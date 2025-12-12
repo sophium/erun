@@ -1,0 +1,13 @@
+{
+    "go.testEnvVars": {
+        "GOWORK": "${workspaceFolder}/erun-cli/go.work"
+    },
+    "go.toolsEnvVars": {
+        "GOWORK": "${workspaceFolder}/erun-cli/go.work"
+    },
+    "go.delveConfig": {
+        "debugAdapter": "dlv-dap",
+        "apiVersion": 2,
+        "stopOnEntry": false
+    }
+}
