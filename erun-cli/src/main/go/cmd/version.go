@@ -29,7 +29,7 @@ func NewVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print build information",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Fprintf(cmd.OutOrStdout(), "erun %s", version)
+			cmd.Printf("erun %s", version)
 			tail := ""
 			if commit != "" {
 				tail = fmt.Sprintf(" (%s", commit)
@@ -38,7 +38,7 @@ func NewVersionCmd() *cobra.Command {
 				}
 				tail += ")"
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "%s\n", tail)
+			cmd.Printf("%s\n", tail)
 		},
 	}
 }
