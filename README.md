@@ -32,6 +32,10 @@ xcode-select -p
 sudo dseditgroup -o edit -t user -a "$USER" _developer
 ```
 
+# Contributing
+
+When submitting Pull Request try to adhere to best practices described in https://go.dev/doc/effective_go
+
 # Design
 
 ERun is a developer tool.
