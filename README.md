@@ -29,7 +29,6 @@ brew install go
 
 ```
 brew install golangci-lint
-golangci-lint version
 ```
 
 ## Enable DEBUG on Mac (you may not need it if debug works for you)
@@ -64,3 +63,7 @@ Once deployed ERun will create docker devops CLI shell, that will be OS agnostic
 
 ERun configuration is stored in $HOME/.erun folder and the CLI exposes a `--config` flag
 that points to this folder.
+
+# Running
+
+To initialize ERun support for the project, just run `erun` in any project directory. ERun will try to locate .git directory, and then configuration/tenant for this directory in $HOME/.erun directory.
