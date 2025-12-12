@@ -1,0 +1,18 @@
+run:
+  timeout: 3m
+  tests: true
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - gofmt
+    - gofumpt
+linters-settings:
+  gofumpt:
+    module-path: github.com/sophium/erun
+issues:
+  exclude-use-default: false

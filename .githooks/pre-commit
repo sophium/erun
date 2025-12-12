@@ -1,0 +1,45 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "${SKIP_GOLANGCI_LINT:-0}" = "1" ]; then
+  echo "SKIP_GOLANGCI_LINT=1 detected; skipping golangci-lint pre-commit check." >&2
+  exit 0
+fi
+
+if ! command -v golangci-lint >/dev/null 2>&1; then
+  cat <<'MSG' >&2
+error: golangci-lint is not installed.
+Install it from https://golangci-lint.run/welcome/install/ and ensure it is on your PATH.
+MSG
+  exit 1
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+  echo "error: git command not found; required for pre-commit hook" >&2
+  exit 1
+fi
+
+CHANGED_GO_FILES=$(git diff --cached --name-only --diff-filter=ACMR -- '*.go' || true)
+if [ -z "$CHANGED_GO_FILES" ]; then
+  exit 0
+fi
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+CLI_ROOT="$REPO_ROOT/erun-cli"
+MODULE_DIR="$CLI_ROOT/src/main/go"
+
+if [ ! -d "$MODULE_DIR" ]; then
+  echo "error: unable to locate CLI module directory at $MODULE_DIR" >&2
+  exit 1
+fi
+
+if [ -f "$CLI_ROOT/go.work" ]; then
+  export GOWORK="$CLI_ROOT/go.work"
+fi
+
+printf 'Running golangci-lint...\n'
+(
+  cd "$MODULE_DIR"
+  golangci-lint run ./...
+)
+printf 'golangci-lint completed successfully.\n'
