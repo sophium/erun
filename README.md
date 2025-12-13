@@ -1,10 +1,10 @@
 # ERun
 
-Multi tenant, Multi-environment deployment tool.
+Multi tenant, Multi-environment deployment and management tool.
 
-ERun implements an opinionated way of how to maintain large scale enterprise project.
+ERun implements an opinionated way of how to maintain large scale enterprise projects.
 
-The problem ERun is trying to solve is "how do you use helm, terraform and cloud provider specific CLI tools in multi environment situation".
+The problem ERun is trying to solve is "how do you use helm, terraform and cloud provider specific CLI tools in multi environment (DEV,TEST,DR,PROD) situation".
 
 The problem escalates to mundane silly everyday tasks and challenges, such as:
 - How do I version my project
@@ -26,7 +26,6 @@ brew install go
 
 ## Install linter
 
-
 ```
 brew install golangci-lint
 ```
@@ -41,12 +40,15 @@ sudo dseditgroup -o edit -t user -a "$USER" _developer
 
 # Contributing
 
-When submitting Pull Request try to adhere to best practices described in https://go.dev/doc/effective_go
+When submitting Pull Request try to adhere to best practices described in https://go.dev/doc/effective_go.
+When commenting use links to https://go.dev/wiki/CodeReviewComments subsection when code is in violation with these rules (most likely linter will not allow these).
 
 # Design
 
 ERun is a developer tool.
-I assumes that bunch of core dependencies such as:
+
+It assumes that bunch of core dependencies such as:
+
 - git
 - terraform
 - helm
@@ -57,7 +59,8 @@ are deployed.
 
 ERun heavily relies on host machine being able to run basic shell (zsh,bash on Mac,Linux or Git bash on windows).
 
-Once deployed ERun will create docker devops CLI shell, that will be OS agnostic, but it will still rely on basic shell capability to be available.
+Once deployed ERun will create docker devops CLI shell, that will deploy all tools necessary for ERun to operate. 
+ERun will launch docker container on per Environment basis, with an option to use mounted host file system, otherwise ERun will use image/container file system with files specific to the particular system release.
 
 # Configuration
 
@@ -66,4 +69,4 @@ that points to this folder.
 
 # Running
 
-To initialize ERun support for the project, just run `erun` in any project directory. ERun will try to locate .git directory, and then configuration/tenant for this directory in $HOME/.erun directory.
+To initialize ERun support for the project, just run `erun` in any project directory. ERun will try to locate .git directory, and then configuration/tenant for this directory in User [Home configuration directory](https://specifications.freedesktop.org/basedir/latest/) that might vary for different Host (Windows,Mac,Linux) architectures. 
