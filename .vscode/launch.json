@@ -1,0 +1,28 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug Tests cli",
+            "type": "go",
+            "request": "launch",
+            "mode": "test",
+            "program": "${workspaceFolder}/erun-cli/src/test/go/cmd",
+            "cwd": "${workspaceFolder}/erun-cli/src/test/go",
+            "env": {
+                "GOWORK": "${workspaceFolder}/erun-cli/go.work"
+            }
+        },
+        {
+            "name": "Debug cli",
+            "type": "go",
+            "request": "launch",
+            "mode": "auto",
+            "program": "${workspaceFolder}/erun-cli/src/main/go",
+            "cwd": "${workspaceFolder}/erun-cli/src/main/go",
+            "stopOnEntry":false,
+            "env": {
+                "GOWORK": "${workspaceFolder}/erun-cli/go.work"
+            }
+        },
+    ]
+}
