@@ -40,8 +40,18 @@ sudo dseditgroup -o edit -t user -a "$USER" _developer
 
 # Contributing
 
+## Pull request
+
 When submitting Pull Request try to adhere to best practices described in https://go.dev/doc/effective_go.
 When commenting use links to https://go.dev/wiki/CodeReviewComments subsection when code is in violation with these rules (most likely linter will not allow these).
+
+## Running locally
+
+When developing ERun it is recommended to use alias
+
+```
+alias erun='~/git/sophium/erun/erun-cli/src/main/go/run.sh'
+```
 
 # Design
 
