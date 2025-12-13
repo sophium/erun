@@ -50,7 +50,7 @@ When commenting use links to https://go.dev/wiki/CodeReviewComments subsection w
 When developing ERun it is recommended to use alias
 
 ```
-alias erun='~/git/sophium/erun/erun-cli/src/main/go/run.sh'
+alias erun='~/git/sophium/erun/erun-cli/run.sh'
 ```
 
 # Design
