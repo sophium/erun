@@ -10,6 +10,7 @@ import (
 
 func TestRootCommandDisplaysHelpWhenNoArgs(t *testing.T) {
 	cmd := cmdpkg.NewRootCmd()
+	t.Setenv("HOME", t.TempDir())
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)

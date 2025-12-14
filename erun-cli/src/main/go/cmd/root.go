@@ -4,16 +4,25 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/sophium/erun/internal/config"
 	"github.com/spf13/cobra"
 )
 
 var (
 	cfgFile string
+	tenant  string
+	cfg     *config.Config
+	cfgPath string
 	rootCmd = NewRootCmd()
 )
 
 // NewRootCmd builds a standalone instance of the root Cobra command.
 func NewRootCmd() *cobra.Command {
+	defaultTenant := os.Getenv("ERUN_TENANT")
+	if defaultTenant == "" {
+		defaultTenant = "default"
+	}
+
 	cmd := &cobra.Command{
 		Use:   "erun",
 		Short: "Utility CLI placeholder built with Cobra",
@@ -26,6 +35,10 @@ It gives you a starting point for adding real commands and configuration.`,
 	}
 
 	cmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file path (optional)")
+	cmd.PersistentFlags().StringVar(&tenant, "tenant", defaultTenant, "tenant name used for configuration when --config is not set")
+	cmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		return initConfig()
+	}
 	cmd.AddCommand(NewVersionCmd())
 	return cmd
 }
@@ -38,20 +51,18 @@ func Execute() error {
 	return nil
 }
 
-func init() {
-	cobra.OnInitialize(initConfig)
-}
-
-func initConfig() {
-	if cfgFile == "" {
-		return
+func initConfig() error {
+	loader := config.Loader{
+		Tenant: tenant,
+		Path:   cfgFile,
 	}
 
-	if _, err := os.Stat(cfgFile); err != nil {
-		// Surfacing errors via Cobra will already format them for the user.
-		fmt.Fprintf(os.Stderr, "warning: unable to stat config file %s: %v\n", cfgFile, err)
-		return
+	configured, path, err := loader.Load()
+	if err != nil {
+		return fmt.Errorf("load configuration: %w", err)
 	}
 
-	// TODO: implement configuration loading when needed.
+	cfg = configured
+	cfgPath = path
+	return nil
 }
