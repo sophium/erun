@@ -20,7 +20,7 @@ var (
 func NewRootCmd() *cobra.Command {
 	defaultTenant := os.Getenv("ERUN_TENANT")
 	if defaultTenant == "" {
-		defaultTenant = "default"
+		defaultTenant = "erun"
 	}
 
 	cmd := &cobra.Command{
