@@ -2,14 +2,19 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 
+	config "github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
 
 var (
-	cfgFile string
 	rootCmd = NewRootCmd()
+)
+
+var (
+	ERunConfig   string
+	TenantConfig string
+	EnvConfig    string
 )
 
 // NewRootCmd builds a standalone instance of the root Cobra command.
@@ -24,8 +29,6 @@ It gives you a starting point for adding real commands and configuration.`,
 			return cmd.Help()
 		},
 	}
-
-	cmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file path (optional)")
 	cmd.AddCommand(NewVersionCmd())
 	return cmd
 }
@@ -43,15 +46,5 @@ func init() {
 }
 
 func initConfig() {
-	if cfgFile == "" {
-		return
-	}
-
-	if _, err := os.Stat(cfgFile); err != nil {
-		// Surfacing errors via Cobra will already format them for the user.
-		fmt.Fprintf(os.Stderr, "warning: unable to stat config file %s: %v\n", cfgFile, err)
-		return
-	}
-
-	// TODO: implement configuration loading when needed.
+	config.InitConfig()
 }
