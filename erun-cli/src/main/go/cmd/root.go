@@ -66,7 +66,7 @@ func initConfig() error {
 		// saving default config in case we managed to init it
 		eRunConfig.DefaultTenant = tenant
 		if err := internal.SaveERunConfig(eRunConfig); err != nil {
-			return nil
+			return err
 		}
 	} else {
 		return err
