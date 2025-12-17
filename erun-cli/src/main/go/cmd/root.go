@@ -1,21 +1,22 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 
-	config "github.com/sophium/erun/internal"
+	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
 
-var (
-	rootCmd = NewRootCmd()
-)
+var rootCmd = NewRootCmd()
 
 var (
-	eRunConfig   config.ERunConfig
-	tenantConfig config.TenantConfig
-	envConfig    config.EnvConfig
+	eRunConfig   internal.ERunConfig
+	tenantConfig internal.TenantConfig
+	envConfig    internal.EnvConfig
 )
+
+var log = internal.NewLogger(0)
 
 // NewRootCmd builds a standalone instance of the root Cobra command.
 func NewRootCmd() *cobra.Command {
@@ -42,12 +43,73 @@ func Execute() error {
 }
 
 func init() {
-	cobra.OnInitialize(initConfig)
-
+	cobra.OnInitialize(func() {
+		if err := initConfig(); err != nil {
+			cobra.CheckErr(err)
+		}
+	})
 }
 
-func initConfig() {
-	config.LoadERunConfig()
-	config.LoadTenantConfig(tenantConfig.Root)
-	config.LoadEnvConfig(tenantConfig.Root, envConfig.Name)
+func initConfig() error {
+	var err error
+	var tenant string
+	var path string
+	var envName string
+
+	// Loading erun tool configuration
+	eRunConfig, err = internal.LoadERunConfig()
+
+	// If not initialized, try to detect current project directory
+	if errors.Is(err, internal.ErrNotInitialized) {
+		tenant, path, err = internal.FindProjectRoot()
+
+		// saving default config in case we managed to init it
+		eRunConfig.DefaultTenant = tenant
+		if err := internal.SaveERunConfig(eRunConfig); err != nil {
+			return nil
+		}
+	} else {
+		return err
+	}
+
+	// Not initialized, not in project directory, instruct user to run erun in project directory
+	if errors.Is(err, internal.ErrNotInGitRepository) {
+		log.Error("erun config is not initialized. Run erun in project directory.")
+		return err
+	}
+
+	// Some sort of fatal system error
+	if err != nil {
+		log.Fatal(err)
+		return err
+	}
+
+	tenantConfig, err = internal.LoadTenantConfig(tenant)
+
+	// If not initialized, add new tenant
+	if errors.Is(err, internal.ErrNotInitialized) {
+		tenantConfig.ProjectRoot = path
+		tenantConfig.DefaultEnvironment = "dev"
+		if err := internal.SaveTenantConfig(tenantConfig); err != nil {
+			return err
+		}
+	} else {
+		return err
+	}
+
+	// TODO: environment must be either tenantConfig.DefaultEnvironment or one passed on to the tool
+	envName = tenantConfig.DefaultEnvironment
+	envConfig, err = internal.LoadEnvConfig(tenant, envName)
+
+	// If not initialized, add new environment
+	if errors.Is(err, internal.ErrNotInitialized) {
+		envConfig.Name = envName
+		if err := internal.SaveEnvConfig(tenant, envConfig); err != nil {
+			return err
+		}
+	} else {
+		return err
+	}
+
+	return nil
 }

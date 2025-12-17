@@ -25,6 +25,7 @@ if [ -z "$CHANGED_GO_FILES" ]; then
 fi
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
+cd "$REPO_ROOT"
 CLI_ROOT="$REPO_ROOT/erun-cli"
 MODULE_DIR="$CLI_ROOT/src/main/go"
 
@@ -37,9 +38,21 @@ if [ -f "$CLI_ROOT/go.work" ]; then
   export GOWORK="$CLI_ROOT/go.work"
 fi
 
-printf 'Running golangci-lint...\n'
+printf 'Running golangci-lint with --fix...\n'
 (
   cd "$MODULE_DIR"
-  golangci-lint run ./...
+  golangci-lint run --fix ./...
 )
 printf 'golangci-lint completed successfully.\n'
+
+printf 'Restaging Go files touched by golangci-lint...\n'
+printf '%s\n' "$CHANGED_GO_FILES" | while IFS= read -r go_file; do
+  if [ -z "$go_file" ]; then
+    continue
+  fi
+  if [ ! -f "$go_file" ]; then
+    continue
+  fi
+  git add "$go_file"
+done
+printf 'Go files restaged.\n'

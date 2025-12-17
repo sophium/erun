@@ -1,8 +1,7 @@
-package config
+package internal
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -10,28 +9,34 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// LoadERunConfig locates the erun config file via XDG and prints its contents.
+const (
+	configRoot = "erun"
+	configFile = "config.yaml"
+)
 
 type ERunConfig struct {
-	Tenant string
+	DefaultTenant string
 }
 
 type TenantConfig struct {
-	Root string
+	ProjectRoot        string
+	DefaultEnvironment string
 }
 
 type EnvConfig struct {
 	Name string
 }
 
-var ErrNotInitialized = errors.New("not initialized")
-var ErrNoUserDataFolder = errors.New("failed to obtain config file locations")
-var ErrConfigCorrupted = errors.New("config file cannot be unmarshaled")
-var ErrFailedToSaveConfig = errors.New("could not save struct to yaml file")
+var (
+	ErrNotInitialized     = errors.New("not initialized")
+	ErrNoUserDataFolder   = errors.New("failed to obtain config file locations")
+	ErrConfigCorrupted    = errors.New("config file cannot be unmarshaled")
+	ErrFailedToSaveConfig = errors.New("could not save struct to yaml file")
+	ErrNotInGitRepository = errors.New("cannot find git project")
+)
 
-func SaveErunConfig(config ERunConfig) error {
-
-	configFilePath, err := xdg.ConfigFile("erun/config.yaml")
+func SaveERunConfig(config ERunConfig) error {
+	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -41,7 +46,6 @@ func SaveErunConfig(config ERunConfig) error {
 	}
 
 	data, err := yaml.Marshal(config)
-
 	if err != nil {
 		return ErrFailedToSaveConfig
 	}
@@ -54,9 +58,8 @@ func SaveErunConfig(config ERunConfig) error {
 }
 
 func LoadERunConfig() (ERunConfig, error) {
-
 	config := ERunConfig{}
-	configFilePath, err := xdg.ConfigFile("erun/config.yaml")
+	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, configFile))
 	if err != nil {
 		return config, ErrNoUserDataFolder
 	}
@@ -74,8 +77,7 @@ func LoadERunConfig() (ERunConfig, error) {
 }
 
 func SaveTenantConfig(config TenantConfig) error {
-
-	configFilePath, err := xdg.ConfigFile(filepath.Join("erun", config.Root, "config.yaml"))
+	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, config.ProjectRoot, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -85,7 +87,6 @@ func SaveTenantConfig(config TenantConfig) error {
 	}
 
 	data, err := yaml.Marshal(config)
-
 	if err != nil {
 		return ErrFailedToSaveConfig
 	}
@@ -97,10 +98,9 @@ func SaveTenantConfig(config TenantConfig) error {
 	return nil
 }
 
-func LoadTenantConfig(root string) (TenantConfig, error) {
-
+func LoadTenantConfig(tenant string) (TenantConfig, error) {
 	config := TenantConfig{}
-	configFilePath, err := xdg.ConfigFile(filepath.Join("erun", root, "config.yaml"))
+	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, configFile))
 	if err != nil {
 		return config, ErrNoUserDataFolder
 	}
@@ -117,9 +117,8 @@ func LoadTenantConfig(root string) (TenantConfig, error) {
 	return config, nil
 }
 
-func SaveEnvConfig(tenantRoot string, config EnvConfig) error {
-
-	configFilePath, err := xdg.ConfigFile(filepath.Join("erun", tenantRoot, config.Name, "config.yaml"))
+func SaveEnvConfig(tenant string, config EnvConfig) error {
+	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, config.Name, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -129,7 +128,6 @@ func SaveEnvConfig(tenantRoot string, config EnvConfig) error {
 	}
 
 	data, err := yaml.Marshal(config)
-
 	if err != nil {
 		return ErrFailedToSaveConfig
 	}
@@ -141,10 +139,9 @@ func SaveEnvConfig(tenantRoot string, config EnvConfig) error {
 	return nil
 }
 
-func LoadEnvConfig(tenantRoot, envName string) (EnvConfig, error) {
-
+func LoadEnvConfig(tenant, envName string) (EnvConfig, error) {
 	config := EnvConfig{}
-	configFilePath, err := xdg.ConfigFile(filepath.Join("erun", tenantRoot, envName, "config.yaml"))
+	configFilePath, err := xdg.ConfigFile(filepath.Join("erun", tenant, envName, "config.yaml"))
 	if err != nil {
 		return config, ErrNoUserDataFolder
 	}
@@ -161,59 +158,23 @@ func LoadEnvConfig(tenantRoot, envName string) (EnvConfig, error) {
 	return config, nil
 }
 
-func InitConfig() { //initializes configs and paths, setting defaults if not foind
-
-	rootConfig, err := LoadERunConfig() // rootConfig is ERunConfig
-
-	if errors.Is(err, ErrNotInitialized) {
-		fmt.Println("ERun config not found, setting default")
-		rootConfig = ERunConfig{Tenant: "default-tenant"}
-	} else if err != nil {
-		fmt.Println(err)
+func FindProjectRoot() (string, string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", "", err
 	}
 
-	if err := SaveErunConfig(rootConfig); err != nil {
-		fmt.Println(err)
+	for {
+		gitDir := filepath.Join(dir, ".git")
+		if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
+			repoName := filepath.Base(dir)
+			return repoName, dir, nil
+		}
+
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", "", ErrNotInGitRepository
+		}
+		dir = parent
 	}
-
-	tenantName := rootConfig.Tenant
-	if tenantName == "" {
-		tenantName = "default_tenant" //for now, user has to insert tenantName in the future
-	}
-
-	tenantConfig, err := LoadTenantConfig(tenantName)
-
-	if errors.Is(err, ErrNotInitialized) {
-		fmt.Println("Tenant config not found, setting default")
-		tenantConfig = TenantConfig{Root: tenantName}
-	} else if err != nil {
-		fmt.Println(err)
-	}
-
-	if tenantConfig.Root == "" {
-		tenantConfig.Root = tenantName
-	}
-
-	if err := SaveTenantConfig(tenantConfig); err != nil {
-		fmt.Println(err)
-	}
-
-	envName := "default_env"
-	envConfig, err := LoadEnvConfig(tenantName, envName)
-
-	if errors.Is(err, ErrNotInitialized) {
-		fmt.Println("Env config not found, setting default")
-		envConfig = EnvConfig{Name: envName}
-	} else if err != nil {
-		fmt.Println(err)
-	}
-
-	if envConfig.Name == "" {
-		envConfig.Name = envName
-	}
-
-	if err := SaveEnvConfig(tenantName, envConfig); err != nil {
-		fmt.Println(err)
-	}
-
 }

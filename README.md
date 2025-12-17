@@ -30,6 +30,14 @@ brew install go
 brew install golangci-lint
 ```
 
+## Enable git hooks
+
+The repository ships a pre-commit hook in `.githooks/pre-commit` that runs `golangci-lint --fix` before every commit. Enable it per-clone so that formatting and lint fixes are automatically applied on `git commit`:
+
+```
+git config core.hooksPath .githooks
+```
+
 ## Enable DEBUG on Mac (you may not need it if debug works for you)
 
 ```
