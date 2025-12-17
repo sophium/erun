@@ -3,12 +3,16 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"strings"
 
+	"github.com/manifoldco/promptui"
 	"github.com/sophium/erun/internal"
 	"github.com/spf13/cobra"
 )
 
 var rootCmd = NewRootCmd()
+
+const defaultEnvironment = "dev"
 
 var (
 	eRunConfig   internal.ERunConfig
@@ -59,11 +63,14 @@ func initConfig() error {
 	var err error
 	var tenant string
 	var path string
-	var envName string
+	envName := defaultEnvironment
 	var configPath string
 
 	eRunConfig, configPath, err = internal.LoadERunConfig()
 	log.Trace("Loading erun tool configuration, configPath=" + configPath)
+	if tenant == "" {
+		tenant = eRunConfig.DefaultTenant
+	}
 
 	if errors.Is(err, internal.ErrNotInitialized) {
 		log.Trace("Trying to detect current project directory")
@@ -79,11 +86,20 @@ func initConfig() error {
 			return err
 		}
 
+		confirm, promptErr := confirmTenantInitialization(tenant, path, envName)
+		if promptErr != nil {
+			return promptErr
+		}
+		if !confirm {
+			return fmt.Errorf("tenant initialization cancelled by user")
+		}
+
 		log.Trace("Saving default config")
 		eRunConfig.DefaultTenant = tenant
 		if err := internal.SaveERunConfig(eRunConfig); err != nil {
 			return err
 		}
+		tenant = eRunConfig.DefaultTenant
 	}
 
 	if err != nil {
@@ -99,7 +115,7 @@ func initConfig() error {
 	if errors.Is(err, internal.ErrNotInitialized) {
 		log.Trace("Adding new tenant")
 		tenantConfig.ProjectRoot = path
-		tenantConfig.DefaultEnvironment = "dev"
+		tenantConfig.DefaultEnvironment = envName
 		tenantConfig.Name = tenant
 		if err := internal.SaveTenantConfig(tenantConfig); err != nil {
 			return err
@@ -122,6 +138,13 @@ func initConfig() error {
 
 	if errors.Is(err, internal.ErrNotInitialized) {
 		log.Trace("Adding new environment")
+		confirmEnv, promptErr := confirmEnvironmentInitialization(tenant, envName)
+		if promptErr != nil {
+			return promptErr
+		}
+		if !confirmEnv {
+			return fmt.Errorf("environment initialization cancelled by user")
+		}
 		envConfig.Name = envName
 		if err := internal.SaveEnvConfig(tenant, envConfig); err != nil {
 			return err
@@ -137,4 +160,44 @@ func initConfig() error {
 
 	log.Trace("Configuration initialized OK")
 	return nil
+}
+
+func confirmTenantInitialization(tenant, path, envName string) (bool, error) {
+	label := fmt.Sprintf(
+		"Initialize tenant %q (path: %s) as the default tenant?",
+		tenant,
+		path,
+	)
+	return confirmPrompt(label)
+}
+
+func confirmEnvironmentInitialization(tenant, envName string) (bool, error) {
+	label := fmt.Sprintf(
+		"Initialize default environment %q for tenant %q?",
+		envName,
+		tenant,
+	)
+	return confirmPrompt(label)
+}
+
+func confirmPrompt(label string) (bool, error) {
+	prompt := promptui.Prompt{
+		Label:     label,
+		IsConfirm: true,
+		Default:   "y",
+	}
+
+	result, err := prompt.Run()
+	if err != nil {
+		if errors.Is(err, promptui.ErrInterrupt) {
+			return false, fmt.Errorf("initialization interrupted")
+		}
+		return false, err
+	}
+
+	if result == "" {
+		return true, nil
+	}
+
+	return strings.EqualFold(result, "y"), nil
 }
