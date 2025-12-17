@@ -18,15 +18,12 @@ var (
 
 var log = internal.NewLogger(0)
 
-// NewRootCmd builds a standalone instance of the root Cobra command.
 func NewRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "erun",
-		Short: "Utility CLI placeholder built with Cobra",
-		Long: `erun is a skeleton CLI built with Cobra.
-It gives you a starting point for adding real commands and configuration.`,
+		Short: "Environment Runner",
+		Long:  `erun helps to run and manage multiple tenants/environments.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Show help when no subcommand is provided so users can discover available commands.
 			return cmd.Help()
 		},
 	}
@@ -34,7 +31,6 @@ It gives you a starting point for adding real commands and configuration.`,
 	return cmd
 }
 
-// Execute runs the root command and surfaces any errors to the caller.
 func Execute() error {
 	if err := rootCmd.Execute(); err != nil {
 		return fmt.Errorf("cli execution failed: %w", err)
@@ -56,14 +52,14 @@ func initConfig() error {
 	var path string
 	var envName string
 
-	// Loading erun tool configuration
+	log.Trace("Loading erun tool configuration")
 	eRunConfig, err = internal.LoadERunConfig()
 
-	// If not initialized, try to detect current project directory
+	log.Trace("If not initialized, try to detect current project directory")
 	if errors.Is(err, internal.ErrNotInitialized) {
 		tenant, path, err = internal.FindProjectRoot()
 
-		// saving default config in case we managed to init it
+		log.Trace("Saving default config in case we managed to init it")
 		eRunConfig.DefaultTenant = tenant
 		if err := internal.SaveERunConfig(eRunConfig); err != nil {
 			return err
@@ -72,13 +68,13 @@ func initConfig() error {
 		return err
 	}
 
-	// Not initialized, not in project directory, instruct user to run erun in project directory
+	log.Trace("Not initialized, not in project directory, instruct user to run erun in project directory")
 	if errors.Is(err, internal.ErrNotInGitRepository) {
 		log.Error("erun config is not initialized. Run erun in project directory.")
 		return err
 	}
 
-	// Some sort of fatal system error
+	log.Trace("Some sort of fatal system error")
 	if err != nil {
 		log.Fatal(err)
 		return err
@@ -86,7 +82,7 @@ func initConfig() error {
 
 	tenantConfig, err = internal.LoadTenantConfig(tenant)
 
-	// If not initialized, add new tenant
+	log.Trace("If not initialized, add new tenant")
 	if errors.Is(err, internal.ErrNotInitialized) {
 		tenantConfig.ProjectRoot = path
 		tenantConfig.DefaultEnvironment = "dev"
@@ -101,7 +97,7 @@ func initConfig() error {
 	envName = tenantConfig.DefaultEnvironment
 	envConfig, err = internal.LoadEnvConfig(tenant, envName)
 
-	// If not initialized, add new environment
+	log.Trace("If not initialized, add new environment")
 	if errors.Is(err, internal.ErrNotInitialized) {
 		envConfig.Name = envName
 		if err := internal.SaveEnvConfig(tenant, envConfig); err != nil {
@@ -111,5 +107,6 @@ func initConfig() error {
 		return err
 	}
 
+	log.Trace("Configuration initialized OK")
 	return nil
 }
