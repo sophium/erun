@@ -141,7 +141,7 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 
 func LoadEnvConfig(tenant, envName string) (EnvConfig, error) {
 	config := EnvConfig{}
-	configFilePath, err := xdg.ConfigFile(filepath.Join("erun", tenant, envName, "config.yaml"))
+	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, envName, configFile))
 	if err != nil {
 		return config, ErrNoUserDataFolder
 	}
