@@ -12,9 +12,9 @@ var (
 )
 
 var (
-	ERunConfig   string
-	TenantConfig string
-	EnvConfig    string
+	eRunConfig   config.ERunConfig
+	tenantConfig config.TenantConfig
+	envConfig    config.EnvConfig
 )
 
 // NewRootCmd builds a standalone instance of the root Cobra command.
@@ -43,8 +43,11 @@ func Execute() error {
 
 func init() {
 	cobra.OnInitialize(initConfig)
+
 }
 
 func initConfig() {
-	config.InitConfig()
+	config.LoadERunConfig()
+	config.LoadTenantConfig(tenantConfig.Root)
+	config.LoadEnvConfig(tenantConfig.Root, envConfig.Name)
 }
