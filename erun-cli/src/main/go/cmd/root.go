@@ -30,6 +30,7 @@ It gives you a starting point for adding real commands and configuration.`,
 		},
 	}
 	cmd.AddCommand(NewVersionCmd())
+	cmd.AddCommand(NewInitCmd())
 	return cmd
 }
 
