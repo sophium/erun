@@ -20,6 +20,7 @@ type ERunConfig struct {
 
 type TenantConfig struct {
 	ProjectRoot        string
+	Name               string
 	DefaultEnvironment string
 }
 
@@ -57,27 +58,27 @@ func SaveERunConfig(config ERunConfig) error {
 	return nil
 }
 
-func LoadERunConfig() (ERunConfig, error) {
+func LoadERunConfig() (ERunConfig, string, error) {
 	config := ERunConfig{}
 	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, configFile))
 	if err != nil {
-		return config, ErrNoUserDataFolder
+		return config, configFilePath, ErrNoUserDataFolder
 	}
 
 	data, err := os.ReadFile(configFilePath)
 	if err != nil {
-		return config, ErrNotInitialized
+		return config, configFilePath, ErrNotInitialized
 	}
 
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return config, ErrConfigCorrupted
+		return config, configFilePath, ErrConfigCorrupted
 	}
 
-	return config, nil
+	return config, configFilePath, nil
 }
 
 func SaveTenantConfig(config TenantConfig) error {
-	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, config.ProjectRoot, configFile))
+	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, config.Name, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
 	}
@@ -98,23 +99,23 @@ func SaveTenantConfig(config TenantConfig) error {
 	return nil
 }
 
-func LoadTenantConfig(tenant string) (TenantConfig, error) {
+func LoadTenantConfig(tenant string) (TenantConfig, string, error) {
 	config := TenantConfig{}
 	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, configFile))
 	if err != nil {
-		return config, ErrNoUserDataFolder
+		return config, configFilePath, ErrNoUserDataFolder
 	}
 
 	data, err := os.ReadFile(configFilePath)
 	if err != nil {
-		return config, ErrNotInitialized
+		return config, configFilePath, ErrNotInitialized
 	}
 
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return config, ErrConfigCorrupted
+		return config, configFilePath, ErrConfigCorrupted
 	}
 
-	return config, nil
+	return config, configFilePath, nil
 }
 
 func SaveEnvConfig(tenant string, config EnvConfig) error {
@@ -139,23 +140,23 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 	return nil
 }
 
-func LoadEnvConfig(tenant, envName string) (EnvConfig, error) {
+func LoadEnvConfig(tenant, envName string) (EnvConfig, string, error) {
 	config := EnvConfig{}
 	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, envName, configFile))
 	if err != nil {
-		return config, ErrNoUserDataFolder
+		return config, configFilePath, ErrNoUserDataFolder
 	}
 
 	data, err := os.ReadFile(configFilePath)
 	if err != nil {
-		return config, ErrNotInitialized
+		return config, configFilePath, ErrNotInitialized
 	}
 
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return config, ErrConfigCorrupted
+		return config, configFilePath, ErrConfigCorrupted
 	}
 
-	return config, nil
+	return config, configFilePath, nil
 }
 
 func FindProjectRoot() (string, string, error) {
