@@ -27,7 +27,7 @@ fi
 REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "$REPO_ROOT"
 CLI_ROOT="$REPO_ROOT/erun-cli"
-MODULE_DIR="$CLI_ROOT/src/main/go"
+MODULE_DIR="$CLI_ROOT"
 
 if [ ! -d "$MODULE_DIR" ]; then
   echo "error: unable to locate CLI module directory at $MODULE_DIR" >&2

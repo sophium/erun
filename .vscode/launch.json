@@ -7,7 +7,7 @@
             "request": "launch",
             "mode": "test",
             "program": "${workspaceFolder}/erun-cli/src/test/go/cmd",
-            "cwd": "${workspaceFolder}/erun-cli/src/test/go",
+            "cwd": "${workspaceFolder}/erun-cli",
             "env": {
                 "GOWORK": "${workspaceFolder}/erun-cli/go.work"
             }
@@ -17,8 +17,8 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
-            "program": "${workspaceFolder}/erun-cli/src/main/go",
-            "cwd": "${workspaceFolder}/erun-cli/src/main/go",
+            "program": "${workspaceFolder}/erun-cli",
+            "cwd": "${workspaceFolder}/erun-cli",
             "stopOnEntry":false,
             "env": {
                 "GOWORK": "${workspaceFolder}/erun-cli/go.work"
