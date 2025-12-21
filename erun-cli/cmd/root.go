@@ -12,6 +12,11 @@ import (
 
 var rootCmd = NewRootCmd()
 
+var (
+	initConfigFunc  func() error = initConfig
+	findProjectRoot              = internal.FindProjectRoot
+)
+
 const defaultEnvironment = "dev"
 
 var (
@@ -23,6 +28,13 @@ var (
 var (
 	log       = internal.NewLogger(0)
 	verbosity int
+)
+
+var (
+	defaultPromptRunner = func(prompt promptui.Prompt) (string, error) {
+		return prompt.Run()
+	}
+	promptRunner = defaultPromptRunner
 )
 
 func NewRootCmd() *cobra.Command {
@@ -49,7 +61,7 @@ func Execute() error {
 func init() {
 	cobra.OnInitialize(func() {
 		configureLogging()
-		if err := initConfig(); err != nil {
+		if err := initConfigFunc(); err != nil {
 			cobra.CheckErr(err)
 		}
 	})
@@ -74,7 +86,7 @@ func initConfig() error {
 
 	if errors.Is(err, internal.ErrNotInitialized) {
 		log.Trace("Trying to detect current project directory")
-		tenant, path, err = internal.FindProjectRoot()
+		tenant, path, err = findProjectRoot()
 
 		if errors.Is(err, internal.ErrNotInGitRepository) {
 			log.Error("erun config is not initialized. Run erun in project directory.")
@@ -187,7 +199,7 @@ func confirmPrompt(label string) (bool, error) {
 		Default:   "y",
 	}
 
-	result, err := prompt.Run()
+	result, err := promptRunner(prompt)
 	if err != nil {
 		if errors.Is(err, promptui.ErrInterrupt) {
 			return false, fmt.Errorf("initialization interrupted")
