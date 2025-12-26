@@ -434,6 +434,11 @@ func TestConfirmPromptDefaultAndErrors(t *testing.T) {
 		t.Fatalf("expected rejection, got %v %v", ok, err)
 	}
 
+	promptRunner = func(prompt promptui.Prompt) (string, error) { return "", promptui.ErrAbort }
+	if ok, err := confirmPrompt("label"); err != nil || ok {
+		t.Fatalf("expected abort to be treated as rejection, got %v %v", ok, err)
+	}
+
 	promptRunner = func(prompt promptui.Prompt) (string, error) { return "", promptui.ErrInterrupt }
 	if ok, err := confirmPrompt("label"); err == nil || ok || !strings.Contains(err.Error(), "interrupted") {
 		t.Fatalf("expected interrupt error, got %v %v", ok, err)

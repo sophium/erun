@@ -204,6 +204,9 @@ func confirmPrompt(label string) (bool, error) {
 		if errors.Is(err, promptui.ErrInterrupt) {
 			return false, fmt.Errorf("initialization interrupted")
 		}
+		if errors.Is(err, promptui.ErrAbort) {
+			return false, nil
+		}
 		return false, err
 	}
 
