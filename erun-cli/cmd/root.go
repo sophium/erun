@@ -47,6 +47,7 @@ func NewRootCmd() *cobra.Command {
 		},
 	}
 	cmd.PersistentFlags().CountVarP(&verbosity, "verbose", "v", "Increase logging verbosity. Repeat for more detail.")
+	cmd.AddCommand(NewInitCmd())
 	cmd.AddCommand(NewVersionCmd())
 	return cmd
 }
