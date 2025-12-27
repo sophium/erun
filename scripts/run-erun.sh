@@ -8,7 +8,7 @@ fi
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
-CLI_DIR="$REPO_ROOT/erun-cli/src/main/go"
+CLI_DIR="$REPO_ROOT/erun-cli"
 BIN_DIR="$REPO_ROOT/bin"
 TARGET="$BIN_DIR/erun"
 
