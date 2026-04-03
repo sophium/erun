@@ -5,11 +5,13 @@ ERun is a Go-based developer tool for working with project tenants and environme
 The repository currently contains:
 
 - a CLI in `erun-cli/`
+- a shared common module in `erun-common/`
+- an MCP server module in `erun-mcp/`
 - explicit project initialization through `erun init`
 - a simple MCP server exposed through `erun mcp`
 - YAML-backed config stored in the platform XDG config directory
 
-The CLI remains the primary interface. MCP is an additional transport that exposes the same capabilities as tools.
+The CLI remains the primary interface. MCP is an additional transport that exposes the same capabilities as tools. The default usage model should remain local-first, with any remote transport added later as an explicit extension.
 
 ## Current Commands
 
@@ -19,10 +21,9 @@ The CLI remains the primary interface. MCP is an additional transport that expos
 
 `erun init` bootstraps configuration for the current project or for an explicit tenant/project root.
 
-`erun mcp` runs a stdio MCP server and currently exposes:
+`erun mcp` runs a local HTTP MCP server by default at `http://127.0.0.1:9090/mcp` and currently exposes:
 
 - `version`
-- `init`
 
 ## Configuration
 

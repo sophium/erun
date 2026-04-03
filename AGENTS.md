@@ -10,11 +10,22 @@ Repository guidance for humans and coding agents working in this repo.
 ## Project Structure
 
 - `erun-cli` - CLI utility
+- `erun-common` - shared common module
+- `erun-mcp` - MCP server module
+
+## Module Boundaries
+
+- Keep CLI-private implementation in `erun-cli/internal`.
+- Treat `internal` as a deliberate module boundary, not a staging area for future shared code.
+- Move code into `erun-common` only when it is genuinely shared across modules and remains transport-agnostic.
+- Do not move code into `erun-common` just because it is reused once; prefer a specific shared package only when a stable cross-module abstraction exists.
+- Keep `erun-common` small and focused on reusable core types and logic, not module-specific orchestration.
 
 ## Preferred Direction
 
 - Prefer explicit runtime structs over package globals.
 - Keep mutable state local to one CLI execution or one MCP tool invocation.
+- Default to local execution and local integrations. Any remote or hosted transport should be additive, not the baseline behavior.
 - Prefer dependency injection in tests instead of replacing globals.
 - Prefer pure functions with no side effects for core logic.
 - Keep config and domain types simple and easy to copy safely.
@@ -36,3 +47,12 @@ Repository guidance for humans and coding agents working in this repo.
 - CLI prompts are acceptable in interactive flows, but MCP-exposed paths should receive all required input explicitly and fail clearly when input is missing.
 - Prefer deterministic command behavior so tool calls are safe to run repeatedly and concurrently.
 - Prefer safety and clarity over micro-optimizations.
+
+## Branching Strategy
+
+- Create a GitHub issue before starting implementation work.
+- Branch from `main`.
+- Use `feature/<issue-number>-<short-kebab-case-description>` for new functionality.
+- Use `bug/<issue-number>-<short-kebab-case-description>` for bug fixes.
+- Include the issue number in the branch name for traceability, for example `feature/12-add-mcp-server-entrypoint`.
+- Open pull requests back into `main` and reference the issue in the PR body, for example `Closes #12`.
