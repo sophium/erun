@@ -47,6 +47,7 @@ Repository guidance for humans and coding agents working in this repo.
 - CLI prompts are acceptable in interactive flows, but MCP-exposed paths should receive all required input explicitly and fail clearly when input is missing.
 - Prefer deterministic command behavior so tool calls are safe to run repeatedly and concurrently.
 - Prefer safety and clarity over micro-optimizations.
+- Do not modify `README.md` unless the user explicitly asks for a README change.
 
 ## Branching Strategy
 
@@ -56,3 +57,9 @@ Repository guidance for humans and coding agents working in this repo.
 - Use `bug/<issue-number>-<short-kebab-case-description>` for bug fixes.
 - Include the issue number in the branch name for traceability, for example `feature/12-add-mcp-server-entrypoint`.
 - Open pull requests back into `main` and reference the issue in the PR body, for example `Closes #12`.
+
+## Pull Request Titles
+
+- Use a clean human title that describes the change directly.
+- Do not add agent markers such as `[codex]` unless the repository explicitly asks for them.
+- Prefer sentence-style titles such as `Add HTTP MCP server entrypoint`.
