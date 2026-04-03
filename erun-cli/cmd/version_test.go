@@ -17,9 +17,6 @@ func TestVersionCommandOutput(t *testing.T) {
 	t.Cleanup(func() {
 		SetBuildInfo(prevV, prevC, prevD)
 	})
-	prevInit := initConfigFunc
-	initConfigFunc = func() error { return nil }
-	t.Cleanup(func() { initConfigFunc = prevInit })
 
 	cmd := NewVersionCmd()
 	buf := new(bytes.Buffer)
