@@ -64,6 +64,7 @@ Repository guidance for humans and coding agents working in this repo.
 - Use `bug/<issue-number>-<short-kebab-case-description>` for bug fixes.
 - Include the issue number in the branch name for traceability, for example `feature/12-add-mcp-server-entrypoint`.
 - Open pull requests back into `main` and reference the issue in the PR body, for example `Closes #12`.
+- Treat `push, accept` as a request to complete the full publish flow: push the branch, create the pull request, and leave the PR in a non-draft accepted/ready-for-review state. Do not stop after the branch push alone.
 
 ## Pull Request Titles
 
