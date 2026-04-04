@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/adrg/xdg"
@@ -64,6 +65,45 @@ func TestRunLoadsExistingConfiguration(t *testing.T) {
 	}
 }
 
+func TestRunRespectsExistingTenantDefaultEnvironment(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	tenant := "tenant-a"
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	if err := internal.SaveERunConfig(internal.ERunConfig{DefaultTenant: tenant}); err != nil {
+		t.Fatalf("save erun config: %v", err)
+	}
+	if err := internal.SaveTenantConfig(internal.TenantConfig{
+		Name:               tenant,
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: "prod",
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := internal.SaveEnvConfig(tenant, internal.EnvConfig{Name: "prod"}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	service := Service{
+		Store: ConfigStore{},
+		FindProjectRoot: func() (string, string, error) {
+			return tenant, projectRoot, nil
+		},
+		Confirm: func(label string) (bool, error) {
+			t.Fatalf("unexpected confirmation: %s", label)
+			return false, nil
+		},
+	}
+
+	result, err := service.Run(InitRequest{})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.EnvConfig.Name != "prod" {
+		t.Fatalf("expected tenant default environment to be used, got %+v", result.EnvConfig)
+	}
+}
+
 func TestRunBootstrapsNewProjectWithAutoApprove(t *testing.T) {
 	setupXDGConfigHome(t)
 
@@ -99,6 +139,64 @@ func TestRunFailsOutsideGitRepository(t *testing.T) {
 
 	if _, err := service.Run(InitRequest{AutoApprove: true}); !errors.Is(err, internal.ErrNotInGitRepository) {
 		t.Fatalf("expected ErrNotInGitRepository, got %v", err)
+	}
+}
+
+func TestRunLogsProgress(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	logger := &testLogger{}
+	service := Service{
+		Store: ConfigStore{},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", "/tmp/project", nil
+		},
+		Logger: logger,
+	}
+
+	if _, err := service.Run(InitRequest{AutoApprove: true}); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	for _, want := range []string{
+		"Loading erun tool configuration",
+		"Trying to detect current project directory",
+		"Saving default config",
+		"Loaded erun tool configuration",
+		"Loading tenant configuration",
+		"Adding new tenant",
+		"Loaded tenant configuration",
+		"Loading environment configuration",
+		"Adding new environment",
+		"Configuration initialized OK",
+	} {
+		if !logger.containsTrace(want) {
+			t.Fatalf("expected trace log containing %q, got %+v", want, logger.traces)
+		}
+	}
+}
+
+func TestRunLogsOutsideGitRepository(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	logger := &testLogger{}
+	service := Service{
+		Store: ConfigStore{},
+		FindProjectRoot: func() (string, string, error) {
+			return "", "", internal.ErrNotInGitRepository
+		},
+		Logger: logger,
+	}
+
+	_, err := service.Run(InitRequest{AutoApprove: true})
+	if !errors.Is(err, internal.ErrNotInGitRepository) {
+		t.Fatalf("expected ErrNotInGitRepository, got %v", err)
+	}
+	if !internal.IsReported(err) {
+		t.Fatalf("expected reported error wrapper, got %v", err)
+	}
+	if !logger.containsError("erun config is not initialized. Run erun in project directory.") {
+		t.Fatalf("expected error log, got %+v", logger.errors)
 	}
 }
 
@@ -197,13 +295,33 @@ func TestRunPropagatesSaveErrors(t *testing.T) {
 	}
 }
 
-func TestSummary(t *testing.T) {
-	got := InitResult{
-		TenantConfig: internal.TenantConfig{Name: "tenant-a", ProjectRoot: "/tmp/project"},
-		EnvConfig:    internal.EnvConfig{Name: "dev"},
-	}.Summary()
+type testLogger struct {
+	traces []string
+	errors []string
+}
 
-	if got == "" {
-		t.Fatal("expected non-empty summary")
+func (l *testLogger) Trace(message string) {
+	l.traces = append(l.traces, message)
+}
+
+func (l *testLogger) Error(message string) {
+	l.errors = append(l.errors, message)
+}
+
+func (l *testLogger) containsTrace(want string) bool {
+	for _, got := range l.traces {
+		if strings.Contains(got, want) {
+			return true
+		}
 	}
+	return false
+}
+
+func (l *testLogger) containsError(want string) bool {
+	for _, got := range l.errors {
+		if strings.Contains(got, want) {
+			return true
+		}
+	}
+	return false
 }

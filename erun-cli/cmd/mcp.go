@@ -19,7 +19,8 @@ func NewMCPCmd(_ Dependencies) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			cmd.Printf("ERun MCP listening on %s\n", erunmcp.EndpointURL(cfg))
+			logger := eruncommon.NewLoggerWithWriters(0, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			logger.Info(fmt.Sprintf("ERun MCP listening on %s", erunmcp.EndpointURL(cfg)))
 			return erunmcp.RunHTTP(cmd.Context(), eruncommon.NormalizeBuildInfo(CurrentBuildInfo()), cfg)
 		},
 	}

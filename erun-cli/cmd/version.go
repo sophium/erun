@@ -34,7 +34,8 @@ func NewVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print build information",
 		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Printf("%s\n", eruncommon.FormatVersionLine(CurrentBuildInfo()))
+			logger := eruncommon.NewLoggerWithWriters(0, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			logger.Info(eruncommon.FormatVersionLine(CurrentBuildInfo()))
 		},
 	}
 }

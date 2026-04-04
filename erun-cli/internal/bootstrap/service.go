@@ -7,7 +7,7 @@ import (
 	"github.com/sophium/erun/internal"
 )
 
-const DefaultEnvironment = "dev"
+const DefaultEnvironment = "local"
 
 var (
 	ErrTenantInitializationCancelled      = errors.New("tenant initialization cancelled by user")
@@ -25,7 +25,13 @@ type Store interface {
 
 type ProjectFinder func() (string, string, error)
 
-type ConfirmFunc func(label string) (bool, error)
+type (
+	ConfirmFunc func(label string) (bool, error)
+	Logger      interface {
+		Trace(string)
+		Error(string)
+	}
+)
 
 type ConfigStore struct{}
 
@@ -69,22 +75,11 @@ type InitResult struct {
 	CreatedEnvConfig    bool
 }
 
-func (r InitResult) Summary() string {
-	return fmt.Sprintf(
-		"Initialized tenant %q at %s with environment %q (created: erun=%t tenant=%t env=%t).",
-		r.TenantConfig.Name,
-		r.TenantConfig.ProjectRoot,
-		r.EnvConfig.Name,
-		r.CreatedERunConfig,
-		r.CreatedTenantConfig,
-		r.CreatedEnvConfig,
-	)
-}
-
 type Service struct {
 	Store           Store
 	FindProjectRoot ProjectFinder
 	Confirm         ConfirmFunc
+	Logger          Logger
 }
 
 func (s Service) Run(req InitRequest) (InitResult, error) {
@@ -98,8 +93,13 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 		if detected.loaded {
 			return detected, nil
 		}
+		s.Logger.Trace("Trying to detect current project directory")
 		tenant, root, err := s.FindProjectRoot()
 		if err != nil {
+			if errors.Is(err, internal.ErrNotInGitRepository) {
+				s.Logger.Error("erun config is not initialized. Run erun in project directory.")
+				return projectContext{}, internal.MarkReported(err)
+			}
 			return projectContext{}, err
 		}
 		detected = projectContext{
@@ -110,7 +110,8 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 		return detected, nil
 	}
 
-	toolConfig, _, err := s.Store.LoadERunConfig()
+	toolConfig, configPath, err := s.Store.LoadERunConfig()
+	s.Logger.Trace("Loading erun tool configuration, configPath=" + configPath)
 	switch {
 	case err == nil:
 	case errors.Is(err, internal.ErrNotInitialized):
@@ -133,6 +134,7 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 			return result, err
 		}
 
+		s.Logger.Trace("Saving default config")
 		toolConfig = internal.ERunConfig{DefaultTenant: tenant}
 		if err := s.Store.SaveERunConfig(toolConfig); err != nil {
 			return result, err
@@ -141,6 +143,7 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 	case err != nil:
 		return result, err
 	}
+	s.Logger.Trace("Loaded erun tool configuration")
 
 	tenant := req.Tenant
 	if tenant == "" {
@@ -154,6 +157,7 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 		tenant = project.tenant
 	}
 
+	s.Logger.Trace("Loading tenant configuration")
 	tenantConfig, _, err := s.Store.LoadTenantConfig(tenant)
 	switch {
 	case err == nil:
@@ -167,10 +171,16 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 			projectRoot = project.root
 		}
 
+		defaultEnvironment := req.Environment
+		if defaultEnvironment == "" {
+			defaultEnvironment = DefaultEnvironment
+		}
+
+		s.Logger.Trace("Adding new tenant")
 		tenantConfig = internal.TenantConfig{
 			Name:               tenant,
 			ProjectRoot:        projectRoot,
-			DefaultEnvironment: req.Environment,
+			DefaultEnvironment: defaultEnvironment,
 		}
 		if err := s.Store.SaveTenantConfig(tenantConfig); err != nil {
 			return result, err
@@ -183,6 +193,7 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 	if tenantConfig.Name == "" {
 		tenantConfig.Name = tenant
 	}
+	s.Logger.Trace("Loaded tenant configuration")
 
 	envName := req.Environment
 	if envName == "" {
@@ -193,8 +204,12 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 	}
 	if tenantConfig.DefaultEnvironment == "" {
 		tenantConfig.DefaultEnvironment = envName
+		if err := s.Store.SaveTenantConfig(tenantConfig); err != nil {
+			return result, err
+		}
 	}
 
+	s.Logger.Trace("Loading environment configuration")
 	envConfig, _, err := s.Store.LoadEnvConfig(tenant, envName)
 	switch {
 	case err == nil:
@@ -203,6 +218,7 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 			return result, err
 		}
 
+		s.Logger.Trace("Adding new environment")
 		envConfig = internal.EnvConfig{Name: envName}
 		if err := s.Store.SaveEnvConfig(tenant, envConfig); err != nil {
 			return result, err
@@ -219,13 +235,11 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 	result.ERunConfig = toolConfig
 	result.TenantConfig = tenantConfig
 	result.EnvConfig = envConfig
+	s.Logger.Trace("Configuration initialized OK")
 	return result, nil
 }
 
 func normalizeRequest(req InitRequest) InitRequest {
-	if req.Environment == "" {
-		req.Environment = DefaultEnvironment
-	}
 	return req
 }
 
@@ -251,6 +265,9 @@ func (s Service) withDefaults() Service {
 	}
 	if s.FindProjectRoot == nil {
 		s.FindProjectRoot = internal.FindProjectRoot
+	}
+	if s.Logger == nil {
+		s.Logger = noopLogger{}
 	}
 	return s
 }
@@ -288,3 +305,9 @@ type projectContext struct {
 	root   string
 	loaded bool
 }
+
+type noopLogger struct{}
+
+func (noopLogger) Trace(string) {}
+
+func (noopLogger) Error(string) {}

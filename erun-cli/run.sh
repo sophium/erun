@@ -2,10 +2,16 @@
 
 set -eu
 
-cd "$(dirname "$0")"
+ORIGINAL_DIR=$(pwd)
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+TARGET="$SCRIPT_DIR/bin/erun"
+
+cd "$SCRIPT_DIR"
 
 mkdir -p bin
 
-go build -o bin/erun ./
+go build -o "$TARGET" ./
 
-./bin/erun "$@"
+cd "$ORIGINAL_DIR"
+
+exec "$TARGET" "$@"

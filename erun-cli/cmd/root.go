@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"fmt"
-
 	"github.com/manifoldco/promptui"
 	"github.com/sophium/erun/internal"
 	"github.com/sophium/erun/internal/bootstrap"
@@ -34,11 +32,13 @@ func NewRootCmd(deps Dependencies) *cobra.Command {
 	var verbosity int
 
 	cmd := &cobra.Command{
-		Use:   "erun",
-		Short: "Environment Runner",
-		Long:  `erun helps to run and manage multiple tenants/environments.`,
+		Use:           "erun",
+		Short:         "Environment Runner",
+		Long:          `erun helps to run and manage multiple tenants/environments.`,
+		SilenceUsage:  true,
+		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmd.Help()
+			return runInitCommand(cmd, deps, &verbosity, bootstrap.InitRequest{})
 		},
 	}
 
@@ -50,10 +50,7 @@ func NewRootCmd(deps Dependencies) *cobra.Command {
 }
 
 func Execute() error {
-	if err := NewRootCmd(DefaultDependencies()).Execute(); err != nil {
-		return fmt.Errorf("cli execution failed: %w", err)
-	}
-	return nil
+	return NewRootCmd(DefaultDependencies()).Execute()
 }
 
 func withDependencyDefaults(deps Dependencies) Dependencies {

@@ -49,6 +49,12 @@ Repository guidance for humans and coding agents working in this repo.
 - Prefer safety and clarity over micro-optimizations.
 - Do not modify `README.md` unless the user explicitly asks for a README change.
 
+## Refactoring Rules
+
+- Treat refactoring as behavior-preserving by default.
+- Do not change user-visible output, help text, error text, prompts, logging, defaults, or flags unless the user explicitly asks for that functional change.
+- Before and after a refactor, compare observable behavior with `main` and add or update regression tests for any behavior that must remain unchanged.
+
 ## Branching Strategy
 
 - Create a GitHub issue before starting implementation work.
