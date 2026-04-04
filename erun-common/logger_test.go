@@ -1,4 +1,4 @@
-package internal
+package eruncommon
 
 import (
 	"bytes"
@@ -119,6 +119,24 @@ func TestLoggerErrorAndFatal(t *testing.T) {
 	expected = colorize("fatal", colorError) + "\n"
 	if stderr != expected {
 		t.Fatalf("unexpected fatal output: %q", stderr)
+	}
+}
+
+func TestLoggerWithWriters(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	logger := NewLoggerWithWriters(2, &stdout, &stderr)
+	logger.Info("info")
+	logger.Debug("debug")
+	logger.Trace("trace")
+	logger.Error("boom")
+
+	if got := stdout.String(); got != "info\ndebug\n"+colorize("trace", colorTrace)+"\n" {
+		t.Fatalf("unexpected stdout output: %q", got)
+	}
+	if got := stderr.String(); got != colorize("boom", colorError)+"\n" {
+		t.Fatalf("unexpected stderr output: %q", got)
 	}
 }
 

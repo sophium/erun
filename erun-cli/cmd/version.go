@@ -1,26 +1,31 @@
 package cmd
 
 import (
-	"fmt"
-
+	eruncommon "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
 )
 
-var (
-	// These variables are replaced at build time via -ldflags to embed release metadata.
-	version = "dev"
-	commit  = ""
-	date    = ""
-)
+// These variables are replaced at build time via -ldflags to embed release metadata.
+var buildInfo = eruncommon.BuildInfo{Version: "dev"}
+
+// CurrentBuildInfo exposes the current CLI build metadata in the shared common format.
+func CurrentBuildInfo() eruncommon.BuildInfo {
+	return eruncommon.NormalizeBuildInfo(buildInfo)
+}
 
 // BuildInfo exposes the current CLI build metadata.
 func BuildInfo() (string, string, string) {
-	return version, commit, date
+	info := CurrentBuildInfo()
+	return info.Version, info.Commit, info.Date
 }
 
 // SetBuildInfo overrides the CLI build metadata. Primarily useful for tests.
 func SetBuildInfo(v, c, d string) {
-	version, commit, date = v, c, d
+	buildInfo = eruncommon.BuildInfo{
+		Version: v,
+		Commit:  c,
+		Date:    d,
+	}
 }
 
 // NewVersionCmd returns a Cobra command that prints the build information.
@@ -29,16 +34,8 @@ func NewVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print build information",
 		Run: func(cmd *cobra.Command, args []string) {
-			cmd.Printf("erun %s", version)
-			tail := ""
-			if commit != "" {
-				tail = fmt.Sprintf(" (%s", commit)
-				if date != "" {
-					tail += fmt.Sprintf(" built %s", date)
-				}
-				tail += ")"
-			}
-			cmd.Printf("%s\n", tail)
+			logger := eruncommon.NewLoggerWithWriters(0, cmd.OutOrStdout(), cmd.ErrOrStderr())
+			logger.Info(eruncommon.FormatVersionLine(CurrentBuildInfo()))
 		},
 	}
 }
