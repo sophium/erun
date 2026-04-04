@@ -7,9 +7,12 @@ import (
 
 	"github.com/manifoldco/promptui"
 	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/sophium/erun/internal"
 	"github.com/sophium/erun/internal/bootstrap"
 	"github.com/spf13/cobra"
 )
+
+const initializeCurrentProjectOption = "Initialize current project"
 
 func NewInitCmd(deps Dependencies, verbosity *int) *cobra.Command {
 	req := bootstrap.InitRequest{}
@@ -17,9 +20,14 @@ func NewInitCmd(deps Dependencies, verbosity *int) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:          "init",
 		Short:        "Initialize configuration for the current project",
+		Args:         cobra.MaximumNArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runInitCommand(cmd, deps, verbosity, req)
+			request := req
+			if request.Tenant == "" && len(args) > 0 {
+				request.Tenant = args[0]
+			}
+			return runInitCommand(cmd, deps, verbosity, request)
 		},
 	}
 
@@ -35,6 +43,9 @@ func runInitCommand(cmd *cobra.Command, deps Dependencies, verbosity *int, req b
 	service := bootstrap.Service{
 		Store:           deps.Store,
 		FindProjectRoot: deps.FindProjectRoot,
+		SelectTenant: func(tenants []internal.TenantConfig) (bootstrap.TenantSelectionResult, error) {
+			return selectTenantPrompt(deps.SelectRunner, tenants)
+		},
 		Confirm: func(label string) (bool, error) {
 			return confirmPrompt(deps.PromptRunner, label)
 		},
@@ -77,4 +88,34 @@ func confirmPrompt(run PromptRunner, label string) (bool, error) {
 	}
 
 	return strings.EqualFold(result, "y"), nil
+}
+
+func selectTenantPrompt(run SelectRunner, tenants []internal.TenantConfig) (bootstrap.TenantSelectionResult, error) {
+	items := make([]string, 0, len(tenants)+1)
+	for _, tenant := range tenants {
+		items = append(items, tenant.Name)
+	}
+	items = append(items, initializeCurrentProjectOption)
+
+	prompt := promptui.Select{
+		Label: "Select tenant",
+		Items: items,
+	}
+
+	_, result, err := run(prompt)
+	if err != nil {
+		if errors.Is(err, promptui.ErrInterrupt) {
+			return bootstrap.TenantSelectionResult{}, fmt.Errorf("tenant selection interrupted")
+		}
+		if errors.Is(err, promptui.ErrAbort) {
+			return bootstrap.TenantSelectionResult{}, nil
+		}
+		return bootstrap.TenantSelectionResult{}, err
+	}
+
+	if result == initializeCurrentProjectOption {
+		return bootstrap.TenantSelectionResult{Initialize: true}, nil
+	}
+
+	return bootstrap.TenantSelectionResult{Tenant: result}, nil
 }

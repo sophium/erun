@@ -37,7 +37,7 @@ func TestRunLoadsExistingConfiguration(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveEnvConfig(tenant, internal.EnvConfig{Name: DefaultEnvironment}); err != nil {
+	if err := internal.SaveEnvConfig(tenant, internal.EnvConfig{Name: DefaultEnvironment, RepoPath: projectRoot}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -80,7 +80,7 @@ func TestRunRespectsExistingTenantDefaultEnvironment(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveEnvConfig(tenant, internal.EnvConfig{Name: "prod"}); err != nil {
+	if err := internal.SaveEnvConfig(tenant, internal.EnvConfig{Name: "prod", RepoPath: projectRoot}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -104,6 +104,183 @@ func TestRunRespectsExistingTenantDefaultEnvironment(t *testing.T) {
 	}
 }
 
+func TestRunResolveTenantUsesCurrentDirectoryTenantBeforeDefault(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	projectRootA := filepath.Join(t.TempDir(), "tenant-a")
+	projectRootB := filepath.Join(t.TempDir(), "tenant-b")
+	for _, tenant := range []struct {
+		name        string
+		projectRoot string
+	}{
+		{name: "tenant-a", projectRoot: projectRootA},
+		{name: "tenant-b", projectRoot: projectRootB},
+	} {
+		if err := internal.SaveTenantConfig(internal.TenantConfig{
+			Name:               tenant.name,
+			ProjectRoot:        tenant.projectRoot,
+			DefaultEnvironment: DefaultEnvironment,
+		}); err != nil {
+			t.Fatalf("save tenant config: %v", err)
+		}
+		if err := internal.SaveEnvConfig(tenant.name, internal.EnvConfig{Name: DefaultEnvironment, RepoPath: tenant.projectRoot}); err != nil {
+			t.Fatalf("save env config: %v", err)
+		}
+	}
+	if err := internal.SaveERunConfig(internal.ERunConfig{DefaultTenant: "tenant-b"}); err != nil {
+		t.Fatalf("save erun config: %v", err)
+	}
+
+	service := Service{
+		Store: ConfigStore{},
+		GetWorkingDir: func() (string, error) {
+			return filepath.Join(projectRootA, "nested"), nil
+		},
+		SelectTenant: func([]internal.TenantConfig) (TenantSelectionResult, error) {
+			t.Fatal("unexpected tenant selection")
+			return TenantSelectionResult{}, nil
+		},
+		FindProjectRoot: func() (string, string, error) {
+			t.Fatal("unexpected project detection")
+			return "", "", nil
+		},
+		Confirm: func(label string) (bool, error) {
+			t.Fatalf("unexpected confirmation: %s", label)
+			return false, nil
+		},
+	}
+
+	result, err := service.Run(InitRequest{ResolveTenant: true})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.TenantConfig.Name != "tenant-a" {
+		t.Fatalf("expected current directory tenant to win, got %+v", result.TenantConfig)
+	}
+}
+
+func TestRunResolveTenantSelectsConfiguredTenantWhenOutsideTenantDirectory(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	projectRoot := filepath.Join(t.TempDir(), "tenant-a")
+	if err := internal.SaveTenantConfig(internal.TenantConfig{
+		Name:               "tenant-a",
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: DefaultEnvironment,
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: DefaultEnvironment, RepoPath: projectRoot}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	service := Service{
+		Store: ConfigStore{},
+		GetWorkingDir: func() (string, error) {
+			return t.TempDir(), nil
+		},
+		SelectTenant: func(tenants []internal.TenantConfig) (TenantSelectionResult, error) {
+			if len(tenants) != 1 || tenants[0].Name != "tenant-a" {
+				t.Fatalf("unexpected tenant options: %+v", tenants)
+			}
+			return TenantSelectionResult{Tenant: "tenant-a"}, nil
+		},
+		FindProjectRoot: func() (string, string, error) {
+			t.Fatal("unexpected project detection")
+			return "", "", nil
+		},
+		Confirm: func(label string) (bool, error) {
+			t.Fatalf("unexpected confirmation: %s", label)
+			return false, nil
+		},
+	}
+
+	result, err := service.Run(InitRequest{ResolveTenant: true})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if !result.CreatedERunConfig || result.CreatedTenantConfig || result.CreatedEnvConfig {
+		t.Fatalf("unexpected init result: %+v", result)
+	}
+	if result.TenantConfig.Name != "tenant-a" {
+		t.Fatalf("unexpected tenant config: %+v", result.TenantConfig)
+	}
+}
+
+func TestRunResolveTenantCanInitializeCurrentProjectFromSelection(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	existingProjectRoot := filepath.Join(t.TempDir(), "tenant-b")
+	if err := internal.SaveTenantConfig(internal.TenantConfig{
+		Name:               "tenant-b",
+		ProjectRoot:        existingProjectRoot,
+		DefaultEnvironment: DefaultEnvironment,
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := internal.SaveEnvConfig("tenant-b", internal.EnvConfig{Name: DefaultEnvironment, RepoPath: existingProjectRoot}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	service := Service{
+		Store: ConfigStore{},
+		GetWorkingDir: func() (string, error) {
+			return t.TempDir(), nil
+		},
+		SelectTenant: func([]internal.TenantConfig) (TenantSelectionResult, error) {
+			return TenantSelectionResult{Initialize: true}, nil
+		},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+	}
+
+	result, err := service.Run(InitRequest{ResolveTenant: true, AutoApprove: true})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if !result.CreatedERunConfig || !result.CreatedTenantConfig || !result.CreatedEnvConfig {
+		t.Fatalf("expected selection to initialize current project, got %+v", result)
+	}
+	if result.TenantConfig.Name != "tenant-a" || result.TenantConfig.ProjectRoot != projectRoot {
+		t.Fatalf("unexpected tenant config: %+v", result.TenantConfig)
+	}
+	if result.EnvConfig.RepoPath != projectRoot {
+		t.Fatalf("unexpected env config: %+v", result.EnvConfig)
+	}
+}
+
+func TestRunResolveTenantSelectionCancelled(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	projectRoot := filepath.Join(t.TempDir(), "tenant-a")
+	if err := internal.SaveTenantConfig(internal.TenantConfig{
+		Name:               "tenant-a",
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: DefaultEnvironment,
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: DefaultEnvironment, RepoPath: projectRoot}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	service := Service{
+		Store: ConfigStore{},
+		GetWorkingDir: func() (string, error) {
+			return t.TempDir(), nil
+		},
+		SelectTenant: func([]internal.TenantConfig) (TenantSelectionResult, error) {
+			return TenantSelectionResult{}, nil
+		},
+	}
+
+	if _, err := service.Run(InitRequest{ResolveTenant: true}); !errors.Is(err, ErrTenantSelectionCancelled) {
+		t.Fatalf("expected ErrTenantSelectionCancelled, got %v", err)
+	}
+}
+
 func TestRunBootstrapsNewProjectWithAutoApprove(t *testing.T) {
 	setupXDGConfigHome(t)
 
@@ -122,7 +299,7 @@ func TestRunBootstrapsNewProjectWithAutoApprove(t *testing.T) {
 	if !result.CreatedERunConfig || !result.CreatedTenantConfig || !result.CreatedEnvConfig {
 		t.Fatalf("expected all configs to be created, got %+v", result)
 	}
-	if result.TenantConfig.Name != "tenant-a" || result.EnvConfig.Name != DefaultEnvironment {
+	if result.TenantConfig.Name != "tenant-a" || result.EnvConfig.Name != DefaultEnvironment || result.EnvConfig.RepoPath != "/tmp/project" {
 		t.Fatalf("unexpected init result: %+v", result)
 	}
 }

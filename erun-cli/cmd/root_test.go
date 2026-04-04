@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -10,12 +11,13 @@ import (
 	"github.com/manifoldco/promptui"
 	"github.com/sophium/erun/internal"
 	"github.com/sophium/erun/internal/bootstrap"
+	"github.com/sophium/erun/internal/opener"
 )
 
 func TestNewRootCmdRegistersCommands(t *testing.T) {
 	cmd := NewRootCmd(Dependencies{})
 
-	for _, name := range []string{"init", "mcp", "version"} {
+	for _, name := range []string{"init", "open", "mcp", "version"} {
 		found, _, err := cmd.Find([]string{name})
 		if err != nil {
 			t.Fatalf("Find(%q) failed: %v", name, err)
@@ -41,6 +43,7 @@ func TestRootCommandRunsInitWhenNoSubcommand(t *testing.T) {
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
+	cmd.SetArgs([]string{})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute failed: %v", err)
@@ -70,8 +73,168 @@ func TestRootCommandRunsInitWhenNoSubcommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEnvConfig failed: %v", err)
 	}
-	if envConfig.Name != bootstrap.DefaultEnvironment {
+	if envConfig.Name != bootstrap.DefaultEnvironment || envConfig.RepoPath != projectRoot {
 		t.Fatalf("unexpected env config: %+v", envConfig)
+	}
+}
+
+func TestRootCommandRunsOpenWithDefaults(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("mkdir project root: %v", err)
+	}
+	if err := internal.SaveERunConfig(internal.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
+		t.Fatalf("save erun config: %v", err)
+	}
+	if err := internal.SaveTenantConfig(internal.TenantConfig{
+		Name:               "tenant-a",
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: "dev",
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: "dev", RepoPath: projectRoot}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	launched := opener.ShellLaunchRequest{}
+	cmd := NewRootCmd(Dependencies{
+		FindProjectRoot: func() (string, string, error) {
+			t.Fatal("unexpected project detection")
+			return "", "", nil
+		},
+		PromptRunner: func(promptui.Prompt) (string, error) {
+			t.Fatal("unexpected prompt")
+			return "", nil
+		},
+		LaunchShell: func(req opener.ShellLaunchRequest) error {
+			launched = req
+			return nil
+		},
+	})
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if launched.Dir != projectRoot || launched.Title != "tenant-a-dev" {
+		t.Fatalf("unexpected shell launch: %+v", launched)
+	}
+}
+
+func TestRootCommandRunsOpenWithDefaultTenantAndRequestedEnvironment(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	projectRoot := filepath.Join(t.TempDir(), "tenant-a-dev")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("mkdir project root: %v", err)
+	}
+	if err := internal.SaveERunConfig(internal.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
+		t.Fatalf("save erun config: %v", err)
+	}
+	if err := internal.SaveTenantConfig(internal.TenantConfig{
+		Name:               "tenant-a",
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: bootstrap.DefaultEnvironment,
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: "dev", RepoPath: projectRoot}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	launched := opener.ShellLaunchRequest{}
+	cmd := NewRootCmd(Dependencies{
+		FindProjectRoot: func() (string, string, error) {
+			t.Fatal("unexpected project detection")
+			return "", "", nil
+		},
+		PromptRunner: func(prompt promptui.Prompt) (string, error) {
+			t.Fatalf("unexpected confirmation: %+v", prompt)
+			return "", nil
+		},
+		LaunchShell: func(req opener.ShellLaunchRequest) error {
+			launched = req
+			return nil
+		},
+	})
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"dev"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if launched.Dir != projectRoot || launched.Title != "tenant-a-dev" {
+		t.Fatalf("unexpected shell launch: %+v", launched)
+	}
+}
+
+func TestRootCommandRunsOpenWithExplicitTenantAndEnvironment(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	projectRoot := filepath.Join(t.TempDir(), "dog-me")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("mkdir project root: %v", err)
+	}
+	if err := internal.SaveTenantConfig(internal.TenantConfig{
+		Name:               "dog",
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: "local",
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := internal.SaveEnvConfig("dog", internal.EnvConfig{Name: "me", RepoPath: projectRoot}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	launched := opener.ShellLaunchRequest{}
+	cmd := NewRootCmd(Dependencies{
+		LaunchShell: func(req opener.ShellLaunchRequest) error {
+			launched = req
+			return nil
+		},
+	})
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"dog", "me"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if launched.Dir != projectRoot || launched.Title != "dog-me" {
+		t.Fatalf("unexpected shell launch: %+v", launched)
+	}
+}
+
+func TestRootCommandExplicitTenantFailsWhenMissing(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	cmd := NewRootCmd(Dependencies{})
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"dog", "me"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected missing tenant error")
+	}
+	if !errors.Is(err, opener.ErrTenantNotFound) {
+		t.Fatalf("expected ErrTenantNotFound, got %v", err)
+	}
+	if got := err.Error(); !bytes.Contains([]byte(got), []byte("no such tenant exists")) {
+		t.Fatalf("expected missing tenant message, got %q", got)
 	}
 }
 
@@ -89,7 +252,7 @@ func TestInitCommandPreservesExistingTenantDefaultEnvironmentWhenFlagOmitted(t *
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: "prod"}); err != nil {
+	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: "prod", RepoPath: projectRoot}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -148,7 +311,7 @@ func TestRootCommandHelpFlagPrintsHelp(t *testing.T) {
 	}
 
 	output := buf.String()
-	for _, want := range []string{"init", "mcp", "version"} {
+	for _, want := range []string{"init", "open", "mcp", "version"} {
 		if !bytes.Contains([]byte(output), []byte(want)) {
 			t.Fatalf("expected help output to mention %q, got %q", want, output)
 		}
@@ -166,6 +329,7 @@ func TestRootCommandInitErrorsDoNotPrintHelp(t *testing.T) {
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
+	cmd.SetArgs([]string{})
 
 	err := cmd.Execute()
 	if !errors.Is(err, internal.ErrNotInGitRepository) {
@@ -217,6 +381,7 @@ func TestRootCommandInitErrorsDoNotPrintErrorTwice(t *testing.T) {
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
+	cmd.SetArgs([]string{})
 
 	err := cmd.Execute()
 	if !errors.Is(err, internal.ErrNotInGitRepository) {
@@ -270,11 +435,15 @@ func TestExecuteReturnsUnderlyingError(t *testing.T) {
 		defaultPromptRunner = previous
 	})
 
-	err := NewRootCmd(Dependencies{
+	cmd := NewRootCmd(Dependencies{
 		FindProjectRoot: func() (string, string, error) {
 			return "", "", internal.ErrNotInGitRepository
 		},
-	}).Execute()
+	})
+	cmd.SetArgs([]string{})
+	err := func() error {
+		return cmd.Execute()
+	}()
 	if !errors.Is(err, internal.ErrNotInGitRepository) {
 		t.Fatalf("expected ErrNotInGitRepository, got %v", err)
 	}

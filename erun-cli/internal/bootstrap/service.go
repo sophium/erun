@@ -3,6 +3,9 @@ package bootstrap
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/sophium/erun/internal"
 )
@@ -12,22 +15,32 @@ const DefaultEnvironment = "local"
 var (
 	ErrTenantInitializationCancelled      = errors.New("tenant initialization cancelled by user")
 	ErrEnvironmentInitializationCancelled = errors.New("environment initialization cancelled by user")
+	ErrTenantSelectionCancelled           = errors.New("tenant selection cancelled by user")
 )
 
 type Store interface {
 	LoadERunConfig() (internal.ERunConfig, string, error)
 	SaveERunConfig(internal.ERunConfig) error
+	ListTenantConfigs() ([]internal.TenantConfig, error)
 	LoadTenantConfig(string) (internal.TenantConfig, string, error)
 	SaveTenantConfig(internal.TenantConfig) error
 	LoadEnvConfig(string, string) (internal.EnvConfig, string, error)
 	SaveEnvConfig(string, internal.EnvConfig) error
 }
 
-type ProjectFinder func() (string, string, error)
+type (
+	ProjectFinder    func() (string, string, error)
+	WorkDirFunc      func() (string, error)
+	SelectTenantFunc func([]internal.TenantConfig) (TenantSelectionResult, error)
+)
 
 type (
-	ConfirmFunc func(label string) (bool, error)
-	Logger      interface {
+	ConfirmFunc           func(label string) (bool, error)
+	TenantSelectionResult struct {
+		Tenant     string
+		Initialize bool
+	}
+	Logger interface {
 		Trace(string)
 		Error(string)
 	}
@@ -41,6 +54,10 @@ func (ConfigStore) LoadERunConfig() (internal.ERunConfig, string, error) {
 
 func (ConfigStore) SaveERunConfig(config internal.ERunConfig) error {
 	return internal.SaveERunConfig(config)
+}
+
+func (ConfigStore) ListTenantConfigs() ([]internal.TenantConfig, error) {
+	return internal.ListTenantConfigs()
 }
 
 func (ConfigStore) LoadTenantConfig(tenant string) (internal.TenantConfig, string, error) {
@@ -60,10 +77,11 @@ func (ConfigStore) SaveEnvConfig(tenant string, config internal.EnvConfig) error
 }
 
 type InitRequest struct {
-	Tenant      string
-	ProjectRoot string
-	Environment string
-	AutoApprove bool
+	Tenant        string
+	ProjectRoot   string
+	Environment   string
+	AutoApprove   bool
+	ResolveTenant bool
 }
 
 type InitResult struct {
@@ -78,6 +96,8 @@ type InitResult struct {
 type Service struct {
 	Store           Store
 	FindProjectRoot ProjectFinder
+	GetWorkingDir   WorkDirFunc
+	SelectTenant    SelectTenantFunc
 	Confirm         ConfirmFunc
 	Logger          Logger
 }
@@ -88,18 +108,16 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 
 	var result InitResult
 	var detected projectContext
+	var tenants []internal.TenantConfig
+	var tenantsLoaded bool
+	var tenantConfirmed bool
 
-	detectProject := func() (projectContext, error) {
+	findProject := func() (projectContext, error) {
 		if detected.loaded {
 			return detected, nil
 		}
-		s.Logger.Trace("Trying to detect current project directory")
 		tenant, root, err := s.FindProjectRoot()
 		if err != nil {
-			if errors.Is(err, internal.ErrNotInGitRepository) {
-				s.Logger.Error("erun config is not initialized. Run erun in project directory.")
-				return projectContext{}, internal.MarkReported(err)
-			}
 			return projectContext{}, err
 		}
 		detected = projectContext{
@@ -110,11 +128,42 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 		return detected, nil
 	}
 
+	detectProject := func() (projectContext, error) {
+		s.Logger.Trace("Trying to detect current project directory")
+		project, err := findProject()
+		if err != nil {
+			if errors.Is(err, internal.ErrNotInGitRepository) {
+				s.Logger.Error("erun config is not initialized. Run erun in project directory.")
+				return projectContext{}, internal.MarkReported(err)
+			}
+			return projectContext{}, err
+		}
+		return project, nil
+	}
+
+	loadTenants := func() ([]internal.TenantConfig, error) {
+		if tenantsLoaded {
+			return tenants, nil
+		}
+		loadedTenants, err := s.Store.ListTenantConfigs()
+		if err != nil {
+			return nil, err
+		}
+		tenants = loadedTenants
+		tenantsLoaded = true
+		return tenants, nil
+	}
+
 	toolConfig, configPath, err := s.Store.LoadERunConfig()
+	toolConfigMissing := false
 	s.Logger.Trace("Loading erun tool configuration, configPath=" + configPath)
 	switch {
 	case err == nil:
 	case errors.Is(err, internal.ErrNotInitialized):
+		toolConfigMissing = true
+		if req.ResolveTenant {
+			break
+		}
 		tenant := req.Tenant
 		projectRoot := req.ProjectRoot
 		if tenant == "" || projectRoot == "" {
@@ -133,6 +182,7 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 		if err := s.confirmTenant(req.AutoApprove, tenant, projectRoot); err != nil {
 			return result, err
 		}
+		tenantConfirmed = true
 
 		s.Logger.Trace("Saving default config")
 		toolConfig = internal.ERunConfig{DefaultTenant: tenant}
@@ -140,14 +190,45 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 			return result, err
 		}
 		result.CreatedERunConfig = true
+		toolConfigMissing = false
 	case err != nil:
 		return result, err
 	}
 	s.Logger.Trace("Loaded erun tool configuration")
 
 	tenant := req.Tenant
+	if tenant == "" && req.ResolveTenant {
+		loadedTenants, err := loadTenants()
+		if err != nil {
+			return result, err
+		}
+		if len(loadedTenants) > 0 {
+			workingDir, err := s.GetWorkingDir()
+			if err != nil {
+				return result, err
+			}
+			if currentTenant, found := findTenantForDirectory(workingDir, loadedTenants); found {
+				tenant = currentTenant.Name
+			}
+		}
+	}
 	if tenant == "" {
 		tenant = toolConfig.DefaultTenant
+	}
+	if tenant == "" && req.ResolveTenant {
+		loadedTenants, err := loadTenants()
+		if err != nil {
+			return result, err
+		}
+		if len(loadedTenants) > 0 {
+			selection, err := s.selectTenant(loadedTenants)
+			if err != nil {
+				return result, err
+			}
+			if !selection.Initialize {
+				tenant = selection.Tenant
+			}
+		}
 	}
 	if tenant == "" {
 		project, detectErr := detectProject()
@@ -169,6 +250,12 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 				return result, detectErr
 			}
 			projectRoot = project.root
+		}
+
+		if !tenantConfirmed {
+			if err := s.confirmTenant(req.AutoApprove, tenant, projectRoot); err != nil {
+				return result, err
+			}
 		}
 
 		defaultEnvironment := req.Environment
@@ -214,12 +301,28 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 	switch {
 	case err == nil:
 	case errors.Is(err, internal.ErrNotInitialized):
+		envProjectRoot := req.ProjectRoot
+		if envProjectRoot == "" {
+			envProjectRoot = tenantConfig.ProjectRoot
+		}
+		if envProjectRoot == "" {
+			project, detectErr := findProject()
+			if detectErr == nil {
+				envProjectRoot = project.root
+			} else if !errors.Is(detectErr, internal.ErrNotInGitRepository) {
+				return result, detectErr
+			}
+		}
+
 		if err := s.confirmEnvironment(req.AutoApprove, tenant, envName); err != nil {
 			return result, err
 		}
 
 		s.Logger.Trace("Adding new environment")
-		envConfig = internal.EnvConfig{Name: envName}
+		envConfig = internal.EnvConfig{
+			Name:     envName,
+			RepoPath: envProjectRoot,
+		}
 		if err := s.Store.SaveEnvConfig(tenant, envConfig); err != nil {
 			return result, err
 		}
@@ -229,7 +332,14 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 	}
 
 	if toolConfig.DefaultTenant == "" {
+		s.Logger.Trace("Saving default config")
 		toolConfig.DefaultTenant = tenant
+		if err := s.Store.SaveERunConfig(toolConfig); err != nil {
+			return result, err
+		}
+		if toolConfigMissing {
+			result.CreatedERunConfig = true
+		}
 	}
 
 	result.ERunConfig = toolConfig
@@ -266,6 +376,9 @@ func (s Service) withDefaults() Service {
 	if s.FindProjectRoot == nil {
 		s.FindProjectRoot = internal.FindProjectRoot
 	}
+	if s.GetWorkingDir == nil {
+		s.GetWorkingDir = os.Getwd
+	}
 	if s.Logger == nil {
 		s.Logger = noopLogger{}
 	}
@@ -298,6 +411,56 @@ func (s Service) confirm(label string, cancelled error) error {
 		return cancelled
 	}
 	return nil
+}
+
+func (s Service) selectTenant(tenants []internal.TenantConfig) (TenantSelectionResult, error) {
+	if s.SelectTenant == nil {
+		return TenantSelectionResult{}, fmt.Errorf("tenant selection required")
+	}
+	selection, err := s.SelectTenant(tenants)
+	if err != nil {
+		return TenantSelectionResult{}, err
+	}
+	if selection.Initialize {
+		return selection, nil
+	}
+	if selection.Tenant == "" {
+		return TenantSelectionResult{}, ErrTenantSelectionCancelled
+	}
+	return selection, nil
+}
+
+func findTenantForDirectory(dir string, tenants []internal.TenantConfig) (internal.TenantConfig, bool) {
+	cleanDir := filepath.Clean(dir)
+	bestIndex := -1
+
+	for i, tenant := range tenants {
+		if tenant.ProjectRoot == "" {
+			continue
+		}
+		if !isWithinDirectory(cleanDir, filepath.Clean(tenant.ProjectRoot)) {
+			continue
+		}
+		if bestIndex == -1 || len(tenant.ProjectRoot) > len(tenants[bestIndex].ProjectRoot) {
+			bestIndex = i
+		}
+	}
+
+	if bestIndex == -1 {
+		return internal.TenantConfig{}, false
+	}
+	return tenants[bestIndex], true
+}
+
+func isWithinDirectory(path, root string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
 
 type projectContext struct {
