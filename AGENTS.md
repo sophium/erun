@@ -6,7 +6,13 @@ Repository guidance for humans and coding agents working in this repo.
 
 - Erun GitHub repository: `https://github.com/sophium/erun`
 - Use this repository to extend ERun functionality.
-- Start by creating issue, create branch and PR once conclusion, that functionality is needed is reached
+- Start by creating or confirming the GitHub issue that tracks the work.
+- Branch from `main` using the issue-linked naming rules defined below.
+- Implement the change and run the relevant validation before publishing.
+- Push the branch and open a pull request back into `main`.
+- When the PR is intended to close the issue, include `Closes #<issue-number>` in the PR body.
+- A pushed branch or an open PR does not close the issue by itself. The issue closes after the PR is merged or if it is closed manually.
+- If the user asks for `push, accept`, treat that as completing the full publish flow rather than stopping after the branch push.
 
 ## Project Structure
 
@@ -63,8 +69,6 @@ Repository guidance for humans and coding agents working in this repo.
 - Use `feature/<issue-number>-<short-kebab-case-description>` for new functionality.
 - Use `bug/<issue-number>-<short-kebab-case-description>` for bug fixes.
 - Include the issue number in the branch name for traceability, for example `feature/12-add-mcp-server-entrypoint`.
-- Open pull requests back into `main` and reference the issue in the PR body, for example `Closes #12`.
-- Treat `push, accept` as a request to complete the full publish flow: push the branch, create the pull request, and leave the PR in a non-draft accepted/ready-for-review state. Do not stop after the branch push alone.
 
 ## Pull Request Titles
 
