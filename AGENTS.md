@@ -2,10 +2,11 @@
 
 Repository guidance for humans and coding agents working in this repo.
 
-## Repository
+## Contributing
 
 - Erun GitHub repository: `https://github.com/sophium/erun`
 - Use this repository to extend ERun functionality.
+- Start by creating issue, create branch and PR once conclusion, that functionality is needed is reached
 
 ## Project Structure
 
