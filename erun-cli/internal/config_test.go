@@ -141,6 +141,31 @@ func TestTenantConfigRoundTrip(t *testing.T) {
 	}
 }
 
+func TestListTenantConfigs(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	for _, cfg := range []TenantConfig{
+		{Name: "tenant-b", ProjectRoot: "/tmp/b", DefaultEnvironment: "prod"},
+		{Name: "tenant-a", ProjectRoot: "/tmp/a", DefaultEnvironment: "dev"},
+	} {
+		if err := SaveTenantConfig(cfg); err != nil {
+			t.Fatalf("SaveTenantConfig(%q) failed: %v", cfg.Name, err)
+		}
+	}
+
+	tenants, err := ListTenantConfigs()
+	if err != nil {
+		t.Fatalf("ListTenantConfigs failed: %v", err)
+	}
+
+	if len(tenants) != 2 {
+		t.Fatalf("expected 2 tenants, got %+v", tenants)
+	}
+	if tenants[0].Name != "tenant-a" || tenants[1].Name != "tenant-b" {
+		t.Fatalf("expected tenants to be sorted by name, got %+v", tenants)
+	}
+}
+
 func TestLoadTenantConfigErrors(t *testing.T) {
 	setupXDGConfigHome(t)
 
@@ -205,7 +230,7 @@ func TestSaveTenantConfigErrors(t *testing.T) {
 func TestEnvConfigRoundTrip(t *testing.T) {
 	setupXDGConfigHome(t)
 
-	cfg := EnvConfig{Name: "dev"}
+	cfg := EnvConfig{Name: "dev", RepoPath: "/tmp/project-dev"}
 	if err := SaveEnvConfig("tenant-a", cfg); err != nil {
 		t.Fatalf("SaveEnvConfig failed: %v", err)
 	}
@@ -313,6 +338,45 @@ func TestFindProjectRoot(t *testing.T) {
 	}
 
 	if name != "project" {
+		t.Fatalf("unexpected repo name: %s", name)
+	}
+	if path != realRepoRoot {
+		t.Fatalf("unexpected path: %s", path)
+	}
+}
+
+func TestFindProjectRootInWorktree(t *testing.T) {
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(originalDir); err != nil {
+			t.Fatalf("return to original dir: %v", err)
+		}
+	})
+
+	repoRoot := filepath.Join(t.TempDir(), "project-dev")
+	subDir := filepath.Join(repoRoot, "nested")
+	if err := os.MkdirAll(subDir, 0o755); err != nil {
+		t.Fatalf("mkdir subdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, ".git"), []byte("gitdir: /tmp/worktree"), 0o644); err != nil {
+		t.Fatalf("write .git file: %v", err)
+	}
+	realRepoRoot, err := filepath.EvalSymlinks(repoRoot)
+	if err != nil {
+		t.Fatalf("eval symlinks: %v", err)
+	}
+	if err := os.Chdir(subDir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	name, path, err := FindProjectRoot()
+	if err != nil {
+		t.Fatalf("FindProjectRoot failed: %v", err)
+	}
+	if name != "project-dev" {
 		t.Fatalf("unexpected repo name: %s", name)
 	}
 	if path != realRepoRoot {

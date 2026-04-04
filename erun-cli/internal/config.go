@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/adrg/xdg"
 	"gopkg.in/yaml.v3"
@@ -25,7 +26,8 @@ type TenantConfig struct {
 }
 
 type EnvConfig struct {
-	Name string
+	Name     string
+	RepoPath string
 }
 
 var (
@@ -118,6 +120,43 @@ func LoadTenantConfig(tenant string) (TenantConfig, string, error) {
 	return config, configFilePath, nil
 }
 
+func ListTenantConfigs() ([]TenantConfig, error) {
+	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, configFile))
+	if err != nil {
+		return nil, ErrNoUserDataFolder
+	}
+
+	entries, err := os.ReadDir(filepath.Dir(configFilePath))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	tenants := make([]TenantConfig, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		tenantConfig, _, err := LoadTenantConfig(entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		if tenantConfig.Name == "" {
+			tenantConfig.Name = entry.Name()
+		}
+		tenants = append(tenants, tenantConfig)
+	}
+
+	sort.Slice(tenants, func(i, j int) bool {
+		return tenants[i].Name < tenants[j].Name
+	})
+
+	return tenants, nil
+}
+
 func SaveEnvConfig(tenant string, config EnvConfig) error {
 	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, config.Name, configFile))
 	if err != nil {
@@ -167,7 +206,7 @@ func FindProjectRoot() (string, string, error) {
 
 	for {
 		gitDir := filepath.Join(dir, ".git")
-		if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
+		if _, err := os.Stat(gitDir); err == nil {
 			repoName := filepath.Base(dir)
 			return repoName, dir, nil
 		}
