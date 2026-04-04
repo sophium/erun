@@ -29,9 +29,10 @@ type Store interface {
 }
 
 type (
-	ProjectFinder    func() (string, string, error)
-	WorkDirFunc      func() (string, error)
-	SelectTenantFunc func([]internal.TenantConfig) (TenantSelectionResult, error)
+	ProjectFinder       func() (string, string, error)
+	CurrentBranchFinder func(string) (string, error)
+	WorkDirFunc         func() (string, error)
+	SelectTenantFunc    func([]internal.TenantConfig) (TenantSelectionResult, error)
 )
 
 type (
@@ -77,11 +78,13 @@ func (ConfigStore) SaveEnvConfig(tenant string, config internal.EnvConfig) error
 }
 
 type InitRequest struct {
-	Tenant        string
-	ProjectRoot   string
-	Environment   string
-	AutoApprove   bool
-	ResolveTenant bool
+	Tenant                  string
+	ProjectRoot             string
+	Environment             string
+	Branch                  string
+	DetectEnvironmentBranch bool
+	AutoApprove             bool
+	ResolveTenant           bool
 }
 
 type InitResult struct {
@@ -94,12 +97,13 @@ type InitResult struct {
 }
 
 type Service struct {
-	Store           Store
-	FindProjectRoot ProjectFinder
-	GetWorkingDir   WorkDirFunc
-	SelectTenant    SelectTenantFunc
-	Confirm         ConfirmFunc
-	Logger          Logger
+	Store             Store
+	FindProjectRoot   ProjectFinder
+	FindCurrentBranch CurrentBranchFinder
+	GetWorkingDir     WorkDirFunc
+	SelectTenant      SelectTenantFunc
+	Confirm           ConfirmFunc
+	Logger            Logger
 }
 
 func (s Service) Run(req InitRequest) (InitResult, error) {
@@ -314,7 +318,16 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 			}
 		}
 
-		if err := s.confirmEnvironment(req.AutoApprove, tenant, envName); err != nil {
+		envBranch := req.Branch
+		if envBranch == "" && req.DetectEnvironmentBranch {
+			detectedBranch, detectErr := s.FindCurrentBranch(envProjectRoot)
+			if detectErr != nil && !errors.Is(detectErr, internal.ErrNotInGitRepository) {
+				return result, detectErr
+			}
+			envBranch = detectedBranch
+		}
+
+		if err := s.confirmEnvironment(req.AutoApprove, tenant, envName, envBranch); err != nil {
 			return result, err
 		}
 
@@ -322,6 +335,7 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 		envConfig = internal.EnvConfig{
 			Name:     envName,
 			RepoPath: envProjectRoot,
+			Branch:   envBranch,
 		}
 		if err := s.Store.SaveEnvConfig(tenant, envConfig); err != nil {
 			return result, err
@@ -329,6 +343,16 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 		result.CreatedEnvConfig = true
 	case err != nil:
 		return result, err
+	}
+
+	if envConfig.Name == "" {
+		envConfig.Name = envName
+	}
+	if req.Branch != "" && envConfig.Branch != req.Branch {
+		envConfig.Branch = req.Branch
+		if err := s.Store.SaveEnvConfig(tenant, envConfig); err != nil {
+			return result, err
+		}
 	}
 
 	if toolConfig.DefaultTenant == "" {
@@ -362,10 +386,22 @@ func TenantConfirmationLabel(tenant, projectRoot string) string {
 }
 
 func EnvironmentConfirmationLabel(tenant, envName string) string {
+	return EnvironmentConfirmationLabelWithBranch(tenant, envName, "")
+}
+
+func EnvironmentConfirmationLabelWithBranch(tenant, envName, branch string) string {
+	if branch == "" {
+		return fmt.Sprintf(
+			"Initialize default environment %q for tenant %q?",
+			envName,
+			tenant,
+		)
+	}
 	return fmt.Sprintf(
-		"Initialize default environment %q for tenant %q?",
+		"Initialize default environment %q for tenant %q with default worktree branch %q?",
 		envName,
 		tenant,
+		branch,
 	)
 }
 
@@ -375,6 +411,9 @@ func (s Service) withDefaults() Service {
 	}
 	if s.FindProjectRoot == nil {
 		s.FindProjectRoot = internal.FindProjectRoot
+	}
+	if s.FindCurrentBranch == nil {
+		s.FindCurrentBranch = internal.FindCurrentBranch
 	}
 	if s.GetWorkingDir == nil {
 		s.GetWorkingDir = os.Getwd
@@ -392,11 +431,11 @@ func (s Service) confirmTenant(autoApprove bool, tenant, projectRoot string) err
 	return s.confirm(TenantConfirmationLabel(tenant, projectRoot), ErrTenantInitializationCancelled)
 }
 
-func (s Service) confirmEnvironment(autoApprove bool, tenant, envName string) error {
+func (s Service) confirmEnvironment(autoApprove bool, tenant, envName, branch string) error {
 	if autoApprove {
 		return nil
 	}
-	return s.confirm(EnvironmentConfirmationLabel(tenant, envName), ErrEnvironmentInitializationCancelled)
+	return s.confirm(EnvironmentConfirmationLabelWithBranch(tenant, envName, branch), ErrEnvironmentInitializationCancelled)
 }
 
 func (s Service) confirm(label string, cancelled error) error {

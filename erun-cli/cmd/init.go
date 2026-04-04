@@ -15,7 +15,7 @@ import (
 const initializeCurrentProjectOption = "Initialize current project"
 
 func NewInitCmd(deps Dependencies, verbosity *int) *cobra.Command {
-	req := bootstrap.InitRequest{}
+	req := bootstrap.InitRequest{DetectEnvironmentBranch: true}
 
 	cmd := &cobra.Command{
 		Use:          "init",
@@ -34,6 +34,7 @@ func NewInitCmd(deps Dependencies, verbosity *int) *cobra.Command {
 	cmd.Flags().StringVar(&req.Tenant, "tenant", "", "Tenant name to initialize")
 	cmd.Flags().StringVar(&req.ProjectRoot, "project-root", "", "Project root to bind to the tenant")
 	cmd.Flags().StringVar(&req.Environment, "environment", "", "Default environment name")
+	cmd.Flags().StringVar(&req.Branch, "branch", "", "Branch name for the environment worktree")
 	cmd.Flags().BoolVarP(&req.AutoApprove, "yes", "y", false, "Automatically approve initialization prompts")
 	return cmd
 }
@@ -41,8 +42,9 @@ func NewInitCmd(deps Dependencies, verbosity *int) *cobra.Command {
 func runInitCommand(cmd *cobra.Command, deps Dependencies, verbosity *int, req bootstrap.InitRequest) error {
 	logger := eruncommon.NewLoggerWithWriters(valueOrZero(verbosity), cmd.OutOrStdout(), cmd.ErrOrStderr())
 	service := bootstrap.Service{
-		Store:           deps.Store,
-		FindProjectRoot: deps.FindProjectRoot,
+		Store:             deps.Store,
+		FindProjectRoot:   deps.FindProjectRoot,
+		FindCurrentBranch: deps.FindCurrentBranch,
 		SelectTenant: func(tenants []internal.TenantConfig) (bootstrap.TenantSelectionResult, error) {
 			return selectTenantPrompt(deps.SelectRunner, tenants)
 		},

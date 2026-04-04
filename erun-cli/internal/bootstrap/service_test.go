@@ -251,6 +251,141 @@ func TestRunResolveTenantCanInitializeCurrentProjectFromSelection(t *testing.T) 
 	}
 }
 
+func TestRunStoresConfiguredEnvironmentBranch(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	service := Service{
+		Store: ConfigStore{},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", "/tmp/project", nil
+		},
+	}
+
+	result, err := service.Run(InitRequest{AutoApprove: true, Branch: "develop"})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.EnvConfig.Branch != "develop" {
+		t.Fatalf("expected branch to be saved, got %+v", result.EnvConfig)
+	}
+
+	loaded, _, err := internal.LoadEnvConfig("tenant-a", DefaultEnvironment)
+	if err != nil {
+		t.Fatalf("LoadEnvConfig failed: %v", err)
+	}
+	if loaded.Branch != "develop" {
+		t.Fatalf("expected persisted branch, got %+v", loaded)
+	}
+}
+
+func TestRunDetectsCurrentBranchForNewEnvironment(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	service := Service{
+		Store: ConfigStore{},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", "/tmp/project", nil
+		},
+		FindCurrentBranch: func(string) (string, error) {
+			return "develop", nil
+		},
+	}
+
+	result, err := service.Run(InitRequest{AutoApprove: true, DetectEnvironmentBranch: true})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.EnvConfig.Branch != "develop" {
+		t.Fatalf("expected detected branch to be saved, got %+v", result.EnvConfig)
+	}
+}
+
+func TestRunPreservesExistingEnvironmentBranchWhenFlagOmitted(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	tenant := "tenant-a"
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	if err := internal.SaveERunConfig(internal.ERunConfig{DefaultTenant: tenant}); err != nil {
+		t.Fatalf("save erun config: %v", err)
+	}
+	if err := internal.SaveTenantConfig(internal.TenantConfig{
+		Name:               tenant,
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: DefaultEnvironment,
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := internal.SaveEnvConfig(tenant, internal.EnvConfig{
+		Name:     DefaultEnvironment,
+		RepoPath: projectRoot,
+		Branch:   "release",
+	}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	service := Service{
+		Store: ConfigStore{},
+		FindProjectRoot: func() (string, string, error) {
+			return tenant, projectRoot, nil
+		},
+	}
+
+	result, err := service.Run(InitRequest{})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.EnvConfig.Branch != "release" {
+		t.Fatalf("expected branch to remain unchanged, got %+v", result.EnvConfig)
+	}
+}
+
+func TestRunUpdatesExistingEnvironmentBranchWhenFlagProvided(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	tenant := "tenant-a"
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	if err := internal.SaveERunConfig(internal.ERunConfig{DefaultTenant: tenant}); err != nil {
+		t.Fatalf("save erun config: %v", err)
+	}
+	if err := internal.SaveTenantConfig(internal.TenantConfig{
+		Name:               tenant,
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: DefaultEnvironment,
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := internal.SaveEnvConfig(tenant, internal.EnvConfig{
+		Name:     DefaultEnvironment,
+		RepoPath: projectRoot,
+		Branch:   "release",
+	}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	service := Service{
+		Store: ConfigStore{},
+		FindProjectRoot: func() (string, string, error) {
+			return tenant, projectRoot, nil
+		},
+	}
+
+	result, err := service.Run(InitRequest{Branch: "develop"})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.EnvConfig.Branch != "develop" {
+		t.Fatalf("expected branch to be updated, got %+v", result.EnvConfig)
+	}
+
+	loaded, _, err := internal.LoadEnvConfig(tenant, DefaultEnvironment)
+	if err != nil {
+		t.Fatalf("LoadEnvConfig failed: %v", err)
+	}
+	if loaded.Branch != "develop" {
+		t.Fatalf("expected persisted branch update, got %+v", loaded)
+	}
+}
+
 func TestRunResolveTenantSelectionCancelled(t *testing.T) {
 	setupXDGConfigHome(t)
 
@@ -415,12 +550,19 @@ func TestRunEnvironmentConfirmationRejected(t *testing.T) {
 		FindProjectRoot: func() (string, string, error) {
 			return tenant, "/tmp/project", nil
 		},
+		FindCurrentBranch: func(string) (string, error) {
+			return "develop", nil
+		},
 		Confirm: func(label string) (bool, error) {
+			want := EnvironmentConfirmationLabelWithBranch(tenant, DefaultEnvironment, "develop")
+			if label != want {
+				t.Fatalf("unexpected confirmation label: %q", label)
+			}
 			return false, nil
 		},
 	}
 
-	if _, err := service.Run(InitRequest{}); !errors.Is(err, ErrEnvironmentInitializationCancelled) {
+	if _, err := service.Run(InitRequest{DetectEnvironmentBranch: true}); !errors.Is(err, ErrEnvironmentInitializationCancelled) {
 		t.Fatalf("expected environment cancellation, got %v", err)
 	}
 }

@@ -28,6 +28,7 @@ type TenantConfig struct {
 type EnvConfig struct {
 	Name     string
 	RepoPath string
+	Branch   string
 }
 
 var (

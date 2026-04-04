@@ -230,7 +230,7 @@ func TestSaveTenantConfigErrors(t *testing.T) {
 func TestEnvConfigRoundTrip(t *testing.T) {
 	setupXDGConfigHome(t)
 
-	cfg := EnvConfig{Name: "dev", RepoPath: "/tmp/project-dev"}
+	cfg := EnvConfig{Name: "dev", RepoPath: "/tmp/project-dev", Branch: "develop"}
 	if err := SaveEnvConfig("tenant-a", cfg); err != nil {
 		t.Fatalf("SaveEnvConfig failed: %v", err)
 	}

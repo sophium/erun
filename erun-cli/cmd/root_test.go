@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -32,11 +33,19 @@ func TestRootCommandRunsInitWhenNoSubcommand(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
 	projectRoot := filepath.Join(t.TempDir(), "project")
+	var labels []string
 	cmd := NewRootCmd(Dependencies{
 		FindProjectRoot: func() (string, string, error) {
 			return "tenant-a", projectRoot, nil
 		},
-		PromptRunner: func(promptui.Prompt) (string, error) {
+		FindCurrentBranch: func(root string) (string, error) {
+			if root != projectRoot {
+				t.Fatalf("unexpected project root: %s", root)
+			}
+			return "develop", nil
+		},
+		PromptRunner: func(prompt promptui.Prompt) (string, error) {
+			labels = append(labels, fmt.Sprint(prompt.Label))
 			return "y", nil
 		},
 	})
@@ -73,8 +82,21 @@ func TestRootCommandRunsInitWhenNoSubcommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEnvConfig failed: %v", err)
 	}
-	if envConfig.Name != bootstrap.DefaultEnvironment || envConfig.RepoPath != projectRoot {
+	if envConfig.Name != bootstrap.DefaultEnvironment || envConfig.RepoPath != projectRoot || envConfig.Branch != "develop" {
 		t.Fatalf("unexpected env config: %+v", envConfig)
+	}
+
+	wantLabels := []string{
+		bootstrap.TenantConfirmationLabel("tenant-a", projectRoot),
+		bootstrap.EnvironmentConfirmationLabelWithBranch("tenant-a", bootstrap.DefaultEnvironment, "develop"),
+	}
+	if len(labels) != len(wantLabels) {
+		t.Fatalf("unexpected confirmation labels: %+v", labels)
+	}
+	for i := range wantLabels {
+		if labels[i] != wantLabels[i] {
+			t.Fatalf("unexpected confirmation label %d: got %q want %q", i, labels[i], wantLabels[i])
+		}
 	}
 }
 
@@ -296,6 +318,74 @@ func TestInitCommandPreservesExistingTenantDefaultEnvironmentWhenFlagOmitted(t *
 
 	if _, _, err := internal.LoadEnvConfig("tenant-a", bootstrap.DefaultEnvironment); !errors.Is(err, internal.ErrNotInitialized) {
 		t.Fatalf("expected no implicit %q env config, got %v", bootstrap.DefaultEnvironment, err)
+	}
+}
+
+func TestInitCommandStoresEnvironmentBranchFlag(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	cmd := NewRootCmd(Dependencies{
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		PromptRunner: func(promptui.Prompt) (string, error) {
+			t.Fatal("unexpected prompt")
+			return "", nil
+		},
+	})
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"init", "--branch", "develop", "-y"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	envConfig, _, err := internal.LoadEnvConfig("tenant-a", bootstrap.DefaultEnvironment)
+	if err != nil {
+		t.Fatalf("LoadEnvConfig failed: %v", err)
+	}
+	if envConfig.Branch != "develop" {
+		t.Fatalf("expected branch to be stored, got %+v", envConfig)
+	}
+}
+
+func TestInitCommandDetectsEnvironmentBranch(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	cmd := NewRootCmd(Dependencies{
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		FindCurrentBranch: func(root string) (string, error) {
+			if root != projectRoot {
+				t.Fatalf("unexpected project root: %s", root)
+			}
+			return "develop", nil
+		},
+		PromptRunner: func(promptui.Prompt) (string, error) {
+			t.Fatal("unexpected prompt")
+			return "", nil
+		},
+	})
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"init", "-y"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	envConfig, _, err := internal.LoadEnvConfig("tenant-a", bootstrap.DefaultEnvironment)
+	if err != nil {
+		t.Fatalf("LoadEnvConfig failed: %v", err)
+	}
+	if envConfig.Branch != "develop" {
+		t.Fatalf("expected detected branch to be stored, got %+v", envConfig)
 	}
 }
 

@@ -16,19 +16,21 @@ type (
 )
 
 type Dependencies struct {
-	Store           bootstrap.Store
-	FindProjectRoot bootstrap.ProjectFinder
-	PromptRunner    PromptRunner
-	SelectRunner    SelectRunner
-	LaunchShell     opener.ShellLauncher
+	Store             bootstrap.Store
+	FindProjectRoot   bootstrap.ProjectFinder
+	FindCurrentBranch bootstrap.CurrentBranchFinder
+	PromptRunner      PromptRunner
+	SelectRunner      SelectRunner
+	LaunchShell       opener.ShellLauncher
 }
 
 func DefaultDependencies() Dependencies {
 	return Dependencies{
-		Store:           bootstrap.ConfigStore{},
-		FindProjectRoot: internal.FindProjectRoot,
-		PromptRunner:    defaultPromptRunner,
-		LaunchShell:     opener.DefaultShellLauncher,
+		Store:             bootstrap.ConfigStore{},
+		FindProjectRoot:   internal.FindProjectRoot,
+		FindCurrentBranch: internal.FindCurrentBranch,
+		PromptRunner:      defaultPromptRunner,
+		LaunchShell:       opener.DefaultShellLauncher,
 	}
 }
 
@@ -120,6 +122,9 @@ func withDependencyDefaults(deps Dependencies) Dependencies {
 	if deps.FindProjectRoot == nil {
 		deps.FindProjectRoot = internal.FindProjectRoot
 	}
+	if deps.FindCurrentBranch == nil {
+		deps.FindCurrentBranch = internal.FindCurrentBranch
+	}
 	if deps.PromptRunner == nil {
 		deps.PromptRunner = defaultPromptRunner
 	}
@@ -146,8 +151,9 @@ func initRequestForRootCommand(deps Dependencies, args []string) (bootstrap.Init
 	if err != nil {
 		if errors.Is(err, opener.ErrDefaultTenantNotConfigured) || errors.Is(err, internal.ErrNotInitialized) {
 			return bootstrap.InitRequest{
-				Environment:   envName,
-				ResolveTenant: true,
+				Environment:             envName,
+				DetectEnvironmentBranch: true,
+				ResolveTenant:           true,
 			}, nil
 		}
 		return bootstrap.InitRequest{}, err
@@ -155,22 +161,24 @@ func initRequestForRootCommand(deps Dependencies, args []string) (bootstrap.Init
 
 	if envName != "" {
 		return bootstrap.InitRequest{
-			Tenant:      tenant,
-			Environment: envName,
+			Tenant:                  tenant,
+			Environment:             envName,
+			DetectEnvironmentBranch: true,
 		}, nil
 	}
 
 	defaultEnvironment, err := loadDefaultEnvironment(deps.Store, tenant)
 	if err != nil {
 		if errors.Is(err, opener.ErrDefaultEnvironmentNotConfigured) || errors.Is(err, internal.ErrNotInitialized) {
-			return bootstrap.InitRequest{Tenant: tenant}, nil
+			return bootstrap.InitRequest{Tenant: tenant, DetectEnvironmentBranch: true}, nil
 		}
 		return bootstrap.InitRequest{}, err
 	}
 
 	return bootstrap.InitRequest{
-		Tenant:      tenant,
-		Environment: defaultEnvironment,
+		Tenant:                  tenant,
+		Environment:             defaultEnvironment,
+		DetectEnvironmentBranch: true,
 	}, nil
 }
 
