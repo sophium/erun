@@ -10,6 +10,7 @@ Repository guidance for humans and coding agents working in this repo.
 - Branch from `main` using the issue-linked naming rules defined below.
 - Implement the change and run the relevant validation before publishing.
 - Push the branch and open a pull request back into `main`.
+- After a pull request is accepted, switch the local checkout back to the branch the PR targeted, usually `main`.
 - When the PR is intended to close the issue, include `Closes #<issue-number>` in the PR body.
 - A pushed branch or an open PR does not close the issue by itself. The issue closes after the PR is merged or if it is closed manually.
 - If the user asks for `push, accept`, treat that as completing the full publish flow rather than stopping after the branch push.
