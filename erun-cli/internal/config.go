@@ -5,14 +5,16 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/adrg/xdg"
 	"gopkg.in/yaml.v3"
 )
 
 const (
-	configRoot = "erun"
-	configFile = "config.yaml"
+	configRoot       = "erun"
+	configFile       = "config.yaml"
+	projectConfigDir = ".erun"
 )
 
 type ERunConfig struct {
@@ -26,8 +28,59 @@ type TenantConfig struct {
 }
 
 type EnvConfig struct {
-	Name     string
-	RepoPath string
+	Name              string
+	RepoPath          string
+	KubernetesContext string
+	ContainerRegistry string
+}
+
+type ProjectEnvironmentConfig struct {
+	ContainerRegistry string `yaml:"containerregistry,omitempty"`
+}
+
+type ProjectConfig struct {
+	ContainerRegistry string                              `yaml:"containerregistry,omitempty"`
+	Environments      map[string]ProjectEnvironmentConfig `yaml:"environments,omitempty"`
+}
+
+func (c ProjectConfig) ContainerRegistryForEnvironment(environment string) string {
+	environment = strings.TrimSpace(environment)
+	if environment != "" && c.Environments != nil {
+		if envConfig, ok := c.Environments[environment]; ok {
+			if registry := strings.TrimSpace(envConfig.ContainerRegistry); registry != "" {
+				return registry
+			}
+		}
+	}
+
+	return strings.TrimSpace(c.ContainerRegistry)
+}
+
+func (c *ProjectConfig) SetContainerRegistryForEnvironment(environment, registry string) {
+	environment = strings.TrimSpace(environment)
+	registry = strings.TrimSpace(registry)
+
+	if environment == "" {
+		c.ContainerRegistry = registry
+		return
+	}
+
+	c.ContainerRegistry = ""
+	if c.Environments == nil {
+		c.Environments = make(map[string]ProjectEnvironmentConfig)
+	}
+
+	if registry == "" {
+		delete(c.Environments, environment)
+		if len(c.Environments) == 0 {
+			c.Environments = nil
+		}
+		return
+	}
+
+	envConfig := c.Environments[environment]
+	envConfig.ContainerRegistry = registry
+	c.Environments[environment] = envConfig
 }
 
 var (
@@ -196,6 +249,54 @@ func LoadEnvConfig(tenant, envName string) (EnvConfig, string, error) {
 	}
 
 	return config, configFilePath, nil
+}
+
+func SaveProjectConfig(projectRoot string, config ProjectConfig) error {
+	configFilePath, err := projectConfigPath(projectRoot)
+	if err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(configFilePath), 0o755); err != nil {
+		return ErrFailedToSaveConfig
+	}
+
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return ErrFailedToSaveConfig
+	}
+
+	if err := os.WriteFile(configFilePath, data, 0o644); err != nil {
+		return ErrFailedToSaveConfig
+	}
+
+	return nil
+}
+
+func LoadProjectConfig(projectRoot string) (ProjectConfig, string, error) {
+	config := ProjectConfig{}
+	configFilePath, err := projectConfigPath(projectRoot)
+	if err != nil {
+		return config, "", err
+	}
+
+	data, err := os.ReadFile(configFilePath)
+	if err != nil {
+		return config, configFilePath, ErrNotInitialized
+	}
+
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return config, configFilePath, ErrConfigCorrupted
+	}
+
+	return config, configFilePath, nil
+}
+
+func projectConfigPath(projectRoot string) (string, error) {
+	if projectRoot == "" {
+		return "", ErrNotInGitRepository
+	}
+	return filepath.Join(filepath.Clean(projectRoot), projectConfigDir, configFile), nil
 }
 
 func FindProjectRoot() (string, string, error) {

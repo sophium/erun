@@ -15,7 +15,7 @@ import (
 
 const (
 	DefaultHost = "127.0.0.1"
-	DefaultPort = 9090
+	DefaultPort = eruncommon.MCPServicePort
 	DefaultPath = "/mcp"
 )
 

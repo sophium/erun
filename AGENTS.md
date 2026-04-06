@@ -30,6 +30,9 @@ Repository guidance for humans and coding agents working in this repo.
 
 ## Preferred Direction
 
+- Prioritize maintainability and clarity over performance optimizations by default.
+- Prefer established repository patterns over introducing new command, config, testing, or documentation styles. Extend the existing shape first and only add a new pattern when the current one is clearly inadequate.
+- Prefer immutable value-style inputs and resolved plans over mutating shared state in place.
 - Prefer explicit runtime structs over package globals.
 - Keep mutable state local to one CLI execution or one MCP tool invocation.
 - Default to local execution and local integrations. Any remote or hosted transport should be additive, not the baseline behavior.
@@ -50,10 +53,18 @@ Repository guidance for humans and coding agents working in this repo.
 - Treat execution state as scoped to one CLI run or one MCP request, not shared process state.
 - Avoid adding new package-level mutable variables.
 - Keep side effects at the boundaries: CLI I/O, MCP transport, filesystem, network, and process execution.
+- For high-impact operations, prefer designs that can expose an explicit resolved plan, support dry-run execution, and emit traceable command details.
+- New or materially changed action-oriented CLI commands should support `--dry-run` by default unless there is a strong reason they cannot. Dry-run should resolve the intended work and print the concrete actions that would execute, without performing side effects.
+- Do not treat summary notes as a sufficient dry-run for imperative operations when the real execution plan can be shown. Prefer the actual commands, file writes, or concrete operation steps, with secrets redacted only where necessary.
+- Action-oriented MCP endpoints should likewise provide a preview or plan path so callers can inspect the resolved work before execution. Preview behavior should avoid side effects and return the concrete actions that would run.
+- Keep external dependencies pinned and explicit. Make dependency changes easy to review and avoid hidden runtime coupling where practical.
+- When optimizing Dockerfiles, prefer simple, reviewable layer ordering and cache boundaries over clever or fragile build tricks.
 - Keep tests isolated and do not add `t.Parallel()` around code that mutates globals.
 - CLI prompts are acceptable in interactive flows, but MCP-exposed paths should receive all required input explicitly and fail clearly when input is missing.
 - Prefer deterministic command behavior so tool calls are safe to run repeatedly and concurrently.
 - Prefer safety and clarity over micro-optimizations.
+- Do not add new documentation files unless the user explicitly asks for them; add repository instructions to `AGENTS.md` instead.
+- Keep `AGENTS.md` focused on repository workflow and engineering guidance; do not document app behavior, command semantics, or end-user functionality in it.
 - Do not modify `README.md` unless the user explicitly asks for a README change.
 
 ## Refactoring Rules

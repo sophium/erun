@@ -1,0 +1,142 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Namespace }}-{{ .Release.Name }}-home
+  labels:
+    app: erun-devops
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Namespace }}-{{ .Release.Name }}-docker
+  labels:
+    app: erun-devops
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: erun-devops
+  labels:
+    app: erun-devops
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: erun-devops
+  labels:
+    app: erun-devops
+subjects:
+  - kind: ServiceAccount
+    name: erun-devops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: erun-devops
+  labels:
+    app: erun-devops
+spec:
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: erun-devops
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: erun-devops
+    spec:
+      automountServiceAccountToken: true
+      serviceAccountName: erun-devops
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - image: erunpaas/erun-devops:{{ .Chart.AppVersion }}
+          name: erun-devops
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HOME
+              value: /home/erun
+            - name: KUBECONFIG
+              value: /home/erun/.kube/config
+            - name: DOCKER_HOST
+              value: unix:///var/run/docker.sock
+            - name: DOCKER_BUILDKIT
+              value: "1"
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+          resources:
+            limits:
+              cpu: "4"
+              memory: "8916Mi"
+            requests:
+              cpu: "0.25"
+              memory: "1024Mi"
+          volumeMounts:
+            - name: erun-home
+              mountPath: /home/erun
+            - name: repo-worktree
+              mountPath: /home/erun/git/erun
+            - name: docker-socket
+              mountPath: /var/run
+        - image: erunpaas/erun-dind:28.1.1
+          name: erun-dind
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: DOCKER_TLS_CERTDIR
+              value: ""
+          securityContext:
+            privileged: true
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -lc
+                - docker info >/dev/null 2>&1
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 30
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - sh
+                  - -lc
+                  - while [ ! -S /var/run/docker.sock ]; do sleep 1; done; chmod 0666 /var/run/docker.sock
+          volumeMounts:
+            - name: docker-socket
+              mountPath: /var/run
+            - name: docker-state
+              mountPath: /var/lib/docker
+      volumes:
+        - name: erun-home
+          persistentVolumeClaim:
+            claimName: {{ .Release.Namespace }}-{{ .Release.Name }}-home
+        - name: repo-worktree
+          hostPath:
+            path: {{ required "worktreeHostPath is required" .Values.worktreeHostPath | quote }}
+            type: Directory
+        - name: docker-socket
+          emptyDir: {}
+        - name: docker-state
+          persistentVolumeClaim:
+            claimName: {{ .Release.Namespace }}-{{ .Release.Name }}-docker
+      restartPolicy: Always

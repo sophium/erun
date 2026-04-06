@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/adrg/xdg"
@@ -230,7 +231,12 @@ func TestSaveTenantConfigErrors(t *testing.T) {
 func TestEnvConfigRoundTrip(t *testing.T) {
 	setupXDGConfigHome(t)
 
-	cfg := EnvConfig{Name: "dev", RepoPath: "/tmp/project-dev"}
+	cfg := EnvConfig{
+		Name:              "dev",
+		RepoPath:          "/tmp/project-dev",
+		KubernetesContext: "cluster-dev",
+		ContainerRegistry: "erunpaas",
+	}
 	if err := SaveEnvConfig("tenant-a", cfg); err != nil {
 		t.Fatalf("SaveEnvConfig failed: %v", err)
 	}
@@ -242,6 +248,47 @@ func TestEnvConfigRoundTrip(t *testing.T) {
 
 	if loaded != cfg {
 		t.Fatalf("unexpected env config: %+v", loaded)
+	}
+}
+
+func TestProjectConfigRoundTrip(t *testing.T) {
+	projectRoot := t.TempDir()
+
+	cfg := ProjectConfig{
+		Environments: map[string]ProjectEnvironmentConfig{
+			"local": {ContainerRegistry: "erunpaas"},
+			"prod":  {ContainerRegistry: "registry.example/team"},
+		},
+	}
+	if err := SaveProjectConfig(projectRoot, cfg); err != nil {
+		t.Fatalf("SaveProjectConfig failed: %v", err)
+	}
+
+	loaded, path, err := LoadProjectConfig(projectRoot)
+	if err != nil {
+		t.Fatalf("LoadProjectConfig failed: %v", err)
+	}
+	if !reflect.DeepEqual(loaded, cfg) {
+		t.Fatalf("unexpected project config: %+v", loaded)
+	}
+	if path != filepath.Join(projectRoot, projectConfigDir, configFile) {
+		t.Fatalf("unexpected project config path: %s", path)
+	}
+}
+
+func TestProjectConfigContainerRegistryForEnvironmentFallsBackToLegacyValue(t *testing.T) {
+	cfg := ProjectConfig{ContainerRegistry: "legacy-registry"}
+
+	if got := cfg.ContainerRegistryForEnvironment("local"); got != "legacy-registry" {
+		t.Fatalf("unexpected container registry: %q", got)
+	}
+}
+
+func TestLoadProjectConfigNotInitialized(t *testing.T) {
+	projectRoot := t.TempDir()
+
+	if _, _, err := LoadProjectConfig(projectRoot); !errors.Is(err, ErrNotInitialized) {
+		t.Fatalf("expected ErrNotInitialized, got %v", err)
 	}
 }
 

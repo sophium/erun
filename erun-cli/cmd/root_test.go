@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -17,7 +18,7 @@ import (
 func TestNewRootCmdRegistersCommands(t *testing.T) {
 	cmd := NewRootCmd(Dependencies{})
 
-	for _, name := range []string{"init", "open", "mcp", "version"} {
+	for _, name := range []string{"init", "open", "devops", "mcp", "version"} {
 		found, _, err := cmd.Find([]string{name})
 		if err != nil {
 			t.Fatalf("Find(%q) failed: %v", name, err)
@@ -32,12 +33,33 @@ func TestRootCommandRunsInitWhenNoSubcommand(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
 	projectRoot := filepath.Join(t.TempDir(), "project")
+	var promptLabels []string
+	var selectLabels []string
+	ensuredContext := ""
+	ensuredNamespace := ""
 	cmd := NewRootCmd(Dependencies{
 		FindProjectRoot: func() (string, string, error) {
 			return "tenant-a", projectRoot, nil
 		},
-		PromptRunner: func(promptui.Prompt) (string, error) {
+		PromptRunner: func(prompt promptui.Prompt) (string, error) {
+			label := fmt.Sprint(prompt.Label)
+			promptLabels = append(promptLabels, label)
+			if label == bootstrap.ContainerRegistryLabel("tenant-a", bootstrap.DefaultEnvironment) {
+				return "", nil
+			}
 			return "y", nil
+		},
+		SelectRunner: func(prompt promptui.Select) (int, string, error) {
+			selectLabels = append(selectLabels, fmt.Sprint(prompt.Label))
+			return 0, "cluster-local", nil
+		},
+		ListKubernetesContexts: func() ([]string, error) {
+			return []string{"cluster-local", "cluster-prod"}, nil
+		},
+		EnsureKubernetesNamespace: func(contextName, namespace string) error {
+			ensuredContext = contextName
+			ensuredNamespace = namespace
+			return nil
 		},
 	})
 	buf := new(bytes.Buffer)
@@ -76,6 +98,37 @@ func TestRootCommandRunsInitWhenNoSubcommand(t *testing.T) {
 	if envConfig.Name != bootstrap.DefaultEnvironment || envConfig.RepoPath != projectRoot {
 		t.Fatalf("unexpected env config: %+v", envConfig)
 	}
+	if envConfig.KubernetesContext != "cluster-local" {
+		t.Fatalf("unexpected kubernetes context: %+v", envConfig)
+	}
+
+	projectConfig, _, err := internal.LoadProjectConfig(projectRoot)
+	if err != nil {
+		t.Fatalf("LoadProjectConfig failed: %v", err)
+	}
+	if got := projectConfig.ContainerRegistryForEnvironment(bootstrap.DefaultEnvironment); got != bootstrap.DefaultContainerRegistry {
+		t.Fatalf("unexpected project config: %+v", projectConfig)
+	}
+
+	wantPromptLabels := []string{
+		bootstrap.TenantConfirmationLabel("tenant-a", projectRoot),
+		bootstrap.EnvironmentConfirmationLabel("tenant-a", bootstrap.DefaultEnvironment),
+		bootstrap.ContainerRegistryLabel("tenant-a", bootstrap.DefaultEnvironment),
+	}
+	if len(promptLabels) != len(wantPromptLabels) {
+		t.Fatalf("unexpected prompts: %+v", promptLabels)
+	}
+	for i := range wantPromptLabels {
+		if promptLabels[i] != wantPromptLabels[i] {
+			t.Fatalf("unexpected prompt %d: got %q want %q", i, promptLabels[i], wantPromptLabels[i])
+		}
+	}
+	if len(selectLabels) != 1 || selectLabels[0] != bootstrap.KubernetesContextLabel("tenant-a", bootstrap.DefaultEnvironment) {
+		t.Fatalf("unexpected select prompts: %+v", selectLabels)
+	}
+	if ensuredContext != "cluster-local" || ensuredNamespace != "tenant-a-local" {
+		t.Fatalf("unexpected namespace ensure request: context=%q namespace=%q", ensuredContext, ensuredNamespace)
+	}
 }
 
 func TestRootCommandRunsOpenWithDefaults(t *testing.T) {
@@ -95,7 +148,7 @@ func TestRootCommandRunsOpenWithDefaults(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: "dev", RepoPath: projectRoot}); err != nil {
+	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: "dev", RepoPath: projectRoot, KubernetesContext: "cluster-dev"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -126,6 +179,9 @@ func TestRootCommandRunsOpenWithDefaults(t *testing.T) {
 	if launched.Dir != projectRoot || launched.Title != "tenant-a-dev" {
 		t.Fatalf("unexpected shell launch: %+v", launched)
 	}
+	if launched.Namespace != "tenant-a-dev" || launched.KubernetesContext != "cluster-dev" {
+		t.Fatalf("unexpected remote shell target: %+v", launched)
+	}
 }
 
 func TestRootCommandRunsOpenWithDefaultTenantAndRequestedEnvironment(t *testing.T) {
@@ -145,7 +201,7 @@ func TestRootCommandRunsOpenWithDefaultTenantAndRequestedEnvironment(t *testing.
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: "dev", RepoPath: projectRoot}); err != nil {
+	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: "dev", RepoPath: projectRoot, KubernetesContext: "cluster-dev"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -176,6 +232,9 @@ func TestRootCommandRunsOpenWithDefaultTenantAndRequestedEnvironment(t *testing.
 	if launched.Dir != projectRoot || launched.Title != "tenant-a-dev" {
 		t.Fatalf("unexpected shell launch: %+v", launched)
 	}
+	if launched.Namespace != "tenant-a-dev" || launched.KubernetesContext != "cluster-dev" {
+		t.Fatalf("unexpected remote shell target: %+v", launched)
+	}
 }
 
 func TestRootCommandRunsOpenWithExplicitTenantAndEnvironment(t *testing.T) {
@@ -192,7 +251,7 @@ func TestRootCommandRunsOpenWithExplicitTenantAndEnvironment(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveEnvConfig("dog", internal.EnvConfig{Name: "me", RepoPath: projectRoot}); err != nil {
+	if err := internal.SaveEnvConfig("dog", internal.EnvConfig{Name: "me", RepoPath: projectRoot, KubernetesContext: "cluster-me"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -214,6 +273,77 @@ func TestRootCommandRunsOpenWithExplicitTenantAndEnvironment(t *testing.T) {
 
 	if launched.Dir != projectRoot || launched.Title != "dog-me" {
 		t.Fatalf("unexpected shell launch: %+v", launched)
+	}
+	if launched.Namespace != "dog-me" || launched.KubernetesContext != "cluster-me" {
+		t.Fatalf("unexpected remote shell target: %+v", launched)
+	}
+}
+
+func TestRootCommandRunsInitWhenOpenEnvironmentLacksKubernetesContext(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	projectRoot := filepath.Join(t.TempDir(), "tenant-a-dev")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("mkdir project root: %v", err)
+	}
+	if err := internal.SaveERunConfig(internal.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
+		t.Fatalf("save erun config: %v", err)
+	}
+	if err := internal.SaveTenantConfig(internal.TenantConfig{
+		Name:               "tenant-a",
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: "dev",
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{
+		Name:     "dev",
+		RepoPath: projectRoot,
+	}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	cmd := NewRootCmd(Dependencies{
+		FindProjectRoot: func() (string, string, error) {
+			t.Fatal("unexpected project detection")
+			return "", "", nil
+		},
+		PromptRunner: func(prompt promptui.Prompt) (string, error) {
+			t.Fatalf("unexpected prompt: %+v", prompt)
+			return "", nil
+		},
+		SelectRunner: func(prompt promptui.Select) (int, string, error) {
+			if fmt.Sprint(prompt.Label) != bootstrap.KubernetesContextLabel("tenant-a", "dev") {
+				t.Fatalf("unexpected select prompt: %+v", prompt)
+			}
+			return 0, "cluster-dev", nil
+		},
+		ListKubernetesContexts: func() ([]string, error) {
+			return []string{"cluster-dev", "cluster-prod"}, nil
+		},
+		EnsureKubernetesNamespace: func(contextName, namespace string) error {
+			if contextName != "cluster-dev" || namespace != "tenant-a-dev" {
+				t.Fatalf("unexpected namespace ensure request: context=%q namespace=%q", contextName, namespace)
+			}
+			return nil
+		},
+		LaunchShell: func(req opener.ShellLaunchRequest) error {
+			t.Fatalf("unexpected shell launch: %+v", req)
+			return nil
+		},
+	})
+	cmd.SetArgs([]string{})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	envConfig, _, err := internal.LoadEnvConfig("tenant-a", "dev")
+	if err != nil {
+		t.Fatalf("LoadEnvConfig failed: %v", err)
+	}
+	if envConfig.KubernetesContext != "cluster-dev" {
+		t.Fatalf("expected kubernetes context to be stored, got %+v", envConfig)
 	}
 }
 
@@ -252,7 +382,7 @@ func TestInitCommandPreservesExistingTenantDefaultEnvironmentWhenFlagOmitted(t *
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: "prod", RepoPath: projectRoot}); err != nil {
+	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: "prod", RepoPath: projectRoot, KubernetesContext: "cluster-prod"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -311,10 +441,71 @@ func TestRootCommandHelpFlagPrintsHelp(t *testing.T) {
 	}
 
 	output := buf.String()
-	for _, want := range []string{"init", "open", "mcp", "version"} {
+	for _, want := range []string{"init", "open", "devops", "mcp", "version"} {
 		if !bytes.Contains([]byte(output), []byte(want)) {
 			t.Fatalf("expected help output to mention %q, got %q", want, output)
 		}
+	}
+	for _, want := range []string{
+		"-v",
+		"-vv",
+		"-vvv",
+		"--dry-run",
+		"print resolved command plans before execution",
+		"add decision notes",
+		"include internal trace logs when available",
+	} {
+		if !bytes.Contains([]byte(output), []byte(want)) {
+			t.Fatalf("expected help output to mention %q, got %q", want, output)
+		}
+	}
+}
+
+func TestRootCommandDryRunOpensByPlanningWithoutLaunchingShell(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("mkdir project root: %v", err)
+	}
+	if err := internal.SaveERunConfig(internal.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
+		t.Fatalf("save erun config: %v", err)
+	}
+	if err := internal.SaveTenantConfig(internal.TenantConfig{
+		Name:               "tenant-a",
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: "dev",
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: "dev", RepoPath: projectRoot, KubernetesContext: "cluster-dev"}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	cmd := NewRootCmd(Dependencies{
+		CheckKubernetesDeployment: func(req KubernetesDeploymentCheckRequest) (bool, error) {
+			return true, nil
+		},
+		LaunchShell: func(req opener.ShellLaunchRequest) error {
+			t.Fatalf("unexpected shell launch during dry-run: %+v", req)
+			return nil
+		},
+	})
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"--dry-run"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if got := stdout.String(); got != "" {
+		t.Fatalf("expected no stdout output during dry-run, got %q", got)
+	}
+	if got := stderr.String(); !bytes.Contains([]byte(got), []byte("[dry-run] kubectl --context cluster-dev --namespace tenant-a-dev wait --for=condition=Available --timeout 2m0s deployment/erun-devops")) {
+		t.Fatalf("expected dry-run open trace, got %q", got)
 	}
 }
 
