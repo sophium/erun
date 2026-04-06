@@ -37,7 +37,7 @@ func TestRunLoadsExistingConfiguration(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveEnvConfig(tenant, internal.EnvConfig{Name: DefaultEnvironment, RepoPath: projectRoot}); err != nil {
+	if err := internal.SaveEnvConfig(tenant, internal.EnvConfig{Name: DefaultEnvironment, RepoPath: projectRoot, KubernetesContext: "cluster-local"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -80,7 +80,7 @@ func TestRunRespectsExistingTenantDefaultEnvironment(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveEnvConfig(tenant, internal.EnvConfig{Name: "prod", RepoPath: projectRoot}); err != nil {
+	if err := internal.SaveEnvConfig(tenant, internal.EnvConfig{Name: "prod", RepoPath: projectRoot, KubernetesContext: "cluster-prod"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -123,7 +123,7 @@ func TestRunResolveTenantUsesCurrentDirectoryTenantBeforeDefault(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("save tenant config: %v", err)
 		}
-		if err := internal.SaveEnvConfig(tenant.name, internal.EnvConfig{Name: DefaultEnvironment, RepoPath: tenant.projectRoot}); err != nil {
+		if err := internal.SaveEnvConfig(tenant.name, internal.EnvConfig{Name: DefaultEnvironment, RepoPath: tenant.projectRoot, KubernetesContext: "cluster-" + tenant.name}); err != nil {
 			t.Fatalf("save env config: %v", err)
 		}
 	}
@@ -170,7 +170,7 @@ func TestRunResolveTenantSelectsConfiguredTenantWhenOutsideTenantDirectory(t *te
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: DefaultEnvironment, RepoPath: projectRoot}); err != nil {
+	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: DefaultEnvironment, RepoPath: projectRoot, KubernetesContext: "cluster-local"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -218,7 +218,7 @@ func TestRunResolveTenantCanInitializeCurrentProjectFromSelection(t *testing.T) 
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveEnvConfig("tenant-b", internal.EnvConfig{Name: DefaultEnvironment, RepoPath: existingProjectRoot}); err != nil {
+	if err := internal.SaveEnvConfig("tenant-b", internal.EnvConfig{Name: DefaultEnvironment, RepoPath: existingProjectRoot, KubernetesContext: "cluster-tenant-b"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -251,6 +251,224 @@ func TestRunResolveTenantCanInitializeCurrentProjectFromSelection(t *testing.T) 
 	}
 }
 
+func TestRunPromptsForKubernetesContextAndContainerRegistryWhenCreatingEnvironment(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	ensuredContext := ""
+	ensuredNamespace := ""
+	promptedRegistryLabel := ""
+	service := Service{
+		Store: ConfigStore{},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", "/tmp/project", nil
+		},
+		Confirm: func(string) (bool, error) {
+			return true, nil
+		},
+		PromptKubernetesContext: func(label string) (string, error) {
+			want := KubernetesContextLabel("tenant-a", DefaultEnvironment)
+			if label != want {
+				t.Fatalf("unexpected kubernetes context label: %q", label)
+			}
+			return "cluster-local", nil
+		},
+		PromptContainerRegistry: func(label string) (string, error) {
+			promptedRegistryLabel = label
+			return "", nil
+		},
+		EnsureKubernetesNamespace: func(contextName, namespace string) error {
+			ensuredContext = contextName
+			ensuredNamespace = namespace
+			return nil
+		},
+	}
+
+	result, err := service.Run(InitRequest{})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.EnvConfig.KubernetesContext != "cluster-local" {
+		t.Fatalf("expected kubernetes context to be saved, got %+v", result.EnvConfig)
+	}
+	if result.EnvConfig.ContainerRegistry != DefaultContainerRegistry {
+		t.Fatalf("expected default container registry to be saved, got %+v", result.EnvConfig)
+	}
+	if ensuredContext != "cluster-local" || ensuredNamespace != "tenant-a-local" {
+		t.Fatalf("unexpected namespace ensure request: context=%q namespace=%q", ensuredContext, ensuredNamespace)
+	}
+	if promptedRegistryLabel != ContainerRegistryLabel("tenant-a", DefaultEnvironment) {
+		t.Fatalf("unexpected container registry label: %q", promptedRegistryLabel)
+	}
+}
+
+func TestRunPromptsForMissingExistingKubernetesContext(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	tenant := "tenant-a"
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	if err := internal.SaveERunConfig(internal.ERunConfig{DefaultTenant: tenant}); err != nil {
+		t.Fatalf("save erun config: %v", err)
+	}
+	if err := internal.SaveTenantConfig(internal.TenantConfig{
+		Name:               tenant,
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: DefaultEnvironment,
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := internal.SaveEnvConfig(tenant, internal.EnvConfig{Name: DefaultEnvironment, RepoPath: projectRoot}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	ensuredContext := ""
+	ensuredNamespace := ""
+	service := Service{
+		Store: ConfigStore{},
+		FindProjectRoot: func() (string, string, error) {
+			t.Fatal("unexpected project detection")
+			return "", "", nil
+		},
+		Confirm: func(string) (bool, error) {
+			t.Fatal("unexpected confirmation")
+			return false, nil
+		},
+		PromptKubernetesContext: func(label string) (string, error) {
+			want := KubernetesContextLabel(tenant, DefaultEnvironment)
+			if label != want {
+				t.Fatalf("unexpected kubernetes context label: %q", label)
+			}
+			return "cluster-local", nil
+		},
+		PromptContainerRegistry: func(string) (string, error) {
+			t.Fatal("unexpected container registry prompt")
+			return "", nil
+		},
+		EnsureKubernetesNamespace: func(contextName, namespace string) error {
+			ensuredContext = contextName
+			ensuredNamespace = namespace
+			return nil
+		},
+	}
+
+	result, err := service.Run(InitRequest{})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.CreatedEnvConfig {
+		t.Fatalf("expected existing environment to be updated, got %+v", result)
+	}
+	if result.EnvConfig.KubernetesContext != "cluster-local" {
+		t.Fatalf("expected kubernetes context to be stored, got %+v", result.EnvConfig)
+	}
+	if ensuredContext != "cluster-local" || ensuredNamespace != "tenant-a-local" {
+		t.Fatalf("unexpected namespace ensure request: context=%q namespace=%q", ensuredContext, ensuredNamespace)
+	}
+}
+
+func TestRunUsesProjectContainerRegistryWhenCreatingEnvironment(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	projectRoot := t.TempDir()
+	service := Service{
+		Store: ConfigStore{},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		Confirm: func(string) (bool, error) {
+			return true, nil
+		},
+		PromptKubernetesContext: func(string) (string, error) {
+			return "cluster-local", nil
+		},
+		PromptContainerRegistry: func(string) (string, error) {
+			t.Fatal("unexpected container registry prompt")
+			return "", nil
+		},
+		EnsureKubernetesNamespace: func(string, string) error {
+			return nil
+		},
+		LoadProjectConfig: func(root string) (internal.ProjectConfig, string, error) {
+			if root != projectRoot {
+				t.Fatalf("unexpected project root: %s", root)
+			}
+			return internal.ProjectConfig{
+				Environments: map[string]internal.ProjectEnvironmentConfig{
+					DefaultEnvironment: {ContainerRegistry: "project-registry"},
+				},
+			}, "", nil
+		},
+		SaveProjectConfig: func(string, internal.ProjectConfig) error {
+			t.Fatal("unexpected project config save")
+			return nil
+		},
+	}
+
+	result, err := service.Run(InitRequest{})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.EnvConfig.ContainerRegistry != "project-registry" {
+		t.Fatalf("expected project container registry, got %+v", result.EnvConfig)
+	}
+}
+
+func TestRunMigratesExistingEnvironmentContainerRegistryToProjectConfig(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	tenant := "tenant-a"
+	projectRoot := t.TempDir()
+	if err := internal.SaveERunConfig(internal.ERunConfig{DefaultTenant: tenant}); err != nil {
+		t.Fatalf("save erun config: %v", err)
+	}
+	if err := internal.SaveTenantConfig(internal.TenantConfig{
+		Name:               tenant,
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: DefaultEnvironment,
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := internal.SaveEnvConfig(tenant, internal.EnvConfig{
+		Name:              DefaultEnvironment,
+		RepoPath:          projectRoot,
+		KubernetesContext: "cluster-local",
+		ContainerRegistry: "legacy-registry",
+	}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	savedRoot := ""
+	savedConfig := internal.ProjectConfig{}
+	service := Service{
+		Store: ConfigStore{},
+		SaveProjectConfig: func(root string, config internal.ProjectConfig) error {
+			savedRoot = root
+			savedConfig = config
+			return nil
+		},
+	}
+
+	result, err := service.Run(InitRequest{})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.EnvConfig.ContainerRegistry != "legacy-registry" {
+		t.Fatalf("expected legacy registry to remain effective, got %+v", result.EnvConfig)
+	}
+	if savedRoot != projectRoot || savedConfig.ContainerRegistryForEnvironment(DefaultEnvironment) != "legacy-registry" {
+		t.Fatalf("unexpected project config save: root=%q config=%+v", savedRoot, savedConfig)
+	}
+	if savedConfig.ContainerRegistry != "" {
+		t.Fatalf("expected legacy project registry to be migrated, got %+v", savedConfig)
+	}
+}
+
+func TestKubernetesNamespaceNameNormalizesTenantAndEnvironment(t *testing.T) {
+	got := KubernetesNamespaceName("Tenant_A", "Dev.Env")
+	if got != "tenant-a-dev-env" {
+		t.Fatalf("unexpected namespace name: %q", got)
+	}
+}
+
 func TestRunResolveTenantSelectionCancelled(t *testing.T) {
 	setupXDGConfigHome(t)
 
@@ -262,7 +480,7 @@ func TestRunResolveTenantSelectionCancelled(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: DefaultEnvironment, RepoPath: projectRoot}); err != nil {
+	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: DefaultEnvironment, RepoPath: projectRoot, KubernetesContext: "cluster-local"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -301,6 +519,9 @@ func TestRunBootstrapsNewProjectWithAutoApprove(t *testing.T) {
 	}
 	if result.TenantConfig.Name != "tenant-a" || result.EnvConfig.Name != DefaultEnvironment || result.EnvConfig.RepoPath != "/tmp/project" {
 		t.Fatalf("unexpected init result: %+v", result)
+	}
+	if result.EnvConfig.ContainerRegistry != DefaultContainerRegistry {
+		t.Fatalf("expected default container registry, got %+v", result.EnvConfig)
 	}
 }
 

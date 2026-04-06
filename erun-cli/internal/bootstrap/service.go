@@ -10,11 +10,16 @@ import (
 	"github.com/sophium/erun/internal"
 )
 
-const DefaultEnvironment = "local"
+const (
+	DefaultEnvironment       = "local"
+	DefaultContainerRegistry = "erunpaas"
+)
 
 var (
 	ErrTenantInitializationCancelled      = errors.New("tenant initialization cancelled by user")
 	ErrEnvironmentInitializationCancelled = errors.New("environment initialization cancelled by user")
+	ErrKubernetesContextCancelled         = errors.New("kubernetes context association cancelled by user")
+	ErrContainerRegistryCancelled         = errors.New("container registry configuration cancelled by user")
 	ErrTenantSelectionCancelled           = errors.New("tenant selection cancelled by user")
 )
 
@@ -29,9 +34,13 @@ type Store interface {
 }
 
 type (
-	ProjectFinder    func() (string, string, error)
-	WorkDirFunc      func() (string, error)
-	SelectTenantFunc func([]internal.TenantConfig) (TenantSelectionResult, error)
+	ProjectFinder       func() (string, string, error)
+	WorkDirFunc         func() (string, error)
+	SelectTenantFunc    func([]internal.TenantConfig) (TenantSelectionResult, error)
+	PromptValueFunc     func(string) (string, error)
+	NamespaceEnsurer    func(string, string) error
+	ProjectConfigLoader func(string) (internal.ProjectConfig, string, error)
+	ProjectConfigSaver  func(string, internal.ProjectConfig) error
 )
 
 type (
@@ -77,11 +86,13 @@ func (ConfigStore) SaveEnvConfig(tenant string, config internal.EnvConfig) error
 }
 
 type InitRequest struct {
-	Tenant        string
-	ProjectRoot   string
-	Environment   string
-	AutoApprove   bool
-	ResolveTenant bool
+	Tenant            string
+	ProjectRoot       string
+	Environment       string
+	KubernetesContext string
+	ContainerRegistry string
+	AutoApprove       bool
+	ResolveTenant     bool
 }
 
 type InitResult struct {
@@ -94,12 +105,17 @@ type InitResult struct {
 }
 
 type Service struct {
-	Store           Store
-	FindProjectRoot ProjectFinder
-	GetWorkingDir   WorkDirFunc
-	SelectTenant    SelectTenantFunc
-	Confirm         ConfirmFunc
-	Logger          Logger
+	Store                     Store
+	FindProjectRoot           ProjectFinder
+	GetWorkingDir             WorkDirFunc
+	SelectTenant              SelectTenantFunc
+	Confirm                   ConfirmFunc
+	PromptKubernetesContext   PromptValueFunc
+	PromptContainerRegistry   PromptValueFunc
+	EnsureKubernetesNamespace NamespaceEnsurer
+	LoadProjectConfig         ProjectConfigLoader
+	SaveProjectConfig         ProjectConfigSaver
+	Logger                    Logger
 }
 
 func (s Service) Run(req InitRequest) (InitResult, error) {
@@ -318,17 +334,67 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 			return result, err
 		}
 
-		s.Logger.Trace("Adding new environment")
-		envConfig = internal.EnvConfig{
-			Name:     envName,
-			RepoPath: envProjectRoot,
-		}
-		if err := s.Store.SaveEnvConfig(tenant, envConfig); err != nil {
+		kubernetesContext, err := s.resolveKubernetesContext(req, tenant, envName, "")
+		if err != nil {
 			return result, err
 		}
+		if err := s.ensureKubernetesNamespace(tenant, envName, "", kubernetesContext); err != nil {
+			return result, err
+		}
+		containerRegistry, err := s.resolveContainerRegistry(req, tenant, envName, envProjectRoot, "", true)
+		if err != nil {
+			return result, err
+		}
+		if err := s.saveProjectContainerRegistry(envProjectRoot, envName, containerRegistry); err != nil {
+			return result, err
+		}
+
+		s.Logger.Trace("Adding new environment")
+		envConfig = internal.EnvConfig{
+			Name:              envName,
+			RepoPath:          envProjectRoot,
+			KubernetesContext: kubernetesContext,
+		}
+		if err := saveEnvConfig(s.Store, tenant, envConfig); err != nil {
+			return result, err
+		}
+		envConfig.ContainerRegistry = containerRegistry
 		result.CreatedEnvConfig = true
 	case err != nil:
 		return result, err
+	}
+
+	kubernetesContext, err := s.resolveKubernetesContext(req, tenant, envName, envConfig.KubernetesContext)
+	if err != nil {
+		return result, err
+	}
+	if kubernetesContext != envConfig.KubernetesContext {
+		if err := s.ensureKubernetesNamespace(tenant, envName, envConfig.KubernetesContext, kubernetesContext); err != nil {
+			return result, err
+		}
+		envConfig.KubernetesContext = kubernetesContext
+		if err := saveEnvConfig(s.Store, tenant, envConfig); err != nil {
+			return result, err
+		}
+	}
+	projectRoot := envConfig.RepoPath
+	if projectRoot == "" {
+		projectRoot = tenantConfig.ProjectRoot
+	}
+	containerRegistry, err := s.resolveContainerRegistry(req, tenant, envName, projectRoot, envConfig.ContainerRegistry, false)
+	if err != nil {
+		return result, err
+	}
+	if containerRegistry != "" {
+		if err := s.saveProjectContainerRegistry(projectRoot, envName, containerRegistry); err != nil {
+			return result, err
+		}
+	}
+	if containerRegistry != "" && containerRegistry != envConfig.ContainerRegistry {
+		envConfig.ContainerRegistry = containerRegistry
+		if err := saveEnvConfig(s.Store, tenant, envConfig); err != nil {
+			return result, err
+		}
 	}
 
 	if toolConfig.DefaultTenant == "" {
@@ -350,6 +416,8 @@ func (s Service) Run(req InitRequest) (InitResult, error) {
 }
 
 func normalizeRequest(req InitRequest) InitRequest {
+	req.KubernetesContext = strings.TrimSpace(req.KubernetesContext)
+	req.ContainerRegistry = strings.TrimSpace(req.ContainerRegistry)
 	return req
 }
 
@@ -367,6 +435,26 @@ func EnvironmentConfirmationLabel(tenant, envName string) string {
 		envName,
 		tenant,
 	)
+}
+
+func KubernetesContextLabel(tenant, envName string) string {
+	return fmt.Sprintf(
+		"Kubernetes context for environment %q in tenant %q",
+		envName,
+		tenant,
+	)
+}
+
+func ContainerRegistryLabel(tenant, envName string) string {
+	return fmt.Sprintf(
+		"Container registry for environment %q in tenant %q",
+		envName,
+		tenant,
+	)
+}
+
+func KubernetesNamespaceName(tenant, envName string) string {
+	return normalizeNamespaceName(tenant + "-" + envName)
 }
 
 func (s Service) withDefaults() Service {
@@ -411,6 +499,120 @@ func (s Service) confirm(label string, cancelled error) error {
 		return cancelled
 	}
 	return nil
+}
+
+func (s Service) resolveKubernetesContext(req InitRequest, tenant, envName, current string) (string, error) {
+	if req.KubernetesContext != "" {
+		return req.KubernetesContext, nil
+	}
+
+	current = strings.TrimSpace(current)
+	if current != "" || req.AutoApprove {
+		return current, nil
+	}
+
+	if s.PromptKubernetesContext == nil {
+		return "", fmt.Errorf("kubernetes context prompt required")
+	}
+
+	context, err := s.PromptKubernetesContext(KubernetesContextLabel(tenant, envName))
+	if err != nil {
+		return "", err
+	}
+	context = strings.TrimSpace(context)
+	if context == "" {
+		return "", ErrKubernetesContextCancelled
+	}
+	return context, nil
+}
+
+func (s Service) resolveContainerRegistry(req InitRequest, tenant, envName, projectRoot, current string, creating bool) (string, error) {
+	if req.ContainerRegistry != "" {
+		return req.ContainerRegistry, nil
+	}
+
+	if projectRoot != "" && s.LoadProjectConfig != nil {
+		projectConfig, _, err := s.LoadProjectConfig(projectRoot)
+		if err != nil && !errors.Is(err, internal.ErrNotInitialized) {
+			return "", err
+		}
+		if err == nil {
+			projectRegistry := projectConfig.ContainerRegistryForEnvironment(envName)
+			if projectRegistry != "" {
+				return projectRegistry, nil
+			}
+		}
+	}
+
+	current = strings.TrimSpace(current)
+	if current != "" {
+		return current, nil
+	}
+	if !creating {
+		return "", nil
+	}
+	if req.AutoApprove {
+		return DefaultContainerRegistry, nil
+	}
+	if s.PromptContainerRegistry == nil {
+		return "", fmt.Errorf("container registry prompt required")
+	}
+
+	registry, err := s.PromptContainerRegistry(ContainerRegistryLabel(tenant, envName))
+	if err != nil {
+		return "", err
+	}
+	registry = strings.TrimSpace(registry)
+	if registry == "" {
+		return DefaultContainerRegistry, nil
+	}
+	return registry, nil
+}
+
+func (s Service) saveProjectContainerRegistry(projectRoot, envName, registry string) error {
+	if projectRoot == "" || envName == "" || registry == "" || s.SaveProjectConfig == nil {
+		return nil
+	}
+
+	projectConfig := internal.ProjectConfig{}
+	if s.LoadProjectConfig != nil {
+		loadedConfig, _, err := s.LoadProjectConfig(projectRoot)
+		if err != nil && !errors.Is(err, internal.ErrNotInitialized) {
+			return err
+		}
+		if err == nil {
+			projectConfig = loadedConfig
+		}
+	}
+
+	if strings.TrimSpace(projectConfig.ContainerRegistry) == "" {
+		if projectConfig.Environments != nil {
+			if envConfig, ok := projectConfig.Environments[envName]; ok && strings.TrimSpace(envConfig.ContainerRegistry) == registry {
+				return nil
+			}
+		}
+	}
+
+	projectConfig.SetContainerRegistryForEnvironment(envName, registry)
+	return s.SaveProjectConfig(projectRoot, projectConfig)
+}
+
+func (s Service) ensureKubernetesNamespace(tenant, envName, currentContext, nextContext string) error {
+	if s.EnsureKubernetesNamespace == nil {
+		return nil
+	}
+
+	nextContext = strings.TrimSpace(nextContext)
+	if nextContext == "" || nextContext == strings.TrimSpace(currentContext) {
+		return nil
+	}
+
+	namespace := KubernetesNamespaceName(tenant, envName)
+	if namespace == "" {
+		return fmt.Errorf("kubernetes namespace name is empty for tenant %q and environment %q", tenant, envName)
+	}
+
+	return s.EnsureKubernetesNamespace(nextContext, namespace)
 }
 
 func (s Service) selectTenant(tenants []internal.TenantConfig) (TenantSelectionResult, error) {
@@ -461,6 +663,34 @@ func isWithinDirectory(path, root string) bool {
 		return true
 	}
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
+}
+
+func normalizeNamespaceName(value string) string {
+	var builder strings.Builder
+	lastHyphen := false
+
+	for _, r := range strings.ToLower(value) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			builder.WriteRune(r)
+			lastHyphen = false
+		case !lastHyphen && builder.Len() > 0:
+			builder.WriteByte('-')
+			lastHyphen = true
+		}
+	}
+
+	result := strings.Trim(builder.String(), "-")
+	if len(result) > 63 {
+		result = strings.Trim(result[:63], "-")
+	}
+	return result
+}
+
+func saveEnvConfig(store Store, tenant string, config internal.EnvConfig) error {
+	stored := config
+	stored.ContainerRegistry = ""
+	return store.SaveEnvConfig(tenant, stored)
 }
 
 type projectContext struct {

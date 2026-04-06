@@ -46,7 +46,7 @@ func TestNormalizeHTTPConfigRejectsInvalidPort(t *testing.T) {
 
 func TestEndpointURL(t *testing.T) {
 	got := EndpointURL(HTTPConfig{})
-	if got != "http://127.0.0.1:9090/mcp" {
+	if got != "http://127.0.0.1:17000/mcp" {
 		t.Fatalf("unexpected endpoint URL: %q", got)
 	}
 }
