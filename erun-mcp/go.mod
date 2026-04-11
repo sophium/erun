@@ -3,8 +3,10 @@ module github.com/sophium/erun/erun-mcp
 go 1.25.5
 
 require (
+	github.com/adrg/xdg v0.5.3
 	github.com/modelcontextprotocol/go-sdk v1.4.1
 	github.com/sophium/erun/erun-common v0.0.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

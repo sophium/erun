@@ -3,13 +3,13 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/adrg/xdg"
 	"github.com/manifoldco/promptui"
-	"github.com/sophium/erun/internal"
-	"github.com/sophium/erun/internal/bootstrap"
+	common "github.com/sophium/erun/erun-common"
 )
 
 func TestKubernetesContextPromptSelectsExistingContext(t *testing.T) {
@@ -100,8 +100,21 @@ func TestKubernetesContextPromptReturnsCancellationOnSelectAbort(t *testing.T) {
 		},
 		"Choose context",
 	)
-	if !errors.Is(err, bootstrap.ErrKubernetesContextCancelled) {
+	if !errors.Is(err, common.ErrKubernetesContextCancelled) {
 		t.Fatalf("expected ErrKubernetesContextCancelled, got %v", err)
+	}
+}
+
+func TestPreferCurrentKubernetesContextMovesCurrentToFront(t *testing.T) {
+	got := preferCurrentKubernetesContext([]string{"cluster-a", "cluster-b", "cluster-c"}, "cluster-b\n")
+	want := []string{"cluster-b", "cluster-a", "cluster-c"}
+	if len(got) != len(want) {
+		t.Fatalf("unexpected contexts length: got %d want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected context at %d: got %q want %q", i, got[i], want[i])
+		}
 	}
 }
 
@@ -110,7 +123,7 @@ func TestContainerRegistryPromptUsesDefaultOnEmptyInput(t *testing.T) {
 		if prompt.Label != "Choose registry" {
 			t.Fatalf("unexpected prompt label: %v", prompt.Label)
 		}
-		if prompt.Default != bootstrap.DefaultContainerRegistry {
+		if prompt.Default != common.DefaultContainerRegistry {
 			t.Fatalf("unexpected prompt default: %q", prompt.Default)
 		}
 		return "", nil
@@ -118,7 +131,7 @@ func TestContainerRegistryPromptUsesDefaultOnEmptyInput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("containerRegistryPrompt failed: %v", err)
 	}
-	if got != bootstrap.DefaultContainerRegistry {
+	if got != common.DefaultContainerRegistry {
 		t.Fatalf("unexpected registry: %q", got)
 	}
 }
@@ -127,7 +140,7 @@ func TestContainerRegistryPromptReturnsCancellationOnAbort(t *testing.T) {
 	_, err := containerRegistryPrompt(func(promptui.Prompt) (string, error) {
 		return "", promptui.ErrAbort
 	}, "Choose registry")
-	if !errors.Is(err, bootstrap.ErrContainerRegistryCancelled) {
+	if !errors.Is(err, common.ErrContainerRegistryCancelled) {
 		t.Fatalf("expected ErrContainerRegistryCancelled, got %v", err)
 	}
 }
@@ -137,7 +150,7 @@ func TestInitCommandDryRunDoesNotPersistConfiguration(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	namespaceEnsured := false
-	cmd := NewRootCmd(Dependencies{
+	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
 			return "tenant-a", projectRoot, nil
 		},
@@ -171,16 +184,16 @@ func TestInitCommandDryRunDoesNotPersistConfiguration(t *testing.T) {
 	if namespaceEnsured {
 		t.Fatal("did not expect namespace creation during dry-run")
 	}
-	if _, _, err := internal.LoadERunConfig(); !errors.Is(err, internal.ErrNotInitialized) {
+	if _, _, err := common.LoadERunConfig(); !errors.Is(err, common.ErrNotInitialized) {
 		t.Fatalf("expected erun config to remain absent, got %v", err)
 	}
-	if _, _, err := internal.LoadTenantConfig("tenant-a"); !errors.Is(err, internal.ErrNotInitialized) {
+	if _, _, err := common.LoadTenantConfig("tenant-a"); !errors.Is(err, common.ErrNotInitialized) {
 		t.Fatalf("expected tenant config to remain absent, got %v", err)
 	}
-	if _, _, err := internal.LoadEnvConfig("tenant-a", bootstrap.DefaultEnvironment); !errors.Is(err, internal.ErrNotInitialized) {
+	if _, _, err := common.LoadEnvConfig("tenant-a", common.DefaultEnvironment); !errors.Is(err, common.ErrNotInitialized) {
 		t.Fatalf("expected env config to remain absent, got %v", err)
 	}
-	if got := stderr.String(); !bytes.Contains([]byte(got), []byte("[dry-run] decision: dry-run suppresses configuration writes and namespace creation")) {
+	if got := stderr.String(); !bytes.Contains([]byte(got), []byte("write-yaml")) {
 		t.Fatalf("expected dry-run trace output, got %q", got)
 	}
 }
@@ -189,7 +202,7 @@ func TestInitCommandDryRunPrintsConcretePlannedActions(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
 	projectRoot := t.TempDir()
-	cmd := NewRootCmd(Dependencies{
+	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
 			return "tenant-a", projectRoot, nil
 		},
@@ -208,7 +221,7 @@ func TestInitCommandDryRunPrintsConcretePlannedActions(t *testing.T) {
 	})
 	stderr := new(bytes.Buffer)
 	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"init", "--dry-run"})
+	cmd.SetArgs([]string{"init", "--dry-run", "-v"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute failed: %v", err)
@@ -222,7 +235,7 @@ func TestInitCommandDryRunPrintsConcretePlannedActions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("xdg tenant path: %v", err)
 	}
-	envConfigPath, err := xdg.ConfigFile(filepath.Join("erun", "tenant-a", bootstrap.DefaultEnvironment, "config.yaml"))
+	envConfigPath, err := xdg.ConfigFile(filepath.Join("erun", "tenant-a", common.DefaultEnvironment, "config.yaml"))
 	if err != nil {
 		t.Fatalf("xdg env path: %v", err)
 	}
@@ -230,15 +243,59 @@ func TestInitCommandDryRunPrintsConcretePlannedActions(t *testing.T) {
 
 	output := stderr.String()
 	for _, want := range []string{
-		"[dry-run] kubectl create namespace tenant-a-local --dry-run=client -o yaml",
-		"[dry-run] kubectl --context cluster-local apply -f -",
-		"[dry-run] write-yaml " + rootConfigPath,
-		"[dry-run] write-yaml " + tenantConfigPath,
-		"[dry-run] write-yaml " + envConfigPath,
-		"[dry-run] write-yaml " + projectConfigPath,
+		"kubectl --context cluster-local get namespace tenant-a-local -o name",
+		"kubectl --context cluster-local create namespace tenant-a-local",
+		"write-yaml " + rootConfigPath,
+		"write-yaml " + tenantConfigPath,
+		"write-yaml " + envConfigPath,
+		"write-yaml " + projectConfigPath,
 	} {
 		if !bytes.Contains([]byte(output), []byte(want)) {
 			t.Fatalf("expected dry-run output to contain %q, got %q", want, output)
 		}
+	}
+}
+
+func TestEnsureKubernetesNamespaceReturnsNilWhenNamespaceAlreadyExists(t *testing.T) {
+	kubectlDir := t.TempDir()
+	kubectlPath := filepath.Join(kubectlDir, "kubectl")
+	if err := os.WriteFile(kubectlPath, []byte(`#!/bin/sh
+if [ "$1" = "--context" ] && [ "$3" = "get" ] && [ "$4" = "namespace" ] && [ "$5" = "tenant-a-local" ]; then
+  echo "namespace/tenant-a-local"
+  exit 0
+fi
+echo "unexpected kubectl invocation: $@" >&2
+exit 1
+`), 0o755); err != nil {
+		t.Fatalf("write kubectl stub: %v", err)
+	}
+	t.Setenv("PATH", kubectlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := ensureKubernetesNamespace("cluster-local", "tenant-a-local"); err != nil {
+		t.Fatalf("ensureKubernetesNamespace failed: %v", err)
+	}
+}
+
+func TestEnsureKubernetesNamespaceCreatesWhenNamespaceMissing(t *testing.T) {
+	kubectlDir := t.TempDir()
+	kubectlPath := filepath.Join(kubectlDir, "kubectl")
+	if err := os.WriteFile(kubectlPath, []byte(`#!/bin/sh
+if [ "$1" = "--context" ] && [ "$3" = "get" ] && [ "$4" = "namespace" ] && [ "$5" = "tenant-a-local" ]; then
+  echo 'Error from server (NotFound): namespaces "tenant-a-local" not found' >&2
+  exit 1
+fi
+if [ "$1" = "--context" ] && [ "$3" = "create" ] && [ "$4" = "namespace" ] && [ "$5" = "tenant-a-local" ]; then
+  echo "namespace/tenant-a-local"
+  exit 0
+fi
+echo "unexpected kubectl invocation: $@" >&2
+exit 1
+`), 0o755); err != nil {
+		t.Fatalf("write kubectl stub: %v", err)
+	}
+	t.Setenv("PATH", kubectlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := ensureKubernetesNamespace("cluster-local", "tenant-a-local"); err != nil {
+		t.Fatalf("ensureKubernetesNamespace failed: %v", err)
 	}
 }

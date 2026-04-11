@@ -1,4 +1,4 @@
-package internal
+package eruncommon
 
 import (
 	"errors"
@@ -12,7 +12,7 @@ import (
 
 const testConfigRoot = "erun"
 
-func setupXDGConfigHome(t *testing.T) string {
+func setupConfigTestXDGConfigHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
@@ -24,7 +24,7 @@ func setupXDGConfigHome(t *testing.T) string {
 }
 
 func TestSaveAndLoadERunConfig(t *testing.T) {
-	setupXDGConfigHome(t)
+	setupConfigTestXDGConfigHome(t)
 
 	expected := ERunConfig{DefaultTenant: "tenant-a"}
 	if err := SaveERunConfig(expected); err != nil {
@@ -46,7 +46,7 @@ func TestSaveAndLoadERunConfig(t *testing.T) {
 }
 
 func TestLoadERunConfigNotInitialized(t *testing.T) {
-	setupXDGConfigHome(t)
+	setupConfigTestXDGConfigHome(t)
 
 	_, _, err := LoadERunConfig()
 	if !errors.Is(err, ErrNotInitialized) {
@@ -55,7 +55,7 @@ func TestLoadERunConfigNotInitialized(t *testing.T) {
 }
 
 func TestLoadERunConfigCorrupted(t *testing.T) {
-	setupXDGConfigHome(t)
+	setupConfigTestXDGConfigHome(t)
 
 	configPath, err := xdg.ConfigFile(filepath.Join(testConfigRoot, configFile))
 	if err != nil {
@@ -73,7 +73,7 @@ func TestLoadERunConfigCorrupted(t *testing.T) {
 }
 
 func TestSaveERunConfigDirectoryConflict(t *testing.T) {
-	setupXDGConfigHome(t)
+	setupConfigTestXDGConfigHome(t)
 
 	configPath, err := xdg.ConfigFile(filepath.Join(testConfigRoot, configFile))
 	if err != nil {
@@ -98,7 +98,7 @@ func TestSaveERunConfigDirectoryConflict(t *testing.T) {
 }
 
 func TestSaveERunConfigWriteFailure(t *testing.T) {
-	setupXDGConfigHome(t)
+	setupConfigTestXDGConfigHome(t)
 
 	configPath, err := xdg.ConfigFile(filepath.Join(testConfigRoot, configFile))
 	if err != nil {
@@ -125,7 +125,7 @@ func TestSaveERunConfigWriteFailure(t *testing.T) {
 }
 
 func TestTenantConfigRoundTrip(t *testing.T) {
-	setupXDGConfigHome(t)
+	setupConfigTestXDGConfigHome(t)
 
 	cfg := TenantConfig{ProjectRoot: "/tmp/project", Name: "tenant-a", DefaultEnvironment: "dev"}
 	if err := SaveTenantConfig(cfg); err != nil {
@@ -143,7 +143,7 @@ func TestTenantConfigRoundTrip(t *testing.T) {
 }
 
 func TestListTenantConfigs(t *testing.T) {
-	setupXDGConfigHome(t)
+	setupConfigTestXDGConfigHome(t)
 
 	for _, cfg := range []TenantConfig{
 		{Name: "tenant-b", ProjectRoot: "/tmp/b", DefaultEnvironment: "prod"},
@@ -168,7 +168,7 @@ func TestListTenantConfigs(t *testing.T) {
 }
 
 func TestLoadTenantConfigErrors(t *testing.T) {
-	setupXDGConfigHome(t)
+	setupConfigTestXDGConfigHome(t)
 
 	if _, _, err := LoadTenantConfig("missing"); !errors.Is(err, ErrNotInitialized) {
 		t.Fatalf("expected ErrNotInitialized, got %v", err)
@@ -189,7 +189,7 @@ func TestLoadTenantConfigErrors(t *testing.T) {
 }
 
 func TestSaveTenantConfigErrors(t *testing.T) {
-	setupXDGConfigHome(t)
+	setupConfigTestXDGConfigHome(t)
 
 	tenant := "tenant-a"
 	configPath, err := xdg.ConfigFile(filepath.Join(testConfigRoot, tenant, configFile))
@@ -229,7 +229,7 @@ func TestSaveTenantConfigErrors(t *testing.T) {
 }
 
 func TestEnvConfigRoundTrip(t *testing.T) {
-	setupXDGConfigHome(t)
+	setupConfigTestXDGConfigHome(t)
 
 	cfg := EnvConfig{
 		Name:              "dev",
@@ -248,6 +248,31 @@ func TestEnvConfigRoundTrip(t *testing.T) {
 
 	if loaded != cfg {
 		t.Fatalf("unexpected env config: %+v", loaded)
+	}
+}
+
+func TestListEnvConfigs(t *testing.T) {
+	setupConfigTestXDGConfigHome(t)
+
+	for _, cfg := range []EnvConfig{
+		{Name: "prod", RepoPath: "/tmp/prod", KubernetesContext: "cluster-prod"},
+		{Name: "dev", RepoPath: "/tmp/dev", KubernetesContext: "cluster-dev"},
+	} {
+		if err := SaveEnvConfig("tenant-a", cfg); err != nil {
+			t.Fatalf("SaveEnvConfig(%q) failed: %v", cfg.Name, err)
+		}
+	}
+
+	envs, err := ListEnvConfigs("tenant-a")
+	if err != nil {
+		t.Fatalf("ListEnvConfigs failed: %v", err)
+	}
+
+	if len(envs) != 2 {
+		t.Fatalf("expected 2 envs, got %+v", envs)
+	}
+	if envs[0].Name != "dev" || envs[1].Name != "prod" {
+		t.Fatalf("expected envs sorted by name, got %+v", envs)
 	}
 }
 
@@ -284,6 +309,35 @@ func TestProjectConfigContainerRegistryForEnvironmentFallsBackToLegacyValue(t *t
 	}
 }
 
+func TestProjectConfigSetContainerRegistryForEnvironmentPreservesProjectWideRegistry(t *testing.T) {
+	cfg := ProjectConfig{ContainerRegistry: "shared-registry"}
+
+	cfg.SetContainerRegistryForEnvironment("prod", "prod-registry")
+
+	if cfg.ContainerRegistry != "shared-registry" {
+		t.Fatalf("expected project-wide registry to be preserved, got %+v", cfg)
+	}
+	if got := cfg.ContainerRegistryForEnvironment("local"); got != "shared-registry" {
+		t.Fatalf("unexpected local registry: %q", got)
+	}
+	if got := cfg.ContainerRegistryForEnvironment("prod"); got != "prod-registry" {
+		t.Fatalf("unexpected prod registry: %q", got)
+	}
+}
+
+func TestProjectConfigSetContainerRegistryForEnvironmentAvoidsRedundantOverride(t *testing.T) {
+	cfg := ProjectConfig{ContainerRegistry: "shared-registry"}
+
+	cfg.SetContainerRegistryForEnvironment("local", "shared-registry")
+
+	if cfg.ContainerRegistry != "shared-registry" {
+		t.Fatalf("expected project-wide registry to be preserved, got %+v", cfg)
+	}
+	if cfg.Environments != nil {
+		t.Fatalf("did not expect redundant environment overrides, got %+v", cfg.Environments)
+	}
+}
+
 func TestLoadProjectConfigNotInitialized(t *testing.T) {
 	projectRoot := t.TempDir()
 
@@ -293,7 +347,7 @@ func TestLoadProjectConfigNotInitialized(t *testing.T) {
 }
 
 func TestLoadEnvConfigErrors(t *testing.T) {
-	setupXDGConfigHome(t)
+	setupConfigTestXDGConfigHome(t)
 
 	if _, _, err := LoadEnvConfig("tenant-a", "dev"); !errors.Is(err, ErrNotInitialized) {
 		t.Fatalf("expected ErrNotInitialized, got %v", err)
@@ -313,7 +367,7 @@ func TestLoadEnvConfigErrors(t *testing.T) {
 }
 
 func TestSaveEnvConfigErrors(t *testing.T) {
-	setupXDGConfigHome(t)
+	setupConfigTestXDGConfigHome(t)
 
 	path, err := xdg.ConfigFile(filepath.Join(testConfigRoot, "tenant-a", "dev", configFile))
 	if err != nil {

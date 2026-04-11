@@ -7,13 +7,12 @@ import (
 	"os"
 	"strings"
 
+	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/internal"
-	"github.com/sophium/erun/internal/bootstrap"
-	"github.com/sophium/erun/internal/opener"
 	"github.com/spf13/cobra"
 )
 
-func NewOpenCmd(deps Dependencies, verbosity *int) *cobra.Command {
+func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error, launchShell common.ShellLauncherFunc, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	var noShell bool
 
 	cmd := &cobra.Command{
@@ -22,20 +21,15 @@ func NewOpenCmd(deps Dependencies, verbosity *int) *cobra.Command {
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			req, err := openRequestForArgs(args)
+			ctx := commandContext(cmd)
+			result, initRan, err := resolveOpenWithInitStop(ctx, args, shouldRunInitForOpenCommand, resolveOpen, runInitForArgs)
 			if err != nil {
 				return err
 			}
-
-			err = runOpenCommand(cmd, deps, req, openOptions{NoShell: noShell})
-			if shouldRunInitForOpenCommand(err) {
-				initReq, initErr := initRequestForRootCommand(deps, args)
-				if initErr != nil {
-					return initErr
-				}
-				return runInitCommand(cmd, deps, verbosity, initReq)
+			if initRan {
+				return nil
 			}
-			return err
+			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell}, launchShell, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart)
 		},
 	}
 
@@ -48,124 +42,108 @@ type openOptions struct {
 	NoShell bool
 }
 
-func openRequestForArgs(args []string) (opener.Request, error) {
-	switch len(args) {
-	case 0:
-		return opener.Request{
-			UseDefaultTenant:      true,
-			UseDefaultEnvironment: true,
-		}, nil
-	case 1:
-		return opener.Request{
-			Environment:      args[0],
-			UseDefaultTenant: true,
-		}, nil
-	case 2:
-		return opener.Request{
-			Tenant:      args[0],
-			Environment: args[1],
-		}, nil
-	default:
-		return opener.Request{}, fmt.Errorf("accepts 0 to 2 arg(s), received %d", len(args))
-	}
-}
-
-func runOpenCommand(cmd *cobra.Command, deps Dependencies, req opener.Request, options openOptions) error {
-	result, err := resolveOpenCommand(deps, req)
+func resolveOpenArgs(args []string, resolveOpen func(common.OpenParams) (common.OpenResult, error)) (common.OpenParams, common.OpenResult, error) {
+	params, err := common.OpenParamsForArgs(args)
 	if err != nil {
-		return err
-	}
-	return launchOpenResult(cmd, deps, result, options)
-}
-
-func resolveOpenCommand(deps Dependencies, req opener.Request) (opener.Result, error) {
-	return newOpenService(deps).Resolve(req)
-}
-
-func launchOpenResult(cmd *cobra.Command, deps Dependencies, result opener.Result, options ...openOptions) error {
-	option := openOptions{}
-	if len(options) > 0 {
-		option = options[0]
+		return common.OpenParams{}, common.OpenResult{}, err
 	}
 
-	emitOpenResultTrace(cmd, result, option)
-	if option.NoShell {
-		if isDryRunCommand(cmd) {
-			return nil
+	result, err := resolveOpen(params)
+	return params, result, err
+}
+
+func runInitBeforeOpen(ctx common.Context, args []string, runInitForArgs func(common.Context, []string) error) error {
+	ctx.Logger.Debug("running init before resolving open target")
+	return runInitForArgs(ctx, args)
+}
+
+func resolveOpenWithInitStop(ctx common.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error) (common.OpenResult, bool, error) {
+	_, result, err := resolveOpenArgs(args, resolveOpen)
+	if !shouldRunInit(err) {
+		return result, false, err
+	}
+
+	if initErr := runInitBeforeOpen(ctx, args, runInitForArgs); initErr != nil {
+		return common.OpenResult{}, true, initErr
+	}
+
+	return common.OpenResult{}, true, nil
+}
+
+func resolveOpenWithInitRetry(ctx common.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error) (common.OpenResult, bool, error) {
+	params, result, err := resolveOpenArgs(args, resolveOpen)
+	if !shouldRunInit(err) {
+		return result, false, err
+	}
+
+	if initErr := runInitBeforeOpen(ctx, args, runInitForArgs); initErr != nil {
+		return common.OpenResult{}, true, initErr
+	}
+
+	result, err = resolveOpen(params)
+	return result, true, err
+}
+
+func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, launchShell common.ShellLauncherFunc, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) error {
+	namespace := common.KubernetesNamespaceName(result.Tenant, result.Environment)
+	if options.NoShell {
+		ctx.TraceCommand("", "kubectl", "config", "use-context", strings.TrimSpace(result.EnvConfig.KubernetesContext))
+		ctx.TraceCommand("", "kubectl", "config", "set-context", "--current", "--namespace="+namespace)
+		ctx.TraceCommand("", "cd", result.RepoPath)
+		return emitLocalShellSetupForOpenResult(result, ctx.Stdout, ctx.Stderr)
+	}
+
+	shellReq := common.ShellLaunchParamsFromResult(result)
+	if checkKubernetesDeployment != nil && deployHelmChart != nil {
+		deployed, err := checkKubernetesDeployment(common.KubernetesDeploymentCheckParams{
+			Name:              common.RuntimeReleaseName(result.Tenant),
+			Namespace:         namespace,
+			KubernetesContext: result.EnvConfig.KubernetesContext,
+			ExpectedRepoPath:  common.RemoteShellWorktreePath(shellReq),
+		})
+		if err != nil {
+			return err
 		}
-		return emitLocalShellSetupForOpenResult(result, cmd.OutOrStdout(), cmd.ErrOrStderr())
+		if !deployed {
+			ctx.Logger.Debug("deploying the devops runtime before opening the shell")
+			execution, err := resolveRuntimeDeploySpec(result)
+			if err != nil {
+				return err
+			}
+			if err := common.RunDeploySpec(
+				ctx,
+				execution,
+				common.DockerImageBuilder,
+				func(ctx common.Context, pushInput common.DockerPushSpec) error {
+					return common.RunDockerPush(ctx, pushInput, common.DockerImagePusher)
+				},
+				deployHelmChart,
+			); err != nil {
+				return err
+			}
+		}
 	}
-	if err := ensureOpenRuntimeAvailable(cmd, deps, result); err != nil {
-		return err
+
+	if preview, err := common.PreviewShellLaunch(shellReq); err == nil {
+		ctx.TraceCommand("", "kubectl", preview.WaitArgs...)
+		execArgs := append([]string{}, preview.ExecArgs...)
+		if len(execArgs) > 0 {
+			execArgs[len(execArgs)-1] = "<bootstrap-script>"
+		}
+		ctx.TraceCommand("", "kubectl", execArgs...)
+		ctx.TraceBlock("bootstrap-script", preview.Script)
+	} else {
+		ctx.Logger.Debug("unable to render remote shell bootstrap trace: " + err.Error())
 	}
-	if isDryRunCommand(cmd) {
+
+	if ctx.DryRun {
 		return nil
 	}
 
-	launcher := deps.LaunchShell
-	if launcher == nil {
-		launcher = opener.DefaultShellLauncher
-	}
-	return launcher(opener.ShellLaunchRequestFromResult(result))
+	return launchShell(shellReq)
 }
 
-func emitOpenResultTrace(cmd *cobra.Command, result opener.Result, options openOptions) {
-	if !commandTraceEnabled(cmd) {
-		return
-	}
-
-	namespace := bootstrap.KubernetesNamespaceName(result.Tenant, result.Environment)
-	notes := []string{
-		"decision: resolved tenant=" + result.Tenant,
-		"decision: resolved environment=" + result.Environment,
-		"decision: resolved namespace=" + namespace,
-		"decision: resolved kubernetes context=" + strings.TrimSpace(result.EnvConfig.KubernetesContext),
-	}
-	if options.NoShell {
-		notes = append(notes, "decision: using local shell setup mode because --no-shell was requested")
-	} else {
-		notes = append(notes, "decision: using remote shell mode through deployment/"+devopsComponentName)
-	}
-	emitTraceNotes(cmd, cmd.ErrOrStderr(), notes...)
-
-	if options.NoShell {
-		emitCommandTrace(cmd, cmd.ErrOrStderr(), CommandTrace{
-			Name: "kubectl",
-			Args: []string{"config", "use-context", strings.TrimSpace(result.EnvConfig.KubernetesContext)},
-		})
-		emitCommandTrace(cmd, cmd.ErrOrStderr(), CommandTrace{
-			Name: "kubectl",
-			Args: []string{"config", "set-context", "--current", "--namespace=" + namespace},
-		})
-		emitCommandTrace(cmd, cmd.ErrOrStderr(), CommandTrace{
-			Name: "cd",
-			Args: []string{result.RepoPath},
-		})
-		return
-	}
-
-	preview, err := opener.PreviewShellLaunch(opener.ShellLaunchRequestFromResult(result))
-	if err != nil {
-		emitTraceNotes(cmd, cmd.ErrOrStderr(), "decision: unable to render the full remote shell preview: "+err.Error())
-		return
-	}
-	emitCommandTrace(cmd, cmd.ErrOrStderr(), CommandTrace{
-		Name: "kubectl",
-		Args: preview.WaitArgs,
-	})
-	execArgs := append([]string{}, preview.ExecArgs...)
-	if len(execArgs) > 0 {
-		execArgs[len(execArgs)-1] = "<bootstrap-script>"
-	}
-	emitCommandTrace(cmd, cmd.ErrOrStderr(), CommandTrace{
-		Name: "kubectl",
-		Args: execArgs,
-	})
-	emitTraceBlock(cmd, cmd.ErrOrStderr(), "bootstrap-script", preview.Script)
-	emitTraceNotes(cmd, cmd.ErrOrStderr(), "decision: the remote shell bootstrap preview redacts host credential file contents while preserving the command shape")
-}
-
-func emitLocalShellSetupForOpenResult(result opener.Result, stdout, stderr io.Writer) error {
+func emitLocalShellSetupForOpenResult(result common.OpenResult, stdout, stderr io.Writer) error {
 	if stdout == nil {
 		stdout = io.Discard
 	}
@@ -179,74 +157,29 @@ func emitLocalShellSetupForOpenResult(result opener.Result, stdout, stderr io.Wr
 		}
 	}
 
-	_, err := io.WriteString(stdout, localShellSetupScript(result))
+	_, err := io.WriteString(stdout, common.LocalShellSetupScript(result))
 	return err
 }
 
-func ensureOpenRuntimeAvailable(cmd *cobra.Command, deps Dependencies, result opener.Result) error {
-	if deps.CheckKubernetesDeployment == nil || deps.DeployHelmChart == nil {
-		return nil
-	}
-
-	namespace := bootstrap.KubernetesNamespaceName(result.Tenant, result.Environment)
-	deployed, err := deps.CheckKubernetesDeployment(KubernetesDeploymentCheckRequest{
-		Name:              devopsComponentName,
-		Namespace:         namespace,
-		KubernetesContext: result.EnvConfig.KubernetesContext,
-	})
-	if err != nil {
-		return err
-	}
-	if deployed {
-		emitTraceNotes(cmd, cmd.ErrOrStderr(), "decision: the devops runtime is already deployed in the target namespace")
-		return nil
-	}
-	emitTraceNotes(cmd, cmd.ErrOrStderr(), "decision: the devops runtime is missing and will be deployed before opening the shell")
-	if isDryRunCommand(cmd) {
-		buildPlans, deployPlan, err := resolveDeployExecutionForTarget(deps, result, devopsComponentName, "")
-		if err != nil {
-			return err
-		}
-		emitResolvedDeployExecutionTrace(cmd, buildPlans, deployPlan)
-		return nil
-	}
-
-	return deployComponentForTarget(deps, result, devopsComponentName, cmd.OutOrStdout(), cmd.ErrOrStderr())
-}
-
-func newOpenService(deps Dependencies) opener.Service {
-	deps = withDependencyDefaults(deps)
-	return opener.Service{
-		Store:       deps.Store,
-		LaunchShell: deps.LaunchShell,
-	}
-}
-
 func openerIsDefaultError(err error) bool {
-	return errors.Is(err, opener.ErrDefaultTenantNotConfigured) ||
-		errors.Is(err, opener.ErrDefaultEnvironmentNotConfigured) ||
-		errors.Is(err, internal.ErrNotInitialized)
+	return errors.Is(err, common.ErrDefaultTenantNotConfigured) ||
+		errors.Is(err, common.ErrDefaultEnvironmentNotConfigured) ||
+		errors.Is(err, common.ErrNotInitialized)
 }
 
 func shouldInitOpenCommand(err error) bool {
-	return errors.Is(err, opener.ErrKubernetesContextNotConfigured)
+	return errors.Is(err, common.ErrKubernetesContextNotConfigured)
 }
 
 func shouldRunInitForOpenCommand(err error) bool {
 	return shouldInitRootCommand(err) ||
-		errors.Is(err, opener.ErrTenantNotFound) ||
-		errors.Is(err, opener.ErrEnvironmentNotFound)
+		errors.Is(err, common.ErrTenantNotFound) ||
+		errors.Is(err, common.ErrEnvironmentNotFound)
 }
 
-func localShellSetupScript(result opener.Result) string {
-	commands := []string{
-		fmt.Sprintf("kubectl config use-context %s >/dev/null", shellSnippetQuote(strings.TrimSpace(result.EnvConfig.KubernetesContext))),
-		fmt.Sprintf("kubectl config set-context --current --namespace=%s >/dev/null", shellSnippetQuote(bootstrap.KubernetesNamespaceName(result.Tenant, result.Environment))),
-		fmt.Sprintf("cd %s", shellSnippetQuote(result.RepoPath)),
-	}
-	return strings.Join(commands, " &&\n") + "\n"
-}
-
-func shellSnippetQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+func shouldInitRootCommand(err error) bool {
+	return openerIsDefaultError(err) ||
+		shouldInitOpenCommand(err) ||
+		errors.Is(err, common.ErrNotInGitRepository) ||
+		internal.IsReported(err)
 }

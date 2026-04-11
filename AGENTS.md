@@ -28,11 +28,22 @@ Repository guidance for humans and coding agents working in this repo.
 - Move code into `erun-common` only when it is genuinely shared across modules and remains transport-agnostic.
 - Do not move code into `erun-common` just because it is reused once; prefer a specific shared package only when a stable cross-module abstraction exists.
 - Keep `erun-common` small and focused on reusable core types and logic, not module-specific orchestration.
+- `erun-cli` and `erun-mcp` must not import each other.
+- `erun-cli` may depend on `erun-common`, but its `mcp` command is only a launcher for the `emcp` executable and must not embed MCP server logic.
+- `erun-mcp` owns MCP transport concerns: server startup, HTTP handler wiring, SDK integration, tool registration, and the `cmd/emcp` executable.
+- Keep MCP-specific configuration, flag parsing, and transport wiring in `erun-mcp`, not in `erun-cli` or `erun-common`.
+- Keep `erun-common` usable as a standalone library for third parties. Shared code placed there must be transport-agnostic and should not depend on Cobra, the MCP SDK, or module-specific orchestration.
+- When sharing operation contracts across modules, prefer transport-neutral names such as plan, request, result, or input/output. Do not put MCP-only wrapper types in `erun-common` unless they are intentionally generic library contracts.
 
 ## Preferred Direction
 
 - Prioritize maintainability and clarity over performance optimizations by default.
 - Prefer established repository patterns over introducing new command, config, testing, or documentation styles. Extend the existing shape first and only add a new pattern when the current one is clearly inadequate.
+- Organize shared command logic by command name when practical. If `build`, `open`, `init`, or `deploy` is shared, prefer files and types that mirror that command shape across `erun-common`, `erun-cli/cmd`, and `erun-mcp`.
+- Keep CLI and MCP layers thin. Flags, prompts, terminal rendering, MCP schemas, and transport setup belong in the transport modules; shared planning and execution logic belongs in `erun-common`.
+- Do not make one transport invoke the other for shared behavior. If CLI and MCP need the same operation logic, extract it into `erun-common` so third parties can use it directly as a library.
+- Keep trace and preview policy shared, but keep rendering transport-specific. `erun-common` may own plans, command specs, and feedback rules; CLI owns terminal trace formatting and MCP owns structured tool output.
+- When the same status or resolved-plan data must be shown in both CLI and MCP, extract the transport-neutral result assembly into `erun-common`. Let CLI format it for humans and MCP return it as structured output.
 - Prefer immutable value-style inputs and resolved plans over mutating shared state in place.
 - Prefer explicit runtime structs over package globals.
 - Keep mutable state local to one CLI execution or one MCP tool invocation.
@@ -42,6 +53,33 @@ Repository guidance for humans and coding agents working in this repo.
 - Keep config and domain types simple and easy to copy safely.
 - Keep business logic reusable so the CLI and MCP layers can share it.
 - Design MCP-facing handlers as non-interactive operations with explicit inputs and structured outputs.
+
+## Dependency Wiring
+
+- Apply KISS to dependency wiring. Do not introduce abstractions or injection layers unless they solve an immediate problem in the current code.
+- Do not pass a dependency into a function unless that function actually uses it in its own body. Passing it through to another function does not count as usage.
+- Prefer wiring concrete dependencies at the boundary and then passing only the specific values needed by the next function.
+- If a function only needs already-built subcommands, handlers, or services, pass those directly instead of the larger set of dependencies used to construct them.
+- Prefer direct use of an existing concrete function such as `common.FindProjectRoot` when it is only needed once. Do not create a local alias just to forward it.
+- If a dependency value is used multiple times in the same function, binding it to a local is acceptable when that improves readability.
+- Keep default wiring local to the real composition boundary, usually `Execute()` or the transport entrypoint, rather than spreading default-resolution helpers throughout production code.
+- In CLI command constructors, keep inline `RunE` closures thin. Use them for Cobra argument adaptation and flag binding, but move real command/application logic into named package functions.
+- If a command already has meaningful application logic such as resolving shared results and rendering them, prefer a named `run...Command` or equivalent helper over leaving that logic inline in the Cobra definition.
+- Test-only convenience wiring helpers are acceptable, but keep them in `_test.go` files and name them clearly as test helpers so they do not read like production APIs.
+
+## Visibility
+
+- Default functions, types, and variables to package-private. Export only when they are actually used outside the package today.
+- Do not keep functions exported only for tests in the same package. Lower them and let same-package tests call them directly.
+- When refactoring removes the last external use of an exported symbol, lower it unless there is a clear current external caller that still needs it.
+
+## Naming
+
+- Do not use a `Service` suffix in local variable names when a more direct noun exists. Prefer names such as `deployer`, `builder`, `opener`, or `bootstrapper` over names such as `deployService`.
+- Use `Service` in type names only when the abstraction is genuinely a stable service concept in the domain. Do not add the suffix by default.
+- Do not call small input structs `Request` when they are just direct function inputs with a small number of fields.
+- For function input structs with fewer than 5 top-level fields, prefer a `Params` suffix over `Request`.
+- Reserve `Request` and `Response` naming for transport-facing contracts or shapes that are meaningfully request/response objects rather than simple local parameters.
 
 ## Go Safety Notes
 
@@ -73,6 +111,11 @@ Repository guidance for humans and coding agents working in this repo.
 - Treat refactoring as behavior-preserving by default.
 - Do not change user-visible output, help text, error text, prompts, logging, defaults, or flags unless the user explicitly asks for that functional change.
 - Before and after a refactor, compare observable behavior with `main` and add or update regression tests for any behavior that must remain unchanged.
+- After refactoring shared code or moving logic across module boundaries, run validation in all modules: `erun-cli`, `erun-common`, and `erun-mcp`. Use each module's local validation commands; this includes `go test ./...` and linting where the module defines lint configuration.
+- After refactoring, explicitly look for unused code left behind by the move or simplification and remove it. Do not leave dead wrappers, compatibility helpers, or transport-specific glue in place just because tests still reference it.
+- When a shared interface in `erun-common` already matches the needed contract, use it directly instead of creating a duplicate local interface with the same methods.
+- After extracting shared code, remove test-only production shims where possible and move meaningful coverage to the module that now owns the behavior.
+- Prefer deleting obsolete pass-through helpers over keeping rename layers. If a command now calls a shared service directly, remove the old wrapper unless it still provides real CLI-specific behavior.
 
 ## Branching Strategy
 

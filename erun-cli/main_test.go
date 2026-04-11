@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/sophium/erun/cmd"
+	common "github.com/sophium/erun/erun-common"
 	"github.com/sophium/erun/internal"
 )
 
@@ -32,7 +33,7 @@ func TestRunInvokesCLI(t *testing.T) {
 
 func TestRunDoesNotLogReportedErrors(t *testing.T) {
 	runCLI = func() error {
-		return internal.MarkReported(internal.ErrNotInGitRepository)
+		return internal.MarkReported(common.ErrNotInGitRepository)
 	}
 	t.Cleanup(func() {
 		runCLI = cmd.Execute

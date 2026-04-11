@@ -25,21 +25,15 @@ type HTTPConfig struct {
 	Path string
 }
 
-type VersionOutput struct {
-	Version string `json:"version"`
-	Commit  string `json:"commit,omitempty"`
-	Date    string `json:"date,omitempty"`
-}
-
-func RunHTTP(ctx context.Context, info eruncommon.BuildInfo, cfg HTTPConfig) error {
-	cfg, err := NormalizeHTTPConfig(cfg)
+func RunHTTP(ctx context.Context, info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeConfig) error {
+	cfg, err := normalizeHTTPConfig(cfg)
 	if err != nil {
 		return err
 	}
 
 	server := &http.Server{
-		Addr:              ListenAddress(cfg),
-		Handler:           NewHTTPHandler(info, cfg),
+		Addr:              listenAddress(cfg),
+		Handler:           newHTTPHandler(info, cfg, runtime),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 
@@ -58,10 +52,10 @@ func RunHTTP(ctx context.Context, info eruncommon.BuildInfo, cfg HTTPConfig) err
 	return err
 }
 
-func NewHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig) http.Handler {
-	cfg, _ = NormalizeHTTPConfig(cfg)
+func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeConfig) http.Handler {
+	cfg, _ = normalizeHTTPConfig(cfg)
 
-	server := NewServer(info)
+	server := newServer(info, runtime)
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 		return server
 	}, &mcp.StreamableHTTPOptions{
@@ -74,7 +68,7 @@ func NewHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig) http.Handler {
 	return mux
 }
 
-func NormalizeHTTPConfig(cfg HTTPConfig) (HTTPConfig, error) {
+func normalizeHTTPConfig(cfg HTTPConfig) (HTTPConfig, error) {
 	if cfg.Host == "" {
 		cfg.Host = DefaultHost
 	}
@@ -93,17 +87,18 @@ func NormalizeHTTPConfig(cfg HTTPConfig) (HTTPConfig, error) {
 	return cfg, nil
 }
 
-func ListenAddress(cfg HTTPConfig) string {
+func listenAddress(cfg HTTPConfig) string {
 	return net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 }
 
-func EndpointURL(cfg HTTPConfig) string {
-	cfg, _ = NormalizeHTTPConfig(cfg)
-	return "http://" + ListenAddress(cfg) + cfg.Path
+func endpointURL(cfg HTTPConfig) string {
+	cfg, _ = normalizeHTTPConfig(cfg)
+	return "http://" + listenAddress(cfg) + cfg.Path
 }
 
-func NewServer(info eruncommon.BuildInfo) *mcp.Server {
+func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 	info = eruncommon.NormalizeBuildInfo(info)
+	runtime = normalizeRuntimeConfig(runtime)
 
 	server := mcp.NewServer(&mcp.Implementation{
 		Name:    "erun",
@@ -114,22 +109,30 @@ func NewServer(info eruncommon.BuildInfo) *mcp.Server {
 		Name:        "version",
 		Description: "Return build metadata for the current erun binary",
 	}, versionTool(info))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list",
+		Description: "List configured tenants and environments, defaults, and the effective target for the current runtime directory",
+	}, listTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "open",
+		Description: "Resolve the current tenant/environment context and return the local shell setup commands for it",
+	}, openTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "init",
+		Description: "Run `erun init` using the shared init flow; when more input is needed, return a structured interaction request for the caller to answer in a follow-up tool call",
+	}, initTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "build",
+		Description: "Run Docker build operations from the runtime repo root in the resolved tenant/environment context",
+	}, buildTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "push",
+		Description: "Run Docker push operations from the runtime repo root in the resolved tenant/environment context",
+	}, pushTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "deploy",
+		Description: "Run `erun devops k8s deploy COMPONENT` from the runtime repo root in the resolved tenant/environment context",
+	}, deployTool(runtime))
 
 	return server
-}
-
-func versionTool(info eruncommon.BuildInfo) func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, VersionOutput, error) {
-	output := buildVersionOutput(info)
-	return func(context.Context, *mcp.CallToolRequest, struct{}) (*mcp.CallToolResult, VersionOutput, error) {
-		return nil, output, nil
-	}
-}
-
-func buildVersionOutput(info eruncommon.BuildInfo) VersionOutput {
-	info = eruncommon.NormalizeBuildInfo(info)
-	return VersionOutput{
-		Version: info.Version,
-		Commit:  info.Commit,
-		Date:    info.Date,
-	}
 }

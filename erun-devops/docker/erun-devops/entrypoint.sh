@@ -44,6 +44,18 @@ users:
 EOF
 }
 
+initialize_erun_config() {
+    repo_dir="${ERUN_REPO_PATH:-${HOME}/git/erun}"
+
+    if [ ! -d "${repo_dir}/.git" ]; then
+        return
+    fi
+
+    cd "${repo_dir}"
+    erun init -y --kubernetes-context "${ERUN_KUBERNETES_CONTEXT:-in-cluster}"
+}
+
 write_kubeconfig
+initialize_erun_config
 
 exec erun mcp "$@"
