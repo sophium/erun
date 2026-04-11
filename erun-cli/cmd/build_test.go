@@ -145,7 +145,11 @@ func TestNewRootCmdRegistersBuildShorthandWhenDockerfilePresent(t *testing.T) {
 
 func TestNewRootCmdRegistersBuildShorthandWhenProjectBuildScriptPresent(t *testing.T) {
 	projectRoot := t.TempDir()
-	scriptPath := filepath.Join(projectRoot, "build.sh")
+	scriptDir := filepath.Join(projectRoot, "scripts", "build")
+	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
+		t.Fatalf("mkdir script dir: %v", err)
+	}
+	scriptPath := filepath.Join(scriptDir, "build.sh")
 	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatalf("write build.sh: %v", err)
 	}
@@ -274,7 +278,11 @@ func TestRootBuildShorthandRunsDockerBuild(t *testing.T) {
 
 func TestRootBuildShorthandRunsProjectBuildScriptWhenPresent(t *testing.T) {
 	projectRoot := t.TempDir()
-	scriptPath := filepath.Join(projectRoot, "build.sh")
+	scriptDir := filepath.Join(projectRoot, "scripts", "build")
+	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
+		t.Fatalf("mkdir script dir: %v", err)
+	}
+	scriptPath := filepath.Join(scriptDir, "build.sh")
 	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatalf("write build.sh: %v", err)
 	}
@@ -317,7 +325,7 @@ func TestRootBuildShorthandRunsProjectBuildScriptWhenPresent(t *testing.T) {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	if received.Dir != projectRoot || received.Path != "./build.sh" {
+	if received.Dir != scriptDir || received.Path != "./build.sh" {
 		t.Fatalf("unexpected build script call: %+v", received)
 	}
 	if received.Stdout != stdout || received.Stderr != stderr {
@@ -526,7 +534,11 @@ func TestRootBuildShorthandDryRunPrintsCommandWithoutExecuting(t *testing.T) {
 
 func TestRootBuildShorthandDryRunPrintsBuildScriptCommandWithoutExecuting(t *testing.T) {
 	projectRoot := t.TempDir()
-	scriptPath := filepath.Join(projectRoot, "build.sh")
+	scriptDir := filepath.Join(projectRoot, "scripts", "build")
+	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
+		t.Fatalf("mkdir script dir: %v", err)
+	}
+	scriptPath := filepath.Join(scriptDir, "build.sh")
 	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatalf("write build.sh: %v", err)
 	}
@@ -554,12 +566,12 @@ func TestRootBuildShorthandDryRunPrintsBuildScriptCommandWithoutExecuting(t *tes
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	if got := stderr.String(); !strings.Contains(got, "cd "+projectRoot+" && ./build.sh") {
+	if got := stderr.String(); !strings.Contains(got, "cd "+scriptDir+" && ./build.sh") {
 		t.Fatalf("expected build.sh dry-run trace, got %q", got)
 	}
 }
 
-func TestRootBuildShorthandIgnoresNestedBuildScript(t *testing.T) {
+func TestRootBuildShorthandIgnoresBuildScriptInDockerArtifactDirectory(t *testing.T) {
 	projectRoot := t.TempDir()
 	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
 	if err := os.MkdirAll(buildDir, 0o755); err != nil {
@@ -568,12 +580,8 @@ func TestRootBuildShorthandIgnoresNestedBuildScript(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
 		t.Fatalf("write Dockerfile: %v", err)
 	}
-	scriptDir := filepath.Join(projectRoot, "scripts")
-	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
-		t.Fatalf("mkdir script dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(scriptDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write nested build.sh: %v", err)
+	if err := os.WriteFile(filepath.Join(buildDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write artifact build.sh: %v", err)
 	}
 	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
 		t.Fatalf("save project config: %v", err)
