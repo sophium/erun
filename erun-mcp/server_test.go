@@ -297,7 +297,11 @@ func TestBuildToolPreviewVerboseIncludesTrace(t *testing.T) {
 
 func TestBuildToolRunsProjectBuildScriptWhenPresent(t *testing.T) {
 	projectRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(projectRoot, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+	scriptDir := filepath.Join(projectRoot, "scripts", "build")
+	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
+		t.Fatalf("mkdir script dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatalf("write build.sh: %v", err)
 	}
 
@@ -309,7 +313,7 @@ func TestBuildToolRunsProjectBuildScriptWhenPresent(t *testing.T) {
 		},
 		BuildScriptRunner: func(dir, path string, stdin io.Reader, stdout, stderr io.Writer) error {
 			called = true
-			if dir != projectRoot || path != "./build.sh" {
+			if dir != scriptDir || path != "./build.sh" {
 				t.Fatalf("unexpected build script call: dir=%q path=%q", dir, path)
 			}
 			return nil
@@ -334,7 +338,11 @@ func TestBuildToolRunsProjectBuildScriptWhenPresent(t *testing.T) {
 
 func TestBuildToolPreviewVerboseIncludesBuildScriptTrace(t *testing.T) {
 	projectRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(projectRoot, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+	scriptDir := filepath.Join(projectRoot, "scripts", "build")
+	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
+		t.Fatalf("mkdir script dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatalf("write build.sh: %v", err)
 	}
 
@@ -355,7 +363,7 @@ func TestBuildToolPreviewVerboseIncludesBuildScriptTrace(t *testing.T) {
 	if len(output.Trace) == 0 {
 		t.Fatalf("expected trace output, got %+v", output)
 	}
-	if output.Trace[0] != "cd "+projectRoot+" && ./build.sh" {
+	if output.Trace[0] != "cd "+scriptDir+" && ./build.sh" {
 		t.Fatalf("unexpected trace output: %+v", output.Trace)
 	}
 }

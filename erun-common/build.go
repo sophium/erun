@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -269,21 +270,64 @@ func resolveProjectBuildScript(findProjectRoot ProjectFinderFunc, target DockerC
 	}
 
 	projectRoot = filepath.Clean(projectRoot)
-	scriptPath := filepath.Join(projectRoot, "build.sh")
-	info, err := os.Stat(scriptPath)
+	rootScriptPath := filepath.Join(projectRoot, "build.sh")
+	info, err := os.Stat(rootScriptPath)
+	if err == nil && !info.IsDir() {
+		return &projectBuildScriptSpec{
+			Dir:  projectRoot,
+			Path: "./build.sh",
+		}, nil
+	}
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+
+	var script *projectBuildScriptSpec
+	err = filepath.WalkDir(projectRoot, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" || isProjectBuildArtifactDir(path, projectRoot) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "build.sh" {
+			return nil
+		}
+
+		script = &projectBuildScriptSpec{
+			Dir:  filepath.Dir(path),
+			Path: "./build.sh",
+		}
+		return fs.SkipAll
+	})
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
+		if errors.Is(err, fs.SkipAll) {
+			return script, nil
 		}
 		return nil, err
 	}
-	if info.IsDir() {
-		return nil, nil
+	return script, nil
+}
+
+func isProjectBuildArtifactDir(path, projectRoot string) bool {
+	path = filepath.Clean(strings.TrimSpace(path))
+	projectRoot = filepath.Clean(strings.TrimSpace(projectRoot))
+	if path == "" || projectRoot == "" || path == projectRoot {
+		return false
 	}
-	return &projectBuildScriptSpec{
-		Dir:  projectRoot,
-		Path: "./build.sh",
-	}, nil
+
+	relative, err := filepath.Rel(projectRoot, path)
+	if err != nil {
+		return false
+	}
+	if relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return false
+	}
+
+	return filepath.Base(filepath.Dir(path)) == "docker"
 }
 
 func normalizeDockerDependencies(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc) (DockerStore, ProjectFinderFunc, BuildContextResolverFunc, NowFunc) {
