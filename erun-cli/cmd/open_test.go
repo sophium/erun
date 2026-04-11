@@ -3,10 +3,12 @@ package cmd
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/manifoldco/promptui"
 	common "github.com/sophium/erun/erun-common"
@@ -32,6 +34,76 @@ func TestOpenCommandLaunchesShell(t *testing.T) {
 	}
 	if launched.Namespace != "tenant-a-dev" || launched.KubernetesContext != "cluster-dev" {
 		t.Fatalf("unexpected remote shell target: %+v", launched)
+	}
+}
+
+func TestOpenCommandLaunchesLocalRuntimeForLocalEnvironment(t *testing.T) {
+	repoPath := t.TempDir()
+	componentDir := filepath.Join(repoPath, "tenant-a-devops", "docker", "tenant-a-devops")
+	if err := os.MkdirAll(componentDir, 0o755); err != nil {
+		t.Fatalf("mkdir component dir: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(repoPath, "tenant-a-devops", "VERSION"),
+		filepath.Join(componentDir, "VERSION"),
+	} {
+		if err := os.WriteFile(path, []byte("1.1.0\n"), 0o644); err != nil {
+			t.Fatalf("write VERSION: %v", err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+
+	var builtTag string
+	var ranArgs []string
+	cmd := newTestRootCmd(testRootDeps{
+		Store: openCommandStore{
+			repoPath:   repoPath,
+			toolConfig: common.ERunConfig{DefaultTenant: "tenant-a"},
+		},
+		BuildDockerImage: func(dir, dockerfilePath, tag string, stdout, stderr io.Writer) error {
+			builtTag = tag
+			if dir != repoPath {
+				t.Fatalf("unexpected build dir: %q", dir)
+			}
+			if dockerfilePath != filepath.Join(componentDir, "Dockerfile") {
+				t.Fatalf("unexpected dockerfile path: %q", dockerfilePath)
+			}
+			return nil
+		},
+		OpenDockerContainer: func(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
+			ranArgs = append([]string{}, args...)
+			return nil
+		},
+		LaunchShell: func(req common.ShellLaunchParams) error {
+			t.Fatalf("did not expect kubernetes shell launch: %+v", req)
+			return nil
+		},
+		Now: func() time.Time {
+			return time.Date(2026, time.April, 11, 10, 9, 8, 0, time.UTC)
+		},
+	})
+	cmd.SetArgs([]string{"open"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if builtTag != "erunpaas/tenant-a-devops:1.1.0" {
+		t.Fatalf("unexpected build tag: %q", builtTag)
+	}
+	runCommand := strings.Join(ranArgs, " ")
+	for _, want := range []string{
+		"run --rm -it",
+		"ERUN_REPO_PATH=/home/erun/git/" + filepath.Base(repoPath),
+		"ERUN_KUBERNETES_CONTEXT=cluster-dev",
+		"ERUN_SHELL_HOST=tenant-a-local",
+		"erunpaas/tenant-a-devops:1.1.0",
+		"shell",
+	} {
+		if !strings.Contains(runCommand, want) {
+			t.Fatalf("expected local runtime args to contain %q, got %q", want, runCommand)
+		}
 	}
 }
 
@@ -118,6 +190,9 @@ func TestOpenCommandDryRunPrintsDeployPlanWhenDevopsRuntimeIsMissing(t *testing.
 
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
+	if err := os.WriteFile(filepath.Join(chartPath, "values.dev.yaml"), nil, 0o644); err != nil {
+		t.Fatalf("write values.dev.yaml: %v", err)
+	}
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		t.Fatalf("mkdir docker dir: %v", err)
@@ -163,7 +238,7 @@ func TestOpenCommandDryRunPrintsDeployPlanWhenDevopsRuntimeIsMissing(t *testing.
 	})
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"-v", "open", "--dry-run"})
+	cmd.SetArgs([]string{"-v", "open", "tenant-a", "dev", "--dry-run"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute failed: %v", err)
@@ -171,11 +246,9 @@ func TestOpenCommandDryRunPrintsDeployPlanWhenDevopsRuntimeIsMissing(t *testing.
 
 	output := stderr.String()
 	for _, want := range []string{
-		"docker build -t erunpaas/erun-devops:1.1.0",
-		"docker push erunpaas/erun-devops:1.1.0",
-		"helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace tenant-a-local --kube-context cluster-dev -f " + filepath.Join(chartPath, "values.local.yaml"),
-		"kubectl --context cluster-dev --namespace tenant-a-local wait --for=condition=Available --timeout 2m0s deployment/tenant-a-devops",
-		"kubectl --context cluster-dev --namespace tenant-a-local exec -it -c erun-devops deployment/tenant-a-devops -- /bin/sh -lc '<bootstrap-script>'",
+		"helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace tenant-a-dev --kube-context cluster-dev -f " + filepath.Join(chartPath, "values.dev.yaml"),
+		"kubectl --context cluster-dev --namespace tenant-a-dev wait --for=condition=Available --timeout 2m0s deployment/tenant-a-devops",
+		"kubectl --context cluster-dev --namespace tenant-a-dev exec -it -c erun-devops deployment/tenant-a-devops -- /bin/sh -lc '<bootstrap-script>'",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected dry-run output to contain %q, got %q", want, output)
@@ -250,6 +323,60 @@ func TestOpenCommandLaunchesShellWithDefaults(t *testing.T) {
 	}
 	if launched.Namespace != "tenant-a-local" || launched.KubernetesContext != "cluster-dev" {
 		t.Fatalf("unexpected remote shell target: %+v", launched)
+	}
+}
+
+func TestOpenCommandDryRunPrintsLocalRuntimeTraceWhenTenantDevopsModuleExists(t *testing.T) {
+	repoPath := t.TempDir()
+	componentDir := filepath.Join(repoPath, "tenant-a-devops", "docker", "tenant-a-devops")
+	if err := os.MkdirAll(componentDir, 0o755); err != nil {
+		t.Fatalf("mkdir component dir: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(repoPath, "tenant-a-devops", "VERSION"),
+		filepath.Join(componentDir, "VERSION"),
+	} {
+		if err := os.WriteFile(path, []byte("1.1.0\n"), 0o644); err != nil {
+			t.Fatalf("write VERSION: %v", err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+
+	stderr := new(bytes.Buffer)
+	cmd := newTestRootCmd(testRootDeps{
+		Store: openCommandStore{
+			repoPath:   repoPath,
+			toolConfig: common.ERunConfig{DefaultTenant: "tenant-a"},
+		},
+		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
+			t.Fatalf("did not expect kubernetes deployment check: %+v", req)
+			return false, nil
+		},
+		LaunchShell: func(req common.ShellLaunchParams) error {
+			t.Fatalf("did not expect kubernetes shell launch: %+v", req)
+			return nil
+		},
+	})
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"open", "--dry-run", "-v"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stderr.String()
+	for _, want := range []string{
+		"docker build -t erunpaas/tenant-a-devops:1.1.0",
+		"docker run --rm -it",
+		"ERUN_KUBERNETES_CONTEXT=cluster-dev",
+		"ERUN_SHELL_HOST=tenant-a-local",
+		"erunpaas/tenant-a-devops:1.1.0 shell",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected dry-run trace to contain %q, got %q", want, output)
+		}
 	}
 }
 

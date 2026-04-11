@@ -33,6 +33,9 @@ func Execute() error {
 	resolveOpen := func(params common.OpenParams) (common.OpenResult, error) {
 		return common.ResolveOpen(store, params)
 	}
+	resolveOpenRuntimeSpec := func(target common.OpenResult) (common.OpenRuntimeSpec, bool, error) {
+		return common.ResolveOpenRuntimeSpec(store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, target)
+	}
 	resolveRuntimeDeploySpec := func(target common.OpenResult) (common.DeploySpec, error) {
 		return common.ResolveOpenRuntimeDeploySpec(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, target)
 	}
@@ -42,6 +45,9 @@ func Execute() error {
 		resolveOpen,
 		runInitForArgs,
 		common.LaunchShell,
+		resolveOpenRuntimeSpec,
+		common.DockerContainerRunner,
+		common.DockerImageBuilder,
 		common.CheckKubernetesDeployment,
 		resolveRuntimeDeploySpec,
 		common.DeployHelmChart,
@@ -87,7 +93,7 @@ func Execute() error {
 		if initRan {
 			return nil
 		}
-		return runResolvedOpenCommand(ctx, result, openOptions{}, common.LaunchShell, common.CheckKubernetesDeployment, resolveRuntimeDeploySpec, common.DeployHelmChart)
+		return runResolvedOpenCommand(ctx, result, openOptions{}, common.LaunchShell, resolveOpenRuntimeSpec, common.DockerContainerRunner, common.DockerImageBuilder, common.CheckKubernetesDeployment, resolveRuntimeDeploySpec, common.DeployHelmChart)
 	}
 
 	cmd := newRootCommand(runRoot)

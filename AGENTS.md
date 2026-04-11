@@ -14,6 +14,7 @@ Repository guidance for humans and coding agents working in this repo.
 - When the PR is intended to close the issue, include `Closes #<issue-number>` in the PR body.
 - A pushed branch or an open PR does not close the issue by itself. The issue closes after the PR is merged or if it is closed manually.
 - If the user asks for `push, accept`, treat that as completing the full publish flow rather than stopping after the branch push.
+- If the user asks to `close`, treat that as the full publish flow: push the branch, open the PR, merge it with squash unless they asked otherwise, close the PR via merge, and close the linked issue.
 
 ## Project Structure
 
@@ -34,6 +35,7 @@ Repository guidance for humans and coding agents working in this repo.
 - Keep MCP-specific configuration, flag parsing, and transport wiring in `erun-mcp`, not in `erun-cli` or `erun-common`.
 - Keep `erun-common` usable as a standalone library for third parties. Shared code placed there must be transport-agnostic and should not depend on Cobra, the MCP SDK, or module-specific orchestration.
 - When sharing operation contracts across modules, prefer transport-neutral names such as plan, request, result, or input/output. Do not put MCP-only wrapper types in `erun-common` unless they are intentionally generic library contracts.
+- By default, new commands should be implemented in both transports: CLI and MCP. Treat a command as shared work unless there is a clear repository-specific reason for it to exist in only one transport.
 
 ## Preferred Direction
 
@@ -53,6 +55,8 @@ Repository guidance for humans and coding agents working in this repo.
 - Keep config and domain types simple and easy to copy safely.
 - Keep business logic reusable so the CLI and MCP layers can share it.
 - Design MCP-facing handlers as non-interactive operations with explicit inputs and structured outputs.
+- Keep tenant DevOps runtime scaffolding shared. When `init` creates project-local runtime assets, prefer generating the tenant-specific `<tenant>-devops` module from shared templates in `erun-common` so CLI and MCP flows stay aligned.
+- Assume tenant-specific DevOps modules use the shared `erun` runtime image as their base. Prefer thin tenant wrappers that extend the canonical runtime image over duplicating Dockerfiles, entrypoints, prompt scripts, or tool installation logic per tenant module.
 
 ## Dependency Wiring
 

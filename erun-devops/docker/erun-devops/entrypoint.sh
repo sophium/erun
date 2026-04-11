@@ -44,8 +44,12 @@ users:
 EOF
 }
 
+runtime_repo_dir() {
+    printf '%s\n' "${ERUN_REPO_PATH:-${HOME}/git/erun}"
+}
+
 initialize_erun_config() {
-    repo_dir="${ERUN_REPO_PATH:-${HOME}/git/erun}"
+    repo_dir=$(runtime_repo_dir)
 
     if [ ! -d "${repo_dir}/.git" ]; then
         return
@@ -55,7 +59,23 @@ initialize_erun_config() {
     erun init -y --kubernetes-context "${ERUN_KUBERNETES_CONTEXT:-in-cluster}"
 }
 
+run_shell() {
+    repo_dir=$(runtime_repo_dir)
+
+    if [ -d "${repo_dir}" ]; then
+        cd "${repo_dir}"
+    fi
+
+    exec /bin/bash -i
+}
+
 write_kubeconfig
+
+if [ "${1:-}" = "shell" ]; then
+    shift
+    run_shell "$@"
+fi
+
 initialize_erun_config
 
 exec erun mcp "$@"

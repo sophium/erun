@@ -240,6 +240,8 @@ func TestInitCommandDryRunPrintsConcretePlannedActions(t *testing.T) {
 		t.Fatalf("xdg env path: %v", err)
 	}
 	projectConfigPath := filepath.Join(projectRoot, ".erun", "config.yaml")
+	devopsVersionPath := filepath.Join(projectRoot, "tenant-a-devops", "VERSION")
+	devopsDockerfilePath := filepath.Join(projectRoot, "tenant-a-devops", "docker", "tenant-a-devops", "Dockerfile")
 
 	output := stderr.String()
 	for _, want := range []string{
@@ -249,6 +251,8 @@ func TestInitCommandDryRunPrintsConcretePlannedActions(t *testing.T) {
 		"write-yaml " + tenantConfigPath,
 		"write-yaml " + envConfigPath,
 		"write-yaml " + projectConfigPath,
+		"write-file " + devopsVersionPath,
+		"write-file " + devopsDockerfilePath,
 	} {
 		if !bytes.Contains([]byte(output), []byte(want)) {
 			t.Fatalf("expected dry-run output to contain %q, got %q", want, output)

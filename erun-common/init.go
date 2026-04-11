@@ -528,6 +528,9 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 			return result, err
 		}
 	}
+	if err := EnsureDefaultDevopsModule(s.Context, projectRoot, tenant); err != nil {
+		return result, err
+	}
 
 	if toolConfig.DefaultTenant == "" || (setDefaultTenant && toolConfig.DefaultTenant != tenant) {
 		s.Context.Trace("Saving default config")
