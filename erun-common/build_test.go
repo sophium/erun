@@ -143,14 +143,122 @@ func TestResolveBuildExecutionPrefersProjectBuildScript(t *testing.T) {
 	}
 }
 
-func TestHasProjectBuildScriptIgnoresNestedBuildScripts(t *testing.T) {
+func TestResolveBuildExecutionPrefersProjectRootBuildScriptOverNestedScripts(t *testing.T) {
 	projectRoot := t.TempDir()
-	nestedDir := filepath.Join(projectRoot, "scripts")
+	if err := os.WriteFile(filepath.Join(projectRoot, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write root build.sh: %v", err)
+	}
+	nestedDir := filepath.Join(projectRoot, "scripts", "alpha")
 	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
 		t.Fatalf("mkdir nested dir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(nestedDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write build.sh: %v", err)
+		t.Fatalf("write nested build.sh: %v", err)
+	}
+
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{}, errors.New("docker build context should not be resolved")
+		},
+		nil,
+		DockerCommandTarget{},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+
+	var called bool
+	ctx := Context{
+		Logger: NewLoggerWithWriters(2, io.Discard, io.Discard),
+		Stdin:  new(bytes.Buffer),
+		Stdout: new(bytes.Buffer),
+		Stderr: new(bytes.Buffer),
+	}
+	if err := RunBuildExecution(ctx, execution, func(dir, path string, stdin io.Reader, stdout, stderr io.Writer) error {
+		called = true
+		if dir != projectRoot || path != "./build.sh" {
+			t.Fatalf("unexpected script call: dir=%q path=%q", dir, path)
+		}
+		return nil
+	}, func(string, string, string, io.Writer, io.Writer) error {
+		t.Fatal("unexpected docker build")
+		return nil
+	}); err != nil {
+		t.Fatalf("RunBuildExecution failed: %v", err)
+	}
+	if !called {
+		t.Fatal("expected build script runner to be called")
+	}
+}
+
+func TestResolveBuildExecutionUsesFirstNestedProjectBuildScript(t *testing.T) {
+	projectRoot := t.TempDir()
+	firstDir := filepath.Join(projectRoot, "scripts", "alpha")
+	if err := os.MkdirAll(firstDir, 0o755); err != nil {
+		t.Fatalf("mkdir first dir: %v", err)
+	}
+	secondDir := filepath.Join(projectRoot, "scripts", "zeta")
+	if err := os.MkdirAll(secondDir, 0o755); err != nil {
+		t.Fatalf("mkdir second dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(firstDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write first build.sh: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(secondDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write second build.sh: %v", err)
+	}
+
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{}, errors.New("docker build context should not be resolved")
+		},
+		nil,
+		DockerCommandTarget{},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+
+	var called bool
+	ctx := Context{
+		Logger: NewLoggerWithWriters(2, io.Discard, io.Discard),
+		Stdin:  new(bytes.Buffer),
+		Stdout: new(bytes.Buffer),
+		Stderr: new(bytes.Buffer),
+	}
+	if err := RunBuildExecution(ctx, execution, func(dir, path string, stdin io.Reader, stdout, stderr io.Writer) error {
+		called = true
+		if dir != firstDir || path != "./build.sh" {
+			t.Fatalf("unexpected script call: dir=%q path=%q", dir, path)
+		}
+		return nil
+	}, func(string, string, string, io.Writer, io.Writer) error {
+		t.Fatal("unexpected docker build")
+		return nil
+	}); err != nil {
+		t.Fatalf("RunBuildExecution failed: %v", err)
+	}
+	if !called {
+		t.Fatal("expected build script runner to be called")
+	}
+}
+
+func TestHasProjectBuildScriptIgnoresDockerArtifactBuildScripts(t *testing.T) {
+	projectRoot := t.TempDir()
+	artifactDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatalf("mkdir artifact dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(artifactDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write artifact build.sh: %v", err)
 	}
 
 	hasScript, err := HasProjectBuildScript(func() (string, string, error) {
@@ -160,6 +268,6 @@ func TestHasProjectBuildScriptIgnoresNestedBuildScripts(t *testing.T) {
 		t.Fatalf("HasProjectBuildScript failed: %v", err)
 	}
 	if hasScript {
-		t.Fatal("did not expect nested build.sh to be selected")
+		t.Fatal("did not expect docker artifact build.sh to be selected")
 	}
 }
