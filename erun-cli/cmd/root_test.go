@@ -107,6 +107,9 @@ func TestRootCommandRunsInitWhenNoSubcommand(t *testing.T) {
 	if got := projectConfig.ContainerRegistryForEnvironment(common.DefaultEnvironment); got != common.DefaultContainerRegistry {
 		t.Fatalf("unexpected project config: %+v", projectConfig)
 	}
+	if _, err := os.Stat(filepath.Join(projectRoot, "tenant-a-devops", "docker", "tenant-a-devops", "Dockerfile")); err != nil {
+		t.Fatalf("expected tenant devops module to be created: %v", err)
+	}
 
 	wantPromptLabels := []string{
 		fmt.Sprintf("Initialize tenant %q (path: %s) as the default tenant?", "tenant-a", projectRoot),

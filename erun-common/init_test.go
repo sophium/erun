@@ -243,6 +243,105 @@ func TestBootstrapRunPromptsForKubernetesContextAndContainerRegistryWhenCreating
 	}
 }
 
+func TestBootstrapRunCreatesTenantDevopsModule(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	projectRoot := t.TempDir()
+	service := bootstrapTestRunner{
+		Store: ConfigStore{},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		Confirm: func(string) (bool, error) {
+			return true, nil
+		},
+		PromptKubernetesContext: func(string) (string, error) {
+			return "cluster-local", nil
+		},
+		PromptContainerRegistry: func(string) (string, error) {
+			return DefaultContainerRegistry, nil
+		},
+		EnsureKubernetesNamespace: func(string, string) error {
+			return nil
+		},
+	}
+
+	if _, err := service.Run(BootstrapInitParams{}); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	moduleRoot := filepath.Join(projectRoot, "tenant-a-devops")
+	for _, path := range []string{
+		filepath.Join(moduleRoot, "VERSION"),
+		filepath.Join(moduleRoot, "docker", "tenant-a-devops", "Dockerfile"),
+	} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("expected %s to exist: %v", path, err)
+		}
+	}
+
+	dockerfilePath := filepath.Join(moduleRoot, "docker", "tenant-a-devops", "Dockerfile")
+	dockerfile, err := os.ReadFile(dockerfilePath)
+	if err != nil {
+		t.Fatalf("read Dockerfile: %v", err)
+	}
+	if !strings.Contains(string(dockerfile), "FROM ${ERUN_BASE_TAG}") {
+		t.Fatalf("expected thin wrapper Dockerfile, got %q", string(dockerfile))
+	}
+	if !strings.Contains(string(dockerfile), "exec /bin/bash -i") || !strings.Contains(string(dockerfile), "exec erun-devops-entrypoint") {
+		t.Fatalf("expected wrapper Dockerfile to handle shell mode and delegate to base entrypoint, got %q", string(dockerfile))
+	}
+	if strings.Contains(string(dockerfile), "entrypoint.sh") || strings.Contains(string(dockerfile), "terraform") {
+		t.Fatalf("expected no duplicated runtime setup in Dockerfile, got %q", string(dockerfile))
+	}
+}
+
+func TestBootstrapRunUpdatesLegacyGeneratedTenantDevopsDockerfile(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	projectRoot := t.TempDir()
+	moduleRoot := filepath.Join(projectRoot, "tenant-a-devops")
+	dockerfilePath := filepath.Join(moduleRoot, "docker", "tenant-a-devops", "Dockerfile")
+	if err := os.MkdirAll(filepath.Dir(dockerfilePath), 0o755); err != nil {
+		t.Fatalf("mkdir docker dir: %v", err)
+	}
+	legacyDockerfile := "ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.0.0\n\nFROM ${ERUN_BASE_TAG}\n"
+	if err := os.WriteFile(dockerfilePath, []byte(legacyDockerfile), 0o644); err != nil {
+		t.Fatalf("write legacy Dockerfile: %v", err)
+	}
+
+	service := bootstrapTestRunner{
+		Store: ConfigStore{},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		Confirm: func(string) (bool, error) {
+			return true, nil
+		},
+		PromptKubernetesContext: func(string) (string, error) {
+			return "cluster-local", nil
+		},
+		PromptContainerRegistry: func(string) (string, error) {
+			return DefaultContainerRegistry, nil
+		},
+		EnsureKubernetesNamespace: func(string, string) error {
+			return nil
+		},
+	}
+
+	if _, err := service.Run(BootstrapInitParams{}); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	dockerfile, err := os.ReadFile(dockerfilePath)
+	if err != nil {
+		t.Fatalf("read Dockerfile: %v", err)
+	}
+	if !strings.Contains(string(dockerfile), "exec /bin/bash -i") || !strings.Contains(string(dockerfile), "exec erun-devops-entrypoint") {
+		t.Fatalf("expected legacy Dockerfile to be replaced with shell-capable wrapper, got %q", string(dockerfile))
+	}
+}
+
 func TestBootstrapRunReturnsTenantConfirmationInteractionWhenPromptIsNeeded(t *testing.T) {
 	setupXDGConfigHome(t)
 

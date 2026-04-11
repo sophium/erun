@@ -34,6 +34,7 @@ FROM erunpaas/erun-ubuntu:noble-20260217
 ARG TARGETARCH
 ARG KUBECTL_VERSION=v1.33.1
 ARG HELM_VERSION=v3.18.2
+ARG TERRAFORM_VERSION=1.12.2
 ARG K9S_VERSION=v0.50.9
 ARG DOCKER_VERSION=28.1.1
 ARG BUILDX_VERSION=v0.24.0
@@ -54,6 +55,9 @@ RUN apt-get update && \
     curl -fsSL -o /tmp/helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-linux-${arch}.tar.gz" && \
     tar -xzf /tmp/helm.tar.gz -C /tmp && \
     install -m 0755 "/tmp/linux-${arch}/helm" /usr/local/bin/helm && \
+    curl -fsSL -o /tmp/terraform.zip "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_${arch}.zip" && \
+    unzip -q /tmp/terraform.zip -d /tmp && \
+    install -m 0755 /tmp/terraform /usr/local/bin/terraform && \
     curl -fsSL -o /tmp/k9s.tar.gz "https://github.com/derailed/k9s/releases/download/${K9S_VERSION}/k9s_Linux_${arch}.tar.gz" && \
     tar -xzf /tmp/k9s.tar.gz -C /tmp && \
     install -m 0755 /tmp/k9s /usr/local/bin/k9s && \
@@ -66,13 +70,13 @@ RUN apt-get update && \
     mkdir -p /usr/local/lib/docker/cli-plugins /usr/local/libexec/docker/cli-plugins && \
     curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-buildx "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-${arch}" && \
     ln -sf /usr/local/lib/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx && \
-    rm -rf /tmp/helm.tar.gz /tmp/k9s.tar.gz /tmp/difft.tar.gz /tmp/docker.tgz "/tmp/linux-${arch}" /tmp/k9s /tmp/difft /tmp/docker && \
+    rm -rf /tmp/helm.tar.gz /tmp/terraform.zip /tmp/k9s.tar.gz /tmp/difft.tar.gz /tmp/docker.tgz "/tmp/linux-${arch}" /tmp/terraform /tmp/k9s /tmp/difft /tmp/docker && \
     groupmod -n erun ubuntu && \
     usermod -l erun -d /home/erun -m -g erun ubuntu && \
     mkdir -p /home/erun/git /home/erun/.kube /home/erun/.config/k9s /etc/erun /etc/bash_completion.d && \
     printf '\n[ -r /usr/share/bash-completion/bash_completion ] && . /usr/share/bash-completion/bash_completion\n[ -r /etc/bash_completion.d/erun ] && . /etc/bash_completion.d/erun\n[ -r /etc/erun/bash_prompt.sh ] && . /etc/erun/bash_prompt.sh\n' >> /etc/bash.bashrc && \
     chown -R erun:erun /home/erun && \
-    chmod 0755 /usr/local/bin/kubectl /usr/local/bin/helm /usr/local/bin/k9s /usr/local/bin/difft /usr/local/bin/docker /usr/local/lib/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
+    chmod 0755 /usr/local/bin/kubectl /usr/local/bin/helm /usr/local/bin/terraform /usr/local/bin/k9s /usr/local/bin/difft /usr/local/bin/docker /usr/local/lib/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
 
 COPY --from=builder --chmod=0755 /out/erun /usr/local/bin/erun
 COPY --from=builder --chmod=0755 /out/emcp /usr/local/bin/emcp
