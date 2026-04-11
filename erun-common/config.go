@@ -1,4 +1,4 @@
-package internal
+package eruncommon
 
 import (
 	"errors"
@@ -65,17 +65,28 @@ func (c *ProjectConfig) SetContainerRegistryForEnvironment(environment, registry
 		return
 	}
 
-	c.ContainerRegistry = ""
-	if c.Environments == nil {
-		c.Environments = make(map[string]ProjectEnvironmentConfig)
-	}
-
 	if registry == "" {
-		delete(c.Environments, environment)
-		if len(c.Environments) == 0 {
-			c.Environments = nil
+		if c.Environments != nil {
+			delete(c.Environments, environment)
+			if len(c.Environments) == 0 {
+				c.Environments = nil
+			}
 		}
 		return
+	}
+
+	if registry == strings.TrimSpace(c.ContainerRegistry) {
+		if c.Environments != nil {
+			delete(c.Environments, environment)
+			if len(c.Environments) == 0 {
+				c.Environments = nil
+			}
+		}
+		return
+	}
+
+	if c.Environments == nil {
+		c.Environments = make(map[string]ProjectEnvironmentConfig)
 	}
 
 	envConfig := c.Environments[environment]
@@ -90,6 +101,40 @@ var (
 	ErrFailedToSaveConfig = errors.New("could not save struct to yaml file")
 	ErrNotInGitRepository = errors.New("cannot find git project")
 )
+
+type ConfigStore struct{}
+
+func (ConfigStore) LoadERunConfig() (ERunConfig, string, error) {
+	return LoadERunConfig()
+}
+
+func (ConfigStore) SaveERunConfig(config ERunConfig) error {
+	return SaveERunConfig(config)
+}
+
+func (ConfigStore) ListTenantConfigs() ([]TenantConfig, error) {
+	return ListTenantConfigs()
+}
+
+func (ConfigStore) LoadTenantConfig(tenant string) (TenantConfig, string, error) {
+	return LoadTenantConfig(tenant)
+}
+
+func (ConfigStore) SaveTenantConfig(config TenantConfig) error {
+	return SaveTenantConfig(config)
+}
+
+func (ConfigStore) LoadEnvConfig(tenant, envName string) (EnvConfig, string, error) {
+	return LoadEnvConfig(tenant, envName)
+}
+
+func (ConfigStore) ListEnvConfigs(tenant string) ([]EnvConfig, error) {
+	return ListEnvConfigs(tenant)
+}
+
+func (ConfigStore) SaveEnvConfig(tenant string, config EnvConfig) error {
+	return SaveEnvConfig(tenant, config)
+}
 
 func SaveERunConfig(config ERunConfig) error {
 	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, configFile))
@@ -251,6 +296,43 @@ func LoadEnvConfig(tenant, envName string) (EnvConfig, string, error) {
 	return config, configFilePath, nil
 }
 
+func ListEnvConfigs(tenant string) ([]EnvConfig, error) {
+	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, configFile))
+	if err != nil {
+		return nil, ErrNoUserDataFolder
+	}
+
+	entries, err := os.ReadDir(filepath.Dir(configFilePath))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	envs := make([]EnvConfig, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		envConfig, _, err := LoadEnvConfig(tenant, entry.Name())
+		if err != nil {
+			return nil, err
+		}
+		if envConfig.Name == "" {
+			envConfig.Name = entry.Name()
+		}
+		envs = append(envs, envConfig)
+	}
+
+	sort.Slice(envs, func(i, j int) bool {
+		return envs[i].Name < envs[j].Name
+	})
+
+	return envs, nil
+}
+
 func SaveProjectConfig(projectRoot string, config ProjectConfig) error {
 	configFilePath, err := projectConfigPath(projectRoot)
 	if err != nil {
@@ -292,19 +374,16 @@ func LoadProjectConfig(projectRoot string) (ProjectConfig, string, error) {
 	return config, configFilePath, nil
 }
 
-func projectConfigPath(projectRoot string) (string, error) {
-	if projectRoot == "" {
-		return "", ErrNotInGitRepository
-	}
-	return filepath.Join(filepath.Clean(projectRoot), projectConfigDir, configFile), nil
-}
-
 func FindProjectRoot() (string, string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
 		return "", "", err
 	}
+	return FindProjectRootFromDir(dir)
+}
 
+func FindProjectRootFromDir(dir string) (string, string, error) {
+	dir = filepath.Clean(dir)
 	for {
 		gitDir := filepath.Join(dir, ".git")
 		if _, err := os.Stat(gitDir); err == nil {
@@ -318,4 +397,11 @@ func FindProjectRoot() (string, string, error) {
 		}
 		dir = parent
 	}
+}
+
+func projectConfigPath(projectRoot string) (string, error) {
+	if projectRoot == "" {
+		return "", ErrNotInGitRepository
+	}
+	return filepath.Join(filepath.Clean(projectRoot), projectConfigDir, configFile), nil
 }

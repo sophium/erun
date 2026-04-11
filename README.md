@@ -55,11 +55,21 @@ When commenting use links to https://go.dev/wiki/CodeReviewComments subsection w
 
 ## Running locally
 
-When developing ERun it is recommended to use alias
+When developing ERun it is recommended to use aliases
 
 ```
 alias erun='~/git/sophium/erun/erun-cli/run.sh'
+alias emcp='~/git/sophium/erun/erun-mcp/run.sh'
 ```
+
+This keeps local startup consistent for both executables:
+
+```
+erun version
+emcp --host 127.0.0.1 --port 17000 --path /mcp
+```
+
+`erun mcp` launches the separate `emcp` binary, so local development should build `emcp` via `erun-mcp/run.sh` or otherwise make `emcp` available on `PATH`.
 
 # Design
 

@@ -25,7 +25,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     ERUN_VERSION="$(tr -d '\n' < /src/erun-devops/VERSION)" && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags "-X github.com/sophium/erun/cmd.buildVersion=${ERUN_VERSION}" -o /out/erun .
+    go build -ldflags "-X github.com/sophium/erun/cmd.buildVersion=${ERUN_VERSION}" -o /out/erun . && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -ldflags "-X github.com/sophium/erun/erun-mcp.buildVersion=${ERUN_VERSION}" -o /out/emcp ../erun-mcp/cmd/emcp
 
 FROM erunpaas/erun-ubuntu:noble-20260217
 
@@ -73,6 +75,7 @@ RUN apt-get update && \
     chmod 0755 /usr/local/bin/kubectl /usr/local/bin/helm /usr/local/bin/k9s /usr/local/bin/difft /usr/local/bin/docker /usr/local/lib/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
 
 COPY --from=builder --chmod=0755 /out/erun /usr/local/bin/erun
+COPY --from=builder --chmod=0755 /out/emcp /usr/local/bin/emcp
 COPY --chmod=0755 erun-devops/docker/erun-devops/entrypoint.sh /usr/local/bin/erun-devops-entrypoint
 COPY --chmod=0644 erun-devops/docker/erun-devops/bash_prompt.sh /etc/erun/bash_prompt.sh
 

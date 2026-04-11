@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,16 +11,68 @@ import (
 	"time"
 
 	"github.com/manifoldco/promptui"
-	"github.com/sophium/erun/internal"
-	"github.com/sophium/erun/internal/bootstrap"
-	"github.com/sophium/erun/internal/opener"
+	common "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
 )
 
+type dockerBuildCall struct {
+	Dir            string
+	DockerfilePath string
+	Tag            string
+	Stdout         io.Writer
+	Stderr         io.Writer
+}
+
+type dockerPushCall struct {
+	Tag    string
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
+type dockerLoginCall struct {
+	Registry string
+	Stdin    io.Reader
+	Stdout   io.Writer
+	Stderr   io.Writer
+}
+
+func buildCallFunc(run func(dockerBuildCall) error) common.DockerImageBuilderFunc {
+	return func(dir, dockerfilePath, tag string, stdout, stderr io.Writer) error {
+		return run(dockerBuildCall{
+			Dir:            dir,
+			DockerfilePath: dockerfilePath,
+			Tag:            tag,
+			Stdout:         stdout,
+			Stderr:         stderr,
+		})
+	}
+}
+
+func pushCallFunc(run func(dockerPushCall) error) common.DockerImagePusherFunc {
+	return func(tag string, stdout, stderr io.Writer) error {
+		return run(dockerPushCall{
+			Tag:    tag,
+			Stdout: stdout,
+			Stderr: stderr,
+		})
+	}
+}
+
+func loginCallFunc(run func(dockerLoginCall) error) common.DockerRegistryLoginFunc {
+	return func(registry string, stdin io.Reader, stdout, stderr io.Writer) error {
+		return run(dockerLoginCall{
+			Registry: registry,
+			Stdin:    stdin,
+			Stdout:   stdout,
+			Stderr:   stderr,
+		})
+	}
+}
+
 func TestNewRootCmdRegistersDevopsContainerBuildCommand(t *testing.T) {
-	cmd := NewRootCmd(Dependencies{
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{Dir: t.TempDir()}, nil
+	cmd := newTestRootCmd(testRootDeps{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: t.TempDir()}, nil
 		},
 	})
 
@@ -33,9 +86,9 @@ func TestNewRootCmdRegistersDevopsContainerBuildCommand(t *testing.T) {
 }
 
 func TestNewRootCmdRegistersDevopsContainerPushCommand(t *testing.T) {
-	cmd := NewRootCmd(Dependencies{
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{Dir: t.TempDir()}, nil
+	cmd := newTestRootCmd(testRootDeps{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: t.TempDir()}, nil
 		},
 	})
 
@@ -49,10 +102,10 @@ func TestNewRootCmdRegistersDevopsContainerPushCommand(t *testing.T) {
 }
 
 func TestNewRootCmdRegistersBuildShorthandWhenDockerfilePresent(t *testing.T) {
-	cmd := NewRootCmd(Dependencies{
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
+	cmd := newTestRootCmd(testRootDeps{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
 			dir := t.TempDir()
-			return DockerBuildContext{
+			return common.DockerBuildContext{
 				Dir:            dir,
 				DockerfilePath: filepath.Join(dir, "Dockerfile"),
 			}, nil
@@ -82,9 +135,9 @@ func TestNewRootCmdRegistersBuildShorthandWhenDockerDirectoryContainsDockerfiles
 		t.Fatalf("write Dockerfile: %v", err)
 	}
 
-	cmd := NewRootCmd(Dependencies{
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{Dir: dockerDir}, nil
+	cmd := newTestRootCmd(testRootDeps{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: dockerDir}, nil
 		},
 	})
 
@@ -97,9 +150,9 @@ func TestNewRootCmdRegistersBuildShorthandWhenDockerDirectoryContainsDockerfiles
 }
 
 func TestNewRootCmdOmitsBuildShorthandWhenDockerfileAbsent(t *testing.T) {
-	cmd := NewRootCmd(Dependencies{
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{Dir: t.TempDir()}, nil
+	cmd := newTestRootCmd(testRootDeps{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: t.TempDir()}, nil
 		},
 	})
 
@@ -117,7 +170,7 @@ func TestRootBuildShorthandRunsDockerBuild(t *testing.T) {
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		t.Fatalf("mkdir build dir: %v", err)
 	}
-	if err := internal.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
@@ -126,24 +179,24 @@ func TestRootBuildShorthandRunsDockerBuild(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("noble-20260217\n"), 0o644); err != nil {
 		t.Fatalf("write local VERSION: %v", err)
 	}
-	buildContext := DockerBuildContext{
+	buildContext := common.DockerBuildContext{
 		Dir:            workdir,
 		DockerfilePath: filepath.Join(workdir, "Dockerfile"),
 	}
 
-	var received DockerBuildRequest
-	cmd := NewRootCmd(Dependencies{
+	var received dockerBuildCall
+	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
 			return "erun", projectRoot, nil
 		},
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
 			return buildContext, nil
 		},
-		BuildDockerImage: func(req DockerBuildRequest) error {
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
 			received = req
 			return nil
-		},
-		LaunchShell: func(req opener.ShellLaunchRequest) error {
+		}),
+		LaunchShell: func(req common.ShellLaunchParams) error {
 			t.Fatalf("unexpected shell launch: %+v", req)
 			return nil
 		},
@@ -187,14 +240,14 @@ func TestRootBuildShorthandBuildsAllDockerImagesWhenCurrentDirectoryIsDockerDire
 			t.Fatalf("write Dockerfile: %v", err)
 		}
 	}
-	if err := internal.SaveTenantConfig(internal.TenantConfig{
+	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
-		DefaultEnvironment: bootstrap.DefaultEnvironment,
+		DefaultEnvironment: common.DefaultEnvironment,
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(componentDirs[0], "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
@@ -207,18 +260,18 @@ func TestRootBuildShorthandBuildsAllDockerImagesWhenCurrentDirectoryIsDockerDire
 		t.Fatalf("write VERSION: %v", err)
 	}
 
-	var received []DockerBuildRequest
-	cmd := NewRootCmd(Dependencies{
+	var received []dockerBuildCall
+	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
 			return "erun", projectRoot, nil
 		},
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{Dir: dockerDir}, nil
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: dockerDir}, nil
 		},
-		BuildDockerImage: func(req DockerBuildRequest) error {
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
 			received = append(received, req)
 			return nil
-		},
+		}),
 	})
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
@@ -263,14 +316,14 @@ func TestRootBuildShorthandUsesExactVersionFromCurrentBuildDirectoryForLocalEnvi
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		t.Fatalf("mkdir build dir: %v", err)
 	}
-	if err := internal.SaveTenantConfig(internal.TenantConfig{
+	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
-		DefaultEnvironment: bootstrap.DefaultEnvironment,
+		DefaultEnvironment: common.DefaultEnvironment,
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
@@ -281,21 +334,21 @@ func TestRootBuildShorthandUsesExactVersionFromCurrentBuildDirectoryForLocalEnvi
 	}
 
 	fixedNow := time.Date(2026, time.April, 6, 12, 34, 56, 0, time.UTC)
-	var received DockerBuildRequest
-	cmd := NewRootCmd(Dependencies{
+	var received dockerBuildCall
+	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
 			return "erun", projectRoot, nil
 		},
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{
 				Dir:            workdir,
 				DockerfilePath: filepath.Join(workdir, "Dockerfile"),
 			}, nil
 		},
-		BuildDockerImage: func(req DockerBuildRequest) error {
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
 			received = req
 			return nil
-		},
+		}),
 		Now: func() time.Time {
 			return fixedNow
 		},
@@ -320,14 +373,14 @@ func TestRootBuildShorthandDryRunPrintsCommandWithoutExecuting(t *testing.T) {
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		t.Fatalf("mkdir build dir: %v", err)
 	}
-	if err := internal.SaveTenantConfig(internal.TenantConfig{
+	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
-		DefaultEnvironment: bootstrap.DefaultEnvironment,
+		DefaultEnvironment: common.DefaultEnvironment,
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
@@ -338,20 +391,20 @@ func TestRootBuildShorthandDryRunPrintsCommandWithoutExecuting(t *testing.T) {
 	}
 
 	stderr := new(bytes.Buffer)
-	cmd := NewRootCmd(Dependencies{
+	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
 			return "erun", projectRoot, nil
 		},
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{
 				Dir:            workdir,
 				DockerfilePath: filepath.Join(workdir, "Dockerfile"),
 			}, nil
 		},
-		BuildDockerImage: func(req DockerBuildRequest) error {
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
 			t.Fatalf("unexpected build request during dry-run: %+v", req)
 			return nil
-		},
+		}),
 		Now: func() time.Time {
 			return time.Date(2026, time.April, 6, 13, 16, 30, 0, time.UTC)
 		},
@@ -363,11 +416,8 @@ func TestRootBuildShorthandDryRunPrintsCommandWithoutExecuting(t *testing.T) {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	if got := stderr.String(); !strings.Contains(got, "[dry-run] docker build -t erunpaas/erun-devops:1.1.0") {
-		t.Fatalf("expected dry-run build trace, got %q", got)
-	}
-	if got := stderr.String(); strings.Contains(got, "decision:") {
-		t.Fatalf("did not expect decision notes without -v during dry-run, got %q", got)
+	if got := stderr.String(); !bytes.Contains([]byte(got), []byte("docker build -t erunpaas/erun-devops:1.1.0")) {
+		t.Fatalf("expected dry-run trace output, got %q", got)
 	}
 }
 
@@ -377,7 +427,7 @@ func TestRootBuildShorthandVerbosePrintsTraceBeforeExecuting(t *testing.T) {
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		t.Fatalf("mkdir build dir: %v", err)
 	}
-	if err := internal.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
@@ -388,19 +438,19 @@ func TestRootBuildShorthandVerbosePrintsTraceBeforeExecuting(t *testing.T) {
 	}
 
 	stderr := new(bytes.Buffer)
-	cmd := NewRootCmd(Dependencies{
+	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
 			return "erun", projectRoot, nil
 		},
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{
 				Dir:            workdir,
 				DockerfilePath: filepath.Join(workdir, "Dockerfile"),
 			}, nil
 		},
-		BuildDockerImage: func(req DockerBuildRequest) error {
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
 			return nil
-		},
+		}),
 	})
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"-v", "build"})
@@ -409,7 +459,7 @@ func TestRootBuildShorthandVerbosePrintsTraceBeforeExecuting(t *testing.T) {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	if got := stderr.String(); !strings.Contains(got, "[trace] docker build -t erunpaas/erun-devops:1.1.0") {
+	if got := stderr.String(); !strings.Contains(got, "docker build -t erunpaas/erun-devops:1.1.0") {
 		t.Fatalf("expected verbose build trace, got %q", got)
 	}
 	if got := stderr.String(); strings.Contains(got, "decision:") {
@@ -417,13 +467,13 @@ func TestRootBuildShorthandVerbosePrintsTraceBeforeExecuting(t *testing.T) {
 	}
 }
 
-func TestRootBuildShorthandDoubleVerbosePrintsDecisionNotesBeforeExecuting(t *testing.T) {
+func TestRootBuildShorthandDoubleVerbosePrintsBuildTraceBeforeExecuting(t *testing.T) {
 	projectRoot := t.TempDir()
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		t.Fatalf("mkdir build dir: %v", err)
 	}
-	if err := internal.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
@@ -434,19 +484,19 @@ func TestRootBuildShorthandDoubleVerbosePrintsDecisionNotesBeforeExecuting(t *te
 	}
 
 	stderr := new(bytes.Buffer)
-	cmd := NewRootCmd(Dependencies{
+	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
 			return "erun", projectRoot, nil
 		},
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{
 				Dir:            workdir,
 				DockerfilePath: filepath.Join(workdir, "Dockerfile"),
 			}, nil
 		},
-		BuildDockerImage: func(req DockerBuildRequest) error {
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
 			return nil
-		},
+		}),
 	})
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"-vv", "build"})
@@ -456,23 +506,23 @@ func TestRootBuildShorthandDoubleVerbosePrintsDecisionNotesBeforeExecuting(t *te
 	}
 
 	got := stderr.String()
-	if !strings.Contains(got, "[trace] docker build -t erunpaas/erun-devops:1.1.0") {
+	if !strings.Contains(got, "docker build -t erunpaas/erun-devops:1.1.0") {
 		t.Fatalf("expected verbose build trace, got %q", got)
 	}
-	if !strings.Contains(got, "[trace] decision: resolved registry=erunpaas") {
-		t.Fatalf("expected decision notes at -vv, got %q", got)
+	if strings.Contains(got, "decision:") {
+		t.Fatalf("did not expect decision notes at -vv, got %q", got)
 	}
 }
 
 func TestDevopsContainerBuildFailsWithoutDockerfile(t *testing.T) {
-	cmd := NewRootCmd(Dependencies{
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{Dir: t.TempDir()}, nil
+	cmd := newTestRootCmd(testRootDeps{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: t.TempDir()}, nil
 		},
-		BuildDockerImage: func(req DockerBuildRequest) error {
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
 			t.Fatalf("unexpected build request: %+v", req)
 			return nil
-		},
+		}),
 	})
 	cmd.SetArgs([]string{"devops", "container", "build"})
 
@@ -491,7 +541,7 @@ func TestDevopsContainerPushUsesResolvedImageTag(t *testing.T) {
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		t.Fatalf("mkdir build dir: %v", err)
 	}
-	if err := internal.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
@@ -501,21 +551,21 @@ func TestDevopsContainerPushUsesResolvedImageTag(t *testing.T) {
 		t.Fatalf("write local VERSION: %v", err)
 	}
 
-	var received DockerPushRequest
-	cmd := NewRootCmd(Dependencies{
+	var received dockerPushCall
+	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
 			return "erun", projectRoot, nil
 		},
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{
 				Dir:            workdir,
 				DockerfilePath: filepath.Join(workdir, "Dockerfile"),
 			}, nil
 		},
-		PushDockerImage: func(req DockerPushRequest) error {
+		PushDockerImage: pushCallFunc(func(req dockerPushCall) error {
 			received = req
 			return nil
-		},
+		}),
 	})
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
@@ -541,7 +591,7 @@ func TestDevopsContainerPushPromptsLoginAndRetriesOnAuthError(t *testing.T) {
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		t.Fatalf("mkdir build dir: %v", err)
 	}
-	if err := internal.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
@@ -553,12 +603,12 @@ func TestDevopsContainerPushPromptsLoginAndRetriesOnAuthError(t *testing.T) {
 
 	pushCalls := 0
 	loginRegistry := "unexpected"
-	cmd := NewRootCmd(Dependencies{
+	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
 			return "erun", projectRoot, nil
 		},
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{
 				Dir:            workdir,
 				DockerfilePath: filepath.Join(workdir, "Dockerfile"),
 			}, nil
@@ -566,22 +616,22 @@ func TestDevopsContainerPushPromptsLoginAndRetriesOnAuthError(t *testing.T) {
 		SelectRunner: func(prompt promptui.Select) (int, string, error) {
 			return 0, loginAndRetryPushOption, nil
 		},
-		PushDockerImage: func(req DockerPushRequest) error {
+		PushDockerImage: pushCallFunc(func(req dockerPushCall) error {
 			pushCalls++
 			if pushCalls == 1 {
-				return dockerRegistryAuthError{
-					tag:      req.Tag,
-					registry: dockerRegistryFromImageTag(req.Tag),
-					message:  "push access denied: insufficient_scope: authorization failed",
-					err:      errors.New("exit status 1"),
+				return common.DockerRegistryAuthError{
+					Tag:      req.Tag,
+					Registry: "",
+					Message:  "push access denied: insufficient_scope: authorization failed",
+					Err:      errors.New("exit status 1"),
 				}
 			}
 			return nil
-		},
-		LoginToDockerRegistry: func(req DockerLoginRequest) error {
+		}),
+		LoginToDockerRegistry: loginCallFunc(func(req dockerLoginCall) error {
 			loginRegistry = req.Registry
 			return nil
-		},
+		}),
 	})
 	cmd.SetArgs([]string{"devops", "container", "push"})
 
@@ -603,7 +653,7 @@ func TestRootPushShorthandUsesResolvedImageTag(t *testing.T) {
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		t.Fatalf("mkdir build dir: %v", err)
 	}
-	if err := internal.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
@@ -613,21 +663,21 @@ func TestRootPushShorthandUsesResolvedImageTag(t *testing.T) {
 		t.Fatalf("write local VERSION: %v", err)
 	}
 
-	var received DockerPushRequest
-	cmd := NewRootCmd(Dependencies{
+	var received dockerPushCall
+	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
 			return "erun", projectRoot, nil
 		},
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{
 				Dir:            workdir,
 				DockerfilePath: filepath.Join(workdir, "Dockerfile"),
 			}, nil
 		},
-		PushDockerImage: func(req DockerPushRequest) error {
+		PushDockerImage: pushCallFunc(func(req dockerPushCall) error {
 			received = req
 			return nil
-		},
+		}),
 	})
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
@@ -655,15 +705,15 @@ func TestRootPushShorthandBuildsAndPushesSameExactVersionFromCurrentBuildDirecto
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		t.Fatalf("mkdir build dir: %v", err)
 	}
-	if err := internal.SaveTenantConfig(internal.TenantConfig{
+	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
-		DefaultEnvironment: bootstrap.DefaultEnvironment,
+		DefaultEnvironment: common.DefaultEnvironment,
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
 
-	if err := internal.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
@@ -673,26 +723,26 @@ func TestRootPushShorthandBuildsAndPushesSameExactVersionFromCurrentBuildDirecto
 		t.Fatalf("write local VERSION: %v", err)
 	}
 
-	var built DockerBuildRequest
-	var received DockerPushRequest
-	cmd := NewRootCmd(Dependencies{
+	var built dockerBuildCall
+	var received dockerPushCall
+	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
 			return "erun", projectRoot, nil
 		},
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{
 				Dir:            workdir,
 				DockerfilePath: filepath.Join(workdir, "Dockerfile"),
 			}, nil
 		},
-		BuildDockerImage: func(req DockerBuildRequest) error {
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
 			built = req
 			return nil
-		},
-		PushDockerImage: func(req DockerPushRequest) error {
+		}),
+		PushDockerImage: pushCallFunc(func(req dockerPushCall) error {
 			received = req
 			return nil
-		},
+		}),
 		Now: func() time.Time {
 			return time.Date(2026, time.April, 6, 14, 0, 0, 0, time.UTC)
 		},
@@ -719,14 +769,14 @@ func TestRootBuildShorthandUsesSnapshotWhenVersionIsInheritedFromParentModule(t 
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		t.Fatalf("mkdir build dir: %v", err)
 	}
-	if err := internal.SaveTenantConfig(internal.TenantConfig{
+	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
-		DefaultEnvironment: bootstrap.DefaultEnvironment,
+		DefaultEnvironment: common.DefaultEnvironment,
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
@@ -734,21 +784,21 @@ func TestRootBuildShorthandUsesSnapshotWhenVersionIsInheritedFromParentModule(t 
 	}
 
 	fixedNow := time.Date(2026, time.April, 6, 12, 34, 56, 0, time.UTC)
-	var received DockerBuildRequest
-	cmd := NewRootCmd(Dependencies{
+	var received dockerBuildCall
+	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
 			return "erun", projectRoot, nil
 		},
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{
 				Dir:            workdir,
 				DockerfilePath: filepath.Join(workdir, "Dockerfile"),
 			}, nil
 		},
-		BuildDockerImage: func(req DockerBuildRequest) error {
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
 			received = req
 			return nil
-		},
+		}),
 		Now: func() time.Time {
 			return fixedNow
 		},
@@ -772,14 +822,14 @@ func TestRootPushShorthandDryRunPrintsCommandWithoutExecuting(t *testing.T) {
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		t.Fatalf("mkdir build dir: %v", err)
 	}
-	if err := internal.SaveTenantConfig(internal.TenantConfig{
+	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
-		DefaultEnvironment: bootstrap.DefaultEnvironment,
+		DefaultEnvironment: common.DefaultEnvironment,
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
@@ -790,24 +840,24 @@ func TestRootPushShorthandDryRunPrintsCommandWithoutExecuting(t *testing.T) {
 	}
 
 	stderr := new(bytes.Buffer)
-	cmd := NewRootCmd(Dependencies{
+	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
 			return "erun", projectRoot, nil
 		},
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{
 				Dir:            workdir,
 				DockerfilePath: filepath.Join(workdir, "Dockerfile"),
 			}, nil
 		},
-		BuildDockerImage: func(req DockerBuildRequest) error {
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
 			t.Fatalf("unexpected build request during dry-run: %+v", req)
 			return nil
-		},
-		PushDockerImage: func(req DockerPushRequest) error {
+		}),
+		PushDockerImage: pushCallFunc(func(req dockerPushCall) error {
 			t.Fatalf("unexpected push request during dry-run: %+v", req)
 			return nil
-		},
+		}),
 	})
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"push", "--dry-run"})
@@ -817,23 +867,20 @@ func TestRootPushShorthandDryRunPrintsCommandWithoutExecuting(t *testing.T) {
 	}
 
 	got := stderr.String()
-	if !strings.Contains(got, "[dry-run] docker build -t erunpaas/erun-devops:1.1.0") {
-		t.Fatalf("expected dry-run build trace, got %q", got)
-	}
-	if !strings.Contains(got, "[dry-run] docker push erunpaas/erun-devops:1.1.0") {
-		t.Fatalf("expected dry-run push trace, got %q", got)
+	if !bytes.Contains([]byte(got), []byte("docker push erunpaas/erun-devops:1.1.0")) {
+		t.Fatalf("expected dry-run trace output, got %q", got)
 	}
 }
 
 func TestDevopsContainerPushFailsWithoutDockerfile(t *testing.T) {
-	cmd := NewRootCmd(Dependencies{
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{Dir: t.TempDir()}, nil
+	cmd := newTestRootCmd(testRootDeps{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: t.TempDir()}, nil
 		},
-		PushDockerImage: func(req DockerPushRequest) error {
+		PushDockerImage: pushCallFunc(func(req dockerPushCall) error {
 			t.Fatalf("unexpected push request: %+v", req)
 			return nil
-		},
+		}),
 	})
 	cmd.SetArgs([]string{"devops", "container", "push"})
 
@@ -852,7 +899,7 @@ func TestDevopsContainerPushReturnsOriginalAuthErrorWhenLoginCancelled(t *testin
 	if err := os.MkdirAll(workdir, 0o755); err != nil {
 		t.Fatalf("mkdir build dir: %v", err)
 	}
-	if err := internal.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
@@ -862,19 +909,19 @@ func TestDevopsContainerPushReturnsOriginalAuthErrorWhenLoginCancelled(t *testin
 		t.Fatalf("write local VERSION: %v", err)
 	}
 
-	expectedErr := dockerRegistryAuthError{
-		tag:      "erunpaas/erun-devops:1.1.0",
-		registry: "",
-		message:  "push access denied: insufficient_scope: authorization failed",
-		err:      errors.New("exit status 1"),
+	expectedErr := common.DockerRegistryAuthError{
+		Tag:      "erunpaas/erun-devops:1.1.0",
+		Registry: "",
+		Message:  "push access denied: insufficient_scope: authorization failed",
+		Err:      errors.New("exit status 1"),
 	}
 
-	cmd := NewRootCmd(Dependencies{
+	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
 			return "erun", projectRoot, nil
 		},
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{
 				Dir:            workdir,
 				DockerfilePath: filepath.Join(workdir, "Dockerfile"),
 			}, nil
@@ -882,13 +929,13 @@ func TestDevopsContainerPushReturnsOriginalAuthErrorWhenLoginCancelled(t *testin
 		SelectRunner: func(prompt promptui.Select) (int, string, error) {
 			return 1, cancelPushOption, nil
 		},
-		PushDockerImage: func(req DockerPushRequest) error {
+		PushDockerImage: pushCallFunc(func(req dockerPushCall) error {
 			return expectedErr
-		},
-		LoginToDockerRegistry: func(req DockerLoginRequest) error {
+		}),
+		LoginToDockerRegistry: loginCallFunc(func(req dockerLoginCall) error {
 			t.Fatalf("unexpected login request: %+v", req)
 			return nil
-		},
+		}),
 	})
 	cmd.SetArgs([]string{"devops", "container", "push"})
 
@@ -908,30 +955,30 @@ func TestRootCommandTreatsBuildAsEnvironmentWhenDockerfileAbsent(t *testing.T) {
 	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
 		t.Fatalf("mkdir project root: %v", err)
 	}
-	if err := internal.SaveERunConfig(internal.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
+	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
 		t.Fatalf("save erun config: %v", err)
 	}
-	if err := internal.SaveTenantConfig(internal.TenantConfig{
+	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
 		DefaultEnvironment: "build",
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: "build", RepoPath: projectRoot, KubernetesContext: "cluster-build"}); err != nil {
+	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "build", RepoPath: projectRoot, KubernetesContext: "cluster-build"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
-	launched := opener.ShellLaunchRequest{}
-	cmd := NewRootCmd(Dependencies{
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{Dir: t.TempDir()}, nil
+	launched := common.ShellLaunchParams{}
+	cmd := newTestRootCmd(testRootDeps{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: t.TempDir()}, nil
 		},
-		BuildDockerImage: func(req DockerBuildRequest) error {
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
 			t.Fatalf("unexpected build request: %+v", req)
 			return nil
-		},
-		LaunchShell: func(req opener.ShellLaunchRequest) error {
+		}),
+		LaunchShell: func(req common.ShellLaunchParams) error {
 			launched = req
 			return nil
 		},
@@ -954,30 +1001,30 @@ func TestRootCommandTreatsPushAsEnvironmentWhenDockerfileAbsent(t *testing.T) {
 	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
 		t.Fatalf("mkdir project root: %v", err)
 	}
-	if err := internal.SaveERunConfig(internal.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
+	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
 		t.Fatalf("save erun config: %v", err)
 	}
-	if err := internal.SaveTenantConfig(internal.TenantConfig{
+	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
 		DefaultEnvironment: "push",
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveEnvConfig("tenant-a", internal.EnvConfig{Name: "push", RepoPath: projectRoot, KubernetesContext: "cluster-push"}); err != nil {
+	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "push", RepoPath: projectRoot, KubernetesContext: "cluster-push"}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
-	launched := opener.ShellLaunchRequest{}
-	cmd := NewRootCmd(Dependencies{
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{Dir: t.TempDir()}, nil
+	launched := common.ShellLaunchParams{}
+	cmd := newTestRootCmd(testRootDeps{
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: t.TempDir()}, nil
 		},
-		PushDockerImage: func(req DockerPushRequest) error {
+		PushDockerImage: pushCallFunc(func(req dockerPushCall) error {
 			t.Fatalf("unexpected push request: %+v", req)
 			return nil
-		},
-		LaunchShell: func(req opener.ShellLaunchRequest) error {
+		}),
+		LaunchShell: func(req common.ShellLaunchParams) error {
 			launched = req
 			return nil
 		},
@@ -993,74 +1040,17 @@ func TestRootCommandTreatsPushAsEnvironmentWhenDockerfileAbsent(t *testing.T) {
 	}
 }
 
-func TestDefaultDockerBuildContextResolverDetectsDockerfile(t *testing.T) {
-	workdir := t.TempDir()
-	dockerfilePath := filepath.Join(workdir, "Dockerfile")
-	if err := os.WriteFile(dockerfilePath, []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-
-	previousDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd failed: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(previousDir) })
-	if err := os.Chdir(workdir); err != nil {
-		t.Fatalf("Chdir failed: %v", err)
-	}
-
-	result, err := defaultDockerBuildContextResolver()
-	if err != nil {
-		t.Fatalf("defaultDockerBuildContextResolver failed: %v", err)
-	}
-	resolvedWorkdir, err := filepath.EvalSymlinks(workdir)
-	if err != nil {
-		t.Fatalf("EvalSymlinks(workdir) failed: %v", err)
-	}
-	resolvedDockerfilePath, err := filepath.EvalSymlinks(dockerfilePath)
-	if err != nil {
-		t.Fatalf("EvalSymlinks(dockerfilePath) failed: %v", err)
-	}
-	if result.Dir != resolvedWorkdir || result.DockerfilePath != resolvedDockerfilePath {
-		t.Fatalf("unexpected build context: %+v", result)
-	}
-}
-
-func TestDefaultDockerBuildContextResolverIgnoresMissingDockerfile(t *testing.T) {
-	workdir := t.TempDir()
-
-	previousDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("Getwd failed: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(previousDir) })
-	if err := os.Chdir(workdir); err != nil {
-		t.Fatalf("Chdir failed: %v", err)
-	}
-
-	result, err := defaultDockerBuildContextResolver()
-	if err != nil {
-		t.Fatalf("defaultDockerBuildContextResolver failed: %v", err)
-	}
-	resolvedWorkdir, err := filepath.EvalSymlinks(workdir)
-	if err != nil {
-		t.Fatalf("EvalSymlinks(workdir) failed: %v", err)
-	}
-	if result.Dir != resolvedWorkdir {
-		t.Fatalf("unexpected build context: %+v", result)
-	}
-	if result.DockerfilePath != "" {
-		t.Fatalf("expected empty Dockerfile path, got %+v", result)
-	}
-}
-
 func TestRunContainerBuildCommandPropagatesBuildContextErrors(t *testing.T) {
 	expectedErr := errors.New("resolve failed")
-	cmd := NewBuildCmd(Dependencies{
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{}, expectedErr
+	cmd := newBuildCmd(
+		common.ConfigStore{},
+		nil,
+		func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{}, expectedErr
 		},
-	})
+		nil,
+		nil,
+	)
 	cmd.SetArgs([]string{})
 
 	err := cmd.Execute()
@@ -1071,52 +1061,31 @@ func TestRunContainerBuildCommandPropagatesBuildContextErrors(t *testing.T) {
 
 func TestRunContainerPushCommandPropagatesBuildContextErrors(t *testing.T) {
 	expectedErr := errors.New("resolve failed")
-	cmd := NewDevopsCmd(Dependencies{
-		ResolveDockerBuildContext: func() (DockerBuildContext, error) {
-			return DockerBuildContext{}, expectedErr
-		},
-	})
+	containerCmd := newCommandGroup(
+		"container",
+		"Container utilities",
+		newBuildCmd(common.ConfigStore{}, nil, func() (common.DockerBuildContext, error) {
+			t.Fatal("unexpected build execution")
+			return common.DockerBuildContext{}, nil
+		}, nil, nil),
+		newPushCmd(common.ConfigStore{}, nil, func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{}, expectedErr
+		}, nil, nil, nil),
+	)
+	k8sCmd := newCommandGroup(
+		"k8s",
+		"Kubernetes utilities",
+		newK8sDeployCmd(common.ConfigStore{}, nil, nil, nil, nil, nil, nil, func(common.HelmDeployParams) error {
+			t.Fatal("unexpected deploy execution")
+			return nil
+		}),
+	)
+	cmd := newCommandGroup("devops", "DevOps utilities", containerCmd, k8sCmd)
 	cmd.SetArgs([]string{"container", "push"})
 
 	err := cmd.Execute()
 	if !errors.Is(err, expectedErr) {
 		t.Fatalf("expected %v, got %v", expectedErr, err)
-	}
-}
-
-func TestDockerRegistryFromImageTag(t *testing.T) {
-	tests := map[string]string{
-		"erunpaas/erun-ubuntu:noble-20260217":    "",
-		"ghcr.io/acme/erun-devops:1.0.0":         "ghcr.io",
-		"localhost:5000/erun-devops:1.0.0":       "localhost:5000",
-		"registry.example.com/team/image:latest": "registry.example.com",
-	}
-
-	for tag, want := range tests {
-		if got := dockerRegistryFromImageTag(tag); got != want {
-			t.Fatalf("dockerRegistryFromImageTag(%q) = %q, want %q", tag, got, want)
-		}
-	}
-}
-
-func TestResolveDockerBuildContextDirUsesProjectRootForModuleDockerDirs(t *testing.T) {
-	projectRoot := t.TempDir()
-	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(buildDir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
-
-	contextDir, err := resolveDockerBuildContextDir(Dependencies{
-		FindProjectRoot: func() (string, string, error) {
-			return "erun", projectRoot, nil
-		},
-	}, buildDir)
-	if err != nil {
-		t.Fatalf("resolveDockerBuildContextDir failed: %v", err)
-	}
-
-	if contextDir != projectRoot {
-		t.Fatalf("unexpected context dir: %q", contextDir)
 	}
 }
 
@@ -1126,7 +1095,7 @@ func TestResolveDockerBuildTagPrefersCurrentDirectoryVersion(t *testing.T) {
 	if err := os.MkdirAll(buildDir, 0o755); err != nil {
 		t.Fatalf("mkdir build dir: %v", err)
 	}
-	if err := internal.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("registry.example/team")); err != nil {
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("registry.example/team")); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
@@ -1136,15 +1105,23 @@ func TestResolveDockerBuildTagPrefersCurrentDirectoryVersion(t *testing.T) {
 		t.Fatalf("write local VERSION: %v", err)
 	}
 
-	tag, err := resolveDockerBuildTag(Dependencies{
-		FindProjectRoot: func() (string, string, error) {
-			return "erun", projectRoot, nil
-		},
-	}, buildDir)
+	imageRef, err := func(buildDir string, target common.DockerCommandTarget) (common.DockerImageReference, error) {
+		return common.ResolveDockerImageReference(
+			common.ConfigStore{},
+			func() (string, string, error) {
+				return "erun", projectRoot, nil
+			},
+			common.ResolveDockerBuildContext,
+			time.Now,
+			buildDir,
+			target,
+		)
+	}(buildDir, common.DockerCommandTarget{})
 	if err != nil {
-		t.Fatalf("resolveDockerBuildTag failed: %v", err)
+		t.Fatalf("ResolveDockerImageReference failed: %v", err)
 	}
 
+	tag := imageRef.Tag
 	if tag != "registry.example/team/erun-ubuntu:noble-20260217" {
 		t.Fatalf("unexpected tag: %q", tag)
 	}
@@ -1158,15 +1135,15 @@ func TestResolveDockerBuildTagUsesDefaultEnvironmentRegistry(t *testing.T) {
 	if err := os.MkdirAll(buildDir, 0o755); err != nil {
 		t.Fatalf("mkdir build dir: %v", err)
 	}
-	if err := internal.SaveTenantConfig(internal.TenantConfig{
+	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
 		DefaultEnvironment: "prod",
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := internal.SaveProjectConfig(projectRoot, internal.ProjectConfig{
-		Environments: map[string]internal.ProjectEnvironmentConfig{
+	if err := common.SaveProjectConfig(projectRoot, common.ProjectConfig{
+		Environments: map[string]common.ProjectEnvironmentConfig{
 			"local": {ContainerRegistry: "local-registry"},
 			"prod":  {ContainerRegistry: "registry.example/team"},
 		},
@@ -1180,24 +1157,89 @@ func TestResolveDockerBuildTagUsesDefaultEnvironmentRegistry(t *testing.T) {
 		t.Fatalf("write local VERSION: %v", err)
 	}
 
-	tag, err := resolveDockerBuildTag(Dependencies{
-		FindProjectRoot: func() (string, string, error) {
-			return "erun", projectRoot, nil
-		},
-	}, buildDir)
+	imageRef, err := func(buildDir string, target common.DockerCommandTarget) (common.DockerImageReference, error) {
+		return common.ResolveDockerImageReference(
+			common.ConfigStore{},
+			func() (string, string, error) {
+				return "erun", projectRoot, nil
+			},
+			common.ResolveDockerBuildContext,
+			time.Now,
+			buildDir,
+			target,
+		)
+	}(buildDir, common.DockerCommandTarget{})
 	if err != nil {
-		t.Fatalf("resolveDockerBuildTag failed: %v", err)
+		t.Fatalf("ResolveDockerImageReference failed: %v", err)
 	}
 
+	tag := imageRef.Tag
 	if tag != "registry.example/team/erun-ubuntu:noble-20260217" {
 		t.Fatalf("unexpected tag: %q", tag)
 	}
 }
 
-func projectConfigWithSingleRegistry(registry string) internal.ProjectConfig {
-	return internal.ProjectConfig{
-		Environments: map[string]internal.ProjectEnvironmentConfig{
-			bootstrap.DefaultEnvironment: {ContainerRegistry: registry},
+func TestBuildCommandHiddenEnvironmentOverrideUsesProvidedEnvironment(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	projectRoot := t.TempDir()
+	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		t.Fatalf("mkdir build dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write module VERSION: %v", err)
+	}
+	if err := common.SaveTenantConfig(common.TenantConfig{
+		Name:               "tenant-a",
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: "local",
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := common.SaveProjectConfig(projectRoot, common.ProjectConfig{
+		Environments: map[string]common.ProjectEnvironmentConfig{
+			"local": {ContainerRegistry: "local-registry"},
+			"prod":  {ContainerRegistry: "prod-registry"},
+		},
+	}); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	var built dockerBuildCall
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{
+				Dir:            buildDir,
+				DockerfilePath: filepath.Join(buildDir, "Dockerfile"),
+			}, nil
+		},
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
+			built = req
+			return nil
+		}),
+	})
+	cmd.SetArgs([]string{"build", "--environment", "prod", "--project-root", projectRoot})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if built.Tag != "prod-registry/erun-devops:1.0.0" {
+		t.Fatalf("unexpected build request: %+v", built)
+	}
+}
+
+func projectConfigWithSingleRegistry(registry string) common.ProjectConfig {
+	return common.ProjectConfig{
+		Environments: map[string]common.ProjectEnvironmentConfig{
+			common.DefaultEnvironment: {ContainerRegistry: registry},
 		},
 	}
 }

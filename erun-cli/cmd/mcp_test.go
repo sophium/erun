@@ -2,13 +2,18 @@ package cmd
 
 import (
 	"bytes"
+	"io"
 	"testing"
 
-	erunmcp "github.com/sophium/erun/erun-mcp"
+	common "github.com/sophium/erun/erun-common"
 )
 
 func TestNewMCPCmdDefaultsToLocalHTTP(t *testing.T) {
-	cmd := NewMCPCmd(Dependencies{}, nil)
+	root := newTestRootCmd(testRootDeps{})
+	cmd, _, err := root.Find([]string{"mcp"})
+	if err != nil {
+		t.Fatalf("Find(mcp) failed: %v", err)
+	}
 
 	host, err := cmd.Flags().GetString("host")
 	if err != nil {
@@ -23,18 +28,26 @@ func TestNewMCPCmdDefaultsToLocalHTTP(t *testing.T) {
 		t.Fatalf("GetString(path) failed: %v", err)
 	}
 
-	if host != erunmcp.DefaultHost || port != erunmcp.DefaultPort || path != erunmcp.DefaultPath {
+	if host != defaultMCPHost || port != defaultMCPPort || path != defaultMCPPath {
 		t.Fatalf("unexpected defaults: host=%q port=%d path=%q", host, port, path)
 	}
 }
 
 func TestMCPCmdDryRunPrintsTraceWithoutStartingServer(t *testing.T) {
-	cmd := NewMCPCmd(Dependencies{}, nil)
+	repoPath := t.TempDir()
+	cmd := newTestRootCmd(testRootDeps{
+		Store: openCommandStore{
+			repoPath: repoPath,
+			toolConfig: common.ERunConfig{
+				DefaultTenant: "tenant-a",
+			},
+		},
+	})
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"--dry-run", "--host", "0.0.0.0", "--port", "17000", "--path", "/mcp"})
+	cmd.SetArgs([]string{"-v", "mcp", "--dry-run", "--host", "0.0.0.0", "--port", "17000", "--path", "/mcp"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute failed: %v", err)
@@ -43,7 +56,42 @@ func TestMCPCmdDryRunPrintsTraceWithoutStartingServer(t *testing.T) {
 	if got := stdout.String(); got != "" {
 		t.Fatalf("expected no server output during dry-run, got %q", got)
 	}
-	if got := stderr.String(); got == "" || !bytes.Contains([]byte(got), []byte("[dry-run] erun mcp --host 0.0.0.0 --port 17000 --path /mcp")) {
+	wantTrace := "emcp --host 0.0.0.0 --port 17000 --path /mcp --tenant tenant-a --environment local --repo-path " + repoPath + " --kubernetes-context cluster-dev --namespace tenant-a-local"
+	if got := stderr.String(); got == "" || !bytes.Contains([]byte(got), []byte(wantTrace)) {
 		t.Fatalf("expected dry-run trace, got %q", got)
+	}
+}
+
+func TestMCPCmdStartsEMCP(t *testing.T) {
+	started := false
+	var gotArgs []string
+	repoPath := t.TempDir()
+
+	cmd := newTestRootCmd(testRootDeps{
+		Store: openCommandStore{
+			repoPath: repoPath,
+		},
+		LaunchMCP: func(stdin io.Reader, stdout, stderr io.Writer, args []string) error {
+			started = true
+			gotArgs = append([]string(nil), args...)
+			return nil
+		},
+	})
+	cmd.SetArgs([]string{"mcp", "tenant-a", "dev", "--host", "0.0.0.0", "--port", "17001", "--path", "custom"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if !started {
+		t.Fatal("expected emcp to be launched")
+	}
+	wantArgs := []string{"--host", "0.0.0.0", "--port", "17001", "--path", "custom", "--tenant", "tenant-a", "--environment", "dev", "--repo-path", repoPath, "--kubernetes-context", "cluster-dev", "--namespace", "tenant-a-dev"}
+	if len(gotArgs) != len(wantArgs) {
+		t.Fatalf("unexpected emcp args: got=%v want=%v", gotArgs, wantArgs)
+	}
+	for i := range wantArgs {
+		if gotArgs[i] != wantArgs[i] {
+			t.Fatalf("unexpected emcp args: got=%v want=%v", gotArgs, wantArgs)
+		}
 	}
 }

@@ -8,16 +8,16 @@ import (
 )
 
 func TestBuildInfoDefaults(t *testing.T) {
-	v, c, d := BuildInfo()
+	v, c, d := buildInfo()
 	if v != "dev" || c != "" || d != "" {
 		t.Fatalf("unexpected defaults: %s %s %s", v, c, d)
 	}
 }
 
 func TestVersionCommandOutput(t *testing.T) {
-	prevV, prevC, prevD := BuildInfo()
+	prevV, prevC, prevD := buildInfo()
 	t.Cleanup(func() {
-		SetBuildInfo(prevV, prevC, prevD)
+		setBuildInfo(prevV, prevC, prevD)
 	})
 
 	workdir := t.TempDir()
@@ -32,12 +32,13 @@ func TestVersionCommandOutput(t *testing.T) {
 		_ = os.Chdir(prevWD)
 	})
 
-	cmd := NewVersionCmd(Dependencies{}, nil)
+	cmd := newTestRootCmd(testRootDeps{})
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"version"})
 
-	SetBuildInfo("1.2.3", "abcdef", "2024-01-01")
+	setBuildInfo("1.2.3", "abcdef", "2024-01-01")
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -47,7 +48,7 @@ func TestVersionCommandOutput(t *testing.T) {
 	}
 
 	buf.Reset()
-	SetBuildInfo("1.2.3", "", "")
+	setBuildInfo("1.2.3", "", "")
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -57,9 +58,9 @@ func TestVersionCommandOutput(t *testing.T) {
 }
 
 func TestVersionCommandPrefersVersionFileInCurrentDirectory(t *testing.T) {
-	prevV, prevC, prevD := BuildInfo()
+	prevV, prevC, prevD := buildInfo()
 	t.Cleanup(func() {
-		SetBuildInfo(prevV, prevC, prevD)
+		setBuildInfo(prevV, prevC, prevD)
 	})
 
 	workdir := t.TempDir()
@@ -67,11 +68,11 @@ func TestVersionCommandPrefersVersionFileInCurrentDirectory(t *testing.T) {
 		t.Fatalf("write VERSION: %v", err)
 	}
 
-	cmd := NewVersionCmd(Dependencies{}, nil)
+	cmd := newTestRootCmd(testRootDeps{})
 	buf := new(bytes.Buffer)
 	cmd.SetOut(buf)
 	cmd.SetErr(buf)
-	cmd.SetArgs(nil)
+	cmd.SetArgs([]string{"version"})
 
 	prevWD, err := os.Getwd()
 	if err != nil {
@@ -84,7 +85,7 @@ func TestVersionCommandPrefersVersionFileInCurrentDirectory(t *testing.T) {
 		_ = os.Chdir(prevWD)
 	})
 
-	SetBuildInfo("1.2.3", "abcdef", "2024-01-01")
+	setBuildInfo("1.2.3", "abcdef", "2024-01-01")
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
@@ -107,21 +108,21 @@ func TestVersionCommandDryRunPrintsTraceWithoutOutput(t *testing.T) {
 		_ = os.Chdir(prevWD)
 	})
 
-	cmd := NewVersionCmd(Dependencies{}, nil)
+	cmd := newTestRootCmd(testRootDeps{})
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"--dry-run"})
+	cmd.SetArgs([]string{"version", "--dry-run", "-v"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	if got := stdout.String(); got != "" {
-		t.Fatalf("expected no version output during dry-run, got %q", got)
+	if got := stdout.String(); got == "" {
+		t.Fatalf("expected version output during dry-run, got %q", got)
 	}
-	if got := stderr.String(); got == "" || !bytes.Contains([]byte(got), []byte("[dry-run] erun version")) {
+	if got := stderr.String(); got == "" || !bytes.Contains([]byte(got), []byte("erun version")) {
 		t.Fatalf("expected dry-run trace, got %q", got)
 	}
 }

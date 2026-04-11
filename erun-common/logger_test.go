@@ -83,7 +83,7 @@ func TestLoggerTrace(t *testing.T) {
 	stdout := captureStdout(t, func() {
 		NewLogger(2).Trace("trace")
 	})
-	expected := colorize("trace", colorTrace) + "\n"
+	expected := "trace\n"
 	if stdout != expected {
 		t.Fatalf("unexpected trace output: %q", stdout)
 	}
@@ -101,7 +101,7 @@ func TestLoggerErrorAndFatal(t *testing.T) {
 	stderr := captureStderr(t, func() {
 		logger.Error("boom")
 	})
-	expected := colorize("boom", colorError) + "\n"
+	expected := "boom\n"
 	if stderr != expected {
 		t.Fatalf("unexpected error output: %q", stderr)
 	}
@@ -116,7 +116,7 @@ func TestLoggerErrorAndFatal(t *testing.T) {
 	stderr = captureStderr(t, func() {
 		logger.Fatal(errors.New("fatal"))
 	})
-	expected = colorize("fatal", colorError) + "\n"
+	expected = "fatal\n"
 	if stderr != expected {
 		t.Fatalf("unexpected fatal output: %q", stderr)
 	}
@@ -132,10 +132,10 @@ func TestLoggerWithWriters(t *testing.T) {
 	logger.Trace("trace")
 	logger.Error("boom")
 
-	if got := stdout.String(); got != "info\ndebug\n"+colorize("trace", colorTrace)+"\n" {
+	if got := stdout.String(); got != "info\ndebug\ntrace\n" {
 		t.Fatalf("unexpected stdout output: %q", got)
 	}
-	if got := stderr.String(); got != colorize("boom", colorError)+"\n" {
+	if got := stderr.String(); got != "boom\n" {
 		t.Fatalf("unexpected stderr output: %q", got)
 	}
 }
