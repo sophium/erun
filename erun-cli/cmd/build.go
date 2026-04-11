@@ -17,7 +17,7 @@ const (
 
 var errVersionFileNotFound = common.ErrVersionFileNotFound
 
-func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc) *cobra.Command {
+func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc) *cobra.Command {
 	target := common.DockerCommandTarget{}
 	cmd := &cobra.Command{
 		Use:           "build",
@@ -27,11 +27,11 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			builds, err := common.ResolveCurrentDockerBuildSpecs(store, findProjectRoot, resolveBuildContext, now, target)
+			execution, err := common.ResolveBuildExecution(store, findProjectRoot, resolveBuildContext, now, target)
 			if err != nil {
 				return err
 			}
-			return common.RunDockerBuilds(ctx, builds, buildDockerImage)
+			return common.RunBuildExecution(ctx, execution, runBuildScript, buildDockerImage)
 		},
 	}
 	addDryRunFlag(cmd)

@@ -25,11 +25,11 @@ type PushInput struct {
 func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, BuildInput) (*mcp.CallToolResult, CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input BuildInput) (*mcp.CallToolResult, CommandOutput, error) {
 		output, err := runRuntimeCommand(runtime.Context, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
-			builds, err := resolveRuntimeBuilds(runtime, workDir, strings.TrimSpace(input.Component))
+			execution, err := resolveRuntimeBuildExecution(runtime, workDir, strings.TrimSpace(input.Component))
 			if err != nil {
 				return err
 			}
-			return eruncommon.RunDockerBuilds(runCtx, builds, runtime.BuildDockerImage)
+			return eruncommon.RunBuildExecution(runCtx, execution, runtime.BuildScriptRunner, runtime.BuildDockerImage)
 		})
 		return nil, output, err
 	}
@@ -54,8 +54,12 @@ func pushTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 	}
 }
 
-func resolveRuntimeBuilds(runtime RuntimeConfig, projectRoot, component string) ([]eruncommon.DockerBuildSpec, error) {
+func resolveRuntimeBuildExecution(runtime RuntimeConfig, projectRoot, component string) (eruncommon.BuildExecutionSpec, error) {
 	environment := strings.TrimSpace(runtime.Context.Environment)
+	target := eruncommon.DockerCommandTarget{
+		ProjectRoot: projectRoot,
+		Environment: environment,
+	}
 	findProjectRoot := func() (string, string, error) {
 		return runtimeFindProjectRoot(runtime.Context, projectRoot)
 	}
@@ -66,44 +70,46 @@ func resolveRuntimeBuilds(runtime RuntimeConfig, projectRoot, component string) 
 	if component != "" {
 		buildContext, ok, err := eruncommon.FindComponentDockerBuildContext(projectRoot, component)
 		if err != nil {
-			return nil, err
+			return eruncommon.BuildExecutionSpec{}, err
 		}
 		if !ok {
-			return nil, fmt.Errorf("docker build context not found for component %q", component)
+			return eruncommon.BuildExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
 		}
 		imageRef, err := eruncommon.ResolveDockerImageReference(runtime.Store, findProjectRoot, resolveBuildContext, nil, buildContext.Dir, eruncommon.DockerCommandTarget{
 			ProjectRoot: projectRoot,
 			Environment: environment,
 		})
 		if err != nil {
-			return nil, err
+			return eruncommon.BuildExecutionSpec{}, err
 		}
-		return []eruncommon.DockerBuildSpec{{
+		return eruncommon.BuildExecutionSpecFromDockerBuilds([]eruncommon.DockerBuildSpec{{
 			ContextDir:     eruncommon.ResolveDockerBuildContextDirForProject(buildContext.Dir, projectRoot),
 			DockerfilePath: buildContext.DockerfilePath,
 			Image:          imageRef,
-		}}, nil
+		}}), nil
 	}
 
 	rootBuildContext, err := eruncommon.DockerBuildContextAtDir(projectRoot)
 	if err != nil {
-		return nil, err
+		return eruncommon.BuildExecutionSpec{}, err
 	}
-	if strings.TrimSpace(rootBuildContext.DockerfilePath) != "" {
-		return eruncommon.ResolveCurrentDockerBuildSpecs(runtime.Store, findProjectRoot, resolveBuildContext, nil, eruncommon.DockerCommandTarget{
-			ProjectRoot: projectRoot,
-			Environment: environment,
-		})
+	hasScript, err := eruncommon.HasProjectBuildScript(findProjectRoot, target)
+	if err != nil {
+		return eruncommon.BuildExecutionSpec{}, err
+	}
+	if hasScript || strings.TrimSpace(rootBuildContext.DockerfilePath) != "" {
+		return eruncommon.ResolveBuildExecution(runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
 	}
 
 	dockerModuleDir := filepath.Join(projectRoot, "docker")
 	resolveDockerModuleContext := func() (eruncommon.DockerBuildContext, error) {
 		return eruncommon.DockerBuildContext{Dir: dockerModuleDir}, nil
 	}
-	return eruncommon.ResolveCurrentDockerBuildSpecs(runtime.Store, findProjectRoot, resolveDockerModuleContext, nil, eruncommon.DockerCommandTarget{
-		ProjectRoot: projectRoot,
-		Environment: environment,
-	})
+	builds, err := eruncommon.ResolveCurrentDockerBuildSpecs(runtime.Store, findProjectRoot, resolveDockerModuleContext, nil, target)
+	if err != nil {
+		return eruncommon.BuildExecutionSpec{}, err
+	}
+	return eruncommon.BuildExecutionSpecFromDockerBuilds(builds), nil
 }
 
 func resolveRuntimePushExecution(runtime RuntimeConfig, projectRoot, component string) (eruncommon.DockerPushSpec, *eruncommon.DockerBuildSpec, error) {

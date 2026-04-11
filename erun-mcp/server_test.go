@@ -3,6 +3,7 @@ package erunmcp
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -290,6 +291,71 @@ func TestBuildToolPreviewVerboseIncludesTrace(t *testing.T) {
 	}
 	want := "docker build -t erunpaas/erun-devops:1.1.0 -f " + filepath.Join(componentDir, "Dockerfile") + " ."
 	if output.Trace[0] != "cd "+projectRoot+" && "+want {
+		t.Fatalf("unexpected trace output: %+v", output.Trace)
+	}
+}
+
+func TestBuildToolRunsProjectBuildScriptWhenPresent(t *testing.T) {
+	projectRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectRoot, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write build.sh: %v", err)
+	}
+
+	var called bool
+	handler := buildTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{
+			Environment: "dev",
+			RepoPath:    projectRoot,
+		},
+		BuildScriptRunner: func(dir, path string, stdin io.Reader, stdout, stderr io.Writer) error {
+			called = true
+			if dir != projectRoot || path != "./build.sh" {
+				t.Fatalf("unexpected build script call: dir=%q path=%q", dir, path)
+			}
+			return nil
+		},
+		BuildDockerImage: func(string, string, string, io.Writer, io.Writer) error {
+			t.Fatal("unexpected docker build")
+			return nil
+		},
+	}))
+
+	_, output, err := handler(context.Background(), nil, BuildInput{})
+	if err != nil {
+		t.Fatalf("buildTool failed: %v", err)
+	}
+	if !output.Executed {
+		t.Fatalf("expected execution output, got %+v", output)
+	}
+	if !called {
+		t.Fatal("expected build script runner to be called")
+	}
+}
+
+func TestBuildToolPreviewVerboseIncludesBuildScriptTrace(t *testing.T) {
+	projectRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectRoot, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write build.sh: %v", err)
+	}
+
+	handler := buildTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{
+			Environment: "dev",
+			RepoPath:    projectRoot,
+		},
+	}))
+
+	_, output, err := handler(context.Background(), nil, BuildInput{
+		Preview:   true,
+		Verbosity: 1,
+	})
+	if err != nil {
+		t.Fatalf("buildTool failed: %v", err)
+	}
+	if len(output.Trace) == 0 {
+		t.Fatalf("expected trace output, got %+v", output)
+	}
+	if output.Trace[0] != "cd "+projectRoot+" && ./build.sh" {
 		t.Fatalf("unexpected trace output: %+v", output.Trace)
 	}
 }

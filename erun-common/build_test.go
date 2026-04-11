@@ -1,6 +1,9 @@
 package eruncommon
 
 import (
+	"bytes"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -92,5 +95,71 @@ func TestResolveDockerBuildContextIgnoresMissingDockerfile(t *testing.T) {
 	}
 	if result.DockerfilePath != "" {
 		t.Fatalf("expected empty Dockerfile path, got %+v", result)
+	}
+}
+
+func TestResolveBuildExecutionPrefersProjectBuildScript(t *testing.T) {
+	projectRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectRoot, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write build.sh: %v", err)
+	}
+
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{}, errors.New("docker build context should not be resolved")
+		},
+		nil,
+		DockerCommandTarget{},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+
+	var called bool
+	ctx := Context{
+		Logger: NewLoggerWithWriters(2, io.Discard, io.Discard),
+		Stdin:  new(bytes.Buffer),
+		Stdout: new(bytes.Buffer),
+		Stderr: new(bytes.Buffer),
+	}
+	if err := RunBuildExecution(ctx, execution, func(dir, path string, stdin io.Reader, stdout, stderr io.Writer) error {
+		called = true
+		if dir != projectRoot || path != "./build.sh" {
+			t.Fatalf("unexpected script call: dir=%q path=%q", dir, path)
+		}
+		return nil
+	}, func(string, string, string, io.Writer, io.Writer) error {
+		t.Fatal("unexpected docker build")
+		return nil
+	}); err != nil {
+		t.Fatalf("RunBuildExecution failed: %v", err)
+	}
+	if !called {
+		t.Fatal("expected build script runner to be called")
+	}
+}
+
+func TestHasProjectBuildScriptIgnoresNestedBuildScripts(t *testing.T) {
+	projectRoot := t.TempDir()
+	nestedDir := filepath.Join(projectRoot, "scripts")
+	if err := os.MkdirAll(nestedDir, 0o755); err != nil {
+		t.Fatalf("mkdir nested dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write build.sh: %v", err)
+	}
+
+	hasScript, err := HasProjectBuildScript(func() (string, string, error) {
+		return "tenant-a", projectRoot, nil
+	}, DockerCommandTarget{})
+	if err != nil {
+		t.Fatalf("HasProjectBuildScript failed: %v", err)
+	}
+	if hasScript {
+		t.Fatal("did not expect nested build.sh to be selected")
 	}
 }

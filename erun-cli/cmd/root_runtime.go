@@ -113,7 +113,12 @@ func newPushOperation(pushDockerImage common.DockerImagePusherFunc, loginToDocke
 	}
 }
 
-func hasOptionalBuildCmd(resolveBuildContext common.BuildContextResolverFunc) bool {
+func hasOptionalBuildCmd(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc) bool {
+	hasScript, err := common.HasProjectBuildScript(findProjectRoot, common.DockerCommandTarget{})
+	if err == nil && hasScript {
+		return true
+	}
+
 	buildContext, err := resolveBuildContext()
 	if err != nil {
 		return false
