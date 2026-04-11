@@ -3,7 +3,6 @@ package eruncommon
 import (
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -30,6 +29,14 @@ type dockerContainerMount struct {
 	Target   string
 	ReadOnly bool
 }
+
+const (
+	openRuntimeContainerHome       = "/home/erun"
+	openRuntimeContainerKubeconfig = openRuntimeContainerHome + "/.kube/config"
+	openRuntimeContainerK3sConfig  = openRuntimeContainerHome + "/.kube/k3s.yaml"
+)
+
+var detectOpenRuntimeHost = DetectHostRuntime
 
 func ResolveOpenRuntimeSpec(store OpenRuntimeStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target OpenResult) (OpenRuntimeSpec, bool, error) {
 	if !isLocalEnvironment(target.Environment) {
@@ -152,43 +159,69 @@ func DockerContainerRunner(args []string, stdin io.Reader, stdout, stderr io.Wri
 }
 
 func openRuntimeDockerArgs(target OpenResult, worktreePath, imageTag string) []string {
+	hostRuntime := detectOpenRuntimeHost()
 	args := []string{"run", "--rm", "-it"}
+	args = append(args, openRuntimeDockerExtraArgs(hostRuntime)...)
 
-	for _, entry := range []struct {
-		Name  string
-		Value string
-	}{
-		{Name: "ERUN_REPO_PATH", Value: worktreePath},
-		{Name: "ERUN_KUBERNETES_CONTEXT", Value: strings.TrimSpace(target.EnvConfig.KubernetesContext)},
-		{Name: "ERUN_SHELL_HOST", Value: target.Title},
-	} {
+	for _, entry := range openRuntimeDockerEnv(target, worktreePath, hostRuntime) {
 		if strings.TrimSpace(entry.Value) == "" {
 			continue
 		}
 		args = append(args, "-e", entry.Name+"="+entry.Value)
 	}
 
-	for _, mount := range openRuntimeDockerMounts(target.RepoPath, worktreePath) {
-		args = append(args, "-v", dockerContainerMountArg(mount))
+	for _, mount := range openRuntimeDockerMounts(target.RepoPath, worktreePath, hostRuntime) {
+		args = append(args, "-v", dockerContainerMountArg(hostRuntime.Host, mount))
 	}
 
 	args = append(args, "-w", worktreePath, imageTag, "shell")
 	return args
 }
 
-func openRuntimeDockerMounts(repoPath, worktreePath string) []dockerContainerMount {
+func openRuntimeDockerEnv(target OpenResult, worktreePath string, hostRuntime HostRuntime) []struct {
+	Name  string
+	Value string
+} {
+	entries := []struct {
+		Name  string
+		Value string
+	}{
+		{Name: "ERUN_REPO_PATH", Value: worktreePath},
+		{Name: "ERUN_KUBERNETES_CONTEXT", Value: strings.TrimSpace(target.EnvConfig.KubernetesContext)},
+		{Name: "ERUN_SHELL_HOST", Value: target.Title},
+	}
+	if hostRuntime.KubernetesInstallation.KubeconfigPath != "" {
+		entries = append(entries, struct {
+			Name  string
+			Value string
+		}{
+			Name:  "KUBECONFIG",
+			Value: strings.Join([]string{openRuntimeContainerKubeconfig, openRuntimeContainerK3sConfig}, ":"),
+		})
+	}
+	return entries
+}
+
+func openRuntimeDockerExtraArgs(hostRuntime HostRuntime) []string {
+	if hostRuntime.Host.OS == HostOSLinux && hostRuntime.KubernetesInstallation.Type == KubernetesInstallationK3s {
+		return []string{"--network", "host"}
+	}
+	return nil
+}
+
+func openRuntimeDockerMounts(repoPath, worktreePath string, hostRuntime HostRuntime) []dockerContainerMount {
 	mounts := []dockerContainerMount{{
 		Source: filepath.Clean(repoPath),
 		Target: worktreePath,
 	}}
 
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
+	homeDir := strings.TrimSpace(hostRuntime.Host.HomeDir)
+	if homeDir != "" {
 		for _, mount := range []dockerContainerMount{
-			{Source: filepath.Join(homeDir, ".kube"), Target: "/home/erun/.kube", ReadOnly: true},
-			{Source: filepath.Join(homeDir, ".ssh"), Target: "/home/erun/.ssh", ReadOnly: true},
-			{Source: filepath.Join(homeDir, ".gitconfig"), Target: "/home/erun/.gitconfig", ReadOnly: true},
-			{Source: filepath.Join(homeDir, ".docker"), Target: "/home/erun/.docker", ReadOnly: true},
+			{Source: hostRuntime.Host.JoinPath(homeDir, ".kube"), Target: openRuntimeContainerHome + "/.kube", ReadOnly: true},
+			{Source: hostRuntime.Host.JoinPath(homeDir, ".ssh"), Target: openRuntimeContainerHome + "/.ssh", ReadOnly: true},
+			{Source: hostRuntime.Host.JoinPath(homeDir, ".gitconfig"), Target: openRuntimeContainerHome + "/.gitconfig", ReadOnly: true},
+			{Source: hostRuntime.Host.JoinPath(homeDir, ".docker"), Target: openRuntimeContainerHome + "/.docker", ReadOnly: true},
 		} {
 			if openRuntimeHostPathExists(mount.Source) {
 				mounts = append(mounts, mount)
@@ -196,9 +229,17 @@ func openRuntimeDockerMounts(repoPath, worktreePath string) []dockerContainerMou
 		}
 	}
 
-	if openRuntimeHostPathExists("/var/run/docker.sock") {
+	if hostRuntime.KubernetesInstallation.KubeconfigPath != "" && openRuntimeHostPathExists(hostRuntime.KubernetesInstallation.KubeconfigPath) {
 		mounts = append(mounts, dockerContainerMount{
-			Source: "/var/run/docker.sock",
+			Source:   hostRuntime.KubernetesInstallation.KubeconfigPath,
+			Target:   openRuntimeContainerK3sConfig,
+			ReadOnly: true,
+		})
+	}
+
+	if hostRuntime.ContainerSocketPath != "" && openRuntimeHostPathExists(hostRuntime.ContainerSocketPath) {
+		mounts = append(mounts, dockerContainerMount{
+			Source: hostRuntime.ContainerSocketPath,
 			Target: "/var/run/docker.sock",
 		})
 	}
@@ -207,12 +248,11 @@ func openRuntimeDockerMounts(repoPath, worktreePath string) []dockerContainerMou
 }
 
 func openRuntimeHostPathExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
+	return hostPathExists(path)
 }
 
-func dockerContainerMountArg(mount dockerContainerMount) string {
-	value := filepath.Clean(mount.Source) + ":" + mount.Target
+func dockerContainerMountArg(host HostInfo, mount dockerContainerMount) string {
+	value := host.DockerVolumeSource(mount.Source) + ":" + mount.Target
 	if mount.ReadOnly {
 		value += ":ro"
 	}
