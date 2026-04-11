@@ -30,6 +30,7 @@ type runtimeStore interface {
 type RuntimeConfig struct {
 	Context                   RuntimeContext
 	Store                     runtimeStore
+	BuildScriptRunner         eruncommon.BuildScriptRunnerFunc
 	BuildDockerImage          eruncommon.DockerImageBuilderFunc
 	PushDockerImage           eruncommon.DockerImagePusherFunc
 	DeployHelmChart           eruncommon.HelmChartDeployerFunc
@@ -49,6 +50,9 @@ var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 func normalizeRuntimeConfig(cfg RuntimeConfig) RuntimeConfig {
 	if cfg.Store == nil {
 		cfg.Store = eruncommon.ConfigStore{}
+	}
+	if cfg.BuildScriptRunner == nil {
+		cfg.BuildScriptRunner = eruncommon.BuildScriptRunner
 	}
 	if cfg.BuildDockerImage == nil {
 		cfg.BuildDockerImage = eruncommon.DockerImageBuilder

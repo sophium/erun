@@ -36,6 +36,14 @@ type dockerLoginCall struct {
 	Stderr   io.Writer
 }
 
+type buildScriptCall struct {
+	Dir    string
+	Path   string
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
 func buildCallFunc(run func(dockerBuildCall) error) common.DockerImageBuilderFunc {
 	return func(dir, dockerfilePath, tag string, stdout, stderr io.Writer) error {
 		return run(dockerBuildCall{
@@ -44,6 +52,18 @@ func buildCallFunc(run func(dockerBuildCall) error) common.DockerImageBuilderFun
 			Tag:            tag,
 			Stdout:         stdout,
 			Stderr:         stderr,
+		})
+	}
+}
+
+func buildScriptCallFunc(run func(buildScriptCall) error) common.BuildScriptRunnerFunc {
+	return func(dir, path string, stdin io.Reader, stdout, stderr io.Writer) error {
+		return run(buildScriptCall{
+			Dir:    dir,
+			Path:   path,
+			Stdin:  stdin,
+			Stdout: stdout,
+			Stderr: stderr,
 		})
 	}
 }
@@ -103,6 +123,9 @@ func TestNewRootCmdRegistersDevopsContainerPushCommand(t *testing.T) {
 
 func TestNewRootCmdRegistersBuildShorthandWhenDockerfilePresent(t *testing.T) {
 	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", t.TempDir(), nil
+		},
 		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
 			dir := t.TempDir()
 			return common.DockerBuildContext{
@@ -117,6 +140,33 @@ func TestNewRootCmdRegistersBuildShorthandWhenDockerfilePresent(t *testing.T) {
 	}
 	if !hasSubcommand(cmd, "push") {
 		t.Fatal("expected push shorthand command to be registered")
+	}
+}
+
+func TestNewRootCmdRegistersBuildShorthandWhenProjectBuildScriptPresent(t *testing.T) {
+	projectRoot := t.TempDir()
+	scriptPath := filepath.Join(projectRoot, "build.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write build.sh: %v", err)
+	}
+
+	cmd := newTestRootCmd(testRootDeps{
+		OptionalBuildFindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: projectRoot}, nil
+		},
+	})
+
+	if !hasSubcommand(cmd, "build") {
+		t.Fatal("expected build shorthand command to be registered")
+	}
+	if hasSubcommand(cmd, "push") {
+		t.Fatal("did not expect push shorthand command to be registered")
 	}
 }
 
@@ -216,6 +266,59 @@ func TestRootBuildShorthandRunsDockerBuild(t *testing.T) {
 	}
 	if received.Tag != "erunpaas/erun-ubuntu:noble-20260217" {
 		t.Fatalf("unexpected image tag: %+v", received)
+	}
+	if received.Stdout != stdout || received.Stderr != stderr {
+		t.Fatalf("unexpected output writers: %+v", received)
+	}
+}
+
+func TestRootBuildShorthandRunsProjectBuildScriptWhenPresent(t *testing.T) {
+	projectRoot := t.TempDir()
+	scriptPath := filepath.Join(projectRoot, "build.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write build.sh: %v", err)
+	}
+
+	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		t.Fatalf("mkdir build dir: %v", err)
+	}
+
+	var received buildScriptCall
+	cmd := newTestRootCmd(testRootDeps{
+		OptionalBuildFindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{
+				Dir:            buildDir,
+				DockerfilePath: filepath.Join(buildDir, "Dockerfile"),
+			}, nil
+		},
+		RunBuildScript: buildScriptCallFunc(func(req buildScriptCall) error {
+			received = req
+			return nil
+		}),
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
+			t.Fatalf("unexpected docker build request: %+v", req)
+			return nil
+		}),
+	})
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"build"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if received.Dir != projectRoot || received.Path != "./build.sh" {
+		t.Fatalf("unexpected build script call: %+v", received)
 	}
 	if received.Stdout != stdout || received.Stderr != stderr {
 		t.Fatalf("unexpected output writers: %+v", received)
@@ -418,6 +521,98 @@ func TestRootBuildShorthandDryRunPrintsCommandWithoutExecuting(t *testing.T) {
 
 	if got := stderr.String(); !bytes.Contains([]byte(got), []byte("docker build -t erunpaas/erun-devops:1.1.0")) {
 		t.Fatalf("expected dry-run trace output, got %q", got)
+	}
+}
+
+func TestRootBuildShorthandDryRunPrintsBuildScriptCommandWithoutExecuting(t *testing.T) {
+	projectRoot := t.TempDir()
+	scriptPath := filepath.Join(projectRoot, "build.sh")
+	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write build.sh: %v", err)
+	}
+
+	stderr := new(bytes.Buffer)
+	cmd := newTestRootCmd(testRootDeps{
+		OptionalBuildFindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: projectRoot}, nil
+		},
+		RunBuildScript: buildScriptCallFunc(func(req buildScriptCall) error {
+			t.Fatalf("unexpected build script execution during dry-run: %+v", req)
+			return nil
+		}),
+	})
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"build", "--dry-run"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if got := stderr.String(); !strings.Contains(got, "cd "+projectRoot+" && ./build.sh") {
+		t.Fatalf("expected build.sh dry-run trace, got %q", got)
+	}
+}
+
+func TestRootBuildShorthandIgnoresNestedBuildScript(t *testing.T) {
+	projectRoot := t.TempDir()
+	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		t.Fatalf("mkdir build dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	scriptDir := filepath.Join(projectRoot, "scripts")
+	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
+		t.Fatalf("mkdir script dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write nested build.sh: %v", err)
+	}
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write module VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
+		t.Fatalf("write local VERSION: %v", err)
+	}
+
+	var built dockerBuildCall
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{
+				Dir:            buildDir,
+				DockerfilePath: filepath.Join(buildDir, "Dockerfile"),
+			}, nil
+		},
+		RunBuildScript: buildScriptCallFunc(func(req buildScriptCall) error {
+			t.Fatalf("unexpected build script call: %+v", req)
+			return nil
+		}),
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
+			built = req
+			return nil
+		}),
+	})
+	cmd.SetArgs([]string{"build"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if built.Dir != projectRoot || built.Tag != "erunpaas/erun-devops:1.1.0" {
+		t.Fatalf("unexpected docker build request: %+v", built)
 	}
 }
 
@@ -1050,6 +1245,7 @@ func TestRunContainerBuildCommandPropagatesBuildContextErrors(t *testing.T) {
 		},
 		nil,
 		nil,
+		nil,
 	)
 	cmd.SetArgs([]string{})
 
@@ -1067,7 +1263,7 @@ func TestRunContainerPushCommandPropagatesBuildContextErrors(t *testing.T) {
 		newBuildCmd(common.ConfigStore{}, nil, func() (common.DockerBuildContext, error) {
 			t.Fatal("unexpected build execution")
 			return common.DockerBuildContext{}, nil
-		}, nil, nil),
+		}, nil, nil, nil),
 		newPushCmd(common.ConfigStore{}, nil, func() (common.DockerBuildContext, error) {
 			return common.DockerBuildContext{}, expectedErr
 		}, nil, nil, nil),
