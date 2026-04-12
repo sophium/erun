@@ -288,10 +288,10 @@ func TestBootstrapRunCreatesTenantDevopsModule(t *testing.T) {
 	if !strings.Contains(string(dockerfile), "FROM ${ERUN_BASE_TAG}") {
 		t.Fatalf("expected thin wrapper Dockerfile, got %q", string(dockerfile))
 	}
-	if !strings.Contains(string(dockerfile), "exec /bin/bash -i") || !strings.Contains(string(dockerfile), "exec erun-devops-entrypoint") {
-		t.Fatalf("expected wrapper Dockerfile to handle shell mode and delegate to base entrypoint, got %q", string(dockerfile))
+	if !strings.Contains(string(dockerfile), "ENTRYPOINT [\"erun-devops-entrypoint\"]") {
+		t.Fatalf("expected wrapper Dockerfile to delegate to base entrypoint, got %q", string(dockerfile))
 	}
-	if strings.Contains(string(dockerfile), "entrypoint.sh") || strings.Contains(string(dockerfile), "terraform") {
+	if strings.Contains(string(dockerfile), "exec /bin/bash -i") || strings.Contains(string(dockerfile), "entrypoint.sh") || strings.Contains(string(dockerfile), "terraform") {
 		t.Fatalf("expected no duplicated runtime setup in Dockerfile, got %q", string(dockerfile))
 	}
 }
@@ -305,7 +305,7 @@ func TestBootstrapRunUpdatesLegacyGeneratedTenantDevopsDockerfile(t *testing.T) 
 	if err := os.MkdirAll(filepath.Dir(dockerfilePath), 0o755); err != nil {
 		t.Fatalf("mkdir docker dir: %v", err)
 	}
-	legacyDockerfile := "ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.0.0\n\nFROM ${ERUN_BASE_TAG}\n"
+	legacyDockerfile := "ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.0.0\n\nFROM ${ERUN_BASE_TAG}\n\nENTRYPOINT [\"/bin/sh\", \"-lc\", \"if [ \\\"${1:-}\\\" = shell ]; then shift; repo_dir=\\\"${ERUN_REPO_PATH:-${HOME}/git/erun}\\\"; [ -d \\\"$repo_dir\\\" ] && cd \\\"$repo_dir\\\"; exec /bin/bash -i; fi; exec erun-devops-entrypoint \\\"$@\\\"\", \"erun-devops-wrapper\"]\n"
 	if err := os.WriteFile(dockerfilePath, []byte(legacyDockerfile), 0o644); err != nil {
 		t.Fatalf("write legacy Dockerfile: %v", err)
 	}
@@ -337,8 +337,8 @@ func TestBootstrapRunUpdatesLegacyGeneratedTenantDevopsDockerfile(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read Dockerfile: %v", err)
 	}
-	if !strings.Contains(string(dockerfile), "exec /bin/bash -i") || !strings.Contains(string(dockerfile), "exec erun-devops-entrypoint") {
-		t.Fatalf("expected legacy Dockerfile to be replaced with shell-capable wrapper, got %q", string(dockerfile))
+	if !strings.Contains(string(dockerfile), "ENTRYPOINT [\"erun-devops-entrypoint\"]") {
+		t.Fatalf("expected legacy Dockerfile to be replaced with entrypoint wrapper, got %q", string(dockerfile))
 	}
 }
 

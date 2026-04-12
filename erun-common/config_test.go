@@ -167,6 +167,63 @@ func TestListTenantConfigs(t *testing.T) {
 	}
 }
 
+func TestListTenantConfigsSkipsIncompleteTenantDirectories(t *testing.T) {
+	setupConfigTestXDGConfigHome(t)
+
+	if err := SaveTenantConfig(TenantConfig{Name: "tenant-a", ProjectRoot: "/tmp/a", DefaultEnvironment: "dev"}); err != nil {
+		t.Fatalf("SaveTenantConfig failed: %v", err)
+	}
+
+	incompleteDir, err := xdg.ConfigFile(filepath.Join(testConfigRoot, "tenant-b", configFile))
+	if err != nil {
+		t.Fatalf("xdg path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(incompleteDir), 0o755); err != nil {
+		t.Fatalf("mkdir incomplete tenant dir: %v", err)
+	}
+	if err := os.Remove(incompleteDir); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("remove config file: %v", err)
+	}
+
+	tenants, err := ListTenantConfigs()
+	if err != nil {
+		t.Fatalf("ListTenantConfigs failed: %v", err)
+	}
+	if len(tenants) != 1 || tenants[0].Name != "tenant-a" {
+		t.Fatalf("expected only complete tenants, got %+v", tenants)
+	}
+}
+
+func TestListEnvConfigsSkipsIncompleteEnvironmentDirectories(t *testing.T) {
+	setupConfigTestXDGConfigHome(t)
+
+	if err := SaveTenantConfig(TenantConfig{Name: "tenant-a", ProjectRoot: "/tmp/a", DefaultEnvironment: "dev"}); err != nil {
+		t.Fatalf("SaveTenantConfig failed: %v", err)
+	}
+	if err := SaveEnvConfig("tenant-a", EnvConfig{Name: "dev", RepoPath: "/tmp/a", KubernetesContext: "cluster-dev"}); err != nil {
+		t.Fatalf("SaveEnvConfig failed: %v", err)
+	}
+
+	incompletePath, err := xdg.ConfigFile(filepath.Join(testConfigRoot, "tenant-a", "prod", configFile))
+	if err != nil {
+		t.Fatalf("xdg path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(incompletePath), 0o755); err != nil {
+		t.Fatalf("mkdir incomplete env dir: %v", err)
+	}
+	if err := os.Remove(incompletePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("remove config file: %v", err)
+	}
+
+	envs, err := ListEnvConfigs("tenant-a")
+	if err != nil {
+		t.Fatalf("ListEnvConfigs failed: %v", err)
+	}
+	if len(envs) != 1 || envs[0].Name != "dev" {
+		t.Fatalf("expected only complete envs, got %+v", envs)
+	}
+}
+
 func TestLoadTenantConfigErrors(t *testing.T) {
 	setupConfigTestXDGConfigHome(t)
 

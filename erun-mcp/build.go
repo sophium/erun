@@ -3,7 +3,6 @@ package erunmcp
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -38,17 +37,11 @@ func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 func pushTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, PushInput) (*mcp.CallToolResult, CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input PushInput) (*mcp.CallToolResult, CommandOutput, error) {
 		output, err := runRuntimeCommand(runtime.Context, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
-			pushInput, buildInput, err := resolveRuntimePushExecution(runtime, workDir, strings.TrimSpace(input.Component))
+			execution, err := resolveRuntimePushExecution(runtime, workDir, strings.TrimSpace(input.Component))
 			if err != nil {
 				return err
 			}
-			return eruncommon.RunDockerPushSpec(
-				runCtx,
-				pushInput,
-				buildInput,
-				runtime.BuildDockerImage,
-				runtimePushFunc(runtime),
-			)
+			return eruncommon.RunDockerPushExecution(runCtx, execution, runtime.BuildDockerImage, runtimePushFunc(runtime))
 		})
 		return nil, output, err
 	}
@@ -89,30 +82,10 @@ func resolveRuntimeBuildExecution(runtime RuntimeConfig, projectRoot, component 
 		}}), nil
 	}
 
-	rootBuildContext, err := eruncommon.DockerBuildContextAtDir(projectRoot)
-	if err != nil {
-		return eruncommon.BuildExecutionSpec{}, err
-	}
-	hasScript, err := eruncommon.HasProjectBuildScript(findProjectRoot, target)
-	if err != nil {
-		return eruncommon.BuildExecutionSpec{}, err
-	}
-	if hasScript || strings.TrimSpace(rootBuildContext.DockerfilePath) != "" {
-		return eruncommon.ResolveBuildExecution(runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
-	}
-
-	dockerModuleDir := filepath.Join(projectRoot, "docker")
-	resolveDockerModuleContext := func() (eruncommon.DockerBuildContext, error) {
-		return eruncommon.DockerBuildContext{Dir: dockerModuleDir}, nil
-	}
-	builds, err := eruncommon.ResolveCurrentDockerBuildSpecs(runtime.Store, findProjectRoot, resolveDockerModuleContext, nil, target)
-	if err != nil {
-		return eruncommon.BuildExecutionSpec{}, err
-	}
-	return eruncommon.BuildExecutionSpecFromDockerBuilds(builds), nil
+	return eruncommon.ResolveBuildExecution(runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
 }
 
-func resolveRuntimePushExecution(runtime RuntimeConfig, projectRoot, component string) (eruncommon.DockerPushSpec, *eruncommon.DockerBuildSpec, error) {
+func resolveRuntimePushExecution(runtime RuntimeConfig, projectRoot, component string) (eruncommon.DockerPushExecutionSpec, error) {
 	target := eruncommon.DockerCommandTarget{
 		ProjectRoot: projectRoot,
 		Environment: strings.TrimSpace(runtime.Context.Environment),
@@ -124,43 +97,37 @@ func resolveRuntimePushExecution(runtime RuntimeConfig, projectRoot, component s
 		return eruncommon.DockerBuildContextAtDir(projectRoot)
 	}
 
-	rootBuildContext, err := eruncommon.DockerBuildContextAtDir(projectRoot)
-	if err != nil {
-		return eruncommon.DockerPushSpec{}, nil, err
-	}
-
 	if component == "" {
-		if strings.TrimSpace(rootBuildContext.DockerfilePath) == "" {
-			return eruncommon.DockerPushSpec{}, nil, fmt.Errorf("component is required when the runtime repo root is not a Docker build context")
-		}
-		return eruncommon.ResolveDockerPushSpec(runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
+		return eruncommon.ResolveDockerPushExecution(runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
 	}
 
 	buildContext, ok, err := eruncommon.FindComponentDockerBuildContext(projectRoot, component)
 	if err != nil {
-		return eruncommon.DockerPushSpec{}, nil, err
+		return eruncommon.DockerPushExecutionSpec{}, err
 	}
 	if !ok {
-		return eruncommon.DockerPushSpec{}, nil, fmt.Errorf("docker build context not found for component %q", component)
+		return eruncommon.DockerPushExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
 	}
 
 	imageRef, err := eruncommon.ResolveDockerImageReference(runtime.Store, findProjectRoot, resolveBuildContext, nil, buildContext.Dir, target)
 	if err != nil {
-		return eruncommon.DockerPushSpec{}, nil, err
+		return eruncommon.DockerPushExecutionSpec{}, err
 	}
 
-	var buildInput *eruncommon.DockerBuildSpec
+	builds := make([]eruncommon.DockerBuildSpec, 0, 1)
 	if imageRef.IsLocalBuild {
 		build, err := eruncommon.ResolveDockerBuildForComponent(runtime.Store, findProjectRoot, resolveBuildContext, nil, projectRoot, target.Environment, component)
 		if err != nil {
-			return eruncommon.DockerPushSpec{}, nil, err
+			return eruncommon.DockerPushExecutionSpec{}, err
 		}
 		if build == nil {
-			return eruncommon.DockerPushSpec{}, nil, fmt.Errorf("docker build context not found for component %q", component)
+			return eruncommon.DockerPushExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
 		}
-		buildInput = build
+		builds = append(builds, *build)
 		imageRef = build.Image
 	}
 
-	return eruncommon.NewDockerPushSpec(projectRoot, imageRef), buildInput, nil
+	return eruncommon.DockerPushExecutionSpecFromSpecs(builds, []eruncommon.DockerPushSpec{
+		eruncommon.NewDockerPushSpec(projectRoot, imageRef),
+	}), nil
 }

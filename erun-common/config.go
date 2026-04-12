@@ -239,6 +239,9 @@ func ListTenantConfigs() ([]TenantConfig, error) {
 		}
 
 		tenantConfig, _, err := LoadTenantConfig(entry.Name())
+		if errors.Is(err, ErrNotInitialized) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -317,6 +320,9 @@ func ListEnvConfigs(tenant string) ([]EnvConfig, error) {
 		}
 
 		envConfig, _, err := LoadEnvConfig(tenant, entry.Name())
+		if errors.Is(err, ErrNotInitialized) {
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}

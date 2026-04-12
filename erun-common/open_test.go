@@ -291,9 +291,10 @@ func TestRemoteShellScriptSeedsConfigsAndCloneCommand(t *testing.T) {
 	for _, pattern := range []string{
 		"mkdir -p '/home/erun/git/erun'",
 		"cd '/home/erun/git/erun'",
-		"$HOME/.config/erun/config.yaml",
-		"$HOME/.config/erun/tenant-a/config.yaml",
-		"$HOME/.config/erun/tenant-a/local/config.yaml",
+		"config_home=\"${XDG_CONFIG_HOME:-$HOME/.config}\"",
+		"$config_home/erun/config.yaml",
+		"$config_home/erun/tenant-a/config.yaml",
+		"$config_home/erun/tenant-a/local/config.yaml",
 		"defaulttenant: tenant-a",
 		"projectroot: " + remoteWorkdir,
 		"defaultenvironment: local",
@@ -313,7 +314,7 @@ func TestRemoteShellScriptSeedsConfigsAndCloneCommand(t *testing.T) {
 		t.Fatalf("did not expect host repo path %q in remote bootstrap script, got:\n%s", repoDir, script)
 	}
 
-	toolConfigBody := extractHeredoc(t, script, `cat > "$HOME/.config/erun/config.yaml" <<'EOF'`)
+	toolConfigBody := extractHeredoc(t, script, `cat > "$config_home/erun/config.yaml" <<'EOF'`)
 	var toolConfig ERunConfig
 	if err := yaml.Unmarshal([]byte(toolConfigBody), &toolConfig); err != nil {
 		t.Fatalf("expected tool config heredoc to be valid yaml, got %v\n%s", err, toolConfigBody)
@@ -322,7 +323,7 @@ func TestRemoteShellScriptSeedsConfigsAndCloneCommand(t *testing.T) {
 		t.Fatalf("unexpected tool config: %+v", toolConfig)
 	}
 
-	tenantConfigBody := extractHeredoc(t, script, `cat > "$HOME/.config/erun/tenant-a/config.yaml" <<'EOF'`)
+	tenantConfigBody := extractHeredoc(t, script, `cat > "$config_home/erun/tenant-a/config.yaml" <<'EOF'`)
 	var tenantConfig TenantConfig
 	if err := yaml.Unmarshal([]byte(tenantConfigBody), &tenantConfig); err != nil {
 		t.Fatalf("expected tenant config heredoc to be valid yaml, got %v\n%s", err, tenantConfigBody)
@@ -331,13 +332,36 @@ func TestRemoteShellScriptSeedsConfigsAndCloneCommand(t *testing.T) {
 		t.Fatalf("unexpected tenant config: %+v", tenantConfig)
 	}
 
-	envConfigBody := extractHeredoc(t, script, `cat > "$HOME/.config/erun/tenant-a/local/config.yaml" <<'EOF'`)
+	envConfigBody := extractHeredoc(t, script, `cat > "$config_home/erun/tenant-a/local/config.yaml" <<'EOF'`)
 	var envConfig EnvConfig
 	if err := yaml.Unmarshal([]byte(envConfigBody), &envConfig); err != nil {
 		t.Fatalf("expected env config heredoc to be valid yaml, got %v\n%s", err, envConfigBody)
 	}
 	if envConfig.RepoPath != remoteWorkdir || envConfig.KubernetesContext != "in-cluster" {
 		t.Fatalf("unexpected env config: %+v", envConfig)
+	}
+}
+
+func TestRemoteShellScriptUsesXDGConfigHomeWhenPresent(t *testing.T) {
+	script, err := buildRemoteShellScript(ShellLaunchParams{
+		Dir:               "/Users/test/git/erun",
+		Tenant:            "tenant-a",
+		Environment:       "local",
+		Title:             "tenant-a-local",
+		KubernetesContext: "in-cluster",
+	}, true)
+	if err != nil {
+		t.Fatalf("buildRemoteShellScript failed: %v", err)
+	}
+
+	for _, pattern := range []string{
+		`config_home="${XDG_CONFIG_HOME:-$HOME/.config}"`,
+		`mkdir -p "$config_home/erun"`,
+		`cat > "$config_home/erun/config.yaml" <<'EOF'`,
+	} {
+		if !strings.Contains(script, pattern) {
+			t.Fatalf("expected script to contain %q, got:\n%s", pattern, script)
+		}
 	}
 }
 

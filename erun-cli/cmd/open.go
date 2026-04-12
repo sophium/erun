@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error, launchShell common.ShellLauncherFunc, resolveOpenRuntimeSpec func(common.OpenResult) (common.OpenRuntimeSpec, bool, error), runDockerContainer common.DockerContainerRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
+func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error, launchShell common.ShellLauncherFunc, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	var noShell bool
 
 	cmd := &cobra.Command{
@@ -29,7 +29,7 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 			if initRan {
 				return nil
 			}
-			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell}, launchShell, resolveOpenRuntimeSpec, runDockerContainer, buildDockerImage, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart)
+			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell}, launchShell, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart)
 		},
 	}
 
@@ -84,23 +84,13 @@ func resolveOpenWithInitRetry(ctx common.Context, args []string, shouldRunInit f
 	return result, true, err
 }
 
-func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, launchShell common.ShellLauncherFunc, resolveOpenRuntimeSpec func(common.OpenResult) (common.OpenRuntimeSpec, bool, error), runDockerContainer common.DockerContainerRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) error {
+func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, launchShell common.ShellLauncherFunc, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) error {
 	namespace := common.KubernetesNamespaceName(result.Tenant, result.Environment)
 	if options.NoShell {
 		ctx.TraceCommand("", "kubectl", "config", "use-context", strings.TrimSpace(result.EnvConfig.KubernetesContext))
 		ctx.TraceCommand("", "kubectl", "config", "set-context", "--current", "--namespace="+namespace)
 		ctx.TraceCommand("", "cd", result.RepoPath)
 		return emitLocalShellSetupForOpenResult(result, ctx.Stdout, ctx.Stderr)
-	}
-
-	if resolveOpenRuntimeSpec != nil {
-		spec, ok, err := resolveOpenRuntimeSpec(result)
-		if err != nil {
-			return err
-		}
-		if ok {
-			return common.RunOpenRuntime(ctx, spec, buildDockerImage, runDockerContainer)
-		}
 	}
 
 	shellReq := common.ShellLaunchParamsFromResult(result)
