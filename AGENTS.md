@@ -58,6 +58,9 @@ Repository guidance for humans and coding agents working in this repo.
 - Design MCP-facing handlers as non-interactive operations with explicit inputs and structured outputs.
 - Keep tenant DevOps runtime scaffolding shared. When `init` creates project-local runtime assets, prefer generating the tenant-specific `<tenant>-devops` module from shared templates in `erun-common` so CLI and MCP flows stay aligned.
 - Assume tenant-specific DevOps modules use the shared `erun` runtime image as their base. Prefer thin tenant wrappers that extend the canonical runtime image over duplicating Dockerfiles, entrypoints, prompt scripts, or tool installation logic per tenant module.
+- Keep generated runtime asset identity explicit. Prefer rendering stable, intentional names into generated assets over deriving runtime identity indirectly from release metadata when the generated module already knows what it is.
+- Treat runtime startup code and deployment templates as one contract. If runtime initialization depends on specific context values, pass them explicitly through deployment inputs instead of relying on ambient process state or cwd detection inside the container.
+- Keep transport entrypoints responsible for wiring required runtime initialization values into shared deployment plans. Deployment templates should declare required startup inputs, and shared execution should pass them concretely so the same contract holds across CLI and MCP flows.
 
 ## Dependency Wiring
 

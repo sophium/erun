@@ -1,12 +1,9 @@
-{{- $worktreeHostPath := required "worktreeHostPath is required" .Values.worktreeHostPath -}}
-{{- $repoMountPath := printf "/home/erun/git/%s" (base $worktreeHostPath) -}}
-{{- $runtimeName := .Release.Name -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ .Release.Namespace }}-{{ .Release.Name }}-home
+  name: __MODULE_NAME__-home
   labels:
-    app: {{ $runtimeName }}
+    app: __MODULE_NAME__
 spec:
   accessModes:
     - ReadWriteOnce
@@ -17,9 +14,9 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ .Release.Namespace }}-{{ .Release.Name }}-docker
+  name: __MODULE_NAME__-docker
   labels:
-    app: {{ $runtimeName }}
+    app: __MODULE_NAME__
 spec:
   accessModes:
     - ReadWriteOnce
@@ -30,19 +27,19 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ $runtimeName }}
+  name: __MODULE_NAME__
   labels:
-    app: {{ $runtimeName }}
+    app: __MODULE_NAME__
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ $runtimeName }}
+  name: __MODULE_NAME__
   labels:
-    app: {{ $runtimeName }}
+    app: __MODULE_NAME__
 subjects:
   - kind: ServiceAccount
-    name: {{ $runtimeName }}
+    name: __MODULE_NAME__
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -51,28 +48,28 @@ roleRef:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ $runtimeName }}
+  name: __MODULE_NAME__
   labels:
-    app: {{ $runtimeName }}
+    app: __MODULE_NAME__
 spec:
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: {{ $runtimeName }}
+      app: __MODULE_NAME__
   replicas: 1
   template:
     metadata:
       labels:
-        app: {{ $runtimeName }}
+        app: __MODULE_NAME__
     spec:
       automountServiceAccountToken: true
-      serviceAccountName: {{ $runtimeName }}
+      serviceAccountName: __MODULE_NAME__
       securityContext:
         fsGroup: 1000
       containers:
         - image: erunpaas/erun-devops:{{ .Chart.AppVersion }}
-          name: erun-devops
+          name: __MODULE_NAME__
           imagePullPolicy: IfNotPresent
           env:
             - name: HOME
@@ -84,9 +81,13 @@ spec:
             - name: DOCKER_BUILDKIT
               value: "1"
             - name: ERUN_REPO_PATH
-              value: {{ $repoMountPath | quote }}
+              value: {{ printf "/home/erun/git/%s" (base (required "worktreeHostPath is required" .Values.worktreeHostPath)) | quote }}
             - name: ERUN_KUBERNETES_CONTEXT
               value: in-cluster
+            - name: ERUN_TENANT
+              value: {{ required "tenant is required" .Values.tenant | quote }}
+            - name: ERUN_ENVIRONMENT
+              value: {{ required "environment is required" .Values.environment | quote }}
           securityContext:
             runAsUser: 1000
             runAsGroup: 1000
@@ -101,7 +102,7 @@ spec:
             - name: erun-home
               mountPath: /home/erun
             - name: repo-worktree
-              mountPath: {{ $repoMountPath | quote }}
+              mountPath: {{ printf "/home/erun/git/%s" (base (required "worktreeHostPath is required" .Values.worktreeHostPath)) | quote }}
             - name: docker-socket
               mountPath: /var/run
         - image: erunpaas/erun-dind:28.1.1
@@ -136,14 +137,14 @@ spec:
       volumes:
         - name: erun-home
           persistentVolumeClaim:
-            claimName: {{ .Release.Namespace }}-{{ .Release.Name }}-home
+            claimName: __MODULE_NAME__-home
         - name: repo-worktree
           hostPath:
-            path: {{ $worktreeHostPath | quote }}
+            path: {{ required "worktreeHostPath is required" .Values.worktreeHostPath | quote }}
             type: Directory
         - name: docker-socket
           emptyDir: {}
         - name: docker-state
           persistentVolumeClaim:
-            claimName: {{ .Release.Namespace }}-{{ .Release.Name }}-docker
+            claimName: __MODULE_NAME__-docker
       restartPolicy: Always

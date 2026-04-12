@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -231,6 +233,62 @@ func TestResolveReleaseSpecStableReleaseUsesConfiguredDevelopBranchForSyncAndPus
 	}
 }
 
+func TestGitCommandRunnerUsesFallbackIdentityWhenGitConfigIsMissing(t *testing.T) {
+	projectRoot := t.TempDir()
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(homeDir, ".config"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+	runGitWithEnv(t, projectRoot, []string{
+		"GIT_AUTHOR_NAME=Codex",
+		"GIT_AUTHOR_EMAIL=codex@example.com",
+		"GIT_COMMITTER_NAME=Codex",
+		"GIT_COMMITTER_EMAIL=codex@example.com",
+	}, "init", "-b", "main")
+
+	if err := os.WriteFile(filepath.Join(projectRoot, "README.md"), []byte("initial\n"), 0o644); err != nil {
+		t.Fatalf("write README: %v", err)
+	}
+
+	runGitWithEnv(t, projectRoot, []string{
+		"GIT_AUTHOR_NAME=Codex",
+		"GIT_AUTHOR_EMAIL=codex@example.com",
+		"GIT_COMMITTER_NAME=Codex",
+		"GIT_COMMITTER_EMAIL=codex@example.com",
+	}, "add", "README.md")
+	runGitWithEnv(t, projectRoot, []string{
+		"GIT_AUTHOR_NAME=Codex",
+		"GIT_AUTHOR_EMAIL=codex@example.com",
+		"GIT_COMMITTER_NAME=Codex",
+		"GIT_COMMITTER_EMAIL=codex@example.com",
+	}, "commit", "-m", "initial")
+
+	if err := os.WriteFile(filepath.Join(projectRoot, "README.md"), []byte("updated\n"), 0o644); err != nil {
+		t.Fatalf("update README: %v", err)
+	}
+
+	if err := GitCommandRunner(projectRoot, io.Discard, io.Discard, "add", "README.md"); err != nil {
+		t.Fatalf("GitCommandRunner add failed: %v", err)
+	}
+	if err := GitCommandRunner(projectRoot, io.Discard, io.Discard, "commit", "-m", "update"); err != nil {
+		t.Fatalf("GitCommandRunner commit failed: %v", err)
+	}
+	if err := GitCommandRunner(projectRoot, io.Discard, io.Discard, "tag", "-a", "v1.0.0", "-m", "Release 1.0.0"); err != nil {
+		t.Fatalf("GitCommandRunner tag failed: %v", err)
+	}
+
+	author := strings.TrimSpace(runGitOutput(t, projectRoot, "log", "-1", "--format=%an <%ae>"))
+	if author != defaultReleaseGitUserName+" <"+defaultReleaseGitUserEmail+">" {
+		t.Fatalf("unexpected author identity: %q", author)
+	}
+
+	tagger := strings.TrimSpace(runGitOutput(t, projectRoot, "for-each-ref", "refs/tags/v1.0.0", "--format=%(taggername) %(taggeremail)"))
+	if tagger != defaultReleaseGitUserName+" <"+defaultReleaseGitUserEmail+">" {
+		t.Fatalf("unexpected tagger identity: %q", tagger)
+	}
+}
+
 type releaseProjectOptions struct {
 	ProjectConfig ProjectConfig
 }
@@ -278,4 +336,28 @@ func setupReleaseProject(t *testing.T, options releaseProjectOptions) string {
 	}
 
 	return projectRoot
+}
+
+func runGitWithEnv(t *testing.T, dir string, extraEnv []string, args ...string) {
+	t.Helper()
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), extraEnv...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, output)
+	}
+}
+
+func runGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, output)
+	}
+	return string(output)
 }

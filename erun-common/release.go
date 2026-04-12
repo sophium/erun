@@ -17,6 +17,8 @@ import (
 const (
 	DefaultReleaseMainBranch    = "main"
 	DefaultReleaseDevelopBranch = "develop"
+	defaultReleaseGitUserName   = "ERun"
+	defaultReleaseGitUserEmail  = "erun@local"
 )
 
 type (
@@ -249,7 +251,88 @@ func GitCommandRunner(dir string, stdout, stderr io.Writer, args ...string) erro
 	cmd.Dir = dir
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
+	cmd.Env = gitCommandEnv(dir)
 	return cmd.Run()
+}
+
+func gitCommandEnv(dir string) []string {
+	env := os.Environ()
+
+	authorName := firstNonEmptyEnv(env, "GIT_AUTHOR_NAME")
+	authorEmail := firstNonEmptyEnv(env, "GIT_AUTHOR_EMAIL")
+	committerName := firstNonEmptyEnv(env, "GIT_COMMITTER_NAME")
+	committerEmail := firstNonEmptyEnv(env, "GIT_COMMITTER_EMAIL")
+
+	name := authorName
+	if name == "" {
+		name = committerName
+	}
+	if name == "" {
+		name = gitConfigValue(dir, "user.name")
+	}
+	if name == "" {
+		name = firstNonEmptyEnv(env, "ERUN_GIT_USER_NAME")
+	}
+	if name == "" {
+		name = defaultReleaseGitUserName
+	}
+
+	email := authorEmail
+	if email == "" {
+		email = committerEmail
+	}
+	if email == "" {
+		email = gitConfigValue(dir, "user.email")
+	}
+	if email == "" {
+		email = firstNonEmptyEnv(env, "ERUN_GIT_USER_EMAIL")
+	}
+	if email == "" {
+		email = defaultReleaseGitUserEmail
+	}
+
+	env = appendOrReplaceEnv(env, "GIT_AUTHOR_NAME", name)
+	env = appendOrReplaceEnv(env, "GIT_AUTHOR_EMAIL", email)
+	env = appendOrReplaceEnv(env, "GIT_COMMITTER_NAME", name)
+	env = appendOrReplaceEnv(env, "GIT_COMMITTER_EMAIL", email)
+
+	return env
+}
+
+func gitConfigValue(dir, key string) string {
+	cmd := exec.Command("git", "config", "--get", key)
+	cmd.Dir = dir
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func firstNonEmptyEnv(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(entry, prefix))
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func appendOrReplaceEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, entry := range env {
+		if !strings.HasPrefix(entry, prefix) {
+			continue
+		}
+		env[i] = prefix + value
+		return env
+	}
+	return append(env, prefix+value)
 }
 
 func normalizeReleaseDependencies(findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc) (ProjectFinderFunc, ProjectConfigLoaderFunc, GitValueResolverFunc, GitValueResolverFunc) {

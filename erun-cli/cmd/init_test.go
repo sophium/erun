@@ -242,6 +242,9 @@ func TestInitCommandDryRunPrintsConcretePlannedActions(t *testing.T) {
 	projectConfigPath := filepath.Join(projectRoot, ".erun", "config.yaml")
 	devopsVersionPath := filepath.Join(projectRoot, "tenant-a-devops", "VERSION")
 	devopsDockerfilePath := filepath.Join(projectRoot, "tenant-a-devops", "docker", "tenant-a-devops", "Dockerfile")
+	devopsChartPath := filepath.Join(projectRoot, "tenant-a-devops", "k8s", "tenant-a-devops", "Chart.yaml")
+	devopsValuesPath := filepath.Join(projectRoot, "tenant-a-devops", "k8s", "tenant-a-devops", "values.local.yaml")
+	devopsTemplatePath := filepath.Join(projectRoot, "tenant-a-devops", "k8s", "tenant-a-devops", "templates", "service.yaml")
 
 	output := stderr.String()
 	for _, want := range []string{
@@ -253,6 +256,9 @@ func TestInitCommandDryRunPrintsConcretePlannedActions(t *testing.T) {
 		"write-yaml " + projectConfigPath,
 		"write-file " + devopsVersionPath,
 		"write-file " + devopsDockerfilePath,
+		"write-file " + devopsChartPath,
+		"write-file " + devopsValuesPath,
+		"write-file " + devopsTemplatePath,
 	} {
 		if !bytes.Contains([]byte(output), []byte(want)) {
 			t.Fatalf("expected dry-run output to contain %q, got %q", want, output)

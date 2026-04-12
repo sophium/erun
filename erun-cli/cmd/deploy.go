@@ -1,9 +1,6 @@
 package cmd
 
 import (
-	"errors"
-	"strings"
-
 	common "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
 )
@@ -12,20 +9,17 @@ func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinder
 	target := common.DeployTarget{}
 	cmd := &cobra.Command{
 		Use:           "deploy",
-		Short:         "Deploy the current component Helm chart",
+		Short:         "Deploy the current Helm chart or all charts in the current devops k8s scope",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := validateCurrentDeployContext(resolveDeployContext); err != nil {
-				return err
-			}
 			ctx := commandContext(cmd)
-			deploySpec, err := common.ResolveDeploySpec(store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, "", "")
+			deploySpecs, err := common.ResolveCurrentDeploySpecs(store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target)
 			if err != nil {
 				return err
 			}
-			return common.RunDeploySpec(ctx, deploySpec, buildDockerImage, push, deployHelmChart)
+			return common.RunDeploySpecs(ctx, deploySpecs, buildDockerImage, push, deployHelmChart)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -62,20 +56,4 @@ func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget
 	_ = cmd.Flags().MarkHidden("tenant")
 	_ = cmd.Flags().MarkHidden("environment")
 	_ = cmd.Flags().MarkHidden("repo-path")
-}
-
-func validateCurrentDeployContext(resolveKubernetesDeployContext common.DeployContextResolverFunc) error {
-	if resolveKubernetesDeployContext == nil {
-		return errors.New("helm chart not found in current component directory")
-	}
-
-	currentContext, err := resolveKubernetesDeployContext()
-	if err != nil {
-		return err
-	}
-	if strings.TrimSpace(currentContext.ChartPath) == "" || strings.TrimSpace(currentContext.ComponentName) == "" {
-		return errors.New("helm chart not found in current component directory")
-	}
-	currentContext.ComponentName = strings.TrimSpace(currentContext.ComponentName)
-	return common.ValidateHelmChartPath(currentContext.ChartPath)
 }
