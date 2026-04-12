@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -219,6 +220,83 @@ func TestListToolReturnsConfiguredTenantsAndEffectiveTarget(t *testing.T) {
 	}
 	if len(output.Tenants) != 1 || output.Tenants[0].Name != "tenant-a" {
 		t.Fatalf("unexpected tenants: %+v", output.Tenants)
+	}
+}
+
+func TestReleaseToolPreview(t *testing.T) {
+	projectRoot := createReleaseRuntimeRepo(t, "develop")
+	if err := eruncommon.SaveProjectConfig(projectRoot, eruncommon.ProjectConfig{}); err != nil {
+		t.Fatalf("SaveProjectConfig failed: %v", err)
+	}
+
+	handler := releaseTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{
+			RepoPath: projectRoot,
+		},
+	}))
+
+	_, output, err := handler(context.Background(), nil, ReleaseInput{Preview: true, Verbosity: 1})
+	if err != nil {
+		t.Fatalf("releaseTool failed: %v", err)
+	}
+
+	if output.Executed {
+		t.Fatalf("expected preview output, got %+v", output)
+	}
+	if output.Spec.Mode != eruncommon.ReleaseModeCandidate || output.Spec.Version == "" || len(output.Spec.Stages) == 0 {
+		t.Fatalf("unexpected release output: %+v", output)
+	}
+	if len(output.Spec.DockerImages) != 1 || output.Spec.DockerImages[0].Tag == "" {
+		t.Fatalf("unexpected docker images: %+v", output.Spec.DockerImages)
+	}
+}
+
+func createReleaseRuntimeRepo(t *testing.T, branch string) string {
+	t.Helper()
+
+	projectRoot := t.TempDir()
+	releaseRoot := filepath.Join(projectRoot, "erun-devops")
+	for _, dir := range []string{
+		filepath.Join(releaseRoot, "k8s", "api"),
+		filepath.Join(releaseRoot, "docker", "api"),
+		filepath.Join(releaseRoot, "docker", "base"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(releaseRoot, "VERSION"), []byte("1.4.2\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(releaseRoot, "k8s", "api", "Chart.yaml"), []byte("apiVersion: v2\nname: api\nversion: 0.1.0\nappVersion: 0.1.0\n"), 0o644); err != nil {
+		t.Fatalf("write Chart.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(releaseRoot, "docker", "api", "Dockerfile"), []byte("FROM alpine:3.22\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(releaseRoot, "docker", "base", "Dockerfile"), []byte("FROM alpine:3.22\n"), 0o644); err != nil {
+		t.Fatalf("write other Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(releaseRoot, "docker", "base", "VERSION"), []byte("9.9.9\n"), 0o644); err != nil {
+		t.Fatalf("write other VERSION: %v", err)
+	}
+
+	runGitTestCommand(t, projectRoot, "init", "-b", branch)
+	runGitTestCommand(t, projectRoot, "config", "user.email", "codex@example.com")
+	runGitTestCommand(t, projectRoot, "config", "user.name", "Codex")
+	runGitTestCommand(t, projectRoot, "add", ".")
+	runGitTestCommand(t, projectRoot, "commit", "-m", "initial")
+	return projectRoot
+}
+
+func runGitTestCommand(t *testing.T, dir string, args ...string) {
+	t.Helper()
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, output)
 	}
 }
 

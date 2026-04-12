@@ -38,9 +38,15 @@ type ProjectEnvironmentConfig struct {
 	ContainerRegistry string `yaml:"containerregistry,omitempty"`
 }
 
+type ReleaseConfig struct {
+	MainBranch    string `yaml:"mainbranch,omitempty"`
+	DevelopBranch string `yaml:"developbranch,omitempty"`
+}
+
 type ProjectConfig struct {
 	ContainerRegistry string                              `yaml:"containerregistry,omitempty"`
 	Environments      map[string]ProjectEnvironmentConfig `yaml:"environments,omitempty"`
+	Release           ReleaseConfig                       `yaml:"release,omitempty"`
 }
 
 func (c ProjectConfig) ContainerRegistryForEnvironment(environment string) string {
@@ -92,6 +98,17 @@ func (c *ProjectConfig) SetContainerRegistryForEnvironment(environment, registry
 	envConfig := c.Environments[environment]
 	envConfig.ContainerRegistry = registry
 	c.Environments[environment] = envConfig
+}
+
+func (c ProjectConfig) NormalizedReleaseConfig() ReleaseConfig {
+	config := c.Release
+	if strings.TrimSpace(config.MainBranch) == "" {
+		config.MainBranch = DefaultReleaseMainBranch
+	}
+	if strings.TrimSpace(config.DevelopBranch) == "" {
+		config.DevelopBranch = DefaultReleaseDevelopBranch
+	}
+	return config
 }
 
 var (
