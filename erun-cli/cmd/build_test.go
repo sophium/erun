@@ -1828,6 +1828,175 @@ func TestResolveDockerBuildTagUsesDefaultEnvironmentRegistry(t *testing.T) {
 	}
 }
 
+func TestResolveDockerBuildTagUsesVersionOverrideInLocal(t *testing.T) {
+	projectRoot := t.TempDir()
+	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		t.Fatalf("mkdir build dir: %v", err)
+	}
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("registry.example/team")); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write module VERSION: %v", err)
+	}
+
+	imageRef, err := common.ResolveDockerImageReference(
+		common.ConfigStore{},
+		func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		common.ResolveDockerBuildContext,
+		time.Now,
+		buildDir,
+		common.DockerCommandTarget{VersionOverride: "1.0.0-pr.abc1234"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveDockerImageReference failed: %v", err)
+	}
+
+	if got := imageRef.Tag; got != "registry.example/team/erun-devops:1.0.0-pr.abc1234" {
+		t.Fatalf("unexpected tag: %q", got)
+	}
+}
+
+func TestResolveDockerBuildTagKeepsBuildDirVersionWhenOverrideIsSet(t *testing.T) {
+	projectRoot := t.TempDir()
+	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-ubuntu")
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		t.Fatalf("mkdir build dir: %v", err)
+	}
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("registry.example/team")); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write module VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "VERSION"), []byte("noble-20260217\n"), 0o644); err != nil {
+		t.Fatalf("write local VERSION: %v", err)
+	}
+
+	imageRef, err := common.ResolveDockerImageReference(
+		common.ConfigStore{},
+		func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		common.ResolveDockerBuildContext,
+		time.Now,
+		buildDir,
+		common.DockerCommandTarget{VersionOverride: "1.0.0-pr.abc1234"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveDockerImageReference failed: %v", err)
+	}
+
+	if got := imageRef.Tag; got != "registry.example/team/erun-ubuntu:noble-20260217" {
+		t.Fatalf("unexpected tag: %q", got)
+	}
+}
+
+func TestBuildCommandVersionOverrideAvoidsSnapshotTag(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	projectRoot := t.TempDir()
+	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		t.Fatalf("mkdir build dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContextAtDir(buildDir)
+		},
+		BuildDockerImage: func(dir, dockerfilePath, tag string, stdout, stderr io.Writer) error {
+			t.Fatalf("unexpected build execution: %s", tag)
+			return nil
+		},
+	})
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"build", "--dry-run", "--version", "1.0.0-pr.abc1234"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if got := stderr.String(); !strings.Contains(got, "erun-devops:1.0.0-pr.abc1234") || strings.Contains(got, "-snapshot-") {
+		t.Fatalf("unexpected dry-run output:\n%s", got)
+	}
+}
+
+func TestBuildCommandVersionOverrideDoesNotReplaceComponentLocalVersions(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	projectRoot := t.TempDir()
+	devopsDir := filepath.Join(projectRoot, "erun-devops")
+	for _, dir := range []string{
+		filepath.Join(devopsDir, "docker", "erun-devops"),
+		filepath.Join(devopsDir, "docker", "erun-ubuntu"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(devopsDir, "docker", "erun-devops", "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write devops Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(devopsDir, "docker", "erun-ubuntu", "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write ubuntu Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(devopsDir, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(devopsDir, "docker", "erun-ubuntu", "VERSION"), []byte("noble-20260217\n"), 0o644); err != nil {
+		t.Fatalf("write ubuntu VERSION: %v", err)
+	}
+
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: filepath.Join(devopsDir, "docker")}, nil
+		},
+		BuildDockerImage: func(dir, dockerfilePath, tag string, stdout, stderr io.Writer) error {
+			t.Fatalf("unexpected build execution: %s", tag)
+			return nil
+		},
+	})
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"build", "--dry-run", "--version", "1.0.0-pr.abc1234"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stderr.String()
+	if !strings.Contains(output, "erun-devops:1.0.0-pr.abc1234") {
+		t.Fatalf("expected overridden devops tag in output:\n%s", output)
+	}
+	if !strings.Contains(output, "erun-ubuntu:noble-20260217") {
+		t.Fatalf("expected component-local ubuntu tag in output:\n%s", output)
+	}
+	if strings.Contains(output, "erun-ubuntu:1.0.0-pr.abc1234") {
+		t.Fatalf("did not expect ubuntu tag override:\n%s", output)
+	}
+}
+
 func TestBuildCommandHiddenEnvironmentOverrideUsesProvidedEnvironment(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 

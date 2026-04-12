@@ -95,6 +95,7 @@ func runDockerPushWithRetry(ctx common.Context, pushInput common.DockerPushSpec,
 func addDockerCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {
 	cmd.Flags().StringVar(&target.ProjectRoot, "project-root", "", "Project root override for internal tooling")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Environment override for internal tooling")
+	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the resolved image version")
 	_ = cmd.Flags().MarkHidden("project-root")
 	_ = cmd.Flags().MarkHidden("environment")
 }

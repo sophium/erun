@@ -76,6 +76,7 @@ func Execute() error {
 
 	mcpCmd := newMCPCmd(resolveOpen, runInitForArgs, launchMCPProcess)
 	listCmd := newListCmd(configStore, common.FindProjectRoot)
+	releaseCmd := newReleaseCmd(common.FindProjectRoot, common.GitCommandRunner)
 	versionCmd := newVersionCmd(func() (common.BuildInfo, string, error) {
 		return resolveVersionCommandBuildInfo(common.FindProjectRoot)
 	})
@@ -93,6 +94,6 @@ func Execute() error {
 	}
 
 	cmd := newRootCommand(runRoot)
-	addCommands(cmd, initCmd, openCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, listCmd, versionCmd)
+	addCommands(cmd, initCmd, openCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, listCmd, releaseCmd, versionCmd)
 	return cmd.Execute()
 }

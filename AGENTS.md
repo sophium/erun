@@ -35,6 +35,7 @@ Repository guidance for humans and coding agents working in this repo.
 - Keep MCP-specific configuration, flag parsing, and transport wiring in `erun-mcp`, not in `erun-cli` or `erun-common`.
 - Keep `erun-common` usable as a standalone library for third parties. Shared code placed there must be transport-agnostic and should not depend on Cobra, the MCP SDK, or module-specific orchestration.
 - When sharing operation contracts across modules, prefer transport-neutral names such as plan, request, result, or input/output. Do not put MCP-only wrapper types in `erun-common` unless they are intentionally generic library contracts.
+- Prefer reusing a shared struct over creating a transport-local duplicate with the same shape. When one shared struct is the canonical contract for both CLI and MCP, transport-specific annotations such as `json` tags are acceptable in `erun-common` to avoid structure duplication.
 - By default, new commands should be implemented in both transports: CLI and MCP. Treat a command as shared work unless there is a clear repository-specific reason for it to exist in only one transport.
 
 ## Preferred Direction

@@ -130,7 +130,7 @@ func ResolveDeploySpecForOpenResult(store DeployStore, findProjectRoot ProjectFi
 
 	builds := make([]DockerBuildSpec, 0, 2)
 	if strings.TrimSpace(versionOverride) == "" {
-		buildInput, err := ResolveDockerBuildForComponent(store, findProjectRoot, resolveDockerBuildContext, now, target.RepoPath, target.Environment, deployContext.ComponentName)
+		buildInput, err := ResolveDockerBuildForComponent(store, findProjectRoot, resolveDockerBuildContext, now, target.RepoPath, target.Environment, deployContext.ComponentName, "")
 		if err != nil {
 			return DeploySpec{}, err
 		}
