@@ -154,6 +154,20 @@ func resolveReleaseSpec(findProjectRoot ProjectFinderFunc, loadProjectConfig Pro
 				stages = append(stages, bumpStage)
 			}
 		}
+		syncStage := newSyncDevelopStage(projectRoot, releaseConfig)
+		if len(syncStage.FileUpdates) > 0 || len(syncStage.GitCommands) > 0 {
+			stages = append(stages, syncStage)
+		}
+		pushStage := newPushReleaseStage(projectRoot, releaseConfig)
+		if len(pushStage.FileUpdates) > 0 || len(pushStage.GitCommands) > 0 {
+			stages = append(stages, pushStage)
+		}
+	}
+	if mode == ReleaseModeCandidate {
+		pushStage := newPushCandidateReleaseStage(projectRoot, releaseConfig)
+		if len(pushStage.FileUpdates) > 0 || len(pushStage.GitCommands) > 0 {
+			stages = append(stages, pushStage)
+		}
 	}
 
 	return ReleaseSpec{
@@ -431,6 +445,52 @@ func newBumpStage(projectRoot, nextVersion string, fileUpdate ReleaseFileUpdate)
 		GitCommands: []ReleaseCommandSpec{
 			releaseGitCommand(projectRoot, "add", releaseGitPath(projectRoot, fileUpdate.Path)),
 			releaseGitCommand(projectRoot, "commit", "-m", "[skip ci] prepare "+nextVersion),
+		},
+	}
+}
+
+func newSyncDevelopStage(projectRoot string, config ReleaseConfig) ReleaseStage {
+	mainBranch := strings.TrimSpace(config.MainBranch)
+	developBranch := strings.TrimSpace(config.DevelopBranch)
+	if mainBranch == "" || developBranch == "" {
+		return ReleaseStage{}
+	}
+
+	return ReleaseStage{
+		Name: "sync-develop",
+		GitCommands: []ReleaseCommandSpec{
+			releaseGitCommand(projectRoot, "checkout", developBranch),
+			releaseGitCommand(projectRoot, "merge", "--no-edit", "-X", "theirs", mainBranch),
+			releaseGitCommand(projectRoot, "checkout", mainBranch),
+		},
+	}
+}
+
+func newPushReleaseStage(projectRoot string, config ReleaseConfig) ReleaseStage {
+	mainBranch := strings.TrimSpace(config.MainBranch)
+	developBranch := strings.TrimSpace(config.DevelopBranch)
+	if mainBranch == "" || developBranch == "" {
+		return ReleaseStage{}
+	}
+
+	return ReleaseStage{
+		Name: "push",
+		GitCommands: []ReleaseCommandSpec{
+			releaseGitCommand(projectRoot, "push", "--follow-tags", "origin", mainBranch, developBranch),
+		},
+	}
+}
+
+func newPushCandidateReleaseStage(projectRoot string, config ReleaseConfig) ReleaseStage {
+	developBranch := strings.TrimSpace(config.DevelopBranch)
+	if developBranch == "" {
+		return ReleaseStage{}
+	}
+
+	return ReleaseStage{
+		Name: "push",
+		GitCommands: []ReleaseCommandSpec{
+			releaseGitCommand(projectRoot, "push", "--follow-tags", "origin", developBranch),
 		},
 	}
 }

@@ -35,8 +35,8 @@ func TestResolveReleaseSpecStableRelease(t *testing.T) {
 	if len(spec.DockerImages) != 1 || spec.DockerImages[0].Tag != "erunpaas/api:1.4.2" {
 		t.Fatalf("unexpected docker images: %+v", spec.DockerImages)
 	}
-	if len(spec.Stages) != 2 {
-		t.Fatalf("expected 2 stages, got %+v", spec.Stages)
+	if len(spec.Stages) != 4 {
+		t.Fatalf("expected 4 stages, got %+v", spec.Stages)
 	}
 	if got := spec.Stages[0].GitCommands[0].Args; !reflect.DeepEqual(got, []string{"add", filepath.Join("erun-devops", "k8s", "api", "Chart.yaml")}) {
 		t.Fatalf("unexpected release add command: %+v", got)
@@ -49,6 +49,18 @@ func TestResolveReleaseSpecStableRelease(t *testing.T) {
 	}
 	if got := spec.Stages[1].GitCommands[0].Args; !reflect.DeepEqual(got, []string{"add", filepath.Join("erun-devops", "VERSION")}) {
 		t.Fatalf("unexpected bump add command: %+v", got)
+	}
+	if got := spec.Stages[2].GitCommands[0].Args; !reflect.DeepEqual(got, []string{"checkout", "develop"}) {
+		t.Fatalf("unexpected sync checkout command: %+v", got)
+	}
+	if got := spec.Stages[2].GitCommands[1].Args; !reflect.DeepEqual(got, []string{"merge", "--no-edit", "-X", "theirs", "main"}) {
+		t.Fatalf("unexpected sync merge command: %+v", got)
+	}
+	if got := spec.Stages[2].GitCommands[2].Args; !reflect.DeepEqual(got, []string{"checkout", "main"}) {
+		t.Fatalf("unexpected sync return command: %+v", got)
+	}
+	if got := spec.Stages[3].GitCommands[0].Args; !reflect.DeepEqual(got, []string{"push", "--follow-tags", "origin", "main", "develop"}) {
+		t.Fatalf("unexpected push command: %+v", got)
 	}
 }
 
@@ -76,8 +88,14 @@ func TestResolveReleaseSpecUsesConfiguredBranches(t *testing.T) {
 	if spec.Mode != ReleaseModeCandidate || spec.Version != "1.4.2-rc.abc1234" || spec.NextVersion != "" {
 		t.Fatalf("unexpected release spec: %+v", spec)
 	}
+	if len(spec.Stages) != 2 {
+		t.Fatalf("expected 2 stages, got %+v", spec.Stages)
+	}
 	if got := spec.Stages[0].GitCommands[2].Args; !reflect.DeepEqual(got, []string{"tag", "-a", "v1.4.2-rc.abc1234", "-m", "Release candidate 1.4.2-rc.abc1234"}) {
 		t.Fatalf("unexpected candidate tag command: %+v", got)
+	}
+	if got := spec.Stages[1].GitCommands[0].Args; !reflect.DeepEqual(got, []string{"push", "--follow-tags", "origin", "integration"}) {
+		t.Fatalf("unexpected candidate push command: %+v", got)
 	}
 }
 
@@ -130,9 +148,86 @@ func TestRunReleaseSpecWritesFilesAndRunsGitStages(t *testing.T) {
 		{projectRoot, "tag", "-a", "v1.4.2", "-m", "Release 1.4.2"},
 		{projectRoot, "add", filepath.Join("erun-devops", "VERSION")},
 		{projectRoot, "commit", "-m", "[skip ci] prepare 1.4.3"},
+		{projectRoot, "checkout", "develop"},
+		{projectRoot, "merge", "--no-edit", "-X", "theirs", "main"},
+		{projectRoot, "checkout", "main"},
+		{projectRoot, "push", "--follow-tags", "origin", "main", "develop"},
 	}
 	if !reflect.DeepEqual(gitCalls, wantCalls) {
 		t.Fatalf("unexpected git calls: got %+v want %+v", gitCalls, wantCalls)
+	}
+}
+
+func TestRunReleaseSpecCandidateRunsTagAndPush(t *testing.T) {
+	projectRoot := setupReleaseProject(t, releaseProjectOptions{})
+
+	spec, err := resolveReleaseSpec(
+		func() (string, string, error) { return "tenant-a", projectRoot, nil },
+		LoadProjectConfig,
+		func(string) (string, error) { return "develop", nil },
+		func(string) (string, error) { return "abc1234", nil },
+		ReleaseParams{},
+	)
+	if err != nil {
+		t.Fatalf("resolveReleaseSpec failed: %v", err)
+	}
+
+	var gitCalls [][]string
+	ctx := Context{
+		Logger: NewLoggerWithWriters(2, new(bytes.Buffer), new(bytes.Buffer)),
+		Stdout: new(bytes.Buffer),
+		Stderr: new(bytes.Buffer),
+	}
+	if err := RunReleaseSpec(ctx, spec, func(dir string, stdout, stderr io.Writer, args ...string) error {
+		gitCalls = append(gitCalls, append([]string{dir}, args...))
+		return nil
+	}); err != nil {
+		t.Fatalf("RunReleaseSpec failed: %v", err)
+	}
+
+	wantCalls := [][]string{
+		{projectRoot, "add", filepath.Join("erun-devops", "k8s", "api", "Chart.yaml")},
+		{projectRoot, "commit", "-m", "[skip ci] release 1.4.2-rc.abc1234"},
+		{projectRoot, "tag", "-a", "v1.4.2-rc.abc1234", "-m", "Release candidate 1.4.2-rc.abc1234"},
+		{projectRoot, "push", "--follow-tags", "origin", "develop"},
+	}
+	if !reflect.DeepEqual(gitCalls, wantCalls) {
+		t.Fatalf("unexpected git calls: got %+v want %+v", gitCalls, wantCalls)
+	}
+}
+
+func TestResolveReleaseSpecStableReleaseUsesConfiguredDevelopBranchForSyncAndPush(t *testing.T) {
+	projectRoot := setupReleaseProject(t, releaseProjectOptions{
+		ProjectConfig: ProjectConfig{
+			Release: ReleaseConfig{
+				MainBranch:    "trunk",
+				DevelopBranch: "integration",
+			},
+		},
+	})
+
+	spec, err := resolveReleaseSpec(
+		func() (string, string, error) { return "tenant-a", projectRoot, nil },
+		LoadProjectConfig,
+		func(string) (string, error) { return "trunk", nil },
+		func(string) (string, error) { return "abc1234", nil },
+		ReleaseParams{},
+	)
+	if err != nil {
+		t.Fatalf("resolveReleaseSpec failed: %v", err)
+	}
+
+	if got := spec.Stages[2].GitCommands[0].Args; !reflect.DeepEqual(got, []string{"checkout", "integration"}) {
+		t.Fatalf("unexpected configured sync checkout command: %+v", got)
+	}
+	if got := spec.Stages[2].GitCommands[1].Args; !reflect.DeepEqual(got, []string{"merge", "--no-edit", "-X", "theirs", "trunk"}) {
+		t.Fatalf("unexpected configured sync merge command: %+v", got)
+	}
+	if got := spec.Stages[2].GitCommands[2].Args; !reflect.DeepEqual(got, []string{"checkout", "trunk"}) {
+		t.Fatalf("unexpected configured sync return command: %+v", got)
+	}
+	if got := spec.Stages[3].GitCommands[0].Args; !reflect.DeepEqual(got, []string{"push", "--follow-tags", "origin", "trunk", "integration"}) {
+		t.Fatalf("unexpected configured push command: %+v", got)
 	}
 }
 
