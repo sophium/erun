@@ -328,7 +328,7 @@ func TestResolveCurrentDockerBuildContextsUsesDevopsModuleRoot(t *testing.T) {
 	}
 }
 
-func TestResolveBuildExecutionIncludesPushesForProjectRootDevopsScope(t *testing.T) {
+func TestResolveBuildExecutionBuildsWithoutPushesForProjectRootDevopsScope(t *testing.T) {
 	projectRoot := t.TempDir()
 	moduleRoot := filepath.Join(projectRoot, "tenant-a-devops")
 	componentDirs := []string{
@@ -372,7 +372,7 @@ func TestResolveBuildExecutionIncludesPushesForProjectRootDevopsScope(t *testing
 		t.Fatalf("ResolveBuildExecution failed: %v", err)
 	}
 
-	if len(execution.dockerBuilds) != 2 || len(execution.dockerPushes) != 2 {
+	if len(execution.dockerBuilds) != 2 || len(execution.dockerPushes) != 0 {
 		t.Fatalf("unexpected execution: %+v", execution)
 	}
 	buildTags := []string{execution.dockerBuilds[0].Image.Tag, execution.dockerBuilds[1].Image.Tag}
@@ -387,19 +387,6 @@ func TestResolveBuildExecutionIncludesPushesForProjectRootDevopsScope(t *testing
 		}
 		if !found {
 			t.Fatalf("missing build tag %q in %+v", want, execution.dockerBuilds)
-		}
-	}
-	pushTags := []string{execution.dockerPushes[0].Image.Tag, execution.dockerPushes[1].Image.Tag}
-	for _, want := range wantTags {
-		found := false
-		for _, got := range pushTags {
-			if got == want {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("missing push tag %q in %+v", want, execution.dockerPushes)
 		}
 	}
 }
