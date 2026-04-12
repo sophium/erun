@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"io"
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
@@ -23,7 +24,12 @@ func newReleaseCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCo
 			if _, err := fmt.Fprintln(ctx.Stdout, spec.Version); err != nil {
 				return err
 			}
-			return common.RunReleaseSpec(ctx, spec, runGit)
+			return common.RunReleaseSpec(ctx, spec, func(dir string, stdout, stderr io.Writer, args ...string) error {
+				if runGit == nil {
+					runGit = common.GitCommandRunner
+				}
+				return runGit(dir, ctx.Stderr, stderr, args...)
+			})
 		},
 	}
 	addDryRunFlag(cmd)
