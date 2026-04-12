@@ -126,21 +126,6 @@ func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc,
 		return BuildExecutionSpec{script: script}, nil
 	}
 
-	shouldPush, err := shouldPushResolvedBuilds(findProjectRoot, resolveBuildContext, target)
-	if err != nil {
-		return BuildExecutionSpec{}, err
-	}
-	if shouldPush {
-		execution, err := ResolveDockerPushExecution(store, findProjectRoot, resolveBuildContext, now, target)
-		if err != nil {
-			return BuildExecutionSpec{}, err
-		}
-		return BuildExecutionSpec{
-			dockerBuilds: execution.builds,
-			dockerPushes: execution.pushes,
-		}, nil
-	}
-
 	builds, err := ResolveCurrentDockerBuildSpecs(store, findProjectRoot, resolveBuildContext, now, target)
 	if err != nil {
 		return BuildExecutionSpec{}, err
@@ -160,30 +145,6 @@ func DockerPushExecutionSpecFromSpecs(builds []DockerBuildSpec, pushes []DockerP
 func HasProjectBuildScript(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (bool, error) {
 	script, err := resolveProjectBuildScript(findProjectRoot, target)
 	return script != nil, err
-}
-
-func shouldPushResolvedBuilds(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget) (bool, error) {
-	if resolveBuildContext == nil {
-		resolveBuildContext = ResolveDockerBuildContext
-	}
-
-	buildContext, err := resolveBuildContext()
-	if err != nil {
-		return false, err
-	}
-	if strings.TrimSpace(buildContext.DockerfilePath) != "" {
-		return false, nil
-	}
-
-	if _, err := ResolveDockerBuildContextsAtDir(buildContext.Dir); err == nil {
-		return true, nil
-	}
-
-	_, ok, err := resolveCurrentDevopsDockerDir(findProjectRoot, buildContext.Dir, target)
-	if err != nil {
-		return false, err
-	}
-	return ok, nil
 }
 
 func ResolveDockerPushExecution(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (DockerPushExecutionSpec, error) {

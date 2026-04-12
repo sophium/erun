@@ -94,22 +94,28 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 	}
 
 	shellReq := common.ShellLaunchParamsFromResult(result)
-	if checkKubernetesDeployment != nil && deployHelmChart != nil {
-		deployed, err := checkKubernetesDeployment(common.KubernetesDeploymentCheckParams{
-			Name:              common.RuntimeReleaseName(result.Tenant),
-			Namespace:         namespace,
-			KubernetesContext: result.EnvConfig.KubernetesContext,
-			ExpectedRepoPath:  common.RemoteShellWorktreePath(shellReq),
-		})
+	if resolveRuntimeDeploySpec != nil && deployHelmChart != nil {
+		execution, err := resolveRuntimeDeploySpec(result)
 		if err != nil {
 			return err
 		}
-		if !deployed {
-			ctx.Logger.Debug("deploying the devops runtime before opening the shell")
-			execution, err := resolveRuntimeDeploySpec(result)
+
+		shouldDeploy := len(execution.Builds) > 0
+		if !shouldDeploy && checkKubernetesDeployment != nil {
+			deployed, err := checkKubernetesDeployment(common.KubernetesDeploymentCheckParams{
+				Name:              common.RuntimeReleaseName(result.Tenant),
+				Namespace:         namespace,
+				KubernetesContext: result.EnvConfig.KubernetesContext,
+				ExpectedRepoPath:  common.RemoteShellWorktreePath(shellReq),
+			})
 			if err != nil {
 				return err
 			}
+			shouldDeploy = !deployed
+		}
+
+		if shouldDeploy {
+			ctx.Logger.Debug("deploying the devops runtime before opening the shell")
 			if err := common.RunDeploySpec(
 				ctx,
 				execution,

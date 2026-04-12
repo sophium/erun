@@ -373,7 +373,7 @@ func TestBuildToolPreviewVerboseIncludesTrace(t *testing.T) {
 	}
 }
 
-func TestBuildToolPreviewAtRepoRootIncludesBuildAndPushTrace(t *testing.T) {
+func TestBuildToolPreviewAtRepoRootIncludesBuildTrace(t *testing.T) {
 	projectRoot := t.TempDir()
 	moduleRoot := filepath.Join(projectRoot, "tenant-a-devops")
 	componentDirs := []string{
@@ -417,7 +417,7 @@ func TestBuildToolPreviewAtRepoRootIncludesBuildAndPushTrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildTool failed: %v", err)
 	}
-	if len(output.Trace) != 4 {
+	if len(output.Trace) != 2 {
 		t.Fatalf("unexpected trace output: %+v", output.Trace)
 	}
 }

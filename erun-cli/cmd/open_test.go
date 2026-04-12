@@ -184,6 +184,77 @@ func TestOpenCommandDryRunPrintsDeployPlanWhenDevopsRuntimeIsMissing(t *testing.
 	}
 }
 
+func TestOpenCommandDryRunRedeploysWhenRuntimeHasLocalBuilds(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	projectRoot := t.TempDir()
+	componentName := "tenant-a-devops"
+	componentRoot := filepath.Join(projectRoot, componentName)
+	chartPath := filepath.Join(componentRoot, "k8s", componentName)
+	if err := os.MkdirAll(chartPath, 0o755); err != nil {
+		t.Fatalf("mkdir chart dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: "+componentName+"\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write Chart.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644); err != nil {
+		t.Fatalf("write values.local.yaml: %v", err)
+	}
+	workdir := filepath.Join(componentRoot, "docker", componentName)
+	if err := os.MkdirAll(workdir, 0o755); err != nil {
+		t.Fatalf("mkdir docker dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(componentRoot, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write module VERSION: %v", err)
+	}
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd := newTestRootCmd(testRootDeps{
+		Store: openCommandStore{
+			repoPath:   projectRoot,
+			toolConfig: common.ERunConfig{DefaultTenant: "tenant-a"},
+		},
+		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
+			t.Fatalf("did not expect deployment check when local runtime builds exist: %+v", req)
+			return true, nil
+		},
+		DeployHelmChart: func(req common.HelmDeployParams) error {
+			t.Fatalf("did not expect runtime deployment execution during dry-run: %+v", req)
+			return nil
+		},
+		LaunchShell: func(req common.ShellLaunchParams) error {
+			t.Fatalf("did not expect remote shell launch during dry-run: %+v", req)
+			return nil
+		},
+	})
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"-v", "open", "tenant-a", "local", "--dry-run"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stderr.String()
+	for _, want := range []string{
+		"docker build -t erunpaas/tenant-a-devops:1.0.0",
+		"docker push erunpaas/tenant-a-devops:1.0.0",
+		"helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace tenant-a-local --kube-context cluster-dev -f " + filepath.Join(chartPath, "values.local.yaml") + " --set-string tenant=tenant-a --set-string environment=local",
+		"kubectl --context cluster-dev --namespace tenant-a-local wait --for=condition=Available --timeout 2m0s deployment/tenant-a-devops",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected dry-run output to contain %q, got %q", want, output)
+		}
+	}
+}
+
 func TestOpenCommandDryRunFallsBackToDefaultRuntimeChartWhenTenantRepoHasNoDevopsChart(t *testing.T) {
 	repoPath := t.TempDir()
 	stdout := new(bytes.Buffer)
