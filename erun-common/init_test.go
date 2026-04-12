@@ -243,7 +243,7 @@ func TestBootstrapRunPromptsForKubernetesContextAndContainerRegistryWhenCreating
 	}
 }
 
-func TestBootstrapRunCreatesTenantDevopsModule(t *testing.T) {
+func TestBootstrapRunCreatesTenantDevopsModuleAndChart(t *testing.T) {
 	setupXDGConfigHome(t)
 
 	projectRoot := t.TempDir()
@@ -266,7 +266,7 @@ func TestBootstrapRunCreatesTenantDevopsModule(t *testing.T) {
 		},
 	}
 
-	if _, err := service.Run(BootstrapInitParams{}); err != nil {
+	if _, err := service.Run(BootstrapInitParams{RuntimeVersion: "1.2.3"}); err != nil {
 		t.Fatalf("Run failed: %v", err)
 	}
 
@@ -274,6 +274,9 @@ func TestBootstrapRunCreatesTenantDevopsModule(t *testing.T) {
 	for _, path := range []string{
 		filepath.Join(moduleRoot, "VERSION"),
 		filepath.Join(moduleRoot, "docker", "tenant-a-devops", "Dockerfile"),
+		filepath.Join(moduleRoot, "k8s", "tenant-a-devops", "Chart.yaml"),
+		filepath.Join(moduleRoot, "k8s", "tenant-a-devops", "values.local.yaml"),
+		filepath.Join(moduleRoot, "k8s", "tenant-a-devops", "templates", "service.yaml"),
 	} {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("expected %s to exist: %v", path, err)
@@ -288,11 +291,76 @@ func TestBootstrapRunCreatesTenantDevopsModule(t *testing.T) {
 	if !strings.Contains(string(dockerfile), "FROM ${ERUN_BASE_TAG}") {
 		t.Fatalf("expected thin wrapper Dockerfile, got %q", string(dockerfile))
 	}
+	if !strings.Contains(string(dockerfile), "ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.2.3") {
+		t.Fatalf("expected Dockerfile base tag to match init runtime version, got %q", string(dockerfile))
+	}
 	if !strings.Contains(string(dockerfile), "ENTRYPOINT [\"erun-devops-entrypoint\"]") {
 		t.Fatalf("expected wrapper Dockerfile to delegate to base entrypoint, got %q", string(dockerfile))
 	}
 	if strings.Contains(string(dockerfile), "exec /bin/bash -i") || strings.Contains(string(dockerfile), "entrypoint.sh") || strings.Contains(string(dockerfile), "terraform") {
 		t.Fatalf("expected no duplicated runtime setup in Dockerfile, got %q", string(dockerfile))
+	}
+
+	chartPath := filepath.Join(moduleRoot, "k8s", "tenant-a-devops", "Chart.yaml")
+	chart, err := os.ReadFile(chartPath)
+	if err != nil {
+		t.Fatalf("read Chart.yaml: %v", err)
+	}
+	if !strings.Contains(string(chart), "name: tenant-a-devops") {
+		t.Fatalf("expected tenant chart name, got %q", string(chart))
+	}
+
+	serviceTemplatePath := filepath.Join(moduleRoot, "k8s", "tenant-a-devops", "templates", "service.yaml")
+	serviceTemplate, err := os.ReadFile(serviceTemplatePath)
+	if err != nil {
+		t.Fatalf("read service template: %v", err)
+	}
+	if !strings.Contains(string(serviceTemplate), "image: erunpaas/tenant-a-devops:{{ .Chart.AppVersion }}") {
+		t.Fatalf("expected tenant image reference, got %q", string(serviceTemplate))
+	}
+	if !strings.Contains(string(serviceTemplate), "name: tenant-a-devops") {
+		t.Fatalf("expected tenant container name, got %q", string(serviceTemplate))
+	}
+}
+
+func TestBootstrapRunCreatesTenantDevopsEnvironmentValuesFile(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	projectRoot := t.TempDir()
+	service := bootstrapTestRunner{
+		Store: ConfigStore{},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		Confirm: func(string) (bool, error) {
+			return true, nil
+		},
+		PromptKubernetesContext: func(string) (string, error) {
+			return "cluster-dev", nil
+		},
+		PromptContainerRegistry: func(string) (string, error) {
+			return DefaultContainerRegistry, nil
+		},
+		EnsureKubernetesNamespace: func(string, string) error {
+			return nil
+		},
+	}
+
+	if _, err := service.Run(BootstrapInitParams{Environment: "dev"}); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	valuesPath := filepath.Join(projectRoot, "tenant-a-devops", "k8s", "tenant-a-devops", "values.dev.yaml")
+	if _, err := os.Stat(valuesPath); err != nil {
+		t.Fatalf("expected %s to exist: %v", valuesPath, err)
+	}
+
+	data, err := os.ReadFile(valuesPath)
+	if err != nil {
+		t.Fatalf("read values.dev.yaml: %v", err)
+	}
+	if len(data) != 0 {
+		t.Fatalf("expected empty values.dev.yaml, got %q", string(data))
 	}
 }
 

@@ -17,7 +17,7 @@ const (
 
 var errVersionFileNotFound = common.ErrVersionFileNotFound
 
-func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc) *cobra.Command {
+func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc) *cobra.Command {
 	target := common.DockerCommandTarget{}
 	cmd := &cobra.Command{
 		Use:           "build",
@@ -31,7 +31,7 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 			if err != nil {
 				return err
 			}
-			return common.RunBuildExecution(ctx, execution, runBuildScript, buildDockerImage)
+			return common.RunBuildExecution(ctx, execution, runBuildScript, buildDockerImage, push)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -43,17 +43,17 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 	target := common.DockerCommandTarget{}
 	cmd := &cobra.Command{
 		Use:           "push",
-		Short:         "Push the current container image",
+		Short:         "Build and push the current container image",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			execution, err := common.ResolveDockerPushExecution(store, findProjectRoot, resolveBuildContext, now, target)
+			pushInput, buildInput, err := common.ResolveDockerPushSpec(store, findProjectRoot, resolveBuildContext, now, target)
 			if err != nil {
 				return err
 			}
-			return common.RunDockerPushExecution(ctx, execution, buildDockerImage, push)
+			return common.RunDockerPushSpec(ctx, pushInput, buildInput, buildDockerImage, push)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -95,6 +95,7 @@ func runDockerPushWithRetry(ctx common.Context, pushInput common.DockerPushSpec,
 func addDockerCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {
 	cmd.Flags().StringVar(&target.ProjectRoot, "project-root", "", "Project root override for internal tooling")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Environment override for internal tooling")
+	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the resolved image version")
 	_ = cmd.Flags().MarkHidden("project-root")
 	_ = cmd.Flags().MarkHidden("environment")
 }

@@ -361,7 +361,7 @@ func kubectlDeploymentWaitArgs(req ShellLaunchParams) []string {
 
 func kubectlExecArgs(req ShellLaunchParams, script string) []string {
 	args := kubectlTargetArgs(req)
-	args = append(args, "exec", "-it", "-c", DevopsComponentName)
+	args = append(args, "exec", "-it", "-c", RuntimeReleaseName(req.Tenant))
 	args = append(args, "deployment/"+RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
 	return args
 }

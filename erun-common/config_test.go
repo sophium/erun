@@ -395,6 +395,31 @@ func TestProjectConfigSetContainerRegistryForEnvironmentAvoidsRedundantOverride(
 	}
 }
 
+func TestProjectConfigNormalizedReleaseConfigDefaults(t *testing.T) {
+	cfg := ProjectConfig{}
+
+	got := cfg.NormalizedReleaseConfig()
+
+	if got.MainBranch != DefaultReleaseMainBranch || got.DevelopBranch != DefaultReleaseDevelopBranch {
+		t.Fatalf("unexpected release config defaults: %+v", got)
+	}
+}
+
+func TestProjectConfigNormalizedReleaseConfigUsesConfiguredBranches(t *testing.T) {
+	cfg := ProjectConfig{
+		Release: ReleaseConfig{
+			MainBranch:    "trunk",
+			DevelopBranch: "integration",
+		},
+	}
+
+	got := cfg.NormalizedReleaseConfig()
+
+	if got.MainBranch != "trunk" || got.DevelopBranch != "integration" {
+		t.Fatalf("unexpected release config: %+v", got)
+	}
+}
+
 func TestLoadProjectConfigNotInitialized(t *testing.T) {
 	projectRoot := t.TempDir()
 

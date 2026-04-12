@@ -114,10 +114,6 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Description: "List configured tenants and environments, defaults, and the effective target for the current runtime directory",
 	}, listTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "open",
-		Description: "Resolve the current tenant/environment context and return the local shell setup commands for it",
-	}, openTool(runtime))
-	mcp.AddTool(server, &mcp.Tool{
 		Name:        "init",
 		Description: "Run `erun init` using the shared init flow; when more input is needed, return a structured interaction request for the caller to answer in a follow-up tool call",
 	}, initTool(runtime))
@@ -133,6 +129,10 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Name:        "deploy",
 		Description: "Run `erun devops k8s deploy COMPONENT` from the runtime repo root in the resolved tenant/environment context",
 	}, deployTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "release",
+		Description: "Plan and execute a project release from the runtime repo root using .erun/config.yaml branch policy",
+	}, releaseTool(runtime))
 
 	return server
 }

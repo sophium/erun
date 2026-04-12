@@ -74,6 +74,7 @@ type projectBuildScriptSpec struct {
 type BuildExecutionSpec struct {
 	script       *projectBuildScriptSpec
 	dockerBuilds []DockerBuildSpec
+	dockerPushes []DockerPushSpec
 }
 
 type DockerPushExecutionSpec struct {
@@ -82,8 +83,9 @@ type DockerPushExecutionSpec struct {
 }
 
 type DockerCommandTarget struct {
-	ProjectRoot string
-	Environment string
+	ProjectRoot     string
+	Environment     string
+	VersionOverride string
 }
 
 type DockerRegistryAuthError struct {
@@ -124,6 +126,21 @@ func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc,
 		return BuildExecutionSpec{script: script}, nil
 	}
 
+	shouldPush, err := shouldPushResolvedBuilds(findProjectRoot, resolveBuildContext, target)
+	if err != nil {
+		return BuildExecutionSpec{}, err
+	}
+	if shouldPush {
+		execution, err := ResolveDockerPushExecution(store, findProjectRoot, resolveBuildContext, now, target)
+		if err != nil {
+			return BuildExecutionSpec{}, err
+		}
+		return BuildExecutionSpec{
+			dockerBuilds: execution.builds,
+			dockerPushes: execution.pushes,
+		}, nil
+	}
+
 	builds, err := ResolveCurrentDockerBuildSpecs(store, findProjectRoot, resolveBuildContext, now, target)
 	if err != nil {
 		return BuildExecutionSpec{}, err
@@ -143,6 +160,30 @@ func DockerPushExecutionSpecFromSpecs(builds []DockerBuildSpec, pushes []DockerP
 func HasProjectBuildScript(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (bool, error) {
 	script, err := resolveProjectBuildScript(findProjectRoot, target)
 	return script != nil, err
+}
+
+func shouldPushResolvedBuilds(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget) (bool, error) {
+	if resolveBuildContext == nil {
+		resolveBuildContext = ResolveDockerBuildContext
+	}
+
+	buildContext, err := resolveBuildContext()
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(buildContext.DockerfilePath) != "" {
+		return false, nil
+	}
+
+	if _, err := ResolveDockerBuildContextsAtDir(buildContext.Dir); err == nil {
+		return true, nil
+	}
+
+	_, ok, err := resolveCurrentDevopsDockerDir(findProjectRoot, buildContext.Dir, target)
+	if err != nil {
+		return false, err
+	}
+	return ok, nil
 }
 
 func ResolveDockerPushExecution(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (DockerPushExecutionSpec, error) {
@@ -177,22 +218,32 @@ func ResolveDockerPushExecution(store DockerStore, findProjectRoot ProjectFinder
 }
 
 func ResolveDockerPushSpec(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (DockerPushSpec, *DockerBuildSpec, error) {
-	execution, err := ResolveDockerPushExecution(store, findProjectRoot, resolveBuildContext, now, target)
+	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
+
+	buildContext, err := resolveBuildContext()
 	if err != nil {
 		return DockerPushSpec{}, nil, err
 	}
-	if len(execution.pushes) != 1 {
-		return DockerPushSpec{}, nil, fmt.Errorf("expected exactly one Docker push spec, got %d", len(execution.pushes))
+	if strings.TrimSpace(buildContext.DockerfilePath) == "" {
+		return DockerPushSpec{}, nil, fmt.Errorf("dockerfile not found in current directory")
 	}
-	if len(execution.builds) > 1 {
-		return DockerPushSpec{}, nil, fmt.Errorf("expected at most one Docker build spec, got %d", len(execution.builds))
+
+	imageRef, err := ResolveDockerImageReference(store, findProjectRoot, resolveBuildContext, now, buildContext.Dir, target)
+	if err != nil {
+		return DockerPushSpec{}, nil, err
 	}
 
 	var build *DockerBuildSpec
-	if len(execution.builds) == 1 {
-		build = &execution.builds[0]
+	if imageRef.IsLocalBuild {
+		resolvedBuild, err := resolveDockerBuildSpec(store, findProjectRoot, resolveBuildContext, now, buildContext, target)
+		if err != nil {
+			return DockerPushSpec{}, nil, err
+		}
+		build = &resolvedBuild
+		imageRef = resolvedBuild.Image
 	}
-	return execution.pushes[0], build, nil
+
+	return NewDockerPushSpec(buildContext.Dir, imageRef), build, nil
 }
 
 func ResolveDockerImageReference(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, buildDir string, target DockerCommandTarget) (DockerImageReference, error) {
@@ -208,7 +259,7 @@ func ResolveDockerImageReference(store DockerStore, findProjectRoot ProjectFinde
 		return DockerImageReference{}, err
 	}
 
-	return resolveDockerImageReferenceForProject(now, projectRoot, environment, buildDir)
+	return resolveDockerImageReferenceForProject(now, projectRoot, environment, buildDir, strings.TrimSpace(target.VersionOverride))
 }
 
 func resolveCurrentDockerBuildSpec(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (DockerBuildSpec, error) {
@@ -222,7 +273,7 @@ func resolveCurrentDockerBuildSpec(store DockerStore, findProjectRoot ProjectFin
 	return resolveDockerBuildSpec(store, findProjectRoot, resolveBuildContext, now, buildContext, target)
 }
 
-func ResolveDockerBuildForComponent(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, componentName string) (*DockerBuildSpec, error) {
+func ResolveDockerBuildForComponent(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, componentName, versionOverride string) (*DockerBuildSpec, error) {
 	_, _, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	if !isLocalEnvironment(environment) {
@@ -236,7 +287,7 @@ func ResolveDockerBuildForComponent(store DockerStore, findProjectRoot ProjectFi
 			if filepath.Base(dir) == strings.TrimSpace(componentName) &&
 				filepath.Base(filepath.Dir(dir)) == "docker" &&
 				strings.TrimSpace(buildContext.DockerfilePath) != "" {
-				build, err := newDockerBuildSpec(now, projectRoot, environment, buildContext)
+				build, err := newDockerBuildSpec(now, projectRoot, environment, buildContext, versionOverride)
 				if err != nil {
 					return nil, err
 				}
@@ -250,7 +301,7 @@ func ResolveDockerBuildForComponent(store DockerStore, findProjectRoot ProjectFi
 		return nil, err
 	}
 
-	build, err := newDockerBuildSpec(now, projectRoot, environment, buildContext)
+	build, err := newDockerBuildSpec(now, projectRoot, environment, buildContext, versionOverride)
 	if err != nil {
 		return nil, err
 	}
@@ -575,10 +626,10 @@ func resolveDockerBuildSpec(store DockerStore, findProjectRoot ProjectFinderFunc
 		return DockerBuildSpec{}, err
 	}
 
-	return newDockerBuildSpec(now, projectRoot, environment, buildContext)
+	return newDockerBuildSpec(now, projectRoot, environment, buildContext, strings.TrimSpace(target.VersionOverride))
 }
 
-func resolveDockerImageReferenceForProject(now NowFunc, projectRoot, environment, buildDir string) (DockerImageReference, error) {
+func resolveDockerImageReferenceForProject(now NowFunc, projectRoot, environment, buildDir, versionOverride string) (DockerImageReference, error) {
 	registry, err := resolveDockerBuildRegistryForEnvironment(projectRoot, environment)
 	if err != nil {
 		return DockerImageReference{}, err
@@ -589,7 +640,7 @@ func resolveDockerImageReferenceForProject(now NowFunc, projectRoot, environment
 		return DockerImageReference{}, fmt.Errorf("could not determine image name from current directory")
 	}
 
-	version, versionFromBuildDir, versionFilePath, err := resolveDockerImageVersion(now, projectRoot, environment, buildDir)
+	version, versionFromBuildDir, versionFilePath, err := resolveDockerImageVersion(now, projectRoot, environment, buildDir, versionOverride)
 	if err != nil {
 		return DockerImageReference{}, err
 	}
@@ -607,18 +658,26 @@ func resolveDockerImageReferenceForProject(now NowFunc, projectRoot, environment
 	}, nil
 }
 
-func resolveDockerImageVersion(now NowFunc, projectRoot, environment, buildDir string) (string, bool, string, error) {
+func resolveDockerImageVersion(now NowFunc, projectRoot, environment, buildDir, versionOverride string) (string, bool, string, error) {
 	baseVersion, versionFromBuildDir, versionFilePath, err := ResolveDockerBuildVersion(buildDir, projectRoot)
 	if err != nil {
 		return "", false, "", err
 	}
+
+	if versionOverride = strings.TrimSpace(versionOverride); versionOverride != "" {
+		if versionFromBuildDir {
+			return baseVersion, versionFromBuildDir, versionFilePath, nil
+		}
+		return versionOverride, versionFromBuildDir, versionFilePath, nil
+	}
+
 	if !isLocalEnvironment(environment) || versionFromBuildDir {
 		return baseVersion, versionFromBuildDir, versionFilePath, nil
 	}
 	return formatLocalSnapshotVersion(baseVersion, now()), versionFromBuildDir, versionFilePath, nil
 }
 
-func newDockerBuildSpec(now NowFunc, projectRoot, environment string, buildContext DockerBuildContext) (DockerBuildSpec, error) {
+func newDockerBuildSpec(now NowFunc, projectRoot, environment string, buildContext DockerBuildContext, versionOverride string) (DockerBuildSpec, error) {
 	if strings.TrimSpace(buildContext.DockerfilePath) == "" {
 		var err error
 		buildContext, err = DockerBuildContextAtDir(buildContext.Dir)
@@ -628,7 +687,7 @@ func newDockerBuildSpec(now NowFunc, projectRoot, environment string, buildConte
 	}
 
 	contextDir := ResolveDockerBuildContextDirForProject(buildContext.Dir, projectRoot)
-	imageRef, err := resolveDockerImageReferenceForProject(now, projectRoot, environment, buildContext.Dir)
+	imageRef, err := resolveDockerImageReferenceForProject(now, projectRoot, environment, buildContext.Dir, versionOverride)
 	if err != nil {
 		return DockerBuildSpec{}, err
 	}
@@ -681,9 +740,15 @@ func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBui
 	return nil
 }
 
-func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc) error {
+func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) error {
 	if execution.script != nil {
 		return runBuildScript(ctx, *execution.script, runScript)
+	}
+	if len(execution.dockerPushes) > 0 {
+		return RunDockerPushExecution(ctx, DockerPushExecutionSpec{
+			builds: execution.dockerBuilds,
+			pushes: execution.dockerPushes,
+		}, build, push)
 	}
 	return RunDockerBuilds(ctx, execution.dockerBuilds, build)
 }

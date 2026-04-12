@@ -103,7 +103,7 @@ func TestOpenCommandDryRunPrintsResolvedOpenTraceWithoutLaunchingShell(t *testin
 	output := stderr.String()
 	for _, want := range []string{
 		"kubectl --context cluster-dev --namespace tenant-a-dev wait --for=condition=Available --timeout 2m0s deployment/tenant-a-devops",
-		"kubectl --context cluster-dev --namespace tenant-a-dev exec -it -c erun-devops deployment/tenant-a-devops -- /bin/sh -lc '<bootstrap-script>'",
+		"kubectl --context cluster-dev --namespace tenant-a-dev exec -it -c tenant-a-devops deployment/tenant-a-devops -- /bin/sh -lc '<bootstrap-script>'",
 		"bootstrap-script:",
 		"  set -eu",
 	} {
@@ -174,9 +174,9 @@ func TestOpenCommandDryRunPrintsDeployPlanWhenDevopsRuntimeIsMissing(t *testing.
 
 	output := stderr.String()
 	for _, want := range []string{
-		"helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace tenant-a-dev --kube-context cluster-dev -f " + filepath.Join(chartPath, "values.dev.yaml"),
+		"helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace tenant-a-dev --kube-context cluster-dev -f " + filepath.Join(chartPath, "values.dev.yaml") + " --set-string tenant=tenant-a --set-string environment=dev",
 		"kubectl --context cluster-dev --namespace tenant-a-dev wait --for=condition=Available --timeout 2m0s deployment/tenant-a-devops",
-		"kubectl --context cluster-dev --namespace tenant-a-dev exec -it -c erun-devops deployment/tenant-a-devops -- /bin/sh -lc '<bootstrap-script>'",
+		"kubectl --context cluster-dev --namespace tenant-a-dev exec -it -c tenant-a-devops deployment/tenant-a-devops -- /bin/sh -lc '<bootstrap-script>'",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected dry-run output to contain %q, got %q", want, output)
@@ -218,9 +218,17 @@ func TestOpenCommandDryRunFallsBackToDefaultRuntimeChartWhenTenantRepoHasNoDevop
 		t.Fatalf("did not expect local build or push for default runtime chart, got %q", output)
 	}
 	for _, want := range []string{
-		"helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace frs-local --kube-context cluster-dev",
+		"helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace frs-local --kube-context cluster-dev -f ",
 		"kubectl --context cluster-dev --namespace frs-local wait --for=condition=Available --timeout 2m0s deployment/frs-devops",
-		"kubectl --context cluster-dev --namespace frs-local exec -it -c erun-devops deployment/frs-devops -- /bin/sh -lc '<bootstrap-script>'",
+		"kubectl --context cluster-dev --namespace frs-local exec -it -c frs-devops deployment/frs-devops -- /bin/sh -lc '<bootstrap-script>'",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected dry-run output to contain %q, got %q", want, output)
+		}
+	}
+	for _, want := range []string{
+		"--set-string tenant=frs",
+		"--set-string environment=local",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected dry-run output to contain %q, got %q", want, output)

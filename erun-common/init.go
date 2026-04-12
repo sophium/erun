@@ -60,6 +60,7 @@ type BootstrapInitParams struct {
 	InitializeCurrentProject bool
 	ProjectRoot              string
 	Environment              string
+	RuntimeVersion           string
 	KubernetesContext        string
 	ContainerRegistry        string
 	ConfirmTenant            *bool
@@ -528,7 +529,10 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 			return result, err
 		}
 	}
-	if err := EnsureDefaultDevopsModule(s.Context, projectRoot, tenant); err != nil {
+	if err := EnsureDefaultDevopsModuleWithVersion(s.Context, projectRoot, tenant, params.RuntimeVersion); err != nil {
+		return result, err
+	}
+	if err := EnsureDefaultDevopsChart(s.Context, projectRoot, tenant, envName); err != nil {
 		return result, err
 	}
 
@@ -575,6 +579,7 @@ func normalizeBootstrapParams(params BootstrapInitParams) BootstrapInitParams {
 	params.SelectedTenant = strings.TrimSpace(params.SelectedTenant)
 	params.ProjectRoot = strings.TrimSpace(params.ProjectRoot)
 	params.Environment = strings.TrimSpace(params.Environment)
+	params.RuntimeVersion = strings.TrimSpace(params.RuntimeVersion)
 	params.KubernetesContext = strings.TrimSpace(params.KubernetesContext)
 	params.ContainerRegistry = strings.TrimSpace(params.ContainerRegistry)
 	return params

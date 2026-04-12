@@ -478,7 +478,7 @@ func TestPreviewShellLaunchRedactsHostCredentialContents(t *testing.T) {
 	if !strings.Contains(strings.Join(preview.WaitArgs, " "), "wait --for=condition=Available --timeout 2m0s deployment/tenant-a-devops") {
 		t.Fatalf("unexpected wait args: %#v", preview.WaitArgs)
 	}
-	if !strings.Contains(strings.Join(preview.ExecArgs, " "), "exec -it -c erun-devops deployment/tenant-a-devops -- /bin/sh -lc") {
+	if !strings.Contains(strings.Join(preview.ExecArgs, " "), "exec -it -c tenant-a-devops deployment/tenant-a-devops -- /bin/sh -lc") {
 		t.Fatalf("unexpected exec args: %#v", preview.ExecArgs)
 	}
 	if strings.Contains(preview.Script, "PRIVATE KEY") {

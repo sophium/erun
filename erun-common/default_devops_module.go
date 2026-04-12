@@ -32,6 +32,10 @@ var defaultDevopsModuleTemplates = []defaultDevopsModuleTemplate{
 }
 
 func EnsureDefaultDevopsModule(ctx Context, projectRoot, tenant string) error {
+	return EnsureDefaultDevopsModuleWithVersion(ctx, projectRoot, tenant, "")
+}
+
+func EnsureDefaultDevopsModuleWithVersion(ctx Context, projectRoot, tenant, runtimeVersion string) error {
 	projectRoot = strings.TrimSpace(projectRoot)
 	tenant = strings.TrimSpace(tenant)
 	if projectRoot == "" || tenant == "" {
@@ -40,17 +44,16 @@ func EnsureDefaultDevopsModule(ctx Context, projectRoot, tenant string) error {
 	projectRoot = filepath.Clean(projectRoot)
 
 	moduleName := RuntimeReleaseName(tenant)
-	replacer := strings.NewReplacer("__MODULE_NAME__", moduleName)
 	for _, templateFile := range defaultDevopsModuleTemplates {
 		data, err := defaultDevopsModuleFiles.ReadFile(templateFile.AssetPath)
 		if err != nil {
 			return err
 		}
 
-		targetPath := replacer.Replace(templateFile.TargetPath)
+		targetPath := strings.ReplaceAll(templateFile.TargetPath, "__MODULE_NAME__", moduleName)
 		resolvedPath := filepath.Join(projectRoot, filepath.FromSlash(targetPath))
-		content := []byte(replacer.Replace(string(data)))
-		if err := ensureDefaultDevopsModuleFile(ctx, resolvedPath, templateFile.Mode, content); err != nil {
+		content := renderDefaultDevopsModuleTemplate(templateFile.AssetPath, moduleName, runtimeVersion, data)
+		if err := ensureDefaultDevopsFile(ctx, resolvedPath, templateFile.Mode, content); err != nil {
 			return err
 		}
 	}
@@ -58,7 +61,26 @@ func EnsureDefaultDevopsModule(ctx Context, projectRoot, tenant string) error {
 	return nil
 }
 
-func ensureDefaultDevopsModuleFile(ctx Context, path string, mode os.FileMode, content []byte) error {
+func renderDefaultDevopsModuleTemplate(assetPath, moduleName, runtimeVersion string, data []byte) []byte {
+	content := strings.ReplaceAll(string(data), "__MODULE_NAME__", moduleName)
+
+	switch assetPath {
+	case "assets/default-devops-module/docker/component/Dockerfile":
+		content = strings.Replace(content, "ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.0.0", "ARG ERUN_BASE_TAG="+defaultDevopsBaseTag(runtimeVersion), 1)
+	}
+
+	return []byte(content)
+}
+
+func defaultDevopsBaseTag(runtimeVersion string) string {
+	runtimeVersion = strings.TrimSpace(runtimeVersion)
+	if runtimeVersion == "" {
+		runtimeVersion = "dev"
+	}
+	return "erunpaas/erun-devops:" + runtimeVersion
+}
+
+func ensureDefaultDevopsFile(ctx Context, path string, mode os.FileMode, content []byte) error {
 	info, err := os.Stat(path)
 	switch {
 	case err == nil && info.IsDir():
@@ -71,7 +93,7 @@ func ensureDefaultDevopsModuleFile(ctx Context, path string, mode os.FileMode, c
 		if bytes.Equal(existing, content) {
 			return nil
 		}
-		if !shouldReplaceDefaultDevopsModuleFile(path, existing) {
+		if !shouldReplaceDefaultDevopsFile(path, existing) {
 			return nil
 		}
 	case !os.IsNotExist(err):
@@ -93,7 +115,7 @@ func ensureDefaultDevopsModuleFile(ctx Context, path string, mode os.FileMode, c
 	return os.Chmod(path, mode)
 }
 
-func shouldReplaceDefaultDevopsModuleFile(path string, existing []byte) bool {
+func shouldReplaceDefaultDevopsFile(path string, existing []byte) bool {
 	if filepath.Base(path) != "Dockerfile" {
 		return false
 	}

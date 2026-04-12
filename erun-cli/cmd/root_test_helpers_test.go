@@ -18,6 +18,7 @@ type testRootDeps struct {
 	ResolveDockerBuildContext      common.BuildContextResolverFunc
 	ResolveKubernetesDeployContext common.DeployContextResolverFunc
 	CheckKubernetesDeployment      common.KubernetesDeploymentCheckerFunc
+	RunGit                         common.GitCommandRunnerFunc
 	RunBuildScript                 common.BuildScriptRunnerFunc
 	BuildDockerImage               common.DockerImageBuilderFunc
 	PushDockerImage                common.DockerImagePusherFunc
@@ -86,6 +87,10 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	if launchMCP == nil {
 		launchMCP = launchMCPProcess
 	}
+	runGit := deps.RunGit
+	if runGit == nil {
+		runGit = common.GitCommandRunner
+	}
 	launchShell := deps.LaunchShell
 	if launchShell == nil {
 		launchShell = common.LaunchShell
@@ -121,7 +126,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	containerCmd := newCommandGroup(
 		"container",
 		"Container utilities",
-		newBuildCmd(store, findProjectRoot, resolveDockerBuildContext, now, runBuildScript, buildDockerImage),
+		newBuildCmd(store, findProjectRoot, resolveDockerBuildContext, now, runBuildScript, buildDockerImage, push),
 		newPushCmd(store, findProjectRoot, resolveDockerBuildContext, now, buildDockerImage, push),
 	)
 	k8sCmd := newCommandGroup(
@@ -133,7 +138,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 
 	var buildCmd *cobra.Command
 	if hasOptionalBuildCmd(optionalBuildFindProjectRoot, resolveDockerBuildContext) {
-		buildCmd = newBuildCmd(store, findProjectRoot, resolveDockerBuildContext, now, runBuildScript, buildDockerImage)
+		buildCmd = newBuildCmd(store, findProjectRoot, resolveDockerBuildContext, now, runBuildScript, buildDockerImage, push)
 		buildCmd.Short = optionalBuildCmdShort(optionalBuildFindProjectRoot, resolveDockerBuildContext)
 	}
 	var pushCmd *cobra.Command
@@ -148,6 +153,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 
 	mcpCmd := newMCPCmd(resolveOpen, runInitForArgs, launchMCP)
 	listCmd := newListCmd(listDataStore, findProjectRoot)
+	releaseCmd := newReleaseCmd(findProjectRoot, runGit)
 	versionCmd := newVersionCmd(func() (common.BuildInfo, string, error) {
 		return resolveVersionCommandBuildInfo(findProjectRoot)
 	})
@@ -165,6 +171,6 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	}
 
 	cmd := newRootCommand(runRoot)
-	addCommands(cmd, initCmd, openCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, listCmd, versionCmd)
+	addCommands(cmd, initCmd, openCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, listCmd, releaseCmd, versionCmd)
 	return cmd
 }

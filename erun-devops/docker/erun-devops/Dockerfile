@@ -12,6 +12,9 @@ WORKDIR /src/erun-cli
 
 ARG TARGETOS=linux
 ARG TARGETARCH
+ARG ERUN_VERSION
+ARG ERUN_COMMIT=""
+ARG ERUN_DATE=""
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
@@ -23,11 +26,11 @@ COPY erun-mcp /src/erun-mcp
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    ERUN_VERSION="$(tr -d '\n' < /src/erun-devops/VERSION)" && \
+    ERUN_VERSION="${ERUN_VERSION:-$(tr -d '\n' < /src/erun-devops/VERSION)}" && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags "-X github.com/sophium/erun/cmd.buildVersion=${ERUN_VERSION}" -o /out/erun . && \
+    go build -ldflags "-X github.com/sophium/erun/cmd.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/cmd.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/cmd.buildDate=${ERUN_DATE}" -o /out/erun . && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags "-X github.com/sophium/erun/erun-mcp.buildVersion=${ERUN_VERSION}" -o /out/emcp ../erun-mcp/cmd/emcp
+    go build -ldflags "-X github.com/sophium/erun/erun-mcp.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/erun-mcp.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/erun-mcp.buildDate=${ERUN_DATE}" -o /out/emcp ../erun-mcp/cmd/emcp
 
 FROM erunpaas/erun-ubuntu:noble-20260217
 

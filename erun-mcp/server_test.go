@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -222,6 +223,83 @@ func TestListToolReturnsConfiguredTenantsAndEffectiveTarget(t *testing.T) {
 	}
 }
 
+func TestReleaseToolPreview(t *testing.T) {
+	projectRoot := createReleaseRuntimeRepo(t, "develop")
+	if err := eruncommon.SaveProjectConfig(projectRoot, eruncommon.ProjectConfig{}); err != nil {
+		t.Fatalf("SaveProjectConfig failed: %v", err)
+	}
+
+	handler := releaseTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{
+			RepoPath: projectRoot,
+		},
+	}))
+
+	_, output, err := handler(context.Background(), nil, ReleaseInput{Preview: true, Verbosity: 1})
+	if err != nil {
+		t.Fatalf("releaseTool failed: %v", err)
+	}
+
+	if output.Executed {
+		t.Fatalf("expected preview output, got %+v", output)
+	}
+	if output.Spec.Mode != eruncommon.ReleaseModeCandidate || output.Spec.Version == "" || len(output.Spec.Stages) == 0 {
+		t.Fatalf("unexpected release output: %+v", output)
+	}
+	if len(output.Spec.DockerImages) != 1 || output.Spec.DockerImages[0].Tag == "" {
+		t.Fatalf("unexpected docker images: %+v", output.Spec.DockerImages)
+	}
+}
+
+func createReleaseRuntimeRepo(t *testing.T, branch string) string {
+	t.Helper()
+
+	projectRoot := t.TempDir()
+	releaseRoot := filepath.Join(projectRoot, "erun-devops")
+	for _, dir := range []string{
+		filepath.Join(releaseRoot, "k8s", "api"),
+		filepath.Join(releaseRoot, "docker", "api"),
+		filepath.Join(releaseRoot, "docker", "base"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(releaseRoot, "VERSION"), []byte("1.4.2\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(releaseRoot, "k8s", "api", "Chart.yaml"), []byte("apiVersion: v2\nname: api\nversion: 0.1.0\nappVersion: 0.1.0\n"), 0o644); err != nil {
+		t.Fatalf("write Chart.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(releaseRoot, "docker", "api", "Dockerfile"), []byte("FROM alpine:3.22\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(releaseRoot, "docker", "base", "Dockerfile"), []byte("FROM alpine:3.22\n"), 0o644); err != nil {
+		t.Fatalf("write other Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(releaseRoot, "docker", "base", "VERSION"), []byte("9.9.9\n"), 0o644); err != nil {
+		t.Fatalf("write other VERSION: %v", err)
+	}
+
+	runGitTestCommand(t, projectRoot, "init", "-b", branch)
+	runGitTestCommand(t, projectRoot, "config", "user.email", "codex@example.com")
+	runGitTestCommand(t, projectRoot, "config", "user.name", "Codex")
+	runGitTestCommand(t, projectRoot, "add", ".")
+	runGitTestCommand(t, projectRoot, "commit", "-m", "initial")
+	return projectRoot
+}
+
+func runGitTestCommand(t *testing.T, dir string, args ...string) {
+	t.Helper()
+
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v failed: %v\n%s", args, err, output)
+	}
+}
+
 func TestBuildToolRunsErunBuildWithResolvedContext(t *testing.T) {
 	projectRoot := t.TempDir()
 	componentDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
@@ -292,6 +370,82 @@ func TestBuildToolPreviewVerboseIncludesTrace(t *testing.T) {
 	want := "docker build -t erunpaas/erun-devops:1.1.0 -f " + filepath.Join(componentDir, "Dockerfile") + " ."
 	if output.Trace[0] != "cd "+projectRoot+" && "+want {
 		t.Fatalf("unexpected trace output: %+v", output.Trace)
+	}
+}
+
+func TestBuildToolPreviewAtRepoRootIncludesBuildAndPushTrace(t *testing.T) {
+	projectRoot := t.TempDir()
+	moduleRoot := filepath.Join(projectRoot, "tenant-a-devops")
+	componentDirs := []string{
+		filepath.Join(moduleRoot, "docker", "tenant-a-devops"),
+		filepath.Join(moduleRoot, "docker", "erun-dind"),
+	}
+	for _, dir := range componentDirs {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir component dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+			t.Fatalf("write Dockerfile: %v", err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(componentDirs[0], "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(componentDirs[1], "VERSION"), []byte("28.1.1\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := eruncommon.SaveProjectConfig(projectRoot, eruncommon.ProjectConfig{
+		Environments: map[string]eruncommon.ProjectEnvironmentConfig{
+			eruncommon.DefaultEnvironment: {ContainerRegistry: "erunpaas"},
+		},
+	}); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	handler := buildTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{
+			Tenant:      "tenant-a",
+			Environment: eruncommon.DefaultEnvironment,
+			RepoPath:    projectRoot,
+		},
+	}))
+
+	_, output, err := handler(context.Background(), nil, BuildInput{
+		Preview:   true,
+		Verbosity: 1,
+	})
+	if err != nil {
+		t.Fatalf("buildTool failed: %v", err)
+	}
+	if len(output.Trace) != 4 {
+		t.Fatalf("unexpected trace output: %+v", output.Trace)
+	}
+}
+
+func TestPushToolRejectsRepoRootWithoutComponent(t *testing.T) {
+	projectRoot := t.TempDir()
+	moduleRoot := filepath.Join(projectRoot, "tenant-a-devops")
+	componentDir := filepath.Join(moduleRoot, "docker", "tenant-a-devops")
+	if err := os.MkdirAll(componentDir, 0o755); err != nil {
+		t.Fatalf("mkdir component dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+
+	handler := pushTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{
+			Environment: eruncommon.DefaultEnvironment,
+			RepoPath:    projectRoot,
+		},
+	}))
+
+	_, _, err := handler(context.Background(), nil, PushInput{})
+	if err == nil {
+		t.Fatal("expected missing Dockerfile error")
+	}
+	if err.Error() != "dockerfile not found in current directory" {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

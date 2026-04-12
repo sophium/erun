@@ -1,5 +1,5 @@
 apiVersion: v2
-name: erun-devops
+name: __MODULE_NAME__
 description: ERun DevOps
 type: application
 version: "1.0.0"

@@ -39,6 +39,8 @@ type HelmDeployParams struct {
 	ReleaseName       string
 	ChartPath         string
 	ValuesFilePath    string
+	Tenant            string
+	Environment       string
 	Namespace         string
 	KubernetesContext string
 	WorktreeHostPath  string
@@ -52,6 +54,8 @@ type HelmDeploySpec struct {
 	ReleaseName       string
 	ChartPath         string
 	ValuesFilePath    string
+	Tenant            string
+	Environment       string
 	Namespace         string
 	KubernetesContext string
 	WorktreeHostPath  string
@@ -77,6 +81,15 @@ type DeploySpec struct {
 	DeployContext KubernetesDeployContext
 	Builds        []DockerBuildSpec
 	Deploy        HelmDeploySpec
+}
+
+func RunDeploySpecs(ctx Context, executions []DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
+	for _, execution := range executions {
+		if err := RunDeploySpec(ctx, execution, build, push, deploy); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc) error {
@@ -120,6 +133,31 @@ func ResolveDeploySpec(store DeployStore, findProjectRoot ProjectFinderFunc, res
 	return ResolveDeploySpecForOpenResult(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, componentName, versionOverride)
 }
 
+func ResolveCurrentDeploySpecs(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) ([]DeploySpec, error) {
+	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+
+	resolvedTarget, err := resolveDeployTarget(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
+	if err != nil {
+		return nil, err
+	}
+
+	deployContexts, err := ResolveCurrentKubernetesDeployContexts(findProjectRoot, resolveKubernetesDeployContext, target.RepoPath)
+	if err != nil {
+		return nil, err
+	}
+
+	specs := make([]DeploySpec, 0, len(deployContexts))
+	for _, deployContext := range deployContexts {
+		spec, err := resolveDeploySpecForContext(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, deployContext, "")
+		if err != nil {
+			return nil, err
+		}
+		specs = append(specs, spec)
+	}
+
+	return specs, nil
+}
+
 func ResolveDeploySpecForOpenResult(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, componentName, versionOverride string) (DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 
@@ -128,9 +166,15 @@ func ResolveDeploySpecForOpenResult(store DeployStore, findProjectRoot ProjectFi
 		return DeploySpec{}, err
 	}
 
+	return resolveDeploySpecForContext(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, deployContext, versionOverride)
+}
+
+func resolveDeploySpecForContext(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, deployContext KubernetesDeployContext, versionOverride string) (DeploySpec, error) {
+	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+
 	builds := make([]DockerBuildSpec, 0, 2)
 	if strings.TrimSpace(versionOverride) == "" {
-		buildInput, err := ResolveDockerBuildForComponent(store, findProjectRoot, resolveDockerBuildContext, now, target.RepoPath, target.Environment, deployContext.ComponentName)
+		buildInput, err := ResolveDockerBuildForComponent(store, findProjectRoot, resolveDockerBuildContext, now, target.RepoPath, target.Environment, deployContext.ComponentName, "")
 		if err != nil {
 			return DeploySpec{}, err
 		}
@@ -381,6 +425,8 @@ func newHelmDeploySpec(target OpenResult, deployContext KubernetesDeployContext,
 		ReleaseName:       deployContext.ComponentName,
 		ChartPath:         deployContext.ChartPath,
 		ValuesFilePath:    valuesFilePath,
+		Tenant:            target.Tenant,
+		Environment:       target.Environment,
 		Namespace:         KubernetesNamespaceName(target.Tenant, target.Environment),
 		KubernetesContext: target.EnvConfig.KubernetesContext,
 		WorktreeHostPath:  target.RepoPath,
@@ -394,6 +440,8 @@ func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 		ReleaseName:       d.ReleaseName,
 		ChartPath:         d.ChartPath,
 		ValuesFilePath:    d.ValuesFilePath,
+		Tenant:            d.Tenant,
+		Environment:       d.Environment,
 		Namespace:         d.Namespace,
 		KubernetesContext: d.KubernetesContext,
 		WorktreeHostPath:  d.WorktreeHostPath,
@@ -418,6 +466,8 @@ func (d HelmDeploySpec) command() commandSpec {
 	}
 	args = append(args,
 		"-f", d.ValuesFilePath,
+		"--set-string", "tenant="+d.Tenant,
+		"--set-string", "environment="+d.Environment,
 		"--set-string", "worktreeHostPath="+d.WorktreeHostPath,
 		d.ReleaseName,
 		d.ChartPath,
@@ -437,6 +487,39 @@ func ResolveKubernetesDeployContext() (KubernetesDeployContext, error) {
 	}
 
 	return KubernetesDeployContextAtDir(dir), nil
+}
+
+func ResolveCurrentKubernetesDeployContexts(findProjectRoot ProjectFinderFunc, resolveDeployContext DeployContextResolverFunc, projectRootOverride string) ([]KubernetesDeployContext, error) {
+	if resolveDeployContext == nil {
+		return nil, fmt.Errorf("helm chart not found in current directory")
+	}
+
+	deployContext, err := resolveDeployContext()
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(deployContext.ChartPath) != "" && strings.TrimSpace(deployContext.ComponentName) != "" {
+		deployContext.ComponentName = strings.TrimSpace(deployContext.ComponentName)
+		deployContext.ChartPath = filepath.Clean(deployContext.ChartPath)
+		if err := ValidateHelmChartPath(deployContext.ChartPath); err != nil {
+			return nil, err
+		}
+		return []KubernetesDeployContext{deployContext}, nil
+	}
+
+	if deployContexts, err := ResolveKubernetesDeployContextsAtDir(deployContext.Dir); err == nil {
+		return deployContexts, nil
+	}
+
+	k8sDir, ok, err := resolveCurrentDevopsK8sDir(findProjectRoot, deployContext.Dir, projectRootOverride)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		return ResolveKubernetesDeployContextsAtDir(k8sDir)
+	}
+
+	return nil, fmt.Errorf("helm chart not found in current directory")
 }
 
 func KubernetesDeployContextAtDir(dir string) KubernetesDeployContext {
@@ -459,6 +542,139 @@ func KubernetesDeployContextAtDir(dir string) KubernetesDeployContext {
 	}
 
 	return context
+}
+
+func ResolveKubernetesDeployContextsAtDir(dir string) ([]KubernetesDeployContext, error) {
+	dir = filepath.Clean(strings.TrimSpace(dir))
+	if dir == "" || filepath.Base(dir) != "k8s" {
+		return nil, fmt.Errorf("helm chart not found in current directory")
+	}
+
+	deployContexts, err := KubernetesDeployContextsUnderDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	if len(deployContexts) == 0 {
+		return nil, fmt.Errorf("helm chart not found in current directory")
+	}
+
+	return deployContexts, nil
+}
+
+func KubernetesDeployContextsUnderDir(dir string) ([]KubernetesDeployContext, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+
+	deployContexts := make([]KubernetesDeployContext, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		chartPath := filepath.Join(dir, entry.Name())
+		if !hasHelmChart(filepath.Join(chartPath, "Chart.yaml")) {
+			continue
+		}
+
+		deployContexts = append(deployContexts, KubernetesDeployContext{
+			Dir:           dir,
+			ComponentName: entry.Name(),
+			ChartPath:     chartPath,
+		})
+	}
+
+	return deployContexts, nil
+}
+
+func resolveCurrentDevopsK8sDir(findProjectRoot ProjectFinderFunc, dir, projectRootOverride string) (string, bool, error) {
+	dir = filepath.Clean(strings.TrimSpace(dir))
+	if dir == "" {
+		return "", false, nil
+	}
+
+	k8sDir := filepath.Join(dir, "k8s")
+	if strings.HasSuffix(filepath.Base(dir), "-devops") {
+		if ok, err := isKubernetesDeployModuleDir(k8sDir); err != nil {
+			return "", false, err
+		} else if ok {
+			return k8sDir, true, nil
+		}
+	}
+
+	projectRoot := strings.TrimSpace(projectRootOverride)
+	if projectRoot == "" {
+		var err error
+		projectRoot, err = resolveDockerBuildProjectRoot(findProjectRoot, DockerCommandTarget{})
+		if err != nil {
+			return "", false, err
+		}
+	}
+	if projectRoot == "" || dir != filepath.Clean(projectRoot) {
+		return "", false, nil
+	}
+
+	return resolveProjectRootDevopsK8sDir(findProjectRoot, projectRoot)
+}
+
+func resolveProjectRootDevopsK8sDir(findProjectRoot ProjectFinderFunc, projectRoot string) (string, bool, error) {
+	projectRoot = filepath.Clean(strings.TrimSpace(projectRoot))
+	if projectRoot == "" {
+		return "", false, nil
+	}
+
+	if tenant, detectedProjectRoot, err := findProjectRoot(); err == nil &&
+		filepath.Clean(strings.TrimSpace(detectedProjectRoot)) == projectRoot &&
+		strings.TrimSpace(tenant) != "" {
+		k8sDir := filepath.Join(projectRoot, RuntimeReleaseName(tenant), "k8s")
+		if ok, err := isKubernetesDeployModuleDir(k8sDir); err != nil {
+			return "", false, err
+		} else if ok {
+			return k8sDir, true, nil
+		}
+	}
+
+	entries, err := os.ReadDir(projectRoot)
+	if err != nil {
+		return "", false, err
+	}
+
+	candidates := make([]string, 0, 1)
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasSuffix(entry.Name(), "-devops") {
+			continue
+		}
+
+		k8sDir := filepath.Join(projectRoot, entry.Name(), "k8s")
+		ok, err := isKubernetesDeployModuleDir(k8sDir)
+		if err != nil {
+			return "", false, err
+		}
+		if ok {
+			candidates = append(candidates, k8sDir)
+		}
+	}
+
+	switch len(candidates) {
+	case 0:
+		return "", false, nil
+	case 1:
+		return candidates[0], true, nil
+	default:
+		return "", false, fmt.Errorf("multiple devops k8s directories found under project root")
+	}
+}
+
+func isKubernetesDeployModuleDir(dir string) (bool, error) {
+	deployContexts, err := ResolveKubernetesDeployContextsAtDir(dir)
+	if err != nil {
+		if err.Error() == "helm chart not found in current directory" {
+			return false, nil
+		}
+		return false, err
+	}
+	return len(deployContexts) > 0, nil
 }
 
 func DeployHelmChart(params HelmDeployParams) error {
@@ -486,6 +702,8 @@ func DeployHelmChart(params HelmDeployParams) error {
 	}
 	args = append(args,
 		"-f", params.ValuesFilePath,
+		"--set-string", "tenant="+params.Tenant,
+		"--set-string", "environment="+params.Environment,
 		"--set-string", "worktreeHostPath="+params.WorktreeHostPath,
 		params.ReleaseName,
 		chartPath,

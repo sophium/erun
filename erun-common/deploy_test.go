@@ -87,6 +87,47 @@ func TestResolveKubernetesDeployContextDetectsK8sComponentDir(t *testing.T) {
 	}
 }
 
+func TestResolveCurrentKubernetesDeployContextsUsesProjectRootDevopsModule(t *testing.T) {
+	projectRoot := t.TempDir()
+	moduleRoot := filepath.Join(projectRoot, "tenant-a-devops")
+	chartA := filepath.Join(moduleRoot, "k8s", "tenant-a-devops")
+	chartB := filepath.Join(moduleRoot, "k8s", "erun-dind")
+	for _, chartPath := range []string{chartA, chartB} {
+		if err := os.MkdirAll(chartPath, 0o755); err != nil {
+			t.Fatalf("mkdir chart dir: %v", err)
+		}
+		componentName := filepath.Base(chartPath)
+		if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: "+componentName+"\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644); err != nil {
+			t.Fatalf("write Chart.yaml: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644); err != nil {
+			t.Fatalf("write values.local.yaml: %v", err)
+		}
+	}
+
+	deployContexts, err := ResolveCurrentKubernetesDeployContexts(
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (KubernetesDeployContext, error) {
+			return KubernetesDeployContext{Dir: projectRoot}, nil
+		},
+		"",
+	)
+	if err != nil {
+		t.Fatalf("ResolveCurrentKubernetesDeployContexts failed: %v", err)
+	}
+	if len(deployContexts) != 2 {
+		t.Fatalf("unexpected deploy contexts: %+v", deployContexts)
+	}
+	if deployContexts[0].ComponentName != "erun-dind" || deployContexts[0].ChartPath != chartB {
+		t.Fatalf("unexpected first deploy context: %+v", deployContexts[0])
+	}
+	if deployContexts[1].ComponentName != "tenant-a-devops" || deployContexts[1].ChartPath != chartA {
+		t.Fatalf("unexpected second deploy context: %+v", deployContexts[1])
+	}
+}
+
 func TestPrepareHelmChartForDeployOverridesVersionAndAppVersion(t *testing.T) {
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
