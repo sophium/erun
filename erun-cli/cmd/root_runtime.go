@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
@@ -119,22 +120,73 @@ func hasOptionalBuildCmd(findProjectRoot common.ProjectFinderFunc, resolveBuildC
 		return true
 	}
 
-	buildContext, err := resolveBuildContext()
-	if err != nil {
-		return false
-	}
-	buildContexts := []common.DockerBuildContext(nil)
-	if strings.TrimSpace(buildContext.DockerfilePath) != "" {
-		buildContexts = []common.DockerBuildContext{buildContext}
-	} else if resolvedBuildContexts, err := common.ResolveDockerBuildContextsAtDir(buildContext.Dir); err == nil {
-		buildContexts = resolvedBuildContexts
-	}
-	return len(buildContexts) > 0
+	buildContexts, err := common.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, common.DockerCommandTarget{})
+	return err == nil && len(buildContexts) > 0
 }
 
-func hasOptionalPushCmd(resolveBuildContext common.BuildContextResolverFunc) bool {
+func hasOptionalPushCmd(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc) bool {
 	buildContext, err := resolveBuildContext()
 	return err == nil && strings.TrimSpace(buildContext.DockerfilePath) != ""
+}
+
+func optionalBuildCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc) string {
+	hasScript, err := common.HasProjectBuildScript(findProjectRoot, common.DockerCommandTarget{})
+	if err == nil && hasScript {
+		return "Build the project"
+	}
+
+	buildContexts, err := common.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, common.DockerCommandTarget{})
+	if err != nil {
+		return "Build the container image in the current directory"
+	}
+
+	buildContext, err := resolveBuildContext()
+	if err == nil && strings.TrimSpace(buildContext.DockerfilePath) != "" && len(buildContexts) == 1 {
+		return "Build the container image in the current directory"
+	}
+
+	if len(buildContexts) > 0 {
+		if projectRoot, projectRootErr := projectRootForHelp(findProjectRoot); projectRootErr == nil &&
+			projectRoot != "" &&
+			filepath.Clean(strings.TrimSpace(buildContext.Dir)) == projectRoot {
+			return "Build the project"
+		}
+		return "Build the devops container images for the current project"
+	}
+
+	return "Build the container image in the current directory"
+}
+
+func optionalPushCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc) string {
+	buildContexts, err := common.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, common.DockerCommandTarget{})
+	if err != nil {
+		return "Push the current container image"
+	}
+
+	buildContext, err := resolveBuildContext()
+	if err == nil && strings.TrimSpace(buildContext.DockerfilePath) != "" && len(buildContexts) == 1 {
+		return "Push the current container image"
+	}
+
+	if len(buildContexts) > 0 {
+		return "Build and push the devops container images for the current project"
+	}
+
+	return "Push the current container image"
+}
+
+func projectRootForHelp(findProjectRoot common.ProjectFinderFunc) (string, error) {
+	if findProjectRoot == nil {
+		findProjectRoot = common.FindProjectRoot
+	}
+	_, projectRoot, err := findProjectRoot()
+	if err != nil {
+		if errors.Is(err, common.ErrNotInGitRepository) {
+			return "", nil
+		}
+		return "", err
+	}
+	return filepath.Clean(strings.TrimSpace(projectRoot)), nil
 }
 
 func hasOptionalDeployCmd(resolveDeployContext common.DeployContextResolverFunc) bool {

@@ -271,3 +271,59 @@ func TestHasProjectBuildScriptIgnoresDockerArtifactBuildScripts(t *testing.T) {
 		t.Fatal("did not expect docker artifact build.sh to be selected")
 	}
 }
+
+func TestResolveCurrentDockerBuildContextsUsesProjectRootDevopsModule(t *testing.T) {
+	projectRoot := t.TempDir()
+	moduleRoot := filepath.Join(projectRoot, "tenant-a-devops")
+	componentDir := filepath.Join(moduleRoot, "docker", "tenant-a-devops")
+	if err := os.MkdirAll(componentDir, 0o755); err != nil {
+		t.Fatalf("mkdir component dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+
+	buildContexts, err := ResolveCurrentDockerBuildContexts(
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{Dir: projectRoot}, nil
+		},
+		DockerCommandTarget{},
+	)
+	if err != nil {
+		t.Fatalf("ResolveCurrentDockerBuildContexts failed: %v", err)
+	}
+	if len(buildContexts) != 1 || buildContexts[0].Dir != componentDir {
+		t.Fatalf("unexpected build contexts: %+v", buildContexts)
+	}
+}
+
+func TestResolveCurrentDockerBuildContextsUsesDevopsModuleRoot(t *testing.T) {
+	projectRoot := t.TempDir()
+	moduleRoot := filepath.Join(projectRoot, "tenant-a-devops")
+	componentDir := filepath.Join(moduleRoot, "docker", "tenant-a-devops")
+	if err := os.MkdirAll(componentDir, 0o755); err != nil {
+		t.Fatalf("mkdir component dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+
+	buildContexts, err := ResolveCurrentDockerBuildContexts(
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{Dir: moduleRoot}, nil
+		},
+		DockerCommandTarget{},
+	)
+	if err != nil {
+		t.Fatalf("ResolveCurrentDockerBuildContexts failed: %v", err)
+	}
+	if len(buildContexts) != 1 || buildContexts[0].Dir != componentDir {
+		t.Fatalf("unexpected build contexts: %+v", buildContexts)
+	}
+}

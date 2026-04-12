@@ -33,9 +33,6 @@ func Execute() error {
 	resolveOpen := func(params common.OpenParams) (common.OpenResult, error) {
 		return common.ResolveOpen(store, params)
 	}
-	resolveOpenRuntimeSpec := func(target common.OpenResult) (common.OpenRuntimeSpec, bool, error) {
-		return common.ResolveOpenRuntimeSpec(store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, target)
-	}
 	resolveRuntimeDeploySpec := func(target common.OpenResult) (common.DeploySpec, error) {
 		return common.ResolveOpenRuntimeDeploySpec(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, target)
 	}
@@ -45,9 +42,6 @@ func Execute() error {
 		resolveOpen,
 		runInitForArgs,
 		common.LaunchShell,
-		resolveOpenRuntimeSpec,
-		common.DockerContainerRunner,
-		common.DockerImageBuilder,
 		common.CheckKubernetesDeployment,
 		resolveRuntimeDeploySpec,
 		common.DeployHelmChart,
@@ -68,10 +62,12 @@ func Execute() error {
 	var buildCmd *cobra.Command
 	if hasOptionalBuildCmd(common.FindProjectRoot, common.ResolveDockerBuildContext) {
 		buildCmd = newBuildCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder)
+		buildCmd.Short = optionalBuildCmdShort(common.FindProjectRoot, common.ResolveDockerBuildContext)
 	}
 	var pushCmd *cobra.Command
-	if hasOptionalPushCmd(common.ResolveDockerBuildContext) {
+	if hasOptionalPushCmd(common.FindProjectRoot, common.ResolveDockerBuildContext) {
 		pushCmd = newPushCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.DockerImageBuilder, push)
+		pushCmd.Short = optionalPushCmdShort(common.FindProjectRoot, common.ResolveDockerBuildContext)
 	}
 	var deployCmd *cobra.Command
 	if hasOptionalDeployCmd(common.ResolveKubernetesDeployContext) {
@@ -93,7 +89,7 @@ func Execute() error {
 		if initRan {
 			return nil
 		}
-		return runResolvedOpenCommand(ctx, result, openOptions{}, common.LaunchShell, resolveOpenRuntimeSpec, common.DockerContainerRunner, common.DockerImageBuilder, common.CheckKubernetesDeployment, resolveRuntimeDeploySpec, common.DeployHelmChart)
+		return runResolvedOpenCommand(ctx, result, openOptions{}, common.LaunchShell, common.CheckKubernetesDeployment, resolveRuntimeDeploySpec, common.DeployHelmChart)
 	}
 
 	cmd := newRootCommand(runRoot)

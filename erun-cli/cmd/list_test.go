@@ -162,3 +162,49 @@ func TestListCommandUsesConfiguredCurrentDirectoryTenantBeforeDefault(t *testing
 		}
 	}
 }
+
+func TestListCommandPrintsEmptyStateWhenNotInitialized(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	repoRoot := filepath.Join(t.TempDir(), "erun")
+	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	prevWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(prevWD)
+	})
+
+	stdout := new(bytes.Buffer)
+	cmd := newTestRootCmd(testRootDeps{})
+	cmd.SetOut(stdout)
+	cmd.SetErr(new(bytes.Buffer))
+	cmd.SetArgs([]string{"list"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stdout.String()
+	for _, want := range []string{
+		"Defaults:",
+		"  tenant: none",
+		"  environment: none",
+		"Current Directory:",
+		"  repo: erun",
+		"  configured tenant: none",
+		"  effective target: unavailable (default tenant is not configured)",
+		"Tenants:",
+		"  none",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)
+		}
+	}
+}

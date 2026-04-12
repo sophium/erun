@@ -49,11 +49,11 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			pushInput, buildInput, err := common.ResolveDockerPushSpec(store, findProjectRoot, resolveBuildContext, now, target)
+			execution, err := common.ResolveDockerPushExecution(store, findProjectRoot, resolveBuildContext, now, target)
 			if err != nil {
 				return err
 			}
-			return common.RunDockerPushSpec(ctx, pushInput, buildInput, buildDockerImage, push)
+			return common.RunDockerPushExecution(ctx, execution, buildDockerImage, push)
 		},
 	}
 	addDryRunFlag(cmd)

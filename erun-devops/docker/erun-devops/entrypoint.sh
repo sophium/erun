@@ -3,26 +3,23 @@
 set -eu
 
 write_kubeconfig() {
-    if [ -z "${KUBERNETES_SERVICE_HOST:-}" ]; then
-        return
-    fi
-
-    token_file=/var/run/secrets/kubernetes.io/serviceaccount/token
-    ca_file=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-    namespace_file=/var/run/secrets/kubernetes.io/serviceaccount/namespace
-
-    if [ ! -r "${token_file}" ] || [ ! -r "${ca_file}" ] || [ ! -r "${namespace_file}" ]; then
-        return
-    fi
-
-    namespace=$(cat "${namespace_file}")
     kube_dir="${HOME}/.kube"
     kubeconfig_path="${KUBECONFIG:-${kube_dir}/config}"
-    server="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS:-443}"
-
     mkdir -p "${kube_dir}"
 
-    cat >"${kubeconfig_path}" <<EOF
+    if [ -n "${KUBERNETES_SERVICE_HOST:-}" ]; then
+        token_file=/var/run/secrets/kubernetes.io/serviceaccount/token
+        ca_file=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        namespace_file=/var/run/secrets/kubernetes.io/serviceaccount/namespace
+
+        if [ ! -r "${token_file}" ] || [ ! -r "${ca_file}" ] || [ ! -r "${namespace_file}" ]; then
+            return
+        fi
+
+        namespace=$(cat "${namespace_file}")
+        server="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT_HTTPS:-443}"
+
+        cat >"${kubeconfig_path}" <<EOF
 apiVersion: v1
 kind: Config
 clusters:
@@ -42,6 +39,15 @@ users:
     user:
       tokenFile: ${token_file}
 EOF
+        return
+    fi
+
+    if [ -n "${ERUN_HOST_KUBE_CONFIG:-}" ] && [ -r "${ERUN_HOST_KUBE_CONFIG}" ]; then
+        sed \
+            -e 's#https://127\.0\.0\.1:#https://host.docker.internal:#g' \
+            -e 's#https://localhost:#https://host.docker.internal:#g' \
+            "${ERUN_HOST_KUBE_CONFIG}" >"${kubeconfig_path}"
+    fi
 }
 
 runtime_repo_dir() {
@@ -50,13 +56,32 @@ runtime_repo_dir() {
 
 initialize_erun_config() {
     repo_dir=$(runtime_repo_dir)
+    tenant="${ERUN_TENANT:-}"
+    environment="${ERUN_ENVIRONMENT:-}"
+    config_home="${XDG_CONFIG_HOME:-${HOME}/.config}"
+    config_dir="${config_home}/erun"
 
-    if [ ! -d "${repo_dir}/.git" ]; then
+    if [ -z "${tenant}" ] || [ -z "${environment}" ]; then
         return
     fi
 
-    cd "${repo_dir}"
-    erun init -y --kubernetes-context "${ERUN_KUBERNETES_CONTEXT:-in-cluster}"
+    mkdir -p "${config_dir}/${tenant}/${environment}"
+
+    cat >"${config_dir}/config.yaml" <<EOF
+defaulttenant: ${tenant}
+EOF
+
+    cat >"${config_dir}/${tenant}/config.yaml" <<EOF
+projectroot: ${repo_dir}
+name: ${tenant}
+defaultenvironment: ${environment}
+EOF
+
+    cat >"${config_dir}/${tenant}/${environment}/config.yaml" <<EOF
+name: ${environment}
+repopath: ${repo_dir}
+kubernetescontext: ${ERUN_KUBERNETES_CONTEXT:-in-cluster}
+EOF
 }
 
 run_shell() {
@@ -73,6 +98,7 @@ write_kubeconfig
 
 if [ "${1:-}" = "shell" ]; then
     shift
+    initialize_erun_config
     run_shell "$@"
 fi
 

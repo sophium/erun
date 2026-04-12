@@ -89,6 +89,82 @@ func loginCallFunc(run func(dockerLoginCall) error) common.DockerRegistryLoginFu
 	}
 }
 
+func setupMultiDockerProject(t *testing.T, tenant string) (string, string, string, []string, []string) {
+	t.Helper()
+
+	setupRootCmdTestConfigHome(t)
+
+	projectRoot := t.TempDir()
+	moduleName := common.RuntimeReleaseName(tenant)
+	moduleRoot := filepath.Join(projectRoot, moduleName)
+	dockerDir := filepath.Join(moduleRoot, "docker")
+	componentNames := []string{moduleName, "erun-dind", "erun-ubuntu"}
+	componentDirs := make([]string, 0, len(componentNames))
+	for _, componentName := range componentNames {
+		componentDir := filepath.Join(dockerDir, componentName)
+		if err := os.MkdirAll(componentDir, 0o755); err != nil {
+			t.Fatalf("mkdir component dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+			t.Fatalf("write Dockerfile: %v", err)
+		}
+		componentDirs = append(componentDirs, componentDir)
+	}
+	if err := os.WriteFile(filepath.Join(moduleRoot, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write module VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(componentDirs[0], "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(componentDirs[1], "VERSION"), []byte("28.1.1\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(componentDirs[2], "VERSION"), []byte("noble-20260217\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := common.SaveTenantConfig(common.TenantConfig{
+		Name:               tenant,
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: common.DefaultEnvironment,
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	tags := []string{
+		"erunpaas/" + componentNames[0] + ":1.0.0",
+		"erunpaas/erun-dind:28.1.1",
+		"erunpaas/erun-ubuntu:noble-20260217",
+	}
+	return projectRoot, moduleRoot, dockerDir, componentDirs, tags
+}
+
+func assertTagSet(t *testing.T, got, want []string) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Fatalf("unexpected tag count: got %v want %v", got, want)
+	}
+
+	gotCounts := make(map[string]int, len(got))
+	for _, tag := range got {
+		gotCounts[tag]++
+	}
+	for _, tag := range want {
+		if gotCounts[tag] == 0 {
+			t.Fatalf("missing expected tag %q in %v", tag, got)
+		}
+		gotCounts[tag]--
+	}
+	for tag, count := range gotCounts {
+		if count != 0 {
+			t.Fatalf("unexpected extra tag %q in %v", tag, got)
+		}
+	}
+}
+
 func TestNewRootCmdRegistersDevopsContainerBuildCommand(t *testing.T) {
 	cmd := newTestRootCmd(testRootDeps{
 		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
@@ -141,6 +217,22 @@ func TestNewRootCmdRegistersBuildShorthandWhenDockerfilePresent(t *testing.T) {
 	if !hasSubcommand(cmd, "push") {
 		t.Fatal("expected push shorthand command to be registered")
 	}
+
+	buildCmd, _, err := cmd.Find([]string{"build"})
+	if err != nil {
+		t.Fatalf("Find(build) failed: %v", err)
+	}
+	if buildCmd.Short != "Build the container image in the current directory" {
+		t.Fatalf("unexpected build short help: %q", buildCmd.Short)
+	}
+
+	pushCmd, _, err := cmd.Find([]string{"push"})
+	if err != nil {
+		t.Fatalf("Find(push) failed: %v", err)
+	}
+	if pushCmd.Short != "Push the current container image" {
+		t.Fatalf("unexpected push short help: %q", pushCmd.Short)
+	}
 }
 
 func TestNewRootCmdRegistersBuildShorthandWhenProjectBuildScriptPresent(t *testing.T) {
@@ -172,6 +264,14 @@ func TestNewRootCmdRegistersBuildShorthandWhenProjectBuildScriptPresent(t *testi
 	if hasSubcommand(cmd, "push") {
 		t.Fatal("did not expect push shorthand command to be registered")
 	}
+
+	buildCmd, _, err := cmd.Find([]string{"build"})
+	if err != nil {
+		t.Fatalf("Find(build) failed: %v", err)
+	}
+	if buildCmd.Short != "Build the project" {
+		t.Fatalf("unexpected build short help: %q", buildCmd.Short)
+	}
 }
 
 func TestNewRootCmdRegistersBuildShorthandWhenDockerDirectoryContainsDockerfiles(t *testing.T) {
@@ -198,6 +298,46 @@ func TestNewRootCmdRegistersBuildShorthandWhenDockerDirectoryContainsDockerfiles
 	if !hasSubcommand(cmd, "build") {
 		t.Fatal("expected build shorthand command to be registered")
 	}
+	if hasSubcommand(cmd, "push") {
+		t.Fatal("did not expect push shorthand command to be registered")
+	}
+
+	buildCmd, _, err := cmd.Find([]string{"build"})
+	if err != nil {
+		t.Fatalf("Find(build) failed: %v", err)
+	}
+	if buildCmd.Short != "Build the devops container images for the current project" {
+		t.Fatalf("unexpected build short help: %q", buildCmd.Short)
+	}
+
+	if hasSubcommand(cmd, "push") {
+		t.Fatal("did not expect push shorthand command to be registered")
+	}
+}
+
+func TestNewRootCmdRegistersContextAwareShorthandHelpWhenCurrentDirectoryIsProjectRoot(t *testing.T) {
+	projectRoot, _, _, _, _ := setupMultiDockerProject(t, "tenant-a")
+
+	cmd := newTestRootCmd(testRootDeps{
+		OptionalBuildFindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: projectRoot}, nil
+		},
+	})
+
+	buildCmd, _, err := cmd.Find([]string{"build"})
+	if err != nil {
+		t.Fatalf("Find(build) failed: %v", err)
+	}
+	if buildCmd.Short != "Build the project" {
+		t.Fatalf("unexpected build short help: %q", buildCmd.Short)
+	}
+
 	if hasSubcommand(cmd, "push") {
 		t.Fatal("did not expect push shorthand command to be registered")
 	}
@@ -417,6 +557,80 @@ func TestRootBuildShorthandBuildsAllDockerImagesWhenCurrentDirectoryIsDockerDire
 			t.Fatalf("unexpected output writers: %+v", req)
 		}
 	}
+}
+
+func TestRootBuildShorthandBuildsAllDockerImagesWhenCurrentDirectoryIsProjectRoot(t *testing.T) {
+	projectRoot, _, _, _, wantTags := setupMultiDockerProject(t, "tenant-a")
+
+	var received []dockerBuildCall
+	cmd := newTestRootCmd(testRootDeps{
+		OptionalBuildFindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: projectRoot}, nil
+		},
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
+			received = append(received, req)
+			return nil
+		}),
+	})
+	cmd.SetArgs([]string{"build"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if len(received) != len(wantTags) {
+		t.Fatalf("expected %d build requests, got %d", len(wantTags), len(received))
+	}
+	gotTags := make([]string, 0, len(received))
+	for i, req := range received {
+		if req.Dir != projectRoot {
+			t.Fatalf("unexpected build request %d: %+v", i, req)
+		}
+		gotTags = append(gotTags, req.Tag)
+	}
+	assertTagSet(t, gotTags, wantTags)
+}
+
+func TestRootBuildShorthandBuildsAllDockerImagesWhenCurrentDirectoryIsDevopsModuleRoot(t *testing.T) {
+	projectRoot, moduleRoot, _, _, wantTags := setupMultiDockerProject(t, "tenant-a")
+
+	var received []dockerBuildCall
+	cmd := newTestRootCmd(testRootDeps{
+		OptionalBuildFindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: moduleRoot}, nil
+		},
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
+			received = append(received, req)
+			return nil
+		}),
+	})
+	cmd.SetArgs([]string{"build"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if len(received) != len(wantTags) {
+		t.Fatalf("expected %d build requests, got %d", len(wantTags), len(received))
+	}
+	gotTags := make([]string, 0, len(received))
+	for i, req := range received {
+		if req.Dir != projectRoot {
+			t.Fatalf("unexpected build request %d: %+v", i, req)
+		}
+		gotTags = append(gotTags, req.Tag)
+	}
+	assertTagSet(t, gotTags, wantTags)
 }
 
 func TestRootBuildShorthandUsesExactVersionFromCurrentBuildDirectoryForLocalEnvironment(t *testing.T) {
@@ -962,6 +1176,147 @@ func TestRootPushShorthandBuildsAndPushesSameExactVersionFromCurrentBuildDirecto
 	if received.Tag != "erunpaas/erun-devops:1.1.0" {
 		t.Fatalf("unexpected image tag: %+v", received)
 	}
+}
+
+func TestDevopsContainerPushBuildsAndPushesAllDockerImagesWhenCurrentDirectoryIsProjectRoot(t *testing.T) {
+	projectRoot, _, _, _, wantTags := setupMultiDockerProject(t, "tenant-a")
+
+	var built []dockerBuildCall
+	var pushed []dockerPushCall
+	cmd := newTestRootCmd(testRootDeps{
+		OptionalBuildFindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: projectRoot}, nil
+		},
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
+			built = append(built, req)
+			return nil
+		}),
+		PushDockerImage: pushCallFunc(func(req dockerPushCall) error {
+			pushed = append(pushed, req)
+			return nil
+		}),
+	})
+	cmd.SetArgs([]string{"devops", "container", "push"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if len(built) != len(wantTags) || len(pushed) != len(wantTags) {
+		t.Fatalf("unexpected build/push counts: builds=%d pushes=%d", len(built), len(pushed))
+	}
+	builtTags := make([]string, 0, len(built))
+	for i, req := range built {
+		if req.Dir != projectRoot {
+			t.Fatalf("unexpected build request %d: %+v", i, req)
+		}
+		builtTags = append(builtTags, req.Tag)
+	}
+	pushedTags := make([]string, 0, len(pushed))
+	for _, req := range pushed {
+		pushedTags = append(pushedTags, req.Tag)
+	}
+	assertTagSet(t, builtTags, wantTags)
+	assertTagSet(t, pushedTags, wantTags)
+}
+
+func TestDevopsContainerPushBuildsAndPushesAllDockerImagesWhenCurrentDirectoryIsDevopsModuleRoot(t *testing.T) {
+	projectRoot, moduleRoot, _, _, wantTags := setupMultiDockerProject(t, "tenant-a")
+
+	var built []dockerBuildCall
+	var pushed []dockerPushCall
+	cmd := newTestRootCmd(testRootDeps{
+		OptionalBuildFindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: moduleRoot}, nil
+		},
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
+			built = append(built, req)
+			return nil
+		}),
+		PushDockerImage: pushCallFunc(func(req dockerPushCall) error {
+			pushed = append(pushed, req)
+			return nil
+		}),
+	})
+	cmd.SetArgs([]string{"devops", "container", "push"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if len(built) != len(wantTags) || len(pushed) != len(wantTags) {
+		t.Fatalf("unexpected build/push counts: builds=%d pushes=%d", len(built), len(pushed))
+	}
+	builtTags := make([]string, 0, len(built))
+	for i, req := range built {
+		if req.Dir != projectRoot {
+			t.Fatalf("unexpected build request %d: %+v", i, req)
+		}
+		builtTags = append(builtTags, req.Tag)
+	}
+	pushedTags := make([]string, 0, len(pushed))
+	for _, req := range pushed {
+		pushedTags = append(pushedTags, req.Tag)
+	}
+	assertTagSet(t, builtTags, wantTags)
+	assertTagSet(t, pushedTags, wantTags)
+}
+
+func TestDevopsContainerPushBuildsAndPushesAllDockerImagesWhenCurrentDirectoryIsDockerDirectory(t *testing.T) {
+	projectRoot, _, dockerDir, _, wantTags := setupMultiDockerProject(t, "tenant-a")
+
+	var built []dockerBuildCall
+	var pushed []dockerPushCall
+	cmd := newTestRootCmd(testRootDeps{
+		OptionalBuildFindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: dockerDir}, nil
+		},
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
+			built = append(built, req)
+			return nil
+		}),
+		PushDockerImage: pushCallFunc(func(req dockerPushCall) error {
+			pushed = append(pushed, req)
+			return nil
+		}),
+	})
+	cmd.SetArgs([]string{"devops", "container", "push"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if len(built) != len(wantTags) || len(pushed) != len(wantTags) {
+		t.Fatalf("unexpected build/push counts: builds=%d pushes=%d", len(built), len(pushed))
+	}
+	builtTags := make([]string, 0, len(built))
+	for i, req := range built {
+		if req.Dir != projectRoot {
+			t.Fatalf("unexpected build request %d: %+v", i, req)
+		}
+		builtTags = append(builtTags, req.Tag)
+	}
+	pushedTags := make([]string, 0, len(pushed))
+	for _, req := range pushed {
+		pushedTags = append(pushedTags, req.Tag)
+	}
+	assertTagSet(t, builtTags, wantTags)
+	assertTagSet(t, pushedTags, wantTags)
 }
 
 func TestRootBuildShorthandUsesSnapshotWhenVersionIsInheritedFromParentModule(t *testing.T) {
