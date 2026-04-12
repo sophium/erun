@@ -149,9 +149,9 @@ func optionalBuildCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuil
 		if projectRoot, projectRootErr := projectRootForHelp(findProjectRoot); projectRootErr == nil &&
 			projectRoot != "" &&
 			filepath.Clean(strings.TrimSpace(buildContext.Dir)) == projectRoot {
-			return "Build the project"
+			return "Build and push the project"
 		}
-		return "Build the devops container images for the current project"
+		return "Build and push the devops container images for the current project"
 	}
 
 	return "Build the container image in the current directory"
@@ -160,19 +160,19 @@ func optionalBuildCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuil
 func optionalPushCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc) string {
 	buildContexts, err := common.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, common.DockerCommandTarget{})
 	if err != nil {
-		return "Push the current container image"
+		return "Build and push the current container image"
 	}
 
 	buildContext, err := resolveBuildContext()
 	if err == nil && strings.TrimSpace(buildContext.DockerfilePath) != "" && len(buildContexts) == 1 {
-		return "Push the current container image"
+		return "Build and push the current container image"
 	}
 
 	if len(buildContexts) > 0 {
 		return "Build and push the devops container images for the current project"
 	}
 
-	return "Push the current container image"
+	return "Build and push the current container image"
 }
 
 func projectRootForHelp(findProjectRoot common.ProjectFinderFunc) (string, error) {

@@ -49,7 +49,7 @@ func Execute() error {
 	containerCmd := newCommandGroup(
 		"container",
 		"Container utilities",
-		newBuildCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder),
+		newBuildCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder, push),
 		newPushCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.DockerImageBuilder, push),
 	)
 	k8sCmd := newCommandGroup(
@@ -61,7 +61,7 @@ func Execute() error {
 
 	var buildCmd *cobra.Command
 	if hasOptionalBuildCmd(common.FindProjectRoot, common.ResolveDockerBuildContext) {
-		buildCmd = newBuildCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder)
+		buildCmd = newBuildCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder, push)
 		buildCmd.Short = optionalBuildCmdShort(common.FindProjectRoot, common.ResolveDockerBuildContext)
 	}
 	var pushCmd *cobra.Command
