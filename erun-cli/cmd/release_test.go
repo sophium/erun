@@ -107,6 +107,44 @@ func TestReleaseCommandDryRunStableIncludesSyncAndPush(t *testing.T) {
 	}
 }
 
+func TestReleaseCommandWritesOnlyVersionToStdoutDuringExecution(t *testing.T) {
+	projectRoot := createReleaseGitRepo(t, "develop")
+	if err := common.SaveProjectConfig(projectRoot, common.ProjectConfig{}); err != nil {
+		t.Fatalf("SaveProjectConfig failed: %v", err)
+	}
+
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		RunGit: func(_ string, stdout, stderr io.Writer, _ ...string) error {
+			if _, err := io.WriteString(stdout, "git-stdout\n"); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(stderr, "git-stderr\n"); err != nil {
+				return err
+			}
+			return nil
+		},
+	})
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"release"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if got := strings.TrimSpace(stdout.String()); !strings.HasPrefix(got, "1.4.2-rc.") || strings.Contains(got, "git-stdout") {
+		t.Fatalf("unexpected stdout: %q", got)
+	}
+	if got := stderr.String(); !strings.Contains(got, "git-stdout") || !strings.Contains(got, "git-stderr") {
+		t.Fatalf("expected git command output on stderr, got %q", got)
+	}
+}
+
 func createReleaseGitRepo(t *testing.T, branch string) string {
 	t.Helper()
 
