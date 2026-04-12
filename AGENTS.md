@@ -106,6 +106,8 @@ Repository guidance for humans and coding agents working in this repo.
 - CLI prompts are acceptable in interactive flows, but MCP-exposed paths should receive all required input explicitly and fail clearly when input is missing.
 - Prefer deterministic command behavior so tool calls are safe to run repeatedly and concurrently.
 - Prefer safety and clarity over micro-optimizations.
+- When answering whether an issue, bug, or feature is done, blocked, or regresssed, report concrete evidence from code, tests, linked PRs, commits, or observed behavior. Do not answer from personal opinion or confidence alone.
+- If evidence is incomplete, say what was checked and what is still missing instead of filling the gap with a judgment call.
 - Do not add new documentation files unless the user explicitly asks for them; add repository instructions to `AGENTS.md` instead.
 - Keep `AGENTS.md` focused on repository workflow and engineering guidance; do not document app behavior, command semantics, or end-user functionality in it.
 - Do not modify `README.md` unless the user explicitly asks for a README change.
