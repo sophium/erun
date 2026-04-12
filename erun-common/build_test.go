@@ -135,7 +135,7 @@ func TestResolveBuildExecutionPrefersProjectBuildScript(t *testing.T) {
 	}, func(string, string, string, io.Writer, io.Writer) error {
 		t.Fatal("unexpected docker build")
 		return nil
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("RunBuildExecution failed: %v", err)
 	}
 	if !called {
@@ -187,7 +187,7 @@ func TestResolveBuildExecutionPrefersProjectRootBuildScriptOverNestedScripts(t *
 	}, func(string, string, string, io.Writer, io.Writer) error {
 		t.Fatal("unexpected docker build")
 		return nil
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("RunBuildExecution failed: %v", err)
 	}
 	if !called {
@@ -243,7 +243,7 @@ func TestResolveBuildExecutionUsesFirstNestedProjectBuildScript(t *testing.T) {
 	}, func(string, string, string, io.Writer, io.Writer) error {
 		t.Fatal("unexpected docker build")
 		return nil
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("RunBuildExecution failed: %v", err)
 	}
 	if !called {
@@ -325,5 +325,114 @@ func TestResolveCurrentDockerBuildContextsUsesDevopsModuleRoot(t *testing.T) {
 	}
 	if len(buildContexts) != 1 || buildContexts[0].Dir != componentDir {
 		t.Fatalf("unexpected build contexts: %+v", buildContexts)
+	}
+}
+
+func TestResolveBuildExecutionIncludesPushesForProjectRootDevopsScope(t *testing.T) {
+	projectRoot := t.TempDir()
+	moduleRoot := filepath.Join(projectRoot, "tenant-a-devops")
+	componentDirs := []string{
+		filepath.Join(moduleRoot, "docker", "tenant-a-devops"),
+		filepath.Join(moduleRoot, "docker", "erun-dind"),
+	}
+	for _, dir := range componentDirs {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir component dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+			t.Fatalf("write Dockerfile: %v", err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(componentDirs[0], "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(componentDirs[1], "VERSION"), []byte("28.1.1\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := SaveProjectConfig(projectRoot, ProjectConfig{
+		Environments: map[string]ProjectEnvironmentConfig{
+			DefaultEnvironment: {ContainerRegistry: "erunpaas"},
+		},
+	}); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{Dir: projectRoot}, nil
+		},
+		nil,
+		DockerCommandTarget{Environment: DefaultEnvironment},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+
+	if len(execution.dockerBuilds) != 2 || len(execution.dockerPushes) != 2 {
+		t.Fatalf("unexpected execution: %+v", execution)
+	}
+	buildTags := []string{execution.dockerBuilds[0].Image.Tag, execution.dockerBuilds[1].Image.Tag}
+	wantTags := []string{"erunpaas/tenant-a-devops:1.0.0", "erunpaas/erun-dind:28.1.1"}
+	for _, want := range wantTags {
+		found := false
+		for _, got := range buildTags {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("missing build tag %q in %+v", want, execution.dockerBuilds)
+		}
+	}
+	pushTags := []string{execution.dockerPushes[0].Image.Tag, execution.dockerPushes[1].Image.Tag}
+	for _, want := range wantTags {
+		found := false
+		for _, got := range pushTags {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("missing push tag %q in %+v", want, execution.dockerPushes)
+		}
+	}
+}
+
+func TestResolveDockerPushSpecRejectsNonDockerfileScopes(t *testing.T) {
+	projectRoot := t.TempDir()
+	moduleRoot := filepath.Join(projectRoot, "tenant-a-devops")
+	dockerDir := filepath.Join(moduleRoot, "docker")
+	componentDir := filepath.Join(dockerDir, "tenant-a-devops")
+	if err := os.MkdirAll(componentDir, 0o755); err != nil {
+		t.Fatalf("mkdir component dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+
+	for _, scope := range []string{projectRoot, moduleRoot, dockerDir} {
+		_, _, err := ResolveDockerPushSpec(
+			ConfigStore{},
+			func() (string, string, error) {
+				return "tenant-a", projectRoot, nil
+			},
+			func() (DockerBuildContext, error) {
+				return DockerBuildContext{Dir: scope}, nil
+			},
+			nil,
+			DockerCommandTarget{Environment: DefaultEnvironment},
+		)
+		if err == nil {
+			t.Fatalf("expected error for scope %q", scope)
+		}
+		if err.Error() != "dockerfile not found in current directory" {
+			t.Fatalf("unexpected error for scope %q: %v", scope, err)
+		}
 	}
 }

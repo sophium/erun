@@ -28,7 +28,7 @@ func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 			if err != nil {
 				return err
 			}
-			return eruncommon.RunBuildExecution(runCtx, execution, runtime.BuildScriptRunner, runtime.BuildDockerImage)
+			return eruncommon.RunBuildExecution(runCtx, execution, runtime.BuildScriptRunner, runtime.BuildDockerImage, runtimePushFunc(runtime))
 		})
 		return nil, output, err
 	}
@@ -98,7 +98,15 @@ func resolveRuntimePushExecution(runtime RuntimeConfig, projectRoot, component s
 	}
 
 	if component == "" {
-		return eruncommon.ResolveDockerPushExecution(runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
+		pushInput, buildInput, err := eruncommon.ResolveDockerPushSpec(runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
+		if err != nil {
+			return eruncommon.DockerPushExecutionSpec{}, err
+		}
+		builds := make([]eruncommon.DockerBuildSpec, 0, 1)
+		if buildInput != nil {
+			builds = append(builds, *buildInput)
+		}
+		return eruncommon.DockerPushExecutionSpecFromSpecs(builds, []eruncommon.DockerPushSpec{pushInput}), nil
 	}
 
 	buildContext, ok, err := eruncommon.FindComponentDockerBuildContext(projectRoot, component)
