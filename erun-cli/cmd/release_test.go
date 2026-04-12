@@ -46,6 +46,8 @@ func TestReleaseCommandDryRun(t *testing.T) {
 		"docker image: erunpaas/api:1.4.2-rc.",
 		"git commit -m '[skip ci] release 1.4.2-rc.",
 		"git tag -a",
+		"stage: push",
+		"git push --follow-tags origin develop",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, output)
@@ -58,6 +60,50 @@ func TestReleaseCommandDryRun(t *testing.T) {
 	}
 	if got := string(versionData); got != "1.4.2\n" {
 		t.Fatalf("unexpected VERSION content after dry-run: %q", got)
+	}
+}
+
+func TestReleaseCommandDryRunStableIncludesSyncAndPush(t *testing.T) {
+	projectRoot := createReleaseGitRepo(t, "main")
+	if err := common.SaveProjectConfig(projectRoot, common.ProjectConfig{}); err != nil {
+		t.Fatalf("SaveProjectConfig failed: %v", err)
+	}
+
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		RunGit: func(string, io.Writer, io.Writer, ...string) error {
+			t.Fatal("unexpected git execution during dry-run")
+			return nil
+		},
+	})
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"release", "--dry-run"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if got := strings.TrimSpace(stdout.String()); got != "1.4.2" {
+		t.Fatalf("unexpected stdout: %q", got)
+	}
+	output := stderr.String()
+	for _, want := range []string{
+		"release: branch=main mode=stable version=1.4.2",
+		"next version: 1.4.3",
+		"stage: sync-develop",
+		"git checkout develop",
+		"git merge --no-edit -X theirs main",
+		"stage: push",
+		"git push --follow-tags origin main develop",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, output)
+		}
 	}
 }
 
