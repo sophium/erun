@@ -35,7 +35,7 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 		},
 	}
 	addDryRunFlag(cmd)
-	addDockerCommandTargetFlags(cmd, &target)
+	addBuildCommandTargetFlags(cmd, &target)
 	return cmd
 }
 
@@ -57,7 +57,7 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 		},
 	}
 	addDryRunFlag(cmd)
-	addDockerCommandTargetFlags(cmd, &target)
+	addPushCommandTargetFlags(cmd, &target)
 	return cmd
 }
 
@@ -92,7 +92,12 @@ func runDockerPushWithRetry(ctx common.Context, pushInput common.DockerPushSpec,
 	return push(ctx, pushInput)
 }
 
-func addDockerCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {
+func addBuildCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {
+	addPushCommandTargetFlags(cmd, target)
+	cmd.Flags().BoolVar(&target.Release, "release", false, "Run release first and build with the released version")
+}
+
+func addPushCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {
 	cmd.Flags().StringVar(&target.ProjectRoot, "project-root", "", "Project root override for internal tooling")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Environment override for internal tooling")
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the resolved image version")

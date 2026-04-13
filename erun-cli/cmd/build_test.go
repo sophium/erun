@@ -39,6 +39,7 @@ type dockerLoginCall struct {
 type buildScriptCall struct {
 	Dir    string
 	Path   string
+	Env    []string
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
@@ -57,10 +58,11 @@ func buildCallFunc(run func(dockerBuildCall) error) common.DockerImageBuilderFun
 }
 
 func buildScriptCallFunc(run func(buildScriptCall) error) common.BuildScriptRunnerFunc {
-	return func(dir, path string, stdin io.Reader, stdout, stderr io.Writer) error {
+	return func(dir, path string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		return run(buildScriptCall{
 			Dir:    dir,
 			Path:   path,
+			Env:    append([]string{}, env...),
 			Stdin:  stdin,
 			Stdout: stdout,
 			Stderr: stderr,
@@ -2086,6 +2088,58 @@ func TestBuildCommandHiddenEnvironmentOverrideUsesProvidedEnvironment(t *testing
 
 	if built.Tag != "prod-registry/erun-devops:1.0.0" {
 		t.Fatalf("unexpected build request: %+v", built)
+	}
+}
+
+func TestBuildCommandRejectsReleaseWithVersion(t *testing.T) {
+	cmd := newTestRootCmd(testRootDeps{})
+	cmd.SetArgs([]string{"devops", "container", "build", "--release", "--version", "1.0.7"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected conflict error")
+	}
+	if err.Error() != "release build cannot be combined with explicit version override" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBuildCommandDryRunReleaseShowsReleaseAndBuildVersionTrace(t *testing.T) {
+	projectRoot := createReleaseGitRepo(t, "develop")
+	if err := os.WriteFile(filepath.Join(projectRoot, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write build.sh: %v", err)
+	}
+
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		OptionalBuildFindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: projectRoot}, nil
+		},
+	})
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"build", "--dry-run", "--release"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stderr.String()
+	if !strings.Contains(output, "release: branch=develop mode=candidate version=1.4.2-rc.") {
+		t.Fatalf("expected release trace, got:\n%s", output)
+	}
+	if !strings.Contains(output, "ERUN_BUILD_VERSION=1.4.2-rc.") || !strings.Contains(output, "./build.sh") {
+		t.Fatalf("expected build trace with release version env, got:\n%s", output)
+	}
+	if !strings.Contains(output, "release version: 1.4.2-rc.") {
+		t.Fatalf("expected final release version output, got:\n%s", output)
 	}
 }
 

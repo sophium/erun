@@ -12,6 +12,7 @@ import (
 type BuildInput struct {
 	Component string `json:"component,omitempty" jsonschema:"optional component name to build from the runtime repo root; when empty, build all Docker component images"`
 	Version   string `json:"version,omitempty" jsonschema:"optional explicit image version override; disables local snapshot tagging when set"`
+	Release   bool   `json:"release,omitempty" jsonschema:"when true, run release first and build with the resolved release version"`
 	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
@@ -26,7 +27,7 @@ type PushInput struct {
 func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, BuildInput) (*mcp.CallToolResult, CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input BuildInput) (*mcp.CallToolResult, CommandOutput, error) {
 		output, err := runRuntimeCommand(runtime.Context, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
-			execution, err := resolveRuntimeBuildExecution(runtime, workDir, strings.TrimSpace(input.Component), strings.TrimSpace(input.Version))
+			execution, err := resolveRuntimeBuildExecution(runtime, workDir, strings.TrimSpace(input.Component), strings.TrimSpace(input.Version), input.Release)
 			if err != nil {
 				return err
 			}
@@ -49,12 +50,13 @@ func pushTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 	}
 }
 
-func resolveRuntimeBuildExecution(runtime RuntimeConfig, projectRoot, component, versionOverride string) (eruncommon.BuildExecutionSpec, error) {
+func resolveRuntimeBuildExecution(runtime RuntimeConfig, projectRoot, component, versionOverride string, release bool) (eruncommon.BuildExecutionSpec, error) {
 	environment := strings.TrimSpace(runtime.Context.Environment)
 	target := eruncommon.DockerCommandTarget{
 		ProjectRoot:     projectRoot,
 		Environment:     environment,
 		VersionOverride: versionOverride,
+		Release:         release,
 	}
 	findProjectRoot := func() (string, string, error) {
 		return runtimeFindProjectRoot(runtime.Context, projectRoot)
@@ -64,6 +66,11 @@ func resolveRuntimeBuildExecution(runtime RuntimeConfig, projectRoot, component,
 	}
 
 	if component != "" {
+		target, releaseSpec, err := eruncommon.ResolveDockerBuildTarget(findProjectRoot, target)
+		if err != nil {
+			return eruncommon.BuildExecutionSpec{}, err
+		}
+
 		buildContext, ok, err := eruncommon.FindComponentDockerBuildContext(projectRoot, component)
 		if err != nil {
 			return eruncommon.BuildExecutionSpec{}, err
@@ -71,19 +78,19 @@ func resolveRuntimeBuildExecution(runtime RuntimeConfig, projectRoot, component,
 		if !ok {
 			return eruncommon.BuildExecutionSpec{}, fmt.Errorf("docker build context not found for component %q", component)
 		}
-		imageRef, err := eruncommon.ResolveDockerImageReference(runtime.Store, findProjectRoot, resolveBuildContext, nil, buildContext.Dir, eruncommon.DockerCommandTarget{
-			ProjectRoot:     projectRoot,
-			Environment:     environment,
-			VersionOverride: versionOverride,
-		})
+		imageRef, err := eruncommon.ResolveDockerImageReference(runtime.Store, findProjectRoot, resolveBuildContext, nil, buildContext.Dir, target)
 		if err != nil {
 			return eruncommon.BuildExecutionSpec{}, err
 		}
-		return eruncommon.BuildExecutionSpecFromDockerBuilds([]eruncommon.DockerBuildSpec{{
+		execution := eruncommon.BuildExecutionSpecFromDockerBuilds([]eruncommon.DockerBuildSpec{{
 			ContextDir:     eruncommon.ResolveDockerBuildContextDirForProject(buildContext.Dir, projectRoot),
 			DockerfilePath: buildContext.DockerfilePath,
 			Image:          imageRef,
-		}}), nil
+		}})
+		if releaseSpec != nil {
+			return eruncommon.BuildExecutionSpecWithRelease(execution, *releaseSpec), nil
+		}
+		return execution, nil
 	}
 
 	return eruncommon.ResolveBuildExecution(runtime.Store, findProjectRoot, resolveBuildContext, nil, target)

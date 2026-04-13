@@ -18,6 +18,10 @@ func (c Context) Trace(message string) {
 	c.Logger.Trace(message)
 }
 
+func (c Context) Info(message string) {
+	c.Logger.Info(message)
+}
+
 func (c Context) TraceCommand(dir, name string, args ...string) {
 	c.Logger.Trace(formatShellCommand(dir, name, args...))
 }
