@@ -89,6 +89,7 @@ type DockerCommandTarget struct {
 	Environment     string
 	VersionOverride string
 	Release         bool
+	Deploy          bool
 }
 
 type DockerRegistryAuthError struct {
@@ -150,6 +151,10 @@ func BuildExecutionSpecFromDockerBuilds(builds []DockerBuildSpec) BuildExecution
 func BuildExecutionSpecWithRelease(execution BuildExecutionSpec, release ReleaseSpec) BuildExecutionSpec {
 	execution.release = &release
 	return execution
+}
+
+func BuildExecutionUsesBuildScript(execution BuildExecutionSpec) bool {
+	return execution.script != nil
 }
 
 func ResolveDockerBuildTarget(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (DockerCommandTarget, *ReleaseSpec, error) {
@@ -740,30 +745,93 @@ func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBui
 }
 
 func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) error {
+	return runBuildExecution(ctx, execution, nil, runScript, build, push, nil)
+}
+
+func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
+	return runBuildExecution(ctx, execution, deploySpecs, runScript, build, push, deploy)
+}
+
+func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
 	if execution.release != nil {
 		if err := RunReleaseSpec(ctx, *execution.release, nil); err != nil {
 			return err
 		}
 	}
 
+	pushedTags := make(map[string]struct{}, len(execution.dockerBuilds)+len(execution.dockerPushes))
 	var err error
 	if execution.script != nil {
+		if len(deploySpecs) > 0 {
+			return fmt.Errorf("build deploy is not supported for project build scripts")
+		}
 		err = runBuildScript(ctx, *execution.script, runScript)
 	} else if len(execution.dockerPushes) > 0 {
 		err = RunDockerPushExecution(ctx, DockerPushExecutionSpec{
 			builds: execution.dockerBuilds,
 			pushes: execution.dockerPushes,
 		}, build, push)
+		if err == nil {
+			for _, pushInput := range execution.dockerPushes {
+				pushedTags[pushInput.Image.Tag] = struct{}{}
+			}
+		}
+	} else if len(deploySpecs) > 0 {
+		err = RunDockerBuilds(ctx, execution.dockerBuilds, build)
+		if err == nil {
+			for _, buildInput := range execution.dockerBuilds {
+				pushInput := NewDockerPushSpec(buildInput.ContextDir, buildInput.Image)
+				if pushErr := RunDockerPushSpec(ctx, pushInput, nil, build, push); pushErr != nil {
+					err = pushErr
+					break
+				}
+				pushedTags[pushInput.Image.Tag] = struct{}{}
+			}
+		}
 	} else {
 		err = RunDockerBuilds(ctx, execution.dockerBuilds, build)
 	}
 	if err != nil {
 		return err
 	}
+	for _, deploySpec := range filterDeploySpecsForPushedTags(deploySpecs, pushedTags) {
+		if err := RunDeploySpec(ctx, deploySpec, build, push, deploy); err != nil {
+			return err
+		}
+	}
 	if execution.release != nil {
 		ctx.Info("release version: " + execution.release.Version)
 	}
 	return nil
+}
+
+func filterDeploySpecsForPushedTags(specs []DeploySpec, pushedTags map[string]struct{}) []DeploySpec {
+	if len(specs) == 0 || len(pushedTags) == 0 {
+		return specs
+	}
+
+	filtered := make([]DeploySpec, 0, len(specs))
+	for _, spec := range specs {
+		copySpec := spec
+		copySpec.Builds = filterDockerBuildsForPushedTags(spec.Builds, pushedTags)
+		filtered = append(filtered, copySpec)
+	}
+	return filtered
+}
+
+func filterDockerBuildsForPushedTags(builds []DockerBuildSpec, pushedTags map[string]struct{}) []DockerBuildSpec {
+	if len(builds) == 0 || len(pushedTags) == 0 {
+		return builds
+	}
+
+	filtered := make([]DockerBuildSpec, 0, len(builds))
+	for _, build := range builds {
+		if _, ok := pushedTags[build.Image.Tag]; ok {
+			continue
+		}
+		filtered = append(filtered, build)
+	}
+	return filtered
 }
 
 func RunDockerPush(ctx Context, pushInput DockerPushSpec, push DockerImagePusherFunc) error {

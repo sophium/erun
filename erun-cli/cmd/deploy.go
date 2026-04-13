@@ -50,6 +50,7 @@ func newK8sDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFin
 }
 
 func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget) {
+	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the deployed chart and image version")
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Tenant override for internal tooling")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Environment override for internal tooling")
 	cmd.Flags().StringVar(&target.RepoPath, "repo-path", "", "Repo path override for internal tooling")

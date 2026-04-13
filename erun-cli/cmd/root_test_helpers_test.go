@@ -126,7 +126,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	containerCmd := newCommandGroup(
 		"container",
 		"Container utilities",
-		newBuildCmd(store, findProjectRoot, resolveDockerBuildContext, now, runBuildScript, buildDockerImage, push),
+		newBuildCmd(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, runBuildScript, buildDockerImage, push, deployHelmChart),
 		newPushCmd(store, findProjectRoot, resolveDockerBuildContext, now, buildDockerImage, push),
 	)
 	k8sCmd := newCommandGroup(
@@ -138,7 +138,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 
 	var buildCmd *cobra.Command
 	if hasOptionalBuildCmd(optionalBuildFindProjectRoot, resolveDockerBuildContext) {
-		buildCmd = newBuildCmd(store, findProjectRoot, resolveDockerBuildContext, now, runBuildScript, buildDockerImage, push)
+		buildCmd = newBuildCmd(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, runBuildScript, buildDockerImage, push, deployHelmChart)
 		buildCmd.Short = optionalBuildCmdShort(optionalBuildFindProjectRoot, resolveDockerBuildContext)
 	}
 	var pushCmd *cobra.Command
