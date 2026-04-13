@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -373,6 +374,52 @@ func TestBuildToolPreviewVerboseIncludesTrace(t *testing.T) {
 	}
 }
 
+func TestBuildToolPreviewReleaseIncludesReleaseAndBuildTrace(t *testing.T) {
+	projectRoot := createReleaseRuntimeRepo(t, "develop")
+	if err := eruncommon.SaveProjectConfig(projectRoot, eruncommon.ProjectConfig{}); err != nil {
+		t.Fatalf("SaveProjectConfig failed: %v", err)
+	}
+
+	handler := buildTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{
+			Environment: eruncommon.DefaultEnvironment,
+			RepoPath:    projectRoot,
+		},
+	}))
+
+	_, output, err := handler(context.Background(), nil, BuildInput{
+		Component: "api",
+		Release:   true,
+		Preview:   true,
+		Verbosity: 1,
+	})
+	if err != nil {
+		t.Fatalf("buildTool failed: %v", err)
+	}
+	if len(output.Trace) < 2 {
+		t.Fatalf("expected release and build trace, got %+v", output.Trace)
+	}
+	if !strings.Contains(output.Trace[0], "release: branch=develop mode=candidate version=1.4.2-rc.") {
+		t.Fatalf("unexpected release trace: %+v", output.Trace)
+	}
+	foundBuildTrace := false
+	foundVersionReport := false
+	for _, trace := range output.Trace {
+		if strings.Contains(trace, "docker build -t erunpaas/api:1.4.2-rc.") {
+			foundBuildTrace = true
+		}
+		if strings.Contains(trace, "release version: 1.4.2-rc.") {
+			foundVersionReport = true
+		}
+	}
+	if !foundBuildTrace {
+		t.Fatalf("unexpected build trace: %+v", output.Trace)
+	}
+	if !foundVersionReport {
+		t.Fatalf("expected final release version output, got %+v", output.Trace)
+	}
+}
+
 func TestBuildToolPreviewAtRepoRootIncludesBuildTrace(t *testing.T) {
 	projectRoot := t.TempDir()
 	moduleRoot := filepath.Join(projectRoot, "tenant-a-devops")
@@ -465,10 +512,13 @@ func TestBuildToolRunsProjectBuildScriptWhenPresent(t *testing.T) {
 			Environment: "dev",
 			RepoPath:    projectRoot,
 		},
-		BuildScriptRunner: func(dir, path string, stdin io.Reader, stdout, stderr io.Writer) error {
+		BuildScriptRunner: func(dir, path string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
 			called = true
 			if dir != scriptDir || path != "./build.sh" {
 				t.Fatalf("unexpected build script call: dir=%q path=%q", dir, path)
+			}
+			if len(env) != 0 {
+				t.Fatalf("unexpected build script env: %+v", env)
 			}
 			return nil
 		},

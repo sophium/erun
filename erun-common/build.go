@@ -29,7 +29,7 @@ type (
 	DockerImageBuilderFunc   func(string, string, string, io.Writer, io.Writer) error
 	DockerImagePusherFunc    func(string, io.Writer, io.Writer) error
 	DockerRegistryLoginFunc  func(string, io.Reader, io.Writer, io.Writer) error
-	BuildScriptRunnerFunc    func(string, string, io.Reader, io.Writer, io.Writer) error
+	BuildScriptRunnerFunc    func(string, string, []string, io.Reader, io.Writer, io.Writer) error
 	DockerPushFunc           func(Context, DockerPushSpec) error
 )
 
@@ -69,9 +69,11 @@ type DockerPushSpec struct {
 type projectBuildScriptSpec struct {
 	Dir  string
 	Path string
+	Env  []string
 }
 
 type BuildExecutionSpec struct {
+	release      *ReleaseSpec
 	script       *projectBuildScriptSpec
 	dockerBuilds []DockerBuildSpec
 	dockerPushes []DockerPushSpec
@@ -86,6 +88,7 @@ type DockerCommandTarget struct {
 	ProjectRoot     string
 	Environment     string
 	VersionOverride string
+	Release         bool
 }
 
 type DockerRegistryAuthError struct {
@@ -118,12 +121,18 @@ func ResolveCurrentDockerBuildSpecs(store DockerStore, findProjectRoot ProjectFi
 func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (BuildExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
+	target, releaseSpec, err := ResolveDockerBuildTarget(findProjectRoot, target)
+	if err != nil {
+		return BuildExecutionSpec{}, err
+	}
+
 	script, err := resolveProjectBuildScript(findProjectRoot, target)
 	if err != nil {
 		return BuildExecutionSpec{}, err
 	}
 	if script != nil {
-		return BuildExecutionSpec{script: script}, nil
+		script.Env = buildScriptEnv(target.VersionOverride)
+		return BuildExecutionSpec{release: releaseSpec, script: script}, nil
 	}
 
 	builds, err := ResolveCurrentDockerBuildSpecs(store, findProjectRoot, resolveBuildContext, now, target)
@@ -131,11 +140,35 @@ func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc,
 		return BuildExecutionSpec{}, err
 	}
 
-	return BuildExecutionSpec{dockerBuilds: builds}, nil
+	return BuildExecutionSpec{release: releaseSpec, dockerBuilds: builds}, nil
 }
 
 func BuildExecutionSpecFromDockerBuilds(builds []DockerBuildSpec) BuildExecutionSpec {
 	return BuildExecutionSpec{dockerBuilds: builds}
+}
+
+func BuildExecutionSpecWithRelease(execution BuildExecutionSpec, release ReleaseSpec) BuildExecutionSpec {
+	execution.release = &release
+	return execution
+}
+
+func ResolveDockerBuildTarget(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (DockerCommandTarget, *ReleaseSpec, error) {
+	target.VersionOverride = strings.TrimSpace(target.VersionOverride)
+	if !target.Release {
+		return target, nil, nil
+	}
+	if target.VersionOverride != "" {
+		return DockerCommandTarget{}, nil, fmt.Errorf("release build cannot be combined with explicit version override")
+	}
+
+	releaseSpec, err := ResolveReleaseSpec(findProjectRoot, ReleaseParams{ProjectRoot: target.ProjectRoot})
+	if err != nil {
+		return DockerCommandTarget{}, nil, err
+	}
+
+	target.Release = false
+	target.VersionOverride = releaseSpec.Version
+	return target, &releaseSpec, nil
 }
 
 func DockerPushExecutionSpecFromSpecs(builds []DockerBuildSpec, pushes []DockerPushSpec) DockerPushExecutionSpec {
@@ -209,6 +242,11 @@ func ResolveDockerPushSpec(store DockerStore, findProjectRoot ProjectFinderFunc,
 
 func ResolveDockerImageReference(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, buildDir string, target DockerCommandTarget) (DockerImageReference, error) {
 	store, findProjectRoot, _, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
+
+	target, _, err := ResolveDockerBuildTarget(findProjectRoot, target)
+	if err != nil {
+		return DockerImageReference{}, err
+	}
 
 	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
@@ -702,16 +740,30 @@ func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBui
 }
 
 func RunBuildExecution(ctx Context, execution BuildExecutionSpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) error {
-	if execution.script != nil {
-		return runBuildScript(ctx, *execution.script, runScript)
+	if execution.release != nil {
+		if err := RunReleaseSpec(ctx, *execution.release, nil); err != nil {
+			return err
+		}
 	}
-	if len(execution.dockerPushes) > 0 {
-		return RunDockerPushExecution(ctx, DockerPushExecutionSpec{
+
+	var err error
+	if execution.script != nil {
+		err = runBuildScript(ctx, *execution.script, runScript)
+	} else if len(execution.dockerPushes) > 0 {
+		err = RunDockerPushExecution(ctx, DockerPushExecutionSpec{
 			builds: execution.dockerBuilds,
 			pushes: execution.dockerPushes,
 		}, build, push)
+	} else {
+		err = RunDockerBuilds(ctx, execution.dockerBuilds, build)
 	}
-	return RunDockerBuilds(ctx, execution.dockerBuilds, build)
+	if err != nil {
+		return err
+	}
+	if execution.release != nil {
+		ctx.Info("release version: " + execution.release.Version)
+	}
+	return nil
 }
 
 func RunDockerPush(ctx Context, pushInput DockerPushSpec, push DockerImagePusherFunc) error {
@@ -871,9 +923,10 @@ func DockerImageBuilder(dir, dockerfilePath, tag string, stdout, stderr io.Write
 	return cmd.Run()
 }
 
-func BuildScriptRunner(dir, scriptPath string, stdin io.Reader, stdout, stderr io.Writer) error {
+func BuildScriptRunner(dir, scriptPath string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	cmd := exec.Command(scriptPath)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), env...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
@@ -920,15 +973,30 @@ func runBuildScript(ctx Context, script projectBuildScriptSpec, run BuildScriptR
 	if run == nil {
 		run = BuildScriptRunner
 	}
-	command := commandSpec{
-		Dir:  script.Dir,
-		Name: script.Path,
-	}
-	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
+	name, args := buildScriptTraceCommand(script)
+	ctx.TraceCommand(script.Dir, name, args...)
 	if ctx.DryRun {
 		return nil
 	}
-	return run(script.Dir, script.Path, ctx.Stdin, ctx.Stdout, ctx.Stderr)
+	return run(script.Dir, script.Path, script.Env, ctx.Stdin, ctx.Stdout, ctx.Stderr)
+}
+
+func buildScriptEnv(version string) []string {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return nil
+	}
+	return []string{"ERUN_BUILD_VERSION=" + version}
+}
+
+func buildScriptTraceCommand(script projectBuildScriptSpec) (string, []string) {
+	if len(script.Env) == 0 {
+		return script.Path, nil
+	}
+
+	args := append([]string{}, script.Env...)
+	args = append(args, script.Path)
+	return args[0], args[1:]
 }
 
 func resolveDockerBuildRegistryForEnvironment(projectRoot, environment string) (string, error) {
