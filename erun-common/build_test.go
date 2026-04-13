@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -126,10 +127,13 @@ func TestResolveBuildExecutionPrefersProjectBuildScript(t *testing.T) {
 		Stdout: new(bytes.Buffer),
 		Stderr: new(bytes.Buffer),
 	}
-	if err := RunBuildExecution(ctx, execution, func(dir, path string, stdin io.Reader, stdout, stderr io.Writer) error {
+	if err := RunBuildExecution(ctx, execution, func(dir, path string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		called = true
 		if dir != projectRoot || path != "./build.sh" {
 			t.Fatalf("unexpected script call: dir=%q path=%q", dir, path)
+		}
+		if len(env) != 0 {
+			t.Fatalf("unexpected script env: %+v", env)
 		}
 		return nil
 	}, func(string, string, string, io.Writer, io.Writer) error {
@@ -178,10 +182,13 @@ func TestResolveBuildExecutionPrefersProjectRootBuildScriptOverNestedScripts(t *
 		Stdout: new(bytes.Buffer),
 		Stderr: new(bytes.Buffer),
 	}
-	if err := RunBuildExecution(ctx, execution, func(dir, path string, stdin io.Reader, stdout, stderr io.Writer) error {
+	if err := RunBuildExecution(ctx, execution, func(dir, path string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		called = true
 		if dir != projectRoot || path != "./build.sh" {
 			t.Fatalf("unexpected script call: dir=%q path=%q", dir, path)
+		}
+		if len(env) != 0 {
+			t.Fatalf("unexpected script env: %+v", env)
 		}
 		return nil
 	}, func(string, string, string, io.Writer, io.Writer) error {
@@ -234,10 +241,13 @@ func TestResolveBuildExecutionUsesFirstNestedProjectBuildScript(t *testing.T) {
 		Stdout: new(bytes.Buffer),
 		Stderr: new(bytes.Buffer),
 	}
-	if err := RunBuildExecution(ctx, execution, func(dir, path string, stdin io.Reader, stdout, stderr io.Writer) error {
+	if err := RunBuildExecution(ctx, execution, func(dir, path string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		called = true
 		if dir != firstDir || path != "./build.sh" {
 			t.Fatalf("unexpected script call: dir=%q path=%q", dir, path)
+		}
+		if len(env) != 0 {
+			t.Fatalf("unexpected script env: %+v", env)
 		}
 		return nil
 	}, func(string, string, string, io.Writer, io.Writer) error {
@@ -422,4 +432,126 @@ func TestResolveDockerPushSpecRejectsNonDockerfileScopes(t *testing.T) {
 			t.Fatalf("unexpected error for scope %q: %v", scope, err)
 		}
 	}
+}
+
+func TestResolveBuildExecutionReleaseUsesResolvedVersionForDockerBuilds(t *testing.T) {
+	projectRoot := setupReleaseProjectGitRepo(t, "main")
+	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "api")
+
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContextAtDir(buildDir)
+		},
+		nil,
+		DockerCommandTarget{ProjectRoot: projectRoot, Environment: DefaultEnvironment, Release: true},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+
+	if execution.release == nil {
+		t.Fatalf("expected release spec, got %+v", execution)
+	}
+	if got := execution.release.Version; got != "1.4.2" {
+		t.Fatalf("unexpected release version: %q", got)
+	}
+	if len(execution.dockerBuilds) != 1 {
+		t.Fatalf("unexpected docker builds: %+v", execution.dockerBuilds)
+	}
+	if got := execution.dockerBuilds[0].Image.Tag; got != "erunpaas/api:1.4.2" {
+		t.Fatalf("unexpected docker build tag: %q", got)
+	}
+	if got := execution.release.NextVersion; got != "1.4.3" {
+		t.Fatalf("unexpected next version: %q", got)
+	}
+}
+
+func TestResolveBuildExecutionReleasePassesVersionToProjectBuildScript(t *testing.T) {
+	projectRoot := setupReleaseProjectGitRepo(t, "develop")
+	if err := os.WriteFile(filepath.Join(projectRoot, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write build.sh: %v", err)
+	}
+
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{}, errors.New("docker build context should not be resolved")
+		},
+		nil,
+		DockerCommandTarget{ProjectRoot: projectRoot, Environment: DefaultEnvironment, Release: true},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+
+	if execution.release == nil || execution.script == nil {
+		t.Fatalf("unexpected execution: %+v", execution)
+	}
+	if got := execution.script.Env; len(got) != 1 || !strings.HasPrefix(got[0], "ERUN_BUILD_VERSION=1.4.2-rc.") {
+		t.Fatalf("unexpected script env: %+v", got)
+	}
+}
+
+func TestRunBuildExecutionDryRunReleaseIncludesReleaseAndBuildTrace(t *testing.T) {
+	projectRoot := setupReleaseProjectGitRepo(t, "develop")
+	if err := os.WriteFile(filepath.Join(projectRoot, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write build.sh: %v", err)
+	}
+
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{}, errors.New("docker build context should not be resolved")
+		},
+		nil,
+		DockerCommandTarget{ProjectRoot: projectRoot, Environment: DefaultEnvironment, Release: true},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+
+	stdout := new(bytes.Buffer)
+	ctx := Context{
+		Logger: NewLoggerWithWriters(2, stdout, io.Discard),
+		DryRun: true,
+		Stdin:  new(bytes.Buffer),
+		Stdout: stdout,
+		Stderr: io.Discard,
+	}
+	if err := RunBuildExecution(ctx, execution, nil, nil, nil); err != nil {
+		t.Fatalf("RunBuildExecution failed: %v", err)
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "release: branch=develop mode=candidate version=1.4.2-rc.") {
+		t.Fatalf("expected release trace, got:\n%s", output)
+	}
+	if !strings.Contains(output, "ERUN_BUILD_VERSION=1.4.2-rc.") || !strings.Contains(output, "./build.sh") {
+		t.Fatalf("expected build script trace with version env, got:\n%s", output)
+	}
+	if !strings.Contains(output, "release version: 1.4.2-rc.") {
+		t.Fatalf("expected final release version output, got:\n%s", output)
+	}
+}
+
+func setupReleaseProjectGitRepo(t *testing.T, branch string) string {
+	t.Helper()
+
+	projectRoot := setupReleaseProject(t, releaseProjectOptions{})
+	runGitWithEnv(t, projectRoot, nil, "init", "-b", branch)
+	runGitWithEnv(t, projectRoot, nil, "config", "user.email", "codex@example.com")
+	runGitWithEnv(t, projectRoot, nil, "config", "user.name", "Codex")
+	runGitWithEnv(t, projectRoot, nil, "add", ".")
+	runGitWithEnv(t, projectRoot, nil, "commit", "-m", "initial")
+	return projectRoot
 }

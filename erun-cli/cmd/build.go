@@ -17,7 +17,7 @@ const (
 
 var errVersionFileNotFound = common.ErrVersionFileNotFound
 
-func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc) *cobra.Command {
+func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	target := common.DockerCommandTarget{}
 	cmd := &cobra.Command{
 		Use:           "build",
@@ -26,17 +26,37 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := commandContext(cmd)
-			execution, err := common.ResolveBuildExecution(store, findProjectRoot, resolveBuildContext, now, target)
-			if err != nil {
-				return err
-			}
-			return common.RunBuildExecution(ctx, execution, runBuildScript, buildDockerImage, push)
+			return runBuildCommand(commandContext(cmd), store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, runBuildScript, buildDockerImage, push, deployHelmChart)
 		},
 	}
 	addDryRunFlag(cmd)
-	addDockerCommandTargetFlags(cmd, &target)
+	addBuildCommandTargetFlags(cmd, &target)
 	return cmd
+}
+
+func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, target common.DockerCommandTarget, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) error {
+	execution, err := common.ResolveBuildExecution(store, findProjectRoot, resolveBuildContext, now, target)
+	if err != nil {
+		return err
+	}
+	if !target.Deploy {
+		return common.RunBuildExecution(ctx, execution, runBuildScript, buildDockerImage, push)
+	}
+	if common.BuildExecutionUsesBuildScript(execution) {
+		return errors.New("build deploy is not supported for project build scripts")
+	}
+
+	buildDeployStore, ok := any(store).(common.BuildDeployStore)
+	if !ok {
+		return errors.New("store does not support deploy resolution")
+	}
+
+	deploySpecs, err := common.ResolveCurrentDeploySpecsForDockerTarget(buildDeployStore, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target)
+	if err != nil {
+		return err
+	}
+
+	return common.RunBuildExecutionAndDeploy(ctx, execution, deploySpecs, runBuildScript, buildDockerImage, push, deployHelmChart)
 }
 
 func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc) *cobra.Command {
@@ -57,7 +77,7 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 		},
 	}
 	addDryRunFlag(cmd)
-	addDockerCommandTargetFlags(cmd, &target)
+	addPushCommandTargetFlags(cmd, &target)
 	return cmd
 }
 
@@ -92,7 +112,13 @@ func runDockerPushWithRetry(ctx common.Context, pushInput common.DockerPushSpec,
 	return push(ctx, pushInput)
 }
 
-func addDockerCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {
+func addBuildCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {
+	addPushCommandTargetFlags(cmd, target)
+	cmd.Flags().BoolVar(&target.Deploy, "deploy", false, "Deploy the built version after the build completes")
+	cmd.Flags().BoolVar(&target.Release, "release", false, "Run release first and build with the released version")
+}
+
+func addPushCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {
 	cmd.Flags().StringVar(&target.ProjectRoot, "project-root", "", "Project root override for internal tooling")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Environment override for internal tooling")
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the resolved image version")

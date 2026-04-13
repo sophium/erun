@@ -519,6 +519,84 @@ func TestDeployCommandHiddenTargetOverrideUsesProvidedTenantEnvironment(t *testi
 	}
 }
 
+func TestDeployCommandVersionOverrideUsesProvidedVersion(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	projectRoot := t.TempDir()
+	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
+	componentDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
+	if err := os.MkdirAll(componentDir, 0o755); err != nil {
+		t.Fatalf("mkdir docker dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
+		t.Fatalf("save erun config: %v", err)
+	}
+	if err := common.SaveTenantConfig(common.TenantConfig{
+		Name:               "tenant-a",
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: "local",
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{
+		Name:              "local",
+		RepoPath:          projectRoot,
+		KubernetesContext: "cluster-local",
+	}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	var deployed common.HelmDeployParams
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		ResolveKubernetesDeployContext: func() (common.KubernetesDeployContext, error) {
+			return common.KubernetesDeployContext{
+				Dir:           componentDir,
+				ComponentName: "erun-devops",
+				ChartPath:     chartPath,
+			}, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{
+				Dir:            componentDir,
+				DockerfilePath: filepath.Join(componentDir, "Dockerfile"),
+			}, nil
+		},
+		BuildDockerImage: deployBuildCallFunc(func(req deployBuildCall) error {
+			t.Fatalf("unexpected build request: %+v", req)
+			return nil
+		}),
+		PushDockerImage: deployPushCallFunc(func(req deployPushCall) error {
+			t.Fatalf("unexpected push request: %+v", req)
+			return nil
+		}),
+		DeployHelmChart: func(req common.HelmDeployParams) error {
+			deployed = req
+			return nil
+		},
+	})
+	cmd.SetArgs([]string{"deploy", "--version", "1.0.7"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if deployed.Version != "1.0.7" {
+		t.Fatalf("unexpected deploy version: %+v", deployed)
+	}
+}
+
 func TestRootDeployShorthandDryRunPrintsBuildAndDeployCommandsWithoutExecuting(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
