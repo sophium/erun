@@ -122,7 +122,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	push := newPushOperation(pushDockerImage, loginToDockerRegistry, selectRunner)
 
 	initCmd := newInitCmd(runInit)
-	openCmd := newOpenCmd(resolveOpen, runInitForArgs, launchShell, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart)
+	openCmd := newOpenCmd(resolveOpen, runInitForArgs, promptRunner, launchShell, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart)
 	containerCmd := newCommandGroup(
 		"container",
 		"Container utilities",
@@ -167,7 +167,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 		if initRan {
 			return nil
 		}
-		return runResolvedOpenCommand(ctx, result, openOptions{}, launchShell, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart)
+		return runResolvedOpenCommand(ctx, result, openOptions{}, promptRunner, launchShell, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart)
 	}
 
 	cmd := newRootCommand(runRoot)

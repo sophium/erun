@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
@@ -12,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error, launchShell common.ShellLauncherFunc, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
+func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error, promptRunner PromptRunner, launchShell common.ShellLauncherFunc, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	var noShell bool
 
 	cmd := &cobra.Command{
@@ -29,7 +30,7 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 			if initRan {
 				return nil
 			}
-			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell}, launchShell, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart)
+			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell}, promptRunner, launchShell, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart)
 		},
 	}
 
@@ -84,13 +85,13 @@ func resolveOpenWithInitRetry(ctx common.Context, args []string, shouldRunInit f
 	return result, true, err
 }
 
-func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, launchShell common.ShellLauncherFunc, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) error {
+func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, launchShell common.ShellLauncherFunc, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) error {
 	namespace := common.KubernetesNamespaceName(result.Tenant, result.Environment)
 	if options.NoShell {
 		ctx.TraceCommand("", "kubectl", "config", "use-context", strings.TrimSpace(result.EnvConfig.KubernetesContext))
 		ctx.TraceCommand("", "kubectl", "config", "set-context", "--current", "--namespace="+namespace)
 		ctx.TraceCommand("", "cd", result.RepoPath)
-		return emitLocalShellSetupForOpenResult(result, ctx.Stdout, ctx.Stderr)
+		return emitLocalShellSetupForOpenResult(result, promptRunner, ctx.Stdout, ctx.Stderr)
 	}
 
 	shellReq := common.ShellLaunchParamsFromResult(result)
@@ -149,7 +150,7 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 	return launchShell(shellReq)
 }
 
-func emitLocalShellSetupForOpenResult(result common.OpenResult, stdout, stderr io.Writer) error {
+func emitLocalShellSetupForOpenResult(result common.OpenResult, promptRunner PromptRunner, stdout, stderr io.Writer) error {
 	if stdout == nil {
 		stdout = io.Discard
 	}
@@ -159,12 +160,159 @@ func emitLocalShellSetupForOpenResult(result common.OpenResult, stdout, stderr i
 
 	if file, ok := stdout.(*os.File); ok {
 		if info, err := file.Stat(); err == nil && (info.Mode()&os.ModeCharDevice) != 0 {
-			_, _ = fmt.Fprintln(stderr, `run this to update the current shell: eval "$(erun open --no-shell)"`)
+			if err := maybeConfigureOpenNoShellAlias(result, promptRunner, os.Getenv("SHELL"), stderr); err != nil {
+				return err
+			}
 		}
 	}
 
 	_, err := io.WriteString(stdout, common.LocalShellSetupScript(result))
 	return err
+}
+
+func maybeConfigureOpenNoShellAlias(result common.OpenResult, promptRunner PromptRunner, shellPath string, stderr io.Writer) error {
+	aliasName := openNoShellAliasName(result)
+	startupFile, aliasConfigured := detectOpenNoShellAliasStartupFile(result, shellPath)
+	if aliasConfigured {
+		for _, line := range openNoShellHintLines(result, shellPath) {
+			_, _ = fmt.Fprintln(stderr, line)
+		}
+		return nil
+	}
+	if startupFile == "" || promptRunner == nil {
+		for _, line := range openNoShellHintLines(result, shellPath) {
+			_, _ = fmt.Fprintln(stderr, line)
+		}
+		return nil
+	}
+
+	ok, err := confirmPrompt(promptRunner, fmt.Sprintf("add %s to %s", aliasName, startupFile))
+	if err != nil {
+		return err
+	}
+	if !ok {
+		for _, line := range openNoShellHintLines(result, shellPath) {
+			_, _ = fmt.Fprintln(stderr, line)
+		}
+		return nil
+	}
+
+	if err := appendOpenNoShellAlias(startupFile, openNoShellAliasCommand(result, shellPath)); err != nil {
+		return err
+	}
+	_, _ = fmt.Fprintf(stderr, "added %s to %s\n", aliasName, startupFile)
+	_, _ = fmt.Fprintf(stderr, "open a new shell to use %s\n", aliasName)
+	return nil
+}
+
+func openNoShellHintLines(result common.OpenResult, shellPath string) []string {
+	aliasName := openNoShellAliasName(result)
+	aliasCommand := openNoShellAliasCommand(result, shellPath)
+	startupFile, aliasConfigured := detectOpenNoShellAliasStartupFile(result, shellPath)
+	if aliasConfigured {
+		return []string{
+			fmt.Sprintf("configured in your shell startup file: open a new shell to use %s", aliasName),
+		}
+	}
+	if startupFile == "" {
+		return []string{
+			"one-liner alias:",
+			aliasCommand,
+		}
+	}
+	return []string{
+		"one-liner alias:",
+		aliasCommand,
+	}
+}
+
+func openNoShellAliasName(result common.OpenResult) string {
+	if strings.TrimSpace(result.Title) != "" {
+		return strings.TrimSpace(result.Title)
+	}
+	return strings.TrimSpace(result.Tenant) + "-" + strings.TrimSpace(result.Environment)
+}
+
+func openNoShellAliasCommand(result common.OpenResult, shellPath string) string {
+	aliasName := openNoShellAliasName(result)
+	command := fmt.Sprintf("erun open %s %s --no-shell", result.Tenant, result.Environment)
+	if filepath.Base(strings.TrimSpace(shellPath)) == "fish" {
+		return "alias " + aliasName + " 'eval (" + command + ")'"
+	}
+	return "alias " + aliasName + `='eval "$(` + command + `)"'`
+}
+
+func detectOpenNoShellAliasStartupFile(result common.OpenResult, shellPath string) (string, bool) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(homeDir) == "" {
+		return "", false
+	}
+
+	preferred, candidates := openNoShellStartupFiles(homeDir, shellPath)
+	for _, candidate := range candidates {
+		configured, err := startupFileHasAlias(candidate, openNoShellAliasName(result))
+		if err != nil {
+			continue
+		}
+		if configured {
+			return candidate, true
+		}
+	}
+	return preferred, false
+}
+
+func openNoShellStartupFiles(homeDir, shellPath string) (string, []string) {
+	switch filepath.Base(strings.TrimSpace(shellPath)) {
+	case "bash":
+		preferred := filepath.Join(homeDir, ".bashrc")
+		return preferred, []string{
+			preferred,
+			filepath.Join(homeDir, ".bash_profile"),
+			filepath.Join(homeDir, ".profile"),
+		}
+	case "fish":
+		preferred := filepath.Join(homeDir, ".config", "fish", "config.fish")
+		return preferred, []string{preferred}
+	default:
+		preferred := filepath.Join(homeDir, ".zshrc")
+		return preferred, []string{preferred}
+	}
+}
+
+func startupFileHasAlias(path, aliasName string) (bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "alias "+aliasName+"=") || strings.HasPrefix(trimmed, "alias "+aliasName+" ") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func appendOpenNoShellAlias(path, aliasCommand string) error {
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if strings.Contains(string(data), aliasCommand) {
+		return nil
+	}
+
+	content := string(data)
+	if strings.TrimSpace(content) != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	content += aliasCommand + "\n"
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(content), 0o644)
 }
 
 func openerIsDefaultError(err error) bool {
