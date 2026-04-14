@@ -19,6 +19,7 @@ func TestResolveReleaseSpecStableRelease(t *testing.T) {
 		LoadProjectConfig,
 		func(string) (string, error) { return "main", nil },
 		func(string) (string, error) { return "abc1234", nil },
+		func(string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -81,6 +82,7 @@ func TestResolveReleaseSpecUsesConfiguredBranches(t *testing.T) {
 		LoadProjectConfig,
 		func(string) (string, error) { return "integration", nil },
 		func(string) (string, error) { return "abc1234", nil },
+		func(string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -109,6 +111,7 @@ func TestRunReleaseSpecWritesFilesAndRunsGitStages(t *testing.T) {
 		LoadProjectConfig,
 		func(string) (string, error) { return "main", nil },
 		func(string) (string, error) { return "abc1234", nil },
+		func(string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -168,6 +171,7 @@ func TestRunReleaseSpecCandidateRunsTagAndPush(t *testing.T) {
 		LoadProjectConfig,
 		func(string) (string, error) { return "develop", nil },
 		func(string) (string, error) { return "abc1234", nil },
+		func(string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -213,6 +217,7 @@ func TestResolveReleaseSpecStableReleaseUsesConfiguredDevelopBranchForSyncAndPus
 		LoadProjectConfig,
 		func(string) (string, error) { return "trunk", nil },
 		func(string) (string, error) { return "abc1234", nil },
+		func(string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -230,6 +235,32 @@ func TestResolveReleaseSpecStableReleaseUsesConfiguredDevelopBranchForSyncAndPus
 	}
 	if got := spec.Stages[3].GitCommands[0].Args; !reflect.DeepEqual(got, []string{"push", "--follow-tags", "origin", "trunk", "integration"}) {
 		t.Fatalf("unexpected configured push command: %+v", got)
+	}
+}
+
+func TestResolveReleaseSpecStableReleaseSkipsDevelopSyncWhenBranchMissing(t *testing.T) {
+	projectRoot := setupReleaseProject(t, releaseProjectOptions{})
+
+	spec, err := resolveReleaseSpec(
+		func() (string, string, error) { return "tenant-a", projectRoot, nil },
+		LoadProjectConfig,
+		func(string) (string, error) { return "main", nil },
+		func(string) (string, error) { return "abc1234", nil },
+		func(string, string) (bool, error) { return false, nil },
+		ReleaseParams{},
+	)
+	if err != nil {
+		t.Fatalf("resolveReleaseSpec failed: %v", err)
+	}
+
+	if len(spec.Stages) != 3 {
+		t.Fatalf("expected 3 stages without develop sync, got %+v", spec.Stages)
+	}
+	if spec.Stages[2].Name != "push" {
+		t.Fatalf("unexpected final stage: %+v", spec.Stages[2])
+	}
+	if got := spec.Stages[2].GitCommands[0].Args; !reflect.DeepEqual(got, []string{"push", "--follow-tags", "origin", "main"}) {
+		t.Fatalf("unexpected main-only push command: %+v", got)
 	}
 }
 
