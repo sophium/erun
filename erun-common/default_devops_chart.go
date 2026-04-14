@@ -81,8 +81,12 @@ func renderDefaultDevopsChartTemplate(assetPath, moduleName string, data []byte)
 }
 
 func resolveOpenRuntimeDeploySpec(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult) (DeploySpec, error) {
+	allowLocalBuilds := target.TenantConfig.SnapshotEnabled()
+	if target.TenantConfig.Snapshot == nil {
+		allowLocalBuilds = target.EnvConfig.SnapshotEnabled()
+	}
 	for _, componentName := range openRuntimeComponentNames(target.Tenant) {
-		spec, err := ResolveDeploySpecForOpenResult(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, componentName, "")
+		spec, err := resolveDeploySpecForOpenResult(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, componentName, "", allowLocalBuilds)
 		if err == nil {
 			spec.Deploy.ReleaseName = RuntimeReleaseName(target.Tenant)
 			return spec, nil

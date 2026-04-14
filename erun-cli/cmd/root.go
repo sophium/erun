@@ -58,6 +58,7 @@ func Execute() error {
 	initCmd := newInitCmd(runInit)
 	openCmd := newOpenCmd(
 		resolveOpen,
+		store.SaveTenantConfig,
 		runInitForArgs,
 		runPrompt,
 		newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell),

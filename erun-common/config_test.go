@@ -127,7 +127,8 @@ func TestSaveERunConfigWriteFailure(t *testing.T) {
 func TestTenantConfigRoundTrip(t *testing.T) {
 	setupConfigTestXDGConfigHome(t)
 
-	cfg := TenantConfig{ProjectRoot: "/tmp/project", Name: "tenant-a", DefaultEnvironment: "dev"}
+	snapshot := false
+	cfg := TenantConfig{ProjectRoot: "/tmp/project", Name: "tenant-a", DefaultEnvironment: "dev", Snapshot: &snapshot}
 	if err := SaveTenantConfig(cfg); err != nil {
 		t.Fatalf("SaveTenantConfig failed: %v", err)
 	}
@@ -137,7 +138,7 @@ func TestTenantConfigRoundTrip(t *testing.T) {
 		t.Fatalf("LoadTenantConfig failed: %v", err)
 	}
 
-	if loaded != cfg {
+	if !reflect.DeepEqual(loaded, cfg) {
 		t.Fatalf("unexpected tenant config: %+v", loaded)
 	}
 }
@@ -303,7 +304,7 @@ func TestEnvConfigRoundTrip(t *testing.T) {
 		t.Fatalf("LoadEnvConfig failed: %v", err)
 	}
 
-	if loaded != cfg {
+	if !reflect.DeepEqual(loaded, cfg) {
 		t.Fatalf("unexpected env config: %+v", loaded)
 	}
 }

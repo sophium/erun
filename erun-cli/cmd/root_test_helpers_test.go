@@ -148,7 +148,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	runInitForArgs := newRunInitForArgs(store, runInit)
 
 	initCmd := newInitCmd(runInit)
-	openCmd := newOpenCmd(resolveOpen, runInitForArgs, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart)
+	openCmd := newOpenCmd(resolveOpen, store.SaveTenantConfig, runInitForArgs, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart)
 	containerCmd := newCommandGroup(
 		"container",
 		"Container utilities",

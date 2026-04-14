@@ -7,6 +7,8 @@ import (
 
 func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	target := common.DeployTarget{}
+	var snapshot bool
+	var noSnapshot bool
 	cmd := &cobra.Command{
 		Use:           "deploy",
 		Short:         "Deploy the current Helm chart or all charts in the current devops k8s scope",
@@ -15,6 +17,11 @@ func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinder
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
+			snapshotOverride, err := resolveSnapshotFlagOverride(cmd, snapshot, noSnapshot)
+			if err != nil {
+				return err
+			}
+			target.Snapshot = snapshotOverride
 			deploySpecs, err := common.ResolveCurrentDeploySpecs(store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target)
 			if err != nil {
 				return err
@@ -23,12 +30,14 @@ func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinder
 		},
 	}
 	addDryRunFlag(cmd)
-	addDeployCommandTargetFlags(cmd, &target)
+	addDeployCommandTargetFlags(cmd, &target, &snapshot, &noSnapshot)
 	return cmd
 }
 
 func newK8sDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	target := common.DeployTarget{}
+	var snapshot bool
+	var noSnapshot bool
 	cmd := &cobra.Command{
 		Use:           "deploy COMPONENT",
 		Short:         "Deploy a component Helm chart",
@@ -37,6 +46,11 @@ func newK8sDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFin
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
+			snapshotOverride, err := resolveSnapshotFlagOverride(cmd, snapshot, noSnapshot)
+			if err != nil {
+				return err
+			}
+			target.Snapshot = snapshotOverride
 			deploySpec, err := common.ResolveDeploySpec(store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, args[0], "")
 			if err != nil {
 				return err
@@ -45,12 +59,13 @@ func newK8sDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFin
 		},
 	}
 	addDryRunFlag(cmd)
-	addDeployCommandTargetFlags(cmd, &target)
+	addDeployCommandTargetFlags(cmd, &target, &snapshot, &noSnapshot)
 	return cmd
 }
 
-func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget) {
+func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget, snapshot, noSnapshot *bool) {
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the deployed chart and image version")
+	addSnapshotFlags(cmd, snapshot, noSnapshot, "Build and deploy local snapshot images in the local environment")
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Tenant override for internal tooling")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Environment override for internal tooling")
 	cmd.Flags().StringVar(&target.RepoPath, "repo-path", "", "Repo path override for internal tooling")
