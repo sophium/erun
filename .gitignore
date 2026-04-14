@@ -32,3 +32,5 @@ profile.cov
 __debug_bin*
 
 .gomodcache
+/packaging/apt/dist/
+/erun-devops/linux/**/dist/

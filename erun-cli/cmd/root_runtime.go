@@ -124,6 +124,11 @@ func hasOptionalBuildCmd(findProjectRoot common.ProjectFinderFunc, resolveBuildC
 		return true
 	}
 
+	linuxContexts, err := common.ResolveCurrentLinuxPackageContexts(findProjectRoot, resolveBuildContext, common.DockerCommandTarget{})
+	if err == nil && len(linuxContexts) > 0 {
+		return true
+	}
+
 	buildContexts, err := common.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, common.DockerCommandTarget{})
 	return err == nil && len(buildContexts) > 0
 }
@@ -136,6 +141,11 @@ func hasOptionalPushCmd(findProjectRoot common.ProjectFinderFunc, resolveBuildCo
 func optionalBuildCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc) string {
 	hasScript, err := common.HasProjectBuildScript(findProjectRoot, common.DockerCommandTarget{})
 	if err == nil && hasScript {
+		return "Build the project"
+	}
+
+	linuxContexts, linuxErr := common.ResolveCurrentLinuxPackageContexts(findProjectRoot, resolveBuildContext, common.DockerCommandTarget{})
+	if linuxErr == nil && len(linuxContexts) > 0 {
 		return "Build the project"
 	}
 

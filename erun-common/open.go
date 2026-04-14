@@ -23,14 +23,20 @@ var (
 	ErrEnvironmentNotFound             = errors.New("no such environment exists")
 	ErrKubernetesContextNotConfigured  = errors.New("kubernetes context is not configured")
 	ErrRepoPathNotConfigured           = errors.New("repo path is not configured")
+	ErrShellReattachDeploy             = errors.New("remote shell requested deploy handoff and reattach")
 )
 
 const defaultShellLaunchWaitTimeout = "2m0s"
+const remoteShellReattachDeployExitCode = 75
 
 type OpenStore interface {
 	LoadERunConfig() (ERunConfig, string, error)
 	LoadTenantConfig(string) (TenantConfig, string, error)
 	LoadEnvConfig(string, string) (EnvConfig, string, error)
+}
+
+type effectiveKubernetesContextResolver interface {
+	ResolveEffectiveKubernetesContext(environment, configured string) string
 }
 
 type OpenParams struct {
@@ -223,6 +229,9 @@ func ResolveOpen(store OpenStore, params OpenParams) (OpenResult, error) {
 	if envConfig.Name == "" {
 		envConfig.Name = environment
 	}
+	if resolver, ok := store.(effectiveKubernetesContextResolver); ok {
+		envConfig.KubernetesContext = resolver.ResolveEffectiveKubernetesContext(environment, envConfig.KubernetesContext)
+	}
 
 	repoPath := envConfig.RepoPath
 	if repoPath == "" {
@@ -288,6 +297,75 @@ func loadCurrentDirectoryTenant(store OpenStore) (string, bool, error) {
 	return "", false, nil
 }
 
+func resolveEffectiveKubernetesContext(environment, configured string, listContexts func() ([]string, error), currentContext func() (string, error)) string {
+	environment = strings.TrimSpace(environment)
+	configured = strings.TrimSpace(configured)
+	if configured == "" || environment != DefaultEnvironment {
+		return configured
+	}
+	if listContexts == nil || currentContext == nil {
+		return configured
+	}
+
+	contexts, err := listContexts()
+	if err != nil {
+		return configured
+	}
+	if containsTrimmedString(contexts, configured) {
+		return configured
+	}
+
+	current, err := currentContext()
+	if err != nil {
+		return configured
+	}
+	current = strings.TrimSpace(current)
+	if current == "" || !containsTrimmedString(contexts, current) {
+		return configured
+	}
+
+	return current
+}
+
+func listKubernetesContextNames() ([]string, error) {
+	output, err := exec.Command("kubectl", "config", "get-contexts", "-o=name").Output()
+	if err != nil {
+		return nil, err
+	}
+
+	lines := strings.Split(string(output), "\n")
+	contexts := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		contexts = append(contexts, line)
+	}
+	return contexts, nil
+}
+
+func currentKubernetesContextName() (string, error) {
+	output, err := exec.Command("kubectl", "config", "current-context").Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
+func containsTrimmedString(values []string, target string) bool {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.TrimSpace(value) == target {
+			return true
+		}
+	}
+	return false
+}
+
 func ShellLaunchParamsFromResult(result OpenResult) ShellLaunchParams {
 	return ShellLaunchParams{
 		Dir:               result.RepoPath,
@@ -325,7 +403,13 @@ func LaunchShell(req ShellLaunchParams) error {
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		if isShellReattachDeployExit(err) {
+			return ErrShellReattachDeploy
+		}
+		return err
+	}
+	return nil
 }
 
 func PreviewShellLaunch(req ShellLaunchParams) (ShellLaunchPreview, error) {
@@ -420,9 +504,16 @@ func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (stri
 		fmt.Sprintf("cat > \"$config_home/erun/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, tenantYAML),
 		fmt.Sprintf("mkdir -p \"$config_home/erun/%s/%s\"", req.Tenant, req.Environment),
 		fmt.Sprintf("cat > \"$config_home/erun/%s/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, req.Environment, envYAML),
-		fmt.Sprintf("cat > \"$HOME/.erun_bashrc\" <<'EOF'\nexport ERUN_SHELL_HOST=%s\n[ -r /etc/bash.bashrc ] && . /etc/bash.bashrc\nEOF", title),
+		fmt.Sprintf("cat > \"$HOME/.erun_bashrc\" <<'EOF'\nexport ERUN_SHELL_HOST=%s\nerun() {\n  if [ \"${1:-}\" = \"deploy\" ] && [ \"$#\" -eq 1 ] && [ -n \"${ERUN_SHELL_REQUEST_FILE:-}\" ]; then\n    : > \"$ERUN_SHELL_REQUEST_FILE\"\n    exit 0\n  fi\n  command erun \"$@\"\n}\n[ -r /etc/bash.bashrc ] && . /etc/bash.bashrc\nEOF", title),
 		fmt.Sprintf("printf '\\033]0;%s\\007'", title),
-		"exec /bin/bash --rcfile \"$HOME/.erun_bashrc\" -i",
+		"request_file=\"$HOME/.erun-shell-request\"",
+		"rm -f \"$request_file\"",
+		"export ERUN_SHELL_REQUEST_FILE=\"$request_file\"",
+		"shell_status=0",
+		"/bin/bash --rcfile \"$HOME/.erun_bashrc\" -i || shell_status=$?",
+		fmt.Sprintf("if [ -e \"$request_file\" ]; then rm -f \"$request_file\"; exit %d; fi", remoteShellReattachDeployExitCode),
+		"rm -f \"$request_file\"",
+		"exit \"$shell_status\"",
 	}
 
 	if gitHost, gitUser, gitRepo, err := resolveGitRemote(req.Dir); err == nil {
@@ -488,6 +579,14 @@ func remoteWorktreeRepoName(req ShellLaunchParams) string {
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+func isShellReattachDeployExit(err error) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	return exitErr.ExitCode() == remoteShellReattachDeployExitCode
 }
 
 func resolveGitRemote(repoPath string) (string, string, string, error) {

@@ -1,0 +1,31 @@
+{
+  "version": "1.0.17",
+  "description": "Multi-tenant multi-environment deployment and management tool",
+  "homepage": "https://github.com/sophium/erun",
+  "license": "MIT",
+  "depends": [
+    "go"
+  ],
+  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.17.zip",
+  "hash": "ebb6b98c7cde86500d27c505554ed7a9251d306c50b5dfc909001293b90e0661",
+  "extract_dir": "erun-1.0.17",
+  "installer": {
+    "script": [
+      "$env:CGO_ENABLED = '0'",
+      "$cliLdflags = \"-s -w -X github.com/sophium/erun/cmd.buildVersion=$version\"",
+      "Push-Location \"$dir\\erun-cli\"",
+      "go build -trimpath -ldflags $cliLdflags -o \"$dir\\erun.exe\" .",
+      "if ($LASTEXITCODE -ne 0) { throw 'failed to build erun.exe' }",
+      "Pop-Location",
+      "$mcpLdflags = \"-s -w -X github.com/sophium/erun/erun-mcp.buildVersion=$version\"",
+      "Push-Location \"$dir\\erun-mcp\"",
+      "go build -trimpath -ldflags $mcpLdflags -o \"$dir\\emcp.exe\" ./cmd/emcp",
+      "if ($LASTEXITCODE -ne 0) { throw 'failed to build emcp.exe' }",
+      "Pop-Location"
+    ]
+  },
+  "bin": [
+    "erun.exe",
+    "emcp.exe"
+  ]
+}

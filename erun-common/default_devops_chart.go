@@ -141,6 +141,15 @@ func resolveDefaultDevopsDeploySpec(target OpenResult) (DeploySpec, error) {
 	}, nil
 }
 
+func IsDefaultDevopsChartPath(chartPath string) bool {
+	chartPath = filepath.Clean(strings.TrimSpace(chartPath))
+	if chartPath == "" {
+		return false
+	}
+
+	return strings.HasPrefix(filepath.Base(chartPath), "erun-default-devops-chart-")
+}
+
 func materializeDefaultDevopsChart(moduleName string) (string, error) {
 	hash, err := defaultDevopsChartHash()
 	if err != nil {

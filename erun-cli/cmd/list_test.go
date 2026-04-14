@@ -12,6 +12,7 @@ import (
 
 func TestListCommandPrintsDefaultsAndConfiguredTenants(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
+	stubKubectlContexts(t, []string{"cluster-local"}, "cluster-local")
 
 	tenantAPath := filepath.Join(t.TempDir(), "tenant-a")
 	tenantBPath := filepath.Join(t.TempDir(), "tenant-b")

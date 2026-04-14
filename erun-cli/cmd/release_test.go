@@ -186,6 +186,44 @@ func TestReleaseCommandWritesOnlyVersionToStdoutDuringExecution(t *testing.T) {
 	}
 }
 
+func TestReleaseCommandDryRunIncludesLinuxReleaseScripts(t *testing.T) {
+	projectRoot := createReleaseGitRepo(t, "develop")
+	linuxComponentDir := filepath.Join(projectRoot, "erun-devops", "linux", "erun-cli")
+	if err := os.MkdirAll(linuxComponentDir, 0o755); err != nil {
+		t.Fatalf("mkdir linux component dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(linuxComponentDir, "release.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write release.sh: %v", err)
+	}
+	if err := common.SaveProjectConfig(projectRoot, common.ProjectConfig{}); err != nil {
+		t.Fatalf("SaveProjectConfig failed: %v", err)
+	}
+
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		RunGit: func(string, io.Writer, io.Writer, ...string) error {
+			t.Fatal("unexpected git execution during dry-run")
+			return nil
+		},
+	})
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"release", "--dry-run"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stderr.String()
+	if !strings.Contains(output, "ERUN_BUILD_VERSION=1.4.2-rc.") || !strings.Contains(output, "./release.sh") {
+		t.Fatalf("expected linux release trace, got:\n%s", output)
+	}
+}
+
 func createReleaseGitRepo(t *testing.T, branch string) string {
 	t.Helper()
 

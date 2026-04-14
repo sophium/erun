@@ -42,12 +42,16 @@ ARG K9S_VERSION=v0.50.9
 ARG DOCKER_VERSION=28.1.1
 ARG BUILDX_VERSION=v0.24.0
 ARG DIFFT_VERSION=0.68.0
+ARG GH_VERSION=2.74.2
+ARG GOLANGCI_LINT_VERSION=v2.2.2
 
 USER root
 
+COPY --from=builder /usr/local/go /usr/local/go
+
 # Keep external tooling installs pinned and centralized in one layer for traceability.
 RUN apt-get update && \
-    apt-get install -y git bash-completion && \
+    apt-get install -y git bash-completion dpkg-dev && \
     rm -rf /var/lib/apt/lists/* && \
     case "${TARGETARCH}" in \
         amd64) arch=amd64; docker_arch=x86_64 ;; \
@@ -67,13 +71,19 @@ RUN apt-get update && \
     curl -fsSL -o /tmp/difft.tar.gz "https://github.com/Wilfred/difftastic/releases/download/${DIFFT_VERSION}/difft-${docker_arch}-unknown-linux-gnu.tar.gz" && \
     tar -xzf /tmp/difft.tar.gz -C /tmp && \
     install -m 0755 /tmp/difft /usr/local/bin/difft && \
+    curl -fsSL -o /tmp/gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${arch}.tar.gz" && \
+    tar -xzf /tmp/gh.tar.gz -C /tmp && \
+    install -m 0755 "/tmp/gh_${GH_VERSION}_linux_${arch}/bin/gh" /usr/local/bin/gh && \
+    curl -fsSL -o /tmp/golangci-lint.tar.gz "https://github.com/golangci/golangci-lint/releases/download/${GOLANGCI_LINT_VERSION}/golangci-lint-${GOLANGCI_LINT_VERSION#v}-linux-${arch}.tar.gz" && \
+    tar -xzf /tmp/golangci-lint.tar.gz -C /tmp && \
+    install -m 0755 "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION#v}-linux-${arch}/golangci-lint" /usr/local/bin/golangci-lint && \
     curl -fsSL -o /tmp/docker.tgz "https://download.docker.com/linux/static/stable/${docker_arch}/docker-${DOCKER_VERSION}.tgz" && \
     tar -xzf /tmp/docker.tgz -C /tmp && \
     install -m 0755 /tmp/docker/docker /usr/local/bin/docker && \
     mkdir -p /usr/local/lib/docker/cli-plugins /usr/local/libexec/docker/cli-plugins && \
     curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-buildx "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-${arch}" && \
     ln -sf /usr/local/lib/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx && \
-    rm -rf /tmp/helm.tar.gz /tmp/terraform.zip /tmp/k9s.tar.gz /tmp/difft.tar.gz /tmp/docker.tgz "/tmp/linux-${arch}" /tmp/terraform /tmp/k9s /tmp/difft /tmp/docker && \
+    rm -rf /tmp/helm.tar.gz /tmp/terraform.zip /tmp/k9s.tar.gz /tmp/difft.tar.gz /tmp/gh.tar.gz /tmp/golangci-lint.tar.gz /tmp/docker.tgz "/tmp/linux-${arch}" "/tmp/gh_${GH_VERSION}_linux_${arch}" "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION#v}-linux-${arch}" /tmp/terraform /tmp/k9s /tmp/difft /tmp/docker && \
     groupmod -n erun ubuntu && \
     usermod -l erun -d /home/erun -m -g erun ubuntu && \
     mkdir -p /home/erun/git /home/erun/.kube /home/erun/.config/k9s /etc/erun /etc/bash_completion.d && \
@@ -90,6 +100,8 @@ RUN /usr/local/bin/erun completion bash > /etc/bash_completion.d/erun && \
     chmod 0644 /etc/bash_completion.d/erun
 
 ENV HOME=/home/erun
+ENV PATH=/usr/local/go/bin:${PATH}
+ENV GOPATH=/home/erun/go
 ENV KUBECONFIG=/home/erun/.kube/config
 ENV DOCKER_HOST=unix:///var/run/docker.sock
 ENV DOCKER_BUILDKIT=1

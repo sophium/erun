@@ -29,6 +29,8 @@ func newReleaseCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCo
 					runGit = common.GitCommandRunner
 				}
 				return runGit(dir, ctx.Stderr, stderr, args...)
+			}, func(dir, path string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
+				return common.BuildScriptRunner(dir, path, env, stdin, ctx.Stderr, stderr)
 			})
 		},
 	}

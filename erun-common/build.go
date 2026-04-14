@@ -15,7 +15,11 @@ import (
 
 const localSnapshotTimestampFormat = "20060102150405"
 
-var ErrVersionFileNotFound = errors.New("version file not found for current module")
+var (
+	ErrVersionFileNotFound        = errors.New("version file not found for current module")
+	ErrDockerBuildContextNotFound = errors.New("dockerfile not found in current directory")
+	ErrLinuxPackageBuildNotFound  = errors.New("linux package build script not found in current directory")
+)
 
 type commandSpec struct {
 	Dir  string   `json:"dir,omitempty"`
@@ -66,7 +70,7 @@ type DockerPushSpec struct {
 	Image DockerImageReference
 }
 
-type projectBuildScriptSpec struct {
+type scriptSpec struct {
 	Dir  string
 	Path string
 	Env  []string
@@ -74,7 +78,8 @@ type projectBuildScriptSpec struct {
 
 type BuildExecutionSpec struct {
 	release      *ReleaseSpec
-	script       *projectBuildScriptSpec
+	script       *scriptSpec
+	linuxBuilds  []scriptSpec
 	dockerBuilds []DockerBuildSpec
 	dockerPushes []DockerPushSpec
 }
@@ -97,6 +102,12 @@ type DockerRegistryAuthError struct {
 	Registry string
 	Message  string
 	Err      error
+}
+
+type LinuxPackageContext struct {
+	Dir               string
+	BuildScriptPath   string
+	ReleaseScriptPath string
 }
 
 func ResolveCurrentDockerBuildSpecs(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) ([]DockerBuildSpec, error) {
@@ -136,12 +147,24 @@ func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc,
 		return BuildExecutionSpec{release: releaseSpec, script: script}, nil
 	}
 
+	linuxBuilds := make([]scriptSpec, 0)
+	if releaseSpec == nil {
+		linuxBuilds, err = ResolveCurrentLinuxBuildScripts(findProjectRoot, resolveBuildContext, target, target.VersionOverride)
+		if err != nil && !errors.Is(err, ErrLinuxPackageBuildNotFound) {
+			return BuildExecutionSpec{}, err
+		}
+	}
+
 	builds, err := ResolveCurrentDockerBuildSpecs(store, findProjectRoot, resolveBuildContext, now, target)
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrDockerBuildContextNotFound) {
 		return BuildExecutionSpec{}, err
 	}
 
-	execution := BuildExecutionSpec{dockerBuilds: builds}
+	if len(linuxBuilds) == 0 && len(builds) == 0 && releaseSpec == nil {
+		return BuildExecutionSpec{}, ErrDockerBuildContextNotFound
+	}
+
+	execution := BuildExecutionSpec{linuxBuilds: linuxBuilds, dockerBuilds: builds}
 	if releaseSpec != nil {
 		return BuildExecutionSpecWithRelease(execution, *releaseSpec), nil
 	}
@@ -375,7 +398,7 @@ func ResolveDockerBuildForImageReference(store DockerStore, findProjectRoot Proj
 	}, true, nil
 }
 
-func resolveProjectBuildScript(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (*projectBuildScriptSpec, error) {
+func resolveProjectBuildScript(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (*scriptSpec, error) {
 	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
 		return nil, err
@@ -388,7 +411,7 @@ func resolveProjectBuildScript(findProjectRoot ProjectFinderFunc, target DockerC
 	rootScriptPath := filepath.Join(projectRoot, "build.sh")
 	info, err := os.Stat(rootScriptPath)
 	if err == nil && !info.IsDir() {
-		return &projectBuildScriptSpec{
+		return &scriptSpec{
 			Dir:  projectRoot,
 			Path: "./build.sh",
 		}, nil
@@ -397,7 +420,7 @@ func resolveProjectBuildScript(findProjectRoot ProjectFinderFunc, target DockerC
 		return nil, err
 	}
 
-	var script *projectBuildScriptSpec
+	var script *scriptSpec
 	err = filepath.WalkDir(projectRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -412,7 +435,7 @@ func resolveProjectBuildScript(findProjectRoot ProjectFinderFunc, target DockerC
 			return nil
 		}
 
-		script = &projectBuildScriptSpec{
+		script = &scriptSpec{
 			Dir:  filepath.Dir(path),
 			Path: "./build.sh",
 		}
@@ -442,7 +465,8 @@ func isProjectBuildArtifactDir(path, projectRoot string) bool {
 		return false
 	}
 
-	return filepath.Base(filepath.Dir(path)) == "docker"
+	parent := filepath.Base(filepath.Dir(path))
+	return parent == "docker" || parent == "linux"
 }
 
 func normalizeDockerDependencies(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc) (DockerStore, ProjectFinderFunc, BuildContextResolverFunc, NowFunc) {
@@ -497,7 +521,7 @@ func ResolveCurrentDockerBuildContexts(findProjectRoot ProjectFinderFunc, resolv
 		return ResolveDockerBuildContextsAtDir(dockerDir)
 	}
 
-	return nil, fmt.Errorf("dockerfile not found in current directory")
+	return nil, ErrDockerBuildContextNotFound
 }
 
 func resolveCurrentDevopsDockerDir(findProjectRoot ProjectFinderFunc, dir string, target DockerCommandTarget) (string, bool, error) {
@@ -577,7 +601,7 @@ func resolveProjectRootDevopsDockerDir(findProjectRoot ProjectFinderFunc, projec
 func isDockerBuildModuleDir(dir string) (bool, error) {
 	buildContexts, err := ResolveDockerBuildContextsAtDir(dir)
 	if err != nil {
-		if err.Error() == "dockerfile not found in current directory" {
+		if errors.Is(err, ErrDockerBuildContextNotFound) {
 			return false, nil
 		}
 		return false, err
@@ -781,7 +805,7 @@ func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deplo
 
 func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
 	if execution.release != nil {
-		if err := RunReleaseSpec(ctx, *execution.release, nil); err != nil {
+		if err := RunReleaseSpec(ctx, *execution.release, nil, runScript); err != nil {
 			return err
 		}
 	}
@@ -792,31 +816,36 @@ func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []
 		if len(deploySpecs) > 0 {
 			return fmt.Errorf("build deploy is not supported for project build scripts")
 		}
-		err = runBuildScript(ctx, *execution.script, runScript)
-	} else if len(execution.dockerPushes) > 0 {
-		err = RunDockerPushExecution(ctx, DockerPushExecutionSpec{
-			builds: execution.dockerBuilds,
-			pushes: execution.dockerPushes,
-		}, build, push)
-		if err == nil {
-			for _, pushInput := range execution.dockerPushes {
-				pushedTags[pushInput.Image.Tag] = struct{}{}
-			}
-		}
-	} else if len(deploySpecs) > 0 {
-		err = RunDockerBuilds(ctx, execution.dockerBuilds, build)
-		if err == nil {
-			for _, buildInput := range execution.dockerBuilds {
-				pushInput := NewDockerPushSpec(buildInput.ContextDir, buildInput.Image)
-				if pushErr := RunDockerPushSpec(ctx, pushInput, nil, build, push); pushErr != nil {
-					err = pushErr
-					break
-				}
-				pushedTags[pushInput.Image.Tag] = struct{}{}
-			}
-		}
+		err = runScriptSpec(ctx, *execution.script, runScript)
 	} else {
-		err = RunDockerBuilds(ctx, execution.dockerBuilds, build)
+		if err = runScriptSpecs(ctx, execution.linuxBuilds, runScript); err != nil {
+			return err
+		}
+		if len(execution.dockerPushes) > 0 {
+			err = RunDockerPushExecution(ctx, DockerPushExecutionSpec{
+				builds: execution.dockerBuilds,
+				pushes: execution.dockerPushes,
+			}, build, push)
+			if err == nil {
+				for _, pushInput := range execution.dockerPushes {
+					pushedTags[pushInput.Image.Tag] = struct{}{}
+				}
+			}
+		} else if len(deploySpecs) > 0 {
+			err = RunDockerBuilds(ctx, execution.dockerBuilds, build)
+			if err == nil {
+				for _, buildInput := range execution.dockerBuilds {
+					pushInput := NewDockerPushSpec(buildInput.ContextDir, buildInput.Image)
+					if pushErr := RunDockerPushSpec(ctx, pushInput, nil, build, push); pushErr != nil {
+						err = pushErr
+						break
+					}
+					pushedTags[pushInput.Image.Tag] = struct{}{}
+				}
+			}
+		} else {
+			err = RunDockerBuilds(ctx, execution.dockerBuilds, build)
+		}
 	}
 	if err != nil {
 		return err
@@ -946,15 +975,18 @@ func DockerBuildContextAtDir(dir string) (DockerBuildContext, error) {
 func ResolveDockerBuildContextsAtDir(dir string) ([]DockerBuildContext, error) {
 	dir = filepath.Clean(strings.TrimSpace(dir))
 	if dir == "" || filepath.Base(dir) != "docker" {
-		return nil, fmt.Errorf("dockerfile not found in current directory")
+		return nil, ErrDockerBuildContextNotFound
 	}
 
 	buildContexts, err := DockerBuildContextsUnderDir(dir)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrDockerBuildContextNotFound
+		}
 		return nil, err
 	}
 	if len(buildContexts) == 0 {
-		return nil, fmt.Errorf("dockerfile not found in current directory")
+		return nil, ErrDockerBuildContextNotFound
 	}
 
 	return buildContexts, nil
@@ -1085,16 +1117,25 @@ func DockerRegistryLogin(registry string, stdin io.Reader, stdout, stderr io.Wri
 	return loginCmd.Run()
 }
 
-func runBuildScript(ctx Context, script projectBuildScriptSpec, run BuildScriptRunnerFunc) error {
+func runScriptSpec(ctx Context, script scriptSpec, run BuildScriptRunnerFunc) error {
 	if run == nil {
 		run = BuildScriptRunner
 	}
-	name, args := buildScriptTraceCommand(script)
+	name, args := scriptTraceCommand(script)
 	ctx.TraceCommand(script.Dir, name, args...)
 	if ctx.DryRun {
 		return nil
 	}
 	return run(script.Dir, script.Path, script.Env, ctx.Stdin, ctx.Stdout, ctx.Stderr)
+}
+
+func runScriptSpecs(ctx Context, scripts []scriptSpec, run BuildScriptRunnerFunc) error {
+	for _, script := range scripts {
+		if err := runScriptSpec(ctx, script, run); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func buildScriptEnv(version string) []string {
@@ -1105,7 +1146,7 @@ func buildScriptEnv(version string) []string {
 	return []string{"ERUN_BUILD_VERSION=" + version}
 }
 
-func buildScriptTraceCommand(script projectBuildScriptSpec) (string, []string) {
+func scriptTraceCommand(script scriptSpec) (string, []string) {
 	if len(script.Env) == 0 {
 		return script.Path, nil
 	}
@@ -1113,6 +1154,292 @@ func buildScriptTraceCommand(script projectBuildScriptSpec) (string, []string) {
 	args := append([]string{}, script.Env...)
 	args = append(args, script.Path)
 	return args[0], args[1:]
+}
+
+func ResolveCurrentLinuxBuildScripts(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget, version string) ([]scriptSpec, error) {
+	contexts, err := ResolveCurrentLinuxPackageContexts(findProjectRoot, resolveBuildContext, target)
+	if err != nil {
+		return nil, err
+	}
+
+	scripts := make([]scriptSpec, 0, len(contexts))
+	for _, context := range contexts {
+		if strings.TrimSpace(context.BuildScriptPath) == "" {
+			continue
+		}
+		scripts = append(scripts, newScriptSpec(context.Dir, "./build.sh", version))
+	}
+	if len(scripts) == 0 {
+		return nil, ErrLinuxPackageBuildNotFound
+	}
+	return scripts, nil
+}
+
+func ResolveCurrentLinuxReleaseScripts(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget, version string) ([]scriptSpec, error) {
+	contexts, err := ResolveCurrentLinuxPackageContexts(findProjectRoot, resolveBuildContext, target)
+	if err != nil {
+		return nil, err
+	}
+
+	scripts := make([]scriptSpec, 0, len(contexts))
+	for _, context := range contexts {
+		if strings.TrimSpace(context.ReleaseScriptPath) == "" {
+			continue
+		}
+		scripts = append(scripts, newScriptSpec(context.Dir, "./release.sh", version))
+	}
+	if len(scripts) == 0 {
+		return nil, ErrLinuxPackageBuildNotFound
+	}
+	return scripts, nil
+}
+
+func ResolveCurrentLinuxPackageContexts(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget) ([]LinuxPackageContext, error) {
+	if resolveBuildContext == nil {
+		resolveBuildContext = ResolveDockerBuildContext
+	}
+
+	buildContext, err := resolveBuildContext()
+	if err != nil {
+		return nil, err
+	}
+
+	if context, ok, err := LinuxPackageContextAtDir(buildContext.Dir); err != nil {
+		return nil, err
+	} else if ok {
+		return []LinuxPackageContext{context}, nil
+	}
+
+	if contexts, err := ResolveLinuxPackageContextsAtDir(buildContext.Dir); err == nil {
+		return contexts, nil
+	} else if !errors.Is(err, ErrLinuxPackageBuildNotFound) {
+		return nil, err
+	}
+
+	linuxDir, ok, err := resolveCurrentDevopsLinuxDir(findProjectRoot, buildContext.Dir, target)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		return ResolveLinuxPackageContextsAtDir(linuxDir)
+	}
+
+	return nil, ErrLinuxPackageBuildNotFound
+}
+
+func LinuxPackageContextAtDir(dir string) (LinuxPackageContext, bool, error) {
+	dir = filepath.Clean(strings.TrimSpace(dir))
+	if dir == "" {
+		return LinuxPackageContext{}, false, nil
+	}
+	if filepath.Base(filepath.Dir(dir)) != "linux" {
+		return LinuxPackageContext{}, false, nil
+	}
+
+	buildScriptPath, buildFound, err := linuxPackageScriptPath(dir, "build.sh")
+	if err != nil {
+		return LinuxPackageContext{}, false, err
+	}
+	releaseScriptPath, releaseFound, err := linuxPackageScriptPath(dir, "release.sh")
+	if err != nil {
+		return LinuxPackageContext{}, false, err
+	}
+	if !buildFound && !releaseFound {
+		return LinuxPackageContext{}, false, nil
+	}
+
+	return LinuxPackageContext{
+		Dir:               dir,
+		BuildScriptPath:   buildScriptPath,
+		ReleaseScriptPath: releaseScriptPath,
+	}, true, nil
+}
+
+func ResolveLinuxPackageContextsAtDir(dir string) ([]LinuxPackageContext, error) {
+	dir = filepath.Clean(strings.TrimSpace(dir))
+	if dir == "" || filepath.Base(dir) != "linux" {
+		return nil, ErrLinuxPackageBuildNotFound
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrLinuxPackageBuildNotFound
+		}
+		return nil, err
+	}
+
+	contexts := make([]LinuxPackageContext, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		context, ok, err := LinuxPackageContextAtDir(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		contexts = append(contexts, context)
+	}
+	if len(contexts) == 0 {
+		return nil, ErrLinuxPackageBuildNotFound
+	}
+	return contexts, nil
+}
+
+func FindComponentLinuxPackageContext(projectRoot, componentName string) (LinuxPackageContext, bool, error) {
+	projectRoot = filepath.Clean(strings.TrimSpace(projectRoot))
+	componentName = strings.TrimSpace(componentName)
+	if projectRoot == "" || componentName == "" {
+		return LinuxPackageContext{}, false, nil
+	}
+
+	matches := make([]LinuxPackageContext, 0, 1)
+	err := filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.Name() != "build.sh" && d.Name() != "release.sh" {
+			return nil
+		}
+
+		dir := filepath.Dir(path)
+		if filepath.Base(dir) != componentName || filepath.Base(filepath.Dir(dir)) != "linux" {
+			return nil
+		}
+		context, ok, err := LinuxPackageContextAtDir(dir)
+		if err != nil || !ok {
+			return err
+		}
+		matches = append(matches, context)
+		return nil
+	})
+	if err != nil {
+		return LinuxPackageContext{}, false, err
+	}
+	if len(matches) == 0 {
+		return LinuxPackageContext{}, false, nil
+	}
+	if len(matches) > 1 {
+		return LinuxPackageContext{}, false, fmt.Errorf("multiple linux package contexts found for component %q", componentName)
+	}
+	return matches[0], true, nil
+}
+
+func resolveCurrentDevopsLinuxDir(findProjectRoot ProjectFinderFunc, dir string, target DockerCommandTarget) (string, bool, error) {
+	dir = filepath.Clean(strings.TrimSpace(dir))
+	if dir == "" {
+		return "", false, nil
+	}
+
+	linuxDir := filepath.Join(dir, "linux")
+	if strings.HasSuffix(filepath.Base(dir), "-devops") {
+		if ok, err := isLinuxPackageModuleDir(linuxDir); err != nil {
+			return "", false, err
+		} else if ok {
+			return linuxDir, true, nil
+		}
+	}
+
+	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	if err != nil {
+		return "", false, err
+	}
+	if projectRoot == "" || dir != filepath.Clean(projectRoot) {
+		return "", false, nil
+	}
+
+	return resolveProjectRootDevopsLinuxDir(findProjectRoot, projectRoot)
+}
+
+func resolveProjectRootDevopsLinuxDir(findProjectRoot ProjectFinderFunc, projectRoot string) (string, bool, error) {
+	projectRoot = filepath.Clean(strings.TrimSpace(projectRoot))
+	if projectRoot == "" {
+		return "", false, nil
+	}
+
+	if tenant, detectedProjectRoot, err := findProjectRoot(); err == nil &&
+		filepath.Clean(strings.TrimSpace(detectedProjectRoot)) == projectRoot &&
+		strings.TrimSpace(tenant) != "" {
+		linuxDir := filepath.Join(projectRoot, RuntimeReleaseName(tenant), "linux")
+		if ok, err := isLinuxPackageModuleDir(linuxDir); err != nil {
+			return "", false, err
+		} else if ok {
+			return linuxDir, true, nil
+		}
+	}
+
+	entries, err := os.ReadDir(projectRoot)
+	if err != nil {
+		return "", false, err
+	}
+
+	candidates := make([]string, 0, 1)
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasSuffix(entry.Name(), "-devops") {
+			continue
+		}
+
+		linuxDir := filepath.Join(projectRoot, entry.Name(), "linux")
+		ok, err := isLinuxPackageModuleDir(linuxDir)
+		if err != nil {
+			return "", false, err
+		}
+		if ok {
+			candidates = append(candidates, linuxDir)
+		}
+	}
+
+	switch len(candidates) {
+	case 0:
+		return "", false, nil
+	case 1:
+		return candidates[0], true, nil
+	default:
+		return "", false, fmt.Errorf("multiple devops linux directories found under project root")
+	}
+}
+
+func isLinuxPackageModuleDir(dir string) (bool, error) {
+	contexts, err := ResolveLinuxPackageContextsAtDir(dir)
+	if err != nil {
+		if errors.Is(err, ErrLinuxPackageBuildNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return len(contexts) > 0, nil
+}
+
+func linuxPackageScriptPath(dir, name string) (string, bool, error) {
+	path := filepath.Join(dir, name)
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	if info.IsDir() {
+		return "", false, nil
+	}
+	return path, true, nil
+}
+
+func newScriptSpec(dir, path, version string) scriptSpec {
+	return scriptSpec{
+		Dir:  dir,
+		Path: path,
+		Env:  buildScriptEnv(version),
+	}
 }
 
 func resolveDockerBuildRegistryForEnvironment(projectRoot, environment string) (string, error) {

@@ -1,6 +1,10 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
@@ -44,7 +48,9 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	}
 	optionalBuildFindProjectRoot := deps.OptionalBuildFindProjectRoot
 	if optionalBuildFindProjectRoot == nil {
-		optionalBuildFindProjectRoot = common.FindProjectRoot
+		optionalBuildFindProjectRoot = func() (string, string, error) {
+			return "", "", common.ErrNotInGitRepository
+		}
 	}
 	promptRunner := deps.PromptRunner
 	if promptRunner == nil {
@@ -111,6 +117,25 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	resolveRuntimeDeploySpec := func(target common.OpenResult) (common.DeploySpec, error) {
 		return common.ResolveOpenRuntimeDeploySpec(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	}
+	push := newPushOperation(pushDockerImage, loginToDockerRegistry, selectRunner)
+	runManagedDeploy := func(ctx common.Context, target common.OpenResult) error {
+		specs, err := common.ResolveCurrentDeploySpecs(
+			store,
+			findProjectRoot,
+			resolveDockerBuildContext,
+			resolveKubernetesDeployContext,
+			now,
+			common.DeployTarget{
+				Tenant:      target.Tenant,
+				Environment: target.Environment,
+				RepoPath:    target.RepoPath,
+			},
+		)
+		if err != nil {
+			return err
+		}
+		return common.RunDeploySpecs(ctx, specs, buildDockerImage, push, deployHelmChart)
+	}
 	ensureKubernetesNamespace := func(contextName, namespace string) error {
 		if deps.EnsureKubernetesNamespace == nil {
 			return nil
@@ -119,10 +144,9 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	}
 	runInit := newRunInit(store, findProjectRoot, promptRunner, selectRunner, listKubernetesContexts, ensureKubernetesNamespace)
 	runInitForArgs := newRunInitForArgs(store, runInit)
-	push := newPushOperation(pushDockerImage, loginToDockerRegistry, selectRunner)
 
 	initCmd := newInitCmd(runInit)
-	openCmd := newOpenCmd(resolveOpen, runInitForArgs, promptRunner, launchShell, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart)
+	openCmd := newOpenCmd(resolveOpen, runInitForArgs, promptRunner, launchShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart)
 	containerCmd := newCommandGroup(
 		"container",
 		"Container utilities",
@@ -167,10 +191,32 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 		if initRan {
 			return nil
 		}
-		return runResolvedOpenCommand(ctx, result, openOptions{}, promptRunner, launchShell, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart)
+		return runResolvedOpenCommand(ctx, result, openOptions{}, promptRunner, launchShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart)
 	}
 
 	cmd := newRootCommand(runRoot)
 	addCommands(cmd, initCmd, openCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, listCmd, releaseCmd, versionCmd)
 	return cmd
+}
+
+func stubKubectlContexts(t *testing.T, contexts []string, current string) {
+	t.Helper()
+
+	kubectlDir := t.TempDir()
+	kubectlPath := filepath.Join(kubectlDir, "kubectl")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = \"config\" ] && [ \"$2\" = \"get-contexts\" ] && [ \"$3\" = \"-o=name\" ]; then\n" +
+		"  cat <<'EOF'\n" + strings.Join(contexts, "\n") + "\nEOF\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"if [ \"$1\" = \"config\" ] && [ \"$2\" = \"current-context\" ]; then\n" +
+		"  printf '%s\\n' '" + current + "'\n" +
+		"  exit 0\n" +
+		"fi\n" +
+		"echo \"unexpected kubectl invocation: $@\" >&2\n" +
+		"exit 1\n"
+	if err := os.WriteFile(kubectlPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write kubectl stub: %v", err)
+	}
+	t.Setenv("PATH", kubectlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
