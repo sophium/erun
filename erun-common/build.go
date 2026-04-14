@@ -141,7 +141,11 @@ func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc,
 		return BuildExecutionSpec{}, err
 	}
 
-	return BuildExecutionSpec{release: releaseSpec, dockerBuilds: builds}, nil
+	execution := BuildExecutionSpec{dockerBuilds: builds}
+	if releaseSpec != nil {
+		return BuildExecutionSpecWithRelease(execution, *releaseSpec), nil
+	}
+	return execution, nil
 }
 
 func BuildExecutionSpecFromDockerBuilds(builds []DockerBuildSpec) BuildExecutionSpec {
@@ -150,11 +154,34 @@ func BuildExecutionSpecFromDockerBuilds(builds []DockerBuildSpec) BuildExecution
 
 func BuildExecutionSpecWithRelease(execution BuildExecutionSpec, release ReleaseSpec) BuildExecutionSpec {
 	execution.release = &release
+	if len(execution.dockerBuilds) > 0 && len(execution.dockerPushes) == 0 {
+		execution.dockerPushes = releaseDockerPushSpecs(execution.dockerBuilds, release.DockerImages)
+	}
 	return execution
 }
 
 func BuildExecutionUsesBuildScript(execution BuildExecutionSpec) bool {
 	return execution.script != nil
+}
+
+func releaseDockerPushSpecs(builds []DockerBuildSpec, images []ReleaseDockerImageSpec) []DockerPushSpec {
+	if len(builds) == 0 || len(images) == 0 {
+		return nil
+	}
+
+	releaseTags := make(map[string]struct{}, len(images))
+	for _, image := range images {
+		releaseTags[strings.TrimSpace(image.Tag)] = struct{}{}
+	}
+
+	pushes := make([]DockerPushSpec, 0, len(builds))
+	for _, build := range builds {
+		if _, ok := releaseTags[strings.TrimSpace(build.Image.Tag)]; !ok {
+			continue
+		}
+		pushes = append(pushes, NewDockerPushSpec(build.ContextDir, build.Image))
+	}
+	return pushes
 }
 
 func ResolveDockerBuildTarget(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (DockerCommandTarget, *ReleaseSpec, error) {

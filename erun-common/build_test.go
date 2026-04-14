@@ -465,8 +465,43 @@ func TestResolveBuildExecutionReleaseUsesResolvedVersionForDockerBuilds(t *testi
 	if got := execution.dockerBuilds[0].Image.Tag; got != "erunpaas/api:1.4.2" {
 		t.Fatalf("unexpected docker build tag: %q", got)
 	}
+	if len(execution.dockerPushes) != 1 {
+		t.Fatalf("unexpected docker pushes: %+v", execution.dockerPushes)
+	}
+	if got := execution.dockerPushes[0].Image.Tag; got != "erunpaas/api:1.4.2" {
+		t.Fatalf("unexpected docker push tag: %q", got)
+	}
 	if got := execution.release.NextVersion; got != "1.4.3" {
 		t.Fatalf("unexpected next version: %q", got)
+	}
+}
+
+func TestResolveBuildExecutionReleaseOnlyPushesReleaseTaggedDockerBuilds(t *testing.T) {
+	projectRoot := setupReleaseProjectGitRepo(t, "main")
+
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{Dir: projectRoot}, nil
+		},
+		nil,
+		DockerCommandTarget{ProjectRoot: projectRoot, Environment: DefaultEnvironment, Release: true},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+
+	if len(execution.dockerBuilds) != 2 {
+		t.Fatalf("unexpected docker builds: %+v", execution.dockerBuilds)
+	}
+	if len(execution.dockerPushes) != 1 {
+		t.Fatalf("unexpected docker pushes: %+v", execution.dockerPushes)
+	}
+	if got := execution.dockerPushes[0].Image.Tag; got != "erunpaas/api:1.4.2" {
+		t.Fatalf("unexpected docker push tag: %q", got)
 	}
 }
 
@@ -541,6 +576,52 @@ func TestRunBuildExecutionDryRunReleaseIncludesReleaseAndBuildTrace(t *testing.T
 	}
 	if !strings.Contains(output, "release version: 1.4.2-rc.") {
 		t.Fatalf("expected final release version output, got:\n%s", output)
+	}
+}
+
+func TestRunBuildExecutionReleaseBuildsAndPushesResolvedVersion(t *testing.T) {
+	projectRoot := setupReleaseProjectGitRepo(t, "main")
+	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "api")
+
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContextAtDir(buildDir)
+		},
+		nil,
+		DockerCommandTarget{ProjectRoot: projectRoot, Environment: DefaultEnvironment, Release: true},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+	execution.release = nil
+
+	var buildCalls []string
+	var pushCalls []string
+	ctx := Context{
+		Logger: NewLoggerWithWriters(2, io.Discard, io.Discard),
+		Stdin:  new(bytes.Buffer),
+		Stdout: new(bytes.Buffer),
+		Stderr: new(bytes.Buffer),
+	}
+	if err := RunBuildExecution(ctx, execution, nil, func(dir, dockerfilePath, tag string, stdout, stderr io.Writer) error {
+		buildCalls = append(buildCalls, tag)
+		return nil
+	}, func(ctx Context, pushInput DockerPushSpec) error {
+		pushCalls = append(pushCalls, pushInput.Image.Tag)
+		return nil
+	}); err != nil {
+		t.Fatalf("RunBuildExecution failed: %v", err)
+	}
+
+	if len(buildCalls) != 1 || buildCalls[0] != "erunpaas/api:1.4.2" {
+		t.Fatalf("unexpected build calls: %+v", buildCalls)
+	}
+	if len(pushCalls) != 1 || pushCalls[0] != "erunpaas/api:1.4.2" {
+		t.Fatalf("unexpected push calls: %+v", pushCalls)
 	}
 }
 

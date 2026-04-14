@@ -115,7 +115,7 @@ func runDockerPushWithRetry(ctx common.Context, pushInput common.DockerPushSpec,
 func addBuildCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {
 	addPushCommandTargetFlags(cmd, target)
 	cmd.Flags().BoolVar(&target.Deploy, "deploy", false, "Deploy the built version after the build completes")
-	cmd.Flags().BoolVar(&target.Release, "release", false, "Run release first and build with the released version")
+	cmd.Flags().BoolVar(&target.Release, "release", false, "Run release first and publish the release-tagged images")
 }
 
 func addPushCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {

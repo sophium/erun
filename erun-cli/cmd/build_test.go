@@ -2287,6 +2287,48 @@ func TestBuildCommandDryRunReleaseShowsReleaseAndBuildVersionTrace(t *testing.T)
 	}
 }
 
+func TestBuildCommandDryRunReleaseShowsPushCommandsForReleaseTaggedDockerBuilds(t *testing.T) {
+	projectRoot := createReleaseGitRepo(t, "main")
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		OptionalBuildFindProjectRoot: func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: projectRoot}, nil
+		},
+	})
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"build", "--dry-run", "--release"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stderr.String()
+	if !strings.Contains(output, "docker build -t erunpaas/api:1.4.2") {
+		t.Fatalf("expected release build trace, got:\n%s", output)
+	}
+	if !strings.Contains(output, "docker build -t erunpaas/base:9.9.9") {
+		t.Fatalf("expected component-local build trace, got:\n%s", output)
+	}
+	if !strings.Contains(output, "docker push erunpaas/api:1.4.2") {
+		t.Fatalf("expected release push trace, got:\n%s", output)
+	}
+	if strings.Contains(output, "docker push erunpaas/base:9.9.9") {
+		t.Fatalf("did not expect push trace for non-release-tagged image, got:\n%s", output)
+	}
+}
+
 func projectConfigWithSingleRegistry(registry string) common.ProjectConfig {
 	return common.ProjectConfig{
 		Environments: map[string]common.ProjectEnvironmentConfig{
