@@ -141,7 +141,7 @@ spec:
         - name: repo-worktree
           hostPath:
             path: {{ required "worktreeHostPath is required" .Values.worktreeHostPath | quote }}
-            type: Directory
+            type: DirectoryOrCreate
         - name: docker-socket
           emptyDir: {}
         - name: docker-state

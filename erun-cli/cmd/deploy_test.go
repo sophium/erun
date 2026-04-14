@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/manifoldco/promptui"
 	common "github.com/sophium/erun/erun-common"
 )
 
@@ -120,6 +122,7 @@ func TestNewRootCmdOmitsDeployShorthandWhenKubernetesDeployContextAbsent(t *test
 
 func TestDevopsK8sDeployBuildsAndDeploysSameExactVersionFromCurrentBuildDirectoryForLocalEnvironment(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
+	stubKubectlContexts(t, []string{"cluster-local"}, "cluster-local")
 
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
@@ -209,7 +212,11 @@ func TestDevopsK8sDeployBuildsAndDeploysSameExactVersionFromCurrentBuildDirector
 	if received.KubernetesContext != "cluster-local" {
 		t.Fatalf("unexpected kubernetes context: %+v", received)
 	}
-	if received.WorktreeHostPath != projectRoot {
+	resolvedProjectRoot, err := filepath.EvalSymlinks(projectRoot)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(projectRoot) failed: %v", err)
+	}
+	if received.WorktreeHostPath != resolvedProjectRoot {
 		t.Fatalf("unexpected worktree values: %+v", received)
 	}
 	if received.Timeout != common.DefaultHelmDeploymentTimeout {
@@ -599,6 +606,7 @@ func TestDeployCommandVersionOverrideUsesProvidedVersion(t *testing.T) {
 
 func TestRootDeployShorthandDryRunPrintsBuildAndDeployCommandsWithoutExecuting(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
+	stubKubectlContexts(t, []string{"cluster-local"}, "cluster-local")
 
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
@@ -835,6 +843,15 @@ func TestRootCommandTreatsDeployAsEnvironmentWhenDeployContextAbsent(t *testing.
 	cmd := newTestRootCmd(testRootDeps{
 		ResolveKubernetesDeployContext: func() (common.KubernetesDeployContext, error) {
 			return common.KubernetesDeployContext{Dir: t.TempDir()}, nil
+		},
+		PromptRunner: func(prompt promptui.Prompt) (string, error) {
+			if !prompt.IsConfirm {
+				t.Fatalf("expected confirm prompt, got %+v", prompt)
+			}
+			if prompt.Label != fmt.Sprintf("create tenant-a-devops chart in %s", projectRoot) {
+				t.Fatalf("unexpected prompt label: %q", prompt.Label)
+			}
+			return "n", nil
 		},
 		DeployHelmChart: func(req common.HelmDeployParams) error {
 			t.Fatalf("unexpected deploy request: %+v", req)

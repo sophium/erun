@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -235,6 +236,83 @@ func TestOpenResolveRequiresKubernetesContextAssociation(t *testing.T) {
 	}
 }
 
+func TestResolveEffectiveKubernetesContextFallsBackToCurrentContextForLocalEnvironment(t *testing.T) {
+	got := resolveEffectiveKubernetesContext(
+		DefaultEnvironment,
+		"rancher-desktop",
+		func() ([]string, error) {
+			return []string{"docker-desktop"}, nil
+		},
+		func() (string, error) {
+			return "docker-desktop", nil
+		},
+	)
+	if got != "docker-desktop" {
+		t.Fatalf("expected current context fallback, got %q", got)
+	}
+}
+
+func TestResolveEffectiveKubernetesContextKeepsConfiguredContextOutsideLocalEnvironment(t *testing.T) {
+	listCalled := false
+	currentCalled := false
+
+	got := resolveEffectiveKubernetesContext(
+		"dev",
+		"cluster-dev",
+		func() ([]string, error) {
+			listCalled = true
+			return []string{"other-context"}, nil
+		},
+		func() (string, error) {
+			currentCalled = true
+			return "other-context", nil
+		},
+	)
+	if got != "cluster-dev" {
+		t.Fatalf("expected configured context to be preserved, got %q", got)
+	}
+	if listCalled || currentCalled {
+		t.Fatalf("did not expect kubectl lookup for non-local environment")
+	}
+}
+
+func TestOpenResolveUsesEffectiveKubernetesContextFromStore(t *testing.T) {
+	repoPath := t.TempDir()
+	store := openStore{
+		tenantConfigs: map[string]TenantConfig{
+			"tenant-a": {
+				Name:               "tenant-a",
+				ProjectRoot:        repoPath,
+				DefaultEnvironment: DefaultEnvironment,
+			},
+		},
+		envConfigs: map[string]EnvConfig{
+			"tenant-a/local": {
+				Name:              DefaultEnvironment,
+				RepoPath:          repoPath,
+				KubernetesContext: "rancher-desktop",
+			},
+		},
+		resolveEffectiveKubernetesContext: func(environment, configured string) string {
+			if environment != DefaultEnvironment || configured != "rancher-desktop" {
+				t.Fatalf("unexpected resolver inputs: environment=%q configured=%q", environment, configured)
+			}
+			return "docker-desktop"
+		},
+	}
+
+	result, err := ResolveOpen(store, OpenParams{
+		Tenant:      "tenant-a",
+		Environment: DefaultEnvironment,
+	})
+	if err != nil {
+		t.Fatalf("ResolveOpen failed: %v", err)
+	}
+	if result.EnvConfig.KubernetesContext != "docker-desktop" {
+		t.Fatalf("expected effective context override, got %+v", result.EnvConfig)
+	}
+}
+
 func TestOpenRunLaunchesShell(t *testing.T) {
 	repoPath := t.TempDir()
 	store := openStore{
@@ -301,10 +379,17 @@ func TestRemoteShellScriptSeedsConfigsAndCloneCommand(t *testing.T) {
 		"repopath: " + remoteWorkdir,
 		"kubernetescontext: in-cluster",
 		"cat > \"$HOME/.erun_bashrc\" <<'EOF'\nexport ERUN_SHELL_HOST='tenant-a-local'",
+		"if [ \"${1:-}\" = \"deploy\" ] && [ \"$#\" -eq 1 ] && [ -n \"${ERUN_SHELL_REQUEST_FILE:-}\" ]; then",
+		": > \"$ERUN_SHELL_REQUEST_FILE\"",
+		"exit 0",
 		"printf '\\033]0;'tenant-a-local'\\007'",
+		"request_file=\"$HOME/.erun-shell-request\"",
+		"export ERUN_SHELL_REQUEST_FILE=\"$request_file\"",
 		"IdentityFile ~/.ssh/keys",
 		"if command -v git >/dev/null 2>&1; then if [ ! -d .git ]; then git clone git@github.com:'sophium'/'erun'.git .; fi; git config --global --add safe.directory '*'; fi",
-		"exec /bin/bash --rcfile \"$HOME/.erun_bashrc\" -i",
+		"/bin/bash --rcfile \"$HOME/.erun_bashrc\" -i || shell_status=$?",
+		fmt.Sprintf("if [ -e \"$request_file\" ]; then rm -f \"$request_file\"; exit %d; fi", remoteShellReattachDeployExitCode),
+		"exit \"$shell_status\"",
 	} {
 		if !strings.Contains(script, pattern) {
 			t.Fatalf("expected script to contain %q, got:\n%s", pattern, script)
@@ -522,10 +607,11 @@ func extractHeredoc(t *testing.T, script, header string) string {
 }
 
 type openStore struct {
-	toolConfig    ERunConfig
-	loadERunErr   error
-	tenantConfigs map[string]TenantConfig
-	envConfigs    map[string]EnvConfig
+	toolConfig                        ERunConfig
+	loadERunErr                       error
+	tenantConfigs                     map[string]TenantConfig
+	envConfigs                        map[string]EnvConfig
+	resolveEffectiveKubernetesContext func(environment, configured string) string
 }
 
 func (s openStore) LoadERunConfig() (ERunConfig, string, error) {
@@ -549,6 +635,13 @@ func (s openStore) ListTenantConfigs() ([]TenantConfig, error) {
 		tenants = append(tenants, config)
 	}
 	return tenants, nil
+}
+
+func (s openStore) ResolveEffectiveKubernetesContext(environment, configured string) string {
+	if s.resolveEffectiveKubernetesContext == nil {
+		return configured
+	}
+	return s.resolveEffectiveKubernetesContext(environment, configured)
 }
 
 func (s openStore) LoadEnvConfig(tenant, environment string) (EnvConfig, string, error) {

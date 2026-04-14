@@ -521,10 +521,25 @@ func newHelmDeploySpec(target OpenResult, deployContext KubernetesDeployContext,
 		Environment:       target.Environment,
 		Namespace:         KubernetesNamespaceName(target.Tenant, target.Environment),
 		KubernetesContext: target.EnvConfig.KubernetesContext,
-		WorktreeHostPath:  target.RepoPath,
+		WorktreeHostPath:  resolveWorktreeHostPath(target.RepoPath),
 		Version:           version,
 		Timeout:           DefaultHelmDeploymentTimeout,
 	}, nil
+}
+
+func resolveWorktreeHostPath(repoPath string) string {
+	repoPath = strings.TrimSpace(repoPath)
+	if repoPath == "" {
+		return ""
+	}
+
+	cleaned := filepath.Clean(repoPath)
+	resolved, err := filepath.EvalSymlinks(cleaned)
+	if err != nil || strings.TrimSpace(resolved) == "" {
+		return cleaned
+	}
+
+	return resolved
 }
 
 func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {

@@ -146,3 +146,61 @@ func TestResolveListResultFallsBackToDefaultWhenRepoIsNotConfiguredTenant(t *tes
 		t.Fatalf("unexpected effective target: %+v", result.CurrentDirectory.Effective)
 	}
 }
+
+func TestResolveListResultUsesEffectiveKubernetesContextForCurrentDirectoryTarget(t *testing.T) {
+	originalDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(originalDir); err != nil {
+			t.Fatalf("restore working directory: %v", err)
+		}
+	})
+
+	repoRoot := filepath.Join(t.TempDir(), "tenant-a")
+	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+
+	store := listStore{
+		openStore: openStore{
+			toolConfig: ERunConfig{DefaultTenant: "tenant-a"},
+			tenantConfigs: map[string]TenantConfig{
+				"tenant-a": {Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: DefaultEnvironment},
+			},
+			envConfigs: map[string]EnvConfig{
+				"tenant-a/local": {Name: DefaultEnvironment, RepoPath: repoRoot, KubernetesContext: "rancher-desktop"},
+			},
+			resolveEffectiveKubernetesContext: func(environment, configured string) string {
+				if environment != DefaultEnvironment || configured != "rancher-desktop" {
+					t.Fatalf("unexpected resolver inputs: environment=%q configured=%q", environment, configured)
+				}
+				return "docker-desktop"
+			},
+		},
+		envsByTenant: map[string][]EnvConfig{
+			"tenant-a": {{Name: DefaultEnvironment, RepoPath: repoRoot, KubernetesContext: "rancher-desktop"}},
+		},
+	}
+
+	result, err := ResolveListResult(store, nil, OpenParams{
+		UseDefaultTenant:      true,
+		UseDefaultEnvironment: true,
+	})
+	if err != nil {
+		t.Fatalf("ResolveListResult failed: %v", err)
+	}
+	if result.CurrentDirectory.Effective == nil {
+		t.Fatalf("expected effective target, got %+v", result.CurrentDirectory)
+	}
+	if result.CurrentDirectory.Effective.KubernetesContext != "docker-desktop" {
+		t.Fatalf("unexpected effective kubernetes context: %+v", result.CurrentDirectory.Effective)
+	}
+	if got := result.Tenants[0].Environments[0].KubernetesContext; got != "rancher-desktop" {
+		t.Fatalf("expected configured tenant environment context to remain unchanged, got %q", got)
+	}
+}

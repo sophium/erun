@@ -321,6 +321,9 @@ func TestBootstrapRunCreatesTenantDevopsModuleAndChart(t *testing.T) {
 	if !strings.Contains(string(serviceTemplate), "name: tenant-a-devops") {
 		t.Fatalf("expected tenant container name, got %q", string(serviceTemplate))
 	}
+	if !strings.Contains(string(serviceTemplate), "type: DirectoryOrCreate") {
+		t.Fatalf("expected repo worktree hostPath to allow missing directories, got %q", string(serviceTemplate))
+	}
 }
 
 func TestBootstrapRunCreatesTenantDevopsEnvironmentValuesFile(t *testing.T) {
