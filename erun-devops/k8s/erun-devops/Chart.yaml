@@ -1,6 +1,6 @@
 apiVersion: v2
-appVersion: 1.0.18-pr.ec5e696
+appVersion: 1.0.18-pr.2f0d4ac
 description: ERun DevOps
 name: erun-devops
 type: application
-version: 1.0.18-pr.ec5e696
+version: 1.0.18-pr.2f0d4ac
