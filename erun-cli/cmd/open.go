@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error, promptRunner PromptRunner, launchShell common.ShellLauncherFunc, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
+func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	var noShell bool
 
 	cmd := &cobra.Command{
@@ -30,7 +30,7 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 			if initRan {
 				return nil
 			}
-			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell}, promptRunner, launchShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart)
+			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart)
 		},
 	}
 
@@ -85,7 +85,7 @@ func resolveOpenWithInitRetry(ctx common.Context, args []string, shouldRunInit f
 	return result, true, err
 }
 
-func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, launchShell common.ShellLauncherFunc, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) error {
+func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) error {
 	namespace := common.KubernetesNamespaceName(result.Tenant, result.Environment)
 	if options.NoShell {
 		ctx.TraceCommand("", "kubectl", "config", "use-context", strings.TrimSpace(result.EnvConfig.KubernetesContext))
@@ -128,7 +128,7 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 				func(ctx common.Context, pushInput common.DockerPushSpec) error {
 					return common.RunDockerPush(ctx, pushInput, common.DockerImagePusher)
 				},
-				deployHelmChart,
+				wrapOpenHelmDeployWithSpinner(ctx, execution.Deploy.ReleaseName, deployHelmChart),
 			); err != nil {
 				return err
 			}
@@ -152,7 +152,7 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 	}
 
 	for {
-		err := launchShell(shellReq)
+		err := openShell(ctx, shellReq)
 		if !errors.Is(err, common.ErrShellReattachDeploy) {
 			return err
 		}
@@ -162,6 +162,22 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 		if err := runManagedDeploy(ctx, result); err != nil {
 			return err
 		}
+	}
+}
+
+func wrapOpenHelmDeployWithSpinner(ctx common.Context, releaseName string, deployHelmChart common.HelmChartDeployerFunc) common.HelmChartDeployerFunc {
+	if deployHelmChart == nil {
+		return nil
+	}
+	return func(params common.HelmDeployParams) error {
+		return runWithSpinner(
+			ctx,
+			" deploying "+releaseName+" with helm",
+			"deployment updated: "+releaseName+"\n",
+			func() error {
+				return deployHelmChart(params)
+			},
+		)
 	}
 }
 
