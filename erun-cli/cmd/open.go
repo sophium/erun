@@ -13,8 +13,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
+func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), saveTenantConfig func(common.TenantConfig) error, runInitForArgs func(common.Context, []string) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	var noShell bool
+	var snapshot bool
+	var noSnapshot bool
 
 	cmd := &cobra.Command{
 		Use:          "open [TENANT] [ENVIRONMENT]",
@@ -30,17 +32,41 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 			if initRan {
 				return nil
 			}
+			snapshotOverride, err := resolveSnapshotFlagOverride(cmd, snapshot, noSnapshot)
+			if err != nil {
+				return err
+			}
+			result, err = applyOpenSnapshotPreference(result, snapshotOverride, saveTenantConfig)
+			if err != nil {
+				return err
+			}
 			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart)
 		},
 	}
 
 	addDryRunFlag(cmd)
 	cmd.Flags().BoolVar(&noShell, "no-shell", false, "Print shell commands to switch kubectl context, namespace, and worktree locally")
+	addSnapshotFlags(cmd, &snapshot, &noSnapshot, "Build and deploy a local snapshot when opening the local environment")
 	return cmd
 }
 
 type openOptions struct {
 	NoShell bool
+}
+
+func applyOpenSnapshotPreference(result common.OpenResult, enabled *bool, saveTenantConfig func(common.TenantConfig) error) (common.OpenResult, error) {
+	if enabled == nil || !strings.EqualFold(strings.TrimSpace(result.Environment), common.DefaultEnvironment) {
+		return result, nil
+	}
+
+	result.TenantConfig.SetSnapshot(*enabled)
+	if saveTenantConfig == nil {
+		return result, nil
+	}
+	if err := saveTenantConfig(result.TenantConfig); err != nil {
+		return common.OpenResult{}, err
+	}
+	return result, nil
 }
 
 func resolveOpenArgs(args []string, resolveOpen func(common.OpenParams) (common.OpenResult, error)) (common.OpenParams, common.OpenResult, error) {

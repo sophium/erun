@@ -12,6 +12,7 @@ import (
 type DeployInput struct {
 	Component string `json:"component,omitempty" jsonschema:"component name for the devops k8s deploy COMPONENT command"`
 	Version   string `json:"version,omitempty" jsonschema:"optional explicit version override for the deployed chart"`
+	Snapshot  *bool  `json:"snapshot,omitempty" jsonschema:"optional local snapshot override; when false, skips local snapshot builds in the local environment"`
 	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
@@ -39,6 +40,7 @@ func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 				Environment:     strings.TrimSpace(runtime.Context.Environment),
 				RepoPath:        workDir,
 				VersionOverride: strings.TrimSpace(input.Version),
+				Snapshot:        input.Snapshot,
 			}, component, strings.TrimSpace(input.Version))
 			if err != nil {
 				return err

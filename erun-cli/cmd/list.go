@@ -89,6 +89,9 @@ func writeEffectiveOpen(ctx common.Context, current common.ListCurrentDirectoryR
 	if err := writeLabeledValue(ctx, "kubernetes context", current.Effective.KubernetesContext); err != nil {
 		return err
 	}
+	if err := writeLabeledValue(ctx, "snapshot", enabledDisabledLabel(current.Effective.Snapshot)); err != nil {
+		return err
+	}
 	return writeLabeledValue(ctx, "repo path", current.Effective.RepoPath)
 }
 
@@ -111,6 +114,9 @@ func writeTenantEntry(ctx common.Context, tenant common.ListTenantResult) error 
 		return err
 	}
 	if err := writeIndentedValue(ctx, 4, "default environment", tenant.DefaultEnvironment); err != nil {
+		return err
+	}
+	if err := writeIndentedValue(ctx, 4, "snapshot", enabledDisabledLabel(tenant.Snapshot)); err != nil {
 		return err
 	}
 
@@ -175,4 +181,11 @@ func configuredCurrentTenantOrNone(tenant string) string {
 		return "none"
 	}
 	return tenant
+}
+
+func enabledDisabledLabel(enabled bool) string {
+	if enabled {
+		return "on"
+	}
+	return "off"
 }

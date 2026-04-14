@@ -350,6 +350,149 @@ func TestOpenCommandDryRunRedeploysWhenRuntimeHasLocalBuilds(t *testing.T) {
 	}
 }
 
+func TestOpenCommandPersistsSnapshotPreferenceForLocalEnvironment(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+	stubKubectlContexts(t, []string{"cluster-local"}, "cluster-local")
+
+	projectRoot := t.TempDir()
+	if err := common.SaveTenantConfig(common.TenantConfig{
+		Name:               "tenant-a",
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: common.DefaultEnvironment,
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{
+		Name:              common.DefaultEnvironment,
+		RepoPath:          projectRoot,
+		KubernetesContext: "cluster-local",
+	}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	cmd := newTestRootCmd(testRootDeps{
+		Store: common.ConfigStore{},
+		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
+			return true, nil
+		},
+		LaunchShell: func(req common.ShellLaunchParams) error {
+			return nil
+		},
+	})
+	cmd.SetArgs([]string{"open", "tenant-a", common.DefaultEnvironment, "--snapshot=false"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	tenantConfig, _, err := common.LoadTenantConfig("tenant-a")
+	if err != nil {
+		t.Fatalf("LoadTenantConfig failed: %v", err)
+	}
+	if tenantConfig.Snapshot == nil || *tenantConfig.Snapshot {
+		t.Fatalf("expected snapshot preference to be saved as false, got %+v", tenantConfig)
+	}
+}
+
+func TestOpenCommandUsesPersistedSnapshotPreferenceForLocalEnvironment(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+	stubKubectlContexts(t, []string{"cluster-local"}, "cluster-local")
+
+	projectRoot := t.TempDir()
+	componentName := "tenant-a-devops"
+	componentRoot := filepath.Join(projectRoot, componentName)
+	chartPath := filepath.Join(componentRoot, "k8s", componentName)
+	if err := os.MkdirAll(chartPath, 0o755); err != nil {
+		t.Fatalf("mkdir chart dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: "+componentName+"\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write Chart.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644); err != nil {
+		t.Fatalf("write values.local.yaml: %v", err)
+	}
+	workdir := filepath.Join(componentRoot, "docker", componentName)
+	if err := os.MkdirAll(workdir, 0o755); err != nil {
+		t.Fatalf("mkdir docker dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(componentRoot, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write module VERSION: %v", err)
+	}
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+	snapshot := false
+	if err := common.SaveTenantConfig(common.TenantConfig{
+		Name:               "tenant-a",
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: common.DefaultEnvironment,
+		Snapshot:           &snapshot,
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{
+		Name:              common.DefaultEnvironment,
+		RepoPath:          projectRoot,
+		KubernetesContext: "cluster-local",
+	}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	checkedDeployment := false
+	cmd := newTestRootCmd(testRootDeps{
+		Store: common.ConfigStore{},
+		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
+			checkedDeployment = true
+			if req.Name != "tenant-a-devops" || req.Namespace != "tenant-a-local" || req.KubernetesContext != "cluster-local" {
+				t.Fatalf("unexpected deployment check: %+v", req)
+			}
+			return true, nil
+		},
+		DeployHelmChart: func(req common.HelmDeployParams) error {
+			t.Fatalf("did not expect runtime deployment during dry-run: %+v", req)
+			return nil
+		},
+		LaunchShell: func(req common.ShellLaunchParams) error {
+			t.Fatalf("did not expect remote shell launch during dry-run: %+v", req)
+			return nil
+		},
+	})
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"-v", "open", "tenant-a", common.DefaultEnvironment, "--dry-run"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if !checkedDeployment {
+		t.Fatal("expected deployment existence check when snapshot preference is disabled")
+	}
+
+	output := stderr.String()
+	for _, unwanted := range []string{
+		"docker build -t",
+		"docker push ",
+		"helm upgrade --install",
+	} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("did not expect %q in dry-run output, got %q", unwanted, output)
+		}
+	}
+	for _, want := range []string{
+		"kubectl --context cluster-local --namespace tenant-a-local wait --for=condition=Available --timeout 2m0s deployment/tenant-a-devops",
+		"kubectl --context cluster-local --namespace tenant-a-local exec -it -c tenant-a-devops deployment/tenant-a-devops -- /bin/sh -lc '<bootstrap-script>'",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected dry-run output to contain %q, got %q", want, output)
+		}
+	}
+}
+
 func TestOpenCommandDryRunFallsBackToDefaultRuntimeChartWhenTenantRepoHasNoDevopsChart(t *testing.T) {
 	repoPath := t.TempDir()
 	stdout := new(bytes.Buffer)

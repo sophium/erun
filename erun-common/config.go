@@ -25,6 +25,7 @@ type TenantConfig struct {
 	ProjectRoot        string
 	Name               string
 	DefaultEnvironment string
+	Snapshot           *bool `yaml:"snapshot,omitempty"`
 }
 
 type EnvConfig struct {
@@ -32,6 +33,37 @@ type EnvConfig struct {
 	RepoPath          string
 	KubernetesContext string
 	ContainerRegistry string
+	Snapshot          *bool `yaml:"snapshot,omitempty"`
+}
+
+func (c TenantConfig) SnapshotEnabled() bool {
+	if c.Snapshot == nil {
+		return true
+	}
+	return *c.Snapshot
+}
+
+func (c *TenantConfig) SetSnapshot(enabled bool) {
+	if c == nil {
+		return
+	}
+	value := enabled
+	c.Snapshot = &value
+}
+
+func (c EnvConfig) SnapshotEnabled() bool {
+	if c.Snapshot == nil {
+		return true
+	}
+	return *c.Snapshot
+}
+
+func (c *EnvConfig) SetSnapshot(enabled bool) {
+	if c == nil {
+		return
+	}
+	value := enabled
+	c.Snapshot = &value
 }
 
 type ProjectEnvironmentConfig struct {
