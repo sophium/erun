@@ -13,7 +13,7 @@ type BuildInput struct {
 	Component string `json:"component,omitempty" jsonschema:"optional component name to build from the runtime repo root; when empty, build all Docker component images"`
 	Version   string `json:"version,omitempty" jsonschema:"optional explicit image version override; disables local snapshot tagging when set"`
 	Deploy    bool   `json:"deploy,omitempty" jsonschema:"when true, push the built images and deploy the resolved Helm chart(s) using the built version"`
-	Release   bool   `json:"release,omitempty" jsonschema:"when true, run release first and build with the resolved release version"`
+	Release   bool   `json:"release,omitempty" jsonschema:"when true, run release first and publish the resolved release-tagged images"`
 	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
