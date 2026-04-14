@@ -387,13 +387,20 @@ func LocalShellSetupScript(result OpenResult) string {
 }
 
 func LaunchShell(req ShellLaunchParams) error {
+	if err := WaitForShellDeployment(req); err != nil {
+		return err
+	}
+	return ExecShell(req)
+}
+
+func WaitForShellDeployment(req ShellLaunchParams) error {
 	waitCmd := exec.Command("kubectl", kubectlDeploymentWaitArgs(req)...)
 	waitCmd.Stdout = io.Discard
 	waitCmd.Stderr = os.Stderr
-	if err := waitCmd.Run(); err != nil {
-		return err
-	}
+	return waitCmd.Run()
+}
 
+func ExecShell(req ShellLaunchParams) error {
 	script, err := buildRemoteShellScript(req, false)
 	if err != nil {
 		return err

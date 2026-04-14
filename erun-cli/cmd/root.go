@@ -60,7 +60,7 @@ func Execute() error {
 		resolveOpen,
 		runInitForArgs,
 		runPrompt,
-		common.LaunchShell,
+		newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell),
 		runManagedDeploy,
 		common.CheckKubernetesDeployment,
 		resolveRuntimeDeploySpec,
@@ -110,7 +110,7 @@ func Execute() error {
 		if initRan {
 			return nil
 		}
-		return runResolvedOpenCommand(ctx, result, openOptions{}, runPrompt, common.LaunchShell, runManagedDeploy, common.CheckKubernetesDeployment, resolveRuntimeDeploySpec, common.DeployHelmChart)
+		return runResolvedOpenCommand(ctx, result, openOptions{}, runPrompt, newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell), runManagedDeploy, common.CheckKubernetesDeployment, resolveRuntimeDeploySpec, common.DeployHelmChart)
 	}
 
 	cmd := newRootCommand(runRoot)

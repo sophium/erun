@@ -97,9 +97,11 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	if runGit == nil {
 		runGit = common.GitCommandRunner
 	}
-	launchShell := deps.LaunchShell
-	if launchShell == nil {
-		launchShell = common.LaunchShell
+	openShell := newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell)
+	if deps.LaunchShell != nil {
+		openShell = func(_ common.Context, req common.ShellLaunchParams) error {
+			return deps.LaunchShell(req)
+		}
 	}
 	now := deps.Now
 	if now == nil {
@@ -146,7 +148,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	runInitForArgs := newRunInitForArgs(store, runInit)
 
 	initCmd := newInitCmd(runInit)
-	openCmd := newOpenCmd(resolveOpen, runInitForArgs, promptRunner, launchShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart)
+	openCmd := newOpenCmd(resolveOpen, runInitForArgs, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart)
 	containerCmd := newCommandGroup(
 		"container",
 		"Container utilities",
@@ -191,7 +193,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 		if initRan {
 			return nil
 		}
-		return runResolvedOpenCommand(ctx, result, openOptions{}, promptRunner, launchShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart)
+		return runResolvedOpenCommand(ctx, result, openOptions{}, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart)
 	}
 
 	cmd := newRootCommand(runRoot)
