@@ -65,6 +65,7 @@ func TestReleaseCommandDryRun(t *testing.T) {
 
 func TestReleaseCommandDryRunStableIncludesSyncAndPush(t *testing.T) {
 	projectRoot := createReleaseGitRepo(t, "main")
+	runGitCommand(t, projectRoot, "branch", "develop")
 	if err := common.SaveProjectConfig(projectRoot, common.ProjectConfig{}); err != nil {
 		t.Fatalf("SaveProjectConfig failed: %v", err)
 	}
@@ -104,6 +105,46 @@ func TestReleaseCommandDryRunStableIncludesSyncAndPush(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, output)
 		}
+	}
+}
+
+func TestReleaseCommandDryRunStableWithoutDevelopOnlyPushesMain(t *testing.T) {
+	projectRoot := createReleaseGitRepo(t, "main")
+	if err := common.SaveProjectConfig(projectRoot, common.ProjectConfig{}); err != nil {
+		t.Fatalf("SaveProjectConfig failed: %v", err)
+	}
+
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		RunGit: func(string, io.Writer, io.Writer, ...string) error {
+			t.Fatal("unexpected git execution during dry-run")
+			return nil
+		},
+	})
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"release", "--dry-run"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if got := strings.TrimSpace(stdout.String()); got != "1.4.2" {
+		t.Fatalf("unexpected stdout: %q", got)
+	}
+	output := stderr.String()
+	if strings.Contains(output, "stage: sync-develop") || strings.Contains(output, "git checkout develop") {
+		t.Fatalf("did not expect develop sync in output:\n%s", output)
+	}
+	if !strings.Contains(output, "stage: push") || !strings.Contains(output, "git push --follow-tags origin main") {
+		t.Fatalf("expected main-only push in output, got:\n%s", output)
+	}
+	if strings.Contains(output, "git push --follow-tags origin main develop") {
+		t.Fatalf("did not expect develop push target in output:\n%s", output)
 	}
 }
 

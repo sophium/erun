@@ -14,7 +14,8 @@ Repository guidance for humans and coding agents working in this repo.
 - When the PR is intended to close the issue, include `Closes #<issue-number>` in the PR body.
 - A pushed branch or an open PR does not close the issue by itself. The issue closes after the PR is merged or if it is closed manually.
 - If the user asks for `push, accept`, treat that as completing the full publish flow rather than stopping after the branch push.
-- If the user asks to `close`, treat that as the full publish flow: push the branch, open the PR, merge it with squash unless they asked otherwise, close the PR via merge, and close the linked issue.
+- If the user asks to `close`, always treat that as the repository publish flow in this repo: push the branch, open the PR, merge it with squash unless they asked otherwise, close the PR via merge, and close the linked issue.
+- Do not interpret `close` as a request to end or archive the conversation in this repository.
 
 ## Project Structure
 

@@ -802,6 +802,9 @@ func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []
 	if execution.release != nil {
 		ctx.Info("release version: " + execution.release.Version)
 	}
+	if version := deployedVersionForSpecs(deploySpecs); version != "" {
+		ctx.Info("deployed version: " + version)
+	}
 	return nil
 }
 
@@ -832,6 +835,24 @@ func filterDockerBuildsForPushedTags(builds []DockerBuildSpec, pushedTags map[st
 		filtered = append(filtered, build)
 	}
 	return filtered
+}
+
+func deployedVersionForSpecs(specs []DeploySpec) string {
+	version := ""
+	for _, spec := range specs {
+		current := strings.TrimSpace(spec.Deploy.Version)
+		if current == "" {
+			return ""
+		}
+		if version == "" {
+			version = current
+			continue
+		}
+		if current != version {
+			return ""
+		}
+	}
+	return version
 }
 
 func RunDockerPush(ctx Context, pushInput DockerPushSpec, push DockerImagePusherFunc) error {

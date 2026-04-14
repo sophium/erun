@@ -544,6 +544,93 @@ func TestRunBuildExecutionDryRunReleaseIncludesReleaseAndBuildTrace(t *testing.T
 	}
 }
 
+func TestRunBuildExecutionAndDeployDryRunReleaseReportsDeployedVersionLast(t *testing.T) {
+	projectRoot := setupReleaseProjectGitRepo(t, "develop")
+	chartPath := filepath.Join(projectRoot, "erun-devops", "k8s", "api")
+	if err := os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644); err != nil {
+		t.Fatalf("write values.local.yaml: %v", err)
+	}
+	if err := SaveTenantConfig(TenantConfig{
+		Name:               "tenant-a",
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: DefaultEnvironment,
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := SaveEnvConfig("tenant-a", EnvConfig{
+		Name:              DefaultEnvironment,
+		RepoPath:          projectRoot,
+		KubernetesContext: "cluster-local",
+	}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+	if err := SaveProjectConfig(projectRoot, ProjectConfig{}); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	findProjectRoot := func() (string, string, error) {
+		return "tenant-a", projectRoot, nil
+	}
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		findProjectRoot,
+		func() (DockerBuildContext, error) {
+			return DockerBuildContextAtDir(filepath.Join(projectRoot, "erun-devops", "docker", "api"))
+		},
+		nil,
+		DockerCommandTarget{ProjectRoot: projectRoot, Environment: DefaultEnvironment, Release: true},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+	deploySpec, err := ResolveDeploySpecForDockerTarget(
+		ConfigStore{},
+		findProjectRoot,
+		func() (DockerBuildContext, error) {
+			return DockerBuildContextAtDir(filepath.Join(projectRoot, "erun-devops", "docker", "api"))
+		},
+		func() (KubernetesDeployContext, error) {
+			return KubernetesDeployContextAtDir(filepath.Join(projectRoot, "erun-devops", "docker", "api")), nil
+		},
+		nil,
+		DockerCommandTarget{ProjectRoot: projectRoot, Environment: DefaultEnvironment, Release: true},
+		"api",
+	)
+	if err != nil {
+		t.Fatalf("ResolveDeploySpecForDockerTarget failed: %v", err)
+	}
+	if deploySpec.Deploy.Version != "1.4.2-rc.0000000" && !strings.HasPrefix(deploySpec.Deploy.Version, "1.4.2-rc.") {
+		t.Fatalf("unexpected deploy version: %+v", deploySpec.Deploy)
+	}
+
+	stdout := new(bytes.Buffer)
+	ctx := Context{
+		Logger: NewLoggerWithWriters(2, stdout, io.Discard),
+		DryRun: true,
+		Stdin:  new(bytes.Buffer),
+		Stdout: stdout,
+		Stderr: io.Discard,
+	}
+	if err := RunBuildExecutionAndDeploy(ctx, execution, []DeploySpec{deploySpec}, nil, nil, nil, func(HelmDeployParams) error {
+		t.Fatal("unexpected deploy execution during dry-run")
+		return nil
+	}); err != nil {
+		t.Fatalf("RunBuildExecutionAndDeploy failed: %v", err)
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	if !strings.Contains(output, "release version: 1.4.2-rc.") {
+		t.Fatalf("expected release version output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "deployed version: 1.4.2-rc.") {
+		t.Fatalf("expected deployed version output, got:\n%s", output)
+	}
+	lines := strings.Split(output, "\n")
+	if !strings.Contains(lines[len(lines)-1], "deployed version: 1.4.2-rc.") {
+		t.Fatalf("expected deployed version last, got:\n%s", output)
+	}
+}
+
 func setupReleaseProjectGitRepo(t *testing.T, branch string) string {
 	t.Helper()
 

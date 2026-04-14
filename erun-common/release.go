@@ -24,6 +24,7 @@ const (
 type (
 	GitValueResolverFunc func(string) (string, error)
 	GitCommandRunnerFunc func(string, io.Writer, io.Writer, ...string) error
+	GitBranchCheckerFunc func(string, string) (bool, error)
 )
 
 type ReleaseMode string
@@ -86,11 +87,11 @@ type ReleaseSpec struct {
 }
 
 func ResolveReleaseSpec(findProjectRoot ProjectFinderFunc, params ReleaseParams) (ReleaseSpec, error) {
-	return resolveReleaseSpec(findProjectRoot, LoadProjectConfig, GitCurrentBranch, GitShortCommit, params)
+	return resolveReleaseSpec(findProjectRoot, LoadProjectConfig, GitCurrentBranch, GitShortCommit, GitLocalBranchExists, params)
 }
 
-func resolveReleaseSpec(findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc, params ReleaseParams) (ReleaseSpec, error) {
-	findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit = normalizeReleaseDependencies(findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit)
+func resolveReleaseSpec(findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc, branchExists GitBranchCheckerFunc, params ReleaseParams) (ReleaseSpec, error) {
+	findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists = normalizeReleaseDependencies(findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists)
 
 	projectRoot, err := resolveReleaseProjectRoot(findProjectRoot, params)
 	if err != nil {
@@ -123,6 +124,10 @@ func resolveReleaseSpec(findProjectRoot ProjectFinderFunc, loadProjectConfig Pro
 
 	mode := classifyReleaseMode(branch, releaseConfig)
 	version := resolveReleaseVersion(baseVersion, commit, mode)
+	developBranchExists, err := branchExists(projectRoot, releaseConfig.DevelopBranch)
+	if err != nil {
+		return ReleaseSpec{}, err
+	}
 
 	charts, chartUpdates, err := discoverReleaseCharts(releaseRoot, version)
 	if err != nil {
@@ -156,11 +161,11 @@ func resolveReleaseSpec(findProjectRoot ProjectFinderFunc, loadProjectConfig Pro
 				stages = append(stages, bumpStage)
 			}
 		}
-		syncStage := newSyncDevelopStage(projectRoot, releaseConfig)
+		syncStage := newSyncDevelopStage(projectRoot, releaseConfig, developBranchExists)
 		if len(syncStage.FileUpdates) > 0 || len(syncStage.GitCommands) > 0 {
 			stages = append(stages, syncStage)
 		}
-		pushStage := newPushReleaseStage(projectRoot, releaseConfig)
+		pushStage := newPushReleaseStage(projectRoot, releaseConfig, developBranchExists)
 		if len(pushStage.FileUpdates) > 0 || len(pushStage.GitCommands) > 0 {
 			stages = append(stages, pushStage)
 		}
@@ -244,6 +249,25 @@ func GitShortCommit(projectRoot string) (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
+}
+
+func GitLocalBranchExists(projectRoot, branch string) (bool, error) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return false, nil
+	}
+
+	cmd := exec.Command("git", "-C", projectRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
 }
 
 func GitCommandRunner(dir string, stdout, stderr io.Writer, args ...string) error {
@@ -335,7 +359,7 @@ func appendOrReplaceEnv(env []string, key, value string) []string {
 	return append(env, prefix+value)
 }
 
-func normalizeReleaseDependencies(findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc) (ProjectFinderFunc, ProjectConfigLoaderFunc, GitValueResolverFunc, GitValueResolverFunc) {
+func normalizeReleaseDependencies(findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc, branchExists GitBranchCheckerFunc) (ProjectFinderFunc, ProjectConfigLoaderFunc, GitValueResolverFunc, GitValueResolverFunc, GitBranchCheckerFunc) {
 	if findProjectRoot == nil {
 		findProjectRoot = FindProjectRoot
 	}
@@ -348,7 +372,10 @@ func normalizeReleaseDependencies(findProjectRoot ProjectFinderFunc, loadProject
 	if resolveCommit == nil {
 		resolveCommit = GitShortCommit
 	}
-	return findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit
+	if branchExists == nil {
+		branchExists = GitLocalBranchExists
+	}
+	return findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists
 }
 
 func resolveReleaseProjectRoot(findProjectRoot ProjectFinderFunc, params ReleaseParams) (string, error) {
@@ -532,10 +559,10 @@ func newBumpStage(projectRoot, nextVersion string, fileUpdate ReleaseFileUpdate)
 	}
 }
 
-func newSyncDevelopStage(projectRoot string, config ReleaseConfig) ReleaseStage {
+func newSyncDevelopStage(projectRoot string, config ReleaseConfig, developBranchExists bool) ReleaseStage {
 	mainBranch := strings.TrimSpace(config.MainBranch)
 	developBranch := strings.TrimSpace(config.DevelopBranch)
-	if mainBranch == "" || developBranch == "" {
+	if mainBranch == "" || developBranch == "" || !developBranchExists {
 		return ReleaseStage{}
 	}
 
@@ -549,17 +576,22 @@ func newSyncDevelopStage(projectRoot string, config ReleaseConfig) ReleaseStage 
 	}
 }
 
-func newPushReleaseStage(projectRoot string, config ReleaseConfig) ReleaseStage {
+func newPushReleaseStage(projectRoot string, config ReleaseConfig, developBranchExists bool) ReleaseStage {
 	mainBranch := strings.TrimSpace(config.MainBranch)
 	developBranch := strings.TrimSpace(config.DevelopBranch)
-	if mainBranch == "" || developBranch == "" {
+	if mainBranch == "" {
 		return ReleaseStage{}
+	}
+
+	args := []string{"push", "--follow-tags", "origin", mainBranch}
+	if developBranchExists && developBranch != "" {
+		args = append(args, developBranch)
 	}
 
 	return ReleaseStage{
 		Name: "push",
 		GitCommands: []ReleaseCommandSpec{
-			releaseGitCommand(projectRoot, "push", "--follow-tags", "origin", mainBranch, developBranch),
+			releaseGitCommand(projectRoot, args...),
 		},
 	}
 }

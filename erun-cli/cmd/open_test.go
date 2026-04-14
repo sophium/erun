@@ -68,6 +68,101 @@ func TestOpenCommandNoShellConfiguresLocalKubeconfig(t *testing.T) {
 	}
 }
 
+func TestOpenNoShellHintLinesSuggestAliasAndStartupFileWhenMissing(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	result := common.OpenResult{Tenant: "frs", Environment: "local", Title: "frs-local"}
+
+	lines := openNoShellHintLines(result, "/bin/zsh")
+
+	if len(lines) != 2 {
+		t.Fatalf("unexpected hint lines: %+v", lines)
+	}
+	if lines[0] != "one-liner alias:" {
+		t.Fatalf("unexpected intro line: %q", lines[0])
+	}
+	if lines[1] != `alias frs-local='eval "$(erun open frs local --no-shell)"'` {
+		t.Fatalf("unexpected alias line: %q", lines[1])
+	}
+}
+
+func TestOpenNoShellHintLinesRecommendAliasWhenConfigured(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	result := common.OpenResult{Tenant: "frs", Environment: "local", Title: "frs-local"}
+	startupPath := filepath.Join(homeDir, ".zshrc")
+	if err := os.WriteFile(startupPath, []byte(`alias frs-local='eval "$(erun open frs local --no-shell)"'`+"\n"), 0o644); err != nil {
+		t.Fatalf("write startup file: %v", err)
+	}
+
+	lines := openNoShellHintLines(result, "/bin/zsh")
+
+	if len(lines) != 1 {
+		t.Fatalf("unexpected hint lines: %+v", lines)
+	}
+	if lines[0] != "configured in your shell startup file: open a new shell to use frs-local" {
+		t.Fatalf("unexpected recommendation: %q", lines[0])
+	}
+}
+
+func TestMaybeConfigureOpenNoShellAliasPromptsAndAppendsToStartupFile(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	result := common.OpenResult{Tenant: "frs", Environment: "local", Title: "frs-local"}
+	startupPath := filepath.Join(homeDir, ".zshrc")
+	stderr := new(bytes.Buffer)
+
+	err := maybeConfigureOpenNoShellAlias(result, func(prompt promptui.Prompt) (string, error) {
+		if !prompt.IsConfirm {
+			t.Fatalf("expected confirm prompt, got %+v", prompt)
+		}
+		if prompt.Label != fmt.Sprintf("add frs-local to %s", startupPath) {
+			t.Fatalf("unexpected prompt label: %q", prompt.Label)
+		}
+		return "", nil
+	}, "/bin/zsh", stderr)
+	if err != nil {
+		t.Fatalf("maybeConfigureOpenNoShellAlias failed: %v", err)
+	}
+
+	data, err := os.ReadFile(startupPath)
+	if err != nil {
+		t.Fatalf("read startup file: %v", err)
+	}
+	if string(data) != "alias frs-local='eval \"$(erun open frs local --no-shell)\"'\n" {
+		t.Fatalf("unexpected startup file contents: %q", string(data))
+	}
+	output := stderr.String()
+	if strings.Contains(output, "one-liner alias:") {
+		t.Fatalf("did not expect one-liner output after successful add: %q", output)
+	}
+	if !strings.Contains(output, "added frs-local to "+startupPath) || !strings.Contains(output, "open a new shell to use frs-local") {
+		t.Fatalf("unexpected stderr output: %q", output)
+	}
+}
+
+func TestMaybeConfigureOpenNoShellAliasRecommendsConfiguredAliasWithoutPrompt(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	result := common.OpenResult{Tenant: "frs", Environment: "local", Title: "frs-local"}
+	startupPath := filepath.Join(homeDir, ".zshrc")
+	if err := os.WriteFile(startupPath, []byte(`alias frs-local='eval "$(erun open frs local --no-shell)"'`+"\n"), 0o644); err != nil {
+		t.Fatalf("write startup file: %v", err)
+	}
+	stderr := new(bytes.Buffer)
+
+	err := maybeConfigureOpenNoShellAlias(result, func(prompt promptui.Prompt) (string, error) {
+		t.Fatalf("did not expect prompt when alias is already configured: %+v", prompt)
+		return "", nil
+	}, "/bin/zsh", stderr)
+	if err != nil {
+		t.Fatalf("maybeConfigureOpenNoShellAlias failed: %v", err)
+	}
+	if got := strings.TrimSpace(stderr.String()); got != "configured in your shell startup file: open a new shell to use frs-local" {
+		t.Fatalf("unexpected stderr output: %q", got)
+	}
+}
+
 func TestOpenCommandDryRunPrintsResolvedOpenTraceWithoutLaunchingShell(t *testing.T) {
 	repoPath := t.TempDir()
 	stdout := new(bytes.Buffer)
