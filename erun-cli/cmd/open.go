@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error, promptRunner PromptRunner, launchShell common.ShellLauncherFunc, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
+func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error, promptRunner PromptRunner, launchShell common.ShellLauncherFunc, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	var noShell bool
 
 	cmd := &cobra.Command{
@@ -30,7 +30,7 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 			if initRan {
 				return nil
 			}
-			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell}, promptRunner, launchShell, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart)
+			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell}, promptRunner, launchShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart)
 		},
 	}
 
@@ -85,7 +85,7 @@ func resolveOpenWithInitRetry(ctx common.Context, args []string, shouldRunInit f
 	return result, true, err
 }
 
-func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, launchShell common.ShellLauncherFunc, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) error {
+func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, launchShell common.ShellLauncherFunc, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) error {
 	namespace := common.KubernetesNamespaceName(result.Tenant, result.Environment)
 	if options.NoShell {
 		ctx.TraceCommand("", "kubectl", "config", "use-context", strings.TrimSpace(result.EnvConfig.KubernetesContext))
@@ -97,6 +97,10 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 	shellReq := common.ShellLaunchParamsFromResult(result)
 	if resolveRuntimeDeploySpec != nil && deployHelmChart != nil {
 		execution, err := resolveRuntimeDeploySpec(result)
+		if err != nil {
+			return err
+		}
+		execution, err = maybeCreateMissingRuntimeChart(ctx, result, promptRunner, resolveRuntimeDeploySpec, execution)
 		if err != nil {
 			return err
 		}
@@ -147,7 +151,42 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 		return nil
 	}
 
-	return launchShell(shellReq)
+	for {
+		err := launchShell(shellReq)
+		if !errors.Is(err, common.ErrShellReattachDeploy) {
+			return err
+		}
+		if runManagedDeploy == nil {
+			return err
+		}
+		if err := runManagedDeploy(ctx, result); err != nil {
+			return err
+		}
+	}
+}
+
+func maybeCreateMissingRuntimeChart(ctx common.Context, result common.OpenResult, promptRunner PromptRunner, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), execution common.DeploySpec) (common.DeploySpec, error) {
+	if ctx.DryRun || promptRunner == nil || resolveRuntimeDeploySpec == nil {
+		return execution, nil
+	}
+	if !common.IsDefaultDevopsChartPath(execution.Deploy.ChartPath) {
+		return execution, nil
+	}
+
+	moduleName := common.RuntimeReleaseName(result.Tenant)
+	ok, err := confirmPrompt(promptRunner, fmt.Sprintf("create %s chart in %s", moduleName, result.RepoPath))
+	if err != nil {
+		return common.DeploySpec{}, err
+	}
+	if !ok {
+		return execution, nil
+	}
+
+	if err := common.EnsureDefaultDevopsChart(ctx, result.RepoPath, result.Tenant, result.Environment); err != nil {
+		return common.DeploySpec{}, err
+	}
+
+	return resolveRuntimeDeploySpec(result)
 }
 
 func emitLocalShellSetupForOpenResult(result common.OpenResult, promptRunner PromptRunner, stdout, stderr io.Writer) error {

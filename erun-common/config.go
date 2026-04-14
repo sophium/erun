@@ -145,6 +145,10 @@ func (ConfigStore) LoadEnvConfig(tenant, envName string) (EnvConfig, string, err
 	return LoadEnvConfig(tenant, envName)
 }
 
+func (ConfigStore) ResolveEffectiveKubernetesContext(environment, configured string) string {
+	return resolveEffectiveKubernetesContext(environment, configured, listKubernetesContextNames, currentKubernetesContextName)
+}
+
 func (ConfigStore) ListEnvConfigs(tenant string) ([]EnvConfig, error) {
 	return ListEnvConfigs(tenant)
 }

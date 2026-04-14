@@ -402,6 +402,103 @@ func TestOpenCommandDryRunFallsBackToDefaultRuntimeChartWhenTenantRepoHasNoDevop
 	}
 }
 
+func TestOpenCommandPromptsToCreateMissingRuntimeChartAndUsesCreatedChart(t *testing.T) {
+	repoPath := t.TempDir()
+	deployed := common.HelmDeployParams{}
+	launched := common.ShellLaunchParams{}
+
+	cmd := newTestRootCmd(testRootDeps{
+		Store: openCommandStore{
+			repoPath:   repoPath,
+			toolConfig: common.ERunConfig{DefaultTenant: "frs"},
+		},
+		PromptRunner: func(prompt promptui.Prompt) (string, error) {
+			if !prompt.IsConfirm {
+				t.Fatalf("expected confirm prompt, got %+v", prompt)
+			}
+			if prompt.Label != fmt.Sprintf("create frs-devops chart in %s", repoPath) {
+				t.Fatalf("unexpected prompt label: %q", prompt.Label)
+			}
+			return "", nil
+		},
+		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
+			return false, nil
+		},
+		DeployHelmChart: func(req common.HelmDeployParams) error {
+			deployed = req
+			return nil
+		},
+		LaunchShell: func(req common.ShellLaunchParams) error {
+			launched = req
+			return nil
+		},
+	})
+	cmd.SetArgs([]string{"open"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	chartPath := filepath.Join(repoPath, "frs-devops", "k8s", "frs-devops")
+	if deployed.ChartPath != chartPath {
+		t.Fatalf("expected created local chart path, got %+v", deployed)
+	}
+	if deployed.ReleaseName != "frs-devops" {
+		t.Fatalf("unexpected release name: %+v", deployed)
+	}
+	if _, err := os.Stat(filepath.Join(chartPath, "Chart.yaml")); err != nil {
+		t.Fatalf("expected generated chart to exist: %v", err)
+	}
+	if launched.Namespace != "frs-local" || launched.KubernetesContext != "cluster-dev" {
+		t.Fatalf("unexpected shell launch: %+v", launched)
+	}
+}
+
+func TestOpenCommandRunsManagedDeployAndReattachesWhenShellRequestsHandoff(t *testing.T) {
+	projectRoot := t.TempDir()
+	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
+	if err := os.WriteFile(filepath.Join(chartPath, "values.dev.yaml"), nil, 0o644); err != nil {
+		t.Fatalf("write values.dev.yaml: %v", err)
+	}
+
+	launchCalls := 0
+	deployed := common.HelmDeployParams{}
+	cmd := newTestRootCmd(testRootDeps{
+		Store: openCommandStore{
+			repoPath:   projectRoot,
+			toolConfig: common.ERunConfig{DefaultTenant: "tenant-a"},
+		},
+		ResolveKubernetesDeployContext: func() (common.KubernetesDeployContext, error) {
+			return common.KubernetesDeployContext{Dir: projectRoot}, nil
+		},
+		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
+			return true, nil
+		},
+		DeployHelmChart: func(req common.HelmDeployParams) error {
+			deployed = req
+			return nil
+		},
+		LaunchShell: func(req common.ShellLaunchParams) error {
+			launchCalls++
+			if launchCalls == 1 {
+				return common.ErrShellReattachDeploy
+			}
+			return nil
+		},
+	})
+	cmd.SetArgs([]string{"open", "tenant-a", "dev"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if launchCalls != 2 {
+		t.Fatalf("expected shell to relaunch after handoff, got %d launches", launchCalls)
+	}
+	if deployed.ChartPath != chartPath || deployed.ReleaseName != "erun-devops" {
+		t.Fatalf("expected managed deploy before reattach, got %+v", deployed)
+	}
+}
+
 func TestOpenCommandLaunchesShellWithDefaults(t *testing.T) {
 	repoPath := t.TempDir()
 	launched := common.ShellLaunchParams{}

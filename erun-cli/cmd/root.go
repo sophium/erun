@@ -36,6 +36,24 @@ func Execute() error {
 	resolveRuntimeDeploySpec := func(target common.OpenResult) (common.DeploySpec, error) {
 		return common.ResolveOpenRuntimeDeploySpec(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, target)
 	}
+	runManagedDeploy := func(ctx common.Context, target common.OpenResult) error {
+		specs, err := common.ResolveCurrentDeploySpecs(
+			store,
+			common.FindProjectRoot,
+			common.ResolveDockerBuildContext,
+			common.ResolveKubernetesDeployContext,
+			time.Now,
+			common.DeployTarget{
+				Tenant:      target.Tenant,
+				Environment: target.Environment,
+				RepoPath:    target.RepoPath,
+			},
+		)
+		if err != nil {
+			return err
+		}
+		return common.RunDeploySpecs(ctx, specs, common.DockerImageBuilder, push, common.DeployHelmChart)
+	}
 
 	initCmd := newInitCmd(runInit)
 	openCmd := newOpenCmd(
@@ -43,6 +61,7 @@ func Execute() error {
 		runInitForArgs,
 		runPrompt,
 		common.LaunchShell,
+		runManagedDeploy,
 		common.CheckKubernetesDeployment,
 		resolveRuntimeDeploySpec,
 		common.DeployHelmChart,
@@ -91,7 +110,7 @@ func Execute() error {
 		if initRan {
 			return nil
 		}
-		return runResolvedOpenCommand(ctx, result, openOptions{}, runPrompt, common.LaunchShell, common.CheckKubernetesDeployment, resolveRuntimeDeploySpec, common.DeployHelmChart)
+		return runResolvedOpenCommand(ctx, result, openOptions{}, runPrompt, common.LaunchShell, runManagedDeploy, common.CheckKubernetesDeployment, resolveRuntimeDeploySpec, common.DeployHelmChart)
 	}
 
 	cmd := newRootCommand(runRoot)

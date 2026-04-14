@@ -159,6 +159,48 @@ func TestPrepareHelmChartForDeployOverridesVersionAndAppVersion(t *testing.T) {
 	}
 }
 
+func TestNewHelmDeploySpecCanonicalizesWorktreeHostPath(t *testing.T) {
+	projectRoot := t.TempDir()
+	repoRoot := filepath.Join(projectRoot, "repo")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+
+	linkParent := filepath.Join(projectRoot, "links")
+	if err := os.MkdirAll(linkParent, 0o755); err != nil {
+		t.Fatalf("mkdir link parent: %v", err)
+	}
+	linkPath := filepath.Join(linkParent, "repo-link")
+	if err := os.Symlink(repoRoot, linkPath); err != nil {
+		t.Fatalf("symlink repo root: %v", err)
+	}
+
+	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
+	spec, err := newHelmDeploySpec(
+		OpenResult{
+			Tenant:      "tenant-a",
+			Environment: DefaultEnvironment,
+			RepoPath:    linkPath,
+			EnvConfig:   EnvConfig{KubernetesContext: "cluster-local"},
+		},
+		KubernetesDeployContext{
+			ComponentName: "erun-devops",
+			ChartPath:     chartPath,
+		},
+		"",
+	)
+	if err != nil {
+		t.Fatalf("newHelmDeploySpec failed: %v", err)
+	}
+	resolvedRepoRoot, err := filepath.EvalSymlinks(repoRoot)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(repoRoot) failed: %v", err)
+	}
+	if spec.WorktreeHostPath != resolvedRepoRoot {
+		t.Fatalf("expected canonical worktree host path %q, got %q", resolvedRepoRoot, spec.WorktreeHostPath)
+	}
+}
+
 func TestResolveOpenRuntimeDeploySpecUsesTenantSpecificComponentBeforeSharedDefault(t *testing.T) {
 	projectRoot := t.TempDir()
 	chartPath := createComponentHelmChartFixture(t, projectRoot, "frs-devops")
