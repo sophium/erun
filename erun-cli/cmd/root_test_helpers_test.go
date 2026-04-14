@@ -48,7 +48,9 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	}
 	optionalBuildFindProjectRoot := deps.OptionalBuildFindProjectRoot
 	if optionalBuildFindProjectRoot == nil {
-		optionalBuildFindProjectRoot = common.FindProjectRoot
+		optionalBuildFindProjectRoot = func() (string, string, error) {
+			return "", "", common.ErrNotInGitRepository
+		}
 	}
 	promptRunner := deps.PromptRunner
 	if promptRunner == nil {

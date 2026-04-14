@@ -127,7 +127,7 @@ func TestRunReleaseSpecWritesFilesAndRunsGitStages(t *testing.T) {
 	if err := RunReleaseSpec(ctx, spec, func(dir string, stdout, stderr io.Writer, args ...string) error {
 		gitCalls = append(gitCalls, append([]string{dir}, args...))
 		return nil
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("RunReleaseSpec failed: %v", err)
 	}
 
@@ -187,7 +187,7 @@ func TestRunReleaseSpecCandidateRunsTagAndPush(t *testing.T) {
 	if err := RunReleaseSpec(ctx, spec, func(dir string, stdout, stderr io.Writer, args ...string) error {
 		gitCalls = append(gitCalls, append([]string{dir}, args...))
 		return nil
-	}); err != nil {
+	}, nil); err != nil {
 		t.Fatalf("RunReleaseSpec failed: %v", err)
 	}
 
@@ -199,6 +199,142 @@ func TestRunReleaseSpecCandidateRunsTagAndPush(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gitCalls, wantCalls) {
 		t.Fatalf("unexpected git calls: got %+v want %+v", gitCalls, wantCalls)
+	}
+}
+
+func TestRunReleaseSpecCandidateSkipsExistingTagAtHead(t *testing.T) {
+	projectRoot := setupReleaseProject(t, releaseProjectOptions{})
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "k8s", "api", "Chart.yaml"), []byte("apiVersion: v2\nname: api\nversion: 1.4.2-rc.abc1234\nappVersion: 1.4.2-rc.abc1234\n"), 0o644); err != nil {
+		t.Fatalf("write Chart.yaml: %v", err)
+	}
+	runGitWithEnv(t, projectRoot, []string{
+		"GIT_AUTHOR_NAME=Codex",
+		"GIT_AUTHOR_EMAIL=codex@example.com",
+		"GIT_COMMITTER_NAME=Codex",
+		"GIT_COMMITTER_EMAIL=codex@example.com",
+	}, "init", "-b", "develop")
+	runGitWithEnv(t, projectRoot, []string{
+		"GIT_AUTHOR_NAME=Codex",
+		"GIT_AUTHOR_EMAIL=codex@example.com",
+		"GIT_COMMITTER_NAME=Codex",
+		"GIT_COMMITTER_EMAIL=codex@example.com",
+	}, "add", ".")
+	runGitWithEnv(t, projectRoot, []string{
+		"GIT_AUTHOR_NAME=Codex",
+		"GIT_AUTHOR_EMAIL=codex@example.com",
+		"GIT_COMMITTER_NAME=Codex",
+		"GIT_COMMITTER_EMAIL=codex@example.com",
+	}, "commit", "-m", "initial")
+	runGitWithEnv(t, projectRoot, []string{
+		"GIT_AUTHOR_NAME=Codex",
+		"GIT_AUTHOR_EMAIL=codex@example.com",
+		"GIT_COMMITTER_NAME=Codex",
+		"GIT_COMMITTER_EMAIL=codex@example.com",
+	}, "tag", "-a", "v1.4.2-rc.abc1234", "-m", "Release candidate 1.4.2-rc.abc1234")
+
+	spec, err := resolveReleaseSpec(
+		func() (string, string, error) { return "tenant-a", projectRoot, nil },
+		LoadProjectConfig,
+		func(string) (string, error) { return "develop", nil },
+		func(string) (string, error) { return "abc1234", nil },
+		func(string, string) (bool, error) { return true, nil },
+		ReleaseParams{},
+	)
+	if err != nil {
+		t.Fatalf("resolveReleaseSpec failed: %v", err)
+	}
+
+	var gitCalls [][]string
+	ctx := Context{
+		Logger: NewLoggerWithWriters(2, new(bytes.Buffer), new(bytes.Buffer)),
+		Stdout: new(bytes.Buffer),
+		Stderr: new(bytes.Buffer),
+	}
+	if err := RunReleaseSpec(ctx, spec, func(dir string, stdout, stderr io.Writer, args ...string) error {
+		gitCalls = append(gitCalls, append([]string{dir}, args...))
+		return nil
+	}, nil); err != nil {
+		t.Fatalf("RunReleaseSpec failed: %v", err)
+	}
+
+	wantCalls := [][]string{
+		{projectRoot, "push", "--follow-tags", "origin", "develop"},
+	}
+	if !reflect.DeepEqual(gitCalls, wantCalls) {
+		t.Fatalf("unexpected git calls: got %+v want %+v", gitCalls, wantCalls)
+	}
+}
+
+func TestRunReleaseSpecReturnsErrorWhenExistingTagPointsElsewhere(t *testing.T) {
+	projectRoot := setupReleaseProject(t, releaseProjectOptions{})
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "k8s", "api", "Chart.yaml"), []byte("apiVersion: v2\nname: api\nversion: 1.4.2-rc.abc1234\nappVersion: 1.4.2-rc.abc1234\n"), 0o644); err != nil {
+		t.Fatalf("write Chart.yaml: %v", err)
+	}
+	runGitWithEnv(t, projectRoot, []string{
+		"GIT_AUTHOR_NAME=Codex",
+		"GIT_AUTHOR_EMAIL=codex@example.com",
+		"GIT_COMMITTER_NAME=Codex",
+		"GIT_COMMITTER_EMAIL=codex@example.com",
+	}, "init", "-b", "develop")
+	runGitWithEnv(t, projectRoot, []string{
+		"GIT_AUTHOR_NAME=Codex",
+		"GIT_AUTHOR_EMAIL=codex@example.com",
+		"GIT_COMMITTER_NAME=Codex",
+		"GIT_COMMITTER_EMAIL=codex@example.com",
+	}, "add", ".")
+	runGitWithEnv(t, projectRoot, []string{
+		"GIT_AUTHOR_NAME=Codex",
+		"GIT_AUTHOR_EMAIL=codex@example.com",
+		"GIT_COMMITTER_NAME=Codex",
+		"GIT_COMMITTER_EMAIL=codex@example.com",
+	}, "commit", "-m", "initial")
+	runGitWithEnv(t, projectRoot, []string{
+		"GIT_AUTHOR_NAME=Codex",
+		"GIT_AUTHOR_EMAIL=codex@example.com",
+		"GIT_COMMITTER_NAME=Codex",
+		"GIT_COMMITTER_EMAIL=codex@example.com",
+	}, "tag", "-a", "v1.4.2-rc.abc1234", "-m", "Release candidate 1.4.2-rc.abc1234")
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "README.tmp"), []byte("change\n"), 0o644); err != nil {
+		t.Fatalf("write temp change: %v", err)
+	}
+	runGitWithEnv(t, projectRoot, []string{
+		"GIT_AUTHOR_NAME=Codex",
+		"GIT_AUTHOR_EMAIL=codex@example.com",
+		"GIT_COMMITTER_NAME=Codex",
+		"GIT_COMMITTER_EMAIL=codex@example.com",
+	}, "add", "erun-devops/README.tmp")
+	runGitWithEnv(t, projectRoot, []string{
+		"GIT_AUTHOR_NAME=Codex",
+		"GIT_AUTHOR_EMAIL=codex@example.com",
+		"GIT_COMMITTER_NAME=Codex",
+		"GIT_COMMITTER_EMAIL=codex@example.com",
+	}, "commit", "-m", "advance head")
+
+	spec, err := resolveReleaseSpec(
+		func() (string, string, error) { return "tenant-a", projectRoot, nil },
+		LoadProjectConfig,
+		func(string) (string, error) { return "develop", nil },
+		func(string) (string, error) { return "abc1234", nil },
+		func(string, string) (bool, error) { return true, nil },
+		ReleaseParams{},
+	)
+	if err != nil {
+		t.Fatalf("resolveReleaseSpec failed: %v", err)
+	}
+
+	ctx := Context{
+		Logger: NewLoggerWithWriters(2, new(bytes.Buffer), new(bytes.Buffer)),
+		Stdout: new(bytes.Buffer),
+		Stderr: new(bytes.Buffer),
+	}
+	err = RunReleaseSpec(ctx, spec, func(dir string, stdout, stderr io.Writer, args ...string) error {
+		return nil
+	}, nil)
+	if err == nil {
+		t.Fatal("expected existing tag mismatch error")
+	}
+	if !strings.Contains(err.Error(), `release tag "v1.4.2-rc.abc1234" already exists`) {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

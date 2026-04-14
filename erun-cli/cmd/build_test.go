@@ -2329,6 +2329,98 @@ func TestBuildCommandDryRunReleaseShowsPushCommandsForReleaseTaggedDockerBuilds(
 	}
 }
 
+func TestBuildCommandDryRunBuildsLinuxPackagesFromProjectRoot(t *testing.T) {
+	projectRoot := t.TempDir()
+	linuxComponentDir := filepath.Join(projectRoot, "erun-devops", "linux", "erun-cli")
+	if err := os.MkdirAll(linuxComponentDir, 0o755); err != nil {
+		t.Fatalf("mkdir linux component dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.2.3\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(linuxComponentDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write build.sh: %v", err)
+	}
+
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		OptionalBuildFindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: projectRoot}, nil
+		},
+	})
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"build", "--dry-run"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stderr.String()
+	if !strings.Contains(output, "./build.sh") {
+		t.Fatalf("expected linux build trace, got:\n%s", output)
+	}
+}
+
+func TestBuildCommandDryRunReleasePublishesLinuxPackagesWithoutDockerBuilds(t *testing.T) {
+	projectRoot := t.TempDir()
+	releaseRoot := filepath.Join(projectRoot, "erun-devops")
+	linuxComponentDir := filepath.Join(releaseRoot, "linux", "erun-cli")
+	if err := os.MkdirAll(linuxComponentDir, 0o755); err != nil {
+		t.Fatalf("mkdir linux component dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(releaseRoot, "VERSION"), []byte("1.4.2\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(linuxComponentDir, "release.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write release.sh: %v", err)
+	}
+	runGitCommand(t, projectRoot, "init", "-b", "develop")
+	runGitCommand(t, projectRoot, "config", "user.email", "codex@example.com")
+	runGitCommand(t, projectRoot, "config", "user.name", "Codex")
+	runGitCommand(t, projectRoot, "add", ".")
+	runGitCommand(t, projectRoot, "commit", "-m", "initial")
+	if err := common.SaveProjectConfig(projectRoot, common.ProjectConfig{}); err != nil {
+		t.Fatalf("SaveProjectConfig failed: %v", err)
+	}
+
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		OptionalBuildFindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: projectRoot}, nil
+		},
+	})
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"build", "--dry-run", "--release"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stderr.String()
+	if !strings.Contains(output, "release: branch=develop mode=candidate version=1.4.2-rc.") {
+		t.Fatalf("expected release trace, got:\n%s", output)
+	}
+	if !strings.Contains(output, "ERUN_BUILD_VERSION=1.4.2-rc.") || !strings.Contains(output, "./release.sh") {
+		t.Fatalf("expected linux release trace, got:\n%s", output)
+	}
+}
+
 func projectConfigWithSingleRegistry(registry string) common.ProjectConfig {
 	return common.ProjectConfig{
 		Environments: map[string]common.ProjectEnvironmentConfig{

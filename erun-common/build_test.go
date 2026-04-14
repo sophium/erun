@@ -282,6 +282,79 @@ func TestHasProjectBuildScriptIgnoresDockerArtifactBuildScripts(t *testing.T) {
 	}
 }
 
+func TestResolveBuildExecutionIncludesLinuxBuildScriptsAtProjectRoot(t *testing.T) {
+	projectRoot := t.TempDir()
+	linuxComponentDir := filepath.Join(projectRoot, "erun-devops", "linux", "erun-cli")
+	if err := os.MkdirAll(linuxComponentDir, 0o755); err != nil {
+		t.Fatalf("mkdir linux component dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.2.3\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(linuxComponentDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write build.sh: %v", err)
+	}
+
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{Dir: projectRoot}, nil
+		},
+		nil,
+		DockerCommandTarget{},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+
+	if len(execution.linuxBuilds) != 1 {
+		t.Fatalf("unexpected linux build scripts: %+v", execution.linuxBuilds)
+	}
+	if execution.linuxBuilds[0].Dir != linuxComponentDir || execution.linuxBuilds[0].Path != "./build.sh" {
+		t.Fatalf("unexpected linux build script: %+v", execution.linuxBuilds[0])
+	}
+}
+
+func TestRunBuildExecutionRunsLinuxBuildScripts(t *testing.T) {
+	linuxComponentDir := t.TempDir()
+	execution := BuildExecutionSpec{
+		linuxBuilds: []scriptSpec{{
+			Dir:  linuxComponentDir,
+			Path: "./build.sh",
+			Env:  []string{"ERUN_BUILD_VERSION=1.2.3"},
+		}},
+	}
+
+	var called bool
+	ctx := Context{
+		Logger: NewLoggerWithWriters(2, io.Discard, io.Discard),
+		Stdin:  new(bytes.Buffer),
+		Stdout: new(bytes.Buffer),
+		Stderr: new(bytes.Buffer),
+	}
+	if err := RunBuildExecution(ctx, execution, func(dir, path string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
+		called = true
+		if dir != linuxComponentDir || path != "./build.sh" {
+			t.Fatalf("unexpected script call: dir=%q path=%q", dir, path)
+		}
+		if len(env) != 1 || env[0] != "ERUN_BUILD_VERSION=1.2.3" {
+			t.Fatalf("unexpected script env: %+v", env)
+		}
+		return nil
+	}, func(string, string, string, io.Writer, io.Writer) error {
+		t.Fatal("unexpected docker build")
+		return nil
+	}, nil); err != nil {
+		t.Fatalf("RunBuildExecution failed: %v", err)
+	}
+	if !called {
+		t.Fatal("expected linux build script runner to be called")
+	}
+}
+
 func TestResolveCurrentDockerBuildContextsUsesProjectRootDevopsModule(t *testing.T) {
 	projectRoot := t.TempDir()
 	moduleRoot := filepath.Join(projectRoot, "tenant-a-devops")

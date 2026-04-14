@@ -84,6 +84,7 @@ type ReleaseSpec struct {
 	Charts          []ReleaseChartSpec       `json:"charts,omitempty"`
 	DockerImages    []ReleaseDockerImageSpec `json:"dockerImages,omitempty"`
 	Stages          []ReleaseStage           `json:"stages,omitempty"`
+	LinuxReleases   []scriptSpec
 }
 
 func ResolveReleaseSpec(findProjectRoot ProjectFinderFunc, params ReleaseParams) (ReleaseSpec, error) {
@@ -135,6 +136,10 @@ func resolveReleaseSpec(findProjectRoot ProjectFinderFunc, loadProjectConfig Pro
 	}
 
 	images, err := discoverReleaseDockerImages(projectRoot, releaseRoot, versionFilePath, version)
+	if err != nil {
+		return ReleaseSpec{}, err
+	}
+	linuxReleases, err := discoverReleaseLinuxScripts(releaseRoot, version)
 	if err != nil {
 		return ReleaseSpec{}, err
 	}
@@ -190,10 +195,11 @@ func resolveReleaseSpec(findProjectRoot ProjectFinderFunc, loadProjectConfig Pro
 		Charts:          charts,
 		DockerImages:    images,
 		Stages:          stages,
+		LinuxReleases:   linuxReleases,
 	}, nil
 }
 
-func RunReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc) error {
+func RunReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc) error {
 	if runGit == nil {
 		runGit = GitCommandRunner
 	}
@@ -226,13 +232,72 @@ func RunReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc) 
 			if command.Name != "git" {
 				return fmt.Errorf("unsupported release command %q", command.Name)
 			}
+			if shouldSkipExistingReleaseTag(command.Args) {
+				skip, err := canSkipExistingReleaseTag(command.Dir, command.Args[2])
+				if err != nil {
+					return err
+				}
+				if skip {
+					ctx.Trace("release tag already exists at HEAD; skipping " + command.Args[2])
+					continue
+				}
+			}
 			if err := runGit(command.Dir, ctx.Stdout, ctx.Stderr, command.Args...); err != nil {
 				return err
 			}
 		}
 	}
 
+	if err := runScriptSpecs(ctx, spec.LinuxReleases, runScript); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+func shouldSkipExistingReleaseTag(args []string) bool {
+	return len(args) >= 3 && args[0] == "tag" && args[1] == "-a" && strings.TrimSpace(args[2]) != ""
+}
+
+func canSkipExistingReleaseTag(projectRoot, tag string) (bool, error) {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return false, nil
+	}
+
+	tagCommit, ok, err := gitResolvedRef(projectRoot, tag+"^{}")
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, nil
+	}
+
+	headCommit, ok, err := gitResolvedRef(projectRoot, "HEAD")
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, fmt.Errorf("could not resolve HEAD for release tag check")
+	}
+	if tagCommit != headCommit {
+		return false, fmt.Errorf("release tag %q already exists at %s, expected current HEAD %s", tag, tagCommit, headCommit)
+	}
+
+	return true, nil
+}
+
+func gitResolvedRef(projectRoot, ref string) (string, bool, error) {
+	output, err := exec.Command("git", "-C", projectRoot, "rev-parse", ref).CombinedOutput()
+	if err == nil {
+		return strings.TrimSpace(string(output)), true, nil
+	}
+
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() != 0 {
+		return "", false, nil
+	}
+	return "", false, err
 }
 
 func GitCurrentBranch(projectRoot string) (string, error) {
@@ -485,6 +550,26 @@ func discoverReleaseDockerImages(projectRoot, releaseRoot, versionFilePath, vers
 		})
 	}
 	return images, nil
+}
+
+func discoverReleaseLinuxScripts(releaseRoot, version string) ([]scriptSpec, error) {
+	linuxDir := filepath.Join(releaseRoot, "linux")
+	contexts, err := ResolveLinuxPackageContextsAtDir(linuxDir)
+	if err != nil {
+		if errors.Is(err, ErrLinuxPackageBuildNotFound) || errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	scripts := make([]scriptSpec, 0, len(contexts))
+	for _, context := range contexts {
+		if strings.TrimSpace(context.ReleaseScriptPath) == "" {
+			continue
+		}
+		scripts = append(scripts, newScriptSpec(context.Dir, "./release.sh", version))
+	}
+	return scripts, nil
 }
 
 func updateHelmChartReleaseVersion(chartFilePath, version string) (string, bool, ReleaseChartSpec, error) {

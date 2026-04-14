@@ -16,6 +16,47 @@ The problem escalates to mundane silly everyday tasks and challenges, such as:
 
 ERun tries to help solving these issues without getting into the developers way. ERun is entirely optional, all the heavy lifting is done via terraform, helm and git. One can stop using ERun at any point and just navigate and build with these tools.
 
+# Install
+
+ERun ships two executables:
+- `erun` - CLI utility
+- `emcp` - MCP server executable
+
+## Homebrew
+
+Tap the repository and install `erun` from it:
+
+```
+brew tap sophium/erun https://github.com/sophium/erun
+brew install sophium/erun/erun
+```
+
+## Scoop
+
+Add the repository as a Scoop bucket and install `erun` from it:
+
+```
+scoop bucket add sophium-erun https://github.com/sophium/erun
+scoop install sophium-erun/erun
+```
+
+## Linux
+
+For Debian and Ubuntu, download and install a specific release from the project's [GitHub Releases](https://github.com/sophium/erun/releases) page:
+
+```bash
+VERSION="1.0.17" && ARCH="$(dpkg --print-architecture)" && curl -fLo "erun_${VERSION}_${ARCH}.deb" "https://github.com/sophium/erun/releases/download/v${VERSION}/erun_${VERSION}_${ARCH}.deb" && sudo apt install "./erun_${VERSION}_${ARCH}.deb"
+```
+
+## Build From Source
+
+If you prefer to build the binaries yourself:
+
+```
+(cd erun-cli && go build -o ../erun .)
+(cd erun-mcp && go build -o ../emcp ./cmd/emcp)
+```
+
 # How to install development environment
 
 ## Install GO
