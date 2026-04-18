@@ -43,6 +43,9 @@ func TestReleaseCommandDryRun(t *testing.T) {
 	output := stderr.String()
 	for _, want := range []string{
 		"release: branch=develop mode=candidate version=1.4.2-rc.",
+		"stage: sync-remote",
+		"git fetch origin",
+		"git rebase origin/develop",
 		"docker image: erunpaas/api:1.4.2-rc.",
 		"git commit -m '[skip ci] release 1.4.2-rc.",
 		"git tag -a",
@@ -96,6 +99,9 @@ func TestReleaseCommandDryRunStableIncludesSyncAndPush(t *testing.T) {
 	for _, want := range []string{
 		"release: branch=main mode=stable version=1.4.2",
 		"next version: 1.4.3",
+		"stage: sync-remote",
+		"git fetch origin",
+		"git rebase origin/main",
 		"stage: sync-develop",
 		"git checkout develop",
 		"git merge --no-edit -X theirs main",
@@ -139,6 +145,15 @@ func TestReleaseCommandDryRunStableWithoutDevelopOnlyPushesMain(t *testing.T) {
 	output := stderr.String()
 	if strings.Contains(output, "stage: sync-develop") || strings.Contains(output, "git checkout develop") {
 		t.Fatalf("did not expect develop sync in output:\n%s", output)
+	}
+	for _, want := range []string{
+		"stage: sync-remote",
+		"git fetch origin",
+		"git rebase origin/main",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected main sync in output to contain %q, got:\n%s", want, output)
+		}
 	}
 	if !strings.Contains(output, "stage: push") || !strings.Contains(output, "git push --follow-tags origin main") {
 		t.Fatalf("expected main-only push in output, got:\n%s", output)
