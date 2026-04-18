@@ -68,6 +68,25 @@ func TestOpenCommandNoShellConfiguresLocalKubeconfig(t *testing.T) {
 	}
 }
 
+func TestLocalShellSetupScriptUsesPowerShellOnWindows(t *testing.T) {
+	result := common.OpenResult{
+		Tenant:      "tenant-a",
+		Environment: "dev",
+		RepoPath:    `C:\Users\john\src\tenant-a`,
+		EnvConfig: common.EnvConfig{
+			KubernetesContext: "cluster-dev",
+		},
+	}
+
+	got := localShellSetupScript(result, openNoShellDialectPowerShell)
+	want := "kubectl config use-context 'cluster-dev' | Out-Null\n" +
+		"kubectl config set-context --current '--namespace=tenant-a-dev' | Out-Null\n" +
+		"Set-Location -LiteralPath 'C:\\Users\\john\\src\\tenant-a'\n"
+	if got != want {
+		t.Fatalf("unexpected PowerShell setup script:\nwant:\n%s\ngot:\n%s", want, got)
+	}
+}
+
 func TestOpenNoShellHintLinesSuggestAliasAndStartupFileWhenMissing(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
@@ -83,6 +102,27 @@ func TestOpenNoShellHintLinesSuggestAliasAndStartupFileWhenMissing(t *testing.T)
 	}
 	if lines[1] != `alias frs-local='eval "$(erun open frs local --no-shell)"'` {
 		t.Fatalf("unexpected alias line: %q", lines[1])
+	}
+}
+
+func TestOpenNoShellHintLinesUsePowerShellFunctionOnWindows(t *testing.T) {
+	previousHostOS := currentHostOS
+	currentHostOS = func() common.HostOS { return common.HostOSWindows }
+	t.Cleanup(func() {
+		currentHostOS = previousHostOS
+	})
+
+	result := common.OpenResult{Tenant: "frs", Environment: "local", Title: "frs-local"}
+	lines := openNoShellHintLines(result, "")
+
+	if len(lines) != 2 {
+		t.Fatalf("unexpected hint lines: %+v", lines)
+	}
+	if lines[0] != "one-liner function:" {
+		t.Fatalf("unexpected intro line: %q", lines[0])
+	}
+	if lines[1] != "function frs-local { erun open frs local --no-shell | Invoke-Expression }" {
+		t.Fatalf("unexpected function line: %q", lines[1])
 	}
 }
 
@@ -340,6 +380,7 @@ func TestOpenCommandDryRunRedeploysWhenRuntimeHasLocalBuilds(t *testing.T) {
 	output := stderr.String()
 	for _, want := range []string{
 		"docker build -t erunpaas/tenant-a-devops:1.0.0",
+		"--build-arg ERUN_VERSION=1.0.0",
 		"docker push erunpaas/tenant-a-devops:1.0.0",
 		"helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace tenant-a-local --kube-context cluster-dev -f " + filepath.Join(chartPath, "values.local.yaml") + " --set-string tenant=tenant-a --set-string environment=local",
 		"kubectl --context cluster-dev --namespace tenant-a-local wait --for=condition=Available --timeout 2m0s deployment/tenant-a-devops",
@@ -594,6 +635,50 @@ func TestOpenCommandPromptsToCreateMissingRuntimeChartAndUsesCreatedChart(t *tes
 	}
 	if launched.Namespace != "frs-local" || launched.KubernetesContext != "cluster-dev" {
 		t.Fatalf("unexpected shell launch: %+v", launched)
+	}
+}
+
+func TestOpenCommandSkipsLocalRuntimeChartPromptForRemoteRepo(t *testing.T) {
+	launched := common.ShellLaunchParams{}
+	cmd := newTestRootCmd(testRootDeps{
+		Store: openCommandStore{
+			repoPath:   "/home/erun/git/erun",
+			toolConfig: common.ERunConfig{DefaultTenant: "erun"},
+			tenant: &common.TenantConfig{
+				Name:               "erun",
+				ProjectRoot:        "/home/erun/git/erun",
+				DefaultEnvironment: "local",
+				Remote:             true,
+			},
+			env: &common.EnvConfig{
+				Name:              "local",
+				RepoPath:          "/home/erun/git/erun",
+				KubernetesContext: "cluster-dev",
+				Remote:            true,
+			},
+		},
+		PromptRunner: func(prompt promptui.Prompt) (string, error) {
+			t.Fatalf("did not expect chart creation prompt for remote repo: %+v", prompt)
+			return "", nil
+		},
+		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
+			return true, nil
+		},
+		LaunchShell: func(req common.ShellLaunchParams) error {
+			launched = req
+			return nil
+		},
+	})
+	cmd.SetArgs([]string{"open"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if launched.Dir != "/home/erun/git/erun" || launched.Title != "erun-local" {
+		t.Fatalf("unexpected shell launch: %+v", launched)
+	}
+	if !launched.RemoteRepo {
+		t.Fatalf("expected remote shell launch params, got %+v", launched)
 	}
 }
 
@@ -869,6 +954,8 @@ func TestOpenCommandDeploysDevopsWhenMissing(t *testing.T) {
 type openCommandStore struct {
 	repoPath   string
 	toolConfig common.ERunConfig
+	tenant     *common.TenantConfig
+	env        *common.EnvConfig
 }
 
 func (s openCommandStore) LoadERunConfig() (common.ERunConfig, string, error) {
@@ -884,6 +971,13 @@ func (openCommandStore) ListTenantConfigs() ([]common.TenantConfig, error) {
 }
 
 func (s openCommandStore) LoadTenantConfig(tenant string) (common.TenantConfig, string, error) {
+	if s.tenant != nil {
+		config := *s.tenant
+		if config.Name == "" {
+			config.Name = tenant
+		}
+		return config, "", nil
+	}
 	return common.TenantConfig{
 		Name:               tenant,
 		ProjectRoot:        s.repoPath,
@@ -896,6 +990,13 @@ func (openCommandStore) SaveTenantConfig(common.TenantConfig) error {
 }
 
 func (s openCommandStore) LoadEnvConfig(tenant, env string) (common.EnvConfig, string, error) {
+	if s.env != nil {
+		config := *s.env
+		if config.Name == "" {
+			config.Name = env
+		}
+		return config, "", nil
+	}
 	return common.EnvConfig{
 		Name:              env,
 		RepoPath:          s.repoPath,

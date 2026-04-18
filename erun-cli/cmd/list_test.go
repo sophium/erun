@@ -13,6 +13,10 @@ import (
 func TestListCommandPrintsDefaultsAndConfiguredTenants(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 	stubKubectlContexts(t, []string{"cluster-local"}, "cluster-local")
+	configDir, err := common.ERunConfigDir()
+	if err != nil {
+		t.Fatalf("ERunConfigDir failed: %v", err)
+	}
 
 	tenantAPath := filepath.Join(t.TempDir(), "tenant-a")
 	tenantBPath := filepath.Join(t.TempDir(), "tenant-b")
@@ -72,6 +76,8 @@ func TestListCommandPrintsDefaultsAndConfiguredTenants(t *testing.T) {
 
 	output := stdout.String()
 	for _, want := range []string{
+		"Configuration:",
+		"  directory: " + configDir,
 		"Defaults:",
 		"  tenant: tenant-a",
 		"  environment: local",
@@ -99,6 +105,10 @@ func TestListCommandPrintsDefaultsAndConfiguredTenants(t *testing.T) {
 
 func TestListCommandUsesConfiguredCurrentDirectoryTenantBeforeDefault(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
+	configDir, err := common.ERunConfigDir()
+	if err != nil {
+		t.Fatalf("ERunConfigDir failed: %v", err)
+	}
 
 	tenantAPath := filepath.Join(t.TempDir(), "tenant-a")
 	tenantBPath := filepath.Join(t.TempDir(), "tenant-b")
@@ -154,6 +164,8 @@ func TestListCommandUsesConfiguredCurrentDirectoryTenantBeforeDefault(t *testing
 
 	output := stdout.String()
 	for _, want := range []string{
+		"Configuration:",
+		"  directory: " + configDir,
 		"  repo: tenant-b",
 		"  configured tenant: tenant-b",
 		"  effective target: tenant-b/dev",
@@ -171,6 +183,10 @@ func TestListCommandUsesConfiguredCurrentDirectoryTenantBeforeDefault(t *testing
 
 func TestListCommandPrintsEmptyStateWhenNotInitialized(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
+	configDir, err := common.ERunConfigDir()
+	if err != nil {
+		t.Fatalf("ERunConfigDir failed: %v", err)
+	}
 
 	repoRoot := filepath.Join(t.TempDir(), "erun")
 	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
@@ -199,6 +215,8 @@ func TestListCommandPrintsEmptyStateWhenNotInitialized(t *testing.T) {
 
 	output := stdout.String()
 	for _, want := range []string{
+		"Configuration:",
+		"  directory: " + configDir,
 		"Defaults:",
 		"  tenant: none",
 		"  environment: none",

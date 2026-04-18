@@ -71,6 +71,21 @@ func TestDockerRegistryFromImageTag(t *testing.T) {
 	}
 }
 
+func TestDockerBuildArgsIncludeImageVersionAsBuildArg(t *testing.T) {
+	args := dockerBuildArgs("erunpaas/erun-devops:1.0.0-snapshot-20260406123456", "/tmp/Dockerfile")
+	got := strings.Join(args, " ")
+	for _, want := range []string{
+		"build",
+		"-t erunpaas/erun-devops:1.0.0-snapshot-20260406123456",
+		"--build-arg ERUN_VERSION=1.0.0-snapshot-20260406123456",
+		"-f /tmp/Dockerfile .",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected docker build args to contain %q, got %q", want, got)
+		}
+	}
+}
+
 func TestResolveDockerBuildContextIgnoresMissingDockerfile(t *testing.T) {
 	workdir := t.TempDir()
 

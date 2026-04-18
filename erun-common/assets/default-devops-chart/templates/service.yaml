@@ -1,3 +1,6 @@
+{{- $worktreeStorage := default "host" .Values.worktreeStorage -}}
+{{- $worktreeRepoName := required "worktreeRepoName is required" .Values.worktreeRepoName -}}
+{{- $worktreePath := printf "/home/erun/git/%s" $worktreeRepoName -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -81,13 +84,19 @@ spec:
             - name: DOCKER_BUILDKIT
               value: "1"
             - name: ERUN_REPO_PATH
-              value: {{ printf "/home/erun/git/%s" (base (required "worktreeHostPath is required" .Values.worktreeHostPath)) | quote }}
+              value: {{ $worktreePath | quote }}
+            - name: ERUN_REPO_REMOTE
+              value: {{ if eq $worktreeStorage "pvc" }}"true"{{ else }}"false"{{ end }}
             - name: ERUN_KUBERNETES_CONTEXT
               value: in-cluster
             - name: ERUN_TENANT
               value: {{ required "tenant is required" .Values.tenant | quote }}
             - name: ERUN_ENVIRONMENT
               value: {{ required "environment is required" .Values.environment | quote }}
+            - name: ERUN_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           securityContext:
             runAsUser: 1000
             runAsGroup: 1000
@@ -101,8 +110,10 @@ spec:
           volumeMounts:
             - name: erun-home
               mountPath: /home/erun
+{{- if eq $worktreeStorage "host" }}
             - name: repo-worktree
-              mountPath: {{ printf "/home/erun/git/%s" (base (required "worktreeHostPath is required" .Values.worktreeHostPath)) | quote }}
+              mountPath: {{ $worktreePath | quote }}
+{{- end }}
             - name: docker-socket
               mountPath: /var/run
         - image: erunpaas/erun-dind:28.1.1
@@ -138,10 +149,12 @@ spec:
         - name: erun-home
           persistentVolumeClaim:
             claimName: __MODULE_NAME__-home
+{{- if eq $worktreeStorage "host" }}
         - name: repo-worktree
           hostPath:
             path: {{ required "worktreeHostPath is required" .Values.worktreeHostPath | quote }}
             type: DirectoryOrCreate
+{{- end }}
         - name: docker-socket
           emptyDir: {}
         - name: docker-state

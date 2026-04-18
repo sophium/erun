@@ -19,6 +19,11 @@ func (s listStore) ListEnvConfigs(tenant string) ([]EnvConfig, error) {
 }
 
 func TestResolveListResultUsesCurrentDirectoryTenantBeforeDefault(t *testing.T) {
+	configDir, err := ERunConfigDir()
+	if err != nil {
+		t.Fatalf("ERunConfigDir failed: %v", err)
+	}
+
 	originalDir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
@@ -72,6 +77,9 @@ func TestResolveListResultUsesCurrentDirectoryTenantBeforeDefault(t *testing.T) 
 
 	if result.Defaults.Tenant != "tenant-a" || result.Defaults.Environment != "local" {
 		t.Fatalf("unexpected defaults: %+v", result.Defaults)
+	}
+	if result.ConfigDirectory != configDir {
+		t.Fatalf("unexpected config directory: %+v", result)
 	}
 	if result.CurrentDirectory.Repo != "tenant-b" || result.CurrentDirectory.ConfiguredTenant != "tenant-b" {
 		t.Fatalf("unexpected current directory: %+v", result.CurrentDirectory)

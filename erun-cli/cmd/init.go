@@ -20,14 +20,23 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	params := common.BootstrapInitParams{}
 
 	cmd := &cobra.Command{
-		Use:          "init",
+		Use:          "init [TENANT] [ENVIRONMENT]",
 		Short:        "Initialize configuration for the current project",
-		Args:         cobra.MaximumNArgs(1),
+		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			runParams := params
 			if runParams.Tenant == "" && len(args) > 0 {
 				runParams.Tenant = args[0]
+			}
+			if runParams.Environment == "" && len(args) > 1 {
+				runParams.Environment = args[1]
+			}
+			if runParams.Remote && runParams.Tenant == "" {
+				return fmt.Errorf("tenant is required with --remote")
+			}
+			if runParams.Remote && strings.TrimSpace(runParams.Environment) == "" {
+				return fmt.Errorf("environment is required with --remote")
 			}
 			return runInit(commandContext(cmd), runParams)
 		},
@@ -36,8 +45,10 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	cmd.Flags().StringVar(&params.Tenant, "tenant", "", "Tenant name to initialize")
 	cmd.Flags().StringVar(&params.ProjectRoot, "project-root", "", "Project root to bind to the tenant")
 	cmd.Flags().StringVar(&params.Environment, "environment", "", "Environment name")
+	cmd.Flags().StringVar(&params.RuntimeVersion, "version", "", "Runtime image version to initialize and deploy")
 	cmd.Flags().StringVar(&params.KubernetesContext, "kubernetes-context", "", "Kubernetes context to associate with the environment")
 	cmd.Flags().StringVar(&params.ContainerRegistry, "container-registry", "", "Container registry to associate with the environment")
+	cmd.Flags().BoolVar(&params.Remote, "remote", false, "Initialize the tenant repository inside the runtime pod instead of the local host")
 	cmd.Flags().BoolVarP(&params.AutoApprove, "yes", "y", false, "Automatically approve initialization prompts")
 	addDryRunFlag(cmd)
 	return cmd
@@ -65,6 +76,24 @@ func containerRegistryPrompt(run PromptRunner, label string) (string, error) {
 		return common.DefaultContainerRegistry, nil
 	}
 	return result, nil
+}
+
+func remoteRepositoryURLPrompt(run PromptRunner, label string) (string, error) {
+	prompt := promptui.Prompt{
+		Label: label,
+		Validate: func(input string) error {
+			if strings.TrimSpace(input) == "" {
+				return fmt.Errorf("repository remote URL is required")
+			}
+			return nil
+		},
+	}
+
+	result, err := run(prompt)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result), nil
 }
 
 func confirmPrompt(run PromptRunner, label string) (bool, error) {

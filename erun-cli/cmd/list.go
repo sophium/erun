@@ -34,6 +34,13 @@ func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot 
 }
 
 func writeListResult(ctx common.Context, result common.ListResult) error {
+	if _, err := fmt.Fprintln(ctx.Stdout, "Configuration:"); err != nil {
+		return err
+	}
+	if err := writeLabeledValue(ctx, "directory", valueOrNone(result.ConfigDirectory)); err != nil {
+		return err
+	}
+
 	if _, err := fmt.Fprintln(ctx.Stdout, "Defaults:"); err != nil {
 		return err
 	}

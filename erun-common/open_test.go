@@ -47,6 +47,42 @@ func TestOpenResolveUsesDefaultTenantAndEnvironment(t *testing.T) {
 	}
 }
 
+func TestOpenResolveAllowsRemoteRepoPathWithoutLocalCheckout(t *testing.T) {
+	store := openStore{
+		toolConfig: ERunConfig{DefaultTenant: "frs"},
+		tenantConfigs: map[string]TenantConfig{
+			"frs": {
+				Name:               "frs",
+				ProjectRoot:        "/home/erun/git/frs",
+				DefaultEnvironment: "dev",
+				Remote:             true,
+			},
+		},
+		envConfigs: map[string]EnvConfig{
+			"frs/dev": {
+				Name:              "dev",
+				RepoPath:          "/home/erun/git/frs",
+				KubernetesContext: "cluster-dev",
+				Remote:            true,
+			},
+		},
+	}
+
+	result, err := ResolveOpen(store, OpenParams{
+		UseDefaultTenant:      true,
+		UseDefaultEnvironment: true,
+	})
+	if err != nil {
+		t.Fatalf("Resolve failed: %v", err)
+	}
+	if !result.RemoteRepo() {
+		t.Fatalf("expected remote repo result, got %+v", result)
+	}
+	if result.RepoPath != "/home/erun/git/frs" {
+		t.Fatalf("unexpected repo path: %+v", result)
+	}
+}
+
 func TestOpenResolveUsesCurrentDirectoryTenantBeforeDefault(t *testing.T) {
 	originalDir, err := os.Getwd()
 	if err != nil {
@@ -474,6 +510,42 @@ func TestRemoteShellScriptUsesRepoBasenameForRemoteWorkdir(t *testing.T) {
 	}
 }
 
+func TestRemoteShellScriptMarksRemoteConfigsAndSkipsHostGitBootstrap(t *testing.T) {
+	script, err := buildRemoteShellScript(ShellLaunchParams{
+		Dir:               "/home/erun/git/erun",
+		Tenant:            "erun",
+		Environment:       "remote",
+		Title:             "erun-remote",
+		KubernetesContext: "in-cluster",
+		RemoteRepo:        true,
+	}, true)
+	if err != nil {
+		t.Fatalf("buildRemoteShellScript failed: %v", err)
+	}
+
+	if strings.Contains(script, "git clone git@") {
+		t.Fatalf("did not expect host git bootstrap in remote repo shell script, got:\n%s", script)
+	}
+
+	tenantConfigBody := extractHeredoc(t, script, `cat > "$config_home/erun/erun/config.yaml" <<'EOF'`)
+	var tenantConfig TenantConfig
+	if err := yaml.Unmarshal([]byte(tenantConfigBody), &tenantConfig); err != nil {
+		t.Fatalf("expected tenant config heredoc to be valid yaml, got %v\n%s", err, tenantConfigBody)
+	}
+	if !tenantConfig.Remote {
+		t.Fatalf("expected remote tenant config, got %+v", tenantConfig)
+	}
+
+	envConfigBody := extractHeredoc(t, script, `cat > "$config_home/erun/erun/remote/config.yaml" <<'EOF'`)
+	var envConfig EnvConfig
+	if err := yaml.Unmarshal([]byte(envConfigBody), &envConfig); err != nil {
+		t.Fatalf("expected env config heredoc to be valid yaml, got %v\n%s", err, envConfigBody)
+	}
+	if !envConfig.Remote {
+		t.Fatalf("expected remote env config, got %+v", envConfig)
+	}
+}
+
 func TestRemoteShellScriptUsesOnlySSHCredentialsRelevantToRepoRemote(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
@@ -509,6 +581,43 @@ func TestRemoteShellScriptUsesOnlySSHCredentialsRelevantToRepoRemote(t *testing.
 	}
 	if strings.Contains(script, "OTHER PRIVATE KEY") {
 		t.Fatalf("did not expect unrelated private key in script, got:\n%s", script)
+	}
+}
+
+func TestRemoteShellScriptLoadsSSHConfigFromUserHomeDirWhenHOMEIsUnset(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", "")
+	previousUserHomeDir := openUserHomeDir
+	openUserHomeDir = func() (string, error) { return homeDir, nil }
+	t.Cleanup(func() {
+		openUserHomeDir = previousUserHomeDir
+	})
+
+	repoDir := createGitRepoWithRemote(t, "git@github.com:sophium/erun.git")
+	sshDir := filepath.Join(homeDir, ".ssh")
+	if err := os.MkdirAll(sshDir, 0o755); err != nil {
+		t.Fatalf("mkdir .ssh: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sshDir, "config"), []byte("Host github.com\n  IdentityFile ~/.ssh/id_ed25519\n"), 0o600); err != nil {
+		t.Fatalf("write ssh config: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sshDir, "id_ed25519"), []byte("PRIVATE KEY"), 0o600); err != nil {
+		t.Fatalf("write ssh key: %v", err)
+	}
+
+	script, err := buildRemoteShellScript(ShellLaunchParams{
+		Dir:               repoDir,
+		Tenant:            "tenant-a",
+		Environment:       "local",
+		Title:             "tenant-a-local",
+		KubernetesContext: "in-cluster",
+	}, false)
+	if err != nil {
+		t.Fatalf("buildRemoteShellScript failed: %v", err)
+	}
+
+	if !strings.Contains(script, "PRIVATE KEY") {
+		t.Fatalf("expected private key to be loaded from user home dir, got:\n%s", script)
 	}
 }
 
