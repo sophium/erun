@@ -54,15 +54,41 @@ runtime_repo_dir() {
     printf '%s\n' "${ERUN_REPO_PATH:-${HOME}/git/erun}"
 }
 
+runtime_repo_is_remote() {
+    case "${ERUN_REPO_REMOTE:-}" in
+        1|true|TRUE|True|yes|YES|on|ON)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
+runtime_namespace() {
+    if [ -n "${ERUN_NAMESPACE:-}" ]; then
+        printf '%s\n' "${ERUN_NAMESPACE}"
+        return
+    fi
+
+    namespace_file=/var/run/secrets/kubernetes.io/serviceaccount/namespace
+    if [ -r "${namespace_file}" ]; then
+        cat "${namespace_file}"
+    fi
+}
+
 initialize_erun_config() {
     repo_dir=$(runtime_repo_dir)
     tenant="${ERUN_TENANT:-}"
     environment="${ERUN_ENVIRONMENT:-}"
     config_home="${XDG_CONFIG_HOME:-${HOME}/.config}"
     config_dir="${config_home}/erun"
+    remote_line=""
 
     if [ -z "${tenant}" ] || [ -z "${environment}" ]; then
         return
+    fi
+
+    if runtime_repo_is_remote; then
+        remote_line="remote: true"
     fi
 
     mkdir -p "${config_dir}/${tenant}/${environment}"
@@ -75,12 +101,14 @@ EOF
 projectroot: ${repo_dir}
 name: ${tenant}
 defaultenvironment: ${environment}
+${remote_line}
 EOF
 
     cat >"${config_dir}/${tenant}/${environment}/config.yaml" <<EOF
 name: ${environment}
 repopath: ${repo_dir}
 kubernetescontext: ${ERUN_KUBERNETES_CONTEXT:-in-cluster}
+${remote_line}
 EOF
 }
 
@@ -104,4 +132,15 @@ fi
 
 initialize_erun_config
 
-exec erun mcp "$@"
+set -- emcp "$@" \
+    --tenant "${ERUN_TENANT:-}" \
+    --environment "${ERUN_ENVIRONMENT:-}" \
+    --repo-path "$(runtime_repo_dir)" \
+    --kubernetes-context "${ERUN_KUBERNETES_CONTEXT:-in-cluster}"
+
+namespace=$(runtime_namespace)
+if [ -n "${namespace}" ]; then
+    set -- "$@" --namespace "${namespace}"
+fi
+
+exec "$@"

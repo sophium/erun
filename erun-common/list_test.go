@@ -19,6 +19,11 @@ func (s listStore) ListEnvConfigs(tenant string) ([]EnvConfig, error) {
 }
 
 func TestResolveListResultUsesCurrentDirectoryTenantBeforeDefault(t *testing.T) {
+	configDir, err := ERunConfigDir()
+	if err != nil {
+		t.Fatalf("ERunConfigDir failed: %v", err)
+	}
+
 	originalDir, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
@@ -73,6 +78,9 @@ func TestResolveListResultUsesCurrentDirectoryTenantBeforeDefault(t *testing.T) 
 	if result.Defaults.Tenant != "tenant-a" || result.Defaults.Environment != "local" {
 		t.Fatalf("unexpected defaults: %+v", result.Defaults)
 	}
+	if result.ConfigDirectory != configDir {
+		t.Fatalf("unexpected config directory: %+v", result)
+	}
 	if result.CurrentDirectory.Repo != "tenant-b" || result.CurrentDirectory.ConfiguredTenant != "tenant-b" {
 		t.Fatalf("unexpected current directory: %+v", result.CurrentDirectory)
 	}
@@ -81,6 +89,9 @@ func TestResolveListResultUsesCurrentDirectoryTenantBeforeDefault(t *testing.T) 
 	}
 	if result.CurrentDirectory.Effective.Tenant != "tenant-b" || result.CurrentDirectory.Effective.Environment != "dev" {
 		t.Fatalf("unexpected effective target: %+v", result.CurrentDirectory.Effective)
+	}
+	if !result.CurrentDirectory.Effective.Snapshot {
+		t.Fatalf("expected effective snapshot to default on, got %+v", result.CurrentDirectory.Effective)
 	}
 	if len(result.Tenants) != 2 {
 		t.Fatalf("unexpected tenants: %+v", result.Tenants)
@@ -145,6 +156,9 @@ func TestResolveListResultFallsBackToDefaultWhenRepoIsNotConfiguredTenant(t *tes
 	if result.CurrentDirectory.Effective.Tenant != "tenant-a" || result.CurrentDirectory.Effective.Environment != "dev" {
 		t.Fatalf("unexpected effective target: %+v", result.CurrentDirectory.Effective)
 	}
+	if !result.CurrentDirectory.Effective.Snapshot {
+		t.Fatalf("expected effective snapshot to default on, got %+v", result.CurrentDirectory.Effective)
+	}
 }
 
 func TestResolveListResultUsesEffectiveKubernetesContextForCurrentDirectoryTarget(t *testing.T) {
@@ -200,7 +214,48 @@ func TestResolveListResultUsesEffectiveKubernetesContextForCurrentDirectoryTarge
 	if result.CurrentDirectory.Effective.KubernetesContext != "docker-desktop" {
 		t.Fatalf("unexpected effective kubernetes context: %+v", result.CurrentDirectory.Effective)
 	}
+	if !result.CurrentDirectory.Effective.Snapshot {
+		t.Fatalf("expected effective snapshot to default on, got %+v", result.CurrentDirectory.Effective)
+	}
 	if got := result.Tenants[0].Environments[0].KubernetesContext; got != "rancher-desktop" {
 		t.Fatalf("expected configured tenant environment context to remain unchanged, got %q", got)
+	}
+}
+
+func TestResolveListResultIncludesSnapshotPreferenceForTenant(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "tenant-a")
+	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	snapshot := false
+	store := listStore{
+		openStore: openStore{
+			toolConfig: ERunConfig{DefaultTenant: "tenant-a"},
+			tenantConfigs: map[string]TenantConfig{
+				"tenant-a": {Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: DefaultEnvironment, Snapshot: &snapshot},
+			},
+			envConfigs: map[string]EnvConfig{
+				"tenant-a/local": {Name: DefaultEnvironment, RepoPath: repoRoot, KubernetesContext: "cluster-local"},
+			},
+		},
+		envsByTenant: map[string][]EnvConfig{
+			"tenant-a": {{Name: DefaultEnvironment, RepoPath: repoRoot, KubernetesContext: "cluster-local"}},
+		},
+	}
+
+	result, err := ResolveListResult(store, func() (string, string, error) {
+		return "tenant-a", repoRoot, nil
+	}, OpenParams{
+		UseDefaultTenant:      true,
+		UseDefaultEnvironment: true,
+	})
+	if err != nil {
+		t.Fatalf("ResolveListResult failed: %v", err)
+	}
+	if result.CurrentDirectory.Effective == nil || result.CurrentDirectory.Effective.Snapshot {
+		t.Fatalf("expected effective snapshot off, got %+v", result.CurrentDirectory.Effective)
+	}
+	if len(result.Tenants) != 1 || len(result.Tenants[0].Environments) != 1 || result.Tenants[0].Snapshot {
+		t.Fatalf("expected environment snapshot off, got %+v", result.Tenants)
 	}
 }

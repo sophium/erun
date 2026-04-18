@@ -82,12 +82,18 @@ spec:
               value: "1"
             - name: ERUN_REPO_PATH
               value: {{ printf "/home/erun/git/%s" (base (required "worktreeHostPath is required" .Values.worktreeHostPath)) | quote }}
+            - name: ERUN_REPO_REMOTE
+              value: "false"
             - name: ERUN_KUBERNETES_CONTEXT
               value: in-cluster
             - name: ERUN_TENANT
               value: {{ required "tenant is required" .Values.tenant | quote }}
             - name: ERUN_ENVIRONMENT
               value: {{ required "environment is required" .Values.environment | quote }}
+            - name: ERUN_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           securityContext:
             runAsUser: 1000
             runAsGroup: 1000

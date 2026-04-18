@@ -698,6 +698,96 @@ func TestRootDeployShorthandDryRunPrintsBuildAndDeployCommandsWithoutExecuting(t
 	}
 }
 
+func TestRootDeployShorthandUsesPersistedSnapshotPreferenceForLocalEnvironment(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+	stubKubectlContexts(t, []string{"cluster-local"}, "cluster-local")
+
+	projectRoot := t.TempDir()
+	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
+	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
+	if err := os.MkdirAll(workdir, 0o755); err != nil {
+		t.Fatalf("mkdir docker dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write module VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
+		t.Fatalf("write local VERSION: %v", err)
+	}
+
+	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
+		t.Fatalf("save erun config: %v", err)
+	}
+	snapshot := false
+	if err := common.SaveTenantConfig(common.TenantConfig{
+		Name:               "tenant-a",
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: "local",
+		Snapshot:           &snapshot,
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{
+		Name:              "local",
+		RepoPath:          projectRoot,
+		KubernetesContext: "cluster-local",
+	}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	stderr := new(bytes.Buffer)
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		ResolveKubernetesDeployContext: func() (common.KubernetesDeployContext, error) {
+			return common.KubernetesDeployContext{
+				Dir:           workdir,
+				ComponentName: "erun-devops",
+				ChartPath:     chartPath,
+			}, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{
+				Dir:            workdir,
+				DockerfilePath: filepath.Join(workdir, "Dockerfile"),
+			}, nil
+		},
+		BuildDockerImage: deployBuildCallFunc(func(req deployBuildCall) error {
+			t.Fatalf("unexpected build request during dry-run: %+v", req)
+			return nil
+		}),
+		PushDockerImage: deployPushCallFunc(func(req deployPushCall) error {
+			t.Fatalf("unexpected push request during dry-run: %+v", req)
+			return nil
+		}),
+		DeployHelmChart: func(req common.HelmDeployParams) error {
+			t.Fatalf("unexpected deploy request during dry-run: %+v", req)
+			return nil
+		},
+	})
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"deploy", "--dry-run", "-v"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stderr.String()
+	if strings.Contains(output, "docker build -t") || strings.Contains(output, "docker push ") {
+		t.Fatalf("did not expect dry-run snapshot build or push, got %q", output)
+	}
+	if !strings.Contains(output, "helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace tenant-a-local --kube-context cluster-local -f "+filepath.Join(chartPath, "values.local.yaml")+" --set-string tenant=tenant-a --set-string environment=local") {
+		t.Fatalf("expected dry-run deploy trace, got %q", output)
+	}
+}
+
 func TestRootDeployShorthandBuildsAndPushesLiteralChartImageDependencies(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 

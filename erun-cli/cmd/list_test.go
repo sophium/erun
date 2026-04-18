@@ -13,6 +13,10 @@ import (
 func TestListCommandPrintsDefaultsAndConfiguredTenants(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 	stubKubectlContexts(t, []string{"cluster-local"}, "cluster-local")
+	configDir, err := common.ERunConfigDir()
+	if err != nil {
+		t.Fatalf("ERunConfigDir failed: %v", err)
+	}
 
 	tenantAPath := filepath.Join(t.TempDir(), "tenant-a")
 	tenantBPath := filepath.Join(t.TempDir(), "tenant-b")
@@ -72,6 +76,8 @@ func TestListCommandPrintsDefaultsAndConfiguredTenants(t *testing.T) {
 
 	output := stdout.String()
 	for _, want := range []string{
+		"Configuration:",
+		"  directory: " + configDir,
 		"Defaults:",
 		"  tenant: tenant-a",
 		"  environment: local",
@@ -80,12 +86,15 @@ func TestListCommandPrintsDefaultsAndConfiguredTenants(t *testing.T) {
 		"  configured tenant: none",
 		"  effective target: tenant-a/local",
 		"  kubernetes context: cluster-local",
+		"  snapshot: on",
 		"Tenants:",
 		"  tenant-a [default, effective]",
 		"    default environment: local",
+		"    snapshot: on",
 		"      - local [default, effective] context=cluster-local repo=" + tenantAPath,
 		"      - prod context=cluster-prod repo=" + tenantAPath,
 		"  tenant-b",
+		"    snapshot: on",
 		"      - dev [default] context=cluster-b repo=" + tenantBPath,
 	} {
 		if !strings.Contains(output, want) {
@@ -96,6 +105,10 @@ func TestListCommandPrintsDefaultsAndConfiguredTenants(t *testing.T) {
 
 func TestListCommandUsesConfiguredCurrentDirectoryTenantBeforeDefault(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
+	configDir, err := common.ERunConfigDir()
+	if err != nil {
+		t.Fatalf("ERunConfigDir failed: %v", err)
+	}
 
 	tenantAPath := filepath.Join(t.TempDir(), "tenant-a")
 	tenantBPath := filepath.Join(t.TempDir(), "tenant-b")
@@ -151,11 +164,15 @@ func TestListCommandUsesConfiguredCurrentDirectoryTenantBeforeDefault(t *testing
 
 	output := stdout.String()
 	for _, want := range []string{
+		"Configuration:",
+		"  directory: " + configDir,
 		"  repo: tenant-b",
 		"  configured tenant: tenant-b",
 		"  effective target: tenant-b/dev",
 		"  kubernetes context: cluster-b",
+		"  snapshot: on",
 		"  tenant-b [effective]",
+		"    snapshot: on",
 		"      - dev [default, effective] context=cluster-b repo=" + tenantBPath,
 	} {
 		if !strings.Contains(output, want) {
@@ -166,6 +183,10 @@ func TestListCommandUsesConfiguredCurrentDirectoryTenantBeforeDefault(t *testing
 
 func TestListCommandPrintsEmptyStateWhenNotInitialized(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
+	configDir, err := common.ERunConfigDir()
+	if err != nil {
+		t.Fatalf("ERunConfigDir failed: %v", err)
+	}
 
 	repoRoot := filepath.Join(t.TempDir(), "erun")
 	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
@@ -194,6 +215,8 @@ func TestListCommandPrintsEmptyStateWhenNotInitialized(t *testing.T) {
 
 	output := stdout.String()
 	for _, want := range []string{
+		"Configuration:",
+		"  directory: " + configDir,
 		"Defaults:",
 		"  tenant: none",
 		"  environment: none",
@@ -203,6 +226,58 @@ func TestListCommandPrintsEmptyStateWhenNotInitialized(t *testing.T) {
 		"  effective target: unavailable (default tenant is not configured)",
 		"Tenants:",
 		"  none",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)
+		}
+	}
+}
+
+func TestListCommandPrintsSnapshotPreference(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+	stubKubectlContexts(t, []string{"cluster-local"}, "cluster-local")
+
+	repoRoot := filepath.Join(t.TempDir(), "tenant-a")
+	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
+		t.Fatalf("save erun config: %v", err)
+	}
+	snapshot := false
+	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: "local", Snapshot: &snapshot}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "local", RepoPath: repoRoot, KubernetesContext: "cluster-local"}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	prevWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(repoRoot); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(prevWD)
+	})
+
+	stdout := new(bytes.Buffer)
+	cmd := newTestRootCmd(testRootDeps{})
+	cmd.SetOut(stdout)
+	cmd.SetErr(new(bytes.Buffer))
+	cmd.SetArgs([]string{"list"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stdout.String()
+	for _, want := range []string{
+		"  snapshot: off",
+		"    snapshot: off",
+		"      - local [default, effective] context=cluster-local repo=" + repoRoot,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)

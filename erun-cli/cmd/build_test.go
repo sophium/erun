@@ -1549,6 +1549,9 @@ func TestRootPushShorthandDryRunPrintsCommandWithoutExecuting(t *testing.T) {
 	if !bytes.Contains([]byte(got), []byte("docker build -t erunpaas/erun-devops:1.1.0")) {
 		t.Fatalf("expected dry-run build trace output, got %q", got)
 	}
+	if !bytes.Contains([]byte(got), []byte("--build-arg ERUN_VERSION=1.1.0")) {
+		t.Fatalf("expected dry-run build arg output, got %q", got)
+	}
 	if !bytes.Contains([]byte(got), []byte("docker push erunpaas/erun-devops:1.1.0")) {
 		t.Fatalf("expected dry-run trace output, got %q", got)
 	}

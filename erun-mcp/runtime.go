@@ -35,6 +35,8 @@ type RuntimeConfig struct {
 	PushDockerImage           eruncommon.DockerImagePusherFunc
 	DeployHelmChart           eruncommon.HelmChartDeployerFunc
 	EnsureKubernetesNamespace eruncommon.NamespaceEnsurerFunc
+	WaitForRemoteRuntime      eruncommon.RemoteRuntimeWaitFunc
+	RunRemoteCommand          eruncommon.RemoteCommandRunnerFunc
 }
 
 type CommandOutput struct {
@@ -62,6 +64,12 @@ func normalizeRuntimeConfig(cfg RuntimeConfig) RuntimeConfig {
 	}
 	if cfg.DeployHelmChart == nil {
 		cfg.DeployHelmChart = eruncommon.DeployHelmChart
+	}
+	if cfg.WaitForRemoteRuntime == nil {
+		cfg.WaitForRemoteRuntime = eruncommon.WaitForShellDeployment
+	}
+	if cfg.RunRemoteCommand == nil {
+		cfg.RunRemoteCommand = eruncommon.RunRemoteCommand
 	}
 	return cfg
 }

@@ -24,6 +24,8 @@ var (
 	ErrKubernetesContextNotConfigured  = errors.New("kubernetes context is not configured")
 	ErrRepoPathNotConfigured           = errors.New("repo path is not configured")
 	ErrShellReattachDeploy             = errors.New("remote shell requested deploy handoff and reattach")
+
+	openUserHomeDir = os.UserHomeDir
 )
 
 const defaultShellLaunchWaitTimeout = "2m0s"
@@ -55,6 +57,10 @@ type OpenResult struct {
 	Title        string
 }
 
+func (r OpenResult) RemoteRepo() bool {
+	return r.EnvConfig.Remote || r.TenantConfig.Remote
+}
+
 type ShellLaunchParams struct {
 	Dir               string
 	Tenant            string
@@ -62,6 +68,7 @@ type ShellLaunchParams struct {
 	Title             string
 	Namespace         string
 	KubernetesContext string
+	RemoteRepo        bool
 }
 
 type ShellLaunchPreview struct {
@@ -242,12 +249,14 @@ func ResolveOpen(store OpenStore, params OpenParams) (OpenResult, error) {
 	}
 
 	repoPath = filepath.Clean(repoPath)
-	info, err := os.Stat(repoPath)
-	if err != nil {
-		return OpenResult{}, err
-	}
-	if !info.IsDir() {
-		return OpenResult{}, fmt.Errorf("%q is not a directory", repoPath)
+	if !(envConfig.Remote || tenantConfig.Remote) {
+		info, err := os.Stat(repoPath)
+		if err != nil {
+			return OpenResult{}, err
+		}
+		if !info.IsDir() {
+			return OpenResult{}, fmt.Errorf("%q is not a directory", repoPath)
+		}
 	}
 	if strings.TrimSpace(envConfig.KubernetesContext) == "" {
 		return OpenResult{}, fmt.Errorf("%w: %s/%s", ErrKubernetesContextNotConfigured, tenant, environment)
@@ -374,6 +383,7 @@ func ShellLaunchParamsFromResult(result OpenResult) ShellLaunchParams {
 		Title:             result.Title,
 		Namespace:         KubernetesNamespaceName(result.Tenant, result.Environment),
 		KubernetesContext: strings.TrimSpace(result.EnvConfig.KubernetesContext),
+		RemoteRepo:        result.RemoteRepo(),
 	}
 }
 
@@ -387,13 +397,20 @@ func LocalShellSetupScript(result OpenResult) string {
 }
 
 func LaunchShell(req ShellLaunchParams) error {
+	if err := WaitForShellDeployment(req); err != nil {
+		return err
+	}
+	return ExecShell(req)
+}
+
+func WaitForShellDeployment(req ShellLaunchParams) error {
 	waitCmd := exec.Command("kubectl", kubectlDeploymentWaitArgs(req)...)
 	waitCmd.Stdout = io.Discard
 	waitCmd.Stderr = os.Stderr
-	if err := waitCmd.Run(); err != nil {
-		return err
-	}
+	return waitCmd.Run()
+}
 
+func ExecShell(req ShellLaunchParams) error {
 	script, err := buildRemoteShellScript(req, false)
 	if err != nil {
 		return err
@@ -427,6 +444,14 @@ func PreviewShellLaunch(req ShellLaunchParams) (ShellLaunchPreview, error) {
 
 func RemoteShellWorktreePath(req ShellLaunchParams) string {
 	return remoteWorktreePath(req)
+}
+
+func RemoteWorktreePathForRepoName(repoName string) string {
+	repoName = strings.TrimSpace(repoName)
+	if repoName == "" {
+		repoName = "worktree"
+	}
+	return path.Join("/home", "erun", "git", repoName)
 }
 
 func RuntimeReleaseName(tenant string) string {
@@ -468,6 +493,7 @@ func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (stri
 		Name:               req.Tenant,
 		ProjectRoot:        remoteWorkdir,
 		DefaultEnvironment: req.Environment,
+		Remote:             req.RemoteRepo,
 	})
 	if err != nil {
 		return "", err
@@ -482,6 +508,7 @@ func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (stri
 		Name:              req.Environment,
 		RepoPath:          remoteWorkdir,
 		KubernetesContext: req.KubernetesContext,
+		Remote:            req.RemoteRepo,
 	})
 	if err != nil {
 		return "", err
@@ -516,48 +543,50 @@ func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (stri
 		"exit \"$shell_status\"",
 	}
 
-	if gitHost, gitUser, gitRepo, err := resolveGitRemote(req.Dir); err == nil {
-		hostConfigEntries, err := resolveSSHConfigEntries(gitHost)
-		if err != nil {
-			return "", err
+	if !req.RemoteRepo {
+		if gitHost, gitUser, gitRepo, err := resolveGitRemote(req.Dir); err == nil {
+			hostConfigEntries, err := resolveSSHConfigEntries(gitHost)
+			if err != nil {
+				return "", err
+			}
+
+			knownHostsLines, err := loadKnownHostsLines(gitHost)
+			if err != nil {
+				return "", err
+			}
+
+			keyLines, err := loadPrivateKeyMaterial(hostConfigEntries, redactHostSecrets)
+			if err != nil {
+				return "", err
+			}
+
+			knownHosts := strings.Join(knownHostsLines, "\n")
+			keys := strings.Join(keyLines, "\n")
+			gitUser = shellQuote(gitUser)
+			gitRepo = shellQuote(gitRepo)
+			sshConfig := strings.Join([]string{
+				fmt.Sprintf("Host %s", gitHost),
+				fmt.Sprintf("  HostName %s", gitHost),
+				"  IdentityFile ~/.ssh/keys",
+				"  IdentitiesOnly yes",
+				"  UserKnownHostsFile ~/.ssh/known_hosts",
+			}, "\n")
+
+			scriptLines = append([]string{
+				"set -eu",
+				"mkdir -p \"$HOME/.ssh\"",
+				"chmod 700 \"$HOME/.ssh\"",
+				fmt.Sprintf("cat > \"$HOME/.ssh/known_hosts\" <<'EOF'\n%s\nEOF", knownHosts),
+				"chmod 600 \"$HOME/.ssh/known_hosts\"",
+				fmt.Sprintf("cat > \"$HOME/.ssh/keys\" <<'EOF'\n%s\nEOF", keys),
+				"chmod 600 \"$HOME/.ssh/keys\"",
+				fmt.Sprintf("cat > \"$HOME/.ssh/config\" <<'EOF'\n%s\nEOF", sshConfig),
+				"chmod 600 \"$HOME/.ssh/config\"",
+				fmt.Sprintf("mkdir -p %s", workdir),
+				fmt.Sprintf("cd %s", workdir),
+				fmt.Sprintf("if command -v git >/dev/null 2>&1; then if [ ! -d .git ]; then git clone git@%s:%s/%s.git .; fi; git config --global --add safe.directory '*'; fi", gitHost, gitUser, gitRepo),
+			}, scriptLines[1:]...)
 		}
-
-		knownHostsLines, err := loadKnownHostsLines(gitHost)
-		if err != nil {
-			return "", err
-		}
-
-		keyLines, err := loadPrivateKeyMaterial(hostConfigEntries, redactHostSecrets)
-		if err != nil {
-			return "", err
-		}
-
-		knownHosts := strings.Join(knownHostsLines, "\n")
-		keys := strings.Join(keyLines, "\n")
-		gitUser = shellQuote(gitUser)
-		gitRepo = shellQuote(gitRepo)
-		sshConfig := strings.Join([]string{
-			fmt.Sprintf("Host %s", gitHost),
-			fmt.Sprintf("  HostName %s", gitHost),
-			"  IdentityFile ~/.ssh/keys",
-			"  IdentitiesOnly yes",
-			"  UserKnownHostsFile ~/.ssh/known_hosts",
-		}, "\n")
-
-		scriptLines = append([]string{
-			"set -eu",
-			"mkdir -p \"$HOME/.ssh\"",
-			"chmod 700 \"$HOME/.ssh\"",
-			fmt.Sprintf("cat > \"$HOME/.ssh/known_hosts\" <<'EOF'\n%s\nEOF", knownHosts),
-			"chmod 600 \"$HOME/.ssh/known_hosts\"",
-			fmt.Sprintf("cat > \"$HOME/.ssh/keys\" <<'EOF'\n%s\nEOF", keys),
-			"chmod 600 \"$HOME/.ssh/keys\"",
-			fmt.Sprintf("cat > \"$HOME/.ssh/config\" <<'EOF'\n%s\nEOF", sshConfig),
-			"chmod 600 \"$HOME/.ssh/config\"",
-			fmt.Sprintf("mkdir -p %s", workdir),
-			fmt.Sprintf("cd %s", workdir),
-			fmt.Sprintf("if command -v git >/dev/null 2>&1; then if [ ! -d .git ]; then git clone git@%s:%s/%s.git .; fi; git config --global --add safe.directory '*'; fi", gitHost, gitUser, gitRepo),
-		}, scriptLines[1:]...)
 	}
 
 	script := strings.Join(scriptLines, "\n")
@@ -566,7 +595,7 @@ func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (stri
 }
 
 func remoteWorktreePath(req ShellLaunchParams) string {
-	return path.Join("/home", "erun", "git", remoteWorktreeRepoName(req))
+	return RemoteWorktreePathForRepoName(remoteWorktreeRepoName(req))
 }
 
 func remoteWorktreeRepoName(req ShellLaunchParams) string {
@@ -624,7 +653,7 @@ func splitRepoPath(repoPath string) (string, string) {
 }
 
 func resolveSSHConfigEntries(host string) ([]sshConfigEntry, error) {
-	sshConfigPath := filepath.Join(os.Getenv("HOME"), ".ssh", "config")
+	sshConfigPath := filepath.Join(resolveOpenUserHomeDir(), ".ssh", "config")
 	data, err := os.ReadFile(sshConfigPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -644,7 +673,7 @@ func resolveSSHConfigEntries(host string) ([]sshConfigEntry, error) {
 }
 
 func loadKnownHostsLines(host string) ([]string, error) {
-	knownHostsPath := filepath.Join(os.Getenv("HOME"), ".ssh", "known_hosts")
+	knownHostsPath := filepath.Join(resolveOpenUserHomeDir(), ".ssh", "known_hosts")
 	data, err := os.ReadFile(knownHostsPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -692,7 +721,7 @@ func loadPrivateKeyMaterial(entries []sshConfigEntry, redact bool) ([]string, er
 
 	if len(keyPaths) == 0 {
 		for _, fallback := range []string{"id_rsa", "id_ed25519", "id_ecdsa"} {
-			addKeyPath(filepath.Join(os.Getenv("HOME"), ".ssh", fallback))
+			addKeyPath(filepath.Join(resolveOpenUserHomeDir(), ".ssh", fallback))
 		}
 	}
 
@@ -772,7 +801,15 @@ func parseSSHConfig(contents string) []sshConfigEntry {
 func expandSSHPath(value string) string {
 	value = strings.TrimSpace(value)
 	if strings.HasPrefix(value, "~/") {
-		return filepath.Join(os.Getenv("HOME"), strings.TrimPrefix(value, "~/"))
+		return filepath.Join(resolveOpenUserHomeDir(), strings.TrimPrefix(value, "~/"))
 	}
 	return value
+}
+
+func resolveOpenUserHomeDir() string {
+	homeDir, err := openUserHomeDir()
+	if err == nil && strings.TrimSpace(homeDir) != "" {
+		return homeDir
+	}
+	return strings.TrimSpace(os.Getenv("HOME"))
 }

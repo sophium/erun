@@ -13,8 +13,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error, promptRunner PromptRunner, launchShell common.ShellLauncherFunc, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
+type openNoShellDialect string
+
+const (
+	openNoShellDialectPOSIX      openNoShellDialect = "posix"
+	openNoShellDialectPowerShell openNoShellDialect = "powershell"
+)
+
+var currentHostOS = func() common.HostOS { return common.DetectHost().OS }
+
+func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), saveTenantConfig func(common.TenantConfig) error, runInitForArgs func(common.Context, []string) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	var noShell bool
+	var snapshot bool
+	var noSnapshot bool
 
 	cmd := &cobra.Command{
 		Use:          "open [TENANT] [ENVIRONMENT]",
@@ -30,17 +41,41 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 			if initRan {
 				return nil
 			}
-			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell}, promptRunner, launchShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart)
+			snapshotOverride, err := resolveSnapshotFlagOverride(cmd, snapshot, noSnapshot)
+			if err != nil {
+				return err
+			}
+			result, err = applyOpenSnapshotPreference(result, snapshotOverride, saveTenantConfig)
+			if err != nil {
+				return err
+			}
+			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart)
 		},
 	}
 
 	addDryRunFlag(cmd)
 	cmd.Flags().BoolVar(&noShell, "no-shell", false, "Print shell commands to switch kubectl context, namespace, and worktree locally")
+	addSnapshotFlags(cmd, &snapshot, &noSnapshot, "Build and deploy a local snapshot when opening the local environment")
 	return cmd
 }
 
 type openOptions struct {
 	NoShell bool
+}
+
+func applyOpenSnapshotPreference(result common.OpenResult, enabled *bool, saveTenantConfig func(common.TenantConfig) error) (common.OpenResult, error) {
+	if enabled == nil || !strings.EqualFold(strings.TrimSpace(result.Environment), common.DefaultEnvironment) {
+		return result, nil
+	}
+
+	result.TenantConfig.SetSnapshot(*enabled)
+	if saveTenantConfig == nil {
+		return result, nil
+	}
+	if err := saveTenantConfig(result.TenantConfig); err != nil {
+		return common.OpenResult{}, err
+	}
+	return result, nil
 }
 
 func resolveOpenArgs(args []string, resolveOpen func(common.OpenParams) (common.OpenResult, error)) (common.OpenParams, common.OpenResult, error) {
@@ -85,7 +120,7 @@ func resolveOpenWithInitRetry(ctx common.Context, args []string, shouldRunInit f
 	return result, true, err
 }
 
-func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, launchShell common.ShellLauncherFunc, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) error {
+func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) error {
 	namespace := common.KubernetesNamespaceName(result.Tenant, result.Environment)
 	if options.NoShell {
 		ctx.TraceCommand("", "kubectl", "config", "use-context", strings.TrimSpace(result.EnvConfig.KubernetesContext))
@@ -128,7 +163,7 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 				func(ctx common.Context, pushInput common.DockerPushSpec) error {
 					return common.RunDockerPush(ctx, pushInput, common.DockerImagePusher)
 				},
-				deployHelmChart,
+				wrapOpenHelmDeployWithSpinner(ctx, execution.Deploy.ReleaseName, deployHelmChart),
 			); err != nil {
 				return err
 			}
@@ -152,7 +187,7 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 	}
 
 	for {
-		err := launchShell(shellReq)
+		err := openShell(ctx, shellReq)
 		if !errors.Is(err, common.ErrShellReattachDeploy) {
 			return err
 		}
@@ -165,8 +200,27 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 	}
 }
 
+func wrapOpenHelmDeployWithSpinner(ctx common.Context, releaseName string, deployHelmChart common.HelmChartDeployerFunc) common.HelmChartDeployerFunc {
+	if deployHelmChart == nil {
+		return nil
+	}
+	return func(params common.HelmDeployParams) error {
+		return runWithSpinner(
+			ctx,
+			" deploying "+releaseName+" with helm",
+			"deployment updated: "+releaseName+"\n",
+			func() error {
+				return deployHelmChart(params)
+			},
+		)
+	}
+}
+
 func maybeCreateMissingRuntimeChart(ctx common.Context, result common.OpenResult, promptRunner PromptRunner, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), execution common.DeploySpec) (common.DeploySpec, error) {
 	if ctx.DryRun || promptRunner == nil || resolveRuntimeDeploySpec == nil {
+		return execution, nil
+	}
+	if result.RemoteRepo() {
 		return execution, nil
 	}
 	if !common.IsDefaultDevopsChartPath(execution.Deploy.ChartPath) {
@@ -197,6 +251,7 @@ func emitLocalShellSetupForOpenResult(result common.OpenResult, promptRunner Pro
 		stderr = io.Discard
 	}
 
+	dialect := openNoShellDialectForShell(os.Getenv("SHELL"))
 	if file, ok := stdout.(*os.File); ok {
 		if info, err := file.Stat(); err == nil && (info.Mode()&os.ModeCharDevice) != 0 {
 			if err := maybeConfigureOpenNoShellAlias(result, promptRunner, os.Getenv("SHELL"), stderr); err != nil {
@@ -205,11 +260,12 @@ func emitLocalShellSetupForOpenResult(result common.OpenResult, promptRunner Pro
 		}
 	}
 
-	_, err := io.WriteString(stdout, common.LocalShellSetupScript(result))
+	_, err := io.WriteString(stdout, localShellSetupScript(result, dialect))
 	return err
 }
 
 func maybeConfigureOpenNoShellAlias(result common.OpenResult, promptRunner PromptRunner, shellPath string, stderr io.Writer) error {
+	dialect := openNoShellDialectForShell(shellPath)
 	aliasName := openNoShellAliasName(result)
 	startupFile, aliasConfigured := detectOpenNoShellAliasStartupFile(result, shellPath)
 	if aliasConfigured {
@@ -218,7 +274,7 @@ func maybeConfigureOpenNoShellAlias(result common.OpenResult, promptRunner Promp
 		}
 		return nil
 	}
-	if startupFile == "" || promptRunner == nil {
+	if startupFile == "" || promptRunner == nil || dialect == openNoShellDialectPowerShell {
 		for _, line := range openNoShellHintLines(result, shellPath) {
 			_, _ = fmt.Fprintln(stderr, line)
 		}
@@ -245,6 +301,7 @@ func maybeConfigureOpenNoShellAlias(result common.OpenResult, promptRunner Promp
 }
 
 func openNoShellHintLines(result common.OpenResult, shellPath string) []string {
+	dialect := openNoShellDialectForShell(shellPath)
 	aliasName := openNoShellAliasName(result)
 	aliasCommand := openNoShellAliasCommand(result, shellPath)
 	startupFile, aliasConfigured := detectOpenNoShellAliasStartupFile(result, shellPath)
@@ -253,14 +310,14 @@ func openNoShellHintLines(result common.OpenResult, shellPath string) []string {
 			fmt.Sprintf("configured in your shell startup file: open a new shell to use %s", aliasName),
 		}
 	}
-	if startupFile == "" {
+	if startupFile == "" || dialect == openNoShellDialectPowerShell {
 		return []string{
-			"one-liner alias:",
+			openNoShellHintPrefix(dialect),
 			aliasCommand,
 		}
 	}
 	return []string{
-		"one-liner alias:",
+		openNoShellHintPrefix(dialect),
 		aliasCommand,
 	}
 }
@@ -275,6 +332,10 @@ func openNoShellAliasName(result common.OpenResult) string {
 func openNoShellAliasCommand(result common.OpenResult, shellPath string) string {
 	aliasName := openNoShellAliasName(result)
 	command := fmt.Sprintf("erun open %s %s --no-shell", result.Tenant, result.Environment)
+	dialect := openNoShellDialectForShell(shellPath)
+	if dialect == openNoShellDialectPowerShell {
+		return "function " + aliasName + " { " + command + " | Invoke-Expression }"
+	}
 	if filepath.Base(strings.TrimSpace(shellPath)) == "fish" {
 		return "alias " + aliasName + " 'eval (" + command + ")'"
 	}
@@ -282,6 +343,9 @@ func openNoShellAliasCommand(result common.OpenResult, shellPath string) string 
 }
 
 func detectOpenNoShellAliasStartupFile(result common.OpenResult, shellPath string) (string, bool) {
+	if openNoShellDialectForShell(shellPath) == openNoShellDialectPowerShell {
+		return "", false
+	}
 	homeDir, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(homeDir) == "" {
 		return "", false
@@ -352,6 +416,48 @@ func appendOpenNoShellAlias(path, aliasCommand string) error {
 		return err
 	}
 	return os.WriteFile(path, []byte(content), 0o644)
+}
+
+func openNoShellDialectForShell(shellPath string) openNoShellDialect {
+	return detectOpenNoShellDialect(currentHostOS(), shellPath)
+}
+
+func detectOpenNoShellDialect(hostOS common.HostOS, shellPath string) openNoShellDialect {
+	switch strings.ToLower(filepath.Base(strings.TrimSpace(shellPath))) {
+	case "pwsh", "pwsh.exe", "powershell", "powershell.exe":
+		return openNoShellDialectPowerShell
+	case "bash", "bash.exe", "zsh", "zsh.exe", "sh", "sh.exe", "fish", "fish.exe":
+		return openNoShellDialectPOSIX
+	}
+	if hostOS == common.HostOSWindows {
+		return openNoShellDialectPowerShell
+	}
+	return openNoShellDialectPOSIX
+}
+
+func localShellSetupScript(result common.OpenResult, dialect openNoShellDialect) string {
+	switch dialect {
+	case openNoShellDialectPowerShell:
+		commands := []string{
+			"kubectl config use-context " + powerShellQuote(strings.TrimSpace(result.EnvConfig.KubernetesContext)) + " | Out-Null",
+			"kubectl config set-context --current " + powerShellQuote("--namespace="+common.KubernetesNamespaceName(result.Tenant, result.Environment)) + " | Out-Null",
+			"Set-Location -LiteralPath " + powerShellQuote(result.RepoPath),
+		}
+		return strings.Join(commands, "\n") + "\n"
+	default:
+		return common.LocalShellSetupScript(result)
+	}
+}
+
+func openNoShellHintPrefix(dialect openNoShellDialect) string {
+	if dialect == openNoShellDialectPowerShell {
+		return "one-liner function:"
+	}
+	return "one-liner alias:"
+}
+
+func powerShellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
 }
 
 func openerIsDefaultError(err error) bool {

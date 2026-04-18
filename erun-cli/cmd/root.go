@@ -27,7 +27,7 @@ func runSelect(prompt promptui.Select) (int, string, error) {
 func Execute() error {
 	configStore := common.ConfigStore{}
 	store := rootStore(configStore)
-	runInit := newRunInit(store, common.FindProjectRoot, runPrompt, runSelect, listKubernetesContexts, ensureKubernetesNamespace)
+	runInit := newRunInit(store, common.FindProjectRoot, runPrompt, runSelect, listKubernetesContexts, ensureKubernetesNamespace, common.WaitForShellDeployment, common.RunRemoteCommand, common.DeployHelmChart)
 	runInitForArgs := newRunInitForArgs(store, runInit)
 	push := newPushOperation(nil, common.DockerRegistryLogin, runSelect)
 	resolveOpen := func(params common.OpenParams) (common.OpenResult, error) {
@@ -58,9 +58,10 @@ func Execute() error {
 	initCmd := newInitCmd(runInit)
 	openCmd := newOpenCmd(
 		resolveOpen,
+		store.SaveTenantConfig,
 		runInitForArgs,
 		runPrompt,
-		common.LaunchShell,
+		newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell),
 		runManagedDeploy,
 		common.CheckKubernetesDeployment,
 		resolveRuntimeDeploySpec,
@@ -110,7 +111,7 @@ func Execute() error {
 		if initRan {
 			return nil
 		}
-		return runResolvedOpenCommand(ctx, result, openOptions{}, runPrompt, common.LaunchShell, runManagedDeploy, common.CheckKubernetesDeployment, resolveRuntimeDeploySpec, common.DeployHelmChart)
+		return runResolvedOpenCommand(ctx, result, openOptions{}, runPrompt, newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell), runManagedDeploy, common.CheckKubernetesDeployment, resolveRuntimeDeploySpec, common.DeployHelmChart)
 	}
 
 	cmd := newRootCommand(runRoot)

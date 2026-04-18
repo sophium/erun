@@ -14,6 +14,7 @@ type ListStore interface {
 }
 
 type ListResult struct {
+	ConfigDirectory  string                     `json:"configDirectory,omitempty"`
 	Defaults         ListDefaultsResult         `json:"defaults"`
 	CurrentDirectory ListCurrentDirectoryResult `json:"currentDirectory"`
 	Tenants          []ListTenantResult         `json:"tenants,omitempty"`
@@ -37,12 +38,14 @@ type ListEffectiveTargetResult struct {
 	Environment       string `json:"environment"`
 	KubernetesContext string `json:"kubernetesContext"`
 	RepoPath          string `json:"repoPath"`
+	Snapshot          bool   `json:"snapshot"`
 }
 
 type ListTenantResult struct {
 	Name               string                  `json:"name"`
 	ProjectRoot        string                  `json:"projectRoot,omitempty"`
 	DefaultEnvironment string                  `json:"defaultEnvironment,omitempty"`
+	Snapshot           bool                    `json:"snapshot,omitempty"`
 	IsDefault          bool                    `json:"isDefault,omitempty"`
 	IsEffective        bool                    `json:"isEffective,omitempty"`
 	Environments       []ListEnvironmentResult `json:"environments,omitempty"`
@@ -75,7 +78,9 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 	}
 
 	effectiveResult, effectiveErr := ResolveOpen(store, params)
+	configDir, configDirErr := ERunConfigDir()
 	result := ListResult{
+		ConfigDirectory: strings.TrimSpace(configDir),
 		Defaults: ListDefaultsResult{
 			Tenant:      defaultTenant,
 			Environment: defaultEnvironment,
@@ -87,6 +92,9 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 		},
 		Tenants: make([]ListTenantResult, 0, len(tenants)),
 	}
+	if configDirErr != nil {
+		return ListResult{}, configDirErr
+	}
 
 	if effectiveErr != nil {
 		result.CurrentDirectory.EffectiveError = effectiveErr.Error()
@@ -96,6 +104,7 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 			Environment:       effectiveResult.Environment,
 			KubernetesContext: strings.TrimSpace(effectiveResult.EnvConfig.KubernetesContext),
 			RepoPath:          effectiveResult.RepoPath,
+			Snapshot:          deployTargetSnapshotEnabled(effectiveResult, nil),
 		}
 	}
 
@@ -109,6 +118,7 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 			Name:               tenant.Name,
 			ProjectRoot:        tenant.ProjectRoot,
 			DefaultEnvironment: tenant.DefaultEnvironment,
+			Snapshot:           tenant.SnapshotEnabled(),
 			IsDefault:          tenant.Name == defaultTenant,
 			IsEffective:        effectiveErr == nil && tenant.Name == effectiveResult.Tenant,
 			Environments:       make([]ListEnvironmentResult, 0, len(envs)),

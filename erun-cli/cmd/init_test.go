@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/adrg/xdg"
@@ -307,5 +308,70 @@ exit 1
 
 	if err := ensureKubernetesNamespace("cluster-local", "tenant-a-local"); err != nil {
 		t.Fatalf("ensureKubernetesNamespace failed: %v", err)
+	}
+}
+
+func TestInitCommandRemoteRequiresEnvironment(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	cmd := newTestRootCmd(testRootDeps{})
+	cmd.SetArgs([]string{"init", "--remote", "--tenant", "frs"})
+
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "environment is required with --remote") {
+		t.Fatalf("expected remote environment validation error, got %v", err)
+	}
+}
+
+func TestInitCommandMapsPositionalTenantAndEnvironmentArgs(t *testing.T) {
+	var got common.BootstrapInitParams
+	cmd := newInitCmd(func(_ common.Context, params common.BootstrapInitParams) error {
+		got = params
+		return nil
+	})
+	cmd.SetArgs([]string{"erun", "rtest"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if got.Tenant != "erun" || got.Environment != "rtest" {
+		t.Fatalf("unexpected init params: %+v", got)
+	}
+}
+
+func TestInitCommandHelpShowsPositionalTenantAndEnvironment(t *testing.T) {
+	cmd := newInitCmd(func(common.Context, common.BootstrapInitParams) error {
+		t.Fatal("did not expect init execution")
+		return nil
+	})
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stdout.String() + stderr.String()
+	if !strings.Contains(output, "Usage:\n  init [TENANT] [ENVIRONMENT] [flags]") {
+		t.Fatalf("unexpected help output: %q", output)
+	}
+}
+
+func TestInitCommandAcceptsRuntimeVersionOverride(t *testing.T) {
+	var got common.BootstrapInitParams
+	cmd := newInitCmd(func(_ common.Context, params common.BootstrapInitParams) error {
+		got = params
+		return nil
+	})
+	cmd.SetArgs([]string{"erun", "local", "--version", "1.0.19-snapshot-20260418141901"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if got.RuntimeVersion != "1.0.19-snapshot-20260418141901" {
+		t.Fatalf("unexpected init params: %+v", got)
 	}
 }

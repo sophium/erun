@@ -2,10 +2,12 @@ package eruncommon
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/adrg/xdg"
 )
@@ -29,31 +31,48 @@ type bootstrapTestRunner struct {
 	Confirm                   ConfirmFunc
 	PromptKubernetesContext   PromptValueFunc
 	PromptContainerRegistry   PromptValueFunc
+	PromptRemoteRepositoryURL PromptValueFunc
 	EnsureKubernetesNamespace NamespaceEnsurerFunc
 	LoadProjectConfig         ProjectConfigLoaderFunc
 	SaveProjectConfig         ProjectConfigSaverFunc
+	WaitForRemoteRuntime      RemoteRuntimeWaitFunc
+	RunRemoteCommand          RemoteCommandRunnerFunc
+	DeployHelmChart           HelmChartDeployerFunc
+	Sleep                     SleepFunc
 	Context                   Context
 }
 
 func (r bootstrapTestRunner) Run(params BootstrapInitParams) (BootstrapInitResult, error) {
-	return RunBootstrapInit(
-		r.Context,
-		params,
-		r.Store,
-		r.FindProjectRoot,
-		r.GetWorkingDir,
-		r.SelectTenant,
-		r.Confirm,
-		r.PromptKubernetesContext,
-		r.PromptContainerRegistry,
-		r.EnsureKubernetesNamespace,
-		r.LoadProjectConfig,
-		r.SaveProjectConfig,
-	)
+	return RunBootstrapInitWithDependencies(BootstrapInitDependencies{
+		Store:                     r.Store,
+		FindProjectRoot:           r.FindProjectRoot,
+		GetWorkingDir:             r.GetWorkingDir,
+		SelectTenant:              r.SelectTenant,
+		Confirm:                   r.Confirm,
+		PromptKubernetesContext:   r.PromptKubernetesContext,
+		PromptContainerRegistry:   r.PromptContainerRegistry,
+		PromptRemoteRepositoryURL: r.PromptRemoteRepositoryURL,
+		EnsureKubernetesNamespace: r.EnsureKubernetesNamespace,
+		LoadProjectConfig:         r.LoadProjectConfig,
+		SaveProjectConfig:         r.SaveProjectConfig,
+		WaitForRemoteRuntime:      r.WaitForRemoteRuntime,
+		RunRemoteCommand:          r.RunRemoteCommand,
+		DeployHelmChart:           r.DeployHelmChart,
+		Sleep:                     r.Sleep,
+		Context:                   r.Context,
+	}, params)
 }
 
 func (r bootstrapTestRunner) saveProjectContainerRegistry(projectRoot, envName, registry string) error {
-	return bootstrapRunner(r).saveProjectContainerRegistry(projectRoot, envName, registry)
+	return bootstrapRunner{
+		BootstrapInitDependencies: BootstrapInitDependencies{
+			Store:             r.Store,
+			LoadProjectConfig: r.LoadProjectConfig,
+			SaveProjectConfig: r.SaveProjectConfig,
+			Context:           r.Context,
+		},
+		Context: r.Context,
+	}.saveProjectContainerRegistry(projectRoot, envName, registry, false)
 }
 
 func TestBootstrapRunLoadsExistingConfiguration(t *testing.T) {
@@ -851,7 +870,63 @@ func TestBootstrapRunLogsOutsideGitRepository(t *testing.T) {
 	}
 }
 
-func TestBootstrapRunTenantConfirmationRejected(t *testing.T) {
+func TestBootstrapRunDecliningDefaultTenantStillInitializes(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	projectRoot := t.TempDir()
+	prompts := make([]string, 0, 2)
+	service := bootstrapTestRunner{
+		Store: ConfigStore{},
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		Confirm: func(label string) (bool, error) {
+			prompts = append(prompts, label)
+			return label != tenantConfirmationLabel("tenant-a", projectRoot), nil
+		},
+		PromptKubernetesContext: func(string) (string, error) {
+			return "cluster-review", nil
+		},
+		PromptContainerRegistry: func(string) (string, error) {
+			return DefaultContainerRegistry, nil
+		},
+		EnsureKubernetesNamespace: func(string, string) error {
+			return nil
+		},
+	}
+
+	result, err := service.Run(BootstrapInitParams{Environment: "review"})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	if result.CreatedERunConfig {
+		t.Fatalf("did not expect erun config to be created, got %+v", result)
+	}
+	if !result.CreatedTenantConfig || !result.CreatedEnvConfig {
+		t.Fatalf("expected tenant and environment config to be created, got %+v", result)
+	}
+	if result.TenantConfig.Name != "tenant-a" || result.EnvConfig.Name != "review" {
+		t.Fatalf("unexpected init result: %+v", result)
+	}
+	if _, _, err := LoadERunConfig(); !errors.Is(err, ErrNotInitialized) {
+		t.Fatalf("expected default tenant config to remain unset, got %v", err)
+	}
+	wantPrompts := []string{
+		tenantConfirmationLabel("tenant-a", projectRoot),
+		environmentConfirmationLabel("tenant-a", "review"),
+	}
+	if len(prompts) != len(wantPrompts) {
+		t.Fatalf("unexpected prompts: %+v", prompts)
+	}
+	for i := range wantPrompts {
+		if prompts[i] != wantPrompts[i] {
+			t.Fatalf("unexpected prompt %d: got %q want %q", i, prompts[i], wantPrompts[i])
+		}
+	}
+}
+
+func TestBootstrapRunDecliningDefaultTenantViaParamStillInitializes(t *testing.T) {
 	setupXDGConfigHome(t)
 
 	projectRoot := t.TempDir()
@@ -860,13 +935,32 @@ func TestBootstrapRunTenantConfirmationRejected(t *testing.T) {
 		FindProjectRoot: func() (string, string, error) {
 			return "tenant-a", projectRoot, nil
 		},
-		Confirm: func(string) (bool, error) {
-			return false, nil
+		PromptKubernetesContext: func(string) (string, error) {
+			return "cluster-review", nil
+		},
+		PromptContainerRegistry: func(string) (string, error) {
+			return DefaultContainerRegistry, nil
+		},
+		EnsureKubernetesNamespace: func(string, string) error {
+			return nil
 		},
 	}
 
-	if _, err := service.Run(BootstrapInitParams{}); !errors.Is(err, ErrTenantInitializationCancelled) {
-		t.Fatalf("expected tenant cancellation, got %v", err)
+	confirmTenant := false
+	confirmEnvironment := true
+	result, err := service.Run(BootstrapInitParams{
+		Environment:        "review",
+		ConfirmTenant:      &confirmTenant,
+		ConfirmEnvironment: &confirmEnvironment,
+	})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+	if result.CreatedERunConfig {
+		t.Fatalf("did not expect erun config to be created, got %+v", result)
+	}
+	if _, _, err := LoadERunConfig(); !errors.Is(err, ErrNotInitialized) {
+		t.Fatalf("expected default tenant config to remain unset, got %v", err)
 	}
 }
 
@@ -927,6 +1021,231 @@ func TestBootstrapRunPropagatesSaveErrors(t *testing.T) {
 
 	if _, err := service.Run(BootstrapInitParams{}); !errors.Is(err, ErrFailedToSaveConfig) {
 		t.Fatalf("expected save error, got %v", err)
+	}
+}
+
+func TestBootstrapRunRemoteInitializesTenantInPodWorktree(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	var waited ShellLaunchParams
+	scripts := make([]string, 0, 3)
+	service := bootstrapTestRunner{
+		Context: testContextWithLogger(&testTraceLogger{}),
+		Store:   ConfigStore{},
+		FindProjectRoot: func() (string, string, error) {
+			t.Fatal("did not expect local project detection for remote init")
+			return "", "", nil
+		},
+		Confirm: func(string) (bool, error) {
+			return true, nil
+		},
+		PromptKubernetesContext: func(string) (string, error) {
+			return "cluster-remote", nil
+		},
+		PromptContainerRegistry: func(string) (string, error) {
+			return "registry.example.com/remote", nil
+		},
+		PromptRemoteRepositoryURL: func(label string) (string, error) {
+			if label != remoteRepositoryLabel("frs", "dev") {
+				t.Fatalf("unexpected repository label: %q", label)
+			}
+			return "git@github.com:sophium/frs.git", nil
+		},
+		EnsureKubernetesNamespace: func(contextName, namespace string) error {
+			if contextName != "cluster-remote" || namespace != "frs-dev" {
+				t.Fatalf("unexpected namespace ensure: %s %s", contextName, namespace)
+			}
+			return nil
+		},
+		DeployHelmChart: func(params HelmDeployParams) error {
+			if params.WorktreeStorage != WorktreeStoragePVC {
+				t.Fatalf("expected pvc worktree storage, got %+v", params)
+			}
+			if params.WorktreeRepoName != "frs" {
+				t.Fatalf("unexpected worktree repo name: %+v", params)
+			}
+			if params.Version != "1.2.3" {
+				t.Fatalf("expected remote runtime version override, got %+v", params)
+			}
+			return nil
+		},
+		WaitForRemoteRuntime: func(req ShellLaunchParams) error {
+			waited = req
+			return nil
+		},
+		RunRemoteCommand: func(req ShellLaunchParams, script string) (RemoteCommandResult, error) {
+			scripts = append(scripts, script)
+			switch len(scripts) {
+			case 1:
+				return RemoteCommandResult{
+					Stdout: "repo_missing\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n",
+				}, nil
+			case 2, 3:
+				return RemoteCommandResult{}, nil
+			default:
+				t.Fatalf("unexpected remote command script:\n%s", script)
+				return RemoteCommandResult{}, nil
+			}
+		},
+	}
+
+	result, err := service.Run(BootstrapInitParams{
+		Tenant:         "frs",
+		Environment:    "dev",
+		Remote:         true,
+		RuntimeVersion: "1.2.3",
+	})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	remotePath := RemoteWorktreePathForRepoName("frs")
+	if result.TenantConfig.ProjectRoot != remotePath || !result.TenantConfig.Remote {
+		t.Fatalf("unexpected tenant config: %+v", result.TenantConfig)
+	}
+	if result.EnvConfig.RepoPath != remotePath || !result.EnvConfig.Remote {
+		t.Fatalf("unexpected env config: %+v", result.EnvConfig)
+	}
+	if result.EnvConfig.ContainerRegistry != "registry.example.com/remote" {
+		t.Fatalf("expected remote container registry to be persisted, got %+v", result.EnvConfig)
+	}
+	if waited.Dir != remotePath || waited.KubernetesContext != "cluster-remote" {
+		t.Fatalf("unexpected wait request: %+v", waited)
+	}
+	if len(scripts) != 3 {
+		t.Fatalf("expected state/access/clone remote commands, got %d", len(scripts))
+	}
+
+	savedEnv, _, err := LoadEnvConfig("frs", "dev")
+	if err != nil {
+		t.Fatalf("LoadEnvConfig failed: %v", err)
+	}
+	if !savedEnv.Remote || savedEnv.ContainerRegistry != "registry.example.com/remote" {
+		t.Fatalf("unexpected saved env config: %+v", savedEnv)
+	}
+}
+
+func TestBootstrapRunRemoteWaitsForSSHKeyImportAndRetries(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	logger := &testTraceLogger{}
+	var sleepCalls int
+	scripts := make([]string, 0, 5)
+	service := bootstrapTestRunner{
+		Context: testContextWithLogger(logger),
+		Store:   ConfigStore{},
+		Confirm: func(string) (bool, error) {
+			return true, nil
+		},
+		PromptKubernetesContext: func(string) (string, error) {
+			return "cluster-remote", nil
+		},
+		PromptContainerRegistry: func(string) (string, error) {
+			return DefaultContainerRegistry, nil
+		},
+		PromptRemoteRepositoryURL: func(string) (string, error) {
+			return "git@github.com:sophium/frs.git", nil
+		},
+		EnsureKubernetesNamespace: func(string, string) error {
+			return nil
+		},
+		DeployHelmChart: func(HelmDeployParams) error {
+			return nil
+		},
+		WaitForRemoteRuntime: func(ShellLaunchParams) error {
+			return nil
+		},
+		RunRemoteCommand: func(req ShellLaunchParams, script string) (RemoteCommandResult, error) {
+			scripts = append(scripts, script)
+			switch len(scripts) {
+			case 1:
+				return RemoteCommandResult{
+					Stdout: "repo_missing\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n",
+				}, nil
+			case 2, 3:
+				return RemoteCommandResult{
+					Stderr: "Permission denied (publickey).",
+				}, fmt.Errorf("exit status 128")
+			case 4, 5:
+				return RemoteCommandResult{}, nil
+			default:
+				t.Fatalf("unexpected remote command script:\n%s", script)
+				return RemoteCommandResult{}, nil
+			}
+		},
+		Sleep: func(duration time.Duration) {
+			sleepCalls++
+			if duration != remoteRepositoryAccessRetryInterval {
+				t.Fatalf("unexpected sleep duration: %s", duration)
+			}
+		},
+	}
+
+	_, err := service.Run(BootstrapInitParams{
+		Tenant:      "frs",
+		Environment: "dev",
+		Remote:      true,
+	})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	if sleepCalls != 2 {
+		t.Fatalf("expected 2 sleep calls, got %d", sleepCalls)
+	}
+	if len(scripts) != 5 {
+		t.Fatalf("expected state/access/access/access/clone remote commands, got %d", len(scripts))
+	}
+	if !logger.containsTrace("Waiting for the SSH key to be deployed to the git host. Rechecking every 2 seconds. Press Ctrl+C to cancel.") {
+		t.Fatalf("expected waiting message, got %+v", logger.traces)
+	}
+	if !logger.containsTrace("SSH key not active yet; retrying in 2 seconds...") {
+		t.Fatalf("expected retry message, got %+v", logger.traces)
+	}
+	if !logger.containsTrace("Remote repository access confirmed.") {
+		t.Fatalf("expected success message, got %+v", logger.traces)
+	}
+}
+
+func TestBootstrapRunRemoteRequestsRepositoryURLWhenCheckoutMissing(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	service := bootstrapTestRunner{
+		Context: testContextWithLogger(&testTraceLogger{}),
+		Store:   ConfigStore{},
+		Confirm: func(string) (bool, error) {
+			return true, nil
+		},
+		PromptKubernetesContext: func(string) (string, error) {
+			return "cluster-remote", nil
+		},
+		PromptContainerRegistry: func(string) (string, error) {
+			return DefaultContainerRegistry, nil
+		},
+		DeployHelmChart: func(HelmDeployParams) error {
+			return nil
+		},
+		WaitForRemoteRuntime: func(ShellLaunchParams) error {
+			return nil
+		},
+		RunRemoteCommand: func(req ShellLaunchParams, script string) (RemoteCommandResult, error) {
+			return RemoteCommandResult{
+				Stdout: "repo_missing\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n",
+			}, nil
+		},
+	}
+
+	_, err := service.Run(BootstrapInitParams{
+		Tenant:      "frs",
+		Environment: "dev",
+		Remote:      true,
+	})
+	interaction, ok := AsBootstrapInitInteraction(err)
+	if !ok {
+		t.Fatalf("expected interaction, got %v", err)
+	}
+	if interaction.Type != BootstrapInitInteractionRemoteRepository {
+		t.Fatalf("unexpected interaction: %+v", interaction)
 	}
 }
 

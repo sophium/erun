@@ -241,6 +241,81 @@ func TestResolveOpenRuntimeDeploySpecUsesTenantSpecificComponentBeforeSharedDefa
 	}
 }
 
+func TestResolveOpenRuntimeDeploySpecSkipsLocalBuildsWhenSnapshotDisabled(t *testing.T) {
+	projectRoot := t.TempDir()
+	createComponentHelmChartFixture(t, projectRoot, "frs-devops")
+	workdir := filepath.Join(projectRoot, "frs-devops", "docker", "frs-devops")
+	if err := os.MkdirAll(workdir, 0o755); err != nil {
+		t.Fatalf("mkdir docker dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "frs-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write module VERSION: %v", err)
+	}
+	if err := SaveProjectConfig(projectRoot, ProjectConfig{ContainerRegistry: "erunpaas"}); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	snapshot := false
+	spec, err := ResolveOpenRuntimeDeploySpec(ConfigStore{}, FindProjectRoot, ResolveDockerBuildContext, ResolveKubernetesDeployContext, nil, OpenResult{
+		Tenant:      "frs",
+		Environment: DefaultEnvironment,
+		RepoPath:    projectRoot,
+		TenantConfig: TenantConfig{
+			Snapshot: &snapshot,
+		},
+		EnvConfig: EnvConfig{
+			KubernetesContext: "cluster-local",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveOpenRuntimeDeploySpec failed: %v", err)
+	}
+	if len(spec.Builds) != 0 {
+		t.Fatalf("expected local runtime builds to be skipped, got %+v", spec.Builds)
+	}
+	if spec.Deploy.Version != "" {
+		t.Fatalf("expected deploy version override to remain empty, got %+v", spec.Deploy)
+	}
+}
+
+func TestResolveOpenRuntimeDeploySpecFallsBackToLegacyEnvironmentSnapshotSetting(t *testing.T) {
+	projectRoot := t.TempDir()
+	createComponentHelmChartFixture(t, projectRoot, "frs-devops")
+	workdir := filepath.Join(projectRoot, "frs-devops", "docker", "frs-devops")
+	if err := os.MkdirAll(workdir, 0o755); err != nil {
+		t.Fatalf("mkdir docker dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "frs-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write module VERSION: %v", err)
+	}
+	if err := SaveProjectConfig(projectRoot, ProjectConfig{ContainerRegistry: "erunpaas"}); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	snapshot := false
+	spec, err := ResolveOpenRuntimeDeploySpec(ConfigStore{}, FindProjectRoot, ResolveDockerBuildContext, ResolveKubernetesDeployContext, nil, OpenResult{
+		Tenant:      "frs",
+		Environment: DefaultEnvironment,
+		RepoPath:    projectRoot,
+		EnvConfig: EnvConfig{
+			KubernetesContext: "cluster-local",
+			Snapshot:          &snapshot,
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveOpenRuntimeDeploySpec failed: %v", err)
+	}
+	if len(spec.Builds) != 0 {
+		t.Fatalf("expected legacy environment snapshot setting to skip builds, got %+v", spec.Builds)
+	}
+}
+
 func TestResolveOpenRuntimeDeploySpecFallsBackToEmbeddedDefaultChart(t *testing.T) {
 	projectRoot := t.TempDir()
 

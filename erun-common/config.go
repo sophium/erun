@@ -25,6 +25,8 @@ type TenantConfig struct {
 	ProjectRoot        string
 	Name               string
 	DefaultEnvironment string
+	Remote             bool  `yaml:"remote,omitempty"`
+	Snapshot           *bool `yaml:"snapshot,omitempty"`
 }
 
 type EnvConfig struct {
@@ -32,6 +34,38 @@ type EnvConfig struct {
 	RepoPath          string
 	KubernetesContext string
 	ContainerRegistry string
+	Remote            bool  `yaml:"remote,omitempty"`
+	Snapshot          *bool `yaml:"snapshot,omitempty"`
+}
+
+func (c TenantConfig) SnapshotEnabled() bool {
+	if c.Snapshot == nil {
+		return true
+	}
+	return *c.Snapshot
+}
+
+func (c *TenantConfig) SetSnapshot(enabled bool) {
+	if c == nil {
+		return
+	}
+	value := enabled
+	c.Snapshot = &value
+}
+
+func (c EnvConfig) SnapshotEnabled() bool {
+	if c.Snapshot == nil {
+		return true
+	}
+	return *c.Snapshot
+}
+
+func (c *EnvConfig) SetSnapshot(enabled bool) {
+	if c == nil {
+		return
+	}
+	value := enabled
+	c.Snapshot = &value
 }
 
 type ProjectEnvironmentConfig struct {
@@ -118,6 +152,14 @@ var (
 	ErrFailedToSaveConfig = errors.New("could not save struct to yaml file")
 	ErrNotInGitRepository = errors.New("cannot find git project")
 )
+
+func ERunConfigDir() (string, error) {
+	configHome := strings.TrimSpace(xdg.ConfigHome)
+	if configHome == "" {
+		return "", ErrNoUserDataFolder
+	}
+	return filepath.Join(configHome, configRoot), nil
+}
 
 type ConfigStore struct{}
 
