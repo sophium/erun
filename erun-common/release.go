@@ -145,6 +145,9 @@ func resolveReleaseSpec(findProjectRoot ProjectFinderFunc, loadProjectConfig Pro
 	}
 
 	stages := make([]ReleaseStage, 0, 2)
+	if syncStage := newSyncRemoteStage(projectRoot, branch); len(syncStage.GitCommands) > 0 {
+		stages = append(stages, syncStage)
+	}
 	releaseStage := newReleaseStage(projectRoot, chartUpdates, version, mode)
 	if len(releaseStage.FileUpdates) > 0 || len(releaseStage.GitCommands) > 0 {
 		stages = append(stages, releaseStage)
@@ -210,6 +213,15 @@ func RunReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 	}
 	for _, image := range spec.DockerImages {
 		ctx.Trace("docker image: " + image.Tag)
+	}
+	if !ctx.DryRun {
+		clean, err := gitWorktreeClean(spec.ProjectRoot)
+		if err != nil {
+			return err
+		}
+		if !clean {
+			return fmt.Errorf("release requires a clean git worktree; commit or stash changes first")
+		}
 	}
 
 	for _, stage := range spec.Stages {
@@ -342,6 +354,14 @@ func GitCommandRunner(dir string, stdout, stderr io.Writer, args ...string) erro
 	cmd.Stderr = stderr
 	cmd.Env = gitCommandEnv(dir)
 	return cmd.Run()
+}
+
+func gitWorktreeClean(projectRoot string) (bool, error) {
+	output, err := exec.Command("git", "-C", projectRoot, "status", "--porcelain").CombinedOutput()
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(output)) == "", nil
 }
 
 func gitCommandEnv(dir string) []string {
@@ -640,6 +660,21 @@ func newBumpStage(projectRoot, nextVersion string, fileUpdate ReleaseFileUpdate)
 		GitCommands: []ReleaseCommandSpec{
 			releaseGitCommand(projectRoot, "add", releaseGitPath(projectRoot, fileUpdate.Path)),
 			releaseGitCommand(projectRoot, "commit", "-m", "[skip ci] prepare "+nextVersion),
+		},
+	}
+}
+
+func newSyncRemoteStage(projectRoot, branch string) ReleaseStage {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return ReleaseStage{}
+	}
+
+	return ReleaseStage{
+		Name: "sync-remote",
+		GitCommands: []ReleaseCommandSpec{
+			releaseGitCommand(projectRoot, "fetch", "origin"),
+			releaseGitCommand(projectRoot, "rebase", "origin/"+branch),
 		},
 	}
 }
