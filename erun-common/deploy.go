@@ -18,6 +18,11 @@ const DefaultHelmDeploymentTimeout = "2m0s"
 
 const DevopsComponentName = "erun-devops"
 
+const (
+	WorktreeStorageHost = "host"
+	WorktreeStoragePVC  = "pvc"
+)
+
 type DeployStore interface {
 	OpenStore
 	ListTenantConfigs() ([]TenantConfig, error)
@@ -43,6 +48,8 @@ type HelmDeployParams struct {
 	Environment       string
 	Namespace         string
 	KubernetesContext string
+	WorktreeStorage   string
+	WorktreeRepoName  string
 	WorktreeHostPath  string
 	Version           string
 	Timeout           string
@@ -58,6 +65,8 @@ type HelmDeploySpec struct {
 	Environment       string
 	Namespace         string
 	KubernetesContext string
+	WorktreeStorage   string
+	WorktreeRepoName  string
 	WorktreeHostPath  string
 	Version           string
 	Timeout           string
@@ -537,10 +546,27 @@ func newHelmDeploySpec(target OpenResult, deployContext KubernetesDeployContext,
 		Environment:       target.Environment,
 		Namespace:         KubernetesNamespaceName(target.Tenant, target.Environment),
 		KubernetesContext: target.EnvConfig.KubernetesContext,
+		WorktreeStorage:   resolveWorktreeStorage(target),
+		WorktreeRepoName:  resolveWorktreeRepoName(target.RepoPath),
 		WorktreeHostPath:  resolveWorktreeHostPath(target.RepoPath),
 		Version:           version,
 		Timeout:           DefaultHelmDeploymentTimeout,
 	}, nil
+}
+
+func resolveWorktreeStorage(target OpenResult) string {
+	if target.RemoteRepo() {
+		return WorktreeStoragePVC
+	}
+	return WorktreeStorageHost
+}
+
+func resolveWorktreeRepoName(repoPath string) string {
+	repoName := strings.TrimSpace(filepath.Base(strings.TrimSpace(repoPath)))
+	if repoName == "" || repoName == "." || repoName == string(filepath.Separator) {
+		return "worktree"
+	}
+	return repoName
 }
 
 func resolveWorktreeHostPath(repoPath string) string {
@@ -567,6 +593,8 @@ func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 		Environment:       d.Environment,
 		Namespace:         d.Namespace,
 		KubernetesContext: d.KubernetesContext,
+		WorktreeStorage:   d.WorktreeStorage,
+		WorktreeRepoName:  d.WorktreeRepoName,
 		WorktreeHostPath:  d.WorktreeHostPath,
 		Version:           d.Version,
 		Timeout:           d.Timeout,
@@ -591,6 +619,8 @@ func (d HelmDeploySpec) command() commandSpec {
 		"-f", d.ValuesFilePath,
 		"--set-string", "tenant="+d.Tenant,
 		"--set-string", "environment="+d.Environment,
+		"--set-string", "worktreeStorage="+d.WorktreeStorage,
+		"--set-string", "worktreeRepoName="+d.WorktreeRepoName,
 		"--set-string", "worktreeHostPath="+d.WorktreeHostPath,
 		d.ReleaseName,
 		d.ChartPath,
@@ -827,6 +857,8 @@ func DeployHelmChart(params HelmDeployParams) error {
 		"-f", params.ValuesFilePath,
 		"--set-string", "tenant="+params.Tenant,
 		"--set-string", "environment="+params.Environment,
+		"--set-string", "worktreeStorage="+params.WorktreeStorage,
+		"--set-string", "worktreeRepoName="+params.WorktreeRepoName,
 		"--set-string", "worktreeHostPath="+params.WorktreeHostPath,
 		params.ReleaseName,
 		chartPath,

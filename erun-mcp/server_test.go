@@ -368,7 +368,7 @@ func TestBuildToolPreviewVerboseIncludesTrace(t *testing.T) {
 	if len(output.Trace) == 0 {
 		t.Fatalf("expected trace output at preview verbosity 1, got %+v", output)
 	}
-	want := "docker build -t erunpaas/erun-devops:1.1.0 -f " + filepath.Join(componentDir, "Dockerfile") + " ."
+	want := "docker build -t erunpaas/erun-devops:1.1.0 --build-arg ERUN_VERSION=1.1.0 -f " + filepath.Join(componentDir, "Dockerfile") + " ."
 	if output.Trace[0] != "cd "+projectRoot+" && "+want {
 		t.Fatalf("unexpected trace output: %+v", output.Trace)
 	}
@@ -599,6 +599,87 @@ func TestInitToolReturnsInteractionWhenSharedInitNeedsInput(t *testing.T) {
 	if output.Executed {
 		t.Fatalf("expected non-executed interaction output, got %+v", output)
 	}
+}
+
+func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
+	handler := initTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{},
+		Store:   initInteractionStore{},
+		DeployHelmChart: func(eruncommon.HelmDeployParams) error {
+			return nil
+		},
+		WaitForRemoteRuntime: func(eruncommon.ShellLaunchParams) error {
+			return nil
+		},
+		RunRemoteCommand: func(eruncommon.ShellLaunchParams, string) (eruncommon.RemoteCommandResult, error) {
+			return eruncommon.RemoteCommandResult{
+				Stdout: "repo_missing\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n",
+			}, nil
+		},
+	}))
+
+	_, output, err := handler(context.Background(), nil, InitInput{
+		Tenant:             "frs",
+		Environment:        "dev",
+		Remote:             true,
+		KubernetesContext:  "cluster-remote",
+		ContainerRegistry:  eruncommon.DefaultContainerRegistry,
+		ConfirmTenant:      boolPtr(true),
+		ConfirmEnvironment: boolPtr(true),
+	})
+	if err != nil {
+		t.Fatalf("initTool failed: %v", err)
+	}
+	if output.Interaction == nil {
+		t.Fatalf("expected interaction output, got %+v", output)
+	}
+	if output.Interaction.Type != eruncommon.BootstrapInitInteractionRemoteRepository {
+		t.Fatalf("unexpected interaction: %+v", output.Interaction)
+	}
+}
+
+func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
+	var deployedVersion string
+	handler := initTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{},
+		Store:   initInteractionStore{},
+		DeployHelmChart: func(params eruncommon.HelmDeployParams) error {
+			deployedVersion = params.Version
+			return nil
+		},
+		WaitForRemoteRuntime: func(eruncommon.ShellLaunchParams) error {
+			return nil
+		},
+		RunRemoteCommand: func(eruncommon.ShellLaunchParams, string) (eruncommon.RemoteCommandResult, error) {
+			return eruncommon.RemoteCommandResult{
+				Stdout: "repo_exists\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n",
+			}, nil
+		},
+	}))
+
+	_, output, err := handler(context.Background(), nil, InitInput{
+		Tenant:             "tenant-a",
+		Environment:        "dev",
+		Version:            "1.0.19-snapshot-20260418141901",
+		Remote:             true,
+		KubernetesContext:  "cluster-dev",
+		ContainerRegistry:  eruncommon.DefaultContainerRegistry,
+		ConfirmTenant:      boolPtr(true),
+		ConfirmEnvironment: boolPtr(true),
+	})
+	if err != nil {
+		t.Fatalf("initTool failed: %v", err)
+	}
+	if output.Interaction != nil {
+		t.Fatalf("unexpected interaction output: %+v", output)
+	}
+	if deployedVersion != "1.0.19-snapshot-20260418141901" {
+		t.Fatalf("unexpected deployed version %q", deployedVersion)
+	}
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 func decodeStructuredVersion(t *testing.T, content any) map[string]any {

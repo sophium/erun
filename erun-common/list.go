@@ -14,6 +14,7 @@ type ListStore interface {
 }
 
 type ListResult struct {
+	ConfigDirectory  string                     `json:"configDirectory,omitempty"`
 	Defaults         ListDefaultsResult         `json:"defaults"`
 	CurrentDirectory ListCurrentDirectoryResult `json:"currentDirectory"`
 	Tenants          []ListTenantResult         `json:"tenants,omitempty"`
@@ -77,7 +78,9 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 	}
 
 	effectiveResult, effectiveErr := ResolveOpen(store, params)
+	configDir, configDirErr := ERunConfigDir()
 	result := ListResult{
+		ConfigDirectory: strings.TrimSpace(configDir),
 		Defaults: ListDefaultsResult{
 			Tenant:      defaultTenant,
 			Environment: defaultEnvironment,
@@ -88,6 +91,9 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 			ConfiguredTenant: configuredTenantForRepo(currentRepoName, tenants),
 		},
 		Tenants: make([]ListTenantResult, 0, len(tenants)),
+	}
+	if configDirErr != nil {
+		return ListResult{}, configDirErr
 	}
 
 	if effectiveErr != nil {

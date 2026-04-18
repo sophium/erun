@@ -30,6 +30,8 @@ type testRootDeps struct {
 	DeployHelmChart                common.HelmChartDeployerFunc
 	LaunchMCP                      MCPLauncher
 	LaunchShell                    common.ShellLauncherFunc
+	WaitForRemoteRuntime           common.RemoteRuntimeWaitFunc
+	RunRemoteCommand               common.RemoteCommandRunnerFunc
 	Now                            common.NowFunc
 }
 
@@ -144,7 +146,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 		}
 		return deps.EnsureKubernetesNamespace(contextName, namespace)
 	}
-	runInit := newRunInit(store, findProjectRoot, promptRunner, selectRunner, listKubernetesContexts, ensureKubernetesNamespace)
+	runInit := newRunInit(store, findProjectRoot, promptRunner, selectRunner, listKubernetesContexts, ensureKubernetesNamespace, deps.WaitForRemoteRuntime, deps.RunRemoteCommand, deployHelmChart)
 	runInitForArgs := newRunInitForArgs(store, runInit)
 
 	initCmd := newInitCmd(runInit)

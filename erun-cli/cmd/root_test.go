@@ -430,6 +430,80 @@ func TestInitCommandPreservesExistingTenantDefaultEnvironmentWhenFlagOmitted(t *
 	}
 }
 
+func TestInitCommandDecliningDefaultTenantStillInitializes(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	promptLabels := make([]string, 0, 3)
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "petios", projectRoot, nil
+		},
+		PromptRunner: func(prompt promptui.Prompt) (string, error) {
+			label := fmt.Sprint(prompt.Label)
+			promptLabels = append(promptLabels, label)
+			if prompt.IsConfirm && label == fmt.Sprintf("Initialize tenant %q (path: %s) as the default tenant?", "petios", projectRoot) {
+				return "n", nil
+			}
+			if prompt.IsConfirm {
+				return "y", nil
+			}
+			return "", nil
+		},
+		SelectRunner: func(prompt promptui.Select) (int, string, error) {
+			if fmt.Sprint(prompt.Label) != fmt.Sprintf("Kubernetes context for environment %q in tenant %q", "review", "petios") {
+				t.Fatalf("unexpected select prompt: %+v", prompt)
+			}
+			return 0, "cluster-review", nil
+		},
+		ListKubernetesContexts: func() ([]string, error) {
+			return []string{"cluster-review"}, nil
+		},
+		EnsureKubernetesNamespace: func(contextName, namespace string) error {
+			if contextName != "cluster-review" || namespace != "petios-review" {
+				t.Fatalf("unexpected namespace ensure request: context=%q namespace=%q", contextName, namespace)
+			}
+			return nil
+		},
+	})
+	cmd.SetArgs([]string{"init", "--tenant", "petios", "--environment", "review"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if _, _, err := common.LoadERunConfig(); !errors.Is(err, common.ErrNotInitialized) {
+		t.Fatalf("expected erun config to remain absent, got %v", err)
+	}
+	tenantConfig, _, err := common.LoadTenantConfig("petios")
+	if err != nil {
+		t.Fatalf("LoadTenantConfig failed: %v", err)
+	}
+	if tenantConfig.ProjectRoot != projectRoot || tenantConfig.DefaultEnvironment != "review" {
+		t.Fatalf("unexpected tenant config: %+v", tenantConfig)
+	}
+	envConfig, _, err := common.LoadEnvConfig("petios", "review")
+	if err != nil {
+		t.Fatalf("LoadEnvConfig failed: %v", err)
+	}
+	if envConfig.KubernetesContext != "cluster-review" || envConfig.RepoPath != projectRoot {
+		t.Fatalf("unexpected env config: %+v", envConfig)
+	}
+	wantPromptLabels := []string{
+		fmt.Sprintf("Initialize tenant %q (path: %s) as the default tenant?", "petios", projectRoot),
+		fmt.Sprintf("Initialize default environment %q for tenant %q?", "review", "petios"),
+		fmt.Sprintf("Container registry for environment %q in tenant %q", "review", "petios"),
+	}
+	if len(promptLabels) != len(wantPromptLabels) {
+		t.Fatalf("unexpected prompts: %+v", promptLabels)
+	}
+	for i := range wantPromptLabels {
+		if promptLabels[i] != wantPromptLabels[i] {
+			t.Fatalf("unexpected prompt %d: got %q want %q", i, promptLabels[i], wantPromptLabels[i])
+		}
+	}
+}
+
 func TestRootCommandHelpFlagPrintsHelp(t *testing.T) {
 	cmd := newTestRootCmd(testRootDeps{})
 	buf := new(bytes.Buffer)

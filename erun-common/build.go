@@ -758,7 +758,7 @@ func (b DockerBuildSpec) command() commandSpec {
 	return commandSpec{
 		Dir:  b.ContextDir,
 		Name: "docker",
-		Args: []string{"build", "-t", b.Image.Tag, "-f", b.DockerfilePath, "."},
+		Args: dockerBuildArgs(b.Image.Tag, b.DockerfilePath),
 	}
 }
 
@@ -1064,11 +1064,32 @@ func FindComponentDockerBuildContext(projectRoot, componentName string) (DockerB
 }
 
 func DockerImageBuilder(dir, dockerfilePath, tag string, stdout, stderr io.Writer) error {
-	cmd := exec.Command("docker", "build", "-t", tag, "-f", dockerfilePath, ".")
+	cmd := exec.Command("docker", dockerBuildArgs(tag, dockerfilePath)...)
 	cmd.Dir = dir
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return cmd.Run()
+}
+
+func dockerBuildArgs(tag, dockerfilePath string) []string {
+	args := []string{"build", "-t", tag}
+	if version := dockerImageTagVersion(tag); version != "" {
+		args = append(args, "--build-arg", "ERUN_VERSION="+version)
+	}
+	args = append(args, "-f", dockerfilePath, ".")
+	return args
+}
+
+func dockerImageTagVersion(tag string) string {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return ""
+	}
+	index := strings.LastIndex(tag, ":")
+	if index < 0 || index == len(tag)-1 {
+		return ""
+	}
+	return tag[index+1:]
 }
 
 func BuildScriptRunner(dir, scriptPath string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {

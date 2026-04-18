@@ -57,33 +57,37 @@ func newRootCommand(runRoot func(*cobra.Command, []string) error) *cobra.Command
 	return cmd
 }
 
-func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinderFunc, promptRunner PromptRunner, selectRunner SelectRunner, listKubernetesContexts KubernetesContextsLister, ensureKubernetesNamespace common.NamespaceEnsurerFunc) func(common.Context, common.BootstrapInitParams) error {
+func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinderFunc, promptRunner PromptRunner, selectRunner SelectRunner, listKubernetesContexts KubernetesContextsLister, ensureKubernetesNamespace common.NamespaceEnsurerFunc, waitForRemoteRuntime common.RemoteRuntimeWaitFunc, runRemoteCommand common.RemoteCommandRunnerFunc, deployHelmChart common.HelmChartDeployerFunc) func(common.Context, common.BootstrapInitParams) error {
 	return func(ctx common.Context, params common.BootstrapInitParams) error {
 		if strings.TrimSpace(params.RuntimeVersion) == "" {
 			params.RuntimeVersion = currentBuildInfo().Version
 		}
-		_, err := common.RunBootstrapInit(
-			ctx,
-			params,
-			common.TraceBootstrapStore(ctx, store),
-			findProjectRoot,
-			nil,
-			func(tenants []common.TenantConfig) (common.TenantSelectionResult, error) {
+		_, err := common.RunBootstrapInitWithDependencies(common.BootstrapInitDependencies{
+			Store:           common.TraceBootstrapStore(ctx, store),
+			FindProjectRoot: findProjectRoot,
+			SelectTenant: func(tenants []common.TenantConfig) (common.TenantSelectionResult, error) {
 				return selectTenantPrompt(selectRunner, tenants)
 			},
-			func(label string) (bool, error) {
+			Confirm: func(label string) (bool, error) {
 				return confirmPrompt(promptRunner, label)
 			},
-			func(label string) (string, error) {
+			PromptKubernetesContext: func(label string) (string, error) {
 				return kubernetesContextPrompt(promptRunner, selectRunner, listKubernetesContexts, label)
 			},
-			func(label string) (string, error) {
+			PromptContainerRegistry: func(label string) (string, error) {
 				return containerRegistryPrompt(promptRunner, label)
 			},
-			common.TraceNamespaceEnsurer(ctx, ensureKubernetesNamespace),
-			common.LoadProjectConfig,
-			common.TraceProjectConfigSaver(ctx, common.SaveProjectConfig),
-		)
+			PromptRemoteRepositoryURL: func(label string) (string, error) {
+				return remoteRepositoryURLPrompt(promptRunner, label)
+			},
+			EnsureKubernetesNamespace: common.TraceNamespaceEnsurer(ctx, ensureKubernetesNamespace),
+			LoadProjectConfig:         common.LoadProjectConfig,
+			SaveProjectConfig:         common.TraceProjectConfigSaver(ctx, common.SaveProjectConfig),
+			WaitForRemoteRuntime:      waitForRemoteRuntime,
+			RunRemoteCommand:          runRemoteCommand,
+			DeployHelmChart:           deployHelmChart,
+			Context:                   ctx,
+		}, params)
 		if err != nil {
 			if errors.Is(err, common.ErrNotInGitRepository) {
 				return internal.MarkReported(common.ErrNotInGitRepository)

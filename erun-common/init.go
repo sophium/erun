@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/adrg/xdg"
 	"gopkg.in/yaml.v3"
@@ -44,6 +45,9 @@ type (
 	NamespaceEnsurerFunc    func(string, string) error
 	ProjectConfigLoaderFunc func(string) (ProjectConfig, string, error)
 	ProjectConfigSaverFunc  func(string, ProjectConfig) error
+	RemoteRuntimeWaitFunc   func(ShellLaunchParams) error
+	RemoteCommandRunnerFunc func(ShellLaunchParams, string) (RemoteCommandResult, error)
+	SleepFunc               func(time.Duration)
 )
 
 type (
@@ -51,6 +55,10 @@ type (
 	TenantSelectionResult struct {
 		Tenant     string
 		Initialize bool
+	}
+	RemoteCommandResult struct {
+		Stdout string
+		Stderr string
 	}
 )
 
@@ -63,8 +71,11 @@ type BootstrapInitParams struct {
 	RuntimeVersion           string
 	KubernetesContext        string
 	ContainerRegistry        string
+	Remote                   bool
+	RemoteRepositoryURL      string
 	ConfirmTenant            *bool
 	ConfirmEnvironment       *bool
+	ConfirmRemoteKeyImport   *bool
 	AutoApprove              bool
 	ResolveTenant            bool
 }
@@ -77,6 +88,8 @@ const (
 	BootstrapInitInteractionConfirmEnvironment BootstrapInitInteractionType = "confirm_environment"
 	BootstrapInitInteractionKubernetesContext  BootstrapInitInteractionType = "input_kubernetes_context"
 	BootstrapInitInteractionContainerRegistry  BootstrapInitInteractionType = "input_container_registry"
+	BootstrapInitInteractionRemoteRepository   BootstrapInitInteractionType = "input_remote_repository"
+	BootstrapInitInteractionConfirmRemoteKey   BootstrapInitInteractionType = "confirm_remote_key"
 )
 
 type BootstrapInitInteraction struct {
@@ -84,6 +97,7 @@ type BootstrapInitInteraction struct {
 	Label        string                       `json:"label"`
 	Options      []string                     `json:"options,omitempty"`
 	DefaultValue string                       `json:"defaultValue,omitempty"`
+	Details      string                       `json:"details,omitempty"`
 }
 
 type BootstrapInitInteractionError struct {
@@ -111,7 +125,7 @@ type BootstrapInitResult struct {
 	CreatedEnvConfig    bool
 }
 
-type bootstrapRunner struct {
+type BootstrapInitDependencies struct {
 	Store                     BootstrapStore
 	FindProjectRoot           ProjectFinderFunc
 	GetWorkingDir             WorkDirFunc
@@ -119,14 +133,24 @@ type bootstrapRunner struct {
 	Confirm                   ConfirmFunc
 	PromptKubernetesContext   PromptValueFunc
 	PromptContainerRegistry   PromptValueFunc
+	PromptRemoteRepositoryURL PromptValueFunc
 	EnsureKubernetesNamespace NamespaceEnsurerFunc
 	LoadProjectConfig         ProjectConfigLoaderFunc
 	SaveProjectConfig         ProjectConfigSaverFunc
+	WaitForRemoteRuntime      RemoteRuntimeWaitFunc
+	RunRemoteCommand          RemoteCommandRunnerFunc
+	DeployHelmChart           HelmChartDeployerFunc
+	Sleep                     SleepFunc
 	Context                   Context
 }
 
+type bootstrapRunner struct {
+	BootstrapInitDependencies
+	Context Context
+}
+
 func RunBootstrapInit(ctx Context, params BootstrapInitParams, store BootstrapStore, findProjectRoot ProjectFinderFunc, getWorkingDir WorkDirFunc, selectTenant SelectTenantFunc, confirm ConfirmFunc, promptKubernetesContext PromptValueFunc, promptContainerRegistry PromptValueFunc, ensureKubernetesNamespace NamespaceEnsurerFunc, loadProjectConfig ProjectConfigLoaderFunc, saveProjectConfig ProjectConfigSaverFunc) (BootstrapInitResult, error) {
-	return bootstrapRunner{
+	return RunBootstrapInitWithDependencies(BootstrapInitDependencies{
 		Store:                     store,
 		FindProjectRoot:           findProjectRoot,
 		GetWorkingDir:             getWorkingDir,
@@ -138,6 +162,13 @@ func RunBootstrapInit(ctx Context, params BootstrapInitParams, store BootstrapSt
 		LoadProjectConfig:         loadProjectConfig,
 		SaveProjectConfig:         saveProjectConfig,
 		Context:                   ctx,
+	}, params)
+}
+
+func RunBootstrapInitWithDependencies(deps BootstrapInitDependencies, params BootstrapInitParams) (BootstrapInitResult, error) {
+	return bootstrapRunner{
+		BootstrapInitDependencies: deps,
+		Context:                   deps.Context,
 	}.run(params)
 }
 
@@ -243,12 +274,26 @@ func (s tracedBootstrapStore) SaveEnvConfig(tenant string, config EnvConfig) err
 func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, error) {
 	s = s.withDefaults()
 	params = normalizeBootstrapParams(params)
+	remoteMode := params.Remote
 
 	var result BootstrapInitResult
 	var detected projectContext
 	var tenants []TenantConfig
 	var tenantsLoaded bool
 	var setDefaultTenant bool
+	var defaultTenantResolved bool
+
+	if remoteMode {
+		if params.InitializeCurrentProject || params.ResolveTenant {
+			return result, fmt.Errorf("remote initialization requires an explicit tenant")
+		}
+		if params.Tenant == "" {
+			return result, fmt.Errorf("tenant is required with --remote")
+		}
+		if params.Environment == "" {
+			return result, fmt.Errorf("environment is required with --remote")
+		}
+	}
 
 	findProject := func() (projectContext, error) {
 		if detected.loaded {
@@ -292,6 +337,19 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 		return tenants, nil
 	}
 
+	resolveDefaultTenant := func(tenant, projectRoot string) error {
+		if defaultTenantResolved {
+			return nil
+		}
+		updateDefaultTenant, err := s.confirmTenant(params, tenant, projectRoot)
+		if err != nil {
+			return err
+		}
+		setDefaultTenant = updateDefaultTenant
+		defaultTenantResolved = true
+		return nil
+	}
+
 	toolConfig, configPath, err := s.Store.LoadERunConfig()
 	toolConfigMissing := false
 	s.Context.Trace("Loading erun tool configuration, configPath=" + configPath)
@@ -304,7 +362,9 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 		}
 		tenant := params.Tenant
 		projectRoot := params.ProjectRoot
-		if tenant == "" || projectRoot == "" {
+		if remoteMode {
+			projectRoot = RemoteWorktreePathForRepoName(tenant)
+		} else if tenant == "" || projectRoot == "" {
 			project, detectErr := detectProject()
 			if detectErr != nil {
 				return result, detectErr
@@ -317,25 +377,26 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 			}
 		}
 
-		if err := s.confirmTenant(params, tenant, projectRoot); err != nil {
+		if err := resolveDefaultTenant(tenant, projectRoot); err != nil {
 			return result, err
 		}
-		setDefaultTenant = true
 
-		s.Context.Trace("Saving default config")
-		toolConfig = ERunConfig{DefaultTenant: tenant}
-		if err := s.Store.SaveERunConfig(toolConfig); err != nil {
-			return result, err
+		if setDefaultTenant {
+			s.Context.Trace("Saving default config")
+			toolConfig = ERunConfig{DefaultTenant: tenant}
+			if err := s.Store.SaveERunConfig(toolConfig); err != nil {
+				return result, err
+			}
+			result.CreatedERunConfig = true
+			toolConfigMissing = false
 		}
-		result.CreatedERunConfig = true
-		toolConfigMissing = false
 	case err != nil:
 		return result, err
 	}
 	s.Context.Trace("Loaded erun tool configuration")
 
 	tenant := params.Tenant
-	if tenant == "" {
+	if tenant == "" && !remoteMode {
 		project, detectErr := findProject()
 		switch {
 		case detectErr == nil:
@@ -360,7 +421,7 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 			}
 		}
 	}
-	if tenant == "" {
+	if tenant == "" && !remoteMode {
 		tenant = toolConfig.DefaultTenant
 	}
 	if tenant == "" && params.ResolveTenant {
@@ -378,21 +439,25 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 			}
 		}
 	}
-	if tenant == "" {
+	if tenant == "" && !remoteMode {
 		project, detectErr := detectProject()
 		if detectErr != nil {
 			return result, detectErr
 		}
 		tenant = project.tenant
 	}
+	if remoteMode {
+		params.ProjectRoot = RemoteWorktreePathForRepoName(tenant)
+	}
 
 	s.Context.Trace("Loading tenant configuration")
 	tenantConfig, _, err := s.Store.LoadTenantConfig(tenant)
+	tenantConfigChanged := false
 	switch {
 	case err == nil:
 	case errors.Is(err, ErrNotInitialized):
 		projectRoot := params.ProjectRoot
-		if projectRoot == "" {
+		if projectRoot == "" && !remoteMode {
 			project, detectErr := detectProject()
 			if detectErr != nil {
 				return result, detectErr
@@ -400,11 +465,10 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 			projectRoot = project.root
 		}
 
-		if !setDefaultTenant {
-			if err := s.confirmTenant(params, tenant, projectRoot); err != nil {
+		if !defaultTenantResolved {
+			if err := resolveDefaultTenant(tenant, projectRoot); err != nil {
 				return result, err
 			}
-			setDefaultTenant = true
 		}
 
 		defaultEnvironment := params.Environment
@@ -417,6 +481,7 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 			Name:               tenant,
 			ProjectRoot:        projectRoot,
 			DefaultEnvironment: defaultEnvironment,
+			Remote:             remoteMode,
 		}
 		if err := s.Store.SaveTenantConfig(tenantConfig); err != nil {
 			return result, err
@@ -428,6 +493,17 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 
 	if tenantConfig.Name == "" {
 		tenantConfig.Name = tenant
+		tenantConfigChanged = true
+	}
+	if remoteMode {
+		if tenantConfig.ProjectRoot != params.ProjectRoot {
+			tenantConfig.ProjectRoot = params.ProjectRoot
+			tenantConfigChanged = true
+		}
+		if !tenantConfig.Remote {
+			tenantConfig.Remote = true
+			tenantConfigChanged = true
+		}
 	}
 	s.Context.Trace("Loaded tenant configuration")
 
@@ -440,6 +516,9 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 	}
 	if tenantConfig.DefaultEnvironment == "" {
 		tenantConfig.DefaultEnvironment = envName
+		tenantConfigChanged = true
+	}
+	if tenantConfigChanged {
 		if err := s.Store.SaveTenantConfig(tenantConfig); err != nil {
 			return result, err
 		}
@@ -447,6 +526,7 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 
 	s.Context.Trace("Loading environment configuration")
 	envConfig, _, err := s.Store.LoadEnvConfig(tenant, envName)
+	envConfigChanged := false
 	switch {
 	case err == nil:
 	case errors.Is(err, ErrNotInitialized):
@@ -454,7 +534,7 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 		if envProjectRoot == "" {
 			envProjectRoot = tenantConfig.ProjectRoot
 		}
-		if envProjectRoot == "" {
+		if envProjectRoot == "" && !remoteMode {
 			project, detectErr := findProject()
 			if detectErr == nil {
 				envProjectRoot = project.root
@@ -478,7 +558,7 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 		if err != nil {
 			return result, err
 		}
-		if err := s.saveProjectContainerRegistry(envProjectRoot, envName, containerRegistry); err != nil {
+		if err := s.saveProjectContainerRegistry(envProjectRoot, envName, containerRegistry, remoteMode); err != nil {
 			return result, err
 		}
 
@@ -487,14 +567,28 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 			Name:              envName,
 			RepoPath:          envProjectRoot,
 			KubernetesContext: kubernetesContext,
+			Remote:            remoteMode,
 		}
 		if err := saveEnvConfig(s.Store, tenant, envConfig); err != nil {
 			return result, err
 		}
 		envConfig.ContainerRegistry = containerRegistry
+		if remoteMode && containerRegistry != "" {
+			envConfigChanged = true
+		}
 		result.CreatedEnvConfig = true
 	case err != nil:
 		return result, err
+	}
+	if remoteMode {
+		if envConfig.RepoPath != params.ProjectRoot {
+			envConfig.RepoPath = params.ProjectRoot
+			envConfigChanged = true
+		}
+		if !envConfig.Remote {
+			envConfig.Remote = true
+			envConfigChanged = true
+		}
 	}
 
 	kubernetesContext, err := s.resolveKubernetesContext(params, tenant, envName, envConfig.KubernetesContext)
@@ -506,9 +600,7 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 			return result, err
 		}
 		envConfig.KubernetesContext = kubernetesContext
-		if err := saveEnvConfig(s.Store, tenant, envConfig); err != nil {
-			return result, err
-		}
+		envConfigChanged = true
 	}
 	projectRoot := envConfig.RepoPath
 	if projectRoot == "" {
@@ -519,24 +611,33 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 		return result, err
 	}
 	if containerRegistry != "" {
-		if err := s.saveProjectContainerRegistry(projectRoot, envName, containerRegistry); err != nil {
+		if err := s.saveProjectContainerRegistry(projectRoot, envName, containerRegistry, remoteMode); err != nil {
 			return result, err
 		}
 	}
 	if containerRegistry != "" && containerRegistry != envConfig.ContainerRegistry {
 		envConfig.ContainerRegistry = containerRegistry
+		envConfigChanged = true
+	}
+	if remoteMode {
+		if err := s.ensureRemoteRepository(params, tenant, envName, kubernetesContext, projectRoot); err != nil {
+			return result, err
+		}
+	} else {
+		if err := EnsureDefaultDevopsModuleWithVersion(s.Context, projectRoot, tenant, params.RuntimeVersion); err != nil {
+			return result, err
+		}
+		if err := EnsureDefaultDevopsChart(s.Context, projectRoot, tenant, envName); err != nil {
+			return result, err
+		}
+	}
+	if envConfigChanged {
 		if err := saveEnvConfig(s.Store, tenant, envConfig); err != nil {
 			return result, err
 		}
 	}
-	if err := EnsureDefaultDevopsModuleWithVersion(s.Context, projectRoot, tenant, params.RuntimeVersion); err != nil {
-		return result, err
-	}
-	if err := EnsureDefaultDevopsChart(s.Context, projectRoot, tenant, envName); err != nil {
-		return result, err
-	}
 
-	if toolConfig.DefaultTenant == "" || (setDefaultTenant && toolConfig.DefaultTenant != tenant) {
+	if setDefaultTenant && (toolConfigMissing || toolConfig.DefaultTenant != tenant) {
 		s.Context.Trace("Saving default config")
 		toolConfig.DefaultTenant = tenant
 		if err := s.Store.SaveERunConfig(toolConfig); err != nil {
@@ -570,6 +671,14 @@ func containerRegistryLabel(tenant, envName string) string {
 	return fmt.Sprintf("Container registry for environment %q in tenant %q", envName, tenant)
 }
 
+func remoteRepositoryLabel(tenant, envName string) string {
+	return fmt.Sprintf("Git remote URL for environment %q in tenant %q", envName, tenant)
+}
+
+func remoteKeyImportLabel(tenant, envName string) string {
+	return fmt.Sprintf("Import the SSH public key above for environment %q in tenant %q and continue?", envName, tenant)
+}
+
 func KubernetesNamespaceName(tenant, envName string) string {
 	return normalizeNamespaceName(tenant + "-" + envName)
 }
@@ -582,6 +691,7 @@ func normalizeBootstrapParams(params BootstrapInitParams) BootstrapInitParams {
 	params.RuntimeVersion = strings.TrimSpace(params.RuntimeVersion)
 	params.KubernetesContext = strings.TrimSpace(params.KubernetesContext)
 	params.ContainerRegistry = strings.TrimSpace(params.ContainerRegistry)
+	params.RemoteRepositoryURL = strings.TrimSpace(params.RemoteRepositoryURL)
 	return params
 }
 
@@ -601,26 +711,35 @@ func (s bootstrapRunner) withDefaults() bootstrapRunner {
 	if s.SaveProjectConfig == nil {
 		s.SaveProjectConfig = SaveProjectConfig
 	}
+	if s.WaitForRemoteRuntime == nil {
+		s.WaitForRemoteRuntime = WaitForShellDeployment
+	}
+	if s.RunRemoteCommand == nil {
+		s.RunRemoteCommand = RunRemoteCommand
+	}
+	if s.DeployHelmChart == nil {
+		s.DeployHelmChart = DeployHelmChart
+	}
+	if s.Sleep == nil {
+		s.Sleep = time.Sleep
+	}
 	if s.Context.Logger.verbosity == 0 && s.Context.Logger.stdout == nil && s.Context.Logger.stderr == nil {
 		s.Context.Logger = NewLoggerWithWriters(-1, io.Discard, io.Discard)
 	}
 	return s
 }
 
-func (s bootstrapRunner) confirmTenant(params BootstrapInitParams, tenant, projectRoot string) error {
+func (s bootstrapRunner) confirmTenant(params BootstrapInitParams, tenant, projectRoot string) (bool, error) {
 	if params.AutoApprove {
-		return nil
+		return true, nil
 	}
 	if params.ConfirmTenant != nil {
-		if *params.ConfirmTenant {
-			return nil
-		}
-		return ErrTenantInitializationCancelled
+		return *params.ConfirmTenant, nil
 	}
 	return s.confirm(BootstrapInitInteraction{
 		Type:  BootstrapInitInteractionConfirmTenant,
 		Label: tenantConfirmationLabel(tenant, projectRoot),
-	}, ErrTenantInitializationCancelled)
+	})
 }
 
 func (s bootstrapRunner) confirmEnvironment(params BootstrapInitParams, tenant, envName string) error {
@@ -633,24 +752,28 @@ func (s bootstrapRunner) confirmEnvironment(params BootstrapInitParams, tenant, 
 		}
 		return ErrEnvironmentInitializationCancelled
 	}
-	return s.confirm(BootstrapInitInteraction{
+	confirmed, err := s.confirm(BootstrapInitInteraction{
 		Type:  BootstrapInitInteractionConfirmEnvironment,
 		Label: environmentConfirmationLabel(tenant, envName),
-	}, ErrEnvironmentInitializationCancelled)
-}
-
-func (s bootstrapRunner) confirm(interaction BootstrapInitInteraction, cancelled error) error {
-	if s.Confirm == nil {
-		return BootstrapInitInteractionError{Interaction: interaction}
-	}
-	confirmed, err := s.Confirm(interaction.Label)
+	})
 	if err != nil {
 		return err
 	}
 	if !confirmed {
-		return cancelled
+		return ErrEnvironmentInitializationCancelled
 	}
 	return nil
+}
+
+func (s bootstrapRunner) confirm(interaction BootstrapInitInteraction) (bool, error) {
+	if s.Confirm == nil {
+		return false, BootstrapInitInteractionError{Interaction: interaction}
+	}
+	confirmed, err := s.Confirm(interaction.Label)
+	if err != nil {
+		return false, err
+	}
+	return confirmed, nil
 }
 
 func (s bootstrapRunner) resolveKubernetesContext(params BootstrapInitParams, tenant, envName, current string) (string, error) {
@@ -728,7 +851,10 @@ func (s bootstrapRunner) resolveContainerRegistry(params BootstrapInitParams, te
 	return registry, nil
 }
 
-func (s bootstrapRunner) saveProjectContainerRegistry(projectRoot, envName, registry string) error {
+func (s bootstrapRunner) saveProjectContainerRegistry(projectRoot, envName, registry string, remote bool) error {
+	if remote {
+		return nil
+	}
 	if projectRoot == "" || envName == "" || registry == "" || s.SaveProjectConfig == nil {
 		return nil
 	}
@@ -859,7 +985,9 @@ func normalizeNamespaceName(value string) string {
 
 func saveEnvConfig(store BootstrapStore, tenant string, config EnvConfig) error {
 	stored := config
-	stored.ContainerRegistry = ""
+	if !stored.Remote {
+		stored.ContainerRegistry = ""
+	}
 	return store.SaveEnvConfig(tenant, stored)
 }
 

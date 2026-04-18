@@ -27,7 +27,7 @@ func runSelect(prompt promptui.Select) (int, string, error) {
 func Execute() error {
 	configStore := common.ConfigStore{}
 	store := rootStore(configStore)
-	runInit := newRunInit(store, common.FindProjectRoot, runPrompt, runSelect, listKubernetesContexts, ensureKubernetesNamespace)
+	runInit := newRunInit(store, common.FindProjectRoot, runPrompt, runSelect, listKubernetesContexts, ensureKubernetesNamespace, common.WaitForShellDeployment, common.RunRemoteCommand, common.DeployHelmChart)
 	runInitForArgs := newRunInitForArgs(store, runInit)
 	push := newPushOperation(nil, common.DockerRegistryLogin, runSelect)
 	resolveOpen := func(params common.OpenParams) (common.OpenResult, error) {

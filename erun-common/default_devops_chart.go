@@ -81,6 +81,10 @@ func renderDefaultDevopsChartTemplate(assetPath, moduleName string, data []byte)
 }
 
 func resolveOpenRuntimeDeploySpec(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult) (DeploySpec, error) {
+	if target.RemoteRepo() {
+		return resolveDefaultDevopsDeploySpec(target)
+	}
+
 	allowLocalBuilds := target.TenantConfig.SnapshotEnabled()
 	if target.TenantConfig.Snapshot == nil {
 		allowLocalBuilds = target.EnvConfig.SnapshotEnabled()
