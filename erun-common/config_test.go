@@ -294,6 +294,12 @@ func TestEnvConfigRoundTrip(t *testing.T) {
 		RepoPath:          "/tmp/project-dev",
 		KubernetesContext: "cluster-dev",
 		ContainerRegistry: "erunpaas",
+		RuntimeVersion:    "1.2.3",
+		SSHD: SSHDConfig{
+			Enabled:       true,
+			LocalPort:     62222,
+			PublicKeyPath: "/tmp/id_ed25519.pub",
+		},
 	}
 	if err := SaveEnvConfig("tenant-a", cfg); err != nil {
 		t.Fatalf("SaveEnvConfig failed: %v", err)

@@ -102,6 +102,8 @@ spec:
               value: {{ required "tenant is required" .Values.tenant | quote }}
             - name: ERUN_ENVIRONMENT
               value: {{ required "environment is required" .Values.environment | quote }}
+            - name: ERUN_SSHD_ENABLED
+              value: {{ if .Values.sshdEnabled }}"true"{{ else }}"false"{{ end }}
             - name: ERUN_NAMESPACE
               valueFrom:
                 fieldRef:
@@ -109,6 +111,9 @@ spec:
           securityContext:
             runAsUser: 1000
             runAsGroup: 1000
+          ports:
+            - containerPort: 2222
+              name: ssh
           resources:
             limits:
               cpu: "4"

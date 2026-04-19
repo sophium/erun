@@ -51,6 +51,7 @@ type HelmDeployParams struct {
 	WorktreeStorage   string
 	WorktreeRepoName  string
 	WorktreeHostPath  string
+	SSHDEnabled       bool
 	Version           string
 	Timeout           string
 	Stdout            io.Writer
@@ -68,6 +69,7 @@ type HelmDeploySpec struct {
 	WorktreeStorage   string
 	WorktreeRepoName  string
 	WorktreeHostPath  string
+	SSHDEnabled       bool
 	Version           string
 	Timeout           string
 }
@@ -77,6 +79,7 @@ type KubernetesDeploymentCheckParams struct {
 	Namespace         string
 	KubernetesContext string
 	ExpectedRepoPath  string
+	ExpectedSSHD      *bool
 }
 
 type DeployTarget struct {
@@ -270,7 +273,7 @@ func resolveDeployTarget(store DeployStore, findProjectRoot ProjectFinderFunc, r
 			return OpenResult{}, fmt.Errorf("tenant and environment overrides are required together")
 		}
 
-		result, err := ResolveOpen(store, OpenParams{
+		result, err := resolveOpenWithFinder(store, findProjectRoot, OpenParams{
 			Tenant:      strings.TrimSpace(target.Tenant),
 			Environment: strings.TrimSpace(target.Environment),
 		})
@@ -283,27 +286,9 @@ func resolveDeployTarget(store DeployStore, findProjectRoot ProjectFinderFunc, r
 		return result, nil
 	}
 
-	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, DockerCommandTarget{})
-	if err != nil {
-		return OpenResult{}, err
-	}
-	if projectRoot == "" {
-		return OpenResult{}, fmt.Errorf("cannot determine project root for Helm deployment")
-	}
-
-	tenant, err := resolveProjectTenantForRoot(store, projectRoot)
-	if err != nil {
-		return OpenResult{}, err
-	}
-
-	environment, err := loadDefaultEnvironment(store, tenant)
-	if err != nil {
-		return OpenResult{}, err
-	}
-
-	return ResolveOpen(store, OpenParams{
-		Tenant:      tenant,
-		Environment: environment,
+	return resolveOpenWithFinder(store, findProjectRoot, OpenParams{
+		UseDefaultTenant:      true,
+		UseDefaultEnvironment: true,
 	})
 }
 
@@ -549,6 +534,7 @@ func newHelmDeploySpec(target OpenResult, deployContext KubernetesDeployContext,
 		WorktreeStorage:   resolveWorktreeStorage(target),
 		WorktreeRepoName:  resolveWorktreeRepoName(target.RepoPath),
 		WorktreeHostPath:  resolveWorktreeHostPath(target.RepoPath),
+		SSHDEnabled:       target.EnvConfig.SSHD.Enabled,
 		Version:           version,
 		Timeout:           DefaultHelmDeploymentTimeout,
 	}, nil
@@ -596,6 +582,7 @@ func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 		WorktreeStorage:   d.WorktreeStorage,
 		WorktreeRepoName:  d.WorktreeRepoName,
 		WorktreeHostPath:  d.WorktreeHostPath,
+		SSHDEnabled:       d.SSHDEnabled,
 		Version:           d.Version,
 		Timeout:           d.Timeout,
 		Stdout:            stdout,
@@ -622,6 +609,7 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "worktreeStorage="+d.WorktreeStorage,
 		"--set-string", "worktreeRepoName="+d.WorktreeRepoName,
 		"--set-string", "worktreeHostPath="+d.WorktreeHostPath,
+		"--set", "sshdEnabled="+formatHelmBool(d.SSHDEnabled),
 		d.ReleaseName,
 		d.ChartPath,
 	)
@@ -631,6 +619,13 @@ func (d HelmDeploySpec) command() commandSpec {
 		Name: "helm",
 		Args: args,
 	}
+}
+
+func formatHelmBool(value bool) string {
+	if value {
+		return "true"
+	}
+	return "false"
 }
 
 func ResolveKubernetesDeployContext() (KubernetesDeployContext, error) {
@@ -972,10 +967,10 @@ func CheckKubernetesDeployment(params KubernetesDeploymentCheckParams) (bool, er
 
 	output, err := exec.Command("kubectl", args...).CombinedOutput()
 	if err == nil {
-		if strings.TrimSpace(params.ExpectedRepoPath) == "" {
+		if strings.TrimSpace(params.ExpectedRepoPath) == "" && params.ExpectedSSHD == nil {
 			return true, nil
 		}
-		return deploymentUsesExpectedRepoPath(params)
+		return deploymentMatchesExpectedSettings(params)
 	}
 
 	message := strings.ToLower(string(output))
@@ -986,7 +981,7 @@ func CheckKubernetesDeployment(params KubernetesDeploymentCheckParams) (bool, er
 	return false, fmt.Errorf("failed to check deployment %q: %w", params.Name, err)
 }
 
-func deploymentUsesExpectedRepoPath(params KubernetesDeploymentCheckParams) (bool, error) {
+func deploymentMatchesExpectedSettings(params KubernetesDeploymentCheckParams) (bool, error) {
 	args := make([]string, 0, 8)
 	if strings.TrimSpace(params.KubernetesContext) != "" {
 		args = append(args, "--context", params.KubernetesContext)
@@ -1025,12 +1020,21 @@ func deploymentUsesExpectedRepoPath(params KubernetesDeploymentCheckParams) (boo
 		if strings.TrimSpace(container.Name) != params.Name {
 			continue
 		}
+		matchesRepoPath := strings.TrimSpace(expectedRepoPath) == ""
+		matchesSSHD := params.ExpectedSSHD == nil
 		for _, env := range container.Env {
-			if strings.TrimSpace(env.Name) == "ERUN_REPO_PATH" {
-				return filepath.Clean(strings.TrimSpace(env.Value)) == filepath.Clean(expectedRepoPath), nil
+			switch strings.TrimSpace(env.Name) {
+			case "ERUN_REPO_PATH":
+				if strings.TrimSpace(expectedRepoPath) != "" {
+					matchesRepoPath = filepath.Clean(strings.TrimSpace(env.Value)) == filepath.Clean(expectedRepoPath)
+				}
+			case "ERUN_SSHD_ENABLED":
+				if params.ExpectedSSHD != nil {
+					matchesSSHD = strings.EqualFold(strings.TrimSpace(env.Value), formatHelmBool(*params.ExpectedSSHD))
+				}
 			}
 		}
-		return false, nil
+		return matchesRepoPath && matchesSSHD, nil
 	}
 
 	return false, nil

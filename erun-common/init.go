@@ -567,6 +567,7 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 			Name:              envName,
 			RepoPath:          envProjectRoot,
 			KubernetesContext: kubernetesContext,
+			RuntimeVersion:    strings.TrimSpace(params.RuntimeVersion),
 			Remote:            remoteMode,
 		}
 		if err := saveEnvConfig(s.Store, tenant, envConfig); err != nil {
@@ -583,6 +584,10 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 	if remoteMode {
 		if envConfig.RepoPath != params.ProjectRoot {
 			envConfig.RepoPath = params.ProjectRoot
+			envConfigChanged = true
+		}
+		if runtimeVersion := strings.TrimSpace(params.RuntimeVersion); runtimeVersion != "" && envConfig.RuntimeVersion != runtimeVersion {
+			envConfig.RuntimeVersion = runtimeVersion
 			envConfigChanged = true
 		}
 		if !envConfig.Remote {

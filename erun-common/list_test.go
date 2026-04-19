@@ -259,3 +259,60 @@ func TestResolveListResultIncludesSnapshotPreferenceForTenant(t *testing.T) {
 		t.Fatalf("expected environment snapshot off, got %+v", result.Tenants)
 	}
 }
+
+func TestResolveListResultIncludesSSHDConfiguration(t *testing.T) {
+	repoRoot := filepath.Join(t.TempDir(), "tenant-a")
+	store := listStore{
+		openStore: openStore{
+			toolConfig: ERunConfig{DefaultTenant: "tenant-a"},
+			tenantConfigs: map[string]TenantConfig{
+				"tenant-a": {Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: "dev", Remote: true},
+			},
+			envConfigs: map[string]EnvConfig{
+				"tenant-a/dev": {
+					Name:              "dev",
+					RepoPath:          repoRoot,
+					KubernetesContext: "cluster-dev",
+					Remote:            true,
+					SSHD: SSHDConfig{
+						Enabled:       true,
+						LocalPort:     DefaultSSHLocalPort,
+						PublicKeyPath: "/tmp/id_ed25519.pub",
+					},
+				},
+			},
+		},
+		envsByTenant: map[string][]EnvConfig{
+			"tenant-a": {{
+				Name:              "dev",
+				RepoPath:          repoRoot,
+				KubernetesContext: "cluster-dev",
+				Remote:            true,
+				SSHD: SSHDConfig{
+					Enabled:       true,
+					LocalPort:     DefaultSSHLocalPort,
+					PublicKeyPath: "/tmp/id_ed25519.pub",
+				},
+			}},
+		},
+	}
+
+	result, err := ResolveListResult(store, func() (string, string, error) {
+		return "", "", ErrNotInGitRepository
+	}, OpenParams{
+		Tenant:      "tenant-a",
+		Environment: "dev",
+	})
+	if err != nil {
+		t.Fatalf("ResolveListResult failed: %v", err)
+	}
+	if result.CurrentDirectory.Effective == nil || !result.CurrentDirectory.Effective.SSH.Enabled {
+		t.Fatalf("expected effective SSH details, got %+v", result.CurrentDirectory.Effective)
+	}
+	if result.CurrentDirectory.Effective.SSH.User != DefaultSSHUser || result.CurrentDirectory.Effective.SSH.LocalPort != DefaultSSHLocalPort {
+		t.Fatalf("unexpected effective SSH info: %+v", result.CurrentDirectory.Effective.SSH)
+	}
+	if got := result.Tenants[0].Environments[0].SSH.WorkspacePath; got != "/home/erun/git/tenant-a" {
+		t.Fatalf("unexpected SSH workspace path: %q", got)
+	}
+}

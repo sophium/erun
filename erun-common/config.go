@@ -21,6 +21,19 @@ type ERunConfig struct {
 	DefaultTenant string
 }
 
+type SSHDConfig struct {
+	Enabled       bool   `yaml:"enabled,omitempty"`
+	LocalPort     int    `yaml:"localport,omitempty"`
+	PublicKeyPath string `yaml:"publickeypath,omitempty"`
+}
+
+func (c SSHDConfig) ResolvedLocalPort() int {
+	if c.LocalPort > 0 {
+		return c.LocalPort
+	}
+	return DefaultSSHLocalPort
+}
+
 type TenantConfig struct {
 	ProjectRoot        string
 	Name               string
@@ -34,8 +47,10 @@ type EnvConfig struct {
 	RepoPath          string
 	KubernetesContext string
 	ContainerRegistry string
-	Remote            bool  `yaml:"remote,omitempty"`
-	Snapshot          *bool `yaml:"snapshot,omitempty"`
+	RuntimeVersion    string     `yaml:"runtimeversion,omitempty"`
+	SSHD              SSHDConfig `yaml:"sshd,omitempty"`
+	Remote            bool       `yaml:"remote,omitempty"`
+	Snapshot          *bool      `yaml:"snapshot,omitempty"`
 }
 
 func (c TenantConfig) SnapshotEnabled() bool {

@@ -27,6 +27,38 @@ func TestNewRootCmdRegistersCommands(t *testing.T) {
 	}
 }
 
+func TestResolveRuntimeDeploySpecForOpenFallsBackToCurrentBuildVersionForRemoteRepo(t *testing.T) {
+	spec, err := resolveRuntimeDeploySpecForOpen(
+		common.ConfigStore{},
+		common.FindProjectRoot,
+		common.ResolveDockerBuildContext,
+		common.ResolveKubernetesDeployContext,
+		nil,
+		common.BuildInfo{Version: "1.0.31"},
+		common.OpenResult{
+			Tenant:      "erun",
+			Environment: "remote",
+			RepoPath:    "/home/erun/git/erun",
+			TenantConfig: common.TenantConfig{
+				Name:   "erun",
+				Remote: true,
+			},
+			EnvConfig: common.EnvConfig{
+				Name:              "remote",
+				RepoPath:          "/home/erun/git/erun",
+				KubernetesContext: "rancher-desktop",
+				Remote:            true,
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("resolveRuntimeDeploySpecForOpen failed: %v", err)
+	}
+	if spec.Deploy.Version != "1.0.31" {
+		t.Fatalf("expected remote default runtime deploy version fallback, got %+v", spec.Deploy)
+	}
+}
+
 func TestRootCommandRunsInitWhenNoSubcommand(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 

@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -70,6 +71,43 @@ func TestResolveReleaseSpecStableRelease(t *testing.T) {
 	}
 	if got := spec.Stages[4].GitCommands[0].Args; !reflect.DeepEqual(got, []string{"push", "--follow-tags", "origin", "main", "develop"}) {
 		t.Fatalf("unexpected push command: %+v", got)
+	}
+}
+
+func TestResolveReleaseSpecSkipsLinuxScriptsWhenUnsupported(t *testing.T) {
+	prevGOOS := currentGOOS
+	prevLookPath := hostLookPath
+	currentGOOS = func() string { return "darwin" }
+	hostLookPath = func(file string) (string, error) {
+		return "", errors.New("not found")
+	}
+	t.Cleanup(func() {
+		currentGOOS = prevGOOS
+		hostLookPath = prevLookPath
+	})
+
+	projectRoot := setupReleaseProjectGitRepo(t, "main")
+	linuxDir := filepath.Join(projectRoot, "erun-devops", "linux", "erun-cli")
+	if err := os.MkdirAll(linuxDir, 0o755); err != nil {
+		t.Fatalf("mkdir linux dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(linuxDir, "release.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write release.sh: %v", err)
+	}
+
+	spec, err := resolveReleaseSpec(
+		func() (string, string, error) { return "tenant-a", projectRoot, nil },
+		LoadProjectConfig,
+		func(string) (string, error) { return "main", nil },
+		func(string) (string, error) { return "abc1234", nil },
+		func(string, string) (bool, error) { return true, nil },
+		ReleaseParams{},
+	)
+	if err != nil {
+		t.Fatalf("resolveReleaseSpec failed: %v", err)
+	}
+	if len(spec.LinuxReleases) != 0 || !spec.SkippedLinux {
+		t.Fatalf("expected linux releases to be skipped, got %+v", spec)
 	}
 }
 

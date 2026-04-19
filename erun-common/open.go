@@ -130,58 +130,76 @@ func loadOpenDefaultEnvironment(store OpenStore, tenant string) (string, error) 
 }
 
 func InitParamsForOpenArgs(store OpenStore, args []string) (BootstrapInitParams, error) {
-	if len(args) == 2 {
+	params, err := OpenParamsForArgs(args)
+	if err != nil {
+		return BootstrapInitParams{}, err
+	}
+	return InitParamsForOpenTarget(store, params)
+}
+
+func InitParamsForOpenTarget(store OpenStore, params OpenParams) (BootstrapInitParams, error) {
+	tenant := strings.TrimSpace(params.Tenant)
+	environment := strings.TrimSpace(params.Environment)
+
+	switch {
+	case tenant != "" && environment != "":
 		return BootstrapInitParams{
-			Tenant:      args[0],
-			Environment: args[1],
+			Tenant:      tenant,
+			Environment: environment,
+		}, nil
+	case tenant != "":
+		return BootstrapInitParams{Tenant: tenant}, nil
+	case environment != "":
+		resolvedTenant, err := loadOpenDefaultTenant(store)
+		if err != nil {
+			if errors.Is(err, ErrDefaultTenantNotConfigured) || errors.Is(err, ErrNotInitialized) {
+				return BootstrapInitParams{
+					Environment:   environment,
+					ResolveTenant: true,
+				}, nil
+			}
+			return BootstrapInitParams{}, err
+		}
+		return BootstrapInitParams{
+			Tenant:      resolvedTenant,
+			Environment: environment,
 		}, nil
 	}
 
-	envName := ""
-	if len(args) == 1 {
-		envName = args[0]
-	}
-
-	tenant, err := loadOpenDefaultTenant(store)
+	resolvedTenant, err := loadOpenDefaultTenant(store)
 	if err != nil {
 		if errors.Is(err, ErrDefaultTenantNotConfigured) || errors.Is(err, ErrNotInitialized) {
-			return BootstrapInitParams{
-				Environment:   envName,
-				ResolveTenant: true,
-			}, nil
+			return BootstrapInitParams{ResolveTenant: true}, nil
 		}
 		return BootstrapInitParams{}, err
 	}
 
-	if envName != "" {
-		return BootstrapInitParams{
-			Tenant:      tenant,
-			Environment: envName,
-		}, nil
-	}
-
-	defaultEnvironment, err := loadOpenDefaultEnvironment(store, tenant)
+	defaultEnvironment, err := loadOpenDefaultEnvironment(store, resolvedTenant)
 	if err != nil {
 		if errors.Is(err, ErrDefaultEnvironmentNotConfigured) || errors.Is(err, ErrNotInitialized) {
-			return BootstrapInitParams{Tenant: tenant}, nil
+			return BootstrapInitParams{Tenant: resolvedTenant}, nil
 		}
 		return BootstrapInitParams{}, err
 	}
 
 	return BootstrapInitParams{
-		Tenant:      tenant,
+		Tenant:      resolvedTenant,
 		Environment: defaultEnvironment,
 	}, nil
 }
 
 func ResolveOpen(store OpenStore, params OpenParams) (OpenResult, error) {
+	return resolveOpenWithFinder(store, FindProjectRoot, params)
+}
+
+func resolveOpenWithFinder(store OpenStore, findProjectRoot ProjectFinderFunc, params OpenParams) (OpenResult, error) {
 	if store == nil {
 		return OpenResult{}, fmt.Errorf("store is required")
 	}
 
 	tenant := params.Tenant
 	if tenant == "" && params.UseDefaultTenant {
-		if currentTenant, ok, err := loadCurrentDirectoryTenant(store); err != nil {
+		if currentTenant, ok, err := loadCurrentDirectoryTenant(store, findProjectRoot); err != nil {
 			return OpenResult{}, err
 		} else if ok {
 			tenant = currentTenant
@@ -272,7 +290,7 @@ func ResolveOpen(store OpenStore, params OpenParams) (OpenResult, error) {
 	}, nil
 }
 
-func loadCurrentDirectoryTenant(store OpenStore) (string, bool, error) {
+func loadCurrentDirectoryTenant(store OpenStore, findProjectRoot ProjectFinderFunc) (string, bool, error) {
 	tenantLister, ok := store.(interface {
 		ListTenantConfigs() ([]TenantConfig, error)
 	})
@@ -280,7 +298,11 @@ func loadCurrentDirectoryTenant(store OpenStore) (string, bool, error) {
 		return "", false, nil
 	}
 
-	tenant, _, err := FindProjectRoot()
+	if findProjectRoot == nil {
+		findProjectRoot = FindProjectRoot
+	}
+
+	tenant, _, err := findProjectRoot()
 	if errors.Is(err, ErrNotInGitRepository) {
 		return "", false, nil
 	}

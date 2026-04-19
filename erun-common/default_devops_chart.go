@@ -141,6 +141,9 @@ func resolveDefaultDevopsDeploySpec(target OpenResult) (DeploySpec, error) {
 		return DeploySpec{}, err
 	}
 	deployInput.ReleaseName = moduleName
+	if runtimeVersion := strings.TrimSpace(target.EnvConfig.RuntimeVersion); runtimeVersion != "" {
+		deployInput.Version = runtimeVersion
+	}
 
 	return DeploySpec{
 		Target:        target,
