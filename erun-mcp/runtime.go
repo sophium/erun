@@ -65,6 +65,11 @@ func normalizeRuntimeConfig(cfg RuntimeConfig) RuntimeConfig {
 	if cfg.DeployHelmChart == nil {
 		cfg.DeployHelmChart = eruncommon.DeployHelmChart
 	}
+	namespaceEnsurer := cfg.EnsureKubernetesNamespace
+	if namespaceEnsurer == nil {
+		namespaceEnsurer = eruncommon.EnsureKubernetesNamespace
+	}
+	cfg.DeployHelmChart = eruncommon.WrapHelmChartDeployerWithNamespaceEnsure(namespaceEnsurer, cfg.DeployHelmChart)
 	if cfg.WaitForRemoteRuntime == nil {
 		cfg.WaitForRemoteRuntime = eruncommon.WaitForShellDeployment
 	}

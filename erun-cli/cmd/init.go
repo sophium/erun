@@ -228,51 +228,7 @@ func listKubernetesContexts() ([]string, error) {
 }
 
 func ensureKubernetesNamespace(contextName, namespace string) error {
-	if exists, err := kubernetesNamespaceExists(contextName, namespace); err != nil {
-		return err
-	} else if exists {
-		return nil
-	}
-
-	output, err := exec.Command("kubectl", "--context", contextName, "create", "namespace", namespace).CombinedOutput()
-	if err != nil {
-		message := strings.TrimSpace(string(output))
-		if kubernetesNamespaceAlreadyExists(message) {
-			return nil
-		}
-		if message == "" {
-			return fmt.Errorf("failed to ensure kubernetes namespace %q in context %q: %w", namespace, contextName, err)
-		}
-		return fmt.Errorf("failed to ensure kubernetes namespace %q in context %q: %w: %s", namespace, contextName, err, message)
-	}
-
-	return nil
-}
-
-func kubernetesNamespaceExists(contextName, namespace string) (bool, error) {
-	output, err := exec.Command("kubectl", "--context", contextName, "get", "namespace", namespace, "-o", "name").CombinedOutput()
-	if err == nil {
-		return true, nil
-	}
-
-	message := strings.TrimSpace(string(output))
-	if kubernetesNamespaceNotFound(message) {
-		return false, nil
-	}
-	if message == "" {
-		return false, fmt.Errorf("failed to check kubernetes namespace %q in context %q: %w", namespace, contextName, err)
-	}
-	return false, fmt.Errorf("failed to check kubernetes namespace %q in context %q: %w: %s", namespace, contextName, err, message)
-}
-
-func kubernetesNamespaceNotFound(message string) bool {
-	message = strings.ToLower(strings.TrimSpace(message))
-	return strings.Contains(message, "notfound") || strings.Contains(message, "not found")
-}
-
-func kubernetesNamespaceAlreadyExists(message string) bool {
-	message = strings.ToLower(strings.TrimSpace(message))
-	return strings.Contains(message, "alreadyexists") || strings.Contains(message, "already exists")
+	return common.EnsureKubernetesNamespace(contextName, namespace)
 }
 
 func preferCurrentKubernetesContext(contexts []string, current string) []string {

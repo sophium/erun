@@ -45,6 +45,54 @@ roleRef:
   kind: ClusterRole
   name: admin
 ---
+{{- if eq (required "environment is required" .Values.environment) "local" }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: erun-devops-namespace-manager
+  labels:
+    app: erun-devops
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+      - list
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: erun-devops
+  labels:
+    app: erun-devops
+subjects:
+  - kind: ServiceAccount
+    name: erun-devops
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: erun-devops-namespace-manager
+  labels:
+    app: erun-devops
+subjects:
+  - kind: ServiceAccount
+    name: erun-devops
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: erun-devops-namespace-manager
+---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
