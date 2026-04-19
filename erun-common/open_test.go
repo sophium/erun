@@ -210,6 +210,34 @@ func TestOpenResolveFallsBackToTenantProjectRoot(t *testing.T) {
 	}
 }
 
+func TestInitParamsForOpenTargetUsesExplicitTenantAndDefaultEnvironment(t *testing.T) {
+	params, err := InitParamsForOpenTarget(openStore{}, OpenParams{
+		Tenant:                "tenant-a",
+		UseDefaultEnvironment: true,
+	})
+	if err != nil {
+		t.Fatalf("InitParamsForOpenTarget failed: %v", err)
+	}
+	if params.Tenant != "tenant-a" || params.Environment != "" || params.ResolveTenant {
+		t.Fatalf("unexpected init params: %+v", params)
+	}
+}
+
+func TestInitParamsForOpenTargetUsesDefaultTenantForExplicitEnvironment(t *testing.T) {
+	params, err := InitParamsForOpenTarget(openStore{
+		toolConfig: ERunConfig{DefaultTenant: "tenant-a"},
+	}, OpenParams{
+		Environment:      "dev",
+		UseDefaultTenant: true,
+	})
+	if err != nil {
+		t.Fatalf("InitParamsForOpenTarget failed: %v", err)
+	}
+	if params.Tenant != "tenant-a" || params.Environment != "dev" || params.ResolveTenant {
+		t.Fatalf("unexpected init params: %+v", params)
+	}
+}
+
 func TestOpenResolveRequiresDefaultTenant(t *testing.T) {
 	if _, err := ResolveOpen(openStore{loadERunErr: ErrNotInitialized}, OpenParams{UseDefaultTenant: true}); !errors.Is(err, ErrDefaultTenantNotConfigured) {
 		t.Fatalf("expected ErrDefaultTenantNotConfigured, got %v", err)

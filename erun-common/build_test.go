@@ -411,6 +411,15 @@ func TestHasProjectBuildScriptIgnoresDockerArtifactBuildScripts(t *testing.T) {
 }
 
 func TestResolveBuildExecutionIncludesLinuxBuildScriptsAtProjectRoot(t *testing.T) {
+	prevGOOS := currentGOOS
+	prevLookPath := hostLookPath
+	currentGOOS = func() string { return "linux" }
+	hostLookPath = func(file string) (string, error) { return "/usr/bin/" + file, nil }
+	t.Cleanup(func() {
+		currentGOOS = prevGOOS
+		hostLookPath = prevLookPath
+	})
+
 	projectRoot := t.TempDir()
 	linuxComponentDir := filepath.Join(projectRoot, "erun-devops", "linux", "erun-cli")
 	if err := os.MkdirAll(linuxComponentDir, 0o755); err != nil {
@@ -443,6 +452,90 @@ func TestResolveBuildExecutionIncludesLinuxBuildScriptsAtProjectRoot(t *testing.
 	}
 	if execution.linuxBuilds[0].Dir != linuxComponentDir || execution.linuxBuilds[0].Path != "./build.sh" {
 		t.Fatalf("unexpected linux build script: %+v", execution.linuxBuilds[0])
+	}
+}
+
+func TestResolveBuildExecutionSkipsLinuxBuildScriptsWhenHostIsNotLinux(t *testing.T) {
+	prevGOOS := currentGOOS
+	prevLookPath := hostLookPath
+	currentGOOS = func() string { return "darwin" }
+	hostLookPath = func(file string) (string, error) { return "/usr/bin/" + file, nil }
+	t.Cleanup(func() {
+		currentGOOS = prevGOOS
+		hostLookPath = prevLookPath
+	})
+
+	projectRoot := t.TempDir()
+	linuxComponentDir := filepath.Join(projectRoot, "erun-devops", "linux", "erun-cli")
+	if err := os.MkdirAll(linuxComponentDir, 0o755); err != nil {
+		t.Fatalf("mkdir linux component dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.2.3\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(linuxComponentDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write build.sh: %v", err)
+	}
+
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{Dir: projectRoot}, nil
+		},
+		nil,
+		DockerCommandTarget{},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+	if len(execution.linuxBuilds) != 0 || !execution.skippedLinux {
+		t.Fatalf("expected linux build scripts to be skipped, got %+v", execution)
+	}
+}
+
+func TestResolveBuildExecutionSkipsLinuxBuildScriptsWhenDpkgDebUnavailable(t *testing.T) {
+	prevGOOS := currentGOOS
+	prevLookPath := hostLookPath
+	currentGOOS = func() string { return "linux" }
+	hostLookPath = func(file string) (string, error) {
+		return "", errors.New("not found")
+	}
+	t.Cleanup(func() {
+		currentGOOS = prevGOOS
+		hostLookPath = prevLookPath
+	})
+
+	projectRoot := t.TempDir()
+	linuxComponentDir := filepath.Join(projectRoot, "erun-devops", "linux", "erun-cli")
+	if err := os.MkdirAll(linuxComponentDir, 0o755); err != nil {
+		t.Fatalf("mkdir linux component dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.2.3\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(linuxComponentDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write build.sh: %v", err)
+	}
+
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{Dir: projectRoot}, nil
+		},
+		nil,
+		DockerCommandTarget{},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+	if len(execution.linuxBuilds) != 0 || !execution.skippedLinux {
+		t.Fatalf("expected linux build scripts to be skipped, got %+v", execution)
 	}
 }
 

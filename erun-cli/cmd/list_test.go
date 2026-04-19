@@ -101,6 +101,9 @@ func TestListCommandPrintsDefaultsAndConfiguredTenants(t *testing.T) {
 			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)
 		}
 	}
+	if strings.Contains(output, "project root:") {
+		t.Fatalf("expected list output to omit tenant-level project root, got:\n%s", output)
+	}
 }
 
 func TestListCommandUsesConfiguredCurrentDirectoryTenantBeforeDefault(t *testing.T) {
@@ -278,6 +281,57 @@ func TestListCommandPrintsSnapshotPreference(t *testing.T) {
 		"  snapshot: off",
 		"    snapshot: off",
 		"      - local [default, effective] context=cluster-local repo=" + repoRoot,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)
+		}
+	}
+}
+
+func TestListCommandPrintsSSHDConfiguration(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	repoRoot := filepath.Join(t.TempDir(), "tenant-a")
+	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
+		t.Fatalf("mkdir repo root: %v", err)
+	}
+	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
+		t.Fatalf("save erun config: %v", err)
+	}
+	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: "dev", Remote: true}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{
+		Name:              "dev",
+		RepoPath:          repoRoot,
+		KubernetesContext: "cluster-dev",
+		Remote:            true,
+		SSHD: common.SSHDConfig{
+			Enabled:       true,
+			LocalPort:     common.DefaultSSHLocalPort,
+			PublicKeyPath: "/tmp/id_ed25519.pub",
+		},
+	}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	stdout := new(bytes.Buffer)
+	cmd := newTestRootCmd(testRootDeps{})
+	cmd.SetOut(stdout)
+	cmd.SetErr(new(bytes.Buffer))
+	cmd.SetArgs([]string{"list"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stdout.String()
+	for _, want := range []string{
+		"  sshd: on",
+		"  ssh user: erun",
+		"  ssh local port: 62222 (after erun open)",
+		"  ssh workspace: /home/erun/git/tenant-a",
+		"ssh=on user=erun local-port=62222 workspace=/home/erun/git/tenant-a",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)

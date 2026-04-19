@@ -98,6 +98,7 @@ type ReleaseSpec struct {
 	DockerImages    []ReleaseDockerImageSpec `json:"dockerImages,omitempty"`
 	Stages          []ReleaseStage           `json:"stages,omitempty"`
 	LinuxReleases   []scriptSpec
+	SkippedLinux    bool `json:"-"`
 }
 
 func ResolveReleaseSpec(findProjectRoot ProjectFinderFunc, params ReleaseParams) (ReleaseSpec, error) {
@@ -166,6 +167,11 @@ func resolveReleaseSpec(findProjectRoot ProjectFinderFunc, loadProjectConfig Pro
 	if err != nil {
 		return ReleaseSpec{}, err
 	}
+	skippedLinux := false
+	if len(linuxReleases) > 0 && !LinuxPackageBuildsSupported() {
+		linuxReleases = nil
+		skippedLinux = true
+	}
 
 	stages := make([]ReleaseStage, 0, 2)
 	if syncStage := newSyncRemoteStage(projectRoot, branch); len(syncStage.GitCommands) > 0 {
@@ -232,6 +238,7 @@ func resolveReleaseSpec(findProjectRoot ProjectFinderFunc, loadProjectConfig Pro
 		DockerImages:    images,
 		Stages:          stages,
 		LinuxReleases:   linuxReleases,
+		SkippedLinux:    skippedLinux,
 	}, nil
 }
 
@@ -313,6 +320,9 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 				return err
 			}
 		}
+	}
+	if spec.SkippedLinux {
+		ctx.Trace("skipping linux package scripts: host is not Linux or dpkg-deb is unavailable")
 	}
 
 	if err := runScriptSpecs(ctx, spec.LinuxReleases, runScript); err != nil {

@@ -35,6 +35,105 @@ func TestOpenCommandLaunchesShell(t *testing.T) {
 	}
 }
 
+func TestOpenHelpShowsTenantAndEnvironmentFlags(t *testing.T) {
+	cmd := newTestRootCmd(testRootDeps{})
+	stdout := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(new(bytes.Buffer))
+	cmd.SetArgs([]string{"open", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stdout.String()
+	for _, want := range []string{
+		"--tenant string",
+		"Open a specific tenant",
+		"--environment string",
+		"Open a specific environment",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected open help to contain %q, got:\n%s", want, output)
+		}
+	}
+}
+
+func TestOpenCommandAcceptsTenantAndEnvironmentFlags(t *testing.T) {
+	repoPath := t.TempDir()
+	launched := common.ShellLaunchParams{}
+	cmd := newTestRootCmd(testRootDeps{
+		Store: openCommandStore{repoPath: repoPath},
+		LaunchShell: func(req common.ShellLaunchParams) error {
+			launched = req
+			return nil
+		},
+	})
+	cmd.SetArgs([]string{"open", "--tenant", "tenant-a", "--environment", "dev"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if launched.Dir != repoPath || launched.Title != "tenant-a-dev" {
+		t.Fatalf("unexpected shell launch: %+v", launched)
+	}
+}
+
+func TestRunResolvedOpenCommandActivatesSSHDWhenEnabled(t *testing.T) {
+	activated := false
+	launched := false
+	err := runResolvedOpenCommand(
+		common.Context{
+			Logger: common.NewLoggerWithWriters(0, new(bytes.Buffer), new(bytes.Buffer)),
+			Stdout: new(bytes.Buffer),
+			Stderr: new(bytes.Buffer),
+		},
+		common.OpenResult{
+			Tenant:      "tenant-a",
+			Environment: "dev",
+			RepoPath:    "/home/erun/git/tenant-a",
+			TenantConfig: common.TenantConfig{
+				Name:     "tenant-a",
+				Remote:   true,
+				Snapshot: nil,
+			},
+			EnvConfig: common.EnvConfig{
+				Name:              "dev",
+				RepoPath:          "/home/erun/git/tenant-a",
+				KubernetesContext: "cluster-dev",
+				Remote:            true,
+				SSHD:              common.SSHDConfig{Enabled: true},
+			},
+		},
+		openOptions{},
+		nil,
+		func(_ common.Context, _ common.ShellLaunchParams) error {
+			launched = true
+			return nil
+		},
+		nil,
+		nil,
+		nil,
+		nil,
+		func(_ common.Context, result common.OpenResult) error {
+			activated = true
+			if !result.EnvConfig.SSHD.Enabled {
+				t.Fatalf("expected SSHD-enabled target, got %+v", result.EnvConfig.SSHD)
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("runResolvedOpenCommand failed: %v", err)
+	}
+	if !activated {
+		t.Fatal("expected SSHD activator to run")
+	}
+	if !launched {
+		t.Fatal("expected shell launch after SSHD activation")
+	}
+}
+
 func TestOpenCommandNoShellConfiguresLocalKubeconfig(t *testing.T) {
 	repoPath := t.TempDir()
 	stdout := new(bytes.Buffer)

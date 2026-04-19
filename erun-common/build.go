@@ -88,6 +88,7 @@ type BuildExecutionSpec struct {
 	linuxBuilds  []scriptSpec
 	dockerBuilds []DockerBuildSpec
 	dockerPushes []DockerPushSpec
+	skippedLinux bool
 }
 
 type DockerPushExecutionSpec struct {
@@ -154,10 +155,15 @@ func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc,
 	}
 
 	linuxBuilds := make([]scriptSpec, 0)
+	hadLinuxBuilds := false
 	if releaseSpec == nil {
 		linuxBuilds, err = ResolveCurrentLinuxBuildScripts(findProjectRoot, resolveBuildContext, target, target.VersionOverride)
 		if err != nil && !errors.Is(err, ErrLinuxPackageBuildNotFound) {
 			return BuildExecutionSpec{}, err
+		}
+		hadLinuxBuilds = len(linuxBuilds) > 0
+		if hadLinuxBuilds && !LinuxPackageBuildsSupported() {
+			linuxBuilds = nil
 		}
 	}
 
@@ -167,10 +173,13 @@ func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc,
 	}
 
 	if len(linuxBuilds) == 0 && len(builds) == 0 && releaseSpec == nil {
+		if hadLinuxBuilds {
+			return BuildExecutionSpec{skippedLinux: true}, nil
+		}
 		return BuildExecutionSpec{}, ErrDockerBuildContextNotFound
 	}
 
-	execution := BuildExecutionSpec{linuxBuilds: linuxBuilds, dockerBuilds: builds}
+	execution := BuildExecutionSpec{linuxBuilds: linuxBuilds, dockerBuilds: builds, skippedLinux: hadLinuxBuilds && len(linuxBuilds) == 0}
 	if releaseSpec != nil {
 		return BuildExecutionSpecWithRelease(execution, *releaseSpec), nil
 	}
@@ -882,6 +891,9 @@ func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []
 		if err := RunReleaseSpec(ctx, *execution.release, nil, runScript); err != nil {
 			return err
 		}
+	}
+	if execution.skippedLinux {
+		ctx.Trace("skipping linux package scripts: host is not Linux or dpkg-deb is unavailable")
 	}
 
 	pushedTags := make(map[string]struct{}, len(execution.dockerBuilds)+len(execution.dockerPushes))

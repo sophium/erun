@@ -236,8 +236,12 @@ func TestReleaseCommandDryRunIncludesLinuxReleaseScripts(t *testing.T) {
 	}
 
 	output := stderr.String()
-	if !strings.Contains(output, "ERUN_BUILD_VERSION=1.4.2-rc.") || !strings.Contains(output, "./release.sh") {
-		t.Fatalf("expected linux release trace, got:\n%s", output)
+	if common.LinuxPackageBuildsSupported() {
+		if !strings.Contains(output, "ERUN_BUILD_VERSION=1.4.2-rc.") || !strings.Contains(output, "./release.sh") {
+			t.Fatalf("expected linux release trace, got:\n%s", output)
+		}
+	} else if !strings.Contains(output, "skipping linux package scripts: host is not Linux or dpkg-deb is unavailable") {
+		t.Fatalf("expected linux release skip trace, got:\n%s", output)
 	}
 }
 

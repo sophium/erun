@@ -128,6 +128,65 @@ func TestResolveCurrentKubernetesDeployContextsUsesProjectRootDevopsModule(t *te
 	}
 }
 
+func TestResolveDeployTargetUsesCurrentDirectoryTenantWhenTenantProjectRootDiffers(t *testing.T) {
+	projectRoot := filepath.Join(t.TempDir(), "tenant-a")
+	defaultRepo := filepath.Join(t.TempDir(), "tenant-b")
+	for _, dir := range []string{projectRoot, defaultRepo} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir repo: %v", err)
+		}
+	}
+
+	store := openStore{
+		toolConfig: ERunConfig{DefaultTenant: "tenant-b"},
+		tenantConfigs: map[string]TenantConfig{
+			"tenant-a": {
+				Name:               "tenant-a",
+				ProjectRoot:        "/home/erun/git/tenant-a",
+				DefaultEnvironment: "dev",
+				Remote:             true,
+			},
+			"tenant-b": {
+				Name:               "tenant-b",
+				ProjectRoot:        defaultRepo,
+				DefaultEnvironment: "prod",
+			},
+		},
+		envConfigs: map[string]EnvConfig{
+			"tenant-a/dev": {
+				Name:              "dev",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-a",
+			},
+			"tenant-b/prod": {
+				Name:              "prod",
+				RepoPath:          defaultRepo,
+				KubernetesContext: "cluster-b",
+			},
+		},
+	}
+
+	result, err := resolveDeployTarget(
+		store,
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		nil,
+		nil,
+		nil,
+		DeployTarget{},
+	)
+	if err != nil {
+		t.Fatalf("resolveDeployTarget failed: %v", err)
+	}
+	if result.Tenant != "tenant-a" || result.Environment != "dev" {
+		t.Fatalf("expected current directory tenant target, got %+v", result)
+	}
+	if result.RepoPath != projectRoot {
+		t.Fatalf("expected repo path %q, got %+v", projectRoot, result)
+	}
+}
+
 func TestPrepareHelmChartForDeployOverridesVersionAndAppVersion(t *testing.T) {
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
@@ -366,6 +425,33 @@ func TestResolveOpenRuntimeDeploySpecFallsBackToEmbeddedDefaultChart(t *testing.
 	}
 	if got := filepath.Base(spec.Deploy.ValuesFilePath); got != "values.dev.yaml" {
 		t.Fatalf("expected values.dev.yaml fallback, got %q", got)
+	}
+}
+
+func TestResolveOpenRuntimeDeploySpecUsesRemoteEnvRuntimeVersionForEmbeddedChart(t *testing.T) {
+	spec, err := ResolveOpenRuntimeDeploySpec(ConfigStore{}, FindProjectRoot, ResolveDockerBuildContext, ResolveKubernetesDeployContext, nil, OpenResult{
+		Tenant:      "frs",
+		Environment: "remote",
+		RepoPath:    "/home/erun/git/frs",
+		TenantConfig: TenantConfig{
+			Name:   "frs",
+			Remote: true,
+		},
+		EnvConfig: EnvConfig{
+			KubernetesContext: "cluster-remote",
+			RepoPath:          "/home/erun/git/frs",
+			Remote:            true,
+			RuntimeVersion:    "1.0.31",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveOpenRuntimeDeploySpec failed: %v", err)
+	}
+	if spec.Deploy.Version != "1.0.31" {
+		t.Fatalf("expected embedded chart deploy version override, got %+v", spec.Deploy)
+	}
+	if len(spec.Builds) != 0 {
+		t.Fatalf("expected no local builds for remote embedded chart, got %+v", spec.Builds)
 	}
 }
 
