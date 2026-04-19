@@ -1244,9 +1244,42 @@ func DockerImageBuilder(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 	}
 	cmd := exec.Command("docker", dockerBuildArgs(buildInput)...)
 	cmd.Dir = buildInput.ContextDir
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	return cmd.Run()
+	output := new(bytes.Buffer)
+	cmd.Stdout = dockerCommandOutputWriter(stdout, output)
+	cmd.Stderr = dockerCommandOutputWriter(stderr, output)
+	err := cmd.Run()
+	if err == nil {
+		return nil
+	}
+
+	message := output.String()
+	if buildInput.Push && IsDockerPushAuthorizationError(message) {
+		return DockerRegistryAuthError{
+			Tag:      buildInput.Image.Tag,
+			Registry: dockerRegistryFromImageTag(buildInput.Image.Tag),
+			Message:  strings.TrimSpace(message),
+			Err:      err,
+		}
+	}
+
+	return err
+}
+
+func dockerCommandOutputWriter(primary io.Writer, capture io.Writer) io.Writer {
+	writers := make([]io.Writer, 0, 2)
+	if primary != nil {
+		writers = append(writers, primary)
+	}
+	if capture != nil {
+		writers = append(writers, capture)
+	}
+	if len(writers) == 0 {
+		return io.Discard
+	}
+	if len(writers) == 1 {
+		return writers[0]
+	}
+	return io.MultiWriter(writers...)
 }
 
 func dockerBuildArgs(buildInput DockerBuildSpec) []string {
@@ -1385,8 +1418,8 @@ func BuildScriptRunner(dir, scriptPath string, env []string, stdin io.Reader, st
 func DockerImagePusher(tag string, stdout, stderr io.Writer) error {
 	pushCmd := exec.Command("docker", "push", tag)
 	output := new(bytes.Buffer)
-	pushCmd.Stdout = io.MultiWriter(stdout, output)
-	pushCmd.Stderr = io.MultiWriter(stderr, output)
+	pushCmd.Stdout = dockerCommandOutputWriter(stdout, output)
+	pushCmd.Stderr = dockerCommandOutputWriter(stderr, output)
 	err := pushCmd.Run()
 	if err == nil {
 		return nil
