@@ -146,6 +146,59 @@ func TestDockerBuildTraceCommandsIncludeBuildxBootstrapForMultiPlatformBuilds(t 
 	}
 }
 
+func TestMissingBuildxPlatformsReportsRequiredPlatformsNotPresent(t *testing.T) {
+	output := `Name: erun-multiarch
+Driver: docker-container
+Platforms: linux/arm64
+`
+
+	missing := missingBuildxPlatforms(output, []string{"linux/amd64", "linux/arm64"})
+	if !reflect.DeepEqual(missing, []string{"linux/amd64"}) {
+		t.Fatalf("unexpected missing platforms: %+v", missing)
+	}
+}
+
+func TestOrderedDockerBuildSpecsBuildsLocalBaseImagesBeforeDependents(t *testing.T) {
+	workdir := t.TempDir()
+	baseDir := filepath.Join(workdir, "base")
+	appDir := filepath.Join(workdir, "app")
+	for _, dir := range []string{baseDir, appDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %q: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, "Dockerfile"), []byte("FROM alpine:3.22\n"), 0o644); err != nil {
+		t.Fatalf("write base Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(appDir, "Dockerfile"), []byte("FROM erunpaas/base:1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write app Dockerfile: %v", err)
+	}
+
+	builds := []DockerBuildSpec{
+		{
+			ContextDir:     appDir,
+			DockerfilePath: filepath.Join(appDir, "Dockerfile"),
+			Image: DockerImageReference{
+				Tag: "erunpaas/app:1.0.0",
+			},
+		},
+		{
+			ContextDir:     baseDir,
+			DockerfilePath: filepath.Join(baseDir, "Dockerfile"),
+			Image: DockerImageReference{
+				Tag: "erunpaas/base:1.0.0",
+			},
+		},
+	}
+
+	ordered := orderedDockerBuildSpecs(builds)
+	got := []string{ordered[0].Image.Tag, ordered[1].Image.Tag}
+	want := []string{"erunpaas/base:1.0.0", "erunpaas/app:1.0.0"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected build order: got %+v want %+v", got, want)
+	}
+}
+
 func TestResolveDockerBuildContextIgnoresMissingDockerfile(t *testing.T) {
 	workdir := t.TempDir()
 
@@ -653,6 +706,69 @@ func TestResolveBuildExecutionReleaseOnlyPushesReleaseTaggedDockerBuilds(t *test
 	}
 	if got := execution.dockerPushes[0].Image.Tag; got != "erunpaas/api:1.4.2" {
 		t.Fatalf("unexpected docker push tag: %q", got)
+	}
+}
+
+func TestResolveBuildExecutionReleasePushesLocalDockerDependenciesAndDind(t *testing.T) {
+	projectRoot := setupReleaseProjectGitRepo(t, "main")
+	releaseRoot := filepath.Join(projectRoot, "erun-devops")
+
+	apiDockerfilePath := filepath.Join(releaseRoot, "docker", "api", "Dockerfile")
+	if err := os.WriteFile(apiDockerfilePath, []byte("FROM erunpaas/base:9.9.9\n"), 0o644); err != nil {
+		t.Fatalf("write api Dockerfile: %v", err)
+	}
+
+	dindDir := filepath.Join(releaseRoot, "docker", "erun-dind")
+	if err := os.MkdirAll(dindDir, 0o755); err != nil {
+		t.Fatalf("mkdir dind dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dindDir, "Dockerfile"), []byte("FROM docker:28.1.1-dind\n"), 0o644); err != nil {
+		t.Fatalf("write dind Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dindDir, "VERSION"), []byte("28.1.1\n"), 0o644); err != nil {
+		t.Fatalf("write dind VERSION: %v", err)
+	}
+
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{Dir: projectRoot}, nil
+		},
+		nil,
+		DockerCommandTarget{ProjectRoot: projectRoot, Environment: DefaultEnvironment, Release: true},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+
+	if len(execution.dockerPushes) != 3 {
+		t.Fatalf("unexpected docker pushes: %+v", execution.dockerPushes)
+	}
+	wantPushes := map[string]struct{}{
+		"erunpaas/api:1.4.2":        {},
+		"erunpaas/base:9.9.9":       {},
+		"erunpaas/erun-dind:28.1.1": {},
+	}
+	for _, pushInput := range execution.dockerPushes {
+		if _, ok := wantPushes[pushInput.Image.Tag]; !ok {
+			t.Fatalf("unexpected docker push tag: %q", pushInput.Image.Tag)
+		}
+		delete(wantPushes, pushInput.Image.Tag)
+	}
+	if len(wantPushes) != 0 {
+		t.Fatalf("missing docker pushes: %+v", wantPushes)
+	}
+
+	for _, build := range execution.dockerBuilds {
+		switch build.Image.Tag {
+		case "erunpaas/api:1.4.2", "erunpaas/base:9.9.9", "erunpaas/erun-dind:28.1.1":
+			if !build.Push || !reflect.DeepEqual(build.Platforms, []string{"linux/amd64", "linux/arm64"}) {
+				t.Fatalf("expected multi-platform release build for %q, got %+v", build.Image.Tag, build)
+			}
+		}
 	}
 }
 
