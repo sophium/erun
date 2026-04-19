@@ -2322,7 +2322,16 @@ func TestBuildCommandDryRunReleaseShowsPushCommandsForReleaseTaggedDockerBuilds(
 	}
 
 	output := stderr.String()
-	if !strings.Contains(output, "docker buildx build --platform 'linux/amd64,linux/arm64' -t erunpaas/api:1.4.2") {
+	if !strings.Contains(output, "docker buildx inspect erun-multiarch") {
+		t.Fatalf("expected buildx inspect trace, got:\n%s", output)
+	}
+	if !strings.Contains(output, "docker buildx create --name erun-multiarch --driver docker-container") {
+		t.Fatalf("expected buildx create trace, got:\n%s", output)
+	}
+	if !strings.Contains(output, "docker buildx inspect --builder erun-multiarch --bootstrap") {
+		t.Fatalf("expected buildx bootstrap trace, got:\n%s", output)
+	}
+	if !strings.Contains(output, "docker buildx build --builder erun-multiarch --platform 'linux/amd64,linux/arm64' -t erunpaas/api:1.4.2") {
 		t.Fatalf("expected release build trace, got:\n%s", output)
 	}
 	if !strings.Contains(output, "docker build -t erunpaas/base:9.9.9") {

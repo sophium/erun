@@ -104,6 +104,7 @@ func TestDockerBuildArgsUseBuildxForMultiPlatformPush(t *testing.T) {
 	got := strings.Join(args, " ")
 	for _, want := range []string{
 		"buildx build",
+		"--builder erun-multiarch",
 		"--platform linux/amd64,linux/arm64",
 		"-t erunpaas/erun-devops:1.0.0",
 		"--build-arg ERUN_VERSION=1.0.0",
@@ -113,6 +114,35 @@ func TestDockerBuildArgsUseBuildxForMultiPlatformPush(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected docker buildx args to contain %q, got %q", want, got)
 		}
+	}
+}
+
+func TestDockerBuildTraceCommandsIncludeBuildxBootstrapForMultiPlatformBuilds(t *testing.T) {
+	buildInput := DockerBuildSpec{
+		ContextDir:     "/tmp/project",
+		DockerfilePath: "/tmp/project/Dockerfile",
+		Image: DockerImageReference{
+			Tag: "erunpaas/erun-devops:1.0.0",
+		},
+		Platforms: []string{"linux/amd64", "linux/arm64"},
+		Push:      true,
+	}
+
+	commands := buildInput.traceCommands()
+	if len(commands) != 4 {
+		t.Fatalf("unexpected trace commands: %+v", commands)
+	}
+	if got := strings.Join(commands[0].Args, " "); got != "buildx inspect erun-multiarch" {
+		t.Fatalf("unexpected inspect command: %q", got)
+	}
+	if got := strings.Join(commands[1].Args, " "); got != "buildx create --name erun-multiarch --driver docker-container" {
+		t.Fatalf("unexpected create command: %q", got)
+	}
+	if got := strings.Join(commands[2].Args, " "); got != "buildx inspect --builder erun-multiarch --bootstrap" {
+		t.Fatalf("unexpected bootstrap command: %q", got)
+	}
+	if got := strings.Join(commands[3].Args, " "); !strings.Contains(got, "buildx build --builder erun-multiarch --platform linux/amd64,linux/arm64") {
+		t.Fatalf("unexpected build command: %q", got)
 	}
 }
 

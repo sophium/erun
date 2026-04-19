@@ -405,7 +405,7 @@ func TestBuildToolPreviewReleaseIncludesReleaseAndBuildTrace(t *testing.T) {
 	foundBuildTrace := false
 	foundVersionReport := false
 	for _, trace := range output.Trace {
-		if strings.Contains(trace, "docker buildx build --platform 'linux/amd64,linux/arm64' -t erunpaas/api:1.4.2-rc.") && strings.Contains(trace, "--push") {
+		if strings.Contains(trace, "docker buildx build --builder erun-multiarch --platform 'linux/amd64,linux/arm64' -t erunpaas/api:1.4.2-rc.") && strings.Contains(trace, "--push") {
 			foundBuildTrace = true
 		}
 		if strings.Contains(trace, "release version: 1.4.2-rc.") {
