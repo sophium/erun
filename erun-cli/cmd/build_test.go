@@ -19,6 +19,8 @@ type dockerBuildCall struct {
 	Dir            string
 	DockerfilePath string
 	Tag            string
+	Platforms      []string
+	Push           bool
 	Stdout         io.Writer
 	Stderr         io.Writer
 }
@@ -46,11 +48,13 @@ type buildScriptCall struct {
 }
 
 func buildCallFunc(run func(dockerBuildCall) error) common.DockerImageBuilderFunc {
-	return func(dir, dockerfilePath, tag string, stdout, stderr io.Writer) error {
+	return func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
 		return run(dockerBuildCall{
-			Dir:            dir,
-			DockerfilePath: dockerfilePath,
-			Tag:            tag,
+			Dir:            buildInput.ContextDir,
+			DockerfilePath: buildInput.DockerfilePath,
+			Tag:            buildInput.Image.Tag,
+			Platforms:      append([]string{}, buildInput.Platforms...),
+			Push:           buildInput.Push,
 			Stdout:         stdout,
 			Stderr:         stderr,
 		})
@@ -1957,8 +1961,8 @@ func TestBuildCommandVersionOverrideAvoidsSnapshotTag(t *testing.T) {
 		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
 			return common.DockerBuildContextAtDir(buildDir)
 		},
-		BuildDockerImage: func(dir, dockerfilePath, tag string, stdout, stderr io.Writer) error {
-			t.Fatalf("unexpected build execution: %s", tag)
+		BuildDockerImage: func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
+			t.Fatalf("unexpected build execution: %s", buildInput.Image.Tag)
 			return nil
 		},
 	})
@@ -2010,8 +2014,8 @@ func TestBuildCommandVersionOverrideDoesNotReplaceComponentLocalVersions(t *test
 		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
 			return common.DockerBuildContext{Dir: filepath.Join(devopsDir, "docker")}, nil
 		},
-		BuildDockerImage: func(dir, dockerfilePath, tag string, stdout, stderr io.Writer) error {
-			t.Fatalf("unexpected build execution: %s", tag)
+		BuildDockerImage: func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
+			t.Fatalf("unexpected build execution: %s", buildInput.Image.Tag)
 			return nil
 		},
 	})
@@ -2318,17 +2322,17 @@ func TestBuildCommandDryRunReleaseShowsPushCommandsForReleaseTaggedDockerBuilds(
 	}
 
 	output := stderr.String()
-	if !strings.Contains(output, "docker build -t erunpaas/api:1.4.2") {
+	if !strings.Contains(output, "docker buildx build --platform 'linux/amd64,linux/arm64' -t erunpaas/api:1.4.2") {
 		t.Fatalf("expected release build trace, got:\n%s", output)
 	}
 	if !strings.Contains(output, "docker build -t erunpaas/base:9.9.9") {
 		t.Fatalf("expected component-local build trace, got:\n%s", output)
 	}
-	if !strings.Contains(output, "docker push erunpaas/api:1.4.2") {
-		t.Fatalf("expected release push trace, got:\n%s", output)
+	if !strings.Contains(output, "--push") {
+		t.Fatalf("expected multi-platform release push trace, got:\n%s", output)
 	}
-	if strings.Contains(output, "docker push erunpaas/base:9.9.9") {
-		t.Fatalf("did not expect push trace for non-release-tagged image, got:\n%s", output)
+	if strings.Contains(output, "docker push erunpaas/api:1.4.2") || strings.Contains(output, "docker push erunpaas/base:9.9.9") {
+		t.Fatalf("did not expect separate docker push trace, got:\n%s", output)
 	}
 }
 

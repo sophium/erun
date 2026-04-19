@@ -405,7 +405,7 @@ func TestBuildToolPreviewReleaseIncludesReleaseAndBuildTrace(t *testing.T) {
 	foundBuildTrace := false
 	foundVersionReport := false
 	for _, trace := range output.Trace {
-		if strings.Contains(trace, "docker build -t erunpaas/api:1.4.2-rc.") {
+		if strings.Contains(trace, "docker buildx build --platform 'linux/amd64,linux/arm64' -t erunpaas/api:1.4.2-rc.") && strings.Contains(trace, "--push") {
 			foundBuildTrace = true
 		}
 		if strings.Contains(trace, "release version: 1.4.2-rc.") {
@@ -522,7 +522,7 @@ func TestBuildToolRunsProjectBuildScriptWhenPresent(t *testing.T) {
 			}
 			return nil
 		},
-		BuildDockerImage: func(string, string, string, io.Writer, io.Writer) error {
+		BuildDockerImage: func(eruncommon.DockerBuildSpec, io.Writer, io.Writer) error {
 			t.Fatal("unexpected docker build")
 			return nil
 		},
