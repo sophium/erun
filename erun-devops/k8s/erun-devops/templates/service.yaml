@@ -67,6 +67,15 @@ spec:
       serviceAccountName: erun-devops
       securityContext:
         fsGroup: 1000
+      initContainers:
+        - image: tonistiigi/binfmt:qemu-v10.0.4-56
+          name: install-binfmt
+          imagePullPolicy: IfNotPresent
+          args:
+            - --install
+            - amd64,arm64
+          securityContext:
+            privileged: true
       containers:
         - image: erunpaas/erun-devops:{{ .Chart.AppVersion }}
           name: erun-devops

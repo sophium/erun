@@ -159,6 +159,30 @@ func TestPrepareHelmChartForDeployOverridesVersionAndAppVersion(t *testing.T) {
 	}
 }
 
+func TestRuntimeChartsInstallBinfmtForMultiArchBuilds(t *testing.T) {
+	paths := []string{
+		filepath.Join("..", "erun-devops", "k8s", "erun-devops", "templates", "service.yaml"),
+		filepath.Join("assets", "default-devops-chart", "templates", "service.yaml"),
+	}
+
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %q: %v", path, err)
+		}
+		content := string(data)
+		if !strings.Contains(content, "tonistiigi/binfmt:qemu-v10.0.4-56") {
+			t.Fatalf("expected %q to install binfmt, got:\n%s", path, content)
+		}
+		if !strings.Contains(content, "name: install-binfmt") {
+			t.Fatalf("expected %q to define install-binfmt init container, got:\n%s", path, content)
+		}
+		if !strings.Contains(content, "amd64,arm64") {
+			t.Fatalf("expected %q to install amd64 and arm64 binfmt support, got:\n%s", path, content)
+		}
+	}
+}
+
 func TestNewHelmDeploySpecCanonicalizesWorktreeHostPath(t *testing.T) {
 	projectRoot := t.TempDir()
 	repoRoot := filepath.Join(projectRoot, "repo")

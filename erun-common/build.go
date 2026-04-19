@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -205,7 +207,7 @@ func BuildExecutionUsesBuildScript(execution BuildExecutionSpec) bool {
 }
 
 func releaseDockerPushSpecs(builds []DockerBuildSpec, images []ReleaseDockerImageSpec) []DockerPushSpec {
-	if len(builds) == 0 || len(images) == 0 {
+	if len(builds) == 0 {
 		return nil
 	}
 
@@ -213,8 +215,9 @@ func releaseDockerPushSpecs(builds []DockerBuildSpec, images []ReleaseDockerImag
 	for _, image := range images {
 		releaseTags[strings.TrimSpace(image.Tag)] = struct{}{}
 	}
+	releaseTags = expandLocalReleaseImageDependencies(builds, releaseTags)
 
-	pushes := make([]DockerPushSpec, 0, len(builds))
+	pushes := make([]DockerPushSpec, 0, len(releaseTags))
 	for _, build := range builds {
 		if _, ok := releaseTags[strings.TrimSpace(build.Image.Tag)]; !ok {
 			continue
@@ -222,6 +225,50 @@ func releaseDockerPushSpecs(builds []DockerBuildSpec, images []ReleaseDockerImag
 		pushes = append(pushes, NewDockerPushSpec(build.ContextDir, build.Image))
 	}
 	return pushes
+}
+
+func expandLocalReleaseImageDependencies(builds []DockerBuildSpec, releaseTags map[string]struct{}) map[string]struct{} {
+	if len(builds) == 0 || len(releaseTags) == 0 {
+		return releaseTags
+	}
+
+	buildsByTag := make(map[string]DockerBuildSpec, len(builds))
+	for _, build := range builds {
+		buildsByTag[strings.TrimSpace(build.Image.Tag)] = build
+	}
+
+	expanded := make(map[string]struct{}, len(releaseTags))
+	queue := make([]string, 0, len(releaseTags))
+	for tag := range releaseTags {
+		expanded[tag] = struct{}{}
+		queue = append(queue, tag)
+	}
+
+	for len(queue) > 0 {
+		tag := queue[0]
+		queue = queue[1:]
+
+		build, ok := buildsByTag[tag]
+		if !ok {
+			continue
+		}
+		for _, dependencyTag := range dockerfileLocalBaseImageTags(build.DockerfilePath, buildsByTag) {
+			if _, exists := expanded[dependencyTag]; exists {
+				continue
+			}
+			expanded[dependencyTag] = struct{}{}
+			queue = append(queue, dependencyTag)
+		}
+	}
+
+	for _, build := range builds {
+		if !strings.Contains(strings.TrimSpace(build.Image.ImageName), "dind") {
+			continue
+		}
+		expanded[strings.TrimSpace(build.Image.Tag)] = struct{}{}
+	}
+
+	return expanded
 }
 
 func ResolveDockerBuildTarget(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (DockerCommandTarget, *ReleaseSpec, error) {
@@ -814,7 +861,7 @@ func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBu
 }
 
 func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc) error {
-	for _, buildInput := range builds {
+	for _, buildInput := range orderedDockerBuildSpecs(builds) {
 		if err := RunDockerBuild(ctx, buildInput, build); err != nil {
 			return err
 		}
@@ -1012,6 +1059,80 @@ func DockerBuildContextAtDir(dir string) (DockerBuildContext, error) {
 	return DockerBuildContext{Dir: dir, DockerfilePath: dockerfilePath}, nil
 }
 
+func orderedDockerBuildSpecs(builds []DockerBuildSpec) []DockerBuildSpec {
+	if len(builds) < 2 {
+		return builds
+	}
+
+	buildsByTag := make(map[string]DockerBuildSpec, len(builds))
+	orderIndex := make(map[string]int, len(builds))
+	for i, build := range builds {
+		tag := strings.TrimSpace(build.Image.Tag)
+		buildsByTag[tag] = build
+		orderIndex[tag] = i
+	}
+
+	tags := make([]string, 0, len(builds))
+	seen := make(map[string]bool, len(builds))
+	var visit func(string)
+	visit = func(tag string) {
+		if seen[tag] {
+			return
+		}
+		seen[tag] = true
+		build, ok := buildsByTag[tag]
+		if ok {
+			for _, dependencyTag := range dockerfileLocalBaseImageTags(build.DockerfilePath, buildsByTag) {
+				visit(dependencyTag)
+			}
+		}
+		tags = append(tags, tag)
+	}
+
+	inputTags := make([]string, 0, len(builds))
+	for _, build := range builds {
+		inputTags = append(inputTags, strings.TrimSpace(build.Image.Tag))
+	}
+	slices.SortStableFunc(inputTags, func(a, b string) int {
+		return orderIndex[a] - orderIndex[b]
+	})
+	for _, tag := range inputTags {
+		visit(tag)
+	}
+
+	ordered := make([]DockerBuildSpec, 0, len(builds))
+	for _, tag := range tags {
+		ordered = append(ordered, buildsByTag[tag])
+	}
+	return ordered
+}
+
+var dockerfileFromPattern = regexp.MustCompile(`(?im)^\s*FROM(?:\s+--platform=\S+)?\s+([^\s]+)`)
+
+func dockerfileLocalBaseImageTags(dockerfilePath string, buildsByTag map[string]DockerBuildSpec) []string {
+	data, err := os.ReadFile(dockerfilePath)
+	if err != nil {
+		return nil
+	}
+
+	matches := dockerfileFromPattern.FindAllStringSubmatch(string(data), -1)
+	dependencies := make([]string, 0, len(matches))
+	for _, match := range matches {
+		if len(match) < 2 {
+			continue
+		}
+		imageRef := strings.TrimSpace(match[1])
+		if imageRef == "" || strings.HasPrefix(imageRef, "${") {
+			continue
+		}
+		if _, ok := buildsByTag[imageRef]; !ok {
+			continue
+		}
+		dependencies = append(dependencies, imageRef)
+	}
+	return dependencies
+}
+
 func ResolveDockerBuildContextsAtDir(dir string) ([]DockerBuildContext, error) {
 	dir = filepath.Clean(strings.TrimSpace(dir))
 	if dir == "" || filepath.Base(dir) != "docker" {
@@ -1105,7 +1226,7 @@ func FindComponentDockerBuildContext(projectRoot, componentName string) (DockerB
 
 func DockerImageBuilder(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
 	if len(buildInput.Platforms) > 0 {
-		if err := ensureDockerBuildxBuilder(buildInput.ContextDir, stdout, stderr); err != nil {
+		if err := ensureDockerBuildxBuilder(buildInput.ContextDir, buildInput.Platforms, stdout, stderr); err != nil {
 			return err
 		}
 	}
@@ -1153,7 +1274,9 @@ func dockerBuildxSetupCommands(dir string) []commandSpec {
 	}
 }
 
-func ensureDockerBuildxBuilder(dir string, stdout, stderr io.Writer) error {
+var buildxPlatformsPattern = regexp.MustCompile(`(?m)^\s*Platforms:\s*(.+)$`)
+
+func ensureDockerBuildxBuilder(dir string, requiredPlatforms []string, stdout, stderr io.Writer) error {
 	inspect := exec.Command("docker", "buildx", "inspect", multiPlatformBuildxBuilderName)
 	inspect.Dir = dir
 	inspect.Stdout = io.Discard
@@ -1170,9 +1293,59 @@ func ensureDockerBuildxBuilder(dir string, stdout, stderr io.Writer) error {
 
 	bootstrap := exec.Command("docker", "buildx", "inspect", "--builder", multiPlatformBuildxBuilderName, "--bootstrap")
 	bootstrap.Dir = dir
-	bootstrap.Stdout = stdout
-	bootstrap.Stderr = stderr
-	return bootstrap.Run()
+	output := new(bytes.Buffer)
+	bootstrap.Stdout = io.MultiWriter(stdout, output)
+	bootstrap.Stderr = io.MultiWriter(stderr, output)
+	if err := bootstrap.Run(); err != nil {
+		return err
+	}
+	if missingPlatforms := missingBuildxPlatforms(output.String(), requiredPlatforms); len(missingPlatforms) > 0 {
+		availablePlatforms := buildxPlatforms(output.String())
+		if len(availablePlatforms) == 0 {
+			return fmt.Errorf("multi-platform release builder %q did not report supported platforms after bootstrap", multiPlatformBuildxBuilderName)
+		}
+		return fmt.Errorf("multi-platform release builder %q does not support required platforms: %s (available: %s)", multiPlatformBuildxBuilderName, strings.Join(missingPlatforms, ", "), strings.Join(availablePlatforms, ", "))
+	}
+	return nil
+}
+
+func buildxPlatforms(output string) []string {
+	match := buildxPlatformsPattern.FindStringSubmatch(output)
+	if len(match) < 2 {
+		return nil
+	}
+	rawPlatforms := strings.Split(match[1], ",")
+	platforms := make([]string, 0, len(rawPlatforms))
+	for _, platform := range rawPlatforms {
+		platform = strings.TrimSpace(platform)
+		if platform == "" {
+			continue
+		}
+		platforms = append(platforms, platform)
+	}
+	return platforms
+}
+
+func missingBuildxPlatforms(output string, requiredPlatforms []string) []string {
+	if len(requiredPlatforms) == 0 {
+		return nil
+	}
+	supported := make(map[string]struct{}, len(requiredPlatforms))
+	for _, platform := range buildxPlatforms(output) {
+		supported[platform] = struct{}{}
+	}
+	missing := make([]string, 0, len(requiredPlatforms))
+	for _, platform := range requiredPlatforms {
+		platform = strings.TrimSpace(platform)
+		if platform == "" {
+			continue
+		}
+		if _, ok := supported[platform]; ok {
+			continue
+		}
+		missing = append(missing, platform)
+	}
+	return missing
 }
 
 func dockerImageTagVersion(tag string) string {
