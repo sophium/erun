@@ -168,6 +168,8 @@ func TestReleaseCommandWritesOnlyVersionToStdoutDuringExecution(t *testing.T) {
 	if err := common.SaveProjectConfig(projectRoot, common.ProjectConfig{}); err != nil {
 		t.Fatalf("SaveProjectConfig failed: %v", err)
 	}
+	runGitCommand(t, projectRoot, "add", ".erun/config.yaml")
+	runGitCommand(t, projectRoot, "commit", "-m", "save config")
 
 	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {

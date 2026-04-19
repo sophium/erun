@@ -1,10 +1,13 @@
 package eruncommon
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +15,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -68,9 +72,16 @@ type ReleaseCommandSpec struct {
 }
 
 type ReleaseStage struct {
-	Name        string               `json:"name"`
-	FileUpdates []ReleaseFileUpdate  `json:"fileUpdates,omitempty"`
-	GitCommands []ReleaseCommandSpec `json:"gitCommands,omitempty"`
+	Name          string                    `json:"name"`
+	FileUpdates   []ReleaseFileUpdate       `json:"fileUpdates,omitempty"`
+	GitCommands   []ReleaseCommandSpec      `json:"gitCommands,omitempty"`
+	PackagingSync *ReleasePackagingSyncSpec `json:"packagingSync,omitempty"`
+}
+
+type ReleasePackagingSyncSpec struct {
+	Version     string `json:"version"`
+	FormulaPath string `json:"formulaPath,omitempty"`
+	ScoopPath   string `json:"scoopPath,omitempty"`
 }
 
 type ReleaseSpec struct {
@@ -137,12 +148,14 @@ func resolveReleaseSpec(findProjectRoot ProjectFinderFunc, loadProjectConfig Pro
 		return ReleaseSpec{}, err
 	}
 	releaseFileUpdates := append([]ReleaseFileUpdate{}, chartUpdates...)
+	var packagingSync *ReleasePackagingSyncSpec
 	if mode == ReleaseModeStable {
-		packagingUpdates, err := discoverStableReleasePackaging(projectRoot, version)
+		packagingUpdates, syncSpec, err := discoverStableReleasePackaging(projectRoot, version)
 		if err != nil {
 			return ReleaseSpec{}, err
 		}
 		releaseFileUpdates = append(releaseFileUpdates, packagingUpdates...)
+		packagingSync = syncSpec
 	}
 
 	images, err := discoverReleaseDockerImages(projectRoot, releaseRoot, versionFilePath, version)
@@ -161,6 +174,16 @@ func resolveReleaseSpec(findProjectRoot ProjectFinderFunc, loadProjectConfig Pro
 	releaseStage := newReleaseStage(projectRoot, releaseFileUpdates, version, mode)
 	if len(releaseStage.FileUpdates) > 0 || len(releaseStage.GitCommands) > 0 {
 		stages = append(stages, releaseStage)
+	}
+	if mode == ReleaseModeStable && packagingSync != nil {
+		tagPushStage := newPushReleaseTagStage(projectRoot, version)
+		if len(tagPushStage.GitCommands) > 0 {
+			stages = append(stages, tagPushStage)
+		}
+		packagingStage := newSyncPackagingStage(projectRoot, *packagingSync)
+		if packagingStage.PackagingSync != nil || len(packagingStage.GitCommands) > 0 {
+			stages = append(stages, packagingStage)
+		}
 	}
 
 	nextVersion := ""
@@ -212,9 +235,18 @@ func resolveReleaseSpec(findProjectRoot ProjectFinderFunc, loadProjectConfig Pro
 	}, nil
 }
 
+type ReleasePackagingSyncerFunc func(Context, ReleasePackagingSyncSpec) ([]ReleaseFileUpdate, error)
+
 func RunReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc) error {
+	return runReleaseSpec(ctx, spec, runGit, runScript, syncReleasePackagingChecksums)
+}
+
+func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
 	if runGit == nil {
 		runGit = GitCommandRunner
+	}
+	if syncPackagingChecksums == nil {
+		syncPackagingChecksums = syncReleasePackagingChecksums
 	}
 
 	ctx.Trace(fmt.Sprintf("release: branch=%s mode=%s version=%s", spec.Branch, spec.Mode, spec.Version))
@@ -236,7 +268,16 @@ func RunReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 
 	for _, stage := range spec.Stages {
 		ctx.Trace("stage: " + stage.Name)
-		for _, update := range stage.FileUpdates {
+		stageFileUpdates := append([]ReleaseFileUpdate{}, stage.FileUpdates...)
+		if stage.PackagingSync != nil {
+			generatedUpdates, err := syncPackagingChecksums(ctx, *stage.PackagingSync)
+			if err != nil {
+				return err
+			}
+			stageFileUpdates = append(stageFileUpdates, generatedUpdates...)
+		}
+
+		for _, update := range stageFileUpdates {
 			ctx.TraceBlock("write "+update.Path, strings.TrimRight(update.Content, "\n"))
 			if ctx.DryRun {
 				continue
@@ -246,7 +287,11 @@ func RunReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 			}
 		}
 
-		for _, command := range stage.GitCommands {
+		stageCommands := stage.GitCommands
+		if !ctx.DryRun && stage.PackagingSync != nil && len(stageFileUpdates) == 0 {
+			stageCommands = nil
+		}
+		for _, command := range stageCommands {
 			ctx.TraceCommand(command.Dir, command.Name, command.Args...)
 			if ctx.DryRun {
 				continue
@@ -602,13 +647,14 @@ func discoverReleaseLinuxScripts(releaseRoot, version string) ([]scriptSpec, err
 	return scripts, nil
 }
 
-func discoverStableReleasePackaging(projectRoot, version string) ([]ReleaseFileUpdate, error) {
+func discoverStableReleasePackaging(projectRoot, version string) ([]ReleaseFileUpdate, *ReleasePackagingSyncSpec, error) {
 	updates := make([]ReleaseFileUpdate, 0, 2)
+	syncSpec := &ReleasePackagingSyncSpec{Version: version}
 
 	formulaPath := filepath.Join(projectRoot, "Formula", "erun.rb")
 	formulaContent, formulaChanged, err := updateHomebrewFormulaReleaseVersion(formulaPath, version)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if formulaChanged {
 		updates = append(updates, ReleaseFileUpdate{
@@ -616,11 +662,14 @@ func discoverStableReleasePackaging(projectRoot, version string) ([]ReleaseFileU
 			Content: formulaContent,
 		})
 	}
+	if fileExists(formulaPath) {
+		syncSpec.FormulaPath = formulaPath
+	}
 
 	scoopPath := filepath.Join(projectRoot, "bucket", "erun.json")
 	scoopContent, scoopChanged, err := updateScoopManifestReleaseVersion(scoopPath, version)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if scoopChanged {
 		updates = append(updates, ReleaseFileUpdate{
@@ -628,8 +677,14 @@ func discoverStableReleasePackaging(projectRoot, version string) ([]ReleaseFileU
 			Content: scoopContent,
 		})
 	}
+	if fileExists(scoopPath) {
+		syncSpec.ScoopPath = scoopPath
+	}
+	if syncSpec.FormulaPath == "" && syncSpec.ScoopPath == "" {
+		return updates, nil, nil
+	}
 
-	return updates, nil
+	return updates, syncSpec, nil
 }
 
 func updateHelmChartReleaseVersion(chartFilePath, version string) (string, bool, ReleaseChartSpec, error) {
@@ -733,6 +788,150 @@ func updateScoopManifestReleaseVersion(manifestPath, version string) (string, bo
 	return string(updated) + "\n", true, nil
 }
 
+func updateHomebrewFormulaReleaseChecksum(formulaPath, checksum string) (string, bool, error) {
+	data, err := os.ReadFile(formulaPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+
+	content := string(data)
+	want := `sha256 "` + checksum + `"`
+	pattern := regexp.MustCompile(`(?m)^  sha256 "[0-9a-f]+"$`)
+	updated := pattern.ReplaceAllString(content, "  "+want)
+	if updated == content {
+		return "", false, nil
+	}
+
+	return updated, true, nil
+}
+
+func updateScoopManifestReleaseChecksum(manifestPath, checksum string) (string, bool, error) {
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+
+	var manifest struct {
+		Version     string   `json:"version"`
+		Description string   `json:"description"`
+		Homepage    string   `json:"homepage"`
+		License     string   `json:"license"`
+		Depends     []string `json:"depends,omitempty"`
+		URL         string   `json:"url"`
+		Hash        string   `json:"hash"`
+		ExtractDir  string   `json:"extract_dir"`
+		Installer   struct {
+			Script []string `json:"script,omitempty"`
+		} `json:"installer,omitempty"`
+		Bin []string `json:"bin,omitempty"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return "", false, err
+	}
+	if manifest.Hash == checksum {
+		return "", false, nil
+	}
+	manifest.Hash = checksum
+	updated, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return "", false, err
+	}
+	return string(updated) + "\n", true, nil
+}
+
+func syncReleasePackagingChecksums(ctx Context, spec ReleasePackagingSyncSpec) ([]ReleaseFileUpdate, error) {
+	if spec.FormulaPath == "" && spec.ScoopPath == "" {
+		return nil, nil
+	}
+
+	updates := make([]ReleaseFileUpdate, 0, 2)
+
+	if spec.FormulaPath != "" {
+		url := "https://github.com/sophium/erun/archive/refs/tags/v" + spec.Version + ".tar.gz"
+		ctx.TraceCommand("", "curl", "-fsSL", url)
+		ctx.TraceCommand("", "shasum", "-a", "256", "v"+spec.Version+".tar.gz")
+		if !ctx.DryRun {
+			checksum, err := releaseArchiveSHA256(url)
+			if err != nil {
+				return nil, err
+			}
+			content, changed, err := updateHomebrewFormulaReleaseChecksum(spec.FormulaPath, checksum)
+			if err != nil {
+				return nil, err
+			}
+			if changed {
+				updates = append(updates, ReleaseFileUpdate{Path: spec.FormulaPath, Content: content})
+			}
+		}
+	}
+
+	if spec.ScoopPath != "" {
+		url := "https://github.com/sophium/erun/archive/refs/tags/v" + spec.Version + ".zip"
+		ctx.TraceCommand("", "curl", "-fsSL", url)
+		ctx.TraceCommand("", "shasum", "-a", "256", "v"+spec.Version+".zip")
+		if !ctx.DryRun {
+			checksum, err := releaseArchiveSHA256(url)
+			if err != nil {
+				return nil, err
+			}
+			content, changed, err := updateScoopManifestReleaseChecksum(spec.ScoopPath, checksum)
+			if err != nil {
+				return nil, err
+			}
+			if changed {
+				updates = append(updates, ReleaseFileUpdate{Path: spec.ScoopPath, Content: content})
+			}
+		}
+	}
+
+	return updates, nil
+}
+
+func releaseArchiveSHA256(url string) (string, error) {
+	client := &http.Client{Timeout: 30 * time.Second}
+	var lastErr error
+	for attempt := 0; attempt < 10; attempt++ {
+		checksum, retry, err := fetchReleaseArchiveSHA256(client, url)
+		if err == nil {
+			return checksum, nil
+		}
+		lastErr = err
+		if !retry {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("failed to download release archive %q", url)
+	}
+	return "", lastErr
+}
+
+func fetchReleaseArchiveSHA256(client *http.Client, url string) (string, bool, error) {
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", true, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		retry := resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError
+		return "", retry, fmt.Errorf("download %q failed: %s", url, resp.Status)
+	}
+
+	sum := sha256.New()
+	if _, err := io.Copy(sum, resp.Body); err != nil {
+		return "", true, err
+	}
+	return hex.EncodeToString(sum.Sum(nil)), false, nil
+}
+
 func newReleaseStage(projectRoot string, fileUpdates []ReleaseFileUpdate, version string, mode ReleaseMode) ReleaseStage {
 	stage := ReleaseStage{
 		Name:        "release",
@@ -756,6 +955,44 @@ func newReleaseStage(projectRoot string, fileUpdates []ReleaseFileUpdate, versio
 	}
 	stage.GitCommands = append(stage.GitCommands, releaseGitCommand(projectRoot, "tag", "-a", "v"+version, "-m", tagMessage))
 	return stage
+}
+
+func newPushReleaseTagStage(projectRoot, version string) ReleaseStage {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return ReleaseStage{}
+	}
+
+	return ReleaseStage{
+		Name: "push-release-tag",
+		GitCommands: []ReleaseCommandSpec{
+			releaseGitCommand(projectRoot, "push", "origin", "v"+version),
+		},
+	}
+}
+
+func newSyncPackagingStage(projectRoot string, spec ReleasePackagingSyncSpec) ReleaseStage {
+	if spec.FormulaPath == "" && spec.ScoopPath == "" {
+		return ReleaseStage{}
+	}
+
+	updates := make([]ReleaseFileUpdate, 0, 2)
+	if spec.FormulaPath != "" {
+		updates = append(updates, ReleaseFileUpdate{Path: spec.FormulaPath})
+	}
+	if spec.ScoopPath != "" {
+		updates = append(updates, ReleaseFileUpdate{Path: spec.ScoopPath})
+	}
+
+	addArgs := append([]string{"add"}, releaseUpdatedPaths(projectRoot, updates)...)
+	return ReleaseStage{
+		Name:          "sync-packaging-checksums",
+		PackagingSync: &spec,
+		GitCommands: []ReleaseCommandSpec{
+			releaseGitCommand(projectRoot, addArgs...),
+			releaseGitCommand(projectRoot, "commit", "-m", "[skip ci] sync package metadata "+spec.Version),
+		},
+	}
 }
 
 func newBumpStage(projectRoot, nextVersion string, fileUpdate ReleaseFileUpdate) ReleaseStage {
@@ -871,6 +1108,11 @@ func releaseGitPath(projectRoot, path string) string {
 		return path
 	}
 	return filepath.Clean(relative)
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 func findReleaseChartPaths(projectRoot string) ([]string, error) {
