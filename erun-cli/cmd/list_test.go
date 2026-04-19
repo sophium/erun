@@ -328,10 +328,11 @@ func TestListCommandPrintsSSHDConfiguration(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		"  sshd: on",
+		"  ssh host: erun-tenant-a-dev",
 		"  ssh user: erun",
 		"  ssh local port: 62222 (after erun open)",
 		"  ssh workspace: /home/erun/git/tenant-a",
-		"ssh=on user=erun local-port=62222 workspace=/home/erun/git/tenant-a",
+		"ssh=on host=erun-tenant-a-dev user=erun local-port=62222 workspace=/home/erun/git/tenant-a",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)

@@ -11,6 +11,9 @@ import (
 )
 
 func TestRunSSHDInitCommandPersistsConfigAndDeploysRuntime(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
 	publicKeyPath := filepath.Join(t.TempDir(), "id_ed25519.pub")
 	if err := os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644); err != nil {
 		t.Fatalf("write public key: %v", err)
@@ -76,6 +79,7 @@ func TestRunSSHDInitCommandPersistsConfigAndDeploysRuntime(t *testing.T) {
 			remoteScript = script
 			return common.RemoteCommandResult{}, nil
 		},
+		writeLocalSSHConfig,
 	)
 	if err != nil {
 		t.Fatalf("runSSHDInitCommand failed: %v", err)
@@ -92,5 +96,30 @@ func TestRunSSHDInitCommandPersistsConfigAndDeploysRuntime(t *testing.T) {
 	}
 	if !strings.Contains(remoteScript, "authorized_keys") || !strings.Contains(remoteScript, "ssh-ed25519 AAAATEST user@example") {
 		t.Fatalf("unexpected remote authorized_keys script:\n%s", remoteScript)
+	}
+	sshConfigData, err := os.ReadFile(filepath.Join(homeDir, ".ssh", "config"))
+	if err != nil {
+		t.Fatalf("read ssh config: %v", err)
+	}
+	for _, want := range []string{
+		"Host erun-tenant-a-dev",
+		"HostName 127.0.0.1",
+		"Port 64022",
+		"User erun",
+		"HostKeyAlias erun-tenant-a-dev",
+		"IdentityFile " + strings.TrimSuffix(publicKeyPath, ".pub"),
+	} {
+		if !strings.Contains(string(sshConfigData), want) {
+			t.Fatalf("expected ssh config to contain %q, got:\n%s", want, sshConfigData)
+		}
+	}
+	stdout := ctx.Stdout.(*bytes.Buffer).String()
+	for _, want := range []string{
+		"host: erun-tenant-a-dev",
+		"config: " + filepath.Join(homeDir, ".ssh", "config"),
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("expected stdout to contain %q, got:\n%s", want, stdout)
+		}
 	}
 }

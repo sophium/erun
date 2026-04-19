@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newSSHDCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, runRemoteCommand common.RemoteCommandRunnerFunc) *cobra.Command {
+func newSSHDCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, runRemoteCommand common.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) *cobra.Command {
 	var publicKeyPath string
 	var localPort int
 	target := common.OpenParams{}
@@ -27,7 +27,7 @@ func newSSHDCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 			if err != nil {
 				return err
 			}
-			return runSSHDInitCommand(ctx, result, publicKeyPath, localPort, saveEnvConfig, resolveRuntimeDeploySpec, deployHelmChart, runRemoteCommand)
+			return runSSHDInitCommand(ctx, result, publicKeyPath, localPort, saveEnvConfig, resolveRuntimeDeploySpec, deployHelmChart, runRemoteCommand, writeLocalConfig)
 		},
 	}
 	addDryRunFlag(initCmd)
@@ -39,7 +39,7 @@ func newSSHDCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 	return newCommandGroup("sshd", "Remote SSH utilities", initCmd)
 }
 
-func runSSHDInitCommand(ctx common.Context, result common.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, common.EnvConfig) error, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, runRemoteCommand common.RemoteCommandRunnerFunc) error {
+func runSSHDInitCommand(ctx common.Context, result common.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, common.EnvConfig) error, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, runRemoteCommand common.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
 	if err := common.ValidateSSHDTarget(result); err != nil {
 		return err
 	}
@@ -88,13 +88,29 @@ func runSSHDInitCommand(ctx common.Context, result common.OpenResult, publicKeyP
 		return err
 	}
 
+	localConfig := SSHDLocalConfigResult{}
+	if writeLocalConfig != nil {
+		if ctx.DryRun {
+			info := common.SSHConnectionInfoForResult(result)
+			ctx.Trace(fmt.Sprintf("write ssh config host %s for %s/%s", info.HostAlias, result.Tenant, result.Environment))
+		} else {
+			configResult, err := writeLocalConfig(result)
+			if err != nil {
+				return err
+			}
+			localConfig = configResult
+		}
+	}
+
 	if ctx.Stdout != nil {
 		info := common.SSHConnectionInfoForResult(result)
 		if _, err := fmt.Fprintf(
 			ctx.Stdout,
-			"SSHD enabled for %s/%s\n  user: %s\n  local port: %d\n  workspace: %s\n",
+			"SSHD enabled for %s/%s\n  host: %s\n  config: %s\n  user: %s\n  local port: %d\n  workspace: %s\n",
 			result.Tenant,
 			result.Environment,
+			valueOrNone(localConfig.HostAlias),
+			valueOrNone(localConfig.ConfigPath),
 			info.User,
 			info.Port,
 			info.WorkspacePath,

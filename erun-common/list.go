@@ -62,6 +62,7 @@ type ListEnvironmentResult struct {
 
 type ListSSHResult struct {
 	Enabled       bool   `json:"enabled,omitempty"`
+	HostAlias     string `json:"hostAlias,omitempty"`
 	User          string `json:"user,omitempty"`
 	LocalPort     int    `json:"localPort,omitempty"`
 	WorkspacePath string `json:"workspacePath,omitempty"`
@@ -165,6 +166,7 @@ func listSSHResult(result OpenResult) ListSSHResult {
 	info := SSHConnectionInfoForResult(result)
 	return ListSSHResult{
 		Enabled:       true,
+		HostAlias:     info.HostAlias,
 		User:          info.User,
 		LocalPort:     info.Port,
 		WorkspacePath: info.WorkspacePath,

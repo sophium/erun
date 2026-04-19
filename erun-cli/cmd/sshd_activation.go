@@ -95,8 +95,9 @@ func emitSSHDConnectionInfo(ctx common.Context, info common.SSHConnectionInfo) e
 	}
 	_, err := fmt.Fprintf(
 		ctx.Stdout,
-		"SSH:\n  host: %s\n  port: %d\n  user: %s\n  workspace: %s\n",
+		"SSH:\n  host: %s\n  alias: %s\n  port: %d\n  user: %s\n  workspace: %s\n",
 		info.Host,
+		info.HostAlias,
 		info.Port,
 		info.User,
 		info.WorkspacePath,
