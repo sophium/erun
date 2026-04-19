@@ -605,6 +605,9 @@ func TestInitToolReturnsRepositoryInteractionForRemoteInit(t *testing.T) {
 	handler := initTool(normalizeRuntimeConfig(RuntimeConfig{
 		Context: RuntimeContext{},
 		Store:   initInteractionStore{},
+		EnsureKubernetesNamespace: func(string, string) error {
+			return nil
+		},
 		DeployHelmChart: func(eruncommon.HelmDeployParams) error {
 			return nil
 		},
@@ -643,6 +646,9 @@ func TestInitToolUsesExplicitRuntimeVersionOverride(t *testing.T) {
 	handler := initTool(normalizeRuntimeConfig(RuntimeConfig{
 		Context: RuntimeContext{},
 		Store:   initInteractionStore{},
+		EnsureKubernetesNamespace: func(string, string) error {
+			return nil
+		},
 		DeployHelmChart: func(params eruncommon.HelmDeployParams) error {
 			deployedVersion = params.Version
 			return nil

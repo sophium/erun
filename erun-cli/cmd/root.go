@@ -27,7 +27,8 @@ func runSelect(prompt promptui.Select) (int, string, error) {
 func Execute() error {
 	configStore := common.ConfigStore{}
 	store := rootStore(configStore)
-	runInit := newRunInit(store, common.FindProjectRoot, runPrompt, runSelect, listKubernetesContexts, ensureKubernetesNamespace, common.WaitForShellDeployment, common.RunRemoteCommand, common.DeployHelmChart)
+	deployHelmChart := common.WrapHelmChartDeployerWithNamespaceEnsure(ensureKubernetesNamespace, common.DeployHelmChart)
+	runInit := newRunInit(store, common.FindProjectRoot, runPrompt, runSelect, listKubernetesContexts, ensureKubernetesNamespace, common.WaitForShellDeployment, common.RunRemoteCommand, deployHelmChart)
 	runInitForArgs := newRunInitForArgs(store, runInit)
 	runInitForOpen := newRunInitForOpen(store, runInit)
 	push := newPushOperation(nil, common.DockerRegistryLogin, runSelect)
@@ -54,7 +55,7 @@ func Execute() error {
 		if err != nil {
 			return err
 		}
-		return common.RunDeploySpecs(ctx, specs, common.DockerImageBuilder, push, common.DeployHelmChart)
+		return common.RunDeploySpecs(ctx, specs, common.DockerImageBuilder, push, deployHelmChart)
 	}
 
 	initCmd := newInitCmd(runInit)
@@ -67,26 +68,26 @@ func Execute() error {
 		runManagedDeploy,
 		common.CheckKubernetesDeployment,
 		resolveRuntimeDeploySpec,
-		common.DeployHelmChart,
+		deployHelmChart,
 		activateSSHD,
 	)
-	sshdCmd := newSSHDCmd(resolveOpen, store.SaveEnvConfig, runInitForOpen, resolveRuntimeDeploySpec, common.DeployHelmChart, common.RunRemoteCommand)
+	sshdCmd := newSSHDCmd(resolveOpen, store.SaveEnvConfig, runInitForOpen, resolveRuntimeDeploySpec, deployHelmChart, common.RunRemoteCommand)
 	containerCmd := newCommandGroup(
 		"container",
 		"Container utilities",
-		newBuildCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder, push, common.DeployHelmChart),
+		newBuildCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder, push, deployHelmChart),
 		newPushCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.DockerImageBuilder, push),
 	)
 	k8sCmd := newCommandGroup(
 		"k8s",
 		"Kubernetes utilities",
-		newK8sDeployCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, push, common.DeployHelmChart),
+		newK8sDeployCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, push, deployHelmChart),
 	)
 	devopsCmd := newCommandGroup("devops", "DevOps utilities", containerCmd, k8sCmd)
 
 	var buildCmd *cobra.Command
 	if hasOptionalBuildCmd(common.FindProjectRoot, common.ResolveDockerBuildContext) {
-		buildCmd = newBuildCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder, push, common.DeployHelmChart)
+		buildCmd = newBuildCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder, push, deployHelmChart)
 		buildCmd.Short = optionalBuildCmdShort(common.FindProjectRoot, common.ResolveDockerBuildContext)
 	}
 	var pushCmd *cobra.Command
@@ -96,7 +97,7 @@ func Execute() error {
 	}
 	var deployCmd *cobra.Command
 	if hasOptionalDeployCmd(common.ResolveKubernetesDeployContext) {
-		deployCmd = newDeployCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, push, common.DeployHelmChart)
+		deployCmd = newDeployCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, push, deployHelmChart)
 	}
 
 	mcpCmd := newMCPCmd(resolveOpen, runInitForArgs, launchMCPProcess)
@@ -115,7 +116,7 @@ func Execute() error {
 		if initRan {
 			return nil
 		}
-		return runResolvedOpenCommand(ctx, result, openOptions{}, runPrompt, newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell), runManagedDeploy, common.CheckKubernetesDeployment, resolveRuntimeDeploySpec, common.DeployHelmChart, activateSSHD)
+		return runResolvedOpenCommand(ctx, result, openOptions{}, runPrompt, newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell), runManagedDeploy, common.CheckKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateSSHD)
 	}
 
 	cmd := newRootCommand(runRoot)

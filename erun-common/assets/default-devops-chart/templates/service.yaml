@@ -48,6 +48,54 @@ roleRef:
   kind: ClusterRole
   name: admin
 ---
+{{- if eq (required "environment is required" .Values.environment) "local" }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: __MODULE_NAME__-namespace-manager
+  labels:
+    app: __MODULE_NAME__
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+      - list
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: __MODULE_NAME__
+  labels:
+    app: __MODULE_NAME__
+subjects:
+  - kind: ServiceAccount
+    name: __MODULE_NAME__
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: __MODULE_NAME__-namespace-manager
+  labels:
+    app: __MODULE_NAME__
+subjects:
+  - kind: ServiceAccount
+    name: __MODULE_NAME__
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: __MODULE_NAME__-namespace-manager
+---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

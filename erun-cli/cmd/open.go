@@ -226,6 +226,9 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 		}
 
 		if shouldDeploy {
+			if result.EnvConfig.SSHD.Enabled {
+				execution.Deploy.SSHDEnabled = true
+			}
 			ctx.Logger.Debug("deploying the devops runtime before opening the shell")
 			if err := common.RunDeploySpec(
 				ctx,

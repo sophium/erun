@@ -242,6 +242,34 @@ func TestRuntimeChartsInstallBinfmtForMultiArchBuilds(t *testing.T) {
 	}
 }
 
+func TestRuntimeChartsGrantLocalRuntimeCrossNamespaceBootstrapAccess(t *testing.T) {
+	paths := []string{
+		filepath.Join("..", "erun-devops", "k8s", "erun-devops", "templates", "service.yaml"),
+		filepath.Join("assets", "default-devops-chart", "templates", "service.yaml"),
+	}
+
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %q: %v", path, err)
+		}
+		content := string(data)
+		for _, want := range []string{
+			`{{- if eq (required "environment is required" .Values.environment) "local" }}`,
+			"kind: ClusterRole",
+			"resources:",
+			"      - namespaces",
+			"      - list",
+			"      - create",
+			"kind: ClusterRoleBinding",
+		} {
+			if !strings.Contains(content, want) {
+				t.Fatalf("expected %q to include %q, got:\n%s", path, want, content)
+			}
+		}
+	}
+}
+
 func TestNewHelmDeploySpecCanonicalizesWorktreeHostPath(t *testing.T) {
 	projectRoot := t.TempDir()
 	repoRoot := filepath.Join(projectRoot, "repo")
@@ -452,6 +480,87 @@ func TestResolveOpenRuntimeDeploySpecUsesRemoteEnvRuntimeVersionForEmbeddedChart
 	}
 	if len(spec.Builds) != 0 {
 		t.Fatalf("expected no local builds for remote embedded chart, got %+v", spec.Builds)
+	}
+}
+
+func TestResolveDeploySpecForContextUsesSelectedKubernetesContextForLocalEnvironment(t *testing.T) {
+	projectRoot := t.TempDir()
+	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
+
+	spec, err := resolveDeploySpecForContext(
+		openStore{
+			resolveDeployKubernetesContext: func(environment, configured string) string {
+				if environment != DefaultEnvironment || configured != "cluster-configured" {
+					t.Fatalf("unexpected deploy context resolution inputs: environment=%q configured=%q", environment, configured)
+				}
+				return "cluster-selected"
+			},
+		},
+		nil,
+		nil,
+		nil,
+		nil,
+		OpenResult{
+			Tenant:      "tenant-a",
+			Environment: DefaultEnvironment,
+			RepoPath:    projectRoot,
+			EnvConfig: EnvConfig{
+				KubernetesContext: "cluster-configured",
+			},
+		},
+		KubernetesDeployContext{
+			ComponentName: "erun-devops",
+			ChartPath:     chartPath,
+		},
+		"",
+		false,
+	)
+	if err != nil {
+		t.Fatalf("resolveDeploySpecForContext failed: %v", err)
+	}
+	if spec.Deploy.KubernetesContext != "cluster-selected" {
+		t.Fatalf("expected selected kubernetes context, got %+v", spec.Deploy)
+	}
+}
+
+func TestDeployHelmChartPassesSSHDEnabledValue(t *testing.T) {
+	helmDir := t.TempDir()
+	argsPath := filepath.Join(helmDir, "helm-args.txt")
+	helmPath := filepath.Join(helmDir, "helm")
+	if err := os.WriteFile(helmPath, []byte(`#!/bin/sh
+printf '%s
+' "$@" > "$ERUN_HELM_ARGS_FILE"
+`), 0o755); err != nil {
+		t.Fatalf("write helm stub: %v", err)
+	}
+	t.Setenv("ERUN_HELM_ARGS_FILE", argsPath)
+	t.Setenv("PATH", helmDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	chartPath := createHelmChartFixture(t, t.TempDir(), "erun-devops")
+	if err := DeployHelmChart(HelmDeployParams{
+		ReleaseName:       "erun-devops",
+		ChartPath:         chartPath,
+		ValuesFilePath:    filepath.Join(chartPath, "values.local.yaml"),
+		Tenant:            "erun",
+		Environment:       "remote",
+		Namespace:         "erun-remote",
+		KubernetesContext: "rancher-desktop",
+		WorktreeStorage:   WorktreeStoragePVC,
+		WorktreeRepoName:  "erun",
+		WorktreeHostPath:  "/home/erun/git/erun",
+		SSHDEnabled:       true,
+		Timeout:           DefaultHelmDeploymentTimeout,
+	}); err != nil {
+		t.Fatalf("DeployHelmChart failed: %v", err)
+	}
+
+	data, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read helm args: %v", err)
+	}
+	args := string(data)
+	if !strings.Contains(args, "--set\nsshdEnabled=true\n") {
+		t.Fatalf("expected helm args to include sshdEnabled=true, got:\n%s", args)
 	}
 }
 
