@@ -98,6 +98,17 @@ func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinde
 	}
 }
 
+func resolveRuntimeDeploySpecForOpen(store common.DeployStore, findProjectRoot common.ProjectFinderFunc, resolveDockerBuildContext common.BuildContextResolverFunc, resolveKubernetesDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildInfo common.BuildInfo, target common.OpenResult) (common.DeploySpec, error) {
+	spec, err := common.ResolveOpenRuntimeDeploySpec(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
+	if err != nil {
+		return common.DeploySpec{}, err
+	}
+	if target.RemoteRepo() && strings.TrimSpace(spec.Deploy.Version) == "" {
+		spec.Deploy.Version = common.NormalizeBuildInfo(buildInfo).Version
+	}
+	return spec, nil
+}
+
 func newRunInitForArgs(store common.OpenStore, runInit func(common.Context, common.BootstrapInitParams) error) func(common.Context, []string) error {
 	return func(ctx common.Context, args []string) error {
 		params, err := common.InitParamsForOpenArgs(store, args)
@@ -105,6 +116,16 @@ func newRunInitForArgs(store common.OpenStore, runInit func(common.Context, comm
 			return err
 		}
 		return runInit(ctx, params)
+	}
+}
+
+func newRunInitForOpen(store common.OpenStore, runInit func(common.Context, common.BootstrapInitParams) error) func(common.Context, common.OpenParams) error {
+	return func(ctx common.Context, params common.OpenParams) error {
+		initParams, err := common.InitParamsForOpenTarget(store, params)
+		if err != nil {
+			return err
+		}
+		return runInit(ctx, initParams)
 	}
 }
 

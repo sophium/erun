@@ -22,10 +22,11 @@ const (
 
 var currentHostOS = func() common.HostOS { return common.DetectHost().OS }
 
-func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), saveTenantConfig func(common.TenantConfig) error, runInitForArgs func(common.Context, []string) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
+func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), saveTenantConfig func(common.TenantConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateSSHD SSHDActivator) *cobra.Command {
 	var noShell bool
 	var snapshot bool
 	var noSnapshot bool
+	target := common.OpenParams{}
 
 	cmd := &cobra.Command{
 		Use:          "open [TENANT] [ENVIRONMENT]",
@@ -34,7 +35,11 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			result, initRan, err := resolveOpenWithInitStop(ctx, args, shouldRunInitForOpenCommand, resolveOpen, runInitForArgs)
+			params, err := resolveOpenParams(args, target)
+			if err != nil {
+				return err
+			}
+			result, initRan, err := resolveOpenWithInitStopForParams(ctx, params, shouldRunInitForOpenCommand, resolveOpen, runInitForOpen)
 			if err != nil {
 				return err
 			}
@@ -49,11 +54,13 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 			if err != nil {
 				return err
 			}
-			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart)
+			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateSSHD)
 		},
 	}
 
 	addDryRunFlag(cmd)
+	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Open a specific tenant")
+	cmd.Flags().StringVar(&target.Environment, "environment", "", "Open a specific environment")
 	cmd.Flags().BoolVar(&noShell, "no-shell", false, "Print shell commands to switch kubectl context, namespace, and worktree locally")
 	addSnapshotFlags(cmd, &snapshot, &noSnapshot, "Build and deploy a local snapshot when opening the local environment")
 	return cmd
@@ -88,9 +95,44 @@ func resolveOpenArgs(args []string, resolveOpen func(common.OpenParams) (common.
 	return params, result, err
 }
 
+func resolveOpenParams(args []string, overrides common.OpenParams) (common.OpenParams, error) {
+	params, err := common.OpenParamsForArgs(args)
+	if err != nil {
+		return common.OpenParams{}, err
+	}
+	if tenant := strings.TrimSpace(overrides.Tenant); tenant != "" {
+		params.Tenant = tenant
+	}
+	if environment := strings.TrimSpace(overrides.Environment); environment != "" {
+		params.Environment = environment
+	}
+
+	switch {
+	case strings.TrimSpace(params.Tenant) == "" && strings.TrimSpace(params.Environment) == "":
+		params.UseDefaultTenant = true
+		params.UseDefaultEnvironment = true
+	case strings.TrimSpace(params.Tenant) == "":
+		params.UseDefaultTenant = true
+		params.UseDefaultEnvironment = false
+	case strings.TrimSpace(params.Environment) == "":
+		params.UseDefaultTenant = false
+		params.UseDefaultEnvironment = true
+	default:
+		params.UseDefaultTenant = false
+		params.UseDefaultEnvironment = false
+	}
+
+	return params, nil
+}
+
 func runInitBeforeOpen(ctx common.Context, args []string, runInitForArgs func(common.Context, []string) error) error {
 	ctx.Logger.Debug("running init before resolving open target")
 	return runInitForArgs(ctx, args)
+}
+
+func runInitBeforeOpenForParams(ctx common.Context, params common.OpenParams, runInitForOpen func(common.Context, common.OpenParams) error) error {
+	ctx.Logger.Debug("running init before resolving open target")
+	return runInitForOpen(ctx, params)
 }
 
 func resolveOpenWithInitStop(ctx common.Context, args []string, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForArgs func(common.Context, []string) error) (common.OpenResult, bool, error) {
@@ -120,9 +162,36 @@ func resolveOpenWithInitRetry(ctx common.Context, args []string, shouldRunInit f
 	return result, true, err
 }
 
-func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc) error {
+func resolveOpenWithInitStopForParams(ctx common.Context, params common.OpenParams, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForOpen func(common.Context, common.OpenParams) error) (common.OpenResult, bool, error) {
+	result, err := resolveOpen(params)
+	if !shouldRunInit(err) {
+		return result, false, err
+	}
+
+	if initErr := runInitBeforeOpenForParams(ctx, params, runInitForOpen); initErr != nil {
+		return common.OpenResult{}, true, initErr
+	}
+
+	return common.OpenResult{}, true, nil
+}
+
+func resolveOpenWithInitRetryForParams(ctx common.Context, params common.OpenParams, shouldRunInit func(error) bool, resolveOpen func(common.OpenParams) (common.OpenResult, error), runInitForOpen func(common.Context, common.OpenParams) error) (common.OpenResult, bool, error) {
+	result, err := resolveOpen(params)
+	if !shouldRunInit(err) {
+		return result, false, err
+	}
+
+	if initErr := runInitBeforeOpenForParams(ctx, params, runInitForOpen); initErr != nil {
+		return common.OpenResult{}, true, initErr
+	}
+
+	result, err = resolveOpen(params)
+	return result, true, err
+}
+
+func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateSSHD SSHDActivator) error {
 	namespace := common.KubernetesNamespaceName(result.Tenant, result.Environment)
-	if options.NoShell {
+	if options.NoShell && !result.EnvConfig.SSHD.Enabled {
 		ctx.TraceCommand("", "kubectl", "config", "use-context", strings.TrimSpace(result.EnvConfig.KubernetesContext))
 		ctx.TraceCommand("", "kubectl", "config", "set-context", "--current", "--namespace="+namespace)
 		ctx.TraceCommand("", "cd", result.RepoPath)
@@ -142,11 +211,13 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 
 		shouldDeploy := len(execution.Builds) > 0
 		if !shouldDeploy && checkKubernetesDeployment != nil {
+			expectedSSHD := sshdExpectationForDeployment(result)
 			deployed, err := checkKubernetesDeployment(common.KubernetesDeploymentCheckParams{
 				Name:              common.RuntimeReleaseName(result.Tenant),
 				Namespace:         namespace,
 				KubernetesContext: result.EnvConfig.KubernetesContext,
 				ExpectedRepoPath:  common.RemoteShellWorktreePath(shellReq),
+				ExpectedSSHD:      expectedSSHD,
 			})
 			if err != nil {
 				return err
@@ -168,6 +239,19 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 				return err
 			}
 		}
+	}
+
+	if activateSSHD != nil && result.EnvConfig.SSHD.Enabled {
+		if err := activateSSHD(ctx, result); err != nil {
+			return err
+		}
+	}
+
+	if options.NoShell {
+		ctx.TraceCommand("", "kubectl", "config", "use-context", strings.TrimSpace(result.EnvConfig.KubernetesContext))
+		ctx.TraceCommand("", "kubectl", "config", "set-context", "--current", "--namespace="+namespace)
+		ctx.TraceCommand("", "cd", result.RepoPath)
+		return emitLocalShellSetupForOpenResult(result, promptRunner, ctx.Stdout, ctx.Stderr)
 	}
 
 	if preview, err := common.PreviewShellLaunch(shellReq); err == nil {
@@ -198,6 +282,14 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 			return err
 		}
 	}
+}
+
+func sshdExpectationForDeployment(result common.OpenResult) *bool {
+	if !result.EnvConfig.SSHD.Enabled {
+		return nil
+	}
+	expected := true
+	return &expected
 }
 
 func wrapOpenHelmDeployWithSpinner(ctx common.Context, releaseName string, deployHelmChart common.HelmChartDeployerFunc) common.HelmChartDeployerFunc {

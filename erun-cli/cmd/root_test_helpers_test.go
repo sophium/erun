@@ -119,8 +119,9 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 		return common.ResolveOpen(store, params)
 	}
 	resolveRuntimeDeploySpec := func(target common.OpenResult) (common.DeploySpec, error) {
-		return common.ResolveOpenRuntimeDeploySpec(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
+		return resolveRuntimeDeploySpecForOpen(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, currentBuildInfo(), target)
 	}
+	activateSSHD := newSSHDActivator(deps.RunRemoteCommand)
 	push := newPushOperation(pushDockerImage, loginToDockerRegistry, selectRunner)
 	runManagedDeploy := func(ctx common.Context, target common.OpenResult) error {
 		specs, err := common.ResolveCurrentDeploySpecs(
@@ -148,9 +149,11 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	}
 	runInit := newRunInit(store, findProjectRoot, promptRunner, selectRunner, listKubernetesContexts, ensureKubernetesNamespace, deps.WaitForRemoteRuntime, deps.RunRemoteCommand, deployHelmChart)
 	runInitForArgs := newRunInitForArgs(store, runInit)
+	runInitForOpen := newRunInitForOpen(store, runInit)
 
 	initCmd := newInitCmd(runInit)
-	openCmd := newOpenCmd(resolveOpen, store.SaveTenantConfig, runInitForArgs, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart)
+	openCmd := newOpenCmd(resolveOpen, store.SaveTenantConfig, runInitForOpen, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart, activateSSHD)
+	sshdCmd := newSSHDCmd(resolveOpen, store.SaveEnvConfig, runInitForOpen, resolveRuntimeDeploySpec, openDeployHelmChart, deps.RunRemoteCommand)
 	containerCmd := newCommandGroup(
 		"container",
 		"Container utilities",
@@ -195,11 +198,11 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 		if initRan {
 			return nil
 		}
-		return runResolvedOpenCommand(ctx, result, openOptions{}, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart)
+		return runResolvedOpenCommand(ctx, result, openOptions{}, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart, activateSSHD)
 	}
 
 	cmd := newRootCommand(runRoot)
-	addCommands(cmd, initCmd, openCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, listCmd, releaseCmd, versionCmd)
+	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, listCmd, releaseCmd, versionCmd)
 	return cmd
 }
 

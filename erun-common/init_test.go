@@ -1106,6 +1106,9 @@ func TestBootstrapRunRemoteInitializesTenantInPodWorktree(t *testing.T) {
 	if result.EnvConfig.RepoPath != remotePath || !result.EnvConfig.Remote {
 		t.Fatalf("unexpected env config: %+v", result.EnvConfig)
 	}
+	if result.EnvConfig.RuntimeVersion != "1.2.3" {
+		t.Fatalf("expected remote runtime version to be persisted, got %+v", result.EnvConfig)
+	}
 	if result.EnvConfig.ContainerRegistry != "registry.example.com/remote" {
 		t.Fatalf("expected remote container registry to be persisted, got %+v", result.EnvConfig)
 	}

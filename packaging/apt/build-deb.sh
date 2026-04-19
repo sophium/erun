@@ -40,6 +40,11 @@ arm64 | aarch64)
   ;;
 esac
 
+if ! command -v dpkg-deb >/dev/null 2>&1; then
+  echo "dpkg-deb is required to build Debian packages; install dpkg or run this build in a Debian-compatible environment" >&2
+  exit 1
+fi
+
 staging_dir=$(mktemp -d)
 trap 'rm -rf "$staging_dir"' EXIT
 

@@ -117,6 +117,19 @@ Repository guidance for humans and coding agents working in this repo.
 - Keep `AGENTS.md` focused on repository workflow and engineering guidance; do not document app behavior, command semantics, or end-user functionality in it.
 - Do not modify `README.md` unless the user explicitly asks for a README change.
 
+## Release Rules
+
+- Treat release work as repository-wide. When changing release behavior, validate `erun-common`, `erun-cli`, and `erun-mcp`, not just the module where the code change landed.
+- Keep stable release automation responsible for all repository metadata that must move with the release, including versioned charts, package-manager metadata, and generated release references; when that metadata references GitHub archive assets, update both version fields and checksums instead of rewriting only URLs.
+- Treat release-time Docker images as dependency graphs, not isolated targets. If a release image depends on local base images, publish those local dependencies before publishing the dependent image.
+- Release-tagged runtime images must be published for both `linux/amd64` and `linux/arm64`. Do not rely on the local daemon default platform for stable releases.
+- Multi-architecture release builds must verify builder capability explicitly. Fail with a direct error when the selected buildx builder does not report all required target platforms.
+- Keep the runtime deployment and release-build environment aligned. If the runtime pod performs release builds through dind, ensure the deployment installs the required binfmt or emulator support before the daemon is used for multi-arch builds.
+- Prefer pinned versions for release-critical infrastructure images such as binfmt helpers, dind, and runtime base images so release behavior stays reproducible.
+- When release automation pushes tags or branches mid-flow, add the follow-up verification needed for later steps. Do not assume remote state, package archives, or checksums are available without checking.
+- Add regression tests for each release failure mode that was fixed. When a release bug is caused by ordering, missing metadata, or missing platform support, encode that contract in tests so the next release cannot regress silently.
+- When a change affects generated runtime charts or embedded templates, test both the shared template source and the concrete runtime chart when practical. Treat them as one contract.
+
 ## Refactoring Rules
 
 - Treat refactoring as behavior-preserving by default.

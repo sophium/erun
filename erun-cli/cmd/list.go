@@ -99,6 +99,20 @@ func writeEffectiveOpen(ctx common.Context, current common.ListCurrentDirectoryR
 	if err := writeLabeledValue(ctx, "snapshot", enabledDisabledLabel(current.Effective.Snapshot)); err != nil {
 		return err
 	}
+	if current.Effective.SSH.Enabled {
+		if err := writeLabeledValue(ctx, "sshd", "on"); err != nil {
+			return err
+		}
+		if err := writeLabeledValue(ctx, "ssh user", current.Effective.SSH.User); err != nil {
+			return err
+		}
+		if err := writeLabeledValue(ctx, "ssh local port", fmt.Sprintf("%d (after erun open)", current.Effective.SSH.LocalPort)); err != nil {
+			return err
+		}
+		if err := writeLabeledValue(ctx, "ssh workspace", current.Effective.SSH.WorkspacePath); err != nil {
+			return err
+		}
+	}
 	return writeLabeledValue(ctx, "repo path", current.Effective.RepoPath)
 }
 
@@ -115,9 +129,6 @@ func writeTenantEntry(ctx common.Context, tenant common.ListTenantResult) error 
 		header += " [" + strings.Join(tenantMarkers, ", ") + "]"
 	}
 	if _, err := fmt.Fprintln(ctx.Stdout, header); err != nil {
-		return err
-	}
-	if err := writeIndentedValue(ctx, 4, "project root", tenant.ProjectRoot); err != nil {
 		return err
 	}
 	if err := writeIndentedValue(ctx, 4, "default environment", tenant.DefaultEnvironment); err != nil {
@@ -148,6 +159,12 @@ func writeTenantEntry(ctx common.Context, tenant common.ListTenantResult) error 
 		}
 		envLine += " context=" + quotedValueOrNone(env.KubernetesContext)
 		envLine += " repo=" + quotedValueOrNone(env.RepoPath)
+		if env.SSH.Enabled {
+			envLine += " ssh=on"
+			envLine += " user=" + quotedValueOrNone(env.SSH.User)
+			envLine += " local-port=" + fmt.Sprintf("%d", env.SSH.LocalPort)
+			envLine += " workspace=" + quotedValueOrNone(env.SSH.WorkspacePath)
+		}
 		if _, err := fmt.Fprintln(ctx.Stdout, envLine); err != nil {
 			return err
 		}

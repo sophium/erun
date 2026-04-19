@@ -66,10 +66,8 @@ func newK8sDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFin
 func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget, snapshot, noSnapshot *bool) {
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the deployed chart and image version")
 	addSnapshotFlags(cmd, snapshot, noSnapshot, "Build and deploy local snapshot images in the local environment")
-	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Tenant override for internal tooling")
-	cmd.Flags().StringVar(&target.Environment, "environment", "", "Environment override for internal tooling")
+	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Deploy for a specific tenant")
+	cmd.Flags().StringVar(&target.Environment, "environment", "", "Deploy for a specific environment; requires --tenant")
 	cmd.Flags().StringVar(&target.RepoPath, "repo-path", "", "Repo path override for internal tooling")
-	_ = cmd.Flags().MarkHidden("tenant")
-	_ = cmd.Flags().MarkHidden("environment")
 	_ = cmd.Flags().MarkHidden("repo-path")
 }

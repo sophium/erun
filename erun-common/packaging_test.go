@@ -113,6 +113,9 @@ func TestAptBuildScriptBuildsDebianPackageForBothExecutables(t *testing.T) {
 	if !strings.Contains(script, `dpkg-deb --build --root-owner-group "$package_root" "$output_path"`) {
 		t.Fatalf("apt build script does not emit a .deb package:\n%s", script)
 	}
+	if !strings.Contains(script, `dpkg-deb is required to build Debian packages; install dpkg or run this build in a Debian-compatible environment`) {
+		t.Fatalf("apt build script does not explain missing dpkg-deb prerequisite:\n%s", script)
+	}
 	if !regexp.MustCompile(`(?m)^Package: erun$`).MatchString(script) {
 		t.Fatalf("apt build script does not define erun package metadata:\n%s", script)
 	}

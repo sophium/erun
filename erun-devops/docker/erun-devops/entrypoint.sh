@@ -75,6 +75,15 @@ runtime_namespace() {
     fi
 }
 
+runtime_sshd_enabled() {
+    case "${ERUN_SSHD_ENABLED:-}" in
+        1|true|TRUE|True|yes|YES|on|ON)
+            return 0
+            ;;
+    esac
+    return 1
+}
+
 initialize_erun_config() {
     repo_dir=$(runtime_repo_dir)
     tenant="${ERUN_TENANT:-}"
@@ -112,6 +121,52 @@ ${remote_line}
 EOF
 }
 
+start_sshd() {
+    if ! runtime_sshd_enabled; then
+        return
+    fi
+
+    sshd_dir="${HOME}/.sshd"
+    host_key_dir="${sshd_dir}/host_keys"
+    pid_file="${sshd_dir}/sshd.pid"
+    config_file="${sshd_dir}/sshd_config"
+    mkdir -p "${HOME}/.ssh" "${host_key_dir}"
+    chmod 700 "${HOME}/.ssh" "${sshd_dir}" "${host_key_dir}"
+
+    if [ -r "${pid_file}" ] && kill -0 "$(cat "${pid_file}")" 2>/dev/null; then
+        return
+    fi
+    rm -f "${pid_file}"
+
+    host_key="${host_key_dir}/ssh_host_ed25519_key"
+    if [ ! -f "${host_key}" ]; then
+        ssh-keygen -q -t ed25519 -N "" -f "${host_key}" >/dev/null 2>&1
+    fi
+    chmod 600 "${host_key}"
+    chmod 644 "${host_key}.pub"
+
+    cat >"${config_file}" <<EOF
+Port 2222
+ListenAddress 0.0.0.0
+HostKey ${host_key}
+AuthorizedKeysFile ${HOME}/.ssh/authorized_keys
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+ChallengeResponseAuthentication no
+PubkeyAuthentication yes
+PermitRootLogin no
+UsePAM no
+PidFile ${pid_file}
+PrintMotd no
+Subsystem sftp internal-sftp
+EOF
+    chmod 600 "${config_file}"
+    touch "${HOME}/.ssh/authorized_keys"
+    chmod 600 "${HOME}/.ssh/authorized_keys"
+
+    /usr/sbin/sshd -f "${config_file}" -E "${sshd_dir}/sshd.log"
+}
+
 run_shell() {
     repo_dir=$(runtime_repo_dir)
 
@@ -123,6 +178,7 @@ run_shell() {
 }
 
 write_kubeconfig
+start_sshd
 
 if [ "${1:-}" = "shell" ]; then
     shift

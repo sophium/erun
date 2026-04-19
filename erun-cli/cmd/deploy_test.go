@@ -70,6 +70,40 @@ func TestNewRootCmdRegistersDevopsK8sDeployCommand(t *testing.T) {
 	}
 }
 
+func TestDeployHelpShowsTenantAndEnvironmentFlags(t *testing.T) {
+	cmd := newTestRootCmd(testRootDeps{
+		ResolveKubernetesDeployContext: func() (common.KubernetesDeployContext, error) {
+			return common.KubernetesDeployContext{
+				ComponentName: "erun-devops",
+				ChartPath:     filepath.Join(t.TempDir(), "erun-devops", "k8s", "erun-devops"),
+			}, nil
+		},
+	})
+	stdout := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(new(bytes.Buffer))
+	cmd.SetArgs([]string{"deploy", "--help"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stdout.String()
+	for _, want := range []string{
+		"--tenant string",
+		"Deploy for a specific tenant",
+		"--environment string",
+		"Deploy for a specific environment; requires --tenant",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected deploy help to contain %q, got:\n%s", want, output)
+		}
+	}
+	if strings.Contains(output, "--repo-path") {
+		t.Fatalf("expected repo-path to remain hidden, got:\n%s", output)
+	}
+}
+
 func TestNewRootCmdRegistersDeployShorthandWhenKubernetesDeployContextPresent(t *testing.T) {
 	cmd := newTestRootCmd(testRootDeps{
 		ResolveKubernetesDeployContext: func() (common.KubernetesDeployContext, error) {
