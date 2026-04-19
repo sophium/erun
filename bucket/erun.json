@@ -1,14 +1,14 @@
 {
-  "version": "1.0.31",
+  "version": "1.0.32",
   "description": "Multi-tenant multi-environment deployment and management tool",
   "homepage": "https://github.com/sophium/erun",
   "license": "MIT",
   "depends": [
     "go"
   ],
-  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.31.zip",
+  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.32.zip",
   "hash": "b72a9e22f362933f23ef5d58ab7a48dd3274276e34fb6c2ee378cd6bfa7f6159",
-  "extract_dir": "erun-1.0.31",
+  "extract_dir": "erun-1.0.32",
   "installer": {
     "script": [
       "$env:CGO_ENABLED = '0'",
