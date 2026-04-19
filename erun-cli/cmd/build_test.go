@@ -1214,6 +1214,70 @@ func TestDevopsContainerPushPromptsLoginAndRetriesOnAuthError(t *testing.T) {
 	}
 }
 
+func TestBuildCommandReleasePromptsLoginAndRetriesOnAuthError(t *testing.T) {
+	projectRoot := createReleaseGitRepo(t, "main")
+	remoteRoot := filepath.Join(t.TempDir(), "release-remote.git")
+	if err := os.MkdirAll(remoteRoot, 0o755); err != nil {
+		t.Fatalf("mkdir remote root: %v", err)
+	}
+	runGitCommand(t, remoteRoot, "init", "--bare")
+	runGitCommand(t, projectRoot, "remote", "add", "origin", remoteRoot)
+	runGitCommand(t, projectRoot, "push", "-u", "origin", "main")
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+	runGitCommand(t, projectRoot, "add", ".")
+	runGitCommand(t, projectRoot, "commit", "-m", "configure registry")
+	runGitCommand(t, projectRoot, "push", "origin", "main")
+
+	pushBuildCalls := 0
+	loginRegistry := "unexpected"
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		OptionalBuildFindProjectRoot: func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: projectRoot}, nil
+		},
+		SelectRunner: func(prompt promptui.Select) (int, string, error) {
+			return 0, loginAndRetryPushOption, nil
+		},
+		BuildDockerImage: buildCallFunc(func(req dockerBuildCall) error {
+			if req.Push {
+				pushBuildCalls++
+				if pushBuildCalls == 1 {
+					return common.DockerRegistryAuthError{
+						Tag:      req.Tag,
+						Registry: "",
+						Message:  "push access denied: insufficient_scope: authorization failed",
+						Err:      errors.New("exit status 1"),
+					}
+				}
+			}
+			return nil
+		}),
+		LoginToDockerRegistry: loginCallFunc(func(req dockerLoginCall) error {
+			loginRegistry = req.Registry
+			return nil
+		}),
+	})
+	cmd.SetArgs([]string{"build", "--release"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if pushBuildCalls != 2 {
+		t.Fatalf("expected release build retry, got %d pushed build calls", pushBuildCalls)
+	}
+	if loginRegistry != "" {
+		t.Fatalf("expected Docker Hub login, got %q", loginRegistry)
+	}
+}
+
 func TestRootPushShorthandUsesResolvedImageTag(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
@@ -1743,6 +1807,8 @@ func TestRunContainerBuildCommandPropagatesBuildContextErrors(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
+		nil,
 	)
 	cmd.SetArgs([]string{})
 
@@ -1760,7 +1826,7 @@ func TestRunContainerPushCommandPropagatesBuildContextErrors(t *testing.T) {
 		newBuildCmd(common.ConfigStore{}, nil, func() (common.DockerBuildContext, error) {
 			t.Fatal("unexpected build execution")
 			return common.DockerBuildContext{}, nil
-		}, nil, nil, nil, nil, nil, nil),
+		}, nil, nil, nil, nil, nil, nil, nil, nil),
 		newPushCmd(common.ConfigStore{}, nil, func() (common.DockerBuildContext, error) {
 			return common.DockerBuildContext{}, expectedErr
 		}, nil, nil, nil),

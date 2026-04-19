@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/manifoldco/promptui"
@@ -17,7 +18,7 @@ const (
 
 var errVersionFileNotFound = common.ErrVersionFileNotFound
 
-func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
+func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	target := common.DockerCommandTarget{}
 	cmd := &cobra.Command{
 		Use:           "build",
@@ -26,7 +27,7 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runBuildCommand(commandContext(cmd), store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, runBuildScript, buildDockerImage, push, deployHelmChart)
+			return runBuildCommand(commandContext(cmd), store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push, deployHelmChart)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -34,13 +35,29 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 	return cmd
 }
 
-func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, target common.DockerCommandTarget, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) error {
+func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, target common.DockerCommandTarget, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) error {
 	execution, err := common.ResolveBuildExecution(store, findProjectRoot, resolveBuildContext, now, target)
 	if err != nil {
 		return err
 	}
+	buildWithRetry := func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
+		return runDockerBuildWithRetry(
+			ctx,
+			buildInput,
+			func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
+				if buildDockerImage == nil {
+					return common.DockerImageBuilder(buildInput, stdout, stderr)
+				}
+				return buildDockerImage(buildInput, stdout, stderr)
+			},
+			loginToDockerRegistry,
+			selectRunner,
+			stdout,
+			stderr,
+		)
+	}
 	if !target.Deploy {
-		return common.RunBuildExecution(ctx, execution, runBuildScript, buildDockerImage, push)
+		return common.RunBuildExecution(ctx, execution, runBuildScript, buildWithRetry, push)
 	}
 	if common.BuildExecutionUsesBuildScript(execution) {
 		return errors.New("build deploy is not supported for project build scripts")
@@ -56,7 +73,7 @@ func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRo
 		return err
 	}
 
-	return common.RunBuildExecutionAndDeploy(ctx, execution, deploySpecs, runBuildScript, buildDockerImage, push, deployHelmChart)
+	return common.RunBuildExecutionAndDeploy(ctx, execution, deploySpecs, runBuildScript, buildWithRetry, push, deployHelmChart)
 }
 
 func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc) *cobra.Command {
@@ -110,6 +127,37 @@ func runDockerPushWithRetry(ctx common.Context, pushInput common.DockerPushSpec,
 	}
 
 	return push(ctx, pushInput)
+}
+
+func runDockerBuildWithRetry(ctx common.Context, buildInput common.DockerBuildSpec, build common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, stdout, stderr io.Writer) error {
+	err := build(buildInput, stdout, stderr)
+	if err == nil {
+		return nil
+	}
+
+	var authErr common.DockerRegistryAuthError
+	if !errors.As(err, &authErr) {
+		return err
+	}
+
+	retry, promptErr := promptDockerLoginRetry(selectRunner, authErr.Registry)
+	if promptErr != nil {
+		return promptErr
+	}
+	if !retry {
+		return err
+	}
+
+	loginArgs := []string{"login"}
+	if strings.TrimSpace(authErr.Registry) != "" {
+		loginArgs = append(loginArgs, authErr.Registry)
+	}
+	ctx.TraceCommand(buildInput.ContextDir, "docker", loginArgs...)
+	if loginErr := loginToDockerRegistry(authErr.Registry, ctx.Stdin, ctx.Stdout, ctx.Stderr); loginErr != nil {
+		return loginErr
+	}
+
+	return build(buildInput, stdout, stderr)
 }
 
 func addBuildCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {

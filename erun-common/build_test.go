@@ -146,6 +146,57 @@ func TestDockerBuildTraceCommandsIncludeBuildxBootstrapForMultiPlatformBuilds(t 
 	}
 }
 
+func TestDockerImageBuilderReturnsRegistryAuthErrorForBuildxPushAuthFailure(t *testing.T) {
+	dockerDir := t.TempDir()
+	dockerPath := filepath.Join(dockerDir, "docker")
+	if err := os.WriteFile(dockerPath, []byte(`#!/bin/sh
+if [ "$1" = "buildx" ] && [ "$2" = "inspect" ] && [ "$3" = "erun-multiarch" ]; then
+  exit 0
+fi
+if [ "$1" = "buildx" ] && [ "$2" = "inspect" ] && [ "$3" = "--builder" ] && [ "$4" = "erun-multiarch" ] && [ "$5" = "--bootstrap" ]; then
+  cat <<'EOF'
+Name: erun-multiarch
+Driver: docker-container
+Platforms: linux/amd64, linux/arm64
+EOF
+  exit 0
+fi
+if [ "$1" = "buildx" ] && [ "$2" = "build" ]; then
+  echo "push access denied: insufficient_scope: authorization failed" >&2
+  exit 1
+fi
+echo "unexpected docker invocation: $@" >&2
+exit 1
+`), 0o755); err != nil {
+		t.Fatalf("write docker stub: %v", err)
+	}
+	t.Setenv("PATH", dockerDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	err := DockerImageBuilder(DockerBuildSpec{
+		ContextDir:     t.TempDir(),
+		DockerfilePath: "/tmp/Dockerfile",
+		Image: DockerImageReference{
+			Tag: "erunpaas/erun-devops:1.4.2",
+		},
+		Platforms: []string{"linux/amd64", "linux/arm64"},
+		Push:      true,
+	}, io.Discard, io.Discard)
+	if err == nil {
+		t.Fatal("expected auth error")
+	}
+
+	var authErr DockerRegistryAuthError
+	if !errors.As(err, &authErr) {
+		t.Fatalf("expected DockerRegistryAuthError, got %T: %v", err, err)
+	}
+	if authErr.Tag != "erunpaas/erun-devops:1.4.2" {
+		t.Fatalf("unexpected auth error tag: %+v", authErr)
+	}
+	if authErr.Registry != "" {
+		t.Fatalf("expected Docker Hub registry, got %q", authErr.Registry)
+	}
+}
+
 func TestMissingBuildxPlatformsReportsRequiredPlatformsNotPresent(t *testing.T) {
 	output := `Name: erun-multiarch
 Driver: docker-container
