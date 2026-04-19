@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -72,7 +73,12 @@ func TestDockerRegistryFromImageTag(t *testing.T) {
 }
 
 func TestDockerBuildArgsIncludeImageVersionAsBuildArg(t *testing.T) {
-	args := dockerBuildArgs("erunpaas/erun-devops:1.0.0-snapshot-20260406123456", "/tmp/Dockerfile")
+	args := dockerBuildArgs(DockerBuildSpec{
+		DockerfilePath: "/tmp/Dockerfile",
+		Image: DockerImageReference{
+			Tag: "erunpaas/erun-devops:1.0.0-snapshot-20260406123456",
+		},
+	})
 	got := strings.Join(args, " ")
 	for _, want := range []string{
 		"build",
@@ -82,6 +88,30 @@ func TestDockerBuildArgsIncludeImageVersionAsBuildArg(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected docker build args to contain %q, got %q", want, got)
+		}
+	}
+}
+
+func TestDockerBuildArgsUseBuildxForMultiPlatformPush(t *testing.T) {
+	args := dockerBuildArgs(DockerBuildSpec{
+		DockerfilePath: "/tmp/Dockerfile",
+		Image: DockerImageReference{
+			Tag: "erunpaas/erun-devops:1.0.0",
+		},
+		Platforms: []string{"linux/amd64", "linux/arm64"},
+		Push:      true,
+	})
+	got := strings.Join(args, " ")
+	for _, want := range []string{
+		"buildx build",
+		"--platform linux/amd64,linux/arm64",
+		"-t erunpaas/erun-devops:1.0.0",
+		"--build-arg ERUN_VERSION=1.0.0",
+		"--push",
+		"-f /tmp/Dockerfile .",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected docker buildx args to contain %q, got %q", want, got)
 		}
 	}
 }
@@ -151,7 +181,7 @@ func TestResolveBuildExecutionPrefersProjectBuildScript(t *testing.T) {
 			t.Fatalf("unexpected script env: %+v", env)
 		}
 		return nil
-	}, func(string, string, string, io.Writer, io.Writer) error {
+	}, func(DockerBuildSpec, io.Writer, io.Writer) error {
 		t.Fatal("unexpected docker build")
 		return nil
 	}, nil); err != nil {
@@ -206,7 +236,7 @@ func TestResolveBuildExecutionPrefersProjectRootBuildScriptOverNestedScripts(t *
 			t.Fatalf("unexpected script env: %+v", env)
 		}
 		return nil
-	}, func(string, string, string, io.Writer, io.Writer) error {
+	}, func(DockerBuildSpec, io.Writer, io.Writer) error {
 		t.Fatal("unexpected docker build")
 		return nil
 	}, nil); err != nil {
@@ -265,7 +295,7 @@ func TestResolveBuildExecutionUsesFirstNestedProjectBuildScript(t *testing.T) {
 			t.Fatalf("unexpected script env: %+v", env)
 		}
 		return nil
-	}, func(string, string, string, io.Writer, io.Writer) error {
+	}, func(DockerBuildSpec, io.Writer, io.Writer) error {
 		t.Fatal("unexpected docker build")
 		return nil
 	}, nil); err != nil {
@@ -359,7 +389,7 @@ func TestRunBuildExecutionRunsLinuxBuildScripts(t *testing.T) {
 			t.Fatalf("unexpected script env: %+v", env)
 		}
 		return nil
-	}, func(string, string, string, io.Writer, io.Writer) error {
+	}, func(DockerBuildSpec, io.Writer, io.Writer) error {
 		t.Fatal("unexpected docker build")
 		return nil
 	}, nil); err != nil {
@@ -553,6 +583,9 @@ func TestResolveBuildExecutionReleaseUsesResolvedVersionForDockerBuilds(t *testi
 	if got := execution.dockerBuilds[0].Image.Tag; got != "erunpaas/api:1.4.2" {
 		t.Fatalf("unexpected docker build tag: %q", got)
 	}
+	if !execution.dockerBuilds[0].Push || !reflect.DeepEqual(execution.dockerBuilds[0].Platforms, []string{"linux/amd64", "linux/arm64"}) {
+		t.Fatalf("expected multi-platform release build spec, got %+v", execution.dockerBuilds[0])
+	}
 	if len(execution.dockerPushes) != 1 {
 		t.Fatalf("unexpected docker pushes: %+v", execution.dockerPushes)
 	}
@@ -667,7 +700,7 @@ func TestRunBuildExecutionDryRunReleaseIncludesReleaseAndBuildTrace(t *testing.T
 	}
 }
 
-func TestRunBuildExecutionReleaseBuildsAndPushesResolvedVersion(t *testing.T) {
+func TestRunBuildExecutionReleasePublishesResolvedVersionAsMultiPlatformBuild(t *testing.T) {
 	projectRoot := setupReleaseProjectGitRepo(t, "main")
 	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "api")
 
@@ -687,7 +720,7 @@ func TestRunBuildExecutionReleaseBuildsAndPushesResolvedVersion(t *testing.T) {
 	}
 	execution.release = nil
 
-	var buildCalls []string
+	var buildCalls []DockerBuildSpec
 	var pushCalls []string
 	ctx := Context{
 		Logger: NewLoggerWithWriters(2, io.Discard, io.Discard),
@@ -695,8 +728,8 @@ func TestRunBuildExecutionReleaseBuildsAndPushesResolvedVersion(t *testing.T) {
 		Stdout: new(bytes.Buffer),
 		Stderr: new(bytes.Buffer),
 	}
-	if err := RunBuildExecution(ctx, execution, nil, func(dir, dockerfilePath, tag string, stdout, stderr io.Writer) error {
-		buildCalls = append(buildCalls, tag)
+	if err := RunBuildExecution(ctx, execution, nil, func(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
+		buildCalls = append(buildCalls, buildInput)
 		return nil
 	}, func(ctx Context, pushInput DockerPushSpec) error {
 		pushCalls = append(pushCalls, pushInput.Image.Tag)
@@ -705,11 +738,14 @@ func TestRunBuildExecutionReleaseBuildsAndPushesResolvedVersion(t *testing.T) {
 		t.Fatalf("RunBuildExecution failed: %v", err)
 	}
 
-	if len(buildCalls) != 1 || buildCalls[0] != "erunpaas/api:1.4.2" {
+	if len(buildCalls) != 1 || buildCalls[0].Image.Tag != "erunpaas/api:1.4.2" {
 		t.Fatalf("unexpected build calls: %+v", buildCalls)
 	}
-	if len(pushCalls) != 1 || pushCalls[0] != "erunpaas/api:1.4.2" {
-		t.Fatalf("unexpected push calls: %+v", pushCalls)
+	if !buildCalls[0].Push || !reflect.DeepEqual(buildCalls[0].Platforms, []string{"linux/amd64", "linux/arm64"}) {
+		t.Fatalf("expected multi-platform pushed release build, got %+v", buildCalls[0])
+	}
+	if len(pushCalls) != 0 {
+		t.Fatalf("did not expect separate push calls: %+v", pushCalls)
 	}
 }
 

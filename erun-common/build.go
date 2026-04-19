@@ -30,7 +30,7 @@ type commandSpec struct {
 type (
 	BuildContextResolverFunc func() (DockerBuildContext, error)
 	NowFunc                  func() time.Time
-	DockerImageBuilderFunc   func(string, string, string, io.Writer, io.Writer) error
+	DockerImageBuilderFunc   func(DockerBuildSpec, io.Writer, io.Writer) error
 	DockerImagePusherFunc    func(string, io.Writer, io.Writer) error
 	DockerRegistryLoginFunc  func(string, io.Reader, io.Writer, io.Writer) error
 	BuildScriptRunnerFunc    func(string, string, []string, io.Reader, io.Writer, io.Writer) error
@@ -63,6 +63,8 @@ type DockerBuildSpec struct {
 	ContextDir     string
 	DockerfilePath string
 	Image          DockerImageReference
+	Platforms      []string
+	Push           bool
 }
 
 type DockerPushSpec struct {
@@ -179,6 +181,19 @@ func BuildExecutionSpecWithRelease(execution BuildExecutionSpec, release Release
 	execution.release = &release
 	if len(execution.dockerBuilds) > 0 && len(execution.dockerPushes) == 0 {
 		execution.dockerPushes = releaseDockerPushSpecs(execution.dockerBuilds, release.DockerImages)
+	}
+	if len(execution.dockerBuilds) > 0 && len(execution.dockerPushes) > 0 {
+		releaseTags := make(map[string]struct{}, len(execution.dockerPushes))
+		for _, pushInput := range execution.dockerPushes {
+			releaseTags[strings.TrimSpace(pushInput.Image.Tag)] = struct{}{}
+		}
+		for i := range execution.dockerBuilds {
+			if _, ok := releaseTags[strings.TrimSpace(execution.dockerBuilds[i].Image.Tag)]; !ok {
+				continue
+			}
+			execution.dockerBuilds[i].Platforms = []string{"linux/amd64", "linux/arm64"}
+			execution.dockerBuilds[i].Push = true
+		}
 	}
 	return execution
 }
@@ -758,7 +773,7 @@ func (b DockerBuildSpec) command() commandSpec {
 	return commandSpec{
 		Dir:  b.ContextDir,
 		Name: "docker",
-		Args: dockerBuildArgs(b.Image.Tag, b.DockerfilePath),
+		Args: dockerBuildArgs(b),
 	}
 }
 
@@ -783,7 +798,7 @@ func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBu
 	if ctx.DryRun {
 		return nil
 	}
-	return build(buildInput.ContextDir, buildInput.DockerfilePath, buildInput.Image.Tag, ctx.Stdout, ctx.Stderr)
+	return build(buildInput, ctx.Stdout, ctx.Stderr)
 }
 
 func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc) error {
@@ -928,6 +943,9 @@ func RunDockerPushSpec(ctx Context, pushInput DockerPushSpec, buildInput *Docker
 		if err := RunDockerBuild(ctx, *buildInput, build); err != nil {
 			return err
 		}
+		if buildInput.Push {
+			return nil
+		}
 	}
 	if push == nil {
 		push = func(ctx Context, pushInput DockerPushSpec) error {
@@ -941,7 +959,17 @@ func RunDockerPushExecution(ctx Context, execution DockerPushExecutionSpec, buil
 	if err := RunDockerBuilds(ctx, execution.builds, build); err != nil {
 		return err
 	}
+	builtAndPushedTags := make(map[string]struct{}, len(execution.builds))
+	for _, buildInput := range execution.builds {
+		if !buildInput.Push {
+			continue
+		}
+		builtAndPushedTags[buildInput.Image.Tag] = struct{}{}
+	}
 	for _, pushInput := range execution.pushes {
+		if _, ok := builtAndPushedTags[pushInput.Image.Tag]; ok {
+			continue
+		}
 		if err := RunDockerPushSpec(ctx, pushInput, nil, build, push); err != nil {
 			return err
 		}
@@ -1063,20 +1091,28 @@ func FindComponentDockerBuildContext(projectRoot, componentName string) (DockerB
 	return matches[0], true, nil
 }
 
-func DockerImageBuilder(dir, dockerfilePath, tag string, stdout, stderr io.Writer) error {
-	cmd := exec.Command("docker", dockerBuildArgs(tag, dockerfilePath)...)
-	cmd.Dir = dir
+func DockerImageBuilder(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
+	cmd := exec.Command("docker", dockerBuildArgs(buildInput)...)
+	cmd.Dir = buildInput.ContextDir
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	return cmd.Run()
 }
 
-func dockerBuildArgs(tag, dockerfilePath string) []string {
-	args := []string{"build", "-t", tag}
+func dockerBuildArgs(buildInput DockerBuildSpec) []string {
+	tag := strings.TrimSpace(buildInput.Image.Tag)
+	args := []string{"build"}
+	if len(buildInput.Platforms) > 0 {
+		args = []string{"buildx", "build", "--platform", strings.Join(buildInput.Platforms, ",")}
+	}
+	args = append(args, "-t", tag)
 	if version := dockerImageTagVersion(tag); version != "" {
 		args = append(args, "--build-arg", "ERUN_VERSION="+version)
 	}
-	args = append(args, "-f", dockerfilePath, ".")
+	if buildInput.Push {
+		args = append(args, "--push")
+	}
+	args = append(args, "-f", buildInput.DockerfilePath, ".")
 	return args
 }
 
