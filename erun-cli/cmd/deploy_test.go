@@ -18,6 +18,8 @@ type deployBuildCall struct {
 	Dir            string
 	DockerfilePath string
 	Tag            string
+	Platforms      []string
+	Push           bool
 	Stdout         io.Writer
 	Stderr         io.Writer
 }
@@ -29,11 +31,13 @@ type deployPushCall struct {
 }
 
 func deployBuildCallFunc(run func(deployBuildCall) error) common.DockerImageBuilderFunc {
-	return func(dir, dockerfilePath, tag string, stdout, stderr io.Writer) error {
+	return func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
 		return run(deployBuildCall{
-			Dir:            dir,
-			DockerfilePath: dockerfilePath,
-			Tag:            tag,
+			Dir:            buildInput.ContextDir,
+			DockerfilePath: buildInput.DockerfilePath,
+			Tag:            buildInput.Image.Tag,
+			Platforms:      append([]string{}, buildInput.Platforms...),
+			Push:           buildInput.Push,
 			Stdout:         stdout,
 			Stderr:         stderr,
 		})
