@@ -73,6 +73,43 @@ func TestResolveReleaseSpecStableRelease(t *testing.T) {
 	}
 }
 
+func TestResolveReleaseSpecStableReleaseIncludesPackagingUpdatesWhenPresent(t *testing.T) {
+	projectRoot := setupReleaseProject(t, releaseProjectOptions{WithPackaging: true})
+
+	spec, err := resolveReleaseSpec(
+		func() (string, string, error) { return "tenant-a", projectRoot, nil },
+		LoadProjectConfig,
+		func(string) (string, error) { return "main", nil },
+		func(string) (string, error) { return "abc1234", nil },
+		func(string, string) (bool, error) { return true, nil },
+		ReleaseParams{},
+	)
+	if err != nil {
+		t.Fatalf("resolveReleaseSpec failed: %v", err)
+	}
+
+	if len(spec.Stages) != 5 {
+		t.Fatalf("expected 5 stages, got %+v", spec.Stages)
+	}
+	if len(spec.Stages[1].FileUpdates) != 3 {
+		t.Fatalf("expected chart, formula, and scoop updates, got %+v", spec.Stages[1].FileUpdates)
+	}
+	if got := spec.Stages[1].GitCommands[0].Args; !reflect.DeepEqual(got, []string{
+		"add",
+		filepath.Join("erun-devops", "k8s", "api", "Chart.yaml"),
+		filepath.Join("Formula", "erun.rb"),
+		filepath.Join("bucket", "erun.json"),
+	}) {
+		t.Fatalf("unexpected release add command: %+v", got)
+	}
+	if formula := spec.Stages[1].FileUpdates[1].Content; !strings.Contains(formula, `url "https://github.com/sophium/erun/archive/refs/tags/v1.4.2.tar.gz"`) {
+		t.Fatalf("unexpected formula update: %s", formula)
+	}
+	if scoop := spec.Stages[1].FileUpdates[2].Content; !strings.Contains(scoop, `"version": "1.4.2"`) || !strings.Contains(scoop, `"extract_dir": "erun-1.4.2"`) {
+		t.Fatalf("unexpected scoop update: %s", scoop)
+	}
+}
+
 func TestResolveReleaseSpecUsesConfiguredBranches(t *testing.T) {
 	projectRoot := setupReleaseProject(t, releaseProjectOptions{
 		ProjectConfig: ProjectConfig{
@@ -174,6 +211,62 @@ func TestRunReleaseSpecWritesFilesAndRunsGitStages(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gitCalls, wantCalls) {
 		t.Fatalf("unexpected git calls: got %+v want %+v", gitCalls, wantCalls)
+	}
+}
+
+func TestRunReleaseSpecRewritesStablePackagingMetadataWhenPresent(t *testing.T) {
+	projectRoot := setupReleaseProjectGitRepoWithOptions(t, "main", releaseProjectOptions{WithPackaging: true})
+
+	spec, err := resolveReleaseSpec(
+		func() (string, string, error) { return "tenant-a", projectRoot, nil },
+		LoadProjectConfig,
+		func(string) (string, error) { return "main", nil },
+		func(string) (string, error) { return "abc1234", nil },
+		func(string, string) (bool, error) { return true, nil },
+		ReleaseParams{},
+	)
+	if err != nil {
+		t.Fatalf("resolveReleaseSpec failed: %v", err)
+	}
+
+	var gitCalls [][]string
+	ctx := Context{
+		Logger: NewLoggerWithWriters(2, new(bytes.Buffer), new(bytes.Buffer)),
+		Stdout: new(bytes.Buffer),
+		Stderr: new(bytes.Buffer),
+	}
+	if err := RunReleaseSpec(ctx, spec, func(dir string, stdout, stderr io.Writer, args ...string) error {
+		gitCalls = append(gitCalls, append([]string{dir}, args...))
+		return nil
+	}, nil); err != nil {
+		t.Fatalf("RunReleaseSpec failed: %v", err)
+	}
+
+	formulaData, err := os.ReadFile(filepath.Join(projectRoot, "Formula", "erun.rb"))
+	if err != nil {
+		t.Fatalf("read formula: %v", err)
+	}
+	if !strings.Contains(string(formulaData), `url "https://github.com/sophium/erun/archive/refs/tags/v1.4.2.tar.gz"`) {
+		t.Fatalf("unexpected formula content: %s", formulaData)
+	}
+
+	scoopData, err := os.ReadFile(filepath.Join(projectRoot, "bucket", "erun.json"))
+	if err != nil {
+		t.Fatalf("read scoop manifest: %v", err)
+	}
+	scoop := string(scoopData)
+	if !strings.Contains(scoop, `"version": "1.4.2"`) || !strings.Contains(scoop, `"url": "https://github.com/sophium/erun/archive/refs/tags/v1.4.2.zip"`) || !strings.Contains(scoop, `"extract_dir": "erun-1.4.2"`) {
+		t.Fatalf("unexpected scoop content: %s", scoop)
+	}
+
+	if got := gitCalls[2]; !reflect.DeepEqual(got, []string{
+		projectRoot,
+		"add",
+		filepath.Join("erun-devops", "k8s", "api", "Chart.yaml"),
+		filepath.Join("Formula", "erun.rb"),
+		filepath.Join("bucket", "erun.json"),
+	}) {
+		t.Fatalf("unexpected release add call: %+v", got)
 	}
 }
 
@@ -512,6 +605,7 @@ func TestGitCommandRunnerUsesFallbackIdentityWhenGitConfigIsMissing(t *testing.T
 
 type releaseProjectOptions struct {
 	ProjectConfig ProjectConfig
+	WithPackaging bool
 }
 
 func setupReleaseProject(t *testing.T, options releaseProjectOptions) string {
@@ -555,7 +649,64 @@ func setupReleaseProject(t *testing.T, options releaseProjectOptions) string {
 	if err := SaveProjectConfig(projectRoot, options.ProjectConfig); err != nil {
 		t.Fatalf("SaveProjectConfig failed: %v", err)
 	}
+	if options.WithPackaging {
+		formulaPath := filepath.Join(projectRoot, "Formula")
+		if err := os.MkdirAll(formulaPath, 0o755); err != nil {
+			t.Fatalf("mkdir Formula: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(formulaPath, "erun.rb"), []byte(`class Erun < Formula
+  desc "Multi-tenant multi-environment deployment and management tool"
+  homepage "https://github.com/sophium/erun"
+  url "https://github.com/sophium/erun/archive/refs/tags/v1.4.1.tar.gz"
+  sha256 "unchanged"
+  license "MIT"
+end
+`), 0o644); err != nil {
+			t.Fatalf("write formula: %v", err)
+		}
 
+		bucketPath := filepath.Join(projectRoot, "bucket")
+		if err := os.MkdirAll(bucketPath, 0o755); err != nil {
+			t.Fatalf("mkdir bucket: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(bucketPath, "erun.json"), []byte(`{
+  "version": "1.4.1",
+  "description": "Multi-tenant multi-environment deployment and management tool",
+  "homepage": "https://github.com/sophium/erun",
+  "license": "MIT",
+  "depends": [
+    "go"
+  ],
+  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.4.1.zip",
+  "hash": "unchanged",
+  "extract_dir": "erun-1.4.1",
+  "installer": {
+    "script": [
+      "go build"
+    ]
+  },
+  "bin": [
+    "erun.exe",
+    "emcp.exe"
+  ]
+}
+`), 0o644); err != nil {
+			t.Fatalf("write scoop manifest: %v", err)
+		}
+	}
+
+	return projectRoot
+}
+
+func setupReleaseProjectGitRepoWithOptions(t *testing.T, branch string, options releaseProjectOptions) string {
+	t.Helper()
+
+	projectRoot := setupReleaseProject(t, options)
+	runGitWithEnv(t, projectRoot, nil, "init", "-b", branch)
+	runGitWithEnv(t, projectRoot, nil, "config", "user.email", "codex@example.com")
+	runGitWithEnv(t, projectRoot, nil, "config", "user.name", "Codex")
+	runGitWithEnv(t, projectRoot, nil, "add", ".")
+	runGitWithEnv(t, projectRoot, nil, "commit", "-m", "initial")
 	return projectRoot
 }
 

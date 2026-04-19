@@ -1,12 +1,14 @@
 package eruncommon
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -134,6 +136,14 @@ func resolveReleaseSpec(findProjectRoot ProjectFinderFunc, loadProjectConfig Pro
 	if err != nil {
 		return ReleaseSpec{}, err
 	}
+	releaseFileUpdates := append([]ReleaseFileUpdate{}, chartUpdates...)
+	if mode == ReleaseModeStable {
+		packagingUpdates, err := discoverStableReleasePackaging(projectRoot, version)
+		if err != nil {
+			return ReleaseSpec{}, err
+		}
+		releaseFileUpdates = append(releaseFileUpdates, packagingUpdates...)
+	}
 
 	images, err := discoverReleaseDockerImages(projectRoot, releaseRoot, versionFilePath, version)
 	if err != nil {
@@ -148,7 +158,7 @@ func resolveReleaseSpec(findProjectRoot ProjectFinderFunc, loadProjectConfig Pro
 	if syncStage := newSyncRemoteStage(projectRoot, branch); len(syncStage.GitCommands) > 0 {
 		stages = append(stages, syncStage)
 	}
-	releaseStage := newReleaseStage(projectRoot, chartUpdates, version, mode)
+	releaseStage := newReleaseStage(projectRoot, releaseFileUpdates, version, mode)
 	if len(releaseStage.FileUpdates) > 0 || len(releaseStage.GitCommands) > 0 {
 		stages = append(stages, releaseStage)
 	}
@@ -592,6 +602,36 @@ func discoverReleaseLinuxScripts(releaseRoot, version string) ([]scriptSpec, err
 	return scripts, nil
 }
 
+func discoverStableReleasePackaging(projectRoot, version string) ([]ReleaseFileUpdate, error) {
+	updates := make([]ReleaseFileUpdate, 0, 2)
+
+	formulaPath := filepath.Join(projectRoot, "Formula", "erun.rb")
+	formulaContent, formulaChanged, err := updateHomebrewFormulaReleaseVersion(formulaPath, version)
+	if err != nil {
+		return nil, err
+	}
+	if formulaChanged {
+		updates = append(updates, ReleaseFileUpdate{
+			Path:    formulaPath,
+			Content: formulaContent,
+		})
+	}
+
+	scoopPath := filepath.Join(projectRoot, "bucket", "erun.json")
+	scoopContent, scoopChanged, err := updateScoopManifestReleaseVersion(scoopPath, version)
+	if err != nil {
+		return nil, err
+	}
+	if scoopChanged {
+		updates = append(updates, ReleaseFileUpdate{
+			Path:    scoopPath,
+			Content: scoopContent,
+		})
+	}
+
+	return updates, nil
+}
+
 func updateHelmChartReleaseVersion(chartFilePath, version string) (string, bool, ReleaseChartSpec, error) {
 	data, err := os.ReadFile(chartFilePath)
 	if err != nil {
@@ -626,6 +666,71 @@ func updateHelmChartReleaseVersion(chartFilePath, version string) (string, bool,
 		Version:    version,
 		AppVersion: version,
 	}, nil
+}
+
+func updateHomebrewFormulaReleaseVersion(formulaPath, version string) (string, bool, error) {
+	data, err := os.ReadFile(formulaPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+
+	content := string(data)
+	wantURL := `url "https://github.com/sophium/erun/archive/refs/tags/v` + version + `.tar.gz"`
+	urlPattern := regexp.MustCompile(`(?m)^  url "https://github\.com/sophium/erun/archive/refs/tags/v[^"]+\.tar\.gz"$`)
+	updated := urlPattern.ReplaceAllString(content, "  "+wantURL)
+	if updated == content {
+		return "", false, nil
+	}
+
+	return updated, true, nil
+}
+
+func updateScoopManifestReleaseVersion(manifestPath, version string) (string, bool, error) {
+	data, err := os.ReadFile(manifestPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+
+	var manifest struct {
+		Version     string   `json:"version"`
+		Description string   `json:"description"`
+		Homepage    string   `json:"homepage"`
+		License     string   `json:"license"`
+		Depends     []string `json:"depends,omitempty"`
+		URL         string   `json:"url"`
+		Hash        string   `json:"hash"`
+		ExtractDir  string   `json:"extract_dir"`
+		Installer   struct {
+			Script []string `json:"script,omitempty"`
+		} `json:"installer,omitempty"`
+		Bin []string `json:"bin,omitempty"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return "", false, err
+	}
+
+	wantURL := "https://github.com/sophium/erun/archive/refs/tags/v" + version + ".zip"
+	wantExtractDir := "erun-" + version
+	if manifest.Version == version && manifest.URL == wantURL && manifest.ExtractDir == wantExtractDir {
+		return "", false, nil
+	}
+
+	manifest.Version = version
+	manifest.URL = wantURL
+	manifest.ExtractDir = wantExtractDir
+
+	updated, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return "", false, err
+	}
+
+	return string(updated) + "\n", true, nil
 }
 
 func newReleaseStage(projectRoot string, fileUpdates []ReleaseFileUpdate, version string, mode ReleaseMode) ReleaseStage {
