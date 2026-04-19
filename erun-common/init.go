@@ -206,8 +206,7 @@ func TraceNamespaceEnsurer(ctx Context, ensure NamespaceEnsurerFunc) NamespaceEn
 		return nil
 	}
 	return func(contextName, namespace string) error {
-		ctx.TraceCommand("", "kubectl", "--context", contextName, "get", "namespace", namespace, "-o", "name")
-		ctx.TraceCommand("", "kubectl", "--context", contextName, "create", "namespace", namespace)
+		TraceEnsureKubernetesNamespace(ctx, contextName, namespace)
 		if ctx.DryRun {
 			return nil
 		}

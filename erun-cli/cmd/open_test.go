@@ -134,6 +134,69 @@ func TestRunResolvedOpenCommandActivatesSSHDWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestRunResolvedOpenCommandForcesSSHDEnabledOnRuntimeDeploy(t *testing.T) {
+	deployed := common.HelmDeployParams{}
+	err := runResolvedOpenCommand(
+		common.Context{
+			Logger: common.NewLoggerWithWriters(0, new(bytes.Buffer), new(bytes.Buffer)),
+			Stdout: new(bytes.Buffer),
+			Stderr: new(bytes.Buffer),
+		},
+		common.OpenResult{
+			Tenant:      "tenant-a",
+			Environment: "dev",
+			RepoPath:    "/home/erun/git/tenant-a",
+			TenantConfig: common.TenantConfig{
+				Name:   "tenant-a",
+				Remote: true,
+			},
+			EnvConfig: common.EnvConfig{
+				Name:              "dev",
+				RepoPath:          "/home/erun/git/tenant-a",
+				KubernetesContext: "cluster-dev",
+				Remote:            true,
+				SSHD:              common.SSHDConfig{Enabled: true},
+			},
+		},
+		openOptions{},
+		nil,
+		func(_ common.Context, _ common.ShellLaunchParams) error { return nil },
+		nil,
+		func(common.KubernetesDeploymentCheckParams) (bool, error) {
+			return false, nil
+		},
+		func(common.OpenResult) (common.DeploySpec, error) {
+			return common.DeploySpec{
+				Deploy: common.HelmDeploySpec{
+					ReleaseName:       "tenant-a-devops",
+					ChartPath:         "/tmp/chart",
+					ValuesFilePath:    "/tmp/chart/values.dev.yaml",
+					Tenant:            "tenant-a",
+					Environment:       "dev",
+					Namespace:         "tenant-a-dev",
+					KubernetesContext: "cluster-dev",
+					WorktreeStorage:   common.WorktreeStoragePVC,
+					WorktreeRepoName:  "tenant-a",
+					WorktreeHostPath:  "/tmp/ignored",
+					SSHDEnabled:       false,
+					Timeout:           common.DefaultHelmDeploymentTimeout,
+				},
+			}, nil
+		},
+		func(params common.HelmDeployParams) error {
+			deployed = params
+			return nil
+		},
+		func(_ common.Context, _ common.OpenResult) error { return nil },
+	)
+	if err != nil {
+		t.Fatalf("runResolvedOpenCommand failed: %v", err)
+	}
+	if !deployed.SSHDEnabled {
+		t.Fatalf("expected runtime deploy to force SSHD enabled, got %+v", deployed)
+	}
+}
+
 func TestOpenCommandNoShellConfiguresLocalKubeconfig(t *testing.T) {
 	repoPath := t.TempDir()
 	stdout := new(bytes.Buffer)

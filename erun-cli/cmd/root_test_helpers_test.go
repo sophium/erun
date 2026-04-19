@@ -91,6 +91,9 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	if deployHelmChart == nil {
 		deployHelmChart = common.DeployHelmChart
 	}
+	if deps.EnsureKubernetesNamespace != nil {
+		deployHelmChart = common.WrapHelmChartDeployerWithNamespaceEnsure(deps.EnsureKubernetesNamespace, deployHelmChart)
+	}
 	launchMCP := deps.LaunchMCP
 	if launchMCP == nil {
 		launchMCP = launchMCPProcess

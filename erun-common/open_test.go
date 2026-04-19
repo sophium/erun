@@ -749,6 +749,7 @@ type openStore struct {
 	tenantConfigs                     map[string]TenantConfig
 	envConfigs                        map[string]EnvConfig
 	resolveEffectiveKubernetesContext func(environment, configured string) string
+	resolveDeployKubernetesContext    func(environment, configured string) string
 }
 
 func (s openStore) LoadERunConfig() (ERunConfig, string, error) {
@@ -779,6 +780,13 @@ func (s openStore) ResolveEffectiveKubernetesContext(environment, configured str
 		return configured
 	}
 	return s.resolveEffectiveKubernetesContext(environment, configured)
+}
+
+func (s openStore) ResolveDeployKubernetesContext(environment, configured string) string {
+	if s.resolveDeployKubernetesContext == nil {
+		return configured
+	}
+	return s.resolveDeployKubernetesContext(environment, configured)
 }
 
 func (s openStore) LoadEnvConfig(tenant, environment string) (EnvConfig, string, error) {

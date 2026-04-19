@@ -34,6 +34,10 @@ type (
 	HelmChartDeployerFunc           func(HelmDeployParams) error
 )
 
+type deployKubernetesContextResolver interface {
+	ResolveDeployKubernetesContext(environment, configured string) string
+}
+
 type KubernetesDeployContext struct {
 	Dir           string
 	ComponentName string
@@ -110,6 +114,7 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	if deploy == nil {
 		return fmt.Errorf("helm deployer is required")
 	}
+	TraceEnsureKubernetesNamespace(ctx, deployInput.KubernetesContext, deployInput.Namespace)
 	command := deployInput.command()
 	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
 	if ctx.DryRun {
@@ -191,6 +196,7 @@ func resolveDeploySpecForOpenResult(store DeployStore, findProjectRoot ProjectFi
 
 func resolveDeploySpecForContext(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, deployContext KubernetesDeployContext, versionOverride string, allowLocalBuilds bool) (DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+	target = applyDeployKubernetesContext(store, target)
 
 	builds := make([]DockerBuildSpec, 0, 2)
 	if allowLocalBuilds && strings.TrimSpace(versionOverride) == "" {
@@ -221,6 +227,13 @@ func resolveDeploySpecForContext(store DeployStore, findProjectRoot ProjectFinde
 		Builds:        builds,
 		Deploy:        deployInput,
 	}, nil
+}
+
+func applyDeployKubernetesContext(store DeployStore, target OpenResult) OpenResult {
+	if resolver, ok := store.(deployKubernetesContextResolver); ok {
+		target.EnvConfig.KubernetesContext = resolver.ResolveDeployKubernetesContext(target.Environment, target.EnvConfig.KubernetesContext)
+	}
+	return target
 }
 
 func ResolveOpenRuntimeDeploySpec(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult) (DeploySpec, error) {
@@ -628,6 +641,24 @@ func formatHelmBool(value bool) string {
 	return "false"
 }
 
+func resolveDeployKubernetesContext(environment, configured string, currentContext func() (string, error)) string {
+	environment = strings.TrimSpace(environment)
+	configured = strings.TrimSpace(configured)
+	if environment != DefaultEnvironment || currentContext == nil {
+		return configured
+	}
+
+	current, err := currentContext()
+	if err != nil {
+		return configured
+	}
+	current = strings.TrimSpace(current)
+	if current == "" {
+		return configured
+	}
+	return current
+}
+
 func ResolveKubernetesDeployContext() (KubernetesDeployContext, error) {
 	dir, err := os.Getwd()
 	if err != nil {
@@ -837,30 +868,23 @@ func DeployHelmChart(params HelmDeployParams) error {
 		defer cleanup()
 	}
 
-	args := []string{
-		"upgrade",
-		"--install",
-		"--wait",
-		"--wait-for-jobs",
-		"--timeout", params.Timeout,
-		"--namespace", params.Namespace,
-	}
-	if strings.TrimSpace(params.KubernetesContext) != "" {
-		args = append(args, "--kube-context", params.KubernetesContext)
-	}
-	args = append(args,
-		"-f", params.ValuesFilePath,
-		"--set-string", "tenant="+params.Tenant,
-		"--set-string", "environment="+params.Environment,
-		"--set-string", "worktreeStorage="+params.WorktreeStorage,
-		"--set-string", "worktreeRepoName="+params.WorktreeRepoName,
-		"--set-string", "worktreeHostPath="+params.WorktreeHostPath,
-		params.ReleaseName,
-		chartPath,
-	)
+	command := HelmDeploySpec{
+		ReleaseName:       params.ReleaseName,
+		ChartPath:         chartPath,
+		ValuesFilePath:    params.ValuesFilePath,
+		Tenant:            params.Tenant,
+		Environment:       params.Environment,
+		Namespace:         params.Namespace,
+		KubernetesContext: params.KubernetesContext,
+		WorktreeStorage:   params.WorktreeStorage,
+		WorktreeRepoName:  params.WorktreeRepoName,
+		WorktreeHostPath:  params.WorktreeHostPath,
+		SSHDEnabled:       params.SSHDEnabled,
+		Timeout:           params.Timeout,
+	}.command()
 
-	cmd := exec.Command("helm", args...)
-	cmd.Dir = chartPath
+	cmd := exec.Command(command.Name, command.Args...)
+	cmd.Dir = command.Dir
 	cmd.Stdout = params.Stdout
 	cmd.Stderr = params.Stderr
 	return cmd.Run()
