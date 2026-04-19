@@ -15,6 +15,8 @@ import (
 
 const localSnapshotTimestampFormat = "20060102150405"
 
+const multiPlatformBuildxBuilderName = "erun-multiarch"
+
 var (
 	ErrVersionFileNotFound        = errors.New("version file not found for current module")
 	ErrDockerBuildContextNotFound = errors.New("dockerfile not found in current directory")
@@ -770,11 +772,20 @@ func newDockerBuildSpec(now NowFunc, projectRoot, environment string, buildConte
 }
 
 func (b DockerBuildSpec) command() commandSpec {
+	args := dockerBuildArgs(b)
 	return commandSpec{
 		Dir:  b.ContextDir,
 		Name: "docker",
-		Args: dockerBuildArgs(b),
+		Args: args,
 	}
+}
+
+func (b DockerBuildSpec) traceCommands() []commandSpec {
+	if len(b.Platforms) == 0 {
+		return []commandSpec{b.command()}
+	}
+
+	return append(dockerBuildxSetupCommands(b.ContextDir), b.command())
 }
 
 func (p DockerPushSpec) command() commandSpec {
@@ -793,8 +804,9 @@ func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBu
 	if build == nil {
 		build = DockerImageBuilder
 	}
-	command := buildInput.command()
-	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
+	for _, command := range buildInput.traceCommands() {
+		ctx.TraceCommand(command.Dir, command.Name, command.Args...)
+	}
 	if ctx.DryRun {
 		return nil
 	}
@@ -1092,6 +1104,11 @@ func FindComponentDockerBuildContext(projectRoot, componentName string) (DockerB
 }
 
 func DockerImageBuilder(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
+	if len(buildInput.Platforms) > 0 {
+		if err := ensureDockerBuildxBuilder(buildInput.ContextDir, stdout, stderr); err != nil {
+			return err
+		}
+	}
 	cmd := exec.Command("docker", dockerBuildArgs(buildInput)...)
 	cmd.Dir = buildInput.ContextDir
 	cmd.Stdout = stdout
@@ -1103,7 +1120,7 @@ func dockerBuildArgs(buildInput DockerBuildSpec) []string {
 	tag := strings.TrimSpace(buildInput.Image.Tag)
 	args := []string{"build"}
 	if len(buildInput.Platforms) > 0 {
-		args = []string{"buildx", "build", "--platform", strings.Join(buildInput.Platforms, ",")}
+		args = []string{"buildx", "build", "--builder", multiPlatformBuildxBuilderName, "--platform", strings.Join(buildInput.Platforms, ",")}
 	}
 	args = append(args, "-t", tag)
 	if version := dockerImageTagVersion(tag); version != "" {
@@ -1114,6 +1131,48 @@ func dockerBuildArgs(buildInput DockerBuildSpec) []string {
 	}
 	args = append(args, "-f", buildInput.DockerfilePath, ".")
 	return args
+}
+
+func dockerBuildxSetupCommands(dir string) []commandSpec {
+	return []commandSpec{
+		{
+			Dir:  dir,
+			Name: "docker",
+			Args: []string{"buildx", "inspect", multiPlatformBuildxBuilderName},
+		},
+		{
+			Dir:  dir,
+			Name: "docker",
+			Args: []string{"buildx", "create", "--name", multiPlatformBuildxBuilderName, "--driver", "docker-container"},
+		},
+		{
+			Dir:  dir,
+			Name: "docker",
+			Args: []string{"buildx", "inspect", "--builder", multiPlatformBuildxBuilderName, "--bootstrap"},
+		},
+	}
+}
+
+func ensureDockerBuildxBuilder(dir string, stdout, stderr io.Writer) error {
+	inspect := exec.Command("docker", "buildx", "inspect", multiPlatformBuildxBuilderName)
+	inspect.Dir = dir
+	inspect.Stdout = io.Discard
+	inspect.Stderr = io.Discard
+	if err := inspect.Run(); err != nil {
+		create := exec.Command("docker", "buildx", "create", "--name", multiPlatformBuildxBuilderName, "--driver", "docker-container")
+		create.Dir = dir
+		create.Stdout = stdout
+		create.Stderr = stderr
+		if err := create.Run(); err != nil {
+			return err
+		}
+	}
+
+	bootstrap := exec.Command("docker", "buildx", "inspect", "--builder", multiPlatformBuildxBuilderName, "--bootstrap")
+	bootstrap.Dir = dir
+	bootstrap.Stdout = stdout
+	bootstrap.Stderr = stderr
+	return bootstrap.Run()
 }
 
 func dockerImageTagVersion(tag string) string {
