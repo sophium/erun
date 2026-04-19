@@ -1,7 +1,7 @@
 class Erun < Formula
   desc "Multi-tenant multi-environment deployment and management tool"
   homepage "https://github.com/sophium/erun"
-  url "https://github.com/sophium/erun/archive/refs/tags/v1.0.33.tar.gz"
+  url "https://github.com/sophium/erun/archive/refs/tags/v1.0.34.tar.gz"
   sha256 "bd4e59b4a3785ad7ec2e54036ebe149cecc0387d91ba02bf6275ba8330a39b1b"
   license "MIT"
 
