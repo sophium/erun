@@ -52,6 +52,8 @@ func TestOpenHelpShowsTenantAndEnvironmentFlags(t *testing.T) {
 		"Open a specific tenant",
 		"--environment string",
 		"Open a specific environment",
+		"--vscode",
+		"Open the remote environment in VS Code instead of a shell",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected open help to contain %q, got:\n%s", want, output)
@@ -122,6 +124,7 @@ func TestRunResolvedOpenCommandActivatesSSHDWhenEnabled(t *testing.T) {
 			}
 			return nil
 		},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("runResolvedOpenCommand failed: %v", err)
@@ -131,6 +134,29 @@ func TestRunResolvedOpenCommandActivatesSSHDWhenEnabled(t *testing.T) {
 	}
 	if !launched {
 		t.Fatal("expected shell launch after SSHD activation")
+	}
+}
+
+func TestEmitSSHDConnectionInfoIncludesHostAlias(t *testing.T) {
+	stdout := new(bytes.Buffer)
+	err := emitSSHDConnectionInfo(common.Context{Stdout: stdout}, common.SSHConnectionInfo{
+		User:          "erun",
+		Host:          "127.0.0.1",
+		HostAlias:     "erun-tenant-a-dev",
+		Port:          62222,
+		WorkspacePath: "/home/erun/git/tenant-a",
+	})
+	if err != nil {
+		t.Fatalf("emitSSHDConnectionInfo failed: %v", err)
+	}
+	for _, want := range []string{
+		"host: 127.0.0.1",
+		"alias: erun-tenant-a-dev",
+		"workspace: /home/erun/git/tenant-a",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("expected SSH output to contain %q, got:\n%s", want, stdout.String())
+		}
 	}
 }
 
@@ -188,6 +214,7 @@ func TestRunResolvedOpenCommandForcesSSHDEnabledOnRuntimeDeploy(t *testing.T) {
 			return nil
 		},
 		func(_ common.Context, _ common.OpenResult) error { return nil },
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("runResolvedOpenCommand failed: %v", err)
@@ -227,6 +254,100 @@ func TestOpenCommandNoShellConfiguresLocalKubeconfig(t *testing.T) {
 	}
 	if stderr.String() != "" {
 		t.Fatalf("did not expect stderr output in buffered mode, got %q", stderr.String())
+	}
+}
+
+func TestRunResolvedOpenCommandLaunchesVSCodeWhenRequested(t *testing.T) {
+	activated := false
+	launched := false
+	err := runResolvedOpenCommand(
+		common.Context{
+			Logger: common.NewLoggerWithWriters(0, new(bytes.Buffer), new(bytes.Buffer)),
+			Stdout: new(bytes.Buffer),
+			Stderr: new(bytes.Buffer),
+		},
+		common.OpenResult{
+			Tenant:      "tenant-a",
+			Environment: "dev",
+			RepoPath:    "/home/erun/git/tenant-a",
+			TenantConfig: common.TenantConfig{
+				Name:   "tenant-a",
+				Remote: true,
+			},
+			EnvConfig: common.EnvConfig{
+				Name:              "dev",
+				RepoPath:          "/home/erun/git/tenant-a",
+				KubernetesContext: "cluster-dev",
+				Remote:            true,
+				SSHD:              common.SSHDConfig{Enabled: true},
+			},
+		},
+		openOptions{VSCode: true},
+		nil,
+		func(_ common.Context, _ common.ShellLaunchParams) error {
+			t.Fatal("did not expect shell launch")
+			return nil
+		},
+		nil,
+		nil,
+		nil,
+		nil,
+		func(_ common.Context, _ common.OpenResult) error {
+			activated = true
+			return nil
+		},
+		func(_ common.Context, result common.OpenResult) error {
+			launched = true
+			if result.Tenant != "tenant-a" || result.Environment != "dev" {
+				t.Fatalf("unexpected VS Code target: %+v", result)
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("runResolvedOpenCommand failed: %v", err)
+	}
+	if !activated {
+		t.Fatal("expected SSH activation before launching VS Code")
+	}
+	if !launched {
+		t.Fatal("expected VS Code launch")
+	}
+}
+
+func TestRunResolvedOpenCommandRejectsVSCodeWithoutSSHD(t *testing.T) {
+	err := runResolvedOpenCommand(
+		common.Context{
+			Logger: common.NewLoggerWithWriters(0, new(bytes.Buffer), new(bytes.Buffer)),
+			Stdout: new(bytes.Buffer),
+			Stderr: new(bytes.Buffer),
+		},
+		common.OpenResult{
+			Tenant:      "tenant-a",
+			Environment: "dev",
+			RepoPath:    "/home/erun/git/tenant-a",
+			EnvConfig: common.EnvConfig{
+				Name:              "dev",
+				RepoPath:          "/home/erun/git/tenant-a",
+				KubernetesContext: "cluster-dev",
+				Remote:            true,
+			},
+		},
+		openOptions{VSCode: true},
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	if err == nil {
+		t.Fatal("expected VS Code SSH error")
+	}
+	if got := err.Error(); !strings.Contains(got, "run `erun sshd init tenant-a dev` first") {
+		t.Fatalf("unexpected error: %q", got)
 	}
 }
 
