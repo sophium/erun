@@ -1,13 +1,18 @@
 package eruncommon
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPackageManagerDefinitionsTrackLatestStableTag(t *testing.T) {
@@ -27,6 +32,14 @@ func TestPackageManagerDefinitionsTrackLatestStableTag(t *testing.T) {
 	if !strings.Contains(formula, `bin/"erun"`) || !strings.Contains(formula, `bin/"emcp"`) {
 		t.Fatalf("formula does not build both executables:\n%s", formula)
 	}
+	formulaSHA := regexp.MustCompile(`(?m)^  sha256 "([0-9a-f]+)"$`).FindStringSubmatch(formula)
+	if len(formulaSHA) != 2 {
+		t.Fatalf("formula sha256 not found:\n%s", formula)
+	}
+	gotFormulaSHA := releaseArchiveSHA256ForTest(t, "https://github.com/sophium/erun/archive/refs/tags/"+latestTag+".tar.gz")
+	if formulaSHA[1] != gotFormulaSHA {
+		t.Fatalf("formula sha256 = %q, want %q", formulaSHA[1], gotFormulaSHA)
+	}
 
 	scoopPath := filepath.Join(repoRoot, "bucket", "erun.json")
 	scoopData, err := os.ReadFile(scoopPath)
@@ -37,6 +50,7 @@ func TestPackageManagerDefinitionsTrackLatestStableTag(t *testing.T) {
 	var manifest struct {
 		Version    string `json:"version"`
 		URL        string `json:"url"`
+		Hash       string `json:"hash"`
 		ExtractDir string `json:"extract_dir"`
 		Depends    []string
 		Bin        []string
@@ -54,6 +68,10 @@ func TestPackageManagerDefinitionsTrackLatestStableTag(t *testing.T) {
 	wantZipURL := "https://github.com/sophium/erun/archive/refs/tags/" + latestTag + ".zip"
 	if manifest.URL != wantZipURL {
 		t.Fatalf("scoop url = %q, want %q", manifest.URL, wantZipURL)
+	}
+	gotScoopSHA := releaseArchiveSHA256ForTest(t, manifest.URL)
+	if manifest.Hash != gotScoopSHA {
+		t.Fatalf("scoop hash = %q, want %q", manifest.Hash, gotScoopSHA)
 	}
 	if manifest.ExtractDir != "erun-"+latestVersion {
 		t.Fatalf("scoop extract_dir = %q, want %q", manifest.ExtractDir, "erun-"+latestVersion)
@@ -177,4 +195,23 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func releaseArchiveSHA256ForTest(t *testing.T, url string) string {
+	t.Helper()
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		t.Fatalf("download %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("download %s: unexpected status %s", url, resp.Status)
+	}
+	sum := sha256.New()
+	if _, err := io.Copy(sum, resp.Body); err != nil {
+		t.Fatalf("hash %s: %v", url, err)
+	}
+	return hex.EncodeToString(sum.Sum(nil))
 }

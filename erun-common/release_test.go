@@ -88,8 +88,8 @@ func TestResolveReleaseSpecStableReleaseIncludesPackagingUpdatesWhenPresent(t *t
 		t.Fatalf("resolveReleaseSpec failed: %v", err)
 	}
 
-	if len(spec.Stages) != 5 {
-		t.Fatalf("expected 5 stages, got %+v", spec.Stages)
+	if len(spec.Stages) != 7 {
+		t.Fatalf("expected 7 stages, got %+v", spec.Stages)
 	}
 	if len(spec.Stages[1].FileUpdates) != 3 {
 		t.Fatalf("expected chart, formula, and scoop updates, got %+v", spec.Stages[1].FileUpdates)
@@ -107,6 +107,25 @@ func TestResolveReleaseSpecStableReleaseIncludesPackagingUpdatesWhenPresent(t *t
 	}
 	if scoop := spec.Stages[1].FileUpdates[2].Content; !strings.Contains(scoop, `"version": "1.4.2"`) || !strings.Contains(scoop, `"extract_dir": "erun-1.4.2"`) {
 		t.Fatalf("unexpected scoop update: %s", scoop)
+	}
+	if spec.Stages[2].Name != "push-release-tag" {
+		t.Fatalf("unexpected tag push stage: %+v", spec.Stages[2])
+	}
+	if got := spec.Stages[2].GitCommands[0].Args; !reflect.DeepEqual(got, []string{"push", "origin", "v1.4.2"}) {
+		t.Fatalf("unexpected tag push command: %+v", got)
+	}
+	if spec.Stages[3].Name != "sync-packaging-checksums" || spec.Stages[3].PackagingSync == nil {
+		t.Fatalf("unexpected packaging sync stage: %+v", spec.Stages[3])
+	}
+	if got := spec.Stages[3].GitCommands[0].Args; !reflect.DeepEqual(got, []string{
+		"add",
+		filepath.Join("Formula", "erun.rb"),
+		filepath.Join("bucket", "erun.json"),
+	}) {
+		t.Fatalf("unexpected packaging add command: %+v", got)
+	}
+	if got := spec.Stages[3].GitCommands[1].Args; !reflect.DeepEqual(got, []string{"commit", "-m", "[skip ci] sync package metadata 1.4.2"}) {
+		t.Fatalf("unexpected packaging commit command: %+v", got)
 	}
 }
 
@@ -235,10 +254,49 @@ func TestRunReleaseSpecRewritesStablePackagingMetadataWhenPresent(t *testing.T) 
 		Stdout: new(bytes.Buffer),
 		Stderr: new(bytes.Buffer),
 	}
-	if err := RunReleaseSpec(ctx, spec, func(dir string, stdout, stderr io.Writer, args ...string) error {
+	if err := runReleaseSpec(ctx, spec, func(dir string, stdout, stderr io.Writer, args ...string) error {
 		gitCalls = append(gitCalls, append([]string{dir}, args...))
 		return nil
-	}, nil); err != nil {
+	}, nil, func(Context, ReleasePackagingSyncSpec) ([]ReleaseFileUpdate, error) {
+		return []ReleaseFileUpdate{
+			{
+				Path: filepath.Join(projectRoot, "Formula", "erun.rb"),
+				Content: `class Erun < Formula
+  desc "Multi-tenant multi-environment deployment and management tool"
+  homepage "https://github.com/sophium/erun"
+  url "https://github.com/sophium/erun/archive/refs/tags/v1.4.2.tar.gz"
+  sha256 "formula-checksum"
+  license "MIT"
+end
+`,
+			},
+			{
+				Path: filepath.Join(projectRoot, "bucket", "erun.json"),
+				Content: `{
+  "version": "1.4.2",
+  "description": "Multi-tenant multi-environment deployment and management tool",
+  "homepage": "https://github.com/sophium/erun",
+  "license": "MIT",
+  "depends": [
+    "go"
+  ],
+  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.4.2.zip",
+  "hash": "scoop-checksum",
+  "extract_dir": "erun-1.4.2",
+  "installer": {
+    "script": [
+      "go build"
+    ]
+  },
+  "bin": [
+    "erun.exe",
+    "emcp.exe"
+  ]
+}
+`,
+			},
+		}, nil
+	}); err != nil {
 		t.Fatalf("RunReleaseSpec failed: %v", err)
 	}
 
@@ -246,7 +304,7 @@ func TestRunReleaseSpecRewritesStablePackagingMetadataWhenPresent(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read formula: %v", err)
 	}
-	if !strings.Contains(string(formulaData), `url "https://github.com/sophium/erun/archive/refs/tags/v1.4.2.tar.gz"`) {
+	if !strings.Contains(string(formulaData), `url "https://github.com/sophium/erun/archive/refs/tags/v1.4.2.tar.gz"`) || !strings.Contains(string(formulaData), `sha256 "formula-checksum"`) {
 		t.Fatalf("unexpected formula content: %s", formulaData)
 	}
 
@@ -255,18 +313,140 @@ func TestRunReleaseSpecRewritesStablePackagingMetadataWhenPresent(t *testing.T) 
 		t.Fatalf("read scoop manifest: %v", err)
 	}
 	scoop := string(scoopData)
-	if !strings.Contains(scoop, `"version": "1.4.2"`) || !strings.Contains(scoop, `"url": "https://github.com/sophium/erun/archive/refs/tags/v1.4.2.zip"`) || !strings.Contains(scoop, `"extract_dir": "erun-1.4.2"`) {
+	if !strings.Contains(scoop, `"version": "1.4.2"`) || !strings.Contains(scoop, `"url": "https://github.com/sophium/erun/archive/refs/tags/v1.4.2.zip"`) || !strings.Contains(scoop, `"extract_dir": "erun-1.4.2"`) || !strings.Contains(scoop, `"hash": "scoop-checksum"`) {
 		t.Fatalf("unexpected scoop content: %s", scoop)
 	}
 
-	if got := gitCalls[2]; !reflect.DeepEqual(got, []string{
+	if got := gitCalls[5]; !reflect.DeepEqual(got, []string{
+		projectRoot,
+		"push",
+		"origin",
+		"v1.4.2",
+	}) {
+		t.Fatalf("unexpected tag push call: %+v", got)
+	}
+	if got := gitCalls[6]; !reflect.DeepEqual(got, []string{
 		projectRoot,
 		"add",
-		filepath.Join("erun-devops", "k8s", "api", "Chart.yaml"),
 		filepath.Join("Formula", "erun.rb"),
 		filepath.Join("bucket", "erun.json"),
 	}) {
-		t.Fatalf("unexpected release add call: %+v", got)
+		t.Fatalf("unexpected packaging add call: %+v", got)
+	}
+	if got := gitCalls[7]; !reflect.DeepEqual(got, []string{
+		projectRoot,
+		"commit",
+		"-m",
+		"[skip ci] sync package metadata 1.4.2",
+	}) {
+		t.Fatalf("unexpected packaging commit call: %+v", got)
+	}
+}
+
+func TestRunReleaseSpecSkipsPackagingCommitWhenChecksumsAreAlreadyCurrent(t *testing.T) {
+	projectRoot := setupReleaseProjectGitRepoWithOptions(t, "main", releaseProjectOptions{WithPackaging: true})
+
+	spec, err := resolveReleaseSpec(
+		func() (string, string, error) { return "tenant-a", projectRoot, nil },
+		LoadProjectConfig,
+		func(string) (string, error) { return "main", nil },
+		func(string) (string, error) { return "abc1234", nil },
+		func(string, string) (bool, error) { return true, nil },
+		ReleaseParams{},
+	)
+	if err != nil {
+		t.Fatalf("resolveReleaseSpec failed: %v", err)
+	}
+
+	var gitCalls [][]string
+	ctx := Context{
+		Logger: NewLoggerWithWriters(2, new(bytes.Buffer), new(bytes.Buffer)),
+		Stdout: new(bytes.Buffer),
+		Stderr: new(bytes.Buffer),
+	}
+	if err := runReleaseSpec(ctx, spec, func(dir string, stdout, stderr io.Writer, args ...string) error {
+		gitCalls = append(gitCalls, append([]string{dir}, args...))
+		return nil
+	}, nil, func(Context, ReleasePackagingSyncSpec) ([]ReleaseFileUpdate, error) {
+		return nil, nil
+	}); err != nil {
+		t.Fatalf("RunReleaseSpec failed: %v", err)
+	}
+
+	for _, call := range gitCalls {
+		if len(call) >= 4 && call[1] == "commit" && call[3] == "[skip ci] sync package metadata 1.4.2" {
+			t.Fatalf("did not expect packaging commit when checksum updates are empty: %+v", call)
+		}
+	}
+	if got := gitCalls[6]; !reflect.DeepEqual(got, []string{
+		projectRoot,
+		"add",
+		filepath.Join("erun-devops", "VERSION"),
+	}) {
+		t.Fatalf("expected version bump to follow tag push when checksum updates are empty, got %+v", got)
+	}
+}
+
+func TestUpdateHomebrewFormulaReleaseChecksum(t *testing.T) {
+	projectRoot := t.TempDir()
+	formulaPath := filepath.Join(projectRoot, "Formula", "erun.rb")
+	if err := os.MkdirAll(filepath.Dir(formulaPath), 0o755); err != nil {
+		t.Fatalf("mkdir formula dir: %v", err)
+	}
+	if err := os.WriteFile(formulaPath, []byte(`class Erun < Formula
+  url "https://github.com/sophium/erun/archive/refs/tags/v1.4.2.tar.gz"
+  sha256 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+end
+`), 0o644); err != nil {
+		t.Fatalf("write formula: %v", err)
+	}
+
+	content, changed, err := updateHomebrewFormulaReleaseChecksum(formulaPath, "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd")
+	if err != nil {
+		t.Fatalf("updateHomebrewFormulaReleaseChecksum failed: %v", err)
+	}
+	if !changed || !strings.Contains(content, `sha256 "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd"`) {
+		t.Fatalf("unexpected checksum update: changed=%v content=%s", changed, content)
+	}
+}
+
+func TestUpdateScoopManifestReleaseChecksum(t *testing.T) {
+	projectRoot := t.TempDir()
+	manifestPath := filepath.Join(projectRoot, "bucket", "erun.json")
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
+		t.Fatalf("mkdir bucket dir: %v", err)
+	}
+	if err := os.WriteFile(manifestPath, []byte(`{
+  "version": "1.4.2",
+  "description": "Multi-tenant multi-environment deployment and management tool",
+  "homepage": "https://github.com/sophium/erun",
+  "license": "MIT",
+  "depends": [
+    "go"
+  ],
+  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.4.2.zip",
+  "hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "extract_dir": "erun-1.4.2",
+  "installer": {
+    "script": [
+      "go build"
+    ]
+  },
+  "bin": [
+    "erun.exe",
+    "emcp.exe"
+  ]
+}
+`), 0o644); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+
+	content, changed, err := updateScoopManifestReleaseChecksum(manifestPath, "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd")
+	if err != nil {
+		t.Fatalf("updateScoopManifestReleaseChecksum failed: %v", err)
+	}
+	if !changed || !strings.Contains(content, `"hash": "abcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcdefabcd"`) {
+		t.Fatalf("unexpected checksum update: changed=%v content=%s", changed, content)
 	}
 }
 
