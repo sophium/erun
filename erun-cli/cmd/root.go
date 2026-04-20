@@ -71,6 +71,7 @@ func Execute() error {
 		deployHelmChart,
 		activateSSHD,
 		launchVSCode,
+		launchIntelliJ,
 	)
 	sshdCmd := newSSHDCmd(resolveOpen, store.SaveEnvConfig, runInitForOpen, resolveRuntimeDeploySpec, deployHelmChart, common.RunRemoteCommand, writeLocalSSHConfig)
 	containerCmd := newCommandGroup(
@@ -117,7 +118,7 @@ func Execute() error {
 		if initRan {
 			return nil
 		}
-		return runResolvedOpenCommand(ctx, result, openOptions{}, runPrompt, newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell), runManagedDeploy, common.CheckKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateSSHD, launchVSCode)
+		return runResolvedOpenCommand(ctx, result, openOptions{}, runPrompt, newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell), runManagedDeploy, common.CheckKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateSSHD, launchVSCode, launchIntelliJ)
 	}
 
 	cmd := newRootCommand(runRoot)

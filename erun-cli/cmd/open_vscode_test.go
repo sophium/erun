@@ -49,9 +49,9 @@ func TestVSCodeLaunchCommand(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			command, args, err := vscodeLaunchCommand(tt.hostOS, "vscode://example")
+			command, args, err := ideLaunchCommand(tt.hostOS, "vscode://example")
 			if err != nil {
-				t.Fatalf("vscodeLaunchCommand failed: %v", err)
+				t.Fatalf("ideLaunchCommand failed: %v", err)
 			}
 			if command != tt.command {
 				t.Fatalf("unexpected command: %q", command)
@@ -70,10 +70,10 @@ func TestVSCodeLaunchCommand(t *testing.T) {
 
 func TestLaunchVSCodeEnsuresKnownHostBeforeOpening(t *testing.T) {
 	prevEnsure := ensureLocalSSHDKnownHostFunc
-	prevExec := vscodeExecCommand
+	prevExec := ideExecCommand
 	t.Cleanup(func() {
 		ensureLocalSSHDKnownHostFunc = prevEnsure
-		vscodeExecCommand = prevExec
+		ideExecCommand = prevExec
 	})
 
 	callOrder := make([]string, 0, 2)
@@ -84,7 +84,7 @@ func TestLaunchVSCodeEnsuresKnownHostBeforeOpening(t *testing.T) {
 		}
 		return nil
 	}
-	vscodeExecCommand = func(name string, args ...string) *exec.Cmd {
+	ideExecCommand = func(name string, args ...string) *exec.Cmd {
 		callOrder = append(callOrder, "launch")
 		if name != "open" {
 			t.Fatalf("unexpected command: %q", name)
@@ -120,16 +120,16 @@ func TestLaunchVSCodeEnsuresKnownHostBeforeOpening(t *testing.T) {
 
 func TestLaunchVSCodeReturnsKnownHostError(t *testing.T) {
 	prevEnsure := ensureLocalSSHDKnownHostFunc
-	prevExec := vscodeExecCommand
+	prevExec := ideExecCommand
 	t.Cleanup(func() {
 		ensureLocalSSHDKnownHostFunc = prevEnsure
-		vscodeExecCommand = prevExec
+		ideExecCommand = prevExec
 	})
 
 	ensureLocalSSHDKnownHostFunc = func(common.Context, common.OpenResult) error {
 		return errors.New("known host failed")
 	}
-	vscodeExecCommand = func(name string, args ...string) *exec.Cmd {
+	ideExecCommand = func(name string, args ...string) *exec.Cmd {
 		t.Fatal("did not expect VS Code launch when known_hosts update fails")
 		return nil
 	}

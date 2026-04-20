@@ -33,6 +33,7 @@ type testRootDeps struct {
 	WaitForRemoteRuntime           common.RemoteRuntimeWaitFunc
 	RunRemoteCommand               common.RemoteCommandRunnerFunc
 	LaunchVSCode                   VSCodeLauncher
+	LaunchIntelliJ                 IntelliJLauncher
 	Now                            common.NowFunc
 }
 
@@ -130,6 +131,10 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	if launchVSCodeCmd == nil {
 		launchVSCodeCmd = launchVSCode
 	}
+	launchIntelliJCmd := deps.LaunchIntelliJ
+	if launchIntelliJCmd == nil {
+		launchIntelliJCmd = launchIntelliJ
+	}
 	push := newPushOperation(pushDockerImage, loginToDockerRegistry, selectRunner)
 	runManagedDeploy := func(ctx common.Context, target common.OpenResult) error {
 		specs, err := common.ResolveCurrentDeploySpecs(
@@ -160,7 +165,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	runInitForOpen := newRunInitForOpen(store, runInit)
 
 	initCmd := newInitCmd(runInit)
-	openCmd := newOpenCmd(resolveOpen, store.SaveTenantConfig, runInitForOpen, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart, activateSSHD, launchVSCodeCmd)
+	openCmd := newOpenCmd(resolveOpen, store.SaveTenantConfig, runInitForOpen, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart, activateSSHD, launchVSCodeCmd, launchIntelliJCmd)
 	sshdCmd := newSSHDCmd(resolveOpen, store.SaveEnvConfig, runInitForOpen, resolveRuntimeDeploySpec, openDeployHelmChart, deps.RunRemoteCommand, writeLocalSSHConfig)
 	containerCmd := newCommandGroup(
 		"container",
@@ -206,7 +211,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 		if initRan {
 			return nil
 		}
-		return runResolvedOpenCommand(ctx, result, openOptions{}, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart, activateSSHD, launchVSCodeCmd)
+		return runResolvedOpenCommand(ctx, result, openOptions{}, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart, activateSSHD, launchVSCodeCmd, launchIntelliJCmd)
 	}
 
 	cmd := newRootCommand(runRoot)

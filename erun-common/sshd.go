@@ -14,21 +14,23 @@ const (
 )
 
 type SSHConnectionInfo struct {
-	User          string
-	Host          string
-	Port          int
-	WorkspacePath string
-	HostAlias     string
+	User           string
+	Host           string
+	Port           int
+	WorkspacePath  string
+	HostAlias      string
+	PrivateKeyPath string
 }
 
 func SSHConnectionInfoForResult(result OpenResult) SSHConnectionInfo {
 	req := ShellLaunchParamsFromResult(result)
 	return SSHConnectionInfo{
-		User:          DefaultSSHUser,
-		Host:          "127.0.0.1",
-		Port:          result.EnvConfig.SSHD.ResolvedLocalPort(),
-		WorkspacePath: RemoteShellWorktreePath(req),
-		HostAlias:     SSHHostAlias(result.Tenant, result.Environment),
+		User:           DefaultSSHUser,
+		Host:           "127.0.0.1",
+		Port:           result.EnvConfig.SSHD.ResolvedLocalPort(),
+		WorkspacePath:  RemoteShellWorktreePath(req),
+		HostAlias:      SSHHostAlias(result.Tenant, result.Environment),
+		PrivateKeyPath: SSHPrivateKeyPath(result.EnvConfig.SSHD.PublicKeyPath),
 	}
 }
 
