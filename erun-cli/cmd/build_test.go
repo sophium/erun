@@ -2412,6 +2412,54 @@ func TestBuildCommandDryRunReleaseShowsPushCommandsForReleaseTaggedDockerBuilds(
 	}
 }
 
+func TestBuildCommandDryRunReleaseForceIncludesTagDeletionForStaleReleaseTag(t *testing.T) {
+	projectRoot := createReleaseGitRepo(t, "main")
+	remoteRoot := filepath.Join(t.TempDir(), "origin.git")
+	runGitCommand(t, t.TempDir(), "init", "--bare", remoteRoot)
+	runGitCommand(t, projectRoot, "remote", "add", "origin", remoteRoot)
+	runGitCommand(t, projectRoot, "push", "-u", "origin", "main")
+	runGitCommand(t, projectRoot, "tag", "-a", "v1.4.2", "-m", "Release 1.4.2")
+	runGitCommand(t, projectRoot, "push", "origin", "v1.4.2")
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "README.tmp"), []byte("change\n"), 0o644); err != nil {
+		t.Fatalf("write temp change: %v", err)
+	}
+	runGitCommand(t, projectRoot, "add", "erun-devops/README.tmp")
+	runGitCommand(t, projectRoot, "commit", "-m", "advance head")
+	runGitCommand(t, projectRoot, "push", "origin", "main")
+
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		OptionalBuildFindProjectRoot: func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: projectRoot}, nil
+		},
+	})
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"build", "--dry-run", "--release", "--force"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stderr.String()
+	for _, want := range []string{
+		"git tag -d v1.4.2",
+		"git push --delete origin v1.4.2",
+		"docker buildx build --builder erun-multiarch --platform 'linux/amd64,linux/arm64' -t erunpaas/api:1.4.2",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, output)
+		}
+	}
+}
+
 func TestBuildCommandDryRunBuildsLinuxPackagesFromProjectRoot(t *testing.T) {
 	projectRoot := t.TempDir()
 	linuxComponentDir := filepath.Join(projectRoot, "erun-devops", "linux", "erun-cli")

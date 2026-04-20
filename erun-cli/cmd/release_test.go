@@ -163,6 +163,52 @@ func TestReleaseCommandDryRunStableWithoutDevelopOnlyPushesMain(t *testing.T) {
 	}
 }
 
+func TestReleaseCommandDryRunForceIncludesTagDeletionForStaleReleaseTag(t *testing.T) {
+	projectRoot := createReleaseGitRepo(t, "main")
+	remoteRoot := filepath.Join(t.TempDir(), "origin.git")
+	runGitCommand(t, t.TempDir(), "init", "--bare", remoteRoot)
+	runGitCommand(t, projectRoot, "remote", "add", "origin", remoteRoot)
+	runGitCommand(t, projectRoot, "push", "-u", "origin", "main")
+	runGitCommand(t, projectRoot, "tag", "-a", "v1.4.2", "-m", "Release 1.4.2")
+	runGitCommand(t, projectRoot, "push", "origin", "v1.4.2")
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "README.tmp"), []byte("change\n"), 0o644); err != nil {
+		t.Fatalf("write temp change: %v", err)
+	}
+	runGitCommand(t, projectRoot, "add", "erun-devops/README.tmp")
+	runGitCommand(t, projectRoot, "commit", "-m", "advance head")
+	runGitCommand(t, projectRoot, "push", "origin", "main")
+
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		RunGit: func(string, io.Writer, io.Writer, ...string) error {
+			t.Fatal("unexpected git execution during dry-run")
+			return nil
+		},
+	})
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"release", "--dry-run", "--force"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stderr.String()
+	for _, want := range []string{
+		"git tag -d v1.4.2",
+		"git push --delete origin v1.4.2",
+		"git tag -a v1.4.2 -m 'Release 1.4.2'",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, output)
+		}
+	}
+}
+
 func TestReleaseCommandWritesOnlyVersionToStdoutDuringExecution(t *testing.T) {
 	projectRoot := createReleaseGitRepo(t, "develop")
 	if err := common.SaveProjectConfig(projectRoot, common.ProjectConfig{}); err != nil {

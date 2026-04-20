@@ -101,6 +101,7 @@ type DockerCommandTarget struct {
 	Environment     string
 	VersionOverride string
 	Release         bool
+	Force           bool
 	Deploy          bool
 }
 
@@ -297,7 +298,7 @@ func ResolveDockerBuildTarget(findProjectRoot ProjectFinderFunc, target DockerCo
 		return DockerCommandTarget{}, nil, fmt.Errorf("release build cannot be combined with explicit version override")
 	}
 
-	releaseSpec, err := ResolveReleaseSpec(findProjectRoot, ReleaseParams{ProjectRoot: target.ProjectRoot})
+	releaseSpec, err := ResolveReleaseSpec(findProjectRoot, ReleaseParams{ProjectRoot: target.ProjectRoot, Force: target.Force})
 	if err != nil {
 		return DockerCommandTarget{}, nil, err
 	}

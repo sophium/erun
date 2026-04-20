@@ -867,6 +867,31 @@ func TestResolveBuildExecutionReleaseUsesResolvedVersionForDockerBuilds(t *testi
 	}
 }
 
+func TestResolveBuildExecutionReleaseCarriesForceToReleaseSpec(t *testing.T) {
+	projectRoot := setupReleaseProjectGitRepo(t, "main")
+
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{Dir: projectRoot}, nil
+		},
+		nil,
+		DockerCommandTarget{ProjectRoot: projectRoot, Environment: DefaultEnvironment, Release: true, Force: true},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+	if execution.release == nil {
+		t.Fatalf("expected release spec, got %+v", execution)
+	}
+	if !execution.release.Force {
+		t.Fatalf("expected release force flag, got %+v", execution.release)
+	}
+}
+
 func TestResolveBuildExecutionReleaseOnlyPushesReleaseTaggedDockerBuilds(t *testing.T) {
 	projectRoot := setupReleaseProjectGitRepo(t, "main")
 

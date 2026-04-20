@@ -667,6 +667,59 @@ func TestRunReleaseSpecReturnsErrorWhenExistingTagPointsElsewhere(t *testing.T) 
 	}
 }
 
+func TestRunReleaseSpecForceDeletesExistingTagAndRecreatesIt(t *testing.T) {
+	projectRoot := setupReleaseProjectGitRepo(t, "develop")
+	remoteBase := t.TempDir()
+	remoteRoot := filepath.Join(remoteBase, "origin.git")
+	runGitWithEnv(t, remoteBase, nil, "init", "--bare", remoteRoot)
+	runGitWithEnv(t, projectRoot, nil, "remote", "add", "origin", remoteRoot)
+	runGitWithEnv(t, projectRoot, nil, "push", "-u", "origin", "develop")
+	runGitWithEnv(t, projectRoot, nil, "tag", "-a", "v1.4.2-rc.abc1234", "-m", "Release candidate 1.4.2-rc.abc1234")
+	runGitWithEnv(t, projectRoot, nil, "push", "origin", "v1.4.2-rc.abc1234")
+
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "README.tmp"), []byte("change\n"), 0o644); err != nil {
+		t.Fatalf("write temp change: %v", err)
+	}
+	runGitWithEnv(t, projectRoot, nil, "add", "erun-devops/README.tmp")
+	runGitWithEnv(t, projectRoot, nil, "commit", "-m", "advance head")
+	runGitWithEnv(t, projectRoot, nil, "push", "origin", "develop")
+
+	spec, err := resolveReleaseSpec(
+		func() (string, string, error) { return "tenant-a", projectRoot, nil },
+		LoadProjectConfig,
+		func(string) (string, error) { return "develop", nil },
+		func(string) (string, error) { return "abc1234", nil },
+		func(string, string) (bool, error) { return true, nil },
+		ReleaseParams{Force: true},
+	)
+	if err != nil {
+		t.Fatalf("resolveReleaseSpec failed: %v", err)
+	}
+
+	ctx := Context{
+		Logger: NewLoggerWithWriters(2, new(bytes.Buffer), new(bytes.Buffer)),
+		Stdout: new(bytes.Buffer),
+		Stderr: new(bytes.Buffer),
+	}
+	if err := RunReleaseSpec(ctx, spec, nil, nil); err != nil {
+		t.Fatalf("RunReleaseSpec failed: %v", err)
+	}
+
+	headCommit := strings.TrimSpace(runGitOutput(t, projectRoot, "rev-parse", "HEAD"))
+	localTagCommit := strings.TrimSpace(runGitOutput(t, projectRoot, "rev-parse", "v1.4.2-rc.abc1234^{}"))
+	if localTagCommit != headCommit {
+		t.Fatalf("expected local tag at HEAD, got tag=%s head=%s", localTagCommit, headCommit)
+	}
+
+	remoteTagOutput := strings.Fields(runGitOutput(t, projectRoot, "ls-remote", "--tags", "origin", "refs/tags/v1.4.2-rc.abc1234^{}"))
+	if len(remoteTagOutput) == 0 {
+		t.Fatal("expected remote tag output")
+	}
+	if remoteTagOutput[0] != headCommit {
+		t.Fatalf("expected remote tag at HEAD, got tag=%s head=%s", remoteTagOutput[0], headCommit)
+	}
+}
+
 func TestRunReleaseSpecReturnsErrorWhenWorktreeIsDirty(t *testing.T) {
 	projectRoot := setupReleaseProjectGitRepo(t, "main")
 
