@@ -7,7 +7,7 @@
     "go"
   ],
   "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.35.zip",
-  "hash": "36aa0d5d8578ad42bf93d53b7fece0a7fbf41041b690cdbd434879827e544651",
+  "hash": "7e4df0dce2c353dc75f06a74efd3033655e81d01a9097fd5b13673dd6df94e35",
   "extract_dir": "erun-1.0.35",
   "installer": {
     "script": [
