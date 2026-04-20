@@ -1,0 +1,271 @@
+:root {
+  --sidebar-width: 338px;
+  color: #2f3136;
+  background: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: #ffffff;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.app-shell {
+  display: grid;
+  grid-template-rows: 52px minmax(0, 1fr);
+  width: 100%;
+  height: 100%;
+  background: #ffffff;
+}
+
+.titlebar {
+  position: relative;
+  border-bottom: 1px solid #eceef1;
+  background: rgba(255, 255, 255, 0.94);
+  box-sizing: border-box;
+  --wails-draggable: drag;
+  user-select: none;
+}
+
+.titlebar__button {
+  width: 28px;
+  height: 28px;
+  position: absolute;
+  top: 12px;
+  left: 88px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #7c8289;
+  cursor: pointer;
+  flex: 0 0 auto;
+  --wails-draggable: no-drag;
+}
+
+.titlebar__button:hover {
+  background: #edf0f3;
+  color: #52575e;
+}
+
+.titlebar__button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.titlebar__fill {
+  position: absolute;
+  inset: 0;
+}
+
+.workbench {
+  display: grid;
+  grid-template-columns: var(--sidebar-width) 10px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.sidebar-hidden .workbench {
+  grid-template-columns: 0 0 minmax(0, 1fr);
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #f4f5f7;
+  padding: 28px 8px 16px 14px;
+  box-sizing: border-box;
+}
+
+.sidebar-hidden .sidebar {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.sidebar__header {
+  padding: 0 14px 10px;
+}
+
+.sidebar__header-title {
+  color: #9fa5ad;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.sidebar__list {
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.tenant-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.tenant-group--spaced {
+  margin-top: 10px;
+}
+
+.tenant-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  background: transparent;
+  color: #53565c;
+  padding: 3px 14px 5px;
+  text-align: left;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  cursor: pointer;
+}
+
+.tenant-row:hover {
+  color: #303338;
+}
+
+.folder-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.environment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-top: 0;
+}
+
+.environment-row {
+  display: flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: #4b4f55;
+  border-radius: 12px;
+  height: 34px;
+  margin-left: 2px;
+  margin-right: 0;
+  padding: 0 16px 0 42px;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.environment-row:hover {
+  background: rgba(225, 228, 232, 0.7);
+}
+
+.environment-row.is-selected {
+  background: #e3e7ec;
+}
+
+.splitter {
+  position: relative;
+  cursor: col-resize;
+  background: transparent;
+}
+
+.splitter::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: transparent;
+  transition: background 120ms ease;
+}
+
+.splitter:hover::before,
+.is-resizing .splitter::before {
+  background: #d3d8de;
+}
+
+.sidebar-hidden .splitter {
+  pointer-events: none;
+}
+
+.terminal-pane {
+  position: relative;
+  overflow: hidden;
+  background: #000000;
+}
+
+.terminal {
+  width: 100%;
+  height: 100%;
+  padding: 14px 16px;
+  box-sizing: border-box;
+}
+
+.terminal .xterm,
+.terminal .xterm-viewport,
+.terminal .xterm-screen {
+  height: 100% !important;
+}
+
+.terminal-message {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  color: #c4c7cb;
+  background: rgba(0, 0, 0, 0.68);
+  text-align: center;
+  font-size: 18px;
+  line-height: 1.45;
+  pointer-events: none;
+}
+
+.terminal-message.is-hidden {
+  display: none;
+}
+
+@media (max-width: 980px) {
+  .sidebar {
+    padding-left: 10px;
+  }
+
+  .environment-row {
+    padding-left: 42px;
+  }
+
+  .titlebar {
+  }
+
+  .titlebar__button {
+    left: 76px;
+  }
+}

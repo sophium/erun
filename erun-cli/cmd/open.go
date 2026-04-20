@@ -22,8 +22,10 @@ const (
 
 var currentHostOS = func() common.HostOS { return common.DetectHost().OS }
 
-func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), saveTenantConfig func(common.TenantConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateSSHD SSHDActivator) *cobra.Command {
+func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
 	var noShell bool
+	var vscode bool
+	var intellij bool
 	var snapshot bool
 	var noSnapshot bool
 	target := common.OpenParams{}
@@ -35,6 +37,9 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
+			if vscode && intellij {
+				return fmt.Errorf("--vscode and --intellij cannot be used together")
+			}
 			params, err := resolveOpenParams(args, target)
 			if err != nil {
 				return err
@@ -50,11 +55,11 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 			if err != nil {
 				return err
 			}
-			result, err = applyOpenSnapshotPreference(result, snapshotOverride, saveTenantConfig)
+			result, err = applyOpenSnapshotPreference(result, snapshotOverride, saveEnvConfig)
 			if err != nil {
 				return err
 			}
-			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateSSHD)
+			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell, VSCode: vscode, IntelliJ: intellij}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateSSHD, launchVSCode, launchIntelliJ)
 		},
 	}
 
@@ -62,24 +67,28 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Open a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Open a specific environment")
 	cmd.Flags().BoolVar(&noShell, "no-shell", false, "Print shell commands to switch kubectl context, namespace, and worktree locally")
+	cmd.Flags().BoolVar(&vscode, "vscode", false, "Open the remote environment in VS Code instead of a shell")
+	cmd.Flags().BoolVar(&intellij, "intellij", false, "Open the remote environment in IntelliJ IDEA instead of a shell")
 	addSnapshotFlags(cmd, &snapshot, &noSnapshot, "Build and deploy a local snapshot when opening the local environment")
 	return cmd
 }
 
 type openOptions struct {
-	NoShell bool
+	NoShell  bool
+	VSCode   bool
+	IntelliJ bool
 }
 
-func applyOpenSnapshotPreference(result common.OpenResult, enabled *bool, saveTenantConfig func(common.TenantConfig) error) (common.OpenResult, error) {
+func applyOpenSnapshotPreference(result common.OpenResult, enabled *bool, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
 	if enabled == nil || !strings.EqualFold(strings.TrimSpace(result.Environment), common.DefaultEnvironment) {
 		return result, nil
 	}
 
-	result.TenantConfig.SetSnapshot(*enabled)
-	if saveTenantConfig == nil {
+	result.EnvConfig.SetSnapshot(*enabled)
+	if saveEnvConfig == nil {
 		return result, nil
 	}
-	if err := saveTenantConfig(result.TenantConfig); err != nil {
+	if err := saveEnvConfig(result.Tenant, result.EnvConfig); err != nil {
 		return common.OpenResult{}, err
 	}
 	return result, nil
@@ -189,9 +198,19 @@ func resolveOpenWithInitRetryForParams(ctx common.Context, params common.OpenPar
 	return result, true, err
 }
 
-func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateSSHD SSHDActivator) error {
+func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
 	namespace := common.KubernetesNamespaceName(result.Tenant, result.Environment)
-	if options.NoShell && !result.EnvConfig.SSHD.Enabled {
+	if options.VSCode && options.IntelliJ {
+		return fmt.Errorf("--vscode and --intellij cannot be used together")
+	}
+	if (options.VSCode || options.IntelliJ) && !result.EnvConfig.SSHD.Enabled {
+		flag := "--vscode"
+		if options.IntelliJ {
+			flag = "--intellij"
+		}
+		return fmt.Errorf("%s requires sshd-enabled remote environment; run `erun sshd init %s %s` first", flag, result.Tenant, result.Environment)
+	}
+	if options.NoShell && !options.VSCode && !options.IntelliJ && !result.EnvConfig.SSHD.Enabled {
 		ctx.TraceCommand("", "kubectl", "config", "use-context", strings.TrimSpace(result.EnvConfig.KubernetesContext))
 		ctx.TraceCommand("", "kubectl", "config", "set-context", "--current", "--namespace="+namespace)
 		ctx.TraceCommand("", "cd", result.RepoPath)
@@ -248,6 +267,19 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 		if err := activateSSHD(ctx, result); err != nil {
 			return err
 		}
+	}
+
+	if options.VSCode {
+		if launchVSCode == nil {
+			return fmt.Errorf("VS Code launcher is required")
+		}
+		return launchVSCode(ctx, result)
+	}
+	if options.IntelliJ {
+		if launchIntelliJ == nil {
+			return fmt.Errorf("IntelliJ launcher is required")
+		}
+		return launchIntelliJ(ctx, result, promptRunner)
 	}
 
 	if options.NoShell {

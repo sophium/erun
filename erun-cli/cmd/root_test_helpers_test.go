@@ -29,9 +29,12 @@ type testRootDeps struct {
 	LoginToDockerRegistry          common.DockerRegistryLoginFunc
 	DeployHelmChart                common.HelmChartDeployerFunc
 	LaunchMCP                      MCPLauncher
+	LaunchApp                      AppLauncher
 	LaunchShell                    common.ShellLauncherFunc
 	WaitForRemoteRuntime           common.RemoteRuntimeWaitFunc
 	RunRemoteCommand               common.RemoteCommandRunnerFunc
+	LaunchVSCode                   VSCodeLauncher
+	LaunchIntelliJ                 IntelliJLauncher
 	Now                            common.NowFunc
 }
 
@@ -98,6 +101,10 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	if launchMCP == nil {
 		launchMCP = launchMCPProcess
 	}
+	launchApp := deps.LaunchApp
+	if launchApp == nil {
+		launchApp = launchAppProcess
+	}
 	runGit := deps.RunGit
 	if runGit == nil {
 		runGit = common.GitCommandRunner
@@ -125,6 +132,14 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 		return resolveRuntimeDeploySpecForOpen(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, currentBuildInfo(), target)
 	}
 	activateSSHD := newSSHDActivator(deps.RunRemoteCommand)
+	launchVSCodeCmd := deps.LaunchVSCode
+	if launchVSCodeCmd == nil {
+		launchVSCodeCmd = launchVSCode
+	}
+	launchIntelliJCmd := deps.LaunchIntelliJ
+	if launchIntelliJCmd == nil {
+		launchIntelliJCmd = launchIntelliJ
+	}
 	push := newPushOperation(pushDockerImage, loginToDockerRegistry, selectRunner)
 	runManagedDeploy := func(ctx common.Context, target common.OpenResult) error {
 		specs, err := common.ResolveCurrentDeploySpecs(
@@ -155,8 +170,8 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	runInitForOpen := newRunInitForOpen(store, runInit)
 
 	initCmd := newInitCmd(runInit)
-	openCmd := newOpenCmd(resolveOpen, store.SaveTenantConfig, runInitForOpen, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart, activateSSHD)
-	sshdCmd := newSSHDCmd(resolveOpen, store.SaveEnvConfig, runInitForOpen, resolveRuntimeDeploySpec, openDeployHelmChart, deps.RunRemoteCommand)
+	openCmd := newOpenCmd(resolveOpen, store.SaveEnvConfig, runInitForOpen, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart, activateSSHD, launchVSCodeCmd, launchIntelliJCmd)
+	sshdCmd := newSSHDCmd(resolveOpen, store.SaveEnvConfig, runInitForOpen, resolveRuntimeDeploySpec, openDeployHelmChart, deps.RunRemoteCommand, writeLocalSSHConfig)
 	containerCmd := newCommandGroup(
 		"container",
 		"Container utilities",
@@ -186,6 +201,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	}
 
 	mcpCmd := newMCPCmd(resolveOpen, runInitForArgs, launchMCP)
+	appCmd := newAppCmd(launchApp)
 	listCmd := newListCmd(listDataStore, findProjectRoot)
 	releaseCmd := newReleaseCmd(findProjectRoot, runGit)
 	versionCmd := newVersionCmd(func() (common.BuildInfo, string, error) {
@@ -201,11 +217,11 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 		if initRan {
 			return nil
 		}
-		return runResolvedOpenCommand(ctx, result, openOptions{}, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart, activateSSHD)
+		return runResolvedOpenCommand(ctx, result, openOptions{}, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart, activateSSHD, launchVSCodeCmd, launchIntelliJCmd)
 	}
 
 	cmd := newRootCommand(runRoot)
-	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, listCmd, releaseCmd, versionCmd)
+	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, listCmd, releaseCmd, versionCmd)
 	return cmd
 }
 

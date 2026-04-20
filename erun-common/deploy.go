@@ -381,9 +381,6 @@ func deployTargetSnapshotEnabled(target OpenResult, override *bool) bool {
 	if override != nil {
 		return *override
 	}
-	if target.TenantConfig.Snapshot != nil {
-		return target.TenantConfig.SnapshotEnabled()
-	}
 	return target.EnvConfig.SnapshotEnabled()
 }
 

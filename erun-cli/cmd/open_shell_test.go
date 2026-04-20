@@ -54,3 +54,11 @@ func TestNewOpenShellRunnerSkipsExecOnWaitError(t *testing.T) {
 		t.Fatalf("expected %v, got %v", waitErr, err)
 	}
 }
+
+func TestShouldUseSpinnerDisabledForDesktopSession(t *testing.T) {
+	t.Setenv(desktopAppSessionEnvVar, "1")
+
+	if shouldUseSpinner(nil) {
+		t.Fatal("expected spinner to be disabled for desktop session")
+	}
+}

@@ -43,6 +43,7 @@ const (
 
 type ReleaseParams struct {
 	ProjectRoot string
+	Force       bool
 }
 
 type ReleaseFileUpdate struct {
@@ -94,6 +95,7 @@ type ReleaseSpec struct {
 	NextVersion     string                   `json:"nextVersion,omitempty"`
 	VersionFilePath string                   `json:"versionFilePath"`
 	Mode            ReleaseMode              `json:"mode"`
+	Force           bool                     `json:"force,omitempty"`
 	Charts          []ReleaseChartSpec       `json:"charts,omitempty"`
 	DockerImages    []ReleaseDockerImageSpec `json:"dockerImages,omitempty"`
 	Stages          []ReleaseStage           `json:"stages,omitempty"`
@@ -234,6 +236,7 @@ func resolveReleaseSpec(findProjectRoot ProjectFinderFunc, loadProjectConfig Pro
 		NextVersion:     nextVersion,
 		VersionFilePath: versionFilePath,
 		Mode:            mode,
+		Force:           params.Force,
 		Charts:          charts,
 		DockerImages:    images,
 		Stages:          stages,
@@ -299,15 +302,8 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 			stageCommands = nil
 		}
 		for _, command := range stageCommands {
-			ctx.TraceCommand(command.Dir, command.Name, command.Args...)
-			if ctx.DryRun {
-				continue
-			}
-			if command.Name != "git" {
-				return fmt.Errorf("unsupported release command %q", command.Name)
-			}
-			if shouldSkipExistingReleaseTag(command.Args) {
-				skip, err := canSkipExistingReleaseTag(command.Dir, command.Args[2])
+			if command.Name == "git" && shouldSkipExistingReleaseTag(command.Args) {
+				skip, err := prepareReleaseTag(ctx, spec, runGit, command)
 				if err != nil {
 					return err
 				}
@@ -315,6 +311,13 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 					ctx.Trace("release tag already exists at HEAD; skipping " + command.Args[2])
 					continue
 				}
+			}
+			ctx.TraceCommand(command.Dir, command.Name, command.Args...)
+			if ctx.DryRun {
+				continue
+			}
+			if command.Name != "git" {
+				return fmt.Errorf("unsupported release command %q", command.Name)
 			}
 			if err := runGit(command.Dir, ctx.Stdout, ctx.Stderr, command.Args...); err != nil {
 				return err
@@ -334,6 +337,20 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 
 func shouldSkipExistingReleaseTag(args []string) bool {
 	return len(args) >= 3 && args[0] == "tag" && args[1] == "-a" && strings.TrimSpace(args[2]) != ""
+}
+
+func prepareReleaseTag(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, command ReleaseCommandSpec) (bool, error) {
+	tag := strings.TrimSpace(command.Args[2])
+	if tag == "" {
+		return false, nil
+	}
+	if spec.Force {
+		if err := deleteExistingReleaseTag(ctx, command.Dir, tag, runGit); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	return canSkipExistingReleaseTag(command.Dir, tag)
 }
 
 func canSkipExistingReleaseTag(projectRoot, tag string) (bool, error) {
@@ -362,6 +379,55 @@ func canSkipExistingReleaseTag(projectRoot, tag string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func deleteExistingReleaseTag(ctx Context, projectRoot, tag string, runGit GitCommandRunnerFunc) error {
+	localExists, err := gitTagExists(projectRoot, tag)
+	if err != nil {
+		return err
+	}
+	if localExists {
+		ctx.TraceCommand(projectRoot, "git", "tag", "-d", tag)
+		if !ctx.DryRun {
+			if err := runGit(projectRoot, ctx.Stdout, ctx.Stderr, "tag", "-d", tag); err != nil {
+				return err
+			}
+		}
+	}
+
+	remoteExists, err := gitRemoteTagExists(projectRoot, "origin", tag)
+	if err != nil {
+		return err
+	}
+	if remoteExists {
+		ctx.TraceCommand(projectRoot, "git", "push", "--delete", "origin", tag)
+		if !ctx.DryRun {
+			if err := runGit(projectRoot, ctx.Stdout, ctx.Stderr, "push", "--delete", "origin", tag); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func gitTagExists(projectRoot, tag string) (bool, error) {
+	_, ok, err := gitResolvedRef(projectRoot, tag+"^{}")
+	return ok, err
+}
+
+func gitRemoteTagExists(projectRoot, remote, tag string) (bool, error) {
+	remote = strings.TrimSpace(remote)
+	tag = strings.TrimSpace(tag)
+	if remote == "" || tag == "" {
+		return false, nil
+	}
+
+	output, err := exec.Command("git", "-C", projectRoot, "ls-remote", "--tags", "--refs", remote, "refs/tags/"+tag).CombinedOutput()
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(output)) != "", nil
 }
 
 func gitResolvedRef(projectRoot, ref string) (string, bool, error) {

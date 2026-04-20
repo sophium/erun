@@ -232,14 +232,14 @@ func TestResolveListResultIncludesSnapshotPreferenceForTenant(t *testing.T) {
 		openStore: openStore{
 			toolConfig: ERunConfig{DefaultTenant: "tenant-a"},
 			tenantConfigs: map[string]TenantConfig{
-				"tenant-a": {Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: DefaultEnvironment, Snapshot: &snapshot},
+				"tenant-a": {Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: DefaultEnvironment},
 			},
 			envConfigs: map[string]EnvConfig{
-				"tenant-a/local": {Name: DefaultEnvironment, RepoPath: repoRoot, KubernetesContext: "cluster-local"},
+				"tenant-a/local": {Name: DefaultEnvironment, RepoPath: repoRoot, KubernetesContext: "cluster-local", Snapshot: &snapshot},
 			},
 		},
 		envsByTenant: map[string][]EnvConfig{
-			"tenant-a": {{Name: DefaultEnvironment, RepoPath: repoRoot, KubernetesContext: "cluster-local"}},
+			"tenant-a": {{Name: DefaultEnvironment, RepoPath: repoRoot, KubernetesContext: "cluster-local", Snapshot: &snapshot}},
 		},
 	}
 
@@ -255,7 +255,7 @@ func TestResolveListResultIncludesSnapshotPreferenceForTenant(t *testing.T) {
 	if result.CurrentDirectory.Effective == nil || result.CurrentDirectory.Effective.Snapshot {
 		t.Fatalf("expected effective snapshot off, got %+v", result.CurrentDirectory.Effective)
 	}
-	if len(result.Tenants) != 1 || len(result.Tenants[0].Environments) != 1 || result.Tenants[0].Snapshot {
+	if len(result.Tenants) != 1 || len(result.Tenants[0].Environments) != 1 || result.Tenants[0].Environments[0].Snapshot {
 		t.Fatalf("expected environment snapshot off, got %+v", result.Tenants)
 	}
 }
@@ -308,6 +308,9 @@ func TestResolveListResultIncludesSSHDConfiguration(t *testing.T) {
 	}
 	if result.CurrentDirectory.Effective == nil || !result.CurrentDirectory.Effective.SSH.Enabled {
 		t.Fatalf("expected effective SSH details, got %+v", result.CurrentDirectory.Effective)
+	}
+	if result.CurrentDirectory.Effective.SSH.HostAlias != "erun-tenant-a-dev" {
+		t.Fatalf("unexpected effective SSH host alias: %+v", result.CurrentDirectory.Effective.SSH)
 	}
 	if result.CurrentDirectory.Effective.SSH.User != DefaultSSHUser || result.CurrentDirectory.Effective.SSH.LocalPort != DefaultSSHLocalPort {
 		t.Fatalf("unexpected effective SSH info: %+v", result.CurrentDirectory.Effective.SSH)

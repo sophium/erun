@@ -164,6 +164,7 @@ func addBuildCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommand
 	addPushCommandTargetFlags(cmd, target)
 	cmd.Flags().BoolVar(&target.Deploy, "deploy", false, "Deploy the built version after the build completes")
 	cmd.Flags().BoolVar(&target.Release, "release", false, "Run release first and publish the release-tagged images")
+	cmd.Flags().BoolVar(&target.Force, "force", false, "Delete and recreate conflicting release tags when combined with --release")
 }
 
 func addPushCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {

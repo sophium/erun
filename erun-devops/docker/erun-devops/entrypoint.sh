@@ -154,6 +154,7 @@ PasswordAuthentication no
 KbdInteractiveAuthentication no
 ChallengeResponseAuthentication no
 PubkeyAuthentication yes
+StrictModes no
 PermitRootLogin no
 UsePAM no
 PidFile ${pid_file}

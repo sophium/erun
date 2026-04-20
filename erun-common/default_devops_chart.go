@@ -85,10 +85,7 @@ func resolveOpenRuntimeDeploySpec(store DeployStore, findProjectRoot ProjectFind
 		return resolveDefaultDevopsDeploySpec(target)
 	}
 
-	allowLocalBuilds := target.TenantConfig.SnapshotEnabled()
-	if target.TenantConfig.Snapshot == nil {
-		allowLocalBuilds = target.EnvConfig.SnapshotEnabled()
-	}
+	allowLocalBuilds := deployTargetSnapshotEnabled(target, nil)
 	for _, componentName := range openRuntimeComponentNames(target.Tenant) {
 		spec, err := resolveDeploySpecForOpenResult(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, componentName, "", allowLocalBuilds)
 		if err == nil {

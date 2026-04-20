@@ -2,6 +2,10 @@
 
 Repository guidance for humans and coding agents working in this repo.
 
+- Follow this file for the whole repository.
+- When working inside a subdirectory that has its own `AGENTS.md`, follow the child file as additional, more specific guidance for that subtree.
+- Submodules may define their own `AGENTS.md` files with more specific guidance. See `erun-ui/AGENTS.md` for desktop-module guidance.
+
 ## Contributing
 
 - Erun GitHub repository: `https://github.com/sophium/erun`
@@ -22,6 +26,7 @@ Repository guidance for humans and coding agents working in this repo.
 - `erun-cli` - CLI utility
 - `erun-common` - shared common module
 - `erun-mcp` - MCP server module
+- `erun-ui` - desktop app module built with Wails, using a Go backend and a TypeScript/Yarn frontend
 
 ## Module Boundaries
 
@@ -32,6 +37,9 @@ Repository guidance for humans and coding agents working in this repo.
 - Keep `erun-common` small and focused on reusable core types and logic, not module-specific orchestration.
 - `erun-cli` and `erun-mcp` must not import each other.
 - `erun-cli` may depend on `erun-common`, but its `mcp` command is only a launcher for the `emcp` executable and must not embed MCP server logic.
+- `erun-ui` is an additive desktop transport for the same solution, not a replacement for shared domain logic. Keep shared tenant and environment resolution in `erun-common`, not in the desktop module.
+- `erun-ui` owns desktop-specific concerns: Wails startup, native window integration, frontend assets, PTY-backed terminal sessions, and package-manager-facing desktop build outputs.
+- `erun-ui` may depend on `erun-common`, and it may launch the installed `erun` executable as a child process for interactive terminal sessions, but it must not import `erun-cli` packages.
 - `erun-mcp` owns MCP transport concerns: server startup, HTTP handler wiring, SDK integration, tool registration, and the `cmd/emcp` executable.
 - Keep MCP-specific configuration, flag parsing, and transport wiring in `erun-mcp`, not in `erun-cli` or `erun-common`.
 - Keep `erun-common` usable as a standalone library for third parties. Shared code placed there must be transport-agnostic and should not depend on Cobra, the MCP SDK, or module-specific orchestration.
@@ -120,6 +128,7 @@ Repository guidance for humans and coding agents working in this repo.
 ## Release Rules
 
 - Treat release work as repository-wide. When changing release behavior, validate `erun-common`, `erun-cli`, and `erun-mcp`, not just the module where the code change landed.
+- When release, launcher, or desktop packaging behavior changes affect the desktop app, validate `erun-ui` too and keep package-manager metadata aligned with the desktop build outputs.
 - Keep stable release automation responsible for all repository metadata that must move with the release, including versioned charts, package-manager metadata, and generated release references; when that metadata references GitHub archive assets, update both version fields and checksums instead of rewriting only URLs.
 - Treat release-time Docker images as dependency graphs, not isolated targets. If a release image depends on local base images, publish those local dependencies before publishing the dependent image.
 - Release-tagged runtime images must be published for both `linux/amd64` and `linux/arm64`. Do not rely on the local daemon default platform for stable releases.
@@ -136,6 +145,7 @@ Repository guidance for humans and coding agents working in this repo.
 - Do not change user-visible output, help text, error text, prompts, logging, defaults, or flags unless the user explicitly asks for that functional change.
 - Before and after a refactor, compare observable behavior with `main` and add or update regression tests for any behavior that must remain unchanged.
 - After refactoring shared code or moving logic across module boundaries, run validation in all modules: `erun-cli`, `erun-common`, and `erun-mcp`. Use each module's local validation commands; this includes `go test ./...` and linting where the module defines lint configuration.
+- Include `erun-ui` in that validation set when the refactor changes desktop wiring, shared code consumed by the desktop app, or package-manager and launcher integration.
 - After refactoring, explicitly look for unused code left behind by the move or simplification and remove it. Do not leave dead wrappers, compatibility helpers, or transport-specific glue in place just because tests still reference it.
 - When a shared interface in `erun-common` already matches the needed contract, use it directly instead of creating a duplicate local interface with the same methods.
 - After extracting shared code, remove test-only production shims where possible and move meaningful coverage to the module that now owns the behavior.

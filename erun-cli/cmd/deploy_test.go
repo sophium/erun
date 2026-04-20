@@ -935,7 +935,6 @@ func TestRootDeployShorthandUsesPersistedSnapshotPreferenceForLocalEnvironment(t
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
 		DefaultEnvironment: "local",
-		Snapshot:           &snapshot,
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
@@ -943,6 +942,7 @@ func TestRootDeployShorthandUsesPersistedSnapshotPreferenceForLocalEnvironment(t
 		Name:              "local",
 		RepoPath:          projectRoot,
 		KubernetesContext: "cluster-local",
+		Snapshot:          &snapshot,
 	}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}

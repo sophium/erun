@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestResolveDockerBuildContextDirForProjectUsesProjectRootForModuleDockerDirs(t *testing.T) {
@@ -290,7 +291,7 @@ func TestResolveBuildExecutionPrefersProjectBuildScript(t *testing.T) {
 			return "tenant-a", projectRoot, nil
 		},
 		func() (DockerBuildContext, error) {
-			return DockerBuildContext{}, errors.New("docker build context should not be resolved")
+			return DockerBuildContext{Dir: projectRoot}, nil
 		},
 		nil,
 		DockerCommandTarget{},
@@ -345,7 +346,7 @@ func TestResolveBuildExecutionPrefersProjectRootBuildScriptOverNestedScripts(t *
 			return "tenant-a", projectRoot, nil
 		},
 		func() (DockerBuildContext, error) {
-			return DockerBuildContext{}, errors.New("docker build context should not be resolved")
+			return DockerBuildContext{Dir: projectRoot}, nil
 		},
 		nil,
 		DockerCommandTarget{},
@@ -404,7 +405,7 @@ func TestResolveBuildExecutionUsesFirstNestedProjectBuildScript(t *testing.T) {
 			return "tenant-a", projectRoot, nil
 		},
 		func() (DockerBuildContext, error) {
-			return DockerBuildContext{}, errors.New("docker build context should not be resolved")
+			return DockerBuildContext{Dir: projectRoot}, nil
 		},
 		nil,
 		DockerCommandTarget{},
@@ -437,6 +438,48 @@ func TestResolveBuildExecutionUsesFirstNestedProjectBuildScript(t *testing.T) {
 	}
 	if !called {
 		t.Fatal("expected build script runner to be called")
+	}
+}
+
+func TestResolveBuildExecutionPrefersDockerBuildsOverNestedProjectBuildScript(t *testing.T) {
+	projectRoot := t.TempDir()
+	scriptDir := filepath.Join(projectRoot, "scripts", "alpha")
+	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
+		t.Fatalf("mkdir script dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(scriptDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write build.sh: %v", err)
+	}
+	componentDir := filepath.Join(projectRoot, "tenant-a-devops", "docker", "tenant-a-devops")
+	if err := os.MkdirAll(componentDir, 0o755); err != nil {
+		t.Fatalf("mkdir component dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "tenant-a-devops", "VERSION"), []byte("1.2.3\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{Dir: projectRoot}, nil
+		},
+		time.Now,
+		DockerCommandTarget{},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+	if execution.script != nil {
+		t.Fatalf("did not expect nested build script to override docker builds: %+v", execution.script)
+	}
+	if len(execution.dockerBuilds) != 1 {
+		t.Fatalf("unexpected docker builds: %+v", execution.dockerBuilds)
 	}
 }
 
@@ -821,6 +864,31 @@ func TestResolveBuildExecutionReleaseUsesResolvedVersionForDockerBuilds(t *testi
 	}
 	if got := execution.release.NextVersion; got != "1.4.3" {
 		t.Fatalf("unexpected next version: %q", got)
+	}
+}
+
+func TestResolveBuildExecutionReleaseCarriesForceToReleaseSpec(t *testing.T) {
+	projectRoot := setupReleaseProjectGitRepo(t, "main")
+
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{Dir: projectRoot}, nil
+		},
+		nil,
+		DockerCommandTarget{ProjectRoot: projectRoot, Environment: DefaultEnvironment, Release: true, Force: true},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+	if execution.release == nil {
+		t.Fatalf("expected release spec, got %+v", execution)
+	}
+	if !execution.release.Force {
+		t.Fatalf("expected release force flag, got %+v", execution.release)
 	}
 }
 

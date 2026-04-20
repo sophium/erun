@@ -1,4 +1,4 @@
-FROM golang:1.25.5 AS builder
+FROM golang:1.26.0 AS builder
 
 WORKDIR /src
 
@@ -86,6 +86,7 @@ RUN apt-get update && \
     rm -rf /tmp/helm.tar.gz /tmp/terraform.zip /tmp/k9s.tar.gz /tmp/difft.tar.gz /tmp/gh.tar.gz /tmp/golangci-lint.tar.gz /tmp/docker.tgz "/tmp/linux-${arch}" "/tmp/gh_${GH_VERSION}_linux_${arch}" "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION#v}-linux-${arch}" /tmp/terraform /tmp/k9s /tmp/difft /tmp/docker && \
     groupmod -n erun ubuntu && \
     usermod -l erun -d /home/erun -m -g erun ubuntu && \
+    passwd -d erun && \
     mkdir -p /home/erun/git /home/erun/.kube /home/erun/.config/k9s /etc/erun /etc/bash_completion.d && \
     printf '\n[ -r /usr/share/bash-completion/bash_completion ] && . /usr/share/bash-completion/bash_completion\n[ -r /etc/bash_completion.d/erun ] && . /etc/bash_completion.d/erun\n[ -r /etc/erun/bash_prompt.sh ] && . /etc/erun/bash_prompt.sh\n' >> /etc/bash.bashrc && \
     chown -R erun:erun /home/erun && \

@@ -164,8 +164,8 @@ func hasOptionalPushCmd(findProjectRoot common.ProjectFinderFunc, resolveBuildCo
 }
 
 func optionalBuildCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc) string {
-	hasScript, err := common.HasProjectBuildScript(findProjectRoot, common.DockerCommandTarget{})
-	if err == nil && hasScript {
+	hasRootScript, err := hasProjectRootBuildScript(findProjectRoot)
+	if err == nil && hasRootScript {
 		return "Build the project"
 	}
 
@@ -175,16 +175,12 @@ func optionalBuildCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuil
 	}
 
 	buildContexts, err := common.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, common.DockerCommandTarget{})
-	if err != nil {
-		return "Build the container image in the current directory"
-	}
+	if err == nil && len(buildContexts) > 0 {
+		buildContext, buildContextErr := resolveBuildContext()
+		if buildContextErr == nil && strings.TrimSpace(buildContext.DockerfilePath) != "" && len(buildContexts) == 1 {
+			return "Build the container image in the current directory"
+		}
 
-	buildContext, err := resolveBuildContext()
-	if err == nil && strings.TrimSpace(buildContext.DockerfilePath) != "" && len(buildContexts) == 1 {
-		return "Build the container image in the current directory"
-	}
-
-	if len(buildContexts) > 0 {
 		if projectRoot, projectRootErr := projectRootForHelp(findProjectRoot); projectRootErr == nil &&
 			projectRoot != "" &&
 			filepath.Clean(strings.TrimSpace(buildContext.Dir)) == projectRoot {
@@ -193,7 +189,30 @@ func optionalBuildCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuil
 		return "Build and push the devops container images for the current project"
 	}
 
+	hasScript, err := common.HasProjectBuildScript(findProjectRoot, common.DockerCommandTarget{})
+	if err == nil && hasScript {
+		return "Build the project"
+	}
+	if err != nil {
+		return "Build the container image in the current directory"
+	}
+
 	return "Build the container image in the current directory"
+}
+
+func hasProjectRootBuildScript(findProjectRoot common.ProjectFinderFunc) (bool, error) {
+	projectRoot, err := projectRootForHelp(findProjectRoot)
+	if err != nil || projectRoot == "" {
+		return false, err
+	}
+	info, err := os.Stat(filepath.Join(projectRoot, "build.sh"))
+	if err == nil {
+		return !info.IsDir(), nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
 }
 
 func optionalPushCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc) string {
