@@ -29,6 +29,7 @@ type testRootDeps struct {
 	LoginToDockerRegistry          common.DockerRegistryLoginFunc
 	DeployHelmChart                common.HelmChartDeployerFunc
 	LaunchMCP                      MCPLauncher
+	LaunchApp                      AppLauncher
 	LaunchShell                    common.ShellLauncherFunc
 	WaitForRemoteRuntime           common.RemoteRuntimeWaitFunc
 	RunRemoteCommand               common.RemoteCommandRunnerFunc
@@ -99,6 +100,10 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	launchMCP := deps.LaunchMCP
 	if launchMCP == nil {
 		launchMCP = launchMCPProcess
+	}
+	launchApp := deps.LaunchApp
+	if launchApp == nil {
+		launchApp = launchAppProcess
 	}
 	runGit := deps.RunGit
 	if runGit == nil {
@@ -196,6 +201,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	}
 
 	mcpCmd := newMCPCmd(resolveOpen, runInitForArgs, launchMCP)
+	appCmd := newAppCmd(launchApp)
 	listCmd := newListCmd(listDataStore, findProjectRoot)
 	releaseCmd := newReleaseCmd(findProjectRoot, runGit)
 	versionCmd := newVersionCmd(func() (common.BuildInfo, string, error) {
@@ -215,7 +221,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	}
 
 	cmd := newRootCommand(runRoot)
-	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, listCmd, releaseCmd, versionCmd)
+	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, listCmd, releaseCmd, versionCmd)
 	return cmd
 }
 

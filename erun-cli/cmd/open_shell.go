@@ -13,6 +13,8 @@ import (
 
 type OpenShellRunner func(common.Context, common.ShellLaunchParams) error
 
+const desktopAppSessionEnvVar = "ERUN_UI_SESSION"
+
 func newOpenShellRunner(waitForShellDeployment func(common.ShellLaunchParams) error, execShell common.ShellLauncherFunc) OpenShellRunner {
 	if waitForShellDeployment == nil {
 		waitForShellDeployment = common.WaitForShellDeployment
@@ -55,7 +57,7 @@ func runWithSpinner(ctx common.Context, suffix, finalMessage string, run func() 
 	if run == nil {
 		return fmt.Errorf("run function is required")
 	}
-	if !isTerminalWriter(ctx.Stderr) {
+	if !shouldUseSpinner(ctx.Stderr) {
 		return run()
 	}
 
@@ -69,4 +71,11 @@ func runWithSpinner(ctx common.Context, suffix, finalMessage string, run func() 
 	}
 	s.Stop()
 	return err
+}
+
+func shouldUseSpinner(w io.Writer) bool {
+	if os.Getenv(desktopAppSessionEnvVar) != "" {
+		return false
+	}
+	return isTerminalWriter(w)
 }
