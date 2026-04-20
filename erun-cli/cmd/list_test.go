@@ -90,12 +90,10 @@ func TestListCommandPrintsDefaultsAndConfiguredTenants(t *testing.T) {
 		"Tenants:",
 		"  tenant-a [default, effective]",
 		"    default environment: local",
-		"    snapshot: on",
-		"      - local [default, effective] context=cluster-local repo=" + tenantAPath,
-		"      - prod context=cluster-prod repo=" + tenantAPath,
+		"      - local [default, effective] context=cluster-local snapshot=on repo=" + tenantAPath,
+		"      - prod context=cluster-prod snapshot=on repo=" + tenantAPath,
 		"  tenant-b",
-		"    snapshot: on",
-		"      - dev [default] context=cluster-b repo=" + tenantBPath,
+		"      - dev [default] context=cluster-b snapshot=on repo=" + tenantBPath,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)
@@ -175,8 +173,7 @@ func TestListCommandUsesConfiguredCurrentDirectoryTenantBeforeDefault(t *testing
 		"  kubernetes context: cluster-b",
 		"  snapshot: on",
 		"  tenant-b [effective]",
-		"    snapshot: on",
-		"      - dev [default, effective] context=cluster-b repo=" + tenantBPath,
+		"      - dev [default, effective] context=cluster-b snapshot=on repo=" + tenantBPath,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)
@@ -248,10 +245,10 @@ func TestListCommandPrintsSnapshotPreference(t *testing.T) {
 		t.Fatalf("save erun config: %v", err)
 	}
 	snapshot := false
-	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: "local", Snapshot: &snapshot}); err != nil {
+	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: "local"}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "local", RepoPath: repoRoot, KubernetesContext: "cluster-local"}); err != nil {
+	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "local", RepoPath: repoRoot, KubernetesContext: "cluster-local", Snapshot: &snapshot}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
 
@@ -279,8 +276,7 @@ func TestListCommandPrintsSnapshotPreference(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		"  snapshot: off",
-		"    snapshot: off",
-		"      - local [default, effective] context=cluster-local repo=" + repoRoot,
+		"      - local [default, effective] context=cluster-local snapshot=off repo=" + repoRoot,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)

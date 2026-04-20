@@ -22,7 +22,7 @@ const (
 
 var currentHostOS = func() common.HostOS { return common.DetectHost().OS }
 
-func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), saveTenantConfig func(common.TenantConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
+func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
 	var noShell bool
 	var vscode bool
 	var intellij bool
@@ -55,7 +55,7 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 			if err != nil {
 				return err
 			}
-			result, err = applyOpenSnapshotPreference(result, snapshotOverride, saveTenantConfig)
+			result, err = applyOpenSnapshotPreference(result, snapshotOverride, saveEnvConfig)
 			if err != nil {
 				return err
 			}
@@ -79,16 +79,16 @@ type openOptions struct {
 	IntelliJ bool
 }
 
-func applyOpenSnapshotPreference(result common.OpenResult, enabled *bool, saveTenantConfig func(common.TenantConfig) error) (common.OpenResult, error) {
+func applyOpenSnapshotPreference(result common.OpenResult, enabled *bool, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
 	if enabled == nil || !strings.EqualFold(strings.TrimSpace(result.Environment), common.DefaultEnvironment) {
 		return result, nil
 	}
 
-	result.TenantConfig.SetSnapshot(*enabled)
-	if saveTenantConfig == nil {
+	result.EnvConfig.SetSnapshot(*enabled)
+	if saveEnvConfig == nil {
 		return result, nil
 	}
-	if err := saveTenantConfig(result.TenantConfig); err != nil {
+	if err := saveEnvConfig(result.Tenant, result.EnvConfig); err != nil {
 		return common.OpenResult{}, err
 	}
 	return result, nil

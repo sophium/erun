@@ -34,3 +34,4 @@ __debug_bin*
 .gomodcache
 /packaging/apt/dist/
 /erun-devops/linux/**/dist/
+/erun-cli/bin/erun-app

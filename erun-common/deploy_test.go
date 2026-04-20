@@ -374,11 +374,9 @@ func TestResolveOpenRuntimeDeploySpecSkipsLocalBuildsWhenSnapshotDisabled(t *tes
 		Tenant:      "frs",
 		Environment: DefaultEnvironment,
 		RepoPath:    projectRoot,
-		TenantConfig: TenantConfig{
-			Snapshot: &snapshot,
-		},
 		EnvConfig: EnvConfig{
 			KubernetesContext: "cluster-local",
+			Snapshot:          &snapshot,
 		},
 	})
 	if err != nil {
@@ -392,7 +390,7 @@ func TestResolveOpenRuntimeDeploySpecSkipsLocalBuildsWhenSnapshotDisabled(t *tes
 	}
 }
 
-func TestResolveOpenRuntimeDeploySpecFallsBackToLegacyEnvironmentSnapshotSetting(t *testing.T) {
+func TestResolveOpenRuntimeDeploySpecIgnoresTenantSnapshotSetting(t *testing.T) {
 	projectRoot := t.TempDir()
 	createComponentHelmChartFixture(t, projectRoot, "frs-devops")
 	workdir := filepath.Join(projectRoot, "frs-devops", "docker", "frs-devops")
@@ -414,16 +412,18 @@ func TestResolveOpenRuntimeDeploySpecFallsBackToLegacyEnvironmentSnapshotSetting
 		Tenant:      "frs",
 		Environment: DefaultEnvironment,
 		RepoPath:    projectRoot,
+		TenantConfig: TenantConfig{
+			Snapshot: &snapshot,
+		},
 		EnvConfig: EnvConfig{
 			KubernetesContext: "cluster-local",
-			Snapshot:          &snapshot,
 		},
 	})
 	if err != nil {
 		t.Fatalf("ResolveOpenRuntimeDeploySpec failed: %v", err)
 	}
-	if len(spec.Builds) != 0 {
-		t.Fatalf("expected legacy environment snapshot setting to skip builds, got %+v", spec.Builds)
+	if len(spec.Builds) == 0 {
+		t.Fatalf("expected tenant snapshot setting to be ignored, got %+v", spec.Builds)
 	}
 }
 

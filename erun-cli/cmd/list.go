@@ -137,9 +137,6 @@ func writeTenantEntry(ctx common.Context, tenant common.ListTenantResult) error 
 	if err := writeIndentedValue(ctx, 4, "default environment", tenant.DefaultEnvironment); err != nil {
 		return err
 	}
-	if err := writeIndentedValue(ctx, 4, "snapshot", enabledDisabledLabel(tenant.Snapshot)); err != nil {
-		return err
-	}
 
 	if len(tenant.Environments) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "    environments: none")
@@ -161,6 +158,7 @@ func writeTenantEntry(ctx common.Context, tenant common.ListTenantResult) error 
 			envLine += " [" + strings.Join(envMarkers, ", ") + "]"
 		}
 		envLine += " context=" + quotedValueOrNone(env.KubernetesContext)
+		envLine += " snapshot=" + enabledDisabledLabel(env.Snapshot)
 		envLine += " repo=" + quotedValueOrNone(env.RepoPath)
 		if env.SSH.Enabled {
 			envLine += " ssh=on"

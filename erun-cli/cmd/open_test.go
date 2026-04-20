@@ -848,12 +848,12 @@ func TestOpenCommandPersistsSnapshotPreferenceForLocalEnvironment(t *testing.T) 
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	tenantConfig, _, err := common.LoadTenantConfig("tenant-a")
+	envConfig, _, err := common.LoadEnvConfig("tenant-a", common.DefaultEnvironment)
 	if err != nil {
-		t.Fatalf("LoadTenantConfig failed: %v", err)
+		t.Fatalf("LoadEnvConfig failed: %v", err)
 	}
-	if tenantConfig.Snapshot == nil || *tenantConfig.Snapshot {
-		t.Fatalf("expected snapshot preference to be saved as false, got %+v", tenantConfig)
+	if envConfig.Snapshot == nil || *envConfig.Snapshot {
+		t.Fatalf("expected snapshot preference to be saved as false, got %+v", envConfig)
 	}
 }
 
@@ -892,7 +892,6 @@ func TestOpenCommandUsesPersistedSnapshotPreferenceForLocalEnvironment(t *testin
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
 		DefaultEnvironment: common.DefaultEnvironment,
-		Snapshot:           &snapshot,
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
@@ -900,6 +899,7 @@ func TestOpenCommandUsesPersistedSnapshotPreferenceForLocalEnvironment(t *testin
 		Name:              common.DefaultEnvironment,
 		RepoPath:          projectRoot,
 		KubernetesContext: "cluster-local",
+		Snapshot:          &snapshot,
 	}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}

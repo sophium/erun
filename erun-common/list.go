@@ -45,7 +45,6 @@ type ListEffectiveTargetResult struct {
 type ListTenantResult struct {
 	Name               string                  `json:"name"`
 	DefaultEnvironment string                  `json:"defaultEnvironment,omitempty"`
-	Snapshot           bool                    `json:"snapshot,omitempty"`
 	IsDefault          bool                    `json:"isDefault,omitempty"`
 	IsEffective        bool                    `json:"isEffective,omitempty"`
 	Environments       []ListEnvironmentResult `json:"environments,omitempty"`
@@ -55,6 +54,7 @@ type ListEnvironmentResult struct {
 	Name              string        `json:"name"`
 	KubernetesContext string        `json:"kubernetesContext,omitempty"`
 	RepoPath          string        `json:"repoPath,omitempty"`
+	Snapshot          bool          `json:"snapshot"`
 	IsDefault         bool          `json:"isDefault,omitempty"`
 	IsEffective       bool          `json:"isEffective,omitempty"`
 	SSH               ListSSHResult `json:"ssh,omitempty"`
@@ -127,7 +127,6 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 		tenantResult := ListTenantResult{
 			Name:               tenant.Name,
 			DefaultEnvironment: tenant.DefaultEnvironment,
-			Snapshot:           tenant.SnapshotEnabled(),
 			IsDefault:          tenant.Name == defaultTenant,
 			IsEffective:        effectiveErr == nil && tenant.Name == effectiveResult.Tenant,
 			Environments:       make([]ListEnvironmentResult, 0, len(envs)),
@@ -137,6 +136,7 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 				Name:              env.Name,
 				KubernetesContext: strings.TrimSpace(env.KubernetesContext),
 				RepoPath:          strings.TrimSpace(env.RepoPath),
+				Snapshot:          env.SnapshotEnabled(),
 				IsDefault:         env.Name == tenant.DefaultEnvironment,
 				IsEffective:       effectiveErr == nil && tenant.Name == effectiveResult.Tenant && env.Name == effectiveResult.Environment,
 				SSH: listSSHResult(OpenResult{

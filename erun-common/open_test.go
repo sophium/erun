@@ -431,6 +431,11 @@ func TestRemoteShellScriptSeedsConfigsAndCloneCommand(t *testing.T) {
 	remoteWorkdir := "/home/erun/git/erun"
 
 	for _, pattern := range []string{
+		"rm -f \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/keys\" \"$HOME/.ssh/config\"",
+		"old_umask=\"$(umask)\"",
+		"umask 077",
+		"umask \"$old_umask\"",
+		"chmod 600 \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/keys\" \"$HOME/.ssh/config\"",
 		"mkdir -p '/home/erun/git/erun'",
 		"cd '/home/erun/git/erun'",
 		"config_home=\"${XDG_CONFIG_HOME:-$HOME/.config}\"",

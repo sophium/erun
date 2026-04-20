@@ -145,7 +145,7 @@ func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc,
 		return BuildExecutionSpec{}, err
 	}
 
-	script, err := resolveProjectBuildScript(findProjectRoot, target)
+	script, err := resolveProjectRootBuildScript(findProjectRoot, target)
 	if err != nil {
 		return BuildExecutionSpec{}, err
 	}
@@ -175,6 +175,14 @@ func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc,
 	if len(linuxBuilds) == 0 && len(builds) == 0 && releaseSpec == nil {
 		if hadLinuxBuilds {
 			return BuildExecutionSpec{skippedLinux: true}, nil
+		}
+		script, err := resolveNestedProjectBuildScript(findProjectRoot, target)
+		if err != nil {
+			return BuildExecutionSpec{}, err
+		}
+		if script != nil {
+			script.Env = buildScriptEnv(target.VersionOverride)
+			return BuildExecutionSpec{script: script}, nil
 		}
 		return BuildExecutionSpec{}, ErrDockerBuildContextNotFound
 	}
@@ -472,6 +480,14 @@ func ResolveDockerBuildForImageReference(store DockerStore, findProjectRoot Proj
 }
 
 func resolveProjectBuildScript(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (*scriptSpec, error) {
+	script, err := resolveProjectRootBuildScript(findProjectRoot, target)
+	if err != nil || script != nil {
+		return script, err
+	}
+	return resolveNestedProjectBuildScript(findProjectRoot, target)
+}
+
+func resolveProjectRootBuildScript(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (*scriptSpec, error) {
 	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
 	if err != nil {
 		return nil, err
@@ -493,6 +509,18 @@ func resolveProjectBuildScript(findProjectRoot ProjectFinderFunc, target DockerC
 		return nil, err
 	}
 
+	return nil, nil
+}
+
+func resolveNestedProjectBuildScript(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (*scriptSpec, error) {
+	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(projectRoot) == "" {
+		return nil, nil
+	}
+
 	var script *scriptSpec
 	err = filepath.WalkDir(projectRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -505,6 +533,9 @@ func resolveProjectBuildScript(findProjectRoot ProjectFinderFunc, target DockerC
 			return nil
 		}
 		if d.Name() != "build.sh" {
+			return nil
+		}
+		if filepath.Dir(path) == projectRoot {
 			return nil
 		}
 
