@@ -21,11 +21,19 @@
       "Push-Location \"$dir\\erun-mcp\"",
       "go build -trimpath -ldflags $mcpLdflags -o \"$dir\\emcp.exe\" ./cmd/emcp",
       "if ($LASTEXITCODE -ne 0) { throw 'failed to build emcp.exe' }",
+      "Pop-Location",
+      "Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue",
+      "if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) { throw 'building erun-app.exe requires a C compiler such as MinGW (see Fyne desktop prerequisites)' }",
+      "$appLdflags = \"-s -w -H windowsgui -X github.com/sophium/erun/erun-ui.buildVersion=$version\"",
+      "Push-Location \"$dir\\erun-ui\"",
+      "go build -trimpath -tags desktop,production -ldflags $appLdflags -o \"$dir\\erun-app.exe\" .",
+      "if ($LASTEXITCODE -ne 0) { throw 'failed to build erun-app.exe' }",
       "Pop-Location"
     ]
   },
   "bin": [
     "erun.exe",
-    "emcp.exe"
+    "emcp.exe",
+    "erun-app.exe"
   ]
 }
