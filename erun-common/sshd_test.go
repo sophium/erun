@@ -54,6 +54,26 @@ func TestRuntimeDockerfileUsesDesktopGoVersion(t *testing.T) {
 	}
 }
 
+func TestRuntimeDockerfileInstallsAptPackagesBeforeBuilderArtifacts(t *testing.T) {
+	dockerfileData, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "Dockerfile"))
+	if err != nil {
+		t.Fatalf("read runtime Dockerfile: %v", err)
+	}
+	content := string(dockerfileData)
+
+	aptIndex := strings.Index(content, "RUN apt-get update &&")
+	if aptIndex < 0 {
+		t.Fatalf("expected runtime Dockerfile apt-get layer, got:\n%s", content)
+	}
+	goCopyIndex := strings.Index(content, "COPY --from=builder /usr/local/go /usr/local/go")
+	if goCopyIndex < 0 {
+		t.Fatalf("expected runtime Dockerfile to copy Go toolchain from builder, got:\n%s", content)
+	}
+	if aptIndex > goCopyIndex {
+		t.Fatalf("expected runtime Dockerfile to install apt packages before copying builder artifacts so cache survives source rebuilds, got:\n%s", content)
+	}
+}
+
 func TestRuntimeEntrypointDisablesStrictModesForPVCBackedHome(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
 	if err != nil {

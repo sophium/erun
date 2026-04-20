@@ -47,8 +47,6 @@ ARG GOLANGCI_LINT_VERSION=v2.2.2
 
 USER root
 
-COPY --from=builder /usr/local/go /usr/local/go
-
 # Keep external tooling installs pinned and centralized in one layer for traceability.
 RUN apt-get update && \
     apt-get install -y git bash-completion dpkg-dev && \
@@ -92,6 +90,7 @@ RUN apt-get update && \
     chown -R erun:erun /home/erun && \
     chmod 0755 /usr/local/bin/kubectl /usr/local/bin/helm /usr/local/bin/terraform /usr/local/bin/k9s /usr/local/bin/difft /usr/local/bin/docker /usr/local/lib/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
 
+COPY --from=builder /usr/local/go /usr/local/go
 COPY --from=builder --chmod=0755 /out/erun /usr/local/bin/erun
 COPY --from=builder --chmod=0755 /out/emcp /usr/local/bin/emcp
 COPY --chmod=0755 erun-devops/docker/erun-devops/entrypoint.sh /usr/local/bin/erun-devops-entrypoint
