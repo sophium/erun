@@ -76,9 +76,12 @@ func TestPackageManagerDefinitionsTrackLatestStableTag(t *testing.T) {
 	if manifest.ExtractDir != "erun-"+latestVersion {
 		t.Fatalf("scoop extract_dir = %q, want %q", manifest.ExtractDir, "erun-"+latestVersion)
 	}
-	if !containsString(manifest.Depends, "go") {
-		t.Fatalf("scoop manifest missing go dependency: %+v", manifest.Depends)
-	}
+		if !containsString(manifest.Depends, "go") {
+			t.Fatalf("scoop manifest missing go dependency: %+v", manifest.Depends)
+		}
+		if !containsString(manifest.Depends, "mingw") {
+			t.Fatalf("scoop manifest missing mingw dependency for erun-app.exe: %+v", manifest.Depends)
+		}
 	if !containsString(manifest.Bin, "erun.exe") || !containsString(manifest.Bin, "emcp.exe") {
 		t.Fatalf("scoop manifest does not shim both executables: %+v", manifest.Bin)
 	}
@@ -86,10 +89,13 @@ func TestPackageManagerDefinitionsTrackLatestStableTag(t *testing.T) {
 	if !strings.Contains(script, `go build -trimpath -ldflags $cliLdflags -o "$dir\erun.exe" .`) {
 		t.Fatalf("scoop installer does not build erun.exe:\n%s", script)
 	}
-	if !strings.Contains(script, `go build -trimpath -ldflags $mcpLdflags -o "$dir\emcp.exe" ./cmd/emcp`) {
-		t.Fatalf("scoop installer does not build emcp.exe:\n%s", script)
+		if !strings.Contains(script, `go build -trimpath -ldflags $mcpLdflags -o "$dir\emcp.exe" ./cmd/emcp`) {
+			t.Fatalf("scoop installer does not build emcp.exe:\n%s", script)
+		}
+		if !strings.Contains(script, `building erun-app.exe requires a C compiler such as MinGW for the Wails CGO build`) {
+			t.Fatalf("scoop installer does not explain the Wails CGO compiler requirement:\n%s", script)
+		}
 	}
-}
 
 func TestAptBuildScriptBuildsDebianPackageForBothExecutables(t *testing.T) {
 	repoRoot := repoRootForPackagingTest(t)

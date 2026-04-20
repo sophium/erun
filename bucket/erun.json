@@ -1,14 +1,15 @@
 {
-  "version": "1.0.35",
+  "version": "1.0.36",
   "description": "Multi-tenant multi-environment deployment and management tool",
   "homepage": "https://github.com/sophium/erun",
   "license": "MIT",
   "depends": [
-    "go"
+    "go",
+    "mingw"
   ],
-  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.35.zip",
-  "hash": "7e4df0dce2c353dc75f06a74efd3033655e81d01a9097fd5b13673dd6df94e35",
-  "extract_dir": "erun-1.0.35",
+  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.36.zip",
+  "hash": "42ef708bf21035c11e2765598d403391e1741e5049da323bf95e2d0a91331c21",
+  "extract_dir": "erun-1.0.36",
   "installer": {
     "script": [
       "$env:CGO_ENABLED = '0'",
@@ -23,7 +24,7 @@
       "if ($LASTEXITCODE -ne 0) { throw 'failed to build emcp.exe' }",
       "Pop-Location",
       "Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue",
-      "if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) { throw 'building erun-app.exe requires a C compiler such as MinGW (see Fyne desktop prerequisites)' }",
+      "if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) { throw 'building erun-app.exe requires a C compiler such as MinGW for the Wails CGO build' }",
       "$appLdflags = \"-s -w -H windowsgui -X github.com/sophium/erun/erun-ui.buildVersion=$version\"",
       "Push-Location \"$dir\\erun-ui\"",
       "go build -trimpath -tags desktop,production -ldflags $appLdflags -o \"$dir\\erun-app.exe\" .",
