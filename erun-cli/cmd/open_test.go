@@ -801,15 +801,20 @@ func TestOpenCommandDryRunRedeploysWhenRuntimeHasLocalBuilds(t *testing.T) {
 
 	output := stderr.String()
 	for _, want := range []string{
-		"docker build -t erunpaas/tenant-a-devops:1.0.0",
+		"docker buildx build --builder erun-multiarch",
+		"--platform 'linux/amd64,linux/arm64'",
+		"--cache-from 'type=registry,ref=erunpaas/tenant-a-devops:buildcache'",
 		"--build-arg ERUN_VERSION=1.0.0",
-		"docker push erunpaas/tenant-a-devops:1.0.0",
+		"--push",
 		"helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace tenant-a-local --kube-context cluster-dev -f " + filepath.Join(chartPath, "values.local.yaml") + " --set-string tenant=tenant-a --set-string environment=local",
 		"kubectl --context cluster-dev --namespace tenant-a-local wait --for=condition=Available --timeout 2m0s deployment/tenant-a-devops",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected dry-run output to contain %q, got %q", want, output)
 		}
+	}
+	if strings.Contains(output, "docker push erunpaas/tenant-a-devops:1.0.0") {
+		t.Fatalf("did not expect separate docker push in dry-run output, got %q", output)
 	}
 }
 
@@ -854,6 +859,90 @@ func TestOpenCommandPersistsSnapshotPreferenceForLocalEnvironment(t *testing.T) 
 	}
 	if envConfig.Snapshot == nil || *envConfig.Snapshot {
 		t.Fatalf("expected snapshot preference to be saved as false, got %+v", envConfig)
+	}
+}
+
+func TestOpenCommandDryRunUsesConfiguredContextForLocalDeploy(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+	stubKubectlContexts(t, []string{"erun", "rancher-desktop"}, "rancher-desktop")
+
+	projectRoot := t.TempDir()
+	componentName := "erun-devops"
+	componentRoot := filepath.Join(projectRoot, componentName)
+	chartPath := filepath.Join(componentRoot, "k8s", componentName)
+	if err := os.MkdirAll(chartPath, 0o755); err != nil {
+		t.Fatalf("mkdir chart dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: "+componentName+"\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write Chart.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644); err != nil {
+		t.Fatalf("write values.local.yaml: %v", err)
+	}
+	workdir := filepath.Join(componentRoot, "docker", componentName)
+	if err := os.MkdirAll(workdir, 0o755); err != nil {
+		t.Fatalf("mkdir docker dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(componentRoot, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write module VERSION: %v", err)
+	}
+	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+	if err := common.SaveTenantConfig(common.TenantConfig{
+		Name:               "erun",
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: common.DefaultEnvironment,
+	}); err != nil {
+		t.Fatalf("save tenant config: %v", err)
+	}
+	if err := common.SaveEnvConfig("erun", common.EnvConfig{
+		Name:              common.DefaultEnvironment,
+		RepoPath:          projectRoot,
+		KubernetesContext: "erun",
+	}); err != nil {
+		t.Fatalf("save env config: %v", err)
+	}
+
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd := newTestRootCmd(testRootDeps{
+		Store: common.ConfigStore{},
+		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
+			t.Fatalf("did not expect deployment check when local runtime builds exist: %+v", req)
+			return true, nil
+		},
+		DeployHelmChart: func(req common.HelmDeployParams) error {
+			t.Fatalf("did not expect runtime deployment execution during dry-run: %+v", req)
+			return nil
+		},
+		LaunchShell: func(req common.ShellLaunchParams) error {
+			t.Fatalf("did not expect remote shell launch during dry-run: %+v", req)
+			return nil
+		},
+	})
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"-v", "open", "erun", common.DefaultEnvironment, "--dry-run"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	output := stderr.String()
+	for _, want := range []string{
+		"helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace erun-local --kube-context erun -f " + filepath.Join(chartPath, "values.local.yaml") + " --set-string tenant=erun --set-string environment=local",
+		"kubectl --context erun --namespace erun-local wait --for=condition=Available --timeout 2m0s deployment/erun-devops",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected dry-run output to contain %q, got %q", want, output)
+		}
+	}
+	if strings.Contains(output, "--context rancher-desktop") || strings.Contains(output, "--kube-context rancher-desktop") {
+		t.Fatalf("did not expect deploy trace to use current context, got %q", output)
 	}
 }
 

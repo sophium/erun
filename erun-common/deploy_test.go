@@ -1,10 +1,14 @@
 package eruncommon
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -520,6 +524,171 @@ func TestResolveDeploySpecForContextUsesSelectedKubernetesContextForLocalEnviron
 	}
 	if spec.Deploy.KubernetesContext != "cluster-selected" {
 		t.Fatalf("expected selected kubernetes context, got %+v", spec.Deploy)
+	}
+}
+
+func TestResolveDeployKubernetesContextKeepsConfiguredContextForLocalEnvironment(t *testing.T) {
+	called := false
+	got := resolveDeployKubernetesContext(DefaultEnvironment, "cluster-configured", func() (string, error) {
+		called = true
+		return "cluster-current", nil
+	})
+	if got != "cluster-configured" {
+		t.Fatalf("resolveDeployKubernetesContext returned %q, want %q", got, "cluster-configured")
+	}
+	if called {
+		t.Fatal("did not expect current-context lookup when deploy context is already configured")
+	}
+}
+
+func TestResolveDeployKubernetesContextFallsBackToCurrentContextWhenUnconfigured(t *testing.T) {
+	got := resolveDeployKubernetesContext(DefaultEnvironment, "", func() (string, error) {
+		return "cluster-current", nil
+	})
+	if got != "cluster-current" {
+		t.Fatalf("resolveDeployKubernetesContext returned %q, want %q", got, "cluster-current")
+	}
+}
+
+func TestResolveDeploySpecForContextPublishesLocalRuntimeBuildsAsMultiPlatform(t *testing.T) {
+	projectRoot := t.TempDir()
+	componentRoot := filepath.Join(projectRoot, "tenant-a-devops")
+	chartPath := createComponentHelmChartFixture(t, projectRoot, "tenant-a-devops")
+	templatesPath := filepath.Join(chartPath, "templates")
+	if err := os.MkdirAll(templatesPath, 0o755); err != nil {
+		t.Fatalf("mkdir templates dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(templatesPath, "deployment.yaml"), []byte("apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: tenant-a-devops\n          image: erunpaas/tenant-a-devops:{{ .Chart.AppVersion }}\n        - name: erun-dind\n          image: erunpaas/erun-dind:28.1.1\n"), 0o644); err != nil {
+		t.Fatalf("write deployment template: %v", err)
+	}
+
+	runtimeWorkdir := filepath.Join(componentRoot, "docker", "tenant-a-devops")
+	if err := os.MkdirAll(runtimeWorkdir, 0o755); err != nil {
+		t.Fatalf("mkdir runtime docker dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(runtimeWorkdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write runtime Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(componentRoot, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write runtime VERSION: %v", err)
+	}
+
+	dindWorkdir := filepath.Join(componentRoot, "docker", "erun-dind")
+	if err := os.MkdirAll(dindWorkdir, 0o755); err != nil {
+		t.Fatalf("mkdir dind docker dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dindWorkdir, "Dockerfile"), []byte("FROM docker:28.1.1-dind\n"), 0o644); err != nil {
+		t.Fatalf("write dind Dockerfile: %v", err)
+	}
+	projectConfig := ProjectConfig{}
+	projectConfig.SetContainerRegistryForEnvironment(DefaultEnvironment, "erunpaas")
+	if err := SaveProjectConfig(projectRoot, projectConfig); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	spec, err := resolveDeploySpecForContext(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{
+				Dir:            runtimeWorkdir,
+				DockerfilePath: filepath.Join(runtimeWorkdir, "Dockerfile"),
+			}, nil
+		},
+		nil,
+		func() time.Time {
+			return time.Date(2026, time.April, 21, 18, 24, 44, 0, time.UTC)
+		},
+		OpenResult{
+			Tenant:      "tenant-a",
+			Environment: DefaultEnvironment,
+			RepoPath:    projectRoot,
+			TenantConfig: TenantConfig{
+				Name:        "tenant-a",
+				ProjectRoot: projectRoot,
+			},
+			EnvConfig: EnvConfig{
+				Name:              DefaultEnvironment,
+				RepoPath:          projectRoot,
+				KubernetesContext: "erun",
+			},
+		},
+		KubernetesDeployContext{
+			Dir:           runtimeWorkdir,
+			ComponentName: "tenant-a-devops",
+			ChartPath:     chartPath,
+		},
+		"",
+		true,
+	)
+	if err != nil {
+		t.Fatalf("resolveDeploySpecForContext failed: %v", err)
+	}
+
+	if len(spec.Builds) != 2 {
+		t.Fatalf("unexpected builds: %+v", spec.Builds)
+	}
+	for _, build := range spec.Builds {
+		if !build.Push {
+			t.Fatalf("expected deploy build to push via buildx, got %+v", build)
+		}
+		if !reflect.DeepEqual(build.Platforms, []string{"linux/amd64", "linux/arm64"}) {
+			t.Fatalf("expected deploy build to target both platforms, got %+v", build)
+		}
+	}
+}
+
+func TestRunDeploySpecSkipsSeparatePushWhenBuildAlreadyPushes(t *testing.T) {
+	buildCalls := 0
+	pushCalls := 0
+	ctx := Context{
+		Logger: NewLoggerWithWriters(2, io.Discard, io.Discard),
+		Stdout: new(bytes.Buffer),
+		Stderr: new(bytes.Buffer),
+	}
+	err := RunDeploySpec(
+		ctx,
+		DeploySpec{
+			Builds: []DockerBuildSpec{{
+				ContextDir:     "/tmp/runtime",
+				DockerfilePath: "/tmp/runtime/Dockerfile",
+				Image: DockerImageReference{
+					Tag: "erunpaas/tenant-a-devops:1.0.0",
+				},
+				Platforms: []string{"linux/amd64", "linux/arm64"},
+				Push:      true,
+			}},
+			Deploy: HelmDeploySpec{
+				ReleaseName:       "tenant-a-devops",
+				ChartPath:         "/tmp/chart",
+				ValuesFilePath:    "/tmp/chart/values.local.yaml",
+				Namespace:         "tenant-a-local",
+				KubernetesContext: "erun",
+				Timeout:           DefaultHelmDeploymentTimeout,
+			},
+		},
+		func(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
+			buildCalls++
+			return nil
+		},
+		func(ctx Context, pushInput DockerPushSpec) error {
+			pushCalls++
+			return nil
+		},
+		func(params HelmDeployParams) error {
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("RunDeploySpec failed: %v", err)
+	}
+	if buildCalls != 1 {
+		t.Fatalf("expected one build call, got %d", buildCalls)
+	}
+	if pushCalls != 0 {
+		t.Fatalf("expected no separate push call, got %d", pushCalls)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -263,8 +264,11 @@ func TestDevopsK8sDeployBuildsAndDeploysSameExactVersionFromCurrentBuildDirector
 	if built.Tag != "erunpaas/erun-devops:1.1.0" {
 		t.Fatalf("unexpected build request: %+v", built)
 	}
-	if pushed.Tag != built.Tag {
-		t.Fatalf("expected push to use built tag, got build=%+v push=%+v", built, pushed)
+	if !built.Push || !reflect.DeepEqual(built.Platforms, []string{"linux/amd64", "linux/arm64"}) {
+		t.Fatalf("expected multi-platform buildx push request, got %+v", built)
+	}
+	if pushed.Tag != "" {
+		t.Fatalf("did not expect separate push for buildx deploy, got build=%+v push=%+v", built, pushed)
 	}
 	if received.Version != "1.1.0" {
 		t.Fatalf("unexpected chart version override: %+v", received)
@@ -341,8 +345,8 @@ func TestRootDeployShorthandUsesCurrentComponentContext(t *testing.T) {
 			return nil
 		}),
 		DeployHelmChart: func(req common.HelmDeployParams) error {
-			if built.Tag == "" || pushed.Tag == "" {
-				t.Fatal("expected build and push to run before deploy")
+			if built.Tag == "" {
+				t.Fatal("expected build to run before deploy")
 			}
 			received = req
 			return nil
@@ -360,8 +364,11 @@ func TestRootDeployShorthandUsesCurrentComponentContext(t *testing.T) {
 	if built.Tag != "erunpaas/erun-devops:1.1.0" {
 		t.Fatalf("unexpected build request: %+v", built)
 	}
-	if pushed.Tag != built.Tag {
-		t.Fatalf("expected push to use built tag, got build=%+v push=%+v", built, pushed)
+	if !built.Push || !reflect.DeepEqual(built.Platforms, []string{"linux/amd64", "linux/arm64"}) {
+		t.Fatalf("expected multi-platform buildx push request, got %+v", built)
+	}
+	if pushed.Tag != "" {
+		t.Fatalf("did not expect separate push for buildx deploy, got build=%+v push=%+v", built, pushed)
 	}
 	if received.ReleaseName != "erun-devops" || received.ChartPath != chartPath {
 		t.Fatalf("unexpected deploy request: %+v", received)
@@ -464,11 +471,16 @@ func TestRootDeployShorthandAtProjectRootDeploysAllComponents(t *testing.T) {
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	if len(builds) != 2 || len(pushes) != 2 || len(deploys) != 2 {
+	if len(builds) != 2 || len(pushes) != 0 || len(deploys) != 2 {
 		t.Fatalf("unexpected execution counts: builds=%+v pushes=%+v deploys=%+v", builds, pushes, deploys)
 	}
 	if builds[0].Tag != "erunpaas/erun-dind:28.1.1" || builds[1].Tag != "erunpaas/tenant-a-devops:1.1.0" {
 		t.Fatalf("unexpected builds: %+v", builds)
+	}
+	for _, build := range builds {
+		if !build.Push || !reflect.DeepEqual(build.Platforms, []string{"linux/amd64", "linux/arm64"}) {
+			t.Fatalf("expected multi-platform buildx push request, got %+v", build)
+		}
 	}
 	if deploys[0].ReleaseName != "erun-dind" || deploys[0].ChartPath != chartB {
 		t.Fatalf("unexpected first deploy: %+v", deploys[0])
@@ -642,7 +654,7 @@ func TestDeployCommandVersionOverrideUsesProvidedVersion(t *testing.T) {
 	}
 }
 
-func TestDeployCommandUsesCurrentKubernetesContextForLocalEnvironment(t *testing.T) {
+func TestDeployCommandUsesConfiguredKubernetesContextForLocalEnvironment(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 	stubKubectlContexts(t, []string{"cluster-local", "cluster-selected"}, "cluster-selected")
 
@@ -716,8 +728,8 @@ func TestDeployCommandUsesCurrentKubernetesContextForLocalEnvironment(t *testing
 		t.Fatalf("Execute failed: %v", err)
 	}
 
-	if deployed.KubernetesContext != "cluster-selected" {
-		t.Fatalf("expected deploy to use current kubernetes context, got %+v", deployed)
+	if deployed.KubernetesContext != "cluster-local" {
+		t.Fatalf("expected deploy to keep configured kubernetes context, got %+v", deployed)
 	}
 }
 
@@ -893,11 +905,14 @@ func TestRootDeployShorthandDryRunPrintsBuildAndDeployCommandsWithoutExecuting(t
 	}
 
 	output := stderr.String()
-	if !strings.Contains(output, "docker build -t erunpaas/erun-devops:1.1.0") {
+	if !strings.Contains(output, "docker buildx build --builder erun-multiarch") {
 		t.Fatalf("expected dry-run build trace, got %q", output)
 	}
-	if !strings.Contains(output, "docker push erunpaas/erun-devops:1.1.0") {
-		t.Fatalf("expected dry-run push trace, got %q", output)
+	if !strings.Contains(output, "--platform 'linux/amd64,linux/arm64'") || !strings.Contains(output, "--cache-from 'type=registry,ref=erunpaas/erun-devops:buildcache'") || !strings.Contains(output, "--push") {
+		t.Fatalf("expected multi-platform dry-run build trace, got %q", output)
+	}
+	if strings.Contains(output, "docker push erunpaas/erun-devops:1.1.0") {
+		t.Fatalf("did not expect separate dry-run push trace, got %q", output)
 	}
 	if !strings.Contains(output, "helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace tenant-a-local --kube-context cluster-local -f "+filepath.Join(chartPath, "values.local.yaml")+" --set-string tenant=tenant-a --set-string environment=local") {
 		t.Fatalf("expected dry-run deploy trace, got %q", output)
@@ -1099,8 +1114,8 @@ func TestRootDeployShorthandBuildsAndPushesLiteralChartImageDependencies(t *test
 	if len(builds) != 2 {
 		t.Fatalf("expected 2 builds, got %+v", builds)
 	}
-	if len(pushes) != 2 {
-		t.Fatalf("expected 2 pushes, got %+v", pushes)
+	if len(pushes) != 0 {
+		t.Fatalf("expected no separate pushes, got %+v", pushes)
 	}
 	if builds[0].Tag != "erunpaas/erun-devops:1.1.0" {
 		t.Fatalf("unexpected primary build: %+v", builds[0])
@@ -1108,8 +1123,10 @@ func TestRootDeployShorthandBuildsAndPushesLiteralChartImageDependencies(t *test
 	if builds[1].Tag != "erunpaas/erun-dind:28.1.1-dind" {
 		t.Fatalf("unexpected dependency build: %+v", builds[1])
 	}
-	if pushes[0].Tag != builds[0].Tag || pushes[1].Tag != builds[1].Tag {
-		t.Fatalf("expected pushes to match builds, got builds=%+v pushes=%+v", builds, pushes)
+	for _, build := range builds {
+		if !build.Push || !reflect.DeepEqual(build.Platforms, []string{"linux/amd64", "linux/arm64"}) {
+			t.Fatalf("expected multi-platform buildx push request, got %+v", build)
+		}
 	}
 }
 

@@ -408,7 +408,7 @@ func TestBuildToolPreviewReleaseIncludesReleaseAndBuildTrace(t *testing.T) {
 		if strings.Contains(trace, "docker buildx build --builder erun-multiarch --platform 'linux/amd64,linux/arm64'") &&
 			strings.Contains(trace, "-t erunpaas/api:1.4.2-rc.") &&
 			strings.Contains(trace, "--cache-from 'type=registry,ref=erunpaas/api:buildcache'") &&
-			strings.Contains(trace, "--cache-to 'type=registry,ref=erunpaas/api:buildcache,mode=max'") &&
+			strings.Contains(trace, "--cache-to 'type=registry,ref=erunpaas/api:buildcache,mode=max,ignore-error=true'") &&
 			strings.Contains(trace, "--push") {
 			foundBuildTrace = true
 		}
