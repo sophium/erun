@@ -203,6 +203,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	mcpCmd := newMCPCmd(resolveOpen, runInitForArgs, launchMCP)
 	appCmd := newAppCmd(launchApp)
 	listCmd := newListCmd(listDataStore, findProjectRoot)
+	doctorCmd := newDoctorCmd(resolveOpen, promptRunner)
 	releaseCmd := newReleaseCmd(findProjectRoot, runGit)
 	versionCmd := newVersionCmd(func() (common.BuildInfo, string, error) {
 		return resolveVersionCommandBuildInfo(findProjectRoot)
@@ -221,7 +222,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	}
 
 	cmd := newRootCommand(runRoot)
-	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, listCmd, releaseCmd, versionCmd)
+	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, listCmd, doctorCmd, releaseCmd, versionCmd)
 	return cmd
 }
 

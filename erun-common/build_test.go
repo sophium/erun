@@ -93,6 +93,22 @@ func TestDockerBuildArgsIncludeImageVersionAsBuildArg(t *testing.T) {
 	}
 }
 
+func TestDockerBuildCacheRefUsesStableTagWithinImageRepository(t *testing.T) {
+	tests := map[string]string{
+		"erunpaas/erun-devops:1.0.0":             "erunpaas/erun-devops:buildcache",
+		"ghcr.io/acme/erun-devops:1.0.0":         "ghcr.io/acme/erun-devops:buildcache",
+		"localhost:5000/erun-devops:1.0.0":       "localhost:5000/erun-devops:buildcache",
+		"registry.example.com/team/image:latest": "registry.example.com/team/image:buildcache",
+		"registry.example.com/team/image":        "registry.example.com/team/image:buildcache",
+	}
+
+	for tag, want := range tests {
+		if got := dockerBuildCacheRef(tag); got != want {
+			t.Fatalf("dockerBuildCacheRef(%q) = %q, want %q", tag, got, want)
+		}
+	}
+}
+
 func TestDockerBuildArgsUseBuildxForMultiPlatformPush(t *testing.T) {
 	args := dockerBuildArgs(DockerBuildSpec{
 		DockerfilePath: "/tmp/Dockerfile",
@@ -107,6 +123,8 @@ func TestDockerBuildArgsUseBuildxForMultiPlatformPush(t *testing.T) {
 		"buildx build",
 		"--builder erun-multiarch",
 		"--platform linux/amd64,linux/arm64",
+		"--cache-from type=registry,ref=erunpaas/erun-devops:buildcache",
+		"--cache-to type=registry,ref=erunpaas/erun-devops:buildcache,mode=max",
 		"-t erunpaas/erun-devops:1.0.0",
 		"--build-arg ERUN_VERSION=1.0.0",
 		"--push",
@@ -142,7 +160,7 @@ func TestDockerBuildTraceCommandsIncludeBuildxBootstrapForMultiPlatformBuilds(t 
 	if got := strings.Join(commands[2].Args, " "); got != "buildx inspect --builder erun-multiarch --bootstrap" {
 		t.Fatalf("unexpected bootstrap command: %q", got)
 	}
-	if got := strings.Join(commands[3].Args, " "); !strings.Contains(got, "buildx build --builder erun-multiarch --platform linux/amd64,linux/arm64") {
+	if got := strings.Join(commands[3].Args, " "); !strings.Contains(got, "buildx build --builder erun-multiarch --platform linux/amd64,linux/arm64 --cache-from type=registry,ref=erunpaas/erun-devops:buildcache --cache-to type=registry,ref=erunpaas/erun-devops:buildcache,mode=max") {
 		t.Fatalf("unexpected build command: %q", got)
 	}
 }

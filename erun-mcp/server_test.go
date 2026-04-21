@@ -157,7 +157,7 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
 	}
-	if len(tools.Tools) != 7 {
+	if len(tools.Tools) != 8 {
 		t.Fatalf("unexpected tools: %+v", tools.Tools)
 	}
 
@@ -405,7 +405,11 @@ func TestBuildToolPreviewReleaseIncludesReleaseAndBuildTrace(t *testing.T) {
 	foundBuildTrace := false
 	foundVersionReport := false
 	for _, trace := range output.Trace {
-		if strings.Contains(trace, "docker buildx build --builder erun-multiarch --platform 'linux/amd64,linux/arm64' -t erunpaas/api:1.4.2-rc.") && strings.Contains(trace, "--push") {
+		if strings.Contains(trace, "docker buildx build --builder erun-multiarch --platform 'linux/amd64,linux/arm64'") &&
+			strings.Contains(trace, "-t erunpaas/api:1.4.2-rc.") &&
+			strings.Contains(trace, "--cache-from 'type=registry,ref=erunpaas/api:buildcache'") &&
+			strings.Contains(trace, "--cache-to 'type=registry,ref=erunpaas/api:buildcache,mode=max'") &&
+			strings.Contains(trace, "--push") {
 			foundBuildTrace = true
 		}
 		if strings.Contains(trace, "release version: 1.4.2-rc.") {
@@ -466,6 +470,68 @@ func TestBuildToolPreviewAtRepoRootIncludesBuildTrace(t *testing.T) {
 	}
 	if len(output.Trace) != 2 {
 		t.Fatalf("unexpected trace output: %+v", output.Trace)
+	}
+}
+
+func TestDoctorToolPreviewIncludesDindCleanupTrace(t *testing.T) {
+	projectRoot := filepath.Join(t.TempDir(), "project")
+	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+		t.Fatalf("mkdir project root: %v", err)
+	}
+	runtime := normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{
+			Tenant:      "tenant-a",
+			Environment: "local",
+			RepoPath:    projectRoot,
+		},
+		Store: listToolStore{
+			toolConfig: eruncommon.ERunConfig{DefaultTenant: "tenant-a"},
+			tenantConfigs: map[string]eruncommon.TenantConfig{
+				"tenant-a": {
+					Name:               "tenant-a",
+					ProjectRoot:        projectRoot,
+					DefaultEnvironment: "local",
+				},
+			},
+			envConfigs: map[string]eruncommon.EnvConfig{
+				"tenant-a/local": {
+					Name:              "local",
+					RepoPath:          projectRoot,
+					KubernetesContext: "cluster-local",
+				},
+			},
+			envsByTenant: map[string][]eruncommon.EnvConfig{
+				"tenant-a": {{
+					Name:              "local",
+					RepoPath:          projectRoot,
+					KubernetesContext: "cluster-local",
+				}},
+			},
+		},
+	})
+
+	handler := doctorTool(runtime)
+	_, output, err := handler(context.Background(), nil, DoctorInput{
+		Preview:     true,
+		Verbosity:   1,
+		PruneImages: true,
+	})
+	if err != nil {
+		t.Fatalf("doctorTool failed: %v", err)
+	}
+	if len(output.Trace) == 0 {
+		t.Fatalf("expected trace output, got %+v", output)
+	}
+	joined := strings.Join(output.Trace, "\n")
+	for _, want := range []string{
+		"kubectl --context cluster-local --namespace tenant-a-local wait --for=condition=Available --timeout 2m0s deployment/tenant-a-devops",
+		"kubectl --context cluster-local --namespace tenant-a-local exec -c erun-dind deployment/tenant-a-devops -- /bin/sh -lc '<remote-script>'",
+		"docker system df",
+		"docker image prune -a -f",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected trace to contain %q, got %+v", want, output.Trace)
+		}
 	}
 }
 

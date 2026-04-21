@@ -105,6 +105,7 @@ func Execute() error {
 	mcpCmd := newMCPCmd(resolveOpen, runInitForArgs, launchMCPProcess)
 	appCmd := newAppCmd(launchAppProcess)
 	listCmd := newListCmd(configStore, common.FindProjectRoot)
+	doctorCmd := newDoctorCmd(resolveOpen, runPrompt)
 	releaseCmd := newReleaseCmd(common.FindProjectRoot, common.GitCommandRunner)
 	versionCmd := newVersionCmd(func() (common.BuildInfo, string, error) {
 		return resolveVersionCommandBuildInfo(common.FindProjectRoot)
@@ -123,6 +124,6 @@ func Execute() error {
 	}
 
 	cmd := newRootCommand(runRoot)
-	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, listCmd, releaseCmd, versionCmd)
+	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, listCmd, doctorCmd, releaseCmd, versionCmd)
 	return cmd.Execute()
 }
