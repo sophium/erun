@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -128,6 +129,9 @@ func RunDeploySpec(ctx Context, execution DeploySpec, build DockerImageBuilderFu
 		if err := RunDockerBuild(ctx, buildInput, build); err != nil {
 			return err
 		}
+		if buildInput.Push {
+			continue
+		}
 		pushInput := NewDockerPushSpec(buildInput.ContextDir, buildInput.Image)
 		if push != nil {
 			if err := push(ctx, pushInput); err != nil {
@@ -220,6 +224,7 @@ func resolveDeploySpecForContext(store DeployStore, findProjectRoot ProjectFinde
 		return DeploySpec{}, err
 	}
 	builds = append(builds, dependencyBuilds...)
+	builds = configureDockerBuildsForDeploy(builds)
 
 	return DeploySpec{
 		Target:        target,
@@ -470,6 +475,14 @@ func resolveAdditionalDockerBuildsForDeploy(store DeployStore, findProjectRoot P
 	return builds, nil
 }
 
+func configureDockerBuildsForDeploy(builds []DockerBuildSpec) []DockerBuildSpec {
+	for i := range builds {
+		builds[i].Platforms = slices.Clone(multiPlatformDockerBuilds)
+		builds[i].Push = true
+	}
+	return builds
+}
+
 func resolveProjectTenantForRoot(store DeployStore, projectRoot string) (string, error) {
 	tenants, err := store.ListTenantConfigs()
 	if err != nil {
@@ -641,7 +654,7 @@ func formatHelmBool(value bool) string {
 func resolveDeployKubernetesContext(environment, configured string, currentContext func() (string, error)) string {
 	environment = strings.TrimSpace(environment)
 	configured = strings.TrimSpace(configured)
-	if environment != DefaultEnvironment || currentContext == nil {
+	if environment != DefaultEnvironment || configured != "" || currentContext == nil {
 		return configured
 	}
 

@@ -124,7 +124,7 @@ func TestDockerBuildArgsUseBuildxForMultiPlatformPush(t *testing.T) {
 		"--builder erun-multiarch",
 		"--platform linux/amd64,linux/arm64",
 		"--cache-from type=registry,ref=erunpaas/erun-devops:buildcache",
-		"--cache-to type=registry,ref=erunpaas/erun-devops:buildcache,mode=max",
+		"--cache-to type=registry,ref=erunpaas/erun-devops:buildcache,mode=max,ignore-error=true",
 		"-t erunpaas/erun-devops:1.0.0",
 		"--build-arg ERUN_VERSION=1.0.0",
 		"--push",
@@ -160,7 +160,7 @@ func TestDockerBuildTraceCommandsIncludeBuildxBootstrapForMultiPlatformBuilds(t 
 	if got := strings.Join(commands[2].Args, " "); got != "buildx inspect --builder erun-multiarch --bootstrap" {
 		t.Fatalf("unexpected bootstrap command: %q", got)
 	}
-	if got := strings.Join(commands[3].Args, " "); !strings.Contains(got, "buildx build --builder erun-multiarch --platform linux/amd64,linux/arm64 --cache-from type=registry,ref=erunpaas/erun-devops:buildcache --cache-to type=registry,ref=erunpaas/erun-devops:buildcache,mode=max") {
+	if got := strings.Join(commands[3].Args, " "); !strings.Contains(got, "buildx build --builder erun-multiarch --platform linux/amd64,linux/arm64 --cache-from type=registry,ref=erunpaas/erun-devops:buildcache --cache-to type=registry,ref=erunpaas/erun-devops:buildcache,mode=max,ignore-error=true") {
 		t.Fatalf("unexpected build command: %q", got)
 	}
 }

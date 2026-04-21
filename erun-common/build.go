@@ -23,6 +23,7 @@ var (
 	ErrVersionFileNotFound        = errors.New("version file not found for current module")
 	ErrDockerBuildContextNotFound = errors.New("dockerfile not found in current directory")
 	ErrLinuxPackageBuildNotFound  = errors.New("linux package build script not found in current directory")
+	multiPlatformDockerBuilds     = []string{"linux/amd64", "linux/arm64"}
 )
 
 type commandSpec struct {
@@ -213,7 +214,7 @@ func BuildExecutionSpecWithRelease(execution BuildExecutionSpec, release Release
 			if _, ok := releaseTags[strings.TrimSpace(execution.dockerBuilds[i].Image.Tag)]; !ok {
 				continue
 			}
-			execution.dockerBuilds[i].Platforms = []string{"linux/amd64", "linux/arm64"}
+			execution.dockerBuilds[i].Platforms = slices.Clone(multiPlatformDockerBuilds)
 			execution.dockerBuilds[i].Push = true
 		}
 	}
@@ -1323,7 +1324,7 @@ func dockerBuildArgs(buildInput DockerBuildSpec) []string {
 			cacheRef := dockerBuildCacheRef(tag)
 			args = append(args,
 				"--cache-from", "type=registry,ref="+cacheRef,
-				"--cache-to", "type=registry,ref="+cacheRef+",mode=max",
+				"--cache-to", "type=registry,ref="+cacheRef+",mode=max,ignore-error=true",
 			)
 		}
 	}
