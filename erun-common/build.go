@@ -1319,6 +1319,13 @@ func dockerBuildArgs(buildInput DockerBuildSpec) []string {
 	args := []string{"build"}
 	if len(buildInput.Platforms) > 0 {
 		args = []string{"buildx", "build", "--builder", multiPlatformBuildxBuilderName, "--platform", strings.Join(buildInput.Platforms, ",")}
+		if buildInput.Push {
+			cacheRef := dockerBuildCacheRef(tag)
+			args = append(args,
+				"--cache-from", "type=registry,ref="+cacheRef,
+				"--cache-to", "type=registry,ref="+cacheRef+",mode=max",
+			)
+		}
 	}
 	args = append(args, "-t", tag)
 	if version := dockerImageTagVersion(tag); version != "" {
@@ -1329,6 +1336,20 @@ func dockerBuildArgs(buildInput DockerBuildSpec) []string {
 	}
 	args = append(args, "-f", buildInput.DockerfilePath, ".")
 	return args
+}
+
+func dockerBuildCacheRef(tag string) string {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return ""
+	}
+
+	lastSlash := strings.LastIndex(tag, "/")
+	lastColon := strings.LastIndex(tag, ":")
+	if lastColon > lastSlash {
+		return tag[:lastColon] + ":buildcache"
+	}
+	return tag + ":buildcache"
 }
 
 func dockerBuildxSetupCommands(dir string) []commandSpec {

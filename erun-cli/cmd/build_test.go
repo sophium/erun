@@ -2398,8 +2398,14 @@ func TestBuildCommandDryRunReleaseShowsPushCommandsForReleaseTaggedDockerBuilds(
 	if !strings.Contains(output, "docker buildx inspect --builder erun-multiarch --bootstrap") {
 		t.Fatalf("expected buildx bootstrap trace, got:\n%s", output)
 	}
-	if !strings.Contains(output, "docker buildx build --builder erun-multiarch --platform 'linux/amd64,linux/arm64' -t erunpaas/api:1.4.2") {
+	if !strings.Contains(output, "docker buildx build --builder erun-multiarch --platform 'linux/amd64,linux/arm64'") || !strings.Contains(output, "-t erunpaas/api:1.4.2") {
 		t.Fatalf("expected release build trace, got:\n%s", output)
+	}
+	if !strings.Contains(output, "--cache-from 'type=registry,ref=erunpaas/api:buildcache'") {
+		t.Fatalf("expected release cache import trace, got:\n%s", output)
+	}
+	if !strings.Contains(output, "--cache-to 'type=registry,ref=erunpaas/api:buildcache,mode=max'") {
+		t.Fatalf("expected release cache export trace, got:\n%s", output)
 	}
 	if !strings.Contains(output, "docker build -t erunpaas/base:9.9.9") {
 		t.Fatalf("expected component-local build trace, got:\n%s", output)
@@ -2452,7 +2458,10 @@ func TestBuildCommandDryRunReleaseForceIncludesTagDeletionForStaleReleaseTag(t *
 	for _, want := range []string{
 		"git tag -d v1.4.2",
 		"git push --delete origin v1.4.2",
-		"docker buildx build --builder erun-multiarch --platform 'linux/amd64,linux/arm64' -t erunpaas/api:1.4.2",
+		"docker buildx build --builder erun-multiarch --platform 'linux/amd64,linux/arm64'",
+		"-t erunpaas/api:1.4.2",
+		"--cache-from 'type=registry,ref=erunpaas/api:buildcache'",
+		"--cache-to 'type=registry,ref=erunpaas/api:buildcache,mode=max'",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, output)

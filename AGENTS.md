@@ -5,6 +5,7 @@ Repository guidance for humans and coding agents working in this repo.
 - Follow this file for the whole repository.
 - When working inside a subdirectory that has its own `AGENTS.md`, follow the child file as additional, more specific guidance for that subtree.
 - Submodules may define their own `AGENTS.md` files with more specific guidance. See `erun-ui/AGENTS.md` for desktop-module guidance.
+- See `erun-devops/AGENTS.md` for runtime-image, chart, build-cache, and release-workflow guidance in the DevOps module.
 
 ## Contributing
 
@@ -26,6 +27,7 @@ Repository guidance for humans and coding agents working in this repo.
 - `erun-cli` - CLI utility
 - `erun-common` - shared common module
 - `erun-mcp` - MCP server module
+- `erun-devops` - runtime Docker images, Linux packaging, and Kubernetes chart assets used by build, open, deploy, and release flows
 - `erun-ui` - desktop app module built with Wails, using a Go backend and a TypeScript/Yarn frontend
 
 ## Module Boundaries
