@@ -556,8 +556,10 @@ func TestRootCommandHelpFlagPrintsHelp(t *testing.T) {
 	for _, want := range []string{
 		"-v",
 		"--dry-run",
+		"--time",
 		"print trace logs for command flow and side effects",
 		"runs the same resolution flow but skips mutating operations",
+		"prints the elapsed runtime after the command finishes",
 	} {
 		if !bytes.Contains([]byte(output), []byte(want)) {
 			t.Fatalf("expected help output to mention %q, got %q", want, output)

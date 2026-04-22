@@ -126,3 +126,41 @@ func TestVersionCommandDryRunPrintsTraceWithoutOutput(t *testing.T) {
 		t.Fatalf("expected dry-run trace, got %q", got)
 	}
 }
+
+func TestVersionCommandTimeFlagPrintsElapsedTimeToStderr(t *testing.T) {
+	prevV, prevC, prevD := buildInfo()
+	t.Cleanup(func() {
+		setBuildInfo(prevV, prevC, prevD)
+	})
+
+	workdir := t.TempDir()
+	prevWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(workdir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(prevWD)
+	})
+
+	cmd := newTestRootCmd(testRootDeps{})
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"version", "--time"})
+
+	setBuildInfo("1.2.3", "", "")
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if got := stdout.String(); got != "erun 1.2.3\n" {
+		t.Fatalf("unexpected stdout: %q", got)
+	}
+	if got := stderr.String(); got == "" || !bytes.Contains([]byte(got), []byte("elapsed:")) {
+		t.Fatalf("expected elapsed time on stderr, got %q", got)
+	}
+}
