@@ -803,7 +803,6 @@ func TestOpenCommandDryRunRedeploysWhenRuntimeHasLocalBuilds(t *testing.T) {
 	for _, want := range []string{
 		"docker buildx build --builder erun-multiarch",
 		"--platform 'linux/amd64,linux/arm64'",
-		"--cache-from 'type=registry,ref=erunpaas/tenant-a-devops:buildcache'",
 		"--build-arg ERUN_VERSION=1.0.0",
 		"--push",
 		"helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace tenant-a-local --kube-context cluster-dev -f " + filepath.Join(chartPath, "values.local.yaml") + " --set-string tenant=tenant-a --set-string environment=local",

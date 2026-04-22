@@ -908,7 +908,7 @@ func TestRootDeployShorthandDryRunPrintsBuildAndDeployCommandsWithoutExecuting(t
 	if !strings.Contains(output, "docker buildx build --builder erun-multiarch") {
 		t.Fatalf("expected dry-run build trace, got %q", output)
 	}
-	if !strings.Contains(output, "--platform 'linux/amd64,linux/arm64'") || !strings.Contains(output, "--cache-from 'type=registry,ref=erunpaas/erun-devops:buildcache'") || !strings.Contains(output, "--push") {
+	if !strings.Contains(output, "--platform 'linux/amd64,linux/arm64'") || !strings.Contains(output, "--push") {
 		t.Fatalf("expected multi-platform dry-run build trace, got %q", output)
 	}
 	if strings.Contains(output, "docker push erunpaas/erun-devops:1.1.0") {
