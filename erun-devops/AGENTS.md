@@ -37,8 +37,7 @@ Additional guidance for `erun-devops` and its subtree.
   - builder `erun-multiarch`
   - platforms `linux/amd64,linux/arm64`
   - `--push`
-  - registry-backed cache import/export
-- The registry-backed cache is part of the release contract. Keep `--cache-from` and `--cache-to` aligned with the image repository so the runtime pod can reuse expensive layers across pod restarts and builder recreation.
+- Keep the builder state on persistent local storage. The `docker-container` buildx builder should reuse the dind daemon state mounted from the runtime PVC so repeated builds in the same namespace can reuse cached layers without publishing cache artifacts to the registry.
 - Dry-run output for build and release should show the real buildx commands, not just a summary.
 
 ## Release Workflow
