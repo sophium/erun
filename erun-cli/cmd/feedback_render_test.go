@@ -36,3 +36,20 @@ func TestCommandContextEnablesTraceDuringDryRunWithoutVerboseFlag(t *testing.T) 
 		t.Fatal("expected dry-run trace output without verbose flag")
 	}
 }
+
+func TestRootCommandPrintsElapsedTimeOnError(t *testing.T) {
+	cmd := newRootCommand(func(_ *cobra.Command, _ []string) error {
+		return bytes.ErrTooLarge
+	})
+	stderr := new(bytes.Buffer)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"--time"})
+
+	err := cmd.Execute()
+	if err == nil {
+		t.Fatal("expected command error")
+	}
+	if got := stderr.String(); got == "" || !bytes.Contains([]byte(got), []byte("elapsed:")) {
+		t.Fatalf("expected elapsed time output on stderr, got %q", got)
+	}
+}
