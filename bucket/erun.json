@@ -8,7 +8,7 @@
     "mingw"
   ],
   "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.46.zip",
-  "hash": "ac8769fe9897bcb3f4e282f77e1f32235aaa24e64ae1e2f1ade84d70b11e1771",
+  "hash": "6ce1ca25c94be51a85e2b814d0065750fa9fa4fdd18439d473309c5f667b0b4a",
   "extract_dir": "erun-1.0.46",
   "installer": {
     "script": [
