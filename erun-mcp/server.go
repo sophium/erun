@@ -138,6 +138,10 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Description: "Return the current git diff from the runtime repo root as raw text plus structured file, hunk, line, and tree data",
 	}, diffTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "raw",
+		Description: "Run an arbitrary command from the runtime repo root and return captured stdout, stderr, and trace output",
+	}, rawTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "release",
 		Description: "Plan and execute a project release from the runtime repo root using .erun/config.yaml branch policy",
 	}, releaseTool(runtime))

@@ -37,6 +37,74 @@ func TestCommandContextEnablesTraceDuringDryRunWithoutVerboseFlag(t *testing.T) 
 	}
 }
 
+func TestRootCommandAuditsOnlyWhenTraceEnabled(t *testing.T) {
+	cmd := newRootCommand(func(_ *cobra.Command, _ []string) error {
+		return nil
+	})
+	stderr := new(bytes.Buffer)
+	cmd.SetErr(stderr)
+	cmd.SetArgs(nil)
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if got := stderr.String(); got != "" {
+		t.Fatalf("expected no audit without trace, got %q", got)
+	}
+
+	cmd = newRootCommand(func(_ *cobra.Command, _ []string) error {
+		return nil
+	})
+	stderr = new(bytes.Buffer)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"-v"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if got := stderr.String(); got != "audit: erun\n" {
+		t.Fatalf("unexpected audit output: %q", got)
+	}
+}
+
+func TestExecCommandEnablesTraceByDefault(t *testing.T) {
+	root := newRootCommand(func(_ *cobra.Command, _ []string) error {
+		return nil
+	})
+	execCmd := newCommandGroup("exec", "Repository execution utilities", &cobra.Command{
+		Use: "noop",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			commandContext(cmd).Trace("exec trace")
+			return nil
+		},
+	})
+	addCommands(root, execCmd)
+	stderr := new(bytes.Buffer)
+	root.SetErr(stderr)
+	root.SetArgs([]string{"exec", "noop"})
+
+	if err := root.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	got := stderr.String()
+	if !bytes.Contains([]byte(got), []byte("audit: erun exec noop")) || !bytes.Contains([]byte(got), []byte("exec trace")) {
+		t.Fatalf("expected exec trace by default, got %q", got)
+	}
+}
+
+func TestAuditCommandRedactsSensitiveArgs(t *testing.T) {
+	cmd := &cobra.Command{Use: "raw"}
+	parent := newCommandGroup("exec", "Repository execution utilities", cmd)
+	root := newRootCommand(func(_ *cobra.Command, _ []string) error { return nil })
+	addCommands(root, parent)
+
+	got := formatAuditCommand(cmd, []string{"deploy", "--token", "secret-value", "--password=hidden", "ok"})
+	want := "erun exec raw deploy --token <redacted> --password=<redacted> ok"
+	if got != want {
+		t.Fatalf("unexpected audit command: got %q want %q", got, want)
+	}
+}
+
 func TestRootCommandPrintsElapsedTimeOnError(t *testing.T) {
 	cmd := newRootCommand(func(_ *cobra.Command, _ []string) error {
 		return bytes.ErrTooLarge
