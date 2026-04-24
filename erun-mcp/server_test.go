@@ -157,7 +157,7 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
 	}
-	if len(tools.Tools) != 9 {
+	if len(tools.Tools) != 10 {
 		t.Fatalf("unexpected tools: %+v", tools.Tools)
 	}
 
@@ -168,6 +168,54 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	version := decodeStructuredVersion(t, result.StructuredContent)
 	if got := version["version"]; got != "1.2.3" {
 		t.Fatalf("unexpected structured content: %+v", version)
+	}
+}
+
+func TestRawToolRunsCommandFromRuntimeRepoRoot(t *testing.T) {
+	projectRoot := t.TempDir()
+	handler := rawTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{RepoPath: projectRoot},
+	}))
+
+	_, output, err := handler(context.Background(), nil, RawInput{
+		Command:   []string{"/bin/sh", "-c", "printf '%s:%s' \"$PWD\" \"$(cat)\""},
+		Stdin:     "input",
+		Verbosity: 1,
+	})
+	if err != nil {
+		t.Fatalf("rawTool failed: %v", err)
+	}
+	if !output.Executed || output.WorkingDirectory != projectRoot {
+		t.Fatalf("unexpected output metadata: %+v", output)
+	}
+	if output.Stdout != projectRoot+":input" {
+		t.Fatalf("unexpected stdout: %q", output.Stdout)
+	}
+	if len(output.Trace) != 1 || !strings.Contains(output.Trace[0], "cd "+projectRoot+" && /bin/sh -c") {
+		t.Fatalf("unexpected trace: %+v", output.Trace)
+	}
+}
+
+func TestRawToolPreviewRedactsTraceWithoutExecuting(t *testing.T) {
+	projectRoot := t.TempDir()
+	handler := rawTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{RepoPath: projectRoot},
+	}))
+
+	_, output, err := handler(context.Background(), nil, RawInput{
+		Command:   []string{"/bin/sh", "-c", "exit 1", "--token", "secret-value"},
+		Preview:   true,
+		Verbosity: 1,
+	})
+	if err != nil {
+		t.Fatalf("rawTool preview failed: %v", err)
+	}
+	if output.Executed {
+		t.Fatalf("expected preview output, got %+v", output)
+	}
+	joined := strings.Join(output.Trace, "\n")
+	if !strings.Contains(joined, "--token '<redacted>'") || strings.Contains(joined, "secret-value") {
+		t.Fatalf("unexpected trace: %+v", output.Trace)
 	}
 }
 

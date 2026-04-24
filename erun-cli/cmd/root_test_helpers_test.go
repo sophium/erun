@@ -23,6 +23,7 @@ type testRootDeps struct {
 	ResolveKubernetesDeployContext common.DeployContextResolverFunc
 	CheckKubernetesDeployment      common.KubernetesDeploymentCheckerFunc
 	RunGit                         common.GitCommandRunnerFunc
+	RunRawCommand                  common.RawCommandRunnerFunc
 	RunBuildScript                 common.BuildScriptRunnerFunc
 	BuildDockerImage               common.DockerImageBuilderFunc
 	PushDockerImage                common.DockerImagePusherFunc
@@ -207,7 +208,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 
 	mcpCmd := newMCPCmd(resolveOpen, runInitForArgs, launchMCP)
 	appCmd := newAppCmd(launchApp)
-	execCmd := newExecCmd(findProjectRoot, runGit)
+	execCmd := newExecCmd(findProjectRoot, runGit, deps.RunRawCommand)
 	listCmd := newListCmd(listDataStore, findProjectRoot)
 	doctorCmd := newDoctorCmd(resolveOpen, promptRunner)
 	releaseCmd := newReleaseCmd(findProjectRoot, runGit)

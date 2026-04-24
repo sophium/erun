@@ -51,6 +51,7 @@ func newRootCommand(runRoot func(*cobra.Command, []string) error) *cobra.Command
 		SilenceUsage:     true,
 		SilenceErrors:    true,
 		TraverseChildren: true,
+		PersistentPreRun: auditCommand,
 		RunE:             runRoot,
 	}
 	addDryRunFlag(cmd)

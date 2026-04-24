@@ -106,7 +106,7 @@ func Execute() error {
 
 	mcpCmd := newMCPCmd(resolveOpen, runInitForArgs, launchMCPProcess)
 	appCmd := newAppCmd(launchAppProcess)
-	execCmd := newExecCmd(common.FindProjectRoot, common.GitCommandRunner)
+	execCmd := newExecCmd(common.FindProjectRoot, common.GitCommandRunner, nil)
 	listCmd := newListCmd(configStore, common.FindProjectRoot)
 	doctorCmd := newDoctorCmd(resolveOpen, runPrompt)
 	releaseCmd := newReleaseCmd(common.FindProjectRoot, common.GitCommandRunner)
