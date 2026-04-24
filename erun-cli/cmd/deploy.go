@@ -10,19 +10,23 @@ func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinder
 	var snapshot bool
 	var noSnapshot bool
 	cmd := &cobra.Command{
-		Use:           "deploy",
+		Use:           "deploy [TENANT] [ENVIRONMENT]",
 		Short:         "Deploy the current Helm chart or all charts in the current devops k8s scope",
-		Args:          cobra.NoArgs,
+		Args:          cobra.MaximumNArgs(2),
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
+			deployTarget, err := resolveDeployTargetArgs(args, target)
+			if err != nil {
+				return err
+			}
 			snapshotOverride, err := resolveSnapshotFlagOverride(cmd, snapshot, noSnapshot)
 			if err != nil {
 				return err
 			}
-			target.Snapshot = snapshotOverride
-			deploySpecs, err := common.ResolveCurrentDeploySpecs(store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target)
+			deployTarget.Snapshot = snapshotOverride
+			deploySpecs, err := common.ResolveCurrentDeploySpecs(store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 			if err != nil {
 				return err
 			}
@@ -70,4 +74,17 @@ func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Deploy for a specific environment; requires --tenant")
 	cmd.Flags().StringVar(&target.RepoPath, "repo-path", "", "Repo path override for internal tooling")
 	_ = cmd.Flags().MarkHidden("repo-path")
+}
+
+func resolveDeployTargetArgs(args []string, target common.DeployTarget) (common.DeployTarget, error) {
+	params, err := resolveOpenParams(args, common.OpenParams{
+		Tenant:      target.Tenant,
+		Environment: target.Environment,
+	})
+	if err != nil {
+		return common.DeployTarget{}, err
+	}
+	target.Tenant = params.Tenant
+	target.Environment = params.Environment
+	return target, nil
 }
