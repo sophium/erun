@@ -123,3 +123,78 @@ func TestRunSSHDInitCommandPersistsConfigAndDeploysRuntime(t *testing.T) {
 		}
 	}
 }
+
+func TestRunSSHDInitCommandUsesResolvedEnvironmentLocalPortByDefault(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	publicKeyPath := filepath.Join(t.TempDir(), "id_ed25519.pub")
+	if err := os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644); err != nil {
+		t.Fatalf("write public key: %v", err)
+	}
+
+	var savedEnv common.EnvConfig
+	err := runSSHDInitCommand(
+		common.Context{
+			Logger: common.NewLoggerWithWriters(1, new(bytes.Buffer), new(bytes.Buffer)),
+			Stdout: new(bytes.Buffer),
+			Stderr: new(bytes.Buffer),
+		},
+		common.OpenResult{
+			Tenant:      "tenant-a",
+			Environment: "prod",
+			RepoPath:    "/home/erun/git/tenant-a",
+			TenantConfig: common.TenantConfig{
+				Name:   "tenant-a",
+				Remote: true,
+			},
+			EnvConfig: common.EnvConfig{
+				Name:              "prod",
+				RepoPath:          "/home/erun/git/tenant-a",
+				KubernetesContext: "cluster-prod",
+				Remote:            true,
+			},
+			LocalPorts: common.EnvironmentLocalPorts{
+				RangeStart: 17100,
+				RangeEnd:   17199,
+				MCP:        17100,
+				SSH:        17122,
+			},
+		},
+		publicKeyPath,
+		0,
+		func(_ string, config common.EnvConfig) error {
+			savedEnv = config
+			return nil
+		},
+		func(target common.OpenResult) (common.DeploySpec, error) {
+			return common.DeploySpec{
+				Target: target,
+				Deploy: common.HelmDeploySpec{
+					ReleaseName:       common.RuntimeReleaseName(target.Tenant),
+					ChartPath:         "/tmp/chart",
+					ValuesFilePath:    "/tmp/chart/values.prod.yaml",
+					Tenant:            target.Tenant,
+					Environment:       target.Environment,
+					Namespace:         common.KubernetesNamespaceName(target.Tenant, target.Environment),
+					KubernetesContext: target.EnvConfig.KubernetesContext,
+					SSHDEnabled:       target.EnvConfig.SSHD.Enabled,
+					Timeout:           common.DefaultHelmDeploymentTimeout,
+				},
+			}, nil
+		},
+		func(common.HelmDeployParams) error { return nil },
+		func(_ common.ShellLaunchParams, _ string) (common.RemoteCommandResult, error) {
+			return common.RemoteCommandResult{}, nil
+		},
+		func(common.OpenResult) (SSHDLocalConfigResult, error) {
+			return SSHDLocalConfigResult{}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("runSSHDInitCommand failed: %v", err)
+	}
+	if savedEnv.SSHD.LocalPort != 17122 {
+		t.Fatalf("expected resolved environment SSH port, got %+v", savedEnv.SSHD)
+	}
+}

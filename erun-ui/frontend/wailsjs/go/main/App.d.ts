@@ -6,6 +6,8 @@ export function LoadState():Promise<main.uiState>;
 
 export function ResizeSession(arg1:number,arg2:number):Promise<void>;
 
+export function SavePastedImage(arg1:main.pastedImagePayload):Promise<main.pastedImageResult>;
+
 export function SendSessionInput(arg1:string):Promise<void>;
 
 export function StartSession(arg1:main.uiSelection,arg2:number,arg3:number):Promise<main.startSessionResult>;

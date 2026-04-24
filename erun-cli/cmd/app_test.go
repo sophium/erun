@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"io"
+	"path/filepath"
 	"testing"
 )
 
@@ -55,6 +56,23 @@ func TestNewAppProcessCommandSetsDarwinProcessName(t *testing.T) {
 	}
 	if got, want := cmd.Args[0], "ERun"; got != want {
 		t.Fatalf("Args[0] = %q, want %q", got, want)
+	}
+}
+
+func TestNewAppProcessCommandOpensDarwinBundle(t *testing.T) {
+	cmd := newAppProcessCommand("darwin", "/tmp/ERun.app", []string{"--flag"})
+
+	if got, want := filepath.Base(cmd.Path), "open"; got != want {
+		t.Fatalf("Path = %q, want %q", got, want)
+	}
+	wantArgs := []string{"open", "-n", "/tmp/ERun.app", "--args", "--flag"}
+	if len(cmd.Args) != len(wantArgs) {
+		t.Fatalf("Args = %+v, want %+v", cmd.Args, wantArgs)
+	}
+	for index := range wantArgs {
+		if cmd.Args[index] != wantArgs[index] {
+			t.Fatalf("Args[%d] = %q, want %q", index, cmd.Args[index], wantArgs[index])
+		}
 	}
 }
 

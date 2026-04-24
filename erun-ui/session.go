@@ -31,14 +31,8 @@ func resolveCLIExecutable() string {
 
 	executable, err := os.Executable()
 	if err == nil {
-		sibling := filepath.Join(filepath.Dir(executable), executableName)
-		if info, statErr := os.Stat(sibling); statErr == nil && !info.IsDir() {
-			return sibling
-		}
-
-		devBinary := filepath.Clean(filepath.Join(filepath.Dir(executable), "..", "..", "erun-cli", "bin", executableName))
-		if info, statErr := os.Stat(devBinary); statErr == nil && !info.IsDir() {
-			return devBinary
+		if resolved := resolveCLIExecutableFromPath(runtime.GOOS, executable, executableName); resolved != "" {
+			return resolved
 		}
 	}
 
@@ -46,6 +40,26 @@ func resolveCLIExecutable() string {
 		return path
 	}
 	return executableName
+}
+
+func resolveCLIExecutableFromPath(goos, appExecutable, executableName string) string {
+	executableDir := filepath.Dir(appExecutable)
+	candidates := []string{
+		filepath.Join(executableDir, executableName),
+	}
+
+	if goos == "darwin" && filepath.Base(executableDir) == "MacOS" {
+		candidates = append(candidates, filepath.Clean(filepath.Join(executableDir, "..", "..", "..", executableName)))
+	}
+
+	candidates = append(candidates, filepath.Clean(filepath.Join(executableDir, "..", "..", "erun-cli", "bin", executableName)))
+
+	for _, candidate := range candidates {
+		if info, statErr := os.Stat(candidate); statErr == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func buildOpenCommand(cliPath, tenant, environment string) string {

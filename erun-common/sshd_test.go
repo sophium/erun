@@ -74,6 +74,30 @@ func TestRuntimeDockerfileInstallsAptPackagesBeforeBuilderArtifacts(t *testing.T
 	}
 }
 
+func TestRuntimeDockerfileInstallsPinnedCodexCLI(t *testing.T) {
+	dockerfileData, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "Dockerfile"))
+	if err != nil {
+		t.Fatalf("read runtime Dockerfile: %v", err)
+	}
+	content := string(dockerfileData)
+
+	if !strings.Contains(content, "ARG NODE_VERSION=24.14.0") {
+		t.Fatalf("expected runtime Dockerfile to pin the Node.js version for Codex CLI, got:\n%s", content)
+	}
+	if !strings.Contains(content, "ARG CODEX_VERSION=0.124.0") {
+		t.Fatalf("expected runtime Dockerfile to pin the Codex CLI version, got:\n%s", content)
+	}
+	if !strings.Contains(content, "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.gz") {
+		t.Fatalf("expected runtime Dockerfile to install Node.js from a pinned upstream tarball, got:\n%s", content)
+	}
+	if !strings.Contains(content, "npm install -g \"@openai/codex@${CODEX_VERSION}\"") {
+		t.Fatalf("expected runtime Dockerfile to install the pinned Codex CLI globally, got:\n%s", content)
+	}
+	if !strings.Contains(content, "bubblewrap") {
+		t.Fatalf("expected runtime Dockerfile to install bubblewrap for Codex CLI sandboxing, got:\n%s", content)
+	}
+}
+
 func TestRuntimeEntrypointDisablesStrictModesForPVCBackedHome(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
 	if err != nil {

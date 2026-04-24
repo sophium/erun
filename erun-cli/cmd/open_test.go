@@ -119,6 +119,7 @@ func TestRunResolvedOpenCommandActivatesSSHDWhenEnabled(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 		func(_ common.Context, result common.OpenResult) error {
 			activated = true
 			if !result.EnvConfig.SSHD.Enabled {
@@ -137,6 +138,120 @@ func TestRunResolvedOpenCommandActivatesSSHDWhenEnabled(t *testing.T) {
 	}
 	if !launched {
 		t.Fatal("expected shell launch after SSHD activation")
+	}
+}
+
+func TestRunResolvedOpenCommandForwardsMCPBeforeShell(t *testing.T) {
+	forwarded := false
+	launched := false
+	err := runResolvedOpenCommand(
+		common.Context{
+			Logger: common.NewLoggerWithWriters(0, new(bytes.Buffer), new(bytes.Buffer)),
+			Stdout: new(bytes.Buffer),
+			Stderr: new(bytes.Buffer),
+		},
+		common.OpenResult{
+			Tenant:      "tenant-a",
+			Environment: "dev",
+			RepoPath:    "/home/erun/git/tenant-a",
+			TenantConfig: common.TenantConfig{
+				Name:   "tenant-a",
+				Remote: true,
+			},
+			EnvConfig: common.EnvConfig{
+				Name:              "dev",
+				RepoPath:          "/home/erun/git/tenant-a",
+				KubernetesContext: "cluster-dev",
+				Remote:            true,
+			},
+			LocalPorts: common.EnvironmentLocalPorts{
+				RangeStart: 17100,
+				RangeEnd:   17199,
+				MCP:        17100,
+				SSH:        17122,
+			},
+		},
+		openOptions{},
+		nil,
+		func(_ common.Context, _ common.ShellLaunchParams) error {
+			if !forwarded {
+				t.Fatal("expected MCP forward before shell launch")
+			}
+			launched = true
+			return nil
+		},
+		nil,
+		nil,
+		nil,
+		nil,
+		func(_ common.Context, result common.OpenResult) error {
+			forwarded = true
+			if common.MCPPortForResult(result) != 17100 {
+				t.Fatalf("unexpected MCP port: %+v", result.LocalPorts)
+			}
+			return nil
+		},
+		nil,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("runResolvedOpenCommand failed: %v", err)
+	}
+	if !forwarded {
+		t.Fatal("expected MCP forwarder to run")
+	}
+	if !launched {
+		t.Fatal("expected shell launch")
+	}
+}
+
+func TestRunResolvedOpenCommandForwardsMCPWithNoShell(t *testing.T) {
+	forwarded := false
+	stdout := new(bytes.Buffer)
+	err := runResolvedOpenCommand(
+		common.Context{
+			Logger: common.NewLoggerWithWriters(0, new(bytes.Buffer), new(bytes.Buffer)),
+			Stdout: stdout,
+			Stderr: new(bytes.Buffer),
+		},
+		common.OpenResult{
+			Tenant:      "tenant-a",
+			Environment: "dev",
+			RepoPath:    "/home/erun/git/tenant-a",
+			EnvConfig: common.EnvConfig{
+				Name:              "dev",
+				RepoPath:          "/home/erun/git/tenant-a",
+				KubernetesContext: "cluster-dev",
+				Remote:            true,
+			},
+		},
+		openOptions{NoShell: true},
+		nil,
+		func(_ common.Context, _ common.ShellLaunchParams) error {
+			t.Fatal("did not expect shell launch")
+			return nil
+		},
+		nil,
+		nil,
+		nil,
+		nil,
+		func(common.Context, common.OpenResult) error {
+			forwarded = true
+			return nil
+		},
+		nil,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("runResolvedOpenCommand failed: %v", err)
+	}
+	if !forwarded {
+		t.Fatal("expected MCP forwarder to run")
+	}
+	if !strings.Contains(stdout.String(), "kubectl config use-context 'cluster-dev'") {
+		t.Fatalf("expected no-shell setup output, got:\n%s", stdout.String())
 	}
 }
 
@@ -218,6 +333,7 @@ func TestRunResolvedOpenCommandForcesSSHDEnabledOnRuntimeDeploy(t *testing.T) {
 			deployed = params
 			return nil
 		},
+		nil,
 		func(_ common.Context, _ common.OpenResult) error { return nil },
 		nil,
 		nil,
@@ -298,6 +414,7 @@ func TestRunResolvedOpenCommandLaunchesVSCodeWhenRequested(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 		func(_ common.Context, _ common.OpenResult) error {
 			activated = true
 			return nil
@@ -350,6 +467,7 @@ func TestRunResolvedOpenCommandRejectsVSCodeWithoutSSHD(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 	if err == nil {
 		t.Fatal("expected VS Code SSH error")
@@ -390,6 +508,7 @@ func TestRunResolvedOpenCommandLaunchesIntelliJWhenRequested(t *testing.T) {
 			t.Fatal("did not expect shell launch")
 			return nil
 		},
+		nil,
 		nil,
 		nil,
 		nil,
@@ -446,6 +565,7 @@ func TestRunResolvedOpenCommandRejectsIntelliJWithoutSSHD(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 	if err == nil {
 		t.Fatal("expected IntelliJ SSH error")
@@ -475,6 +595,7 @@ func TestRunResolvedOpenCommandRejectsMultipleIDETargets(t *testing.T) {
 			},
 		},
 		openOptions{VSCode: true, IntelliJ: true},
+		nil,
 		nil,
 		nil,
 		nil,

@@ -78,4 +78,54 @@ go build \
 	-o "$TARGET" \
 	./
 
+if [ "$TARGET_GOOS" = "darwin" ]; then
+	APP_BUNDLE="$(dirname "$TARGET")/ERun.app"
+	APP_CONTENTS="$APP_BUNDLE/Contents"
+	APP_MACOS="$APP_CONTENTS/MacOS"
+	APP_RESOURCES="$APP_CONTENTS/Resources"
+	ICONSET="$APP_RESOURCES/iconfile.iconset"
+	ICON_SOURCE="$SCRIPT_DIR/build/appicon.png"
+
+	rm -rf "$APP_BUNDLE"
+	mkdir -p "$APP_MACOS" "$APP_RESOURCES" "$ICONSET"
+	cp "$TARGET" "$APP_MACOS/erun-app"
+
+	for icon_size in 16 32 128 256 512; do
+		sips -z "$icon_size" "$icon_size" "$ICON_SOURCE" --out "$ICONSET/icon_${icon_size}x${icon_size}.png" >/dev/null
+		double_size=$((icon_size * 2))
+		sips -z "$double_size" "$double_size" "$ICON_SOURCE" --out "$ICONSET/icon_${icon_size}x${icon_size}@2x.png" >/dev/null
+	done
+	iconutil -c icns "$ICONSET" -o "$APP_RESOURCES/iconfile.icns"
+	rm -rf "$ICONSET"
+
+	cat > "$APP_CONTENTS/Info.plist" <<EOF
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>erun-app</string>
+    <key>CFBundleIconFile</key>
+    <string>iconfile</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.sophium.erun</string>
+    <key>CFBundleName</key>
+    <string>ERun</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$BUILD_VERSION</string>
+    <key>CFBundleVersion</key>
+    <string>$BUILD_VERSION</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+  </dict>
+</plist>
+EOF
+	plutil -lint "$APP_CONTENTS/Info.plist" >/dev/null
+fi
+
 cd "$ORIGINAL_DIR"

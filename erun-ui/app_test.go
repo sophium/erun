@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -58,6 +60,33 @@ func TestBuildOpenArgsTrimsTenantAndEnvironment(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("unexpected arg[%d]: got %q want %q", i, got[i], want[i])
 		}
+	}
+}
+
+func TestResolveCLIExecutableFromDarwinBundleUsesSiblingCLI(t *testing.T) {
+	root := t.TempDir()
+	cliPath := filepath.Join(root, "erun")
+	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	appExecutable := filepath.Join(root, "ERun.app", "Contents", "MacOS", "erun-app")
+	got := resolveCLIExecutableFromPath("darwin", appExecutable, "erun")
+	if got != cliPath {
+		t.Fatalf("resolveCLIExecutableFromPath() = %q, want %q", got, cliPath)
+	}
+}
+
+func TestResolveCLIExecutableFromPathUsesExecutableSibling(t *testing.T) {
+	root := t.TempDir()
+	cliPath := filepath.Join(root, "erun")
+	if err := os.WriteFile(cliPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	got := resolveCLIExecutableFromPath("linux", filepath.Join(root, "erun-app"), "erun")
+	if got != cliPath {
+		t.Fatalf("resolveCLIExecutableFromPath() = %q, want %q", got, cliPath)
 	}
 }
 
@@ -149,6 +178,118 @@ func TestStartSessionReusesExistingSessionForSelection(t *testing.T) {
 	}
 }
 
+func TestSavePastedImageCopiesIntoCurrentRuntime(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {
+				Name:               "erun",
+				ProjectRoot:        projectRoot,
+				DefaultEnvironment: "local",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/local": {
+				Name:              "local",
+				RepoPath:          projectRoot,
+				KubernetesContext: "rancher-desktop",
+			},
+		},
+	}
+
+	imageData := []byte("png-data")
+	var saved pastedImageSaveParams
+	app := NewApp(erunUIDeps{
+		store: store,
+		savePastedImage: func(params pastedImageSaveParams) (string, error) {
+			saved = params
+			return "/home/erun/git/erun/.codex/attachments/paste.png", nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	app.mu.Lock()
+	app.current = &managedTerminal{
+		session:   newStubTerminalSession(),
+		selection: uiSelection{Tenant: "erun", Environment: "local"},
+	}
+	app.mu.Unlock()
+
+	result, err := app.SavePastedImage(pastedImagePayload{
+		Data:     base64.StdEncoding.EncodeToString(imageData),
+		MIMEType: "image/png",
+		Name:     "screenshot.png",
+	})
+	if err != nil {
+		t.Fatalf("SavePastedImage failed: %v", err)
+	}
+	if result.Path != "/home/erun/git/erun/.codex/attachments/paste.png" {
+		t.Fatalf("unexpected pasted image path: %q", result.Path)
+	}
+	if string(saved.Data) != string(imageData) {
+		t.Fatalf("unexpected saved data: %q", string(saved.Data))
+	}
+	if saved.MIMEType != "image/png" || saved.Name != "screenshot.png" {
+		t.Fatalf("unexpected saved metadata: %+v", saved)
+	}
+	if saved.Result.Tenant != "erun" || saved.Result.Environment != "local" {
+		t.Fatalf("unexpected resolved target: %+v", saved.Result)
+	}
+}
+
+func TestDecodePastedImagePayloadAcceptsDataURL(t *testing.T) {
+	imageData := []byte("png-data")
+	got, mimeType, err := decodePastedImagePayload(pastedImagePayload{
+		Data: "data:image/png;base64," + base64.StdEncoding.EncodeToString(imageData),
+	})
+	if err != nil {
+		t.Fatalf("decodePastedImagePayload failed: %v", err)
+	}
+	if string(got) != string(imageData) {
+		t.Fatalf("unexpected decoded data: %q", string(got))
+	}
+	if mimeType != "image/png" {
+		t.Fatalf("unexpected mime type: %q", mimeType)
+	}
+}
+
+func TestBuildPastedImageCopyCommandTargetsRuntimeDeployment(t *testing.T) {
+	result := eruncommon.OpenResult{
+		Tenant:      "erun",
+		Environment: "local",
+		RepoPath:    "/Users/example/git/erun",
+		EnvConfig: eruncommon.EnvConfig{
+			KubernetesContext: "rancher-desktop",
+		},
+	}
+
+	remoteDir := pastedImageRemoteDir(result)
+	if remoteDir != "/home/erun/git/erun/.codex/attachments" {
+		t.Fatalf("unexpected remote dir: %q", remoteDir)
+	}
+
+	name, args, script := buildPastedImageCopyCommand(result, remoteDir, remoteDir+"/paste.png")
+	if name != "kubectl" {
+		t.Fatalf("unexpected command name: %q", name)
+	}
+	wantArgs := []string{
+		"--context", "rancher-desktop",
+		"--namespace", "erun-local",
+		"exec", "-i",
+		"-c", "erun-devops",
+		"deployment/erun-devops",
+		"--",
+		"/bin/sh", "-lc",
+		"mkdir -p '/home/erun/git/erun/.codex/attachments' && base64 -d > '/home/erun/git/erun/.codex/attachments/paste.png'",
+	}
+	if strings.Join(args, "\n") != strings.Join(wantArgs, "\n") {
+		t.Fatalf("unexpected args:\n%q\nwant:\n%q", args, wantArgs)
+	}
+	if script != wantArgs[len(wantArgs)-1] {
+		t.Fatalf("unexpected script: %q", script)
+	}
+}
+
 type stubUIStore struct {
 	tenants map[string]eruncommon.TenantConfig
 	envs    map[string]eruncommon.EnvConfig
@@ -175,11 +316,21 @@ func (s stubUIStore) LoadEnvConfig(tenant, environment string) (eruncommon.EnvCo
 }
 
 func (s stubUIStore) ListTenantConfigs() ([]eruncommon.TenantConfig, error) {
-	return nil, nil
+	tenants := make([]eruncommon.TenantConfig, 0, len(s.tenants))
+	for _, tenant := range s.tenants {
+		tenants = append(tenants, tenant)
+	}
+	return tenants, nil
 }
 
-func (s stubUIStore) ListEnvConfigs(string) ([]eruncommon.EnvConfig, error) {
-	return nil, nil
+func (s stubUIStore) ListEnvConfigs(tenant string) ([]eruncommon.EnvConfig, error) {
+	envs := make([]eruncommon.EnvConfig, 0)
+	for key, env := range s.envs {
+		if strings.HasPrefix(key, tenant+"/") {
+			envs = append(envs, env)
+		}
+	}
+	return envs, nil
 }
 
 type stubTerminalSession struct {
