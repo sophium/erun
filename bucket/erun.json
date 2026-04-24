@@ -1,15 +1,17 @@
 {
-  "version": "1.0.48",
+  "version": "1.0.49",
   "description": "Multi-tenant multi-environment deployment and management tool",
   "homepage": "https://github.com/sophium/erun",
   "license": "MIT",
   "depends": [
     "go",
-    "mingw"
+    "mingw",
+    "nodejs",
+    "yarn"
   ],
-  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.48.zip",
-  "hash": "1a70ce3b6af5eb5ae54198c463c15f9997f0a8e4e342d0e701d54932448ac29e",
-  "extract_dir": "erun-1.0.48",
+  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.49.zip",
+  "hash": "0ba75e99962dfbc45adcb96cdef13fc6b6d0379242014bc2d565e77b64df2d9e",
+  "extract_dir": "erun-1.0.49",
   "installer": {
     "script": [
       "$env:CGO_ENABLED = '0'",
@@ -27,6 +29,22 @@
       "if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) { throw 'building erun-app.exe requires a C compiler such as MinGW for the Wails CGO build' }",
       "$appLdflags = \"-s -w -H windowsgui -X github.com/sophium/erun/erun-ui.buildVersion=$version\"",
       "Push-Location \"$dir\\erun-ui\"",
+      "$wailsVersion = go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2",
+      "if ($LASTEXITCODE -ne 0) { throw 'failed to resolve Wails version' }",
+      "$wailsBin = Join-Path $dir 'wails-bin'",
+      "New-Item -ItemType Directory -Force -Path $wailsBin | Out-Null",
+      "$env:GOBIN = $wailsBin",
+      "go install \"github.com/wailsapp/wails/v2/cmd/wails@$wailsVersion\"",
+      "if ($LASTEXITCODE -ne 0) { throw 'failed to install Wails generator' }",
+      "Remove-Item Env:GOBIN -ErrorAction SilentlyContinue",
+      "\u0026 (Join-Path $wailsBin 'wails.exe') generate module",
+      "if ($LASTEXITCODE -ne 0) { throw 'failed to generate erun-app frontend bindings' }",
+      "Push-Location \"frontend\"",
+      "yarn install --frozen-lockfile",
+      "if ($LASTEXITCODE -ne 0) { throw 'failed to install erun-app frontend dependencies' }",
+      "yarn build",
+      "if ($LASTEXITCODE -ne 0) { throw 'failed to build erun-app frontend assets' }",
+      "Pop-Location",
       "go build -trimpath -tags desktop,production -ldflags $appLdflags -o \"$dir\\erun-app.exe\" .",
       "if ($LASTEXITCODE -ne 0) { throw 'failed to build erun-app.exe' }",
       "Pop-Location"

@@ -480,7 +480,6 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 			Name:               tenant,
 			ProjectRoot:        projectRoot,
 			DefaultEnvironment: defaultEnvironment,
-			Remote:             remoteMode,
 		}
 		if err := s.Store.SaveTenantConfig(tenantConfig); err != nil {
 			return result, err
@@ -497,10 +496,6 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 	if remoteMode {
 		if tenantConfig.ProjectRoot != params.ProjectRoot {
 			tenantConfig.ProjectRoot = params.ProjectRoot
-			tenantConfigChanged = true
-		}
-		if !tenantConfig.Remote {
-			tenantConfig.Remote = true
 			tenantConfigChanged = true
 		}
 	}

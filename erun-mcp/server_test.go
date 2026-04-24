@@ -157,7 +157,7 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
 	}
-	if len(tools.Tools) != 8 {
+	if len(tools.Tools) != 10 {
 		t.Fatalf("unexpected tools: %+v", tools.Tools)
 	}
 
@@ -168,6 +168,90 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	version := decodeStructuredVersion(t, result.StructuredContent)
 	if got := version["version"]; got != "1.2.3" {
 		t.Fatalf("unexpected structured content: %+v", version)
+	}
+}
+
+func TestRawToolRunsCommandFromRuntimeRepoRoot(t *testing.T) {
+	projectRoot := t.TempDir()
+	handler := rawTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{RepoPath: projectRoot},
+	}))
+
+	_, output, err := handler(context.Background(), nil, RawInput{
+		Command:   []string{"/bin/sh", "-c", "printf '%s:%s' \"$PWD\" \"$(cat)\""},
+		Stdin:     "input",
+		Verbosity: 1,
+	})
+	if err != nil {
+		t.Fatalf("rawTool failed: %v", err)
+	}
+	if !output.Executed || output.WorkingDirectory != projectRoot {
+		t.Fatalf("unexpected output metadata: %+v", output)
+	}
+	if output.Stdout != projectRoot+":input" {
+		t.Fatalf("unexpected stdout: %q", output.Stdout)
+	}
+	if len(output.Trace) != 1 || !strings.Contains(output.Trace[0], "cd "+projectRoot+" && /bin/sh -c") {
+		t.Fatalf("unexpected trace: %+v", output.Trace)
+	}
+}
+
+func TestRawToolPreviewRedactsTraceWithoutExecuting(t *testing.T) {
+	projectRoot := t.TempDir()
+	handler := rawTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{RepoPath: projectRoot},
+	}))
+
+	_, output, err := handler(context.Background(), nil, RawInput{
+		Command:   []string{"/bin/sh", "-c", "exit 1", "--token", "secret-value"},
+		Preview:   true,
+		Verbosity: 1,
+	})
+	if err != nil {
+		t.Fatalf("rawTool preview failed: %v", err)
+	}
+	if output.Executed {
+		t.Fatalf("expected preview output, got %+v", output)
+	}
+	joined := strings.Join(output.Trace, "\n")
+	if !strings.Contains(joined, "--token '<redacted>'") || strings.Contains(joined, "secret-value") {
+		t.Fatalf("unexpected trace: %+v", output.Trace)
+	}
+}
+
+func TestDiffToolReturnsStructuredGitDiff(t *testing.T) {
+	projectRoot := t.TempDir()
+	runGitTestCommand(t, projectRoot, "init", "-b", "main")
+	runGitTestCommand(t, projectRoot, "config", "user.email", "codex@example.com")
+	runGitTestCommand(t, projectRoot, "config", "user.name", "Codex")
+	if err := os.WriteFile(filepath.Join(projectRoot, "app.txt"), []byte("old\nsame\n"), 0o644); err != nil {
+		t.Fatalf("write app.txt: %v", err)
+	}
+	runGitTestCommand(t, projectRoot, "add", ".")
+	runGitTestCommand(t, projectRoot, "commit", "-m", "initial")
+	if err := os.WriteFile(filepath.Join(projectRoot, "app.txt"), []byte("new\nsame\nadded\n"), 0o644); err != nil {
+		t.Fatalf("write app.txt: %v", err)
+	}
+
+	handler := diffTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{RepoPath: projectRoot},
+	}))
+	_, output, err := handler(context.Background(), nil, DiffInput{})
+	if err != nil {
+		t.Fatalf("diffTool failed: %v", err)
+	}
+
+	if output.WorkingDirectory != projectRoot || output.RawDiff == "" {
+		t.Fatalf("unexpected output: %+v", output)
+	}
+	if output.Summary.FileCount != 1 || output.Summary.Additions != 2 || output.Summary.Deletions != 1 {
+		t.Fatalf("unexpected summary: %+v", output.Summary)
+	}
+	if len(output.Files) != 1 || output.Files[0].Path != "app.txt" {
+		t.Fatalf("unexpected files: %+v", output.Files)
+	}
+	if len(output.Tree) != 1 || output.Tree[0].Name != "app.txt" {
+		t.Fatalf("unexpected tree: %+v", output.Tree)
 	}
 }
 

@@ -22,11 +22,11 @@ profile.cov
 
 # env file
 .env
-.erun/
 
 # Editor/IDE
 # .idea/
 # .vscode/
+/.codex
 
 # Delve debug binaries
 __debug_bin*

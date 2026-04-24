@@ -59,7 +59,7 @@ type OpenResult struct {
 }
 
 func (r OpenResult) RemoteRepo() bool {
-	return r.EnvConfig.Remote || r.TenantConfig.Remote
+	return r.EnvConfig.Remote
 }
 
 type ShellLaunchParams struct {
@@ -268,7 +268,7 @@ func resolveOpenWithFinder(store OpenStore, findProjectRoot ProjectFinderFunc, p
 	}
 
 	repoPath = filepath.Clean(repoPath)
-	if !(envConfig.Remote || tenantConfig.Remote) {
+	if !envConfig.Remote {
 		info, err := os.Stat(repoPath)
 		if err != nil {
 			return OpenResult{}, err
@@ -522,7 +522,6 @@ func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (stri
 		Name:               req.Tenant,
 		ProjectRoot:        remoteWorkdir,
 		DefaultEnvironment: req.Environment,
-		Remote:             req.RemoteRepo,
 	})
 	if err != nil {
 		return "", err
@@ -560,7 +559,7 @@ func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (stri
 		fmt.Sprintf("cat > \"$config_home/erun/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, tenantYAML),
 		fmt.Sprintf("mkdir -p \"$config_home/erun/%s/%s\"", req.Tenant, req.Environment),
 		fmt.Sprintf("cat > \"$config_home/erun/%s/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, req.Environment, envYAML),
-		fmt.Sprintf("cat > \"$HOME/.erun_bashrc\" <<'EOF'\nexport ERUN_SHELL_HOST=%s\nerun() {\n  if [ \"${1:-}\" = \"deploy\" ] && [ \"$#\" -eq 1 ] && [ -n \"${ERUN_SHELL_REQUEST_FILE:-}\" ]; then\n    : > \"$ERUN_SHELL_REQUEST_FILE\"\n    exit 0\n  fi\n  command erun \"$@\"\n}\n[ -r /etc/bash.bashrc ] && . /etc/bash.bashrc\nEOF", title),
+		fmt.Sprintf("cat > \"$HOME/.erun_bashrc\" <<'EOF'\nexport ERUN_SHELL_HOST=%s\nerun() {\n  if [ \"${1:-}\" = \"deploy\" ] && [ \"$#\" -eq 1 ] && [ -n \"${ERUN_SHELL_REQUEST_FILE:-}\" ]; then\n    : > \"$ERUN_SHELL_REQUEST_FILE\"\n    exit 0\n  fi\n  command erun \"$@\"\n}\nEOF", title),
 		fmt.Sprintf("printf '\\033]0;%s\\007'", title),
 		"request_file=\"$HOME/.erun-shell-request\"",
 		"rm -f \"$request_file\"",

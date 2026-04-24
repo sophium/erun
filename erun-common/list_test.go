@@ -266,7 +266,7 @@ func TestResolveListResultIncludesSSHDConfiguration(t *testing.T) {
 		openStore: openStore{
 			toolConfig: ERunConfig{DefaultTenant: "tenant-a"},
 			tenantConfigs: map[string]TenantConfig{
-				"tenant-a": {Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: "dev", Remote: true},
+				"tenant-a": {Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: "dev"},
 			},
 			envConfigs: map[string]EnvConfig{
 				"tenant-a/dev": {

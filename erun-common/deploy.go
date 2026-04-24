@@ -219,7 +219,7 @@ func resolveDeploySpecForContext(store DeployStore, findProjectRoot ProjectFinde
 		return DeploySpec{}, err
 	}
 
-	dependencyBuilds, err := resolveAdditionalDockerBuildsForDeploy(store, findProjectRoot, resolveDockerBuildContext, now, target.RepoPath, deployContext.ChartPath, builds)
+	dependencyBuilds, err := resolveAdditionalDockerBuildsForDeploy(store, findProjectRoot, resolveDockerBuildContext, now, target.RepoPath, target.Environment, deployContext.ChartPath, builds)
 	if err != nil {
 		return DeploySpec{}, err
 	}
@@ -445,7 +445,7 @@ func resolveDeployContext(findProjectRoot ProjectFinderFunc, resolveKubernetesDe
 	}, nil
 }
 
-func resolveAdditionalDockerBuildsForDeploy(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, chartPath string, existing []DockerBuildSpec) ([]DockerBuildSpec, error) {
+func resolveAdditionalDockerBuildsForDeploy(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, chartPath string, existing []DockerBuildSpec) ([]DockerBuildSpec, error) {
 	images, err := findLiteralDockerImagesInChart(chartPath)
 	if err != nil {
 		return nil, err
@@ -458,7 +458,7 @@ func resolveAdditionalDockerBuildsForDeploy(store DeployStore, findProjectRoot P
 
 	builds := make([]DockerBuildSpec, 0, len(images))
 	for _, image := range images {
-		buildInput, ok, err := ResolveDockerBuildForImageReference(store, findProjectRoot, resolveDockerBuildContext, now, projectRoot, image)
+		buildInput, ok, err := ResolveDockerBuildForImageReference(store, findProjectRoot, resolveDockerBuildContext, now, projectRoot, environment, image)
 		if err != nil {
 			return nil, err
 		}

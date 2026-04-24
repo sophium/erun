@@ -90,14 +90,14 @@ initialize_erun_config() {
     environment="${ERUN_ENVIRONMENT:-}"
     config_home="${XDG_CONFIG_HOME:-${HOME}/.config}"
     config_dir="${config_home}/erun"
-    remote_line=""
+    env_remote_line=""
 
     if [ -z "${tenant}" ] || [ -z "${environment}" ]; then
         return
     fi
 
     if runtime_repo_is_remote; then
-        remote_line="remote: true"
+        env_remote_line="remote: true"
     fi
 
     mkdir -p "${config_dir}/${tenant}/${environment}"
@@ -110,14 +110,37 @@ EOF
 projectroot: ${repo_dir}
 name: ${tenant}
 defaultenvironment: ${environment}
-${remote_line}
 EOF
 
     cat >"${config_dir}/${tenant}/${environment}/config.yaml" <<EOF
 name: ${environment}
 repopath: ${repo_dir}
 kubernetescontext: ${ERUN_KUBERNETES_CONTEXT:-in-cluster}
-${remote_line}
+${env_remote_line}
+EOF
+}
+
+initialize_codex_config() {
+    codex_dir="${HOME}/.codex"
+    codex_config="${codex_dir}/config.toml"
+    mcp_url="http://127.0.0.1:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}"
+
+    mkdir -p "${codex_dir}"
+    touch "${codex_config}"
+
+    tmp_config="${codex_config}.tmp"
+    awk '
+        /^\[mcp_servers\.erun\]$/ { skip = 1; next }
+        /^\[/ && skip { skip = 0 }
+        !skip { print }
+    ' "${codex_config}" >"${tmp_config}"
+    mv "${tmp_config}" "${codex_config}"
+
+    cat >>"${codex_config}" <<EOF
+
+[mcp_servers.erun]
+url = "${mcp_url}"
+tool_timeout_sec = 600
 EOF
 }
 
@@ -184,10 +207,12 @@ start_sshd
 if [ "${1:-}" = "shell" ]; then
     shift
     initialize_erun_config
+    initialize_codex_config
     run_shell "$@"
 fi
 
 initialize_erun_config
+initialize_codex_config
 
 set -- emcp "$@" \
     --host "${ERUN_MCP_HOST:-0.0.0.0}" \

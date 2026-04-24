@@ -108,6 +108,50 @@ func TestRuntimeEntrypointDisablesStrictModesForPVCBackedHome(t *testing.T) {
 	}
 }
 
+func TestRuntimeEntrypointConfiguresCodexMCP(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read runtime entrypoint: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		`initialize_codex_config`,
+		`[mcp_servers.erun]`,
+		`url = "${mcp_url}"`,
+		`tool_timeout_sec = 600`,
+		`http://127.0.0.1:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected runtime entrypoint to contain %q, got:\n%s", want, content)
+		}
+	}
+}
+
+func TestRuntimeEntrypointWritesRemoteOnlyToEnvironmentConfig(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read runtime entrypoint: %v", err)
+	}
+	content := string(data)
+	tenantConfig := `cat >"${config_dir}/${tenant}/config.yaml" <<EOF
+projectroot: ${repo_dir}
+name: ${tenant}
+defaultenvironment: ${environment}
+EOF`
+	if !strings.Contains(content, tenantConfig) {
+		t.Fatalf("expected tenant config heredoc without remote flag, got:\n%s", content)
+	}
+	envConfig := `cat >"${config_dir}/${tenant}/${environment}/config.yaml" <<EOF
+name: ${environment}
+repopath: ${repo_dir}
+kubernetescontext: ${ERUN_KUBERNETES_CONTEXT:-in-cluster}
+${env_remote_line}
+EOF`
+	if !strings.Contains(content, envConfig) {
+		t.Fatalf("expected environment config heredoc to include env remote flag, got:\n%s", content)
+	}
+}
+
 func moduleGoVersion(goMod string) (string, error) {
 	for _, line := range strings.Split(goMod, "\n") {
 		line = strings.TrimSpace(line)

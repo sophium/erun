@@ -24,8 +24,8 @@ func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
 			{
 				Name: "erun",
 				Environments: []eruncommon.ListEnvironmentResult{
-					{Name: "local"},
-					{Name: "remote"},
+					{Name: "local", LocalPorts: eruncommon.EnvironmentLocalPorts{MCP: 17000}},
+					{Name: "remote", LocalPorts: eruncommon.EnvironmentLocalPorts{MCP: 17100}},
 				},
 			},
 		},
@@ -39,6 +39,48 @@ func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
 	}
 	if len(state.Tenants) != 1 || len(state.Tenants[0].Environments) != 2 {
 		t.Fatalf("unexpected tenants: %+v", state.Tenants)
+	}
+	if state.Tenants[0].Environments[0].MCPURL != "http://127.0.0.1:17000/mcp" {
+		t.Fatalf("unexpected MCP URL: %+v", state.Tenants[0].Environments[0])
+	}
+}
+
+func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {
+				Name:               "erun",
+				ProjectRoot:        projectRoot,
+				DefaultEnvironment: "local",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/local": {
+				Name:              "local",
+				RepoPath:          projectRoot,
+				KubernetesContext: "rancher-desktop",
+			},
+		},
+	}
+	var gotEndpoint string
+	app := NewApp(erunUIDeps{
+		store: store,
+		loadDiff: func(_ context.Context, endpoint string) (eruncommon.DiffResult, error) {
+			gotEndpoint = endpoint
+			return eruncommon.DiffResult{RawDiff: "diff --git a/a.txt b/a.txt\n"}, nil
+		},
+	})
+
+	result, err := app.LoadDiff(uiSelection{Tenant: "erun", Environment: "local"})
+	if err != nil {
+		t.Fatalf("LoadDiff failed: %v", err)
+	}
+	if gotEndpoint != "http://127.0.0.1:17000/mcp" {
+		t.Fatalf("unexpected endpoint: %q", gotEndpoint)
+	}
+	if result.RawDiff == "" {
+		t.Fatalf("unexpected diff result: %+v", result)
 	}
 }
 
@@ -234,6 +276,38 @@ func TestSavePastedImageCopiesIntoCurrentRuntime(t *testing.T) {
 	}
 	if saved.Result.Tenant != "erun" || saved.Result.Environment != "local" {
 		t.Fatalf("unexpected resolved target: %+v", saved.Result)
+	}
+}
+
+func TestBeforeClosePersistsMaximisedWindowState(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "window-state.json")
+	app := NewApp(erunUIDeps{
+		windowStatePath: statePath,
+		windowMaximised: func(context.Context) bool {
+			return true
+		},
+	})
+
+	if prevent := app.beforeClose(context.Background()); prevent {
+		t.Fatal("beforeClose should not prevent shutdown")
+	}
+
+	state := loadAppWindowState(statePath)
+	if !state.Maximised {
+		t.Fatalf("expected maximised state to be persisted: %+v", state)
+	}
+}
+
+func TestSaveAndLoadAppWindowState(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "nested", "window-state.json")
+
+	if err := saveAppWindowState(statePath, appWindowState{Maximised: true}); err != nil {
+		t.Fatalf("saveAppWindowState failed: %v", err)
+	}
+
+	state := loadAppWindowState(statePath)
+	if !state.Maximised {
+		t.Fatalf("unexpected loaded window state: %+v", state)
 	}
 }
 

@@ -28,6 +28,7 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 	var intellij bool
 	var snapshot bool
 	var noSnapshot bool
+	var versionOverride string
 	target := common.OpenParams{}
 
 	cmd := &cobra.Command{
@@ -59,7 +60,7 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 			if err != nil {
 				return err
 			}
-			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell, VSCode: vscode, IntelliJ: intellij}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateSSHD, launchVSCode, launchIntelliJ)
+			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell, VSCode: vscode, IntelliJ: intellij, VersionOverride: versionOverride}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateSSHD, launchVSCode, launchIntelliJ)
 		},
 	}
 
@@ -69,14 +70,16 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 	cmd.Flags().BoolVar(&noShell, "no-shell", false, "Print shell commands to switch kubectl context, namespace, and worktree locally")
 	cmd.Flags().BoolVar(&vscode, "vscode", false, "Open the remote environment in VS Code instead of a shell")
 	cmd.Flags().BoolVar(&intellij, "intellij", false, "Open the remote environment in IntelliJ IDEA instead of a shell")
+	cmd.Flags().StringVar(&versionOverride, "version", "", "Override the runtime chart and image version before opening")
 	addSnapshotFlags(cmd, &snapshot, &noSnapshot, "Build and deploy a local snapshot when opening the local environment")
 	return cmd
 }
 
 type openOptions struct {
-	NoShell  bool
-	VSCode   bool
-	IntelliJ bool
+	NoShell         bool
+	VSCode          bool
+	IntelliJ        bool
+	VersionOverride string
 }
 
 func applyOpenSnapshotPreference(result common.OpenResult, enabled *bool, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
@@ -220,8 +223,12 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 		if err != nil {
 			return err
 		}
+		execution = applyRuntimeDeployVersionOverride(execution, options.VersionOverride)
 
 		shouldDeploy := len(execution.Builds) > 0
+		if strings.TrimSpace(options.VersionOverride) != "" {
+			shouldDeploy = true
+		}
 		if !shouldDeploy && checkKubernetesDeployment != nil {
 			expectedSSHD := sshdExpectationForDeployment(result)
 			deployed, err := checkKubernetesDeployment(common.KubernetesDeploymentCheckParams{
@@ -366,6 +373,16 @@ func maybeCreateMissingRuntimeChart(ctx common.Context, result common.OpenResult
 	}
 
 	return resolveRuntimeDeploySpec(result)
+}
+
+func applyRuntimeDeployVersionOverride(execution common.DeploySpec, versionOverride string) common.DeploySpec {
+	versionOverride = strings.TrimSpace(versionOverride)
+	if versionOverride == "" {
+		return execution
+	}
+	execution.Builds = nil
+	execution.Deploy.Version = versionOverride
+	return execution
 }
 
 func emitLocalShellSetupForOpenResult(result common.OpenResult, promptRunner PromptRunner, stdout, stderr io.Writer) error {

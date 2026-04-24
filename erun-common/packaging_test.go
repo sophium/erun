@@ -32,6 +32,27 @@ func TestPackageManagerDefinitionsTrackLatestStableTag(t *testing.T) {
 	if !strings.Contains(formula, `bin/"erun"`) || !strings.Contains(formula, `bin/"emcp"`) {
 		t.Fatalf("formula does not build both executables:\n%s", formula)
 	}
+	if !strings.Contains(formula, `depends_on "node" => :build`) {
+		t.Fatalf("formula missing node dependency for erun-app frontend build:\n%s", formula)
+	}
+	if !strings.Contains(formula, `depends_on "yarn" => :build`) {
+		t.Fatalf("formula missing yarn dependency for erun-app frontend build:\n%s", formula)
+	}
+	if !strings.Contains(formula, `system "yarn", "install", "--frozen-lockfile"`) {
+		t.Fatalf("formula does not install erun-app frontend dependencies:\n%s", formula)
+	}
+	if !strings.Contains(formula, `go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2`) {
+		t.Fatalf("formula does not resolve the Wails generator version from go.mod:\n%s", formula)
+	}
+	if !strings.Contains(formula, `system "go", "install", "github.com/wailsapp/wails/v2/cmd/wails@#{wails_version}"`) {
+		t.Fatalf("formula does not install the Wails generator:\n%s", formula)
+	}
+	if !strings.Contains(formula, `system wails_bin, "generate", "module"`) {
+		t.Fatalf("formula does not generate erun-app frontend bindings:\n%s", formula)
+	}
+	if !strings.Contains(formula, `system "yarn", "build"`) {
+		t.Fatalf("formula does not build erun-app frontend assets:\n%s", formula)
+	}
 	formulaSHA := regexp.MustCompile(`(?m)^  sha256 "([0-9a-f]+)"$`).FindStringSubmatch(formula)
 	if len(formulaSHA) != 2 {
 		t.Fatalf("formula sha256 not found:\n%s", formula)
@@ -76,12 +97,18 @@ func TestPackageManagerDefinitionsTrackLatestStableTag(t *testing.T) {
 	if manifest.ExtractDir != "erun-"+latestVersion {
 		t.Fatalf("scoop extract_dir = %q, want %q", manifest.ExtractDir, "erun-"+latestVersion)
 	}
-		if !containsString(manifest.Depends, "go") {
-			t.Fatalf("scoop manifest missing go dependency: %+v", manifest.Depends)
-		}
-		if !containsString(manifest.Depends, "mingw") {
-			t.Fatalf("scoop manifest missing mingw dependency for erun-app.exe: %+v", manifest.Depends)
-		}
+	if !containsString(manifest.Depends, "go") {
+		t.Fatalf("scoop manifest missing go dependency: %+v", manifest.Depends)
+	}
+	if !containsString(manifest.Depends, "mingw") {
+		t.Fatalf("scoop manifest missing mingw dependency for erun-app.exe: %+v", manifest.Depends)
+	}
+	if !containsString(manifest.Depends, "nodejs") {
+		t.Fatalf("scoop manifest missing nodejs dependency for erun-app frontend build: %+v", manifest.Depends)
+	}
+	if !containsString(manifest.Depends, "yarn") {
+		t.Fatalf("scoop manifest missing yarn dependency for erun-app frontend build: %+v", manifest.Depends)
+	}
 	if !containsString(manifest.Bin, "erun.exe") || !containsString(manifest.Bin, "emcp.exe") {
 		t.Fatalf("scoop manifest does not shim both executables: %+v", manifest.Bin)
 	}
@@ -89,13 +116,28 @@ func TestPackageManagerDefinitionsTrackLatestStableTag(t *testing.T) {
 	if !strings.Contains(script, `go build -trimpath -ldflags $cliLdflags -o "$dir\erun.exe" .`) {
 		t.Fatalf("scoop installer does not build erun.exe:\n%s", script)
 	}
-		if !strings.Contains(script, `go build -trimpath -ldflags $mcpLdflags -o "$dir\emcp.exe" ./cmd/emcp`) {
-			t.Fatalf("scoop installer does not build emcp.exe:\n%s", script)
-		}
-		if !strings.Contains(script, `building erun-app.exe requires a C compiler such as MinGW for the Wails CGO build`) {
-			t.Fatalf("scoop installer does not explain the Wails CGO compiler requirement:\n%s", script)
-		}
+	if !strings.Contains(script, `go build -trimpath -ldflags $mcpLdflags -o "$dir\emcp.exe" ./cmd/emcp`) {
+		t.Fatalf("scoop installer does not build emcp.exe:\n%s", script)
 	}
+	if !strings.Contains(script, `building erun-app.exe requires a C compiler such as MinGW for the Wails CGO build`) {
+		t.Fatalf("scoop installer does not explain the Wails CGO compiler requirement:\n%s", script)
+	}
+	if !strings.Contains(script, `yarn install --frozen-lockfile`) {
+		t.Fatalf("scoop installer does not install erun-app frontend dependencies:\n%s", script)
+	}
+	if !strings.Contains(script, `go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2`) {
+		t.Fatalf("scoop installer does not resolve the Wails generator version from go.mod:\n%s", script)
+	}
+	if !strings.Contains(script, `go install "github.com/wailsapp/wails/v2/cmd/wails@$wailsVersion"`) {
+		t.Fatalf("scoop installer does not install the Wails generator:\n%s", script)
+	}
+	if !strings.Contains(script, `generate module`) {
+		t.Fatalf("scoop installer does not generate erun-app frontend bindings:\n%s", script)
+	}
+	if !strings.Contains(script, `yarn build`) {
+		t.Fatalf("scoop installer does not build erun-app frontend assets:\n%s", script)
+	}
+}
 
 func TestAptBuildScriptBuildsDebianPackageForBothExecutables(t *testing.T) {
 	repoRoot := repoRootForPackagingTest(t)

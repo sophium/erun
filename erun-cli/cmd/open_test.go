@@ -83,6 +83,44 @@ func TestOpenCommandAcceptsTenantAndEnvironmentFlags(t *testing.T) {
 	}
 }
 
+func TestOpenCommandVersionOverrideForcesRuntimeDeploy(t *testing.T) {
+	repoPath := t.TempDir()
+	deployed := common.HelmDeployParams{}
+	launched := common.ShellLaunchParams{}
+	cmd := newTestRootCmd(testRootDeps{
+		Store: openCommandStore{repoPath: repoPath},
+		PromptRunner: func(prompt promptui.Prompt) (string, error) {
+			if !prompt.IsConfirm {
+				t.Fatalf("expected confirm prompt, got %+v", prompt)
+			}
+			return "n", nil
+		},
+		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
+			return true, nil
+		},
+		DeployHelmChart: func(req common.HelmDeployParams) error {
+			deployed = req
+			return nil
+		},
+		LaunchShell: func(req common.ShellLaunchParams) error {
+			launched = req
+			return nil
+		},
+	})
+	cmd.SetArgs([]string{"open", "tenant-a", "dev", "--version", "1.0.48"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if deployed.Version != "1.0.48" {
+		t.Fatalf("unexpected deploy version: %+v", deployed)
+	}
+	if launched.Namespace != "tenant-a-dev" {
+		t.Fatalf("expected shell launch after deploy, got %+v", launched)
+	}
+}
+
 func TestRunResolvedOpenCommandActivatesSSHDWhenEnabled(t *testing.T) {
 	activated := false
 	launched := false
@@ -155,8 +193,7 @@ func TestRunResolvedOpenCommandForwardsMCPBeforeShell(t *testing.T) {
 			Environment: "dev",
 			RepoPath:    "/home/erun/git/tenant-a",
 			TenantConfig: common.TenantConfig{
-				Name:   "tenant-a",
-				Remote: true,
+				Name: "tenant-a",
 			},
 			EnvConfig: common.EnvConfig{
 				Name:              "dev",
@@ -293,8 +330,7 @@ func TestRunResolvedOpenCommandForcesSSHDEnabledOnRuntimeDeploy(t *testing.T) {
 			Environment: "dev",
 			RepoPath:    "/home/erun/git/tenant-a",
 			TenantConfig: common.TenantConfig{
-				Name:   "tenant-a",
-				Remote: true,
+				Name: "tenant-a",
 			},
 			EnvConfig: common.EnvConfig{
 				Name:              "dev",
@@ -393,8 +429,7 @@ func TestRunResolvedOpenCommandLaunchesVSCodeWhenRequested(t *testing.T) {
 			Environment: "dev",
 			RepoPath:    "/home/erun/git/tenant-a",
 			TenantConfig: common.TenantConfig{
-				Name:   "tenant-a",
-				Remote: true,
+				Name: "tenant-a",
 			},
 			EnvConfig: common.EnvConfig{
 				Name:              "dev",
@@ -491,8 +526,7 @@ func TestRunResolvedOpenCommandLaunchesIntelliJWhenRequested(t *testing.T) {
 			Environment: "dev",
 			RepoPath:    "/home/erun/git/tenant-a",
 			TenantConfig: common.TenantConfig{
-				Name:   "tenant-a",
-				Remote: true,
+				Name: "tenant-a",
 			},
 			EnvConfig: common.EnvConfig{
 				Name:              "dev",
@@ -1279,7 +1313,6 @@ func TestOpenCommandSkipsLocalRuntimeChartPromptForRemoteRepo(t *testing.T) {
 				Name:               "erun",
 				ProjectRoot:        "/home/erun/git/erun",
 				DefaultEnvironment: "local",
-				Remote:             true,
 			},
 			env: &common.EnvConfig{
 				Name:              "local",
