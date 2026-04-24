@@ -6,6 +6,8 @@ class Erun < Formula
   license "MIT"
 
   depends_on "go" => :build
+  depends_on "node" => :build
+  depends_on "yarn" => :build
 
   def install
     cd "erun-cli" do
@@ -27,6 +29,18 @@ class Erun < Formula
     end
 
     cd "erun-ui" do
+      wails_bin = buildpath/"bin/wails"
+      wails_version = shell_output("go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2").strip
+      mkdir_p wails_bin.dirname
+      ENV["GOBIN"] = wails_bin.dirname
+      system "go", "install", "github.com/wailsapp/wails/v2/cmd/wails@#{wails_version}"
+      system wails_bin, "generate", "module"
+
+      cd "frontend" do
+        system "yarn", "install", "--frozen-lockfile"
+        system "yarn", "build"
+      end
+
       ENV["CGO_ENABLED"] = "1"
       ENV["MACOSX_DEPLOYMENT_TARGET"] = "11.0"
       ENV.append "CGO_CFLAGS", "-mmacosx-version-min=#{ENV["MACOSX_DEPLOYMENT_TARGET"]}"
