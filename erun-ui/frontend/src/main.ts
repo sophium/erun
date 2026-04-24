@@ -4,7 +4,7 @@ import './style.css';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 
-import { LoadState, ResizeSession, SendSessionInput, StartSession } from '../wailsjs/go/main/App';
+import { LoadState, ResizeSession, SavePastedImage, SendSessionInput, StartSession } from '../wailsjs/go/main/App';
 import { EventsOn, WindowToggleMaximise } from '../wailsjs/runtime/runtime';
 
 interface UIEnvironment {
@@ -40,6 +40,10 @@ interface TerminalOutputPayload {
 interface TerminalExitPayload {
   sessionId: number;
   reason?: string;
+}
+
+interface PastedImageResult {
+  path: string;
 }
 
 const shell = document.querySelector<HTMLDivElement>('#app');
@@ -94,7 +98,7 @@ const state: {
   collapsed: Set<string>;
   sessionId: number;
   selectionSessions: Map<string, number>;
-  sessionBuffers: Map<number, string>;
+  sessionBuffers: Map<number, Uint8Array[]>;
   sessionExitReasons: Map<number, string>;
   sidebarWidth: number;
   sidebarHidden: boolean;
@@ -104,7 +108,7 @@ const state: {
   collapsed: new Set<string>(),
   sessionId: 0,
   selectionSessions: new Map<string, number>(),
-  sessionBuffers: new Map<number, string>(),
+  sessionBuffers: new Map<number, Uint8Array[]>(),
   sessionExitReasons: new Map<number, string>(),
   sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
   sidebarHidden: false,
@@ -130,6 +134,12 @@ terminal.onData((data) => {
     showTerminalMessage(readError(error));
   });
 });
+
+terminalRoot.addEventListener('paste', (event: ClipboardEvent) => {
+  void handleTerminalPaste(event).catch((error: unknown) => {
+    showTerminalMessage(readError(error));
+  });
+}, true);
 
 let resizeTimer = 0;
 const resizeObserver = new ResizeObserver(() => {
@@ -176,9 +186,10 @@ EventsOn('terminal-output', (payload: TerminalOutputPayload) => {
   if (!payload) {
     return;
   }
-  const data = window.atob(payload.data);
-  const existing = state.sessionBuffers.get(payload.sessionId) || '';
-  state.sessionBuffers.set(payload.sessionId, existing + data);
+  const data = decodeBase64Bytes(payload.data);
+  const existing = state.sessionBuffers.get(payload.sessionId) || [];
+  existing.push(data);
+  state.sessionBuffers.set(payload.sessionId, existing);
   if (payload.sessionId !== state.sessionId) {
     return;
   }
@@ -242,7 +253,7 @@ async function openSelection(selection: UISelection): Promise<void> {
     resetTerminal();
     const buffer = state.sessionBuffers.get(result.sessionId);
     if (buffer) {
-      terminal.write(buffer);
+      writeTerminalBuffer(buffer);
     }
   }
 
@@ -362,6 +373,72 @@ function hideTerminalMessage(): void {
   terminalMessage.classList.add('is-hidden');
 }
 
+async function handleTerminalPaste(event: ClipboardEvent): Promise<void> {
+  if (!isTerminalPasteTarget(event.target)) {
+    return;
+  }
+
+  const images = pastedImageFiles(event);
+  if (images.length === 0) {
+    return;
+  }
+
+  event.preventDefault();
+  const paths: string[] = [];
+  for (const image of images) {
+    const result = (await SavePastedImage({
+      data: await fileToBase64(image),
+      mimeType: image.type,
+      name: image.name,
+    })) as PastedImageResult;
+    if (result.path) {
+      paths.push(result.path);
+    }
+  }
+  if (paths.length === 0) {
+    return;
+  }
+  await SendSessionInput(`${paths.join(' ')} `);
+  terminal.focus();
+}
+
+function isTerminalPasteTarget(target: EventTarget | null): boolean {
+  return target instanceof Node && terminalRoot.contains(target);
+}
+
+function pastedImageFiles(event: ClipboardEvent): File[] {
+  const items = event.clipboardData?.items;
+  if (!items) {
+    return [];
+  }
+
+  const files: File[] = [];
+  for (const item of Array.from(items)) {
+    if (item.kind !== 'file' || !item.type.toLowerCase().startsWith('image/')) {
+      continue;
+    }
+    const file = item.getAsFile();
+    if (file) {
+      files.push(file);
+    }
+  }
+  return files;
+}
+
+async function fileToBase64(file: File): Promise<string> {
+  const buffer = await file.arrayBuffer();
+  return bytesToBase64(new Uint8Array(buffer));
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return window.btoa(binary);
+}
+
 function readError(error: unknown): string {
   if (typeof error === 'string') {
     return error;
@@ -373,6 +450,21 @@ function readError(error: unknown): string {
     return error.message;
   }
   return 'Unexpected error';
+}
+
+function decodeBase64Bytes(value: string): Uint8Array {
+  const binary = window.atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+function writeTerminalBuffer(chunks: Uint8Array[]): void {
+  for (const chunk of chunks) {
+    terminal.write(chunk);
+  }
 }
 
 function escapeHTML(value: string): string {

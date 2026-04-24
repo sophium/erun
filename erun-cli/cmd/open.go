@@ -22,7 +22,7 @@ const (
 
 var currentHostOS = func() common.HostOS { return common.DetectHost().OS }
 
-func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
+func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
 	var noShell bool
 	var vscode bool
 	var intellij bool
@@ -59,7 +59,7 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 			if err != nil {
 				return err
 			}
-			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell, VSCode: vscode, IntelliJ: intellij}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateSSHD, launchVSCode, launchIntelliJ)
+			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell, VSCode: vscode, IntelliJ: intellij}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateSSHD, launchVSCode, launchIntelliJ)
 		},
 	}
 
@@ -198,7 +198,7 @@ func resolveOpenWithInitRetryForParams(ctx common.Context, params common.OpenPar
 	return result, true, err
 }
 
-func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
+func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
 	namespace := common.KubernetesNamespaceName(result.Tenant, result.Environment)
 	if options.VSCode && options.IntelliJ {
 		return fmt.Errorf("--vscode and --intellij cannot be used together")
@@ -210,13 +210,6 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 		}
 		return fmt.Errorf("%s requires sshd-enabled remote environment; run `erun sshd init %s %s` first", flag, result.Tenant, result.Environment)
 	}
-	if options.NoShell && !options.VSCode && !options.IntelliJ && !result.EnvConfig.SSHD.Enabled {
-		ctx.TraceCommand("", "kubectl", "config", "use-context", strings.TrimSpace(result.EnvConfig.KubernetesContext))
-		ctx.TraceCommand("", "kubectl", "config", "set-context", "--current", "--namespace="+namespace)
-		ctx.TraceCommand("", "cd", result.RepoPath)
-		return emitLocalShellSetupForOpenResult(result, promptRunner, ctx.Stdout, ctx.Stderr)
-	}
-
 	shellReq := common.ShellLaunchParamsFromResult(result)
 	if resolveRuntimeDeploySpec != nil && deployHelmChart != nil {
 		execution, err := resolveRuntimeDeploySpec(result)
@@ -265,6 +258,11 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 
 	if activateSSHD != nil && result.EnvConfig.SSHD.Enabled {
 		if err := activateSSHD(ctx, result); err != nil {
+			return err
+		}
+	}
+	if activateMCP != nil {
+		if err := activateMCP(ctx, result); err != nil {
 			return err
 		}
 	}

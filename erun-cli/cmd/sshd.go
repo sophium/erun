@@ -68,7 +68,7 @@ func runSSHDInitCommand(ctx common.Context, result common.OpenResult, publicKeyP
 		updatedEnv.SSHD.LocalPort = localPort
 	}
 	if updatedEnv.SSHD.LocalPort == 0 {
-		updatedEnv.SSHD.LocalPort = common.DefaultSSHLocalPort
+		updatedEnv.SSHD.LocalPort = common.SSHLocalPortForResult(result)
 	}
 	if ctx.DryRun {
 		ctx.Trace(fmt.Sprintf("save SSHD config for %s/%s", result.Tenant, result.Environment))

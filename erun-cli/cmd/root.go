@@ -38,6 +38,7 @@ func Execute() error {
 	resolveRuntimeDeploySpec := func(target common.OpenResult) (common.DeploySpec, error) {
 		return resolveRuntimeDeploySpecForOpen(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, currentBuildInfo(), target)
 	}
+	activateMCP := newMCPForwarder()
 	activateSSHD := newSSHDActivator(common.RunRemoteCommand)
 	runManagedDeploy := func(ctx common.Context, target common.OpenResult) error {
 		specs, err := common.ResolveCurrentDeploySpecs(
@@ -69,6 +70,7 @@ func Execute() error {
 		common.CheckKubernetesDeployment,
 		resolveRuntimeDeploySpec,
 		deployHelmChart,
+		activateMCP,
 		activateSSHD,
 		launchVSCode,
 		launchIntelliJ,
@@ -120,7 +122,7 @@ func Execute() error {
 		if initRan {
 			return nil
 		}
-		return runResolvedOpenCommand(ctx, result, openOptions{}, runPrompt, newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell), runManagedDeploy, common.CheckKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateSSHD, launchVSCode, launchIntelliJ)
+		return runResolvedOpenCommand(ctx, result, openOptions{}, runPrompt, newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell), runManagedDeploy, common.CheckKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateSSHD, launchVSCode, launchIntelliJ)
 	}
 
 	cmd := newRootCommand(runRoot)

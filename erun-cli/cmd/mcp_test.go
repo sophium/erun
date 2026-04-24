@@ -3,6 +3,8 @@ package cmd
 import (
 	"bytes"
 	"io"
+	"os"
+	"path/filepath"
 	"testing"
 
 	common "github.com/sophium/erun/erun-common"
@@ -93,5 +95,47 @@ func TestMCPCmdStartsEMCP(t *testing.T) {
 		if gotArgs[i] != wantArgs[i] {
 			t.Fatalf("unexpected emcp args: got=%v want=%v", gotArgs, wantArgs)
 		}
+	}
+}
+
+func TestMCPCmdUsesEnvironmentLocalPortByDefault(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+
+	tenantAPath := filepath.Join(t.TempDir(), "tenant-a")
+	tenantBPath := filepath.Join(t.TempDir(), "tenant-b")
+	for _, dir := range []string{tenantAPath, tenantBPath} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir repo: %v", err)
+		}
+	}
+
+	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
+		t.Fatalf("save erun config: %v", err)
+	}
+	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: tenantAPath, DefaultEnvironment: "local"}); err != nil {
+		t.Fatalf("save tenant-a config: %v", err)
+	}
+	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-b", ProjectRoot: tenantBPath, DefaultEnvironment: "dev"}); err != nil {
+		t.Fatalf("save tenant-b config: %v", err)
+	}
+	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "local", RepoPath: tenantAPath, KubernetesContext: "cluster-a"}); err != nil {
+		t.Fatalf("save tenant-a env: %v", err)
+	}
+	if err := common.SaveEnvConfig("tenant-b", common.EnvConfig{Name: "dev", RepoPath: tenantBPath, KubernetesContext: "cluster-b"}); err != nil {
+		t.Fatalf("save tenant-b env: %v", err)
+	}
+
+	cmd := newTestRootCmd(testRootDeps{})
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(new(bytes.Buffer))
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"-v", "mcp", "tenant-b", "dev", "--dry-run"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if got := stderr.String(); !bytes.Contains([]byte(got), []byte("--port 17100")) {
+		t.Fatalf("expected environment-scoped MCP port in trace, got %q", got)
 	}
 }

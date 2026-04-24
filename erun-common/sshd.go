@@ -8,9 +8,8 @@ import (
 )
 
 const (
-	DefaultSSHUser      = "erun"
-	DefaultSSHLocalPort = 62222
-	RemoteSSHDPort      = 2222
+	DefaultSSHUser = "erun"
+	RemoteSSHDPort = 2222
 )
 
 type SSHConnectionInfo struct {
@@ -27,7 +26,7 @@ func SSHConnectionInfoForResult(result OpenResult) SSHConnectionInfo {
 	return SSHConnectionInfo{
 		User:           DefaultSSHUser,
 		Host:           "127.0.0.1",
-		Port:           result.EnvConfig.SSHD.ResolvedLocalPort(),
+		Port:           SSHLocalPortForResult(result),
 		WorkspacePath:  RemoteShellWorktreePath(req),
 		HostAlias:      SSHHostAlias(result.Tenant, result.Environment),
 		PrivateKeyPath: SSHPrivateKeyPath(result.EnvConfig.SSHD.PublicKeyPath),

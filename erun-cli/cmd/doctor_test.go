@@ -115,6 +115,7 @@ func TestDoctorCommandDryRunShowsDindTraceForSelectedAction(t *testing.T) {
 	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "local", RepoPath: projectRoot, KubernetesContext: "cluster-local"}); err != nil {
 		t.Fatalf("SaveEnvConfig failed: %v", err)
 	}
+	stubKubectlContexts(t, []string{"rancher-desktop"}, "rancher-desktop")
 
 	cmd := newTestRootCmd(testRootDeps{})
 	stdout := new(bytes.Buffer)

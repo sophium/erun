@@ -190,6 +190,9 @@ fi
 initialize_erun_config
 
 set -- emcp "$@" \
+    --host "${ERUN_MCP_HOST:-0.0.0.0}" \
+    --port "${ERUN_MCP_PORT:-17000}" \
+    --path "${ERUN_MCP_PATH:-/mcp}" \
     --tenant "${ERUN_TENANT:-}" \
     --environment "${ERUN_ENVIRONMENT:-}" \
     --repo-path "$(runtime_repo_dir)" \

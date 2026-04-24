@@ -51,6 +51,15 @@ func launchAppProcess(stdout, stderr io.Writer, args []string) error {
 }
 
 func newAppProcessCommand(goos string, executable string, args []string) *exec.Cmd {
+	if goos == "darwin" && filepath.Ext(executable) == ".app" {
+		openArgs := []string{"-n", executable}
+		if len(args) > 0 {
+			openArgs = append(openArgs, "--args")
+			openArgs = append(openArgs, args...)
+		}
+		return exec.Command("open", openArgs...)
+	}
+
 	cmd := exec.Command(executable, args...)
 	if goos == "darwin" {
 		cmd.Args[0] = "ERun"
@@ -66,6 +75,17 @@ func resolveAppExecutable() string {
 
 	executable, err := os.Executable()
 	if err == nil {
+		if runtime.GOOS == "darwin" {
+			siblingBundle := filepath.Join(filepath.Dir(executable), "ERun.app")
+			if info, statErr := os.Stat(siblingBundle); statErr == nil && info.IsDir() {
+				return siblingBundle
+			}
+			devBundle := filepath.Clean(filepath.Join(filepath.Dir(executable), "..", "..", "erun-ui", "bin", "ERun.app"))
+			if info, statErr := os.Stat(devBundle); statErr == nil && info.IsDir() {
+				return devBundle
+			}
+		}
+
 		sibling := filepath.Join(filepath.Dir(executable), executableName)
 		if info, statErr := os.Stat(sibling); statErr == nil && !info.IsDir() {
 			return sibling

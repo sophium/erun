@@ -87,13 +87,16 @@ func TestListCommandPrintsDefaultsAndConfiguredTenants(t *testing.T) {
 		"  effective target: tenant-a/local",
 		"  kubernetes context: cluster-local",
 		"  snapshot: on",
+		"  assigned local port range: 17000-17099",
+		"  assigned mcp local port: 17000 (when MCP is running or forwarded)",
+		"  assigned ssh local port: 17022 (when SSH port-forward is active)",
 		"Tenants:",
 		"  tenant-a [default, effective]",
 		"    default environment: local",
-		"      - local [default, effective] context=cluster-local snapshot=on repo=" + tenantAPath,
-		"      - prod context=cluster-prod snapshot=on repo=" + tenantAPath,
+		"      - local [default, effective] context=cluster-local snapshot=on repo=" + tenantAPath + " ports=17000-17099 mcp-port=17000 ssh-port=17022",
+		"      - prod context=cluster-prod snapshot=on repo=" + tenantAPath + " ports=17100-17199 mcp-port=17100 ssh-port=17122",
 		"  tenant-b",
-		"      - dev [default] context=cluster-b snapshot=on repo=" + tenantBPath,
+		"      - dev [default] context=cluster-b snapshot=on repo=" + tenantBPath + " ports=17200-17299 mcp-port=17200 ssh-port=17222",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)
@@ -172,8 +175,11 @@ func TestListCommandUsesConfiguredCurrentDirectoryTenantBeforeDefault(t *testing
 		"  effective target: tenant-b/dev",
 		"  kubernetes context: cluster-b",
 		"  snapshot: on",
+		"  assigned local port range: 17100-17199",
+		"  assigned mcp local port: 17100 (when MCP is running or forwarded)",
+		"  assigned ssh local port: 17122 (when SSH port-forward is active)",
 		"  tenant-b [effective]",
-		"      - dev [default, effective] context=cluster-b snapshot=on repo=" + tenantBPath,
+		"      - dev [default, effective] context=cluster-b snapshot=on repo=" + tenantBPath + " ports=17100-17199 mcp-port=17100 ssh-port=17122",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)
@@ -276,7 +282,10 @@ func TestListCommandPrintsSnapshotPreference(t *testing.T) {
 	output := stdout.String()
 	for _, want := range []string{
 		"  snapshot: off",
-		"      - local [default, effective] context=cluster-local snapshot=off repo=" + repoRoot,
+		"  assigned local port range: 17000-17099",
+		"  assigned mcp local port: 17000 (when MCP is running or forwarded)",
+		"  assigned ssh local port: 17022 (when SSH port-forward is active)",
+		"      - local [default, effective] context=cluster-local snapshot=off repo=" + repoRoot + " ports=17000-17099 mcp-port=17000 ssh-port=17022",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)
@@ -323,12 +332,14 @@ func TestListCommandPrintsSSHDConfiguration(t *testing.T) {
 
 	output := stdout.String()
 	for _, want := range []string{
+		"  assigned local port range: 17000-17099",
+		"  assigned mcp local port: 17000 (when MCP is running or forwarded)",
+		"  assigned ssh local port: 17022 (when SSH port-forward is active)",
 		"  sshd: on",
 		"  ssh host: erun-tenant-a-dev",
 		"  ssh user: erun",
-		"  ssh local port: 62222 (after erun open)",
 		"  ssh workspace: /home/erun/git/tenant-a",
-		"ssh=on host=erun-tenant-a-dev user=erun local-port=62222 workspace=/home/erun/git/tenant-a",
+		"ports=17000-17099 mcp-port=17000 ssh-port=17022 ssh=on host=erun-tenant-a-dev user=erun local-port=17022 workspace=/home/erun/git/tenant-a",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)
