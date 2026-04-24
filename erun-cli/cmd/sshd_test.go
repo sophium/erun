@@ -35,8 +35,7 @@ func TestRunSSHDInitCommandPersistsConfigAndDeploysRuntime(t *testing.T) {
 			Environment: "dev",
 			RepoPath:    "/home/erun/git/tenant-a",
 			TenantConfig: common.TenantConfig{
-				Name:   "tenant-a",
-				Remote: true,
+				Name: "tenant-a",
 			},
 			EnvConfig: common.EnvConfig{
 				Name:              "dev",
@@ -145,8 +144,7 @@ func TestRunSSHDInitCommandUsesResolvedEnvironmentLocalPortByDefault(t *testing.
 			Environment: "prod",
 			RepoPath:    "/home/erun/git/tenant-a",
 			TenantConfig: common.TenantConfig{
-				Name:   "tenant-a",
-				Remote: true,
+				Name: "tenant-a",
 			},
 			EnvConfig: common.EnvConfig{
 				Name:              "prod",

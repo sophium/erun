@@ -90,14 +90,14 @@ initialize_erun_config() {
     environment="${ERUN_ENVIRONMENT:-}"
     config_home="${XDG_CONFIG_HOME:-${HOME}/.config}"
     config_dir="${config_home}/erun"
-    remote_line=""
+    env_remote_line=""
 
     if [ -z "${tenant}" ] || [ -z "${environment}" ]; then
         return
     fi
 
     if runtime_repo_is_remote; then
-        remote_line="remote: true"
+        env_remote_line="remote: true"
     fi
 
     mkdir -p "${config_dir}/${tenant}/${environment}"
@@ -110,14 +110,13 @@ EOF
 projectroot: ${repo_dir}
 name: ${tenant}
 defaultenvironment: ${environment}
-${remote_line}
 EOF
 
     cat >"${config_dir}/${tenant}/${environment}/config.yaml" <<EOF
 name: ${environment}
 repopath: ${repo_dir}
 kubernetescontext: ${ERUN_KUBERNETES_CONTEXT:-in-cluster}
-${remote_line}
+${env_remote_line}
 EOF
 }
 

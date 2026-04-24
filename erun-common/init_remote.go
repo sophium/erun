@@ -24,7 +24,6 @@ func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tena
 			Name:               tenant,
 			ProjectRoot:        projectRoot,
 			DefaultEnvironment: envName,
-			Remote:             true,
 		},
 		EnvConfig: EnvConfig{
 			Name:              envName,

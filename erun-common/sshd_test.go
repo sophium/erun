@@ -108,6 +108,31 @@ func TestRuntimeEntrypointDisablesStrictModesForPVCBackedHome(t *testing.T) {
 	}
 }
 
+func TestRuntimeEntrypointWritesRemoteOnlyToEnvironmentConfig(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read runtime entrypoint: %v", err)
+	}
+	content := string(data)
+	tenantConfig := `cat >"${config_dir}/${tenant}/config.yaml" <<EOF
+projectroot: ${repo_dir}
+name: ${tenant}
+defaultenvironment: ${environment}
+EOF`
+	if !strings.Contains(content, tenantConfig) {
+		t.Fatalf("expected tenant config heredoc without remote flag, got:\n%s", content)
+	}
+	envConfig := `cat >"${config_dir}/${tenant}/${environment}/config.yaml" <<EOF
+name: ${environment}
+repopath: ${repo_dir}
+kubernetescontext: ${ERUN_KUBERNETES_CONTEXT:-in-cluster}
+${env_remote_line}
+EOF`
+	if !strings.Contains(content, envConfig) {
+		t.Fatalf("expected environment config heredoc to include env remote flag, got:\n%s", content)
+	}
+}
+
 func moduleGoVersion(goMod string) (string, error) {
 	for _, line := range strings.Split(goMod, "\n") {
 		line = strings.TrimSpace(line)

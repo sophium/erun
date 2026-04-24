@@ -59,7 +59,7 @@ type OpenResult struct {
 }
 
 func (r OpenResult) RemoteRepo() bool {
-	return r.EnvConfig.Remote || r.TenantConfig.Remote
+	return r.EnvConfig.Remote
 }
 
 type ShellLaunchParams struct {
@@ -268,7 +268,7 @@ func resolveOpenWithFinder(store OpenStore, findProjectRoot ProjectFinderFunc, p
 	}
 
 	repoPath = filepath.Clean(repoPath)
-	if !(envConfig.Remote || tenantConfig.Remote) {
+	if !envConfig.Remote {
 		info, err := os.Stat(repoPath)
 		if err != nil {
 			return OpenResult{}, err
@@ -522,7 +522,6 @@ func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (stri
 		Name:               req.Tenant,
 		ProjectRoot:        remoteWorkdir,
 		DefaultEnvironment: req.Environment,
-		Remote:             req.RemoteRepo,
 	})
 	if err != nil {
 		return "", err

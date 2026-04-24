@@ -193,8 +193,7 @@ func TestRunResolvedOpenCommandForwardsMCPBeforeShell(t *testing.T) {
 			Environment: "dev",
 			RepoPath:    "/home/erun/git/tenant-a",
 			TenantConfig: common.TenantConfig{
-				Name:   "tenant-a",
-				Remote: true,
+				Name: "tenant-a",
 			},
 			EnvConfig: common.EnvConfig{
 				Name:              "dev",
@@ -331,8 +330,7 @@ func TestRunResolvedOpenCommandForcesSSHDEnabledOnRuntimeDeploy(t *testing.T) {
 			Environment: "dev",
 			RepoPath:    "/home/erun/git/tenant-a",
 			TenantConfig: common.TenantConfig{
-				Name:   "tenant-a",
-				Remote: true,
+				Name: "tenant-a",
 			},
 			EnvConfig: common.EnvConfig{
 				Name:              "dev",
@@ -431,8 +429,7 @@ func TestRunResolvedOpenCommandLaunchesVSCodeWhenRequested(t *testing.T) {
 			Environment: "dev",
 			RepoPath:    "/home/erun/git/tenant-a",
 			TenantConfig: common.TenantConfig{
-				Name:   "tenant-a",
-				Remote: true,
+				Name: "tenant-a",
 			},
 			EnvConfig: common.EnvConfig{
 				Name:              "dev",
@@ -529,8 +526,7 @@ func TestRunResolvedOpenCommandLaunchesIntelliJWhenRequested(t *testing.T) {
 			Environment: "dev",
 			RepoPath:    "/home/erun/git/tenant-a",
 			TenantConfig: common.TenantConfig{
-				Name:   "tenant-a",
-				Remote: true,
+				Name: "tenant-a",
 			},
 			EnvConfig: common.EnvConfig{
 				Name:              "dev",
@@ -1317,7 +1313,6 @@ func TestOpenCommandSkipsLocalRuntimeChartPromptForRemoteRepo(t *testing.T) {
 				Name:               "erun",
 				ProjectRoot:        "/home/erun/git/erun",
 				DefaultEnvironment: "local",
-				Remote:             true,
 			},
 			env: &common.EnvConfig{
 				Name:              "local",

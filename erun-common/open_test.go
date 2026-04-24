@@ -58,7 +58,6 @@ func TestOpenResolveAllowsRemoteRepoPathWithoutLocalCheckout(t *testing.T) {
 				Name:               "frs",
 				ProjectRoot:        "/home/erun/git/frs",
 				DefaultEnvironment: "dev",
-				Remote:             true,
 			},
 		},
 		envConfigs: map[string]EnvConfig{
@@ -83,6 +82,39 @@ func TestOpenResolveAllowsRemoteRepoPathWithoutLocalCheckout(t *testing.T) {
 	}
 	if result.RepoPath != "/home/erun/git/frs" {
 		t.Fatalf("unexpected repo path: %+v", result)
+	}
+}
+
+func TestOpenResolveIgnoresLegacyTenantRemoteFlagForLocalEnvironment(t *testing.T) {
+	repoPath := t.TempDir()
+	store := openStore{
+		toolConfig: ERunConfig{DefaultTenant: "frs"},
+		tenantConfigs: map[string]TenantConfig{
+			"frs": {
+				Name:               "frs",
+				ProjectRoot:        repoPath,
+				DefaultEnvironment: "local",
+				Remote:             true,
+			},
+		},
+		envConfigs: map[string]EnvConfig{
+			"frs/local": {
+				Name:              "local",
+				RepoPath:          repoPath,
+				KubernetesContext: "cluster-local",
+			},
+		},
+	}
+
+	result, err := ResolveOpen(store, OpenParams{
+		UseDefaultTenant:      true,
+		UseDefaultEnvironment: true,
+	})
+	if err != nil {
+		t.Fatalf("Resolve failed: %v", err)
+	}
+	if result.RemoteRepo() {
+		t.Fatalf("expected env-level remote setting to control remote repo behavior, got %+v", result)
 	}
 }
 
@@ -598,8 +630,8 @@ func TestRemoteShellScriptMarksRemoteConfigsAndSkipsHostGitBootstrap(t *testing.
 	if err := yaml.Unmarshal([]byte(tenantConfigBody), &tenantConfig); err != nil {
 		t.Fatalf("expected tenant config heredoc to be valid yaml, got %v\n%s", err, tenantConfigBody)
 	}
-	if !tenantConfig.Remote {
-		t.Fatalf("expected remote tenant config, got %+v", tenantConfig)
+	if tenantConfig.Remote {
+		t.Fatalf("did not expect tenant config to be marked remote, got %+v", tenantConfig)
 	}
 
 	envConfigBody := extractHeredoc(t, script, `cat > "$config_home/erun/erun/remote/config.yaml" <<'EOF'`)

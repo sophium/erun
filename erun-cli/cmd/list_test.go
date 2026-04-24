@@ -303,7 +303,7 @@ func TestListCommandPrintsSSHDConfiguration(t *testing.T) {
 	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
 		t.Fatalf("save erun config: %v", err)
 	}
-	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: "dev", Remote: true}); err != nil {
+	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: "dev"}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
 	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{

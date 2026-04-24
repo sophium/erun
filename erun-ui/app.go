@@ -29,6 +29,7 @@ type erunUIDeps struct {
 	resolveCLIPath  func() string
 	startTerminal   func(startTerminalSessionParams) (terminalSession, error)
 	savePastedImage func(pastedImageSaveParams) (string, error)
+	loadDiff        func(context.Context, string) (eruncommon.DiffResult, error)
 }
 
 type App struct {
@@ -54,7 +55,8 @@ type uiTenant struct {
 }
 
 type uiEnvironment struct {
-	Name string `json:"name"`
+	Name   string `json:"name"`
+	MCPURL string `json:"mcpUrl,omitempty"`
 }
 
 type uiSelection struct {
@@ -108,6 +110,9 @@ func NewApp(deps erunUIDeps) *App {
 	}
 	if deps.savePastedImage == nil {
 		deps.savePastedImage = savePastedImageToRuntime
+	}
+	if deps.loadDiff == nil {
+		deps.loadDiff = loadDiffFromMCP
 	}
 	return &App{
 		deps:     deps,
@@ -259,6 +264,25 @@ func (a *App) SavePastedImage(payload pastedImagePayload) (pastedImageResult, er
 	return pastedImageResult{Path: path}, nil
 }
 
+func (a *App) LoadDiff(selection uiSelection) (eruncommon.DiffResult, error) {
+	selection = normalizeSelection(selection)
+	if selection.Tenant == "" || selection.Environment == "" {
+		return eruncommon.DiffResult{}, fmt.Errorf("tenant and environment are required")
+	}
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+	})
+	if err != nil {
+		return eruncommon.DiffResult{}, err
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return a.deps.loadDiff(ctx, mcpEndpointForOpenResult(result))
+}
+
 func (a *App) ResizeSession(cols, rows int) error {
 	if cols <= 0 || rows <= 0 {
 		return nil
@@ -379,7 +403,8 @@ func stateFromListResult(result eruncommon.ListResult) uiState {
 		}
 		for _, environment := range tenant.Environments {
 			item.Environments = append(item.Environments, uiEnvironment{
-				Name: strings.TrimSpace(environment.Name),
+				Name:   strings.TrimSpace(environment.Name),
+				MCPURL: mcpEndpointForListEnvironment(environment),
 			})
 		}
 		state.Tenants = append(state.Tenants, item)
@@ -391,6 +416,18 @@ func stateFromListResult(result eruncommon.ListResult) uiState {
 		}
 	}
 	return state
+}
+
+func mcpEndpointForOpenResult(result eruncommon.OpenResult) string {
+	return fmt.Sprintf("http://127.0.0.1:%d/mcp", eruncommon.MCPPortForResult(result))
+}
+
+func mcpEndpointForListEnvironment(environment eruncommon.ListEnvironmentResult) string {
+	port := environment.LocalPorts.MCP
+	if port <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d/mcp", port)
 }
 
 func buildDetailsFrom(info eruncommon.BuildInfo) uiBuildDetails {

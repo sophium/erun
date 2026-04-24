@@ -134,6 +134,10 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Description: "Inspect the resolved DevOps runtime Docker state and optionally prune unused images, build cache, or stopped containers",
 	}, doctorTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "diff",
+		Description: "Return the current git diff from the runtime repo root as raw text plus structured file, hunk, line, and tree data",
+	}, diffTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "release",
 		Description: "Plan and execute a project release from the runtime repo root using .erun/config.yaml branch policy",
 	}, releaseTool(runtime))
