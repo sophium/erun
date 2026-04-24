@@ -33,6 +33,13 @@ fi
 
 if [ -x "$WAILS_BIN" ]; then
 	"$WAILS_BIN" generate module
+else
+	WAILS_VERSION=$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)
+	WAILS_TMP="${TMPDIR:-/tmp}/erun-wails-$$"
+	mkdir -p "$WAILS_TMP"
+	GOBIN="$WAILS_TMP" go install "github.com/wailsapp/wails/v2/cmd/wails@$WAILS_VERSION"
+	"$WAILS_TMP/wails" generate module
+	rm -rf "$WAILS_TMP"
 fi
 
 if [ -d frontend ]; then

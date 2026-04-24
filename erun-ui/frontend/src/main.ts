@@ -91,6 +91,7 @@ const root = document.documentElement;
 const MIN_SIDEBAR_WIDTH = 248;
 const MAX_SIDEBAR_WIDTH = 520;
 const DEFAULT_SIDEBAR_WIDTH = 338;
+const SIDEBAR_WIDTH_STORAGE_KEY = 'erun.sidebarWidth';
 
 const state: {
   tenants: UITenant[];
@@ -110,7 +111,7 @@ const state: {
   selectionSessions: new Map<string, number>(),
   sessionBuffers: new Map<number, Uint8Array[]>(),
   sessionExitReasons: new Map<number, string>(),
-  sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
+  sidebarWidth: loadSavedSidebarWidth(),
   sidebarHidden: false,
 };
 
@@ -176,6 +177,7 @@ splitter.addEventListener('mousedown', (event: MouseEvent) => {
     document.body.classList.remove('is-resizing');
     window.removeEventListener('mousemove', move);
     window.removeEventListener('mouseup', stop);
+    saveSidebarWidth();
   };
 
   window.addEventListener('mousemove', move);
@@ -335,6 +337,29 @@ function resetTerminal(): void {
 function setSidebarWidth(nextWidth: number): void {
   state.sidebarWidth = clamp(nextWidth, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH);
   applySidebarState();
+}
+
+function loadSavedSidebarWidth(): number {
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+    if (!raw) {
+      return DEFAULT_SIDEBAR_WIDTH;
+    }
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed)) {
+      return DEFAULT_SIDEBAR_WIDTH;
+    }
+    return clamp(parsed, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH);
+  } catch {
+    return DEFAULT_SIDEBAR_WIDTH;
+  }
+}
+
+function saveSidebarWidth(): void {
+  try {
+    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(state.sidebarWidth));
+  } catch {
+  }
 }
 
 function setSidebarHidden(hidden: boolean): void {
