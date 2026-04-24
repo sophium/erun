@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 const (
@@ -28,6 +28,7 @@ type erunUIDeps struct {
 	findProjectRoot eruncommon.ProjectFinderFunc
 	resolveCLIPath  func() string
 	startTerminal   func(startTerminalSessionParams) (terminalSession, error)
+	savePastedImage func(pastedImageSaveParams) (string, error)
 }
 
 type App struct {
@@ -82,6 +83,16 @@ type terminalExitPayload struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
+type pastedImagePayload struct {
+	Data     string `json:"data"`
+	MIMEType string `json:"mimeType,omitempty"`
+	Name     string `json:"name,omitempty"`
+}
+
+type pastedImageResult struct {
+	Path string `json:"path"`
+}
+
 func NewApp(deps erunUIDeps) *App {
 	if deps.store == nil {
 		deps.store = eruncommon.ConfigStore{}
@@ -94,6 +105,9 @@ func NewApp(deps erunUIDeps) *App {
 	}
 	if deps.startTerminal == nil {
 		deps.startTerminal = startTerminalSession
+	}
+	if deps.savePastedImage == nil {
+		deps.savePastedImage = savePastedImageToRuntime
 	}
 	return &App{
 		deps:     deps,
@@ -212,6 +226,39 @@ func (a *App) SendSessionInput(data string) error {
 	return err
 }
 
+func (a *App) SavePastedImage(payload pastedImagePayload) (pastedImageResult, error) {
+	data, mimeType, err := decodePastedImagePayload(payload)
+	if err != nil {
+		return pastedImageResult{}, err
+	}
+
+	a.mu.Lock()
+	current := a.current
+	a.mu.Unlock()
+	if current == nil || current.session == nil {
+		return pastedImageResult{}, fmt.Errorf("no active terminal session")
+	}
+
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      current.selection.Tenant,
+		Environment: current.selection.Environment,
+	})
+	if err != nil {
+		return pastedImageResult{}, err
+	}
+
+	path, err := a.deps.savePastedImage(pastedImageSaveParams{
+		Result:   result,
+		Data:     data,
+		MIMEType: mimeType,
+		Name:     payload.Name,
+	})
+	if err != nil {
+		return pastedImageResult{}, err
+	}
+	return pastedImageResult{Path: path}, nil
+}
+
 func (a *App) ResizeSession(cols, rows int) error {
 	if cols <= 0 || rows <= 0 {
 		return nil
@@ -225,6 +272,37 @@ func (a *App) ResizeSession(cols, rows int) error {
 	}
 
 	return current.session.Resize(cols, rows)
+}
+
+func decodePastedImagePayload(payload pastedImagePayload) ([]byte, string, error) {
+	value := strings.TrimSpace(payload.Data)
+	mimeType := strings.TrimSpace(payload.MIMEType)
+	if strings.HasPrefix(value, "data:") {
+		header, body, ok := strings.Cut(value, ",")
+		if !ok {
+			return nil, "", fmt.Errorf("pasted image data URL is malformed")
+		}
+		value = body
+		if mimeType == "" {
+			mediaType := strings.TrimPrefix(header, "data:")
+			mediaType, _, _ = strings.Cut(mediaType, ";")
+			mimeType = strings.TrimSpace(mediaType)
+		}
+	}
+	if value == "" {
+		return nil, "", fmt.Errorf("pasted image data is empty")
+	}
+	data, err := base64.StdEncoding.DecodeString(value)
+	if err != nil {
+		return nil, "", fmt.Errorf("decode pasted image: %w", err)
+	}
+	if len(data) == 0 {
+		return nil, "", fmt.Errorf("pasted image data is empty")
+	}
+	if !strings.HasPrefix(strings.ToLower(mimeType), "image/") {
+		return nil, "", fmt.Errorf("clipboard item is not an image")
+	}
+	return data, mimeType, nil
 }
 
 func (a *App) streamSession(managed *managedTerminal) {

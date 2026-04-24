@@ -44,16 +44,18 @@ ARG BUILDX_VERSION=v0.24.0
 ARG DIFFT_VERSION=0.68.0
 ARG GH_VERSION=2.74.2
 ARG GOLANGCI_LINT_VERSION=v2.2.2
+ARG NODE_VERSION=24.14.0
+ARG CODEX_VERSION=0.124.0
 
 USER root
 
 # Keep external tooling installs pinned and centralized in one layer for traceability.
 RUN apt-get update && \
-    apt-get install -y git bash-completion dpkg-dev && \
+    apt-get install -y git bash-completion bubblewrap dpkg-dev && \
     rm -rf /var/lib/apt/lists/* && \
     case "${TARGETARCH}" in \
-        amd64) arch=amd64; docker_arch=x86_64 ;; \
-        arm64) arch=arm64; docker_arch=aarch64 ;; \
+        amd64) arch=amd64; docker_arch=x86_64; node_arch=x64 ;; \
+        arm64) arch=arm64; docker_arch=aarch64; node_arch=arm64 ;; \
         *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
     esac && \
     curl -fsSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${arch}/kubectl" && \
@@ -78,10 +80,14 @@ RUN apt-get update && \
     curl -fsSL -o /tmp/docker.tgz "https://download.docker.com/linux/static/stable/${docker_arch}/docker-${DOCKER_VERSION}.tgz" && \
     tar -xzf /tmp/docker.tgz -C /tmp && \
     install -m 0755 /tmp/docker/docker /usr/local/bin/docker && \
+    curl -fsSL -o /tmp/node.tar.gz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.gz" && \
+    tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1 && \
+    npm install -g "@openai/codex@${CODEX_VERSION}" && \
+    npm cache clean --force && \
     mkdir -p /usr/local/lib/docker/cli-plugins /usr/local/libexec/docker/cli-plugins && \
     curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-buildx "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-${arch}" && \
     ln -sf /usr/local/lib/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx && \
-    rm -rf /tmp/helm.tar.gz /tmp/terraform.zip /tmp/k9s.tar.gz /tmp/difft.tar.gz /tmp/gh.tar.gz /tmp/golangci-lint.tar.gz /tmp/docker.tgz "/tmp/linux-${arch}" "/tmp/gh_${GH_VERSION}_linux_${arch}" "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION#v}-linux-${arch}" /tmp/terraform /tmp/k9s /tmp/difft /tmp/docker && \
+    rm -rf /tmp/helm.tar.gz /tmp/terraform.zip /tmp/k9s.tar.gz /tmp/difft.tar.gz /tmp/gh.tar.gz /tmp/golangci-lint.tar.gz /tmp/docker.tgz /tmp/node.tar.gz "/tmp/linux-${arch}" "/tmp/gh_${GH_VERSION}_linux_${arch}" "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION#v}-linux-${arch}" /tmp/terraform /tmp/k9s /tmp/difft /tmp/docker && \
     groupmod -n erun ubuntu && \
     usermod -l erun -d /home/erun -m -g erun ubuntu && \
     passwd -d erun && \

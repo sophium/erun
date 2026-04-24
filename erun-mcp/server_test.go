@@ -219,8 +219,14 @@ func TestListToolReturnsConfiguredTenantsAndEffectiveTarget(t *testing.T) {
 	if output.CurrentDirectory.Effective.Tenant != "tenant-a" || output.CurrentDirectory.Effective.Environment != "dev" {
 		t.Fatalf("unexpected effective target: %+v", output.CurrentDirectory.Effective)
 	}
+	if output.CurrentDirectory.Effective.LocalPorts.RangeStart != 17000 || output.CurrentDirectory.Effective.LocalPorts.SSH != 17022 {
+		t.Fatalf("unexpected effective local ports: %+v", output.CurrentDirectory.Effective.LocalPorts)
+	}
 	if len(output.Tenants) != 1 || output.Tenants[0].Name != "tenant-a" {
 		t.Fatalf("unexpected tenants: %+v", output.Tenants)
+	}
+	if output.Tenants[0].Environments[0].LocalPorts.RangeEnd != 17099 {
+		t.Fatalf("unexpected environment local ports: %+v", output.Tenants[0].Environments[0].LocalPorts)
 	}
 }
 

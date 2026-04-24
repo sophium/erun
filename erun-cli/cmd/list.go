@@ -99,6 +99,15 @@ func writeEffectiveOpen(ctx common.Context, current common.ListCurrentDirectoryR
 	if err := writeLabeledValue(ctx, "snapshot", enabledDisabledLabel(current.Effective.Snapshot)); err != nil {
 		return err
 	}
+	if err := writeLabeledValue(ctx, "assigned local port range", portRangeLabel(current.Effective.LocalPorts)); err != nil {
+		return err
+	}
+	if err := writeLabeledValue(ctx, "assigned mcp local port", fmt.Sprintf("%d (when MCP is running or forwarded)", current.Effective.LocalPorts.MCP)); err != nil {
+		return err
+	}
+	if err := writeLabeledValue(ctx, "assigned ssh local port", fmt.Sprintf("%d (when SSH port-forward is active)", current.Effective.LocalPorts.SSH)); err != nil {
+		return err
+	}
 	if current.Effective.SSH.Enabled {
 		if err := writeLabeledValue(ctx, "sshd", "on"); err != nil {
 			return err
@@ -107,9 +116,6 @@ func writeEffectiveOpen(ctx common.Context, current common.ListCurrentDirectoryR
 			return err
 		}
 		if err := writeLabeledValue(ctx, "ssh user", current.Effective.SSH.User); err != nil {
-			return err
-		}
-		if err := writeLabeledValue(ctx, "ssh local port", fmt.Sprintf("%d (after erun open)", current.Effective.SSH.LocalPort)); err != nil {
 			return err
 		}
 		if err := writeLabeledValue(ctx, "ssh workspace", current.Effective.SSH.WorkspacePath); err != nil {
@@ -160,6 +166,9 @@ func writeTenantEntry(ctx common.Context, tenant common.ListTenantResult) error 
 		envLine += " context=" + quotedValueOrNone(env.KubernetesContext)
 		envLine += " snapshot=" + enabledDisabledLabel(env.Snapshot)
 		envLine += " repo=" + quotedValueOrNone(env.RepoPath)
+		envLine += " ports=" + portRangeLabel(env.LocalPorts)
+		envLine += " mcp-port=" + fmt.Sprintf("%d", env.LocalPorts.MCP)
+		envLine += " ssh-port=" + fmt.Sprintf("%d", env.LocalPorts.SSH)
 		if env.SSH.Enabled {
 			envLine += " ssh=on"
 			envLine += " host=" + quotedValueOrNone(env.SSH.HostAlias)
@@ -214,4 +223,11 @@ func enabledDisabledLabel(enabled bool) string {
 		return "on"
 	}
 	return "off"
+}
+
+func portRangeLabel(ports common.EnvironmentLocalPorts) string {
+	if ports.RangeStart <= 0 || ports.RangeEnd <= 0 {
+		return "none"
+	}
+	return fmt.Sprintf("%d-%d", ports.RangeStart, ports.RangeEnd)
 }

@@ -71,10 +71,13 @@ func TestVSCodeLaunchCommand(t *testing.T) {
 func TestLaunchVSCodeEnsuresKnownHostBeforeOpening(t *testing.T) {
 	prevEnsure := ensureLocalSSHDKnownHostFunc
 	prevExec := ideExecCommand
+	prevHostOS := currentHostOS
 	t.Cleanup(func() {
 		ensureLocalSSHDKnownHostFunc = prevEnsure
 		ideExecCommand = prevExec
+		currentHostOS = prevHostOS
 	})
+	currentHostOS = func() common.HostOS { return common.HostOSDarwin }
 
 	callOrder := make([]string, 0, 2)
 	ensureLocalSSHDKnownHostFunc = func(_ common.Context, result common.OpenResult) error {

@@ -34,12 +34,13 @@ type ListCurrentDirectoryResult struct {
 }
 
 type ListEffectiveTargetResult struct {
-	Tenant            string        `json:"tenant"`
-	Environment       string        `json:"environment"`
-	KubernetesContext string        `json:"kubernetesContext"`
-	RepoPath          string        `json:"repoPath"`
-	Snapshot          bool          `json:"snapshot"`
-	SSH               ListSSHResult `json:"ssh,omitempty"`
+	Tenant            string                `json:"tenant"`
+	Environment       string                `json:"environment"`
+	KubernetesContext string                `json:"kubernetesContext"`
+	RepoPath          string                `json:"repoPath"`
+	Snapshot          bool                  `json:"snapshot"`
+	LocalPorts        EnvironmentLocalPorts `json:"localPorts,omitempty"`
+	SSH               ListSSHResult         `json:"ssh,omitempty"`
 }
 
 type ListTenantResult struct {
@@ -51,13 +52,14 @@ type ListTenantResult struct {
 }
 
 type ListEnvironmentResult struct {
-	Name              string        `json:"name"`
-	KubernetesContext string        `json:"kubernetesContext,omitempty"`
-	RepoPath          string        `json:"repoPath,omitempty"`
-	Snapshot          bool          `json:"snapshot"`
-	IsDefault         bool          `json:"isDefault,omitempty"`
-	IsEffective       bool          `json:"isEffective,omitempty"`
-	SSH               ListSSHResult `json:"ssh,omitempty"`
+	Name              string                `json:"name"`
+	KubernetesContext string                `json:"kubernetesContext,omitempty"`
+	RepoPath          string                `json:"repoPath,omitempty"`
+	Snapshot          bool                  `json:"snapshot"`
+	LocalPorts        EnvironmentLocalPorts `json:"localPorts,omitempty"`
+	IsDefault         bool                  `json:"isDefault,omitempty"`
+	IsEffective       bool                  `json:"isEffective,omitempty"`
+	SSH               ListSSHResult         `json:"ssh,omitempty"`
 }
 
 type ListSSHResult struct {
@@ -114,8 +116,14 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 			KubernetesContext: strings.TrimSpace(effectiveResult.EnvConfig.KubernetesContext),
 			RepoPath:          effectiveResult.RepoPath,
 			Snapshot:          deployTargetSnapshotEnabled(effectiveResult, nil),
+			LocalPorts:        LocalPortsForResult(effectiveResult),
 			SSH:               listSSHResult(effectiveResult),
 		}
+	}
+
+	portAllocations, err := ResolveAllEnvironmentLocalPorts(store)
+	if err != nil {
+		return ListResult{}, err
 	}
 
 	for _, tenant := range tenants {
@@ -132,11 +140,19 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 			Environments:       make([]ListEnvironmentResult, 0, len(envs)),
 		}
 		for _, env := range envs {
+			localPorts := portAllocations[environmentPortKey(tenant.Name, env.Name)]
+			if localPorts.RangeStart == 0 {
+				localPorts = DefaultEnvironmentLocalPorts()
+				if env.SSHD.LocalPort > 0 {
+					localPorts.SSH = env.SSHD.LocalPort
+				}
+			}
 			tenantResult.Environments = append(tenantResult.Environments, ListEnvironmentResult{
 				Name:              env.Name,
 				KubernetesContext: strings.TrimSpace(env.KubernetesContext),
 				RepoPath:          strings.TrimSpace(env.RepoPath),
 				Snapshot:          env.SnapshotEnabled(),
+				LocalPorts:        localPorts,
 				IsDefault:         env.Name == tenant.DefaultEnvironment,
 				IsEffective:       effectiveErr == nil && tenant.Name == effectiveResult.Tenant && env.Name == effectiveResult.Environment,
 				SSH: listSSHResult(OpenResult{
@@ -147,8 +163,9 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 						ProjectRoot: tenant.ProjectRoot,
 						Remote:      tenant.Remote,
 					},
-					EnvConfig: env,
-					RepoPath:  env.RepoPath,
+					EnvConfig:  env,
+					LocalPorts: localPorts,
+					RepoPath:   env.RepoPath,
 				}),
 			})
 		}

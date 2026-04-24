@@ -42,6 +42,10 @@ func newMCPCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), r
 			if err != nil {
 				return err
 			}
+			resolvedPort := port
+			if !cmd.Flags().Changed("port") {
+				resolvedPort = common.MCPPortForResult(result)
+			}
 
 			runtime := mcpLaunchContext{
 				Tenant:            result.Tenant,
@@ -50,7 +54,7 @@ func newMCPCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), r
 				KubernetesContext: result.EnvConfig.KubernetesContext,
 				Namespace:         common.KubernetesNamespaceName(result.Tenant, result.Environment),
 			}
-			commandArgs := mcpCommandArgs(host, port, path, runtime)
+			commandArgs := mcpCommandArgs(host, resolvedPort, path, runtime)
 			ctx.TraceCommand("", "emcp", commandArgs...)
 			if ctx.DryRun {
 				return nil

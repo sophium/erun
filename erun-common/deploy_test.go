@@ -246,6 +246,31 @@ func TestRuntimeChartsInstallBinfmtForMultiArchBuilds(t *testing.T) {
 	}
 }
 
+func TestRuntimeChartsExposeMCPAndSSHPorts(t *testing.T) {
+	paths := []string{
+		filepath.Join("..", "erun-devops", "k8s", "erun-devops", "templates", "service.yaml"),
+		filepath.Join("assets", "default-devops-chart", "templates", "service.yaml"),
+	}
+
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %q: %v", path, err)
+		}
+		content := string(data)
+		for _, want := range []string{
+			"containerPort: 17000",
+			"name: mcp",
+			"containerPort: 2222",
+			"name: ssh",
+		} {
+			if !strings.Contains(content, want) {
+				t.Fatalf("expected %q to contain %q, got:\n%s", path, want, content)
+			}
+		}
+	}
+}
+
 func TestRuntimeChartsGrantLocalRuntimeCrossNamespaceBootstrapAccess(t *testing.T) {
 	paths := []string{
 		filepath.Join("..", "erun-devops", "k8s", "erun-devops", "templates", "service.yaml"),

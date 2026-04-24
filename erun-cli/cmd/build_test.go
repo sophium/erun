@@ -1067,6 +1067,9 @@ func TestRootBuildShorthandDoubleVerbosePrintsBuildTraceBeforeExecuting(t *testi
 
 func TestDevopsContainerBuildFailsWithoutDockerfile(t *testing.T) {
 	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "", "", common.ErrNotInGitRepository
+		},
 		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
 			return common.DockerBuildContext{Dir: t.TempDir()}, nil
 		},

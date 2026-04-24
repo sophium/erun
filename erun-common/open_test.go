@@ -45,6 +45,9 @@ func TestOpenResolveUsesDefaultTenantAndEnvironment(t *testing.T) {
 	if result.RepoPath != repoPath || result.Title != "tenant-a-dev" {
 		t.Fatalf("unexpected shell target: %+v", result)
 	}
+	if result.LocalPorts.RangeStart != 17000 || result.LocalPorts.SSH != 17022 {
+		t.Fatalf("unexpected local ports: %+v", result.LocalPorts)
+	}
 }
 
 func TestOpenResolveAllowsRemoteRepoPathWithoutLocalCheckout(t *testing.T) {
@@ -131,6 +134,33 @@ func TestOpenResolveUsesCurrentDirectoryTenantBeforeDefault(t *testing.T) {
 	}
 	if result.Tenant != "tenant-a" || result.Environment != "dev" {
 		t.Fatalf("expected current directory tenant to win, got %+v", result)
+	}
+	if result.LocalPorts.RangeStart != 17000 || result.LocalPorts.SSH != 17022 {
+		t.Fatalf("unexpected local ports: %+v", result.LocalPorts)
+	}
+}
+
+func TestOpenResolveAssignsEnvironmentLocalPortsFromSortedTenantEnvironmentOrder(t *testing.T) {
+	repoA := t.TempDir()
+	repoB := t.TempDir()
+	store := openStore{
+		tenantConfigs: map[string]TenantConfig{
+			"tenant-b": {Name: "tenant-b", ProjectRoot: repoB, DefaultEnvironment: "stage"},
+			"tenant-a": {Name: "tenant-a", ProjectRoot: repoA, DefaultEnvironment: "dev"},
+		},
+		envConfigs: map[string]EnvConfig{
+			"tenant-a/dev":   {Name: "dev", RepoPath: repoA, KubernetesContext: "cluster-a"},
+			"tenant-a/prod":  {Name: "prod", RepoPath: repoA, KubernetesContext: "cluster-a"},
+			"tenant-b/stage": {Name: "stage", RepoPath: repoB, KubernetesContext: "cluster-b"},
+		},
+	}
+
+	result, err := ResolveOpen(store, OpenParams{Tenant: "tenant-b", Environment: "stage"})
+	if err != nil {
+		t.Fatalf("ResolveOpen failed: %v", err)
+	}
+	if result.LocalPorts.RangeStart != 17200 || result.LocalPorts.MCP != 17200 || result.LocalPorts.SSH != 17222 {
+		t.Fatalf("unexpected local ports: %+v", result.LocalPorts)
 	}
 }
 
@@ -800,4 +830,15 @@ func (s openStore) LoadEnvConfig(tenant, environment string) (EnvConfig, string,
 		return EnvConfig{}, "", ErrNotInitialized
 	}
 	return config, "", nil
+}
+
+func (s openStore) ListEnvConfigs(tenant string) ([]EnvConfig, error) {
+	envs := make([]EnvConfig, 0, len(s.envConfigs))
+	for key, config := range s.envConfigs {
+		if !strings.HasPrefix(key, tenant+"/") {
+			continue
+		}
+		envs = append(envs, config)
+	}
+	return envs, nil
 }

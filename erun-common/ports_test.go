@@ -14,3 +14,30 @@ func TestMCPServicePortUsesOffsetFromLowerServicePort(t *testing.T) {
 		t.Fatalf("expected MCP service port %d, got %d", want, MCPServicePort)
 	}
 }
+
+func TestResolveEnvironmentLocalPortsUsesSortedTenantEnvironmentOrder(t *testing.T) {
+	store := listStore{
+		openStore: openStore{
+			tenantConfigs: map[string]TenantConfig{
+				"tenant-b": {Name: "tenant-b"},
+				"tenant-a": {Name: "tenant-a"},
+			},
+		},
+		envsByTenant: map[string][]EnvConfig{
+			"tenant-a": {{Name: "prod"}, {Name: "dev"}},
+			"tenant-b": {{Name: "stage"}},
+		},
+	}
+
+	ports, err := ResolveEnvironmentLocalPorts(store, "tenant-b", "stage")
+	if err != nil {
+		t.Fatalf("ResolveEnvironmentLocalPorts failed: %v", err)
+	}
+
+	if ports.RangeStart != 17200 || ports.RangeEnd != 17299 {
+		t.Fatalf("unexpected local port range: %+v", ports)
+	}
+	if ports.MCP != 17200 || ports.SSH != 17222 {
+		t.Fatalf("unexpected local service ports: %+v", ports)
+	}
+}

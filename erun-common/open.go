@@ -53,6 +53,7 @@ type OpenResult struct {
 	Environment  string
 	TenantConfig TenantConfig
 	EnvConfig    EnvConfig
+	LocalPorts   EnvironmentLocalPorts
 	RepoPath     string
 	Title        string
 }
@@ -280,11 +281,17 @@ func resolveOpenWithFinder(store OpenStore, findProjectRoot ProjectFinderFunc, p
 		return OpenResult{}, fmt.Errorf("%w: %s/%s", ErrKubernetesContextNotConfigured, tenant, environment)
 	}
 
+	localPorts, err := environmentLocalPortsForTarget(store, tenant, envConfig)
+	if err != nil {
+		return OpenResult{}, err
+	}
+
 	return OpenResult{
 		Tenant:       tenant,
 		Environment:  environment,
 		TenantConfig: tenantConfig,
 		EnvConfig:    envConfig,
+		LocalPorts:   localPorts,
 		RepoPath:     repoPath,
 		Title:        tenant + "-" + environment,
 	}, nil
