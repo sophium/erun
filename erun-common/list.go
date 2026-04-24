@@ -161,7 +161,6 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 					TenantConfig: TenantConfig{
 						Name:        tenant.Name,
 						ProjectRoot: tenant.ProjectRoot,
-						Remote:      tenant.Remote,
 					},
 					EnvConfig:  env,
 					LocalPorts: localPorts,

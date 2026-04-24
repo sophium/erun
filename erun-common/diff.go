@@ -1,0 +1,384 @@
+package eruncommon
+
+import (
+	"bytes"
+	"fmt"
+	"io"
+	"path"
+	"strconv"
+	"strings"
+)
+
+type DiffResult struct {
+	WorkingDirectory string         `json:"workingDirectory,omitempty"`
+	RawDiff          string         `json:"rawDiff"`
+	Summary          DiffSummary    `json:"summary"`
+	Files            []DiffFile     `json:"files,omitempty"`
+	Tree             []DiffTreeNode `json:"tree,omitempty"`
+}
+
+type DiffSummary struct {
+	FileCount int `json:"fileCount"`
+	Additions int `json:"additions"`
+	Deletions int `json:"deletions"`
+}
+
+type DiffFile struct {
+	Path      string     `json:"path"`
+	OldPath   string     `json:"oldPath,omitempty"`
+	NewPath   string     `json:"newPath,omitempty"`
+	Status    string     `json:"status"`
+	Additions int        `json:"additions"`
+	Deletions int        `json:"deletions"`
+	Binary    bool       `json:"binary,omitempty"`
+	Hunks     []DiffHunk `json:"hunks,omitempty"`
+}
+
+type DiffHunk struct {
+	Header   string     `json:"header"`
+	OldStart int        `json:"oldStart"`
+	OldLines int        `json:"oldLines"`
+	NewStart int        `json:"newStart"`
+	NewLines int        `json:"newLines"`
+	Lines    []DiffLine `json:"lines,omitempty"`
+}
+
+type DiffLine struct {
+	Kind    string `json:"kind"`
+	Content string `json:"content"`
+	OldLine int    `json:"oldLine,omitempty"`
+	NewLine int    `json:"newLine,omitempty"`
+}
+
+type DiffTreeNode struct {
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	ParentPath string `json:"parentPath,omitempty"`
+	Type       string `json:"type"`
+	Depth      int    `json:"depth"`
+	Status     string `json:"status,omitempty"`
+	Additions  int    `json:"additions,omitempty"`
+	Deletions  int    `json:"deletions,omitempty"`
+}
+
+type diffTreeBuildNode struct {
+	Name      string
+	Path      string
+	Type      string
+	Status    string
+	Additions int
+	Deletions int
+	Children  []diffTreeBuildNode
+}
+
+func ResolveGitDiff(projectRoot string, runGit GitCommandRunnerFunc) (DiffResult, error) {
+	projectRoot = strings.TrimSpace(projectRoot)
+	if projectRoot == "" {
+		return DiffResult{}, fmt.Errorf("project root is required")
+	}
+	if runGit == nil {
+		runGit = GitCommandRunner
+	}
+
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	if err := runGit(projectRoot, stdout, stderr, "diff", "--no-color", "--no-ext-diff"); err != nil {
+		return DiffResult{}, fmt.Errorf("git diff: %w%s", err, formatGitCommandStderr(stderr.String()))
+	}
+
+	result := ParseGitDiff(stdout.String())
+	result.WorkingDirectory = projectRoot
+	return result, nil
+}
+
+func ParseGitDiff(raw string) DiffResult {
+	result := DiffResult{
+		RawDiff: raw,
+		Files:   parseGitDiffFiles(raw),
+	}
+	for _, file := range result.Files {
+		result.Summary.FileCount++
+		result.Summary.Additions += file.Additions
+		result.Summary.Deletions += file.Deletions
+	}
+	result.Tree = BuildDiffTree(result.Files)
+	return result
+}
+
+func parseGitDiffFiles(raw string) []DiffFile {
+	lines := strings.Split(raw, "\n")
+	files := make([]DiffFile, 0)
+	var current *DiffFile
+	var currentHunk *DiffHunk
+	oldLine := 0
+	newLine := 0
+
+	flush := func() {
+		if current == nil {
+			return
+		}
+		normalizeDiffFile(current)
+		files = append(files, *current)
+		current = nil
+		currentHunk = nil
+	}
+
+	for index, line := range lines {
+		if index == len(lines)-1 && line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "diff --git ") {
+			flush()
+			oldPath, newPath := parseDiffGitHeader(line)
+			current = &DiffFile{
+				Path:    firstNonEmptyDiffPath(newPath, oldPath),
+				OldPath: oldPath,
+				NewPath: newPath,
+				Status:  "modified",
+			}
+			continue
+		}
+		if current == nil {
+			continue
+		}
+
+		switch {
+		case strings.HasPrefix(line, "new file mode "):
+			current.Status = "added"
+		case strings.HasPrefix(line, "deleted file mode "):
+			current.Status = "deleted"
+		case strings.HasPrefix(line, "rename from "):
+			current.Status = "renamed"
+			current.OldPath = strings.TrimSpace(strings.TrimPrefix(line, "rename from "))
+		case strings.HasPrefix(line, "rename to "):
+			current.Status = "renamed"
+			current.NewPath = strings.TrimSpace(strings.TrimPrefix(line, "rename to "))
+			current.Path = current.NewPath
+		case strings.HasPrefix(line, "copy from "):
+			current.Status = "copied"
+			current.OldPath = strings.TrimSpace(strings.TrimPrefix(line, "copy from "))
+		case strings.HasPrefix(line, "copy to "):
+			current.Status = "copied"
+			current.NewPath = strings.TrimSpace(strings.TrimPrefix(line, "copy to "))
+			current.Path = current.NewPath
+		case strings.HasPrefix(line, "Binary files ") || strings.HasPrefix(line, "GIT binary patch"):
+			current.Binary = true
+			currentHunk = nil
+		case strings.HasPrefix(line, "@@ "):
+			hunk := parseDiffHunkHeader(line)
+			current.Hunks = append(current.Hunks, hunk)
+			currentHunk = &current.Hunks[len(current.Hunks)-1]
+			oldLine = currentHunk.OldStart
+			newLine = currentHunk.NewStart
+		case currentHunk != nil:
+			switch {
+			case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++ "):
+				current.Additions++
+				currentHunk.Lines = append(currentHunk.Lines, DiffLine{
+					Kind:    "add",
+					Content: strings.TrimPrefix(line, "+"),
+					NewLine: newLine,
+				})
+				newLine++
+			case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "--- "):
+				current.Deletions++
+				currentHunk.Lines = append(currentHunk.Lines, DiffLine{
+					Kind:    "delete",
+					Content: strings.TrimPrefix(line, "-"),
+					OldLine: oldLine,
+				})
+				oldLine++
+			case strings.HasPrefix(line, "\\"):
+				currentHunk.Lines = append(currentHunk.Lines, DiffLine{
+					Kind:    "meta",
+					Content: line,
+				})
+			default:
+				content := line
+				if strings.HasPrefix(content, " ") {
+					content = strings.TrimPrefix(content, " ")
+				}
+				currentHunk.Lines = append(currentHunk.Lines, DiffLine{
+					Kind:    "context",
+					Content: content,
+					OldLine: oldLine,
+					NewLine: newLine,
+				})
+				oldLine++
+				newLine++
+			}
+		}
+	}
+	flush()
+	return files
+}
+
+func parseDiffGitHeader(line string) (string, string) {
+	value := strings.TrimSpace(strings.TrimPrefix(line, "diff --git "))
+	parts := strings.SplitN(value, " b/", 2)
+	if len(parts) != 2 {
+		return "", ""
+	}
+	oldPath := strings.TrimPrefix(strings.TrimSpace(parts[0]), "a/")
+	newPath := strings.TrimSpace(parts[1])
+	return oldPath, newPath
+}
+
+func parseDiffHunkHeader(line string) DiffHunk {
+	hunk := DiffHunk{Header: line}
+	end := strings.Index(line[3:], " @@")
+	if end < 0 {
+		return hunk
+	}
+	ranges := strings.Fields(line[3 : 3+end])
+	if len(ranges) >= 2 {
+		hunk.OldStart, hunk.OldLines = parseDiffRange(ranges[0], "-")
+		hunk.NewStart, hunk.NewLines = parseDiffRange(ranges[1], "+")
+	}
+	return hunk
+}
+
+func parseDiffRange(value, prefix string) (int, int) {
+	value = strings.TrimPrefix(strings.TrimSpace(value), prefix)
+	parts := strings.SplitN(value, ",", 2)
+	start, _ := strconv.Atoi(parts[0])
+	lineCount := 1
+	if len(parts) == 2 {
+		lineCount, _ = strconv.Atoi(parts[1])
+	}
+	return start, lineCount
+}
+
+func normalizeDiffFile(file *DiffFile) {
+	if file == nil {
+		return
+	}
+	file.OldPath = strings.TrimPrefix(strings.TrimSpace(file.OldPath), "a/")
+	file.NewPath = strings.TrimPrefix(strings.TrimSpace(file.NewPath), "b/")
+	switch file.Status {
+	case "added":
+		file.Path = firstNonEmptyDiffPath(file.NewPath, file.Path)
+	case "deleted":
+		file.Path = firstNonEmptyDiffPath(file.OldPath, file.Path)
+	default:
+		file.Path = firstNonEmptyDiffPath(file.NewPath, file.OldPath, file.Path)
+	}
+	file.Path = cleanDiffPath(file.Path)
+	file.OldPath = cleanDiffPath(file.OldPath)
+	file.NewPath = cleanDiffPath(file.NewPath)
+}
+
+func firstNonEmptyDiffPath(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func cleanDiffPath(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.Trim(value, `"`)
+	value = strings.TrimPrefix(value, "a/")
+	value = strings.TrimPrefix(value, "b/")
+	cleaned := path.Clean(value)
+	if cleaned == "." {
+		return ""
+	}
+	return cleaned
+}
+
+func BuildDiffTree(files []DiffFile) []DiffTreeNode {
+	root := make([]diffTreeBuildNode, 0)
+	for _, file := range files {
+		parts := strings.Split(cleanDiffPath(file.Path), "/")
+		if len(parts) == 0 || parts[0] == "" {
+			continue
+		}
+		root = appendDiffTreeNode(root, parts, file, "")
+	}
+	flat := make([]DiffTreeNode, 0, len(files))
+	for _, node := range root {
+		flat = appendFlattenedDiffTreeNode(flat, node, "", 0)
+	}
+	return flat
+}
+
+func appendDiffTreeNode(nodes []diffTreeBuildNode, parts []string, file DiffFile, parent string) []diffTreeBuildNode {
+	name := parts[0]
+	nodePath := name
+	if parent != "" {
+		nodePath = parent + "/" + name
+	}
+	for i := range nodes {
+		if nodes[i].Name != name {
+			continue
+		}
+		if len(parts) == 1 {
+			nodes[i] = diffFileTreeNode(file, nodePath)
+			return nodes
+		}
+		nodes[i].Children = appendDiffTreeNode(nodes[i].Children, parts[1:], file, nodePath)
+		nodes[i].Additions += file.Additions
+		nodes[i].Deletions += file.Deletions
+		return nodes
+	}
+
+	if len(parts) == 1 {
+		return append(nodes, diffFileTreeNode(file, nodePath))
+	}
+	node := diffTreeBuildNode{
+		Name:      name,
+		Path:      nodePath,
+		Type:      "directory",
+		Additions: file.Additions,
+		Deletions: file.Deletions,
+		Children:  appendDiffTreeNode(nil, parts[1:], file, nodePath),
+	}
+	return append(nodes, node)
+}
+
+func diffFileTreeNode(file DiffFile, nodePath string) diffTreeBuildNode {
+	return diffTreeBuildNode{
+		Name:      path.Base(nodePath),
+		Path:      file.Path,
+		Type:      "file",
+		Status:    file.Status,
+		Additions: file.Additions,
+		Deletions: file.Deletions,
+	}
+}
+
+func appendFlattenedDiffTreeNode(flat []DiffTreeNode, node diffTreeBuildNode, parent string, depth int) []DiffTreeNode {
+	flat = append(flat, DiffTreeNode{
+		Name:       node.Name,
+		Path:       node.Path,
+		ParentPath: parent,
+		Type:       node.Type,
+		Depth:      depth,
+		Status:     node.Status,
+		Additions:  node.Additions,
+		Deletions:  node.Deletions,
+	})
+	for _, child := range node.Children {
+		flat = appendFlattenedDiffTreeNode(flat, child, node.Path, depth+1)
+	}
+	return flat
+}
+
+func formatGitCommandStderr(stderr string) string {
+	stderr = strings.TrimSpace(stderr)
+	if stderr == "" {
+		return ""
+	}
+	return "\n" + stderr
+}
+
+func WriteRawDiff(stdout io.Writer, result DiffResult) error {
+	if result.RawDiff == "" {
+		return nil
+	}
+	_, err := io.WriteString(stdout, result.RawDiff)
+	return err
+}

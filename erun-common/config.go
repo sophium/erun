@@ -84,7 +84,16 @@ func (c *EnvConfig) SetSnapshot(enabled bool) {
 }
 
 type ProjectEnvironmentConfig struct {
-	ContainerRegistry string `yaml:"containerregistry,omitempty"`
+	ContainerRegistry string              `yaml:"containerregistry,omitempty"`
+	Docker            ProjectDockerConfig `yaml:"docker,omitempty"`
+}
+
+type ProjectDockerConfig struct {
+	SkipIfExists []string `yaml:"skipIfExists,omitempty"`
+}
+
+func (c ProjectDockerConfig) IsZero() bool {
+	return len(c.SkipIfExists) == 0
 }
 
 type ReleaseConfig struct {
@@ -109,6 +118,26 @@ func (c ProjectConfig) ContainerRegistryForEnvironment(environment string) strin
 	}
 
 	return strings.TrimSpace(c.ContainerRegistry)
+}
+
+func (c ProjectConfig) DockerSkipIfExistsForEnvironment(environment string) []string {
+	environment = strings.TrimSpace(environment)
+	if environment == "" || c.Environments == nil {
+		return nil
+	}
+
+	envConfig, ok := c.Environments[environment]
+	if !ok || len(envConfig.Docker.SkipIfExists) == 0 {
+		return nil
+	}
+
+	values := make([]string, 0, len(envConfig.Docker.SkipIfExists))
+	for _, value := range envConfig.Docker.SkipIfExists {
+		if value = strings.TrimSpace(value); value != "" {
+			values = append(values, value)
+		}
+	}
+	return values
 }
 
 func (c *ProjectConfig) SetContainerRegistryForEnvironment(environment, registry string) {

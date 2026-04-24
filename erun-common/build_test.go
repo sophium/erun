@@ -147,6 +147,173 @@ func TestDockerBuildTraceCommandsIncludeBuildxBootstrapForMultiPlatformBuilds(t 
 	}
 }
 
+func TestResolveBuildExecutionMarksEnvironmentConfiguredBuildsSkippable(t *testing.T) {
+	projectRoot := t.TempDir()
+	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
+	if err := os.MkdirAll(buildDir, 0o755); err != nil {
+		t.Fatalf("mkdir build dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := SaveProjectConfig(projectRoot, ProjectConfig{
+		Environments: map[string]ProjectEnvironmentConfig{
+			DefaultEnvironment: {
+				ContainerRegistry: "erunpaas",
+				Docker: ProjectDockerConfig{
+					SkipIfExists: []string{"erunpaas/erun-devops"},
+				},
+			},
+			"frs": {
+				ContainerRegistry: "erunpaas",
+				Docker: ProjectDockerConfig{
+					SkipIfExists: []string{"erunpaas/other"},
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("SaveProjectConfig failed: %v", err)
+	}
+
+	localExecution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContextAtDir(buildDir)
+		},
+		func() time.Time { return time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC) },
+		DockerCommandTarget{ProjectRoot: projectRoot, Environment: DefaultEnvironment},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution local failed: %v", err)
+	}
+	if len(localExecution.dockerBuilds) != 1 || !localExecution.dockerBuilds[0].SkipIfExists {
+		t.Fatalf("expected local build to be skippable, got %+v", localExecution.dockerBuilds)
+	}
+
+	frsExecution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContextAtDir(buildDir)
+		},
+		func() time.Time { return time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC) },
+		DockerCommandTarget{ProjectRoot: projectRoot, Environment: "frs"},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution frs failed: %v", err)
+	}
+	if len(frsExecution.dockerBuilds) != 1 || frsExecution.dockerBuilds[0].SkipIfExists {
+		t.Fatalf("did not expect frs build to be skippable, got %+v", frsExecution.dockerBuilds)
+	}
+}
+
+func TestRunDockerBuildsSkipsConfiguredExistingLocalImages(t *testing.T) {
+	builds := []DockerBuildSpec{
+		{
+			ContextDir:     "/tmp/base",
+			DockerfilePath: "/tmp/base/Dockerfile",
+			Image: DockerImageReference{
+				Tag: "erunpaas/base:1.2.3",
+			},
+			SkipIfExists: true,
+			Push:         true,
+		},
+		{
+			ContextDir:     "/tmp/api",
+			DockerfilePath: "/tmp/api/Dockerfile",
+			Image: DockerImageReference{
+				Tag: "erunpaas/api:1.2.3",
+			},
+			SkipIfExists: true,
+		},
+		{
+			ContextDir:     "/tmp/worker",
+			DockerfilePath: "/tmp/worker/Dockerfile",
+			Image: DockerImageReference{
+				Tag: "erunpaas/worker:1.2.3",
+			},
+		},
+	}
+
+	inspected := make([]string, 0)
+	built := make([]string, 0)
+	ctx := Context{
+		Logger: NewLoggerWithWriters(1, io.Discard, io.Discard),
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+	}
+	err := runDockerBuilds(ctx, builds, func(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
+		built = append(built, buildInput.Image.Tag)
+		return nil
+	}, func(tag string) (bool, error) {
+		inspected = append(inspected, tag)
+		return tag == "erunpaas/base:1.2.3", nil
+	})
+	if err != nil {
+		t.Fatalf("runDockerBuilds failed: %v", err)
+	}
+
+	if !reflect.DeepEqual(inspected, []string{"erunpaas/base:1.2.3", "erunpaas/api:1.2.3"}) {
+		t.Fatalf("unexpected inspected tags: %+v", inspected)
+	}
+	if !reflect.DeepEqual(built, []string{"erunpaas/api:1.2.3", "erunpaas/worker:1.2.3"}) {
+		t.Fatalf("unexpected built tags: %+v", built)
+	}
+}
+
+func TestRunDockerBuildSkipsPushBuildWhenRemoteManifestExists(t *testing.T) {
+	dockerDir := t.TempDir()
+	argsPath := filepath.Join(dockerDir, "docker.args")
+	dockerPath := filepath.Join(dockerDir, "docker")
+	if err := os.WriteFile(dockerPath, []byte(`#!/bin/sh
+echo "$@" > "`+argsPath+`"
+if [ "$1" = "manifest" ] && [ "$2" = "inspect" ]; then
+  exit 0
+fi
+echo "unexpected docker invocation: $@" >&2
+exit 1
+`), 0o755); err != nil {
+		t.Fatalf("write docker stub: %v", err)
+	}
+	t.Setenv("PATH", dockerDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	err := RunDockerBuild(Context{
+		Logger: NewLoggerWithWriters(1, io.Discard, io.Discard),
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+	}, DockerBuildSpec{
+		ContextDir:     "/tmp/base",
+		DockerfilePath: "/tmp/base/Dockerfile",
+		Image: DockerImageReference{
+			Tag: "erunpaas/erun-dind:28.1.1",
+		},
+		SkipIfExists: true,
+		Push:         true,
+	}, func(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
+		t.Fatalf("build should not run for existing push manifest: %+v", buildInput)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RunDockerBuild failed: %v", err)
+	}
+
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read docker args: %v", err)
+	}
+	if strings.TrimSpace(string(args)) != "manifest inspect erunpaas/erun-dind:28.1.1" {
+		t.Fatalf("unexpected docker args: %q", strings.TrimSpace(string(args)))
+	}
+}
+
 func TestDockerImageBuilderReturnsRegistryAuthErrorForBuildxPushAuthFailure(t *testing.T) {
 	dockerDir := t.TempDir()
 	dockerPath := filepath.Join(dockerDir, "docker")

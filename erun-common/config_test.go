@@ -345,8 +345,13 @@ func TestProjectConfigRoundTrip(t *testing.T) {
 
 	cfg := ProjectConfig{
 		Environments: map[string]ProjectEnvironmentConfig{
-			"local": {ContainerRegistry: "erunpaas"},
-			"prod":  {ContainerRegistry: "registry.example/team"},
+			"local": {
+				ContainerRegistry: "erunpaas",
+				Docker: ProjectDockerConfig{
+					SkipIfExists: []string{"erunpaas/base", "erunpaas/erun-ubuntu"},
+				},
+			},
+			"prod": {ContainerRegistry: "registry.example/team"},
 		},
 	}
 	if err := SaveProjectConfig(projectRoot, cfg); err != nil {

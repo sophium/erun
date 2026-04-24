@@ -207,6 +207,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 
 	mcpCmd := newMCPCmd(resolveOpen, runInitForArgs, launchMCP)
 	appCmd := newAppCmd(launchApp)
+	execCmd := newExecCmd(findProjectRoot, runGit)
 	listCmd := newListCmd(listDataStore, findProjectRoot)
 	doctorCmd := newDoctorCmd(resolveOpen, promptRunner)
 	releaseCmd := newReleaseCmd(findProjectRoot, runGit)
@@ -227,7 +228,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	}
 
 	cmd := newRootCommand(runRoot)
-	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, listCmd, doctorCmd, releaseCmd, versionCmd)
+	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, execCmd, listCmd, doctorCmd, releaseCmd, versionCmd)
 	return cmd
 }
 

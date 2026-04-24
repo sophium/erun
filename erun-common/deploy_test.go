@@ -491,8 +491,7 @@ func TestResolveOpenRuntimeDeploySpecUsesRemoteEnvRuntimeVersionForEmbeddedChart
 		Environment: "remote",
 		RepoPath:    "/home/erun/git/frs",
 		TenantConfig: TenantConfig{
-			Name:   "frs",
-			Remote: true,
+			Name: "frs",
 		},
 		EnvConfig: EnvConfig{
 			KubernetesContext: "cluster-remote",
@@ -607,6 +606,12 @@ func TestResolveDeploySpecForContextPublishesLocalRuntimeBuildsAsMultiPlatform(t
 	}
 	projectConfig := ProjectConfig{}
 	projectConfig.SetContainerRegistryForEnvironment(DefaultEnvironment, "erunpaas")
+	projectConfig.Environments[DefaultEnvironment] = ProjectEnvironmentConfig{
+		ContainerRegistry: "erunpaas",
+		Docker: ProjectDockerConfig{
+			SkipIfExists: []string{"erunpaas/erun-dind"},
+		},
+	}
 	if err := SaveProjectConfig(projectRoot, projectConfig); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
@@ -661,6 +666,11 @@ func TestResolveDeploySpecForContextPublishesLocalRuntimeBuildsAsMultiPlatform(t
 		}
 		if !reflect.DeepEqual(build.Platforms, []string{"linux/amd64", "linux/arm64"}) {
 			t.Fatalf("expected deploy build to target both platforms, got %+v", build)
+		}
+	}
+	for _, build := range spec.Builds {
+		if build.Image.Tag == "erunpaas/erun-dind:28.1.1" && !build.SkipIfExists {
+			t.Fatalf("expected dind dependency build to be skippable, got %+v", build)
 		}
 	}
 }

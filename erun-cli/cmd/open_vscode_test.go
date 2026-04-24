@@ -15,8 +15,7 @@ func TestVSCodeRemoteFolderURI(t *testing.T) {
 		Tenant:      "tenant-a",
 		Environment: "remote",
 		TenantConfig: common.TenantConfig{
-			Name:   "tenant-a",
-			Remote: true,
+			Name: "tenant-a",
 		},
 		EnvConfig: common.EnvConfig{
 			Name:     "remote",
@@ -99,8 +98,7 @@ func TestLaunchVSCodeEnsuresKnownHostBeforeOpening(t *testing.T) {
 		Tenant:      "tenant-a",
 		Environment: "remote",
 		TenantConfig: common.TenantConfig{
-			Name:   "tenant-a",
-			Remote: true,
+			Name: "tenant-a",
 		},
 		EnvConfig: common.EnvConfig{
 			Name:     "remote",
@@ -153,8 +151,7 @@ func TestEnsureLocalSSHDKnownHostDryRunTracesKeyscan(t *testing.T) {
 		Tenant:      "tenant-a",
 		Environment: "remote",
 		TenantConfig: common.TenantConfig{
-			Name:   "tenant-a",
-			Remote: true,
+			Name: "tenant-a",
 		},
 		EnvConfig: common.EnvConfig{
 			Name:     "remote",

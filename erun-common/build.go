@@ -37,6 +37,7 @@ type (
 	NowFunc                  func() time.Time
 	DockerImageBuilderFunc   func(DockerBuildSpec, io.Writer, io.Writer) error
 	DockerImagePusherFunc    func(string, io.Writer, io.Writer) error
+	DockerImageInspectorFunc func(string) (bool, error)
 	DockerRegistryLoginFunc  func(string, io.Reader, io.Writer, io.Writer) error
 	BuildScriptRunnerFunc    func(string, string, []string, io.Reader, io.Writer, io.Writer) error
 	DockerPushFunc           func(Context, DockerPushSpec) error
@@ -70,6 +71,7 @@ type DockerBuildSpec struct {
 	Image          DockerImageReference
 	Platforms      []string
 	Push           bool
+	SkipIfExists   bool
 }
 
 type DockerPushSpec struct {
@@ -445,7 +447,7 @@ func ResolveDockerBuildForComponent(store DockerStore, findProjectRoot ProjectFi
 	return &build, nil
 }
 
-func ResolveDockerBuildForImageReference(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, image string) (DockerBuildSpec, bool, error) {
+func ResolveDockerBuildForImageReference(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, image string) (DockerBuildSpec, bool, error) {
 	image = strings.TrimSpace(image)
 	if image == "" {
 		return DockerBuildSpec{}, false, nil
@@ -468,16 +470,25 @@ func ResolveDockerBuildForImageReference(store DockerStore, findProjectRoot Proj
 		return DockerBuildSpec{}, false, err
 	}
 
+	imageRef := DockerImageReference{
+		ProjectRoot:  projectRoot,
+		Environment:  strings.TrimSpace(environment),
+		Registry:     registry,
+		ImageName:    imageName,
+		Version:      version,
+		Tag:          image,
+		IsLocalBuild: isLocalEnvironment(environment),
+	}
+	skipIfExists, err := resolveDockerBuildSkipIfExists(projectRoot, environment, imageRef)
+	if err != nil {
+		return DockerBuildSpec{}, false, err
+	}
+
 	return DockerBuildSpec{
 		ContextDir:     ResolveDockerBuildContextDirForProject(buildContext.Dir, projectRoot),
 		DockerfilePath: buildContext.DockerfilePath,
-		Image: DockerImageReference{
-			ProjectRoot: projectRoot,
-			Registry:    registry,
-			ImageName:   imageName,
-			Version:     version,
-			Tag:         image,
-		},
+		Image:          imageRef,
+		SkipIfExists:   skipIfExists,
 	}, true, nil
 }
 
@@ -852,11 +863,16 @@ func newDockerBuildSpec(now NowFunc, projectRoot, environment string, buildConte
 	if err != nil {
 		return DockerBuildSpec{}, err
 	}
+	skipIfExists, err := resolveDockerBuildSkipIfExists(projectRoot, environment, imageRef)
+	if err != nil {
+		return DockerBuildSpec{}, err
+	}
 
 	return DockerBuildSpec{
 		ContextDir:     contextDir,
 		DockerfilePath: buildContext.DockerfilePath,
 		Image:          imageRef,
+		SkipIfExists:   skipIfExists,
 	}, nil
 }
 
@@ -890,8 +906,19 @@ func NewDockerPushSpec(dir string, image DockerImageReference) DockerPushSpec {
 }
 
 func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc) error {
+	return runDockerBuild(ctx, buildInput, build, nil)
+}
+
+func runDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc, inspect DockerImageInspectorFunc) error {
 	if build == nil {
 		build = DockerImageBuilder
+	}
+	skip, err := shouldSkipDockerBuild(ctx, buildInput, inspect)
+	if err != nil {
+		return err
+	}
+	if skip {
+		return nil
 	}
 	for _, command := range buildInput.traceCommands() {
 		ctx.TraceCommand(command.Dir, command.Name, command.Args...)
@@ -902,9 +929,42 @@ func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBu
 	return build(buildInput, ctx.Stdout, ctx.Stderr)
 }
 
+func shouldSkipDockerBuild(ctx Context, buildInput DockerBuildSpec, inspect DockerImageInspectorFunc) (bool, error) {
+	if !buildInput.SkipIfExists {
+		return false, nil
+	}
+	tag := strings.TrimSpace(buildInput.Image.Tag)
+	if tag == "" {
+		return false, nil
+	}
+	inspectCommand := []string{"image", "inspect", tag}
+	if inspect == nil {
+		inspect = DockerImageExists
+		if buildInput.Push {
+			inspect = DockerManifestExists
+			inspectCommand = []string{"manifest", "inspect", tag}
+		}
+	}
+
+	ctx.TraceCommand("", "docker", inspectCommand...)
+	exists, err := inspect(tag)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
+		return false, nil
+	}
+	ctx.Trace("skipping docker build because configured image exists: " + tag)
+	return true, nil
+}
+
 func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc) error {
+	return runDockerBuilds(ctx, builds, build, nil)
+}
+
+func runDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc, inspect DockerImageInspectorFunc) error {
 	for _, buildInput := range orderedDockerBuildSpecs(builds) {
-		if err := RunDockerBuild(ctx, buildInput, build); err != nil {
+		if err := runDockerBuild(ctx, buildInput, build, inspect); err != nil {
 			return err
 		}
 	}
@@ -1044,7 +1104,7 @@ func RunDockerPush(ctx Context, pushInput DockerPushSpec, push DockerImagePusher
 
 func RunDockerPushSpec(ctx Context, pushInput DockerPushSpec, buildInput *DockerBuildSpec, build DockerImageBuilderFunc, push DockerPushFunc) error {
 	if buildInput != nil {
-		if err := RunDockerBuild(ctx, *buildInput, build); err != nil {
+		if err := runDockerBuild(ctx, *buildInput, build, nil); err != nil {
 			return err
 		}
 		if buildInput.Push {
@@ -1296,6 +1356,40 @@ func DockerImageBuilder(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 	}
 
 	return err
+}
+
+func DockerImageExists(tag string) (bool, error) {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return false, nil
+	}
+	cmd := exec.Command("docker", "image", "inspect", tag)
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return false, nil
+	}
+	return false, err
+}
+
+func DockerManifestExists(tag string) (bool, error) {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return false, nil
+	}
+	cmd := exec.Command("docker", "manifest", "inspect", tag)
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return false, nil
+	}
+	return false, err
 }
 
 func dockerCommandOutputWriter(primary io.Writer, capture io.Writer) io.Writer {
@@ -1832,6 +1926,59 @@ func resolveDockerBuildRegistryForEnvironment(projectRoot, environment string) (
 	}
 
 	return registry, nil
+}
+
+func resolveDockerBuildSkipIfExists(projectRoot, environment string, image DockerImageReference) (bool, error) {
+	if strings.TrimSpace(projectRoot) == "" {
+		return false, nil
+	}
+
+	projectConfig, _, err := LoadProjectConfig(projectRoot)
+	if err != nil {
+		if errors.Is(err, ErrNotInitialized) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	return dockerSkipIfExistsMatches(image, projectConfig.DockerSkipIfExistsForEnvironment(environment)), nil
+}
+
+func dockerSkipIfExistsMatches(image DockerImageReference, configured []string) bool {
+	if len(configured) == 0 {
+		return false
+	}
+
+	imageName := normalizeDockerSkipImageName(image.ImageName)
+	repository := normalizeDockerSkipImageName(dockerImageRepository(image.Tag))
+	for _, candidate := range configured {
+		candidate = normalizeDockerSkipImageName(candidate)
+		if candidate == "" {
+			continue
+		}
+		if candidate == imageName || candidate == repository {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeDockerSkipImageName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return dockerImageRepository(value)
+}
+
+func dockerImageRepository(value string) string {
+	value = strings.TrimSpace(value)
+	lastSlash := strings.LastIndex(value, "/")
+	lastColon := strings.LastIndex(value, ":")
+	if lastColon > lastSlash {
+		return value[:lastColon]
+	}
+	return value
 }
 
 func ResolveDockerBuildContextDirForProject(buildDir, projectRoot string) string {

@@ -1,0 +1,13 @@
+environments:
+    frs:
+        containerregistry: erunpaas
+        docker:
+            skipIfExists:
+                - erunpaas/erun-dind
+                - erunpaas/erun-ubuntu
+    local:
+        containerregistry: erunpaas
+        docker:
+            skipIfExists:
+                - erunpaas/erun-dind
+                - erunpaas/erun-ubuntu

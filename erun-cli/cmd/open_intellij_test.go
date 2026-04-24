@@ -60,8 +60,7 @@ func TestLaunchIntelliJEnsuresKnownHostBeforeOpening(t *testing.T) {
 		Tenant:      "tenant-a",
 		Environment: "remote",
 		TenantConfig: common.TenantConfig{
-			Name:   "tenant-a",
-			Remote: true,
+			Name: "tenant-a",
 		},
 		EnvConfig: common.EnvConfig{
 			Name:     "remote",
@@ -146,8 +145,7 @@ func TestLaunchIntelliJReturnsInstalledIDEAError(t *testing.T) {
 		Tenant:      "tenant-a",
 		Environment: "remote",
 		TenantConfig: common.TenantConfig{
-			Name:   "tenant-a",
-			Remote: true,
+			Name: "tenant-a",
 		},
 		EnvConfig: common.EnvConfig{
 			Name:     "remote",
@@ -223,8 +221,7 @@ func TestRegisterIntelliJProjectDryRunTracesOptionsDir(t *testing.T) {
 		Tenant:      "tenant-a",
 		Environment: "remote",
 		TenantConfig: common.TenantConfig{
-			Name:   "tenant-a",
-			Remote: true,
+			Name: "tenant-a",
 		},
 		EnvConfig: common.EnvConfig{
 			Name:     "remote",

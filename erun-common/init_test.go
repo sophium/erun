@@ -1100,8 +1100,11 @@ func TestBootstrapRunRemoteInitializesTenantInPodWorktree(t *testing.T) {
 	}
 
 	remotePath := RemoteWorktreePathForRepoName("frs")
-	if result.TenantConfig.ProjectRoot != remotePath || !result.TenantConfig.Remote {
+	if result.TenantConfig.ProjectRoot != remotePath {
 		t.Fatalf("unexpected tenant config: %+v", result.TenantConfig)
+	}
+	if result.TenantConfig.Remote {
+		t.Fatalf("did not expect tenant config to be marked remote: %+v", result.TenantConfig)
 	}
 	if result.EnvConfig.RepoPath != remotePath || !result.EnvConfig.Remote {
 		t.Fatalf("unexpected env config: %+v", result.EnvConfig)
