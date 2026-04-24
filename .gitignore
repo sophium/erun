@@ -26,6 +26,7 @@ profile.cov
 # Editor/IDE
 # .idea/
 # .vscode/
+/.codex
 
 # Delve debug binaries
 __debug_bin*
