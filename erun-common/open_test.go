@@ -497,6 +497,9 @@ func TestRemoteShellScriptSeedsConfigsAndCloneCommand(t *testing.T) {
 	if strings.Contains(script, repoDir) {
 		t.Fatalf("did not expect host repo path %q in remote bootstrap script, got:\n%s", repoDir, script)
 	}
+	if strings.Contains(script, "/etc/bash.bashrc") {
+		t.Fatalf("did not expect remote rcfile to source system bashrc twice, got:\n%s", script)
+	}
 
 	toolConfigBody := extractHeredoc(t, script, `cat > "$config_home/erun/config.yaml" <<'EOF'`)
 	var toolConfig ERunConfig
