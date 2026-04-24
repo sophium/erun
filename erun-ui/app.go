@@ -29,6 +29,8 @@ type erunUIDeps struct {
 	resolveCLIPath  func() string
 	startTerminal   func(startTerminalSessionParams) (terminalSession, error)
 	savePastedImage func(pastedImageSaveParams) (string, error)
+	windowStatePath string
+	windowMaximised func(context.Context) bool
 }
 
 type App struct {
@@ -109,6 +111,12 @@ func NewApp(deps erunUIDeps) *App {
 	if deps.savePastedImage == nil {
 		deps.savePastedImage = savePastedImageToRuntime
 	}
+	if deps.windowStatePath == "" {
+		deps.windowStatePath = defaultAppWindowStatePath()
+	}
+	if deps.windowMaximised == nil {
+		deps.windowMaximised = runtime.WindowIsMaximised
+	}
 	return &App{
 		deps:     deps,
 		sessions: make(map[string]*managedTerminal),
@@ -124,6 +132,13 @@ func (a *App) shutdown(context.Context) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.closeAllSessionsLocked()
+}
+
+func (a *App) beforeClose(ctx context.Context) bool {
+	_ = saveAppWindowState(a.deps.windowStatePath, appWindowState{
+		Maximised: a.deps.windowMaximised(ctx),
+	})
+	return false
 }
 
 func (a *App) LoadState() (uiState, error) {
