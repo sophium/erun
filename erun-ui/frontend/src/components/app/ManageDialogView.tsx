@@ -13,6 +13,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { ManageTab } from '@/types';
 import { VersionField } from './VersionField';
 
+const dialogErrorClassName =
+  'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
+
 export function ManageDialogView({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
   const dialog = state.manageDialog;
   const versionRef = React.useRef<HTMLInputElement>(null);
@@ -92,10 +95,14 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
               </TabsContent>
               <TabsContent className="mt-0 grid gap-3" value="delete">
                 {selection && (
-                  <div className="delete-warning">
-                    <AlertTriangle aria-hidden="true" />
+                  <div className="grid grid-cols-[18px_minmax(0,1fr)] items-start gap-[9px] rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_30%,var(--border))] bg-[color-mix(in_oklch,var(--destructive)_7%,transparent)] px-[11px] py-2.5 text-[13px] leading-[1.35] text-foreground">
+                    <AlertTriangle className="mt-px size-[17px] text-destructive" aria-hidden="true" />
                     <span>
-                      Delete <strong>{selection.tenant} / {selection.environment}</strong>. Type <code>{expected}</code> to confirm.
+                      Delete <strong className="font-semibold">{selection.tenant} / {selection.environment}</strong>. Type{' '}
+                      <code className="rounded-[calc(var(--radius)-4px)] bg-[color-mix(in_oklch,var(--destructive)_12%,transparent)] px-1 py-px font-mono text-xs text-destructive">
+                        {expected}
+                      </code>{' '}
+                      to confirm.
                     </span>
                   </div>
                 )}
@@ -124,7 +131,7 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
             </div>
           </Tabs>
           {dialog.error && (
-            <div className="dialog-error" role="alert">
+            <div className={dialogErrorClassName} role="alert">
               {dialog.error}
             </div>
           )}

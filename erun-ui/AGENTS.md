@@ -23,6 +23,18 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 - Edit frontend source files, not generated bundles or generated Wails bindings. Regenerate generated artifacts instead of hand-editing them.
 - Keep styling intentional and native-desktop oriented. Prefer precise layout and spacing adjustments in CSS over adding more Wails or DOM complexity.
 
+## Frontend Styling
+
+- Use Tailwind utilities as the default for component-owned layout, spacing, color, typography, hover/focus/disabled state, and responsive behavior.
+- Keep shadcn-generated files under `erun-ui/frontend/src/components/ui`, `erun-ui/frontend/src/lib/utils.ts`, `erun-ui/frontend/src/styles/theme.css`, `components.json`, `package.json`, and `yarn.lock` aligned with the pinned shadcn CLI. Do not hand-edit generated shadcn output unless the change is intentionally local and `yarn shadcn:check` still passes.
+- Keep `src/styles/theme.css` shadcn-compatible. Put app-owned Tailwind theme extensions in separate app CSS files, then import them from `src/styles/index.css`.
+- Keep global CSS small and reserved for true globals: root sizing/reset rules, xterm internals, Wails drag or resize state hooks, pseudo-elements that would be awkward in markup, and runtime CSS variables that are set from controller state.
+- Prefer shadcn primitives and variants for buttons, inputs, dialogs, tabs, popovers, tooltips, labels, and checkboxes before adding custom local controls.
+- Preserve CSS variables for runtime-sized panels and computed values such as sidebar width, review width, file-list width, tree depth, and diff content width.
+- Use semantic Tailwind tokens such as `bg-background`, `text-foreground`, `border-border`, `bg-sidebar`, and app-owned tokens from app theme files instead of repeating raw color values in component markup.
+- Avoid reintroducing broad semantic CSS class files for ordinary component styling. If a selector is only used by one React component and does not require a true global rule, keep the styling beside that component in `className`.
+- For frontend styling changes, run `yarn build`, `yarn shadcn:check`, and `go test ./...` from the relevant module paths unless the change is documentation-only.
+
 ## Build And Packaging
 
 - Keep the module build script as the canonical local and release-facing desktop build entrypoint.

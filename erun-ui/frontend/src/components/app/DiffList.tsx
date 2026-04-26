@@ -29,11 +29,11 @@ export function DiffList({ controller, state }: { controller: ERunUIController; 
 
 function DiffFileView({ file, selected }: { file: DiffFile; selected: boolean }): React.ReactElement {
   return (
-    <section className={cn('diff-file', selected && 'is-selected')} data-path={file.path}>
-      <header className="diff-file-header">
-        <span className="diff-file-path">{file.path}</span>
-        <span className="diff-file-counts">
-          <span>+{file.additions}</span> <span>-{file.deletions}</span>
+    <section className="diff-file scroll-mt-4" data-path={file.path} data-selected={selected || undefined}>
+      <header className="flex items-center justify-between gap-4 px-1.5 pb-2.5 text-[13px] font-semibold text-foreground">
+        <span className="min-w-0 truncate">{file.path}</span>
+        <span className="flex-none font-semibold text-diff-add-foreground">
+          <span>+{file.additions}</span> <span className="text-diff-delete-foreground">-{file.deletions}</span>
         </span>
       </header>
       {file.binary ? (
@@ -50,15 +50,31 @@ function DiffHunkView({ hunk }: { hunk: DiffHunk }): React.ReactElement {
   const style = { '--diff-content-width': `${contentWidth + 2}ch` } as React.CSSProperties;
 
   return (
-    <div className="diff-hunk">
-      <div className="diff-hunk-header">{hunk.header}</div>
-      <div className="diff-hunk-body" style={style}>
+    <div className="overflow-hidden rounded-[var(--radius)] border bg-background not-first:mt-2.5">
+      <div className="overflow-hidden bg-muted px-2.5 py-1.5 font-mono text-[11px] leading-[1.35] text-ellipsis whitespace-pre text-muted-foreground">
+        {hunk.header}
+      </div>
+      <div className="relative max-w-full overflow-x-auto overflow-y-hidden" style={style}>
         {(hunk.lines || []).map((line, index) => (
-          <div key={`${line.oldLine || ''}:${line.newLine || ''}:${index}`} className={`diff-line diff-line-${line.kind}`}>
-            <span className="diff-line-old">{line.oldLine || ''}</span>
-            <span className="diff-line-new">{line.newLine || ''}</span>
-            <span className="diff-line-mark">{diffLineMark(line.kind)}</span>
-            <span className="diff-line-content">{line.content || ' '}</span>
+          <div
+            key={`${line.oldLine || ''}:${line.newLine || ''}:${index}`}
+            className={cn(
+              'grid min-h-5 w-max min-w-full grid-cols-[48px_48px_22px_minmax(var(--diff-content-width),1fr)] bg-background font-mono text-[11px] leading-5',
+              line.kind === 'add' && 'bg-diff-add',
+              line.kind === 'delete' && 'bg-diff-delete',
+              line.kind === 'meta' && 'bg-muted text-muted-foreground',
+            )}
+          >
+            <span className="select-none border-r border-[oklch(0_0_0/0.05)] bg-inherit px-2 text-right text-muted-foreground">
+              {line.oldLine || ''}
+            </span>
+            <span className="select-none border-r border-[oklch(0_0_0/0.05)] bg-inherit px-2 text-right text-muted-foreground">
+              {line.newLine || ''}
+            </span>
+            <span className="select-none border-r border-[oklch(0_0_0/0.05)] bg-inherit text-center text-foreground">
+              {diffLineMark(line.kind)}
+            </span>
+            <span className="min-w-0 whitespace-pre pr-4">{line.content || ' '}</span>
           </div>
         ))}
       </div>
@@ -67,5 +83,5 @@ function DiffHunkView({ hunk }: { hunk: DiffHunk }): React.ReactElement {
 }
 
 export function ReviewStatus({ children }: { children: React.ReactNode }): React.ReactElement {
-  return <div className="review-status">{children}</div>;
+  return <div className="px-3 py-3.5 text-sm leading-[1.4] text-muted-foreground">{children}</div>;
 }

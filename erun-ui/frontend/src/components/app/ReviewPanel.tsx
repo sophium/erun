@@ -13,6 +13,9 @@ import { DiffList, ReviewStatus } from './DiffList';
 import { FileIcon } from './FileIcon';
 import { IconTooltip } from './IconTooltip';
 
+const filesSplitterClassName =
+  'relative cursor-col-resize border-l bg-background before:absolute before:top-0 before:bottom-0 before:left-1 before:w-px before:bg-transparent before:transition-colors hover:before:bg-border [.is-resizing-files_&]:before:bg-border';
+
 export function ReviewPanel({
   controller,
   state,
@@ -29,35 +32,50 @@ export function ReviewPanel({
   return (
     <section
       ref={reviewViewRef}
-      className={cn('review-view', !state.reviewOpen && 'is-hidden', !state.filesOpen && 'files-hidden')}
+      className={cn(
+        'relative grid h-full min-h-0 w-full min-w-0 overflow-hidden bg-background text-foreground',
+        state.filesOpen
+          ? 'grid-cols-[minmax(260px,1fr)_10px_minmax(220px,var(--files-width))] max-[980px]:grid-cols-[minmax(0,1fr)]'
+          : 'grid-cols-[minmax(0,1fr)]',
+        !state.reviewOpen && 'hidden',
+      )}
     >
       <div
         ref={reviewMainRef}
-        className="review-main"
+        className="h-full min-h-0 min-w-0 overflow-auto overscroll-contain bg-background"
         onScroll={() => controller.queueVisibleDiffSelectionUpdate()}
       >
-        <div ref={diffListRef} className="diff-list">
+        <div ref={diffListRef} className="flex flex-col gap-3.5 px-[18px] pt-5 pb-[34px]">
           <DiffList controller={controller} state={state} />
         </div>
       </div>
       <div
-        className="files-splitter"
+        className={cn(filesSplitterClassName, (!state.filesOpen || !state.reviewOpen) && 'hidden', 'max-[980px]:hidden')}
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize changed files list"
         onMouseDown={(event) => controller.startFilesResize(event)}
       />
-      <aside className="changed-files">
-        <div className="changed-files-header">
-          <button className="changed-files-title" type="button">
+      <aside
+        className={cn(
+          'box-border flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-l bg-background px-[18px] py-5',
+          (!state.filesOpen || !state.reviewOpen) && 'hidden',
+          'max-[980px]:hidden',
+        )}
+      >
+        <div className="mb-3.5 flex min-w-0 items-center justify-between gap-3">
+          <button
+            className="inline-flex min-w-0 flex-1 cursor-pointer items-center gap-1 overflow-hidden border-0 bg-transparent p-0 text-sm font-semibold whitespace-nowrap text-foreground [&_svg]:size-4 [&_svg]:flex-none [&_svg]:text-muted-foreground"
+            type="button"
+          >
             <FileDiff aria-hidden="true" />
-            Changed files <span className="changed-files-count">{state.diff?.summary?.fileCount || 0}</span>
+            Changed files <span className="flex-none text-muted-foreground">{state.diff?.summary?.fileCount || 0}</span>
             <ChevronDown aria-hidden="true" />
           </button>
-          <div className="changed-files-actions">
+          <div className="flex min-w-0 flex-none items-center gap-2">
             <IconTooltip label="Refresh diff">
               <Button
-                className="changed-files-icon-button"
+                className="size-7 cursor-pointer border-0 bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:cursor-default disabled:opacity-55 [&_svg]:size-[17px]"
                 type="button"
                 variant="ghost"
                 size="icon"
@@ -70,16 +88,16 @@ export function ReviewPanel({
                 <RefreshCw />
               </Button>
             </IconTooltip>
-            <div className="changed-files-stats">
-              <span>+{state.diff?.summary?.additions || 0}</span>
-              <span>-{state.diff?.summary?.deletions || 0}</span>
+            <div className="flex gap-1.5 text-sm font-semibold whitespace-nowrap">
+              <span className="text-diff-add-foreground">+{state.diff?.summary?.additions || 0}</span>
+              <span className="text-diff-delete-foreground">-{state.diff?.summary?.deletions || 0}</span>
             </div>
           </div>
         </div>
-        <Label className="file-filter">
+        <Label className="box-border flex h-[38px] items-center gap-2 rounded-[var(--radius)] border border-input bg-background px-3 text-muted-foreground [&_svg]:size-[18px] [&_svg]:flex-none">
           <Search aria-hidden="true" />
           <Input
-            className="file-filter-input"
+            className="h-auto min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-foreground shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0"
             value={state.diffFilter}
             type="search"
             placeholder="Filter files..."
@@ -87,7 +105,7 @@ export function ReviewPanel({
             onChange={(event) => controller.setDiffFilter(event.target.value)}
           />
         </Label>
-        <div className="changed-file-tree">
+        <div className="min-h-0 flex-1 overflow-auto overscroll-contain pt-3.5">
           <ChangedFileTree controller={controller} state={state} />
         </div>
       </aside>
@@ -131,31 +149,34 @@ function ChangedFileNode({
   if (node.type === 'directory') {
     const collapsed = state.collapsedDiffDirs.has(node.path);
     return (
-      <div className="changed-file-node">
+      <div className="flex flex-col">
         <button
           type="button"
-          className="changed-file-row changed-file-row-directory"
+          className="flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-[var(--radius)] border-0 bg-transparent py-0 pr-2.5 pl-[calc(8px+(var(--depth)*18px))] text-left text-sm leading-[1.2] font-medium text-foreground hover:bg-accent"
           style={style}
           onClick={() => controller.toggleDiffDirectory(node.path)}
         >
-          <ChevronRight className={cn('tree-chevron', !collapsed && 'is-open')} aria-hidden="true" />
-          <span>{node.name}</span>
+          <ChevronRight className={cn('size-4 flex-none text-current', !collapsed && 'rotate-90')} aria-hidden="true" />
+          <span className="min-w-0 truncate">{node.name}</span>
         </button>
       </div>
     );
   }
 
   return (
-    <div className="changed-file-node">
+    <div className="flex flex-col">
       <button
         type="button"
-        className={cn('changed-file-row changed-file-row-file', node.path === state.selectedDiffPath && 'is-selected')}
+        className={cn(
+          'flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-[var(--radius)] border-0 bg-transparent py-0 pr-2.5 pl-[calc(8px+(var(--depth)*18px))] text-left text-sm leading-[1.2] text-foreground hover:bg-accent',
+          node.path === state.selectedDiffPath && 'bg-primary text-primary-foreground hover:bg-primary',
+        )}
         style={style}
         data-path={node.path}
         onClick={() => controller.selectDiffPath(node.path)}
       >
         <FileIcon filePath={node.path} />
-        <span>{node.name}</span>
+        <span className="min-w-0 truncate">{node.name}</span>
       </button>
     </div>
   );
