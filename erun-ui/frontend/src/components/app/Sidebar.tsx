@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Folder, FolderOpen, MoreHorizontal, Plus } from 'lucide-react';
+import { Folder, FolderOpen, MoreHorizontal, Plus, Settings } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
@@ -19,18 +19,32 @@ export function Sidebar({ controller, state }: { controller: ERunUIController; s
     >
       <div className="flex items-center justify-between gap-2 pr-1.5 pb-2.5 pl-3.5">
         <span className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Environments</span>
-        <IconTooltip label="Initialize new remote environment">
-          <Button
-            className="size-[26px] flex-none text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&_svg]:size-4"
-            type="button"
-            variant="ghost"
-            size="icon-xs"
-            aria-label="Initialize new remote environment"
-            onClick={() => controller.openInitializeDialog()}
-          >
-            <Plus />
-          </Button>
-        </IconTooltip>
+        <div className="flex items-center gap-1">
+          <IconTooltip label="Manage ERun config">
+            <Button
+              className="size-[26px] flex-none text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&_svg]:size-4"
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Manage ERun config"
+              onClick={() => controller.openGlobalConfigDialog()}
+            >
+              <Settings />
+            </Button>
+          </IconTooltip>
+          <IconTooltip label="Initialize new remote environment">
+            <Button
+              className="size-[26px] flex-none text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&_svg]:size-4"
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Initialize new remote environment"
+              onClick={() => controller.openInitializeDialog()}
+            >
+              <Plus />
+            </Button>
+          </IconTooltip>
+        </div>
       </div>
       <div className="min-h-0 overflow-auto pr-1">
         {state.tenants.length === 0 ? (
@@ -66,18 +80,35 @@ function TenantGroup({
 
   return (
     <div className={cn('flex flex-col', spaced && 'mt-2.5')}>
-      <button
-        className="flex cursor-pointer items-center gap-[9px] border-0 bg-transparent px-3 py-[4px] pb-1.5 text-left text-[15px] leading-[1.25] font-medium tracking-normal text-muted-foreground hover:text-foreground"
-        type="button"
-        onClick={() => controller.toggleTenant(tenant.name)}
-      >
-        {collapsed ? (
-          <Folder className="size-[18px] flex-none" aria-hidden="true" />
-        ) : (
-          <FolderOpen className="size-[18px] flex-none" aria-hidden="true" />
-        )}
-        <span>{tenant.name}</span>
-      </button>
+      <div className="group/tenant flex items-center pr-1">
+        <button
+          className="flex min-w-0 flex-1 cursor-pointer items-center gap-[9px] border-0 bg-transparent px-3 py-[4px] pb-1.5 text-left text-[15px] leading-[1.25] font-medium tracking-normal text-muted-foreground hover:text-foreground"
+          type="button"
+          onClick={() => controller.toggleTenant(tenant.name)}
+        >
+          {collapsed ? (
+            <Folder className="size-[18px] flex-none" aria-hidden="true" />
+          ) : (
+            <FolderOpen className="size-[18px] flex-none" aria-hidden="true" />
+          )}
+          <span className="truncate">{tenant.name}</span>
+        </button>
+        <IconTooltip label="Manage tenant">
+          <Button
+            type="button"
+            className="pointer-events-none size-[26px] flex-none cursor-pointer text-muted-foreground opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover/tenant:pointer-events-auto group-hover/tenant:opacity-100 group-focus-within/tenant:pointer-events-auto group-focus-within/tenant:opacity-100 [&_svg]:size-4"
+            variant="ghost"
+            size="icon"
+            aria-label={`Manage ${tenant.name}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              controller.openTenantDialog(tenant.name);
+            }}
+          >
+            <MoreHorizontal />
+          </Button>
+        </IconTooltip>
+      </div>
       {!collapsed && (
         <div className="flex flex-col gap-0 pt-0">
           {tenant.environments.map((environment) => {

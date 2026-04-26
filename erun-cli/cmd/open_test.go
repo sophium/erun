@@ -420,6 +420,92 @@ func TestRunResolvedOpenCommandForcesSSHDEnabledOnRuntimeDeploy(t *testing.T) {
 	}
 }
 
+func TestRunResolvedOpenCommandPersistsRuntimeVersionAfterDeploy(t *testing.T) {
+	const deployedVersion = "1.0.50-snapshot-20260426163200"
+
+	var saved common.EnvConfig
+	savedTenant := ""
+	err := runResolvedOpenCommand(
+		common.Context{
+			Logger: common.NewLoggerWithWriters(0, new(bytes.Buffer), new(bytes.Buffer)),
+			Stdout: new(bytes.Buffer),
+			Stderr: new(bytes.Buffer),
+		},
+		common.OpenResult{
+			Tenant:      "test",
+			Environment: "env",
+			RepoPath:    "/home/erun/git/test",
+			TenantConfig: common.TenantConfig{
+				Name: "test",
+			},
+			EnvConfig: common.EnvConfig{
+				Name:              "env",
+				RepoPath:          "/home/erun/git/test",
+				KubernetesContext: "erun",
+				RuntimeVersion:    "1.0.48",
+				Remote:            true,
+			},
+		},
+		openOptions{
+			NoShell: true,
+			SaveEnvConfig: func(tenant string, env common.EnvConfig) error {
+				savedTenant = tenant
+				saved = env
+				return nil
+			},
+		},
+		nil,
+		func(_ common.Context, _ common.ShellLaunchParams) error {
+			t.Fatal("did not expect shell launch")
+			return nil
+		},
+		nil,
+		func(common.KubernetesDeploymentCheckParams) (bool, error) {
+			return false, nil
+		},
+		func(common.OpenResult) (common.DeploySpec, error) {
+			return common.DeploySpec{
+				Deploy: common.HelmDeploySpec{
+					ReleaseName:       "test-devops",
+					ChartPath:         "/tmp/chart",
+					ValuesFilePath:    "/tmp/chart/values.env.yaml",
+					Tenant:            "test",
+					Environment:       "env",
+					Namespace:         "test-env",
+					KubernetesContext: "erun",
+					WorktreeStorage:   common.WorktreeStoragePVC,
+					WorktreeRepoName:  "test",
+					WorktreeHostPath:  "/tmp/ignored",
+					Version:           deployedVersion,
+					Timeout:           common.DefaultHelmDeploymentTimeout,
+				},
+			}, nil
+		},
+		func(params common.HelmDeployParams) error {
+			if params.Version != deployedVersion {
+				t.Fatalf("unexpected deployed version: %+v", params)
+			}
+			return nil
+		},
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("runResolvedOpenCommand failed: %v", err)
+	}
+	if savedTenant != "test" {
+		t.Fatalf("expected env config saved for test tenant, got %q", savedTenant)
+	}
+	if saved.RuntimeVersion != deployedVersion {
+		t.Fatalf("expected persisted runtime version %q, got %q", deployedVersion, saved.RuntimeVersion)
+	}
+	if saved.Snapshot == nil || !*saved.Snapshot {
+		t.Fatalf("expected snapshot deployment to persist snapshot true, got %+v", saved)
+	}
+}
+
 func TestOpenCommandNoShellConfiguresLocalKubeconfig(t *testing.T) {
 	repoPath := t.TempDir()
 	stdout := new(bytes.Buffer)
@@ -911,10 +997,17 @@ func TestOpenCommandDryRunPrintsDeployPlanWhenDevopsRuntimeIsMissing(t *testing.
 
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
+	snapshot := true
 	cmd := newTestRootCmd(testRootDeps{
 		Store: openCommandStore{
 			repoPath:   projectRoot,
 			toolConfig: common.ERunConfig{DefaultTenant: "tenant-a"},
+			env: &common.EnvConfig{
+				Name:              common.DefaultEnvironment,
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-dev",
+				Snapshot:          &snapshot,
+			},
 		},
 		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
 			return false, nil
@@ -987,10 +1080,17 @@ func TestOpenCommandDryRunRedeploysWhenRuntimeHasLocalBuilds(t *testing.T) {
 
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
+	snapshot := true
 	cmd := newTestRootCmd(testRootDeps{
 		Store: openCommandStore{
 			repoPath:   projectRoot,
 			toolConfig: common.ERunConfig{DefaultTenant: "tenant-a"},
+			env: &common.EnvConfig{
+				Name:              common.DefaultEnvironment,
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-dev",
+				Snapshot:          &snapshot,
+			},
 		},
 		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
 			t.Fatalf("did not expect deployment check when local runtime builds exist: %+v", req)
@@ -1112,10 +1212,12 @@ func TestOpenCommandDryRunUsesConfiguredContextForLocalDeploy(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
+	snapshot := true
 	if err := common.SaveEnvConfig("erun", common.EnvConfig{
 		Name:              common.DefaultEnvironment,
 		RepoPath:          projectRoot,
 		KubernetesContext: "erun",
+		Snapshot:          &snapshot,
 	}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}

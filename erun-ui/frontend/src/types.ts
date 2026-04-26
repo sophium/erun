@@ -10,7 +10,7 @@ export interface UITenant {
 }
 
 export type EnvironmentActionMode = 'init' | 'deploy';
-export type ManageTab = 'deploy' | 'delete';
+export type ManageTab = 'deploy' | 'config' | 'delete';
 
 export interface UISelection {
   tenant: string;
@@ -40,6 +40,32 @@ export interface UIVersionSuggestion {
   version: string;
   source?: string;
   image?: string;
+}
+
+export interface UIERunConfig {
+  defaultTenant: string;
+}
+
+export interface UITenantConfig {
+  name: string;
+  defaultEnvironment: string;
+}
+
+export interface UISSHDConfig {
+  enabled: boolean;
+  localPort: number;
+  publicKeyPath: string;
+}
+
+export interface UIEnvironmentConfig {
+  name: string;
+  repoPath: string;
+  kubernetesContext: string;
+  containerRegistry: string;
+  runtimeVersion: string;
+  sshd: UISSHDConfig;
+  remote: boolean;
+  snapshot: boolean;
 }
 
 export interface StartSessionResult {

@@ -761,6 +761,131 @@ func TestDeleteEnvironmentRequiresExactConfirmationAndDeletesConfig(t *testing.T
 	}
 }
 
+func TestLoadAndSaveTenantConfig(t *testing.T) {
+	snapshot := false
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"frs": {
+				Name:               "frs",
+				ProjectRoot:        "/tmp/old",
+				DefaultEnvironment: "dev",
+				Remote:             true,
+				Snapshot:           &snapshot,
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	loaded, err := app.LoadTenantConfig(" frs ")
+	if err != nil {
+		t.Fatalf("LoadTenantConfig failed: %v", err)
+	}
+	if loaded.Name != "frs" || loaded.DefaultEnvironment != "dev" {
+		t.Fatalf("unexpected loaded config: %+v", loaded)
+	}
+
+	saved, err := app.SaveTenantConfig(uiTenantConfig{
+		Name:               "frs",
+		DefaultEnvironment: " prod ",
+	})
+	if err != nil {
+		t.Fatalf("SaveTenantConfig failed: %v", err)
+	}
+	if saved.DefaultEnvironment != "prod" {
+		t.Fatalf("unexpected saved config: %+v", saved)
+	}
+	if store.tenants["frs"].ProjectRoot != "/tmp/old" || !store.tenants["frs"].Remote || store.tenants["frs"].Snapshot == nil || *store.tenants["frs"].Snapshot {
+		t.Fatalf("expected tenant project root/remote/snapshot to be preserved, got %+v", store.tenants["frs"])
+	}
+}
+
+func TestLoadAndSaveERunConfig(t *testing.T) {
+	config := eruncommon.ERunConfig{DefaultTenant: "old-tenant"}
+	store := stubUIStore{
+		config: &config,
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	loaded, err := app.LoadERunConfig()
+	if err != nil {
+		t.Fatalf("LoadERunConfig failed: %v", err)
+	}
+	if loaded.DefaultTenant != "old-tenant" {
+		t.Fatalf("unexpected loaded config: %+v", loaded)
+	}
+
+	saved, err := app.SaveERunConfig(uiERunConfig{DefaultTenant: " new-tenant "})
+	if err != nil {
+		t.Fatalf("SaveERunConfig failed: %v", err)
+	}
+	if saved.DefaultTenant != "new-tenant" || config.DefaultTenant != "new-tenant" {
+		t.Fatalf("unexpected saved config: result=%+v stored=%+v", saved, config)
+	}
+}
+
+func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
+	projectRoot := t.TempDir()
+	snapshot := true
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"frs": {
+				Name:        "frs",
+				ProjectRoot: projectRoot,
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/prod": {
+				Name:              "prod",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-old",
+				ContainerRegistry: "registry.example/old",
+				RuntimeVersion:    "1.0.0",
+				SSHD: eruncommon.SSHDConfig{
+					Enabled:       false,
+					LocalPort:     60022,
+					PublicKeyPath: "/tmp/old.pub",
+				},
+				Remote:   false,
+				Snapshot: &snapshot,
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	loaded, err := app.LoadEnvironmentConfig(uiSelection{Tenant: " frs ", Environment: " prod "})
+	if err != nil {
+		t.Fatalf("LoadEnvironmentConfig failed: %v", err)
+	}
+	if loaded.Name != "prod" || loaded.RepoPath != projectRoot || loaded.KubernetesContext != "cluster-old" {
+		t.Fatalf("unexpected loaded config: %+v", loaded)
+	}
+
+	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "prod"}, uiEnvironmentConfig{
+		Name:              "prod",
+		RepoPath:          " /tmp/repo ",
+		KubernetesContext: " cluster-new ",
+		ContainerRegistry: " registry.example/team ",
+		RuntimeVersion:    " 1.2.3 ",
+		SSHD: uiSSHDConfig{
+			Enabled:       true,
+			LocalPort:     62222,
+			PublicKeyPath: " /tmp/id_ed25519.pub ",
+		},
+		Remote:   true,
+		Snapshot: false,
+	})
+	if err != nil {
+		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
+	}
+	if saved.RepoPath != projectRoot || saved.KubernetesContext != "cluster-old" || saved.ContainerRegistry != "registry.example/old" || saved.RuntimeVersion != "1.0.0" {
+		t.Fatalf("unexpected saved config: %+v", saved)
+	}
+	stored := store.envs["frs/prod"]
+	if stored.RepoPath != projectRoot || stored.Remote || stored.RuntimeVersion != "1.0.0" || stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" || stored.Snapshot == nil || *stored.Snapshot {
+		t.Fatalf("unexpected stored config: %+v", stored)
+	}
+}
+
 func TestStartSessionReusesExistingSessionForSelection(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -955,15 +1080,22 @@ func TestBuildPastedImageCopyCommandTargetsRuntimeDeployment(t *testing.T) {
 }
 
 type stubUIStore struct {
+	config  *eruncommon.ERunConfig
 	tenants map[string]eruncommon.TenantConfig
 	envs    map[string]eruncommon.EnvConfig
 }
 
 func (s stubUIStore) LoadERunConfig() (eruncommon.ERunConfig, string, error) {
-	return eruncommon.ERunConfig{}, "", nil
+	if s.config == nil {
+		return eruncommon.ERunConfig{}, "", nil
+	}
+	return *s.config, "", nil
 }
 
-func (s stubUIStore) SaveERunConfig(eruncommon.ERunConfig) error {
+func (s stubUIStore) SaveERunConfig(config eruncommon.ERunConfig) error {
+	if s.config != nil {
+		*s.config = config
+	}
 	return nil
 }
 
@@ -994,6 +1126,14 @@ func (s stubUIStore) LoadEnvConfig(tenant, environment string) (eruncommon.EnvCo
 		return eruncommon.EnvConfig{}, "", eruncommon.ErrNotInitialized
 	}
 	return config, "", nil
+}
+
+func (s stubUIStore) SaveEnvConfig(tenant string, config eruncommon.EnvConfig) error {
+	if s.envs == nil {
+		s.envs = make(map[string]eruncommon.EnvConfig)
+	}
+	s.envs[tenant+"/"+config.Name] = config
+	return nil
 }
 
 func (s stubUIStore) DeleteEnvConfig(tenant, environment string) error {
