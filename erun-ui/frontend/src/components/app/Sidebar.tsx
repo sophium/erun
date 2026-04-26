@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Folder, FolderOpen, FolderPlus, MoreHorizontal } from 'lucide-react';
+import { Folder, FolderOpen, MoreHorizontal, Plus } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
@@ -17,18 +17,18 @@ export function Sidebar({ controller, state }: { controller: ERunUIController; s
         state.sidebarHidden ? 'px-0 py-6 pb-4' : 'py-6 pr-2 pb-4 pl-3 max-[980px]:pl-2.5',
       )}
     >
-      <div className="flex items-center justify-between gap-2 px-3.5 pb-2.5">
+      <div className="flex items-center justify-between gap-2 pr-1.5 pb-2.5 pl-3.5">
         <span className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Environments</span>
         <IconTooltip label="Initialize new remote environment">
           <Button
-            className="size-[26px] flex-none border-0 bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground [&_svg]:size-[19px]"
+            className="size-[26px] flex-none text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&_svg]:size-4"
             type="button"
             variant="ghost"
-            size="icon"
+            size="icon-xs"
             aria-label="Initialize new remote environment"
             onClick={() => controller.openInitializeDialog()}
           >
-            <FolderPlus />
+            <Plus />
           </Button>
         </IconTooltip>
       </div>
