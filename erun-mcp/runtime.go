@@ -35,6 +35,7 @@ type RuntimeConfig struct {
 	PushDockerImage           eruncommon.DockerImagePusherFunc
 	DeployHelmChart           eruncommon.HelmChartDeployerFunc
 	EnsureKubernetesNamespace eruncommon.NamespaceEnsurerFunc
+	DeleteKubernetesNamespace eruncommon.NamespaceDeleterFunc
 	WaitForRemoteRuntime      eruncommon.RemoteRuntimeWaitFunc
 	RunRemoteCommand          eruncommon.RemoteCommandRunnerFunc
 }
@@ -75,6 +76,9 @@ func normalizeRuntimeConfig(cfg RuntimeConfig) RuntimeConfig {
 	}
 	if cfg.RunRemoteCommand == nil {
 		cfg.RunRemoteCommand = eruncommon.RunRemoteCommand
+	}
+	if cfg.DeleteKubernetesNamespace == nil {
+		cfg.DeleteKubernetesNamespace = eruncommon.DeleteKubernetesNamespace
 	}
 	return cfg
 }

@@ -55,6 +55,7 @@ type ListEnvironmentResult struct {
 	Name              string                `json:"name"`
 	KubernetesContext string                `json:"kubernetesContext,omitempty"`
 	RepoPath          string                `json:"repoPath,omitempty"`
+	RuntimeVersion    string                `json:"runtimeVersion,omitempty"`
 	Snapshot          bool                  `json:"snapshot"`
 	LocalPorts        EnvironmentLocalPorts `json:"localPorts,omitempty"`
 	IsDefault         bool                  `json:"isDefault,omitempty"`
@@ -151,6 +152,7 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 				Name:              env.Name,
 				KubernetesContext: strings.TrimSpace(env.KubernetesContext),
 				RepoPath:          strings.TrimSpace(env.RepoPath),
+				RuntimeVersion:    strings.TrimSpace(env.RuntimeVersion),
 				Snapshot:          env.SnapshotEnabled(),
 				LocalPorts:        localPorts,
 				IsDefault:         env.Name == tenant.DefaultEnvironment,

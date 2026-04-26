@@ -28,7 +28,9 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 	var intellij bool
 	var snapshot bool
 	var noSnapshot bool
+	var noAliasPrompt bool
 	var versionOverride string
+	var runtimeImage string
 	target := common.OpenParams{}
 
 	cmd := &cobra.Command{
@@ -60,7 +62,7 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 			if err != nil {
 				return err
 			}
-			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell, VSCode: vscode, IntelliJ: intellij, VersionOverride: versionOverride}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateSSHD, launchVSCode, launchIntelliJ)
+			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell, NoAliasPrompt: noAliasPrompt, VSCode: vscode, IntelliJ: intellij, VersionOverride: versionOverride, RuntimeImage: runtimeImage}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateSSHD, launchVSCode, launchIntelliJ)
 		},
 	}
 
@@ -68,18 +70,22 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Open a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Open a specific environment")
 	cmd.Flags().BoolVar(&noShell, "no-shell", false, "Print shell commands to switch kubectl context, namespace, and worktree locally")
+	cmd.Flags().BoolVar(&noAliasPrompt, "no-alias-prompt", false, "Skip prompting to add a local shell alias with --no-shell")
 	cmd.Flags().BoolVar(&vscode, "vscode", false, "Open the remote environment in VS Code instead of a shell")
 	cmd.Flags().BoolVar(&intellij, "intellij", false, "Open the remote environment in IntelliJ IDEA instead of a shell")
 	cmd.Flags().StringVar(&versionOverride, "version", "", "Override the runtime chart and image version before opening")
+	cmd.Flags().StringVar(&runtimeImage, "runtime-image", "", "Override the runtime image repository before opening")
 	addSnapshotFlags(cmd, &snapshot, &noSnapshot, "Build and deploy a local snapshot when opening the local environment")
 	return cmd
 }
 
 type openOptions struct {
 	NoShell         bool
+	NoAliasPrompt   bool
 	VSCode          bool
 	IntelliJ        bool
 	VersionOverride string
+	RuntimeImage    string
 }
 
 func applyOpenSnapshotPreference(result common.OpenResult, enabled *bool, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
@@ -223,10 +229,14 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 		if err != nil {
 			return err
 		}
+		execution, err = applyRuntimeDeployImageOverride(result, execution, options.RuntimeImage)
+		if err != nil {
+			return err
+		}
 		execution = applyRuntimeDeployVersionOverride(execution, options.VersionOverride)
 
 		shouldDeploy := len(execution.Builds) > 0
-		if strings.TrimSpace(options.VersionOverride) != "" {
+		if strings.TrimSpace(options.VersionOverride) != "" || strings.TrimSpace(options.RuntimeImage) != "" {
 			shouldDeploy = true
 		}
 		if !shouldDeploy && checkKubernetesDeployment != nil {
@@ -291,6 +301,9 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 		ctx.TraceCommand("", "kubectl", "config", "use-context", strings.TrimSpace(result.EnvConfig.KubernetesContext))
 		ctx.TraceCommand("", "kubectl", "config", "set-context", "--current", "--namespace="+namespace)
 		ctx.TraceCommand("", "cd", result.RepoPath)
+		if options.NoAliasPrompt {
+			promptRunner = nil
+		}
 		return emitLocalShellSetupForOpenResult(result, promptRunner, ctx.Stdout, ctx.Stderr)
 	}
 
@@ -373,6 +386,20 @@ func maybeCreateMissingRuntimeChart(ctx common.Context, result common.OpenResult
 	}
 
 	return resolveRuntimeDeploySpec(result)
+}
+
+func applyRuntimeDeployImageOverride(result common.OpenResult, execution common.DeploySpec, runtimeImage string) (common.DeploySpec, error) {
+	runtimeImage = strings.TrimSpace(runtimeImage)
+	if runtimeImage == "" {
+		return execution, nil
+	}
+	if result.RemoteRepo() {
+		return common.ResolveDefaultDevopsDeploySpecWithImage(result, runtimeImage)
+	}
+	if !common.IsDefaultDevopsChartPath(execution.Deploy.ChartPath) {
+		return execution, nil
+	}
+	return common.ResolveDefaultDevopsDeploySpecWithImage(result, runtimeImage)
 }
 
 func applyRuntimeDeployVersionOverride(execution common.DeploySpec, versionOverride string) common.DeploySpec {

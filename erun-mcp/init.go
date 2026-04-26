@@ -19,6 +19,7 @@ type InitInput struct {
 	KubernetesContext        string `json:"kubernetesContext,omitempty" jsonschema:"optional kubernetes context to associate with the environment"`
 	ContainerRegistry        string `json:"containerRegistry,omitempty" jsonschema:"optional container registry to associate with the environment"`
 	Remote                   bool   `json:"remote,omitempty" jsonschema:"when true, initialize the repository inside the runtime pod"`
+	NoGit                    bool   `json:"noGit,omitempty" jsonschema:"when true with remote initialization, create the remote worktree directory without configuring a Git checkout"`
 	RemoteRepositoryURL      string `json:"remoteRepositoryURL,omitempty" jsonschema:"optional SSH repository URL used when creating the remote checkout"`
 	ConfirmTenant            *bool  `json:"confirmTenant,omitempty" jsonschema:"response to a prior tenant confirmation interaction"`
 	ConfirmEnvironment       *bool  `json:"confirmEnvironment,omitempty" jsonschema:"response to a prior environment confirmation interaction"`
@@ -50,6 +51,7 @@ func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 			ProjectRoot:              firstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath)),
 			Environment:              firstNonEmpty(strings.TrimSpace(input.Environment), strings.TrimSpace(runtime.Context.Environment)),
 			RuntimeVersion:           firstNonEmpty(strings.TrimSpace(input.Version), CurrentBuildInfo().Version),
+			NoGit:                    input.NoGit,
 			KubernetesContext:        firstNonEmpty(strings.TrimSpace(input.KubernetesContext), strings.TrimSpace(runtime.Context.KubernetesContext)),
 			ContainerRegistry:        strings.TrimSpace(input.ContainerRegistry),
 			ConfirmTenant:            input.ConfirmTenant,

@@ -485,6 +485,41 @@ func TestResolveOpenRuntimeDeploySpecFallsBackToEmbeddedDefaultChart(t *testing.
 	}
 }
 
+func TestRemoteBootstrapRuntimeUsesCanonicalImageWithTenantRelease(t *testing.T) {
+	spec, err := resolveDefaultDevopsDeploySpecWithImage(OpenResult{
+		Tenant:      "test",
+		Environment: "env",
+		RepoPath:    "/home/erun/git/test",
+		EnvConfig: EnvConfig{
+			KubernetesContext: "cluster-env",
+			Remote:            true,
+			RuntimeVersion:    "1.0.50",
+		},
+	}, DevopsComponentName)
+	if err != nil {
+		t.Fatalf("resolveDefaultDevopsDeploySpecWithImage failed: %v", err)
+	}
+	if spec.Deploy.ReleaseName != "test-devops" {
+		t.Fatalf("expected tenant release name, got %+v", spec.Deploy)
+	}
+
+	templatePath := filepath.Join(spec.Deploy.ChartPath, "templates", "service.yaml")
+	data, err := os.ReadFile(templatePath)
+	if err != nil {
+		t.Fatalf("read rendered chart template: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "name: test-devops") {
+		t.Fatalf("expected tenant deployment identity in chart, got:\n%s", content)
+	}
+	if !strings.Contains(content, "image: erunpaas/erun-devops:{{ .Chart.AppVersion }}") {
+		t.Fatalf("expected canonical runtime image in bootstrap chart, got:\n%s", content)
+	}
+	if strings.Contains(content, "image: erunpaas/test-devops:") {
+		t.Fatalf("bootstrap chart must not require tenant image before it exists, got:\n%s", content)
+	}
+}
+
 func TestResolveOpenRuntimeDeploySpecUsesRemoteEnvRuntimeVersionForEmbeddedChart(t *testing.T) {
 	spec, err := ResolveOpenRuntimeDeploySpec(ConfigStore{}, FindProjectRoot, ResolveDockerBuildContext, ResolveKubernetesDeployContext, nil, OpenResult{
 		Tenant:      "frs",
@@ -508,6 +543,17 @@ func TestResolveOpenRuntimeDeploySpecUsesRemoteEnvRuntimeVersionForEmbeddedChart
 	}
 	if len(spec.Builds) != 0 {
 		t.Fatalf("expected no local builds for remote embedded chart, got %+v", spec.Builds)
+	}
+	data, err := os.ReadFile(filepath.Join(spec.Deploy.ChartPath, "templates", "service.yaml"))
+	if err != nil {
+		t.Fatalf("read rendered chart template: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "image: erunpaas/erun-devops:{{ .Chart.AppVersion }}") {
+		t.Fatalf("expected canonical runtime image for remote deploy, got:\n%s", content)
+	}
+	if strings.Contains(content, "image: erunpaas/frs-devops:") {
+		t.Fatalf("remote deploy must not require tenant image before it exists, got:\n%s", content)
 	}
 }
 

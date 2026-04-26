@@ -56,7 +56,7 @@ func EnsureDefaultDevopsChart(ctx Context, projectRoot, tenant, environment stri
 
 		targetPath := replacer.Replace(templateFile.TargetPath)
 		resolvedPath := filepath.Join(projectRoot, filepath.FromSlash(targetPath))
-		content := renderDefaultDevopsChartTemplate(templateFile.AssetPath, moduleName, data)
+		content := renderDefaultDevopsChartTemplate(templateFile.AssetPath, moduleName, moduleName, data)
 		if err := ensureDefaultDevopsFile(ctx, resolvedPath, templateFile.Mode, content); err != nil {
 			return err
 		}
@@ -72,17 +72,21 @@ func EnsureDefaultDevopsChart(ctx Context, projectRoot, tenant, environment stri
 	return nil
 }
 
-func renderDefaultDevopsChartTemplate(assetPath, moduleName string, data []byte) []byte {
+func renderDefaultDevopsChartTemplate(assetPath, moduleName, imageName string, data []byte) []byte {
 	content := strings.ReplaceAll(string(data), "__MODULE_NAME__", moduleName)
+	imageName = strings.TrimSpace(imageName)
+	if imageName == "" {
+		imageName = moduleName
+	}
 	if assetPath == "assets/default-devops-chart/templates/service.yaml" {
-		content = strings.Replace(content, "image: erunpaas/erun-devops:{{ .Chart.AppVersion }}", "image: erunpaas/"+moduleName+":{{ .Chart.AppVersion }}", 1)
+		content = strings.Replace(content, "image: erunpaas/erun-devops:{{ .Chart.AppVersion }}", "image: erunpaas/"+imageName+":{{ .Chart.AppVersion }}", 1)
 	}
 	return []byte(content)
 }
 
 func resolveOpenRuntimeDeploySpec(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult) (DeploySpec, error) {
 	if target.RemoteRepo() {
-		return resolveDefaultDevopsDeploySpec(target)
+		return resolveDefaultDevopsDeploySpecWithImage(target, DevopsComponentName)
 	}
 
 	allowLocalBuilds := deployTargetSnapshotEnabled(target, nil)
@@ -119,8 +123,16 @@ func isHelmChartNotFoundForComponent(err error) bool {
 }
 
 func resolveDefaultDevopsDeploySpec(target OpenResult) (DeploySpec, error) {
+	return resolveDefaultDevopsDeploySpecWithImage(target, RuntimeReleaseName(target.Tenant))
+}
+
+func ResolveDefaultDevopsDeploySpecWithImage(target OpenResult, imageName string) (DeploySpec, error) {
+	return resolveDefaultDevopsDeploySpecWithImage(target, imageName)
+}
+
+func resolveDefaultDevopsDeploySpecWithImage(target OpenResult, imageName string) (DeploySpec, error) {
 	moduleName := RuntimeReleaseName(target.Tenant)
-	chartPath, err := materializeDefaultDevopsChart(moduleName)
+	chartPath, err := materializeDefaultDevopsChart(moduleName, imageName)
 	if err != nil {
 		return DeploySpec{}, err
 	}
@@ -158,7 +170,7 @@ func IsDefaultDevopsChartPath(chartPath string) bool {
 	return strings.HasPrefix(filepath.Base(chartPath), "erun-default-devops-chart-")
 }
 
-func materializeDefaultDevopsChart(moduleName string) (string, error) {
+func materializeDefaultDevopsChart(moduleName, imageName string) (string, error) {
 	hash, err := defaultDevopsChartHash()
 	if err != nil {
 		return "", err
@@ -167,8 +179,12 @@ func materializeDefaultDevopsChart(moduleName string) (string, error) {
 	if moduleName == "" {
 		moduleName = DevopsComponentName
 	}
+	imageName = strings.TrimSpace(imageName)
+	if imageName == "" {
+		imageName = moduleName
+	}
 
-	chartPath := filepath.Join(os.TempDir(), "erun-default-devops-chart-"+moduleName+"-"+hash)
+	chartPath := filepath.Join(os.TempDir(), "erun-default-devops-chart-"+moduleName+"-"+imageName+"-"+hash)
 	if err := os.MkdirAll(chartPath, 0o755); err != nil {
 		return "", err
 	}
@@ -183,7 +199,7 @@ func materializeDefaultDevopsChart(moduleName string) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		data = renderDefaultDevopsChartTemplate(name, moduleName, data)
+		data = renderDefaultDevopsChartTemplate(name, moduleName, imageName, data)
 
 		relativePath := strings.TrimPrefix(name, "assets/default-devops-chart/")
 		targetPath := filepath.Join(chartPath, filepath.FromSlash(relativePath))

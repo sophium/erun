@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 type terminalSession interface {
@@ -73,6 +75,31 @@ func buildOpenArgs(tenant, environment string) []string {
 	return []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment)}
 }
 
+func buildInitArgs(tenant, environment, version, runtimeImage string, noGit bool) []string {
+	args := []string{"init", strings.TrimSpace(tenant), strings.TrimSpace(environment), "--remote"}
+	if version = strings.TrimSpace(version); version != "" {
+		args = append(args, "--version", version)
+	}
+	if runtimeImage = strings.TrimSpace(runtimeImage); runtimeImage != "" {
+		args = append(args, "--runtime-image", runtimeImage)
+	}
+	if noGit {
+		args = append(args, "--no-git")
+	}
+	return args
+}
+
+func buildDeployArgs(tenant, environment, version, runtimeImage string) []string {
+	args := []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment), "--no-shell", "--no-alias-prompt"}
+	if version = strings.TrimSpace(version); version != "" {
+		args = append(args, "--version", version)
+	}
+	if runtimeImage = strings.TrimSpace(runtimeImage); runtimeImage != "" {
+		args = append(args, "--runtime-image", runtimeImage)
+	}
+	return args
+}
+
 func resolveTerminalStartDir(preferred string) string {
 	candidates := []string{strings.TrimSpace(preferred)}
 
@@ -95,6 +122,18 @@ func resolveTerminalStartDir(preferred string) string {
 	}
 
 	return "."
+}
+
+func resolveDeployStartDir(findProjectRoot eruncommon.ProjectFinderFunc, result eruncommon.OpenResult) string {
+	if findProjectRoot != nil {
+		if _, projectRoot, err := findProjectRoot(); err == nil && strings.TrimSpace(projectRoot) != "" {
+			return resolveTerminalStartDir(projectRoot)
+		}
+	}
+	if result.RemoteRepo() {
+		return resolveTerminalStartDir("")
+	}
+	return resolveTerminalStartDir(result.RepoPath)
 }
 
 func shellQuote(value string) string {

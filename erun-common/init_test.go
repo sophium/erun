@@ -1067,6 +1067,13 @@ func TestBootstrapRunRemoteInitializesTenantInPodWorktree(t *testing.T) {
 			if params.Version != "1.2.3" {
 				t.Fatalf("expected remote runtime version override, got %+v", params)
 			}
+			service, err := os.ReadFile(filepath.Join(params.ChartPath, "templates", "service.yaml"))
+			if err != nil {
+				t.Fatalf("ReadFile failed: %v", err)
+			}
+			if !strings.Contains(string(service), "image: erunpaas/frs-devops:{{ .Chart.AppVersion }}") {
+				t.Fatalf("expected remote runtime image override, got:\n%s", service)
+			}
 			return nil
 		},
 		WaitForRemoteRuntime: func(req ShellLaunchParams) error {
@@ -1094,6 +1101,7 @@ func TestBootstrapRunRemoteInitializesTenantInPodWorktree(t *testing.T) {
 		Environment:    "dev",
 		Remote:         true,
 		RuntimeVersion: "1.2.3",
+		RuntimeImage:   "frs-devops",
 	})
 	if err != nil {
 		t.Fatalf("Run failed: %v", err)
@@ -1128,6 +1136,72 @@ func TestBootstrapRunRemoteInitializesTenantInPodWorktree(t *testing.T) {
 	}
 	if !savedEnv.Remote || savedEnv.ContainerRegistry != "registry.example.com/remote" {
 		t.Fatalf("unexpected saved env config: %+v", savedEnv)
+	}
+}
+
+func TestBootstrapRunRemoteNoGitCreatesWorktreeWithoutRepositoryPrompts(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	scripts := make([]string, 0, 1)
+	service := bootstrapTestRunner{
+		Context: testContextWithLogger(&testTraceLogger{}),
+		Store:   ConfigStore{},
+		FindProjectRoot: func() (string, string, error) {
+			t.Fatal("did not expect local project detection for remote init")
+			return "", "", nil
+		},
+		Confirm: func(string) (bool, error) {
+			return true, nil
+		},
+		PromptKubernetesContext: func(string) (string, error) {
+			return "cluster-remote", nil
+		},
+		PromptContainerRegistry: func(string) (string, error) {
+			return "registry.example.com/remote", nil
+		},
+		PromptRemoteRepositoryURL: func(string) (string, error) {
+			t.Fatal("did not expect Git remote URL prompt")
+			return "", nil
+		},
+		EnsureKubernetesNamespace: func(string, string) error {
+			return nil
+		},
+		DeployHelmChart: func(HelmDeployParams) error {
+			return nil
+		},
+		WaitForRemoteRuntime: func(ShellLaunchParams) error {
+			return nil
+		},
+		RunRemoteCommand: func(req ShellLaunchParams, script string) (RemoteCommandResult, error) {
+			scripts = append(scripts, script)
+			return RemoteCommandResult{}, nil
+		},
+	}
+
+	result, err := service.Run(BootstrapInitParams{
+		Tenant:      "frs",
+		Environment: "dev",
+		Remote:      true,
+		NoGit:       true,
+	})
+	if err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	remotePath := RemoteWorktreePathForRepoName("frs")
+	if result.EnvConfig.RepoPath != remotePath || !result.EnvConfig.Remote {
+		t.Fatalf("unexpected env config: %+v", result.EnvConfig)
+	}
+	if len(scripts) != 1 {
+		t.Fatalf("expected only remote worktree command, got %d", len(scripts))
+	}
+	if !strings.Contains(scripts[0], "mkdir -p "+shellQuote(remotePath)) {
+		t.Fatalf("expected worktree directory creation, got:\n%s", scripts[0])
+	}
+	for _, unexpected := range []string{"ssh-keygen", "git clone", "git -C"} {
+		if strings.Contains(scripts[0], unexpected) {
+			t.Fatalf("did not expect %q in no-git script:\n%s", unexpected, scripts[0])
+		}
 	}
 }
 

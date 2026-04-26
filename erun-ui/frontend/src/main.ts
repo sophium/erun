@@ -4,12 +4,13 @@ import './style.css';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 
-import { LoadDiff, LoadState, ResizeSession, SavePastedImage, SendSessionInput, StartSession } from '../wailsjs/go/main/App';
+import { DeleteEnvironment, LoadDiff, LoadState, LoadVersionSuggestions, ResizeSession, SavePastedImage, SendSessionInput, StartDeploySession, StartInitSession, StartSession } from '../wailsjs/go/main/App';
 import { EventsOn, WindowToggleMaximise } from '../wailsjs/runtime/runtime';
 
 interface UIEnvironment {
   name: string;
   mcpUrl?: string;
+  runtimeVersion?: string;
 }
 
 interface UITenant {
@@ -20,13 +21,35 @@ interface UITenant {
 interface UISelection {
   tenant: string;
   environment: string;
+  version?: string;
+  runtimeImage?: string;
+  noGit?: boolean;
+  action?: EnvironmentActionMode;
+}
+
+interface UIBuildDetails {
+  version: string;
+  commit?: string;
+  date?: string;
 }
 
 interface UIState {
   tenants: UITenant[];
   selected?: UISelection;
   message?: string;
+  build?: UIBuildDetails;
+  versionSuggestions?: UIVersionSuggestion[];
 }
+
+interface UIVersionSuggestion {
+  label: string;
+  version: string;
+  source?: string;
+  image?: string;
+}
+
+type EnvironmentActionMode = 'init' | 'deploy';
+type ManageTab = 'deploy' | 'delete';
 
 interface StartSessionResult {
   sessionId: number;
@@ -45,6 +68,14 @@ interface TerminalExitPayload {
 
 interface PastedImageResult {
   path: string;
+}
+
+interface DeleteEnvironmentResult {
+  tenant: string;
+  environment: string;
+  namespace?: string;
+  kubernetesContext?: string;
+  namespaceDeleteError?: string;
 }
 
 interface DiffResult {
@@ -122,6 +153,9 @@ shell.innerHTML = `
       <aside id="sidebar" class="sidebar">
         <div class="sidebar__header">
           <span class="sidebar__header-title">Environments</span>
+          <button id="environment-init" class="sidebar__icon-button" type="button" aria-label="Initialize new remote environment" title="Initialize new remote environment">
+            ${addEnvironmentIconMarkup()}
+          </button>
         </div>
         <div id="sidebar-list" class="sidebar__list"></div>
       </aside>
@@ -162,10 +196,82 @@ shell.innerHTML = `
       </main>
     </div>
   </div>
+  <div id="environment-dialog-overlay" class="modal-overlay is-hidden" role="presentation">
+    <form id="environment-dialog-form" class="init-dialog" role="dialog" aria-modal="true" aria-labelledby="environment-dialog-title">
+      <div class="init-dialog__header">
+        <h2 id="environment-dialog-title">New environment</h2>
+      </div>
+      <label class="init-dialog__field">
+        <span>Tenant</span>
+        <input id="environment-dialog-tenant" type="text" autocomplete="off" spellcheck="false" required />
+      </label>
+      <label class="init-dialog__field">
+        <span>Environment</span>
+        <input id="environment-dialog-environment" type="text" autocomplete="off" spellcheck="false" required />
+      </label>
+      <label class="init-dialog__field">
+        <span>Runtime version</span>
+        <div id="environment-version-combobox" class="version-combobox">
+          <input id="environment-dialog-version" type="text" autocomplete="off" spellcheck="false" />
+          <button id="environment-version-toggle" class="version-combobox__toggle" type="button" aria-label="Show version choices">
+            ${chevronDownMarkup()}
+          </button>
+          <div id="environment-version-list" class="version-combobox__list is-hidden" role="listbox"></div>
+        </div>
+        <span id="environment-version-source" class="version-source"></span>
+      </label>
+      <label class="init-dialog__option">
+        <input id="environment-dialog-no-git" type="checkbox" />
+        <span>Initialize without Git checkout</span>
+      </label>
+      <div class="init-dialog__actions">
+        <button id="environment-dialog-cancel" class="init-dialog__button" type="button">Cancel</button>
+        <button id="environment-dialog-submit" class="init-dialog__button init-dialog__button--primary" type="submit">Start enrollment</button>
+      </div>
+    </form>
+  </div>
+  <div id="manage-dialog-overlay" class="modal-overlay is-hidden" role="presentation">
+    <section id="manage-dialog" class="manage-dialog" role="dialog" aria-modal="true" aria-labelledby="manage-dialog-title">
+      <div class="init-dialog__header">
+        <h2 id="manage-dialog-title">Manage environment</h2>
+      </div>
+      <p id="manage-dialog-target" class="manage-dialog__target"></p>
+      <div class="manage-dialog__tabs" role="tablist" aria-label="Environment actions">
+        <button id="manage-tab-deploy" class="manage-dialog__tab is-active" type="button" role="tab" aria-selected="true" aria-controls="manage-dialog-deploy-panel">Deploy</button>
+        <button id="manage-tab-delete" class="manage-dialog__tab" type="button" role="tab" aria-selected="false" aria-controls="manage-dialog-delete-panel">Delete</button>
+      </div>
+      <div id="manage-dialog-deploy-panel" class="manage-dialog__section" role="tabpanel" aria-labelledby="manage-tab-deploy">
+        <label class="init-dialog__field">
+          <span>Runtime version</span>
+          <div class="version-combobox">
+            <input id="manage-dialog-version" type="text" autocomplete="off" spellcheck="false" />
+            <button id="manage-version-toggle" class="version-combobox__toggle" type="button" aria-label="Show version choices">
+              ${chevronDownMarkup()}
+            </button>
+            <div id="manage-version-list" class="version-combobox__list is-hidden" role="listbox"></div>
+          </div>
+          <span id="manage-version-source" class="version-source"></span>
+        </label>
+      </div>
+      <div id="manage-dialog-delete-panel" class="manage-dialog__section manage-dialog__section--danger" role="tabpanel" aria-labelledby="manage-tab-delete" hidden>
+        <p id="manage-dialog-delete-message" class="manage-dialog__message"></p>
+        <label class="init-dialog__field">
+          <span>Confirmation</span>
+          <input id="manage-dialog-confirmation" type="text" autocomplete="off" spellcheck="false" />
+        </label>
+      </div>
+      <div class="init-dialog__actions manage-dialog__footer">
+        <button id="manage-dialog-cancel" class="init-dialog__button" type="button">Cancel</button>
+        <button id="manage-dialog-deploy" class="init-dialog__button init-dialog__button--primary" type="button">Deploy</button>
+        <button id="manage-dialog-delete" class="init-dialog__button init-dialog__button--danger" type="button" hidden>Delete</button>
+      </div>
+    </section>
+  </div>
 `;
 
 const sidebarList = document.querySelector<HTMLDivElement>('#sidebar-list');
 const sidebar = document.querySelector<HTMLElement>('#sidebar');
+const environmentInit = document.querySelector<HTMLButtonElement>('#environment-init');
 const splitter = document.querySelector<HTMLElement>('#splitter');
 const sidebarToggle = document.querySelector<HTMLButtonElement>('#sidebar-toggle');
 const reviewToggle = document.querySelector<HTMLButtonElement>('#review-toggle');
@@ -185,8 +291,35 @@ const changedFilesCount = document.querySelector<HTMLSpanElement>('#changed-file
 const diffAdditions = document.querySelector<HTMLSpanElement>('#diff-additions');
 const diffDeletions = document.querySelector<HTMLSpanElement>('#diff-deletions');
 const terminalMessage = document.querySelector<HTMLDivElement>('#terminal-message');
+const environmentDialogOverlay = document.querySelector<HTMLDivElement>('#environment-dialog-overlay');
+const environmentDialogForm = document.querySelector<HTMLFormElement>('#environment-dialog-form');
+const environmentDialogTitle = document.querySelector<HTMLHeadingElement>('#environment-dialog-title');
+const environmentDialogTenantInput = document.querySelector<HTMLInputElement>('#environment-dialog-tenant');
+const environmentDialogEnvironmentInput = document.querySelector<HTMLInputElement>('#environment-dialog-environment');
+const environmentDialogVersionInput = document.querySelector<HTMLInputElement>('#environment-dialog-version');
+const environmentVersionSource = document.querySelector<HTMLSpanElement>('#environment-version-source');
+const environmentDialogNoGit = document.querySelector<HTMLInputElement>('#environment-dialog-no-git');
+const environmentVersionToggle = document.querySelector<HTMLButtonElement>('#environment-version-toggle');
+const environmentVersionList = document.querySelector<HTMLDivElement>('#environment-version-list');
+const environmentDialogCancel = document.querySelector<HTMLButtonElement>('#environment-dialog-cancel');
+const environmentDialogSubmit = document.querySelector<HTMLButtonElement>('#environment-dialog-submit');
+const manageDialogOverlay = document.querySelector<HTMLDivElement>('#manage-dialog-overlay');
+const manageDialogTarget = document.querySelector<HTMLParagraphElement>('#manage-dialog-target');
+const manageTabDeploy = document.querySelector<HTMLButtonElement>('#manage-tab-deploy');
+const manageTabDelete = document.querySelector<HTMLButtonElement>('#manage-tab-delete');
+const manageDialogDeploy = document.querySelector<HTMLButtonElement>('#manage-dialog-deploy');
+const manageDialogDelete = document.querySelector<HTMLButtonElement>('#manage-dialog-delete');
+const manageDialogDeployPanel = document.querySelector<HTMLDivElement>('#manage-dialog-deploy-panel');
+const manageDialogDeletePanel = document.querySelector<HTMLDivElement>('#manage-dialog-delete-panel');
+const manageDialogVersionInput = document.querySelector<HTMLInputElement>('#manage-dialog-version');
+const manageVersionSource = document.querySelector<HTMLSpanElement>('#manage-version-source');
+const manageVersionToggle = document.querySelector<HTMLButtonElement>('#manage-version-toggle');
+const manageVersionList = document.querySelector<HTMLDivElement>('#manage-version-list');
+const manageDialogDeleteMessage = document.querySelector<HTMLParagraphElement>('#manage-dialog-delete-message');
+const manageDialogConfirmation = document.querySelector<HTMLInputElement>('#manage-dialog-confirmation');
+const manageDialogCancel = document.querySelector<HTMLButtonElement>('#manage-dialog-cancel');
 
-if (!sidebarList || !sidebar || !splitter || !sidebarToggle || !reviewToggle || !titlebar || !terminalView || !terminalRoot || !reviewSplitter || !reviewView || !reviewMain || !diffList || !changedFileTree || !fileFilter || !filesToggle || !diffRefresh || !filesSplitter || !changedFilesCount || !diffAdditions || !diffDeletions || !terminalMessage) {
+if (!sidebarList || !sidebar || !environmentInit || !splitter || !sidebarToggle || !reviewToggle || !titlebar || !terminalView || !terminalRoot || !reviewSplitter || !reviewView || !reviewMain || !diffList || !changedFileTree || !fileFilter || !filesToggle || !diffRefresh || !filesSplitter || !changedFilesCount || !diffAdditions || !diffDeletions || !terminalMessage || !environmentDialogOverlay || !environmentDialogForm || !environmentDialogTitle || !environmentDialogTenantInput || !environmentDialogEnvironmentInput || !environmentDialogVersionInput || !environmentVersionSource || !environmentDialogNoGit || !environmentVersionToggle || !environmentVersionList || !environmentDialogCancel || !environmentDialogSubmit || !manageDialogOverlay || !manageDialogTarget || !manageTabDeploy || !manageTabDelete || !manageDialogDeploy || !manageDialogDelete || !manageDialogDeployPanel || !manageDialogDeletePanel || !manageDialogVersionInput || !manageVersionSource || !manageVersionToggle || !manageVersionList || !manageDialogDeleteMessage || !manageDialogConfirmation || !manageDialogCancel) {
   throw new Error('required elements are missing');
 }
 
@@ -208,8 +341,17 @@ const FILES_OPEN_STORAGE_KEY = 'erun.filesOpen';
 const state: {
   tenants: UITenant[];
   selected: UISelection | null;
+  versionSuggestions: UIVersionSuggestion[];
+  environmentVersionImage: string;
+  manageVersionImage: string;
+  environmentActionMode: EnvironmentActionMode;
+  manageTab: ManageTab;
+  manageSelection: UISelection | null;
+  manageBusy: boolean;
   collapsed: Set<string>;
   sessionId: number;
+  initSessionIds: Set<number>;
+  deploySessionIds: Set<number>;
   selectionSessions: Map<string, number>;
   sessionBuffers: Map<number, Uint8Array[]>;
   sessionExitReasons: Map<number, string>;
@@ -228,8 +370,17 @@ const state: {
 } = {
   tenants: [],
   selected: null,
+  versionSuggestions: [],
+  environmentVersionImage: '',
+  manageVersionImage: '',
+  environmentActionMode: 'init',
+  manageTab: 'deploy',
+  manageSelection: null,
+  manageBusy: false,
   collapsed: new Set<string>(),
   sessionId: 0,
+  initSessionIds: new Set<number>(),
+  deploySessionIds: new Set<number>(),
   selectionSessions: new Map<string, number>(),
   sessionBuffers: new Map<number, Uint8Array[]>(),
   sessionExitReasons: new Map<number, string>(),
@@ -276,6 +427,8 @@ terminalRoot.addEventListener('paste', (event: ClipboardEvent) => {
 
 let resizeTimer = 0;
 let reviewScrollFrame = 0;
+let versionSuggestionTimer = 0;
+let versionSuggestionRequest = 0;
 const resizeObserver = new ResizeObserver(() => {
   queueTerminalResize();
 });
@@ -286,6 +439,134 @@ window.addEventListener('resize', () => {
 
 sidebarToggle.addEventListener('click', () => {
   setSidebarHidden(!state.sidebarHidden);
+});
+
+environmentInit.addEventListener('click', () => {
+  openInitializeDialog();
+});
+
+environmentDialogOverlay.addEventListener('mousedown', (event: MouseEvent) => {
+  if (event.target === environmentDialogOverlay) {
+    closeEnvironmentDialog();
+  }
+});
+
+environmentDialogCancel.addEventListener('click', () => {
+  closeEnvironmentDialog();
+});
+
+manageDialogOverlay.addEventListener('mousedown', (event: MouseEvent) => {
+  if (event.target === manageDialogOverlay) {
+    closeManageDialog();
+  }
+});
+
+manageDialogCancel.addEventListener('click', () => {
+  closeManageDialog();
+});
+
+manageTabDeploy.addEventListener('click', () => {
+  setManageTab('deploy');
+});
+
+manageTabDelete.addEventListener('click', () => {
+  setManageTab('delete');
+});
+
+manageDialogDeploy.addEventListener('click', () => {
+  void submitManageDeploy().catch((error: unknown) => {
+    showTerminalMessage(readError(error));
+  });
+});
+
+manageDialogDelete.addEventListener('click', () => {
+  void submitManageDelete().catch((error: unknown) => {
+    showTerminalMessage(readError(error));
+  });
+});
+
+manageDialogVersionInput.addEventListener('input', () => {
+  manageDialogVersionInput.setCustomValidity('');
+  state.manageVersionImage = '';
+  syncManageVersionSourceFromInput();
+  closeManageVersionChoices();
+});
+
+manageDialogVersionInput.addEventListener('keydown', (event: KeyboardEvent) => {
+  if (event.key !== 'Enter') {
+    return;
+  }
+  event.preventDefault();
+  void submitManageDeploy().catch((error: unknown) => {
+    showTerminalMessage(readError(error));
+  });
+});
+
+manageVersionToggle.addEventListener('click', () => {
+  toggleManageVersionChoices();
+});
+
+manageDialogConfirmation.addEventListener('input', () => {
+  manageDialogConfirmation.setCustomValidity('');
+  syncDeleteButtonState();
+});
+
+manageDialogConfirmation.addEventListener('keydown', (event: KeyboardEvent) => {
+  if (event.key !== 'Enter') {
+    return;
+  }
+  event.preventDefault();
+  void submitManageDelete().catch((error: unknown) => {
+    showTerminalMessage(readError(error));
+  });
+});
+
+environmentDialogTenantInput.addEventListener('input', () => {
+  environmentDialogTenantInput.setCustomValidity('');
+  scheduleDialogVersionSuggestionRefresh(true);
+});
+
+environmentDialogEnvironmentInput.addEventListener('input', () => {
+  environmentDialogEnvironmentInput.setCustomValidity('');
+});
+
+environmentDialogVersionInput.addEventListener('input', () => {
+  environmentDialogVersionInput.setCustomValidity('');
+  state.environmentVersionImage = '';
+  syncEnvironmentVersionSourceFromInput();
+  closeVersionChoices();
+});
+
+environmentVersionToggle.addEventListener('click', () => {
+  toggleVersionChoices();
+});
+
+environmentDialogForm.addEventListener('submit', (event: SubmitEvent) => {
+  event.preventDefault();
+  void submitEnvironmentDialog().catch((error: unknown) => {
+    showTerminalMessage(readError(error));
+  });
+});
+
+window.addEventListener('keydown', (event: KeyboardEvent) => {
+  if (event.key !== 'Escape') {
+    return;
+  }
+  if (!environmentDialogOverlay.classList.contains('is-hidden')) {
+    closeEnvironmentDialog();
+  }
+  if (!manageDialogOverlay.classList.contains('is-hidden')) {
+    closeManageDialog();
+  }
+});
+
+document.addEventListener('mousedown', (event: MouseEvent) => {
+  const target = event.target;
+  if (target instanceof Node && (environmentDialogForm.contains(target) || manageDialogOverlay.contains(target))) {
+    return;
+  }
+  closeVersionChoices();
+  closeManageVersionChoices();
 });
 
 reviewToggle.addEventListener('click', () => {
@@ -400,15 +681,24 @@ EventsOn('terminal-output', (payload: TerminalOutputPayload) => {
 });
 
 EventsOn('terminal-exit', (payload: TerminalExitPayload) => {
+  void handleTerminalExit(payload);
+});
+
+async function handleTerminalExit(payload: TerminalExitPayload): Promise<void> {
   if (!payload) {
     return;
   }
   state.sessionExitReasons.set(payload.sessionId, payload.reason || 'Session ended.');
+  const initSessionEnded = state.initSessionIds.delete(payload.sessionId);
+  const deploySessionEnded = state.deploySessionIds.delete(payload.sessionId);
+  if (initSessionEnded || deploySessionEnded) {
+    await reloadStateAfterInit();
+  }
   if (payload.sessionId !== state.sessionId) {
     return;
   }
   showTerminalMessage(payload.reason || 'Session ended.');
-});
+}
 
 void boot();
 applySidebarState();
@@ -421,6 +711,7 @@ async function boot(): Promise<void> {
     const loaded = (await LoadState()) as UIState;
     state.tenants = loaded.tenants || [];
     state.selected = loaded.selected || null;
+    state.versionSuggestions = normalizeVersionSuggestions(loaded.versionSuggestions || []);
     renderSidebar();
 
     if (loaded.message) {
@@ -477,6 +768,540 @@ async function openSelection(selection: UISelection): Promise<void> {
   queueTerminalResize();
 }
 
+function openInitializeDialog(): void {
+  const tenantDefault = state.selected?.tenant || state.tenants[0]?.name || '';
+  state.environmentActionMode = 'init';
+  state.environmentVersionImage = '';
+  environmentDialogTitle.textContent = 'New environment';
+  environmentDialogSubmit.textContent = 'Start enrollment';
+  environmentDialogTenantInput.disabled = false;
+  environmentDialogEnvironmentInput.disabled = false;
+  environmentDialogTenantInput.value = tenantDefault;
+  environmentDialogEnvironmentInput.value = '';
+  environmentDialogNoGit.checked = false;
+  resetVersionInput();
+  void refreshDialogVersionSuggestions(true);
+  resetEnvironmentDialogValidity();
+  environmentDialogOverlay.classList.remove('is-hidden');
+
+  window.setTimeout(() => {
+    const target = tenantDefault ? environmentDialogEnvironmentInput : environmentDialogTenantInput;
+    target.focus();
+    target.select();
+  }, 0);
+}
+
+function closeEnvironmentDialog(): void {
+  environmentDialogOverlay.classList.add('is-hidden');
+  closeVersionChoices();
+  state.environmentVersionImage = '';
+  environmentVersionSource.textContent = '';
+  terminal.focus();
+}
+
+function openManageDialog(selection: UISelection): void {
+  state.manageSelection = selection;
+  state.manageBusy = false;
+  state.manageVersionImage = '';
+  manageDialogTarget.textContent = `${selection.tenant} / ${selection.environment}`;
+  manageDialogDeleteMessage.textContent = `Type ${deleteConfirmationValue(selection)} to delete ${selection.tenant} / ${selection.environment}.`;
+  manageDialogConfirmation.value = '';
+  manageDialogConfirmation.setCustomValidity('');
+  syncDeleteButtonState();
+  manageDialogVersionInput.setCustomValidity('');
+  resetManageVersionInput();
+  void refreshManageVersionSuggestions(true);
+  setManageTab('deploy');
+  manageDialogOverlay.classList.remove('is-hidden');
+
+  window.setTimeout(() => {
+    manageDialogVersionInput.focus();
+    manageDialogVersionInput.select();
+  }, 0);
+}
+
+function closeManageDialog(): void {
+  if (state.manageBusy) {
+    return;
+  }
+  manageDialogOverlay.classList.add('is-hidden');
+  closeManageVersionChoices();
+  state.manageSelection = null;
+  state.manageVersionImage = '';
+  setManageBusy(false);
+  manageVersionSource.textContent = '';
+  state.manageTab = 'deploy';
+  terminal.focus();
+}
+
+function setManageTab(tab: ManageTab): void {
+  if (state.manageBusy) {
+    return;
+  }
+  state.manageTab = tab;
+  const deployActive = tab === 'deploy';
+  manageTabDeploy.classList.toggle('is-active', deployActive);
+  manageTabDelete.classList.toggle('is-active', !deployActive);
+  manageTabDeploy.setAttribute('aria-selected', String(deployActive));
+  manageTabDelete.setAttribute('aria-selected', String(!deployActive));
+  manageDialogDeployPanel.hidden = !deployActive;
+  manageDialogDeletePanel.hidden = deployActive;
+  manageDialogDeploy.hidden = !deployActive;
+  manageDialogDelete.hidden = deployActive;
+  syncDeleteButtonState();
+  closeManageVersionChoices();
+
+  window.setTimeout(() => {
+    if (deployActive) {
+      manageDialogVersionInput.focus();
+      return;
+    }
+    manageDialogConfirmation.focus();
+  }, 0);
+}
+
+function syncDeleteButtonState(): void {
+  const selection = state.manageSelection;
+  const expected = selection ? deleteConfirmationValue(selection) : '';
+  manageDialogDelete.disabled = state.manageBusy || normalizeDialogValue(manageDialogConfirmation.value) !== expected;
+}
+
+function setManageBusy(busy: boolean): void {
+  state.manageBusy = busy;
+  manageTabDeploy.disabled = busy;
+  manageTabDelete.disabled = busy;
+  manageDialogDeploy.disabled = busy;
+  manageDialogCancel.disabled = busy;
+  manageDialogVersionInput.disabled = busy;
+  manageVersionToggle.disabled = busy;
+  manageDialogConfirmation.disabled = busy;
+  manageDialogDelete.textContent = busy ? 'Deleting...' : 'Delete';
+  syncDeleteButtonState();
+}
+
+async function submitManageDeploy(): Promise<void> {
+  if (state.manageBusy) {
+    return;
+  }
+  const selection = state.manageSelection;
+  if (!selection) {
+    closeManageDialog();
+    return;
+  }
+  const version = normalizeDialogValue(manageDialogVersionInput.value);
+  if (!version) {
+    manageDialogVersionInput.setCustomValidity('Version is required');
+    manageDialogVersionInput.reportValidity();
+    return;
+  }
+  closeManageDialog();
+  await startDeploySelection({ ...selection, version, runtimeImage: resolveManageRuntimeImage(version) });
+}
+
+async function submitManageDelete(): Promise<void> {
+  if (state.manageBusy) {
+    return;
+  }
+  const selection = state.manageSelection;
+  if (!selection) {
+    closeManageDialog();
+    return;
+  }
+  const confirmation = normalizeDialogValue(manageDialogConfirmation.value);
+  const expected = deleteConfirmationValue(selection);
+  if (confirmation !== expected) {
+    manageDialogConfirmation.setCustomValidity(`Type ${expected} to confirm`);
+    manageDialogConfirmation.reportValidity();
+    return;
+  }
+
+  setManageBusy(true);
+  showTerminalMessage(`Deleting ${selection.tenant} / ${selection.environment}...`);
+
+  try {
+    const result = (await DeleteEnvironment(selection, confirmation)) as DeleteEnvironmentResult;
+    state.selected = null;
+    await reloadStateAfterEnvironmentChange();
+    setManageBusy(false);
+    closeManageDialog();
+    const warning = result.namespaceDeleteError ? ` Namespace deletion failed: ${result.namespaceDeleteError}` : '';
+    showTerminalMessage(`Deleted ${result.tenant} / ${result.environment}.${warning}`);
+  } catch (error) {
+    setManageBusy(false);
+    throw error;
+  }
+}
+
+function deleteConfirmationValue(selection: UISelection): string {
+  return `${selection.tenant}-${selection.environment}`;
+}
+
+async function submitEnvironmentDialog(): Promise<void> {
+  const tenant = normalizeDialogValue(environmentDialogTenantInput.value);
+  const environment = normalizeDialogValue(environmentDialogEnvironmentInput.value);
+  const version = normalizeDialogValue(environmentDialogVersionInput.value);
+  if (!tenant || !environment) {
+    environmentDialogTenantInput.setCustomValidity(tenant ? '' : 'Tenant is required');
+    environmentDialogEnvironmentInput.setCustomValidity(environment ? '' : 'Environment is required');
+    environmentDialogForm.reportValidity();
+    return;
+  }
+
+  if (state.environmentActionMode === 'deploy' && !version) {
+    environmentDialogVersionInput.setCustomValidity('Version is required');
+    environmentDialogForm.reportValidity();
+    return;
+  }
+
+  closeEnvironmentDialog();
+  const selection = { tenant, environment, version, runtimeImage: resolveEnvironmentRuntimeImage(version), noGit: environmentDialogNoGit.checked };
+  if (state.environmentActionMode === 'deploy') {
+    await startDeploySelection(selection);
+    return;
+  }
+  await startInitSelection(selection);
+}
+
+async function startInitSelection(selection: UISelection): Promise<void> {
+  state.selected = selection;
+  renderSidebar();
+  showTerminalMessage(`Initializing ${selection.tenant} / ${selection.environment}...`);
+
+  fitAddon.fit();
+  const result = (await StartInitSession(selection, terminal.cols, terminal.rows)) as StartSessionResult;
+  state.initSessionIds.add(result.sessionId);
+  state.sessionId = result.sessionId;
+
+  resetTerminal();
+  hideTerminalMessage();
+  terminal.focus();
+  queueTerminalResize();
+}
+
+async function startDeploySelection(selection: UISelection): Promise<void> {
+  state.selected = selection;
+  renderSidebar();
+  showTerminalMessage(`Deploying ${selection.tenant} / ${selection.environment}...`);
+
+  fitAddon.fit();
+  const result = (await StartDeploySession(selection, terminal.cols, terminal.rows)) as StartSessionResult;
+  state.deploySessionIds.add(result.sessionId);
+  state.sessionId = result.sessionId;
+
+  resetTerminal();
+  hideTerminalMessage();
+  terminal.focus();
+  queueTerminalResize();
+}
+
+async function reloadStateAfterInit(): Promise<void> {
+  await reloadStateAfterEnvironmentChange();
+}
+
+async function reloadStateAfterEnvironmentChange(): Promise<void> {
+  try {
+    const loaded = (await LoadState()) as UIState;
+    state.tenants = loaded.tenants || [];
+    state.versionSuggestions = normalizeVersionSuggestions(loaded.versionSuggestions || state.versionSuggestions);
+    renderSidebar();
+  } catch {
+  }
+}
+
+function normalizeDialogValue(value: string): string {
+  return value.trim();
+}
+
+function normalizeVersionSuggestions(values: UIVersionSuggestion[]): UIVersionSuggestion[] {
+  const suggestions: UIVersionSuggestion[] = [];
+  for (const value of values) {
+    const version = normalizeDialogValue(value.version);
+    const image = normalizeDialogValue(value.image || '');
+    const source = normalizeDialogValue(value.source || '');
+    const label = normalizeDialogValue(value.label);
+    if (version && !suggestions.some((suggestion) => suggestion.version === version && suggestion.image === image && suggestion.source === source && suggestion.label === label)) {
+      suggestions.push({
+        label,
+        version,
+        source,
+        image,
+      });
+    }
+  }
+  return suggestions;
+}
+
+function resetVersionInput(): void {
+  selectEnvironmentVersionSuggestion(state.versionSuggestions[0]);
+  renderVersionChoices();
+  closeVersionChoices();
+}
+
+function resetManageVersionInput(): void {
+  selectManageVersionSuggestion(state.versionSuggestions[0]);
+  renderManageVersionChoices();
+  closeManageVersionChoices();
+}
+
+function scheduleDialogVersionSuggestionRefresh(selectDefault: boolean): void {
+  if (versionSuggestionTimer) {
+    window.clearTimeout(versionSuggestionTimer);
+  }
+  versionSuggestionTimer = window.setTimeout(() => {
+    void refreshDialogVersionSuggestions(selectDefault);
+  }, 250);
+}
+
+async function refreshDialogVersionSuggestions(selectDefault: boolean): Promise<void> {
+  const request = ++versionSuggestionRequest;
+  const selection = {
+    tenant: normalizeDialogValue(environmentDialogTenantInput.value),
+    environment: normalizeDialogValue(environmentDialogEnvironmentInput.value),
+    action: state.environmentActionMode,
+  };
+  const suggestions = normalizeVersionSuggestions((await LoadVersionSuggestions(selection)) as UIVersionSuggestion[]);
+  if (request !== versionSuggestionRequest || environmentDialogOverlay.classList.contains('is-hidden')) {
+    return;
+  }
+
+  state.versionSuggestions = suggestions;
+  const currentVersion = normalizeDialogValue(environmentDialogVersionInput.value);
+  renderVersionChoices();
+  if (selectDefault || !suggestions.some((suggestion) => suggestion.version === currentVersion)) {
+    selectEnvironmentVersionSuggestion(suggestions[0]);
+  } else {
+    syncEnvironmentVersionSourceFromInput();
+  }
+}
+
+async function refreshManageVersionSuggestions(selectDefault: boolean): Promise<void> {
+  const selection = state.manageSelection;
+  if (!selection) {
+    return;
+  }
+  const request = ++versionSuggestionRequest;
+  const suggestions = normalizeVersionSuggestions((await LoadVersionSuggestions(selection)) as UIVersionSuggestion[]);
+  if (request !== versionSuggestionRequest || manageDialogOverlay.classList.contains('is-hidden')) {
+    return;
+  }
+
+  state.versionSuggestions = suggestions;
+  const currentVersion = normalizeDialogValue(manageDialogVersionInput.value);
+  renderManageVersionChoices();
+  if (selectDefault || !suggestions.some((suggestion) => suggestion.version === currentVersion)) {
+    selectManageVersionSuggestion(suggestions[0]);
+  } else {
+    syncManageVersionSourceFromInput();
+  }
+}
+
+function versionChoiceLabel(suggestion: UIVersionSuggestion): string {
+  const source = versionChoiceSource(suggestion);
+  if (!suggestion.label) {
+    if (source) {
+      return `${source}: ${suggestion.version}`;
+    }
+    return suggestion.version;
+  }
+  if (source && !suggestion.label.toLowerCase().startsWith(source.toLowerCase())) {
+    return `${source} ${suggestion.label.toLowerCase()}: ${suggestion.version}`;
+  }
+  return `${suggestion.label}: ${suggestion.version}`;
+}
+
+function versionChoiceKind(suggestion: UIVersionSuggestion): string {
+  const label = normalizeDialogValue(suggestion.label);
+  if (!label) {
+    return '';
+  }
+  const source = versionChoiceSource(suggestion);
+  if (source && label.toLowerCase().startsWith(source.toLowerCase())) {
+    return normalizeDialogValue(label.slice(source.length));
+  }
+  return label;
+}
+
+function versionChoiceSource(suggestion: UIVersionSuggestion): string {
+  const source = normalizeDialogValue(suggestion.source || '');
+  if (source) {
+    return source;
+  }
+  const image = normalizeDialogValue(suggestion.image || '');
+  if (image === 'erun-devops') {
+    return 'ERun';
+  }
+  if (image.endsWith('-devops')) {
+    return image.slice(0, -'-devops'.length);
+  }
+  return '';
+}
+
+function versionChoiceImage(suggestion: UIVersionSuggestion): string {
+  const image = normalizeDialogValue(suggestion.image || '');
+  if (image) {
+    return image;
+  }
+  const source = versionChoiceSource(suggestion);
+  if (!source) {
+    return '';
+  }
+  if (source === 'ERun') {
+    return 'erun-devops';
+  }
+  return `${source}-devops`;
+}
+
+function appendVersionChoiceContent(option: HTMLButtonElement, suggestion: UIVersionSuggestion): void {
+  const version = document.createElement('span');
+  version.className = 'version-combobox__option-version';
+  version.textContent = suggestion.version;
+
+  const meta = document.createElement('span');
+  meta.className = 'version-combobox__option-meta';
+  const image = versionChoiceImage(suggestion);
+  const kind = versionChoiceKind(suggestion);
+  meta.textContent = [image, kind].filter(Boolean).join(' · ');
+
+  option.replaceChildren(version, meta);
+}
+
+function renderVersionChoices(): void {
+  environmentVersionList.replaceChildren();
+  state.versionSuggestions.forEach((choice) => {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = 'version-combobox__option';
+    option.setAttribute('aria-label', versionChoiceLabel(choice));
+    appendVersionChoiceContent(option, choice);
+    option.addEventListener('click', () => {
+      selectEnvironmentVersionSuggestion(choice);
+      environmentDialogVersionInput.setCustomValidity('');
+      closeVersionChoices();
+      environmentDialogVersionInput.focus();
+    });
+    environmentVersionList.appendChild(option);
+  });
+}
+
+function renderManageVersionChoices(): void {
+  manageVersionList.replaceChildren();
+  state.versionSuggestions.forEach((choice) => {
+    const option = document.createElement('button');
+    option.type = 'button';
+    option.className = 'version-combobox__option';
+    option.setAttribute('aria-label', versionChoiceLabel(choice));
+    appendVersionChoiceContent(option, choice);
+    option.addEventListener('click', () => {
+      selectManageVersionSuggestion(choice);
+      manageDialogVersionInput.setCustomValidity('');
+      closeManageVersionChoices();
+      manageDialogVersionInput.focus();
+    });
+    manageVersionList.appendChild(option);
+  });
+}
+
+function selectEnvironmentVersionSuggestion(suggestion: UIVersionSuggestion | undefined): void {
+  environmentDialogVersionInput.value = suggestion?.version || '';
+  state.environmentVersionImage = suggestion?.image || '';
+  environmentVersionSource.textContent = selectedVersionSourceText(suggestion);
+}
+
+function selectManageVersionSuggestion(suggestion: UIVersionSuggestion | undefined): void {
+  manageDialogVersionInput.value = suggestion?.version || '';
+  state.manageVersionImage = suggestion?.image || '';
+  manageVersionSource.textContent = selectedVersionSourceText(suggestion);
+}
+
+function selectedVersionSourceText(suggestion: UIVersionSuggestion | undefined): string {
+  if (!suggestion) {
+    return '';
+  }
+  const image = versionChoiceImage(suggestion);
+  if (!image) {
+    return '';
+  }
+  return `Image: ${image}`;
+}
+
+function syncEnvironmentVersionSourceFromInput(): void {
+  const version = normalizeDialogValue(environmentDialogVersionInput.value);
+  const suggestion = state.versionSuggestions.find((value) => value.version === version);
+  state.environmentVersionImage = suggestion?.image || '';
+  environmentVersionSource.textContent = selectedVersionSourceText(suggestion);
+}
+
+function syncManageVersionSourceFromInput(): void {
+  const version = normalizeDialogValue(manageDialogVersionInput.value);
+  const suggestion = state.versionSuggestions.find((value) => value.version === version);
+  state.manageVersionImage = suggestion?.image || '';
+  manageVersionSource.textContent = selectedVersionSourceText(suggestion);
+}
+
+function resolveEnvironmentRuntimeImage(version: string): string {
+  if (state.environmentVersionImage) {
+    return state.environmentVersionImage;
+  }
+  const suggestion = state.versionSuggestions.find((value) => value.version === version);
+  return suggestion?.image || '';
+}
+
+function resolveManageRuntimeImage(version: string): string {
+  if (state.manageVersionImage) {
+    return state.manageVersionImage;
+  }
+  const suggestion = state.versionSuggestions.find((value) => value.version === version);
+  return suggestion?.image || '';
+}
+
+function toggleVersionChoices(): void {
+  if (environmentVersionList.classList.contains('is-hidden')) {
+    openVersionChoices();
+    return;
+  }
+  closeVersionChoices();
+}
+
+function toggleManageVersionChoices(): void {
+  if (manageVersionList.classList.contains('is-hidden')) {
+    openManageVersionChoices();
+    return;
+  }
+  closeManageVersionChoices();
+}
+
+function openVersionChoices(): void {
+  renderVersionChoices();
+  if (environmentVersionList.childElementCount === 0) {
+    closeVersionChoices();
+    return;
+  }
+  environmentVersionList.classList.remove('is-hidden');
+}
+
+function openManageVersionChoices(): void {
+  renderManageVersionChoices();
+  if (manageVersionList.childElementCount === 0) {
+    closeManageVersionChoices();
+    return;
+  }
+  manageVersionList.classList.remove('is-hidden');
+}
+
+function closeVersionChoices(): void {
+  environmentVersionList.classList.add('is-hidden');
+}
+
+function closeManageVersionChoices(): void {
+  manageVersionList.classList.add('is-hidden');
+}
+
+function resetEnvironmentDialogValidity(): void {
+  environmentDialogTenantInput.setCustomValidity('');
+  environmentDialogEnvironmentInput.setCustomValidity('');
+  environmentDialogVersionInput.setCustomValidity('');
+}
+
 function setReviewOpen(open: boolean): void {
   state.reviewOpen = open;
   reviewToggle.classList.toggle('is-active', open);
@@ -501,6 +1326,14 @@ function terminalPaneReviewClass(open: boolean): void {
 
 function renderSidebar(): void {
   sidebarList.replaceChildren();
+
+  if (state.tenants.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'sidebar-empty';
+    empty.textContent = 'No environments';
+    sidebarList.appendChild(empty);
+    return;
+  }
 
   state.tenants.forEach((tenant, index) => {
     const group = document.createElement('div');
@@ -528,15 +1361,18 @@ function renderSidebar(): void {
       environmentList.className = 'environment-list';
 
       tenant.environments.forEach((environment) => {
+        const environmentRow = document.createElement('div');
+        environmentRow.className = 'environment-row';
+
         const environmentButton = document.createElement('button');
         environmentButton.type = 'button';
-        environmentButton.className = 'environment-row';
+        environmentButton.className = 'environment-row__open';
 
         const isSelected =
           state.selected?.tenant === tenant.name &&
           state.selected?.environment === environment.name;
         if (isSelected) {
-          environmentButton.classList.add('is-selected');
+          environmentRow.classList.add('is-selected');
         }
 
         environmentButton.textContent = environment.name;
@@ -548,7 +1384,24 @@ function renderSidebar(): void {
             showTerminalMessage(readError(error));
           });
         });
-        environmentList.appendChild(environmentButton);
+        environmentRow.appendChild(environmentButton);
+
+        const manageButton = document.createElement('button');
+        manageButton.type = 'button';
+        manageButton.className = 'environment-row__manage';
+        manageButton.setAttribute('aria-label', `Manage ${tenant.name} / ${environment.name}`);
+        manageButton.title = 'Manage environment';
+        manageButton.innerHTML = manageIconMarkup();
+        manageButton.addEventListener('click', (event: MouseEvent) => {
+          event.stopPropagation();
+          openManageDialog({
+            tenant: tenant.name,
+            environment: environment.name,
+          });
+        });
+        environmentRow.appendChild(manageButton);
+
+        environmentList.appendChild(environmentRow);
       });
 
       group.appendChild(environmentList);
@@ -1138,6 +1991,24 @@ function folderIconMarkup(): string {
   return `
     <svg class="folder-icon" viewBox="0 0 24 24" aria-hidden="true">
       <path fill="currentColor" d="M3.75 5.5A2.25 2.25 0 0 1 6 3.25h3.45c.56 0 1.1.21 1.51.6l1.24 1.15c.14.13.33.2.52.2H18A2.25 2.25 0 0 1 20.25 7.45v8.8A2.5 2.5 0 0 1 17.75 18.75h-11A2.5 2.5 0 0 1 4.25 16.25V6.75A1.25 1.25 0 0 1 5.5 5.5h-1.75Z"/>
+    </svg>
+  `;
+}
+
+function addEnvironmentIconMarkup(): string {
+  return `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3.75 6.35A2.35 2.35 0 0 1 6.1 4h3.3c.58 0 1.14.22 1.56.61l1.08 1.01c.23.21.53.33.85.33h5.01a2.35 2.35 0 0 1 2.35 2.35v2.3" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M3.75 7.95v8.3a2.5 2.5 0 0 0 2.5 2.5h6.1" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M17.75 14.25v6.5M14.5 17.5H21" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+    </svg>
+  `;
+}
+
+function manageIconMarkup(): string {
+  return `
+    <svg viewBox="0 0 20 20" aria-hidden="true">
+      <path d="M5 10h.01M10 10h.01M15 10h.01" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/>
     </svg>
   `;
 }

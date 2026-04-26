@@ -109,10 +109,11 @@ func Execute() error {
 	execCmd := newExecCmd(common.FindProjectRoot, common.GitCommandRunner, nil)
 	listCmd := newListCmd(configStore, common.FindProjectRoot)
 	doctorCmd := newDoctorCmd(resolveOpen, runPrompt)
+	deleteCmd := newDeleteCmd(configStore, runPrompt, common.DeleteKubernetesNamespace)
 	releaseCmd := newReleaseCmd(common.FindProjectRoot, common.GitCommandRunner)
 	versionCmd := newVersionCmd(func() (common.BuildInfo, string, error) {
 		return resolveVersionCommandBuildInfo(common.FindProjectRoot)
-	})
+	}, common.ResolveDefaultRuntimeRegistryVersions)
 
 	runRoot := func(cmd *cobra.Command, args []string) error {
 		ctx := commandContext(cmd)
@@ -127,6 +128,6 @@ func Execute() error {
 	}
 
 	cmd := newRootCommand(runRoot)
-	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, execCmd, listCmd, doctorCmd, releaseCmd, versionCmd)
+	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, execCmd, listCmd, doctorCmd, deleteCmd, releaseCmd, versionCmd)
 	return cmd.Execute()
 }

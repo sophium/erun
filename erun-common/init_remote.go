@@ -36,8 +36,11 @@ func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tena
 	}
 	req := ShellLaunchParamsFromResult(target)
 
-	if err := s.ensureRemoteRuntime(target, req, params.RuntimeVersion); err != nil {
+	if err := s.ensureRemoteRuntime(target, req, params.RuntimeVersion, params.RuntimeImage); err != nil {
 		return err
+	}
+	if params.NoGit {
+		return s.ensureRemoteWorktree(req, projectRoot)
 	}
 
 	state, err := s.remoteRepositoryState(req, projectRoot)
@@ -58,8 +61,24 @@ func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tena
 	return s.cloneRemoteRepository(req, projectRoot, repositoryURL)
 }
 
-func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchParams, runtimeVersion string) error {
-	spec, err := resolveDefaultDevopsDeploySpec(target)
+func (s bootstrapRunner) ensureRemoteWorktree(req ShellLaunchParams, projectRoot string) error {
+	script := strings.Join([]string{
+		"set -eu",
+		fmt.Sprintf("mkdir -p %s", shellQuote(projectRoot)),
+	}, "\n")
+	output, err := s.runRemoteScript(req, "remote-worktree", script)
+	if err != nil {
+		return fmt.Errorf("create remote worktree: %w%s", err, formatRemoteCommandStderr(output.Stderr))
+	}
+	return nil
+}
+
+func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchParams, runtimeVersion, runtimeImage string) error {
+	runtimeImage = strings.TrimSpace(runtimeImage)
+	if runtimeImage == "" {
+		runtimeImage = DevopsComponentName
+	}
+	spec, err := resolveDefaultDevopsDeploySpecWithImage(target, runtimeImage)
 	if err != nil {
 		return err
 	}
