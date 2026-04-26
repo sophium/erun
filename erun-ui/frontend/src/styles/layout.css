@@ -293,3 +293,48 @@
 .sidebar-hidden .splitter {
   pointer-events: none;
 }
+
+.dialog-error {
+  border: 1px solid color-mix(in oklch, var(--destructive) 36%, transparent);
+  border-radius: var(--radius);
+  background: color-mix(in oklch, var(--destructive) 8%, transparent);
+  color: var(--destructive);
+  padding: 9px 11px;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.delete-warning {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 9px;
+  align-items: start;
+  border: 1px solid color-mix(in oklch, var(--destructive) 30%, var(--border));
+  border-radius: var(--radius);
+  background: color-mix(in oklch, var(--destructive) 7%, transparent);
+  color: var(--foreground);
+  padding: 10px 11px;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.delete-warning svg {
+  width: 17px;
+  height: 17px;
+  margin-top: 1px;
+  color: var(--destructive);
+}
+
+.delete-warning strong {
+  font-weight: 650;
+}
+
+.delete-warning code {
+  border-radius: calc(var(--radius) - 4px);
+  background: color-mix(in oklch, var(--destructive) 12%, transparent);
+  color: var(--destructive);
+  padding: 1px 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}

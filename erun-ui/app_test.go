@@ -687,6 +687,23 @@ func TestStartDeploySessionUsesSeparateSessionKey(t *testing.T) {
 	}
 }
 
+func TestTerminalSessionExitReasonUsesProcessExitError(t *testing.T) {
+	session := newStubTerminalSession()
+	session.waitErr = io.ErrUnexpectedEOF
+
+	got := terminalSessionExitReason(session, io.EOF)
+	if got != io.ErrUnexpectedEOF.Error() {
+		t.Fatalf("unexpected exit reason: got %q want %q", got, io.ErrUnexpectedEOF.Error())
+	}
+}
+
+func TestTerminalSessionExitReasonIgnoresCleanEOF(t *testing.T) {
+	got := terminalSessionExitReason(newStubTerminalSession(), io.EOF)
+	if got != "" {
+		t.Fatalf("unexpected clean exit reason: %q", got)
+	}
+}
+
 func TestDeleteEnvironmentRequiresExactConfirmationAndDeletesConfig(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -1004,6 +1021,7 @@ func (s stubUIStore) ListEnvConfigs(tenant string) ([]eruncommon.EnvConfig, erro
 
 type stubTerminalSession struct {
 	closeCh chan struct{}
+	waitErr error
 }
 
 func newStubTerminalSession() *stubTerminalSession {
@@ -1021,6 +1039,10 @@ func (s *stubTerminalSession) Write(buffer []byte) (int, error) {
 
 func (s *stubTerminalSession) Resize(int, int) error {
 	return nil
+}
+
+func (s *stubTerminalSession) Wait() error {
+	return s.waitErr
 }
 
 func (s *stubTerminalSession) Close() error {

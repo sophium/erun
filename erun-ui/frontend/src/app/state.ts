@@ -30,6 +30,8 @@ export interface EnvironmentDialogState {
   noGit: boolean;
   versionImage: string;
   choicesOpen: boolean;
+  busy: boolean;
+  error: string;
 }
 
 export interface ManageDialogState {
@@ -41,6 +43,7 @@ export interface ManageDialogState {
   confirmation: string;
   busy: boolean;
   choicesOpen: boolean;
+  error: string;
 }
 
 export interface AppState {
@@ -64,6 +67,8 @@ export interface AppState {
   diffFilter: string;
   collapsedDiffDirs: Set<string>;
   terminalMessage: string;
+  terminalCopyOutput: string;
+  terminalCopyStatus: string;
 }
 
 export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
@@ -75,6 +80,8 @@ export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
   noGit: false,
   versionImage: '',
   choicesOpen: false,
+  busy: false,
+  error: '',
 });
 
 export const defaultManageDialog = (): ManageDialogState => ({
@@ -86,4 +93,5 @@ export const defaultManageDialog = (): ManageDialogState => ({
   confirmation: '',
   busy: false,
   choicesOpen: false,
+  error: '',
 });

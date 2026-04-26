@@ -14,7 +14,7 @@ import {
   StartInitSession,
   StartSession,
 } from '../../wailsjs/go/main/App';
-import { EventsOn, WindowToggleMaximise } from '../../wailsjs/runtime/runtime';
+import { ClipboardSetText, EventsOn, WindowToggleMaximise } from '../../wailsjs/runtime/runtime';
 import { fileToBase64, decodeBase64Bytes, isTerminalPasteTarget, pastedImageFiles } from './clipboard';
 import { chooseSelectedDiffPath, cssEscape } from './diffUtils';
 import { readError } from './errors';
@@ -82,14 +82,18 @@ export class ERunUIController {
     diffFilter: '',
     collapsedDiffDirs: new Set<string>(),
     terminalMessage: '',
+    terminalCopyOutput: '',
+    terminalCopyStatus: '',
   };
 
   private readonly subscribers = new Set<() => void>();
-  private readonly initSessionIds = new Set<number>();
-  private readonly deploySessionIds = new Set<number>();
+  private readonly initSessionSelections = new Map<number, UISelection>();
+  private readonly deploySessionSelections = new Map<number, UISelection>();
+  private readonly openSessionSelections = new Map<number, UISelection>();
   private readonly selectionSessions = new Map<string, number>();
   private readonly sessionBuffers = new Map<number, Uint8Array[]>();
   private readonly sessionExitReasons = new Map<number, string>();
+  private readonly sessionExitOutputs = new Map<number, string>();
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
   private terminalRoot: HTMLDivElement | null = null;
@@ -101,6 +105,7 @@ export class ERunUIController {
   private resizeTimer = 0;
   private reviewScrollFrame = 0;
   private versionSuggestionTimer = 0;
+  private terminalCopyStatusTimer = 0;
   private versionSuggestionRequest = 0;
   private bootStarted = false;
   private terminalDataDisposable: TerminalDataDisposable | null = null;
@@ -192,7 +197,7 @@ export class ERunUIController {
     this.applyLayoutVars();
     this.emit();
     this.queueTerminalResize();
-    window.setTimeout(() => this.terminal?.focus(), 0);
+    this.focusTerminalSoon();
   }
 
   startSidebarResize(event: React.MouseEvent<HTMLElement>): void {
@@ -282,7 +287,7 @@ export class ERunUIController {
     if (this.state.reviewOpen) {
       void this.loadReviewDiff();
     }
-    window.setTimeout(() => this.terminal?.focus(), 0);
+    this.focusTerminalSoon();
   }
 
   setFilesOpen(open: boolean, persist = true): void {
@@ -311,12 +316,15 @@ export class ERunUIController {
     this.state.selected = selection;
     this.emit();
     if (previousKnownSessionId === 0 || previousKnownSessionId !== previousSessionId) {
+      this.state.terminalCopyOutput = '';
+      this.state.terminalCopyStatus = '';
       this.showTerminalMessage(`Opening ${selection.tenant} / ${selection.environment}...`);
     }
 
     this.fitAddon?.fit();
     const result = (await StartSession(selection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
     this.selectionSessions.set(key, result.sessionId);
+    this.openSessionSelections.set(result.sessionId, selection);
     this.state.sessionId = result.sessionId;
 
     if (result.sessionId !== previousSessionId) {
@@ -329,6 +337,8 @@ export class ERunUIController {
 
     const exitReason = this.sessionExitReasons.get(result.sessionId);
     if (exitReason) {
+      this.state.terminalCopyOutput = this.sessionExitOutputs.get(result.sessionId) || '';
+      this.state.terminalCopyStatus = '';
       this.showTerminalMessage(exitReason);
     } else {
       this.hideTerminalMessage();
@@ -337,7 +347,7 @@ export class ERunUIController {
     if (this.state.reviewOpen) {
       await this.loadReviewDiff();
     }
-    this.terminal?.focus();
+    this.focusTerminalSoon();
     this.queueTerminalResize();
     this.emit();
   }
@@ -353,21 +363,30 @@ export class ERunUIController {
       noGit: false,
       versionImage: this.state.versionSuggestions[0]?.image || '',
       choicesOpen: false,
+      busy: false,
+      error: '',
     };
     this.emit();
     void this.refreshDialogVersionSuggestions(true);
   }
 
   closeEnvironmentDialog(): void {
+    if (this.state.environmentDialog.busy) {
+      return;
+    }
     this.state.environmentDialog = defaultEnvironmentDialog();
     this.emit();
-    window.setTimeout(() => this.terminal?.focus(), 0);
+    this.focusTerminalSoon();
   }
 
   updateEnvironmentDialog(values: Partial<EnvironmentDialogState>): void {
+    if (this.state.environmentDialog.busy) {
+      return;
+    }
     this.state.environmentDialog = {
       ...this.state.environmentDialog,
       ...values,
+      error: values.error ?? '',
     };
     if (values.version !== undefined) {
       this.state.environmentDialog.versionImage = '';
@@ -384,6 +403,9 @@ export class ERunUIController {
   }
 
   setEnvironmentVersionChoicesOpen(open: boolean): void {
+    if (this.state.environmentDialog.busy) {
+      return;
+    }
     this.state.environmentDialog = {
       ...this.state.environmentDialog,
       choicesOpen: open && this.state.versionSuggestions.length > 0,
@@ -392,6 +414,9 @@ export class ERunUIController {
   }
 
   selectEnvironmentVersionSuggestion(suggestion: UIVersionSuggestion | undefined): void {
+    if (this.state.environmentDialog.busy) {
+      return;
+    }
     this.state.environmentDialog = {
       ...this.state.environmentDialog,
       version: suggestion?.version || '',
@@ -403,16 +428,20 @@ export class ERunUIController {
 
   async submitEnvironmentDialog(form: HTMLFormElement): Promise<void> {
     const dialog = this.state.environmentDialog;
+    if (dialog.busy) {
+      return;
+    }
     const tenant = normalizeDialogValue(dialog.tenant);
     const environment = normalizeDialogValue(dialog.environment);
     const version = normalizeDialogValue(dialog.version);
 
     if (!tenant || !environment || (dialog.actionMode === 'deploy' && !version)) {
+      this.state.environmentDialog = { ...dialog, error: '' };
+      this.emit();
       form.reportValidity();
       return;
     }
 
-    this.closeEnvironmentDialog();
     const selection = {
       tenant,
       environment,
@@ -420,11 +449,38 @@ export class ERunUIController {
       runtimeImage: this.resolveEnvironmentRuntimeImage(version),
       noGit: dialog.noGit,
     };
-    if (dialog.actionMode === 'deploy') {
-      await this.startDeploySelection(selection);
-      return;
+
+    this.state.environmentDialog = {
+      ...dialog,
+      tenant,
+      environment,
+      version,
+      busy: true,
+      error: '',
+      choicesOpen: false,
+    };
+    this.emit();
+
+    const previousSelected = this.state.selected;
+    try {
+      if (dialog.actionMode === 'deploy') {
+        await this.startDeploySelection(selection);
+      } else {
+        await this.startInitSelection(selection);
+      }
+      this.state.environmentDialog = defaultEnvironmentDialog();
+      this.emit();
+      this.focusTerminalSoon();
+    } catch (error) {
+      const message = readError(error);
+      this.state.selected = previousSelected;
+      this.state.environmentDialog = {
+        ...this.state.environmentDialog,
+        busy: false,
+        error: message,
+      };
+      this.showTerminalMessage(message);
     }
-    await this.startInitSelection(selection);
   }
 
   openManageDialog(selection: UISelection): void {
@@ -438,6 +494,7 @@ export class ERunUIController {
       confirmation: '',
       busy: false,
       choicesOpen: false,
+      error: '',
     };
     this.emit();
     void this.refreshManageVersionSuggestions(true);
@@ -449,7 +506,7 @@ export class ERunUIController {
     }
     this.state.manageDialog = defaultManageDialog();
     this.emit();
-    window.setTimeout(() => this.terminal?.focus(), 0);
+    this.focusTerminalSoon();
   }
 
   setManageTab(tab: ManageTab): void {
@@ -460,14 +517,19 @@ export class ERunUIController {
       ...this.state.manageDialog,
       tab,
       choicesOpen: false,
+      error: '',
     };
     this.emit();
   }
 
   updateManageDialog(values: Partial<ManageDialogState>): void {
+    if (this.state.manageDialog.busy) {
+      return;
+    }
     this.state.manageDialog = {
       ...this.state.manageDialog,
       ...values,
+      error: values.error ?? '',
     };
     if (values.version !== undefined) {
       this.state.manageDialog.versionImage = '';
@@ -481,6 +543,9 @@ export class ERunUIController {
   }
 
   setManageVersionChoicesOpen(open: boolean): void {
+    if (this.state.manageDialog.busy) {
+      return;
+    }
     this.state.manageDialog = {
       ...this.state.manageDialog,
       choicesOpen: open && this.state.versionSuggestions.length > 0,
@@ -489,6 +554,9 @@ export class ERunUIController {
   }
 
   selectManageVersionSuggestion(suggestion: UIVersionSuggestion | undefined): void {
+    if (this.state.manageDialog.busy) {
+      return;
+    }
     this.state.manageDialog = {
       ...this.state.manageDialog,
       version: suggestion?.version || '',
@@ -533,19 +601,31 @@ export class ERunUIController {
       return;
     }
 
-    this.state.manageDialog = { ...dialog, busy: true };
+    this.state.manageDialog = { ...dialog, busy: true, error: '' };
+    this.state.terminalCopyOutput = '';
+    this.state.terminalCopyStatus = '';
     this.showTerminalMessage(`Deleting ${selection.tenant} / ${selection.environment}...`);
 
     try {
       const result = (await DeleteEnvironment(selection, confirmation)) as DeleteEnvironmentResult;
-      this.state.selected = null;
+      const deletedSelected = this.state.selected ? selectionKey(this.state.selected) === selectionKey(selection) : false;
+      if (deletedSelected) {
+        this.state.selected = null;
+        this.state.sessionId = 0;
+        this.resetTerminal();
+      }
       await this.reloadStateAfterEnvironmentChange();
       this.state.manageDialog = defaultManageDialog();
+      this.state.terminalCopyOutput = '';
+      this.state.terminalCopyStatus = '';
       const warning = result.namespaceDeleteError ? ` Namespace deletion failed: ${result.namespaceDeleteError}` : '';
       this.showTerminalMessage(`Deleted ${result.tenant} / ${result.environment}.${warning}`);
     } catch (error) {
-      this.state.manageDialog = { ...this.state.manageDialog, busy: false };
-      this.showTerminalMessage(readError(error));
+      const message = readError(error);
+      this.state.manageDialog = { ...this.state.manageDialog, busy: false, error: message };
+      this.state.terminalCopyOutput = `Failed to delete ${selection.tenant} / ${selection.environment}: ${message}`;
+      this.state.terminalCopyStatus = '';
+      this.showTerminalMessage(message);
       this.emit();
     }
   }
@@ -613,6 +693,32 @@ export class ERunUIController {
     this.emit();
   }
 
+  focusTerminalSoon(): void {
+    window.setTimeout(() => {
+      this.terminal?.focus();
+      window.requestAnimationFrame(() => this.terminal?.focus());
+      window.setTimeout(() => this.terminal?.focus(), 80);
+    }, 0);
+  }
+
+  async copyTerminalOutput(): Promise<void> {
+    if (!this.state.terminalCopyOutput) {
+      return;
+    }
+    try {
+      await ClipboardSetText(this.state.terminalCopyOutput);
+      this.state.terminalCopyStatus = 'Copied';
+    } catch (error) {
+      this.state.terminalCopyStatus = readError(error);
+    }
+    this.emit();
+    window.clearTimeout(this.terminalCopyStatusTimer);
+    this.terminalCopyStatusTimer = window.setTimeout(() => {
+      this.state.terminalCopyStatus = '';
+      this.emit();
+    }, 1400);
+  }
+
   private emit(): void {
     this.subscribers.forEach((subscriber) => subscriber());
   }
@@ -644,16 +750,18 @@ export class ERunUIController {
   private async startInitSelection(selection: UISelection): Promise<void> {
     this.state.selected = selection;
     this.emit();
+    this.state.terminalCopyOutput = '';
+    this.state.terminalCopyStatus = '';
     this.showTerminalMessage(`Initializing ${selection.tenant} / ${selection.environment}...`);
 
     this.fitAddon?.fit();
     const result = (await StartInitSession(selection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
-    this.initSessionIds.add(result.sessionId);
+    this.initSessionSelections.set(result.sessionId, selection);
     this.state.sessionId = result.sessionId;
 
     this.resetTerminal();
     this.hideTerminalMessage();
-    this.terminal?.focus();
+    this.focusTerminalSoon();
     this.queueTerminalResize();
     this.emit();
   }
@@ -661,16 +769,18 @@ export class ERunUIController {
   private async startDeploySelection(selection: UISelection): Promise<void> {
     this.state.selected = selection;
     this.emit();
+    this.state.terminalCopyOutput = '';
+    this.state.terminalCopyStatus = '';
     this.showTerminalMessage(`Deploying ${selection.tenant} / ${selection.environment}...`);
 
     this.fitAddon?.fit();
     const result = (await StartDeploySession(selection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
-    this.deploySessionIds.add(result.sessionId);
+    this.deploySessionSelections.set(result.sessionId, selection);
     this.state.sessionId = result.sessionId;
 
     this.resetTerminal();
     this.hideTerminalMessage();
-    this.terminal?.focus();
+    this.focusTerminalSoon();
     this.queueTerminalResize();
     this.emit();
   }
@@ -759,6 +869,8 @@ export class ERunUIController {
 
   private hideTerminalMessage(): void {
     this.state.terminalMessage = '';
+    this.state.terminalCopyOutput = '';
+    this.state.terminalCopyStatus = '';
     this.emit();
   }
 
@@ -780,16 +892,74 @@ export class ERunUIController {
     if (!payload) {
       return;
     }
-    this.sessionExitReasons.set(payload.sessionId, payload.reason || 'Session ended.');
-    const initSessionEnded = this.initSessionIds.delete(payload.sessionId);
-    const deploySessionEnded = this.deploySessionIds.delete(payload.sessionId);
-    if (initSessionEnded || deploySessionEnded) {
+    const initSelection = this.initSessionSelections.get(payload.sessionId);
+    const deploySelection = this.deploySessionSelections.get(payload.sessionId);
+    const openSelection = this.openSessionSelections.get(payload.sessionId);
+    this.initSessionSelections.delete(payload.sessionId);
+    this.deploySessionSelections.delete(payload.sessionId);
+    this.openSessionSelections.delete(payload.sessionId);
+
+    const reason = this.terminalExitReason(payload, initSelection, deploySelection, openSelection);
+    this.sessionExitReasons.set(payload.sessionId, reason);
+    const failedOutput = payload.reason && (initSelection || deploySelection || openSelection)
+      ? this.failedTerminalOutput(payload.sessionId, reason)
+      : '';
+    if (failedOutput) {
+      this.sessionExitOutputs.set(payload.sessionId, failedOutput);
+    }
+    if (initSelection || deploySelection) {
       await this.reloadStateAfterEnvironmentChange();
     }
     if (payload.sessionId !== this.state.sessionId) {
       return;
     }
-    this.showTerminalMessage(payload.reason || 'Session ended.');
+    if (initSelection && !payload.reason) {
+      try {
+        await this.openSelection(initSelection);
+      } catch (error) {
+        this.showTerminalMessage(readError(error));
+      }
+      return;
+    }
+    if (payload.reason && (initSelection || deploySelection || openSelection)) {
+      this.state.terminalCopyOutput = failedOutput;
+      this.state.terminalCopyStatus = '';
+    }
+    this.showTerminalMessage(reason);
+  }
+
+  private terminalExitReason(
+    payload: TerminalExitPayload,
+    initSelection?: UISelection,
+    deploySelection?: UISelection,
+    openSelection?: UISelection,
+  ): string {
+    if (payload.reason) {
+      if (initSelection) {
+        return `Failed to create ${initSelection.tenant} / ${initSelection.environment}: ${payload.reason}`;
+      }
+      if (deploySelection) {
+        return `Failed to deploy ${deploySelection.tenant} / ${deploySelection.environment}: ${payload.reason}`;
+      }
+      if (openSelection) {
+        return `Failed to open ${openSelection.tenant} / ${openSelection.environment}: ${payload.reason}`;
+      }
+      return payload.reason;
+    }
+    if (initSelection) {
+      return `Created ${initSelection.tenant} / ${initSelection.environment}.`;
+    }
+    if (deploySelection) {
+      return `Deployed ${deploySelection.tenant} / ${deploySelection.environment}.`;
+    }
+    return 'Session ended.';
+  }
+
+  private failedTerminalOutput(sessionId: number, fallback: string): string {
+    const chunks = this.sessionBuffers.get(sessionId) || [];
+    const decoder = new TextDecoder();
+    const output = chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join('') + decoder.decode();
+    return cleanTerminalOutput(output) || fallback;
   }
 
   private applyLayoutVars(): void {
@@ -894,7 +1064,7 @@ export class ERunUIController {
       return;
     }
     await SendSessionInput(`${paths.join(' ')} `);
-    this.terminal?.focus();
+    this.focusTerminalSoon();
   }
 
   private writeTerminalBuffer(chunks: Uint8Array[]): void {
@@ -902,4 +1072,13 @@ export class ERunUIController {
       this.terminal?.write(chunk);
     }
   }
+}
+
+function cleanTerminalOutput(value: string): string {
+  return value
+    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, '')
+    .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .trim();
 }

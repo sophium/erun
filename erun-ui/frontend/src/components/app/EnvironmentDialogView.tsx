@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { FolderPlus, LoaderCircle, Rocket } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
@@ -6,7 +7,7 @@ import type { AppState } from '@/app/state';
 import { findVersionSuggestion, selectedVersionSourceText } from '@/app/versionSuggestions';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { VersionField } from './VersionField';
@@ -15,6 +16,9 @@ export function EnvironmentDialogView({ controller, state }: { controller: ERunU
   const dialog = state.environmentDialog;
   const tenantRef = React.useRef<HTMLInputElement>(null);
   const environmentRef = React.useRef<HTMLInputElement>(null);
+  const isDeploy = dialog.actionMode === 'deploy';
+  const submitLabel = isDeploy ? 'Deploy' : 'Create';
+  const busyLabel = isDeploy ? 'Deploying...' : 'Creating...';
 
   React.useEffect(() => {
     if (!dialog.open) {
@@ -30,7 +34,13 @@ export function EnvironmentDialogView({ controller, state }: { controller: ERunU
 
   return (
     <Dialog open={dialog.open} onOpenChange={(open) => !open && controller.closeEnvironmentDialog()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          controller.focusTerminalSoon();
+        }}
+      >
         <form
           className="grid gap-4"
           onSubmit={(event) => {
@@ -42,8 +52,11 @@ export function EnvironmentDialogView({ controller, state }: { controller: ERunU
         >
           <DialogHeader>
             <DialogTitle>
-              {dialog.actionMode === 'deploy' ? 'Deploy environment' : 'New environment'}
+              {isDeploy ? 'Deploy environment' : 'New environment'}
             </DialogTitle>
+            <DialogDescription>
+              {dialog.tenant && dialog.environment ? `${dialog.tenant} / ${dialog.environment}` : 'Enter the tenant and environment name.'}
+            </DialogDescription>
           </DialogHeader>
           <div className="grid gap-2">
             <Label htmlFor="environment-tenant">Tenant</Label>
@@ -55,7 +68,7 @@ export function EnvironmentDialogView({ controller, state }: { controller: ERunU
               autoComplete="off"
               spellCheck={false}
               required
-              disabled={dialog.actionMode === 'deploy'}
+              disabled={dialog.busy || isDeploy}
               onChange={(event) => controller.updateEnvironmentDialog({ tenant: event.target.value })}
             />
           </div>
@@ -69,7 +82,7 @@ export function EnvironmentDialogView({ controller, state }: { controller: ERunU
               autoComplete="off"
               spellCheck={false}
               required
-              disabled={dialog.actionMode === 'deploy'}
+              disabled={dialog.busy || isDeploy}
               onChange={(event) => controller.updateEnvironmentDialog({ environment: event.target.value })}
             />
           </div>
@@ -79,7 +92,8 @@ export function EnvironmentDialogView({ controller, state }: { controller: ERunU
             sourceText={selectedVersionSourceText(findVersionSuggestion(state.versionSuggestions, dialog.version, dialog.versionImage))}
             suggestions={state.versionSuggestions}
             choicesOpen={dialog.choicesOpen}
-            required={dialog.actionMode === 'deploy'}
+            required={isDeploy}
+            disabled={dialog.busy}
             onValueChange={(version) => controller.updateEnvironmentDialog({ version })}
             onChoicesOpenChange={(open) => controller.setEnvironmentVersionChoicesOpen(open)}
             onSelect={(suggestion) => controller.selectEnvironmentVersionSuggestion(suggestion)}
@@ -88,18 +102,31 @@ export function EnvironmentDialogView({ controller, state }: { controller: ERunU
             <Checkbox
               id="environment-no-git"
               checked={dialog.noGit}
+              disabled={dialog.busy}
               onCheckedChange={(checked) => controller.updateEnvironmentDialog({ noGit: checked === true })}
             />
             <Label htmlFor="environment-no-git" className="text-sm font-normal">
               Initialize without Git checkout
             </Label>
           </div>
+          {dialog.error && (
+            <div className="dialog-error" role="alert">
+              {dialog.error}
+            </div>
+          )}
           <DialogFooter>
-            <Button type="button" variant="outline" size="sm" onClick={() => controller.closeEnvironmentDialog()}>
+            <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => controller.closeEnvironmentDialog()}>
               Cancel
             </Button>
-            <Button type="submit" size="sm">
-              Start enrollment
+            <Button type="submit" size="sm" disabled={dialog.busy}>
+              {dialog.busy ? (
+                <LoaderCircle className="animate-spin" aria-hidden="true" />
+              ) : isDeploy ? (
+                <Rocket aria-hidden="true" />
+              ) : (
+                <FolderPlus aria-hidden="true" />
+              )}
+              {dialog.busy ? busyLabel : submitLabel}
             </Button>
           </DialogFooter>
         </form>

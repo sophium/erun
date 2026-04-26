@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Rocket, Trash2 } from 'lucide-react';
+import { AlertTriangle, LoaderCircle, Rocket, Trash2 } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
@@ -37,7 +37,13 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
 
   return (
     <Dialog open={dialog.open} onOpenChange={(open) => !open && controller.closeManageDialog()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          controller.focusTerminalSoon();
+        }}
+      >
         <form
           className="grid gap-4"
           onSubmit={(event) => {
@@ -85,9 +91,14 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
                 />
               </TabsContent>
               <TabsContent className="mt-0 grid gap-3" value="delete">
-                <p className="text-sm text-muted-foreground">
-                  {selection ? `Type ${expected} to delete ${selection.tenant} / ${selection.environment}.` : ''}
-                </p>
+                {selection && (
+                  <div className="delete-warning">
+                    <AlertTriangle aria-hidden="true" />
+                    <span>
+                      Delete <strong>{selection.tenant} / {selection.environment}</strong>. Type <code>{expected}</code> to confirm.
+                    </span>
+                  </div>
+                )}
                 <div className="grid gap-2">
                   <Label htmlFor="manage-confirmation">Confirmation</Label>
                   <Input
@@ -102,7 +113,9 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') {
                         event.preventDefault();
-                        void controller.submitManageDelete();
+                        if (deleteEnabled) {
+                          void controller.submitManageDelete();
+                        }
                       }
                     }}
                   />
@@ -110,14 +123,19 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
               </TabsContent>
             </div>
           </Tabs>
+          {dialog.error && (
+            <div className="dialog-error" role="alert">
+              {dialog.error}
+            </div>
+          )}
           <DialogFooter>
             <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => controller.closeManageDialog()}>
               Cancel
             </Button>
             {dialog.tab === 'deploy' ? (
               <Button type="submit" size="sm" disabled={dialog.busy}>
-                <Rocket aria-hidden="true" />
-                Deploy
+                {dialog.busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Rocket aria-hidden="true" />}
+                {dialog.busy ? 'Deploying...' : 'Deploy'}
               </Button>
             ) : (
               <Button
@@ -129,7 +147,7 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
                   void controller.submitManageDelete();
                 }}
               >
-                <Trash2 aria-hidden="true" />
+                {dialog.busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
                 {dialog.busy ? 'Deleting...' : 'Delete'}
               </Button>
             )}

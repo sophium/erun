@@ -14,6 +14,7 @@ import (
 type terminalSession interface {
 	io.ReadWriteCloser
 	Resize(cols, rows int) error
+	Wait() error
 }
 
 type startTerminalSessionParams struct {

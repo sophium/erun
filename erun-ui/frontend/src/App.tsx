@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { Check, Copy } from 'lucide-react';
 
 import { ERunUIController } from '@/app/ERunUIController';
 import { useControllerState } from '@/app/useControllerState';
@@ -7,6 +8,7 @@ import { ManageDialogView } from '@/components/app/ManageDialogView';
 import { ReviewPanel } from '@/components/app/ReviewPanel';
 import { Sidebar } from '@/components/app/Sidebar';
 import { Titlebar } from '@/components/app/Titlebar';
+import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
@@ -51,8 +53,24 @@ export function App(): React.ReactElement {
           >
             <div className="terminal-view">
               <div ref={terminalRootRef} className="terminal" />
-              <div className={cn('terminal-message', !state.terminalMessage && 'is-hidden')}>
-                {state.terminalMessage}
+              <div className={cn('terminal-message', state.terminalCopyOutput && 'has-copy-action', !state.terminalMessage && 'is-hidden')}>
+                <div className="terminal-message-content">
+                  <div>{state.terminalMessage}</div>
+                  {state.terminalCopyOutput && (
+                    <Button
+                      className="terminal-copy-button"
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        void controller.copyTerminalOutput();
+                      }}
+                    >
+                      {state.terminalCopyStatus === 'Copied' ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+                      {state.terminalCopyStatus || 'Copy output'}
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
             <div
