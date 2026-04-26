@@ -33,6 +33,7 @@ type (
 	DeployContextResolverFunc       func() (KubernetesDeployContext, error)
 	KubernetesDeploymentCheckerFunc func(KubernetesDeploymentCheckParams) (bool, error)
 	HelmChartDeployerFunc           func(HelmDeployParams) error
+	HelmReleaseRecovererFunc        func(HelmReleaseRecoveryParams) error
 )
 
 type deployKubernetesContextResolver interface {
@@ -77,6 +78,22 @@ type HelmDeploySpec struct {
 	SSHDEnabled       bool
 	Version           string
 	Timeout           string
+}
+
+type HelmReleaseRecoveryParams struct {
+	ReleaseName       string
+	Namespace         string
+	KubernetesContext string
+	Stdout            io.Writer
+	Stderr            io.Writer
+}
+
+type HelmReleasePendingOperationError struct {
+	ReleaseName       string
+	Namespace         string
+	KubernetesContext string
+	Message           string
+	Err               error
 }
 
 type KubernetesDeploymentCheckParams struct {
@@ -644,6 +661,71 @@ func (d HelmDeploySpec) command() commandSpec {
 	}
 }
 
+func (p HelmReleaseRecoveryParams) command() commandSpec {
+	args := []string{}
+	if strings.TrimSpace(p.KubernetesContext) != "" {
+		args = append(args, "--context", p.KubernetesContext)
+	}
+	args = append(args,
+		"--namespace", p.Namespace,
+		"delete",
+		"secrets,configmaps",
+		"-l", helmPendingReleaseOperationSelector(p.ReleaseName),
+		"--ignore-not-found",
+	)
+
+	return commandSpec{
+		Name: "kubectl",
+		Args: args,
+	}
+}
+
+func helmPendingReleaseOperationSelector(releaseName string) string {
+	return "owner=helm,name=" + releaseName + ",status in (pending-install,pending-upgrade,pending-rollback)"
+}
+
+func (e *HelmReleasePendingOperationError) Error() string {
+	if e == nil {
+		return ""
+	}
+	message := strings.TrimSpace(e.Message)
+	if message == "" && e.Err != nil {
+		message = e.Err.Error()
+	}
+	if message == "" {
+		message = "helm release operation is already in progress"
+	}
+	return fmt.Sprintf("%s; recover with: %s", message, e.RecoveryCommand())
+}
+
+func (e *HelmReleasePendingOperationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func (e *HelmReleasePendingOperationError) RecoveryParams(stdout, stderr io.Writer) HelmReleaseRecoveryParams {
+	if e == nil {
+		return HelmReleaseRecoveryParams{Stdout: stdout, Stderr: stderr}
+	}
+	return HelmReleaseRecoveryParams{
+		ReleaseName:       e.ReleaseName,
+		Namespace:         e.Namespace,
+		KubernetesContext: e.KubernetesContext,
+		Stdout:            stdout,
+		Stderr:            stderr,
+	}
+}
+
+func (e *HelmReleasePendingOperationError) RecoveryCommand() string {
+	if e == nil {
+		return ""
+	}
+	command := e.RecoveryParams(nil, nil).command()
+	return formatShellCommand(command.Dir, command.Name, command.Args...)
+}
+
 func formatHelmBool(value bool) string {
 	if value {
 		return "true"
@@ -896,8 +978,45 @@ func DeployHelmChart(params HelmDeployParams) error {
 	cmd := exec.Command(command.Name, command.Args...)
 	cmd.Dir = command.Dir
 	cmd.Stdout = params.Stdout
+	stderr := new(strings.Builder)
+	if params.Stderr != nil {
+		cmd.Stderr = io.MultiWriter(params.Stderr, stderr)
+	} else {
+		cmd.Stderr = stderr
+	}
+	err := cmd.Run()
+	if err != nil && isHelmReleasePendingOperationMessage(stderr.String()) {
+		return &HelmReleasePendingOperationError{
+			ReleaseName:       params.ReleaseName,
+			Namespace:         params.Namespace,
+			KubernetesContext: params.KubernetesContext,
+			Message:           stderr.String(),
+			Err:               err,
+		}
+	}
+	return err
+}
+
+func ClearHelmReleasePendingOperation(params HelmReleaseRecoveryParams) error {
+	if strings.TrimSpace(params.ReleaseName) == "" {
+		return fmt.Errorf("helm release name is required")
+	}
+	if strings.TrimSpace(params.Namespace) == "" {
+		return fmt.Errorf("helm release namespace is required")
+	}
+
+	command := params.command()
+	cmd := exec.Command(command.Name, command.Args...)
+	cmd.Stdout = params.Stdout
 	cmd.Stderr = params.Stderr
 	return cmd.Run()
+}
+
+func isHelmReleasePendingOperationMessage(message string) bool {
+	message = strings.ToLower(message)
+	return strings.Contains(message, "another operation") &&
+		strings.Contains(message, "install/upgrade/rollback") &&
+		strings.Contains(message, "in progress")
 }
 
 func prepareHelmChartForDeploy(chartPath, version string) (string, func(), error) {

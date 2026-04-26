@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -811,6 +812,85 @@ printf '%s
 	args := string(data)
 	if !strings.Contains(args, "--set\nsshdEnabled=true\n") {
 		t.Fatalf("expected helm args to include sshdEnabled=true, got:\n%s", args)
+	}
+}
+
+func TestDeployHelmChartReturnsPendingOperationError(t *testing.T) {
+	helmDir := t.TempDir()
+	helmPath := filepath.Join(helmDir, "helm")
+	if err := os.WriteFile(helmPath, []byte(`#!/bin/sh
+echo "Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress" >&2
+exit 1
+`), 0o755); err != nil {
+		t.Fatalf("write helm stub: %v", err)
+	}
+	t.Setenv("PATH", helmDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	chartPath := createHelmChartFixture(t, t.TempDir(), "erun-devops")
+	stderr := new(bytes.Buffer)
+	err := DeployHelmChart(HelmDeployParams{
+		ReleaseName:       "erun-devops",
+		ChartPath:         chartPath,
+		ValuesFilePath:    filepath.Join(chartPath, "values.local.yaml"),
+		Tenant:            "erun",
+		Environment:       "local",
+		Namespace:         "erun-local",
+		KubernetesContext: "rancher-desktop",
+		WorktreeStorage:   WorktreeStorageHost,
+		WorktreeRepoName:  "erun",
+		WorktreeHostPath:  "/home/erun/git/erun",
+		Timeout:           DefaultHelmDeploymentTimeout,
+		Stderr:            stderr,
+	})
+
+	var pending *HelmReleasePendingOperationError
+	if !errors.As(err, &pending) {
+		t.Fatalf("expected pending operation error, got %T: %v", err, err)
+	}
+	if pending.ReleaseName != "erun-devops" || pending.Namespace != "erun-local" || pending.KubernetesContext != "rancher-desktop" {
+		t.Fatalf("unexpected pending operation details: %+v", pending)
+	}
+	if !strings.Contains(stderr.String(), "another operation") {
+		t.Fatalf("expected helm stderr to remain streamed, got %q", stderr.String())
+	}
+	wantCommand := "kubectl --context rancher-desktop --namespace erun-local delete 'secrets,configmaps' -l 'owner=helm,name=erun-devops,status in (pending-install,pending-upgrade,pending-rollback)' --ignore-not-found"
+	if pending.RecoveryCommand() != wantCommand {
+		t.Fatalf("unexpected recovery command %q, want %q", pending.RecoveryCommand(), wantCommand)
+	}
+}
+
+func TestClearHelmReleasePendingOperationDeletesOnlyPendingMetadata(t *testing.T) {
+	kubectlDir := t.TempDir()
+	argsPath := filepath.Join(kubectlDir, "kubectl-args.txt")
+	kubectlPath := filepath.Join(kubectlDir, "kubectl")
+	if err := os.WriteFile(kubectlPath, []byte(`#!/bin/sh
+printf '%s
+' "$@" > "$ERUN_KUBECTL_ARGS_FILE"
+`), 0o755); err != nil {
+		t.Fatalf("write kubectl stub: %v", err)
+	}
+	t.Setenv("ERUN_KUBECTL_ARGS_FILE", argsPath)
+	t.Setenv("PATH", kubectlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	if err := ClearHelmReleasePendingOperation(HelmReleaseRecoveryParams{
+		ReleaseName:       "erun-devops",
+		Namespace:         "erun-local",
+		KubernetesContext: "rancher-desktop",
+	}); err != nil {
+		t.Fatalf("ClearHelmReleasePendingOperation failed: %v", err)
+	}
+
+	data, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read kubectl args: %v", err)
+	}
+	args := string(data)
+	if strings.Contains(args, "uninstall\n") {
+		t.Fatalf("did not expect helm uninstall args:\n%s", args)
+	}
+	want := "--context\nrancher-desktop\n--namespace\nerun-local\ndelete\nsecrets,configmaps\n-l\nowner=helm,name=erun-devops,status in (pending-install,pending-upgrade,pending-rollback)\n--ignore-not-found\n"
+	if args != want {
+		t.Fatalf("unexpected kubectl recovery args:\n%s", args)
 	}
 }
 

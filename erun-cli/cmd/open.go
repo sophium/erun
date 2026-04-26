@@ -266,7 +266,11 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 				func(ctx common.Context, pushInput common.DockerPushSpec) error {
 					return common.RunDockerPush(ctx, pushInput, common.DockerImagePusher)
 				},
-				wrapOpenHelmDeployWithSpinner(ctx, execution.Deploy.ReleaseName, deployHelmChart),
+				wrapHelmDeployWithReleaseRecovery(
+					promptRunner,
+					wrapOpenHelmDeployWithSpinner(ctx, execution.Deploy.ReleaseName, deployHelmChart),
+					common.ClearHelmReleasePendingOperation,
+				),
 			); err != nil {
 				return err
 			}
