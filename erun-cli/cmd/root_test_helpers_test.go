@@ -22,6 +22,7 @@ type testRootDeps struct {
 	ResolveDockerBuildContext      common.BuildContextResolverFunc
 	ResolveKubernetesDeployContext common.DeployContextResolverFunc
 	CheckKubernetesDeployment      common.KubernetesDeploymentCheckerFunc
+	DeleteKubernetesNamespace      common.NamespaceDeleterFunc
 	RunGit                         common.GitCommandRunnerFunc
 	RunRawCommand                  common.RawCommandRunnerFunc
 	RunBuildScript                 common.BuildScriptRunnerFunc
@@ -37,6 +38,7 @@ type testRootDeps struct {
 	RunRemoteCommand               common.RemoteCommandRunnerFunc
 	LaunchVSCode                   VSCodeLauncher
 	LaunchIntelliJ                 IntelliJLauncher
+	ResolveRuntimeRegistryVersions common.RuntimeRegistryVersionResolverFunc
 	Now                            common.NowFunc
 }
 
@@ -211,10 +213,19 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	execCmd := newExecCmd(findProjectRoot, runGit, deps.RunRawCommand)
 	listCmd := newListCmd(listDataStore, findProjectRoot)
 	doctorCmd := newDoctorCmd(resolveOpen, promptRunner)
+	deleteNamespace := deps.DeleteKubernetesNamespace
+	if deleteNamespace == nil {
+		deleteNamespace = common.DeleteKubernetesNamespace
+	}
+	deleteStore, ok := any(store).(common.DeleteStore)
+	if !ok {
+		deleteStore = common.ConfigStore{}
+	}
+	deleteCmd := newDeleteCmd(deleteStore, promptRunner, deleteNamespace)
 	releaseCmd := newReleaseCmd(findProjectRoot, runGit)
 	versionCmd := newVersionCmd(func() (common.BuildInfo, string, error) {
 		return resolveVersionCommandBuildInfo(findProjectRoot)
-	})
+	}, deps.ResolveRuntimeRegistryVersions)
 
 	runRoot := func(cmd *cobra.Command, args []string) error {
 		ctx := commandContext(cmd)
@@ -229,7 +240,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	}
 
 	cmd := newRootCommand(runRoot)
-	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, execCmd, listCmd, doctorCmd, releaseCmd, versionCmd)
+	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, execCmd, listCmd, doctorCmd, deleteCmd, releaseCmd, versionCmd)
 	return cmd
 }
 

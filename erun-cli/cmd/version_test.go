@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+
+	common "github.com/sophium/erun/erun-common"
 )
 
 func TestBuildInfoDefaults(t *testing.T) {
@@ -91,6 +94,94 @@ func TestVersionCommandPrefersVersionFileInCurrentDirectory(t *testing.T) {
 	}
 
 	if got := buf.String(); got != "erun 9.9.9 (abcdef built 2024-01-01)\n" {
+		t.Fatalf("unexpected output: %q", got)
+	}
+}
+
+func TestVersionCommandPrintsRegistryVersions(t *testing.T) {
+	prevV, prevC, prevD := buildInfo()
+	t.Cleanup(func() {
+		setBuildInfo(prevV, prevC, prevD)
+	})
+
+	workdir := t.TempDir()
+	prevWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(workdir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(prevWD)
+	})
+
+	cmd := newTestRootCmd(testRootDeps{
+		ResolveRuntimeRegistryVersions: func(context.Context) (common.RuntimeRegistryVersions, error) {
+			return common.RuntimeRegistryVersions{
+				Image:          "erunpaas/erun-devops",
+				LatestStable:   "1.0.50",
+				LatestSnapshot: "1.0.51-snapshot-20260424100000",
+			}, nil
+		},
+	})
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"version"})
+
+	setBuildInfo("1.2.3", "abcdef", "2024-01-01")
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	want := "erun 1.2.3 (abcdef built 2024-01-01)\n" +
+		"latest stable: 1.0.50\n" +
+		"latest snapshot: 1.0.51-snapshot-20260424100000\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("unexpected output: %q", got)
+	}
+}
+
+func TestVersionCommandCanSkipRegistryVersions(t *testing.T) {
+	prevV, prevC, prevD := buildInfo()
+	t.Cleanup(func() {
+		setBuildInfo(prevV, prevC, prevD)
+	})
+
+	workdir := t.TempDir()
+	prevWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	if err := os.Chdir(workdir); err != nil {
+		t.Fatalf("chdir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(prevWD)
+	})
+
+	called := false
+	cmd := newTestRootCmd(testRootDeps{
+		ResolveRuntimeRegistryVersions: func(context.Context) (common.RuntimeRegistryVersions, error) {
+			called = true
+			return common.RuntimeRegistryVersions{LatestStable: "1.0.50"}, nil
+		},
+	})
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"version", "--no-registry"})
+
+	setBuildInfo("1.2.3", "", "")
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	if called {
+		t.Fatal("registry resolver was called")
+	}
+	if got := buf.String(); got != "erun 1.2.3\n" {
 		t.Fatalf("unexpected output: %q", got)
 	}
 }

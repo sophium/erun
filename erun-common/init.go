@@ -69,6 +69,8 @@ type BootstrapInitParams struct {
 	ProjectRoot              string
 	Environment              string
 	RuntimeVersion           string
+	RuntimeImage             string
+	NoGit                    bool
 	KubernetesContext        string
 	ContainerRegistry        string
 	Remote                   bool
@@ -688,6 +690,7 @@ func normalizeBootstrapParams(params BootstrapInitParams) BootstrapInitParams {
 	params.ProjectRoot = strings.TrimSpace(params.ProjectRoot)
 	params.Environment = strings.TrimSpace(params.Environment)
 	params.RuntimeVersion = strings.TrimSpace(params.RuntimeVersion)
+	params.RuntimeImage = strings.TrimSpace(params.RuntimeImage)
 	params.KubernetesContext = strings.TrimSpace(params.KubernetesContext)
 	params.ContainerRegistry = strings.TrimSpace(params.ContainerRegistry)
 	params.RemoteRepositoryURL = strings.TrimSpace(params.RemoteRepositoryURL)

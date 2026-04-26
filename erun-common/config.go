@@ -227,6 +227,10 @@ func (ConfigStore) SaveTenantConfig(config TenantConfig) error {
 	return SaveTenantConfig(config)
 }
 
+func (ConfigStore) DeleteTenantConfig(tenant string) error {
+	return DeleteTenantConfig(tenant)
+}
+
 func (ConfigStore) LoadEnvConfig(tenant, envName string) (EnvConfig, string, error) {
 	return LoadEnvConfig(tenant, envName)
 }
@@ -245,6 +249,10 @@ func (ConfigStore) ListEnvConfigs(tenant string) ([]EnvConfig, error) {
 
 func (ConfigStore) SaveEnvConfig(tenant string, config EnvConfig) error {
 	return SaveEnvConfig(tenant, config)
+}
+
+func (ConfigStore) DeleteEnvConfig(tenant, envName string) error {
+	return DeleteEnvConfig(tenant, envName)
 }
 
 func SaveERunConfig(config ERunConfig) error {
@@ -307,6 +315,18 @@ func SaveTenantConfig(config TenantConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
+	return nil
+}
+
+func DeleteTenantConfig(tenant string) error {
+	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, configFile))
+	if err != nil {
+		return ErrNoUserDataFolder
+	}
+
+	if err := os.RemoveAll(filepath.Dir(configFilePath)); err != nil {
+		return ErrFailedToSaveConfig
+	}
 	return nil
 }
 
@@ -388,6 +408,18 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
+	return nil
+}
+
+func DeleteEnvConfig(tenant, envName string) error {
+	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, envName, configFile))
+	if err != nil {
+		return ErrNoUserDataFolder
+	}
+
+	if err := os.RemoveAll(filepath.Dir(configFilePath)); err != nil {
+		return ErrFailedToSaveConfig
+	}
 	return nil
 }
 

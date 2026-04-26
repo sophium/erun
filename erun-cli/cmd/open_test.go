@@ -121,6 +121,44 @@ func TestOpenCommandVersionOverrideForcesRuntimeDeploy(t *testing.T) {
 	}
 }
 
+func TestOpenCommandRuntimeImageOverrideUsesSelectedImage(t *testing.T) {
+	deployed := common.HelmDeployParams{}
+	cmd := newTestRootCmd(testRootDeps{
+		Store: openCommandStore{
+			repoPath: "/home/erun/git/test",
+			env: &common.EnvConfig{
+				Name:              "env",
+				RepoPath:          "/home/erun/git/test",
+				KubernetesContext: "cluster-dev",
+				Remote:            true,
+			},
+		},
+		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
+			return true, nil
+		},
+		DeployHelmChart: func(req common.HelmDeployParams) error {
+			deployed = req
+			return nil
+		},
+	})
+	cmd.SetArgs([]string{"open", "test", "env", "--no-shell", "--version", "1.0.48", "--runtime-image", "test-devops", "--no-alias-prompt"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+
+	service, err := os.ReadFile(filepath.Join(deployed.ChartPath, "templates", "service.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	if !strings.Contains(string(service), "image: erunpaas/test-devops:{{ .Chart.AppVersion }}") {
+		t.Fatalf("expected selected runtime image in generated chart, got:\n%s", service)
+	}
+	if deployed.Version != "1.0.48" || deployed.ReleaseName != "test-devops" {
+		t.Fatalf("unexpected deploy params: %+v", deployed)
+	}
+}
+
 func TestRunResolvedOpenCommandActivatesSSHDWhenEnabled(t *testing.T) {
 	activated := false
 	launched := false
@@ -412,6 +450,27 @@ func TestOpenCommandNoShellConfiguresLocalKubeconfig(t *testing.T) {
 	}
 	if stderr.String() != "" {
 		t.Fatalf("did not expect stderr output in buffered mode, got %q", stderr.String())
+	}
+}
+
+func TestOpenCommandNoShellAliasPromptFlagSkipsPrompt(t *testing.T) {
+	repoPath := t.TempDir()
+	stdout := new(bytes.Buffer)
+	cmd := newTestRootCmd(testRootDeps{
+		Store: openCommandStore{repoPath: repoPath},
+		PromptRunner: func(promptui.Prompt) (string, error) {
+			t.Fatal("did not expect alias prompt")
+			return "", nil
+		},
+	})
+	cmd.SetOut(stdout)
+	cmd.SetArgs([]string{"open", "tenant-a", "dev", "--no-shell", "--no-alias-prompt"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "kubectl config use-context") {
+		t.Fatalf("expected no-shell setup output, got %q", stdout.String())
 	}
 }
 
@@ -1627,6 +1686,10 @@ func (s openCommandStore) LoadERunConfig() (common.ERunConfig, string, error) {
 }
 
 func (openCommandStore) SaveERunConfig(common.ERunConfig) error {
+	return nil
+}
+
+func (openCommandStore) DeleteTenantConfig(string) error {
 	return nil
 }
 

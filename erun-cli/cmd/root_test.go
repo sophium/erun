@@ -16,7 +16,7 @@ import (
 func TestNewRootCmdRegistersCommands(t *testing.T) {
 	cmd := newTestRootCmd(testRootDeps{})
 
-	for _, name := range []string{"init", "open", "devops", "mcp", "app", "exec", "list", "doctor", "release", "version"} {
+	for _, name := range []string{"init", "open", "devops", "mcp", "app", "exec", "list", "doctor", "delete", "release", "version"} {
 		found, _, err := cmd.Find([]string{name})
 		if err != nil {
 			t.Fatalf("Find(%q) failed: %v", name, err)

@@ -235,11 +235,11 @@ func TestResolveListResultIncludesSnapshotPreferenceForTenant(t *testing.T) {
 				"tenant-a": {Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: DefaultEnvironment},
 			},
 			envConfigs: map[string]EnvConfig{
-				"tenant-a/local": {Name: DefaultEnvironment, RepoPath: repoRoot, KubernetesContext: "cluster-local", Snapshot: &snapshot},
+				"tenant-a/local": {Name: DefaultEnvironment, RepoPath: repoRoot, KubernetesContext: "cluster-local", RuntimeVersion: "1.0.19-snapshot-20260418141901", Snapshot: &snapshot},
 			},
 		},
 		envsByTenant: map[string][]EnvConfig{
-			"tenant-a": {{Name: DefaultEnvironment, RepoPath: repoRoot, KubernetesContext: "cluster-local", Snapshot: &snapshot}},
+			"tenant-a": {{Name: DefaultEnvironment, RepoPath: repoRoot, KubernetesContext: "cluster-local", RuntimeVersion: "1.0.19-snapshot-20260418141901", Snapshot: &snapshot}},
 		},
 	}
 
@@ -257,6 +257,9 @@ func TestResolveListResultIncludesSnapshotPreferenceForTenant(t *testing.T) {
 	}
 	if len(result.Tenants) != 1 || len(result.Tenants[0].Environments) != 1 || result.Tenants[0].Environments[0].Snapshot {
 		t.Fatalf("expected environment snapshot off, got %+v", result.Tenants)
+	}
+	if result.Tenants[0].Environments[0].RuntimeVersion != "1.0.19-snapshot-20260418141901" {
+		t.Fatalf("unexpected runtime version: %+v", result.Tenants[0].Environments[0])
 	}
 }
 

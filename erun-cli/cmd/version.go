@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -37,7 +38,8 @@ func setBuildInfo(v, c, d string) {
 }
 
 // newVersionCmd returns a Cobra command that prints the build information.
-func newVersionCmd(resolveBuildInfo func() (common.BuildInfo, string, error)) *cobra.Command {
+func newVersionCmd(resolveBuildInfo func() (common.BuildInfo, string, error), resolveRegistryVersions common.RuntimeRegistryVersionResolverFunc) *cobra.Command {
+	var noRegistry bool
 	cmd := &cobra.Command{
 		Use:   "version",
 		Short: "Print build information",
@@ -53,14 +55,42 @@ func newVersionCmd(resolveBuildInfo func() (common.BuildInfo, string, error)) *c
 				ctx.Logger.Debug("resolved version from " + versionFilePath)
 			}
 
-			_, writeErr := fmt.Fprintln(ctx.Stdout, common.FormatVersionLine(info))
-			return writeErr
+			if _, writeErr := fmt.Fprintln(ctx.Stdout, common.FormatVersionLine(info)); writeErr != nil {
+				return writeErr
+			}
+			if noRegistry {
+				return nil
+			}
+			return writeRegistryVersions(cmd.Context(), ctx, resolveRegistryVersions)
 		},
 	}
 	addDryRunFlag(cmd)
+	cmd.Flags().BoolVar(&noRegistry, "no-registry", false, "Skip remote registry version lookup")
 	cmd.Example = "  erun version\n  erun -v version\n  erun version --dry-run"
 	cmd.Long = fmt.Sprintf("%s\n\nVerbosity levels:\n  -v    print trace logs for command flow and side effects\n\nDry-run:\n  --dry-run runs the same resolution flow but skips mutating operations", cmd.Short)
 	return cmd
+}
+
+func writeRegistryVersions(ctx context.Context, commandCtx common.Context, resolveRegistryVersions common.RuntimeRegistryVersionResolverFunc) error {
+	if resolveRegistryVersions == nil {
+		return nil
+	}
+	versions, err := resolveRegistryVersions(ctx)
+	if err != nil {
+		commandCtx.Logger.Debug("resolve runtime registry versions: " + err.Error())
+		return nil
+	}
+	if stable := strings.TrimSpace(versions.LatestStable); stable != "" {
+		if _, err := fmt.Fprintln(commandCtx.Stdout, "latest stable: "+stable); err != nil {
+			return err
+		}
+	}
+	if snapshot := strings.TrimSpace(versions.LatestSnapshot); snapshot != "" {
+		if _, err := fmt.Fprintln(commandCtx.Stdout, "latest snapshot: "+snapshot); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func resolveVersionCommandBuildInfo(findProjectRoot common.ProjectFinderFunc) (common.BuildInfo, string, error) {

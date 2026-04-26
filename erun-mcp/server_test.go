@@ -157,7 +157,7 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
 	}
-	if len(tools.Tools) != 10 {
+	if len(tools.Tools) != 11 {
 		t.Fatalf("unexpected tools: %+v", tools.Tools)
 	}
 
