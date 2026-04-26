@@ -1,5 +1,5 @@
 import '@xterm/xterm/css/xterm.css';
-import './style.css';
+import './styles/index.css';
 
 import { createRoot } from 'react-dom/client';
 
