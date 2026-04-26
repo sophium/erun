@@ -55,7 +55,7 @@ type EnvConfig struct {
 
 func (c TenantConfig) SnapshotEnabled() bool {
 	if c.Snapshot == nil {
-		return true
+		return false
 	}
 	return *c.Snapshot
 }
@@ -70,7 +70,7 @@ func (c *TenantConfig) SetSnapshot(enabled bool) {
 
 func (c EnvConfig) SnapshotEnabled() bool {
 	if c.Snapshot == nil {
-		return true
+		return false
 	}
 	return *c.Snapshot
 }

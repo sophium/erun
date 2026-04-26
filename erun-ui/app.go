@@ -21,6 +21,9 @@ const (
 
 type erunUIStore interface {
 	eruncommon.ListStore
+	SaveERunConfig(eruncommon.ERunConfig) error
+	SaveTenantConfig(eruncommon.TenantConfig) error
+	SaveEnvConfig(string, eruncommon.EnvConfig) error
 }
 
 type erunUIDeps struct {
@@ -82,6 +85,32 @@ type uiBuildDetails struct {
 }
 
 type uiVersion = eruncommon.RuntimeVersionSuggestion
+
+type uiERunConfig struct {
+	DefaultTenant string `json:"defaultTenant"`
+}
+
+type uiTenantConfig struct {
+	Name               string `json:"name"`
+	DefaultEnvironment string `json:"defaultEnvironment"`
+}
+
+type uiSSHDConfig struct {
+	Enabled       bool   `json:"enabled"`
+	LocalPort     int    `json:"localPort"`
+	PublicKeyPath string `json:"publicKeyPath"`
+}
+
+type uiEnvironmentConfig struct {
+	Name              string       `json:"name"`
+	RepoPath          string       `json:"repoPath"`
+	KubernetesContext string       `json:"kubernetesContext"`
+	ContainerRegistry string       `json:"containerRegistry"`
+	RuntimeVersion    string       `json:"runtimeVersion"`
+	SSHD              uiSSHDConfig `json:"sshd"`
+	Remote            bool         `json:"remote"`
+	Snapshot          bool         `json:"snapshot"`
+}
 
 type startSessionResult struct {
 	SessionID int         `json:"sessionId"`
@@ -244,6 +273,84 @@ func (a *App) LoadVersionSuggestions(selection uiSelection) ([]uiVersion, error)
 	return a.runtimeVersionSuggestions(a.deps.resolveBuildInfo(), selection.Tenant), nil
 }
 
+func (a *App) LoadERunConfig() (uiERunConfig, error) {
+	config, _, err := a.deps.store.LoadERunConfig()
+	if err != nil {
+		return uiERunConfig{}, err
+	}
+	return erunConfigToUI(config), nil
+}
+
+func (a *App) SaveERunConfig(config uiERunConfig) (uiERunConfig, error) {
+	updated := eruncommon.ERunConfig{
+		DefaultTenant: strings.TrimSpace(config.DefaultTenant),
+	}
+	if err := a.deps.store.SaveERunConfig(updated); err != nil {
+		return uiERunConfig{}, err
+	}
+	return erunConfigToUI(updated), nil
+}
+
+func (a *App) LoadTenantConfig(tenant string) (uiTenantConfig, error) {
+	tenant = strings.TrimSpace(tenant)
+	if tenant == "" {
+		return uiTenantConfig{}, fmt.Errorf("tenant is required")
+	}
+
+	config, _, err := a.deps.store.LoadTenantConfig(tenant)
+	if err != nil {
+		return uiTenantConfig{}, err
+	}
+	return tenantConfigToUI(config, tenant), nil
+}
+
+func (a *App) SaveTenantConfig(config uiTenantConfig) (uiTenantConfig, error) {
+	tenant := strings.TrimSpace(config.Name)
+	if tenant == "" {
+		return uiTenantConfig{}, fmt.Errorf("tenant is required")
+	}
+
+	existing, _, err := a.deps.store.LoadTenantConfig(tenant)
+	if err != nil {
+		return uiTenantConfig{}, err
+	}
+	updated := tenantConfigFromUI(config, existing)
+	if err := a.deps.store.SaveTenantConfig(updated); err != nil {
+		return uiTenantConfig{}, err
+	}
+	return tenantConfigToUI(updated, tenant), nil
+}
+
+func (a *App) LoadEnvironmentConfig(selection uiSelection) (uiEnvironmentConfig, error) {
+	selection = normalizeSelection(selection)
+	if selection.Tenant == "" || selection.Environment == "" {
+		return uiEnvironmentConfig{}, fmt.Errorf("tenant and environment are required")
+	}
+
+	config, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
+	if err != nil {
+		return uiEnvironmentConfig{}, err
+	}
+	return environmentConfigToUI(config, selection.Environment), nil
+}
+
+func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentConfig) (uiEnvironmentConfig, error) {
+	selection = normalizeSelection(selection)
+	if selection.Tenant == "" || selection.Environment == "" {
+		return uiEnvironmentConfig{}, fmt.Errorf("tenant and environment are required")
+	}
+
+	existing, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
+	if err != nil {
+		return uiEnvironmentConfig{}, err
+	}
+	updated := environmentConfigFromUI(config, existing)
+	if err := a.deps.store.SaveEnvConfig(selection.Tenant, updated); err != nil {
+		return uiEnvironmentConfig{}, err
+	}
+	return environmentConfigToUI(updated, selection.Environment), nil
+}
+
 func labelRuntimeVersionSuggestions(source, image string, suggestions []uiVersion) []uiVersion {
 	source = strings.TrimSpace(source)
 	image = strings.TrimSpace(image)
@@ -259,6 +366,58 @@ func labelRuntimeVersionSuggestions(source, image string, suggestions []uiVersio
 		labeled = append(labeled, suggestion)
 	}
 	return labeled
+}
+
+func erunConfigToUI(config eruncommon.ERunConfig) uiERunConfig {
+	return uiERunConfig{
+		DefaultTenant: strings.TrimSpace(config.DefaultTenant),
+	}
+}
+
+func tenantConfigToUI(config eruncommon.TenantConfig, fallbackName string) uiTenantConfig {
+	name := strings.TrimSpace(config.Name)
+	if name == "" {
+		name = strings.TrimSpace(fallbackName)
+	}
+	result := uiTenantConfig{
+		Name:               name,
+		DefaultEnvironment: strings.TrimSpace(config.DefaultEnvironment),
+	}
+	return result
+}
+
+func tenantConfigFromUI(config uiTenantConfig, existing eruncommon.TenantConfig) eruncommon.TenantConfig {
+	existing.Name = strings.TrimSpace(config.Name)
+	existing.DefaultEnvironment = strings.TrimSpace(config.DefaultEnvironment)
+	return existing
+}
+
+func environmentConfigToUI(config eruncommon.EnvConfig, fallbackName string) uiEnvironmentConfig {
+	name := strings.TrimSpace(config.Name)
+	if name == "" {
+		name = strings.TrimSpace(fallbackName)
+	}
+	result := uiEnvironmentConfig{
+		Name:              name,
+		RepoPath:          strings.TrimSpace(config.RepoPath),
+		KubernetesContext: strings.TrimSpace(config.KubernetesContext),
+		ContainerRegistry: strings.TrimSpace(config.ContainerRegistry),
+		RuntimeVersion:    strings.TrimSpace(config.RuntimeVersion),
+		SSHD: uiSSHDConfig{
+			Enabled:       config.SSHD.Enabled,
+			LocalPort:     config.SSHD.LocalPort,
+			PublicKeyPath: strings.TrimSpace(config.SSHD.PublicKeyPath),
+		},
+		Remote:   config.Remote,
+		Snapshot: config.SnapshotEnabled(),
+	}
+	return result
+}
+
+func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.EnvConfig) eruncommon.EnvConfig {
+	existing.Name = strings.TrimSpace(config.Name)
+	existing.SetSnapshot(config.Snapshot)
+	return existing
 }
 
 func (a *App) StartSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
@@ -329,7 +488,7 @@ func (a *App) StartSession(selection uiSelection, cols, rows int) (startSessionR
 }
 
 func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
-	return a.startCommandSession(selection, cols, rows, initSelectionKey(selection), buildInitArgs(selection.Tenant, selection.Environment, selection.Version, selection.RuntimeImage, selection.NoGit), resolveInitStartDir(a.deps.findProjectRoot))
+	return a.startCommandSession(selection, cols, rows, initSelectionKey(selection), buildInitArgs(selection.Tenant, selection.Environment, selection.Version, selection.RuntimeImage, selection.NoGit), resolveInitStartDir(a.deps.findProjectRoot), []string{appSessionEnvVar + "=1"})
 }
 
 func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
@@ -344,7 +503,7 @@ func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSe
 	if err != nil {
 		return startSessionResult{}, err
 	}
-	return a.startCommandSession(selection, cols, rows, deploySelectionKey(selection), buildDeployArgs(selection.Tenant, selection.Environment, selection.Version, selection.RuntimeImage), resolveDeployStartDir(a.deps.findProjectRoot, result))
+	return a.startCommandSession(selection, cols, rows, deploySelectionKey(selection), buildDeployArgs(selection.Tenant, selection.Environment, selection.Version, selection.RuntimeImage), resolveDeployStartDir(a.deps.findProjectRoot, result), []string{appSessionEnvVar + "=1"})
 }
 
 func (a *App) DeleteEnvironment(selection uiSelection, confirmation string) (deleteEnvironmentResult, error) {
@@ -379,7 +538,7 @@ func (a *App) DeleteEnvironment(selection uiSelection, confirmation string) (del
 	}, nil
 }
 
-func (a *App) startCommandSession(selection uiSelection, cols, rows int, key string, args []string, dir string) (startSessionResult, error) {
+func (a *App) startCommandSession(selection uiSelection, cols, rows int, key string, args []string, dir string, env []string) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
 		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
@@ -406,7 +565,7 @@ func (a *App) startCommandSession(selection uiSelection, cols, rows int, key str
 		Dir:        dir,
 		Executable: a.deps.resolveCLIPath(),
 		Args:       args,
-		Env:        []string{appSessionEnvVar + "=1"},
+		Env:        env,
 		Cols:       cols,
 		Rows:       rows,
 	})

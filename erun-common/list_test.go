@@ -90,8 +90,8 @@ func TestResolveListResultUsesCurrentDirectoryTenantBeforeDefault(t *testing.T) 
 	if result.CurrentDirectory.Effective.Tenant != "tenant-b" || result.CurrentDirectory.Effective.Environment != "dev" {
 		t.Fatalf("unexpected effective target: %+v", result.CurrentDirectory.Effective)
 	}
-	if !result.CurrentDirectory.Effective.Snapshot {
-		t.Fatalf("expected effective snapshot to default on, got %+v", result.CurrentDirectory.Effective)
+	if result.CurrentDirectory.Effective.Snapshot {
+		t.Fatalf("expected effective snapshot to default off, got %+v", result.CurrentDirectory.Effective)
 	}
 	if len(result.Tenants) != 2 {
 		t.Fatalf("unexpected tenants: %+v", result.Tenants)
@@ -156,8 +156,8 @@ func TestResolveListResultFallsBackToDefaultWhenRepoIsNotConfiguredTenant(t *tes
 	if result.CurrentDirectory.Effective.Tenant != "tenant-a" || result.CurrentDirectory.Effective.Environment != "dev" {
 		t.Fatalf("unexpected effective target: %+v", result.CurrentDirectory.Effective)
 	}
-	if !result.CurrentDirectory.Effective.Snapshot {
-		t.Fatalf("expected effective snapshot to default on, got %+v", result.CurrentDirectory.Effective)
+	if result.CurrentDirectory.Effective.Snapshot {
+		t.Fatalf("expected effective snapshot to default off, got %+v", result.CurrentDirectory.Effective)
 	}
 }
 
@@ -214,8 +214,8 @@ func TestResolveListResultUsesEffectiveKubernetesContextForCurrentDirectoryTarge
 	if result.CurrentDirectory.Effective.KubernetesContext != "docker-desktop" {
 		t.Fatalf("unexpected effective kubernetes context: %+v", result.CurrentDirectory.Effective)
 	}
-	if !result.CurrentDirectory.Effective.Snapshot {
-		t.Fatalf("expected effective snapshot to default on, got %+v", result.CurrentDirectory.Effective)
+	if result.CurrentDirectory.Effective.Snapshot {
+		t.Fatalf("expected effective snapshot to default off, got %+v", result.CurrentDirectory.Effective)
 	}
 	if got := result.Tenants[0].Environments[0].KubernetesContext; got != "rancher-desktop" {
 		t.Fatalf("expected configured tenant environment context to remain unchanged, got %q", got)

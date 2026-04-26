@@ -86,17 +86,17 @@ func TestListCommandPrintsDefaultsAndConfiguredTenants(t *testing.T) {
 		"  configured tenant: none",
 		"  effective target: tenant-a/local",
 		"  kubernetes context: cluster-local",
-		"  snapshot: on",
+		"  snapshot: off",
 		"  assigned local port range: 17000-17099",
 		"  assigned mcp local port: 17000 (when MCP is running or forwarded)",
 		"  assigned ssh local port: 17022 (when SSH port-forward is active)",
 		"Tenants:",
 		"  tenant-a [default, effective]",
 		"    default environment: local",
-		"      - local [default, effective] context=cluster-local snapshot=on repo=" + tenantAPath + " ports=17000-17099 mcp-port=17000 ssh-port=17022",
-		"      - prod context=cluster-prod snapshot=on repo=" + tenantAPath + " ports=17100-17199 mcp-port=17100 ssh-port=17122",
+		"      - local [default, effective] context=cluster-local snapshot=off repo=" + tenantAPath + " ports=17000-17099 mcp-port=17000 ssh-port=17022",
+		"      - prod context=cluster-prod snapshot=off repo=" + tenantAPath + " ports=17100-17199 mcp-port=17100 ssh-port=17122",
 		"  tenant-b",
-		"      - dev [default] context=cluster-b snapshot=on repo=" + tenantBPath + " ports=17200-17299 mcp-port=17200 ssh-port=17222",
+		"      - dev [default] context=cluster-b snapshot=off repo=" + tenantBPath + " ports=17200-17299 mcp-port=17200 ssh-port=17222",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)
@@ -174,12 +174,12 @@ func TestListCommandUsesConfiguredCurrentDirectoryTenantBeforeDefault(t *testing
 		"  configured tenant: tenant-b",
 		"  effective target: tenant-b/dev",
 		"  kubernetes context: cluster-b",
-		"  snapshot: on",
+		"  snapshot: off",
 		"  assigned local port range: 17100-17199",
 		"  assigned mcp local port: 17100 (when MCP is running or forwarded)",
 		"  assigned ssh local port: 17122 (when SSH port-forward is active)",
 		"  tenant-b [effective]",
-		"      - dev [default, effective] context=cluster-b snapshot=on repo=" + tenantBPath + " ports=17100-17199 mcp-port=17100 ssh-port=17122",
+		"      - dev [default, effective] context=cluster-b snapshot=off repo=" + tenantBPath + " ports=17100-17199 mcp-port=17100 ssh-port=17122",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)

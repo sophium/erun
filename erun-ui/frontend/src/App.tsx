@@ -4,9 +4,11 @@ import { Check, Copy } from 'lucide-react';
 import { ERunUIController } from '@/app/ERunUIController';
 import { useControllerState } from '@/app/useControllerState';
 import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
+import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
 import { ManageDialogView } from '@/components/app/ManageDialogView';
 import { ReviewPanel } from '@/components/app/ReviewPanel';
 import { Sidebar } from '@/components/app/Sidebar';
+import { TenantDialogView } from '@/components/app/TenantDialogView';
 import { Titlebar } from '@/components/app/Titlebar';
 import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -112,7 +114,9 @@ export function App(): React.ReactElement {
         </div>
       </div>
       <EnvironmentDialogView controller={controller} state={state} />
+      <GlobalConfigDialogView controller={controller} state={state} />
       <ManageDialogView controller={controller} state={state} />
+      <TenantDialogView controller={controller} state={state} />
     </TooltipProvider>
   );
 }

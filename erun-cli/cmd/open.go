@@ -62,7 +62,15 @@ func newOpenCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), 
 			if err != nil {
 				return err
 			}
-			return runResolvedOpenCommand(ctx, result, openOptions{NoShell: noShell, NoAliasPrompt: noAliasPrompt, VSCode: vscode, IntelliJ: intellij, VersionOverride: versionOverride, RuntimeImage: runtimeImage}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateSSHD, launchVSCode, launchIntelliJ)
+			return runResolvedOpenCommand(ctx, result, openOptions{
+				NoShell:         noShell,
+				NoAliasPrompt:   noAliasPrompt,
+				VSCode:          vscode,
+				IntelliJ:        intellij,
+				VersionOverride: versionOverride,
+				RuntimeImage:    runtimeImage,
+				SaveEnvConfig:   saveEnvConfig,
+			}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateSSHD, launchVSCode, launchIntelliJ)
 		},
 	}
 
@@ -86,6 +94,7 @@ type openOptions struct {
 	IntelliJ        bool
 	VersionOverride string
 	RuntimeImage    string
+	SaveEnvConfig   func(string, common.EnvConfig) error
 }
 
 func applyOpenSnapshotPreference(result common.OpenResult, enabled *bool, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
@@ -98,6 +107,34 @@ func applyOpenSnapshotPreference(result common.OpenResult, enabled *bool, saveEn
 		return result, nil
 	}
 	if err := saveEnvConfig(result.Tenant, result.EnvConfig); err != nil {
+		return common.OpenResult{}, err
+	}
+	return result, nil
+}
+
+func persistOpenRuntimeVersion(result common.OpenResult, version string, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
+	version = strings.TrimSpace(version)
+	if version == "" || saveEnvConfig == nil {
+		return result, nil
+	}
+
+	updated := result.EnvConfig
+	changed := false
+	if strings.TrimSpace(updated.RuntimeVersion) != version {
+		updated.RuntimeVersion = version
+		changed = true
+	}
+	snapshot := strings.Contains(version, "-snapshot-")
+	if updated.Snapshot == nil || *updated.Snapshot != snapshot {
+		updated.SetSnapshot(snapshot)
+		changed = true
+	}
+	if !changed {
+		return result, nil
+	}
+
+	result.EnvConfig = updated
+	if err := saveEnvConfig(result.Tenant, updated); err != nil {
 		return common.OpenResult{}, err
 	}
 	return result, nil
@@ -273,6 +310,12 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 				),
 			); err != nil {
 				return err
+			}
+			if !ctx.DryRun {
+				result, err = persistOpenRuntimeVersion(result, execution.Deploy.Version, options.SaveEnvConfig)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}

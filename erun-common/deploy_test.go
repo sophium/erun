@@ -437,16 +437,18 @@ func TestResolveOpenRuntimeDeploySpecIgnoresTenantSnapshotSetting(t *testing.T) 
 		t.Fatalf("save project config: %v", err)
 	}
 
-	snapshot := false
+	tenantSnapshot := false
+	envSnapshot := true
 	spec, err := ResolveOpenRuntimeDeploySpec(ConfigStore{}, FindProjectRoot, ResolveDockerBuildContext, ResolveKubernetesDeployContext, nil, OpenResult{
 		Tenant:      "frs",
 		Environment: DefaultEnvironment,
 		RepoPath:    projectRoot,
 		TenantConfig: TenantConfig{
-			Snapshot: &snapshot,
+			Snapshot: &tenantSnapshot,
 		},
 		EnvConfig: EnvConfig{
 			KubernetesContext: "cluster-local",
+			Snapshot:          &envSnapshot,
 		},
 	})
 	if err != nil {

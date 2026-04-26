@@ -5,10 +5,16 @@ import { Terminal } from '@xterm/xterm';
 import {
   DeleteEnvironment,
   LoadDiff,
+  LoadEnvironmentConfig,
+  LoadERunConfig,
   LoadState,
+  LoadTenantConfig,
   LoadVersionSuggestions,
   ResizeSession,
   SavePastedImage,
+  SaveEnvironmentConfig,
+  SaveERunConfig,
+  SaveTenantConfig,
   SendSessionInput,
   StartDeploySession,
   StartInitSession,
@@ -30,10 +36,14 @@ import {
   REVIEW_WIDTH_STORAGE_KEY,
   SIDEBAR_WIDTH_STORAGE_KEY,
   defaultEnvironmentDialog,
+  defaultGlobalConfigDialog,
   defaultManageDialog,
+  defaultTenantDialog,
   type AppState,
   type EnvironmentDialogState,
+  type GlobalConfigDialogState,
   type ManageDialogState,
+  type TenantDialogState,
 } from './state';
 import { clamp, loadSavedFilesOpen, loadSavedFilesWidth, loadSavedReviewWidth, loadSavedSidebarWidth, saveBoolean, saveNumber } from './storage';
 import { deleteConfirmationValue, normalizeDialogValue, normalizeVersionSuggestions, selectionKey } from './versionSuggestions';
@@ -45,8 +55,11 @@ import type {
   StartSessionResult,
   TerminalExitPayload,
   TerminalOutputPayload,
+  UIERunConfig,
+  UIEnvironmentConfig,
   UISelection,
   UIState,
+  UITenantConfig,
   UIVersionSuggestion,
 } from '@/types';
 
@@ -67,6 +80,8 @@ export class ERunUIController {
     versionSuggestions: [],
     environmentDialog: defaultEnvironmentDialog(),
     manageDialog: defaultManageDialog(),
+    tenantDialog: defaultTenantDialog(),
+    globalConfigDialog: defaultGlobalConfigDialog(),
     collapsedTenants: new Set<string>(),
     sessionId: 0,
     sidebarWidth: loadSavedSidebarWidth(),
@@ -484,20 +499,31 @@ export class ERunUIController {
   }
 
   openManageDialog(selection: UISelection): void {
-    const suggestion = this.state.versionSuggestions[0];
     this.state.manageDialog = {
       open: true,
-      tab: 'deploy',
+      tab: 'config',
       selection,
-      version: suggestion?.version || '',
-      versionImage: suggestion?.image || '',
+      version: '',
+      versionImage: '',
+      config: {
+        name: selection.environment,
+        repoPath: '',
+        kubernetesContext: '',
+        containerRegistry: '',
+        runtimeVersion: '',
+        sshd: { enabled: false, localPort: 0, publicKeyPath: '' },
+        remote: false,
+        snapshot: true,
+      },
+      configLoading: true,
       confirmation: '',
       busy: false,
       choicesOpen: false,
       error: '',
     };
     this.emit();
-    void this.refreshManageVersionSuggestions(true);
+    void this.refreshManageVersionSuggestions(false);
+    void this.loadManageConfig();
   }
 
   closeManageDialog(): void {
@@ -520,6 +546,9 @@ export class ERunUIController {
       error: '',
     };
     this.emit();
+    if (tab === 'config' && !this.state.manageDialog.configLoading && this.state.manageDialog.selection) {
+      void this.loadManageConfig();
+    }
   }
 
   updateManageDialog(values: Partial<ManageDialogState>): void {
@@ -566,7 +595,324 @@ export class ERunUIController {
     this.emit();
   }
 
-  async submitManageDeploy(form?: HTMLFormElement): Promise<void> {
+  updateManageConfig(values: Partial<UIEnvironmentConfig>): void {
+    if (this.state.manageDialog.busy || this.state.manageDialog.configLoading) {
+      return;
+    }
+    this.state.manageDialog = {
+      ...this.state.manageDialog,
+      config: {
+        ...this.state.manageDialog.config,
+        ...values,
+      },
+      error: '',
+    };
+    this.emit();
+  }
+
+  updateManageSSHDConfig(values: Partial<UIEnvironmentConfig['sshd']>): void {
+    if (this.state.manageDialog.busy || this.state.manageDialog.configLoading) {
+      return;
+    }
+    this.state.manageDialog = {
+      ...this.state.manageDialog,
+      config: {
+        ...this.state.manageDialog.config,
+        sshd: {
+          ...this.state.manageDialog.config.sshd,
+          ...values,
+        },
+      },
+      error: '',
+    };
+    this.emit();
+  }
+
+  async loadManageConfig(): Promise<void> {
+    const dialog = this.state.manageDialog;
+    const selection = dialog.selection;
+    if (!dialog.open || !selection) {
+      return;
+    }
+    this.state.manageDialog = {
+      ...dialog,
+      configLoading: true,
+      error: '',
+    };
+    this.emit();
+    try {
+      const result = (await LoadEnvironmentConfig(selection)) as UIEnvironmentConfig;
+      this.state.manageDialog = {
+        ...this.state.manageDialog,
+        config: result,
+        configLoading: false,
+        error: '',
+      };
+      this.emit();
+    } catch (error) {
+      this.state.manageDialog = {
+        ...this.state.manageDialog,
+        configLoading: false,
+        error: readError(error),
+      };
+      this.emit();
+    }
+  }
+
+  async submitManageConfig(): Promise<void> {
+    const dialog = this.state.manageDialog;
+    if (dialog.busy || dialog.configLoading) {
+      return;
+    }
+    const selection = dialog.selection;
+    if (!selection) {
+      this.closeManageDialog();
+      return;
+    }
+
+    this.state.manageDialog = { ...dialog, busy: true, error: '' };
+    this.emit();
+    try {
+      const result = (await SaveEnvironmentConfig(selection, dialog.config)) as UIEnvironmentConfig;
+      this.state.manageDialog = {
+        ...this.state.manageDialog,
+        config: result,
+        busy: false,
+        error: '',
+      };
+      this.showTerminalMessage(`Saved config for ${selection.tenant} / ${selection.environment}.`);
+      this.closeManageDialog();
+    } catch (error) {
+      const message = readError(error);
+      this.state.manageDialog = {
+        ...this.state.manageDialog,
+        busy: false,
+        error: message,
+      };
+      this.showTerminalMessage(message);
+      this.emit();
+    }
+  }
+
+  openGlobalConfigDialog(): void {
+    this.state.globalConfigDialog = {
+      open: true,
+      config: {
+        defaultTenant: '',
+      },
+      configLoading: true,
+      busy: false,
+      error: '',
+    };
+    this.emit();
+    void this.loadGlobalConfig();
+  }
+
+  closeGlobalConfigDialog(): void {
+    if (this.state.globalConfigDialog.busy) {
+      return;
+    }
+    this.state.globalConfigDialog = defaultGlobalConfigDialog();
+    this.emit();
+    this.focusTerminalSoon();
+  }
+
+  updateGlobalConfigDialog(values: Partial<GlobalConfigDialogState>): void {
+    if (this.state.globalConfigDialog.busy) {
+      return;
+    }
+    this.state.globalConfigDialog = {
+      ...this.state.globalConfigDialog,
+      ...values,
+      error: values.error ?? '',
+    };
+    this.emit();
+  }
+
+  updateGlobalConfig(values: Partial<UIERunConfig>): void {
+    if (this.state.globalConfigDialog.busy || this.state.globalConfigDialog.configLoading) {
+      return;
+    }
+    this.updateGlobalConfigDialog({
+      config: {
+        ...this.state.globalConfigDialog.config,
+        ...values,
+      },
+    });
+  }
+
+  async loadGlobalConfig(): Promise<void> {
+    const dialog = this.state.globalConfigDialog;
+    if (!dialog.open) {
+      return;
+    }
+    this.state.globalConfigDialog = {
+      ...dialog,
+      configLoading: true,
+      error: '',
+    };
+    this.emit();
+    try {
+      const result = (await LoadERunConfig()) as UIERunConfig;
+      this.state.globalConfigDialog = {
+        ...this.state.globalConfigDialog,
+        config: result,
+        configLoading: false,
+        error: '',
+      };
+      this.emit();
+    } catch (error) {
+      this.state.globalConfigDialog = {
+        ...this.state.globalConfigDialog,
+        configLoading: false,
+        error: readError(error),
+      };
+      this.emit();
+    }
+  }
+
+  async submitGlobalConfig(): Promise<void> {
+    const dialog = this.state.globalConfigDialog;
+    if (dialog.busy || dialog.configLoading) {
+      return;
+    }
+    this.state.globalConfigDialog = { ...dialog, busy: true, error: '' };
+    this.emit();
+    try {
+      const result = (await SaveERunConfig(dialog.config)) as UIERunConfig;
+      this.state.globalConfigDialog = {
+        ...this.state.globalConfigDialog,
+        config: result,
+        busy: false,
+        error: '',
+      };
+      this.showTerminalMessage('Saved ERun config.');
+      this.closeGlobalConfigDialog();
+    } catch (error) {
+      const message = readError(error);
+      this.state.globalConfigDialog = {
+        ...this.state.globalConfigDialog,
+        busy: false,
+        error: message,
+      };
+      this.showTerminalMessage(message);
+      this.emit();
+    }
+  }
+
+  openTenantDialog(tenant: string): void {
+    this.state.tenantDialog = {
+      open: true,
+      tenant,
+      config: {
+        name: tenant,
+        defaultEnvironment: '',
+      },
+      configLoading: true,
+      busy: false,
+      error: '',
+    };
+    this.emit();
+    void this.loadTenantConfig();
+  }
+
+  closeTenantDialog(): void {
+    if (this.state.tenantDialog.busy) {
+      return;
+    }
+    this.state.tenantDialog = defaultTenantDialog();
+    this.emit();
+    this.focusTerminalSoon();
+  }
+
+  updateTenantDialog(values: Partial<TenantDialogState>): void {
+    if (this.state.tenantDialog.busy) {
+      return;
+    }
+    this.state.tenantDialog = {
+      ...this.state.tenantDialog,
+      ...values,
+      error: values.error ?? '',
+    };
+    this.emit();
+  }
+
+  updateTenantConfig(values: Partial<UITenantConfig>): void {
+    if (this.state.tenantDialog.busy || this.state.tenantDialog.configLoading) {
+      return;
+    }
+    this.updateTenantDialog({
+      config: {
+        ...this.state.tenantDialog.config,
+        ...values,
+      },
+    });
+  }
+
+  async loadTenantConfig(): Promise<void> {
+    const dialog = this.state.tenantDialog;
+    if (!dialog.open || !dialog.tenant) {
+      return;
+    }
+    this.state.tenantDialog = {
+      ...dialog,
+      configLoading: true,
+      error: '',
+    };
+    this.emit();
+    try {
+      const result = (await LoadTenantConfig(dialog.tenant)) as UITenantConfig;
+      this.state.tenantDialog = {
+        ...this.state.tenantDialog,
+        config: result,
+        configLoading: false,
+        error: '',
+      };
+      this.emit();
+    } catch (error) {
+      this.state.tenantDialog = {
+        ...this.state.tenantDialog,
+        configLoading: false,
+        error: readError(error),
+      };
+      this.emit();
+    }
+  }
+
+  async submitTenantConfig(): Promise<void> {
+    const dialog = this.state.tenantDialog;
+    if (dialog.busy || dialog.configLoading) {
+      return;
+    }
+    if (!dialog.tenant) {
+      this.closeTenantDialog();
+      return;
+    }
+    this.state.tenantDialog = { ...dialog, busy: true, error: '' };
+    this.emit();
+    try {
+      const result = (await SaveTenantConfig(dialog.config)) as UITenantConfig;
+      this.state.tenantDialog = {
+        ...this.state.tenantDialog,
+        config: result,
+        busy: false,
+        error: '',
+      };
+      this.showTerminalMessage(`Saved config for ${result.name}.`);
+      this.closeTenantDialog();
+    } catch (error) {
+      const message = readError(error);
+      this.state.tenantDialog = {
+        ...this.state.tenantDialog,
+        busy: false,
+        error: message,
+      };
+      this.showTerminalMessage(message);
+      this.emit();
+    }
+  }
+
+  async submitManageDeploy(): Promise<void> {
     const dialog = this.state.manageDialog;
     if (dialog.busy) {
       return;
@@ -577,12 +923,8 @@ export class ERunUIController {
       return;
     }
     const version = normalizeDialogValue(dialog.version);
-    if (!version) {
-      form?.reportValidity();
-      return;
-    }
     this.closeManageDialog();
-    await this.startDeploySelection({ ...selection, version, runtimeImage: this.resolveManageRuntimeImage(version) });
+    await this.startDeploySelection({ ...selection, version, runtimeImage: version ? this.resolveManageRuntimeImage(version) : '' });
   }
 
   async submitManageDelete(): Promise<void> {
@@ -839,7 +1181,9 @@ export class ERunUIController {
 
     this.state.versionSuggestions = suggestions;
     const currentVersion = normalizeDialogValue(this.state.manageDialog.version);
-    if (selectDefault || !suggestions.some((suggestion) => suggestion.version === currentVersion)) {
+    if (!currentVersion && !selectDefault) {
+      this.emit();
+    } else if (selectDefault || !suggestions.some((suggestion) => suggestion.version === currentVersion)) {
       this.selectManageVersionSuggestion(suggestions[0]);
     } else {
       this.emit();
@@ -913,9 +1257,9 @@ export class ERunUIController {
     if (payload.sessionId !== this.state.sessionId) {
       return;
     }
-    if (initSelection && !payload.reason) {
+    if ((initSelection || deploySelection) && !payload.reason) {
       try {
-        await this.openSelection(initSelection);
+        await this.openSelection(initSelection || deploySelection);
       } catch (error) {
         this.showTerminalMessage(readError(error));
       }

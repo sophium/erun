@@ -2,7 +2,10 @@ import type {
   DiffResult,
   EnvironmentActionMode,
   ManageTab,
+  UIERunConfig,
+  UIEnvironmentConfig,
   UISelection,
+  UITenantConfig,
   UITenant,
   UIVersionSuggestion,
 } from '@/types';
@@ -40,9 +43,28 @@ export interface ManageDialogState {
   selection: UISelection | null;
   version: string;
   versionImage: string;
+  config: UIEnvironmentConfig;
+  configLoading: boolean;
   confirmation: string;
   busy: boolean;
   choicesOpen: boolean;
+  error: string;
+}
+
+export interface TenantDialogState {
+  open: boolean;
+  tenant: string;
+  config: UITenantConfig;
+  configLoading: boolean;
+  busy: boolean;
+  error: string;
+}
+
+export interface GlobalConfigDialogState {
+  open: boolean;
+  config: UIERunConfig;
+  configLoading: boolean;
+  busy: boolean;
   error: string;
 }
 
@@ -52,6 +74,8 @@ export interface AppState {
   versionSuggestions: UIVersionSuggestion[];
   environmentDialog: EnvironmentDialogState;
   manageDialog: ManageDialogState;
+  tenantDialog: TenantDialogState;
+  globalConfigDialog: GlobalConfigDialogState;
   collapsedTenants: Set<string>;
   sessionId: number;
   sidebarWidth: number;
@@ -86,12 +110,55 @@ export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
 
 export const defaultManageDialog = (): ManageDialogState => ({
   open: false,
-  tab: 'deploy',
+  tab: 'config',
   selection: null,
   version: '',
   versionImage: '',
+  config: defaultEnvironmentConfig(),
+  configLoading: false,
   confirmation: '',
   busy: false,
   choicesOpen: false,
   error: '',
+});
+
+export const defaultTenantDialog = (): TenantDialogState => ({
+  open: false,
+  tenant: '',
+  config: defaultTenantConfig(),
+  configLoading: false,
+  busy: false,
+  error: '',
+});
+
+export const defaultGlobalConfigDialog = (): GlobalConfigDialogState => ({
+  open: false,
+  config: defaultERunConfig(),
+  configLoading: false,
+  busy: false,
+  error: '',
+});
+
+export const defaultERunConfig = (): UIERunConfig => ({
+  defaultTenant: '',
+});
+
+export const defaultTenantConfig = (): UITenantConfig => ({
+  name: '',
+  defaultEnvironment: '',
+});
+
+export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
+  name: '',
+  repoPath: '',
+  kubernetesContext: '',
+  containerRegistry: '',
+  runtimeVersion: '',
+  sshd: {
+    enabled: false,
+    localPort: 0,
+    publicKeyPath: '',
+  },
+  remote: false,
+  snapshot: true,
 });
