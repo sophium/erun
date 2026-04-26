@@ -18,14 +18,15 @@ export function EnvironmentDialogView({ controller, state }: { controller: ERunU
 
   React.useEffect(() => {
     if (!dialog.open) {
-      return;
+      return undefined;
     }
-    window.setTimeout(() => {
+    const timeout = window.setTimeout(() => {
       const target = dialog.tenant ? environmentRef.current : tenantRef.current;
       target?.focus();
       target?.select();
     }, 0);
-  }, [dialog.open, dialog.tenant]);
+    return () => window.clearTimeout(timeout);
+  }, [dialog.open]);
 
   return (
     <Dialog open={dialog.open} onOpenChange={(open) => !open && controller.closeEnvironmentDialog()}>
