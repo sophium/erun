@@ -18,6 +18,8 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 ## Frontend Workflow
 
 - Use Yarn for dependency management and frontend builds. Do not introduce `npm` or `pnpm` lockfiles unless the user explicitly asks for a toolchain change.
+- Use the pinned shadcn CLI from `erun-ui/frontend/package.json`. Do not use `shadcn@latest` or `yarn dlx shadcn@latest`; run shadcn commands through `yarn shadcn ...` from `erun-ui/frontend`.
+- Keep generated shadcn files aligned with the pinned CLI. After adding or updating shadcn components, run `yarn shadcn:check` from `erun-ui/frontend`; it regenerates the installed components and fails if committed generated files differ.
 - Edit frontend source files, not generated bundles or generated Wails bindings. Regenerate generated artifacts instead of hand-editing them.
 - Keep styling intentional and native-desktop oriented. Prefer precise layout and spacing adjustments in CSS over adding more Wails or DOM complexity.
 
