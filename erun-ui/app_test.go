@@ -162,6 +162,41 @@ func TestLoadVersionSuggestionsFiltersOutMissingTenantImageTags(t *testing.T) {
 	}
 }
 
+func TestLoadVersionSuggestionsDoesNotDuplicateDefaultRuntimeForErunTenant(t *testing.T) {
+	var repositories []string
+	app := NewApp(erunUIDeps{
+		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+			if namespace != eruncommon.DefaultContainerRegistry {
+				t.Fatalf("unexpected registry namespace: %s", namespace)
+			}
+			repositories = append(repositories, repository)
+			if repository != eruncommon.DefaultRuntimeImageName {
+				t.Fatalf("unexpected registry repository: %s", repository)
+			}
+			return eruncommon.RuntimeRegistryVersions{
+				Image:          namespace + "/" + repository,
+				Tags:           []string{"1.0.48", "1.0.47", "1.0.50-snapshot-20260426090832"},
+				LatestStable:   "1.0.48",
+				LatestSnapshot: "1.0.50-snapshot-20260426090832",
+			}, nil
+		},
+	})
+
+	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " erun "})
+	if err != nil {
+		t.Fatalf("LoadVersionSuggestions failed: %v", err)
+	}
+	got := versionValues(suggestions)
+	want := []string{"1.0.48", "1.0.47", "1.0.50-snapshot-20260426090832"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected suggestions: got %+v want %+v", suggestions, want)
+	}
+	if strings.Join(repositories, "\n") != eruncommon.DefaultRuntimeImageName {
+		t.Fatalf("expected one registry lookup for default runtime image, got %+v", repositories)
+	}
+}
+
 func TestLoadVersionSuggestionsFallsBackToDefaultRuntimeTagsWhenTenantImageMissing(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },

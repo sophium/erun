@@ -229,6 +229,9 @@ func (a *App) runtimeVersionSuggestions(info eruncommon.BuildInfo, tenant string
 	suggestions := make([]uiVersion, 0, 8)
 	tenantImage := eruncommon.RuntimeReleaseName(tenant)
 	suggestions = append(suggestions, labelRuntimeVersionSuggestions(tenant, tenantImage, eruncommon.RuntimeDeployVersionSuggestions(info, a.resolveRuntimeRegistryVersionsForTenant(tenant)))...)
+	if tenantImage == eruncommon.DefaultRuntimeImageName {
+		return suggestions
+	}
 	suggestions = append(suggestions, labelRuntimeVersionSuggestions("ERun", eruncommon.DefaultRuntimeImageName, eruncommon.RuntimeDeployVersionSuggestions(info, a.resolveRuntimeRegistryVersionsForTenant("")))...)
 	return suggestions
 }
