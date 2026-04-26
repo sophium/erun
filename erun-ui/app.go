@@ -561,10 +561,7 @@ func (a *App) streamSession(managed *managedTerminal) {
 			a.emitEvent(terminalOutputEvent, payload)
 		}
 		if err != nil {
-			reason := ""
-			if !errors.Is(err, io.EOF) {
-				reason = err.Error()
-			}
+			reason := terminalSessionExitReason(managed.session, err)
 			a.mu.Lock()
 			managed.closed = true
 			if existing := a.sessions[managed.key]; existing == managed {
@@ -581,6 +578,19 @@ func (a *App) streamSession(managed *managedTerminal) {
 			return
 		}
 	}
+}
+
+func terminalSessionExitReason(session terminalSession, readErr error) string {
+	if session != nil {
+		if waitErr := session.Wait(); waitErr != nil {
+			return waitErr.Error()
+		}
+		return ""
+	}
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return readErr.Error()
+	}
+	return ""
 }
 
 func (a *App) emitEvent(name string, payload any) {

@@ -3,7 +3,9 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"sync"
 	"syscall"
 
 	"github.com/ActiveState/termtest/conpty"
@@ -13,6 +15,8 @@ type windowsTerminalSession struct {
 	pty     *conpty.ConPty
 	outPipe *os.File
 	process *os.Process
+	wait    sync.Once
+	waitErr error
 }
 
 func startTerminalSession(params startTerminalSessionParams) (terminalSession, error) {
@@ -60,13 +64,30 @@ func (s *windowsTerminalSession) Resize(cols, rows int) error {
 	return s.pty.Resize(uint16(cols), uint16(rows))
 }
 
+func (s *windowsTerminalSession) Wait() error {
+	if s == nil {
+		return nil
+	}
+	s.wait.Do(func() {
+		if s.process != nil {
+			state, err := s.process.Wait()
+			if err != nil {
+				s.waitErr = err
+			} else if state != nil && state.ExitCode() != 0 {
+				s.waitErr = fmt.Errorf("exit status %d", state.ExitCode())
+			}
+		}
+	})
+	return s.waitErr
+}
+
 func (s *windowsTerminalSession) Close() error {
 	if s == nil {
 		return nil
 	}
 	if s.process != nil {
 		_ = s.process.Kill()
-		_, _ = s.process.Wait()
+		_ = s.Wait()
 	}
 	if s.pty != nil {
 		return s.pty.Close()

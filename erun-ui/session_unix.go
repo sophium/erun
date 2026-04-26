@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"sync"
 
 	"github.com/creack/pty"
 )
@@ -12,6 +13,8 @@ import (
 type unixTerminalSession struct {
 	ptyFile *os.File
 	cmd     *exec.Cmd
+	wait    sync.Once
+	waitErr error
 }
 
 func startTerminalSession(params startTerminalSessionParams) (terminalSession, error) {
@@ -49,13 +52,25 @@ func (s *unixTerminalSession) Resize(cols, rows int) error {
 	})
 }
 
+func (s *unixTerminalSession) Wait() error {
+	if s == nil {
+		return nil
+	}
+	s.wait.Do(func() {
+		if s.cmd != nil {
+			s.waitErr = s.cmd.Wait()
+		}
+	})
+	return s.waitErr
+}
+
 func (s *unixTerminalSession) Close() error {
 	if s == nil {
 		return nil
 	}
 	if s.cmd != nil && s.cmd.Process != nil {
 		_ = s.cmd.Process.Kill()
-		_, _ = s.cmd.Process.Wait()
+		_ = s.Wait()
 	}
 	if s.ptyFile != nil {
 		return s.ptyFile.Close()
