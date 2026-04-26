@@ -30,6 +30,7 @@ type testRootDeps struct {
 	PushDockerImage                common.DockerImagePusherFunc
 	LoginToDockerRegistry          common.DockerRegistryLoginFunc
 	DeployHelmChart                common.HelmChartDeployerFunc
+	RecoverHelmRelease             common.HelmReleaseRecovererFunc
 	LaunchMCP                      MCPLauncher
 	ForwardMCP                     MCPForwarder
 	LaunchApp                      AppLauncher
@@ -101,6 +102,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	if deps.EnsureKubernetesNamespace != nil {
 		deployHelmChart = common.WrapHelmChartDeployerWithNamespaceEnsure(deps.EnsureKubernetesNamespace, deployHelmChart)
 	}
+	recoveringDeployHelmChart := wrapHelmDeployWithReleaseRecovery(promptRunner, deployHelmChart, deps.RecoverHelmRelease)
 	launchMCP := deps.LaunchMCP
 	if launchMCP == nil {
 		launchMCP = launchMCPProcess
@@ -165,7 +167,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return common.RunDeploySpecs(ctx, specs, buildDockerImage, push, deployHelmChart)
+		return common.RunDeploySpecs(ctx, specs, buildDockerImage, push, recoveringDeployHelmChart)
 	}
 	ensureKubernetesNamespace := func(contextName, namespace string) error {
 		if deps.EnsureKubernetesNamespace == nil {
@@ -173,7 +175,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 		}
 		return deps.EnsureKubernetesNamespace(contextName, namespace)
 	}
-	runInit := newRunInit(store, findProjectRoot, promptRunner, selectRunner, listKubernetesContexts, ensureKubernetesNamespace, deps.WaitForRemoteRuntime, deps.RunRemoteCommand, deployHelmChart)
+	runInit := newRunInit(store, findProjectRoot, promptRunner, selectRunner, listKubernetesContexts, ensureKubernetesNamespace, deps.WaitForRemoteRuntime, deps.RunRemoteCommand, recoveringDeployHelmChart)
 	runInitForArgs := newRunInitForArgs(store, runInit)
 	runInitForOpen := newRunInitForOpen(store, runInit)
 
@@ -183,19 +185,19 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	containerCmd := newCommandGroup(
 		"container",
 		"Container utilities",
-		newBuildCmd(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push, deployHelmChart),
+		newBuildCmd(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push, recoveringDeployHelmChart),
 		newPushCmd(store, findProjectRoot, resolveDockerBuildContext, now, buildDockerImage, push),
 	)
 	k8sCmd := newCommandGroup(
 		"k8s",
 		"Kubernetes utilities",
-		newK8sDeployCmd(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, buildDockerImage, push, deployHelmChart),
+		newK8sDeployCmd(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, buildDockerImage, push, recoveringDeployHelmChart),
 	)
 	devopsCmd := newCommandGroup("devops", "DevOps utilities", containerCmd, k8sCmd)
 
 	var buildCmd *cobra.Command
 	if hasOptionalBuildCmd(optionalBuildFindProjectRoot, resolveDockerBuildContext) {
-		buildCmd = newBuildCmd(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push, deployHelmChart)
+		buildCmd = newBuildCmd(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push, recoveringDeployHelmChart)
 		buildCmd.Short = optionalBuildCmdShort(optionalBuildFindProjectRoot, resolveDockerBuildContext)
 	}
 	var pushCmd *cobra.Command
@@ -205,7 +207,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	}
 	var deployCmd *cobra.Command
 	if hasOptionalDeployCmd(resolveKubernetesDeployContext) {
-		deployCmd = newDeployCmd(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, buildDockerImage, push, deployHelmChart)
+		deployCmd = newDeployCmd(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, buildDockerImage, push, recoveringDeployHelmChart)
 	}
 
 	mcpCmd := newMCPCmd(resolveOpen, runInitForArgs, launchMCP)

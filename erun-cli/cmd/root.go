@@ -28,7 +28,8 @@ func Execute() error {
 	configStore := common.ConfigStore{}
 	store := rootStore(configStore)
 	deployHelmChart := common.WrapHelmChartDeployerWithNamespaceEnsure(ensureKubernetesNamespace, common.DeployHelmChart)
-	runInit := newRunInit(store, common.FindProjectRoot, runPrompt, runSelect, listKubernetesContexts, ensureKubernetesNamespace, common.WaitForShellDeployment, common.RunRemoteCommand, deployHelmChart)
+	recoveringDeployHelmChart := wrapHelmDeployWithReleaseRecovery(runPrompt, deployHelmChart, common.ClearHelmReleasePendingOperation)
+	runInit := newRunInit(store, common.FindProjectRoot, runPrompt, runSelect, listKubernetesContexts, ensureKubernetesNamespace, common.WaitForShellDeployment, common.RunRemoteCommand, recoveringDeployHelmChart)
 	runInitForArgs := newRunInitForArgs(store, runInit)
 	runInitForOpen := newRunInitForOpen(store, runInit)
 	push := newPushOperation(nil, common.DockerRegistryLogin, runSelect)
@@ -56,7 +57,7 @@ func Execute() error {
 		if err != nil {
 			return err
 		}
-		return common.RunDeploySpecs(ctx, specs, common.DockerImageBuilder, push, deployHelmChart)
+		return common.RunDeploySpecs(ctx, specs, common.DockerImageBuilder, push, recoveringDeployHelmChart)
 	}
 
 	initCmd := newInitCmd(runInit)
@@ -75,23 +76,23 @@ func Execute() error {
 		launchVSCode,
 		launchIntelliJ,
 	)
-	sshdCmd := newSSHDCmd(resolveOpen, store.SaveEnvConfig, runInitForOpen, resolveRuntimeDeploySpec, deployHelmChart, common.RunRemoteCommand, writeLocalSSHConfig)
+	sshdCmd := newSSHDCmd(resolveOpen, store.SaveEnvConfig, runInitForOpen, resolveRuntimeDeploySpec, recoveringDeployHelmChart, common.RunRemoteCommand, writeLocalSSHConfig)
 	containerCmd := newCommandGroup(
 		"container",
 		"Container utilities",
-		newBuildCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder, common.DockerRegistryLogin, runSelect, push, deployHelmChart),
+		newBuildCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder, common.DockerRegistryLogin, runSelect, push, recoveringDeployHelmChart),
 		newPushCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.DockerImageBuilder, push),
 	)
 	k8sCmd := newCommandGroup(
 		"k8s",
 		"Kubernetes utilities",
-		newK8sDeployCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, push, deployHelmChart),
+		newK8sDeployCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, push, recoveringDeployHelmChart),
 	)
 	devopsCmd := newCommandGroup("devops", "DevOps utilities", containerCmd, k8sCmd)
 
 	var buildCmd *cobra.Command
 	if hasOptionalBuildCmd(common.FindProjectRoot, common.ResolveDockerBuildContext) {
-		buildCmd = newBuildCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder, common.DockerRegistryLogin, runSelect, push, deployHelmChart)
+		buildCmd = newBuildCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder, common.DockerRegistryLogin, runSelect, push, recoveringDeployHelmChart)
 		buildCmd.Short = optionalBuildCmdShort(common.FindProjectRoot, common.ResolveDockerBuildContext)
 	}
 	var pushCmd *cobra.Command
@@ -101,7 +102,7 @@ func Execute() error {
 	}
 	var deployCmd *cobra.Command
 	if hasOptionalDeployCmd(common.ResolveKubernetesDeployContext) {
-		deployCmd = newDeployCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, push, deployHelmChart)
+		deployCmd = newDeployCmd(store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, push, recoveringDeployHelmChart)
 	}
 
 	mcpCmd := newMCPCmd(resolveOpen, runInitForArgs, launchMCPProcess)
