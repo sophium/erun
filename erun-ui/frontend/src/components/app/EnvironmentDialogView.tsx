@@ -12,6 +12,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { VersionField } from './VersionField';
 
+const dialogErrorClassName =
+  'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
+
 export function EnvironmentDialogView({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
   const dialog = state.environmentDialog;
   const tenantRef = React.useRef<HTMLInputElement>(null);
@@ -110,7 +113,7 @@ export function EnvironmentDialogView({ controller, state }: { controller: ERunU
             </Label>
           </div>
           {dialog.error && (
-            <div className="dialog-error" role="alert">
+            <div className={dialogErrorClassName} role="alert">
               {dialog.error}
             </div>
           )}

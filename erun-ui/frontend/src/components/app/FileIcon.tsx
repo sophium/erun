@@ -4,8 +4,11 @@ import { File, FileCode2, FileCog, FileJson, FileText, Gem } from 'lucide-react'
 export function FileIcon({ filePath }: { filePath: string }): React.ReactElement {
   const Icon = fileIconForPath(filePath);
   return (
-    <span className="file-icon" aria-hidden="true">
-      <Icon className="file-icon-glyph" />
+    <span
+      className="inline-flex size-[22px] flex-none items-center justify-center rounded-[calc(var(--radius)-2px)] bg-muted text-[9px] leading-none font-bold text-muted-foreground"
+      aria-hidden="true"
+    >
+      <Icon className="size-3.5" />
     </span>
   );
 }
