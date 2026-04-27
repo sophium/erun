@@ -64,9 +64,10 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
               </div>
             ) : (
               <div className="grid gap-3">
-                <ReadonlyField id="environment-config-repopath" label="repopath" value={config.repoPath} />
-                <ReadonlyField id="environment-config-kubernetescontext" label="kubernetescontext" value={config.kubernetesContext} />
-                <ReadonlyField id="environment-config-containerregistry" label="containerregistry" value={config.containerRegistry} />
+                <ReadonlyField id="environment-config-repopath" label="Repository path" value={config.repoPath} />
+                <ReadonlyField id="environment-config-kubernetescontext" label="Kubernetes context" value={config.kubernetesContext} />
+                <ReadonlyField id="environment-config-containerregistry" label="Container registry" value={config.containerRegistry} />
+                <TextField id="environment-config-cloudprovideralias" label="Cloud alias" value={config.cloudProviderAlias} disabled={dialog.busy} onChange={(cloudProviderAlias) => controller.updateManageConfig({ cloudProviderAlias })} />
                 <RuntimeDeployField
                   configuredVersion={config.runtimeVersion}
                   overrideVersion={dialog.version}
@@ -78,9 +79,9 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
                   onSelect={(suggestion) => controller.selectManageVersionSuggestion(suggestion)}
                   onDeploy={() => void controller.submitManageDeploy().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}
                 />
-                <CheckboxField id="environment-config-remote" label="remote" checked={config.remote} disabled onChange={() => {}} />
-                <CheckboxField id="environment-config-snapshot" label="snapshot" checked={config.snapshot} disabled={dialog.busy} onChange={(snapshot) => controller.updateManageConfig({ snapshot })} />
-                <ReadonlyField id="environment-config-localportrange" label="assigned local port range" value={portRangeValue(config.localPorts.rangeStart, config.localPorts.rangeEnd)} />
+                <CheckboxField id="environment-config-remote" label="Remote environment" checked={config.remote} disabled onChange={() => {}} />
+                <CheckboxField id="environment-config-snapshot" label="Snapshot deploy" checked={config.snapshot} disabled={dialog.busy} onChange={(snapshot) => controller.updateManageConfig({ snapshot })} />
+                <ReadonlyField id="environment-config-localportrange" label="Assigned local port range" value={portRangeValue(config.localPorts.rangeStart, config.localPorts.rangeEnd)} />
                 <PortStatusTable
                   rows={[
                     { service: 'mcp', port: config.localPorts.mcp, status: config.localPorts.mcpStatus },
@@ -88,14 +89,14 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
                   ]}
                 />
                 <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
-                  <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">sshd</div>
-                  <CheckboxField id="environment-config-sshd-enabled" label="enabled" checked={config.sshd.enabled} disabled onChange={() => {}} />
+                  <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">SSH access</div>
+                  <CheckboxField id="environment-config-sshd-enabled" label="Enabled" checked={config.sshd.enabled} disabled onChange={() => {}} />
                   <ReadonlyField
                     id="environment-config-sshd-localport"
-                    label="localport"
+                    label="Local port"
                     value={config.sshd.localPort > 0 ? String(config.sshd.localPort) : ''}
                   />
-                  <ReadonlyField id="environment-config-sshd-publickeypath" label="publickeypath" value={config.sshd.publicKeyPath} />
+                  <ReadonlyField id="environment-config-sshd-publickeypath" label="Public key" value={config.sshd.publicKeyPath} />
                 </div>
                 {confirmingDelete && (
                   <div className="grid gap-3">
@@ -111,7 +112,7 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
                         </span>
                       </div>
                     )}
-                    <TextField id="manage-confirmation" label="confirmation" value={dialog.confirmation} disabled={dialog.busy} inputRef={confirmationRef} onChange={(confirmation) => controller.updateManageDialog({ confirmation })} />
+                    <TextField id="manage-confirmation" label="Confirmation" value={dialog.confirmation} disabled={dialog.busy} inputRef={confirmationRef} onChange={(confirmation) => controller.updateManageDialog({ confirmation })} />
                   </div>
                 )}
               </div>
@@ -178,9 +179,14 @@ function RuntimeDeployField({
 }): React.ReactElement {
   return (
     <div className="grid gap-2">
-      <Label htmlFor="environment-config-runtimeversion">runtimeversion</Label>
+      <div className="text-sm font-medium leading-none">Runtime version</div>
       <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
-        <Input id="environment-config-runtimeversion" value={configuredVersion} type="text" autoComplete="off" spellCheck={false} disabled onChange={() => {}} />
+        <div
+          id="environment-config-runtimeversion"
+          className="min-h-10 rounded-[var(--radius)] border border-border bg-muted/35 px-3 py-2 text-sm leading-[1.35] text-muted-foreground [overflow-wrap:anywhere]"
+        >
+          {configuredVersion || 'Not configured'}
+        </div>
         <div className="relative min-w-0">
           <Input
             id="manage-version"
@@ -189,7 +195,7 @@ function RuntimeDeployField({
             type="text"
             autoComplete="off"
             spellCheck={false}
-            placeholder="deploy override"
+            placeholder="Version to deploy"
             disabled={disabled}
             onChange={(event) => onValueChange(event.target.value)}
           />
@@ -258,7 +264,7 @@ function ReadonlyField({ id, label, value }: { id: string; label: string; value:
         className="min-h-9 rounded-[var(--radius)] border border-border bg-muted/35 px-3 py-2 text-sm leading-[1.35] text-muted-foreground [overflow-wrap:anywhere]"
         aria-labelledby={id}
       >
-        {value || 'none'}
+        {value || 'Not configured'}
       </div>
     </div>
   );
@@ -267,16 +273,16 @@ function ReadonlyField({ id, label, value }: { id: string; label: string; value:
 function PortStatusTable({ rows }: { rows: { service: string; port: number; status: UIPortStatus }[] }): React.ReactElement {
   return (
     <div className="grid gap-2">
-      <div className="text-sm font-medium leading-none">ports</div>
+      <div className="text-sm font-medium leading-none">Local ports</div>
       <div className="overflow-hidden rounded-[var(--radius)] border border-border bg-muted/35 text-xs leading-[1.3]">
         <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-3 border-b border-border px-3 py-2 text-[11px] font-semibold uppercase leading-[1.2] text-muted-foreground">
-          <div>port</div>
-          <div>service</div>
-          <div>available</div>
+          <div>Port</div>
+          <div>Service</div>
+          <div>Status</div>
         </div>
         {rows.map((row) => (
           <div key={row.service} className="grid min-h-8 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-3 py-1 last:border-b-0">
-            <div className="font-mono text-xs text-foreground">{row.port > 0 ? row.port : 'none'}</div>
+            <div className="font-mono text-xs text-foreground">{row.port > 0 ? row.port : 'Not configured'}</div>
             <div className="text-foreground">{row.service}</div>
             <AvailabilityDot status={row.status} />
           </div>

@@ -6,7 +6,6 @@ import { readError } from '@/app/errors';
 import type { AppState } from '@/app/state';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 const dialogErrorClassName =
@@ -46,8 +45,8 @@ export function TenantDialogView({ controller, state }: { controller: ERunUICont
             </div>
           ) : (
             <div className="grid gap-3">
-              <TextField id="tenant-config-name" label="name" value={config.name} disabled onChange={() => {}} />
-              <SelectField id="tenant-config-defaultenvironment" label="defaultenvironment" value={config.defaultEnvironment} options={environmentOptions} disabled={dialog.busy || environmentOptions.length === 0} onChange={(defaultEnvironment) => controller.updateTenantConfig({ defaultEnvironment })} />
+              <ReadonlyField id="tenant-config-name" label="Tenant name" value={config.name} />
+              <SelectField id="tenant-config-defaultenvironment" label="Default environment" value={config.defaultEnvironment} options={environmentOptions} disabled={dialog.busy || environmentOptions.length === 0} onChange={(defaultEnvironment) => controller.updateTenantConfig({ defaultEnvironment })} />
             </div>
           )}
           {dialog.error && (
@@ -98,11 +97,18 @@ function SelectField({ id, label, value, options, disabled, onChange }: { id: st
   );
 }
 
-function TextField({ id, label, value, disabled, onChange }: { id: string; label: string; value: string; disabled?: boolean; onChange: (value: string) => void }): React.ReactElement {
+function ReadonlyField({ id, label, value }: { id: string; label: string; value: string }): React.ReactElement {
   return (
     <div className="grid gap-2">
-      <Label htmlFor={id}>{label}</Label>
-      <Input id={id} value={value} type="text" autoComplete="off" spellCheck={false} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+      <div id={id} className="text-sm font-medium leading-none">
+        {label}
+      </div>
+      <div
+        className="min-h-9 rounded-[var(--radius)] border border-border bg-muted/35 px-3 py-2 text-sm leading-[1.35] text-muted-foreground [overflow-wrap:anywhere]"
+        aria-labelledby={id}
+      >
+        {value || 'Not configured'}
+      </div>
     </div>
   );
 }

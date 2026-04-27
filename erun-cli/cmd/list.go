@@ -67,6 +67,10 @@ func writeListResult(ctx common.Context, result common.ListResult) error {
 		return err
 	}
 
+	if err := writeCloudProviders(ctx, result.CloudProviders); err != nil {
+		return err
+	}
+
 	if _, err := fmt.Fprintln(ctx.Stdout, "Tenants:"); err != nil {
 		return err
 	}
@@ -95,6 +99,11 @@ func writeEffectiveOpen(ctx common.Context, current common.ListCurrentDirectoryR
 	}
 	if err := writeLabeledValue(ctx, "kubernetes context", current.Effective.KubernetesContext); err != nil {
 		return err
+	}
+	if strings.TrimSpace(current.Effective.CloudProviderAlias) != "" {
+		if err := writeLabeledValue(ctx, "cloud provider", current.Effective.CloudProviderAlias); err != nil {
+			return err
+		}
 	}
 	if err := writeLabeledValue(ctx, "snapshot", enabledDisabledLabel(current.Effective.Snapshot)); err != nil {
 		return err
@@ -164,6 +173,9 @@ func writeTenantEntry(ctx common.Context, tenant common.ListTenantResult) error 
 			envLine += " [" + strings.Join(envMarkers, ", ") + "]"
 		}
 		envLine += " context=" + quotedValueOrNone(env.KubernetesContext)
+		if strings.TrimSpace(env.CloudProviderAlias) != "" {
+			envLine += " cloud=" + quotedValueOrNone(env.CloudProviderAlias)
+		}
 		envLine += " snapshot=" + enabledDisabledLabel(env.Snapshot)
 		envLine += " repo=" + quotedValueOrNone(env.RepoPath)
 		envLine += " ports=" + portRangeLabel(env.LocalPorts)
@@ -177,6 +189,29 @@ func writeTenantEntry(ctx common.Context, tenant common.ListTenantResult) error 
 			envLine += " workspace=" + quotedValueOrNone(env.SSH.WorkspacePath)
 		}
 		if _, err := fmt.Fprintln(ctx.Stdout, envLine); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeCloudProviders(ctx common.Context, providers []common.CloudProviderStatus) error {
+	if _, err := fmt.Fprintln(ctx.Stdout, "Cloud Providers:"); err != nil {
+		return err
+	}
+	if len(providers) == 0 {
+		_, err := fmt.Fprintln(ctx.Stdout, "  none")
+		return err
+	}
+	for _, provider := range providers {
+		line := "  - " + provider.Alias
+		line += " provider=" + quotedValueOrNone(provider.Provider)
+		line += " account=" + quotedValueOrNone(provider.AccountID)
+		line += " status=" + quotedValueOrNone(provider.Status)
+		if strings.TrimSpace(provider.Message) != "" {
+			line += " message=" + quotedValueOrNone(provider.Message)
+		}
+		if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
 			return err
 		}
 	}

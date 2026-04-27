@@ -36,7 +36,7 @@ func TestSaveAndLoadERunConfig(t *testing.T) {
 		t.Fatalf("LoadERunConfig failed: %v", err)
 	}
 
-	if cfg != expected {
+	if !reflect.DeepEqual(cfg, expected) {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 

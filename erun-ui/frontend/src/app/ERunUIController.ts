@@ -4,7 +4,10 @@ import { Terminal } from '@xterm/xterm';
 
 import {
   DeleteEnvironment,
+  InitCloudContext,
   LoadDiff,
+  LoadCloudContextStatuses,
+  LoadCloudProviderStatuses,
   LoadEnvironmentConfig,
   LoadERunConfig,
   LoadKubernetesContexts,
@@ -12,14 +15,18 @@ import {
   LoadTenantConfig,
   LoadVersionSuggestions,
   ResizeSession,
+  LoginCloudProvider,
   SavePastedImage,
   SaveEnvironmentConfig,
   SaveERunConfig,
   SaveTenantConfig,
   SendSessionInput,
+  StartCloudContext,
+  StartCloudInitAWSSession,
   StartDeploySession,
   StartInitSession,
   StartSession,
+  StopCloudContext,
 } from '../../wailsjs/go/main/App';
 import { ClipboardSetText, EventsOn, WindowToggleMaximise } from '../../wailsjs/runtime/runtime';
 import { fileToBase64, decodeBase64Bytes, isTerminalPasteTarget, pastedImageFiles } from './clipboard';
@@ -38,6 +45,7 @@ import {
   SIDEBAR_WIDTH_STORAGE_KEY,
   defaultEnvironmentConfig,
   defaultEnvironmentDialog,
+  defaultCloudContextInitInput,
   defaultGlobalConfigDialog,
   defaultManageDialog,
   defaultTenantDialog,
@@ -57,6 +65,9 @@ import type {
   StartSessionResult,
   TerminalExitPayload,
   TerminalOutputPayload,
+  UICloudContextInitInput,
+  UICloudContextStatus,
+  UICloudProviderStatus,
   UIERunConfig,
   UIEnvironmentConfig,
   UISelection,
@@ -107,6 +118,7 @@ export class ERunUIController {
   private readonly initSessionSelections = new Map<number, UISelection>();
   private readonly deploySessionSelections = new Map<number, UISelection>();
   private readonly openSessionSelections = new Map<number, UISelection>();
+  private readonly cloudInitSessions = new Set<number>();
   private readonly selectionSessions = new Map<string, number>();
   private readonly sessionBuffers = new Map<number, Uint8Array[]>();
   private readonly sessionExitReasons = new Map<number, string>();
@@ -709,7 +721,10 @@ export class ERunUIController {
       open: true,
       config: {
         defaultTenant: '',
+        cloudProviders: [],
+        cloudContexts: [],
       },
+      cloudContextDraft: defaultCloudContextInitInput(),
       configLoading: true,
       busy: false,
       error: '',
@@ -751,6 +766,18 @@ export class ERunUIController {
     });
   }
 
+  updateCloudContextDraft(values: Partial<UICloudContextInitInput>): void {
+    if (this.state.globalConfigDialog.busy || this.state.globalConfigDialog.configLoading) {
+      return;
+    }
+    this.updateGlobalConfigDialog({
+      cloudContextDraft: {
+        ...this.state.globalConfigDialog.cloudContextDraft,
+        ...values,
+      },
+    });
+  }
+
   async loadGlobalConfig(): Promise<void> {
     const dialog = this.state.globalConfigDialog;
     if (!dialog.open) {
@@ -767,6 +794,7 @@ export class ERunUIController {
       this.state.globalConfigDialog = {
         ...this.state.globalConfigDialog,
         config: result,
+        cloudContextDraft: cloudContextDraftForConfig(result, this.state.globalConfigDialog.cloudContextDraft),
         configLoading: false,
         error: '',
       };
@@ -781,6 +809,203 @@ export class ERunUIController {
     }
   }
 
+  async refreshCloudProviders(): Promise<void> {
+    const dialog = this.state.globalConfigDialog;
+    if (!dialog.open || dialog.busy) {
+      return;
+    }
+    try {
+      const cloudProviders = await LoadCloudProviderStatuses();
+      this.state.globalConfigDialog = {
+        ...this.state.globalConfigDialog,
+        config: {
+          ...this.state.globalConfigDialog.config,
+          cloudProviders,
+        },
+        error: '',
+      };
+      this.emit();
+    } catch (error) {
+      const message = readError(error);
+      this.state.globalConfigDialog = {
+        ...this.state.globalConfigDialog,
+        error: message,
+      };
+      this.showTerminalMessage(message);
+      this.emit();
+    }
+  }
+
+  async refreshCloudContexts(): Promise<void> {
+    const dialog = this.state.globalConfigDialog;
+    if (!dialog.open || dialog.busy) {
+      return;
+    }
+    try {
+      const cloudContexts = await LoadCloudContextStatuses();
+      this.state.globalConfigDialog = {
+        ...this.state.globalConfigDialog,
+        config: {
+          ...this.state.globalConfigDialog.config,
+          cloudContexts,
+        },
+        error: '',
+      };
+      this.emit();
+    } catch (error) {
+      const message = readError(error);
+      this.state.globalConfigDialog = {
+        ...this.state.globalConfigDialog,
+        error: message,
+      };
+      this.showTerminalMessage(message);
+      this.emit();
+    }
+  }
+
+  async initCloudContext(): Promise<void> {
+    const dialog = this.state.globalConfigDialog;
+    if (dialog.busy || dialog.configLoading) {
+      return;
+    }
+    this.state.globalConfigDialog = { ...dialog, busy: true, error: '' };
+    this.emit();
+    try {
+      const context = (await InitCloudContext(dialog.cloudContextDraft)) as UICloudContextStatus;
+      this.state.globalConfigDialog = {
+        ...this.state.globalConfigDialog,
+        config: {
+          ...this.state.globalConfigDialog.config,
+          cloudContexts: replaceCloudContext(this.state.globalConfigDialog.config.cloudContexts || [], context),
+        },
+        cloudContextDraft: cloudContextDraftForConfig(this.state.globalConfigDialog.config, {
+          ...defaultCloudContextInitInput(),
+          cloudProviderAlias: dialog.cloudContextDraft.cloudProviderAlias,
+          region: dialog.cloudContextDraft.region,
+        }),
+        busy: false,
+        error: '',
+      };
+      this.showTerminalMessage(`Initialized cloud context ${context.kubernetesContext}.`);
+      void this.refreshKubernetesContexts();
+      this.emit();
+    } catch (error) {
+      const message = readError(error);
+      this.state.globalConfigDialog = {
+        ...this.state.globalConfigDialog,
+        busy: false,
+        error: message,
+      };
+      this.showTerminalMessage(message);
+      this.emit();
+    }
+  }
+
+  async stopCloudContext(name: string): Promise<void> {
+    await this.updateCloudContextPower(name, StopCloudContext, 'Stopped');
+  }
+
+  async startCloudContext(name: string): Promise<void> {
+    await this.updateCloudContextPower(name, StartCloudContext, 'Started');
+    void this.refreshKubernetesContexts();
+  }
+
+  private async updateCloudContextPower(name: string, action: (name: string) => Promise<unknown>, label: string): Promise<void> {
+    const dialog = this.state.globalConfigDialog;
+    if (dialog.busy || dialog.configLoading) {
+      return;
+    }
+    this.state.globalConfigDialog = { ...dialog, busy: true, error: '' };
+    this.emit();
+    try {
+      const context = (await action(name)) as UICloudContextStatus;
+      this.state.globalConfigDialog = {
+        ...this.state.globalConfigDialog,
+        config: {
+          ...this.state.globalConfigDialog.config,
+          cloudContexts: replaceCloudContext(this.state.globalConfigDialog.config.cloudContexts || [], context),
+        },
+        busy: false,
+        error: '',
+      };
+      this.showTerminalMessage(`${label} cloud context ${context.kubernetesContext}.`);
+      this.emit();
+    } catch (error) {
+      const message = readError(error);
+      this.state.globalConfigDialog = {
+        ...this.state.globalConfigDialog,
+        busy: false,
+        error: message,
+      };
+      this.showTerminalMessage(message);
+      this.emit();
+    }
+  }
+
+  async startAWSCloudInit(): Promise<void> {
+    const dialog = this.state.globalConfigDialog;
+    if (dialog.busy || dialog.configLoading) {
+      return;
+    }
+    this.state.globalConfigDialog = { ...dialog, busy: true, error: '' };
+    this.emit();
+    try {
+      this.fitAddon?.fit();
+      const result = (await StartCloudInitAWSSession(this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
+      this.cloudInitSessions.add(result.sessionId);
+      this.state.globalConfigDialog = defaultGlobalConfigDialog();
+      this.state.sessionId = result.sessionId;
+      this.state.terminalCopyOutput = '';
+      this.state.terminalCopyStatus = '';
+      this.resetTerminal();
+      this.hideTerminalMessage();
+      this.focusTerminalSoon();
+      this.queueTerminalResize();
+      this.emit();
+    } catch (error) {
+      const message = readError(error);
+      this.state.globalConfigDialog = {
+        ...this.state.globalConfigDialog,
+        busy: false,
+        error: message,
+      };
+      this.showTerminalMessage(message);
+      this.emit();
+    }
+  }
+
+  async loginCloudProvider(alias: string): Promise<void> {
+    const dialog = this.state.globalConfigDialog;
+    if (dialog.busy || dialog.configLoading) {
+      return;
+    }
+    this.state.globalConfigDialog = { ...dialog, busy: true, error: '' };
+    this.emit();
+    try {
+      const provider = await LoginCloudProvider(alias);
+      this.state.globalConfigDialog = {
+        ...this.state.globalConfigDialog,
+        config: {
+          ...this.state.globalConfigDialog.config,
+          cloudProviders: replaceCloudProvider(this.state.globalConfigDialog.config.cloudProviders || [], provider),
+        },
+        busy: false,
+        error: '',
+      };
+      this.showTerminalMessage(`${provider.alias}: ${provider.status}`);
+      this.emit();
+    } catch (error) {
+      const message = readError(error);
+      this.state.globalConfigDialog = {
+        ...this.state.globalConfigDialog,
+        busy: false,
+        error: message,
+      };
+      this.showTerminalMessage(message);
+      this.emit();
+    }
+  }
+
   async submitGlobalConfig(): Promise<void> {
     const dialog = this.state.globalConfigDialog;
     if (dialog.busy || dialog.configLoading) {
@@ -789,7 +1014,7 @@ export class ERunUIController {
     this.state.globalConfigDialog = { ...dialog, busy: true, error: '' };
     this.emit();
     try {
-      const result = (await SaveERunConfig(dialog.config)) as UIERunConfig;
+      const result = (await SaveERunConfig(dialog.config as Parameters<typeof SaveERunConfig>[0])) as UIERunConfig;
       this.state.globalConfigDialog = {
         ...this.state.globalConfigDialog,
         config: result,
@@ -1300,13 +1525,15 @@ export class ERunUIController {
     const initSelection = this.initSessionSelections.get(payload.sessionId);
     const deploySelection = this.deploySessionSelections.get(payload.sessionId);
     const openSelection = this.openSessionSelections.get(payload.sessionId);
+    const cloudInit = this.cloudInitSessions.has(payload.sessionId);
     this.initSessionSelections.delete(payload.sessionId);
     this.deploySessionSelections.delete(payload.sessionId);
     this.openSessionSelections.delete(payload.sessionId);
+    this.cloudInitSessions.delete(payload.sessionId);
 
-    const reason = this.terminalExitReason(payload, initSelection, deploySelection, openSelection);
+    const reason = this.terminalExitReason(payload, initSelection, deploySelection, openSelection, cloudInit);
     this.sessionExitReasons.set(payload.sessionId, reason);
-    const failedOutput = payload.reason && (initSelection || deploySelection || openSelection)
+    const failedOutput = payload.reason && (initSelection || deploySelection || openSelection || cloudInit)
       ? this.failedTerminalOutput(payload.sessionId, reason)
       : '';
     if (failedOutput) {
@@ -1327,7 +1554,7 @@ export class ERunUIController {
       }
       return;
     }
-    if (payload.reason && (initSelection || deploySelection || openSelection)) {
+    if (payload.reason && (initSelection || deploySelection || openSelection || cloudInit)) {
       this.state.terminalCopyOutput = failedOutput;
       this.state.terminalCopyStatus = '';
     }
@@ -1339,6 +1566,7 @@ export class ERunUIController {
     initSelection?: UISelection,
     deploySelection?: UISelection,
     openSelection?: UISelection,
+    cloudInit?: boolean,
   ): string {
     if (payload.reason) {
       if (initSelection) {
@@ -1350,6 +1578,9 @@ export class ERunUIController {
       if (openSelection) {
         return `Failed to open ${openSelection.tenant} / ${openSelection.environment}: ${payload.reason}`;
       }
+      if (cloudInit) {
+        return `Failed to initialize AWS cloud alias: ${payload.reason}`;
+      }
       return payload.reason;
     }
     if (initSelection) {
@@ -1357,6 +1588,9 @@ export class ERunUIController {
     }
     if (deploySelection) {
       return `Deployed ${deploySelection.tenant} / ${deploySelection.environment}.`;
+    }
+    if (cloudInit) {
+      return 'AWS cloud alias setup ended.';
     }
     return 'Session ended.';
   }
@@ -1487,4 +1721,30 @@ function cleanTerminalOutput(value: string): string {
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .trim();
+}
+
+function replaceCloudProvider(providers: UICloudProviderStatus[], provider: UICloudProviderStatus): UICloudProviderStatus[] {
+  const next = providers.filter((item) => item.alias !== provider.alias);
+  next.push(provider);
+  next.sort((left, right) => left.alias.localeCompare(right.alias));
+  return next;
+}
+
+function replaceCloudContext(contexts: UICloudContextStatus[], context: UICloudContextStatus): UICloudContextStatus[] {
+  const next = contexts.filter((item) => item.name !== context.name);
+  next.push(context);
+  next.sort((left, right) => left.name.localeCompare(right.name));
+  return next;
+}
+
+function cloudContextDraftForConfig(config: UIERunConfig, current: UICloudContextInitInput): UICloudContextInitInput {
+  const draft = {
+    ...defaultCloudContextInitInput(),
+    ...current,
+  };
+  const providers = config.cloudProviders || [];
+  if (!draft.cloudProviderAlias || !providers.some((provider) => provider.alias === draft.cloudProviderAlias)) {
+    draft.cloudProviderAlias = providers[0]?.alias || '';
+  }
+  return draft;
 }
