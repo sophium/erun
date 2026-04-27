@@ -9,12 +9,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newCloudCmd(store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, deps common.CloudDependencies) *cobra.Command {
+type cloudCommandStoreInterface interface {
+	common.CloudStore
+	common.EnvironmentCloudAliasStore
+}
+
+func newCloudCmd(store cloudCommandStoreInterface, promptRunner PromptRunner, selectRunner SelectRunner, deps common.CloudDependencies) *cobra.Command {
 	return newCommandGroup(
 		"cloud",
 		"Cloud provider utilities",
 		newCloudInitCmd(store, promptRunner, deps),
 		newCloudLoginCmd(store, promptRunner, selectRunner, deps),
+		newCloudSetCmd(store),
 	)
 }
 
@@ -205,6 +211,42 @@ func runCloudLoginCommand(ctx common.Context, store common.CloudStore, promptRun
 		return err
 	}
 	return writeCloudStatus(ctx, status)
+}
+
+func newCloudSetCmd(store common.EnvironmentCloudAliasStore) *cobra.Command {
+	var alias string
+	cmd := &cobra.Command{
+		Use:          "set TENANT ENVIRONMENT",
+		Short:        "Set the cloud provider alias for an environment",
+		Args:         cobra.ExactArgs(2),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCloudSetCommand(commandContext(cmd), store, common.SetEnvironmentCloudAliasParams{
+				Tenant:      args[0],
+				Environment: args[1],
+				Alias:       alias,
+			})
+		},
+	}
+	cmd.Flags().StringVar(&alias, "alias", "", "Cloud provider alias to assign")
+	if err := cmd.MarkFlagRequired("alias"); err != nil {
+		panic(err)
+	}
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func runCloudSetCommand(ctx common.Context, store common.EnvironmentCloudAliasStore, params common.SetEnvironmentCloudAliasParams) error {
+	config, err := common.SetEnvironmentCloudProviderAlias(ctx, store, params)
+	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		_, err = fmt.Fprintln(ctx.Stdout, "Dry run: cloud provider alias update planned.")
+		return err
+	}
+	_, err = fmt.Fprintf(ctx.Stdout, "Set cloud provider alias %s for %s/%s\n", config.CloudProviderAlias, strings.TrimSpace(params.Tenant), strings.TrimSpace(params.Environment))
+	return err
 }
 
 func selectCloudAliasPrompt(store common.CloudStore, selectRunner SelectRunner) (string, error) {

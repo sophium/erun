@@ -1127,6 +1127,17 @@ func TestBootstrapRunPropagatesSaveErrors(t *testing.T) {
 func TestBootstrapRunRemoteInitializesTenantInPodWorktree(t *testing.T) {
 	setupXDGConfigHome(t)
 
+	if err := SaveERunConfig(ERunConfig{
+		CloudContexts: []CloudContextConfig{{
+			Name:               "remote-cloud",
+			Provider:           CloudProviderAWS,
+			CloudProviderAlias: "team-cloud",
+			KubernetesContext:  "cluster-remote",
+		}},
+	}); err != nil {
+		t.Fatalf("SaveERunConfig failed: %v", err)
+	}
+
 	var waited ShellLaunchParams
 	scripts := make([]string, 0, 3)
 	service := bootstrapTestRunner{
@@ -1223,6 +1234,9 @@ func TestBootstrapRunRemoteInitializesTenantInPodWorktree(t *testing.T) {
 	if result.EnvConfig.ContainerRegistry != "registry.example.com/remote" {
 		t.Fatalf("expected remote container registry to be persisted, got %+v", result.EnvConfig)
 	}
+	if result.EnvConfig.CloudProviderAlias != "team-cloud" {
+		t.Fatalf("expected cloud provider alias to be persisted, got %+v", result.EnvConfig)
+	}
 	if waited.Dir != remotePath || waited.KubernetesContext != "cluster-remote" {
 		t.Fatalf("unexpected wait request: %+v", waited)
 	}
@@ -1236,6 +1250,9 @@ func TestBootstrapRunRemoteInitializesTenantInPodWorktree(t *testing.T) {
 	}
 	if !savedEnv.Remote || savedEnv.ContainerRegistry != "registry.example.com/remote" {
 		t.Fatalf("unexpected saved env config: %+v", savedEnv)
+	}
+	if savedEnv.CloudProviderAlias != "team-cloud" {
+		t.Fatalf("unexpected saved cloud provider alias: %+v", savedEnv)
 	}
 }
 

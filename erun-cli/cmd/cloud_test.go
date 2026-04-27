@@ -11,6 +11,7 @@ import (
 
 type cloudCommandStore struct {
 	config common.ERunConfig
+	envs   map[string]common.EnvConfig
 }
 
 func (s *cloudCommandStore) LoadERunConfig() (common.ERunConfig, string, error) {
@@ -19,6 +20,22 @@ func (s *cloudCommandStore) LoadERunConfig() (common.ERunConfig, string, error) 
 
 func (s *cloudCommandStore) SaveERunConfig(config common.ERunConfig) error {
 	s.config = config
+	return nil
+}
+
+func (s *cloudCommandStore) LoadEnvConfig(tenant, environment string) (common.EnvConfig, string, error) {
+	config, ok := s.envs[tenant+"/"+environment]
+	if !ok {
+		return common.EnvConfig{}, "", common.ErrNotInitialized
+	}
+	return config, "", nil
+}
+
+func (s *cloudCommandStore) SaveEnvConfig(tenant string, config common.EnvConfig) error {
+	if s.envs == nil {
+		s.envs = make(map[string]common.EnvConfig)
+	}
+	s.envs[tenant+"/"+config.Name] = config
 	return nil
 }
 
@@ -121,6 +138,34 @@ func TestRunCloudLoginCommandPromptsWhenExpired(t *testing.T) {
 		t.Fatal("expected AWS login to run")
 	}
 	if got := stdout.String(); got != "rihards+123456789012@aws: active\n" {
+		t.Fatalf("unexpected stdout: %q", got)
+	}
+}
+
+func TestRunCloudSetCommandSetsEnvironmentAlias(t *testing.T) {
+	store := &cloudCommandStore{envs: map[string]common.EnvConfig{
+		"frs/dev": {
+			Name:               "dev",
+			RepoPath:           "/workspace/frs",
+			KubernetesContext:  "cluster-dev",
+			CloudProviderAlias: "old-cloud",
+			Remote:             true,
+		},
+	}}
+	stdout := new(bytes.Buffer)
+
+	err := runCloudSetCommand(common.Context{Stdout: stdout}, store, common.SetEnvironmentCloudAliasParams{
+		Tenant:      "frs",
+		Environment: "dev",
+		Alias:       "team-cloud",
+	})
+	if err != nil {
+		t.Fatalf("runCloudSetCommand failed: %v", err)
+	}
+	if store.envs["frs/dev"].CloudProviderAlias != "team-cloud" {
+		t.Fatalf("unexpected stored env: %+v", store.envs["frs/dev"])
+	}
+	if got := stdout.String(); got != "Set cloud provider alias team-cloud for frs/dev\n" {
 		t.Fatalf("unexpected stdout: %q", got)
 	}
 }

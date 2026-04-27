@@ -126,6 +126,10 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Description: "Login to a configured cloud provider alias, with preview support",
 	}, cloudLoginTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cloud_set",
+		Description: "Set the cloud provider alias for a tenant environment, with preview support",
+	}, cloudSetTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "context_list",
 		Description: "List managed ERun cloud Kubernetes contexts",
 	}, contextListTool(runtime))

@@ -7,6 +7,7 @@ import (
 
 type memoryCloudStore struct {
 	config ERunConfig
+	envs   map[string]EnvConfig
 	err    error
 }
 
@@ -20,6 +21,22 @@ func (s *memoryCloudStore) LoadERunConfig() (ERunConfig, string, error) {
 func (s *memoryCloudStore) SaveERunConfig(config ERunConfig) error {
 	s.config = config
 	s.err = nil
+	return nil
+}
+
+func (s *memoryCloudStore) LoadEnvConfig(tenant, environment string) (EnvConfig, string, error) {
+	config, ok := s.envs[tenant+"/"+environment]
+	if !ok {
+		return EnvConfig{}, "", ErrNotInitialized
+	}
+	return config, "", nil
+}
+
+func (s *memoryCloudStore) SaveEnvConfig(tenant string, config EnvConfig) error {
+	if s.envs == nil {
+		s.envs = make(map[string]EnvConfig)
+	}
+	s.envs[tenant+"/"+config.Name] = config
 	return nil
 }
 
@@ -146,5 +163,42 @@ func TestResolveCloudProviderRequiresConfiguredAlias(t *testing.T) {
 	}
 	if errors.Is(err, ErrNotInitialized) {
 		t.Fatalf("expected missing alias error, got %v", err)
+	}
+}
+
+func TestSetEnvironmentCloudProviderAliasUpdatesOnlyAlias(t *testing.T) {
+	snapshot := true
+	store := &memoryCloudStore{envs: map[string]EnvConfig{
+		"frs/dev": {
+			Name:               "dev",
+			RepoPath:           "/workspace/frs",
+			KubernetesContext:  "cluster-dev",
+			ContainerRegistry:  "registry.example.com/frs",
+			CloudProviderAlias: "old-cloud",
+			RuntimeVersion:     "1.0.0",
+			SSHD: SSHDConfig{
+				Enabled:       true,
+				LocalPort:     60022,
+				PublicKeyPath: "/tmp/id.pub",
+			},
+			Remote:   true,
+			Snapshot: &snapshot,
+		},
+	}}
+
+	updated, err := SetEnvironmentCloudProviderAlias(Context{}, store, SetEnvironmentCloudAliasParams{
+		Tenant:      " frs ",
+		Environment: " dev ",
+		Alias:       " team-cloud ",
+	})
+	if err != nil {
+		t.Fatalf("SetEnvironmentCloudProviderAlias failed: %v", err)
+	}
+	if updated.CloudProviderAlias != "team-cloud" {
+		t.Fatalf("unexpected updated config: %+v", updated)
+	}
+	stored := store.envs["frs/dev"]
+	if stored.RepoPath != "/workspace/frs" || stored.KubernetesContext != "cluster-dev" || stored.ContainerRegistry != "registry.example.com/frs" || stored.RuntimeVersion != "1.0.0" || !stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/id.pub" || !stored.Remote || stored.Snapshot == nil || !*stored.Snapshot {
+		t.Fatalf("unexpected stored config: %+v", stored)
 	}
 }

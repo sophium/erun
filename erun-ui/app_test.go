@@ -1044,6 +1044,57 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	}
 }
 
+func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
+	projectRoot := eruncommon.RemoteWorktreePathForRepoName("frs")
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"frs": {
+				Name:               "frs",
+				ProjectRoot:        projectRoot,
+				DefaultEnvironment: "dev",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/dev": {
+				Name:               "dev",
+				RepoPath:           projectRoot,
+				KubernetesContext:  "cluster-dev",
+				CloudProviderAlias: "old-cloud",
+				Remote:             true,
+			},
+		},
+	}
+	var remoteEndpoint string
+	var remoteTenant string
+	var remoteEnvironment string
+	var remoteAlias string
+	app := NewApp(erunUIDeps{
+		store:               store,
+		canConnectLocalPort: func(int) bool { return true },
+		setRemoteCloudAlias: func(_ context.Context, endpoint, tenant, environment, alias string) (eruncommon.EnvConfig, error) {
+			remoteEndpoint = endpoint
+			remoteTenant = tenant
+			remoteEnvironment = environment
+			remoteAlias = alias
+			return eruncommon.EnvConfig{Name: environment, CloudProviderAlias: alias}, nil
+		},
+	})
+
+	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "dev"}, uiEnvironmentConfig{
+		Name:               "dev",
+		CloudProviderAlias: "team-cloud",
+	})
+	if err != nil {
+		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
+	}
+	if saved.CloudProviderAlias != "team-cloud" || store.envs["frs/dev"].CloudProviderAlias != "team-cloud" {
+		t.Fatalf("unexpected saved config: result=%+v stored=%+v", saved, store.envs["frs/dev"])
+	}
+	if remoteEndpoint != "http://127.0.0.1:17000/mcp" || remoteTenant != "frs" || remoteEnvironment != "dev" || remoteAlias != "team-cloud" {
+		t.Fatalf("unexpected remote alias call: endpoint=%q tenant=%q environment=%q alias=%q", remoteEndpoint, remoteTenant, remoteEnvironment, remoteAlias)
+	}
+}
+
 func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	projectRoot := t.TempDir()
 	rootConfig := &eruncommon.ERunConfig{

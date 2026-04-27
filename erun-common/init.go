@@ -564,6 +564,10 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 		if err := s.ensureKubernetesNamespace(tenant, envName, "", kubernetesContext); err != nil {
 			return result, err
 		}
+		cloudProviderAlias, err := s.resolveCloudProviderAlias(kubernetesContext, "")
+		if err != nil {
+			return result, err
+		}
 		containerRegistry, err := s.resolveContainerRegistry(params, tenant, envName, envProjectRoot, "", true)
 		if err != nil {
 			return result, err
@@ -574,11 +578,12 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 
 		s.Context.Trace("Adding new environment")
 		envConfig = EnvConfig{
-			Name:              envName,
-			RepoPath:          envProjectRoot,
-			KubernetesContext: kubernetesContext,
-			RuntimeVersion:    strings.TrimSpace(params.RuntimeVersion),
-			Remote:            remoteMode,
+			Name:               envName,
+			RepoPath:           envProjectRoot,
+			KubernetesContext:  kubernetesContext,
+			CloudProviderAlias: cloudProviderAlias,
+			RuntimeVersion:     strings.TrimSpace(params.RuntimeVersion),
+			Remote:             remoteMode,
 		}
 		if err := saveEnvConfig(s.Store, tenant, envConfig); err != nil {
 			return result, err
@@ -615,6 +620,14 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 			return result, err
 		}
 		envConfig.KubernetesContext = kubernetesContext
+		envConfigChanged = true
+	}
+	cloudProviderAlias, err := s.resolveCloudProviderAlias(kubernetesContext, envConfig.CloudProviderAlias)
+	if err != nil {
+		return result, err
+	}
+	if cloudProviderAlias != envConfig.CloudProviderAlias {
+		envConfig.CloudProviderAlias = cloudProviderAlias
 		envConfigChanged = true
 	}
 	projectRoot := envConfig.RepoPath
@@ -876,6 +889,19 @@ func (s bootstrapRunner) resolveContainerRegistry(params BootstrapInitParams, te
 		return DefaultContainerRegistry, nil
 	}
 	return registry, nil
+}
+
+func (s bootstrapRunner) resolveCloudProviderAlias(kubernetesContext, current string) (string, error) {
+	current = strings.TrimSpace(current)
+	if current != "" {
+		return current, nil
+	}
+
+	status, ok, err := findCloudContextForKubernetesContext(s.Store, kubernetesContext)
+	if err != nil || !ok {
+		return current, err
+	}
+	return strings.TrimSpace(status.CloudProviderAlias), nil
 }
 
 func (s bootstrapRunner) saveProjectContainerRegistry(projectRoot, envName, registry string, remote bool) error {

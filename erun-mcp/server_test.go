@@ -85,6 +85,14 @@ func (s listToolStore) LoadEnvConfig(tenant, environment string) (eruncommon.Env
 	return config, "", nil
 }
 
+func (s listToolStore) SaveEnvConfig(tenant string, config eruncommon.EnvConfig) error {
+	if s.envConfigs == nil {
+		s.envConfigs = make(map[string]eruncommon.EnvConfig)
+	}
+	s.envConfigs[tenant+"/"+config.Name] = config
+	return nil
+}
+
 func (s listToolStore) ListEnvConfigs(tenant string) ([]eruncommon.EnvConfig, error) {
 	return s.envsByTenant[tenant], nil
 }
@@ -157,7 +165,7 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
 	}
-	if len(tools.Tools) != 18 {
+	if len(tools.Tools) != 19 {
 		t.Fatalf("unexpected tools: %+v", tools.Tools)
 	}
 
@@ -168,6 +176,38 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	version := decodeStructuredVersion(t, result.StructuredContent)
 	if got := version["version"]; got != "1.2.3" {
 		t.Fatalf("unexpected structured content: %+v", version)
+	}
+}
+
+func TestCloudSetToolSetsEnvironmentAlias(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := &listToolStore{
+		tenantConfigs: map[string]eruncommon.TenantConfig{
+			"frs": {Name: "frs", ProjectRoot: projectRoot, DefaultEnvironment: "dev"},
+		},
+		envConfigs: map[string]eruncommon.EnvConfig{
+			"frs/dev": {
+				Name:               "dev",
+				RepoPath:           projectRoot,
+				KubernetesContext:  "cluster-dev",
+				CloudProviderAlias: "old-cloud",
+			},
+		},
+	}
+	handler := cloudSetTool(normalizeRuntimeConfig(RuntimeConfig{
+		Context: RuntimeContext{Tenant: "frs", Environment: "dev"},
+		Store:   store,
+	}))
+
+	_, result, err := handler(context.Background(), nil, CloudSetInput{Alias: "team-cloud"})
+	if err != nil {
+		t.Fatalf("cloudSetTool failed: %v", err)
+	}
+	if result.Tenant != "frs" || result.Environment != "dev" || result.EnvConfig.CloudProviderAlias != "team-cloud" {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if store.envConfigs["frs/dev"].CloudProviderAlias != "team-cloud" {
+		t.Fatalf("unexpected stored env: %+v", store.envConfigs["frs/dev"])
 	}
 }
 

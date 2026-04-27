@@ -218,7 +218,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	mcpCmd := newMCPCmd(resolveOpen, runInitForArgs, launchMCP)
 	appCmd := newAppCmd(launchApp)
 	execCmd := newExecCmd(findProjectRoot, runGit, deps.RunRawCommand)
-	cloudStore, ok := any(store).(common.CloudStore)
+	cloudStore, ok := any(store).(cloudCommandStoreInterface)
 	if !ok {
 		cloudStore = common.ConfigStore{}
 	}

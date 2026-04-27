@@ -26,6 +26,11 @@ type CloudStore interface {
 	SaveERunConfig(ERunConfig) error
 }
 
+type EnvironmentCloudAliasStore interface {
+	LoadEnvConfig(string, string) (EnvConfig, string, error)
+	SaveEnvConfig(string, EnvConfig) error
+}
+
 type CloudReadStore interface {
 	LoadERunConfig() (ERunConfig, string, error)
 }
@@ -66,6 +71,12 @@ type InitAWSCloudProviderParams struct {
 type CloudLoginParams struct {
 	Alias string
 	Force bool
+}
+
+type SetEnvironmentCloudAliasParams struct {
+	Tenant      string
+	Environment string
+	Alias       string
 }
 
 type CloudDependencies struct {
@@ -219,6 +230,47 @@ func LoginCloudProviderAlias(ctx Context, store CloudStore, params CloudLoginPar
 		return status, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
 	}
 	return CloudProviderTokenStatus(provider, deps), nil
+}
+
+func SetEnvironmentCloudProviderAlias(ctx Context, store EnvironmentCloudAliasStore, params SetEnvironmentCloudAliasParams) (EnvConfig, error) {
+	if store == nil {
+		return EnvConfig{}, fmt.Errorf("store is required")
+	}
+	tenant := strings.TrimSpace(params.Tenant)
+	if tenant == "" {
+		return EnvConfig{}, fmt.Errorf("tenant is required")
+	}
+	environment := strings.TrimSpace(params.Environment)
+	if environment == "" {
+		return EnvConfig{}, fmt.Errorf("environment is required")
+	}
+	alias := strings.TrimSpace(params.Alias)
+	if alias == "" {
+		return EnvConfig{}, fmt.Errorf("cloud provider alias is required")
+	}
+
+	config, _, err := store.LoadEnvConfig(tenant, environment)
+	if errors.Is(err, ErrNotInitialized) {
+		return EnvConfig{}, fmt.Errorf("%w: %s", ErrEnvironmentNotFound, environment)
+	}
+	if err != nil {
+		return EnvConfig{}, err
+	}
+	if config.Name == "" {
+		config.Name = environment
+	}
+	if config.CloudProviderAlias == alias {
+		return config, nil
+	}
+	config.CloudProviderAlias = alias
+	if ctx.DryRun {
+		ctx.Trace("write erun environment cloud provider alias " + tenant + "/" + environment)
+		return config, nil
+	}
+	if err := store.SaveEnvConfig(tenant, config); err != nil {
+		return EnvConfig{}, err
+	}
+	return config, nil
 }
 
 func ResolveCloudProvider(store CloudStore, alias string) (CloudProviderConfig, error) {
