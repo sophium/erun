@@ -108,6 +108,8 @@ func Execute() error {
 	mcpCmd := newMCPCmd(resolveOpen, runInitForArgs, launchMCPProcess)
 	appCmd := newAppCmd(launchAppProcess)
 	execCmd := newExecCmd(common.FindProjectRoot, common.GitCommandRunner, nil)
+	cloudCmd := newCloudCmd(configStore, runPrompt, runSelect, common.CloudDependencies{})
+	contextCmd := newContextCmd(configStore, runPrompt, runSelect, common.CloudContextDependencies{})
 	listCmd := newListCmd(configStore, common.FindProjectRoot)
 	doctorCmd := newDoctorCmd(resolveOpen, runPrompt)
 	deleteCmd := newDeleteCmd(configStore, runPrompt, common.DeleteKubernetesNamespace)
@@ -129,6 +131,6 @@ func Execute() error {
 	}
 
 	cmd := newRootCommand(runRoot)
-	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, execCmd, listCmd, doctorCmd, deleteCmd, releaseCmd, versionCmd)
+	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, execCmd, cloudCmd, contextCmd, listCmd, doctorCmd, deleteCmd, releaseCmd, versionCmd)
 	return cmd.Execute()
 }

@@ -18,7 +18,9 @@ const (
 )
 
 type ERunConfig struct {
-	DefaultTenant string
+	DefaultTenant  string
+	CloudProviders []CloudProviderConfig `yaml:"cloudproviders,omitempty"`
+	CloudContexts  []CloudContextConfig  `yaml:"cloudcontexts,omitempty"`
 }
 
 type SSHDConfig struct {
@@ -43,14 +45,15 @@ type TenantConfig struct {
 }
 
 type EnvConfig struct {
-	Name              string
-	RepoPath          string
-	KubernetesContext string
-	ContainerRegistry string
-	RuntimeVersion    string     `yaml:"runtimeversion,omitempty"`
-	SSHD              SSHDConfig `yaml:"sshd,omitempty"`
-	Remote            bool       `yaml:"remote,omitempty"`
-	Snapshot          *bool      `yaml:"snapshot,omitempty"`
+	Name               string
+	RepoPath           string
+	KubernetesContext  string
+	ContainerRegistry  string
+	CloudProviderAlias string     `yaml:"cloudprovideralias,omitempty"`
+	RuntimeVersion     string     `yaml:"runtimeversion,omitempty"`
+	SSHD               SSHDConfig `yaml:"sshd,omitempty"`
+	Remote             bool       `yaml:"remote,omitempty"`
+	Snapshot           *bool      `yaml:"snapshot,omitempty"`
 }
 
 func (c TenantConfig) SnapshotEnabled() bool {

@@ -48,6 +48,51 @@ export interface UIVersionSuggestion {
 
 export interface UIERunConfig {
   defaultTenant: string;
+  cloudProviders?: UICloudProviderStatus[];
+  cloudContexts?: UICloudContextStatus[];
+}
+
+export interface UICloudProviderStatus {
+  alias: string;
+  provider: string;
+  username?: string;
+  accountId?: string;
+  profile?: string;
+  status: string;
+  message?: string;
+}
+
+export interface UIAWSCloudAliasInput {
+  alias: string;
+  username: string;
+  accountId: string;
+  profile: string;
+  ssoRegion: string;
+  ssoStartUrl: string;
+}
+
+export interface UICloudContextStatus {
+  name: string;
+  provider: string;
+  cloudProviderAlias: string;
+  region: string;
+  instanceId?: string;
+  publicIp?: string;
+  instanceType: string;
+  diskType: string;
+  diskSizeGb: number;
+  kubernetesContext: string;
+  status: string;
+  message?: string;
+}
+
+export interface UICloudContextInitInput {
+  name: string;
+  cloudProviderAlias: string;
+  region: string;
+  instanceType: string;
+  diskType: string;
+  diskSizeGb: number;
 }
 
 export interface UITenantConfig {
@@ -80,6 +125,7 @@ export interface UIEnvironmentConfig {
   repoPath: string;
   kubernetesContext: string;
   containerRegistry: string;
+  cloudProviderAlias: string;
   runtimeVersion: string;
   sshd: UISSHDConfig;
   localPorts: UIEnvironmentLocalPorts;

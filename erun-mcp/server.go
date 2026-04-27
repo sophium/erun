@@ -114,6 +114,34 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Description: "List configured tenants and environments, defaults, and the effective target for the current runtime directory",
 	}, listTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cloud_list",
+		Description: "List configured root-level cloud provider aliases and token status",
+	}, cloudListTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cloud_init_aws",
+		Description: "Initialize an AWS SSO cloud provider alias in root ERun config, with preview support",
+	}, cloudInitAWSTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cloud_login",
+		Description: "Login to a configured cloud provider alias, with preview support",
+	}, cloudLoginTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "context_list",
+		Description: "List managed ERun cloud Kubernetes contexts",
+	}, contextListTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "context_init",
+		Description: "Initialize a managed cloud k3s Kubernetes context, with preview support",
+	}, contextInitTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "context_stop",
+		Description: "Stop a managed ERun cloud Kubernetes context, with preview support",
+	}, contextStopTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "context_start",
+		Description: "Start a managed ERun cloud Kubernetes context, with preview support",
+	}, contextStartTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "init",
 		Description: "Run `erun init` using the shared init flow; when more input is needed, return a structured interaction request for the caller to answer in a follow-up tool call",
 	}, initTool(runtime))

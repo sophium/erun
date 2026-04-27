@@ -4,6 +4,7 @@ import type {
   ManageTab,
   UIERunConfig,
   UIEnvironmentConfig,
+  UICloudContextInitInput,
   UISelection,
   UITenantConfig,
   UITenant,
@@ -68,6 +69,7 @@ export interface TenantDialogState {
 export interface GlobalConfigDialogState {
   open: boolean;
   config: UIERunConfig;
+  cloudContextDraft: UICloudContextInitInput;
   configLoading: boolean;
   busy: boolean;
   error: string;
@@ -144,6 +146,7 @@ export const defaultTenantDialog = (): TenantDialogState => ({
 export const defaultGlobalConfigDialog = (): GlobalConfigDialogState => ({
   open: false,
   config: defaultERunConfig(),
+  cloudContextDraft: defaultCloudContextInitInput(),
   configLoading: false,
   busy: false,
   error: '',
@@ -151,6 +154,17 @@ export const defaultGlobalConfigDialog = (): GlobalConfigDialogState => ({
 
 export const defaultERunConfig = (): UIERunConfig => ({
   defaultTenant: '',
+  cloudProviders: [],
+  cloudContexts: [],
+});
+
+export const defaultCloudContextInitInput = (): UICloudContextInitInput => ({
+  name: '',
+  cloudProviderAlias: '',
+  region: 'eu-west-2',
+  instanceType: 'c8gd.2xlarge',
+  diskType: 'gp3',
+  diskSizeGb: 100,
 });
 
 export const defaultTenantConfig = (): UITenantConfig => ({
@@ -163,6 +177,7 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
   repoPath: '',
   kubernetesContext: '',
   containerRegistry: '',
+  cloudProviderAlias: '',
   runtimeVersion: '',
   sshd: {
     enabled: false,

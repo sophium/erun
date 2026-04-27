@@ -132,6 +132,10 @@ func buildDeployArgs(tenant, environment, version, runtimeImage string) []string
 	return args
 }
 
+func buildCloudInitAWSArgs() []string {
+	return []string{"cloud", "init", "aws"}
+}
+
 func resolveTerminalStartDir(preferred string) string {
 	candidates := []string{strings.TrimSpace(preferred)}
 
