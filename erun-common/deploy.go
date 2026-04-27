@@ -58,6 +58,8 @@ type HelmDeployParams struct {
 	WorktreeRepoName  string
 	WorktreeHostPath  string
 	SSHDEnabled       bool
+	MCPPort           int
+	SSHPort           int
 	Version           string
 	Timeout           string
 	Stdout            io.Writer
@@ -76,6 +78,8 @@ type HelmDeploySpec struct {
 	WorktreeRepoName  string
 	WorktreeHostPath  string
 	SSHDEnabled       bool
+	MCPPort           int
+	SSHPort           int
 	Version           string
 	Timeout           string
 }
@@ -102,6 +106,8 @@ type KubernetesDeploymentCheckParams struct {
 	KubernetesContext string
 	ExpectedRepoPath  string
 	ExpectedSSHD      *bool
+	ExpectedMCPPort   int
+	ExpectedSSHPort   int
 }
 
 type DeployTarget struct {
@@ -562,6 +568,7 @@ func newHelmDeploySpec(target OpenResult, deployContext KubernetesDeployContext,
 	}
 
 	version := strings.TrimSpace(versionOverride)
+	ports := LocalPortsForResult(target)
 
 	return HelmDeploySpec{
 		ReleaseName:       deployContext.ComponentName,
@@ -575,6 +582,8 @@ func newHelmDeploySpec(target OpenResult, deployContext KubernetesDeployContext,
 		WorktreeRepoName:  resolveWorktreeRepoName(target.RepoPath),
 		WorktreeHostPath:  resolveWorktreeHostPath(target.RepoPath),
 		SSHDEnabled:       target.EnvConfig.SSHD.Enabled,
+		MCPPort:           ports.MCP,
+		SSHPort:           ports.SSH,
 		Version:           version,
 		Timeout:           DefaultHelmDeploymentTimeout,
 	}, nil
@@ -623,6 +632,8 @@ func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 		WorktreeRepoName:  d.WorktreeRepoName,
 		WorktreeHostPath:  d.WorktreeHostPath,
 		SSHDEnabled:       d.SSHDEnabled,
+		MCPPort:           d.MCPPort,
+		SSHPort:           d.SSHPort,
 		Version:           d.Version,
 		Timeout:           d.Timeout,
 		Stdout:            stdout,
@@ -650,6 +661,8 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "worktreeRepoName="+d.WorktreeRepoName,
 		"--set-string", "worktreeHostPath="+d.WorktreeHostPath,
 		"--set", "sshdEnabled="+formatHelmBool(d.SSHDEnabled),
+		"--set", "mcpPort="+formatHelmPort(d.MCPPort, MCPServicePort),
+		"--set", "sshPort="+formatHelmPort(d.SSHPort, DefaultSSHLocalPort),
 		d.ReleaseName,
 		d.ChartPath,
 	)
@@ -731,6 +744,13 @@ func formatHelmBool(value bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+func formatHelmPort(value, fallback int) string {
+	if value <= 0 {
+		value = fallback
+	}
+	return fmt.Sprintf("%d", value)
 }
 
 func resolveDeployKubernetesContext(environment, configured string, currentContext func() (string, error)) string {
@@ -972,6 +992,8 @@ func DeployHelmChart(params HelmDeployParams) error {
 		WorktreeRepoName:  params.WorktreeRepoName,
 		WorktreeHostPath:  params.WorktreeHostPath,
 		SSHDEnabled:       params.SSHDEnabled,
+		MCPPort:           params.MCPPort,
+		SSHPort:           params.SSHPort,
 		Timeout:           params.Timeout,
 	}.command()
 
@@ -1120,7 +1142,7 @@ func CheckKubernetesDeployment(params KubernetesDeploymentCheckParams) (bool, er
 
 	output, err := exec.Command("kubectl", args...).CombinedOutput()
 	if err == nil {
-		if strings.TrimSpace(params.ExpectedRepoPath) == "" && params.ExpectedSSHD == nil {
+		if strings.TrimSpace(params.ExpectedRepoPath) == "" && params.ExpectedSSHD == nil && params.ExpectedMCPPort == 0 && params.ExpectedSSHPort == 0 {
 			return true, nil
 		}
 		return deploymentMatchesExpectedSettings(params)
@@ -1175,6 +1197,8 @@ func deploymentMatchesExpectedSettings(params KubernetesDeploymentCheckParams) (
 		}
 		matchesRepoPath := strings.TrimSpace(expectedRepoPath) == ""
 		matchesSSHD := params.ExpectedSSHD == nil
+		matchesMCPPort := params.ExpectedMCPPort <= 0
+		matchesSSHPort := params.ExpectedSSHPort <= 0
 		for _, env := range container.Env {
 			switch strings.TrimSpace(env.Name) {
 			case "ERUN_REPO_PATH":
@@ -1185,9 +1209,17 @@ func deploymentMatchesExpectedSettings(params KubernetesDeploymentCheckParams) (
 				if params.ExpectedSSHD != nil {
 					matchesSSHD = strings.EqualFold(strings.TrimSpace(env.Value), formatHelmBool(*params.ExpectedSSHD))
 				}
+			case "ERUN_MCP_PORT":
+				if params.ExpectedMCPPort > 0 {
+					matchesMCPPort = strings.TrimSpace(env.Value) == fmt.Sprintf("%d", params.ExpectedMCPPort)
+				}
+			case "ERUN_SSHD_PORT":
+				if params.ExpectedSSHPort > 0 {
+					matchesSSHPort = strings.TrimSpace(env.Value) == fmt.Sprintf("%d", params.ExpectedSSHPort)
+				}
 			}
 		}
-		return matchesRepoPath && matchesSSHD, nil
+		return matchesRepoPath && matchesSSHD && matchesMCPPort && matchesSSHPort, nil
 	}
 
 	return false, nil

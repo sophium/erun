@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +25,7 @@ type mcpPortForwardState struct {
 	Namespace         string `json:"namespace"`
 	LocalPort         int    `json:"localPort"`
 	LogPath           string `json:"logPath,omitempty"`
+	ProcessID         int    `json:"processId,omitempty"`
 }
 
 func newMCPForwarder() MCPForwarder {
@@ -48,8 +50,12 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 		LocalPort:         localPort,
 	}
 
-	if stateMatchesMCPTarget(state, expectedState) && canConnectLocalPort(localPort) {
+	if stateMatchesMCPTarget(state, expectedState) && canReachLocalMCPEndpoint(localPort) {
 		return localPort, nil
+	}
+	if stateMatchesMCPTarget(state, expectedState) && state.ProcessID > 0 && canConnectLocalPort(localPort) {
+		_ = stopMCPPortForwardProcess(state.ProcessID)
+		waitForLocalPortToClose(localPort)
 	}
 	if canConnectLocalPort(localPort) {
 		return 0, fmt.Errorf("local MCP port %d is already in use", localPort)
@@ -76,18 +82,20 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 	cmd := exec.Command("kubectl", args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
+	detachBackgroundProcess(cmd)
 	if err := cmd.Start(); err != nil {
 		return 0, err
 	}
 
 	expectedState.LogPath = logPath
+	expectedState.ProcessID = cmd.Process.Pid
 	if err := saveMCPPortForwardState(statePath, expectedState); err != nil {
 		return 0, err
 	}
 
 	deadline := time.Now().Add(mcpPortForwardStartupTimeout)
 	for time.Now().Before(deadline) {
-		if canConnectLocalPort(localPort) {
+		if canReachLocalMCPEndpoint(localPort) {
 			return localPort, nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -108,7 +116,7 @@ func kubectlMCPPortForwardArgs(result common.OpenResult, localPort int) []string
 	args = append(args,
 		"port-forward",
 		"deployment/"+common.RuntimeReleaseName(result.Tenant),
-		fmt.Sprintf("%d:%d", localPort, common.MCPServicePort),
+		fmt.Sprintf("%d:%d", localPort, common.MCPPortForResult(result)),
 		"--address", "127.0.0.1",
 	)
 	return args
@@ -164,4 +172,41 @@ func canConnectLocalPort(port int) bool {
 	}
 	_ = conn.Close()
 	return true
+}
+
+func canReachLocalMCPEndpoint(port int) bool {
+	if port <= 0 {
+		return false
+	}
+	client := http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/mcp", port))
+	if err != nil {
+		return false
+	}
+	_ = resp.Body.Close()
+	return true
+}
+
+func stopMCPPortForwardProcess(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+	if !isMCPPortForwardProcess(pid) {
+		return nil
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return process.Kill()
+}
+
+func waitForLocalPortToClose(port int) {
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if !canConnectLocalPort(port) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }

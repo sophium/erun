@@ -345,6 +345,75 @@ func TestBootstrapRunCreatesTenantDevopsModuleAndChart(t *testing.T) {
 	}
 }
 
+func TestEnsureDefaultDevopsChartMigratesLegacyGeneratedServiceTemplate(t *testing.T) {
+	projectRoot := t.TempDir()
+	moduleName := "tenant-a-devops"
+	serviceTemplatePath := filepath.Join(projectRoot, moduleName, "k8s", moduleName, "templates", "service.yaml")
+	current, err := defaultDevopsChartFiles.ReadFile("assets/default-devops-chart/templates/service.yaml")
+	if err != nil {
+		t.Fatalf("read embedded service template: %v", err)
+	}
+	rendered := renderDefaultDevopsChartTemplate("assets/default-devops-chart/templates/service.yaml", moduleName, moduleName, current)
+	if err := os.MkdirAll(filepath.Dir(serviceTemplatePath), 0o755); err != nil {
+		t.Fatalf("mkdir service template dir: %v", err)
+	}
+	if err := os.WriteFile(serviceTemplatePath, []byte(legacyDefaultDevopsServiceTemplate(rendered)), 0o644); err != nil {
+		t.Fatalf("write legacy service template: %v", err)
+	}
+
+	if err := EnsureDefaultDevopsChart(Context{}, projectRoot, "tenant-a", DefaultEnvironment); err != nil {
+		t.Fatalf("EnsureDefaultDevopsChart failed: %v", err)
+	}
+
+	migrated, err := os.ReadFile(serviceTemplatePath)
+	if err != nil {
+		t.Fatalf("read migrated service template: %v", err)
+	}
+	content := string(migrated)
+	for _, want := range []string{
+		`{{- $mcpPort := default 17000 .Values.mcpPort -}}`,
+		`{{- $sshPort := default 17022 .Values.sshPort -}}`,
+		"name: ERUN_MCP_PORT",
+		"name: ERUN_SSHD_PORT",
+		"containerPort: {{ $mcpPort }}",
+		"containerPort: {{ $sshPort }}",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected migrated service template to contain %q, got:\n%s", want, content)
+		}
+	}
+}
+
+func TestEnsureDefaultDevopsChartPreservesModifiedServiceTemplate(t *testing.T) {
+	projectRoot := t.TempDir()
+	moduleName := "tenant-a-devops"
+	serviceTemplatePath := filepath.Join(projectRoot, moduleName, "k8s", moduleName, "templates", "service.yaml")
+	current, err := defaultDevopsChartFiles.ReadFile("assets/default-devops-chart/templates/service.yaml")
+	if err != nil {
+		t.Fatalf("read embedded service template: %v", err)
+	}
+	rendered := renderDefaultDevopsChartTemplate("assets/default-devops-chart/templates/service.yaml", moduleName, moduleName, current)
+	modified := legacyDefaultDevopsServiceTemplate(rendered) + "\n# tenant customization\n"
+	if err := os.MkdirAll(filepath.Dir(serviceTemplatePath), 0o755); err != nil {
+		t.Fatalf("mkdir service template dir: %v", err)
+	}
+	if err := os.WriteFile(serviceTemplatePath, []byte(modified), 0o644); err != nil {
+		t.Fatalf("write modified service template: %v", err)
+	}
+
+	if err := EnsureDefaultDevopsChart(Context{}, projectRoot, "tenant-a", DefaultEnvironment); err != nil {
+		t.Fatalf("EnsureDefaultDevopsChart failed: %v", err)
+	}
+
+	preserved, err := os.ReadFile(serviceTemplatePath)
+	if err != nil {
+		t.Fatalf("read service template: %v", err)
+	}
+	if string(preserved) != modified {
+		t.Fatalf("expected modified service template to be preserved, got:\n%s", preserved)
+	}
+}
+
 func TestBootstrapRunCreatesTenantDevopsEnvironmentValuesFile(t *testing.T) {
 	setupXDGConfigHome(t)
 
@@ -1142,7 +1211,26 @@ func TestBootstrapRunRemoteInitializesTenantInPodWorktree(t *testing.T) {
 func TestBootstrapRunRemoteNoGitCreatesWorktreeWithoutRepositoryPrompts(t *testing.T) {
 	setupXDGConfigHome(t)
 
+	if err := SaveTenantConfig(TenantConfig{
+		Name:               "erun",
+		ProjectRoot:        RemoteWorktreePathForRepoName("erun"),
+		DefaultEnvironment: "local",
+	}); err != nil {
+		t.Fatalf("SaveTenantConfig failed: %v", err)
+	}
+	for _, envName := range []string{"local", "proxmox1"} {
+		if err := SaveEnvConfig("erun", EnvConfig{
+			Name:              envName,
+			RepoPath:          RemoteWorktreePathForRepoName("erun"),
+			KubernetesContext: "cluster-remote",
+			Remote:            true,
+		}); err != nil {
+			t.Fatalf("SaveEnvConfig failed: %v", err)
+		}
+	}
+
 	scripts := make([]string, 0, 1)
+	var deployed HelmDeployParams
 	service := bootstrapTestRunner{
 		Context: testContextWithLogger(&testTraceLogger{}),
 		Store:   ConfigStore{},
@@ -1166,7 +1254,8 @@ func TestBootstrapRunRemoteNoGitCreatesWorktreeWithoutRepositoryPrompts(t *testi
 		EnsureKubernetesNamespace: func(string, string) error {
 			return nil
 		},
-		DeployHelmChart: func(HelmDeployParams) error {
+		DeployHelmChart: func(params HelmDeployParams) error {
+			deployed = params
 			return nil
 		},
 		WaitForRemoteRuntime: func(ShellLaunchParams) error {
@@ -1179,8 +1268,8 @@ func TestBootstrapRunRemoteNoGitCreatesWorktreeWithoutRepositoryPrompts(t *testi
 	}
 
 	result, err := service.Run(BootstrapInitParams{
-		Tenant:      "frs",
-		Environment: "dev",
+		Tenant:      "erun",
+		Environment: "test",
 		Remote:      true,
 		NoGit:       true,
 	})
@@ -1188,9 +1277,12 @@ func TestBootstrapRunRemoteNoGitCreatesWorktreeWithoutRepositoryPrompts(t *testi
 		t.Fatalf("Run failed: %v", err)
 	}
 
-	remotePath := RemoteWorktreePathForRepoName("frs")
+	remotePath := RemoteWorktreePathForRepoName("erun")
 	if result.EnvConfig.RepoPath != remotePath || !result.EnvConfig.Remote {
 		t.Fatalf("unexpected env config: %+v", result.EnvConfig)
+	}
+	if deployed.MCPPort != 17200 || deployed.SSHPort != 17222 {
+		t.Fatalf("expected remote init deploy to use allocated ports, got mcp=%d ssh=%d", deployed.MCPPort, deployed.SSHPort)
 	}
 	if len(scripts) != 1 {
 		t.Fatalf("expected only remote worktree command, got %d", len(scripts))

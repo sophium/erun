@@ -375,3 +375,22 @@ func TestInitCommandAcceptsRuntimeVersionOverride(t *testing.T) {
 		t.Fatalf("unexpected init params: %+v", got)
 	}
 }
+
+func TestInitCommandAcceptsDefaultSelectionOverrides(t *testing.T) {
+	var got common.BootstrapInitParams
+	cmd := newInitCmd(func(_ common.Context, params common.BootstrapInitParams) error {
+		got = params
+		return nil
+	})
+	cmd.SetArgs([]string{"erun", "local", "--set-default-tenant=false", "--confirm-environment=true"})
+
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute failed: %v", err)
+	}
+	if got.ConfirmTenant == nil || *got.ConfirmTenant {
+		t.Fatalf("unexpected tenant confirmation: %+v", got.ConfirmTenant)
+	}
+	if got.ConfirmEnvironment == nil || !*got.ConfirmEnvironment {
+		t.Fatalf("unexpected environment confirmation: %+v", got.ConfirmEnvironment)
+	}
+}

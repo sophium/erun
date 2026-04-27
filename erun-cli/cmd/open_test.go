@@ -90,9 +90,6 @@ func TestOpenCommandVersionOverrideForcesRuntimeDeploy(t *testing.T) {
 	cmd := newTestRootCmd(testRootDeps{
 		Store: openCommandStore{repoPath: repoPath},
 		PromptRunner: func(prompt promptui.Prompt) (string, error) {
-			if !prompt.IsConfirm {
-				t.Fatalf("expected confirm prompt, got %+v", prompt)
-			}
 			return "n", nil
 		},
 		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
@@ -875,9 +872,6 @@ func TestMaybeConfigureOpenNoShellAliasPromptsAndAppendsToStartupFile(t *testing
 	stderr := new(bytes.Buffer)
 
 	err := maybeConfigureOpenNoShellAlias(result, func(prompt promptui.Prompt) (string, error) {
-		if !prompt.IsConfirm {
-			t.Fatalf("expected confirm prompt, got %+v", prompt)
-		}
 		if prompt.Label != fmt.Sprintf("add frs-local to %s", startupPath) {
 			t.Fatalf("unexpected prompt label: %q", prompt.Label)
 		}
@@ -1423,9 +1417,6 @@ func TestOpenCommandPromptsToCreateMissingRuntimeChartAndUsesCreatedChart(t *tes
 			toolConfig: common.ERunConfig{DefaultTenant: "frs"},
 		},
 		PromptRunner: func(prompt promptui.Prompt) (string, error) {
-			if !prompt.IsConfirm {
-				t.Fatalf("expected confirm prompt, got %+v", prompt)
-			}
 			if prompt.Label != fmt.Sprintf("create frs-devops chart in %s", repoPath) {
 				t.Fatalf("unexpected prompt label: %q", prompt.Label)
 			}

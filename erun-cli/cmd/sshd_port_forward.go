@@ -98,7 +98,7 @@ func kubectlPortForwardArgs(result common.OpenResult, localPort int) []string {
 	args = append(args,
 		"port-forward",
 		"deployment/"+common.RuntimeReleaseName(result.Tenant),
-		fmt.Sprintf("%d:%d", localPort, common.RemoteSSHDPort),
+		fmt.Sprintf("%d:%d", localPort, common.SSHLocalPortForResult(result)),
 		"--address", "127.0.0.1",
 	)
 	return args

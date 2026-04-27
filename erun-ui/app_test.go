@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -272,6 +274,25 @@ func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T
 	}
 }
 
+func TestLoadKubernetesContextsNormalizesContexts(t *testing.T) {
+	app := NewApp(erunUIDeps{
+		listKubeContexts: func() ([]string, error) {
+			return []string{" cluster-b ", "cluster-a", "cluster-b", ""}, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	contexts, err := app.LoadKubernetesContexts()
+	if err != nil {
+		t.Fatalf("LoadKubernetesContexts failed: %v", err)
+	}
+
+	want := []string{"cluster-b", "cluster-a"}
+	if strings.Join(contexts, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected contexts: got %+v want %+v", contexts, want)
+	}
+}
+
 func TestParseVersionOutputUsesLastVersionLine(t *testing.T) {
 	info, ok := parseVersionOutput("trace line\nerun 1.0.50 (03ce970142a1 built 2026-04-24T17:38:53Z)\n")
 	if !ok {
@@ -309,8 +330,16 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 		},
 	}
 	var gotEndpoint string
+	var ensured eruncommon.OpenResult
 	app := NewApp(erunUIDeps{
 		store: store,
+		canConnectLocalPort: func(int) bool {
+			return false
+		},
+		ensureMCP: func(_ context.Context, result eruncommon.OpenResult) error {
+			ensured = result
+			return nil
+		},
 		loadDiff: func(_ context.Context, endpoint string) (eruncommon.DiffResult, error) {
 			gotEndpoint = endpoint
 			return eruncommon.DiffResult{RawDiff: "diff --git a/a.txt b/a.txt\n"}, nil
@@ -323,6 +352,65 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 	}
 	if gotEndpoint != "http://127.0.0.1:17000/mcp" {
 		t.Fatalf("unexpected endpoint: %q", gotEndpoint)
+	}
+	if ensured.Tenant != "erun" || ensured.Environment != "local" {
+		t.Fatalf("expected MCP forward to be ensured before diff, got %+v", ensured)
+	}
+	if result.RawDiff == "" {
+		t.Fatalf("unexpected diff result: %+v", result)
+	}
+}
+
+func TestLoadDiffReactivatesMCPAfterConnectionError(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {
+				Name:               "erun",
+				ProjectRoot:        projectRoot,
+				DefaultEnvironment: "test",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/test": {
+				Name:              "test",
+				RepoPath:          projectRoot,
+				KubernetesContext: "orbstack",
+			},
+		},
+	}
+	ensureCalls := 0
+	loadCalls := 0
+	app := NewApp(erunUIDeps{
+		store: store,
+		canConnectLocalPort: func(int) bool {
+			return true
+		},
+		ensureMCP: func(_ context.Context, result eruncommon.OpenResult) error {
+			ensureCalls++
+			if result.Tenant != "erun" || result.Environment != "test" {
+				t.Fatalf("unexpected MCP target: %+v", result)
+			}
+			return nil
+		},
+		loadDiff: func(_ context.Context, endpoint string) (eruncommon.DiffResult, error) {
+			loadCalls++
+			if endpoint != "http://127.0.0.1:17000/mcp" {
+				t.Fatalf("unexpected endpoint: %q", endpoint)
+			}
+			if loadCalls == 1 {
+				return eruncommon.DiffResult{}, errors.New("EOF")
+			}
+			return eruncommon.DiffResult{RawDiff: "diff --git a/a.txt b/a.txt\n"}, nil
+		},
+	})
+
+	result, err := app.LoadDiff(uiSelection{Tenant: "erun", Environment: "test"})
+	if err != nil {
+		t.Fatalf("LoadDiff failed: %v", err)
+	}
+	if ensureCalls != 1 || loadCalls != 2 {
+		t.Fatalf("expected one MCP reactivation and retry, got ensure=%d load=%d", ensureCalls, loadCalls)
 	}
 	if result.RawDiff == "" {
 		t.Fatalf("unexpected diff result: %+v", result)
@@ -350,9 +438,22 @@ func TestBuildOpenArgsTrimsTenantAndEnvironment(t *testing.T) {
 	}
 }
 
+func TestBuildOpenNoShellArgsTrimsTenantAndEnvironment(t *testing.T) {
+	got := buildOpenNoShellArgs(" erun ", " local ")
+	want := []string{"open", "erun", "local", "--no-shell", "--no-alias-prompt"}
+	if len(got) != len(want) {
+		t.Fatalf("unexpected args length: got %+v want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected arg[%d]: got %q want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestBuildInitArgsTrimsTenantAndEnvironment(t *testing.T) {
-	got := buildInitArgs(" erun ", " remote ", "", "", false)
-	want := []string{"init", "erun", "remote", "--remote"}
+	got := buildInitArgs(uiSelection{Tenant: " erun ", Environment: " remote "})
+	want := []string{"init", "erun", "remote", "--remote", "--set-default-tenant=false", "--confirm-environment=true"}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected args length: got %+v want %+v", got, want)
 	}
@@ -364,8 +465,17 @@ func TestBuildInitArgsTrimsTenantAndEnvironment(t *testing.T) {
 }
 
 func TestBuildInitArgsIncludesRuntimeVersion(t *testing.T) {
-	got := buildInitArgs(" erun ", " remote ", " 1.0.19 ", " erun-devops ", true)
-	want := []string{"init", "erun", "remote", "--remote", "--version", "1.0.19", "--runtime-image", "erun-devops", "--no-git"}
+	got := buildInitArgs(uiSelection{
+		Tenant:            " erun ",
+		Environment:       " remote ",
+		Version:           " 1.0.19 ",
+		RuntimeImage:      " erun-devops ",
+		KubernetesContext: " orbstack ",
+		ContainerRegistry: " erunpaas ",
+		NoGit:             true,
+		SetDefaultTenant:  true,
+	})
+	want := []string{"init", "erun", "remote", "--remote", "--version", "1.0.19", "--runtime-image", "erun-devops", "--kubernetes-context", "orbstack", "--container-registry", "erunpaas", "--set-default-tenant=true", "--confirm-environment=true", "--no-git"}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected args length: got %+v want %+v", got, want)
 	}
@@ -469,7 +579,15 @@ func TestStartInitSessionStartsRemoteInitCommand(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	result, err := app.StartInitSession(uiSelection{Tenant: " erun ", Environment: " remote ", Version: " 1.0.19 ", NoGit: true}, 80, 24)
+	result, err := app.StartInitSession(uiSelection{
+		Tenant:            " erun ",
+		Environment:       " remote ",
+		Version:           " 1.0.19 ",
+		KubernetesContext: " orbstack ",
+		ContainerRegistry: " erunpaas ",
+		NoGit:             true,
+		SetDefaultTenant:  true,
+	}, 80, 24)
 	if err != nil {
 		t.Fatalf("StartInitSession failed: %v", err)
 	}
@@ -483,7 +601,7 @@ func TestStartInitSessionStartsRemoteInitCommand(t *testing.T) {
 	if started.Executable != "/tmp/erun" {
 		t.Fatalf("unexpected executable: %q", started.Executable)
 	}
-	wantArgs := []string{"init", "erun", "remote", "--remote", "--version", "1.0.19", "--no-git"}
+	wantArgs := []string{"init", "erun", "remote", "--remote", "--version", "1.0.19", "--kubernetes-context", "orbstack", "--container-registry", "erunpaas", "--set-default-tenant=true", "--confirm-environment=true", "--no-git"}
 	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
 		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
 	}
@@ -859,6 +977,9 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	if loaded.Name != "prod" || loaded.RepoPath != projectRoot || loaded.KubernetesContext != "cluster-old" {
 		t.Fatalf("unexpected loaded config: %+v", loaded)
 	}
+	if loaded.LocalPorts.RangeStart != 17000 || loaded.LocalPorts.RangeEnd != 17099 || loaded.LocalPorts.MCP != 17000 || loaded.LocalPorts.SSH != 60022 {
+		t.Fatalf("unexpected loaded local ports: %+v", loaded.LocalPorts)
+	}
 
 	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "prod"}, uiEnvironmentConfig{
 		Name:              "prod",
@@ -880,9 +1001,33 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	if saved.RepoPath != projectRoot || saved.KubernetesContext != "cluster-old" || saved.ContainerRegistry != "registry.example/old" || saved.RuntimeVersion != "1.0.0" {
 		t.Fatalf("unexpected saved config: %+v", saved)
 	}
+	if saved.LocalPorts.RangeStart != 17000 || saved.LocalPorts.RangeEnd != 17099 || saved.LocalPorts.MCP != 17000 || saved.LocalPorts.SSH != 60022 {
+		t.Fatalf("unexpected saved local ports: %+v", saved.LocalPorts)
+	}
 	stored := store.envs["frs/prod"]
 	if stored.RepoPath != projectRoot || stored.Remote || stored.RuntimeVersion != "1.0.0" || stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" || stored.Snapshot == nil || *stored.Snapshot {
 		t.Fatalf("unexpected stored config: %+v", stored)
+	}
+}
+
+func TestLocalPortStatusReportsAvailability(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen on ephemeral port: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+
+	connectable := localPortStatus(port)
+	if !connectable.Available || connectable.Status != "Yes" {
+		t.Fatalf("expected connectable status, got %+v", connectable)
+	}
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close listener: %v", err)
+	}
+
+	unreachable := localPortStatus(port)
+	if unreachable.Available || unreachable.Status != "No" {
+		t.Fatalf("expected unreachable status, got %+v", unreachable)
 	}
 }
 

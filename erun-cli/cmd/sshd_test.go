@@ -4,11 +4,40 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	common "github.com/sophium/erun/erun-common"
 )
+
+func TestKubectlSSHDPortForwardArgs(t *testing.T) {
+	got := kubectlPortForwardArgs(common.OpenResult{
+		Tenant:      "tenant-a",
+		Environment: "dev",
+		EnvConfig: common.EnvConfig{
+			KubernetesContext: "cluster-dev",
+		},
+		LocalPorts: common.EnvironmentLocalPorts{
+			RangeStart: 17100,
+			RangeEnd:   17199,
+			MCP:        17100,
+			SSH:        17122,
+		},
+	}, 17122)
+
+	want := []string{
+		"--context", "cluster-dev",
+		"--namespace", "tenant-a-dev",
+		"port-forward",
+		"deployment/tenant-a-devops",
+		"17122:17122",
+		"--address", "127.0.0.1",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected args:\ngot:  %v\nwant: %v", got, want)
+	}
+}
 
 func TestRunSSHDInitCommandPersistsConfigAndDeploysRuntime(t *testing.T) {
 	homeDir := t.TempDir()

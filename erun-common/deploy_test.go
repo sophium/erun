@@ -260,9 +260,13 @@ func TestRuntimeChartsExposeMCPAndSSHPorts(t *testing.T) {
 		}
 		content := string(data)
 		for _, want := range []string{
-			"containerPort: 17000",
+			`{{- $mcpPort := default 17000 .Values.mcpPort -}}`,
+			`{{- $sshPort := default 17022 .Values.sshPort -}}`,
+			"name: ERUN_MCP_PORT",
+			"name: ERUN_SSHD_PORT",
+			"containerPort: {{ $mcpPort }}",
 			"name: mcp",
-			"containerPort: 2222",
+			"containerPort: {{ $sshPort }}",
 			"name: ssh",
 		} {
 			if !strings.Contains(content, want) {
@@ -339,6 +343,41 @@ func TestNewHelmDeploySpecCanonicalizesWorktreeHostPath(t *testing.T) {
 	}
 	if spec.WorktreeHostPath != resolvedRepoRoot {
 		t.Fatalf("expected canonical worktree host path %q, got %q", resolvedRepoRoot, spec.WorktreeHostPath)
+	}
+}
+
+func TestNewHelmDeploySpecUsesResolvedEnvironmentPorts(t *testing.T) {
+	projectRoot := t.TempDir()
+	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
+	spec, err := newHelmDeploySpec(
+		OpenResult{
+			Tenant:      "tenant-a",
+			Environment: DefaultEnvironment,
+			RepoPath:    projectRoot,
+			EnvConfig: EnvConfig{
+				Name: DefaultEnvironment,
+				SSHD: SSHDConfig{
+					LocalPort: 62222,
+				},
+			},
+			LocalPorts: EnvironmentLocalPorts{
+				RangeStart: 17100,
+				RangeEnd:   17199,
+				MCP:        17100,
+				SSH:        17122,
+			},
+		},
+		KubernetesDeployContext{
+			ComponentName: "erun-devops",
+			ChartPath:     chartPath,
+		},
+		"",
+	)
+	if err != nil {
+		t.Fatalf("newHelmDeploySpec failed: %v", err)
+	}
+	if spec.MCPPort != 17100 || spec.SSHPort != 62222 {
+		t.Fatalf("expected resolved ports to be preserved, got mcp=%d ssh=%d", spec.MCPPort, spec.SSHPort)
 	}
 }
 
@@ -802,6 +841,8 @@ printf '%s
 		WorktreeRepoName:  "erun",
 		WorktreeHostPath:  "/home/erun/git/erun",
 		SSHDEnabled:       true,
+		MCPPort:           17100,
+		SSHPort:           17122,
 		Timeout:           DefaultHelmDeploymentTimeout,
 	}); err != nil {
 		t.Fatalf("DeployHelmChart failed: %v", err)
@@ -814,6 +855,12 @@ printf '%s
 	args := string(data)
 	if !strings.Contains(args, "--set\nsshdEnabled=true\n") {
 		t.Fatalf("expected helm args to include sshdEnabled=true, got:\n%s", args)
+	}
+	if !strings.Contains(args, "--set\nmcpPort=17100\n") {
+		t.Fatalf("expected helm args to include mcpPort=17100, got:\n%s", args)
+	}
+	if !strings.Contains(args, "--set\nsshPort=17122\n") {
+		t.Fatalf("expected helm args to include sshPort=17122, got:\n%s", args)
 	}
 }
 
@@ -930,6 +977,47 @@ exit 1
 	}
 	if deployed {
 		t.Fatalf("expected repo-path mismatch to require redeploy")
+	}
+}
+
+func TestCheckKubernetesDeploymentReturnsFalseWhenRuntimePortDiffers(t *testing.T) {
+	kubectlDir := t.TempDir()
+	kubectlPath := filepath.Join(kubectlDir, "kubectl")
+	if err := os.WriteFile(kubectlPath, []byte(`#!/bin/sh
+if [ "$1" = "--context" ]; then shift 2; fi
+if [ "$1" = "--namespace" ]; then shift 2; fi
+if [ "$1" = "get" ] && [ "$2" = "deployment" ] && [ "$3" = "erun-devops" ] && [ "$4" = "-o" ] && [ "$5" = "name" ]; then
+  echo deployment/erun-devops
+  exit 0
+fi
+if [ "$1" = "get" ] && [ "$2" = "deployment" ] && [ "$3" = "erun-devops" ] && [ "$4" = "-o" ] && [ "$5" = "json" ]; then
+  cat <<'EOF'
+{"spec":{"template":{"spec":{"containers":[{"name":"erun-devops","env":[{"name":"ERUN_REPO_PATH","value":"/home/erun/git/erun"},{"name":"ERUN_SSHD_ENABLED","value":"false"},{"name":"ERUN_MCP_PORT","value":"17000"},{"name":"ERUN_SSHD_PORT","value":"17022"}]}]}}}}
+EOF
+  exit 0
+fi
+echo "unexpected kubectl invocation: $@" >&2
+exit 1
+`), 0o755); err != nil {
+		t.Fatalf("write kubectl stub: %v", err)
+	}
+	t.Setenv("PATH", kubectlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	sshd := false
+	deployed, err := CheckKubernetesDeployment(KubernetesDeploymentCheckParams{
+		Name:              "erun-devops",
+		Namespace:         "erun-test",
+		KubernetesContext: "cluster-local",
+		ExpectedRepoPath:  "/home/erun/git/erun",
+		ExpectedSSHD:      &sshd,
+		ExpectedMCPPort:   17200,
+		ExpectedSSHPort:   17222,
+	})
+	if err != nil {
+		t.Fatalf("CheckKubernetesDeployment failed: %v", err)
+	}
+	if deployed {
+		t.Fatalf("expected port mismatch to require redeploy")
 	}
 }
 

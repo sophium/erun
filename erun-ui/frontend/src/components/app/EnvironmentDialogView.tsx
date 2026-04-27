@@ -22,6 +22,7 @@ export function EnvironmentDialogView({ controller, state }: { controller: ERunU
   const isDeploy = dialog.actionMode === 'deploy';
   const submitLabel = isDeploy ? 'Deploy' : 'Create';
   const busyLabel = isDeploy ? 'Deploying...' : 'Creating...';
+  const createDisabled = dialog.busy || (!isDeploy && (dialog.kubernetesContextsLoading || dialog.kubernetesContexts.length === 0));
 
   React.useEffect(() => {
     if (!dialog.open) {
@@ -101,17 +102,70 @@ export function EnvironmentDialogView({ controller, state }: { controller: ERunU
             onChoicesOpenChange={(open) => controller.setEnvironmentVersionChoicesOpen(open)}
             onSelect={(suggestion) => controller.selectEnvironmentVersionSuggestion(suggestion)}
           />
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="environment-no-git"
-              checked={dialog.noGit}
-              disabled={dialog.busy}
-              onCheckedChange={(checked) => controller.updateEnvironmentDialog({ noGit: checked === true })}
-            />
-            <Label htmlFor="environment-no-git" className="text-sm font-normal">
-              Initialize without Git checkout
-            </Label>
-          </div>
+          {!isDeploy && (
+            <>
+              <div className="grid gap-2">
+                <Label htmlFor="environment-kubernetes-context">Kubernetes context</Label>
+                <select
+                  id="environment-kubernetes-context"
+                  className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex h-10 w-full rounded-[var(--radius)] border px-3 py-2 text-sm file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                  value={dialog.kubernetesContext}
+                  required
+                  disabled={dialog.busy || dialog.kubernetesContextsLoading || dialog.kubernetesContexts.length === 0}
+                  onChange={(event) => controller.updateEnvironmentDialog({ kubernetesContext: event.target.value })}
+                >
+                  {dialog.kubernetesContextsLoading ? (
+                    <option value="">Loading contexts...</option>
+                  ) : dialog.kubernetesContexts.length === 0 ? (
+                    <option value="">No Kubernetes contexts</option>
+                  ) : (
+                    dialog.kubernetesContexts.map((context) => (
+                      <option key={context} value={context}>
+                        {context}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="environment-container-registry">Container registry</Label>
+                <Input
+                  id="environment-container-registry"
+                  value={dialog.containerRegistry}
+                  type="text"
+                  autoComplete="off"
+                  spellCheck={false}
+                  required
+                  disabled={dialog.busy}
+                  onChange={(event) => controller.updateEnvironmentDialog({ containerRegistry: event.target.value })}
+                />
+              </div>
+              <div className="grid gap-2">
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="environment-default-tenant"
+                    checked={dialog.setDefaultTenant}
+                    disabled={dialog.busy}
+                    onCheckedChange={(checked) => controller.updateEnvironmentDialog({ setDefaultTenant: checked === true })}
+                  />
+                  <Label htmlFor="environment-default-tenant" className="text-sm font-normal">
+                    Set as default tenant
+                  </Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="environment-no-git"
+                    checked={dialog.noGit}
+                    disabled={dialog.busy}
+                    onCheckedChange={(checked) => controller.updateEnvironmentDialog({ noGit: checked === true })}
+                  />
+                  <Label htmlFor="environment-no-git" className="text-sm font-normal">
+                    Initialize without Git checkout
+                  </Label>
+                </div>
+              </div>
+            </>
+          )}
           {dialog.error && (
             <div className={dialogErrorClassName} role="alert">
               {dialog.error}
@@ -121,7 +175,7 @@ export function EnvironmentDialogView({ controller, state }: { controller: ERunU
             <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => controller.closeEnvironmentDialog()}>
               Cancel
             </Button>
-            <Button type="submit" size="sm" disabled={dialog.busy}>
+            <Button type="submit" size="sm" disabled={createDisabled}>
               {dialog.busy ? (
                 <LoaderCircle className="animate-spin" aria-hidden="true" />
               ) : isDeploy ? (
