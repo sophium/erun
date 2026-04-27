@@ -29,6 +29,14 @@ type CloudLoginInput struct {
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
+type CloudSetInput struct {
+	Tenant      string `json:"tenant,omitempty" jsonschema:"tenant whose environment should be updated; defaults to the server tenant context"`
+	Environment string `json:"environment,omitempty" jsonschema:"environment to update; defaults to the server environment context"`
+	Alias       string `json:"alias" jsonschema:"cloud provider alias to assign to the environment"`
+	Preview     bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without saving config"`
+	Verbosity   int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+}
+
 type CloudListResult struct {
 	CloudProviders []eruncommon.CloudProviderStatus `json:"cloudProviders,omitempty"`
 }
@@ -39,6 +47,14 @@ type CloudActionResult struct {
 	Provider eruncommon.CloudProviderStatus `json:"provider,omitempty"`
 	Trace    []string                       `json:"trace,omitempty"`
 	Plan     []string                       `json:"plan,omitempty"`
+}
+
+type CloudSetResult struct {
+	Preview     bool                 `json:"preview"`
+	Tenant      string               `json:"tenant"`
+	Environment string               `json:"environment"`
+	EnvConfig   eruncommon.EnvConfig `json:"envConfig"`
+	Trace       []string             `json:"trace,omitempty"`
 }
 
 func cloudListTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudListInput) (*mcp.CallToolResult, CloudListResult, error) {
@@ -99,5 +115,29 @@ func cloudLoginTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRe
 			return nil, CloudActionResult{}, err
 		}
 		return nil, CloudActionResult{Alias: alias, Provider: status, Trace: normalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
+func cloudSetTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudSetInput) (*mcp.CallToolResult, CloudSetResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudSetInput) (*mcp.CallToolResult, CloudSetResult, error) {
+		tenant := firstNonEmpty(strings.TrimSpace(input.Tenant), strings.TrimSpace(runtime.Context.Tenant))
+		environment := firstNonEmpty(strings.TrimSpace(input.Environment), strings.TrimSpace(runtime.Context.Environment))
+		traceOutput := strings.Builder{}
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		config, err := eruncommon.SetEnvironmentCloudProviderAlias(ctx, runtime.Store, eruncommon.SetEnvironmentCloudAliasParams{
+			Tenant:      tenant,
+			Environment: environment,
+			Alias:       input.Alias,
+		})
+		if err != nil {
+			return nil, CloudSetResult{}, err
+		}
+		return nil, CloudSetResult{
+			Preview:     input.Preview,
+			Tenant:      tenant,
+			Environment: environment,
+			EnvConfig:   config,
+			Trace:       normalizeTraceLines(traceOutput.String()),
+		}, nil
 	}
 }

@@ -128,6 +128,7 @@ export interface UIEnvironmentConfig {
   kubernetesContext: string;
   containerRegistry: string;
   cloudProviderAlias: string;
+  cloudProviderAliases?: string[];
   cloudContext?: UICloudContextStatus;
   runtimeVersion: string;
   sshd: UISSHDConfig;

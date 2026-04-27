@@ -41,6 +41,7 @@ type erunUIDeps struct {
 	listKubeContexts     func() ([]string, error)
 	ensureMCP            func(context.Context, eruncommon.OpenResult) error
 	canConnectLocalPort  func(int) bool
+	setRemoteCloudAlias  func(context.Context, string, string, string, string) (eruncommon.EnvConfig, error)
 	startTerminal        func(startTerminalSessionParams) (terminalSession, error)
 	savePastedImage      func(pastedImageSaveParams) (string, error)
 	loadDiff             func(context.Context, string) (eruncommon.DiffResult, error)
@@ -131,17 +132,18 @@ type uiPortStatus struct {
 }
 
 type uiEnvironmentConfig struct {
-	Name               string                  `json:"name"`
-	RepoPath           string                  `json:"repoPath"`
-	KubernetesContext  string                  `json:"kubernetesContext"`
-	ContainerRegistry  string                  `json:"containerRegistry"`
-	CloudProviderAlias string                  `json:"cloudProviderAlias"`
-	CloudContext       *uiCloudContextStatus   `json:"cloudContext,omitempty"`
-	RuntimeVersion     string                  `json:"runtimeVersion"`
-	SSHD               uiSSHDConfig            `json:"sshd"`
-	LocalPorts         uiEnvironmentLocalPorts `json:"localPorts"`
-	Remote             bool                    `json:"remote"`
-	Snapshot           bool                    `json:"snapshot"`
+	Name                 string                  `json:"name"`
+	RepoPath             string                  `json:"repoPath"`
+	KubernetesContext    string                  `json:"kubernetesContext"`
+	ContainerRegistry    string                  `json:"containerRegistry"`
+	CloudProviderAlias   string                  `json:"cloudProviderAlias"`
+	CloudProviderAliases []string                `json:"cloudProviderAliases,omitempty"`
+	CloudContext         *uiCloudContextStatus   `json:"cloudContext,omitempty"`
+	RuntimeVersion       string                  `json:"runtimeVersion"`
+	SSHD                 uiSSHDConfig            `json:"sshd"`
+	LocalPorts           uiEnvironmentLocalPorts `json:"localPorts"`
+	Remote               bool                    `json:"remote"`
+	Snapshot             bool                    `json:"snapshot"`
 }
 
 type uiCloudProviderStatus struct {
@@ -257,6 +259,9 @@ func NewApp(deps erunUIDeps) *App {
 	}
 	if deps.canConnectLocalPort == nil {
 		deps.canConnectLocalPort = canConnectLocalTCP
+	}
+	if deps.setRemoteCloudAlias == nil {
+		deps.setRemoteCloudAlias = setEnvironmentCloudAliasViaMCP
 	}
 	if deps.startTerminal == nil {
 		deps.startTerminal = startTerminalSession
@@ -541,6 +546,25 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 		return uiEnvironmentConfig{}, err
 	}
 	updated := environmentConfigFromUI(config, existing)
+	if existing.Remote && strings.TrimSpace(updated.CloudProviderAlias) != strings.TrimSpace(existing.CloudProviderAlias) {
+		result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+			Tenant:      selection.Tenant,
+			Environment: selection.Environment,
+		})
+		if err != nil {
+			return uiEnvironmentConfig{}, err
+		}
+		ctx := a.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		if err := a.ensureMCPAvailable(ctx, result); err != nil {
+			return uiEnvironmentConfig{}, err
+		}
+		if _, err := a.deps.setRemoteCloudAlias(ctx, mcpEndpointForOpenResult(result), selection.Tenant, selection.Environment, updated.CloudProviderAlias); err != nil {
+			return uiEnvironmentConfig{}, err
+		}
+	}
 	if err := a.deps.store.SaveEnvConfig(selection.Tenant, updated); err != nil {
 		return uiEnvironmentConfig{}, err
 	}
@@ -604,12 +628,13 @@ func (a *App) environmentConfigToUI(config eruncommon.EnvConfig, fallbackName st
 		LocalPorts: ports,
 	})
 	result := uiEnvironmentConfig{
-		Name:               name,
-		RepoPath:           strings.TrimSpace(config.RepoPath),
-		KubernetesContext:  strings.TrimSpace(config.KubernetesContext),
-		ContainerRegistry:  strings.TrimSpace(config.ContainerRegistry),
-		CloudProviderAlias: strings.TrimSpace(config.CloudProviderAlias),
-		RuntimeVersion:     strings.TrimSpace(config.RuntimeVersion),
+		Name:                 name,
+		RepoPath:             strings.TrimSpace(config.RepoPath),
+		KubernetesContext:    strings.TrimSpace(config.KubernetesContext),
+		ContainerRegistry:    strings.TrimSpace(config.ContainerRegistry),
+		CloudProviderAlias:   strings.TrimSpace(config.CloudProviderAlias),
+		CloudProviderAliases: environmentCloudProviderAliases(a.deps.store, config.CloudProviderAlias),
+		RuntimeVersion:       strings.TrimSpace(config.RuntimeVersion),
 		SSHD: uiSSHDConfig{
 			Enabled:       config.SSHD.Enabled,
 			LocalPort:     config.SSHD.LocalPort,
@@ -633,6 +658,33 @@ func (a *App) environmentConfigToUI(config eruncommon.EnvConfig, fallbackName st
 		result.CloudContext = &status
 	}
 	return result, nil
+}
+
+func environmentCloudProviderAliases(store eruncommon.CloudReadStore, current string) []string {
+	providers, err := eruncommon.ListCloudProviders(store)
+	if err != nil {
+		return nil
+	}
+	current = strings.TrimSpace(current)
+	aliases := make([]string, 0, len(providers)+1)
+	seen := make(map[string]struct{}, len(providers)+1)
+	for _, provider := range providers {
+		alias := strings.TrimSpace(provider.Alias)
+		if alias == "" {
+			continue
+		}
+		if _, ok := seen[alias]; ok {
+			continue
+		}
+		aliases = append(aliases, alias)
+		seen[alias] = struct{}{}
+	}
+	if current != "" {
+		if _, ok := seen[current]; !ok {
+			aliases = append([]string{current}, aliases...)
+		}
+	}
+	return aliases
 }
 
 func localPortStatus(port int) uiPortStatus {
@@ -1087,13 +1139,8 @@ func (a *App) LoadDiff(selection uiSelection) (eruncommon.DiffResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	mcpPort := eruncommon.MCPPortForResult(result)
-	if a.deps.ensureMCP != nil && !a.deps.canConnectLocalPort(mcpPort) {
-		if err := a.deps.ensureMCP(ctx, result); err != nil {
-			if !a.deps.canConnectLocalPort(mcpPort) {
-				return eruncommon.DiffResult{}, err
-			}
-		}
+	if err := a.ensureMCPAvailable(ctx, result); err != nil {
+		return eruncommon.DiffResult{}, err
 	}
 	endpoint := mcpEndpointForOpenResult(result)
 	diff, err := a.deps.loadDiff(ctx, endpoint)
@@ -1104,6 +1151,18 @@ func (a *App) LoadDiff(selection uiSelection) (eruncommon.DiffResult, error) {
 		return eruncommon.DiffResult{}, err
 	}
 	return a.deps.loadDiff(ctx, endpoint)
+}
+
+func (a *App) ensureMCPAvailable(ctx context.Context, result eruncommon.OpenResult) error {
+	mcpPort := eruncommon.MCPPortForResult(result)
+	if a.deps.ensureMCP != nil && !a.deps.canConnectLocalPort(mcpPort) {
+		if err := a.deps.ensureMCP(ctx, result); err != nil {
+			if !a.deps.canConnectLocalPort(mcpPort) {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (a *App) ResizeSession(cols, rows int) error {

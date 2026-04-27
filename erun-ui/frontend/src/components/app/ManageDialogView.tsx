@@ -67,7 +67,13 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
                 <ReadonlyField id="environment-config-repopath" label="Repository path" value={config.repoPath} />
                 <ReadonlyField id="environment-config-kubernetescontext" label="Kubernetes context" value={config.kubernetesContext} />
                 <ReadonlyField id="environment-config-containerregistry" label="Container registry" value={config.containerRegistry} />
-                <TextField id="environment-config-cloudprovideralias" label="Cloud alias" value={config.cloudProviderAlias} disabled={dialog.busy} onChange={(cloudProviderAlias) => controller.updateManageConfig({ cloudProviderAlias })} />
+                <CloudAliasSelect
+                  id="environment-config-cloudprovideralias"
+                  value={config.cloudProviderAlias}
+                  options={config.cloudProviderAliases || []}
+                  disabled={dialog.busy}
+                  onChange={(cloudProviderAlias) => controller.updateManageConfig({ cloudProviderAlias })}
+                />
                 <CloudContextField
                   context={config.cloudContext}
                   cloudProviderAlias={config.cloudProviderAlias}
@@ -327,6 +333,46 @@ function TextField({ id, label, value, disabled, inputMode, inputRef, onChange }
     <div className="grid gap-2">
       <Label htmlFor={id}>{label}</Label>
       <Input id={id} ref={inputRef} value={value} type="text" inputMode={inputMode} autoComplete="off" spellCheck={false} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+    </div>
+  );
+}
+
+function CloudAliasSelect({ id, value, options, disabled, onChange }: { id: string; value: string; options: string[]; disabled?: boolean; onChange: (value: string) => void }): React.ReactElement {
+  const normalizedValue = value.trim();
+  const normalizedOptions = options.map((option) => option.trim()).filter(Boolean);
+  const selectOptions = normalizedValue && !normalizedOptions.includes(normalizedValue) ? [normalizedValue, ...normalizedOptions] : normalizedOptions;
+  const selectDisabled = disabled || selectOptions.length === 0;
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor={id}>Cloud alias</Label>
+      <select
+        id={id}
+        className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex h-10 w-full rounded-[var(--radius)] border px-3 py-2 text-sm file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+        value={normalizedValue}
+        disabled={selectDisabled}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        {selectOptions.length === 0 ? (
+          <option value="">No cloud aliases configured</option>
+        ) : normalizedValue === '' ? (
+          <>
+            <option value="" disabled>
+              Select cloud alias
+            </option>
+            {selectOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </>
+        ) : (
+          selectOptions.map((option) => (
+            <option key={option} value={option}>
+              {option}
+            </option>
+          ))
+        )}
+      </select>
     </div>
   );
 }
