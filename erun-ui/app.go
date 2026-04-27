@@ -6,8 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"os/exec"
 	"strings"
 	"sync"
+	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -33,6 +36,9 @@ type erunUIDeps struct {
 	resolveBuildInfo     func() eruncommon.BuildInfo
 	resolveImageRegistry func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error)
 	deleteNamespace      eruncommon.NamespaceDeleterFunc
+	listKubeContexts     func() ([]string, error)
+	ensureMCP            func(context.Context, eruncommon.OpenResult) error
+	canConnectLocalPort  func(int) bool
 	startTerminal        func(startTerminalSessionParams) (terminalSession, error)
 	savePastedImage      func(pastedImageSaveParams) (string, error)
 	loadDiff             func(context.Context, string) (eruncommon.DiffResult, error)
@@ -70,12 +76,15 @@ type uiEnvironment struct {
 }
 
 type uiSelection struct {
-	Tenant       string `json:"tenant"`
-	Environment  string `json:"environment"`
-	Version      string `json:"version,omitempty"`
-	RuntimeImage string `json:"runtimeImage,omitempty"`
-	NoGit        bool   `json:"noGit,omitempty"`
-	Action       string `json:"action,omitempty"`
+	Tenant            string `json:"tenant"`
+	Environment       string `json:"environment"`
+	Version           string `json:"version,omitempty"`
+	RuntimeImage      string `json:"runtimeImage,omitempty"`
+	KubernetesContext string `json:"kubernetesContext,omitempty"`
+	ContainerRegistry string `json:"containerRegistry,omitempty"`
+	NoGit             bool   `json:"noGit,omitempty"`
+	SetDefaultTenant  bool   `json:"setDefaultTenant,omitempty"`
+	Action            string `json:"action,omitempty"`
 }
 
 type uiBuildDetails struct {
@@ -101,15 +110,30 @@ type uiSSHDConfig struct {
 	PublicKeyPath string `json:"publicKeyPath"`
 }
 
+type uiEnvironmentLocalPorts struct {
+	RangeStart int          `json:"rangeStart"`
+	RangeEnd   int          `json:"rangeEnd"`
+	MCP        int          `json:"mcp"`
+	SSH        int          `json:"ssh"`
+	MCPStatus  uiPortStatus `json:"mcpStatus"`
+	SSHStatus  uiPortStatus `json:"sshStatus"`
+}
+
+type uiPortStatus struct {
+	Available bool   `json:"available"`
+	Status    string `json:"status"`
+}
+
 type uiEnvironmentConfig struct {
-	Name              string       `json:"name"`
-	RepoPath          string       `json:"repoPath"`
-	KubernetesContext string       `json:"kubernetesContext"`
-	ContainerRegistry string       `json:"containerRegistry"`
-	RuntimeVersion    string       `json:"runtimeVersion"`
-	SSHD              uiSSHDConfig `json:"sshd"`
-	Remote            bool         `json:"remote"`
-	Snapshot          bool         `json:"snapshot"`
+	Name              string                  `json:"name"`
+	RepoPath          string                  `json:"repoPath"`
+	KubernetesContext string                  `json:"kubernetesContext"`
+	ContainerRegistry string                  `json:"containerRegistry"`
+	RuntimeVersion    string                  `json:"runtimeVersion"`
+	SSHD              uiSSHDConfig            `json:"sshd"`
+	LocalPorts        uiEnvironmentLocalPorts `json:"localPorts"`
+	Remote            bool                    `json:"remote"`
+	Snapshot          bool                    `json:"snapshot"`
 }
 
 type startSessionResult struct {
@@ -165,6 +189,17 @@ func NewApp(deps erunUIDeps) *App {
 	}
 	if deps.deleteNamespace == nil {
 		deps.deleteNamespace = eruncommon.DeleteKubernetesNamespace
+	}
+	if deps.listKubeContexts == nil {
+		deps.listKubeContexts = listKubernetesContexts
+	}
+	if deps.ensureMCP == nil {
+		deps.ensureMCP = func(ctx context.Context, result eruncommon.OpenResult) error {
+			return ensureMCPViaOpenCommand(ctx, deps.resolveCLIPath(), result)
+		}
+	}
+	if deps.canConnectLocalPort == nil {
+		deps.canConnectLocalPort = canConnectLocalTCP
 	}
 	if deps.startTerminal == nil {
 		deps.startTerminal = startTerminalSession
@@ -273,6 +308,14 @@ func (a *App) LoadVersionSuggestions(selection uiSelection) ([]uiVersion, error)
 	return a.runtimeVersionSuggestions(a.deps.resolveBuildInfo(), selection.Tenant), nil
 }
 
+func (a *App) LoadKubernetesContexts() ([]string, error) {
+	contexts, err := a.deps.listKubeContexts()
+	if err != nil {
+		return nil, err
+	}
+	return normalizeKubernetesContexts(contexts), nil
+}
+
 func (a *App) LoadERunConfig() (uiERunConfig, error) {
 	config, _, err := a.deps.store.LoadERunConfig()
 	if err != nil {
@@ -331,7 +374,11 @@ func (a *App) LoadEnvironmentConfig(selection uiSelection) (uiEnvironmentConfig,
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	return environmentConfigToUI(config, selection.Environment), nil
+	ports, err := eruncommon.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
+	if err != nil {
+		return uiEnvironmentConfig{}, err
+	}
+	return environmentConfigToUI(config, selection.Environment, ports), nil
 }
 
 func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentConfig) (uiEnvironmentConfig, error) {
@@ -348,7 +395,11 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 	if err := a.deps.store.SaveEnvConfig(selection.Tenant, updated); err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	return environmentConfigToUI(updated, selection.Environment), nil
+	ports, err := eruncommon.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
+	if err != nil {
+		return uiEnvironmentConfig{}, err
+	}
+	return environmentConfigToUI(updated, selection.Environment, ports), nil
 }
 
 func labelRuntimeVersionSuggestions(source, image string, suggestions []uiVersion) []uiVersion {
@@ -392,11 +443,15 @@ func tenantConfigFromUI(config uiTenantConfig, existing eruncommon.TenantConfig)
 	return existing
 }
 
-func environmentConfigToUI(config eruncommon.EnvConfig, fallbackName string) uiEnvironmentConfig {
+func environmentConfigToUI(config eruncommon.EnvConfig, fallbackName string, ports eruncommon.EnvironmentLocalPorts) uiEnvironmentConfig {
 	name := strings.TrimSpace(config.Name)
 	if name == "" {
 		name = strings.TrimSpace(fallbackName)
 	}
+	ports = eruncommon.LocalPortsForResult(eruncommon.OpenResult{
+		EnvConfig:  config,
+		LocalPorts: ports,
+	})
 	result := uiEnvironmentConfig{
 		Name:              name,
 		RepoPath:          strings.TrimSpace(config.RepoPath),
@@ -408,10 +463,40 @@ func environmentConfigToUI(config eruncommon.EnvConfig, fallbackName string) uiE
 			LocalPort:     config.SSHD.LocalPort,
 			PublicKeyPath: strings.TrimSpace(config.SSHD.PublicKeyPath),
 		},
+		LocalPorts: uiEnvironmentLocalPorts{
+			RangeStart: ports.RangeStart,
+			RangeEnd:   ports.RangeEnd,
+			MCP:        ports.MCP,
+			SSH:        ports.SSH,
+			MCPStatus:  localPortStatus(ports.MCP),
+			SSHStatus:  localPortStatus(ports.SSH),
+		},
 		Remote:   config.Remote,
 		Snapshot: config.SnapshotEnabled(),
 	}
 	return result
+}
+
+func localPortStatus(port int) uiPortStatus {
+	if port <= 0 {
+		return uiPortStatus{Status: "Not assigned"}
+	}
+	if !canConnectLocalTCP(port) {
+		return uiPortStatus{Status: "No"}
+	}
+	return uiPortStatus{Available: true, Status: "Yes"}
+}
+
+func canConnectLocalTCP(port int) bool {
+	if port <= 0 {
+		return false
+	}
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 200*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
 }
 
 func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.EnvConfig) eruncommon.EnvConfig {
@@ -488,7 +573,7 @@ func (a *App) StartSession(selection uiSelection, cols, rows int) (startSessionR
 }
 
 func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
-	return a.startCommandSession(selection, cols, rows, initSelectionKey(selection), buildInitArgs(selection.Tenant, selection.Environment, selection.Version, selection.RuntimeImage, selection.NoGit), resolveInitStartDir(a.deps.findProjectRoot), []string{appSessionEnvVar + "=1"})
+	return a.startCommandSession(selection, cols, rows, initSelectionKey(selection), buildInitArgs(selection), resolveInitStartDir(a.deps.findProjectRoot), []string{appSessionEnvVar + "=1"})
 }
 
 func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
@@ -659,7 +744,23 @@ func (a *App) LoadDiff(selection uiSelection) (eruncommon.DiffResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return a.deps.loadDiff(ctx, mcpEndpointForOpenResult(result))
+	mcpPort := eruncommon.MCPPortForResult(result)
+	if a.deps.ensureMCP != nil && !a.deps.canConnectLocalPort(mcpPort) {
+		if err := a.deps.ensureMCP(ctx, result); err != nil {
+			if !a.deps.canConnectLocalPort(mcpPort) {
+				return eruncommon.DiffResult{}, err
+			}
+		}
+	}
+	endpoint := mcpEndpointForOpenResult(result)
+	diff, err := a.deps.loadDiff(ctx, endpoint)
+	if err == nil || a.deps.ensureMCP == nil {
+		return diff, err
+	}
+	if ensureErr := a.deps.ensureMCP(ctx, result); ensureErr != nil {
+		return eruncommon.DiffResult{}, err
+	}
+	return a.deps.loadDiff(ctx, endpoint)
 }
 
 func (a *App) ResizeSession(cols, rows int) error {
@@ -863,14 +964,66 @@ func buildDetailsFrom(info eruncommon.BuildInfo) uiBuildDetails {
 	}
 }
 
+func listKubernetesContexts() ([]string, error) {
+	output, err := exec.Command("kubectl", "config", "get-contexts", "-o=name").Output()
+	if err != nil {
+		return nil, err
+	}
+	contexts := strings.Split(string(output), "\n")
+
+	currentOutput, err := exec.Command("kubectl", "config", "current-context").Output()
+	if err == nil {
+		contexts = preferCurrentKubernetesContext(contexts, string(currentOutput))
+	}
+
+	return contexts, nil
+}
+
+func normalizeKubernetesContexts(contexts []string) []string {
+	seen := make(map[string]struct{}, len(contexts))
+	result := make([]string, 0, len(contexts))
+	for _, context := range contexts {
+		context = strings.TrimSpace(context)
+		if context == "" {
+			continue
+		}
+		if _, ok := seen[context]; ok {
+			continue
+		}
+		seen[context] = struct{}{}
+		result = append(result, context)
+	}
+	return result
+}
+
+func preferCurrentKubernetesContext(contexts []string, current string) []string {
+	current = strings.TrimSpace(current)
+	if current == "" {
+		return contexts
+	}
+
+	result := make([]string, 0, len(contexts)+1)
+	result = append(result, current)
+	for _, context := range contexts {
+		if strings.TrimSpace(context) == current {
+			continue
+		}
+		result = append(result, context)
+	}
+	return result
+}
+
 func normalizeSelection(selection uiSelection) uiSelection {
 	return uiSelection{
-		Tenant:       strings.TrimSpace(selection.Tenant),
-		Environment:  strings.TrimSpace(selection.Environment),
-		Version:      strings.TrimSpace(selection.Version),
-		RuntimeImage: strings.TrimSpace(selection.RuntimeImage),
-		NoGit:        selection.NoGit,
-		Action:       strings.TrimSpace(selection.Action),
+		Tenant:            strings.TrimSpace(selection.Tenant),
+		Environment:       strings.TrimSpace(selection.Environment),
+		Version:           strings.TrimSpace(selection.Version),
+		RuntimeImage:      strings.TrimSpace(selection.RuntimeImage),
+		KubernetesContext: strings.TrimSpace(selection.KubernetesContext),
+		ContainerRegistry: strings.TrimSpace(selection.ContainerRegistry),
+		NoGit:             selection.NoGit,
+		SetDefaultTenant:  selection.SetDefaultTenant,
+		Action:            strings.TrimSpace(selection.Action),
 	}
 }
 
@@ -906,7 +1059,7 @@ func selectionKey(selection uiSelection) string {
 
 func initSelectionKey(selection uiSelection) string {
 	selection = normalizeSelection(selection)
-	return "init\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00" + selection.Version + "\x00" + selection.RuntimeImage + "\x00" + fmt.Sprintf("%t", selection.NoGit)
+	return "init\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00" + selection.Version + "\x00" + selection.RuntimeImage + "\x00" + selection.KubernetesContext + "\x00" + selection.ContainerRegistry + "\x00" + fmt.Sprintf("%t", selection.SetDefaultTenant) + "\x00" + fmt.Sprintf("%t", selection.NoGit)
 }
 
 func deploySelectionKey(selection uiSelection) string {

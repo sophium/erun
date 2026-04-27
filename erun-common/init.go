@@ -272,6 +272,16 @@ func (s tracedBootstrapStore) SaveEnvConfig(tenant string, config EnvConfig) err
 	return s.BootstrapStore.SaveEnvConfig(tenant, config)
 }
 
+func (s tracedBootstrapStore) ListEnvConfigs(tenant string) ([]EnvConfig, error) {
+	portStore, ok := s.BootstrapStore.(interface {
+		ListEnvConfigs(string) ([]EnvConfig, error)
+	})
+	if !ok {
+		return nil, ErrNotInitialized
+	}
+	return portStore.ListEnvConfigs(tenant)
+}
+
 func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, error) {
 	s = s.withDefaults()
 	params = normalizeBootstrapParams(params)
@@ -657,11 +667,11 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 }
 
 func tenantConfirmationLabel(tenant, projectRoot string) string {
-	return fmt.Sprintf("Initialize tenant %q (path: %s) as the default tenant?", tenant, projectRoot)
+	return fmt.Sprintf("Initialize tenant %q (path: %s) as the default tenant", tenant, projectRoot)
 }
 
 func environmentConfirmationLabel(tenant, envName string) string {
-	return fmt.Sprintf("Initialize default environment %q for tenant %q?", envName, tenant)
+	return fmt.Sprintf("Initialize default environment %q for tenant %q", envName, tenant)
 }
 
 func kubernetesContextLabel(tenant, envName string) string {
@@ -677,7 +687,7 @@ func remoteRepositoryLabel(tenant, envName string) string {
 }
 
 func remoteKeyImportLabel(tenant, envName string) string {
-	return fmt.Sprintf("Import the SSH public key above for environment %q in tenant %q and continue?", envName, tenant)
+	return fmt.Sprintf("Import the SSH public key above for environment %q in tenant %q and continue", envName, tenant)
 }
 
 func KubernetesNamespaceName(tenant, envName string) string {

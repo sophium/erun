@@ -103,8 +103,12 @@ func TestRuntimeEntrypointDisablesStrictModesForPVCBackedHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read runtime entrypoint: %v", err)
 	}
-	if !strings.Contains(string(data), "StrictModes no") {
+	content := string(data)
+	if !strings.Contains(content, "StrictModes no") {
 		t.Fatalf("expected runtime entrypoint to disable sshd strict modes for PVC-backed home directory, got:\n%s", string(data))
+	}
+	if !strings.Contains(content, "Port ${ERUN_SSHD_PORT:-17022}") {
+		t.Fatalf("expected runtime entrypoint to configure sshd from ERUN_SSHD_PORT, got:\n%s", content)
 	}
 }
 

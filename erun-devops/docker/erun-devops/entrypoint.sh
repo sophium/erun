@@ -169,7 +169,7 @@ start_sshd() {
     chmod 644 "${host_key}.pub"
 
     cat >"${config_file}" <<EOF
-Port 2222
+Port ${ERUN_SSHD_PORT:-17022}
 ListenAddress 0.0.0.0
 HostKey ${host_key}
 AuthorizedKeysFile ${HOME}/.ssh/authorized_keys

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -76,15 +78,44 @@ func buildOpenArgs(tenant, environment string) []string {
 	return []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment)}
 }
 
-func buildInitArgs(tenant, environment, version, runtimeImage string, noGit bool) []string {
-	args := []string{"init", strings.TrimSpace(tenant), strings.TrimSpace(environment), "--remote"}
-	if version = strings.TrimSpace(version); version != "" {
+func buildOpenNoShellArgs(tenant, environment string) []string {
+	return []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment), "--no-shell", "--no-alias-prompt"}
+}
+
+func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncommon.OpenResult) error {
+	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
+	cmd := exec.CommandContext(ctx, cliPath, args...)
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(string(output))
+	if detail == "" {
+		return fmt.Errorf("activate MCP port-forward: %w", err)
+	}
+	return fmt.Errorf("activate MCP port-forward: %w: %s", err, detail)
+}
+
+func buildInitArgs(selection uiSelection) []string {
+	args := []string{"init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment), "--remote"}
+	if version := strings.TrimSpace(selection.Version); version != "" {
 		args = append(args, "--version", version)
 	}
-	if runtimeImage = strings.TrimSpace(runtimeImage); runtimeImage != "" {
+	if runtimeImage := strings.TrimSpace(selection.RuntimeImage); runtimeImage != "" {
 		args = append(args, "--runtime-image", runtimeImage)
 	}
-	if noGit {
+	if kubernetesContext := strings.TrimSpace(selection.KubernetesContext); kubernetesContext != "" {
+		args = append(args, "--kubernetes-context", kubernetesContext)
+	}
+	if containerRegistry := strings.TrimSpace(selection.ContainerRegistry); containerRegistry != "" {
+		args = append(args, "--container-registry", containerRegistry)
+	}
+	args = append(
+		args,
+		"--set-default-tenant="+boolArg(selection.SetDefaultTenant),
+		"--confirm-environment=true",
+	)
+	if selection.NoGit {
 		args = append(args, "--no-git")
 	}
 	return args
@@ -143,4 +174,11 @@ func shellQuote(value string) string {
 
 func powerShellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+func boolArg(value bool) string {
+	if value {
+		return "true"
+	}
+	return "false"
 }

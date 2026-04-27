@@ -1245,9 +1245,6 @@ func TestRootCommandTreatsDeployAsEnvironmentWhenDeployContextAbsent(t *testing.
 			return common.KubernetesDeployContext{Dir: t.TempDir()}, nil
 		},
 		PromptRunner: func(prompt promptui.Prompt) (string, error) {
-			if !prompt.IsConfirm {
-				t.Fatalf("expected confirm prompt, got %+v", prompt)
-			}
 			if prompt.Label != fmt.Sprintf("create tenant-a-devops chart in %s", projectRoot) {
 				t.Fatalf("unexpected prompt label: %q", prompt.Label)
 			}

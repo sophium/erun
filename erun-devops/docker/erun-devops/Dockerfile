@@ -115,7 +115,7 @@ WORKDIR /home/erun
 
 USER erun
 
-EXPOSE 17000
+EXPOSE 17000 17022
 
 ENTRYPOINT ["erun-devops-entrypoint"]
 CMD ["--host", "0.0.0.0"]

@@ -7,10 +7,7 @@ import (
 	"strings"
 )
 
-const (
-	DefaultSSHUser = "erun"
-	RemoteSSHDPort = 2222
-)
+const DefaultSSHUser = "erun"
 
 type SSHConnectionInfo struct {
 	User           string

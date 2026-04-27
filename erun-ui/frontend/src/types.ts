@@ -17,7 +17,10 @@ export interface UISelection {
   environment: string;
   version?: string;
   runtimeImage?: string;
+  kubernetesContext?: string;
+  containerRegistry?: string;
   noGit?: boolean;
+  setDefaultTenant?: boolean;
   action?: EnvironmentActionMode;
 }
 
@@ -33,6 +36,7 @@ export interface UIState {
   message?: string;
   build?: UIBuildDetails;
   versionSuggestions?: UIVersionSuggestion[];
+  kubernetesContexts?: string[];
 }
 
 export interface UIVersionSuggestion {
@@ -57,6 +61,20 @@ export interface UISSHDConfig {
   publicKeyPath: string;
 }
 
+export interface UIEnvironmentLocalPorts {
+  rangeStart: number;
+  rangeEnd: number;
+  mcp: number;
+  ssh: number;
+  mcpStatus: UIPortStatus;
+  sshStatus: UIPortStatus;
+}
+
+export interface UIPortStatus {
+  available: boolean;
+  status: string;
+}
+
 export interface UIEnvironmentConfig {
   name: string;
   repoPath: string;
@@ -64,6 +82,7 @@ export interface UIEnvironmentConfig {
   containerRegistry: string;
   runtimeVersion: string;
   sshd: UISSHDConfig;
+  localPorts: UIEnvironmentLocalPorts;
   remote: boolean;
   snapshot: boolean;
 }

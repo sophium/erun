@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/adrg/xdg"
@@ -143,8 +144,8 @@ func TestRootCommandRunsInitWhenNoSubcommand(t *testing.T) {
 	}
 
 	wantPromptLabels := []string{
-		fmt.Sprintf("Initialize tenant %q (path: %s) as the default tenant?", "tenant-a", projectRoot),
-		fmt.Sprintf("Initialize default environment %q for tenant %q?", common.DefaultEnvironment, "tenant-a"),
+		fmt.Sprintf("Initialize tenant %q (path: %s) as the default tenant", "tenant-a", projectRoot),
+		fmt.Sprintf("Initialize default environment %q for tenant %q", common.DefaultEnvironment, "tenant-a"),
 		fmt.Sprintf("Container registry for environment %q in tenant %q", common.DefaultEnvironment, "tenant-a"),
 	}
 	if len(promptLabels) != len(wantPromptLabels) {
@@ -473,10 +474,10 @@ func TestInitCommandDecliningDefaultTenantStillInitializes(t *testing.T) {
 		PromptRunner: func(prompt promptui.Prompt) (string, error) {
 			label := fmt.Sprint(prompt.Label)
 			promptLabels = append(promptLabels, label)
-			if prompt.IsConfirm && label == fmt.Sprintf("Initialize tenant %q (path: %s) as the default tenant?", "petios", projectRoot) {
+			if label == fmt.Sprintf("Initialize tenant %q (path: %s) as the default tenant", "petios", projectRoot) {
 				return "n", nil
 			}
-			if prompt.IsConfirm {
+			if prompt.Templates != nil {
 				return "y", nil
 			}
 			return "", nil
@@ -521,8 +522,8 @@ func TestInitCommandDecliningDefaultTenantStillInitializes(t *testing.T) {
 		t.Fatalf("unexpected env config: %+v", envConfig)
 	}
 	wantPromptLabels := []string{
-		fmt.Sprintf("Initialize tenant %q (path: %s) as the default tenant?", "petios", projectRoot),
-		fmt.Sprintf("Initialize default environment %q for tenant %q?", "review", "petios"),
+		fmt.Sprintf("Initialize tenant %q (path: %s) as the default tenant", "petios", projectRoot),
+		fmt.Sprintf("Initialize default environment %q for tenant %q", "review", "petios"),
 		fmt.Sprintf("Container registry for environment %q in tenant %q", "review", "petios"),
 	}
 	if len(promptLabels) != len(wantPromptLabels) {
@@ -719,6 +720,26 @@ func TestConfirmPromptDefaultAndErrors(t *testing.T) {
 	expectedErr := errors.New("boom")
 	if ok, err := confirmPrompt(run("", expectedErr), "label"); !errors.Is(err, expectedErr) || ok {
 		t.Fatalf("expected original error, got %v %v", ok, err)
+	}
+}
+
+func TestConfirmPromptUsesNormalPromptWithOwnQuestionMarker(t *testing.T) {
+	var captured promptui.Prompt
+	ok, err := confirmPrompt(func(prompt promptui.Prompt) (string, error) {
+		captured = prompt
+		return "n", nil
+	}, "label?")
+	if err != nil || ok {
+		t.Fatalf("expected rejection, got %v %v", ok, err)
+	}
+	if captured.IsConfirm {
+		t.Fatalf("expected normal prompt to avoid promptui confirm abort behavior: %+v", captured)
+	}
+	if captured.Label != "label" {
+		t.Fatalf("expected trailing question mark to be removed from label, got %q", captured.Label)
+	}
+	if captured.Templates == nil || !strings.Contains(captured.Templates.Prompt, "[Y/n]") {
+		t.Fatalf("expected explicit confirm prompt template, got %+v", captured.Templates)
 	}
 }
 

@@ -93,7 +93,7 @@ func ensureDefaultDevopsFile(ctx Context, path string, mode os.FileMode, content
 		if bytes.Equal(existing, content) {
 			return nil
 		}
-		if !shouldReplaceDefaultDevopsFile(path, existing) {
+		if !shouldReplaceDefaultDevopsFile(path, existing, content) {
 			return nil
 		}
 	case !os.IsNotExist(err):
@@ -115,21 +115,33 @@ func ensureDefaultDevopsFile(ctx Context, path string, mode os.FileMode, content
 	return os.Chmod(path, mode)
 }
 
-func shouldReplaceDefaultDevopsFile(path string, existing []byte) bool {
-	if filepath.Base(path) != "Dockerfile" {
-		return false
-	}
-
+func shouldReplaceDefaultDevopsFile(path string, existing, content []byte) bool {
 	legacy := []string{
 		"ARG ERUN_BASE_IMAGE=erunpaas/erun-devops\nARG ERUN_BASE_VERSION=1.0.0\n\nFROM ${ERUN_BASE_IMAGE}:${ERUN_BASE_VERSION}\n",
 		"ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.0.0\n\nFROM ${ERUN_BASE_TAG}\n",
 		"ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.0.0\n\nFROM ${ERUN_BASE_TAG}\n\nENTRYPOINT [\"/bin/sh\", \"-lc\", \"if [ \\\"${1:-}\\\" = shell ]; then shift; repo_dir=\\\"${ERUN_REPO_PATH:-${HOME}/git/erun}\\\"; [ -d \\\"$repo_dir\\\" ] && cd \\\"$repo_dir\\\"; exec /bin/bash -i; fi; exec erun-devops-entrypoint \\\"$@\\\"\", \"erun-devops-wrapper\"]\n",
 	}
 	current := strings.TrimSpace(string(existing))
-	for _, candidate := range legacy {
-		if current == strings.TrimSpace(candidate) {
-			return true
+	switch filepath.Base(path) {
+	case "Dockerfile":
+		for _, candidate := range legacy {
+			if current == strings.TrimSpace(candidate) {
+				return true
+			}
 		}
+	case "service.yaml":
+		return current == strings.TrimSpace(legacyDefaultDevopsServiceTemplate(content))
 	}
 	return false
+}
+
+func legacyDefaultDevopsServiceTemplate(content []byte) string {
+	return strings.NewReplacer(
+		"{{- $mcpPort := default 17000 .Values.mcpPort -}}\n{{- $sshPort := default 17022 .Values.sshPort -}}\n",
+		"",
+		"            - name: ERUN_MCP_PORT\n              value: {{ $mcpPort | quote }}\n            - name: ERUN_SSHD_PORT\n              value: {{ $sshPort | quote }}\n",
+		"",
+		"            - containerPort: {{ $mcpPort }}\n              name: mcp\n            - containerPort: {{ $sshPort }}\n              name: ssh",
+		"            - containerPort: 17000\n              name: mcp\n            - containerPort: 2222\n              name: ssh",
+	).Replace(string(content))
 }

@@ -1,3 +1,5 @@
+{{- $mcpPort := default 17000 .Values.mcpPort -}}
+{{- $sshPort := default 17022 .Values.sshPort -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -149,6 +151,10 @@ spec:
               value: {{ required "environment is required" .Values.environment | quote }}
             - name: ERUN_SSHD_ENABLED
               value: {{ if .Values.sshdEnabled }}"true"{{ else }}"false"{{ end }}
+            - name: ERUN_MCP_PORT
+              value: {{ $mcpPort | quote }}
+            - name: ERUN_SSHD_PORT
+              value: {{ $sshPort | quote }}
             - name: ERUN_NAMESPACE
               valueFrom:
                 fieldRef:
@@ -157,9 +163,9 @@ spec:
             runAsUser: 1000
             runAsGroup: 1000
           ports:
-            - containerPort: 17000
+            - containerPort: {{ $mcpPort }}
               name: mcp
-            - containerPort: 2222
+            - containerPort: {{ $sshPort }}
               name: ssh
           resources:
             limits:

@@ -284,6 +284,8 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 				KubernetesContext: result.EnvConfig.KubernetesContext,
 				ExpectedRepoPath:  common.RemoteShellWorktreePath(shellReq),
 				ExpectedSSHD:      expectedSSHD,
+				ExpectedMCPPort:   common.MCPPortForResult(result),
+				ExpectedSSHPort:   common.SSHLocalPortForResult(result),
 			})
 			if err != nil {
 				return err

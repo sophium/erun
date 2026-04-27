@@ -30,7 +30,12 @@ export interface EnvironmentDialogState {
   tenant: string;
   environment: string;
   version: string;
+  kubernetesContext: string;
+  kubernetesContexts: string[];
+  kubernetesContextsLoading: boolean;
+  containerRegistry: string;
   noGit: boolean;
+  setDefaultTenant: boolean;
   versionImage: string;
   choicesOpen: boolean;
   busy: boolean;
@@ -101,7 +106,12 @@ export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
   tenant: '',
   environment: '',
   version: '',
+  kubernetesContext: '',
+  kubernetesContexts: [],
+  kubernetesContextsLoading: false,
+  containerRegistry: 'erunpaas',
   noGit: false,
+  setDefaultTenant: true,
   versionImage: '',
   choicesOpen: false,
   busy: false,
@@ -158,6 +168,20 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
     enabled: false,
     localPort: 0,
     publicKeyPath: '',
+  },
+  localPorts: {
+    rangeStart: 0,
+    rangeEnd: 0,
+    mcp: 0,
+    ssh: 0,
+    mcpStatus: {
+      available: false,
+      status: '',
+    },
+    sshStatus: {
+      available: false,
+      status: '',
+    },
   },
   remote: false,
   snapshot: true,

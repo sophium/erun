@@ -1,7 +1,11 @@
 package cmd
 
 import (
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"testing"
 
 	common "github.com/sophium/erun/erun-common"
@@ -27,10 +31,32 @@ func TestKubectlMCPPortForwardArgs(t *testing.T) {
 		"--namespace", "tenant-a-dev",
 		"port-forward",
 		"deployment/tenant-a-devops",
-		"17100:17000",
+		"17100:17100",
 		"--address", "127.0.0.1",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected args:\ngot:  %v\nwant: %v", got, want)
+	}
+}
+
+func TestCanReachLocalMCPEndpointRequiresHTTPResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	host, portValue, err := net.SplitHostPort(server.Listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split address: %v", err)
+	}
+	if host == "" {
+		t.Fatal("expected listener host")
+	}
+	port, err := strconv.Atoi(portValue)
+	if err != nil {
+		t.Fatalf("parse port: %v", err)
+	}
+	if !canReachLocalMCPEndpoint(port) {
+		t.Fatal("expected HTTP endpoint to be reachable")
 	}
 }

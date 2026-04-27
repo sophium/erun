@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import type { UIVersionSuggestion } from '@/types';
+import type { UIPortStatus, UIVersionSuggestion } from '@/types';
 import { cn } from '@/lib/utils';
 
 const dialogErrorClassName =
@@ -80,18 +80,22 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
                 />
                 <CheckboxField id="environment-config-remote" label="remote" checked={config.remote} disabled onChange={() => {}} />
                 <CheckboxField id="environment-config-snapshot" label="snapshot" checked={config.snapshot} disabled={dialog.busy} onChange={(snapshot) => controller.updateManageConfig({ snapshot })} />
+                <ReadonlyField id="environment-config-localportrange" label="assigned local port range" value={portRangeValue(config.localPorts.rangeStart, config.localPorts.rangeEnd)} />
+                <PortStatusTable
+                  rows={[
+                    { service: 'mcp', port: config.localPorts.mcp, status: config.localPorts.mcpStatus },
+                    { service: 'ssh', port: config.localPorts.ssh, status: config.localPorts.sshStatus },
+                  ]}
+                />
                 <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
                   <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">sshd</div>
                   <CheckboxField id="environment-config-sshd-enabled" label="enabled" checked={config.sshd.enabled} disabled onChange={() => {}} />
-                  <TextField
+                  <ReadonlyField
                     id="environment-config-sshd-localport"
                     label="localport"
                     value={config.sshd.localPort > 0 ? String(config.sshd.localPort) : ''}
-                    disabled
-                    inputMode="numeric"
-                    onChange={() => {}}
                   />
-                  <TextField id="environment-config-sshd-publickeypath" label="publickeypath" value={config.sshd.publicKeyPath} disabled onChange={() => {}} />
+                  <ReadonlyField id="environment-config-sshd-publickeypath" label="publickeypath" value={config.sshd.publicKeyPath} />
                 </div>
                 {confirmingDelete && (
                   <div className="grid gap-3">
@@ -245,7 +249,57 @@ function TextField({ id, label, value, disabled, inputMode, inputRef, onChange }
 }
 
 function ReadonlyField({ id, label, value }: { id: string; label: string; value: string }): React.ReactElement {
-  return <TextField id={id} label={label} value={value} disabled onChange={() => {}} />;
+  return (
+    <div className="grid gap-2">
+      <div id={id} className="text-sm font-medium leading-none">
+        {label}
+      </div>
+      <div
+        className="min-h-9 rounded-[var(--radius)] border border-border bg-muted/35 px-3 py-2 text-sm leading-[1.35] text-muted-foreground [overflow-wrap:anywhere]"
+        aria-labelledby={id}
+      >
+        {value || 'none'}
+      </div>
+    </div>
+  );
+}
+
+function PortStatusTable({ rows }: { rows: { service: string; port: number; status: UIPortStatus }[] }): React.ReactElement {
+  return (
+    <div className="grid gap-2">
+      <div className="text-sm font-medium leading-none">ports</div>
+      <div className="overflow-hidden rounded-[var(--radius)] border border-border bg-muted/35 text-xs leading-[1.3]">
+        <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-3 border-b border-border px-3 py-2 text-[11px] font-semibold uppercase leading-[1.2] text-muted-foreground">
+          <div>port</div>
+          <div>service</div>
+          <div>available</div>
+        </div>
+        {rows.map((row) => (
+          <div key={row.service} className="grid min-h-8 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-3 py-1 last:border-b-0">
+            <div className="font-mono text-xs text-foreground">{row.port > 0 ? row.port : 'none'}</div>
+            <div className="text-foreground">{row.service}</div>
+            <AvailabilityDot status={row.status} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AvailabilityDot({ status }: { status: UIPortStatus }): React.ReactElement {
+  const label = status.available ? 'available' : 'unavailable';
+  return (
+    <span className="inline-flex justify-end" aria-label={label} title={label}>
+      <span className={cn('size-2.5 rounded-full', status.available ? 'bg-green-600' : 'bg-destructive')} aria-hidden="true" />
+    </span>
+  );
+}
+
+function portRangeValue(rangeStart: number, rangeEnd: number): string {
+  if (rangeStart <= 0 || rangeEnd <= 0) {
+    return '';
+  }
+  return `${rangeStart}-${rangeEnd}`;
 }
 
 function CheckboxField({ id, label, checked, disabled, onChange }: { id: string; label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }): React.ReactElement {

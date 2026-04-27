@@ -17,6 +17,13 @@ type remoteRepositoryState struct {
 const remoteRepositoryAccessRetryInterval = 2 * time.Second
 
 func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, kubernetesContext, projectRoot string) error {
+	ports := DefaultEnvironmentLocalPorts()
+	if portStore, ok := s.Store.(environmentPortStore); ok {
+		resolved, err := ResolveEnvironmentLocalPorts(portStore, tenant, envName)
+		if err == nil {
+			ports = resolved
+		}
+	}
 	target := OpenResult{
 		Tenant:      tenant,
 		Environment: envName,
@@ -31,8 +38,9 @@ func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tena
 			KubernetesContext: kubernetesContext,
 			Remote:            true,
 		},
-		RepoPath: projectRoot,
-		Title:    tenant + "-" + envName,
+		LocalPorts: ports,
+		RepoPath:   projectRoot,
+		Title:      tenant + "-" + envName,
 	}
 	req := ShellLaunchParamsFromResult(target)
 

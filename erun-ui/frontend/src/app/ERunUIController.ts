@@ -7,6 +7,7 @@ import {
   LoadDiff,
   LoadEnvironmentConfig,
   LoadERunConfig,
+  LoadKubernetesContexts,
   LoadState,
   LoadTenantConfig,
   LoadVersionSuggestions,
@@ -35,6 +36,7 @@ import {
   MIN_SIDEBAR_WIDTH,
   REVIEW_WIDTH_STORAGE_KEY,
   SIDEBAR_WIDTH_STORAGE_KEY,
+  defaultEnvironmentConfig,
   defaultEnvironmentDialog,
   defaultGlobalConfigDialog,
   defaultManageDialog,
@@ -375,13 +377,19 @@ export class ERunUIController {
       tenant: tenantDefault,
       environment: '',
       version: this.state.versionSuggestions[0]?.version || '',
+      kubernetesContext: '',
+      kubernetesContexts: [],
+      kubernetesContextsLoading: true,
+      containerRegistry: 'erunpaas',
       noGit: false,
+      setDefaultTenant: true,
       versionImage: this.state.versionSuggestions[0]?.image || '',
       choicesOpen: false,
       busy: false,
       error: '',
     };
     this.emit();
+    void this.refreshKubernetesContexts();
     void this.refreshDialogVersionSuggestions(true);
   }
 
@@ -449,8 +457,11 @@ export class ERunUIController {
     const tenant = normalizeDialogValue(dialog.tenant);
     const environment = normalizeDialogValue(dialog.environment);
     const version = normalizeDialogValue(dialog.version);
+    const kubernetesContext = normalizeDialogValue(dialog.kubernetesContext);
+    const containerRegistry = normalizeDialogValue(dialog.containerRegistry);
+    const isInit = dialog.actionMode === 'init';
 
-    if (!tenant || !environment || (dialog.actionMode === 'deploy' && !version)) {
+    if (!tenant || !environment || (dialog.actionMode === 'deploy' && !version) || (isInit && (!kubernetesContext || !containerRegistry))) {
       this.state.environmentDialog = { ...dialog, error: '' };
       this.emit();
       form.reportValidity();
@@ -462,7 +473,10 @@ export class ERunUIController {
       environment,
       version,
       runtimeImage: this.resolveEnvironmentRuntimeImage(version),
+      kubernetesContext: isInit ? kubernetesContext : undefined,
+      containerRegistry: isInit ? containerRegistry : undefined,
       noGit: dialog.noGit,
+      setDefaultTenant: isInit ? dialog.setDefaultTenant : undefined,
     };
 
     this.state.environmentDialog = {
@@ -470,6 +484,8 @@ export class ERunUIController {
       tenant,
       environment,
       version,
+      kubernetesContext,
+      containerRegistry,
       busy: true,
       error: '',
       choicesOpen: false,
@@ -506,14 +522,8 @@ export class ERunUIController {
       version: '',
       versionImage: '',
       config: {
+        ...defaultEnvironmentConfig(),
         name: selection.environment,
-        repoPath: '',
-        kubernetesContext: '',
-        containerRegistry: '',
-        runtimeVersion: '',
-        sshd: { enabled: false, localPort: 0, publicKeyPath: '' },
-        remote: false,
-        snapshot: true,
       },
       configLoading: true,
       confirmation: '',
@@ -673,7 +683,7 @@ export class ERunUIController {
     this.state.manageDialog = { ...dialog, busy: true, error: '' };
     this.emit();
     try {
-      const result = (await SaveEnvironmentConfig(selection, dialog.config)) as UIEnvironmentConfig;
+      const result = (await SaveEnvironmentConfig(selection, dialog.config as Parameters<typeof SaveEnvironmentConfig>[1])) as UIEnvironmentConfig;
       this.state.manageDialog = {
         ...this.state.manageDialog,
         config: result,
@@ -1071,6 +1081,7 @@ export class ERunUIController {
       this.state.tenants = loaded.tenants || [];
       this.state.selected = loaded.selected || null;
       this.state.versionSuggestions = normalizeVersionSuggestions(loaded.versionSuggestions || []);
+      this.selectLoadedKubernetesContexts(loaded.kubernetesContexts || []);
       this.emit();
 
       if (loaded.message) {
@@ -1132,9 +1143,59 @@ export class ERunUIController {
       const loaded = (await LoadState()) as UIState;
       this.state.tenants = loaded.tenants || [];
       this.state.versionSuggestions = normalizeVersionSuggestions(loaded.versionSuggestions || this.state.versionSuggestions);
+      this.selectLoadedKubernetesContexts(loaded.kubernetesContexts || []);
       this.emit();
     } catch {
     }
+  }
+
+  private async refreshKubernetesContexts(): Promise<void> {
+    try {
+      const contexts = ((await LoadKubernetesContexts()) as string[]).map((context) => context.trim()).filter(Boolean);
+      if (!this.state.environmentDialog.open || this.state.environmentDialog.actionMode !== 'init') {
+        return;
+      }
+      this.state.environmentDialog = {
+        ...this.state.environmentDialog,
+        kubernetesContexts: contexts,
+        kubernetesContext: this.resolveDialogKubernetesContext(contexts),
+        kubernetesContextsLoading: false,
+      };
+      this.emit();
+    } catch (error) {
+      if (!this.state.environmentDialog.open || this.state.environmentDialog.actionMode !== 'init') {
+        return;
+      }
+      this.state.environmentDialog = {
+        ...this.state.environmentDialog,
+        kubernetesContexts: [],
+        kubernetesContext: '',
+        kubernetesContextsLoading: false,
+        error: readError(error),
+      };
+      this.emit();
+    }
+  }
+
+  private resolveDialogKubernetesContext(contexts: string[]): string {
+    const current = normalizeDialogValue(this.state.environmentDialog.kubernetesContext);
+    if (current && contexts.includes(current)) {
+      return current;
+    }
+    return contexts[0] || '';
+  }
+
+  private selectLoadedKubernetesContexts(contexts: string[]): void {
+    if (!this.state.environmentDialog.open || this.state.environmentDialog.actionMode !== 'init') {
+      return;
+    }
+    const normalized = contexts.map((context) => context.trim()).filter(Boolean);
+    this.state.environmentDialog = {
+      ...this.state.environmentDialog,
+      kubernetesContexts: normalized,
+      kubernetesContext: this.resolveDialogKubernetesContext(normalized),
+      kubernetesContextsLoading: false,
+    };
   }
 
   private scheduleDialogVersionSuggestionRefresh(selectDefault: boolean): void {
@@ -1257,9 +1318,10 @@ export class ERunUIController {
     if (payload.sessionId !== this.state.sessionId) {
       return;
     }
-    if ((initSelection || deploySelection) && !payload.reason) {
+    const completedSelection = initSelection || deploySelection;
+    if (completedSelection && !payload.reason) {
       try {
-        await this.openSelection(initSelection || deploySelection);
+        await this.openSelection(completedSelection);
       } catch (error) {
         this.showTerminalMessage(readError(error));
       }

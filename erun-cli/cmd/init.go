@@ -18,6 +18,8 @@ const (
 
 func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) *cobra.Command {
 	params := common.BootstrapInitParams{}
+	setDefaultTenant := false
+	confirmEnvironment := false
 
 	cmd := &cobra.Command{
 		Use:          "init [TENANT] [ENVIRONMENT]",
@@ -38,6 +40,12 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 			if runParams.Remote && strings.TrimSpace(runParams.Environment) == "" {
 				return fmt.Errorf("environment is required with --remote")
 			}
+			if cmd.Flags().Changed("set-default-tenant") {
+				runParams.ConfirmTenant = &setDefaultTenant
+			}
+			if cmd.Flags().Changed("confirm-environment") {
+				runParams.ConfirmEnvironment = &confirmEnvironment
+			}
 			return runInit(commandContext(cmd), runParams)
 		},
 	}
@@ -51,6 +59,8 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	cmd.Flags().StringVar(&params.ContainerRegistry, "container-registry", "", "Container registry to associate with the environment")
 	cmd.Flags().BoolVar(&params.Remote, "remote", false, "Initialize the tenant repository inside the runtime pod instead of the local host")
 	cmd.Flags().BoolVar(&params.NoGit, "no-git", false, "Skip remote Git checkout setup when used with --remote")
+	cmd.Flags().BoolVar(&setDefaultTenant, "set-default-tenant", false, "Set the initialized tenant as the default tenant")
+	cmd.Flags().BoolVar(&confirmEnvironment, "confirm-environment", false, "Confirm environment initialization without prompting")
 	cmd.Flags().BoolVarP(&params.AutoApprove, "yes", "y", false, "Automatically approve initialization prompts")
 	addDryRunFlag(cmd)
 	return cmd
@@ -99,10 +109,23 @@ func remoteRepositoryURLPrompt(run PromptRunner, label string) (string, error) {
 }
 
 func confirmPrompt(run PromptRunner, label string) (bool, error) {
+	label = strings.TrimRight(strings.TrimSpace(label), "?")
 	prompt := promptui.Prompt{
-		Label:     label,
-		IsConfirm: true,
-		Default:   "y",
+		Label: label,
+		Templates: &promptui.PromptTemplates{
+			Prompt:  `{{ "?" | blue }} {{ . | bold }}? {{ "[Y/n]" | faint }} `,
+			Valid:   `{{ "?" | blue }} {{ . | bold }}? {{ "[Y/n]" | faint }} `,
+			Invalid: `{{ "?" | blue }} {{ . | bold }}? {{ "[Y/n]" | faint }} `,
+			Success: `{{ . | faint }}? `,
+		},
+		Validate: func(input string) error {
+			switch strings.ToLower(strings.TrimSpace(input)) {
+			case "", "y", "n":
+				return nil
+			default:
+				return fmt.Errorf("enter y or n")
+			}
+		},
 	}
 
 	result, err := run(prompt)
@@ -120,7 +143,7 @@ func confirmPrompt(run PromptRunner, label string) (bool, error) {
 		return true, nil
 	}
 
-	return strings.EqualFold(result, "y"), nil
+	return strings.EqualFold(strings.TrimSpace(result), "y"), nil
 }
 
 func kubernetesContextPrompt(run PromptRunner, selectRun SelectRunner, list KubernetesContextsLister, label string) (string, error) {
