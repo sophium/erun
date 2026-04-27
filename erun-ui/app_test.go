@@ -438,6 +438,14 @@ func TestBuildOpenArgsTrimsTenantAndEnvironment(t *testing.T) {
 	}
 }
 
+func TestBuildOpenArgsIncludesDebugVerbosity(t *testing.T) {
+	got := buildOpenArgs(" erun ", " local ", true)
+	want := []string{"-vv", "open", "erun", "local"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected args: got %+v want %+v", got, want)
+	}
+}
+
 func TestBuildOpenNoShellArgsTrimsTenantAndEnvironment(t *testing.T) {
 	got := buildOpenNoShellArgs(" erun ", " local ")
 	want := []string{"open", "erun", "local", "--no-shell", "--no-alias-prompt"}
@@ -487,7 +495,7 @@ func TestBuildInitArgsIncludesRuntimeVersion(t *testing.T) {
 }
 
 func TestBuildDeployArgsIncludesRuntimeVersion(t *testing.T) {
-	got := buildDeployArgs(" erun ", " remote ", " 1.0.19 ", " erun-devops ")
+	got := buildDeployArgs(uiSelection{Tenant: " erun ", Environment: " remote ", Version: " 1.0.19 ", RuntimeImage: " erun-devops "})
 	want := []string{"open", "erun", "remote", "--no-shell", "--no-alias-prompt", "--version", "1.0.19", "--runtime-image", "erun-devops"}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected args length: got %+v want %+v", got, want)
@@ -944,7 +952,27 @@ func TestLoadAndSaveERunConfig(t *testing.T) {
 func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	projectRoot := t.TempDir()
 	snapshot := true
+	rootConfig := &eruncommon.ERunConfig{
+		CloudProviders: []eruncommon.CloudProviderConfig{
+			{Alias: "team-cloud", Provider: eruncommon.CloudProviderAWS},
+		},
+		CloudContexts: []eruncommon.CloudContextConfig{
+			{
+				Name:               "team-context",
+				Provider:           eruncommon.CloudProviderAWS,
+				CloudProviderAlias: "team-cloud",
+				Region:             eruncommon.DefaultCloudContextRegion,
+				InstanceID:         "i-test",
+				InstanceType:       eruncommon.DefaultCloudContextInstanceType,
+				DiskType:           eruncommon.DefaultCloudContextDiskType,
+				DiskSizeGB:         eruncommon.DefaultCloudContextDiskSizeGB,
+				KubernetesContext:  "cluster-old",
+				Status:             eruncommon.CloudContextStatusStopped,
+			},
+		},
+	}
 	store := stubUIStore{
+		config: rootConfig,
 		tenants: map[string]eruncommon.TenantConfig{
 			"frs": {
 				Name:        "frs",
@@ -953,11 +981,12 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/prod": {
-				Name:              "prod",
-				RepoPath:          projectRoot,
-				KubernetesContext: "cluster-old",
-				ContainerRegistry: "registry.example/old",
-				RuntimeVersion:    "1.0.0",
+				Name:               "prod",
+				RepoPath:           projectRoot,
+				KubernetesContext:  "cluster-old",
+				ContainerRegistry:  "registry.example/old",
+				CloudProviderAlias: "team-cloud",
+				RuntimeVersion:     "1.0.0",
 				SSHD: eruncommon.SSHDConfig{
 					Enabled:       false,
 					LocalPort:     60022,
@@ -977,16 +1006,20 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	if loaded.Name != "prod" || loaded.RepoPath != projectRoot || loaded.KubernetesContext != "cluster-old" {
 		t.Fatalf("unexpected loaded config: %+v", loaded)
 	}
+	if loaded.CloudContext == nil || loaded.CloudContext.Name != "team-context" || loaded.CloudContext.Status != eruncommon.CloudContextStatusStopped {
+		t.Fatalf("expected linked cloud context, got %+v", loaded.CloudContext)
+	}
 	if loaded.LocalPorts.RangeStart != 17000 || loaded.LocalPorts.RangeEnd != 17099 || loaded.LocalPorts.MCP != 17000 || loaded.LocalPorts.SSH != 60022 {
 		t.Fatalf("unexpected loaded local ports: %+v", loaded.LocalPorts)
 	}
 
 	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "prod"}, uiEnvironmentConfig{
-		Name:              "prod",
-		RepoPath:          " /tmp/repo ",
-		KubernetesContext: " cluster-new ",
-		ContainerRegistry: " registry.example/team ",
-		RuntimeVersion:    " 1.2.3 ",
+		Name:               "prod",
+		RepoPath:           " /tmp/repo ",
+		KubernetesContext:  " cluster-new ",
+		ContainerRegistry:  " registry.example/team ",
+		CloudProviderAlias: " other-cloud ",
+		RuntimeVersion:     " 1.2.3 ",
 		SSHD: uiSSHDConfig{
 			Enabled:       true,
 			LocalPort:     62222,
@@ -998,15 +1031,160 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
 	}
-	if saved.RepoPath != projectRoot || saved.KubernetesContext != "cluster-old" || saved.ContainerRegistry != "registry.example/old" || saved.RuntimeVersion != "1.0.0" {
+	if saved.RepoPath != projectRoot || saved.KubernetesContext != "cluster-old" || saved.ContainerRegistry != "registry.example/old" || saved.RuntimeVersion != "1.0.0" || saved.CloudProviderAlias != "other-cloud" {
 		t.Fatalf("unexpected saved config: %+v", saved)
 	}
 	if saved.LocalPorts.RangeStart != 17000 || saved.LocalPorts.RangeEnd != 17099 || saved.LocalPorts.MCP != 17000 || saved.LocalPorts.SSH != 60022 {
 		t.Fatalf("unexpected saved local ports: %+v", saved.LocalPorts)
 	}
 	stored := store.envs["frs/prod"]
-	if stored.RepoPath != projectRoot || stored.Remote || stored.RuntimeVersion != "1.0.0" || stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" || stored.Snapshot == nil || *stored.Snapshot {
+	if stored.RepoPath != projectRoot || stored.Remote || stored.RuntimeVersion != "1.0.0" || stored.CloudProviderAlias != "other-cloud" || stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" || stored.Snapshot == nil || *stored.Snapshot {
 		t.Fatalf("unexpected stored config: %+v", stored)
+	}
+}
+
+func TestStartSessionStartsLinkedCloudContextBeforeOpen(t *testing.T) {
+	projectRoot := t.TempDir()
+	rootConfig := &eruncommon.ERunConfig{
+		CloudProviders: []eruncommon.CloudProviderConfig{
+			{Alias: "team-cloud", Provider: eruncommon.CloudProviderAWS},
+		},
+		CloudContexts: []eruncommon.CloudContextConfig{
+			{
+				Name:               "team-context",
+				Provider:           eruncommon.CloudProviderAWS,
+				CloudProviderAlias: "team-cloud",
+				Region:             eruncommon.DefaultCloudContextRegion,
+				InstanceID:         "i-test",
+				InstanceType:       eruncommon.DefaultCloudContextInstanceType,
+				DiskType:           eruncommon.DefaultCloudContextDiskType,
+				DiskSizeGB:         eruncommon.DefaultCloudContextDiskSizeGB,
+				KubernetesContext:  "cluster-prod",
+				AdminToken:         "test-token",
+				Status:             eruncommon.CloudContextStatusStopped,
+			},
+		},
+	}
+	var actions []string
+	app := NewApp(erunUIDeps{
+		store: stubUIStore{
+			config: rootConfig,
+			tenants: map[string]eruncommon.TenantConfig{
+				"frs": {Name: "frs", ProjectRoot: projectRoot, DefaultEnvironment: "prod"},
+			},
+			envs: map[string]eruncommon.EnvConfig{
+				"frs/prod": {
+					Name:              "prod",
+					RepoPath:          projectRoot,
+					KubernetesContext: "cluster-prod",
+					Remote:            true,
+				},
+			},
+		},
+		resolveCLIPath:   func() string { return "/tmp/erun" },
+		cloudContextDeps: testCloudContextDeps(&actions),
+		startTerminal: func(params startTerminalSessionParams) (terminalSession, error) {
+			actions = append(actions, "terminal "+strings.Join(params.Args, " "))
+			return newStubTerminalSession(), nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	if _, err := app.StartSession(uiSelection{Tenant: "frs", Environment: "prod"}, 80, 24); err != nil {
+		t.Fatalf("StartSession failed: %v", err)
+	}
+
+	got := strings.Join(actions, "\n")
+	for _, want := range []string{
+		"aws ec2 start-instances --instance-ids i-test",
+		"aws ec2 wait instance-running --instance-ids i-test",
+		"kubectl config set-context cluster-prod --cluster cluster-prod --user cluster-prod",
+		"terminal open frs prod",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected action %q in:\n%s", want, got)
+		}
+	}
+	if strings.Index(got, "aws ec2 start-instances") > strings.Index(got, "terminal open") {
+		t.Fatalf("expected cloud context start before terminal open, got:\n%s", got)
+	}
+	if rootConfig.CloudContexts[0].Status != eruncommon.CloudContextStatusRunning {
+		t.Fatalf("expected cloud context to be running, got %+v", rootConfig.CloudContexts[0])
+	}
+}
+
+func TestDeleteEnvironmentStartsLinkedContextThenStopsIt(t *testing.T) {
+	projectRoot := t.TempDir()
+	rootConfig := &eruncommon.ERunConfig{
+		DefaultTenant: "frs",
+		CloudProviders: []eruncommon.CloudProviderConfig{
+			{Alias: "team-cloud", Provider: eruncommon.CloudProviderAWS},
+		},
+		CloudContexts: []eruncommon.CloudContextConfig{
+			{
+				Name:               "team-context",
+				Provider:           eruncommon.CloudProviderAWS,
+				CloudProviderAlias: "team-cloud",
+				Region:             eruncommon.DefaultCloudContextRegion,
+				InstanceID:         "i-test",
+				InstanceType:       eruncommon.DefaultCloudContextInstanceType,
+				DiskType:           eruncommon.DefaultCloudContextDiskType,
+				DiskSizeGB:         eruncommon.DefaultCloudContextDiskSizeGB,
+				KubernetesContext:  "cluster-prod",
+				AdminToken:         "test-token",
+				Status:             eruncommon.CloudContextStatusStopped,
+			},
+		},
+	}
+	store := stubUIStore{
+		config: rootConfig,
+		tenants: map[string]eruncommon.TenantConfig{
+			"frs": {Name: "frs", ProjectRoot: projectRoot, DefaultEnvironment: "prod"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/prod": {
+				Name:              "prod",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-prod",
+				Remote:            true,
+			},
+		},
+	}
+	var actions []string
+	app := NewApp(erunUIDeps{
+		store:            store,
+		cloudContextDeps: testCloudContextDeps(&actions),
+		deleteNamespace: func(context, namespace string) error {
+			actions = append(actions, "delete-namespace "+context+" "+namespace)
+			return nil
+		},
+	})
+
+	result, err := app.DeleteEnvironment(uiSelection{Tenant: "frs", Environment: "prod"}, "frs-prod")
+	if err != nil {
+		t.Fatalf("DeleteEnvironment failed: %v", err)
+	}
+	if result.CloudContextStopError != "" {
+		t.Fatalf("unexpected cloud context stop error: %+v", result)
+	}
+	got := strings.Join(actions, "\n")
+	for _, want := range []string{
+		"aws ec2 start-instances --instance-ids i-test",
+		"delete-namespace cluster-prod frs-prod",
+		"aws ec2 stop-instances --instance-ids i-test",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected action %q in:\n%s", want, got)
+		}
+	}
+	if strings.Index(got, "aws ec2 start-instances") > strings.Index(got, "delete-namespace") || strings.Index(got, "delete-namespace") > strings.Index(got, "aws ec2 stop-instances") {
+		t.Fatalf("unexpected delete ordering:\n%s", got)
+	}
+	if _, _, err := store.LoadEnvConfig("frs", "prod"); !errors.Is(err, eruncommon.ErrNotInitialized) {
+		t.Fatalf("expected environment config to be deleted, got %v", err)
+	}
+	if rootConfig.CloudContexts[0].Status != eruncommon.CloudContextStatusStopped {
+		t.Fatalf("expected cloud context to be stopped, got %+v", rootConfig.CloudContexts[0])
 	}
 }
 
@@ -1228,6 +1406,22 @@ type stubUIStore struct {
 	config  *eruncommon.ERunConfig
 	tenants map[string]eruncommon.TenantConfig
 	envs    map[string]eruncommon.EnvConfig
+}
+
+func testCloudContextDeps(actions *[]string) eruncommon.CloudContextDependencies {
+	return eruncommon.CloudContextDependencies{
+		RunAWS: func(_ eruncommon.Context, _ eruncommon.CloudProviderConfig, _ string, args []string) (string, error) {
+			*actions = append(*actions, "aws "+strings.Join(args, " "))
+			if strings.Join(args, " ") == "ec2 describe-instances --instance-ids i-test --query Reservations[0].Instances[0].PublicIpAddress --output text" {
+				return "203.0.113.10", nil
+			}
+			return "", nil
+		},
+		RunKubectl: func(_ eruncommon.Context, args []string) error {
+			*actions = append(*actions, "kubectl "+strings.Join(args, " "))
+			return nil
+		},
+	}
 }
 
 func (s stubUIStore) LoadERunConfig() (eruncommon.ERunConfig, string, error) {

@@ -1,13 +1,18 @@
 import {
   DEFAULT_FILES_WIDTH,
+  DEFAULT_DEBUG_HEIGHT,
   DEFAULT_REVIEW_WIDTH,
   DEFAULT_SIDEBAR_WIDTH,
+  DEBUG_HEIGHT_STORAGE_KEY,
+  DEBUG_OPEN_STORAGE_KEY,
   FILES_OPEN_STORAGE_KEY,
   FILES_WIDTH_STORAGE_KEY,
   MAX_FILES_WIDTH,
+  MAX_DEBUG_HEIGHT,
   MAX_REVIEW_WIDTH,
   MAX_SIDEBAR_WIDTH,
   MIN_FILES_WIDTH,
+  MIN_DEBUG_HEIGHT,
   MIN_REVIEW_WIDTH,
   MIN_SIDEBAR_WIDTH,
   REVIEW_WIDTH_STORAGE_KEY,
@@ -26,11 +31,23 @@ export function loadSavedFilesWidth(): number {
   return loadSavedNumber(FILES_WIDTH_STORAGE_KEY, DEFAULT_FILES_WIDTH, MIN_FILES_WIDTH, MAX_FILES_WIDTH);
 }
 
+export function loadSavedDebugHeight(): number {
+  return loadSavedNumber(DEBUG_HEIGHT_STORAGE_KEY, DEFAULT_DEBUG_HEIGHT, MIN_DEBUG_HEIGHT, MAX_DEBUG_HEIGHT);
+}
+
 export function loadSavedFilesOpen(): boolean {
   try {
     return window.localStorage.getItem(FILES_OPEN_STORAGE_KEY) !== 'false';
   } catch {
     return true;
+  }
+}
+
+export function loadSavedDebugOpen(): boolean {
+  try {
+    return window.localStorage.getItem(DEBUG_OPEN_STORAGE_KEY) === 'true';
+  } catch {
+    return false;
   }
 }
 

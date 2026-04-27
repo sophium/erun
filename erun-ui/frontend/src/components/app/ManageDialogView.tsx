@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { AlertTriangle, Check, ChevronsUpDown, LoaderCircle, Rocket, Save, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, ChevronsUpDown, LoaderCircle, Play, Power, Rocket, Save, Server, Trash2 } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import type { UIPortStatus, UIVersionSuggestion } from '@/types';
+import type { UICloudContextStatus, UIPortStatus, UIVersionSuggestion } from '@/types';
 import { cn } from '@/lib/utils';
 
 const dialogErrorClassName =
@@ -68,6 +68,13 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
                 <ReadonlyField id="environment-config-kubernetescontext" label="Kubernetes context" value={config.kubernetesContext} />
                 <ReadonlyField id="environment-config-containerregistry" label="Container registry" value={config.containerRegistry} />
                 <TextField id="environment-config-cloudprovideralias" label="Cloud alias" value={config.cloudProviderAlias} disabled={dialog.busy} onChange={(cloudProviderAlias) => controller.updateManageConfig({ cloudProviderAlias })} />
+                <CloudContextField
+                  context={config.cloudContext}
+                  cloudProviderAlias={config.cloudProviderAlias}
+                  disabled={dialog.busy || dialog.configLoading}
+                  onStart={(name) => void controller.startManageCloudContext(name)}
+                  onStop={(name) => void controller.stopManageCloudContext(name)}
+                />
                 <RuntimeDeployField
                   configuredVersion={config.runtimeVersion}
                   overrideVersion={dialog.version}
@@ -153,6 +160,61 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function CloudContextField({
+  context,
+  cloudProviderAlias,
+  disabled,
+  onStart,
+  onStop,
+}: {
+  context: UICloudContextStatus | undefined;
+  cloudProviderAlias: string;
+  disabled?: boolean;
+  onStart: (name: string) => void;
+  onStop: (name: string) => void;
+}): React.ReactElement {
+  if (!context) {
+    return (
+      <div className="grid gap-2">
+        <div className="text-sm font-medium leading-none">Cloud context</div>
+        <div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">
+          {cloudProviderAlias.trim() ? 'No linked cloud context' : 'Not linked'}
+        </div>
+      </div>
+    );
+  }
+  const running = context.status.trim() === 'running';
+  return (
+    <div className="grid gap-2">
+      <div className="text-sm font-medium leading-none">Cloud context</div>
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-[var(--radius)] border border-border px-3 py-2.5">
+        <div className="grid min-w-0 gap-1">
+          <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
+            <Server className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <span className="truncate">{context.kubernetesContext || context.name}</span>
+            <StatusBadge status={context.status} />
+          </div>
+          <div className="truncate text-xs text-muted-foreground">
+            {[context.cloudProviderAlias, context.region, context.instanceType, context.instanceId].filter(Boolean).join(' | ')}
+            {context.message ? ` - ${context.message}` : ''}
+          </div>
+        </div>
+        {running ? (
+          <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => onStop(context.name)}>
+            <Power aria-hidden="true" />
+            Stop
+          </Button>
+        ) : (
+          <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => onStart(context.name)}>
+            <Play aria-hidden="true" />
+            Start
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -242,6 +304,21 @@ function RuntimeDeployField({
         </Button>
       </div>
     </div>
+  );
+}
+
+function StatusBadge({ status }: { status: string }): React.ReactElement {
+  const normalized = status.trim() || 'unknown';
+  const className =
+    normalized === 'running'
+      ? 'border-green-600/35 bg-green-600/10 text-green-700 dark:text-green-400'
+      : normalized === 'stopped'
+        ? 'border-border bg-muted/40 text-muted-foreground'
+        : 'border-[color-mix(in_oklch,var(--destructive)_35%,var(--border))] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] text-destructive';
+  return (
+    <span className={`shrink-0 rounded-[calc(var(--radius)-2px)] border px-1.5 py-0.5 text-[11px] leading-none font-medium ${className}`}>
+      {normalized.replace(/_/g, ' ')}
+    </span>
   );
 }
 

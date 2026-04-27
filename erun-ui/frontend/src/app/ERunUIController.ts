@@ -33,11 +33,15 @@ import { fileToBase64, decodeBase64Bytes, isTerminalPasteTarget, pastedImageFile
 import { chooseSelectedDiffPath, cssEscape } from './diffUtils';
 import { readError } from './errors';
 import {
+  DEBUG_HEIGHT_STORAGE_KEY,
+  DEBUG_OPEN_STORAGE_KEY,
   FILES_OPEN_STORAGE_KEY,
   FILES_WIDTH_STORAGE_KEY,
+  MAX_DEBUG_HEIGHT,
   MAX_FILES_WIDTH,
   MAX_REVIEW_WIDTH,
   MAX_SIDEBAR_WIDTH,
+  MIN_DEBUG_HEIGHT,
   MIN_FILES_WIDTH,
   MIN_REVIEW_WIDTH,
   MIN_SIDEBAR_WIDTH,
@@ -55,7 +59,7 @@ import {
   type ManageDialogState,
   type TenantDialogState,
 } from './state';
-import { clamp, loadSavedFilesOpen, loadSavedFilesWidth, loadSavedReviewWidth, loadSavedSidebarWidth, saveBoolean, saveNumber } from './storage';
+import { clamp, loadSavedDebugHeight, loadSavedDebugOpen, loadSavedFilesOpen, loadSavedFilesWidth, loadSavedReviewWidth, loadSavedSidebarWidth, saveBoolean, saveNumber } from './storage';
 import { deleteConfirmationValue, normalizeDialogValue, normalizeVersionSuggestions, selectionKey } from './versionSuggestions';
 import type {
   DeleteEnvironmentResult,
@@ -85,6 +89,17 @@ export interface MountElements {
 }
 
 type TerminalDataDisposable = ReturnType<Terminal['onData']>;
+type TerminalWriteData = string | Uint8Array;
+
+interface AppStatusPayload {
+  message?: string;
+  busy?: boolean;
+}
+
+interface DebugOpenFilter {
+  released: boolean;
+  pending: string;
+}
 
 export class ERunUIController {
   readonly state: AppState = {
@@ -110,8 +125,12 @@ export class ERunUIController {
     diffFilter: '',
     collapsedDiffDirs: new Set<string>(),
     terminalMessage: '',
+    terminalBusy: false,
     terminalCopyOutput: '',
     terminalCopyStatus: '',
+    debugOpen: loadSavedDebugOpen(),
+    debugHeight: loadSavedDebugHeight(),
+    debugOutput: '',
   };
 
   private readonly subscribers = new Set<() => void>();
@@ -121,8 +140,10 @@ export class ERunUIController {
   private readonly cloudInitSessions = new Set<number>();
   private readonly selectionSessions = new Map<string, number>();
   private readonly sessionBuffers = new Map<number, Uint8Array[]>();
+  private readonly sessionDisplayBuffers = new Map<number, TerminalWriteData[]>();
   private readonly sessionExitReasons = new Map<number, string>();
   private readonly sessionExitOutputs = new Map<number, string>();
+  private readonly debugOpenFilters = new Map<number, DebugOpenFilter>();
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
   private terminalRoot: HTMLDivElement | null = null;
@@ -140,6 +161,7 @@ export class ERunUIController {
   private terminalDataDisposable: TerminalDataDisposable | null = null;
   private terminalOutputOff: (() => void) | null = null;
   private terminalExitOff: (() => void) | null = null;
+  private appStatusOff: (() => void) | null = null;
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
 
   subscribe = (subscriber: () => void): (() => void) => {
@@ -200,6 +222,9 @@ export class ERunUIController {
     this.terminalExitOff = EventsOn('terminal-exit', (payload: TerminalExitPayload) => {
       void this.handleTerminalExit(payload);
     });
+    this.appStatusOff = EventsOn('app-status', (payload: AppStatusPayload) => {
+      this.handleAppStatus(payload);
+    });
 
     if (!this.bootStarted) {
       this.bootStarted = true;
@@ -210,6 +235,9 @@ export class ERunUIController {
       window.removeEventListener('resize', this.queueTerminalResize);
       this.resizeObserver?.disconnect();
       this.terminalDataDisposable?.dispose();
+      this.terminalOutputOff?.();
+      this.terminalExitOff?.();
+      this.appStatusOff?.();
       if (this.pasteHandler && this.terminalRoot) {
         this.terminalRoot.removeEventListener('paste', this.pasteHandler, true);
       }
@@ -307,6 +335,35 @@ export class ERunUIController {
     window.addEventListener('mouseup', stop);
   }
 
+  startDebugResize(event: React.MouseEvent<HTMLElement>): void {
+    if (!this.state.debugOpen) {
+      return;
+    }
+    event.preventDefault();
+    document.body.classList.add('is-resizing-debug');
+
+    const move = (moveEvent: MouseEvent) => {
+      const paneRect = this.terminalPane?.getBoundingClientRect();
+      if (!paneRect) {
+        return;
+      }
+      const maxForPane = Math.max(MIN_DEBUG_HEIGHT, Math.min(MAX_DEBUG_HEIGHT, paneRect.height - 120));
+      this.state.debugHeight = clamp(paneRect.bottom - moveEvent.clientY, MIN_DEBUG_HEIGHT, maxForPane);
+      this.applyLayoutVars();
+      this.emit();
+      this.queueTerminalResize();
+    };
+    const stop = () => {
+      document.body.classList.remove('is-resizing-debug');
+      window.removeEventListener('mousemove', move);
+      window.removeEventListener('mouseup', stop);
+      saveNumber(DEBUG_HEIGHT_STORAGE_KEY, this.state.debugHeight);
+    };
+
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', stop);
+  }
+
   toggleReview(): void {
     this.state.reviewOpen = !this.state.reviewOpen;
     this.applyLayoutVars();
@@ -328,6 +385,21 @@ export class ERunUIController {
     this.emit();
   }
 
+  setDebugOpen(open: boolean): void {
+    this.state.debugOpen = open;
+    saveBoolean(DEBUG_OPEN_STORAGE_KEY, open);
+    if (open && !this.state.debugOutput) {
+      this.state.debugOutput = 'Debug output will appear here for new erun sessions started while this panel is open.\n';
+    }
+    this.emit();
+    this.queueTerminalResize();
+  }
+
+  clearDebugOutput(): void {
+    this.state.debugOutput = '';
+    this.emit();
+  }
+
   toggleTenant(tenant: string): void {
     if (this.state.collapsedTenants.has(tenant)) {
       this.state.collapsedTenants.delete(tenant);
@@ -338,27 +410,32 @@ export class ERunUIController {
   }
 
   async openSelection(selection: UISelection): Promise<void> {
-    const key = selectionKey(selection);
+    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
+    const key = selectionKey(runSelection);
     const previousSessionId = this.state.sessionId;
     const previousKnownSessionId = this.selectionSessions.get(key) || 0;
 
     this.state.selected = selection;
+    if (this.state.debugOpen && (previousKnownSessionId === 0 || previousKnownSessionId !== previousSessionId)) {
+      this.state.debugOutput = `$ ${formatDebugCommand(runSelection)}\n`;
+    }
     this.emit();
     if (previousKnownSessionId === 0 || previousKnownSessionId !== previousSessionId) {
       this.state.terminalCopyOutput = '';
       this.state.terminalCopyStatus = '';
-      this.showTerminalMessage(`Opening ${selection.tenant} / ${selection.environment}...`);
+      this.showTerminalMessage(`Opening ${selection.tenant} / ${selection.environment}...`, true);
     }
 
     this.fitAddon?.fit();
-    const result = (await StartSession(selection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
+    const result = (await StartSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
     this.selectionSessions.set(key, result.sessionId);
-    this.openSessionSelections.set(result.sessionId, selection);
+    this.openSessionSelections.set(result.sessionId, runSelection);
+    this.rebuildTerminalDisplayBuffer(result.sessionId);
     this.state.sessionId = result.sessionId;
 
     if (result.sessionId !== previousSessionId) {
       this.resetTerminal();
-      const buffer = this.sessionBuffers.get(result.sessionId);
+      const buffer = this.sessionDisplayBuffers.get(result.sessionId);
       if (buffer) {
         this.writeTerminalBuffer(buffer);
       }
@@ -370,7 +447,12 @@ export class ERunUIController {
       this.state.terminalCopyStatus = '';
       this.showTerminalMessage(exitReason);
     } else {
-      this.hideTerminalMessage();
+      const buffer = this.sessionDisplayBuffers.get(result.sessionId);
+      if (buffer && buffer.length > 0) {
+        this.hideTerminalMessage();
+      } else {
+        this.showTerminalMessage(`Opening ${selection.tenant} / ${selection.environment}...`, true);
+      }
     }
 
     if (this.state.reviewOpen) {
@@ -621,12 +703,16 @@ export class ERunUIController {
     if (this.state.manageDialog.busy || this.state.manageDialog.configLoading) {
       return;
     }
+    const config = {
+      ...this.state.manageDialog.config,
+      ...values,
+    };
+    if (values.cloudProviderAlias !== undefined) {
+      config.cloudContext = undefined;
+    }
     this.state.manageDialog = {
       ...this.state.manageDialog,
-      config: {
-        ...this.state.manageDialog.config,
-        ...values,
-      },
+      config,
       error: '',
     };
     this.emit();
@@ -716,6 +802,48 @@ export class ERunUIController {
     }
   }
 
+  async startManageCloudContext(name: string): Promise<void> {
+    await this.updateManageCloudContextPower(name, StartCloudContext, 'Started');
+    void this.refreshKubernetesContexts();
+  }
+
+  async stopManageCloudContext(name: string): Promise<void> {
+    await this.updateManageCloudContextPower(name, StopCloudContext, 'Stopped');
+  }
+
+  private async updateManageCloudContextPower(name: string, action: (name: string) => Promise<unknown>, label: string): Promise<void> {
+    const contextName = normalizeDialogValue(name);
+    const dialog = this.state.manageDialog;
+    if (dialog.busy || dialog.configLoading || !dialog.selection || !contextName) {
+      return;
+    }
+    this.state.manageDialog = { ...dialog, busy: true, error: '' };
+    this.emit();
+    try {
+      const context = (await action(contextName)) as UICloudContextStatus;
+      this.state.manageDialog = {
+        ...this.state.manageDialog,
+        config: {
+          ...this.state.manageDialog.config,
+          cloudContext: context,
+        },
+        busy: false,
+        error: '',
+      };
+      this.showTerminalMessage(`${label} cloud context ${context.kubernetesContext || context.name}.`);
+      this.emit();
+    } catch (error) {
+      const message = readError(error);
+      this.state.manageDialog = {
+        ...this.state.manageDialog,
+        busy: false,
+        error: message,
+      };
+      this.showTerminalMessage(message);
+      this.emit();
+    }
+  }
+
   openGlobalConfigDialog(): void {
     this.state.globalConfigDialog = {
       open: true,
@@ -727,6 +855,8 @@ export class ERunUIController {
       cloudContextDraft: defaultCloudContextInitInput(),
       configLoading: true,
       busy: false,
+      busyAction: '',
+      busyTarget: '',
       error: '',
     };
     this.emit();
@@ -868,7 +998,7 @@ export class ERunUIController {
     if (dialog.busy || dialog.configLoading) {
       return;
     }
-    this.state.globalConfigDialog = { ...dialog, busy: true, error: '' };
+    this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-context-init', busyTarget: '', error: '' };
     this.emit();
     try {
       const context = (await InitCloudContext(dialog.cloudContextDraft)) as UICloudContextStatus;
@@ -884,6 +1014,8 @@ export class ERunUIController {
           region: dialog.cloudContextDraft.region,
         }),
         busy: false,
+        busyAction: '',
+        busyTarget: '',
         error: '',
       };
       this.showTerminalMessage(`Initialized cloud context ${context.kubernetesContext}.`);
@@ -894,6 +1026,8 @@ export class ERunUIController {
       this.state.globalConfigDialog = {
         ...this.state.globalConfigDialog,
         busy: false,
+        busyAction: '',
+        busyTarget: '',
         error: message,
       };
       this.showTerminalMessage(message);
@@ -915,7 +1049,7 @@ export class ERunUIController {
     if (dialog.busy || dialog.configLoading) {
       return;
     }
-    this.state.globalConfigDialog = { ...dialog, busy: true, error: '' };
+    this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-context-power', busyTarget: name, error: '' };
     this.emit();
     try {
       const context = (await action(name)) as UICloudContextStatus;
@@ -926,6 +1060,8 @@ export class ERunUIController {
           cloudContexts: replaceCloudContext(this.state.globalConfigDialog.config.cloudContexts || [], context),
         },
         busy: false,
+        busyAction: '',
+        busyTarget: '',
         error: '',
       };
       this.showTerminalMessage(`${label} cloud context ${context.kubernetesContext}.`);
@@ -935,6 +1071,8 @@ export class ERunUIController {
       this.state.globalConfigDialog = {
         ...this.state.globalConfigDialog,
         busy: false,
+        busyAction: '',
+        busyTarget: '',
         error: message,
       };
       this.showTerminalMessage(message);
@@ -947,7 +1085,7 @@ export class ERunUIController {
     if (dialog.busy || dialog.configLoading) {
       return;
     }
-    this.state.globalConfigDialog = { ...dialog, busy: true, error: '' };
+    this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-provider-init', busyTarget: '', error: '' };
     this.emit();
     try {
       this.fitAddon?.fit();
@@ -967,6 +1105,8 @@ export class ERunUIController {
       this.state.globalConfigDialog = {
         ...this.state.globalConfigDialog,
         busy: false,
+        busyAction: '',
+        busyTarget: '',
         error: message,
       };
       this.showTerminalMessage(message);
@@ -979,7 +1119,7 @@ export class ERunUIController {
     if (dialog.busy || dialog.configLoading) {
       return;
     }
-    this.state.globalConfigDialog = { ...dialog, busy: true, error: '' };
+    this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-provider-login', busyTarget: alias, error: '' };
     this.emit();
     try {
       const provider = await LoginCloudProvider(alias);
@@ -990,6 +1130,8 @@ export class ERunUIController {
           cloudProviders: replaceCloudProvider(this.state.globalConfigDialog.config.cloudProviders || [], provider),
         },
         busy: false,
+        busyAction: '',
+        busyTarget: '',
         error: '',
       };
       this.showTerminalMessage(`${provider.alias}: ${provider.status}`);
@@ -999,6 +1141,8 @@ export class ERunUIController {
       this.state.globalConfigDialog = {
         ...this.state.globalConfigDialog,
         busy: false,
+        busyAction: '',
+        busyTarget: '',
         error: message,
       };
       this.showTerminalMessage(message);
@@ -1011,7 +1155,7 @@ export class ERunUIController {
     if (dialog.busy || dialog.configLoading) {
       return;
     }
-    this.state.globalConfigDialog = { ...dialog, busy: true, error: '' };
+    this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'save', busyTarget: '', error: '' };
     this.emit();
     try {
       const result = (await SaveERunConfig(dialog.config as Parameters<typeof SaveERunConfig>[0])) as UIERunConfig;
@@ -1019,6 +1163,8 @@ export class ERunUIController {
         ...this.state.globalConfigDialog,
         config: result,
         busy: false,
+        busyAction: '',
+        busyTarget: '',
         error: '',
       };
       this.showTerminalMessage('Saved ERun config.');
@@ -1028,6 +1174,8 @@ export class ERunUIController {
       this.state.globalConfigDialog = {
         ...this.state.globalConfigDialog,
         busy: false,
+        busyAction: '',
+        busyTarget: '',
         error: message,
       };
       this.showTerminalMessage(message);
@@ -1195,7 +1343,11 @@ export class ERunUIController {
       this.state.manageDialog = defaultManageDialog();
       this.state.terminalCopyOutput = '';
       this.state.terminalCopyStatus = '';
-      const warning = result.namespaceDeleteError ? ` Namespace deletion failed: ${result.namespaceDeleteError}` : '';
+      const warnings = [
+        result.namespaceDeleteError ? `Namespace deletion failed: ${result.namespaceDeleteError}` : '',
+        result.cloudContextStopError ? `Cloud context stop failed: ${result.cloudContextStopError}` : '',
+      ].filter(Boolean).join(' ');
+      const warning = warnings ? ` ${warnings}` : '';
       this.showTerminalMessage(`Deleted ${result.tenant} / ${result.environment}.${warning}`);
     } catch (error) {
       const message = readError(error);
@@ -1265,8 +1417,9 @@ export class ERunUIController {
     WindowToggleMaximise();
   }
 
-  showTerminalMessage(message: string): void {
+  showTerminalMessage(message: string, busy = false): void {
     this.state.terminalMessage = message;
+    this.state.terminalBusy = busy;
     this.emit();
   }
 
@@ -1326,15 +1479,19 @@ export class ERunUIController {
   }
 
   private async startInitSelection(selection: UISelection): Promise<void> {
+    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     this.state.selected = selection;
+    if (this.state.debugOpen) {
+      this.state.debugOutput = `$ ${formatDebugCommand(runSelection, 'init')}\n`;
+    }
     this.emit();
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
     this.showTerminalMessage(`Initializing ${selection.tenant} / ${selection.environment}...`);
 
     this.fitAddon?.fit();
-    const result = (await StartInitSession(selection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
-    this.initSessionSelections.set(result.sessionId, selection);
+    const result = (await StartInitSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
+    this.initSessionSelections.set(result.sessionId, runSelection);
     this.state.sessionId = result.sessionId;
 
     this.resetTerminal();
@@ -1345,15 +1502,19 @@ export class ERunUIController {
   }
 
   private async startDeploySelection(selection: UISelection): Promise<void> {
+    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     this.state.selected = selection;
+    if (this.state.debugOpen) {
+      this.state.debugOutput = `$ ${formatDebugCommand(runSelection, 'deploy')}\n`;
+    }
     this.emit();
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
     this.showTerminalMessage(`Deploying ${selection.tenant} / ${selection.environment}...`);
 
     this.fitAddon?.fit();
-    const result = (await StartDeploySession(selection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
-    this.deploySessionSelections.set(result.sessionId, selection);
+    const result = (await StartDeploySession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
+    this.deploySessionSelections.set(result.sessionId, runSelection);
     this.state.sessionId = result.sessionId;
 
     this.resetTerminal();
@@ -1499,8 +1660,26 @@ export class ERunUIController {
 
   private hideTerminalMessage(): void {
     this.state.terminalMessage = '';
+    this.state.terminalBusy = false;
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
+    this.emit();
+  }
+
+  private handleAppStatus(payload: AppStatusPayload): void {
+    const message = String(payload?.message || '').trim();
+    if (!message) {
+      return;
+    }
+    this.appendDebugOutput(`[status] ${message}\n`);
+    this.showTerminalMessage(message, payload.busy === true);
+  }
+
+  private appendDebugOutput(text: string): void {
+    if (!this.state.debugOpen || !text) {
+      return;
+    }
+    this.state.debugOutput = trimDebugOutput(this.state.debugOutput + text);
     this.emit();
   }
 
@@ -1512,10 +1691,23 @@ export class ERunUIController {
     const existing = this.sessionBuffers.get(payload.sessionId) || [];
     existing.push(data);
     this.sessionBuffers.set(payload.sessionId, existing);
+    this.appendDebugOutput(decodeDebugOutput(data));
+    const displayData = this.filterTerminalDisplayData(payload.sessionId, data);
+    if (displayData) {
+      const displayBuffer = this.sessionDisplayBuffers.get(payload.sessionId) || [];
+      displayBuffer.push(displayData);
+      this.sessionDisplayBuffers.set(payload.sessionId, displayBuffer);
+    }
     if (payload.sessionId !== this.state.sessionId) {
       return;
     }
-    this.terminal?.write(data);
+    if (!displayData) {
+      return;
+    }
+    if (this.state.terminalMessage && !this.state.terminalCopyOutput) {
+      this.hideTerminalMessage();
+    }
+    this.terminal?.write(displayData);
   }
 
   private async handleTerminalExit(payload: TerminalExitPayload): Promise<void> {
@@ -1615,6 +1807,11 @@ export class ERunUIController {
     const maxFilesForReview = reviewWidth > 0 ? reviewWidth - 260 : MAX_FILES_WIDTH;
     const filesMaximum = Math.max(MIN_FILES_WIDTH, Math.min(MAX_FILES_WIDTH, maxFilesForReview));
     root.style.setProperty('--files-width', `${clamp(this.state.filesWidth, MIN_FILES_WIDTH, filesMaximum)}px`);
+
+    const paneHeight = this.terminalPane?.getBoundingClientRect().height || 0;
+    const maxDebugForPane = paneHeight > 0 ? paneHeight - 120 : MAX_DEBUG_HEIGHT;
+    const debugMaximum = Math.max(MIN_DEBUG_HEIGHT, Math.min(MAX_DEBUG_HEIGHT, maxDebugForPane));
+    root.style.setProperty('--debug-height', `${clamp(this.state.debugHeight, MIN_DEBUG_HEIGHT, debugMaximum)}px`);
   }
 
   private queueTerminalResize = (): void => {
@@ -1707,7 +1904,49 @@ export class ERunUIController {
     this.focusTerminalSoon();
   }
 
-  private writeTerminalBuffer(chunks: Uint8Array[]): void {
+  private rebuildTerminalDisplayBuffer(sessionId: number): void {
+    this.debugOpenFilters.delete(sessionId);
+    const chunks = this.sessionBuffers.get(sessionId) || [];
+    const displayBuffer: TerminalWriteData[] = [];
+    for (const chunk of chunks) {
+      const displayData = this.filterTerminalDisplayData(sessionId, chunk);
+      if (displayData) {
+        displayBuffer.push(displayData);
+      }
+    }
+    if (displayBuffer.length > 0) {
+      this.sessionDisplayBuffers.set(sessionId, displayBuffer);
+    } else {
+      this.sessionDisplayBuffers.delete(sessionId);
+    }
+  }
+
+  private filterTerminalDisplayData(sessionId: number, data: Uint8Array): TerminalWriteData | null {
+    const selection = this.openSessionSelections.get(sessionId);
+    if (!selection?.debug) {
+      return data;
+    }
+    const filter = this.debugOpenFilters.get(sessionId) || { released: false, pending: '' };
+    if (filter.released) {
+      return data;
+    }
+
+    const text = new TextDecoder().decode(data);
+    const output = filter.pending + text;
+    const titleIndex = output.indexOf('\x1B]0;');
+    if (titleIndex === -1) {
+      filter.pending = output.slice(-16);
+      this.debugOpenFilters.set(sessionId, filter);
+      return null;
+    }
+
+    filter.released = true;
+    filter.pending = '';
+    this.debugOpenFilters.set(sessionId, filter);
+    return output.slice(titleIndex);
+  }
+
+  private writeTerminalBuffer(chunks: TerminalWriteData[]): void {
     for (const chunk of chunks) {
       this.terminal?.write(chunk);
     }
@@ -1721,6 +1960,66 @@ function cleanTerminalOutput(value: string): string {
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .trim();
+}
+
+function decodeDebugOutput(data: Uint8Array): string {
+  return new TextDecoder()
+    .decode(data)
+    .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n');
+}
+
+function trimDebugOutput(value: string): string {
+  const maxLength = 80_000;
+  if (value.length <= maxLength) {
+    return value;
+  }
+  return value.slice(value.length - maxLength);
+}
+
+function formatDebugCommand(selection: UISelection, mode: 'open' | 'init' | 'deploy' = 'open'): string {
+  const args = ['erun'];
+  if (selection.debug) {
+    args.push('-vv');
+  }
+  if (mode === 'init') {
+    args.push('init', selection.tenant, selection.environment, '--remote');
+    if (selection.version) {
+      args.push('--version', selection.version);
+    }
+    if (selection.runtimeImage) {
+      args.push('--runtime-image', selection.runtimeImage);
+    }
+    if (selection.kubernetesContext) {
+      args.push('--kubernetes-context', selection.kubernetesContext);
+    }
+    if (selection.containerRegistry) {
+      args.push('--container-registry', selection.containerRegistry);
+    }
+    args.push(`--set-default-tenant=${selection.setDefaultTenant ? 'true' : 'false'}`, '--confirm-environment=true');
+    if (selection.noGit) {
+      args.push('--no-git');
+    }
+  } else if (mode === 'deploy') {
+    args.push('open', selection.tenant, selection.environment, '--no-shell', '--no-alias-prompt');
+    if (selection.version) {
+      args.push('--version', selection.version);
+    }
+    if (selection.runtimeImage) {
+      args.push('--runtime-image', selection.runtimeImage);
+    }
+  } else {
+    args.push('open', selection.tenant, selection.environment);
+  }
+  return args.map(shellDebugArg).join(' ');
+}
+
+function shellDebugArg(value: string): string {
+  if (/^[A-Za-z0-9._/:=-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
 function replaceCloudProvider(providers: UICloudProviderStatus[], provider: UICloudProviderStatus): UICloudProviderStatus[] {

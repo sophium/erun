@@ -22,6 +22,7 @@ export interface UISelection {
   noGit?: boolean;
   setDefaultTenant?: boolean;
   action?: EnvironmentActionMode;
+  debug?: boolean;
 }
 
 export interface UIBuildDetails {
@@ -126,6 +127,7 @@ export interface UIEnvironmentConfig {
   kubernetesContext: string;
   containerRegistry: string;
   cloudProviderAlias: string;
+  cloudContext?: UICloudContextStatus;
   runtimeVersion: string;
   sshd: UISSHDConfig;
   localPorts: UIEnvironmentLocalPorts;
@@ -158,6 +160,7 @@ export interface DeleteEnvironmentResult {
   namespace?: string;
   kubernetesContext?: string;
   namespaceDeleteError?: string;
+  cloudContextStopError?: string;
 }
 
 export interface DiffResult {

@@ -35,6 +35,29 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 - Avoid reintroducing broad semantic CSS class files for ordinary component styling. If a selector is only used by one React component and does not require a true global rule, keep the styling beside that component in `className`.
 - For frontend styling changes, run `yarn build`, `yarn shadcn:check`, and `go test ./...` from the relevant module paths unless the change is documentation-only.
 
+## Professional UX
+
+- Treat the referenced UX standards in this section as normative, not inspirational. When designing or reviewing UI, apply the underlying principles from those sources directly, even when this file does not list the exact case. Local bullets are examples and repository-specific emphasis, not the full rule set.
+- Before considering a UI change complete, do a heuristic pass against the referenced standards: visibility of system status, match with user language, consistency and standards, error prevention, recognition over recall, user control, accessible operation, and component-appropriate behavior. If a control, label, status color, disabled state, or action would violate those principles, fix it even if no local bullet names that exact problem.
+- Model user-facing settings around the domain objects users actually manage. Do not expose implementation details such as hidden local profiles, process state, transport-specific names, generated IDs, or implementation caches as primary concepts unless the user must explicitly choose them.
+- Use familiar operational patterns: lists or tables for collections, badges for status, icon buttons for compact actions, forms for editable details, and explicit primary/secondary actions for side effects.
+- Make object state visible where users act on it. Collection rows should show the object name, relevant metadata, current status, and the most likely action without requiring users to open a detail view.
+- Keep state, color, and available actions semantically consistent. A success/ready state should look successful and should not present an action that implies the opposite state; warning/error/expired states should clearly show that attention is needed and offer the relevant recovery action.
+- Empty states must not look like disabled inputs or editable fields. Use plain text or a purpose-built empty-state surface, and reserve bordered input styling for controls that accept input.
+- Labels and messages must use user-language, not implementation-language. Prefer terms that describe the object or action the user understands, and keep internal provider, CLI, SDK, profile, session, or transport details out of the primary UI.
+- Status refresh, login, deploy, delete, and other side-effecting actions must be explicit user actions. Do not run them implicitly when opening, rendering, or refreshing a settings view unless that behavior is clearly named by the control.
+- Design destructive, publishing, login, and external side-effect flows with clear action boundaries: users should understand what will happen before the action starts, be able to cancel before commitment, and see completion or failure status afterward.
+- Keep forms focused on values the user can know and intentionally provide. Do not ask users to invent derived values; compute aliases, IDs, labels, summaries, and status from authoritative data after the relevant operation completes.
+- Keep settings saves scoped to edited fields. Saving one setting must not remove or rewrite unrelated configuration.
+- Preserve accessibility basics in every UI change: semantic buttons and labels, keyboard-reachable controls, visible focus, sufficient contrast, non-color-only status communication, and error text associated with the relevant control or action.
+- Validate UI work with an actual rendered surface, using a Wails runtime or a browser harness with Wails mocks when the plain Vite page cannot run standalone. Include the relevant visual state in validation: empty, populated, loading, error, disabled, and narrow viewport when the change can affect those states.
+
+References:
+- Nielsen Norman Group, "10 Usability Heuristics for User Interface Design": https://www.nngroup.com/articles/ten-usability-heuristics/
+- W3C, "Web Content Accessibility Guidelines (WCAG) 2.2": https://www.w3.org/TR/WCAG22/
+- Material Design, "Empty states": https://m1.material.io/patterns/empty-states.html
+- Material Design, "Dialogs": https://m1.material.io/components/dialogs.html
+
 ## Build And Packaging
 
 - Keep the module build script as the canonical local and release-facing desktop build entrypoint.
