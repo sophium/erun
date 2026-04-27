@@ -74,8 +74,8 @@ func buildOpenCommand(cliPath, tenant, environment string) string {
 	return shellQuote(cliPath) + " open " + shellQuote(strings.TrimSpace(tenant)) + " " + shellQuote(strings.TrimSpace(environment))
 }
 
-func buildOpenArgs(tenant, environment string) []string {
-	return []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment)}
+func buildOpenArgs(tenant, environment string, debug ...bool) []string {
+	return erunArgs(debugEnabled(debug...), "open", strings.TrimSpace(tenant), strings.TrimSpace(environment))
 }
 
 func buildOpenNoShellArgs(tenant, environment string) []string {
@@ -97,7 +97,7 @@ func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncom
 }
 
 func buildInitArgs(selection uiSelection) []string {
-	args := []string{"init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment), "--remote"}
+	args := erunArgs(selection.Debug, "init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment), "--remote")
 	if version := strings.TrimSpace(selection.Version); version != "" {
 		args = append(args, "--version", version)
 	}
@@ -121,8 +121,10 @@ func buildInitArgs(selection uiSelection) []string {
 	return args
 }
 
-func buildDeployArgs(tenant, environment, version, runtimeImage string) []string {
-	args := []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment), "--no-shell", "--no-alias-prompt"}
+func buildDeployArgs(selection uiSelection) []string {
+	args := erunArgs(selection.Debug, "open", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment), "--no-shell", "--no-alias-prompt")
+	version := selection.Version
+	runtimeImage := selection.RuntimeImage
 	if version = strings.TrimSpace(version); version != "" {
 		args = append(args, "--version", version)
 	}
@@ -130,6 +132,20 @@ func buildDeployArgs(tenant, environment, version, runtimeImage string) []string
 		args = append(args, "--runtime-image", runtimeImage)
 	}
 	return args
+}
+
+func erunArgs(debug bool, args ...string) []string {
+	if !debug {
+		return args
+	}
+	result := make([]string, 0, len(args)+1)
+	result = append(result, "-vv")
+	result = append(result, args...)
+	return result
+}
+
+func debugEnabled(values ...bool) bool {
+	return len(values) > 0 && values[0]
 }
 
 func buildCloudInitAWSArgs() []string {

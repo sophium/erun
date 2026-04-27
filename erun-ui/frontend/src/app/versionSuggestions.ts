@@ -108,5 +108,5 @@ export function deleteConfirmationValue(selection: UISelection): string {
 }
 
 export function selectionKey(selection: UISelection): string {
-  return `${selection.tenant}\u0000${selection.environment}`;
+  return `${selection.tenant}\u0000${selection.environment}\u0000${selection.debug === true ? 'debug' : 'normal'}`;
 }

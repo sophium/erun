@@ -18,6 +18,9 @@ export function GlobalConfigDialogView({ controller, state }: { controller: ERun
   const tenantOptions = optionValues(state.tenants.map((tenant) => tenant.name), config.defaultTenant);
   const selectedCloudProvider = (config.cloudProviders || []).find((provider) => provider.alias === dialog.cloudContextDraft.cloudProviderAlias);
   const generatedCloudContextName = generatedContextName(selectedCloudProvider, dialog.cloudContextDraft.region, config.cloudContexts || []);
+  const saving = dialog.busyAction === 'save';
+  const initializingContext = dialog.busyAction === 'cloud-context-init';
+  const initializingCloudProvider = dialog.busyAction === 'cloud-provider-init';
 
   return (
     <Dialog open={dialog.open} onOpenChange={(open) => !open && controller.closeGlobalConfigDialog()}>
@@ -53,7 +56,7 @@ export function GlobalConfigDialogView({ controller, state }: { controller: ERun
                   <Label>Cloud aliases</Label>
                   <div className="flex gap-1.5">
                     <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => void controller.startAWSCloudInit()}>
-                      <Plus aria-hidden="true" />
+                      {initializingCloudProvider ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Plus aria-hidden="true" />}
                       AWS
                     </Button>
                     <Button type="button" variant="ghost" size="icon" disabled={dialog.busy} aria-label="Refresh cloud aliases" onClick={() => void controller.refreshCloudProviders()}>
@@ -84,7 +87,7 @@ export function GlobalConfigDialogView({ controller, state }: { controller: ERun
                             {provider.message ? ` - ${provider.message}` : ''}
                           </div>
                         </div>
-                        <CloudAliasAction status={provider.status} busy={dialog.busy} onLogin={() => void controller.loginCloudProvider(provider.alias)} />
+                        <CloudAliasAction status={provider.status} busy={dialog.busy} loading={dialog.busyAction === 'cloud-provider-login' && dialog.busyTarget === provider.alias} onLogin={() => void controller.loginCloudProvider(provider.alias)} />
                       </div>
                     ))}
                   </div>
@@ -137,7 +140,7 @@ export function GlobalConfigDialogView({ controller, state }: { controller: ERun
                         onChange={(event) => controller.updateCloudContextDraft({ name: event.target.value })}
                       />
                       <Button type="button" size="sm" disabled={dialog.busy || dialog.configLoading || !dialog.cloudContextDraft.cloudProviderAlias || !dialog.cloudContextDraft.region} onClick={() => void controller.initCloudContext()}>
-                        {dialog.busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Plus aria-hidden="true" />}
+                        {initializingContext ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Plus aria-hidden="true" />}
                         Init
                       </Button>
                     </div>
@@ -169,7 +172,13 @@ export function GlobalConfigDialogView({ controller, state }: { controller: ERun
                             {context.message ? ` - ${context.message}` : ''}
                           </div>
                         </div>
-                        <CloudContextAction status={context.status} busy={dialog.busy} onStart={() => void controller.startCloudContext(context.name)} onStop={() => void controller.stopCloudContext(context.name)} />
+                        <CloudContextAction
+                          status={context.status}
+                          busy={dialog.busy}
+                          loading={dialog.busyAction === 'cloud-context-power' && dialog.busyTarget === context.name}
+                          onStart={() => void controller.startCloudContext(context.name)}
+                          onStop={() => void controller.stopCloudContext(context.name)}
+                        />
                       </div>
                     ))}
                   </div>
@@ -187,8 +196,8 @@ export function GlobalConfigDialogView({ controller, state }: { controller: ERun
               Cancel
             </Button>
             <Button type="submit" size="sm" disabled={dialog.busy || dialog.configLoading}>
-              {dialog.busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
-              {dialog.busy ? 'Saving...' : 'Save settings'}
+              {saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
+              {saving ? 'Saving...' : 'Save settings'}
             </Button>
           </DialogFooter>
         </form>
@@ -212,7 +221,7 @@ function StatusBadge({ status }: { status: string }): React.ReactElement {
   );
 }
 
-function CloudAliasAction({ status, busy, onLogin }: { status: string; busy: boolean; onLogin: () => void }): React.ReactElement {
+function CloudAliasAction({ status, busy, loading, onLogin }: { status: string; busy: boolean; loading: boolean; onLogin: () => void }): React.ReactElement {
   if (status.trim() === 'active') {
     return (
       <div className="inline-flex items-center gap-1.5 px-1 text-xs font-medium text-green-700 dark:text-green-400" aria-label="Connected">
@@ -223,25 +232,25 @@ function CloudAliasAction({ status, busy, onLogin }: { status: string; busy: boo
   }
   return (
     <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onLogin}>
-      <LogIn aria-hidden="true" />
-      Login
+      {loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <LogIn aria-hidden="true" />}
+      {loading ? 'Logging in...' : 'Login'}
     </Button>
   );
 }
 
-function CloudContextAction({ status, busy, onStart, onStop }: { status: string; busy: boolean; onStart: () => void; onStop: () => void }): React.ReactElement {
+function CloudContextAction({ status, busy, loading, onStart, onStop }: { status: string; busy: boolean; loading: boolean; onStart: () => void; onStop: () => void }): React.ReactElement {
   if (status.trim() === 'running') {
     return (
       <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onStop}>
-        <Power aria-hidden="true" />
-        Stop
+        {loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Power aria-hidden="true" />}
+        {loading ? 'Stopping...' : 'Stop'}
       </Button>
     );
   }
   return (
     <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onStart}>
-      <Play aria-hidden="true" />
-      Start
+      {loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Play aria-hidden="true" />}
+      {loading ? 'Starting...' : 'Start'}
     </Button>
   );
 }

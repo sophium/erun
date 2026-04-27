@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Check, Copy } from 'lucide-react';
+import { Check, ChevronDown, ChevronUp, Copy, LoaderCircle, Trash2 } from 'lucide-react';
 
 import { ERunUIController } from '@/app/ERunUIController';
 import { useControllerState } from '@/app/useControllerState';
@@ -19,6 +19,9 @@ const splitterClassName =
 
 const reviewSplitterClassName =
   'relative cursor-col-resize border-l bg-background before:absolute before:top-0 before:bottom-0 before:left-1 before:w-px before:bg-transparent before:transition-colors hover:before:bg-border [.is-resizing-review_&]:before:bg-border';
+
+const debugSplitterClassName =
+  'relative cursor-row-resize bg-[oklch(0.06_0_0)] before:absolute before:left-0 before:right-0 before:top-1 before:h-px before:bg-transparent before:transition-colors hover:before:bg-[oklch(0.36_0_0)] [.is-resizing-debug_&]:before:bg-[oklch(0.46_0_0)]';
 
 export function App(): React.ReactElement {
   const controller = React.useMemo(() => new ERunUIController(), []);
@@ -63,53 +66,64 @@ export function App(): React.ReactElement {
           <main
             ref={terminalPaneRef}
             className={cn(
-              'grid h-full min-h-0 min-w-0 grid-cols-[minmax(360px,1fr)] overflow-hidden bg-terminal',
-              state.reviewOpen &&
-                'grid-cols-[minmax(360px,1fr)_10px_minmax(420px,var(--review-width))] max-[980px]:grid-cols-[minmax(260px,1fr)_10px_minmax(360px,min(var(--review-width),58vw))]',
+              'grid h-full min-h-0 min-w-0 overflow-hidden bg-terminal',
+              state.debugOpen ? 'grid-rows-[minmax(0,1fr)_var(--debug-height)]' : 'grid-rows-[minmax(0,1fr)_34px]',
             )}
           >
-            <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
-              <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full box-border px-4 py-3.5" />
-              <div
-                className={cn(
-                  'pointer-events-none absolute inset-0 flex items-center justify-center bg-[oklch(0_0_0/0.68)] p-10 text-center text-lg leading-[1.45] text-[oklch(0.92_0_0)]',
-                  state.terminalCopyOutput && 'pointer-events-auto',
-                  !state.terminalMessage && 'hidden',
-                )}
-              >
-                <div className="flex max-w-[min(680px,100%)] flex-col items-center gap-3.5">
-                  <div>{state.terminalMessage}</div>
-                  {state.terminalCopyOutput && (
-                    <Button
-                      className="pointer-events-auto cursor-pointer border-[oklch(0.92_0_0/0.55)] bg-[oklch(0.98_0_0)] text-[oklch(0.18_0_0)] opacity-100 shadow-[0_10px_30px_oklch(0_0_0/0.32)] hover:border-[oklch(1_0_0/0.75)] hover:bg-[oklch(1_0_0)] hover:text-[oklch(0.12_0_0)] [&_svg]:size-[15px]"
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        void controller.copyTerminalOutput();
-                      }}
-                    >
-                      {state.terminalCopyStatus === 'Copied' ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
-                      {state.terminalCopyStatus || 'Copy output'}
-                    </Button>
+            <div
+              className={cn(
+                'grid min-h-0 min-w-0 grid-cols-[minmax(360px,1fr)] overflow-hidden',
+                state.reviewOpen &&
+                  'grid-cols-[minmax(360px,1fr)_10px_minmax(420px,var(--review-width))] max-[980px]:grid-cols-[minmax(260px,1fr)_10px_minmax(360px,min(var(--review-width),58vw))]',
+              )}
+            >
+              <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
+                <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full box-border px-4 py-3.5" />
+                <div
+                  className={cn(
+                    'pointer-events-none absolute inset-0 flex items-center justify-center bg-[oklch(0_0_0/0.68)] p-10 text-center text-lg leading-[1.45] text-[oklch(0.92_0_0)]',
+                    state.terminalCopyOutput && 'pointer-events-auto',
+                    !state.terminalMessage && 'hidden',
                   )}
+                >
+                  <div className="flex max-w-[min(680px,100%)] flex-col items-center gap-3.5">
+                    <div className="flex items-center justify-center gap-3">
+                      {state.terminalBusy && <LoaderCircle className="size-5 shrink-0 animate-spin" aria-hidden="true" />}
+                      <span>{state.terminalMessage}</span>
+                    </div>
+                    {state.terminalCopyOutput && (
+                      <Button
+                        className="pointer-events-auto cursor-pointer border-[oklch(0.92_0_0/0.55)] bg-[oklch(0.98_0_0)] text-[oklch(0.18_0_0)] opacity-100 shadow-[0_10px_30px_oklch(0_0_0/0.32)] hover:border-[oklch(1_0_0/0.75)] hover:bg-[oklch(1_0_0)] hover:text-[oklch(0.12_0_0)] [&_svg]:size-[15px]"
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          void controller.copyTerminalOutput();
+                        }}
+                      >
+                        {state.terminalCopyStatus === 'Copied' ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+                        {state.terminalCopyStatus || 'Copy output'}
+                      </Button>
+                    )}
+                  </div>
                 </div>
               </div>
+              <div
+                className={cn(reviewSplitterClassName, !state.reviewOpen && 'hidden')}
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize diff panel"
+                onMouseDown={(event) => controller.startReviewResize(event)}
+              />
+              <ReviewPanel
+                controller={controller}
+                state={state}
+                reviewViewRef={reviewViewRef}
+                reviewMainRef={reviewMainRef}
+                diffListRef={diffListRef}
+              />
             </div>
-            <div
-              className={cn(reviewSplitterClassName, !state.reviewOpen && 'hidden')}
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize diff panel"
-              onMouseDown={(event) => controller.startReviewResize(event)}
-            />
-            <ReviewPanel
-              controller={controller}
-              state={state}
-              reviewViewRef={reviewViewRef}
-              reviewMainRef={reviewMainRef}
-              diffListRef={diffListRef}
-            />
+            <DebugPanel controller={controller} open={state.debugOpen} output={state.debugOutput} />
           </main>
         </div>
       </div>
@@ -118,5 +132,54 @@ export function App(): React.ReactElement {
       <ManageDialogView controller={controller} state={state} />
       <TenantDialogView controller={controller} state={state} />
     </TooltipProvider>
+  );
+}
+
+function DebugPanel({ controller, open, output }: { controller: ERunUIController; open: boolean; output: string }): React.ReactElement {
+  const outputRef = React.useRef<HTMLPreElement>(null);
+
+  React.useEffect(() => {
+    if (open && outputRef.current) {
+      outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }
+  }, [open, output]);
+
+  return (
+    <section className={cn('grid min-h-0 border-t border-[oklch(0.26_0_0)] bg-[oklch(0.06_0_0)] text-[oklch(0.86_0_0)]', open ? 'grid-rows-[6px_34px_minmax(0,1fr)]' : 'grid-rows-[34px]')}>
+      {open && (
+        <div
+          className={debugSplitterClassName}
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="Resize debug panel"
+          onMouseDown={(event) => controller.startDebugResize(event)}
+        />
+      )}
+      <div className="flex h-[34px] items-center justify-between gap-2 border-b border-[oklch(0.18_0_0)] px-3">
+        <button
+          type="button"
+          className="flex min-w-0 items-center gap-2 border-0 bg-transparent p-0 text-xs font-medium tracking-normal text-[oklch(0.76_0_0)]"
+          onClick={() => controller.setDebugOpen(!open)}
+        >
+          {open ? <ChevronDown className="size-4" aria-hidden="true" /> : <ChevronUp className="size-4" aria-hidden="true" />}
+          <span>Debug</span>
+          <span className="text-[11px] font-normal text-[oklch(0.56_0_0)]">{open ? 'erun -vv output' : 'collapsed'}</span>
+        </button>
+        {open && (
+          <Button className="h-6 px-2 text-[11px] [&_svg]:size-3.5" type="button" variant="ghost" size="sm" onClick={() => controller.clearDebugOutput()}>
+            <Trash2 aria-hidden="true" />
+            Clear
+          </Button>
+        )}
+      </div>
+      {open && (
+        <pre
+          ref={outputRef}
+          className="min-h-0 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-[1.35] text-[oklch(0.82_0_0)]"
+        >
+          {output || 'Open an environment while Debug is expanded to run erun with -vv and stream output here.'}
+        </pre>
+      )}
+    </section>
   );
 }

@@ -20,10 +20,15 @@ export const DEFAULT_REVIEW_WIDTH = 620;
 export const MIN_FILES_WIDTH = 220;
 export const MAX_FILES_WIDTH = 460;
 export const DEFAULT_FILES_WIDTH = 300;
+export const MIN_DEBUG_HEIGHT = 120;
+export const MAX_DEBUG_HEIGHT = 520;
+export const DEFAULT_DEBUG_HEIGHT = 220;
 export const SIDEBAR_WIDTH_STORAGE_KEY = 'erun.sidebarWidth';
 export const REVIEW_WIDTH_STORAGE_KEY = 'erun.reviewWidth';
 export const FILES_WIDTH_STORAGE_KEY = 'erun.filesWidth';
 export const FILES_OPEN_STORAGE_KEY = 'erun.filesOpen';
+export const DEBUG_OPEN_STORAGE_KEY = 'erun.debugOpen';
+export const DEBUG_HEIGHT_STORAGE_KEY = 'erun.debugHeight';
 
 export interface EnvironmentDialogState {
   open: boolean;
@@ -72,6 +77,8 @@ export interface GlobalConfigDialogState {
   cloudContextDraft: UICloudContextInitInput;
   configLoading: boolean;
   busy: boolean;
+  busyAction: '' | 'save' | 'cloud-context-init' | 'cloud-context-power' | 'cloud-provider-init' | 'cloud-provider-login';
+  busyTarget: string;
   error: string;
 }
 
@@ -98,8 +105,12 @@ export interface AppState {
   diffFilter: string;
   collapsedDiffDirs: Set<string>;
   terminalMessage: string;
+  terminalBusy: boolean;
   terminalCopyOutput: string;
   terminalCopyStatus: string;
+  debugOpen: boolean;
+  debugHeight: number;
+  debugOutput: string;
 }
 
 export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
@@ -149,6 +160,8 @@ export const defaultGlobalConfigDialog = (): GlobalConfigDialogState => ({
   cloudContextDraft: defaultCloudContextInitInput(),
   configLoading: false,
   busy: false,
+  busyAction: '',
+  busyTarget: '',
   error: '',
 });
 

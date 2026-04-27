@@ -19,6 +19,7 @@ import (
 const (
 	terminalOutputEvent = "terminal-output"
 	terminalExitEvent   = "terminal-exit"
+	appStatusEvent      = "app-status"
 	appSessionEnvVar    = "ERUN_UI_SESSION"
 )
 
@@ -35,6 +36,7 @@ type erunUIDeps struct {
 	resolveCLIPath       func() string
 	resolveBuildInfo     func() eruncommon.BuildInfo
 	resolveImageRegistry func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error)
+	cloudContextDeps     eruncommon.CloudContextDependencies
 	deleteNamespace      eruncommon.NamespaceDeleterFunc
 	listKubeContexts     func() ([]string, error)
 	ensureMCP            func(context.Context, eruncommon.OpenResult) error
@@ -85,6 +87,7 @@ type uiSelection struct {
 	NoGit             bool   `json:"noGit,omitempty"`
 	SetDefaultTenant  bool   `json:"setDefaultTenant,omitempty"`
 	Action            string `json:"action,omitempty"`
+	Debug             bool   `json:"debug,omitempty"`
 }
 
 type uiBuildDetails struct {
@@ -132,6 +135,7 @@ type uiEnvironmentConfig struct {
 	KubernetesContext  string                  `json:"kubernetesContext"`
 	ContainerRegistry  string                  `json:"containerRegistry"`
 	CloudProviderAlias string                  `json:"cloudProviderAlias"`
+	CloudContext       *uiCloudContextStatus   `json:"cloudContext,omitempty"`
 	RuntimeVersion     string                  `json:"runtimeVersion"`
 	SSHD               uiSSHDConfig            `json:"sshd"`
 	LocalPorts         uiEnvironmentLocalPorts `json:"localPorts"`
@@ -188,11 +192,12 @@ type startSessionResult struct {
 }
 
 type deleteEnvironmentResult struct {
-	Tenant               string `json:"tenant"`
-	Environment          string `json:"environment"`
-	Namespace            string `json:"namespace,omitempty"`
-	KubernetesContext    string `json:"kubernetesContext,omitempty"`
-	NamespaceDeleteError string `json:"namespaceDeleteError,omitempty"`
+	Tenant                string `json:"tenant"`
+	Environment           string `json:"environment"`
+	Namespace             string `json:"namespace,omitempty"`
+	KubernetesContext     string `json:"kubernetesContext,omitempty"`
+	NamespaceDeleteError  string `json:"namespaceDeleteError,omitempty"`
+	CloudContextStopError string `json:"cloudContextStopError,omitempty"`
 }
 
 type terminalOutputPayload struct {
@@ -203,6 +208,11 @@ type terminalOutputPayload struct {
 type terminalExitPayload struct {
 	SessionID int    `json:"sessionId"`
 	Reason    string `json:"reason,omitempty"`
+}
+
+type appStatusPayload struct {
+	Message string `json:"message"`
+	Busy    bool   `json:"busy"`
 }
 
 type pastedImagePayload struct {
@@ -420,7 +430,7 @@ func (a *App) InitCloudContext(input uiCloudContextInitInput) (uiCloudContextSta
 }
 
 func (a *App) StopCloudContext(name string) (uiCloudContextStatus, error) {
-	status, err := eruncommon.StopCloudContext(eruncommon.Context{}, a.deps.store, eruncommon.CloudContextParams{Name: name}, eruncommon.CloudContextDependencies{})
+	status, err := eruncommon.StopCloudContext(eruncommon.Context{}, a.deps.store, eruncommon.CloudContextParams{Name: name}, a.deps.cloudContextDeps)
 	if err != nil {
 		return uiCloudContextStatus{}, err
 	}
@@ -428,7 +438,7 @@ func (a *App) StopCloudContext(name string) (uiCloudContextStatus, error) {
 }
 
 func (a *App) StartCloudContext(name string) (uiCloudContextStatus, error) {
-	status, err := eruncommon.StartCloudContext(eruncommon.Context{}, a.deps.store, eruncommon.CloudContextParams{Name: name}, eruncommon.CloudContextDependencies{})
+	status, err := eruncommon.StartCloudContext(eruncommon.Context{}, a.deps.store, eruncommon.CloudContextParams{Name: name}, a.deps.cloudContextDeps)
 	if err != nil {
 		return uiCloudContextStatus{}, err
 	}
@@ -516,7 +526,7 @@ func (a *App) LoadEnvironmentConfig(selection uiSelection) (uiEnvironmentConfig,
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	return environmentConfigToUI(config, selection.Environment, ports), nil
+	return a.environmentConfigToUI(config, selection.Environment, ports)
 }
 
 func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentConfig) (uiEnvironmentConfig, error) {
@@ -537,7 +547,7 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	return environmentConfigToUI(updated, selection.Environment, ports), nil
+	return a.environmentConfigToUI(updated, selection.Environment, ports)
 }
 
 func labelRuntimeVersionSuggestions(source, image string, suggestions []uiVersion) []uiVersion {
@@ -583,7 +593,7 @@ func tenantConfigFromUI(config uiTenantConfig, existing eruncommon.TenantConfig)
 	return existing
 }
 
-func environmentConfigToUI(config eruncommon.EnvConfig, fallbackName string, ports eruncommon.EnvironmentLocalPorts) uiEnvironmentConfig {
+func (a *App) environmentConfigToUI(config eruncommon.EnvConfig, fallbackName string, ports eruncommon.EnvironmentLocalPorts) (uiEnvironmentConfig, error) {
 	name := strings.TrimSpace(config.Name)
 	if name == "" {
 		name = strings.TrimSpace(fallbackName)
@@ -615,7 +625,13 @@ func environmentConfigToUI(config eruncommon.EnvConfig, fallbackName string, por
 		Remote:   config.Remote,
 		Snapshot: config.SnapshotEnabled(),
 	}
-	return result
+	if cloudContext, ok, err := a.linkedCloudContext(config); err != nil {
+		return uiEnvironmentConfig{}, err
+	} else if ok {
+		status := cloudContextStatusToUI(cloudContext)
+		result.CloudContext = &status
+	}
+	return result, nil
 }
 
 func localPortStatus(port int) uiPortStatus {
@@ -709,6 +725,65 @@ func cloudContextStatusToUI(status eruncommon.CloudContextStatus) uiCloudContext
 	}
 }
 
+func (a *App) linkedCloudContext(config eruncommon.EnvConfig) (eruncommon.CloudContextStatus, bool, error) {
+	cloudProviderAlias := strings.TrimSpace(config.CloudProviderAlias)
+	kubernetesContext := strings.TrimSpace(config.KubernetesContext)
+	if kubernetesContext == "" {
+		return eruncommon.CloudContextStatus{}, false, nil
+	}
+	statuses, err := eruncommon.ListCloudContextStatuses(a.deps.store)
+	if err != nil {
+		return eruncommon.CloudContextStatus{}, false, err
+	}
+	for _, status := range statuses {
+		context := eruncommon.NormalizeCloudContextConfig(status.CloudContextConfig)
+		if cloudProviderAlias != "" && strings.TrimSpace(context.CloudProviderAlias) != cloudProviderAlias {
+			continue
+		}
+		if strings.TrimSpace(context.KubernetesContext) == kubernetesContext || strings.TrimSpace(context.Name) == kubernetesContext {
+			status.CloudContextConfig = context
+			return status, true, nil
+		}
+	}
+	return eruncommon.CloudContextStatus{}, false, nil
+}
+
+func (a *App) ensureLinkedCloudContextRunning(config eruncommon.EnvConfig) (eruncommon.CloudContextStatus, bool, error) {
+	status, ok, err := a.linkedCloudContext(config)
+	if err != nil || !ok {
+		return status, ok, err
+	}
+	if strings.TrimSpace(status.Status) == eruncommon.CloudContextStatusRunning {
+		a.emitAppStatus(fmt.Sprintf("Cloud context %s is running. Opening environment...", cloudContextDisplayName(status)), true)
+		return status, true, nil
+	}
+	a.emitAppStatus(fmt.Sprintf("Starting cloud context %s and waiting for Kubernetes access...", cloudContextDisplayName(status)), true)
+	status, err = eruncommon.StartCloudContext(eruncommon.Context{}, a.deps.store, eruncommon.CloudContextParams{Name: status.Name}, a.deps.cloudContextDeps)
+	if err != nil {
+		return eruncommon.CloudContextStatus{}, true, err
+	}
+	a.emitAppStatus(fmt.Sprintf("Cloud context %s is running. Opening environment...", cloudContextDisplayName(status)), true)
+	return status, true, nil
+}
+
+func (a *App) stopCloudContext(name string) (eruncommon.CloudContextStatus, error) {
+	return eruncommon.StopCloudContext(eruncommon.Context{}, a.deps.store, eruncommon.CloudContextParams{Name: name}, a.deps.cloudContextDeps)
+}
+
+func (a *App) emitAppStatus(message string, busy bool) {
+	if a.ctx == nil || strings.TrimSpace(message) == "" {
+		return
+	}
+	runtime.EventsEmit(a.ctx, appStatusEvent, appStatusPayload{Message: message, Busy: busy})
+}
+
+func cloudContextDisplayName(status eruncommon.CloudContextStatus) string {
+	if name := strings.TrimSpace(status.KubernetesContext); name != "" {
+		return name
+	}
+	return strings.TrimSpace(status.Name)
+}
+
 func (a *App) StartSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -723,6 +798,16 @@ func (a *App) StartSession(selection uiSelection, cols, rows int) (startSessionR
 	}
 
 	key := selectionKey(selection)
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+	})
+	if err != nil {
+		return startSessionResult{}, err
+	}
+	if _, _, err := a.ensureLinkedCloudContextRunning(result.EnvConfig); err != nil {
+		return startSessionResult{}, err
+	}
 
 	a.mu.Lock()
 	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
@@ -735,18 +820,10 @@ func (a *App) StartSession(selection uiSelection, cols, rows int) (startSessionR
 	}
 	a.mu.Unlock()
 
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
-		Tenant:      selection.Tenant,
-		Environment: selection.Environment,
-	})
-	if err != nil {
-		return startSessionResult{}, err
-	}
-
 	session, err := a.deps.startTerminal(startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),
-		Args:       buildOpenArgs(result.Tenant, result.Environment),
+		Args:       buildOpenArgs(result.Tenant, result.Environment, selection.Debug),
 		Env:        []string{appSessionEnvVar + "=1"},
 		Cols:       cols,
 		Rows:       rows,
@@ -792,7 +869,7 @@ func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSe
 	if err != nil {
 		return startSessionResult{}, err
 	}
-	return a.startCommandSession(selection, cols, rows, deploySelectionKey(selection), buildDeployArgs(selection.Tenant, selection.Environment, selection.Version, selection.RuntimeImage), resolveDeployStartDir(a.deps.findProjectRoot, result), []string{appSessionEnvVar + "=1"})
+	return a.startCommandSession(selection, cols, rows, deploySelectionKey(selection), buildDeployArgs(selection), resolveDeployStartDir(a.deps.findProjectRoot, result), []string{appSessionEnvVar + "=1"})
 }
 
 func (a *App) StartCloudInitAWSSession(cols, rows int) (startSessionResult, error) {
@@ -858,21 +935,36 @@ func (a *App) DeleteEnvironment(selection uiSelection, confirmation string) (del
 	if !ok {
 		return deleteEnvironmentResult{}, fmt.Errorf("environment deletion is not supported by the configured store")
 	}
+	envConfig, _, err := store.LoadEnvConfig(selection.Tenant, selection.Environment)
+	if err != nil {
+		return deleteEnvironmentResult{}, err
+	}
+	linkedContext, hasLinkedContext, err := a.ensureLinkedCloudContextRunning(envConfig)
+	if err != nil {
+		return deleteEnvironmentResult{}, err
+	}
 
 	result, err := eruncommon.RunDeleteEnvironment(eruncommon.Context{}, eruncommon.DeleteEnvironmentParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 	}, store, a.deps.deleteNamespace)
+	stopError := ""
+	if hasLinkedContext {
+		if _, stopErr := a.stopCloudContext(linkedContext.Name); stopErr != nil {
+			stopError = stopErr.Error()
+		}
+	}
 	if err != nil {
 		return deleteEnvironmentResult{}, err
 	}
 	a.closeSessionsForSelection(selection)
 	return deleteEnvironmentResult{
-		Tenant:               result.Tenant,
-		Environment:          result.Environment,
-		Namespace:            result.Namespace,
-		KubernetesContext:    result.KubernetesContext,
-		NamespaceDeleteError: result.NamespaceDeleteError,
+		Tenant:                result.Tenant,
+		Environment:           result.Environment,
+		Namespace:             result.Namespace,
+		KubernetesContext:     result.KubernetesContext,
+		NamespaceDeleteError:  result.NamespaceDeleteError,
+		CloudContextStopError: stopError,
 	}, nil
 }
 
@@ -1277,6 +1369,7 @@ func normalizeSelection(selection uiSelection) uiSelection {
 		NoGit:             selection.NoGit,
 		SetDefaultTenant:  selection.SetDefaultTenant,
 		Action:            strings.TrimSpace(selection.Action),
+		Debug:             selection.Debug,
 	}
 }
 
@@ -1307,15 +1400,15 @@ func (s *managedTerminal) Close() error {
 
 func selectionKey(selection uiSelection) string {
 	selection = normalizeSelection(selection)
-	return selection.Tenant + "\x00" + selection.Environment
+	return selection.Tenant + "\x00" + selection.Environment + "\x00" + fmt.Sprintf("%t", selection.Debug)
 }
 
 func initSelectionKey(selection uiSelection) string {
 	selection = normalizeSelection(selection)
-	return "init\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00" + selection.Version + "\x00" + selection.RuntimeImage + "\x00" + selection.KubernetesContext + "\x00" + selection.ContainerRegistry + "\x00" + fmt.Sprintf("%t", selection.SetDefaultTenant) + "\x00" + fmt.Sprintf("%t", selection.NoGit)
+	return "init\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00" + selection.Version + "\x00" + selection.RuntimeImage + "\x00" + selection.KubernetesContext + "\x00" + selection.ContainerRegistry + "\x00" + fmt.Sprintf("%t", selection.SetDefaultTenant) + "\x00" + fmt.Sprintf("%t", selection.NoGit) + "\x00" + fmt.Sprintf("%t", selection.Debug)
 }
 
 func deploySelectionKey(selection uiSelection) string {
 	selection = normalizeSelection(selection)
-	return "deploy\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00" + selection.Version + "\x00" + selection.RuntimeImage
+	return "deploy\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00" + selection.Version + "\x00" + selection.RuntimeImage + "\x00" + fmt.Sprintf("%t", selection.Debug)
 }
