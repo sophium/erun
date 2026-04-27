@@ -116,23 +116,27 @@ func ensureDefaultDevopsFile(ctx Context, path string, mode os.FileMode, content
 }
 
 func shouldReplaceDefaultDevopsFile(path string, existing, content []byte) bool {
-	legacy := []string{
-		"ARG ERUN_BASE_IMAGE=erunpaas/erun-devops\nARG ERUN_BASE_VERSION=1.0.0\n\nFROM ${ERUN_BASE_IMAGE}:${ERUN_BASE_VERSION}\n",
-		"ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.0.0\n\nFROM ${ERUN_BASE_TAG}\n",
-		"ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.0.0\n\nFROM ${ERUN_BASE_TAG}\n\nENTRYPOINT [\"/bin/sh\", \"-lc\", \"if [ \\\"${1:-}\\\" = shell ]; then shift; repo_dir=\\\"${ERUN_REPO_PATH:-${HOME}/git/erun}\\\"; [ -d \\\"$repo_dir\\\" ] && cd \\\"$repo_dir\\\"; exec /bin/bash -i; fi; exec erun-devops-entrypoint \\\"$@\\\"\", \"erun-devops-wrapper\"]\n",
-	}
 	current := strings.TrimSpace(string(existing))
-	switch filepath.Base(path) {
-	case "Dockerfile":
-		for _, candidate := range legacy {
-			if current == strings.TrimSpace(candidate) {
-				return true
-			}
+	for _, candidate := range defaultDevopsLegacyContents(path, content) {
+		if current == strings.TrimSpace(candidate) {
+			return true
 		}
-	case "service.yaml":
-		return current == strings.TrimSpace(legacyDefaultDevopsServiceTemplate(content))
 	}
 	return false
+}
+
+func defaultDevopsLegacyContents(path string, content []byte) []string {
+	switch filepath.Base(path) {
+	case "Dockerfile":
+		return []string{
+			"ARG ERUN_BASE_IMAGE=erunpaas/erun-devops\nARG ERUN_BASE_VERSION=1.0.0\n\nFROM ${ERUN_BASE_IMAGE}:${ERUN_BASE_VERSION}\n",
+			"ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.0.0\n\nFROM ${ERUN_BASE_TAG}\n",
+			"ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.0.0\n\nFROM ${ERUN_BASE_TAG}\n\nENTRYPOINT [\"/bin/sh\", \"-lc\", \"if [ \\\"${1:-}\\\" = shell ]; then shift; repo_dir=\\\"${ERUN_REPO_PATH:-${HOME}/git/erun}\\\"; [ -d \\\"$repo_dir\\\" ] && cd \\\"$repo_dir\\\"; exec /bin/bash -i; fi; exec erun-devops-entrypoint \\\"$@\\\"\", \"erun-devops-wrapper\"]\n",
+		}
+	case "service.yaml":
+		return []string{legacyDefaultDevopsServiceTemplate(content)}
+	}
+	return nil
 }
 
 func legacyDefaultDevopsServiceTemplate(content []byte) string {

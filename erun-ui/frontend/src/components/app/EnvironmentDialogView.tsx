@@ -163,6 +163,17 @@ export function EnvironmentDialogView({ controller, state }: { controller: ERunU
                     Initialize without Git checkout
                   </Label>
                 </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox
+                    id="environment-bootstrap"
+                    checked={dialog.bootstrap}
+                    disabled={dialog.busy}
+                    onCheckedChange={(checked) => controller.updateEnvironmentDialog({ bootstrap: checked === true })}
+                  />
+                  <Label htmlFor="environment-bootstrap" className="text-sm font-normal">
+                    Create tenant devops module
+                  </Label>
+                </div>
               </div>
             </>
           )}

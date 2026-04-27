@@ -85,6 +85,7 @@ type uiSelection struct {
 	KubernetesContext string `json:"kubernetesContext,omitempty"`
 	ContainerRegistry string `json:"containerRegistry,omitempty"`
 	NoGit             bool   `json:"noGit,omitempty"`
+	Bootstrap         bool   `json:"bootstrap,omitempty"`
 	SetDefaultTenant  bool   `json:"setDefaultTenant,omitempty"`
 	Action            string `json:"action,omitempty"`
 	Debug             bool   `json:"debug,omitempty"`
@@ -805,9 +806,6 @@ func (a *App) StartSession(selection uiSelection, cols, rows int) (startSessionR
 	if err != nil {
 		return startSessionResult{}, err
 	}
-	if _, _, err := a.ensureLinkedCloudContextRunning(result.EnvConfig); err != nil {
-		return startSessionResult{}, err
-	}
 
 	a.mu.Lock()
 	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
@@ -1367,6 +1365,7 @@ func normalizeSelection(selection uiSelection) uiSelection {
 		KubernetesContext: strings.TrimSpace(selection.KubernetesContext),
 		ContainerRegistry: strings.TrimSpace(selection.ContainerRegistry),
 		NoGit:             selection.NoGit,
+		Bootstrap:         selection.Bootstrap,
 		SetDefaultTenant:  selection.SetDefaultTenant,
 		Action:            strings.TrimSpace(selection.Action),
 		Debug:             selection.Debug,
@@ -1405,7 +1404,7 @@ func selectionKey(selection uiSelection) string {
 
 func initSelectionKey(selection uiSelection) string {
 	selection = normalizeSelection(selection)
-	return "init\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00" + selection.Version + "\x00" + selection.RuntimeImage + "\x00" + selection.KubernetesContext + "\x00" + selection.ContainerRegistry + "\x00" + fmt.Sprintf("%t", selection.SetDefaultTenant) + "\x00" + fmt.Sprintf("%t", selection.NoGit) + "\x00" + fmt.Sprintf("%t", selection.Debug)
+	return "init\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00" + selection.Version + "\x00" + selection.RuntimeImage + "\x00" + selection.KubernetesContext + "\x00" + selection.ContainerRegistry + "\x00" + fmt.Sprintf("%t", selection.SetDefaultTenant) + "\x00" + fmt.Sprintf("%t", selection.NoGit) + "\x00" + fmt.Sprintf("%t", selection.Bootstrap) + "\x00" + fmt.Sprintf("%t", selection.Debug)
 }
 
 func deploySelectionKey(selection uiSelection) string {

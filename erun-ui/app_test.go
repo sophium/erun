@@ -481,9 +481,10 @@ func TestBuildInitArgsIncludesRuntimeVersion(t *testing.T) {
 		KubernetesContext: " orbstack ",
 		ContainerRegistry: " erunpaas ",
 		NoGit:             true,
+		Bootstrap:         true,
 		SetDefaultTenant:  true,
 	})
-	want := []string{"init", "erun", "remote", "--remote", "--version", "1.0.19", "--runtime-image", "erun-devops", "--kubernetes-context", "orbstack", "--container-registry", "erunpaas", "--set-default-tenant=true", "--confirm-environment=true", "--no-git"}
+	want := []string{"init", "erun", "remote", "--remote", "--version", "1.0.19", "--runtime-image", "erun-devops", "--kubernetes-context", "orbstack", "--container-registry", "erunpaas", "--set-default-tenant=true", "--confirm-environment=true", "--no-git", "--bootstrap"}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected args length: got %+v want %+v", got, want)
 	}
@@ -1043,7 +1044,7 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	}
 }
 
-func TestStartSessionStartsLinkedCloudContextBeforeOpen(t *testing.T) {
+func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	projectRoot := t.TempDir()
 	rootConfig := &eruncommon.ERunConfig{
 		CloudProviders: []eruncommon.CloudProviderConfig{
@@ -1095,21 +1096,11 @@ func TestStartSessionStartsLinkedCloudContextBeforeOpen(t *testing.T) {
 	}
 
 	got := strings.Join(actions, "\n")
-	for _, want := range []string{
-		"aws ec2 start-instances --instance-ids i-test",
-		"aws ec2 wait instance-running --instance-ids i-test",
-		"kubectl config set-context cluster-prod --cluster cluster-prod --user cluster-prod",
-		"terminal open frs prod",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("expected action %q in:\n%s", want, got)
-		}
+	if got != "terminal open frs prod" {
+		t.Fatalf("expected only terminal start action, got:\n%s", got)
 	}
-	if strings.Index(got, "aws ec2 start-instances") > strings.Index(got, "terminal open") {
-		t.Fatalf("expected cloud context start before terminal open, got:\n%s", got)
-	}
-	if rootConfig.CloudContexts[0].Status != eruncommon.CloudContextStatusRunning {
-		t.Fatalf("expected cloud context to be running, got %+v", rootConfig.CloudContexts[0])
+	if rootConfig.CloudContexts[0].Status != eruncommon.CloudContextStatusStopped {
+		t.Fatalf("expected cloud context startup to be left to erun, got %+v", rootConfig.CloudContexts[0])
 	}
 }
 

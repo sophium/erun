@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +61,89 @@ func TestInitCloudContextUsesDefaultsAndStoresKubeContext(t *testing.T) {
 	}
 	if len(awsCommands) == 0 || len(kubectlCommands) != 3 {
 		t.Fatalf("expected AWS and kubeconfig commands, got aws=%+v kubectl=%+v", awsCommands, kubectlCommands)
+	}
+}
+
+func TestCloudContextPreflightDryRunTracesStartForStoppedContext(t *testing.T) {
+	store := &memoryCloudStore{config: ERunConfig{
+		CloudProviders: []CloudProviderConfig{{
+			Alias:    "team-cloud",
+			Provider: CloudProviderAWS,
+			Profile:  "erun-sso",
+		}},
+		CloudContexts: []CloudContextConfig{{
+			Name:               "team-context",
+			Provider:           CloudProviderAWS,
+			CloudProviderAlias: "team-cloud",
+			Region:             DefaultCloudContextRegion,
+			InstanceID:         "i-test",
+			PublicIP:           "198.51.100.10",
+			InstanceType:       DefaultCloudContextInstanceType,
+			DiskType:           DefaultCloudContextDiskType,
+			DiskSizeGB:         DefaultCloudContextDiskSizeGB,
+			KubernetesContext:  "cluster-prod",
+			AdminToken:         "test-token",
+			Status:             CloudContextStatusStopped,
+		}},
+	}}
+	trace := new(bytes.Buffer)
+	ctx := Context{
+		DryRun: true,
+		Logger: NewLoggerWithWriters(2, trace, trace),
+	}
+	ctx.KubernetesContextPreflight = CloudContextPreflight(store, CloudContextDependencies{})
+
+	if err := ctx.EnsureKubernetesContext("cluster-prod"); err != nil {
+		t.Fatalf("EnsureKubernetesContext failed: %v", err)
+	}
+
+	output := trace.String()
+	for _, want := range []string{
+		"aws ec2 start-instances --instance-ids i-test --region eu-west-2 --profile erun-sso",
+		"aws ec2 wait instance-running --instance-ids i-test --region eu-west-2 --profile erun-sso",
+		"aws ec2 describe-instances --instance-ids i-test --query 'Reservations[0].Instances[0].PublicIpAddress' --output text --region eu-west-2 --profile erun-sso",
+		"kubectl config set-cluster cluster-prod --server https://203.0.113.10:6443 --insecure-skip-tls-verify=true",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected dry-run trace to contain %q, got:\n%s", want, output)
+		}
+	}
+	if store.config.CloudContexts[0].Status != CloudContextStatusStopped {
+		t.Fatalf("dry-run should not persist cloud context start, got %+v", store.config.CloudContexts[0])
+	}
+}
+
+func TestCloudContextPreflightSkipsRunningContext(t *testing.T) {
+	store := &memoryCloudStore{config: ERunConfig{
+		CloudProviders: []CloudProviderConfig{{
+			Alias:    "team-cloud",
+			Provider: CloudProviderAWS,
+		}},
+		CloudContexts: []CloudContextConfig{{
+			Name:               "team-context",
+			Provider:           CloudProviderAWS,
+			CloudProviderAlias: "team-cloud",
+			Region:             DefaultCloudContextRegion,
+			InstanceID:         "i-test",
+			KubernetesContext:  "cluster-prod",
+			AdminToken:         "test-token",
+			Status:             CloudContextStatusRunning,
+		}},
+	}}
+	ctx := Context{}
+	ctx.KubernetesContextPreflight = CloudContextPreflight(store, CloudContextDependencies{
+		RunAWS: func(Context, CloudProviderConfig, string, []string) (string, error) {
+			t.Fatal("did not expect AWS command for running cloud context")
+			return "", nil
+		},
+		RunKubectl: func(Context, []string) error {
+			t.Fatal("did not expect kubectl command for running cloud context")
+			return nil
+		},
+	})
+
+	if err := ctx.EnsureKubernetesContext("cluster-prod"); err != nil {
+		t.Fatalf("EnsureKubernetesContext failed: %v", err)
 	}
 }
 

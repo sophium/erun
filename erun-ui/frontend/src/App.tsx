@@ -177,7 +177,7 @@ function DebugPanel({ controller, open, output }: { controller: ERunUIController
           ref={outputRef}
           className="min-h-0 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-[1.35] text-[oklch(0.82_0_0)]"
         >
-          {output || 'Open an environment while Debug is expanded to run erun with -vv and stream output here.'}
+          {output || 'Run an environment command while Debug is expanded to stream erun -vv output here.'}
         </pre>
       )}
     </section>

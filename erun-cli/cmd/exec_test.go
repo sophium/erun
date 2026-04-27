@@ -18,10 +18,13 @@ func TestExecDiffPrintsRawGitDiff(t *testing.T) {
 			if dir != "/tmp/project" {
 				t.Fatalf("unexpected git dir: %q", dir)
 			}
-			if strings.Join(args, " ") != "diff --no-color --no-ext-diff" {
+			switch strings.Join(args, " ") {
+			case "diff --no-color --no-ext-diff":
+				_, _ = io.WriteString(stdout, "diff --git a/a.txt b/a.txt\n")
+			case "ls-files --others --exclude-standard -z":
+			default:
 				t.Fatalf("unexpected git args: %+v", args)
 			}
-			_, _ = io.WriteString(stdout, "diff --git a/a.txt b/a.txt\n")
 			return nil
 		},
 	})

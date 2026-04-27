@@ -75,6 +75,8 @@ type BootstrapInitParams struct {
 	ContainerRegistry        string
 	Remote                   bool
 	RemoteRepositoryURL      string
+	CodeCommitSSHKeyID       string
+	Bootstrap                bool
 	ConfirmTenant            *bool
 	ConfirmEnvironment       *bool
 	ConfirmRemoteKeyImport   *bool
@@ -91,6 +93,7 @@ const (
 	BootstrapInitInteractionKubernetesContext  BootstrapInitInteractionType = "input_kubernetes_context"
 	BootstrapInitInteractionContainerRegistry  BootstrapInitInteractionType = "input_container_registry"
 	BootstrapInitInteractionRemoteRepository   BootstrapInitInteractionType = "input_remote_repository"
+	BootstrapInitInteractionCodeCommitSSHKeyID BootstrapInitInteractionType = "input_codecommit_ssh_key_id"
 	BootstrapInitInteractionConfirmRemoteKey   BootstrapInitInteractionType = "confirm_remote_key"
 )
 
@@ -136,6 +139,7 @@ type BootstrapInitDependencies struct {
 	PromptKubernetesContext   PromptValueFunc
 	PromptContainerRegistry   PromptValueFunc
 	PromptRemoteRepositoryURL PromptValueFunc
+	PromptCodeCommitSSHKeyID  PromptValueFunc
 	EnsureKubernetesNamespace NamespaceEnsurerFunc
 	LoadProjectConfig         ProjectConfigLoaderFunc
 	SaveProjectConfig         ProjectConfigSaverFunc
@@ -631,8 +635,14 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 		envConfigChanged = true
 	}
 	if remoteMode {
-		if err := s.ensureRemoteRepository(params, tenant, envName, kubernetesContext, projectRoot); err != nil {
+		req, err := s.ensureRemoteRepository(params, tenant, envName, kubernetesContext, projectRoot)
+		if err != nil {
 			return result, err
+		}
+		if params.Bootstrap {
+			if err := s.ensureRemoteDefaultDevopsBootstrap(req, projectRoot, tenant, envName, params.RuntimeVersion); err != nil {
+				return result, err
+			}
 		}
 	} else {
 		if err := EnsureDefaultDevopsModuleWithVersion(s.Context, projectRoot, tenant, params.RuntimeVersion); err != nil {
@@ -686,6 +696,10 @@ func remoteRepositoryLabel(tenant, envName string) string {
 	return fmt.Sprintf("Git remote URL for environment %q in tenant %q", envName, tenant)
 }
 
+func codeCommitSSHKeyIDLabel(tenant, envName string) string {
+	return fmt.Sprintf("CodeCommit SSH public key ID for environment %q in tenant %q", envName, tenant)
+}
+
 func remoteKeyImportLabel(tenant, envName string) string {
 	return fmt.Sprintf("Import the SSH public key above for environment %q in tenant %q and continue", envName, tenant)
 }
@@ -704,6 +718,7 @@ func normalizeBootstrapParams(params BootstrapInitParams) BootstrapInitParams {
 	params.KubernetesContext = strings.TrimSpace(params.KubernetesContext)
 	params.ContainerRegistry = strings.TrimSpace(params.ContainerRegistry)
 	params.RemoteRepositoryURL = strings.TrimSpace(params.RemoteRepositoryURL)
+	params.CodeCommitSSHKeyID = strings.TrimSpace(params.CodeCommitSSHKeyID)
 	return params
 }
 
@@ -898,6 +913,9 @@ func (s bootstrapRunner) ensureKubernetesNamespace(tenant, envName, currentConte
 	nextContext = strings.TrimSpace(nextContext)
 	if nextContext == "" || nextContext == strings.TrimSpace(currentContext) {
 		return nil
+	}
+	if err := s.Context.EnsureKubernetesContext(nextContext); err != nil {
+		return err
 	}
 
 	namespace := KubernetesNamespaceName(tenant, envName)

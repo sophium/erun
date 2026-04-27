@@ -42,6 +42,7 @@ func Execute() error {
 	activateMCP := newMCPForwarder()
 	activateSSHD := newSSHDActivator(common.RunRemoteCommand)
 	runManagedDeploy := func(ctx common.Context, target common.OpenResult) error {
+		ctx = withCloudContextPreflight(ctx, store)
 		specs, err := common.ResolveCurrentDeploySpecs(
 			store,
 			common.FindProjectRoot,
@@ -62,6 +63,9 @@ func Execute() error {
 
 	initCmd := newInitCmd(runInit)
 	openCmd := newOpenCmd(
+		func(ctx common.Context) common.Context {
+			return withCloudContextPreflight(ctx, store)
+		},
 		resolveOpen,
 		store.SaveEnvConfig,
 		runInitForOpen,
@@ -76,7 +80,9 @@ func Execute() error {
 		launchVSCode,
 		launchIntelliJ,
 	)
-	sshdCmd := newSSHDCmd(resolveOpen, store.SaveEnvConfig, runInitForOpen, resolveRuntimeDeploySpec, recoveringDeployHelmChart, common.RunRemoteCommand, writeLocalSSHConfig)
+	sshdCmd := newSSHDCmd(func(ctx common.Context) common.Context {
+		return withCloudContextPreflight(ctx, store)
+	}, resolveOpen, store.SaveEnvConfig, runInitForOpen, resolveRuntimeDeploySpec, recoveringDeployHelmChart, common.RunRemoteCommand, writeLocalSSHConfig)
 	containerCmd := newCommandGroup(
 		"container",
 		"Container utilities",
@@ -119,7 +125,7 @@ func Execute() error {
 	}, common.ResolveDefaultRuntimeRegistryVersions)
 
 	runRoot := func(cmd *cobra.Command, args []string) error {
-		ctx := commandContext(cmd)
+		ctx := withCloudContextPreflight(commandContext(cmd), store)
 		result, initRan, err := resolveOpenWithInitStop(ctx, args, shouldInitRootCommand, resolveOpen, runInitForArgs)
 		if err != nil {
 			return err
@@ -133,4 +139,13 @@ func Execute() error {
 	cmd := newRootCommand(runRoot)
 	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, execCmd, cloudCmd, contextCmd, listCmd, doctorCmd, deleteCmd, releaseCmd, versionCmd)
 	return cmd.Execute()
+}
+
+func withCloudContextPreflight(ctx common.Context, store any) common.Context {
+	cloudStore, ok := store.(common.CloudContextStore)
+	if !ok {
+		return ctx
+	}
+	ctx.KubernetesContextPreflight = common.CloudContextPreflight(cloudStore, common.CloudContextDependencies{})
+	return ctx
 }
