@@ -366,12 +366,12 @@ func TestInitCommandAcceptsRuntimeVersionOverride(t *testing.T) {
 		got = params
 		return nil
 	})
-	cmd.SetArgs([]string{"erun", "local", "--version", "1.0.19-snapshot-20260418141901", "--runtime-image", "erun-devops", "--no-git"})
+	cmd.SetArgs([]string{"erun", "local", "--version", "1.0.19-snapshot-20260418141901", "--runtime-image", "erun-devops", "--no-git", "--bootstrap"})
 
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("Execute failed: %v", err)
 	}
-	if got.RuntimeVersion != "1.0.19-snapshot-20260418141901" || got.RuntimeImage != "erun-devops" || !got.NoGit {
+	if got.RuntimeVersion != "1.0.19-snapshot-20260418141901" || got.RuntimeImage != "erun-devops" || !got.NoGit || !got.Bootstrap {
 		t.Fatalf("unexpected init params: %+v", got)
 	}
 }

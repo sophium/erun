@@ -152,6 +152,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	}
 	push := newPushOperation(pushDockerImage, loginToDockerRegistry, selectRunner)
 	runManagedDeploy := func(ctx common.Context, target common.OpenResult) error {
+		ctx = withCloudContextPreflight(ctx, store)
 		specs, err := common.ResolveCurrentDeploySpecs(
 			store,
 			findProjectRoot,
@@ -180,8 +181,12 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	runInitForOpen := newRunInitForOpen(store, runInit)
 
 	initCmd := newInitCmd(runInit)
-	openCmd := newOpenCmd(resolveOpen, store.SaveEnvConfig, runInitForOpen, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart, activateMCP, activateSSHD, launchVSCodeCmd, launchIntelliJCmd)
-	sshdCmd := newSSHDCmd(resolveOpen, store.SaveEnvConfig, runInitForOpen, resolveRuntimeDeploySpec, openDeployHelmChart, deps.RunRemoteCommand, writeLocalSSHConfig)
+	openCmd := newOpenCmd(func(ctx common.Context) common.Context {
+		return withCloudContextPreflight(ctx, store)
+	}, resolveOpen, store.SaveEnvConfig, runInitForOpen, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart, activateMCP, activateSSHD, launchVSCodeCmd, launchIntelliJCmd)
+	sshdCmd := newSSHDCmd(func(ctx common.Context) common.Context {
+		return withCloudContextPreflight(ctx, store)
+	}, resolveOpen, store.SaveEnvConfig, runInitForOpen, resolveRuntimeDeploySpec, openDeployHelmChart, deps.RunRemoteCommand, writeLocalSSHConfig)
 	containerCmd := newCommandGroup(
 		"container",
 		"Container utilities",
@@ -235,7 +240,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	}, deps.ResolveRuntimeRegistryVersions)
 
 	runRoot := func(cmd *cobra.Command, args []string) error {
-		ctx := commandContext(cmd)
+		ctx := withCloudContextPreflight(commandContext(cmd), store)
 		result, initRan, err := resolveOpenWithInitStop(ctx, args, shouldInitRootCommand, resolveOpen, runInitForArgs)
 		if err != nil {
 			return err

@@ -17,7 +17,7 @@ func newDeleteCmd(store common.DeleteStore, promptRunner PromptRunner, deleteNam
 		Args:         cobra.ExactArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDeleteCommand(commandContext(cmd), store, promptRunner, deleteNamespace, args[0], args[1])
+			return runDeleteCommand(withCloudContextPreflight(commandContext(cmd), store), store, promptRunner, deleteNamespace, args[0], args[1])
 		},
 	}
 	addDryRunFlag(cmd)

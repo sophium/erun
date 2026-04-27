@@ -85,10 +85,56 @@ func ResolveGitDiff(projectRoot string, runGit GitCommandRunnerFunc) (DiffResult
 	if err := runGit(projectRoot, stdout, stderr, "diff", "--no-color", "--no-ext-diff"); err != nil {
 		return DiffResult{}, fmt.Errorf("git diff: %w%s", err, formatGitCommandStderr(stderr.String()))
 	}
+	if err := appendUntrackedGitDiff(projectRoot, stdout, runGit); err != nil {
+		return DiffResult{}, err
+	}
 
 	result := ParseGitDiff(stdout.String())
 	result.WorkingDirectory = projectRoot
 	return result, nil
+}
+
+func appendUntrackedGitDiff(projectRoot string, rawDiff *bytes.Buffer, runGit GitCommandRunnerFunc) error {
+	untrackedOutput := new(bytes.Buffer)
+	untrackedStderr := new(bytes.Buffer)
+	if err := runGit(projectRoot, untrackedOutput, untrackedStderr, "ls-files", "--others", "--exclude-standard", "-z"); err != nil {
+		return fmt.Errorf("git ls-files: %w%s", err, formatGitCommandStderr(untrackedStderr.String()))
+	}
+	for _, file := range splitNULTerminated(untrackedOutput.String()) {
+		file = strings.TrimSpace(file)
+		if file == "" {
+			continue
+		}
+		fileDiff := new(bytes.Buffer)
+		fileStderr := new(bytes.Buffer)
+		err := runGit(projectRoot, fileDiff, fileStderr, "diff", "--no-color", "--no-ext-diff", "--no-index", "--", "/dev/null", file)
+		if err != nil && fileDiff.Len() == 0 {
+			return fmt.Errorf("git diff untracked %s: %w%s", file, err, formatGitCommandStderr(fileStderr.String()))
+		}
+		appendRawDiff(rawDiff, fileDiff.String())
+	}
+	return nil
+}
+
+func splitNULTerminated(value string) []string {
+	value = strings.TrimSuffix(value, "\x00")
+	if value == "" {
+		return nil
+	}
+	return strings.Split(value, "\x00")
+}
+
+func appendRawDiff(rawDiff *bytes.Buffer, diff string) {
+	if diff == "" {
+		return
+	}
+	if rawDiff.Len() > 0 && !strings.HasSuffix(rawDiff.String(), "\n") {
+		rawDiff.WriteString("\n")
+	}
+	rawDiff.WriteString(diff)
+	if !strings.HasSuffix(diff, "\n") {
+		rawDiff.WriteString("\n")
+	}
 }
 
 func ParseGitDiff(raw string) DiffResult {

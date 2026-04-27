@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -293,6 +294,62 @@ func StartCloudContext(ctx Context, store CloudContextStore, params CloudContext
 		return CloudContextStatus{}, err
 	}
 	return status, nil
+}
+
+func CloudContextPreflight(store CloudContextStore, deps CloudContextDependencies) KubernetesContextPreflightFunc {
+	var mu sync.Mutex
+	started := make(map[string]struct{})
+	return func(ctx Context, kubernetesContext string) error {
+		kubernetesContext = strings.TrimSpace(kubernetesContext)
+		if kubernetesContext == "" || store == nil {
+			return nil
+		}
+
+		mu.Lock()
+		if _, ok := started[kubernetesContext]; ok {
+			mu.Unlock()
+			return nil
+		}
+		mu.Unlock()
+
+		status, ok, err := findCloudContextForKubernetesContext(store, kubernetesContext)
+		if err != nil || !ok {
+			return err
+		}
+		if strings.TrimSpace(status.Status) == CloudContextStatusRunning {
+			return nil
+		}
+
+		if _, err := StartCloudContext(ctx, store, CloudContextParams{Name: status.Name}, deps); err != nil {
+			return err
+		}
+
+		mu.Lock()
+		started[kubernetesContext] = struct{}{}
+		if name := strings.TrimSpace(status.Name); name != "" {
+			started[name] = struct{}{}
+		}
+		mu.Unlock()
+		return nil
+	}
+}
+
+func findCloudContextForKubernetesContext(store CloudReadStore, kubernetesContext string) (CloudContextStatus, bool, error) {
+	kubernetesContext = strings.TrimSpace(kubernetesContext)
+	if kubernetesContext == "" {
+		return CloudContextStatus{}, false, nil
+	}
+	contexts, err := ListCloudContexts(store)
+	if err != nil {
+		return CloudContextStatus{}, false, err
+	}
+	for _, context := range contexts {
+		context = NormalizeCloudContextConfig(context)
+		if strings.TrimSpace(context.KubernetesContext) == kubernetesContext || strings.TrimSpace(context.Name) == kubernetesContext {
+			return CloudContextStatus{CloudContextConfig: context}, true, nil
+		}
+	}
+	return CloudContextStatus{}, false, nil
 }
 
 func changeCloudContextPowerState(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies, awsAction, status string) (CloudContextStatus, error) {

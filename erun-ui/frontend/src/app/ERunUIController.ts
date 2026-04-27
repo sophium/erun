@@ -101,6 +101,8 @@ interface DebugOpenFilter {
   pending: string;
 }
 
+type DebugSessionMode = 'open' | 'hidden';
+
 export class ERunUIController {
   readonly state: AppState = {
     tenants: [],
@@ -144,6 +146,7 @@ export class ERunUIController {
   private readonly sessionExitReasons = new Map<number, string>();
   private readonly sessionExitOutputs = new Map<number, string>();
   private readonly debugOpenFilters = new Map<number, DebugOpenFilter>();
+  private readonly debugSessionModes = new Map<number, DebugSessionMode>();
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
   private terminalRoot: HTMLDivElement | null = null;
@@ -430,6 +433,7 @@ export class ERunUIController {
     const result = (await StartSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
     this.selectionSessions.set(key, result.sessionId);
     this.openSessionSelections.set(result.sessionId, runSelection);
+    this.registerDebugSession(result.sessionId, runSelection, 'open');
     this.rebuildTerminalDisplayBuffer(result.sessionId);
     this.state.sessionId = result.sessionId;
 
@@ -476,6 +480,7 @@ export class ERunUIController {
       kubernetesContextsLoading: true,
       containerRegistry: 'erunpaas',
       noGit: false,
+      bootstrap: false,
       setDefaultTenant: true,
       versionImage: this.state.versionSuggestions[0]?.image || '',
       choicesOpen: false,
@@ -570,6 +575,7 @@ export class ERunUIController {
       kubernetesContext: isInit ? kubernetesContext : undefined,
       containerRegistry: isInit ? containerRegistry : undefined,
       noGit: dialog.noGit,
+      bootstrap: isInit ? dialog.bootstrap : undefined,
       setDefaultTenant: isInit ? dialog.setDefaultTenant : undefined,
     };
 
@@ -1492,6 +1498,7 @@ export class ERunUIController {
     this.fitAddon?.fit();
     const result = (await StartInitSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
     this.initSessionSelections.set(result.sessionId, runSelection);
+    this.registerDebugSession(result.sessionId, runSelection, 'hidden');
     this.state.sessionId = result.sessionId;
 
     this.resetTerminal();
@@ -1515,6 +1522,7 @@ export class ERunUIController {
     this.fitAddon?.fit();
     const result = (await StartDeploySession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
     this.deploySessionSelections.set(result.sessionId, runSelection);
+    this.registerDebugSession(result.sessionId, runSelection, 'hidden');
     this.state.sessionId = result.sessionId;
 
     this.resetTerminal();
@@ -1722,6 +1730,7 @@ export class ERunUIController {
     this.deploySessionSelections.delete(payload.sessionId);
     this.openSessionSelections.delete(payload.sessionId);
     this.cloudInitSessions.delete(payload.sessionId);
+    this.debugSessionModes.delete(payload.sessionId);
 
     const reason = this.terminalExitReason(payload, initSelection, deploySelection, openSelection, cloudInit);
     this.sessionExitReasons.set(payload.sessionId, reason);
@@ -1922,9 +1931,27 @@ export class ERunUIController {
   }
 
   private filterTerminalDisplayData(sessionId: number, data: Uint8Array): TerminalWriteData | null {
-    const selection = this.openSessionSelections.get(sessionId);
-    if (!selection?.debug) {
+    const debugMode = this.debugSessionModes.get(sessionId);
+    if (!debugMode) {
       return data;
+    }
+    if (debugMode === 'hidden') {
+      const filter = this.debugOpenFilters.get(sessionId) || { released: false, pending: '' };
+      if (filter.released) {
+        return data;
+      }
+      const text = new TextDecoder().decode(data);
+      const output = filter.pending + text;
+      const promptIndex = interactivePromptIndex(output);
+      if (promptIndex === -1) {
+        filter.pending = output.slice(-512);
+        this.debugOpenFilters.set(sessionId, filter);
+        return null;
+      }
+      filter.released = true;
+      filter.pending = '';
+      this.debugOpenFilters.set(sessionId, filter);
+      return output.slice(promptIndex);
     }
     const filter = this.debugOpenFilters.get(sessionId) || { released: false, pending: '' };
     if (filter.released) {
@@ -1944,6 +1971,13 @@ export class ERunUIController {
     filter.pending = '';
     this.debugOpenFilters.set(sessionId, filter);
     return output.slice(titleIndex);
+  }
+
+  private registerDebugSession(sessionId: number, selection: UISelection, mode: DebugSessionMode): void {
+    if (!selection.debug) {
+      return;
+    }
+    this.debugSessionModes.set(sessionId, mode);
   }
 
   private writeTerminalBuffer(chunks: TerminalWriteData[]): void {
@@ -1968,6 +2002,30 @@ function decodeDebugOutput(data: Uint8Array): string {
     .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n');
+}
+
+function interactivePromptIndex(output: string): number {
+  const promptLabels = [
+    'Git remote URL for environment',
+    'CodeCommit SSH public key ID for environment',
+    'Import the SSH public key above',
+    'Kubernetes context for environment',
+    'Container registry for environment',
+    'Initialize default environment',
+    'Initialize tenant',
+    'Select tenant',
+  ];
+  let match = -1;
+  for (const label of promptLabels) {
+    const index = output.lastIndexOf(label);
+    if (index > match) {
+      match = index;
+    }
+  }
+  if (match === -1) {
+    return -1;
+  }
+  return Math.max(output.lastIndexOf('\n', match), output.lastIndexOf('\r', match)) + 1;
 }
 
 function trimDebugOutput(value: string): string {
@@ -2000,6 +2058,9 @@ function formatDebugCommand(selection: UISelection, mode: 'open' | 'init' | 'dep
     args.push(`--set-default-tenant=${selection.setDefaultTenant ? 'true' : 'false'}`, '--confirm-environment=true');
     if (selection.noGit) {
       args.push('--no-git');
+    }
+    if (selection.bootstrap) {
+      args.push('--bootstrap');
     }
   } else if (mode === 'deploy') {
     args.push('open', selection.tenant, selection.environment, '--no-shell', '--no-alias-prompt');

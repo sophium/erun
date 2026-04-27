@@ -118,6 +118,9 @@ func buildInitArgs(selection uiSelection) []string {
 	if selection.NoGit {
 		args = append(args, "--no-git")
 	}
+	if selection.Bootstrap {
+		args = append(args, "--bootstrap")
+	}
 	return args
 }
 

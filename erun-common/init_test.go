@@ -32,6 +32,7 @@ type bootstrapTestRunner struct {
 	PromptKubernetesContext   PromptValueFunc
 	PromptContainerRegistry   PromptValueFunc
 	PromptRemoteRepositoryURL PromptValueFunc
+	PromptCodeCommitSSHKeyID  PromptValueFunc
 	EnsureKubernetesNamespace NamespaceEnsurerFunc
 	LoadProjectConfig         ProjectConfigLoaderFunc
 	SaveProjectConfig         ProjectConfigSaverFunc
@@ -52,6 +53,7 @@ func (r bootstrapTestRunner) Run(params BootstrapInitParams) (BootstrapInitResul
 		PromptKubernetesContext:   r.PromptKubernetesContext,
 		PromptContainerRegistry:   r.PromptContainerRegistry,
 		PromptRemoteRepositoryURL: r.PromptRemoteRepositoryURL,
+		PromptCodeCommitSSHKeyID:  r.PromptCodeCommitSSHKeyID,
 		EnsureKubernetesNamespace: r.EnsureKubernetesNamespace,
 		LoadProjectConfig:         r.LoadProjectConfig,
 		SaveProjectConfig:         r.SaveProjectConfig,
@@ -73,6 +75,35 @@ func (r bootstrapTestRunner) saveProjectContainerRegistry(projectRoot, envName, 
 		},
 		Context: r.Context,
 	}.saveProjectContainerRegistry(projectRoot, envName, registry, false)
+}
+
+func TestBootstrapEnsureKubernetesNamespaceRunsContextPreflightFirst(t *testing.T) {
+	var actions []string
+	runner := bootstrapRunner{
+		BootstrapInitDependencies: BootstrapInitDependencies{
+			EnsureKubernetesNamespace: func(contextName, namespace string) error {
+				actions = append(actions, "namespace "+contextName+" "+namespace)
+				return nil
+			},
+		},
+		Context: Context{
+			KubernetesContextPreflight: func(_ Context, contextName string) error {
+				actions = append(actions, "preflight "+contextName)
+				return nil
+			},
+		},
+	}
+	runner.BootstrapInitDependencies.Context = runner.Context
+
+	if err := runner.ensureKubernetesNamespace("tenant-a", "dev", "", "cluster-dev"); err != nil {
+		t.Fatalf("ensureKubernetesNamespace failed: %v", err)
+	}
+
+	got := strings.Join(actions, "\n")
+	want := "preflight cluster-dev\nnamespace cluster-dev tenant-a-dev"
+	if got != want {
+		t.Fatalf("unexpected action order:\n%s", got)
+	}
 }
 
 func TestBootstrapRunLoadsExistingConfiguration(t *testing.T) {
@@ -1154,7 +1185,7 @@ func TestBootstrapRunRemoteInitializesTenantInPodWorktree(t *testing.T) {
 			switch len(scripts) {
 			case 1:
 				return RemoteCommandResult{
-					Stdout: "repo_missing\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n",
+					Stdout: "repo_missing\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n__ERUN_REMOTE_CODECOMMIT_PUBLIC_KEY__\nssh-rsa AAAACODECOMMITRSA remote\n",
 				}, nil
 			case 2, 3:
 				return RemoteCommandResult{}, nil
@@ -1293,6 +1324,164 @@ func TestBootstrapRunRemoteNoGitCreatesWorktreeWithoutRepositoryPrompts(t *testi
 	for _, unexpected := range []string{"ssh-keygen", "git clone", "git -C"} {
 		if strings.Contains(scripts[0], unexpected) {
 			t.Fatalf("did not expect %q in no-git script:\n%s", unexpected, scripts[0])
+		}
+	}
+}
+
+func TestBootstrapRunRemoteBootstrapCreatesTenantDevopsModuleAndChart(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	scripts := make([]string, 0, 2)
+	projectRoot := RemoteWorktreePathForRepoName("frs")
+	service := bootstrapTestRunner{
+		Context: testContextWithLogger(&testTraceLogger{}),
+		Store:   ConfigStore{},
+		Confirm: func(string) (bool, error) {
+			return true, nil
+		},
+		PromptKubernetesContext: func(string) (string, error) {
+			return "cluster-remote", nil
+		},
+		PromptContainerRegistry: func(string) (string, error) {
+			return DefaultContainerRegistry, nil
+		},
+		PromptRemoteRepositoryURL: func(string) (string, error) {
+			t.Fatal("did not expect Git remote URL prompt")
+			return "", nil
+		},
+		EnsureKubernetesNamespace: func(string, string) error {
+			return nil
+		},
+		DeployHelmChart: func(HelmDeployParams) error {
+			return nil
+		},
+		WaitForRemoteRuntime: func(ShellLaunchParams) error {
+			return nil
+		},
+		RunRemoteCommand: func(_ ShellLaunchParams, script string) (RemoteCommandResult, error) {
+			scripts = append(scripts, script)
+			return RemoteCommandResult{}, nil
+		},
+	}
+
+	if _, err := service.Run(BootstrapInitParams{
+		Tenant:         "frs",
+		Environment:    "dev",
+		Remote:         true,
+		NoGit:          true,
+		Bootstrap:      true,
+		RuntimeVersion: "1.2.3",
+	}); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	if len(scripts) != 2 {
+		t.Fatalf("expected worktree and bootstrap scripts, got %d: %#v", len(scripts), scripts)
+	}
+	bootstrapScript := scripts[1]
+	for _, path := range []string{
+		filepath.Join(projectRoot, "frs-devops", "VERSION"),
+		filepath.Join(projectRoot, "frs-devops", "docker", "frs-devops", "Dockerfile"),
+		filepath.Join(projectRoot, "frs-devops", "k8s", "frs-devops", "Chart.yaml"),
+		filepath.Join(projectRoot, "frs-devops", "k8s", "frs-devops", "values.dev.yaml"),
+	} {
+		if !strings.Contains(bootstrapScript, shellQuote(path)) {
+			t.Fatalf("expected bootstrap script to write %s, got:\n%s", path, bootstrapScript)
+		}
+	}
+	if !strings.Contains(bootstrapScript, "ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.2.3") {
+		t.Fatalf("expected runtime version in bootstrap Dockerfile, got:\n%s", bootstrapScript)
+	}
+}
+
+func TestBootstrapRunRemoteConfiguresCodeCommitSSHRepository(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	var promptedKeyID bool
+	scripts := make([]string, 0, 3)
+	service := bootstrapTestRunner{
+		Context: testContextWithLogger(&testTraceLogger{}),
+		Store:   ConfigStore{},
+		Confirm: func(string) (bool, error) {
+			return true, nil
+		},
+		PromptKubernetesContext: func(string) (string, error) {
+			return "cluster-remote", nil
+		},
+		PromptContainerRegistry: func(string) (string, error) {
+			return DefaultContainerRegistry, nil
+		},
+		PromptRemoteRepositoryURL: func(string) (string, error) {
+			return "git-codecommit.eu-west-1.amazonaws.com/v1/repos/petios", nil
+		},
+		PromptCodeCommitSSHKeyID: func(label string) (string, error) {
+			if label != codeCommitSSHKeyIDLabel("petios", "dev") {
+				t.Fatalf("unexpected CodeCommit SSH key ID label: %q", label)
+			}
+			promptedKeyID = true
+			return "APKATESTCODECOMMITKEY", nil
+		},
+		EnsureKubernetesNamespace: func(string, string) error {
+			return nil
+		},
+		DeployHelmChart: func(HelmDeployParams) error {
+			return nil
+		},
+		WaitForRemoteRuntime: func(ShellLaunchParams) error {
+			return nil
+		},
+		RunRemoteCommand: func(req ShellLaunchParams, script string) (RemoteCommandResult, error) {
+			scripts = append(scripts, script)
+			switch len(scripts) {
+			case 1:
+				return RemoteCommandResult{
+					Stdout: "repo_missing\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n",
+				}, nil
+			case 2, 3:
+				return RemoteCommandResult{}, nil
+			default:
+				t.Fatalf("unexpected remote command script:\n%s", script)
+				return RemoteCommandResult{}, nil
+			}
+		},
+	}
+
+	if _, err := service.Run(BootstrapInitParams{
+		Tenant:      "petios",
+		Environment: "dev",
+		Remote:      true,
+	}); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	if !promptedKeyID {
+		t.Fatal("expected CodeCommit SSH key ID prompt")
+	}
+	if len(scripts) != 3 {
+		t.Fatalf("expected state/access/clone scripts, got %d", len(scripts))
+	}
+	for _, want := range []string{
+		`ssh-keygen -t ed25519`,
+		`ssh-keygen -t rsa -b 4096`,
+		`id_rsa_codecommit`,
+		`__ERUN_REMOTE_CODECOMMIT_PUBLIC_KEY__`,
+	} {
+		if !strings.Contains(scripts[0], want) {
+			t.Fatalf("expected repository state script to contain %q, got:\n%s", want, scripts[0])
+		}
+	}
+	for _, index := range []int{1, 2} {
+		script := scripts[index]
+		for _, want := range []string{
+			"Host git-codecommit.eu-west-1.amazonaws.com",
+			"User APKATESTCODECOMMITKEY",
+			"IdentityFile ~/.ssh/id_rsa_codecommit",
+			`ssh_command='ssh -F "$HOME/.ssh/config"'`,
+			"ssh://git-codecommit.eu-west-1.amazonaws.com/v1/repos/petios",
+		} {
+			if !strings.Contains(script, want) {
+				t.Fatalf("expected CodeCommit script to contain %q, got:\n%s", want, script)
+			}
 		}
 	}
 }

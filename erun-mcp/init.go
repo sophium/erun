@@ -21,6 +21,8 @@ type InitInput struct {
 	Remote                   bool   `json:"remote,omitempty" jsonschema:"when true, initialize the repository inside the runtime pod"`
 	NoGit                    bool   `json:"noGit,omitempty" jsonschema:"when true with remote initialization, create the remote worktree directory without configuring a Git checkout"`
 	RemoteRepositoryURL      string `json:"remoteRepositoryURL,omitempty" jsonschema:"optional SSH repository URL used when creating the remote checkout"`
+	CodeCommitSSHKeyID       string `json:"codeCommitSSHKeyID,omitempty" jsonschema:"optional AWS CodeCommit SSH public key ID used when the remote repository URL is a CodeCommit SSH URL"`
+	Bootstrap                bool   `json:"bootstrap,omitempty" jsonschema:"when true, create the tenant devops module and chart during initialization"`
 	ConfirmTenant            *bool  `json:"confirmTenant,omitempty" jsonschema:"response to a prior tenant confirmation interaction"`
 	ConfirmEnvironment       *bool  `json:"confirmEnvironment,omitempty" jsonschema:"response to a prior environment confirmation interaction"`
 	ConfirmRemoteKeyImport   *bool  `json:"confirmRemoteKeyImport,omitempty" jsonschema:"response to a prior remote SSH key import confirmation interaction"`
@@ -43,6 +45,7 @@ func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 
 		traceOutput := new(bytes.Buffer)
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, traceOutput, traceOutput)
+		ctx.KubernetesContextPreflight = eruncommon.CloudContextPreflight(runtime.Store, eruncommon.CloudContextDependencies{})
 
 		params := eruncommon.BootstrapInitParams{
 			Tenant:                   firstNonEmpty(strings.TrimSpace(input.Tenant), strings.TrimSpace(runtime.Context.Tenant)),
@@ -52,6 +55,7 @@ func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 			Environment:              firstNonEmpty(strings.TrimSpace(input.Environment), strings.TrimSpace(runtime.Context.Environment)),
 			RuntimeVersion:           firstNonEmpty(strings.TrimSpace(input.Version), CurrentBuildInfo().Version),
 			NoGit:                    input.NoGit,
+			Bootstrap:                input.Bootstrap,
 			KubernetesContext:        firstNonEmpty(strings.TrimSpace(input.KubernetesContext), strings.TrimSpace(runtime.Context.KubernetesContext)),
 			ContainerRegistry:        strings.TrimSpace(input.ContainerRegistry),
 			ConfirmTenant:            input.ConfirmTenant,
@@ -61,6 +65,7 @@ func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 
 		params.Remote = input.Remote
 		params.RemoteRepositoryURL = strings.TrimSpace(input.RemoteRepositoryURL)
+		params.CodeCommitSSHKeyID = strings.TrimSpace(input.CodeCommitSSHKeyID)
 		params.ConfirmRemoteKeyImport = input.ConfirmRemoteKeyImport
 
 		_, err = eruncommon.RunBootstrapInitWithDependencies(eruncommon.BootstrapInitDependencies{

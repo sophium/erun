@@ -24,6 +24,8 @@ func TraceEnsureKubernetesNamespace(ctx Context, contextName, namespace string) 
 }
 
 func EnsureKubernetesNamespace(contextName, namespace string) error {
+	contextName = strings.TrimSpace(contextName)
+	namespace = strings.TrimSpace(namespace)
 	if exists, err := kubernetesNamespaceExists(contextName, namespace); err != nil {
 		return err
 	} else if exists {
@@ -31,7 +33,7 @@ func EnsureKubernetesNamespace(contextName, namespace string) error {
 	}
 
 	args := []string{}
-	if strings.TrimSpace(contextName) != "" {
+	if contextName != "" {
 		args = append(args, "--context", contextName)
 	}
 	args = append(args, "create", "namespace", namespace)

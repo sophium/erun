@@ -139,11 +139,12 @@ func runCommandOutput(ctx eruncommon.Context, workDir string, traceOutput *bytes
 	}, nil
 }
 
-func runRuntimeCommand(runtime RuntimeContext, preview bool, verbosity int, run func(eruncommon.Context, string) error) (CommandOutput, error) {
+func runRuntimeCommand(runtime RuntimeConfig, preview bool, verbosity int, run func(eruncommon.Context, string) error) (CommandOutput, error) {
 	traceOutput := new(bytes.Buffer)
 	ctx := runtimeCallContext(preview, verbosity, nil, traceOutput, traceOutput)
+	ctx.KubernetesContextPreflight = eruncommon.CloudContextPreflight(runtime.Store, eruncommon.CloudContextDependencies{})
 
-	workDir, err := runtimeRepoPath(runtime)
+	workDir, err := runtimeRepoPath(runtime.Context)
 	if err != nil {
 		return CommandOutput{}, err
 	}

@@ -16,7 +16,7 @@ func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinder
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := commandContext(cmd)
+			ctx := withCloudContextPreflight(commandContext(cmd), store)
 			deployTarget, err := resolveDeployTargetArgs(args, target)
 			if err != nil {
 				return err
@@ -52,7 +52,7 @@ func newK8sDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFin
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := commandContext(cmd)
+			ctx := withCloudContextPreflight(commandContext(cmd), store)
 			snapshotOverride, err := resolveSnapshotFlagOverride(cmd, snapshot, noSnapshot)
 			if err != nil {
 				return err

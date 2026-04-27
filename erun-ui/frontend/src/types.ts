@@ -20,6 +20,7 @@ export interface UISelection {
   kubernetesContext?: string;
   containerRegistry?: string;
   noGit?: boolean;
+  bootstrap?: boolean;
   setDefaultTenant?: boolean;
   action?: EnvironmentActionMode;
   debug?: boolean;

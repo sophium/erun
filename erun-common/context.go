@@ -7,12 +7,15 @@ import (
 )
 
 type Context struct {
-	Logger Logger
-	DryRun bool
-	Stdin  io.Reader
-	Stdout io.Writer
-	Stderr io.Writer
+	Logger                     Logger
+	DryRun                     bool
+	Stdin                      io.Reader
+	Stdout                     io.Writer
+	Stderr                     io.Writer
+	KubernetesContextPreflight KubernetesContextPreflightFunc
 }
+
+type KubernetesContextPreflightFunc func(Context, string) error
 
 func (c Context) Trace(message string) {
 	c.Logger.Trace(message)
@@ -24,6 +27,14 @@ func (c Context) Info(message string) {
 
 func (c Context) TraceCommand(dir, name string, args ...string) {
 	c.Logger.Trace(formatShellCommand(dir, name, args...))
+}
+
+func (c Context) EnsureKubernetesContext(contextName string) error {
+	contextName = strings.TrimSpace(contextName)
+	if contextName == "" || c.KubernetesContextPreflight == nil {
+		return nil
+	}
+	return c.KubernetesContextPreflight(c, contextName)
 }
 
 func (c Context) TraceBlock(label, body string) {

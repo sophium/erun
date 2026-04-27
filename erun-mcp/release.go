@@ -32,7 +32,7 @@ func releaseTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 			return nil, ReleaseOutput{}, err
 		}
 
-		commandOutput, err := runRuntimeCommand(runtime.Context, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
+		commandOutput, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
 			return eruncommon.RunReleaseSpec(runCtx, spec, eruncommon.GitCommandRunner, eruncommon.BuildScriptRunner)
 		})
 		if err != nil {

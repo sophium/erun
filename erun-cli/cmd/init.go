@@ -57,6 +57,8 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	cmd.Flags().StringVar(&params.RuntimeImage, "runtime-image", "", "Runtime image repository to initialize and deploy")
 	cmd.Flags().StringVar(&params.KubernetesContext, "kubernetes-context", "", "Kubernetes context to associate with the environment")
 	cmd.Flags().StringVar(&params.ContainerRegistry, "container-registry", "", "Container registry to associate with the environment")
+	cmd.Flags().StringVar(&params.CodeCommitSSHKeyID, "codecommit-ssh-key-id", "", "CodeCommit SSH public key ID to use for remote repository access")
+	cmd.Flags().BoolVar(&params.Bootstrap, "bootstrap", false, "Create the tenant devops module and chart during initialization")
 	cmd.Flags().BoolVar(&params.Remote, "remote", false, "Initialize the tenant repository inside the runtime pod instead of the local host")
 	cmd.Flags().BoolVar(&params.NoGit, "no-git", false, "Skip remote Git checkout setup when used with --remote")
 	cmd.Flags().BoolVar(&setDefaultTenant, "set-default-tenant", false, "Set the initialized tenant as the default tenant")
@@ -96,6 +98,24 @@ func remoteRepositoryURLPrompt(run PromptRunner, label string) (string, error) {
 		Validate: func(input string) error {
 			if strings.TrimSpace(input) == "" {
 				return fmt.Errorf("repository remote URL is required")
+			}
+			return nil
+		},
+	}
+
+	result, err := run(prompt)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result), nil
+}
+
+func codeCommitSSHKeyIDPrompt(run PromptRunner, label string) (string, error) {
+	prompt := promptui.Prompt{
+		Label: label,
+		Validate: func(input string) error {
+			if strings.TrimSpace(input) == "" {
+				return fmt.Errorf("CodeCommit SSH public key ID is required")
 			}
 			return nil
 		},

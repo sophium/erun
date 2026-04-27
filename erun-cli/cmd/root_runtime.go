@@ -63,6 +63,7 @@ func newRootCommand(runRoot func(*cobra.Command, []string) error) *cobra.Command
 
 func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinderFunc, promptRunner PromptRunner, selectRunner SelectRunner, listKubernetesContexts KubernetesContextsLister, ensureKubernetesNamespace common.NamespaceEnsurerFunc, waitForRemoteRuntime common.RemoteRuntimeWaitFunc, runRemoteCommand common.RemoteCommandRunnerFunc, deployHelmChart common.HelmChartDeployerFunc) func(common.Context, common.BootstrapInitParams) error {
 	return func(ctx common.Context, params common.BootstrapInitParams) error {
+		ctx = withCloudContextPreflight(ctx, store)
 		if strings.TrimSpace(params.RuntimeVersion) == "" {
 			params.RuntimeVersion = currentBuildInfo().Version
 		}
@@ -83,6 +84,9 @@ func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinde
 			},
 			PromptRemoteRepositoryURL: func(label string) (string, error) {
 				return remoteRepositoryURLPrompt(promptRunner, label)
+			},
+			PromptCodeCommitSSHKeyID: func(label string) (string, error) {
+				return codeCommitSSHKeyIDPrompt(promptRunner, label)
 			},
 			EnsureKubernetesNamespace: common.TraceNamespaceEnsurer(ctx, ensureKubernetesNamespace),
 			LoadProjectConfig:         common.LoadProjectConfig,
