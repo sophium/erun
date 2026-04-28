@@ -43,6 +43,7 @@ type erunUIDeps struct {
 	canConnectLocalPort  func(int) bool
 	setRemoteCloudAlias  func(context.Context, string, string, string, string) (eruncommon.EnvConfig, error)
 	startTerminal        func(startTerminalSessionParams) (terminalSession, error)
+	runIDECommand        func(context.Context, startTerminalSessionParams) (string, error)
 	savePastedImage      func(pastedImageSaveParams) (string, error)
 	loadDiff             func(context.Context, string) (eruncommon.DiffResult, error)
 	windowStatePath      string
@@ -265,6 +266,9 @@ func NewApp(deps erunUIDeps) *App {
 	}
 	if deps.startTerminal == nil {
 		deps.startTerminal = startTerminalSession
+	}
+	if deps.runIDECommand == nil {
+		deps.runIDECommand = runIDECommand
 	}
 	if deps.savePastedImage == nil {
 		deps.savePastedImage = savePastedImageToRuntime
@@ -922,6 +926,52 @@ func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSe
 	return a.startCommandSession(selection, cols, rows, deploySelectionKey(selection), buildDeployArgs(selection), resolveDeployStartDir(a.deps.findProjectRoot, result), []string{appSessionEnvVar + "=1"})
 }
 
+func (a *App) OpenIDE(selection uiSelection, ide string) error {
+	selection = normalizeSelection(selection)
+	ide = strings.TrimSpace(ide)
+	if selection.Tenant == "" || selection.Environment == "" {
+		return fmt.Errorf("tenant and environment are required")
+	}
+	if ide != "vscode" && ide != "intellij" {
+		return fmt.Errorf("unsupported IDE %q", ide)
+	}
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+	})
+	if err != nil {
+		return err
+	}
+
+	cliPath := a.deps.resolveCLIPath()
+	executable := cliPath
+	args := buildOpenIDEArgs(selection, ide)
+	if !result.EnvConfig.SSHD.Enabled {
+		executable, args, err = buildIDEShellLaunch(cliPath, selection, ide)
+		if err != nil {
+			return err
+		}
+	}
+
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	output, err := a.deps.runIDECommand(ctx, startTerminalSessionParams{
+		Dir:        resolveDeployStartDir(a.deps.findProjectRoot, result),
+		Executable: executable,
+		Args:       args,
+		Env:        []string{appSessionEnvVar + "=1"},
+	})
+	if err == nil {
+		return nil
+	}
+	if detail := strings.TrimSpace(output); detail != "" {
+		return fmt.Errorf("open %s: %w: %s", ide, err, detail)
+	}
+	return fmt.Errorf("open %s: %w", ide, err)
+}
+
 func (a *App) StartCloudInitAWSSession(cols, rows int) (startSessionResult, error) {
 	if cols <= 0 {
 		cols = 120
@@ -1019,6 +1069,10 @@ func (a *App) DeleteEnvironment(selection uiSelection, confirmation string) (del
 }
 
 func (a *App) startCommandSession(selection uiSelection, cols, rows int, key string, args []string, dir string, env []string) (startSessionResult, error) {
+	return a.startCommandSessionWithExecutable(selection, cols, rows, key, a.deps.resolveCLIPath(), args, dir, env)
+}
+
+func (a *App) startCommandSessionWithExecutable(selection uiSelection, cols, rows int, key string, executable string, args []string, dir string, env []string) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
 		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
@@ -1043,7 +1097,7 @@ func (a *App) startCommandSession(selection uiSelection, cols, rows int, key str
 
 	session, err := a.deps.startTerminal(startTerminalSessionParams{
 		Dir:        dir,
-		Executable: a.deps.resolveCLIPath(),
+		Executable: executable,
 		Args:       args,
 		Env:        env,
 		Cols:       cols,

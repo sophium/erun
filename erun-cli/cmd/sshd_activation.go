@@ -11,6 +11,8 @@ import (
 
 type SSHDActivator func(common.Context, common.OpenResult) error
 
+var waitForSSHDRemoteDeployment = common.WaitForShellDeployment
+
 func newSSHDActivator(runRemoteCommand common.RemoteCommandRunnerFunc) SSHDActivator {
 	return func(ctx common.Context, result common.OpenResult) error {
 		if !result.EnvConfig.SSHD.Enabled {
@@ -41,9 +43,26 @@ func syncRemoteSSHDKey(ctx common.Context, result common.OpenResult, runRemoteCo
 	script := common.BuildRemoteAuthorizedKeysSyncScript(publicKey)
 	output, err := common.RunTracedRemoteCommand(ctx, runRemoteCommand, req, "remote-ssh-authorized-keys", script)
 	if err != nil {
+		if sshdRemoteExecPodWasReplaced(output.Stderr) {
+			ctx.Trace("runtime pod was replaced while syncing SSH authorized_keys; waiting for deployment and retrying")
+			if waitErr := waitForSSHDRemoteDeployment(req); waitErr != nil {
+				return "", fmt.Errorf("wait for runtime deployment after SSH authorized_keys sync failed: %w", waitErr)
+			}
+			output, err = common.RunTracedRemoteCommand(ctx, runRemoteCommand, req, "remote-ssh-authorized-keys", script)
+			if err == nil {
+				return publicKeyPath, nil
+			}
+		}
 		return "", fmt.Errorf("sync remote authorized_keys from %s: %w%s", publicKeyPath, err, formatRemoteCommandStderr(output.Stderr))
 	}
 	return publicKeyPath, nil
+}
+
+func sshdRemoteExecPodWasReplaced(stderr string) bool {
+	value := strings.ToLower(stderr)
+	return strings.Contains(value, "pod does not exist") ||
+		strings.Contains(value, "pod not found") ||
+		strings.Contains(value, "lost connection to pod")
 }
 
 func resolveSSHDPublicKey(path string) (string, string, error) {

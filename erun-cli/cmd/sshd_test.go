@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -36,6 +39,39 @@ func TestKubectlSSHDPortForwardArgs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected args:\ngot:  %v\nwant: %v", got, want)
+	}
+}
+
+func TestCanReachLocalSSHEndpointRequiresSSHBanner(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer func() {
+		_ = listener.Close()
+	}()
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer func() {
+			_ = conn.Close()
+		}()
+		_, _ = conn.Write([]byte("SSH-2.0-test\r\n"))
+	}()
+
+	_, portValue, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatalf("split host port: %v", err)
+	}
+	port, err := strconv.Atoi(portValue)
+	if err != nil {
+		t.Fatalf("parse port: %v", err)
+	}
+	if !canReachLocalSSHEndpoint(port) {
+		t.Fatal("expected SSH endpoint to be reachable")
 	}
 }
 
@@ -223,5 +259,82 @@ func TestRunSSHDInitCommandUsesResolvedEnvironmentLocalPortByDefault(t *testing.
 	}
 	if savedEnv.SSHD.LocalPort != 17122 {
 		t.Fatalf("expected resolved environment SSH port, got %+v", savedEnv.SSHD)
+	}
+}
+
+func TestSyncRemoteSSHDKeyRetriesWhenPodWasReplaced(t *testing.T) {
+	prevWait := waitForSSHDRemoteDeployment
+	t.Cleanup(func() {
+		waitForSSHDRemoteDeployment = prevWait
+	})
+
+	publicKeyPath := filepath.Join(t.TempDir(), "id_ed25519.pub")
+	if err := os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644); err != nil {
+		t.Fatalf("write public key: %v", err)
+	}
+
+	var waited common.ShellLaunchParams
+	waitForSSHDRemoteDeployment = func(req common.ShellLaunchParams) error {
+		waited = req
+		return nil
+	}
+
+	attempts := 0
+	got, err := syncRemoteSSHDKey(
+		common.Context{
+			Logger: common.NewLoggerWithWriters(1, new(bytes.Buffer), new(bytes.Buffer)),
+		},
+		common.OpenResult{
+			Tenant:      "tenant-a",
+			Environment: "dev",
+			RepoPath:    "/home/erun/git/tenant-a",
+			TenantConfig: common.TenantConfig{
+				Name: "tenant-a",
+			},
+			EnvConfig: common.EnvConfig{
+				Name:              "dev",
+				RepoPath:          "/home/erun/git/tenant-a",
+				KubernetesContext: "cluster-dev",
+				Remote:            true,
+				SSHD: common.SSHDConfig{
+					Enabled:       true,
+					PublicKeyPath: publicKeyPath,
+				},
+			},
+		},
+		func(_ common.ShellLaunchParams, _ string) (common.RemoteCommandResult, error) {
+			attempts++
+			if attempts == 1 {
+				return common.RemoteCommandResult{
+					Stderr: "error: Internal error occurred: unable to upgrade connection: pod does not exist",
+				}, errors.New("exit status 1")
+			}
+			return common.RemoteCommandResult{}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("syncRemoteSSHDKey failed: %v", err)
+	}
+	if got != publicKeyPath {
+		t.Fatalf("unexpected key path: %q", got)
+	}
+	if attempts != 2 {
+		t.Fatalf("expected retry after pod replacement, got %d attempts", attempts)
+	}
+	if waited.Namespace != "tenant-a-dev" || waited.KubernetesContext != "cluster-dev" {
+		t.Fatalf("unexpected wait params: %+v", waited)
+	}
+}
+
+func TestSSHDRemoteExecPodWasReplaced(t *testing.T) {
+	tests := []string{
+		"error: Internal error occurred: unable to upgrade connection: pod does not exist",
+		`error: error upgrading connection: unable to upgrade connection: pod not found ("petios-devops-123")`,
+		"error: lost connection to pod",
+	}
+	for _, stderr := range tests {
+		if !sshdRemoteExecPodWasReplaced(stderr) {
+			t.Fatalf("expected stderr to be classified as pod replacement: %s", stderr)
+		}
 	}
 }

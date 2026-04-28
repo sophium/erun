@@ -446,6 +446,20 @@ func TestBuildOpenArgsIncludesDebugVerbosity(t *testing.T) {
 	}
 }
 
+func TestBuildOpenIDEArgsAddsIDEFlag(t *testing.T) {
+	got := buildOpenIDEArgs(uiSelection{Tenant: " erun ", Environment: " remote ", Debug: true}, "vscode")
+	want := []string{"-vv", "open", "erun", "remote", "--vscode"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected VS Code args: got %+v want %+v", got, want)
+	}
+
+	got = buildOpenIDEArgs(uiSelection{Tenant: "erun", Environment: "remote"}, "intellij")
+	want = []string{"open", "erun", "remote", "--intellij"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected IntelliJ args: got %+v want %+v", got, want)
+	}
+}
+
 func TestBuildOpenNoShellArgsTrimsTenantAndEnvironment(t *testing.T) {
 	got := buildOpenNoShellArgs(" erun ", " local ")
 	want := []string{"open", "erun", "local", "--no-shell", "--no-alias-prompt"}
@@ -811,6 +825,103 @@ func TestStartDeploySessionUsesSeparateSessionKey(t *testing.T) {
 	}
 	if startCalls != 3 {
 		t.Fatalf("start terminal called %d times, want 3", startCalls)
+	}
+}
+
+func TestOpenIDERunsWithoutConsumingTerminalWhenSSHDEnabled(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {
+				Name:               "erun",
+				ProjectRoot:        projectRoot,
+				DefaultEnvironment: "remote",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {
+				Name:              "remote",
+				RepoPath:          projectRoot,
+				KubernetesContext: "rancher-desktop",
+				SSHD: eruncommon.SSHDConfig{
+					Enabled: true,
+				},
+			},
+		},
+	}
+
+	startCalls := 0
+	var started startTerminalSessionParams
+	app := NewApp(erunUIDeps{
+		store:          store,
+		resolveCLIPath: func() string { return "/tmp/erun" },
+		startTerminal: func(params startTerminalSessionParams) (terminalSession, error) {
+			startCalls++
+			return newStubTerminalSession(), nil
+		},
+		runIDECommand: func(_ context.Context, params startTerminalSessionParams) (string, error) {
+			started = params
+			return "", nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	if err := app.OpenIDE(uiSelection{Tenant: " erun ", Environment: " remote "}, "vscode"); err != nil {
+		t.Fatalf("OpenIDE failed: %v", err)
+	}
+	if startCalls != 0 {
+		t.Fatalf("expected IDE open not to start a managed terminal, got %d calls", startCalls)
+	}
+	if started.Executable != "/tmp/erun" {
+		t.Fatalf("unexpected executable: %q", started.Executable)
+	}
+	wantArgs := []string{"open", "erun", "remote", "--vscode"}
+	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
+		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
+	}
+}
+
+func TestOpenIDEInitializesSSHDWhenMissing(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {
+				Name:               "erun",
+				ProjectRoot:        projectRoot,
+				DefaultEnvironment: "remote",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {
+				Name:              "remote",
+				RepoPath:          projectRoot,
+				KubernetesContext: "rancher-desktop",
+			},
+		},
+	}
+
+	var started startTerminalSessionParams
+	app := NewApp(erunUIDeps{
+		store:          store,
+		resolveCLIPath: func() string { return "/tmp/erun" },
+		runIDECommand: func(_ context.Context, params startTerminalSessionParams) (string, error) {
+			started = params
+			return "", nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	if err := app.OpenIDE(uiSelection{Tenant: "erun", Environment: "remote"}, "intellij"); err != nil {
+		t.Fatalf("OpenIDE failed: %v", err)
+	}
+	if started.Executable == "/tmp/erun" {
+		t.Fatalf("expected shell wrapper executable when SSHD is missing, got %q", started.Executable)
+	}
+	args := strings.Join(started.Args, "\n")
+	for _, want := range []string{"sshd", "init", "erun", "remote", "open", "--intellij"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("expected shell args to contain %q, got %+v", want, started.Args)
+		}
 	}
 }
 

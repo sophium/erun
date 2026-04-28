@@ -14,6 +14,7 @@ import {
   LoadState,
   LoadTenantConfig,
   LoadVersionSuggestions,
+  OpenIDE,
   ResizeSession,
   LoginCloudProvider,
   SavePastedImage,
@@ -110,6 +111,7 @@ interface DebugOpenFilter {
 }
 
 type DebugSessionMode = 'open' | 'hidden';
+type IDEKind = 'vscode' | 'intellij';
 
 export class ERunUIController {
   readonly state: AppState = {
@@ -481,6 +483,34 @@ export class ERunUIController {
     this.focusTerminalSoon();
     this.queueTerminalResize();
     this.emit();
+  }
+
+  async openIDE(selection: UISelection | null, ide: IDEKind): Promise<void> {
+    if (!selection) {
+      this.showTerminalMessage('Choose an environment from the left pane.');
+      return;
+    }
+    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
+    const label = ideLabel(ide);
+    this.state.selected = selection;
+    if (this.state.debugOpen) {
+      this.state.debugOutput = `$ ${formatIDECommand(runSelection, ide)}\n`;
+    }
+    this.emit();
+    this.state.terminalCopyOutput = '';
+    this.state.terminalCopyStatus = '';
+    this.showTerminalMessage(`Opening ${label} for ${selection.tenant} / ${selection.environment}...`, true);
+
+    try {
+      await OpenIDE(runSelection, ide);
+    } catch (error: unknown) {
+      const failure = ideOpenFailure(selection, label, readError(error));
+      this.appendDebugOutput(debugOutputBlock(failure.copyOutput));
+      this.dismissNotification();
+      this.showTerminalFailure(failure.message, failure.detail, failure.copyOutput, '', null);
+      return;
+    }
+    this.showNotification('success', `Opened ${label} for ${selection.tenant} / ${selection.environment}.`);
   }
 
   openInitializeDialog(): void {
@@ -2109,6 +2139,37 @@ function cleanTerminalOutput(value: string): string {
     .trim();
 }
 
+function ideOpenFailure(selection: UISelection, label: string, rawError: string): ClassifiedTerminalFailure & { copyOutput: string } {
+  const output = cleanTerminalOutput(rawError) || rawError.trim() || 'Unexpected error';
+  return {
+    message: `Failed to open ${label} for ${selection.tenant} / ${selection.environment}`,
+    detail: shortIDEOpenFailureDetail(output),
+    copyOutput: output,
+    action: '',
+    retrySelection: null,
+  };
+}
+
+function debugOutputBlock(output: string): string {
+  const trimmed = output.trim();
+  if (!trimmed) {
+    return '';
+  }
+  return `${trimmed}\n`;
+}
+
+function shortIDEOpenFailureDetail(output: string): string {
+  const firstLine = output.split('\n').map((line) => line.trim()).find(Boolean) || '';
+  const exitStatus = firstLine.match(/exit status \d+/)?.[0];
+  if (exitStatus) {
+    return exitStatus;
+  }
+  if (firstLine.length <= 80) {
+    return firstLine;
+  }
+  return `${firstLine.slice(0, 77)}...`;
+}
+
 function classifiedTerminalFailure(rawReason: string, displayReason: string, output: string, openSelection?: UISelection): ClassifiedTerminalFailure {
   const combined = `${rawReason}\n${output}`.toLowerCase();
   if (combined.includes('timed out waiting for mcp port-forward')) {
@@ -2249,6 +2310,19 @@ function formatDebugCommand(selection: UISelection, mode: 'open' | 'init' | 'dep
     args.push('open', selection.tenant, selection.environment);
   }
   return args.map(shellDebugArg).join(' ');
+}
+
+function formatIDECommand(selection: UISelection, ide: IDEKind): string {
+  const args = ['erun'];
+  if (selection.debug) {
+    args.push('-vv');
+  }
+  args.push('open', selection.tenant, selection.environment, ide === 'vscode' ? '--vscode' : '--intellij');
+  return args.map(shellDebugArg).join(' ');
+}
+
+function ideLabel(ide: IDEKind): string {
+  return ide === 'vscode' ? 'VS Code' : 'IntelliJ IDEA';
 }
 
 function shellDebugArg(value: string): string {
