@@ -67,6 +67,16 @@ func resolveCLIExecutableFromPath(goos, appExecutable, executableName string) st
 	return ""
 }
 
+func runIDECommand(ctx context.Context, params startTerminalSessionParams) (string, error) {
+	cmd := exec.CommandContext(ctx, params.Executable, params.Args...)
+	cmd.Dir = resolveTerminalStartDir(params.Dir)
+	if len(params.Env) > 0 {
+		cmd.Env = append(os.Environ(), params.Env...)
+	}
+	output, err := cmd.CombinedOutput()
+	return string(output), err
+}
+
 func buildOpenCommand(cliPath, tenant, environment string) string {
 	if runtime.GOOS == "windows" {
 		return "& " + powerShellQuote(cliPath) + " open " + powerShellQuote(strings.TrimSpace(tenant)) + " " + powerShellQuote(strings.TrimSpace(environment))
@@ -78,8 +88,55 @@ func buildOpenArgs(tenant, environment string, debug ...bool) []string {
 	return erunArgs(debugEnabled(debug...), "open", strings.TrimSpace(tenant), strings.TrimSpace(environment))
 }
 
+func buildOpenIDEArgs(selection uiSelection, ide string) []string {
+	args := erunArgs(selection.Debug, "open", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
+	switch strings.TrimSpace(ide) {
+	case "vscode":
+		return append(args, "--vscode")
+	case "intellij":
+		return append(args, "--intellij")
+	default:
+		return args
+	}
+}
+
+func buildSSHDInitArgs(selection uiSelection) []string {
+	return erunArgs(selection.Debug, "sshd", "init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
+}
+
 func buildOpenNoShellArgs(tenant, environment string) []string {
 	return []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment), "--no-shell", "--no-alias-prompt"}
+}
+
+func buildIDEShellLaunch(cliPath string, selection uiSelection, ide string) (string, []string, error) {
+	switch runtime.GOOS {
+	case "windows":
+		initCommand := buildPowerShellCommandInvocation(cliPath, buildSSHDInitArgs(selection))
+		openCommand := buildPowerShellCommandInvocation(cliPath, buildOpenIDEArgs(selection, ide))
+		return "powershell.exe", []string{"-NoLogo", "-NoProfile", "-Command", initCommand + "; if ($LASTEXITCODE -eq 0) { " + openCommand + " } else { exit $LASTEXITCODE }"}, nil
+	default:
+		initCommand := buildShellCommandInvocation(cliPath, buildSSHDInitArgs(selection))
+		openCommand := buildShellCommandInvocation(cliPath, buildOpenIDEArgs(selection, ide))
+		return "/bin/sh", []string{"-lc", initCommand + " && " + openCommand}, nil
+	}
+}
+
+func buildShellCommandInvocation(command string, args []string) string {
+	quoted := make([]string, 0, len(args)+1)
+	quoted = append(quoted, shellQuote(command))
+	for _, arg := range args {
+		quoted = append(quoted, shellQuote(arg))
+	}
+	return strings.Join(quoted, " ")
+}
+
+func buildPowerShellCommandInvocation(command string, args []string) string {
+	quoted := make([]string, 0, len(args)+1)
+	quoted = append(quoted, "& "+powerShellQuote(command))
+	for _, arg := range args {
+		quoted = append(quoted, powerShellQuote(arg))
+	}
+	return strings.Join(quoted, " ")
 }
 
 func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncommon.OpenResult) error {

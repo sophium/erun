@@ -13,7 +13,7 @@ func detachBackgroundProcess(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
-func isMCPPortForwardProcess(pid int) bool {
+func isPortForwardProcess(pid int) bool {
 	output, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=").Output()
 	if err != nil {
 		return false

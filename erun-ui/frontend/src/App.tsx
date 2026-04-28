@@ -1,7 +1,8 @@
 import * as React from 'react';
-import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronUp, Copy, Trash2 } from 'lucide-react';
 
 import { ERunUIController } from '@/app/ERunUIController';
+import { readError } from '@/app/errors';
 import { useControllerState } from '@/app/useControllerState';
 import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
 import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
@@ -13,6 +14,7 @@ import { Titlebar } from '@/components/app/Titlebar';
 import { Button } from '@/components/ui/button';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { ClipboardSetText } from '../wailsjs/runtime/runtime';
 
 const splitterClassName =
   'relative cursor-col-resize bg-transparent before:absolute before:top-0 before:bottom-0 before:left-1 before:w-px before:bg-transparent before:transition-colors hover:before:bg-border [.is-resizing_&]:before:bg-border';
@@ -109,12 +111,30 @@ export function App(): React.ReactElement {
 
 function DebugPanel({ controller, open, output }: { controller: ERunUIController; open: boolean; output: string }): React.ReactElement {
   const outputRef = React.useRef<HTMLPreElement>(null);
+  const [copyStatus, setCopyStatus] = React.useState('');
+  const canCopy = output.trim().length > 0;
 
   React.useEffect(() => {
     if (open && outputRef.current) {
       outputRef.current.scrollTop = outputRef.current.scrollHeight;
     }
   }, [open, output]);
+
+  React.useEffect(() => {
+    setCopyStatus('');
+  }, [output]);
+
+  const copyDebugOutput = React.useCallback(() => {
+    if (!canCopy) {
+      return;
+    }
+    void ClipboardSetText(output)
+      .then(() => {
+        setCopyStatus('Copied');
+        window.setTimeout(() => setCopyStatus(''), 1400);
+      })
+      .catch((error: unknown) => setCopyStatus(readError(error)));
+  }, [canCopy, output]);
 
   return (
     <section className={cn('grid min-h-0 border-t border-[oklch(0.26_0_0)] bg-[oklch(0.06_0_0)] text-[oklch(0.86_0_0)]', open ? 'grid-rows-[6px_34px_minmax(0,1fr)]' : 'grid-rows-[34px]')}>
@@ -138,10 +158,16 @@ function DebugPanel({ controller, open, output }: { controller: ERunUIController
           <span className="text-[11px] font-normal text-[oklch(0.56_0_0)]">{open ? 'erun -vv output' : 'collapsed'}</span>
         </button>
         {open && (
-          <Button className="h-6 px-2 text-[11px] [&_svg]:size-3.5" type="button" variant="ghost" size="sm" onClick={() => controller.clearDebugOutput()}>
-            <Trash2 aria-hidden="true" />
-            Clear
-          </Button>
+          <div className="flex items-center gap-1">
+            <Button className="h-6 px-2 text-[11px] [&_svg]:size-3.5" type="button" variant="ghost" size="sm" disabled={!canCopy} onClick={copyDebugOutput}>
+              {copyStatus === 'Copied' ? <CheckCircle2 aria-hidden="true" /> : <Copy aria-hidden="true" />}
+              {copyStatus || 'Copy'}
+            </Button>
+            <Button className="h-6 px-2 text-[11px] [&_svg]:size-3.5" type="button" variant="ghost" size="sm" onClick={() => controller.clearDebugOutput()}>
+              <Trash2 aria-hidden="true" />
+              Clear
+            </Button>
+          </div>
         )}
       </div>
       {open && (

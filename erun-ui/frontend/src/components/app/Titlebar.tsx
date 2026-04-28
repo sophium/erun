@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { AlertCircle, CheckCircle2, Copy, Info, ListTree, LoaderCircle, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, X } from 'lucide-react';
+import { AlertCircle, Blocks, CheckCircle2, Code2, Copy, Info, ListTree, LoaderCircle, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, X } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import type { AppState } from '@/app/state';
@@ -16,6 +16,7 @@ export function Titlebar({ controller, state }: { controller: ERunUIController; 
   const SidebarIcon = state.sidebarHidden ? PanelLeftOpen : PanelLeftClose;
   const ReviewIcon = state.reviewOpen ? PanelRightClose : PanelRightOpen;
   const notification = state.notification;
+  const selected = state.selected;
   const terminalStatus = !notification && state.terminalMessage
     ? {
         kind: state.terminalStatusKind,
@@ -66,6 +67,42 @@ export function Titlebar({ controller, state }: { controller: ERunUIController; 
           <ReviewIcon />
         </Button>
       </IconTooltip>
+      <IconTooltip label="Open in VS Code">
+        <Button
+          className={cn(
+            titlebarButtonClassName,
+            'left-auto right-[122px] max-[980px]:left-auto max-[980px]:right-[108px]',
+          )}
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Open selected environment in VS Code"
+          disabled={!selected}
+          onClick={() => {
+            void controller.openIDE(selected ?? null, 'vscode');
+          }}
+        >
+          <Code2 />
+        </Button>
+      </IconTooltip>
+      <IconTooltip label="Open in IntelliJ IDEA">
+        <Button
+          className={cn(
+            titlebarButtonClassName,
+            'left-auto right-[90px] max-[980px]:left-auto max-[980px]:right-[78px]',
+          )}
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Open selected environment in IntelliJ IDEA"
+          disabled={!selected}
+          onClick={() => {
+            void controller.openIDE(selected ?? null, 'intellij');
+          }}
+        >
+          <Blocks />
+        </Button>
+      </IconTooltip>
       <IconTooltip label="Toggle changed files list">
         <Button
           className={cn(
@@ -86,7 +123,7 @@ export function Titlebar({ controller, state }: { controller: ERunUIController; 
       </IconTooltip>
       {status && (
         <div
-          className="pointer-events-none absolute top-2.5 right-24 left-32 z-20 flex justify-center [--wails-draggable:no-drag] max-[980px]:right-[84px] max-[980px]:left-[112px]"
+          className="pointer-events-none absolute top-2.5 right-[168px] left-32 z-20 flex justify-center [--wails-draggable:no-drag] max-[980px]:right-[146px] max-[980px]:left-[112px]"
           role={status.kind === 'error' ? 'alert' : 'status'}
           aria-live={status.kind === 'error' ? 'assertive' : 'polite'}
         >

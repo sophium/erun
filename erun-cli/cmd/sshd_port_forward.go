@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,6 +22,7 @@ type sshdPortForwardState struct {
 	Namespace         string `json:"namespace"`
 	LocalPort         int    `json:"localPort"`
 	LogPath           string `json:"logPath,omitempty"`
+	ProcessID         int    `json:"processId,omitempty"`
 }
 
 func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common.SSHConnectionInfo, error) {
@@ -38,8 +40,12 @@ func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common
 		LocalPort:         info.Port,
 	}
 
-	if stateMatchesSSHDTarget(state, expectedState) && canConnectLocalPort(info.Port) {
+	if stateMatchesSSHDTarget(state, expectedState) && canReachLocalSSHEndpoint(info.Port) {
 		return info, nil
+	}
+	if stateMatchesSSHDTarget(state, expectedState) && state.ProcessID > 0 && canConnectLocalPort(info.Port) {
+		_ = stopPortForwardProcess(state.ProcessID)
+		waitForLocalPortToClose(info.Port)
 	}
 	if canConnectLocalPort(info.Port) {
 		return common.SSHConnectionInfo{}, fmt.Errorf("local SSH port %d is already in use", info.Port)
@@ -66,18 +72,20 @@ func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common
 	cmd := exec.Command("kubectl", args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
+	detachBackgroundProcess(cmd)
 	if err := cmd.Start(); err != nil {
 		return common.SSHConnectionInfo{}, err
 	}
 
 	expectedState.LogPath = logPath
+	expectedState.ProcessID = cmd.Process.Pid
 	if err := saveSSHDPortForwardState(statePath, expectedState); err != nil {
 		return common.SSHConnectionInfo{}, err
 	}
 
 	deadline := time.Now().Add(sshdPortForwardStartupTimeout)
 	for time.Now().Before(deadline) {
-		if canConnectLocalPort(info.Port) {
+		if canReachLocalSSHEndpoint(info.Port) {
 			return info, nil
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -145,4 +153,23 @@ func stateMatchesSSHDTarget(state, expected sshdPortForwardState) bool {
 		state.KubernetesContext == expected.KubernetesContext &&
 		state.Namespace == expected.Namespace &&
 		state.LocalPort == expected.LocalPort
+}
+
+func canReachLocalSSHEndpoint(port int) bool {
+	if port <= 0 {
+		return false
+	}
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 500*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	defer func() {
+		_ = conn.Close()
+	}()
+	if err := conn.SetDeadline(time.Now().Add(500 * time.Millisecond)); err != nil {
+		return false
+	}
+	buffer := make([]byte, 4)
+	n, err := conn.Read(buffer)
+	return err == nil && n >= 4 && string(buffer[:4]) == "SSH-"
 }

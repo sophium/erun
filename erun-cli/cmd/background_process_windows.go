@@ -6,6 +6,6 @@ import "os/exec"
 
 func detachBackgroundProcess(*exec.Cmd) {}
 
-func isMCPPortForwardProcess(int) bool {
+func isPortForwardProcess(int) bool {
 	return false
 }

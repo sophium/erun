@@ -54,7 +54,7 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 		return localPort, nil
 	}
 	if stateMatchesMCPTarget(state, expectedState) && state.ProcessID > 0 && canConnectLocalPort(localPort) {
-		_ = stopMCPPortForwardProcess(state.ProcessID)
+		_ = stopPortForwardProcess(state.ProcessID)
 		waitForLocalPortToClose(localPort)
 	}
 	if canConnectLocalPort(localPort) {
@@ -210,11 +210,11 @@ func mcpPortForwardTimeoutDetail(logPath string) string {
 	}
 }
 
-func stopMCPPortForwardProcess(pid int) error {
+func stopPortForwardProcess(pid int) error {
 	if pid <= 0 {
 		return nil
 	}
-	if !isMCPPortForwardProcess(pid) {
+	if !isPortForwardProcess(pid) {
 		return nil
 	}
 	process, err := os.FindProcess(pid)
