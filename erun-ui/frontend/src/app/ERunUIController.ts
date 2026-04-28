@@ -58,6 +58,8 @@ import {
   type GlobalConfigDialogState,
   type ManageDialogState,
   type TenantDialogState,
+  type TerminalStatusAction,
+  type TerminalStatusKind,
 } from './state';
 import { clamp, loadSavedDebugHeight, loadSavedDebugOpen, loadSavedFilesOpen, loadSavedFilesWidth, loadSavedReviewWidth, loadSavedSidebarWidth, saveBoolean, saveNumber } from './storage';
 import { deleteConfirmationValue, normalizeDialogValue, normalizeVersionSuggestions, selectionKey } from './versionSuggestions';
@@ -90,6 +92,12 @@ export interface MountElements {
 
 type TerminalDataDisposable = ReturnType<Terminal['onData']>;
 type TerminalWriteData = string | Uint8Array;
+type ClassifiedTerminalFailure = {
+  message: string;
+  detail: string;
+  action: TerminalStatusAction;
+  retrySelection: UISelection | null;
+};
 
 interface AppStatusPayload {
   message?: string;
@@ -126,7 +134,11 @@ export class ERunUIController {
     selectedDiffPath: '',
     diffFilter: '',
     collapsedDiffDirs: new Set<string>(),
+    notification: null,
     terminalMessage: '',
+    terminalStatusKind: 'info',
+    terminalStatusDetail: '',
+    terminalStatusAction: '',
     terminalBusy: false,
     terminalCopyOutput: '',
     terminalCopyStatus: '',
@@ -158,6 +170,7 @@ export class ERunUIController {
   private resizeTimer = 0;
   private reviewScrollFrame = 0;
   private versionSuggestionTimer = 0;
+  private notificationTimer = 0;
   private terminalCopyStatusTimer = 0;
   private versionSuggestionRequest = 0;
   private bootStarted = false;
@@ -166,6 +179,7 @@ export class ERunUIController {
   private terminalExitOff: (() => void) | null = null;
   private appStatusOff: (() => void) | null = null;
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
+  private terminalStatusRetrySelection: UISelection | null = null;
 
   subscribe = (subscriber: () => void): (() => void) => {
     this.subscribers.add(subscriber);
@@ -241,6 +255,8 @@ export class ERunUIController {
       this.terminalOutputOff?.();
       this.terminalExitOff?.();
       this.appStatusOff?.();
+      window.clearTimeout(this.notificationTimer);
+      window.clearTimeout(this.terminalCopyStatusTimer);
       if (this.pasteHandler && this.terminalRoot) {
         this.terminalRoot.removeEventListener('paste', this.pasteHandler, true);
       }
@@ -794,7 +810,7 @@ export class ERunUIController {
         busy: false,
         error: '',
       };
-      this.showTerminalMessage(`Saved config for ${selection.tenant} / ${selection.environment}.`);
+      this.showNotification('success', `Saved config for ${selection.tenant} / ${selection.environment}.`);
       this.closeManageDialog();
     } catch (error) {
       const message = readError(error);
@@ -1173,7 +1189,7 @@ export class ERunUIController {
         busyTarget: '',
         error: '',
       };
-      this.showTerminalMessage('Saved ERun config.');
+      this.showNotification('success', 'Saved ERun config.');
       this.closeGlobalConfigDialog();
     } catch (error) {
       const message = readError(error);
@@ -1287,7 +1303,7 @@ export class ERunUIController {
         busy: false,
         error: '',
       };
-      this.showTerminalMessage(`Saved config for ${result.name}.`);
+      this.showNotification('success', `Saved config for ${result.name}.`);
       this.closeTenantDialog();
     } catch (error) {
       const message = readError(error);
@@ -1425,8 +1441,83 @@ export class ERunUIController {
 
   showTerminalMessage(message: string, busy = false): void {
     this.state.terminalMessage = message;
+    this.state.terminalStatusKind = 'info';
+    this.state.terminalStatusDetail = '';
+    this.state.terminalStatusAction = '';
     this.state.terminalBusy = busy;
+    if (busy) {
+      this.state.terminalCopyOutput = '';
+      this.state.terminalCopyStatus = '';
+    }
+    this.terminalStatusRetrySelection = null;
     this.emit();
+  }
+
+  showTerminalFailure(message: string, detail: string, copyOutput: string, action: TerminalStatusAction, retrySelection: UISelection | null): void {
+    this.state.terminalMessage = message;
+    this.state.terminalStatusKind = action === 'wait-longer' ? 'warning' : 'error';
+    this.state.terminalStatusDetail = detail;
+    this.state.terminalStatusAction = action;
+    this.state.terminalBusy = false;
+    this.state.terminalCopyOutput = copyOutput;
+    this.state.terminalCopyStatus = '';
+    this.terminalStatusRetrySelection = action === 'wait-longer' ? retrySelection : null;
+    this.emit();
+  }
+
+  showNotification(kind: NonNullable<AppState['notification']>['kind'], message: string): void {
+    const trimmed = message.trim();
+    if (!trimmed) {
+      return;
+    }
+    window.clearTimeout(this.notificationTimer);
+    this.state.notification = {
+      kind,
+      message: trimmed,
+    };
+    this.emit();
+
+    if (kind === 'success' || kind === 'info') {
+      this.notificationTimer = window.setTimeout(() => {
+        this.dismissNotification();
+      }, 3200);
+    }
+  }
+
+  dismissNotification(): void {
+    window.clearTimeout(this.notificationTimer);
+    if (!this.state.notification) {
+      return;
+    }
+    this.state.notification = null;
+    this.emit();
+  }
+
+  dismissTerminalStatus(): void {
+    if (!this.state.terminalMessage && !this.state.terminalStatusDetail && !this.state.terminalCopyOutput && !this.state.terminalCopyStatus) {
+      return;
+    }
+    this.state.terminalMessage = '';
+    this.state.terminalStatusKind = 'info';
+    this.state.terminalStatusDetail = '';
+    this.state.terminalStatusAction = '';
+    this.state.terminalBusy = false;
+    this.state.terminalCopyOutput = '';
+    this.state.terminalCopyStatus = '';
+    this.terminalStatusRetrySelection = null;
+    this.emit();
+  }
+
+  async waitLongerForTerminalStatus(): Promise<void> {
+    const selection = this.terminalStatusRetrySelection;
+    if (!selection) {
+      return;
+    }
+    this.state.terminalStatusAction = '';
+    this.state.terminalCopyOutput = '';
+    this.state.terminalCopyStatus = '';
+    this.showTerminalMessage(`Waiting longer for ${selection.tenant} / ${selection.environment}...`, true);
+    await this.openSelection(selection);
   }
 
   focusTerminalSoon(): void {
@@ -1461,6 +1552,7 @@ export class ERunUIController {
 
   private async boot(): Promise<void> {
     try {
+      this.showTerminalMessage('Loading environments...', true);
       const loaded = (await LoadState()) as UIState;
       this.state.tenants = loaded.tenants || [];
       this.state.selected = loaded.selected || null;
@@ -1493,7 +1585,7 @@ export class ERunUIController {
     this.emit();
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
-    this.showTerminalMessage(`Initializing ${selection.tenant} / ${selection.environment}...`);
+    this.showTerminalMessage(`Creating remote environment ${selection.tenant} / ${selection.environment}...`, true);
 
     this.fitAddon?.fit();
     const result = (await StartInitSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
@@ -1517,7 +1609,7 @@ export class ERunUIController {
     this.emit();
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
-    this.showTerminalMessage(`Deploying ${selection.tenant} / ${selection.environment}...`);
+    this.showTerminalMessage(`Deploying runtime for ${selection.tenant} / ${selection.environment}...`, true);
 
     this.fitAddon?.fit();
     const result = (await StartDeploySession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
@@ -1668,9 +1760,13 @@ export class ERunUIController {
 
   private hideTerminalMessage(): void {
     this.state.terminalMessage = '';
+    this.state.terminalStatusKind = 'info';
+    this.state.terminalStatusDetail = '';
+    this.state.terminalStatusAction = '';
     this.state.terminalBusy = false;
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
+    this.terminalStatusRetrySelection = null;
     this.emit();
   }
 
@@ -1699,7 +1795,9 @@ export class ERunUIController {
     const existing = this.sessionBuffers.get(payload.sessionId) || [];
     existing.push(data);
     this.sessionBuffers.set(payload.sessionId, existing);
-    this.appendDebugOutput(decodeDebugOutput(data));
+    const debugOutput = decodeDebugOutput(data);
+    this.appendDebugOutput(debugOutput);
+    this.updateOpenStatusFromOutput(payload.sessionId, debugOutput);
     const displayData = this.filterTerminalDisplayData(payload.sessionId, data);
     if (displayData) {
       const displayBuffer = this.sessionDisplayBuffers.get(payload.sessionId) || [];
@@ -1729,6 +1827,9 @@ export class ERunUIController {
     this.initSessionSelections.delete(payload.sessionId);
     this.deploySessionSelections.delete(payload.sessionId);
     this.openSessionSelections.delete(payload.sessionId);
+    if (openSelection) {
+      this.selectionSessions.delete(selectionKey(openSelection));
+    }
     this.cloudInitSessions.delete(payload.sessionId);
     this.debugSessionModes.delete(payload.sessionId);
 
@@ -1756,8 +1857,9 @@ export class ERunUIController {
       return;
     }
     if (payload.reason && (initSelection || deploySelection || openSelection || cloudInit)) {
-      this.state.terminalCopyOutput = failedOutput;
-      this.state.terminalCopyStatus = '';
+      const failure = classifiedTerminalFailure(payload.reason, reason, failedOutput, openSelection);
+      this.showTerminalFailure(failure.message, failure.detail, failedOutput, failure.action, failure.retrySelection);
+      return;
     }
     this.showTerminalMessage(reason);
   }
@@ -1801,6 +1903,17 @@ export class ERunUIController {
     const decoder = new TextDecoder();
     const output = chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join('') + decoder.decode();
     return cleanTerminalOutput(output) || fallback;
+  }
+
+  private updateOpenStatusFromOutput(sessionId: number, output: string): void {
+    if (!output || !this.openSessionSelections.has(sessionId) || this.state.terminalCopyOutput) {
+      return;
+    }
+    const status = statusForTerminalOutput(output);
+    if (!status) {
+      return;
+    }
+    this.showTerminalMessage(status, true);
   }
 
   private applyLayoutVars(): void {
@@ -1994,6 +2107,68 @@ function cleanTerminalOutput(value: string): string {
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .trim();
+}
+
+function classifiedTerminalFailure(rawReason: string, displayReason: string, output: string, openSelection?: UISelection): ClassifiedTerminalFailure {
+  const combined = `${rawReason}\n${output}`.toLowerCase();
+  if (combined.includes('timed out waiting for mcp port-forward')) {
+    const port = rawReason.match(/127\.0\.0\.1:(\d+)/)?.[1] || output.match(/127\.0\.0\.1:(\d+)/)?.[1] || '';
+    return {
+      message: port ? `MCP port-forward on 127.0.0.1:${port} is still not ready` : 'MCP port-forward is still not ready',
+      detail: mcpPortForwardDetail(combined),
+      action: openSelection ? 'wait-longer' : '',
+      retrySelection: openSelection || null,
+    };
+  }
+  return {
+    message: displayReason,
+    detail: '',
+    action: '',
+    retrySelection: null,
+  };
+}
+
+function mcpPortForwardDetail(value: string): string {
+  if (value.includes('local mcp port') && value.includes('already in use')) {
+    return 'Another local process is using the MCP port.';
+  }
+  if (value.includes('pod not found')) {
+    return 'The runtime pod was replaced while the app was connecting.';
+  }
+  if (value.includes('lost connection to pod') || value.includes('network namespace') || value.includes('sandbox')) {
+    return 'The runtime pod connection was lost, likely because the pod restarted.';
+  }
+  if (value.includes('connection refused') || value.includes('not accepting')) {
+    return 'The runtime pod exists, but MCP is not accepting connections yet.';
+  }
+  return 'kubectl has not exposed a reachable MCP endpoint yet.';
+}
+
+function statusForTerminalOutput(output: string): string {
+  const lower = output.toLowerCase();
+  if (lower.includes('forwarding from 127.0.0.1:')) {
+    const port = output.match(/Forwarding from 127\.0\.0\.1:(\d+)/)?.[1] || '';
+    return port ? `Waiting for MCP endpoint on 127.0.0.1:${port}...` : 'Waiting for MCP endpoint...';
+  }
+  if (lower.includes('handling connection for')) {
+    return 'Checking MCP endpoint readiness...';
+  }
+  if (lower.includes('connection refused')) {
+    return 'Runtime pod is not accepting MCP connections yet...';
+  }
+  if (lower.includes('lost connection to pod') || lower.includes('network namespace')) {
+    return 'Runtime pod connection changed. Reconnecting MCP port-forward...';
+  }
+  if (lower.includes('pod not found')) {
+    return 'Runtime pod was replaced. Waiting for the new pod...';
+  }
+  if (lower.includes('context "') && lower.includes('modified')) {
+    return 'Configuring Kubernetes context...';
+  }
+  if (lower.includes('cluster "') && lower.includes('set.')) {
+    return 'Configuring Kubernetes cluster access...';
+  }
+  return '';
 }
 
 function decodeDebugOutput(data: Uint8Array): string {
