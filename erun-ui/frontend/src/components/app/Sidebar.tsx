@@ -84,6 +84,7 @@ function TenantGroup({
         <button
           className="flex min-w-0 flex-1 cursor-pointer items-center gap-[9px] border-0 bg-transparent px-3 py-[4px] pb-1.5 text-left text-[15px] leading-[1.25] font-medium tracking-normal text-muted-foreground hover:text-foreground"
           type="button"
+          title={tenant.name}
           onClick={() => controller.toggleTenant(tenant.name)}
         >
           {collapsed ? (
@@ -119,13 +120,18 @@ function TenantGroup({
               <div
                 key={environment.name}
                 className={cn(
-                  'group relative mr-0 ml-0.5 flex h-[34px] items-center rounded-[var(--radius)] pr-1.5 text-foreground hover:bg-accent',
-                  selected && 'bg-primary text-primary-foreground hover:bg-primary',
+                  'group relative mr-1 ml-1 flex h-8 items-center rounded-md pr-1.5 text-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                  selected && 'bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground',
                 )}
               >
                 <button
                   type="button"
-                  className="h-[34px] min-w-0 flex-1 cursor-pointer truncate border-0 bg-transparent py-0 pr-2 pl-[42px] text-left text-sm leading-[1.2] font-normal tracking-normal text-inherit"
+                  className={cn(
+                    'h-8 min-w-0 flex-1 cursor-pointer truncate border-0 bg-transparent py-0 pr-2 pl-10 text-left text-sm leading-[1.2] tracking-normal text-inherit',
+                    selected ? 'font-medium' : 'font-normal',
+                  )}
+                  title={`${tenant.name} / ${environment.name}`}
+                  aria-current={selected ? 'page' : undefined}
                   onClick={() => {
                     void controller.openSelection(selection).catch((error: unknown) => {
                       controller.showTerminalMessage(readError(error));

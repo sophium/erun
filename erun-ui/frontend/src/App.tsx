@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Check, ChevronDown, ChevronUp, Copy, LoaderCircle, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
 
 import { ERunUIController } from '@/app/ERunUIController';
 import { useControllerState } from '@/app/useControllerState';
@@ -79,34 +79,6 @@ export function App(): React.ReactElement {
             >
               <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
                 <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full box-border px-4 py-3.5" />
-                <div
-                  className={cn(
-                    'pointer-events-none absolute inset-0 flex items-center justify-center bg-[oklch(0_0_0/0.68)] p-10 text-center text-lg leading-[1.45] text-[oklch(0.92_0_0)]',
-                    state.terminalCopyOutput && 'pointer-events-auto',
-                    !state.terminalMessage && 'hidden',
-                  )}
-                >
-                  <div className="flex max-w-[min(680px,100%)] flex-col items-center gap-3.5">
-                    <div className="flex items-center justify-center gap-3">
-                      {state.terminalBusy && <LoaderCircle className="size-5 shrink-0 animate-spin" aria-hidden="true" />}
-                      <span>{state.terminalMessage}</span>
-                    </div>
-                    {state.terminalCopyOutput && (
-                      <Button
-                        className="pointer-events-auto cursor-pointer border-[oklch(0.92_0_0/0.55)] bg-[oklch(0.98_0_0)] text-[oklch(0.18_0_0)] opacity-100 shadow-[0_10px_30px_oklch(0_0_0/0.32)] hover:border-[oklch(1_0_0/0.75)] hover:bg-[oklch(1_0_0)] hover:text-[oklch(0.12_0_0)] [&_svg]:size-[15px]"
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          void controller.copyTerminalOutput();
-                        }}
-                      >
-                        {state.terminalCopyStatus === 'Copied' ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
-                        {state.terminalCopyStatus || 'Copy output'}
-                      </Button>
-                    )}
-                  </div>
-                </div>
               </div>
               <div
                 className={cn(reviewSplitterClassName, !state.reviewOpen && 'hidden')}

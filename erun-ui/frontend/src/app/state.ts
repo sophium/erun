@@ -83,6 +83,14 @@ export interface GlobalConfigDialogState {
   error: string;
 }
 
+export interface AppNotification {
+  kind: 'success' | 'warning' | 'error' | 'info';
+  message: string;
+}
+
+export type TerminalStatusKind = 'info' | 'warning' | 'error';
+export type TerminalStatusAction = '' | 'wait-longer';
+
 export interface AppState {
   tenants: UITenant[];
   selected: UISelection | null;
@@ -105,7 +113,11 @@ export interface AppState {
   selectedDiffPath: string;
   diffFilter: string;
   collapsedDiffDirs: Set<string>;
+  notification: AppNotification | null;
   terminalMessage: string;
+  terminalStatusKind: TerminalStatusKind;
+  terminalStatusDetail: string;
+  terminalStatusAction: TerminalStatusAction;
   terminalBusy: boolean;
   terminalCopyOutput: string;
   terminalCopyStatus: string;

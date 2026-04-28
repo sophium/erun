@@ -101,6 +101,9 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 		time.Sleep(100 * time.Millisecond)
 	}
 
+	if detail := mcpPortForwardTimeoutDetail(logPath); detail != "" {
+		return 0, fmt.Errorf("timed out waiting for MCP port-forward on 127.0.0.1:%d: %s; see %s", localPort, detail, logPath)
+	}
 	return 0, fmt.Errorf("timed out waiting for MCP port-forward on 127.0.0.1:%d; see %s", localPort, logPath)
 }
 
@@ -185,6 +188,26 @@ func canReachLocalMCPEndpoint(port int) bool {
 	}
 	_ = resp.Body.Close()
 	return true
+}
+
+func mcpPortForwardTimeoutDetail(logPath string) string {
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return ""
+	}
+	value := strings.ToLower(string(data))
+	switch {
+	case strings.Contains(value, "pod not found"):
+		return "runtime pod was replaced while connecting"
+	case strings.Contains(value, "lost connection to pod") ||
+		strings.Contains(value, "network namespace") ||
+		strings.Contains(value, "sandbox"):
+		return "runtime pod connection was lost, likely because the pod restarted"
+	case strings.Contains(value, "connection refused"):
+		return "runtime pod exists but MCP is not accepting connections yet"
+	default:
+		return ""
+	}
 }
 
 func stopMCPPortForwardProcess(pid int) error {
