@@ -927,46 +927,63 @@ func syncReleasePackagingChecksums(ctx Context, spec ReleasePackagingSyncSpec) (
 	}
 
 	updates := make([]ReleaseFileUpdate, 0, 2)
-
-	if spec.FormulaPath != "" {
-		url := "https://github.com/sophium/erun/archive/refs/tags/v" + spec.Version + ".tar.gz"
-		ctx.TraceCommand("", "curl", "-fsSL", url)
-		ctx.TraceCommand("", "shasum", "-a", "256", "v"+spec.Version+".tar.gz")
-		if !ctx.DryRun {
-			checksum, err := releaseArchiveSHA256(url)
-			if err != nil {
-				return nil, err
-			}
-			content, changed, err := updateHomebrewFormulaReleaseChecksum(spec.FormulaPath, checksum)
-			if err != nil {
-				return nil, err
-			}
-			if changed {
-				updates = append(updates, ReleaseFileUpdate{Path: spec.FormulaPath, Content: content})
-			}
-		}
+	formulaUpdate, ok, err := syncHomebrewReleaseChecksum(ctx, spec)
+	if err != nil {
+		return nil, err
 	}
-
-	if spec.ScoopPath != "" {
-		url := "https://github.com/sophium/erun/archive/refs/tags/v" + spec.Version + ".zip"
-		ctx.TraceCommand("", "curl", "-fsSL", url)
-		ctx.TraceCommand("", "shasum", "-a", "256", "v"+spec.Version+".zip")
-		if !ctx.DryRun {
-			checksum, err := releaseArchiveSHA256(url)
-			if err != nil {
-				return nil, err
-			}
-			content, changed, err := updateScoopManifestReleaseChecksum(spec.ScoopPath, checksum)
-			if err != nil {
-				return nil, err
-			}
-			if changed {
-				updates = append(updates, ReleaseFileUpdate{Path: spec.ScoopPath, Content: content})
-			}
-		}
+	if ok {
+		updates = append(updates, formulaUpdate)
 	}
-
+	scoopUpdate, ok, err := syncScoopReleaseChecksum(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		updates = append(updates, scoopUpdate)
+	}
 	return updates, nil
+}
+
+func syncHomebrewReleaseChecksum(ctx Context, spec ReleasePackagingSyncSpec) (ReleaseFileUpdate, bool, error) {
+	if spec.FormulaPath == "" {
+		return ReleaseFileUpdate{}, false, nil
+	}
+	url := "https://github.com/sophium/erun/archive/refs/tags/v" + spec.Version + ".tar.gz"
+	ctx.TraceCommand("", "curl", "-fsSL", url)
+	ctx.TraceCommand("", "shasum", "-a", "256", "v"+spec.Version+".tar.gz")
+	if ctx.DryRun {
+		return ReleaseFileUpdate{}, false, nil
+	}
+	checksum, err := releaseArchiveSHA256(url)
+	if err != nil {
+		return ReleaseFileUpdate{}, false, err
+	}
+	content, changed, err := updateHomebrewFormulaReleaseChecksum(spec.FormulaPath, checksum)
+	if err != nil || !changed {
+		return ReleaseFileUpdate{}, false, err
+	}
+	return ReleaseFileUpdate{Path: spec.FormulaPath, Content: content}, true, nil
+}
+
+func syncScoopReleaseChecksum(ctx Context, spec ReleasePackagingSyncSpec) (ReleaseFileUpdate, bool, error) {
+	if spec.ScoopPath == "" {
+		return ReleaseFileUpdate{}, false, nil
+	}
+	url := "https://github.com/sophium/erun/archive/refs/tags/v" + spec.Version + ".zip"
+	ctx.TraceCommand("", "curl", "-fsSL", url)
+	ctx.TraceCommand("", "shasum", "-a", "256", "v"+spec.Version+".zip")
+	if ctx.DryRun {
+		return ReleaseFileUpdate{}, false, nil
+	}
+	checksum, err := releaseArchiveSHA256(url)
+	if err != nil {
+		return ReleaseFileUpdate{}, false, err
+	}
+	content, changed, err := updateScoopManifestReleaseChecksum(spec.ScoopPath, checksum)
+	if err != nil || !changed {
+		return ReleaseFileUpdate{}, false, err
+	}
+	return ReleaseFileUpdate{Path: spec.ScoopPath, Content: content}, true, nil
 }
 
 func releaseArchiveSHA256(url string) (string, error) {
@@ -1244,42 +1261,56 @@ func resolveReleaseModuleRoot(projectRoot string) (string, error) {
 func findNestedReleaseRoots(projectRoot string) ([]string, error) {
 	matches := make([]string, 0, 2)
 	err := filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
+		dir, ok, walkErr := nestedReleaseRootCandidate(projectRoot, path, d, err)
+		if ok {
+			matches = append(matches, dir)
 		}
-		if d.IsDir() {
-			if d.Name() == ".git" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.Name() != "VERSION" {
-			return nil
-		}
-
-		dir := filepath.Dir(path)
-		if dir == projectRoot {
-			return nil
-		}
-		relative, err := filepath.Rel(projectRoot, dir)
-		if err != nil {
-			return err
-		}
-		parts := strings.Split(filepath.ToSlash(relative), "/")
-		for _, part := range parts {
-			if part == "assets" {
-				return nil
-			}
-		}
-		if len(parts) >= 2 && parts[1] == "docker" {
-			return nil
-		}
-		matches = append(matches, dir)
-		return nil
+		return walkErr
 	})
 	if err != nil {
 		return nil, err
 	}
 	sort.Strings(matches)
 	return matches, nil
+}
+
+func nestedReleaseRootCandidate(projectRoot, path string, d os.DirEntry, err error) (string, bool, error) {
+	if err != nil {
+		return "", false, err
+	}
+	if d.IsDir() {
+		if d.Name() == ".git" {
+			return "", false, filepath.SkipDir
+		}
+		return "", false, nil
+	}
+	if d.Name() != "VERSION" {
+		return "", false, nil
+	}
+	dir := filepath.Dir(path)
+	if dir == projectRoot {
+		return "", false, nil
+	}
+	parts, err := releaseRootRelativeParts(projectRoot, dir)
+	if err != nil || ignoredNestedReleaseRoot(parts) {
+		return "", false, err
+	}
+	return dir, true, nil
+}
+
+func releaseRootRelativeParts(projectRoot, dir string) ([]string, error) {
+	relative, err := filepath.Rel(projectRoot, dir)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Split(filepath.ToSlash(relative), "/"), nil
+}
+
+func ignoredNestedReleaseRoot(parts []string) bool {
+	for _, part := range parts {
+		if part == "assets" {
+			return true
+		}
+	}
+	return len(parts) >= 2 && parts[1] == "docker"
 }
