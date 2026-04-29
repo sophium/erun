@@ -112,59 +112,78 @@ function TenantGroup({
       </div>
       {!collapsed && (
         <div className="flex flex-col gap-0 pt-0">
-          {tenant.environments.map((environment) => {
-            const selected = state.selected?.tenant === tenant.name && state.selected?.environment === environment.name;
-            const selection = { tenant: tenant.name, environment: environment.name };
-            const busy = environmentIsBusy(state, tenant.name, environment.name);
-
-            return (
-              <div
-                key={environment.name}
-                className={cn(
-                  'group relative mr-1 ml-1 flex h-8 items-center rounded-md pr-1.5 text-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                  selected && 'bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground',
-                )}
-              >
-                <button
-                  type="button"
-                  className={cn(
-                    'flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent py-0 pr-2 pl-10 text-left text-sm leading-[1.2] tracking-normal text-inherit',
-                    selected ? 'font-medium' : 'font-normal',
-                  )}
-                  title={`${tenant.name} / ${environment.name}`}
-                  aria-current={selected ? 'page' : undefined}
-                  onClick={() => {
-                    void controller.openSelection(selection).catch((error: unknown) => {
-                      controller.showTerminalMessage(readError(error));
-                    });
-                  }}
-                >
-                  <span className="min-w-0 truncate">{environment.name}</span>
-                  {busy && <LoaderCircle className="size-3.5 flex-none animate-spin text-current opacity-75" aria-hidden="true" />}
-                </button>
-                <IconTooltip label="Manage environment">
-                  <Button
-                    type="button"
-                    className={cn(
-                      'pointer-events-none size-[26px] flex-none cursor-pointer border-0 bg-transparent text-current opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-[color-mix(in_oklch,currentColor_12%,transparent)] hover:text-current group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 [&_svg]:size-4',
-                      selected && 'pointer-events-auto opacity-100',
-                    )}
-                    variant="ghost"
-                    size="icon"
-                    aria-label={`Manage ${tenant.name} / ${environment.name}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      controller.openManageDialog(selection);
-                    }}
-                  >
-                    <MoreHorizontal />
-                  </Button>
-                </IconTooltip>
-              </div>
-            );
-          })}
+          {tenant.environments.map((environment) => (
+            <EnvironmentRow
+              key={environment.name}
+              controller={controller}
+              state={state}
+              tenantName={tenant.name}
+              environmentName={environment.name}
+            />
+          ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function EnvironmentRow({
+  controller,
+  state,
+  tenantName,
+  environmentName,
+}: {
+  controller: ERunUIController;
+  state: AppState;
+  tenantName: string;
+  environmentName: string;
+}): React.ReactElement {
+  const selected = state.selected?.tenant === tenantName && state.selected?.environment === environmentName;
+  const selection = { tenant: tenantName, environment: environmentName };
+  const busy = environmentIsBusy(state, tenantName, environmentName);
+
+  return (
+    <div
+      className={cn(
+        'group relative mr-1 ml-1 flex h-8 items-center rounded-md pr-1.5 text-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+        selected && 'bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground',
+      )}
+    >
+      <button
+        type="button"
+        className={cn(
+          'flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent py-0 pr-2 pl-10 text-left text-sm leading-[1.2] tracking-normal text-inherit',
+          selected ? 'font-medium' : 'font-normal',
+        )}
+        title={`${tenantName} / ${environmentName}`}
+        aria-current={selected ? 'page' : undefined}
+        onClick={() => {
+          void controller.openSelection(selection).catch((error: unknown) => {
+            controller.showTerminalMessage(readError(error));
+          });
+        }}
+      >
+        <span className="min-w-0 truncate">{environmentName}</span>
+        {busy && <LoaderCircle className="size-3.5 flex-none animate-spin text-current opacity-75" aria-hidden="true" />}
+      </button>
+      <IconTooltip label="Manage environment">
+        <Button
+          type="button"
+          className={cn(
+            'pointer-events-none size-[26px] flex-none cursor-pointer border-0 bg-transparent text-current opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-[color-mix(in_oklch,currentColor_12%,transparent)] hover:text-current group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 [&_svg]:size-4',
+            selected && 'pointer-events-auto opacity-100',
+          )}
+          variant="ghost"
+          size="icon"
+          aria-label={`Manage ${tenantName} / ${environmentName}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            controller.openManageDialog(selection);
+          }}
+        >
+          <MoreHorizontal />
+        </Button>
+      </IconTooltip>
     </div>
   );
 }

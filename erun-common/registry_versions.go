@@ -87,7 +87,9 @@ func fetchDockerHubTagPage(ctx context.Context, client *http.Client, endpoint st
 	if err != nil {
 		return dockerHubTagPage{}, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return dockerHubTagPage{}, fmt.Errorf("docker hub tags request failed: %s", resp.Status)

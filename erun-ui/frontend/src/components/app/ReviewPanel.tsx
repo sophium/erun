@@ -29,16 +29,11 @@ export function ReviewPanel({
   reviewMainRef: React.RefObject<HTMLDivElement | null>;
   diffListRef: React.RefObject<HTMLDivElement | null>;
 }): React.ReactElement {
+  const filesVisible = state.filesOpen && state.reviewOpen;
   return (
     <section
       ref={reviewViewRef}
-      className={cn(
-        'relative grid h-full min-h-0 w-full min-w-0 overflow-hidden bg-background text-foreground',
-        state.filesOpen
-          ? 'grid-cols-[minmax(260px,1fr)_10px_minmax(220px,var(--files-width))] max-[980px]:grid-cols-[minmax(0,1fr)]'
-          : 'grid-cols-[minmax(0,1fr)]',
-        !state.reviewOpen && 'hidden',
-      )}
+      className={reviewPanelClassName(state.reviewOpen, state.filesOpen)}
     >
       <div
         ref={reviewMainRef}
@@ -49,67 +44,92 @@ export function ReviewPanel({
           <DiffList controller={controller} state={state} />
         </div>
       </div>
-      <div
-        className={cn(filesSplitterClassName, (!state.filesOpen || !state.reviewOpen) && 'hidden', 'max-[980px]:hidden')}
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize changed files list"
-        onMouseDown={(event) => controller.startFilesResize(event)}
-      />
-      <aside
-        className={cn(
-          'box-border flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-l bg-background px-[18px] py-5',
-          (!state.filesOpen || !state.reviewOpen) && 'hidden',
-          'max-[980px]:hidden',
-        )}
-      >
-        <div className="mb-3.5 flex min-w-0 items-center justify-between gap-3">
-          <button
-            className="inline-flex min-w-0 flex-1 cursor-pointer items-center gap-1 overflow-hidden border-0 bg-transparent p-0 text-sm font-semibold whitespace-nowrap text-foreground [&_svg]:size-4 [&_svg]:flex-none [&_svg]:text-muted-foreground"
-            type="button"
-          >
-            <FileDiff aria-hidden="true" />
-            Changed files <span className="flex-none text-muted-foreground">{state.diff?.summary?.fileCount || 0}</span>
-            <ChevronDown aria-hidden="true" />
-          </button>
-          <div className="flex min-w-0 flex-none items-center gap-2">
-            <IconTooltip label="Refresh diff">
-              <Button
-                className="size-7 cursor-pointer border-0 bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:cursor-default disabled:opacity-55 [&_svg]:size-[17px]"
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label="Refresh diff"
-                disabled={state.diffLoading}
-                onClick={() => {
-                  void controller.loadReviewDiff();
-                }}
-              >
-                <RefreshCw />
-              </Button>
-            </IconTooltip>
-            <div className="flex gap-1.5 text-sm font-semibold whitespace-nowrap">
-              <span className="text-diff-add-foreground">+{state.diff?.summary?.additions || 0}</span>
-              <span className="text-diff-delete-foreground">-{state.diff?.summary?.deletions || 0}</span>
-            </div>
-          </div>
-        </div>
-        <Label className="box-border flex h-[38px] items-center gap-2 rounded-[var(--radius)] border border-input bg-background px-3 text-muted-foreground [&_svg]:size-[18px] [&_svg]:flex-none">
-          <Search aria-hidden="true" />
-          <Input
-            className="h-auto min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-foreground shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0"
-            value={state.diffFilter}
-            type="search"
-            placeholder="Filter files..."
-            autoComplete="off"
-            onChange={(event) => controller.setDiffFilter(event.target.value)}
-          />
-        </Label>
-        <div className="min-h-0 flex-1 overflow-auto overscroll-contain pt-3.5">
-          <ChangedFileTree controller={controller} state={state} />
-        </div>
-      </aside>
+      <ChangedFilesSplitter visible={filesVisible} onMouseDown={(event) => controller.startFilesResize(event)} />
+      <ChangedFilesAside controller={controller} state={state} visible={filesVisible} />
     </section>
+  );
+}
+
+function reviewPanelClassName(reviewOpen: boolean, filesOpen: boolean): string {
+  const gridClassName = filesOpen
+    ? 'grid-cols-[minmax(260px,1fr)_10px_minmax(220px,var(--files-width))] max-[980px]:grid-cols-[minmax(0,1fr)]'
+    : 'grid-cols-[minmax(0,1fr)]';
+  return cn('relative grid h-full min-h-0 w-full min-w-0 overflow-hidden bg-background text-foreground', gridClassName, !reviewOpen && 'hidden');
+}
+
+function ChangedFilesSplitter({ visible, onMouseDown }: { visible: boolean; onMouseDown: React.MouseEventHandler<HTMLDivElement> }): React.ReactElement {
+  return (
+    <div
+      className={cn(filesSplitterClassName, !visible && 'hidden', 'max-[980px]:hidden')}
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize changed files list"
+      onMouseDown={onMouseDown}
+    />
+  );
+}
+
+function ChangedFilesAside({ controller, state, visible }: { controller: ERunUIController; state: AppState; visible: boolean }): React.ReactElement {
+  return (
+    <aside
+      className={cn(
+        'box-border flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-l bg-background px-[18px] py-5',
+        !visible && 'hidden',
+        'max-[980px]:hidden',
+      )}
+    >
+      <ChangedFilesHeader controller={controller} state={state} />
+      <Label className="box-border flex h-[38px] items-center gap-2 rounded-[var(--radius)] border border-input bg-background px-3 text-muted-foreground [&_svg]:size-[18px] [&_svg]:flex-none">
+        <Search aria-hidden="true" />
+        <Input
+          className="h-auto min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-foreground shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0"
+          value={state.diffFilter}
+          type="search"
+          placeholder="Filter files..."
+          autoComplete="off"
+          onChange={(event) => controller.setDiffFilter(event.target.value)}
+        />
+      </Label>
+      <div className="min-h-0 flex-1 overflow-auto overscroll-contain pt-3.5">
+        <ChangedFileTree controller={controller} state={state} />
+      </div>
+    </aside>
+  );
+}
+
+function ChangedFilesHeader({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
+  return (
+    <div className="mb-3.5 flex min-w-0 items-center justify-between gap-3">
+      <button
+        className="inline-flex min-w-0 flex-1 cursor-pointer items-center gap-1 overflow-hidden border-0 bg-transparent p-0 text-sm font-semibold whitespace-nowrap text-foreground [&_svg]:size-4 [&_svg]:flex-none [&_svg]:text-muted-foreground"
+        type="button"
+      >
+        <FileDiff aria-hidden="true" />
+        Changed files <span className="flex-none text-muted-foreground">{state.diff?.summary?.fileCount || 0}</span>
+        <ChevronDown aria-hidden="true" />
+      </button>
+      <div className="flex min-w-0 flex-none items-center gap-2">
+        <IconTooltip label="Refresh diff">
+          <Button
+            className="size-7 cursor-pointer border-0 bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:cursor-default disabled:opacity-55 [&_svg]:size-[17px]"
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Refresh diff"
+            disabled={state.diffLoading}
+            onClick={() => {
+              void controller.loadReviewDiff();
+            }}
+          >
+            <RefreshCw />
+          </Button>
+        </IconTooltip>
+        <div className="flex gap-1.5 text-sm font-semibold whitespace-nowrap">
+          <span className="text-diff-add-foreground">+{state.diff?.summary?.additions || 0}</span>
+          <span className="text-diff-delete-foreground">-{state.diff?.summary?.deletions || 0}</span>
+        </div>
+      </div>
+    </div>
   );
 }
 

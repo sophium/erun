@@ -401,17 +401,6 @@ func ResolveDockerImageReference(store DockerStore, findProjectRoot ProjectFinde
 	return resolveDockerImageReferenceForProject(now, projectRoot, environment, buildDir, strings.TrimSpace(target.VersionOverride))
 }
 
-func resolveCurrentDockerBuildSpec(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (DockerBuildSpec, error) {
-	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
-
-	buildContext, err := resolveSingleCurrentDockerBuildContext(findProjectRoot, resolveBuildContext, target)
-	if err != nil {
-		return DockerBuildSpec{}, err
-	}
-
-	return resolveDockerBuildSpec(store, findProjectRoot, resolveBuildContext, now, buildContext, target)
-}
-
 func ResolveDockerBuildForComponent(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, componentName, versionOverride string) (*DockerBuildSpec, error) {
 	_, _, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
@@ -419,20 +408,12 @@ func ResolveDockerBuildForComponent(store DockerStore, findProjectRoot ProjectFi
 		return nil, nil
 	}
 
-	if resolveBuildContext != nil {
-		buildContext, err := resolveBuildContext()
-		if err == nil {
-			dir := filepath.Clean(strings.TrimSpace(buildContext.Dir))
-			if filepath.Base(dir) == strings.TrimSpace(componentName) &&
-				filepath.Base(filepath.Dir(dir)) == "docker" &&
-				strings.TrimSpace(buildContext.DockerfilePath) != "" {
-				build, err := newDockerBuildSpec(now, projectRoot, environment, buildContext, versionOverride)
-				if err != nil {
-					return nil, err
-				}
-				return &build, nil
-			}
+	if buildContext, ok := currentComponentDockerBuildContext(resolveBuildContext, componentName); ok {
+		build, err := newDockerBuildSpec(now, projectRoot, environment, buildContext, versionOverride)
+		if err != nil {
+			return nil, err
 		}
+		return &build, nil
 	}
 
 	buildContext, ok, err := FindComponentDockerBuildContext(projectRoot, componentName)
@@ -445,6 +426,21 @@ func ResolveDockerBuildForComponent(store DockerStore, findProjectRoot ProjectFi
 		return nil, err
 	}
 	return &build, nil
+}
+
+func currentComponentDockerBuildContext(resolveBuildContext BuildContextResolverFunc, componentName string) (DockerBuildContext, bool) {
+	if resolveBuildContext == nil {
+		return DockerBuildContext{}, false
+	}
+	buildContext, err := resolveBuildContext()
+	if err != nil {
+		return DockerBuildContext{}, false
+	}
+	dir := filepath.Clean(strings.TrimSpace(buildContext.Dir))
+	if filepath.Base(dir) != strings.TrimSpace(componentName) || filepath.Base(filepath.Dir(dir)) != "docker" {
+		return DockerBuildContext{}, false
+	}
+	return buildContext, strings.TrimSpace(buildContext.DockerfilePath) != ""
 }
 
 func ResolveDockerBuildForImageReference(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment, image string) (DockerBuildSpec, bool, error) {
@@ -602,17 +598,6 @@ func normalizeDockerDependencies(store DockerStore, findProjectRoot ProjectFinde
 	return store, findProjectRoot, resolveBuildContext, now
 }
 
-func resolveSingleCurrentDockerBuildContext(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget) (DockerBuildContext, error) {
-	buildContexts, err := ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, target)
-	if err != nil {
-		return DockerBuildContext{}, err
-	}
-	if len(buildContexts) != 1 {
-		return DockerBuildContext{}, fmt.Errorf("expected exactly one Docker build context, got %d", len(buildContexts))
-	}
-	return buildContexts[0], nil
-}
-
 func ResolveCurrentDockerBuildContexts(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget) ([]DockerBuildContext, error) {
 	if resolveBuildContext == nil {
 		resolveBuildContext = ResolveDockerBuildContext
@@ -684,27 +669,10 @@ func resolveProjectRootDevopsDockerDir(findProjectRoot ProjectFinderFunc, projec
 		}
 	}
 
-	entries, err := os.ReadDir(projectRoot)
+	candidates, err := findDevopsDockerDirs(projectRoot)
 	if err != nil {
 		return "", false, err
 	}
-
-	candidates := make([]string, 0, 1)
-	for _, entry := range entries {
-		if !entry.IsDir() || !strings.HasSuffix(entry.Name(), "-devops") {
-			continue
-		}
-
-		dockerDir := filepath.Join(projectRoot, entry.Name(), "docker")
-		ok, err := isDockerBuildModuleDir(dockerDir)
-		if err != nil {
-			return "", false, err
-		}
-		if ok {
-			candidates = append(candidates, dockerDir)
-		}
-	}
-
 	switch len(candidates) {
 	case 0:
 		return "", false, nil
@@ -713,6 +681,28 @@ func resolveProjectRootDevopsDockerDir(findProjectRoot ProjectFinderFunc, projec
 	default:
 		return "", false, fmt.Errorf("multiple devops docker directories found under project root")
 	}
+}
+
+func findDevopsDockerDirs(projectRoot string) ([]string, error) {
+	entries, err := os.ReadDir(projectRoot)
+	if err != nil {
+		return nil, err
+	}
+	candidates := make([]string, 0, 1)
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasSuffix(entry.Name(), "-devops") {
+			continue
+		}
+		dockerDir := filepath.Join(projectRoot, entry.Name(), "docker")
+		ok, err := isDockerBuildModuleDir(dockerDir)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			candidates = append(candidates, dockerDir)
+		}
+	}
+	return candidates, nil
 }
 
 func isDockerBuildModuleDir(dir string) (bool, error) {
@@ -1838,27 +1828,10 @@ func resolveProjectRootDevopsLinuxDir(findProjectRoot ProjectFinderFunc, project
 		}
 	}
 
-	entries, err := os.ReadDir(projectRoot)
+	candidates, err := findDevopsLinuxDirs(projectRoot)
 	if err != nil {
 		return "", false, err
 	}
-
-	candidates := make([]string, 0, 1)
-	for _, entry := range entries {
-		if !entry.IsDir() || !strings.HasSuffix(entry.Name(), "-devops") {
-			continue
-		}
-
-		linuxDir := filepath.Join(projectRoot, entry.Name(), "linux")
-		ok, err := isLinuxPackageModuleDir(linuxDir)
-		if err != nil {
-			return "", false, err
-		}
-		if ok {
-			candidates = append(candidates, linuxDir)
-		}
-	}
-
 	switch len(candidates) {
 	case 0:
 		return "", false, nil
@@ -1867,6 +1840,28 @@ func resolveProjectRootDevopsLinuxDir(findProjectRoot ProjectFinderFunc, project
 	default:
 		return "", false, fmt.Errorf("multiple devops linux directories found under project root")
 	}
+}
+
+func findDevopsLinuxDirs(projectRoot string) ([]string, error) {
+	entries, err := os.ReadDir(projectRoot)
+	if err != nil {
+		return nil, err
+	}
+	candidates := make([]string, 0, 1)
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasSuffix(entry.Name(), "-devops") {
+			continue
+		}
+		linuxDir := filepath.Join(projectRoot, entry.Name(), "linux")
+		ok, err := isLinuxPackageModuleDir(linuxDir)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			candidates = append(candidates, linuxDir)
+		}
+	}
+	return candidates, nil
 }
 
 func isLinuxPackageModuleDir(dir string) (bool, error) {

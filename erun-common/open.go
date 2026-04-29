@@ -28,8 +28,10 @@ var (
 	openUserHomeDir = os.UserHomeDir
 )
 
-const defaultShellLaunchWaitTimeout = "2m0s"
-const remoteShellReattachDeployExitCode = 75
+const (
+	defaultShellLaunchWaitTimeout     = "2m0s"
+	remoteShellReattachDeployExitCode = 75
+)
 
 type OpenStore interface {
 	LoadERunConfig() (ERunConfig, string, error)

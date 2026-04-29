@@ -244,6 +244,18 @@ type pastedImageResult struct {
 }
 
 func NewApp(deps erunUIDeps) *App {
+	deps = withDefaultCoreDeps(deps)
+	deps = withDefaultRuntimeDeps(deps)
+	deps = withDefaultUIDeps(deps)
+	return &App{
+		deps:      deps,
+		sessions:  make(map[string]*managedTerminal),
+		idleStops: make(map[string]struct{}),
+		busyEnvs:  make(map[string]int),
+	}
+}
+
+func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
 	if deps.store == nil {
 		deps.store = eruncommon.ConfigStore{}
 	}
@@ -264,6 +276,10 @@ func NewApp(deps erunUIDeps) *App {
 	if deps.deleteNamespace == nil {
 		deps.deleteNamespace = eruncommon.DeleteKubernetesNamespace
 	}
+	return deps
+}
+
+func withDefaultRuntimeDeps(deps erunUIDeps) erunUIDeps {
 	if deps.listKubeContexts == nil {
 		deps.listKubeContexts = listKubernetesContexts
 	}
@@ -284,6 +300,10 @@ func NewApp(deps erunUIDeps) *App {
 	if deps.runIDECommand == nil {
 		deps.runIDECommand = runIDECommand
 	}
+	return deps
+}
+
+func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 	if deps.savePastedImage == nil {
 		deps.savePastedImage = savePastedImageToRuntime
 	}
@@ -307,12 +327,7 @@ func NewApp(deps erunUIDeps) *App {
 	if deps.windowMaximised == nil {
 		deps.windowMaximised = runtime.WindowIsMaximised
 	}
-	return &App{
-		deps:      deps,
-		sessions:  make(map[string]*managedTerminal),
-		idleStops: make(map[string]struct{}),
-		busyEnvs:  make(map[string]int),
-	}
+	return deps
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -580,35 +595,12 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	updated := environmentConfigFromUI(config, existing)
-	if _, err := updated.Idle.Resolve(); err != nil {
+	updated, err := a.updatedEnvironmentConfig(config, existing)
+	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	if updated.Remote && strings.TrimSpace(updated.CloudProviderAlias) != "" {
-		if _, ok, err := a.linkedCloudContext(updated); err != nil {
-			return uiEnvironmentConfig{}, err
-		} else if ok {
-			updated.ManagedCloud = true
-		}
-	}
-	if existing.Remote && strings.TrimSpace(updated.CloudProviderAlias) != strings.TrimSpace(existing.CloudProviderAlias) {
-		result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
-			Tenant:      selection.Tenant,
-			Environment: selection.Environment,
-		})
-		if err != nil {
-			return uiEnvironmentConfig{}, err
-		}
-		ctx := a.ctx
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		if err := a.ensureMCPAvailable(ctx, result); err != nil {
-			return uiEnvironmentConfig{}, err
-		}
-		if _, err := a.deps.setRemoteCloudAlias(ctx, mcpEndpointForOpenResult(result), selection.Tenant, selection.Environment, updated.CloudProviderAlias); err != nil {
-			return uiEnvironmentConfig{}, err
-		}
+	if err := a.saveRemoteCloudAlias(selection, existing, updated); err != nil {
+		return uiEnvironmentConfig{}, err
 	}
 	if err := a.deps.store.SaveEnvConfig(selection.Tenant, updated); err != nil {
 		return uiEnvironmentConfig{}, err
@@ -618,6 +610,43 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 		return uiEnvironmentConfig{}, err
 	}
 	return a.environmentConfigToUI(updated, selection.Environment, ports)
+}
+
+func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing eruncommon.EnvConfig) (eruncommon.EnvConfig, error) {
+	updated := environmentConfigFromUI(config, existing)
+	if _, err := updated.Idle.Resolve(); err != nil {
+		return eruncommon.EnvConfig{}, err
+	}
+	if updated.Remote && strings.TrimSpace(updated.CloudProviderAlias) != "" {
+		if _, ok, err := a.linkedCloudContext(updated); err != nil {
+			return eruncommon.EnvConfig{}, err
+		} else if ok {
+			updated.ManagedCloud = true
+		}
+	}
+	return updated, nil
+}
+
+func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated eruncommon.EnvConfig) error {
+	if !existing.Remote || strings.TrimSpace(updated.CloudProviderAlias) == strings.TrimSpace(existing.CloudProviderAlias) {
+		return nil
+	}
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+	})
+	if err != nil {
+		return err
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := a.ensureMCPAvailable(ctx, result); err != nil {
+		return err
+	}
+	_, err = a.deps.setRemoteCloudAlias(ctx, mcpEndpointForOpenResult(result), selection.Tenant, selection.Environment, updated.CloudProviderAlias)
+	return err
 }
 
 func labelRuntimeVersionSuggestions(source, image string, suggestions []uiVersion) []uiVersion {

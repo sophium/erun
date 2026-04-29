@@ -185,7 +185,7 @@ func RunDeploySpec(ctx Context, execution DeploySpec, build DockerImageBuilderFu
 }
 
 func ResolveDeploySpec(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget, componentName, versionOverride string) (DeploySpec, error) {
-	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	versionOverride = resolveDeployVersionOverride(target, versionOverride)
 
 	resolvedTarget, err := resolveDeployTarget(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
@@ -196,7 +196,7 @@ func ResolveDeploySpec(store DeployStore, findProjectRoot ProjectFinderFunc, res
 }
 
 func ResolveCurrentDeploySpecs(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) ([]DeploySpec, error) {
-	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 
 	resolvedTarget, err := resolveDeployTarget(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {
@@ -237,7 +237,7 @@ func resolveDeploySpecForOpenResult(store DeployStore, findProjectRoot ProjectFi
 }
 
 func resolveDeploySpecForContext(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, deployContext KubernetesDeployContext, versionOverride string, allowLocalBuilds bool) (DeploySpec, error) {
-	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	target = applyDeployKubernetesContext(store, target)
 
 	builds := make([]DockerBuildSpec, 0, 2)
@@ -571,17 +571,6 @@ func loadDefaultTenant(store DeployStore) (string, error) {
 		return "", ErrDefaultTenantNotConfigured
 	}
 	return toolConfig.DefaultTenant, nil
-}
-
-func loadDefaultEnvironment(store DeployStore, tenant string) (string, error) {
-	tenantConfig, _, err := store.LoadTenantConfig(tenant)
-	if err != nil {
-		return "", err
-	}
-	if tenantConfig.DefaultEnvironment == "" {
-		return "", ErrDefaultEnvironmentNotConfigured
-	}
-	return tenantConfig.DefaultEnvironment, nil
 }
 
 func newHelmDeploySpec(target OpenResult, deployContext KubernetesDeployContext, versionOverride string) (HelmDeploySpec, error) {

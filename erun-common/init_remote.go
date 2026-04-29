@@ -274,14 +274,6 @@ func (s bootstrapRunner) resolveRemoteRepositoryURL(params BootstrapInitParams, 
 	return repositoryURL, nil
 }
 
-func (s bootstrapRunner) resolveRemoteRepositorySpec(params BootstrapInitParams, tenant, envName, repositoryURL, codeCommitPublicKey string) (remoteRepositorySpec, error) {
-	spec, err := parseRemoteRepositorySpec(repositoryURL)
-	if err != nil {
-		return remoteRepositorySpec{}, err
-	}
-	return s.resolveRemoteRepositoryCredentials(params, tenant, envName, spec, codeCommitPublicKey)
-}
-
 func (s bootstrapRunner) resolveRemoteRepositoryCredentials(params BootstrapInitParams, tenant, envName string, spec remoteRepositorySpec, codeCommitPublicKey string) (remoteRepositorySpec, error) {
 	if spec.CodeCommitHost == "" || spec.CodeCommitSSHKeyID != "" {
 		return spec, nil

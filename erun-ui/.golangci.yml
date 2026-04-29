@@ -4,6 +4,9 @@ run:
   timeout: 3m
   tests: true
 linters:
+  exclusions:
+    paths:
+      - ^frontend/node_modules/
   enable:
     - errcheck
     - govet
@@ -26,4 +29,4 @@ formatters:
     - gofumpt
   settings:
     gofumpt:
-      module-path: github.com/sophium/erun/erun-common
+      module-path: github.com/sophium/erun/erun-ui

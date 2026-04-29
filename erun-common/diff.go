@@ -240,10 +240,7 @@ func parseGitDiffFiles(raw string) []DiffFile {
 					Content: line,
 				})
 			default:
-				content := line
-				if strings.HasPrefix(content, " ") {
-					content = strings.TrimPrefix(content, " ")
-				}
+				content := strings.TrimPrefix(line, " ")
 				currentHunk.Lines = append(currentHunk.Lines, DiffLine{
 					Kind:    "context",
 					Content: content,

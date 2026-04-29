@@ -418,12 +418,6 @@ func pendingCloudContextInstanceProfileAssociationID(ctx Context, deps CloudCont
 	})
 }
 
-func anyCloudContextInstanceProfileAssociationID(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, instanceID string) (string, error) {
-	return describeCloudContextInstanceProfileAssociationID(ctx, deps, provider, region, []string{
-		"Name=instance-id,Values=" + instanceID,
-	})
-}
-
 func describeCloudContextInstanceProfileAssociationID(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region string, filters []string) (string, error) {
 	args := []string{
 		"ec2", "describe-iam-instance-profile-associations",
@@ -902,14 +896,6 @@ func isExistingInstanceProfileAssociationError(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "incorrectstate") && strings.Contains(message, "existing association")
-}
-
-func isInactiveInstanceProfileAssociationError(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "incorrectstate") && strings.Contains(message, "not the active association")
 }
 
 func describeCloudContextPublicIP(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, instanceID string) (string, error) {

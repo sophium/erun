@@ -994,7 +994,9 @@ func fetchReleaseArchiveSHA256(client *http.Client, url string) (string, bool, e
 	if err != nil {
 		return "", true, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		retry := resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError

@@ -44,25 +44,7 @@ type bootstrapTestRunner struct {
 }
 
 func (r bootstrapTestRunner) Run(params BootstrapInitParams) (BootstrapInitResult, error) {
-	return RunBootstrapInitWithDependencies(BootstrapInitDependencies{
-		Store:                     r.Store,
-		FindProjectRoot:           r.FindProjectRoot,
-		GetWorkingDir:             r.GetWorkingDir,
-		SelectTenant:              r.SelectTenant,
-		Confirm:                   r.Confirm,
-		PromptKubernetesContext:   r.PromptKubernetesContext,
-		PromptContainerRegistry:   r.PromptContainerRegistry,
-		PromptRemoteRepositoryURL: r.PromptRemoteRepositoryURL,
-		PromptCodeCommitSSHKeyID:  r.PromptCodeCommitSSHKeyID,
-		EnsureKubernetesNamespace: r.EnsureKubernetesNamespace,
-		LoadProjectConfig:         r.LoadProjectConfig,
-		SaveProjectConfig:         r.SaveProjectConfig,
-		WaitForRemoteRuntime:      r.WaitForRemoteRuntime,
-		RunRemoteCommand:          r.RunRemoteCommand,
-		DeployHelmChart:           r.DeployHelmChart,
-		Sleep:                     r.Sleep,
-		Context:                   r.Context,
-	}, params)
+	return RunBootstrapInitWithDependencies(BootstrapInitDependencies(r), params)
 }
 
 func (r bootstrapTestRunner) saveProjectContainerRegistry(projectRoot, envName, registry string) error {

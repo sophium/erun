@@ -136,40 +136,9 @@ func ResolveEnvironmentIdleStatus(config EnvironmentIdleConfig, activity map[str
 		return EnvironmentIdleStatus{}, err
 	}
 
-	markers := []EnvironmentIdleMarker{{
-		Name:             "working-hours",
-		Idle:             outsideWorkingHours,
-		Reason:           workingHoursReason(outsideWorkingHours, policy.WorkingHours),
-		SecondsRemaining: secondsUntilWorkingHoursEnd,
-	}}
-	for _, kind := range environmentActivityKinds {
-		snapshot := activity[kind]
-		markers = append(markers, activityIdleMarker(kind, snapshot, policy, now))
-	}
-
-	secondsUntilStop := int64(0)
-	stopEligible := outsideWorkingHours
-	if !outsideWorkingHours {
-		stopEligible = true
-		for _, marker := range markers {
-			if marker.Name == "working-hours" {
-				continue
-			}
-			if !marker.Idle {
-				stopEligible = false
-				if marker.SecondsRemaining > secondsUntilStop {
-					secondsUntilStop = marker.SecondsRemaining
-				}
-			}
-		}
-	}
-	if stopEligible {
-		secondsUntilStop = 0
-	}
-	stopBlockedReason := ""
-	if !stopEligible {
-		stopBlockedReason = environmentStopBlockedReason(markers)
-	}
+	markers := environmentIdleMarkers(activity, policy, now, outsideWorkingHours, secondsUntilWorkingHoursEnd)
+	stopEligible, secondsUntilStop := environmentStopEligibility(markers, outsideWorkingHours)
+	stopBlockedReason := environmentBlockedReason(markers, stopEligible)
 
 	return EnvironmentIdleStatus{
 		Policy:              policy,
@@ -180,6 +149,48 @@ func ResolveEnvironmentIdleStatus(config EnvironmentIdleConfig, activity map[str
 		Markers:             markers,
 		Activity:            activity,
 	}, nil
+}
+
+func environmentIdleMarkers(activity map[string]EnvironmentActivitySnapshot, policy EnvironmentIdlePolicy, now time.Time, outsideWorkingHours bool, secondsUntilWorkingHoursEnd int64) []EnvironmentIdleMarker {
+	markers := []EnvironmentIdleMarker{{
+		Name:             "working-hours",
+		Idle:             outsideWorkingHours,
+		Reason:           workingHoursReason(outsideWorkingHours, policy.WorkingHours),
+		SecondsRemaining: secondsUntilWorkingHoursEnd,
+	}}
+	for _, kind := range environmentActivityKinds {
+		snapshot := activity[kind]
+		markers = append(markers, activityIdleMarker(kind, snapshot, policy, now))
+	}
+	return markers
+}
+
+func environmentStopEligibility(markers []EnvironmentIdleMarker, outsideWorkingHours bool) (bool, int64) {
+	if outsideWorkingHours {
+		return true, 0
+	}
+	stopEligible := true
+	secondsUntilStop := int64(0)
+	for _, marker := range markers {
+		if marker.Name == "working-hours" || marker.Idle {
+			continue
+		}
+		stopEligible = false
+		if marker.SecondsRemaining > secondsUntilStop {
+			secondsUntilStop = marker.SecondsRemaining
+		}
+	}
+	if stopEligible {
+		return true, 0
+	}
+	return false, secondsUntilStop
+}
+
+func environmentBlockedReason(markers []EnvironmentIdleMarker, stopEligible bool) string {
+	if stopEligible {
+		return ""
+	}
+	return environmentStopBlockedReason(markers)
 }
 
 func ResolveStoredEnvironmentIdleStatus(store EnvironmentIdleStore, tenant, environment string, now time.Time) (EnvironmentIdleStatus, error) {

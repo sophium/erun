@@ -256,7 +256,9 @@ func releaseArchiveSHA256ForTest(t *testing.T, url string) string {
 	if err != nil {
 		t.Fatalf("download %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("download %s: unexpected status %s", url, resp.Status)
 	}
