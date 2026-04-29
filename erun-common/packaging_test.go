@@ -22,121 +22,90 @@ func TestPackageManagerDefinitionsTrackLatestStableTag(t *testing.T) {
 
 	formulaPath := filepath.Join(repoRoot, "Formula", "erun.rb")
 	formulaData, err := os.ReadFile(formulaPath)
-	if err != nil {
-		t.Fatalf("read formula: %v", err)
-	}
+	requireNoError(t, err, "read formula")
 	formula := string(formulaData)
-	if !strings.Contains(formula, `url "https://github.com/sophium/erun/archive/refs/tags/`+latestTag+`.tar.gz"`) {
-		t.Fatalf("formula does not target latest stable tag %s:\n%s", latestTag, formula)
-	}
-	if !strings.Contains(formula, `bin/"erun"`) || !strings.Contains(formula, `bin/"emcp"`) {
-		t.Fatalf("formula does not build both executables:\n%s", formula)
-	}
-	if !strings.Contains(formula, `depends_on "node" => :build`) {
-		t.Fatalf("formula missing node dependency for erun-app frontend build:\n%s", formula)
-	}
-	if !strings.Contains(formula, `depends_on "yarn" => :build`) {
-		t.Fatalf("formula missing yarn dependency for erun-app frontend build:\n%s", formula)
-	}
-	if !strings.Contains(formula, `system "yarn", "install", "--frozen-lockfile"`) {
-		t.Fatalf("formula does not install erun-app frontend dependencies:\n%s", formula)
-	}
-	if !strings.Contains(formula, `go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2`) {
-		t.Fatalf("formula does not resolve the Wails generator version from go.mod:\n%s", formula)
-	}
-	if !strings.Contains(formula, `system "go", "install", "github.com/wailsapp/wails/v2/cmd/wails@#{wails_version}"`) {
-		t.Fatalf("formula does not install the Wails generator:\n%s", formula)
-	}
-	if !strings.Contains(formula, `system wails_bin, "generate", "module"`) {
-		t.Fatalf("formula does not generate erun-app frontend bindings:\n%s", formula)
-	}
-	if !strings.Contains(formula, `system "yarn", "build"`) {
-		t.Fatalf("formula does not build erun-app frontend assets:\n%s", formula)
-	}
-	formulaSHA := regexp.MustCompile(`(?m)^  sha256 "([0-9a-f]+)"$`).FindStringSubmatch(formula)
-	if len(formulaSHA) != 2 {
-		t.Fatalf("formula sha256 not found:\n%s", formula)
-	}
-	gotFormulaSHA := releaseArchiveSHA256ForTest(t, "https://github.com/sophium/erun/archive/refs/tags/"+latestTag+".tar.gz")
-	if formulaSHA[1] != gotFormulaSHA {
-		t.Fatalf("formula sha256 = %q, want %q", formulaSHA[1], gotFormulaSHA)
-	}
+	requireHomebrewFormulaTracksLatestTag(t, formula, latestTag)
 
 	scoopPath := filepath.Join(repoRoot, "bucket", "erun.json")
 	scoopData, err := os.ReadFile(scoopPath)
-	if err != nil {
-		t.Fatalf("read scoop manifest: %v", err)
-	}
+	requireNoError(t, err, "read scoop manifest")
 
-	var manifest struct {
-		Version    string `json:"version"`
-		URL        string `json:"url"`
-		Hash       string `json:"hash"`
-		ExtractDir string `json:"extract_dir"`
-		Depends    []string
-		Bin        []string
-		Installer  struct {
-			Script []string `json:"script"`
-		} `json:"installer"`
-	}
-	if err := json.Unmarshal(scoopData, &manifest); err != nil {
-		t.Fatalf("unmarshal scoop manifest: %v", err)
-	}
+	manifest := unmarshalScoopManifest(t, scoopData)
+	requireScoopManifestTracksLatestTag(t, manifest, latestTag, latestVersion)
+	requireScoopInstallerBuildsDesktopApp(t, strings.Join(manifest.Installer.Script, "\n"))
+}
 
-	if manifest.Version != latestVersion {
-		t.Fatalf("scoop version = %q, want %q", manifest.Version, latestVersion)
-	}
+type scoopManifestForTest struct {
+	Version    string `json:"version"`
+	URL        string `json:"url"`
+	Hash       string `json:"hash"`
+	ExtractDir string `json:"extract_dir"`
+	Depends    []string
+	Bin        []string
+	Installer  struct {
+		Script []string `json:"script"`
+	} `json:"installer"`
+}
+
+func requireHomebrewFormulaTracksLatestTag(t *testing.T, formula, latestTag string) {
+	t.Helper()
+	requireStringContains(t, formula, `url "https://github.com/sophium/erun/archive/refs/tags/`+latestTag+`.tar.gz"`, "formula does not target latest stable tag "+latestTag)
+	requireStringContains(t, formula, `bin/"erun"`, "formula does not build erun")
+	requireStringContains(t, formula, `bin/"emcp"`, "formula does not build emcp")
+	requireStringContains(t, formula, `depends_on "node" => :build`, "formula missing node dependency")
+	requireStringContains(t, formula, `depends_on "yarn" => :build`, "formula missing yarn dependency")
+	requireStringContains(t, formula, `system "yarn", "install", "--frozen-lockfile"`, "formula does not install frontend dependencies")
+	requireStringContains(t, formula, `go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2`, "formula does not resolve Wails version")
+	requireStringContains(t, formula, `system "go", "install", "github.com/wailsapp/wails/v2/cmd/wails@#{wails_version}"`, "formula does not install Wails")
+	requireStringContains(t, formula, `system wails_bin, "generate", "module"`, "formula does not generate frontend bindings")
+	requireStringContains(t, formula, `system "yarn", "build"`, "formula does not build frontend assets")
+	requireFormulaChecksum(t, formula, latestTag)
+}
+
+func requireFormulaChecksum(t *testing.T, formula, latestTag string) {
+	t.Helper()
+	formulaSHA := regexp.MustCompile(`(?m)^  sha256 "([0-9a-f]+)"$`).FindStringSubmatch(formula)
+	requireEqual(t, len(formulaSHA), 2, "formula sha256 match count")
+	gotFormulaSHA := releaseArchiveSHA256ForTest(t, "https://github.com/sophium/erun/archive/refs/tags/"+latestTag+".tar.gz")
+	requireEqual(t, formulaSHA[1], gotFormulaSHA, "formula sha256")
+}
+
+func unmarshalScoopManifest(t *testing.T, data []byte) scoopManifestForTest {
+	t.Helper()
+	var manifest scoopManifestForTest
+	requireNoError(t, json.Unmarshal(data, &manifest), "unmarshal scoop manifest")
+	return manifest
+}
+
+func requireScoopManifestTracksLatestTag(t *testing.T, manifest scoopManifestForTest, latestTag, latestVersion string) {
+	t.Helper()
+	requireEqual(t, manifest.Version, latestVersion, "scoop version")
 	wantZipURL := "https://github.com/sophium/erun/archive/refs/tags/" + latestTag + ".zip"
-	if manifest.URL != wantZipURL {
-		t.Fatalf("scoop url = %q, want %q", manifest.URL, wantZipURL)
-	}
-	gotScoopSHA := releaseArchiveSHA256ForTest(t, manifest.URL)
-	if manifest.Hash != gotScoopSHA {
-		t.Fatalf("scoop hash = %q, want %q", manifest.Hash, gotScoopSHA)
-	}
-	if manifest.ExtractDir != "erun-"+latestVersion {
-		t.Fatalf("scoop extract_dir = %q, want %q", manifest.ExtractDir, "erun-"+latestVersion)
-	}
-	if !containsString(manifest.Depends, "go") {
-		t.Fatalf("scoop manifest missing go dependency: %+v", manifest.Depends)
-	}
-	if !containsString(manifest.Depends, "mingw") {
-		t.Fatalf("scoop manifest missing mingw dependency for erun-app.exe: %+v", manifest.Depends)
-	}
-	if !containsString(manifest.Depends, "nodejs") {
-		t.Fatalf("scoop manifest missing nodejs dependency for erun-app frontend build: %+v", manifest.Depends)
-	}
-	if !containsString(manifest.Depends, "yarn") {
-		t.Fatalf("scoop manifest missing yarn dependency for erun-app frontend build: %+v", manifest.Depends)
-	}
-	if !containsString(manifest.Bin, "erun.exe") || !containsString(manifest.Bin, "emcp.exe") {
-		t.Fatalf("scoop manifest does not shim both executables: %+v", manifest.Bin)
-	}
-	script := strings.Join(manifest.Installer.Script, "\n")
-	if !strings.Contains(script, `go build -trimpath -ldflags $cliLdflags -o "$dir\erun.exe" .`) {
-		t.Fatalf("scoop installer does not build erun.exe:\n%s", script)
-	}
-	if !strings.Contains(script, `go build -trimpath -ldflags $mcpLdflags -o "$dir\emcp.exe" ./cmd/emcp`) {
-		t.Fatalf("scoop installer does not build emcp.exe:\n%s", script)
-	}
-	if !strings.Contains(script, `building erun-app.exe requires a C compiler such as MinGW for the Wails CGO build`) {
-		t.Fatalf("scoop installer does not explain the Wails CGO compiler requirement:\n%s", script)
-	}
-	if !strings.Contains(script, `yarn install --frozen-lockfile`) {
-		t.Fatalf("scoop installer does not install erun-app frontend dependencies:\n%s", script)
-	}
-	if !strings.Contains(script, `go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2`) {
-		t.Fatalf("scoop installer does not resolve the Wails generator version from go.mod:\n%s", script)
-	}
-	if !strings.Contains(script, `go install "github.com/wailsapp/wails/v2/cmd/wails@$wailsVersion"`) {
-		t.Fatalf("scoop installer does not install the Wails generator:\n%s", script)
-	}
-	if !strings.Contains(script, `generate module`) {
-		t.Fatalf("scoop installer does not generate erun-app frontend bindings:\n%s", script)
-	}
-	if !strings.Contains(script, `yarn build`) {
-		t.Fatalf("scoop installer does not build erun-app frontend assets:\n%s", script)
-	}
+	requireEqual(t, manifest.URL, wantZipURL, "scoop url")
+	requireEqual(t, manifest.Hash, releaseArchiveSHA256ForTest(t, manifest.URL), "scoop hash")
+	requireEqual(t, manifest.ExtractDir, "erun-"+latestVersion, "scoop extract_dir")
+	requireScoopManifestCommands(t, manifest)
+}
+
+func requireScoopManifestCommands(t *testing.T, manifest scoopManifestForTest) {
+	t.Helper()
+	requireCondition(t, containsString(manifest.Depends, "go"), "scoop manifest missing go dependency: %+v", manifest.Depends)
+	requireCondition(t, containsString(manifest.Depends, "mingw"), "scoop manifest missing mingw dependency: %+v", manifest.Depends)
+	requireCondition(t, containsString(manifest.Depends, "nodejs"), "scoop manifest missing nodejs dependency: %+v", manifest.Depends)
+	requireCondition(t, containsString(manifest.Depends, "yarn"), "scoop manifest missing yarn dependency: %+v", manifest.Depends)
+	requireCondition(t, containsString(manifest.Bin, "erun.exe") && containsString(manifest.Bin, "emcp.exe"), "scoop manifest does not shim both executables: %+v", manifest.Bin)
+}
+
+func requireScoopInstallerBuildsDesktopApp(t *testing.T, script string) {
+	t.Helper()
+	requireStringContains(t, script, `go build -trimpath -ldflags $cliLdflags -o "$dir\erun.exe" .`, "scoop installer does not build erun.exe")
+	requireStringContains(t, script, `go build -trimpath -ldflags $mcpLdflags -o "$dir\emcp.exe" ./cmd/emcp`, "scoop installer does not build emcp.exe")
+	requireStringContains(t, script, `building erun-app.exe requires a C compiler such as MinGW for the Wails CGO build`, "scoop installer does not explain Wails CGO compiler requirement")
+	requireStringContains(t, script, `yarn install --frozen-lockfile`, "scoop installer does not install frontend dependencies")
+	requireStringContains(t, script, `go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2`, "scoop installer does not resolve Wails version")
+	requireStringContains(t, script, `go install "github.com/wailsapp/wails/v2/cmd/wails@$wailsVersion"`, "scoop installer does not install Wails")
+	requireStringContains(t, script, `generate module`, "scoop installer does not generate frontend bindings")
+	requireStringContains(t, script, `yarn build`, "scoop installer does not build frontend assets")
 }
 
 func TestAptBuildScriptBuildsDebianPackageForBothExecutables(t *testing.T) {
@@ -174,38 +143,23 @@ func TestLinuxReleaseScriptPromptsForGitHubLogin(t *testing.T) {
 	scriptPath := filepath.Join(repoRoot, "erun-devops", "linux", "erun-cli", "release.sh")
 
 	scriptData, err := os.ReadFile(scriptPath)
-	if err != nil {
-		t.Fatalf("read linux release script: %v", err)
-	}
+	requireNoError(t, err, "read linux release script")
 	script := string(scriptData)
 
-	if !strings.Contains(script, `if ! gh auth status >/dev/null 2>&1; then`) {
-		t.Fatalf("linux release script does not prompt for gh auth login when needed:\n%s", script)
-	}
-	if !strings.Contains(script, `gh auth login --hostname github.com --git-protocol ssh --web --skip-ssh-key --scopes admin:public_key`) {
-		t.Fatalf("linux release script does not request the admin:public_key scope during login:\n%s", script)
-	}
-	if !strings.Contains(script, `printf '%s-%s\n' "${ERUN_TENANT}" "${ERUN_ENVIRONMENT}"`) {
-		t.Fatalf("linux release script does not derive the SSH key title from tenant and environment:\n%s", script)
-	}
-	if !strings.Contains(script, `gh auth refresh --hostname github.com --scopes admin:public_key`) {
-		t.Fatalf("linux release script does not refresh the admin:public_key scope when needed:\n%s", script)
-	}
-	if !strings.Contains(script, `gh ssh-key add "$public_key_path" --title "$key_title"`) {
-		t.Fatalf("linux release script does not upload the SSH key with the resolved title:\n%s", script)
-	}
-	if !strings.Contains(script, `grep -Fq "$public_key_data" <<<"$uploaded_keys"`) {
-		t.Fatalf("linux release script does not skip SSH key upload when the key is already present:\n%s", script)
-	}
-	if !strings.Contains(script, `git -C "$repo_root" ls-remote --exit-code --tags origin "refs/tags/$tag"`) {
-		t.Fatalf("linux release script does not check whether the release tag already exists on origin:\n%s", script)
-	}
-	if !strings.Contains(script, `git -C "$repo_root" push origin "$tag"`) {
-		t.Fatalf("linux release script does not push a missing release tag to origin before creating the release:\n%s", script)
-	}
-	if !strings.Contains(script, `gh release upload "$tag" "$artifact_path" --clobber`) {
-		t.Fatalf("linux release script does not upload release artifacts:\n%s", script)
-	}
+	requireLinuxReleaseScriptGitHubFlow(t, script)
+}
+
+func requireLinuxReleaseScriptGitHubFlow(t *testing.T, script string) {
+	t.Helper()
+	requireStringContains(t, script, `if ! gh auth status >/dev/null 2>&1; then`, "linux release script does not prompt for gh auth login")
+	requireStringContains(t, script, `gh auth login --hostname github.com --git-protocol ssh --web --skip-ssh-key --scopes admin:public_key`, "linux release script does not request admin:public_key scope")
+	requireStringContains(t, script, `printf '%s-%s\n' "${ERUN_TENANT}" "${ERUN_ENVIRONMENT}"`, "linux release script does not derive SSH key title")
+	requireStringContains(t, script, `gh auth refresh --hostname github.com --scopes admin:public_key`, "linux release script does not refresh admin:public_key scope")
+	requireStringContains(t, script, `gh ssh-key add "$public_key_path" --title "$key_title"`, "linux release script does not upload SSH key")
+	requireStringContains(t, script, `grep -Fq "$public_key_data" <<<"$uploaded_keys"`, "linux release script does not skip existing SSH key")
+	requireStringContains(t, script, `git -C "$repo_root" ls-remote --exit-code --tags origin "refs/tags/$tag"`, "linux release script does not check origin tag")
+	requireStringContains(t, script, `git -C "$repo_root" push origin "$tag"`, "linux release script does not push missing tag")
+	requireStringContains(t, script, `gh release upload "$tag" "$artifact_path" --clobber`, "linux release script does not upload artifacts")
 }
 
 func repoRootForPackagingTest(t *testing.T) string {

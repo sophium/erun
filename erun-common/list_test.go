@@ -20,34 +20,15 @@ func (s listStore) ListEnvConfigs(tenant string) ([]EnvConfig, error) {
 
 func TestResolveListResultUsesCurrentDirectoryTenantBeforeDefault(t *testing.T) {
 	configDir, err := ERunConfigDir()
-	if err != nil {
-		t.Fatalf("ERunConfigDir failed: %v", err)
-	}
+	requireNoError(t, err, "ERunConfigDir failed")
 
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chdir(originalDir); err != nil {
-			t.Fatalf("restore working directory: %v", err)
-		}
-	})
+	restoreWorkingDirAfterTest(t)
 
 	tenantAPath := filepath.Join(t.TempDir(), "tenant-a")
 	tenantBPath := filepath.Join(t.TempDir(), "tenant-b")
 	subDir := filepath.Join(tenantBPath, "nested")
-	for _, dir := range []string{tenantAPath, tenantBPath, subDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("mkdir %q: %v", dir, err)
-		}
-	}
-	if err := os.MkdirAll(filepath.Join(tenantBPath, ".git"), 0o755); err != nil {
-		t.Fatalf("mkdir .git: %v", err)
-	}
-	if err := os.Chdir(subDir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	mkdirAllForTest(t, tenantAPath, tenantBPath, subDir, filepath.Join(tenantBPath, ".git"))
+	requireNoError(t, os.Chdir(subDir), "chdir")
 
 	store := listStore{
 		openStore: openStore{
@@ -75,54 +56,44 @@ func TestResolveListResultUsesCurrentDirectoryTenantBeforeDefault(t *testing.T) 
 		t.Fatalf("ResolveListResult failed: %v", err)
 	}
 
-	if result.Defaults.Tenant != "tenant-a" || result.Defaults.Environment != "local" {
-		t.Fatalf("unexpected defaults: %+v", result.Defaults)
-	}
-	if result.ConfigDirectory != configDir {
-		t.Fatalf("unexpected config directory: %+v", result)
-	}
-	if result.CurrentDirectory.Repo != "tenant-b" || result.CurrentDirectory.ConfiguredTenant != "tenant-b" {
-		t.Fatalf("unexpected current directory: %+v", result.CurrentDirectory)
-	}
-	if result.CurrentDirectory.Effective == nil {
-		t.Fatalf("expected effective target, got %+v", result.CurrentDirectory)
-	}
-	if result.CurrentDirectory.Effective.Tenant != "tenant-b" || result.CurrentDirectory.Effective.Environment != "dev" {
-		t.Fatalf("unexpected effective target: %+v", result.CurrentDirectory.Effective)
-	}
-	if result.CurrentDirectory.Effective.Snapshot {
-		t.Fatalf("expected effective snapshot to default off, got %+v", result.CurrentDirectory.Effective)
-	}
-	if len(result.Tenants) != 2 {
-		t.Fatalf("unexpected tenants: %+v", result.Tenants)
+	requireCurrentDirectoryListResult(t, result, configDir)
+}
+
+func restoreWorkingDirAfterTest(t *testing.T) {
+	t.Helper()
+	originalDir, err := os.Getwd()
+	requireNoError(t, err, "getwd")
+	t.Cleanup(func() {
+		requireNoError(t, os.Chdir(originalDir), "restore working directory")
+	})
+}
+
+func mkdirAllForTest(t *testing.T, dirs ...string) {
+	t.Helper()
+	for _, dir := range dirs {
+		requireNoError(t, os.MkdirAll(dir, 0o755), "mkdir "+dir)
 	}
 }
 
+func requireCurrentDirectoryListResult(t *testing.T, result ListResult, configDir string) {
+	t.Helper()
+	requireCondition(t, result.Defaults.Tenant == "tenant-a" && result.Defaults.Environment == "local", "unexpected defaults: %+v", result.Defaults)
+	requireEqual(t, result.ConfigDirectory, configDir, "config directory")
+	requireCondition(t, result.CurrentDirectory.Repo == "tenant-b" && result.CurrentDirectory.ConfiguredTenant == "tenant-b", "unexpected current directory: %+v", result.CurrentDirectory)
+	requireCondition(t, result.CurrentDirectory.Effective != nil, "expected effective target, got %+v", result.CurrentDirectory)
+	requireCondition(t, result.CurrentDirectory.Effective.Tenant == "tenant-b" && result.CurrentDirectory.Effective.Environment == "dev", "unexpected effective target: %+v", result.CurrentDirectory.Effective)
+	requireCondition(t, !result.CurrentDirectory.Effective.Snapshot, "expected effective snapshot to default off, got %+v", result.CurrentDirectory.Effective)
+	requireEqual(t, len(result.Tenants), 2, "tenant count")
+}
+
 func TestResolveListResultFallsBackToDefaultWhenRepoIsNotConfiguredTenant(t *testing.T) {
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chdir(originalDir); err != nil {
-			t.Fatalf("restore working directory: %v", err)
-		}
-	})
+	restoreWorkingDirAfterTest(t)
 
 	repoRoot := filepath.Join(t.TempDir(), "frs")
 	subDir := filepath.Join(repoRoot, "nested")
 	defaultRepo := filepath.Join(t.TempDir(), "tenant-a")
-	for _, dir := range []string{defaultRepo, subDir} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("mkdir %q: %v", dir, err)
-		}
-	}
-	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
-		t.Fatalf("mkdir .git: %v", err)
-	}
-	if err := os.Chdir(subDir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	mkdirAllForTest(t, defaultRepo, subDir, filepath.Join(repoRoot, ".git"))
+	requireNoError(t, os.Chdir(subDir), "chdir")
 
 	store := listStore{
 		openStore: openStore{
@@ -143,42 +114,25 @@ func TestResolveListResultFallsBackToDefaultWhenRepoIsNotConfiguredTenant(t *tes
 		UseDefaultTenant:      true,
 		UseDefaultEnvironment: true,
 	})
-	if err != nil {
-		t.Fatalf("ResolveListResult failed: %v", err)
-	}
+	requireNoError(t, err, "ResolveListResult failed")
 
-	if result.CurrentDirectory.Repo != "frs" || result.CurrentDirectory.ConfiguredTenant != "" {
-		t.Fatalf("unexpected current directory: %+v", result.CurrentDirectory)
-	}
-	if result.CurrentDirectory.Effective == nil {
-		t.Fatalf("expected effective target, got %+v", result.CurrentDirectory)
-	}
-	if result.CurrentDirectory.Effective.Tenant != "tenant-a" || result.CurrentDirectory.Effective.Environment != "dev" {
-		t.Fatalf("unexpected effective target: %+v", result.CurrentDirectory.Effective)
-	}
-	if result.CurrentDirectory.Effective.Snapshot {
-		t.Fatalf("expected effective snapshot to default off, got %+v", result.CurrentDirectory.Effective)
-	}
+	requireFallbackListResult(t, result)
+}
+
+func requireFallbackListResult(t *testing.T, result ListResult) {
+	t.Helper()
+	requireCondition(t, result.CurrentDirectory.Repo == "frs" && result.CurrentDirectory.ConfiguredTenant == "", "unexpected current directory: %+v", result.CurrentDirectory)
+	requireCondition(t, result.CurrentDirectory.Effective != nil, "expected effective target, got %+v", result.CurrentDirectory)
+	requireCondition(t, result.CurrentDirectory.Effective.Tenant == "tenant-a" && result.CurrentDirectory.Effective.Environment == "dev", "unexpected effective target: %+v", result.CurrentDirectory.Effective)
+	requireCondition(t, !result.CurrentDirectory.Effective.Snapshot, "expected effective snapshot to default off, got %+v", result.CurrentDirectory.Effective)
 }
 
 func TestResolveListResultUsesEffectiveKubernetesContextForCurrentDirectoryTarget(t *testing.T) {
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chdir(originalDir); err != nil {
-			t.Fatalf("restore working directory: %v", err)
-		}
-	})
+	restoreWorkingDirAfterTest(t)
 
 	repoRoot := filepath.Join(t.TempDir(), "tenant-a")
-	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
-		t.Fatalf("mkdir .git: %v", err)
-	}
-	if err := os.Chdir(repoRoot); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	mkdirAllForTest(t, filepath.Join(repoRoot, ".git"))
+	requireNoError(t, os.Chdir(repoRoot), "chdir")
 
 	store := listStore{
 		openStore: openStore{
@@ -205,21 +159,16 @@ func TestResolveListResultUsesEffectiveKubernetesContextForCurrentDirectoryTarge
 		UseDefaultTenant:      true,
 		UseDefaultEnvironment: true,
 	})
-	if err != nil {
-		t.Fatalf("ResolveListResult failed: %v", err)
-	}
-	if result.CurrentDirectory.Effective == nil {
-		t.Fatalf("expected effective target, got %+v", result.CurrentDirectory)
-	}
-	if result.CurrentDirectory.Effective.KubernetesContext != "docker-desktop" {
-		t.Fatalf("unexpected effective kubernetes context: %+v", result.CurrentDirectory.Effective)
-	}
-	if result.CurrentDirectory.Effective.Snapshot {
-		t.Fatalf("expected effective snapshot to default off, got %+v", result.CurrentDirectory.Effective)
-	}
-	if got := result.Tenants[0].Environments[0].KubernetesContext; got != "rancher-desktop" {
-		t.Fatalf("expected configured tenant environment context to remain unchanged, got %q", got)
-	}
+	requireNoError(t, err, "ResolveListResult failed")
+	requireEffectiveKubernetesListResult(t, result)
+}
+
+func requireEffectiveKubernetesListResult(t *testing.T, result ListResult) {
+	t.Helper()
+	requireCondition(t, result.CurrentDirectory.Effective != nil, "expected effective target, got %+v", result.CurrentDirectory)
+	requireEqual(t, result.CurrentDirectory.Effective.KubernetesContext, "docker-desktop", "effective kubernetes context")
+	requireCondition(t, !result.CurrentDirectory.Effective.Snapshot, "expected effective snapshot to default off, got %+v", result.CurrentDirectory.Effective)
+	requireEqual(t, result.Tenants[0].Environments[0].KubernetesContext, "rancher-desktop", "configured tenant environment context")
 }
 
 func TestResolveListResultIncludesSnapshotPreferenceForTenant(t *testing.T) {
@@ -306,25 +255,16 @@ func TestResolveListResultIncludesSSHDConfiguration(t *testing.T) {
 		Tenant:      "tenant-a",
 		Environment: "dev",
 	})
-	if err != nil {
-		t.Fatalf("ResolveListResult failed: %v", err)
-	}
-	if result.CurrentDirectory.Effective == nil || !result.CurrentDirectory.Effective.SSH.Enabled {
-		t.Fatalf("expected effective SSH details, got %+v", result.CurrentDirectory.Effective)
-	}
-	if result.CurrentDirectory.Effective.LocalPorts.RangeStart != 17000 || result.CurrentDirectory.Effective.LocalPorts.SSH != DefaultSSHLocalPort {
-		t.Fatalf("unexpected effective local ports: %+v", result.CurrentDirectory.Effective.LocalPorts)
-	}
-	if result.CurrentDirectory.Effective.SSH.HostAlias != "erun-tenant-a-dev" {
-		t.Fatalf("unexpected effective SSH host alias: %+v", result.CurrentDirectory.Effective.SSH)
-	}
-	if result.CurrentDirectory.Effective.SSH.User != DefaultSSHUser || result.CurrentDirectory.Effective.SSH.LocalPort != DefaultSSHLocalPort {
-		t.Fatalf("unexpected effective SSH info: %+v", result.CurrentDirectory.Effective.SSH)
-	}
-	if got := result.Tenants[0].Environments[0].LocalPorts.RangeEnd; got != 17099 {
-		t.Fatalf("unexpected environment local port range: %+v", result.Tenants[0].Environments[0].LocalPorts)
-	}
-	if got := result.Tenants[0].Environments[0].SSH.WorkspacePath; got != "/home/erun/git/tenant-a" {
-		t.Fatalf("unexpected SSH workspace path: %q", got)
-	}
+	requireNoError(t, err, "ResolveListResult failed")
+	requireSSHDListResult(t, result)
+}
+
+func requireSSHDListResult(t *testing.T, result ListResult) {
+	t.Helper()
+	requireCondition(t, result.CurrentDirectory.Effective != nil && result.CurrentDirectory.Effective.SSH.Enabled, "expected effective SSH details, got %+v", result.CurrentDirectory.Effective)
+	requireCondition(t, result.CurrentDirectory.Effective.LocalPorts.RangeStart == 17000 && result.CurrentDirectory.Effective.LocalPorts.SSH == DefaultSSHLocalPort, "unexpected effective local ports: %+v", result.CurrentDirectory.Effective.LocalPorts)
+	requireEqual(t, result.CurrentDirectory.Effective.SSH.HostAlias, "erun-tenant-a-dev", "effective SSH host alias")
+	requireCondition(t, result.CurrentDirectory.Effective.SSH.User == DefaultSSHUser && result.CurrentDirectory.Effective.SSH.LocalPort == DefaultSSHLocalPort, "unexpected effective SSH info: %+v", result.CurrentDirectory.Effective.SSH)
+	requireEqual(t, result.Tenants[0].Environments[0].LocalPorts.RangeEnd, 17099, "environment local port range")
+	requireEqual(t, result.Tenants[0].Environments[0].SSH.WorkspacePath, "/home/erun/git/tenant-a", "SSH workspace path")
 }
