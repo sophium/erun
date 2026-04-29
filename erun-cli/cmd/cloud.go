@@ -93,38 +93,36 @@ func promptAWSInitParams(promptRunner PromptRunner, params common.InitAWSCloudPr
 	if strings.TrimSpace(params.Profile) != "" {
 		return params, nil
 	}
+	return promptMissingAWSInitParams(promptRunner, params)
+}
+
+func promptMissingAWSInitParams(promptRunner PromptRunner, params common.InitAWSCloudProviderParams) (common.InitAWSCloudProviderParams, error) {
 	var err error
-	if strings.TrimSpace(params.SSOStartURL) == "" {
-		params.SSOStartURL, err = requiredCloudPrompt(promptRunner, "AWS SSO start URL", "")
-		if err != nil {
-			return params, err
-		}
+	params.SSOStartURL, err = promptCloudValueIfEmpty(promptRunner, params.SSOStartURL, "AWS SSO start URL", "")
+	if err != nil {
+		return params, err
 	}
-	if strings.TrimSpace(params.SSORegion) == "" {
-		params.SSORegion, err = requiredCloudPrompt(promptRunner, "AWS SSO region", "")
-		if err != nil {
-			return params, err
-		}
+	params.SSORegion, err = promptCloudValueIfEmpty(promptRunner, params.SSORegion, "AWS SSO region", "")
+	if err != nil {
+		return params, err
 	}
-	if strings.TrimSpace(params.AccountID) == "" {
-		params.AccountID, err = requiredCloudPrompt(promptRunner, "AWS account ID", "")
-		if err != nil {
-			return params, err
-		}
+	params.AccountID, err = promptCloudValueIfEmpty(promptRunner, params.AccountID, "AWS account ID", "")
+	if err != nil {
+		return params, err
 	}
-	if strings.TrimSpace(params.RoleName) == "" {
-		params.RoleName, err = requiredCloudPrompt(promptRunner, "AWS role name", "")
-		if err != nil {
-			return params, err
-		}
+	params.RoleName, err = promptCloudValueIfEmpty(promptRunner, params.RoleName, "AWS role name", "")
+	if err != nil {
+		return params, err
 	}
-	if strings.TrimSpace(params.Region) == "" {
-		params.Region, err = requiredCloudPrompt(promptRunner, "Default AWS region", strings.TrimSpace(params.SSORegion))
-		if err != nil {
-			return params, err
-		}
+	params.Region, err = promptCloudValueIfEmpty(promptRunner, params.Region, "Default AWS region", strings.TrimSpace(params.SSORegion))
+	return params, err
+}
+
+func promptCloudValueIfEmpty(promptRunner PromptRunner, value, label, defaultValue string) (string, error) {
+	if strings.TrimSpace(value) != "" {
+		return value, nil
 	}
-	return params, nil
+	return requiredCloudPrompt(promptRunner, label, defaultValue)
 }
 
 func requiredCloudPrompt(promptRunner PromptRunner, label, defaultValue string) (string, error) {

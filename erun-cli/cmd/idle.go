@@ -55,27 +55,34 @@ func writeIdleStatus(ctx common.Context, status common.EnvironmentIdleStatus) er
 	if err := writeLabeledValue(ctx, "stop eligible", enabledDisabledLabel(status.StopEligible)); err != nil {
 		return err
 	}
-	if strings.TrimSpace(status.StopBlockedReason) != "" {
-		if err := writeLabeledValue(ctx, "stop blocked", status.StopBlockedReason); err != nil {
-			return err
-		}
+	if err := writeOptionalIdleValue(ctx, "stop blocked", status.StopBlockedReason); err != nil {
+		return err
 	}
-	if strings.TrimSpace(status.StopError) != "" {
-		if err := writeLabeledValue(ctx, "stop error", status.StopError); err != nil {
-			return err
-		}
+	if err := writeOptionalIdleValue(ctx, "stop error", status.StopError); err != nil {
+		return err
 	}
 	for _, marker := range status.Markers {
-		value := "active"
-		if marker.Idle {
-			value = "idle"
-		}
-		if marker.SecondsRemaining > 0 {
-			value += fmt.Sprintf(" (%ds)", marker.SecondsRemaining)
-		}
-		if err := writeLabeledValue(ctx, marker.Name, value); err != nil {
+		if err := writeLabeledValue(ctx, marker.Name, idleMarkerValue(marker)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func writeOptionalIdleValue(ctx common.Context, label, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return writeLabeledValue(ctx, label, value)
+}
+
+func idleMarkerValue(marker common.EnvironmentIdleMarker) string {
+	value := "active"
+	if marker.Idle {
+		value = "idle"
+	}
+	if marker.SecondsRemaining > 0 {
+		value += fmt.Sprintf(" (%ds)", marker.SecondsRemaining)
+	}
+	return value
 }
