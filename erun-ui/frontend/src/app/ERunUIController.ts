@@ -5,12 +5,8 @@ import { Terminal } from '@xterm/xterm';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import {
   DeleteEnvironment,
-  InitCloudContext,
   LoadDiff,
-  LoadCloudContextStatuses,
-  LoadCloudProviderStatuses,
   LoadEnvironmentConfig,
-  LoadERunConfig,
   LoadIdleStatus,
   LoadKubernetesContexts,
   LoadState,
@@ -18,14 +14,11 @@ import {
   LoadVersionSuggestions,
   OpenIDE,
   ResizeSession,
-  LoginCloudProvider,
   SavePastedImage,
   SaveEnvironmentConfig,
-  SaveERunConfig,
   SaveTenantConfig,
   SendSessionInput,
   StartCloudContext,
-  StartCloudInitAWSSession,
   StartDeploySession,
   StartDoctorSession,
   StartInitSession,
@@ -34,19 +27,14 @@ import {
   StopCloudContext,
 } from '../../wailsjs/go/main/App';
 import { ClipboardSetText, EventsOn, WindowToggleMaximise } from '../../wailsjs/runtime/runtime';
-import {
-  cloudContextDraftForConfig,
-  idleCloudContextAction,
-  replaceCloudContext,
-  replaceCloudProvider,
-} from './cloudContextState';
 import { fileToBase64, decodeBase64Bytes, isTerminalPasteTarget, pastedImageFiles } from './clipboard';
-import { chooseSelectedDiffPath, cssEscape } from './diffUtils';
+import { chooseSelectedDiffPath } from './diffUtils';
 import {
   normalizedEnvironmentDialogValues,
   rememberEnvironmentDialogSelection,
   validEnvironmentDialogValues,
 } from './environmentDialogState';
+import { GlobalConfigWorkflow } from './globalConfigWorkflow';
 import {
   setDebugOpen as applyDebugOpen,
   setFilesOpen as applyFilesOpen,
@@ -58,6 +46,7 @@ import {
   toggleSidebar as toggleSidebarPanel,
 } from './layoutActions';
 import { readError } from './errors';
+import { scrollSelectedDiffIntoView, visibleDiffPath } from './reviewDiffNavigation';
 import type {
   AppStatusPayload,
   DebugSessionMode,
@@ -78,7 +67,6 @@ import {
   MIN_REVIEW_WIDTH,
   defaultEnvironmentConfig,
   defaultEnvironmentDialog,
-  defaultCloudContextInitInput,
   defaultGlobalConfigDialog,
   defaultManageDialog,
   defaultTenantDialog,
@@ -101,7 +89,6 @@ import {
 } from './storage';
 import {
   classifiedTerminalFailure,
-  cleanTerminalOutput,
   debugOutputBlock,
   decodeDebugOutput,
   failedTerminalExitReason,
@@ -110,12 +97,12 @@ import {
   hiddenSessionBusyMessage,
   ideLabel,
   ideOpenFailure,
-  interactivePromptIndex,
   statusForTerminalOutput,
   successfulTerminalExitReason,
   terminalExitHasTrackedSelection,
   trimDebugOutput,
 } from './terminalStatus';
+import { failedTerminalOutput, filterTerminalDisplayData, rebuildTerminalDisplayBuffer } from './terminalBuffers';
 import { deleteConfirmationValue, normalizeDialogValue, normalizeVersionSuggestions, selectionKey } from './versionSuggestions';
 import type {
   DeleteEnvironmentResult,
@@ -199,6 +186,21 @@ export class ERunUIController {
   private appStatusOff: (() => void) | null = null;
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
   private terminalStatusRetrySelection: UISelection | null = null;
+  private readonly globalConfig = new GlobalConfigWorkflow({
+    state: this.state,
+    sessions: this.sessions,
+    terminalSize: () => ({ cols: this.terminal?.cols || 80, rows: this.terminal?.rows || 24 }),
+    fitTerminal: () => this.fitAddon?.fit(),
+    resetTerminal: () => this.resetTerminal(),
+    emit: () => this.emit(),
+    focusTerminalSoon: () => this.focusTerminalSoon(),
+    queueTerminalResize: () => this.queueTerminalResize(),
+    refreshIdleStatus: () => { void this.refreshIdleStatus(); },
+    refreshKubernetesContexts: () => { void this.refreshKubernetesContexts(); },
+    hideTerminalMessage: () => this.hideTerminalMessage(),
+    showNotification: (kind, message) => this.showNotification(kind, message),
+    showTerminalMessage: (message, busy) => this.showTerminalMessage(message, busy),
+  });
 
   subscribe = (subscriber: () => void): (() => void) => {
     this.subscribers.add(subscriber);
@@ -377,7 +379,7 @@ export class ERunUIController {
   private registerOpenSessionResult(key: string, result: StartSessionResult, runSelection: UISelection, previousSessionId: number): void {
     this.sessions.trackOpenSession(key, result.sessionId, runSelection);
     this.registerDebugSession(result.sessionId, runSelection, 'open');
-    this.rebuildTerminalDisplayBuffer(result.sessionId);
+    rebuildTerminalDisplayBuffer(this.sessions, result.sessionId);
     this.state.sessionId = result.sessionId;
     if (result.sessionId !== previousSessionId) {
       this.resetTerminal();
@@ -872,387 +874,63 @@ export class ERunUIController {
   }
 
   openGlobalConfigDialog(): void {
-    this.state.globalConfigDialog = {
-      open: true,
-      config: {
-        defaultTenant: '',
-        cloudProviders: [],
-        cloudContexts: [],
-      },
-      cloudContextDraft: defaultCloudContextInitInput(),
-      configLoading: true,
-      busy: false,
-      busyAction: '',
-      busyTarget: '',
-      error: '',
-    };
-    this.emit();
-    void this.loadGlobalConfig();
+    this.globalConfig.openDialog();
   }
 
   closeGlobalConfigDialog(): void {
-    if (this.state.globalConfigDialog.busy) {
-      return;
-    }
-    this.state.globalConfigDialog = defaultGlobalConfigDialog();
-    this.emit();
-    this.focusTerminalSoon();
+    this.globalConfig.closeDialog();
   }
 
   updateGlobalConfigDialog(values: Partial<GlobalConfigDialogState>): void {
-    if (this.state.globalConfigDialog.busy) {
-      return;
-    }
-    this.state.globalConfigDialog = {
-      ...this.state.globalConfigDialog,
-      ...values,
-      error: values.error ?? '',
-    };
-    this.emit();
+    this.globalConfig.updateDialog(values);
   }
 
   updateGlobalConfig(values: Partial<UIERunConfig>): void {
-    if (this.state.globalConfigDialog.busy || this.state.globalConfigDialog.configLoading) {
-      return;
-    }
-    this.updateGlobalConfigDialog({
-      config: {
-        ...this.state.globalConfigDialog.config,
-        ...values,
-      },
-    });
+    this.globalConfig.updateConfig(values);
   }
 
   updateCloudContextDraft(values: Partial<UICloudContextInitInput>): void {
-    if (this.state.globalConfigDialog.busy || this.state.globalConfigDialog.configLoading) {
-      return;
-    }
-    this.updateGlobalConfigDialog({
-      cloudContextDraft: {
-        ...this.state.globalConfigDialog.cloudContextDraft,
-        ...values,
-      },
-    });
+    this.globalConfig.updateCloudContextDraft(values);
   }
 
   async loadGlobalConfig(): Promise<void> {
-    const dialog = this.state.globalConfigDialog;
-    if (!dialog.open) {
-      return;
-    }
-    this.state.globalConfigDialog = {
-      ...dialog,
-      configLoading: true,
-      error: '',
-    };
-    this.emit();
-    try {
-      const result = (await LoadERunConfig()) as UIERunConfig;
-      this.state.globalConfigDialog = {
-        ...this.state.globalConfigDialog,
-        config: result,
-        cloudContextDraft: cloudContextDraftForConfig(result, this.state.globalConfigDialog.cloudContextDraft),
-        configLoading: false,
-        error: '',
-      };
-      this.emit();
-    } catch (error) {
-      this.state.globalConfigDialog = {
-        ...this.state.globalConfigDialog,
-        configLoading: false,
-        error: readError(error),
-      };
-      this.emit();
-    }
+    await this.globalConfig.loadConfig();
   }
 
   async refreshCloudProviders(): Promise<void> {
-    const dialog = this.state.globalConfigDialog;
-    if (!dialog.open || dialog.busy) {
-      return;
-    }
-    try {
-      const cloudProviders = await LoadCloudProviderStatuses();
-      this.state.globalConfigDialog = {
-        ...this.state.globalConfigDialog,
-        config: {
-          ...this.state.globalConfigDialog.config,
-          cloudProviders,
-        },
-        error: '',
-      };
-      this.emit();
-    } catch (error) {
-      const message = readError(error);
-      this.state.globalConfigDialog = {
-        ...this.state.globalConfigDialog,
-        error: message,
-      };
-      this.showTerminalMessage(message);
-      this.emit();
-    }
+    await this.globalConfig.refreshCloudProviders();
   }
 
   async refreshCloudContexts(): Promise<void> {
-    const dialog = this.state.globalConfigDialog;
-    if (!dialog.open || dialog.busy) {
-      return;
-    }
-    try {
-      const cloudContexts = await LoadCloudContextStatuses();
-      this.state.globalConfigDialog = {
-        ...this.state.globalConfigDialog,
-        config: {
-          ...this.state.globalConfigDialog.config,
-          cloudContexts,
-        },
-        error: '',
-      };
-      this.emit();
-    } catch (error) {
-      const message = readError(error);
-      this.state.globalConfigDialog = {
-        ...this.state.globalConfigDialog,
-        error: message,
-      };
-      this.showTerminalMessage(message);
-      this.emit();
-    }
+    await this.globalConfig.refreshCloudContexts();
   }
 
   async initCloudContext(): Promise<void> {
-    const dialog = this.state.globalConfigDialog;
-    if (dialog.busy || dialog.configLoading) {
-      return;
-    }
-    this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-context-init', busyTarget: '', error: '' };
-    this.emit();
-    try {
-      const context = (await InitCloudContext(dialog.cloudContextDraft)) as UICloudContextStatus;
-      this.state.globalConfigDialog = {
-        ...this.state.globalConfigDialog,
-        config: {
-          ...this.state.globalConfigDialog.config,
-          cloudContexts: replaceCloudContext(this.state.globalConfigDialog.config.cloudContexts || [], context),
-        },
-        cloudContextDraft: cloudContextDraftForConfig(this.state.globalConfigDialog.config, {
-          ...defaultCloudContextInitInput(),
-          cloudProviderAlias: dialog.cloudContextDraft.cloudProviderAlias,
-          region: dialog.cloudContextDraft.region,
-        }),
-        busy: false,
-        busyAction: '',
-        busyTarget: '',
-        error: '',
-      };
-      this.showTerminalMessage(`Initialized cloud context ${context.kubernetesContext}.`);
-      void this.refreshKubernetesContexts();
-      this.emit();
-    } catch (error) {
-      const message = readError(error);
-      this.state.globalConfigDialog = {
-        ...this.state.globalConfigDialog,
-        busy: false,
-        busyAction: '',
-        busyTarget: '',
-        error: message,
-      };
-      this.showTerminalMessage(message);
-      this.emit();
-    }
+    await this.globalConfig.initCloudContext();
   }
 
   async stopCloudContext(name: string): Promise<void> {
-    await this.updateCloudContextPower(name, StopCloudContext, 'Stopped');
+    await this.globalConfig.stopCloudContext(name);
   }
 
   async startCloudContext(name: string): Promise<void> {
-    await this.updateCloudContextPower(name, StartCloudContext, 'Started');
-    void this.refreshKubernetesContexts();
+    await this.globalConfig.startCloudContext(name);
   }
 
   async toggleIdleCloudContext(): Promise<void> {
-    const action = idleCloudContextAction(this.state.idleStatus, this.state.idleCloudContextBusy);
-    if (!action) {
-      return;
-    }
-    this.state.idleCloudContextBusy = true;
-    this.emit();
-    try {
-      const context = (await action.run(action.name)) as UICloudContextStatus;
-      this.applyIdleCloudContextResult(action.idleStatus, context);
-      this.state.idleCloudContextBusy = false;
-      this.showNotification('success', `${action.label} cloud environment ${context.kubernetesContext || context.name}.`);
-      this.emit();
-      if (action.refreshKubernetesContexts) {
-        void this.refreshKubernetesContexts();
-      }
-      void this.refreshIdleStatus();
-    } catch (error) {
-      const message = readError(error);
-      this.state.idleCloudContextBusy = false;
-      this.showNotification('error', message);
-      this.showTerminalMessage(message);
-      this.emit();
-    }
-  }
-
-  private applyIdleCloudContextResult(idleStatus: UIIdleStatus, context: UICloudContextStatus): void {
-    this.state.idleStatus = {
-      ...(this.state.idleStatus ?? idleStatus),
-      cloudContextName: context.name,
-      cloudContextStatus: context.status,
-      cloudContextLabel: context.kubernetesContext || context.name,
-    };
-    if (!this.state.globalConfigDialog.open) {
-      return;
-    }
-    this.state.globalConfigDialog = {
-      ...this.state.globalConfigDialog,
-      config: {
-        ...this.state.globalConfigDialog.config,
-        cloudContexts: replaceCloudContext(this.state.globalConfigDialog.config.cloudContexts || [], context),
-      },
-    };
-  }
-
-  private async updateCloudContextPower(name: string, action: (name: string) => Promise<unknown>, label: string): Promise<void> {
-    const dialog = this.state.globalConfigDialog;
-    if (dialog.busy || dialog.configLoading) {
-      return;
-    }
-    this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-context-power', busyTarget: name, error: '' };
-    this.emit();
-    try {
-      const context = (await action(name)) as UICloudContextStatus;
-      this.state.globalConfigDialog = {
-        ...this.state.globalConfigDialog,
-        config: {
-          ...this.state.globalConfigDialog.config,
-          cloudContexts: replaceCloudContext(this.state.globalConfigDialog.config.cloudContexts || [], context),
-        },
-        busy: false,
-        busyAction: '',
-        busyTarget: '',
-        error: '',
-      };
-      this.showTerminalMessage(`${label} cloud context ${context.kubernetesContext}.`);
-      this.emit();
-    } catch (error) {
-      const message = readError(error);
-      this.state.globalConfigDialog = {
-        ...this.state.globalConfigDialog,
-        busy: false,
-        busyAction: '',
-        busyTarget: '',
-        error: message,
-      };
-      this.showTerminalMessage(message);
-      this.emit();
-    }
+    await this.globalConfig.toggleIdleCloudContext();
   }
 
   async startAWSCloudInit(): Promise<void> {
-    const dialog = this.state.globalConfigDialog;
-    if (dialog.busy || dialog.configLoading) {
-      return;
-    }
-    this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-provider-init', busyTarget: '', error: '' };
-    this.emit();
-    try {
-      this.fitAddon?.fit();
-      const result = (await StartCloudInitAWSSession(this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
-      this.sessions.trackCloudInitSession(result.sessionId);
-      this.state.globalConfigDialog = defaultGlobalConfigDialog();
-      this.state.sessionId = result.sessionId;
-      this.state.terminalCopyOutput = '';
-      this.state.terminalCopyStatus = '';
-      this.resetTerminal();
-      this.hideTerminalMessage();
-      this.focusTerminalSoon();
-      this.queueTerminalResize();
-      this.emit();
-    } catch (error) {
-      const message = readError(error);
-      this.state.globalConfigDialog = {
-        ...this.state.globalConfigDialog,
-        busy: false,
-        busyAction: '',
-        busyTarget: '',
-        error: message,
-      };
-      this.showTerminalMessage(message);
-      this.emit();
-    }
+    await this.globalConfig.startAWSCloudInit();
   }
 
   async loginCloudProvider(alias: string): Promise<void> {
-    const dialog = this.state.globalConfigDialog;
-    if (dialog.busy || dialog.configLoading) {
-      return;
-    }
-    this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-provider-login', busyTarget: alias, error: '' };
-    this.emit();
-    try {
-      const provider = await LoginCloudProvider(alias);
-      this.state.globalConfigDialog = {
-        ...this.state.globalConfigDialog,
-        config: {
-          ...this.state.globalConfigDialog.config,
-          cloudProviders: replaceCloudProvider(this.state.globalConfigDialog.config.cloudProviders || [], provider),
-        },
-        busy: false,
-        busyAction: '',
-        busyTarget: '',
-        error: '',
-      };
-      this.showTerminalMessage(`${provider.alias}: ${provider.status}`);
-      this.emit();
-    } catch (error) {
-      const message = readError(error);
-      this.state.globalConfigDialog = {
-        ...this.state.globalConfigDialog,
-        busy: false,
-        busyAction: '',
-        busyTarget: '',
-        error: message,
-      };
-      this.showTerminalMessage(message);
-      this.emit();
-    }
+    await this.globalConfig.loginCloudProvider(alias);
   }
 
   async submitGlobalConfig(): Promise<void> {
-    const dialog = this.state.globalConfigDialog;
-    if (dialog.busy || dialog.configLoading) {
-      return;
-    }
-    this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'save', busyTarget: '', error: '' };
-    this.emit();
-    try {
-      const result = (await SaveERunConfig(dialog.config as Parameters<typeof SaveERunConfig>[0])) as UIERunConfig;
-      this.state.globalConfigDialog = {
-        ...this.state.globalConfigDialog,
-        config: result,
-        busy: false,
-        busyAction: '',
-        busyTarget: '',
-        error: '',
-      };
-      this.showNotification('success', 'Saved ERun config.');
-      this.closeGlobalConfigDialog();
-    } catch (error) {
-      const message = readError(error);
-      this.state.globalConfigDialog = {
-        ...this.state.globalConfigDialog,
-        busy: false,
-        busyAction: '',
-        busyTarget: '',
-        error: message,
-      };
-      this.showTerminalMessage(message);
-      this.emit();
-    }
+    await this.globalConfig.submitConfig();
   }
 
   openTenantDialog(tenant: string): void {
@@ -1893,7 +1571,7 @@ export class ERunUIController {
     const debugOutput = decodeDebugOutput(data);
     this.appendDebugOutput(debugOutput);
     this.updateOpenStatusFromOutput(payload.sessionId, debugOutput);
-    const displayData = this.filterTerminalDisplayData(payload.sessionId, data);
+    const displayData = filterTerminalDisplayData(this.sessions, payload.sessionId, data);
     if (displayData) {
       this.sessions.appendDisplayBuffer(payload.sessionId, displayData);
     }
@@ -1943,7 +1621,7 @@ export class ERunUIController {
     if (!payload.reason || !terminalExitHasTrackedSelection(selections)) {
       return '';
     }
-    const failedOutput = this.failedTerminalOutput(payload.sessionId, reason);
+    const failedOutput = failedTerminalOutput(this.sessions, payload.sessionId, reason);
     if (failedOutput) {
       this.sessions.recordExitOutput(payload.sessionId, failedOutput);
     }
@@ -1979,13 +1657,6 @@ export class ERunUIController {
       return failedTerminalExitReason(payload.reason, selections);
     }
     return successfulTerminalExitReason(selections);
-  }
-
-  private failedTerminalOutput(sessionId: number, fallback: string): string {
-    const chunks = this.sessions.sessionBuffer(sessionId);
-    const decoder = new TextDecoder();
-    const output = chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join('') + decoder.decode();
-    return cleanTerminalOutput(output) || fallback;
   }
 
   private updateOpenStatusFromOutput(sessionId: number, output: string): void {
@@ -2052,52 +1723,16 @@ export class ERunUIController {
   };
 
   private scrollSelectedDiffIntoView(): void {
-    if (!this.state.selectedDiffPath || !this.diffList) {
-      return;
-    }
-    const selector = `[data-path="${cssEscape(this.state.selectedDiffPath)}"]`;
-    this.diffList.querySelector<HTMLElement>(selector)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    scrollSelectedDiffIntoView(this.diffList, this.state.selectedDiffPath);
   }
 
   private updateSelectedDiffPathFromScroll(): void {
-    const path = this.visibleDiffPath();
+    const path = visibleDiffPath(this.diffList, this.reviewMain);
     if (!path || path === this.state.selectedDiffPath) {
       return;
     }
     this.state.selectedDiffPath = path;
     this.emit();
-  }
-
-  private visibleDiffPath(): string {
-    if (!this.diffList || !this.reviewMain) {
-      return '';
-    }
-    const sections = Array.from(this.diffList.querySelectorAll<HTMLElement>('.diff-file[data-path]'));
-    if (sections.length === 0) {
-      return '';
-    }
-
-    const containerRect = this.reviewMain.getBoundingClientRect();
-    const anchor = containerRect.top + 72;
-    let closestPath = '';
-    let closestDistance = Number.POSITIVE_INFINITY;
-
-    for (const section of sections) {
-      const rect = section.getBoundingClientRect();
-      const path = section.dataset.path || '';
-      if (!path) {
-        continue;
-      }
-      if (rect.top <= anchor && rect.bottom > anchor) {
-        return path;
-      }
-      const distance = Math.abs(rect.top - anchor);
-      if (distance < closestDistance) {
-        closestDistance = distance;
-        closestPath = path;
-      }
-    }
-    return closestPath;
   }
 
   private async handleTerminalPaste(event: ClipboardEvent): Promise<void> {
@@ -2127,62 +1762,6 @@ export class ERunUIController {
     }
     await SendSessionInput(`${paths.join(' ')} `);
     this.focusTerminalSoon();
-  }
-
-  private rebuildTerminalDisplayBuffer(sessionId: number): void {
-    this.sessions.clearDebugFilter(sessionId);
-    const chunks = this.sessions.sessionBuffer(sessionId);
-    const displayBuffer: TerminalWriteData[] = [];
-    for (const chunk of chunks) {
-      const displayData = this.filterTerminalDisplayData(sessionId, chunk);
-      if (displayData) {
-        displayBuffer.push(displayData);
-      }
-    }
-    this.sessions.replaceDisplayBuffer(sessionId, displayBuffer);
-  }
-
-  private filterTerminalDisplayData(sessionId: number, data: Uint8Array): TerminalWriteData | null {
-    const debugMode = this.sessions.debugMode(sessionId);
-    if (!debugMode) {
-      return data;
-    }
-    if (debugMode === 'hidden') {
-      const filter = this.sessions.debugFilter(sessionId);
-      if (filter.released) {
-        return data;
-      }
-      const text = new TextDecoder().decode(data);
-      const output = filter.pending + text;
-      const promptIndex = interactivePromptIndex(output);
-      if (promptIndex === -1) {
-        filter.pending = output.slice(-512);
-        this.sessions.setDebugFilter(sessionId, filter);
-        return null;
-      }
-      filter.released = true;
-      filter.pending = '';
-      this.sessions.setDebugFilter(sessionId, filter);
-      return output.slice(promptIndex);
-    }
-    const filter = this.sessions.debugFilter(sessionId);
-    if (filter.released) {
-      return data;
-    }
-
-    const text = new TextDecoder().decode(data);
-    const output = filter.pending + text;
-    const titleIndex = output.indexOf('\x1B]0;');
-    if (titleIndex === -1) {
-      filter.pending = output.slice(-16);
-      this.sessions.setDebugFilter(sessionId, filter);
-      return null;
-    }
-
-    filter.released = true;
-    filter.pending = '';
-    this.sessions.setDebugFilter(sessionId, filter);
-    return output.slice(titleIndex);
   }
 
   private registerDebugSession(sessionId: number, selection: UISelection, mode: DebugSessionMode): void {
