@@ -14,6 +14,10 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 - Keep layout, interaction behavior, DOM state, and terminal presentation in the frontend source tree.
 - Keep terminal session ownership in Go. The frontend should attach to sessions by ID, render buffered output, and send input, but it should not start shells on its own.
 - Prefer small transport-facing Go methods with JSON-safe structs over leaking backend internals into the frontend contract.
+- Keep Wails-exported Go methods as transport-facing facades. They should validate UI inputs, call focused backend workflow logic, and return JSON-safe results.
+- Keep desktop backend UI contracts together when they are generated into frontend bindings. Do not mix JSON-facing structs with process, PTY, or cloud lifecycle behavior in the same owner.
+- Put backend workflow behavior beside the lifecycle state it owns, such as idle status, session management, pasted images, cloud context actions, or window state.
+- Keep Wails event payloads stable unless the frontend contract is intentionally changing and generated bindings are refreshed.
 
 ## Frontend Workflow
 
@@ -37,6 +41,10 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 - Keep Wails calls near the workflow that owns them unless a backend adapter is being introduced intentionally.
 - Keep storage persistence close to the state transition that owns the persisted value.
 - Name workflow modules for user-visible flows or domain concepts, such as environment, tenant, global configuration, review, terminal, layout, cloud context, or package management.
+- Workflow classes should receive explicit dependencies and callbacks rather than importing component state, mutating global singletons, or reaching back through broad controller references.
+- Keep frontend workflow moves behavior-preserving: preserve timers, busy flags, notifications, emitted state updates, retry state, and focus/resize side effects.
+- Put terminal output buffering, display filtering, and session bookkeeping in terminal-owned modules. Keep controllers responsible only for connecting terminal events to app state.
+- Put review diff navigation and DOM viewport selection in review-owned modules. Keep generic diff parsing and formatting in diff helper modules.
 
 ## Frontend Component Discovery
 
