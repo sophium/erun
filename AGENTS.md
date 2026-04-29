@@ -54,6 +54,10 @@ Repository guidance for humans and coding agents working in this repo.
 - Prioritize maintainability and clarity over performance optimizations by default.
 - Prefer established repository patterns over introducing new command, config, testing, or documentation styles. Extend the existing shape first and only add a new pattern when the current one is clearly inadequate.
 - Organize shared command logic by command name when practical. If `build`, `open`, `init`, or `deploy` is shared, prefer files and types that mirror that command shape across `erun-common`, `erun-cli/cmd`, and `erun-mcp`.
+- Add new code directly to the file or module that owns the behavior. Do not use a large file, facade, or transport entrypoint as a temporary staging area.
+- Keep files organized around cohesive responsibilities: contracts, planning, execution, discovery, formatting, persistence, and transport adaptation should not be mixed just because they belong to the same command.
+- When a command has multiple responsibilities, split by stable behavior boundaries rather than by incidental implementation details.
+- Keep public entrypoints thin. They should adapt inputs, call focused logic, and render or return results instead of accumulating domain behavior.
 - Keep CLI and MCP layers thin. Flags, prompts, terminal rendering, MCP schemas, and transport setup belong in the transport modules; shared planning and execution logic belongs in `erun-common`.
 - Do not make one transport invoke the other for shared behavior. If CLI and MCP need the same operation logic, extract it into `erun-common` so third parties can use it directly as a library.
 - Keep trace and preview policy shared, but keep rendering transport-specific. `erun-common` may own plans, command specs, and feedback rules; CLI owns terminal trace formatting and MCP owns structured tool output.
