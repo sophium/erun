@@ -150,16 +150,9 @@ func TestDockerBuildTraceCommandsIncludeBuildxBootstrapForMultiPlatformBuilds(t 
 func TestResolveBuildExecutionMarksEnvironmentConfiguredBuildsSkippable(t *testing.T) {
 	projectRoot := t.TempDir()
 	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(buildDir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := SaveProjectConfig(projectRoot, ProjectConfig{
+	writeDockerBuildFixture(t, buildDir)
+	writeVersionFileForTest(t, filepath.Join(projectRoot, "erun-devops", "VERSION"), "1.0.0")
+	requireNoError(t, SaveProjectConfig(projectRoot, ProjectConfig{
 		Environments: map[string]ProjectEnvironmentConfig{
 			DefaultEnvironment: {
 				ContainerRegistry: "erunpaas",
@@ -174,9 +167,7 @@ func TestResolveBuildExecutionMarksEnvironmentConfiguredBuildsSkippable(t *testi
 				},
 			},
 		},
-	}); err != nil {
-		t.Fatalf("SaveProjectConfig failed: %v", err)
-	}
+	}), "SaveProjectConfig failed")
 
 	localExecution, err := ResolveBuildExecution(
 		ConfigStore{},
@@ -189,12 +180,8 @@ func TestResolveBuildExecutionMarksEnvironmentConfiguredBuildsSkippable(t *testi
 		func() time.Time { return time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC) },
 		DockerCommandTarget{ProjectRoot: projectRoot, Environment: DefaultEnvironment},
 	)
-	if err != nil {
-		t.Fatalf("ResolveBuildExecution local failed: %v", err)
-	}
-	if len(localExecution.dockerBuilds) != 1 || !localExecution.dockerBuilds[0].SkipIfExists {
-		t.Fatalf("expected local build to be skippable, got %+v", localExecution.dockerBuilds)
-	}
+	requireNoError(t, err, "ResolveBuildExecution local failed")
+	requireSkippableBuild(t, localExecution)
 
 	frsExecution, err := ResolveBuildExecution(
 		ConfigStore{},
@@ -207,12 +194,31 @@ func TestResolveBuildExecutionMarksEnvironmentConfiguredBuildsSkippable(t *testi
 		func() time.Time { return time.Date(2026, 4, 24, 12, 0, 0, 0, time.UTC) },
 		DockerCommandTarget{ProjectRoot: projectRoot, Environment: "frs"},
 	)
-	if err != nil {
-		t.Fatalf("ResolveBuildExecution frs failed: %v", err)
-	}
-	if len(frsExecution.dockerBuilds) != 1 || frsExecution.dockerBuilds[0].SkipIfExists {
-		t.Fatalf("did not expect frs build to be skippable, got %+v", frsExecution.dockerBuilds)
-	}
+	requireNoError(t, err, "ResolveBuildExecution frs failed")
+	requireUnskippableBuild(t, frsExecution)
+}
+
+func writeDockerBuildFixture(t *testing.T, buildDir string) {
+	t.Helper()
+	requireNoError(t, os.MkdirAll(buildDir, 0o755), "mkdir build dir")
+	requireNoError(t, os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+}
+
+func writeVersionFileForTest(t *testing.T, path, version string) {
+	t.Helper()
+	requireNoError(t, os.WriteFile(path, []byte(version+"\n"), 0o644), "write VERSION")
+}
+
+func requireSkippableBuild(t *testing.T, execution BuildExecutionSpec) {
+	t.Helper()
+	requireEqual(t, len(execution.dockerBuilds), 1, "docker build count")
+	requireCondition(t, execution.dockerBuilds[0].SkipIfExists, "expected build to be skippable, got %+v", execution.dockerBuilds)
+}
+
+func requireUnskippableBuild(t *testing.T, execution BuildExecutionSpec) {
+	t.Helper()
+	requireEqual(t, len(execution.dockerBuilds), 1, "docker build count")
+	requireCondition(t, !execution.dockerBuilds[0].SkipIfExists, "did not expect build to be skippable, got %+v", execution.dockerBuilds)
 }
 
 func TestRunDockerBuildsSkipsConfiguredExistingLocalImages(t *testing.T) {
@@ -552,19 +558,9 @@ func TestResolveBuildExecutionPrefersProjectRootBuildScriptOverNestedScripts(t *
 func TestResolveBuildExecutionUsesFirstNestedProjectBuildScript(t *testing.T) {
 	projectRoot := t.TempDir()
 	firstDir := filepath.Join(projectRoot, "scripts", "alpha")
-	if err := os.MkdirAll(firstDir, 0o755); err != nil {
-		t.Fatalf("mkdir first dir: %v", err)
-	}
 	secondDir := filepath.Join(projectRoot, "scripts", "zeta")
-	if err := os.MkdirAll(secondDir, 0o755); err != nil {
-		t.Fatalf("mkdir second dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(firstDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write first build.sh: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(secondDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write second build.sh: %v", err)
-	}
+	writeBuildScriptForTest(t, firstDir)
+	writeBuildScriptForTest(t, secondDir)
 
 	execution, err := ResolveBuildExecution(
 		ConfigStore{},
@@ -577,9 +573,7 @@ func TestResolveBuildExecutionUsesFirstNestedProjectBuildScript(t *testing.T) {
 		nil,
 		DockerCommandTarget{},
 	)
-	if err != nil {
-		t.Fatalf("ResolveBuildExecution failed: %v", err)
-	}
+	requireNoError(t, err, "ResolveBuildExecution failed")
 
 	var called bool
 	ctx := Context{
@@ -588,24 +582,23 @@ func TestResolveBuildExecutionUsesFirstNestedProjectBuildScript(t *testing.T) {
 		Stdout: new(bytes.Buffer),
 		Stderr: new(bytes.Buffer),
 	}
-	if err := RunBuildExecution(ctx, execution, func(dir, path string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
+	err = RunBuildExecution(ctx, execution, func(dir, path string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
 		called = true
-		if dir != firstDir || path != "./build.sh" {
-			t.Fatalf("unexpected script call: dir=%q path=%q", dir, path)
-		}
-		if len(env) != 0 {
-			t.Fatalf("unexpected script env: %+v", env)
-		}
+		requireCondition(t, dir == firstDir && path == "./build.sh", "unexpected script call: dir=%q path=%q", dir, path)
+		requireEqual(t, len(env), 0, "script env count")
 		return nil
 	}, func(DockerBuildSpec, io.Writer, io.Writer) error {
 		t.Fatal("unexpected docker build")
 		return nil
-	}, nil); err != nil {
-		t.Fatalf("RunBuildExecution failed: %v", err)
-	}
-	if !called {
-		t.Fatal("expected build script runner to be called")
-	}
+	}, nil)
+	requireNoError(t, err, "RunBuildExecution failed")
+	requireCondition(t, called, "expected build script runner to be called")
+}
+
+func writeBuildScriptForTest(t *testing.T, dir string) {
+	t.Helper()
+	requireNoError(t, os.MkdirAll(dir, 0o755), "mkdir build script dir")
+	requireNoError(t, os.WriteFile(filepath.Join(dir, "build.sh"), []byte("#!/bin/sh\n"), 0o755), "write build.sh")
 }
 
 func TestResolveBuildExecutionPrefersDockerBuildsOverNestedProjectBuildScript(t *testing.T) {
@@ -900,27 +893,15 @@ func TestResolveBuildExecutionBuildsWithoutPushesForProjectRootDevopsScope(t *te
 		filepath.Join(moduleRoot, "docker", "tenant-a-devops"),
 		filepath.Join(moduleRoot, "docker", "erun-dind"),
 	}
-	for _, dir := range componentDirs {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("mkdir component dir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-			t.Fatalf("write Dockerfile: %v", err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(componentDirs[0], "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentDirs[1], "VERSION"), []byte("28.1.1\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := SaveProjectConfig(projectRoot, ProjectConfig{
+	writeDockerBuildFixture(t, componentDirs[0])
+	writeVersionFileForTest(t, filepath.Join(componentDirs[0], "VERSION"), "1.0.0")
+	writeDockerBuildFixture(t, componentDirs[1])
+	writeVersionFileForTest(t, filepath.Join(componentDirs[1], "VERSION"), "28.1.1")
+	requireNoError(t, SaveProjectConfig(projectRoot, ProjectConfig{
 		Environments: map[string]ProjectEnvironmentConfig{
 			DefaultEnvironment: {ContainerRegistry: "erunpaas"},
 		},
-	}); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	}), "save project config")
 
 	execution, err := ResolveBuildExecution(
 		ConfigStore{},
@@ -933,26 +914,23 @@ func TestResolveBuildExecutionBuildsWithoutPushesForProjectRootDevopsScope(t *te
 		nil,
 		DockerCommandTarget{Environment: DefaultEnvironment},
 	)
-	if err != nil {
-		t.Fatalf("ResolveBuildExecution failed: %v", err)
-	}
+	requireNoError(t, err, "ResolveBuildExecution failed")
 
-	if len(execution.dockerBuilds) != 2 || len(execution.dockerPushes) != 0 {
-		t.Fatalf("unexpected execution: %+v", execution)
-	}
+	requireProjectRootDevopsBuilds(t, execution)
+}
+
+func requireProjectRootDevopsBuilds(t *testing.T, execution BuildExecutionSpec) {
+	t.Helper()
+	requireEqual(t, len(execution.dockerBuilds), 2, "docker build count")
+	requireEqual(t, len(execution.dockerPushes), 0, "docker push count")
 	buildTags := []string{execution.dockerBuilds[0].Image.Tag, execution.dockerBuilds[1].Image.Tag}
-	wantTags := []string{"erunpaas/tenant-a-devops:1.0.0", "erunpaas/erun-dind:28.1.1"}
-	for _, want := range wantTags {
-		found := false
-		for _, got := range buildTags {
-			if got == want {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Fatalf("missing build tag %q in %+v", want, execution.dockerBuilds)
-		}
+	requireContainsAllStrings(t, buildTags, []string{"erunpaas/tenant-a-devops:1.0.0", "erunpaas/erun-dind:28.1.1"})
+}
+
+func requireContainsAllStrings(t *testing.T, got, want []string) {
+	t.Helper()
+	for _, value := range want {
+		requireCondition(t, containsString(got, value), "missing value %q in %+v", value, got)
 	}
 }
 
@@ -1004,34 +982,25 @@ func TestResolveBuildExecutionReleaseUsesResolvedVersionForDockerBuilds(t *testi
 		nil,
 		DockerCommandTarget{ProjectRoot: projectRoot, Environment: DefaultEnvironment, Release: true},
 	)
-	if err != nil {
-		t.Fatalf("ResolveBuildExecution failed: %v", err)
-	}
+	requireNoError(t, err, "ResolveBuildExecution failed")
+	requireReleaseDockerBuildExecution(t, execution)
+}
 
-	if execution.release == nil {
-		t.Fatalf("expected release spec, got %+v", execution)
-	}
-	if got := execution.release.Version; got != "1.4.2" {
-		t.Fatalf("unexpected release version: %q", got)
-	}
-	if len(execution.dockerBuilds) != 1 {
-		t.Fatalf("unexpected docker builds: %+v", execution.dockerBuilds)
-	}
-	if got := execution.dockerBuilds[0].Image.Tag; got != "erunpaas/api:1.4.2" {
-		t.Fatalf("unexpected docker build tag: %q", got)
-	}
-	if !execution.dockerBuilds[0].Push || !reflect.DeepEqual(execution.dockerBuilds[0].Platforms, []string{"linux/amd64", "linux/arm64"}) {
-		t.Fatalf("expected multi-platform release build spec, got %+v", execution.dockerBuilds[0])
-	}
-	if len(execution.dockerPushes) != 1 {
-		t.Fatalf("unexpected docker pushes: %+v", execution.dockerPushes)
-	}
-	if got := execution.dockerPushes[0].Image.Tag; got != "erunpaas/api:1.4.2" {
-		t.Fatalf("unexpected docker push tag: %q", got)
-	}
-	if got := execution.release.NextVersion; got != "1.4.3" {
-		t.Fatalf("unexpected next version: %q", got)
-	}
+func requireReleaseDockerBuildExecution(t *testing.T, execution BuildExecutionSpec) {
+	t.Helper()
+	requireCondition(t, execution.release != nil, "expected release spec, got %+v", execution)
+	requireEqual(t, execution.release.Version, "1.4.2", "release version")
+	requireEqual(t, execution.release.NextVersion, "1.4.3", "next version")
+	requireEqual(t, len(execution.dockerBuilds), 1, "docker build count")
+	requireEqual(t, execution.dockerBuilds[0].Image.Tag, "erunpaas/api:1.4.2", "docker build tag")
+	requireMultiPlatformPushedBuild(t, execution.dockerBuilds[0])
+	requireEqual(t, len(execution.dockerPushes), 1, "docker push count")
+	requireEqual(t, execution.dockerPushes[0].Image.Tag, "erunpaas/api:1.4.2", "docker push tag")
+}
+
+func requireMultiPlatformPushedBuild(t *testing.T, build DockerBuildSpec) {
+	t.Helper()
+	requireCondition(t, build.Push && reflect.DeepEqual(build.Platforms, []string{"linux/amd64", "linux/arm64"}), "expected multi-platform release build spec, got %+v", build)
 }
 
 func TestResolveBuildExecutionReleaseCarriesForceToReleaseSpec(t *testing.T) {
@@ -1093,20 +1062,12 @@ func TestResolveBuildExecutionReleasePushesLocalDockerDependenciesAndDind(t *tes
 	releaseRoot := filepath.Join(projectRoot, "erun-devops")
 
 	apiDockerfilePath := filepath.Join(releaseRoot, "docker", "api", "Dockerfile")
-	if err := os.WriteFile(apiDockerfilePath, []byte("FROM erunpaas/base:9.9.9\n"), 0o644); err != nil {
-		t.Fatalf("write api Dockerfile: %v", err)
-	}
+	requireNoError(t, os.WriteFile(apiDockerfilePath, []byte("FROM erunpaas/base:9.9.9\n"), 0o644), "write api Dockerfile")
 
 	dindDir := filepath.Join(releaseRoot, "docker", "erun-dind")
-	if err := os.MkdirAll(dindDir, 0o755); err != nil {
-		t.Fatalf("mkdir dind dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dindDir, "Dockerfile"), []byte("FROM docker:28.1.1-dind\n"), 0o644); err != nil {
-		t.Fatalf("write dind Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dindDir, "VERSION"), []byte("28.1.1\n"), 0o644); err != nil {
-		t.Fatalf("write dind VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(dindDir, 0o755), "mkdir dind dir")
+	requireNoError(t, os.WriteFile(filepath.Join(dindDir, "Dockerfile"), []byte("FROM docker:28.1.1-dind\n"), 0o644), "write dind Dockerfile")
+	writeVersionFileForTest(t, filepath.Join(dindDir, "VERSION"), "28.1.1")
 
 	execution, err := ResolveBuildExecution(
 		ConfigStore{},
@@ -1119,34 +1080,27 @@ func TestResolveBuildExecutionReleasePushesLocalDockerDependenciesAndDind(t *tes
 		nil,
 		DockerCommandTarget{ProjectRoot: projectRoot, Environment: DefaultEnvironment, Release: true},
 	)
-	if err != nil {
-		t.Fatalf("ResolveBuildExecution failed: %v", err)
-	}
+	requireNoError(t, err, "ResolveBuildExecution failed")
 
-	if len(execution.dockerPushes) != 3 {
-		t.Fatalf("unexpected docker pushes: %+v", execution.dockerPushes)
-	}
-	wantPushes := map[string]struct{}{
-		"erunpaas/api:1.4.2":        {},
-		"erunpaas/base:9.9.9":       {},
-		"erunpaas/erun-dind:28.1.1": {},
-	}
+	requireReleaseDependencyPushes(t, execution)
+}
+
+func requireReleaseDependencyPushes(t *testing.T, execution BuildExecutionSpec) {
+	t.Helper()
+	wantTags := []string{"erunpaas/api:1.4.2", "erunpaas/base:9.9.9", "erunpaas/erun-dind:28.1.1"}
+	pushTags := make([]string, 0, len(execution.dockerPushes))
 	for _, pushInput := range execution.dockerPushes {
-		if _, ok := wantPushes[pushInput.Image.Tag]; !ok {
-			t.Fatalf("unexpected docker push tag: %q", pushInput.Image.Tag)
-		}
-		delete(wantPushes, pushInput.Image.Tag)
+		pushTags = append(pushTags, pushInput.Image.Tag)
 	}
-	if len(wantPushes) != 0 {
-		t.Fatalf("missing docker pushes: %+v", wantPushes)
-	}
+	requireContainsAllStrings(t, pushTags, wantTags)
+	requireMultiPlatformReleaseBuilds(t, execution.dockerBuilds, wantTags)
+}
 
-	for _, build := range execution.dockerBuilds {
-		switch build.Image.Tag {
-		case "erunpaas/api:1.4.2", "erunpaas/base:9.9.9", "erunpaas/erun-dind:28.1.1":
-			if !build.Push || !reflect.DeepEqual(build.Platforms, []string{"linux/amd64", "linux/arm64"}) {
-				t.Fatalf("expected multi-platform release build for %q, got %+v", build.Image.Tag, build)
-			}
+func requireMultiPlatformReleaseBuilds(t *testing.T, builds []DockerBuildSpec, wantTags []string) {
+	t.Helper()
+	for _, build := range builds {
+		if containsString(wantTags, build.Image.Tag) {
+			requireMultiPlatformPushedBuild(t, build)
 		}
 	}
 }
@@ -1277,26 +1231,18 @@ func TestRunBuildExecutionReleasePublishesResolvedVersionAsMultiPlatformBuild(t 
 func TestRunBuildExecutionAndDeployDryRunReleaseReportsDeployedVersionLast(t *testing.T) {
 	projectRoot := setupReleaseProjectGitRepo(t, "develop")
 	chartPath := filepath.Join(projectRoot, "erun-devops", "k8s", "api")
-	if err := os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644); err != nil {
-		t.Fatalf("write values.local.yaml: %v", err)
-	}
-	if err := SaveTenantConfig(TenantConfig{
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644), "write values.local.yaml")
+	requireNoError(t, SaveTenantConfig(TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
 		DefaultEnvironment: DefaultEnvironment,
-	}); err != nil {
-		t.Fatalf("save tenant config: %v", err)
-	}
-	if err := SaveEnvConfig("tenant-a", EnvConfig{
+	}), "save tenant config")
+	requireNoError(t, SaveEnvConfig("tenant-a", EnvConfig{
 		Name:              DefaultEnvironment,
 		RepoPath:          projectRoot,
 		KubernetesContext: "cluster-local",
-	}); err != nil {
-		t.Fatalf("save env config: %v", err)
-	}
-	if err := SaveProjectConfig(projectRoot, ProjectConfig{}); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	}), "save env config")
+	requireNoError(t, SaveProjectConfig(projectRoot, ProjectConfig{}), "save project config")
 
 	findProjectRoot := func() (string, string, error) {
 		return "tenant-a", projectRoot, nil
@@ -1310,9 +1256,7 @@ func TestRunBuildExecutionAndDeployDryRunReleaseReportsDeployedVersionLast(t *te
 		nil,
 		DockerCommandTarget{ProjectRoot: projectRoot, Environment: DefaultEnvironment, Release: true},
 	)
-	if err != nil {
-		t.Fatalf("ResolveBuildExecution failed: %v", err)
-	}
+	requireNoError(t, err, "ResolveBuildExecution failed")
 	deploySpec, err := ResolveDeploySpecForDockerTarget(
 		ConfigStore{},
 		findProjectRoot,
@@ -1326,12 +1270,8 @@ func TestRunBuildExecutionAndDeployDryRunReleaseReportsDeployedVersionLast(t *te
 		DockerCommandTarget{ProjectRoot: projectRoot, Environment: DefaultEnvironment, Release: true},
 		"api",
 	)
-	if err != nil {
-		t.Fatalf("ResolveDeploySpecForDockerTarget failed: %v", err)
-	}
-	if deploySpec.Deploy.Version != "1.4.2-rc.0000000" && !strings.HasPrefix(deploySpec.Deploy.Version, "1.4.2-rc.") {
-		t.Fatalf("unexpected deploy version: %+v", deploySpec.Deploy)
-	}
+	requireNoError(t, err, "ResolveDeploySpecForDockerTarget failed")
+	requireReleaseCandidateVersion(t, deploySpec.Deploy.Version, "deploy version")
 
 	stdout := new(bytes.Buffer)
 	ctx := Context{
@@ -1341,24 +1281,22 @@ func TestRunBuildExecutionAndDeployDryRunReleaseReportsDeployedVersionLast(t *te
 		Stdout: stdout,
 		Stderr: io.Discard,
 	}
-	if err := RunBuildExecutionAndDeploy(ctx, execution, []DeploySpec{deploySpec}, nil, nil, nil, func(HelmDeployParams) error {
+	err = RunBuildExecutionAndDeploy(ctx, execution, []DeploySpec{deploySpec}, nil, nil, nil, func(HelmDeployParams) error {
 		t.Fatal("unexpected deploy execution during dry-run")
 		return nil
-	}); err != nil {
-		t.Fatalf("RunBuildExecutionAndDeploy failed: %v", err)
-	}
+	})
+	requireNoError(t, err, "RunBuildExecutionAndDeploy failed")
 
 	output := strings.TrimSpace(stdout.String())
-	if !strings.Contains(output, "release version: 1.4.2-rc.") {
-		t.Fatalf("expected release version output, got:\n%s", output)
-	}
-	if !strings.Contains(output, "deployed version: 1.4.2-rc.") {
-		t.Fatalf("expected deployed version output, got:\n%s", output)
-	}
+	requireStringContains(t, output, "release version: 1.4.2-rc.", "expected release version output")
+	requireStringContains(t, output, "deployed version: 1.4.2-rc.", "expected deployed version output")
 	lines := strings.Split(output, "\n")
-	if !strings.Contains(lines[len(lines)-1], "deployed version: 1.4.2-rc.") {
-		t.Fatalf("expected deployed version last, got:\n%s", output)
-	}
+	requireStringContains(t, lines[len(lines)-1], "deployed version: 1.4.2-rc.", "expected deployed version last")
+}
+
+func requireReleaseCandidateVersion(t *testing.T, version, label string) {
+	t.Helper()
+	requireCondition(t, version == "1.4.2-rc.0000000" || strings.HasPrefix(version, "1.4.2-rc."), "unexpected %s: %s", label, version)
 }
 
 func setupReleaseProjectGitRepo(t *testing.T, branch string) string {
