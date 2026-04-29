@@ -53,10 +53,7 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 	if stateMatchesMCPTarget(state, expectedState) && canReachLocalMCPEndpoint(localPort) {
 		return localPort, nil
 	}
-	if stateMatchesMCPTarget(state, expectedState) && state.ProcessID > 0 && canConnectLocalPort(localPort) {
-		_ = stopPortForwardProcess(state.ProcessID)
-		waitForLocalPortToClose(localPort)
-	}
+	stopStaleMCPPortForward(state, expectedState, localPort)
 	if canConnectLocalPort(localPort) {
 		return 0, fmt.Errorf("local MCP port %d is already in use", localPort)
 	}
@@ -67,6 +64,18 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 		return localPort, nil
 	}
 
+	return startMCPPortForward(statePath, expectedState, args, localPort)
+}
+
+func stopStaleMCPPortForward(state, expectedState mcpPortForwardState, localPort int) {
+	if !stateMatchesMCPTarget(state, expectedState) || state.ProcessID <= 0 || !canConnectLocalPort(localPort) {
+		return
+	}
+	_ = stopPortForwardProcess(state.ProcessID)
+	waitForLocalPortToClose(localPort)
+}
+
+func startMCPPortForward(statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {
 	logPath := mcpPortForwardLogPath(statePath)
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return 0, err
@@ -93,18 +102,25 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 		return 0, err
 	}
 
+	if err := waitForMCPPortForward(localPort, logPath); err != nil {
+		return 0, err
+	}
+	return localPort, nil
+}
+
+func waitForMCPPortForward(localPort int, logPath string) error {
 	deadline := time.Now().Add(mcpPortForwardStartupTimeout)
 	for time.Now().Before(deadline) {
 		if canReachLocalMCPEndpoint(localPort) {
-			return localPort, nil
+			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 
 	if detail := mcpPortForwardTimeoutDetail(logPath); detail != "" {
-		return 0, fmt.Errorf("timed out waiting for MCP port-forward on 127.0.0.1:%d: %s; see %s", localPort, detail, logPath)
+		return fmt.Errorf("timed out waiting for MCP port-forward on 127.0.0.1:%d: %s; see %s", localPort, detail, logPath)
 	}
-	return 0, fmt.Errorf("timed out waiting for MCP port-forward on 127.0.0.1:%d; see %s", localPort, logPath)
+	return fmt.Errorf("timed out waiting for MCP port-forward on 127.0.0.1:%d; see %s", localPort, logPath)
 }
 
 func kubectlMCPPortForwardArgs(result common.OpenResult, localPort int) []string {
