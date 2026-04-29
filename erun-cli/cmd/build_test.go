@@ -489,20 +489,14 @@ func TestRootBuildShorthandBuildsAllDockerImagesWhenCurrentDirectoryIsDockerDire
 		filepath.Join(dockerDir, "erun-ubuntu"),
 	}
 	for _, dir := range componentDirs {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("mkdir component dir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-			t.Fatalf("write Dockerfile: %v", err)
-		}
+		requireMkdirAll(t, dir, 0o755, "mkdir component dir")
+		requireWriteFile(t, filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\n"), 0o644, "write Dockerfile")
 	}
-	if err := common.SaveTenantConfig(common.TenantConfig{
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
 		DefaultEnvironment: common.DefaultEnvironment,
-	}); err != nil {
-		t.Fatalf("save tenant config: %v", err)
-	}
+	}), "save tenant config")
 	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 	requireNoError(t, os.WriteFile(filepath.Join(componentDirs[0], "VERSION"), []byte("1.0.0\n"), 0o644), "write VERSION")
 	requireNoError(t, os.WriteFile(filepath.Join(componentDirs[1], "VERSION"), []byte("28.1.1\n"), 0o644), "write VERSION")
@@ -544,11 +538,7 @@ func TestRootBuildShorthandBuildsAllDockerImagesWhenCurrentDirectoryIsDockerDire
 		"erunpaas/erun-dind:28.1.1",
 		"erunpaas/erun-ubuntu:noble-20260217",
 	}
-	for i := range wantTags {
-		if gotTags[i] != wantTags[i] {
-			t.Fatalf("unexpected image tags: got %v want %v", gotTags, wantTags)
-		}
-	}
+	requireStringSlicesEqual(t, gotTags, wantTags, "unexpected image tags")
 	for _, req := range built {
 		if req.Dir != projectRoot {
 			t.Fatalf("expected project root build context, got %+v", req)

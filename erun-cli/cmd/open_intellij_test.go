@@ -34,39 +34,25 @@ func TestLaunchIntelliJEnsuresKnownHostBeforeOpening(t *testing.T) {
 	currentHostOS = func() common.HostOS { return common.HostOSDarwin }
 	ensureLocalSSHDKnownHostFunc = func(_ common.Context, result common.OpenResult) error {
 		callOrder = append(callOrder, "known_hosts")
-		if result.Tenant != "tenant-a" {
-			t.Fatalf("unexpected target: %+v", result)
-		}
+		requireIntelliJTarget(t, result)
 		return nil
 	}
 	registerIntelliJProjectFunc = func(_ common.Context, result common.OpenResult, hostOS common.HostOS) error {
 		callOrder = append(callOrder, "register_project")
-		if hostOS != common.HostOSDarwin {
-			t.Fatalf("unexpected host OS: %s", hostOS)
-		}
-		if result.Tenant != "tenant-a" {
-			t.Fatalf("unexpected target: %+v", result)
-		}
+		requireIntelliJHostOS(t, hostOS)
+		requireIntelliJTarget(t, result)
 		return nil
 	}
 	openIntelliJGatewayProjectFunc = func(_ common.Context, result common.OpenResult, hostOS common.HostOS) (bool, error) {
 		callOrder = append(callOrder, "open_gateway")
-		if hostOS != common.HostOSDarwin {
-			t.Fatalf("unexpected host OS: %s", hostOS)
-		}
-		if result.Tenant != "tenant-a" {
-			t.Fatalf("unexpected target: %+v", result)
-		}
+		requireIntelliJHostOS(t, hostOS)
+		requireIntelliJTarget(t, result)
 		return false, nil
 	}
 	openInstalledIntelliJAppFunc = func(_ common.Context, result common.OpenResult, hostOS common.HostOS) error {
 		callOrder = append(callOrder, "open_intellij")
-		if hostOS != common.HostOSDarwin {
-			t.Fatalf("unexpected host OS: %s", hostOS)
-		}
-		if result.Tenant != "tenant-a" {
-			t.Fatalf("unexpected target: %+v", result)
-		}
+		requireIntelliJHostOS(t, hostOS)
+		requireIntelliJTarget(t, result)
 		return nil
 	}
 
@@ -106,6 +92,20 @@ func TestLaunchIntelliJEnsuresKnownHostBeforeOpening(t *testing.T) {
 		if !strings.Contains(stderr.String(), want) {
 			t.Fatalf("expected guidance to contain %q, got:\n%s", want, stderr.String())
 		}
+	}
+}
+
+func requireIntelliJTarget(t *testing.T, result common.OpenResult) {
+	t.Helper()
+	if result.Tenant != "tenant-a" {
+		t.Fatalf("unexpected target: %+v", result)
+	}
+}
+
+func requireIntelliJHostOS(t *testing.T, hostOS common.HostOS) {
+	t.Helper()
+	if hostOS != common.HostOSDarwin {
+		t.Fatalf("unexpected host OS: %s", hostOS)
 	}
 }
 
@@ -315,7 +315,7 @@ func TestOpenIntelliJGatewayProjectLaunchesRecentProjectURI(t *testing.T) {
 	requireNoError(t, os.WriteFile(filepath.Join(appContentsDir, "lib", "app.jar"), nil, 0o600), "write app jar")
 	requireNoError(t, os.WriteFile(filepath.Join(appContentsDir, "plugins", "gateway-plugin", "resources", "gateway.vmoptions"), []byte("-Xmx512m\n-Dapple.awt.application.name=Gateway\n"), 0o600), "write gateway vmoptions")
 	configID := jetbrainsconfig.StableConfigID("erun-tenant-a-remote")
-	if err := os.WriteFile(filepath.Join(optionsDir, "sshRecentConnections.v2.xml"), []byte(`<application>
+	requireWriteFile(t, filepath.Join(optionsDir, "sshRecentConnections.v2.xml"), []byte(`<application>
   <component name="SshLocalRecentConnectionsManager">
     <option name="connections">
       <list>
@@ -342,23 +342,10 @@ func TestOpenIntelliJGatewayProjectLaunchesRecentProjectURI(t *testing.T) {
     </option>
   </component>
 </application>
-`), 0o600); err != nil {
-		t.Fatalf("write recent projects: %v", err)
-	}
+`), 0o600, "write recent projects")
 
 	ideUserHomeDir = func() (string, error) { return root, nil }
-	ideGlob = func(pattern string) ([]string, error) {
-		if strings.Contains(pattern, "IntelliJIdea*") {
-			return []string{optionsDir}, nil
-		}
-		if strings.Contains(pattern, "IntelliJ IDEA*.app") {
-			return []string{appContentsDir}, nil
-		}
-		if strings.Contains(pattern, "lib/*.jar") {
-			return []string{filepath.Join(appContentsDir, "lib", "app.jar")}, nil
-		}
-		return nil, nil
-	}
+	ideGlob = gatewayProjectGlob(optionsDir, appContentsDir)
 	ideStat = os.Stat
 	ideRunTokenFunc = func() string { return "fixed-token" }
 	var launchedCommand string
@@ -386,9 +373,27 @@ func TestOpenIntelliJGatewayProjectLaunchesRecentProjectURI(t *testing.T) {
 		},
 		RepoPath: "/home/erun/git/tenant-a",
 	}, common.HostOSDarwin)
-	if err != nil {
-		t.Fatalf("openIntelliJGatewayProject failed: %v", err)
+	requireNoError(t, err, "openIntelliJGatewayProject failed")
+	requireGatewayProjectLaunch(t, opened, launchedCommand, launchedArgs, appContentsDir, configID)
+}
+
+func gatewayProjectGlob(optionsDir, appContentsDir string) func(string) ([]string, error) {
+	return func(pattern string) ([]string, error) {
+		if strings.Contains(pattern, "IntelliJIdea*") {
+			return []string{optionsDir}, nil
+		}
+		if strings.Contains(pattern, "IntelliJ IDEA*.app") {
+			return []string{appContentsDir}, nil
+		}
+		if strings.Contains(pattern, "lib/*.jar") {
+			return []string{filepath.Join(appContentsDir, "lib", "app.jar")}, nil
+		}
+		return nil, nil
 	}
+}
+
+func requireGatewayProjectLaunch(t *testing.T, opened bool, launchedCommand string, launchedArgs []string, appContentsDir, configID string) {
+	t.Helper()
 	if !opened {
 		t.Fatal("expected gateway project launch")
 	}
@@ -403,6 +408,11 @@ func TestOpenIntelliJGatewayProjectLaunchesRecentProjectURI(t *testing.T) {
 		values.Get("runFromIdeToken") != "fixed-token" {
 		t.Fatalf("unexpected gateway URI values: %s", uri)
 	}
+	requireGatewayLaunchArgs(t, launchedArgs, appContentsDir)
+}
+
+func requireGatewayLaunchArgs(t *testing.T, launchedArgs []string, appContentsDir string) {
+	t.Helper()
 	if !strings.Contains(strings.Join(launchedArgs, "\n"), "-Didea.platform.prefix=Gateway") {
 		t.Fatalf("expected Gateway platform launch args, got %+v", launchedArgs)
 	}

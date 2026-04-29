@@ -1275,21 +1275,17 @@ func TestOpenCommandUsesPersistedSnapshotPreferenceForLocalEnvironment(t *testin
 	requireNoError(t, os.WriteFile(filepath.Join(componentRoot, "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
 	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 	snapshot := false
-	if err := common.SaveTenantConfig(common.TenantConfig{
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
 		DefaultEnvironment: common.DefaultEnvironment,
-	}); err != nil {
-		t.Fatalf("save tenant config: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{
+	}), "save tenant config")
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{
 		Name:              common.DefaultEnvironment,
 		RepoPath:          projectRoot,
 		KubernetesContext: "cluster-local",
 		Snapshot:          &snapshot,
-	}); err != nil {
-		t.Fatalf("save env config: %v", err)
-	}
+	}), "save env config")
 
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
@@ -1298,9 +1294,7 @@ func TestOpenCommandUsesPersistedSnapshotPreferenceForLocalEnvironment(t *testin
 		Store: common.ConfigStore{},
 		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
 			checkedDeployment = true
-			if req.Name != "tenant-a-devops" || req.Namespace != "tenant-a-local" || req.KubernetesContext != "cluster-local" {
-				t.Fatalf("unexpected deployment check: %+v", req)
-			}
+			requireDeploymentCheckTarget(t, req, "tenant-a-devops", "tenant-a-local", "cluster-local")
 			return true, nil
 		},
 		DeployHelmChart: func(req common.HelmDeployParams) error {
@@ -1694,9 +1688,7 @@ func TestOpenCommandDeploysDevopsWhenMissing(t *testing.T) {
 	cmd := newTestRootCmd(testRootDeps{
 		Store: openCommandStore{repoPath: repoPath},
 		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
-			if req.Name != "tenant-a-devops" || req.Namespace != "tenant-a-dev" || req.KubernetesContext != "cluster-dev" {
-				t.Fatalf("unexpected deployment check: %+v", req)
-			}
+			requireDeploymentCheckTarget(t, req, "tenant-a-devops", "tenant-a-dev", "cluster-dev")
 			return false, nil
 		},
 		DeployHelmChart: func(req common.HelmDeployParams) error {
@@ -1723,6 +1715,13 @@ func TestOpenCommandDeploysDevopsWhenMissing(t *testing.T) {
 	}
 	if launched.Namespace != "tenant-a-dev" || launched.KubernetesContext != "cluster-dev" {
 		t.Fatalf("unexpected shell launch: %+v", launched)
+	}
+}
+
+func requireDeploymentCheckTarget(t *testing.T, req common.KubernetesDeploymentCheckParams, name, namespace, kubernetesContext string) {
+	t.Helper()
+	if req.Name != name || req.Namespace != namespace || req.KubernetesContext != kubernetesContext {
+		t.Fatalf("unexpected deployment check: %+v", req)
 	}
 }
 

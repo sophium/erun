@@ -164,20 +164,16 @@ func TestDevopsK8sDeployBuildsAndDeploysSameExactVersionFromCurrentBuildDirector
 	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
 
 	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
-	if err := common.SaveTenantConfig(common.TenantConfig{
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
 		DefaultEnvironment: "local",
-	}); err != nil {
-		t.Fatalf("save tenant config: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{
+	}), "save tenant config")
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{
 		Name:              "local",
 		RepoPath:          projectRoot,
 		KubernetesContext: "cluster-local",
-	}); err != nil {
-		t.Fatalf("save env config: %v", err)
-	}
+	}), "save env config")
 	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	var built deployBuildCall
@@ -211,34 +207,7 @@ func TestDevopsK8sDeployBuildsAndDeploysSameExactVersionFromCurrentBuildDirector
 
 	requireNoError(t, cmd.Execute(), "Execute failed")
 
-	if received.ReleaseName != "erun-devops" {
-		t.Fatalf("unexpected release name: %+v", received)
-	}
-	if received.ChartPath != chartPath {
-		t.Fatalf("unexpected chart path: %+v", received)
-	}
-	if received.ValuesFilePath != filepath.Join(chartPath, "values.local.yaml") {
-		t.Fatalf("unexpected values file path: %+v", received)
-	}
-	if received.Tenant != "tenant-a" || received.Environment != "local" {
-		t.Fatalf("unexpected tenant/environment: %+v", received)
-	}
-	if received.Namespace != "tenant-a-local" {
-		t.Fatalf("unexpected namespace: %+v", received)
-	}
-	if received.KubernetesContext != "cluster-local" {
-		t.Fatalf("unexpected kubernetes context: %+v", received)
-	}
-	resolvedProjectRoot, err := filepath.EvalSymlinks(projectRoot)
-	if err != nil {
-		t.Fatalf("EvalSymlinks(projectRoot) failed: %v", err)
-	}
-	if received.WorktreeHostPath != resolvedProjectRoot {
-		t.Fatalf("unexpected worktree values: %+v", received)
-	}
-	if received.Timeout != common.DefaultHelmDeploymentTimeout {
-		t.Fatalf("unexpected timeout: %+v", received)
-	}
+	requireLocalDevopsDeployRequest(t, received, chartPath, projectRoot)
 	if built.Tag != "erunpaas/erun-devops:1.1.0" {
 		t.Fatalf("unexpected build request: %+v", built)
 	}
@@ -256,6 +225,27 @@ func TestDevopsK8sDeployBuildsAndDeploysSameExactVersionFromCurrentBuildDirector
 	}
 }
 
+func requireLocalDevopsDeployRequest(t *testing.T, received common.HelmDeployParams, chartPath, projectRoot string) {
+	t.Helper()
+	if received.ReleaseName != "erun-devops" || received.ChartPath != chartPath {
+		t.Fatalf("unexpected deploy request: %+v", received)
+	}
+	if received.ValuesFilePath != filepath.Join(chartPath, "values.local.yaml") {
+		t.Fatalf("unexpected values file path: %+v", received)
+	}
+	if received.Tenant != "tenant-a" || received.Environment != "local" {
+		t.Fatalf("unexpected tenant/environment: %+v", received)
+	}
+	if received.Namespace != "tenant-a-local" || received.KubernetesContext != "cluster-local" {
+		t.Fatalf("unexpected deployment target: %+v", received)
+	}
+	resolvedProjectRoot, err := filepath.EvalSymlinks(projectRoot)
+	requireNoError(t, err, "EvalSymlinks(projectRoot) failed")
+	if received.WorktreeHostPath != resolvedProjectRoot || received.Timeout != common.DefaultHelmDeploymentTimeout {
+		t.Fatalf("unexpected deploy request values: %+v", received)
+	}
+}
+
 func TestRootDeployShorthandUsesCurrentComponentContext(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
@@ -267,20 +257,16 @@ func TestRootDeployShorthandUsesCurrentComponentContext(t *testing.T) {
 	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
 
 	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
-	if err := common.SaveTenantConfig(common.TenantConfig{
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
 		DefaultEnvironment: "local",
-	}); err != nil {
-		t.Fatalf("save tenant config: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{
+	}), "save tenant config")
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{
 		Name:              "local",
 		RepoPath:          projectRoot,
 		KubernetesContext: "cluster-local",
-	}); err != nil {
-		t.Fatalf("save env config: %v", err)
-	}
+	}), "save env config")
 	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	fixedNow := time.Date(2026, time.April, 6, 13, 16, 30, 0, time.UTC)
@@ -352,47 +338,33 @@ func TestRootDeployShorthandAtProjectRootDeploysAllComponents(t *testing.T) {
 	chartA := filepath.Join(moduleRoot, "k8s", "tenant-a-devops")
 	chartB := filepath.Join(moduleRoot, "k8s", "erun-dind")
 	for _, chartPath := range []string{chartA, chartB} {
-		if err := os.MkdirAll(chartPath, 0o755); err != nil {
-			t.Fatalf("mkdir chart dir: %v", err)
-		}
+		requireMkdirAll(t, chartPath, 0o755, "mkdir chart dir")
 		componentName := filepath.Base(chartPath)
-		if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: "+componentName+"\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644); err != nil {
-			t.Fatalf("write Chart.yaml: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644); err != nil {
-			t.Fatalf("write values.local.yaml: %v", err)
-		}
+		requireWriteFile(t, filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: "+componentName+"\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644, "write Chart.yaml")
+		requireWriteFile(t, filepath.Join(chartPath, "values.local.yaml"), nil, 0o644, "write values.local.yaml")
 	}
 
 	componentA := filepath.Join(moduleRoot, "docker", "tenant-a-devops")
 	componentB := filepath.Join(moduleRoot, "docker", "erun-dind")
 	for _, componentDir := range []string{componentA, componentB} {
-		if err := os.MkdirAll(componentDir, 0o755); err != nil {
-			t.Fatalf("mkdir docker dir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-			t.Fatalf("write Dockerfile: %v", err)
-		}
+		requireMkdirAll(t, componentDir, 0o755, "mkdir docker dir")
+		requireWriteFile(t, filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644, "write Dockerfile")
 	}
 	requireNoError(t, os.WriteFile(filepath.Join(moduleRoot, "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
 	requireNoError(t, os.WriteFile(filepath.Join(componentA, "VERSION"), []byte("1.1.0\n"), 0o644), "write component A VERSION")
 	requireNoError(t, os.WriteFile(filepath.Join(componentB, "VERSION"), []byte("28.1.1\n"), 0o644), "write component B VERSION")
 
 	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
-	if err := common.SaveTenantConfig(common.TenantConfig{
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
 		DefaultEnvironment: "local",
-	}); err != nil {
-		t.Fatalf("save tenant config: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{
+	}), "save tenant config")
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{
 		Name:              "local",
 		RepoPath:          projectRoot,
 		KubernetesContext: "cluster-local",
-	}); err != nil {
-		t.Fatalf("save env config: %v", err)
-	}
+	}), "save env config")
 	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	var builds []deployBuildCall
@@ -425,9 +397,20 @@ func TestRootDeployShorthandAtProjectRootDeploysAllComponents(t *testing.T) {
 
 	requireNoError(t, cmd.Execute(), "Execute failed")
 
+	requireProjectRootDeployAllComponents(t, builds, pushes, deploys, chartA, chartB)
+}
+
+func requireProjectRootDeployAllComponents(t *testing.T, builds []deployBuildCall, pushes []deployPushCall, deploys []common.HelmDeployParams, chartA, chartB string) {
+	t.Helper()
 	if len(builds) != 2 || len(pushes) != 0 || len(deploys) != 2 {
 		t.Fatalf("unexpected execution counts: builds=%+v pushes=%+v deploys=%+v", builds, pushes, deploys)
 	}
+	requireProjectRootBuilds(t, builds)
+	requireProjectRootDeploys(t, deploys, chartA, chartB)
+}
+
+func requireProjectRootBuilds(t *testing.T, builds []deployBuildCall) {
+	t.Helper()
 	if builds[0].Tag != "erunpaas/erun-dind:28.1.1" || builds[1].Tag != "erunpaas/tenant-a-devops:1.1.0" {
 		t.Fatalf("unexpected builds: %+v", builds)
 	}
@@ -436,6 +419,10 @@ func TestRootDeployShorthandAtProjectRootDeploysAllComponents(t *testing.T) {
 			t.Fatalf("expected multi-platform buildx push request, got %+v", build)
 		}
 	}
+}
+
+func requireProjectRootDeploys(t *testing.T, deploys []common.HelmDeployParams, chartA, chartB string) {
+	t.Helper()
 	if deploys[0].ReleaseName != "erun-dind" || deploys[0].ChartPath != chartB {
 		t.Fatalf("unexpected first deploy: %+v", deploys[0])
 	}

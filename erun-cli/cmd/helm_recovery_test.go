@@ -16,16 +16,7 @@ func TestHelmDeployRecoveryClearsPendingMetadataAndRetries(t *testing.T) {
 	var recovered common.HelmReleaseRecoveryParams
 
 	deploy := wrapHelmDeployWithReleaseRecovery(
-		func(prompt promptui.Prompt) (string, error) {
-			if !prompt.IsConfirm {
-				t.Fatalf("expected confirm prompt, got %+v", prompt)
-			}
-			want := "clear pending Helm metadata for release erun-devops from namespace erun-local in context rancher-desktop and retry deploy"
-			if prompt.Label != want {
-				t.Fatalf("unexpected prompt label %q, want %q", prompt.Label, want)
-			}
-			return "y", nil
-		},
+		confirmHelmRecoveryPrompt(t),
 		func(params common.HelmDeployParams) error {
 			deployCalls++
 			if deployCalls == 1 {
@@ -45,15 +36,12 @@ func TestHelmDeployRecoveryClearsPendingMetadataAndRetries(t *testing.T) {
 		},
 	)
 
-	err := deploy(common.HelmDeployParams{
+	requireNoError(t, deploy(common.HelmDeployParams{
 		ReleaseName:       "erun-devops",
 		Namespace:         "erun-local",
 		KubernetesContext: "rancher-desktop",
 		Stderr:            stderr,
-	})
-	if err != nil {
-		t.Fatalf("deploy failed: %v", err)
-	}
+	}), "deploy failed")
 	if deployCalls != 2 {
 		t.Fatalf("expected deploy to retry once, got %d calls", deployCalls)
 	}
@@ -68,5 +56,19 @@ func TestHelmDeployRecoveryClearsPendingMetadataAndRetries(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "owner=helm,name=erun-devops,status in (pending-install,pending-upgrade,pending-rollback)") {
 		t.Fatalf("expected pending metadata selector in stderr, got %q", stderr.String())
+	}
+}
+
+func confirmHelmRecoveryPrompt(t *testing.T) PromptRunner {
+	t.Helper()
+	return func(prompt promptui.Prompt) (string, error) {
+		if !prompt.IsConfirm {
+			t.Fatalf("expected confirm prompt, got %+v", prompt)
+		}
+		want := "clear pending Helm metadata for release erun-devops from namespace erun-local in context rancher-desktop and retry deploy"
+		if prompt.Label != want {
+			t.Fatalf("unexpected prompt label %q, want %q", prompt.Label, want)
+		}
+		return "y", nil
 	}
 }
