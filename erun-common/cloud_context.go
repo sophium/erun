@@ -166,64 +166,124 @@ func InitCloudContext(ctx Context, store CloudContextStore, params InitCloudCont
 		return CloudContextStatus{}, fmt.Errorf("store is required")
 	}
 	deps = normalizeCloudContextDependencies(deps)
-	provider, err := ResolveCloudProvider(store, params.CloudProviderAlias)
+	provider, config, err := initCloudContextConfig(store, params, deps)
 	if err != nil {
 		return CloudContextStatus{}, err
 	}
+	if err := prepareInitCloudContextResources(ctx, deps, provider, params, &config); err != nil {
+		return CloudContextStatus{}, err
+	}
+
+	instanceID, err := runInitCloudContextInstance(ctx, deps, provider, params, &config)
+	if err != nil {
+		return CloudContextStatus{}, err
+	}
+	config.InstanceID = strings.TrimSpace(instanceID)
+	if config.InstanceID == "" {
+		config.InstanceID = "i-<new-instance>"
+	}
+	config.Status = CloudContextStatusPending
+
+	if err := finalizeInitCloudContext(ctx, deps, provider, &config); err != nil {
+		return CloudContextStatus{}, err
+	}
+	if ctx.DryRun {
+		return CloudContextStatus{CloudContextConfig: NormalizeCloudContextConfig(config)}, nil
+	}
+	if err := saveCloudContextConfig(store, config); err != nil {
+		return CloudContextStatus{}, err
+	}
+	return CloudContextStatus{CloudContextConfig: NormalizeCloudContextConfig(config)}, nil
+}
+
+func initCloudContextConfig(store CloudContextStore, params InitCloudContextParams, deps CloudContextDependencies) (CloudProviderConfig, CloudContextConfig, error) {
+	provider, err := ResolveCloudProvider(store, params.CloudProviderAlias)
+	if err != nil {
+		return CloudProviderConfig{}, CloudContextConfig{}, err
+	}
 	if provider.Provider != CloudProviderAWS {
-		return CloudContextStatus{}, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
+		return CloudProviderConfig{}, CloudContextConfig{}, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
 	}
 	existingContexts, err := ListCloudContexts(store)
 	if err != nil {
-		return CloudContextStatus{}, err
+		return CloudProviderConfig{}, CloudContextConfig{}, err
 	}
 	config, err := resolveInitCloudContextConfig(provider, params, deps.Now(), existingContexts)
 	if err != nil {
-		return CloudContextStatus{}, err
+		return CloudProviderConfig{}, CloudContextConfig{}, err
 	}
-	if existing, ok, err := findCloudContext(store, config.Name); err != nil {
-		return CloudContextStatus{}, err
-	} else if ok && existing.InstanceID != "" {
-		return CloudContextStatus{}, fmt.Errorf("cloud context %q already exists", config.Name)
+	if err := ensureInitCloudContextDoesNotExist(store, config.Name); err != nil {
+		return CloudProviderConfig{}, CloudContextConfig{}, err
 	}
+	return provider, config, nil
+}
 
-	ami, err := deps.RunAWS(ctx, provider, config.Region, []string{
+func ensureInitCloudContextDoesNotExist(store CloudContextStore, name string) error {
+	existing, ok, err := findCloudContext(store, name)
+	if err != nil {
+		return err
+	}
+	if ok && existing.InstanceID != "" {
+		return fmt.Errorf("cloud context %q already exists", name)
+	}
+	return nil
+}
+
+func prepareInitCloudContextResources(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, params InitCloudContextParams, config *CloudContextConfig) error {
+	securityGroupID, err := initCloudContextSecurityGroup(ctx, deps, provider, params, *config)
+	if err != nil {
+		return err
+	}
+	config.SecurityGroupID = securityGroupID
+	instanceProfile, err := ensureCloudContextInstanceProfile(ctx, deps, provider, config.Region, config.Name)
+	if err != nil {
+		return err
+	}
+	config.InstanceProfileName = instanceProfile.Name
+	config.InstanceProfileARN = instanceProfile.ARN
+	config.InstanceRoleName = instanceProfile.RoleName
+	return nil
+}
+
+func initCloudContextSecurityGroup(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, params InitCloudContextParams, config CloudContextConfig) (string, error) {
+	securityGroupID := strings.TrimSpace(params.SecurityGroupID)
+	if securityGroupID != "" {
+		return securityGroupID, nil
+	}
+	return createCloudContextSecurityGroup(ctx, deps, provider, config.Region, config.Name)
+}
+
+func runInitCloudContextInstance(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, params InitCloudContextParams, config *CloudContextConfig) (string, error) {
+	ami, err := initCloudContextAMI(ctx, deps, provider, config.Region)
+	if err != nil {
+		return "", err
+	}
+	config.AdminToken = deps.NewToken()
+	userDataPath, cleanup, err := cloudContextUserDataFile(ctx, config.AdminToken)
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
+	return deps.RunAWS(ctx, provider, config.Region, initCloudContextRunArgs(ami, userDataPath, params, *config))
+}
+
+func initCloudContextAMI(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region string) (string, error) {
+	ami, err := deps.RunAWS(ctx, provider, region, []string{
 		"ssm", "get-parameter",
 		"--name", "/aws/service/canonical/ubuntu/server/24.04/stable/current/arm64/hvm/ebs-gp3/ami-id",
 		"--query", "Parameter.Value",
 		"--output", "text",
 	})
 	if err != nil {
-		return CloudContextStatus{}, err
+		return "", err
 	}
-	ami = strings.TrimSpace(ami)
-	if ami == "" {
-		ami = "ami-<latest-ubuntu-arm64>"
+	if ami = strings.TrimSpace(ami); ami != "" {
+		return ami, nil
 	}
+	return "ami-<latest-ubuntu-arm64>", nil
+}
 
-	securityGroupID := strings.TrimSpace(params.SecurityGroupID)
-	if securityGroupID == "" {
-		securityGroupID, err = createCloudContextSecurityGroup(ctx, deps, provider, config.Region, config.Name)
-		if err != nil {
-			return CloudContextStatus{}, err
-		}
-	}
-	config.SecurityGroupID = securityGroupID
-	instanceProfile, err := ensureCloudContextInstanceProfile(ctx, deps, provider, config.Region, config.Name)
-	if err != nil {
-		return CloudContextStatus{}, err
-	}
-	config.InstanceProfileName = instanceProfile.Name
-	config.InstanceProfileARN = instanceProfile.ARN
-	config.InstanceRoleName = instanceProfile.RoleName
-
-	config.AdminToken = deps.NewToken()
-	userDataPath, cleanup, err := cloudContextUserDataFile(ctx, config.AdminToken)
-	if err != nil {
-		return CloudContextStatus{}, err
-	}
-	defer cleanup()
-
+func initCloudContextRunArgs(ami, userDataPath string, params InitCloudContextParams, config CloudContextConfig) []string {
 	runArgs := []string{
 		"ec2", "run-instances",
 		"--image-id", ami,
@@ -236,50 +296,44 @@ func InitCloudContext(ctx Context, store CloudContextStore, params InitCloudCont
 		"--query", "Instances[0].InstanceId",
 		"--output", "text",
 	}
-	if config.SecurityGroupID != "" {
-		runArgs = append(runArgs, "--security-group-ids", config.SecurityGroupID)
-	}
-	if config.InstanceProfileARN != "" {
-		runArgs = append(runArgs, "--iam-instance-profile", "Arn="+config.InstanceProfileARN)
-	} else if config.InstanceProfileName != "" {
-		runArgs = append(runArgs, "--iam-instance-profile", "Name="+config.InstanceProfileName)
-	}
-	if subnetID := strings.TrimSpace(params.SubnetID); subnetID != "" {
-		runArgs = append(runArgs, "--subnet-id", subnetID)
-	}
-	if keyName := strings.TrimSpace(params.KeyName); keyName != "" {
-		runArgs = append(runArgs, "--key-name", keyName)
-	}
-	instanceID, err := deps.RunAWS(ctx, provider, config.Region, runArgs)
-	if err != nil {
-		return CloudContextStatus{}, err
-	}
-	config.InstanceID = strings.TrimSpace(instanceID)
-	if config.InstanceID == "" {
-		config.InstanceID = "i-<new-instance>"
-	}
-	config.Status = CloudContextStatusPending
+	runArgs = appendOptionalCloudContextRunArg(runArgs, "--security-group-ids", config.SecurityGroupID)
+	runArgs = appendCloudContextProfileRunArg(runArgs, config)
+	runArgs = appendOptionalCloudContextRunArg(runArgs, "--subnet-id", params.SubnetID)
+	return appendOptionalCloudContextRunArg(runArgs, "--key-name", params.KeyName)
+}
 
+func appendOptionalCloudContextRunArg(args []string, name, value string) []string {
+	if value = strings.TrimSpace(value); value != "" {
+		return append(args, name, value)
+	}
+	return args
+}
+
+func appendCloudContextProfileRunArg(args []string, config CloudContextConfig) []string {
+	if config.InstanceProfileARN != "" {
+		return append(args, "--iam-instance-profile", "Arn="+config.InstanceProfileARN)
+	}
+	if config.InstanceProfileName != "" {
+		return append(args, "--iam-instance-profile", "Name="+config.InstanceProfileName)
+	}
+	return args
+}
+
+func finalizeInitCloudContext(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, config *CloudContextConfig) error {
 	if _, err := deps.RunAWS(ctx, provider, config.Region, []string{"ec2", "wait", "instance-running", "--instance-ids", config.InstanceID}); err != nil {
-		return CloudContextStatus{}, err
+		return err
 	}
 	publicIP, err := describeCloudContextPublicIP(ctx, deps, provider, config.Region, config.InstanceID)
 	if err != nil {
-		return CloudContextStatus{}, err
+		return err
 	}
 	config.PublicIP = publicIP
-	if err := configureCloudKubeContext(ctx, deps, config); err != nil {
-		return CloudContextStatus{}, err
+	if err := configureCloudKubeContext(ctx, deps, *config); err != nil {
+		return err
 	}
 	config.Status = CloudContextStatusRunning
 	config.UpdatedAt = deps.Now().UTC().Format(time.RFC3339)
-	if ctx.DryRun {
-		return CloudContextStatus{CloudContextConfig: NormalizeCloudContextConfig(config)}, nil
-	}
-	if err := saveCloudContextConfig(store, config); err != nil {
-		return CloudContextStatus{}, err
-	}
-	return CloudContextStatus{CloudContextConfig: NormalizeCloudContextConfig(config)}, nil
+	return nil
 }
 
 func StopCloudContext(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies) (CloudContextStatus, error) {
