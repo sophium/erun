@@ -759,6 +759,12 @@ func normalizeBootstrapParams(params BootstrapInitParams) BootstrapInitParams {
 }
 
 func (s bootstrapRunner) withDefaults() bootstrapRunner {
+	s = s.withStoreDefaults()
+	s = s.withRuntimeDefaults()
+	return s.withLoggerDefaults()
+}
+
+func (s bootstrapRunner) withStoreDefaults() bootstrapRunner {
 	if s.Store == nil {
 		s.Store = ConfigStore{}
 	}
@@ -774,6 +780,10 @@ func (s bootstrapRunner) withDefaults() bootstrapRunner {
 	if s.SaveProjectConfig == nil {
 		s.SaveProjectConfig = SaveProjectConfig
 	}
+	return s
+}
+
+func (s bootstrapRunner) withRuntimeDefaults() bootstrapRunner {
 	if s.WaitForRemoteRuntime == nil {
 		s.WaitForRemoteRuntime = WaitForShellDeployment
 	}
@@ -786,6 +796,10 @@ func (s bootstrapRunner) withDefaults() bootstrapRunner {
 	if s.Sleep == nil {
 		s.Sleep = time.Sleep
 	}
+	return s
+}
+
+func (s bootstrapRunner) withLoggerDefaults() bootstrapRunner {
 	if s.Context.Logger.verbosity == 0 && s.Context.Logger.stdout == nil && s.Context.Logger.stderr == nil {
 		s.Context.Logger = NewLoggerWithWriters(-1, io.Discard, io.Discard)
 	}
