@@ -26,40 +26,22 @@ func TestListCommandPrintsDefaultsAndConfiguredTenants(t *testing.T) {
 		}
 	}
 
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
-	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: tenantAPath, DefaultEnvironment: "local"}); err != nil {
-		t.Fatalf("save tenant-a config: %v", err)
-	}
-	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-b", ProjectRoot: tenantBPath, DefaultEnvironment: "dev"}); err != nil {
-		t.Fatalf("save tenant-b config: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "local", RepoPath: tenantAPath, KubernetesContext: "cluster-local"}); err != nil {
-		t.Fatalf("save tenant-a local env: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "prod", RepoPath: tenantAPath, KubernetesContext: "cluster-prod"}); err != nil {
-		t.Fatalf("save tenant-a prod env: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-b", common.EnvConfig{Name: "dev", RepoPath: tenantBPath, KubernetesContext: "cluster-b"}); err != nil {
-		t.Fatalf("save tenant-b dev env: %v", err)
-	}
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: tenantAPath, DefaultEnvironment: "local"}), "save tenant-a config")
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{Name: "tenant-b", ProjectRoot: tenantBPath, DefaultEnvironment: "dev"}), "save tenant-b config")
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "local", RepoPath: tenantAPath, KubernetesContext: "cluster-local"}), "save tenant-a local env")
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "prod", RepoPath: tenantAPath, KubernetesContext: "cluster-prod"}), "save tenant-a prod env")
+	requireNoError(t, common.SaveEnvConfig("tenant-b", common.EnvConfig{Name: "dev", RepoPath: tenantBPath, KubernetesContext: "cluster-b"}), "save tenant-b dev env")
 
 	repoRoot := filepath.Join(t.TempDir(), "frs")
-	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
-		t.Fatalf("mkdir .git: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755), "mkdir .git")
 	subDir := filepath.Join(repoRoot, "nested")
-	if err := os.MkdirAll(subDir, 0o755); err != nil {
-		t.Fatalf("mkdir nested: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(subDir, 0o755), "mkdir nested")
 	prevWD, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	if err := os.Chdir(subDir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	requireNoError(t, os.Chdir(subDir), "chdir")
 	t.Cleanup(func() {
 		_ = os.Chdir(prevWD)
 	})
@@ -70,9 +52,7 @@ func TestListCommandPrintsDefaultsAndConfiguredTenants(t *testing.T) {
 	cmd.SetErr(new(bytes.Buffer))
 	cmd.SetArgs([]string{"list"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stdout.String()
 	for _, want := range []string{
@@ -122,36 +102,20 @@ func TestListCommandUsesConfiguredCurrentDirectoryTenantBeforeDefault(t *testing
 		}
 	}
 
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
-	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: tenantAPath, DefaultEnvironment: "local"}); err != nil {
-		t.Fatalf("save tenant-a config: %v", err)
-	}
-	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-b", ProjectRoot: tenantBPath, DefaultEnvironment: "dev"}); err != nil {
-		t.Fatalf("save tenant-b config: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "local", RepoPath: tenantAPath, KubernetesContext: "cluster-local"}); err != nil {
-		t.Fatalf("save tenant-a env: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-b", common.EnvConfig{Name: "dev", RepoPath: tenantBPath, KubernetesContext: "cluster-b"}); err != nil {
-		t.Fatalf("save tenant-b env: %v", err)
-	}
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: tenantAPath, DefaultEnvironment: "local"}), "save tenant-a config")
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{Name: "tenant-b", ProjectRoot: tenantBPath, DefaultEnvironment: "dev"}), "save tenant-b config")
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "local", RepoPath: tenantAPath, KubernetesContext: "cluster-local"}), "save tenant-a env")
+	requireNoError(t, common.SaveEnvConfig("tenant-b", common.EnvConfig{Name: "dev", RepoPath: tenantBPath, KubernetesContext: "cluster-b"}), "save tenant-b env")
 
-	if err := os.MkdirAll(filepath.Join(tenantBPath, ".git"), 0o755); err != nil {
-		t.Fatalf("mkdir .git: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(filepath.Join(tenantBPath, ".git"), 0o755), "mkdir .git")
 	subDir := filepath.Join(tenantBPath, "nested")
-	if err := os.MkdirAll(subDir, 0o755); err != nil {
-		t.Fatalf("mkdir nested: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(subDir, 0o755), "mkdir nested")
 	prevWD, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	if err := os.Chdir(subDir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	requireNoError(t, os.Chdir(subDir), "chdir")
 	t.Cleanup(func() {
 		_ = os.Chdir(prevWD)
 	})
@@ -162,9 +126,7 @@ func TestListCommandUsesConfiguredCurrentDirectoryTenantBeforeDefault(t *testing
 	cmd.SetErr(new(bytes.Buffer))
 	cmd.SetArgs([]string{"list"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stdout.String()
 	for _, want := range []string{
@@ -195,16 +157,12 @@ func TestListCommandPrintsEmptyStateWhenNotInitialized(t *testing.T) {
 	}
 
 	repoRoot := filepath.Join(t.TempDir(), "erun")
-	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
-		t.Fatalf("mkdir .git: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755), "mkdir .git")
 	prevWD, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	if err := os.Chdir(repoRoot); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	requireNoError(t, os.Chdir(repoRoot), "chdir")
 	t.Cleanup(func() {
 		_ = os.Chdir(prevWD)
 	})
@@ -215,9 +173,7 @@ func TestListCommandPrintsEmptyStateWhenNotInitialized(t *testing.T) {
 	cmd.SetErr(new(bytes.Buffer))
 	cmd.SetArgs([]string{"list"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stdout.String()
 	for _, want := range []string{
@@ -244,27 +200,17 @@ func TestListCommandPrintsSnapshotPreference(t *testing.T) {
 	stubKubectlContexts(t, []string{"cluster-local"}, "cluster-local")
 
 	repoRoot := filepath.Join(t.TempDir(), "tenant-a")
-	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
-		t.Fatalf("mkdir .git: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755), "mkdir .git")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	snapshot := false
-	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: "local"}); err != nil {
-		t.Fatalf("save tenant config: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "local", RepoPath: repoRoot, KubernetesContext: "cluster-local", Snapshot: &snapshot}); err != nil {
-		t.Fatalf("save env config: %v", err)
-	}
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: "local"}), "save tenant config")
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "local", RepoPath: repoRoot, KubernetesContext: "cluster-local", Snapshot: &snapshot}), "save env config")
 
 	prevWD, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	if err := os.Chdir(repoRoot); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	requireNoError(t, os.Chdir(repoRoot), "chdir")
 	t.Cleanup(func() {
 		_ = os.Chdir(prevWD)
 	})
@@ -275,9 +221,7 @@ func TestListCommandPrintsSnapshotPreference(t *testing.T) {
 	cmd.SetErr(new(bytes.Buffer))
 	cmd.SetArgs([]string{"list"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stdout.String()
 	for _, want := range []string{
@@ -297,15 +241,9 @@ func TestListCommandPrintsSSHDConfiguration(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
 	repoRoot := filepath.Join(t.TempDir(), "tenant-a")
-	if err := os.MkdirAll(repoRoot, 0o755); err != nil {
-		t.Fatalf("mkdir repo root: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
-	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: "dev"}); err != nil {
-		t.Fatalf("save tenant config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(repoRoot, 0o755), "mkdir repo root")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: repoRoot, DefaultEnvironment: "dev"}), "save tenant config")
 	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{
 		Name:              "dev",
 		RepoPath:          repoRoot,
@@ -326,9 +264,7 @@ func TestListCommandPrintsSSHDConfiguration(t *testing.T) {
 	cmd.SetErr(new(bytes.Buffer))
 	cmd.SetArgs([]string{"list"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stdout.String()
 	for _, want := range []string{

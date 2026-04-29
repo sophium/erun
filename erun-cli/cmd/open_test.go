@@ -24,9 +24,7 @@ func TestOpenCommandLaunchesShell(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"open", "tenant-a", "dev"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if launched.Dir != repoPath || launched.Title != "tenant-a-dev" {
 		t.Fatalf("unexpected shell launch: %+v", launched)
 	}
@@ -42,9 +40,7 @@ func TestOpenHelpShowsTenantAndEnvironmentFlags(t *testing.T) {
 	cmd.SetErr(new(bytes.Buffer))
 	cmd.SetArgs([]string{"open", "--help"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stdout.String()
 	for _, want := range []string{
@@ -75,9 +71,7 @@ func TestOpenCommandAcceptsTenantAndEnvironmentFlags(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"open", "--tenant", "tenant-a", "--environment", "dev"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if launched.Dir != repoPath || launched.Title != "tenant-a-dev" {
 		t.Fatalf("unexpected shell launch: %+v", launched)
 	}
@@ -106,9 +100,7 @@ func TestOpenCommandVersionOverrideForcesRuntimeDeploy(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"open", "tenant-a", "dev", "--version", "1.0.48"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if deployed.Version != "1.0.48" {
 		t.Fatalf("unexpected deploy version: %+v", deployed)
@@ -140,9 +132,7 @@ func TestOpenCommandRuntimeImageOverrideUsesSelectedImage(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"open", "test", "env", "--no-shell", "--version", "1.0.48", "--runtime-image", "test-devops", "--no-alias-prompt"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	service, err := os.ReadFile(filepath.Join(deployed.ChartPath, "templates", "service.yaml"))
 	if err != nil {
@@ -522,9 +512,7 @@ func TestOpenCommandNoShellConfiguresLocalKubeconfig(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"open", "tenant-a", "dev", "--no-shell"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	expected := "kubectl config use-context 'cluster-dev' >/dev/null &&\n" +
 		"kubectl config set-context --current --namespace='tenant-a-dev' >/dev/null &&\n" +
 		"cd '" + repoPath + "'\n"
@@ -549,9 +537,7 @@ func TestOpenCommandNoShellAliasPromptFlagSkipsPrompt(t *testing.T) {
 	cmd.SetOut(stdout)
 	cmd.SetArgs([]string{"open", "tenant-a", "dev", "--no-shell", "--no-alias-prompt"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if !strings.Contains(stdout.String(), "kubectl config use-context") {
 		t.Fatalf("expected no-shell setup output, got %q", stdout.String())
 	}
@@ -921,9 +907,7 @@ func TestOpenNoShellHintLinesRecommendAliasWhenConfigured(t *testing.T) {
 	t.Setenv("HOME", homeDir)
 	result := common.OpenResult{Tenant: "frs", Environment: "local", Title: "frs-local"}
 	startupPath := filepath.Join(homeDir, ".zshrc")
-	if err := os.WriteFile(startupPath, []byte(`alias frs-local='eval "$(erun open frs local --no-shell)"'`+"\n"), 0o644); err != nil {
-		t.Fatalf("write startup file: %v", err)
-	}
+	requireNoError(t, os.WriteFile(startupPath, []byte(`alias frs-local='eval "$(erun open frs local --no-shell)"'`+"\n"), 0o644), "write startup file")
 
 	lines := openNoShellHintLines(result, "/bin/zsh")
 
@@ -973,9 +957,7 @@ func TestMaybeConfigureOpenNoShellAliasRecommendsConfiguredAliasWithoutPrompt(t 
 	t.Setenv("HOME", homeDir)
 	result := common.OpenResult{Tenant: "frs", Environment: "local", Title: "frs-local"}
 	startupPath := filepath.Join(homeDir, ".zshrc")
-	if err := os.WriteFile(startupPath, []byte(`alias frs-local='eval "$(erun open frs local --no-shell)"'`+"\n"), 0o644); err != nil {
-		t.Fatalf("write startup file: %v", err)
-	}
+	requireNoError(t, os.WriteFile(startupPath, []byte(`alias frs-local='eval "$(erun open frs local --no-shell)"'`+"\n"), 0o644), "write startup file")
 	stderr := new(bytes.Buffer)
 
 	err := maybeConfigureOpenNoShellAlias(result, func(prompt promptui.Prompt) (string, error) {
@@ -1015,9 +997,7 @@ func TestOpenCommandDryRunPrintsResolvedOpenTraceWithoutLaunchingShell(t *testin
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"-v", "open", "tenant-a", "dev", "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := stdout.String(); got != "" {
 		t.Fatalf("did not expect stdout output during dry-run, got %q", got)
@@ -1040,25 +1020,13 @@ func TestOpenCommandDryRunPrintsDeployPlanWhenDevopsRuntimeIsMissing(t *testing.
 
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
-	if err := os.WriteFile(filepath.Join(chartPath, "values.dev.yaml"), nil, 0o644); err != nil {
-		t.Fatalf("write values.dev.yaml: %v", err)
-	}
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "values.dev.yaml"), nil, 0o644), "write values.dev.yaml")
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir docker dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
@@ -1097,9 +1065,7 @@ func TestOpenCommandDryRunPrintsDeployPlanWhenDevopsRuntimeIsMissing(t *testing.
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"-v", "open", "tenant-a", "dev", "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
 	for _, want := range []string{
@@ -1120,28 +1086,14 @@ func TestOpenCommandDryRunRedeploysWhenRuntimeHasLocalBuilds(t *testing.T) {
 	componentName := "tenant-a-devops"
 	componentRoot := filepath.Join(projectRoot, componentName)
 	chartPath := filepath.Join(componentRoot, "k8s", componentName)
-	if err := os.MkdirAll(chartPath, 0o755); err != nil {
-		t.Fatalf("mkdir chart dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: "+componentName+"\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write Chart.yaml: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644); err != nil {
-		t.Fatalf("write values.local.yaml: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(chartPath, 0o755), "mkdir chart dir")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: "+componentName+"\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644), "write Chart.yaml")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644), "write values.local.yaml")
 	workdir := filepath.Join(componentRoot, "docker", componentName)
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir docker dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentRoot, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(componentRoot, "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	stdout := new(bytes.Buffer)
 	stderr := new(bytes.Buffer)
@@ -1174,9 +1126,7 @@ func TestOpenCommandDryRunRedeploysWhenRuntimeHasLocalBuilds(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"-v", "open", "tenant-a", "local", "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
 	for _, want := range []string{
@@ -1227,9 +1177,7 @@ func TestOpenCommandPersistsSnapshotPreferenceForLocalEnvironment(t *testing.T) 
 	})
 	cmd.SetArgs([]string{"open", "tenant-a", common.DefaultEnvironment, "--snapshot=false"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	envConfig, _, err := common.LoadEnvConfig("tenant-a", common.DefaultEnvironment)
 	if err != nil {
@@ -1248,28 +1196,14 @@ func TestOpenCommandDryRunUsesConfiguredContextForLocalDeploy(t *testing.T) {
 	componentName := "erun-devops"
 	componentRoot := filepath.Join(projectRoot, componentName)
 	chartPath := filepath.Join(componentRoot, "k8s", componentName)
-	if err := os.MkdirAll(chartPath, 0o755); err != nil {
-		t.Fatalf("mkdir chart dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: "+componentName+"\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write Chart.yaml: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644); err != nil {
-		t.Fatalf("write values.local.yaml: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(chartPath, 0o755), "mkdir chart dir")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: "+componentName+"\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644), "write Chart.yaml")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644), "write values.local.yaml")
 	workdir := filepath.Join(componentRoot, "docker", componentName)
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir docker dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentRoot, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(componentRoot, "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
@@ -1308,9 +1242,7 @@ func TestOpenCommandDryRunUsesConfiguredContextForLocalDeploy(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"-v", "open", "erun", common.DefaultEnvironment, "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
 	for _, want := range []string{
@@ -1334,28 +1266,14 @@ func TestOpenCommandUsesPersistedSnapshotPreferenceForLocalEnvironment(t *testin
 	componentName := "tenant-a-devops"
 	componentRoot := filepath.Join(projectRoot, componentName)
 	chartPath := filepath.Join(componentRoot, "k8s", componentName)
-	if err := os.MkdirAll(chartPath, 0o755); err != nil {
-		t.Fatalf("mkdir chart dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: "+componentName+"\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write Chart.yaml: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644); err != nil {
-		t.Fatalf("write values.local.yaml: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(chartPath, 0o755), "mkdir chart dir")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: "+componentName+"\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644), "write Chart.yaml")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644), "write values.local.yaml")
 	workdir := filepath.Join(componentRoot, "docker", componentName)
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir docker dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentRoot, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(componentRoot, "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 	snapshot := false
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
@@ -1398,9 +1316,7 @@ func TestOpenCommandUsesPersistedSnapshotPreferenceForLocalEnvironment(t *testin
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"-v", "open", "tenant-a", common.DefaultEnvironment, "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if !checkedDeployment {
 		t.Fatal("expected deployment existence check when snapshot preference is disabled")
 	}
@@ -1450,9 +1366,7 @@ func TestOpenCommandDryRunFallsBackToDefaultRuntimeChartWhenTenantRepoHasNoDevop
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"open", "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
 	if strings.Contains(output, "docker build -t") || strings.Contains(output, "docker push ") {
@@ -1507,9 +1421,7 @@ func TestOpenCommandPromptsToCreateMissingRuntimeChartAndUsesCreatedChart(t *tes
 	})
 	cmd.SetArgs([]string{"open"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	chartPath := filepath.Join(repoPath, "frs-devops", "k8s", "frs-devops")
 	if deployed.ChartPath != chartPath {
@@ -1558,9 +1470,7 @@ func TestOpenCommandSkipsLocalRuntimeChartPromptForRemoteRepo(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"open"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if launched.Dir != "/home/erun/git/erun" || launched.Title != "erun-local" {
 		t.Fatalf("unexpected shell launch: %+v", launched)
 	}
@@ -1572,9 +1482,7 @@ func TestOpenCommandSkipsLocalRuntimeChartPromptForRemoteRepo(t *testing.T) {
 func TestOpenCommandRunsManagedDeployAndReattachesWhenShellRequestsHandoff(t *testing.T) {
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
-	if err := os.WriteFile(filepath.Join(chartPath, "values.dev.yaml"), nil, 0o644); err != nil {
-		t.Fatalf("write values.dev.yaml: %v", err)
-	}
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "values.dev.yaml"), nil, 0o644), "write values.dev.yaml")
 
 	launchCalls := 0
 	deployed := common.HelmDeployParams{}
@@ -1603,9 +1511,7 @@ func TestOpenCommandRunsManagedDeployAndReattachesWhenShellRequestsHandoff(t *te
 	})
 	cmd.SetArgs([]string{"open", "tenant-a", "dev"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if launchCalls != 2 {
 		t.Fatalf("expected shell to relaunch after handoff, got %d launches", launchCalls)
 	}
@@ -1629,9 +1535,7 @@ func TestOpenCommandLaunchesShellWithDefaults(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"open"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if launched.Dir != repoPath || launched.Title != "tenant-a-local" {
 		t.Fatalf("unexpected shell launch: %+v", launched)
 	}
@@ -1655,9 +1559,7 @@ func TestOpenCommandLaunchesShellWithDefaultTenantAndRequestedEnvironment(t *tes
 	})
 	cmd.SetArgs([]string{"open", "dev"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if launched.Dir != repoPath || launched.Title != "tenant-a-dev" {
 		t.Fatalf("unexpected shell launch: %+v", launched)
 	}
@@ -1670,9 +1572,7 @@ func TestOpenCommandRunsInitWhenKubernetesContextIsMissing(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
 	projectRoot := t.TempDir()
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -1715,9 +1615,7 @@ func TestOpenCommandRunsInitWhenKubernetesContextIsMissing(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"open", "tenant-a", "dev"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	envConfig, _, err := common.LoadEnvConfig("tenant-a", "dev")
 	if err != nil {
@@ -1773,9 +1671,7 @@ func TestOpenCommandRunsInitWhenEnvironmentIsMissing(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"open", "tenant-a", "dev"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	envConfig, _, err := common.LoadEnvConfig("tenant-a", "dev")
 	if err != nil {
@@ -1789,15 +1685,9 @@ func TestOpenCommandRunsInitWhenEnvironmentIsMissing(t *testing.T) {
 func TestOpenCommandDeploysDevopsWhenMissing(t *testing.T) {
 	repoPath := t.TempDir()
 	chartPath := filepath.Join(repoPath, "erun-devops", "k8s", "erun-devops")
-	if err := os.MkdirAll(chartPath, 0o755); err != nil {
-		t.Fatalf("mkdir chart path: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: erun-devops\n"), 0o644); err != nil {
-		t.Fatalf("write Chart.yaml: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(chartPath, "values.dev.yaml"), nil, 0o644); err != nil {
-		t.Fatalf("write values.dev.yaml: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(chartPath, 0o755), "mkdir chart path")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: erun-devops\n"), 0o644), "write Chart.yaml")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "values.dev.yaml"), nil, 0o644), "write values.dev.yaml")
 
 	launched := common.ShellLaunchParams{}
 	deployed := common.HelmDeployParams{}
@@ -1820,9 +1710,7 @@ func TestOpenCommandDeploysDevopsWhenMissing(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"open", "tenant-a", "dev"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if deployed.ReleaseName != "tenant-a-devops" || deployed.ChartPath != chartPath {
 		t.Fatalf("unexpected deploy request: %+v", deployed)

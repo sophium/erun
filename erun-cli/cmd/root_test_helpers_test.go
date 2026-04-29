@@ -43,6 +43,13 @@ type testRootDeps struct {
 	Now                            common.NowFunc
 }
 
+func requireNoError(t *testing.T, err error, context string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", context, err)
+	}
+}
+
 func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	store := deps.Store
 	if store == nil {
@@ -272,8 +279,6 @@ func stubKubectlContexts(t *testing.T, contexts []string, current string) {
 		"fi\n" +
 		"echo \"unexpected kubectl invocation: $@\" >&2\n" +
 		"exit 1\n"
-	if err := os.WriteFile(kubectlPath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write kubectl stub: %v", err)
-	}
+	requireNoError(t, os.WriteFile(kubectlPath, []byte(script), 0o755), "write kubectl stub")
 	t.Setenv("PATH", kubectlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }

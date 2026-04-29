@@ -308,22 +308,12 @@ func TestOpenIntelliJGatewayProjectLaunchesRecentProjectURI(t *testing.T) {
 
 	root := t.TempDir()
 	optionsDir := filepath.Join(root, "Library", "Application Support", "JetBrains", "IntelliJIdea2025.3", "options")
-	if err := os.MkdirAll(optionsDir, 0o700); err != nil {
-		t.Fatalf("mkdir optionsDir: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(optionsDir, 0o700), "mkdir optionsDir")
 	appContentsDir := filepath.Join(root, "Applications", "IntelliJ IDEA.app", "Contents")
-	if err := os.MkdirAll(filepath.Join(appContentsDir, "plugins", "gateway-plugin", "resources"), 0o700); err != nil {
-		t.Fatalf("mkdir app contents: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(appContentsDir, "lib"), 0o700); err != nil {
-		t.Fatalf("mkdir app lib: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(appContentsDir, "lib", "app.jar"), nil, 0o600); err != nil {
-		t.Fatalf("write app jar: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(appContentsDir, "plugins", "gateway-plugin", "resources", "gateway.vmoptions"), []byte("-Xmx512m\n-Dapple.awt.application.name=Gateway\n"), 0o600); err != nil {
-		t.Fatalf("write gateway vmoptions: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(filepath.Join(appContentsDir, "plugins", "gateway-plugin", "resources"), 0o700), "mkdir app contents")
+	requireNoError(t, os.MkdirAll(filepath.Join(appContentsDir, "lib"), 0o700), "mkdir app lib")
+	requireNoError(t, os.WriteFile(filepath.Join(appContentsDir, "lib", "app.jar"), nil, 0o600), "write app jar")
+	requireNoError(t, os.WriteFile(filepath.Join(appContentsDir, "plugins", "gateway-plugin", "resources", "gateway.vmoptions"), []byte("-Xmx512m\n-Dapple.awt.application.name=Gateway\n"), 0o600), "write gateway vmoptions")
 	configID := jetbrainsconfig.StableConfigID("erun-tenant-a-remote")
 	if err := os.WriteFile(filepath.Join(optionsDir, "sshRecentConnections.v2.xml"), []byte(`<application>
   <component name="SshLocalRecentConnectionsManager">
@@ -521,20 +511,12 @@ func TestResolveIntelliJOptionsDirChoosesMostRecentlyModified(t *testing.T) {
 	root := t.TempDir()
 	oldDir := filepath.Join(root, "IntelliJIdea2025.2", "options")
 	newDir := filepath.Join(root, "IntelliJIdea2025.3", "options")
-	if err := os.MkdirAll(oldDir, 0o700); err != nil {
-		t.Fatalf("mkdir oldDir: %v", err)
-	}
-	if err := os.MkdirAll(newDir, 0o700); err != nil {
-		t.Fatalf("mkdir newDir: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(oldDir, 0o700), "mkdir oldDir")
+	requireNoError(t, os.MkdirAll(newDir, 0o700), "mkdir newDir")
 	oldTime := time.Unix(100, 0)
 	newTime := time.Unix(200, 0)
-	if err := os.Chtimes(oldDir, oldTime, oldTime); err != nil {
-		t.Fatalf("chtimes oldDir: %v", err)
-	}
-	if err := os.Chtimes(newDir, newTime, newTime); err != nil {
-		t.Fatalf("chtimes newDir: %v", err)
-	}
+	requireNoError(t, os.Chtimes(oldDir, oldTime, oldTime), "chtimes oldDir")
+	requireNoError(t, os.Chtimes(newDir, newTime, newTime), "chtimes newDir")
 
 	ideUserHomeDir = func() (string, error) { return "/Users/test", nil }
 	ideGlob = func(pattern string) ([]string, error) { return []string{oldDir, newDir}, nil }
@@ -561,9 +543,7 @@ func TestResolveIntelliJOptionsDirWindowsUsesAppData(t *testing.T) {
 
 	root := t.TempDir()
 	optionsDir := filepath.Join(root, "JetBrains", "IntelliJIdea2025.3", "options")
-	if err := os.MkdirAll(optionsDir, 0o700); err != nil {
-		t.Fatalf("mkdir optionsDir: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(optionsDir, 0o700), "mkdir optionsDir")
 	t.Setenv("APPDATA", root)
 
 	ideUserHomeDir = func() (string, error) { return "/Users/ignored", nil }

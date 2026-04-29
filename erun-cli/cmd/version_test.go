@@ -28,9 +28,7 @@ func TestVersionCommandOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	if err := os.Chdir(workdir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	requireNoError(t, os.Chdir(workdir), "chdir")
 	t.Cleanup(func() {
 		_ = os.Chdir(prevWD)
 	})
@@ -42,9 +40,7 @@ func TestVersionCommandOutput(t *testing.T) {
 	cmd.SetArgs([]string{"version"})
 
 	setBuildInfo("1.2.3", "abcdef", "2024-01-01")
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := buf.String(); got != "erun 1.2.3 (abcdef built 2024-01-01)\n" {
 		t.Fatalf("unexpected output: %q", got)
@@ -52,9 +48,7 @@ func TestVersionCommandOutput(t *testing.T) {
 
 	buf.Reset()
 	setBuildInfo("1.2.3", "", "")
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if got := buf.String(); got != "erun 1.2.3\n" {
 		t.Fatalf("unexpected tail-less output: %q", got)
 	}
@@ -67,9 +61,7 @@ func TestVersionCommandPrefersVersionFileInCurrentDirectory(t *testing.T) {
 	})
 
 	workdir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("9.9.9\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("9.9.9\n"), 0o644), "write VERSION")
 
 	cmd := newTestRootCmd(testRootDeps{})
 	buf := new(bytes.Buffer)
@@ -81,17 +73,13 @@ func TestVersionCommandPrefersVersionFileInCurrentDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	if err := os.Chdir(workdir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	requireNoError(t, os.Chdir(workdir), "chdir")
 	t.Cleanup(func() {
 		_ = os.Chdir(prevWD)
 	})
 
 	setBuildInfo("1.2.3", "abcdef", "2024-01-01")
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := buf.String(); got != "erun 9.9.9 (abcdef built 2024-01-01)\n" {
 		t.Fatalf("unexpected output: %q", got)
@@ -109,9 +97,7 @@ func TestVersionCommandPrintsRegistryVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	if err := os.Chdir(workdir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	requireNoError(t, os.Chdir(workdir), "chdir")
 	t.Cleanup(func() {
 		_ = os.Chdir(prevWD)
 	})
@@ -131,9 +117,7 @@ func TestVersionCommandPrintsRegistryVersions(t *testing.T) {
 	cmd.SetArgs([]string{"version"})
 
 	setBuildInfo("1.2.3", "abcdef", "2024-01-01")
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	want := "erun 1.2.3 (abcdef built 2024-01-01)\n" +
 		"latest stable: 1.0.50\n" +
@@ -154,9 +138,7 @@ func TestVersionCommandCanSkipRegistryVersions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	if err := os.Chdir(workdir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	requireNoError(t, os.Chdir(workdir), "chdir")
 	t.Cleanup(func() {
 		_ = os.Chdir(prevWD)
 	})
@@ -174,9 +156,7 @@ func TestVersionCommandCanSkipRegistryVersions(t *testing.T) {
 	cmd.SetArgs([]string{"version", "--no-registry"})
 
 	setBuildInfo("1.2.3", "", "")
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if called {
 		t.Fatal("registry resolver was called")
@@ -192,9 +172,7 @@ func TestVersionCommandDryRunPrintsTraceWithoutOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	if err := os.Chdir(workdir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	requireNoError(t, os.Chdir(workdir), "chdir")
 	t.Cleanup(func() {
 		_ = os.Chdir(prevWD)
 	})
@@ -206,9 +184,7 @@ func TestVersionCommandDryRunPrintsTraceWithoutOutput(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"version", "--dry-run", "-v"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := stdout.String(); got == "" {
 		t.Fatalf("expected version output during dry-run, got %q", got)
@@ -229,9 +205,7 @@ func TestVersionCommandTimeFlagPrintsElapsedTimeToStderr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	if err := os.Chdir(workdir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	requireNoError(t, os.Chdir(workdir), "chdir")
 	t.Cleanup(func() {
 		_ = os.Chdir(prevWD)
 	})
@@ -244,9 +218,7 @@ func TestVersionCommandTimeFlagPrintsElapsedTimeToStderr(t *testing.T) {
 	cmd.SetArgs([]string{"version", "--time"})
 
 	setBuildInfo("1.2.3", "", "")
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := stdout.String(); got != "erun 1.2.3\n" {
 		t.Fatalf("unexpected stdout: %q", got)

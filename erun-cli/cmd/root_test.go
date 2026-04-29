@@ -97,9 +97,7 @@ func TestRootCommandRunsInitWhenNoSubcommand(t *testing.T) {
 	cmd.SetErr(buf)
 	cmd.SetArgs([]string{})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := buf.String(); got != "" {
 		t.Fatalf("expected no command output, got %q", got)
@@ -168,12 +166,8 @@ func TestRootCommandRunsOpenWithDefaults(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
 	projectRoot := filepath.Join(t.TempDir(), "project")
-	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
-		t.Fatalf("mkdir project root: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(projectRoot, 0o755), "mkdir project root")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -181,9 +175,7 @@ func TestRootCommandRunsOpenWithDefaults(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "dev", RepoPath: projectRoot, KubernetesContext: "cluster-dev"}); err != nil {
-		t.Fatalf("save env config: %v", err)
-	}
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "dev", RepoPath: projectRoot, KubernetesContext: "cluster-dev"}), "save env config")
 
 	launched := common.ShellLaunchParams{}
 	cmd := newTestRootCmd(testRootDeps{
@@ -205,9 +197,7 @@ func TestRootCommandRunsOpenWithDefaults(t *testing.T) {
 	cmd.SetErr(buf)
 	cmd.SetArgs([]string{})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if launched.Dir != projectRoot || launched.Title != "tenant-a-dev" {
 		t.Fatalf("unexpected shell launch: %+v", launched)
@@ -221,12 +211,8 @@ func TestRootCommandRunsOpenWithDefaultTenantAndRequestedEnvironment(t *testing.
 	setupRootCmdTestConfigHome(t)
 
 	projectRoot := filepath.Join(t.TempDir(), "tenant-a-dev")
-	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
-		t.Fatalf("mkdir project root: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(projectRoot, 0o755), "mkdir project root")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -234,9 +220,7 @@ func TestRootCommandRunsOpenWithDefaultTenantAndRequestedEnvironment(t *testing.
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "dev", RepoPath: projectRoot, KubernetesContext: "cluster-dev"}); err != nil {
-		t.Fatalf("save env config: %v", err)
-	}
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "dev", RepoPath: projectRoot, KubernetesContext: "cluster-dev"}), "save env config")
 
 	launched := common.ShellLaunchParams{}
 	cmd := newTestRootCmd(testRootDeps{
@@ -258,9 +242,7 @@ func TestRootCommandRunsOpenWithDefaultTenantAndRequestedEnvironment(t *testing.
 	cmd.SetErr(buf)
 	cmd.SetArgs([]string{"dev"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if launched.Dir != projectRoot || launched.Title != "tenant-a-dev" {
 		t.Fatalf("unexpected shell launch: %+v", launched)
@@ -274,9 +256,7 @@ func TestRootCommandRunsOpenWithExplicitTenantAndEnvironment(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
 	projectRoot := filepath.Join(t.TempDir(), "dog-me")
-	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
-		t.Fatalf("mkdir project root: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(projectRoot, 0o755), "mkdir project root")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "dog",
 		ProjectRoot:        projectRoot,
@@ -284,9 +264,7 @@ func TestRootCommandRunsOpenWithExplicitTenantAndEnvironment(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := common.SaveEnvConfig("dog", common.EnvConfig{Name: "me", RepoPath: projectRoot, KubernetesContext: "cluster-me"}); err != nil {
-		t.Fatalf("save env config: %v", err)
-	}
+	requireNoError(t, common.SaveEnvConfig("dog", common.EnvConfig{Name: "me", RepoPath: projectRoot, KubernetesContext: "cluster-me"}), "save env config")
 
 	launched := common.ShellLaunchParams{}
 	cmd := newTestRootCmd(testRootDeps{
@@ -300,9 +278,7 @@ func TestRootCommandRunsOpenWithExplicitTenantAndEnvironment(t *testing.T) {
 	cmd.SetErr(buf)
 	cmd.SetArgs([]string{"dog", "me"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if launched.Dir != projectRoot || launched.Title != "dog-me" {
 		t.Fatalf("unexpected shell launch: %+v", launched)
@@ -316,12 +292,8 @@ func TestRootCommandRunsInitWhenOpenEnvironmentLacksKubernetesContext(t *testing
 	setupRootCmdTestConfigHome(t)
 
 	projectRoot := filepath.Join(t.TempDir(), "tenant-a-dev")
-	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
-		t.Fatalf("mkdir project root: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(projectRoot, 0o755), "mkdir project root")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -367,9 +339,7 @@ func TestRootCommandRunsInitWhenOpenEnvironmentLacksKubernetesContext(t *testing
 	})
 	cmd.SetArgs([]string{})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	envConfig, _, err := common.LoadEnvConfig("tenant-a", "dev")
 	if err != nil {
@@ -405,9 +375,7 @@ func TestInitCommandPreservesExistingTenantDefaultEnvironmentWhenFlagOmitted(t *
 	setupRootCmdTestConfigHome(t)
 
 	projectRoot := filepath.Join(t.TempDir(), "project")
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -415,9 +383,7 @@ func TestInitCommandPreservesExistingTenantDefaultEnvironmentWhenFlagOmitted(t *
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "prod", RepoPath: projectRoot, KubernetesContext: "cluster-prod"}); err != nil {
-		t.Fatalf("save env config: %v", err)
-	}
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "prod", RepoPath: projectRoot, KubernetesContext: "cluster-prod"}), "save env config")
 
 	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
@@ -433,9 +399,7 @@ func TestInitCommandPreservesExistingTenantDefaultEnvironmentWhenFlagOmitted(t *
 	cmd.SetErr(buf)
 	cmd.SetArgs([]string{"init", "-y"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := buf.String(); got != "" {
 		t.Fatalf("expected no command output, got %q", got)
@@ -500,9 +464,7 @@ func TestInitCommandDecliningDefaultTenantStillInitializes(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"init", "--tenant", "petios", "--environment", "review"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if _, _, err := common.LoadERunConfig(); !errors.Is(err, common.ErrNotInitialized) {
 		t.Fatalf("expected erun config to remain absent, got %v", err)
@@ -543,9 +505,7 @@ func TestRootCommandHelpFlagPrintsHelp(t *testing.T) {
 	cmd.SetErr(buf)
 	cmd.SetArgs([]string{"--help"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := buf.String()
 	for _, want := range []string{"init", "open", "devops", "mcp", "version"} {
@@ -571,12 +531,8 @@ func TestRootCommandDryRunOpensByPlanningWithoutLaunchingShell(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
 	projectRoot := filepath.Join(t.TempDir(), "project")
-	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
-		t.Fatalf("mkdir project root: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(projectRoot, 0o755), "mkdir project root")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -584,9 +540,7 @@ func TestRootCommandDryRunOpensByPlanningWithoutLaunchingShell(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "dev", RepoPath: projectRoot, KubernetesContext: "cluster-dev"}); err != nil {
-		t.Fatalf("save env config: %v", err)
-	}
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "dev", RepoPath: projectRoot, KubernetesContext: "cluster-dev"}), "save env config")
 
 	cmd := newTestRootCmd(testRootDeps{
 		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
@@ -603,9 +557,7 @@ func TestRootCommandDryRunOpensByPlanningWithoutLaunchingShell(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"-v", "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := stdout.String(); got != "" {
 		t.Fatalf("expected no stdout output during dry-run, got %q", got)
@@ -768,9 +720,7 @@ func setupRootCmdTestConfigHome(t *testing.T) {
 
 	dir := t.TempDir()
 	previousValue, hadPreviousValue := os.LookupEnv("XDG_CONFIG_HOME")
-	if err := os.Setenv("XDG_CONFIG_HOME", dir); err != nil {
-		t.Fatalf("set XDG_CONFIG_HOME: %v", err)
-	}
+	requireNoError(t, os.Setenv("XDG_CONFIG_HOME", dir), "set XDG_CONFIG_HOME")
 	xdg.Reload()
 	t.Cleanup(func() {
 		var err error

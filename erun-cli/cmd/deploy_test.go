@@ -85,9 +85,7 @@ func TestDeployHelpShowsTenantAndEnvironmentFlags(t *testing.T) {
 	cmd.SetErr(new(bytes.Buffer))
 	cmd.SetArgs([]string{"deploy", "--help"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stdout.String()
 	for _, want := range []string{
@@ -123,15 +121,9 @@ func TestNewRootCmdRegistersDeployShorthandWhenKubernetesDeployContextPresent(t 
 func TestNewRootCmdRegistersDeployShorthandAtProjectRootWhenDevopsK8sScopePresent(t *testing.T) {
 	projectRoot := t.TempDir()
 	moduleRoot := filepath.Join(projectRoot, "tenant-a-devops", "k8s", "tenant-a-devops")
-	if err := os.MkdirAll(moduleRoot, 0o755); err != nil {
-		t.Fatalf("mkdir chart dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(moduleRoot, "Chart.yaml"), []byte("apiVersion: v2\nname: tenant-a-devops\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write Chart.yaml: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(moduleRoot, "values.local.yaml"), nil, 0o644); err != nil {
-		t.Fatalf("write values.local.yaml: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(moduleRoot, 0o755), "mkdir chart dir")
+	requireNoError(t, os.WriteFile(filepath.Join(moduleRoot, "Chart.yaml"), []byte("apiVersion: v2\nname: tenant-a-devops\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644), "write Chart.yaml")
+	requireNoError(t, os.WriteFile(filepath.Join(moduleRoot, "values.local.yaml"), nil, 0o644), "write values.local.yaml")
 
 	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
@@ -166,22 +158,12 @@ func TestDevopsK8sDeployBuildsAndDeploysSameExactVersionFromCurrentBuildDirector
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir docker dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
 
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -196,9 +178,7 @@ func TestDevopsK8sDeployBuildsAndDeploysSameExactVersionFromCurrentBuildDirector
 	}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	var built deployBuildCall
 	var pushed deployPushCall
@@ -229,9 +209,7 @@ func TestDevopsK8sDeployBuildsAndDeploysSameExactVersionFromCurrentBuildDirector
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"devops", "k8s", "deploy", "erun-devops"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if received.ReleaseName != "erun-devops" {
 		t.Fatalf("unexpected release name: %+v", received)
@@ -284,19 +262,11 @@ func TestRootDeployShorthandUsesCurrentComponentContext(t *testing.T) {
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir docker dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
 
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -311,9 +281,7 @@ func TestRootDeployShorthandUsesCurrentComponentContext(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	fixedNow := time.Date(2026, time.April, 6, 13, 16, 30, 0, time.UTC)
 	var built deployBuildCall
@@ -357,9 +325,7 @@ func TestRootDeployShorthandUsesCurrentComponentContext(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"deploy"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if built.Tag != "erunpaas/erun-devops:1.1.0" {
 		t.Fatalf("unexpected build request: %+v", built)
@@ -408,19 +374,11 @@ func TestRootDeployShorthandAtProjectRootDeploysAllComponents(t *testing.T) {
 			t.Fatalf("write Dockerfile: %v", err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(moduleRoot, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentA, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write component A VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentB, "VERSION"), []byte("28.1.1\n"), 0o644); err != nil {
-		t.Fatalf("write component B VERSION: %v", err)
-	}
+	requireNoError(t, os.WriteFile(filepath.Join(moduleRoot, "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(componentA, "VERSION"), []byte("1.1.0\n"), 0o644), "write component A VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(componentB, "VERSION"), []byte("28.1.1\n"), 0o644), "write component B VERSION")
 
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -435,9 +393,7 @@ func TestRootDeployShorthandAtProjectRootDeploysAllComponents(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	var builds []deployBuildCall
 	var pushes []deployPushCall
@@ -467,9 +423,7 @@ func TestRootDeployShorthandAtProjectRootDeploysAllComponents(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"deploy"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if len(builds) != 2 || len(pushes) != 0 || len(deploys) != 2 {
 		t.Fatalf("unexpected execution counts: builds=%+v pushes=%+v deploys=%+v", builds, pushes, deploys)
@@ -495,22 +449,12 @@ func TestDeployCommandHiddenTargetOverrideUsesProvidedTenantEnvironment(t *testi
 
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
-	if err := os.WriteFile(filepath.Join(chartPath, "values.dev.yaml"), []byte("image:\n  repository: erunpaas/erun-devops\n  tag: latest\n"), 0o644); err != nil {
-		t.Fatalf("write values.dev.yaml: %v", err)
-	}
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "values.dev.yaml"), []byte("image:\n  repository: erunpaas/erun-devops\n  tag: latest\n"), 0o644), "write values.dev.yaml")
 	componentDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(componentDir, 0o755); err != nil {
-		t.Fatalf("mkdir docker dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(componentDir, 0o755), "mkdir docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write VERSION")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -561,9 +505,7 @@ func TestDeployCommandHiddenTargetOverrideUsesProvidedTenantEnvironment(t *testi
 	})
 	cmd.SetArgs([]string{"deploy", "--tenant", "tenant-a", "--environment", "dev", "--repo-path", projectRoot})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if deployed.Namespace != "tenant-a-dev" || deployed.KubernetesContext != "cluster-dev" {
 		t.Fatalf("unexpected deploy target: %+v", deployed)
@@ -582,18 +524,10 @@ func TestDeployCommandVersionOverrideUsesProvidedVersion(t *testing.T) {
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
 	componentDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(componentDir, 0o755); err != nil {
-		t.Fatalf("mkdir docker dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(componentDir, 0o755), "mkdir docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write VERSION")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -608,9 +542,7 @@ func TestDeployCommandVersionOverrideUsesProvidedVersion(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	var deployed common.HelmDeployParams
 	cmd := newTestRootCmd(testRootDeps{
@@ -645,9 +577,7 @@ func TestDeployCommandVersionOverrideUsesProvidedVersion(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"deploy", "--version", "1.0.7"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if deployed.Version != "1.0.7" {
 		t.Fatalf("unexpected deploy version: %+v", deployed)
@@ -660,21 +590,11 @@ func TestDeployCommandAcceptsTenantAndEnvironmentArgsWithVersionOverride(t *test
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
 	componentDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(componentDir, 0o755); err != nil {
-		t.Fatalf("mkdir docker dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(chartPath, "values.proxmox1.yaml"), nil, 0o644); err != nil {
-		t.Fatalf("write values.proxmox1.yaml: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(componentDir, 0o755), "mkdir docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "values.proxmox1.yaml"), nil, 0o644), "write values.proxmox1.yaml")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write VERSION")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -689,9 +609,7 @@ func TestDeployCommandAcceptsTenantAndEnvironmentArgsWithVersionOverride(t *test
 	}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	var deployed common.HelmDeployParams
 	cmd := newTestRootCmd(testRootDeps{
@@ -726,9 +644,7 @@ func TestDeployCommandAcceptsTenantAndEnvironmentArgsWithVersionOverride(t *test
 	})
 	cmd.SetArgs([]string{"deploy", "tenant-a", "proxmox1", "--version", "1.0.48"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if deployed.Tenant != "tenant-a" || deployed.Environment != "proxmox1" {
 		t.Fatalf("unexpected deploy target: %+v", deployed)
@@ -745,18 +661,10 @@ func TestDeployCommandUsesConfiguredKubernetesContextForLocalEnvironment(t *test
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
 	componentDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(componentDir, 0o755); err != nil {
-		t.Fatalf("mkdir docker dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(componentDir, 0o755), "mkdir docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write VERSION")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -771,9 +679,7 @@ func TestDeployCommandUsesConfiguredKubernetesContextForLocalEnvironment(t *test
 	}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	var deployed common.HelmDeployParams
 	cmd := newTestRootCmd(testRootDeps{
@@ -808,9 +714,7 @@ func TestDeployCommandUsesConfiguredKubernetesContextForLocalEnvironment(t *test
 	})
 	cmd.SetArgs([]string{"deploy", "--version", "1.0.7"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if deployed.KubernetesContext != "cluster-local" {
 		t.Fatalf("expected deploy to keep configured kubernetes context, got %+v", deployed)
@@ -824,18 +728,10 @@ func TestDeployCommandEnsuresNamespaceBeforeDeploy(t *testing.T) {
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
 	componentDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(componentDir, 0o755); err != nil {
-		t.Fatalf("mkdir docker dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(componentDir, 0o755), "mkdir docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(componentDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write VERSION")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -850,9 +746,7 @@ func TestDeployCommandEnsuresNamespaceBeforeDeploy(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	ensuredContext := ""
 	ensuredNamespace := ""
@@ -897,9 +791,7 @@ func TestDeployCommandEnsuresNamespaceBeforeDeploy(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"deploy", "--version", "1.0.7"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if ensuredContext != "cluster-local" || ensuredNamespace != "tenant-a-local" {
 		t.Fatalf("unexpected namespace ensure request: context=%q namespace=%q", ensuredContext, ensuredNamespace)
@@ -916,19 +808,11 @@ func TestRootDeployShorthandDryRunPrintsBuildAndDeployCommandsWithoutExecuting(t
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir docker dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
 
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -943,9 +827,7 @@ func TestRootDeployShorthandDryRunPrintsBuildAndDeployCommandsWithoutExecuting(t
 	}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	stderr := new(bytes.Buffer)
 	cmd := newTestRootCmd(testRootDeps{
@@ -984,9 +866,7 @@ func TestRootDeployShorthandDryRunPrintsBuildAndDeployCommandsWithoutExecuting(t
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"deploy", "--dry-run", "-v"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
 	if !strings.Contains(output, "docker buildx build --builder erun-multiarch") {
@@ -1013,22 +893,12 @@ func TestRootDeployShorthandUsesPersistedSnapshotPreferenceForLocalEnvironment(t
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir docker dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
 
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	snapshot := false
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
@@ -1045,9 +915,7 @@ func TestRootDeployShorthandUsesPersistedSnapshotPreferenceForLocalEnvironment(t
 	}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	stderr := new(bytes.Buffer)
 	cmd := newTestRootCmd(testRootDeps{
@@ -1083,9 +951,7 @@ func TestRootDeployShorthandUsesPersistedSnapshotPreferenceForLocalEnvironment(t
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"deploy", "--dry-run", "-v"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
 	if strings.Contains(output, "docker build -t") || strings.Contains(output, "docker push ") {
@@ -1102,41 +968,21 @@ func TestRootDeployShorthandBuildsAndPushesLiteralChartImageDependencies(t *test
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
 	templatePath := filepath.Join(chartPath, "templates", "deployment.yaml")
-	if err := os.MkdirAll(filepath.Dir(templatePath), 0o755); err != nil {
-		t.Fatalf("mkdir templates dir: %v", err)
-	}
-	if err := os.WriteFile(templatePath, []byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: erun-devops\nspec:\n  template:\n    spec:\n      containers:\n        - image: erunpaas/erun-dind:28.1.1-dind\n          name: dind\n"), 0o644); err != nil {
-		t.Fatalf("write deployment template: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(filepath.Dir(templatePath), 0o755), "mkdir templates dir")
+	requireNoError(t, os.WriteFile(templatePath, []byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: erun-devops\nspec:\n  template:\n    spec:\n      containers:\n        - image: erunpaas/erun-dind:28.1.1-dind\n          name: dind\n"), 0o644), "write deployment template")
 
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir docker dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write main Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write main VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write main Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write main VERSION")
 
 	dindDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-dind")
-	if err := os.MkdirAll(dindDir, 0o755); err != nil {
-		t.Fatalf("mkdir dind dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dindDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write dind Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dindDir, "VERSION"), []byte("28.1.1-dind\n"), 0o644); err != nil {
-		t.Fatalf("write dind VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(dindDir, 0o755), "mkdir dind dir")
+	requireNoError(t, os.WriteFile(filepath.Join(dindDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write dind Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(dindDir, "VERSION"), []byte("28.1.1-dind\n"), 0o644), "write dind VERSION")
 
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -1151,9 +997,7 @@ func TestRootDeployShorthandBuildsAndPushesLiteralChartImageDependencies(t *test
 	}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	var builds []deployBuildCall
 	var pushes []deployPushCall
@@ -1191,9 +1035,7 @@ func TestRootDeployShorthandBuildsAndPushesLiteralChartImageDependencies(t *test
 	})
 	cmd.SetArgs([]string{"deploy"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if len(builds) != 2 {
 		t.Fatalf("expected 2 builds, got %+v", builds)
@@ -1218,12 +1060,8 @@ func TestRootCommandTreatsDeployAsEnvironmentWhenDeployContextAbsent(t *testing.
 	setupRootCmdTestConfigHome(t)
 
 	projectRoot := filepath.Join(t.TempDir(), "tenant-a-deploy")
-	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
-		t.Fatalf("mkdir project root: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(projectRoot, 0o755), "mkdir project root")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -1261,9 +1099,7 @@ func TestRootCommandTreatsDeployAsEnvironmentWhenDeployContextAbsent(t *testing.
 	})
 	cmd.SetArgs([]string{"deploy"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if launched.Dir != projectRoot || launched.Title != "tenant-a-deploy" {
 		t.Fatalf("unexpected shell launch: %+v", launched)
@@ -1274,14 +1110,8 @@ func createHelmChartFixture(t *testing.T, projectRoot, componentName string) str
 	t.Helper()
 
 	chartPath := filepath.Join(projectRoot, "erun-devops", "k8s", componentName)
-	if err := os.MkdirAll(chartPath, 0o755); err != nil {
-		t.Fatalf("mkdir chart dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: "+componentName+"\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write Chart.yaml: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644); err != nil {
-		t.Fatalf("write values.local.yaml: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(chartPath, 0o755), "mkdir chart dir")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: "+componentName+"\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644), "write Chart.yaml")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644), "write values.local.yaml")
 	return chartPath
 }

@@ -81,9 +81,7 @@ func TestRunSSHDInitCommandPersistsConfigAndDeploysRuntime(t *testing.T) {
 	t.Setenv("HOME", homeDir)
 
 	publicKeyPath := filepath.Join(t.TempDir(), "id_ed25519.pub")
-	if err := os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644); err != nil {
-		t.Fatalf("write public key: %v", err)
-	}
+	requireNoError(t, os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644), "write public key")
 
 	var savedTenant string
 	var savedEnv common.EnvConfig
@@ -194,9 +192,7 @@ func TestRunSSHDInitCommandUsesResolvedEnvironmentLocalPortByDefault(t *testing.
 	t.Setenv("HOME", homeDir)
 
 	publicKeyPath := filepath.Join(t.TempDir(), "id_ed25519.pub")
-	if err := os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644); err != nil {
-		t.Fatalf("write public key: %v", err)
-	}
+	requireNoError(t, os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644), "write public key")
 
 	var savedEnv common.EnvConfig
 	err := runSSHDInitCommand(
@@ -272,9 +268,7 @@ func TestSyncRemoteSSHDKeyRetriesWhenDeploymentIsNotReady(t *testing.T) {
 	})
 
 	publicKeyPath := filepath.Join(t.TempDir(), "id_ed25519.pub")
-	if err := os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644); err != nil {
-		t.Fatalf("write public key: %v", err)
-	}
+	requireNoError(t, os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644), "write public key")
 
 	var waited common.ShellLaunchParams
 	waitForSSHDRemoteDeployment = func(req common.ShellLaunchParams) error {
@@ -340,9 +334,7 @@ func TestSyncRemoteSSHDKeyRetriesWhenKubeletProxyIsStarting(t *testing.T) {
 	})
 
 	publicKeyPath := filepath.Join(t.TempDir(), "id_ed25519.pub")
-	if err := os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644); err != nil {
-		t.Fatalf("write public key: %v", err)
-	}
+	requireNoError(t, os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644), "write public key")
 
 	waits := 0
 	waitForSSHDRemoteDeployment = func(common.ShellLaunchParams) error {

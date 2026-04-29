@@ -34,9 +34,7 @@ func TestExecDiffPrintsRawGitDiff(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"exec", "diff"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if stdout.String() != "diff --git a/a.txt b/a.txt\n" {
 		t.Fatalf("unexpected stdout: %q", stdout.String())
 	}
@@ -72,9 +70,7 @@ func TestExecRawRunsCommandFromProjectRootWithDefaultTrace(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"exec", "raw", "echo", "--token", "secret-value", "done"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if gotDir != "/tmp/project" || gotName != "echo" || strings.Join(gotArgs, " ") != "--token secret-value done" {
 		t.Fatalf("unexpected raw command call: dir=%q name=%q args=%+v", gotDir, gotName, gotArgs)
