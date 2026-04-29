@@ -514,6 +514,30 @@ func kubectlTargetArgs(req ShellLaunchParams) []string {
 }
 
 func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (string, error) {
+	config, err := remoteShellConfigForRequest(req)
+	if err != nil {
+		return "", err
+	}
+	workdir := shellQuote(config.Workdir)
+	scriptLines := remoteShellBaseScriptLines(req, config, workdir, shellQuote(req.Title))
+	gitLines, err := remoteShellGitSeedLines(req, redactHostSecrets, workdir)
+	if err != nil {
+		return "", err
+	}
+	if len(gitLines) > 0 {
+		scriptLines = append(gitLines, scriptLines[1:]...)
+	}
+	return strings.Join(scriptLines, "\n"), nil
+}
+
+type remoteShellConfig struct {
+	Workdir    string
+	ToolYAML   string
+	TenantYAML string
+	EnvYAML    string
+}
+
+func remoteShellConfigForRequest(req ShellLaunchParams) (remoteShellConfig, error) {
 	remoteWorkdir := remoteWorktreePath(req)
 
 	tenantConfig, err := yaml.Marshal(TenantConfig{
@@ -522,13 +546,13 @@ func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (stri
 		DefaultEnvironment: req.Environment,
 	})
 	if err != nil {
-		return "", err
+		return remoteShellConfig{}, err
 	}
 	toolConfig, err := yaml.Marshal(ERunConfig{
 		DefaultTenant: req.Tenant,
 	})
 	if err != nil {
-		return "", err
+		return remoteShellConfig{}, err
 	}
 	envConfig, err := yaml.Marshal(EnvConfig{
 		Name:              req.Environment,
@@ -537,26 +561,29 @@ func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (stri
 		Remote:            req.RemoteRepo,
 	})
 	if err != nil {
-		return "", err
+		return remoteShellConfig{}, err
 	}
 
-	workdir := shellQuote(remoteWorkdir)
-	toolYAML := string(toolConfig)
-	tenantYAML := string(tenantConfig)
-	envYAML := string(envConfig)
-	title := shellQuote(req.Title)
+	return remoteShellConfig{
+		Workdir:    remoteWorkdir,
+		ToolYAML:   string(toolConfig),
+		TenantYAML: string(tenantConfig),
+		EnvYAML:    string(envConfig),
+	}, nil
+}
 
-	scriptLines := []string{
+func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig, workdir, title string) []string {
+	return []string{
 		"set -eu",
 		fmt.Sprintf("mkdir -p %s", workdir),
 		fmt.Sprintf("cd %s", workdir),
 		"config_home=\"${XDG_CONFIG_HOME:-$HOME/.config}\"",
 		"mkdir -p \"$config_home/erun\"",
-		fmt.Sprintf("cat > \"$config_home/erun/config.yaml\" <<'EOF'\n%s\nEOF", toolYAML),
+		fmt.Sprintf("cat > \"$config_home/erun/config.yaml\" <<'EOF'\n%s\nEOF", config.ToolYAML),
 		fmt.Sprintf("mkdir -p \"$config_home/erun/%s\"", req.Tenant),
-		fmt.Sprintf("cat > \"$config_home/erun/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, tenantYAML),
+		fmt.Sprintf("cat > \"$config_home/erun/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, config.TenantYAML),
 		fmt.Sprintf("mkdir -p \"$config_home/erun/%s/%s\"", req.Tenant, req.Environment),
-		fmt.Sprintf("cat > \"$config_home/erun/%s/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, req.Environment, envYAML),
+		fmt.Sprintf("cat > \"$config_home/erun/%s/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, req.Environment, config.EnvYAML),
 		fmt.Sprintf("cat > \"$HOME/.erun_bashrc\" <<'EOF'\nexport ERUN_SHELL_HOST=%s\nerun() {\n  if [ \"${1:-}\" = \"deploy\" ] && [ \"$#\" -eq 1 ] && [ -n \"${ERUN_SHELL_REQUEST_FILE:-}\" ]; then\n    : > \"$ERUN_SHELL_REQUEST_FILE\"\n    exit 0\n  fi\n  command erun \"$@\"\n}\nEOF", title),
 		fmt.Sprintf("printf '\\033]0;%s\\007'", title),
 		"request_file=\"$HOME/.erun-shell-request\"",
@@ -568,58 +595,55 @@ func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (stri
 		"rm -f \"$request_file\"",
 		"exit \"$shell_status\"",
 	}
+}
 
-	if !req.RemoteRepo {
-		if gitHost, gitUser, gitRepo, err := resolveGitRemote(req.Dir); err == nil {
-			hostConfigEntries, err := resolveSSHConfigEntries(gitHost)
-			if err != nil {
-				return "", err
-			}
-
-			knownHostsLines, err := loadKnownHostsLines(gitHost)
-			if err != nil {
-				return "", err
-			}
-
-			keyLines, err := loadPrivateKeyMaterial(hostConfigEntries, redactHostSecrets)
-			if err != nil {
-				return "", err
-			}
-
-			knownHosts := strings.Join(knownHostsLines, "\n")
-			keys := strings.Join(keyLines, "\n")
-			gitUser = shellQuote(gitUser)
-			gitRepo = shellQuote(gitRepo)
-			sshConfig := strings.Join([]string{
-				fmt.Sprintf("Host %s", gitHost),
-				fmt.Sprintf("  HostName %s", gitHost),
-				"  IdentityFile ~/.ssh/keys",
-				"  IdentitiesOnly yes",
-				"  UserKnownHostsFile ~/.ssh/known_hosts",
-			}, "\n")
-
-			scriptLines = append([]string{
-				"set -eu",
-				"mkdir -p \"$HOME/.ssh\"",
-				"chmod 700 \"$HOME/.ssh\"",
-				"rm -f \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/keys\" \"$HOME/.ssh/config\"",
-				"old_umask=\"$(umask)\"",
-				"umask 077",
-				fmt.Sprintf("cat > \"$HOME/.ssh/known_hosts\" <<'EOF'\n%s\nEOF", knownHosts),
-				fmt.Sprintf("cat > \"$HOME/.ssh/keys\" <<'EOF'\n%s\nEOF", keys),
-				fmt.Sprintf("cat > \"$HOME/.ssh/config\" <<'EOF'\n%s\nEOF", sshConfig),
-				"umask \"$old_umask\"",
-				"chmod 600 \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/keys\" \"$HOME/.ssh/config\"",
-				fmt.Sprintf("mkdir -p %s", workdir),
-				fmt.Sprintf("cd %s", workdir),
-				fmt.Sprintf("if command -v git >/dev/null 2>&1; then if [ ! -d .git ]; then git clone git@%s:%s/%s.git .; fi; git config --global --add safe.directory '*'; fi", gitHost, gitUser, gitRepo),
-			}, scriptLines[1:]...)
-		}
+func remoteShellGitSeedLines(req ShellLaunchParams, redactHostSecrets bool, workdir string) ([]string, error) {
+	if req.RemoteRepo {
+		return nil, nil
 	}
+	gitHost, gitUser, gitRepo, err := resolveGitRemote(req.Dir)
+	if err != nil {
+		return nil, nil
+	}
+	hostConfigEntries, err := resolveSSHConfigEntries(gitHost)
+	if err != nil {
+		return nil, err
+	}
+	knownHostsLines, err := loadKnownHostsLines(gitHost)
+	if err != nil {
+		return nil, err
+	}
+	keyLines, err := loadPrivateKeyMaterial(hostConfigEntries, redactHostSecrets)
+	if err != nil {
+		return nil, err
+	}
+	return remoteShellGitSeedScriptLines(workdir, gitHost, shellQuote(gitUser), shellQuote(gitRepo), strings.Join(knownHostsLines, "\n"), strings.Join(keyLines, "\n")), nil
+}
 
-	script := strings.Join(scriptLines, "\n")
-
-	return script, nil
+func remoteShellGitSeedScriptLines(workdir, gitHost, gitUser, gitRepo, knownHosts, keys string) []string {
+	sshConfig := strings.Join([]string{
+		fmt.Sprintf("Host %s", gitHost),
+		fmt.Sprintf("  HostName %s", gitHost),
+		"  IdentityFile ~/.ssh/keys",
+		"  IdentitiesOnly yes",
+		"  UserKnownHostsFile ~/.ssh/known_hosts",
+	}, "\n")
+	return []string{
+		"set -eu",
+		"mkdir -p \"$HOME/.ssh\"",
+		"chmod 700 \"$HOME/.ssh\"",
+		"rm -f \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/keys\" \"$HOME/.ssh/config\"",
+		"old_umask=\"$(umask)\"",
+		"umask 077",
+		fmt.Sprintf("cat > \"$HOME/.ssh/known_hosts\" <<'EOF'\n%s\nEOF", knownHosts),
+		fmt.Sprintf("cat > \"$HOME/.ssh/keys\" <<'EOF'\n%s\nEOF", keys),
+		fmt.Sprintf("cat > \"$HOME/.ssh/config\" <<'EOF'\n%s\nEOF", sshConfig),
+		"umask \"$old_umask\"",
+		"chmod 600 \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/keys\" \"$HOME/.ssh/config\"",
+		fmt.Sprintf("mkdir -p %s", workdir),
+		fmt.Sprintf("cd %s", workdir),
+		fmt.Sprintf("if command -v git >/dev/null 2>&1; then if [ ! -d .git ]; then git clone git@%s:%s/%s.git .; fi; git config --global --add safe.directory '*'; fi", gitHost, gitUser, gitRepo),
+	}
 }
 
 func remoteWorktreePath(req ShellLaunchParams) string {
