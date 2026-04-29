@@ -886,17 +886,9 @@ func (s bootstrapRunner) resolveContainerRegistry(params BootstrapInitParams, te
 		return params.ContainerRegistry, nil
 	}
 
-	if projectRoot != "" && s.LoadProjectConfig != nil {
-		projectConfig, _, err := s.LoadProjectConfig(projectRoot)
-		if err != nil && !errors.Is(err, ErrNotInitialized) {
-			return "", err
-		}
-		if err == nil {
-			projectRegistry := projectConfig.ContainerRegistryForEnvironment(envName)
-			if projectRegistry != "" {
-				return projectRegistry, nil
-			}
-		}
+	projectRegistry, err := s.projectContainerRegistry(projectRoot, envName)
+	if err != nil || projectRegistry != "" {
+		return projectRegistry, err
 	}
 
 	current = strings.TrimSpace(current)
@@ -909,6 +901,24 @@ func (s bootstrapRunner) resolveContainerRegistry(params BootstrapInitParams, te
 	if params.AutoApprove {
 		return DefaultContainerRegistry, nil
 	}
+	return s.promptContainerRegistry(tenant, envName)
+}
+
+func (s bootstrapRunner) projectContainerRegistry(projectRoot, envName string) (string, error) {
+	if projectRoot == "" || s.LoadProjectConfig == nil {
+		return "", nil
+	}
+	projectConfig, _, err := s.LoadProjectConfig(projectRoot)
+	if err != nil {
+		if errors.Is(err, ErrNotInitialized) {
+			return "", nil
+		}
+		return "", err
+	}
+	return projectConfig.ContainerRegistryForEnvironment(envName), nil
+}
+
+func (s bootstrapRunner) promptContainerRegistry(tenant, envName string) (string, error) {
 	if s.PromptContainerRegistry == nil {
 		return "", BootstrapInitInteractionError{Interaction: BootstrapInitInteraction{
 			Type:         BootstrapInitInteractionContainerRegistry,
@@ -949,15 +959,9 @@ func (s bootstrapRunner) saveProjectContainerRegistry(projectRoot, envName, regi
 		return nil
 	}
 
-	projectConfig := ProjectConfig{}
-	if s.LoadProjectConfig != nil {
-		loadedConfig, _, err := s.LoadProjectConfig(projectRoot)
-		if err != nil && !errors.Is(err, ErrNotInitialized) {
-			return err
-		}
-		if err == nil {
-			projectConfig = loadedConfig
-		}
+	projectConfig, err := s.loadProjectConfigForContainerRegistry(projectRoot)
+	if err != nil {
+		return err
 	}
 
 	if projectConfig.ContainerRegistryForEnvironment(envName) == registry {
@@ -966,6 +970,20 @@ func (s bootstrapRunner) saveProjectContainerRegistry(projectRoot, envName, regi
 
 	projectConfig.SetContainerRegistryForEnvironment(envName, registry)
 	return s.SaveProjectConfig(projectRoot, projectConfig)
+}
+
+func (s bootstrapRunner) loadProjectConfigForContainerRegistry(projectRoot string) (ProjectConfig, error) {
+	if s.LoadProjectConfig == nil {
+		return ProjectConfig{}, nil
+	}
+	projectConfig, _, err := s.LoadProjectConfig(projectRoot)
+	if err != nil {
+		if errors.Is(err, ErrNotInitialized) {
+			return ProjectConfig{}, nil
+		}
+		return ProjectConfig{}, err
+	}
+	return projectConfig, nil
 }
 
 func (s bootstrapRunner) ensureKubernetesNamespace(tenant, envName, currentContext, nextContext string) error {

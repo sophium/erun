@@ -146,29 +146,28 @@ func InitParamsForOpenTarget(store OpenStore, params OpenParams) (BootstrapInitP
 
 	switch {
 	case tenant != "" && environment != "":
-		return BootstrapInitParams{
-			Tenant:      tenant,
-			Environment: environment,
-		}, nil
+		return BootstrapInitParams{Tenant: tenant, Environment: environment}, nil
 	case tenant != "":
 		return BootstrapInitParams{Tenant: tenant}, nil
 	case environment != "":
-		resolvedTenant, err := loadOpenDefaultTenant(store)
-		if err != nil {
-			if errors.Is(err, ErrDefaultTenantNotConfigured) || errors.Is(err, ErrNotInitialized) {
-				return BootstrapInitParams{
-					Environment:   environment,
-					ResolveTenant: true,
-				}, nil
-			}
-			return BootstrapInitParams{}, err
-		}
-		return BootstrapInitParams{
-			Tenant:      resolvedTenant,
-			Environment: environment,
-		}, nil
+		return initParamsForOpenEnvironmentOnly(store, environment)
 	}
 
+	return initParamsForOpenDefaults(store)
+}
+
+func initParamsForOpenEnvironmentOnly(store OpenStore, environment string) (BootstrapInitParams, error) {
+	resolvedTenant, err := loadOpenDefaultTenant(store)
+	if err != nil {
+		if errors.Is(err, ErrDefaultTenantNotConfigured) || errors.Is(err, ErrNotInitialized) {
+			return BootstrapInitParams{Environment: environment, ResolveTenant: true}, nil
+		}
+		return BootstrapInitParams{}, err
+	}
+	return BootstrapInitParams{Tenant: resolvedTenant, Environment: environment}, nil
+}
+
+func initParamsForOpenDefaults(store OpenStore) (BootstrapInitParams, error) {
 	resolvedTenant, err := loadOpenDefaultTenant(store)
 	if err != nil {
 		if errors.Is(err, ErrDefaultTenantNotConfigured) || errors.Is(err, ErrNotInitialized) {
@@ -185,10 +184,7 @@ func InitParamsForOpenTarget(store OpenStore, params OpenParams) (BootstrapInitP
 		return BootstrapInitParams{}, err
 	}
 
-	return BootstrapInitParams{
-		Tenant:      resolvedTenant,
-		Environment: defaultEnvironment,
-	}, nil
+	return BootstrapInitParams{Tenant: resolvedTenant, Environment: defaultEnvironment}, nil
 }
 
 func ResolveOpen(store OpenStore, params OpenParams) (OpenResult, error) {
@@ -730,32 +726,7 @@ func loadKnownHostsLines(host string) ([]string, error) {
 }
 
 func loadPrivateKeyMaterial(entries []sshConfigEntry, redact bool) ([]string, error) {
-	keyPaths := make([]string, 0, 4)
-	seen := make(map[string]struct{}, 4)
-
-	addKeyPath := func(path string) {
-		path = strings.TrimSpace(path)
-		if path == "" {
-			return
-		}
-		if _, ok := seen[path]; ok {
-			return
-		}
-		seen[path] = struct{}{}
-		keyPaths = append(keyPaths, path)
-	}
-
-	for _, entry := range entries {
-		for _, identityFile := range entry.identityFiles {
-			addKeyPath(identityFile)
-		}
-	}
-
-	if len(keyPaths) == 0 {
-		for _, fallback := range []string{"id_rsa", "id_ed25519", "id_ecdsa"} {
-			addKeyPath(filepath.Join(resolveOpenUserHomeDir(), ".ssh", fallback))
-		}
-	}
+	keyPaths := privateKeyPaths(entries)
 
 	lines := make([]string, 0, len(keyPaths))
 	for _, keyPath := range keyPaths {
@@ -774,6 +745,35 @@ func loadPrivateKeyMaterial(entries []sshConfigEntry, redact bool) ([]string, er
 		lines = append(lines, string(data))
 	}
 	return lines, nil
+}
+
+func privateKeyPaths(entries []sshConfigEntry) []string {
+	keyPaths := make([]string, 0, 4)
+	seen := make(map[string]struct{}, 4)
+	for _, entry := range entries {
+		for _, identityFile := range entry.identityFiles {
+			keyPaths = appendUniquePrivateKeyPath(keyPaths, seen, identityFile)
+		}
+	}
+	if len(keyPaths) > 0 {
+		return keyPaths
+	}
+	for _, fallback := range []string{"id_rsa", "id_ed25519", "id_ecdsa"} {
+		keyPaths = appendUniquePrivateKeyPath(keyPaths, seen, filepath.Join(resolveOpenUserHomeDir(), ".ssh", fallback))
+	}
+	return keyPaths
+}
+
+func appendUniquePrivateKeyPath(keyPaths []string, seen map[string]struct{}, path string) []string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return keyPaths
+	}
+	if _, ok := seen[path]; ok {
+		return keyPaths
+	}
+	seen[path] = struct{}{}
+	return append(keyPaths, path)
 }
 
 type sshConfigEntry struct {
