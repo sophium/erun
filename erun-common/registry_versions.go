@@ -104,31 +104,21 @@ func fetchDockerHubTagPage(ctx context.Context, client *http.Client, endpoint st
 
 func latestRuntimeVersionsFromTags(tags []string) RuntimeRegistryVersions {
 	var latestStable semver
-	latestStableSet := false
 	latestSnapshot := ""
 	latestSnapshotTime := ""
+	latestStableSet := false
 	uniqueTags := make([]string, 0, len(tags))
 
 	for _, tag := range tags {
-		tag = strings.TrimSpace(tag)
-		if tag == "" {
+		if tag = strings.TrimSpace(tag); tag == "" {
 			continue
 		}
-		if !slices.Contains(uniqueTags, tag) {
-			uniqueTags = append(uniqueTags, tag)
+		uniqueTags = appendUniqueRuntimeTag(uniqueTags, tag)
+		if version, ok := newerRegistryStableVersion(tag, latestStable, latestStableSet); ok {
+			latestStable, latestStableSet = version, true
 		}
-		if version, ok := parseRegistryStableVersion(tag); ok {
-			if !latestStableSet || compareSemver(version, latestStable) > 0 {
-				latestStable = version
-				latestStableSet = true
-			}
-			continue
-		}
-		if snapshotTime, ok := parseRegistrySnapshotTime(tag); ok {
-			if latestSnapshotTime == "" || snapshotTime > latestSnapshotTime {
-				latestSnapshot = tag
-				latestSnapshotTime = snapshotTime
-			}
+		if snapshot, ok := newerRegistrySnapshotVersion(tag, latestSnapshotTime); ok {
+			latestSnapshot, latestSnapshotTime = tag, snapshot
 		}
 	}
 
@@ -140,6 +130,29 @@ func latestRuntimeVersionsFromTags(tags []string) RuntimeRegistryVersions {
 		result.LatestStable = formatSemver(latestStable)
 	}
 	return result
+}
+
+func appendUniqueRuntimeTag(tags []string, tag string) []string {
+	if slices.Contains(tags, tag) {
+		return tags
+	}
+	return append(tags, tag)
+}
+
+func newerRegistryStableVersion(tag string, latest semver, latestSet bool) (semver, bool) {
+	version, ok := parseRegistryStableVersion(tag)
+	if !ok || latestSet && compareSemver(version, latest) <= 0 {
+		return semver{}, false
+	}
+	return version, true
+}
+
+func newerRegistrySnapshotVersion(tag, latestSnapshotTime string) (string, bool) {
+	snapshotTime, ok := parseRegistrySnapshotTime(tag)
+	if !ok || latestSnapshotTime != "" && snapshotTime <= latestSnapshotTime {
+		return "", false
+	}
+	return snapshotTime, true
 }
 
 func (versions RuntimeRegistryVersions) HasVersion(version string) bool {

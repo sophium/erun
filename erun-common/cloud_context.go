@@ -849,11 +849,7 @@ func sanitizeIAMName(value string) string {
 	var b strings.Builder
 	lastDash := false
 	for _, r := range value {
-		valid := r >= 'a' && r <= 'z' ||
-			r >= 'A' && r <= 'Z' ||
-			r >= '0' && r <= '9' ||
-			r == '+' || r == '=' || r == ',' || r == '.' || r == '@' || r == '_' || r == '-'
-		if valid {
+		if isValidIAMNameRune(r) {
 			b.WriteRune(r)
 			lastDash = r == '-'
 			continue
@@ -864,6 +860,13 @@ func sanitizeIAMName(value string) string {
 		}
 	}
 	return strings.Trim(b.String(), "-")
+}
+
+func isValidIAMNameRune(r rune) bool {
+	return r >= 'a' && r <= 'z' ||
+		r >= 'A' && r <= 'Z' ||
+		r >= '0' && r <= '9' ||
+		strings.ContainsRune("+=,.@_-", r)
 }
 
 func truncateIAMName(value string) string {

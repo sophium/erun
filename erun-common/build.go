@@ -144,12 +144,7 @@ func ResolveCurrentDockerBuildSpecs(store DockerStore, findProjectRoot ProjectFi
 func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (BuildExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
-	target, releaseSpec, err := ResolveDockerBuildTarget(findProjectRoot, target)
-	if err != nil {
-		return BuildExecutionSpec{}, err
-	}
-
-	script, err := resolveProjectRootBuildScript(findProjectRoot, target)
+	target, releaseSpec, script, err := resolveBuildExecutionTargetAndScript(findProjectRoot, target)
 	if err != nil {
 		return BuildExecutionSpec{}, err
 	}
@@ -158,17 +153,9 @@ func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc,
 		return BuildExecutionSpec{release: releaseSpec, script: script}, nil
 	}
 
-	linuxBuilds := make([]scriptSpec, 0)
-	hadLinuxBuilds := false
-	if releaseSpec == nil {
-		linuxBuilds, err = ResolveCurrentLinuxBuildScripts(findProjectRoot, resolveBuildContext, target, target.VersionOverride)
-		if err != nil && !errors.Is(err, ErrLinuxPackageBuildNotFound) {
-			return BuildExecutionSpec{}, err
-		}
-		hadLinuxBuilds = len(linuxBuilds) > 0
-		if hadLinuxBuilds && !LinuxPackageBuildsSupported() {
-			linuxBuilds = nil
-		}
+	linuxBuilds, hadLinuxBuilds, err := resolveLinuxBuildsForExecution(findProjectRoot, resolveBuildContext, target, releaseSpec)
+	if err != nil {
+		return BuildExecutionSpec{}, err
 	}
 
 	builds, err := ResolveCurrentDockerBuildSpecs(store, findProjectRoot, resolveBuildContext, now, target)
@@ -176,19 +163,8 @@ func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc,
 		return BuildExecutionSpec{}, err
 	}
 
-	if len(linuxBuilds) == 0 && len(builds) == 0 && releaseSpec == nil {
-		if hadLinuxBuilds {
-			return BuildExecutionSpec{skippedLinux: true}, nil
-		}
-		script, err := resolveNestedProjectBuildScript(findProjectRoot, target)
-		if err != nil {
-			return BuildExecutionSpec{}, err
-		}
-		if script != nil {
-			script.Env = buildScriptEnv(target.VersionOverride)
-			return BuildExecutionSpec{script: script}, nil
-		}
-		return BuildExecutionSpec{}, ErrDockerBuildContextNotFound
+	if buildExecutionHasNoBuilds(linuxBuilds, builds, releaseSpec) {
+		return resolveBuildExecutionWithoutBuilds(findProjectRoot, target, hadLinuxBuilds)
 	}
 
 	execution := BuildExecutionSpec{linuxBuilds: linuxBuilds, dockerBuilds: builds, skippedLinux: hadLinuxBuilds && len(linuxBuilds) == 0}
@@ -196,6 +172,52 @@ func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc,
 		return BuildExecutionSpecWithRelease(execution, *releaseSpec), nil
 	}
 	return execution, nil
+}
+
+func resolveBuildExecutionTargetAndScript(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (DockerCommandTarget, *ReleaseSpec, *scriptSpec, error) {
+	target, releaseSpec, err := ResolveDockerBuildTarget(findProjectRoot, target)
+	if err != nil {
+		return DockerCommandTarget{}, nil, nil, err
+	}
+	script, err := resolveProjectRootBuildScript(findProjectRoot, target)
+	if err != nil {
+		return DockerCommandTarget{}, nil, nil, err
+	}
+	return target, releaseSpec, script, nil
+}
+
+func buildExecutionHasNoBuilds(linuxBuilds []scriptSpec, builds []DockerBuildSpec, releaseSpec *ReleaseSpec) bool {
+	return len(linuxBuilds) == 0 && len(builds) == 0 && releaseSpec == nil
+}
+
+func resolveLinuxBuildsForExecution(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget, releaseSpec *ReleaseSpec) ([]scriptSpec, bool, error) {
+	if releaseSpec != nil {
+		return nil, false, nil
+	}
+	linuxBuilds, err := ResolveCurrentLinuxBuildScripts(findProjectRoot, resolveBuildContext, target, target.VersionOverride)
+	if err != nil && !errors.Is(err, ErrLinuxPackageBuildNotFound) {
+		return nil, false, err
+	}
+	hadLinuxBuilds := len(linuxBuilds) > 0
+	if hadLinuxBuilds && !LinuxPackageBuildsSupported() {
+		return nil, true, nil
+	}
+	return linuxBuilds, hadLinuxBuilds, nil
+}
+
+func resolveBuildExecutionWithoutBuilds(findProjectRoot ProjectFinderFunc, target DockerCommandTarget, hadLinuxBuilds bool) (BuildExecutionSpec, error) {
+	if hadLinuxBuilds {
+		return BuildExecutionSpec{skippedLinux: true}, nil
+	}
+	script, err := resolveNestedProjectBuildScript(findProjectRoot, target)
+	if err != nil {
+		return BuildExecutionSpec{}, err
+	}
+	if script == nil {
+		return BuildExecutionSpec{}, ErrDockerBuildContextNotFound
+	}
+	script.Env = buildScriptEnv(target.VersionOverride)
+	return BuildExecutionSpec{script: script}, nil
 }
 
 func BuildExecutionSpecFromDockerBuilds(builds []DockerBuildSpec) BuildExecutionSpec {
@@ -253,17 +275,8 @@ func expandLocalReleaseImageDependencies(builds []DockerBuildSpec, releaseTags m
 		return releaseTags
 	}
 
-	buildsByTag := make(map[string]DockerBuildSpec, len(builds))
-	for _, build := range builds {
-		buildsByTag[strings.TrimSpace(build.Image.Tag)] = build
-	}
-
-	expanded := make(map[string]struct{}, len(releaseTags))
-	queue := make([]string, 0, len(releaseTags))
-	for tag := range releaseTags {
-		expanded[tag] = struct{}{}
-		queue = append(queue, tag)
-	}
+	buildsByTag := dockerBuildsByTag(builds)
+	expanded, queue := queuedReleaseTags(releaseTags)
 
 	for len(queue) > 0 {
 		tag := queue[0]
@@ -290,6 +303,24 @@ func expandLocalReleaseImageDependencies(builds []DockerBuildSpec, releaseTags m
 	}
 
 	return expanded
+}
+
+func dockerBuildsByTag(builds []DockerBuildSpec) map[string]DockerBuildSpec {
+	buildsByTag := make(map[string]DockerBuildSpec, len(builds))
+	for _, build := range builds {
+		buildsByTag[strings.TrimSpace(build.Image.Tag)] = build
+	}
+	return buildsByTag
+}
+
+func queuedReleaseTags(releaseTags map[string]struct{}) (map[string]struct{}, []string) {
+	expanded := make(map[string]struct{}, len(releaseTags))
+	queue := make([]string, 0, len(releaseTags))
+	for tag := range releaseTags {
+		expanded[tag] = struct{}{}
+		queue = append(queue, tag)
+	}
+	return expanded, queue
 }
 
 func ResolveDockerBuildTarget(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (DockerCommandTarget, *ReleaseSpec, error) {
@@ -530,29 +561,15 @@ func resolveNestedProjectBuildScript(findProjectRoot ProjectFinderFunc, target D
 		return nil, nil
 	}
 
-	var script *scriptSpec
-	err = filepath.WalkDir(projectRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			if d.Name() == ".git" || isProjectBuildArtifactDir(path, projectRoot) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.Name() != "build.sh" {
-			return nil
-		}
-		if filepath.Dir(path) == projectRoot {
-			return nil
-		}
+	return findNestedProjectBuildScript(filepath.Clean(projectRoot))
+}
 
-		script = &scriptSpec{
-			Dir:  filepath.Dir(path),
-			Path: "./build.sh",
-		}
-		return fs.SkipAll
+func findNestedProjectBuildScript(projectRoot string) (*scriptSpec, error) {
+	var script *scriptSpec
+	err := filepath.WalkDir(projectRoot, func(path string, d fs.DirEntry, err error) error {
+		var walkErr error
+		script, walkErr = nestedProjectBuildScriptCandidate(projectRoot, path, d, err)
+		return walkErr
 	})
 	if err != nil {
 		if errors.Is(err, fs.SkipAll) {
@@ -561,6 +578,22 @@ func resolveNestedProjectBuildScript(findProjectRoot ProjectFinderFunc, target D
 		return nil, err
 	}
 	return script, nil
+}
+
+func nestedProjectBuildScriptCandidate(projectRoot, path string, d fs.DirEntry, err error) (*scriptSpec, error) {
+	if err != nil {
+		return nil, err
+	}
+	if d.IsDir() {
+		if d.Name() == ".git" || isProjectBuildArtifactDir(path, projectRoot) {
+			return nil, filepath.SkipDir
+		}
+		return nil, nil
+	}
+	if d.Name() != "build.sh" || filepath.Dir(path) == projectRoot {
+		return nil, nil
+	}
+	return &scriptSpec{Dir: filepath.Dir(path), Path: "./build.sh"}, fs.SkipAll
 }
 
 func isProjectBuildArtifactDir(path, projectRoot string) bool {
@@ -658,15 +691,9 @@ func resolveProjectRootDevopsDockerDir(findProjectRoot ProjectFinderFunc, projec
 		return "", false, nil
 	}
 
-	if tenant, detectedProjectRoot, err := findProjectRoot(); err == nil &&
-		filepath.Clean(strings.TrimSpace(detectedProjectRoot)) == projectRoot &&
-		strings.TrimSpace(tenant) != "" {
-		dockerDir := filepath.Join(projectRoot, RuntimeReleaseName(tenant), "docker")
-		if ok, err := isDockerBuildModuleDir(dockerDir); err != nil {
-			return "", false, err
-		} else if ok {
-			return dockerDir, true, nil
-		}
+	dockerDir, ok, err := detectedProjectRootDevopsDockerDir(findProjectRoot, projectRoot)
+	if err != nil || ok {
+		return dockerDir, ok, err
 	}
 
 	candidates, err := findDevopsDockerDirs(projectRoot)
@@ -681,6 +708,20 @@ func resolveProjectRootDevopsDockerDir(findProjectRoot ProjectFinderFunc, projec
 	default:
 		return "", false, fmt.Errorf("multiple devops docker directories found under project root")
 	}
+}
+
+func detectedProjectRootDevopsDockerDir(findProjectRoot ProjectFinderFunc, projectRoot string) (string, bool, error) {
+	tenant, detectedProjectRoot, err := findProjectRoot()
+	if err != nil || filepath.Clean(strings.TrimSpace(detectedProjectRoot)) != projectRoot || strings.TrimSpace(tenant) == "" {
+		return "", false, nil
+	}
+	dockerDir := filepath.Join(projectRoot, RuntimeReleaseName(tenant), "docker")
+	if ok, err := isDockerBuildModuleDir(dockerDir); err != nil {
+		return "", false, err
+	} else if ok {
+		return dockerDir, true, nil
+	}
+	return "", false, nil
 }
 
 func findDevopsDockerDirs(projectRoot string) ([]string, error) {
@@ -736,6 +777,14 @@ func resolveDockerBuildEnvironment(store DockerStore, findProjectRoot ProjectFin
 		return environment, nil
 	}
 
+	cleanProjectRoot := filepath.Clean(projectRoot)
+	if environment, err := dockerBuildEnvironmentFromTenantConfigs(store, cleanProjectRoot); environment != "" || err != nil {
+		return environment, err
+	}
+	return dockerBuildEnvironmentFromDetectedProject(store, findProjectRoot, cleanProjectRoot)
+}
+
+func dockerBuildEnvironmentFromTenantConfigs(store DockerStore, cleanProjectRoot string) (string, error) {
 	tenants, err := store.ListTenantConfigs()
 	if err != nil {
 		if errors.Is(err, ErrNotInitialized) {
@@ -744,14 +793,16 @@ func resolveDockerBuildEnvironment(store DockerStore, findProjectRoot ProjectFin
 		return "", err
 	}
 
-	cleanProjectRoot := filepath.Clean(projectRoot)
 	for _, tenantConfig := range tenants {
 		if filepath.Clean(tenantConfig.ProjectRoot) != cleanProjectRoot {
 			continue
 		}
 		return strings.TrimSpace(tenantConfig.DefaultEnvironment), nil
 	}
+	return "", nil
+}
 
+func dockerBuildEnvironmentFromDetectedProject(store DockerStore, findProjectRoot ProjectFinderFunc, cleanProjectRoot string) (string, error) {
 	tenant, detectedProjectRoot, err := findProjectRoot()
 	if err != nil {
 		if errors.Is(err, ErrNotInGitRepository) {
@@ -979,43 +1030,7 @@ func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []
 		ctx.Trace("skipping linux package scripts: host is not Linux or dpkg-deb is unavailable")
 	}
 
-	pushedTags := make(map[string]struct{}, len(execution.dockerBuilds)+len(execution.dockerPushes))
-	var err error
-	if execution.script != nil {
-		if len(deploySpecs) > 0 {
-			return fmt.Errorf("build deploy is not supported for project build scripts")
-		}
-		err = runScriptSpec(ctx, *execution.script, runScript)
-	} else {
-		if err = runScriptSpecs(ctx, execution.linuxBuilds, runScript); err != nil {
-			return err
-		}
-		if len(execution.dockerPushes) > 0 {
-			err = RunDockerPushExecution(ctx, DockerPushExecutionSpec{
-				builds: execution.dockerBuilds,
-				pushes: execution.dockerPushes,
-			}, build, push)
-			if err == nil {
-				for _, pushInput := range execution.dockerPushes {
-					pushedTags[pushInput.Image.Tag] = struct{}{}
-				}
-			}
-		} else if len(deploySpecs) > 0 {
-			err = RunDockerBuilds(ctx, execution.dockerBuilds, build)
-			if err == nil {
-				for _, buildInput := range execution.dockerBuilds {
-					pushInput := NewDockerPushSpec(buildInput.ContextDir, buildInput.Image)
-					if pushErr := RunDockerPushSpec(ctx, pushInput, nil, build, push); pushErr != nil {
-						err = pushErr
-						break
-					}
-					pushedTags[pushInput.Image.Tag] = struct{}{}
-				}
-			}
-		} else {
-			err = RunDockerBuilds(ctx, execution.dockerBuilds, build)
-		}
-	}
+	pushedTags, err := runBuildExecutionBuilds(ctx, execution, deploySpecs, runScript, build, push)
 	if err != nil {
 		return err
 	}
@@ -1029,6 +1044,55 @@ func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []
 	}
 	if version := deployedVersionForSpecs(deploySpecs); version != "" {
 		ctx.Info("deployed version: " + version)
+	}
+	return nil
+}
+
+func runBuildExecutionBuilds(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (map[string]struct{}, error) {
+	pushedTags := make(map[string]struct{}, len(execution.dockerBuilds)+len(execution.dockerPushes))
+	if execution.script != nil {
+		if len(deploySpecs) > 0 {
+			return nil, fmt.Errorf("build deploy is not supported for project build scripts")
+		}
+		return pushedTags, runScriptSpec(ctx, *execution.script, runScript)
+	}
+	if err := runScriptSpecs(ctx, execution.linuxBuilds, runScript); err != nil {
+		return nil, err
+	}
+	return runDockerBuildExecutionPhase(ctx, execution, deploySpecs, build, push, pushedTags)
+}
+
+func runDockerBuildExecutionPhase(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, pushedTags map[string]struct{}) (map[string]struct{}, error) {
+	if len(execution.dockerPushes) > 0 {
+		err := RunDockerPushExecution(ctx, DockerPushExecutionSpec{builds: execution.dockerBuilds, pushes: execution.dockerPushes}, build, push)
+		if err != nil {
+			return pushedTags, err
+		}
+		return recordDockerPushTags(pushedTags, execution.dockerPushes), nil
+	}
+	if len(deploySpecs) > 0 {
+		return pushedTags, buildAndPushDeployDockerImages(ctx, execution.dockerBuilds, build, push, pushedTags)
+	}
+	return pushedTags, RunDockerBuilds(ctx, execution.dockerBuilds, build)
+}
+
+func recordDockerPushTags(tags map[string]struct{}, pushes []DockerPushSpec) map[string]struct{} {
+	for _, pushInput := range pushes {
+		tags[pushInput.Image.Tag] = struct{}{}
+	}
+	return tags
+}
+
+func buildAndPushDeployDockerImages(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc, push DockerPushFunc, pushedTags map[string]struct{}) error {
+	if err := RunDockerBuilds(ctx, builds, build); err != nil {
+		return err
+	}
+	for _, buildInput := range builds {
+		pushInput := NewDockerPushSpec(buildInput.ContextDir, buildInput.Image)
+		if err := RunDockerPushSpec(ctx, pushInput, nil, build, push); err != nil {
+			return err
+		}
+		pushedTags[pushInput.Image.Tag] = struct{}{}
 	}
 	return nil
 }

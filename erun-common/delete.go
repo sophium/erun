@@ -77,15 +77,8 @@ func RunDeleteEnvironment(ctx Context, params DeleteEnvironmentParams, store Del
 	}
 
 	if envConfig.Remote {
-		result.Namespace = KubernetesNamespaceName(tenant, environment)
-		if err := ctx.EnsureKubernetesContext(result.KubernetesContext); err != nil {
+		if err := deleteRemoteEnvironmentNamespace(ctx, deleteNamespace, &result); err != nil {
 			return result, err
-		}
-		TraceDeleteKubernetesNamespace(ctx, result.KubernetesContext, result.Namespace)
-		if !ctx.DryRun {
-			if err := deleteNamespace(result.KubernetesContext, result.Namespace); err != nil {
-				result.NamespaceDeleteError = err.Error()
-			}
 		}
 	}
 
@@ -102,6 +95,21 @@ func RunDeleteEnvironment(ctx Context, params DeleteEnvironmentParams, store Del
 	}
 
 	return result, nil
+}
+
+func deleteRemoteEnvironmentNamespace(ctx Context, deleteNamespace NamespaceDeleterFunc, result *DeleteEnvironmentResult) error {
+	result.Namespace = KubernetesNamespaceName(result.Tenant, result.Environment)
+	if err := ctx.EnsureKubernetesContext(result.KubernetesContext); err != nil {
+		return err
+	}
+	TraceDeleteKubernetesNamespace(ctx, result.KubernetesContext, result.Namespace)
+	if ctx.DryRun {
+		return nil
+	}
+	if err := deleteNamespace(result.KubernetesContext, result.Namespace); err != nil {
+		result.NamespaceDeleteError = err.Error()
+	}
+	return nil
 }
 
 func removeTenantWhenLastEnvironmentDeleted(ctx Context, store DeleteStore, tenant, deletedEnvironment string) error {
