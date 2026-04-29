@@ -18,14 +18,15 @@ import { cn } from '@/lib/utils';
 const dialogErrorClassName =
   'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
 
+type ManageDialog = AppState['manageDialog'];
+
 export function ManageDialogView({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
   const dialog = state.manageDialog;
   const confirmationRef = React.useRef<HTMLInputElement>(null);
   const selection = dialog.selection;
-  const expected = selection ? deleteConfirmationValue(selection) : '';
   const confirmingDelete = dialog.tab === 'delete';
+  const expected = selection ? deleteConfirmationValue(selection) : '';
   const deleteEnabled = !dialog.busy && normalizeDialogValue(dialog.confirmation) === expected;
-  const config = dialog.config;
 
   React.useEffect(() => {
     if (!dialog.open || !confirmingDelete) {
@@ -57,172 +58,140 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
           <DialogHeader>
             <DialogTitle>{selection ? `${selection.tenant}-${selection.environment}` : 'Environment'}</DialogTitle>
           </DialogHeader>
-          <div className="-mx-1 min-h-0 overflow-auto px-1 pb-1">
-            {dialog.configLoading ? (
-              <div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">
-                Loading config...
-              </div>
-            ) : (
-              <div className="grid gap-3">
-                <ReadonlyField id="environment-config-repopath" label="Repository path" value={config.repoPath} />
-                <ReadonlyField id="environment-config-kubernetescontext" label="Kubernetes context" value={config.kubernetesContext} />
-                <ReadonlyField id="environment-config-containerregistry" label="Container registry" value={config.containerRegistry} />
-                <CloudAliasSelect
-                  id="environment-config-cloudprovideralias"
-                  value={config.cloudProviderAlias}
-                  options={config.cloudProviderAliases || []}
-                  disabled={dialog.busy}
-                  onChange={(cloudProviderAlias) => controller.updateManageConfig({ cloudProviderAlias })}
-                />
-                <CloudContextField
-                  context={config.cloudContext}
-                  cloudProviderAlias={config.cloudProviderAlias}
-                  disabled={dialog.busy || dialog.configLoading}
-                  onStart={(name) => void controller.startManageCloudContext(name)}
-                  onStop={(name) => void controller.stopManageCloudContext(name)}
-                />
-                <RuntimeDeployField
-                  configuredVersion={config.runtimeVersion}
-                  overrideVersion={dialog.version}
-                  suggestions={state.versionSuggestions}
-                  choicesOpen={dialog.choicesOpen}
-                  disabled={dialog.busy || dialog.configLoading}
-                  onValueChange={(version) => controller.updateManageDialog({ version })}
-                  onChoicesOpenChange={(open) => controller.setManageVersionChoicesOpen(open)}
-                  onSelect={(suggestion) => controller.selectManageVersionSuggestion(suggestion)}
-                  onDeploy={() => void controller.submitManageDeploy().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}
-                />
-                <CheckboxField id="environment-config-remote" label="Remote environment" checked={config.remote} disabled onChange={() => {}} />
-                <CheckboxField id="environment-config-snapshot" label="Snapshot deploy" checked={config.snapshot} disabled={dialog.busy} onChange={(snapshot) => controller.updateManageConfig({ snapshot })} />
-                <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
-                  <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Idle stop</div>
-                  <TextField
-                    id="environment-config-idle-timeout"
-                    label="Timeout"
-                    value={config.idle.timeout}
-                    disabled={dialog.busy}
-                    onChange={(timeout) => controller.updateManageConfig({ idle: { ...config.idle, timeout } })}
-                  />
-                  <TextField
-                    id="environment-config-idle-workinghours"
-                    label="Working hours"
-                    value={config.idle.workingHours}
-                    disabled={dialog.busy}
-                    onChange={(workingHours) => controller.updateManageConfig({ idle: { ...config.idle, workingHours } })}
-                  />
-                  <TextField
-                    id="environment-config-idle-traffic"
-                    label="Idle SSH bytes"
-                    value={String(config.idle.idleTrafficBytes)}
-                    inputMode="numeric"
-                    disabled={dialog.busy}
-                    onChange={(idleTrafficBytes) => controller.updateManageConfig({ idle: { ...config.idle, idleTrafficBytes: parseIdleTrafficBytes(idleTrafficBytes) } })}
-                  />
-                </div>
-                <ReadonlyField id="environment-config-localportrange" label="Assigned local port range" value={portRangeValue(config.localPorts.rangeStart, config.localPorts.rangeEnd)} />
-                <PortStatusTable
-                  rows={[
-                    { service: 'mcp', port: config.localPorts.mcp, status: config.localPorts.mcpStatus },
-                    { service: 'ssh', port: config.localPorts.ssh, status: config.localPorts.sshStatus },
-                  ]}
-                />
-                <div className="grid gap-2 rounded-[var(--radius)] border border-border p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Diagnostics</div>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={dialog.busy || dialog.configLoading}
-                      onClick={() => void controller.startManageDoctor().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}
-                    >
-                      <Stethoscope aria-hidden="true" />
-                      Run Doctor
-                    </Button>
-                  </div>
-                </div>
-                <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">SSH access</div>
-                    {!config.sshd.enabled && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={dialog.busy || dialog.configLoading || !config.remote}
-                        onClick={() => void controller.enableManageSSHD().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}
-                      >
-                        <Server aria-hidden="true" />
-                        Enable SSHD
-                      </Button>
-                    )}
-                  </div>
-                  <CheckboxField id="environment-config-sshd-enabled" label="Enabled" checked={config.sshd.enabled} disabled onChange={() => {}} />
-                  <ReadonlyField
-                    id="environment-config-sshd-localport"
-                    label="Local port"
-                    value={config.sshd.localPort > 0 ? String(config.sshd.localPort) : ''}
-                  />
-                  <ReadonlyField id="environment-config-sshd-publickeypath" label="Public key" value={config.sshd.publicKeyPath} />
-                </div>
-                {confirmingDelete && (
-                  <div className="grid gap-3">
-                    {selection && (
-                      <div className="grid grid-cols-[18px_minmax(0,1fr)] items-start gap-[9px] rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_30%,var(--border))] bg-[color-mix(in_oklch,var(--destructive)_7%,transparent)] px-[11px] py-2.5 text-[13px] leading-[1.35] text-foreground">
-                        <AlertTriangle className="mt-px size-[17px] text-destructive" aria-hidden="true" />
-                        <span>
-                          Type{' '}
-                          <code className="rounded-[calc(var(--radius)-4px)] bg-[color-mix(in_oklch,var(--destructive)_12%,transparent)] px-1 py-px font-mono text-xs text-destructive">
-                            {expected}
-                          </code>{' '}
-                          to confirm.
-                        </span>
-                      </div>
-                    )}
-                    <TextField id="manage-confirmation" label="Confirmation" value={dialog.confirmation} disabled={dialog.busy} inputRef={confirmationRef} onChange={(confirmation) => controller.updateManageDialog({ confirmation })} />
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-          {dialog.error && (
-            <div className={dialogErrorClassName} role="alert">
-              {dialog.error}
-            </div>
-          )}
-          <DialogFooter>
-            <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => controller.closeManageDialog()}>
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              variant={confirmingDelete ? 'destructive' : 'outline'}
-              size="sm"
-              disabled={dialog.busy || (confirmingDelete && !deleteEnabled)}
-              onClick={() => {
-                if (confirmingDelete) {
-                  void controller.submitManageDelete();
-                  return;
-                }
-                controller.updateManageDialog({ tab: 'delete', confirmation: '' });
-              }}
-            >
-              {dialog.busy && confirmingDelete ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
-              {dialog.busy && confirmingDelete ? 'Deleting...' : 'Delete'}
-            </Button>
-            {!confirmingDelete && (
-              <Button type="button" size="sm" disabled={dialog.busy || dialog.configLoading} onClick={() => void controller.submitManageConfig().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}>
-                {dialog.busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
-                {dialog.busy ? 'Saving...' : 'Save'}
-              </Button>
-            )}
-          </DialogFooter>
+          <ManageDialogContent controller={controller} state={state} confirmationRef={confirmationRef} expected={expected} confirmingDelete={confirmingDelete} />
+          <DialogError error={dialog.error} />
+          <ManageDialogFooter controller={controller} dialog={dialog} confirmingDelete={confirmingDelete} deleteEnabled={deleteEnabled} />
         </form>
       </DialogContent>
     </Dialog>
   );
+}
+
+function ManageDialogContent({ controller, state, confirmationRef, expected, confirmingDelete }: { controller: ERunUIController; state: AppState; confirmationRef: React.Ref<HTMLInputElement>; expected: string; confirmingDelete: boolean }): React.ReactElement {
+  const dialog = state.manageDialog;
+  if (dialog.configLoading) {
+    return <div className="-mx-1 min-h-0 overflow-auto px-1 pb-1"><div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">Loading config...</div></div>;
+  }
+  return (
+    <div className="-mx-1 min-h-0 overflow-auto px-1 pb-1">
+      <div className="grid gap-3">
+        <ManageConfigFields controller={controller} state={state} />
+        {confirmingDelete && <DeleteConfirmationFields controller={controller} dialog={dialog} confirmationRef={confirmationRef} expected={expected} />}
+      </div>
+    </div>
+  );
+}
+
+function ManageConfigFields({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
+  const dialog = state.manageDialog;
+  const config = dialog.config;
+  return (
+    <>
+      <ReadonlyField id="environment-config-repopath" label="Repository path" value={config.repoPath} />
+      <ReadonlyField id="environment-config-kubernetescontext" label="Kubernetes context" value={config.kubernetesContext} />
+      <ReadonlyField id="environment-config-containerregistry" label="Container registry" value={config.containerRegistry} />
+      <CloudAliasSelect id="environment-config-cloudprovideralias" value={config.cloudProviderAlias} options={config.cloudProviderAliases || []} disabled={dialog.busy} onChange={(cloudProviderAlias) => controller.updateManageConfig({ cloudProviderAlias })} />
+      <CloudContextField context={config.cloudContext} cloudProviderAlias={config.cloudProviderAlias} disabled={dialog.busy || dialog.configLoading} onStart={(name) => void controller.startManageCloudContext(name)} onStop={(name) => void controller.stopManageCloudContext(name)} />
+      <RuntimeDeployField configuredVersion={config.runtimeVersion} overrideVersion={dialog.version} suggestions={state.versionSuggestions} choicesOpen={dialog.choicesOpen} disabled={dialog.busy || dialog.configLoading} onValueChange={(version) => controller.updateManageDialog({ version })} onChoicesOpenChange={(open) => controller.setManageVersionChoicesOpen(open)} onSelect={(suggestion) => controller.selectManageVersionSuggestion(suggestion)} onDeploy={() => void controller.submitManageDeploy().catch((error: unknown) => controller.showTerminalMessage(readError(error)))} />
+      <CheckboxField id="environment-config-remote" label="Remote environment" checked={config.remote} disabled onChange={() => {}} />
+      <CheckboxField id="environment-config-snapshot" label="Snapshot deploy" checked={config.snapshot} disabled={dialog.busy} onChange={(snapshot) => controller.updateManageConfig({ snapshot })} />
+      <IdleStopFields controller={controller} dialog={dialog} />
+      <ReadonlyField id="environment-config-localportrange" label="Assigned local port range" value={portRangeValue(config.localPorts.rangeStart, config.localPorts.rangeEnd)} />
+      <PortStatusTable rows={[{ service: 'mcp', port: config.localPorts.mcp, status: config.localPorts.mcpStatus }, { service: 'ssh', port: config.localPorts.ssh, status: config.localPorts.sshStatus }]} />
+      <DiagnosticsSection controller={controller} dialog={dialog} />
+      <SSHAccessSection controller={controller} dialog={dialog} />
+    </>
+  );
+}
+
+function IdleStopFields({ controller, dialog }: { controller: ERunUIController; dialog: ManageDialog }): React.ReactElement {
+  const config = dialog.config;
+  return (
+    <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
+      <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Idle stop</div>
+      <TextField id="environment-config-idle-timeout" label="Timeout" value={config.idle.timeout} disabled={dialog.busy} onChange={(timeout) => controller.updateManageConfig({ idle: { ...config.idle, timeout } })} />
+      <TextField id="environment-config-idle-workinghours" label="Working hours" value={config.idle.workingHours} disabled={dialog.busy} onChange={(workingHours) => controller.updateManageConfig({ idle: { ...config.idle, workingHours } })} />
+      <TextField id="environment-config-idle-traffic" label="Idle SSH bytes" value={String(config.idle.idleTrafficBytes)} inputMode="numeric" disabled={dialog.busy} onChange={(idleTrafficBytes) => controller.updateManageConfig({ idle: { ...config.idle, idleTrafficBytes: parseIdleTrafficBytes(idleTrafficBytes) } })} />
+    </div>
+  );
+}
+
+function DiagnosticsSection({ controller, dialog }: { controller: ERunUIController; dialog: ManageDialog }): React.ReactElement {
+  return (
+    <div className="grid gap-2 rounded-[var(--radius)] border border-border p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0"><div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Diagnostics</div></div>
+        <Button type="button" variant="outline" size="sm" disabled={dialog.busy || dialog.configLoading} onClick={() => void controller.startManageDoctor().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}>
+          <Stethoscope aria-hidden="true" />
+          Run Doctor
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function SSHAccessSection({ controller, dialog }: { controller: ERunUIController; dialog: ManageDialog }): React.ReactElement {
+  const config = dialog.config;
+  return (
+    <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">SSH access</div>
+        {!config.sshd.enabled && <Button type="button" variant="outline" size="sm" disabled={dialog.busy || dialog.configLoading || !config.remote} onClick={() => void controller.enableManageSSHD().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}><Server aria-hidden="true" />Enable SSHD</Button>}
+      </div>
+      <CheckboxField id="environment-config-sshd-enabled" label="Enabled" checked={config.sshd.enabled} disabled onChange={() => {}} />
+      <ReadonlyField id="environment-config-sshd-localport" label="Local port" value={config.sshd.localPort > 0 ? String(config.sshd.localPort) : ''} />
+      <ReadonlyField id="environment-config-sshd-publickeypath" label="Public key" value={config.sshd.publicKeyPath} />
+    </div>
+  );
+}
+
+function DeleteConfirmationFields({ controller, dialog, confirmationRef, expected }: { controller: ERunUIController; dialog: ManageDialog; confirmationRef: React.Ref<HTMLInputElement>; expected: string }): React.ReactElement {
+  return (
+    <div className="grid gap-3">
+      <DeleteWarning expected={expected} />
+      <TextField id="manage-confirmation" label="Confirmation" value={dialog.confirmation} disabled={dialog.busy} inputRef={confirmationRef} onChange={(confirmation) => controller.updateManageDialog({ confirmation })} />
+    </div>
+  );
+}
+
+function DeleteWarning({ expected }: { expected: string }): React.ReactElement {
+  return (
+    <div className="grid grid-cols-[18px_minmax(0,1fr)] items-start gap-[9px] rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_30%,var(--border))] bg-[color-mix(in_oklch,var(--destructive)_7%,transparent)] px-[11px] py-2.5 text-[13px] leading-[1.35] text-foreground">
+      <AlertTriangle className="mt-px size-[17px] text-destructive" aria-hidden="true" />
+      <span>Type <code className="rounded-[calc(var(--radius)-4px)] bg-[color-mix(in_oklch,var(--destructive)_12%,transparent)] px-1 py-px font-mono text-xs text-destructive">{expected}</code> to confirm.</span>
+    </div>
+  );
+}
+
+function DialogError({ error }: { error: string }): React.ReactElement | null {
+  return error ? <div className={dialogErrorClassName} role="alert">{error}</div> : null;
+}
+
+function ManageDialogFooter({ controller, dialog, confirmingDelete, deleteEnabled }: { controller: ERunUIController; dialog: ManageDialog; confirmingDelete: boolean; deleteEnabled: boolean }): React.ReactElement {
+  return (
+    <DialogFooter>
+      <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => controller.closeManageDialog()}>Cancel</Button>
+      <DeleteButton controller={controller} dialog={dialog} confirmingDelete={confirmingDelete} deleteEnabled={deleteEnabled} />
+      {!confirmingDelete && <Button type="button" size="sm" disabled={dialog.busy || dialog.configLoading} onClick={() => void controller.submitManageConfig().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}>{dialog.busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}{dialog.busy ? 'Saving...' : 'Save'}</Button>}
+    </DialogFooter>
+  );
+}
+
+function DeleteButton({ controller, dialog, confirmingDelete, deleteEnabled }: { controller: ERunUIController; dialog: ManageDialog; confirmingDelete: boolean; deleteEnabled: boolean }): React.ReactElement {
+  return (
+    <Button type="button" variant={confirmingDelete ? 'destructive' : 'outline'} size="sm" disabled={dialog.busy || (confirmingDelete && !deleteEnabled)} onClick={() => submitOrStartDelete(controller, confirmingDelete)}>
+      {dialog.busy && confirmingDelete ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
+      {dialog.busy && confirmingDelete ? 'Deleting...' : 'Delete'}
+    </Button>
+  );
+}
+
+function submitOrStartDelete(controller: ERunUIController, confirmingDelete: boolean): void {
+  if (confirmingDelete) {
+    void controller.submitManageDelete();
+    return;
+  }
+  controller.updateManageDialog({ tab: 'delete', confirmation: '' });
 }
 
 function CloudContextField({
