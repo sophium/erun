@@ -21,3 +21,12 @@ func isPortForwardProcess(pid int) bool {
 	command := string(output)
 	return strings.Contains(command, "kubectl") && strings.Contains(command, "port-forward")
 }
+
+func isSSHDActivityProxyProcess(pid int) bool {
+	output, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=").Output()
+	if err != nil {
+		return false
+	}
+	command := string(output)
+	return strings.Contains(command, "activity") && strings.Contains(command, "ssh-proxy")
+}

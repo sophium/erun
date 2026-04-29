@@ -5,13 +5,22 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	common "github.com/sophium/erun/erun-common"
 )
 
 type SSHDActivator func(common.Context, common.OpenResult) error
 
-var waitForSSHDRemoteDeployment = common.WaitForShellDeployment
+var (
+	waitForSSHDRemoteDeployment    = common.WaitForShellDeployment
+	sleepBeforeSSHDRemoteExecRetry = time.Sleep
+)
+
+const (
+	sshdRemoteExecMaxAttempts = 3
+	sshdRemoteExecRetryDelay  = 5 * time.Second
+)
 
 func newSSHDActivator(runRemoteCommand common.RemoteCommandRunnerFunc) SSHDActivator {
 	return func(ctx common.Context, result common.OpenResult) error {
@@ -41,28 +50,30 @@ func syncRemoteSSHDKey(ctx common.Context, result common.OpenResult, runRemoteCo
 	}
 	req := common.ShellLaunchParamsFromResult(result)
 	script := common.BuildRemoteAuthorizedKeysSyncScript(publicKey)
-	output, err := common.RunTracedRemoteCommand(ctx, runRemoteCommand, req, "remote-ssh-authorized-keys", script)
-	if err != nil {
-		if sshdRemoteExecPodWasReplaced(output.Stderr) {
-			ctx.Trace("runtime pod was replaced while syncing SSH authorized_keys; waiting for deployment and retrying")
-			if waitErr := waitForSSHDRemoteDeployment(req); waitErr != nil {
-				return "", fmt.Errorf("wait for runtime deployment after SSH authorized_keys sync failed: %w", waitErr)
-			}
-			output, err = common.RunTracedRemoteCommand(ctx, runRemoteCommand, req, "remote-ssh-authorized-keys", script)
-			if err == nil {
-				return publicKeyPath, nil
-			}
+	for attempt := 1; attempt <= sshdRemoteExecMaxAttempts; attempt++ {
+		output, err := common.RunTracedRemoteCommand(ctx, runRemoteCommand, req, "remote-ssh-authorized-keys", script)
+		if err == nil {
+			return publicKeyPath, nil
 		}
-		return "", fmt.Errorf("sync remote authorized_keys from %s: %w%s", publicKeyPath, err, formatRemoteCommandStderr(output.Stderr))
+		if attempt >= sshdRemoteExecMaxAttempts || !sshdRemoteExecNeedsDeploymentRetry(output.Stderr) {
+			return "", fmt.Errorf("sync remote authorized_keys from %s: %w%s", publicKeyPath, err, formatRemoteCommandStderr(output.Stderr))
+		}
+		ctx.Trace("runtime pod/container was not ready while syncing SSH authorized_keys; waiting for deployment and retrying")
+		if waitErr := waitForSSHDRemoteDeployment(req); waitErr != nil {
+			return "", fmt.Errorf("wait for runtime deployment after SSH authorized_keys sync failed: %w", waitErr)
+		}
+		sleepBeforeSSHDRemoteExecRetry(sshdRemoteExecRetryDelay)
 	}
-	return publicKeyPath, nil
+	return "", fmt.Errorf("sync remote authorized_keys from %s: exceeded retry attempts", publicKeyPath)
 }
 
-func sshdRemoteExecPodWasReplaced(stderr string) bool {
+func sshdRemoteExecNeedsDeploymentRetry(stderr string) bool {
 	value := strings.ToLower(stderr)
 	return strings.Contains(value, "pod does not exist") ||
 		strings.Contains(value, "pod not found") ||
-		strings.Contains(value, "lost connection to pod")
+		strings.Contains(value, "lost connection to pod") ||
+		strings.Contains(value, "container not found") ||
+		strings.Contains(value, "502 bad gateway")
 }
 
 func resolveSSHDPublicKey(path string) (string, string, error) {

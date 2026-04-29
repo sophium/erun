@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 )
@@ -26,7 +27,7 @@ func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
 			{
 				Name: "erun",
 				Environments: []eruncommon.ListEnvironmentResult{
-					{Name: "local", RuntimeVersion: "1.0.19-snapshot-20260418141901", LocalPorts: eruncommon.EnvironmentLocalPorts{MCP: 17000}},
+					{Name: "local", RuntimeVersion: "1.0.19-snapshot-20260418141901", LocalPorts: eruncommon.EnvironmentLocalPorts{MCP: 17000}, SSH: eruncommon.ListSSHResult{Enabled: true}},
 					{Name: "remote", RuntimeVersion: "1.0.18", LocalPorts: eruncommon.EnvironmentLocalPorts{MCP: 17100}},
 				},
 			},
@@ -47,6 +48,9 @@ func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
 	}
 	if state.Tenants[0].Environments[0].RuntimeVersion != "1.0.19-snapshot-20260418141901" {
 		t.Fatalf("unexpected runtime version: %+v", state.Tenants[0].Environments[0])
+	}
+	if !state.Tenants[0].Environments[0].SSHDEnabled || state.Tenants[0].Environments[1].SSHDEnabled {
+		t.Fatalf("unexpected SSHD flags: %+v", state.Tenants[0].Environments)
 	}
 }
 
@@ -460,6 +464,14 @@ func TestBuildOpenIDEArgsAddsIDEFlag(t *testing.T) {
 	}
 }
 
+func TestBuildDoctorArgsTrimsTenantAndEnvironment(t *testing.T) {
+	got := buildDoctorArgs(uiSelection{Tenant: " erun ", Environment: " remote ", Debug: true})
+	want := []string{"-vv", "doctor", "erun", "remote"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected doctor args: got %+v want %+v", got, want)
+	}
+}
+
 func TestBuildOpenNoShellArgsTrimsTenantAndEnvironment(t *testing.T) {
 	got := buildOpenNoShellArgs(" erun ", " local ")
 	want := []string{"open", "erun", "local", "--no-shell", "--no-alias-prompt"}
@@ -696,6 +708,108 @@ func TestStartInitSessionUsesVersionInSessionKey(t *testing.T) {
 	}
 }
 
+func TestStartSSHDInitSessionStartsSSHDInitCommand(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {
+				Name:               "erun",
+				ProjectRoot:        projectRoot,
+				DefaultEnvironment: "remote",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {
+				Name:              "remote",
+				RepoPath:          projectRoot,
+				KubernetesContext: "rancher-desktop",
+			},
+		},
+	}
+
+	var started startTerminalSessionParams
+	app := NewApp(erunUIDeps{
+		store:           store,
+		findProjectRoot: func() (string, string, error) { return "project", projectRoot, nil },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		startTerminal: func(params startTerminalSessionParams) (terminalSession, error) {
+			started = params
+			return newStubTerminalSession(), nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	result, err := app.StartSSHDInitSession(uiSelection{Tenant: " erun ", Environment: " remote "}, 80, 24)
+	if err != nil {
+		t.Fatalf("StartSSHDInitSession failed: %v", err)
+	}
+
+	if result.SessionID == 0 {
+		t.Fatalf("expected session id, got %+v", result)
+	}
+	if started.Dir != projectRoot {
+		t.Fatalf("unexpected start dir: %q", started.Dir)
+	}
+	if started.Executable != "/tmp/erun" {
+		t.Fatalf("unexpected executable: %q", started.Executable)
+	}
+	wantArgs := []string{"sshd", "init", "erun", "remote"}
+	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
+		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
+	}
+}
+
+func TestStartDoctorSessionStartsDoctorCommand(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {
+				Name:               "erun",
+				ProjectRoot:        projectRoot,
+				DefaultEnvironment: "remote",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {
+				Name:              "remote",
+				RepoPath:          projectRoot,
+				KubernetesContext: "rancher-desktop",
+			},
+		},
+	}
+
+	var started startTerminalSessionParams
+	app := NewApp(erunUIDeps{
+		store:           store,
+		findProjectRoot: func() (string, string, error) { return "project", projectRoot, nil },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		startTerminal: func(params startTerminalSessionParams) (terminalSession, error) {
+			started = params
+			return newStubTerminalSession(), nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	result, err := app.StartDoctorSession(uiSelection{Tenant: " erun ", Environment: " remote "}, 80, 24)
+	if err != nil {
+		t.Fatalf("StartDoctorSession failed: %v", err)
+	}
+
+	if result.SessionID == 0 {
+		t.Fatalf("expected session id, got %+v", result)
+	}
+	if started.Dir != projectRoot {
+		t.Fatalf("unexpected start dir: %q", started.Dir)
+	}
+	if started.Executable != "/tmp/erun" {
+		t.Fatalf("unexpected executable: %q", started.Executable)
+	}
+	wantArgs := []string{"doctor", "erun", "remote"}
+	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
+		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
+	}
+}
+
 func TestStartDeploySessionStartsDeployCommand(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -881,7 +995,7 @@ func TestOpenIDERunsWithoutConsumingTerminalWhenSSHDEnabled(t *testing.T) {
 	}
 }
 
-func TestOpenIDEInitializesSSHDWhenMissing(t *testing.T) {
+func TestOpenIDERejectsMissingSSHDWithoutHiddenInit(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
@@ -911,17 +1025,15 @@ func TestOpenIDEInitializesSSHDWhenMissing(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if err := app.OpenIDE(uiSelection{Tenant: "erun", Environment: "remote"}, "intellij"); err != nil {
-		t.Fatalf("OpenIDE failed: %v", err)
+	err := app.OpenIDE(uiSelection{Tenant: "erun", Environment: "remote"}, "intellij")
+	if err == nil {
+		t.Fatal("expected missing SSHD error")
 	}
-	if started.Executable == "/tmp/erun" {
-		t.Fatalf("expected shell wrapper executable when SSHD is missing, got %q", started.Executable)
+	if !strings.Contains(err.Error(), "open intellij requires sshd-enabled remote environment") {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	args := strings.Join(started.Args, "\n")
-	for _, want := range []string{"sshd", "init", "erun", "remote", "open", "--intellij"} {
-		if !strings.Contains(args, want) {
-			t.Fatalf("expected shell args to contain %q, got %+v", want, started.Args)
-		}
+	if started.Executable != "" || len(started.Args) != 0 {
+		t.Fatalf("did not expect hidden SSHD init command, got %+v", started)
 	}
 }
 
@@ -1157,7 +1269,15 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 
 func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
 	projectRoot := eruncommon.RemoteWorktreePathForRepoName("frs")
+	rootConfig := &eruncommon.ERunConfig{
+		CloudContexts: []eruncommon.CloudContextConfig{{
+			Name:               "team-context",
+			CloudProviderAlias: "team-cloud",
+			KubernetesContext:  "cluster-dev",
+		}},
+	}
 	store := stubUIStore{
+		config: rootConfig,
 		tenants: map[string]eruncommon.TenantConfig{
 			"frs": {
 				Name:               "frs",
@@ -1198,7 +1318,7 @@ func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
 	}
-	if saved.CloudProviderAlias != "team-cloud" || store.envs["frs/dev"].CloudProviderAlias != "team-cloud" {
+	if saved.CloudProviderAlias != "team-cloud" || store.envs["frs/dev"].CloudProviderAlias != "team-cloud" || !store.envs["frs/dev"].ManagedCloud {
 		t.Fatalf("unexpected saved config: result=%+v stored=%+v", saved, store.envs["frs/dev"])
 	}
 	if remoteEndpoint != "http://127.0.0.1:17000/mcp" || remoteTenant != "frs" || remoteEnvironment != "dev" || remoteAlias != "team-cloud" {
@@ -1408,6 +1528,307 @@ func TestStartSessionReusesExistingSessionForSelection(t *testing.T) {
 	}
 	if first.SessionID != second.SessionID {
 		t.Fatalf("session ids differ: first=%d second=%d", first.SessionID, second.SessionID)
+	}
+}
+
+func TestSendSessionInputRecordsCLIActivityForCurrentEnvironment(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {
+				Name:               "erun",
+				ProjectRoot:        projectRoot,
+				DefaultEnvironment: "local",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/local": {
+				Name:              "local",
+				RepoPath:          projectRoot,
+				KubernetesContext: "rancher-desktop",
+			},
+		},
+	}
+
+	var recorded []eruncommon.EnvironmentActivityParams
+	app := NewApp(erunUIDeps{
+		store:          store,
+		resolveCLIPath: func() string { return "/tmp/erun" },
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			return newStubTerminalSession(), nil
+		},
+		recordActivity: func(params eruncommon.EnvironmentActivityParams) error {
+			recorded = append(recorded, params)
+			return nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 80, 24); err != nil {
+		t.Fatalf("StartSession failed: %v", err)
+	}
+	if err := app.SendSessionInput("date\r"); err != nil {
+		t.Fatalf("SendSessionInput failed: %v", err)
+	}
+
+	if len(recorded) != 2 {
+		t.Fatalf("recorded %d activity events, want 2", len(recorded))
+	}
+	for _, event := range recorded {
+		if event.Tenant != "erun" || event.Environment != "local" || event.Kind != eruncommon.ActivityKindCLI {
+			t.Fatalf("unexpected activity params: %+v", event)
+		}
+	}
+}
+
+func TestMergeNewerActivityMarkersPrefersLocalTerminalActivity(t *testing.T) {
+	now := time.Now()
+	remote := eruncommon.EnvironmentIdleStatus{
+		Markers: []eruncommon.EnvironmentIdleMarker{
+			{Name: "working-hours", LastActivity: now},
+			{Name: eruncommon.ActivityKindCLI, LastActivity: now.Add(-4 * time.Minute), SecondsRemaining: 60},
+			{Name: eruncommon.ActivityKindMCP, LastActivity: now.Add(-1 * time.Minute), SecondsRemaining: 240},
+		},
+	}
+	local := eruncommon.EnvironmentIdleStatus{
+		Markers: []eruncommon.EnvironmentIdleMarker{
+			{Name: eruncommon.ActivityKindCLI, LastActivity: now, SecondsRemaining: 300},
+			{Name: eruncommon.ActivityKindMCP, LastActivity: now.Add(-2 * time.Minute), SecondsRemaining: 180},
+		},
+	}
+
+	merged := mergeNewerActivityMarkers(remote, local)
+	if got := activitySecondsUntilIdle(merged); got != 300 {
+		t.Fatalf("activitySecondsUntilIdle = %d, want 300", got)
+	}
+	for _, marker := range merged.Markers {
+		if marker.Name == eruncommon.ActivityKindMCP && marker.SecondsRemaining != 240 {
+			t.Fatalf("older local MCP marker should not replace remote marker: %+v", marker)
+		}
+	}
+}
+
+func TestMergeLocalIdleActivityUsesSavedPolicyWithRemoteActivity(t *testing.T) {
+	now := time.Now()
+	store := stubUIStore{
+		envs: map[string]eruncommon.EnvConfig{
+			"team-stop/dev-stop": {
+				Name: "dev-stop",
+				Idle: eruncommon.EnvironmentIdleConfig{
+					Timeout:      "10s",
+					WorkingHours: "00:00-23:59",
+				},
+				ManagedCloud: true,
+				Remote:       true,
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+	defer app.shutdown(context.Background())
+
+	remote := eruncommon.EnvironmentIdleStatus{
+		Policy: eruncommon.EnvironmentIdlePolicy{
+			Timeout:      5 * time.Minute,
+			WorkingHours: "00:00-23:59",
+		},
+		ManagedCloud: true,
+		Markers: []eruncommon.EnvironmentIdleMarker{
+			{Name: eruncommon.ActivityKindCLI, Idle: false, SecondsRemaining: 295},
+		},
+		Activity: map[string]eruncommon.EnvironmentActivitySnapshot{
+			eruncommon.ActivityKindCLI: {LastActivity: now.Add(-5 * time.Second), LastSeen: now.Add(-5 * time.Second)},
+		},
+	}
+
+	merged := app.mergeLocalIdleActivity(eruncommon.OpenResult{
+		Tenant:      "team-stop",
+		Environment: "dev-stop",
+		EnvConfig:   store.envs["team-stop/dev-stop"],
+	}, remote)
+
+	if merged.Policy.Timeout != 10*time.Second {
+		t.Fatalf("expected saved local timeout, got %s", merged.Policy.Timeout)
+	}
+	if got := activitySecondsUntilIdle(merged); got <= 0 || got > 10 {
+		t.Fatalf("activitySecondsUntilIdle = %d, want local 10s policy countdown", got)
+	}
+}
+
+func TestLoadIdleStatusStopsLinkedCloudContextWhenStopEligible(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		config: &eruncommon.ERunConfig{
+			CloudContexts: []eruncommon.CloudContextConfig{{
+				Name:               "cloud-ctx",
+				CloudProviderAlias: "team-cloud",
+				KubernetesContext:  "cluster-cloud",
+				Status:             eruncommon.CloudContextStatusRunning,
+			}},
+		},
+		tenants: map[string]eruncommon.TenantConfig{
+			"team-stop": {
+				Name:               "team-stop",
+				ProjectRoot:        projectRoot,
+				DefaultEnvironment: "dev-stop",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"team-stop/dev-stop": {
+				Name:               "dev-stop",
+				RepoPath:           projectRoot,
+				KubernetesContext:  "cluster-cloud",
+				CloudProviderAlias: "team-cloud",
+				ManagedCloud:       true,
+				Remote:             true,
+			},
+		},
+	}
+	stopped := make(chan string, 1)
+	app := NewApp(erunUIDeps{
+		store:               store,
+		canConnectLocalPort: func(int) bool { return true },
+		loadIdleStatus: func(context.Context, string) (eruncommon.EnvironmentIdleStatus, error) {
+			return eruncommon.EnvironmentIdleStatus{
+				ManagedCloud: true,
+				StopEligible: true,
+				Policy: eruncommon.EnvironmentIdlePolicy{
+					Timeout: 5 * time.Minute,
+				},
+				Markers: []eruncommon.EnvironmentIdleMarker{
+					{Name: "working-hours", Idle: true},
+					{Name: eruncommon.ActivityKindSSH, Idle: true},
+					{Name: eruncommon.ActivityKindMCP, Idle: true},
+					{Name: eruncommon.ActivityKindCLI, Idle: true},
+					{Name: eruncommon.ActivityKindCodex, Idle: true},
+				},
+			}, nil
+		},
+		stopCloudContext: func(_ context.Context, name string) (eruncommon.CloudContextStatus, error) {
+			stopped <- name
+			return eruncommon.CloudContextStatus{}, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	status, err := app.LoadIdleStatus(uiSelection{Tenant: "team-stop", Environment: "dev-stop"})
+	if err != nil {
+		t.Fatalf("LoadIdleStatus failed: %v", err)
+	}
+	if status.CloudContextName != "cloud-ctx" || status.CloudContextStatus != eruncommon.CloudContextStatusRunning || status.CloudContextLabel != "cluster-cloud" {
+		t.Fatalf("unexpected linked cloud context details: %+v", status)
+	}
+
+	select {
+	case got := <-stopped:
+		if got != "cloud-ctx" {
+			t.Fatalf("stopped context %q, want cloud-ctx", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for cloud context stop")
+	}
+}
+
+func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		config: &eruncommon.ERunConfig{
+			CloudContexts: []eruncommon.CloudContextConfig{{
+				Name:               "cloud-ctx",
+				CloudProviderAlias: "team-cloud",
+				KubernetesContext:  "cluster-cloud",
+				Status:             eruncommon.CloudContextStatusRunning,
+			}},
+		},
+		tenants: map[string]eruncommon.TenantConfig{
+			"team-busy": {
+				Name:               "team-busy",
+				ProjectRoot:        projectRoot,
+				DefaultEnvironment: "dev-busy",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"team-busy/dev-busy": {
+				Name:               "dev-busy",
+				RepoPath:           projectRoot,
+				KubernetesContext:  "cluster-cloud",
+				CloudProviderAlias: "team-cloud",
+				ManagedCloud:       true,
+				Remote:             true,
+			},
+		},
+	}
+	stopped := make(chan string, 1)
+	app := NewApp(erunUIDeps{
+		store:           store,
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		findProjectRoot: func() (string, string, error) { return "project", projectRoot, nil },
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			return newStubTerminalSession(), nil
+		},
+		canConnectLocalPort: func(int) bool { return true },
+		loadIdleStatus: func(context.Context, string) (eruncommon.EnvironmentIdleStatus, error) {
+			return eruncommon.EnvironmentIdleStatus{
+				ManagedCloud: true,
+				StopEligible: true,
+				Policy: eruncommon.EnvironmentIdlePolicy{
+					Timeout: 5 * time.Minute,
+				},
+				Markers: []eruncommon.EnvironmentIdleMarker{
+					{Name: "working-hours", Idle: true},
+					{Name: eruncommon.ActivityKindSSH, Idle: true},
+					{Name: eruncommon.ActivityKindMCP, Idle: true},
+					{Name: eruncommon.ActivityKindCLI, Idle: true},
+					{Name: eruncommon.ActivityKindCodex, Idle: true},
+				},
+			}, nil
+		},
+		stopCloudContext: func(_ context.Context, name string) (eruncommon.CloudContextStatus, error) {
+			stopped <- name
+			return eruncommon.CloudContextStatus{}, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	if _, err := app.StartDeploySession(uiSelection{Tenant: "team-busy", Environment: "dev-busy", Version: "1.0.0"}, 80, 24); err != nil {
+		t.Fatalf("StartDeploySession failed: %v", err)
+	}
+	if _, err := app.LoadIdleStatus(uiSelection{Tenant: "team-busy", Environment: "dev-busy"}); err != nil {
+		t.Fatalf("LoadIdleStatus failed: %v", err)
+	}
+
+	select {
+	case got := <-stopped:
+		t.Fatalf("did not expect cloud context stop while deploy is running, got %q", got)
+	default:
+	}
+}
+
+func TestIdleStatusToUIIncludesBlockerDetails(t *testing.T) {
+	status := idleStatusToUI(eruncommon.EnvironmentIdleStatus{
+		ManagedCloud:      true,
+		StopEligible:      false,
+		StopBlockedReason: "waiting for activity timeout",
+		StopError:         "failed to stop instance: access denied",
+		Policy: eruncommon.EnvironmentIdlePolicy{
+			Timeout: 5 * time.Minute,
+		},
+		Markers: []eruncommon.EnvironmentIdleMarker{
+			{Name: eruncommon.ActivityKindSSH, Idle: false, Reason: "recent activity", SecondsRemaining: 42},
+			{Name: eruncommon.ActivityKindMCP, Idle: true, Reason: "last activity exceeded timeout"},
+		},
+	})
+
+	if status.TimeoutSeconds != 300 || status.SecondsUntilStop != 42 || !status.ManagedCloud || status.StopEligible {
+		t.Fatalf("unexpected idle status: %+v", status)
+	}
+	if status.StopBlockedReason != "waiting for activity timeout" {
+		t.Fatalf("unexpected stop blocked reason: %q", status.StopBlockedReason)
+	}
+	if status.StopError != "failed to stop instance: access denied" {
+		t.Fatalf("unexpected stop error: %q", status.StopError)
+	}
+	if len(status.Markers) != 2 || status.Markers[0].Name != eruncommon.ActivityKindSSH || status.Markers[0].Reason != "recent activity" || status.Markers[0].SecondsRemaining != 42 {
+		t.Fatalf("unexpected markers: %+v", status.Markers)
 	}
 }
 

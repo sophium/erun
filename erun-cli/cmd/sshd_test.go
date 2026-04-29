@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	common "github.com/sophium/erun/erun-common"
 )
@@ -262,10 +263,12 @@ func TestRunSSHDInitCommandUsesResolvedEnvironmentLocalPortByDefault(t *testing.
 	}
 }
 
-func TestSyncRemoteSSHDKeyRetriesWhenPodWasReplaced(t *testing.T) {
+func TestSyncRemoteSSHDKeyRetriesWhenDeploymentIsNotReady(t *testing.T) {
 	prevWait := waitForSSHDRemoteDeployment
+	prevSleep := sleepBeforeSSHDRemoteExecRetry
 	t.Cleanup(func() {
 		waitForSSHDRemoteDeployment = prevWait
+		sleepBeforeSSHDRemoteExecRetry = prevSleep
 	})
 
 	publicKeyPath := filepath.Join(t.TempDir(), "id_ed25519.pub")
@@ -278,6 +281,7 @@ func TestSyncRemoteSSHDKeyRetriesWhenPodWasReplaced(t *testing.T) {
 		waited = req
 		return nil
 	}
+	sleepBeforeSSHDRemoteExecRetry = func(time.Duration) {}
 
 	attempts := 0
 	got, err := syncRemoteSSHDKey(
@@ -306,7 +310,8 @@ func TestSyncRemoteSSHDKeyRetriesWhenPodWasReplaced(t *testing.T) {
 			attempts++
 			if attempts == 1 {
 				return common.RemoteCommandResult{
-					Stderr: "error: Internal error occurred: unable to upgrade connection: pod does not exist",
+					Stderr: `Defaulted container "petios-devops" out of: petios-devops, erun-dind, install-binfmt (init)
+error: Internal error occurred: unable to upgrade connection: container not found ("petios-devops")`,
 				}, errors.New("exit status 1")
 			}
 			return common.RemoteCommandResult{}, nil
@@ -319,22 +324,89 @@ func TestSyncRemoteSSHDKeyRetriesWhenPodWasReplaced(t *testing.T) {
 		t.Fatalf("unexpected key path: %q", got)
 	}
 	if attempts != 2 {
-		t.Fatalf("expected retry after pod replacement, got %d attempts", attempts)
+		t.Fatalf("expected retry after deployment readiness failure, got %d attempts", attempts)
 	}
 	if waited.Namespace != "tenant-a-dev" || waited.KubernetesContext != "cluster-dev" {
 		t.Fatalf("unexpected wait params: %+v", waited)
 	}
 }
 
-func TestSSHDRemoteExecPodWasReplaced(t *testing.T) {
+func TestSyncRemoteSSHDKeyRetriesWhenKubeletProxyIsStarting(t *testing.T) {
+	prevWait := waitForSSHDRemoteDeployment
+	prevSleep := sleepBeforeSSHDRemoteExecRetry
+	t.Cleanup(func() {
+		waitForSSHDRemoteDeployment = prevWait
+		sleepBeforeSSHDRemoteExecRetry = prevSleep
+	})
+
+	publicKeyPath := filepath.Join(t.TempDir(), "id_ed25519.pub")
+	if err := os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644); err != nil {
+		t.Fatalf("write public key: %v", err)
+	}
+
+	waits := 0
+	waitForSSHDRemoteDeployment = func(common.ShellLaunchParams) error {
+		waits++
+		return nil
+	}
+	sleeps := 0
+	sleepBeforeSSHDRemoteExecRetry = func(time.Duration) {
+		sleeps++
+	}
+
+	attempts := 0
+	_, err := syncRemoteSSHDKey(
+		common.Context{
+			Logger: common.NewLoggerWithWriters(1, new(bytes.Buffer), new(bytes.Buffer)),
+		},
+		common.OpenResult{
+			Tenant:      "petios",
+			Environment: "rihards",
+			RepoPath:    "/home/erun/git/petios",
+			TenantConfig: common.TenantConfig{
+				Name: "petios",
+			},
+			EnvConfig: common.EnvConfig{
+				Name:              "rihards",
+				RepoPath:          "/home/erun/git/petios",
+				KubernetesContext: "cluster-dev",
+				Remote:            true,
+				SSHD: common.SSHDConfig{
+					Enabled:       true,
+					PublicKeyPath: publicKeyPath,
+				},
+			},
+		},
+		func(_ common.ShellLaunchParams, _ string) (common.RemoteCommandResult, error) {
+			attempts++
+			if attempts == 1 {
+				return common.RemoteCommandResult{
+					Stderr: `error: Internal error occurred: error sending request: Post "https://172.31.31.130:10250/exec/petios-rihards/petios-devops-59d995466-l9sbh/petios-devops": proxy error from 127.0.0.1:6443 while dialing 172.31.31.130:10250, code 502: 502 Bad Gateway`,
+				}, errors.New("exit status 1")
+			}
+			return common.RemoteCommandResult{}, nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("syncRemoteSSHDKey failed: %v", err)
+	}
+	if attempts != 2 || waits != 1 || sleeps != 1 {
+		t.Fatalf("unexpected retry counts: attempts=%d waits=%d sleeps=%d", attempts, waits, sleeps)
+	}
+}
+
+func TestSSHDRemoteExecNeedsDeploymentRetry(t *testing.T) {
 	tests := []string{
 		"error: Internal error occurred: unable to upgrade connection: pod does not exist",
 		`error: error upgrading connection: unable to upgrade connection: pod not found ("petios-devops-123")`,
 		"error: lost connection to pod",
+		`Defaulted container "petios-devops" out of: petios-devops, erun-dind, install-binfmt (init)
+error: Internal error occurred: unable to upgrade connection: container not found ("petios-devops")`,
+		`error: Internal error occurred: error sending request: proxy error from 127.0.0.1:6443 while dialing 172.31.31.130:10250, code 502: 502 Bad Gateway`,
 	}
 	for _, stderr := range tests {
-		if !sshdRemoteExecPodWasReplaced(stderr) {
-			t.Fatalf("expected stderr to be classified as pod replacement: %s", stderr)
+		if !sshdRemoteExecNeedsDeploymentRetry(stderr) {
+			t.Fatalf("expected stderr to be classified as deployment readiness failure: %s", stderr)
 		}
 	}
 }

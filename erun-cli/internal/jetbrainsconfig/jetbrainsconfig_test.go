@@ -202,6 +202,58 @@ func TestFindRecentProjectReturnsLatestUsedIDE(t *testing.T) {
 	}
 }
 
+func TestClearRecentProjectLatestUsedIDERemovesBackendMetadata(t *testing.T) {
+	optionsDir := t.TempDir()
+	configID := StableConfigID("erun-petios-rihards")
+	recentPath := filepath.Join(optionsDir, "sshRecentConnections.v2.xml")
+	if err := os.WriteFile(recentPath, []byte(`<application>
+  <component name="SshLocalRecentConnectionsManager">
+    <option name="connections">
+      <list>
+        <LocalRecentConnectionState>
+          <option name="configId" value="`+configID+`"></option>
+          <option name="projects">
+            <list>
+              <RecentProjectState>
+                <option name="date" value="1777362254961"></option>
+                <option name="latestUsedIde">
+                  <RecentProjectInstalledIde>
+                    <option name="buildNumber" value="261.23567.71"></option>
+                    <option name="pathToIde" value="/home/erun/.cache/JetBrains/RemoteDev/dist/fd6f0251cd1fc_idea-261.23567.71-aarch64"></option>
+                    <option name="productCode" value="IU"></option>
+                  </RecentProjectInstalledIde>
+                </option>
+                <option name="productCode" value="IU"></option>
+                <option name="projectPath" value="/home/erun/git/petios"></option>
+              </RecentProjectState>
+            </list>
+          </option>
+        </LocalRecentConnectionState>
+      </list>
+    </option>
+  </component>
+</application>
+`), 0o600); err != nil {
+		t.Fatalf("write recent projects: %v", err)
+	}
+
+	changed, err := ClearRecentProjectLatestUsedIDE(optionsDir, configID, "/home/erun/git/petios")
+	if err != nil {
+		t.Fatalf("ClearRecentProjectLatestUsedIDE failed: %v", err)
+	}
+	if !changed {
+		t.Fatal("expected metadata to be changed")
+	}
+
+	recent := readFile(t, recentPath)
+	if strings.Contains(recent, "latestUsedIde") || strings.Contains(recent, "pathToIde") {
+		t.Fatalf("expected latest IDE metadata to be removed, got:\n%s", recent)
+	}
+	if !strings.Contains(recent, `<option name="projectPath" value="/home/erun/git/petios"></option>`) {
+		t.Fatalf("expected project metadata to remain, got:\n%s", recent)
+	}
+}
+
 func assertFileContains(t *testing.T, path string, wants ...string) {
 	t.Helper()
 	data := readFile(t, path)

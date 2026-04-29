@@ -49,11 +49,13 @@ type EnvConfig struct {
 	RepoPath           string
 	KubernetesContext  string
 	ContainerRegistry  string
-	CloudProviderAlias string     `yaml:"cloudprovideralias,omitempty"`
-	RuntimeVersion     string     `yaml:"runtimeversion,omitempty"`
-	SSHD               SSHDConfig `yaml:"sshd,omitempty"`
-	Remote             bool       `yaml:"remote,omitempty"`
-	Snapshot           *bool      `yaml:"snapshot,omitempty"`
+	CloudProviderAlias string                `yaml:"cloudprovideralias,omitempty"`
+	ManagedCloud       bool                  `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
+	RuntimeVersion     string                `yaml:"runtimeversion,omitempty"`
+	SSHD               SSHDConfig            `yaml:"sshd,omitempty"`
+	Idle               EnvironmentIdleConfig `yaml:"idle,omitempty"`
+	Remote             bool                  `yaml:"remote,omitempty"`
+	Snapshot           *bool                 `yaml:"snapshot,omitempty"`
 }
 
 func (c TenantConfig) SnapshotEnabled() bool {

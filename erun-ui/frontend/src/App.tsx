@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { CheckCircle2, ChevronDown, ChevronUp, Copy, Trash2 } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronUp, Copy, LoaderCircle, Trash2 } from 'lucide-react';
 
 import { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
@@ -81,6 +81,7 @@ export function App(): React.ReactElement {
             >
               <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
                 <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full box-border px-4 py-3.5" />
+                <TerminalBusyOverlay message={state.terminalBusy ? state.terminalMessage : ''} />
               </div>
               <div
                 className={cn(reviewSplitterClassName, !state.reviewOpen && 'hidden')}
@@ -106,6 +107,21 @@ export function App(): React.ReactElement {
       <ManageDialogView controller={controller} state={state} />
       <TenantDialogView controller={controller} state={state} />
     </TooltipProvider>
+  );
+}
+
+function TerminalBusyOverlay({ message }: { message: string }): React.ReactElement | null {
+  if (!message) {
+    return null;
+  }
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-terminal/45">
+      <div className="flex max-w-[min(520px,calc(100%-48px))] items-center gap-3 rounded-md border border-[oklch(0.28_0_0)] bg-[oklch(0.08_0_0)] px-4 py-3 text-[13px] leading-[1.35] text-[oklch(0.86_0_0)] shadow-lg">
+        <LoaderCircle className="size-4 flex-none animate-spin text-[oklch(0.72_0_0)]" aria-hidden="true" />
+        <span className="min-w-0 truncate" title={message}>{message}</span>
+      </div>
+    </div>
   );
 }
 

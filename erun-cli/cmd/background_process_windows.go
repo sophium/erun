@@ -9,3 +9,7 @@ func detachBackgroundProcess(*exec.Cmd) {}
 func isPortForwardProcess(int) bool {
 	return false
 }
+
+func isSSHDActivityProxyProcess(int) bool {
+	return false
+}

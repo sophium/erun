@@ -119,10 +119,12 @@ func Execute() error {
 	listCmd := newListCmd(configStore, common.FindProjectRoot)
 	doctorCmd := newDoctorCmd(resolveOpen, runPrompt)
 	deleteCmd := newDeleteCmd(configStore, runPrompt, common.DeleteKubernetesNamespace)
+	idleCmd := newIdleCmd(configStore)
 	releaseCmd := newReleaseCmd(common.FindProjectRoot, common.GitCommandRunner)
 	versionCmd := newVersionCmd(func() (common.BuildInfo, string, error) {
 		return resolveVersionCommandBuildInfo(common.FindProjectRoot)
 	}, common.ResolveDefaultRuntimeRegistryVersions)
+	activityCmd := newActivityCmd(configStore)
 
 	runRoot := func(cmd *cobra.Command, args []string) error {
 		ctx := withCloudContextPreflight(commandContext(cmd), store)
@@ -137,7 +139,7 @@ func Execute() error {
 	}
 
 	cmd := newRootCommand(runRoot)
-	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, execCmd, cloudCmd, contextCmd, listCmd, doctorCmd, deleteCmd, releaseCmd, versionCmd)
+	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, execCmd, cloudCmd, contextCmd, listCmd, doctorCmd, deleteCmd, idleCmd, releaseCmd, versionCmd, activityCmd)
 	return cmd.Execute()
 }
 

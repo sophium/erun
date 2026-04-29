@@ -25,6 +25,7 @@ type InitInput struct {
 	Bootstrap                bool   `json:"bootstrap,omitempty" jsonschema:"when true, create the tenant devops module and chart during initialization"`
 	ConfirmTenant            *bool  `json:"confirmTenant,omitempty" jsonschema:"response to a prior tenant confirmation interaction"`
 	ConfirmEnvironment       *bool  `json:"confirmEnvironment,omitempty" jsonschema:"response to a prior environment confirmation interaction"`
+	ConfirmRemoteHostConfig  *bool  `json:"confirmRemoteHostConfig,omitempty" jsonschema:"response to a prior existing remote SSH host config confirmation interaction"`
 	ConfirmRemoteKeyImport   *bool  `json:"confirmRemoteKeyImport,omitempty" jsonschema:"response to a prior remote SSH key import confirmation interaction"`
 	AutoApprove              bool   `json:"autoApprove,omitempty" jsonschema:"when true, automatically approve initialization prompts"`
 	Preview                  bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
@@ -60,6 +61,7 @@ func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 			ContainerRegistry:        strings.TrimSpace(input.ContainerRegistry),
 			ConfirmTenant:            input.ConfirmTenant,
 			ConfirmEnvironment:       input.ConfirmEnvironment,
+			ConfirmRemoteHostConfig:  input.ConfirmRemoteHostConfig,
 			AutoApprove:              input.AutoApprove,
 		}
 

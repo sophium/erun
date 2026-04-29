@@ -47,41 +47,53 @@ type KubernetesDeployContext struct {
 }
 
 type HelmDeployParams struct {
-	ReleaseName       string
-	ChartPath         string
-	ValuesFilePath    string
-	Tenant            string
-	Environment       string
-	Namespace         string
-	KubernetesContext string
-	WorktreeStorage   string
-	WorktreeRepoName  string
-	WorktreeHostPath  string
-	SSHDEnabled       bool
-	MCPPort           int
-	SSHPort           int
-	Version           string
-	Timeout           string
-	Stdout            io.Writer
-	Stderr            io.Writer
+	ReleaseName        string
+	ChartPath          string
+	ValuesFilePath     string
+	Tenant             string
+	Environment        string
+	Namespace          string
+	KubernetesContext  string
+	WorktreeStorage    string
+	WorktreeRepoName   string
+	WorktreeHostPath   string
+	SSHDEnabled        bool
+	MCPPort            int
+	SSHPort            int
+	ManagedCloud       bool
+	CloudContextName   string
+	CloudProviderAlias string
+	CloudRegion        string
+	CloudInstanceID    string
+	Idle               EnvironmentIdleConfig
+	Version            string
+	Timeout            string
+	Stdout             io.Writer
+	Stderr             io.Writer
 }
 
 type HelmDeploySpec struct {
-	ReleaseName       string
-	ChartPath         string
-	ValuesFilePath    string
-	Tenant            string
-	Environment       string
-	Namespace         string
-	KubernetesContext string
-	WorktreeStorage   string
-	WorktreeRepoName  string
-	WorktreeHostPath  string
-	SSHDEnabled       bool
-	MCPPort           int
-	SSHPort           int
-	Version           string
-	Timeout           string
+	ReleaseName        string
+	ChartPath          string
+	ValuesFilePath     string
+	Tenant             string
+	Environment        string
+	Namespace          string
+	KubernetesContext  string
+	WorktreeStorage    string
+	WorktreeRepoName   string
+	WorktreeHostPath   string
+	SSHDEnabled        bool
+	MCPPort            int
+	SSHPort            int
+	ManagedCloud       bool
+	CloudContextName   string
+	CloudProviderAlias string
+	CloudRegion        string
+	CloudInstanceID    string
+	Idle               EnvironmentIdleConfig
+	Version            string
+	Timeout            string
 }
 
 type HelmReleaseRecoveryParams struct {
@@ -243,6 +255,14 @@ func resolveDeploySpecForContext(store DeployStore, findProjectRoot ProjectFinde
 	deployInput, err := newHelmDeploySpec(target, deployContext, versionOverride)
 	if err != nil {
 		return DeploySpec{}, err
+	}
+	managedCloud, err := managedCloudEnvironment(store, target.EnvConfig)
+	if err != nil {
+		return DeploySpec{}, err
+	}
+	deployInput.ManagedCloud = managedCloud
+	if managedCloud {
+		applyCloudContextStopMetadata(store, target.EnvConfig, &deployInput)
 	}
 
 	dependencyBuilds, err := resolveAdditionalDockerBuildsForDeploy(store, findProjectRoot, resolveDockerBuildContext, now, target.RepoPath, target.Environment, deployContext.ChartPath, builds)
@@ -574,22 +594,39 @@ func newHelmDeploySpec(target OpenResult, deployContext KubernetesDeployContext,
 	ports := LocalPortsForResult(target)
 
 	return HelmDeploySpec{
-		ReleaseName:       deployContext.ComponentName,
-		ChartPath:         deployContext.ChartPath,
-		ValuesFilePath:    valuesFilePath,
-		Tenant:            target.Tenant,
-		Environment:       target.Environment,
-		Namespace:         KubernetesNamespaceName(target.Tenant, target.Environment),
-		KubernetesContext: target.EnvConfig.KubernetesContext,
-		WorktreeStorage:   resolveWorktreeStorage(target),
-		WorktreeRepoName:  resolveWorktreeRepoName(target.RepoPath),
-		WorktreeHostPath:  resolveWorktreeHostPath(target.RepoPath),
-		SSHDEnabled:       target.EnvConfig.SSHD.Enabled,
-		MCPPort:           ports.MCP,
-		SSHPort:           ports.SSH,
-		Version:           version,
-		Timeout:           DefaultHelmDeploymentTimeout,
+		ReleaseName:        deployContext.ComponentName,
+		ChartPath:          deployContext.ChartPath,
+		ValuesFilePath:     valuesFilePath,
+		Tenant:             target.Tenant,
+		Environment:        target.Environment,
+		Namespace:          KubernetesNamespaceName(target.Tenant, target.Environment),
+		KubernetesContext:  target.EnvConfig.KubernetesContext,
+		WorktreeStorage:    resolveWorktreeStorage(target),
+		WorktreeRepoName:   resolveWorktreeRepoName(target.RepoPath),
+		WorktreeHostPath:   resolveWorktreeHostPath(target.RepoPath),
+		SSHDEnabled:        target.EnvConfig.SSHD.Enabled,
+		MCPPort:            ports.MCP,
+		SSHPort:            ports.SSH,
+		CloudProviderAlias: target.EnvConfig.CloudProviderAlias,
+		Idle:               target.EnvConfig.Idle,
+		Version:            version,
+		Timeout:            DefaultHelmDeploymentTimeout,
 	}, nil
+}
+
+func applyCloudContextStopMetadata(store CloudReadStore, env EnvConfig, deployInput *HelmDeploySpec) {
+	if deployInput == nil {
+		return
+	}
+	deployInput.CloudProviderAlias = strings.TrimSpace(env.CloudProviderAlias)
+	status, ok, err := findCloudContextForKubernetesContext(store, env.KubernetesContext)
+	if err != nil || !ok {
+		return
+	}
+	deployInput.CloudContextName = status.Name
+	deployInput.CloudProviderAlias = status.CloudProviderAlias
+	deployInput.CloudRegion = status.Region
+	deployInput.CloudInstanceID = status.InstanceID
 }
 
 func resolveWorktreeStorage(target OpenResult) string {
@@ -624,23 +661,29 @@ func resolveWorktreeHostPath(repoPath string) string {
 
 func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 	return HelmDeployParams{
-		ReleaseName:       d.ReleaseName,
-		ChartPath:         d.ChartPath,
-		ValuesFilePath:    d.ValuesFilePath,
-		Tenant:            d.Tenant,
-		Environment:       d.Environment,
-		Namespace:         d.Namespace,
-		KubernetesContext: d.KubernetesContext,
-		WorktreeStorage:   d.WorktreeStorage,
-		WorktreeRepoName:  d.WorktreeRepoName,
-		WorktreeHostPath:  d.WorktreeHostPath,
-		SSHDEnabled:       d.SSHDEnabled,
-		MCPPort:           d.MCPPort,
-		SSHPort:           d.SSHPort,
-		Version:           d.Version,
-		Timeout:           d.Timeout,
-		Stdout:            stdout,
-		Stderr:            stderr,
+		ReleaseName:        d.ReleaseName,
+		ChartPath:          d.ChartPath,
+		ValuesFilePath:     d.ValuesFilePath,
+		Tenant:             d.Tenant,
+		Environment:        d.Environment,
+		Namespace:          d.Namespace,
+		KubernetesContext:  d.KubernetesContext,
+		WorktreeStorage:    d.WorktreeStorage,
+		WorktreeRepoName:   d.WorktreeRepoName,
+		WorktreeHostPath:   d.WorktreeHostPath,
+		SSHDEnabled:        d.SSHDEnabled,
+		MCPPort:            d.MCPPort,
+		SSHPort:            d.SSHPort,
+		ManagedCloud:       d.ManagedCloud,
+		CloudContextName:   d.CloudContextName,
+		CloudProviderAlias: d.CloudProviderAlias,
+		CloudRegion:        d.CloudRegion,
+		CloudInstanceID:    d.CloudInstanceID,
+		Idle:               d.Idle,
+		Version:            d.Version,
+		Timeout:            d.Timeout,
+		Stdout:             stdout,
+		Stderr:             stderr,
 	}
 }
 
@@ -666,6 +709,14 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set", "sshdEnabled="+formatHelmBool(d.SSHDEnabled),
 		"--set", "mcpPort="+formatHelmPort(d.MCPPort, MCPServicePort),
 		"--set", "sshPort="+formatHelmPort(d.SSHPort, DefaultSSHLocalPort),
+		"--set", "managedCloud="+formatHelmBool(d.ManagedCloud),
+		"--set-string", "cloudContext.name="+d.CloudContextName,
+		"--set-string", "cloudContext.providerAlias="+d.CloudProviderAlias,
+		"--set-string", "cloudContext.region="+d.CloudRegion,
+		"--set-string", "cloudContext.instanceId="+d.CloudInstanceID,
+		"--set-string", "idle.timeout="+helmIdleTimeout(d.Idle),
+		"--set-string", "idle.workingHours="+helmIdleWorkingHours(d.Idle),
+		"--set", "idle.trafficBytes="+formatHelmInt64(helmIdleTrafficBytes(d.Idle)),
 		d.ReleaseName,
 		d.ChartPath,
 	)
@@ -754,6 +805,34 @@ func formatHelmPort(value, fallback int) string {
 		value = fallback
 	}
 	return fmt.Sprintf("%d", value)
+}
+
+func formatHelmInt64(value int64) string {
+	return fmt.Sprintf("%d", value)
+}
+
+func helmIdleTimeout(config EnvironmentIdleConfig) string {
+	policy, err := config.Resolve()
+	if err != nil {
+		return DefaultEnvironmentIdleTimeout.String()
+	}
+	return policy.Timeout.String()
+}
+
+func helmIdleWorkingHours(config EnvironmentIdleConfig) string {
+	policy, err := config.Resolve()
+	if err != nil {
+		return DefaultEnvironmentWorkingHours
+	}
+	return policy.WorkingHours
+}
+
+func helmIdleTrafficBytes(config EnvironmentIdleConfig) int64 {
+	policy, err := config.Resolve()
+	if err != nil {
+		return DefaultEnvironmentIdleTrafficBytes
+	}
+	return policy.IdleTrafficBytes
 }
 
 func resolveDeployKubernetesContext(environment, configured string, currentContext func() (string, error)) string {
@@ -984,20 +1063,26 @@ func DeployHelmChart(params HelmDeployParams) error {
 	}
 
 	command := HelmDeploySpec{
-		ReleaseName:       params.ReleaseName,
-		ChartPath:         chartPath,
-		ValuesFilePath:    params.ValuesFilePath,
-		Tenant:            params.Tenant,
-		Environment:       params.Environment,
-		Namespace:         params.Namespace,
-		KubernetesContext: params.KubernetesContext,
-		WorktreeStorage:   params.WorktreeStorage,
-		WorktreeRepoName:  params.WorktreeRepoName,
-		WorktreeHostPath:  params.WorktreeHostPath,
-		SSHDEnabled:       params.SSHDEnabled,
-		MCPPort:           params.MCPPort,
-		SSHPort:           params.SSHPort,
-		Timeout:           params.Timeout,
+		ReleaseName:        params.ReleaseName,
+		ChartPath:          chartPath,
+		ValuesFilePath:     params.ValuesFilePath,
+		Tenant:             params.Tenant,
+		Environment:        params.Environment,
+		Namespace:          params.Namespace,
+		KubernetesContext:  params.KubernetesContext,
+		WorktreeStorage:    params.WorktreeStorage,
+		WorktreeRepoName:   params.WorktreeRepoName,
+		WorktreeHostPath:   params.WorktreeHostPath,
+		SSHDEnabled:        params.SSHDEnabled,
+		MCPPort:            params.MCPPort,
+		SSHPort:            params.SSHPort,
+		ManagedCloud:       params.ManagedCloud,
+		CloudContextName:   params.CloudContextName,
+		CloudProviderAlias: params.CloudProviderAlias,
+		CloudRegion:        params.CloudRegion,
+		CloudInstanceID:    params.CloudInstanceID,
+		Idle:               params.Idle,
+		Timeout:            params.Timeout,
 	}.command()
 
 	cmd := exec.Command(command.Name, command.Args...)

@@ -5,13 +5,22 @@ import (
 	"strings"
 
 	common "github.com/sophium/erun/erun-common"
+	jetbrainsconfig "github.com/sophium/erun/internal/jetbrainsconfig"
 	"github.com/spf13/cobra"
 )
 
 type doctorOptions struct {
-	pruneImages     bool
-	pruneBuildCache bool
-	pruneContainers bool
+	pruneImages            bool
+	pruneBuildCache        bool
+	pruneContainers        bool
+	repairJetBrainsGateway bool
+}
+
+type jetBrainsGatewayDoctorRepair struct {
+	optionsDir  string
+	configID    string
+	projectPath string
+	idePath     string
 }
 
 func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), promptRunner PromptRunner) *cobra.Command {
@@ -30,6 +39,7 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 	cmd.Flags().BoolVar(&options.pruneImages, "prune-images", false, "Prune unused Docker images without prompting")
 	cmd.Flags().BoolVar(&options.pruneBuildCache, "prune-build-cache", false, "Prune unused BuildKit cache without prompting")
 	cmd.Flags().BoolVar(&options.pruneContainers, "prune-containers", false, "Prune stopped Docker containers without prompting")
+	cmd.Flags().BoolVar(&options.repairJetBrainsGateway, "repair-jetbrains-gateway", false, "Clear cached JetBrains Gateway backend metadata for this environment")
 	return cmd
 }
 
@@ -45,6 +55,14 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 
 	if _, err := fmt.Fprintf(ctx.Stdout, "Target: %s/%s\n", result.Tenant, result.Environment); err != nil {
 		return err
+	}
+
+	repairedJetBrains, err := runSelectedJetBrainsGatewayRepair(ctx, promptRunner, result, options)
+	if err != nil {
+		return err
+	}
+	if repairedJetBrains && doctorOnlySelectedJetBrainsGatewayRepair(options) {
+		return nil
 	}
 
 	req := common.ShellLaunchParamsFromResult(result)
@@ -88,6 +106,80 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 		}
 	}
 	return nil
+}
+
+func runSelectedJetBrainsGatewayRepair(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, options doctorOptions) (bool, error) {
+	repair, ok, err := jetBrainsGatewayDoctorRepairForResult(result)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		if options.repairJetBrainsGateway {
+			_, err := fmt.Fprintln(ctx.Stdout, "No cached JetBrains Gateway backend metadata found for this environment.")
+			return true, err
+		}
+		return false, nil
+	}
+
+	selected := options.repairJetBrainsGateway
+	if !selected && promptRunner != nil && !ctx.DryRun {
+		ok, err := confirmPrompt(promptRunner, fmt.Sprintf("Clear cached JetBrains Gateway backend metadata for %s/%s?", result.Tenant, result.Environment))
+		if err != nil {
+			return false, err
+		}
+		selected = ok
+	}
+	if !selected {
+		return false, nil
+	}
+	if _, err := fmt.Fprintf(ctx.Stdout, "Running: Clear cached JetBrains Gateway backend metadata\n"); err != nil {
+		return false, err
+	}
+	if _, err := fmt.Fprintf(ctx.Stdout, "Cached backend path: %s\n", repair.idePath); err != nil {
+		return false, err
+	}
+	if ctx.DryRun {
+		_, err := fmt.Fprintf(ctx.Stdout, "Would clear latest used IDE metadata in %s\n", repair.optionsDir)
+		return true, err
+	}
+	changed, err := jetbrainsconfig.ClearRecentProjectLatestUsedIDE(repair.optionsDir, repair.configID, repair.projectPath)
+	if err != nil {
+		return false, err
+	}
+	if !changed {
+		_, err := fmt.Fprintln(ctx.Stdout, "No JetBrains Gateway metadata changed.")
+		return true, err
+	}
+	_, err = fmt.Fprintln(ctx.Stdout, "Cleared cached JetBrains Gateway backend metadata. Open IntelliJ again to let Gateway select or redeploy the backend.")
+	return true, err
+}
+
+func jetBrainsGatewayDoctorRepairForResult(result common.OpenResult) (jetBrainsGatewayDoctorRepair, bool, error) {
+	optionsDir, err := resolveIntelliJOptionsDir(currentHostOS())
+	if err != nil {
+		return jetBrainsGatewayDoctorRepair{}, false, nil
+	}
+	info := common.SSHConnectionInfoForResult(result)
+	configID := jetbrainsconfig.StableConfigID(info.HostAlias)
+	projectPath := strings.TrimSpace(info.WorkspacePath)
+	recent, found, err := jetbrainsconfig.FindRecentProject(optionsDir, configID, projectPath)
+	if err != nil {
+		return jetBrainsGatewayDoctorRepair{}, false, err
+	}
+	idePath := strings.TrimSpace(recent.LatestUsedIDE.PathToIDE)
+	if !found || idePath == "" {
+		return jetBrainsGatewayDoctorRepair{}, false, nil
+	}
+	return jetBrainsGatewayDoctorRepair{
+		optionsDir:  optionsDir,
+		configID:    configID,
+		projectPath: projectPath,
+		idePath:     idePath,
+	}, true, nil
+}
+
+func doctorOnlySelectedJetBrainsGatewayRepair(options doctorOptions) bool {
+	return options.repairJetBrainsGateway && !options.pruneImages && !options.pruneBuildCache && !options.pruneContainers
 }
 
 func selectedDoctorActions(promptRunner PromptRunner, result common.OpenResult, options doctorOptions, dryRun bool) ([]common.DoctorAction, error) {

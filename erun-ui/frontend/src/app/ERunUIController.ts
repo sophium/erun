@@ -10,6 +10,7 @@ import {
   LoadCloudProviderStatuses,
   LoadEnvironmentConfig,
   LoadERunConfig,
+  LoadIdleStatus,
   LoadKubernetesContexts,
   LoadState,
   LoadTenantConfig,
@@ -25,7 +26,9 @@ import {
   StartCloudContext,
   StartCloudInitAWSSession,
   StartDeploySession,
+  StartDoctorSession,
   StartInitSession,
+  StartSSHDInitSession,
   StartSession,
   StopCloudContext,
 } from '../../wailsjs/go/main/App';
@@ -62,7 +65,21 @@ import {
   type TerminalStatusAction,
   type TerminalStatusKind,
 } from './state';
-import { clamp, loadSavedDebugHeight, loadSavedDebugOpen, loadSavedFilesOpen, loadSavedFilesWidth, loadSavedReviewWidth, loadSavedSidebarWidth, saveBoolean, saveNumber } from './storage';
+import {
+  clamp,
+  loadSavedDebugHeight,
+  loadSavedDebugOpen,
+  loadSavedFilesOpen,
+  loadSavedFilesWidth,
+  loadSavedPastContainerRegistries,
+  loadSavedReviewWidth,
+  loadSavedSidebarWidth,
+  rememberPastContainerRegistry,
+  rememberPastEnvironment,
+  rememberPastTenant,
+  saveBoolean,
+  saveNumber,
+} from './storage';
 import { deleteConfirmationValue, normalizeDialogValue, normalizeVersionSuggestions, selectionKey } from './versionSuggestions';
 import type {
   DeleteEnvironmentResult,
@@ -77,6 +94,7 @@ import type {
   UICloudProviderStatus,
   UIERunConfig,
   UIEnvironmentConfig,
+  UIIdleStatus,
   UISelection,
   UIState,
   UITenantConfig,
@@ -144,6 +162,8 @@ export class ERunUIController {
     terminalBusy: false,
     terminalCopyOutput: '',
     terminalCopyStatus: '',
+    idleStatus: null,
+    idleCloudContextBusy: false,
     debugOpen: loadSavedDebugOpen(),
     debugHeight: loadSavedDebugHeight(),
     debugOutput: '',
@@ -152,6 +172,8 @@ export class ERunUIController {
   private readonly subscribers = new Set<() => void>();
   private readonly initSessionSelections = new Map<number, UISelection>();
   private readonly deploySessionSelections = new Map<number, UISelection>();
+  private readonly sshdInitSessionSelections = new Map<number, UISelection>();
+  private readonly doctorSessionSelections = new Map<number, UISelection>();
   private readonly openSessionSelections = new Map<number, UISelection>();
   private readonly cloudInitSessions = new Set<number>();
   private readonly selectionSessions = new Map<string, number>();
@@ -174,6 +196,8 @@ export class ERunUIController {
   private versionSuggestionTimer = 0;
   private notificationTimer = 0;
   private terminalCopyStatusTimer = 0;
+  private idleStatusTimer = 0;
+  private idleStatusRequest = 0;
   private versionSuggestionRequest = 0;
   private bootStarted = false;
   private terminalDataDisposable: TerminalDataDisposable | null = null;
@@ -249,6 +273,7 @@ export class ERunUIController {
       this.bootStarted = true;
       void this.boot();
     }
+    this.scheduleIdleStatusPoll(0);
 
     return () => {
       window.removeEventListener('resize', this.queueTerminalResize);
@@ -259,6 +284,7 @@ export class ERunUIController {
       this.appStatusOff?.();
       window.clearTimeout(this.notificationTimer);
       window.clearTimeout(this.terminalCopyStatusTimer);
+      window.clearTimeout(this.idleStatusTimer);
       if (this.pasteHandler && this.terminalRoot) {
         this.terminalRoot.removeEventListener('paste', this.pasteHandler, true);
       }
@@ -437,6 +463,7 @@ export class ERunUIController {
     const previousKnownSessionId = this.selectionSessions.get(key) || 0;
 
     this.state.selected = selection;
+    this.state.idleStatus = null;
     if (this.state.debugOpen && (previousKnownSessionId === 0 || previousKnownSessionId !== previousSessionId)) {
       this.state.debugOutput = `$ ${formatDebugCommand(runSelection)}\n`;
     }
@@ -499,7 +526,7 @@ export class ERunUIController {
     this.emit();
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
-    this.showTerminalMessage(`Opening ${label} for ${selection.tenant} / ${selection.environment}...`, true);
+    this.showTerminalMessage(`Opening ${label} for ${selection.tenant} / ${selection.environment}...`);
 
     try {
       await OpenIDE(runSelection, ide);
@@ -510,11 +537,13 @@ export class ERunUIController {
       this.showTerminalFailure(failure.message, failure.detail, failure.copyOutput, '', null);
       return;
     }
+    this.dismissTerminalStatus();
     this.showNotification('success', `Opened ${label} for ${selection.tenant} / ${selection.environment}.`);
   }
 
   openInitializeDialog(): void {
     const tenantDefault = this.state.selected?.tenant || this.state.tenants[0]?.name || '';
+    const containerRegistryDefault = loadSavedPastContainerRegistries()[0] || 'erunpaas';
     this.state.environmentDialog = {
       open: true,
       actionMode: 'init',
@@ -524,7 +553,7 @@ export class ERunUIController {
       kubernetesContext: '',
       kubernetesContexts: [],
       kubernetesContextsLoading: true,
-      containerRegistry: 'erunpaas',
+      containerRegistry: containerRegistryDefault,
       noGit: false,
       bootstrap: false,
       setDefaultTenant: true,
@@ -624,6 +653,11 @@ export class ERunUIController {
       bootstrap: isInit ? dialog.bootstrap : undefined,
       setDefaultTenant: isInit ? dialog.setDefaultTenant : undefined,
     };
+    rememberPastTenant(tenant);
+    rememberPastEnvironment(environment);
+    if (isInit) {
+      rememberPastContainerRegistry(containerRegistry);
+    }
 
     this.state.environmentDialog = {
       ...dialog,
@@ -857,6 +891,64 @@ export class ERunUIController {
   async startManageCloudContext(name: string): Promise<void> {
     await this.updateManageCloudContextPower(name, StartCloudContext, 'Started');
     void this.refreshKubernetesContexts();
+  }
+
+  async enableManageSSHD(): Promise<void> {
+    const dialog = this.state.manageDialog;
+    const selection = dialog.selection;
+    if (dialog.busy || dialog.configLoading || !selection) {
+      return;
+    }
+    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
+    this.state.selected = selection;
+    this.state.manageDialog = defaultManageDialog();
+    if (this.state.debugOpen) {
+      this.state.debugOutput = `$ ${formatDebugCommand(runSelection, 'sshd-init')}\n`;
+    }
+    this.emit();
+    this.state.terminalCopyOutput = '';
+    this.state.terminalCopyStatus = '';
+    this.showTerminalMessage(`Enabling SSHD for ${selection.tenant} / ${selection.environment}...`, true);
+
+    this.fitAddon?.fit();
+    const result = (await StartSSHDInitSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
+    this.sshdInitSessionSelections.set(result.sessionId, runSelection);
+    this.registerDebugSession(result.sessionId, runSelection, 'hidden');
+    this.state.sessionId = result.sessionId;
+
+    this.resetTerminal();
+    this.focusTerminalSoon();
+    this.queueTerminalResize();
+    this.emit();
+  }
+
+  async startManageDoctor(): Promise<void> {
+    const dialog = this.state.manageDialog;
+    const selection = dialog.selection;
+    if (dialog.busy || dialog.configLoading || !selection) {
+      return;
+    }
+    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
+    this.state.selected = selection;
+    this.state.manageDialog = defaultManageDialog();
+    if (this.state.debugOpen) {
+      this.state.debugOutput = `$ ${formatDebugCommand(runSelection, 'doctor')}\n`;
+    }
+    this.emit();
+    this.state.terminalCopyOutput = '';
+    this.state.terminalCopyStatus = '';
+    this.showTerminalMessage(`Running doctor for ${selection.tenant} / ${selection.environment}...`, true);
+
+    this.fitAddon?.fit();
+    const result = (await StartDoctorSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
+    this.doctorSessionSelections.set(result.sessionId, runSelection);
+    this.registerDebugSession(result.sessionId, runSelection, 'hidden');
+    this.state.sessionId = result.sessionId;
+
+    this.resetTerminal();
+    this.focusTerminalSoon();
+    this.queueTerminalResize();
+    this.emit();
   }
 
   async stopManageCloudContext(name: string): Promise<void> {
@@ -1094,6 +1186,50 @@ export class ERunUIController {
   async startCloudContext(name: string): Promise<void> {
     await this.updateCloudContextPower(name, StartCloudContext, 'Started');
     void this.refreshKubernetesContexts();
+  }
+
+  async toggleIdleCloudContext(): Promise<void> {
+    const idleStatus = this.state.idleStatus;
+    const name = normalizeDialogValue(idleStatus?.cloudContextName || '');
+    if (!idleStatus || !idleStatus.managedCloud || !name || this.state.idleCloudContextBusy) {
+      return;
+    }
+    const running = normalizeDialogValue(idleStatus.cloudContextStatus || '').toLowerCase() === 'running';
+    const action = running ? StopCloudContext : StartCloudContext;
+    const label = running ? 'Stopped' : 'Started';
+    this.state.idleCloudContextBusy = true;
+    this.emit();
+    try {
+      const context = (await action(name)) as UICloudContextStatus;
+      this.state.idleStatus = {
+        ...(this.state.idleStatus ?? idleStatus),
+        cloudContextName: context.name,
+        cloudContextStatus: context.status,
+        cloudContextLabel: context.kubernetesContext || context.name,
+      };
+      if (this.state.globalConfigDialog.open) {
+        this.state.globalConfigDialog = {
+          ...this.state.globalConfigDialog,
+          config: {
+            ...this.state.globalConfigDialog.config,
+            cloudContexts: replaceCloudContext(this.state.globalConfigDialog.config.cloudContexts || [], context),
+          },
+        };
+      }
+      this.state.idleCloudContextBusy = false;
+      this.showNotification('success', `${label} cloud environment ${context.kubernetesContext || context.name}.`);
+      this.emit();
+      if (!running) {
+        void this.refreshKubernetesContexts();
+      }
+      void this.refreshIdleStatus();
+    } catch (error) {
+      const message = readError(error);
+      this.state.idleCloudContextBusy = false;
+      this.showNotification('error', message);
+      this.showTerminalMessage(message);
+      this.emit();
+    }
   }
 
   private async updateCloudContextPower(name: string, action: (name: string) => Promise<unknown>, label: string): Promise<void> {
@@ -1580,6 +1716,43 @@ export class ERunUIController {
     this.subscribers.forEach((subscriber) => subscriber());
   }
 
+  private scheduleIdleStatusPoll(delay = 1000): void {
+    window.clearTimeout(this.idleStatusTimer);
+    this.idleStatusTimer = window.setTimeout(() => {
+      void this.refreshIdleStatus();
+    }, delay);
+  }
+
+  private async refreshIdleStatus(): Promise<void> {
+    const selection = this.state.selected;
+    const request = ++this.idleStatusRequest;
+    if (!selection) {
+      if (this.state.idleStatus) {
+        this.state.idleStatus = null;
+        this.emit();
+      }
+      this.scheduleIdleStatusPoll();
+      return;
+    }
+
+    try {
+      const status = (await LoadIdleStatus(selection)) as UIIdleStatus;
+      if (request === this.idleStatusRequest && this.state.selected?.tenant === selection.tenant && this.state.selected.environment === selection.environment) {
+        this.state.idleStatus = status;
+        this.emit();
+      }
+    } catch {
+      if (request === this.idleStatusRequest && this.state.idleStatus) {
+        this.state.idleStatus = null;
+        this.emit();
+      }
+    } finally {
+      if (request === this.idleStatusRequest) {
+        this.scheduleIdleStatusPoll();
+      }
+    }
+  }
+
   private async boot(): Promise<void> {
     try {
       this.showTerminalMessage('Loading environments...', true);
@@ -1624,7 +1797,6 @@ export class ERunUIController {
     this.state.sessionId = result.sessionId;
 
     this.resetTerminal();
-    this.hideTerminalMessage();
     this.focusTerminalSoon();
     this.queueTerminalResize();
     this.emit();
@@ -1648,7 +1820,6 @@ export class ERunUIController {
     this.state.sessionId = result.sessionId;
 
     this.resetTerminal();
-    this.hideTerminalMessage();
     this.focusTerminalSoon();
     this.queueTerminalResize();
     this.emit();
@@ -1852,10 +2023,14 @@ export class ERunUIController {
     }
     const initSelection = this.initSessionSelections.get(payload.sessionId);
     const deploySelection = this.deploySessionSelections.get(payload.sessionId);
+    const sshdInitSelection = this.sshdInitSessionSelections.get(payload.sessionId);
+    const doctorSelection = this.doctorSessionSelections.get(payload.sessionId);
     const openSelection = this.openSessionSelections.get(payload.sessionId);
     const cloudInit = this.cloudInitSessions.has(payload.sessionId);
     this.initSessionSelections.delete(payload.sessionId);
     this.deploySessionSelections.delete(payload.sessionId);
+    this.sshdInitSessionSelections.delete(payload.sessionId);
+    this.doctorSessionSelections.delete(payload.sessionId);
     this.openSessionSelections.delete(payload.sessionId);
     if (openSelection) {
       this.selectionSessions.delete(selectionKey(openSelection));
@@ -1863,18 +2038,22 @@ export class ERunUIController {
     this.cloudInitSessions.delete(payload.sessionId);
     this.debugSessionModes.delete(payload.sessionId);
 
-    const reason = this.terminalExitReason(payload, initSelection, deploySelection, openSelection, cloudInit);
+    const reason = this.terminalExitReason(payload, initSelection, deploySelection, sshdInitSelection, doctorSelection, openSelection, cloudInit);
     this.sessionExitReasons.set(payload.sessionId, reason);
-    const failedOutput = payload.reason && (initSelection || deploySelection || openSelection || cloudInit)
+    const failedOutput = payload.reason && (initSelection || deploySelection || sshdInitSelection || doctorSelection || openSelection || cloudInit)
       ? this.failedTerminalOutput(payload.sessionId, reason)
       : '';
     if (failedOutput) {
       this.sessionExitOutputs.set(payload.sessionId, failedOutput);
     }
-    if (initSelection || deploySelection) {
+    if (initSelection || deploySelection || sshdInitSelection) {
       await this.reloadStateAfterEnvironmentChange();
     }
     if (payload.sessionId !== this.state.sessionId) {
+      return;
+    }
+    if (sshdInitSelection && !payload.reason) {
+      this.showTerminalMessage(reason);
       return;
     }
     const completedSelection = initSelection || deploySelection;
@@ -1886,7 +2065,7 @@ export class ERunUIController {
       }
       return;
     }
-    if (payload.reason && (initSelection || deploySelection || openSelection || cloudInit)) {
+    if (payload.reason && (initSelection || deploySelection || sshdInitSelection || doctorSelection || openSelection || cloudInit)) {
       const failure = classifiedTerminalFailure(payload.reason, reason, failedOutput, openSelection);
       this.showTerminalFailure(failure.message, failure.detail, failedOutput, failure.action, failure.retrySelection);
       return;
@@ -1898,6 +2077,8 @@ export class ERunUIController {
     payload: TerminalExitPayload,
     initSelection?: UISelection,
     deploySelection?: UISelection,
+    sshdInitSelection?: UISelection,
+    doctorSelection?: UISelection,
     openSelection?: UISelection,
     cloudInit?: boolean,
   ): string {
@@ -1907,6 +2088,12 @@ export class ERunUIController {
       }
       if (deploySelection) {
         return `Failed to deploy ${deploySelection.tenant} / ${deploySelection.environment}: ${payload.reason}`;
+      }
+      if (sshdInitSelection) {
+        return `Failed to enable SSHD for ${sshdInitSelection.tenant} / ${sshdInitSelection.environment}: ${payload.reason}`;
+      }
+      if (doctorSelection) {
+        return `Doctor failed for ${doctorSelection.tenant} / ${doctorSelection.environment}: ${payload.reason}`;
       }
       if (openSelection) {
         return `Failed to open ${openSelection.tenant} / ${openSelection.environment}: ${payload.reason}`;
@@ -1921,6 +2108,12 @@ export class ERunUIController {
     }
     if (deploySelection) {
       return `Deployed ${deploySelection.tenant} / ${deploySelection.environment}.`;
+    }
+    if (sshdInitSelection) {
+      return `Enabled SSHD for ${sshdInitSelection.tenant} / ${sshdInitSelection.environment}.`;
+    }
+    if (doctorSelection) {
+      return `Doctor finished for ${doctorSelection.tenant} / ${doctorSelection.environment}.`;
     }
     if (cloudInit) {
       return 'AWS cloud alias setup ended.';
@@ -2244,9 +2437,14 @@ function interactivePromptIndex(output: string): number {
   const promptLabels = [
     'Git remote URL for environment',
     'CodeCommit SSH public key ID for environment',
+    'Use existing SSH host config for environment',
     'Import the SSH public key above',
     'Kubernetes context for environment',
     'Container registry for environment',
+    'Clear cached JetBrains Gateway backend metadata',
+    'Prune unused Docker images',
+    'Prune unused BuildKit cache',
+    'Prune stopped Docker containers',
     'Initialize default environment',
     'Initialize tenant',
     'Select tenant',
@@ -2272,7 +2470,7 @@ function trimDebugOutput(value: string): string {
   return value.slice(value.length - maxLength);
 }
 
-function formatDebugCommand(selection: UISelection, mode: 'open' | 'init' | 'deploy' = 'open'): string {
+function formatDebugCommand(selection: UISelection, mode: 'open' | 'init' | 'deploy' | 'sshd-init' | 'doctor' = 'open'): string {
   const args = ['erun'];
   if (selection.debug) {
     args.push('-vv');
@@ -2298,6 +2496,10 @@ function formatDebugCommand(selection: UISelection, mode: 'open' | 'init' | 'dep
     if (selection.bootstrap) {
       args.push('--bootstrap');
     }
+  } else if (mode === 'sshd-init') {
+    args.push('sshd', 'init', selection.tenant, selection.environment);
+  } else if (mode === 'doctor') {
+    args.push('doctor', selection.tenant, selection.environment);
   } else if (mode === 'deploy') {
     args.push('open', selection.tenant, selection.environment, '--no-shell', '--no-alias-prompt');
     if (selection.version) {

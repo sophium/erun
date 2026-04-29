@@ -404,6 +404,14 @@ func TestEnsureDefaultDevopsChartMigratesLegacyGeneratedServiceTemplate(t *testi
 	for _, want := range []string{
 		`{{- $mcpPort := default 17000 .Values.mcpPort -}}`,
 		`{{- $sshPort := default 17022 .Values.sshPort -}}`,
+		`{{- $cloudContextName := default "" .Values.cloudContext.name -}}`,
+		`{{- $cloudProviderAlias := default "" .Values.cloudContext.providerAlias -}}`,
+		`{{- $cloudRegion := default "" .Values.cloudContext.region -}}`,
+		`{{- $cloudInstanceID := default "" .Values.cloudContext.instanceId -}}`,
+		"name: ERUN_CLOUD_CONTEXT_NAME",
+		"name: ERUN_CLOUD_PROVIDER_ALIAS",
+		"name: ERUN_CLOUD_REGION",
+		"name: ERUN_CLOUD_INSTANCE_ID",
 		"name: ERUN_MCP_PORT",
 		"name: ERUN_SSHD_PORT",
 		"containerPort: {{ $mcpPort }}",
@@ -1582,6 +1590,93 @@ func TestBootstrapRunRemoteWaitsForSSHKeyImportAndRetries(t *testing.T) {
 	}
 	if !logger.containsTrace("Remote repository access confirmed.") {
 		t.Fatalf("expected success message, got %+v", logger.traces)
+	}
+}
+
+func TestBootstrapRunRemoteOffersExistingSSHHostConfigBeforeKeyImport(t *testing.T) {
+	setupXDGConfigHome(t)
+
+	logger := &testTraceLogger{}
+	var promptedHostConfig bool
+	scripts := make([]string, 0, 3)
+	service := bootstrapTestRunner{
+		Context: testContextWithLogger(logger),
+		Store:   ConfigStore{},
+		Confirm: func(label string) (bool, error) {
+			if label == remoteHostConfigLabel("frs", "dev") {
+				promptedHostConfig = true
+			}
+			return true, nil
+		},
+		PromptKubernetesContext: func(string) (string, error) {
+			return "cluster-remote", nil
+		},
+		PromptContainerRegistry: func(string) (string, error) {
+			return DefaultContainerRegistry, nil
+		},
+		PromptRemoteRepositoryURL: func(string) (string, error) {
+			return "git@github.com:sophium/frs.git", nil
+		},
+		EnsureKubernetesNamespace: func(string, string) error {
+			return nil
+		},
+		DeployHelmChart: func(HelmDeployParams) error {
+			return nil
+		},
+		WaitForRemoteRuntime: func(ShellLaunchParams) error {
+			return nil
+		},
+		RunRemoteCommand: func(req ShellLaunchParams, script string) (RemoteCommandResult, error) {
+			scripts = append(scripts, script)
+			switch len(scripts) {
+			case 1:
+				return RemoteCommandResult{
+					Stdout: strings.Join([]string{
+						"repo_missing",
+						"__ERUN_REMOTE_PUBLIC_KEY__",
+						"ssh-ed25519 AAAATEST remote",
+						"__ERUN_REMOTE_CODECOMMIT_PUBLIC_KEY__",
+						"ssh-rsa AAAACODECOMMITRSA remote",
+						"__ERUN_REMOTE_SSH_CONFIG__",
+						"exists",
+					}, "\n") + "\n",
+				}, nil
+			case 2:
+				if !strings.Contains(script, `ssh -F "$HOME/.ssh/config"`) || strings.Contains(script, "id_ed25519") {
+					t.Fatalf("expected existing host config access check, got:\n%s", script)
+				}
+				return RemoteCommandResult{}, nil
+			case 3:
+				if !strings.Contains(script, `ssh -F "$HOME/.ssh/config"`) || strings.Contains(script, "id_ed25519") {
+					t.Fatalf("expected clone to use existing host config, got:\n%s", script)
+				}
+				return RemoteCommandResult{}, nil
+			default:
+				t.Fatalf("unexpected remote command script:\n%s", script)
+				return RemoteCommandResult{}, nil
+			}
+		},
+	}
+
+	if _, err := service.Run(BootstrapInitParams{
+		Tenant:      "frs",
+		Environment: "dev",
+		Remote:      true,
+	}); err != nil {
+		t.Fatalf("Run failed: %v", err)
+	}
+
+	if !promptedHostConfig {
+		t.Fatal("expected existing SSH host config confirmation")
+	}
+	if len(scripts) != 3 {
+		t.Fatalf("expected state/existing-host-config/clone remote commands, got %d", len(scripts))
+	}
+	if logger.containsTrace("Import this SSH public key into your git host before continuing:") {
+		t.Fatalf("did not expect SSH public key import instructions, got %+v", logger.traces)
+	}
+	if logger.containsTrace("Waiting for the SSH key to be deployed to the git host.") {
+		t.Fatalf("did not expect SSH key import wait, got %+v", logger.traces)
 	}
 }
 

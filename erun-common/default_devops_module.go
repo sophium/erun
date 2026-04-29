@@ -143,6 +143,10 @@ func legacyDefaultDevopsServiceTemplate(content []byte) string {
 	return strings.NewReplacer(
 		"{{- $mcpPort := default 17000 .Values.mcpPort -}}\n{{- $sshPort := default 17022 .Values.sshPort -}}\n",
 		"",
+		"{{- $cloudContextName := default \"\" .Values.cloudContext.name -}}\n{{- $cloudProviderAlias := default \"\" .Values.cloudContext.providerAlias -}}\n{{- $cloudRegion := default \"\" .Values.cloudContext.region -}}\n{{- $cloudInstanceID := default \"\" .Values.cloudContext.instanceId -}}\n",
+		"",
+		"            - name: ERUN_CLOUD_CONTEXT_NAME\n              value: {{ $cloudContextName | quote }}\n            - name: ERUN_CLOUD_PROVIDER_ALIAS\n              value: {{ $cloudProviderAlias | quote }}\n            - name: ERUN_CLOUD_REGION\n              value: {{ $cloudRegion | quote }}\n            - name: ERUN_CLOUD_INSTANCE_ID\n              value: {{ $cloudInstanceID | quote }}\n",
+		"",
 		"            - name: ERUN_MCP_PORT\n              value: {{ $mcpPort | quote }}\n            - name: ERUN_SSHD_PORT\n              value: {{ $sshPort | quote }}\n",
 		"",
 		"            - containerPort: {{ $mcpPort }}\n              name: mcp\n            - containerPort: {{ $sshPort }}\n              name: ssh",
