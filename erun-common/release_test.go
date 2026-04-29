@@ -23,55 +23,33 @@ func TestResolveReleaseSpecStableRelease(t *testing.T) {
 		func(string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
-	if err != nil {
-		t.Fatalf("resolveReleaseSpec failed: %v", err)
-	}
+	requireNoError(t, err, "resolveReleaseSpec failed")
 
-	if spec.Mode != ReleaseModeStable || spec.Version != "1.4.2" || spec.NextVersion != "1.4.3" {
-		t.Fatalf("unexpected release spec: %+v", spec)
-	}
-	if spec.ReleaseRoot != filepath.Join(projectRoot, "erun-devops") {
-		t.Fatalf("unexpected release root: %q", spec.ReleaseRoot)
-	}
-	if len(spec.Charts) != 1 || spec.Charts[0].Version != "1.4.2" || spec.Charts[0].AppVersion != "1.4.2" {
-		t.Fatalf("unexpected charts: %+v", spec.Charts)
-	}
-	if len(spec.DockerImages) != 1 || spec.DockerImages[0].Tag != "erunpaas/api:1.4.2" {
-		t.Fatalf("unexpected docker images: %+v", spec.DockerImages)
-	}
-	if len(spec.Stages) != 5 {
-		t.Fatalf("expected 5 stages, got %+v", spec.Stages)
-	}
-	if got := spec.Stages[0].GitCommands[0].Args; !reflect.DeepEqual(got, []string{"fetch", "origin"}) {
-		t.Fatalf("unexpected sync fetch command: %+v", got)
-	}
-	if got := spec.Stages[0].GitCommands[1].Args; !reflect.DeepEqual(got, []string{"rebase", "origin/main"}) {
-		t.Fatalf("unexpected sync rebase command: %+v", got)
-	}
-	if got := spec.Stages[1].GitCommands[0].Args; !reflect.DeepEqual(got, []string{"add", filepath.Join("erun-devops", "k8s", "api", "Chart.yaml")}) {
-		t.Fatalf("unexpected release add command: %+v", got)
-	}
-	if got := spec.Stages[1].GitCommands[1].Args; !reflect.DeepEqual(got, []string{"commit", "-m", "[skip ci] release 1.4.2"}) {
-		t.Fatalf("unexpected release commit command: %+v", got)
-	}
-	if got := spec.Stages[1].GitCommands[2].Args; !reflect.DeepEqual(got, []string{"tag", "-a", "v1.4.2", "-m", "Release 1.4.2"}) {
-		t.Fatalf("unexpected release tag command: %+v", got)
-	}
-	if got := spec.Stages[2].GitCommands[0].Args; !reflect.DeepEqual(got, []string{"add", filepath.Join("erun-devops", "VERSION")}) {
-		t.Fatalf("unexpected bump add command: %+v", got)
-	}
-	if got := spec.Stages[3].GitCommands[0].Args; !reflect.DeepEqual(got, []string{"checkout", "develop"}) {
-		t.Fatalf("unexpected sync checkout command: %+v", got)
-	}
-	if got := spec.Stages[3].GitCommands[1].Args; !reflect.DeepEqual(got, []string{"merge", "--no-edit", "-X", "theirs", "main"}) {
-		t.Fatalf("unexpected sync merge command: %+v", got)
-	}
-	if got := spec.Stages[3].GitCommands[2].Args; !reflect.DeepEqual(got, []string{"checkout", "main"}) {
-		t.Fatalf("unexpected sync return command: %+v", got)
-	}
-	if got := spec.Stages[4].GitCommands[0].Args; !reflect.DeepEqual(got, []string{"push", "--follow-tags", "origin", "main", "develop"}) {
-		t.Fatalf("unexpected push command: %+v", got)
-	}
+	requireStableReleaseSpec(t, spec, projectRoot)
+}
+
+func requireStableReleaseSpec(t *testing.T, spec ReleaseSpec, projectRoot string) {
+	t.Helper()
+	requireCondition(t, spec.Mode == ReleaseModeStable && spec.Version == "1.4.2" && spec.NextVersion == "1.4.3", "unexpected release spec: %+v", spec)
+	requireEqual(t, spec.ReleaseRoot, filepath.Join(projectRoot, "erun-devops"), "unexpected release root")
+	requireCondition(t, len(spec.Charts) == 1 && spec.Charts[0].Version == "1.4.2" && spec.Charts[0].AppVersion == "1.4.2", "unexpected charts: %+v", spec.Charts)
+	requireCondition(t, len(spec.DockerImages) == 1 && spec.DockerImages[0].Tag == "erunpaas/api:1.4.2", "unexpected docker images: %+v", spec.DockerImages)
+	requireEqual(t, len(spec.Stages), 5, "stage count")
+	requireStableReleaseStageCommands(t, spec, projectRoot)
+}
+
+func requireStableReleaseStageCommands(t *testing.T, spec ReleaseSpec, projectRoot string) {
+	t.Helper()
+	requireDeepEqual(t, spec.Stages[0].GitCommands[0].Args, []string{"fetch", "origin"}, "unexpected sync fetch command")
+	requireDeepEqual(t, spec.Stages[0].GitCommands[1].Args, []string{"rebase", "origin/main"}, "unexpected sync rebase command")
+	requireDeepEqual(t, spec.Stages[1].GitCommands[0].Args, []string{"add", filepath.Join("erun-devops", "k8s", "api", "Chart.yaml")}, "unexpected release add command")
+	requireDeepEqual(t, spec.Stages[1].GitCommands[1].Args, []string{"commit", "-m", "[skip ci] release 1.4.2"}, "unexpected release commit command")
+	requireDeepEqual(t, spec.Stages[1].GitCommands[2].Args, []string{"tag", "-a", "v1.4.2", "-m", "Release 1.4.2"}, "unexpected release tag command")
+	requireDeepEqual(t, spec.Stages[2].GitCommands[0].Args, []string{"add", filepath.Join("erun-devops", "VERSION")}, "unexpected bump add command")
+	requireDeepEqual(t, spec.Stages[3].GitCommands[0].Args, []string{"checkout", "develop"}, "unexpected sync checkout command")
+	requireDeepEqual(t, spec.Stages[3].GitCommands[1].Args, []string{"merge", "--no-edit", "-X", "theirs", "main"}, "unexpected sync merge command")
+	requireDeepEqual(t, spec.Stages[3].GitCommands[2].Args, []string{"checkout", "main"}, "unexpected sync return command")
+	requireDeepEqual(t, spec.Stages[4].GitCommands[0].Args, []string{"push", "--follow-tags", "origin", "main", "develop"}, "unexpected push command")
 }
 
 func TestResolveReleaseSpecSkipsLinuxScriptsWhenUnsupported(t *testing.T) {
@@ -126,45 +104,31 @@ func TestResolveReleaseSpecStableReleaseIncludesPackagingUpdatesWhenPresent(t *t
 		t.Fatalf("resolveReleaseSpec failed: %v", err)
 	}
 
-	if len(spec.Stages) != 7 {
-		t.Fatalf("expected 7 stages, got %+v", spec.Stages)
-	}
-	if len(spec.Stages[1].FileUpdates) != 3 {
-		t.Fatalf("expected chart, formula, and scoop updates, got %+v", spec.Stages[1].FileUpdates)
-	}
-	if got := spec.Stages[1].GitCommands[0].Args; !reflect.DeepEqual(got, []string{
+	requireStablePackagingReleaseSpec(t, spec)
+}
+
+func requireStablePackagingReleaseSpec(t *testing.T, spec ReleaseSpec) {
+	t.Helper()
+	requireEqual(t, len(spec.Stages), 7, "stage count")
+	requireEqual(t, len(spec.Stages[1].FileUpdates), 3, "release file update count")
+	requireDeepEqual(t, spec.Stages[1].GitCommands[0].Args, []string{
 		"add",
 		filepath.Join("erun-devops", "k8s", "api", "Chart.yaml"),
 		filepath.Join("Formula", "erun.rb"),
 		filepath.Join("bucket", "erun.json"),
-	}) {
-		t.Fatalf("unexpected release add command: %+v", got)
-	}
-	if formula := spec.Stages[1].FileUpdates[1].Content; !strings.Contains(formula, `url "https://github.com/sophium/erun/archive/refs/tags/v1.4.2.tar.gz"`) {
-		t.Fatalf("unexpected formula update: %s", formula)
-	}
-	if scoop := spec.Stages[1].FileUpdates[2].Content; !strings.Contains(scoop, `"version": "1.4.2"`) || !strings.Contains(scoop, `"extract_dir": "erun-1.4.2"`) {
-		t.Fatalf("unexpected scoop update: %s", scoop)
-	}
-	if spec.Stages[2].Name != "push-release-tag" {
-		t.Fatalf("unexpected tag push stage: %+v", spec.Stages[2])
-	}
-	if got := spec.Stages[2].GitCommands[0].Args; !reflect.DeepEqual(got, []string{"push", "origin", "v1.4.2"}) {
-		t.Fatalf("unexpected tag push command: %+v", got)
-	}
-	if spec.Stages[3].Name != "sync-packaging-checksums" || spec.Stages[3].PackagingSync == nil {
-		t.Fatalf("unexpected packaging sync stage: %+v", spec.Stages[3])
-	}
-	if got := spec.Stages[3].GitCommands[0].Args; !reflect.DeepEqual(got, []string{
+	}, "unexpected release add command")
+	requireStringContains(t, spec.Stages[1].FileUpdates[1].Content, `url "https://github.com/sophium/erun/archive/refs/tags/v1.4.2.tar.gz"`, "unexpected formula update")
+	requireStringContains(t, spec.Stages[1].FileUpdates[2].Content, `"version": "1.4.2"`, "unexpected scoop version update")
+	requireStringContains(t, spec.Stages[1].FileUpdates[2].Content, `"extract_dir": "erun-1.4.2"`, "unexpected scoop extract dir update")
+	requireEqual(t, spec.Stages[2].Name, "push-release-tag", "unexpected tag push stage")
+	requireDeepEqual(t, spec.Stages[2].GitCommands[0].Args, []string{"push", "origin", "v1.4.2"}, "unexpected tag push command")
+	requireCondition(t, spec.Stages[3].Name == "sync-packaging-checksums" && spec.Stages[3].PackagingSync != nil, "unexpected packaging sync stage: %+v", spec.Stages[3])
+	requireDeepEqual(t, spec.Stages[3].GitCommands[0].Args, []string{
 		"add",
 		filepath.Join("Formula", "erun.rb"),
 		filepath.Join("bucket", "erun.json"),
-	}) {
-		t.Fatalf("unexpected packaging add command: %+v", got)
-	}
-	if got := spec.Stages[3].GitCommands[1].Args; !reflect.DeepEqual(got, []string{"commit", "-m", "[skip ci] sync package metadata 1.4.2"}) {
-		t.Fatalf("unexpected packaging commit command: %+v", got)
-	}
+	}, "unexpected packaging add command")
+	requireDeepEqual(t, spec.Stages[3].GitCommands[1].Args, []string{"commit", "-m", "[skip ci] sync package metadata 1.4.2"}, "unexpected packaging commit command")
 }
 
 func TestResolveReleaseSpecUsesConfiguredBranches(t *testing.T) {
@@ -292,7 +256,7 @@ func TestRunReleaseSpecRewritesStablePackagingMetadataWhenPresent(t *testing.T) 
 		Stdout: new(bytes.Buffer),
 		Stderr: new(bytes.Buffer),
 	}
-	if err := runReleaseSpec(ctx, spec, func(dir string, stdout, stderr io.Writer, args ...string) error {
+	err = runReleaseSpec(ctx, spec, func(dir string, stdout, stderr io.Writer, args ...string) error {
 		gitCalls = append(gitCalls, append([]string{dir}, args...))
 		return nil
 	}, nil, func(Context, ReleasePackagingSyncSpec) ([]ReleaseFileUpdate, error) {
@@ -334,51 +298,39 @@ end
 `,
 			},
 		}, nil
-	}); err != nil {
-		t.Fatalf("RunReleaseSpec failed: %v", err)
-	}
+	})
+	requireNoError(t, err, "RunReleaseSpec failed")
 
 	formulaData, err := os.ReadFile(filepath.Join(projectRoot, "Formula", "erun.rb"))
-	if err != nil {
-		t.Fatalf("read formula: %v", err)
-	}
-	if !strings.Contains(string(formulaData), `url "https://github.com/sophium/erun/archive/refs/tags/v1.4.2.tar.gz"`) || !strings.Contains(string(formulaData), `sha256 "formula-checksum"`) {
-		t.Fatalf("unexpected formula content: %s", formulaData)
-	}
+	requireNoError(t, err, "read formula")
+	requireBytesContains(t, formulaData, `url "https://github.com/sophium/erun/archive/refs/tags/v1.4.2.tar.gz"`, "unexpected formula URL")
+	requireBytesContains(t, formulaData, `sha256 "formula-checksum"`, "unexpected formula checksum")
 
 	scoopData, err := os.ReadFile(filepath.Join(projectRoot, "bucket", "erun.json"))
-	if err != nil {
-		t.Fatalf("read scoop manifest: %v", err)
-	}
+	requireNoError(t, err, "read scoop manifest")
 	scoop := string(scoopData)
-	if !strings.Contains(scoop, `"version": "1.4.2"`) || !strings.Contains(scoop, `"url": "https://github.com/sophium/erun/archive/refs/tags/v1.4.2.zip"`) || !strings.Contains(scoop, `"extract_dir": "erun-1.4.2"`) || !strings.Contains(scoop, `"hash": "scoop-checksum"`) {
-		t.Fatalf("unexpected scoop content: %s", scoop)
-	}
+	requireStablePackagingFiles(t, scoop)
+	requireStablePackagingGitCalls(t, gitCalls, projectRoot)
+}
 
-	if got := gitCalls[5]; !reflect.DeepEqual(got, []string{
-		projectRoot,
-		"push",
-		"origin",
-		"v1.4.2",
-	}) {
-		t.Fatalf("unexpected tag push call: %+v", got)
-	}
-	if got := gitCalls[6]; !reflect.DeepEqual(got, []string{
+func requireStablePackagingFiles(t *testing.T, scoop string) {
+	t.Helper()
+	requireStringContains(t, scoop, `"version": "1.4.2"`, "unexpected scoop version")
+	requireStringContains(t, scoop, `"url": "https://github.com/sophium/erun/archive/refs/tags/v1.4.2.zip"`, "unexpected scoop URL")
+	requireStringContains(t, scoop, `"extract_dir": "erun-1.4.2"`, "unexpected scoop extract dir")
+	requireStringContains(t, scoop, `"hash": "scoop-checksum"`, "unexpected scoop checksum")
+}
+
+func requireStablePackagingGitCalls(t *testing.T, gitCalls [][]string, projectRoot string) {
+	t.Helper()
+	requireDeepEqual(t, gitCalls[5], []string{projectRoot, "push", "origin", "v1.4.2"}, "unexpected tag push call")
+	requireDeepEqual(t, gitCalls[6], []string{
 		projectRoot,
 		"add",
 		filepath.Join("Formula", "erun.rb"),
 		filepath.Join("bucket", "erun.json"),
-	}) {
-		t.Fatalf("unexpected packaging add call: %+v", got)
-	}
-	if got := gitCalls[7]; !reflect.DeepEqual(got, []string{
-		projectRoot,
-		"commit",
-		"-m",
-		"[skip ci] sync package metadata 1.4.2",
-	}) {
-		t.Fatalf("unexpected packaging commit call: %+v", got)
-	}
+	}, "unexpected packaging add call")
+	requireDeepEqual(t, gitCalls[7], []string{projectRoot, "commit", "-m", "[skip ci] sync package metadata 1.4.2"}, "unexpected packaging commit call")
 }
 
 func TestRunReleaseSpecSkipsPackagingCommitWhenChecksumsAreAlreadyCurrent(t *testing.T) {
@@ -884,63 +836,57 @@ func setupReleaseProject(t *testing.T, options releaseProjectOptions) string {
 
 	projectRoot := t.TempDir()
 	releaseRoot := filepath.Join(projectRoot, "erun-devops")
-	if err := os.MkdirAll(releaseRoot, 0o755); err != nil {
-		t.Fatalf("mkdir release root: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(releaseRoot, "VERSION"), []byte("1.4.2\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-
-	chartPath := filepath.Join(releaseRoot, "k8s", "api")
-	if err := os.MkdirAll(chartPath, 0o755); err != nil {
-		t.Fatalf("mkdir chart path: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: api\nversion: 0.1.0\nappVersion: 0.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write Chart.yaml: %v", err)
-	}
-
-	dockerPath := filepath.Join(releaseRoot, "docker", "api")
-	if err := os.MkdirAll(dockerPath, 0o755); err != nil {
-		t.Fatalf("mkdir docker path: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dockerPath, "Dockerfile"), []byte("FROM alpine:3.22\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	otherDockerPath := filepath.Join(releaseRoot, "docker", "base")
-	if err := os.MkdirAll(otherDockerPath, 0o755); err != nil {
-		t.Fatalf("mkdir other docker path: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(otherDockerPath, "Dockerfile"), []byte("FROM alpine:3.22\n"), 0o644); err != nil {
-		t.Fatalf("write other Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(otherDockerPath, "VERSION"), []byte("9.9.9\n"), 0o644); err != nil {
-		t.Fatalf("write other VERSION: %v", err)
-	}
-
-	if err := SaveProjectConfig(projectRoot, options.ProjectConfig); err != nil {
-		t.Fatalf("SaveProjectConfig failed: %v", err)
-	}
+	writeReleaseProjectScaffold(t, releaseRoot)
+	requireNoError(t, SaveProjectConfig(projectRoot, options.ProjectConfig), "SaveProjectConfig failed")
 	if options.WithPackaging {
-		formulaPath := filepath.Join(projectRoot, "Formula")
-		if err := os.MkdirAll(formulaPath, 0o755); err != nil {
-			t.Fatalf("mkdir Formula: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(formulaPath, "erun.rb"), []byte(`class Erun < Formula
+		writeReleasePackagingScaffold(t, projectRoot)
+	}
+
+	return projectRoot
+}
+
+func writeReleaseProjectScaffold(t *testing.T, releaseRoot string) {
+	t.Helper()
+	requireNoError(t, os.MkdirAll(releaseRoot, 0o755), "mkdir release root")
+	requireNoError(t, os.WriteFile(filepath.Join(releaseRoot, "VERSION"), []byte("1.4.2\n"), 0o644), "write VERSION")
+	writeReleaseChartScaffold(t, releaseRoot)
+	writeReleaseDockerScaffold(t, releaseRoot)
+}
+
+func writeReleaseChartScaffold(t *testing.T, releaseRoot string) {
+	t.Helper()
+	chartPath := filepath.Join(releaseRoot, "k8s", "api")
+	requireNoError(t, os.MkdirAll(chartPath, 0o755), "mkdir chart path")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: api\nversion: 0.1.0\nappVersion: 0.1.0\n"), 0o644), "write Chart.yaml")
+}
+
+func writeReleaseDockerScaffold(t *testing.T, releaseRoot string) {
+	t.Helper()
+	dockerPath := filepath.Join(releaseRoot, "docker", "api")
+	requireNoError(t, os.MkdirAll(dockerPath, 0o755), "mkdir docker path")
+	requireNoError(t, os.WriteFile(filepath.Join(dockerPath, "Dockerfile"), []byte("FROM alpine:3.22\n"), 0o644), "write Dockerfile")
+	otherDockerPath := filepath.Join(releaseRoot, "docker", "base")
+	requireNoError(t, os.MkdirAll(otherDockerPath, 0o755), "mkdir other docker path")
+	requireNoError(t, os.WriteFile(filepath.Join(otherDockerPath, "Dockerfile"), []byte("FROM alpine:3.22\n"), 0o644), "write other Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(otherDockerPath, "VERSION"), []byte("9.9.9\n"), 0o644), "write other VERSION")
+}
+
+func writeReleasePackagingScaffold(t *testing.T, projectRoot string) {
+	t.Helper()
+	formulaPath := filepath.Join(projectRoot, "Formula")
+	requireNoError(t, os.MkdirAll(formulaPath, 0o755), "mkdir Formula")
+	requireNoError(t, os.WriteFile(filepath.Join(formulaPath, "erun.rb"), []byte(`class Erun < Formula
   desc "Multi-tenant multi-environment deployment and management tool"
   homepage "https://github.com/sophium/erun"
   url "https://github.com/sophium/erun/archive/refs/tags/v1.4.1.tar.gz"
   sha256 "unchanged"
   license "MIT"
 end
-`), 0o644); err != nil {
-			t.Fatalf("write formula: %v", err)
-		}
+`), 0o644), "write formula")
 
-		bucketPath := filepath.Join(projectRoot, "bucket")
-		if err := os.MkdirAll(bucketPath, 0o755); err != nil {
-			t.Fatalf("mkdir bucket: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(bucketPath, "erun.json"), []byte(`{
+	bucketPath := filepath.Join(projectRoot, "bucket")
+	requireNoError(t, os.MkdirAll(bucketPath, 0o755), "mkdir bucket")
+	requireNoError(t, os.WriteFile(filepath.Join(bucketPath, "erun.json"), []byte(`{
   "version": "1.4.1",
   "description": "Multi-tenant multi-environment deployment and management tool",
   "homepage": "https://github.com/sophium/erun",
@@ -961,12 +907,7 @@ end
     "emcp.exe"
   ]
 }
-`), 0o644); err != nil {
-			t.Fatalf("write scoop manifest: %v", err)
-		}
-	}
-
-	return projectRoot
+`), 0o644), "write scoop manifest")
 }
 
 func setupReleaseProjectGitRepoWithOptions(t *testing.T, branch string, options releaseProjectOptions) string {
