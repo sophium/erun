@@ -2,6 +2,7 @@ import type * as React from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 
+import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import {
   DeleteEnvironment,
   InitCloudContext,
@@ -33,24 +34,48 @@ import {
   StopCloudContext,
 } from '../../wailsjs/go/main/App';
 import { ClipboardSetText, EventsOn, WindowToggleMaximise } from '../../wailsjs/runtime/runtime';
+import {
+  cloudContextDraftForConfig,
+  idleCloudContextAction,
+  replaceCloudContext,
+  replaceCloudProvider,
+} from './cloudContextState';
 import { fileToBase64, decodeBase64Bytes, isTerminalPasteTarget, pastedImageFiles } from './clipboard';
 import { chooseSelectedDiffPath, cssEscape } from './diffUtils';
-import { readError } from './errors';
 import {
-  DEBUG_HEIGHT_STORAGE_KEY,
-  DEBUG_OPEN_STORAGE_KEY,
-  FILES_OPEN_STORAGE_KEY,
-  FILES_WIDTH_STORAGE_KEY,
+  normalizedEnvironmentDialogValues,
+  rememberEnvironmentDialogSelection,
+  validEnvironmentDialogValues,
+} from './environmentDialogState';
+import {
+  setDebugOpen as applyDebugOpen,
+  setFilesOpen as applyFilesOpen,
+  startDebugResize as startDebugPanelResize,
+  startFilesResize as startFilesPanelResize,
+  startReviewResize as startReviewPanelResize,
+  startSidebarResize as startSidebarPanelResize,
+  toggleReview as toggleReviewPanel,
+  toggleSidebar as toggleSidebarPanel,
+} from './layoutActions';
+import { readError } from './errors';
+import type {
+  AppStatusPayload,
+  DebugSessionMode,
+  HiddenSessionMode,
+  IDEKind,
+  MountElements,
+  TerminalDataDisposable,
+  TerminalExitSelections,
+  TerminalWriteData,
+} from './model';
+import { isNewSessionSelection } from './sessionSelection';
+import {
   MAX_DEBUG_HEIGHT,
   MAX_FILES_WIDTH,
   MAX_REVIEW_WIDTH,
-  MAX_SIDEBAR_WIDTH,
   MIN_DEBUG_HEIGHT,
   MIN_FILES_WIDTH,
   MIN_REVIEW_WIDTH,
-  MIN_SIDEBAR_WIDTH,
-  REVIEW_WIDTH_STORAGE_KEY,
-  SIDEBAR_WIDTH_STORAGE_KEY,
   defaultEnvironmentConfig,
   defaultEnvironmentDialog,
   defaultCloudContextInitInput,
@@ -63,7 +88,6 @@ import {
   type ManageDialogState,
   type TenantDialogState,
   type TerminalStatusAction,
-  type TerminalStatusKind,
 } from './state';
 import {
   clamp,
@@ -74,12 +98,24 @@ import {
   loadSavedPastContainerRegistries,
   loadSavedReviewWidth,
   loadSavedSidebarWidth,
-  rememberPastContainerRegistry,
-  rememberPastEnvironment,
-  rememberPastTenant,
-  saveBoolean,
-  saveNumber,
 } from './storage';
+import {
+  classifiedTerminalFailure,
+  cleanTerminalOutput,
+  debugOutputBlock,
+  decodeDebugOutput,
+  failedTerminalExitReason,
+  formatDebugCommand,
+  formatIDECommand,
+  hiddenSessionBusyMessage,
+  ideLabel,
+  ideOpenFailure,
+  interactivePromptIndex,
+  statusForTerminalOutput,
+  successfulTerminalExitReason,
+  terminalExitHasTrackedSelection,
+  trimDebugOutput,
+} from './terminalStatus';
 import { deleteConfirmationValue, normalizeDialogValue, normalizeVersionSuggestions, selectionKey } from './versionSuggestions';
 import type {
   DeleteEnvironmentResult,
@@ -91,7 +127,6 @@ import type {
   TerminalOutputPayload,
   UICloudContextInitInput,
   UICloudContextStatus,
-  UICloudProviderStatus,
   UIERunConfig,
   UIEnvironmentConfig,
   UIIdleStatus,
@@ -100,45 +135,6 @@ import type {
   UITenantConfig,
   UIVersionSuggestion,
 } from '@/types';
-
-export interface MountElements {
-  terminalRoot: HTMLDivElement;
-  terminalPane: HTMLElement;
-  reviewView: HTMLElement;
-  reviewMain: HTMLDivElement;
-  diffList: HTMLDivElement;
-}
-
-type TerminalDataDisposable = ReturnType<Terminal['onData']>;
-type TerminalWriteData = string | Uint8Array;
-type ClassifiedTerminalFailure = {
-  message: string;
-  detail: string;
-  action: TerminalStatusAction;
-  retrySelection: UISelection | null;
-};
-
-interface AppStatusPayload {
-  message?: string;
-  busy?: boolean;
-}
-
-interface DebugOpenFilter {
-  released: boolean;
-  pending: string;
-}
-
-type DebugSessionMode = 'open' | 'hidden';
-type IDEKind = 'vscode' | 'intellij';
-type HiddenSessionMode = 'sshd-init' | 'doctor';
-type TerminalExitSelections = {
-  initSelection?: UISelection;
-  deploySelection?: UISelection;
-  sshdInitSelection?: UISelection;
-  doctorSelection?: UISelection;
-  openSelection?: UISelection;
-  cloudInit: boolean;
-};
 
 export class ERunUIController {
   readonly state: AppState = {
@@ -179,19 +175,7 @@ export class ERunUIController {
   };
 
   private readonly subscribers = new Set<() => void>();
-  private readonly initSessionSelections = new Map<number, UISelection>();
-  private readonly deploySessionSelections = new Map<number, UISelection>();
-  private readonly sshdInitSessionSelections = new Map<number, UISelection>();
-  private readonly doctorSessionSelections = new Map<number, UISelection>();
-  private readonly openSessionSelections = new Map<number, UISelection>();
-  private readonly cloudInitSessions = new Set<number>();
-  private readonly selectionSessions = new Map<string, number>();
-  private readonly sessionBuffers = new Map<number, Uint8Array[]>();
-  private readonly sessionDisplayBuffers = new Map<number, TerminalWriteData[]>();
-  private readonly sessionExitReasons = new Map<number, string>();
-  private readonly sessionExitOutputs = new Map<number, string>();
-  private readonly debugOpenFilters = new Map<number, DebugOpenFilter>();
-  private readonly debugSessionModes = new Map<number, DebugSessionMode>();
+  private readonly sessions = new TerminalSessionRegistry();
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
   private terminalRoot: HTMLDivElement | null = null;
@@ -309,149 +293,35 @@ export class ERunUIController {
   }
 
   toggleSidebar(): void {
-    this.state.sidebarHidden = !this.state.sidebarHidden;
-    this.applyLayoutVars();
-    this.emit();
-    this.queueTerminalResize();
-    this.focusTerminalSoon();
+    toggleSidebarPanel(this.state, this.layoutCallbacks());
   }
 
   startSidebarResize(event: React.MouseEvent<HTMLElement>): void {
-    if (this.state.sidebarHidden) {
-      return;
-    }
-    event.preventDefault();
-    document.body.classList.add('is-resizing');
-
-    const move = (moveEvent: MouseEvent) => {
-      this.state.sidebarWidth = clamp(moveEvent.clientX, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH);
-      this.applyLayoutVars();
-      this.emit();
-    };
-    const stop = () => {
-      document.body.classList.remove('is-resizing');
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', stop);
-      saveNumber(SIDEBAR_WIDTH_STORAGE_KEY, this.state.sidebarWidth);
-    };
-
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', stop);
+    startSidebarPanelResize(this.state, event, () => this.applyLayoutVars(), () => this.emit());
   }
 
   startReviewResize(event: React.MouseEvent<HTMLElement>): void {
-    if (!this.state.reviewOpen) {
-      return;
-    }
-    event.preventDefault();
-    document.body.classList.add('is-resizing-review');
-
-    const move = (moveEvent: MouseEvent) => {
-      const paneRect = this.terminalPane?.getBoundingClientRect();
-      if (!paneRect) {
-        return;
-      }
-      this.state.reviewWidth = clamp(paneRect.right - moveEvent.clientX, MIN_REVIEW_WIDTH, MAX_REVIEW_WIDTH);
-      this.applyLayoutVars();
-      this.emit();
-      this.queueTerminalResize();
-    };
-    const stop = () => {
-      document.body.classList.remove('is-resizing-review');
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', stop);
-      saveNumber(REVIEW_WIDTH_STORAGE_KEY, this.state.reviewWidth);
-    };
-
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', stop);
+    startReviewPanelResize(this.state, event, this.terminalPane, this.layoutCallbacks());
   }
 
   startFilesResize(event: React.MouseEvent<HTMLElement>): void {
-    if (!this.state.reviewOpen) {
-      return;
-    }
-    event.preventDefault();
-    document.body.classList.add('is-resizing-files');
-
-    const move = (moveEvent: MouseEvent) => {
-      const reviewRect = this.reviewView?.getBoundingClientRect();
-      if (!reviewRect) {
-        return;
-      }
-      this.state.filesWidth = clamp(reviewRect.right - moveEvent.clientX, MIN_FILES_WIDTH, MAX_FILES_WIDTH);
-      this.applyLayoutVars();
-      this.emit();
-    };
-    const stop = () => {
-      document.body.classList.remove('is-resizing-files');
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', stop);
-      saveNumber(FILES_WIDTH_STORAGE_KEY, this.state.filesWidth);
-    };
-
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', stop);
+    startFilesPanelResize(this.state, event, this.reviewView, () => this.applyLayoutVars(), () => this.emit());
   }
 
   startDebugResize(event: React.MouseEvent<HTMLElement>): void {
-    if (!this.state.debugOpen) {
-      return;
-    }
-    event.preventDefault();
-    document.body.classList.add('is-resizing-debug');
-
-    const move = (moveEvent: MouseEvent) => {
-      const paneRect = this.terminalPane?.getBoundingClientRect();
-      if (!paneRect) {
-        return;
-      }
-      const maxForPane = Math.max(MIN_DEBUG_HEIGHT, Math.min(MAX_DEBUG_HEIGHT, paneRect.height - 120));
-      this.state.debugHeight = clamp(paneRect.bottom - moveEvent.clientY, MIN_DEBUG_HEIGHT, maxForPane);
-      this.applyLayoutVars();
-      this.emit();
-      this.queueTerminalResize();
-    };
-    const stop = () => {
-      document.body.classList.remove('is-resizing-debug');
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', stop);
-      saveNumber(DEBUG_HEIGHT_STORAGE_KEY, this.state.debugHeight);
-    };
-
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', stop);
+    startDebugPanelResize(this.state, event, this.terminalPane, this.layoutCallbacks());
   }
 
   toggleReview(): void {
-    this.state.reviewOpen = !this.state.reviewOpen;
-    this.applyLayoutVars();
-    this.setFilesOpen(this.state.filesOpen, false);
-    this.emit();
-    this.queueTerminalResize();
-    if (this.state.reviewOpen) {
-      void this.loadReviewDiff();
-    }
-    this.focusTerminalSoon();
+    toggleReviewPanel(this.state, { ...this.layoutCallbacks(), loadReviewDiff: () => { void this.loadReviewDiff(); } });
   }
 
   setFilesOpen(open: boolean, persist = true): void {
-    this.state.filesOpen = open;
-    this.applyLayoutVars();
-    if (persist) {
-      saveBoolean(FILES_OPEN_STORAGE_KEY, open);
-    }
-    this.emit();
+    applyFilesOpen(this.state, open, persist, () => this.applyLayoutVars(), () => this.emit());
   }
 
   setDebugOpen(open: boolean): void {
-    this.state.debugOpen = open;
-    saveBoolean(DEBUG_OPEN_STORAGE_KEY, open);
-    if (open && !this.state.debugOutput) {
-      this.state.debugOutput = 'Debug output will appear here for new erun sessions started while this panel is open.\n';
-    }
-    this.emit();
-    this.queueTerminalResize();
+    applyDebugOpen(this.state, open, () => this.emit(), this.queueTerminalResize);
   }
 
   clearDebugOutput(): void {
@@ -472,7 +342,7 @@ export class ERunUIController {
     const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     const key = selectionKey(runSelection);
     const previousSessionId = this.state.sessionId;
-    const previousKnownSessionId = this.selectionSessions.get(key) || 0;
+    const previousKnownSessionId = this.sessions.knownSelectionSession(key);
 
     this.prepareOpenSelection(selection, runSelection, previousSessionId, previousKnownSessionId);
     this.fitAddon?.fit();
@@ -505,26 +375,25 @@ export class ERunUIController {
   }
 
   private registerOpenSessionResult(key: string, result: StartSessionResult, runSelection: UISelection, previousSessionId: number): void {
-    this.selectionSessions.set(key, result.sessionId);
-    this.openSessionSelections.set(result.sessionId, runSelection);
+    this.sessions.trackOpenSession(key, result.sessionId, runSelection);
     this.registerDebugSession(result.sessionId, runSelection, 'open');
     this.rebuildTerminalDisplayBuffer(result.sessionId);
     this.state.sessionId = result.sessionId;
     if (result.sessionId !== previousSessionId) {
       this.resetTerminal();
-      this.writeTerminalBuffer(this.sessionDisplayBuffers.get(result.sessionId) || []);
+      this.writeTerminalBuffer(this.sessions.displayBuffer(result.sessionId));
     }
   }
 
   private showOpenSelectionStatus(sessionId: number, selection: UISelection): void {
-    const exitReason = this.sessionExitReasons.get(sessionId);
+    const exitReason = this.sessions.exitReason(sessionId);
     if (exitReason) {
-      this.state.terminalCopyOutput = this.sessionExitOutputs.get(sessionId) || '';
+      this.state.terminalCopyOutput = this.sessions.exitOutput(sessionId);
       this.state.terminalCopyStatus = '';
       this.showTerminalMessage(exitReason);
       return;
     }
-    const buffer = this.sessionDisplayBuffers.get(sessionId) || [];
+    const buffer = this.sessions.displayBuffer(sessionId);
     if (buffer.length > 0) {
       this.hideTerminalMessage();
       return;
@@ -959,10 +828,10 @@ export class ERunUIController {
 
   private trackHiddenSession(mode: HiddenSessionMode, sessionId: number, selection: UISelection): void {
     if (mode === 'sshd-init') {
-      this.sshdInitSessionSelections.set(sessionId, selection);
+      this.sessions.trackSSHDInitSession(sessionId, selection);
       return;
     }
-    this.doctorSessionSelections.set(sessionId, selection);
+    this.sessions.trackDoctorSession(sessionId, selection);
   }
 
   async stopManageCloudContext(name: string): Promise<void> {
@@ -1293,7 +1162,7 @@ export class ERunUIController {
     try {
       this.fitAddon?.fit();
       const result = (await StartCloudInitAWSSession(this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
-      this.cloudInitSessions.add(result.sessionId);
+      this.sessions.trackCloudInitSession(result.sessionId);
       this.state.globalConfigDialog = defaultGlobalConfigDialog();
       this.state.sessionId = result.sessionId;
       this.state.terminalCopyOutput = '';
@@ -1819,7 +1688,7 @@ export class ERunUIController {
 
     this.fitAddon?.fit();
     const result = (await StartInitSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
-    this.initSessionSelections.set(result.sessionId, runSelection);
+    this.sessions.trackInitSession(result.sessionId, runSelection);
     this.registerDebugSession(result.sessionId, runSelection, 'hidden');
     this.state.sessionId = result.sessionId;
 
@@ -1842,7 +1711,7 @@ export class ERunUIController {
 
     this.fitAddon?.fit();
     const result = (await StartDeploySession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
-    this.deploySessionSelections.set(result.sessionId, runSelection);
+    this.sessions.trackDeploySession(result.sessionId, runSelection);
     this.registerDebugSession(result.sessionId, runSelection, 'hidden');
     this.state.sessionId = result.sessionId;
 
@@ -2020,17 +1889,13 @@ export class ERunUIController {
       return;
     }
     const data = decodeBase64Bytes(payload.data);
-    const existing = this.sessionBuffers.get(payload.sessionId) || [];
-    existing.push(data);
-    this.sessionBuffers.set(payload.sessionId, existing);
+    this.sessions.appendSessionBuffer(payload.sessionId, data);
     const debugOutput = decodeDebugOutput(data);
     this.appendDebugOutput(debugOutput);
     this.updateOpenStatusFromOutput(payload.sessionId, debugOutput);
     const displayData = this.filterTerminalDisplayData(payload.sessionId, data);
     if (displayData) {
-      const displayBuffer = this.sessionDisplayBuffers.get(payload.sessionId) || [];
-      displayBuffer.push(displayData);
-      this.sessionDisplayBuffers.set(payload.sessionId, displayBuffer);
+      this.sessions.appendDisplayBuffer(payload.sessionId, displayData);
     }
     if (payload.sessionId !== this.state.sessionId) {
       return;
@@ -2070,35 +1935,17 @@ export class ERunUIController {
   }
 
   private takeTerminalExitSelections(sessionId: number): TerminalExitSelections {
-    const selections = {
-      initSelection: this.initSessionSelections.get(sessionId),
-      deploySelection: this.deploySessionSelections.get(sessionId),
-      sshdInitSelection: this.sshdInitSessionSelections.get(sessionId),
-      doctorSelection: this.doctorSessionSelections.get(sessionId),
-      openSelection: this.openSessionSelections.get(sessionId),
-      cloudInit: this.cloudInitSessions.has(sessionId),
-    };
-    this.initSessionSelections.delete(sessionId);
-    this.deploySessionSelections.delete(sessionId);
-    this.sshdInitSessionSelections.delete(sessionId);
-    this.doctorSessionSelections.delete(sessionId);
-    this.openSessionSelections.delete(sessionId);
-    this.cloudInitSessions.delete(sessionId);
-    this.debugSessionModes.delete(sessionId);
-    if (selections.openSelection) {
-      this.selectionSessions.delete(selectionKey(selections.openSelection));
-    }
-    return selections;
+    return this.sessions.takeExitSelections(sessionId);
   }
 
   private recordTerminalExit(payload: TerminalExitPayload, reason: string, selections: TerminalExitSelections): string {
-    this.sessionExitReasons.set(payload.sessionId, reason);
+    this.sessions.recordExitReason(payload.sessionId, reason);
     if (!payload.reason || !terminalExitHasTrackedSelection(selections)) {
       return '';
     }
     const failedOutput = this.failedTerminalOutput(payload.sessionId, reason);
     if (failedOutput) {
-      this.sessionExitOutputs.set(payload.sessionId, failedOutput);
+      this.sessions.recordExitOutput(payload.sessionId, failedOutput);
     }
     return failedOutput;
   }
@@ -2135,14 +1982,14 @@ export class ERunUIController {
   }
 
   private failedTerminalOutput(sessionId: number, fallback: string): string {
-    const chunks = this.sessionBuffers.get(sessionId) || [];
+    const chunks = this.sessions.sessionBuffer(sessionId);
     const decoder = new TextDecoder();
     const output = chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join('') + decoder.decode();
     return cleanTerminalOutput(output) || fallback;
   }
 
   private updateOpenStatusFromOutput(sessionId: number, output: string): void {
-    if (!output || !this.openSessionSelections.has(sessionId) || this.state.terminalCopyOutput) {
+    if (!output || !this.sessions.isOpenSession(sessionId) || this.state.terminalCopyOutput) {
       return;
     }
     const status = statusForTerminalOutput(output);
@@ -2150,6 +1997,20 @@ export class ERunUIController {
       return;
     }
     this.showTerminalMessage(status, true);
+  }
+
+  private layoutCallbacks(): {
+    applyLayoutVars: () => void;
+    emit: () => void;
+    focusTerminalSoon: () => void;
+    queueTerminalResize: () => void;
+  } {
+    return {
+      applyLayoutVars: () => this.applyLayoutVars(),
+      emit: () => this.emit(),
+      focusTerminalSoon: () => this.focusTerminalSoon(),
+      queueTerminalResize: this.queueTerminalResize,
+    };
   }
 
   private applyLayoutVars(): void {
@@ -2269,8 +2130,8 @@ export class ERunUIController {
   }
 
   private rebuildTerminalDisplayBuffer(sessionId: number): void {
-    this.debugOpenFilters.delete(sessionId);
-    const chunks = this.sessionBuffers.get(sessionId) || [];
+    this.sessions.clearDebugFilter(sessionId);
+    const chunks = this.sessions.sessionBuffer(sessionId);
     const displayBuffer: TerminalWriteData[] = [];
     for (const chunk of chunks) {
       const displayData = this.filterTerminalDisplayData(sessionId, chunk);
@@ -2278,20 +2139,16 @@ export class ERunUIController {
         displayBuffer.push(displayData);
       }
     }
-    if (displayBuffer.length > 0) {
-      this.sessionDisplayBuffers.set(sessionId, displayBuffer);
-    } else {
-      this.sessionDisplayBuffers.delete(sessionId);
-    }
+    this.sessions.replaceDisplayBuffer(sessionId, displayBuffer);
   }
 
   private filterTerminalDisplayData(sessionId: number, data: Uint8Array): TerminalWriteData | null {
-    const debugMode = this.debugSessionModes.get(sessionId);
+    const debugMode = this.sessions.debugMode(sessionId);
     if (!debugMode) {
       return data;
     }
     if (debugMode === 'hidden') {
-      const filter = this.debugOpenFilters.get(sessionId) || { released: false, pending: '' };
+      const filter = this.sessions.debugFilter(sessionId);
       if (filter.released) {
         return data;
       }
@@ -2300,15 +2157,15 @@ export class ERunUIController {
       const promptIndex = interactivePromptIndex(output);
       if (promptIndex === -1) {
         filter.pending = output.slice(-512);
-        this.debugOpenFilters.set(sessionId, filter);
+        this.sessions.setDebugFilter(sessionId, filter);
         return null;
       }
       filter.released = true;
       filter.pending = '';
-      this.debugOpenFilters.set(sessionId, filter);
+      this.sessions.setDebugFilter(sessionId, filter);
       return output.slice(promptIndex);
     }
-    const filter = this.debugOpenFilters.get(sessionId) || { released: false, pending: '' };
+    const filter = this.sessions.debugFilter(sessionId);
     if (filter.released) {
       return data;
     }
@@ -2318,21 +2175,18 @@ export class ERunUIController {
     const titleIndex = output.indexOf('\x1B]0;');
     if (titleIndex === -1) {
       filter.pending = output.slice(-16);
-      this.debugOpenFilters.set(sessionId, filter);
+      this.sessions.setDebugFilter(sessionId, filter);
       return null;
     }
 
     filter.released = true;
     filter.pending = '';
-    this.debugOpenFilters.set(sessionId, filter);
+    this.sessions.setDebugFilter(sessionId, filter);
     return output.slice(titleIndex);
   }
 
   private registerDebugSession(sessionId: number, selection: UISelection, mode: DebugSessionMode): void {
-    if (!selection.debug) {
-      return;
-    }
-    this.debugSessionModes.set(sessionId, mode);
+    this.sessions.registerDebugSession(sessionId, selection, mode);
   }
 
   private writeTerminalBuffer(chunks: TerminalWriteData[]): void {
@@ -2340,389 +2194,4 @@ export class ERunUIController {
       this.terminal?.write(chunk);
     }
   }
-}
-
-type NormalizedEnvironmentDialogValues = {
-  tenant: string;
-  environment: string;
-  version: string;
-  kubernetesContext: string;
-  containerRegistry: string;
-};
-
-type IdleCloudContextAction = {
-  idleStatus: UIIdleStatus;
-  name: string;
-  run: (name: string) => Promise<unknown>;
-  label: string;
-  refreshKubernetesContexts: boolean;
-};
-
-function isNewSessionSelection(previousSessionId: number, previousKnownSessionId: number): boolean {
-  return previousKnownSessionId === 0 || previousKnownSessionId !== previousSessionId;
-}
-
-function normalizedEnvironmentDialogValues(dialog: EnvironmentDialogState): NormalizedEnvironmentDialogValues {
-  return {
-    tenant: normalizeDialogValue(dialog.tenant),
-    environment: normalizeDialogValue(dialog.environment),
-    version: normalizeDialogValue(dialog.version),
-    kubernetesContext: normalizeDialogValue(dialog.kubernetesContext),
-    containerRegistry: normalizeDialogValue(dialog.containerRegistry),
-  };
-}
-
-function validEnvironmentDialogValues(values: NormalizedEnvironmentDialogValues, actionMode: EnvironmentDialogState['actionMode']): boolean {
-  if (!values.tenant || !values.environment) {
-    return false;
-  }
-  if (actionMode === 'deploy') {
-    return Boolean(values.version);
-  }
-  return Boolean(values.kubernetesContext && values.containerRegistry);
-}
-
-function rememberEnvironmentDialogSelection(selection: UISelection, actionMode: EnvironmentDialogState['actionMode']): void {
-  rememberPastTenant(selection.tenant);
-  rememberPastEnvironment(selection.environment);
-  if (actionMode === 'init' && selection.containerRegistry) {
-    rememberPastContainerRegistry(selection.containerRegistry);
-  }
-}
-
-function hiddenSessionBusyMessage(selection: UISelection, mode: HiddenSessionMode): string {
-  if (mode === 'sshd-init') {
-    return `Enabling SSHD for ${selection.tenant} / ${selection.environment}...`;
-  }
-  return `Running doctor for ${selection.tenant} / ${selection.environment}...`;
-}
-
-function idleCloudContextAction(idleStatus: UIIdleStatus | null, busy: boolean): IdleCloudContextAction | null {
-  const name = normalizeDialogValue(idleStatus?.cloudContextName || '');
-  if (!idleStatus || !idleStatus.managedCloud || !name || busy) {
-    return null;
-  }
-  const running = normalizeDialogValue(idleStatus.cloudContextStatus || '').toLowerCase() === 'running';
-  return {
-    idleStatus,
-    name,
-    run: running ? StopCloudContext : StartCloudContext,
-    label: running ? 'Stopped' : 'Started',
-    refreshKubernetesContexts: !running,
-  };
-}
-
-function terminalExitHasTrackedSelection(selections: TerminalExitSelections): boolean {
-  return Boolean(selections.initSelection || selections.deploySelection || selections.sshdInitSelection || selections.doctorSelection || selections.openSelection || selections.cloudInit);
-}
-
-function failedTerminalExitReason(reason: string, selections: TerminalExitSelections): string {
-  const selectionReason = failedSelectionExitReason(reason, selections);
-  if (selectionReason) {
-    return selectionReason;
-  }
-  if (selections.cloudInit) {
-    return `Failed to initialize AWS cloud alias: ${reason}`;
-  }
-  return reason;
-}
-
-function failedSelectionExitReason(reason: string, selections: TerminalExitSelections): string {
-  if (selections.initSelection) {
-    return `Failed to create ${selectionLabel(selections.initSelection)}: ${reason}`;
-  }
-  if (selections.deploySelection) {
-    return `Failed to deploy ${selectionLabel(selections.deploySelection)}: ${reason}`;
-  }
-  if (selections.sshdInitSelection) {
-    return `Failed to enable SSHD for ${selectionLabel(selections.sshdInitSelection)}: ${reason}`;
-  }
-  if (selections.doctorSelection) {
-    return `Doctor failed for ${selectionLabel(selections.doctorSelection)}: ${reason}`;
-  }
-  if (selections.openSelection) {
-    return `Failed to open ${selectionLabel(selections.openSelection)}: ${reason}`;
-  }
-  return '';
-}
-
-function successfulTerminalExitReason(selections: TerminalExitSelections): string {
-  const selectionReason = successfulSelectionExitReason(selections);
-  if (selectionReason) {
-    return selectionReason;
-  }
-  if (selections.cloudInit) {
-    return 'AWS cloud alias setup ended.';
-  }
-  return 'Session ended.';
-}
-
-function successfulSelectionExitReason(selections: TerminalExitSelections): string {
-  if (selections.initSelection) {
-    return `Created ${selectionLabel(selections.initSelection)}.`;
-  }
-  if (selections.deploySelection) {
-    return `Deployed ${selectionLabel(selections.deploySelection)}.`;
-  }
-  if (selections.sshdInitSelection) {
-    return `Enabled SSHD for ${selectionLabel(selections.sshdInitSelection)}.`;
-  }
-  if (selections.doctorSelection) {
-    return `Doctor finished for ${selectionLabel(selections.doctorSelection)}.`;
-  }
-  return '';
-}
-
-function selectionLabel(selection: UISelection): string {
-  return `${selection.tenant} / ${selection.environment}`;
-}
-
-function cleanTerminalOutput(value: string): string {
-  return value
-    .replace(/\x1B\][^\x07]*(?:\x07|\x1B\\)/g, '')
-    .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .trim();
-}
-
-function ideOpenFailure(selection: UISelection, label: string, rawError: string): ClassifiedTerminalFailure & { copyOutput: string } {
-  const output = cleanTerminalOutput(rawError) || rawError.trim() || 'Unexpected error';
-  return {
-    message: `Failed to open ${label} for ${selection.tenant} / ${selection.environment}`,
-    detail: shortIDEOpenFailureDetail(output),
-    copyOutput: output,
-    action: '',
-    retrySelection: null,
-  };
-}
-
-function debugOutputBlock(output: string): string {
-  const trimmed = output.trim();
-  if (!trimmed) {
-    return '';
-  }
-  return `${trimmed}\n`;
-}
-
-function shortIDEOpenFailureDetail(output: string): string {
-  const firstLine = output.split('\n').map((line) => line.trim()).find(Boolean) || '';
-  const exitStatus = firstLine.match(/exit status \d+/)?.[0];
-  if (exitStatus) {
-    return exitStatus;
-  }
-  if (firstLine.length <= 80) {
-    return firstLine;
-  }
-  return `${firstLine.slice(0, 77)}...`;
-}
-
-function classifiedTerminalFailure(rawReason: string, displayReason: string, output: string, openSelection?: UISelection): ClassifiedTerminalFailure {
-  const combined = `${rawReason}\n${output}`.toLowerCase();
-  if (combined.includes('timed out waiting for mcp port-forward')) {
-    const port = rawReason.match(/127\.0\.0\.1:(\d+)/)?.[1] || output.match(/127\.0\.0\.1:(\d+)/)?.[1] || '';
-    return {
-      message: port ? `MCP port-forward on 127.0.0.1:${port} is still not ready` : 'MCP port-forward is still not ready',
-      detail: mcpPortForwardDetail(combined),
-      action: openSelection ? 'wait-longer' : '',
-      retrySelection: openSelection || null,
-    };
-  }
-  return {
-    message: displayReason,
-    detail: '',
-    action: '',
-    retrySelection: null,
-  };
-}
-
-function mcpPortForwardDetail(value: string): string {
-  if (value.includes('local mcp port') && value.includes('already in use')) {
-    return 'Another local process is using the MCP port.';
-  }
-  if (value.includes('pod not found')) {
-    return 'The runtime pod was replaced while the app was connecting.';
-  }
-  if (value.includes('lost connection to pod') || value.includes('network namespace') || value.includes('sandbox')) {
-    return 'The runtime pod connection was lost, likely because the pod restarted.';
-  }
-  if (value.includes('connection refused') || value.includes('not accepting')) {
-    return 'The runtime pod exists, but MCP is not accepting connections yet.';
-  }
-  return 'kubectl has not exposed a reachable MCP endpoint yet.';
-}
-
-type TerminalOutputStatusRule = {
-  matches: (lower: string) => boolean;
-  message: (output: string) => string;
-};
-
-const terminalOutputStatusRules: TerminalOutputStatusRule[] = [
-  { matches: (lower) => lower.includes('forwarding from 127.0.0.1:'), message: mcpForwardingStatusMessage },
-  { matches: (lower) => lower.includes('handling connection for'), message: () => 'Checking MCP endpoint readiness...' },
-  { matches: (lower) => lower.includes('connection refused'), message: () => 'Runtime pod is not accepting MCP connections yet...' },
-  { matches: (lower) => lower.includes('lost connection to pod') || lower.includes('network namespace'), message: () => 'Runtime pod connection changed. Reconnecting MCP port-forward...' },
-  { matches: (lower) => lower.includes('pod not found'), message: () => 'Runtime pod was replaced. Waiting for the new pod...' },
-  { matches: (lower) => lower.includes('context "') && lower.includes('modified'), message: () => 'Configuring Kubernetes context...' },
-  { matches: (lower) => lower.includes('cluster "') && lower.includes('set.'), message: () => 'Configuring Kubernetes cluster access...' },
-];
-
-function statusForTerminalOutput(output: string): string {
-  const lower = output.toLowerCase();
-  const rule = terminalOutputStatusRules.find((candidate) => candidate.matches(lower));
-  return rule?.message(output) || '';
-}
-
-function mcpForwardingStatusMessage(output: string): string {
-  const port = output.match(/Forwarding from 127\.0\.0\.1:(\d+)/)?.[1] || '';
-  return port ? `Waiting for MCP endpoint on 127.0.0.1:${port}...` : 'Waiting for MCP endpoint...';
-}
-
-function decodeDebugOutput(data: Uint8Array): string {
-  return new TextDecoder()
-    .decode(data)
-    .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n');
-}
-
-function interactivePromptIndex(output: string): number {
-  const promptLabels = [
-    'Git remote URL for environment',
-    'CodeCommit SSH public key ID for environment',
-    'Use existing SSH host config for environment',
-    'Import the SSH public key above',
-    'Kubernetes context for environment',
-    'Container registry for environment',
-    'Clear cached JetBrains Gateway backend metadata',
-    'Prune unused Docker images',
-    'Prune unused BuildKit cache',
-    'Prune stopped Docker containers',
-    'Initialize default environment',
-    'Initialize tenant',
-    'Select tenant',
-  ];
-  let match = -1;
-  for (const label of promptLabels) {
-    const index = output.lastIndexOf(label);
-    if (index > match) {
-      match = index;
-    }
-  }
-  if (match === -1) {
-    return -1;
-  }
-  return Math.max(output.lastIndexOf('\n', match), output.lastIndexOf('\r', match)) + 1;
-}
-
-function trimDebugOutput(value: string): string {
-  const maxLength = 80_000;
-  if (value.length <= maxLength) {
-    return value;
-  }
-  return value.slice(value.length - maxLength);
-}
-
-function formatDebugCommand(selection: UISelection, mode: 'open' | 'init' | 'deploy' | 'sshd-init' | 'doctor' = 'open'): string {
-  const args = ['erun'];
-  if (selection.debug) {
-    args.push('-vv');
-  }
-  appendDebugCommandArgs(args, selection, mode);
-  return args.map(shellDebugArg).join(' ');
-}
-
-function appendDebugCommandArgs(args: string[], selection: UISelection, mode: 'open' | 'init' | 'deploy' | 'sshd-init' | 'doctor'): void {
-  if (mode === 'init') {
-    appendInitDebugArgs(args, selection);
-    return;
-  }
-  if (mode === 'deploy') {
-    appendDeployDebugArgs(args, selection);
-    return;
-  }
-  if (mode === 'sshd-init') {
-    args.push('sshd', 'init', selection.tenant, selection.environment);
-    return;
-  }
-  if (mode === 'doctor') {
-    args.push('doctor', selection.tenant, selection.environment);
-    return;
-  }
-  args.push('open', selection.tenant, selection.environment);
-}
-
-function appendInitDebugArgs(args: string[], selection: UISelection): void {
-  args.push('init', selection.tenant, selection.environment, '--remote');
-  appendOptionalDebugArg(args, '--version', selection.version);
-  appendOptionalDebugArg(args, '--runtime-image', selection.runtimeImage);
-  appendOptionalDebugArg(args, '--kubernetes-context', selection.kubernetesContext);
-  appendOptionalDebugArg(args, '--container-registry', selection.containerRegistry);
-  args.push(`--set-default-tenant=${selection.setDefaultTenant ? 'true' : 'false'}`, '--confirm-environment=true');
-  appendDebugFlag(args, '--no-git', selection.noGit);
-  appendDebugFlag(args, '--bootstrap', selection.bootstrap);
-}
-
-function appendDeployDebugArgs(args: string[], selection: UISelection): void {
-  args.push('open', selection.tenant, selection.environment, '--no-shell', '--no-alias-prompt');
-  appendOptionalDebugArg(args, '--version', selection.version);
-  appendOptionalDebugArg(args, '--runtime-image', selection.runtimeImage);
-}
-
-function appendOptionalDebugArg(args: string[], name: string, value: string | undefined): void {
-  if (value) {
-    args.push(name, value);
-  }
-}
-
-function appendDebugFlag(args: string[], name: string, enabled: boolean | undefined): void {
-  if (enabled) {
-    args.push(name);
-  }
-}
-
-function formatIDECommand(selection: UISelection, ide: IDEKind): string {
-  const args = ['erun'];
-  if (selection.debug) {
-    args.push('-vv');
-  }
-  args.push('open', selection.tenant, selection.environment, ide === 'vscode' ? '--vscode' : '--intellij');
-  return args.map(shellDebugArg).join(' ');
-}
-
-function ideLabel(ide: IDEKind): string {
-  return ide === 'vscode' ? 'VS Code' : 'IntelliJ IDEA';
-}
-
-function shellDebugArg(value: string): string {
-  if (/^[A-Za-z0-9._/:=-]+$/.test(value)) {
-    return value;
-  }
-  return `'${value.replace(/'/g, `'\\''`)}'`;
-}
-
-function replaceCloudProvider(providers: UICloudProviderStatus[], provider: UICloudProviderStatus): UICloudProviderStatus[] {
-  const next = providers.filter((item) => item.alias !== provider.alias);
-  next.push(provider);
-  next.sort((left, right) => left.alias.localeCompare(right.alias));
-  return next;
-}
-
-function replaceCloudContext(contexts: UICloudContextStatus[], context: UICloudContextStatus): UICloudContextStatus[] {
-  const next = contexts.filter((item) => item.name !== context.name);
-  next.push(context);
-  next.sort((left, right) => left.name.localeCompare(right.name));
-  return next;
-}
-
-function cloudContextDraftForConfig(config: UIERunConfig, current: UICloudContextInitInput): UICloudContextInitInput {
-  const draft = {
-    ...defaultCloudContextInitInput(),
-    ...current,
-  };
-  const providers = config.cloudProviders || [];
-  if (!draft.cloudProviderAlias || !providers.some((provider) => provider.alias === draft.cloudProviderAlias)) {
-    draft.cloudProviderAlias = providers[0]?.alias || '';
-  }
-  return draft;
 }

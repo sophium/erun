@@ -25,6 +25,19 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 - If the required generator is unavailable or failing, stop and report the generator problem instead of hand-writing generated output. For Wails frontend bindings, this means changing the exported Go method or type first, then running `wails generate module` from `erun-ui`.
 - Keep styling intentional and native-desktop oriented. Prefer precise layout and spacing adjustments in CSS over adding more Wails or DOM complexity.
 
+## Frontend Code Organization
+
+- Keep React-facing controllers, hooks, and app services as thin public facades. They should adapt component events, call focused modules, update state, and emit changes rather than accumulating workflow logic.
+- Add new frontend code directly to the module that owns it. Do not use a facade, component, hook, or large file as a temporary staging area.
+- Put app-owned data structures in `model/` when they are shared across frontend modules or express a workflow contract. Use one exported type or interface per file, and re-export them from a local `index.ts` when that keeps imports readable.
+- Do not move generated Wails types or shared UI types from `@/types` into local model folders.
+- Keep model files free of behavior. Put formatting, parsing, normalization, validation, and classification logic in focused helper modules named for the domain they serve.
+- Put grouped mutable bookkeeping into focused classes when maps, sets, buffers, timers, or subscriptions represent one lifecycle concept.
+- Put DOM/layout interactions in focused action modules when they can operate on app state, DOM references, and explicit callbacks.
+- Keep Wails calls near the workflow that owns them unless a backend adapter is being introduced intentionally.
+- Keep storage persistence close to the state transition that owns the persisted value.
+- Name workflow modules for user-visible flows or domain concepts, such as environment, tenant, global configuration, review, terminal, layout, cloud context, or package management.
+
 ## Frontend Component Discovery
 
 - Before adding a new frontend control or composing a custom interaction, search for an existing local component and usage pattern with `rg` in `erun-ui/frontend/src/components` and `erun-ui/frontend/src/app`. Search by user-facing label, role, primitive name, and behavior, such as `Popover`, `Command`, `VersionField`, `choicesOpen`, `dropdown`, `select`, or the closest visible label.
