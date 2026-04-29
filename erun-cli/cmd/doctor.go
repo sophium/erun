@@ -56,7 +56,6 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 	if _, err := fmt.Fprintf(ctx.Stdout, "Target: %s/%s\n", result.Tenant, result.Environment); err != nil {
 		return err
 	}
-
 	repairedJetBrains, err := runSelectedJetBrainsGatewayRepair(ctx, promptRunner, result, options)
 	if err != nil {
 		return err
@@ -64,7 +63,10 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 	if repairedJetBrains && doctorOnlySelectedJetBrainsGatewayRepair(options) {
 		return nil
 	}
+	return runDoctorCleanupActions(ctx, promptRunner, result, options)
+}
 
+func runDoctorCleanupActions(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, options doctorOptions) error {
 	req := common.ShellLaunchParamsFromResult(result)
 	inspection, err := common.RunDoctorInspection(ctx, nil, req)
 	if err != nil {
@@ -81,31 +83,34 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 		return err
 	}
 	if len(actions) == 0 {
-		if ctx.DryRun {
-			_, err := fmt.Fprintln(ctx.Stdout, "No cleanup actions selected.")
-			return err
-		}
-		if _, err := fmt.Fprintln(ctx.Stdout, "No cleanup actions selected."); err != nil {
-			return err
-		}
-		return nil
+		return writeNoDoctorActionsSelected(ctx)
 	}
 
 	for _, action := range actions {
-		if _, err := fmt.Fprintf(ctx.Stdout, "Running: %s\n", common.DoctorActionDescription(action)); err != nil {
+		if err := runSelectedDoctorAction(ctx, req, action); err != nil {
 			return err
-		}
-		output, err := common.RunDoctorAction(ctx, nil, req, action)
-		if err != nil {
-			return err
-		}
-		if !ctx.DryRun {
-			if err := writeDoctorCommandOutput(ctx, output.Stdout, output.Stderr); err != nil {
-				return err
-			}
 		}
 	}
 	return nil
+}
+
+func writeNoDoctorActionsSelected(ctx common.Context) error {
+	_, err := fmt.Fprintln(ctx.Stdout, "No cleanup actions selected.")
+	return err
+}
+
+func runSelectedDoctorAction(ctx common.Context, req common.ShellLaunchParams, action common.DoctorAction) error {
+	if _, err := fmt.Fprintf(ctx.Stdout, "Running: %s\n", common.DoctorActionDescription(action)); err != nil {
+		return err
+	}
+	output, err := common.RunDoctorAction(ctx, nil, req, action)
+	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		return nil
+	}
+	return writeDoctorCommandOutput(ctx, output.Stdout, output.Stderr)
 }
 
 func runSelectedJetBrainsGatewayRepair(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, options doctorOptions) (bool, error) {
@@ -121,17 +126,27 @@ func runSelectedJetBrainsGatewayRepair(ctx common.Context, promptRunner PromptRu
 		return false, nil
 	}
 
-	selected := options.repairJetBrainsGateway
-	if !selected && promptRunner != nil && !ctx.DryRun {
-		ok, err := confirmPrompt(promptRunner, fmt.Sprintf("Clear cached JetBrains Gateway backend metadata for %s/%s?", result.Tenant, result.Environment))
-		if err != nil {
-			return false, err
-		}
-		selected = ok
+	selected, err := shouldRepairJetBrainsGateway(ctx, promptRunner, result, options)
+	if err != nil {
+		return false, err
 	}
 	if !selected {
 		return false, nil
 	}
+	return runJetBrainsGatewayRepair(ctx, repair)
+}
+
+func shouldRepairJetBrainsGateway(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, options doctorOptions) (bool, error) {
+	if options.repairJetBrainsGateway {
+		return true, nil
+	}
+	if promptRunner == nil || ctx.DryRun {
+		return false, nil
+	}
+	return confirmPrompt(promptRunner, fmt.Sprintf("Clear cached JetBrains Gateway backend metadata for %s/%s?", result.Tenant, result.Environment))
+}
+
+func runJetBrainsGatewayRepair(ctx common.Context, repair jetBrainsGatewayDoctorRepair) (bool, error) {
 	if _, err := fmt.Fprintf(ctx.Stdout, "Running: Clear cached JetBrains Gateway backend metadata\n"); err != nil {
 		return false, err
 	}
