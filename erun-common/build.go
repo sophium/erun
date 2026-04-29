@@ -1347,29 +1347,11 @@ func FindComponentDockerBuildContext(projectRoot, componentName string) (DockerB
 
 	matches := make([]DockerBuildContext, 0, 1)
 	err := filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
+		context, ok, walkErr := componentDockerBuildContextCandidate(path, d, componentName, err)
+		if ok {
+			matches = append(matches, context)
 		}
-		if d.IsDir() {
-			if d.Name() == ".git" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.Name() != "Dockerfile" {
-			return nil
-		}
-
-		dir := filepath.Dir(path)
-		if filepath.Base(dir) != componentName || filepath.Base(filepath.Dir(dir)) != "docker" {
-			return nil
-		}
-
-		matches = append(matches, DockerBuildContext{
-			Dir:            dir,
-			DockerfilePath: path,
-		})
-		return nil
+		return walkErr
 	})
 	if err != nil {
 		return DockerBuildContext{}, false, err
@@ -1381,6 +1363,26 @@ func FindComponentDockerBuildContext(projectRoot, componentName string) (DockerB
 		return DockerBuildContext{}, false, fmt.Errorf("multiple Docker build contexts found for component %q", componentName)
 	}
 	return matches[0], true, nil
+}
+
+func componentDockerBuildContextCandidate(path string, d os.DirEntry, componentName string, err error) (DockerBuildContext, bool, error) {
+	if err != nil {
+		return DockerBuildContext{}, false, err
+	}
+	if d.IsDir() {
+		if d.Name() == ".git" {
+			return DockerBuildContext{}, false, filepath.SkipDir
+		}
+		return DockerBuildContext{}, false, nil
+	}
+	if d.Name() != "Dockerfile" {
+		return DockerBuildContext{}, false, nil
+	}
+	dir := filepath.Dir(path)
+	if filepath.Base(dir) != componentName || filepath.Base(filepath.Dir(dir)) != "docker" {
+		return DockerBuildContext{}, false, nil
+	}
+	return DockerBuildContext{Dir: dir, DockerfilePath: path}, true, nil
 }
 
 func DockerImageBuilder(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
@@ -1813,29 +1815,11 @@ func FindComponentLinuxPackageContext(projectRoot, componentName string) (LinuxP
 
 	matches := make([]LinuxPackageContext, 0, 1)
 	err := filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
+		context, ok, walkErr := componentLinuxPackageContextCandidate(path, d, componentName, err)
+		if ok {
+			matches = append(matches, context)
 		}
-		if d.IsDir() {
-			if d.Name() == ".git" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.Name() != "build.sh" && d.Name() != "release.sh" {
-			return nil
-		}
-
-		dir := filepath.Dir(path)
-		if filepath.Base(dir) != componentName || filepath.Base(filepath.Dir(dir)) != "linux" {
-			return nil
-		}
-		context, ok, err := LinuxPackageContextAtDir(dir)
-		if err != nil || !ok {
-			return err
-		}
-		matches = append(matches, context)
-		return nil
+		return walkErr
 	})
 	if err != nil {
 		return LinuxPackageContext{}, false, err
@@ -1847,6 +1831,26 @@ func FindComponentLinuxPackageContext(projectRoot, componentName string) (LinuxP
 		return LinuxPackageContext{}, false, fmt.Errorf("multiple linux package contexts found for component %q", componentName)
 	}
 	return matches[0], true, nil
+}
+
+func componentLinuxPackageContextCandidate(path string, d os.DirEntry, componentName string, err error) (LinuxPackageContext, bool, error) {
+	if err != nil {
+		return LinuxPackageContext{}, false, err
+	}
+	if d.IsDir() {
+		if d.Name() == ".git" {
+			return LinuxPackageContext{}, false, filepath.SkipDir
+		}
+		return LinuxPackageContext{}, false, nil
+	}
+	if d.Name() != "build.sh" && d.Name() != "release.sh" {
+		return LinuxPackageContext{}, false, nil
+	}
+	dir := filepath.Dir(path)
+	if filepath.Base(dir) != componentName || filepath.Base(filepath.Dir(dir)) != "linux" {
+		return LinuxPackageContext{}, false, nil
+	}
+	return LinuxPackageContextAtDir(dir)
 }
 
 func resolveCurrentDevopsLinuxDir(findProjectRoot ProjectFinderFunc, dir string, target DockerCommandTarget) (string, bool, error) {
@@ -1881,15 +1885,9 @@ func resolveProjectRootDevopsLinuxDir(findProjectRoot ProjectFinderFunc, project
 		return "", false, nil
 	}
 
-	if tenant, detectedProjectRoot, err := findProjectRoot(); err == nil &&
-		filepath.Clean(strings.TrimSpace(detectedProjectRoot)) == projectRoot &&
-		strings.TrimSpace(tenant) != "" {
-		linuxDir := filepath.Join(projectRoot, RuntimeReleaseName(tenant), "linux")
-		if ok, err := isLinuxPackageModuleDir(linuxDir); err != nil {
-			return "", false, err
-		} else if ok {
-			return linuxDir, true, nil
-		}
+	linuxDir, ok, err := detectedProjectRootDevopsLinuxDir(findProjectRoot, projectRoot)
+	if err != nil || ok {
+		return linuxDir, ok, err
 	}
 
 	candidates, err := findDevopsLinuxDirs(projectRoot)
@@ -1904,6 +1902,20 @@ func resolveProjectRootDevopsLinuxDir(findProjectRoot ProjectFinderFunc, project
 	default:
 		return "", false, fmt.Errorf("multiple devops linux directories found under project root")
 	}
+}
+
+func detectedProjectRootDevopsLinuxDir(findProjectRoot ProjectFinderFunc, projectRoot string) (string, bool, error) {
+	tenant, detectedProjectRoot, err := findProjectRoot()
+	if err != nil || filepath.Clean(strings.TrimSpace(detectedProjectRoot)) != projectRoot || strings.TrimSpace(tenant) == "" {
+		return "", false, nil
+	}
+	linuxDir := filepath.Join(projectRoot, RuntimeReleaseName(tenant), "linux")
+	if ok, err := isLinuxPackageModuleDir(linuxDir); err != nil {
+		return "", false, err
+	} else if ok {
+		return linuxDir, true, nil
+	}
+	return "", false, nil
 }
 
 func findDevopsLinuxDirs(projectRoot string) ([]string, error) {
@@ -2064,44 +2076,12 @@ func ResolveDockerBuildVersion(buildDir, projectRoot string) (string, bool, stri
 func dockerBuildVersionCandidates(buildDir, projectRoot string) []string {
 	dirs := make([]string, 0, 4)
 	seen := make(map[string]struct{}, 4)
-	addDir := func(dir string) {
-		dir = filepath.Clean(dir)
-		if dir == "" {
-			return
-		}
-		if _, ok := seen[dir]; ok {
-			return
-		}
-		seen[dir] = struct{}{}
-		dirs = append(dirs, dir)
-	}
-
-	addDir(buildDir)
+	dirs = appendUniqueVersionDir(dirs, seen, buildDir)
 
 	if filepath.Base(filepath.Dir(buildDir)) == "docker" {
-		for dir := filepath.Dir(filepath.Dir(buildDir)); dir != ""; {
-			addDir(dir)
-			if projectRoot != "" && filepath.Clean(dir) == filepath.Clean(projectRoot) {
-				break
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
-		}
+		dirs = appendVersionAncestorDirs(dirs, seen, filepath.Dir(filepath.Dir(buildDir)), projectRoot)
 	} else {
-		for dir := filepath.Dir(buildDir); dir != ""; {
-			addDir(dir)
-			if projectRoot != "" && filepath.Clean(dir) == filepath.Clean(projectRoot) {
-				break
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
-		}
+		dirs = appendVersionAncestorDirs(dirs, seen, filepath.Dir(buildDir), projectRoot)
 	}
 
 	paths := make([]string, 0, len(dirs))
@@ -2109,6 +2089,37 @@ func dockerBuildVersionCandidates(buildDir, projectRoot string) []string {
 		paths = append(paths, filepath.Join(dir, "VERSION"))
 	}
 	return paths
+}
+
+func appendVersionAncestorDirs(dirs []string, seen map[string]struct{}, startDir, projectRoot string) []string {
+	for dir := startDir; dir != ""; {
+		dirs = appendUniqueVersionDir(dirs, seen, dir)
+		if reachedVersionRoot(dir, projectRoot) {
+			break
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return dirs
+}
+
+func appendUniqueVersionDir(dirs []string, seen map[string]struct{}, dir string) []string {
+	dir = filepath.Clean(dir)
+	if dir == "" {
+		return dirs
+	}
+	if _, ok := seen[dir]; ok {
+		return dirs
+	}
+	seen[dir] = struct{}{}
+	return append(dirs, dir)
+}
+
+func reachedVersionRoot(dir, projectRoot string) bool {
+	return projectRoot != "" && filepath.Clean(dir) == filepath.Clean(projectRoot)
 }
 
 func formatLocalSnapshotVersion(version string, now time.Time) string {
