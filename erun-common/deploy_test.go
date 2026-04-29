@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -97,18 +96,8 @@ func TestResolveCurrentKubernetesDeployContextsUsesProjectRootDevopsModule(t *te
 	moduleRoot := filepath.Join(projectRoot, "tenant-a-devops")
 	chartA := filepath.Join(moduleRoot, "k8s", "tenant-a-devops")
 	chartB := filepath.Join(moduleRoot, "k8s", "erun-dind")
-	for _, chartPath := range []string{chartA, chartB} {
-		if err := os.MkdirAll(chartPath, 0o755); err != nil {
-			t.Fatalf("mkdir chart dir: %v", err)
-		}
-		componentName := filepath.Base(chartPath)
-		if err := os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: "+componentName+"\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644); err != nil {
-			t.Fatalf("write Chart.yaml: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644); err != nil {
-			t.Fatalf("write values.local.yaml: %v", err)
-		}
-	}
+	writeDeployChartFixture(t, chartA)
+	writeDeployChartFixture(t, chartB)
 
 	deployContexts, err := ResolveCurrentKubernetesDeployContexts(
 		func() (string, string, error) {
@@ -119,18 +108,24 @@ func TestResolveCurrentKubernetesDeployContextsUsesProjectRootDevopsModule(t *te
 		},
 		"",
 	)
-	if err != nil {
-		t.Fatalf("ResolveCurrentKubernetesDeployContexts failed: %v", err)
-	}
-	if len(deployContexts) != 2 {
-		t.Fatalf("unexpected deploy contexts: %+v", deployContexts)
-	}
-	if deployContexts[0].ComponentName != "erun-dind" || deployContexts[0].ChartPath != chartB {
-		t.Fatalf("unexpected first deploy context: %+v", deployContexts[0])
-	}
-	if deployContexts[1].ComponentName != "tenant-a-devops" || deployContexts[1].ChartPath != chartA {
-		t.Fatalf("unexpected second deploy context: %+v", deployContexts[1])
-	}
+	requireNoError(t, err, "ResolveCurrentKubernetesDeployContexts failed")
+	requireDeployContexts(t, deployContexts, chartA, chartB)
+}
+
+func writeDeployChartFixture(t *testing.T, chartPath string) {
+	t.Helper()
+	requireNoError(t, os.MkdirAll(chartPath, 0o755), "mkdir chart dir")
+	componentName := filepath.Base(chartPath)
+	chart := []byte("apiVersion: v2\nname: " + componentName + "\nversion: 1.0.0\nappVersion: 1.0.0\n")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), chart, 0o644), "write Chart.yaml")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644), "write values.local.yaml")
+}
+
+func requireDeployContexts(t *testing.T, deployContexts []KubernetesDeployContext, chartA, chartB string) {
+	t.Helper()
+	requireEqual(t, len(deployContexts), 2, "deploy context count")
+	requireCondition(t, deployContexts[0].ComponentName == "erun-dind" && deployContexts[0].ChartPath == chartB, "unexpected first deploy context: %+v", deployContexts[0])
+	requireCondition(t, deployContexts[1].ComponentName == "tenant-a-devops" && deployContexts[1].ChartPath == chartA, "unexpected second deploy context: %+v", deployContexts[1])
 }
 
 func TestResolveDeployTargetUsesCurrentDirectoryTenantWhenTenantProjectRootDiffers(t *testing.T) {
@@ -734,31 +729,15 @@ func TestResolveDeploySpecForContextPublishesLocalRuntimeBuildsAsMultiPlatform(t
 	componentRoot := filepath.Join(projectRoot, "tenant-a-devops")
 	chartPath := createComponentHelmChartFixture(t, projectRoot, "tenant-a-devops")
 	templatesPath := filepath.Join(chartPath, "templates")
-	if err := os.MkdirAll(templatesPath, 0o755); err != nil {
-		t.Fatalf("mkdir templates dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(templatesPath, "deployment.yaml"), []byte("apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: tenant-a-devops\n          image: erunpaas/tenant-a-devops:{{ .Chart.AppVersion }}\n        - name: erun-dind\n          image: erunpaas/erun-dind:28.1.1\n"), 0o644); err != nil {
-		t.Fatalf("write deployment template: %v", err)
-	}
+	writeRuntimeDeploymentTemplate(t, templatesPath)
 
 	runtimeWorkdir := filepath.Join(componentRoot, "docker", "tenant-a-devops")
-	if err := os.MkdirAll(runtimeWorkdir, 0o755); err != nil {
-		t.Fatalf("mkdir runtime docker dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(runtimeWorkdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write runtime Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentRoot, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write runtime VERSION: %v", err)
-	}
+	writeDockerBuildFixture(t, runtimeWorkdir)
+	writeVersionFileForTest(t, filepath.Join(componentRoot, "VERSION"), "1.0.0")
 
 	dindWorkdir := filepath.Join(componentRoot, "docker", "erun-dind")
-	if err := os.MkdirAll(dindWorkdir, 0o755); err != nil {
-		t.Fatalf("mkdir dind docker dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dindWorkdir, "Dockerfile"), []byte("FROM docker:28.1.1-dind\n"), 0o644); err != nil {
-		t.Fatalf("write dind Dockerfile: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(dindWorkdir, 0o755), "mkdir dind docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(dindWorkdir, "Dockerfile"), []byte("FROM docker:28.1.1-dind\n"), 0o644), "write dind Dockerfile")
 	projectConfig := ProjectConfig{}
 	projectConfig.SetContainerRegistryForEnvironment(DefaultEnvironment, "erunpaas")
 	projectConfig.Environments[DefaultEnvironment] = ProjectEnvironmentConfig{
@@ -767,9 +746,7 @@ func TestResolveDeploySpecForContextPublishesLocalRuntimeBuildsAsMultiPlatform(t
 			SkipIfExists: []string{"erunpaas/erun-dind"},
 		},
 	}
-	if err := SaveProjectConfig(projectRoot, projectConfig); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, SaveProjectConfig(projectRoot, projectConfig), "save project config")
 
 	spec, err := resolveDeploySpecForContext(
 		ConfigStore{},
@@ -808,24 +785,25 @@ func TestResolveDeploySpecForContextPublishesLocalRuntimeBuildsAsMultiPlatform(t
 		"",
 		true,
 	)
-	if err != nil {
-		t.Fatalf("resolveDeploySpecForContext failed: %v", err)
-	}
+	requireNoError(t, err, "resolveDeploySpecForContext failed")
 
-	if len(spec.Builds) != 2 {
-		t.Fatalf("unexpected builds: %+v", spec.Builds)
-	}
-	for _, build := range spec.Builds {
-		if !build.Push {
-			t.Fatalf("expected deploy build to push via buildx, got %+v", build)
-		}
-		if !reflect.DeepEqual(build.Platforms, []string{"linux/amd64", "linux/arm64"}) {
-			t.Fatalf("expected deploy build to target both platforms, got %+v", build)
-		}
-	}
-	for _, build := range spec.Builds {
-		if build.Image.Tag == "erunpaas/erun-dind:28.1.1" && !build.SkipIfExists {
-			t.Fatalf("expected dind dependency build to be skippable, got %+v", build)
+	requireMultiPlatformDeployBuilds(t, spec.Builds)
+}
+
+func writeRuntimeDeploymentTemplate(t *testing.T, templatesPath string) {
+	t.Helper()
+	requireNoError(t, os.MkdirAll(templatesPath, 0o755), "mkdir templates dir")
+	template := []byte("apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: tenant-a-devops\n          image: erunpaas/tenant-a-devops:{{ .Chart.AppVersion }}\n        - name: erun-dind\n          image: erunpaas/erun-dind:28.1.1\n")
+	requireNoError(t, os.WriteFile(filepath.Join(templatesPath, "deployment.yaml"), template, 0o644), "write deployment template")
+}
+
+func requireMultiPlatformDeployBuilds(t *testing.T, builds []DockerBuildSpec) {
+	t.Helper()
+	requireEqual(t, len(builds), 2, "deploy build count")
+	for _, build := range builds {
+		requireMultiPlatformPushedBuild(t, build)
+		if build.Image.Tag == "erunpaas/erun-dind:28.1.1" {
+			requireCondition(t, build.SkipIfExists, "expected dind dependency build to be skippable, got %+v", build)
 		}
 	}
 }

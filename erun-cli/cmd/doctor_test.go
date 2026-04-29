@@ -17,18 +17,10 @@ func TestDoctorCommandPromptsAndRunsSelectedCleanup(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
 	projectRoot := filepath.Join(t.TempDir(), "project")
-	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
-		t.Fatalf("mkdir project root: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("SaveERunConfig failed: %v", err)
-	}
-	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: projectRoot, DefaultEnvironment: "local"}); err != nil {
-		t.Fatalf("SaveTenantConfig failed: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "local", RepoPath: projectRoot, KubernetesContext: "cluster-local"}); err != nil {
-		t.Fatalf("SaveEnvConfig failed: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(projectRoot, 0o755), "mkdir project root")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "SaveERunConfig failed")
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: projectRoot, DefaultEnvironment: "local"}), "SaveTenantConfig failed")
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "local", RepoPath: projectRoot, KubernetesContext: "cluster-local"}), "SaveEnvConfig failed")
 
 	kubectlDir := t.TempDir()
 	kubectlPath := filepath.Join(kubectlDir, "kubectl")
@@ -58,9 +50,7 @@ fi
 echo "unexpected kubectl invocation: $@" >&2
 exit 1
 `
-	if err := os.WriteFile(kubectlPath, []byte(kubectlScript), 0o755); err != nil {
-		t.Fatalf("write kubectl stub: %v", err)
-	}
+	requireNoError(t, os.WriteFile(kubectlPath, []byte(kubectlScript), 0o755), "write kubectl stub")
 	t.Setenv("PATH", kubectlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	prompts := make([]string, 0, 3)
@@ -80,9 +70,7 @@ exit 1
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"doctor"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stdout.String()
 	for _, want := range []string{
@@ -104,18 +92,10 @@ func TestDoctorCommandDryRunShowsDindTraceForSelectedAction(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
 	projectRoot := filepath.Join(t.TempDir(), "petios")
-	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
-		t.Fatalf("mkdir project root: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("SaveERunConfig failed: %v", err)
-	}
-	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: projectRoot, DefaultEnvironment: "local"}); err != nil {
-		t.Fatalf("SaveTenantConfig failed: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "local", RepoPath: projectRoot, KubernetesContext: "cluster-local"}); err != nil {
-		t.Fatalf("SaveEnvConfig failed: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(projectRoot, 0o755), "mkdir project root")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "SaveERunConfig failed")
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: projectRoot, DefaultEnvironment: "local"}), "SaveTenantConfig failed")
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "local", RepoPath: projectRoot, KubernetesContext: "cluster-local"}), "SaveEnvConfig failed")
 	stubKubectlContexts(t, []string{"rancher-desktop"}, "rancher-desktop")
 
 	cmd := newTestRootCmd(testRootDeps{})
@@ -125,9 +105,7 @@ func TestDoctorCommandDryRunShowsDindTraceForSelectedAction(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"doctor", "--dry-run", "--prune-images"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
 	for _, want := range []string{
@@ -152,15 +130,9 @@ func TestDoctorCommandRepairsJetBrainsGatewayMetadata(t *testing.T) {
 	})
 
 	projectRoot := filepath.Join(t.TempDir(), "petios")
-	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
-		t.Fatalf("mkdir project root: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "petios"}); err != nil {
-		t.Fatalf("SaveERunConfig failed: %v", err)
-	}
-	if err := common.SaveTenantConfig(common.TenantConfig{Name: "petios", ProjectRoot: projectRoot, DefaultEnvironment: "rihards"}); err != nil {
-		t.Fatalf("SaveTenantConfig failed: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(projectRoot, 0o755), "mkdir project root")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "petios"}), "SaveERunConfig failed")
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{Name: "petios", ProjectRoot: projectRoot, DefaultEnvironment: "rihards"}), "SaveTenantConfig failed")
 	if err := common.SaveEnvConfig("petios", common.EnvConfig{
 		Name:              "rihards",
 		RepoPath:          projectRoot,
@@ -175,9 +147,7 @@ func TestDoctorCommandRepairsJetBrainsGatewayMetadata(t *testing.T) {
 
 	root := t.TempDir()
 	optionsDir := filepath.Join(root, "JetBrains", "IntelliJIdea2025.3", "options")
-	if err := os.MkdirAll(optionsDir, 0o700); err != nil {
-		t.Fatalf("mkdir options dir: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(optionsDir, 0o700), "mkdir options dir")
 	configID := jetbrainsconfig.StableConfigID("erun-petios-rihards")
 	recentPath := filepath.Join(optionsDir, "sshRecentConnections.v2.xml")
 	if err := os.WriteFile(recentPath, []byte(`<application>
@@ -226,9 +196,7 @@ func TestDoctorCommandRepairsJetBrainsGatewayMetadata(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"doctor", "petios", "rihards", "--repair-jetbrains-gateway"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stdout.String()
 	for _, want := range []string{

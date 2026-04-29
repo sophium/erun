@@ -517,51 +517,15 @@ func lookPathBootstrapAttempts(candidates []string) []jetbrainsBootstrapAttempt 
 }
 
 func resolveIntelliJOptionsDir(hostOS common.HostOS) (string, error) {
-	homeDir, err := ideUserHomeDir()
+	baseDir, err := intelliJOptionsBaseDir(hostOS)
 	if err != nil {
 		return "", err
 	}
-
-	var baseDir string
-	switch hostOS {
-	case common.HostOSDarwin:
-		baseDir = filepath.Join(homeDir, "Library", "Application Support", "JetBrains")
-	case common.HostOSLinux:
-		baseDir = filepath.Join(homeDir, ".config", "JetBrains")
-	case common.HostOSWindows:
-		if appData := strings.TrimSpace(os.Getenv("APPDATA")); appData != "" {
-			baseDir = filepath.Join(appData, "JetBrains")
-		}
-	default:
-		return "", fmt.Errorf("unsupported host OS: %s", hostOS)
-	}
-	if strings.TrimSpace(baseDir) == "" {
-		return "", fmt.Errorf("JetBrains options directory base is not configured")
-	}
-
-	matches, err := ideGlob(filepath.Join(baseDir, "IntelliJIdea*", "options"))
+	candidates, err := intelliJOptionsCandidates(baseDir)
 	if err != nil {
 		return "", err
 	}
-	type candidate struct {
-		path    string
-		modTime time.Time
-	}
-	candidates := make([]candidate, 0, len(matches))
-	for _, match := range matches {
-		info, err := ideStat(match)
-		if err != nil {
-			continue
-		}
-		if !info.IsDir() {
-			continue
-		}
-		candidates = append(candidates, candidate{path: match, modTime: info.ModTime()})
-	}
-	if len(candidates) == 0 {
-		return "", fmt.Errorf("IntelliJ IDEA options directory not found under %s", baseDir)
-	}
-	slices.SortFunc(candidates, func(a, b candidate) int {
+	slices.SortFunc(candidates, func(a, b intelliJOptionsCandidate) int {
 		if a.modTime.Equal(b.modTime) {
 			return strings.Compare(b.path, a.path)
 		}
@@ -571,6 +535,53 @@ func resolveIntelliJOptionsDir(hostOS common.HostOS) (string, error) {
 		return 1
 	})
 	return candidates[0].path, nil
+}
+
+type intelliJOptionsCandidate struct {
+	path    string
+	modTime time.Time
+}
+
+func intelliJOptionsBaseDir(hostOS common.HostOS) (string, error) {
+	homeDir, err := ideUserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	switch hostOS {
+	case common.HostOSDarwin:
+		return filepath.Join(homeDir, "Library", "Application Support", "JetBrains"), nil
+	case common.HostOSLinux:
+		return filepath.Join(homeDir, ".config", "JetBrains"), nil
+	case common.HostOSWindows:
+		if appData := strings.TrimSpace(os.Getenv("APPDATA")); appData != "" {
+			return filepath.Join(appData, "JetBrains"), nil
+		}
+		return "", fmt.Errorf("JetBrains options directory base is not configured")
+	default:
+		return "", fmt.Errorf("unsupported host OS: %s", hostOS)
+	}
+}
+
+func intelliJOptionsCandidates(baseDir string) ([]intelliJOptionsCandidate, error) {
+	matches, err := ideGlob(filepath.Join(baseDir, "IntelliJIdea*", "options"))
+	if err != nil {
+		return nil, err
+	}
+	candidates := make([]intelliJOptionsCandidate, 0, len(matches))
+	for _, match := range matches {
+		info, err := ideStat(match)
+		if err != nil {
+			continue
+		}
+		if !info.IsDir() {
+			continue
+		}
+		candidates = append(candidates, intelliJOptionsCandidate{path: match, modTime: info.ModTime()})
+	}
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("IntelliJ IDEA options directory not found under %s", baseDir)
+	}
+	return candidates, nil
 }
 
 func resolveIntelliJGatewayOptionsDir(optionsDir string) (string, error) {

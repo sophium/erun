@@ -103,6 +103,28 @@ type ReleaseSpec struct {
 	SkippedLinux    bool `json:"-"`
 }
 
+type releaseInputs struct {
+	ProjectRoot         string
+	ReleaseRoot         string
+	ReleaseConfig       ReleaseConfig
+	Branch              string
+	Commit              string
+	BaseVersion         string
+	Version             string
+	VersionFilePath     string
+	Mode                ReleaseMode
+	DevelopBranchExists bool
+}
+
+type releaseArtifacts struct {
+	Charts        []ReleaseChartSpec
+	Images        []ReleaseDockerImageSpec
+	FileUpdates   []ReleaseFileUpdate
+	PackagingSync *ReleasePackagingSyncSpec
+	LinuxReleases []scriptSpec
+	SkippedLinux  bool
+}
+
 func ResolveReleaseSpec(findProjectRoot ProjectFinderFunc, params ReleaseParams) (ReleaseSpec, error) {
 	return resolveReleaseSpec(findProjectRoot, LoadProjectConfig, GitCurrentBranch, GitShortCommit, GitLocalBranchExists, params)
 }
@@ -110,138 +132,35 @@ func ResolveReleaseSpec(findProjectRoot ProjectFinderFunc, params ReleaseParams)
 func resolveReleaseSpec(findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc, branchExists GitBranchCheckerFunc, params ReleaseParams) (ReleaseSpec, error) {
 	findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists = normalizeReleaseDependencies(findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists)
 
-	projectRoot, err := resolveReleaseProjectRoot(findProjectRoot, params)
+	inputs, err := resolveReleaseInputs(findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists, params)
 	if err != nil {
 		return ReleaseSpec{}, err
 	}
-	releaseRoot, err := resolveReleaseModuleRoot(projectRoot)
+	artifacts, err := discoverReleaseArtifacts(inputs)
 	if err != nil {
 		return ReleaseSpec{}, err
 	}
-
-	projectConfig, _, err := loadProjectConfig(projectRoot)
-	if err != nil && !errors.Is(err, ErrNotInitialized) {
-		return ReleaseSpec{}, err
-	}
-	releaseConfig := projectConfig.NormalizedReleaseConfig()
-
-	branch, err := resolveBranch(projectRoot)
+	nextVersion, stages, err := resolveReleaseStages(inputs, artifacts.FileUpdates, artifacts.PackagingSync)
 	if err != nil {
 		return ReleaseSpec{}, err
-	}
-	commit, err := resolveCommit(projectRoot)
-	if err != nil {
-		return ReleaseSpec{}, err
-	}
-
-	baseVersion, _, versionFilePath, err := ResolveDockerBuildVersion(releaseRoot, releaseRoot)
-	if err != nil {
-		return ReleaseSpec{}, err
-	}
-
-	mode := classifyReleaseMode(branch, releaseConfig)
-	version := resolveReleaseVersion(baseVersion, commit, mode)
-	developBranchExists, err := branchExists(projectRoot, releaseConfig.DevelopBranch)
-	if err != nil {
-		return ReleaseSpec{}, err
-	}
-
-	charts, chartUpdates, err := discoverReleaseCharts(releaseRoot, version)
-	if err != nil {
-		return ReleaseSpec{}, err
-	}
-	releaseFileUpdates := append([]ReleaseFileUpdate{}, chartUpdates...)
-	var packagingSync *ReleasePackagingSyncSpec
-	if mode == ReleaseModeStable {
-		packagingUpdates, syncSpec, err := discoverStableReleasePackaging(projectRoot, version)
-		if err != nil {
-			return ReleaseSpec{}, err
-		}
-		releaseFileUpdates = append(releaseFileUpdates, packagingUpdates...)
-		packagingSync = syncSpec
-	}
-
-	images, err := discoverReleaseDockerImages(projectRoot, releaseRoot, versionFilePath, version)
-	if err != nil {
-		return ReleaseSpec{}, err
-	}
-	linuxReleases, err := discoverReleaseLinuxScripts(releaseRoot, version)
-	if err != nil {
-		return ReleaseSpec{}, err
-	}
-	skippedLinux := false
-	if len(linuxReleases) > 0 && !LinuxPackageBuildsSupported() {
-		linuxReleases = nil
-		skippedLinux = true
-	}
-
-	stages := make([]ReleaseStage, 0, 2)
-	if syncStage := newSyncRemoteStage(projectRoot, branch); len(syncStage.GitCommands) > 0 {
-		stages = append(stages, syncStage)
-	}
-	releaseStage := newReleaseStage(projectRoot, releaseFileUpdates, version, mode)
-	if len(releaseStage.FileUpdates) > 0 || len(releaseStage.GitCommands) > 0 {
-		stages = append(stages, releaseStage)
-	}
-	if mode == ReleaseModeStable && packagingSync != nil {
-		tagPushStage := newPushReleaseTagStage(projectRoot, version)
-		if len(tagPushStage.GitCommands) > 0 {
-			stages = append(stages, tagPushStage)
-		}
-		packagingStage := newSyncPackagingStage(projectRoot, *packagingSync)
-		if packagingStage.PackagingSync != nil || len(packagingStage.GitCommands) > 0 {
-			stages = append(stages, packagingStage)
-		}
-	}
-
-	nextVersion := ""
-	if mode == ReleaseModeStable {
-		nextVersion, err = nextPatchVersion(baseVersion)
-		if err != nil {
-			return ReleaseSpec{}, err
-		}
-		if strings.TrimSpace(versionFilePath) != "" && nextVersion != baseVersion {
-			bumpUpdate := ReleaseFileUpdate{
-				Path:    versionFilePath,
-				Content: nextVersion + "\n",
-			}
-			bumpStage := newBumpStage(projectRoot, nextVersion, bumpUpdate)
-			if len(bumpStage.FileUpdates) > 0 || len(bumpStage.GitCommands) > 0 {
-				stages = append(stages, bumpStage)
-			}
-		}
-		syncStage := newSyncDevelopStage(projectRoot, releaseConfig, developBranchExists)
-		if len(syncStage.FileUpdates) > 0 || len(syncStage.GitCommands) > 0 {
-			stages = append(stages, syncStage)
-		}
-		pushStage := newPushReleaseStage(projectRoot, releaseConfig, developBranchExists)
-		if len(pushStage.FileUpdates) > 0 || len(pushStage.GitCommands) > 0 {
-			stages = append(stages, pushStage)
-		}
-	}
-	if mode == ReleaseModeCandidate {
-		pushStage := newPushCandidateReleaseStage(projectRoot, releaseConfig)
-		if len(pushStage.FileUpdates) > 0 || len(pushStage.GitCommands) > 0 {
-			stages = append(stages, pushStage)
-		}
 	}
 
 	return ReleaseSpec{
-		ProjectRoot:     projectRoot,
-		ReleaseRoot:     releaseRoot,
-		Branch:          branch,
-		Commit:          commit,
-		BaseVersion:     baseVersion,
-		Version:         version,
+		ProjectRoot:     inputs.ProjectRoot,
+		ReleaseRoot:     inputs.ReleaseRoot,
+		Branch:          inputs.Branch,
+		Commit:          inputs.Commit,
+		BaseVersion:     inputs.BaseVersion,
+		Version:         inputs.Version,
 		NextVersion:     nextVersion,
-		VersionFilePath: versionFilePath,
-		Mode:            mode,
+		VersionFilePath: inputs.VersionFilePath,
+		Mode:            inputs.Mode,
 		Force:           params.Force,
-		Charts:          charts,
-		DockerImages:    images,
+		Charts:          artifacts.Charts,
+		DockerImages:    artifacts.Images,
 		Stages:          stages,
-		LinuxReleases:   linuxReleases,
-		SkippedLinux:    skippedLinux,
+		LinuxReleases:   artifacts.LinuxReleases,
+		SkippedLinux:    artifacts.SkippedLinux,
 	}, nil
 }
 
@@ -259,6 +178,24 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 		syncPackagingChecksums = syncReleasePackagingChecksums
 	}
 
+	traceReleaseSpec(ctx, spec)
+	if err := ensureReleaseWorktreeClean(ctx, spec.ProjectRoot); err != nil {
+		return err
+	}
+
+	for _, stage := range spec.Stages {
+		if err := runReleaseStage(ctx, spec, stage, runGit, syncPackagingChecksums); err != nil {
+			return err
+		}
+	}
+	if spec.SkippedLinux {
+		ctx.Trace("skipping linux package scripts: host is not Linux or dpkg-deb is unavailable")
+	}
+
+	return runScriptSpecs(ctx, spec.LinuxReleases, runScript)
+}
+
+func traceReleaseSpec(ctx Context, spec ReleaseSpec) {
 	ctx.Trace(fmt.Sprintf("release: branch=%s mode=%s version=%s", spec.Branch, spec.Mode, spec.Version))
 	if spec.NextVersion != "" {
 		ctx.Trace("next version: " + spec.NextVersion)
@@ -266,73 +203,90 @@ func runReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, 
 	for _, image := range spec.DockerImages {
 		ctx.Trace("docker image: " + image.Tag)
 	}
-	if !ctx.DryRun {
-		clean, err := gitWorktreeClean(spec.ProjectRoot)
+}
+
+func ensureReleaseWorktreeClean(ctx Context, projectRoot string) error {
+	if ctx.DryRun {
+		return nil
+	}
+	clean, err := gitWorktreeClean(projectRoot)
+	if err != nil {
+		return err
+	}
+	if !clean {
+		return fmt.Errorf("release requires a clean git worktree; commit or stash changes first")
+	}
+	return nil
+}
+
+func runReleaseStage(ctx Context, spec ReleaseSpec, stage ReleaseStage, runGit GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
+	ctx.Trace("stage: " + stage.Name)
+	stageFileUpdates, err := releaseStageFileUpdates(ctx, stage, syncPackagingChecksums)
+	if err != nil {
+		return err
+	}
+	if err := writeReleaseFileUpdates(ctx, stageFileUpdates); err != nil {
+		return err
+	}
+	for _, command := range releaseStageCommands(ctx, stage, stageFileUpdates) {
+		if err := runReleaseCommand(ctx, spec, command, runGit); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func releaseStageFileUpdates(ctx Context, stage ReleaseStage, syncPackagingChecksums ReleasePackagingSyncerFunc) ([]ReleaseFileUpdate, error) {
+	updates := append([]ReleaseFileUpdate{}, stage.FileUpdates...)
+	if stage.PackagingSync == nil {
+		return updates, nil
+	}
+	generatedUpdates, err := syncPackagingChecksums(ctx, *stage.PackagingSync)
+	if err != nil {
+		return nil, err
+	}
+	return append(updates, generatedUpdates...), nil
+}
+
+func writeReleaseFileUpdates(ctx Context, updates []ReleaseFileUpdate) error {
+	for _, update := range updates {
+		ctx.TraceBlock("write "+update.Path, strings.TrimRight(update.Content, "\n"))
+		if ctx.DryRun {
+			continue
+		}
+		if err := os.WriteFile(update.Path, []byte(update.Content), 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func releaseStageCommands(ctx Context, stage ReleaseStage, updates []ReleaseFileUpdate) []ReleaseCommandSpec {
+	if !ctx.DryRun && stage.PackagingSync != nil && len(updates) == 0 {
+		return nil
+	}
+	return stage.GitCommands
+}
+
+func runReleaseCommand(ctx Context, spec ReleaseSpec, command ReleaseCommandSpec, runGit GitCommandRunnerFunc) error {
+	if command.Name == "git" && shouldSkipExistingReleaseTag(command.Args) {
+		skip, err := prepareReleaseTag(ctx, spec, runGit, command)
 		if err != nil {
 			return err
 		}
-		if !clean {
-			return fmt.Errorf("release requires a clean git worktree; commit or stash changes first")
+		if skip {
+			ctx.Trace("release tag already exists at HEAD; skipping " + command.Args[2])
+			return nil
 		}
 	}
-
-	for _, stage := range spec.Stages {
-		ctx.Trace("stage: " + stage.Name)
-		stageFileUpdates := append([]ReleaseFileUpdate{}, stage.FileUpdates...)
-		if stage.PackagingSync != nil {
-			generatedUpdates, err := syncPackagingChecksums(ctx, *stage.PackagingSync)
-			if err != nil {
-				return err
-			}
-			stageFileUpdates = append(stageFileUpdates, generatedUpdates...)
-		}
-
-		for _, update := range stageFileUpdates {
-			ctx.TraceBlock("write "+update.Path, strings.TrimRight(update.Content, "\n"))
-			if ctx.DryRun {
-				continue
-			}
-			if err := os.WriteFile(update.Path, []byte(update.Content), 0o644); err != nil {
-				return err
-			}
-		}
-
-		stageCommands := stage.GitCommands
-		if !ctx.DryRun && stage.PackagingSync != nil && len(stageFileUpdates) == 0 {
-			stageCommands = nil
-		}
-		for _, command := range stageCommands {
-			if command.Name == "git" && shouldSkipExistingReleaseTag(command.Args) {
-				skip, err := prepareReleaseTag(ctx, spec, runGit, command)
-				if err != nil {
-					return err
-				}
-				if skip {
-					ctx.Trace("release tag already exists at HEAD; skipping " + command.Args[2])
-					continue
-				}
-			}
-			ctx.TraceCommand(command.Dir, command.Name, command.Args...)
-			if ctx.DryRun {
-				continue
-			}
-			if command.Name != "git" {
-				return fmt.Errorf("unsupported release command %q", command.Name)
-			}
-			if err := runGit(command.Dir, ctx.Stdout, ctx.Stderr, command.Args...); err != nil {
-				return err
-			}
-		}
+	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
+	if ctx.DryRun {
+		return nil
 	}
-	if spec.SkippedLinux {
-		ctx.Trace("skipping linux package scripts: host is not Linux or dpkg-deb is unavailable")
+	if command.Name != "git" {
+		return fmt.Errorf("unsupported release command %q", command.Name)
 	}
-
-	if err := runScriptSpecs(ctx, spec.LinuxReleases, runScript); err != nil {
-		return err
-	}
-
-	return nil
+	return runGit(command.Dir, ctx.Stdout, ctx.Stderr, command.Args...)
 }
 
 func shouldSkipExistingReleaseTag(args []string) bool {
@@ -592,6 +546,182 @@ func normalizeReleaseDependencies(findProjectRoot ProjectFinderFunc, loadProject
 		branchExists = GitLocalBranchExists
 	}
 	return findProjectRoot, loadProjectConfig, resolveBranch, resolveCommit, branchExists
+}
+
+func resolveReleaseInputs(findProjectRoot ProjectFinderFunc, loadProjectConfig ProjectConfigLoaderFunc, resolveBranch, resolveCommit GitValueResolverFunc, branchExists GitBranchCheckerFunc, params ReleaseParams) (releaseInputs, error) {
+	projectRoot, err := resolveReleaseProjectRoot(findProjectRoot, params)
+	if err != nil {
+		return releaseInputs{}, err
+	}
+	releaseRoot, err := resolveReleaseModuleRoot(projectRoot)
+	if err != nil {
+		return releaseInputs{}, err
+	}
+	releaseConfig, err := loadReleaseConfig(projectRoot, loadProjectConfig)
+	if err != nil {
+		return releaseInputs{}, err
+	}
+	branch, commit, err := resolveReleaseGitState(projectRoot, resolveBranch, resolveCommit)
+	if err != nil {
+		return releaseInputs{}, err
+	}
+	baseVersion, _, versionFilePath, err := ResolveDockerBuildVersion(releaseRoot, releaseRoot)
+	if err != nil {
+		return releaseInputs{}, err
+	}
+	mode := classifyReleaseMode(branch, releaseConfig)
+	developBranchExists, err := branchExists(projectRoot, releaseConfig.DevelopBranch)
+	if err != nil {
+		return releaseInputs{}, err
+	}
+	return releaseInputs{
+		ProjectRoot:         projectRoot,
+		ReleaseRoot:         releaseRoot,
+		ReleaseConfig:       releaseConfig,
+		Branch:              branch,
+		Commit:              commit,
+		BaseVersion:         baseVersion,
+		Version:             resolveReleaseVersion(baseVersion, commit, mode),
+		VersionFilePath:     versionFilePath,
+		Mode:                mode,
+		DevelopBranchExists: developBranchExists,
+	}, nil
+}
+
+func loadReleaseConfig(projectRoot string, loadProjectConfig ProjectConfigLoaderFunc) (ReleaseConfig, error) {
+	projectConfig, _, err := loadProjectConfig(projectRoot)
+	if err != nil && !errors.Is(err, ErrNotInitialized) {
+		return ReleaseConfig{}, err
+	}
+	return projectConfig.NormalizedReleaseConfig(), nil
+}
+
+func resolveReleaseGitState(projectRoot string, resolveBranch, resolveCommit GitValueResolverFunc) (string, string, error) {
+	branch, err := resolveBranch(projectRoot)
+	if err != nil {
+		return "", "", err
+	}
+	commit, err := resolveCommit(projectRoot)
+	if err != nil {
+		return "", "", err
+	}
+	return branch, commit, nil
+}
+
+func discoverReleaseArtifacts(inputs releaseInputs) (releaseArtifacts, error) {
+	charts, fileUpdates, err := discoverReleaseCharts(inputs.ReleaseRoot, inputs.Version)
+	if err != nil {
+		return releaseArtifacts{}, err
+	}
+	artifacts := releaseArtifacts{Charts: charts, FileUpdates: fileUpdates}
+	if err := discoverStableReleaseArtifacts(inputs, &artifacts); err != nil {
+		return releaseArtifacts{}, err
+	}
+	images, err := discoverReleaseDockerImages(inputs.ProjectRoot, inputs.ReleaseRoot, inputs.VersionFilePath, inputs.Version)
+	if err != nil {
+		return releaseArtifacts{}, err
+	}
+	artifacts.Images = images
+	linuxReleases, skippedLinux, err := discoverSupportedReleaseLinuxScripts(inputs.ReleaseRoot, inputs.Version)
+	if err != nil {
+		return releaseArtifacts{}, err
+	}
+	artifacts.LinuxReleases = linuxReleases
+	artifacts.SkippedLinux = skippedLinux
+	return artifacts, nil
+}
+
+func discoverStableReleaseArtifacts(inputs releaseInputs, artifacts *releaseArtifacts) error {
+	if inputs.Mode != ReleaseModeStable {
+		return nil
+	}
+	packagingUpdates, syncSpec, err := discoverStableReleasePackaging(inputs.ProjectRoot, inputs.Version)
+	if err != nil {
+		return err
+	}
+	artifacts.FileUpdates = append(artifacts.FileUpdates, packagingUpdates...)
+	artifacts.PackagingSync = syncSpec
+	return nil
+}
+
+func discoverSupportedReleaseLinuxScripts(releaseRoot, version string) ([]scriptSpec, bool, error) {
+	linuxReleases, err := discoverReleaseLinuxScripts(releaseRoot, version)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(linuxReleases) > 0 && !LinuxPackageBuildsSupported() {
+		return nil, true, nil
+	}
+	return linuxReleases, false, nil
+}
+
+func resolveReleaseStages(inputs releaseInputs, releaseFileUpdates []ReleaseFileUpdate, packagingSync *ReleasePackagingSyncSpec) (string, []ReleaseStage, error) {
+	stages := baseReleaseStages(inputs, releaseFileUpdates)
+	stages = append(stages, stablePackagingStages(inputs, packagingSync)...)
+	nextVersion, stableStages, err := stablePostReleaseStages(inputs)
+	if err != nil {
+		return "", nil, err
+	}
+	stages = append(stages, stableStages...)
+	stages = append(stages, candidatePostReleaseStages(inputs)...)
+	return nextVersion, stages, nil
+}
+
+func baseReleaseStages(inputs releaseInputs, releaseFileUpdates []ReleaseFileUpdate) []ReleaseStage {
+	stages := make([]ReleaseStage, 0, 2)
+	stages = appendReleaseStageIfActive(stages, newSyncRemoteStage(inputs.ProjectRoot, inputs.Branch))
+	stages = appendReleaseStageIfActive(stages, newReleaseStage(inputs.ProjectRoot, releaseFileUpdates, inputs.Version, inputs.Mode))
+	return stages
+}
+
+func stablePackagingStages(inputs releaseInputs, packagingSync *ReleasePackagingSyncSpec) []ReleaseStage {
+	if inputs.Mode != ReleaseModeStable || packagingSync == nil {
+		return nil
+	}
+	stages := make([]ReleaseStage, 0, 2)
+	stages = appendReleaseStageIfActive(stages, newPushReleaseTagStage(inputs.ProjectRoot, inputs.Version))
+	stages = appendReleaseStageIfActive(stages, newSyncPackagingStage(inputs.ProjectRoot, *packagingSync))
+	return stages
+}
+
+func stablePostReleaseStages(inputs releaseInputs) (string, []ReleaseStage, error) {
+	if inputs.Mode != ReleaseModeStable {
+		return "", nil, nil
+	}
+	nextVersion, err := nextPatchVersion(inputs.BaseVersion)
+	if err != nil {
+		return "", nil, err
+	}
+	stages := make([]ReleaseStage, 0, 3)
+	stages = appendReleaseStageIfActive(stages, newStableBumpStage(inputs, nextVersion))
+	stages = appendReleaseStageIfActive(stages, newSyncDevelopStage(inputs.ProjectRoot, inputs.ReleaseConfig, inputs.DevelopBranchExists))
+	stages = appendReleaseStageIfActive(stages, newPushReleaseStage(inputs.ProjectRoot, inputs.ReleaseConfig, inputs.DevelopBranchExists))
+	return nextVersion, stages, nil
+}
+
+func newStableBumpStage(inputs releaseInputs, nextVersion string) ReleaseStage {
+	if strings.TrimSpace(inputs.VersionFilePath) == "" || nextVersion == inputs.BaseVersion {
+		return ReleaseStage{}
+	}
+	bumpUpdate := ReleaseFileUpdate{
+		Path:    inputs.VersionFilePath,
+		Content: nextVersion + "\n",
+	}
+	return newBumpStage(inputs.ProjectRoot, nextVersion, bumpUpdate)
+}
+
+func candidatePostReleaseStages(inputs releaseInputs) []ReleaseStage {
+	if inputs.Mode != ReleaseModeCandidate {
+		return nil
+	}
+	return appendReleaseStageIfActive(nil, newPushCandidateReleaseStage(inputs.ProjectRoot, inputs.ReleaseConfig))
+}
+
+func appendReleaseStageIfActive(stages []ReleaseStage, stage ReleaseStage) []ReleaseStage {
+	if len(stage.FileUpdates) == 0 && len(stage.GitCommands) == 0 && stage.PackagingSync == nil {
+		return stages
+	}
+	return append(stages, stage)
 }
 
 func resolveReleaseProjectRoot(findProjectRoot ProjectFinderFunc, params ReleaseParams) (string, error) {
@@ -927,46 +1057,63 @@ func syncReleasePackagingChecksums(ctx Context, spec ReleasePackagingSyncSpec) (
 	}
 
 	updates := make([]ReleaseFileUpdate, 0, 2)
-
-	if spec.FormulaPath != "" {
-		url := "https://github.com/sophium/erun/archive/refs/tags/v" + spec.Version + ".tar.gz"
-		ctx.TraceCommand("", "curl", "-fsSL", url)
-		ctx.TraceCommand("", "shasum", "-a", "256", "v"+spec.Version+".tar.gz")
-		if !ctx.DryRun {
-			checksum, err := releaseArchiveSHA256(url)
-			if err != nil {
-				return nil, err
-			}
-			content, changed, err := updateHomebrewFormulaReleaseChecksum(spec.FormulaPath, checksum)
-			if err != nil {
-				return nil, err
-			}
-			if changed {
-				updates = append(updates, ReleaseFileUpdate{Path: spec.FormulaPath, Content: content})
-			}
-		}
+	formulaUpdate, ok, err := syncHomebrewReleaseChecksum(ctx, spec)
+	if err != nil {
+		return nil, err
 	}
-
-	if spec.ScoopPath != "" {
-		url := "https://github.com/sophium/erun/archive/refs/tags/v" + spec.Version + ".zip"
-		ctx.TraceCommand("", "curl", "-fsSL", url)
-		ctx.TraceCommand("", "shasum", "-a", "256", "v"+spec.Version+".zip")
-		if !ctx.DryRun {
-			checksum, err := releaseArchiveSHA256(url)
-			if err != nil {
-				return nil, err
-			}
-			content, changed, err := updateScoopManifestReleaseChecksum(spec.ScoopPath, checksum)
-			if err != nil {
-				return nil, err
-			}
-			if changed {
-				updates = append(updates, ReleaseFileUpdate{Path: spec.ScoopPath, Content: content})
-			}
-		}
+	if ok {
+		updates = append(updates, formulaUpdate)
 	}
-
+	scoopUpdate, ok, err := syncScoopReleaseChecksum(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		updates = append(updates, scoopUpdate)
+	}
 	return updates, nil
+}
+
+func syncHomebrewReleaseChecksum(ctx Context, spec ReleasePackagingSyncSpec) (ReleaseFileUpdate, bool, error) {
+	if spec.FormulaPath == "" {
+		return ReleaseFileUpdate{}, false, nil
+	}
+	url := "https://github.com/sophium/erun/archive/refs/tags/v" + spec.Version + ".tar.gz"
+	ctx.TraceCommand("", "curl", "-fsSL", url)
+	ctx.TraceCommand("", "shasum", "-a", "256", "v"+spec.Version+".tar.gz")
+	if ctx.DryRun {
+		return ReleaseFileUpdate{}, false, nil
+	}
+	checksum, err := releaseArchiveSHA256(url)
+	if err != nil {
+		return ReleaseFileUpdate{}, false, err
+	}
+	content, changed, err := updateHomebrewFormulaReleaseChecksum(spec.FormulaPath, checksum)
+	if err != nil || !changed {
+		return ReleaseFileUpdate{}, false, err
+	}
+	return ReleaseFileUpdate{Path: spec.FormulaPath, Content: content}, true, nil
+}
+
+func syncScoopReleaseChecksum(ctx Context, spec ReleasePackagingSyncSpec) (ReleaseFileUpdate, bool, error) {
+	if spec.ScoopPath == "" {
+		return ReleaseFileUpdate{}, false, nil
+	}
+	url := "https://github.com/sophium/erun/archive/refs/tags/v" + spec.Version + ".zip"
+	ctx.TraceCommand("", "curl", "-fsSL", url)
+	ctx.TraceCommand("", "shasum", "-a", "256", "v"+spec.Version+".zip")
+	if ctx.DryRun {
+		return ReleaseFileUpdate{}, false, nil
+	}
+	checksum, err := releaseArchiveSHA256(url)
+	if err != nil {
+		return ReleaseFileUpdate{}, false, err
+	}
+	content, changed, err := updateScoopManifestReleaseChecksum(spec.ScoopPath, checksum)
+	if err != nil || !changed {
+		return ReleaseFileUpdate{}, false, err
+	}
+	return ReleaseFileUpdate{Path: spec.ScoopPath, Content: content}, true, nil
 }
 
 func releaseArchiveSHA256(url string) (string, error) {
@@ -994,7 +1141,9 @@ func fetchReleaseArchiveSHA256(client *http.Client, url string) (string, bool, e
 	if err != nil {
 		return "", true, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		retry := resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError
@@ -1242,42 +1391,56 @@ func resolveReleaseModuleRoot(projectRoot string) (string, error) {
 func findNestedReleaseRoots(projectRoot string) ([]string, error) {
 	matches := make([]string, 0, 2)
 	err := filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
+		dir, ok, walkErr := nestedReleaseRootCandidate(projectRoot, path, d, err)
+		if ok {
+			matches = append(matches, dir)
 		}
-		if d.IsDir() {
-			if d.Name() == ".git" {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if d.Name() != "VERSION" {
-			return nil
-		}
-
-		dir := filepath.Dir(path)
-		if dir == projectRoot {
-			return nil
-		}
-		relative, err := filepath.Rel(projectRoot, dir)
-		if err != nil {
-			return err
-		}
-		parts := strings.Split(filepath.ToSlash(relative), "/")
-		for _, part := range parts {
-			if part == "assets" {
-				return nil
-			}
-		}
-		if len(parts) >= 2 && parts[1] == "docker" {
-			return nil
-		}
-		matches = append(matches, dir)
-		return nil
+		return walkErr
 	})
 	if err != nil {
 		return nil, err
 	}
 	sort.Strings(matches)
 	return matches, nil
+}
+
+func nestedReleaseRootCandidate(projectRoot, path string, d os.DirEntry, err error) (string, bool, error) {
+	if err != nil {
+		return "", false, err
+	}
+	if d.IsDir() {
+		if d.Name() == ".git" {
+			return "", false, filepath.SkipDir
+		}
+		return "", false, nil
+	}
+	if d.Name() != "VERSION" {
+		return "", false, nil
+	}
+	dir := filepath.Dir(path)
+	if dir == projectRoot {
+		return "", false, nil
+	}
+	parts, err := releaseRootRelativeParts(projectRoot, dir)
+	if err != nil || ignoredNestedReleaseRoot(parts) {
+		return "", false, err
+	}
+	return dir, true, nil
+}
+
+func releaseRootRelativeParts(projectRoot, dir string) ([]string, error) {
+	relative, err := filepath.Rel(projectRoot, dir)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Split(filepath.ToSlash(relative), "/"), nil
+}
+
+func ignoredNestedReleaseRoot(parts []string) bool {
+	for _, part := range parts {
+		if part == "assets" {
+			return true
+		}
+	}
+	return len(parts) >= 2 && parts[1] == "docker"
 }

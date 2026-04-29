@@ -166,64 +166,124 @@ func InitCloudContext(ctx Context, store CloudContextStore, params InitCloudCont
 		return CloudContextStatus{}, fmt.Errorf("store is required")
 	}
 	deps = normalizeCloudContextDependencies(deps)
-	provider, err := ResolveCloudProvider(store, params.CloudProviderAlias)
+	provider, config, err := initCloudContextConfig(store, params, deps)
 	if err != nil {
 		return CloudContextStatus{}, err
 	}
+	if err := prepareInitCloudContextResources(ctx, deps, provider, params, &config); err != nil {
+		return CloudContextStatus{}, err
+	}
+
+	instanceID, err := runInitCloudContextInstance(ctx, deps, provider, params, &config)
+	if err != nil {
+		return CloudContextStatus{}, err
+	}
+	config.InstanceID = strings.TrimSpace(instanceID)
+	if config.InstanceID == "" {
+		config.InstanceID = "i-<new-instance>"
+	}
+	config.Status = CloudContextStatusPending
+
+	if err := finalizeInitCloudContext(ctx, deps, provider, &config); err != nil {
+		return CloudContextStatus{}, err
+	}
+	if ctx.DryRun {
+		return CloudContextStatus{CloudContextConfig: NormalizeCloudContextConfig(config)}, nil
+	}
+	if err := saveCloudContextConfig(store, config); err != nil {
+		return CloudContextStatus{}, err
+	}
+	return CloudContextStatus{CloudContextConfig: NormalizeCloudContextConfig(config)}, nil
+}
+
+func initCloudContextConfig(store CloudContextStore, params InitCloudContextParams, deps CloudContextDependencies) (CloudProviderConfig, CloudContextConfig, error) {
+	provider, err := ResolveCloudProvider(store, params.CloudProviderAlias)
+	if err != nil {
+		return CloudProviderConfig{}, CloudContextConfig{}, err
+	}
 	if provider.Provider != CloudProviderAWS {
-		return CloudContextStatus{}, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
+		return CloudProviderConfig{}, CloudContextConfig{}, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
 	}
 	existingContexts, err := ListCloudContexts(store)
 	if err != nil {
-		return CloudContextStatus{}, err
+		return CloudProviderConfig{}, CloudContextConfig{}, err
 	}
 	config, err := resolveInitCloudContextConfig(provider, params, deps.Now(), existingContexts)
 	if err != nil {
-		return CloudContextStatus{}, err
+		return CloudProviderConfig{}, CloudContextConfig{}, err
 	}
-	if existing, ok, err := findCloudContext(store, config.Name); err != nil {
-		return CloudContextStatus{}, err
-	} else if ok && existing.InstanceID != "" {
-		return CloudContextStatus{}, fmt.Errorf("cloud context %q already exists", config.Name)
+	if err := ensureInitCloudContextDoesNotExist(store, config.Name); err != nil {
+		return CloudProviderConfig{}, CloudContextConfig{}, err
 	}
+	return provider, config, nil
+}
 
-	ami, err := deps.RunAWS(ctx, provider, config.Region, []string{
+func ensureInitCloudContextDoesNotExist(store CloudContextStore, name string) error {
+	existing, ok, err := findCloudContext(store, name)
+	if err != nil {
+		return err
+	}
+	if ok && existing.InstanceID != "" {
+		return fmt.Errorf("cloud context %q already exists", name)
+	}
+	return nil
+}
+
+func prepareInitCloudContextResources(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, params InitCloudContextParams, config *CloudContextConfig) error {
+	securityGroupID, err := initCloudContextSecurityGroup(ctx, deps, provider, params, *config)
+	if err != nil {
+		return err
+	}
+	config.SecurityGroupID = securityGroupID
+	instanceProfile, err := ensureCloudContextInstanceProfile(ctx, deps, provider, config.Region, config.Name)
+	if err != nil {
+		return err
+	}
+	config.InstanceProfileName = instanceProfile.Name
+	config.InstanceProfileARN = instanceProfile.ARN
+	config.InstanceRoleName = instanceProfile.RoleName
+	return nil
+}
+
+func initCloudContextSecurityGroup(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, params InitCloudContextParams, config CloudContextConfig) (string, error) {
+	securityGroupID := strings.TrimSpace(params.SecurityGroupID)
+	if securityGroupID != "" {
+		return securityGroupID, nil
+	}
+	return createCloudContextSecurityGroup(ctx, deps, provider, config.Region, config.Name)
+}
+
+func runInitCloudContextInstance(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, params InitCloudContextParams, config *CloudContextConfig) (string, error) {
+	ami, err := initCloudContextAMI(ctx, deps, provider, config.Region)
+	if err != nil {
+		return "", err
+	}
+	config.AdminToken = deps.NewToken()
+	userDataPath, cleanup, err := cloudContextUserDataFile(ctx, config.AdminToken)
+	if err != nil {
+		return "", err
+	}
+	defer cleanup()
+	return deps.RunAWS(ctx, provider, config.Region, initCloudContextRunArgs(ami, userDataPath, params, *config))
+}
+
+func initCloudContextAMI(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region string) (string, error) {
+	ami, err := deps.RunAWS(ctx, provider, region, []string{
 		"ssm", "get-parameter",
 		"--name", "/aws/service/canonical/ubuntu/server/24.04/stable/current/arm64/hvm/ebs-gp3/ami-id",
 		"--query", "Parameter.Value",
 		"--output", "text",
 	})
 	if err != nil {
-		return CloudContextStatus{}, err
+		return "", err
 	}
-	ami = strings.TrimSpace(ami)
-	if ami == "" {
-		ami = "ami-<latest-ubuntu-arm64>"
+	if ami = strings.TrimSpace(ami); ami != "" {
+		return ami, nil
 	}
+	return "ami-<latest-ubuntu-arm64>", nil
+}
 
-	securityGroupID := strings.TrimSpace(params.SecurityGroupID)
-	if securityGroupID == "" {
-		securityGroupID, err = createCloudContextSecurityGroup(ctx, deps, provider, config.Region, config.Name)
-		if err != nil {
-			return CloudContextStatus{}, err
-		}
-	}
-	config.SecurityGroupID = securityGroupID
-	instanceProfile, err := ensureCloudContextInstanceProfile(ctx, deps, provider, config.Region, config.Name)
-	if err != nil {
-		return CloudContextStatus{}, err
-	}
-	config.InstanceProfileName = instanceProfile.Name
-	config.InstanceProfileARN = instanceProfile.ARN
-	config.InstanceRoleName = instanceProfile.RoleName
-
-	config.AdminToken = deps.NewToken()
-	userDataPath, cleanup, err := cloudContextUserDataFile(ctx, config.AdminToken)
-	if err != nil {
-		return CloudContextStatus{}, err
-	}
-	defer cleanup()
-
+func initCloudContextRunArgs(ami, userDataPath string, params InitCloudContextParams, config CloudContextConfig) []string {
 	runArgs := []string{
 		"ec2", "run-instances",
 		"--image-id", ami,
@@ -236,50 +296,44 @@ func InitCloudContext(ctx Context, store CloudContextStore, params InitCloudCont
 		"--query", "Instances[0].InstanceId",
 		"--output", "text",
 	}
-	if config.SecurityGroupID != "" {
-		runArgs = append(runArgs, "--security-group-ids", config.SecurityGroupID)
-	}
-	if config.InstanceProfileARN != "" {
-		runArgs = append(runArgs, "--iam-instance-profile", "Arn="+config.InstanceProfileARN)
-	} else if config.InstanceProfileName != "" {
-		runArgs = append(runArgs, "--iam-instance-profile", "Name="+config.InstanceProfileName)
-	}
-	if subnetID := strings.TrimSpace(params.SubnetID); subnetID != "" {
-		runArgs = append(runArgs, "--subnet-id", subnetID)
-	}
-	if keyName := strings.TrimSpace(params.KeyName); keyName != "" {
-		runArgs = append(runArgs, "--key-name", keyName)
-	}
-	instanceID, err := deps.RunAWS(ctx, provider, config.Region, runArgs)
-	if err != nil {
-		return CloudContextStatus{}, err
-	}
-	config.InstanceID = strings.TrimSpace(instanceID)
-	if config.InstanceID == "" {
-		config.InstanceID = "i-<new-instance>"
-	}
-	config.Status = CloudContextStatusPending
+	runArgs = appendOptionalCloudContextRunArg(runArgs, "--security-group-ids", config.SecurityGroupID)
+	runArgs = appendCloudContextProfileRunArg(runArgs, config)
+	runArgs = appendOptionalCloudContextRunArg(runArgs, "--subnet-id", params.SubnetID)
+	return appendOptionalCloudContextRunArg(runArgs, "--key-name", params.KeyName)
+}
 
+func appendOptionalCloudContextRunArg(args []string, name, value string) []string {
+	if value = strings.TrimSpace(value); value != "" {
+		return append(args, name, value)
+	}
+	return args
+}
+
+func appendCloudContextProfileRunArg(args []string, config CloudContextConfig) []string {
+	if config.InstanceProfileARN != "" {
+		return append(args, "--iam-instance-profile", "Arn="+config.InstanceProfileARN)
+	}
+	if config.InstanceProfileName != "" {
+		return append(args, "--iam-instance-profile", "Name="+config.InstanceProfileName)
+	}
+	return args
+}
+
+func finalizeInitCloudContext(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, config *CloudContextConfig) error {
 	if _, err := deps.RunAWS(ctx, provider, config.Region, []string{"ec2", "wait", "instance-running", "--instance-ids", config.InstanceID}); err != nil {
-		return CloudContextStatus{}, err
+		return err
 	}
 	publicIP, err := describeCloudContextPublicIP(ctx, deps, provider, config.Region, config.InstanceID)
 	if err != nil {
-		return CloudContextStatus{}, err
+		return err
 	}
 	config.PublicIP = publicIP
-	if err := configureCloudKubeContext(ctx, deps, config); err != nil {
-		return CloudContextStatus{}, err
+	if err := configureCloudKubeContext(ctx, deps, *config); err != nil {
+		return err
 	}
 	config.Status = CloudContextStatusRunning
 	config.UpdatedAt = deps.Now().UTC().Format(time.RFC3339)
-	if ctx.DryRun {
-		return CloudContextStatus{CloudContextConfig: NormalizeCloudContextConfig(config)}, nil
-	}
-	if err := saveCloudContextConfig(store, config); err != nil {
-		return CloudContextStatus{}, err
-	}
-	return CloudContextStatus{CloudContextConfig: NormalizeCloudContextConfig(config)}, nil
+	return nil
 }
 
 func StopCloudContext(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies) (CloudContextStatus, error) {
@@ -415,12 +469,6 @@ func pendingCloudContextInstanceProfileAssociationID(ctx Context, deps CloudCont
 	return describeCloudContextInstanceProfileAssociationID(ctx, deps, provider, region, []string{
 		"Name=instance-id,Values=" + instanceID,
 		"Name=state,Values=associating,disassociating",
-	})
-}
-
-func anyCloudContextInstanceProfileAssociationID(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, instanceID string) (string, error) {
-	return describeCloudContextInstanceProfileAssociationID(ctx, deps, provider, region, []string{
-		"Name=instance-id,Values=" + instanceID,
 	})
 }
 
@@ -647,6 +695,11 @@ type cloudContextInstanceProfile struct {
 	RoleName string
 }
 
+type cloudContextPolicyPaths struct {
+	Trust  string
+	Policy string
+}
+
 func ensureCloudContextInstanceProfile(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, name string) (cloudContextInstanceProfile, error) {
 	roleName := cloudContextInstanceRoleName(name)
 	profileName := cloudContextInstanceProfileName(name)
@@ -654,53 +707,60 @@ func ensureCloudContextInstanceProfile(ctx Context, deps CloudContextDependencie
 		return cloudContextInstanceProfile{}, fmt.Errorf("cloud context name is required")
 	}
 
-	trustPath, cleanupTrust, err := cloudContextPolicyFile(ctx, ec2AssumeRolePolicy())
+	policies, cleanup, err := cloudContextInstanceProfilePolicyPaths(ctx, provider, region, name)
 	if err != nil {
 		return cloudContextInstanceProfile{}, err
 	}
-	defer cleanupTrust()
-	policyPath, cleanupPolicy, err := cloudContextPolicyFile(ctx, cloudContextSelfStopPolicy(provider, region, name))
-	if err != nil {
-		return cloudContextInstanceProfile{}, err
-	}
-	defer cleanupPolicy()
+	defer cleanup()
 
 	if ctx.DryRun {
-		if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "create-role", "--role-name", roleName, "--assume-role-policy-document", "file://" + trustPath, "--query", "Role.RoleName", "--output", "text"}); err != nil {
-			return cloudContextInstanceProfile{}, err
-		}
-		if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "put-role-policy", "--role-name", roleName, "--policy-name", "erun-self-stop", "--policy-document", "file://" + policyPath}); err != nil {
-			return cloudContextInstanceProfile{}, err
-		}
-		if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "create-instance-profile", "--instance-profile-name", profileName, "--query", "InstanceProfile.Arn", "--output", "text"}); err != nil {
-			return cloudContextInstanceProfile{}, err
-		}
-		if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "add-role-to-instance-profile", "--instance-profile-name", profileName, "--role-name", roleName}); err != nil {
-			return cloudContextInstanceProfile{}, err
-		}
-		return cloudContextInstanceProfile{
-			Name:     profileName,
-			ARN:      cloudContextInstanceProfileARN(provider, profileName),
-			RoleName: roleName,
-		}, nil
+		return dryRunCloudContextInstanceProfile(ctx, deps, provider, region, profileName, roleName, policies)
 	}
+	return realCloudContextInstanceProfile(ctx, deps, provider, region, profileName, roleName, policies)
+}
 
-	if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "get-role", "--role-name", roleName, "--query", "Role.RoleName", "--output", "text"}); err != nil {
-		if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "create-role", "--role-name", roleName, "--assume-role-policy-document", "file://" + trustPath, "--query", "Role.RoleName", "--output", "text"}); err != nil {
+func cloudContextInstanceProfilePolicyPaths(ctx Context, provider CloudProviderConfig, region, name string) (cloudContextPolicyPaths, func(), error) {
+	trustPath, cleanupTrust, err := cloudContextPolicyFile(ctx, ec2AssumeRolePolicy())
+	if err != nil {
+		return cloudContextPolicyPaths{}, func() {}, err
+	}
+	policyPath, cleanupPolicy, err := cloudContextPolicyFile(ctx, cloudContextSelfStopPolicy(provider, region, name))
+	if err != nil {
+		cleanupTrust()
+		return cloudContextPolicyPaths{}, func() {}, err
+	}
+	cleanup := func() {
+		cleanupPolicy()
+		cleanupTrust()
+	}
+	return cloudContextPolicyPaths{Trust: trustPath, Policy: policyPath}, cleanup, nil
+}
+
+func dryRunCloudContextInstanceProfile(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, profileName, roleName string, policies cloudContextPolicyPaths) (cloudContextInstanceProfile, error) {
+	commands := [][]string{
+		{"iam", "create-role", "--role-name", roleName, "--assume-role-policy-document", "file://" + policies.Trust, "--query", "Role.RoleName", "--output", "text"},
+		{"iam", "put-role-policy", "--role-name", roleName, "--policy-name", "erun-self-stop", "--policy-document", "file://" + policies.Policy},
+		{"iam", "create-instance-profile", "--instance-profile-name", profileName, "--query", "InstanceProfile.Arn", "--output", "text"},
+		{"iam", "add-role-to-instance-profile", "--instance-profile-name", profileName, "--role-name", roleName},
+	}
+	for _, command := range commands {
+		if _, err := deps.RunAWS(ctx, provider, region, command); err != nil {
 			return cloudContextInstanceProfile{}, err
 		}
 	}
-	if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "put-role-policy", "--role-name", roleName, "--policy-name", "erun-self-stop", "--policy-document", "file://" + policyPath}); err != nil {
+	return cloudContextInstanceProfile{Name: profileName, ARN: cloudContextInstanceProfileARN(provider, profileName), RoleName: roleName}, nil
+}
+
+func realCloudContextInstanceProfile(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, profileName, roleName string, policies cloudContextPolicyPaths) (cloudContextInstanceProfile, error) {
+	if err := ensureCloudContextInstanceRole(ctx, deps, provider, region, roleName, policies.Trust); err != nil {
 		return cloudContextInstanceProfile{}, err
 	}
-	profileARN, err := deps.RunAWS(ctx, provider, region, []string{"iam", "get-instance-profile", "--instance-profile-name", profileName, "--query", "InstanceProfile.Arn", "--output", "text"})
-	createdProfile := false
+	if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "put-role-policy", "--role-name", roleName, "--policy-name", "erun-self-stop", "--policy-document", "file://" + policies.Policy}); err != nil {
+		return cloudContextInstanceProfile{}, err
+	}
+	profileARN, createdProfile, err := ensureCloudContextInstanceProfileExists(ctx, deps, provider, region, profileName)
 	if err != nil {
-		profileARN, err = deps.RunAWS(ctx, provider, region, []string{"iam", "create-instance-profile", "--instance-profile-name", profileName, "--query", "InstanceProfile.Arn", "--output", "text"})
-		if err != nil {
-			return cloudContextInstanceProfile{}, err
-		}
-		createdProfile = true
+		return cloudContextInstanceProfile{}, err
 	}
 	if err := ensureCloudContextInstanceProfileRole(ctx, deps, provider, region, profileName, roleName, createdProfile); err != nil {
 		return cloudContextInstanceProfile{}, err
@@ -717,18 +777,30 @@ func ensureCloudContextInstanceProfile(ctx Context, deps CloudContextDependencie
 	}, nil
 }
 
+func ensureCloudContextInstanceRole(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, roleName, trustPath string) error {
+	if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "get-role", "--role-name", roleName, "--query", "Role.RoleName", "--output", "text"}); err == nil {
+		return nil
+	}
+	_, err := deps.RunAWS(ctx, provider, region, []string{"iam", "create-role", "--role-name", roleName, "--assume-role-policy-document", "file://" + trustPath, "--query", "Role.RoleName", "--output", "text"})
+	return err
+}
+
+func ensureCloudContextInstanceProfileExists(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, profileName string) (string, bool, error) {
+	profileARN, err := deps.RunAWS(ctx, provider, region, []string{"iam", "get-instance-profile", "--instance-profile-name", profileName, "--query", "InstanceProfile.Arn", "--output", "text"})
+	if err == nil {
+		return profileARN, false, nil
+	}
+	profileARN, err = deps.RunAWS(ctx, provider, region, []string{"iam", "create-instance-profile", "--instance-profile-name", profileName, "--query", "InstanceProfile.Arn", "--output", "text"})
+	return profileARN, true, err
+}
+
 func ensureCloudContextInstanceProfileRole(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, profileName, roleName string, createdProfile bool) error {
-	if !createdProfile {
-		existingRole, err := cloudContextInstanceProfileRoleName(ctx, deps, provider, region, profileName)
-		if err != nil {
-			return err
-		}
-		if existingRole == roleName {
-			return nil
-		}
-		if existingRole != "" {
-			return fmt.Errorf("instance profile %q already contains role %q; expected %q", profileName, existingRole, roleName)
-		}
+	addRole, err := shouldAddCloudContextProfileRole(ctx, deps, provider, region, profileName, roleName, createdProfile)
+	if err != nil {
+		return err
+	}
+	if !addRole {
+		return nil
 	}
 
 	if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "add-role-to-instance-profile", "--instance-profile-name", profileName, "--role-name", roleName}); err != nil {
@@ -748,6 +820,23 @@ func ensureCloudContextInstanceProfileRole(ctx Context, deps CloudContextDepende
 		return err
 	}
 	return nil
+}
+
+func shouldAddCloudContextProfileRole(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, profileName, roleName string, createdProfile bool) (bool, error) {
+	if createdProfile {
+		return true, nil
+	}
+	existingRole, err := cloudContextInstanceProfileRoleName(ctx, deps, provider, region, profileName)
+	if err != nil {
+		return false, err
+	}
+	if existingRole == roleName {
+		return false, nil
+	}
+	if existingRole != "" {
+		return false, fmt.Errorf("instance profile %q already contains role %q; expected %q", profileName, existingRole, roleName)
+	}
+	return true, nil
 }
 
 func cloudContextInstanceProfileRoleName(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, profileName string) (string, error) {
@@ -855,11 +944,7 @@ func sanitizeIAMName(value string) string {
 	var b strings.Builder
 	lastDash := false
 	for _, r := range value {
-		valid := r >= 'a' && r <= 'z' ||
-			r >= 'A' && r <= 'Z' ||
-			r >= '0' && r <= '9' ||
-			r == '+' || r == '=' || r == ',' || r == '.' || r == '@' || r == '_' || r == '-'
-		if valid {
+		if isValidIAMNameRune(r) {
 			b.WriteRune(r)
 			lastDash = r == '-'
 			continue
@@ -870,6 +955,13 @@ func sanitizeIAMName(value string) string {
 		}
 	}
 	return strings.Trim(b.String(), "-")
+}
+
+func isValidIAMNameRune(r rune) bool {
+	return r >= 'a' && r <= 'z' ||
+		r >= 'A' && r <= 'Z' ||
+		r >= '0' && r <= '9' ||
+		strings.ContainsRune("+=,.@_-", r)
 }
 
 func truncateIAMName(value string) string {
@@ -902,14 +994,6 @@ func isExistingInstanceProfileAssociationError(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "incorrectstate") && strings.Contains(message, "existing association")
-}
-
-func isInactiveInstanceProfileAssociationError(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "incorrectstate") && strings.Contains(message, "not the active association")
 }
 
 func describeCloudContextPublicIP(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, instanceID string) (string, error) {

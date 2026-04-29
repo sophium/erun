@@ -127,31 +127,8 @@ func TestLoadStateUsesTenantSpecificDeployableVersionSuggestions(t *testing.T) {
 
 func TestLoadVersionSuggestionsFiltersOutMissingTenantImageTags(t *testing.T) {
 	app := NewApp(erunUIDeps{
-		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
-		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
-			if namespace != eruncommon.DefaultContainerRegistry {
-				t.Fatalf("unexpected registry namespace: %s", namespace)
-			}
-			switch repository {
-			case "frs-devops":
-				return eruncommon.RuntimeRegistryVersions{
-					Image:          namespace + "/" + repository,
-					Tags:           []string{"1.0.11", "1.0.10", "1.0.12-snapshot-20260414165809"},
-					LatestStable:   "1.0.11",
-					LatestSnapshot: "1.0.12-snapshot-20260414165809",
-				}, nil
-			case eruncommon.DefaultRuntimeImageName:
-				return eruncommon.RuntimeRegistryVersions{
-					Image:          namespace + "/" + repository,
-					Tags:           []string{"1.0.50", "1.0.49"},
-					LatestStable:   "1.0.50",
-					LatestSnapshot: "",
-				}, nil
-			default:
-				t.Fatalf("unexpected registry repository: %s", repository)
-			}
-			return eruncommon.RuntimeRegistryVersions{}, nil
-		},
+		resolveBuildInfo:     func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveImageRegistry: missingTenantImageRegistry(t),
 	})
 
 	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " frs "})
@@ -165,6 +142,33 @@ func TestLoadVersionSuggestionsFiltersOutMissingTenantImageTags(t *testing.T) {
 	}
 	if suggestions[0].Label != "frs latest stable" || suggestions[0].Image != "frs-devops" || suggestions[3].Label != "ERun current" || suggestions[3].Image != eruncommon.DefaultRuntimeImageName {
 		t.Fatalf("unexpected suggestion metadata: %+v", suggestions)
+	}
+}
+
+func missingTenantImageRegistry(t *testing.T) func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error) {
+	t.Helper()
+
+	return func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+		if namespace != eruncommon.DefaultContainerRegistry {
+			t.Fatalf("unexpected registry namespace: %s", namespace)
+		}
+		if repository == "frs-devops" {
+			return eruncommon.RuntimeRegistryVersions{
+				Image:          namespace + "/" + repository,
+				Tags:           []string{"1.0.11", "1.0.10", "1.0.12-snapshot-20260414165809"},
+				LatestStable:   "1.0.11",
+				LatestSnapshot: "1.0.12-snapshot-20260414165809",
+			}, nil
+		}
+		if repository == eruncommon.DefaultRuntimeImageName {
+			return eruncommon.RuntimeRegistryVersions{
+				Image:        namespace + "/" + repository,
+				Tags:         []string{"1.0.50", "1.0.49"},
+				LatestStable: "1.0.50",
+			}, nil
+		}
+		t.Fatalf("unexpected registry repository: %s", repository)
+		return eruncommon.RuntimeRegistryVersions{}, nil
 	}
 }
 
@@ -1097,6 +1101,12 @@ func TestDeleteEnvironmentRequiresExactConfirmationAndDeletesConfig(t *testing.T
 	if err != nil {
 		t.Fatalf("DeleteEnvironment failed: %v", err)
 	}
+	assertDeletedEnvironment(t, store, result, deletedContext, deletedNamespace)
+}
+
+func assertDeletedEnvironment(t *testing.T, store stubUIStore, result deleteEnvironmentResult, deletedContext, deletedNamespace string) {
+	t.Helper()
+
 	if deletedContext != "cluster-prod" || deletedNamespace != "frs-prod" {
 		t.Fatalf("unexpected namespace deletion: context=%q namespace=%q", deletedContext, deletedNamespace)
 	}
@@ -1227,15 +1237,7 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEnvironmentConfig failed: %v", err)
 	}
-	if loaded.Name != "prod" || loaded.RepoPath != projectRoot || loaded.KubernetesContext != "cluster-old" {
-		t.Fatalf("unexpected loaded config: %+v", loaded)
-	}
-	if loaded.CloudContext == nil || loaded.CloudContext.Name != "team-context" || loaded.CloudContext.Status != eruncommon.CloudContextStatusStopped {
-		t.Fatalf("expected linked cloud context, got %+v", loaded.CloudContext)
-	}
-	if loaded.LocalPorts.RangeStart != 17000 || loaded.LocalPorts.RangeEnd != 17099 || loaded.LocalPorts.MCP != 17000 || loaded.LocalPorts.SSH != 60022 {
-		t.Fatalf("unexpected loaded local ports: %+v", loaded.LocalPorts)
-	}
+	assertLoadedEnvironmentConfig(t, loaded, projectRoot)
 
 	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "prod"}, uiEnvironmentConfig{
 		Name:               "prod",
@@ -1255,13 +1257,43 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
 	}
+	assertSavedEnvironmentConfig(t, saved, projectRoot)
+	stored := store.envs["frs/prod"]
+	assertStoredEnvironmentConfig(t, stored, projectRoot)
+}
+
+func assertLoadedEnvironmentConfig(t *testing.T, loaded uiEnvironmentConfig, projectRoot string) {
+	t.Helper()
+
+	if loaded.Name != "prod" || loaded.RepoPath != projectRoot || loaded.KubernetesContext != "cluster-old" {
+		t.Fatalf("unexpected loaded config: %+v", loaded)
+	}
+	if loaded.CloudContext == nil || loaded.CloudContext.Name != "team-context" || loaded.CloudContext.Status != eruncommon.CloudContextStatusStopped {
+		t.Fatalf("expected linked cloud context, got %+v", loaded.CloudContext)
+	}
+	assertLocalPorts(t, loaded.LocalPorts)
+}
+
+func assertSavedEnvironmentConfig(t *testing.T, saved uiEnvironmentConfig, projectRoot string) {
+	t.Helper()
+
 	if saved.RepoPath != projectRoot || saved.KubernetesContext != "cluster-old" || saved.ContainerRegistry != "registry.example/old" || saved.RuntimeVersion != "1.0.0" || saved.CloudProviderAlias != "other-cloud" {
 		t.Fatalf("unexpected saved config: %+v", saved)
 	}
-	if saved.LocalPorts.RangeStart != 17000 || saved.LocalPorts.RangeEnd != 17099 || saved.LocalPorts.MCP != 17000 || saved.LocalPorts.SSH != 60022 {
-		t.Fatalf("unexpected saved local ports: %+v", saved.LocalPorts)
+	assertLocalPorts(t, saved.LocalPorts)
+}
+
+func assertLocalPorts(t *testing.T, ports uiEnvironmentLocalPorts) {
+	t.Helper()
+
+	if ports.RangeStart != 17000 || ports.RangeEnd != 17099 || ports.MCP != 17000 || ports.SSH != 60022 {
+		t.Fatalf("unexpected local ports: %+v", ports)
 	}
-	stored := store.envs["frs/prod"]
+}
+
+func assertStoredEnvironmentConfig(t *testing.T, stored eruncommon.EnvConfig, projectRoot string) {
+	t.Helper()
+
 	if stored.RepoPath != projectRoot || stored.Remote || stored.RuntimeVersion != "1.0.0" || stored.CloudProviderAlias != "other-cloud" || stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" || stored.Snapshot == nil || *stored.Snapshot {
 		t.Fatalf("unexpected stored config: %+v", stored)
 	}
@@ -1818,6 +1850,12 @@ func TestIdleStatusToUIIncludesBlockerDetails(t *testing.T) {
 		},
 	})
 
+	assertIdleStatusBlockers(t, status)
+}
+
+func assertIdleStatusBlockers(t *testing.T, status uiIdleStatus) {
+	t.Helper()
+
 	if status.TimeoutSeconds != 300 || status.SecondsUntilStop != 42 || !status.ManagedCloud || status.StopEligible {
 		t.Fatalf("unexpected idle status: %+v", status)
 	}
@@ -1827,8 +1865,14 @@ func TestIdleStatusToUIIncludesBlockerDetails(t *testing.T) {
 	if status.StopError != "failed to stop instance: access denied" {
 		t.Fatalf("unexpected stop error: %q", status.StopError)
 	}
-	if len(status.Markers) != 2 || status.Markers[0].Name != eruncommon.ActivityKindSSH || status.Markers[0].Reason != "recent activity" || status.Markers[0].SecondsRemaining != 42 {
-		t.Fatalf("unexpected markers: %+v", status.Markers)
+	assertIdleStatusMarkers(t, status.Markers)
+}
+
+func assertIdleStatusMarkers(t *testing.T, markers []uiIdleMarker) {
+	t.Helper()
+
+	if len(markers) != 2 || markers[0].Name != eruncommon.ActivityKindSSH || markers[0].Reason != "recent activity" || markers[0].SecondsRemaining != 42 {
+		t.Fatalf("unexpected markers: %+v", markers)
 	}
 }
 

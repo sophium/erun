@@ -112,37 +112,6 @@ func buildOpenNoShellArgs(tenant, environment string) []string {
 	return []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment), "--no-shell", "--no-alias-prompt"}
 }
 
-func buildIDEShellLaunch(cliPath string, selection uiSelection, ide string) (string, []string, error) {
-	switch runtime.GOOS {
-	case "windows":
-		initCommand := buildPowerShellCommandInvocation(cliPath, buildSSHDInitArgs(selection))
-		openCommand := buildPowerShellCommandInvocation(cliPath, buildOpenIDEArgs(selection, ide))
-		return "powershell.exe", []string{"-NoLogo", "-NoProfile", "-Command", initCommand + "; if ($LASTEXITCODE -eq 0) { " + openCommand + " } else { exit $LASTEXITCODE }"}, nil
-	default:
-		initCommand := buildShellCommandInvocation(cliPath, buildSSHDInitArgs(selection))
-		openCommand := buildShellCommandInvocation(cliPath, buildOpenIDEArgs(selection, ide))
-		return "/bin/sh", []string{"-lc", initCommand + " && " + openCommand}, nil
-	}
-}
-
-func buildShellCommandInvocation(command string, args []string) string {
-	quoted := make([]string, 0, len(args)+1)
-	quoted = append(quoted, shellQuote(command))
-	for _, arg := range args {
-		quoted = append(quoted, shellQuote(arg))
-	}
-	return strings.Join(quoted, " ")
-}
-
-func buildPowerShellCommandInvocation(command string, args []string) string {
-	quoted := make([]string, 0, len(args)+1)
-	quoted = append(quoted, "& "+powerShellQuote(command))
-	for _, arg := range args {
-		quoted = append(quoted, powerShellQuote(arg))
-	}
-	return strings.Join(quoted, " ")
-}
-
 func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncommon.OpenResult) error {
 	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
 	cmd := exec.CommandContext(ctx, cliPath, args...)

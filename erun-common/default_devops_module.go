@@ -81,22 +81,8 @@ func defaultDevopsBaseTag(runtimeVersion string) string {
 }
 
 func ensureDefaultDevopsFile(ctx Context, path string, mode os.FileMode, content []byte) error {
-	info, err := os.Stat(path)
-	switch {
-	case err == nil && info.IsDir():
-		return fmt.Errorf("%q is a directory", path)
-	case err == nil:
-		existing, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if bytes.Equal(existing, content) {
-			return nil
-		}
-		if !shouldReplaceDefaultDevopsFile(path, existing, content) {
-			return nil
-		}
-	case !os.IsNotExist(err):
+	replace, err := shouldWriteDefaultDevopsFile(path, content)
+	if err != nil || !replace {
 		return err
 	}
 
@@ -113,6 +99,31 @@ func ensureDefaultDevopsFile(ctx Context, path string, mode os.FileMode, content
 		return err
 	}
 	return os.Chmod(path, mode)
+}
+
+func shouldWriteDefaultDevopsFile(path string, content []byte) (bool, error) {
+	info, err := os.Stat(path)
+	switch {
+	case err == nil && info.IsDir():
+		return false, fmt.Errorf("%q is a directory", path)
+	case err == nil:
+		return shouldWriteExistingDefaultDevopsFile(path, content)
+	case os.IsNotExist(err):
+		return true, nil
+	default:
+		return false, err
+	}
+}
+
+func shouldWriteExistingDefaultDevopsFile(path string, content []byte) (bool, error) {
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	if bytes.Equal(existing, content) {
+		return false, nil
+	}
+	return shouldReplaceDefaultDevopsFile(path, existing, content), nil
 }
 
 func shouldReplaceDefaultDevopsFile(path string, existing, content []byte) bool {

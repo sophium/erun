@@ -26,49 +26,54 @@ func TestInitCloudContextUsesDefaultsAndStoresKubeContext(t *testing.T) {
 		NewToken: func() string { return "test-token" },
 		RunAWS: func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) {
 			awsCommands = append(awsCommands, strings.Join(args, " "))
-			joined := strings.Join(args, " ")
-			switch {
-			case strings.Contains(joined, "ssm get-parameter"):
-				return "ami-test\n", nil
-			case strings.Contains(joined, "create-security-group"):
-				return "sg-test\n", nil
-			case strings.Contains(joined, "run-instances"):
-				return "i-test\n", nil
-			case strings.Contains(joined, "describe-instances"):
-				return "198.51.100.10\n", nil
-			default:
-				return "", nil
-			}
+			return cloudContextAWSOutput(args), nil
 		},
 		RunKubectl: func(_ Context, args []string) error {
 			kubectlCommands = append(kubectlCommands, strings.Join(args, " "))
 			return nil
 		},
 	})
-	if err != nil {
-		t.Fatalf("InitCloudContext failed: %v", err)
+	requireNoError(t, err, "InitCloudContext failed")
+	requireDefaultCloudContextStatus(t, status)
+	requireStoredCloudContext(t, store.config.CloudContexts)
+	requireCloudContextCommands(t, awsCommands, kubectlCommands)
+}
+
+func cloudContextAWSOutput(args []string) string {
+	joined := strings.Join(args, " ")
+	switch {
+	case strings.Contains(joined, "ssm get-parameter"):
+		return "ami-test\n"
+	case strings.Contains(joined, "create-security-group"):
+		return "sg-test\n"
+	case strings.Contains(joined, "run-instances"):
+		return "i-test\n"
+	case strings.Contains(joined, "describe-instances"):
+		return "198.51.100.10\n"
+	default:
+		return ""
 	}
-	if status.InstanceType != DefaultCloudContextInstanceType || status.DiskSizeGB != AlternateCloudContextDiskSizeGB || status.DiskType != DefaultCloudContextDiskType {
-		t.Fatalf("unexpected defaults/options: %+v", status)
-	}
-	if status.Region != DefaultCloudContextRegion || status.Status != CloudContextStatusRunning || status.KubernetesContext == "" {
-		t.Fatalf("unexpected stored context: %+v", status)
-	}
-	if status.Name != "erun-001-123456789012-eu-west-2" {
-		t.Fatalf("unexpected generated context name: %+v", status)
-	}
-	if status.InstanceProfileName != "erun-001-123456789012-eu-west-2-host-stop" || status.InstanceRoleName != "erun-001-123456789012-eu-west-2-host-stop" {
-		t.Fatalf("expected managed instance profile and role, got %+v", status)
-	}
-	if status.InstanceProfileARN != "arn:aws:iam::123456789012:instance-profile/erun-001-123456789012-eu-west-2-host-stop" {
-		t.Fatalf("expected managed instance profile ARN, got %+v", status)
-	}
-	if len(store.config.CloudContexts) != 1 || store.config.CloudContexts[0].InstanceID != "i-test" || store.config.CloudContexts[0].AdminToken != "test-token" || store.config.CloudContexts[0].InstanceProfileName == "" || store.config.CloudContexts[0].InstanceProfileARN == "" || store.config.CloudContexts[0].InstanceRoleName == "" {
-		t.Fatalf("expected context to be saved with instance/token metadata, got %+v", store.config.CloudContexts)
-	}
-	if len(awsCommands) == 0 || len(kubectlCommands) != 3 {
-		t.Fatalf("expected AWS and kubeconfig commands, got aws=%+v kubectl=%+v", awsCommands, kubectlCommands)
-	}
+}
+
+func requireDefaultCloudContextStatus(t *testing.T, status CloudContextStatus) {
+	t.Helper()
+	requireCondition(t, status.InstanceType == DefaultCloudContextInstanceType && status.DiskSizeGB == AlternateCloudContextDiskSizeGB && status.DiskType == DefaultCloudContextDiskType, "unexpected defaults/options: %+v", status)
+	requireCondition(t, status.Region == DefaultCloudContextRegion && status.Status == CloudContextStatusRunning && status.KubernetesContext != "", "unexpected stored context: %+v", status)
+	requireEqual(t, status.Name, "erun-001-123456789012-eu-west-2", "generated context name")
+	requireCondition(t, status.InstanceProfileName == "erun-001-123456789012-eu-west-2-host-stop" && status.InstanceRoleName == "erun-001-123456789012-eu-west-2-host-stop", "expected managed instance profile and role, got %+v", status)
+	requireEqual(t, status.InstanceProfileARN, "arn:aws:iam::123456789012:instance-profile/erun-001-123456789012-eu-west-2-host-stop", "managed instance profile ARN")
+}
+
+func requireStoredCloudContext(t *testing.T, contexts []CloudContextConfig) {
+	t.Helper()
+	requireCondition(t, len(contexts) == 1 && contexts[0].InstanceID == "i-test" && contexts[0].AdminToken == "test-token", "expected context to be saved with instance/token metadata, got %+v", contexts)
+	requireCondition(t, contexts[0].InstanceProfileName != "" && contexts[0].InstanceProfileARN != "" && contexts[0].InstanceRoleName != "", "expected context to include instance profile metadata, got %+v", contexts)
+}
+
+func requireCloudContextCommands(t *testing.T, awsCommands, kubectlCommands []string) {
+	t.Helper()
+	requireCondition(t, len(awsCommands) > 0 && len(kubectlCommands) == 3, "expected AWS and kubeconfig commands, got aws=%+v kubectl=%+v", awsCommands, kubectlCommands)
+	joined := strings.Join(awsCommands, "\n")
 	for _, want := range []string{
 		"iam put-role-policy --role-name erun-001-123456789012-eu-west-2-host-stop --policy-name erun-self-stop",
 		"iam add-role-to-instance-profile --instance-profile-name erun-001-123456789012-eu-west-2-host-stop --role-name erun-001-123456789012-eu-west-2-host-stop",
@@ -76,9 +81,7 @@ func TestInitCloudContextUsesDefaultsAndStoresKubeContext(t *testing.T) {
 		"--iam-instance-profile Arn=arn:aws:iam::123456789012:instance-profile/erun-001-123456789012-eu-west-2-host-stop",
 		"--metadata-options HttpEndpoint=enabled,HttpTokens=required,HttpPutResponseHopLimit=2",
 	} {
-		if !strings.Contains(strings.Join(awsCommands, "\n"), want) {
-			t.Fatalf("expected AWS commands to contain %q, got %+v", want, awsCommands)
-		}
+		requireStringContains(t, joined, want, "expected AWS commands to contain "+want)
 	}
 }
 

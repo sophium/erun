@@ -14,12 +14,8 @@ import (
 func TestDeleteCommandDeletesRemoteNamespaceAndConfigAfterConfirmation(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
-	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", DefaultEnvironment: "dev"}); err != nil {
-		t.Fatalf("SaveTenantConfig failed: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "dev", KubernetesContext: "cluster-dev", Remote: true}); err != nil {
-		t.Fatalf("SaveEnvConfig failed: %v", err)
-	}
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", DefaultEnvironment: "dev"}), "SaveTenantConfig failed")
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "dev", KubernetesContext: "cluster-dev", Remote: true}), "SaveEnvConfig failed")
 
 	var deletedContext string
 	var deletedNamespace string
@@ -41,9 +37,7 @@ func TestDeleteCommandDeletesRemoteNamespaceAndConfigAfterConfirmation(t *testin
 	cmd.SetErr(new(bytes.Buffer))
 	cmd.SetArgs([]string{"delete", "tenant-a", "dev"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if deletedContext != "cluster-dev" || deletedNamespace != "tenant-a-dev" {
 		t.Fatalf("unexpected namespace delete: context=%q namespace=%q", deletedContext, deletedNamespace)
 	}
@@ -58,12 +52,8 @@ func TestDeleteCommandDeletesRemoteNamespaceAndConfigAfterConfirmation(t *testin
 func TestDeleteCommandDeletesConfigWhenNamespaceDeleteFails(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
-	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", DefaultEnvironment: "dev"}); err != nil {
-		t.Fatalf("SaveTenantConfig failed: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "dev", KubernetesContext: "cluster-dev", Remote: true}); err != nil {
-		t.Fatalf("SaveEnvConfig failed: %v", err)
-	}
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", DefaultEnvironment: "dev"}), "SaveTenantConfig failed")
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "dev", KubernetesContext: "cluster-dev", Remote: true}), "SaveEnvConfig failed")
 
 	stderr := new(bytes.Buffer)
 	cmd := newTestRootCmd(testRootDeps{
@@ -78,9 +68,7 @@ func TestDeleteCommandDeletesConfigWhenNamespaceDeleteFails(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"delete", "tenant-a", "dev"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if _, _, err := common.LoadEnvConfig("tenant-a", "dev"); !errors.Is(err, common.ErrNotInitialized) {
 		t.Fatalf("expected env config to be deleted, got %v", err)
 	}
@@ -92,12 +80,8 @@ func TestDeleteCommandDeletesConfigWhenNamespaceDeleteFails(t *testing.T) {
 func TestDeleteCommandRejectsMismatchedConfirmation(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
-	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", DefaultEnvironment: "dev"}); err != nil {
-		t.Fatalf("SaveTenantConfig failed: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "dev", KubernetesContext: "cluster-dev", Remote: true}); err != nil {
-		t.Fatalf("SaveEnvConfig failed: %v", err)
-	}
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", DefaultEnvironment: "dev"}), "SaveTenantConfig failed")
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "dev", KubernetesContext: "cluster-dev", Remote: true}), "SaveEnvConfig failed")
 
 	deletedNamespace := false
 	cmd := newTestRootCmd(testRootDeps{
@@ -128,12 +112,8 @@ func TestDeleteCommandRejectsMismatchedConfirmation(t *testing.T) {
 func TestDeleteCommandDryRunSkipsPromptAndDeletion(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
-	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", DefaultEnvironment: "dev"}); err != nil {
-		t.Fatalf("SaveTenantConfig failed: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "dev", KubernetesContext: "cluster-dev", Remote: true}); err != nil {
-		t.Fatalf("SaveEnvConfig failed: %v", err)
-	}
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", DefaultEnvironment: "dev"}), "SaveTenantConfig failed")
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "dev", KubernetesContext: "cluster-dev", Remote: true}), "SaveEnvConfig failed")
 
 	stderr := new(bytes.Buffer)
 	cmd := newTestRootCmd(testRootDeps{
@@ -150,9 +130,7 @@ func TestDeleteCommandDryRunSkipsPromptAndDeletion(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"delete", "tenant-a", "dev", "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if _, _, err := common.LoadEnvConfig("tenant-a", "dev"); err != nil {
 		t.Fatalf("expected env config to remain during dry-run, got %v", err)
 	}

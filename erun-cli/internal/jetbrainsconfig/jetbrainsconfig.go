@@ -55,20 +55,9 @@ func UpsertOptionsFiles(optionsDir string, entry ProjectEntry) error {
 	if optionsDir == "" {
 		return fmt.Errorf("JetBrains options directory is required")
 	}
-	if strings.TrimSpace(entry.ConfigID) == "" {
-		return fmt.Errorf("JetBrains config ID is required")
-	}
-	if strings.TrimSpace(entry.HostAlias) == "" {
-		return fmt.Errorf("JetBrains host alias is required")
-	}
-	if strings.TrimSpace(entry.User) == "" {
-		return fmt.Errorf("JetBrains SSH user is required")
-	}
-	if strings.TrimSpace(entry.ProjectPath) == "" {
-		return fmt.Errorf("JetBrains project path is required")
-	}
-	if strings.TrimSpace(entry.ProductCode) == "" {
-		entry.ProductCode = "IU"
+	entry, err := normalizeProjectEntry(entry)
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(optionsDir, 0o700); err != nil {
 		return err
@@ -82,6 +71,32 @@ func UpsertOptionsFiles(optionsDir string, entry ProjectEntry) error {
 	}
 	if err := upsertSSHRecentConnectionsFile(filepath.Join(optionsDir, "sshRecentConnections.v2.xml"), entry); err != nil {
 		return err
+	}
+	return nil
+}
+
+func normalizeProjectEntry(entry ProjectEntry) (ProjectEntry, error) {
+	if err := validateProjectEntry(entry); err != nil {
+		return ProjectEntry{}, err
+	}
+	if strings.TrimSpace(entry.ProductCode) == "" {
+		entry.ProductCode = "IU"
+	}
+	return entry, nil
+}
+
+func validateProjectEntry(entry ProjectEntry) error {
+	if strings.TrimSpace(entry.ConfigID) == "" {
+		return fmt.Errorf("JetBrains config ID is required")
+	}
+	if strings.TrimSpace(entry.HostAlias) == "" {
+		return fmt.Errorf("JetBrains host alias is required")
+	}
+	if strings.TrimSpace(entry.User) == "" {
+		return fmt.Errorf("JetBrains SSH user is required")
+	}
+	if strings.TrimSpace(entry.ProjectPath) == "" {
+		return fmt.Errorf("JetBrains project path is required")
 	}
 	return nil
 }

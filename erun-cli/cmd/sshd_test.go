@@ -81,9 +81,7 @@ func TestRunSSHDInitCommandPersistsConfigAndDeploysRuntime(t *testing.T) {
 	t.Setenv("HOME", homeDir)
 
 	publicKeyPath := filepath.Join(t.TempDir(), "id_ed25519.pub")
-	if err := os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644); err != nil {
-		t.Fatalf("write public key: %v", err)
-	}
+	requireNoError(t, os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644), "write public key")
 
 	var savedTenant string
 	var savedEnv common.EnvConfig
@@ -146,10 +144,28 @@ func TestRunSSHDInitCommandPersistsConfigAndDeploysRuntime(t *testing.T) {
 		},
 		writeLocalSSHConfig,
 	)
-	if err != nil {
-		t.Fatalf("runSSHDInitCommand failed: %v", err)
-	}
+	requireNoError(t, err, "runSSHDInitCommand failed")
 
+	requireSSHDInitConfig(t, savedTenant, savedEnv, deployed, remoteScript, publicKeyPath)
+	sshConfigData, err := os.ReadFile(filepath.Join(homeDir, ".ssh", "config"))
+	requireNoError(t, err, "read ssh config")
+	requireContainsAll(t, string(sshConfigData), []string{
+		"Host erun-tenant-a-dev",
+		"HostName 127.0.0.1",
+		"Port 64022",
+		"User erun",
+		"HostKeyAlias erun-tenant-a-dev",
+		"IdentityFile " + strings.TrimSuffix(publicKeyPath, ".pub"),
+	}, "ssh config")
+	stdout := ctx.Stdout.(*bytes.Buffer).String()
+	requireContainsAll(t, stdout, []string{
+		"host: erun-tenant-a-dev",
+		"config: " + filepath.Join(homeDir, ".ssh", "config"),
+	}, "stdout")
+}
+
+func requireSSHDInitConfig(t *testing.T, savedTenant string, savedEnv common.EnvConfig, deployed common.HelmDeployParams, remoteScript, publicKeyPath string) {
+	t.Helper()
 	if savedTenant != "tenant-a" {
 		t.Fatalf("unexpected saved tenant: %q", savedTenant)
 	}
@@ -162,29 +178,13 @@ func TestRunSSHDInitCommandPersistsConfigAndDeploysRuntime(t *testing.T) {
 	if !strings.Contains(remoteScript, "authorized_keys") || !strings.Contains(remoteScript, "ssh-ed25519 AAAATEST user@example") {
 		t.Fatalf("unexpected remote authorized_keys script:\n%s", remoteScript)
 	}
-	sshConfigData, err := os.ReadFile(filepath.Join(homeDir, ".ssh", "config"))
-	if err != nil {
-		t.Fatalf("read ssh config: %v", err)
-	}
-	for _, want := range []string{
-		"Host erun-tenant-a-dev",
-		"HostName 127.0.0.1",
-		"Port 64022",
-		"User erun",
-		"HostKeyAlias erun-tenant-a-dev",
-		"IdentityFile " + strings.TrimSuffix(publicKeyPath, ".pub"),
-	} {
-		if !strings.Contains(string(sshConfigData), want) {
-			t.Fatalf("expected ssh config to contain %q, got:\n%s", want, sshConfigData)
-		}
-	}
-	stdout := ctx.Stdout.(*bytes.Buffer).String()
-	for _, want := range []string{
-		"host: erun-tenant-a-dev",
-		"config: " + filepath.Join(homeDir, ".ssh", "config"),
-	} {
-		if !strings.Contains(stdout, want) {
-			t.Fatalf("expected stdout to contain %q, got:\n%s", want, stdout)
+}
+
+func requireContainsAll(t *testing.T, value string, wants []string, context string) {
+	t.Helper()
+	for _, want := range wants {
+		if !strings.Contains(value, want) {
+			t.Fatalf("expected %s to contain %q, got:\n%s", context, want, value)
 		}
 	}
 }
@@ -194,9 +194,7 @@ func TestRunSSHDInitCommandUsesResolvedEnvironmentLocalPortByDefault(t *testing.
 	t.Setenv("HOME", homeDir)
 
 	publicKeyPath := filepath.Join(t.TempDir(), "id_ed25519.pub")
-	if err := os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644); err != nil {
-		t.Fatalf("write public key: %v", err)
-	}
+	requireNoError(t, os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644), "write public key")
 
 	var savedEnv common.EnvConfig
 	err := runSSHDInitCommand(
@@ -272,9 +270,7 @@ func TestSyncRemoteSSHDKeyRetriesWhenDeploymentIsNotReady(t *testing.T) {
 	})
 
 	publicKeyPath := filepath.Join(t.TempDir(), "id_ed25519.pub")
-	if err := os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644); err != nil {
-		t.Fatalf("write public key: %v", err)
-	}
+	requireNoError(t, os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644), "write public key")
 
 	var waited common.ShellLaunchParams
 	waitForSSHDRemoteDeployment = func(req common.ShellLaunchParams) error {
@@ -340,9 +336,7 @@ func TestSyncRemoteSSHDKeyRetriesWhenKubeletProxyIsStarting(t *testing.T) {
 	})
 
 	publicKeyPath := filepath.Join(t.TempDir(), "id_ed25519.pub")
-	if err := os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644); err != nil {
-		t.Fatalf("write public key: %v", err)
-	}
+	requireNoError(t, os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644), "write public key")
 
 	waits := 0
 	waitForSSHDRemoteDeployment = func(common.ShellLaunchParams) error {

@@ -28,8 +28,10 @@ var (
 	openUserHomeDir = os.UserHomeDir
 )
 
-const defaultShellLaunchWaitTimeout = "2m0s"
-const remoteShellReattachDeployExitCode = 75
+const (
+	defaultShellLaunchWaitTimeout     = "2m0s"
+	remoteShellReattachDeployExitCode = 75
+)
 
 type OpenStore interface {
 	LoadERunConfig() (ERunConfig, string, error)
@@ -144,29 +146,28 @@ func InitParamsForOpenTarget(store OpenStore, params OpenParams) (BootstrapInitP
 
 	switch {
 	case tenant != "" && environment != "":
-		return BootstrapInitParams{
-			Tenant:      tenant,
-			Environment: environment,
-		}, nil
+		return BootstrapInitParams{Tenant: tenant, Environment: environment}, nil
 	case tenant != "":
 		return BootstrapInitParams{Tenant: tenant}, nil
 	case environment != "":
-		resolvedTenant, err := loadOpenDefaultTenant(store)
-		if err != nil {
-			if errors.Is(err, ErrDefaultTenantNotConfigured) || errors.Is(err, ErrNotInitialized) {
-				return BootstrapInitParams{
-					Environment:   environment,
-					ResolveTenant: true,
-				}, nil
-			}
-			return BootstrapInitParams{}, err
-		}
-		return BootstrapInitParams{
-			Tenant:      resolvedTenant,
-			Environment: environment,
-		}, nil
+		return initParamsForOpenEnvironmentOnly(store, environment)
 	}
 
+	return initParamsForOpenDefaults(store)
+}
+
+func initParamsForOpenEnvironmentOnly(store OpenStore, environment string) (BootstrapInitParams, error) {
+	resolvedTenant, err := loadOpenDefaultTenant(store)
+	if err != nil {
+		if errors.Is(err, ErrDefaultTenantNotConfigured) || errors.Is(err, ErrNotInitialized) {
+			return BootstrapInitParams{Environment: environment, ResolveTenant: true}, nil
+		}
+		return BootstrapInitParams{}, err
+	}
+	return BootstrapInitParams{Tenant: resolvedTenant, Environment: environment}, nil
+}
+
+func initParamsForOpenDefaults(store OpenStore) (BootstrapInitParams, error) {
 	resolvedTenant, err := loadOpenDefaultTenant(store)
 	if err != nil {
 		if errors.Is(err, ErrDefaultTenantNotConfigured) || errors.Is(err, ErrNotInitialized) {
@@ -183,10 +184,7 @@ func InitParamsForOpenTarget(store OpenStore, params OpenParams) (BootstrapInitP
 		return BootstrapInitParams{}, err
 	}
 
-	return BootstrapInitParams{
-		Tenant:      resolvedTenant,
-		Environment: defaultEnvironment,
-	}, nil
+	return BootstrapInitParams{Tenant: resolvedTenant, Environment: defaultEnvironment}, nil
 }
 
 func ResolveOpen(store OpenStore, params OpenParams) (OpenResult, error) {
@@ -198,89 +196,29 @@ func resolveOpenWithFinder(store OpenStore, findProjectRoot ProjectFinderFunc, p
 		return OpenResult{}, fmt.Errorf("store is required")
 	}
 
-	tenant := params.Tenant
-	if tenant == "" && params.UseDefaultTenant {
-		if currentTenant, ok, err := loadCurrentDirectoryTenant(store, findProjectRoot); err != nil {
-			return OpenResult{}, err
-		} else if ok {
-			tenant = currentTenant
-		}
-	}
-	if tenant == "" && params.UseDefaultTenant {
-		toolConfig, _, err := store.LoadERunConfig()
-		if errors.Is(err, ErrNotInitialized) {
-			return OpenResult{}, ErrDefaultTenantNotConfigured
-		}
-		if err != nil {
-			return OpenResult{}, err
-		}
-		tenant = toolConfig.DefaultTenant
-		if tenant == "" {
-			return OpenResult{}, ErrDefaultTenantNotConfigured
-		}
-	}
-	if tenant == "" {
-		return OpenResult{}, fmt.Errorf("tenant is required")
-	}
-
-	tenantConfig, _, err := store.LoadTenantConfig(tenant)
-	if errors.Is(err, ErrNotInitialized) {
-		return OpenResult{}, fmt.Errorf("%w: %s", ErrTenantNotFound, tenant)
-	}
+	tenant, err := resolveOpenTenant(store, findProjectRoot, params)
 	if err != nil {
 		return OpenResult{}, err
 	}
-	if tenantConfig.Name == "" {
-		tenantConfig.Name = tenant
-	}
-
-	environment := params.Environment
-	if environment == "" && params.UseDefaultEnvironment {
-		environment = tenantConfig.DefaultEnvironment
-		if environment == "" {
-			return OpenResult{}, ErrDefaultEnvironmentNotConfigured
-		}
-	}
-	if environment == "" {
-		return OpenResult{}, fmt.Errorf("environment is required")
-	}
-
-	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
-	if errors.Is(err, ErrNotInitialized) {
-		return OpenResult{}, fmt.Errorf("%w: %s", ErrEnvironmentNotFound, environment)
-	}
+	tenantConfig, err := loadOpenTenantConfig(store, tenant)
 	if err != nil {
 		return OpenResult{}, err
 	}
-	if envConfig.Name == "" {
-		envConfig.Name = environment
+	environment, err := resolveOpenEnvironment(params, tenantConfig)
+	if err != nil {
+		return OpenResult{}, err
 	}
-	if resolver, ok := store.(effectiveKubernetesContextResolver); ok {
-		envConfig.KubernetesContext = resolver.ResolveEffectiveKubernetesContext(environment, envConfig.KubernetesContext)
+	envConfig, err := loadOpenEnvConfig(store, tenant, environment)
+	if err != nil {
+		return OpenResult{}, err
 	}
-
-	repoPath := envConfig.RepoPath
-	if repoPath == "" {
-		repoPath = tenantConfig.ProjectRoot
+	repoPath, err := resolveOpenRepoPath(tenantConfig, envConfig)
+	if err != nil {
+		return OpenResult{}, err
 	}
-	if repoPath == "" {
-		return OpenResult{}, ErrRepoPathNotConfigured
+	if err := validateOpenTarget(tenant, environment, repoPath, envConfig); err != nil {
+		return OpenResult{}, err
 	}
-
-	repoPath = filepath.Clean(repoPath)
-	if !envConfig.Remote {
-		info, err := os.Stat(repoPath)
-		if err != nil {
-			return OpenResult{}, err
-		}
-		if !info.IsDir() {
-			return OpenResult{}, fmt.Errorf("%q is not a directory", repoPath)
-		}
-	}
-	if strings.TrimSpace(envConfig.KubernetesContext) == "" {
-		return OpenResult{}, fmt.Errorf("%w: %s/%s", ErrKubernetesContextNotConfigured, tenant, environment)
-	}
-
 	localPorts, err := environmentLocalPortsForTarget(store, tenant, envConfig)
 	if err != nil {
 		return OpenResult{}, err
@@ -295,6 +233,98 @@ func resolveOpenWithFinder(store OpenStore, findProjectRoot ProjectFinderFunc, p
 		RepoPath:     repoPath,
 		Title:        tenant + "-" + environment,
 	}, nil
+}
+
+func resolveOpenTenant(store OpenStore, findProjectRoot ProjectFinderFunc, params OpenParams) (string, error) {
+	tenant := params.Tenant
+	if tenant == "" && params.UseDefaultTenant {
+		currentTenant, ok, err := loadCurrentDirectoryTenant(store, findProjectRoot)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			tenant = currentTenant
+		}
+	}
+	if tenant == "" && params.UseDefaultTenant {
+		return loadOpenDefaultTenant(store)
+	}
+	if tenant == "" {
+		return "", fmt.Errorf("tenant is required")
+	}
+	return tenant, nil
+}
+
+func loadOpenTenantConfig(store OpenStore, tenant string) (TenantConfig, error) {
+	tenantConfig, _, err := store.LoadTenantConfig(tenant)
+	if errors.Is(err, ErrNotInitialized) {
+		return TenantConfig{}, fmt.Errorf("%w: %s", ErrTenantNotFound, tenant)
+	}
+	if err != nil {
+		return TenantConfig{}, err
+	}
+	if tenantConfig.Name == "" {
+		tenantConfig.Name = tenant
+	}
+	return tenantConfig, nil
+}
+
+func resolveOpenEnvironment(params OpenParams, tenantConfig TenantConfig) (string, error) {
+	environment := params.Environment
+	if environment == "" && params.UseDefaultEnvironment {
+		environment = tenantConfig.DefaultEnvironment
+		if environment == "" {
+			return "", ErrDefaultEnvironmentNotConfigured
+		}
+	}
+	if environment == "" {
+		return "", fmt.Errorf("environment is required")
+	}
+	return environment, nil
+}
+
+func loadOpenEnvConfig(store OpenStore, tenant, environment string) (EnvConfig, error) {
+	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
+	if errors.Is(err, ErrNotInitialized) {
+		return EnvConfig{}, fmt.Errorf("%w: %s", ErrEnvironmentNotFound, environment)
+	}
+	if err != nil {
+		return EnvConfig{}, err
+	}
+	if envConfig.Name == "" {
+		envConfig.Name = environment
+	}
+	if resolver, ok := store.(effectiveKubernetesContextResolver); ok {
+		envConfig.KubernetesContext = resolver.ResolveEffectiveKubernetesContext(environment, envConfig.KubernetesContext)
+	}
+	return envConfig, nil
+}
+
+func resolveOpenRepoPath(tenantConfig TenantConfig, envConfig EnvConfig) (string, error) {
+	repoPath := envConfig.RepoPath
+	if repoPath == "" {
+		repoPath = tenantConfig.ProjectRoot
+	}
+	if repoPath == "" {
+		return "", ErrRepoPathNotConfigured
+	}
+	return filepath.Clean(repoPath), nil
+}
+
+func validateOpenTarget(tenant, environment, repoPath string, envConfig EnvConfig) error {
+	if !envConfig.Remote {
+		info, err := os.Stat(repoPath)
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("%q is not a directory", repoPath)
+		}
+	}
+	if strings.TrimSpace(envConfig.KubernetesContext) == "" {
+		return fmt.Errorf("%w: %s/%s", ErrKubernetesContextNotConfigured, tenant, environment)
+	}
+	return nil
 }
 
 func loadCurrentDirectoryTenant(store OpenStore, findProjectRoot ProjectFinderFunc) (string, bool, error) {
@@ -516,6 +546,30 @@ func kubectlTargetArgs(req ShellLaunchParams) []string {
 }
 
 func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (string, error) {
+	config, err := remoteShellConfigForRequest(req)
+	if err != nil {
+		return "", err
+	}
+	workdir := shellQuote(config.Workdir)
+	scriptLines := remoteShellBaseScriptLines(req, config, workdir, shellQuote(req.Title))
+	gitLines, err := remoteShellGitSeedLines(req, redactHostSecrets, workdir)
+	if err != nil {
+		return "", err
+	}
+	if len(gitLines) > 0 {
+		scriptLines = append(gitLines, scriptLines[1:]...)
+	}
+	return strings.Join(scriptLines, "\n"), nil
+}
+
+type remoteShellConfig struct {
+	Workdir    string
+	ToolYAML   string
+	TenantYAML string
+	EnvYAML    string
+}
+
+func remoteShellConfigForRequest(req ShellLaunchParams) (remoteShellConfig, error) {
 	remoteWorkdir := remoteWorktreePath(req)
 
 	tenantConfig, err := yaml.Marshal(TenantConfig{
@@ -524,13 +578,13 @@ func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (stri
 		DefaultEnvironment: req.Environment,
 	})
 	if err != nil {
-		return "", err
+		return remoteShellConfig{}, err
 	}
 	toolConfig, err := yaml.Marshal(ERunConfig{
 		DefaultTenant: req.Tenant,
 	})
 	if err != nil {
-		return "", err
+		return remoteShellConfig{}, err
 	}
 	envConfig, err := yaml.Marshal(EnvConfig{
 		Name:              req.Environment,
@@ -539,26 +593,29 @@ func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (stri
 		Remote:            req.RemoteRepo,
 	})
 	if err != nil {
-		return "", err
+		return remoteShellConfig{}, err
 	}
 
-	workdir := shellQuote(remoteWorkdir)
-	toolYAML := string(toolConfig)
-	tenantYAML := string(tenantConfig)
-	envYAML := string(envConfig)
-	title := shellQuote(req.Title)
+	return remoteShellConfig{
+		Workdir:    remoteWorkdir,
+		ToolYAML:   string(toolConfig),
+		TenantYAML: string(tenantConfig),
+		EnvYAML:    string(envConfig),
+	}, nil
+}
 
-	scriptLines := []string{
+func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig, workdir, title string) []string {
+	return []string{
 		"set -eu",
 		fmt.Sprintf("mkdir -p %s", workdir),
 		fmt.Sprintf("cd %s", workdir),
 		"config_home=\"${XDG_CONFIG_HOME:-$HOME/.config}\"",
 		"mkdir -p \"$config_home/erun\"",
-		fmt.Sprintf("cat > \"$config_home/erun/config.yaml\" <<'EOF'\n%s\nEOF", toolYAML),
+		fmt.Sprintf("cat > \"$config_home/erun/config.yaml\" <<'EOF'\n%s\nEOF", config.ToolYAML),
 		fmt.Sprintf("mkdir -p \"$config_home/erun/%s\"", req.Tenant),
-		fmt.Sprintf("cat > \"$config_home/erun/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, tenantYAML),
+		fmt.Sprintf("cat > \"$config_home/erun/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, config.TenantYAML),
 		fmt.Sprintf("mkdir -p \"$config_home/erun/%s/%s\"", req.Tenant, req.Environment),
-		fmt.Sprintf("cat > \"$config_home/erun/%s/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, req.Environment, envYAML),
+		fmt.Sprintf("cat > \"$config_home/erun/%s/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, req.Environment, config.EnvYAML),
 		fmt.Sprintf("cat > \"$HOME/.erun_bashrc\" <<'EOF'\nexport ERUN_SHELL_HOST=%s\nerun() {\n  if [ \"${1:-}\" = \"deploy\" ] && [ \"$#\" -eq 1 ] && [ -n \"${ERUN_SHELL_REQUEST_FILE:-}\" ]; then\n    : > \"$ERUN_SHELL_REQUEST_FILE\"\n    exit 0\n  fi\n  command erun \"$@\"\n}\nEOF", title),
 		fmt.Sprintf("printf '\\033]0;%s\\007'", title),
 		"request_file=\"$HOME/.erun-shell-request\"",
@@ -570,58 +627,55 @@ func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (stri
 		"rm -f \"$request_file\"",
 		"exit \"$shell_status\"",
 	}
+}
 
-	if !req.RemoteRepo {
-		if gitHost, gitUser, gitRepo, err := resolveGitRemote(req.Dir); err == nil {
-			hostConfigEntries, err := resolveSSHConfigEntries(gitHost)
-			if err != nil {
-				return "", err
-			}
-
-			knownHostsLines, err := loadKnownHostsLines(gitHost)
-			if err != nil {
-				return "", err
-			}
-
-			keyLines, err := loadPrivateKeyMaterial(hostConfigEntries, redactHostSecrets)
-			if err != nil {
-				return "", err
-			}
-
-			knownHosts := strings.Join(knownHostsLines, "\n")
-			keys := strings.Join(keyLines, "\n")
-			gitUser = shellQuote(gitUser)
-			gitRepo = shellQuote(gitRepo)
-			sshConfig := strings.Join([]string{
-				fmt.Sprintf("Host %s", gitHost),
-				fmt.Sprintf("  HostName %s", gitHost),
-				"  IdentityFile ~/.ssh/keys",
-				"  IdentitiesOnly yes",
-				"  UserKnownHostsFile ~/.ssh/known_hosts",
-			}, "\n")
-
-			scriptLines = append([]string{
-				"set -eu",
-				"mkdir -p \"$HOME/.ssh\"",
-				"chmod 700 \"$HOME/.ssh\"",
-				"rm -f \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/keys\" \"$HOME/.ssh/config\"",
-				"old_umask=\"$(umask)\"",
-				"umask 077",
-				fmt.Sprintf("cat > \"$HOME/.ssh/known_hosts\" <<'EOF'\n%s\nEOF", knownHosts),
-				fmt.Sprintf("cat > \"$HOME/.ssh/keys\" <<'EOF'\n%s\nEOF", keys),
-				fmt.Sprintf("cat > \"$HOME/.ssh/config\" <<'EOF'\n%s\nEOF", sshConfig),
-				"umask \"$old_umask\"",
-				"chmod 600 \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/keys\" \"$HOME/.ssh/config\"",
-				fmt.Sprintf("mkdir -p %s", workdir),
-				fmt.Sprintf("cd %s", workdir),
-				fmt.Sprintf("if command -v git >/dev/null 2>&1; then if [ ! -d .git ]; then git clone git@%s:%s/%s.git .; fi; git config --global --add safe.directory '*'; fi", gitHost, gitUser, gitRepo),
-			}, scriptLines[1:]...)
-		}
+func remoteShellGitSeedLines(req ShellLaunchParams, redactHostSecrets bool, workdir string) ([]string, error) {
+	if req.RemoteRepo {
+		return nil, nil
 	}
+	gitHost, gitUser, gitRepo, err := resolveGitRemote(req.Dir)
+	if err != nil {
+		return nil, nil
+	}
+	hostConfigEntries, err := resolveSSHConfigEntries(gitHost)
+	if err != nil {
+		return nil, err
+	}
+	knownHostsLines, err := loadKnownHostsLines(gitHost)
+	if err != nil {
+		return nil, err
+	}
+	keyLines, err := loadPrivateKeyMaterial(hostConfigEntries, redactHostSecrets)
+	if err != nil {
+		return nil, err
+	}
+	return remoteShellGitSeedScriptLines(workdir, gitHost, shellQuote(gitUser), shellQuote(gitRepo), strings.Join(knownHostsLines, "\n"), strings.Join(keyLines, "\n")), nil
+}
 
-	script := strings.Join(scriptLines, "\n")
-
-	return script, nil
+func remoteShellGitSeedScriptLines(workdir, gitHost, gitUser, gitRepo, knownHosts, keys string) []string {
+	sshConfig := strings.Join([]string{
+		fmt.Sprintf("Host %s", gitHost),
+		fmt.Sprintf("  HostName %s", gitHost),
+		"  IdentityFile ~/.ssh/keys",
+		"  IdentitiesOnly yes",
+		"  UserKnownHostsFile ~/.ssh/known_hosts",
+	}, "\n")
+	return []string{
+		"set -eu",
+		"mkdir -p \"$HOME/.ssh\"",
+		"chmod 700 \"$HOME/.ssh\"",
+		"rm -f \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/keys\" \"$HOME/.ssh/config\"",
+		"old_umask=\"$(umask)\"",
+		"umask 077",
+		fmt.Sprintf("cat > \"$HOME/.ssh/known_hosts\" <<'EOF'\n%s\nEOF", knownHosts),
+		fmt.Sprintf("cat > \"$HOME/.ssh/keys\" <<'EOF'\n%s\nEOF", keys),
+		fmt.Sprintf("cat > \"$HOME/.ssh/config\" <<'EOF'\n%s\nEOF", sshConfig),
+		"umask \"$old_umask\"",
+		"chmod 600 \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/keys\" \"$HOME/.ssh/config\"",
+		fmt.Sprintf("mkdir -p %s", workdir),
+		fmt.Sprintf("cd %s", workdir),
+		fmt.Sprintf("if command -v git >/dev/null 2>&1; then if [ ! -d .git ]; then git clone git@%s:%s/%s.git .; fi; git config --global --add safe.directory '*'; fi", gitHost, gitUser, gitRepo),
+	}
 }
 
 func remoteWorktreePath(req ShellLaunchParams) string {
@@ -728,32 +782,7 @@ func loadKnownHostsLines(host string) ([]string, error) {
 }
 
 func loadPrivateKeyMaterial(entries []sshConfigEntry, redact bool) ([]string, error) {
-	keyPaths := make([]string, 0, 4)
-	seen := make(map[string]struct{}, 4)
-
-	addKeyPath := func(path string) {
-		path = strings.TrimSpace(path)
-		if path == "" {
-			return
-		}
-		if _, ok := seen[path]; ok {
-			return
-		}
-		seen[path] = struct{}{}
-		keyPaths = append(keyPaths, path)
-	}
-
-	for _, entry := range entries {
-		for _, identityFile := range entry.identityFiles {
-			addKeyPath(identityFile)
-		}
-	}
-
-	if len(keyPaths) == 0 {
-		for _, fallback := range []string{"id_rsa", "id_ed25519", "id_ecdsa"} {
-			addKeyPath(filepath.Join(resolveOpenUserHomeDir(), ".ssh", fallback))
-		}
-	}
+	keyPaths := privateKeyPaths(entries)
 
 	lines := make([]string, 0, len(keyPaths))
 	for _, keyPath := range keyPaths {
@@ -772,6 +801,35 @@ func loadPrivateKeyMaterial(entries []sshConfigEntry, redact bool) ([]string, er
 		lines = append(lines, string(data))
 	}
 	return lines, nil
+}
+
+func privateKeyPaths(entries []sshConfigEntry) []string {
+	keyPaths := make([]string, 0, 4)
+	seen := make(map[string]struct{}, 4)
+	for _, entry := range entries {
+		for _, identityFile := range entry.identityFiles {
+			keyPaths = appendUniquePrivateKeyPath(keyPaths, seen, identityFile)
+		}
+	}
+	if len(keyPaths) > 0 {
+		return keyPaths
+	}
+	for _, fallback := range []string{"id_rsa", "id_ed25519", "id_ecdsa"} {
+		keyPaths = appendUniquePrivateKeyPath(keyPaths, seen, filepath.Join(resolveOpenUserHomeDir(), ".ssh", fallback))
+	}
+	return keyPaths
+}
+
+func appendUniquePrivateKeyPath(keyPaths []string, seen map[string]struct{}, path string) []string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return keyPaths
+	}
+	if _, ok := seen[path]; ok {
+		return keyPaths
+	}
+	seen[path] = struct{}{}
+	return append(keyPaths, path)
 }
 
 type sshConfigEntry struct {

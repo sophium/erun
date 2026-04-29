@@ -248,155 +248,252 @@ func resolveOpenWithInitRetryForParams(ctx common.Context, params common.OpenPar
 }
 
 func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
-	if err := ctx.EnsureKubernetesContext(result.EnvConfig.KubernetesContext); err != nil {
+	runner := resolvedOpenRunner{
+		ctx:                       ctx,
+		result:                    result,
+		options:                   options,
+		promptRunner:              promptRunner,
+		openShell:                 openShell,
+		runManagedDeploy:          runManagedDeploy,
+		checkKubernetesDeployment: checkKubernetesDeployment,
+		resolveRuntimeDeploySpec:  resolveRuntimeDeploySpec,
+		deployHelmChart:           deployHelmChart,
+		activateMCP:               activateMCP,
+		activateSSHD:              activateSSHD,
+		launchVSCode:              launchVSCode,
+		launchIntelliJ:            launchIntelliJ,
+	}
+	return runner.run()
+}
+
+type resolvedOpenRunner struct {
+	ctx                       common.Context
+	result                    common.OpenResult
+	options                   openOptions
+	promptRunner              PromptRunner
+	openShell                 OpenShellRunner
+	runManagedDeploy          func(common.Context, common.OpenResult) error
+	checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc
+	resolveRuntimeDeploySpec  func(common.OpenResult) (common.DeploySpec, error)
+	deployHelmChart           common.HelmChartDeployerFunc
+	activateMCP               MCPForwarder
+	activateSSHD              SSHDActivator
+	launchVSCode              VSCodeLauncher
+	launchIntelliJ            IntelliJLauncher
+}
+
+func (r *resolvedOpenRunner) run() error {
+	if err := r.ctx.EnsureKubernetesContext(r.result.EnvConfig.KubernetesContext); err != nil {
 		return err
 	}
-	if !ctx.DryRun && os.Getenv("ERUN_IDLE_PROBE") != "1" {
+	r.recordActivity()
+	if err := r.validateIDEOptions(); err != nil {
+		return err
+	}
+
+	shellReq := common.ShellLaunchParamsFromResult(r.result)
+	if err := r.maybeDeployRuntime(shellReq); err != nil {
+		return err
+	}
+	if err := r.activateForwarders(); err != nil {
+		return err
+	}
+	if launched, err := r.maybeLaunchIDE(); launched || err != nil {
+		return err
+	}
+	if r.options.NoShell {
+		return r.emitNoShellSetup()
+	}
+
+	r.traceShellPreview(shellReq)
+	if r.ctx.DryRun {
+		return nil
+	}
+	return r.runShellLoop(shellReq)
+}
+
+func (r *resolvedOpenRunner) recordActivity() {
+	if !r.ctx.DryRun && os.Getenv("ERUN_IDLE_PROBE") != "1" {
 		_ = common.RecordEnvironmentActivity(common.EnvironmentActivityParams{
-			Tenant:      result.Tenant,
-			Environment: result.Environment,
+			Tenant:      r.result.Tenant,
+			Environment: r.result.Environment,
 			Kind:        common.ActivityKindCLI,
 		})
 	}
-	namespace := common.KubernetesNamespaceName(result.Tenant, result.Environment)
-	if options.VSCode && options.IntelliJ {
+}
+
+func (r *resolvedOpenRunner) validateIDEOptions() error {
+	if r.options.VSCode && r.options.IntelliJ {
 		return fmt.Errorf("--vscode and --intellij cannot be used together")
 	}
-	if (options.VSCode || options.IntelliJ) && !result.EnvConfig.SSHD.Enabled {
+	if (r.options.VSCode || r.options.IntelliJ) && !r.result.EnvConfig.SSHD.Enabled {
 		flag := "--vscode"
-		if options.IntelliJ {
+		if r.options.IntelliJ {
 			flag = "--intellij"
 		}
-		return fmt.Errorf("%s requires sshd-enabled remote environment; run `erun sshd init %s %s` first", flag, result.Tenant, result.Environment)
+		return fmt.Errorf("%s requires sshd-enabled remote environment; run `erun sshd init %s %s` first", flag, r.result.Tenant, r.result.Environment)
 	}
-	shellReq := common.ShellLaunchParamsFromResult(result)
-	if resolveRuntimeDeploySpec != nil && deployHelmChart != nil {
-		execution, err := resolveRuntimeDeploySpec(result)
-		if err != nil {
+	return nil
+}
+
+func (r *resolvedOpenRunner) maybeDeployRuntime(shellReq common.ShellLaunchParams) error {
+	if r.resolveRuntimeDeploySpec == nil || r.deployHelmChart == nil {
+		return nil
+	}
+	execution, err := r.resolveRuntimeExecution()
+	if err != nil {
+		return err
+	}
+	shouldDeploy, err := r.shouldDeployRuntime(shellReq, execution)
+	if err != nil {
+		return err
+	}
+	if !shouldDeploy {
+		return nil
+	}
+	return r.deployRuntime(execution)
+}
+
+func (r *resolvedOpenRunner) resolveRuntimeExecution() (common.DeploySpec, error) {
+	execution, err := r.resolveRuntimeDeploySpec(r.result)
+	if err != nil {
+		return common.DeploySpec{}, err
+	}
+	execution, err = maybeCreateMissingRuntimeChart(r.ctx, r.result, r.promptRunner, r.resolveRuntimeDeploySpec, execution)
+	if err != nil {
+		return common.DeploySpec{}, err
+	}
+	execution, err = applyRuntimeDeployImageOverride(r.result, execution, r.options.RuntimeImage)
+	if err != nil {
+		return common.DeploySpec{}, err
+	}
+	return applyRuntimeDeployVersionOverride(execution, r.options.VersionOverride), nil
+}
+
+func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq common.ShellLaunchParams, execution common.DeploySpec) (bool, error) {
+	if len(execution.Builds) > 0 || strings.TrimSpace(r.options.VersionOverride) != "" || strings.TrimSpace(r.options.RuntimeImage) != "" {
+		return true, nil
+	}
+	if r.checkKubernetesDeployment == nil {
+		return false, nil
+	}
+	deployed, err := r.checkKubernetesDeployment(common.KubernetesDeploymentCheckParams{
+		Name:              common.RuntimeReleaseName(r.result.Tenant),
+		Namespace:         common.KubernetesNamespaceName(r.result.Tenant, r.result.Environment),
+		KubernetesContext: r.result.EnvConfig.KubernetesContext,
+		ExpectedRepoPath:  common.RemoteShellWorktreePath(shellReq),
+		ExpectedSSHD:      sshdExpectationForDeployment(r.result),
+		ExpectedMCPPort:   common.MCPPortForResult(r.result),
+		ExpectedSSHPort:   common.SSHLocalPortForResult(r.result),
+	})
+	if err != nil {
+		return false, err
+	}
+	return !deployed, nil
+}
+
+func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
+	if r.options.VSCode || r.options.IntelliJ {
+		return fmt.Errorf("opening %s requires updating the runtime deployment for %s/%s; run `erun sshd init %s %s` or `erun open %s %s` first, then retry", ideOpenLabel(r.options), r.result.Tenant, r.result.Environment, r.result.Tenant, r.result.Environment, r.result.Tenant, r.result.Environment)
+	}
+	if r.result.EnvConfig.SSHD.Enabled {
+		execution.Deploy.SSHDEnabled = true
+	}
+	r.ctx.Logger.Debug("deploying the devops runtime before opening the shell")
+	if err := common.RunDeploySpec(r.ctx, execution, common.DockerImageBuilder, runOpenDockerPush, r.openHelmDeployer(execution)); err != nil {
+		return err
+	}
+	return r.persistRuntimeVersion(execution.Deploy.Version)
+}
+
+func runOpenDockerPush(ctx common.Context, pushInput common.DockerPushSpec) error {
+	return common.RunDockerPush(ctx, pushInput, common.DockerImagePusher)
+}
+
+func (r *resolvedOpenRunner) openHelmDeployer(execution common.DeploySpec) common.HelmChartDeployerFunc {
+	return wrapHelmDeployWithReleaseRecovery(
+		r.promptRunner,
+		wrapOpenHelmDeployWithSpinner(r.ctx, execution.Deploy.ReleaseName, r.deployHelmChart),
+		common.ClearHelmReleasePendingOperation,
+	)
+}
+
+func (r *resolvedOpenRunner) persistRuntimeVersion(version string) error {
+	if r.ctx.DryRun {
+		return nil
+	}
+	result, err := persistOpenRuntimeVersion(r.result, version, r.options.SaveEnvConfig)
+	if err != nil {
+		return err
+	}
+	r.result = result
+	return nil
+}
+
+func (r *resolvedOpenRunner) activateForwarders() error {
+	if r.activateSSHD != nil && r.result.EnvConfig.SSHD.Enabled {
+		if err := r.activateSSHD(r.ctx, r.result); err != nil {
 			return err
 		}
-		execution, err = maybeCreateMissingRuntimeChart(ctx, result, promptRunner, resolveRuntimeDeploySpec, execution)
-		if err != nil {
-			return err
-		}
-		execution, err = applyRuntimeDeployImageOverride(result, execution, options.RuntimeImage)
-		if err != nil {
-			return err
-		}
-		execution = applyRuntimeDeployVersionOverride(execution, options.VersionOverride)
-
-		shouldDeploy := len(execution.Builds) > 0
-		if strings.TrimSpace(options.VersionOverride) != "" || strings.TrimSpace(options.RuntimeImage) != "" {
-			shouldDeploy = true
-		}
-		if !shouldDeploy && checkKubernetesDeployment != nil {
-			expectedSSHD := sshdExpectationForDeployment(result)
-			deployed, err := checkKubernetesDeployment(common.KubernetesDeploymentCheckParams{
-				Name:              common.RuntimeReleaseName(result.Tenant),
-				Namespace:         namespace,
-				KubernetesContext: result.EnvConfig.KubernetesContext,
-				ExpectedRepoPath:  common.RemoteShellWorktreePath(shellReq),
-				ExpectedSSHD:      expectedSSHD,
-				ExpectedMCPPort:   common.MCPPortForResult(result),
-				ExpectedSSHPort:   common.SSHLocalPortForResult(result),
-			})
-			if err != nil {
-				return err
-			}
-			shouldDeploy = !deployed
-		}
-
-		if shouldDeploy {
-			if options.VSCode || options.IntelliJ {
-				return fmt.Errorf("opening %s requires updating the runtime deployment for %s/%s; run `erun sshd init %s %s` or `erun open %s %s` first, then retry", ideOpenLabel(options), result.Tenant, result.Environment, result.Tenant, result.Environment, result.Tenant, result.Environment)
-			}
-			if result.EnvConfig.SSHD.Enabled {
-				execution.Deploy.SSHDEnabled = true
-			}
-			ctx.Logger.Debug("deploying the devops runtime before opening the shell")
-			if err := common.RunDeploySpec(
-				ctx,
-				execution,
-				common.DockerImageBuilder,
-				func(ctx common.Context, pushInput common.DockerPushSpec) error {
-					return common.RunDockerPush(ctx, pushInput, common.DockerImagePusher)
-				},
-				wrapHelmDeployWithReleaseRecovery(
-					promptRunner,
-					wrapOpenHelmDeployWithSpinner(ctx, execution.Deploy.ReleaseName, deployHelmChart),
-					common.ClearHelmReleasePendingOperation,
-				),
-			); err != nil {
-				return err
-			}
-			if !ctx.DryRun {
-				result, err = persistOpenRuntimeVersion(result, execution.Deploy.Version, options.SaveEnvConfig)
-				if err != nil {
-					return err
-				}
-			}
-		}
 	}
+	if r.activateMCP == nil {
+		return nil
+	}
+	return r.activateMCP(r.ctx, r.result)
+}
 
-	if activateSSHD != nil && result.EnvConfig.SSHD.Enabled {
-		if err := activateSSHD(ctx, result); err != nil {
-			return err
+func (r *resolvedOpenRunner) maybeLaunchIDE() (bool, error) {
+	if r.options.VSCode {
+		if r.launchVSCode == nil {
+			return true, fmt.Errorf("VS Code launcher is required")
 		}
+		return true, r.launchVSCode(r.ctx, r.result)
 	}
-	if activateMCP != nil {
-		if err := activateMCP(ctx, result); err != nil {
-			return err
+	if r.options.IntelliJ {
+		if r.launchIntelliJ == nil {
+			return true, fmt.Errorf("IntelliJ launcher is required")
 		}
+		return true, r.launchIntelliJ(r.ctx, r.result, r.promptRunner)
 	}
+	return false, nil
+}
 
-	if options.VSCode {
-		if launchVSCode == nil {
-			return fmt.Errorf("VS Code launcher is required")
-		}
-		return launchVSCode(ctx, result)
+func (r *resolvedOpenRunner) emitNoShellSetup() error {
+	namespace := common.KubernetesNamespaceName(r.result.Tenant, r.result.Environment)
+	r.ctx.TraceCommand("", "kubectl", "config", "use-context", strings.TrimSpace(r.result.EnvConfig.KubernetesContext))
+	r.ctx.TraceCommand("", "kubectl", "config", "set-context", "--current", "--namespace="+namespace)
+	r.ctx.TraceCommand("", "cd", r.result.RepoPath)
+	promptRunner := r.promptRunner
+	if r.options.NoAliasPrompt {
+		promptRunner = nil
 	}
-	if options.IntelliJ {
-		if launchIntelliJ == nil {
-			return fmt.Errorf("IntelliJ launcher is required")
-		}
-		return launchIntelliJ(ctx, result, promptRunner)
-	}
+	return emitLocalShellSetupForOpenResult(r.result, promptRunner, r.ctx.Stdout, r.ctx.Stderr)
+}
 
-	if options.NoShell {
-		ctx.TraceCommand("", "kubectl", "config", "use-context", strings.TrimSpace(result.EnvConfig.KubernetesContext))
-		ctx.TraceCommand("", "kubectl", "config", "set-context", "--current", "--namespace="+namespace)
-		ctx.TraceCommand("", "cd", result.RepoPath)
-		if options.NoAliasPrompt {
-			promptRunner = nil
-		}
-		return emitLocalShellSetupForOpenResult(result, promptRunner, ctx.Stdout, ctx.Stderr)
-	}
-
+func (r *resolvedOpenRunner) traceShellPreview(shellReq common.ShellLaunchParams) {
 	if preview, err := common.PreviewShellLaunch(shellReq); err == nil {
-		ctx.TraceCommand("", "kubectl", preview.WaitArgs...)
+		r.ctx.TraceCommand("", "kubectl", preview.WaitArgs...)
 		execArgs := append([]string{}, preview.ExecArgs...)
 		if len(execArgs) > 0 {
 			execArgs[len(execArgs)-1] = "<bootstrap-script>"
 		}
-		ctx.TraceCommand("", "kubectl", execArgs...)
-		ctx.TraceBlock("bootstrap-script", preview.Script)
+		r.ctx.TraceCommand("", "kubectl", execArgs...)
+		r.ctx.TraceBlock("bootstrap-script", preview.Script)
 	} else {
-		ctx.Logger.Debug("unable to render remote shell bootstrap trace: " + err.Error())
+		r.ctx.Logger.Debug("unable to render remote shell bootstrap trace: " + err.Error())
 	}
+}
 
-	if ctx.DryRun {
-		return nil
-	}
-
+func (r *resolvedOpenRunner) runShellLoop(shellReq common.ShellLaunchParams) error {
 	for {
-		err := openShell(ctx, shellReq)
+		err := r.openShell(r.ctx, shellReq)
 		if !errors.Is(err, common.ErrShellReattachDeploy) {
 			return err
 		}
-		if runManagedDeploy == nil {
+		if r.runManagedDeploy == nil {
 			return err
 		}
-		if err := runManagedDeploy(ctx, result); err != nil {
+		if err := r.runManagedDeploy(r.ctx, r.result); err != nil {
 			return err
 		}
 	}
@@ -513,15 +610,11 @@ func maybeConfigureOpenNoShellAlias(result common.OpenResult, promptRunner Promp
 	aliasName := openNoShellAliasName(result)
 	startupFile, aliasConfigured := detectOpenNoShellAliasStartupFile(result, shellPath)
 	if aliasConfigured {
-		for _, line := range openNoShellHintLines(result, shellPath) {
-			_, _ = fmt.Fprintln(stderr, line)
-		}
+		writeOpenNoShellHintLines(stderr, result, shellPath)
 		return nil
 	}
 	if startupFile == "" || promptRunner == nil || dialect == openNoShellDialectPowerShell {
-		for _, line := range openNoShellHintLines(result, shellPath) {
-			_, _ = fmt.Fprintln(stderr, line)
-		}
+		writeOpenNoShellHintLines(stderr, result, shellPath)
 		return nil
 	}
 
@@ -530,9 +623,7 @@ func maybeConfigureOpenNoShellAlias(result common.OpenResult, promptRunner Promp
 		return err
 	}
 	if !ok {
-		for _, line := range openNoShellHintLines(result, shellPath) {
-			_, _ = fmt.Fprintln(stderr, line)
-		}
+		writeOpenNoShellHintLines(stderr, result, shellPath)
 		return nil
 	}
 
@@ -542,6 +633,12 @@ func maybeConfigureOpenNoShellAlias(result common.OpenResult, promptRunner Promp
 	_, _ = fmt.Fprintf(stderr, "added %s to %s\n", aliasName, startupFile)
 	_, _ = fmt.Fprintf(stderr, "open a new shell to use %s\n", aliasName)
 	return nil
+}
+
+func writeOpenNoShellHintLines(stderr io.Writer, result common.OpenResult, shellPath string) {
+	for _, line := range openNoShellHintLines(result, shellPath) {
+		_, _ = fmt.Fprintln(stderr, line)
+	}
 }
 
 func openNoShellHintLines(result common.OpenResult, shellPath string) []string {

@@ -43,93 +43,275 @@ type testRootDeps struct {
 	Now                            common.NowFunc
 }
 
-func newTestRootCmd(deps testRootDeps) *cobra.Command {
-	store := deps.Store
-	if store == nil {
-		store = rootStore(common.ConfigStore{})
+func requireNoError(t *testing.T, err error, context string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s: %v", context, err)
 	}
+}
+
+func requireMkdirAll(t *testing.T, path string, perm os.FileMode, context string) {
+	t.Helper()
+	requireNoError(t, os.MkdirAll(path, perm), context)
+}
+
+func requireWriteFile(t *testing.T, path string, data []byte, perm os.FileMode, context string) {
+	t.Helper()
+	requireNoError(t, os.WriteFile(path, data, perm), context)
+}
+
+func requireStringSlicesEqual(t *testing.T, got, want []string, context string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s: got %v want %v", context, got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("%s: got %v want %v", context, got, want)
+		}
+	}
+}
+
+func testRootStoreOrDefault(store rootStore) rootStore {
+	if store == nil {
+		return rootStore(common.ConfigStore{})
+	}
+	return store
+}
+
+func testListStoreOrDefault(store rootStore) common.ListStore {
 	listDataStore, ok := any(store).(common.ListStore)
 	if !ok {
-		listDataStore = common.ConfigStore{}
+		return common.ConfigStore{}
 	}
-	findProjectRoot := deps.FindProjectRoot
+	return listDataStore
+}
+
+func testCloudStoreOrDefault(store rootStore) cloudCommandStoreInterface {
+	cloudStore, ok := any(store).(cloudCommandStoreInterface)
+	if !ok {
+		return common.ConfigStore{}
+	}
+	return cloudStore
+}
+
+func testDeleteStoreOrDefault(store rootStore) common.DeleteStore {
+	deleteStore, ok := any(store).(common.DeleteStore)
+	if !ok {
+		return common.ConfigStore{}
+	}
+	return deleteStore
+}
+
+func testNamespaceDeleterOrDefault(deleteNamespace common.NamespaceDeleterFunc) common.NamespaceDeleterFunc {
+	if deleteNamespace == nil {
+		return common.DeleteKubernetesNamespace
+	}
+	return deleteNamespace
+}
+
+func testProjectFinderOrDefault(findProjectRoot common.ProjectFinderFunc) common.ProjectFinderFunc {
 	if findProjectRoot == nil {
-		findProjectRoot = common.FindProjectRoot
+		return common.FindProjectRoot
 	}
-	optionalBuildFindProjectRoot := deps.OptionalBuildFindProjectRoot
-	if optionalBuildFindProjectRoot == nil {
-		optionalBuildFindProjectRoot = func() (string, string, error) {
+	return findProjectRoot
+}
+
+func testOptionalProjectFinderOrDefault(findProjectRoot common.ProjectFinderFunc) common.ProjectFinderFunc {
+	if findProjectRoot == nil {
+		return func() (string, string, error) {
 			return "", "", common.ErrNotInGitRepository
 		}
 	}
-	promptRunner := deps.PromptRunner
-	if promptRunner == nil {
-		promptRunner = runPrompt
-	}
-	selectRunner := deps.SelectRunner
-	if selectRunner == nil {
-		selectRunner = runSelect
-	}
-	listKubernetesContexts := deps.ListKubernetesContexts
-	resolveDockerBuildContext := deps.ResolveDockerBuildContext
-	if resolveDockerBuildContext == nil {
-		resolveDockerBuildContext = common.ResolveDockerBuildContext
-	}
-	resolveKubernetesDeployContext := deps.ResolveKubernetesDeployContext
-	if resolveKubernetesDeployContext == nil {
-		resolveKubernetesDeployContext = common.ResolveKubernetesDeployContext
-	}
-	buildDockerImage := deps.BuildDockerImage
-	if buildDockerImage == nil {
-		buildDockerImage = common.DockerImageBuilder
-	}
-	runBuildScript := deps.RunBuildScript
-	if runBuildScript == nil {
-		runBuildScript = common.BuildScriptRunner
-	}
-	pushDockerImage := deps.PushDockerImage
-	if pushDockerImage == nil {
-		pushDockerImage = common.DockerImagePusher
-	}
-	loginToDockerRegistry := deps.LoginToDockerRegistry
-	if loginToDockerRegistry == nil {
-		loginToDockerRegistry = common.DockerRegistryLogin
-	}
-	deployHelmChart := deps.DeployHelmChart
-	if deployHelmChart == nil {
-		deployHelmChart = common.DeployHelmChart
-	}
-	if deps.EnsureKubernetesNamespace != nil {
-		deployHelmChart = common.WrapHelmChartDeployerWithNamespaceEnsure(deps.EnsureKubernetesNamespace, deployHelmChart)
-	}
-	recoveringDeployHelmChart := wrapHelmDeployWithReleaseRecovery(promptRunner, deployHelmChart, deps.RecoverHelmRelease)
-	launchMCP := deps.LaunchMCP
-	if launchMCP == nil {
-		launchMCP = launchMCPProcess
-	}
-	launchApp := deps.LaunchApp
-	if launchApp == nil {
-		launchApp = launchAppProcess
-	}
-	runGit := deps.RunGit
-	if runGit == nil {
-		runGit = common.GitCommandRunner
-	}
-	openShell := newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell)
-	if deps.LaunchShell != nil {
-		openShell = func(_ common.Context, req common.ShellLaunchParams) error {
-			return deps.LaunchShell(req)
-		}
-	}
-	now := deps.Now
-	if now == nil {
-		now = common.NowFunc(time.Now)
-	}
+	return findProjectRoot
+}
 
-	openDeployHelmChart := common.HelmChartDeployerFunc(nil)
-	if deps.DeployHelmChart != nil {
-		openDeployHelmChart = deployHelmChart
+func testPromptRunnerOrDefault(promptRunner PromptRunner) PromptRunner {
+	if promptRunner == nil {
+		return runPrompt
 	}
+	return promptRunner
+}
+
+func testSelectRunnerOrDefault(selectRunner SelectRunner) SelectRunner {
+	if selectRunner == nil {
+		return runSelect
+	}
+	return selectRunner
+}
+
+func testDockerBuildContextResolverOrDefault(resolve common.BuildContextResolverFunc) common.BuildContextResolverFunc {
+	if resolve == nil {
+		return common.ResolveDockerBuildContext
+	}
+	return resolve
+}
+
+func testKubernetesDeployContextResolverOrDefault(resolve common.DeployContextResolverFunc) common.DeployContextResolverFunc {
+	if resolve == nil {
+		return common.ResolveKubernetesDeployContext
+	}
+	return resolve
+}
+
+func testDockerImageBuilderOrDefault(build common.DockerImageBuilderFunc) common.DockerImageBuilderFunc {
+	if build == nil {
+		return common.DockerImageBuilder
+	}
+	return build
+}
+
+func testBuildScriptRunnerOrDefault(run common.BuildScriptRunnerFunc) common.BuildScriptRunnerFunc {
+	if run == nil {
+		return common.BuildScriptRunner
+	}
+	return run
+}
+
+func testDockerImagePusherOrDefault(push common.DockerImagePusherFunc) common.DockerImagePusherFunc {
+	if push == nil {
+		return common.DockerImagePusher
+	}
+	return push
+}
+
+func testDockerRegistryLoginOrDefault(login common.DockerRegistryLoginFunc) common.DockerRegistryLoginFunc {
+	if login == nil {
+		return common.DockerRegistryLogin
+	}
+	return login
+}
+
+func testHelmDeployerOrDefault(deploy common.HelmChartDeployerFunc, ensure common.NamespaceEnsurerFunc) common.HelmChartDeployerFunc {
+	if deploy == nil {
+		deploy = common.DeployHelmChart
+	}
+	if ensure != nil {
+		return common.WrapHelmChartDeployerWithNamespaceEnsure(ensure, deploy)
+	}
+	return deploy
+}
+
+func testMCPLauncherOrDefault(launch MCPLauncher) MCPLauncher {
+	if launch == nil {
+		return launchMCPProcess
+	}
+	return launch
+}
+
+func testAppLauncherOrDefault(launch AppLauncher) AppLauncher {
+	if launch == nil {
+		return launchAppProcess
+	}
+	return launch
+}
+
+func testGitRunnerOrDefault(runGit common.GitCommandRunnerFunc) common.GitCommandRunnerFunc {
+	if runGit == nil {
+		return common.GitCommandRunner
+	}
+	return runGit
+}
+
+func testOpenShellRunnerOrDefault(launchShell common.ShellLauncherFunc) OpenShellRunner {
+	if launchShell == nil {
+		return newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell)
+	}
+	return func(_ common.Context, req common.ShellLaunchParams) error {
+		return launchShell(req)
+	}
+}
+
+func testNowOrDefault(now common.NowFunc) common.NowFunc {
+	if now == nil {
+		return common.NowFunc(time.Now)
+	}
+	return now
+}
+
+func testOpenHelmDeployer(deploy common.HelmChartDeployerFunc, openDeploy common.HelmChartDeployerFunc) common.HelmChartDeployerFunc {
+	if deploy == nil {
+		return nil
+	}
+	return openDeploy
+}
+
+func testMCPForwarderOrDefault(forward MCPForwarder) MCPForwarder {
+	if forward == nil {
+		return func(common.Context, common.OpenResult) error { return nil }
+	}
+	return forward
+}
+
+func testVSCodeLauncherOrDefault(launch VSCodeLauncher) VSCodeLauncher {
+	if launch == nil {
+		return launchVSCode
+	}
+	return launch
+}
+
+func testIntelliJLauncherOrDefault(launch IntelliJLauncher) IntelliJLauncher {
+	if launch == nil {
+		return launchIntelliJ
+	}
+	return launch
+}
+
+type testRootCmdParts struct {
+	deps                           testRootDeps
+	store                          rootStore
+	listDataStore                  common.ListStore
+	findProjectRoot                common.ProjectFinderFunc
+	optionalBuildFindProjectRoot   common.ProjectFinderFunc
+	promptRunner                   PromptRunner
+	selectRunner                   SelectRunner
+	resolveDockerBuildContext      common.BuildContextResolverFunc
+	resolveKubernetesDeployContext common.DeployContextResolverFunc
+	buildDockerImage               common.DockerImageBuilderFunc
+	runBuildScript                 common.BuildScriptRunnerFunc
+	loginToDockerRegistry          common.DockerRegistryLoginFunc
+	recoveringDeployHelmChart      common.HelmChartDeployerFunc
+	launchMCP                      MCPLauncher
+	launchApp                      AppLauncher
+	runGit                         common.GitCommandRunnerFunc
+	openShell                      OpenShellRunner
+	now                            common.NowFunc
+	openDeployHelmChart            common.HelmChartDeployerFunc
+	resolveOpen                    func(common.OpenParams) (common.OpenResult, error)
+	resolveRuntimeDeploySpec       func(common.OpenResult) (common.DeploySpec, error)
+	activateMCP                    MCPForwarder
+	activateSSHD                   SSHDActivator
+	launchVSCodeCmd                VSCodeLauncher
+	launchIntelliJCmd              IntelliJLauncher
+	push                           common.DockerPushFunc
+	runManagedDeploy               func(common.Context, common.OpenResult) error
+	runInit                        func(common.Context, common.BootstrapInitParams) error
+	runInitForArgs                 func(common.Context, []string) error
+	runInitForOpen                 func(common.Context, common.OpenParams) error
+}
+
+func newTestRootCmd(deps testRootDeps) *cobra.Command {
+	store := testRootStoreOrDefault(deps.Store)
+	listDataStore := testListStoreOrDefault(store)
+	findProjectRoot := testProjectFinderOrDefault(deps.FindProjectRoot)
+	optionalBuildFindProjectRoot := testOptionalProjectFinderOrDefault(deps.OptionalBuildFindProjectRoot)
+	promptRunner := testPromptRunnerOrDefault(deps.PromptRunner)
+	selectRunner := testSelectRunnerOrDefault(deps.SelectRunner)
+	listKubernetesContexts := deps.ListKubernetesContexts
+	resolveDockerBuildContext := testDockerBuildContextResolverOrDefault(deps.ResolveDockerBuildContext)
+	resolveKubernetesDeployContext := testKubernetesDeployContextResolverOrDefault(deps.ResolveKubernetesDeployContext)
+	buildDockerImage := testDockerImageBuilderOrDefault(deps.BuildDockerImage)
+	runBuildScript := testBuildScriptRunnerOrDefault(deps.RunBuildScript)
+	pushDockerImage := testDockerImagePusherOrDefault(deps.PushDockerImage)
+	loginToDockerRegistry := testDockerRegistryLoginOrDefault(deps.LoginToDockerRegistry)
+	deployHelmChart := testHelmDeployerOrDefault(deps.DeployHelmChart, deps.EnsureKubernetesNamespace)
+	recoveringDeployHelmChart := wrapHelmDeployWithReleaseRecovery(promptRunner, deployHelmChart, deps.RecoverHelmRelease)
+	launchMCP := testMCPLauncherOrDefault(deps.LaunchMCP)
+	launchApp := testAppLauncherOrDefault(deps.LaunchApp)
+	runGit := testGitRunnerOrDefault(deps.RunGit)
+	openShell := testOpenShellRunnerOrDefault(deps.LaunchShell)
+	now := testNowOrDefault(deps.Now)
+	openDeployHelmChart := testOpenHelmDeployer(deps.DeployHelmChart, deployHelmChart)
 
 	resolveOpen := func(params common.OpenParams) (common.OpenResult, error) {
 		return common.ResolveOpen(store, params)
@@ -137,19 +319,10 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	resolveRuntimeDeploySpec := func(target common.OpenResult) (common.DeploySpec, error) {
 		return resolveRuntimeDeploySpecForOpen(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, currentBuildInfo(), target)
 	}
-	activateMCP := deps.ForwardMCP
-	if activateMCP == nil {
-		activateMCP = func(common.Context, common.OpenResult) error { return nil }
-	}
+	activateMCP := testMCPForwarderOrDefault(deps.ForwardMCP)
 	activateSSHD := newSSHDActivator(deps.RunRemoteCommand)
-	launchVSCodeCmd := deps.LaunchVSCode
-	if launchVSCodeCmd == nil {
-		launchVSCodeCmd = launchVSCode
-	}
-	launchIntelliJCmd := deps.LaunchIntelliJ
-	if launchIntelliJCmd == nil {
-		launchIntelliJCmd = launchIntelliJ
-	}
+	launchVSCodeCmd := testVSCodeLauncherOrDefault(deps.LaunchVSCode)
+	launchIntelliJCmd := testIntelliJLauncherOrDefault(deps.LaunchIntelliJ)
 	push := newPushOperation(pushDockerImage, loginToDockerRegistry, selectRunner)
 	runManagedDeploy := func(ctx common.Context, target common.OpenResult) error {
 		ctx = withCloudContextPreflight(ctx, store)
@@ -180,80 +353,120 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	runInitForArgs := newRunInitForArgs(store, runInit)
 	runInitForOpen := newRunInitForOpen(store, runInit)
 
-	initCmd := newInitCmd(runInit)
+	return assembleTestRootCmd(testRootCmdParts{
+		deps:                           deps,
+		store:                          store,
+		listDataStore:                  listDataStore,
+		findProjectRoot:                findProjectRoot,
+		optionalBuildFindProjectRoot:   optionalBuildFindProjectRoot,
+		promptRunner:                   promptRunner,
+		selectRunner:                   selectRunner,
+		resolveDockerBuildContext:      resolveDockerBuildContext,
+		resolveKubernetesDeployContext: resolveKubernetesDeployContext,
+		buildDockerImage:               buildDockerImage,
+		runBuildScript:                 runBuildScript,
+		loginToDockerRegistry:          loginToDockerRegistry,
+		recoveringDeployHelmChart:      recoveringDeployHelmChart,
+		launchMCP:                      launchMCP,
+		launchApp:                      launchApp,
+		runGit:                         runGit,
+		openShell:                      openShell,
+		now:                            now,
+		openDeployHelmChart:            openDeployHelmChart,
+		resolveOpen:                    resolveOpen,
+		resolveRuntimeDeploySpec:       resolveRuntimeDeploySpec,
+		activateMCP:                    activateMCP,
+		activateSSHD:                   activateSSHD,
+		launchVSCodeCmd:                launchVSCodeCmd,
+		launchIntelliJCmd:              launchIntelliJCmd,
+		push:                           push,
+		runManagedDeploy:               runManagedDeploy,
+		runInit:                        runInit,
+		runInitForArgs:                 runInitForArgs,
+		runInitForOpen:                 runInitForOpen,
+	})
+}
+
+func assembleTestRootCmd(parts testRootCmdParts) *cobra.Command {
+	initCmd := newInitCmd(parts.runInit)
 	openCmd := newOpenCmd(func(ctx common.Context) common.Context {
-		return withCloudContextPreflight(ctx, store)
-	}, resolveOpen, store.SaveEnvConfig, runInitForOpen, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart, activateMCP, activateSSHD, launchVSCodeCmd, launchIntelliJCmd)
+		return withCloudContextPreflight(ctx, parts.store)
+	}, parts.resolveOpen, parts.store.SaveEnvConfig, parts.runInitForOpen, parts.promptRunner, parts.openShell, parts.runManagedDeploy, parts.deps.CheckKubernetesDeployment, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.activateMCP, parts.activateSSHD, parts.launchVSCodeCmd, parts.launchIntelliJCmd)
 	sshdCmd := newSSHDCmd(func(ctx common.Context) common.Context {
-		return withCloudContextPreflight(ctx, store)
-	}, resolveOpen, store.SaveEnvConfig, runInitForOpen, resolveRuntimeDeploySpec, openDeployHelmChart, deps.RunRemoteCommand, writeLocalSSHConfig)
+		return withCloudContextPreflight(ctx, parts.store)
+	}, parts.resolveOpen, parts.store.SaveEnvConfig, parts.runInitForOpen, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.deps.RunRemoteCommand, writeLocalSSHConfig)
 	containerCmd := newCommandGroup(
 		"container",
 		"Container utilities",
-		newBuildCmd(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push, recoveringDeployHelmChart),
-		newPushCmd(store, findProjectRoot, resolveDockerBuildContext, now, buildDockerImage, push),
+		newBuildCmd(parts.store, parts.findProjectRoot, parts.resolveDockerBuildContext, parts.resolveKubernetesDeployContext, parts.now, parts.runBuildScript, parts.buildDockerImage, parts.loginToDockerRegistry, parts.selectRunner, parts.push, parts.recoveringDeployHelmChart),
+		newPushCmd(parts.store, parts.findProjectRoot, parts.resolveDockerBuildContext, parts.now, parts.buildDockerImage, parts.push),
 	)
 	k8sCmd := newCommandGroup(
 		"k8s",
 		"Kubernetes utilities",
-		newK8sDeployCmd(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, buildDockerImage, push, recoveringDeployHelmChart),
+		newK8sDeployCmd(parts.store, parts.findProjectRoot, parts.resolveDockerBuildContext, parts.resolveKubernetesDeployContext, parts.now, parts.buildDockerImage, parts.push, parts.recoveringDeployHelmChart),
 	)
 	devopsCmd := newCommandGroup("devops", "DevOps utilities", containerCmd, k8sCmd)
-
-	var buildCmd *cobra.Command
-	if hasOptionalBuildCmd(optionalBuildFindProjectRoot, resolveDockerBuildContext) {
-		buildCmd = newBuildCmd(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push, recoveringDeployHelmChart)
-		buildCmd.Short = optionalBuildCmdShort(optionalBuildFindProjectRoot, resolveDockerBuildContext)
-	}
-	var pushCmd *cobra.Command
-	if hasOptionalPushCmd(optionalBuildFindProjectRoot, resolveDockerBuildContext) {
-		pushCmd = newPushCmd(store, findProjectRoot, resolveDockerBuildContext, now, buildDockerImage, push)
-		pushCmd.Short = optionalPushCmdShort(optionalBuildFindProjectRoot, resolveDockerBuildContext)
-	}
-	var deployCmd *cobra.Command
-	if hasOptionalDeployCmd(resolveKubernetesDeployContext) {
-		deployCmd = newDeployCmd(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, buildDockerImage, push, recoveringDeployHelmChart)
-	}
-
-	mcpCmd := newMCPCmd(resolveOpen, runInitForArgs, launchMCP)
-	appCmd := newAppCmd(launchApp)
-	execCmd := newExecCmd(findProjectRoot, runGit, deps.RunRawCommand)
-	cloudStore, ok := any(store).(cloudCommandStoreInterface)
-	if !ok {
-		cloudStore = common.ConfigStore{}
-	}
-	cloudCmd := newCloudCmd(cloudStore, promptRunner, selectRunner, common.CloudDependencies{})
-	listCmd := newListCmd(listDataStore, findProjectRoot)
-	doctorCmd := newDoctorCmd(resolveOpen, promptRunner)
-	deleteNamespace := deps.DeleteKubernetesNamespace
-	if deleteNamespace == nil {
-		deleteNamespace = common.DeleteKubernetesNamespace
-	}
-	deleteStore, ok := any(store).(common.DeleteStore)
-	if !ok {
-		deleteStore = common.ConfigStore{}
-	}
-	deleteCmd := newDeleteCmd(deleteStore, promptRunner, deleteNamespace)
-	releaseCmd := newReleaseCmd(findProjectRoot, runGit)
+	buildCmd := optionalTestBuildCmd(parts)
+	pushCmd := optionalTestPushCmd(parts)
+	deployCmd := optionalTestDeployCmd(parts)
 	versionCmd := newVersionCmd(func() (common.BuildInfo, string, error) {
-		return resolveVersionCommandBuildInfo(findProjectRoot)
-	}, deps.ResolveRuntimeRegistryVersions)
+		return resolveVersionCommandBuildInfo(parts.findProjectRoot)
+	}, parts.deps.ResolveRuntimeRegistryVersions)
+	runRoot := testRootRunner(parts)
+	cmd := newRootCommand(runRoot)
+	addCommands(cmd,
+		initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd,
+		newMCPCmd(parts.resolveOpen, parts.runInitForArgs, parts.launchMCP),
+		newAppCmd(parts.launchApp),
+		newExecCmd(parts.findProjectRoot, parts.runGit, parts.deps.RunRawCommand),
+		newCloudCmd(testCloudStoreOrDefault(parts.store), parts.promptRunner, parts.selectRunner, common.CloudDependencies{}),
+		newListCmd(parts.listDataStore, parts.findProjectRoot),
+		newDoctorCmd(parts.resolveOpen, parts.promptRunner),
+		newDeleteCmd(testDeleteStoreOrDefault(parts.store), parts.promptRunner, testNamespaceDeleterOrDefault(parts.deps.DeleteKubernetesNamespace)),
+		newReleaseCmd(parts.findProjectRoot, parts.runGit),
+		versionCmd,
+	)
+	return cmd
+}
 
-	runRoot := func(cmd *cobra.Command, args []string) error {
-		ctx := withCloudContextPreflight(commandContext(cmd), store)
-		result, initRan, err := resolveOpenWithInitStop(ctx, args, shouldInitRootCommand, resolveOpen, runInitForArgs)
+func optionalTestBuildCmd(parts testRootCmdParts) *cobra.Command {
+	if !hasOptionalBuildCmd(parts.optionalBuildFindProjectRoot, parts.resolveDockerBuildContext) {
+		return nil
+	}
+	buildCmd := newBuildCmd(parts.store, parts.findProjectRoot, parts.resolveDockerBuildContext, parts.resolveKubernetesDeployContext, parts.now, parts.runBuildScript, parts.buildDockerImage, parts.loginToDockerRegistry, parts.selectRunner, parts.push, parts.recoveringDeployHelmChart)
+	buildCmd.Short = optionalBuildCmdShort(parts.optionalBuildFindProjectRoot, parts.resolveDockerBuildContext)
+	return buildCmd
+}
+
+func optionalTestPushCmd(parts testRootCmdParts) *cobra.Command {
+	if !hasOptionalPushCmd(parts.optionalBuildFindProjectRoot, parts.resolveDockerBuildContext) {
+		return nil
+	}
+	pushCmd := newPushCmd(parts.store, parts.findProjectRoot, parts.resolveDockerBuildContext, parts.now, parts.buildDockerImage, parts.push)
+	pushCmd.Short = optionalPushCmdShort(parts.optionalBuildFindProjectRoot, parts.resolveDockerBuildContext)
+	return pushCmd
+}
+
+func optionalTestDeployCmd(parts testRootCmdParts) *cobra.Command {
+	if !hasOptionalDeployCmd(parts.resolveKubernetesDeployContext) {
+		return nil
+	}
+	return newDeployCmd(parts.store, parts.findProjectRoot, parts.resolveDockerBuildContext, parts.resolveKubernetesDeployContext, parts.now, parts.buildDockerImage, parts.push, parts.recoveringDeployHelmChart)
+}
+
+func testRootRunner(parts testRootCmdParts) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		ctx := withCloudContextPreflight(commandContext(cmd), parts.store)
+		result, initRan, err := resolveOpenWithInitStop(ctx, args, shouldInitRootCommand, parts.resolveOpen, parts.runInitForArgs)
 		if err != nil {
 			return err
 		}
 		if initRan {
 			return nil
 		}
-		return runResolvedOpenCommand(ctx, result, openOptions{}, promptRunner, openShell, runManagedDeploy, deps.CheckKubernetesDeployment, resolveRuntimeDeploySpec, openDeployHelmChart, activateMCP, activateSSHD, launchVSCodeCmd, launchIntelliJCmd)
+		return runResolvedOpenCommand(ctx, result, openOptions{}, parts.promptRunner, parts.openShell, parts.runManagedDeploy, parts.deps.CheckKubernetesDeployment, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.activateMCP, parts.activateSSHD, parts.launchVSCodeCmd, parts.launchIntelliJCmd)
 	}
-
-	cmd := newRootCommand(runRoot)
-	addCommands(cmd, initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd, mcpCmd, appCmd, execCmd, cloudCmd, listCmd, doctorCmd, deleteCmd, releaseCmd, versionCmd)
-	return cmd
 }
 
 func stubKubectlContexts(t *testing.T, contexts []string, current string) {
@@ -272,8 +485,6 @@ func stubKubectlContexts(t *testing.T, contexts []string, current string) {
 		"fi\n" +
 		"echo \"unexpected kubectl invocation: $@\" >&2\n" +
 		"exit 1\n"
-	if err := os.WriteFile(kubectlPath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write kubectl stub: %v", err)
-	}
+	requireNoError(t, os.WriteFile(kubectlPath, []byte(script), 0o755), "write kubectl stub")
 	t.Setenv("PATH", kubectlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }

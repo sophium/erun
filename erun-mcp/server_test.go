@@ -281,6 +281,12 @@ func TestDiffToolReturnsStructuredGitDiff(t *testing.T) {
 		t.Fatalf("diffTool failed: %v", err)
 	}
 
+	assertStructuredDiffOutput(t, output, projectRoot)
+}
+
+func assertStructuredDiffOutput(t *testing.T, output eruncommon.DiffResult, projectRoot string) {
+	t.Helper()
+
 	if output.WorkingDirectory != projectRoot || output.RawDiff == "" {
 		t.Fatalf("unexpected output: %+v", output)
 	}
@@ -334,23 +340,35 @@ func TestListToolReturnsConfiguredTenantsAndEffectiveTarget(t *testing.T) {
 		t.Fatalf("listTool failed: %v", err)
 	}
 
+	assertListToolOutput(t, output)
+}
+
+func assertListToolOutput(t *testing.T, output eruncommon.ListResult) {
+	t.Helper()
+
 	if output.Defaults.Tenant != "tenant-a" || output.Defaults.Environment != "dev" {
 		t.Fatalf("unexpected defaults: %+v", output.Defaults)
 	}
 	if output.CurrentDirectory.Effective == nil {
 		t.Fatalf("expected effective target, got %+v", output.CurrentDirectory)
 	}
-	if output.CurrentDirectory.Effective.Tenant != "tenant-a" || output.CurrentDirectory.Effective.Environment != "dev" {
-		t.Fatalf("unexpected effective target: %+v", output.CurrentDirectory.Effective)
-	}
-	if output.CurrentDirectory.Effective.LocalPorts.RangeStart != 17000 || output.CurrentDirectory.Effective.LocalPorts.SSH != 17022 {
-		t.Fatalf("unexpected effective local ports: %+v", output.CurrentDirectory.Effective.LocalPorts)
-	}
+	assertListEffectiveTarget(t, *output.CurrentDirectory.Effective)
 	if len(output.Tenants) != 1 || output.Tenants[0].Name != "tenant-a" {
 		t.Fatalf("unexpected tenants: %+v", output.Tenants)
 	}
 	if output.Tenants[0].Environments[0].LocalPorts.RangeEnd != 17099 {
 		t.Fatalf("unexpected environment local ports: %+v", output.Tenants[0].Environments[0].LocalPorts)
+	}
+}
+
+func assertListEffectiveTarget(t *testing.T, target eruncommon.ListEffectiveTargetResult) {
+	t.Helper()
+
+	if target.Tenant != "tenant-a" || target.Environment != "dev" {
+		t.Fatalf("unexpected effective target: %+v", target)
+	}
+	if target.LocalPorts.RangeStart != 17000 || target.LocalPorts.SSH != 17022 {
+		t.Fatalf("unexpected effective local ports: %+v", target.LocalPorts)
 	}
 }
 
@@ -532,24 +550,32 @@ func TestBuildToolPreviewReleaseIncludesReleaseAndBuildTrace(t *testing.T) {
 	if !strings.Contains(output.Trace[0], "release: branch=develop mode=candidate version=1.4.2-rc.") {
 		t.Fatalf("unexpected release trace: %+v", output.Trace)
 	}
-	foundBuildTrace := false
-	foundVersionReport := false
-	for _, trace := range output.Trace {
+	if !hasReleaseBuildTrace(output.Trace) {
+		t.Fatalf("unexpected build trace: %+v", output.Trace)
+	}
+	if !hasReleaseVersionReport(output.Trace) {
+		t.Fatalf("expected final release version output, got %+v", output.Trace)
+	}
+}
+
+func hasReleaseBuildTrace(traces []string) bool {
+	for _, trace := range traces {
 		if strings.Contains(trace, "docker buildx build --builder erun-multiarch --platform 'linux/amd64,linux/arm64'") &&
 			strings.Contains(trace, "-t erunpaas/api:1.4.2-rc.") &&
 			strings.Contains(trace, "--push") {
-			foundBuildTrace = true
+			return true
 		}
+	}
+	return false
+}
+
+func hasReleaseVersionReport(traces []string) bool {
+	for _, trace := range traces {
 		if strings.Contains(trace, "release version: 1.4.2-rc.") {
-			foundVersionReport = true
+			return true
 		}
 	}
-	if !foundBuildTrace {
-		t.Fatalf("unexpected build trace: %+v", output.Trace)
-	}
-	if !foundVersionReport {
-		t.Fatalf("expected final release version output, got %+v", output.Trace)
-	}
+	return false
 }
 
 func TestBuildToolPreviewAtRepoRootIncludesBuildTrace(t *testing.T) {

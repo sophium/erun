@@ -2,7 +2,6 @@ package erunmcp
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -153,40 +152,6 @@ func runRuntimeCommand(runtime RuntimeConfig, preview bool, verbosity int, run f
 		return run(runCtx, workDir)
 	})
 	return output, err
-}
-
-func resolveRuntimeOpenResult(runtime RuntimeConfig) (eruncommon.OpenResult, error) {
-	tenant := strings.TrimSpace(runtime.Context.Tenant)
-	environment := strings.TrimSpace(runtime.Context.Environment)
-	if tenant == "" || environment == "" {
-		return eruncommon.OpenResult{}, fmt.Errorf("server context is not configured; start emcp through `erun mcp [tenant] [environment]` or pass context flags")
-	}
-
-	repoPath := strings.TrimSpace(runtime.Context.RepoPath)
-	kubernetesContext := strings.TrimSpace(runtime.Context.KubernetesContext)
-	if repoPath != "" && kubernetesContext != "" {
-		return eruncommon.OpenResult{
-			Tenant:      tenant,
-			Environment: environment,
-			TenantConfig: eruncommon.TenantConfig{
-				Name:               tenant,
-				ProjectRoot:        repoPath,
-				DefaultEnvironment: environment,
-			},
-			EnvConfig: eruncommon.EnvConfig{
-				Name:              environment,
-				RepoPath:          repoPath,
-				KubernetesContext: kubernetesContext,
-			},
-			RepoPath: repoPath,
-			Title:    tenant + "-" + environment,
-		}, nil
-	}
-
-	return eruncommon.ResolveOpen(runtime.Store, eruncommon.OpenParams{
-		Tenant:      tenant,
-		Environment: environment,
-	})
 }
 
 func runtimeFindProjectRoot(runtime RuntimeContext, workDir string) (string, string, error) {

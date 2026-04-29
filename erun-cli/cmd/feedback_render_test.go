@@ -25,9 +25,7 @@ func TestCommandContextEnablesTraceDuringDryRunWithoutVerboseFlag(t *testing.T) 
 	addDryRunFlag(cmd)
 	stderr := new(bytes.Buffer)
 	cmd.SetErr(stderr)
-	if err := cmd.Flags().Set("dry-run", "true"); err != nil {
-		t.Fatalf("set dry-run: %v", err)
-	}
+	requireNoError(t, cmd.Flags().Set("dry-run", "true"), "set dry-run")
 
 	ctx := commandContext(cmd)
 	ctx.TraceCommand("", "docker", "build", "-t", "example/image:1.0.0", ".")
@@ -45,9 +43,7 @@ func TestRootCommandAuditsOnlyWhenTraceEnabled(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs(nil)
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if got := stderr.String(); got != "" {
 		t.Fatalf("expected no audit without trace, got %q", got)
 	}
@@ -59,9 +55,7 @@ func TestRootCommandAuditsOnlyWhenTraceEnabled(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"-v"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if got := stderr.String(); got != "audit: erun\n" {
 		t.Fatalf("unexpected audit output: %q", got)
 	}
@@ -83,9 +77,7 @@ func TestExecCommandEnablesTraceByDefault(t *testing.T) {
 	root.SetErr(stderr)
 	root.SetArgs([]string{"exec", "noop"})
 
-	if err := root.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, root.Execute(), "Execute failed")
 	got := stderr.String()
 	if !bytes.Contains([]byte(got), []byte("audit: erun exec noop")) || !bytes.Contains([]byte(got), []byte("exec trace")) {
 		t.Fatalf("expected exec trace by default, got %q", got)

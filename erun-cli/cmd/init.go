@@ -27,24 +27,9 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runParams := params
-			if runParams.Tenant == "" && len(args) > 0 {
-				runParams.Tenant = args[0]
-			}
-			if runParams.Environment == "" && len(args) > 1 {
-				runParams.Environment = args[1]
-			}
-			if runParams.Remote && runParams.Tenant == "" {
-				return fmt.Errorf("tenant is required with --remote")
-			}
-			if runParams.Remote && strings.TrimSpace(runParams.Environment) == "" {
-				return fmt.Errorf("environment is required with --remote")
-			}
-			if cmd.Flags().Changed("set-default-tenant") {
-				runParams.ConfirmTenant = &setDefaultTenant
-			}
-			if cmd.Flags().Changed("confirm-environment") {
-				runParams.ConfirmEnvironment = &confirmEnvironment
+			runParams, err := initRunParams(cmd, args, params, setDefaultTenant, confirmEnvironment)
+			if err != nil {
+				return err
 			}
 			return runInit(commandContext(cmd), runParams)
 		},
@@ -66,6 +51,36 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	cmd.Flags().BoolVarP(&params.AutoApprove, "yes", "y", false, "Automatically approve initialization prompts")
 	addDryRunFlag(cmd)
 	return cmd
+}
+
+func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapInitParams, setDefaultTenant, confirmEnvironment bool) (common.BootstrapInitParams, error) {
+	runParams := params
+	if runParams.Tenant == "" && len(args) > 0 {
+		runParams.Tenant = args[0]
+	}
+	if runParams.Environment == "" && len(args) > 1 {
+		runParams.Environment = args[1]
+	}
+	if err := validateInitRunParams(runParams); err != nil {
+		return common.BootstrapInitParams{}, err
+	}
+	if cmd.Flags().Changed("set-default-tenant") {
+		runParams.ConfirmTenant = &setDefaultTenant
+	}
+	if cmd.Flags().Changed("confirm-environment") {
+		runParams.ConfirmEnvironment = &confirmEnvironment
+	}
+	return runParams, nil
+}
+
+func validateInitRunParams(params common.BootstrapInitParams) error {
+	if params.Remote && params.Tenant == "" {
+		return fmt.Errorf("tenant is required with --remote")
+	}
+	if params.Remote && strings.TrimSpace(params.Environment) == "" {
+		return fmt.Errorf("environment is required with --remote")
+	}
+	return nil
 }
 
 func containerRegistryPrompt(run PromptRunner, label string) (string, error) {

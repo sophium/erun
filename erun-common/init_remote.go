@@ -37,31 +37,7 @@ type remoteDefaultDevopsFile struct {
 }
 
 func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, kubernetesContext, projectRoot string) (ShellLaunchParams, error) {
-	ports := DefaultEnvironmentLocalPorts()
-	if portStore, ok := s.Store.(environmentPortStore); ok {
-		resolved, err := ResolveEnvironmentLocalPorts(portStore, tenant, envName)
-		if err == nil {
-			ports = resolved
-		}
-	}
-	target := OpenResult{
-		Tenant:      tenant,
-		Environment: envName,
-		TenantConfig: TenantConfig{
-			Name:               tenant,
-			ProjectRoot:        projectRoot,
-			DefaultEnvironment: envName,
-		},
-		EnvConfig: EnvConfig{
-			Name:              envName,
-			RepoPath:          projectRoot,
-			KubernetesContext: kubernetesContext,
-			Remote:            true,
-		},
-		LocalPorts: ports,
-		RepoPath:   projectRoot,
-		Title:      tenant + "-" + envName,
-	}
+	target := s.remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot)
 	req := ShellLaunchParamsFromResult(target)
 
 	if err := s.ensureRemoteRuntime(target, req, params.RuntimeVersion, params.RuntimeImage); err != nil {
@@ -79,32 +55,78 @@ func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tena
 		return req, s.pullRemoteRepository(req, projectRoot)
 	}
 
-	repositoryURL, err := s.resolveRemoteRepositoryURL(params, tenant, envName)
+	repository, err := s.remoteRepositorySpecForClone(params, tenant, envName, req, state)
 	if err != nil {
 		return ShellLaunchParams{}, err
+	}
+	return req, s.cloneRemoteRepository(req, projectRoot, repository)
+}
+
+func (s bootstrapRunner) remoteRepositorySpecForClone(params BootstrapInitParams, tenant, envName string, req ShellLaunchParams, state remoteRepositoryState) (remoteRepositorySpec, error) {
+	repositoryURL, err := s.resolveRemoteRepositoryURL(params, tenant, envName)
+	if err != nil {
+		return remoteRepositorySpec{}, err
 	}
 	repository, err := parseRemoteRepositorySpec(repositoryURL)
 	if err != nil {
-		return ShellLaunchParams{}, err
+		return remoteRepositorySpec{}, err
 	}
 	repository, usingHostConfig, err := s.resolveExistingRemoteHostConfig(params, tenant, envName, req, state, repository)
 	if err != nil {
-		return ShellLaunchParams{}, err
+		return remoteRepositorySpec{}, err
 	}
 	if !usingHostConfig {
-		repository, err = s.resolveRemoteRepositoryCredentials(params, tenant, envName, repository, state.CodeCommitPublicKey)
-		if err != nil {
-			return ShellLaunchParams{}, err
-		}
-		publicKey := state.PublicKey
-		if repository.CodeCommitHost != "" {
-			publicKey = state.CodeCommitPublicKey
-		}
-		if err := s.waitForRemoteKeyImport(params, tenant, envName, req, repository, publicKey); err != nil {
-			return ShellLaunchParams{}, err
-		}
+		return s.remoteRepositorySpecWithCredentials(params, tenant, envName, req, state, repository)
 	}
-	return req, s.cloneRemoteRepository(req, projectRoot, repository)
+	return repository, nil
+}
+
+func (s bootstrapRunner) remoteRepositorySpecWithCredentials(params BootstrapInitParams, tenant, envName string, req ShellLaunchParams, state remoteRepositoryState, repository remoteRepositorySpec) (remoteRepositorySpec, error) {
+	repository, err := s.resolveRemoteRepositoryCredentials(params, tenant, envName, repository, state.CodeCommitPublicKey)
+	if err != nil {
+		return remoteRepositorySpec{}, err
+	}
+	publicKey := state.PublicKey
+	if repository.CodeCommitHost != "" {
+		publicKey = state.CodeCommitPublicKey
+	}
+	if err := s.waitForRemoteKeyImport(params, tenant, envName, req, repository, publicKey); err != nil {
+		return remoteRepositorySpec{}, err
+	}
+	return repository, nil
+}
+
+func (s bootstrapRunner) remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot string) OpenResult {
+	return OpenResult{
+		Tenant:       tenant,
+		Environment:  envName,
+		TenantConfig: remoteRepositoryTenantConfig(tenant, envName, projectRoot),
+		EnvConfig:    remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot),
+		LocalPorts:   s.remoteRepositoryLocalPorts(tenant, envName),
+		RepoPath:     projectRoot,
+		Title:        tenant + "-" + envName,
+	}
+}
+
+func remoteRepositoryTenantConfig(tenant, envName, projectRoot string) TenantConfig {
+	return TenantConfig{Name: tenant, ProjectRoot: projectRoot, DefaultEnvironment: envName}
+}
+
+func remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot string) EnvConfig {
+	return EnvConfig{Name: envName, RepoPath: projectRoot, KubernetesContext: kubernetesContext, Remote: true}
+}
+
+func (s bootstrapRunner) remoteRepositoryLocalPorts(tenant, envName string) EnvironmentLocalPorts {
+	ports := DefaultEnvironmentLocalPorts()
+	portStore, ok := s.Store.(environmentPortStore)
+	if !ok {
+		return ports
+	}
+	resolved, err := ResolveEnvironmentLocalPorts(portStore, tenant, envName)
+	if err != nil {
+		return ports
+	}
+	return resolved
 }
 
 func (s bootstrapRunner) ensureRemoteWorktree(req ShellLaunchParams, projectRoot string) error {
@@ -272,14 +294,6 @@ func (s bootstrapRunner) resolveRemoteRepositoryURL(params BootstrapInitParams, 
 		return "", BootstrapInitInteractionError{Interaction: interaction}
 	}
 	return repositoryURL, nil
-}
-
-func (s bootstrapRunner) resolveRemoteRepositorySpec(params BootstrapInitParams, tenant, envName, repositoryURL, codeCommitPublicKey string) (remoteRepositorySpec, error) {
-	spec, err := parseRemoteRepositorySpec(repositoryURL)
-	if err != nil {
-		return remoteRepositorySpec{}, err
-	}
-	return s.resolveRemoteRepositoryCredentials(params, tenant, envName, spec, codeCommitPublicKey)
 }
 
 func (s bootstrapRunner) resolveRemoteRepositoryCredentials(params BootstrapInitParams, tenant, envName string, spec remoteRepositorySpec, codeCommitPublicKey string) (remoteRepositorySpec, error) {

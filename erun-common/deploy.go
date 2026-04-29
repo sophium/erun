@@ -185,7 +185,7 @@ func RunDeploySpec(ctx Context, execution DeploySpec, build DockerImageBuilderFu
 }
 
 func ResolveDeploySpec(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget, componentName, versionOverride string) (DeploySpec, error) {
-	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	versionOverride = resolveDeployVersionOverride(target, versionOverride)
 
 	resolvedTarget, err := resolveDeployTarget(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
@@ -196,7 +196,7 @@ func ResolveDeploySpec(store DeployStore, findProjectRoot ProjectFinderFunc, res
 }
 
 func ResolveCurrentDeploySpecs(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) ([]DeploySpec, error) {
-	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 
 	resolvedTarget, err := resolveDeployTarget(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {
@@ -237,7 +237,7 @@ func resolveDeploySpecForOpenResult(store DeployStore, findProjectRoot ProjectFi
 }
 
 func resolveDeploySpecForContext(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, deployContext KubernetesDeployContext, versionOverride string, allowLocalBuilds bool) (DeploySpec, error) {
-	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	target = applyDeployKubernetesContext(store, target)
 
 	builds := make([]DockerBuildSpec, 0, 2)
@@ -571,17 +571,6 @@ func loadDefaultTenant(store DeployStore) (string, error) {
 		return "", ErrDefaultTenantNotConfigured
 	}
 	return toolConfig.DefaultTenant, nil
-}
-
-func loadDefaultEnvironment(store DeployStore, tenant string) (string, error) {
-	tenantConfig, _, err := store.LoadTenantConfig(tenant)
-	if err != nil {
-		return "", err
-	}
-	if tenantConfig.DefaultEnvironment == "" {
-		return "", ErrDefaultEnvironmentNotConfigured
-	}
-	return tenantConfig.DefaultEnvironment, nil
 }
 
 func newHelmDeploySpec(target OpenResult, deployContext KubernetesDeployContext, versionOverride string) (HelmDeploySpec, error) {
@@ -997,20 +986,43 @@ func resolveProjectRootDevopsK8sDir(findProjectRoot ProjectFinderFunc, projectRo
 		return "", false, nil
 	}
 
-	if tenant, detectedProjectRoot, err := findProjectRoot(); err == nil &&
-		filepath.Clean(strings.TrimSpace(detectedProjectRoot)) == projectRoot &&
-		strings.TrimSpace(tenant) != "" {
-		k8sDir := filepath.Join(projectRoot, RuntimeReleaseName(tenant), "k8s")
-		if ok, err := isKubernetesDeployModuleDir(k8sDir); err != nil {
-			return "", false, err
-		} else if ok {
-			return k8sDir, true, nil
-		}
+	k8sDir, ok, err := detectedProjectRootDevopsK8sDir(findProjectRoot, projectRoot)
+	if err != nil || ok {
+		return k8sDir, ok, err
 	}
 
-	entries, err := os.ReadDir(projectRoot)
+	candidates, err := findDevopsK8sDirs(projectRoot)
 	if err != nil {
 		return "", false, err
+	}
+	switch len(candidates) {
+	case 0:
+		return "", false, nil
+	case 1:
+		return candidates[0], true, nil
+	default:
+		return "", false, fmt.Errorf("multiple devops k8s directories found under project root")
+	}
+}
+
+func detectedProjectRootDevopsK8sDir(findProjectRoot ProjectFinderFunc, projectRoot string) (string, bool, error) {
+	tenant, detectedProjectRoot, err := findProjectRoot()
+	if err != nil || filepath.Clean(strings.TrimSpace(detectedProjectRoot)) != projectRoot || strings.TrimSpace(tenant) == "" {
+		return "", false, nil
+	}
+	k8sDir := filepath.Join(projectRoot, RuntimeReleaseName(tenant), "k8s")
+	if ok, err := isKubernetesDeployModuleDir(k8sDir); err != nil {
+		return "", false, err
+	} else if ok {
+		return k8sDir, true, nil
+	}
+	return "", false, nil
+}
+
+func findDevopsK8sDirs(projectRoot string) ([]string, error) {
+	entries, err := os.ReadDir(projectRoot)
+	if err != nil {
+		return nil, err
 	}
 
 	candidates := make([]string, 0, 1)
@@ -1022,21 +1034,13 @@ func resolveProjectRootDevopsK8sDir(findProjectRoot ProjectFinderFunc, projectRo
 		k8sDir := filepath.Join(projectRoot, entry.Name(), "k8s")
 		ok, err := isKubernetesDeployModuleDir(k8sDir)
 		if err != nil {
-			return "", false, err
+			return nil, err
 		}
 		if ok {
 			candidates = append(candidates, k8sDir)
 		}
 	}
-
-	switch len(candidates) {
-	case 0:
-		return "", false, nil
-	case 1:
-		return candidates[0], true, nil
-	default:
-		return "", false, fmt.Errorf("multiple devops k8s directories found under project root")
-	}
+	return candidates, nil
 }
 
 func isKubernetesDeployModuleDir(dir string) (bool, error) {
@@ -1230,7 +1234,7 @@ func CheckKubernetesDeployment(params KubernetesDeploymentCheckParams) (bool, er
 
 	output, err := exec.Command("kubectl", args...).CombinedOutput()
 	if err == nil {
-		if strings.TrimSpace(params.ExpectedRepoPath) == "" && params.ExpectedSSHD == nil && params.ExpectedMCPPort == 0 && params.ExpectedSSHPort == 0 {
+		if !hasExpectedDeploymentSettings(params) {
 			return true, nil
 		}
 		return deploymentMatchesExpectedSettings(params)
@@ -1242,6 +1246,15 @@ func CheckKubernetesDeployment(params KubernetesDeploymentCheckParams) (bool, er
 	}
 
 	return false, fmt.Errorf("failed to check deployment %q: %w", params.Name, err)
+}
+
+func hasExpectedDeploymentSettings(params KubernetesDeploymentCheckParams) bool {
+	return strings.TrimSpace(params.ExpectedRepoPath) != "" || params.ExpectedSSHD != nil || params.ExpectedMCPPort > 0 || params.ExpectedSSHPort > 0
+}
+
+type deploymentEnvVar struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 func deploymentMatchesExpectedSettings(params KubernetesDeploymentCheckParams) (bool, error) {
@@ -1264,11 +1277,8 @@ func deploymentMatchesExpectedSettings(params KubernetesDeploymentCheckParams) (
 			Template struct {
 				Spec struct {
 					Containers []struct {
-						Name string `json:"name"`
-						Env  []struct {
-							Name  string `json:"name"`
-							Value string `json:"value"`
-						} `json:"env"`
+						Name string             `json:"name"`
+						Env  []deploymentEnvVar `json:"env"`
 					} `json:"containers"`
 				} `json:"spec"`
 			} `json:"template"`
@@ -1278,39 +1288,76 @@ func deploymentMatchesExpectedSettings(params KubernetesDeploymentCheckParams) (
 		return false, fmt.Errorf("failed to parse deployment %q: %w", params.Name, err)
 	}
 
-	expectedRepoPath := strings.TrimSpace(params.ExpectedRepoPath)
 	for _, container := range deployment.Spec.Template.Spec.Containers {
 		if strings.TrimSpace(container.Name) != params.Name {
 			continue
 		}
-		matchesRepoPath := strings.TrimSpace(expectedRepoPath) == ""
-		matchesSSHD := params.ExpectedSSHD == nil
-		matchesMCPPort := params.ExpectedMCPPort <= 0
-		matchesSSHPort := params.ExpectedSSHPort <= 0
-		for _, env := range container.Env {
-			switch strings.TrimSpace(env.Name) {
-			case "ERUN_REPO_PATH":
-				if strings.TrimSpace(expectedRepoPath) != "" {
-					matchesRepoPath = filepath.Clean(strings.TrimSpace(env.Value)) == filepath.Clean(expectedRepoPath)
-				}
-			case "ERUN_SSHD_ENABLED":
-				if params.ExpectedSSHD != nil {
-					matchesSSHD = strings.EqualFold(strings.TrimSpace(env.Value), formatHelmBool(*params.ExpectedSSHD))
-				}
-			case "ERUN_MCP_PORT":
-				if params.ExpectedMCPPort > 0 {
-					matchesMCPPort = strings.TrimSpace(env.Value) == fmt.Sprintf("%d", params.ExpectedMCPPort)
-				}
-			case "ERUN_SSHD_PORT":
-				if params.ExpectedSSHPort > 0 {
-					matchesSSHPort = strings.TrimSpace(env.Value) == fmt.Sprintf("%d", params.ExpectedSSHPort)
-				}
-			}
-		}
-		return matchesRepoPath && matchesSSHD && matchesMCPPort && matchesSSHPort, nil
+		return deploymentContainerMatchesExpectedSettings(params, container.Env), nil
 	}
 
 	return false, nil
+}
+
+func deploymentContainerMatchesExpectedSettings(params KubernetesDeploymentCheckParams, envs []deploymentEnvVar) bool {
+	matches := expectedDeploymentMatches(params)
+	for _, env := range envs {
+		matches.apply(params, env.Name, env.Value)
+	}
+	return matches.ok()
+}
+
+type deploymentExpectedMatches struct {
+	repoPath bool
+	sshd     bool
+	mcpPort  bool
+	sshPort  bool
+}
+
+func expectedDeploymentMatches(params KubernetesDeploymentCheckParams) deploymentExpectedMatches {
+	return deploymentExpectedMatches{
+		repoPath: strings.TrimSpace(params.ExpectedRepoPath) == "",
+		sshd:     params.ExpectedSSHD == nil,
+		mcpPort:  params.ExpectedMCPPort <= 0,
+		sshPort:  params.ExpectedSSHPort <= 0,
+	}
+}
+
+func (m *deploymentExpectedMatches) apply(params KubernetesDeploymentCheckParams, name, value string) {
+	switch strings.TrimSpace(name) {
+	case "ERUN_REPO_PATH":
+		m.repoPath = matchesExpectedRepoPath(value, params.ExpectedRepoPath)
+	case "ERUN_SSHD_ENABLED":
+		m.sshd = matchesExpectedBool(value, params.ExpectedSSHD)
+	case "ERUN_MCP_PORT":
+		m.mcpPort = matchesExpectedPort(value, params.ExpectedMCPPort)
+	case "ERUN_SSHD_PORT":
+		m.sshPort = matchesExpectedPort(value, params.ExpectedSSHPort)
+	}
+}
+
+func (m deploymentExpectedMatches) ok() bool {
+	return m.repoPath && m.sshd && m.mcpPort && m.sshPort
+}
+
+func matchesExpectedRepoPath(value, expected string) bool {
+	if strings.TrimSpace(expected) == "" {
+		return true
+	}
+	return filepath.Clean(strings.TrimSpace(value)) == filepath.Clean(strings.TrimSpace(expected))
+}
+
+func matchesExpectedBool(value string, expected *bool) bool {
+	if expected == nil {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(value), formatHelmBool(*expected))
+}
+
+func matchesExpectedPort(value string, expected int) bool {
+	if expected <= 0 {
+		return true
+	}
+	return strings.TrimSpace(value) == fmt.Sprintf("%d", expected)
 }
 
 func resolveKubernetesDeployValuesFile(chartPath, environment string) (string, error) {
@@ -1336,26 +1383,11 @@ func findComponentHelmChartPath(projectRoot, componentName string) (string, erro
 
 	matches := make([]string, 0, 1)
 	err := filepath.WalkDir(projectRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+		chartPath, ok, walkErr := componentHelmChartCandidate(path, d, componentName, err)
+		if ok {
+			matches = append(matches, chartPath)
 		}
-		if d.IsDir() {
-			if d.Name() == ".git" {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if d.Name() != "Chart.yaml" {
-			return nil
-		}
-
-		chartPath := filepath.Dir(path)
-		if filepath.Base(chartPath) != componentName || filepath.Base(filepath.Dir(chartPath)) != "k8s" {
-			return nil
-		}
-
-		matches = append(matches, chartPath)
-		return nil
+		return walkErr
 	})
 	if err != nil {
 		return "", err
@@ -1368,6 +1400,26 @@ func findComponentHelmChartPath(projectRoot, componentName string) (string, erro
 		return "", fmt.Errorf("multiple Helm charts found for component %q", componentName)
 	}
 	return matches[0], nil
+}
+
+func componentHelmChartCandidate(path string, d fs.DirEntry, componentName string, err error) (string, bool, error) {
+	if err != nil {
+		return "", false, err
+	}
+	if d.IsDir() {
+		if d.Name() == ".git" {
+			return "", false, fs.SkipDir
+		}
+		return "", false, nil
+	}
+	if d.Name() != "Chart.yaml" {
+		return "", false, nil
+	}
+	chartPath := filepath.Dir(path)
+	if filepath.Base(chartPath) != componentName || filepath.Base(filepath.Dir(chartPath)) != "k8s" {
+		return "", false, nil
+	}
+	return chartPath, true, nil
 }
 
 func ValidateHelmChartPath(chartPath string) error {
@@ -1416,21 +1468,8 @@ func findLiteralDockerImagesInChart(chartPath string) ([]string, error) {
 		}
 
 		for _, line := range strings.Split(string(data), "\n") {
-			trimmed := strings.TrimSpace(line)
-			switch {
-			case strings.HasPrefix(trimmed, "image:"):
-				trimmed = strings.TrimPrefix(trimmed, "image:")
-			case strings.HasPrefix(trimmed, "- image:"):
-				trimmed = strings.TrimPrefix(trimmed, "- image:")
-			default:
-				continue
-			}
-			value := strings.TrimSpace(trimmed)
-			if idx := strings.Index(value, "#"); idx >= 0 {
-				value = strings.TrimSpace(value[:idx])
-			}
-			value = strings.Trim(value, `"'`)
-			if value == "" || strings.Contains(value, "{{") {
+			value := literalDockerImageFromChartLine(line)
+			if value == "" {
 				continue
 			}
 			if _, ok := seen[value]; ok {
@@ -1447,4 +1486,31 @@ func findLiteralDockerImagesInChart(chartPath string) ([]string, error) {
 	}
 
 	return images, nil
+}
+
+func literalDockerImageFromChartLine(line string) string {
+	value, ok := chartImageValue(line)
+	if !ok {
+		return ""
+	}
+	if idx := strings.Index(value, "#"); idx >= 0 {
+		value = strings.TrimSpace(value[:idx])
+	}
+	value = strings.Trim(strings.TrimSpace(value), `"'`)
+	if value == "" || strings.Contains(value, "{{") {
+		return ""
+	}
+	return value
+}
+
+func chartImageValue(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	switch {
+	case strings.HasPrefix(trimmed, "image:"):
+		return strings.TrimPrefix(trimmed, "image:"), true
+	case strings.HasPrefix(trimmed, "- image:"):
+		return strings.TrimPrefix(trimmed, "- image:"), true
+	default:
+		return "", false
+	}
 }

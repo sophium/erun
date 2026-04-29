@@ -45,13 +45,7 @@ func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common
 	if stateMatchesSSHDTarget(state, expectedState) && !stateHasDeprecatedLocalProxy(state) && canReachLocalSSHEndpoint(info.Port) {
 		return info, nil
 	}
-	if stateMatchesSSHDTarget(state, expectedState) && state.ProcessID > 0 && canConnectLocalPort(info.Port) {
-		stopSSHDPortForwardState(state)
-		waitForLocalPortToClose(info.Port)
-		if state.ForwardPort > 0 {
-			waitForLocalPortToClose(state.ForwardPort)
-		}
-	}
+	stopStaleSSHDPortForward(state, expectedState, info.Port)
 	if canConnectLocalPort(info.Port) {
 		return common.SSHConnectionInfo{}, fmt.Errorf("local SSH port %d is already in use", info.Port)
 	}
@@ -62,6 +56,21 @@ func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common
 		return info, nil
 	}
 
+	return startSSHDPortForward(statePath, expectedState, args, info)
+}
+
+func stopStaleSSHDPortForward(state, expectedState sshdPortForwardState, localPort int) {
+	if !stateMatchesSSHDTarget(state, expectedState) || state.ProcessID <= 0 || !canConnectLocalPort(localPort) {
+		return
+	}
+	stopSSHDPortForwardState(state)
+	waitForLocalPortToClose(localPort)
+	if state.ForwardPort > 0 {
+		waitForLocalPortToClose(state.ForwardPort)
+	}
+}
+
+func startSSHDPortForward(statePath string, expectedState sshdPortForwardState, args []string, info common.SSHConnectionInfo) (common.SSHConnectionInfo, error) {
 	logPath := sshdPortForwardLogPath(statePath)
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return common.SSHConnectionInfo{}, err
@@ -88,15 +97,22 @@ func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common
 		return common.SSHConnectionInfo{}, err
 	}
 
+	if err := waitForSSHDPortForward(info.Port, logPath); err != nil {
+		return common.SSHConnectionInfo{}, err
+	}
+	return info, nil
+}
+
+func waitForSSHDPortForward(port int, logPath string) error {
 	deadline := time.Now().Add(sshdPortForwardStartupTimeout)
 	for time.Now().Before(deadline) {
-		if canReachLocalSSHEndpoint(info.Port) {
-			return info, nil
+		if canReachLocalSSHEndpoint(port) {
+			return nil
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	return common.SSHConnectionInfo{}, fmt.Errorf("timed out waiting for SSH port-forward on 127.0.0.1:%d; see %s", info.Port, logPath)
+	return fmt.Errorf("timed out waiting for SSH port-forward on 127.0.0.1:%d; see %s", port, logPath)
 }
 
 func kubectlPortForwardArgs(result common.OpenResult, localPort int) []string {

@@ -1,4 +1,4 @@
-version: 2
+version: "2"
 
 run:
   timeout: 3m
@@ -10,11 +10,20 @@ linters:
     - ineffassign
     - staticcheck
     - unused
+    - funlen
+    - gocyclo
+    - cyclop
+  settings:
+    funlen:
+      lines: 100
+      statements: 50
+    gocyclo:
+      min-complexity: 15
+    cyclop:
+      max-complexity: 10
 formatters:
   enable:
     - gofumpt
-formatters-settings:
-  gofumpt:
-    module-path: github.com/sophium/erun/erun-mcp
-issues:
-  exclude-use-default: false
+  settings:
+    gofumpt:
+      module-path: github.com/sophium/erun/erun-mcp

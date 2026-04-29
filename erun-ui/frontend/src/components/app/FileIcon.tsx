@@ -1,6 +1,33 @@
 import * as React from 'react';
 import { File, FileCode2, FileCog, FileJson, FileText, Gem } from 'lucide-react';
 
+const extensionIcons = new Map([
+  ['css', FileCode2],
+  ['go', FileCode2],
+  ['html', FileCode2],
+  ['java', FileCode2],
+  ['js', FileCode2],
+  ['jsx', FileCode2],
+  ['json', FileJson],
+  ['jsonc', FileJson],
+  ['md', FileText],
+  ['mdx', FileText],
+  ['py', FileCode2],
+  ['rb', Gem],
+  ['sh', FileCode2],
+  ['toml', FileCog],
+  ['ts', FileCode2],
+  ['tsx', FileCode2],
+  ['txt', FileText],
+  ['yaml', FileCog],
+  ['yml', FileCog],
+]);
+
+const filenameIcons = new Map([
+  ['dockerfile', FileCog],
+  ['makefile', FileCog],
+]);
+
 export function FileIcon({ filePath }: { filePath: string }): React.ReactElement {
   const Icon = fileIconForPath(filePath);
   return (
@@ -16,20 +43,5 @@ export function FileIcon({ filePath }: { filePath: string }): React.ReactElement
 function fileIconForPath(filePath: string): typeof File {
   const name = filePath.split('/').pop()?.toLowerCase() || '';
   const extension = filePath.split('.').pop()?.toLowerCase() || '';
-  if (['json', 'jsonc'].includes(extension)) {
-    return FileJson;
-  }
-  if (extension === 'rb') {
-    return Gem;
-  }
-  if (['yaml', 'yml', 'toml'].includes(extension) || name === 'dockerfile' || name === 'makefile') {
-    return FileCog;
-  }
-  if (['md', 'mdx', 'txt'].includes(extension)) {
-    return FileText;
-  }
-  if (['css', 'go', 'html', 'java', 'js', 'jsx', 'py', 'sh', 'ts', 'tsx'].includes(extension)) {
-    return FileCode2;
-  }
-  return File;
+  return filenameIcons.get(name) ?? extensionIcons.get(extension) ?? File;
 }
