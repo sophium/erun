@@ -34,6 +34,16 @@ func runListCommand(ctx common.Context, store common.ListStore, findProjectRoot 
 }
 
 func writeListResult(ctx common.Context, result common.ListResult) error {
+	if err := writeListHeaderSections(ctx, result); err != nil {
+		return err
+	}
+	if err := writeCloudProviders(ctx, result.CloudProviders); err != nil {
+		return err
+	}
+	return writeListTenants(ctx, result.Tenants)
+}
+
+func writeListHeaderSections(ctx common.Context, result common.ListResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "Configuration:"); err != nil {
 		return err
 	}
@@ -66,20 +76,19 @@ func writeListResult(ctx common.Context, result common.ListResult) error {
 	if err := writeEffectiveOpen(ctx, result.CurrentDirectory); err != nil {
 		return err
 	}
+	return nil
+}
 
-	if err := writeCloudProviders(ctx, result.CloudProviders); err != nil {
-		return err
-	}
-
+func writeListTenants(ctx common.Context, tenants []common.ListTenantResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "Tenants:"); err != nil {
 		return err
 	}
-	if len(result.Tenants) == 0 {
+	if len(tenants) == 0 {
 		_, err := fmt.Fprintln(ctx.Stdout, "  none")
 		return err
 	}
 
-	for _, tenant := range result.Tenants {
+	for _, tenant := range tenants {
 		if err := writeTenantEntry(ctx, tenant); err != nil {
 			return err
 		}
@@ -94,44 +103,52 @@ func writeEffectiveOpen(ctx common.Context, current common.ListCurrentDirectoryR
 		}
 		return writeLabeledValue(ctx, "effective target", "none")
 	}
-	if err := writeLabeledValue(ctx, "effective target", current.Effective.Tenant+"/"+current.Effective.Environment); err != nil {
-		return err
-	}
-	if err := writeLabeledValue(ctx, "kubernetes context", current.Effective.KubernetesContext); err != nil {
-		return err
-	}
-	if strings.TrimSpace(current.Effective.CloudProviderAlias) != "" {
-		if err := writeLabeledValue(ctx, "cloud provider", current.Effective.CloudProviderAlias); err != nil {
-			return err
-		}
-	}
-	if err := writeLabeledValue(ctx, "snapshot", enabledDisabledLabel(current.Effective.Snapshot)); err != nil {
-		return err
-	}
-	if err := writeLabeledValue(ctx, "assigned local port range", portRangeLabel(current.Effective.LocalPorts)); err != nil {
-		return err
-	}
-	if err := writeLabeledValue(ctx, "assigned mcp local port", fmt.Sprintf("%d (when MCP is running or forwarded)", current.Effective.LocalPorts.MCP)); err != nil {
-		return err
-	}
-	if err := writeLabeledValue(ctx, "assigned ssh local port", fmt.Sprintf("%d (when SSH port-forward is active)", current.Effective.LocalPorts.SSH)); err != nil {
+	if err := writeEffectiveOpenBase(ctx, *current.Effective); err != nil {
 		return err
 	}
 	if current.Effective.SSH.Enabled {
-		if err := writeLabeledValue(ctx, "sshd", "on"); err != nil {
-			return err
-		}
-		if err := writeLabeledValue(ctx, "ssh host", current.Effective.SSH.HostAlias); err != nil {
-			return err
-		}
-		if err := writeLabeledValue(ctx, "ssh user", current.Effective.SSH.User); err != nil {
-			return err
-		}
-		if err := writeLabeledValue(ctx, "ssh workspace", current.Effective.SSH.WorkspacePath); err != nil {
+		if err := writeEffectiveOpenSSH(ctx, current.Effective.SSH); err != nil {
 			return err
 		}
 	}
 	return writeLabeledValue(ctx, "repo path", current.Effective.RepoPath)
+}
+
+func writeEffectiveOpenBase(ctx common.Context, effective common.ListEffectiveTargetResult) error {
+	if err := writeLabeledValue(ctx, "effective target", effective.Tenant+"/"+effective.Environment); err != nil {
+		return err
+	}
+	if err := writeLabeledValue(ctx, "kubernetes context", effective.KubernetesContext); err != nil {
+		return err
+	}
+	if strings.TrimSpace(effective.CloudProviderAlias) != "" {
+		if err := writeLabeledValue(ctx, "cloud provider", effective.CloudProviderAlias); err != nil {
+			return err
+		}
+	}
+	if err := writeLabeledValue(ctx, "snapshot", enabledDisabledLabel(effective.Snapshot)); err != nil {
+		return err
+	}
+	if err := writeLabeledValue(ctx, "assigned local port range", portRangeLabel(effective.LocalPorts)); err != nil {
+		return err
+	}
+	if err := writeLabeledValue(ctx, "assigned mcp local port", fmt.Sprintf("%d (when MCP is running or forwarded)", effective.LocalPorts.MCP)); err != nil {
+		return err
+	}
+	return writeLabeledValue(ctx, "assigned ssh local port", fmt.Sprintf("%d (when SSH port-forward is active)", effective.LocalPorts.SSH))
+}
+
+func writeEffectiveOpenSSH(ctx common.Context, ssh common.ListSSHResult) error {
+	if err := writeLabeledValue(ctx, "sshd", "on"); err != nil {
+		return err
+	}
+	if err := writeLabeledValue(ctx, "ssh host", ssh.HostAlias); err != nil {
+		return err
+	}
+	if err := writeLabeledValue(ctx, "ssh user", ssh.User); err != nil {
+		return err
+	}
+	return writeLabeledValue(ctx, "ssh workspace", ssh.WorkspacePath)
 }
 
 func writeTenantEntry(ctx common.Context, tenant common.ListTenantResult) error {
