@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { AlertTriangle, Check, ChevronsUpDown, LoaderCircle, Play, Power, Rocket, Save, Server, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, ChevronsUpDown, LoaderCircle, Play, Power, Rocket, Save, Server, Stethoscope, Trash2 } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
@@ -94,6 +94,31 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
                 />
                 <CheckboxField id="environment-config-remote" label="Remote environment" checked={config.remote} disabled onChange={() => {}} />
                 <CheckboxField id="environment-config-snapshot" label="Snapshot deploy" checked={config.snapshot} disabled={dialog.busy} onChange={(snapshot) => controller.updateManageConfig({ snapshot })} />
+                <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
+                  <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Idle stop</div>
+                  <TextField
+                    id="environment-config-idle-timeout"
+                    label="Timeout"
+                    value={config.idle.timeout}
+                    disabled={dialog.busy}
+                    onChange={(timeout) => controller.updateManageConfig({ idle: { ...config.idle, timeout } })}
+                  />
+                  <TextField
+                    id="environment-config-idle-workinghours"
+                    label="Working hours"
+                    value={config.idle.workingHours}
+                    disabled={dialog.busy}
+                    onChange={(workingHours) => controller.updateManageConfig({ idle: { ...config.idle, workingHours } })}
+                  />
+                  <TextField
+                    id="environment-config-idle-traffic"
+                    label="Idle SSH bytes"
+                    value={String(config.idle.idleTrafficBytes)}
+                    inputMode="numeric"
+                    disabled={dialog.busy}
+                    onChange={(idleTrafficBytes) => controller.updateManageConfig({ idle: { ...config.idle, idleTrafficBytes: parseIdleTrafficBytes(idleTrafficBytes) } })}
+                  />
+                </div>
                 <ReadonlyField id="environment-config-localportrange" label="Assigned local port range" value={portRangeValue(config.localPorts.rangeStart, config.localPorts.rangeEnd)} />
                 <PortStatusTable
                   rows={[
@@ -101,8 +126,39 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
                     { service: 'ssh', port: config.localPorts.ssh, status: config.localPorts.sshStatus },
                   ]}
                 />
+                <div className="grid gap-2 rounded-[var(--radius)] border border-border p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Diagnostics</div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={dialog.busy || dialog.configLoading}
+                      onClick={() => void controller.startManageDoctor().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}
+                    >
+                      <Stethoscope aria-hidden="true" />
+                      Run Doctor
+                    </Button>
+                  </div>
+                </div>
                 <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
-                  <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">SSH access</div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">SSH access</div>
+                    {!config.sshd.enabled && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={dialog.busy || dialog.configLoading || !config.remote}
+                        onClick={() => void controller.enableManageSSHD().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}
+                      >
+                        <Server aria-hidden="true" />
+                        Enable SSHD
+                      </Button>
+                    )}
+                  </div>
                   <CheckboxField id="environment-config-sshd-enabled" label="Enabled" checked={config.sshd.enabled} disabled onChange={() => {}} />
                   <ReadonlyField
                     id="environment-config-sshd-localport"
@@ -429,6 +485,11 @@ function portRangeValue(rangeStart: number, rangeEnd: number): string {
     return '';
   }
   return `${rangeStart}-${rangeEnd}`;
+}
+
+function parseIdleTrafficBytes(value: string): number {
+  const parsed = Number(value.trim() || 0);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
 }
 
 function CheckboxField({ id, label, checked, disabled, onChange }: { id: string; label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }): React.ReactElement {

@@ -15,12 +15,14 @@ type remoteRepositoryState struct {
 	Exists              bool
 	PublicKey           string
 	CodeCommitPublicKey string
+	HasSSHConfig        bool
 }
 
 type remoteRepositorySpec struct {
 	URL                string
 	CodeCommitHost     string
 	CodeCommitSSHKeyID string
+	UseHostConfig      bool
 }
 
 const remoteRepositoryAccessRetryInterval = 2 * time.Second
@@ -81,16 +83,26 @@ func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tena
 	if err != nil {
 		return ShellLaunchParams{}, err
 	}
-	repository, err := s.resolveRemoteRepositorySpec(params, tenant, envName, repositoryURL, state.CodeCommitPublicKey)
+	repository, err := parseRemoteRepositorySpec(repositoryURL)
 	if err != nil {
 		return ShellLaunchParams{}, err
 	}
-	publicKey := state.PublicKey
-	if repository.CodeCommitHost != "" {
-		publicKey = state.CodeCommitPublicKey
-	}
-	if err := s.waitForRemoteKeyImport(params, tenant, envName, req, repository, publicKey); err != nil {
+	repository, usingHostConfig, err := s.resolveExistingRemoteHostConfig(params, tenant, envName, req, state, repository)
+	if err != nil {
 		return ShellLaunchParams{}, err
+	}
+	if !usingHostConfig {
+		repository, err = s.resolveRemoteRepositoryCredentials(params, tenant, envName, repository, state.CodeCommitPublicKey)
+		if err != nil {
+			return ShellLaunchParams{}, err
+		}
+		publicKey := state.PublicKey
+		if repository.CodeCommitHost != "" {
+			publicKey = state.CodeCommitPublicKey
+		}
+		if err := s.waitForRemoteKeyImport(params, tenant, envName, req, repository, publicKey); err != nil {
+			return ShellLaunchParams{}, err
+		}
 	}
 	return req, s.cloneRemoteRepository(req, projectRoot, repository)
 }
@@ -267,6 +279,10 @@ func (s bootstrapRunner) resolveRemoteRepositorySpec(params BootstrapInitParams,
 	if err != nil {
 		return remoteRepositorySpec{}, err
 	}
+	return s.resolveRemoteRepositoryCredentials(params, tenant, envName, spec, codeCommitPublicKey)
+}
+
+func (s bootstrapRunner) resolveRemoteRepositoryCredentials(params BootstrapInitParams, tenant, envName string, spec remoteRepositorySpec, codeCommitPublicKey string) (remoteRepositorySpec, error) {
 	if spec.CodeCommitHost == "" || spec.CodeCommitSSHKeyID != "" {
 		return spec, nil
 	}
@@ -296,6 +312,39 @@ func (s bootstrapRunner) resolveRemoteRepositorySpec(params BootstrapInitParams,
 	}
 	spec.CodeCommitSSHKeyID = keyID
 	return spec, nil
+}
+
+func (s bootstrapRunner) resolveExistingRemoteHostConfig(params BootstrapInitParams, tenant, envName string, req ShellLaunchParams, state remoteRepositoryState, repository remoteRepositorySpec) (remoteRepositorySpec, bool, error) {
+	if !state.HasSSHConfig {
+		return repository, false, nil
+	}
+	if err := s.verifyRemoteRepositoryAccessWithHostConfig(req, repository); err != nil {
+		return repository, false, nil
+	}
+	if params.AutoApprove {
+		repository.UseHostConfig = true
+		return repository, true, nil
+	}
+	if params.ConfirmRemoteHostConfig != nil {
+		if !*params.ConfirmRemoteHostConfig {
+			return repository, false, nil
+		}
+		repository.UseHostConfig = true
+		return repository, true, nil
+	}
+	confirmed, err := s.confirm(BootstrapInitInteraction{
+		Type:    BootstrapInitInteractionConfirmRemoteHost,
+		Label:   remoteHostConfigLabel(tenant, envName),
+		Details: repository.URL,
+	})
+	if err != nil {
+		return remoteRepositorySpec{}, false, err
+	}
+	if !confirmed {
+		return repository, false, nil
+	}
+	repository.UseHostConfig = true
+	return repository, true, nil
 }
 
 func (s bootstrapRunner) waitForRemoteKeyImport(params BootstrapInitParams, tenant, envName string, req ShellLaunchParams, repository remoteRepositorySpec, publicKey string) error {
@@ -355,6 +404,8 @@ func (s bootstrapRunner) remoteRepositoryState(req ShellLaunchParams, projectRoo
 		"cat \"$key.pub\"",
 		"printf '\\n__ERUN_REMOTE_CODECOMMIT_PUBLIC_KEY__\\n'",
 		"cat \"$codecommit_key.pub\"",
+		"printf '\\n__ERUN_REMOTE_SSH_CONFIG__\\n'",
+		"if [ -s \"$HOME/.ssh/config\" ]; then printf 'exists\\n'; else printf 'missing\\n'; fi",
 	}, "\n")
 
 	output, err := s.runRemoteScript(req, "remote-repository-state", script)
@@ -366,6 +417,7 @@ func (s bootstrapRunner) remoteRepositoryState(req ShellLaunchParams, projectRoo
 			PublicKey:           "<remote-public-key>",
 			CodeCommitPublicKey: "<remote-codecommit-rsa-public-key>",
 			Exists:              false,
+			HasSSHConfig:        false,
 		}, nil
 	}
 
@@ -376,6 +428,7 @@ func (s bootstrapRunner) remoteRepositoryState(req ShellLaunchParams, projectRoo
 	state := remoteRepositoryState{Exists: strings.TrimSpace(lines[0]) == "repo_exists"}
 	state.PublicKey = remoteRepositoryStateSection(lines, "__ERUN_REMOTE_PUBLIC_KEY__")
 	state.CodeCommitPublicKey = remoteRepositoryStateSection(lines, "__ERUN_REMOTE_CODECOMMIT_PUBLIC_KEY__")
+	state.HasSSHConfig = strings.EqualFold(remoteRepositoryStateSection(lines, "__ERUN_REMOTE_SSH_CONFIG__"), "exists")
 	return state, nil
 }
 
@@ -406,6 +459,20 @@ func (s bootstrapRunner) verifyRemoteRepositoryAccess(req ShellLaunchParams, rep
 	output, err := s.runRemoteScript(req, "remote-repository-access", script)
 	if err != nil {
 		return fmt.Errorf("verify remote repository access: %w%s", err, formatRemoteCommandStderr(output.Stderr))
+	}
+	return nil
+}
+
+func (s bootstrapRunner) verifyRemoteRepositoryAccessWithHostConfig(req ShellLaunchParams, repository remoteRepositorySpec) error {
+	script := strings.Join([]string{
+		"set -eu",
+		"test -s \"$HOME/.ssh/config\"",
+		fmt.Sprintf("ssh_command=%s", shellQuote(`ssh -F "$HOME/.ssh/config" -o StrictHostKeyChecking=accept-new`)),
+		fmt.Sprintf("git -c core.sshCommand=\"$ssh_command\" ls-remote %s HEAD >/dev/null", shellQuote(repository.URL)),
+	}, "\n")
+	output, err := s.runRemoteScript(req, "remote-repository-existing-host-config", script)
+	if err != nil {
+		return fmt.Errorf("verify remote repository access with existing SSH host config: %w%s", err, formatRemoteCommandStderr(output.Stderr))
 	}
 	return nil
 }
@@ -477,6 +544,9 @@ func parseRemoteRepositorySpec(repositoryURL string) (remoteRepositorySpec, erro
 }
 
 func remoteRepositorySSHConfigScript(repository remoteRepositorySpec) string {
+	if repository.UseHostConfig {
+		return ":"
+	}
 	if repository.CodeCommitHost == "" {
 		return ":"
 	}
@@ -489,6 +559,9 @@ func remoteRepositorySSHConfigScript(repository remoteRepositorySpec) string {
 }
 
 func remoteRepositorySSHCommand(repository remoteRepositorySpec) string {
+	if repository.UseHostConfig {
+		return `ssh -F "$HOME/.ssh/config" -o StrictHostKeyChecking=accept-new`
+	}
 	if repository.CodeCommitHost != "" {
 		return `ssh -F "$HOME/.ssh/config"`
 	}
@@ -534,7 +607,7 @@ func (s bootstrapRunner) runRemoteScript(req ShellLaunchParams, label, script st
 
 func kubectlRemoteExecArgs(req ShellLaunchParams, script string) []string {
 	args := kubectlTargetArgs(req)
-	args = append(args, "exec", "-c", RuntimeReleaseName(req.Tenant))
+	args = append(args, "exec")
 	args = append(args, "deployment/"+RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
 	return args
 }

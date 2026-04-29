@@ -3,6 +3,14 @@
 {{- $worktreePath := printf "/home/erun/git/%s" $worktreeRepoName -}}
 {{- $mcpPort := default 17000 .Values.mcpPort -}}
 {{- $sshPort := default 17022 .Values.sshPort -}}
+{{- $idleTimeout := default "5m0s" .Values.idle.timeout -}}
+{{- $idleWorkingHours := default "08:00-20:00" .Values.idle.workingHours -}}
+{{- $idleTrafficBytes := default 0 .Values.idle.trafficBytes -}}
+{{- $managedCloud := default false .Values.managedCloud -}}
+{{- $cloudContextName := default "" .Values.cloudContext.name -}}
+{{- $cloudProviderAlias := default "" .Values.cloudContext.providerAlias -}}
+{{- $cloudRegion := default "" .Values.cloudContext.region -}}
+{{- $cloudInstanceID := default "" .Values.cloudContext.instanceId -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -146,6 +154,16 @@ spec:
               value: {{ $worktreePath | quote }}
             - name: ERUN_REPO_REMOTE
               value: {{ if eq $worktreeStorage "pvc" }}"true"{{ else }}"false"{{ end }}
+            - name: ERUN_CLOUD_ENVIRONMENT
+              value: {{ if $managedCloud }}"true"{{ else }}"false"{{ end }}
+            - name: ERUN_CLOUD_CONTEXT_NAME
+              value: {{ $cloudContextName | quote }}
+            - name: ERUN_CLOUD_PROVIDER_ALIAS
+              value: {{ $cloudProviderAlias | quote }}
+            - name: ERUN_CLOUD_REGION
+              value: {{ $cloudRegion | quote }}
+            - name: ERUN_CLOUD_INSTANCE_ID
+              value: {{ $cloudInstanceID | quote }}
             - name: ERUN_KUBERNETES_CONTEXT
               value: in-cluster
             - name: ERUN_TENANT
@@ -158,6 +176,12 @@ spec:
               value: {{ $mcpPort | quote }}
             - name: ERUN_SSHD_PORT
               value: {{ $sshPort | quote }}
+            - name: ERUN_IDLE_TIMEOUT
+              value: {{ $idleTimeout | quote }}
+            - name: ERUN_IDLE_WORKING_HOURS
+              value: {{ $idleWorkingHours | quote }}
+            - name: ERUN_IDLE_TRAFFIC_BYTES
+              value: {{ $idleTrafficBytes | quote }}
             - name: ERUN_NAMESPACE
               valueFrom:
                 fieldRef:

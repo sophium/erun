@@ -260,9 +260,20 @@ func SetEnvironmentCloudProviderAlias(ctx Context, store EnvironmentCloudAliasSt
 		config.Name = environment
 	}
 	if config.CloudProviderAlias == alias {
+		if config.Remote && !config.ManagedCloud {
+			config.ManagedCloud = true
+			if !ctx.DryRun {
+				if err := store.SaveEnvConfig(tenant, config); err != nil {
+					return EnvConfig{}, err
+				}
+			}
+		}
 		return config, nil
 	}
 	config.CloudProviderAlias = alias
+	if config.Remote {
+		config.ManagedCloud = true
+	}
 	if ctx.DryRun {
 		ctx.Trace("write erun environment cloud provider alias " + tenant + "/" + environment)
 		return config, nil

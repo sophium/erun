@@ -251,6 +251,13 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 	if err := ctx.EnsureKubernetesContext(result.EnvConfig.KubernetesContext); err != nil {
 		return err
 	}
+	if !ctx.DryRun && os.Getenv("ERUN_IDLE_PROBE") != "1" {
+		_ = common.RecordEnvironmentActivity(common.EnvironmentActivityParams{
+			Tenant:      result.Tenant,
+			Environment: result.Environment,
+			Kind:        common.ActivityKindCLI,
+		})
+	}
 	namespace := common.KubernetesNamespaceName(result.Tenant, result.Environment)
 	if options.VSCode && options.IntelliJ {
 		return fmt.Errorf("--vscode and --intellij cannot be used together")
@@ -300,6 +307,9 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 		}
 
 		if shouldDeploy {
+			if options.VSCode || options.IntelliJ {
+				return fmt.Errorf("opening %s requires updating the runtime deployment for %s/%s; run `erun sshd init %s %s` or `erun open %s %s` first, then retry", ideOpenLabel(options), result.Tenant, result.Environment, result.Tenant, result.Environment, result.Tenant, result.Environment)
+			}
 			if result.EnvConfig.SSHD.Enabled {
 				execution.Deploy.SSHDEnabled = true
 			}
@@ -390,6 +400,16 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 			return err
 		}
 	}
+}
+
+func ideOpenLabel(options openOptions) string {
+	if options.IntelliJ {
+		return "IntelliJ IDEA"
+	}
+	if options.VSCode {
+		return "VS Code"
+	}
+	return "the IDE"
 }
 
 func sshdExpectationForDeployment(result common.OpenResult) *bool {

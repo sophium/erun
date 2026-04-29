@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Folder, FolderOpen, MoreHorizontal, Plus, Settings } from 'lucide-react';
+import { Folder, FolderOpen, LoaderCircle, MoreHorizontal, Plus, Settings } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
@@ -115,6 +115,7 @@ function TenantGroup({
           {tenant.environments.map((environment) => {
             const selected = state.selected?.tenant === tenant.name && state.selected?.environment === environment.name;
             const selection = { tenant: tenant.name, environment: environment.name };
+            const busy = environmentIsBusy(state, tenant.name, environment.name);
 
             return (
               <div
@@ -127,7 +128,7 @@ function TenantGroup({
                 <button
                   type="button"
                   className={cn(
-                    'h-8 min-w-0 flex-1 cursor-pointer truncate border-0 bg-transparent py-0 pr-2 pl-10 text-left text-sm leading-[1.2] tracking-normal text-inherit',
+                    'flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent py-0 pr-2 pl-10 text-left text-sm leading-[1.2] tracking-normal text-inherit',
                     selected ? 'font-medium' : 'font-normal',
                   )}
                   title={`${tenant.name} / ${environment.name}`}
@@ -138,7 +139,8 @@ function TenantGroup({
                     });
                   }}
                 >
-                  {environment.name}
+                  <span className="min-w-0 truncate">{environment.name}</span>
+                  {busy && <LoaderCircle className="size-3.5 flex-none animate-spin text-current opacity-75" aria-hidden="true" />}
                 </button>
                 <IconTooltip label="Manage environment">
                   <Button
@@ -165,4 +167,8 @@ function TenantGroup({
       )}
     </div>
   );
+}
+
+function environmentIsBusy(state: AppState, tenant: string, environment: string): boolean {
+  return state.terminalBusy === true && state.selected?.tenant === tenant && state.selected.environment === environment;
 }

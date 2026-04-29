@@ -60,6 +60,7 @@ type ListEnvironmentResult struct {
 	RepoPath           string                `json:"repoPath,omitempty"`
 	RuntimeVersion     string                `json:"runtimeVersion,omitempty"`
 	Snapshot           bool                  `json:"snapshot"`
+	IsActive           bool                  `json:"isActive,omitempty"`
 	LocalPorts         EnvironmentLocalPorts `json:"localPorts,omitempty"`
 	IsDefault          bool                  `json:"isDefault,omitempty"`
 	IsEffective        bool                  `json:"isEffective,omitempty"`
@@ -164,6 +165,7 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 				RepoPath:           strings.TrimSpace(env.RepoPath),
 				RuntimeVersion:     strings.TrimSpace(env.RuntimeVersion),
 				Snapshot:           env.SnapshotEnabled(),
+				IsActive:           listEnvironmentIsActive(store, env),
 				LocalPorts:         localPorts,
 				IsDefault:          env.Name == tenant.DefaultEnvironment,
 				IsEffective:        effectiveErr == nil && tenant.Name == effectiveResult.Tenant && env.Name == effectiveResult.Environment,
@@ -184,6 +186,17 @@ func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, param
 	}
 
 	return result, nil
+}
+
+func listEnvironmentIsActive(store CloudReadStore, env EnvConfig) bool {
+	if !env.Remote {
+		return false
+	}
+	status, ok, err := findCloudContextForKubernetesContext(store, env.KubernetesContext)
+	if err != nil || !ok {
+		return false
+	}
+	return strings.TrimSpace(status.Status) == CloudContextStatusRunning
 }
 
 func listSSHResult(result OpenResult) ListSSHResult {

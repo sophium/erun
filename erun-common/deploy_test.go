@@ -262,6 +262,14 @@ func TestRuntimeChartsExposeMCPAndSSHPorts(t *testing.T) {
 		for _, want := range []string{
 			`{{- $mcpPort := default 17000 .Values.mcpPort -}}`,
 			`{{- $sshPort := default 17022 .Values.sshPort -}}`,
+			`{{- $cloudContextName := default "" .Values.cloudContext.name -}}`,
+			`{{- $cloudProviderAlias := default "" .Values.cloudContext.providerAlias -}}`,
+			`{{- $cloudRegion := default "" .Values.cloudContext.region -}}`,
+			`{{- $cloudInstanceID := default "" .Values.cloudContext.instanceId -}}`,
+			"name: ERUN_CLOUD_CONTEXT_NAME",
+			"name: ERUN_CLOUD_PROVIDER_ALIAS",
+			"name: ERUN_CLOUD_REGION",
+			"name: ERUN_CLOUD_INSTANCE_ID",
 			"name: ERUN_MCP_PORT",
 			"name: ERUN_SSHD_PORT",
 			"containerPort: {{ $mcpPort }}",
@@ -271,6 +279,15 @@ func TestRuntimeChartsExposeMCPAndSSHPorts(t *testing.T) {
 		} {
 			if !strings.Contains(content, want) {
 				t.Fatalf("expected %q to contain %q, got:\n%s", path, want, content)
+			}
+		}
+		for _, forbidden := range []string{
+			"ERUN_SSHD_TARGET_PORT",
+			"sshTargetPort",
+			"containerPort: 17023",
+		} {
+			if strings.Contains(content, forbidden) {
+				t.Fatalf("expected %q not to expose SSHD target port marker %q, got:\n%s", path, forbidden, content)
 			}
 		}
 	}
@@ -639,6 +656,56 @@ func TestResolveDeploySpecForContextUsesSelectedKubernetesContextForLocalEnviron
 	}
 }
 
+func TestResolveDeploySpecForContextAddsCloudHostStopMetadata(t *testing.T) {
+	projectRoot := t.TempDir()
+	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
+	if err := os.WriteFile(filepath.Join(chartPath, "values.rihards-develop.yaml"), nil, 0o644); err != nil {
+		t.Fatalf("write remote values file: %v", err)
+	}
+
+	spec, err := resolveDeploySpecForContext(
+		openStore{
+			toolConfig: ERunConfig{
+				CloudContexts: []CloudContextConfig{{
+					Name:               "erun-001-020362606330-eu-west-2",
+					CloudProviderAlias: "team-cloud",
+					Region:             "eu-west-2",
+					InstanceID:         "i-073c3338f26fbb000",
+					KubernetesContext:  "cluster-dev",
+					Status:             CloudContextStatusRunning,
+				}},
+			},
+		},
+		nil,
+		nil,
+		nil,
+		nil,
+		OpenResult{
+			Tenant:      "petios",
+			Environment: "rihards-develop",
+			RepoPath:    projectRoot,
+			EnvConfig: EnvConfig{
+				KubernetesContext:  "cluster-dev",
+				CloudProviderAlias: "team-cloud",
+				Remote:             true,
+				ManagedCloud:       true,
+			},
+		},
+		KubernetesDeployContext{
+			ComponentName: "erun-devops",
+			ChartPath:     chartPath,
+		},
+		"",
+		false,
+	)
+	if err != nil {
+		t.Fatalf("resolveDeploySpecForContext failed: %v", err)
+	}
+	if !spec.Deploy.ManagedCloud || spec.Deploy.CloudContextName != "erun-001-020362606330-eu-west-2" || spec.Deploy.CloudProviderAlias != "team-cloud" || spec.Deploy.CloudRegion != "eu-west-2" || spec.Deploy.CloudInstanceID != "i-073c3338f26fbb000" {
+		t.Fatalf("expected cloud host stop metadata, got %+v", spec.Deploy)
+	}
+}
+
 func TestResolveDeployKubernetesContextKeepsConfiguredContextForLocalEnvironment(t *testing.T) {
 	called := false
 	got := resolveDeployKubernetesContext(DefaultEnvironment, "cluster-configured", func() (string, error) {
@@ -830,20 +897,25 @@ printf '%s
 
 	chartPath := createHelmChartFixture(t, t.TempDir(), "erun-devops")
 	if err := DeployHelmChart(HelmDeployParams{
-		ReleaseName:       "erun-devops",
-		ChartPath:         chartPath,
-		ValuesFilePath:    filepath.Join(chartPath, "values.local.yaml"),
-		Tenant:            "erun",
-		Environment:       "remote",
-		Namespace:         "erun-remote",
-		KubernetesContext: "rancher-desktop",
-		WorktreeStorage:   WorktreeStoragePVC,
-		WorktreeRepoName:  "erun",
-		WorktreeHostPath:  "/home/erun/git/erun",
-		SSHDEnabled:       true,
-		MCPPort:           17100,
-		SSHPort:           17122,
-		Timeout:           DefaultHelmDeploymentTimeout,
+		ReleaseName:        "erun-devops",
+		ChartPath:          chartPath,
+		ValuesFilePath:     filepath.Join(chartPath, "values.local.yaml"),
+		Tenant:             "erun",
+		Environment:        "remote",
+		Namespace:          "erun-remote",
+		KubernetesContext:  "rancher-desktop",
+		WorktreeStorage:    WorktreeStoragePVC,
+		WorktreeRepoName:   "erun",
+		WorktreeHostPath:   "/home/erun/git/erun",
+		SSHDEnabled:        true,
+		MCPPort:            17100,
+		SSHPort:            17122,
+		ManagedCloud:       true,
+		CloudContextName:   "erun-001-020362606330-eu-west-2",
+		CloudProviderAlias: "team-cloud",
+		CloudRegion:        "eu-west-2",
+		CloudInstanceID:    "i-073c3338f26fbb000",
+		Timeout:            DefaultHelmDeploymentTimeout,
 	}); err != nil {
 		t.Fatalf("DeployHelmChart failed: %v", err)
 	}
@@ -861,6 +933,17 @@ printf '%s
 	}
 	if !strings.Contains(args, "--set\nsshPort=17122\n") {
 		t.Fatalf("expected helm args to include sshPort=17122, got:\n%s", args)
+	}
+	for _, want := range []string{
+		"--set\nmanagedCloud=true\n",
+		"--set-string\ncloudContext.name=erun-001-020362606330-eu-west-2\n",
+		"--set-string\ncloudContext.providerAlias=team-cloud\n",
+		"--set-string\ncloudContext.region=eu-west-2\n",
+		"--set-string\ncloudContext.instanceId=i-073c3338f26fbb000\n",
+	} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("expected helm args to include %q, got:\n%s", want, args)
+		}
 	}
 }
 

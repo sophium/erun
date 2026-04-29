@@ -124,6 +124,44 @@ func FindRecentProject(optionsDir string, configID string, projectPath string) (
 	return RecentProject{}, false, nil
 }
 
+func ClearRecentProjectLatestUsedIDE(optionsDir string, configID string, projectPath string) (bool, error) {
+	optionsDir = filepath.Clean(strings.TrimSpace(optionsDir))
+	configID = strings.TrimSpace(configID)
+	projectPath = strings.TrimSpace(projectPath)
+	if optionsDir == "" {
+		return false, fmt.Errorf("JetBrains options directory is required")
+	}
+	if configID == "" {
+		return false, fmt.Errorf("JetBrains config ID is required")
+	}
+	if projectPath == "" {
+		return false, fmt.Errorf("JetBrains project path is required")
+	}
+
+	path := filepath.Join(optionsDir, "sshRecentConnections.v2.xml")
+	doc := sshRecentConnectionsApplication{}
+	if err := readXMLFile(path, &doc); err != nil {
+		return false, err
+	}
+	for i := range doc.Component.Connections.List.States {
+		if doc.Component.Connections.List.States[i].ConfigID() != configID {
+			continue
+		}
+		projects := doc.Component.Connections.List.States[i].ProjectStates()
+		for j := range projects {
+			project := &projects[j]
+			if project.ProjectPath() != projectPath {
+				continue
+			}
+			if !project.ClearLatestUsedIDE() {
+				return false, nil
+			}
+			return true, writeXMLFile(path, doc)
+		}
+	}
+	return false, nil
+}
+
 func upsertSSHConfigsFile(path string, entry ProjectEntry) error {
 	doc := sshConfigsApplication{
 		Component: sshConfigsComponent{
@@ -412,6 +450,15 @@ func (state localRecentConnectionState) Projects() []recentProjectState {
 	return nil
 }
 
+func (state *localRecentConnectionState) ProjectStates() []recentProjectState {
+	for i := range state.Options {
+		if state.Options[i].Name == "projects" && state.Options[i].List != nil {
+			return state.Options[i].List.Projects
+		}
+	}
+	return nil
+}
+
 type recentProjectOption struct {
 	Name          string                     `xml:"name,attr"`
 	Value         string                     `xml:"value,attr,omitempty"`
@@ -449,6 +496,17 @@ func (state *recentProjectState) MergeMetadata(project recentProjectState) {
 	state.upsertOptionValue("date", project.OptionValue("date"))
 	state.upsertOptionValue("productCode", project.OptionValue("productCode"))
 	state.upsertOptionValue("projectPath", project.ProjectPath())
+}
+
+func (state *recentProjectState) ClearLatestUsedIDE() bool {
+	for i := range state.Options {
+		if state.Options[i].Name != "latestUsedIde" {
+			continue
+		}
+		state.Options = append(state.Options[:i], state.Options[i+1:]...)
+		return true
+	}
+	return false
 }
 
 func (state *recentProjectState) upsertOptionValue(name string, value string) {

@@ -104,6 +104,10 @@ func buildSSHDInitArgs(selection uiSelection) []string {
 	return erunArgs(selection.Debug, "sshd", "init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
 }
 
+func buildDoctorArgs(selection uiSelection) []string {
+	return erunArgs(selection.Debug, "doctor", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
+}
+
 func buildOpenNoShellArgs(tenant, environment string) []string {
 	return []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment), "--no-shell", "--no-alias-prompt"}
 }
@@ -142,6 +146,7 @@ func buildPowerShellCommandInvocation(command string, args []string) string {
 func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncommon.OpenResult) error {
 	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
 	cmd := exec.CommandContext(ctx, cliPath, args...)
+	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
 	output, err := cmd.CombinedOutput()
 	if err == nil {
 		return nil

@@ -197,8 +197,11 @@ func TestSetEnvironmentCloudProviderAliasUpdatesOnlyAlias(t *testing.T) {
 	if updated.CloudProviderAlias != "team-cloud" {
 		t.Fatalf("unexpected updated config: %+v", updated)
 	}
+	if !updated.ManagedCloud {
+		t.Fatalf("expected remote cloud alias update to mark environment managed cloud: %+v", updated)
+	}
 	stored := store.envs["frs/dev"]
-	if stored.RepoPath != "/workspace/frs" || stored.KubernetesContext != "cluster-dev" || stored.ContainerRegistry != "registry.example.com/frs" || stored.RuntimeVersion != "1.0.0" || !stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/id.pub" || !stored.Remote || stored.Snapshot == nil || !*stored.Snapshot {
+	if stored.RepoPath != "/workspace/frs" || stored.KubernetesContext != "cluster-dev" || stored.ContainerRegistry != "registry.example.com/frs" || stored.RuntimeVersion != "1.0.0" || !stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/id.pub" || !stored.Remote || !stored.ManagedCloud || stored.Snapshot == nil || !*stored.Snapshot {
 		t.Fatalf("unexpected stored config: %+v", stored)
 	}
 }

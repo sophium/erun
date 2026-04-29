@@ -4,6 +4,7 @@ import type {
   ManageTab,
   UIERunConfig,
   UIEnvironmentConfig,
+  UIIdleStatus,
   UICloudContextInitInput,
   UISelection,
   UITenantConfig,
@@ -29,6 +30,9 @@ export const FILES_WIDTH_STORAGE_KEY = 'erun.filesWidth';
 export const FILES_OPEN_STORAGE_KEY = 'erun.filesOpen';
 export const DEBUG_OPEN_STORAGE_KEY = 'erun.debugOpen';
 export const DEBUG_HEIGHT_STORAGE_KEY = 'erun.debugHeight';
+export const PAST_TENANTS_STORAGE_KEY = 'erun.pastTenants';
+export const PAST_ENVIRONMENTS_STORAGE_KEY = 'erun.pastEnvironments';
+export const PAST_CONTAINER_REGISTRIES_STORAGE_KEY = 'erun.pastContainerRegistries';
 
 export interface EnvironmentDialogState {
   open: boolean;
@@ -121,6 +125,8 @@ export interface AppState {
   terminalBusy: boolean;
   terminalCopyOutput: string;
   terminalCopyStatus: string;
+  idleStatus: UIIdleStatus | null;
+  idleCloudContextBusy: boolean;
   debugOpen: boolean;
   debugHeight: number;
   debugOutput: string;
@@ -210,6 +216,11 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
     enabled: false,
     localPort: 0,
     publicKeyPath: '',
+  },
+  idle: {
+    timeout: '5m0s',
+    workingHours: '08:00-20:00',
+    idleTrafficBytes: 0,
   },
   localPorts: {
     rangeStart: 0,

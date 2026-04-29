@@ -21,8 +21,10 @@ type sshdPortForwardState struct {
 	KubernetesContext string `json:"kubernetesContext"`
 	Namespace         string `json:"namespace"`
 	LocalPort         int    `json:"localPort"`
+	ForwardPort       int    `json:"forwardPort,omitempty"`
 	LogPath           string `json:"logPath,omitempty"`
 	ProcessID         int    `json:"processId,omitempty"`
+	ProxyProcessID    int    `json:"proxyProcessId,omitempty"`
 }
 
 func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common.SSHConnectionInfo, error) {
@@ -40,12 +42,15 @@ func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common
 		LocalPort:         info.Port,
 	}
 
-	if stateMatchesSSHDTarget(state, expectedState) && canReachLocalSSHEndpoint(info.Port) {
+	if stateMatchesSSHDTarget(state, expectedState) && !stateHasDeprecatedLocalProxy(state) && canReachLocalSSHEndpoint(info.Port) {
 		return info, nil
 	}
 	if stateMatchesSSHDTarget(state, expectedState) && state.ProcessID > 0 && canConnectLocalPort(info.Port) {
-		_ = stopPortForwardProcess(state.ProcessID)
+		stopSSHDPortForwardState(state)
 		waitForLocalPortToClose(info.Port)
+		if state.ForwardPort > 0 {
+			waitForLocalPortToClose(state.ForwardPort)
+		}
 	}
 	if canConnectLocalPort(info.Port) {
 		return common.SSHConnectionInfo{}, fmt.Errorf("local SSH port %d is already in use", info.Port)
@@ -153,6 +158,33 @@ func stateMatchesSSHDTarget(state, expected sshdPortForwardState) bool {
 		state.KubernetesContext == expected.KubernetesContext &&
 		state.Namespace == expected.Namespace &&
 		state.LocalPort == expected.LocalPort
+}
+
+func stateHasDeprecatedLocalProxy(state sshdPortForwardState) bool {
+	return state.ForwardPort > 0 || state.ProxyProcessID > 0
+}
+
+func stopSSHDPortForwardState(state sshdPortForwardState) {
+	if state.ProxyProcessID > 0 {
+		_ = stopSSHDActivityProxyProcess(state.ProxyProcessID)
+	}
+	if state.ProcessID > 0 {
+		_ = stopPortForwardProcess(state.ProcessID)
+	}
+}
+
+func stopSSHDActivityProxyProcess(pid int) error {
+	if pid <= 0 {
+		return nil
+	}
+	if !isSSHDActivityProxyProcess(pid) {
+		return nil
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return process.Kill()
 }
 
 func canReachLocalSSHEndpoint(port int) bool {

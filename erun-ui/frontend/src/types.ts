@@ -2,6 +2,8 @@ export interface UIEnvironment {
   name: string;
   mcpUrl?: string;
   runtimeVersion?: string;
+  isActive?: boolean;
+  sshdEnabled?: boolean;
 }
 
 export interface UITenant {
@@ -39,6 +41,27 @@ export interface UIState {
   build?: UIBuildDetails;
   versionSuggestions?: UIVersionSuggestion[];
   kubernetesContexts?: string[];
+}
+
+export interface UIIdleStatus {
+  timeoutSeconds: number;
+  secondsUntilStop: number;
+  stopEligible: boolean;
+  outsideWorkingHours: boolean;
+  managedCloud: boolean;
+  stopBlockedReason?: string;
+  stopError?: string;
+  cloudContextName?: string;
+  cloudContextStatus?: string;
+  cloudContextLabel?: string;
+  markers?: UIIdleMarker[];
+}
+
+export interface UIIdleMarker {
+  name: string;
+  idle: boolean;
+  reason?: string;
+  secondsRemaining?: number;
 }
 
 export interface UIVersionSuggestion {
@@ -132,6 +155,11 @@ export interface UIEnvironmentConfig {
   cloudContext?: UICloudContextStatus;
   runtimeVersion: string;
   sshd: UISSHDConfig;
+  idle: {
+    timeout: string;
+    workingHours: string;
+    idleTrafficBytes: number;
+  };
   localPorts: UIEnvironmentLocalPorts;
   remote: boolean;
   snapshot: boolean;

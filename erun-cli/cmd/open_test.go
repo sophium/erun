@@ -713,6 +713,77 @@ func TestRunResolvedOpenCommandLaunchesIntelliJWhenRequested(t *testing.T) {
 	}
 }
 
+func TestRunResolvedOpenCommandRejectsIntelliJRuntimeRedeploy(t *testing.T) {
+	activated := false
+	launched := false
+	err := runResolvedOpenCommand(
+		common.Context{
+			Logger: common.NewLoggerWithWriters(0, new(bytes.Buffer), new(bytes.Buffer)),
+			Stdout: new(bytes.Buffer),
+			Stderr: new(bytes.Buffer),
+		},
+		common.OpenResult{
+			Tenant:      "tenant-a",
+			Environment: "dev",
+			RepoPath:    "/home/erun/git/tenant-a",
+			EnvConfig: common.EnvConfig{
+				Name:              "dev",
+				RepoPath:          "/home/erun/git/tenant-a",
+				KubernetesContext: "cluster-dev",
+				Remote:            true,
+				SSHD:              common.SSHDConfig{Enabled: true},
+			},
+		},
+		openOptions{IntelliJ: true},
+		nil,
+		func(_ common.Context, _ common.ShellLaunchParams) error {
+			t.Fatal("did not expect shell launch")
+			return nil
+		},
+		nil,
+		func(req common.KubernetesDeploymentCheckParams) (bool, error) {
+			if req.ExpectedSSHD == nil || !*req.ExpectedSSHD {
+				t.Fatalf("expected SSHD-enabled deployment check, got %+v", req)
+			}
+			return false, nil
+		},
+		func(common.OpenResult) (common.DeploySpec, error) {
+			return common.DeploySpec{
+				Deploy: common.HelmDeploySpec{
+					ReleaseName: "tenant-a-devops",
+					ChartPath:   "/chart",
+				},
+			}, nil
+		},
+		func(params common.HelmDeployParams) error {
+			t.Fatalf("did not expect hidden runtime deployment while opening IntelliJ: %+v", params)
+			return nil
+		},
+		nil,
+		func(_ common.Context, _ common.OpenResult) error {
+			activated = true
+			return nil
+		},
+		nil,
+		func(_ common.Context, _ common.OpenResult, _ PromptRunner) error {
+			launched = true
+			return nil
+		},
+	)
+	if err == nil {
+		t.Fatal("expected runtime redeploy error")
+	}
+	if !strings.Contains(err.Error(), "opening IntelliJ IDEA requires updating the runtime deployment for tenant-a/dev") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if activated {
+		t.Fatal("did not expect SSH activation after redeploy refusal")
+	}
+	if launched {
+		t.Fatal("did not expect IntelliJ launch after redeploy refusal")
+	}
+}
+
 func TestRunResolvedOpenCommandRejectsIntelliJWithoutSSHD(t *testing.T) {
 	err := runResolvedOpenCommand(
 		common.Context{
@@ -954,7 +1025,7 @@ func TestOpenCommandDryRunPrintsResolvedOpenTraceWithoutLaunchingShell(t *testin
 	output := stderr.String()
 	for _, want := range []string{
 		"kubectl --context cluster-dev --namespace tenant-a-dev wait --for=condition=Available --timeout 2m0s deployment/tenant-a-devops",
-		"kubectl --context cluster-dev --namespace tenant-a-dev exec -it -c tenant-a-devops deployment/tenant-a-devops -- /bin/sh -lc '<bootstrap-script>'",
+		"kubectl --context cluster-dev --namespace tenant-a-dev exec -it deployment/tenant-a-devops -- /bin/sh -lc '<bootstrap-script>'",
 		"bootstrap-script:",
 		"  set -eu",
 	} {
@@ -1034,7 +1105,7 @@ func TestOpenCommandDryRunPrintsDeployPlanWhenDevopsRuntimeIsMissing(t *testing.
 	for _, want := range []string{
 		"helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace tenant-a-dev --kube-context cluster-dev -f " + filepath.Join(chartPath, "values.dev.yaml") + " --set-string tenant=tenant-a --set-string environment=dev",
 		"kubectl --context cluster-dev --namespace tenant-a-dev wait --for=condition=Available --timeout 2m0s deployment/tenant-a-devops",
-		"kubectl --context cluster-dev --namespace tenant-a-dev exec -it -c tenant-a-devops deployment/tenant-a-devops -- /bin/sh -lc '<bootstrap-script>'",
+		"kubectl --context cluster-dev --namespace tenant-a-dev exec -it deployment/tenant-a-devops -- /bin/sh -lc '<bootstrap-script>'",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected dry-run output to contain %q, got %q", want, output)
@@ -1346,7 +1417,7 @@ func TestOpenCommandUsesPersistedSnapshotPreferenceForLocalEnvironment(t *testin
 	}
 	for _, want := range []string{
 		"kubectl --context cluster-local --namespace tenant-a-local wait --for=condition=Available --timeout 2m0s deployment/tenant-a-devops",
-		"kubectl --context cluster-local --namespace tenant-a-local exec -it -c tenant-a-devops deployment/tenant-a-devops -- /bin/sh -lc '<bootstrap-script>'",
+		"kubectl --context cluster-local --namespace tenant-a-local exec -it deployment/tenant-a-devops -- /bin/sh -lc '<bootstrap-script>'",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected dry-run output to contain %q, got %q", want, output)
@@ -1390,7 +1461,7 @@ func TestOpenCommandDryRunFallsBackToDefaultRuntimeChartWhenTenantRepoHasNoDevop
 	for _, want := range []string{
 		"helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace frs-local --kube-context cluster-dev -f ",
 		"kubectl --context cluster-dev --namespace frs-local wait --for=condition=Available --timeout 2m0s deployment/frs-devops",
-		"kubectl --context cluster-dev --namespace frs-local exec -it -c frs-devops deployment/frs-devops -- /bin/sh -lc '<bootstrap-script>'",
+		"kubectl --context cluster-dev --namespace frs-local exec -it deployment/frs-devops -- /bin/sh -lc '<bootstrap-script>'",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected dry-run output to contain %q, got %q", want, output)

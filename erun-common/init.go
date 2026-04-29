@@ -79,6 +79,7 @@ type BootstrapInitParams struct {
 	Bootstrap                bool
 	ConfirmTenant            *bool
 	ConfirmEnvironment       *bool
+	ConfirmRemoteHostConfig  *bool
 	ConfirmRemoteKeyImport   *bool
 	AutoApprove              bool
 	ResolveTenant            bool
@@ -94,6 +95,7 @@ const (
 	BootstrapInitInteractionContainerRegistry  BootstrapInitInteractionType = "input_container_registry"
 	BootstrapInitInteractionRemoteRepository   BootstrapInitInteractionType = "input_remote_repository"
 	BootstrapInitInteractionCodeCommitSSHKeyID BootstrapInitInteractionType = "input_codecommit_ssh_key_id"
+	BootstrapInitInteractionConfirmRemoteHost  BootstrapInitInteractionType = "confirm_remote_host_config"
 	BootstrapInitInteractionConfirmRemoteKey   BootstrapInitInteractionType = "confirm_remote_key"
 )
 
@@ -568,6 +570,14 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 		if err != nil {
 			return result, err
 		}
+		managedCloud, err := managedCloudEnvironment(s.Store, EnvConfig{
+			KubernetesContext:  kubernetesContext,
+			CloudProviderAlias: cloudProviderAlias,
+			Remote:             remoteMode,
+		})
+		if err != nil {
+			return result, err
+		}
 		containerRegistry, err := s.resolveContainerRegistry(params, tenant, envName, envProjectRoot, "", true)
 		if err != nil {
 			return result, err
@@ -582,6 +592,7 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 			RepoPath:           envProjectRoot,
 			KubernetesContext:  kubernetesContext,
 			CloudProviderAlias: cloudProviderAlias,
+			ManagedCloud:       managedCloud,
 			RuntimeVersion:     strings.TrimSpace(params.RuntimeVersion),
 			Remote:             remoteMode,
 		}
@@ -628,6 +639,14 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 	}
 	if cloudProviderAlias != envConfig.CloudProviderAlias {
 		envConfig.CloudProviderAlias = cloudProviderAlias
+		envConfigChanged = true
+	}
+	managedCloud, err := managedCloudEnvironment(s.Store, envConfig)
+	if err != nil {
+		return result, err
+	}
+	if managedCloud != envConfig.ManagedCloud {
+		envConfig.ManagedCloud = managedCloud
 		envConfigChanged = true
 	}
 	projectRoot := envConfig.RepoPath
@@ -715,6 +734,10 @@ func codeCommitSSHKeyIDLabel(tenant, envName string) string {
 
 func remoteKeyImportLabel(tenant, envName string) string {
 	return fmt.Sprintf("Import the SSH public key above for environment %q in tenant %q and continue", envName, tenant)
+}
+
+func remoteHostConfigLabel(tenant, envName string) string {
+	return fmt.Sprintf("Use existing SSH host config for environment %q in tenant %q", envName, tenant)
 }
 
 func KubernetesNamespaceName(tenant, envName string) string {
