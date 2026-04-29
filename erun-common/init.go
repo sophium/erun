@@ -157,6 +157,25 @@ type bootstrapRunner struct {
 	Context Context
 }
 
+type bootstrapRunState struct {
+	runner                bootstrapRunner
+	params                BootstrapInitParams
+	result                BootstrapInitResult
+	detected              projectContext
+	tenants               []TenantConfig
+	tenantsLoaded         bool
+	setDefaultTenant      bool
+	defaultTenantResolved bool
+	toolConfig            ERunConfig
+	toolConfigMissing     bool
+	tenant                string
+	tenantConfig          TenantConfig
+	tenantConfigChanged   bool
+	envName               string
+	envConfig             EnvConfig
+	envConfigChanged      bool
+}
+
 func RunBootstrapInit(ctx Context, params BootstrapInitParams, store BootstrapStore, findProjectRoot ProjectFinderFunc, getWorkingDir WorkDirFunc, selectTenant SelectTenantFunc, confirm ConfirmFunc, promptKubernetesContext PromptValueFunc, promptContainerRegistry PromptValueFunc, ensureKubernetesNamespace NamespaceEnsurerFunc, loadProjectConfig ProjectConfigLoaderFunc, saveProjectConfig ProjectConfigSaverFunc) (BootstrapInitResult, error) {
 	return RunBootstrapInitWithDependencies(BootstrapInitDependencies{
 		Store:                     store,
@@ -290,422 +309,596 @@ func (s tracedBootstrapStore) ListEnvConfigs(tenant string) ([]EnvConfig, error)
 
 func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, error) {
 	s = s.withDefaults()
-	params = normalizeBootstrapParams(params)
-	remoteMode := params.Remote
-
-	var result BootstrapInitResult
-	var detected projectContext
-	var tenants []TenantConfig
-	var tenantsLoaded bool
-	var setDefaultTenant bool
-	var defaultTenantResolved bool
-
-	if remoteMode {
-		if params.InitializeCurrentProject || params.ResolveTenant {
-			return result, fmt.Errorf("remote initialization requires an explicit tenant")
-		}
-		if params.Tenant == "" {
-			return result, fmt.Errorf("tenant is required with --remote")
-		}
-		if params.Environment == "" {
-			return result, fmt.Errorf("environment is required with --remote")
-		}
+	state := bootstrapRunState{
+		runner: s,
+		params: normalizeBootstrapParams(params),
 	}
-
-	findProject := func() (projectContext, error) {
-		if detected.loaded {
-			return detected, nil
-		}
-		tenant, root, err := s.FindProjectRoot()
-		if err != nil {
-			return projectContext{}, err
-		}
-		detected = projectContext{
-			tenant: tenant,
-			root:   root,
-			loaded: true,
-		}
-		return detected, nil
+	if err := state.run(); err != nil {
+		return state.result, err
 	}
+	return state.result, nil
+}
 
-	detectProject := func() (projectContext, error) {
-		s.Context.Trace("Trying to detect current project directory")
-		project, err := findProject()
-		if err != nil {
-			if errors.Is(err, ErrNotInGitRepository) {
-				s.Context.Logger.Error("erun config is not initialized. Run erun in project directory.")
-				return projectContext{}, err
-			}
-			return projectContext{}, err
-		}
+func (s *bootstrapRunState) run() error {
+	if err := s.validateRemoteParams(); err != nil {
+		return err
+	}
+	if err := s.loadBootstrapConfigs(); err != nil {
+		return err
+	}
+	if err := s.applyBootstrapConfigChanges(); err != nil {
+		return err
+	}
+	s.finish()
+	return nil
+}
+
+func (s *bootstrapRunState) loadBootstrapConfigs() error {
+	if err := s.loadToolConfig(); err != nil {
+		return err
+	}
+	if err := s.resolveTenant(); err != nil {
+		return err
+	}
+	if err := s.loadTenantConfig(); err != nil {
+		return err
+	}
+	if err := s.resolveEnvironmentName(); err != nil {
+		return err
+	}
+	return s.loadEnvConfig()
+}
+
+func (s *bootstrapRunState) applyBootstrapConfigChanges() error {
+	if err := s.updateEnvConfig(); err != nil {
+		return err
+	}
+	if err := s.ensureDevopsAssets(); err != nil {
+		return err
+	}
+	if err := s.saveEnvConfigIfChanged(); err != nil {
+		return err
+	}
+	return s.saveDefaultTenantIfNeeded()
+}
+
+func (s *bootstrapRunState) validateRemoteParams() error {
+	if !s.params.Remote {
+		return nil
+	}
+	if s.params.InitializeCurrentProject || s.params.ResolveTenant {
+		return fmt.Errorf("remote initialization requires an explicit tenant")
+	}
+	if s.params.Tenant == "" {
+		return fmt.Errorf("tenant is required with --remote")
+	}
+	if s.params.Environment == "" {
+		return fmt.Errorf("environment is required with --remote")
+	}
+	return nil
+}
+
+func (s *bootstrapRunState) findProject() (projectContext, error) {
+	if s.detected.loaded {
+		return s.detected, nil
+	}
+	tenant, root, err := s.runner.FindProjectRoot()
+	if err != nil {
+		return projectContext{}, err
+	}
+	s.detected = projectContext{
+		tenant: tenant,
+		root:   root,
+		loaded: true,
+	}
+	return s.detected, nil
+}
+
+func (s *bootstrapRunState) detectProject() (projectContext, error) {
+	s.runner.Context.Trace("Trying to detect current project directory")
+	project, err := s.findProject()
+	if err == nil {
 		return project, nil
 	}
-
-	loadTenants := func() ([]TenantConfig, error) {
-		if tenantsLoaded {
-			return tenants, nil
-		}
-		loadedTenants, err := s.Store.ListTenantConfigs()
-		if err != nil {
-			return nil, err
-		}
-		tenants = loadedTenants
-		tenantsLoaded = true
-		return tenants, nil
+	if errors.Is(err, ErrNotInGitRepository) {
+		s.runner.Context.Logger.Error("erun config is not initialized. Run erun in project directory.")
 	}
+	return projectContext{}, err
+}
 
-	resolveDefaultTenant := func(tenant, projectRoot string) error {
-		if defaultTenantResolved {
-			return nil
+func (s *bootstrapRunState) loadTenants() ([]TenantConfig, error) {
+	if s.tenantsLoaded {
+		return s.tenants, nil
+	}
+	tenants, err := s.runner.Store.ListTenantConfigs()
+	if err != nil {
+		return nil, err
+	}
+	s.tenants = tenants
+	s.tenantsLoaded = true
+	return s.tenants, nil
+}
+
+func (s *bootstrapRunState) resolveDefaultTenant(tenant, projectRoot string) error {
+	if s.defaultTenantResolved {
+		return nil
+	}
+	updateDefaultTenant, err := s.runner.confirmTenant(s.params, tenant, projectRoot)
+	if err != nil {
+		return err
+	}
+	s.setDefaultTenant = updateDefaultTenant
+	s.defaultTenantResolved = true
+	return nil
+}
+
+func (s *bootstrapRunState) loadToolConfig() error {
+	toolConfig, configPath, err := s.runner.Store.LoadERunConfig()
+	s.toolConfig = toolConfig
+	s.runner.Context.Trace("Loading erun tool configuration, configPath=" + configPath)
+	switch {
+	case err == nil:
+	case errors.Is(err, ErrNotInitialized):
+		if err := s.initializeMissingToolConfig(); err != nil {
+			return err
 		}
-		updateDefaultTenant, err := s.confirmTenant(params, tenant, projectRoot)
+	case err != nil:
+		return err
+	}
+	s.runner.Context.Trace("Loaded erun tool configuration")
+	return nil
+}
+
+func (s *bootstrapRunState) initializeMissingToolConfig() error {
+	s.toolConfigMissing = true
+	if s.params.ResolveTenant {
+		return nil
+	}
+	tenant, projectRoot, err := s.defaultTenantCandidate()
+	if err != nil {
+		return err
+	}
+	if err := s.resolveDefaultTenant(tenant, projectRoot); err != nil {
+		return err
+	}
+	if !s.setDefaultTenant {
+		return nil
+	}
+	s.runner.Context.Trace("Saving default config")
+	s.toolConfig = ERunConfig{DefaultTenant: tenant}
+	if err := s.runner.Store.SaveERunConfig(s.toolConfig); err != nil {
+		return err
+	}
+	s.result.CreatedERunConfig = true
+	s.toolConfigMissing = false
+	return nil
+}
+
+func (s *bootstrapRunState) defaultTenantCandidate() (string, string, error) {
+	tenant := s.params.Tenant
+	projectRoot := s.params.ProjectRoot
+	if s.params.Remote {
+		return tenant, RemoteWorktreePathForRepoName(tenant), nil
+	}
+	if tenant != "" && projectRoot != "" {
+		return tenant, projectRoot, nil
+	}
+	project, err := s.detectProject()
+	if err != nil {
+		return "", "", err
+	}
+	if tenant == "" {
+		tenant = project.tenant
+	}
+	if projectRoot == "" {
+		projectRoot = project.root
+	}
+	return tenant, projectRoot, nil
+}
+
+func (s *bootstrapRunState) resolveTenant() error {
+	s.tenant = s.params.Tenant
+	if err := s.resolveTenantFromProject(); err != nil {
+		return err
+	}
+	if err := s.resolveTenantFromDirectory(); err != nil {
+		return err
+	}
+	if s.tenant == "" && !s.params.Remote {
+		s.tenant = s.toolConfig.DefaultTenant
+	}
+	if err := s.resolveTenantFromSelection(); err != nil {
+		return err
+	}
+	if s.tenant == "" && !s.params.Remote {
+		project, err := s.detectProject()
 		if err != nil {
 			return err
 		}
-		setDefaultTenant = updateDefaultTenant
-		defaultTenantResolved = true
+		s.tenant = project.tenant
+	}
+	if s.params.Remote {
+		s.params.ProjectRoot = RemoteWorktreePathForRepoName(s.tenant)
+	}
+	return nil
+}
+
+func (s *bootstrapRunState) resolveTenantFromProject() error {
+	if s.tenant != "" || s.params.Remote {
 		return nil
 	}
-
-	toolConfig, configPath, err := s.Store.LoadERunConfig()
-	toolConfigMissing := false
-	s.Context.Trace("Loading erun tool configuration, configPath=" + configPath)
+	project, err := s.findProject()
 	switch {
 	case err == nil:
-	case errors.Is(err, ErrNotInitialized):
-		toolConfigMissing = true
-		if params.ResolveTenant {
-			break
-		}
-		tenant := params.Tenant
-		projectRoot := params.ProjectRoot
-		if remoteMode {
-			projectRoot = RemoteWorktreePathForRepoName(tenant)
-		} else if tenant == "" || projectRoot == "" {
-			project, detectErr := detectProject()
-			if detectErr != nil {
-				return result, detectErr
-			}
-			if tenant == "" {
-				tenant = project.tenant
-			}
-			if projectRoot == "" {
-				projectRoot = project.root
-			}
-		}
-
-		if err := resolveDefaultTenant(tenant, projectRoot); err != nil {
-			return result, err
-		}
-
-		if setDefaultTenant {
-			s.Context.Trace("Saving default config")
-			toolConfig = ERunConfig{DefaultTenant: tenant}
-			if err := s.Store.SaveERunConfig(toolConfig); err != nil {
-				return result, err
-			}
-			result.CreatedERunConfig = true
-			toolConfigMissing = false
-		}
+		s.tenant = project.tenant
+	case errors.Is(err, ErrNotInGitRepository):
 	case err != nil:
-		return result, err
+		return err
 	}
-	s.Context.Trace("Loaded erun tool configuration")
+	return nil
+}
 
-	tenant := params.Tenant
-	if tenant == "" && !remoteMode {
-		project, detectErr := findProject()
-		switch {
-		case detectErr == nil:
-			tenant = project.tenant
-		case errors.Is(detectErr, ErrNotInGitRepository):
-		case detectErr != nil:
-			return result, detectErr
-		}
+func (s *bootstrapRunState) resolveTenantFromDirectory() error {
+	if s.tenant != "" || !s.params.ResolveTenant {
+		return nil
 	}
-	if tenant == "" && params.ResolveTenant {
-		loadedTenants, err := loadTenants()
-		if err != nil {
-			return result, err
-		}
-		if len(loadedTenants) > 0 {
-			workingDir, err := s.GetWorkingDir()
-			if err != nil {
-				return result, err
-			}
-			if currentTenant, found := findTenantForDirectory(workingDir, loadedTenants); found {
-				tenant = currentTenant.Name
-			}
-		}
+	tenants, err := s.loadTenants()
+	if err != nil {
+		return err
 	}
-	if tenant == "" && !remoteMode {
-		tenant = toolConfig.DefaultTenant
+	if len(tenants) == 0 {
+		return nil
 	}
-	if tenant == "" && params.ResolveTenant {
-		loadedTenants, err := loadTenants()
-		if err != nil {
-			return result, err
-		}
-		if len(loadedTenants) > 0 {
-			selection, err := s.selectTenant(params, loadedTenants)
-			if err != nil {
-				return result, err
-			}
-			if !selection.Initialize {
-				tenant = selection.Tenant
-			}
-		}
+	workingDir, err := s.runner.GetWorkingDir()
+	if err != nil {
+		return err
 	}
-	if tenant == "" && !remoteMode {
-		project, detectErr := detectProject()
-		if detectErr != nil {
-			return result, detectErr
-		}
-		tenant = project.tenant
+	if currentTenant, found := findTenantForDirectory(workingDir, tenants); found {
+		s.tenant = currentTenant.Name
 	}
-	if remoteMode {
-		params.ProjectRoot = RemoteWorktreePathForRepoName(tenant)
-	}
+	return nil
+}
 
-	s.Context.Trace("Loading tenant configuration")
-	tenantConfig, _, err := s.Store.LoadTenantConfig(tenant)
-	tenantConfigChanged := false
+func (s *bootstrapRunState) resolveTenantFromSelection() error {
+	if s.tenant != "" || !s.params.ResolveTenant {
+		return nil
+	}
+	tenants, err := s.loadTenants()
+	if err != nil {
+		return err
+	}
+	if len(tenants) == 0 {
+		return nil
+	}
+	selection, err := s.runner.selectTenant(s.params, tenants)
+	if err != nil {
+		return err
+	}
+	if !selection.Initialize {
+		s.tenant = selection.Tenant
+	}
+	return nil
+}
+
+func (s *bootstrapRunState) loadTenantConfig() error {
+	s.runner.Context.Trace("Loading tenant configuration")
+	tenantConfig, _, err := s.runner.Store.LoadTenantConfig(s.tenant)
 	switch {
 	case err == nil:
+		s.tenantConfig = tenantConfig
 	case errors.Is(err, ErrNotInitialized):
-		projectRoot := params.ProjectRoot
-		if projectRoot == "" && !remoteMode {
-			project, detectErr := detectProject()
-			if detectErr != nil {
-				return result, detectErr
-			}
-			projectRoot = project.root
+		if err := s.createTenantConfig(); err != nil {
+			return err
 		}
-
-		if !defaultTenantResolved {
-			if err := resolveDefaultTenant(tenant, projectRoot); err != nil {
-				return result, err
-			}
-		}
-
-		defaultEnvironment := params.Environment
-		if defaultEnvironment == "" {
-			defaultEnvironment = DefaultEnvironment
-		}
-
-		s.Context.Trace("Adding new tenant")
-		tenantConfig = TenantConfig{
-			Name:               tenant,
-			ProjectRoot:        projectRoot,
-			DefaultEnvironment: defaultEnvironment,
-		}
-		if err := s.Store.SaveTenantConfig(tenantConfig); err != nil {
-			return result, err
-		}
-		result.CreatedTenantConfig = true
 	case err != nil:
-		return result, err
+		return err
 	}
+	s.normalizeTenantConfig()
+	s.runner.Context.Trace("Loaded tenant configuration")
+	return nil
+}
 
-	if tenantConfig.Name == "" {
-		tenantConfig.Name = tenant
-		tenantConfigChanged = true
+func (s *bootstrapRunState) createTenantConfig() error {
+	projectRoot, err := s.tenantProjectRoot()
+	if err != nil {
+		return err
 	}
-	if remoteMode {
-		if tenantConfig.ProjectRoot != params.ProjectRoot {
-			tenantConfig.ProjectRoot = params.ProjectRoot
-			tenantConfigChanged = true
-		}
+	if err := s.resolveDefaultTenant(s.tenant, projectRoot); err != nil {
+		return err
 	}
-	s.Context.Trace("Loaded tenant configuration")
+	s.runner.Context.Trace("Adding new tenant")
+	s.tenantConfig = TenantConfig{
+		Name:               s.tenant,
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: defaultBootstrapEnvironment(s.params.Environment),
+	}
+	if err := s.runner.Store.SaveTenantConfig(s.tenantConfig); err != nil {
+		return err
+	}
+	s.result.CreatedTenantConfig = true
+	return nil
+}
 
-	envName := params.Environment
-	if envName == "" {
-		envName = tenantConfig.DefaultEnvironment
+func (s *bootstrapRunState) tenantProjectRoot() (string, error) {
+	projectRoot := s.params.ProjectRoot
+	if projectRoot != "" || s.params.Remote {
+		return projectRoot, nil
 	}
-	if envName == "" {
-		envName = DefaultEnvironment
+	project, err := s.detectProject()
+	if err != nil {
+		return "", err
 	}
-	if tenantConfig.DefaultEnvironment == "" {
-		tenantConfig.DefaultEnvironment = envName
-		tenantConfigChanged = true
-	}
-	if tenantConfigChanged {
-		if err := s.Store.SaveTenantConfig(tenantConfig); err != nil {
-			return result, err
-		}
-	}
+	return project.root, nil
+}
 
-	s.Context.Trace("Loading environment configuration")
-	envConfig, _, err := s.Store.LoadEnvConfig(tenant, envName)
-	envConfigChanged := false
+func defaultBootstrapEnvironment(envName string) string {
+	if envName != "" {
+		return envName
+	}
+	return DefaultEnvironment
+}
+
+func (s *bootstrapRunState) normalizeTenantConfig() {
+	if s.tenantConfig.Name == "" {
+		s.tenantConfig.Name = s.tenant
+		s.tenantConfigChanged = true
+	}
+	if s.params.Remote && s.tenantConfig.ProjectRoot != s.params.ProjectRoot {
+		s.tenantConfig.ProjectRoot = s.params.ProjectRoot
+		s.tenantConfigChanged = true
+	}
+}
+
+func (s *bootstrapRunState) resolveEnvironmentName() error {
+	s.envName = s.params.Environment
+	if s.envName == "" {
+		s.envName = s.tenantConfig.DefaultEnvironment
+	}
+	if s.envName == "" {
+		s.envName = DefaultEnvironment
+	}
+	if s.tenantConfig.DefaultEnvironment == "" {
+		s.tenantConfig.DefaultEnvironment = s.envName
+		s.tenantConfigChanged = true
+	}
+	if !s.tenantConfigChanged {
+		return nil
+	}
+	return s.runner.Store.SaveTenantConfig(s.tenantConfig)
+}
+
+func (s *bootstrapRunState) loadEnvConfig() error {
+	s.runner.Context.Trace("Loading environment configuration")
+	envConfig, _, err := s.runner.Store.LoadEnvConfig(s.tenant, s.envName)
 	switch {
 	case err == nil:
+		s.envConfig = envConfig
 	case errors.Is(err, ErrNotInitialized):
-		envProjectRoot := params.ProjectRoot
-		if envProjectRoot == "" {
-			envProjectRoot = tenantConfig.ProjectRoot
-		}
-		if envProjectRoot == "" && !remoteMode {
-			project, detectErr := findProject()
-			if detectErr == nil {
-				envProjectRoot = project.root
-			} else if !errors.Is(detectErr, ErrNotInGitRepository) {
-				return result, detectErr
-			}
-		}
-
-		if err := s.confirmEnvironment(params, tenant, envName); err != nil {
-			return result, err
-		}
-
-		kubernetesContext, err := s.resolveKubernetesContext(params, tenant, envName, "")
-		if err != nil {
-			return result, err
-		}
-		if err := s.ensureKubernetesNamespace(tenant, envName, "", kubernetesContext); err != nil {
-			return result, err
-		}
-		cloudProviderAlias, err := s.resolveCloudProviderAlias(kubernetesContext, "")
-		if err != nil {
-			return result, err
-		}
-		managedCloud, err := managedCloudEnvironment(s.Store, EnvConfig{
-			KubernetesContext:  kubernetesContext,
-			CloudProviderAlias: cloudProviderAlias,
-			Remote:             remoteMode,
-		})
-		if err != nil {
-			return result, err
-		}
-		containerRegistry, err := s.resolveContainerRegistry(params, tenant, envName, envProjectRoot, "", true)
-		if err != nil {
-			return result, err
-		}
-		if err := s.saveProjectContainerRegistry(envProjectRoot, envName, containerRegistry, remoteMode); err != nil {
-			return result, err
-		}
-
-		s.Context.Trace("Adding new environment")
-		envConfig = EnvConfig{
-			Name:               envName,
-			RepoPath:           envProjectRoot,
-			KubernetesContext:  kubernetesContext,
-			CloudProviderAlias: cloudProviderAlias,
-			ManagedCloud:       managedCloud,
-			RuntimeVersion:     strings.TrimSpace(params.RuntimeVersion),
-			Remote:             remoteMode,
-		}
-		if err := saveEnvConfig(s.Store, tenant, envConfig); err != nil {
-			return result, err
-		}
-		envConfig.ContainerRegistry = containerRegistry
-		if remoteMode && containerRegistry != "" {
-			envConfigChanged = true
-		}
-		result.CreatedEnvConfig = true
+		return s.createEnvConfig()
 	case err != nil:
-		return result, err
+		return err
 	}
-	if remoteMode {
-		if envConfig.RepoPath != params.ProjectRoot {
-			envConfig.RepoPath = params.ProjectRoot
-			envConfigChanged = true
-		}
-		if runtimeVersion := strings.TrimSpace(params.RuntimeVersion); runtimeVersion != "" && envConfig.RuntimeVersion != runtimeVersion {
-			envConfig.RuntimeVersion = runtimeVersion
-			envConfigChanged = true
-		}
-		if !envConfig.Remote {
-			envConfig.Remote = true
-			envConfigChanged = true
-		}
-	}
+	return nil
+}
 
-	kubernetesContext, err := s.resolveKubernetesContext(params, tenant, envName, envConfig.KubernetesContext)
+func (s *bootstrapRunState) createEnvConfig() error {
+	envProjectRoot, err := s.envProjectRoot()
 	if err != nil {
-		return result, err
+		return err
 	}
-	if kubernetesContext != envConfig.KubernetesContext {
-		if err := s.ensureKubernetesNamespace(tenant, envName, envConfig.KubernetesContext, kubernetesContext); err != nil {
-			return result, err
-		}
-		envConfig.KubernetesContext = kubernetesContext
-		envConfigChanged = true
-	}
-	cloudProviderAlias, err := s.resolveCloudProviderAlias(kubernetesContext, envConfig.CloudProviderAlias)
+	kubernetesContext, cloudProviderAlias, managedCloud, err := s.resolveNewEnvCloudConfig()
 	if err != nil {
-		return result, err
+		return err
 	}
-	if cloudProviderAlias != envConfig.CloudProviderAlias {
-		envConfig.CloudProviderAlias = cloudProviderAlias
-		envConfigChanged = true
-	}
-	managedCloud, err := managedCloudEnvironment(s.Store, envConfig)
+	containerRegistry, err := s.runner.resolveContainerRegistry(s.params, s.tenant, s.envName, envProjectRoot, "", true)
 	if err != nil {
-		return result, err
+		return err
 	}
-	if managedCloud != envConfig.ManagedCloud {
-		envConfig.ManagedCloud = managedCloud
-		envConfigChanged = true
+	if err := s.runner.saveProjectContainerRegistry(envProjectRoot, s.envName, containerRegistry, s.params.Remote); err != nil {
+		return err
 	}
-	projectRoot := envConfig.RepoPath
+	s.runner.Context.Trace("Adding new environment")
+	s.envConfig = EnvConfig{
+		Name:               s.envName,
+		RepoPath:           envProjectRoot,
+		KubernetesContext:  kubernetesContext,
+		CloudProviderAlias: cloudProviderAlias,
+		ManagedCloud:       managedCloud,
+		RuntimeVersion:     strings.TrimSpace(s.params.RuntimeVersion),
+		Remote:             s.params.Remote,
+	}
+	if err := saveEnvConfig(s.runner.Store, s.tenant, s.envConfig); err != nil {
+		return err
+	}
+	s.envConfig.ContainerRegistry = containerRegistry
+	s.envConfigChanged = s.params.Remote && containerRegistry != ""
+	s.result.CreatedEnvConfig = true
+	return nil
+}
+
+func (s *bootstrapRunState) envProjectRoot() (string, error) {
+	envProjectRoot := s.params.ProjectRoot
+	if envProjectRoot == "" {
+		envProjectRoot = s.tenantConfig.ProjectRoot
+	}
+	if envProjectRoot != "" || s.params.Remote {
+		return envProjectRoot, nil
+	}
+	project, err := s.findProject()
+	if err == nil {
+		return project.root, nil
+	}
+	if errors.Is(err, ErrNotInGitRepository) {
+		return "", nil
+	}
+	return "", err
+}
+
+func (s *bootstrapRunState) resolveNewEnvCloudConfig() (string, string, bool, error) {
+	if err := s.runner.confirmEnvironment(s.params, s.tenant, s.envName); err != nil {
+		return "", "", false, err
+	}
+	kubernetesContext, err := s.runner.resolveKubernetesContext(s.params, s.tenant, s.envName, "")
+	if err != nil {
+		return "", "", false, err
+	}
+	if err := s.runner.ensureKubernetesNamespace(s.tenant, s.envName, "", kubernetesContext); err != nil {
+		return "", "", false, err
+	}
+	cloudProviderAlias, err := s.runner.resolveCloudProviderAlias(kubernetesContext, "")
+	if err != nil {
+		return "", "", false, err
+	}
+	managedCloud, err := managedCloudEnvironment(s.runner.Store, EnvConfig{
+		KubernetesContext:  kubernetesContext,
+		CloudProviderAlias: cloudProviderAlias,
+		Remote:             s.params.Remote,
+	})
+	return kubernetesContext, cloudProviderAlias, managedCloud, err
+}
+
+func (s *bootstrapRunState) updateEnvConfig() error {
+	s.updateRemoteEnvConfig()
+	kubernetesContext, err := s.updateEnvKubernetesContext()
+	if err != nil {
+		return err
+	}
+	if err := s.updateEnvCloudProvider(kubernetesContext); err != nil {
+		return err
+	}
+	return s.updateEnvContainerRegistry()
+}
+
+func (s *bootstrapRunState) updateRemoteEnvConfig() {
+	if !s.params.Remote {
+		return
+	}
+	if s.envConfig.RepoPath != s.params.ProjectRoot {
+		s.envConfig.RepoPath = s.params.ProjectRoot
+		s.envConfigChanged = true
+	}
+	if runtimeVersion := strings.TrimSpace(s.params.RuntimeVersion); runtimeVersion != "" && s.envConfig.RuntimeVersion != runtimeVersion {
+		s.envConfig.RuntimeVersion = runtimeVersion
+		s.envConfigChanged = true
+	}
+	if !s.envConfig.Remote {
+		s.envConfig.Remote = true
+		s.envConfigChanged = true
+	}
+}
+
+func (s *bootstrapRunState) updateEnvKubernetesContext() (string, error) {
+	kubernetesContext, err := s.runner.resolveKubernetesContext(s.params, s.tenant, s.envName, s.envConfig.KubernetesContext)
+	if err != nil {
+		return "", err
+	}
+	if kubernetesContext == s.envConfig.KubernetesContext {
+		return kubernetesContext, nil
+	}
+	if err := s.runner.ensureKubernetesNamespace(s.tenant, s.envName, s.envConfig.KubernetesContext, kubernetesContext); err != nil {
+		return "", err
+	}
+	s.envConfig.KubernetesContext = kubernetesContext
+	s.envConfigChanged = true
+	return kubernetesContext, nil
+}
+
+func (s *bootstrapRunState) updateEnvCloudProvider(kubernetesContext string) error {
+	cloudProviderAlias, err := s.runner.resolveCloudProviderAlias(kubernetesContext, s.envConfig.CloudProviderAlias)
+	if err != nil {
+		return err
+	}
+	if cloudProviderAlias != s.envConfig.CloudProviderAlias {
+		s.envConfig.CloudProviderAlias = cloudProviderAlias
+		s.envConfigChanged = true
+	}
+	managedCloud, err := managedCloudEnvironment(s.runner.Store, s.envConfig)
+	if err != nil {
+		return err
+	}
+	if managedCloud != s.envConfig.ManagedCloud {
+		s.envConfig.ManagedCloud = managedCloud
+		s.envConfigChanged = true
+	}
+	return nil
+}
+
+func (s *bootstrapRunState) updateEnvContainerRegistry() error {
+	projectRoot := s.projectRoot()
+	containerRegistry, err := s.runner.resolveContainerRegistry(s.params, s.tenant, s.envName, projectRoot, s.envConfig.ContainerRegistry, false)
+	if err != nil {
+		return err
+	}
+	if containerRegistry == "" {
+		return nil
+	}
+	if err := s.runner.saveProjectContainerRegistry(projectRoot, s.envName, containerRegistry, s.params.Remote); err != nil {
+		return err
+	}
+	if containerRegistry != s.envConfig.ContainerRegistry {
+		s.envConfig.ContainerRegistry = containerRegistry
+		s.envConfigChanged = true
+	}
+	return nil
+}
+
+func (s *bootstrapRunState) projectRoot() string {
+	projectRoot := s.envConfig.RepoPath
 	if projectRoot == "" {
-		projectRoot = tenantConfig.ProjectRoot
+		return s.tenantConfig.ProjectRoot
 	}
-	containerRegistry, err := s.resolveContainerRegistry(params, tenant, envName, projectRoot, envConfig.ContainerRegistry, false)
+	return projectRoot
+}
+
+func (s *bootstrapRunState) ensureDevopsAssets() error {
+	projectRoot := s.projectRoot()
+	if s.params.Remote {
+		return s.ensureRemoteDevopsAssets(projectRoot)
+	}
+	if err := EnsureDefaultDevopsModuleWithVersion(s.runner.Context, projectRoot, s.tenant, s.params.RuntimeVersion); err != nil {
+		return err
+	}
+	return EnsureDefaultDevopsChart(s.runner.Context, projectRoot, s.tenant, s.envName)
+}
+
+func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
+	req, err := s.runner.ensureRemoteRepository(s.params, s.tenant, s.envName, s.envConfig.KubernetesContext, projectRoot)
 	if err != nil {
-		return result, err
+		return err
 	}
-	if containerRegistry != "" {
-		if err := s.saveProjectContainerRegistry(projectRoot, envName, containerRegistry, remoteMode); err != nil {
-			return result, err
-		}
+	if !s.params.Bootstrap {
+		return nil
 	}
-	if containerRegistry != "" && containerRegistry != envConfig.ContainerRegistry {
-		envConfig.ContainerRegistry = containerRegistry
-		envConfigChanged = true
-	}
-	if remoteMode {
-		req, err := s.ensureRemoteRepository(params, tenant, envName, kubernetesContext, projectRoot)
-		if err != nil {
-			return result, err
-		}
-		if params.Bootstrap {
-			if err := s.ensureRemoteDefaultDevopsBootstrap(req, projectRoot, tenant, envName, params.RuntimeVersion); err != nil {
-				return result, err
-			}
-		}
-	} else {
-		if err := EnsureDefaultDevopsModuleWithVersion(s.Context, projectRoot, tenant, params.RuntimeVersion); err != nil {
-			return result, err
-		}
-		if err := EnsureDefaultDevopsChart(s.Context, projectRoot, tenant, envName); err != nil {
-			return result, err
-		}
-	}
-	if envConfigChanged {
-		if err := saveEnvConfig(s.Store, tenant, envConfig); err != nil {
-			return result, err
-		}
-	}
+	return s.runner.ensureRemoteDefaultDevopsBootstrap(req, projectRoot, s.tenant, s.envName, s.params.RuntimeVersion)
+}
 
-	if setDefaultTenant && (toolConfigMissing || toolConfig.DefaultTenant != tenant) {
-		s.Context.Trace("Saving default config")
-		toolConfig.DefaultTenant = tenant
-		if err := s.Store.SaveERunConfig(toolConfig); err != nil {
-			return result, err
-		}
-		if toolConfigMissing {
-			result.CreatedERunConfig = true
-		}
+func (s *bootstrapRunState) saveEnvConfigIfChanged() error {
+	if !s.envConfigChanged {
+		return nil
 	}
+	return saveEnvConfig(s.runner.Store, s.tenant, s.envConfig)
+}
 
-	result.ERunConfig = toolConfig
-	result.TenantConfig = tenantConfig
-	result.EnvConfig = envConfig
-	s.Context.Trace("Configuration initialized OK")
-	return result, nil
+func (s *bootstrapRunState) saveDefaultTenantIfNeeded() error {
+	if !s.setDefaultTenant || (!s.toolConfigMissing && s.toolConfig.DefaultTenant == s.tenant) {
+		return nil
+	}
+	s.runner.Context.Trace("Saving default config")
+	s.toolConfig.DefaultTenant = s.tenant
+	if err := s.runner.Store.SaveERunConfig(s.toolConfig); err != nil {
+		return err
+	}
+	if s.toolConfigMissing {
+		s.result.CreatedERunConfig = true
+	}
+	return nil
+}
+
+func (s *bootstrapRunState) finish() {
+	s.result.ERunConfig = s.toolConfig
+	s.result.TenantConfig = s.tenantConfig
+	s.result.EnvConfig = s.envConfig
+	s.runner.Context.Trace("Configuration initialized OK")
 }
 
 func tenantConfirmationLabel(tenant, projectRoot string) string {
