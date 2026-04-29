@@ -196,89 +196,29 @@ func resolveOpenWithFinder(store OpenStore, findProjectRoot ProjectFinderFunc, p
 		return OpenResult{}, fmt.Errorf("store is required")
 	}
 
-	tenant := params.Tenant
-	if tenant == "" && params.UseDefaultTenant {
-		if currentTenant, ok, err := loadCurrentDirectoryTenant(store, findProjectRoot); err != nil {
-			return OpenResult{}, err
-		} else if ok {
-			tenant = currentTenant
-		}
-	}
-	if tenant == "" && params.UseDefaultTenant {
-		toolConfig, _, err := store.LoadERunConfig()
-		if errors.Is(err, ErrNotInitialized) {
-			return OpenResult{}, ErrDefaultTenantNotConfigured
-		}
-		if err != nil {
-			return OpenResult{}, err
-		}
-		tenant = toolConfig.DefaultTenant
-		if tenant == "" {
-			return OpenResult{}, ErrDefaultTenantNotConfigured
-		}
-	}
-	if tenant == "" {
-		return OpenResult{}, fmt.Errorf("tenant is required")
-	}
-
-	tenantConfig, _, err := store.LoadTenantConfig(tenant)
-	if errors.Is(err, ErrNotInitialized) {
-		return OpenResult{}, fmt.Errorf("%w: %s", ErrTenantNotFound, tenant)
-	}
+	tenant, err := resolveOpenTenant(store, findProjectRoot, params)
 	if err != nil {
 		return OpenResult{}, err
 	}
-	if tenantConfig.Name == "" {
-		tenantConfig.Name = tenant
-	}
-
-	environment := params.Environment
-	if environment == "" && params.UseDefaultEnvironment {
-		environment = tenantConfig.DefaultEnvironment
-		if environment == "" {
-			return OpenResult{}, ErrDefaultEnvironmentNotConfigured
-		}
-	}
-	if environment == "" {
-		return OpenResult{}, fmt.Errorf("environment is required")
-	}
-
-	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
-	if errors.Is(err, ErrNotInitialized) {
-		return OpenResult{}, fmt.Errorf("%w: %s", ErrEnvironmentNotFound, environment)
-	}
+	tenantConfig, err := loadOpenTenantConfig(store, tenant)
 	if err != nil {
 		return OpenResult{}, err
 	}
-	if envConfig.Name == "" {
-		envConfig.Name = environment
+	environment, err := resolveOpenEnvironment(params, tenantConfig)
+	if err != nil {
+		return OpenResult{}, err
 	}
-	if resolver, ok := store.(effectiveKubernetesContextResolver); ok {
-		envConfig.KubernetesContext = resolver.ResolveEffectiveKubernetesContext(environment, envConfig.KubernetesContext)
+	envConfig, err := loadOpenEnvConfig(store, tenant, environment)
+	if err != nil {
+		return OpenResult{}, err
 	}
-
-	repoPath := envConfig.RepoPath
-	if repoPath == "" {
-		repoPath = tenantConfig.ProjectRoot
+	repoPath, err := resolveOpenRepoPath(tenantConfig, envConfig)
+	if err != nil {
+		return OpenResult{}, err
 	}
-	if repoPath == "" {
-		return OpenResult{}, ErrRepoPathNotConfigured
+	if err := validateOpenTarget(tenant, environment, repoPath, envConfig); err != nil {
+		return OpenResult{}, err
 	}
-
-	repoPath = filepath.Clean(repoPath)
-	if !envConfig.Remote {
-		info, err := os.Stat(repoPath)
-		if err != nil {
-			return OpenResult{}, err
-		}
-		if !info.IsDir() {
-			return OpenResult{}, fmt.Errorf("%q is not a directory", repoPath)
-		}
-	}
-	if strings.TrimSpace(envConfig.KubernetesContext) == "" {
-		return OpenResult{}, fmt.Errorf("%w: %s/%s", ErrKubernetesContextNotConfigured, tenant, environment)
-	}
-
 	localPorts, err := environmentLocalPortsForTarget(store, tenant, envConfig)
 	if err != nil {
 		return OpenResult{}, err
@@ -293,6 +233,98 @@ func resolveOpenWithFinder(store OpenStore, findProjectRoot ProjectFinderFunc, p
 		RepoPath:     repoPath,
 		Title:        tenant + "-" + environment,
 	}, nil
+}
+
+func resolveOpenTenant(store OpenStore, findProjectRoot ProjectFinderFunc, params OpenParams) (string, error) {
+	tenant := params.Tenant
+	if tenant == "" && params.UseDefaultTenant {
+		currentTenant, ok, err := loadCurrentDirectoryTenant(store, findProjectRoot)
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			tenant = currentTenant
+		}
+	}
+	if tenant == "" && params.UseDefaultTenant {
+		return loadOpenDefaultTenant(store)
+	}
+	if tenant == "" {
+		return "", fmt.Errorf("tenant is required")
+	}
+	return tenant, nil
+}
+
+func loadOpenTenantConfig(store OpenStore, tenant string) (TenantConfig, error) {
+	tenantConfig, _, err := store.LoadTenantConfig(tenant)
+	if errors.Is(err, ErrNotInitialized) {
+		return TenantConfig{}, fmt.Errorf("%w: %s", ErrTenantNotFound, tenant)
+	}
+	if err != nil {
+		return TenantConfig{}, err
+	}
+	if tenantConfig.Name == "" {
+		tenantConfig.Name = tenant
+	}
+	return tenantConfig, nil
+}
+
+func resolveOpenEnvironment(params OpenParams, tenantConfig TenantConfig) (string, error) {
+	environment := params.Environment
+	if environment == "" && params.UseDefaultEnvironment {
+		environment = tenantConfig.DefaultEnvironment
+		if environment == "" {
+			return "", ErrDefaultEnvironmentNotConfigured
+		}
+	}
+	if environment == "" {
+		return "", fmt.Errorf("environment is required")
+	}
+	return environment, nil
+}
+
+func loadOpenEnvConfig(store OpenStore, tenant, environment string) (EnvConfig, error) {
+	envConfig, _, err := store.LoadEnvConfig(tenant, environment)
+	if errors.Is(err, ErrNotInitialized) {
+		return EnvConfig{}, fmt.Errorf("%w: %s", ErrEnvironmentNotFound, environment)
+	}
+	if err != nil {
+		return EnvConfig{}, err
+	}
+	if envConfig.Name == "" {
+		envConfig.Name = environment
+	}
+	if resolver, ok := store.(effectiveKubernetesContextResolver); ok {
+		envConfig.KubernetesContext = resolver.ResolveEffectiveKubernetesContext(environment, envConfig.KubernetesContext)
+	}
+	return envConfig, nil
+}
+
+func resolveOpenRepoPath(tenantConfig TenantConfig, envConfig EnvConfig) (string, error) {
+	repoPath := envConfig.RepoPath
+	if repoPath == "" {
+		repoPath = tenantConfig.ProjectRoot
+	}
+	if repoPath == "" {
+		return "", ErrRepoPathNotConfigured
+	}
+	return filepath.Clean(repoPath), nil
+}
+
+func validateOpenTarget(tenant, environment, repoPath string, envConfig EnvConfig) error {
+	if !envConfig.Remote {
+		info, err := os.Stat(repoPath)
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("%q is not a directory", repoPath)
+		}
+	}
+	if strings.TrimSpace(envConfig.KubernetesContext) == "" {
+		return fmt.Errorf("%w: %s/%s", ErrKubernetesContextNotConfigured, tenant, environment)
+	}
+	return nil
 }
 
 func loadCurrentDirectoryTenant(store OpenStore, findProjectRoot ProjectFinderFunc) (string, bool, error) {
