@@ -44,39 +44,46 @@ func writeListResult(ctx common.Context, result common.ListResult) error {
 }
 
 func writeListHeaderSections(ctx common.Context, result common.ListResult) error {
+	if err := writeListConfigurationSection(ctx, result.ConfigDirectory); err != nil {
+		return err
+	}
+	if err := writeListDefaultsSection(ctx, result.Defaults); err != nil {
+		return err
+	}
+	return writeListCurrentDirectorySection(ctx, result.CurrentDirectory)
+}
+
+func writeListConfigurationSection(ctx common.Context, configDirectory string) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "Configuration:"); err != nil {
 		return err
 	}
-	if err := writeLabeledValue(ctx, "directory", valueOrNone(result.ConfigDirectory)); err != nil {
-		return err
-	}
+	return writeLabeledValue(ctx, "directory", valueOrNone(configDirectory))
+}
 
+func writeListDefaultsSection(ctx common.Context, defaults common.ListDefaultsResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "Defaults:"); err != nil {
 		return err
 	}
-	if err := writeLabeledValue(ctx, "tenant", valueOrNone(result.Defaults.Tenant)); err != nil {
+	if err := writeLabeledValue(ctx, "tenant", valueOrNone(defaults.Tenant)); err != nil {
 		return err
 	}
-	if err := writeLabeledValue(ctx, "environment", valueOrNone(result.Defaults.Environment)); err != nil {
-		return err
-	}
+	return writeLabeledValue(ctx, "environment", valueOrNone(defaults.Environment))
+}
 
+func writeListCurrentDirectorySection(ctx common.Context, current common.ListCurrentDirectoryResult) error {
 	if _, err := fmt.Fprintln(ctx.Stdout, "Current Directory:"); err != nil {
 		return err
 	}
-	if err := writeLabeledValue(ctx, "path", valueOrNone(result.CurrentDirectory.Path)); err != nil {
+	if err := writeLabeledValue(ctx, "path", valueOrNone(current.Path)); err != nil {
 		return err
 	}
-	if err := writeLabeledValue(ctx, "repo", valueOrNone(result.CurrentDirectory.Repo)); err != nil {
+	if err := writeLabeledValue(ctx, "repo", valueOrNone(current.Repo)); err != nil {
 		return err
 	}
-	if err := writeLabeledValue(ctx, "configured tenant", configuredCurrentTenantOrNone(result.CurrentDirectory.ConfiguredTenant)); err != nil {
+	if err := writeLabeledValue(ctx, "configured tenant", configuredCurrentTenantOrNone(current.ConfiguredTenant)); err != nil {
 		return err
 	}
-	if err := writeEffectiveOpen(ctx, result.CurrentDirectory); err != nil {
-		return err
-	}
-	return nil
+	return writeEffectiveOpen(ctx, current)
 }
 
 func writeListTenants(ctx common.Context, tenants []common.ListTenantResult) error {
@@ -152,18 +159,7 @@ func writeEffectiveOpenSSH(ctx common.Context, ssh common.ListSSHResult) error {
 }
 
 func writeTenantEntry(ctx common.Context, tenant common.ListTenantResult) error {
-	header := "  " + tenant.Name
-	tenantMarkers := make([]string, 0, 2)
-	if tenant.IsDefault {
-		tenantMarkers = append(tenantMarkers, "default")
-	}
-	if tenant.IsEffective {
-		tenantMarkers = append(tenantMarkers, "effective")
-	}
-	if len(tenantMarkers) > 0 {
-		header += " [" + strings.Join(tenantMarkers, ", ") + "]"
-	}
-	if _, err := fmt.Fprintln(ctx.Stdout, header); err != nil {
+	if _, err := fmt.Fprintln(ctx.Stdout, tenantHeaderLine(tenant)); err != nil {
 		return err
 	}
 	if err := writeIndentedValue(ctx, 4, "default environment", tenant.DefaultEnvironment); err != nil {
@@ -178,38 +174,64 @@ func writeTenantEntry(ctx common.Context, tenant common.ListTenantResult) error 
 		return err
 	}
 	for _, env := range tenant.Environments {
-		envLine := "      - " + env.Name
-		envMarkers := make([]string, 0, 2)
-		if env.IsDefault {
-			envMarkers = append(envMarkers, "default")
-		}
-		if env.IsEffective {
-			envMarkers = append(envMarkers, "effective")
-		}
-		if len(envMarkers) > 0 {
-			envLine += " [" + strings.Join(envMarkers, ", ") + "]"
-		}
-		envLine += " context=" + quotedValueOrNone(env.KubernetesContext)
-		if strings.TrimSpace(env.CloudProviderAlias) != "" {
-			envLine += " cloud=" + quotedValueOrNone(env.CloudProviderAlias)
-		}
-		envLine += " snapshot=" + enabledDisabledLabel(env.Snapshot)
-		envLine += " repo=" + quotedValueOrNone(env.RepoPath)
-		envLine += " ports=" + portRangeLabel(env.LocalPorts)
-		envLine += " mcp-port=" + fmt.Sprintf("%d", env.LocalPorts.MCP)
-		envLine += " ssh-port=" + fmt.Sprintf("%d", env.LocalPorts.SSH)
-		if env.SSH.Enabled {
-			envLine += " ssh=on"
-			envLine += " host=" + quotedValueOrNone(env.SSH.HostAlias)
-			envLine += " user=" + quotedValueOrNone(env.SSH.User)
-			envLine += " local-port=" + fmt.Sprintf("%d", env.SSH.LocalPort)
-			envLine += " workspace=" + quotedValueOrNone(env.SSH.WorkspacePath)
-		}
-		if _, err := fmt.Fprintln(ctx.Stdout, envLine); err != nil {
+		if _, err := fmt.Fprintln(ctx.Stdout, environmentLine(env)); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func tenantHeaderLine(tenant common.ListTenantResult) string {
+	header := "  " + tenant.Name
+	if markers := statusMarkers(tenant.IsDefault, tenant.IsEffective); len(markers) > 0 {
+		header += " [" + strings.Join(markers, ", ") + "]"
+	}
+	return header
+}
+
+func environmentLine(env common.ListEnvironmentResult) string {
+	envLine := "      - " + env.Name
+	if markers := statusMarkers(env.IsDefault, env.IsEffective); len(markers) > 0 {
+		envLine += " [" + strings.Join(markers, ", ") + "]"
+	}
+	envLine += " context=" + quotedValueOrNone(env.KubernetesContext)
+	if strings.TrimSpace(env.CloudProviderAlias) != "" {
+		envLine += " cloud=" + quotedValueOrNone(env.CloudProviderAlias)
+	}
+	envLine += environmentBaseFields(env)
+	if env.SSH.Enabled {
+		envLine += environmentSSHFields(env.SSH)
+	}
+	return envLine
+}
+
+func statusMarkers(isDefault, isEffective bool) []string {
+	markers := make([]string, 0, 2)
+	if isDefault {
+		markers = append(markers, "default")
+	}
+	if isEffective {
+		markers = append(markers, "effective")
+	}
+	return markers
+}
+
+func environmentBaseFields(env common.ListEnvironmentResult) string {
+	line := " snapshot=" + enabledDisabledLabel(env.Snapshot)
+	line += " repo=" + quotedValueOrNone(env.RepoPath)
+	line += " ports=" + portRangeLabel(env.LocalPorts)
+	line += " mcp-port=" + fmt.Sprintf("%d", env.LocalPorts.MCP)
+	line += " ssh-port=" + fmt.Sprintf("%d", env.LocalPorts.SSH)
+	return line
+}
+
+func environmentSSHFields(ssh common.ListSSHResult) string {
+	line := " ssh=on"
+	line += " host=" + quotedValueOrNone(ssh.HostAlias)
+	line += " user=" + quotedValueOrNone(ssh.User)
+	line += " local-port=" + fmt.Sprintf("%d", ssh.LocalPort)
+	line += " workspace=" + quotedValueOrNone(ssh.WorkspacePath)
+	return line
 }
 
 func writeCloudProviders(ctx common.Context, providers []common.CloudProviderStatus) error {

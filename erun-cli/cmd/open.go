@@ -513,15 +513,11 @@ func maybeConfigureOpenNoShellAlias(result common.OpenResult, promptRunner Promp
 	aliasName := openNoShellAliasName(result)
 	startupFile, aliasConfigured := detectOpenNoShellAliasStartupFile(result, shellPath)
 	if aliasConfigured {
-		for _, line := range openNoShellHintLines(result, shellPath) {
-			_, _ = fmt.Fprintln(stderr, line)
-		}
+		writeOpenNoShellHintLines(stderr, result, shellPath)
 		return nil
 	}
 	if startupFile == "" || promptRunner == nil || dialect == openNoShellDialectPowerShell {
-		for _, line := range openNoShellHintLines(result, shellPath) {
-			_, _ = fmt.Fprintln(stderr, line)
-		}
+		writeOpenNoShellHintLines(stderr, result, shellPath)
 		return nil
 	}
 
@@ -530,9 +526,7 @@ func maybeConfigureOpenNoShellAlias(result common.OpenResult, promptRunner Promp
 		return err
 	}
 	if !ok {
-		for _, line := range openNoShellHintLines(result, shellPath) {
-			_, _ = fmt.Fprintln(stderr, line)
-		}
+		writeOpenNoShellHintLines(stderr, result, shellPath)
 		return nil
 	}
 
@@ -542,6 +536,12 @@ func maybeConfigureOpenNoShellAlias(result common.OpenResult, promptRunner Promp
 	_, _ = fmt.Fprintf(stderr, "added %s to %s\n", aliasName, startupFile)
 	_, _ = fmt.Fprintf(stderr, "open a new shell to use %s\n", aliasName)
 	return nil
+}
+
+func writeOpenNoShellHintLines(stderr io.Writer, result common.OpenResult, shellPath string) {
+	for _, line := range openNoShellHintLines(result, shellPath) {
+		_, _ = fmt.Fprintln(stderr, line)
+	}
 }
 
 func openNoShellHintLines(result common.OpenResult, shellPath string) []string {
