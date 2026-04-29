@@ -47,12 +47,7 @@ func DeleteEnvironmentConfirmation(tenant, environment string) string {
 }
 
 func RunDeleteEnvironment(ctx Context, params DeleteEnvironmentParams, store DeleteStore, deleteNamespace NamespaceDeleterFunc) (DeleteEnvironmentResult, error) {
-	if store == nil {
-		store = ConfigStore{}
-	}
-	if deleteNamespace == nil {
-		deleteNamespace = DeleteKubernetesNamespace
-	}
+	store, deleteNamespace = normalizeDeleteEnvironmentDependencies(store, deleteNamespace)
 
 	tenant := strings.TrimSpace(params.Tenant)
 	environment := strings.TrimSpace(params.Environment)
@@ -64,17 +59,7 @@ func RunDeleteEnvironment(ctx Context, params DeleteEnvironmentParams, store Del
 	if err != nil {
 		return DeleteEnvironmentResult{}, err
 	}
-	if envConfig.Name == "" {
-		envConfig.Name = environment
-	}
-
-	result := DeleteEnvironmentResult{
-		Tenant:            tenant,
-		Environment:       environment,
-		Remote:            envConfig.Remote,
-		KubernetesContext: strings.TrimSpace(envConfig.KubernetesContext),
-		ConfigDir:         filepath.Dir(configPath),
-	}
+	result := deleteEnvironmentResult(tenant, environment, envConfig, configPath)
 
 	if envConfig.Remote {
 		if err := deleteRemoteEnvironmentNamespace(ctx, deleteNamespace, &result); err != nil {
@@ -95,6 +80,26 @@ func RunDeleteEnvironment(ctx Context, params DeleteEnvironmentParams, store Del
 	}
 
 	return result, nil
+}
+
+func normalizeDeleteEnvironmentDependencies(store DeleteStore, deleteNamespace NamespaceDeleterFunc) (DeleteStore, NamespaceDeleterFunc) {
+	if store == nil {
+		store = ConfigStore{}
+	}
+	if deleteNamespace == nil {
+		deleteNamespace = DeleteKubernetesNamespace
+	}
+	return store, deleteNamespace
+}
+
+func deleteEnvironmentResult(tenant, environment string, envConfig EnvConfig, configPath string) DeleteEnvironmentResult {
+	return DeleteEnvironmentResult{
+		Tenant:            tenant,
+		Environment:       environment,
+		Remote:            envConfig.Remote,
+		KubernetesContext: strings.TrimSpace(envConfig.KubernetesContext),
+		ConfigDir:         filepath.Dir(configPath),
+	}
 }
 
 func deleteRemoteEnvironmentNamespace(ctx Context, deleteNamespace NamespaceDeleterFunc, result *DeleteEnvironmentResult) error {
