@@ -4,9 +4,7 @@ import { Terminal } from '@xterm/xterm';
 
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import {
-  DeleteEnvironment,
   LoadDiff,
-  LoadEnvironmentConfig,
   LoadIdleStatus,
   LoadKubernetesContexts,
   LoadState,
@@ -15,16 +13,11 @@ import {
   OpenIDE,
   ResizeSession,
   SavePastedImage,
-  SaveEnvironmentConfig,
   SaveTenantConfig,
   SendSessionInput,
-  StartCloudContext,
   StartDeploySession,
-  StartDoctorSession,
   StartInitSession,
-  StartSSHDInitSession,
   StartSession,
-  StopCloudContext,
 } from '../../wailsjs/go/main/App';
 import { ClipboardSetText, EventsOn, WindowToggleMaximise } from '../../wailsjs/runtime/runtime';
 import { fileToBase64, decodeBase64Bytes, isTerminalPasteTarget, pastedImageFiles } from './clipboard';
@@ -35,6 +28,7 @@ import {
   validEnvironmentDialogValues,
 } from './environmentDialogState';
 import { GlobalConfigWorkflow } from './globalConfigWorkflow';
+import { ManageEnvironmentWorkflow } from './manageEnvironmentWorkflow';
 import {
   setDebugOpen as applyDebugOpen,
   setFilesOpen as applyFilesOpen,
@@ -50,7 +44,6 @@ import { scrollSelectedDiffIntoView, visibleDiffPath } from './reviewDiffNavigat
 import type {
   AppStatusPayload,
   DebugSessionMode,
-  HiddenSessionMode,
   IDEKind,
   MountElements,
   TerminalDataDisposable,
@@ -65,7 +58,6 @@ import {
   MIN_DEBUG_HEIGHT,
   MIN_FILES_WIDTH,
   MIN_REVIEW_WIDTH,
-  defaultEnvironmentConfig,
   defaultEnvironmentDialog,
   defaultGlobalConfigDialog,
   defaultManageDialog,
@@ -94,7 +86,6 @@ import {
   failedTerminalExitReason,
   formatDebugCommand,
   formatIDECommand,
-  hiddenSessionBusyMessage,
   ideLabel,
   ideOpenFailure,
   statusForTerminalOutput,
@@ -103,9 +94,8 @@ import {
   trimDebugOutput,
 } from './terminalStatus';
 import { failedTerminalOutput, filterTerminalDisplayData, rebuildTerminalDisplayBuffer } from './terminalBuffers';
-import { deleteConfirmationValue, normalizeDialogValue, normalizeVersionSuggestions, selectionKey } from './versionSuggestions';
+import { normalizeDialogValue, normalizeVersionSuggestions, selectionKey } from './versionSuggestions';
 import type {
-  DeleteEnvironmentResult,
   DiffResult,
   ManageTab,
   PastedImageResult,
@@ -113,7 +103,6 @@ import type {
   TerminalExitPayload,
   TerminalOutputPayload,
   UICloudContextInitInput,
-  UICloudContextStatus,
   UIERunConfig,
   UIEnvironmentConfig,
   UIIdleStatus,
@@ -198,6 +187,22 @@ export class ERunUIController {
     refreshIdleStatus: () => { void this.refreshIdleStatus(); },
     refreshKubernetesContexts: () => { void this.refreshKubernetesContexts(); },
     hideTerminalMessage: () => this.hideTerminalMessage(),
+    showNotification: (kind, message) => this.showNotification(kind, message),
+    showTerminalMessage: (message, busy) => this.showTerminalMessage(message, busy),
+  });
+  private readonly manageEnvironment = new ManageEnvironmentWorkflow({
+    state: this.state,
+    sessions: this.sessions,
+    terminalSize: () => ({ cols: this.terminal?.cols || 80, rows: this.terminal?.rows || 24 }),
+    fitTerminal: () => this.fitAddon?.fit(),
+    resetTerminal: () => this.resetTerminal(),
+    emit: () => this.emit(),
+    focusTerminalSoon: () => this.focusTerminalSoon(),
+    queueTerminalResize: () => this.queueTerminalResize(),
+    refreshKubernetesContexts: () => { void this.refreshKubernetesContexts(); },
+    reloadStateAfterEnvironmentChange: () => this.reloadStateAfterEnvironmentChange(),
+    resolveRuntimeImage: (version) => this.resolveManageRuntimeImage(version),
+    startDeploySelection: (selection) => this.startDeploySelection(selection),
     showNotification: (kind, message) => this.showNotification(kind, message),
     showTerminalMessage: (message, busy) => this.showTerminalMessage(message, busy),
   });
@@ -590,287 +595,63 @@ export class ERunUIController {
   }
 
   openManageDialog(selection: UISelection): void {
-    this.state.manageDialog = {
-      open: true,
-      tab: 'config',
-      selection,
-      version: '',
-      versionImage: '',
-      config: {
-        ...defaultEnvironmentConfig(),
-        name: selection.environment,
-      },
-      configLoading: true,
-      confirmation: '',
-      busy: false,
-      choicesOpen: false,
-      error: '',
-    };
-    this.emit();
-    void this.refreshManageVersionSuggestions(false);
-    void this.loadManageConfig();
+    this.manageEnvironment.openDialog(selection);
   }
 
   closeManageDialog(): void {
-    if (this.state.manageDialog.busy) {
-      return;
-    }
-    this.state.manageDialog = defaultManageDialog();
-    this.emit();
-    this.focusTerminalSoon();
+    this.manageEnvironment.closeDialog();
   }
 
   setManageTab(tab: ManageTab): void {
-    if (this.state.manageDialog.busy) {
-      return;
-    }
-    this.state.manageDialog = {
-      ...this.state.manageDialog,
-      tab,
-      choicesOpen: false,
-      error: '',
-    };
-    this.emit();
-    if (tab === 'config' && !this.state.manageDialog.configLoading && this.state.manageDialog.selection) {
-      void this.loadManageConfig();
-    }
+    this.manageEnvironment.setTab(tab);
   }
 
   updateManageDialog(values: Partial<ManageDialogState>): void {
-    if (this.state.manageDialog.busy) {
-      return;
-    }
-    this.state.manageDialog = {
-      ...this.state.manageDialog,
-      ...values,
-      error: values.error ?? '',
-    };
-    if (values.version !== undefined) {
-      this.state.manageDialog.versionImage = '';
-      this.state.manageDialog.choicesOpen = false;
-    }
-    this.emit();
+    this.manageEnvironment.updateDialog(values);
   }
 
   toggleManageVersionChoices(): void {
-    this.setManageVersionChoicesOpen(!this.state.manageDialog.choicesOpen);
+    this.manageEnvironment.toggleVersionChoices();
   }
 
   setManageVersionChoicesOpen(open: boolean): void {
-    if (this.state.manageDialog.busy) {
-      return;
-    }
-    this.state.manageDialog = {
-      ...this.state.manageDialog,
-      choicesOpen: open && this.state.versionSuggestions.length > 0,
-    };
-    this.emit();
+    this.manageEnvironment.setVersionChoicesOpen(open);
   }
 
   selectManageVersionSuggestion(suggestion: UIVersionSuggestion | undefined): void {
-    if (this.state.manageDialog.busy) {
-      return;
-    }
-    this.state.manageDialog = {
-      ...this.state.manageDialog,
-      version: suggestion?.version || '',
-      versionImage: suggestion?.image || '',
-      choicesOpen: false,
-    };
-    this.emit();
+    this.manageEnvironment.selectVersionSuggestion(suggestion);
   }
 
   updateManageConfig(values: Partial<UIEnvironmentConfig>): void {
-    if (this.state.manageDialog.busy || this.state.manageDialog.configLoading) {
-      return;
-    }
-    const config = {
-      ...this.state.manageDialog.config,
-      ...values,
-    };
-    if (values.cloudProviderAlias !== undefined) {
-      config.cloudContext = undefined;
-    }
-    this.state.manageDialog = {
-      ...this.state.manageDialog,
-      config,
-      error: '',
-    };
-    this.emit();
+    this.manageEnvironment.updateConfig(values);
   }
 
   updateManageSSHDConfig(values: Partial<UIEnvironmentConfig['sshd']>): void {
-    if (this.state.manageDialog.busy || this.state.manageDialog.configLoading) {
-      return;
-    }
-    this.state.manageDialog = {
-      ...this.state.manageDialog,
-      config: {
-        ...this.state.manageDialog.config,
-        sshd: {
-          ...this.state.manageDialog.config.sshd,
-          ...values,
-        },
-      },
-      error: '',
-    };
-    this.emit();
+    this.manageEnvironment.updateSSHDConfig(values);
   }
 
   async loadManageConfig(): Promise<void> {
-    const dialog = this.state.manageDialog;
-    const selection = dialog.selection;
-    if (!dialog.open || !selection) {
-      return;
-    }
-    this.state.manageDialog = {
-      ...dialog,
-      configLoading: true,
-      error: '',
-    };
-    this.emit();
-    try {
-      const result = (await LoadEnvironmentConfig(selection)) as UIEnvironmentConfig;
-      this.state.manageDialog = {
-        ...this.state.manageDialog,
-        config: result,
-        configLoading: false,
-        error: '',
-      };
-      this.emit();
-    } catch (error) {
-      this.state.manageDialog = {
-        ...this.state.manageDialog,
-        configLoading: false,
-        error: readError(error),
-      };
-      this.emit();
-    }
+    await this.manageEnvironment.loadConfig();
   }
 
   async submitManageConfig(): Promise<void> {
-    const dialog = this.state.manageDialog;
-    if (dialog.busy || dialog.configLoading) {
-      return;
-    }
-    const selection = dialog.selection;
-    if (!selection) {
-      this.closeManageDialog();
-      return;
-    }
-
-    this.state.manageDialog = { ...dialog, busy: true, error: '' };
-    this.emit();
-    try {
-      const result = (await SaveEnvironmentConfig(selection, dialog.config as Parameters<typeof SaveEnvironmentConfig>[1])) as UIEnvironmentConfig;
-      this.state.manageDialog = {
-        ...this.state.manageDialog,
-        config: result,
-        busy: false,
-        error: '',
-      };
-      this.showNotification('success', `Saved config for ${selection.tenant} / ${selection.environment}.`);
-      this.closeManageDialog();
-    } catch (error) {
-      const message = readError(error);
-      this.state.manageDialog = {
-        ...this.state.manageDialog,
-        busy: false,
-        error: message,
-      };
-      this.showTerminalMessage(message);
-      this.emit();
-    }
+    await this.manageEnvironment.submitConfig();
   }
 
   async startManageCloudContext(name: string): Promise<void> {
-    await this.updateManageCloudContextPower(name, StartCloudContext, 'Started');
-    void this.refreshKubernetesContexts();
+    await this.manageEnvironment.startCloudContext(name);
   }
 
   async enableManageSSHD(): Promise<void> {
-    await this.startManageHiddenSession('sshd-init', StartSSHDInitSession);
+    await this.manageEnvironment.enableSSHD();
   }
 
   async startManageDoctor(): Promise<void> {
-    await this.startManageHiddenSession('doctor', StartDoctorSession);
-  }
-
-  private async startManageHiddenSession(mode: HiddenSessionMode, starter: (selection: UISelection, cols: number, rows: number) => Promise<unknown>): Promise<void> {
-    const dialog = this.state.manageDialog;
-    const selection = dialog.selection;
-    if (dialog.busy || dialog.configLoading || !selection) {
-      return;
-    }
-    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
-    this.prepareManageHiddenSession(selection, runSelection, mode);
-    this.fitAddon?.fit();
-    const result = (await starter(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
-    this.trackHiddenSession(mode, result.sessionId, runSelection);
-    this.registerDebugSession(result.sessionId, runSelection, 'hidden');
-    this.state.sessionId = result.sessionId;
-
-    this.resetTerminal();
-    this.focusTerminalSoon();
-    this.queueTerminalResize();
-    this.emit();
-  }
-
-  private prepareManageHiddenSession(selection: UISelection, runSelection: UISelection, mode: HiddenSessionMode): void {
-    this.state.selected = selection;
-    this.state.manageDialog = defaultManageDialog();
-    if (this.state.debugOpen) {
-      this.state.debugOutput = `$ ${formatDebugCommand(runSelection, mode)}\n`;
-    }
-    this.emit();
-    this.state.terminalCopyOutput = '';
-    this.state.terminalCopyStatus = '';
-    this.showTerminalMessage(hiddenSessionBusyMessage(selection, mode), true);
-  }
-
-  private trackHiddenSession(mode: HiddenSessionMode, sessionId: number, selection: UISelection): void {
-    if (mode === 'sshd-init') {
-      this.sessions.trackSSHDInitSession(sessionId, selection);
-      return;
-    }
-    this.sessions.trackDoctorSession(sessionId, selection);
+    await this.manageEnvironment.startDoctor();
   }
 
   async stopManageCloudContext(name: string): Promise<void> {
-    await this.updateManageCloudContextPower(name, StopCloudContext, 'Stopped');
-  }
-
-  private async updateManageCloudContextPower(name: string, action: (name: string) => Promise<unknown>, label: string): Promise<void> {
-    const contextName = normalizeDialogValue(name);
-    const dialog = this.state.manageDialog;
-    if (dialog.busy || dialog.configLoading || !dialog.selection || !contextName) {
-      return;
-    }
-    this.state.manageDialog = { ...dialog, busy: true, error: '' };
-    this.emit();
-    try {
-      const context = (await action(contextName)) as UICloudContextStatus;
-      this.state.manageDialog = {
-        ...this.state.manageDialog,
-        config: {
-          ...this.state.manageDialog.config,
-          cloudContext: context,
-        },
-        busy: false,
-        error: '',
-      };
-      this.showTerminalMessage(`${label} cloud context ${context.kubernetesContext || context.name}.`);
-      this.emit();
-    } catch (error) {
-      const message = readError(error);
-      this.state.manageDialog = {
-        ...this.state.manageDialog,
-        busy: false,
-        error: message,
-      };
-      this.showTerminalMessage(message);
-      this.emit();
-    }
+    await this.manageEnvironment.stopCloudContext(name);
   }
 
   openGlobalConfigDialog(): void {
@@ -1046,67 +827,11 @@ export class ERunUIController {
   }
 
   async submitManageDeploy(): Promise<void> {
-    const dialog = this.state.manageDialog;
-    if (dialog.busy) {
-      return;
-    }
-    const selection = dialog.selection;
-    if (!selection) {
-      this.closeManageDialog();
-      return;
-    }
-    const version = normalizeDialogValue(dialog.version);
-    this.closeManageDialog();
-    await this.startDeploySelection({ ...selection, version, runtimeImage: version ? this.resolveManageRuntimeImage(version) : '' });
+    await this.manageEnvironment.submitDeploy();
   }
 
   async submitManageDelete(): Promise<void> {
-    const dialog = this.state.manageDialog;
-    if (dialog.busy) {
-      return;
-    }
-    const selection = dialog.selection;
-    if (!selection) {
-      this.closeManageDialog();
-      return;
-    }
-    const confirmation = normalizeDialogValue(dialog.confirmation);
-    const expected = deleteConfirmationValue(selection);
-    if (confirmation !== expected) {
-      return;
-    }
-
-    this.state.manageDialog = { ...dialog, busy: true, error: '' };
-    this.state.terminalCopyOutput = '';
-    this.state.terminalCopyStatus = '';
-    this.showTerminalMessage(`Deleting ${selection.tenant} / ${selection.environment}...`);
-
-    try {
-      const result = (await DeleteEnvironment(selection, confirmation)) as DeleteEnvironmentResult;
-      const deletedSelected = this.state.selected ? selectionKey(this.state.selected) === selectionKey(selection) : false;
-      if (deletedSelected) {
-        this.state.selected = null;
-        this.state.sessionId = 0;
-        this.resetTerminal();
-      }
-      await this.reloadStateAfterEnvironmentChange();
-      this.state.manageDialog = defaultManageDialog();
-      this.state.terminalCopyOutput = '';
-      this.state.terminalCopyStatus = '';
-      const warnings = [
-        result.namespaceDeleteError ? `Namespace deletion failed: ${result.namespaceDeleteError}` : '',
-        result.cloudContextStopError ? `Cloud context stop failed: ${result.cloudContextStopError}` : '',
-      ].filter(Boolean).join(' ');
-      const warning = warnings ? ` ${warnings}` : '';
-      this.showTerminalMessage(`Deleted ${result.tenant} / ${result.environment}.${warning}`);
-    } catch (error) {
-      const message = readError(error);
-      this.state.manageDialog = { ...this.state.manageDialog, busy: false, error: message };
-      this.state.terminalCopyOutput = `Failed to delete ${selection.tenant} / ${selection.environment}: ${message}`;
-      this.state.terminalCopyStatus = '';
-      this.showTerminalMessage(message);
-      this.emit();
-    }
+    await this.manageEnvironment.submitDelete();
   }
 
   setDiffFilter(value: string): void {
@@ -1485,28 +1210,6 @@ export class ERunUIController {
     const currentVersion = normalizeDialogValue(this.state.environmentDialog.version);
     if (selectDefault || !suggestions.some((suggestion) => suggestion.version === currentVersion)) {
       this.selectEnvironmentVersionSuggestion(suggestions[0]);
-    } else {
-      this.emit();
-    }
-  }
-
-  private async refreshManageVersionSuggestions(selectDefault: boolean): Promise<void> {
-    const selection = this.state.manageDialog.selection;
-    if (!selection) {
-      return;
-    }
-    const request = ++this.versionSuggestionRequest;
-    const suggestions = normalizeVersionSuggestions((await LoadVersionSuggestions(selection)) as UIVersionSuggestion[]);
-    if (request !== this.versionSuggestionRequest || !this.state.manageDialog.open) {
-      return;
-    }
-
-    this.state.versionSuggestions = suggestions;
-    const currentVersion = normalizeDialogValue(this.state.manageDialog.version);
-    if (!currentVersion && !selectDefault) {
-      this.emit();
-    } else if (selectDefault || !suggestions.some((suggestion) => suggestion.version === currentVersion)) {
-      this.selectManageVersionSuggestion(suggestions[0]);
     } else {
       this.emit();
     }
