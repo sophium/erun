@@ -695,6 +695,11 @@ type cloudContextInstanceProfile struct {
 	RoleName string
 }
 
+type cloudContextPolicyPaths struct {
+	Trust  string
+	Policy string
+}
+
 func ensureCloudContextInstanceProfile(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, name string) (cloudContextInstanceProfile, error) {
 	roleName := cloudContextInstanceRoleName(name)
 	profileName := cloudContextInstanceProfileName(name)
@@ -702,53 +707,60 @@ func ensureCloudContextInstanceProfile(ctx Context, deps CloudContextDependencie
 		return cloudContextInstanceProfile{}, fmt.Errorf("cloud context name is required")
 	}
 
-	trustPath, cleanupTrust, err := cloudContextPolicyFile(ctx, ec2AssumeRolePolicy())
+	policies, cleanup, err := cloudContextInstanceProfilePolicyPaths(ctx, provider, region, name)
 	if err != nil {
 		return cloudContextInstanceProfile{}, err
 	}
-	defer cleanupTrust()
-	policyPath, cleanupPolicy, err := cloudContextPolicyFile(ctx, cloudContextSelfStopPolicy(provider, region, name))
-	if err != nil {
-		return cloudContextInstanceProfile{}, err
-	}
-	defer cleanupPolicy()
+	defer cleanup()
 
 	if ctx.DryRun {
-		if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "create-role", "--role-name", roleName, "--assume-role-policy-document", "file://" + trustPath, "--query", "Role.RoleName", "--output", "text"}); err != nil {
-			return cloudContextInstanceProfile{}, err
-		}
-		if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "put-role-policy", "--role-name", roleName, "--policy-name", "erun-self-stop", "--policy-document", "file://" + policyPath}); err != nil {
-			return cloudContextInstanceProfile{}, err
-		}
-		if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "create-instance-profile", "--instance-profile-name", profileName, "--query", "InstanceProfile.Arn", "--output", "text"}); err != nil {
-			return cloudContextInstanceProfile{}, err
-		}
-		if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "add-role-to-instance-profile", "--instance-profile-name", profileName, "--role-name", roleName}); err != nil {
-			return cloudContextInstanceProfile{}, err
-		}
-		return cloudContextInstanceProfile{
-			Name:     profileName,
-			ARN:      cloudContextInstanceProfileARN(provider, profileName),
-			RoleName: roleName,
-		}, nil
+		return dryRunCloudContextInstanceProfile(ctx, deps, provider, region, profileName, roleName, policies)
 	}
+	return realCloudContextInstanceProfile(ctx, deps, provider, region, profileName, roleName, policies)
+}
 
-	if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "get-role", "--role-name", roleName, "--query", "Role.RoleName", "--output", "text"}); err != nil {
-		if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "create-role", "--role-name", roleName, "--assume-role-policy-document", "file://" + trustPath, "--query", "Role.RoleName", "--output", "text"}); err != nil {
+func cloudContextInstanceProfilePolicyPaths(ctx Context, provider CloudProviderConfig, region, name string) (cloudContextPolicyPaths, func(), error) {
+	trustPath, cleanupTrust, err := cloudContextPolicyFile(ctx, ec2AssumeRolePolicy())
+	if err != nil {
+		return cloudContextPolicyPaths{}, func() {}, err
+	}
+	policyPath, cleanupPolicy, err := cloudContextPolicyFile(ctx, cloudContextSelfStopPolicy(provider, region, name))
+	if err != nil {
+		cleanupTrust()
+		return cloudContextPolicyPaths{}, func() {}, err
+	}
+	cleanup := func() {
+		cleanupPolicy()
+		cleanupTrust()
+	}
+	return cloudContextPolicyPaths{Trust: trustPath, Policy: policyPath}, cleanup, nil
+}
+
+func dryRunCloudContextInstanceProfile(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, profileName, roleName string, policies cloudContextPolicyPaths) (cloudContextInstanceProfile, error) {
+	commands := [][]string{
+		{"iam", "create-role", "--role-name", roleName, "--assume-role-policy-document", "file://" + policies.Trust, "--query", "Role.RoleName", "--output", "text"},
+		{"iam", "put-role-policy", "--role-name", roleName, "--policy-name", "erun-self-stop", "--policy-document", "file://" + policies.Policy},
+		{"iam", "create-instance-profile", "--instance-profile-name", profileName, "--query", "InstanceProfile.Arn", "--output", "text"},
+		{"iam", "add-role-to-instance-profile", "--instance-profile-name", profileName, "--role-name", roleName},
+	}
+	for _, command := range commands {
+		if _, err := deps.RunAWS(ctx, provider, region, command); err != nil {
 			return cloudContextInstanceProfile{}, err
 		}
 	}
-	if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "put-role-policy", "--role-name", roleName, "--policy-name", "erun-self-stop", "--policy-document", "file://" + policyPath}); err != nil {
+	return cloudContextInstanceProfile{Name: profileName, ARN: cloudContextInstanceProfileARN(provider, profileName), RoleName: roleName}, nil
+}
+
+func realCloudContextInstanceProfile(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, profileName, roleName string, policies cloudContextPolicyPaths) (cloudContextInstanceProfile, error) {
+	if err := ensureCloudContextInstanceRole(ctx, deps, provider, region, roleName, policies.Trust); err != nil {
 		return cloudContextInstanceProfile{}, err
 	}
-	profileARN, err := deps.RunAWS(ctx, provider, region, []string{"iam", "get-instance-profile", "--instance-profile-name", profileName, "--query", "InstanceProfile.Arn", "--output", "text"})
-	createdProfile := false
+	if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "put-role-policy", "--role-name", roleName, "--policy-name", "erun-self-stop", "--policy-document", "file://" + policies.Policy}); err != nil {
+		return cloudContextInstanceProfile{}, err
+	}
+	profileARN, createdProfile, err := ensureCloudContextInstanceProfileExists(ctx, deps, provider, region, profileName)
 	if err != nil {
-		profileARN, err = deps.RunAWS(ctx, provider, region, []string{"iam", "create-instance-profile", "--instance-profile-name", profileName, "--query", "InstanceProfile.Arn", "--output", "text"})
-		if err != nil {
-			return cloudContextInstanceProfile{}, err
-		}
-		createdProfile = true
+		return cloudContextInstanceProfile{}, err
 	}
 	if err := ensureCloudContextInstanceProfileRole(ctx, deps, provider, region, profileName, roleName, createdProfile); err != nil {
 		return cloudContextInstanceProfile{}, err
@@ -763,6 +775,23 @@ func ensureCloudContextInstanceProfile(ctx Context, deps CloudContextDependencie
 		ARN:      profileARN,
 		RoleName: roleName,
 	}, nil
+}
+
+func ensureCloudContextInstanceRole(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, roleName, trustPath string) error {
+	if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "get-role", "--role-name", roleName, "--query", "Role.RoleName", "--output", "text"}); err == nil {
+		return nil
+	}
+	_, err := deps.RunAWS(ctx, provider, region, []string{"iam", "create-role", "--role-name", roleName, "--assume-role-policy-document", "file://" + trustPath, "--query", "Role.RoleName", "--output", "text"})
+	return err
+}
+
+func ensureCloudContextInstanceProfileExists(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, profileName string) (string, bool, error) {
+	profileARN, err := deps.RunAWS(ctx, provider, region, []string{"iam", "get-instance-profile", "--instance-profile-name", profileName, "--query", "InstanceProfile.Arn", "--output", "text"})
+	if err == nil {
+		return profileARN, false, nil
+	}
+	profileARN, err = deps.RunAWS(ctx, provider, region, []string{"iam", "create-instance-profile", "--instance-profile-name", profileName, "--query", "InstanceProfile.Arn", "--output", "text"})
+	return profileARN, true, err
 }
 
 func ensureCloudContextInstanceProfileRole(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, profileName, roleName string, createdProfile bool) error {
