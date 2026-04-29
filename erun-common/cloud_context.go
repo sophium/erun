@@ -712,17 +712,12 @@ func ensureCloudContextInstanceProfile(ctx Context, deps CloudContextDependencie
 }
 
 func ensureCloudContextInstanceProfileRole(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, profileName, roleName string, createdProfile bool) error {
-	if !createdProfile {
-		existingRole, err := cloudContextInstanceProfileRoleName(ctx, deps, provider, region, profileName)
-		if err != nil {
-			return err
-		}
-		if existingRole == roleName {
-			return nil
-		}
-		if existingRole != "" {
-			return fmt.Errorf("instance profile %q already contains role %q; expected %q", profileName, existingRole, roleName)
-		}
+	addRole, err := shouldAddCloudContextProfileRole(ctx, deps, provider, region, profileName, roleName, createdProfile)
+	if err != nil {
+		return err
+	}
+	if !addRole {
+		return nil
 	}
 
 	if _, err := deps.RunAWS(ctx, provider, region, []string{"iam", "add-role-to-instance-profile", "--instance-profile-name", profileName, "--role-name", roleName}); err != nil {
@@ -742,6 +737,23 @@ func ensureCloudContextInstanceProfileRole(ctx Context, deps CloudContextDepende
 		return err
 	}
 	return nil
+}
+
+func shouldAddCloudContextProfileRole(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, profileName, roleName string, createdProfile bool) (bool, error) {
+	if createdProfile {
+		return true, nil
+	}
+	existingRole, err := cloudContextInstanceProfileRoleName(ctx, deps, provider, region, profileName)
+	if err != nil {
+		return false, err
+	}
+	if existingRole == roleName {
+		return false, nil
+	}
+	if existingRole != "" {
+		return false, fmt.Errorf("instance profile %q already contains role %q; expected %q", profileName, existingRole, roleName)
+	}
+	return true, nil
 }
 
 func cloudContextInstanceProfileRoleName(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, profileName string) (string, error) {

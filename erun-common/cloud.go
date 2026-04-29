@@ -150,28 +150,9 @@ func InitAWSCloudProvider(ctx Context, store CloudStore, params InitAWSCloudProv
 		return CloudProviderConfig{}, fmt.Errorf("store is required")
 	}
 	deps = normalizeCloudDependencies(deps)
-	profile := strings.TrimSpace(params.Profile)
-	configureProfile := profile == "" || hasAWSProfileConfig(params)
-	if profile == "" {
-		profile = generatedAWSProfileName()
-	}
-	if configureProfile {
-		profileConfig := AWSProfileConfig{
-			Profile:     profile,
-			SSOStartURL: params.SSOStartURL,
-			SSORegion:   params.SSORegion,
-			AccountID:   params.AccountID,
-			RoleName:    params.RoleName,
-			Region:      params.Region,
-		}
-		if err := deps.RunAWSConfigureSSO(ctx, profileConfig); err != nil {
-			return CloudProviderConfig{}, err
-		}
-	}
-	if !params.SkipLogin {
-		if err := deps.RunAWSLogin(ctx, profile); err != nil {
-			return CloudProviderConfig{}, err
-		}
+	profile, err := initAWSProfile(ctx, params, deps)
+	if err != nil {
+		return CloudProviderConfig{}, err
 	}
 
 	identity, err := deps.ResolveAWSIdentity(ctx, profile)
@@ -198,6 +179,36 @@ func InitAWSCloudProvider(ctx Context, store CloudStore, params InitAWSCloudProv
 		return CloudProviderConfig{}, fmt.Errorf("cloud provider alias cannot be resolved")
 	}
 	return SaveCloudProviderConfig(store, provider)
+}
+
+func initAWSProfile(ctx Context, params InitAWSCloudProviderParams, deps CloudDependencies) (string, error) {
+	profile := strings.TrimSpace(params.Profile)
+	configureProfile := profile == "" || hasAWSProfileConfig(params)
+	if profile == "" {
+		profile = generatedAWSProfileName()
+	}
+	if configureProfile {
+		if err := deps.RunAWSConfigureSSO(ctx, awsProfileConfig(profile, params)); err != nil {
+			return "", err
+		}
+	}
+	if !params.SkipLogin {
+		if err := deps.RunAWSLogin(ctx, profile); err != nil {
+			return "", err
+		}
+	}
+	return profile, nil
+}
+
+func awsProfileConfig(profile string, params InitAWSCloudProviderParams) AWSProfileConfig {
+	return AWSProfileConfig{
+		Profile:     profile,
+		SSOStartURL: params.SSOStartURL,
+		SSORegion:   params.SSORegion,
+		AccountID:   params.AccountID,
+		RoleName:    params.RoleName,
+		Region:      params.Region,
+	}
 }
 
 func hasAWSProfileConfig(params InitAWSCloudProviderParams) bool {
@@ -236,17 +247,9 @@ func SetEnvironmentCloudProviderAlias(ctx Context, store EnvironmentCloudAliasSt
 	if store == nil {
 		return EnvConfig{}, fmt.Errorf("store is required")
 	}
-	tenant := strings.TrimSpace(params.Tenant)
-	if tenant == "" {
-		return EnvConfig{}, fmt.Errorf("tenant is required")
-	}
-	environment := strings.TrimSpace(params.Environment)
-	if environment == "" {
-		return EnvConfig{}, fmt.Errorf("environment is required")
-	}
-	alias := strings.TrimSpace(params.Alias)
-	if alias == "" {
-		return EnvConfig{}, fmt.Errorf("cloud provider alias is required")
+	tenant, environment, alias, err := normalizeEnvironmentCloudProviderAliasParams(params)
+	if err != nil {
+		return EnvConfig{}, err
 	}
 
 	config, _, err := store.LoadEnvConfig(tenant, environment)
@@ -260,15 +263,7 @@ func SetEnvironmentCloudProviderAlias(ctx Context, store EnvironmentCloudAliasSt
 		config.Name = environment
 	}
 	if config.CloudProviderAlias == alias {
-		if config.Remote && !config.ManagedCloud {
-			config.ManagedCloud = true
-			if !ctx.DryRun {
-				if err := store.SaveEnvConfig(tenant, config); err != nil {
-					return EnvConfig{}, err
-				}
-			}
-		}
-		return config, nil
+		return saveManagedCloudAliasIfNeeded(ctx, store, tenant, config)
 	}
 	config.CloudProviderAlias = alias
 	if config.Remote {
@@ -276,6 +271,36 @@ func SetEnvironmentCloudProviderAlias(ctx Context, store EnvironmentCloudAliasSt
 	}
 	if ctx.DryRun {
 		ctx.Trace("write erun environment cloud provider alias " + tenant + "/" + environment)
+		return config, nil
+	}
+	if err := store.SaveEnvConfig(tenant, config); err != nil {
+		return EnvConfig{}, err
+	}
+	return config, nil
+}
+
+func normalizeEnvironmentCloudProviderAliasParams(params SetEnvironmentCloudAliasParams) (string, string, string, error) {
+	tenant := strings.TrimSpace(params.Tenant)
+	environment := strings.TrimSpace(params.Environment)
+	alias := strings.TrimSpace(params.Alias)
+	switch {
+	case tenant == "":
+		return "", "", "", fmt.Errorf("tenant is required")
+	case environment == "":
+		return "", "", "", fmt.Errorf("environment is required")
+	case alias == "":
+		return "", "", "", fmt.Errorf("cloud provider alias is required")
+	default:
+		return tenant, environment, alias, nil
+	}
+}
+
+func saveManagedCloudAliasIfNeeded(ctx Context, store EnvironmentCloudAliasStore, tenant string, config EnvConfig) (EnvConfig, error) {
+	if !config.Remote || config.ManagedCloud {
+		return config, nil
+	}
+	config.ManagedCloud = true
+	if ctx.DryRun {
 		return config, nil
 	}
 	if err := store.SaveEnvConfig(tenant, config); err != nil {
