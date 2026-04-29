@@ -83,9 +83,7 @@ func TestInitAWSCloudProviderCreatesProfileAndDerivesAliasFromLoginIdentity(t *t
 	}, CloudDependencies{
 		RunAWSConfigureSSO: func(_ Context, config AWSProfileConfig) error {
 			configuredProfile = config.Profile
-			if config.SSOStartURL != "https://example.awsapps.com/start" || config.SSORegion != "eu-west-1" || config.AccountID != "123456789012" || config.RoleName != "Admin" || config.Region != "eu-west-1" {
-				t.Fatalf("unexpected AWS profile config: %+v", config)
-			}
+			requireAWSProfileConfig(t, config)
 			return nil
 		},
 		RunAWSLogin: func(_ Context, profile string) error {
@@ -100,18 +98,20 @@ func TestInitAWSCloudProviderCreatesProfileAndDerivesAliasFromLoginIdentity(t *t
 			}, nil
 		},
 	})
-	if err != nil {
-		t.Fatalf("InitAWSCloudProvider failed: %v", err)
-	}
-	if configuredProfile == "" {
-		t.Fatal("expected AWS SSO profile to be created")
-	}
-	if loginProfile != configuredProfile || identityProfile != configuredProfile || provider.Profile != configuredProfile {
-		t.Fatalf("expected one generated profile through configure/login/identity/save, got configure=%q login=%q identity=%q provider=%q", configuredProfile, loginProfile, identityProfile, provider.Profile)
-	}
-	if provider.Alias != "rihards+123456789012@aws" {
-		t.Fatalf("expected alias from identity, got %+v", provider)
-	}
+	requireNoError(t, err, "InitAWSCloudProvider failed")
+	requireGeneratedAWSProfile(t, provider, configuredProfile, loginProfile, identityProfile)
+}
+
+func requireAWSProfileConfig(t *testing.T, config AWSProfileConfig) {
+	t.Helper()
+	requireCondition(t, config.SSOStartURL == "https://example.awsapps.com/start" && config.SSORegion == "eu-west-1" && config.AccountID == "123456789012" && config.RoleName == "Admin" && config.Region == "eu-west-1", "unexpected AWS profile config: %+v", config)
+}
+
+func requireGeneratedAWSProfile(t *testing.T, provider CloudProviderConfig, configuredProfile, loginProfile, identityProfile string) {
+	t.Helper()
+	requireCondition(t, configuredProfile != "", "expected AWS SSO profile to be created")
+	requireCondition(t, loginProfile == configuredProfile && identityProfile == configuredProfile && provider.Profile == configuredProfile, "expected one generated profile through configure/login/identity/save, got configure=%q login=%q identity=%q provider=%q", configuredProfile, loginProfile, identityProfile, provider.Profile)
+	requireEqual(t, provider.Alias, "rihards+123456789012@aws", "alias from identity")
 }
 
 func TestLoginCloudProviderAliasRunsLoginWhenStatusIsExpired(t *testing.T) {
@@ -191,17 +191,21 @@ func TestSetEnvironmentCloudProviderAliasUpdatesOnlyAlias(t *testing.T) {
 		Environment: " dev ",
 		Alias:       " team-cloud ",
 	})
-	if err != nil {
-		t.Fatalf("SetEnvironmentCloudProviderAlias failed: %v", err)
-	}
-	if updated.CloudProviderAlias != "team-cloud" {
-		t.Fatalf("unexpected updated config: %+v", updated)
-	}
-	if !updated.ManagedCloud {
-		t.Fatalf("expected remote cloud alias update to mark environment managed cloud: %+v", updated)
-	}
+	requireNoError(t, err, "SetEnvironmentCloudProviderAlias failed")
+	requireUpdatedCloudAlias(t, updated)
 	stored := store.envs["frs/dev"]
-	if stored.RepoPath != "/workspace/frs" || stored.KubernetesContext != "cluster-dev" || stored.ContainerRegistry != "registry.example.com/frs" || stored.RuntimeVersion != "1.0.0" || !stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/id.pub" || !stored.Remote || !stored.ManagedCloud || stored.Snapshot == nil || !*stored.Snapshot {
-		t.Fatalf("unexpected stored config: %+v", stored)
-	}
+	requireStoredCloudAliasConfig(t, stored)
+}
+
+func requireUpdatedCloudAlias(t *testing.T, updated EnvConfig) {
+	t.Helper()
+	requireEqual(t, updated.CloudProviderAlias, "team-cloud", "updated cloud provider alias")
+	requireCondition(t, updated.ManagedCloud, "expected remote cloud alias update to mark environment managed cloud: %+v", updated)
+}
+
+func requireStoredCloudAliasConfig(t *testing.T, stored EnvConfig) {
+	t.Helper()
+	requireCondition(t, stored.RepoPath == "/workspace/frs" && stored.KubernetesContext == "cluster-dev" && stored.ContainerRegistry == "registry.example.com/frs" && stored.RuntimeVersion == "1.0.0", "unexpected stored config: %+v", stored)
+	requireCondition(t, stored.SSHD.Enabled && stored.SSHD.LocalPort == 60022 && stored.SSHD.PublicKeyPath == "/tmp/id.pub", "unexpected stored SSH config: %+v", stored)
+	requireCondition(t, stored.Remote && stored.ManagedCloud && stored.Snapshot != nil && *stored.Snapshot, "unexpected stored flags: %+v", stored)
 }
