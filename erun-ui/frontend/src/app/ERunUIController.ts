@@ -116,6 +116,8 @@ import type {
   UIVersionSuggestion,
 } from '@/types';
 
+const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
+
 export class ERunUIController {
   readonly state: AppState = {
     tenants: [],
@@ -173,6 +175,8 @@ export class ERunUIController {
   private notificationTimer = 0;
   private terminalCopyStatusTimer = 0;
   private idleStatusTimer = 0;
+  private reviewDiffRefreshTimer = 0;
+  private reviewDiffRequest = 0;
   private idleStatusRequest = 0;
   private versionSuggestionRequest = 0;
   private environmentResourceStatusRequest = 0;
@@ -306,6 +310,7 @@ export class ERunUIController {
     window.clearTimeout(this.notificationTimer);
     window.clearTimeout(this.terminalCopyStatusTimer);
     window.clearTimeout(this.idleStatusTimer);
+    this.stopReviewDiffRefresh();
     if (this.pasteHandler && this.terminalRoot) {
       this.terminalRoot.removeEventListener('paste', this.pasteHandler, true);
     }
@@ -340,6 +345,9 @@ export class ERunUIController {
 
   toggleReview(): void {
     toggleReviewPanel(this.state, { ...this.layoutCallbacks(), loadReviewDiff: () => { void this.loadReviewDiff(); } });
+    if (!this.state.reviewOpen) {
+      this.stopReviewDiffRefresh();
+    }
   }
 
   setFilesOpen(open: boolean, persist = true): void {
@@ -894,29 +902,81 @@ export class ERunUIController {
     void this.loadReviewDiff();
   }
 
-  async loadReviewDiff(): Promise<void> {
-    if (!this.state.selected) {
+  async loadReviewDiff(options: { silent?: boolean } = {}): Promise<void> {
+    const selection = this.state.selected;
+    if (!selection) {
       return;
     }
-    this.state.diffLoading = true;
-    this.state.diffError = '';
-    this.emit();
+    const request = ++this.reviewDiffRequest;
+    const selectedKey = selectionKey(selection);
+    const scope = this.state.selectedReviewScope;
+    const selectedCommit = this.state.selectedReviewCommit;
+    if (!options.silent) {
+      this.state.diffLoading = true;
+      this.state.diffError = '';
+      this.emit();
+    }
     try {
-      const diff = (await LoadDiff(this.state.selected, {
-        scope: this.state.selectedReviewScope,
-        selectedCommit: this.state.selectedReviewCommit,
+      const diff = (await LoadDiff(selection, {
+        scope,
+        selectedCommit,
       })) as DiffResult;
+      if (!this.isCurrentReviewDiffRequest(request, selectedKey)) {
+        return;
+      }
       this.state.diff = diff;
+      this.state.diffError = '';
       this.state.selectedReviewScope = diff.scope || 'current';
       this.state.selectedReviewCommit = diff.selectedCommit || '';
       this.state.selectedDiffPath = chooseSelectedDiffPath(diff, this.state.selectedDiffPath);
     } catch (error: unknown) {
-      this.state.diff = null;
+      if (!this.isCurrentReviewDiffRequest(request, selectedKey)) {
+        return;
+      }
+      if (options.silent && this.state.diff) {
+        return;
+      }
+      if (!options.silent || !this.state.diff) {
+        this.state.diff = null;
+      }
       this.state.diffError = readError(error);
     } finally {
-      this.state.diffLoading = false;
-      this.emit();
+      if (request === this.reviewDiffRequest) {
+        if (!options.silent) {
+          this.state.diffLoading = false;
+        }
+        this.emit();
+        this.scheduleReviewDiffRefresh();
+      }
     }
+  }
+
+  private isCurrentReviewDiffRequest(request: number, selectedKey: string): boolean {
+    return request === this.reviewDiffRequest && selectedKey === selectionKey(this.state.selected || { tenant: '', environment: '' });
+  }
+
+  private scheduleReviewDiffRefresh(delay = REVIEW_DIFF_REFRESH_INTERVAL_MS): void {
+    window.clearTimeout(this.reviewDiffRefreshTimer);
+    if (!this.state.reviewOpen || !this.state.selected) {
+      this.reviewDiffRefreshTimer = 0;
+      return;
+    }
+    this.reviewDiffRefreshTimer = window.setTimeout(() => {
+      if (!this.state.reviewOpen || !this.state.selected) {
+        this.stopReviewDiffRefresh();
+        return;
+      }
+      if (this.state.diffLoading) {
+        this.scheduleReviewDiffRefresh();
+        return;
+      }
+      void this.loadReviewDiff({ silent: true });
+    }, delay);
+  }
+
+  private stopReviewDiffRefresh(): void {
+    window.clearTimeout(this.reviewDiffRefreshTimer);
+    this.reviewDiffRefreshTimer = 0;
   }
 
   toggleDiffDirectory(path: string): void {

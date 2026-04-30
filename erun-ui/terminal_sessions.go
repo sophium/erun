@@ -149,10 +149,20 @@ func (a *App) OpenIDE(selection uiSelection, ide string) error {
 		return err
 	}
 
-	cliPath := a.deps.resolveCLIPath()
-	executable := cliPath
-	args := buildOpenIDEArgs(selection, ide)
-	if !result.EnvConfig.SSHD.Enabled {
+	params := startTerminalSessionParams{
+		Dir:        resolveDeployStartDir(a.deps.findProjectRoot, result),
+		Executable: a.deps.resolveCLIPath(),
+		Args:       buildOpenIDEArgs(selection, ide),
+		Env:        []string{appSessionEnvVar + "=1"},
+	}
+	if !result.RemoteRepo() {
+		localParams, err := buildLocalOpenIDEParams(result, ide)
+		if err != nil {
+			return err
+		}
+		params = localParams
+		params.Env = []string{appSessionEnvVar + "=1"}
+	} else if !result.EnvConfig.SSHD.Enabled {
 		return fmt.Errorf("open %s requires sshd-enabled remote environment; run `erun sshd init %s %s` first", ide, selection.Tenant, selection.Environment)
 	}
 
@@ -160,12 +170,7 @@ func (a *App) OpenIDE(selection uiSelection, ide string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	output, err := a.deps.runIDECommand(ctx, startTerminalSessionParams{
-		Dir:        resolveDeployStartDir(a.deps.findProjectRoot, result),
-		Executable: executable,
-		Args:       args,
-		Env:        []string{appSessionEnvVar + "=1"},
-	})
+	output, err := a.deps.runIDECommand(ctx, params)
 	if err == nil {
 		return nil
 	}

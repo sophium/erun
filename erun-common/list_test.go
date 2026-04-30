@@ -265,6 +265,7 @@ func requireSSHDListResult(t *testing.T, result ListResult) {
 	requireCondition(t, result.CurrentDirectory.Effective.LocalPorts.RangeStart == 17000 && result.CurrentDirectory.Effective.LocalPorts.SSH == DefaultSSHLocalPort, "unexpected effective local ports: %+v", result.CurrentDirectory.Effective.LocalPorts)
 	requireEqual(t, result.CurrentDirectory.Effective.SSH.HostAlias, "erun-tenant-a-dev", "effective SSH host alias")
 	requireCondition(t, result.CurrentDirectory.Effective.SSH.User == DefaultSSHUser && result.CurrentDirectory.Effective.SSH.LocalPort == DefaultSSHLocalPort, "unexpected effective SSH info: %+v", result.CurrentDirectory.Effective.SSH)
+	requireCondition(t, result.Tenants[0].Environments[0].Remote, "expected remote environment flag")
 	requireEqual(t, result.Tenants[0].Environments[0].LocalPorts.RangeEnd, 17099, "environment local port range")
 	requireEqual(t, result.Tenants[0].Environments[0].SSH.WorkspacePath, "/home/erun/git/tenant-a", "SSH workspace path")
 }

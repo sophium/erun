@@ -123,6 +123,7 @@ func stateFromListResult(result eruncommon.ListResult, info eruncommon.BuildInfo
 				RuntimeVersion: strings.TrimSpace(environment.RuntimeVersion),
 				IsActive:       environment.IsActive,
 				SSHDEnabled:    environment.SSH.Enabled,
+				Remote:         environment.Remote,
 			})
 		}
 		state.Tenants = append(state.Tenants, item)

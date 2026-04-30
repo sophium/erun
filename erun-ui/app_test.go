@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
 				Name: "erun",
 				Environments: []eruncommon.ListEnvironmentResult{
 					{Name: "local", RuntimeVersion: "1.0.19-snapshot-20260418141901", LocalPorts: eruncommon.EnvironmentLocalPorts{MCP: 17000}, SSH: eruncommon.ListSSHResult{Enabled: true}},
-					{Name: "remote", RuntimeVersion: "1.0.18", LocalPorts: eruncommon.EnvironmentLocalPorts{MCP: 17100}},
+					{Name: "remote", RuntimeVersion: "1.0.18", Remote: true, LocalPorts: eruncommon.EnvironmentLocalPorts{MCP: 17100}},
 				},
 			},
 		},
@@ -51,6 +52,9 @@ func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
 	}
 	if !state.Tenants[0].Environments[0].SSHDEnabled || state.Tenants[0].Environments[1].SSHDEnabled {
 		t.Fatalf("unexpected SSHD flags: %+v", state.Tenants[0].Environments)
+	}
+	if state.Tenants[0].Environments[0].Remote || !state.Tenants[0].Environments[1].Remote {
+		t.Fatalf("unexpected remote flags: %+v", state.Tenants[0].Environments)
 	}
 }
 
@@ -966,6 +970,7 @@ func TestOpenIDERunsWithoutConsumingTerminalWhenSSHDEnabled(t *testing.T) {
 				Name:              "remote",
 				RepoPath:          projectRoot,
 				KubernetesContext: "rancher-desktop",
+				Remote:            true,
 				SSHD: eruncommon.SSHDConfig{
 					Enabled: true,
 				},
@@ -1004,6 +1009,74 @@ func TestOpenIDERunsWithoutConsumingTerminalWhenSSHDEnabled(t *testing.T) {
 	}
 }
 
+func TestOpenIDEOpensLocalProjectWithoutSSHD(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {
+				Name:               "erun",
+				ProjectRoot:        projectRoot,
+				DefaultEnvironment: "local",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/local": {
+				Name:              "local",
+				RepoPath:          projectRoot,
+				KubernetesContext: "rancher-desktop",
+			},
+		},
+	}
+
+	var started startTerminalSessionParams
+	app := NewApp(erunUIDeps{
+		store:          store,
+		resolveCLIPath: func() string { return "/tmp/erun" },
+		runIDECommand: func(_ context.Context, params startTerminalSessionParams) (string, error) {
+			started = params
+			return "", nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	if err := app.OpenIDE(uiSelection{Tenant: "erun", Environment: "local"}, "intellij"); err != nil {
+		t.Fatalf("OpenIDE failed: %v", err)
+	}
+	wantExecutable, wantArgs, err := localOpenIDECommand(runtime.GOOS, "intellij", projectRoot)
+	if err != nil {
+		t.Fatalf("localOpenIDECommand failed: %v", err)
+	}
+	if started.Dir != projectRoot {
+		t.Fatalf("unexpected dir: %q", started.Dir)
+	}
+	if started.Executable != wantExecutable {
+		t.Fatalf("unexpected executable: got %q want %q", started.Executable, wantExecutable)
+	}
+	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
+		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
+	}
+}
+
+func TestLocalOpenIDECommandBuildsDarwinCommands(t *testing.T) {
+	projectRoot := "/tmp/tenant-a"
+
+	executable, args, err := localOpenIDECommand("darwin", "vscode", projectRoot)
+	if err != nil {
+		t.Fatalf("localOpenIDECommand vscode failed: %v", err)
+	}
+	if executable != "open" || strings.Join(args, "\n") != strings.Join([]string{"-a", "Visual Studio Code", projectRoot}, "\n") {
+		t.Fatalf("unexpected VS Code command: %s %+v", executable, args)
+	}
+
+	executable, args, err = localOpenIDECommand("darwin", "intellij", projectRoot)
+	if err != nil {
+		t.Fatalf("localOpenIDECommand intellij failed: %v", err)
+	}
+	if executable != "open" || strings.Join(args, "\n") != strings.Join([]string{"-a", "IntelliJ IDEA", projectRoot}, "\n") {
+		t.Fatalf("unexpected IntelliJ command: %s %+v", executable, args)
+	}
+}
+
 func TestOpenIDERejectsMissingSSHDWithoutHiddenInit(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -1019,6 +1092,7 @@ func TestOpenIDERejectsMissingSSHDWithoutHiddenInit(t *testing.T) {
 				Name:              "remote",
 				RepoPath:          projectRoot,
 				KubernetesContext: "rancher-desktop",
+				Remote:            true,
 			},
 		},
 	}

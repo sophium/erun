@@ -59,6 +59,7 @@ type ListEnvironmentResult struct {
 	CloudProviderAlias string                `json:"cloudProviderAlias,omitempty"`
 	RepoPath           string                `json:"repoPath,omitempty"`
 	RuntimeVersion     string                `json:"runtimeVersion,omitempty"`
+	Remote             bool                  `json:"remote,omitempty"`
 	Snapshot           bool                  `json:"snapshot"`
 	IsActive           bool                  `json:"isActive,omitempty"`
 	LocalPorts         EnvironmentLocalPorts `json:"localPorts,omitempty"`
@@ -179,6 +180,7 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 		CloudProviderAlias: strings.TrimSpace(env.CloudProviderAlias),
 		RepoPath:           strings.TrimSpace(env.RepoPath),
 		RuntimeVersion:     strings.TrimSpace(env.RuntimeVersion),
+		Remote:             env.Remote,
 		Snapshot:           env.SnapshotEnabled(),
 		IsActive:           listEnvironmentIsActive(store, env),
 		LocalPorts:         localPorts,

@@ -21,6 +21,7 @@ type uiEnvironment struct {
 	RuntimeVersion string `json:"runtimeVersion,omitempty"`
 	IsActive       bool   `json:"isActive,omitempty"`
 	SSHDEnabled    bool   `json:"sshdEnabled,omitempty"`
+	Remote         bool   `json:"remote"`
 }
 
 type uiSelection struct {

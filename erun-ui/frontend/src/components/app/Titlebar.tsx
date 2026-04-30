@@ -34,7 +34,7 @@ function TitlebarControls({ controller, state }: { controller: ERunUIController;
   const ReviewIcon = state.reviewOpen ? PanelRightClose : PanelRightOpen;
   const selected = state.selected;
   const selectedEnvironment = selected ? state.tenants.find((tenant) => tenant.name === selected.tenant)?.environments.find((environment) => environment.name === selected.environment) : undefined;
-  const ideDisabled = !selected || selectedEnvironment?.sshdEnabled !== true;
+  const ideDisabled = !selected || (selectedEnvironment?.remote !== false && selectedEnvironment?.sshdEnabled !== true);
   const vscodeTooltip = ideTooltipLabel('VS Code', selected, ideDisabled);
   const intellijTooltip = ideTooltipLabel('IntelliJ IDEA', selected, ideDisabled);
 
