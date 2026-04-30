@@ -227,9 +227,21 @@ touch "${codex_config}"
 
 tmp_config="${codex_config}.tmp"
 awk '
+    function write_codex_policy() {
+        if (!wrote_policy) {
+            print ""
+            print "sandbox_mode = \"danger-full-access\""
+            print "approval_policy = \"on-request\""
+            wrote_policy = 1
+        }
+    }
+    /^sandbox_mode = / { next }
+    /^approval_policy = / { next }
     /^\[mcp_servers\.erun\]$/ { skip = 1; next }
     /^\[/ && skip { skip = 0 }
+    /^\[/ && !skip { write_codex_policy() }
     !skip { print }
+    END { write_codex_policy() }
 ' "${codex_config}" >"${tmp_config}"
 mv "${tmp_config}" "${codex_config}"
 

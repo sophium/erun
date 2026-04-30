@@ -84,7 +84,7 @@ func TestRuntimeDockerfileInstallsPinnedCodexCLI(t *testing.T) {
 	if !strings.Contains(content, "ARG NODE_VERSION=24.14.0") {
 		t.Fatalf("expected runtime Dockerfile to pin the Node.js version for Codex CLI, got:\n%s", content)
 	}
-	if !strings.Contains(content, "ARG CODEX_VERSION=0.124.0") {
+	if !strings.Contains(content, "ARG CODEX_VERSION=0.125.0") {
 		t.Fatalf("expected runtime Dockerfile to pin the Codex CLI version, got:\n%s", content)
 	}
 	if !strings.Contains(content, "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.gz") {
@@ -137,6 +137,13 @@ func TestRuntimeEntrypointConfiguresCodexMCP(t *testing.T) {
 		`configure-codex-mcp.sh`,
 		`install_shell_profile_hook "${HOME}/.bashrc"`,
 		`install_shell_profile_hook "${HOME}/.profile"`,
+		`function write_codex_policy()`,
+		`/^sandbox_mode = / { next }`,
+		`/^approval_policy = / { next }`,
+		`/^\[/ && !skip { write_codex_policy() }`,
+		`END { write_codex_policy() }`,
+		`print "sandbox_mode = \"danger-full-access\""`,
+		`print "approval_policy = \"on-request\""`,
 		`[mcp_servers.erun]`,
 		`url = "${mcp_url}"`,
 		`tool_timeout_sec = 600`,
