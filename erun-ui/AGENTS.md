@@ -18,6 +18,12 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 - Keep desktop backend UI contracts together when they are generated into frontend bindings. Do not mix JSON-facing structs with process, PTY, or cloud lifecycle behavior in the same owner.
 - Put backend workflow behavior beside the lifecycle state it owns, such as idle status, session management, pasted images, cloud context actions, or window state.
 - Keep Wails event payloads stable unless the frontend contract is intentionally changing and generated bindings are refreshed.
+- Keep `app.go` focused on app composition: dependency defaults, `App` construction, Wails startup/shutdown hooks, and top-level lifecycle wiring.
+- Put terminal session startup, reuse, resizing, input, output streaming, activity recording, close logic, and session keys in terminal/session-owned backend files.
+- Put config editing and conversion in config-owned backend files. Separate global or tenant config handlers from environment config handlers when they mutate different store objects or depend on different lifecycle state.
+- Put state/read-model assembly in read-model-owned backend files. This includes initial UI state, version suggestions, Kubernetes context listing, endpoint formatting, and build details.
+- Keep pasted-image handling near terminal/session ownership when it depends on the active terminal selection.
+- Keep desktop backend moves package-local unless a real shared abstraction is being introduced. Organizational splits inside `erun-ui` should stay in package `main`.
 
 ## Frontend Workflow
 
