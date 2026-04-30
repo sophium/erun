@@ -21,6 +21,20 @@ type ProjectEntry struct {
 	TimestampMilli int64
 }
 
+type RecentProject struct {
+	ConfigID       string
+	ProjectPath    string
+	ProductCode    string
+	LatestUsedIDE  RecentProjectIDE
+	TimestampMilli string
+}
+
+type RecentProjectIDE struct {
+	BuildNumber string
+	PathToIDE   string
+	ProductCode string
+}
+
 func StableConfigID(hostAlias string) string {
 	sum := sha1.Sum([]byte(strings.TrimSpace(hostAlias)))
 	b := sum[:16]
@@ -41,20 +55,9 @@ func UpsertOptionsFiles(optionsDir string, entry ProjectEntry) error {
 	if optionsDir == "" {
 		return fmt.Errorf("JetBrains options directory is required")
 	}
-	if strings.TrimSpace(entry.ConfigID) == "" {
-		return fmt.Errorf("JetBrains config ID is required")
-	}
-	if strings.TrimSpace(entry.HostAlias) == "" {
-		return fmt.Errorf("JetBrains host alias is required")
-	}
-	if strings.TrimSpace(entry.User) == "" {
-		return fmt.Errorf("JetBrains SSH user is required")
-	}
-	if strings.TrimSpace(entry.ProjectPath) == "" {
-		return fmt.Errorf("JetBrains project path is required")
-	}
-	if strings.TrimSpace(entry.ProductCode) == "" {
-		entry.ProductCode = "IU"
+	entry, err := normalizeProjectEntry(entry)
+	if err != nil {
+		return err
 	}
 	if err := os.MkdirAll(optionsDir, 0o700); err != nil {
 		return err
@@ -70,6 +73,108 @@ func UpsertOptionsFiles(optionsDir string, entry ProjectEntry) error {
 		return err
 	}
 	return nil
+}
+
+func normalizeProjectEntry(entry ProjectEntry) (ProjectEntry, error) {
+	if err := validateProjectEntry(entry); err != nil {
+		return ProjectEntry{}, err
+	}
+	if strings.TrimSpace(entry.ProductCode) == "" {
+		entry.ProductCode = "IU"
+	}
+	return entry, nil
+}
+
+func validateProjectEntry(entry ProjectEntry) error {
+	if strings.TrimSpace(entry.ConfigID) == "" {
+		return fmt.Errorf("JetBrains config ID is required")
+	}
+	if strings.TrimSpace(entry.HostAlias) == "" {
+		return fmt.Errorf("JetBrains host alias is required")
+	}
+	if strings.TrimSpace(entry.User) == "" {
+		return fmt.Errorf("JetBrains SSH user is required")
+	}
+	if strings.TrimSpace(entry.ProjectPath) == "" {
+		return fmt.Errorf("JetBrains project path is required")
+	}
+	return nil
+}
+
+func FindRecentProject(optionsDir string, configID string, projectPath string) (RecentProject, bool, error) {
+	optionsDir = filepath.Clean(strings.TrimSpace(optionsDir))
+	configID = strings.TrimSpace(configID)
+	projectPath = strings.TrimSpace(projectPath)
+	if optionsDir == "" {
+		return RecentProject{}, false, fmt.Errorf("JetBrains options directory is required")
+	}
+	if configID == "" {
+		return RecentProject{}, false, fmt.Errorf("JetBrains config ID is required")
+	}
+	if projectPath == "" {
+		return RecentProject{}, false, fmt.Errorf("JetBrains project path is required")
+	}
+
+	doc := sshRecentConnectionsApplication{}
+	if err := readXMLFile(filepath.Join(optionsDir, "sshRecentConnections.v2.xml"), &doc); err != nil {
+		return RecentProject{}, false, err
+	}
+	for _, connection := range doc.Component.Connections.List.States {
+		if connection.ConfigID() != configID {
+			continue
+		}
+		for _, project := range connection.Projects() {
+			if project.ProjectPath() != projectPath {
+				continue
+			}
+			return RecentProject{
+				ConfigID:       configID,
+				ProjectPath:    project.ProjectPath(),
+				ProductCode:    project.OptionValue("productCode"),
+				LatestUsedIDE:  project.LatestUsedIDE(),
+				TimestampMilli: project.OptionValue("date"),
+			}, true, nil
+		}
+	}
+	return RecentProject{}, false, nil
+}
+
+func ClearRecentProjectLatestUsedIDE(optionsDir string, configID string, projectPath string) (bool, error) {
+	optionsDir = filepath.Clean(strings.TrimSpace(optionsDir))
+	configID = strings.TrimSpace(configID)
+	projectPath = strings.TrimSpace(projectPath)
+	if optionsDir == "" {
+		return false, fmt.Errorf("JetBrains options directory is required")
+	}
+	if configID == "" {
+		return false, fmt.Errorf("JetBrains config ID is required")
+	}
+	if projectPath == "" {
+		return false, fmt.Errorf("JetBrains project path is required")
+	}
+
+	path := filepath.Join(optionsDir, "sshRecentConnections.v2.xml")
+	doc := sshRecentConnectionsApplication{}
+	if err := readXMLFile(path, &doc); err != nil {
+		return false, err
+	}
+	for i := range doc.Component.Connections.List.States {
+		if doc.Component.Connections.List.States[i].ConfigID() != configID {
+			continue
+		}
+		projects := doc.Component.Connections.List.States[i].ProjectStates()
+		for j := range projects {
+			project := &projects[j]
+			if project.ProjectPath() != projectPath {
+				continue
+			}
+			if !project.ClearLatestUsedIDE() {
+				return false, nil
+			}
+			return true, writeXMLFile(path, doc)
+		}
+	}
+	return false, nil
 }
 
 func upsertSSHConfigsFile(path string, entry ProjectEntry) error {
@@ -312,7 +417,7 @@ func (state *localRecentConnectionState) UpsertProject(project recentProjectStat
 		}
 		for j := range state.Options[i].List.Projects {
 			if state.Options[i].List.Projects[j].ProjectPath() == projectPath {
-				state.Options[i].List.Projects[j] = project
+				state.Options[i].List.Projects[j].MergeMetadata(project)
 				return
 			}
 		}
@@ -351,7 +456,94 @@ func (state recentProjectState) ProjectPath() string {
 	return ""
 }
 
+func (state localRecentConnectionState) Projects() []recentProjectState {
+	for _, option := range state.Options {
+		if option.Name == "projects" && option.List != nil {
+			return option.List.Projects
+		}
+	}
+	return nil
+}
+
+func (state *localRecentConnectionState) ProjectStates() []recentProjectState {
+	for i := range state.Options {
+		if state.Options[i].Name == "projects" && state.Options[i].List != nil {
+			return state.Options[i].List.Projects
+		}
+	}
+	return nil
+}
+
 type recentProjectOption struct {
+	Name          string                     `xml:"name,attr"`
+	Value         string                     `xml:"value,attr,omitempty"`
+	LatestUsedIDE *recentProjectInstalledIDE `xml:"RecentProjectInstalledIde,omitempty"`
+}
+
+type recentProjectInstalledIDE struct {
+	Options []installedIDEOption `xml:"option"`
+}
+
+func (state recentProjectState) OptionValue(name string) string {
+	for _, option := range state.Options {
+		if option.Name == name {
+			return option.Value
+		}
+	}
+	return ""
+}
+
+func (state recentProjectState) LatestUsedIDE() RecentProjectIDE {
+	for _, option := range state.Options {
+		if option.Name != "latestUsedIde" || option.LatestUsedIDE == nil {
+			continue
+		}
+		return RecentProjectIDE{
+			BuildNumber: option.LatestUsedIDE.OptionValue("buildNumber"),
+			PathToIDE:   option.LatestUsedIDE.OptionValue("pathToIde"),
+			ProductCode: option.LatestUsedIDE.OptionValue("productCode"),
+		}
+	}
+	return RecentProjectIDE{}
+}
+
+func (state *recentProjectState) MergeMetadata(project recentProjectState) {
+	state.upsertOptionValue("date", project.OptionValue("date"))
+	state.upsertOptionValue("productCode", project.OptionValue("productCode"))
+	state.upsertOptionValue("projectPath", project.ProjectPath())
+}
+
+func (state *recentProjectState) ClearLatestUsedIDE() bool {
+	for i := range state.Options {
+		if state.Options[i].Name != "latestUsedIde" {
+			continue
+		}
+		state.Options = append(state.Options[:i], state.Options[i+1:]...)
+		return true
+	}
+	return false
+}
+
+func (state *recentProjectState) upsertOptionValue(name string, value string) {
+	for i := range state.Options {
+		if state.Options[i].Name == name {
+			state.Options[i].Value = value
+			return
+		}
+	}
+	state.Options = append(state.Options, recentProjectOption{Name: name, Value: value})
+}
+
+type installedIDEOption struct {
 	Name  string `xml:"name,attr"`
 	Value string `xml:"value,attr,omitempty"`
+}
+
+func (ide recentProjectInstalledIDE) OptionValue(name string) string {
+	for _, option := range ide.Options {
+		if option.Name == name {
+			return option.Value
+		}
+	}
+	return ""
 }

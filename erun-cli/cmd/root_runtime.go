@@ -63,6 +63,7 @@ func newRootCommand(runRoot func(*cobra.Command, []string) error) *cobra.Command
 
 func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinderFunc, promptRunner PromptRunner, selectRunner SelectRunner, listKubernetesContexts KubernetesContextsLister, ensureKubernetesNamespace common.NamespaceEnsurerFunc, waitForRemoteRuntime common.RemoteRuntimeWaitFunc, runRemoteCommand common.RemoteCommandRunnerFunc, deployHelmChart common.HelmChartDeployerFunc) func(common.Context, common.BootstrapInitParams) error {
 	return func(ctx common.Context, params common.BootstrapInitParams) error {
+		ctx = withCloudContextPreflight(ctx, store)
 		if strings.TrimSpace(params.RuntimeVersion) == "" {
 			params.RuntimeVersion = currentBuildInfo().Version
 		}
@@ -83,6 +84,9 @@ func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinde
 			},
 			PromptRemoteRepositoryURL: func(label string) (string, error) {
 				return remoteRepositoryURLPrompt(promptRunner, label)
+			},
+			PromptCodeCommitSSHKeyID: func(label string) (string, error) {
+				return codeCommitSSHKeyIDPrompt(promptRunner, label)
 			},
 			EnsureKubernetesNamespace: common.TraceNamespaceEnsurer(ctx, ensureKubernetesNamespace),
 			LoadProjectConfig:         common.LoadProjectConfig,
@@ -173,24 +177,13 @@ func optionalBuildCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuil
 		return "Build the project"
 	}
 
-	linuxContexts, linuxErr := common.ResolveCurrentLinuxPackageContexts(findProjectRoot, resolveBuildContext, common.DockerCommandTarget{})
-	if linuxErr == nil && len(linuxContexts) > 0 {
+	if hasLinuxPackageContexts(findProjectRoot, resolveBuildContext) {
 		return "Build the project"
 	}
 
 	buildContexts, err := common.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, common.DockerCommandTarget{})
 	if err == nil && len(buildContexts) > 0 {
-		buildContext, buildContextErr := resolveBuildContext()
-		if buildContextErr == nil && strings.TrimSpace(buildContext.DockerfilePath) != "" && len(buildContexts) == 1 {
-			return "Build the container image in the current directory"
-		}
-
-		if projectRoot, projectRootErr := projectRootForHelp(findProjectRoot); projectRootErr == nil &&
-			projectRoot != "" &&
-			filepath.Clean(strings.TrimSpace(buildContext.Dir)) == projectRoot {
-			return "Build and push the project"
-		}
-		return "Build and push the devops container images for the current project"
+		return dockerBuildCmdShort(findProjectRoot, resolveBuildContext, buildContexts)
 	}
 
 	hasScript, err := common.HasProjectBuildScript(findProjectRoot, common.DockerCommandTarget{})
@@ -202,6 +195,27 @@ func optionalBuildCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuil
 	}
 
 	return "Build the container image in the current directory"
+}
+
+func hasLinuxPackageContexts(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc) bool {
+	linuxContexts, err := common.ResolveCurrentLinuxPackageContexts(findProjectRoot, resolveBuildContext, common.DockerCommandTarget{})
+	return err == nil && len(linuxContexts) > 0
+}
+
+func dockerBuildCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, buildContexts []common.DockerBuildContext) string {
+	buildContext, err := resolveBuildContext()
+	if err == nil && strings.TrimSpace(buildContext.DockerfilePath) != "" && len(buildContexts) == 1 {
+		return "Build the container image in the current directory"
+	}
+	if currentBuildContextIsProjectRoot(findProjectRoot, buildContext) {
+		return "Build and push the project"
+	}
+	return "Build and push the devops container images for the current project"
+}
+
+func currentBuildContextIsProjectRoot(findProjectRoot common.ProjectFinderFunc, buildContext common.DockerBuildContext) bool {
+	projectRoot, err := projectRootForHelp(findProjectRoot)
+	return err == nil && projectRoot != "" && filepath.Clean(strings.TrimSpace(buildContext.Dir)) == projectRoot
 }
 
 func hasProjectRootBuildScript(findProjectRoot common.ProjectFinderFunc) (bool, error) {
@@ -263,15 +277,23 @@ func hasOptionalDeployCmd(resolveDeployContext common.DeployContextResolverFunc)
 	if strings.TrimSpace(deployContext.ChartPath) != "" {
 		return true
 	}
-	if deployContexts, err := common.ResolveKubernetesDeployContextsAtDir(deployContext.Dir); err == nil && len(deployContexts) > 0 {
+	if hasDeployContextsAtDir(deployContext.Dir) {
 		return true
 	}
 	k8sDir := filepath.Join(strings.TrimSpace(deployContext.Dir), "k8s")
-	if deployContexts, err := common.ResolveKubernetesDeployContextsAtDir(k8sDir); err == nil && len(deployContexts) > 0 {
+	if hasDeployContextsAtDir(k8sDir) {
 		return true
 	}
+	return hasSingleNestedDevopsDeployContext(deployContext.Dir)
+}
 
-	entries, err := os.ReadDir(strings.TrimSpace(deployContext.Dir))
+func hasDeployContextsAtDir(dir string) bool {
+	deployContexts, err := common.ResolveKubernetesDeployContextsAtDir(dir)
+	return err == nil && len(deployContexts) > 0
+}
+
+func hasSingleNestedDevopsDeployContext(dir string) bool {
+	entries, err := os.ReadDir(strings.TrimSpace(dir))
 	if err != nil {
 		return false
 	}
@@ -280,8 +302,8 @@ func hasOptionalDeployCmd(resolveDeployContext common.DeployContextResolverFunc)
 		if !entry.IsDir() || !strings.HasSuffix(entry.Name(), "-devops") {
 			continue
 		}
-		k8sDir := filepath.Join(strings.TrimSpace(deployContext.Dir), entry.Name(), "k8s")
-		if deployContexts, err := common.ResolveKubernetesDeployContextsAtDir(k8sDir); err == nil && len(deployContexts) > 0 {
+		k8sDir := filepath.Join(strings.TrimSpace(dir), entry.Name(), "k8s")
+		if hasDeployContextsAtDir(k8sDir) {
 			if found {
 				return false
 			}

@@ -178,9 +178,7 @@ func TestInitCommandDryRunDoesNotPersistConfiguration(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"init", "--dry-run", "-v"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if namespaceEnsured {
 		t.Fatal("did not expect namespace creation during dry-run")
@@ -224,9 +222,7 @@ func TestInitCommandDryRunPrintsConcretePlannedActions(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"init", "--dry-run", "-v"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	rootConfigPath, err := xdg.ConfigFile(filepath.Join("erun", "config.yaml"))
 	if err != nil {
@@ -282,9 +278,7 @@ exit 1
 	}
 	t.Setenv("PATH", kubectlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	if err := ensureKubernetesNamespace("cluster-local", "tenant-a-local"); err != nil {
-		t.Fatalf("ensureKubernetesNamespace failed: %v", err)
-	}
+	requireNoError(t, ensureKubernetesNamespace("cluster-local", "tenant-a-local"), "ensureKubernetesNamespace failed")
 }
 
 func TestEnsureKubernetesNamespaceCreatesWhenNamespaceMissing(t *testing.T) {
@@ -306,9 +300,7 @@ exit 1
 	}
 	t.Setenv("PATH", kubectlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	if err := ensureKubernetesNamespace("cluster-local", "tenant-a-local"); err != nil {
-		t.Fatalf("ensureKubernetesNamespace failed: %v", err)
-	}
+	requireNoError(t, ensureKubernetesNamespace("cluster-local", "tenant-a-local"), "ensureKubernetesNamespace failed")
 }
 
 func TestInitCommandRemoteRequiresEnvironment(t *testing.T) {
@@ -331,9 +323,7 @@ func TestInitCommandMapsPositionalTenantAndEnvironmentArgs(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"erun", "rtest"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if got.Tenant != "erun" || got.Environment != "rtest" {
 		t.Fatalf("unexpected init params: %+v", got)
 	}
@@ -350,9 +340,7 @@ func TestInitCommandHelpShowsPositionalTenantAndEnvironment(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"--help"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stdout.String() + stderr.String()
 	if !strings.Contains(output, "Usage:\n  init [TENANT] [ENVIRONMENT] [flags]") {
@@ -366,12 +354,27 @@ func TestInitCommandAcceptsRuntimeVersionOverride(t *testing.T) {
 		got = params
 		return nil
 	})
-	cmd.SetArgs([]string{"erun", "local", "--version", "1.0.19-snapshot-20260418141901"})
+	cmd.SetArgs([]string{"erun", "local", "--version", "1.0.19-snapshot-20260418141901", "--runtime-image", "erun-devops", "--no-git", "--bootstrap"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
-	if got.RuntimeVersion != "1.0.19-snapshot-20260418141901" {
+	requireNoError(t, cmd.Execute(), "Execute failed")
+	if got.RuntimeVersion != "1.0.19-snapshot-20260418141901" || got.RuntimeImage != "erun-devops" || !got.NoGit || !got.Bootstrap {
 		t.Fatalf("unexpected init params: %+v", got)
+	}
+}
+
+func TestInitCommandAcceptsDefaultSelectionOverrides(t *testing.T) {
+	var got common.BootstrapInitParams
+	cmd := newInitCmd(func(_ common.Context, params common.BootstrapInitParams) error {
+		got = params
+		return nil
+	})
+	cmd.SetArgs([]string{"erun", "local", "--set-default-tenant=false", "--confirm-environment=true"})
+
+	requireNoError(t, cmd.Execute(), "Execute failed")
+	if got.ConfirmTenant == nil || *got.ConfirmTenant {
+		t.Fatalf("unexpected tenant confirmation: %+v", got.ConfirmTenant)
+	}
+	if got.ConfirmEnvironment == nil || !*got.ConfirmEnvironment {
+		t.Fatalf("unexpected environment confirmation: %+v", got.ConfirmEnvironment)
 	}
 }

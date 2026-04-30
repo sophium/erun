@@ -24,6 +24,8 @@ func TraceEnsureKubernetesNamespace(ctx Context, contextName, namespace string) 
 }
 
 func EnsureKubernetesNamespace(contextName, namespace string) error {
+	contextName = strings.TrimSpace(contextName)
+	namespace = strings.TrimSpace(namespace)
 	if exists, err := kubernetesNamespaceExists(contextName, namespace); err != nil {
 		return err
 	} else if exists {
@@ -31,7 +33,7 @@ func EnsureKubernetesNamespace(contextName, namespace string) error {
 	}
 
 	args := []string{}
-	if strings.TrimSpace(contextName) != "" {
+	if contextName != "" {
 		args = append(args, "--context", contextName)
 	}
 	args = append(args, "create", "namespace", namespace)
@@ -48,6 +50,45 @@ func EnsureKubernetesNamespace(contextName, namespace string) error {
 		return fmt.Errorf("failed to ensure kubernetes namespace %q in context %q: %w: %s", namespace, contextName, err, message)
 	}
 
+	return nil
+}
+
+func TraceDeleteKubernetesNamespace(ctx Context, contextName, namespace string) {
+	contextName = strings.TrimSpace(contextName)
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return
+	}
+
+	args := []string{}
+	if contextName != "" {
+		args = append(args, "--context", contextName)
+	}
+	args = append(args, "delete", "namespace", namespace, "--ignore-not-found")
+	ctx.TraceCommand("", "kubectl", args...)
+}
+
+func DeleteKubernetesNamespace(contextName, namespace string) error {
+	contextName = strings.TrimSpace(contextName)
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return nil
+	}
+
+	args := []string{}
+	if contextName != "" {
+		args = append(args, "--context", contextName)
+	}
+	args = append(args, "delete", "namespace", namespace, "--ignore-not-found")
+
+	output, err := exec.Command("kubectl", args...).CombinedOutput()
+	if err != nil {
+		message := strings.TrimSpace(string(output))
+		if message == "" {
+			return fmt.Errorf("failed to delete kubernetes namespace %q in context %q: %w", namespace, contextName, err)
+		}
+		return fmt.Errorf("failed to delete kubernetes namespace %q in context %q: %w: %s", namespace, contextName, err, message)
+	}
 	return nil
 }
 

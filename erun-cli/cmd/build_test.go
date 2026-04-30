@@ -116,18 +116,10 @@ func setupMultiDockerProject(t *testing.T, tenant string) (string, string, strin
 		}
 		componentDirs = append(componentDirs, componentDir)
 	}
-	if err := os.WriteFile(filepath.Join(moduleRoot, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentDirs[0], "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentDirs[1], "VERSION"), []byte("28.1.1\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentDirs[2], "VERSION"), []byte("noble-20260217\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
+	requireNoError(t, os.WriteFile(filepath.Join(moduleRoot, "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(componentDirs[0], "VERSION"), []byte("1.0.0\n"), 0o644), "write VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(componentDirs[1], "VERSION"), []byte("28.1.1\n"), 0o644), "write VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(componentDirs[2], "VERSION"), []byte("noble-20260217\n"), 0o644), "write VERSION")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               tenant,
 		ProjectRoot:        projectRoot,
@@ -135,9 +127,7 @@ func setupMultiDockerProject(t *testing.T, tenant string) (string, string, strin
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	tags := []string{
 		"erunpaas/" + componentNames[0] + ":1.0.0",
@@ -244,13 +234,9 @@ func TestNewRootCmdRegistersBuildShorthandWhenDockerfilePresent(t *testing.T) {
 func TestNewRootCmdRegistersBuildShorthandWhenProjectBuildScriptPresent(t *testing.T) {
 	projectRoot := t.TempDir()
 	scriptDir := filepath.Join(projectRoot, "scripts", "build")
-	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
-		t.Fatalf("mkdir script dir: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(scriptDir, 0o755), "mkdir script dir")
 	scriptPath := filepath.Join(scriptDir, "build.sh")
-	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write build.sh: %v", err)
-	}
+	requireNoError(t, os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755), "write build.sh")
 
 	cmd := newTestRootCmd(testRootDeps{
 		OptionalBuildFindProjectRoot: func() (string, string, error) {
@@ -282,18 +268,10 @@ func TestNewRootCmdRegistersBuildShorthandWhenProjectBuildScriptPresent(t *testi
 
 func TestNewRootCmdRegistersBuildShorthandWhenDockerDirectoryContainsDockerfiles(t *testing.T) {
 	dockerDir := filepath.Join(t.TempDir(), "erun-devops", "docker")
-	if err := os.MkdirAll(filepath.Join(dockerDir, "erun-devops"), 0o755); err != nil {
-		t.Fatalf("mkdir component dir: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(dockerDir, "erun-dind"), 0o755); err != nil {
-		t.Fatalf("mkdir component dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dockerDir, "erun-devops", "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(dockerDir, "erun-dind", "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(filepath.Join(dockerDir, "erun-devops"), 0o755), "mkdir component dir")
+	requireNoError(t, os.MkdirAll(filepath.Join(dockerDir, "erun-dind"), 0o755), "mkdir component dir")
+	requireNoError(t, os.WriteFile(filepath.Join(dockerDir, "erun-devops", "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(dockerDir, "erun-dind", "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
 
 	cmd := newTestRootCmd(testRootDeps{
 		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
@@ -367,18 +345,10 @@ func TestNewRootCmdOmitsBuildShorthandWhenDockerfileAbsent(t *testing.T) {
 func TestRootBuildShorthandRunsDockerBuild(t *testing.T) {
 	projectRoot := t.TempDir()
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-ubuntu")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("noble-20260217\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir build dir")
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("noble-20260217\n"), 0o644), "write local VERSION")
 	buildContext := common.DockerBuildContext{
 		Dir:            workdir,
 		DockerfilePath: filepath.Join(workdir, "Dockerfile"),
@@ -411,9 +381,7 @@ func TestRootBuildShorthandRunsDockerBuild(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"build"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if received.Dir != projectRoot || received.DockerfilePath != buildContext.DockerfilePath {
 		t.Fatalf("unexpected build request: %+v", received)
@@ -429,27 +397,15 @@ func TestRootBuildShorthandRunsDockerBuild(t *testing.T) {
 func TestRootBuildShorthandPrefersDockerBuildOverNestedProjectBuildScript(t *testing.T) {
 	projectRoot := t.TempDir()
 	scriptDir := filepath.Join(projectRoot, "scripts", "build")
-	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
-		t.Fatalf("mkdir script dir: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(scriptDir, 0o755), "mkdir script dir")
 	scriptPath := filepath.Join(scriptDir, "build.sh")
-	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write build.sh: %v", err)
-	}
+	requireNoError(t, os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755), "write build.sh")
 
 	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(buildDir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(buildDir, 0o755), "mkdir build dir")
+	requireNoError(t, os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write VERSION")
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	var received dockerBuildCall
 	cmd := newTestRootCmd(testRootDeps{
@@ -480,9 +436,7 @@ func TestRootBuildShorthandPrefersDockerBuildOverNestedProjectBuildScript(t *tes
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"build"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if received.Dir != projectRoot || received.DockerfilePath != filepath.Join(buildDir, "Dockerfile") {
 		t.Fatalf("unexpected docker build call: %+v", received)
@@ -494,14 +448,10 @@ func TestRootBuildShorthandPrefersDockerBuildOverNestedProjectBuildScript(t *tes
 
 func TestRootBuildShorthandDeployRejectsProjectBuildScript(t *testing.T) {
 	projectRoot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(projectRoot, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write build.sh: %v", err)
-	}
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "build.sh"), []byte("#!/bin/sh\n"), 0o755), "write build.sh")
 
 	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(buildDir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(buildDir, 0o755), "mkdir build dir")
 
 	cmd := newTestRootCmd(testRootDeps{
 		OptionalBuildFindProjectRoot: func() (string, string, error) {
@@ -539,32 +489,18 @@ func TestRootBuildShorthandBuildsAllDockerImagesWhenCurrentDirectoryIsDockerDire
 		filepath.Join(dockerDir, "erun-ubuntu"),
 	}
 	for _, dir := range componentDirs {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
-			t.Fatalf("mkdir component dir: %v", err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-			t.Fatalf("write Dockerfile: %v", err)
-		}
+		requireMkdirAll(t, dir, 0o755, "mkdir component dir")
+		requireWriteFile(t, filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\n"), 0o644, "write Dockerfile")
 	}
-	if err := common.SaveTenantConfig(common.TenantConfig{
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
 		DefaultEnvironment: common.DefaultEnvironment,
-	}); err != nil {
-		t.Fatalf("save tenant config: %v", err)
-	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentDirs[0], "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentDirs[1], "VERSION"), []byte("28.1.1\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(componentDirs[2], "VERSION"), []byte("noble-20260217\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
+	}), "save tenant config")
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
+	requireNoError(t, os.WriteFile(filepath.Join(componentDirs[0], "VERSION"), []byte("1.0.0\n"), 0o644), "write VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(componentDirs[1], "VERSION"), []byte("28.1.1\n"), 0o644), "write VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(componentDirs[2], "VERSION"), []byte("noble-20260217\n"), 0o644), "write VERSION")
 
 	var built []dockerBuildCall
 	var pushed []dockerPushCall
@@ -590,9 +526,7 @@ func TestRootBuildShorthandBuildsAllDockerImagesWhenCurrentDirectoryIsDockerDire
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"build"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if len(built) != 3 || len(pushed) != 0 {
 		t.Fatalf("unexpected build/push counts: builds=%d pushes=%d", len(built), len(pushed))
@@ -604,11 +538,7 @@ func TestRootBuildShorthandBuildsAllDockerImagesWhenCurrentDirectoryIsDockerDire
 		"erunpaas/erun-dind:28.1.1",
 		"erunpaas/erun-ubuntu:noble-20260217",
 	}
-	for i := range wantTags {
-		if gotTags[i] != wantTags[i] {
-			t.Fatalf("unexpected image tags: got %v want %v", gotTags, wantTags)
-		}
-	}
+	requireStringSlicesEqual(t, gotTags, wantTags, "unexpected image tags")
 	for _, req := range built {
 		if req.Dir != projectRoot {
 			t.Fatalf("expected project root build context, got %+v", req)
@@ -645,9 +575,7 @@ func TestRootBuildShorthandBuildsAllDockerImagesWhenCurrentDirectoryIsProjectRoo
 	})
 	cmd.SetArgs([]string{"build"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if len(built) != len(wantTags) || len(pushed) != 0 {
 		t.Fatalf("unexpected build/push counts: builds=%d pushes=%d", len(built), len(pushed))
 	}
@@ -687,9 +615,7 @@ func TestRootBuildShorthandBuildsAllDockerImagesWhenCurrentDirectoryIsDevopsModu
 	})
 	cmd.SetArgs([]string{"build"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if len(built) != len(wantTags) || len(pushed) != 0 {
 		t.Fatalf("unexpected build/push counts: builds=%d pushes=%d", len(built), len(pushed))
 	}
@@ -708,9 +634,7 @@ func TestRootBuildShorthandUsesExactVersionFromCurrentBuildDirectoryForLocalEnvi
 
 	projectRoot := t.TempDir()
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir build dir")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
@@ -718,15 +642,9 @@ func TestRootBuildShorthandUsesExactVersionFromCurrentBuildDirectoryForLocalEnvi
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
 
 	fixedNow := time.Date(2026, time.April, 6, 12, 34, 56, 0, time.UTC)
 	var received dockerBuildCall
@@ -754,9 +672,7 @@ func TestRootBuildShorthandUsesExactVersionFromCurrentBuildDirectoryForLocalEnvi
 	})
 	cmd.SetArgs([]string{"build"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	wantVersion := "1.1.0"
 	if received.Tag != "erunpaas/erun-devops:"+wantVersion {
@@ -769,9 +685,7 @@ func TestRootBuildShorthandDryRunPrintsCommandWithoutExecuting(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir build dir")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
@@ -779,15 +693,9 @@ func TestRootBuildShorthandDryRunPrintsCommandWithoutExecuting(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
 
 	stderr := new(bytes.Buffer)
 	cmd := newTestRootCmd(testRootDeps{
@@ -815,9 +723,7 @@ func TestRootBuildShorthandDryRunPrintsCommandWithoutExecuting(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"build", "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := stderr.String(); !bytes.Contains([]byte(got), []byte("docker build -t erunpaas/erun-devops:1.1.0")) {
 		t.Fatalf("expected dry-run trace output, got %q", got)
@@ -853,9 +759,7 @@ func TestRootBuildShorthandDryRunPrintsBuildCommandsForProjectRoot(t *testing.T)
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"build", "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
 	for _, tag := range wantTags {
@@ -871,13 +775,9 @@ func TestRootBuildShorthandDryRunPrintsBuildCommandsForProjectRoot(t *testing.T)
 func TestRootBuildShorthandDryRunPrintsBuildScriptCommandWithoutExecuting(t *testing.T) {
 	projectRoot := t.TempDir()
 	scriptDir := filepath.Join(projectRoot, "scripts", "build")
-	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
-		t.Fatalf("mkdir script dir: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(scriptDir, 0o755), "mkdir script dir")
 	scriptPath := filepath.Join(scriptDir, "build.sh")
-	if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write build.sh: %v", err)
-	}
+	requireNoError(t, os.WriteFile(scriptPath, []byte("#!/bin/sh\n"), 0o755), "write build.sh")
 
 	stderr := new(bytes.Buffer)
 	cmd := newTestRootCmd(testRootDeps{
@@ -898,9 +798,7 @@ func TestRootBuildShorthandDryRunPrintsBuildScriptCommandWithoutExecuting(t *tes
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"build", "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := stderr.String(); !strings.Contains(got, "cd "+scriptDir+" && ./build.sh") {
 		t.Fatalf("expected build.sh dry-run trace, got %q", got)
@@ -910,24 +808,12 @@ func TestRootBuildShorthandDryRunPrintsBuildScriptCommandWithoutExecuting(t *tes
 func TestRootBuildShorthandIgnoresBuildScriptInDockerArtifactDirectory(t *testing.T) {
 	projectRoot := t.TempDir()
 	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(buildDir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(buildDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write artifact build.sh: %v", err)
-	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(buildDir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(buildDir, 0o755), "mkdir build dir")
+	requireNoError(t, os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(buildDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755), "write artifact build.sh")
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(buildDir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
 
 	var built dockerBuildCall
 	cmd := newTestRootCmd(testRootDeps{
@@ -955,9 +841,7 @@ func TestRootBuildShorthandIgnoresBuildScriptInDockerArtifactDirectory(t *testin
 	})
 	cmd.SetArgs([]string{"build"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if built.Dir != projectRoot || built.Tag != "erunpaas/erun-devops:1.1.0" {
 		t.Fatalf("unexpected docker build request: %+v", built)
@@ -967,18 +851,10 @@ func TestRootBuildShorthandIgnoresBuildScriptInDockerArtifactDirectory(t *testin
 func TestRootBuildShorthandVerbosePrintsTraceBeforeExecuting(t *testing.T) {
 	projectRoot := t.TempDir()
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir build dir")
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
 
 	stderr := new(bytes.Buffer)
 	cmd := newTestRootCmd(testRootDeps{
@@ -1002,9 +878,7 @@ func TestRootBuildShorthandVerbosePrintsTraceBeforeExecuting(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"-v", "build"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := stderr.String(); !strings.Contains(got, "docker build -t erunpaas/erun-devops:1.1.0") {
 		t.Fatalf("expected verbose build trace, got %q", got)
@@ -1017,18 +891,10 @@ func TestRootBuildShorthandVerbosePrintsTraceBeforeExecuting(t *testing.T) {
 func TestRootBuildShorthandDoubleVerbosePrintsBuildTraceBeforeExecuting(t *testing.T) {
 	projectRoot := t.TempDir()
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir build dir")
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
 
 	stderr := new(bytes.Buffer)
 	cmd := newTestRootCmd(testRootDeps{
@@ -1052,9 +918,7 @@ func TestRootBuildShorthandDoubleVerbosePrintsBuildTraceBeforeExecuting(t *testi
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"-vv", "build"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	got := stderr.String()
 	if !strings.Contains(got, "docker build -t erunpaas/erun-devops:1.1.0") {
@@ -1094,9 +958,7 @@ func TestDevopsContainerPushUsesResolvedImageTag(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir build dir")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
@@ -1104,15 +966,9 @@ func TestDevopsContainerPushUsesResolvedImageTag(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
 
 	var built dockerBuildCall
 	var received dockerPushCall
@@ -1141,9 +997,7 @@ func TestDevopsContainerPushUsesResolvedImageTag(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"devops", "container", "push"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if built.Tag != "erunpaas/erun-devops:1.1.0" {
 		t.Fatalf("unexpected build tag: %+v", built)
@@ -1159,18 +1013,10 @@ func TestDevopsContainerPushUsesResolvedImageTag(t *testing.T) {
 func TestDevopsContainerPushPromptsLoginAndRetriesOnAuthError(t *testing.T) {
 	projectRoot := t.TempDir()
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir build dir")
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
 
 	pushCalls := 0
 	loginRegistry := "unexpected"
@@ -1206,9 +1052,7 @@ func TestDevopsContainerPushPromptsLoginAndRetriesOnAuthError(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"devops", "container", "push"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if pushCalls != 2 {
 		t.Fatalf("expected push retry, got %d push calls", pushCalls)
@@ -1221,15 +1065,11 @@ func TestDevopsContainerPushPromptsLoginAndRetriesOnAuthError(t *testing.T) {
 func TestBuildCommandReleasePromptsLoginAndRetriesOnAuthError(t *testing.T) {
 	projectRoot := createReleaseGitRepo(t, "main")
 	remoteRoot := filepath.Join(t.TempDir(), "release-remote.git")
-	if err := os.MkdirAll(remoteRoot, 0o755); err != nil {
-		t.Fatalf("mkdir remote root: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(remoteRoot, 0o755), "mkdir remote root")
 	runGitCommand(t, remoteRoot, "init", "--bare")
 	runGitCommand(t, projectRoot, "remote", "add", "origin", remoteRoot)
 	runGitCommand(t, projectRoot, "push", "-u", "origin", "main")
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 	runGitCommand(t, projectRoot, "add", ".")
 	runGitCommand(t, projectRoot, "commit", "-m", "configure registry")
 	runGitCommand(t, projectRoot, "push", "origin", "main")
@@ -1270,9 +1110,7 @@ func TestBuildCommandReleasePromptsLoginAndRetriesOnAuthError(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"build", "--release"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if pushBuildCalls != 2 {
 		t.Fatalf("expected release build retry, got %d pushed build calls", pushBuildCalls)
@@ -1287,9 +1125,7 @@ func TestRootPushShorthandUsesResolvedImageTag(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir build dir")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
@@ -1297,15 +1133,9 @@ func TestRootPushShorthandUsesResolvedImageTag(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
 
 	var built dockerBuildCall
 	var received dockerPushCall
@@ -1334,9 +1164,7 @@ func TestRootPushShorthandUsesResolvedImageTag(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"push"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if built.Tag != "erunpaas/erun-devops:1.1.0" {
 		t.Fatalf("unexpected build tag: %+v", built)
@@ -1354,9 +1182,7 @@ func TestRootPushShorthandBuildsAndPushesSameExactVersionFromCurrentBuildDirecto
 
 	projectRoot := t.TempDir()
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir build dir")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
@@ -1365,15 +1191,9 @@ func TestRootPushShorthandBuildsAndPushesSameExactVersionFromCurrentBuildDirecto
 		t.Fatalf("save tenant config: %v", err)
 	}
 
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
 
 	var built dockerBuildCall
 	var received dockerPushCall
@@ -1401,9 +1221,7 @@ func TestRootPushShorthandBuildsAndPushesSameExactVersionFromCurrentBuildDirecto
 	})
 	cmd.SetArgs([]string{"push"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if built.Tag != "erunpaas/erun-devops:1.1.0" {
 		t.Fatalf("unexpected build tag: %+v", built)
@@ -1517,9 +1335,7 @@ func TestRootBuildShorthandUsesSnapshotWhenVersionIsInheritedFromParentModule(t 
 
 	projectRoot := t.TempDir()
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir build dir")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
@@ -1527,12 +1343,8 @@ func TestRootBuildShorthandUsesSnapshotWhenVersionIsInheritedFromParentModule(t 
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
 
 	fixedNow := time.Date(2026, time.April, 6, 12, 34, 56, 0, time.UTC)
 	var received dockerBuildCall
@@ -1556,9 +1368,7 @@ func TestRootBuildShorthandUsesSnapshotWhenVersionIsInheritedFromParentModule(t 
 	})
 	cmd.SetArgs([]string{"build"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if received.Tag != "erunpaas/erun-devops:1.0.0-snapshot-20260406123456" {
 		t.Fatalf("unexpected image tag: %+v", received)
@@ -1570,9 +1380,7 @@ func TestRootPushShorthandDryRunPrintsCommandWithoutExecuting(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir build dir")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
@@ -1580,15 +1388,9 @@ func TestRootPushShorthandDryRunPrintsCommandWithoutExecuting(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
 
 	stderr := new(bytes.Buffer)
 	cmd := newTestRootCmd(testRootDeps{
@@ -1613,9 +1415,7 @@ func TestRootPushShorthandDryRunPrintsCommandWithoutExecuting(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"push", "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	got := stderr.String()
 	if !bytes.Contains([]byte(got), []byte("docker build -t erunpaas/erun-devops:1.1.0")) {
@@ -1653,18 +1453,10 @@ func TestDevopsContainerPushFailsWithoutDockerfile(t *testing.T) {
 func TestDevopsContainerPushReturnsOriginalAuthErrorWhenLoginCancelled(t *testing.T) {
 	projectRoot := t.TempDir()
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(workdir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir build dir")
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("1.1.0\n"), 0o644), "write local VERSION")
 
 	expectedErr := common.DockerRegistryAuthError{
 		Tag:      "erunpaas/erun-devops:1.1.0",
@@ -1709,12 +1501,8 @@ func TestRootCommandTreatsBuildAsEnvironmentWhenDockerfileAbsent(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
 	projectRoot := filepath.Join(t.TempDir(), "tenant-a-build")
-	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
-		t.Fatalf("mkdir project root: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(projectRoot, 0o755), "mkdir project root")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -1722,9 +1510,7 @@ func TestRootCommandTreatsBuildAsEnvironmentWhenDockerfileAbsent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "build", RepoPath: projectRoot, KubernetesContext: "cluster-build"}); err != nil {
-		t.Fatalf("save env config: %v", err)
-	}
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "build", RepoPath: projectRoot, KubernetesContext: "cluster-build"}), "save env config")
 
 	launched := common.ShellLaunchParams{}
 	cmd := newTestRootCmd(testRootDeps{
@@ -1742,9 +1528,7 @@ func TestRootCommandTreatsBuildAsEnvironmentWhenDockerfileAbsent(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"build"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if launched.Dir != projectRoot || launched.Title != "tenant-a-build" {
 		t.Fatalf("unexpected shell launch: %+v", launched)
@@ -1755,12 +1539,8 @@ func TestRootCommandTreatsPushAsEnvironmentWhenDockerfileAbsent(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
 	projectRoot := filepath.Join(t.TempDir(), "tenant-a-push")
-	if err := os.MkdirAll(projectRoot, 0o755); err != nil {
-		t.Fatalf("mkdir project root: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(projectRoot, 0o755), "mkdir project root")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -1768,9 +1548,7 @@ func TestRootCommandTreatsPushAsEnvironmentWhenDockerfileAbsent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save tenant config: %v", err)
 	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "push", RepoPath: projectRoot, KubernetesContext: "cluster-push"}); err != nil {
-		t.Fatalf("save env config: %v", err)
-	}
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "push", RepoPath: projectRoot, KubernetesContext: "cluster-push"}), "save env config")
 
 	launched := common.ShellLaunchParams{}
 	cmd := newTestRootCmd(testRootDeps{
@@ -1788,9 +1566,7 @@ func TestRootCommandTreatsPushAsEnvironmentWhenDockerfileAbsent(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"push"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if launched.Dir != projectRoot || launched.Title != "tenant-a-push" {
 		t.Fatalf("unexpected shell launch: %+v", launched)
@@ -1855,18 +1631,10 @@ func TestRunContainerPushCommandPropagatesBuildContextErrors(t *testing.T) {
 func TestResolveDockerBuildTagPrefersCurrentDirectoryVersion(t *testing.T) {
 	projectRoot := t.TempDir()
 	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-ubuntu")
-	if err := os.MkdirAll(buildDir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("registry.example/team")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(buildDir, "VERSION"), []byte("noble-20260217\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(buildDir, 0o755), "mkdir build dir")
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("registry.example/team")), "save project config")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(buildDir, "VERSION"), []byte("noble-20260217\n"), 0o644), "write local VERSION")
 
 	imageRef, err := func(buildDir string, target common.DockerCommandTarget) (common.DockerImageReference, error) {
 		return common.ResolveDockerImageReference(
@@ -1895,9 +1663,7 @@ func TestResolveDockerBuildTagUsesDefaultEnvironmentRegistry(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-ubuntu")
-	if err := os.MkdirAll(buildDir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(buildDir, 0o755), "mkdir build dir")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "erun",
 		ProjectRoot:        projectRoot,
@@ -1913,12 +1679,8 @@ func TestResolveDockerBuildTagUsesDefaultEnvironmentRegistry(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("save project config: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(buildDir, "VERSION"), []byte("noble-20260217\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(buildDir, "VERSION"), []byte("noble-20260217\n"), 0o644), "write local VERSION")
 
 	imageRef, err := func(buildDir string, target common.DockerCommandTarget) (common.DockerImageReference, error) {
 		return common.ResolveDockerImageReference(
@@ -1945,15 +1707,9 @@ func TestResolveDockerBuildTagUsesDefaultEnvironmentRegistry(t *testing.T) {
 func TestResolveDockerBuildTagUsesVersionOverrideInLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(buildDir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("registry.example/team")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(buildDir, 0o755), "mkdir build dir")
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("registry.example/team")), "save project config")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
 
 	imageRef, err := common.ResolveDockerImageReference(
 		common.ConfigStore{},
@@ -1977,18 +1733,10 @@ func TestResolveDockerBuildTagUsesVersionOverrideInLocal(t *testing.T) {
 func TestResolveDockerBuildTagKeepsBuildDirVersionWhenOverrideIsSet(t *testing.T) {
 	projectRoot := t.TempDir()
 	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-ubuntu")
-	if err := os.MkdirAll(buildDir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("registry.example/team")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(buildDir, "VERSION"), []byte("noble-20260217\n"), 0o644); err != nil {
-		t.Fatalf("write local VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(buildDir, 0o755), "mkdir build dir")
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("registry.example/team")), "save project config")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(buildDir, "VERSION"), []byte("noble-20260217\n"), 0o644), "write local VERSION")
 
 	imageRef, err := common.ResolveDockerImageReference(
 		common.ConfigStore{},
@@ -2014,15 +1762,9 @@ func TestBuildCommandVersionOverrideAvoidsSnapshotTag(t *testing.T) {
 
 	projectRoot := t.TempDir()
 	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(buildDir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(buildDir, 0o755), "mkdir build dir")
+	requireNoError(t, os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write VERSION")
 
 	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
@@ -2042,9 +1784,7 @@ func TestBuildCommandVersionOverrideAvoidsSnapshotTag(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"build", "--dry-run", "--version", "1.0.0-pr.abc1234"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := stderr.String(); !strings.Contains(got, "erun-devops:1.0.0-pr.abc1234") || strings.Contains(got, "-snapshot-") {
 		t.Fatalf("unexpected dry-run output:\n%s", got)
@@ -2064,18 +1804,10 @@ func TestBuildCommandVersionOverrideDoesNotReplaceComponentLocalVersions(t *test
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(devopsDir, "docker", "erun-devops", "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write devops Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(devopsDir, "docker", "erun-ubuntu", "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write ubuntu Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(devopsDir, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(devopsDir, "docker", "erun-ubuntu", "VERSION"), []byte("noble-20260217\n"), 0o644); err != nil {
-		t.Fatalf("write ubuntu VERSION: %v", err)
-	}
+	requireNoError(t, os.WriteFile(filepath.Join(devopsDir, "docker", "erun-devops", "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write devops Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(devopsDir, "docker", "erun-ubuntu", "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write ubuntu Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(devopsDir, "VERSION"), []byte("1.0.0\n"), 0o644), "write VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(devopsDir, "docker", "erun-ubuntu", "VERSION"), []byte("noble-20260217\n"), 0o644), "write ubuntu VERSION")
 
 	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
@@ -2095,9 +1827,7 @@ func TestBuildCommandVersionOverrideDoesNotReplaceComponentLocalVersions(t *test
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"build", "--dry-run", "--version", "1.0.0-pr.abc1234"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
 	if !strings.Contains(output, "erun-devops:1.0.0-pr.abc1234") {
@@ -2113,9 +1843,7 @@ func TestBuildCommandVersionOverrideDoesNotReplaceComponentLocalVersions(t *test
 
 func TestRootBuildCommandVersionOverrideBuildsWithoutPushing(t *testing.T) {
 	projectRoot, _, _, componentDirs, wantTags := setupMultiDockerProject(t, "tenant-a")
-	if err := os.Remove(filepath.Join(componentDirs[0], "VERSION")); err != nil {
-		t.Fatalf("remove runtime VERSION: %v", err)
-	}
+	requireNoError(t, os.Remove(filepath.Join(componentDirs[0], "VERSION")), "remove runtime VERSION")
 
 	var built []dockerBuildCall
 	cmd := newTestRootCmd(testRootDeps{
@@ -2139,9 +1867,7 @@ func TestRootBuildCommandVersionOverrideBuildsWithoutPushing(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"build", "--version", "1.0.7"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	gotTags := make([]string, 0, len(built))
 	for _, req := range built {
@@ -2163,18 +1889,10 @@ func TestRootBuildCommandDeployBuildsPushesAndDeploysOverriddenVersion(t *testin
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
 	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(buildDir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(buildDir, 0o755), "mkdir build dir")
+	requireNoError(t, os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write VERSION")
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -2189,9 +1907,7 @@ func TestRootBuildCommandDeployBuildsPushesAndDeploysOverriddenVersion(t *testin
 	}); err != nil {
 		t.Fatalf("save env config: %v", err)
 	}
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	var builds []dockerBuildCall
 	var pushes []dockerPushCall
@@ -2231,9 +1947,7 @@ func TestRootBuildCommandDeployBuildsPushesAndDeploysOverriddenVersion(t *testin
 	})
 	cmd.SetArgs([]string{"build", "--deploy", "--version", "1.0.7"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if len(builds) != 1 {
 		t.Fatalf("unexpected build requests: %+v", builds)
@@ -2260,15 +1974,9 @@ func TestBuildCommandHiddenEnvironmentOverrideUsesProvidedEnvironment(t *testing
 
 	projectRoot := t.TempDir()
 	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(buildDir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
-		t.Fatalf("write module VERSION: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(buildDir, 0o755), "mkdir build dir")
+	requireNoError(t, os.WriteFile(filepath.Join(buildDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
 	if err := common.SaveTenantConfig(common.TenantConfig{
 		Name:               "tenant-a",
 		ProjectRoot:        projectRoot,
@@ -2303,9 +2011,7 @@ func TestBuildCommandHiddenEnvironmentOverrideUsesProvidedEnvironment(t *testing
 	})
 	cmd.SetArgs([]string{"build", "--environment", "prod", "--project-root", projectRoot})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if built.Tag != "prod-registry/erun-devops:1.0.0" {
 		t.Fatalf("unexpected build request: %+v", built)
@@ -2327,9 +2033,7 @@ func TestBuildCommandRejectsReleaseWithVersion(t *testing.T) {
 
 func TestBuildCommandDryRunReleaseShowsReleaseAndBuildVersionTrace(t *testing.T) {
 	projectRoot := createReleaseGitRepo(t, "develop")
-	if err := os.WriteFile(filepath.Join(projectRoot, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write build.sh: %v", err)
-	}
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "build.sh"), []byte("#!/bin/sh\n"), 0o755), "write build.sh")
 
 	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
@@ -2348,9 +2052,7 @@ func TestBuildCommandDryRunReleaseShowsReleaseAndBuildVersionTrace(t *testing.T)
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"build", "--dry-run", "--release"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
 	if !strings.Contains(output, "release: branch=develop mode=candidate version=1.4.2-rc.") {
@@ -2366,9 +2068,7 @@ func TestBuildCommandDryRunReleaseShowsReleaseAndBuildVersionTrace(t *testing.T)
 
 func TestBuildCommandDryRunReleaseShowsPushCommandsForReleaseTaggedDockerBuilds(t *testing.T) {
 	projectRoot := createReleaseGitRepo(t, "main")
-	if err := common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")); err != nil {
-		t.Fatalf("save project config: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
 
 	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
@@ -2387,9 +2087,7 @@ func TestBuildCommandDryRunReleaseShowsPushCommandsForReleaseTaggedDockerBuilds(
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"build", "--dry-run", "--release"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
 	if !strings.Contains(output, "docker buildx inspect erun-multiarch") {
@@ -2423,9 +2121,7 @@ func TestBuildCommandDryRunReleaseForceIncludesTagDeletionForStaleReleaseTag(t *
 	runGitCommand(t, projectRoot, "push", "-u", "origin", "main")
 	runGitCommand(t, projectRoot, "tag", "-a", "v1.4.2", "-m", "Release 1.4.2")
 	runGitCommand(t, projectRoot, "push", "origin", "v1.4.2")
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "README.tmp"), []byte("change\n"), 0o644); err != nil {
-		t.Fatalf("write temp change: %v", err)
-	}
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "README.tmp"), []byte("change\n"), 0o644), "write temp change")
 	runGitCommand(t, projectRoot, "add", "erun-devops/README.tmp")
 	runGitCommand(t, projectRoot, "commit", "-m", "advance head")
 	runGitCommand(t, projectRoot, "push", "origin", "main")
@@ -2447,9 +2143,7 @@ func TestBuildCommandDryRunReleaseForceIncludesTagDeletionForStaleReleaseTag(t *
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"build", "--dry-run", "--release", "--force"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
 	for _, want := range []string{
@@ -2467,15 +2161,9 @@ func TestBuildCommandDryRunReleaseForceIncludesTagDeletionForStaleReleaseTag(t *
 func TestBuildCommandDryRunBuildsLinuxPackagesFromProjectRoot(t *testing.T) {
 	projectRoot := t.TempDir()
 	linuxComponentDir := filepath.Join(projectRoot, "erun-devops", "linux", "erun-cli")
-	if err := os.MkdirAll(linuxComponentDir, 0o755); err != nil {
-		t.Fatalf("mkdir linux component dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.2.3\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(linuxComponentDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write build.sh: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(linuxComponentDir, 0o755), "mkdir linux component dir")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.2.3\n"), 0o644), "write VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(linuxComponentDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755), "write build.sh")
 
 	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
@@ -2494,9 +2182,7 @@ func TestBuildCommandDryRunBuildsLinuxPackagesFromProjectRoot(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"build", "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
 	if common.LinuxPackageBuildsSupported() {
@@ -2512,23 +2198,15 @@ func TestBuildCommandDryRunReleasePublishesLinuxPackagesWithoutDockerBuilds(t *t
 	projectRoot := t.TempDir()
 	releaseRoot := filepath.Join(projectRoot, "erun-devops")
 	linuxComponentDir := filepath.Join(releaseRoot, "linux", "erun-cli")
-	if err := os.MkdirAll(linuxComponentDir, 0o755); err != nil {
-		t.Fatalf("mkdir linux component dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(releaseRoot, "VERSION"), []byte("1.4.2\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(linuxComponentDir, "release.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write release.sh: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(linuxComponentDir, 0o755), "mkdir linux component dir")
+	requireNoError(t, os.WriteFile(filepath.Join(releaseRoot, "VERSION"), []byte("1.4.2\n"), 0o644), "write VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(linuxComponentDir, "release.sh"), []byte("#!/bin/sh\n"), 0o755), "write release.sh")
 	runGitCommand(t, projectRoot, "init", "-b", "develop")
 	runGitCommand(t, projectRoot, "config", "user.email", "codex@example.com")
 	runGitCommand(t, projectRoot, "config", "user.name", "Codex")
 	runGitCommand(t, projectRoot, "add", ".")
 	runGitCommand(t, projectRoot, "commit", "-m", "initial")
-	if err := common.SaveProjectConfig(projectRoot, common.ProjectConfig{}); err != nil {
-		t.Fatalf("SaveProjectConfig failed: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, common.ProjectConfig{}), "SaveProjectConfig failed")
 
 	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
@@ -2547,9 +2225,7 @@ func TestBuildCommandDryRunReleasePublishesLinuxPackagesWithoutDockerBuilds(t *t
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"build", "--dry-run", "--release"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
 	if !strings.Contains(output, "release: branch=develop mode=candidate version=1.4.2-rc.") {

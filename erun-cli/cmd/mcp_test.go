@@ -51,9 +51,7 @@ func TestMCPCmdDryRunPrintsTraceWithoutStartingServer(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"-v", "mcp", "--dry-run", "--host", "0.0.0.0", "--port", "17000", "--path", "/mcp"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := stdout.String(); got != "" {
 		t.Fatalf("expected no server output during dry-run, got %q", got)
@@ -81,9 +79,7 @@ func TestMCPCmdStartsEMCP(t *testing.T) {
 	})
 	cmd.SetArgs([]string{"mcp", "tenant-a", "dev", "--host", "0.0.0.0", "--port", "17001", "--path", "custom"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if !started {
 		t.Fatal("expected emcp to be launched")
 	}
@@ -109,21 +105,11 @@ func TestMCPCmdUsesEnvironmentLocalPortByDefault(t *testing.T) {
 		}
 	}
 
-	if err := common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}); err != nil {
-		t.Fatalf("save erun config: %v", err)
-	}
-	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: tenantAPath, DefaultEnvironment: "local"}); err != nil {
-		t.Fatalf("save tenant-a config: %v", err)
-	}
-	if err := common.SaveTenantConfig(common.TenantConfig{Name: "tenant-b", ProjectRoot: tenantBPath, DefaultEnvironment: "dev"}); err != nil {
-		t.Fatalf("save tenant-b config: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "local", RepoPath: tenantAPath, KubernetesContext: "cluster-a"}); err != nil {
-		t.Fatalf("save tenant-a env: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-b", common.EnvConfig{Name: "dev", RepoPath: tenantBPath, KubernetesContext: "cluster-b"}); err != nil {
-		t.Fatalf("save tenant-b env: %v", err)
-	}
+	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", ProjectRoot: tenantAPath, DefaultEnvironment: "local"}), "save tenant-a config")
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{Name: "tenant-b", ProjectRoot: tenantBPath, DefaultEnvironment: "dev"}), "save tenant-b config")
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "local", RepoPath: tenantAPath, KubernetesContext: "cluster-a"}), "save tenant-a env")
+	requireNoError(t, common.SaveEnvConfig("tenant-b", common.EnvConfig{Name: "dev", RepoPath: tenantBPath, KubernetesContext: "cluster-b"}), "save tenant-b env")
 
 	cmd := newTestRootCmd(testRootDeps{})
 	stderr := new(bytes.Buffer)
@@ -131,9 +117,7 @@ func TestMCPCmdUsesEnvironmentLocalPortByDefault(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"-v", "mcp", "tenant-b", "dev", "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := stderr.String(); !bytes.Contains([]byte(got), []byte("--port 17100")) {
 		t.Fatalf("expected environment-scoped MCP port in trace, got %q", got)

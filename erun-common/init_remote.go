@@ -3,63 +3,151 @@ package eruncommon
 import (
 	"bytes"
 	"fmt"
+	"net/url"
 	"os/exec"
 	"path"
+	"regexp"
 	"strings"
 	"time"
 )
 
 type remoteRepositoryState struct {
-	Exists    bool
-	PublicKey string
+	Exists              bool
+	PublicKey           string
+	CodeCommitPublicKey string
+	HasSSHConfig        bool
+}
+
+type remoteRepositorySpec struct {
+	URL                string
+	CodeCommitHost     string
+	CodeCommitSSHKeyID string
+	UseHostConfig      bool
 }
 
 const remoteRepositoryAccessRetryInterval = 2 * time.Second
 
-func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, kubernetesContext, projectRoot string) error {
-	target := OpenResult{
-		Tenant:      tenant,
-		Environment: envName,
-		TenantConfig: TenantConfig{
-			Name:               tenant,
-			ProjectRoot:        projectRoot,
-			DefaultEnvironment: envName,
-		},
-		EnvConfig: EnvConfig{
-			Name:              envName,
-			RepoPath:          projectRoot,
-			KubernetesContext: kubernetesContext,
-			Remote:            true,
-		},
-		RepoPath: projectRoot,
-		Title:    tenant + "-" + envName,
-	}
+var codeCommitHostPattern = regexp.MustCompile(`^git-codecommit\.[a-z0-9-]+\.amazonaws\.com(?:\.cn)?$`)
+
+type remoteDefaultDevopsFile struct {
+	Path    string
+	Mode    string
+	Content []byte
+	Legacy  []string
+}
+
+func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, kubernetesContext, projectRoot string) (ShellLaunchParams, error) {
+	target := s.remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot)
+	target.EnvConfig.RuntimePod = NormalizeRuntimePodResources(params.RuntimePod)
 	req := ShellLaunchParamsFromResult(target)
 
-	if err := s.ensureRemoteRuntime(target, req, params.RuntimeVersion); err != nil {
-		return err
+	if err := s.ensureRemoteRuntime(target, req, params.RuntimeVersion, params.RuntimeImage); err != nil {
+		return ShellLaunchParams{}, err
+	}
+	if params.NoGit {
+		return req, s.ensureRemoteWorktree(req, projectRoot)
 	}
 
 	state, err := s.remoteRepositoryState(req, projectRoot)
 	if err != nil {
-		return err
+		return ShellLaunchParams{}, err
 	}
 	if state.Exists {
-		return s.pullRemoteRepository(req, projectRoot)
+		return req, s.pullRemoteRepository(req, projectRoot)
 	}
 
-	repositoryURL, err := s.resolveRemoteRepositoryURL(params, tenant, envName)
+	repository, err := s.remoteRepositorySpecForClone(params, tenant, envName, req, state)
 	if err != nil {
-		return err
+		return ShellLaunchParams{}, err
 	}
-	if err := s.waitForRemoteKeyImport(params, tenant, envName, req, repositoryURL, state.PublicKey); err != nil {
-		return err
-	}
-	return s.cloneRemoteRepository(req, projectRoot, repositoryURL)
+	return req, s.cloneRemoteRepository(req, projectRoot, repository)
 }
 
-func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchParams, runtimeVersion string) error {
-	spec, err := resolveDefaultDevopsDeploySpec(target)
+func (s bootstrapRunner) remoteRepositorySpecForClone(params BootstrapInitParams, tenant, envName string, req ShellLaunchParams, state remoteRepositoryState) (remoteRepositorySpec, error) {
+	repositoryURL, err := s.resolveRemoteRepositoryURL(params, tenant, envName)
+	if err != nil {
+		return remoteRepositorySpec{}, err
+	}
+	repository, err := parseRemoteRepositorySpec(repositoryURL)
+	if err != nil {
+		return remoteRepositorySpec{}, err
+	}
+	repository, usingHostConfig, err := s.resolveExistingRemoteHostConfig(params, tenant, envName, req, state, repository)
+	if err != nil {
+		return remoteRepositorySpec{}, err
+	}
+	if !usingHostConfig {
+		return s.remoteRepositorySpecWithCredentials(params, tenant, envName, req, state, repository)
+	}
+	return repository, nil
+}
+
+func (s bootstrapRunner) remoteRepositorySpecWithCredentials(params BootstrapInitParams, tenant, envName string, req ShellLaunchParams, state remoteRepositoryState, repository remoteRepositorySpec) (remoteRepositorySpec, error) {
+	repository, err := s.resolveRemoteRepositoryCredentials(params, tenant, envName, repository, state.CodeCommitPublicKey)
+	if err != nil {
+		return remoteRepositorySpec{}, err
+	}
+	publicKey := state.PublicKey
+	if repository.CodeCommitHost != "" {
+		publicKey = state.CodeCommitPublicKey
+	}
+	if err := s.waitForRemoteKeyImport(params, tenant, envName, req, repository, publicKey); err != nil {
+		return remoteRepositorySpec{}, err
+	}
+	return repository, nil
+}
+
+func (s bootstrapRunner) remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot string) OpenResult {
+	return OpenResult{
+		Tenant:       tenant,
+		Environment:  envName,
+		TenantConfig: remoteRepositoryTenantConfig(tenant, envName, projectRoot),
+		EnvConfig:    remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot),
+		LocalPorts:   s.remoteRepositoryLocalPorts(tenant, envName),
+		RepoPath:     projectRoot,
+		Title:        tenant + "-" + envName,
+	}
+}
+
+func remoteRepositoryTenantConfig(tenant, envName, projectRoot string) TenantConfig {
+	return TenantConfig{Name: tenant, ProjectRoot: projectRoot, DefaultEnvironment: envName}
+}
+
+func remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot string) EnvConfig {
+	return EnvConfig{Name: envName, RepoPath: projectRoot, KubernetesContext: kubernetesContext, Remote: true}
+}
+
+func (s bootstrapRunner) remoteRepositoryLocalPorts(tenant, envName string) EnvironmentLocalPorts {
+	ports := DefaultEnvironmentLocalPorts()
+	portStore, ok := s.Store.(environmentPortStore)
+	if !ok {
+		return ports
+	}
+	resolved, err := ResolveEnvironmentLocalPorts(portStore, tenant, envName)
+	if err != nil {
+		return ports
+	}
+	return resolved
+}
+
+func (s bootstrapRunner) ensureRemoteWorktree(req ShellLaunchParams, projectRoot string) error {
+	script := strings.Join([]string{
+		"set -eu",
+		fmt.Sprintf("mkdir -p %s", shellQuote(projectRoot)),
+	}, "\n")
+	output, err := s.runRemoteScript(req, "remote-worktree", script)
+	if err != nil {
+		return fmt.Errorf("create remote worktree: %w%s", err, formatRemoteCommandStderr(output.Stderr))
+	}
+	return nil
+}
+
+func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchParams, runtimeVersion, runtimeImage string) error {
+	runtimeImage = strings.TrimSpace(runtimeImage)
+	if runtimeImage == "" {
+		runtimeImage = DevopsComponentName
+	}
+	spec, err := resolveDefaultDevopsDeploySpecWithImage(target, runtimeImage)
 	if err != nil {
 		return err
 	}
@@ -74,6 +162,117 @@ func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchP
 		return nil
 	}
 	return s.WaitForRemoteRuntime(req)
+}
+
+func (s bootstrapRunner) ensureRemoteDefaultDevopsBootstrap(req ShellLaunchParams, projectRoot, tenant, envName, runtimeVersion string) error {
+	files, err := remoteDefaultDevopsBootstrapFiles(projectRoot, tenant, envName, runtimeVersion)
+	if err != nil {
+		return err
+	}
+	if len(files) == 0 {
+		return nil
+	}
+
+	lines := []string{"set -eu"}
+	for index, file := range files {
+		lines = append(lines, remoteDefaultDevopsFileScript(index, file)...)
+	}
+
+	output, err := s.runRemoteScript(req, "remote-default-devops-bootstrap", strings.Join(lines, "\n"))
+	if err != nil {
+		return fmt.Errorf("bootstrap remote devops module: %w%s", err, formatRemoteCommandStderr(output.Stderr))
+	}
+	return nil
+}
+
+func remoteDefaultDevopsBootstrapFiles(projectRoot, tenant, envName, runtimeVersion string) ([]remoteDefaultDevopsFile, error) {
+	projectRoot = strings.TrimSpace(projectRoot)
+	tenant = strings.TrimSpace(tenant)
+	if projectRoot == "" || tenant == "" {
+		return nil, nil
+	}
+	projectRoot = path.Clean(projectRoot)
+	moduleName := RuntimeReleaseName(tenant)
+	files := make([]remoteDefaultDevopsFile, 0, len(defaultDevopsModuleTemplates)+len(defaultDevopsChartTemplates)+1)
+	for _, templateFile := range defaultDevopsModuleTemplates {
+		data, err := defaultDevopsModuleFiles.ReadFile(templateFile.AssetPath)
+		if err != nil {
+			return nil, err
+		}
+		targetPath := strings.ReplaceAll(templateFile.TargetPath, "__MODULE_NAME__", moduleName)
+		resolvedPath := path.Join(projectRoot, targetPath)
+		content := renderDefaultDevopsModuleTemplate(templateFile.AssetPath, moduleName, runtimeVersion, data)
+		files = append(files, remoteDefaultDevopsFile{
+			Path:    resolvedPath,
+			Mode:    fmt.Sprintf("%o", templateFile.Mode.Perm()),
+			Content: content,
+			Legacy:  defaultDevopsLegacyContents(resolvedPath, content),
+		})
+	}
+
+	replacer := strings.NewReplacer("__MODULE_NAME__", moduleName)
+	for _, templateFile := range defaultDevopsChartTemplates {
+		data, err := defaultDevopsChartFiles.ReadFile(templateFile.AssetPath)
+		if err != nil {
+			return nil, err
+		}
+		targetPath := replacer.Replace(templateFile.TargetPath)
+		resolvedPath := path.Join(projectRoot, targetPath)
+		content := renderDefaultDevopsChartTemplate(templateFile.AssetPath, moduleName, moduleName, data)
+		files = append(files, remoteDefaultDevopsFile{
+			Path:    resolvedPath,
+			Mode:    fmt.Sprintf("%o", templateFile.Mode.Perm()),
+			Content: content,
+			Legacy:  defaultDevopsLegacyContents(resolvedPath, content),
+		})
+	}
+
+	if strings.TrimSpace(envName) != "" && !isLocalEnvironment(envName) {
+		resolvedPath := path.Join(projectRoot, moduleName, "k8s", moduleName, "values."+strings.ToLower(strings.TrimSpace(envName))+".yaml")
+		files = append(files, remoteDefaultDevopsFile{
+			Path: resolvedPath,
+			Mode: "644",
+		})
+	}
+	return files, nil
+}
+
+func remoteDefaultDevopsFileScript(index int, file remoteDefaultDevopsFile) []string {
+	tmp := fmt.Sprintf("erun_bootstrap_tmp_%d", index)
+	lines := []string{
+		fmt.Sprintf("mkdir -p %s", shellQuote(path.Dir(file.Path))),
+		fmt.Sprintf("if [ -d %s ]; then echo %s >&2; exit 1; fi", shellQuote(file.Path), shellQuote(fmt.Sprintf("%q is a directory", file.Path))),
+		fmt.Sprintf("%s=$(mktemp)", tmp),
+		fmt.Sprintf("printf %%s %s > \"$%s\"", shellQuote(string(file.Content)), tmp),
+		"replace=false",
+		fmt.Sprintf("if [ ! -e %s ]; then", shellQuote(file.Path)),
+		"  replace=true",
+		fmt.Sprintf("elif cmp -s \"$%s\" %s; then", tmp, shellQuote(file.Path)),
+		"  replace=false",
+	}
+	if len(file.Legacy) > 0 {
+		lines = append(lines, "else")
+		for legacyIndex, legacy := range file.Legacy {
+			legacyTmp := fmt.Sprintf("erun_bootstrap_legacy_%d_%d", index, legacyIndex)
+			lines = append(lines,
+				fmt.Sprintf("  %s=$(mktemp)", legacyTmp),
+				fmt.Sprintf("  printf %%s %s > \"$%s\"", shellQuote(legacy), legacyTmp),
+				fmt.Sprintf("  if cmp -s \"$%s\" %s; then replace=true; fi", legacyTmp, shellQuote(file.Path)),
+				fmt.Sprintf("  rm -f \"$%s\"", legacyTmp),
+			)
+		}
+	} else {
+		lines = append(lines,
+			"else",
+			"  replace=false",
+		)
+	}
+	lines = append(lines,
+		"fi",
+		fmt.Sprintf("if [ \"$replace\" = true ]; then cp \"$%s\" %s; chmod %s %s; fi", tmp, shellQuote(file.Path), shellQuote(file.Mode), shellQuote(file.Path)),
+		fmt.Sprintf("rm -f \"$%s\"", tmp),
+	)
+	return lines
 }
 
 func (s bootstrapRunner) resolveRemoteRepositoryURL(params BootstrapInitParams, tenant, envName string) (string, error) {
@@ -98,11 +297,80 @@ func (s bootstrapRunner) resolveRemoteRepositoryURL(params BootstrapInitParams, 
 	return repositoryURL, nil
 }
 
-func (s bootstrapRunner) waitForRemoteKeyImport(params BootstrapInitParams, tenant, envName string, req ShellLaunchParams, repositoryURL, publicKey string) error {
+func (s bootstrapRunner) resolveRemoteRepositoryCredentials(params BootstrapInitParams, tenant, envName string, spec remoteRepositorySpec, codeCommitPublicKey string) (remoteRepositorySpec, error) {
+	if spec.CodeCommitHost == "" || spec.CodeCommitSSHKeyID != "" {
+		return spec, nil
+	}
+	keyID := strings.TrimSpace(params.CodeCommitSSHKeyID)
+	details := codeCommitSetupDetails(spec, codeCommitPublicKey, "<SSH public key ID>")
+	if keyID == "" {
+		s.Context.Info(details)
+		if s.PromptCodeCommitSSHKeyID == nil {
+			return remoteRepositorySpec{}, BootstrapInitInteractionError{Interaction: BootstrapInitInteraction{
+				Type:    BootstrapInitInteractionCodeCommitSSHKeyID,
+				Label:   codeCommitSSHKeyIDLabel(tenant, envName),
+				Details: details,
+			}}
+		}
+		prompted, err := s.PromptCodeCommitSSHKeyID(codeCommitSSHKeyIDLabel(tenant, envName))
+		if err != nil {
+			return remoteRepositorySpec{}, err
+		}
+		keyID = strings.TrimSpace(prompted)
+	}
+	if keyID == "" {
+		return remoteRepositorySpec{}, BootstrapInitInteractionError{Interaction: BootstrapInitInteraction{
+			Type:    BootstrapInitInteractionCodeCommitSSHKeyID,
+			Label:   codeCommitSSHKeyIDLabel(tenant, envName),
+			Details: details,
+		}}
+	}
+	spec.CodeCommitSSHKeyID = keyID
+	return spec, nil
+}
+
+func (s bootstrapRunner) resolveExistingRemoteHostConfig(params BootstrapInitParams, tenant, envName string, req ShellLaunchParams, state remoteRepositoryState, repository remoteRepositorySpec) (remoteRepositorySpec, bool, error) {
+	if !state.HasSSHConfig {
+		return repository, false, nil
+	}
+	if err := s.verifyRemoteRepositoryAccessWithHostConfig(req, repository); err != nil {
+		return repository, false, nil
+	}
+	if params.AutoApprove {
+		repository.UseHostConfig = true
+		return repository, true, nil
+	}
+	if params.ConfirmRemoteHostConfig != nil {
+		if !*params.ConfirmRemoteHostConfig {
+			return repository, false, nil
+		}
+		repository.UseHostConfig = true
+		return repository, true, nil
+	}
+	confirmed, err := s.confirm(BootstrapInitInteraction{
+		Type:    BootstrapInitInteractionConfirmRemoteHost,
+		Label:   remoteHostConfigLabel(tenant, envName),
+		Details: repository.URL,
+	})
+	if err != nil {
+		return remoteRepositorySpec{}, false, err
+	}
+	if !confirmed {
+		return repository, false, nil
+	}
+	repository.UseHostConfig = true
+	return repository, true, nil
+}
+
+func (s bootstrapRunner) waitForRemoteKeyImport(params BootstrapInitParams, tenant, envName string, req ShellLaunchParams, repository remoteRepositorySpec, publicKey string) error {
 	publicKey = strings.TrimSpace(publicKey)
 	if publicKey != "" {
-		s.Context.Info("Import this SSH public key into your git host before continuing:")
-		s.Context.Info(publicKey)
+		if repository.CodeCommitHost != "" {
+			s.Context.Info(codeCommitSetupDetails(repository, publicKey, repository.CodeCommitSSHKeyID))
+		} else {
+			s.Context.Info("Import this SSH public key into your git host before continuing:")
+			s.Context.Info(publicKey)
+		}
 	}
 	if params.ConfirmRemoteKeyImport != nil {
 		if !*params.ConfirmRemoteKeyImport {
@@ -118,7 +386,7 @@ func (s bootstrapRunner) waitForRemoteKeyImport(params BootstrapInitParams, tena
 
 	s.Context.Info("Waiting for the SSH key to be deployed to the git host. Rechecking every 2 seconds. Press Ctrl+C to cancel.")
 	for attempts := 0; ; attempts++ {
-		if err := s.verifyRemoteRepositoryAccess(req, repositoryURL); err == nil {
+		if err := s.verifyRemoteRepositoryAccess(req, repository); err == nil {
 			if attempts > 0 {
 				s.Context.Info("Remote repository access confirmed.")
 			}
@@ -141,10 +409,18 @@ func (s bootstrapRunner) remoteRepositoryState(req ShellLaunchParams, projectRoo
 		"if [ ! -f \"$key\" ]; then ssh-keygen -t ed25519 -N '' -f \"$key\" >/dev/null 2>&1; fi",
 		"chmod 600 \"$key\"",
 		"chmod 644 \"$key.pub\"",
+		"codecommit_key=\"$HOME/.ssh/id_rsa_codecommit\"",
+		"if [ ! -f \"$codecommit_key\" ]; then ssh-keygen -t rsa -b 4096 -N '' -f \"$codecommit_key\" >/dev/null 2>&1; fi",
+		"chmod 600 \"$codecommit_key\"",
+		"chmod 644 \"$codecommit_key.pub\"",
 		fmt.Sprintf("mkdir -p %s", shellQuote(projectRoot)),
 		fmt.Sprintf("if [ -d %s/.git ]; then printf 'repo_exists\\n'; else printf 'repo_missing\\n'; fi", shellQuote(projectRoot)),
 		"printf '__ERUN_REMOTE_PUBLIC_KEY__\\n'",
 		"cat \"$key.pub\"",
+		"printf '\\n__ERUN_REMOTE_CODECOMMIT_PUBLIC_KEY__\\n'",
+		"cat \"$codecommit_key.pub\"",
+		"printf '\\n__ERUN_REMOTE_SSH_CONFIG__\\n'",
+		"if [ -s \"$HOME/.ssh/config\" ]; then printf 'exists\\n'; else printf 'missing\\n'; fi",
 	}, "\n")
 
 	output, err := s.runRemoteScript(req, "remote-repository-state", script)
@@ -152,7 +428,12 @@ func (s bootstrapRunner) remoteRepositoryState(req ShellLaunchParams, projectRoo
 		return remoteRepositoryState{}, err
 	}
 	if s.Context.DryRun {
-		return remoteRepositoryState{PublicKey: "<remote-public-key>", Exists: false}, nil
+		return remoteRepositoryState{
+			PublicKey:           "<remote-public-key>",
+			CodeCommitPublicKey: "<remote-codecommit-rsa-public-key>",
+			Exists:              false,
+			HasSSHConfig:        false,
+		}, nil
 	}
 
 	lines := strings.Split(strings.TrimSpace(output.Stdout), "\n")
@@ -160,21 +441,35 @@ func (s bootstrapRunner) remoteRepositoryState(req ShellLaunchParams, projectRoo
 		return remoteRepositoryState{}, fmt.Errorf("remote repository state command returned no output")
 	}
 	state := remoteRepositoryState{Exists: strings.TrimSpace(lines[0]) == "repo_exists"}
-	for index, line := range lines {
-		if strings.TrimSpace(line) != "__ERUN_REMOTE_PUBLIC_KEY__" {
-			continue
-		}
-		state.PublicKey = strings.TrimSpace(strings.Join(lines[index+1:], "\n"))
-		break
-	}
+	state.PublicKey = remoteRepositoryStateSection(lines, "__ERUN_REMOTE_PUBLIC_KEY__")
+	state.CodeCommitPublicKey = remoteRepositoryStateSection(lines, "__ERUN_REMOTE_CODECOMMIT_PUBLIC_KEY__")
+	state.HasSSHConfig = strings.EqualFold(remoteRepositoryStateSection(lines, "__ERUN_REMOTE_SSH_CONFIG__"), "exists")
 	return state, nil
 }
 
-func (s bootstrapRunner) verifyRemoteRepositoryAccess(req ShellLaunchParams, repositoryURL string) error {
+func remoteRepositoryStateSection(lines []string, marker string) string {
+	for index, line := range lines {
+		if strings.TrimSpace(line) != marker {
+			continue
+		}
+		section := make([]string, 0, len(lines)-index-1)
+		for _, value := range lines[index+1:] {
+			if strings.HasPrefix(strings.TrimSpace(value), "__ERUN_REMOTE_") {
+				break
+			}
+			section = append(section, value)
+		}
+		return strings.TrimSpace(strings.Join(section, "\n"))
+	}
+	return ""
+}
+
+func (s bootstrapRunner) verifyRemoteRepositoryAccess(req ShellLaunchParams, repository remoteRepositorySpec) error {
 	script := strings.Join([]string{
 		"set -eu",
-		"ssh_command='ssh -i \"$HOME/.ssh/id_ed25519\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new'",
-		fmt.Sprintf("git -c core.sshCommand=\"$ssh_command\" ls-remote %s HEAD >/dev/null", shellQuote(repositoryURL)),
+		remoteRepositorySSHConfigScript(repository),
+		fmt.Sprintf("ssh_command=%s", shellQuote(remoteRepositorySSHCommand(repository))),
+		fmt.Sprintf("git -c core.sshCommand=\"$ssh_command\" ls-remote %s HEAD >/dev/null", shellQuote(repository.URL)),
 	}, "\n")
 	output, err := s.runRemoteScript(req, "remote-repository-access", script)
 	if err != nil {
@@ -183,14 +478,29 @@ func (s bootstrapRunner) verifyRemoteRepositoryAccess(req ShellLaunchParams, rep
 	return nil
 }
 
-func (s bootstrapRunner) cloneRemoteRepository(req ShellLaunchParams, projectRoot, repositoryURL string) error {
+func (s bootstrapRunner) verifyRemoteRepositoryAccessWithHostConfig(req ShellLaunchParams, repository remoteRepositorySpec) error {
 	script := strings.Join([]string{
 		"set -eu",
-		"ssh_command='ssh -i \"$HOME/.ssh/id_ed25519\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new'",
+		"test -s \"$HOME/.ssh/config\"",
+		fmt.Sprintf("ssh_command=%s", shellQuote(`ssh -F "$HOME/.ssh/config" -o StrictHostKeyChecking=accept-new`)),
+		fmt.Sprintf("git -c core.sshCommand=\"$ssh_command\" ls-remote %s HEAD >/dev/null", shellQuote(repository.URL)),
+	}, "\n")
+	output, err := s.runRemoteScript(req, "remote-repository-existing-host-config", script)
+	if err != nil {
+		return fmt.Errorf("verify remote repository access with existing SSH host config: %w%s", err, formatRemoteCommandStderr(output.Stderr))
+	}
+	return nil
+}
+
+func (s bootstrapRunner) cloneRemoteRepository(req ShellLaunchParams, projectRoot string, repository remoteRepositorySpec) error {
+	script := strings.Join([]string{
+		"set -eu",
+		remoteRepositorySSHConfigScript(repository),
+		fmt.Sprintf("ssh_command=%s", shellQuote(remoteRepositorySSHCommand(repository))),
 		fmt.Sprintf("mkdir -p %s", shellQuote(path.Dir(projectRoot))),
 		fmt.Sprintf("mkdir -p %s", shellQuote(projectRoot)),
 		fmt.Sprintf("if [ -n \"$(ls -A %s 2>/dev/null)\" ] && [ ! -d %s/.git ]; then echo 'remote worktree directory exists and is not empty' >&2; exit 1; fi", shellQuote(projectRoot), shellQuote(projectRoot)),
-		fmt.Sprintf("git -c core.sshCommand=\"$ssh_command\" clone %s %s", shellQuote(repositoryURL), shellQuote(projectRoot)),
+		fmt.Sprintf("git -c core.sshCommand=\"$ssh_command\" clone %s %s", shellQuote(repository.URL), shellQuote(projectRoot)),
 	}, "\n")
 	output, err := s.runRemoteScript(req, "remote-repository-clone", script)
 	if err != nil {
@@ -212,6 +522,91 @@ func (s bootstrapRunner) pullRemoteRepository(req ShellLaunchParams, projectRoot
 	return nil
 }
 
+func parseRemoteRepositorySpec(repositoryURL string) (remoteRepositorySpec, error) {
+	repositoryURL = strings.TrimSpace(repositoryURL)
+	if repositoryURL == "" {
+		return remoteRepositorySpec{}, fmt.Errorf("git remote URL is required")
+	}
+	parseURL := repositoryURL
+	codeCommitBareURL := strings.HasPrefix(parseURL, "git-codecommit.")
+	if codeCommitBareURL {
+		parseURL = "ssh://" + parseURL
+	}
+	if !codeCommitBareURL && !strings.Contains(parseURL, "://") {
+		return remoteRepositorySpec{URL: repositoryURL}, nil
+	}
+	parsed, err := url.Parse(parseURL)
+	if err != nil {
+		return remoteRepositorySpec{}, err
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	if !codeCommitHostPattern.MatchString(host) {
+		return remoteRepositorySpec{URL: repositoryURL}, nil
+	}
+	if parsed.Scheme == "" {
+		parsed.Scheme = "ssh"
+	}
+	keyID := ""
+	if parsed.User != nil {
+		keyID = parsed.User.Username()
+		parsed.User = nil
+	}
+	return remoteRepositorySpec{
+		URL:                parsed.String(),
+		CodeCommitHost:     host,
+		CodeCommitSSHKeyID: keyID,
+	}, nil
+}
+
+func remoteRepositorySSHConfigScript(repository remoteRepositorySpec) string {
+	if repository.UseHostConfig {
+		return ":"
+	}
+	if repository.CodeCommitHost == "" {
+		return ":"
+	}
+	return strings.Join([]string{
+		"cat > \"$HOME/.ssh/config\" <<'EOF'",
+		codeCommitSSHConfig(repository, repository.CodeCommitSSHKeyID),
+		"EOF",
+		"chmod 600 \"$HOME/.ssh/config\"",
+	}, "\n")
+}
+
+func remoteRepositorySSHCommand(repository remoteRepositorySpec) string {
+	if repository.UseHostConfig {
+		return `ssh -F "$HOME/.ssh/config" -o StrictHostKeyChecking=accept-new`
+	}
+	if repository.CodeCommitHost != "" {
+		return `ssh -F "$HOME/.ssh/config"`
+	}
+	return `ssh -i "$HOME/.ssh/id_ed25519" -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new`
+}
+
+func codeCommitSSHConfig(repository remoteRepositorySpec, keyID string) string {
+	keyID = strings.TrimSpace(keyID)
+	if keyID == "" {
+		keyID = "<SSH public key ID>"
+	}
+	return strings.Join([]string{
+		"Host " + repository.CodeCommitHost,
+		"  User " + keyID,
+		"  IdentityFile ~/.ssh/id_rsa_codecommit",
+		"  IdentitiesOnly yes",
+		"  StrictHostKeyChecking accept-new",
+	}, "\n")
+}
+
+func codeCommitSetupDetails(repository remoteRepositorySpec, publicKey, keyID string) string {
+	return strings.Join([]string{
+		"Upload this SSH public key to the IAM user that should access CodeCommit:",
+		strings.TrimSpace(publicKey),
+		"",
+		"Use the SSH public key ID returned by IAM in this SSH host config:",
+		codeCommitSSHConfig(repository, keyID),
+	}, "\n")
+}
+
 func (s bootstrapRunner) runRemoteScript(req ShellLaunchParams, label, script string) (RemoteCommandResult, error) {
 	traceArgs := append([]string{}, kubectlRemoteExecArgs(req, script)...)
 	if len(traceArgs) > 0 {
@@ -227,7 +622,7 @@ func (s bootstrapRunner) runRemoteScript(req ShellLaunchParams, label, script st
 
 func kubectlRemoteExecArgs(req ShellLaunchParams, script string) []string {
 	args := kubectlTargetArgs(req)
-	args = append(args, "exec", "-c", RuntimeReleaseName(req.Tenant))
+	args = append(args, "exec")
 	args = append(args, "deployment/"+RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-lc", script)
 	return args
 }

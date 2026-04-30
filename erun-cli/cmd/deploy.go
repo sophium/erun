@@ -16,7 +16,7 @@ func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinder
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := commandContext(cmd)
+			ctx := withCloudContextPreflight(commandContext(cmd), store)
 			deployTarget, err := resolveDeployTargetArgs(args, target)
 			if err != nil {
 				return err
@@ -24,6 +24,9 @@ func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinder
 			snapshotOverride, err := resolveSnapshotFlagOverride(cmd, snapshot, noSnapshot)
 			if err != nil {
 				return err
+			}
+			if snapshotOverride == nil {
+				snapshotOverride = &snapshot
 			}
 			deployTarget.Snapshot = snapshotOverride
 			deploySpecs, err := common.ResolveCurrentDeploySpecs(store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
@@ -49,10 +52,13 @@ func newK8sDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFin
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := commandContext(cmd)
+			ctx := withCloudContextPreflight(commandContext(cmd), store)
 			snapshotOverride, err := resolveSnapshotFlagOverride(cmd, snapshot, noSnapshot)
 			if err != nil {
 				return err
+			}
+			if snapshotOverride == nil {
+				snapshotOverride = &snapshot
 			}
 			target.Snapshot = snapshotOverride
 			deploySpec, err := common.ResolveDeploySpec(store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, args[0], "")

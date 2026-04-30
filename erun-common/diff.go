@@ -85,10 +85,56 @@ func ResolveGitDiff(projectRoot string, runGit GitCommandRunnerFunc) (DiffResult
 	if err := runGit(projectRoot, stdout, stderr, "diff", "--no-color", "--no-ext-diff"); err != nil {
 		return DiffResult{}, fmt.Errorf("git diff: %w%s", err, formatGitCommandStderr(stderr.String()))
 	}
+	if err := appendUntrackedGitDiff(projectRoot, stdout, runGit); err != nil {
+		return DiffResult{}, err
+	}
 
 	result := ParseGitDiff(stdout.String())
 	result.WorkingDirectory = projectRoot
 	return result, nil
+}
+
+func appendUntrackedGitDiff(projectRoot string, rawDiff *bytes.Buffer, runGit GitCommandRunnerFunc) error {
+	untrackedOutput := new(bytes.Buffer)
+	untrackedStderr := new(bytes.Buffer)
+	if err := runGit(projectRoot, untrackedOutput, untrackedStderr, "ls-files", "--others", "--exclude-standard", "-z"); err != nil {
+		return fmt.Errorf("git ls-files: %w%s", err, formatGitCommandStderr(untrackedStderr.String()))
+	}
+	for _, file := range splitNULTerminated(untrackedOutput.String()) {
+		file = strings.TrimSpace(file)
+		if file == "" {
+			continue
+		}
+		fileDiff := new(bytes.Buffer)
+		fileStderr := new(bytes.Buffer)
+		err := runGit(projectRoot, fileDiff, fileStderr, "diff", "--no-color", "--no-ext-diff", "--no-index", "--", "/dev/null", file)
+		if err != nil && fileDiff.Len() == 0 {
+			return fmt.Errorf("git diff untracked %s: %w%s", file, err, formatGitCommandStderr(fileStderr.String()))
+		}
+		appendRawDiff(rawDiff, fileDiff.String())
+	}
+	return nil
+}
+
+func splitNULTerminated(value string) []string {
+	value = strings.TrimSuffix(value, "\x00")
+	if value == "" {
+		return nil
+	}
+	return strings.Split(value, "\x00")
+}
+
+func appendRawDiff(rawDiff *bytes.Buffer, diff string) {
+	if diff == "" {
+		return
+	}
+	if rawDiff.Len() > 0 && !strings.HasSuffix(rawDiff.String(), "\n") {
+		rawDiff.WriteString("\n")
+	}
+	rawDiff.WriteString(diff)
+	if !strings.HasSuffix(diff, "\n") {
+		rawDiff.WriteString("\n")
+	}
 }
 
 func ParseGitDiff(raw string) DiffResult {
@@ -107,110 +153,128 @@ func ParseGitDiff(raw string) DiffResult {
 
 func parseGitDiffFiles(raw string) []DiffFile {
 	lines := strings.Split(raw, "\n")
-	files := make([]DiffFile, 0)
-	var current *DiffFile
-	var currentHunk *DiffHunk
-	oldLine := 0
-	newLine := 0
-
-	flush := func() {
-		if current == nil {
-			return
-		}
-		normalizeDiffFile(current)
-		files = append(files, *current)
-		current = nil
-		currentHunk = nil
-	}
+	parser := diffFileParser{}
 
 	for index, line := range lines {
 		if index == len(lines)-1 && line == "" {
 			continue
 		}
-		if strings.HasPrefix(line, "diff --git ") {
-			flush()
-			oldPath, newPath := parseDiffGitHeader(line)
-			current = &DiffFile{
-				Path:    firstNonEmptyDiffPath(newPath, oldPath),
-				OldPath: oldPath,
-				NewPath: newPath,
-				Status:  "modified",
-			}
-			continue
-		}
-		if current == nil {
-			continue
-		}
-
-		switch {
-		case strings.HasPrefix(line, "new file mode "):
-			current.Status = "added"
-		case strings.HasPrefix(line, "deleted file mode "):
-			current.Status = "deleted"
-		case strings.HasPrefix(line, "rename from "):
-			current.Status = "renamed"
-			current.OldPath = strings.TrimSpace(strings.TrimPrefix(line, "rename from "))
-		case strings.HasPrefix(line, "rename to "):
-			current.Status = "renamed"
-			current.NewPath = strings.TrimSpace(strings.TrimPrefix(line, "rename to "))
-			current.Path = current.NewPath
-		case strings.HasPrefix(line, "copy from "):
-			current.Status = "copied"
-			current.OldPath = strings.TrimSpace(strings.TrimPrefix(line, "copy from "))
-		case strings.HasPrefix(line, "copy to "):
-			current.Status = "copied"
-			current.NewPath = strings.TrimSpace(strings.TrimPrefix(line, "copy to "))
-			current.Path = current.NewPath
-		case strings.HasPrefix(line, "Binary files ") || strings.HasPrefix(line, "GIT binary patch"):
-			current.Binary = true
-			currentHunk = nil
-		case strings.HasPrefix(line, "@@ "):
-			hunk := parseDiffHunkHeader(line)
-			current.Hunks = append(current.Hunks, hunk)
-			currentHunk = &current.Hunks[len(current.Hunks)-1]
-			oldLine = currentHunk.OldStart
-			newLine = currentHunk.NewStart
-		case currentHunk != nil:
-			switch {
-			case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++ "):
-				current.Additions++
-				currentHunk.Lines = append(currentHunk.Lines, DiffLine{
-					Kind:    "add",
-					Content: strings.TrimPrefix(line, "+"),
-					NewLine: newLine,
-				})
-				newLine++
-			case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "--- "):
-				current.Deletions++
-				currentHunk.Lines = append(currentHunk.Lines, DiffLine{
-					Kind:    "delete",
-					Content: strings.TrimPrefix(line, "-"),
-					OldLine: oldLine,
-				})
-				oldLine++
-			case strings.HasPrefix(line, "\\"):
-				currentHunk.Lines = append(currentHunk.Lines, DiffLine{
-					Kind:    "meta",
-					Content: line,
-				})
-			default:
-				content := line
-				if strings.HasPrefix(content, " ") {
-					content = strings.TrimPrefix(content, " ")
-				}
-				currentHunk.Lines = append(currentHunk.Lines, DiffLine{
-					Kind:    "context",
-					Content: content,
-					OldLine: oldLine,
-					NewLine: newLine,
-				})
-				oldLine++
-				newLine++
-			}
-		}
+		parser.parseLine(line)
 	}
-	flush()
-	return files
+	parser.flush()
+	return parser.files
+}
+
+type diffFileParser struct {
+	files       []DiffFile
+	current     *DiffFile
+	currentHunk *DiffHunk
+	oldLine     int
+	newLine     int
+}
+
+func (p *diffFileParser) parseLine(line string) {
+	if strings.HasPrefix(line, "diff --git ") {
+		p.startFile(line)
+		return
+	}
+	if p.current == nil {
+		return
+	}
+	if p.parseFileMetadata(line) {
+		return
+	}
+	if strings.HasPrefix(line, "@@ ") {
+		p.startHunk(line)
+		return
+	}
+	if p.currentHunk != nil {
+		p.appendHunkLine(line)
+	}
+}
+
+func (p *diffFileParser) startFile(line string) {
+	p.flush()
+	oldPath, newPath := parseDiffGitHeader(line)
+	p.current = &DiffFile{Path: firstNonEmptyDiffPath(newPath, oldPath), OldPath: oldPath, NewPath: newPath, Status: "modified"}
+}
+
+func (p *diffFileParser) flush() {
+	if p.current == nil {
+		return
+	}
+	normalizeDiffFile(p.current)
+	p.files = append(p.files, *p.current)
+	p.current = nil
+	p.currentHunk = nil
+}
+
+func (p *diffFileParser) parseFileMetadata(line string) bool {
+	switch {
+	case strings.HasPrefix(line, "new file mode "):
+		p.current.Status = "added"
+	case strings.HasPrefix(line, "deleted file mode "):
+		p.current.Status = "deleted"
+	case strings.HasPrefix(line, "rename from "):
+		p.current.Status = "renamed"
+		p.current.OldPath = strings.TrimSpace(strings.TrimPrefix(line, "rename from "))
+	case strings.HasPrefix(line, "rename to "):
+		p.current.Status = "renamed"
+		p.current.NewPath = strings.TrimSpace(strings.TrimPrefix(line, "rename to "))
+		p.current.Path = p.current.NewPath
+	case strings.HasPrefix(line, "copy from "):
+		p.current.Status = "copied"
+		p.current.OldPath = strings.TrimSpace(strings.TrimPrefix(line, "copy from "))
+	case strings.HasPrefix(line, "copy to "):
+		p.current.Status = "copied"
+		p.current.NewPath = strings.TrimSpace(strings.TrimPrefix(line, "copy to "))
+		p.current.Path = p.current.NewPath
+	case strings.HasPrefix(line, "Binary files ") || strings.HasPrefix(line, "GIT binary patch"):
+		p.current.Binary = true
+		p.currentHunk = nil
+	default:
+		return false
+	}
+	return true
+}
+
+func (p *diffFileParser) startHunk(line string) {
+	hunk := parseDiffHunkHeader(line)
+	p.current.Hunks = append(p.current.Hunks, hunk)
+	p.currentHunk = &p.current.Hunks[len(p.current.Hunks)-1]
+	p.oldLine = p.currentHunk.OldStart
+	p.newLine = p.currentHunk.NewStart
+}
+
+func (p *diffFileParser) appendHunkLine(line string) {
+	switch {
+	case strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++ "):
+		p.appendAddedLine(line)
+	case strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "--- "):
+		p.appendDeletedLine(line)
+	case strings.HasPrefix(line, "\\"):
+		p.currentHunk.Lines = append(p.currentHunk.Lines, DiffLine{Kind: "meta", Content: line})
+	default:
+		p.appendContextLine(line)
+	}
+}
+
+func (p *diffFileParser) appendAddedLine(line string) {
+	p.current.Additions++
+	p.currentHunk.Lines = append(p.currentHunk.Lines, DiffLine{Kind: "add", Content: strings.TrimPrefix(line, "+"), NewLine: p.newLine})
+	p.newLine++
+}
+
+func (p *diffFileParser) appendDeletedLine(line string) {
+	p.current.Deletions++
+	p.currentHunk.Lines = append(p.currentHunk.Lines, DiffLine{Kind: "delete", Content: strings.TrimPrefix(line, "-"), OldLine: p.oldLine})
+	p.oldLine++
+}
+
+func (p *diffFileParser) appendContextLine(line string) {
+	p.currentHunk.Lines = append(p.currentHunk.Lines, DiffLine{Kind: "context", Content: strings.TrimPrefix(line, " "), OldLine: p.oldLine, NewLine: p.newLine})
+	p.oldLine++
+	p.newLine++
 }
 
 func parseDiffGitHeader(line string) (string, string) {

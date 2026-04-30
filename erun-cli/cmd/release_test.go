@@ -14,9 +14,7 @@ import (
 
 func TestReleaseCommandDryRun(t *testing.T) {
 	projectRoot := createReleaseGitRepo(t, "develop")
-	if err := common.SaveProjectConfig(projectRoot, common.ProjectConfig{}); err != nil {
-		t.Fatalf("SaveProjectConfig failed: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, common.ProjectConfig{}), "SaveProjectConfig failed")
 
 	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
@@ -33,9 +31,7 @@ func TestReleaseCommandDryRun(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"release", "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := strings.TrimSpace(stdout.String()); !strings.HasPrefix(got, "1.4.2-rc.") {
 		t.Fatalf("unexpected stdout: %q", got)
@@ -69,9 +65,7 @@ func TestReleaseCommandDryRun(t *testing.T) {
 func TestReleaseCommandDryRunStableIncludesSyncAndPush(t *testing.T) {
 	projectRoot := createReleaseGitRepo(t, "main")
 	runGitCommand(t, projectRoot, "branch", "develop")
-	if err := common.SaveProjectConfig(projectRoot, common.ProjectConfig{}); err != nil {
-		t.Fatalf("SaveProjectConfig failed: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, common.ProjectConfig{}), "SaveProjectConfig failed")
 
 	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
@@ -88,9 +82,7 @@ func TestReleaseCommandDryRunStableIncludesSyncAndPush(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"release", "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := strings.TrimSpace(stdout.String()); got != "1.4.2" {
 		t.Fatalf("unexpected stdout: %q", got)
@@ -116,9 +108,7 @@ func TestReleaseCommandDryRunStableIncludesSyncAndPush(t *testing.T) {
 
 func TestReleaseCommandDryRunStableWithoutDevelopOnlyPushesMain(t *testing.T) {
 	projectRoot := createReleaseGitRepo(t, "main")
-	if err := common.SaveProjectConfig(projectRoot, common.ProjectConfig{}); err != nil {
-		t.Fatalf("SaveProjectConfig failed: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, common.ProjectConfig{}), "SaveProjectConfig failed")
 
 	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
@@ -135,9 +125,7 @@ func TestReleaseCommandDryRunStableWithoutDevelopOnlyPushesMain(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"release", "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := strings.TrimSpace(stdout.String()); got != "1.4.2" {
 		t.Fatalf("unexpected stdout: %q", got)
@@ -171,9 +159,7 @@ func TestReleaseCommandDryRunForceIncludesTagDeletionForStaleReleaseTag(t *testi
 	runGitCommand(t, projectRoot, "push", "-u", "origin", "main")
 	runGitCommand(t, projectRoot, "tag", "-a", "v1.4.2", "-m", "Release 1.4.2")
 	runGitCommand(t, projectRoot, "push", "origin", "v1.4.2")
-	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "README.tmp"), []byte("change\n"), 0o644); err != nil {
-		t.Fatalf("write temp change: %v", err)
-	}
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "README.tmp"), []byte("change\n"), 0o644), "write temp change")
 	runGitCommand(t, projectRoot, "add", "erun-devops/README.tmp")
 	runGitCommand(t, projectRoot, "commit", "-m", "advance head")
 	runGitCommand(t, projectRoot, "push", "origin", "main")
@@ -193,9 +179,7 @@ func TestReleaseCommandDryRunForceIncludesTagDeletionForStaleReleaseTag(t *testi
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"release", "--dry-run", "--force"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
 	for _, want := range []string{
@@ -211,9 +195,7 @@ func TestReleaseCommandDryRunForceIncludesTagDeletionForStaleReleaseTag(t *testi
 
 func TestReleaseCommandWritesOnlyVersionToStdoutDuringExecution(t *testing.T) {
 	projectRoot := createReleaseGitRepo(t, "develop")
-	if err := common.SaveProjectConfig(projectRoot, common.ProjectConfig{}); err != nil {
-		t.Fatalf("SaveProjectConfig failed: %v", err)
-	}
+	requireNoError(t, common.SaveProjectConfig(projectRoot, common.ProjectConfig{}), "SaveProjectConfig failed")
 	runGitCommand(t, projectRoot, "add", ".erun/config.yaml")
 	runGitCommand(t, projectRoot, "commit", "-m", "save config")
 
@@ -237,9 +219,7 @@ func TestReleaseCommandWritesOnlyVersionToStdoutDuringExecution(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"release"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := strings.TrimSpace(stdout.String()); !strings.HasPrefix(got, "1.4.2-rc.") || strings.Contains(got, "git-stdout") {
 		t.Fatalf("unexpected stdout: %q", got)
@@ -252,15 +232,9 @@ func TestReleaseCommandWritesOnlyVersionToStdoutDuringExecution(t *testing.T) {
 func TestReleaseCommandDryRunIncludesLinuxReleaseScripts(t *testing.T) {
 	projectRoot := createReleaseGitRepo(t, "develop")
 	linuxComponentDir := filepath.Join(projectRoot, "erun-devops", "linux", "erun-cli")
-	if err := os.MkdirAll(linuxComponentDir, 0o755); err != nil {
-		t.Fatalf("mkdir linux component dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(linuxComponentDir, "release.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
-		t.Fatalf("write release.sh: %v", err)
-	}
-	if err := common.SaveProjectConfig(projectRoot, common.ProjectConfig{}); err != nil {
-		t.Fatalf("SaveProjectConfig failed: %v", err)
-	}
+	requireNoError(t, os.MkdirAll(linuxComponentDir, 0o755), "mkdir linux component dir")
+	requireNoError(t, os.WriteFile(filepath.Join(linuxComponentDir, "release.sh"), []byte("#!/bin/sh\n"), 0o755), "write release.sh")
+	requireNoError(t, common.SaveProjectConfig(projectRoot, common.ProjectConfig{}), "SaveProjectConfig failed")
 
 	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
@@ -277,9 +251,7 @@ func TestReleaseCommandDryRunIncludesLinuxReleaseScripts(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"release", "--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
 	if common.LinuxPackageBuildsSupported() {
@@ -305,21 +277,11 @@ func createReleaseGitRepo(t *testing.T, branch string) string {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(releaseRoot, "VERSION"), []byte("1.4.2\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(releaseRoot, "k8s", "api", "Chart.yaml"), []byte("apiVersion: v2\nname: api\nversion: 0.1.0\nappVersion: 0.1.0\n"), 0o644); err != nil {
-		t.Fatalf("write Chart.yaml: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(releaseRoot, "docker", "api", "Dockerfile"), []byte("FROM alpine:3.22\n"), 0o644); err != nil {
-		t.Fatalf("write Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(releaseRoot, "docker", "base", "Dockerfile"), []byte("FROM alpine:3.22\n"), 0o644); err != nil {
-		t.Fatalf("write other Dockerfile: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(releaseRoot, "docker", "base", "VERSION"), []byte("9.9.9\n"), 0o644); err != nil {
-		t.Fatalf("write other VERSION: %v", err)
-	}
+	requireNoError(t, os.WriteFile(filepath.Join(releaseRoot, "VERSION"), []byte("1.4.2\n"), 0o644), "write VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(releaseRoot, "k8s", "api", "Chart.yaml"), []byte("apiVersion: v2\nname: api\nversion: 0.1.0\nappVersion: 0.1.0\n"), 0o644), "write Chart.yaml")
+	requireNoError(t, os.WriteFile(filepath.Join(releaseRoot, "docker", "api", "Dockerfile"), []byte("FROM alpine:3.22\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(releaseRoot, "docker", "base", "Dockerfile"), []byte("FROM alpine:3.22\n"), 0o644), "write other Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(releaseRoot, "docker", "base", "VERSION"), []byte("9.9.9\n"), 0o644), "write other VERSION")
 
 	runGitCommand(t, projectRoot, "init", "-b", branch)
 	runGitCommand(t, projectRoot, "config", "user.email", "codex@example.com")

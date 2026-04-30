@@ -96,6 +96,17 @@ func TestRuntimeDockerfileInstallsPinnedCodexCLI(t *testing.T) {
 	if !strings.Contains(content, "bubblewrap") {
 		t.Fatalf("expected runtime Dockerfile to install bubblewrap for Codex CLI sandboxing, got:\n%s", content)
 	}
+	for _, want := range []string{
+		"ARG AWS_CLI_VERSION=",
+		"aws_arch=x86_64",
+		"aws_arch=aarch64",
+		"https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}-${AWS_CLI_VERSION}.zip",
+		"/tmp/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected runtime Dockerfile to install pinned AWS CLI v2 with %q, got:\n%s", want, content)
+		}
+	}
 }
 
 func TestRuntimeEntrypointDisablesStrictModesForPVCBackedHome(t *testing.T) {
@@ -103,8 +114,15 @@ func TestRuntimeEntrypointDisablesStrictModesForPVCBackedHome(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read runtime entrypoint: %v", err)
 	}
-	if !strings.Contains(string(data), "StrictModes no") {
+	content := string(data)
+	if !strings.Contains(content, "StrictModes no") {
 		t.Fatalf("expected runtime entrypoint to disable sshd strict modes for PVC-backed home directory, got:\n%s", string(data))
+	}
+	if !strings.Contains(content, `sshd_port="17023"`) || !strings.Contains(content, `proxy_port="${ERUN_SSHD_PORT:-17022}"`) {
+		t.Fatalf("expected runtime entrypoint to run sshd behind the configured SSH proxy, got:\n%s", content)
+	}
+	if !strings.Contains(content, `erun activity ssh-proxy`) || !strings.Contains(content, `--listen "0.0.0.0:${proxy_port}"`) || !strings.Contains(content, `--target "127.0.0.1:${sshd_port}"`) {
+		t.Fatalf("expected runtime entrypoint to run the ERun activity proxy in front of sshd, got:\n%s", content)
 	}
 }
 
@@ -116,6 +134,9 @@ func TestRuntimeEntrypointConfiguresCodexMCP(t *testing.T) {
 	content := string(data)
 	for _, want := range []string{
 		`initialize_codex_config`,
+		`configure-codex-mcp.sh`,
+		`install_shell_profile_hook "${HOME}/.bashrc"`,
+		`install_shell_profile_hook "${HOME}/.profile"`,
 		`[mcp_servers.erun]`,
 		`url = "${mcp_url}"`,
 		`tool_timeout_sec = 600`,
@@ -123,6 +144,51 @@ func TestRuntimeEntrypointConfiguresCodexMCP(t *testing.T) {
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("expected runtime entrypoint to contain %q, got:\n%s", want, content)
+		}
+	}
+}
+
+func TestRuntimeEntrypointStopsCloudHostAfterIdle(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read runtime entrypoint: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		"stop_cloud_host()",
+		`runtime_cloud_instance_id()`,
+		`runtime_cloud_region()`,
+		`aws --cli-connect-timeout 5 --cli-read-timeout 20 ec2 stop-instances --region "${region}" --instance-ids "${instance_id}"`,
+		`kubectl --context "${ERUN_KUBERNETES_CONTEXT:-in-cluster}" --namespace "${namespace}" scale "deployment/${ERUN_RUNTIME_DEPLOYMENT:-erun-devops}" --replicas=0`,
+		`stop_cloud_host >>"${HOME}/.erun/idle-stop.log" 2>&1 || true`,
+		`http://169.254.169.254/latest/${path}`,
+		`imds_get "meta-data/instance-id"`,
+		`imds_get "dynamic/instance-identity/document"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected runtime entrypoint to contain %q, got:\n%s", want, content)
+		}
+	}
+}
+
+func TestRuntimeCodexWrapperPreservesForegroundTTY(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "codex-wrapper.sh"))
+	if err != nil {
+		t.Fatalf("read runtime Codex wrapper: %v", err)
+	}
+	content := string(data)
+	if strings.Contains(content, `codex-real "$@" &`) {
+		t.Fatalf("expected Codex wrapper to run codex-real in the foreground, got:\n%s", content)
+	}
+	for _, want := range []string{
+		`monitor_codex_log()`,
+		`script -q -f -e -c "${command}" "${log_file}"`,
+		`touch_codex --seen`,
+		`touch_codex --bytes "${delta}"`,
+		`codex-real "$@"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected Codex wrapper to contain %q, got:\n%s", want, content)
 		}
 	}
 }
@@ -146,9 +212,32 @@ name: ${environment}
 repopath: ${repo_dir}
 kubernetescontext: ${ERUN_KUBERNETES_CONTEXT:-in-cluster}
 ${env_remote_line}
+${env_managed_cloud_line}
+idle:
+  timeout: ${ERUN_IDLE_TIMEOUT:-5m0s}
+  workinghours: ${ERUN_IDLE_WORKING_HOURS:-08:00-20:00}
+  idletrafficbytes: ${ERUN_IDLE_TRAFFIC_BYTES:-0}
 EOF`
 	if !strings.Contains(content, envConfig) {
 		t.Fatalf("expected environment config heredoc to include env remote flag, got:\n%s", content)
+	}
+}
+
+func TestRuntimeEntrypointRecordsInteractiveShellActivity(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read runtime entrypoint: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		"initialize_shell_activity_config()",
+		"__erun_record_cli_activity()",
+		"PROMPT_COMMAND=\"__erun_record_cli_activity",
+		"exec /bin/bash --rcfile \"${shell_activity_rc}\" -i",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected runtime entrypoint to contain %q, got:\n%s", want, content)
+		}
 	}
 }
 

@@ -36,7 +36,7 @@ func TestSaveAndLoadERunConfig(t *testing.T) {
 		t.Fatalf("LoadERunConfig failed: %v", err)
 	}
 
-	if cfg != expected {
+	if !reflect.DeepEqual(cfg, expected) {
 		t.Fatalf("unexpected config: %+v", cfg)
 	}
 
@@ -251,38 +251,38 @@ func TestSaveTenantConfigErrors(t *testing.T) {
 
 	tenant := "tenant-a"
 	configPath, err := xdg.ConfigFile(filepath.Join(testConfigRoot, tenant, configFile))
-	if err != nil {
-		t.Fatalf("xdg path: %v", err)
-	}
+	requireNoError(t, err, "xdg path")
 	dir := filepath.Dir(configPath)
 
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatalf("cleanup: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
-		t.Fatalf("mkdir parent: %v", err)
-	}
-	if err := os.WriteFile(dir, []byte(""), 0o644); err != nil {
-		t.Fatalf("write blocker: %v", err)
-	}
-	if err := SaveTenantConfig(TenantConfig{Name: tenant}); !errors.Is(err, ErrNoUserDataFolder) {
-		t.Fatalf("expected ErrNoUserDataFolder, got %v", err)
-	}
+	blockConfigDirWithFile(t, dir)
+	requireErrorIs(t, SaveTenantConfig(TenantConfig{Name: tenant}), ErrNoUserDataFolder)
 
-	if err := os.Remove(dir); err != nil {
-		t.Fatalf("remove blocker: %v", err)
-	}
-	if err := os.MkdirAll(dir, 0o555); err != nil {
-		t.Fatalf("mkdir dir: %v", err)
-	}
+	makeConfigDirReadOnly(t, dir)
+	requireErrorIs(t, SaveTenantConfig(TenantConfig{Name: tenant}), ErrFailedToSaveConfig)
+}
+
+func blockConfigDirWithFile(t *testing.T, dir string) {
+	t.Helper()
+	requireNoError(t, os.RemoveAll(dir), "cleanup")
+	requireNoError(t, os.MkdirAll(filepath.Dir(dir), 0o755), "mkdir parent")
+	requireNoError(t, os.WriteFile(dir, []byte(""), 0o644), "write blocker")
+}
+
+func makeConfigDirReadOnly(t *testing.T, dir string) {
+	t.Helper()
+	requireNoError(t, os.Remove(dir), "remove blocker")
+	requireNoError(t, os.MkdirAll(dir, 0o555), "mkdir dir")
 	t.Cleanup(func() {
 		if err := os.Chmod(dir, 0o755); err != nil && !errors.Is(err, os.ErrNotExist) {
 			t.Fatalf("reset chmod: %v", err)
 		}
 	})
+}
 
-	if err := SaveTenantConfig(TenantConfig{Name: tenant}); !errors.Is(err, ErrFailedToSaveConfig) {
-		t.Fatalf("expected ErrFailedToSaveConfig, got %v", err)
+func requireErrorIs(t *testing.T, err, target error) {
+	t.Helper()
+	if !errors.Is(err, target) {
+		t.Fatalf("expected %v, got %v", target, err)
 	}
 }
 
@@ -464,39 +464,14 @@ func TestSaveEnvConfigErrors(t *testing.T) {
 	setupConfigTestXDGConfigHome(t)
 
 	path, err := xdg.ConfigFile(filepath.Join(testConfigRoot, "tenant-a", "dev", configFile))
-	if err != nil {
-		t.Fatalf("xdg path: %v", err)
-	}
+	requireNoError(t, err, "xdg path")
 	dir := filepath.Dir(path)
 
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatalf("cleanup: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
-		t.Fatalf("mkdir parent: %v", err)
-	}
-	if err := os.WriteFile(dir, []byte(""), 0o644); err != nil {
-		t.Fatalf("write blocker: %v", err)
-	}
-	if err := SaveEnvConfig("tenant-a", EnvConfig{Name: "dev"}); !errors.Is(err, ErrNoUserDataFolder) {
-		t.Fatalf("expected ErrNoUserDataFolder, got %v", err)
-	}
+	blockConfigDirWithFile(t, dir)
+	requireErrorIs(t, SaveEnvConfig("tenant-a", EnvConfig{Name: "dev"}), ErrNoUserDataFolder)
 
-	if err := os.Remove(dir); err != nil {
-		t.Fatalf("remove blocker: %v", err)
-	}
-	if err := os.MkdirAll(dir, 0o555); err != nil {
-		t.Fatalf("mkdir dir: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chmod(dir, 0o755); err != nil && !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("reset chmod: %v", err)
-		}
-	})
-
-	if err := SaveEnvConfig("tenant-a", EnvConfig{Name: "dev"}); !errors.Is(err, ErrFailedToSaveConfig) {
-		t.Fatalf("expected ErrFailedToSaveConfig, got %v", err)
-	}
+	makeConfigDirReadOnly(t, dir)
+	requireErrorIs(t, SaveEnvConfig("tenant-a", EnvConfig{Name: "dev"}), ErrFailedToSaveConfig)
 }
 
 func TestFindProjectRoot(t *testing.T) {

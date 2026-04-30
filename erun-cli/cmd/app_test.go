@@ -21,9 +21,7 @@ func TestAppCommandLaunchesDesktopApp(t *testing.T) {
 	cmd.SetErr(buf)
 	cmd.SetArgs(nil)
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if !called {
 		t.Fatal("expected launcher to be called")
 	}
@@ -40,9 +38,7 @@ func TestAppCommandDryRunSkipsLaunch(t *testing.T) {
 	cmd.SetErr(buf)
 	cmd.SetArgs([]string{"--dry-run"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if called {
 		t.Fatal("expected launcher not to be called in dry-run mode")
 	}

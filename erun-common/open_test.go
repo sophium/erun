@@ -119,31 +119,13 @@ func TestOpenResolveIgnoresLegacyTenantRemoteFlagForLocalEnvironment(t *testing.
 }
 
 func TestOpenResolveUsesCurrentDirectoryTenantBeforeDefault(t *testing.T) {
-	originalDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := os.Chdir(originalDir); err != nil {
-			t.Fatalf("return to original dir: %v", err)
-		}
-	})
+	restoreWorkingDirAfterTest(t)
 
 	repoRoot := filepath.Join(t.TempDir(), "tenant-a")
 	subDir := filepath.Join(repoRoot, "nested")
 	defaultRepo := filepath.Join(t.TempDir(), "tenant-b")
-	if err := os.MkdirAll(filepath.Join(repoRoot, ".git"), 0o755); err != nil {
-		t.Fatalf("mkdir .git: %v", err)
-	}
-	if err := os.MkdirAll(subDir, 0o755); err != nil {
-		t.Fatalf("mkdir nested dir: %v", err)
-	}
-	if err := os.MkdirAll(defaultRepo, 0o755); err != nil {
-		t.Fatalf("mkdir default repo: %v", err)
-	}
-	if err := os.Chdir(subDir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	mkdirAllForTest(t, filepath.Join(repoRoot, ".git"), subDir, defaultRepo)
+	requireNoError(t, os.Chdir(subDir), "chdir")
 
 	store := openStore{
 		toolConfig: ERunConfig{DefaultTenant: "tenant-b"},
@@ -161,15 +143,9 @@ func TestOpenResolveUsesCurrentDirectoryTenantBeforeDefault(t *testing.T) {
 		UseDefaultTenant:      true,
 		UseDefaultEnvironment: true,
 	})
-	if err != nil {
-		t.Fatalf("Resolve failed: %v", err)
-	}
-	if result.Tenant != "tenant-a" || result.Environment != "dev" {
-		t.Fatalf("expected current directory tenant to win, got %+v", result)
-	}
-	if result.LocalPorts.RangeStart != 17000 || result.LocalPorts.SSH != 17022 {
-		t.Fatalf("unexpected local ports: %+v", result.LocalPorts)
-	}
+	requireNoError(t, err, "Resolve failed")
+	requireCondition(t, result.Tenant == "tenant-a" && result.Environment == "dev", "expected current directory tenant to win, got %+v", result)
+	requireCondition(t, result.LocalPorts.RangeStart == 17000 && result.LocalPorts.SSH == 17022, "unexpected local ports: %+v", result.LocalPorts)
 }
 
 func TestOpenResolveAssignsEnvironmentLocalPortsFromSortedTenantEnvironmentOrder(t *testing.T) {
@@ -486,12 +462,18 @@ func TestRemoteShellScriptSeedsConfigsAndCloneCommand(t *testing.T) {
 		Title:             "tenant-a-local",
 		KubernetesContext: "in-cluster",
 	}, false)
-	if err != nil {
-		t.Fatalf("buildRemoteShellScript failed: %v", err)
-	}
+	requireNoError(t, err, "buildRemoteShellScript failed")
 
 	remoteWorkdir := "/home/erun/git/erun"
 
+	requireRemoteShellScriptPatterns(t, script, remoteWorkdir)
+	requireCondition(t, !strings.Contains(script, repoDir), "did not expect host repo path %q in remote bootstrap script, got:\n%s", repoDir, script)
+	requireCondition(t, !strings.Contains(script, "/etc/bash.bashrc"), "did not expect remote rcfile to source system bashrc twice, got:\n%s", script)
+	requireRemoteShellSeededConfigs(t, script, remoteWorkdir)
+}
+
+func requireRemoteShellScriptPatterns(t *testing.T, script, remoteWorkdir string) {
+	t.Helper()
 	for _, pattern := range []string{
 		"rm -f \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/keys\" \"$HOME/.ssh/config\"",
 		"old_umask=\"$(umask)\"",
@@ -522,43 +504,26 @@ func TestRemoteShellScriptSeedsConfigsAndCloneCommand(t *testing.T) {
 		fmt.Sprintf("if [ -e \"$request_file\" ]; then rm -f \"$request_file\"; exit %d; fi", remoteShellReattachDeployExitCode),
 		"exit \"$shell_status\"",
 	} {
-		if !strings.Contains(script, pattern) {
-			t.Fatalf("expected script to contain %q, got:\n%s", pattern, script)
-		}
+		requireStringContains(t, script, pattern, "expected script pattern")
 	}
-	if strings.Contains(script, repoDir) {
-		t.Fatalf("did not expect host repo path %q in remote bootstrap script, got:\n%s", repoDir, script)
-	}
-	if strings.Contains(script, "/etc/bash.bashrc") {
-		t.Fatalf("did not expect remote rcfile to source system bashrc twice, got:\n%s", script)
-	}
+}
 
+func requireRemoteShellSeededConfigs(t *testing.T, script, remoteWorkdir string) {
+	t.Helper()
 	toolConfigBody := extractHeredoc(t, script, `cat > "$config_home/erun/config.yaml" <<'EOF'`)
 	var toolConfig ERunConfig
-	if err := yaml.Unmarshal([]byte(toolConfigBody), &toolConfig); err != nil {
-		t.Fatalf("expected tool config heredoc to be valid yaml, got %v\n%s", err, toolConfigBody)
-	}
-	if toolConfig.DefaultTenant != "tenant-a" {
-		t.Fatalf("unexpected tool config: %+v", toolConfig)
-	}
+	requireNoError(t, yaml.Unmarshal([]byte(toolConfigBody), &toolConfig), "expected tool config heredoc to be valid yaml")
+	requireEqual(t, toolConfig.DefaultTenant, "tenant-a", "tool config default tenant")
 
 	tenantConfigBody := extractHeredoc(t, script, `cat > "$config_home/erun/tenant-a/config.yaml" <<'EOF'`)
 	var tenantConfig TenantConfig
-	if err := yaml.Unmarshal([]byte(tenantConfigBody), &tenantConfig); err != nil {
-		t.Fatalf("expected tenant config heredoc to be valid yaml, got %v\n%s", err, tenantConfigBody)
-	}
-	if tenantConfig.ProjectRoot != remoteWorkdir || tenantConfig.DefaultEnvironment != "local" {
-		t.Fatalf("unexpected tenant config: %+v", tenantConfig)
-	}
+	requireNoError(t, yaml.Unmarshal([]byte(tenantConfigBody), &tenantConfig), "expected tenant config heredoc to be valid yaml")
+	requireCondition(t, tenantConfig.ProjectRoot == remoteWorkdir && tenantConfig.DefaultEnvironment == "local", "unexpected tenant config: %+v", tenantConfig)
 
 	envConfigBody := extractHeredoc(t, script, `cat > "$config_home/erun/tenant-a/local/config.yaml" <<'EOF'`)
 	var envConfig EnvConfig
-	if err := yaml.Unmarshal([]byte(envConfigBody), &envConfig); err != nil {
-		t.Fatalf("expected env config heredoc to be valid yaml, got %v\n%s", err, envConfigBody)
-	}
-	if envConfig.RepoPath != remoteWorkdir || envConfig.KubernetesContext != "in-cluster" {
-		t.Fatalf("unexpected env config: %+v", envConfig)
-	}
+	requireNoError(t, yaml.Unmarshal([]byte(envConfigBody), &envConfig), "expected env config heredoc to be valid yaml")
+	requireCondition(t, envConfig.RepoPath == remoteWorkdir && envConfig.KubernetesContext == "in-cluster", "unexpected env config: %+v", envConfig)
 }
 
 func TestRemoteShellScriptUsesXDGConfigHomeWhenPresent(t *testing.T) {
@@ -770,7 +735,7 @@ func TestPreviewShellLaunchRedactsHostCredentialContents(t *testing.T) {
 	if !strings.Contains(strings.Join(preview.WaitArgs, " "), "wait --for=condition=Available --timeout 2m0s deployment/tenant-a-devops") {
 		t.Fatalf("unexpected wait args: %#v", preview.WaitArgs)
 	}
-	if !strings.Contains(strings.Join(preview.ExecArgs, " "), "exec -it -c tenant-a-devops deployment/tenant-a-devops -- /bin/sh -lc") {
+	if !strings.Contains(strings.Join(preview.ExecArgs, " "), "exec -it deployment/tenant-a-devops -- /bin/sh -lc") {
 		t.Fatalf("unexpected exec args: %#v", preview.ExecArgs)
 	}
 	if strings.Contains(preview.Script, "PRIVATE KEY") {

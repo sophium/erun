@@ -1,6 +1,26 @@
 {{- $worktreeStorage := default "host" .Values.worktreeStorage -}}
 {{- $worktreeRepoName := required "worktreeRepoName is required" .Values.worktreeRepoName -}}
 {{- $worktreePath := printf "/home/erun/git/%s" $worktreeRepoName -}}
+{{- $mcpPort := default 17000 .Values.mcpPort -}}
+{{- $sshPort := default 17022 .Values.sshPort -}}
+{{- $idle := default dict .Values.idle -}}
+{{- $idleTimeout := default "5m0s" $idle.timeout -}}
+{{- $idleWorkingHours := default "08:00-20:00" $idle.workingHours -}}
+{{- $idleTrafficBytes := default 0 $idle.trafficBytes -}}
+{{- $runtime := default dict .Values.runtime -}}
+{{- $runtimeResources := default dict $runtime.resources -}}
+{{- $runtimeLimits := default dict $runtimeResources.limits -}}
+{{- $runtimeRequests := default dict $runtimeResources.requests -}}
+{{- $runtimeCPU := default "4" $runtimeLimits.cpu -}}
+{{- $runtimeMemory := default "8916Mi" $runtimeLimits.memory -}}
+{{- $runtimeRequestCPU := default "0.25" $runtimeRequests.cpu -}}
+{{- $runtimeRequestMemory := default "1024Mi" $runtimeRequests.memory -}}
+{{- $managedCloud := default false .Values.managedCloud -}}
+{{- $cloudContext := default dict .Values.cloudContext -}}
+{{- $cloudContextName := default "" $cloudContext.name -}}
+{{- $cloudProviderAlias := default "" $cloudContext.providerAlias -}}
+{{- $cloudRegion := default "" $cloudContext.region -}}
+{{- $cloudInstanceID := default "" $cloudContext.instanceId -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -144,6 +164,16 @@ spec:
               value: {{ $worktreePath | quote }}
             - name: ERUN_REPO_REMOTE
               value: {{ if eq $worktreeStorage "pvc" }}"true"{{ else }}"false"{{ end }}
+            - name: ERUN_CLOUD_ENVIRONMENT
+              value: {{ if $managedCloud }}"true"{{ else }}"false"{{ end }}
+            - name: ERUN_CLOUD_CONTEXT_NAME
+              value: {{ $cloudContextName | quote }}
+            - name: ERUN_CLOUD_PROVIDER_ALIAS
+              value: {{ $cloudProviderAlias | quote }}
+            - name: ERUN_CLOUD_REGION
+              value: {{ $cloudRegion | quote }}
+            - name: ERUN_CLOUD_INSTANCE_ID
+              value: {{ $cloudInstanceID | quote }}
             - name: ERUN_KUBERNETES_CONTEXT
               value: in-cluster
             - name: ERUN_TENANT
@@ -152,6 +182,16 @@ spec:
               value: {{ required "environment is required" .Values.environment | quote }}
             - name: ERUN_SSHD_ENABLED
               value: {{ if .Values.sshdEnabled }}"true"{{ else }}"false"{{ end }}
+            - name: ERUN_MCP_PORT
+              value: {{ $mcpPort | quote }}
+            - name: ERUN_SSHD_PORT
+              value: {{ $sshPort | quote }}
+            - name: ERUN_IDLE_TIMEOUT
+              value: {{ $idleTimeout | quote }}
+            - name: ERUN_IDLE_WORKING_HOURS
+              value: {{ $idleWorkingHours | quote }}
+            - name: ERUN_IDLE_TRAFFIC_BYTES
+              value: {{ $idleTrafficBytes | quote }}
             - name: ERUN_NAMESPACE
               valueFrom:
                 fieldRef:
@@ -160,17 +200,17 @@ spec:
             runAsUser: 1000
             runAsGroup: 1000
           ports:
-            - containerPort: 17000
+            - containerPort: {{ $mcpPort }}
               name: mcp
-            - containerPort: 2222
+            - containerPort: {{ $sshPort }}
               name: ssh
           resources:
             limits:
-              cpu: "4"
-              memory: "8916Mi"
+              cpu: {{ $runtimeCPU | quote }}
+              memory: {{ $runtimeMemory | quote }}
             requests:
-              cpu: "0.25"
-              memory: "1024Mi"
+              cpu: {{ $runtimeRequestCPU | quote }}
+              memory: {{ $runtimeRequestMemory | quote }}
           volumeMounts:
             - name: erun-home
               mountPath: /home/erun

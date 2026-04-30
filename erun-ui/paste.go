@@ -11,7 +11,7 @@ import (
 	eruncommon "github.com/sophium/erun/erun-common"
 )
 
-const pastedImageDir = ".codex/attachments"
+const pastedImageDir = "/home/erun/.codex/attachments"
 
 type pastedImageSaveParams struct {
 	Result   eruncommon.OpenResult
@@ -30,7 +30,7 @@ func savePastedImageToRuntime(params pastedImageSaveParams) (string, error) {
 		return "", err
 	}
 
-	remoteDir := pastedImageRemoteDir(params.Result)
+	remoteDir := pastedImageRemoteDir()
 	remotePath := path.Join(remoteDir, pastedImageFilename(time.Now().UTC(), extension))
 	name, args, _ := buildPastedImageCopyCommand(params.Result, remoteDir, remotePath)
 
@@ -73,9 +73,8 @@ func buildPastedImageCopyCommand(result eruncommon.OpenResult, remoteDir, remote
 	return "kubectl", args, script
 }
 
-func pastedImageRemoteDir(result eruncommon.OpenResult) string {
-	shellParams := eruncommon.ShellLaunchParamsFromResult(result)
-	return path.Join(eruncommon.RemoteShellWorktreePath(shellParams), pastedImageDir)
+func pastedImageRemoteDir() string {
+	return pastedImageDir
 }
 
 func pastedImageFilename(now time.Time, extension string) string {

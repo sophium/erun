@@ -21,60 +21,74 @@ type DoctorInput struct {
 
 func doctorTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DoctorInput) (*mcp.CallToolResult, CommandOutput, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input DoctorInput) (*mcp.CallToolResult, CommandOutput, error) {
-		output, err := runRuntimeCommand(runtime.Context, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
-			target, err := resolveDoctorOpenResult(runtime, input)
-			if err != nil {
-				return err
-			}
-			req := eruncommon.ShellLaunchParamsFromResult(target)
-			inspection, err := eruncommon.RunDoctorInspection(runCtx, nil, req)
-			if err != nil {
-				return err
-			}
-			if !runCtx.DryRun {
-				if _, err := fmt.Fprintf(runCtx.Stdout, "Target: %s/%s\n", target.Tenant, target.Environment); err != nil {
-					return err
-				}
-				if stdout := strings.TrimSpace(inspection.Stdout); stdout != "" {
-					if _, err := fmt.Fprintln(runCtx.Stdout, stdout); err != nil {
-						return err
-					}
-				}
-				if stderr := strings.TrimSpace(inspection.Stderr); stderr != "" {
-					if _, err := fmt.Fprintln(runCtx.Stderr, stderr); err != nil {
-						return err
-					}
-				}
-			}
-
-			for _, action := range doctorActionsFromInput(input) {
-				if !runCtx.DryRun {
-					if _, err := fmt.Fprintf(runCtx.Stdout, "Running: %s\n", eruncommon.DoctorActionDescription(action)); err != nil {
-						return err
-					}
-				}
-				output, err := eruncommon.RunDoctorAction(runCtx, nil, req, action)
-				if err != nil {
-					return err
-				}
-				if runCtx.DryRun {
-					continue
-				}
-				if stdout := strings.TrimSpace(output.Stdout); stdout != "" {
-					if _, err := fmt.Fprintln(runCtx.Stdout, stdout); err != nil {
-						return err
-					}
-				}
-				if stderr := strings.TrimSpace(output.Stderr); stderr != "" {
-					if _, err := fmt.Fprintln(runCtx.Stderr, stderr); err != nil {
-						return err
-					}
-				}
-			}
-			return nil
+		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, _ string) error {
+			return runDoctorToolCommand(runtime, input, runCtx)
 		})
 		return nil, output, err
 	}
+}
+
+func runDoctorToolCommand(runtime RuntimeConfig, input DoctorInput, runCtx eruncommon.Context) error {
+	target, err := resolveDoctorOpenResult(runtime, input)
+	if err != nil {
+		return err
+	}
+	req := eruncommon.ShellLaunchParamsFromResult(target)
+	if err := writeDoctorInspection(runCtx, target, req); err != nil {
+		return err
+	}
+	return runDoctorToolActions(runCtx, input, req)
+}
+
+func writeDoctorInspection(runCtx eruncommon.Context, target eruncommon.OpenResult, req eruncommon.ShellLaunchParams) error {
+	inspection, err := eruncommon.RunDoctorInspection(runCtx, nil, req)
+	if err != nil || runCtx.DryRun {
+		return err
+	}
+	if _, err := fmt.Fprintf(runCtx.Stdout, "Target: %s/%s\n", target.Tenant, target.Environment); err != nil {
+		return err
+	}
+	return writeDoctorOutput(runCtx, inspection.Stdout, inspection.Stderr)
+}
+
+func runDoctorToolActions(runCtx eruncommon.Context, input DoctorInput, req eruncommon.ShellLaunchParams) error {
+	for _, action := range doctorActionsFromInput(input) {
+		if err := writeDoctorAction(runCtx, action); err != nil {
+			return err
+		}
+		output, err := eruncommon.RunDoctorAction(runCtx, nil, req, action)
+		if err != nil {
+			return err
+		}
+		if !runCtx.DryRun {
+			if err := writeDoctorOutput(runCtx, output.Stdout, output.Stderr); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func writeDoctorAction(runCtx eruncommon.Context, action eruncommon.DoctorAction) error {
+	if runCtx.DryRun {
+		return nil
+	}
+	_, err := fmt.Fprintf(runCtx.Stdout, "Running: %s\n", eruncommon.DoctorActionDescription(action))
+	return err
+}
+
+func writeDoctorOutput(runCtx eruncommon.Context, stdout, stderr string) error {
+	if trimmed := strings.TrimSpace(stdout); trimmed != "" {
+		if _, err := fmt.Fprintln(runCtx.Stdout, trimmed); err != nil {
+			return err
+		}
+	}
+	if trimmed := strings.TrimSpace(stderr); trimmed != "" {
+		if _, err := fmt.Fprintln(runCtx.Stderr, trimmed); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func resolveDoctorOpenResult(runtime RuntimeConfig, input DoctorInput) (eruncommon.OpenResult, error) {

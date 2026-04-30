@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+
+	common "github.com/sophium/erun/erun-common"
 )
 
 func TestBuildInfoDefaults(t *testing.T) {
@@ -25,9 +28,7 @@ func TestVersionCommandOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	if err := os.Chdir(workdir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	requireNoError(t, os.Chdir(workdir), "chdir")
 	t.Cleanup(func() {
 		_ = os.Chdir(prevWD)
 	})
@@ -39,9 +40,7 @@ func TestVersionCommandOutput(t *testing.T) {
 	cmd.SetArgs([]string{"version"})
 
 	setBuildInfo("1.2.3", "abcdef", "2024-01-01")
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := buf.String(); got != "erun 1.2.3 (abcdef built 2024-01-01)\n" {
 		t.Fatalf("unexpected output: %q", got)
@@ -49,9 +48,7 @@ func TestVersionCommandOutput(t *testing.T) {
 
 	buf.Reset()
 	setBuildInfo("1.2.3", "", "")
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if got := buf.String(); got != "erun 1.2.3\n" {
 		t.Fatalf("unexpected tail-less output: %q", got)
 	}
@@ -64,9 +61,7 @@ func TestVersionCommandPrefersVersionFileInCurrentDirectory(t *testing.T) {
 	})
 
 	workdir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("9.9.9\n"), 0o644); err != nil {
-		t.Fatalf("write VERSION: %v", err)
-	}
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "VERSION"), []byte("9.9.9\n"), 0o644), "write VERSION")
 
 	cmd := newTestRootCmd(testRootDeps{})
 	buf := new(bytes.Buffer)
@@ -78,19 +73,95 @@ func TestVersionCommandPrefersVersionFileInCurrentDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	if err := os.Chdir(workdir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	requireNoError(t, os.Chdir(workdir), "chdir")
 	t.Cleanup(func() {
 		_ = os.Chdir(prevWD)
 	})
 
 	setBuildInfo("1.2.3", "abcdef", "2024-01-01")
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := buf.String(); got != "erun 9.9.9 (abcdef built 2024-01-01)\n" {
+		t.Fatalf("unexpected output: %q", got)
+	}
+}
+
+func TestVersionCommandPrintsRegistryVersions(t *testing.T) {
+	prevV, prevC, prevD := buildInfo()
+	t.Cleanup(func() {
+		setBuildInfo(prevV, prevC, prevD)
+	})
+
+	workdir := t.TempDir()
+	prevWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	requireNoError(t, os.Chdir(workdir), "chdir")
+	t.Cleanup(func() {
+		_ = os.Chdir(prevWD)
+	})
+
+	cmd := newTestRootCmd(testRootDeps{
+		ResolveRuntimeRegistryVersions: func(context.Context) (common.RuntimeRegistryVersions, error) {
+			return common.RuntimeRegistryVersions{
+				Image:          "erunpaas/erun-devops",
+				LatestStable:   "1.0.50",
+				LatestSnapshot: "1.0.51-snapshot-20260424100000",
+			}, nil
+		},
+	})
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"version"})
+
+	setBuildInfo("1.2.3", "abcdef", "2024-01-01")
+	requireNoError(t, cmd.Execute(), "Execute failed")
+
+	want := "erun 1.2.3 (abcdef built 2024-01-01)\n" +
+		"latest stable: 1.0.50\n" +
+		"latest snapshot: 1.0.51-snapshot-20260424100000\n"
+	if got := buf.String(); got != want {
+		t.Fatalf("unexpected output: %q", got)
+	}
+}
+
+func TestVersionCommandCanSkipRegistryVersions(t *testing.T) {
+	prevV, prevC, prevD := buildInfo()
+	t.Cleanup(func() {
+		setBuildInfo(prevV, prevC, prevD)
+	})
+
+	workdir := t.TempDir()
+	prevWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	requireNoError(t, os.Chdir(workdir), "chdir")
+	t.Cleanup(func() {
+		_ = os.Chdir(prevWD)
+	})
+
+	called := false
+	cmd := newTestRootCmd(testRootDeps{
+		ResolveRuntimeRegistryVersions: func(context.Context) (common.RuntimeRegistryVersions, error) {
+			called = true
+			return common.RuntimeRegistryVersions{LatestStable: "1.0.50"}, nil
+		},
+	})
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetErr(buf)
+	cmd.SetArgs([]string{"version", "--no-registry"})
+
+	setBuildInfo("1.2.3", "", "")
+	requireNoError(t, cmd.Execute(), "Execute failed")
+
+	if called {
+		t.Fatal("registry resolver was called")
+	}
+	if got := buf.String(); got != "erun 1.2.3\n" {
 		t.Fatalf("unexpected output: %q", got)
 	}
 }
@@ -101,9 +172,7 @@ func TestVersionCommandDryRunPrintsTraceWithoutOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	if err := os.Chdir(workdir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	requireNoError(t, os.Chdir(workdir), "chdir")
 	t.Cleanup(func() {
 		_ = os.Chdir(prevWD)
 	})
@@ -115,9 +184,7 @@ func TestVersionCommandDryRunPrintsTraceWithoutOutput(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"version", "--dry-run", "-v"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := stdout.String(); got == "" {
 		t.Fatalf("expected version output during dry-run, got %q", got)
@@ -138,9 +205,7 @@ func TestVersionCommandTimeFlagPrintsElapsedTimeToStderr(t *testing.T) {
 	if err != nil {
 		t.Fatalf("getwd: %v", err)
 	}
-	if err := os.Chdir(workdir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
+	requireNoError(t, os.Chdir(workdir), "chdir")
 	t.Cleanup(func() {
 		_ = os.Chdir(prevWD)
 	})
@@ -153,9 +218,7 @@ func TestVersionCommandTimeFlagPrintsElapsedTimeToStderr(t *testing.T) {
 	cmd.SetArgs([]string{"version", "--time"})
 
 	setBuildInfo("1.2.3", "", "")
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := stdout.String(); got != "erun 1.2.3\n" {
 		t.Fatalf("unexpected stdout: %q", got)

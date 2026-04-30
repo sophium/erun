@@ -18,10 +18,13 @@ func TestExecDiffPrintsRawGitDiff(t *testing.T) {
 			if dir != "/tmp/project" {
 				t.Fatalf("unexpected git dir: %q", dir)
 			}
-			if strings.Join(args, " ") != "diff --no-color --no-ext-diff" {
+			switch strings.Join(args, " ") {
+			case "diff --no-color --no-ext-diff":
+				_, _ = io.WriteString(stdout, "diff --git a/a.txt b/a.txt\n")
+			case "ls-files --others --exclude-standard -z":
+			default:
 				t.Fatalf("unexpected git args: %+v", args)
 			}
-			_, _ = io.WriteString(stdout, "diff --git a/a.txt b/a.txt\n")
 			return nil
 		},
 	})
@@ -31,9 +34,7 @@ func TestExecDiffPrintsRawGitDiff(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"exec", "diff"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 	if stdout.String() != "diff --git a/a.txt b/a.txt\n" {
 		t.Fatalf("unexpected stdout: %q", stdout.String())
 	}
@@ -69,9 +70,7 @@ func TestExecRawRunsCommandFromProjectRootWithDefaultTrace(t *testing.T) {
 	cmd.SetErr(stderr)
 	cmd.SetArgs([]string{"exec", "raw", "echo", "--token", "secret-value", "done"})
 
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute failed: %v", err)
-	}
+	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if gotDir != "/tmp/project" || gotName != "echo" || strings.Join(gotArgs, " ") != "--token secret-value done" {
 		t.Fatalf("unexpected raw command call: dir=%q name=%q args=%+v", gotDir, gotName, gotArgs)

@@ -1,17 +1,22 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 type terminalSession interface {
 	io.ReadWriteCloser
 	Resize(cols, rows int) error
+	Wait() error
 }
 
 type startTerminalSessionParams struct {
@@ -62,6 +67,16 @@ func resolveCLIExecutableFromPath(goos, appExecutable, executableName string) st
 	return ""
 }
 
+func runIDECommand(ctx context.Context, params startTerminalSessionParams) (string, error) {
+	cmd := exec.CommandContext(ctx, params.Executable, params.Args...)
+	cmd.Dir = resolveTerminalStartDir(params.Dir)
+	if len(params.Env) > 0 {
+		cmd.Env = append(os.Environ(), params.Env...)
+	}
+	output, err := cmd.CombinedOutput()
+	return string(output), err
+}
+
 func buildOpenCommand(cliPath, tenant, environment string) string {
 	if runtime.GOOS == "windows" {
 		return "& " + powerShellQuote(cliPath) + " open " + powerShellQuote(strings.TrimSpace(tenant)) + " " + powerShellQuote(strings.TrimSpace(environment))
@@ -69,8 +84,112 @@ func buildOpenCommand(cliPath, tenant, environment string) string {
 	return shellQuote(cliPath) + " open " + shellQuote(strings.TrimSpace(tenant)) + " " + shellQuote(strings.TrimSpace(environment))
 }
 
-func buildOpenArgs(tenant, environment string) []string {
-	return []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment)}
+func buildOpenArgs(tenant, environment string, debug ...bool) []string {
+	return erunArgs(debugEnabled(debug...), "open", strings.TrimSpace(tenant), strings.TrimSpace(environment))
+}
+
+func buildOpenIDEArgs(selection uiSelection, ide string) []string {
+	args := erunArgs(selection.Debug, "open", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
+	switch strings.TrimSpace(ide) {
+	case "vscode":
+		return append(args, "--vscode")
+	case "intellij":
+		return append(args, "--intellij")
+	default:
+		return args
+	}
+}
+
+func buildSSHDInitArgs(selection uiSelection) []string {
+	return erunArgs(selection.Debug, "sshd", "init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
+}
+
+func buildDoctorArgs(selection uiSelection) []string {
+	return erunArgs(selection.Debug, "doctor", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
+}
+
+func buildOpenNoShellArgs(tenant, environment string) []string {
+	return []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment), "--no-shell", "--no-alias-prompt"}
+}
+
+func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncommon.OpenResult) error {
+	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
+	cmd := exec.CommandContext(ctx, cliPath, args...)
+	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(string(output))
+	if detail == "" {
+		return fmt.Errorf("activate MCP port-forward: %w", err)
+	}
+	return fmt.Errorf("activate MCP port-forward: %w: %s", err, detail)
+}
+
+func buildInitArgs(selection uiSelection) []string {
+	args := erunArgs(selection.Debug, "init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment), "--remote")
+	if version := strings.TrimSpace(selection.Version); version != "" {
+		args = append(args, "--version", version)
+	}
+	if runtimeImage := strings.TrimSpace(selection.RuntimeImage); runtimeImage != "" {
+		args = append(args, "--runtime-image", runtimeImage)
+	}
+	if runtimeCPU := strings.TrimSpace(selection.RuntimeCPU); runtimeCPU != "" {
+		args = append(args, "--runtime-cpu", runtimeCPU)
+	}
+	if runtimeMemory := strings.TrimSpace(selection.RuntimeMemory); runtimeMemory != "" {
+		args = append(args, "--runtime-memory", runtimeMemory)
+	}
+	if kubernetesContext := strings.TrimSpace(selection.KubernetesContext); kubernetesContext != "" {
+		args = append(args, "--kubernetes-context", kubernetesContext)
+	}
+	if containerRegistry := strings.TrimSpace(selection.ContainerRegistry); containerRegistry != "" {
+		args = append(args, "--container-registry", containerRegistry)
+	}
+	args = append(
+		args,
+		"--set-default-tenant="+boolArg(selection.SetDefaultTenant),
+		"--confirm-environment=true",
+	)
+	if selection.NoGit {
+		args = append(args, "--no-git")
+	}
+	if selection.Bootstrap {
+		args = append(args, "--bootstrap")
+	}
+	return args
+}
+
+func buildDeployArgs(selection uiSelection) []string {
+	args := erunArgs(selection.Debug, "open", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment), "--no-shell", "--no-alias-prompt")
+	version := selection.Version
+	runtimeImage := selection.RuntimeImage
+	if version = strings.TrimSpace(version); version != "" {
+		args = append(args, "--version", version)
+	}
+	if runtimeImage = strings.TrimSpace(runtimeImage); runtimeImage != "" {
+		args = append(args, "--runtime-image", runtimeImage)
+	}
+	return args
+}
+
+func erunArgs(debug bool, args ...string) []string {
+	if !debug {
+		return args
+	}
+	result := make([]string, 0, len(args)+1)
+	result = append(result, "-vv")
+	result = append(result, args...)
+	return result
+}
+
+func debugEnabled(values ...bool) bool {
+	return len(values) > 0 && values[0]
+}
+
+func buildCloudInitAWSArgs() []string {
+	return []string{"cloud", "init", "aws"}
 }
 
 func resolveTerminalStartDir(preferred string) string {
@@ -97,10 +216,29 @@ func resolveTerminalStartDir(preferred string) string {
 	return "."
 }
 
+func resolveDeployStartDir(findProjectRoot eruncommon.ProjectFinderFunc, result eruncommon.OpenResult) string {
+	if findProjectRoot != nil {
+		if _, projectRoot, err := findProjectRoot(); err == nil && strings.TrimSpace(projectRoot) != "" {
+			return resolveTerminalStartDir(projectRoot)
+		}
+	}
+	if result.RemoteRepo() {
+		return resolveTerminalStartDir("")
+	}
+	return resolveTerminalStartDir(result.RepoPath)
+}
+
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
 func powerShellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+func boolArg(value bool) string {
+	if value {
+		return "true"
+	}
+	return "false"
 }

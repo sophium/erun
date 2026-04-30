@@ -1,0 +1,7 @@
+@theme inline {
+  --color-terminal: var(--terminal-background);
+  --color-diff-add: var(--diff-add);
+  --color-diff-add-foreground: var(--diff-add-foreground);
+  --color-diff-delete: var(--diff-delete);
+  --color-diff-delete-foreground: var(--diff-delete-foreground);
+}

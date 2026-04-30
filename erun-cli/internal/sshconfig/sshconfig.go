@@ -56,36 +56,58 @@ func UpsertConfig(path string, entry HostEntry) error {
 
 func UpsertConfigContent(existing string, entry HostEntry) string {
 	lines := splitConfigLines(existing)
-	replaced := false
-	updated := make([]string, 0, len(lines)+8)
-
-	for i := 0; i < len(lines); {
-		if hostLineHasAlias(lines[i], entry.Alias) {
-			if !replaced {
-				updated = appendEntryLines(updated, entry)
-				replaced = true
-			}
-			i++
-			for i < len(lines) && !isHostDirective(lines[i]) {
-				i++
-			}
-			if i < len(lines) && len(updated) > 0 && strings.TrimSpace(updated[len(updated)-1]) != "" {
-				updated = append(updated, "")
-			}
-			continue
-		}
-		updated = append(updated, lines[i])
-		i++
-	}
-
+	updated, replaced := replaceExistingHostEntries(lines, entry)
 	if !replaced {
-		if len(updated) > 0 && strings.TrimSpace(updated[len(updated)-1]) != "" {
-			updated = append(updated, "")
-		}
+		updated = appendBlankBeforeEntry(updated)
 		updated = appendEntryLines(updated, entry)
 	}
 
 	return strings.TrimRight(strings.Join(trimTrailingBlankLines(updated), "\n"), "\n") + "\n"
+}
+
+func replaceExistingHostEntries(lines []string, entry HostEntry) ([]string, bool) {
+	replaced := false
+	updated := make([]string, 0, len(lines)+8)
+	for i := 0; i < len(lines); {
+		if !hostLineHasAlias(lines[i], entry.Alias) {
+			updated = append(updated, lines[i])
+			i++
+			continue
+		}
+		updated = appendFirstReplacement(updated, entry, replaced)
+		replaced = true
+		i = skipHostEntry(lines, i+1)
+		updated = appendBlankBetweenEntries(lines, updated, i)
+	}
+	return updated, replaced
+}
+
+func appendFirstReplacement(lines []string, entry HostEntry, replaced bool) []string {
+	if replaced {
+		return lines
+	}
+	return appendEntryLines(lines, entry)
+}
+
+func skipHostEntry(lines []string, index int) int {
+	for index < len(lines) && !isHostDirective(lines[index]) {
+		index++
+	}
+	return index
+}
+
+func appendBlankBetweenEntries(source, updated []string, nextIndex int) []string {
+	if nextIndex >= len(source) || len(updated) == 0 || strings.TrimSpace(updated[len(updated)-1]) == "" {
+		return updated
+	}
+	return append(updated, "")
+}
+
+func appendBlankBeforeEntry(lines []string) []string {
+	if len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) != "" {
+		return append(lines, "")
+	}
+	return lines
 }
 
 func RenderEntry(entry HostEntry) string {

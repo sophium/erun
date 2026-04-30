@@ -1,0 +1,32 @@
+version: "2"
+
+run:
+  timeout: 3m
+  tests: true
+linters:
+  exclusions:
+    paths:
+      - ^frontend/node_modules/
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - funlen
+    - gocyclo
+    - cyclop
+  settings:
+    funlen:
+      lines: 100
+      statements: 50
+    gocyclo:
+      min-complexity: 15
+    cyclop:
+      max-complexity: 10
+formatters:
+  enable:
+    - gofumpt
+  settings:
+    gofumpt:
+      module-path: github.com/sophium/erun/erun-ui

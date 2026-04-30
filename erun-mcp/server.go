@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -64,8 +65,44 @@ func newHTTPHandler(info eruncommon.BuildInfo, cfg HTTPConfig, runtime RuntimeCo
 	})
 
 	mux := http.NewServeMux()
-	mux.Handle(cfg.Path, handler)
+	mux.Handle(cfg.Path, activityHTTPMiddleware(runtime, handler))
 	return mux
+}
+
+func activityHTTPMiddleware(runtime RuntimeConfig, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Header.Get("X-Erun-Idle-Probe") == "true" {
+			next.ServeHTTP(w, req)
+			return
+		}
+		recordRuntimeActivity(runtime, eruncommon.ActivityKindMCP, false)
+		if requestLooksLikeCodex(req) {
+			recordRuntimeActivity(runtime, eruncommon.ActivityKindCodex, false)
+		}
+		next.ServeHTTP(w, req)
+	})
+}
+
+func recordRuntimeActivity(runtime RuntimeConfig, kind string, seen bool) {
+	_ = eruncommon.RecordEnvironmentActivity(eruncommon.EnvironmentActivityParams{
+		Tenant:      runtime.Context.Tenant,
+		Environment: runtime.Context.Environment,
+		Kind:        kind,
+		Seen:        seen,
+	})
+}
+
+func requestLooksLikeCodex(req *http.Request) bool {
+	userAgent := strings.ToLower(req.UserAgent())
+	if strings.Contains(userAgent, "codex") {
+		return true
+	}
+	for _, value := range req.Header.Values("X-Erun-Client") {
+		if strings.Contains(strings.ToLower(value), "codex") {
+			return true
+		}
+	}
+	return false
 }
 
 func normalizeHTTPConfig(cfg HTTPConfig) (HTTPConfig, error) {
@@ -114,6 +151,42 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Description: "List configured tenants and environments, defaults, and the effective target for the current runtime directory",
 	}, listTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "idle",
+		Description: "Return environment idle stop timeout and marker status without recording activity",
+	}, idleTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cloud_list",
+		Description: "List configured root-level cloud provider aliases and token status",
+	}, cloudListTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cloud_init_aws",
+		Description: "Initialize an AWS SSO cloud provider alias in root ERun config, with preview support",
+	}, cloudInitAWSTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cloud_login",
+		Description: "Login to a configured cloud provider alias, with preview support",
+	}, cloudLoginTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cloud_set",
+		Description: "Set the cloud provider alias for a tenant environment, with preview support",
+	}, cloudSetTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "context_list",
+		Description: "List managed ERun cloud Kubernetes contexts",
+	}, contextListTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "context_init",
+		Description: "Initialize a managed cloud k3s Kubernetes context, with preview support",
+	}, contextInitTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "context_stop",
+		Description: "Stop a managed ERun cloud Kubernetes context, with preview support",
+	}, contextStopTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "context_start",
+		Description: "Start a managed ERun cloud Kubernetes context, with preview support",
+	}, contextStartTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "init",
 		Description: "Run `erun init` using the shared init flow; when more input is needed, return a structured interaction request for the caller to answer in a follow-up tool call",
 	}, initTool(runtime))
@@ -133,6 +206,10 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Name:        "doctor",
 		Description: "Inspect the resolved DevOps runtime Docker state and optionally prune unused images, build cache, or stopped containers",
 	}, doctorTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "delete",
+		Description: "Delete an environment from ERun configuration and remove its remote runtime namespace after explicit tenant-environment confirmation",
+	}, deleteTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "diff",
 		Description: "Return the current git diff from the runtime repo root as raw text plus structured file, hunk, line, and tree data",

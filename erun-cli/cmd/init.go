@@ -18,6 +18,8 @@ const (
 
 func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) *cobra.Command {
 	params := common.BootstrapInitParams{}
+	setDefaultTenant := false
+	confirmEnvironment := false
 
 	cmd := &cobra.Command{
 		Use:          "init [TENANT] [ENVIRONMENT]",
@@ -25,18 +27,9 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runParams := params
-			if runParams.Tenant == "" && len(args) > 0 {
-				runParams.Tenant = args[0]
-			}
-			if runParams.Environment == "" && len(args) > 1 {
-				runParams.Environment = args[1]
-			}
-			if runParams.Remote && runParams.Tenant == "" {
-				return fmt.Errorf("tenant is required with --remote")
-			}
-			if runParams.Remote && strings.TrimSpace(runParams.Environment) == "" {
-				return fmt.Errorf("environment is required with --remote")
+			runParams, err := initRunParams(cmd, args, params, setDefaultTenant, confirmEnvironment)
+			if err != nil {
+				return err
 			}
 			return runInit(commandContext(cmd), runParams)
 		},
@@ -46,12 +39,50 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	cmd.Flags().StringVar(&params.ProjectRoot, "project-root", "", "Project root to bind to the tenant")
 	cmd.Flags().StringVar(&params.Environment, "environment", "", "Environment name")
 	cmd.Flags().StringVar(&params.RuntimeVersion, "version", "", "Runtime image version to initialize and deploy")
+	cmd.Flags().StringVar(&params.RuntimeImage, "runtime-image", "", "Runtime image repository to initialize and deploy")
+	cmd.Flags().StringVar(&params.RuntimePod.CPU, "runtime-cpu", "", "Runtime pod CPU limit")
+	cmd.Flags().StringVar(&params.RuntimePod.Memory, "runtime-memory", "", "Runtime pod memory limit")
 	cmd.Flags().StringVar(&params.KubernetesContext, "kubernetes-context", "", "Kubernetes context to associate with the environment")
 	cmd.Flags().StringVar(&params.ContainerRegistry, "container-registry", "", "Container registry to associate with the environment")
+	cmd.Flags().StringVar(&params.CodeCommitSSHKeyID, "codecommit-ssh-key-id", "", "CodeCommit SSH public key ID to use for remote repository access")
+	cmd.Flags().BoolVar(&params.Bootstrap, "bootstrap", false, "Create the tenant devops module and chart during initialization")
 	cmd.Flags().BoolVar(&params.Remote, "remote", false, "Initialize the tenant repository inside the runtime pod instead of the local host")
+	cmd.Flags().BoolVar(&params.NoGit, "no-git", false, "Skip remote Git checkout setup when used with --remote")
+	cmd.Flags().BoolVar(&setDefaultTenant, "set-default-tenant", false, "Set the initialized tenant as the default tenant")
+	cmd.Flags().BoolVar(&confirmEnvironment, "confirm-environment", false, "Confirm environment initialization without prompting")
 	cmd.Flags().BoolVarP(&params.AutoApprove, "yes", "y", false, "Automatically approve initialization prompts")
 	addDryRunFlag(cmd)
 	return cmd
+}
+
+func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapInitParams, setDefaultTenant, confirmEnvironment bool) (common.BootstrapInitParams, error) {
+	runParams := params
+	if runParams.Tenant == "" && len(args) > 0 {
+		runParams.Tenant = args[0]
+	}
+	if runParams.Environment == "" && len(args) > 1 {
+		runParams.Environment = args[1]
+	}
+	if err := validateInitRunParams(runParams); err != nil {
+		return common.BootstrapInitParams{}, err
+	}
+	if cmd.Flags().Changed("set-default-tenant") {
+		runParams.ConfirmTenant = &setDefaultTenant
+	}
+	if cmd.Flags().Changed("confirm-environment") {
+		runParams.ConfirmEnvironment = &confirmEnvironment
+	}
+	return runParams, nil
+}
+
+func validateInitRunParams(params common.BootstrapInitParams) error {
+	if params.Remote && params.Tenant == "" {
+		return fmt.Errorf("tenant is required with --remote")
+	}
+	if params.Remote && strings.TrimSpace(params.Environment) == "" {
+		return fmt.Errorf("environment is required with --remote")
+	}
+	return nil
 }
 
 func containerRegistryPrompt(run PromptRunner, label string) (string, error) {
@@ -96,11 +127,42 @@ func remoteRepositoryURLPrompt(run PromptRunner, label string) (string, error) {
 	return strings.TrimSpace(result), nil
 }
 
-func confirmPrompt(run PromptRunner, label string) (bool, error) {
+func codeCommitSSHKeyIDPrompt(run PromptRunner, label string) (string, error) {
 	prompt := promptui.Prompt{
-		Label:     label,
-		IsConfirm: true,
-		Default:   "y",
+		Label: label,
+		Validate: func(input string) error {
+			if strings.TrimSpace(input) == "" {
+				return fmt.Errorf("CodeCommit SSH public key ID is required")
+			}
+			return nil
+		},
+	}
+
+	result, err := run(prompt)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result), nil
+}
+
+func confirmPrompt(run PromptRunner, label string) (bool, error) {
+	label = strings.TrimRight(strings.TrimSpace(label), "?")
+	prompt := promptui.Prompt{
+		Label: label,
+		Templates: &promptui.PromptTemplates{
+			Prompt:  `{{ "?" | blue }} {{ . | bold }}? {{ "[Y/n]" | faint }} `,
+			Valid:   `{{ "?" | blue }} {{ . | bold }}? {{ "[Y/n]" | faint }} `,
+			Invalid: `{{ "?" | blue }} {{ . | bold }}? {{ "[Y/n]" | faint }} `,
+			Success: `{{ . | faint }}? `,
+		},
+		Validate: func(input string) error {
+			switch strings.ToLower(strings.TrimSpace(input)) {
+			case "", "y", "n":
+				return nil
+			default:
+				return fmt.Errorf("enter y or n")
+			}
+		},
 	}
 
 	result, err := run(prompt)
@@ -118,7 +180,7 @@ func confirmPrompt(run PromptRunner, label string) (bool, error) {
 		return true, nil
 	}
 
-	return strings.EqualFold(result, "y"), nil
+	return strings.EqualFold(strings.TrimSpace(result), "y"), nil
 }
 
 func kubernetesContextPrompt(run PromptRunner, selectRun SelectRunner, list KubernetesContextsLister, label string) (string, error) {

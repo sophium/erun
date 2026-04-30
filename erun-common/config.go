@@ -18,7 +18,9 @@ const (
 )
 
 type ERunConfig struct {
-	DefaultTenant string
+	DefaultTenant  string
+	CloudProviders []CloudProviderConfig `yaml:"cloudproviders,omitempty"`
+	CloudContexts  []CloudContextConfig  `yaml:"cloudcontexts,omitempty"`
 }
 
 type SSHDConfig struct {
@@ -43,19 +45,23 @@ type TenantConfig struct {
 }
 
 type EnvConfig struct {
-	Name              string
-	RepoPath          string
-	KubernetesContext string
-	ContainerRegistry string
-	RuntimeVersion    string     `yaml:"runtimeversion,omitempty"`
-	SSHD              SSHDConfig `yaml:"sshd,omitempty"`
-	Remote            bool       `yaml:"remote,omitempty"`
-	Snapshot          *bool      `yaml:"snapshot,omitempty"`
+	Name               string
+	RepoPath           string
+	KubernetesContext  string
+	ContainerRegistry  string
+	CloudProviderAlias string                `yaml:"cloudprovideralias,omitempty"`
+	ManagedCloud       bool                  `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
+	RuntimeVersion     string                `yaml:"runtimeversion,omitempty"`
+	RuntimePod         RuntimePodResources   `yaml:"runtimepod,omitempty"`
+	SSHD               SSHDConfig            `yaml:"sshd,omitempty"`
+	Idle               EnvironmentIdleConfig `yaml:"idle,omitempty"`
+	Remote             bool                  `yaml:"remote,omitempty"`
+	Snapshot           *bool                 `yaml:"snapshot,omitempty"`
 }
 
 func (c TenantConfig) SnapshotEnabled() bool {
 	if c.Snapshot == nil {
-		return true
+		return false
 	}
 	return *c.Snapshot
 }
@@ -70,7 +76,7 @@ func (c *TenantConfig) SetSnapshot(enabled bool) {
 
 func (c EnvConfig) SnapshotEnabled() bool {
 	if c.Snapshot == nil {
-		return true
+		return false
 	}
 	return *c.Snapshot
 }
@@ -227,6 +233,10 @@ func (ConfigStore) SaveTenantConfig(config TenantConfig) error {
 	return SaveTenantConfig(config)
 }
 
+func (ConfigStore) DeleteTenantConfig(tenant string) error {
+	return DeleteTenantConfig(tenant)
+}
+
 func (ConfigStore) LoadEnvConfig(tenant, envName string) (EnvConfig, string, error) {
 	return LoadEnvConfig(tenant, envName)
 }
@@ -245,6 +255,10 @@ func (ConfigStore) ListEnvConfigs(tenant string) ([]EnvConfig, error) {
 
 func (ConfigStore) SaveEnvConfig(tenant string, config EnvConfig) error {
 	return SaveEnvConfig(tenant, config)
+}
+
+func (ConfigStore) DeleteEnvConfig(tenant, envName string) error {
+	return DeleteEnvConfig(tenant, envName)
 }
 
 func SaveERunConfig(config ERunConfig) error {
@@ -307,6 +321,18 @@ func SaveTenantConfig(config TenantConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
+	return nil
+}
+
+func DeleteTenantConfig(tenant string) error {
+	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, configFile))
+	if err != nil {
+		return ErrNoUserDataFolder
+	}
+
+	if err := os.RemoveAll(filepath.Dir(configFilePath)); err != nil {
+		return ErrFailedToSaveConfig
+	}
 	return nil
 }
 
@@ -388,6 +414,18 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
+	return nil
+}
+
+func DeleteEnvConfig(tenant, envName string) error {
+	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, tenant, envName, configFile))
+	if err != nil {
+		return ErrNoUserDataFolder
+	}
+
+	if err := os.RemoveAll(filepath.Dir(configFilePath)); err != nil {
+		return ErrFailedToSaveConfig
+	}
 	return nil
 }
 

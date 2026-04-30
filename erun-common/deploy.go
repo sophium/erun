@@ -33,6 +33,7 @@ type (
 	DeployContextResolverFunc       func() (KubernetesDeployContext, error)
 	KubernetesDeploymentCheckerFunc func(KubernetesDeploymentCheckParams) (bool, error)
 	HelmChartDeployerFunc           func(HelmDeployParams) error
+	HelmReleaseRecovererFunc        func(HelmReleaseRecoveryParams) error
 )
 
 type deployKubernetesContextResolver interface {
@@ -46,45 +47,82 @@ type KubernetesDeployContext struct {
 }
 
 type HelmDeployParams struct {
+	ReleaseName        string
+	ChartPath          string
+	ValuesFilePath     string
+	Tenant             string
+	Environment        string
+	Namespace          string
+	KubernetesContext  string
+	WorktreeStorage    string
+	WorktreeRepoName   string
+	WorktreeHostPath   string
+	SSHDEnabled        bool
+	MCPPort            int
+	SSHPort            int
+	ManagedCloud       bool
+	CloudContextName   string
+	CloudProviderAlias string
+	CloudRegion        string
+	CloudInstanceID    string
+	Idle               EnvironmentIdleConfig
+	RuntimePod         RuntimePodResources
+	Version            string
+	Timeout            string
+	Stdout             io.Writer
+	Stderr             io.Writer
+}
+
+type HelmDeploySpec struct {
+	ReleaseName        string
+	ChartPath          string
+	ValuesFilePath     string
+	Tenant             string
+	Environment        string
+	Namespace          string
+	KubernetesContext  string
+	WorktreeStorage    string
+	WorktreeRepoName   string
+	WorktreeHostPath   string
+	SSHDEnabled        bool
+	MCPPort            int
+	SSHPort            int
+	ManagedCloud       bool
+	CloudContextName   string
+	CloudProviderAlias string
+	CloudRegion        string
+	CloudInstanceID    string
+	Idle               EnvironmentIdleConfig
+	RuntimePod         RuntimePodResources
+	Version            string
+	Timeout            string
+}
+
+type HelmReleaseRecoveryParams struct {
 	ReleaseName       string
-	ChartPath         string
-	ValuesFilePath    string
-	Tenant            string
-	Environment       string
 	Namespace         string
 	KubernetesContext string
-	WorktreeStorage   string
-	WorktreeRepoName  string
-	WorktreeHostPath  string
-	SSHDEnabled       bool
-	Version           string
-	Timeout           string
 	Stdout            io.Writer
 	Stderr            io.Writer
 }
 
-type HelmDeploySpec struct {
+type HelmReleasePendingOperationError struct {
 	ReleaseName       string
-	ChartPath         string
-	ValuesFilePath    string
-	Tenant            string
-	Environment       string
 	Namespace         string
 	KubernetesContext string
-	WorktreeStorage   string
-	WorktreeRepoName  string
-	WorktreeHostPath  string
-	SSHDEnabled       bool
-	Version           string
-	Timeout           string
+	Message           string
+	Err               error
 }
 
 type KubernetesDeploymentCheckParams struct {
-	Name              string
-	Namespace         string
-	KubernetesContext string
-	ExpectedRepoPath  string
-	ExpectedSSHD      *bool
+	Name               string
+	Namespace          string
+	KubernetesContext  string
+	ExpectedRepoPath   string
+	ExpectedSSHD       *bool
+	ExpectedMCPPort    int
+	ExpectedSSHPort    int
+	ExpectedRuntimePod RuntimePodResources
 }
 
 type DeployTarget struct {
@@ -114,6 +152,9 @@ func RunDeploySpecs(ctx Context, executions []DeploySpec, build DockerImageBuild
 func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc) error {
 	if deploy == nil {
 		return fmt.Errorf("helm deployer is required")
+	}
+	if err := ctx.EnsureKubernetesContext(deployInput.KubernetesContext); err != nil {
+		return err
 	}
 	TraceEnsureKubernetesNamespace(ctx, deployInput.KubernetesContext, deployInput.Namespace)
 	command := deployInput.command()
@@ -147,7 +188,7 @@ func RunDeploySpec(ctx Context, execution DeploySpec, build DockerImageBuilderFu
 }
 
 func ResolveDeploySpec(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget, componentName, versionOverride string) (DeploySpec, error) {
-	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	versionOverride = resolveDeployVersionOverride(target, versionOverride)
 
 	resolvedTarget, err := resolveDeployTarget(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
@@ -158,7 +199,7 @@ func ResolveDeploySpec(store DeployStore, findProjectRoot ProjectFinderFunc, res
 }
 
 func ResolveCurrentDeploySpecs(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) ([]DeploySpec, error) {
-	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 
 	resolvedTarget, err := resolveDeployTarget(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {
@@ -199,7 +240,7 @@ func resolveDeploySpecForOpenResult(store DeployStore, findProjectRoot ProjectFi
 }
 
 func resolveDeploySpecForContext(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, deployContext KubernetesDeployContext, versionOverride string, allowLocalBuilds bool) (DeploySpec, error) {
-	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	target = applyDeployKubernetesContext(store, target)
 
 	builds := make([]DockerBuildSpec, 0, 2)
@@ -217,6 +258,14 @@ func resolveDeploySpecForContext(store DeployStore, findProjectRoot ProjectFinde
 	deployInput, err := newHelmDeploySpec(target, deployContext, versionOverride)
 	if err != nil {
 		return DeploySpec{}, err
+	}
+	managedCloud, err := managedCloudEnvironment(store, target.EnvConfig)
+	if err != nil {
+		return DeploySpec{}, err
+	}
+	deployInput.ManagedCloud = managedCloud
+	if managedCloud {
+		applyCloudContextStopMetadata(store, target.EnvConfig, &deployInput)
 	}
 
 	dependencyBuilds, err := resolveAdditionalDockerBuildsForDeploy(store, findProjectRoot, resolveDockerBuildContext, now, target.RepoPath, target.Environment, deployContext.ChartPath, builds)
@@ -527,17 +576,6 @@ func loadDefaultTenant(store DeployStore) (string, error) {
 	return toolConfig.DefaultTenant, nil
 }
 
-func loadDefaultEnvironment(store DeployStore, tenant string) (string, error) {
-	tenantConfig, _, err := store.LoadTenantConfig(tenant)
-	if err != nil {
-		return "", err
-	}
-	if tenantConfig.DefaultEnvironment == "" {
-		return "", ErrDefaultEnvironmentNotConfigured
-	}
-	return tenantConfig.DefaultEnvironment, nil
-}
-
 func newHelmDeploySpec(target OpenResult, deployContext KubernetesDeployContext, versionOverride string) (HelmDeploySpec, error) {
 	valuesFilePath, err := resolveKubernetesDeployValuesFile(deployContext.ChartPath, target.Environment)
 	if err != nil {
@@ -545,22 +583,43 @@ func newHelmDeploySpec(target OpenResult, deployContext KubernetesDeployContext,
 	}
 
 	version := strings.TrimSpace(versionOverride)
+	ports := LocalPortsForResult(target)
 
 	return HelmDeploySpec{
-		ReleaseName:       deployContext.ComponentName,
-		ChartPath:         deployContext.ChartPath,
-		ValuesFilePath:    valuesFilePath,
-		Tenant:            target.Tenant,
-		Environment:       target.Environment,
-		Namespace:         KubernetesNamespaceName(target.Tenant, target.Environment),
-		KubernetesContext: target.EnvConfig.KubernetesContext,
-		WorktreeStorage:   resolveWorktreeStorage(target),
-		WorktreeRepoName:  resolveWorktreeRepoName(target.RepoPath),
-		WorktreeHostPath:  resolveWorktreeHostPath(target.RepoPath),
-		SSHDEnabled:       target.EnvConfig.SSHD.Enabled,
-		Version:           version,
-		Timeout:           DefaultHelmDeploymentTimeout,
+		ReleaseName:        deployContext.ComponentName,
+		ChartPath:          deployContext.ChartPath,
+		ValuesFilePath:     valuesFilePath,
+		Tenant:             target.Tenant,
+		Environment:        target.Environment,
+		Namespace:          KubernetesNamespaceName(target.Tenant, target.Environment),
+		KubernetesContext:  target.EnvConfig.KubernetesContext,
+		WorktreeStorage:    resolveWorktreeStorage(target),
+		WorktreeRepoName:   resolveWorktreeRepoName(target.RepoPath),
+		WorktreeHostPath:   resolveWorktreeHostPath(target.RepoPath),
+		SSHDEnabled:        target.EnvConfig.SSHD.Enabled,
+		MCPPort:            ports.MCP,
+		SSHPort:            ports.SSH,
+		CloudProviderAlias: target.EnvConfig.CloudProviderAlias,
+		Idle:               target.EnvConfig.Idle,
+		RuntimePod:         NormalizeRuntimePodResources(target.EnvConfig.RuntimePod),
+		Version:            version,
+		Timeout:            DefaultHelmDeploymentTimeout,
 	}, nil
+}
+
+func applyCloudContextStopMetadata(store CloudReadStore, env EnvConfig, deployInput *HelmDeploySpec) {
+	if deployInput == nil {
+		return
+	}
+	deployInput.CloudProviderAlias = strings.TrimSpace(env.CloudProviderAlias)
+	status, ok, err := findCloudContextForKubernetesContext(store, env.KubernetesContext)
+	if err != nil || !ok {
+		return
+	}
+	deployInput.CloudContextName = status.Name
+	deployInput.CloudProviderAlias = status.CloudProviderAlias
+	deployInput.CloudRegion = status.Region
+	deployInput.CloudInstanceID = status.InstanceID
 }
 
 func resolveWorktreeStorage(target OpenResult) string {
@@ -595,21 +654,30 @@ func resolveWorktreeHostPath(repoPath string) string {
 
 func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 	return HelmDeployParams{
-		ReleaseName:       d.ReleaseName,
-		ChartPath:         d.ChartPath,
-		ValuesFilePath:    d.ValuesFilePath,
-		Tenant:            d.Tenant,
-		Environment:       d.Environment,
-		Namespace:         d.Namespace,
-		KubernetesContext: d.KubernetesContext,
-		WorktreeStorage:   d.WorktreeStorage,
-		WorktreeRepoName:  d.WorktreeRepoName,
-		WorktreeHostPath:  d.WorktreeHostPath,
-		SSHDEnabled:       d.SSHDEnabled,
-		Version:           d.Version,
-		Timeout:           d.Timeout,
-		Stdout:            stdout,
-		Stderr:            stderr,
+		ReleaseName:        d.ReleaseName,
+		ChartPath:          d.ChartPath,
+		ValuesFilePath:     d.ValuesFilePath,
+		Tenant:             d.Tenant,
+		Environment:        d.Environment,
+		Namespace:          d.Namespace,
+		KubernetesContext:  d.KubernetesContext,
+		WorktreeStorage:    d.WorktreeStorage,
+		WorktreeRepoName:   d.WorktreeRepoName,
+		WorktreeHostPath:   d.WorktreeHostPath,
+		SSHDEnabled:        d.SSHDEnabled,
+		MCPPort:            d.MCPPort,
+		SSHPort:            d.SSHPort,
+		ManagedCloud:       d.ManagedCloud,
+		CloudContextName:   d.CloudContextName,
+		CloudProviderAlias: d.CloudProviderAlias,
+		CloudRegion:        d.CloudRegion,
+		CloudInstanceID:    d.CloudInstanceID,
+		Idle:               d.Idle,
+		RuntimePod:         NormalizeRuntimePodResources(d.RuntimePod),
+		Version:            d.Version,
+		Timeout:            d.Timeout,
+		Stdout:             stdout,
+		Stderr:             stderr,
 	}
 }
 
@@ -633,6 +701,18 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "worktreeRepoName="+d.WorktreeRepoName,
 		"--set-string", "worktreeHostPath="+d.WorktreeHostPath,
 		"--set", "sshdEnabled="+formatHelmBool(d.SSHDEnabled),
+		"--set", "mcpPort="+formatHelmPort(d.MCPPort, MCPServicePort),
+		"--set", "sshPort="+formatHelmPort(d.SSHPort, DefaultSSHLocalPort),
+		"--set", "managedCloud="+formatHelmBool(d.ManagedCloud),
+		"--set-string", "cloudContext.name="+d.CloudContextName,
+		"--set-string", "cloudContext.providerAlias="+d.CloudProviderAlias,
+		"--set-string", "cloudContext.region="+d.CloudRegion,
+		"--set-string", "cloudContext.instanceId="+d.CloudInstanceID,
+		"--set-string", "idle.timeout="+helmIdleTimeout(d.Idle),
+		"--set-string", "idle.workingHours="+helmIdleWorkingHours(d.Idle),
+		"--set", "idle.trafficBytes="+formatHelmInt64(helmIdleTrafficBytes(d.Idle)),
+		"--set-string", "runtime.resources.limits.cpu="+NormalizeRuntimePodResources(d.RuntimePod).CPU,
+		"--set-string", "runtime.resources.limits.memory="+NormalizeRuntimePodResources(d.RuntimePod).Memory,
 		d.ReleaseName,
 		d.ChartPath,
 	)
@@ -644,11 +724,111 @@ func (d HelmDeploySpec) command() commandSpec {
 	}
 }
 
+func (p HelmReleaseRecoveryParams) command() commandSpec {
+	args := []string{}
+	if strings.TrimSpace(p.KubernetesContext) != "" {
+		args = append(args, "--context", p.KubernetesContext)
+	}
+	args = append(args,
+		"--namespace", p.Namespace,
+		"delete",
+		"secrets,configmaps",
+		"-l", helmPendingReleaseOperationSelector(p.ReleaseName),
+		"--ignore-not-found",
+	)
+
+	return commandSpec{
+		Name: "kubectl",
+		Args: args,
+	}
+}
+
+func helmPendingReleaseOperationSelector(releaseName string) string {
+	return "owner=helm,name=" + releaseName + ",status in (pending-install,pending-upgrade,pending-rollback)"
+}
+
+func (e *HelmReleasePendingOperationError) Error() string {
+	if e == nil {
+		return ""
+	}
+	message := strings.TrimSpace(e.Message)
+	if message == "" && e.Err != nil {
+		message = e.Err.Error()
+	}
+	if message == "" {
+		message = "helm release operation is already in progress"
+	}
+	return fmt.Sprintf("%s; recover with: %s", message, e.RecoveryCommand())
+}
+
+func (e *HelmReleasePendingOperationError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func (e *HelmReleasePendingOperationError) RecoveryParams(stdout, stderr io.Writer) HelmReleaseRecoveryParams {
+	if e == nil {
+		return HelmReleaseRecoveryParams{Stdout: stdout, Stderr: stderr}
+	}
+	return HelmReleaseRecoveryParams{
+		ReleaseName:       e.ReleaseName,
+		Namespace:         e.Namespace,
+		KubernetesContext: e.KubernetesContext,
+		Stdout:            stdout,
+		Stderr:            stderr,
+	}
+}
+
+func (e *HelmReleasePendingOperationError) RecoveryCommand() string {
+	if e == nil {
+		return ""
+	}
+	command := e.RecoveryParams(nil, nil).command()
+	return formatShellCommand(command.Dir, command.Name, command.Args...)
+}
+
 func formatHelmBool(value bool) string {
 	if value {
 		return "true"
 	}
 	return "false"
+}
+
+func formatHelmPort(value, fallback int) string {
+	if value <= 0 {
+		value = fallback
+	}
+	return fmt.Sprintf("%d", value)
+}
+
+func formatHelmInt64(value int64) string {
+	return fmt.Sprintf("%d", value)
+}
+
+func helmIdleTimeout(config EnvironmentIdleConfig) string {
+	policy, err := config.Resolve()
+	if err != nil {
+		return DefaultEnvironmentIdleTimeout.String()
+	}
+	return policy.Timeout.String()
+}
+
+func helmIdleWorkingHours(config EnvironmentIdleConfig) string {
+	policy, err := config.Resolve()
+	if err != nil {
+		return DefaultEnvironmentWorkingHours
+	}
+	return policy.WorkingHours
+}
+
+func helmIdleTrafficBytes(config EnvironmentIdleConfig) int64 {
+	policy, err := config.Resolve()
+	if err != nil {
+		return DefaultEnvironmentIdleTrafficBytes
+	}
+	return policy.IdleTrafficBytes
 }
 
 func resolveDeployKubernetesContext(environment, configured string, currentContext func() (string, error)) string {
@@ -813,20 +993,43 @@ func resolveProjectRootDevopsK8sDir(findProjectRoot ProjectFinderFunc, projectRo
 		return "", false, nil
 	}
 
-	if tenant, detectedProjectRoot, err := findProjectRoot(); err == nil &&
-		filepath.Clean(strings.TrimSpace(detectedProjectRoot)) == projectRoot &&
-		strings.TrimSpace(tenant) != "" {
-		k8sDir := filepath.Join(projectRoot, RuntimeReleaseName(tenant), "k8s")
-		if ok, err := isKubernetesDeployModuleDir(k8sDir); err != nil {
-			return "", false, err
-		} else if ok {
-			return k8sDir, true, nil
-		}
+	k8sDir, ok, err := detectedProjectRootDevopsK8sDir(findProjectRoot, projectRoot)
+	if err != nil || ok {
+		return k8sDir, ok, err
 	}
 
-	entries, err := os.ReadDir(projectRoot)
+	candidates, err := findDevopsK8sDirs(projectRoot)
 	if err != nil {
 		return "", false, err
+	}
+	switch len(candidates) {
+	case 0:
+		return "", false, nil
+	case 1:
+		return candidates[0], true, nil
+	default:
+		return "", false, fmt.Errorf("multiple devops k8s directories found under project root")
+	}
+}
+
+func detectedProjectRootDevopsK8sDir(findProjectRoot ProjectFinderFunc, projectRoot string) (string, bool, error) {
+	tenant, detectedProjectRoot, err := findProjectRoot()
+	if err != nil || filepath.Clean(strings.TrimSpace(detectedProjectRoot)) != projectRoot || strings.TrimSpace(tenant) == "" {
+		return "", false, nil
+	}
+	k8sDir := filepath.Join(projectRoot, RuntimeReleaseName(tenant), "k8s")
+	if ok, err := isKubernetesDeployModuleDir(k8sDir); err != nil {
+		return "", false, err
+	} else if ok {
+		return k8sDir, true, nil
+	}
+	return "", false, nil
+}
+
+func findDevopsK8sDirs(projectRoot string) ([]string, error) {
+	entries, err := os.ReadDir(projectRoot)
+	if err != nil {
+		return nil, err
 	}
 
 	candidates := make([]string, 0, 1)
@@ -838,21 +1041,13 @@ func resolveProjectRootDevopsK8sDir(findProjectRoot ProjectFinderFunc, projectRo
 		k8sDir := filepath.Join(projectRoot, entry.Name(), "k8s")
 		ok, err := isKubernetesDeployModuleDir(k8sDir)
 		if err != nil {
-			return "", false, err
+			return nil, err
 		}
 		if ok {
 			candidates = append(candidates, k8sDir)
 		}
 	}
-
-	switch len(candidates) {
-	case 0:
-		return "", false, nil
-	case 1:
-		return candidates[0], true, nil
-	default:
-		return "", false, fmt.Errorf("multiple devops k8s directories found under project root")
-	}
+	return candidates, nil
 }
 
 func isKubernetesDeployModuleDir(dir string) (bool, error) {
@@ -879,25 +1074,71 @@ func DeployHelmChart(params HelmDeployParams) error {
 	}
 
 	command := HelmDeploySpec{
-		ReleaseName:       params.ReleaseName,
-		ChartPath:         chartPath,
-		ValuesFilePath:    params.ValuesFilePath,
-		Tenant:            params.Tenant,
-		Environment:       params.Environment,
-		Namespace:         params.Namespace,
-		KubernetesContext: params.KubernetesContext,
-		WorktreeStorage:   params.WorktreeStorage,
-		WorktreeRepoName:  params.WorktreeRepoName,
-		WorktreeHostPath:  params.WorktreeHostPath,
-		SSHDEnabled:       params.SSHDEnabled,
-		Timeout:           params.Timeout,
+		ReleaseName:        params.ReleaseName,
+		ChartPath:          chartPath,
+		ValuesFilePath:     params.ValuesFilePath,
+		Tenant:             params.Tenant,
+		Environment:        params.Environment,
+		Namespace:          params.Namespace,
+		KubernetesContext:  params.KubernetesContext,
+		WorktreeStorage:    params.WorktreeStorage,
+		WorktreeRepoName:   params.WorktreeRepoName,
+		WorktreeHostPath:   params.WorktreeHostPath,
+		SSHDEnabled:        params.SSHDEnabled,
+		MCPPort:            params.MCPPort,
+		SSHPort:            params.SSHPort,
+		ManagedCloud:       params.ManagedCloud,
+		CloudContextName:   params.CloudContextName,
+		CloudProviderAlias: params.CloudProviderAlias,
+		CloudRegion:        params.CloudRegion,
+		CloudInstanceID:    params.CloudInstanceID,
+		Idle:               params.Idle,
+		RuntimePod:         params.RuntimePod,
+		Timeout:            params.Timeout,
 	}.command()
 
 	cmd := exec.Command(command.Name, command.Args...)
 	cmd.Dir = command.Dir
 	cmd.Stdout = params.Stdout
+	stderr := new(strings.Builder)
+	if params.Stderr != nil {
+		cmd.Stderr = io.MultiWriter(params.Stderr, stderr)
+	} else {
+		cmd.Stderr = stderr
+	}
+	err := cmd.Run()
+	if err != nil && isHelmReleasePendingOperationMessage(stderr.String()) {
+		return &HelmReleasePendingOperationError{
+			ReleaseName:       params.ReleaseName,
+			Namespace:         params.Namespace,
+			KubernetesContext: params.KubernetesContext,
+			Message:           stderr.String(),
+			Err:               err,
+		}
+	}
+	return err
+}
+
+func ClearHelmReleasePendingOperation(params HelmReleaseRecoveryParams) error {
+	if strings.TrimSpace(params.ReleaseName) == "" {
+		return fmt.Errorf("helm release name is required")
+	}
+	if strings.TrimSpace(params.Namespace) == "" {
+		return fmt.Errorf("helm release namespace is required")
+	}
+
+	command := params.command()
+	cmd := exec.Command(command.Name, command.Args...)
+	cmd.Stdout = params.Stdout
 	cmd.Stderr = params.Stderr
 	return cmd.Run()
+}
+
+func isHelmReleasePendingOperationMessage(message string) bool {
+	message = strings.ToLower(message)
+	return strings.Contains(message, "another operation") &&
+		strings.Contains(message, "install/upgrade/rollback") &&
+		strings.Contains(message, "in progress")
 }
 
 func prepareHelmChartForDeploy(chartPath, version string) (string, func(), error) {
@@ -1001,7 +1242,7 @@ func CheckKubernetesDeployment(params KubernetesDeploymentCheckParams) (bool, er
 
 	output, err := exec.Command("kubectl", args...).CombinedOutput()
 	if err == nil {
-		if strings.TrimSpace(params.ExpectedRepoPath) == "" && params.ExpectedSSHD == nil {
+		if !hasExpectedDeploymentSettings(params) {
 			return true, nil
 		}
 		return deploymentMatchesExpectedSettings(params)
@@ -1013,6 +1254,19 @@ func CheckKubernetesDeployment(params KubernetesDeploymentCheckParams) (bool, er
 	}
 
 	return false, fmt.Errorf("failed to check deployment %q: %w", params.Name, err)
+}
+
+func hasExpectedDeploymentSettings(params KubernetesDeploymentCheckParams) bool {
+	return strings.TrimSpace(params.ExpectedRepoPath) != "" ||
+		params.ExpectedSSHD != nil ||
+		params.ExpectedMCPPort > 0 ||
+		params.ExpectedSSHPort > 0 ||
+		params.ExpectedRuntimePod != (RuntimePodResources{})
+}
+
+type deploymentEnvVar struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
 }
 
 func deploymentMatchesExpectedSettings(params KubernetesDeploymentCheckParams) (bool, error) {
@@ -1035,11 +1289,11 @@ func deploymentMatchesExpectedSettings(params KubernetesDeploymentCheckParams) (
 			Template struct {
 				Spec struct {
 					Containers []struct {
-						Name string `json:"name"`
-						Env  []struct {
-							Name  string `json:"name"`
-							Value string `json:"value"`
-						} `json:"env"`
+						Name      string             `json:"name"`
+						Env       []deploymentEnvVar `json:"env"`
+						Resources struct {
+							Limits RuntimePodResources `json:"limits"`
+						} `json:"resources"`
 					} `json:"containers"`
 				} `json:"spec"`
 			} `json:"template"`
@@ -1049,29 +1303,97 @@ func deploymentMatchesExpectedSettings(params KubernetesDeploymentCheckParams) (
 		return false, fmt.Errorf("failed to parse deployment %q: %w", params.Name, err)
 	}
 
-	expectedRepoPath := strings.TrimSpace(params.ExpectedRepoPath)
 	for _, container := range deployment.Spec.Template.Spec.Containers {
 		if strings.TrimSpace(container.Name) != params.Name {
 			continue
 		}
-		matchesRepoPath := strings.TrimSpace(expectedRepoPath) == ""
-		matchesSSHD := params.ExpectedSSHD == nil
-		for _, env := range container.Env {
-			switch strings.TrimSpace(env.Name) {
-			case "ERUN_REPO_PATH":
-				if strings.TrimSpace(expectedRepoPath) != "" {
-					matchesRepoPath = filepath.Clean(strings.TrimSpace(env.Value)) == filepath.Clean(expectedRepoPath)
-				}
-			case "ERUN_SSHD_ENABLED":
-				if params.ExpectedSSHD != nil {
-					matchesSSHD = strings.EqualFold(strings.TrimSpace(env.Value), formatHelmBool(*params.ExpectedSSHD))
-				}
-			}
-		}
-		return matchesRepoPath && matchesSSHD, nil
+		return deploymentContainerMatchesExpectedSettings(params, container.Env, container.Resources.Limits), nil
 	}
 
 	return false, nil
+}
+
+func deploymentContainerMatchesExpectedSettings(params KubernetesDeploymentCheckParams, envs []deploymentEnvVar, limits RuntimePodResources) bool {
+	matches := expectedDeploymentMatches(params)
+	for _, env := range envs {
+		matches.apply(params, env.Name, env.Value)
+	}
+	matches.runtimePod = matchesExpectedRuntimePod(limits, params.ExpectedRuntimePod)
+	return matches.ok()
+}
+
+type deploymentExpectedMatches struct {
+	repoPath   bool
+	sshd       bool
+	mcpPort    bool
+	sshPort    bool
+	runtimePod bool
+}
+
+func expectedDeploymentMatches(params KubernetesDeploymentCheckParams) deploymentExpectedMatches {
+	return deploymentExpectedMatches{
+		repoPath:   strings.TrimSpace(params.ExpectedRepoPath) == "",
+		sshd:       params.ExpectedSSHD == nil,
+		mcpPort:    params.ExpectedMCPPort <= 0,
+		sshPort:    params.ExpectedSSHPort <= 0,
+		runtimePod: params.ExpectedRuntimePod == (RuntimePodResources{}),
+	}
+}
+
+func (m *deploymentExpectedMatches) apply(params KubernetesDeploymentCheckParams, name, value string) {
+	switch strings.TrimSpace(name) {
+	case "ERUN_REPO_PATH":
+		m.repoPath = matchesExpectedRepoPath(value, params.ExpectedRepoPath)
+	case "ERUN_SSHD_ENABLED":
+		m.sshd = matchesExpectedBool(value, params.ExpectedSSHD)
+	case "ERUN_MCP_PORT":
+		m.mcpPort = matchesExpectedPort(value, params.ExpectedMCPPort)
+	case "ERUN_SSHD_PORT":
+		m.sshPort = matchesExpectedPort(value, params.ExpectedSSHPort)
+	}
+}
+
+func (m deploymentExpectedMatches) ok() bool {
+	return m.repoPath && m.sshd && m.mcpPort && m.sshPort && m.runtimePod
+}
+
+func matchesExpectedRepoPath(value, expected string) bool {
+	if strings.TrimSpace(expected) == "" {
+		return true
+	}
+	return filepath.Clean(strings.TrimSpace(value)) == filepath.Clean(strings.TrimSpace(expected))
+}
+
+func matchesExpectedBool(value string, expected *bool) bool {
+	if expected == nil {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(value), formatHelmBool(*expected))
+}
+
+func matchesExpectedPort(value string, expected int) bool {
+	if expected <= 0 {
+		return true
+	}
+	return strings.TrimSpace(value) == fmt.Sprintf("%d", expected)
+}
+
+func matchesExpectedRuntimePod(value, expected RuntimePodResources) bool {
+	if expected == (RuntimePodResources{}) {
+		return true
+	}
+	value = NormalizeRuntimePodResources(value)
+	expected = NormalizeRuntimePodResources(expected)
+	valueCPU, valueCPUErr := ParseKubernetesCPUToMilli(value.CPU)
+	expectedCPU, expectedCPUErr := ParseKubernetesCPUToMilli(expected.CPU)
+	valueMemory, valueMemoryErr := ParseKubernetesMemoryToMi(value.Memory)
+	expectedMemory, expectedMemoryErr := ParseKubernetesMemoryToMi(expected.Memory)
+	return valueCPUErr == nil &&
+		expectedCPUErr == nil &&
+		valueMemoryErr == nil &&
+		expectedMemoryErr == nil &&
+		valueCPU == expectedCPU &&
+		valueMemory == expectedMemory
 }
 
 func resolveKubernetesDeployValuesFile(chartPath, environment string) (string, error) {
@@ -1097,26 +1419,11 @@ func findComponentHelmChartPath(projectRoot, componentName string) (string, erro
 
 	matches := make([]string, 0, 1)
 	err := filepath.WalkDir(projectRoot, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+		chartPath, ok, walkErr := componentHelmChartCandidate(path, d, componentName, err)
+		if ok {
+			matches = append(matches, chartPath)
 		}
-		if d.IsDir() {
-			if d.Name() == ".git" {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if d.Name() != "Chart.yaml" {
-			return nil
-		}
-
-		chartPath := filepath.Dir(path)
-		if filepath.Base(chartPath) != componentName || filepath.Base(filepath.Dir(chartPath)) != "k8s" {
-			return nil
-		}
-
-		matches = append(matches, chartPath)
-		return nil
+		return walkErr
 	})
 	if err != nil {
 		return "", err
@@ -1129,6 +1436,26 @@ func findComponentHelmChartPath(projectRoot, componentName string) (string, erro
 		return "", fmt.Errorf("multiple Helm charts found for component %q", componentName)
 	}
 	return matches[0], nil
+}
+
+func componentHelmChartCandidate(path string, d fs.DirEntry, componentName string, err error) (string, bool, error) {
+	if err != nil {
+		return "", false, err
+	}
+	if d.IsDir() {
+		if d.Name() == ".git" {
+			return "", false, fs.SkipDir
+		}
+		return "", false, nil
+	}
+	if d.Name() != "Chart.yaml" {
+		return "", false, nil
+	}
+	chartPath := filepath.Dir(path)
+	if filepath.Base(chartPath) != componentName || filepath.Base(filepath.Dir(chartPath)) != "k8s" {
+		return "", false, nil
+	}
+	return chartPath, true, nil
 }
 
 func ValidateHelmChartPath(chartPath string) error {
@@ -1177,21 +1504,8 @@ func findLiteralDockerImagesInChart(chartPath string) ([]string, error) {
 		}
 
 		for _, line := range strings.Split(string(data), "\n") {
-			trimmed := strings.TrimSpace(line)
-			switch {
-			case strings.HasPrefix(trimmed, "image:"):
-				trimmed = strings.TrimPrefix(trimmed, "image:")
-			case strings.HasPrefix(trimmed, "- image:"):
-				trimmed = strings.TrimPrefix(trimmed, "- image:")
-			default:
-				continue
-			}
-			value := strings.TrimSpace(trimmed)
-			if idx := strings.Index(value, "#"); idx >= 0 {
-				value = strings.TrimSpace(value[:idx])
-			}
-			value = strings.Trim(value, `"'`)
-			if value == "" || strings.Contains(value, "{{") {
+			value := literalDockerImageFromChartLine(line)
+			if value == "" {
 				continue
 			}
 			if _, ok := seen[value]; ok {
@@ -1208,4 +1522,31 @@ func findLiteralDockerImagesInChart(chartPath string) ([]string, error) {
 	}
 
 	return images, nil
+}
+
+func literalDockerImageFromChartLine(line string) string {
+	value, ok := chartImageValue(line)
+	if !ok {
+		return ""
+	}
+	if idx := strings.Index(value, "#"); idx >= 0 {
+		value = strings.TrimSpace(value[:idx])
+	}
+	value = strings.Trim(strings.TrimSpace(value), `"'`)
+	if value == "" || strings.Contains(value, "{{") {
+		return ""
+	}
+	return value
+}
+
+func chartImageValue(line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	switch {
+	case strings.HasPrefix(trimmed, "image:"):
+		return strings.TrimPrefix(trimmed, "image:"), true
+	case strings.HasPrefix(trimmed, "- image:"):
+		return strings.TrimPrefix(trimmed, "- image:"), true
+	default:
+		return "", false
+	}
 }

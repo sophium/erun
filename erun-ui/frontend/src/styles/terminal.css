@@ -1,0 +1,16 @@
+.terminal .xterm,
+.terminal .xterm-viewport,
+.terminal .xterm-screen {
+  height: 100% !important;
+}
+
+.terminal .xterm-viewport {
+  overflow-y: auto !important;
+}
+
+.is-resizing,
+.is-resizing-review,
+.is-resizing-files {
+  cursor: col-resize;
+  user-select: none;
+}

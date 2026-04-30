@@ -75,25 +75,43 @@ func resolveAppExecutable() string {
 
 	executable, err := os.Executable()
 	if err == nil {
-		if runtime.GOOS == "darwin" {
-			siblingBundle := filepath.Join(filepath.Dir(executable), "ERun.app")
-			if info, statErr := os.Stat(siblingBundle); statErr == nil && info.IsDir() {
-				return siblingBundle
-			}
-			devBundle := filepath.Clean(filepath.Join(filepath.Dir(executable), "..", "..", "erun-ui", "bin", "ERun.app"))
-			if info, statErr := os.Stat(devBundle); statErr == nil && info.IsDir() {
-				return devBundle
-			}
-		}
-
-		sibling := filepath.Join(filepath.Dir(executable), executableName)
-		if info, statErr := os.Stat(sibling); statErr == nil && !info.IsDir() {
-			return sibling
-		}
-		devBinary := filepath.Clean(filepath.Join(filepath.Dir(executable), "..", "..", "erun-ui", "bin", executableName))
-		if info, statErr := os.Stat(devBinary); statErr == nil && !info.IsDir() {
-			return devBinary
+		if resolved := resolveAppExecutableNear(executable, executableName); resolved != "" {
+			return resolved
 		}
 	}
 	return executableName
+}
+
+func resolveAppExecutableNear(executable, executableName string) string {
+	executableDir := filepath.Dir(executable)
+	if runtime.GOOS == "darwin" {
+		if bundle := firstExistingDir(
+			filepath.Join(executableDir, "ERun.app"),
+			filepath.Clean(filepath.Join(executableDir, "..", "..", "erun-ui", "bin", "ERun.app")),
+		); bundle != "" {
+			return bundle
+		}
+	}
+	return firstExistingFile(
+		filepath.Join(executableDir, executableName),
+		filepath.Clean(filepath.Join(executableDir, "..", "..", "erun-ui", "bin", executableName)),
+	)
+}
+
+func firstExistingDir(paths ...string) string {
+	for _, path := range paths {
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			return path
+		}
+	}
+	return ""
+}
+
+func firstExistingFile(paths ...string) string {
+	for _, path := range paths {
+		if info, err := os.Stat(path); err == nil && !info.IsDir() {
+			return path
+		}
+	}
+	return ""
 }
