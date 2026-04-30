@@ -100,6 +100,80 @@ func buildOpenIDEArgs(selection uiSelection, ide string) []string {
 	}
 }
 
+func buildLocalOpenIDEParams(result eruncommon.OpenResult, ide string) (startTerminalSessionParams, error) {
+	projectPath := strings.TrimSpace(result.RepoPath)
+	if projectPath == "" {
+		return startTerminalSessionParams{}, fmt.Errorf("local project path is required")
+	}
+	executable, args, err := localOpenIDECommand(runtime.GOOS, strings.TrimSpace(ide), projectPath)
+	if err != nil {
+		return startTerminalSessionParams{}, err
+	}
+	return startTerminalSessionParams{
+		Dir:        projectPath,
+		Executable: executable,
+		Args:       args,
+	}, nil
+}
+
+func localOpenIDECommand(goos, ide, projectPath string) (string, []string, error) {
+	switch strings.TrimSpace(goos) {
+	case "darwin":
+		appName, err := localOpenIDEAppName(ide)
+		if err != nil {
+			return "", nil, err
+		}
+		return "open", []string{"-a", appName, projectPath}, nil
+	case "linux":
+		command, err := localOpenIDEExecutable(ide)
+		if err != nil {
+			return "", nil, err
+		}
+		return command, []string{projectPath}, nil
+	case "windows":
+		command, err := localOpenIDEWindowsCommand(ide)
+		if err != nil {
+			return "", nil, err
+		}
+		return "cmd", []string{"/c", "start", "", command, projectPath}, nil
+	default:
+		return "", nil, fmt.Errorf("opening local IDE projects is unsupported on %s", goos)
+	}
+}
+
+func localOpenIDEAppName(ide string) (string, error) {
+	switch strings.TrimSpace(ide) {
+	case "vscode":
+		return "Visual Studio Code", nil
+	case "intellij":
+		return "IntelliJ IDEA", nil
+	default:
+		return "", fmt.Errorf("unsupported IDE %q", ide)
+	}
+}
+
+func localOpenIDEExecutable(ide string) (string, error) {
+	switch strings.TrimSpace(ide) {
+	case "vscode":
+		return "code", nil
+	case "intellij":
+		return "idea", nil
+	default:
+		return "", fmt.Errorf("unsupported IDE %q", ide)
+	}
+}
+
+func localOpenIDEWindowsCommand(ide string) (string, error) {
+	switch strings.TrimSpace(ide) {
+	case "vscode":
+		return "code", nil
+	case "intellij":
+		return "idea64", nil
+	default:
+		return "", fmt.Errorf("unsupported IDE %q", ide)
+	}
+}
+
 func buildSSHDInitArgs(selection uiSelection) []string {
 	return erunArgs(selection.Debug, "sshd", "init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
 }

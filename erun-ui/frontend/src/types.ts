@@ -4,6 +4,7 @@ export interface UIEnvironment {
   runtimeVersion?: string;
   isActive?: boolean;
   sshdEnabled?: boolean;
+  remote: boolean;
 }
 
 export interface UITenant {

@@ -124,7 +124,7 @@ Repository guidance for humans and coding agents working in this repo.
 ## Working Rules
 
 - Start each non-trivial change by identifying the smallest coherent outcome that would satisfy the request, the modules likely affected, and the validation scope needed for confidence.
-- When asking the user to confirm a plan, describe the actual intended changes, not just investigation steps. Name the behavior that will change, the user-visible outcome, the likely files or modules to edit, and the validation that will prove the change. Keep discovery-only steps out of the plan unless they materially affect the proposed implementation.
+- When asking the user to confirm a plan, show a plan only for the intended change, not for discovery by itself. Describe the actual changes to make: the behavior that will change, the user-visible outcome, the likely files or modules to edit, and the validation that will prove the change. Keep investigation or discovery steps out of the plan unless they materially affect the proposed implementation.
 - Prefer fast, evidence-driven iteration. Use existing behavior, failing symptoms, tests, and screenshots as the source of truth, then tighten the implementation around the observed problem.
 - Keep work centered on the current user goal. Avoid opportunistic cleanup, broad redesign, or unrelated polish unless it directly reduces risk for the requested change.
 - When a problem crosses module boundaries, solve it at the lowest shared layer that owns the behavior, then keep transport-specific code focused on adaptation and presentation.
@@ -145,6 +145,7 @@ Repository guidance for humans and coding agents working in this repo.
 - CLI prompts are acceptable in interactive flows, but MCP-exposed paths should receive all required input explicitly and fail clearly when input is missing.
 - Prefer deterministic command behavior so tool calls are safe to run repeatedly and concurrently.
 - Prefer safety and clarity over micro-optimizations.
+- For documentation-only guidance changes, do not change app behavior. Update the nearest applicable `AGENTS.md` and validate by reviewing the edited guidance for consistency.
 - Do not add new documentation files unless the user explicitly asks for them; add repository instructions to `AGENTS.md` instead.
 - Keep `AGENTS.md` focused on repository workflow and engineering guidance; do not document app behavior, command semantics, or end-user functionality in it.
 - Do not modify `README.md` unless the user explicitly asks for a README change.
