@@ -348,13 +348,16 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 			ensured = result
 			return nil
 		},
-		loadDiff: func(_ context.Context, endpoint string) (eruncommon.DiffResult, error) {
+		loadDiff: func(_ context.Context, endpoint string, options uiDiffOptions) (eruncommon.DiffResult, error) {
 			gotEndpoint = endpoint
+			if options.Scope != "commit" || options.SelectedCommit != "abc123" {
+				t.Fatalf("unexpected diff options: %+v", options)
+			}
 			return eruncommon.DiffResult{RawDiff: "diff --git a/a.txt b/a.txt\n"}, nil
 		},
 	})
 
-	result, err := app.LoadDiff(uiSelection{Tenant: "erun", Environment: "local"})
+	result, err := app.LoadDiff(uiSelection{Tenant: "erun", Environment: "local"}, uiDiffOptions{Scope: " commit ", SelectedCommit: " abc123 "})
 	if err != nil {
 		t.Fatalf("LoadDiff failed: %v", err)
 	}
@@ -401,7 +404,7 @@ func TestLoadDiffReactivatesMCPAfterConnectionError(t *testing.T) {
 			}
 			return nil
 		},
-		loadDiff: func(_ context.Context, endpoint string) (eruncommon.DiffResult, error) {
+		loadDiff: func(_ context.Context, endpoint string, _ uiDiffOptions) (eruncommon.DiffResult, error) {
 			loadCalls++
 			if endpoint != "http://127.0.0.1:17000/mcp" {
 				t.Fatalf("unexpected endpoint: %q", endpoint)
@@ -413,7 +416,7 @@ func TestLoadDiffReactivatesMCPAfterConnectionError(t *testing.T) {
 		},
 	})
 
-	result, err := app.LoadDiff(uiSelection{Tenant: "erun", Environment: "test"})
+	result, err := app.LoadDiff(uiSelection{Tenant: "erun", Environment: "test"}, uiDiffOptions{})
 	if err != nil {
 		t.Fatalf("LoadDiff failed: %v", err)
 	}

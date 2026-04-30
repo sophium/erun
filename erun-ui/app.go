@@ -38,7 +38,7 @@ type erunUIDeps struct {
 	startTerminal        func(startTerminalSessionParams) (terminalSession, error)
 	runIDECommand        func(context.Context, startTerminalSessionParams) (string, error)
 	savePastedImage      func(pastedImageSaveParams) (string, error)
-	loadDiff             func(context.Context, string) (eruncommon.DiffResult, error)
+	loadDiff             func(context.Context, string, uiDiffOptions) (eruncommon.DiffResult, error)
 	loadIdleStatus       func(context.Context, string) (eruncommon.EnvironmentIdleStatus, error)
 	recordActivity       func(eruncommon.EnvironmentActivityParams) error
 	stopCloudContext     func(context.Context, string) (eruncommon.CloudContextStatus, error)

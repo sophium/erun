@@ -122,10 +122,13 @@ export interface AppState {
   filesOpen: boolean;
   sidebarHidden: boolean;
   reviewOpen: boolean;
+  changedFilesOpen: boolean;
   diff: DiffResult | null;
   diffLoading: boolean;
   diffError: string;
   selectedDiffPath: string;
+  selectedReviewScope: 'current' | 'commit' | 'all';
+  selectedReviewCommit: string;
   diffFilter: string;
   collapsedDiffDirs: Set<string>;
   notification: AppNotification | null;

@@ -39,6 +39,11 @@ type uiSelection struct {
 	Debug             bool   `json:"debug,omitempty"`
 }
 
+type uiDiffOptions struct {
+	Scope          string `json:"scope,omitempty"`
+	SelectedCommit string `json:"selectedCommit,omitempty"`
+}
+
 type uiBuildDetails struct {
 	Version string `json:"version"`
 	Commit  string `json:"commit,omitempty"`
