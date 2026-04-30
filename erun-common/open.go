@@ -463,10 +463,10 @@ func LaunchShell(req ShellLaunchParams) error {
 }
 
 func WaitForShellDeployment(req ShellLaunchParams) error {
-	waitCmd := exec.Command("kubectl", kubectlDeploymentWaitArgs(req)...)
-	waitCmd.Stdout = io.Discard
-	waitCmd.Stderr = os.Stderr
-	return waitCmd.Run()
+	if err := runOpenKubectl(kubectlDeploymentWaitArgs(req), io.Discard, os.Stderr); err != nil {
+		return enrichShellDeploymentError(req, err, runOpenKubectl)
+	}
+	return nil
 }
 
 func ExecShell(req ShellLaunchParams) error {
@@ -483,7 +483,7 @@ func ExecShell(req ShellLaunchParams) error {
 		if isShellReattachDeployExit(err) {
 			return ErrShellReattachDeploy
 		}
-		return err
+		return enrichShellDeploymentError(req, err, runOpenKubectl)
 	}
 	return nil
 }
