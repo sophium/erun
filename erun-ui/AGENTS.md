@@ -14,6 +14,16 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 - Keep layout, interaction behavior, DOM state, and terminal presentation in the frontend source tree.
 - Keep terminal session ownership in Go. The frontend should attach to sessions by ID, render buffered output, and send input, but it should not start shells on its own.
 - Prefer small transport-facing Go methods with JSON-safe structs over leaking backend internals into the frontend contract.
+- Keep Wails-exported Go methods as transport-facing facades. They should validate UI inputs, call focused backend workflow logic, and return JSON-safe results.
+- Keep desktop backend UI contracts together when they are generated into frontend bindings. Do not mix JSON-facing structs with process, PTY, or cloud lifecycle behavior in the same owner.
+- Put backend workflow behavior beside the lifecycle state it owns, such as idle status, session management, pasted images, cloud context actions, or window state.
+- Keep Wails event payloads stable unless the frontend contract is intentionally changing and generated bindings are refreshed.
+- Keep `app.go` focused on app composition: dependency defaults, `App` construction, Wails startup/shutdown hooks, and top-level lifecycle wiring.
+- Put terminal session startup, reuse, resizing, input, output streaming, activity recording, close logic, and session keys in terminal/session-owned backend files.
+- Put config editing and conversion in config-owned backend files. Separate global or tenant config handlers from environment config handlers when they mutate different store objects or depend on different lifecycle state.
+- Put state/read-model assembly in read-model-owned backend files. This includes initial UI state, version suggestions, Kubernetes context listing, endpoint formatting, and build details.
+- Keep pasted-image handling near terminal/session ownership when it depends on the active terminal selection.
+- Keep desktop backend moves package-local unless a real shared abstraction is being introduced. Organizational splits inside `erun-ui` should stay in package `main`.
 
 ## Frontend Workflow
 
@@ -24,6 +34,23 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 - Do not patch generated files manually, even temporarily to satisfy a compiler, type checker, import, or test. When generated output is missing or stale, first change the source contract that owns it, then run the appropriate generator.
 - If the required generator is unavailable or failing, stop and report the generator problem instead of hand-writing generated output. For Wails frontend bindings, this means changing the exported Go method or type first, then running `wails generate module` from `erun-ui`.
 - Keep styling intentional and native-desktop oriented. Prefer precise layout and spacing adjustments in CSS over adding more Wails or DOM complexity.
+
+## Frontend Code Organization
+
+- Keep React-facing controllers, hooks, and app services as thin public facades. They should adapt component events, call focused modules, update state, and emit changes rather than accumulating workflow logic.
+- Add new frontend code directly to the module that owns it. Do not use a facade, component, hook, or large file as a temporary staging area.
+- Put app-owned data structures in `model/` when they are shared across frontend modules or express a workflow contract. Use one exported type or interface per file, and re-export them from a local `index.ts` when that keeps imports readable.
+- Do not move generated Wails types or shared UI types from `@/types` into local model folders.
+- Keep model files free of behavior. Put formatting, parsing, normalization, validation, and classification logic in focused helper modules named for the domain they serve.
+- Put grouped mutable bookkeeping into focused classes when maps, sets, buffers, timers, or subscriptions represent one lifecycle concept.
+- Put DOM/layout interactions in focused action modules when they can operate on app state, DOM references, and explicit callbacks.
+- Keep Wails calls near the workflow that owns them unless a backend adapter is being introduced intentionally.
+- Keep storage persistence close to the state transition that owns the persisted value.
+- Name workflow modules for user-visible flows or domain concepts, such as environment, tenant, global configuration, review, terminal, layout, cloud context, or package management.
+- Workflow classes should receive explicit dependencies and callbacks rather than importing component state, mutating global singletons, or reaching back through broad controller references.
+- Keep frontend workflow moves behavior-preserving: preserve timers, busy flags, notifications, emitted state updates, retry state, and focus/resize side effects.
+- Put terminal output buffering, display filtering, and session bookkeeping in terminal-owned modules. Keep controllers responsible only for connecting terminal events to app state.
+- Put review diff navigation and DOM viewport selection in review-owned modules. Keep generic diff parsing and formatting in diff helper modules.
 
 ## Frontend Component Discovery
 

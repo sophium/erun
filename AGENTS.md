@@ -54,6 +54,21 @@ Repository guidance for humans and coding agents working in this repo.
 - Prioritize maintainability and clarity over performance optimizations by default.
 - Prefer established repository patterns over introducing new command, config, testing, or documentation styles. Extend the existing shape first and only add a new pattern when the current one is clearly inadequate.
 - Organize shared command logic by command name when practical. If `build`, `open`, `init`, or `deploy` is shared, prefer files and types that mirror that command shape across `erun-common`, `erun-cli/cmd`, and `erun-mcp`.
+- Add new code directly to the file or module that owns the behavior. Do not use a large file, facade, or transport entrypoint as a temporary staging area.
+- Keep files organized around cohesive responsibilities: contracts, planning, execution, discovery, formatting, persistence, and transport adaptation should not be mixed just because they belong to the same command.
+- When a command has multiple responsibilities, split by stable behavior boundaries rather than by incidental implementation details.
+- Keep public entrypoints thin. They should adapt inputs, call focused logic, and render or return results instead of accumulating domain behavior.
+- Treat large source files as a signal to clarify ownership, not as a goal to reduce line counts mechanically.
+- Move related code together only when it forms a stable responsibility with a clear name and a clear caller. Do not create temporary holding files or vague utility buckets.
+- Preserve public behavior during organization work. Keep output text, defaults, flags, JSON shapes, errors, ordering, and side effects unchanged unless the user explicitly asks for a behavior change.
+- Prefer moving complete contracts, workflow steps, or pure helpers over moving isolated lines. A moved unit should be understandable without reading the old large file first.
+- Keep boundary files as facades only when they are real composition or transport boundaries. A facade should wire dependencies, enforce the public contract, and delegate to focused owners.
+- Put behavior beside the state it owns. If a workflow owns busy flags, request state, retries, timers, or persistence, keep the state transitions in that workflow rather than scattering them across callers.
+- Separate composition from operations. Files that construct applications, commands, transports, or runtimes should not also own read models, config mutation, process/session lifecycle, or domain workflows.
+- Keep transport contracts separate from workflow execution. JSON, CLI, or MCP-facing contract types may live together, but should not be mixed with long-running operations, process management, or domain conversion logic.
+- Keep read-model assembly separate from state mutation. Listing, status aggregation, version suggestions, and display conversion should not be mixed with save/delete/start/stop workflows.
+- Keep helper modules behavior-specific and dependency-light. Prefer pure helpers for normalization, formatting, classification, selection, and ordering.
+- After moving code, remove obsolete wrappers, stale comments, unused helpers, and test-only production shims.
 - Keep CLI and MCP layers thin. Flags, prompts, terminal rendering, MCP schemas, and transport setup belong in the transport modules; shared planning and execution logic belongs in `erun-common`.
 - Do not make one transport invoke the other for shared behavior. If CLI and MCP need the same operation logic, extract it into `erun-common` so third parties can use it directly as a library.
 - Keep trace and preview policy shared, but keep rendering transport-specific. `erun-common` may own plans, command specs, and feedback rules; CLI owns terminal trace formatting and MCP owns structured tool output.
@@ -152,6 +167,12 @@ Repository guidance for humans and coding agents working in this repo.
 - Treat refactoring as behavior-preserving by default.
 - Do not change user-visible output, help text, error text, prompts, logging, defaults, or flags unless the user explicitly asks for that functional change.
 - Before and after a refactor, compare observable behavior with `main` and add or update regression tests for any behavior that must remain unchanged.
+- Before moving code, identify the ownership boundary, the public callers that must stay stable, and the smallest validation set that can prove behavior did not change.
+- During a large-file refactor, move one coherent responsibility at a time and validate after meaningful slices instead of batching unrelated moves into one hard-to-review change.
+- For transport-facing refactors, keep method names, argument shapes, return shapes, event names, and generated-binding contracts stable unless the user explicitly asks for a contract change.
+- Keep moved code in the same package or module when the move is organizational only. Change package boundaries only when the new boundary is part of the intended design.
+- Preserve dependency direction. Shared logic may move downward into `erun-common`; transport-specific logic must not move upward into shared packages.
+- Prefer package-private moved symbols unless an existing external caller needs them. Moving code is not a reason to export it.
 - After refactoring shared code or moving logic across module boundaries, run validation in all modules: `erun-cli`, `erun-common`, and `erun-mcp`. Use each module's local validation commands; this includes `go test ./...` and linting where the module defines lint configuration.
 - Include `erun-ui` in that validation set when the refactor changes desktop wiring, shared code consumed by the desktop app, or package-manager and launcher integration.
 - After refactoring, explicitly look for unused code left behind by the move or simplification and remove it. Do not leave dead wrappers, compatibility helpers, or transport-specific glue in place just because tests still reference it.
