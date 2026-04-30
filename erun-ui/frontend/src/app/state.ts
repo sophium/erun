@@ -6,6 +6,7 @@ import type {
   UIEnvironmentConfig,
   UIIdleStatus,
   UICloudContextInitInput,
+  UIRuntimeResourceStatus,
   UISelection,
   UITenantConfig,
   UITenant,
@@ -43,6 +44,12 @@ export interface EnvironmentDialogState {
   kubernetesContext: string;
   kubernetesContexts: string[];
   kubernetesContextsLoading: boolean;
+  resourceStatus: UIRuntimeResourceStatus | null;
+  resourceStatusLoading: boolean;
+  runtimePod: {
+    cpu: string;
+    memory: string;
+  };
   containerRegistry: string;
   noGit: boolean;
   bootstrap: boolean;
@@ -61,8 +68,12 @@ export interface ManageDialogState {
   versionImage: string;
   config: UIEnvironmentConfig;
   configLoading: boolean;
+  resourceStatus: UIRuntimeResourceStatus | null;
+  resourceStatusLoading: boolean;
   confirmation: string;
   busy: boolean;
+  busyAction: '' | 'save' | 'delete' | 'cloud-context-power';
+  busyTarget: string;
   choicesOpen: boolean;
   error: string;
 }
@@ -141,6 +152,9 @@ export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
   kubernetesContext: '',
   kubernetesContexts: [],
   kubernetesContextsLoading: false,
+  resourceStatus: null,
+  resourceStatusLoading: false,
+  runtimePod: defaultRuntimePodConfig(),
   containerRegistry: 'erunpaas',
   noGit: false,
   bootstrap: false,
@@ -159,8 +173,12 @@ export const defaultManageDialog = (): ManageDialogState => ({
   versionImage: '',
   config: defaultEnvironmentConfig(),
   configLoading: false,
+  resourceStatus: null,
+  resourceStatusLoading: false,
   confirmation: '',
   busy: false,
+  busyAction: '',
+  busyTarget: '',
   choicesOpen: false,
   error: '',
 });
@@ -212,6 +230,7 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
   containerRegistry: '',
   cloudProviderAlias: '',
   runtimeVersion: '',
+  runtimePod: defaultRuntimePodConfig(),
   sshd: {
     enabled: false,
     localPort: 0,
@@ -238,4 +257,9 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
   },
   remote: false,
   snapshot: true,
+});
+
+export const defaultRuntimePodConfig = (): { cpu: string; memory: string } => ({
+  cpu: '4',
+  memory: '8.7',
 });

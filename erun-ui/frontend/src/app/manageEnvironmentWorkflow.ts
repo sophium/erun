@@ -2,6 +2,7 @@ import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import {
   DeleteEnvironment,
   LoadEnvironmentConfig,
+  LoadRuntimeResourceStatus,
   LoadVersionSuggestions,
   SaveEnvironmentConfig,
   StartCloudContext,
@@ -10,6 +11,7 @@ import {
   StopCloudContext,
 } from '../../wailsjs/go/main/App';
 import { readError } from './errors';
+import { runtimePodConfigToDisplay, runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
 import type { HiddenSessionMode } from './model';
 import { defaultEnvironmentConfig, defaultManageDialog, type AppState, type ManageDialogState } from './state';
 import { formatDebugCommand, hiddenSessionBusyMessage } from './terminalStatus';
@@ -25,6 +27,7 @@ import type {
   StartSessionResult,
   UICloudContextStatus,
   UIEnvironmentConfig,
+  UIRuntimeResourceStatus,
   UISelection,
   UIVersionSuggestion,
 } from '@/types';
@@ -68,8 +71,12 @@ export class ManageEnvironmentWorkflow {
         name: selection.environment,
       },
       configLoading: true,
+      resourceStatus: null,
+      resourceStatusLoading: false,
       confirmation: '',
       busy: false,
+      busyAction: '',
+      busyTarget: '',
       choicesOpen: false,
       error: '',
     };
@@ -200,16 +207,59 @@ export class ManageEnvironmentWorkflow {
       const result = (await LoadEnvironmentConfig(selection)) as UIEnvironmentConfig;
       this.state.manageDialog = {
         ...this.state.manageDialog,
-        config: result,
+        config: {
+          ...result,
+          runtimePod: runtimePodConfigToDisplay(result.runtimePod),
+        },
         configLoading: false,
+        resourceStatusLoading: true,
         error: '',
       };
       this.deps.emit();
+      void this.loadResourceStatus(result.kubernetesContext, selection);
     } catch (error) {
       this.state.manageDialog = {
         ...this.state.manageDialog,
         configLoading: false,
         error: readError(error),
+      };
+      this.deps.emit();
+    }
+  }
+
+  private async loadResourceStatus(kubernetesContext: string, selection: UISelection): Promise<void> {
+    if (!this.state.manageDialog.open) {
+      return;
+    }
+    try {
+      const status = (await LoadRuntimeResourceStatus({
+        kubernetesContext,
+        tenant: selection.tenant,
+        environment: selection.environment,
+      })) as UIRuntimeResourceStatus;
+      if (!this.state.manageDialog.open) {
+        return;
+      }
+      this.state.manageDialog = {
+        ...this.state.manageDialog,
+        resourceStatus: status,
+        resourceStatusLoading: false,
+      };
+      this.deps.emit();
+    } catch (error) {
+      if (!this.state.manageDialog.open) {
+        return;
+      }
+      this.state.manageDialog = {
+        ...this.state.manageDialog,
+        resourceStatus: {
+          kubernetesContext,
+          available: false,
+          message: readError(error),
+          cpu: { total: 0, used: 0, free: 0, unit: 'cores', formatted: '' },
+          memory: { total: 0, used: 0, free: 0, unit: 'GiB', formatted: '' },
+        },
+        resourceStatusLoading: false,
       };
       this.deps.emit();
     }
@@ -225,15 +275,30 @@ export class ManageEnvironmentWorkflow {
       this.closeDialog();
       return;
     }
+    const resourceError = runtimeResourceLimitMessage(dialog.config.runtimePod, dialog.resourceStatus);
+    if (resourceError) {
+      this.state.manageDialog = { ...dialog, error: resourceError };
+      this.deps.emit();
+      return;
+    }
 
-    this.state.manageDialog = { ...dialog, busy: true, error: '' };
+    this.state.manageDialog = { ...dialog, busy: true, busyAction: 'save', busyTarget: '', error: '' };
     this.deps.emit();
     try {
-      const result = (await SaveEnvironmentConfig(selection, dialog.config as Parameters<typeof SaveEnvironmentConfig>[1])) as UIEnvironmentConfig;
+      const saveConfig = {
+        ...dialog.config,
+        runtimePod: runtimePodConfigToKubernetes(dialog.config.runtimePod),
+      };
+      const result = (await SaveEnvironmentConfig(selection, saveConfig as Parameters<typeof SaveEnvironmentConfig>[1])) as UIEnvironmentConfig;
       this.state.manageDialog = {
         ...this.state.manageDialog,
-        config: result,
+        config: {
+          ...result,
+          runtimePod: runtimePodConfigToDisplay(result.runtimePod),
+        },
         busy: false,
+        busyAction: '',
+        busyTarget: '',
         error: '',
       };
       this.deps.showNotification('success', `Saved config for ${selection.tenant} / ${selection.environment}.`);
@@ -243,6 +308,8 @@ export class ManageEnvironmentWorkflow {
       this.state.manageDialog = {
         ...this.state.manageDialog,
         busy: false,
+        busyAction: '',
+        busyTarget: '',
         error: message,
       };
       this.deps.showTerminalMessage(message);
@@ -298,7 +365,7 @@ export class ManageEnvironmentWorkflow {
       return;
     }
 
-    this.state.manageDialog = { ...dialog, busy: true, error: '' };
+    this.state.manageDialog = { ...dialog, busy: true, busyAction: 'delete', busyTarget: '', error: '' };
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
     this.deps.showTerminalMessage(`Deleting ${selection.tenant} / ${selection.environment}...`);
@@ -323,7 +390,7 @@ export class ManageEnvironmentWorkflow {
       this.deps.showTerminalMessage(`Deleted ${result.tenant} / ${result.environment}.${warning}`);
     } catch (error) {
       const message = readError(error);
-      this.state.manageDialog = { ...this.state.manageDialog, busy: false, error: message };
+      this.state.manageDialog = { ...this.state.manageDialog, busy: false, busyAction: '', busyTarget: '', error: message };
       this.state.terminalCopyOutput = `Failed to delete ${selection.tenant} / ${selection.environment}: ${message}`;
       this.state.terminalCopyStatus = '';
       this.deps.showTerminalMessage(message);
@@ -400,7 +467,7 @@ export class ManageEnvironmentWorkflow {
     if (dialog.busy || dialog.configLoading || !dialog.selection || !contextName) {
       return;
     }
-    this.state.manageDialog = { ...dialog, busy: true, error: '' };
+    this.state.manageDialog = { ...dialog, busy: true, busyAction: 'cloud-context-power', busyTarget: contextName, error: '' };
     this.deps.emit();
     try {
       const context = (await action(contextName)) as UICloudContextStatus;
@@ -411,6 +478,8 @@ export class ManageEnvironmentWorkflow {
           cloudContext: context,
         },
         busy: false,
+        busyAction: '',
+        busyTarget: '',
         error: '',
       };
       this.deps.showTerminalMessage(`${label} cloud context ${context.kubernetesContext || context.name}.`);
@@ -420,6 +489,8 @@ export class ManageEnvironmentWorkflow {
       this.state.manageDialog = {
         ...this.state.manageDialog,
         busy: false,
+        busyAction: '',
+        busyTarget: '',
         error: message,
       };
       this.deps.showTerminalMessage(message);

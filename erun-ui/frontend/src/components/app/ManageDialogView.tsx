@@ -3,6 +3,7 @@ import { AlertTriangle, Check, ChevronsUpDown, LoaderCircle, Play, Power, Rocket
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
+import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
 import type { AppState } from '@/app/state';
 import { deleteConfirmationValue, normalizeDialogValue, versionChoiceImage, versionChoiceKind, versionChoiceLabel } from '@/app/versionSuggestions';
 import { Button } from '@/components/ui/button';
@@ -14,6 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { UICloudContextStatus, UIPortStatus, UIVersionSuggestion } from '@/types';
 import { cn } from '@/lib/utils';
+import { RuntimeResourceControls } from './RuntimeResourceControls';
 
 const dialogErrorClassName =
   'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
@@ -91,8 +93,9 @@ function ManageConfigFields({ controller, state }: { controller: ERunUIControlle
       <ReadonlyField id="environment-config-kubernetescontext" label="Kubernetes context" value={config.kubernetesContext} />
       <ReadonlyField id="environment-config-containerregistry" label="Container registry" value={config.containerRegistry} />
       <CloudAliasSelect id="environment-config-cloudprovideralias" value={config.cloudProviderAlias} options={config.cloudProviderAliases || []} disabled={dialog.busy} onChange={(cloudProviderAlias) => controller.updateManageConfig({ cloudProviderAlias })} />
-      <CloudContextField context={config.cloudContext} cloudProviderAlias={config.cloudProviderAlias} disabled={dialog.busy || dialog.configLoading} onStart={(name) => void controller.startManageCloudContext(name)} onStop={(name) => void controller.stopManageCloudContext(name)} />
+      <CloudContextField context={config.cloudContext} cloudProviderAlias={config.cloudProviderAlias} disabled={dialog.busy || dialog.configLoading} loading={dialog.busyAction === 'cloud-context-power' && dialog.busyTarget === config.cloudContext?.name} onStart={(name) => void controller.startManageCloudContext(name)} onStop={(name) => void controller.stopManageCloudContext(name)} />
       <RuntimeDeployField configuredVersion={config.runtimeVersion} overrideVersion={dialog.version} suggestions={state.versionSuggestions} choicesOpen={dialog.choicesOpen} disabled={dialog.busy || dialog.configLoading} onValueChange={(version) => controller.updateManageDialog({ version })} onChoicesOpenChange={(open) => controller.setManageVersionChoicesOpen(open)} onSelect={(suggestion) => controller.selectManageVersionSuggestion(suggestion)} onDeploy={() => void controller.submitManageDeploy().catch((error: unknown) => controller.showTerminalMessage(readError(error)))} />
+      <RuntimePodFields controller={controller} dialog={dialog} />
       <CheckboxField id="environment-config-remote" label="Remote environment" checked={config.remote} disabled onChange={() => {}} />
       <CheckboxField id="environment-config-snapshot" label="Snapshot deploy" checked={config.snapshot} disabled={dialog.busy} onChange={(snapshot) => controller.updateManageConfig({ snapshot })} />
       <IdleStopFields controller={controller} dialog={dialog} />
@@ -101,6 +104,20 @@ function ManageConfigFields({ controller, state }: { controller: ERunUIControlle
       <DiagnosticsSection controller={controller} dialog={dialog} />
       <SSHAccessSection controller={controller} dialog={dialog} />
     </>
+  );
+}
+
+function RuntimePodFields({ controller, dialog }: { controller: ERunUIController; dialog: ManageDialog }): React.ReactElement {
+  const config = dialog.config;
+  return (
+    <RuntimeResourceControls
+      idPrefix="environment-config-runtime"
+      value={config.runtimePod}
+      status={dialog.resourceStatus}
+      loading={dialog.resourceStatusLoading}
+      disabled={dialog.busy || dialog.configLoading}
+      onChange={(runtimePod) => controller.updateManageConfig({ runtimePod })}
+    />
   );
 }
 
@@ -168,20 +185,23 @@ function DialogError({ error }: { error: string }): React.ReactElement | null {
 }
 
 function ManageDialogFooter({ controller, dialog, confirmingDelete, deleteEnabled }: { controller: ERunUIController; dialog: ManageDialog; confirmingDelete: boolean; deleteEnabled: boolean }): React.ReactElement {
+  const resourceError = runtimeResourceLimitMessage(dialog.config.runtimePod, dialog.resourceStatus);
+  const saving = dialog.busyAction === 'save';
   return (
     <DialogFooter>
       <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => controller.closeManageDialog()}>Cancel</Button>
       <DeleteButton controller={controller} dialog={dialog} confirmingDelete={confirmingDelete} deleteEnabled={deleteEnabled} />
-      {!confirmingDelete && <Button type="button" size="sm" disabled={dialog.busy || dialog.configLoading} onClick={() => void controller.submitManageConfig().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}>{dialog.busy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}{dialog.busy ? 'Saving...' : 'Save'}</Button>}
+      {!confirmingDelete && <Button type="button" size="sm" disabled={dialog.busy || dialog.configLoading || Boolean(resourceError)} onClick={() => void controller.submitManageConfig().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}>{saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}{saving ? 'Saving...' : 'Save'}</Button>}
     </DialogFooter>
   );
 }
 
 function DeleteButton({ controller, dialog, confirmingDelete, deleteEnabled }: { controller: ERunUIController; dialog: ManageDialog; confirmingDelete: boolean; deleteEnabled: boolean }): React.ReactElement {
+  const deleting = dialog.busyAction === 'delete';
   return (
     <Button type="button" variant={confirmingDelete ? 'destructive' : 'outline'} size="sm" disabled={dialog.busy || (confirmingDelete && !deleteEnabled)} onClick={() => submitOrStartDelete(controller, confirmingDelete)}>
-      {dialog.busy && confirmingDelete ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
-      {dialog.busy && confirmingDelete ? 'Deleting...' : 'Delete'}
+      {deleting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
+      {deleting ? 'Deleting...' : 'Delete'}
     </Button>
   );
 }
@@ -198,12 +218,14 @@ function CloudContextField({
   context,
   cloudProviderAlias,
   disabled,
+  loading,
   onStart,
   onStop,
 }: {
   context: UICloudContextStatus | undefined;
   cloudProviderAlias: string;
   disabled?: boolean;
+  loading?: boolean;
   onStart: (name: string) => void;
   onStop: (name: string) => void;
 }): React.ReactElement {
@@ -235,13 +257,13 @@ function CloudContextField({
         </div>
         {running ? (
           <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => onStop(context.name)}>
-            <Power aria-hidden="true" />
-            Stop
+            {loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Power aria-hidden="true" />}
+            {loading ? 'Stopping...' : 'Stop'}
           </Button>
         ) : (
           <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => onStart(context.name)}>
-            <Play aria-hidden="true" />
-            Start
+            {loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Play aria-hidden="true" />}
+            {loading ? 'Starting...' : 'Start'}
           </Button>
         )}
       </div>

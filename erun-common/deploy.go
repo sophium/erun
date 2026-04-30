@@ -66,6 +66,7 @@ type HelmDeployParams struct {
 	CloudRegion        string
 	CloudInstanceID    string
 	Idle               EnvironmentIdleConfig
+	RuntimePod         RuntimePodResources
 	Version            string
 	Timeout            string
 	Stdout             io.Writer
@@ -92,6 +93,7 @@ type HelmDeploySpec struct {
 	CloudRegion        string
 	CloudInstanceID    string
 	Idle               EnvironmentIdleConfig
+	RuntimePod         RuntimePodResources
 	Version            string
 	Timeout            string
 }
@@ -113,13 +115,14 @@ type HelmReleasePendingOperationError struct {
 }
 
 type KubernetesDeploymentCheckParams struct {
-	Name              string
-	Namespace         string
-	KubernetesContext string
-	ExpectedRepoPath  string
-	ExpectedSSHD      *bool
-	ExpectedMCPPort   int
-	ExpectedSSHPort   int
+	Name               string
+	Namespace          string
+	KubernetesContext  string
+	ExpectedRepoPath   string
+	ExpectedSSHD       *bool
+	ExpectedMCPPort    int
+	ExpectedSSHPort    int
+	ExpectedRuntimePod RuntimePodResources
 }
 
 type DeployTarget struct {
@@ -598,6 +601,7 @@ func newHelmDeploySpec(target OpenResult, deployContext KubernetesDeployContext,
 		SSHPort:            ports.SSH,
 		CloudProviderAlias: target.EnvConfig.CloudProviderAlias,
 		Idle:               target.EnvConfig.Idle,
+		RuntimePod:         NormalizeRuntimePodResources(target.EnvConfig.RuntimePod),
 		Version:            version,
 		Timeout:            DefaultHelmDeploymentTimeout,
 	}, nil
@@ -669,6 +673,7 @@ func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 		CloudRegion:        d.CloudRegion,
 		CloudInstanceID:    d.CloudInstanceID,
 		Idle:               d.Idle,
+		RuntimePod:         NormalizeRuntimePodResources(d.RuntimePod),
 		Version:            d.Version,
 		Timeout:            d.Timeout,
 		Stdout:             stdout,
@@ -706,6 +711,8 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "idle.timeout="+helmIdleTimeout(d.Idle),
 		"--set-string", "idle.workingHours="+helmIdleWorkingHours(d.Idle),
 		"--set", "idle.trafficBytes="+formatHelmInt64(helmIdleTrafficBytes(d.Idle)),
+		"--set-string", "runtime.resources.limits.cpu="+NormalizeRuntimePodResources(d.RuntimePod).CPU,
+		"--set-string", "runtime.resources.limits.memory="+NormalizeRuntimePodResources(d.RuntimePod).Memory,
 		d.ReleaseName,
 		d.ChartPath,
 	)
@@ -1086,6 +1093,7 @@ func DeployHelmChart(params HelmDeployParams) error {
 		CloudRegion:        params.CloudRegion,
 		CloudInstanceID:    params.CloudInstanceID,
 		Idle:               params.Idle,
+		RuntimePod:         params.RuntimePod,
 		Timeout:            params.Timeout,
 	}.command()
 
@@ -1249,7 +1257,11 @@ func CheckKubernetesDeployment(params KubernetesDeploymentCheckParams) (bool, er
 }
 
 func hasExpectedDeploymentSettings(params KubernetesDeploymentCheckParams) bool {
-	return strings.TrimSpace(params.ExpectedRepoPath) != "" || params.ExpectedSSHD != nil || params.ExpectedMCPPort > 0 || params.ExpectedSSHPort > 0
+	return strings.TrimSpace(params.ExpectedRepoPath) != "" ||
+		params.ExpectedSSHD != nil ||
+		params.ExpectedMCPPort > 0 ||
+		params.ExpectedSSHPort > 0 ||
+		params.ExpectedRuntimePod != (RuntimePodResources{})
 }
 
 type deploymentEnvVar struct {
@@ -1277,8 +1289,11 @@ func deploymentMatchesExpectedSettings(params KubernetesDeploymentCheckParams) (
 			Template struct {
 				Spec struct {
 					Containers []struct {
-						Name string             `json:"name"`
-						Env  []deploymentEnvVar `json:"env"`
+						Name      string             `json:"name"`
+						Env       []deploymentEnvVar `json:"env"`
+						Resources struct {
+							Limits RuntimePodResources `json:"limits"`
+						} `json:"resources"`
 					} `json:"containers"`
 				} `json:"spec"`
 			} `json:"template"`
@@ -1292,33 +1307,36 @@ func deploymentMatchesExpectedSettings(params KubernetesDeploymentCheckParams) (
 		if strings.TrimSpace(container.Name) != params.Name {
 			continue
 		}
-		return deploymentContainerMatchesExpectedSettings(params, container.Env), nil
+		return deploymentContainerMatchesExpectedSettings(params, container.Env, container.Resources.Limits), nil
 	}
 
 	return false, nil
 }
 
-func deploymentContainerMatchesExpectedSettings(params KubernetesDeploymentCheckParams, envs []deploymentEnvVar) bool {
+func deploymentContainerMatchesExpectedSettings(params KubernetesDeploymentCheckParams, envs []deploymentEnvVar, limits RuntimePodResources) bool {
 	matches := expectedDeploymentMatches(params)
 	for _, env := range envs {
 		matches.apply(params, env.Name, env.Value)
 	}
+	matches.runtimePod = matchesExpectedRuntimePod(limits, params.ExpectedRuntimePod)
 	return matches.ok()
 }
 
 type deploymentExpectedMatches struct {
-	repoPath bool
-	sshd     bool
-	mcpPort  bool
-	sshPort  bool
+	repoPath   bool
+	sshd       bool
+	mcpPort    bool
+	sshPort    bool
+	runtimePod bool
 }
 
 func expectedDeploymentMatches(params KubernetesDeploymentCheckParams) deploymentExpectedMatches {
 	return deploymentExpectedMatches{
-		repoPath: strings.TrimSpace(params.ExpectedRepoPath) == "",
-		sshd:     params.ExpectedSSHD == nil,
-		mcpPort:  params.ExpectedMCPPort <= 0,
-		sshPort:  params.ExpectedSSHPort <= 0,
+		repoPath:   strings.TrimSpace(params.ExpectedRepoPath) == "",
+		sshd:       params.ExpectedSSHD == nil,
+		mcpPort:    params.ExpectedMCPPort <= 0,
+		sshPort:    params.ExpectedSSHPort <= 0,
+		runtimePod: params.ExpectedRuntimePod == (RuntimePodResources{}),
 	}
 }
 
@@ -1336,7 +1354,7 @@ func (m *deploymentExpectedMatches) apply(params KubernetesDeploymentCheckParams
 }
 
 func (m deploymentExpectedMatches) ok() bool {
-	return m.repoPath && m.sshd && m.mcpPort && m.sshPort
+	return m.repoPath && m.sshd && m.mcpPort && m.sshPort && m.runtimePod
 }
 
 func matchesExpectedRepoPath(value, expected string) bool {
@@ -1358,6 +1376,24 @@ func matchesExpectedPort(value string, expected int) bool {
 		return true
 	}
 	return strings.TrimSpace(value) == fmt.Sprintf("%d", expected)
+}
+
+func matchesExpectedRuntimePod(value, expected RuntimePodResources) bool {
+	if expected == (RuntimePodResources{}) {
+		return true
+	}
+	value = NormalizeRuntimePodResources(value)
+	expected = NormalizeRuntimePodResources(expected)
+	valueCPU, valueCPUErr := ParseKubernetesCPUToMilli(value.CPU)
+	expectedCPU, expectedCPUErr := ParseKubernetesCPUToMilli(expected.CPU)
+	valueMemory, valueMemoryErr := ParseKubernetesMemoryToMi(value.Memory)
+	expectedMemory, expectedMemoryErr := ParseKubernetesMemoryToMi(expected.Memory)
+	return valueCPUErr == nil &&
+		expectedCPUErr == nil &&
+		valueMemoryErr == nil &&
+		expectedMemoryErr == nil &&
+		valueCPU == expectedCPU &&
+		valueMemory == expectedMemory
 }
 
 func resolveKubernetesDeployValuesFile(chartPath, environment string) (string, error) {

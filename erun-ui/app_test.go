@@ -508,13 +508,15 @@ func TestBuildInitArgsIncludesRuntimeVersion(t *testing.T) {
 		Environment:       " remote ",
 		Version:           " 1.0.19 ",
 		RuntimeImage:      " erun-devops ",
+		RuntimeCPU:        " 6 ",
+		RuntimeMemory:     " 12Gi ",
 		KubernetesContext: " orbstack ",
 		ContainerRegistry: " erunpaas ",
 		NoGit:             true,
 		Bootstrap:         true,
 		SetDefaultTenant:  true,
 	})
-	want := []string{"init", "erun", "remote", "--remote", "--version", "1.0.19", "--runtime-image", "erun-devops", "--kubernetes-context", "orbstack", "--container-registry", "erunpaas", "--set-default-tenant=true", "--confirm-environment=true", "--no-git", "--bootstrap"}
+	want := []string{"init", "erun", "remote", "--remote", "--version", "1.0.19", "--runtime-image", "erun-devops", "--runtime-cpu", "6", "--runtime-memory", "12Gi", "--kubernetes-context", "orbstack", "--container-registry", "erunpaas", "--set-default-tenant=true", "--confirm-environment=true", "--no-git", "--bootstrap"}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected args length: got %+v want %+v", got, want)
 	}
@@ -1221,6 +1223,10 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 				ContainerRegistry:  "registry.example/old",
 				CloudProviderAlias: "team-cloud",
 				RuntimeVersion:     "1.0.0",
+				RuntimePod: eruncommon.RuntimePodResources{
+					CPU:    "4",
+					Memory: "8916Mi",
+				},
 				SSHD: eruncommon.SSHDConfig{
 					Enabled:       false,
 					LocalPort:     60022,
@@ -1246,6 +1252,10 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 		ContainerRegistry:  " registry.example/team ",
 		CloudProviderAlias: " other-cloud ",
 		RuntimeVersion:     " 1.2.3 ",
+		RuntimePod: uiRuntimePodConfig{
+			CPU:    "6",
+			Memory: "12Gi",
+		},
 		SSHD: uiSSHDConfig{
 			Enabled:       true,
 			LocalPort:     62222,
@@ -1271,6 +1281,9 @@ func assertLoadedEnvironmentConfig(t *testing.T, loaded uiEnvironmentConfig, pro
 	if loaded.CloudContext == nil || loaded.CloudContext.Name != "team-context" || loaded.CloudContext.Status != eruncommon.CloudContextStatusStopped {
 		t.Fatalf("expected linked cloud context, got %+v", loaded.CloudContext)
 	}
+	if loaded.RuntimePod.CPU != "4" || loaded.RuntimePod.Memory != "8916Mi" {
+		t.Fatalf("unexpected loaded runtime pod config: %+v", loaded.RuntimePod)
+	}
 	assertLocalPorts(t, loaded.LocalPorts)
 }
 
@@ -1279,6 +1292,9 @@ func assertSavedEnvironmentConfig(t *testing.T, saved uiEnvironmentConfig, proje
 
 	if saved.RepoPath != projectRoot || saved.KubernetesContext != "cluster-old" || saved.ContainerRegistry != "registry.example/old" || saved.RuntimeVersion != "1.0.0" || saved.CloudProviderAlias != "other-cloud" {
 		t.Fatalf("unexpected saved config: %+v", saved)
+	}
+	if saved.RuntimePod.CPU != "6" || saved.RuntimePod.Memory != "12Gi" {
+		t.Fatalf("unexpected saved runtime pod config: %+v", saved.RuntimePod)
 	}
 	assertLocalPorts(t, saved.LocalPorts)
 }
@@ -1296,6 +1312,9 @@ func assertStoredEnvironmentConfig(t *testing.T, stored eruncommon.EnvConfig, pr
 
 	if stored.RepoPath != projectRoot || stored.Remote || stored.RuntimeVersion != "1.0.0" || stored.CloudProviderAlias != "other-cloud" || stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" || stored.Snapshot == nil || *stored.Snapshot {
 		t.Fatalf("unexpected stored config: %+v", stored)
+	}
+	if stored.RuntimePod.CPU != "6" || stored.RuntimePod.Memory != "12Gi" {
+		t.Fatalf("unexpected stored runtime pod config: %+v", stored.RuntimePod)
 	}
 }
 

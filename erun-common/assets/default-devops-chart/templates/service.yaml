@@ -3,14 +3,24 @@
 {{- $worktreePath := printf "/home/erun/git/%s" $worktreeRepoName -}}
 {{- $mcpPort := default 17000 .Values.mcpPort -}}
 {{- $sshPort := default 17022 .Values.sshPort -}}
-{{- $idleTimeout := default "5m0s" .Values.idle.timeout -}}
-{{- $idleWorkingHours := default "08:00-20:00" .Values.idle.workingHours -}}
-{{- $idleTrafficBytes := default 0 .Values.idle.trafficBytes -}}
+{{- $idle := default dict .Values.idle -}}
+{{- $idleTimeout := default "5m0s" $idle.timeout -}}
+{{- $idleWorkingHours := default "08:00-20:00" $idle.workingHours -}}
+{{- $idleTrafficBytes := default 0 $idle.trafficBytes -}}
+{{- $runtime := default dict .Values.runtime -}}
+{{- $runtimeResources := default dict $runtime.resources -}}
+{{- $runtimeLimits := default dict $runtimeResources.limits -}}
+{{- $runtimeRequests := default dict $runtimeResources.requests -}}
+{{- $runtimeCPU := default "4" $runtimeLimits.cpu -}}
+{{- $runtimeMemory := default "8916Mi" $runtimeLimits.memory -}}
+{{- $runtimeRequestCPU := default "0.25" $runtimeRequests.cpu -}}
+{{- $runtimeRequestMemory := default "1024Mi" $runtimeRequests.memory -}}
 {{- $managedCloud := default false .Values.managedCloud -}}
-{{- $cloudContextName := default "" .Values.cloudContext.name -}}
-{{- $cloudProviderAlias := default "" .Values.cloudContext.providerAlias -}}
-{{- $cloudRegion := default "" .Values.cloudContext.region -}}
-{{- $cloudInstanceID := default "" .Values.cloudContext.instanceId -}}
+{{- $cloudContext := default dict .Values.cloudContext -}}
+{{- $cloudContextName := default "" $cloudContext.name -}}
+{{- $cloudProviderAlias := default "" $cloudContext.providerAlias -}}
+{{- $cloudRegion := default "" $cloudContext.region -}}
+{{- $cloudInstanceID := default "" $cloudContext.instanceId -}}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -196,11 +206,11 @@ spec:
               name: ssh
           resources:
             limits:
-              cpu: "4"
-              memory: "8916Mi"
+              cpu: {{ $runtimeCPU | quote }}
+              memory: {{ $runtimeMemory | quote }}
             requests:
-              cpu: "0.25"
-              memory: "1024Mi"
+              cpu: {{ $runtimeRequestCPU | quote }}
+              memory: {{ $runtimeRequestMemory | quote }}
           volumeMounts:
             - name: erun-home
               mountPath: /home/erun

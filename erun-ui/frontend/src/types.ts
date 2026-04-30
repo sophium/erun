@@ -19,6 +19,8 @@ export interface UISelection {
   environment: string;
   version?: string;
   runtimeImage?: string;
+  runtimeCpu?: string;
+  runtimeMemory?: string;
   kubernetesContext?: string;
   containerRegistry?: string;
   noGit?: boolean;
@@ -154,6 +156,7 @@ export interface UIEnvironmentConfig {
   cloudProviderAliases?: string[];
   cloudContext?: UICloudContextStatus;
   runtimeVersion: string;
+  runtimePod: UIRuntimePodConfig;
   sshd: UISSHDConfig;
   idle: {
     timeout: string;
@@ -163,6 +166,34 @@ export interface UIEnvironmentConfig {
   localPorts: UIEnvironmentLocalPorts;
   remote: boolean;
   snapshot: boolean;
+}
+
+export interface UIRuntimePodConfig {
+  cpu: string;
+  memory: string;
+}
+
+export interface UIRuntimeResourceStatus {
+  kubernetesContext: string;
+  available: boolean;
+  message?: string;
+  cpu: UIRuntimeResourceMetric;
+  memory: UIRuntimeResourceMetric;
+  nodes?: UIRuntimeResourceNode[];
+}
+
+export interface UIRuntimeResourceMetric {
+  total: number;
+  used: number;
+  free: number;
+  unit: string;
+  formatted: string;
+}
+
+export interface UIRuntimeResourceNode {
+  name: string;
+  cpu: UIRuntimeResourceMetric;
+  memory: UIRuntimeResourceMetric;
 }
 
 export interface StartSessionResult {

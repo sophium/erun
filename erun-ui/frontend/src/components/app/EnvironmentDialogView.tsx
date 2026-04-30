@@ -3,6 +3,7 @@ import { Check, ChevronsUpDown, FolderPlus, LoaderCircle, Rocket } from 'lucide-
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
+import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
 import type { AppState } from '@/app/state';
 import { loadSavedPastContainerRegistries, loadSavedPastEnvironments, loadSavedPastTenants } from '@/app/storage';
 import { findVersionSuggestion, selectedVersionSourceText } from '@/app/versionSuggestions';
@@ -13,6 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
+import { RuntimeResourceControls } from './RuntimeResourceControls';
 import { VersionField } from './VersionField';
 
 const dialogErrorClassName =
@@ -146,6 +148,7 @@ function EnvironmentCreateFields({ controller, dialog }: { controller: ERunUICon
   return (
     <>
       <KubernetesContextSelect controller={controller} dialog={dialog} />
+      <RuntimePodFields controller={controller} dialog={dialog} />
       <EditableComboField id="environment-container-registry" label="Container registry" value={dialog.containerRegistry} suggestions={containerRegistrySuggestions} required disabled={dialog.busy} onValueChange={(containerRegistry) => controller.updateEnvironmentDialog({ containerRegistry })} />
       <EnvironmentCreateChecks controller={controller} dialog={dialog} />
     </>
@@ -167,6 +170,19 @@ function KubernetesContextSelect({ controller, dialog }: { controller: ERunUICon
         {kubernetesContextOptions(dialog)}
       </select>
     </div>
+  );
+}
+
+function RuntimePodFields({ controller, dialog }: { controller: ERunUIController; dialog: EnvironmentDialog }): React.ReactElement {
+  return (
+    <RuntimeResourceControls
+      idPrefix="environment-runtime"
+      value={dialog.runtimePod}
+      status={dialog.resourceStatus}
+      loading={dialog.resourceStatusLoading}
+      disabled={dialog.busy}
+      onChange={(runtimePod) => controller.updateEnvironmentDialog({ runtimePod })}
+    />
   );
 }
 
@@ -195,7 +211,8 @@ function DialogError({ error }: { error: string }): React.ReactElement | null {
 
 function EnvironmentDialogFooter({ controller, dialog }: { controller: ERunUIController; dialog: EnvironmentDialog }): React.ReactElement {
   const isDeploy = dialog.actionMode === 'deploy';
-  const disabled = dialog.busy || (!isDeploy && (dialog.kubernetesContextsLoading || dialog.kubernetesContexts.length === 0));
+  const resourceBlocked = dialog.resourceStatusLoading || !dialog.resourceStatus?.available || Boolean(runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus));
+  const disabled = dialog.busy || (!isDeploy && (dialog.kubernetesContextsLoading || dialog.kubernetesContexts.length === 0 || resourceBlocked));
   return (
     <DialogFooter>
       <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => controller.closeEnvironmentDialog()}>Cancel</Button>

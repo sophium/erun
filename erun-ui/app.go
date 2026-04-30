@@ -31,6 +31,7 @@ type erunUIDeps struct {
 	cloudContextDeps     eruncommon.CloudContextDependencies
 	deleteNamespace      eruncommon.NamespaceDeleterFunc
 	listKubeContexts     func() ([]string, error)
+	loadResourceStatus   func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
 	ensureMCP            func(context.Context, eruncommon.OpenResult) error
 	canConnectLocalPort  func(int) bool
 	setRemoteCloudAlias  func(context.Context, string, string, string, string) (eruncommon.EnvConfig, error)
@@ -96,6 +97,9 @@ func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
 func withDefaultRuntimeDeps(deps erunUIDeps) erunUIDeps {
 	if deps.listKubeContexts == nil {
 		deps.listKubeContexts = listKubernetesContexts
+	}
+	if deps.loadResourceStatus == nil {
+		deps.loadResourceStatus = loadRuntimeResourceStatus
 	}
 	if deps.ensureMCP == nil {
 		deps.ensureMCP = func(ctx context.Context, result eruncommon.OpenResult) error {
