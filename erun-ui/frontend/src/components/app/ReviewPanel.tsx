@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { ChevronDown, ChevronRight, FileDiff, RefreshCw, Search } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileDiff, GitBranch, GitCommitHorizontal, RefreshCw, Search } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { compactDiffError, filterDiffTree, visibleDiffTreeNodes } from '@/app/diffUtils';
@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import type { DiffTreeNode } from '@/types';
+import type { DiffCommit, DiffTreeNode } from '@/types';
 import { DiffList, ReviewStatus } from './DiffList';
 import { FileIcon } from './FileIcon';
 import { IconTooltip } from './IconTooltip';
@@ -79,21 +79,115 @@ function ChangedFilesAside({ controller, state, visible }: { controller: ERunUIC
       )}
     >
       <ChangedFilesHeader controller={controller} state={state} />
-      <Label className="box-border flex h-[38px] items-center gap-2 rounded-[var(--radius)] border border-input bg-background px-3 text-muted-foreground [&_svg]:size-[18px] [&_svg]:flex-none">
-        <Search aria-hidden="true" />
-        <Input
-          className="h-auto min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-foreground shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0"
-          value={state.diffFilter}
-          type="search"
-          placeholder="Filter files..."
-          autoComplete="off"
-          onChange={(event) => controller.setDiffFilter(event.target.value)}
-        />
-      </Label>
-      <div className="min-h-0 flex-1 overflow-auto overscroll-contain pt-3.5">
-        <ChangedFileTree controller={controller} state={state} />
-      </div>
+      <ReviewRangeControl controller={controller} state={state} />
+      {state.changedFilesOpen ? (
+        <>
+          <Label className="box-border flex h-[38px] items-center gap-2 rounded-[var(--radius)] border border-input bg-background px-3 text-muted-foreground [&_svg]:size-[18px] [&_svg]:flex-none">
+            <Search aria-hidden="true" />
+            <Input
+              className="h-auto min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-foreground shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0"
+              value={state.diffFilter}
+              type="search"
+              placeholder="Filter files..."
+              autoComplete="off"
+              onChange={(event) => controller.setDiffFilter(event.target.value)}
+            />
+          </Label>
+          <div className="min-h-0 flex-1 overflow-auto overscroll-contain pt-3.5">
+            <ChangedFileTree controller={controller} state={state} />
+          </div>
+        </>
+      ) : null}
     </aside>
+  );
+}
+
+function ReviewRangeControl({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement | null {
+  const commits = [...(state.diff?.reviewCommits || [])].reverse();
+  const base = state.diff?.reviewBase;
+  if (!base?.commit && commits.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mb-3.5 flex min-h-0 flex-col gap-2 border-b border-border pb-3.5">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <div className="text-xs font-semibold text-foreground">Review layers</div>
+        <div className="text-[11px] leading-4 text-muted-foreground">Newest changes first. Each lower layer includes more history.</div>
+      </div>
+      <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+        <GitBranch className="size-3.5 flex-none" aria-hidden="true" />
+        <span className="flex-none">Merge target</span>
+        <span className="min-w-0 truncate font-medium text-foreground">{base?.branch || 'branch base'}</span>
+        {base?.shortCommit ? <span className="flex-none font-mono">{base.shortCommit}</span> : null}
+      </div>
+      <div className="relative flex min-h-0 flex-col gap-1 before:absolute before:top-4 before:bottom-4 before:left-[15px] before:w-px before:bg-border">
+        <ReviewBoundaryButton
+          label="Current local changes"
+          detail="local only"
+          selected={state.selectedReviewScope === 'current'}
+          disabled={state.diffLoading}
+          onClick={() => controller.selectReviewRange('current')}
+        />
+        {commits.length > 0 ? (
+          <div className="flex max-h-[220px] min-h-0 flex-col gap-1 overflow-auto pr-1">
+            {commits.map((commit) => (
+              <ReviewCommitButton key={commit.hash} controller={controller} state={state} commit={commit} />
+            ))}
+          </div>
+        ) : null}
+        <ReviewBoundaryButton
+          label="All branch changes"
+          detail="base..current"
+          selected={state.selectedReviewScope === 'all'}
+          disabled={state.diffLoading}
+          onClick={() => controller.selectReviewRange('all')}
+        />
+      </div>
+    </div>
+  );
+}
+
+function ReviewCommitButton({ controller, state, commit }: { controller: ERunUIController; state: AppState; commit: DiffCommit }): React.ReactElement {
+  return (
+    <ReviewBoundaryButton
+      label={commit.subject || commit.shortHash}
+      detail={`from ${commit.shortHash}`}
+      selected={state.selectedReviewScope === 'commit' && state.selectedReviewCommit === commit.hash}
+      disabled={state.diffLoading}
+      onClick={() => controller.selectReviewRange('commit', commit.hash)}
+    />
+  );
+}
+
+function ReviewBoundaryButton({
+  label,
+  detail,
+  selected,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  detail: string;
+  selected: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      className={cn(
+        'relative grid h-8 w-full cursor-pointer grid-cols-[16px_minmax(0,1fr)_auto] items-center gap-2 rounded-[var(--radius)] border-0 bg-background px-2 text-left text-xs text-foreground hover:bg-accent disabled:cursor-default disabled:opacity-60',
+        selected && 'bg-primary text-primary-foreground hover:bg-primary',
+      )}
+      disabled={disabled}
+      aria-pressed={selected}
+      onClick={onClick}
+    >
+      <GitCommitHorizontal className="size-3.5 flex-none" aria-hidden="true" />
+      <span className="min-w-0 truncate">{label}</span>
+      <span className={cn('flex-none font-mono text-[11px]', selected ? 'text-primary-foreground/80' : 'text-muted-foreground')}>{detail}</span>
+    </button>
   );
 }
 
@@ -103,10 +197,12 @@ function ChangedFilesHeader({ controller, state }: { controller: ERunUIControlle
       <button
         className="inline-flex min-w-0 flex-1 cursor-pointer items-center gap-1 overflow-hidden border-0 bg-transparent p-0 text-sm font-semibold whitespace-nowrap text-foreground [&_svg]:size-4 [&_svg]:flex-none [&_svg]:text-muted-foreground"
         type="button"
+        aria-expanded={state.changedFilesOpen}
+        onClick={() => controller.toggleChangedFiles()}
       >
         <FileDiff aria-hidden="true" />
         Changed files <span className="flex-none text-muted-foreground">{state.diff?.summary?.fileCount || 0}</span>
-        <ChevronDown aria-hidden="true" />
+        <ChevronDown className={cn('transition-transform', !state.changedFilesOpen && '-rotate-90')} aria-hidden="true" />
       </button>
       <div className="flex min-w-0 flex-none items-center gap-2">
         <IconTooltip label="Refresh diff">

@@ -15,6 +15,11 @@ type DiffResult struct {
 	Summary          DiffSummary    `json:"summary"`
 	Files            []DiffFile     `json:"files,omitempty"`
 	Tree             []DiffTreeNode `json:"tree,omitempty"`
+	ReviewBase       DiffReviewBase `json:"reviewBase,omitempty"`
+	ReviewCommits    []DiffCommit   `json:"reviewCommits,omitempty"`
+	Scope            string         `json:"scope,omitempty"`
+	SelectedCommit   string         `json:"selectedCommit,omitempty"`
+	IncludesWorktree bool           `json:"includesWorktree,omitempty"`
 }
 
 type DiffSummary struct {
@@ -61,6 +66,25 @@ type DiffTreeNode struct {
 	Deletions  int    `json:"deletions,omitempty"`
 }
 
+type DiffReviewBase struct {
+	Branch      string `json:"branch,omitempty"`
+	Commit      string `json:"commit,omitempty"`
+	ShortCommit string `json:"shortCommit,omitempty"`
+}
+
+type DiffCommit struct {
+	Hash      string `json:"hash"`
+	ShortHash string `json:"shortHash"`
+	Subject   string `json:"subject"`
+	Author    string `json:"author"`
+	Date      string `json:"date"`
+}
+
+type DiffOptions struct {
+	Scope          string `json:"scope,omitempty"`
+	SelectedCommit string `json:"selectedCommit,omitempty"`
+}
+
 type diffTreeBuildNode struct {
 	Name      string
 	Path      string
@@ -91,7 +115,158 @@ func ResolveGitDiff(projectRoot string, runGit GitCommandRunnerFunc) (DiffResult
 
 	result := ParseGitDiff(stdout.String())
 	result.WorkingDirectory = projectRoot
+	result.IncludesWorktree = true
 	return result, nil
+}
+
+func ResolveGitDiffWithOptions(projectRoot string, options DiffOptions, runGit GitCommandRunnerFunc) (DiffResult, error) {
+	projectRoot = strings.TrimSpace(projectRoot)
+	if projectRoot == "" {
+		return DiffResult{}, fmt.Errorf("project root is required")
+	}
+	if runGit == nil {
+		runGit = GitCommandRunner
+	}
+
+	base, baseFound, err := resolveGitDiffReviewBase(projectRoot, runGit)
+	if err != nil {
+		return DiffResult{}, err
+	}
+	commits, err := resolveGitDiffReviewCommits(projectRoot, base, baseFound, runGit)
+	if err != nil {
+		return DiffResult{}, err
+	}
+
+	scope := normalizeDiffScope(options.Scope)
+	selectedCommit := strings.TrimSpace(options.SelectedCommit)
+	stdout := new(bytes.Buffer)
+	diffArgs := gitDiffReviewArgs(base.Commit, baseFound, scope, selectedCommit)
+	stderr := new(bytes.Buffer)
+	if err := runGit(projectRoot, stdout, stderr, diffArgs...); err != nil {
+		return DiffResult{}, fmt.Errorf("git diff: %w%s", err, formatGitCommandStderr(stderr.String()))
+	}
+	if err := appendUntrackedGitDiff(projectRoot, stdout, runGit); err != nil {
+		return DiffResult{}, err
+	}
+
+	result := ParseGitDiff(stdout.String())
+	result.WorkingDirectory = projectRoot
+	result.ReviewBase = base
+	result.ReviewCommits = commits
+	result.Scope = scope
+	result.SelectedCommit = selectedCommit
+	result.IncludesWorktree = true
+	return result, nil
+}
+
+func normalizeDiffScope(scope string) string {
+	switch strings.TrimSpace(scope) {
+	case "all", "commit":
+		return strings.TrimSpace(scope)
+	default:
+		return "current"
+	}
+}
+
+func gitDiffReviewArgs(baseCommit string, baseFound bool, scope, selectedCommit string) []string {
+	args := []string{"diff", "--no-color", "--no-ext-diff"}
+	switch scope {
+	case "all":
+		if baseFound {
+			args = append(args, baseCommit)
+		}
+		return args
+	case "commit":
+		if selectedCommit != "" {
+			args = append(args, selectedCommit+"^")
+		}
+		return args
+	default:
+		return args
+	}
+}
+
+func resolveGitDiffReviewBase(projectRoot string, runGit GitCommandRunnerFunc) (DiffReviewBase, bool, error) {
+	var selected DiffReviewBase
+	selectedDistance := -1
+	for _, branch := range []string{"origin/HEAD", "origin/main", "origin/develop", "main", "develop"} {
+		commit, err := gitOutput(projectRoot, runGit, "merge-base", "HEAD", branch)
+		if err != nil || commit == "" {
+			continue
+		}
+		distance, err := gitOutput(projectRoot, runGit, "rev-list", "--count", commit+"..HEAD")
+		if err != nil {
+			continue
+		}
+		parsedDistance, err := strconv.Atoi(strings.TrimSpace(distance))
+		if err != nil {
+			continue
+		}
+		shortCommit, _ := gitOutput(projectRoot, runGit, "rev-parse", "--short", commit)
+		displayBranch := resolveGitDiffReviewBaseBranch(projectRoot, branch, runGit)
+		if selectedDistance < 0 || parsedDistance < selectedDistance {
+			selectedDistance = parsedDistance
+			selected = DiffReviewBase{Branch: displayBranch, Commit: commit, ShortCommit: shortCommit}
+		}
+	}
+	if selected.Commit != "" {
+		return selected, true, nil
+	}
+	return DiffReviewBase{}, false, nil
+}
+
+func resolveGitDiffReviewBaseBranch(projectRoot, branch string, runGit GitCommandRunnerFunc) string {
+	if branch != "origin/HEAD" {
+		return branch
+	}
+	resolved, err := gitOutput(projectRoot, runGit, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	if err != nil || resolved == "" {
+		return branch
+	}
+	return resolved
+}
+
+func resolveGitDiffReviewCommits(projectRoot string, base DiffReviewBase, baseFound bool, runGit GitCommandRunnerFunc) ([]DiffCommit, error) {
+	if !baseFound {
+		return nil, nil
+	}
+	output, err := gitOutput(projectRoot, runGit, "log", "--reverse", "--date=iso-strict", "--pretty=format:%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1e", base.Commit+"..HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("git log: %w", err)
+	}
+	return parseGitDiffReviewCommits(output), nil
+}
+
+func gitOutput(projectRoot string, runGit GitCommandRunnerFunc, args ...string) (string, error) {
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	if err := runGit(projectRoot, stdout, stderr, args...); err != nil {
+		return "", fmt.Errorf("%w%s", err, formatGitCommandStderr(stderr.String()))
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+func parseGitDiffReviewCommits(output string) []DiffCommit {
+	output = strings.TrimSuffix(output, "\x1e")
+	if output == "" {
+		return nil
+	}
+	records := strings.Split(output, "\x1e")
+	commits := make([]DiffCommit, 0, len(records))
+	for _, record := range records {
+		fields := strings.SplitN(strings.TrimSpace(record), "\x1f", 5)
+		if len(fields) != 5 {
+			continue
+		}
+		commits = append(commits, DiffCommit{
+			Hash:      fields[0],
+			ShortHash: fields[1],
+			Author:    fields[2],
+			Date:      fields[3],
+			Subject:   fields[4],
+		})
+	}
+	return commits
 }
 
 func appendUntrackedGitDiff(projectRoot string, rawDiff *bytes.Buffer, runGit GitCommandRunnerFunc) error {

@@ -133,10 +133,13 @@ export class ERunUIController {
     filesOpen: loadSavedFilesOpen(),
     sidebarHidden: false,
     reviewOpen: false,
+    changedFilesOpen: true,
     diff: null,
     diffLoading: false,
     diffError: '',
     selectedDiffPath: '',
+    selectedReviewScope: 'current',
+    selectedReviewCommit: '',
     diffFilter: '',
     collapsedDiffDirs: new Set<string>(),
     notification: null,
@@ -382,6 +385,11 @@ export class ERunUIController {
   }
 
   private prepareOpenSelection(selection: UISelection, runSelection: UISelection, previousSessionId: number, previousKnownSessionId: number): void {
+    if (selectionKey(selection) !== selectionKey(this.state.selected || { tenant: '', environment: '' })) {
+      this.state.selectedReviewScope = 'current';
+      this.state.selectedReviewCommit = '';
+      this.state.selectedDiffPath = '';
+    }
     this.state.selected = selection;
     this.state.idleStatus = null;
     if (!isNewSessionSelection(previousSessionId, previousKnownSessionId)) {
@@ -871,6 +879,21 @@ export class ERunUIController {
     this.emit();
   }
 
+  toggleChangedFiles(): void {
+    this.state.changedFilesOpen = !this.state.changedFilesOpen;
+    this.emit();
+  }
+
+  selectReviewRange(scope: AppState['selectedReviewScope'], hash = ''): void {
+    const selected = hash.trim();
+    if ((scope === this.state.selectedReviewScope && selected === this.state.selectedReviewCommit) || this.state.diffLoading) {
+      return;
+    }
+    this.state.selectedReviewScope = scope;
+    this.state.selectedReviewCommit = selected;
+    void this.loadReviewDiff();
+  }
+
   async loadReviewDiff(): Promise<void> {
     if (!this.state.selected) {
       return;
@@ -879,8 +902,13 @@ export class ERunUIController {
     this.state.diffError = '';
     this.emit();
     try {
-      const diff = (await LoadDiff(this.state.selected)) as DiffResult;
+      const diff = (await LoadDiff(this.state.selected, {
+        scope: this.state.selectedReviewScope,
+        selectedCommit: this.state.selectedReviewCommit,
+      })) as DiffResult;
       this.state.diff = diff;
+      this.state.selectedReviewScope = diff.scope || 'current';
+      this.state.selectedReviewCommit = diff.selectedCommit || '';
       this.state.selectedDiffPath = chooseSelectedDiffPath(diff, this.state.selectedDiffPath);
     } catch (error: unknown) {
       this.state.diff = null;

@@ -398,8 +398,10 @@ func (a *App) SavePastedImage(payload pastedImagePayload) (pastedImageResult, er
 	return pastedImageResult{Path: path}, nil
 }
 
-func (a *App) LoadDiff(selection uiSelection) (eruncommon.DiffResult, error) {
+func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (eruncommon.DiffResult, error) {
 	selection = normalizeSelection(selection)
+	options.Scope = strings.TrimSpace(options.Scope)
+	options.SelectedCommit = strings.TrimSpace(options.SelectedCommit)
 	if selection.Tenant == "" || selection.Environment == "" {
 		return eruncommon.DiffResult{}, fmt.Errorf("tenant and environment are required")
 	}
@@ -418,14 +420,14 @@ func (a *App) LoadDiff(selection uiSelection) (eruncommon.DiffResult, error) {
 		return eruncommon.DiffResult{}, err
 	}
 	endpoint := mcpEndpointForOpenResult(result)
-	diff, err := a.deps.loadDiff(ctx, endpoint)
+	diff, err := a.deps.loadDiff(ctx, endpoint, options)
 	if err == nil || a.deps.ensureMCP == nil {
 		return diff, err
 	}
 	if ensureErr := a.deps.ensureMCP(ctx, result); ensureErr != nil {
 		return eruncommon.DiffResult{}, err
 	}
-	return a.deps.loadDiff(ctx, endpoint)
+	return a.deps.loadDiff(ctx, endpoint, options)
 }
 
 func (a *App) ensureMCPAvailable(ctx context.Context, result eruncommon.OpenResult) error {

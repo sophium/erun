@@ -108,21 +108,185 @@ func TestResolveGitDiffRunsNoColorDiff(t *testing.T) {
 		return writeResolveGitDiffOutput(t, stdout, calls, args)
 	})
 	requireNoError(t, err, "ResolveGitDiff failed")
-	requireCondition(t, gotDir == "/tmp/project" && len(calls) == 2 && calls[0] == "diff --no-color --no-ext-diff" && calls[1] == "ls-files --others --exclude-standard -z", "unexpected git invocation: dir=%q calls=%+v", gotDir, calls)
+	wantCalls := []string{
+		"diff --no-color --no-ext-diff",
+		"ls-files --others --exclude-standard -z",
+	}
+	requireCondition(t, gotDir == "/tmp/project" && strings.Join(calls, "\n") == strings.Join(wantCalls, "\n"), "unexpected git invocation: dir=%q calls=%+v", gotDir, calls)
 	requireCondition(t, result.WorkingDirectory == "/tmp/project" && result.RawDiff != "", "unexpected result: %+v", result)
+	requireCondition(t, result.IncludesWorktree, "expected worktree diff by default")
 }
 
 func writeResolveGitDiffOutput(t *testing.T, stdout io.Writer, calls []string, args []string) error {
 	t.Helper()
-	switch len(calls) {
-	case 1:
+	switch strings.Join(args, " ") {
+	case "diff --no-color --no-ext-diff":
 		_, _ = io.WriteString(stdout, "diff --git a/a.txt b/a.txt\n")
-	case 2:
+	case "ls-files --others --exclude-standard -z":
 		_, _ = io.WriteString(stdout, "")
 	default:
 		t.Fatalf("unexpected git call: %v", args)
 	}
 	return nil
+}
+
+func TestResolveGitDiffWithOptionsRunsAllBranchReviewDiff(t *testing.T) {
+	var gotDir string
+	calls := make([]string, 0, 10)
+	result, err := ResolveGitDiffWithOptions("/tmp/project", DiffOptions{Scope: "all"}, func(dir string, stdout, stderr io.Writer, args ...string) error {
+		gotDir = dir
+		calls = append(calls, strings.Join(args, " "))
+		return writeResolveGitReviewDiffOutput(t, stdout, args)
+	})
+	requireNoError(t, err, "ResolveGitDiffWithOptions failed")
+	wantCalls := []string{
+		"merge-base HEAD origin/HEAD",
+		"rev-list --count abcdef1234567890..HEAD",
+		"rev-parse --short abcdef1234567890",
+		"symbolic-ref --quiet --short refs/remotes/origin/HEAD",
+		"merge-base HEAD origin/main",
+		"merge-base HEAD origin/develop",
+		"merge-base HEAD main",
+		"merge-base HEAD develop",
+		"log --reverse --date=iso-strict --pretty=format:%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1e abcdef1234567890..HEAD",
+		"diff --no-color --no-ext-diff abcdef1234567890",
+		"ls-files --others --exclude-standard -z",
+	}
+	requireCondition(t, gotDir == "/tmp/project" && strings.Join(calls, "\n") == strings.Join(wantCalls, "\n"), "unexpected git invocation: dir=%q calls=%+v", gotDir, calls)
+	requireCondition(t, result.WorkingDirectory == "/tmp/project" && result.RawDiff != "", "unexpected result: %+v", result)
+	requireCondition(t, result.ReviewBase.Branch == "origin/develop" && result.ReviewBase.Commit == "abcdef1234567890" && result.ReviewBase.ShortCommit == "abcdef1", "unexpected review base: %+v", result.ReviewBase)
+	requireCondition(t, result.Scope == "all" && result.IncludesWorktree, "expected all worktree diff scope, got %+v", result)
+	requireCondition(t, len(result.ReviewCommits) == 1 && result.ReviewCommits[0].ShortHash == "1234567" && result.ReviewCommits[0].Subject == "add feature", "unexpected commits: %+v", result.ReviewCommits)
+}
+
+func writeResolveGitReviewDiffOutput(t *testing.T, stdout io.Writer, args []string) error {
+	t.Helper()
+	switch strings.Join(args, " ") {
+	case "merge-base HEAD origin/HEAD":
+		_, _ = io.WriteString(stdout, "abcdef1234567890\n")
+	case "merge-base HEAD origin/main", "merge-base HEAD origin/develop", "merge-base HEAD main", "merge-base HEAD develop":
+		return fmt.Errorf("unknown revision")
+	case "rev-list --count abcdef1234567890..HEAD":
+		_, _ = io.WriteString(stdout, "1\n")
+	case "rev-parse --short abcdef1234567890":
+		_, _ = io.WriteString(stdout, "abcdef1\n")
+	case "symbolic-ref --quiet --short refs/remotes/origin/HEAD":
+		_, _ = io.WriteString(stdout, "origin/develop\n")
+	case "log --reverse --date=iso-strict --pretty=format:%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1e abcdef1234567890..HEAD":
+		_, _ = io.WriteString(stdout, "1234567890abcdef\x1f1234567\x1fPat Example\x1f2026-04-30T08:00:00+03:00\x1fadd feature\x1e")
+	case "diff --no-color --no-ext-diff abcdef1234567890":
+		_, _ = io.WriteString(stdout, "diff --git a/a.txt b/a.txt\n")
+	case "ls-files --others --exclude-standard -z":
+		_, _ = io.WriteString(stdout, "")
+	default:
+		t.Fatalf("unexpected git call: %v", args)
+	}
+	return nil
+}
+
+func TestResolveGitDiffSelectedCommitAccumulatesToWorktreeAndIncludesUntracked(t *testing.T) {
+	result, err := ResolveGitDiffWithOptions("/tmp/project", DiffOptions{Scope: "commit", SelectedCommit: "234567890abcdef1"}, func(dir string, stdout, stderr io.Writer, args ...string) error {
+		if dir != "/tmp/project" {
+			t.Fatalf("unexpected dir: %q", dir)
+		}
+		switch strings.Join(args, " ") {
+		case "merge-base HEAD origin/HEAD":
+			_, _ = io.WriteString(stdout, "abcdef1234567890\n")
+		case "merge-base HEAD origin/main", "merge-base HEAD origin/develop", "merge-base HEAD main", "merge-base HEAD develop":
+			return fmt.Errorf("unknown revision")
+		case "rev-list --count abcdef1234567890..HEAD":
+			_, _ = io.WriteString(stdout, "2\n")
+		case "rev-parse --short abcdef1234567890":
+			_, _ = io.WriteString(stdout, "abcdef1\n")
+		case "symbolic-ref --quiet --short refs/remotes/origin/HEAD":
+			_, _ = io.WriteString(stdout, "origin/develop\n")
+		case "log --reverse --date=iso-strict --pretty=format:%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1e abcdef1234567890..HEAD":
+			_, _ = io.WriteString(stdout, "1234567890abcdef\x1f1234567\x1fPat Example\x1f2026-04-30T08:00:00+03:00\x1ffirst\x1e234567890abcdef1\x1f2345678\x1fPat Example\x1f2026-04-30T08:05:00+03:00\x1fsecond\x1e")
+		case "diff --no-color --no-ext-diff 234567890abcdef1^":
+			_, _ = io.WriteString(stdout, "diff --git a/a.txt b/a.txt\n")
+		case "ls-files --others --exclude-standard -z":
+			_, _ = io.WriteString(stdout, "notes.txt\x00")
+		case "diff --no-color --no-ext-diff --no-index -- /dev/null notes.txt":
+			_, _ = io.WriteString(stdout, untrackedFileDiff("notes.txt", "+notes"))
+			return fmt.Errorf("exit status 1")
+		default:
+			t.Fatalf("unexpected git call: %v", args)
+		}
+		return nil
+	})
+
+	requireNoError(t, err, "ResolveGitDiffWithOptions failed")
+	requireCondition(t, result.Scope == "commit" && result.SelectedCommit == "234567890abcdef1" && result.IncludesWorktree, "unexpected selected range metadata: %+v", result)
+	requireCondition(t, len(result.Files) == 2 && result.Files[1].Path == "notes.txt", "expected selected commit diff plus untracked file, got %+v", result.Files)
+	requireCondition(t, len(result.ReviewCommits) == 2, "unexpected commits: %+v", result.ReviewCommits)
+}
+
+func TestResolveGitDiffChoosesClosestMainOrDevelopBase(t *testing.T) {
+	result, err := ResolveGitDiffWithOptions("/tmp/project", DiffOptions{Scope: "all"}, func(dir string, stdout, stderr io.Writer, args ...string) error {
+		switch strings.Join(args, " ") {
+		case "merge-base HEAD origin/HEAD":
+			_, _ = io.WriteString(stdout, "mainbase\n")
+		case "rev-list --count mainbase..HEAD":
+			_, _ = io.WriteString(stdout, "5\n")
+		case "rev-parse --short mainbase":
+			_, _ = io.WriteString(stdout, "mainbas\n")
+		case "symbolic-ref --quiet --short refs/remotes/origin/HEAD":
+			_, _ = io.WriteString(stdout, "origin/main\n")
+		case "merge-base HEAD origin/main", "merge-base HEAD main":
+			_, _ = io.WriteString(stdout, "mainbase\n")
+		case "merge-base HEAD origin/develop":
+			_, _ = io.WriteString(stdout, "developbase\n")
+		case "rev-list --count developbase..HEAD":
+			_, _ = io.WriteString(stdout, "2\n")
+		case "rev-parse --short developbase":
+			_, _ = io.WriteString(stdout, "develop\n")
+		case "merge-base HEAD develop":
+			_, _ = io.WriteString(stdout, "developbase\n")
+		case "log --reverse --date=iso-strict --pretty=format:%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1e developbase..HEAD":
+			_, _ = io.WriteString(stdout, "")
+		case "diff --no-color --no-ext-diff developbase":
+			_, _ = io.WriteString(stdout, "diff --git a/a.txt b/a.txt\n")
+		case "ls-files --others --exclude-standard -z":
+			_, _ = io.WriteString(stdout, "")
+		default:
+			t.Fatalf("unexpected git call: %v", args)
+		}
+		return nil
+	})
+
+	requireNoError(t, err, "ResolveGitDiffWithOptions failed")
+	requireCondition(t, result.ReviewBase.Branch == "origin/develop" && result.ReviewBase.Commit == "developbase", "unexpected review base: %+v", result.ReviewBase)
+}
+
+func TestResolveGitDiffFallsBackToWorkingDiffWithoutReviewBase(t *testing.T) {
+	calls := make([]string, 0, 8)
+	result, err := ResolveGitDiffWithOptions("/tmp/project", DiffOptions{Scope: "all"}, func(dir string, stdout, stderr io.Writer, args ...string) error {
+		calls = append(calls, strings.Join(args, " "))
+		switch strings.Join(args, " ") {
+		case "merge-base HEAD origin/HEAD", "merge-base HEAD origin/main", "merge-base HEAD origin/develop", "merge-base HEAD main", "merge-base HEAD develop":
+			return fmt.Errorf("unknown revision")
+		case "diff --no-color --no-ext-diff":
+			_, _ = io.WriteString(stdout, "diff --git a/a.txt b/a.txt\n")
+		case "ls-files --others --exclude-standard -z":
+			_, _ = io.WriteString(stdout, "")
+		default:
+			t.Fatalf("unexpected git call: %v", args)
+		}
+		return nil
+	})
+
+	requireNoError(t, err, "ResolveGitDiffWithOptions failed")
+	wantCalls := []string{
+		"merge-base HEAD origin/HEAD",
+		"merge-base HEAD origin/main",
+		"merge-base HEAD origin/develop",
+		"merge-base HEAD main",
+		"merge-base HEAD develop",
+		"diff --no-color --no-ext-diff",
+		"ls-files --others --exclude-standard -z",
+	}
+	requireCondition(t, strings.Join(calls, "\n") == strings.Join(wantCalls, "\n"), "unexpected calls: %+v", calls)
+	requireCondition(t, result.ReviewBase.Commit == "" && result.RawDiff != "", "unexpected fallback result: %+v", result)
 }
 
 func TestResolveGitDiffIncludesUntrackedFiles(t *testing.T) {
@@ -143,6 +307,8 @@ func resolveGitDiffWithUntrackedFiles(t *testing.T) GitCommandRunnerFunc {
 func writeGitDiffWithUntrackedOutput(t *testing.T, stdout io.Writer, args []string) error {
 	t.Helper()
 	switch strings.Join(args, " ") {
+	case "merge-base HEAD origin/HEAD", "merge-base HEAD origin/main", "merge-base HEAD origin/develop", "merge-base HEAD main", "merge-base HEAD develop":
+		return fmt.Errorf("unknown revision")
 	case "diff --no-color --no-ext-diff":
 		_, _ = io.WriteString(stdout, "diff --git a/existing.txt b/existing.txt\n")
 		return nil

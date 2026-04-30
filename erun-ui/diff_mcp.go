@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -23,7 +24,7 @@ func (t idleProbeRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 	return base.RoundTrip(req)
 }
 
-func loadDiffFromMCP(ctx context.Context, endpoint string) (eruncommon.DiffResult, error) {
+func loadDiffFromMCP(ctx context.Context, endpoint string, options uiDiffOptions) (eruncommon.DiffResult, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint:             endpoint,
@@ -36,7 +37,13 @@ func loadDiffFromMCP(ctx context.Context, endpoint string) (eruncommon.DiffResul
 		_ = session.Close()
 	}()
 
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "diff"})
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "diff",
+		Arguments: map[string]any{
+			"scope":          strings.TrimSpace(options.Scope),
+			"selectedCommit": strings.TrimSpace(options.SelectedCommit),
+		},
+	})
 	if err != nil {
 		return eruncommon.DiffResult{}, err
 	}

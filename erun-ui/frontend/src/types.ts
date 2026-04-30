@@ -230,6 +230,11 @@ export interface DiffResult {
   summary: DiffSummary;
   files?: DiffFile[];
   tree?: DiffTreeNode[];
+  reviewBase?: DiffReviewBase;
+  reviewCommits?: DiffCommit[];
+  scope?: 'current' | 'commit' | 'all';
+  selectedCommit?: string;
+  includesWorktree?: boolean;
 }
 
 export interface DiffSummary {
@@ -274,4 +279,18 @@ export interface DiffTreeNode {
   status?: string;
   additions?: number;
   deletions?: number;
+}
+
+export interface DiffReviewBase {
+  branch?: string;
+  commit?: string;
+  shortCommit?: string;
+}
+
+export interface DiffCommit {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  author: string;
+  date: string;
 }
