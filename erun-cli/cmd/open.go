@@ -378,13 +378,14 @@ func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq common.ShellLaunchPara
 		return false, nil
 	}
 	deployed, err := r.checkKubernetesDeployment(common.KubernetesDeploymentCheckParams{
-		Name:              common.RuntimeReleaseName(r.result.Tenant),
-		Namespace:         common.KubernetesNamespaceName(r.result.Tenant, r.result.Environment),
-		KubernetesContext: r.result.EnvConfig.KubernetesContext,
-		ExpectedRepoPath:  common.RemoteShellWorktreePath(shellReq),
-		ExpectedSSHD:      sshdExpectationForDeployment(r.result),
-		ExpectedMCPPort:   common.MCPPortForResult(r.result),
-		ExpectedSSHPort:   common.SSHLocalPortForResult(r.result),
+		Name:               common.RuntimeReleaseName(r.result.Tenant),
+		Namespace:          common.KubernetesNamespaceName(r.result.Tenant, r.result.Environment),
+		KubernetesContext:  r.result.EnvConfig.KubernetesContext,
+		ExpectedRepoPath:   common.RemoteShellWorktreePath(shellReq),
+		ExpectedSSHD:       sshdExpectationForDeployment(r.result),
+		ExpectedMCPPort:    common.MCPPortForResult(r.result),
+		ExpectedSSHPort:    common.SSHLocalPortForResult(r.result),
+		ExpectedRuntimePod: r.result.EnvConfig.RuntimePod,
 	})
 	if err != nil {
 		return false, err

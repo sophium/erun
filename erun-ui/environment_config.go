@@ -59,6 +59,9 @@ func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing erun
 	if _, err := updated.Idle.Resolve(); err != nil {
 		return eruncommon.EnvConfig{}, err
 	}
+	if err := eruncommon.ValidateRuntimePodResources(updated.RuntimePod); err != nil {
+		return eruncommon.EnvConfig{}, err
+	}
 	if updated.Remote && strings.TrimSpace(updated.CloudProviderAlias) != "" {
 		if _, ok, err := a.linkedCloudContext(updated); err != nil {
 			return eruncommon.EnvConfig{}, err
@@ -108,6 +111,7 @@ func (a *App) environmentConfigToUI(config eruncommon.EnvConfig, fallbackName st
 		CloudProviderAlias:   strings.TrimSpace(config.CloudProviderAlias),
 		CloudProviderAliases: environmentCloudProviderAliases(a.deps.store, config.CloudProviderAlias),
 		RuntimeVersion:       strings.TrimSpace(config.RuntimeVersion),
+		RuntimePod:           runtimePodConfigToUI(config.RuntimePod),
 		SSHD: uiSSHDConfig{
 			Enabled:       config.SSHD.Enabled,
 			LocalPort:     config.SSHD.LocalPort,
@@ -190,6 +194,7 @@ func canConnectLocalTCP(port int) bool {
 func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.EnvConfig) eruncommon.EnvConfig {
 	existing.Name = strings.TrimSpace(config.Name)
 	existing.CloudProviderAlias = strings.TrimSpace(config.CloudProviderAlias)
+	existing.RuntimePod = runtimePodConfigFromUI(config.RuntimePod)
 	existing.Idle = eruncommon.EnvironmentIdleConfig{
 		Timeout:          strings.TrimSpace(config.Idle.Timeout),
 		WorkingHours:     strings.TrimSpace(config.Idle.WorkingHours),
@@ -197,6 +202,21 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	}
 	existing.SetSnapshot(config.Snapshot)
 	return existing
+}
+
+func runtimePodConfigToUI(config eruncommon.RuntimePodResources) uiRuntimePodConfig {
+	config = eruncommon.NormalizeRuntimePodResources(config)
+	return uiRuntimePodConfig{
+		CPU:    strings.TrimSpace(config.CPU),
+		Memory: strings.TrimSpace(config.Memory),
+	}
+}
+
+func runtimePodConfigFromUI(config uiRuntimePodConfig) eruncommon.RuntimePodResources {
+	return eruncommon.NormalizeRuntimePodResources(eruncommon.RuntimePodResources{
+		CPU:    strings.TrimSpace(config.CPU),
+		Memory: strings.TrimSpace(config.Memory),
+	})
 }
 
 func idleConfigValue(value, fallback string) string {

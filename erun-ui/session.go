@@ -135,6 +135,12 @@ func buildInitArgs(selection uiSelection) []string {
 	if runtimeImage := strings.TrimSpace(selection.RuntimeImage); runtimeImage != "" {
 		args = append(args, "--runtime-image", runtimeImage)
 	}
+	if runtimeCPU := strings.TrimSpace(selection.RuntimeCPU); runtimeCPU != "" {
+		args = append(args, "--runtime-cpu", runtimeCPU)
+	}
+	if runtimeMemory := strings.TrimSpace(selection.RuntimeMemory); runtimeMemory != "" {
+		args = append(args, "--runtime-memory", runtimeMemory)
+	}
 	if kubernetesContext := strings.TrimSpace(selection.KubernetesContext); kubernetesContext != "" {
 		args = append(args, "--kubernetes-context", kubernetesContext)
 	}

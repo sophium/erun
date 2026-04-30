@@ -70,6 +70,7 @@ type BootstrapInitParams struct {
 	Environment              string
 	RuntimeVersion           string
 	RuntimeImage             string
+	RuntimePod               RuntimePodResources
 	NoGit                    bool
 	KubernetesContext        string
 	ContainerRegistry        string
@@ -320,6 +321,9 @@ func (s bootstrapRunner) run(params BootstrapInitParams) (BootstrapInitResult, e
 }
 
 func (s *bootstrapRunState) run() error {
+	if err := ValidateRuntimePodResources(s.params.RuntimePod); err != nil {
+		return err
+	}
 	if err := s.validateRemoteParams(); err != nil {
 		return err
 	}
@@ -705,6 +709,7 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		CloudProviderAlias: cloudProviderAlias,
 		ManagedCloud:       managedCloud,
 		RuntimeVersion:     strings.TrimSpace(s.params.RuntimeVersion),
+		RuntimePod:         NormalizeRuntimePodResources(s.params.RuntimePod),
 		Remote:             s.params.Remote,
 	}
 	if err := saveEnvConfig(s.runner.Store, s.tenant, s.envConfig); err != nil {
@@ -779,6 +784,10 @@ func (s *bootstrapRunState) updateRemoteEnvConfig() {
 	}
 	if runtimeVersion := strings.TrimSpace(s.params.RuntimeVersion); runtimeVersion != "" && s.envConfig.RuntimeVersion != runtimeVersion {
 		s.envConfig.RuntimeVersion = runtimeVersion
+		s.envConfigChanged = true
+	}
+	if runtimePod := NormalizeRuntimePodResources(s.params.RuntimePod); runtimePod != NormalizeRuntimePodResources(s.envConfig.RuntimePod) {
+		s.envConfig.RuntimePod = runtimePod
 		s.envConfigChanged = true
 	}
 	if !s.envConfig.Remote {
@@ -944,6 +953,7 @@ func normalizeBootstrapParams(params BootstrapInitParams) BootstrapInitParams {
 	params.Environment = strings.TrimSpace(params.Environment)
 	params.RuntimeVersion = strings.TrimSpace(params.RuntimeVersion)
 	params.RuntimeImage = strings.TrimSpace(params.RuntimeImage)
+	params.RuntimePod = NormalizeRuntimePodResources(params.RuntimePod)
 	params.KubernetesContext = strings.TrimSpace(params.KubernetesContext)
 	params.ContainerRegistry = strings.TrimSpace(params.ContainerRegistry)
 	params.RemoteRepositoryURL = strings.TrimSpace(params.RemoteRepositoryURL)

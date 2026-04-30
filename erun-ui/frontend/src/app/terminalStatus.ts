@@ -260,6 +260,8 @@ function appendInitDebugArgs(args: string[], selection: UISelection): void {
   args.push('init', selection.tenant, selection.environment, '--remote');
   appendOptionalDebugArg(args, '--version', selection.version);
   appendOptionalDebugArg(args, '--runtime-image', selection.runtimeImage);
+  appendOptionalDebugArg(args, '--runtime-cpu', selection.runtimeCpu);
+  appendOptionalDebugArg(args, '--runtime-memory', selection.runtimeMemory);
   appendOptionalDebugArg(args, '--kubernetes-context', selection.kubernetesContext);
   appendOptionalDebugArg(args, '--container-registry', selection.containerRegistry);
   args.push(`--set-default-tenant=${selection.setDefaultTenant ? 'true' : 'false'}`, '--confirm-environment=true');

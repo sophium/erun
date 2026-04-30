@@ -38,6 +38,7 @@ type remoteDefaultDevopsFile struct {
 
 func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, kubernetesContext, projectRoot string) (ShellLaunchParams, error) {
 	target := s.remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot)
+	target.EnvConfig.RuntimePod = NormalizeRuntimePodResources(params.RuntimePod)
 	req := ShellLaunchParamsFromResult(target)
 
 	if err := s.ensureRemoteRuntime(target, req, params.RuntimeVersion, params.RuntimeImage); err != nil {

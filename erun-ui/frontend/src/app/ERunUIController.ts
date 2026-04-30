@@ -7,6 +7,7 @@ import {
   LoadDiff,
   LoadIdleStatus,
   LoadKubernetesContexts,
+  LoadRuntimeResourceStatus,
   LoadState,
   LoadTenantConfig,
   LoadVersionSuggestions,
@@ -40,6 +41,7 @@ import {
   toggleSidebar as toggleSidebarPanel,
 } from './layoutActions';
 import { readError } from './errors';
+import { runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
 import { scrollSelectedDiffIntoView, visibleDiffPath } from './reviewDiffNavigation';
 import type {
   AppStatusPayload,
@@ -106,6 +108,7 @@ import type {
   UIERunConfig,
   UIEnvironmentConfig,
   UIIdleStatus,
+  UIRuntimeResourceStatus,
   UISelection,
   UIState,
   UITenantConfig,
@@ -168,6 +171,7 @@ export class ERunUIController {
   private idleStatusTimer = 0;
   private idleStatusRequest = 0;
   private versionSuggestionRequest = 0;
+  private environmentResourceStatusRequest = 0;
   private bootStarted = false;
   private terminalDataDisposable: TerminalDataDisposable | null = null;
   private terminalOutputOff: (() => void) | null = null;
@@ -449,6 +453,9 @@ export class ERunUIController {
       kubernetesContext: '',
       kubernetesContexts: [],
       kubernetesContextsLoading: true,
+      resourceStatus: null,
+      resourceStatusLoading: false,
+      runtimePod: defaultEnvironmentDialog().runtimePod,
       containerRegistry: containerRegistryDefault,
       noGit: false,
       bootstrap: false,
@@ -488,6 +495,9 @@ export class ERunUIController {
     this.emit();
     if (values.tenant !== undefined) {
       this.scheduleDialogVersionSuggestionRefresh(true);
+    }
+    if (values.kubernetesContext !== undefined) {
+      void this.refreshEnvironmentRuntimeResources(values.kubernetesContext);
     }
   }
 
@@ -531,6 +541,12 @@ export class ERunUIController {
       form.reportValidity();
       return;
     }
+    const resourceError = dialog.actionMode === 'init' ? runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus) : '';
+    if (resourceError) {
+      this.state.environmentDialog = { ...dialog, error: resourceError };
+      this.emit();
+      return;
+    }
 
     rememberEnvironmentDialogSelection(selection, dialog.actionMode);
     this.beginEnvironmentDialogSubmit(dialog, selection);
@@ -558,11 +574,14 @@ export class ERunUIController {
       return null;
     }
     const isInit = dialog.actionMode === 'init';
+    const runtimePod = runtimePodConfigToKubernetes(dialog.runtimePod);
     return {
       tenant: values.tenant,
       environment: values.environment,
       version: values.version,
       runtimeImage: this.resolveEnvironmentRuntimeImage(values.version),
+      runtimeCpu: isInit ? runtimePod.cpu : undefined,
+      runtimeMemory: isInit ? runtimePod.memory : undefined,
       kubernetesContext: isInit ? values.kubernetesContext : undefined,
       containerRegistry: isInit ? values.containerRegistry : undefined,
       noGit: dialog.noGit,
@@ -578,6 +597,7 @@ export class ERunUIController {
       environment: selection.environment,
       version: selection.version || '',
       kubernetesContext: selection.kubernetesContext || '',
+      runtimePod: dialog.runtimePod,
       containerRegistry: selection.containerRegistry || '',
       busy: true,
       error: '',
@@ -1148,6 +1168,7 @@ export class ERunUIController {
         kubernetesContextsLoading: false,
       };
       this.emit();
+      void this.refreshEnvironmentRuntimeResources(this.state.environmentDialog.kubernetesContext);
     } catch (error) {
       if (!this.state.environmentDialog.open || this.state.environmentDialog.actionMode !== 'init') {
         return;
@@ -1182,6 +1203,53 @@ export class ERunUIController {
       kubernetesContext: this.resolveDialogKubernetesContext(normalized),
       kubernetesContextsLoading: false,
     };
+    void this.refreshEnvironmentRuntimeResources(this.state.environmentDialog.kubernetesContext);
+  }
+
+  private async refreshEnvironmentRuntimeResources(kubernetesContext: string): Promise<void> {
+    const request = ++this.environmentResourceStatusRequest;
+    const context = normalizeDialogValue(kubernetesContext);
+    if (!this.state.environmentDialog.open || this.state.environmentDialog.actionMode !== 'init' || !context) {
+      return;
+    }
+    this.state.environmentDialog = {
+      ...this.state.environmentDialog,
+      resourceStatusLoading: true,
+      resourceStatus: null,
+    };
+    this.emit();
+    try {
+      const status = (await LoadRuntimeResourceStatus({
+        kubernetesContext: context,
+        tenant: normalizeDialogValue(this.state.environmentDialog.tenant),
+        environment: normalizeDialogValue(this.state.environmentDialog.environment),
+      })) as UIRuntimeResourceStatus;
+      if (request !== this.environmentResourceStatusRequest || !this.state.environmentDialog.open) {
+        return;
+      }
+      this.state.environmentDialog = {
+        ...this.state.environmentDialog,
+        resourceStatus: status,
+        resourceStatusLoading: false,
+      };
+      this.emit();
+    } catch (error) {
+      if (request !== this.environmentResourceStatusRequest || !this.state.environmentDialog.open) {
+        return;
+      }
+      this.state.environmentDialog = {
+        ...this.state.environmentDialog,
+        resourceStatus: {
+          kubernetesContext: context,
+          available: false,
+          message: readError(error),
+          cpu: { total: 0, used: 0, free: 0, unit: 'cores', formatted: '' },
+          memory: { total: 0, used: 0, free: 0, unit: 'GiB', formatted: '' },
+        },
+        resourceStatusLoading: false,
+      };
+      this.emit();
+    }
   }
 
   private scheduleDialogVersionSuggestionRefresh(selectDefault: boolean): void {

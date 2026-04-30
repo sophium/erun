@@ -16,6 +16,8 @@ type InitInput struct {
 	ProjectRoot              string `json:"projectRoot,omitempty" jsonschema:"optional project root to bind to the tenant"`
 	Environment              string `json:"environment,omitempty" jsonschema:"optional environment name to initialize"`
 	Version                  string `json:"version,omitempty" jsonschema:"optional runtime image version to initialize and deploy"`
+	RuntimeCPU               string `json:"runtimeCpu,omitempty" jsonschema:"optional runtime pod CPU limit"`
+	RuntimeMemory            string `json:"runtimeMemory,omitempty" jsonschema:"optional runtime pod memory limit"`
 	KubernetesContext        string `json:"kubernetesContext,omitempty" jsonschema:"optional kubernetes context to associate with the environment"`
 	ContainerRegistry        string `json:"containerRegistry,omitempty" jsonschema:"optional container registry to associate with the environment"`
 	Remote                   bool   `json:"remote,omitempty" jsonschema:"when true, initialize the repository inside the runtime pod"`
@@ -55,14 +57,18 @@ func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 			ProjectRoot:              firstNonEmpty(strings.TrimSpace(input.ProjectRoot), strings.TrimSpace(runtime.Context.RepoPath)),
 			Environment:              firstNonEmpty(strings.TrimSpace(input.Environment), strings.TrimSpace(runtime.Context.Environment)),
 			RuntimeVersion:           firstNonEmpty(strings.TrimSpace(input.Version), CurrentBuildInfo().Version),
-			NoGit:                    input.NoGit,
-			Bootstrap:                input.Bootstrap,
-			KubernetesContext:        firstNonEmpty(strings.TrimSpace(input.KubernetesContext), strings.TrimSpace(runtime.Context.KubernetesContext)),
-			ContainerRegistry:        strings.TrimSpace(input.ContainerRegistry),
-			ConfirmTenant:            input.ConfirmTenant,
-			ConfirmEnvironment:       input.ConfirmEnvironment,
-			ConfirmRemoteHostConfig:  input.ConfirmRemoteHostConfig,
-			AutoApprove:              input.AutoApprove,
+			RuntimePod: eruncommon.RuntimePodResources{
+				CPU:    strings.TrimSpace(input.RuntimeCPU),
+				Memory: strings.TrimSpace(input.RuntimeMemory),
+			},
+			NoGit:                   input.NoGit,
+			Bootstrap:               input.Bootstrap,
+			KubernetesContext:       firstNonEmpty(strings.TrimSpace(input.KubernetesContext), strings.TrimSpace(runtime.Context.KubernetesContext)),
+			ContainerRegistry:       strings.TrimSpace(input.ContainerRegistry),
+			ConfirmTenant:           input.ConfirmTenant,
+			ConfirmEnvironment:      input.ConfirmEnvironment,
+			ConfirmRemoteHostConfig: input.ConfirmRemoteHostConfig,
+			AutoApprove:             input.AutoApprove,
 		}
 
 		params.Remote = input.Remote

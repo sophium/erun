@@ -257,10 +257,11 @@ func TestRuntimeChartsExposeMCPAndSSHPorts(t *testing.T) {
 		for _, want := range []string{
 			`{{- $mcpPort := default 17000 .Values.mcpPort -}}`,
 			`{{- $sshPort := default 17022 .Values.sshPort -}}`,
-			`{{- $cloudContextName := default "" .Values.cloudContext.name -}}`,
-			`{{- $cloudProviderAlias := default "" .Values.cloudContext.providerAlias -}}`,
-			`{{- $cloudRegion := default "" .Values.cloudContext.region -}}`,
-			`{{- $cloudInstanceID := default "" .Values.cloudContext.instanceId -}}`,
+			`{{- $cloudContext := default dict .Values.cloudContext -}}`,
+			`{{- $cloudContextName := default "" $cloudContext.name -}}`,
+			`{{- $cloudProviderAlias := default "" $cloudContext.providerAlias -}}`,
+			`{{- $cloudRegion := default "" $cloudContext.region -}}`,
+			`{{- $cloudInstanceID := default "" $cloudContext.instanceId -}}`,
 			"name: ERUN_CLOUD_CONTEXT_NAME",
 			"name: ERUN_CLOUD_PROVIDER_ALIAS",
 			"name: ERUN_CLOUD_REGION",
@@ -283,6 +284,50 @@ func TestRuntimeChartsExposeMCPAndSSHPorts(t *testing.T) {
 		} {
 			if strings.Contains(content, forbidden) {
 				t.Fatalf("expected %q not to expose SSHD target port marker %q, got:\n%s", path, forbidden, content)
+			}
+		}
+	}
+}
+
+func TestRuntimeChartsUseNilSafeNestedValueDefaults(t *testing.T) {
+	paths := []string{
+		filepath.Join("..", "erun-devops", "k8s", "erun-devops", "templates", "service.yaml"),
+		filepath.Join("assets", "default-devops-chart", "templates", "service.yaml"),
+	}
+
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %q: %v", path, err)
+		}
+		content := string(data)
+		for _, want := range []string{
+			`{{- $idle := default dict .Values.idle -}}`,
+			`{{- $idleTimeout := default "5m0s" $idle.timeout -}}`,
+			`{{- $idleWorkingHours := default "08:00-20:00" $idle.workingHours -}}`,
+			`{{- $idleTrafficBytes := default 0 $idle.trafficBytes -}}`,
+			`{{- $runtime := default dict .Values.runtime -}}`,
+			`{{- $runtimeResources := default dict $runtime.resources -}}`,
+			`{{- $runtimeLimits := default dict $runtimeResources.limits -}}`,
+			`{{- $runtimeRequests := default dict $runtimeResources.requests -}}`,
+			`{{- $runtimeCPU := default "4" $runtimeLimits.cpu -}}`,
+			`{{- $runtimeMemory := default "8916Mi" $runtimeLimits.memory -}}`,
+			`{{- $runtimeRequestCPU := default "0.25" $runtimeRequests.cpu -}}`,
+			`{{- $runtimeRequestMemory := default "1024Mi" $runtimeRequests.memory -}}`,
+			`{{- $cloudContext := default dict .Values.cloudContext -}}`,
+		} {
+			if !strings.Contains(content, want) {
+				t.Fatalf("expected %q to contain nil-safe default %q, got:\n%s", path, want, content)
+			}
+		}
+		for _, forbidden := range []string{
+			".Values.idle.timeout",
+			".Values.runtime.resources.limits.cpu",
+			".Values.runtime.resources.requests.cpu",
+			".Values.cloudContext.name",
+		} {
+			if strings.Contains(content, forbidden) {
+				t.Fatalf("expected %q not to contain direct nested lookup %q, got:\n%s", path, forbidden, content)
 			}
 		}
 	}
@@ -312,6 +357,33 @@ func TestRuntimeChartsGrantLocalRuntimeCrossNamespaceBootstrapAccess(t *testing.
 			if !strings.Contains(content, want) {
 				t.Fatalf("expected %q to include %q, got:\n%s", path, want, content)
 			}
+		}
+	}
+}
+
+func TestHelmDeploySpecIncludesRuntimePodResourceLimits(t *testing.T) {
+	spec := HelmDeploySpec{
+		ReleaseName:     "erun-devops",
+		ChartPath:       "/tmp/chart",
+		ValuesFilePath:  "/tmp/chart/values.local.yaml",
+		Tenant:          "erun",
+		Environment:     "local",
+		Namespace:       "erun-local",
+		WorktreeStorage: WorktreeStorageHost,
+		RuntimePod: RuntimePodResources{
+			CPU:    "6",
+			Memory: "12Gi",
+		},
+		Timeout: DefaultHelmDeploymentTimeout,
+	}
+
+	args := strings.Join(spec.command().Args, "\n")
+	for _, want := range []string{
+		"runtime.resources.limits.cpu=6",
+		"runtime.resources.limits.memory=12Gi",
+	} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("expected Helm command to include %q, got:\n%s", want, args)
 		}
 	}
 }

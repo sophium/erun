@@ -211,6 +211,8 @@ func normalizeSelection(selection uiSelection) uiSelection {
 		Environment:       strings.TrimSpace(selection.Environment),
 		Version:           strings.TrimSpace(selection.Version),
 		RuntimeImage:      strings.TrimSpace(selection.RuntimeImage),
+		RuntimeCPU:        strings.TrimSpace(selection.RuntimeCPU),
+		RuntimeMemory:     strings.TrimSpace(selection.RuntimeMemory),
 		KubernetesContext: strings.TrimSpace(selection.KubernetesContext),
 		ContainerRegistry: strings.TrimSpace(selection.ContainerRegistry),
 		NoGit:             selection.NoGit,

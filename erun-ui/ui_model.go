@@ -28,6 +28,8 @@ type uiSelection struct {
 	Environment       string `json:"environment"`
 	Version           string `json:"version,omitempty"`
 	RuntimeImage      string `json:"runtimeImage,omitempty"`
+	RuntimeCPU        string `json:"runtimeCpu,omitempty"`
+	RuntimeMemory     string `json:"runtimeMemory,omitempty"`
 	KubernetesContext string `json:"kubernetesContext,omitempty"`
 	ContainerRegistry string `json:"containerRegistry,omitempty"`
 	NoGit             bool   `json:"noGit,omitempty"`
@@ -85,11 +87,46 @@ type uiEnvironmentConfig struct {
 	CloudProviderAliases []string                `json:"cloudProviderAliases,omitempty"`
 	CloudContext         *uiCloudContextStatus   `json:"cloudContext,omitempty"`
 	RuntimeVersion       string                  `json:"runtimeVersion"`
+	RuntimePod           uiRuntimePodConfig      `json:"runtimePod"`
 	SSHD                 uiSSHDConfig            `json:"sshd"`
 	Idle                 uiIdleConfig            `json:"idle"`
 	LocalPorts           uiEnvironmentLocalPorts `json:"localPorts"`
 	Remote               bool                    `json:"remote"`
 	Snapshot             bool                    `json:"snapshot"`
+}
+
+type uiRuntimePodConfig struct {
+	CPU    string `json:"cpu"`
+	Memory string `json:"memory"`
+}
+
+type uiRuntimeResourceInput struct {
+	KubernetesContext string `json:"kubernetesContext"`
+	Tenant            string `json:"tenant,omitempty"`
+	Environment       string `json:"environment,omitempty"`
+}
+
+type uiRuntimeResourceStatus struct {
+	KubernetesContext string                  `json:"kubernetesContext"`
+	Available         bool                    `json:"available"`
+	Message           string                  `json:"message,omitempty"`
+	CPU               uiRuntimeResourceMetric `json:"cpu"`
+	Memory            uiRuntimeResourceMetric `json:"memory"`
+	Nodes             []uiRuntimeResourceNode `json:"nodes,omitempty"`
+}
+
+type uiRuntimeResourceMetric struct {
+	Total     float64 `json:"total"`
+	Used      float64 `json:"used"`
+	Free      float64 `json:"free"`
+	Unit      string  `json:"unit"`
+	Formatted string  `json:"formatted"`
+}
+
+type uiRuntimeResourceNode struct {
+	Name   string                  `json:"name"`
+	CPU    uiRuntimeResourceMetric `json:"cpu"`
+	Memory uiRuntimeResourceMetric `json:"memory"`
 }
 
 type uiIdleConfig struct {
