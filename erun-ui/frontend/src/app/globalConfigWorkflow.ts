@@ -40,6 +40,7 @@ interface GlobalConfigWorkflowDeps {
   emit: () => void;
   focusTerminalSoon: () => void;
   queueTerminalResize: () => void;
+  openSelection: (selection: UISelection) => Promise<void>;
   refreshIdleStatus: () => void;
   refreshKubernetesContexts: () => void;
   hideTerminalMessage: () => void;
@@ -255,6 +256,7 @@ export class GlobalConfigWorkflow {
     if (!action) {
       return;
     }
+    const selection = this.state.selected ? { ...this.state.selected } : null;
     this.state.idleCloudContextBusy = true;
     this.deps.emit();
     try {
@@ -265,6 +267,9 @@ export class GlobalConfigWorkflow {
       this.deps.emit();
       if (action.refreshKubernetesContexts) {
         this.deps.refreshKubernetesContexts();
+      }
+      if (action.operation === 'start' && selection) {
+        await this.deps.openSelection(selection);
       }
       this.deps.refreshIdleStatus();
     } catch (error) {

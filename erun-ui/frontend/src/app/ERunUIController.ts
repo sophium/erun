@@ -1,6 +1,6 @@
 import type * as React from 'react';
 import { FitAddon } from '@xterm/addon-fit';
-import { Terminal } from '@xterm/xterm';
+import { Terminal, type IDisposable } from '@xterm/xterm';
 
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import {
@@ -43,6 +43,7 @@ import {
 import { readError } from './errors';
 import { runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
 import { scrollSelectedDiffIntoView, visibleDiffPath } from './reviewDiffNavigation';
+import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses';
 import type {
   AppStatusPayload,
   DebugSessionMode,
@@ -174,6 +175,7 @@ export class ERunUIController {
   private environmentResourceStatusRequest = 0;
   private bootStarted = false;
   private terminalDataDisposable: TerminalDataDisposable | null = null;
+  private terminalQueryResponseDisposables: IDisposable[] = [];
   private terminalOutputOff: (() => void) | null = null;
   private terminalExitOff: (() => void) | null = null;
   private appStatusOff: (() => void) | null = null;
@@ -188,6 +190,7 @@ export class ERunUIController {
     emit: () => this.emit(),
     focusTerminalSoon: () => this.focusTerminalSoon(),
     queueTerminalResize: () => this.queueTerminalResize(),
+    openSelection: (selection) => this.openSelection(selection),
     refreshIdleStatus: () => { void this.refreshIdleStatus(); },
     refreshKubernetesContexts: () => { void this.refreshKubernetesContexts(); },
     hideTerminalMessage: () => this.hideTerminalMessage(),
@@ -244,6 +247,11 @@ export class ERunUIController {
     this.terminal.open(elements.terminalRoot);
     this.fitAddon.fit();
 
+    this.terminalQueryResponseDisposables = registerTerminalQueryResponseHandlers(
+      this.terminal,
+      SendSessionInput,
+      (error) => this.showTerminalMessage(readError(error)),
+    );
     this.terminalDataDisposable = this.terminal.onData((data) => {
       SendSessionInput(data).catch((error: unknown) => {
         this.showTerminalMessage(readError(error));
@@ -286,6 +294,9 @@ export class ERunUIController {
     window.removeEventListener('resize', this.queueTerminalResize);
     this.resizeObserver?.disconnect();
     this.terminalDataDisposable?.dispose();
+    for (const disposable of this.terminalQueryResponseDisposables) {
+      disposable.dispose();
+    }
     this.terminalOutputOff?.();
     this.terminalExitOff?.();
     this.appStatusOff?.();
@@ -298,6 +309,7 @@ export class ERunUIController {
     this.terminalOutputOff = null;
     this.terminalExitOff = null;
     this.appStatusOff = null;
+    this.terminalQueryResponseDisposables = [];
     this.terminal?.dispose();
     this.terminal = null;
     this.fitAddon = null;

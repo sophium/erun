@@ -2,6 +2,7 @@ import * as React from 'react';
 import { AlertCircle, Blocks, CheckCircle2, Code2, Copy, Info, ListTree, LoaderCircle, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Play, Power, X } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
+import { displayableIdleStatus } from '@/app/idleStatusEligibility';
 import type { AppState } from '@/app/state';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -126,17 +127,18 @@ function TitlebarControls({ controller, state }: { controller: ERunUIController;
 }
 
 function IdleStatusWidget({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement | null {
-  const idleStatus = state.idleStatus;
-  if (!idleStatus) {
+  const rawIdleStatus = state.idleStatus;
+  const idleStatus = displayableIdleStatus(rawIdleStatus);
+  const idleAction = rawIdleStatus ? idleCloudAction(rawIdleStatus, state.idleCloudContextBusy) : null;
+  if (!idleStatus && !idleAction) {
     return null;
   }
-  const idleBadge = idleStatusBadge(idleStatus);
-  const idleAction = idleCloudAction(idleStatus, state.idleCloudContextBusy);
+  const idleBadge = idleStatus ? idleStatusBadge(idleStatus) : null;
 
   return (
-    <div className={cn('absolute top-3 right-[168px] z-[1] flex h-7 items-center rounded-md border bg-background [--wails-draggable:no-drag] max-[980px]:right-[146px]', idleBadge.className)}>
-      <IdleStatusBadge idleStatus={idleStatus} idleBadge={idleBadge} hasAction={Boolean(idleAction)} />
-      {idleAction && <IdleStatusAction controller={controller} idleAction={idleAction} />}
+    <div className={cn('absolute top-3 right-[168px] z-[1] flex h-7 items-center rounded-md border bg-background [--wails-draggable:no-drag] max-[980px]:right-[146px]', idleBadge?.className)}>
+      {idleStatus && idleBadge && <IdleStatusBadge idleStatus={idleStatus} idleBadge={idleBadge} hasAction={Boolean(idleAction)} />}
+      {idleAction && <IdleStatusAction controller={controller} idleAction={idleAction} hasBadge={Boolean(idleStatus)} />}
     </div>
   );
 }
@@ -158,11 +160,11 @@ function IdleStatusBadge({ idleStatus, idleBadge, hasAction }: { idleStatus: Idl
   );
 }
 
-function IdleStatusAction({ controller, idleAction }: { controller: ERunUIController; idleAction: { action: 'start' | 'stop'; label: string; busy: boolean } }): React.ReactElement {
+function IdleStatusAction({ controller, idleAction, hasBadge }: { controller: ERunUIController; idleAction: { action: 'start' | 'stop'; label: string; busy: boolean }; hasBadge: boolean }): React.ReactElement {
   const IdleActionIcon = idleAction.busy ? LoaderCircle : idleAction.action === 'start' ? Play : Power;
   return (
     <IconTooltip label={idleAction.label}>
-      <Button className="h-full w-7 rounded-l-none rounded-r-md border-0 bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-60 [&_svg]:size-3.5" type="button" variant="ghost" size="icon" aria-label={idleAction.label} disabled={idleAction.busy} onClick={() => { void controller.toggleIdleCloudContext(); }}>
+      <Button className={cn('h-full w-7 border-0 bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-60 [&_svg]:size-3.5', hasBadge ? 'rounded-l-none rounded-r-md' : 'rounded-md')} type="button" variant="ghost" size="icon" aria-label={idleAction.label} disabled={idleAction.busy} onClick={() => { void controller.toggleIdleCloudContext(); }}>
         <IdleActionIcon className={cn(idleAction.busy && 'animate-spin')} aria-hidden="true" />
       </Button>
     </IconTooltip>
@@ -201,10 +203,11 @@ function TitlebarStatus({ controller, state }: { controller: ERunUIController; s
   if (!status) {
     return null;
   }
+  const idleStatus = displayableIdleStatus(state.idleStatus);
   const idleAction = state.idleStatus ? idleCloudAction(state.idleStatus, state.idleCloudContextBusy) : null;
 
   return (
-    <div className={statusPositionClassName(state.idleStatus, Boolean(idleAction))} role={status.kind === 'error' ? 'alert' : 'status'} aria-live={status.kind === 'error' ? 'assertive' : 'polite'}>
+    <div className={statusPositionClassName(idleStatus, Boolean(idleAction))} role={status.kind === 'error' ? 'alert' : 'status'} aria-live={status.kind === 'error' ? 'assertive' : 'polite'}>
       <div className={cn('pointer-events-auto flex h-8 max-w-full items-center gap-2 rounded-md border bg-background px-2.5 text-[13px] leading-none shadow-sm', statusBorderClassNames[status.kind])}>
         <StatusIcon status={status} />
         <StatusMessage status={status} />
@@ -240,6 +243,9 @@ function titlebarStatus(state: AppState): TitlebarStatusValue | null {
 
 function statusPositionClassName(idleStatus: AppState['idleStatus'], hasIdleAction: boolean): string {
   if (!idleStatus) {
+    if (hasIdleAction) {
+      return 'pointer-events-none absolute top-2.5 left-32 right-[204px] z-20 flex justify-center [--wails-draggable:no-drag] max-[980px]:left-[112px] max-[980px]:right-[182px]';
+    }
     return 'pointer-events-none absolute top-2.5 left-32 right-[168px] z-20 flex justify-center [--wails-draggable:no-drag] max-[980px]:left-[112px] max-[980px]:right-[146px]';
   }
   if (hasIdleAction) {

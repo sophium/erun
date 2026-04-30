@@ -264,6 +264,7 @@ func (a *App) ensureLinkedCloudContextRunning(config eruncommon.EnvConfig) (erun
 	if err != nil {
 		return eruncommon.CloudContextStatus{}, true, err
 	}
+	a.clearIdleStopsForCloudContext(status.Name)
 	a.emitAppStatus(fmt.Sprintf("Cloud context %s is running. Opening environment...", cloudContextDisplayName(status)), true)
 	return status, true, nil
 }

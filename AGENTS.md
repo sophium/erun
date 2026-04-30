@@ -124,6 +124,7 @@ Repository guidance for humans and coding agents working in this repo.
 ## Working Rules
 
 - Start each non-trivial change by identifying the smallest coherent outcome that would satisfy the request, the modules likely affected, and the validation scope needed for confidence.
+- When asking the user to confirm a plan, describe the actual intended changes, not just investigation steps. Name the behavior that will change, the user-visible outcome, the likely files or modules to edit, and the validation that will prove the change. Keep discovery-only steps out of the plan unless they materially affect the proposed implementation.
 - Prefer fast, evidence-driven iteration. Use existing behavior, failing symptoms, tests, and screenshots as the source of truth, then tighten the implementation around the observed problem.
 - Keep work centered on the current user goal. Avoid opportunistic cleanup, broad redesign, or unrelated polish unless it directly reduces risk for the requested change.
 - When a problem crosses module boundaries, solve it at the lowest shared layer that owns the behavior, then keep transport-specific code focused on adaptation and presentation.
