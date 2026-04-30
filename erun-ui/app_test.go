@@ -1659,6 +1659,34 @@ func TestMergeNewerActivityMarkersPrefersLocalTerminalActivity(t *testing.T) {
 	}
 }
 
+func TestMergeNewerActivityMarkersAddsMissingLocalTerminalActivity(t *testing.T) {
+	now := time.Now()
+	remote := eruncommon.EnvironmentIdleStatus{
+		ManagedCloud: true,
+		Markers: []eruncommon.EnvironmentIdleMarker{
+			{Name: "working-hours", LastActivity: now},
+			{Name: eruncommon.ActivityKindMCP, Idle: true, LastActivity: now.Add(-10 * time.Minute), SecondsRemaining: 0},
+		},
+	}
+	local := eruncommon.EnvironmentIdleStatus{
+		ManagedCloud: true,
+		Markers: []eruncommon.EnvironmentIdleMarker{
+			{Name: eruncommon.ActivityKindCLI, Idle: false, LastActivity: now, SecondsRemaining: 60},
+		},
+	}
+
+	merged := mergeNewerActivityMarkers(remote, local)
+	if merged.StopEligible {
+		t.Fatal("expected local CLI activity to block idle stop")
+	}
+	if got := activitySecondsUntilIdle(merged); got != 60 {
+		t.Fatalf("activitySecondsUntilIdle = %d, want 60", got)
+	}
+	if merged.StopBlockedReason != eruncommon.ActivityKindCLI {
+		t.Fatalf("StopBlockedReason = %q, want %q", merged.StopBlockedReason, eruncommon.ActivityKindCLI)
+	}
+}
+
 func TestMergeLocalIdleActivityUsesSavedPolicyWithRemoteActivity(t *testing.T) {
 	now := time.Now()
 	store := stubUIStore{
@@ -1776,6 +1804,44 @@ func TestLoadIdleStatusStopsLinkedCloudContextWhenStopEligible(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for cloud context stop")
+	}
+}
+
+func TestStartCloudContextClearsPreviousIdleStop(t *testing.T) {
+	store := stubUIStore{
+		config: &eruncommon.ERunConfig{
+			CloudContexts: []eruncommon.CloudContextConfig{{
+				Name:               "cloud-ctx",
+				CloudProviderAlias: "team-cloud",
+				KubernetesContext:  "cluster-cloud",
+				Status:             eruncommon.CloudContextStatusRunning,
+			}},
+		},
+		tenants: map[string]eruncommon.TenantConfig{
+			"team-stop": {
+				Name:               "team-stop",
+				DefaultEnvironment: "dev-stop",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"team-stop/dev-stop": {
+				Name:               "dev-stop",
+				KubernetesContext:  "cluster-cloud",
+				CloudProviderAlias: "team-cloud",
+				ManagedCloud:       true,
+				Remote:             true,
+			},
+		},
+	}
+	key := selectionKey(uiSelection{Tenant: "team-stop", Environment: "dev-stop"})
+	app := NewApp(erunUIDeps{store: store})
+	defer app.shutdown(context.Background())
+
+	app.idleStops[key] = struct{}{}
+	app.clearIdleStopsForCloudContext("cloud-ctx")
+
+	if _, exists := app.idleStops[key]; exists {
+		t.Fatal("expected previous idle stop marker to be cleared")
 	}
 }
 

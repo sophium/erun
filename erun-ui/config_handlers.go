@@ -84,6 +84,7 @@ func (a *App) StartCloudContext(name string) (uiCloudContextStatus, error) {
 	if err != nil {
 		return uiCloudContextStatus{}, err
 	}
+	a.clearIdleStopsForCloudContext(status.Name)
 	return cloudContextStatusToUI(status), nil
 }
 
