@@ -14,6 +14,7 @@ type (
 	SelectRunner             func(promptui.Select) (int, string, error)
 	KubernetesContextsLister func() ([]string, error)
 	MCPLauncher              func(io.Reader, io.Writer, io.Writer, []string) error
+	APILauncher              func(io.Reader, io.Writer, io.Writer, []string) error
 )
 
 func runPrompt(prompt promptui.Prompt) (string, error) {
@@ -41,6 +42,7 @@ type rootDependencies struct {
 	resolveOpen               func(common.OpenParams) (common.OpenResult, error)
 	resolveRuntimeDeploySpec  func(common.OpenResult) (common.DeploySpec, error)
 	activateMCP               MCPForwarder
+	activateAPI               APIForwarder
 	activateSSHD              SSHDActivator
 	runManagedDeploy          func(common.Context, common.OpenResult) error
 }
@@ -61,6 +63,7 @@ func newRootDependencies() rootDependencies {
 		runInitForOpen:            newRunInitForOpen(store, runInit),
 		push:                      newPushOperation(nil, common.DockerRegistryLogin, runSelect),
 		activateMCP:               newMCPForwarder(),
+		activateAPI:               newAPIForwarder(),
 		activateSSHD:              newSSHDActivator(common.RunRemoteCommand),
 	}
 	deps.resolveOpen = deps.resolveOpenResult
@@ -116,6 +119,7 @@ func (d rootDependencies) commands() []*cobra.Command {
 		d.optionalPushCommand(),
 		d.optionalDeployCommand(),
 		newMCPCmd(d.resolveOpen, d.runInitForArgs, launchMCPProcess),
+		newAPICmd(d.resolveOpen, d.runInitForArgs, launchAPIProcess),
 		newAppCmd(launchAppProcess),
 		newExecCmd(common.FindProjectRoot, common.GitCommandRunner, nil),
 		newCloudCmd(d.configStore, runPrompt, runSelect, common.CloudDependencies{}),
@@ -147,6 +151,7 @@ func (d rootDependencies) openCommand() *cobra.Command {
 		d.resolveRuntimeDeploySpec,
 		d.deployHelmChart,
 		d.activateMCP,
+		d.activateAPI,
 		d.activateSSHD,
 		launchVSCode,
 		launchIntelliJ,
@@ -210,7 +215,7 @@ func (d rootDependencies) runRoot(cmd *cobra.Command, args []string) error {
 	if initRan {
 		return nil
 	}
-	return runResolvedOpenCommand(ctx, result, openOptions{}, runPrompt, newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell), d.runManagedDeploy, common.CheckKubernetesDeployment, d.resolveRuntimeDeploySpec, d.deployHelmChart, d.activateMCP, d.activateSSHD, launchVSCode, launchIntelliJ)
+	return runResolvedOpenCommandWithAPI(ctx, result, openOptions{}, runPrompt, newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell), d.runManagedDeploy, common.CheckKubernetesDeployment, d.resolveRuntimeDeploySpec, d.deployHelmChart, d.activateMCP, d.activateAPI, d.activateSSHD, launchVSCode, launchIntelliJ)
 }
 
 func withCloudContextPreflight(ctx common.Context, store any) common.Context {

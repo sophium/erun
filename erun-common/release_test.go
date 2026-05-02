@@ -292,7 +292,8 @@ end
   },
   "bin": [
     "erun.exe",
-    "emcp.exe"
+    "emcp.exe",
+    "eapi.exe"
   ]
 }
 `,
@@ -424,7 +425,8 @@ func TestUpdateScoopManifestReleaseChecksum(t *testing.T) {
   },
   "bin": [
     "erun.exe",
-    "emcp.exe"
+    "emcp.exe",
+    "eapi.exe"
   ]
 }
 `), 0o644); err != nil {
@@ -904,7 +906,8 @@ end
   },
   "bin": [
     "erun.exe",
-    "emcp.exe"
+    "emcp.exe",
+    "eapi.exe"
   ]
 }
 `), 0o644), "write scoop manifest")

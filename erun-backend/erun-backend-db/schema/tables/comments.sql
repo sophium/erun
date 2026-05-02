@@ -1,0 +1,23 @@
+CREATE TABLE comments (
+  comment_id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL,
+  review_id UUID NOT NULL,
+  creator_user_id UUID,
+  status TEXT NOT NULL,
+  parent_comment_id UUID,
+  commit_id TEXT NOT NULL,
+  line INTEGER NOT NULL,
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
+  FOREIGN KEY (tenant_id, review_id) REFERENCES reviews (tenant_id, review_id),
+  FOREIGN KEY (tenant_id, creator_user_id) REFERENCES users (tenant_id, user_id),
+  FOREIGN KEY (tenant_id, parent_comment_id) REFERENCES comments (tenant_id, comment_id),
+  CONSTRAINT comments_status_check CHECK (status IN ('OPEN', 'CLOSED')),
+  CONSTRAINT comments_line_check CHECK (line > 0),
+  CONSTRAINT comments_root_creator_check CHECK (parent_comment_id IS NOT NULL OR creator_user_id IS NOT NULL),
+  CONSTRAINT comments_child_creator_check CHECK (parent_comment_id IS NULL OR creator_user_id IS NULL),
+  CONSTRAINT comments_no_self_parent_check CHECK (parent_comment_id IS NULL OR parent_comment_id <> comment_id),
+  CONSTRAINT comments_tenant_comment_key UNIQUE (tenant_id, comment_id),
+  CONSTRAINT comments_tenant_review_comment_key UNIQUE (tenant_id, review_id, comment_id)
+);

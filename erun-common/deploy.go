@@ -59,6 +59,7 @@ type HelmDeployParams struct {
 	WorktreeHostPath   string
 	SSHDEnabled        bool
 	MCPPort            int
+	APIPort            int
 	SSHPort            int
 	ManagedCloud       bool
 	CloudContextName   string
@@ -86,6 +87,7 @@ type HelmDeploySpec struct {
 	WorktreeHostPath   string
 	SSHDEnabled        bool
 	MCPPort            int
+	APIPort            int
 	SSHPort            int
 	ManagedCloud       bool
 	CloudContextName   string
@@ -121,6 +123,7 @@ type KubernetesDeploymentCheckParams struct {
 	ExpectedRepoPath   string
 	ExpectedSSHD       *bool
 	ExpectedMCPPort    int
+	ExpectedAPIPort    int
 	ExpectedSSHPort    int
 	ExpectedRuntimePod RuntimePodResources
 }
@@ -598,6 +601,7 @@ func newHelmDeploySpec(target OpenResult, deployContext KubernetesDeployContext,
 		WorktreeHostPath:   resolveWorktreeHostPath(target.RepoPath),
 		SSHDEnabled:        target.EnvConfig.SSHD.Enabled,
 		MCPPort:            ports.MCP,
+		APIPort:            ports.API,
 		SSHPort:            ports.SSH,
 		CloudProviderAlias: target.EnvConfig.CloudProviderAlias,
 		Idle:               target.EnvConfig.Idle,
@@ -666,6 +670,7 @@ func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 		WorktreeHostPath:   d.WorktreeHostPath,
 		SSHDEnabled:        d.SSHDEnabled,
 		MCPPort:            d.MCPPort,
+		APIPort:            d.APIPort,
 		SSHPort:            d.SSHPort,
 		ManagedCloud:       d.ManagedCloud,
 		CloudContextName:   d.CloudContextName,
@@ -702,6 +707,7 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "worktreeHostPath="+d.WorktreeHostPath,
 		"--set", "sshdEnabled="+formatHelmBool(d.SSHDEnabled),
 		"--set", "mcpPort="+formatHelmPort(d.MCPPort, MCPServicePort),
+		"--set", "apiPort="+formatHelmPort(d.APIPort, APIServicePort),
 		"--set", "sshPort="+formatHelmPort(d.SSHPort, DefaultSSHLocalPort),
 		"--set", "managedCloud="+formatHelmBool(d.ManagedCloud),
 		"--set-string", "cloudContext.name="+d.CloudContextName,
@@ -1086,6 +1092,7 @@ func DeployHelmChart(params HelmDeployParams) error {
 		WorktreeHostPath:   params.WorktreeHostPath,
 		SSHDEnabled:        params.SSHDEnabled,
 		MCPPort:            params.MCPPort,
+		APIPort:            params.APIPort,
 		SSHPort:            params.SSHPort,
 		ManagedCloud:       params.ManagedCloud,
 		CloudContextName:   params.CloudContextName,
@@ -1260,6 +1267,7 @@ func hasExpectedDeploymentSettings(params KubernetesDeploymentCheckParams) bool 
 	return strings.TrimSpace(params.ExpectedRepoPath) != "" ||
 		params.ExpectedSSHD != nil ||
 		params.ExpectedMCPPort > 0 ||
+		params.ExpectedAPIPort > 0 ||
 		params.ExpectedSSHPort > 0 ||
 		params.ExpectedRuntimePod != (RuntimePodResources{})
 }
@@ -1326,6 +1334,7 @@ type deploymentExpectedMatches struct {
 	repoPath   bool
 	sshd       bool
 	mcpPort    bool
+	apiPort    bool
 	sshPort    bool
 	runtimePod bool
 }
@@ -1335,6 +1344,7 @@ func expectedDeploymentMatches(params KubernetesDeploymentCheckParams) deploymen
 		repoPath:   strings.TrimSpace(params.ExpectedRepoPath) == "",
 		sshd:       params.ExpectedSSHD == nil,
 		mcpPort:    params.ExpectedMCPPort <= 0,
+		apiPort:    params.ExpectedAPIPort <= 0,
 		sshPort:    params.ExpectedSSHPort <= 0,
 		runtimePod: params.ExpectedRuntimePod == (RuntimePodResources{}),
 	}
@@ -1348,13 +1358,15 @@ func (m *deploymentExpectedMatches) apply(params KubernetesDeploymentCheckParams
 		m.sshd = matchesExpectedBool(value, params.ExpectedSSHD)
 	case "ERUN_MCP_PORT":
 		m.mcpPort = matchesExpectedPort(value, params.ExpectedMCPPort)
+	case "ERUN_API_PORT":
+		m.apiPort = matchesExpectedPort(value, params.ExpectedAPIPort)
 	case "ERUN_SSHD_PORT":
 		m.sshPort = matchesExpectedPort(value, params.ExpectedSSHPort)
 	}
 }
 
 func (m deploymentExpectedMatches) ok() bool {
-	return m.repoPath && m.sshd && m.mcpPort && m.sshPort && m.runtimePod
+	return m.repoPath && m.sshd && m.mcpPort && m.apiPort && m.sshPort && m.runtimePod
 }
 
 func matchesExpectedRepoPath(value, expected string) bool {

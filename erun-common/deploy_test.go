@@ -242,7 +242,7 @@ func TestRuntimeChartsInstallBinfmtForMultiArchBuilds(t *testing.T) {
 	}
 }
 
-func TestRuntimeChartsExposeMCPAndSSHPorts(t *testing.T) {
+func TestRuntimeChartsExposeMCPAPIAndSSHPorts(t *testing.T) {
 	paths := []string{
 		filepath.Join("..", "erun-devops", "k8s", "erun-devops", "templates", "service.yaml"),
 		filepath.Join("assets", "default-devops-chart", "templates", "service.yaml"),
@@ -256,6 +256,7 @@ func TestRuntimeChartsExposeMCPAndSSHPorts(t *testing.T) {
 		content := string(data)
 		for _, want := range []string{
 			`{{- $mcpPort := default 17000 .Values.mcpPort -}}`,
+			`{{- $apiPort := default 17033 .Values.apiPort -}}`,
 			`{{- $sshPort := default 17022 .Values.sshPort -}}`,
 			`{{- $cloudContext := default dict .Values.cloudContext -}}`,
 			`{{- $cloudContextName := default "" $cloudContext.name -}}`,
@@ -267,9 +268,12 @@ func TestRuntimeChartsExposeMCPAndSSHPorts(t *testing.T) {
 			"name: ERUN_CLOUD_REGION",
 			"name: ERUN_CLOUD_INSTANCE_ID",
 			"name: ERUN_MCP_PORT",
+			"name: ERUN_API_PORT",
 			"name: ERUN_SSHD_PORT",
 			"containerPort: {{ $mcpPort }}",
 			"name: mcp",
+			"containerPort: {{ $apiPort }}",
+			"name: api",
 			"containerPort: {{ $sshPort }}",
 			"name: ssh",
 		} {
@@ -448,6 +452,7 @@ func TestNewHelmDeploySpecUsesResolvedEnvironmentPorts(t *testing.T) {
 				RangeStart: 17100,
 				RangeEnd:   17199,
 				MCP:        17100,
+				API:        17133,
 				SSH:        17122,
 			},
 		},
@@ -460,8 +465,8 @@ func TestNewHelmDeploySpecUsesResolvedEnvironmentPorts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newHelmDeploySpec failed: %v", err)
 	}
-	if spec.MCPPort != 17100 || spec.SSHPort != 62222 {
-		t.Fatalf("expected resolved ports to be preserved, got mcp=%d ssh=%d", spec.MCPPort, spec.SSHPort)
+	if spec.MCPPort != 17100 || spec.APIPort != 17133 || spec.SSHPort != 62222 {
+		t.Fatalf("expected resolved ports to be preserved, got mcp=%d api=%d ssh=%d", spec.MCPPort, spec.APIPort, spec.SSHPort)
 	}
 }
 
@@ -959,6 +964,7 @@ printf '%s
 		WorktreeHostPath:   "/home/erun/git/erun",
 		SSHDEnabled:        true,
 		MCPPort:            17100,
+		APIPort:            17133,
 		SSHPort:            17122,
 		ManagedCloud:       true,
 		CloudContextName:   "erun-001-020362606330-eu-west-2",
@@ -980,6 +986,9 @@ printf '%s
 	}
 	if !strings.Contains(args, "--set\nmcpPort=17100\n") {
 		t.Fatalf("expected helm args to include mcpPort=17100, got:\n%s", args)
+	}
+	if !strings.Contains(args, "--set\napiPort=17133\n") {
+		t.Fatalf("expected helm args to include apiPort=17133, got:\n%s", args)
 	}
 	if !strings.Contains(args, "--set\nsshPort=17122\n") {
 		t.Fatalf("expected helm args to include sshPort=17122, got:\n%s", args)
@@ -1125,7 +1134,7 @@ if [ "$1" = "get" ] && [ "$2" = "deployment" ] && [ "$3" = "erun-devops" ] && [ 
 fi
 if [ "$1" = "get" ] && [ "$2" = "deployment" ] && [ "$3" = "erun-devops" ] && [ "$4" = "-o" ] && [ "$5" = "json" ]; then
   cat <<'EOF'
-{"spec":{"template":{"spec":{"containers":[{"name":"erun-devops","env":[{"name":"ERUN_REPO_PATH","value":"/home/erun/git/erun"},{"name":"ERUN_SSHD_ENABLED","value":"false"},{"name":"ERUN_MCP_PORT","value":"17000"},{"name":"ERUN_SSHD_PORT","value":"17022"}]}]}}}}
+{"spec":{"template":{"spec":{"containers":[{"name":"erun-devops","env":[{"name":"ERUN_REPO_PATH","value":"/home/erun/git/erun"},{"name":"ERUN_SSHD_ENABLED","value":"false"},{"name":"ERUN_MCP_PORT","value":"17000"},{"name":"ERUN_API_PORT","value":"17033"},{"name":"ERUN_SSHD_PORT","value":"17022"}]}]}}}}
 EOF
   exit 0
 fi
@@ -1144,6 +1153,7 @@ exit 1
 		ExpectedRepoPath:  "/home/erun/git/erun",
 		ExpectedSSHD:      &sshd,
 		ExpectedMCPPort:   17200,
+		ExpectedAPIPort:   17233,
 		ExpectedSSHPort:   17222,
 	})
 	if err != nil {

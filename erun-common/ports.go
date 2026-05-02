@@ -12,8 +12,10 @@ const (
 
 	MCPServicePortOffset = 0
 	SSHServicePortOffset = 22
+	APIServicePortOffset = 33
 
 	MCPServicePort      = LowerServicePort + MCPServicePortOffset
+	APIServicePort      = LowerServicePort + APIServicePortOffset
 	DefaultSSHLocalPort = LowerServicePort + SSHServicePortOffset
 )
 
@@ -21,6 +23,7 @@ type EnvironmentLocalPorts struct {
 	RangeStart int `json:"rangeStart,omitempty"`
 	RangeEnd   int `json:"rangeEnd,omitempty"`
 	MCP        int `json:"mcp,omitempty"`
+	API        int `json:"api,omitempty"`
 	SSH        int `json:"ssh,omitempty"`
 }
 
@@ -46,6 +49,9 @@ func LocalPortsForResult(result OpenResult) EnvironmentLocalPorts {
 	if ports.MCP == 0 {
 		ports.MCP = ports.RangeStart + MCPServicePortOffset
 	}
+	if ports.API == 0 {
+		ports.API = ports.RangeStart + APIServicePortOffset
+	}
 	if ports.SSH == 0 {
 		ports.SSH = ports.RangeStart + SSHServicePortOffset
 	}
@@ -57,6 +63,10 @@ func LocalPortsForResult(result OpenResult) EnvironmentLocalPorts {
 
 func MCPPortForResult(result OpenResult) int {
 	return LocalPortsForResult(result).MCP
+}
+
+func APIPortForResult(result OpenResult) int {
+	return LocalPortsForResult(result).API
 }
 
 func SSHLocalPortForResult(result OpenResult) int {
@@ -146,7 +156,7 @@ func environmentLocalPortsForIndex(index int, env EnvConfig) (EnvironmentLocalPo
 	if index < 0 {
 		return EnvironmentLocalPorts{}, fmt.Errorf("environment index must be non-negative")
 	}
-	if MCPServicePortOffset >= EnvironmentPortRangeSize || SSHServicePortOffset >= EnvironmentPortRangeSize {
+	if MCPServicePortOffset >= EnvironmentPortRangeSize || APIServicePortOffset >= EnvironmentPortRangeSize || SSHServicePortOffset >= EnvironmentPortRangeSize {
 		return EnvironmentLocalPorts{}, fmt.Errorf("service port offsets exceed environment local port range size")
 	}
 
@@ -160,6 +170,7 @@ func environmentLocalPortsForIndex(index int, env EnvConfig) (EnvironmentLocalPo
 		RangeStart: rangeStart,
 		RangeEnd:   rangeEnd,
 		MCP:        rangeStart + MCPServicePortOffset,
+		API:        rangeStart + APIServicePortOffset,
 		SSH:        rangeStart + SSHServicePortOffset,
 	}
 	if env.SSHD.LocalPort > 0 {

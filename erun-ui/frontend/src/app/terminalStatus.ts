@@ -64,11 +64,12 @@ export function debugOutputBlock(output: string): string {
 
 export function classifiedTerminalFailure(rawReason: string, displayReason: string, output: string, openSelection?: UISelection): ClassifiedTerminalFailure {
   const combined = `${rawReason}\n${output}`.toLowerCase();
-  if (combined.includes('timed out waiting for mcp port-forward')) {
+  if (combined.includes('timed out waiting for mcp port-forward') || combined.includes('timed out waiting for api port-forward')) {
+    const kind = combined.includes('api port-forward') ? 'API' : 'MCP';
     const port = rawReason.match(/127\.0\.0\.1:(\d+)/)?.[1] || output.match(/127\.0\.0\.1:(\d+)/)?.[1] || '';
     return {
-      message: port ? `MCP port-forward on 127.0.0.1:${port} is still not ready` : 'MCP port-forward is still not ready',
-      detail: mcpPortForwardDetail(combined),
+      message: port ? `${kind} port-forward on 127.0.0.1:${port} is still not ready` : `${kind} port-forward is still not ready`,
+      detail: portForwardDetail(combined, kind),
       action: openSelection ? 'wait-longer' : '',
       retrySelection: openSelection || null,
     };
@@ -205,9 +206,10 @@ function shortIDEOpenFailureDetail(output: string): string {
   return `${firstLine.slice(0, 77)}...`;
 }
 
-function mcpPortForwardDetail(value: string): string {
-  if (value.includes('local mcp port') && value.includes('already in use')) {
-    return 'Another local process is using the MCP port.';
+function portForwardDetail(value: string, kind: 'API' | 'MCP'): string {
+  const lowerKind = kind.toLowerCase();
+  if (value.includes(`local ${lowerKind} port`) && value.includes('already in use')) {
+    return `Another local process is using the ${kind} port.`;
   }
   if (value.includes('pod not found')) {
     return 'The runtime pod was replaced while the app was connecting.';
@@ -216,9 +218,9 @@ function mcpPortForwardDetail(value: string): string {
     return 'The runtime pod connection was lost, likely because the pod restarted.';
   }
   if (value.includes('connection refused') || value.includes('not accepting')) {
-    return 'The runtime pod exists, but MCP is not accepting connections yet.';
+    return `The runtime pod exists, but ${kind} is not accepting connections yet.`;
   }
-  return 'kubectl has not exposed a reachable MCP endpoint yet.';
+  return `kubectl has not exposed a reachable ${kind} endpoint yet.`;
 }
 
 const terminalOutputStatusRules: Array<{ matches: (lower: string) => boolean; message: (output: string) => string }> = [

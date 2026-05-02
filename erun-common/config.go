@@ -40,8 +40,9 @@ type TenantConfig struct {
 	ProjectRoot        string
 	Name               string
 	DefaultEnvironment string
-	Remote             bool  `yaml:"remote,omitempty"`
-	Snapshot           *bool `yaml:"snapshot,omitempty"`
+	APIURL             string `yaml:"api_url,omitempty" json:"apiUrl,omitempty"`
+	Remote             bool   `yaml:"remote,omitempty"`
+	Snapshot           *bool  `yaml:"snapshot,omitempty"`
 }
 
 type EnvConfig struct {

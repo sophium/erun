@@ -120,6 +120,7 @@ func stateFromListResult(result eruncommon.ListResult, info eruncommon.BuildInfo
 			item.Environments = append(item.Environments, uiEnvironment{
 				Name:           strings.TrimSpace(environment.Name),
 				MCPURL:         mcpEndpointForListEnvironment(environment),
+				APIURL:         strings.TrimSpace(environment.APIURL),
 				RuntimeVersion: strings.TrimSpace(environment.RuntimeVersion),
 				IsActive:       environment.IsActive,
 				SSHDEnabled:    environment.SSH.Enabled,

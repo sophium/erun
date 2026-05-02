@@ -142,6 +142,12 @@ func writeEffectiveOpenBase(ctx common.Context, effective common.ListEffectiveTa
 	if err := writeLabeledValue(ctx, "assigned mcp local port", fmt.Sprintf("%d (when MCP is running or forwarded)", effective.LocalPorts.MCP)); err != nil {
 		return err
 	}
+	if err := writeLabeledValue(ctx, "assigned api local port", fmt.Sprintf("%d (when API is running or forwarded)", effective.LocalPorts.API)); err != nil {
+		return err
+	}
+	if err := writeLabeledValue(ctx, "api url", effective.APIURL); err != nil {
+		return err
+	}
 	return writeLabeledValue(ctx, "assigned ssh local port", fmt.Sprintf("%d (when SSH port-forward is active)", effective.LocalPorts.SSH))
 }
 
@@ -164,6 +170,11 @@ func writeTenantEntry(ctx common.Context, tenant common.ListTenantResult) error 
 	}
 	if err := writeIndentedValue(ctx, 4, "default environment", tenant.DefaultEnvironment); err != nil {
 		return err
+	}
+	if strings.TrimSpace(tenant.APIURL) != "" {
+		if err := writeIndentedValue(ctx, 4, "api url", tenant.APIURL); err != nil {
+			return err
+		}
 	}
 
 	if len(tenant.Environments) == 0 {
@@ -221,6 +232,8 @@ func environmentBaseFields(env common.ListEnvironmentResult) string {
 	line += " repo=" + quotedValueOrNone(env.RepoPath)
 	line += " ports=" + portRangeLabel(env.LocalPorts)
 	line += " mcp-port=" + fmt.Sprintf("%d", env.LocalPorts.MCP)
+	line += " api-port=" + fmt.Sprintf("%d", env.LocalPorts.API)
+	line += " api-url=" + quotedValueOrNone(env.APIURL)
 	line += " ssh-port=" + fmt.Sprintf("%d", env.LocalPorts.SSH)
 	return line
 }

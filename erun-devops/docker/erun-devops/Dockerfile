@@ -6,6 +6,7 @@ WORKDIR /src
 COPY erun-cli/go.mod erun-cli/go.sum erun-cli/go.work erun-cli/go.work.sum /src/erun-cli/
 COPY erun-common/go.mod /src/erun-common/go.mod
 COPY erun-mcp/go.mod erun-mcp/go.sum /src/erun-mcp/
+COPY erun-backend/erun-backend-api/go.mod erun-backend/erun-backend-api/go.sum /src/erun-backend/erun-backend-api/
 COPY erun-devops/VERSION /src/erun-devops/VERSION
 
 WORKDIR /src/erun-cli
@@ -18,11 +19,13 @@ ARG ERUN_DATE=""
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    go mod download
+    go mod download && \
+    cd /src/erun-backend/erun-backend-api && go mod download
 
 COPY erun-cli /src/erun-cli
 COPY erun-common /src/erun-common
 COPY erun-mcp /src/erun-mcp
+COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
@@ -30,7 +33,9 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags "-X github.com/sophium/erun/cmd.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/cmd.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/cmd.buildDate=${ERUN_DATE}" -o /out/erun . && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
-    go build -ldflags "-X github.com/sophium/erun/erun-mcp.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/erun-mcp.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/erun-mcp.buildDate=${ERUN_DATE}" -o /out/emcp ../erun-mcp/cmd/emcp
+    go build -ldflags "-X github.com/sophium/erun/erun-mcp.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/erun-mcp.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/erun-mcp.buildDate=${ERUN_DATE}" -o /out/emcp ../erun-mcp/cmd/emcp && \
+    cd /src/erun-backend/erun-backend-api && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/eapi ./cmd/eapi
 
 FROM erunpaas/erun-ubuntu:noble-20260217
 
@@ -104,6 +109,7 @@ RUN apt-get update && \
 COPY --from=builder /usr/local/go /usr/local/go
 COPY --from=builder --chmod=0755 /out/erun /usr/local/bin/erun
 COPY --from=builder --chmod=0755 /out/emcp /usr/local/bin/emcp
+COPY --from=builder --chmod=0755 /out/eapi /usr/local/bin/eapi
 COPY --chmod=0755 erun-devops/docker/erun-devops/entrypoint.sh /usr/local/bin/erun-devops-entrypoint
 COPY --chmod=0755 erun-devops/docker/erun-devops/codex-wrapper.sh /usr/local/bin/codex
 COPY --chmod=0644 erun-devops/docker/erun-devops/bash_prompt.sh /etc/erun/bash_prompt.sh
@@ -121,7 +127,7 @@ WORKDIR /home/erun
 
 USER erun
 
-EXPOSE 17000 17022
+EXPOSE 17000 17033 17022
 
 ENTRYPOINT ["erun-devops-entrypoint"]
 CMD ["--host", "0.0.0.0"]

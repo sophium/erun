@@ -18,6 +18,7 @@ type uiTenant struct {
 type uiEnvironment struct {
 	Name           string `json:"name"`
 	MCPURL         string `json:"mcpUrl,omitempty"`
+	APIURL         string `json:"apiUrl,omitempty"`
 	RuntimeVersion string `json:"runtimeVersion,omitempty"`
 	IsActive       bool   `json:"isActive,omitempty"`
 	SSHDEnabled    bool   `json:"sshdEnabled,omitempty"`
@@ -62,6 +63,7 @@ type uiERunConfig struct {
 type uiTenantConfig struct {
 	Name               string `json:"name"`
 	DefaultEnvironment string `json:"defaultEnvironment"`
+	APIURL             string `json:"apiUrl"`
 }
 
 type uiSSHDConfig struct {
@@ -74,8 +76,10 @@ type uiEnvironmentLocalPorts struct {
 	RangeStart int          `json:"rangeStart"`
 	RangeEnd   int          `json:"rangeEnd"`
 	MCP        int          `json:"mcp"`
+	API        int          `json:"api"`
 	SSH        int          `json:"ssh"`
 	MCPStatus  uiPortStatus `json:"mcpStatus"`
+	APIStatus  uiPortStatus `json:"apiStatus"`
 	SSHStatus  uiPortStatus `json:"sshStatus"`
 }
 

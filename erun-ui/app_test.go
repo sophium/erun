@@ -28,8 +28,8 @@ func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
 			{
 				Name: "erun",
 				Environments: []eruncommon.ListEnvironmentResult{
-					{Name: "local", RuntimeVersion: "1.0.19-snapshot-20260418141901", LocalPorts: eruncommon.EnvironmentLocalPorts{MCP: 17000}, SSH: eruncommon.ListSSHResult{Enabled: true}},
-					{Name: "remote", RuntimeVersion: "1.0.18", Remote: true, LocalPorts: eruncommon.EnvironmentLocalPorts{MCP: 17100}},
+					{Name: "local", APIURL: "http://127.0.0.1:17033", RuntimeVersion: "1.0.19-snapshot-20260418141901", LocalPorts: eruncommon.EnvironmentLocalPorts{MCP: 17000, API: 17033}, SSH: eruncommon.ListSSHResult{Enabled: true}},
+					{Name: "remote", APIURL: "http://127.0.0.1:17133", RuntimeVersion: "1.0.18", Remote: true, LocalPorts: eruncommon.EnvironmentLocalPorts{MCP: 17100, API: 17133}},
 				},
 			},
 		},
@@ -46,6 +46,9 @@ func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
 	}
 	if state.Tenants[0].Environments[0].MCPURL != "http://127.0.0.1:17000/mcp" {
 		t.Fatalf("unexpected MCP URL: %+v", state.Tenants[0].Environments[0])
+	}
+	if state.Tenants[0].Environments[0].APIURL != "http://127.0.0.1:17033" {
+		t.Fatalf("unexpected API URL: %+v", state.Tenants[0].Environments[0])
 	}
 	if state.Tenants[0].Environments[0].RuntimeVersion != "1.0.19-snapshot-20260418141901" {
 		t.Fatalf("unexpected runtime version: %+v", state.Tenants[0].Environments[0])
@@ -1208,6 +1211,7 @@ func TestLoadAndSaveTenantConfig(t *testing.T) {
 				Name:               "frs",
 				ProjectRoot:        "/tmp/old",
 				DefaultEnvironment: "dev",
+				APIURL:             "https://api.old.example",
 				Remote:             true,
 				Snapshot:           &snapshot,
 			},
@@ -1219,21 +1223,22 @@ func TestLoadAndSaveTenantConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTenantConfig failed: %v", err)
 	}
-	if loaded.Name != "frs" || loaded.DefaultEnvironment != "dev" {
+	if loaded.Name != "frs" || loaded.DefaultEnvironment != "dev" || loaded.APIURL != "https://api.old.example" {
 		t.Fatalf("unexpected loaded config: %+v", loaded)
 	}
 
 	saved, err := app.SaveTenantConfig(uiTenantConfig{
 		Name:               "frs",
 		DefaultEnvironment: " prod ",
+		APIURL:             " https://api.new.example ",
 	})
 	if err != nil {
 		t.Fatalf("SaveTenantConfig failed: %v", err)
 	}
-	if saved.DefaultEnvironment != "prod" {
+	if saved.DefaultEnvironment != "prod" || saved.APIURL != "https://api.new.example" {
 		t.Fatalf("unexpected saved config: %+v", saved)
 	}
-	if store.tenants["frs"].ProjectRoot != "/tmp/old" || !store.tenants["frs"].Remote || store.tenants["frs"].Snapshot == nil || *store.tenants["frs"].Snapshot {
+	if store.tenants["frs"].ProjectRoot != "/tmp/old" || store.tenants["frs"].APIURL != "https://api.new.example" || !store.tenants["frs"].Remote || store.tenants["frs"].Snapshot == nil || *store.tenants["frs"].Snapshot {
 		t.Fatalf("expected tenant project root/remote/snapshot to be preserved, got %+v", store.tenants["frs"])
 	}
 }
@@ -1379,7 +1384,7 @@ func assertSavedEnvironmentConfig(t *testing.T, saved uiEnvironmentConfig, proje
 func assertLocalPorts(t *testing.T, ports uiEnvironmentLocalPorts) {
 	t.Helper()
 
-	if ports.RangeStart != 17000 || ports.RangeEnd != 17099 || ports.MCP != 17000 || ports.SSH != 60022 {
+	if ports.RangeStart != 17000 || ports.RangeEnd != 17099 || ports.MCP != 17000 || ports.API != 17033 || ports.SSH != 60022 {
 		t.Fatalf("unexpected local ports: %+v", ports)
 	}
 }

@@ -32,7 +32,9 @@ type testRootDeps struct {
 	DeployHelmChart                common.HelmChartDeployerFunc
 	RecoverHelmRelease             common.HelmReleaseRecovererFunc
 	LaunchMCP                      MCPLauncher
+	LaunchAPI                      APILauncher
 	ForwardMCP                     MCPForwarder
+	ForwardAPI                     APIForwarder
 	LaunchApp                      AppLauncher
 	LaunchShell                    common.ShellLauncherFunc
 	WaitForRemoteRuntime           common.RemoteRuntimeWaitFunc
@@ -199,6 +201,13 @@ func testMCPLauncherOrDefault(launch MCPLauncher) MCPLauncher {
 	return launch
 }
 
+func testAPILauncherOrDefault(launch APILauncher) APILauncher {
+	if launch == nil {
+		return launchAPIProcess
+	}
+	return launch
+}
+
 func testAppLauncherOrDefault(launch AppLauncher) AppLauncher {
 	if launch == nil {
 		return launchAppProcess
@@ -243,6 +252,13 @@ func testMCPForwarderOrDefault(forward MCPForwarder) MCPForwarder {
 	return forward
 }
 
+func testAPIForwarderOrDefault(forward APIForwarder) APIForwarder {
+	if forward == nil {
+		return func(common.Context, common.OpenResult) error { return nil }
+	}
+	return forward
+}
+
 func testVSCodeLauncherOrDefault(launch VSCodeLauncher) VSCodeLauncher {
 	if launch == nil {
 		return launchVSCode
@@ -272,6 +288,7 @@ type testRootCmdParts struct {
 	loginToDockerRegistry          common.DockerRegistryLoginFunc
 	recoveringDeployHelmChart      common.HelmChartDeployerFunc
 	launchMCP                      MCPLauncher
+	launchAPI                      APILauncher
 	launchApp                      AppLauncher
 	runGit                         common.GitCommandRunnerFunc
 	openShell                      OpenShellRunner
@@ -280,6 +297,7 @@ type testRootCmdParts struct {
 	resolveOpen                    func(common.OpenParams) (common.OpenResult, error)
 	resolveRuntimeDeploySpec       func(common.OpenResult) (common.DeploySpec, error)
 	activateMCP                    MCPForwarder
+	activateAPI                    APIForwarder
 	activateSSHD                   SSHDActivator
 	launchVSCodeCmd                VSCodeLauncher
 	launchIntelliJCmd              IntelliJLauncher
@@ -307,6 +325,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	deployHelmChart := testHelmDeployerOrDefault(deps.DeployHelmChart, deps.EnsureKubernetesNamespace)
 	recoveringDeployHelmChart := wrapHelmDeployWithReleaseRecovery(promptRunner, deployHelmChart, deps.RecoverHelmRelease)
 	launchMCP := testMCPLauncherOrDefault(deps.LaunchMCP)
+	launchAPI := testAPILauncherOrDefault(deps.LaunchAPI)
 	launchApp := testAppLauncherOrDefault(deps.LaunchApp)
 	runGit := testGitRunnerOrDefault(deps.RunGit)
 	openShell := testOpenShellRunnerOrDefault(deps.LaunchShell)
@@ -320,6 +339,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 		return resolveRuntimeDeploySpecForOpen(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, currentBuildInfo(), target)
 	}
 	activateMCP := testMCPForwarderOrDefault(deps.ForwardMCP)
+	activateAPI := testAPIForwarderOrDefault(deps.ForwardAPI)
 	activateSSHD := newSSHDActivator(deps.RunRemoteCommand)
 	launchVSCodeCmd := testVSCodeLauncherOrDefault(deps.LaunchVSCode)
 	launchIntelliJCmd := testIntelliJLauncherOrDefault(deps.LaunchIntelliJ)
@@ -368,6 +388,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 		loginToDockerRegistry:          loginToDockerRegistry,
 		recoveringDeployHelmChart:      recoveringDeployHelmChart,
 		launchMCP:                      launchMCP,
+		launchAPI:                      launchAPI,
 		launchApp:                      launchApp,
 		runGit:                         runGit,
 		openShell:                      openShell,
@@ -376,6 +397,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 		resolveOpen:                    resolveOpen,
 		resolveRuntimeDeploySpec:       resolveRuntimeDeploySpec,
 		activateMCP:                    activateMCP,
+		activateAPI:                    activateAPI,
 		activateSSHD:                   activateSSHD,
 		launchVSCodeCmd:                launchVSCodeCmd,
 		launchIntelliJCmd:              launchIntelliJCmd,
@@ -391,7 +413,7 @@ func assembleTestRootCmd(parts testRootCmdParts) *cobra.Command {
 	initCmd := newInitCmd(parts.runInit)
 	openCmd := newOpenCmd(func(ctx common.Context) common.Context {
 		return withCloudContextPreflight(ctx, parts.store)
-	}, parts.resolveOpen, parts.store.SaveEnvConfig, parts.runInitForOpen, parts.promptRunner, parts.openShell, parts.runManagedDeploy, parts.deps.CheckKubernetesDeployment, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.activateMCP, parts.activateSSHD, parts.launchVSCodeCmd, parts.launchIntelliJCmd)
+	}, parts.resolveOpen, parts.store.SaveEnvConfig, parts.runInitForOpen, parts.promptRunner, parts.openShell, parts.runManagedDeploy, parts.deps.CheckKubernetesDeployment, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.activateMCP, parts.activateAPI, parts.activateSSHD, parts.launchVSCodeCmd, parts.launchIntelliJCmd)
 	sshdCmd := newSSHDCmd(func(ctx common.Context) common.Context {
 		return withCloudContextPreflight(ctx, parts.store)
 	}, parts.resolveOpen, parts.store.SaveEnvConfig, parts.runInitForOpen, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.deps.RunRemoteCommand, writeLocalSSHConfig)
@@ -418,6 +440,7 @@ func assembleTestRootCmd(parts testRootCmdParts) *cobra.Command {
 	addCommands(cmd,
 		initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd,
 		newMCPCmd(parts.resolveOpen, parts.runInitForArgs, parts.launchMCP),
+		newAPICmd(parts.resolveOpen, parts.runInitForArgs, parts.launchAPI),
 		newAppCmd(parts.launchApp),
 		newExecCmd(parts.findProjectRoot, parts.runGit, parts.deps.RunRawCommand),
 		newCloudCmd(testCloudStoreOrDefault(parts.store), parts.promptRunner, parts.selectRunner, common.CloudDependencies{}),
@@ -465,7 +488,7 @@ func testRootRunner(parts testRootCmdParts) func(*cobra.Command, []string) error
 		if initRan {
 			return nil
 		}
-		return runResolvedOpenCommand(ctx, result, openOptions{}, parts.promptRunner, parts.openShell, parts.runManagedDeploy, parts.deps.CheckKubernetesDeployment, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.activateMCP, parts.activateSSHD, parts.launchVSCodeCmd, parts.launchIntelliJCmd)
+		return runResolvedOpenCommandWithAPI(ctx, result, openOptions{}, parts.promptRunner, parts.openShell, parts.runManagedDeploy, parts.deps.CheckKubernetesDeployment, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.activateMCP, parts.activateAPI, parts.activateSSHD, parts.launchVSCodeCmd, parts.launchIntelliJCmd)
 	}
 }
 

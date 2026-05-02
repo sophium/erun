@@ -69,14 +69,16 @@ func TestListCommandPrintsDefaultsAndConfiguredTenants(t *testing.T) {
 		"  snapshot: off",
 		"  assigned local port range: 17000-17099",
 		"  assigned mcp local port: 17000 (when MCP is running or forwarded)",
+		"  assigned api local port: 17033 (when API is running or forwarded)",
+		"  api url: http://127.0.0.1:17033",
 		"  assigned ssh local port: 17022 (when SSH port-forward is active)",
 		"Tenants:",
 		"  tenant-a [default, effective]",
 		"    default environment: local",
-		"      - local [default, effective] context=cluster-local snapshot=off repo=" + tenantAPath + " ports=17000-17099 mcp-port=17000 ssh-port=17022",
-		"      - prod context=cluster-prod snapshot=off repo=" + tenantAPath + " ports=17100-17199 mcp-port=17100 ssh-port=17122",
+		"      - local [default, effective] context=cluster-local snapshot=off repo=" + tenantAPath + " ports=17000-17099 mcp-port=17000 api-port=17033 api-url=http://127.0.0.1:17033 ssh-port=17022",
+		"      - prod context=cluster-prod snapshot=off repo=" + tenantAPath + " ports=17100-17199 mcp-port=17100 api-port=17133 api-url=http://127.0.0.1:17133 ssh-port=17122",
 		"  tenant-b",
-		"      - dev [default] context=cluster-b snapshot=off repo=" + tenantBPath + " ports=17200-17299 mcp-port=17200 ssh-port=17222",
+		"      - dev [default] context=cluster-b snapshot=off repo=" + tenantBPath + " ports=17200-17299 mcp-port=17200 api-port=17233 api-url=http://127.0.0.1:17233 ssh-port=17222",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)
@@ -139,9 +141,11 @@ func TestListCommandUsesConfiguredCurrentDirectoryTenantBeforeDefault(t *testing
 		"  snapshot: off",
 		"  assigned local port range: 17100-17199",
 		"  assigned mcp local port: 17100 (when MCP is running or forwarded)",
+		"  assigned api local port: 17133 (when API is running or forwarded)",
+		"  api url: http://127.0.0.1:17133",
 		"  assigned ssh local port: 17122 (when SSH port-forward is active)",
 		"  tenant-b [effective]",
-		"      - dev [default, effective] context=cluster-b snapshot=off repo=" + tenantBPath + " ports=17100-17199 mcp-port=17100 ssh-port=17122",
+		"      - dev [default, effective] context=cluster-b snapshot=off repo=" + tenantBPath + " ports=17100-17199 mcp-port=17100 api-port=17133 api-url=http://127.0.0.1:17133 ssh-port=17122",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)
@@ -228,8 +232,10 @@ func TestListCommandPrintsSnapshotPreference(t *testing.T) {
 		"  snapshot: off",
 		"  assigned local port range: 17000-17099",
 		"  assigned mcp local port: 17000 (when MCP is running or forwarded)",
+		"  assigned api local port: 17033 (when API is running or forwarded)",
+		"  api url: http://127.0.0.1:17033",
 		"  assigned ssh local port: 17022 (when SSH port-forward is active)",
-		"      - local [default, effective] context=cluster-local snapshot=off repo=" + repoRoot + " ports=17000-17099 mcp-port=17000 ssh-port=17022",
+		"      - local [default, effective] context=cluster-local snapshot=off repo=" + repoRoot + " ports=17000-17099 mcp-port=17000 api-port=17033 api-url=http://127.0.0.1:17033 ssh-port=17022",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)
@@ -270,12 +276,14 @@ func TestListCommandPrintsSSHDConfiguration(t *testing.T) {
 	for _, want := range []string{
 		"  assigned local port range: 17000-17099",
 		"  assigned mcp local port: 17000 (when MCP is running or forwarded)",
+		"  assigned api local port: 17033 (when API is running or forwarded)",
+		"  api url: http://127.0.0.1:17033",
 		"  assigned ssh local port: 17022 (when SSH port-forward is active)",
 		"  sshd: on",
 		"  ssh host: erun-tenant-a-dev",
 		"  ssh user: erun",
 		"  ssh workspace: /home/erun/git/tenant-a",
-		"ports=17000-17099 mcp-port=17000 ssh-port=17022 ssh=on host=erun-tenant-a-dev user=erun local-port=17022 workspace=/home/erun/git/tenant-a",
+		"ports=17000-17099 mcp-port=17000 api-port=17033 api-url=http://127.0.0.1:17033 ssh-port=17022 ssh=on host=erun-tenant-a-dev user=erun local-port=17022 workspace=/home/erun/git/tenant-a",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected list output to contain %q, got:\n%s", want, output)

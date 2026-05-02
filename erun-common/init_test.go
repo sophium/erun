@@ -384,6 +384,7 @@ func TestEnsureDefaultDevopsChartMigratesLegacyGeneratedServiceTemplate(t *testi
 	content := string(migrated)
 	for _, want := range []string{
 		`{{- $mcpPort := default 17000 .Values.mcpPort -}}`,
+		`{{- $apiPort := default 17033 .Values.apiPort -}}`,
 		`{{- $sshPort := default 17022 .Values.sshPort -}}`,
 		`{{- $cloudContext := default dict .Values.cloudContext -}}`,
 		`{{- $cloudContextName := default "" $cloudContext.name -}}`,
@@ -395,8 +396,10 @@ func TestEnsureDefaultDevopsChartMigratesLegacyGeneratedServiceTemplate(t *testi
 		"name: ERUN_CLOUD_REGION",
 		"name: ERUN_CLOUD_INSTANCE_ID",
 		"name: ERUN_MCP_PORT",
+		"name: ERUN_API_PORT",
 		"name: ERUN_SSHD_PORT",
 		"containerPort: {{ $mcpPort }}",
+		"containerPort: {{ $apiPort }}",
 		"containerPort: {{ $sshPort }}",
 	} {
 		if !strings.Contains(content, want) {

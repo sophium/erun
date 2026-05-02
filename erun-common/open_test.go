@@ -46,7 +46,7 @@ func TestOpenResolveUsesDefaultTenantAndEnvironment(t *testing.T) {
 	if result.RepoPath != repoPath || result.Title != "tenant-a-dev" {
 		t.Fatalf("unexpected shell target: %+v", result)
 	}
-	if result.LocalPorts.RangeStart != 17000 || result.LocalPorts.SSH != 17022 {
+	if result.LocalPorts.RangeStart != 17000 || result.LocalPorts.API != 17033 || result.LocalPorts.SSH != 17022 {
 		t.Fatalf("unexpected local ports: %+v", result.LocalPorts)
 	}
 }
@@ -146,7 +146,7 @@ func TestOpenResolveUsesCurrentDirectoryTenantBeforeDefault(t *testing.T) {
 	})
 	requireNoError(t, err, "Resolve failed")
 	requireCondition(t, result.Tenant == "tenant-a" && result.Environment == "dev", "expected current directory tenant to win, got %+v", result)
-	requireCondition(t, result.LocalPorts.RangeStart == 17000 && result.LocalPorts.SSH == 17022, "unexpected local ports: %+v", result.LocalPorts)
+	requireCondition(t, result.LocalPorts.RangeStart == 17000 && result.LocalPorts.API == 17033 && result.LocalPorts.SSH == 17022, "unexpected local ports: %+v", result.LocalPorts)
 }
 
 func TestOpenResolveAssignsEnvironmentLocalPortsFromSortedTenantEnvironmentOrder(t *testing.T) {
@@ -168,7 +168,7 @@ func TestOpenResolveAssignsEnvironmentLocalPortsFromSortedTenantEnvironmentOrder
 	if err != nil {
 		t.Fatalf("ResolveOpen failed: %v", err)
 	}
-	if result.LocalPorts.RangeStart != 17200 || result.LocalPorts.MCP != 17200 || result.LocalPorts.SSH != 17222 {
+	if result.LocalPorts.RangeStart != 17200 || result.LocalPorts.MCP != 17200 || result.LocalPorts.API != 17233 || result.LocalPorts.SSH != 17222 {
 		t.Fatalf("unexpected local ports: %+v", result.LocalPorts)
 	}
 }

@@ -27,6 +27,7 @@ Repository guidance for humans and coding agents working in this repo.
 - `erun-cli` - CLI utility
 - `erun-common` - shared common module
 - `erun-mcp` - MCP server module
+- `erun-backend` - backend service area containing the API and database migration modules
 - `erun-devops` - runtime Docker images, Linux packaging, and Kubernetes chart assets used by build, open, deploy, and release flows
 - `erun-ui` - desktop app module built with Wails, using a Go backend and a TypeScript/Yarn frontend
 
@@ -44,6 +45,9 @@ Repository guidance for humans and coding agents working in this repo.
 - `erun-ui` may depend on `erun-common`, and it may launch the installed `erun` executable as a child process for interactive terminal sessions, but it must not import `erun-cli` packages.
 - `erun-mcp` owns MCP transport concerns: server startup, HTTP handler wiring, SDK integration, tool registration, and the `cmd/emcp` executable.
 - Keep MCP-specific configuration, flag parsing, and transport wiring in `erun-mcp`, not in `erun-cli` or `erun-common`.
+- `erun-backend-api` owns hosted backend HTTP API concerns: request authentication, tenant resolution from OIDC claims, API routing, and server-side transport contracts.
+- `erun-backend-db` owns backend database schema and migration concerns. Manage schema changes through Atlas migrations in that module instead of embedding schema setup in API startup code.
+- `erun-cli` and `erun-mcp` should reach backend functionality through transport-neutral clients and contracts in `erun-common`, not by importing backend API packages directly.
 - Keep `erun-common` usable as a standalone library for third parties. Shared code placed there must be transport-agnostic and should not depend on Cobra, the MCP SDK, or module-specific orchestration.
 - When sharing operation contracts across modules, prefer transport-neutral names such as plan, request, result, or input/output. Do not put MCP-only wrapper types in `erun-common` unless they are intentionally generic library contracts.
 - Prefer reusing a shared struct over creating a transport-local duplicate with the same shape. When one shared struct is the canonical contract for both CLI and MCP, transport-specific annotations such as `json` tags are acceptable in `erun-common` to avoid structure duplication.

@@ -171,6 +171,7 @@ func tenantConfigToUI(config eruncommon.TenantConfig, fallbackName string) uiTen
 	result := uiTenantConfig{
 		Name:               name,
 		DefaultEnvironment: strings.TrimSpace(config.DefaultEnvironment),
+		APIURL:             strings.TrimSpace(config.APIURL),
 	}
 	return result
 }
@@ -178,6 +179,7 @@ func tenantConfigToUI(config eruncommon.TenantConfig, fallbackName string) uiTen
 func tenantConfigFromUI(config uiTenantConfig, existing eruncommon.TenantConfig) eruncommon.TenantConfig {
 	existing.Name = strings.TrimSpace(config.Name)
 	existing.DefaultEnvironment = strings.TrimSpace(config.DefaultEnvironment)
+	existing.APIURL = strings.TrimSpace(config.APIURL)
 	return existing
 }
 

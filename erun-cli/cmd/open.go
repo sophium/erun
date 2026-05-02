@@ -22,7 +22,7 @@ const (
 
 var currentHostOS = func() common.HostOS { return common.DetectHost().OS }
 
-func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
+func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateAPI APIForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
 	var noShell bool
 	var vscode bool
 	var intellij bool
@@ -65,7 +65,7 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 			if err != nil {
 				return err
 			}
-			return runResolvedOpenCommand(ctx, result, openOptions{
+			return runResolvedOpenCommandWithAPI(ctx, result, openOptions{
 				NoShell:         noShell,
 				NoAliasPrompt:   noAliasPrompt,
 				VSCode:          vscode,
@@ -73,7 +73,7 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 				VersionOverride: versionOverride,
 				RuntimeImage:    runtimeImage,
 				SaveEnvConfig:   saveEnvConfig,
-			}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateSSHD, launchVSCode, launchIntelliJ)
+			}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateAPI, activateSSHD, launchVSCode, launchIntelliJ)
 		},
 	}
 
@@ -248,6 +248,10 @@ func resolveOpenWithInitRetryForParams(ctx common.Context, params common.OpenPar
 }
 
 func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
+	return runResolvedOpenCommandWithAPI(ctx, result, options, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, nil, activateSSHD, launchVSCode, launchIntelliJ)
+}
+
+func runResolvedOpenCommandWithAPI(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateAPI APIForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
 	runner := resolvedOpenRunner{
 		ctx:                       ctx,
 		result:                    result,
@@ -259,6 +263,7 @@ func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, option
 		resolveRuntimeDeploySpec:  resolveRuntimeDeploySpec,
 		deployHelmChart:           deployHelmChart,
 		activateMCP:               activateMCP,
+		activateAPI:               activateAPI,
 		activateSSHD:              activateSSHD,
 		launchVSCode:              launchVSCode,
 		launchIntelliJ:            launchIntelliJ,
@@ -277,6 +282,7 @@ type resolvedOpenRunner struct {
 	resolveRuntimeDeploySpec  func(common.OpenResult) (common.DeploySpec, error)
 	deployHelmChart           common.HelmChartDeployerFunc
 	activateMCP               MCPForwarder
+	activateAPI               APIForwarder
 	activateSSHD              SSHDActivator
 	launchVSCode              VSCodeLauncher
 	launchIntelliJ            IntelliJLauncher
@@ -384,6 +390,7 @@ func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq common.ShellLaunchPara
 		ExpectedRepoPath:   common.RemoteShellWorktreePath(shellReq),
 		ExpectedSSHD:       sshdExpectationForDeployment(r.result),
 		ExpectedMCPPort:    common.MCPPortForResult(r.result),
+		ExpectedAPIPort:    common.APIPortForResult(r.result),
 		ExpectedSSHPort:    common.SSHLocalPortForResult(r.result),
 		ExpectedRuntimePod: r.result.EnvConfig.RuntimePod,
 	})
@@ -438,9 +445,18 @@ func (r *resolvedOpenRunner) activateForwarders() error {
 		}
 	}
 	if r.activateMCP == nil {
+		if r.activateAPI == nil {
+			return nil
+		}
+		return r.activateAPI(r.ctx, r.result)
+	}
+	if err := r.activateMCP(r.ctx, r.result); err != nil {
+		return err
+	}
+	if r.activateAPI == nil {
 		return nil
 	}
-	return r.activateMCP(r.ctx, r.result)
+	return r.activateAPI(r.ctx, r.result)
 }
 
 func (r *resolvedOpenRunner) maybeLaunchIDE() (bool, error) {
