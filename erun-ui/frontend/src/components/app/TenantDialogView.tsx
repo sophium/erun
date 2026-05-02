@@ -6,6 +6,7 @@ import { readError } from '@/app/errors';
 import type { AppState } from '@/app/state';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
 const dialogErrorClassName =
@@ -47,6 +48,7 @@ export function TenantDialogView({ controller, state }: { controller: ERunUICont
             <div className="grid gap-3">
               <ReadonlyField id="tenant-config-name" label="Tenant name" value={config.name} />
               <SelectField id="tenant-config-defaultenvironment" label="Default environment" value={config.defaultEnvironment} options={environmentOptions} disabled={dialog.busy || environmentOptions.length === 0} onChange={(defaultEnvironment) => controller.updateTenantConfig({ defaultEnvironment })} />
+              <TextField id="tenant-config-apiurl" label="API URL" value={config.apiUrl} disabled={dialog.busy} placeholder={tenantDefaultAPIURL(tenant)} onChange={(apiUrl) => controller.updateTenantConfig({ apiUrl })} />
             </div>
           )}
           {dialog.error && (
@@ -66,6 +68,15 @@ export function TenantDialogView({ controller, state }: { controller: ERunUICont
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function TextField({ id, label, value, disabled, placeholder, onChange }: { id: string; label: string; value: string; disabled?: boolean; placeholder?: string; onChange: (value: string) => void }): React.ReactElement {
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor={id}>{label}</Label>
+      <Input id={id} value={value} disabled={disabled} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />
+    </div>
   );
 }
 
@@ -95,6 +106,11 @@ function SelectField({ id, label, value, options, disabled, onChange }: { id: st
       </select>
     </div>
   );
+}
+
+function tenantDefaultAPIURL(tenant: AppState['tenants'][number] | undefined): string {
+  const environment = tenant?.environments.find((candidate) => candidate.apiUrl);
+  return environment?.apiUrl || 'Environment API URL';
 }
 
 function ReadonlyField({ id, label, value }: { id: string; label: string; value: string }): React.ReactElement {

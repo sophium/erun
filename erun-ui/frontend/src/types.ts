@@ -1,6 +1,7 @@
 export interface UIEnvironment {
   name: string;
   mcpUrl?: string;
+  apiUrl?: string;
   runtimeVersion?: string;
   isActive?: boolean;
   sshdEnabled?: boolean;
@@ -126,6 +127,7 @@ export interface UICloudContextInitInput {
 export interface UITenantConfig {
   name: string;
   defaultEnvironment: string;
+  apiUrl: string;
 }
 
 export interface UISSHDConfig {
@@ -138,8 +140,10 @@ export interface UIEnvironmentLocalPorts {
   rangeStart: number;
   rangeEnd: number;
   mcp: number;
+  api: number;
   ssh: number;
   mcpStatus: UIPortStatus;
+  apiStatus: UIPortStatus;
   sshStatus: UIPortStatus;
 }
 

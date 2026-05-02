@@ -18,12 +18,13 @@ const (
 	DefaultEnvironmentIdleTrafficBytes = 0
 
 	ActivityKindSSH   = "ssh"
+	ActivityKindAPI   = "api"
 	ActivityKindMCP   = "mcp"
 	ActivityKindCLI   = "cli"
 	ActivityKindCodex = "codex"
 )
 
-var environmentActivityKinds = []string{ActivityKindSSH, ActivityKindMCP, ActivityKindCLI, ActivityKindCodex}
+var environmentActivityKinds = []string{ActivityKindSSH, ActivityKindAPI, ActivityKindMCP, ActivityKindCLI, ActivityKindCodex}
 
 type EnvironmentIdleConfig struct {
 	Timeout          string `yaml:"timeout,omitempty" json:"timeout,omitempty"`

@@ -2,6 +2,7 @@
 {{- $worktreeRepoName := required "worktreeRepoName is required" .Values.worktreeRepoName -}}
 {{- $worktreePath := printf "/home/erun/git/%s" $worktreeRepoName -}}
 {{- $mcpPort := default 17000 .Values.mcpPort -}}
+{{- $apiPort := default 17033 .Values.apiPort -}}
 {{- $sshPort := default 17022 .Values.sshPort -}}
 {{- $idle := default dict .Values.idle -}}
 {{- $idleTimeout := default "5m0s" $idle.timeout -}}
@@ -184,6 +185,8 @@ spec:
               value: {{ if .Values.sshdEnabled }}"true"{{ else }}"false"{{ end }}
             - name: ERUN_MCP_PORT
               value: {{ $mcpPort | quote }}
+            - name: ERUN_API_PORT
+              value: {{ $apiPort | quote }}
             - name: ERUN_SSHD_PORT
               value: {{ $sshPort | quote }}
             - name: ERUN_IDLE_TIMEOUT
@@ -202,6 +205,8 @@ spec:
           ports:
             - containerPort: {{ $mcpPort }}
               name: mcp
+            - containerPort: {{ $apiPort }}
+              name: api
             - containerPort: {{ $sshPort }}
               name: ssh
           resources:

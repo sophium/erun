@@ -1,0 +1,13 @@
+CREATE TABLE review_merge_queue (
+  review_merge_queue_id INTEGER PRIMARY KEY,
+  tenant_id UUID NOT NULL,
+  target_branch TEXT NOT NULL,
+  review_id UUID NOT NULL,
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
+  FOREIGN KEY (tenant_id, target_branch, review_id) REFERENCES reviews (tenant_id, target_branch, review_id),
+  CONSTRAINT review_merge_queue_target_branch_check CHECK (length(trim(target_branch)) > 0),
+  CONSTRAINT review_merge_queue_tenant_queue_key UNIQUE (tenant_id, review_merge_queue_id),
+  CONSTRAINT review_merge_queue_tenant_review_key UNIQUE (tenant_id, review_id)
+);

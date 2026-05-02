@@ -25,6 +25,11 @@
       "go build -trimpath -ldflags $mcpLdflags -o \"$dir\\emcp.exe\" ./cmd/emcp",
       "if ($LASTEXITCODE -ne 0) { throw 'failed to build emcp.exe' }",
       "Pop-Location",
+      "$apiLdflags = \"-s -w\"",
+      "Push-Location \"$dir\\erun-backend\\erun-backend-api\"",
+      "go build -trimpath -ldflags $apiLdflags -o \"$dir\\eapi.exe\" ./cmd/eapi",
+      "if ($LASTEXITCODE -ne 0) { throw 'failed to build eapi.exe' }",
+      "Pop-Location",
       "Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue",
       "if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) { throw 'building erun-app.exe requires a C compiler such as MinGW for the Wails CGO build' }",
       "$appLdflags = \"-s -w -H windowsgui -X github.com/sophium/erun/erun-ui.buildVersion=$version\"",
@@ -53,6 +58,7 @@
   "bin": [
     "erun.exe",
     "emcp.exe",
+    "eapi.exe",
     "erun-app.exe"
   ]
 }

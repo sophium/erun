@@ -224,6 +224,7 @@ export const defaultCloudContextInitInput = (): UICloudContextInitInput => ({
 export const defaultTenantConfig = (): UITenantConfig => ({
   name: '',
   defaultEnvironment: '',
+  apiUrl: '',
 });
 
 export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
@@ -248,8 +249,13 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
     rangeStart: 0,
     rangeEnd: 0,
     mcp: 0,
+    api: 0,
     ssh: 0,
     mcpStatus: {
+      available: false,
+      status: '',
+    },
+    apiStatus: {
       available: false,
       status: '',
     },

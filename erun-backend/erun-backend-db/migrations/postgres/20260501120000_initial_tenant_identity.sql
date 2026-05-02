@@ -1,0 +1,622 @@
+CREATE TABLE tenants (
+  tenant_id UUID PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  type TEXT NOT NULL DEFAULT 'COMPANY',
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  CONSTRAINT tenants_type_check CHECK (type IN ('OPERATIONS', 'COMPANY'))
+);
+
+CREATE TABLE tenant_issuers (
+  tenant_id UUID NOT NULL,
+  issuer TEXT PRIMARY KEY,
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
+  CONSTRAINT tenant_issuers_tenant_issuer_key UNIQUE (tenant_id, issuer)
+);
+
+CREATE TABLE users (
+  user_id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL,
+  username TEXT NOT NULL,
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
+  CONSTRAINT users_tenant_user_key UNIQUE (tenant_id, user_id),
+  CONSTRAINT users_tenant_username_key UNIQUE (tenant_id, username)
+);
+
+CREATE TABLE user_external_ids (
+  tenant_id UUID NOT NULL,
+  user_id UUID NOT NULL,
+  issuer TEXT NOT NULL,
+  external_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  PRIMARY KEY (tenant_id, issuer, external_id),
+  FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
+  FOREIGN KEY (tenant_id, user_id) REFERENCES users (tenant_id, user_id),
+  FOREIGN KEY (tenant_id, issuer) REFERENCES tenant_issuers (tenant_id, issuer)
+);
+
+CREATE TABLE roles (
+  role_id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL,
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
+  CONSTRAINT roles_tenant_role_key UNIQUE (tenant_id, role_id),
+  CONSTRAINT roles_tenant_name_key UNIQUE (tenant_id, name)
+);
+
+CREATE TABLE role_permissions (
+  role_permission_id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL,
+  role_id UUID NOT NULL,
+  api_method TEXT,
+  api_path TEXT,
+  api_method_pattern TEXT,
+  api_path_pattern TEXT,
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
+  FOREIGN KEY (tenant_id, role_id) REFERENCES roles (tenant_id, role_id),
+  CONSTRAINT role_permissions_api_method_check CHECK (
+    api_method IS NULL OR api_method IN ('GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD')
+  ),
+  CONSTRAINT role_permissions_exact_or_pattern_check CHECK (
+    (
+      api_method IS NOT NULL
+      AND api_path IS NOT NULL
+      AND api_method_pattern IS NULL
+      AND api_path_pattern IS NULL
+    )
+    OR
+    (
+      api_method IS NULL
+      AND api_path IS NULL
+      AND api_method_pattern IS NOT NULL
+      AND api_path_pattern IS NOT NULL
+    )
+  ),
+  CONSTRAINT role_permissions_tenant_permission_key UNIQUE (tenant_id, role_id, api_method, api_path),
+  CONSTRAINT role_permissions_tenant_permission_pattern_key UNIQUE (tenant_id, role_id, api_method_pattern, api_path_pattern)
+);
+
+CREATE TABLE user_roles (
+  tenant_id UUID NOT NULL,
+  user_id UUID NOT NULL,
+  role_id UUID NOT NULL,
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  PRIMARY KEY (tenant_id, user_id, role_id),
+  FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
+  FOREIGN KEY (tenant_id, user_id) REFERENCES users (tenant_id, user_id),
+  FOREIGN KEY (tenant_id, role_id) REFERENCES roles (tenant_id, role_id)
+);
+
+CREATE TABLE reviews (
+  review_id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL,
+  name TEXT NOT NULL,
+  target_branch TEXT NOT NULL,
+  source_branch TEXT NOT NULL,
+  status TEXT NOT NULL,
+  last_failed_build_id UUID,
+  last_ready_build_id UUID,
+  last_merged_build_id UUID,
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
+  CONSTRAINT reviews_status_check CHECK (status IN ('OPEN', 'CLOSED', 'FAILED', 'READY', 'MERGE', 'MERGED')),
+  CONSTRAINT reviews_target_branch_check CHECK (length(trim(target_branch)) > 0),
+  CONSTRAINT reviews_source_branch_check CHECK (length(trim(source_branch)) > 0),
+  CONSTRAINT reviews_status_build_link_check CHECK (
+    (status <> 'FAILED' OR last_failed_build_id IS NOT NULL)
+    AND (status <> 'READY' OR last_ready_build_id IS NOT NULL)
+    AND (status <> 'MERGE' OR last_ready_build_id IS NOT NULL)
+    AND (status <> 'MERGED' OR last_merged_build_id IS NOT NULL)
+  ),
+  CONSTRAINT reviews_tenant_review_key UNIQUE (tenant_id, review_id),
+  CONSTRAINT reviews_tenant_name_key UNIQUE (tenant_id, name),
+  CONSTRAINT reviews_tenant_target_review_key UNIQUE (tenant_id, target_branch, review_id)
+);
+
+CREATE TABLE review_merge_queue (
+  review_merge_queue_id INTEGER PRIMARY KEY,
+  tenant_id UUID NOT NULL,
+  target_branch TEXT NOT NULL,
+  review_id UUID NOT NULL,
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
+  FOREIGN KEY (tenant_id, target_branch, review_id) REFERENCES reviews (tenant_id, target_branch, review_id),
+  CONSTRAINT review_merge_queue_target_branch_check CHECK (length(trim(target_branch)) > 0),
+  CONSTRAINT review_merge_queue_tenant_queue_key UNIQUE (tenant_id, review_merge_queue_id),
+  CONSTRAINT review_merge_queue_tenant_review_key UNIQUE (tenant_id, review_id)
+);
+
+CREATE TABLE builds (
+  build_id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL,
+  review_id UUID NOT NULL,
+  successful BOOLEAN NOT NULL,
+  commit_id TEXT NOT NULL,
+  version TEXT NOT NULL,
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
+  FOREIGN KEY (tenant_id, review_id) REFERENCES reviews (tenant_id, review_id),
+  CONSTRAINT builds_commit_id_check CHECK (length(trim(commit_id)) > 0),
+  CONSTRAINT builds_version_check CHECK (length(trim(version)) > 0),
+  CONSTRAINT builds_tenant_build_key UNIQUE (tenant_id, build_id),
+  CONSTRAINT builds_tenant_review_build_key UNIQUE (tenant_id, review_id, build_id)
+);
+
+ALTER TABLE reviews
+  ADD CONSTRAINT reviews_last_failed_build_fk
+  FOREIGN KEY (tenant_id, review_id, last_failed_build_id)
+  REFERENCES builds (tenant_id, review_id, build_id);
+
+ALTER TABLE reviews
+  ADD CONSTRAINT reviews_last_ready_build_fk
+  FOREIGN KEY (tenant_id, review_id, last_ready_build_id)
+  REFERENCES builds (tenant_id, review_id, build_id);
+
+ALTER TABLE reviews
+  ADD CONSTRAINT reviews_last_merged_build_fk
+  FOREIGN KEY (tenant_id, review_id, last_merged_build_id)
+  REFERENCES builds (tenant_id, review_id, build_id);
+
+CREATE TABLE comments (
+  comment_id UUID PRIMARY KEY,
+  tenant_id UUID NOT NULL,
+  review_id UUID NOT NULL,
+  creator_user_id UUID,
+  status TEXT NOT NULL,
+  parent_comment_id UUID,
+  commit_id TEXT NOT NULL,
+  line INTEGER NOT NULL,
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
+  FOREIGN KEY (tenant_id, review_id) REFERENCES reviews (tenant_id, review_id),
+  FOREIGN KEY (tenant_id, creator_user_id) REFERENCES users (tenant_id, user_id),
+  FOREIGN KEY (tenant_id, parent_comment_id) REFERENCES comments (tenant_id, comment_id),
+  CONSTRAINT comments_status_check CHECK (status IN ('OPEN', 'CLOSED')),
+  CONSTRAINT comments_line_check CHECK (line > 0),
+  CONSTRAINT comments_root_creator_check CHECK (parent_comment_id IS NOT NULL OR creator_user_id IS NOT NULL),
+  CONSTRAINT comments_child_creator_check CHECK (parent_comment_id IS NULL OR creator_user_id IS NULL),
+  CONSTRAINT comments_no_self_parent_check CHECK (parent_comment_id IS NULL OR parent_comment_id <> comment_id),
+  CONSTRAINT comments_tenant_comment_key UNIQUE (tenant_id, comment_id),
+  CONSTRAINT comments_tenant_review_comment_key UNIQUE (tenant_id, review_id, comment_id)
+);
+
+CREATE INDEX users_tenant_id_idx
+  ON users (tenant_id);
+
+CREATE INDEX user_external_ids_tenant_user_idx
+  ON user_external_ids (tenant_id, user_id);
+
+CREATE INDEX role_permissions_tenant_role_idx
+  ON role_permissions (tenant_id, role_id);
+
+CREATE INDEX role_permissions_tenant_api_idx
+  ON role_permissions (tenant_id, api_method, api_path);
+
+CREATE INDEX role_permissions_tenant_api_pattern_idx
+  ON role_permissions (tenant_id, api_method_pattern, api_path_pattern);
+
+CREATE INDEX user_roles_tenant_role_idx
+  ON user_roles (tenant_id, role_id);
+
+CREATE INDEX reviews_tenant_status_idx
+  ON reviews (tenant_id, status);
+
+CREATE INDEX reviews_tenant_target_branch_idx
+  ON reviews (tenant_id, target_branch);
+
+CREATE INDEX review_merge_queue_tenant_target_idx
+  ON review_merge_queue (tenant_id, target_branch, review_merge_queue_id);
+
+CREATE INDEX builds_tenant_review_created_at_idx
+  ON builds (tenant_id, review_id, created_at);
+
+CREATE INDEX builds_tenant_commit_idx
+  ON builds (tenant_id, commit_id);
+
+CREATE INDEX comments_tenant_review_idx
+  ON comments (tenant_id, review_id);
+
+CREATE INDEX comments_tenant_review_line_idx
+  ON comments (tenant_id, review_id, commit_id, line);
+
+CREATE INDEX comments_tenant_parent_idx
+  ON comments (tenant_id, parent_comment_id);
+
+CREATE FUNCTION erun_validate_comments()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    IF NEW.comment_id IS DISTINCT FROM OLD.comment_id
+       OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+       OR NEW.review_id IS DISTINCT FROM OLD.review_id
+       OR NEW.creator_user_id IS DISTINCT FROM OLD.creator_user_id
+       OR NEW.parent_comment_id IS DISTINCT FROM OLD.parent_comment_id
+       OR NEW.commit_id IS DISTINCT FROM OLD.commit_id
+       OR NEW.line IS DISTINCT FROM OLD.line THEN
+      RAISE EXCEPTION 'comment thread identity fields cannot be updated';
+    END IF;
+  END IF;
+
+  IF NEW.parent_comment_id IS NULL THEN
+    IF EXISTS (
+      SELECT 1
+        FROM comments existing
+       WHERE existing.tenant_id = NEW.tenant_id
+         AND existing.review_id = NEW.review_id
+         AND existing.commit_id = NEW.commit_id
+         AND existing.line = NEW.line
+         AND existing.parent_comment_id IS NULL
+         AND (TG_OP = 'INSERT' OR existing.comment_id <> OLD.comment_id)
+    ) THEN
+      RAISE EXCEPTION 'root comment already exists for review %, commit %, line %', NEW.review_id, NEW.commit_id, NEW.line;
+    END IF;
+  ELSE
+    IF NOT EXISTS (
+      SELECT 1
+        FROM comments parent
+       WHERE parent.tenant_id = NEW.tenant_id
+         AND parent.review_id = NEW.review_id
+         AND parent.comment_id = NEW.parent_comment_id
+         AND parent.commit_id = NEW.commit_id
+         AND parent.line = NEW.line
+         AND parent.parent_comment_id IS NULL
+         AND parent.creator_user_id IS NOT NULL
+    ) THEN
+      RAISE EXCEPTION 'child comments must reference the root comment for the same review, commit, and line';
+    END IF;
+  END IF;
+
+  IF TG_OP = 'UPDATE' AND NEW.status <> OLD.status THEN
+    IF OLD.creator_user_id IS NULL OR OLD.creator_user_id <> NULLIF(current_setting('erun.user_id', true), '')::UUID THEN
+      RAISE EXCEPTION 'only the comment creator can update comment status';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER comments_validate
+  BEFORE INSERT OR UPDATE ON comments
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_validate_comments();
+
+CREATE SEQUENCE review_merge_queue_id_seq;
+
+CREATE FUNCTION erun_set_primary_keys()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF TG_TABLE_NAME = 'tenants' THEN
+    NEW.tenant_id = COALESCE(NEW.tenant_id, uuidv7());
+  ELSIF TG_TABLE_NAME = 'users' THEN
+    NEW.user_id = COALESCE(NEW.user_id, uuidv7());
+  ELSIF TG_TABLE_NAME = 'roles' THEN
+    NEW.role_id = COALESCE(NEW.role_id, uuidv7());
+  ELSIF TG_TABLE_NAME = 'role_permissions' THEN
+    NEW.role_permission_id = COALESCE(NEW.role_permission_id, uuidv7());
+  ELSIF TG_TABLE_NAME = 'reviews' THEN
+    NEW.review_id = COALESCE(NEW.review_id, uuidv7());
+  ELSIF TG_TABLE_NAME = 'review_merge_queue' THEN
+    NEW.review_merge_queue_id = COALESCE(NEW.review_merge_queue_id, nextval('review_merge_queue_id_seq'));
+  ELSIF TG_TABLE_NAME = 'builds' THEN
+    NEW.build_id = COALESCE(NEW.build_id, uuidv7());
+  ELSIF TG_TABLE_NAME = 'comments' THEN
+    NEW.comment_id = COALESCE(NEW.comment_id, uuidv7());
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER tenants_set_primary_keys
+  BEFORE INSERT ON tenants
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_primary_keys();
+
+CREATE TRIGGER users_set_primary_keys
+  BEFORE INSERT ON users
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_primary_keys();
+
+CREATE TRIGGER roles_set_primary_keys
+  BEFORE INSERT ON roles
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_primary_keys();
+
+CREATE TRIGGER role_permissions_set_primary_keys
+  BEFORE INSERT ON role_permissions
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_primary_keys();
+
+CREATE TRIGGER reviews_set_primary_keys
+  BEFORE INSERT ON reviews
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_primary_keys();
+
+CREATE TRIGGER review_merge_queue_set_primary_keys
+  BEFORE INSERT ON review_merge_queue
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_primary_keys();
+
+CREATE TRIGGER builds_set_primary_keys
+  BEFORE INSERT ON builds
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_primary_keys();
+
+CREATE TRIGGER comments_set_primary_keys
+  BEFORE INSERT ON comments
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_primary_keys();
+
+CREATE FUNCTION erun_set_timestamps()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    NEW.created_at = COALESCE(NEW.created_at, NOW());
+    NEW.updated_at = COALESCE(NEW.updated_at, NEW.created_at);
+  ELSE
+    NEW.created_at = OLD.created_at;
+    NEW.updated_at = NOW();
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER tenants_set_timestamps
+  BEFORE INSERT OR UPDATE ON tenants
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER tenant_issuers_set_timestamps
+  BEFORE INSERT OR UPDATE ON tenant_issuers
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER users_set_timestamps
+  BEFORE INSERT OR UPDATE ON users
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER user_external_ids_set_timestamps
+  BEFORE INSERT OR UPDATE ON user_external_ids
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER roles_set_timestamps
+  BEFORE INSERT OR UPDATE ON roles
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER role_permissions_set_timestamps
+  BEFORE INSERT OR UPDATE ON role_permissions
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER user_roles_set_timestamps
+  BEFORE INSERT OR UPDATE ON user_roles
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER reviews_set_timestamps
+  BEFORE INSERT OR UPDATE ON reviews
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER review_merge_queue_set_timestamps
+  BEFORE INSERT OR UPDATE ON review_merge_queue
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER builds_set_timestamps
+  BEFORE INSERT OR UPDATE ON builds
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+CREATE TRIGGER comments_set_timestamps
+  BEFORE INSERT OR UPDATE ON comments
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'erun_tenant') THEN
+    CREATE ROLE erun_tenant NOLOGIN;
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'erun_operations') THEN
+    CREATE ROLE erun_operations NOLOGIN;
+  END IF;
+END;
+$$;
+
+GRANT USAGE ON SCHEMA public TO erun_tenant, erun_operations;
+GRANT USAGE ON SEQUENCE review_merge_queue_id_seq TO erun_tenant, erun_operations;
+
+GRANT SELECT ON tenants, tenant_issuers TO erun_tenant;
+GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES ON tenants, tenant_issuers TO erun_operations;
+
+GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES
+  ON users, user_external_ids, roles, role_permissions, user_roles, reviews, review_merge_queue, builds, comments
+  TO erun_tenant, erun_operations;
+
+CREATE FUNCTION erun_current_tenant_id()
+RETURNS UUID
+LANGUAGE sql
+STABLE
+AS $$
+  SELECT NULLIF(current_setting('erun.tenant_id', true), '')::UUID
+$$;
+
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY users_tenant_isolation
+  ON users
+  FOR ALL
+  TO erun_tenant
+  USING (tenant_id = erun_current_tenant_id())
+  WITH CHECK (tenant_id = erun_current_tenant_id());
+
+CREATE POLICY users_operations_access
+  ON users
+  FOR ALL
+  TO erun_operations
+  USING (true)
+  WITH CHECK (true);
+
+ALTER TABLE user_external_ids ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_external_ids FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY user_external_ids_tenant_isolation
+  ON user_external_ids
+  FOR ALL
+  TO erun_tenant
+  USING (tenant_id = erun_current_tenant_id())
+  WITH CHECK (tenant_id = erun_current_tenant_id());
+
+CREATE POLICY user_external_ids_operations_access
+  ON user_external_ids
+  FOR ALL
+  TO erun_operations
+  USING (true)
+  WITH CHECK (true);
+
+ALTER TABLE roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE roles FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY roles_tenant_isolation
+  ON roles
+  FOR ALL
+  TO erun_tenant
+  USING (tenant_id = erun_current_tenant_id())
+  WITH CHECK (tenant_id = erun_current_tenant_id());
+
+CREATE POLICY roles_operations_access
+  ON roles
+  FOR ALL
+  TO erun_operations
+  USING (true)
+  WITH CHECK (true);
+
+ALTER TABLE role_permissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE role_permissions FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY role_permissions_tenant_isolation
+  ON role_permissions
+  FOR ALL
+  TO erun_tenant
+  USING (tenant_id = erun_current_tenant_id())
+  WITH CHECK (tenant_id = erun_current_tenant_id());
+
+CREATE POLICY role_permissions_operations_access
+  ON role_permissions
+  FOR ALL
+  TO erun_operations
+  USING (true)
+  WITH CHECK (true);
+
+ALTER TABLE user_roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_roles FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY user_roles_tenant_isolation
+  ON user_roles
+  FOR ALL
+  TO erun_tenant
+  USING (tenant_id = erun_current_tenant_id())
+  WITH CHECK (tenant_id = erun_current_tenant_id());
+
+CREATE POLICY user_roles_operations_access
+  ON user_roles
+  FOR ALL
+  TO erun_operations
+  USING (true)
+  WITH CHECK (true);
+
+ALTER TABLE reviews ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reviews FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY reviews_tenant_isolation
+  ON reviews
+  FOR ALL
+  TO erun_tenant
+  USING (tenant_id = erun_current_tenant_id())
+  WITH CHECK (tenant_id = erun_current_tenant_id());
+
+CREATE POLICY reviews_operations_access
+  ON reviews
+  FOR ALL
+  TO erun_operations
+  USING (true)
+  WITH CHECK (true);
+
+ALTER TABLE review_merge_queue ENABLE ROW LEVEL SECURITY;
+ALTER TABLE review_merge_queue FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY review_merge_queue_tenant_isolation
+  ON review_merge_queue
+  FOR ALL
+  TO erun_tenant
+  USING (tenant_id = erun_current_tenant_id())
+  WITH CHECK (tenant_id = erun_current_tenant_id());
+
+CREATE POLICY review_merge_queue_operations_access
+  ON review_merge_queue
+  FOR ALL
+  TO erun_operations
+  USING (true)
+  WITH CHECK (true);
+
+ALTER TABLE builds ENABLE ROW LEVEL SECURITY;
+ALTER TABLE builds FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY builds_tenant_isolation
+  ON builds
+  FOR ALL
+  TO erun_tenant
+  USING (tenant_id = erun_current_tenant_id())
+  WITH CHECK (tenant_id = erun_current_tenant_id());
+
+CREATE POLICY builds_operations_access
+  ON builds
+  FOR ALL
+  TO erun_operations
+  USING (true)
+  WITH CHECK (true);
+
+ALTER TABLE comments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE comments FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY comments_tenant_isolation
+  ON comments
+  FOR ALL
+  TO erun_tenant
+  USING (tenant_id = erun_current_tenant_id())
+  WITH CHECK (tenant_id = erun_current_tenant_id());
+
+CREATE POLICY comments_operations_access
+  ON comments
+  FOR ALL
+  TO erun_operations
+  USING (true)
+  WITH CHECK (true);

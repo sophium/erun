@@ -152,15 +152,15 @@ func defaultDevopsLegacyContents(path string, content []byte) []string {
 
 func legacyDefaultDevopsServiceTemplate(content []byte) string {
 	return strings.NewReplacer(
-		"{{- $mcpPort := default 17000 .Values.mcpPort -}}\n{{- $sshPort := default 17022 .Values.sshPort -}}\n",
+		"{{- $mcpPort := default 17000 .Values.mcpPort -}}\n{{- $apiPort := default 17033 .Values.apiPort -}}\n{{- $sshPort := default 17022 .Values.sshPort -}}\n",
 		"",
 		"{{- $cloudContext := default dict .Values.cloudContext -}}\n{{- $cloudContextName := default \"\" $cloudContext.name -}}\n{{- $cloudProviderAlias := default \"\" $cloudContext.providerAlias -}}\n{{- $cloudRegion := default \"\" $cloudContext.region -}}\n{{- $cloudInstanceID := default \"\" $cloudContext.instanceId -}}\n",
 		"",
 		"            - name: ERUN_CLOUD_CONTEXT_NAME\n              value: {{ $cloudContextName | quote }}\n            - name: ERUN_CLOUD_PROVIDER_ALIAS\n              value: {{ $cloudProviderAlias | quote }}\n            - name: ERUN_CLOUD_REGION\n              value: {{ $cloudRegion | quote }}\n            - name: ERUN_CLOUD_INSTANCE_ID\n              value: {{ $cloudInstanceID | quote }}\n",
 		"",
-		"            - name: ERUN_MCP_PORT\n              value: {{ $mcpPort | quote }}\n            - name: ERUN_SSHD_PORT\n              value: {{ $sshPort | quote }}\n",
+		"            - name: ERUN_MCP_PORT\n              value: {{ $mcpPort | quote }}\n            - name: ERUN_API_PORT\n              value: {{ $apiPort | quote }}\n            - name: ERUN_SSHD_PORT\n              value: {{ $sshPort | quote }}\n",
 		"",
-		"            - containerPort: {{ $mcpPort }}\n              name: mcp\n            - containerPort: {{ $sshPort }}\n              name: ssh",
+		"            - containerPort: {{ $mcpPort }}\n              name: mcp\n            - containerPort: {{ $apiPort }}\n              name: api\n            - containerPort: {{ $sshPort }}\n              name: ssh",
 		"            - containerPort: 17000\n              name: mcp\n            - containerPort: 2222\n              name: ssh",
 	).Replace(string(content))
 }

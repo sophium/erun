@@ -426,6 +426,10 @@ fi
 
 initialize_erun_config
 initialize_codex_config
+record_activity api
+eapi \
+    --host "${ERUN_API_HOST:-0.0.0.0}" \
+    --port "${ERUN_API_PORT:-17033}" &
 record_activity mcp
 
 set -- emcp "$@" \

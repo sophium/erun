@@ -230,6 +230,7 @@ func TestRunResolvedOpenCommandForwardsMCPBeforeShell(t *testing.T) {
 				RangeStart: 17100,
 				RangeEnd:   17199,
 				MCP:        17100,
+				API:        17133,
 				SSH:        17122,
 			},
 		},
@@ -262,6 +263,82 @@ func TestRunResolvedOpenCommandForwardsMCPBeforeShell(t *testing.T) {
 	}
 	if !forwarded {
 		t.Fatal("expected MCP forwarder to run")
+	}
+	if !launched {
+		t.Fatal("expected shell launch")
+	}
+}
+
+func TestRunResolvedOpenCommandForwardsAPIAfterMCPBeforeShell(t *testing.T) {
+	forwardedMCP := false
+	forwardedAPI := false
+	launched := false
+	err := runResolvedOpenCommandWithAPI(
+		common.Context{
+			Logger: common.NewLoggerWithWriters(0, new(bytes.Buffer), new(bytes.Buffer)),
+			Stdout: new(bytes.Buffer),
+			Stderr: new(bytes.Buffer),
+		},
+		common.OpenResult{
+			Tenant:      "tenant-a",
+			Environment: "dev",
+			RepoPath:    "/home/erun/git/tenant-a",
+			TenantConfig: common.TenantConfig{
+				Name: "tenant-a",
+			},
+			EnvConfig: common.EnvConfig{
+				Name:              "dev",
+				RepoPath:          "/home/erun/git/tenant-a",
+				KubernetesContext: "cluster-dev",
+				Remote:            true,
+			},
+			LocalPorts: common.EnvironmentLocalPorts{
+				RangeStart: 17100,
+				RangeEnd:   17199,
+				MCP:        17100,
+				API:        17133,
+				SSH:        17122,
+			},
+		},
+		openOptions{},
+		nil,
+		func(_ common.Context, _ common.ShellLaunchParams) error {
+			if !forwardedMCP || !forwardedAPI {
+				t.Fatal("expected MCP and API forward before shell launch")
+			}
+			launched = true
+			return nil
+		},
+		nil,
+		nil,
+		nil,
+		nil,
+		func(_ common.Context, result common.OpenResult) error {
+			forwardedMCP = true
+			if common.MCPPortForResult(result) != 17100 {
+				t.Fatalf("unexpected MCP port: %+v", result.LocalPorts)
+			}
+			return nil
+		},
+		func(_ common.Context, result common.OpenResult) error {
+			if !forwardedMCP {
+				t.Fatal("expected MCP forward before API forward")
+			}
+			forwardedAPI = true
+			if common.APIPortForResult(result) != 17133 {
+				t.Fatalf("unexpected API port: %+v", result.LocalPorts)
+			}
+			return nil
+		},
+		nil,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("runResolvedOpenCommandWithAPI failed: %v", err)
+	}
+	if !forwardedMCP || !forwardedAPI {
+		t.Fatalf("expected both forwarders to run, mcp=%v api=%v", forwardedMCP, forwardedAPI)
 	}
 	if !launched {
 		t.Fatal("expected shell launch")
