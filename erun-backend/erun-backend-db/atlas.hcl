@@ -3,11 +3,6 @@ variable "database_url" {
   default = getenv("DATABASE_URL")
 }
 
-variable "clickhouse_url" {
-  type    = string
-  default = getenv("CLICKHOUSE_URL")
-}
-
 env "default" {
   src = [
     "file://schema/rls/context.sql",
@@ -22,6 +17,7 @@ env "default" {
     "file://schema/tables/review_merge_queue.sql",
     "file://schema/tables/builds.sql",
     "file://schema/tables/comments.sql",
+    "file://schema/tables/audit_events.sql",
     "file://schema/indexes/users.sql",
     "file://schema/indexes/user_external_ids.sql",
     "file://schema/indexes/role_permissions.sql",
@@ -30,6 +26,7 @@ env "default" {
     "file://schema/indexes/review_merge_queue.sql",
     "file://schema/indexes/builds.sql",
     "file://schema/indexes/comments.sql",
+    "file://schema/indexes/audit_events.sql",
     "file://schema/triggers/comments.sql",
     "file://schema/triggers/timestamps.sql",
     "file://schema/fks/review_builds.sql",
@@ -43,23 +40,12 @@ env "default" {
     "file://schema/rls/review_merge_queue.sql",
     "file://schema/rls/builds.sql",
     "file://schema/rls/comments.sql",
+    "file://schema/rls/audit_events.sql",
   ]
   url = var.database_url
   dev = "docker://postgres/18/dev?search_path=public"
 
   migration {
     dir = "file://migrations/default"
-  }
-}
-
-env "clickhouse" {
-  src = [
-    "file://schema/clickhouse/tables/audit_events.sql",
-  ]
-  url = var.clickhouse_url
-  dev = "docker://clickhouse/24.8/dev"
-
-  migration {
-    dir = "file://migrations/clickhouse"
   }
 }

@@ -21,3 +21,12 @@ type Tenant struct {
 	CreatedAt     time.Time  `json:"createdAt" bun:"created_at,scanonly"`
 	UpdatedAt     time.Time  `json:"updatedAt" bun:"updated_at,scanonly"`
 }
+
+type TenantIssuer struct {
+	bun.BaseModel `bun:"table:tenant_issuers,alias:ti"`
+	TenantID      string    `json:"tenantId" bun:"tenant_id,scanonly"`
+	Issuer        string    `json:"issuer" bun:"issuer,pk,scanonly"`
+	Name          string    `json:"name" bun:"name"`
+	CreatedAt     time.Time `json:"createdAt" bun:"created_at,scanonly"`
+	UpdatedAt     time.Time `json:"updatedAt" bun:"updated_at,scanonly"`
+}

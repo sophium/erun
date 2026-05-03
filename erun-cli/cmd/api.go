@@ -19,8 +19,9 @@ func newAPICmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), r
 	host := defaultAPIHost
 	port := common.APIServicePort
 	databaseURL := ""
-	databaseDialect := ""
 	allowedIssuers := ""
+	awsIdentityStoreID := ""
+	awsIdentityStoreRegion := ""
 
 	cmd := &cobra.Command{
 		Use:   "api [TENANT] [ENVIRONMENT]",
@@ -37,7 +38,7 @@ func newAPICmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), r
 				resolvedPort = common.APIPortForResult(result)
 			}
 
-			commandArgs := apiCommandArgs(host, resolvedPort, databaseURL, databaseDialect, allowedIssuers)
+			commandArgs := apiCommandArgs(host, resolvedPort, databaseURL, allowedIssuers, awsIdentityStoreID, awsIdentityStoreRegion)
 			ctx.TraceCommand("", "eapi", commandArgs...)
 			if ctx.DryRun {
 				return nil
@@ -50,14 +51,15 @@ func newAPICmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), r
 	addDryRunFlag(cmd)
 	cmd.Flags().StringVar(&host, "host", defaultAPIHost, "Host interface to bind the backend API HTTP server to")
 	cmd.Flags().IntVar(&port, "port", common.APIServicePort, "Port to bind the backend API HTTP server to")
-	cmd.Flags().StringVar(&databaseURL, "database-url", "", "Backend database URL; defaults to ERUN_DATABASE_URL or local SQLite")
-	cmd.Flags().StringVar(&databaseDialect, "database-dialect", "", "Backend database dialect: sqlite or postgres")
+	cmd.Flags().StringVar(&databaseURL, "database-url", "", "Backend PostgreSQL database URL; defaults to ERUN_DATABASE_URL")
 	cmd.Flags().StringVar(&allowedIssuers, "oidc-allowed-issuers", "", "Comma-separated OIDC issuer allow-list")
+	cmd.Flags().StringVar(&awsIdentityStoreID, "aws-identity-store-id", "", "AWS IAM Identity Center identity store ID used to resolve usernames from STS tokens")
+	cmd.Flags().StringVar(&awsIdentityStoreRegion, "aws-identity-store-region", "", "AWS region for Identity Store username lookup")
 	cmd.Example = fmt.Sprintf("  erun api --host %s --port %d\n  erun api tenant-a dev", defaultAPIHost, common.APIServicePort)
 	return cmd
 }
 
-func apiCommandArgs(host string, port int, databaseURL string, databaseDialect string, allowedIssuers string) []string {
+func apiCommandArgs(host string, port int, databaseURL string, allowedIssuers string, awsIdentityStoreID string, awsIdentityStoreRegion string) []string {
 	args := []string{
 		"--host", host,
 		"--port", strconv.Itoa(port),
@@ -65,11 +67,14 @@ func apiCommandArgs(host string, port int, databaseURL string, databaseDialect s
 	if databaseURL != "" {
 		args = append(args, "--database-url", databaseURL)
 	}
-	if databaseDialect != "" {
-		args = append(args, "--database-dialect", databaseDialect)
-	}
 	if allowedIssuers != "" {
 		args = append(args, "--oidc-allowed-issuers", allowedIssuers)
+	}
+	if awsIdentityStoreID != "" {
+		args = append(args, "--aws-identity-store-id", awsIdentityStoreID)
+	}
+	if awsIdentityStoreRegion != "" {
+		args = append(args, "--aws-identity-store-region", awsIdentityStoreRegion)
 	}
 	return args
 }

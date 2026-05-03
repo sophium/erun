@@ -19,6 +19,8 @@
 {{- $managedCloud := default false .Values.managedCloud -}}
 {{- $api := default dict .Values.api -}}
 {{- $oidcAllowedIssuers := default "" $api.oidcAllowedIssuers -}}
+{{- $awsIdentityStoreID := default "" $api.awsIdentityStoreID -}}
+{{- $awsIdentityStoreRegion := default "" $api.awsIdentityStoreRegion -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $backendDBImage := default (printf "erunpaas/erun-backend-db:%s" .Chart.AppVersion) (index $imageOverrides "erun-backend-db") -}}
 {{- $devopsImage := default (printf "erunpaas/erun-devops:%s" .Chart.AppVersion) (index $imageOverrides "erun-devops") -}}
@@ -164,8 +166,6 @@ spec:
               value: /home/erun
             - name: ERUN_DATABASE_URL
               value: {{ default "" $api.databaseURL | quote }}
-            - name: ERUN_DATABASE_DIALECT
-              value: {{ default "" $api.databaseDialect | quote }}
           volumeMounts:
             - name: erun-home
               mountPath: /home/erun
@@ -292,10 +292,12 @@ spec:
               value: {{ $apiPort | quote }}
             - name: ERUN_DATABASE_URL
               value: {{ default "" $api.databaseURL | quote }}
-            - name: ERUN_DATABASE_DIALECT
-              value: {{ default "" $api.databaseDialect | quote }}
             - name: ERUN_OIDC_ALLOWED_ISSUERS
               value: {{ $oidcAllowedIssuers | quote }}
+            - name: ERUN_AWS_IDENTITY_STORE_ID
+              value: {{ $awsIdentityStoreID | quote }}
+            - name: ERUN_AWS_IDENTITY_STORE_REGION
+              value: {{ $awsIdentityStoreRegion | quote }}
             - name: ERUN_TENANT
               value: {{ required "tenant is required" .Values.tenant | quote }}
             - name: ERUN_ENVIRONMENT

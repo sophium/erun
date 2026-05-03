@@ -23,6 +23,7 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 	}
 	dashboard := uiTenantDashboard{
 		Tenant:          tenant,
+		Environment:     strings.TrimSpace(input.Environment),
 		APIURL:          apiURL,
 		AuditLogMessage: "Audit log listing is not exposed by the ERun API yet.",
 	}
@@ -52,27 +53,28 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 		dashboard.APIError = "get cloud bearer token: empty token"
 		return dashboard, nil
 	}
+	usernameHint := a.tenantDashboardUsernameHint(token.Alias)
 	client := &http.Client{Timeout: 10 * time.Second}
 
-	user, err := loadTenantDashboardJSON[uiTenantDashboardUser](ctx, client, apiURL, "/v1/whoami", bearer)
+	user, err := loadTenantDashboardJSON[uiTenantDashboardUser](ctx, client, apiURL, "/v1/whoami", bearer, usernameHint)
 	if err != nil {
 		dashboard.APIError = err.Error()
 		return dashboard, nil
 	}
 	dashboard.User = &user
-	reviews, err := loadTenantDashboardJSON[[]uiTenantDashboardReview](ctx, client, apiURL, "/v1/reviews", bearer)
+	reviews, err := loadTenantDashboardJSON[[]uiTenantDashboardReview](ctx, client, apiURL, "/v1/reviews", bearer, usernameHint)
 	if err != nil {
 		dashboard.APIError = err.Error()
 		return dashboard, nil
 	}
 	dashboard.Reviews = reviews
-	mergeQueue, err := loadTenantDashboardJSON[[]uiTenantDashboardReview](ctx, client, apiURL, "/v1/reviews/merge-queue", bearer)
+	mergeQueue, err := loadTenantDashboardJSON[[]uiTenantDashboardReview](ctx, client, apiURL, "/v1/reviews/merge-queue", bearer, usernameHint)
 	if err != nil {
 		dashboard.APIError = err.Error()
 		return dashboard, nil
 	}
 	dashboard.MergeQueue = mergeQueue
-	builds, err := loadTenantDashboardBuilds(ctx, client, apiURL, bearer, reviews)
+	builds, err := loadTenantDashboardBuilds(ctx, client, apiURL, bearer, usernameHint, reviews)
 	if err != nil {
 		dashboard.APIError = err.Error()
 		return dashboard, nil
@@ -81,7 +83,15 @@ func (a *App) LoadTenantDashboard(input uiTenantDashboardInput) (uiTenantDashboa
 	return dashboard, nil
 }
 
-func loadTenantDashboardBuilds(ctx context.Context, client *http.Client, apiURL, bearer string, reviews []uiTenantDashboardReview) ([]uiTenantDashboardBuild, error) {
+func (a *App) tenantDashboardUsernameHint(alias string) string {
+	provider, err := eruncommon.ResolveCloudProvider(a.deps.store, strings.TrimSpace(alias))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(provider.Username)
+}
+
+func loadTenantDashboardBuilds(ctx context.Context, client *http.Client, apiURL, bearer string, usernameHint string, reviews []uiTenantDashboardReview) ([]uiTenantDashboardBuild, error) {
 	builds := make([]uiTenantDashboardBuild, 0)
 	reviewNames := make(map[string]string, len(reviews))
 	for _, review := range reviews {
@@ -90,7 +100,7 @@ func loadTenantDashboardBuilds(ctx context.Context, client *http.Client, apiURL,
 			continue
 		}
 		reviewNames[reviewID] = strings.TrimSpace(review.Name)
-		reviewBuilds, err := loadTenantDashboardJSON[[]uiTenantDashboardBuild](ctx, client, apiURL, "/v1/reviews/"+url.PathEscape(reviewID)+"/builds", bearer)
+		reviewBuilds, err := loadTenantDashboardJSON[[]uiTenantDashboardBuild](ctx, client, apiURL, "/v1/reviews/"+url.PathEscape(reviewID)+"/builds", bearer, usernameHint)
 		if err != nil {
 			return nil, err
 		}
@@ -102,7 +112,7 @@ func loadTenantDashboardBuilds(ctx context.Context, client *http.Client, apiURL,
 	return builds, nil
 }
 
-func loadTenantDashboardJSON[T any](ctx context.Context, client *http.Client, apiURL, apiPath, bearer string) (T, error) {
+func loadTenantDashboardJSON[T any](ctx context.Context, client *http.Client, apiURL, apiPath, bearer string, usernameHint string) (T, error) {
 	var result T
 	endpoint, err := tenantDashboardURL(apiURL, apiPath)
 	if err != nil {
@@ -113,6 +123,9 @@ func loadTenantDashboardJSON[T any](ctx context.Context, client *http.Client, ap
 		return result, err
 	}
 	req.Header.Set("Authorization", "Bearer "+bearer)
+	if usernameHint = strings.TrimSpace(usernameHint); usernameHint != "" {
+		req.Header.Set("X-ERun-Username", usernameHint)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return result, err

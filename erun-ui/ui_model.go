@@ -85,6 +85,7 @@ type uiTenantDashboardInput struct {
 
 type uiTenantDashboard struct {
 	Tenant          string                    `json:"tenant"`
+	Environment     string                    `json:"environment,omitempty"`
 	APIURL          string                    `json:"apiUrl,omitempty"`
 	APIError        string                    `json:"apiError,omitempty"`
 	APILog          string                    `json:"apiLog,omitempty"`
@@ -98,13 +99,14 @@ type uiTenantDashboard struct {
 }
 
 type uiTenantDashboardUser struct {
-	TenantID  string `json:"tenantId"`
-	UserID    string `json:"userId"`
-	Username  string `json:"username,omitempty"`
-	Issuer    string `json:"issuer,omitempty"`
-	Subject   string `json:"subject,omitempty"`
-	CreatedAt string `json:"createdAt,omitempty"`
-	UpdatedAt string `json:"updatedAt,omitempty"`
+	TenantID  string   `json:"tenantId"`
+	UserID    string   `json:"userId"`
+	Username  string   `json:"username,omitempty"`
+	Roles     []string `json:"roles,omitempty"`
+	Issuer    string   `json:"issuer,omitempty"`
+	Subject   string   `json:"subject,omitempty"`
+	CreatedAt string   `json:"createdAt,omitempty"`
+	UpdatedAt string   `json:"updatedAt,omitempty"`
 }
 
 type uiTenantDashboardReview struct {
@@ -228,6 +230,13 @@ type uiCloudProviderStatus struct {
 	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty"`
 	Status        string `json:"status"`
 	Message       string `json:"message,omitempty"`
+}
+
+type uiCloudProviderBearerToken struct {
+	Alias    string                `json:"alias"`
+	Issuer   string                `json:"issuer,omitempty"`
+	Token    string                `json:"token"`
+	Provider uiCloudProviderStatus `json:"provider"`
 }
 
 type uiCloudContextStatus struct {

@@ -1264,6 +1264,7 @@ func TestSetupCloudProviderOIDCStoresIssuer(t *testing.T) {
 		Alias:    "team-cloud",
 		Provider: eruncommon.CloudProviderAWS,
 		Profile:  "team",
+		Username: "Rihards.Freimanis",
 	}}}
 	store := stubUIStore{config: &rootConfig}
 	app := NewApp(erunUIDeps{
@@ -1290,6 +1291,41 @@ func TestSetupCloudProviderOIDCStoresIssuer(t *testing.T) {
 	}
 }
 
+func TestGetCloudProviderBearerTokenReturnsTokenAndStatus(t *testing.T) {
+	jwt := testUIJWT("https://sts.aws.example/.well-known/openid-configuration")
+	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
+		Alias:    "team-cloud",
+		Provider: eruncommon.CloudProviderAWS,
+		Profile:  "team",
+		Username: "Rihards.Freimanis",
+	}}}
+	app := NewApp(erunUIDeps{
+		store: stubUIStore{config: &rootConfig},
+		cloudDeps: eruncommon.CloudDependencies{
+			RunAWSBearerToken: func(_ eruncommon.Context, profile, audience string) (string, error) {
+				if profile != "team" || audience != eruncommon.CloudProviderBearerAudience {
+					t.Fatalf("unexpected bearer token input profile=%q audience=%q", profile, audience)
+				}
+				return jwt, nil
+			},
+			CheckAWSStatus: func(_ eruncommon.Context, provider eruncommon.CloudProviderConfig) eruncommon.CloudProviderStatus {
+				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: eruncommon.CloudTokenStatusActive}
+			},
+		},
+	})
+
+	token, err := app.GetCloudProviderBearerToken(" team-cloud ")
+	if err != nil {
+		t.Fatalf("GetCloudProviderBearerToken failed: %v", err)
+	}
+	if token.Token != jwt || token.Issuer != "https://sts.aws.example" {
+		t.Fatalf("unexpected bearer token result: %+v", token)
+	}
+	if token.Provider.Alias != "team-cloud" || token.Provider.Status != eruncommon.CloudTokenStatusActive {
+		t.Fatalf("expected active provider status, got %+v", token.Provider)
+	}
+}
+
 func TestLoadTenantDashboardUsesPrimaryCloudBearer(t *testing.T) {
 	jwt := testUIJWT("https://sts.aws.example")
 	var requests []string
@@ -1297,11 +1333,14 @@ func TestLoadTenantDashboardUsesPrimaryCloudBearer(t *testing.T) {
 		if req.Header.Get("Authorization") != "Bearer "+jwt {
 			t.Fatalf("unexpected authorization header: %q", req.Header.Get("Authorization"))
 		}
+		if req.Header.Get("X-ERun-Username") != "Rihards.Freimanis" {
+			t.Fatalf("unexpected username hint: %q", req.Header.Get("X-ERun-Username"))
+		}
 		requests = append(requests, req.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		switch req.URL.Path {
 		case "/v1/whoami":
-			_, _ = w.Write([]byte(`{"tenantId":"tenant-1","userId":"user-1","issuer":"https://sts.aws.example","subject":"subject-1"}`))
+			_, _ = w.Write([]byte(`{"tenantId":"tenant-1","userId":"user-1","username":"Rihards.Freimanis","roles":["ReadAll","WriteAll"],"issuer":"https://sts.aws.example","subject":"subject-1"}`))
 		case "/v1/reviews":
 			_, _ = w.Write([]byte(`[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`))
 		case "/v1/reviews/merge-queue":
@@ -1318,6 +1357,7 @@ func TestLoadTenantDashboardUsesPrimaryCloudBearer(t *testing.T) {
 		Alias:    "team-cloud",
 		Provider: eruncommon.CloudProviderAWS,
 		Profile:  "team",
+		Username: "Rihards.Freimanis",
 	}}}
 	app := NewApp(erunUIDeps{
 		store: stubUIStore{config: &rootConfig},
@@ -1342,7 +1382,7 @@ func TestLoadTenantDashboardUsesPrimaryCloudBearer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTenantDashboard failed: %v", err)
 	}
-	if dashboard.User == nil || dashboard.User.UserID != "user-1" || len(dashboard.MergeQueue) != 1 || len(dashboard.Builds) != 1 || dashboard.Builds[0].ReviewName != "Review 1" {
+	if dashboard.User == nil || dashboard.User.Username != "Rihards.Freimanis" || len(dashboard.User.Roles) != 2 || len(dashboard.MergeQueue) != 1 || len(dashboard.Builds) != 1 || dashboard.Builds[0].ReviewName != "Review 1" {
 		t.Fatalf("unexpected dashboard: %+v", dashboard)
 	}
 	if strings.Join(requests, ",") != "/v1/whoami,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds" {

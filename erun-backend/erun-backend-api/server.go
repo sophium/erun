@@ -19,11 +19,13 @@ type HandlerOptions struct {
 	Authorizer       Authorizer
 	DB               *sql.DB
 	DBDialect        repository.Dialect
-	AuditDB          *sql.DB
-	AuditDialect     repository.Dialect
 }
 
 func NewHandler(options HandlerOptions) (http.Handler, error) {
+	var txManager *repository.TxManager
+	if options.DB != nil {
+		txManager = repository.NewTxManager(options.DB, options.DBDialect)
+	}
 	identityResolver := options.IdentityResolver
 	tenantResolver := options.TenantResolver
 	userResolver := options.UserResolver
@@ -39,14 +41,8 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		}
 	}
 	audit := options.AuditLogger
-	auditDB := options.AuditDB
-	auditDialect := options.AuditDialect
-	if auditDB == nil && options.DB != nil && options.DBDialect != repository.DialectPostgres {
-		auditDB = options.DB
-		auditDialect = options.DBDialect
-	}
-	if audit == nil && auditDB != nil {
-		audit = repository.NewAuditEventRepositoryForDialect(auditDB, auditDialect)
+	if audit == nil && txManager != nil {
+		audit = repository.NewAuditEventRepository(txManager)
 	}
 	authorizer := options.Authorizer
 	if authorizer == nil && options.DB != nil {
@@ -66,21 +62,31 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 	}
 
 	mux := http.NewServeMux()
+	registerHealthRoute(mux)
 	register := protectedRouteRegistrar(mux, auth)
-	routes.RegisterWhoamiRoute(register)
-	if options.DB != nil {
-		txManager := repository.NewTxManager(options.DB, options.DBDialect)
+	var users routes.WhoamiUserRepository
+	if txManager != nil {
+		users = repository.NewUserRepository(txManager)
 		reviews := repository.NewReviewRepository(txManager)
 		builds := repository.NewBuildRepository(txManager)
 		comments := repository.NewCommentRepository(txManager)
+		tenantIssuers := repository.NewTenantIssuerRepository(txManager)
 		reviewService := service.NewReviewService(reviews, builds)
 		buildService := service.NewBuildService(builds, reviewService)
 		commentService := service.NewCommentService(comments)
+		routes.RegisterTenantIssuerRoutes(register, tenantIssuers)
 		routes.RegisterReviewRoutes(register, reviews, reviewService)
 		routes.RegisterBuildRoutes(register, builds, buildService)
 		routes.RegisterCommentRoutes(register, comments, commentService)
 	}
+	routes.RegisterWhoamiRoute(register, users)
 	return mux, nil
+}
+
+func registerHealthRoute(mux *http.ServeMux) {
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
 }
 
 func registerProtectedRoute(mux *http.ServeMux, auth *AuthMiddleware, method string, apiPath string, handler http.Handler) {

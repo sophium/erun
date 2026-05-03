@@ -13,8 +13,7 @@ import (
 type Dialect string
 
 const (
-	DialectPostgres   Dialect = "postgres"
-	DialectClickHouse Dialect = "clickhouse"
+	DialectPostgres Dialect = "postgres"
 )
 
 type TxManager struct {

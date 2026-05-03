@@ -7,17 +7,16 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - `erun-backend-db` is the Atlas-managed database project for hosted ERun backend state.
 - The default OLTP database is PostgreSQL 18 or newer.
 - Do not add SQLite migrations, schema files, repository branches, or local fallback behavior.
-- Store audit events in ClickHouse for normal deployments. Do not reintroduce SQLite audit storage as a simple-deployment fallback.
+- Store audit events in PostgreSQL with the rest of the hosted backend schema. Do not reintroduce SQLite audit storage as a simple-deployment fallback.
 
 ## Atlas Workflow
 
 - Store Atlas configuration in `atlas.hcl`.
 - Store default OLTP migrations in `migrations/default/`.
-- Store ClickHouse migrations in `migrations/clickhouse/`.
 - Store declarative target schema files in `schema/` when generating migrations.
 - Generate schema changes through Atlas rather than hand-maintaining API startup DDL.
 - Validate OLTP migrations against the default Atlas environment.
-- Keep audit-event schema in ClickHouse-native files when audit persistence changes.
+- Keep audit-event schema in PostgreSQL schema files when audit persistence changes.
 
 ## Schema Layout
 
@@ -27,7 +26,6 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - Put cross-table or specialized objects in their own object-type folders, such as `schema/views/`, `schema/triggers/`, or `schema/policies/`, when those objects are introduced.
 - Keep table files focused on the table contract: columns, primary key, foreign keys, and table-level constraints.
 - Keep secondary indexes separate from table files unless the index is part of a table-level uniqueness contract that is clearer beside the table definition.
-- Put ClickHouse-only table files under `schema/clickhouse/tables/`.
 - Put trigger files under `schema/triggers/`.
 - Put row-level security policy files under `schema/rls/<table>.sql`.
 - Put default-database foreign-key files that are clearer outside table definitions under `schema/fks/`.
@@ -42,7 +40,7 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - Generate UUIDv7 surrogate primary keys with column defaults that call native `uuidv7()`.
 - Use `TIMESTAMPTZ` for timestamps. Timestamp columns are populated by PostgreSQL triggers.
 - Native database features such as RLS, `TIMESTAMPTZ`, and `uuidv7()` are allowed in the default OLTP schema when they are the clearest way to enforce the backend contract.
-- For ClickHouse audit tables, use ClickHouse-native types and engines rather than forcing PostgreSQL-compatible DDL.
+- Audit tables use PostgreSQL types and constraints.
 
 ## Row-Level Security
 
@@ -149,7 +147,7 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - A successful build moves an `OPEN` or `FAILED` review into the target branch merge queue as `READY`; if there is no active `MERGE` review for that target branch, the next queued review may be promoted to `MERGE`.
 - A failed build for a queued or merging review moves it to `FAILED` and removes it from the merge queue.
 - If a `MERGE` review misses its merge window without failing, move it back to `READY` at the end of the same target branch queue.
-- Audit events are stored in ClickHouse when audit persistence is enabled.
+- Audit events are stored in PostgreSQL.
 - Every tenant-owned PostgreSQL OLTP table must include `tenant_id`, enforce tenant-scoped uniqueness with composite unique indexes, and have PostgreSQL RLS.
 - API request handling must resolve tenant from the bearer token issuer before running tenant-owned queries.
 - Persistence code must require authenticated tenant identity in transaction context, then omit `tenant_id` from normal application inserts so the database default uses `erun_current_tenant_id()`.
@@ -176,7 +174,7 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 ## Audit Events
 
 - Audit events track authenticated API, MCP, and CLI activity.
-- Store audit events in ClickHouse for normal deployments.
+- Store audit events in PostgreSQL for normal deployments.
 - Required common audit fields are `tenant_id`, `erun_user_id`, `external_user_id`, `external_issuer_id`, `type`, and `created_at`.
 - `type` must be one of `API`, `MCP`, or `CLI`.
 - `external_issuer_id` stores the OIDC `iss` value that mapped to the tenant.
@@ -188,8 +186,7 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 - MCP audit events must set `mcp_tool` and may set `mcp_tool_parameters`.
 - Store CLI and MCP parameters as serialized text, preferably compact JSON when the caller has structured input.
 - Audit events are append-only. Do not update or delete audit rows as part of normal application behavior.
-- ClickHouse audit events should use a `MergeTree` table ordered for tenant/time/user/API access patterns.
-- Do not put audit events in PostgreSQL unless a future requirement explicitly adds PostgreSQL audit storage.
+- PostgreSQL audit events should be indexed for tenant/time/user/API access patterns.
 
 ## Review Comments
 

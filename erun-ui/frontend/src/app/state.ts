@@ -158,7 +158,7 @@ export interface AppState {
   idleStatus: UIIdleStatus | null;
   idleCloudContextBusy: boolean;
   sidebarCloudAliasBusy: boolean;
-  sidebarCloudAliasAction: '' | 'login' | 'logout';
+  sidebarCloudAliasAction: '' | 'login' | 'logout' | 'bearer';
   debugOpen: boolean;
   debugHeight: number;
   debugOutput: string;
