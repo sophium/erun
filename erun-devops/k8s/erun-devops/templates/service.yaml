@@ -16,6 +16,8 @@
 {{- $managedCloud := default false .Values.managedCloud -}}
 {{- $api := default dict .Values.api -}}
 {{- $oidcAllowedIssuers := default "" $api.oidcAllowedIssuers -}}
+{{- $awsIdentityStoreID := default "" $api.awsIdentityStoreID -}}
+{{- $awsIdentityStoreRegion := default "" $api.awsIdentityStoreRegion -}}
 {{- $postgres := default dict $api.postgres -}}
 {{- $postgresDatabase := default "erun" $postgres.database -}}
 {{- $postgresUser := default "erun" $postgres.user -}}
@@ -23,6 +25,7 @@
 {{- $postgresPasswordSecretName := default "erun-backend-postgres" $postgres.passwordSecretName -}}
 {{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
 {{- $postgresPassword := default "" $postgres.password -}}
+{{- $postgresReset := default false $postgres.reset -}}
 {{- $existingPostgresSecret := lookup "v1" "Secret" .Release.Namespace $postgresPasswordSecretName -}}
 {{- if and (eq $postgresPassword "") $existingPostgresSecret (hasKey $existingPostgresSecret.data $postgresPasswordSecretKey) -}}
 {{- $postgresPassword = (index $existingPostgresSecret.data $postgresPasswordSecretKey | b64dec) -}}
@@ -180,6 +183,18 @@ spec:
             - amd64,arm64
           securityContext:
             privileged: true
+{{- if $postgresReset }}
+        - image: {{ $postgresImage }}
+          name: erun-backend-postgres-reset
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -lc
+            - rm -rf /home/erun/.erun/postgres && mkdir -p /home/erun/.erun/postgres
+          volumeMounts:
+            - name: erun-home
+              mountPath: /home/erun
+{{- end }}
         - image: {{ $postgresImage }}
           name: erun-backend-postgres
           imagePullPolicy: IfNotPresent
@@ -225,8 +240,6 @@ spec:
                   key: {{ $postgresPasswordSecretKey }}
             - name: ERUN_DATABASE_URL
               value: {{ $databaseURL | quote }}
-            - name: ERUN_DATABASE_DIALECT
-              value: postgres
           volumeMounts:
             - name: erun-home
               mountPath: /home/erun
@@ -354,10 +367,12 @@ spec:
                   key: {{ $postgresPasswordSecretKey }}
             - name: ERUN_DATABASE_URL
               value: {{ $databaseURL | quote }}
-            - name: ERUN_DATABASE_DIALECT
-              value: postgres
             - name: ERUN_OIDC_ALLOWED_ISSUERS
               value: {{ $oidcAllowedIssuers | quote }}
+            - name: ERUN_AWS_IDENTITY_STORE_ID
+              value: {{ $awsIdentityStoreID | quote }}
+            - name: ERUN_AWS_IDENTITY_STORE_REGION
+              value: {{ $awsIdentityStoreRegion | quote }}
             - name: ERUN_TENANT
               value: {{ required "tenant is required" .Values.tenant | quote }}
             - name: ERUN_ENVIRONMENT

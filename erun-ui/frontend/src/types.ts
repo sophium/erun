@@ -63,6 +63,7 @@ export interface UITenantDashboardInput {
 
 export interface UITenantDashboard {
   tenant: string;
+  environment?: string;
   apiUrl?: string;
   apiError?: string;
   apiLog?: string;
@@ -79,6 +80,7 @@ export interface UITenantDashboardUser {
   tenantId: string;
   userId: string;
   username?: string;
+  roles?: string[];
   issuer?: string;
   subject?: string;
   createdAt?: string;
@@ -161,6 +163,13 @@ export interface UICloudProviderStatus {
   oidcIssuerUrl?: string;
   status: string;
   message?: string;
+}
+
+export interface UICloudProviderBearerToken {
+  alias: string;
+  issuer?: string;
+  token: string;
+  provider: UICloudProviderStatus;
 }
 
 export interface UIAWSCloudAliasInput {

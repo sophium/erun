@@ -12,6 +12,7 @@ import {
   LoadTenantDashboard,
   LoadTenantConfig,
   LoadVersionSuggestions,
+  GetCloudProviderBearerToken,
   LoginCloudProvider,
   LogoutCloudProvider,
   OpenIDE,
@@ -113,6 +114,7 @@ import type {
   TerminalExitPayload,
   TerminalOutputPayload,
   UICloudContextInitInput,
+  UICloudProviderBearerToken,
   UICloudProviderStatus,
   UIERunConfig,
   UIEnvironmentConfig,
@@ -435,10 +437,11 @@ export class ERunUIController {
     this.state.tenantDashboard = { ...this.state.tenantDashboard, loading: true, error: '' };
     this.emit();
     try {
-      const data = (await LoadTenantDashboard(input)) as UITenantDashboard;
+      const loadedData = (await LoadTenantDashboard(input)) as UITenantDashboard;
       if (this.state.tenantDashboard.tenant !== tenant) {
         return;
       }
+      const data = { ...loadedData, environment: loadedData.environment || input.environment };
       this.state.tenantDashboard = { ...this.state.tenantDashboard, loading: false, error: '', data };
       this.emit();
     } catch (error) {
@@ -843,6 +846,34 @@ export class ERunUIController {
 
   async logoutPrimaryCloudProvider(alias: string): Promise<void> {
     await this.updatePrimaryCloudProvider(alias, 'logout', LogoutCloudProvider);
+  }
+
+  async getPrimaryCloudProviderBearerToken(alias: string): Promise<void> {
+    alias = alias.trim();
+    if (!alias || this.state.sidebarCloudAliasBusy) {
+      return;
+    }
+    this.state.sidebarCloudAliasBusy = true;
+    this.state.sidebarCloudAliasAction = 'bearer';
+    this.emit();
+    try {
+      const result = (await GetCloudProviderBearerToken(alias)) as UICloudProviderBearerToken;
+      await ClipboardSetText(result.token);
+      this.state.cloudProviders = replaceCloudProvider(this.state.cloudProviders, result.provider);
+      this.state.sidebarCloudAliasBusy = false;
+      this.state.sidebarCloudAliasAction = '';
+      const issuer = result.issuer?.trim();
+      this.showTerminalMessage(issuer ? `Copied bearer token for ${result.alias}. Issuer: ${issuer}` : `Copied bearer token for ${result.alias}.`);
+      this.showNotification('success', `Copied bearer token for ${result.alias}.`);
+      this.emit();
+    } catch (error) {
+      const message = readError(error);
+      this.state.sidebarCloudAliasBusy = false;
+      this.state.sidebarCloudAliasAction = '';
+      this.showTerminalMessage(message);
+      this.showNotification('error', message);
+      this.emit();
+    }
   }
 
   async submitGlobalConfig(): Promise<void> {

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { CheckCircle2, Cloud, Folder, FolderOpen, LoaderCircle, LogIn, LogOut, MoreHorizontal, Plus, Settings, UserCircle2 } from 'lucide-react';
+import { CheckCircle2, Cloud, Copy, Folder, FolderOpen, LoaderCircle, LogIn, LogOut, MoreHorizontal, Plus, Settings, UserCircle2 } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
@@ -92,10 +92,16 @@ function PrimaryCloudAliasControl({ controller, state }: { controller: ERunUICon
           <div className="my-1 border-t border-border" />
           <CloudAliasStatus provider={view.provider} />
           {view.active ? (
-            <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={view.busy} onClick={() => void controller.logoutPrimaryCloudProvider(view.provider.alias)}>
-              {view.logoutBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <LogOut aria-hidden="true" />}
-              {view.logoutBusy ? 'Logging out...' : 'Log out'}
-            </Button>
+            <>
+              <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={view.busy} onClick={() => void controller.getPrimaryCloudProviderBearerToken(view.provider.alias)}>
+                {view.bearerBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Copy aria-hidden="true" />}
+                {view.bearerBusy ? 'Copying token...' : 'Get bearer token'}
+              </Button>
+              <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={view.busy} onClick={() => void controller.logoutPrimaryCloudProvider(view.provider.alias)}>
+                {view.logoutBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <LogOut aria-hidden="true" />}
+                {view.logoutBusy ? 'Logging out...' : 'Log out'}
+              </Button>
+            </>
           ) : (
             <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={view.busy} onClick={() => void controller.loginPrimaryCloudProvider(view.provider.alias)}>
               {view.loginBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <LogIn aria-hidden="true" />}
@@ -114,16 +120,16 @@ interface PrimaryCloudAliasView {
   busy: boolean;
   loginBusy: boolean;
   logoutBusy: boolean;
+  bearerBusy: boolean;
 }
 
 function primaryCloudAliasView(state: AppState): PrimaryCloudAliasView | null {
-  const tenantName = state.tenantDashboard.tenant || state.selected?.tenant || '';
-  const tenant = state.tenants.find((candidate) => candidate.name === tenantName);
+  const tenant = state.tenants.find((candidate) => candidate.name === primaryCloudTenantName(state));
   const alias = tenant?.primaryCloudProviderAlias?.trim();
   if (!alias) {
     return null;
   }
-  const provider = state.cloudProviders.find((candidate) => candidate.alias === alias) || { alias, provider: '', status: 'unknown' };
+  const provider = primaryCloudProviderStatus(state, alias);
   const busy = state.sidebarCloudAliasBusy;
   return {
     provider,
@@ -131,7 +137,16 @@ function primaryCloudAliasView(state: AppState): PrimaryCloudAliasView | null {
     busy,
     loginBusy: busy && state.sidebarCloudAliasAction === 'login',
     logoutBusy: busy && state.sidebarCloudAliasAction === 'logout',
+    bearerBusy: busy && state.sidebarCloudAliasAction === 'bearer',
   };
+}
+
+function primaryCloudTenantName(state: AppState): string {
+  return state.tenantDashboard.tenant || state.selected?.tenant || '';
+}
+
+function primaryCloudProviderStatus(state: AppState, alias: string): UICloudProviderStatus {
+  return state.cloudProviders.find((candidate) => candidate.alias === alias) || { alias, provider: '', status: 'unknown' };
 }
 
 function CloudAliasPopoverRow({ icon, label, muted }: { icon: React.ReactElement; label: string; muted?: boolean }): React.ReactElement {
@@ -182,14 +197,20 @@ function TenantGroup({
   spaced: boolean;
 }): React.ReactElement {
   const collapsed = state.collapsedTenants.has(tenant.name);
-  const active = state.tenantDashboard.tenant === tenant.name || state.selected?.tenant === tenant.name;
+  const active = state.tenantDashboard.tenant === tenant.name;
+  const related = active || state.selected?.tenant === tenant.name;
 
   return (
     <div className={cn('flex flex-col', spaced && 'mt-2.5')}>
-      <div className="group/tenant flex items-center pr-1">
-        <TenantToggleButton controller={controller} tenantName={tenant.name} collapsed={collapsed} />
-        <TenantSelectButton controller={controller} tenantName={tenant.name} active={active} />
-        <TenantManageButton controller={controller} tenantName={tenant.name} />
+      <div
+        className={cn(
+          'group/tenant mr-1 ml-1 flex h-8 items-center rounded-md pr-1 text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+          active && 'bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground',
+        )}
+      >
+        <TenantToggleButton controller={controller} tenantName={tenant.name} collapsed={collapsed} active={active} />
+        <TenantSelectButton controller={controller} tenantName={tenant.name} active={active} related={related} />
+        <TenantManageButton controller={controller} tenantName={tenant.name} active={active} />
       </div>
       {!collapsed && (
         <div className="flex flex-col gap-0 pt-0">
@@ -208,12 +229,15 @@ function TenantGroup({
   );
 }
 
-function TenantToggleButton({ controller, tenantName, collapsed }: { controller: ERunUIController; tenantName: string; collapsed: boolean }): React.ReactElement {
+function TenantToggleButton({ controller, tenantName, collapsed, active }: { controller: ERunUIController; tenantName: string; collapsed: boolean; active: boolean }): React.ReactElement {
   return (
     <IconTooltip label={collapsed ? 'Expand tenant' : 'Collapse tenant'}>
       <Button
         type="button"
-        className="ml-1 size-[26px] flex-none text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&_svg]:size-[18px]"
+        className={cn(
+          'size-[26px] flex-none text-current hover:bg-[color-mix(in_oklch,currentColor_12%,transparent)] hover:text-current [&_svg]:size-[18px]',
+          !active && 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+        )}
         variant="ghost"
         size="icon"
         aria-label={collapsed ? `Expand ${tenantName}` : `Collapse ${tenantName}`}
@@ -226,12 +250,12 @@ function TenantToggleButton({ controller, tenantName, collapsed }: { controller:
   );
 }
 
-function TenantSelectButton({ controller, tenantName, active }: { controller: ERunUIController; tenantName: string; active: boolean }): React.ReactElement {
+function TenantSelectButton({ controller, tenantName, active, related }: { controller: ERunUIController; tenantName: string; active: boolean; related: boolean }): React.ReactElement {
   return (
     <button
       className={cn(
-        'flex min-w-0 flex-1 cursor-pointer items-center border-0 bg-transparent py-[4px] pr-3 pl-2 pb-1.5 text-left text-[15px] leading-[1.25] font-medium tracking-normal text-muted-foreground hover:text-foreground disabled:cursor-default disabled:opacity-50',
-        active && 'text-foreground',
+        'flex min-w-0 flex-1 cursor-pointer items-center border-0 bg-transparent py-[4px] pr-3 pl-2 pb-1.5 text-left text-[15px] leading-[1.25] tracking-normal text-inherit disabled:cursor-default disabled:opacity-50',
+        related ? 'font-medium' : 'font-normal',
       )}
       type="button"
       title={tenantName}
@@ -243,12 +267,16 @@ function TenantSelectButton({ controller, tenantName, active }: { controller: ER
   );
 }
 
-function TenantManageButton({ controller, tenantName }: { controller: ERunUIController; tenantName: string }): React.ReactElement {
+function TenantManageButton({ controller, tenantName, active }: { controller: ERunUIController; tenantName: string; active: boolean }): React.ReactElement {
   return (
     <IconTooltip label="Manage tenant">
       <Button
         type="button"
-        className="pointer-events-none size-[26px] flex-none cursor-pointer text-muted-foreground opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover/tenant:pointer-events-auto group-hover/tenant:opacity-100 group-focus-within/tenant:pointer-events-auto group-focus-within/tenant:opacity-100 [&_svg]:size-4"
+        className={cn(
+          'pointer-events-none size-[26px] flex-none cursor-pointer text-current opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-[color-mix(in_oklch,currentColor_12%,transparent)] hover:text-current group-hover/tenant:pointer-events-auto group-hover/tenant:opacity-100 group-focus-within/tenant:pointer-events-auto group-focus-within/tenant:opacity-100 [&_svg]:size-4',
+          !active && 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+          active && 'pointer-events-auto opacity-100',
+        )}
         variant="ghost"
         size="icon"
         aria-label={`Manage ${tenantName}`}
@@ -274,7 +302,7 @@ function EnvironmentRow({
   tenantName: string;
   environmentName: string;
 }): React.ReactElement {
-  const selected = !state.tenantDashboard.tenant && state.selected?.tenant === tenantName && state.selected?.environment === environmentName;
+  const selected = state.selected?.tenant === tenantName && state.selected?.environment === environmentName;
   const selection = { tenant: tenantName, environment: environmentName };
   const busy = environmentIsBusy(state, tenantName, environmentName);
 

@@ -50,6 +50,31 @@ func (r *UserRepository) Get(ctx context.Context, userID string) (model.User, er
 	return user, err
 }
 
+func (r *UserRepository) RoleNames(ctx context.Context, userID string) ([]string, error) {
+	var rows []struct {
+		Name string `bun:"name"`
+	}
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		return tx.NewRaw(`
+			SELECT ro.name
+			  FROM user_roles ur
+			  JOIN roles ro
+			    ON ro.tenant_id = ur.tenant_id
+			   AND ro.role_id = ur.role_id
+			 WHERE ur.user_id = ?
+			 ORDER BY ro.name
+		`, userID).Scan(ctx, &rows)
+	})
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(rows))
+	for _, row := range rows {
+		names = append(names, row.Name)
+	}
+	return names, nil
+}
+
 func (r *UserRepository) List(ctx context.Context, _ UserFilter) ([]model.User, error) {
 	var users []model.User
 	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {

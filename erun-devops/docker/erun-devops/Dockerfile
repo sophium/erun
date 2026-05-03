@@ -6,7 +6,6 @@ WORKDIR /src
 COPY erun-cli/go.mod erun-cli/go.sum erun-cli/go.work erun-cli/go.work.sum /src/erun-cli/
 COPY erun-common/go.mod /src/erun-common/go.mod
 COPY erun-mcp/go.mod erun-mcp/go.sum /src/erun-mcp/
-COPY erun-backend/erun-backend-db/go.mod erun-backend/erun-backend-db/go.sum /src/erun-backend/erun-backend-db/
 COPY erun-backend/erun-backend-api/go.mod erun-backend/erun-backend-api/go.sum /src/erun-backend/erun-backend-api/
 COPY erun-devops/VERSION /src/erun-devops/VERSION
 
@@ -21,13 +20,11 @@ ARG ERUN_DATE=""
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go mod download && \
-    cd /src/erun-backend/erun-backend-db && go mod download && \
     cd /src/erun-backend/erun-backend-api && go mod download
 
 COPY erun-cli /src/erun-cli
 COPY erun-common /src/erun-common
 COPY erun-mcp /src/erun-mcp
-COPY erun-backend/erun-backend-db /src/erun-backend/erun-backend-db
 COPY erun-backend/erun-backend-api /src/erun-backend/erun-backend-api
 
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -37,8 +34,6 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     go build -ldflags "-X github.com/sophium/erun/cmd.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/cmd.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/cmd.buildDate=${ERUN_DATE}" -o /out/erun . && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags "-X github.com/sophium/erun/erun-mcp.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/erun-mcp.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/erun-mcp.buildDate=${ERUN_DATE}" -o /out/emcp ../erun-mcp/cmd/emcp && \
-    cd /src/erun-backend/erun-backend-db && \
-    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/edb ./cmd/edb && \
     cd /src/erun-backend/erun-backend-api && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/eapi ./cmd/eapi
 
@@ -57,6 +52,7 @@ ARG GOLANGCI_LINT_VERSION=v2.2.2
 ARG NODE_VERSION=24.14.0
 ARG CODEX_VERSION=0.125.0
 ARG AWS_CLI_VERSION=2.32.16
+ARG ATLAS_VERSION=v1.2.0
 
 USER root
 
@@ -70,6 +66,7 @@ RUN apt-get update && \
         *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
     esac && \
     curl -fsSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${arch}/kubectl" && \
+    curl -fsSL -o /usr/local/bin/atlas "https://release.ariga.io/atlas/atlas-linux-${arch}-${ATLAS_VERSION}" && \
     curl -fsSL -o /tmp/helm.tar.gz "https://get.helm.sh/helm-${HELM_VERSION}-linux-${arch}.tar.gz" && \
     tar -xzf /tmp/helm.tar.gz -C /tmp && \
     install -m 0755 "/tmp/linux-${arch}/helm" /usr/local/bin/helm && \
@@ -109,13 +106,12 @@ RUN apt-get update && \
     mkdir -p /home/erun/git /home/erun/.kube /home/erun/.config/k9s /etc/erun /etc/bash_completion.d && \
     printf '\n[ -r /usr/share/bash-completion/bash_completion ] && . /usr/share/bash-completion/bash_completion\n[ -r /etc/bash_completion.d/erun ] && . /etc/bash_completion.d/erun\n[ -r /etc/erun/bash_prompt.sh ] && . /etc/erun/bash_prompt.sh\n' >> /etc/bash.bashrc && \
     chown -R erun:erun /home/erun && \
-    chmod 0755 /usr/local/bin/kubectl /usr/local/bin/helm /usr/local/bin/terraform /usr/local/bin/k9s /usr/local/bin/difft /usr/local/bin/docker /usr/local/bin/aws /usr/local/lib/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
+    chmod 0755 /usr/local/bin/kubectl /usr/local/bin/atlas /usr/local/bin/helm /usr/local/bin/terraform /usr/local/bin/k9s /usr/local/bin/difft /usr/local/bin/docker /usr/local/bin/aws /usr/local/lib/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
 
 COPY --from=builder /usr/local/go /usr/local/go
 COPY --from=builder --chmod=0755 /out/erun /usr/local/bin/erun
 COPY --from=builder --chmod=0755 /out/emcp /usr/local/bin/emcp
 COPY --from=builder --chmod=0755 /out/eapi /usr/local/bin/eapi
-COPY --from=builder --chmod=0755 /out/edb /usr/local/bin/edb
 COPY --chmod=0755 erun-devops/docker/erun-devops/entrypoint.sh /usr/local/bin/erun-devops-entrypoint
 COPY --chmod=0755 erun-devops/docker/erun-devops/codex-wrapper.sh /usr/local/bin/codex
 COPY --chmod=0644 erun-devops/docker/erun-devops/bash_prompt.sh /etc/erun/bash_prompt.sh

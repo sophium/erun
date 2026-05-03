@@ -129,12 +129,12 @@ func canReachLocalAPIEndpoint(port int) bool {
 		return false
 	}
 	client := http.Client{Timeout: 500 * time.Millisecond}
-	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/v1/whoami", port))
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/healthz", port))
 	if err != nil {
 		return false
 	}
 	_ = resp.Body.Close()
-	return true
+	return resp.StatusCode >= 200 && resp.StatusCode < 300
 }
 
 func apiPortForwardTimeoutDetail(logPath string) string {

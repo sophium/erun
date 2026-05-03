@@ -45,14 +45,14 @@ func TestAPICmdDryRunPrintsTraceWithoutStartingServer(t *testing.T) {
 	stderr := new(bytes.Buffer)
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"-v", "api", "--dry-run", "--host", "0.0.0.0", "--port", "17033", "--database-dialect", "sqlite"})
+	cmd.SetArgs([]string{"-v", "api", "--dry-run", "--host", "0.0.0.0", "--port", "17033", "--database-url", "postgres://erun@example/erun"})
 
 	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	if got := stdout.String(); got != "" {
 		t.Fatalf("expected no server output during dry-run, got %q", got)
 	}
-	wantTrace := "eapi --host 0.0.0.0 --port 17033 --database-dialect sqlite"
+	wantTrace := "eapi --host 0.0.0.0 --port 17033 --database-url 'postgres://erun@example/erun'"
 	if got := stderr.String(); got == "" || !bytes.Contains([]byte(got), []byte(wantTrace)) {
 		t.Fatalf("expected dry-run trace, got %q", got)
 	}
@@ -72,13 +72,13 @@ func TestAPICmdStartsEAPI(t *testing.T) {
 			return nil
 		},
 	})
-	cmd.SetArgs([]string{"api", "tenant-a", "dev", "--host", "0.0.0.0", "--port", "17034", "--database-url", "/tmp/erun.db", "--database-dialect", "sqlite", "--oidc-allowed-issuers", "https://issuer.example"})
+	cmd.SetArgs([]string{"api", "tenant-a", "dev", "--host", "0.0.0.0", "--port", "17034", "--database-url", "postgres://erun@example/erun", "--oidc-allowed-issuers", "https://issuer.example", "--aws-identity-store-id", "d-1234567890", "--aws-identity-store-region", "eu-west-2"})
 
 	requireNoError(t, cmd.Execute(), "Execute failed")
 	if !started {
 		t.Fatal("expected eapi to be launched")
 	}
-	wantArgs := []string{"--host", "0.0.0.0", "--port", "17034", "--database-url", "/tmp/erun.db", "--database-dialect", "sqlite", "--oidc-allowed-issuers", "https://issuer.example"}
+	wantArgs := []string{"--host", "0.0.0.0", "--port", "17034", "--database-url", "postgres://erun@example/erun", "--oidc-allowed-issuers", "https://issuer.example", "--aws-identity-store-id", "d-1234567890", "--aws-identity-store-region", "eu-west-2"}
 	if len(gotArgs) != len(wantArgs) {
 		t.Fatalf("unexpected eapi args: got=%v want=%v", gotArgs, wantArgs)
 	}

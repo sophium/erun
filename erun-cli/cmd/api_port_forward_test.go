@@ -42,9 +42,15 @@ func TestKubectlAPIPortForwardArgs(t *testing.T) {
 	}
 }
 
-func TestCanReachLocalAPIEndpointRequiresHTTPResponse(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+func TestCanReachLocalAPIEndpointUsesHealthz(t *testing.T) {
+	var path string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		path = req.URL.Path
+		if req.URL.Path != "/healthz" {
+			http.NotFound(w, req)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}))
 	defer server.Close()
 
@@ -61,6 +67,9 @@ func TestCanReachLocalAPIEndpointRequiresHTTPResponse(t *testing.T) {
 	}
 	if !canReachLocalAPIEndpoint(port) {
 		t.Fatal("expected HTTP endpoint to be reachable")
+	}
+	if path != "/healthz" {
+		t.Fatalf("unexpected readiness path: %q", path)
 	}
 }
 

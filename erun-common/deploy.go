@@ -68,6 +68,7 @@ type HelmDeployParams struct {
 	CloudInstanceID    string
 	OIDCAllowedIssuers string
 	ImageOverrides     map[string]string
+	ResetDatabase      bool
 	Idle               EnvironmentIdleConfig
 	RuntimePod         RuntimePodResources
 	Version            string
@@ -98,6 +99,7 @@ type HelmDeploySpec struct {
 	CloudInstanceID    string
 	OIDCAllowedIssuers string
 	ImageOverrides     map[string]string
+	ResetDatabase      bool
 	Idle               EnvironmentIdleConfig
 	RuntimePod         RuntimePodResources
 	Version            string
@@ -276,6 +278,7 @@ func resolveDeploySpecForContext(store DeployStore, findProjectRoot ProjectFinde
 	if err != nil {
 		return DeploySpec{}, err
 	}
+	deployInput.ResetDatabase = deployResetsDatabase(allowLocalBuilds, deployInput.Version)
 	if err := configureDeployInputMetadata(store, target, &deployInput); err != nil {
 		return DeploySpec{}, err
 	}
@@ -318,6 +321,7 @@ func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target OpenResult
 	if err != nil {
 		return DeploySpec{}, err
 	}
+	deployInput.ResetDatabase = deployResetsDatabase(false, build.Image.Version)
 	if err := configureDeployInputMetadata(store, target, &deployInput); err != nil {
 		return DeploySpec{}, err
 	}
@@ -523,6 +527,10 @@ func deployTargetSnapshotEnabled(target OpenResult, override *bool) bool {
 		return *override
 	}
 	return target.EnvConfig.SnapshotEnabled()
+}
+
+func deployResetsDatabase(snapshotEnabled bool, version string) bool {
+	return snapshotEnabled || strings.Contains(strings.TrimSpace(version), "-snapshot-")
 }
 
 func resolveDeployContextForTarget(findProjectRoot ProjectFinderFunc, resolveKubernetesDeployContext DeployContextResolverFunc, target OpenResult, componentName string) (KubernetesDeployContext, error) {
@@ -763,6 +771,7 @@ func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 		CloudInstanceID:    d.CloudInstanceID,
 		OIDCAllowedIssuers: d.OIDCAllowedIssuers,
 		ImageOverrides:     cloneStringMap(d.ImageOverrides),
+		ResetDatabase:      d.ResetDatabase,
 		Idle:               d.Idle,
 		RuntimePod:         NormalizeRuntimePodResources(d.RuntimePod),
 		Version:            d.Version,
@@ -801,6 +810,7 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "cloudContext.region="+d.CloudRegion,
 		"--set-string", "cloudContext.instanceId="+d.CloudInstanceID,
 		"--set-string", "api.oidcAllowedIssuers="+d.OIDCAllowedIssuers,
+		"--set", "api.postgres.reset="+formatHelmBool(d.ResetDatabase),
 	)
 	for _, key := range sortedStringMapKeys(d.ImageOverrides) {
 		args = append(args, "--set-string", "imageOverrides."+key+"="+d.ImageOverrides[key])
@@ -1241,6 +1251,7 @@ func DeployHelmChart(params HelmDeployParams) error {
 		CloudInstanceID:    params.CloudInstanceID,
 		OIDCAllowedIssuers: params.OIDCAllowedIssuers,
 		ImageOverrides:     cloneStringMap(params.ImageOverrides),
+		ResetDatabase:      params.ResetDatabase,
 		Idle:               params.Idle,
 		RuntimePod:         params.RuntimePod,
 		Timeout:            params.Timeout,

@@ -95,6 +95,79 @@ func TestAuthMiddlewareResolvesIdentityWithSingleResolver(t *testing.T) {
 	}
 }
 
+func TestAuthMiddlewareAppliesUsernameHint(t *testing.T) {
+	middleware, err := NewAuthMiddleware(AuthMiddlewareOptions{
+		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
+			return Claims{Issuer: "https://issuer.example", Subject: "user-1"}, nil
+		}),
+		IdentityResolver: IdentityResolverFunc(func(ctx context.Context, claims Claims) (Tenant, User, error) {
+			if claims.Username != "Rihards.Freimanis" {
+				t.Fatalf("unexpected username hint: %q", claims.Username)
+			}
+			return Tenant{TenantID: "019a7fa5-c2c0-7c55-bc70-714873a71f10"}, User{UserID: "019a7fa5-c2c0-7c55-bc70-714873a71f11", Username: claims.Username}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewAuthMiddleware failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/whoami", nil)
+	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set(usernameHintHeader, " Rihards.Freimanis ")
+	rec := httptest.NewRecorder()
+	middleware.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth, ok := AuthFromContext(r.Context())
+		if !ok {
+			t.Fatal("expected auth context")
+		}
+		if auth.User.Username != "Rihards.Freimanis" {
+			t.Fatalf("unexpected auth username: %q", auth.User.Username)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("unexpected status: %d", rec.Code)
+	}
+}
+
+func TestAuthMiddlewareRefreshesCachedIdentityForUsernameHint(t *testing.T) {
+	cache := NewIdentityResolutionCache(IdentityCacheOptions{PositiveTTL: time.Minute})
+	resolverCalls := 0
+	middleware, err := NewAuthMiddleware(AuthMiddlewareOptions{
+		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
+			return Claims{Issuer: "https://issuer.example", Subject: "user-1"}, nil
+		}),
+		IdentityResolver: IdentityResolverFunc(func(ctx context.Context, claims Claims) (Tenant, User, error) {
+			resolverCalls++
+			return Tenant{TenantID: "019a7fa5-c2c0-7c55-bc70-714873a71f10"}, User{UserID: "019a7fa5-c2c0-7c55-bc70-714873a71f11", Username: claims.Username}, nil
+		}),
+		IdentityCache: cache,
+	})
+	if err != nil {
+		t.Fatalf("NewAuthMiddleware failed: %v", err)
+	}
+
+	for _, username := range []string{"", "Rihards.Freimanis"} {
+		req := httptest.NewRequest(http.MethodGet, "/v1/whoami", nil)
+		req.Header.Set("Authorization", "Bearer valid-token")
+		if username != "" {
+			req.Header.Set(usernameHintHeader, username)
+		}
+		rec := httptest.NewRecorder()
+		middleware.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNoContent)
+		})).ServeHTTP(rec, req)
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("unexpected status: %d", rec.Code)
+		}
+	}
+
+	if resolverCalls != 2 {
+		t.Fatalf("expected username hint to refresh cached identity, got %d resolver calls", resolverCalls)
+	}
+}
+
 func TestAuthMiddlewareRejectsMissingBearerToken(t *testing.T) {
 	middleware, err := NewAuthMiddleware(AuthMiddlewareOptions{
 		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {

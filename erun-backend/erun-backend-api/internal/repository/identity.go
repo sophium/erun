@@ -30,6 +30,10 @@ func (r *IdentityRepository) ResolveIdentity(ctx context.Context, claims securit
 	if err == nil {
 		user, err := r.ResolveUserByExternalID(ctx, tenant.TenantID, claims.Issuer, claims.Subject)
 		if err == nil {
+			user, err = r.refreshUserUsername(ctx, tenant, user, claims)
+			if err != nil {
+				return model.Tenant{}, model.User{}, err
+			}
 			return tenant, user, nil
 		}
 		if !errors.Is(err, ErrNotFound) {
@@ -42,6 +46,38 @@ func (r *IdentityRepository) ResolveIdentity(ctx context.Context, claims securit
 		return model.Tenant{}, model.User{}, err
 	}
 	return r.bootstrapFirstIdentity(ctx, claims)
+}
+
+func (r *IdentityRepository) refreshUserUsername(ctx context.Context, tenant model.Tenant, user model.User, claims security.Claims) (model.User, error) {
+	username := strings.TrimSpace(claims.Username)
+	if username == "" || username == strings.TrimSpace(user.Username) {
+		return user, nil
+	}
+
+	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if r.dialect == DialectPostgres {
+			if err := r.setPostgresSecurityContext(ctx, tx, security.Context{
+				TenantID:   tenant.TenantID,
+				TenantType: string(tenant.Type),
+				ErunUserID: user.UserID,
+			}); err != nil {
+				return err
+			}
+		}
+		err := tx.NewRaw(`
+			UPDATE users
+			   SET username = ?
+			 WHERE tenant_id = ?
+			   AND user_id = ?
+			RETURNING user_id, tenant_id, username, created_at, updated_at
+		`, username, tenant.TenantID, user.UserID).Scan(ctx, &user)
+		return normalizeNoRows(err)
+	})
+	if err != nil {
+		return model.User{}, err
+	}
+	log.Printf("erun api identity refreshed username tenant=%q user=%q username=%q", tenant.TenantID, user.UserID, user.Username)
+	return user, nil
 }
 
 func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, issuer string) (model.Tenant, error) {
@@ -91,7 +127,7 @@ func (r *IdentityRepository) bootstrapFirstIdentity(ctx context.Context, claims 
 			username = claims.Subject
 		}
 
-		if _, err := tx.NewRaw(`INSERT INTO tenant_issuers (issuer) VALUES (?)`, claims.Issuer).Exec(ctx); err != nil {
+		if _, err := tx.NewRaw(`INSERT INTO tenant_issuers (issuer, name) VALUES (?, ?)`, claims.Issuer, defaultTenantIssuerName(claims.Issuer)).Exec(ctx); err != nil {
 			return err
 		}
 		user, err = r.insertUser(ctx, tx, username)
@@ -182,6 +218,14 @@ func (r *IdentityRepository) insertTenant(ctx context.Context, tx bun.Tx, name s
 		return model.Tenant{}, normalizeNoRows(err)
 	}
 	return tenant, nil
+}
+
+func defaultTenantIssuerName(issuer string) string {
+	issuer = strings.TrimSpace(issuer)
+	if issuer == "" {
+		return "OIDC issuer"
+	}
+	return issuer
 }
 
 func (r *IdentityRepository) insertUser(ctx context.Context, tx bun.Tx, username string) (model.User, error) {

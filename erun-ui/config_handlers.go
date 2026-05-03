@@ -143,6 +143,23 @@ func (a *App) SetupCloudProviderOIDC(alias string) (uiCloudProviderStatus, error
 	return cloudProviderStatusToUI(status), nil
 }
 
+func (a *App) GetCloudProviderBearerToken(alias string) (uiCloudProviderBearerToken, error) {
+	token, err := eruncommon.CloudProviderBearerToken(eruncommon.Context{}, a.deps.store, eruncommon.CloudBearerParams{Alias: strings.TrimSpace(alias)}, a.deps.cloudDeps)
+	if err != nil {
+		return uiCloudProviderBearerToken{}, err
+	}
+	provider, err := eruncommon.ResolveCloudProvider(a.deps.store, token.Alias)
+	if err != nil {
+		return uiCloudProviderBearerToken{}, err
+	}
+	return uiCloudProviderBearerToken{
+		Alias:    token.Alias,
+		Issuer:   token.Issuer,
+		Token:    token.Token,
+		Provider: cloudProviderStatusToUI(eruncommon.CloudProviderTokenStatus(provider, a.deps.cloudDeps)),
+	}, nil
+}
+
 func (a *App) LoadTenantConfig(tenant string) (uiTenantConfig, error) {
 	tenant = strings.TrimSpace(tenant)
 	if tenant == "" {

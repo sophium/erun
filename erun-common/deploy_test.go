@@ -251,6 +251,9 @@ func TestResolveCurrentDeploySpecsFromDevopsDockerComponentBuildsOnlyCurrentImag
 	if got := spec.Deploy.ImageOverrides["erun-backend-api"]; got != wantTag {
 		t.Fatalf("expected image override %q, got %+v", wantTag, spec.Deploy.ImageOverrides)
 	}
+	if !spec.Deploy.ResetDatabase {
+		t.Fatalf("expected snapshot deploy to reset database")
+	}
 }
 
 func writeDeployChartFixture(t *testing.T, chartPath string) {
@@ -1134,7 +1137,8 @@ printf '%s
 		ImageOverrides: map[string]string{
 			"erun-backend-api": "erunpaas/erun-backend-api:1.0.0-snapshot-20260503093000",
 		},
-		Timeout: DefaultHelmDeploymentTimeout,
+		ResetDatabase: true,
+		Timeout:       DefaultHelmDeploymentTimeout,
 	}); err != nil {
 		t.Fatalf("DeployHelmChart failed: %v", err)
 	}
@@ -1163,6 +1167,7 @@ printf '%s
 		"--set-string\ncloudContext.region=eu-west-2\n",
 		"--set-string\ncloudContext.instanceId=i-073c3338f26fbb000\n",
 		"--set-string\napi.oidcAllowedIssuers=https://issuer.one.example,https://issuer.two.example\n",
+		"--set\napi.postgres.reset=true\n",
 		"--set-string\nimageOverrides.erun-backend-api=erunpaas/erun-backend-api:1.0.0-snapshot-20260503093000\n",
 	} {
 		if !strings.Contains(args, want) {

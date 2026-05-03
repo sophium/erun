@@ -3,7 +3,7 @@ import { RefreshCw, LoaderCircle } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import type { AppState } from '@/app/state';
-import type { UITenantDashboardBuild, UITenantDashboardReview, UITenantDashboardUser } from '@/types';
+import type { UITenant, UITenantDashboardBuild, UITenantDashboardReview, UITenantDashboardUser } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -13,13 +13,14 @@ export function TenantDashboardView({ controller, state }: { controller: ERunUIC
     return null;
   }
   const tenant = state.tenants.find((candidate) => candidate.name === dashboard.tenant);
+  const environmentName = tenantDashboardEnvironmentName(tenant, dashboard.data?.environment);
   return (
     <section className="grid h-full min-h-0 bg-background text-foreground">
       <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
         <header className="flex min-w-0 items-center justify-between border-b border-border px-5 py-4">
           <div className="min-w-0">
             <h1 className="truncate text-[20px] font-semibold leading-tight tracking-normal">{dashboard.tenant}</h1>
-            <p className="truncate text-sm text-muted-foreground">{tenantDashboardSubtitle(tenant)}</p>
+            <p className="truncate text-sm text-muted-foreground">{tenantDashboardSubtitle(tenant, environmentName)}</p>
           </div>
           <Button type="button" variant="outline" size="sm" disabled={dashboard.loading} onClick={() => { void controller.loadTenantDashboard(); }}>
             {dashboard.loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
@@ -118,14 +119,11 @@ function UsersTable({ users, apiError }: { users: UITenantDashboardUser[]; apiEr
     return <DashboardMessage message={apiError || 'No users found'} destructive={Boolean(apiError)} />;
   }
   return (
-    <DataTable headers={['User', 'Username', 'Tenant', 'Issuer', 'Subject']}>
+    <DataTable headers={['Username', 'Roles']}>
       {users.map((user) => (
-        <tr key={user.userId}>
-          <DataCell strong>{user.userId}</DataCell>
-          <DataCell>{user.username}</DataCell>
-          <DataCell>{user.tenantId}</DataCell>
-          <DataCell>{user.issuer}</DataCell>
-          <DataCell>{user.subject}</DataCell>
+        <tr key={user.userId || user.username || user.subject}>
+          <DataCell strong>{displayUsername(user)}</DataCell>
+          <DataCell>{formatRoles(user.roles)}</DataCell>
         </tr>
       ))}
     </DataTable>
@@ -214,13 +212,41 @@ function DashboardMessage({ message, icon, destructive }: { message: string; ico
   );
 }
 
-function tenantDashboardSubtitle(tenant: AppState['tenants'][number] | undefined): string {
+function displayUsername(user: UITenantDashboardUser): string {
+  return user.username?.trim() || user.subject?.trim() || user.userId?.trim() || 'Unknown user';
+}
+
+function formatRoles(roles: string[] | undefined): string {
+  const names = roles?.map((role) => role.trim()).filter(Boolean) ?? [];
+  return names.length > 0 ? names.join(', ') : 'No roles assigned';
+}
+
+function tenantDashboardSubtitle(tenant: UITenant | undefined, environmentName: string): string {
   if (!tenant) {
-    return 'Tenant dashboard';
+    return environmentName || 'Tenant dashboard';
   }
   const environmentCount = tenant.environments.length;
   const alias = tenant.primaryCloudProviderAlias?.trim();
-  return `${environmentCount} environment${environmentCount === 1 ? '' : 's'}${alias ? `, primary ${alias}` : ''}`;
+  const parts = [
+    environmentName,
+    `${environmentCount} environment${environmentCount === 1 ? '' : 's'}`,
+    alias ? `primary ${alias}` : '',
+  ].filter(Boolean);
+  return parts.join(', ');
+}
+
+function tenantDashboardEnvironmentName(tenant: UITenant | undefined, loadedEnvironment: string | undefined): string {
+  const environmentName = loadedEnvironment?.trim();
+  if (environmentName) {
+    return environmentName;
+  }
+  if (!tenant) {
+    return '';
+  }
+  const defaultEnvironment = tenant.defaultEnvironment?.trim();
+  const environment = tenant.environments.find((candidate) => candidate.name === defaultEnvironment && candidate.apiUrl) ||
+    tenant.environments.find((candidate) => candidate.apiUrl);
+  return environment?.name?.trim() || '';
 }
 
 function formatDate(value: string | undefined): string {

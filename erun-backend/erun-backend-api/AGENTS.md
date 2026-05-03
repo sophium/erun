@@ -141,7 +141,7 @@ Module-specific guidance for `erun-backend-api`. Follow the repository root and 
 - Use the canonical route path and method observed by middleware as the audit source. Do not let routes hand-write those values for normal request auditing.
 - Register protected routes through the shared route registration helper so the canonical API path is available to authentication, authorization, and audit middleware.
 - Audit logging should use the same request-scoped security context that repository transaction wiring uses.
-- Audit writes should target ClickHouse when audit persistence is enabled, matching `erun-backend-db` schema guidance.
+- Audit writes should target PostgreSQL, matching `erun-backend-db` schema guidance.
 - Future CLI and MCP audit callers must set type `CLI` or `MCP` and populate `cli_command` or `mcp_tool` respectively. Store parameter payloads as serialized text, preferably compact JSON for structured input.
 - Treat audit logging failure policy as an explicit API configuration decision. Default request auditing should prefer failing closed only when the endpoint requires audit durability; otherwise log/report the audit failure without hiding authorization failures as unrelated route errors.
 - Do not log audit events for requests rejected before authorization, such as missing tokens, invalid tokens, unknown issuers, unknown external users, or denied permissions.

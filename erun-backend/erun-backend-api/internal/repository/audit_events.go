@@ -2,42 +2,62 @@ package repository
 
 import (
 	"context"
-	"database/sql"
+	"time"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/uptrace/bun"
-	"github.com/uptrace/bun/dialect/pgdialect"
 )
 
 type AuditEventRepository struct {
-	db *bun.DB
+	txs *TxManager
 }
 
-func NewAuditEventRepository(db *sql.DB) *AuditEventRepository {
-	return NewAuditEventRepositoryForDialect(db, DialectPostgres)
-}
-
-func NewAuditEventRepositoryForDialect(db *sql.DB, _ Dialect) *AuditEventRepository {
-	return &AuditEventRepository{db: bun.NewDB(db, pgdialect.New())}
+func NewAuditEventRepository(txs *TxManager) *AuditEventRepository {
+	return &AuditEventRepository{txs: txs}
 }
 
 func (r *AuditEventRepository) LogAuditEvent(ctx context.Context, event model.AuditEvent) error {
-	_, err := r.db.NewInsert().
-		Model(&event).
-		Column(
-			"tenant_id",
-			"erun_user_id",
-			"external_user_id",
-			"external_issuer_id",
-			"type",
-			"api_method",
-			"api_path",
-			"cli_command",
-			"cli_parameters",
-			"mcp_tool",
-			"mcp_tool_parameters",
-			"created_at",
-		).
-		Exec(ctx)
-	return err
+	createdAt := event.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	return r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		_, err := tx.NewRaw(`
+			INSERT INTO audit_events (
+				tenant_id,
+				erun_user_id,
+				external_user_id,
+				external_issuer_id,
+				type,
+				api_method,
+				api_path,
+				cli_command,
+				cli_parameters,
+				mcp_tool,
+				mcp_tool_parameters,
+				created_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`,
+			event.TenantID,
+			event.ErunUserID,
+			event.ExternalUserID,
+			event.ExternalIssuerID,
+			string(event.Type),
+			nullString(event.APIMethod),
+			nullString(event.APIPath),
+			nullString(event.CLICommand),
+			nullString(event.CLIParameters),
+			nullString(event.MCPTool),
+			nullString(event.MCPToolParameters),
+			createdAt,
+		).Exec(ctx)
+		return err
+	})
+}
+
+func nullString(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }

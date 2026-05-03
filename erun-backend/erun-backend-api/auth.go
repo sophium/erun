@@ -19,6 +19,8 @@ var (
 	ErrUserNotResolved    = errors.New("user not resolved")
 )
 
+const usernameHintHeader = "X-ERun-Username"
+
 type Claims = security.Claims
 type Tenant = model.Tenant
 type User = model.User
@@ -163,6 +165,7 @@ func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 			http.Error(w, ErrInvalidBearerToken.Error(), http.StatusUnauthorized)
 			return
 		}
+		claims = claimsWithUsernameHint(claims, r.Header.Get(usernameHintHeader))
 
 		identity, err := m.resolveIdentity(r.Context(), claims)
 		if err != nil {
@@ -212,7 +215,9 @@ func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 func (m *AuthMiddleware) resolveIdentity(ctx context.Context, claims Claims) (Identity, error) {
 	if m.cache != nil {
 		if identity, err, ok := m.cache.Get(claims.Issuer, claims.Subject); ok {
-			return identity, err
+			if !cachedIdentityNeedsUsernameRefresh(identity, err, claims) {
+				return identity, err
+			}
 		}
 	}
 
@@ -256,6 +261,26 @@ func (m *AuthMiddleware) resolveIdentity(ctx context.Context, claims Claims) (Id
 		m.cache.SetSuccess(claims.Issuer, claims.Subject, identity)
 	}
 	return identity, nil
+}
+
+func claimsWithUsernameHint(claims Claims, hint string) Claims {
+	hint = strings.TrimSpace(hint)
+	if hint == "" || strings.ContainsAny(hint, "\r\n") || len(hint) > 256 {
+		return claims
+	}
+	claims.Username = hint
+	return claims
+}
+
+func cachedIdentityNeedsUsernameRefresh(identity Identity, err error, claims Claims) bool {
+	if err != nil {
+		return false
+	}
+	username := strings.TrimSpace(claims.Username)
+	if username == "" {
+		return false
+	}
+	return username != strings.TrimSpace(identity.User.Username)
 }
 
 func (m *AuthMiddleware) logAuditEvent(r *http.Request) error {

@@ -2,6 +2,7 @@ package backendapi
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -28,6 +29,30 @@ func TestHandlerRequiresBearerTokenForAPIEndpoint(t *testing.T) {
 	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/whoami", nil))
 
 	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unexpected status: %d", rec.Code)
+	}
+}
+
+func TestHandlerHealthzDoesNotRequireBearerToken(t *testing.T) {
+	handler, err := NewHandler(HandlerOptions{
+		TokenVerifier: TokenVerifierFunc(func(ctx context.Context, token string) (Claims, error) {
+			return Claims{}, errors.New("verifier should not be called")
+		}),
+		TenantResolver: TenantResolverFunc(func(ctx context.Context, issuer string) (Tenant, error) {
+			return Tenant{}, errors.New("tenant resolver should not be called")
+		}),
+		UserResolver: UserResolverFunc(func(ctx context.Context, tenantID string, issuer string, externalID string) (User, error) {
+			return User{}, errors.New("user resolver should not be called")
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewHandler failed: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+
+	if rec.Code != http.StatusNoContent {
 		t.Fatalf("unexpected status: %d", rec.Code)
 	}
 }
