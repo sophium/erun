@@ -6,16 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	erunbackenddb "github.com/sophium/erun/erun-backend/erun-backend-db"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	_ "modernc.org/sqlite"
 )
 
 func main() {
@@ -36,8 +33,8 @@ func run(args []string) error {
 
 	cfg := configFromEnv()
 	flags := flag.NewFlagSet("edb migrate", flag.ContinueOnError)
-	flags.StringVar(&cfg.DatabaseURL, "database-url", cfg.DatabaseURL, "Backend database URL; supports sqlite and postgres")
-	flags.StringVar(&cfg.DatabaseDialect, "database-dialect", cfg.DatabaseDialect, "Backend database dialect: sqlite or postgres")
+	flags.StringVar(&cfg.DatabaseURL, "database-url", cfg.DatabaseURL, "Backend PostgreSQL database URL")
+	flags.StringVar(&cfg.DatabaseDialect, "database-dialect", cfg.DatabaseDialect, "Backend database dialect; only postgres is supported")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -65,36 +62,26 @@ type dbConfig struct {
 
 func configFromEnv() dbConfig {
 	return dbConfig{
-		DatabaseURL:     envOrDefault("ERUN_DATABASE_URL", defaultSQLiteURL()),
+		DatabaseURL:     strings.TrimSpace(os.Getenv("ERUN_DATABASE_URL")),
 		DatabaseDialect: strings.TrimSpace(os.Getenv("ERUN_DATABASE_DIALECT")),
 	}
 }
 
 func openDatabase(databaseURL string, configuredDialect string) (*sql.DB, string, error) {
+	if strings.TrimSpace(databaseURL) == "" {
+		return nil, "", fmt.Errorf("database URL is required")
+	}
 	dialect := strings.TrimSpace(configuredDialect)
 	if dialect == "" {
 		dialect = inferDialect(databaseURL)
 	}
 	dialect = normalizeDialect(dialect)
-
-	driver := ""
-	dsn := strings.TrimSpace(databaseURL)
-	switch dialect {
-	case "sqlite":
-		driver = "sqlite"
-		dsn = sqliteDSN(dsn)
-		if err := ensureSQLiteDirectory(dsn); err != nil {
-			return nil, "", err
-		}
-	case "postgres":
-		driver = "pgx"
-	case "":
-		return nil, "", fmt.Errorf("database dialect is required")
-	default:
+	if dialect != "postgres" {
 		return nil, "", fmt.Errorf("unsupported database dialect %q", dialect)
 	}
 
-	db, err := sql.Open(driver, dsn)
+	dsn := strings.TrimSpace(databaseURL)
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, "", err
 	}
@@ -109,8 +96,8 @@ func openDatabase(databaseURL string, configuredDialect string) (*sql.DB, string
 
 func normalizeDialect(dialect string) string {
 	switch strings.TrimSpace(strings.ToLower(dialect)) {
-	case "", "sqlite", "sqlite3":
-		return "sqlite"
+	case "":
+		return ""
 	case "postgres", "postgresql", "pgx":
 		return "postgres"
 	default:
@@ -118,65 +105,10 @@ func normalizeDialect(dialect string) string {
 	}
 }
 
-func ensureSQLiteDirectory(dsn string) error {
-	value := strings.TrimPrefix(strings.TrimSpace(dsn), "file:")
-	if idx := strings.Index(value, "?"); idx >= 0 {
-		value = value[:idx]
-	}
-	if value == "" || value == ":memory:" {
-		return nil
-	}
-	return os.MkdirAll(filepath.Dir(filepath.Clean(value)), 0o755)
-}
-
 func inferDialect(databaseURL string) string {
 	value := strings.TrimSpace(strings.ToLower(databaseURL))
 	if strings.HasPrefix(value, "postgres://") || strings.HasPrefix(value, "postgresql://") {
 		return "postgres"
 	}
-	return "sqlite"
-}
-
-func sqliteDSN(databaseURL string) string {
-	value := strings.TrimSpace(databaseURL)
-	if value == "" {
-		value = defaultSQLiteURL()
-	}
-	if strings.HasPrefix(strings.ToLower(value), "sqlite://") {
-		value = strings.TrimPrefix(value, "sqlite://")
-	}
-	if strings.HasPrefix(value, "file:") {
-		return ensureSQLiteForeignKeys(value)
-	}
-	if parsed, err := url.Parse(value); err == nil && parsed.Scheme == "" && parsed.RawQuery != "" {
-		value = parsed.Path + "?" + parsed.RawQuery
-	}
-	return ensureSQLiteForeignKeys("file:" + value)
-}
-
-func ensureSQLiteForeignKeys(dsn string) string {
-	if strings.Contains(dsn, "_pragma=foreign_keys") {
-		return dsn
-	}
-	separator := "?"
-	if strings.Contains(dsn, "?") {
-		separator = "&"
-	}
-	return dsn + separator + "_pragma=foreign_keys(1)"
-}
-
-func defaultSQLiteURL() string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return "file:erun-backend.db"
-	}
-	return filepath.Join(home, ".erun", "erun-backend.db")
-}
-
-func envOrDefault(name string, fallback string) string {
-	value := strings.TrimSpace(os.Getenv(name))
-	if value == "" {
-		return fallback
-	}
-	return value
+	return ""
 }

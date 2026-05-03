@@ -1,6 +1,6 @@
 CREATE TABLE users (
-  user_id UUID PRIMARY KEY,
-  tenant_id UUID NOT NULL,
+  user_id UUID PRIMARY KEY DEFAULT uuidv7(),
+  tenant_id UUID NOT NULL DEFAULT erun_current_tenant_id(),
   username TEXT NOT NULL,
   created_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ,

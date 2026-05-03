@@ -16,17 +16,44 @@
 {{- $managedCloud := default false .Values.managedCloud -}}
 {{- $api := default dict .Values.api -}}
 {{- $oidcAllowedIssuers := default "" $api.oidcAllowedIssuers -}}
+{{- $postgres := default dict $api.postgres -}}
+{{- $postgresDatabase := default "erun" $postgres.database -}}
+{{- $postgresUser := default "erun" $postgres.user -}}
+{{- $postgresPort := default 5432 $postgres.port -}}
+{{- $postgresPasswordSecretName := default "erun-backend-postgres" $postgres.passwordSecretName -}}
+{{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
+{{- $postgresPassword := default "" $postgres.password -}}
+{{- $existingPostgresSecret := lookup "v1" "Secret" .Release.Namespace $postgresPasswordSecretName -}}
+{{- if and (eq $postgresPassword "") $existingPostgresSecret (hasKey $existingPostgresSecret.data $postgresPasswordSecretKey) -}}
+{{- $postgresPassword = (index $existingPostgresSecret.data $postgresPasswordSecretKey | b64dec) -}}
+{{- end -}}
+{{- if eq $postgresPassword "" -}}
+{{- $postgresPassword = randAlphaNum 32 -}}
+{{- end -}}
+{{- $postgresDataSubPath := default ".erun/postgres" $postgres.dataSubPath -}}
+{{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@127.0.0.1:%v/%s?sslmode=disable" $postgresUser $postgresPort $postgresDatabase) $api.databaseURL -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $backendDBImage := default (printf "erunpaas/erun-backend-db:%s" .Chart.AppVersion) (index $imageOverrides "erun-backend-db") -}}
 {{- $devopsImage := default (printf "erunpaas/erun-devops:%s" .Chart.AppVersion) (index $imageOverrides "erun-devops") -}}
 {{- $mcpImage := default (printf "erunpaas/erun-mcp:%s" .Chart.AppVersion) (index $imageOverrides "erun-mcp") -}}
 {{- $backendAPIImage := default (printf "erunpaas/erun-backend-api:%s" .Chart.AppVersion) (index $imageOverrides "erun-backend-api") -}}
+{{- $postgresImage := default "postgres:18" (index $imageOverrides "postgres") -}}
 {{- $dindImage := default "erunpaas/erun-dind:28.1.1" (index $imageOverrides "erun-dind") -}}
 {{- $cloudContext := default dict .Values.cloudContext -}}
 {{- $cloudContextName := default "" $cloudContext.name -}}
 {{- $cloudProviderAlias := default "" $cloudContext.providerAlias -}}
 {{- $cloudRegion := default "" $cloudContext.region -}}
 {{- $cloudInstanceID := default "" $cloudContext.instanceId -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $postgresPasswordSecretName }}
+  labels:
+    app: erun-devops
+type: Opaque
+stringData:
+  {{ $postgresPasswordSecretKey }}: {{ $postgresPassword | quote }}
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -153,16 +180,53 @@ spec:
             - amd64,arm64
           securityContext:
             privileged: true
+        - image: {{ $postgresImage }}
+          name: erun-backend-postgres
+          imagePullPolicy: IfNotPresent
+          restartPolicy: Always
+          env:
+            - name: POSTGRES_DB
+              value: {{ $postgresDatabase | quote }}
+            - name: POSTGRES_USER
+              value: {{ $postgresUser | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $postgresPasswordSecretName }}
+                  key: {{ $postgresPasswordSecretKey }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: {{ $postgresPort }}
+              name: postgres
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -lc
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1 -p {{ $postgresPort }}
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 60
+          volumeMounts:
+            - name: erun-home
+              mountPath: /var/lib/postgresql/data
+              subPath: {{ $postgresDataSubPath | quote }}
         - image: {{ $backendDBImage }}
           name: erun-backend-db
           imagePullPolicy: IfNotPresent
           env:
             - name: HOME
               value: /home/erun
+            - name: ERUN_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $postgresPasswordSecretName }}
+                  key: {{ $postgresPasswordSecretKey }}
             - name: ERUN_DATABASE_URL
-              value: {{ default "" $api.databaseURL | quote }}
+              value: {{ $databaseURL | quote }}
             - name: ERUN_DATABASE_DIALECT
-              value: {{ default "" $api.databaseDialect | quote }}
+              value: postgres
           volumeMounts:
             - name: erun-home
               mountPath: /home/erun
@@ -283,10 +347,15 @@ spec:
               value: 0.0.0.0
             - name: ERUN_API_PORT
               value: {{ $apiPort | quote }}
+            - name: ERUN_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $postgresPasswordSecretName }}
+                  key: {{ $postgresPasswordSecretKey }}
             - name: ERUN_DATABASE_URL
-              value: {{ default "" $api.databaseURL | quote }}
+              value: {{ $databaseURL | quote }}
             - name: ERUN_DATABASE_DIALECT
-              value: {{ default "" $api.databaseDialect | quote }}
+              value: postgres
             - name: ERUN_OIDC_ALLOWED_ISSUERS
               value: {{ $oidcAllowedIssuers | quote }}
             - name: ERUN_TENANT

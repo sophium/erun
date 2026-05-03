@@ -1,5 +1,5 @@
 CREATE TABLE user_roles (
-  tenant_id UUID NOT NULL,
+  tenant_id UUID NOT NULL DEFAULT erun_current_tenant_id(),
   user_id UUID NOT NULL,
   role_id UUID NOT NULL,
   created_at TIMESTAMPTZ,
@@ -9,4 +9,3 @@ CREATE TABLE user_roles (
   FOREIGN KEY (tenant_id, user_id) REFERENCES users (tenant_id, user_id),
   FOREIGN KEY (tenant_id, role_id) REFERENCES roles (tenant_id, role_id)
 );
-

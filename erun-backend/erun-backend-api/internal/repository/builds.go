@@ -2,14 +2,17 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
-	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
+	"github.com/uptrace/bun"
 )
 
 type BuildRepository struct {
 	txs *TxManager
+}
+
+type BuildFilter struct {
+	ReviewID string
 }
 
 func NewBuildRepository(txs *TxManager) *BuildRepository {
@@ -17,102 +20,53 @@ func NewBuildRepository(txs *TxManager) *BuildRepository {
 }
 
 func (r *BuildRepository) Create(ctx context.Context, build model.Build) (model.Build, error) {
-	securityContext, err := security.RequiredFromContext(ctx)
-	if err != nil {
-		return model.Build{}, ErrMissingSecurityContext
-	}
-	build.TenantID = securityContext.TenantID
-	if build.BuildID == "" {
-		buildID, err := newUUIDv7()
-		if err != nil {
-			return model.Build{}, err
-		}
-		build.BuildID = buildID
-	}
-
-	var created model.Build
-	err = r.txs.WithinTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		created, err = scanBuild(tx.QueryRowContext(ctx, r.txs.rebind(`
-			INSERT INTO builds (build_id, tenant_id, review_id, successful, commit_id, version)
-			VALUES (?, ?, ?, ?, ?, ?)
-			RETURNING build_id, tenant_id, review_id, successful, commit_id, version, created_at, updated_at
-		`), build.BuildID, build.TenantID, build.ReviewID, build.Successful, build.CommitID, build.Version))
-		if err != nil {
+	created := build
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		if err := tx.NewInsert().
+			Model(&created).
+			Column("review_id", "successful", "commit_id", "version").
+			Returning("*").
+			Scan(ctx); err != nil {
 			return err
 		}
-
-		return NewReviewRepository(r.txs).markBuildResult(ctx, tx, build.TenantID, build.ReviewID, build.BuildID, build.Successful)
+		return nil
 	})
 	return created, err
 }
 
-func (r *BuildRepository) Get(ctx context.Context, reviewID string, buildID string) (model.Build, error) {
-	securityContext, err := security.RequiredFromContext(ctx)
-	if err != nil {
-		return model.Build{}, ErrMissingSecurityContext
-	}
-
+func (r *BuildRepository) Get(ctx context.Context, buildID string) (model.Build, error) {
 	var build model.Build
-	err = r.txs.WithinTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		var err error
-		build, err = scanBuild(tx.QueryRowContext(ctx, r.txs.rebind(`
-			SELECT build_id, tenant_id, review_id, successful, commit_id, version, created_at, updated_at
-			  FROM builds
-			 WHERE tenant_id = ?
-			   AND review_id = ?
-			   AND build_id = ?
-		`), securityContext.TenantID, reviewID, buildID))
-		return err
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		err := tx.NewRaw(`
+			SELECT b.build_id, b.tenant_id, b.review_id, b.successful, b.commit_id, b.version, b.created_at, b.updated_at, r.name AS review_name
+			  FROM builds b
+			  JOIN reviews r
+			    ON r.tenant_id = b.tenant_id
+			   AND r.review_id = b.review_id
+			 WHERE b.build_id = ?
+		`, buildID).Scan(ctx, &build)
+		return normalizeNoRows(err)
 	})
 	return build, err
 }
 
-func (r *BuildRepository) ListByReview(ctx context.Context, reviewID string) ([]model.Build, error) {
-	securityContext, err := security.RequiredFromContext(ctx)
-	if err != nil {
-		return nil, ErrMissingSecurityContext
-	}
-
+func (r *BuildRepository) List(ctx context.Context, filter BuildFilter) ([]model.Build, error) {
 	var builds []model.Build
-	err = r.txs.WithinTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, r.txs.rebind(`
-			SELECT build_id, tenant_id, review_id, successful, commit_id, version, created_at, updated_at
-			  FROM builds
-			 WHERE tenant_id = ?
-			   AND review_id = ?
-			 ORDER BY created_at DESC, build_id DESC
-		`), securityContext.TenantID, reviewID)
-		if err != nil {
-			return err
+	err := r.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		query := `
+			SELECT b.build_id, b.tenant_id, b.review_id, b.successful, b.commit_id, b.version, b.created_at, b.updated_at, r.name AS review_name
+			  FROM builds b
+			  JOIN reviews r
+			    ON r.tenant_id = b.tenant_id
+			   AND r.review_id = b.review_id
+		`
+		var args []any
+		if filter.ReviewID != "" {
+			query += ` WHERE b.review_id = ?`
+			args = append(args, filter.ReviewID)
 		}
-		defer rows.Close()
-		for rows.Next() {
-			build, err := scanBuild(rows)
-			if err != nil {
-				return err
-			}
-			builds = append(builds, build)
-		}
-		return rows.Err()
+		query += ` ORDER BY b.created_at DESC, b.build_id DESC`
+		return tx.NewRaw(query, args...).Scan(ctx, &builds)
 	})
 	return builds, err
-}
-
-func scanBuild(row rowScanner) (model.Build, error) {
-	var build model.Build
-	err := row.Scan(
-		&build.BuildID,
-		&build.TenantID,
-		&build.ReviewID,
-		&build.Successful,
-		&build.CommitID,
-		&build.Version,
-		scanTime(&build.CreatedAt),
-		scanTime(&build.UpdatedAt),
-	)
-	if err != nil {
-		return model.Build{}, normalizeNoRows(err)
-	}
-	return build, nil
 }

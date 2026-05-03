@@ -6,6 +6,7 @@ import (
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/routes"
+	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/service"
 )
 
 type HandlerOptions struct {
@@ -72,9 +73,12 @@ func NewHandler(options HandlerOptions) (http.Handler, error) {
 		reviews := repository.NewReviewRepository(txManager)
 		builds := repository.NewBuildRepository(txManager)
 		comments := repository.NewCommentRepository(txManager)
-		routes.RegisterReviewRoutes(register, reviews)
-		routes.RegisterBuildRoutes(register, builds)
-		routes.RegisterCommentRoutes(register, comments)
+		reviewService := service.NewReviewService(reviews, builds)
+		buildService := service.NewBuildService(builds, reviewService)
+		commentService := service.NewCommentService(comments)
+		routes.RegisterReviewRoutes(register, reviews, reviewService)
+		routes.RegisterBuildRoutes(register, builds, buildService)
+		routes.RegisterCommentRoutes(register, comments, commentService)
 	}
 	return mux, nil
 }

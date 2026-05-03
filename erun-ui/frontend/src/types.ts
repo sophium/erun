@@ -78,8 +78,11 @@ export interface UITenantDashboard {
 export interface UITenantDashboardUser {
   tenantId: string;
   userId: string;
-  issuer: string;
-  subject: string;
+  username?: string;
+  issuer?: string;
+  subject?: string;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface UITenantDashboardReview {

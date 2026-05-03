@@ -11,7 +11,6 @@ END;
 $$;
 
 GRANT USAGE ON SCHEMA public TO erun_tenant, erun_operations;
-GRANT USAGE ON SEQUENCE review_merge_queue_id_seq TO erun_tenant, erun_operations;
 
 GRANT SELECT ON tenants, tenant_issuers TO erun_tenant;
 GRANT SELECT, INSERT, UPDATE, DELETE, REFERENCES ON tenants, tenant_issuers TO erun_operations;

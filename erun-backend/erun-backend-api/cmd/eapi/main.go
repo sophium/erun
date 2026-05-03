@@ -8,9 +8,7 @@ import (
 	"log"
 	"net"
 	"net/http"
-	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,7 +16,6 @@ import (
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/repository"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
-	_ "modernc.org/sqlite"
 )
 
 func main() {
@@ -32,8 +29,8 @@ func run(args []string) error {
 	flags := flag.NewFlagSet("eapi", flag.ContinueOnError)
 	flags.StringVar(&cfg.Host, "host", cfg.Host, "Host interface to bind the backend API HTTP server to")
 	flags.IntVar(&cfg.Port, "port", cfg.Port, "Port to bind the backend API HTTP server to")
-	flags.StringVar(&cfg.DatabaseURL, "database-url", cfg.DatabaseURL, "Backend database URL; supports sqlite and postgres")
-	flags.StringVar(&cfg.DatabaseDialect, "database-dialect", cfg.DatabaseDialect, "Backend database dialect: sqlite or postgres")
+	flags.StringVar(&cfg.DatabaseURL, "database-url", cfg.DatabaseURL, "Backend PostgreSQL database URL")
+	flags.StringVar(&cfg.DatabaseDialect, "database-dialect", cfg.DatabaseDialect, "Backend database dialect; only postgres is supported")
 	flags.StringVar(&cfg.AllowedIssuers, "oidc-allowed-issuers", cfg.AllowedIssuers, "Comma-separated OIDC issuer allow-list; empty allows any issuer resolved from a token")
 	if err := flags.Parse(args); err != nil {
 		return err
@@ -107,36 +104,26 @@ func configFromEnv() apiConfig {
 	return apiConfig{
 		Host:            envOrDefault("ERUN_API_HOST", "127.0.0.1"),
 		Port:            intEnvOrDefault("ERUN_API_PORT", 17033),
-		DatabaseURL:     envOrDefault("ERUN_DATABASE_URL", defaultSQLiteURL()),
+		DatabaseURL:     strings.TrimSpace(os.Getenv("ERUN_DATABASE_URL")),
 		DatabaseDialect: strings.TrimSpace(os.Getenv("ERUN_DATABASE_DIALECT")),
 		AllowedIssuers:  strings.TrimSpace(os.Getenv("ERUN_OIDC_ALLOWED_ISSUERS")),
 	}
 }
 
 func openDatabase(databaseURL string, configuredDialect string) (*sql.DB, repository.Dialect, error) {
-	dialect := repository.Dialect(strings.TrimSpace(configuredDialect))
+	if strings.TrimSpace(databaseURL) == "" {
+		return nil, "", fmt.Errorf("database URL is required")
+	}
+	dialect := normalizeDialect(configuredDialect)
 	if dialect == "" {
 		dialect = inferDialect(databaseURL)
 	}
-
-	driver := ""
-	dsn := strings.TrimSpace(databaseURL)
-	switch dialect {
-	case repository.DialectSQLite:
-		driver = "sqlite"
-		dsn = sqliteDSN(dsn)
-		if err := ensureSQLiteDirectory(dsn); err != nil {
-			return nil, "", err
-		}
-	case repository.DialectPostgres:
-		driver = "pgx"
-	case "":
-		return nil, "", fmt.Errorf("database dialect is required")
-	default:
+	if dialect != repository.DialectPostgres {
 		return nil, "", fmt.Errorf("unsupported database dialect %q", dialect)
 	}
 
-	db, err := sql.Open(driver, dsn)
+	dsn := strings.TrimSpace(databaseURL)
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		return nil, "", err
 	}
@@ -149,59 +136,23 @@ func openDatabase(databaseURL string, configuredDialect string) (*sql.DB, reposi
 	return db, dialect, nil
 }
 
-func ensureSQLiteDirectory(dsn string) error {
-	value := strings.TrimPrefix(strings.TrimSpace(dsn), "file:")
-	if idx := strings.Index(value, "?"); idx >= 0 {
-		value = value[:idx]
-	}
-	if value == "" || value == ":memory:" {
-		return nil
-	}
-	return os.MkdirAll(filepath.Dir(filepath.Clean(value)), 0o755)
-}
-
 func inferDialect(databaseURL string) repository.Dialect {
 	value := strings.TrimSpace(strings.ToLower(databaseURL))
 	if strings.HasPrefix(value, "postgres://") || strings.HasPrefix(value, "postgresql://") {
 		return repository.DialectPostgres
 	}
-	return repository.DialectSQLite
+	return ""
 }
 
-func sqliteDSN(databaseURL string) string {
-	value := strings.TrimSpace(databaseURL)
-	if value == "" {
-		value = defaultSQLiteURL()
+func normalizeDialect(dialect string) repository.Dialect {
+	switch strings.TrimSpace(strings.ToLower(dialect)) {
+	case "":
+		return ""
+	case "postgres", "postgresql", "pgx":
+		return repository.DialectPostgres
+	default:
+		return repository.Dialect(strings.TrimSpace(strings.ToLower(dialect)))
 	}
-	if strings.HasPrefix(strings.ToLower(value), "sqlite://") {
-		value = strings.TrimPrefix(value, "sqlite://")
-	}
-	if strings.HasPrefix(value, "file:") {
-		return ensureSQLiteForeignKeys(value)
-	}
-	if parsed, err := url.Parse(value); err == nil && parsed.Scheme == "" && parsed.RawQuery != "" {
-		value = parsed.Path + "?" + parsed.RawQuery
-	}
-	return ensureSQLiteForeignKeys("file:" + value)
-}
-
-func ensureSQLiteForeignKeys(dsn string) string {
-	if strings.Contains(dsn, "_pragma=foreign_keys") {
-		return dsn
-	}
-	separator := "?"
-	if strings.Contains(dsn, "?") {
-		separator = "&"
-	}
-	return dsn + separator + "_pragma=foreign_keys(1)"
-}
-
-func defaultSQLiteURL() string {
-	home, err := os.UserHomeDir()
-	if err != nil || strings.TrimSpace(home) == "" {
-		return "file:erun-backend.db"
-	}
-	return filepath.Join(home, ".erun", "erun-backend.db")
 }
 
 func splitCSV(value string) []string {

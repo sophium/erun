@@ -98,10 +98,13 @@ type uiTenantDashboard struct {
 }
 
 type uiTenantDashboardUser struct {
-	TenantID string `json:"tenantId"`
-	UserID   string `json:"userId"`
-	Issuer   string `json:"issuer"`
-	Subject  string `json:"subject"`
+	TenantID  string `json:"tenantId"`
+	UserID    string `json:"userId"`
+	Username  string `json:"username,omitempty"`
+	Issuer    string `json:"issuer,omitempty"`
+	Subject   string `json:"subject,omitempty"`
+	CreatedAt string `json:"createdAt,omitempty"`
+	UpdatedAt string `json:"updatedAt,omitempty"`
 }
 
 type uiTenantDashboardReview struct {

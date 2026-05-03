@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-//go:embed migrations/sqlite/*.sql migrations/postgres/*.sql
+//go:embed migrations/default/*.sql
 var migrationFiles embed.FS
 
 type MigrationResult struct {
@@ -65,16 +65,17 @@ func Migrate(ctx context.Context, db *sql.DB, dialect string) (MigrationResult, 
 
 func normalizeDialect(dialect string) string {
 	switch strings.TrimSpace(strings.ToLower(dialect)) {
-	case "", "sqlite", "sqlite3":
-		return "sqlite"
-	case "postgres", "postgresql", "pgx":
-		return "postgres"
+	case "", "default", "postgres", "postgresql", "pgx":
+		return "default"
 	default:
 		return strings.TrimSpace(strings.ToLower(dialect))
 	}
 }
 
 func migrationNames(dialect string) ([]string, error) {
+	if dialect != "default" {
+		return nil, fmt.Errorf("unsupported database dialect %q", dialect)
+	}
 	dir := path.Join("migrations", dialect)
 	entries, err := migrationFiles.ReadDir(dir)
 	if err != nil {
@@ -136,8 +137,5 @@ func applyMigration(ctx context.Context, db *sql.DB, dialect, name string) error
 }
 
 func rebind(dialect, query string) string {
-	if dialect != "postgres" {
-		return query
-	}
 	return strings.ReplaceAll(query, "?", "$1")
 }

@@ -1,5 +1,5 @@
 CREATE TABLE tenant_issuers (
-  tenant_id UUID NOT NULL,
+  tenant_id UUID NOT NULL DEFAULT erun_current_tenant_id(),
   issuer TEXT PRIMARY KEY,
   created_at TIMESTAMPTZ,
   updated_at TIMESTAMPTZ,

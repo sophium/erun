@@ -1,5 +1,5 @@
 CREATE TABLE user_external_ids (
-  tenant_id UUID NOT NULL,
+  tenant_id UUID NOT NULL DEFAULT erun_current_tenant_id(),
   user_id UUID NOT NULL,
   issuer TEXT NOT NULL,
   external_id TEXT NOT NULL,
