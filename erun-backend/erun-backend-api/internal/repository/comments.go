@@ -138,8 +138,8 @@ func scanComment(row rowScanner) (model.Comment, error) {
 		&parentCommentID,
 		&comment.CommitID,
 		&comment.Line,
-		&comment.CreatedAt,
-		&comment.UpdatedAt,
+		scanTime(&comment.CreatedAt),
+		scanTime(&comment.UpdatedAt),
 	)
 	if err != nil {
 		return model.Comment{}, normalizeNoRows(err)

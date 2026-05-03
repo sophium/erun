@@ -74,9 +74,32 @@ func dockerfileLocalBaseImageTags(dockerfilePath string, buildsByTag map[string]
 			continue
 		}
 		if _, ok := buildsByTag[imageRef]; !ok {
+			for _, tag := range dockerfileLocalBaseImageVersionedTags(imageRef, buildsByTag) {
+				dependencies = append(dependencies, tag)
+			}
 			continue
 		}
 		dependencies = append(dependencies, imageRef)
+	}
+	return dependencies
+}
+
+func dockerfileLocalBaseImageVersionedTags(imageRef string, buildsByTag map[string]DockerBuildSpec) []string {
+	if !strings.Contains(imageRef, "ERUN_VERSION") {
+		return nil
+	}
+
+	dependencies := make([]string, 0, 1)
+	for tag := range buildsByTag {
+		version := dockerImageTagVersion(tag)
+		if version == "" {
+			continue
+		}
+		candidate := strings.ReplaceAll(imageRef, "${ERUN_VERSION}", version)
+		candidate = strings.ReplaceAll(candidate, "$ERUN_VERSION", version)
+		if candidate == tag {
+			dependencies = append(dependencies, tag)
+		}
 	}
 	return dependencies
 }

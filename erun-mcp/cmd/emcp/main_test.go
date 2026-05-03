@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -67,7 +68,7 @@ func TestRunReturnsFailureWhenServerFails(t *testing.T) {
 	if exitCode != 1 {
 		t.Fatalf("expected failure exit code, got %d", exitCode)
 	}
-	if got := stderr.String(); got != "boom\n" {
+	if got := stderr.String(); !strings.Contains(got, "erun mcp listening on 127.0.0.1:17000/mcp") || !strings.HasSuffix(got, "boom\n") {
 		t.Fatalf("unexpected stderr: %q", got)
 	}
 }

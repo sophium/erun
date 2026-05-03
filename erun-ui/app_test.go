@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1205,15 +1208,23 @@ func assertDeletedEnvironment(t *testing.T, store stubUIStore, result deleteEnvi
 
 func TestLoadAndSaveTenantConfig(t *testing.T) {
 	snapshot := false
+	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
+		Alias:         "team-cloud",
+		Provider:      eruncommon.CloudProviderAWS,
+		OIDCIssuerURL: "https://issuer.team.example",
+	}}}
 	store := stubUIStore{
+		config: &rootConfig,
 		tenants: map[string]eruncommon.TenantConfig{
 			"frs": {
-				Name:               "frs",
-				ProjectRoot:        "/tmp/old",
-				DefaultEnvironment: "dev",
-				APIURL:             "https://api.old.example",
-				Remote:             true,
-				Snapshot:           &snapshot,
+				Name:                      "frs",
+				ProjectRoot:               "/tmp/old",
+				DefaultEnvironment:        "dev",
+				APIURL:                    "https://api.old.example",
+				CloudProviderAliases:      []string{"team-cloud"},
+				PrimaryCloudProviderAlias: "team-cloud",
+				Remote:                    true,
+				Snapshot:                  &snapshot,
 			},
 		},
 	}
@@ -1223,24 +1234,223 @@ func TestLoadAndSaveTenantConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadTenantConfig failed: %v", err)
 	}
-	if loaded.Name != "frs" || loaded.DefaultEnvironment != "dev" || loaded.APIURL != "https://api.old.example" {
+	if loaded.Name != "frs" || loaded.DefaultEnvironment != "dev" || loaded.APIURL != "https://api.old.example" || loaded.PrimaryCloudProviderAlias != "team-cloud" || len(loaded.CloudProviderAliases) != 1 || loaded.CloudProviderAliases[0] != "team-cloud" {
 		t.Fatalf("unexpected loaded config: %+v", loaded)
+	}
+	if len(loaded.CloudProviders) != 1 || loaded.CloudProviders[0].OIDCIssuerURL != "https://issuer.team.example" {
+		t.Fatalf("expected cloud provider statuses with issuer URL, got %+v", loaded.CloudProviders)
 	}
 
 	saved, err := app.SaveTenantConfig(uiTenantConfig{
-		Name:               "frs",
-		DefaultEnvironment: " prod ",
-		APIURL:             " https://api.new.example ",
+		Name:                      "frs",
+		DefaultEnvironment:        " prod ",
+		APIURL:                    " https://api.new.example ",
+		CloudProviderAliases:      []string{" team-cloud "},
+		PrimaryCloudProviderAlias: "team-cloud",
 	})
 	if err != nil {
 		t.Fatalf("SaveTenantConfig failed: %v", err)
 	}
-	if saved.DefaultEnvironment != "prod" || saved.APIURL != "https://api.new.example" {
+	if saved.DefaultEnvironment != "prod" || saved.APIURL != "https://api.new.example" || saved.PrimaryCloudProviderAlias != "team-cloud" {
 		t.Fatalf("unexpected saved config: %+v", saved)
 	}
-	if store.tenants["frs"].ProjectRoot != "/tmp/old" || store.tenants["frs"].APIURL != "https://api.new.example" || !store.tenants["frs"].Remote || store.tenants["frs"].Snapshot == nil || *store.tenants["frs"].Snapshot {
+	if store.tenants["frs"].ProjectRoot != "/tmp/old" || store.tenants["frs"].APIURL != "https://api.new.example" || store.tenants["frs"].PrimaryCloudProviderAlias != "team-cloud" || !store.tenants["frs"].Remote || store.tenants["frs"].Snapshot == nil || *store.tenants["frs"].Snapshot {
 		t.Fatalf("expected tenant project root/remote/snapshot to be preserved, got %+v", store.tenants["frs"])
 	}
+}
+
+func TestSetupCloudProviderOIDCStoresIssuer(t *testing.T) {
+	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
+		Alias:    "team-cloud",
+		Provider: eruncommon.CloudProviderAWS,
+		Profile:  "team",
+	}}}
+	store := stubUIStore{config: &rootConfig}
+	app := NewApp(erunUIDeps{
+		store: store,
+		cloudDeps: eruncommon.CloudDependencies{
+			RunAWSBearerToken: func(_ eruncommon.Context, profile, audience string) (string, error) {
+				if profile != "team" || audience != eruncommon.CloudProviderBearerAudience {
+					t.Fatalf("unexpected bearer token input profile=%q audience=%q", profile, audience)
+				}
+				return testUIJWT("https://sts.aws.example/.well-known/openid-configuration"), nil
+			},
+			CheckAWSStatus: func(_ eruncommon.Context, provider eruncommon.CloudProviderConfig) eruncommon.CloudProviderStatus {
+				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: eruncommon.CloudTokenStatusActive}
+			},
+		},
+	})
+
+	status, err := app.SetupCloudProviderOIDC("team-cloud")
+	if err != nil {
+		t.Fatalf("SetupCloudProviderOIDC failed: %v", err)
+	}
+	if status.OIDCIssuerURL != "https://sts.aws.example" || rootConfig.CloudProviders[0].OIDCIssuerURL != "https://sts.aws.example" {
+		t.Fatalf("expected OIDC issuer to be stored, status=%+v config=%+v", status, rootConfig)
+	}
+}
+
+func TestLoadTenantDashboardUsesPrimaryCloudBearer(t *testing.T) {
+	jwt := testUIJWT("https://sts.aws.example")
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Header.Get("Authorization") != "Bearer "+jwt {
+			t.Fatalf("unexpected authorization header: %q", req.Header.Get("Authorization"))
+		}
+		requests = append(requests, req.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch req.URL.Path {
+		case "/v1/whoami":
+			_, _ = w.Write([]byte(`{"tenantId":"tenant-1","userId":"user-1","issuer":"https://sts.aws.example","subject":"subject-1"}`))
+		case "/v1/reviews":
+			_, _ = w.Write([]byte(`[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`))
+		case "/v1/reviews/merge-queue":
+			_, _ = w.Write([]byte(`[{"reviewId":"review-1","tenantId":"tenant-1","name":"Review 1","targetBranch":"main","sourceBranch":"feature","status":"READY"}]`))
+		case "/v1/reviews/review-1/builds":
+			_, _ = w.Write([]byte(`[{"buildId":"build-1","tenantId":"tenant-1","reviewId":"review-1","successful":true,"commitId":"abc","version":"1.2.3"}]`))
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	defer server.Close()
+
+	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
+		Alias:    "team-cloud",
+		Provider: eruncommon.CloudProviderAWS,
+		Profile:  "team",
+	}}}
+	app := NewApp(erunUIDeps{
+		store: stubUIStore{config: &rootConfig},
+		cloudDeps: eruncommon.CloudDependencies{
+			RunAWSBearerToken: func(_ eruncommon.Context, profile, audience string) (string, error) {
+				if profile != "team" || audience != eruncommon.CloudProviderBearerAudience {
+					t.Fatalf("unexpected bearer input profile=%q audience=%q", profile, audience)
+				}
+				return jwt, nil
+			},
+			CheckAWSStatus: func(_ eruncommon.Context, provider eruncommon.CloudProviderConfig) eruncommon.CloudProviderStatus {
+				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: eruncommon.CloudTokenStatusActive}
+			},
+		},
+	})
+
+	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{
+		Tenant:             "frs",
+		APIURL:             server.URL,
+		CloudProviderAlias: "team-cloud",
+	})
+	if err != nil {
+		t.Fatalf("LoadTenantDashboard failed: %v", err)
+	}
+	if dashboard.User == nil || dashboard.User.UserID != "user-1" || len(dashboard.MergeQueue) != 1 || len(dashboard.Builds) != 1 || dashboard.Builds[0].ReviewName != "Review 1" {
+		t.Fatalf("unexpected dashboard: %+v", dashboard)
+	}
+	if strings.Join(requests, ",") != "/v1/whoami,/v1/reviews,/v1/reviews/merge-queue,/v1/reviews/review-1/builds" {
+		t.Fatalf("unexpected API requests: %+v", requests)
+	}
+}
+
+func TestLoadTenantDashboardReturnsAPILogWhenAPIAuthFails(t *testing.T) {
+	jwt := testUIJWT("https://sts.aws.example")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.URL.Path != "/v1/whoami" {
+			t.Fatalf("unexpected request path: %s", req.URL.Path)
+		}
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
+		Alias:    "team-cloud",
+		Provider: eruncommon.CloudProviderAWS,
+		Profile:  "team",
+	}}}
+	app := NewApp(erunUIDeps{
+		store: stubUIStore{config: &rootConfig},
+		cloudDeps: eruncommon.CloudDependencies{
+			RunAWSBearerToken: func(eruncommon.Context, string, string) (string, error) {
+				return jwt, nil
+			},
+			CheckAWSStatus: func(_ eruncommon.Context, provider eruncommon.CloudProviderConfig) eruncommon.CloudProviderStatus {
+				return eruncommon.CloudProviderStatus{CloudProviderConfig: provider, Status: eruncommon.CloudTokenStatusActive}
+			},
+		},
+		loadAPILog: func(_ context.Context, input uiTenantDashboardInput) (string, error) {
+			if input.MCPURL != "http://127.0.0.1:17000/mcp" || input.KubernetesContext != "" {
+				t.Fatalf("unexpected log input: %+v", input)
+			}
+			return "auth rejected token", nil
+		},
+	})
+
+	dashboard, err := app.LoadTenantDashboard(uiTenantDashboardInput{
+		Tenant:             "frs",
+		APIURL:             server.URL,
+		MCPURL:             "http://127.0.0.1:17000/mcp",
+		CloudProviderAlias: "team-cloud",
+	})
+	if err != nil {
+		t.Fatalf("LoadTenantDashboard failed: %v", err)
+	}
+	if !strings.Contains(dashboard.APIError, "/v1/whoami: 401") || dashboard.APILog != "auth rejected token" {
+		t.Fatalf("unexpected dashboard: %+v", dashboard)
+	}
+}
+
+func TestLoadAPILogPrefersKubernetesLogs(t *testing.T) {
+	t.Setenv("PATH", fakeKubectl(t, func(args []string) (string, int) {
+		got := strings.Join(args, "\n")
+		want := "--context\ncluster-dev\n--namespace\nfrs-prod\nlogs\ndeployment/frs-devops\n-c\nerun-backend-api\n--tail\n400"
+		if got != want {
+			t.Fatalf("unexpected kubectl args:\n%s", got)
+		}
+		return "api log from pod\n", 0
+	})+":"+os.Getenv("PATH"))
+
+	log, err := loadAPILog(context.Background(), uiTenantDashboardInput{
+		Tenant:            "frs",
+		Environment:       "prod",
+		MCPURL:            "http://127.0.0.1:17000/mcp",
+		KubernetesContext: "cluster-dev",
+	})
+	if err != nil {
+		t.Fatalf("loadAPILog failed: %v", err)
+	}
+	if log != "api log from pod" {
+		t.Fatalf("unexpected log: %q", log)
+	}
+}
+
+func fakeKubectl(t *testing.T, handler func([]string) (string, int)) string {
+	t.Helper()
+	dir := t.TempDir()
+	argsPath := filepath.Join(dir, "kubectl.args")
+	outputPath := filepath.Join(dir, "kubectl.output")
+	exitPath := filepath.Join(dir, "kubectl.exit")
+	scriptPath := filepath.Join(dir, "kubectl")
+	script := `#!/bin/sh
+printf '%s\n' "$@" >"` + argsPath + `"
+cat "` + outputPath + `"
+exit "$(cat "` + exitPath + `")"
+`
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake kubectl failed: %v", err)
+	}
+	output, code := handler([]string{"--context", "cluster-dev", "--namespace", "frs-prod", "logs", "deployment/frs-devops", "-c", "erun-backend-api", "--tail", "400"})
+	if err := os.WriteFile(outputPath, []byte(output), 0o644); err != nil {
+		t.Fatalf("write fake kubectl output failed: %v", err)
+	}
+	if err := os.WriteFile(exitPath, []byte(fmt.Sprintf("%d", code)), 0o644); err != nil {
+		t.Fatalf("write fake kubectl exit failed: %v", err)
+	}
+	t.Cleanup(func() {
+		data, err := os.ReadFile(argsPath)
+		if err != nil {
+			t.Fatalf("read fake kubectl args failed: %v", err)
+		}
+		handler(strings.Split(strings.TrimSpace(string(data)), "\n"))
+	})
+	return dir
 }
 
 func TestLoadAndSaveERunConfig(t *testing.T) {
@@ -1265,6 +1475,12 @@ func TestLoadAndSaveERunConfig(t *testing.T) {
 	if saved.DefaultTenant != "new-tenant" || config.DefaultTenant != "new-tenant" {
 		t.Fatalf("unexpected saved config: result=%+v stored=%+v", saved, config)
 	}
+}
+
+func testUIJWT(issuer string) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","typ":"JWT"}`))
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"` + issuer + `"}`))
+	return header + "." + payload + ".signature"
 }
 
 func TestLoadAndSaveEnvironmentConfig(t *testing.T) {

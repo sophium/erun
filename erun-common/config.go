@@ -37,12 +37,14 @@ func (c SSHDConfig) ResolvedLocalPort() int {
 }
 
 type TenantConfig struct {
-	ProjectRoot        string
-	Name               string
-	DefaultEnvironment string
-	APIURL             string `yaml:"api_url,omitempty" json:"apiUrl,omitempty"`
-	Remote             bool   `yaml:"remote,omitempty"`
-	Snapshot           *bool  `yaml:"snapshot,omitempty"`
+	ProjectRoot               string
+	Name                      string
+	DefaultEnvironment        string
+	APIURL                    string   `yaml:"api_url,omitempty" json:"apiUrl,omitempty"`
+	CloudProviderAliases      []string `yaml:"cloudprovideraliases,omitempty" json:"cloudProviderAliases,omitempty"`
+	PrimaryCloudProviderAlias string   `yaml:"primarycloudprovideralias,omitempty" json:"primaryCloudProviderAlias,omitempty"`
+	Remote                    bool     `yaml:"remote,omitempty"`
+	Snapshot                  *bool    `yaml:"snapshot,omitempty"`
 }
 
 type EnvConfig struct {
@@ -304,6 +306,7 @@ func LoadERunConfig() (ERunConfig, string, error) {
 }
 
 func SaveTenantConfig(config TenantConfig) error {
+	config = NormalizeTenantConfig(config)
 	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, config.Name, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
@@ -323,6 +326,14 @@ func SaveTenantConfig(config TenantConfig) error {
 	}
 
 	return nil
+}
+
+func NormalizeTenantConfig(config TenantConfig) TenantConfig {
+	config.Name = strings.TrimSpace(config.Name)
+	config.DefaultEnvironment = strings.TrimSpace(config.DefaultEnvironment)
+	config.APIURL = strings.TrimSpace(config.APIURL)
+	config.CloudProviderAliases, config.PrimaryCloudProviderAlias = NormalizeTenantCloudProviderAliases(config.CloudProviderAliases, config.PrimaryCloudProviderAlias)
+	return config
 }
 
 func DeleteTenantConfig(tenant string) error {
@@ -353,7 +364,7 @@ func LoadTenantConfig(tenant string) (TenantConfig, string, error) {
 		return config, configFilePath, ErrConfigCorrupted
 	}
 
-	return config, configFilePath, nil
+	return NormalizeTenantConfig(config), configFilePath, nil
 }
 
 func ListTenantConfigs() ([]TenantConfig, error) {

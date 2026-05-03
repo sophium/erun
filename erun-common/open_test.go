@@ -788,6 +788,29 @@ func TestShellDeploymentFailureDiagnosticIncludesPodExitDetails(t *testing.T) {
 	}
 }
 
+func TestRuntimePodLooksLikeCleanReplacement(t *testing.T) {
+	pod := runtimePodDiagnostic{}
+	pod.Status.Phase = "Running"
+	pod.Status.Conditions = []runtimePodConditionDiagnostic{
+		{Type: "Ready", Status: "True"},
+		{Type: "ContainersReady", Status: "True"},
+	}
+	pod.Status.ContainerStatuses = []runtimeContainerStatusDiagnostic{
+		{Name: "erun-devops", Ready: true, State: runtimeContainerStateDiagnostic{Running: &runtimeContainerRunningDiagnostic{StartedAt: "2026-05-02T10:41:48Z"}}},
+		{Name: "erun-dind", Ready: true, State: runtimeContainerStateDiagnostic{Running: &runtimeContainerRunningDiagnostic{StartedAt: "2026-05-02T10:41:49Z"}}},
+	}
+
+	if !runtimePodLooksLikeCleanReplacement(pod) {
+		t.Fatalf("expected clean replacement pod to be ready")
+	}
+
+	pod.Status.ContainerStatuses[0].RestartCount = 1
+	pod.Status.ContainerStatuses[0].LastState.Terminated = &runtimeContainerTerminatedDiagnostic{ExitCode: 137, Reason: "OOMKilled"}
+	if runtimePodLooksLikeCleanReplacement(pod) {
+		t.Fatalf("did not expect restarted pod to look like a clean replacement")
+	}
+}
+
 func TestPreviewShellLaunchRedactsHostCredentialContents(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)

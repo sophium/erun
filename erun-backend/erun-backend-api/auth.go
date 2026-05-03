@@ -3,6 +3,7 @@ package backendapi
 import (
 	"context"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -147,18 +148,25 @@ func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, err := bearerToken(r.Header.Get("Authorization"))
 		if err != nil {
+			log.Printf("erun api auth rejected method=%s path=%s reason=%q", r.Method, r.URL.Path, err.Error())
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
 		}
 
 		claims, err := m.verifier.VerifyBearerToken(r.Context(), token)
 		if err != nil || strings.TrimSpace(claims.Issuer) == "" || strings.TrimSpace(claims.Subject) == "" {
+			reason := ErrInvalidBearerToken.Error()
+			if err != nil {
+				reason = err.Error()
+			}
+			log.Printf("erun api auth rejected method=%s path=%s reason=%q", r.Method, r.URL.Path, reason)
 			http.Error(w, ErrInvalidBearerToken.Error(), http.StatusUnauthorized)
 			return
 		}
 
 		identity, err := m.resolveIdentity(r.Context(), claims)
 		if err != nil {
+			log.Printf("erun api auth rejected method=%s path=%s issuer=%q subject=%q reason=%q", r.Method, r.URL.Path, claims.Issuer, claims.Subject, err.Error())
 			http.Error(w, err.Error(), http.StatusUnauthorized)
 			return
 		}
@@ -179,16 +187,19 @@ func (m *AuthMiddleware) Wrap(next http.Handler) http.Handler {
 		if m.authz != nil {
 			apiPath, ok := APIPathFromContext(req.Context())
 			if !ok {
+				log.Printf("erun api request rejected method=%s path=%s reason=%q", req.Method, req.URL.Path, "api path not resolved")
 				http.Error(w, "api path not resolved", http.StatusInternalServerError)
 				return
 			}
 			if err := m.authz.Authorize(req.Context(), req.Method, apiPath); err != nil {
+				log.Printf("erun api authorization rejected method=%s path=%s tenant=%q user=%q reason=%q", req.Method, apiPath, identity.Tenant.TenantID, identity.User.UserID, err.Error())
 				http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
 				return
 			}
 		}
 		if m.audit != nil {
 			if _, ok := APIPathFromContext(req.Context()); !ok {
+				log.Printf("erun api request rejected method=%s path=%s reason=%q", req.Method, req.URL.Path, "api path not resolved")
 				http.Error(w, "api path not resolved", http.StatusInternalServerError)
 				return
 			}

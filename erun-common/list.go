@@ -47,12 +47,14 @@ type ListEffectiveTargetResult struct {
 }
 
 type ListTenantResult struct {
-	Name               string                  `json:"name"`
-	DefaultEnvironment string                  `json:"defaultEnvironment,omitempty"`
-	APIURL             string                  `json:"apiUrl,omitempty"`
-	IsDefault          bool                    `json:"isDefault,omitempty"`
-	IsEffective        bool                    `json:"isEffective,omitempty"`
-	Environments       []ListEnvironmentResult `json:"environments,omitempty"`
+	Name                      string                  `json:"name"`
+	DefaultEnvironment        string                  `json:"defaultEnvironment,omitempty"`
+	APIURL                    string                  `json:"apiUrl,omitempty"`
+	CloudProviderAliases      []string                `json:"cloudProviderAliases,omitempty"`
+	PrimaryCloudProviderAlias string                  `json:"primaryCloudProviderAlias,omitempty"`
+	IsDefault                 bool                    `json:"isDefault,omitempty"`
+	IsEffective               bool                    `json:"isEffective,omitempty"`
+	Environments              []ListEnvironmentResult `json:"environments,omitempty"`
 }
 
 type ListEnvironmentResult struct {
@@ -164,12 +166,14 @@ func listTenantResult(store ListStore, tenant TenantConfig, defaultTenant string
 		return ListTenantResult{}, err
 	}
 	result := ListTenantResult{
-		Name:               tenant.Name,
-		DefaultEnvironment: tenant.DefaultEnvironment,
-		APIURL:             strings.TrimSpace(tenant.APIURL),
-		IsDefault:          tenant.Name == defaultTenant,
-		IsEffective:        effectiveErr == nil && tenant.Name == effective.Tenant,
-		Environments:       make([]ListEnvironmentResult, 0, len(envs)),
+		Name:                      tenant.Name,
+		DefaultEnvironment:        tenant.DefaultEnvironment,
+		APIURL:                    strings.TrimSpace(tenant.APIURL),
+		CloudProviderAliases:      append([]string(nil), tenant.CloudProviderAliases...),
+		PrimaryCloudProviderAlias: strings.TrimSpace(tenant.PrimaryCloudProviderAlias),
+		IsDefault:                 tenant.Name == defaultTenant,
+		IsEffective:               effectiveErr == nil && tenant.Name == effective.Tenant,
+		Environments:              make([]ListEnvironmentResult, 0, len(envs)),
 	}
 	for _, env := range envs {
 		result.Environments = append(result.Environments, listEnvironmentResult(store, tenant, env, effective, effectiveErr, portAllocations))

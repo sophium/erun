@@ -424,26 +424,53 @@ if [ "${1:-}" = "shell" ]; then
     run_shell "$@"
 fi
 
-initialize_erun_config
-initialize_codex_config
-record_activity api
-eapi \
-    --host "${ERUN_API_HOST:-0.0.0.0}" \
-    --port "${ERUN_API_PORT:-17033}" &
-record_activity mcp
+if [ "${1:-}" = "api" ]; then
+    shift
+    initialize_erun_config
+    record_activity api
+    echo "starting erun API on ${ERUN_API_HOST:-0.0.0.0}:${ERUN_API_PORT:-17033}"
+    if [ -n "${ERUN_OIDC_ALLOWED_ISSUERS:-}" ]; then
+        exec eapi \
+            --host "${ERUN_API_HOST:-0.0.0.0}" \
+            --port "${ERUN_API_PORT:-17033}" \
+            --oidc-allowed-issuers "${ERUN_OIDC_ALLOWED_ISSUERS}" \
+            "$@"
+    fi
+    exec eapi \
+        --host "${ERUN_API_HOST:-0.0.0.0}" \
+        --port "${ERUN_API_PORT:-17033}" \
+        "$@"
+fi
 
-set -- emcp "$@" \
-    --host "${ERUN_MCP_HOST:-0.0.0.0}" \
-    --port "${ERUN_MCP_PORT:-17000}" \
-    --path "${ERUN_MCP_PATH:-/mcp}" \
-    --tenant "${ERUN_TENANT:-}" \
-    --environment "${ERUN_ENVIRONMENT:-}" \
-    --repo-path "$(runtime_repo_dir)" \
-    --kubernetes-context "${ERUN_KUBERNETES_CONTEXT:-in-cluster}"
+if [ "${1:-}" = "mcp" ]; then
+    shift
+    initialize_erun_config
+    initialize_codex_config
+    record_activity mcp
 
-namespace=$(runtime_namespace)
-if [ -n "${namespace}" ]; then
-    set -- "$@" --namespace "${namespace}"
+    set -- emcp "$@" \
+        --host "${ERUN_MCP_HOST:-0.0.0.0}" \
+        --port "${ERUN_MCP_PORT:-17000}" \
+        --path "${ERUN_MCP_PATH:-/mcp}" \
+        --tenant "${ERUN_TENANT:-}" \
+        --environment "${ERUN_ENVIRONMENT:-}" \
+        --repo-path "$(runtime_repo_dir)" \
+        --kubernetes-context "${ERUN_KUBERNETES_CONTEXT:-in-cluster}"
+
+    namespace=$(runtime_namespace)
+    if [ -n "${namespace}" ]; then
+        set -- "$@" --namespace "${namespace}"
+    fi
+
+    echo "starting erun MCP on ${ERUN_MCP_HOST:-0.0.0.0}:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}"
+    exec "$@"
+fi
+
+if [ "${1:-}" = "devops" ] || [ "$#" -eq 0 ]; then
+    initialize_erun_config
+    initialize_codex_config
+    record_activity devops
+    exec sleep infinity
 fi
 
 exec "$@"

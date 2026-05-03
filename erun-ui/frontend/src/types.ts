@@ -3,6 +3,7 @@ export interface UIEnvironment {
   mcpUrl?: string;
   apiUrl?: string;
   runtimeVersion?: string;
+  kubernetesContext?: string;
   isActive?: boolean;
   sshdEnabled?: boolean;
   remote: boolean;
@@ -10,6 +11,9 @@ export interface UIEnvironment {
 
 export interface UITenant {
   name: string;
+  defaultEnvironment?: string;
+  cloudProviderAliases?: string[];
+  primaryCloudProviderAlias?: string;
   environments: UIEnvironment[];
 }
 
@@ -45,6 +49,70 @@ export interface UIState {
   build?: UIBuildDetails;
   versionSuggestions?: UIVersionSuggestion[];
   kubernetesContexts?: string[];
+  cloudProviders?: UICloudProviderStatus[];
+}
+
+export interface UITenantDashboardInput {
+  tenant: string;
+  environment?: string;
+  apiUrl: string;
+  mcpUrl?: string;
+  kubernetesContext?: string;
+  cloudProviderAlias: string;
+}
+
+export interface UITenantDashboard {
+  tenant: string;
+  apiUrl?: string;
+  apiError?: string;
+  apiLog?: string;
+  apiLogError?: string;
+  user?: UITenantDashboardUser;
+  reviews?: UITenantDashboardReview[];
+  mergeQueue?: UITenantDashboardReview[];
+  builds?: UITenantDashboardBuild[];
+  auditEvents?: UITenantDashboardAudit[];
+  auditLogMessage?: string;
+}
+
+export interface UITenantDashboardUser {
+  tenantId: string;
+  userId: string;
+  issuer: string;
+  subject: string;
+}
+
+export interface UITenantDashboardReview {
+  reviewId: string;
+  tenantId: string;
+  name: string;
+  targetBranch: string;
+  sourceBranch: string;
+  status: string;
+  lastFailedBuildId?: string;
+  lastReadyBuildId?: string;
+  lastMergedBuildId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UITenantDashboardBuild {
+  buildId: string;
+  tenantId: string;
+  reviewId: string;
+  reviewName?: string;
+  successful: boolean;
+  commitId: string;
+  version: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UITenantDashboardAudit {
+  type: string;
+  actor?: string;
+  action: string;
+  createdAt?: string;
 }
 
 export interface UIIdleStatus {
@@ -87,6 +155,7 @@ export interface UICloudProviderStatus {
   username?: string;
   accountId?: string;
   profile?: string;
+  oidcIssuerUrl?: string;
   status: string;
   message?: string;
 }
@@ -98,6 +167,7 @@ export interface UIAWSCloudAliasInput {
   profile: string;
   ssoRegion: string;
   ssoStartUrl: string;
+  oidcIssuerUrl: string;
 }
 
 export interface UICloudContextStatus {
@@ -128,6 +198,9 @@ export interface UITenantConfig {
   name: string;
   defaultEnvironment: string;
   apiUrl: string;
+  cloudProviderAliases?: string[];
+  primaryCloudProviderAlias?: string;
+  cloudProviders?: UICloudProviderStatus[];
 }
 
 export interface UISSHDConfig {

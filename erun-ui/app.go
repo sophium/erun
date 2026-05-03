@@ -28,6 +28,7 @@ type erunUIDeps struct {
 	resolveCLIPath       func() string
 	resolveBuildInfo     func() eruncommon.BuildInfo
 	resolveImageRegistry func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error)
+	cloudDeps            eruncommon.CloudDependencies
 	cloudContextDeps     eruncommon.CloudContextDependencies
 	deleteNamespace      eruncommon.NamespaceDeleterFunc
 	listKubeContexts     func() ([]string, error)
@@ -40,6 +41,7 @@ type erunUIDeps struct {
 	savePastedImage      func(pastedImageSaveParams) (string, error)
 	loadDiff             func(context.Context, string, uiDiffOptions) (eruncommon.DiffResult, error)
 	loadIdleStatus       func(context.Context, string) (eruncommon.EnvironmentIdleStatus, error)
+	loadAPILog           func(context.Context, uiTenantDashboardInput) (string, error)
 	recordActivity       func(eruncommon.EnvironmentActivityParams) error
 	stopCloudContext     func(context.Context, string) (eruncommon.CloudContextStatus, error)
 	windowStatePath      string
@@ -130,6 +132,9 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.loadIdleStatus == nil {
 		deps.loadIdleStatus = loadIdleStatusFromMCP
+	}
+	if deps.loadAPILog == nil {
+		deps.loadAPILog = loadAPILog
 	}
 	if deps.recordActivity == nil {
 		deps.recordActivity = eruncommon.RecordEnvironmentActivity

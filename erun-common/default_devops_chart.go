@@ -79,7 +79,8 @@ func renderDefaultDevopsChartTemplate(assetPath, moduleName, imageName string, d
 		imageName = moduleName
 	}
 	if assetPath == "assets/default-devops-chart/templates/service.yaml" {
-		content = strings.Replace(content, "image: erunpaas/erun-devops:{{ .Chart.AppVersion }}", "image: erunpaas/"+imageName+":{{ .Chart.AppVersion }}", 1)
+		content = strings.Replace(content, `printf "erunpaas/erun-devops:%s"`, `printf "erunpaas/`+imageName+`:%s"`, 1)
+		content = strings.Replace(content, `index $imageOverrides "erun-devops"`, `index $imageOverrides "`+imageName+`"`, 1)
 	}
 	return []byte(content)
 }

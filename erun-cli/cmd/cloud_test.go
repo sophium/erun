@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"bytes"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -50,8 +52,14 @@ func TestRunCloudInitAWSCommandStoresAlias(t *testing.T) {
 			loginCalled = true
 			return nil
 		},
+		RunAWSBearerToken: func(common.Context, string, string) (string, error) {
+			return testCloudJWT(t, "https://sts.aws.example"), nil
+		},
 		ResolveAWSIdentity: func(common.Context, string) (common.AWSIdentity, error) {
 			return common.AWSIdentity{Account: "123456789012", Arn: "arn:aws:iam::123456789012:user/rihards"}, nil
+		},
+		CheckAWSStatus: func(_ common.Context, provider common.CloudProviderConfig) common.CloudProviderStatus {
+			return common.CloudProviderStatus{CloudProviderConfig: provider, Status: common.CloudTokenStatusActive}
 		},
 	})
 	if err != nil {
@@ -92,8 +100,14 @@ func TestRunCloudInitAWSCommandCreatesProfileWithoutPromptingForAlias(t *testing
 		RunAWSLogin: func(common.Context, string) error {
 			return nil
 		},
+		RunAWSBearerToken: func(common.Context, string, string) (string, error) {
+			return testCloudJWT(t, "https://sts.aws.example"), nil
+		},
 		ResolveAWSIdentity: func(common.Context, string) (common.AWSIdentity, error) {
 			return common.AWSIdentity{Account: "123456789012", Arn: "arn:aws:iam::123456789012:user/rihards"}, nil
+		},
+		CheckAWSStatus: func(_ common.Context, provider common.CloudProviderConfig) common.CloudProviderStatus {
+			return common.CloudProviderStatus{CloudProviderConfig: provider, Status: common.CloudTokenStatusActive}
 		},
 	})
 	if err != nil {
@@ -142,6 +156,39 @@ func TestRunCloudLoginCommandPromptsWhenExpired(t *testing.T) {
 	}
 }
 
+func TestRunCloudOIDCCommandStoresIssuer(t *testing.T) {
+	store := &cloudCommandStore{config: common.ERunConfig{CloudProviders: []common.CloudProviderConfig{{
+		Alias:    "rihards+123456789012@aws",
+		Provider: common.CloudProviderAWS,
+		Profile:  "dev",
+	}}}}
+	stdout := new(bytes.Buffer)
+
+	err := runCloudOIDCCommand(common.Context{Stdout: stdout}, store, nil, nil, common.CloudBearerParams{
+		Alias:    "rihards+123456789012@aws",
+		Audience: "https://api.example",
+	}, common.CloudDependencies{
+		RunAWSBearerToken: func(_ common.Context, profile, audience string) (string, error) {
+			if profile != "dev" || audience != "https://api.example" {
+				t.Fatalf("unexpected bearer token input profile=%q audience=%q", profile, audience)
+			}
+			return testCloudJWT(t, "https://sts.aws.example/"), nil
+		},
+		CheckAWSStatus: func(_ common.Context, provider common.CloudProviderConfig) common.CloudProviderStatus {
+			return common.CloudProviderStatus{CloudProviderConfig: provider, Status: common.CloudTokenStatusActive}
+		},
+	})
+	if err != nil {
+		t.Fatalf("runCloudOIDCCommand failed: %v", err)
+	}
+	if store.config.CloudProviders[0].OIDCIssuerURL != "https://sts.aws.example" {
+		t.Fatalf("unexpected stored issuer: %+v", store.config.CloudProviders[0])
+	}
+	if got := stdout.String(); got != "Saved OIDC issuer https://sts.aws.example for rihards+123456789012@aws\n" {
+		t.Fatalf("unexpected stdout: %q", got)
+	}
+}
+
 func TestRunCloudSetCommandSetsEnvironmentAlias(t *testing.T) {
 	store := &cloudCommandStore{envs: map[string]common.EnvConfig{
 		"frs/dev": {
@@ -168,4 +215,17 @@ func TestRunCloudSetCommandSetsEnvironmentAlias(t *testing.T) {
 	if got := stdout.String(); got != "Set cloud provider alias team-cloud for frs/dev\n" {
 		t.Fatalf("unexpected stdout: %q", got)
 	}
+}
+
+func testCloudJWT(t *testing.T, issuer string) string {
+	t.Helper()
+	header, err := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT"})
+	if err != nil {
+		t.Fatalf("marshal JWT header: %v", err)
+	}
+	payload, err := json.Marshal(map[string]string{"iss": issuer})
+	if err != nil {
+		t.Fatalf("marshal JWT payload: %v", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
 }

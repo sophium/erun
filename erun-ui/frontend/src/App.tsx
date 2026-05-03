@@ -9,6 +9,7 @@ import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView'
 import { ManageDialogView } from '@/components/app/ManageDialogView';
 import { ReviewPanel } from '@/components/app/ReviewPanel';
 import { Sidebar } from '@/components/app/Sidebar';
+import { TenantDashboardView } from '@/components/app/TenantDashboardView';
 import { TenantDialogView } from '@/components/app/TenantDialogView';
 import { Titlebar } from '@/components/app/Titlebar';
 import { Button } from '@/components/ui/button';
@@ -65,41 +66,15 @@ export function App(): React.ReactElement {
             aria-label="Resize sidebar"
             onMouseDown={(event) => controller.startSidebarResize(event)}
           />
-          <main
-            ref={terminalPaneRef}
-            className={cn(
-              'grid h-full min-h-0 min-w-0 overflow-hidden bg-terminal',
-              state.debugOpen ? 'grid-rows-[minmax(0,1fr)_var(--debug-height)]' : 'grid-rows-[minmax(0,1fr)_34px]',
-            )}
-          >
-            <div
-              className={cn(
-                'grid min-h-0 min-w-0 grid-cols-[minmax(360px,1fr)] overflow-hidden',
-                state.reviewOpen &&
-                  'grid-cols-[minmax(360px,1fr)_10px_minmax(420px,var(--review-width))] max-[980px]:grid-cols-[minmax(260px,1fr)_10px_minmax(360px,min(var(--review-width),58vw))]',
-              )}
-            >
-              <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
-                <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full box-border px-4 py-3.5" />
-                <TerminalBusyOverlay message={state.terminalBusy ? state.terminalMessage : ''} />
-              </div>
-              <div
-                className={cn(reviewSplitterClassName, !state.reviewOpen && 'hidden')}
-                role="separator"
-                aria-orientation="vertical"
-                aria-label="Resize diff panel"
-                onMouseDown={(event) => controller.startReviewResize(event)}
-              />
-              <ReviewPanel
-                controller={controller}
-                state={state}
-                reviewViewRef={reviewViewRef}
-                reviewMainRef={reviewMainRef}
-                diffListRef={diffListRef}
-              />
-            </div>
-            <DebugPanel controller={controller} open={state.debugOpen} output={state.debugOutput} />
-          </main>
+          <MainPane
+            controller={controller}
+            state={state}
+            terminalPaneRef={terminalPaneRef}
+            terminalRootRef={terminalRootRef}
+            reviewViewRef={reviewViewRef}
+            reviewMainRef={reviewMainRef}
+            diffListRef={diffListRef}
+          />
         </div>
       </div>
       <EnvironmentDialogView controller={controller} state={state} />
@@ -107,6 +82,75 @@ export function App(): React.ReactElement {
       <ManageDialogView controller={controller} state={state} />
       <TenantDialogView controller={controller} state={state} />
     </TooltipProvider>
+  );
+}
+
+function MainPane({
+  controller,
+  state,
+  terminalPaneRef,
+  terminalRootRef,
+  reviewViewRef,
+  reviewMainRef,
+  diffListRef,
+}: {
+  controller: ERunUIController;
+  state: ReturnType<typeof useControllerState>;
+  terminalPaneRef: React.RefObject<HTMLElement | null>;
+  terminalRootRef: React.RefObject<HTMLDivElement | null>;
+  reviewViewRef: React.RefObject<HTMLElement | null>;
+  reviewMainRef: React.RefObject<HTMLDivElement | null>;
+  diffListRef: React.RefObject<HTMLDivElement | null>;
+}): React.ReactElement {
+  const dashboardOpen = Boolean(state.tenantDashboard.tenant);
+  return (
+    <main
+      ref={terminalPaneRef}
+      className={cn(
+        'grid h-full min-h-0 min-w-0 overflow-hidden bg-terminal',
+        dashboardOpen ? 'grid-rows-[minmax(0,1fr)] bg-background' : state.debugOpen ? 'grid-rows-[minmax(0,1fr)_var(--debug-height)]' : 'grid-rows-[minmax(0,1fr)_34px]',
+      )}
+    >
+      {dashboardOpen && <TenantDashboardView controller={controller} state={state} />}
+      <TerminalPane controller={controller} state={state} hidden={dashboardOpen} terminalRootRef={terminalRootRef} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} />
+      {!dashboardOpen && <DebugPanel controller={controller} open={state.debugOpen} output={state.debugOutput} />}
+    </main>
+  );
+}
+
+function TerminalPane({
+  controller,
+  state,
+  hidden,
+  terminalRootRef,
+  reviewViewRef,
+  reviewMainRef,
+  diffListRef,
+}: {
+  controller: ERunUIController;
+  state: ReturnType<typeof useControllerState>;
+  hidden: boolean;
+  terminalRootRef: React.RefObject<HTMLDivElement | null>;
+  reviewViewRef: React.RefObject<HTMLElement | null>;
+  reviewMainRef: React.RefObject<HTMLDivElement | null>;
+  diffListRef: React.RefObject<HTMLDivElement | null>;
+}): React.ReactElement {
+  return (
+    <div
+      className={cn(
+        'grid min-h-0 min-w-0 grid-cols-[minmax(360px,1fr)] overflow-hidden',
+        hidden && 'hidden',
+        state.reviewOpen &&
+          'grid-cols-[minmax(360px,1fr)_10px_minmax(420px,var(--review-width))] max-[980px]:grid-cols-[minmax(260px,1fr)_10px_minmax(360px,min(var(--review-width),58vw))]',
+      )}
+    >
+      <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
+        <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full box-border px-4 py-3.5" />
+        <TerminalBusyOverlay message={state.terminalBusy ? state.terminalMessage : ''} />
+      </div>
+      <div className={cn(reviewSplitterClassName, !state.reviewOpen && 'hidden')} role="separator" aria-orientation="vertical" aria-label="Resize diff panel" onMouseDown={(event) => controller.startReviewResize(event)} />
+      <ReviewPanel controller={controller} state={state} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} />
+    </div>
   );
 }
 

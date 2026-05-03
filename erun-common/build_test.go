@@ -424,6 +424,47 @@ func TestOrderedDockerBuildSpecsBuildsLocalBaseImagesBeforeDependents(t *testing
 	}
 }
 
+func TestOrderedDockerBuildSpecsBuildsVersionArgBaseImagesBeforeDependents(t *testing.T) {
+	workdir := t.TempDir()
+	baseDir := filepath.Join(workdir, "erun-devops")
+	apiDir := filepath.Join(workdir, "erun-backend-api")
+	for _, dir := range []string{baseDir, apiDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %q: %v", dir, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(baseDir, "Dockerfile"), []byte("FROM alpine:3.22\n"), 0o644); err != nil {
+		t.Fatalf("write base Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(apiDir, "Dockerfile"), []byte("ARG ERUN_VERSION\nFROM erunpaas/erun-devops:${ERUN_VERSION}\n"), 0o644); err != nil {
+		t.Fatalf("write api Dockerfile: %v", err)
+	}
+
+	builds := []DockerBuildSpec{
+		{
+			ContextDir:     apiDir,
+			DockerfilePath: filepath.Join(apiDir, "Dockerfile"),
+			Image: DockerImageReference{
+				Tag: "erunpaas/erun-backend-api:1.4.2",
+			},
+		},
+		{
+			ContextDir:     baseDir,
+			DockerfilePath: filepath.Join(baseDir, "Dockerfile"),
+			Image: DockerImageReference{
+				Tag: "erunpaas/erun-devops:1.4.2",
+			},
+		},
+	}
+
+	ordered := orderedDockerBuildSpecs(builds)
+	got := []string{ordered[0].Image.Tag, ordered[1].Image.Tag}
+	want := []string{"erunpaas/erun-devops:1.4.2", "erunpaas/erun-backend-api:1.4.2"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected build order: got %+v want %+v", got, want)
+	}
+}
+
 func TestResolveDockerBuildContextIgnoresMissingDockerfile(t *testing.T) {
 	workdir := t.TempDir()
 

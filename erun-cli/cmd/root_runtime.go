@@ -284,12 +284,33 @@ func hasOptionalDeployCmd(resolveDeployContext common.DeployContextResolverFunc)
 	if hasDeployContextsAtDir(k8sDir) {
 		return true
 	}
+	if hasAncestorDevopsDeployContext(deployContext.Dir) {
+		return true
+	}
 	return hasSingleNestedDevopsDeployContext(deployContext.Dir)
 }
 
 func hasDeployContextsAtDir(dir string) bool {
 	deployContexts, err := common.ResolveKubernetesDeployContextsAtDir(dir)
 	return err == nil && len(deployContexts) > 0
+}
+
+func hasAncestorDevopsDeployContext(dir string) bool {
+	dir = filepath.Clean(strings.TrimSpace(dir))
+	if dir == "" {
+		return false
+	}
+	for current := dir; ; {
+		parent := filepath.Dir(current)
+		if parent == current {
+			return false
+		}
+		current = parent
+		if !strings.HasSuffix(filepath.Base(current), "-devops") {
+			continue
+		}
+		return hasDeployContextsAtDir(filepath.Join(current, "k8s"))
+	}
 }
 
 func hasSingleNestedDevopsDeployContext(dir string) bool {

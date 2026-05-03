@@ -105,26 +105,31 @@ func labelRuntimeVersionSuggestions(source, image string, suggestions []uiVersio
 
 func stateFromListResult(result eruncommon.ListResult, info eruncommon.BuildInfo) uiState {
 	state := uiState{
-		Tenants: make([]uiTenant, 0, len(result.Tenants)),
-		Build:   buildDetailsFrom(info),
+		Tenants:        make([]uiTenant, 0, len(result.Tenants)),
+		Build:          buildDetailsFrom(info),
+		CloudProviders: cloudProviderStatusesToUI(result.CloudProviders),
 	}
 	for _, tenant := range result.Tenants {
 		if len(tenant.Environments) == 0 {
 			continue
 		}
 		item := uiTenant{
-			Name:         strings.TrimSpace(tenant.Name),
-			Environments: make([]uiEnvironment, 0, len(tenant.Environments)),
+			Name:                      strings.TrimSpace(tenant.Name),
+			DefaultEnvironment:        strings.TrimSpace(tenant.DefaultEnvironment),
+			CloudProviderAliases:      append([]string(nil), tenant.CloudProviderAliases...),
+			PrimaryCloudProviderAlias: strings.TrimSpace(tenant.PrimaryCloudProviderAlias),
+			Environments:              make([]uiEnvironment, 0, len(tenant.Environments)),
 		}
 		for _, environment := range tenant.Environments {
 			item.Environments = append(item.Environments, uiEnvironment{
-				Name:           strings.TrimSpace(environment.Name),
-				MCPURL:         mcpEndpointForListEnvironment(environment),
-				APIURL:         strings.TrimSpace(environment.APIURL),
-				RuntimeVersion: strings.TrimSpace(environment.RuntimeVersion),
-				IsActive:       environment.IsActive,
-				SSHDEnabled:    environment.SSH.Enabled,
-				Remote:         environment.Remote,
+				Name:              strings.TrimSpace(environment.Name),
+				MCPURL:            mcpEndpointForListEnvironment(environment),
+				APIURL:            strings.TrimSpace(environment.APIURL),
+				RuntimeVersion:    strings.TrimSpace(environment.RuntimeVersion),
+				KubernetesContext: strings.TrimSpace(environment.KubernetesContext),
+				IsActive:          environment.IsActive,
+				SSHDEnabled:       environment.SSH.Enabled,
+				Remote:            environment.Remote,
 			})
 		}
 		state.Tenants = append(state.Tenants, item)

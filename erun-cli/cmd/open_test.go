@@ -138,7 +138,7 @@ func TestOpenCommandRuntimeImageOverrideUsesSelectedImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile failed: %v", err)
 	}
-	if !strings.Contains(string(service), "image: erunpaas/test-devops:{{ .Chart.AppVersion }}") {
+	if !strings.Contains(string(service), `printf "erunpaas/test-devops:%s" .Chart.AppVersion`) {
 		t.Fatalf("expected selected runtime image in generated chart, got:\n%s", service)
 	}
 	if deployed.Version != "1.0.48" || deployed.ReleaseName != "test-devops" {
@@ -1588,6 +1588,44 @@ func TestOpenCommandRunsManagedDeployAndReattachesWhenShellRequestsHandoff(t *te
 	}
 	if deployed.ChartPath != chartPath || deployed.ReleaseName != "erun-devops" {
 		t.Fatalf("expected managed deploy before reattach, got %+v", deployed)
+	}
+}
+
+func TestOpenCommandReattachesWithoutDeployWhenRuntimePodWasReplaced(t *testing.T) {
+	projectRoot := t.TempDir()
+	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "values.dev.yaml"), nil, 0o644), "write values.dev.yaml")
+
+	launchCalls := 0
+	deployCalled := false
+	cmd := newTestRootCmd(testRootDeps{
+		Store: openCommandStore{
+			repoPath:   projectRoot,
+			toolConfig: common.ERunConfig{DefaultTenant: "tenant-a"},
+		},
+		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
+			return true, nil
+		},
+		DeployHelmChart: func(req common.HelmDeployParams) error {
+			deployCalled = true
+			return nil
+		},
+		LaunchShell: func(req common.ShellLaunchParams) error {
+			launchCalls++
+			if launchCalls == 1 {
+				return common.ErrShellPodReplaced
+			}
+			return nil
+		},
+	})
+	cmd.SetArgs([]string{"open", "tenant-a", "dev"})
+
+	requireNoError(t, cmd.Execute(), "Execute failed")
+	if launchCalls != 2 {
+		t.Fatalf("expected shell to reattach after pod replacement, got %d launches", launchCalls)
+	}
+	if deployCalled {
+		t.Fatalf("did not expect deploy to run for pod replacement reattach")
 	}
 }
 

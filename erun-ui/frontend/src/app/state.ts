@@ -4,8 +4,10 @@ import type {
   ManageTab,
   UIERunConfig,
   UIEnvironmentConfig,
+  UICloudProviderStatus,
   UIIdleStatus,
   UICloudContextInitInput,
+  UITenantDashboard,
   UIRuntimeResourceStatus,
   UISelection,
   UITenantConfig,
@@ -84,7 +86,19 @@ export interface TenantDialogState {
   config: UITenantConfig;
   configLoading: boolean;
   busy: boolean;
+  busyAction: '' | 'save' | 'cloud-oidc';
+  busyTarget: string;
   error: string;
+}
+
+export type TenantDashboardTab = 'users' | 'queue' | 'builds' | 'audit' | 'api-log';
+
+export interface TenantDashboardState {
+  tenant: string;
+  tab: TenantDashboardTab;
+  loading: boolean;
+  error: string;
+  data: UITenantDashboard | null;
 }
 
 export interface GlobalConfigDialogState {
@@ -108,11 +122,13 @@ export type TerminalStatusAction = '' | 'wait-longer';
 
 export interface AppState {
   tenants: UITenant[];
+  cloudProviders: UICloudProviderStatus[];
   selected: UISelection | null;
   versionSuggestions: UIVersionSuggestion[];
   environmentDialog: EnvironmentDialogState;
   manageDialog: ManageDialogState;
   tenantDialog: TenantDialogState;
+  tenantDashboard: TenantDashboardState;
   globalConfigDialog: GlobalConfigDialogState;
   collapsedTenants: Set<string>;
   sessionId: number;
@@ -141,6 +157,8 @@ export interface AppState {
   terminalCopyStatus: string;
   idleStatus: UIIdleStatus | null;
   idleCloudContextBusy: boolean;
+  sidebarCloudAliasBusy: boolean;
+  sidebarCloudAliasAction: '' | 'login' | 'logout';
   debugOpen: boolean;
   debugHeight: number;
   debugOutput: string;
@@ -192,7 +210,17 @@ export const defaultTenantDialog = (): TenantDialogState => ({
   config: defaultTenantConfig(),
   configLoading: false,
   busy: false,
+  busyAction: '',
+  busyTarget: '',
   error: '',
+});
+
+export const defaultTenantDashboard = (): TenantDashboardState => ({
+  tenant: '',
+  tab: 'users',
+  loading: false,
+  error: '',
+  data: null,
 });
 
 export const defaultGlobalConfigDialog = (): GlobalConfigDialogState => ({
@@ -225,6 +253,9 @@ export const defaultTenantConfig = (): UITenantConfig => ({
   name: '',
   defaultEnvironment: '',
   apiUrl: '',
+  cloudProviderAliases: [],
+  primaryCloudProviderAlias: '',
+  cloudProviders: [],
 });
 
 export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({

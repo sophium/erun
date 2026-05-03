@@ -24,6 +24,7 @@ var (
 	ErrKubernetesContextNotConfigured  = errors.New("kubernetes context is not configured")
 	ErrRepoPathNotConfigured           = errors.New("repo path is not configured")
 	ErrShellReattachDeploy             = errors.New("remote shell requested deploy handoff and reattach")
+	ErrShellPodReplaced                = errors.New("remote shell pod was replaced; reattach")
 
 	openUserHomeDir = os.UserHomeDir
 )
@@ -483,6 +484,9 @@ func ExecShell(req ShellLaunchParams) error {
 		if isShellReattachDeployExit(err) {
 			return ErrShellReattachDeploy
 		}
+		if isShellReplacementExit(err) && shellReplacementPodReady(req, runOpenKubectl) {
+			return ErrShellPodReplaced
+		}
 		return enrichShellDeploymentError(req, err, runOpenKubectl)
 	}
 	return nil
@@ -700,6 +704,14 @@ func isShellReattachDeployExit(err error) bool {
 		return false
 	}
 	return exitErr.ExitCode() == remoteShellReattachDeployExitCode
+}
+
+func isShellReplacementExit(err error) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	return exitErr.ExitCode() == 137
 }
 
 func resolveGitRemote(repoPath string) (string, string, string, error) {

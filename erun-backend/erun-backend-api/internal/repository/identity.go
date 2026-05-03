@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log"
 	"strings"
 
 	"github.com/google/uuid"
@@ -24,6 +25,13 @@ func (r *IdentityRepository) ResolveIdentity(ctx context.Context, claims securit
 	tenant, err := r.ResolveTenantByIssuer(ctx, claims.Issuer)
 	if err == nil {
 		user, err := r.ResolveUserByExternalID(ctx, tenant.TenantID, claims.Issuer, claims.Subject)
+		if err == nil {
+			return tenant, user, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return model.Tenant{}, model.User{}, err
+		}
+		user, err = r.bootstrapFirstTenantUser(ctx, tenant, claims)
 		return tenant, user, err
 	}
 	if !errors.Is(err, ErrNotFound) {
@@ -48,8 +56,8 @@ func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, issuer s
 		&tenant.TenantID,
 		&tenant.Name,
 		&tenant.Type,
-		&tenant.CreatedAt,
-		&tenant.UpdatedAt,
+		scanTime(&tenant.CreatedAt),
+		scanTime(&tenant.UpdatedAt),
 	)
 	if err != nil {
 		return model.Tenant{}, normalizeNoRows(err)
@@ -174,7 +182,113 @@ func (r *IdentityRepository) bootstrapFirstIdentity(ctx context.Context, claims 
 	if err := tx.Commit(); err != nil {
 		return model.Tenant{}, model.User{}, err
 	}
+	log.Printf("erun api identity enrolled first tenant/user tenant=%q tenantName=%q tenantType=%q user=%q issuer=%q subject=%q username=%q", tenant.TenantID, tenant.Name, tenant.Type, user.UserID, claims.Issuer, claims.Subject, user.Username)
 	return tenant, user, nil
+}
+
+func (r *IdentityRepository) bootstrapFirstTenantUser(ctx context.Context, tenant model.Tenant, claims security.Claims) (model.User, error) {
+	userID, err := newUUIDv7()
+	if err != nil {
+		return model.User{}, err
+	}
+	readRoleID, err := newUUIDv7()
+	if err != nil {
+		return model.User{}, err
+	}
+	writeRoleID, err := newUUIDv7()
+	if err != nil {
+		return model.User{}, err
+	}
+	readPermissionID, err := newUUIDv7()
+	if err != nil {
+		return model.User{}, err
+	}
+	writePermissionID, err := newUUIDv7()
+	if err != nil {
+		return model.User{}, err
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return model.User{}, err
+	}
+	defer tx.Rollback()
+
+	var userCount int
+	if err := tx.QueryRowContext(ctx, r.rebind(`SELECT COUNT(*) FROM users WHERE tenant_id = ?`), tenant.TenantID).Scan(&userCount); err != nil {
+		return model.User{}, err
+	}
+	if userCount != 0 {
+		return model.User{}, ErrNotFound
+	}
+
+	if r.dialect == DialectPostgres {
+		if err := NewTxManager(r.db, r.dialect).setPostgresSecurityContext(ctx, tx, security.Context{
+			TenantID:   tenant.TenantID,
+			TenantType: string(tenant.Type),
+			ErunUserID: userID,
+		}); err != nil {
+			return model.User{}, err
+		}
+	}
+
+	username := strings.TrimSpace(claims.Username)
+	if username == "" {
+		username = claims.Subject
+	}
+
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{
+			query: `INSERT INTO users (user_id, tenant_id, username) VALUES (?, ?, ?)`,
+			args:  []any{userID, tenant.TenantID, username},
+		},
+		{
+			query: `INSERT INTO user_external_ids (tenant_id, user_id, issuer, external_id) VALUES (?, ?, ?, ?)`,
+			args:  []any{tenant.TenantID, userID, claims.Issuer, claims.Subject},
+		},
+		{
+			query: `INSERT INTO roles (role_id, tenant_id, name) VALUES (?, ?, ?)`,
+			args:  []any{readRoleID, tenant.TenantID, "ReadAll"},
+		},
+		{
+			query: `INSERT INTO roles (role_id, tenant_id, name) VALUES (?, ?, ?)`,
+			args:  []any{writeRoleID, tenant.TenantID, "WriteAll"},
+		},
+		{
+			query: `INSERT INTO role_permissions (role_permission_id, tenant_id, role_id, api_method_pattern, api_path_pattern) VALUES (?, ?, ?, ?, ?)`,
+			args:  []any{readPermissionID, tenant.TenantID, readRoleID, "^(GET|HEAD|OPTIONS)$", "^/.*$"},
+		},
+		{
+			query: `INSERT INTO role_permissions (role_permission_id, tenant_id, role_id, api_method_pattern, api_path_pattern) VALUES (?, ?, ?, ?, ?)`,
+			args:  []any{writePermissionID, tenant.TenantID, writeRoleID, "^(POST|PUT|PATCH|DELETE)$", "^/.*$"},
+		},
+		{
+			query: `INSERT INTO user_roles (tenant_id, user_id, role_id) VALUES (?, ?, ?)`,
+			args:  []any{tenant.TenantID, userID, readRoleID},
+		},
+		{
+			query: `INSERT INTO user_roles (tenant_id, user_id, role_id) VALUES (?, ?, ?)`,
+			args:  []any{tenant.TenantID, userID, writeRoleID},
+		},
+	}
+	for _, stmt := range statements {
+		if _, err := tx.ExecContext(ctx, r.rebind(stmt.query), stmt.args...); err != nil {
+			return model.User{}, err
+		}
+	}
+
+	user, err := r.userByID(ctx, tx, tenant.TenantID, userID)
+	if err != nil {
+		return model.User{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return model.User{}, err
+	}
+	log.Printf("erun api identity enrolled first user tenant=%q tenantName=%q tenantType=%q user=%q issuer=%q subject=%q username=%q", tenant.TenantID, tenant.Name, tenant.Type, user.UserID, claims.Issuer, claims.Subject, user.Username)
+	return user, nil
 }
 
 func (r *IdentityRepository) tenantByID(ctx context.Context, tx *sql.Tx, tenantID string) (model.Tenant, error) {
@@ -187,8 +301,8 @@ func (r *IdentityRepository) tenantByID(ctx context.Context, tx *sql.Tx, tenantI
 		&tenant.TenantID,
 		&tenant.Name,
 		&tenant.Type,
-		&tenant.CreatedAt,
-		&tenant.UpdatedAt,
+		scanTime(&tenant.CreatedAt),
+		scanTime(&tenant.UpdatedAt),
 	)
 	if err != nil {
 		return model.Tenant{}, normalizeNoRows(err)
@@ -207,8 +321,8 @@ func (r *IdentityRepository) userByID(ctx context.Context, tx *sql.Tx, tenantID 
 		&user.UserID,
 		&user.TenantID,
 		&user.Username,
-		&user.CreatedAt,
-		&user.UpdatedAt,
+		scanTime(&user.CreatedAt),
+		scanTime(&user.UpdatedAt),
 	)
 	if err != nil {
 		return model.User{}, normalizeNoRows(err)
@@ -247,8 +361,8 @@ func (r *IdentityRepository) ResolveUserByExternalID(ctx context.Context, tenant
 		&user.UserID,
 		&user.TenantID,
 		&user.Username,
-		&user.CreatedAt,
-		&user.UpdatedAt,
+		scanTime(&user.CreatedAt),
+		scanTime(&user.UpdatedAt),
 	)
 	if err != nil {
 		return model.User{}, normalizeNoRows(err)
@@ -274,8 +388,8 @@ func (r *IdentityRepository) resolveUserByExternalIDPostgres(ctx context.Context
 		&user.UserID,
 		&user.TenantID,
 		&user.Username,
-		&user.CreatedAt,
-		&user.UpdatedAt,
+		scanTime(&user.CreatedAt),
+		scanTime(&user.UpdatedAt),
 	)
 	if err != nil {
 		return model.User{}, normalizeNoRows(err)
