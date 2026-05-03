@@ -14,6 +14,14 @@
 {{- $runtimeRequestCPU := default "0.25" $runtimeRequests.cpu -}}
 {{- $runtimeRequestMemory := default "1024Mi" $runtimeRequests.memory -}}
 {{- $managedCloud := default false .Values.managedCloud -}}
+{{- $api := default dict .Values.api -}}
+{{- $oidcAllowedIssuers := default "" $api.oidcAllowedIssuers -}}
+{{- $imageOverrides := default dict .Values.imageOverrides -}}
+{{- $backendDBImage := default (printf "erunpaas/erun-backend-db:%s" .Chart.AppVersion) (index $imageOverrides "erun-backend-db") -}}
+{{- $devopsImage := default (printf "erunpaas/erun-devops:%s" .Chart.AppVersion) (index $imageOverrides "erun-devops") -}}
+{{- $mcpImage := default (printf "erunpaas/erun-mcp:%s" .Chart.AppVersion) (index $imageOverrides "erun-mcp") -}}
+{{- $backendAPIImage := default (printf "erunpaas/erun-backend-api:%s" .Chart.AppVersion) (index $imageOverrides "erun-backend-api") -}}
+{{- $dindImage := default "erunpaas/erun-dind:28.1.1" (index $imageOverrides "erun-dind") -}}
 {{- $cloudContext := default dict .Values.cloudContext -}}
 {{- $cloudContextName := default "" $cloudContext.name -}}
 {{- $cloudProviderAlias := default "" $cloudContext.providerAlias -}}
@@ -145,8 +153,21 @@ spec:
             - amd64,arm64
           securityContext:
             privileged: true
+        - image: {{ $backendDBImage }}
+          name: erun-backend-db
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HOME
+              value: /home/erun
+            - name: ERUN_DATABASE_URL
+              value: {{ default "" $api.databaseURL | quote }}
+            - name: ERUN_DATABASE_DIALECT
+              value: {{ default "" $api.databaseDialect | quote }}
+          volumeMounts:
+            - name: erun-home
+              mountPath: /home/erun
       containers:
-        - image: erunpaas/erun-devops:{{ .Chart.AppVersion }}
+        - image: {{ $devopsImage }}
           name: erun-devops
           imagePullPolicy: IfNotPresent
           env:
@@ -182,8 +203,6 @@ spec:
               value: {{ if .Values.sshdEnabled }}"true"{{ else }}"false"{{ end }}
             - name: ERUN_MCP_PORT
               value: {{ $mcpPort | quote }}
-            - name: ERUN_API_PORT
-              value: {{ $apiPort | quote }}
             - name: ERUN_SSHD_PORT
               value: {{ $sshPort | quote }}
             - name: ERUN_IDLE_TIMEOUT
@@ -200,10 +219,6 @@ spec:
             runAsUser: 1000
             runAsGroup: 1000
           ports:
-            - containerPort: {{ $mcpPort }}
-              name: mcp
-            - containerPort: {{ $apiPort }}
-              name: api
             - containerPort: {{ $sshPort }}
               name: ssh
           resources:
@@ -220,7 +235,71 @@ spec:
               mountPath: {{ printf "/home/erun/git/%s" (base (required "worktreeHostPath is required" .Values.worktreeHostPath)) | quote }}
             - name: docker-socket
               mountPath: /var/run
-        - image: erunpaas/erun-dind:28.1.1
+        - image: {{ $mcpImage }}
+          name: erun-mcp
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HOME
+              value: /home/erun
+            - name: KUBECONFIG
+              value: /home/erun/.kube/config
+            - name: DOCKER_HOST
+              value: unix:///var/run/docker.sock
+            - name: DOCKER_BUILDKIT
+              value: "1"
+            - name: ERUN_REPO_PATH
+              value: {{ printf "/home/erun/git/%s" (base (required "worktreeHostPath is required" .Values.worktreeHostPath)) | quote }}
+            - name: ERUN_REPO_REMOTE
+              value: "false"
+            - name: ERUN_KUBERNETES_CONTEXT
+              value: in-cluster
+            - name: ERUN_TENANT
+              value: {{ required "tenant is required" .Values.tenant | quote }}
+            - name: ERUN_ENVIRONMENT
+              value: {{ required "environment is required" .Values.environment | quote }}
+            - name: ERUN_MCP_PORT
+              value: {{ $mcpPort | quote }}
+            - name: ERUN_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          ports:
+            - containerPort: {{ $mcpPort }}
+              name: mcp
+          volumeMounts:
+            - name: erun-home
+              mountPath: /home/erun
+            - name: repo-worktree
+              mountPath: {{ printf "/home/erun/git/%s" (base (required "worktreeHostPath is required" .Values.worktreeHostPath)) | quote }}
+            - name: docker-socket
+              mountPath: /var/run
+        - image: {{ $backendAPIImage }}
+          name: erun-backend-api
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HOME
+              value: /home/erun
+            - name: ERUN_API_HOST
+              value: 0.0.0.0
+            - name: ERUN_API_PORT
+              value: {{ $apiPort | quote }}
+            - name: ERUN_DATABASE_URL
+              value: {{ default "" $api.databaseURL | quote }}
+            - name: ERUN_DATABASE_DIALECT
+              value: {{ default "" $api.databaseDialect | quote }}
+            - name: ERUN_OIDC_ALLOWED_ISSUERS
+              value: {{ $oidcAllowedIssuers | quote }}
+            - name: ERUN_TENANT
+              value: {{ required "tenant is required" .Values.tenant | quote }}
+            - name: ERUN_ENVIRONMENT
+              value: {{ required "environment is required" .Values.environment | quote }}
+          ports:
+            - containerPort: {{ $apiPort }}
+              name: api
+          volumeMounts:
+            - name: erun-home
+              mountPath: /home/erun
+        - image: {{ $dindImage }}
           name: erun-dind
           imagePullPolicy: IfNotPresent
           env:

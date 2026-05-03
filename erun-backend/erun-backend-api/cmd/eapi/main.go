@@ -59,7 +59,40 @@ func run(args []string) error {
 		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	log.Printf("erun api listening on %s; database dialect=%s; oidc allowed issuers=%d", server.Addr, dialect, len(splitCSV(cfg.AllowedIssuers)))
+	log.Print(identityBootstrapStatus(context.Background(), db))
 	return server.ListenAndServe()
+}
+
+func identityBootstrapStatus(ctx context.Context, db *sql.DB) string {
+	tenants, tenantErr := countRows(ctx, db, "tenants")
+	users, userErr := countRows(ctx, db, "users")
+	issuers, issuerErr := countRows(ctx, db, "tenant_issuers")
+	if tenantErr != nil || userErr != nil || issuerErr != nil {
+		return fmt.Sprintf("erun api identity status unavailable; tenants=%s users=%s issuers=%s", countStatus(tenants, tenantErr), countStatus(users, userErr), countStatus(issuers, issuerErr))
+	}
+	if tenants == 0 {
+		return "erun api identity bootstrap pending; firstTenant=false firstUser=false tenants=0 users=0 issuers=0"
+	}
+	if users == 0 {
+		return fmt.Sprintf("erun api identity bootstrap pending; firstTenant=true firstUser=false tenants=%d users=0 issuers=%d", tenants, issuers)
+	}
+	return fmt.Sprintf("erun api identity ready; firstTenant=true firstUser=true tenants=%d users=%d issuers=%d", tenants, users, issuers)
+}
+
+func countRows(ctx context.Context, db *sql.DB, table string) (int, error) {
+	var count int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func countStatus(count int, err error) string {
+	if err != nil {
+		return "error(" + err.Error() + ")"
+	}
+	return fmt.Sprintf("%d", count)
 }
 
 type apiConfig struct {

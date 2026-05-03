@@ -324,7 +324,7 @@ func TestBootstrapRunCreatesTenantDevopsModuleAndChart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read service template: %v", err)
 	}
-	if !strings.Contains(string(serviceTemplate), "image: erunpaas/tenant-a-devops:{{ .Chart.AppVersion }}") {
+	if !strings.Contains(string(serviceTemplate), `printf "erunpaas/tenant-a-devops:%s" .Chart.AppVersion`) {
 		t.Fatalf("expected tenant image reference, got %q", string(serviceTemplate))
 	}
 	if !strings.Contains(string(serviceTemplate), "name: tenant-a-devops") {
@@ -1138,7 +1138,7 @@ func TestBootstrapRunRemoteInitializesTenantInPodWorktree(t *testing.T) {
 		},
 		PromptRemoteRepositoryURL: remoteRepositoryPrompt(t, "frs", "dev", "git@github.com:sophium/frs.git"),
 		EnsureKubernetesNamespace: remoteNamespaceEnsurer(t, "cluster-remote", "frs-dev"),
-		DeployHelmChart:           remoteHelmDeployChecker(t, "frs", "1.2.3", "image: erunpaas/frs-devops:{{ .Chart.AppVersion }}"),
+		DeployHelmChart:           remoteHelmDeployChecker(t, "frs", "1.2.3", `printf "erunpaas/frs-devops:%s" .Chart.AppVersion`),
 		WaitForRemoteRuntime: func(req ShellLaunchParams) error {
 			waited = req
 			return nil

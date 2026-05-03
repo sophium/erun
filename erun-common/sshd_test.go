@@ -155,6 +155,22 @@ func TestRuntimeEntrypointConfiguresCodexMCP(t *testing.T) {
 	}
 }
 
+func TestRuntimeEntrypointPassesOIDCIssuersToAPI(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read runtime entrypoint: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		`if [ -n "${ERUN_OIDC_ALLOWED_ISSUERS:-}" ]; then`,
+		`--oidc-allowed-issuers "${ERUN_OIDC_ALLOWED_ISSUERS}"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected runtime entrypoint to contain %q, got:\n%s", want, content)
+		}
+	}
+}
+
 func TestRuntimeEntrypointStopsCloudHostAfterIdle(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
 	if err != nil {

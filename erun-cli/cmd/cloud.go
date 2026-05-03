@@ -20,6 +20,7 @@ func newCloudCmd(store cloudCommandStoreInterface, promptRunner PromptRunner, se
 		"Cloud provider utilities",
 		newCloudInitCmd(store, promptRunner, deps),
 		newCloudLoginCmd(store, promptRunner, selectRunner, deps),
+		newCloudOIDCCmd(store, promptRunner, selectRunner, deps),
 		newCloudSetCmd(store),
 	)
 }
@@ -48,6 +49,7 @@ func newCloudInitAWSCmd(store common.CloudStore, promptRunner PromptRunner, deps
 	cmd.Flags().StringVar(&params.AccountID, "account-id", "", "AWS account ID to use for SSO login")
 	cmd.Flags().StringVar(&params.RoleName, "role-name", "", "AWS role name to use for SSO login")
 	cmd.Flags().StringVar(&params.Region, "region", "", "Default AWS region for the generated configuration")
+	cmd.Flags().StringVar(&params.OIDCIssuerURL, "oidc-issuer-url", "", "OIDC issuer URL trusted by deployed ERun APIs")
 	addDryRunFlag(cmd)
 	return cmd
 }
@@ -78,7 +80,10 @@ func runCloudInitAWSCommand(ctx common.Context, store common.CloudStore, promptR
 			identityArgs = append(identityArgs, "--profile", "erun-sso-<timestamp>")
 		}
 		ctx.TraceCommand("", "aws", identityArgs...)
+		traceAWSEnableOIDCCommand(ctx, strings.TrimSpace(params.Profile))
+		traceAWSBearerTokenPlan(ctx, params, common.CloudProviderBearerAudience)
 		ctx.Trace("write erun root cloud provider alias")
+		ctx.Trace("write cloud provider OIDC issuer resolved from AWS web identity token")
 		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: AWS cloud provider initialization planned.")
 		return err
 	}
@@ -115,6 +120,9 @@ func promptMissingAWSInitParams(promptRunner PromptRunner, params common.InitAWS
 		return params, err
 	}
 	params.Region, err = promptCloudValueIfEmpty(promptRunner, params.Region, "Default AWS region", strings.TrimSpace(params.SSORegion))
+	if err != nil {
+		return params, err
+	}
 	return params, err
 }
 
@@ -164,6 +172,44 @@ func traceAWSConfigureSetPlan(ctx common.Context, params common.InitAWSCloudProv
 	}
 }
 
+func traceAWSBearerTokenPlan(ctx common.Context, params common.InitAWSCloudProviderParams, audience string) {
+	profile := strings.TrimSpace(params.Profile)
+	if profile == "" {
+		profile = "erun-sso-<timestamp>"
+	}
+	traceAWSBearerTokenCommand(ctx, profile, audience)
+}
+
+func traceAWSBearerTokenCommand(ctx common.Context, profile, audience string) {
+	args := []string{
+		"sts", "get-web-identity-token",
+		"--audience", strings.TrimSpace(audience),
+		"--signing-algorithm", "RS256",
+		"--duration-seconds", "900",
+		"--query", "WebIdentityToken",
+		"--output", "text",
+	}
+	if strings.TrimSpace(profile) != "" {
+		args = append(args, "--profile", strings.TrimSpace(profile))
+	}
+	ctx.TraceCommand("", "aws", args...)
+}
+
+func traceAWSEnableOIDCCommand(ctx common.Context, profile string) {
+	if strings.TrimSpace(profile) == "" {
+		profile = "erun-sso-<timestamp>"
+	}
+	args := []string{
+		"iam", "enable-outbound-web-identity-federation",
+		"--query", "IssuerIdentifier",
+		"--output", "text",
+	}
+	if strings.TrimSpace(profile) != "" {
+		args = append(args, "--profile", strings.TrimSpace(profile))
+	}
+	ctx.TraceCommand("", "aws", args...)
+}
+
 func newCloudLoginCmd(store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, deps common.CloudDependencies) *cobra.Command {
 	var alias string
 	cmd := &cobra.Command{
@@ -209,6 +255,64 @@ func runCloudLoginCommand(ctx common.Context, store common.CloudStore, promptRun
 		return err
 	}
 	return writeCloudStatus(ctx, status)
+}
+
+func newCloudOIDCCmd(store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, deps common.CloudDependencies) *cobra.Command {
+	var alias string
+	var audience string
+	cmd := &cobra.Command{
+		Use:          "oidc",
+		Short:        "Refresh the OIDC issuer for a configured cloud provider alias",
+		Args:         cobra.NoArgs,
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runCloudOIDCCommand(commandContext(cmd), store, promptRunner, selectRunner, common.CloudBearerParams{
+				Alias:    alias,
+				Audience: audience,
+			}, deps)
+		},
+	}
+	cmd.Flags().StringVar(&alias, "alias", "", "Cloud provider alias to refresh")
+	cmd.Flags().StringVar(&audience, "audience", common.CloudProviderBearerAudience, "Audience for the AWS web identity bearer token")
+	addDryRunFlag(cmd)
+	return cmd
+}
+
+func runCloudOIDCCommand(ctx common.Context, store common.CloudStore, _ PromptRunner, selectRunner SelectRunner, params common.CloudBearerParams, deps common.CloudDependencies) error {
+	alias := strings.TrimSpace(params.Alias)
+	if alias == "" {
+		selected, err := selectCloudAliasPrompt(store, selectRunner)
+		if err != nil {
+			return err
+		}
+		alias = selected
+	}
+	provider, err := common.ResolveCloudProvider(store, alias)
+	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		audience := strings.TrimSpace(params.Audience)
+		if audience == "" {
+			audience = common.CloudProviderBearerAudience
+		}
+		ctx.Trace("check cloud provider token status")
+		ctx.TraceCommand("", "aws", "sso", "login", "--profile", provider.Profile)
+		traceAWSEnableOIDCCommand(ctx, provider.Profile)
+		traceAWSBearerTokenCommand(ctx, provider.Profile, audience)
+		ctx.Trace("write cloud provider OIDC issuer resolved from AWS web identity token")
+		_, err := fmt.Fprintln(ctx.Stdout, "Dry run: cloud provider OIDC setup planned.")
+		return err
+	}
+	status, _, err := common.SetupCloudProviderOIDC(ctx, store, common.CloudBearerParams{
+		Alias:    alias,
+		Audience: params.Audience,
+	}, deps)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(ctx.Stdout, "Saved OIDC issuer %s for %s\n", status.OIDCIssuerURL, status.Alias)
+	return err
 }
 
 func newCloudSetCmd(store common.EnvironmentCloudAliasStore) *cobra.Command {

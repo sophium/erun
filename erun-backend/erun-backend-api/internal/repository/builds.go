@@ -108,8 +108,8 @@ func scanBuild(row rowScanner) (model.Build, error) {
 		&build.Successful,
 		&build.CommitID,
 		&build.Version,
-		&build.CreatedAt,
-		&build.UpdatedAt,
+		scanTime(&build.CreatedAt),
+		scanTime(&build.UpdatedAt),
 	)
 	if err != nil {
 		return model.Build{}, normalizeNoRows(err)

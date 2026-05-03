@@ -33,6 +33,55 @@ func TestFindLiteralDockerImagesInChartReadsDashPrefixedImageEntries(t *testing.
 	}
 }
 
+func TestFindDockerImagesInChartResolvesChartAppVersion(t *testing.T) {
+	chartPath := filepath.Join(t.TempDir(), "erun-devops")
+	templatePath := filepath.Join(chartPath, "templates", "deployment.yaml")
+	if err := os.MkdirAll(filepath.Dir(templatePath), 0o755); err != nil {
+		t.Fatalf("mkdir templates dir: %v", err)
+	}
+	if err := os.WriteFile(templatePath, []byte("apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      initContainers:\n        - image: erunpaas/erun-backend-db:{{ .Chart.AppVersion }}\n          name: erun-backend-db\n      containers:\n        - image: erunpaas/erun-mcp:{{.Chart.AppVersion}}\n          name: erun-mcp\n"), 0o644); err != nil {
+		t.Fatalf("write deployment template: %v", err)
+	}
+
+	images, err := findDockerImagesInChart(chartPath, "1.0.51-snapshot-20260502152410")
+	if err != nil {
+		t.Fatalf("findDockerImagesInChart failed: %v", err)
+	}
+
+	want := []string{
+		"erunpaas/erun-backend-db:1.0.51-snapshot-20260502152410",
+		"erunpaas/erun-mcp:1.0.51-snapshot-20260502152410",
+	}
+	if strings.Join(images, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected images: got %+v want %+v", images, want)
+	}
+}
+
+func TestFindDockerImagesInChartReadsImageOverrideDefaults(t *testing.T) {
+	chartPath := filepath.Join(t.TempDir(), "erun-devops")
+	templatePath := filepath.Join(chartPath, "templates", "deployment.yaml")
+	requireNoError(t, os.MkdirAll(filepath.Dir(templatePath), 0o755), "mkdir templates dir")
+	template := `{{- $imageOverrides := default dict .Values.imageOverrides -}}
+{{- $backendAPIImage := default (printf "erunpaas/erun-backend-api:%s" .Chart.AppVersion) (index $imageOverrides "erun-backend-api") -}}
+{{- $dindImage := default "erunpaas/erun-dind:28.1.1" (index $imageOverrides "erun-dind") -}}
+containers:
+  - image: {{ $backendAPIImage }}
+  - image: {{ $dindImage }}
+`
+	requireNoError(t, os.WriteFile(templatePath, []byte(template), 0o644), "write deployment template")
+
+	images, err := findDockerImagesInChart(chartPath, "1.0.51-snapshot-20260502152410")
+	requireNoError(t, err, "findDockerImagesInChart failed")
+
+	want := []string{
+		"erunpaas/erun-backend-api:1.0.51-snapshot-20260502152410",
+		"erunpaas/erun-dind:28.1.1",
+	}
+	if strings.Join(images, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("unexpected images: got %+v want %+v", images, want)
+	}
+}
+
 func TestResolveKubernetesDeployContextDetectsDockerComponentDir(t *testing.T) {
 	projectRoot := t.TempDir()
 	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
@@ -110,6 +159,98 @@ func TestResolveCurrentKubernetesDeployContextsUsesProjectRootDevopsModule(t *te
 	)
 	requireNoError(t, err, "ResolveCurrentKubernetesDeployContexts failed")
 	requireDeployContexts(t, deployContexts, chartA, chartB)
+}
+
+func TestResolveCurrentKubernetesDeployContextsUsesAncestorDevopsModuleFromDockerComponent(t *testing.T) {
+	projectRoot := t.TempDir()
+	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
+	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-backend-api")
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir docker component dir")
+
+	deployContexts, err := ResolveCurrentKubernetesDeployContexts(
+		func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		func() (KubernetesDeployContext, error) {
+			return KubernetesDeployContext{Dir: workdir}, nil
+		},
+		"",
+	)
+
+	requireNoError(t, err, "ResolveCurrentKubernetesDeployContexts failed")
+	if len(deployContexts) != 1 || deployContexts[0].ComponentName != "erun-devops" || deployContexts[0].ChartPath != chartPath {
+		t.Fatalf("unexpected deploy contexts: %+v", deployContexts)
+	}
+}
+
+func TestResolveCurrentDeploySpecsFromDevopsDockerComponentBuildsOnlyCurrentImage(t *testing.T) {
+	projectRoot := t.TempDir()
+	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
+	componentRoot := filepath.Join(projectRoot, "erun-devops")
+	workdir := filepath.Join(componentRoot, "docker", "erun-backend-api")
+	writeDockerBuildFixture(t, workdir)
+	writeVersionFileForTest(t, filepath.Join(componentRoot, "VERSION"), "1.0.0")
+	projectConfig := ProjectConfig{}
+	projectConfig.SetContainerRegistryForEnvironment(DefaultEnvironment, "erunpaas")
+	requireNoError(t, SaveProjectConfig(projectRoot, projectConfig), "save project config")
+	snapshot := true
+
+	specs, err := ResolveCurrentDeploySpecs(
+		openStore{
+			toolConfig: ERunConfig{DefaultTenant: "erun"},
+			tenantConfigs: map[string]TenantConfig{
+				"erun": {
+					Name:               "erun",
+					ProjectRoot:        projectRoot,
+					DefaultEnvironment: DefaultEnvironment,
+				},
+			},
+			envConfigs: map[string]EnvConfig{
+				"erun/local": {
+					Name:              DefaultEnvironment,
+					RepoPath:          projectRoot,
+					KubernetesContext: "cluster-local",
+					Snapshot:          &snapshot,
+				},
+			},
+		},
+		func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{
+				Dir:            workdir,
+				DockerfilePath: filepath.Join(workdir, "Dockerfile"),
+			}, nil
+		},
+		func() (KubernetesDeployContext, error) {
+			return KubernetesDeployContext{Dir: workdir}, nil
+		},
+		func() time.Time {
+			return time.Date(2026, time.May, 3, 9, 30, 0, 0, time.UTC)
+		},
+		DeployTarget{},
+	)
+
+	requireNoError(t, err, "ResolveCurrentDeploySpecs failed")
+	if len(specs) != 1 {
+		t.Fatalf("expected one deploy spec, got %+v", specs)
+	}
+	spec := specs[0]
+	if spec.Deploy.ChartPath != chartPath || spec.Deploy.Version != "" {
+		t.Fatalf("unexpected deploy target: %+v", spec.Deploy)
+	}
+	if len(spec.Builds) != 1 || spec.Builds[0].Image.ImageName != "erun-backend-api" {
+		t.Fatalf("expected only current backend API build, got %+v", spec.Builds)
+	}
+	requireMultiPlatformPushedBuild(t, spec.Builds[0])
+	wantTag := "erunpaas/erun-backend-api:1.0.0-snapshot-20260503093000"
+	if spec.Builds[0].Image.Tag != wantTag {
+		t.Fatalf("unexpected image tag: %+v", spec.Builds[0].Image)
+	}
+	if got := spec.Deploy.ImageOverrides["erun-backend-api"]; got != wantTag {
+		t.Fatalf("expected image override %q, got %+v", wantTag, spec.Deploy.ImageOverrides)
+	}
 }
 
 func writeDeployChartFixture(t *testing.T, chartPath string) {
@@ -258,6 +399,8 @@ func TestRuntimeChartsExposeMCPAPIAndSSHPorts(t *testing.T) {
 			`{{- $mcpPort := default 17000 .Values.mcpPort -}}`,
 			`{{- $apiPort := default 17033 .Values.apiPort -}}`,
 			`{{- $sshPort := default 17022 .Values.sshPort -}}`,
+			`{{- $api := default dict .Values.api -}}`,
+			`{{- $oidcAllowedIssuers := default "" $api.oidcAllowedIssuers -}}`,
 			`{{- $cloudContext := default dict .Values.cloudContext -}}`,
 			`{{- $cloudContextName := default "" $cloudContext.name -}}`,
 			`{{- $cloudProviderAlias := default "" $cloudContext.providerAlias -}}`,
@@ -269,6 +412,7 @@ func TestRuntimeChartsExposeMCPAPIAndSSHPorts(t *testing.T) {
 			"name: ERUN_CLOUD_INSTANCE_ID",
 			"name: ERUN_MCP_PORT",
 			"name: ERUN_API_PORT",
+			"name: ERUN_OIDC_ALLOWED_ISSUERS",
 			"name: ERUN_SSHD_PORT",
 			"containerPort: {{ $mcpPort }}",
 			"name: mcp",
@@ -643,7 +787,7 @@ func TestRemoteBootstrapRuntimeUsesCanonicalImageWithTenantRelease(t *testing.T)
 	if !strings.Contains(content, "name: test-devops") {
 		t.Fatalf("expected tenant deployment identity in chart, got:\n%s", content)
 	}
-	if !strings.Contains(content, "image: erunpaas/erun-devops:{{ .Chart.AppVersion }}") {
+	if !strings.Contains(content, `printf "erunpaas/erun-devops:%s" .Chart.AppVersion`) {
 		t.Fatalf("expected canonical runtime image in bootstrap chart, got:\n%s", content)
 	}
 	if strings.Contains(content, "image: erunpaas/test-devops:") {
@@ -680,7 +824,7 @@ func TestResolveOpenRuntimeDeploySpecUsesRemoteEnvRuntimeVersionForEmbeddedChart
 		t.Fatalf("read rendered chart template: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, "image: erunpaas/erun-devops:{{ .Chart.AppVersion }}") {
+	if !strings.Contains(content, `printf "erunpaas/erun-devops:%s" .Chart.AppVersion`) {
 		t.Fatalf("expected canonical runtime image for remote deploy, got:\n%s", content)
 	}
 	if strings.Contains(content, "image: erunpaas/frs-devops:") {
@@ -719,6 +863,7 @@ func TestResolveDeploySpecForContextUsesSelectedKubernetesContextForLocalEnviron
 		},
 		"",
 		false,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("resolveDeploySpecForContext failed: %v", err)
@@ -738,6 +883,11 @@ func TestResolveDeploySpecForContextAddsCloudHostStopMetadata(t *testing.T) {
 	spec, err := resolveDeploySpecForContext(
 		openStore{
 			toolConfig: ERunConfig{
+				CloudProviders: []CloudProviderConfig{{
+					Alias:         "team-cloud",
+					Provider:      CloudProviderAWS,
+					OIDCIssuerURL: "https://issuer.team.example",
+				}},
 				CloudContexts: []CloudContextConfig{{
 					Name:               "erun-001-020362606330-eu-west-2",
 					CloudProviderAlias: "team-cloud",
@@ -756,6 +906,10 @@ func TestResolveDeploySpecForContextAddsCloudHostStopMetadata(t *testing.T) {
 			Tenant:      "petios",
 			Environment: "rihards-develop",
 			RepoPath:    projectRoot,
+			TenantConfig: TenantConfig{
+				CloudProviderAliases:      []string{"team-cloud"},
+				PrimaryCloudProviderAlias: "team-cloud",
+			},
 			EnvConfig: EnvConfig{
 				KubernetesContext:  "cluster-dev",
 				CloudProviderAlias: "team-cloud",
@@ -769,12 +923,16 @@ func TestResolveDeploySpecForContextAddsCloudHostStopMetadata(t *testing.T) {
 		},
 		"",
 		false,
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("resolveDeploySpecForContext failed: %v", err)
 	}
 	if !spec.Deploy.ManagedCloud || spec.Deploy.CloudContextName != "erun-001-020362606330-eu-west-2" || spec.Deploy.CloudProviderAlias != "team-cloud" || spec.Deploy.CloudRegion != "eu-west-2" || spec.Deploy.CloudInstanceID != "i-073c3338f26fbb000" {
 		t.Fatalf("expected cloud host stop metadata, got %+v", spec.Deploy)
+	}
+	if spec.Deploy.OIDCAllowedIssuers != "https://issuer.team.example" {
+		t.Fatalf("expected tenant OIDC issuers, got %+v", spec.Deploy)
 	}
 }
 
@@ -861,6 +1019,7 @@ func TestResolveDeploySpecForContextPublishesLocalRuntimeBuildsAsMultiPlatform(t
 		},
 		"",
 		true,
+		nil,
 	)
 	requireNoError(t, err, "resolveDeploySpecForContext failed")
 
@@ -971,7 +1130,11 @@ printf '%s
 		CloudProviderAlias: "team-cloud",
 		CloudRegion:        "eu-west-2",
 		CloudInstanceID:    "i-073c3338f26fbb000",
-		Timeout:            DefaultHelmDeploymentTimeout,
+		OIDCAllowedIssuers: "https://issuer.one.example,https://issuer.two.example",
+		ImageOverrides: map[string]string{
+			"erun-backend-api": "erunpaas/erun-backend-api:1.0.0-snapshot-20260503093000",
+		},
+		Timeout: DefaultHelmDeploymentTimeout,
 	}); err != nil {
 		t.Fatalf("DeployHelmChart failed: %v", err)
 	}
@@ -999,6 +1162,8 @@ printf '%s
 		"--set-string\ncloudContext.providerAlias=team-cloud\n",
 		"--set-string\ncloudContext.region=eu-west-2\n",
 		"--set-string\ncloudContext.instanceId=i-073c3338f26fbb000\n",
+		"--set-string\napi.oidcAllowedIssuers=https://issuer.one.example,https://issuer.two.example\n",
+		"--set-string\nimageOverrides.erun-backend-api=erunpaas/erun-backend-api:1.0.0-snapshot-20260503093000\n",
 	} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("expected helm args to include %q, got:\n%s", want, args)

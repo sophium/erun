@@ -9,19 +9,24 @@ import {
   LoadKubernetesContexts,
   LoadRuntimeResourceStatus,
   LoadState,
+  LoadTenantDashboard,
   LoadTenantConfig,
   LoadVersionSuggestions,
+  LoginCloudProvider,
+  LogoutCloudProvider,
   OpenIDE,
   ResizeSession,
   SavePastedImage,
   SaveTenantConfig,
   SendSessionInput,
+  SetupCloudProviderOIDC,
   StartDeploySession,
   StartInitSession,
   StartSession,
 } from '../../wailsjs/go/main/App';
 import { ClipboardSetText, EventsOn, WindowToggleMaximise } from '../../wailsjs/runtime/runtime';
 import { fileToBase64, decodeBase64Bytes, isTerminalPasteTarget, pastedImageFiles } from './clipboard';
+import { replaceCloudProvider } from './cloudContextState';
 import { chooseSelectedDiffPath } from './diffUtils';
 import {
   normalizedEnvironmentDialogValues,
@@ -64,11 +69,13 @@ import {
   defaultEnvironmentDialog,
   defaultGlobalConfigDialog,
   defaultManageDialog,
+  defaultTenantDashboard,
   defaultTenantDialog,
   type AppState,
   type EnvironmentDialogState,
   type GlobalConfigDialogState,
   type ManageDialogState,
+  type TenantDashboardTab,
   type TenantDialogState,
   type TerminalStatusAction,
 } from './state';
@@ -106,12 +113,16 @@ import type {
   TerminalExitPayload,
   TerminalOutputPayload,
   UICloudContextInitInput,
+  UICloudProviderStatus,
   UIERunConfig,
   UIEnvironmentConfig,
   UIIdleStatus,
   UIRuntimeResourceStatus,
   UISelection,
   UIState,
+  UITenant,
+  UITenantDashboardInput,
+  UITenantDashboard,
   UITenantConfig,
   UIVersionSuggestion,
 } from '@/types';
@@ -121,11 +132,13 @@ const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 export class ERunUIController {
   readonly state: AppState = {
     tenants: [],
+    cloudProviders: [],
     selected: null,
     versionSuggestions: [],
     environmentDialog: defaultEnvironmentDialog(),
     manageDialog: defaultManageDialog(),
     tenantDialog: defaultTenantDialog(),
+    tenantDashboard: defaultTenantDashboard(),
     globalConfigDialog: defaultGlobalConfigDialog(),
     collapsedTenants: new Set<string>(),
     sessionId: 0,
@@ -154,6 +167,8 @@ export class ERunUIController {
     terminalCopyStatus: '',
     idleStatus: null,
     idleCloudContextBusy: false,
+    sidebarCloudAliasBusy: false,
+    sidebarCloudAliasAction: '',
     debugOpen: loadSavedDebugOpen(),
     debugHeight: loadSavedDebugHeight(),
     debugOutput: '',
@@ -372,7 +387,71 @@ export class ERunUIController {
     this.emit();
   }
 
+  openTenantDashboard(tenant: string): void {
+    tenant = tenant.trim();
+    if (!tenant) {
+      return;
+    }
+    this.state.selected = null;
+    this.state.idleStatus = null;
+    this.state.tenantDashboard = {
+      tenant,
+      tab: this.state.tenantDashboard.tenant === tenant ? this.state.tenantDashboard.tab : 'users',
+      loading: true,
+      error: '',
+      data: null,
+    };
+    this.state.reviewOpen = false;
+    this.showTerminalMessage('');
+    this.emit();
+    void this.loadTenantDashboard(tenant);
+  }
+
+  setTenantDashboardTab(tab: TenantDashboardTab): void {
+    this.state.tenantDashboard = {
+      ...this.state.tenantDashboard,
+      tab,
+    };
+    this.emit();
+  }
+
+  async loadTenantDashboard(tenant = this.state.tenantDashboard.tenant): Promise<void> {
+    tenant = tenant.trim();
+    if (!tenant || this.state.tenantDashboard.tenant !== tenant) {
+      return;
+    }
+    const tenantState = this.state.tenants.find((candidate) => candidate.name === tenant);
+    const input = tenantDashboardInput(tenantState);
+    if (!input) {
+      this.state.tenantDashboard = {
+        ...this.state.tenantDashboard,
+        loading: false,
+        error: 'Tenant dashboard requires an API URL and a primary cloud alias.',
+        data: null,
+      };
+      this.emit();
+      return;
+    }
+    this.state.tenantDashboard = { ...this.state.tenantDashboard, loading: true, error: '' };
+    this.emit();
+    try {
+      const data = (await LoadTenantDashboard(input)) as UITenantDashboard;
+      if (this.state.tenantDashboard.tenant !== tenant) {
+        return;
+      }
+      this.state.tenantDashboard = { ...this.state.tenantDashboard, loading: false, error: '', data };
+      this.emit();
+    } catch (error) {
+      if (this.state.tenantDashboard.tenant !== tenant) {
+        return;
+      }
+      this.state.tenantDashboard = { ...this.state.tenantDashboard, loading: false, error: readError(error), data: null };
+      this.emit();
+    }
+  }
+
   async openSelection(selection: UISelection): Promise<void> {
+    this.state.tenantDashboard = defaultTenantDashboard();
     const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     const key = selectionKey(runSelection);
     const previousSessionId = this.state.sessionId;
@@ -758,6 +837,14 @@ export class ERunUIController {
     await this.globalConfig.loginCloudProvider(alias);
   }
 
+  async loginPrimaryCloudProvider(alias: string): Promise<void> {
+    await this.updatePrimaryCloudProvider(alias, 'login', LoginCloudProvider);
+  }
+
+  async logoutPrimaryCloudProvider(alias: string): Promise<void> {
+    await this.updatePrimaryCloudProvider(alias, 'logout', LogoutCloudProvider);
+  }
+
   async submitGlobalConfig(): Promise<void> {
     await this.globalConfig.submitConfig();
   }
@@ -769,9 +856,15 @@ export class ERunUIController {
       config: {
         name: tenant,
         defaultEnvironment: '',
+        apiUrl: '',
+        cloudProviderAliases: [],
+        primaryCloudProviderAlias: '',
+        cloudProviders: [],
       },
       configLoading: true,
       busy: false,
+      busyAction: '',
+      busyTarget: '',
       error: '',
     };
     this.emit();
@@ -824,6 +917,9 @@ export class ERunUIController {
     this.emit();
     try {
       const result = (await LoadTenantConfig(dialog.tenant)) as UITenantConfig;
+      if (result.cloudProviders) {
+        this.state.cloudProviders = result.cloudProviders;
+      }
       this.state.tenantDialog = {
         ...this.state.tenantDialog,
         config: result,
@@ -850,14 +946,17 @@ export class ERunUIController {
       this.closeTenantDialog();
       return;
     }
-    this.state.tenantDialog = { ...dialog, busy: true, error: '' };
+    this.state.tenantDialog = { ...dialog, busy: true, busyAction: 'save', busyTarget: '', error: '' };
     this.emit();
     try {
       const result = (await SaveTenantConfig(dialog.config)) as UITenantConfig;
+      this.applySavedTenantConfig(result);
       this.state.tenantDialog = {
         ...this.state.tenantDialog,
         config: result,
         busy: false,
+        busyAction: '',
+        busyTarget: '',
         error: '',
       };
       this.showNotification('success', `Saved config for ${result.name}.`);
@@ -867,10 +966,97 @@ export class ERunUIController {
       this.state.tenantDialog = {
         ...this.state.tenantDialog,
         busy: false,
+        busyAction: '',
+        busyTarget: '',
         error: message,
       };
       this.showTerminalMessage(message);
       this.emit();
+    }
+  }
+
+  async setupTenantCloudProviderOIDC(alias: string): Promise<void> {
+    alias = alias.trim();
+    const dialog = this.state.tenantDialog;
+    if (!alias || dialog.busy || dialog.configLoading) {
+      return;
+    }
+    this.state.tenantDialog = { ...dialog, busy: true, busyAction: 'cloud-oidc', busyTarget: alias, error: '' };
+    this.emit();
+    try {
+      const provider = (await SetupCloudProviderOIDC(alias)) as UICloudProviderStatus;
+      this.state.cloudProviders = replaceCloudProvider(this.state.cloudProviders, provider);
+      const currentProviders = this.state.tenantDialog.config.cloudProviders || [];
+      this.state.tenantDialog = {
+        ...this.state.tenantDialog,
+        config: {
+          ...this.state.tenantDialog.config,
+          cloudProviders: replaceCloudProvider(currentProviders, provider),
+        },
+        busy: false,
+        busyAction: '',
+        busyTarget: '',
+        error: '',
+      };
+      this.showNotification('success', `Updated OIDC issuer for ${provider.alias}.`);
+      this.emit();
+    } catch (error) {
+      const message = readError(error);
+      this.state.tenantDialog = {
+        ...this.state.tenantDialog,
+        busy: false,
+        busyAction: '',
+        busyTarget: '',
+        error: message,
+      };
+      this.showTerminalMessage(message);
+      this.showNotification('error', message);
+      this.emit();
+    }
+  }
+
+  private async updatePrimaryCloudProvider(alias: string, action: 'login' | 'logout', run: (alias: string) => Promise<unknown>): Promise<void> {
+    alias = alias.trim();
+    if (!alias || this.state.sidebarCloudAliasBusy) {
+      return;
+    }
+    this.state.sidebarCloudAliasBusy = true;
+    this.state.sidebarCloudAliasAction = action;
+    this.emit();
+    try {
+      const provider = (await run(alias)) as UICloudProviderStatus;
+      this.state.cloudProviders = replaceCloudProvider(this.state.cloudProviders, provider);
+      this.state.sidebarCloudAliasBusy = false;
+      this.state.sidebarCloudAliasAction = '';
+      this.showTerminalMessage(`${provider.alias}: ${provider.status}`);
+      this.emit();
+    } catch (error) {
+      const message = readError(error);
+      this.state.sidebarCloudAliasBusy = false;
+      this.state.sidebarCloudAliasAction = '';
+      this.showTerminalMessage(message);
+      this.showNotification('error', message);
+      this.emit();
+    }
+  }
+
+  private applySavedTenantConfig(config: UITenantConfig): void {
+    const tenantName = config.name.trim();
+    if (!tenantName) {
+      return;
+    }
+    this.state.tenants = this.state.tenants.map((tenant) => {
+      if (tenant.name !== tenantName) {
+        return tenant;
+      }
+      return {
+        ...tenant,
+        cloudProviderAliases: config.cloudProviderAliases || [],
+        primaryCloudProviderAlias: config.primaryCloudProviderAlias || '',
+      };
+    });
+    if (config.cloudProviders) {
+      this.state.cloudProviders = config.cloudProviders;
     }
   }
 
@@ -1177,6 +1363,7 @@ export class ERunUIController {
       this.showTerminalMessage('Loading environments...', true);
       const loaded = (await LoadState()) as UIState;
       this.state.tenants = loaded.tenants || [];
+      this.state.cloudProviders = loaded.cloudProviders || [];
       this.state.selected = loaded.selected || null;
       this.state.versionSuggestions = normalizeVersionSuggestions(loaded.versionSuggestions || []);
       this.selectLoadedKubernetesContexts(loaded.kubernetesContexts || []);
@@ -1248,6 +1435,7 @@ export class ERunUIController {
     try {
       const loaded = (await LoadState()) as UIState;
       this.state.tenants = loaded.tenants || [];
+      this.state.cloudProviders = loaded.cloudProviders || this.state.cloudProviders;
       this.state.versionSuggestions = normalizeVersionSuggestions(loaded.versionSuggestions || this.state.versionSuggestions);
       this.selectLoadedKubernetesContexts(loaded.kubernetesContexts || []);
       this.emit();
@@ -1644,4 +1832,34 @@ export class ERunUIController {
       this.terminal?.write(chunk);
     }
   }
+}
+
+function tenantDashboardInput(tenant: UITenant | undefined): UITenantDashboardInput | null {
+  if (!tenant) {
+    return null;
+  }
+  const environment = tenantDashboardEnvironment(tenant);
+  const apiUrl = trimOptional(environment?.apiUrl);
+  const cloudProviderAlias = trimOptional(tenant.primaryCloudProviderAlias);
+  if (!apiUrl || !cloudProviderAlias) {
+    return null;
+  }
+  return {
+    tenant: tenant.name,
+    environment: trimOptional(environment?.name),
+    apiUrl,
+    mcpUrl: trimOptional(environment?.mcpUrl),
+    kubernetesContext: trimOptional(environment?.kubernetesContext),
+    cloudProviderAlias,
+  };
+}
+
+function tenantDashboardEnvironment(tenant: UITenant): UITenant['environments'][number] | undefined {
+  const defaultEnvironment = tenant.defaultEnvironment?.trim();
+  return tenant.environments.find((candidate) => candidate.name === defaultEnvironment && candidate.apiUrl) ||
+    tenant.environments.find((candidate) => candidate.apiUrl);
+}
+
+function trimOptional(value: string | undefined): string {
+  return value?.trim() || '';
 }

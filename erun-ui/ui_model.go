@@ -3,26 +3,31 @@ package main
 import eruncommon "github.com/sophium/erun/erun-common"
 
 type uiState struct {
-	Tenants            []uiTenant     `json:"tenants"`
-	Selected           *uiSelection   `json:"selected,omitempty"`
-	Message            string         `json:"message,omitempty"`
-	Build              uiBuildDetails `json:"build"`
-	VersionSuggestions []uiVersion    `json:"versionSuggestions,omitempty"`
+	Tenants            []uiTenant              `json:"tenants"`
+	Selected           *uiSelection            `json:"selected,omitempty"`
+	Message            string                  `json:"message,omitempty"`
+	Build              uiBuildDetails          `json:"build"`
+	VersionSuggestions []uiVersion             `json:"versionSuggestions,omitempty"`
+	CloudProviders     []uiCloudProviderStatus `json:"cloudProviders,omitempty"`
 }
 
 type uiTenant struct {
-	Name         string          `json:"name"`
-	Environments []uiEnvironment `json:"environments"`
+	Name                      string          `json:"name"`
+	DefaultEnvironment        string          `json:"defaultEnvironment,omitempty"`
+	CloudProviderAliases      []string        `json:"cloudProviderAliases,omitempty"`
+	PrimaryCloudProviderAlias string          `json:"primaryCloudProviderAlias,omitempty"`
+	Environments              []uiEnvironment `json:"environments"`
 }
 
 type uiEnvironment struct {
-	Name           string `json:"name"`
-	MCPURL         string `json:"mcpUrl,omitempty"`
-	APIURL         string `json:"apiUrl,omitempty"`
-	RuntimeVersion string `json:"runtimeVersion,omitempty"`
-	IsActive       bool   `json:"isActive,omitempty"`
-	SSHDEnabled    bool   `json:"sshdEnabled,omitempty"`
-	Remote         bool   `json:"remote"`
+	Name              string `json:"name"`
+	MCPURL            string `json:"mcpUrl,omitempty"`
+	APIURL            string `json:"apiUrl,omitempty"`
+	RuntimeVersion    string `json:"runtimeVersion,omitempty"`
+	KubernetesContext string `json:"kubernetesContext,omitempty"`
+	IsActive          bool   `json:"isActive,omitempty"`
+	SSHDEnabled       bool   `json:"sshdEnabled,omitempty"`
+	Remote            bool   `json:"remote"`
 }
 
 type uiSelection struct {
@@ -61,9 +66,75 @@ type uiERunConfig struct {
 }
 
 type uiTenantConfig struct {
-	Name               string `json:"name"`
-	DefaultEnvironment string `json:"defaultEnvironment"`
+	Name                      string                  `json:"name"`
+	DefaultEnvironment        string                  `json:"defaultEnvironment"`
+	APIURL                    string                  `json:"apiUrl"`
+	CloudProviderAliases      []string                `json:"cloudProviderAliases,omitempty"`
+	PrimaryCloudProviderAlias string                  `json:"primaryCloudProviderAlias,omitempty"`
+	CloudProviders            []uiCloudProviderStatus `json:"cloudProviders,omitempty"`
+}
+
+type uiTenantDashboardInput struct {
+	Tenant             string `json:"tenant"`
+	Environment        string `json:"environment,omitempty"`
 	APIURL             string `json:"apiUrl"`
+	MCPURL             string `json:"mcpUrl,omitempty"`
+	KubernetesContext  string `json:"kubernetesContext,omitempty"`
+	CloudProviderAlias string `json:"cloudProviderAlias"`
+}
+
+type uiTenantDashboard struct {
+	Tenant          string                    `json:"tenant"`
+	APIURL          string                    `json:"apiUrl,omitempty"`
+	APIError        string                    `json:"apiError,omitempty"`
+	APILog          string                    `json:"apiLog,omitempty"`
+	APILogError     string                    `json:"apiLogError,omitempty"`
+	User            *uiTenantDashboardUser    `json:"user,omitempty"`
+	Reviews         []uiTenantDashboardReview `json:"reviews,omitempty"`
+	MergeQueue      []uiTenantDashboardReview `json:"mergeQueue,omitempty"`
+	Builds          []uiTenantDashboardBuild  `json:"builds,omitempty"`
+	AuditEvents     []uiTenantDashboardAudit  `json:"auditEvents,omitempty"`
+	AuditLogMessage string                    `json:"auditLogMessage,omitempty"`
+}
+
+type uiTenantDashboardUser struct {
+	TenantID string `json:"tenantId"`
+	UserID   string `json:"userId"`
+	Issuer   string `json:"issuer"`
+	Subject  string `json:"subject"`
+}
+
+type uiTenantDashboardReview struct {
+	ReviewID          string `json:"reviewId"`
+	TenantID          string `json:"tenantId"`
+	Name              string `json:"name"`
+	TargetBranch      string `json:"targetBranch"`
+	SourceBranch      string `json:"sourceBranch"`
+	Status            string `json:"status"`
+	LastFailedBuildID string `json:"lastFailedBuildId,omitempty"`
+	LastReadyBuildID  string `json:"lastReadyBuildId,omitempty"`
+	LastMergedBuildID string `json:"lastMergedBuildId,omitempty"`
+	CreatedAt         string `json:"createdAt,omitempty"`
+	UpdatedAt         string `json:"updatedAt,omitempty"`
+}
+
+type uiTenantDashboardBuild struct {
+	BuildID    string `json:"buildId"`
+	TenantID   string `json:"tenantId"`
+	ReviewID   string `json:"reviewId"`
+	ReviewName string `json:"reviewName,omitempty"`
+	Successful bool   `json:"successful"`
+	CommitID   string `json:"commitId"`
+	Version    string `json:"version"`
+	CreatedAt  string `json:"createdAt,omitempty"`
+	UpdatedAt  string `json:"updatedAt,omitempty"`
+}
+
+type uiTenantDashboardAudit struct {
+	Type      string `json:"type"`
+	Actor     string `json:"actor,omitempty"`
+	Action    string `json:"action"`
+	CreatedAt string `json:"createdAt,omitempty"`
 }
 
 type uiSSHDConfig struct {
@@ -146,13 +217,14 @@ type uiIdleConfig struct {
 }
 
 type uiCloudProviderStatus struct {
-	Alias     string `json:"alias"`
-	Provider  string `json:"provider"`
-	Username  string `json:"username,omitempty"`
-	AccountID string `json:"accountId,omitempty"`
-	Profile   string `json:"profile,omitempty"`
-	Status    string `json:"status"`
-	Message   string `json:"message,omitempty"`
+	Alias         string `json:"alias"`
+	Provider      string `json:"provider"`
+	Username      string `json:"username,omitempty"`
+	AccountID     string `json:"accountId,omitempty"`
+	Profile       string `json:"profile,omitempty"`
+	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty"`
+	Status        string `json:"status"`
+	Message       string `json:"message,omitempty"`
 }
 
 type uiCloudContextStatus struct {
@@ -171,12 +243,13 @@ type uiCloudContextStatus struct {
 }
 
 type uiAWSCloudAliasInput struct {
-	Alias       string `json:"alias,omitempty"`
-	Username    string `json:"username,omitempty"`
-	AccountID   string `json:"accountId,omitempty"`
-	Profile     string `json:"profile,omitempty"`
-	SSORegion   string `json:"ssoRegion,omitempty"`
-	SSOStartURL string `json:"ssoStartUrl,omitempty"`
+	Alias         string `json:"alias,omitempty"`
+	Username      string `json:"username,omitempty"`
+	AccountID     string `json:"accountId,omitempty"`
+	Profile       string `json:"profile,omitempty"`
+	SSORegion     string `json:"ssoRegion,omitempty"`
+	SSOStartURL   string `json:"ssoStartUrl,omitempty"`
+	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty"`
 }
 
 type uiCloudContextInitInput struct {

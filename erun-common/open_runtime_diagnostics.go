@@ -61,6 +61,49 @@ func shellDeploymentFailureDiagnostic(req ShellLaunchParams, runner openKubectlR
 	return strings.Join(lines, "\n")
 }
 
+func shellReplacementPodReady(req ShellLaunchParams, runner openKubectlRunnerFunc) bool {
+	if runner == nil {
+		return false
+	}
+	pods, err := loadRuntimePodDiagnostics(req, runner)
+	if err != nil {
+		return false
+	}
+	for _, pod := range pods.Items {
+		if runtimePodLooksLikeCleanReplacement(pod) {
+			return true
+		}
+	}
+	return false
+}
+
+func runtimePodLooksLikeCleanReplacement(pod runtimePodDiagnostic) bool {
+	if !strings.EqualFold(strings.TrimSpace(pod.Status.Phase), "Running") {
+		return false
+	}
+	if !runtimePodConditionTrue(pod, "Ready") || !runtimePodConditionTrue(pod, "ContainersReady") {
+		return false
+	}
+	if len(pod.Status.ContainerStatuses) == 0 {
+		return false
+	}
+	for _, container := range pod.Status.ContainerStatuses {
+		if !container.Ready || container.State.Running == nil || container.RestartCount != 0 || container.LastState.Terminated != nil {
+			return false
+		}
+	}
+	return true
+}
+
+func runtimePodConditionTrue(pod runtimePodDiagnostic, conditionType string) bool {
+	for _, condition := range pod.Status.Conditions {
+		if strings.EqualFold(strings.TrimSpace(condition.Type), conditionType) {
+			return strings.EqualFold(strings.TrimSpace(condition.Status), "True")
+		}
+	}
+	return false
+}
+
 func loadRuntimePodDiagnostics(req ShellLaunchParams, runner openKubectlRunnerFunc) (runtimePodDiagnosticList, error) {
 	args := kubectlTargetArgs(req)
 	args = append(args, "get", "pods", "-l", "app="+RuntimeReleaseName(req.Tenant), "-o", "json")

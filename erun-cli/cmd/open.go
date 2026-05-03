@@ -504,6 +504,9 @@ func (r *resolvedOpenRunner) traceShellPreview(shellReq common.ShellLaunchParams
 func (r *resolvedOpenRunner) runShellLoop(shellReq common.ShellLaunchParams) error {
 	for {
 		err := r.openShell(r.ctx, shellReq)
+		if errors.Is(err, common.ErrShellPodReplaced) {
+			continue
+		}
 		if !errors.Is(err, common.ErrShellReattachDeploy) {
 			return err
 		}

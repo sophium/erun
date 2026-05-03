@@ -112,24 +112,26 @@ func (r *ReviewRepository) ListMergeQueue(ctx context.Context, targetBranch stri
 	if err != nil {
 		return nil, ErrMissingSecurityContext
 	}
-	if targetBranch == "" {
-		return nil, ErrInvalidInput
-	}
 
 	var reviews []model.Review
 	err = r.txs.WithinTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, r.txs.rebind(`
-			SELECT `+qualifiedReviewColumns+`
+		query := `
+			SELECT ` + qualifiedReviewColumns + `
 			  FROM review_merge_queue q
 			  JOIN reviews r
 			    ON r.tenant_id = q.tenant_id
 			   AND r.target_branch = q.target_branch
 			   AND r.review_id = q.review_id
 			 WHERE q.tenant_id = ?
-			   AND q.target_branch = ?
 			   AND r.status = 'READY'
-			 ORDER BY q.review_merge_queue_id ASC
-		`), securityContext.TenantID, targetBranch)
+		`
+		args := []any{securityContext.TenantID}
+		if targetBranch != "" {
+			query += ` AND q.target_branch = ?`
+			args = append(args, targetBranch)
+		}
+		query += ` ORDER BY q.target_branch ASC, q.review_merge_queue_id ASC`
+		rows, err := tx.QueryContext(ctx, r.txs.rebind(query), args...)
 		if err != nil {
 			return err
 		}
@@ -229,8 +231,8 @@ func scanReview(row rowScanner) (model.Review, error) {
 		&lastFailedBuildID,
 		&lastReadyBuildID,
 		&lastMergedBuildID,
-		&review.CreatedAt,
-		&review.UpdatedAt,
+		scanTime(&review.CreatedAt),
+		scanTime(&review.UpdatedAt),
 	)
 	if err != nil {
 		return model.Review{}, normalizeNoRows(err)

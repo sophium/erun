@@ -139,6 +139,29 @@ func TestNewRootCmdRegistersDeployShorthandAtProjectRootWhenDevopsK8sScopePresen
 	}
 }
 
+func TestNewRootCmdRegistersDeployShorthandInDevopsDockerComponentDir(t *testing.T) {
+	projectRoot := t.TempDir()
+	chartPath := filepath.Join(projectRoot, "erun-devops", "k8s", "erun-devops")
+	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-backend-api")
+	requireNoError(t, os.MkdirAll(chartPath, 0o755), "mkdir chart dir")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: erun-devops\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644), "write Chart.yaml")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644), "write values.local.yaml")
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir docker component dir")
+
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "erun", projectRoot, nil
+		},
+		ResolveKubernetesDeployContext: func() (common.KubernetesDeployContext, error) {
+			return common.KubernetesDeployContext{Dir: workdir}, nil
+		},
+	})
+
+	if !hasSubcommand(cmd, "deploy") {
+		t.Fatal("expected deploy shorthand command to be registered")
+	}
+}
+
 func TestNewRootCmdOmitsDeployShorthandWhenKubernetesDeployContextAbsent(t *testing.T) {
 	cmd := newTestRootCmd(testRootDeps{
 		ResolveKubernetesDeployContext: func() (common.KubernetesDeployContext, error) {
@@ -325,8 +348,8 @@ func TestRootDeployShorthandUsesCurrentComponentContext(t *testing.T) {
 	if received.ReleaseName != "erun-devops" || received.ChartPath != chartPath {
 		t.Fatalf("unexpected deploy request: %+v", received)
 	}
-	if received.Version != "1.1.0" {
-		t.Fatalf("unexpected chart version override: %+v", received)
+	if received.Version != "" || received.ImageOverrides["erun-devops"] != "erunpaas/erun-devops:1.1.0" {
+		t.Fatalf("unexpected image override deploy request: %+v", received)
 	}
 }
 
@@ -1024,17 +1047,14 @@ func TestRootDeployShorthandBuildsAndPushesLiteralChartImageDependencies(t *test
 
 	requireNoError(t, cmd.Execute(), "Execute failed")
 
-	if len(builds) != 2 {
-		t.Fatalf("expected 2 builds, got %+v", builds)
+	if len(builds) != 1 {
+		t.Fatalf("expected only current image build, got %+v", builds)
 	}
 	if len(pushes) != 0 {
 		t.Fatalf("expected no separate pushes, got %+v", pushes)
 	}
 	if builds[0].Tag != "erunpaas/erun-devops:1.1.0" {
 		t.Fatalf("unexpected primary build: %+v", builds[0])
-	}
-	if builds[1].Tag != "erunpaas/erun-dind:28.1.1-dind" {
-		t.Fatalf("unexpected dependency build: %+v", builds[1])
 	}
 	for _, build := range builds {
 		if !build.Push || !reflect.DeepEqual(build.Platforms, []string{"linux/amd64", "linux/arm64"}) {

@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,8 @@ import (
 
 const (
 	CloudProviderAWS = "aws"
+
+	CloudProviderBearerAudience = "erun-api"
 
 	CloudTokenStatusActive        = "active"
 	CloudTokenStatusExpired       = "expired"
@@ -36,13 +39,14 @@ type CloudReadStore interface {
 }
 
 type CloudProviderConfig struct {
-	Alias       string `json:"alias" yaml:"alias"`
-	Provider    string `json:"provider" yaml:"provider"`
-	Username    string `json:"username,omitempty" yaml:"username,omitempty"`
-	AccountID   string `json:"accountId,omitempty" yaml:"accountid,omitempty"`
-	Profile     string `json:"profile,omitempty" yaml:"profile,omitempty"`
-	SSORegion   string `json:"ssoRegion,omitempty" yaml:"ssoregion,omitempty"`
-	SSOStartURL string `json:"ssoStartUrl,omitempty" yaml:"ssostarturl,omitempty"`
+	Alias         string `json:"alias" yaml:"alias"`
+	Provider      string `json:"provider" yaml:"provider"`
+	Username      string `json:"username,omitempty" yaml:"username,omitempty"`
+	AccountID     string `json:"accountId,omitempty" yaml:"accountid,omitempty"`
+	Profile       string `json:"profile,omitempty" yaml:"profile,omitempty"`
+	SSORegion     string `json:"ssoRegion,omitempty" yaml:"ssoregion,omitempty"`
+	SSOStartURL   string `json:"ssoStartUrl,omitempty" yaml:"ssostarturl,omitempty"`
+	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty" yaml:"oidcissuerurl,omitempty"`
 }
 
 type CloudProviderStatus struct {
@@ -58,19 +62,32 @@ type AWSIdentity struct {
 }
 
 type InitAWSCloudProviderParams struct {
-	Profile     string
-	Username    string
-	AccountID   string
-	RoleName    string
-	Region      string
-	SSORegion   string
-	SSOStartURL string
-	SkipLogin   bool
+	Profile       string
+	Username      string
+	AccountID     string
+	RoleName      string
+	Region        string
+	SSORegion     string
+	SSOStartURL   string
+	OIDCIssuerURL string
+	SkipLogin     bool
 }
 
 type CloudLoginParams struct {
 	Alias string
 	Force bool
+}
+
+type CloudBearerParams struct {
+	Alias    string
+	Audience string
+}
+
+type CloudBearerToken struct {
+	Alias    string
+	Provider string
+	Token    string
+	Issuer   string
 }
 
 type SetEnvironmentCloudAliasParams struct {
@@ -82,6 +99,9 @@ type SetEnvironmentCloudAliasParams struct {
 type CloudDependencies struct {
 	RunAWSConfigureSSO func(Context, AWSProfileConfig) error
 	RunAWSLogin        func(Context, string) error
+	RunAWSLogout       func(Context, string) error
+	RunAWSBearerToken  func(Context, string, string) (string, error)
+	RunAWSEnableOIDC   func(Context, string) (string, error)
 	ResolveAWSIdentity func(Context, string) (AWSIdentity, error)
 	CheckAWSStatus     func(Context, CloudProviderConfig) CloudProviderStatus
 }
@@ -103,6 +123,7 @@ func NormalizeCloudProviderConfig(config CloudProviderConfig) CloudProviderConfi
 	config.Profile = strings.TrimSpace(config.Profile)
 	config.SSORegion = strings.TrimSpace(config.SSORegion)
 	config.SSOStartURL = strings.TrimSpace(config.SSOStartURL)
+	config.OIDCIssuerURL = normalizeOIDCIssuerURL(config.OIDCIssuerURL)
 	if config.Alias == "" && config.Provider != "" && config.Username != "" && config.AccountID != "" {
 		config.Alias = CloudProviderAlias(config.Username, config.AccountID, config.Provider)
 	}
@@ -168,17 +189,26 @@ func InitAWSCloudProvider(ctx Context, store CloudStore, params InitAWSCloudProv
 		accountID = strings.TrimSpace(params.AccountID)
 	}
 	provider := NormalizeCloudProviderConfig(CloudProviderConfig{
-		Provider:    CloudProviderAWS,
-		Username:    username,
-		AccountID:   accountID,
-		Profile:     profile,
-		SSORegion:   params.SSORegion,
-		SSOStartURL: params.SSOStartURL,
+		Provider:      CloudProviderAWS,
+		Username:      username,
+		AccountID:     accountID,
+		Profile:       profile,
+		SSORegion:     params.SSORegion,
+		SSOStartURL:   params.SSOStartURL,
+		OIDCIssuerURL: params.OIDCIssuerURL,
 	})
 	if provider.Alias == "" {
 		return CloudProviderConfig{}, fmt.Errorf("cloud provider alias cannot be resolved")
 	}
-	return SaveCloudProviderConfig(store, provider)
+	saved, err := SaveCloudProviderConfig(store, provider)
+	if err != nil {
+		return CloudProviderConfig{}, err
+	}
+	status, _, err := SetupCloudProviderOIDC(ctx, store, CloudBearerParams{Alias: saved.Alias}, deps)
+	if err != nil {
+		return CloudProviderConfig{}, err
+	}
+	return status.CloudProviderConfig, nil
 }
 
 func initAWSProfile(ctx Context, params InitAWSCloudProviderParams, deps CloudDependencies) (string, error) {
@@ -241,6 +271,98 @@ func LoginCloudProviderAlias(ctx Context, store CloudStore, params CloudLoginPar
 		return status, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
 	}
 	return CloudProviderTokenStatus(provider, deps), nil
+}
+
+func LogoutCloudProviderAlias(ctx Context, store CloudStore, params CloudLoginParams, deps CloudDependencies) (CloudProviderStatus, error) {
+	provider, err := ResolveCloudProvider(store, params.Alias)
+	if err != nil {
+		return CloudProviderStatus{}, err
+	}
+	deps = normalizeCloudDependencies(deps)
+	status := CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusUnknown}
+	switch provider.Provider {
+	case CloudProviderAWS:
+		if err := deps.RunAWSLogout(ctx, provider.Profile); err != nil {
+			return status, err
+		}
+	default:
+		return status, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
+	}
+	return CloudProviderTokenStatus(provider, deps), nil
+}
+
+func SetupCloudProviderOIDC(ctx Context, store CloudStore, params CloudBearerParams, deps CloudDependencies) (CloudProviderStatus, CloudBearerToken, error) {
+	if store == nil {
+		return CloudProviderStatus{}, CloudBearerToken{}, fmt.Errorf("store is required")
+	}
+	token, err := CloudProviderBearerToken(ctx, store, params, deps)
+	if err != nil {
+		return CloudProviderStatus{}, CloudBearerToken{}, err
+	}
+	provider, err := ResolveCloudProvider(store, token.Alias)
+	if err != nil {
+		return CloudProviderStatus{}, CloudBearerToken{}, err
+	}
+	provider.OIDCIssuerURL = token.Issuer
+	if ctx.DryRun {
+		ctx.Trace("write cloud provider OIDC issuer for " + provider.Alias)
+		return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusActive}, token, nil
+	}
+	provider, err = SaveCloudProviderConfig(store, provider)
+	if err != nil {
+		return CloudProviderStatus{}, CloudBearerToken{}, err
+	}
+	return CloudProviderTokenStatus(provider, deps), token, nil
+}
+
+func CloudProviderBearerToken(ctx Context, store CloudReadStore, params CloudBearerParams, deps CloudDependencies) (CloudBearerToken, error) {
+	provider, err := ResolveCloudProvider(store, params.Alias)
+	if err != nil {
+		return CloudBearerToken{}, err
+	}
+	deps = normalizeCloudDependencies(deps)
+	switch provider.Provider {
+	case CloudProviderAWS:
+		status := CloudProviderTokenStatus(provider, deps)
+		if status.Status != CloudTokenStatusActive {
+			if err := deps.RunAWSLogin(ctx, provider.Profile); err != nil {
+				return CloudBearerToken{}, err
+			}
+		}
+		audience := normalizeCloudBearerAudience(params.Audience)
+		rawToken, err := deps.RunAWSBearerToken(ctx, provider.Profile, audience)
+		if err != nil {
+			if !isAWSOutboundWebIdentityFederationDisabled(err) {
+				return CloudBearerToken{}, err
+			}
+			if _, enableErr := deps.RunAWSEnableOIDC(ctx, provider.Profile); enableErr != nil {
+				return CloudBearerToken{}, enableErr
+			}
+			rawToken, err = deps.RunAWSBearerToken(ctx, provider.Profile, audience)
+			if err != nil {
+				return CloudBearerToken{}, err
+			}
+		}
+		if ctx.DryRun && strings.TrimSpace(rawToken) == "" {
+			return CloudBearerToken{
+				Alias:    provider.Alias,
+				Provider: provider.Provider,
+				Issuer:   "derived-from-aws-web-identity-token",
+			}, nil
+		}
+		issuer, err := issuerFromJWT(rawToken)
+		if err != nil {
+			return CloudBearerToken{}, err
+		}
+		return CloudBearerToken{
+			Alias:    provider.Alias,
+			Provider: provider.Provider,
+			Token:    rawToken,
+			Issuer:   issuer,
+		}, nil
+	default:
+		return CloudBearerToken{}, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
+	}
 }
 
 func SetEnvironmentCloudProviderAlias(ctx Context, store EnvironmentCloudAliasStore, params SetEnvironmentCloudAliasParams) (EnvConfig, error) {
@@ -309,7 +431,7 @@ func saveManagedCloudAliasIfNeeded(ctx Context, store EnvironmentCloudAliasStore
 	return config, nil
 }
 
-func ResolveCloudProvider(store CloudStore, alias string) (CloudProviderConfig, error) {
+func ResolveCloudProvider(store CloudReadStore, alias string) (CloudProviderConfig, error) {
 	alias = strings.TrimSpace(alias)
 	if alias == "" {
 		return CloudProviderConfig{}, fmt.Errorf("cloud provider alias is required")
@@ -324,6 +446,55 @@ func ResolveCloudProvider(store CloudStore, alias string) (CloudProviderConfig, 
 		}
 	}
 	return CloudProviderConfig{}, fmt.Errorf("cloud provider alias %q is not configured", alias)
+}
+
+func ResolveTenantCloudProviderIssuers(store CloudReadStore, tenant TenantConfig) ([]string, error) {
+	aliases := normalizedTenantCloudProviderAliases(tenant.CloudProviderAliases)
+	if len(aliases) == 0 {
+		return nil, nil
+	}
+	issuers := make([]string, 0, len(aliases))
+	seen := make(map[string]struct{}, len(aliases))
+	for _, alias := range aliases {
+		provider, err := ResolveCloudProvider(store, alias)
+		if err != nil {
+			return nil, err
+		}
+		issuer := CloudProviderOIDCIssuerURL(provider)
+		if issuer == "" {
+			return nil, fmt.Errorf("cloud provider alias %q does not have an OIDC issuer URL", alias)
+		}
+		if _, ok := seen[issuer]; ok {
+			continue
+		}
+		issuers = append(issuers, issuer)
+		seen[issuer] = struct{}{}
+	}
+	return issuers, nil
+}
+
+func CloudProviderOIDCIssuerURL(provider CloudProviderConfig) string {
+	provider = NormalizeCloudProviderConfig(provider)
+	if provider.OIDCIssuerURL != "" {
+		return provider.OIDCIssuerURL
+	}
+	startURL := normalizeOIDCIssuerURL(provider.SSOStartURL)
+	if startURL == "" || strings.Contains(startURL, ".awsapps.com/start") || strings.Contains(startURL, ".portal.") {
+		return ""
+	}
+	return startURL
+}
+
+func NormalizeTenantCloudProviderAliases(aliases []string, primary string) ([]string, string) {
+	normalized := normalizedTenantCloudProviderAliases(aliases)
+	primary = strings.TrimSpace(primary)
+	if len(normalized) == 0 {
+		return nil, ""
+	}
+	if primary == "" || !cloudAliasListContains(normalized, primary) {
+		primary = normalized[0]
+	}
+	return normalized, primary
 }
 
 func SaveCloudProviderConfig(store CloudStore, provider CloudProviderConfig) (CloudProviderConfig, error) {
@@ -416,12 +587,85 @@ func normalizedCloudProviders(providers []CloudProviderConfig) []CloudProviderCo
 	return result
 }
 
+func normalizedTenantCloudProviderAliases(aliases []string) []string {
+	result := make([]string, 0, len(aliases))
+	seen := make(map[string]struct{}, len(aliases))
+	for _, alias := range aliases {
+		alias = strings.TrimSpace(alias)
+		if alias == "" {
+			continue
+		}
+		if _, ok := seen[alias]; ok {
+			continue
+		}
+		result = append(result, alias)
+		seen[alias] = struct{}{}
+	}
+	sort.Strings(result)
+	return result
+}
+
+func cloudAliasListContains(aliases []string, alias string) bool {
+	for _, candidate := range aliases {
+		if candidate == alias {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeOIDCIssuerURL(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimSuffix(value, "/.well-known/openid-configuration")
+	return strings.TrimRight(value, "/")
+}
+
+func normalizeCloudBearerAudience(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return CloudProviderBearerAudience
+	}
+	return value
+}
+
+func issuerFromJWT(token string) (string, error) {
+	token = strings.TrimSpace(token)
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return "", fmt.Errorf("cloud provider bearer token is not a JWT")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", fmt.Errorf("decode cloud provider bearer token payload: %w", err)
+	}
+	var claims struct {
+		Issuer string `json:"iss"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return "", fmt.Errorf("parse cloud provider bearer token payload: %w", err)
+	}
+	issuer := normalizeOIDCIssuerURL(claims.Issuer)
+	if issuer == "" {
+		return "", fmt.Errorf("cloud provider bearer token does not include issuer claim")
+	}
+	return issuer, nil
+}
+
 func normalizeCloudDependencies(deps CloudDependencies) CloudDependencies {
 	if deps.RunAWSConfigureSSO == nil {
 		deps.RunAWSConfigureSSO = defaultRunAWSConfigureSSO
 	}
 	if deps.RunAWSLogin == nil {
 		deps.RunAWSLogin = defaultRunAWSLogin
+	}
+	if deps.RunAWSLogout == nil {
+		deps.RunAWSLogout = defaultRunAWSLogout
+	}
+	if deps.RunAWSBearerToken == nil {
+		deps.RunAWSBearerToken = defaultRunAWSBearerToken
+	}
+	if deps.RunAWSEnableOIDC == nil {
+		deps.RunAWSEnableOIDC = defaultRunAWSEnableOIDC
 	}
 	if deps.ResolveAWSIdentity == nil {
 		deps.ResolveAWSIdentity = defaultResolveAWSIdentity
@@ -510,6 +754,101 @@ func defaultRunAWSLogin(ctx Context, profile string) error {
 		return fmt.Errorf("aws sso login: %s", commandErrorMessage(err, stderrBuffer.String(), "AWS SSO login failed"))
 	}
 	return nil
+}
+
+func defaultRunAWSLogout(ctx Context, profile string) error {
+	args := []string{"sso", "logout"}
+	if strings.TrimSpace(profile) != "" {
+		args = append(args, "--profile", strings.TrimSpace(profile))
+	}
+	ctx.TraceCommand("", "aws", args...)
+	if ctx.DryRun {
+		return nil
+	}
+	stdout, _ := captureWriter(ctx.Stdout)
+	stderr, stderrBuffer := captureWriter(ctx.Stderr)
+	if err := RawCommandRunner("", "aws", args, ctx.Stdin, stdout, stderr); err != nil {
+		return fmt.Errorf("aws sso logout: %s", commandErrorMessage(err, stderrBuffer.String(), "AWS SSO logout failed"))
+	}
+	return nil
+}
+
+func defaultRunAWSBearerToken(ctx Context, profile, audience string) (string, error) {
+	audience = normalizeCloudBearerAudience(audience)
+	args := []string{
+		"sts", "get-web-identity-token",
+		"--audience", audience,
+		"--signing-algorithm", "RS256",
+		"--duration-seconds", "900",
+		"--query", "WebIdentityToken",
+		"--output", "text",
+	}
+	if strings.TrimSpace(profile) != "" {
+		args = append(args, "--profile", strings.TrimSpace(profile))
+	}
+	ctx.TraceCommand("", "aws", args...)
+	if ctx.DryRun {
+		return "", nil
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := RawCommandRunner("", "aws", args, nil, &stdout, &stderr); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = err.Error()
+		}
+		return "", fmt.Errorf("get AWS web identity token: %s", message)
+	}
+	token := strings.TrimSpace(stdout.String())
+	if token == "" {
+		return "", fmt.Errorf("get AWS web identity token: empty token")
+	}
+	return token, nil
+}
+
+func defaultRunAWSEnableOIDC(ctx Context, profile string) (string, error) {
+	args := []string{
+		"iam", "enable-outbound-web-identity-federation",
+		"--query", "IssuerIdentifier",
+		"--output", "text",
+	}
+	if strings.TrimSpace(profile) != "" {
+		args = append(args, "--profile", strings.TrimSpace(profile))
+	}
+	ctx.TraceCommand("", "aws", args...)
+	if ctx.DryRun {
+		return "", nil
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if err := RawCommandRunner("", "aws", args, nil, &stdout, &stderr); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = err.Error()
+		}
+		if isAWSOutboundWebIdentityFederationAlreadyEnabledMessage(message) {
+			return "", nil
+		}
+		return "", fmt.Errorf("enable AWS outbound web identity federation: %s", message)
+	}
+	return normalizeOIDCIssuerURL(stdout.String()), nil
+}
+
+func isAWSOutboundWebIdentityFederationDisabled(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "outboundwebidentityfederationdisabledexception") ||
+		strings.Contains(message, "outboundwebidentityfederation is disabled") ||
+		strings.Contains(message, "outbound web identity federation is disabled")
+}
+
+func isAWSOutboundWebIdentityFederationAlreadyEnabledMessage(message string) bool {
+	message = strings.ToLower(message)
+	return strings.Contains(message, "featureenabled") ||
+		strings.Contains(message, "outbound identity federation is already enabled") ||
+		strings.Contains(message, "outbound web identity federation is already enabled")
 }
 
 func generatedAWSProfileName() string {
