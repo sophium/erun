@@ -1,6 +1,6 @@
 CREATE TABLE reviews (
-  review_id UUID PRIMARY KEY,
-  tenant_id UUID NOT NULL,
+  review_id UUID PRIMARY KEY DEFAULT uuidv7(),
+  tenant_id UUID NOT NULL DEFAULT erun_current_tenant_id(),
   name TEXT NOT NULL,
   target_branch TEXT NOT NULL,
   source_branch TEXT NOT NULL,

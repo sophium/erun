@@ -1,6 +1,6 @@
 CREATE TABLE role_permissions (
-  role_permission_id UUID PRIMARY KEY,
-  tenant_id UUID NOT NULL,
+  role_permission_id UUID PRIMARY KEY DEFAULT uuidv7(),
+  tenant_id UUID NOT NULL DEFAULT erun_current_tenant_id(),
   role_id UUID NOT NULL,
   api_method TEXT,
   api_path TEXT,

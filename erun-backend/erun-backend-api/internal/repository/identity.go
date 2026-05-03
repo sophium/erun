@@ -7,18 +7,22 @@ import (
 	"log"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/model"
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
 )
 
 type IdentityRepository struct {
-	db      *sql.DB
+	db      *bun.DB
 	dialect Dialect
 }
 
 func NewIdentityRepository(db *sql.DB, dialect Dialect) *IdentityRepository {
-	return &IdentityRepository{db: db, dialect: dialect}
+	if dialect == "" {
+		dialect = DialectPostgres
+	}
+	return &IdentityRepository{db: bun.NewDB(db, pgdialect.New()), dialect: dialect}
 }
 
 func (r *IdentityRepository) ResolveIdentity(ctx context.Context, claims security.Claims) (model.Tenant, model.User, error) {
@@ -41,24 +45,14 @@ func (r *IdentityRepository) ResolveIdentity(ctx context.Context, claims securit
 }
 
 func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, issuer string) (model.Tenant, error) {
-	query := `
+	var tenant model.Tenant
+	err := r.db.NewRaw(`
 		SELECT t.tenant_id, t.name, t.type, t.created_at, t.updated_at
 		  FROM tenant_issuers ti
 		  JOIN tenants t
 		    ON t.tenant_id = ti.tenant_id
 		 WHERE ti.issuer = ?
-	`
-	if r.dialect == DialectPostgres {
-		query = NewTxManager(r.db, r.dialect).rebind(query)
-	}
-	var tenant model.Tenant
-	err := r.db.QueryRowContext(ctx, query, issuer).Scan(
-		&tenant.TenantID,
-		&tenant.Name,
-		&tenant.Type,
-		scanTime(&tenant.CreatedAt),
-		scanTime(&tenant.UpdatedAt),
-	)
+	`, issuer).Scan(ctx, &tenant)
 	if err != nil {
 		return model.Tenant{}, normalizeNoRows(err)
 	}
@@ -66,120 +60,59 @@ func (r *IdentityRepository) ResolveTenantByIssuer(ctx context.Context, issuer s
 }
 
 func (r *IdentityRepository) bootstrapFirstIdentity(ctx context.Context, claims security.Claims) (model.Tenant, model.User, error) {
-	tenantID, err := newUUIDv7()
-	if err != nil {
-		return model.Tenant{}, model.User{}, err
-	}
-	userID, err := newUUIDv7()
-	if err != nil {
-		return model.Tenant{}, model.User{}, err
-	}
-	readRoleID, err := newUUIDv7()
-	if err != nil {
-		return model.Tenant{}, model.User{}, err
-	}
-	writeRoleID, err := newUUIDv7()
-	if err != nil {
-		return model.Tenant{}, model.User{}, err
-	}
-	readPermissionID, err := newUUIDv7()
-	if err != nil {
-		return model.Tenant{}, model.User{}, err
-	}
-	writePermissionID, err := newUUIDv7()
-	if err != nil {
-		return model.Tenant{}, model.User{}, err
-	}
+	var tenant model.Tenant
+	var user model.User
 
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return model.Tenant{}, model.User{}, err
-	}
-	defer tx.Rollback()
-
-	var tenantCount int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tenants`).Scan(&tenantCount); err != nil {
-		return model.Tenant{}, model.User{}, err
-	}
-	if tenantCount != 0 {
-		return model.Tenant{}, model.User{}, ErrNotFound
-	}
-
-	if r.dialect == DialectPostgres {
-		if err := NewTxManager(r.db, r.dialect).setPostgresSecurityContext(ctx, tx, security.Context{
-			TenantID:   tenantID,
-			TenantType: string(model.TenantTypeOperations),
-			ErunUserID: userID,
-		}); err != nil {
-			return model.Tenant{}, model.User{}, err
+	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		var tenantCount int
+		if err := tx.NewRaw(`SELECT COUNT(*) FROM tenants`).Scan(ctx, &tenantCount); err != nil {
+			return err
 		}
-	}
-
-	username := strings.TrimSpace(claims.Username)
-	if username == "" {
-		username = claims.Subject
-	}
-
-	statements := []struct {
-		query string
-		args  []any
-	}{
-		{
-			query: `INSERT INTO tenants (tenant_id, name, type) VALUES (?, ?, ?)`,
-			args:  []any{tenantID, "operations", model.TenantTypeOperations},
-		},
-		{
-			query: `INSERT INTO tenant_issuers (tenant_id, issuer) VALUES (?, ?)`,
-			args:  []any{tenantID, claims.Issuer},
-		},
-		{
-			query: `INSERT INTO users (user_id, tenant_id, username) VALUES (?, ?, ?)`,
-			args:  []any{userID, tenantID, username},
-		},
-		{
-			query: `INSERT INTO user_external_ids (tenant_id, user_id, issuer, external_id) VALUES (?, ?, ?, ?)`,
-			args:  []any{tenantID, userID, claims.Issuer, claims.Subject},
-		},
-		{
-			query: `INSERT INTO roles (role_id, tenant_id, name) VALUES (?, ?, ?)`,
-			args:  []any{readRoleID, tenantID, "ReadAll"},
-		},
-		{
-			query: `INSERT INTO roles (role_id, tenant_id, name) VALUES (?, ?, ?)`,
-			args:  []any{writeRoleID, tenantID, "WriteAll"},
-		},
-		{
-			query: `INSERT INTO role_permissions (role_permission_id, tenant_id, role_id, api_method_pattern, api_path_pattern) VALUES (?, ?, ?, ?, ?)`,
-			args:  []any{readPermissionID, tenantID, readRoleID, "^(GET|HEAD|OPTIONS)$", "^/.*$"},
-		},
-		{
-			query: `INSERT INTO role_permissions (role_permission_id, tenant_id, role_id, api_method_pattern, api_path_pattern) VALUES (?, ?, ?, ?, ?)`,
-			args:  []any{writePermissionID, tenantID, writeRoleID, "^(POST|PUT|PATCH|DELETE)$", "^/.*$"},
-		},
-		{
-			query: `INSERT INTO user_roles (tenant_id, user_id, role_id) VALUES (?, ?, ?)`,
-			args:  []any{tenantID, userID, readRoleID},
-		},
-		{
-			query: `INSERT INTO user_roles (tenant_id, user_id, role_id) VALUES (?, ?, ?)`,
-			args:  []any{tenantID, userID, writeRoleID},
-		},
-	}
-	for _, stmt := range statements {
-		if _, err := tx.ExecContext(ctx, r.rebind(stmt.query), stmt.args...); err != nil {
-			return model.Tenant{}, model.User{}, err
+		if tenantCount != 0 {
+			return ErrNotFound
 		}
-	}
 
-	tenant, err := r.tenantByID(ctx, tx, tenantID)
+		var err error
+		tenant, err = r.insertTenant(ctx, tx, "operations", model.TenantTypeOperations)
+		if err != nil {
+			return err
+		}
+		if r.dialect == DialectPostgres {
+			if err := r.setPostgresSecurityContext(ctx, tx, security.Context{
+				TenantID:   tenant.TenantID,
+				TenantType: string(model.TenantTypeOperations),
+			}); err != nil {
+				return err
+			}
+		}
+
+		username := strings.TrimSpace(claims.Username)
+		if username == "" {
+			username = claims.Subject
+		}
+
+		if _, err := tx.NewRaw(`INSERT INTO tenant_issuers (issuer) VALUES (?)`, claims.Issuer).Exec(ctx); err != nil {
+			return err
+		}
+		user, err = r.insertUser(ctx, tx, username)
+		if err != nil {
+			return err
+		}
+		if r.dialect == DialectPostgres {
+			if err := r.setPostgresSecurityContext(ctx, tx, security.Context{
+				TenantID:   tenant.TenantID,
+				TenantType: string(model.TenantTypeOperations),
+				ErunUserID: user.UserID,
+			}); err != nil {
+				return err
+			}
+		}
+		if err := r.insertDefaultUserAccess(ctx, tx, user.UserID, claims.Issuer, claims.Subject); err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
-		return model.Tenant{}, model.User{}, err
-	}
-	user, err := r.userByID(ctx, tx, tenantID, userID)
-	if err != nil {
-		return model.Tenant{}, model.User{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return model.Tenant{}, model.User{}, err
 	}
 	log.Printf("erun api identity enrolled first tenant/user tenant=%q tenantName=%q tenantType=%q user=%q issuer=%q subject=%q username=%q", tenant.TenantID, tenant.Name, tenant.Type, user.UserID, claims.Issuer, claims.Subject, user.Username)
@@ -187,159 +120,133 @@ func (r *IdentityRepository) bootstrapFirstIdentity(ctx context.Context, claims 
 }
 
 func (r *IdentityRepository) bootstrapFirstTenantUser(ctx context.Context, tenant model.Tenant, claims security.Claims) (model.User, error) {
-	userID, err := newUUIDv7()
-	if err != nil {
-		return model.User{}, err
-	}
-	readRoleID, err := newUUIDv7()
-	if err != nil {
-		return model.User{}, err
-	}
-	writeRoleID, err := newUUIDv7()
-	if err != nil {
-		return model.User{}, err
-	}
-	readPermissionID, err := newUUIDv7()
-	if err != nil {
-		return model.User{}, err
-	}
-	writePermissionID, err := newUUIDv7()
-	if err != nil {
-		return model.User{}, err
-	}
+	var user model.User
 
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return model.User{}, err
-	}
-	defer tx.Rollback()
-
-	var userCount int
-	if err := tx.QueryRowContext(ctx, r.rebind(`SELECT COUNT(*) FROM users WHERE tenant_id = ?`), tenant.TenantID).Scan(&userCount); err != nil {
-		return model.User{}, err
-	}
-	if userCount != 0 {
-		return model.User{}, ErrNotFound
-	}
-
-	if r.dialect == DialectPostgres {
-		if err := NewTxManager(r.db, r.dialect).setPostgresSecurityContext(ctx, tx, security.Context{
-			TenantID:   tenant.TenantID,
-			TenantType: string(tenant.Type),
-			ErunUserID: userID,
-		}); err != nil {
-			return model.User{}, err
+	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		var userCount int
+		if err := tx.NewRaw(`SELECT COUNT(*) FROM users WHERE tenant_id = ?`, tenant.TenantID).Scan(ctx, &userCount); err != nil {
+			return err
 		}
-	}
-
-	username := strings.TrimSpace(claims.Username)
-	if username == "" {
-		username = claims.Subject
-	}
-
-	statements := []struct {
-		query string
-		args  []any
-	}{
-		{
-			query: `INSERT INTO users (user_id, tenant_id, username) VALUES (?, ?, ?)`,
-			args:  []any{userID, tenant.TenantID, username},
-		},
-		{
-			query: `INSERT INTO user_external_ids (tenant_id, user_id, issuer, external_id) VALUES (?, ?, ?, ?)`,
-			args:  []any{tenant.TenantID, userID, claims.Issuer, claims.Subject},
-		},
-		{
-			query: `INSERT INTO roles (role_id, tenant_id, name) VALUES (?, ?, ?)`,
-			args:  []any{readRoleID, tenant.TenantID, "ReadAll"},
-		},
-		{
-			query: `INSERT INTO roles (role_id, tenant_id, name) VALUES (?, ?, ?)`,
-			args:  []any{writeRoleID, tenant.TenantID, "WriteAll"},
-		},
-		{
-			query: `INSERT INTO role_permissions (role_permission_id, tenant_id, role_id, api_method_pattern, api_path_pattern) VALUES (?, ?, ?, ?, ?)`,
-			args:  []any{readPermissionID, tenant.TenantID, readRoleID, "^(GET|HEAD|OPTIONS)$", "^/.*$"},
-		},
-		{
-			query: `INSERT INTO role_permissions (role_permission_id, tenant_id, role_id, api_method_pattern, api_path_pattern) VALUES (?, ?, ?, ?, ?)`,
-			args:  []any{writePermissionID, tenant.TenantID, writeRoleID, "^(POST|PUT|PATCH|DELETE)$", "^/.*$"},
-		},
-		{
-			query: `INSERT INTO user_roles (tenant_id, user_id, role_id) VALUES (?, ?, ?)`,
-			args:  []any{tenant.TenantID, userID, readRoleID},
-		},
-		{
-			query: `INSERT INTO user_roles (tenant_id, user_id, role_id) VALUES (?, ?, ?)`,
-			args:  []any{tenant.TenantID, userID, writeRoleID},
-		},
-	}
-	for _, stmt := range statements {
-		if _, err := tx.ExecContext(ctx, r.rebind(stmt.query), stmt.args...); err != nil {
-			return model.User{}, err
+		if userCount != 0 {
+			return ErrNotFound
 		}
-	}
 
-	user, err := r.userByID(ctx, tx, tenant.TenantID, userID)
+		if r.dialect == DialectPostgres {
+			if err := r.setPostgresSecurityContext(ctx, tx, security.Context{
+				TenantID:   tenant.TenantID,
+				TenantType: string(tenant.Type),
+			}); err != nil {
+				return err
+			}
+		}
+
+		username := strings.TrimSpace(claims.Username)
+		if username == "" {
+			username = claims.Subject
+		}
+
+		var err error
+		user, err = r.insertUser(ctx, tx, username)
+		if err != nil {
+			return err
+		}
+		if r.dialect == DialectPostgres {
+			if err := r.setPostgresSecurityContext(ctx, tx, security.Context{
+				TenantID:   tenant.TenantID,
+				TenantType: string(tenant.Type),
+				ErunUserID: user.UserID,
+			}); err != nil {
+				return err
+			}
+		}
+		if err := r.insertDefaultUserAccess(ctx, tx, user.UserID, claims.Issuer, claims.Subject); err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
-		return model.User{}, err
-	}
-	if err := tx.Commit(); err != nil {
 		return model.User{}, err
 	}
 	log.Printf("erun api identity enrolled first user tenant=%q tenantName=%q tenantType=%q user=%q issuer=%q subject=%q username=%q", tenant.TenantID, tenant.Name, tenant.Type, user.UserID, claims.Issuer, claims.Subject, user.Username)
 	return user, nil
 }
 
-func (r *IdentityRepository) tenantByID(ctx context.Context, tx *sql.Tx, tenantID string) (model.Tenant, error) {
-	var tenant model.Tenant
-	err := tx.QueryRowContext(ctx, r.rebind(`
-		SELECT tenant_id, name, type, created_at, updated_at
-		  FROM tenants
-		 WHERE tenant_id = ?
-	`), tenantID).Scan(
-		&tenant.TenantID,
-		&tenant.Name,
-		&tenant.Type,
-		scanTime(&tenant.CreatedAt),
-		scanTime(&tenant.UpdatedAt),
-	)
+func (r *IdentityRepository) insertTenant(ctx context.Context, tx bun.Tx, name string, tenantType model.TenantType) (model.Tenant, error) {
+	tenant := model.Tenant{Name: name, Type: tenantType}
+	err := tx.NewInsert().
+		Model(&tenant).
+		Column("name", "type").
+		Returning("*").
+		Scan(ctx)
 	if err != nil {
 		return model.Tenant{}, normalizeNoRows(err)
 	}
 	return tenant, nil
 }
 
-func (r *IdentityRepository) userByID(ctx context.Context, tx *sql.Tx, tenantID string, userID string) (model.User, error) {
-	var user model.User
-	err := tx.QueryRowContext(ctx, r.rebind(`
-		SELECT user_id, tenant_id, username, created_at, updated_at
-		  FROM users
-		 WHERE tenant_id = ?
-		   AND user_id = ?
-	`), tenantID, userID).Scan(
-		&user.UserID,
-		&user.TenantID,
-		&user.Username,
-		scanTime(&user.CreatedAt),
-		scanTime(&user.UpdatedAt),
-	)
+func (r *IdentityRepository) insertUser(ctx context.Context, tx bun.Tx, username string) (model.User, error) {
+	user := model.User{Username: username}
+	err := tx.NewInsert().
+		Model(&user).
+		Column("username").
+		Returning("*").
+		Scan(ctx)
 	if err != nil {
 		return model.User{}, normalizeNoRows(err)
 	}
 	return user, nil
 }
 
-func (r *IdentityRepository) rebind(query string) string {
-	return NewTxManager(r.db, r.dialect).rebind(query)
+func (r *IdentityRepository) insertDefaultUserAccess(ctx context.Context, tx bun.Tx, userID string, issuer string, subject string) error {
+	readRoleID, err := r.insertRole(ctx, tx, "ReadAll")
+	if err != nil {
+		return err
+	}
+	writeRoleID, err := r.insertRole(ctx, tx, "WriteAll")
+	if err != nil {
+		return err
+	}
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{
+			query: `INSERT INTO user_external_ids (user_id, issuer, external_id) VALUES (?, ?, ?)`,
+			args:  []any{userID, issuer, subject},
+		},
+		{
+			query: `INSERT INTO role_permissions (role_id, api_method_pattern, api_path_pattern) VALUES (?, ?, ?)`,
+			args:  []any{readRoleID, "^(GET|HEAD|OPTIONS)$", "^/.*$"},
+		},
+		{
+			query: `INSERT INTO role_permissions (role_id, api_method_pattern, api_path_pattern) VALUES (?, ?, ?)`,
+			args:  []any{writeRoleID, "^(POST|PUT|PATCH|DELETE)$", "^/.*$"},
+		},
+		{
+			query: `INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`,
+			args:  []any{userID, readRoleID},
+		},
+		{
+			query: `INSERT INTO user_roles (user_id, role_id) VALUES (?, ?)`,
+			args:  []any{userID, writeRoleID},
+		},
+	}
+	for _, stmt := range statements {
+		if _, err := tx.NewRaw(stmt.query, stmt.args...).Exec(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func newUUIDv7() (string, error) {
-	id, err := uuid.NewV7()
-	if err != nil {
-		return "", err
-	}
-	return id.String(), nil
+func (r *IdentityRepository) insertRole(ctx context.Context, tx bun.Tx, name string) (string, error) {
+	var roleID string
+	err := tx.NewRaw(`
+		INSERT INTO roles (name)
+		VALUES (?)
+		RETURNING role_id
+	`, name).Scan(ctx, &roleID)
+	return roleID, err
 }
 
 func (r *IdentityRepository) ResolveUserByExternalID(ctx context.Context, tenantID string, issuer string, externalID string) (model.User, error) {
@@ -353,49 +260,43 @@ func (r *IdentityRepository) ResolveUserByExternalID(ctx context.Context, tenant
 		   AND uei.issuer = ?
 		   AND uei.external_id = ?
 	`
-	if r.dialect == DialectPostgres {
-		return r.resolveUserByExternalIDPostgres(ctx, query, tenantID, issuer, externalID)
-	}
+	return r.resolveUserByExternalIDPostgres(ctx, query, tenantID, issuer, externalID)
+}
+
+func (r *IdentityRepository) resolveUserByExternalIDPostgres(ctx context.Context, query string, tenantID string, issuer string, externalID string) (model.User, error) {
 	var user model.User
-	err := r.db.QueryRowContext(ctx, query, tenantID, issuer, externalID).Scan(
-		&user.UserID,
-		&user.TenantID,
-		&user.Username,
-		scanTime(&user.CreatedAt),
-		scanTime(&user.UpdatedAt),
-	)
+	err := r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		if r.dialect == DialectPostgres {
+			if err := r.setPostgresSecurityContext(ctx, tx, security.Context{
+				TenantID: tenantID,
+			}); err != nil {
+				return err
+			}
+		}
+		return tx.NewRaw(query, tenantID, issuer, externalID).Scan(ctx, &user)
+	})
 	if err != nil {
 		return model.User{}, normalizeNoRows(err)
 	}
 	return user, nil
 }
 
-func (r *IdentityRepository) resolveUserByExternalIDPostgres(ctx context.Context, query string, tenantID string, issuer string, externalID string) (model.User, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return model.User{}, err
+func (r *IdentityRepository) setPostgresSecurityContext(ctx context.Context, tx bun.Tx, securityContext security.Context) error {
+	role := "erun_tenant"
+	if securityContext.TenantType == string(model.TenantTypeOperations) {
+		role = "erun_operations"
 	}
-	defer tx.Rollback()
-
-	if err := NewTxManager(r.db, r.dialect).setPostgresSecurityContext(ctx, tx, security.Context{
-		TenantID: tenantID,
-	}); err != nil {
-		return model.User{}, err
+	if _, err := tx.ExecContext(ctx, `SET LOCAL ROLE `+role); err != nil {
+		return err
 	}
-
-	var user model.User
-	err = tx.QueryRowContext(ctx, NewTxManager(r.db, r.dialect).rebind(query), tenantID, issuer, externalID).Scan(
-		&user.UserID,
-		&user.TenantID,
-		&user.Username,
-		scanTime(&user.CreatedAt),
-		scanTime(&user.UpdatedAt),
-	)
-	if err != nil {
-		return model.User{}, normalizeNoRows(err)
+	if _, err := tx.NewRaw(`SELECT set_config('erun.tenant_id', ?, true)`, securityContext.TenantID).Exec(ctx); err != nil {
+		return err
 	}
-	if err := tx.Commit(); err != nil {
-		return model.User{}, err
+	if strings.TrimSpace(securityContext.ErunUserID) == "" {
+		return nil
 	}
-	return user, nil
+	if _, err := tx.NewRaw(`SELECT set_config('erun.user_id', ?, true)`, securityContext.ErunUserID).Exec(ctx); err != nil {
+		return err
+	}
+	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"regexp"
 
 	"github.com/sophium/erun/erun-backend/erun-backend-api/internal/security"
+	"github.com/uptrace/bun"
 )
 
 type PermissionAuthorizer struct {
@@ -13,7 +14,7 @@ type PermissionAuthorizer struct {
 }
 
 func NewPermissionAuthorizer(db *sql.DB) *PermissionAuthorizer {
-	return NewPermissionAuthorizerForDialect(db, DialectSQLite)
+	return NewPermissionAuthorizerForDialect(db, DialectPostgres)
 }
 
 func NewPermissionAuthorizerForDialect(db *sql.DB, dialect Dialect) *PermissionAuthorizer {
@@ -26,8 +27,9 @@ func (a *PermissionAuthorizer) Authorize(ctx context.Context, method string, api
 		return ErrMissingSecurityContext
 	}
 
-	err = a.txs.WithinTx(ctx, func(ctx context.Context, tx *sql.Tx) error {
-		rows, err := tx.QueryContext(ctx, a.txs.rebind(`
+	err = a.txs.WithinTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		var rules []permissionRule
+		if err := tx.NewRaw(`
 			SELECT rp.api_method,
 			       rp.api_path,
 			       rp.api_method_pattern,
@@ -36,24 +38,12 @@ func (a *PermissionAuthorizer) Authorize(ctx context.Context, method string, api
 			  JOIN role_permissions rp
 			    ON rp.tenant_id = ur.tenant_id
 			   AND rp.role_id = ur.role_id
-			 WHERE ur.tenant_id = ?
-			   AND ur.user_id = ?
-		`), securityContext.TenantID, securityContext.ErunUserID)
-		if err != nil {
+			 WHERE ur.user_id = ?
+		`, securityContext.ErunUserID).Scan(ctx, &rules); err != nil {
 			return err
 		}
-		defer rows.Close()
 
-		for rows.Next() {
-			var rule permissionRule
-			if err := rows.Scan(
-				&rule.APIMethod,
-				&rule.APIPath,
-				&rule.APIMethodPattern,
-				&rule.APIPathPattern,
-			); err != nil {
-				return err
-			}
+		for _, rule := range rules {
 			matches, err := rule.matches(method, apiPath)
 			if err != nil {
 				return err
@@ -62,19 +52,16 @@ func (a *PermissionAuthorizer) Authorize(ctx context.Context, method string, api
 				return nil
 			}
 		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
 		return ErrForbidden
 	})
 	return err
 }
 
 type permissionRule struct {
-	APIMethod        sql.NullString
-	APIPath          sql.NullString
-	APIMethodPattern sql.NullString
-	APIPathPattern   sql.NullString
+	APIMethod        sql.NullString `bun:"api_method"`
+	APIPath          sql.NullString `bun:"api_path"`
+	APIMethodPattern sql.NullString `bun:"api_method_pattern"`
+	APIPathPattern   sql.NullString `bun:"api_path_pattern"`
 }
 
 func (r permissionRule) matches(method string, apiPath string) (bool, error) {

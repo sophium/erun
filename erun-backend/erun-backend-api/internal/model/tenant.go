@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"github.com/uptrace/bun"
+)
 
 type TenantType string
 
@@ -10,9 +14,10 @@ const (
 )
 
 type Tenant struct {
-	TenantID  string     `json:"tenantId"`
-	Name      string     `json:"name"`
-	Type      TenantType `json:"type"`
-	CreatedAt time.Time  `json:"createdAt"`
-	UpdatedAt time.Time  `json:"updatedAt"`
+	bun.BaseModel `bun:"table:tenants,alias:t"`
+	TenantID      string     `json:"tenantId" bun:"tenant_id,pk,scanonly"`
+	Name          string     `json:"name" bun:"name"`
+	Type          TenantType `json:"type" bun:"type"`
+	CreatedAt     time.Time  `json:"createdAt" bun:"created_at,scanonly"`
+	UpdatedAt     time.Time  `json:"updatedAt" bun:"updated_at,scanonly"`
 }

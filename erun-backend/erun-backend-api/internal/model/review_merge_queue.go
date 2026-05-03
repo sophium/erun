@@ -1,12 +1,17 @@
 package model
 
-import "time"
+import (
+	"time"
+
+	"github.com/uptrace/bun"
+)
 
 type ReviewMergeQueueEntry struct {
-	ReviewMergeQueueID int64     `json:"reviewMergeQueueId"`
-	TenantID           string    `json:"tenantId"`
-	TargetBranch       string    `json:"targetBranch"`
-	ReviewID           string    `json:"reviewId"`
-	CreatedAt          time.Time `json:"createdAt"`
-	UpdatedAt          time.Time `json:"updatedAt"`
+	bun.BaseModel      `bun:"table:review_merge_queue,alias:q"`
+	ReviewMergeQueueID int64     `json:"reviewMergeQueueId" bun:"review_merge_queue_id,pk,scanonly"`
+	TenantID           string    `json:"tenantId" bun:"tenant_id,scanonly"`
+	TargetBranch       string    `json:"targetBranch" bun:"target_branch"`
+	ReviewID           string    `json:"reviewId" bun:"review_id"`
+	CreatedAt          time.Time `json:"createdAt" bun:"created_at,scanonly"`
+	UpdatedAt          time.Time `json:"updatedAt" bun:"updated_at,scanonly"`
 }

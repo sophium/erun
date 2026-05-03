@@ -56,7 +56,7 @@ function TenantDashboardTabContent({ data }: { data: AppState['tenantDashboard']
   return (
     <>
       <TabsContent value="users" className="min-h-0 overflow-auto">
-        <UsersTable user={view.user} apiError={view.apiError} />
+        <UsersTable users={view.users} apiError={view.apiError} />
       </TabsContent>
       <TabsContent value="queue" className="min-h-0 overflow-auto">
         <ReviewsTable reviews={view.mergeQueue} empty={view.apiError || 'No reviews are waiting in the merge queue'} destructive={view.hasAPIError} />
@@ -75,7 +75,7 @@ function TenantDashboardTabContent({ data }: { data: AppState['tenantDashboard']
 }
 
 interface TenantDashboardViewData {
-  user: UITenantDashboardUser | null;
+  users: UITenantDashboardUser[];
   apiError: string;
   hasAPIError: boolean;
   mergeQueue: UITenantDashboardReview[];
@@ -86,7 +86,7 @@ interface TenantDashboardViewData {
 }
 
 const emptyTenantDashboardViewData: TenantDashboardViewData = {
-  user: null,
+  users: [],
   apiError: '',
   hasAPIError: false,
   mergeQueue: [],
@@ -102,7 +102,7 @@ function tenantDashboardViewData(data: AppState['tenantDashboard']['data']): Ten
   }
   const apiError = data.apiError ?? '';
   return {
-    user: data.user ?? null,
+    users: data.user ? [data.user] : [],
     apiError,
     hasAPIError: apiError.length > 0,
     mergeQueue: data.mergeQueue ?? [],
@@ -113,18 +113,21 @@ function tenantDashboardViewData(data: AppState['tenantDashboard']['data']): Ten
   };
 }
 
-function UsersTable({ user, apiError }: { user: NonNullable<AppState['tenantDashboard']['data']>['user'] | null; apiError: string }): React.ReactElement {
-  if (!user) {
-    return <DashboardMessage message={apiError || 'No user identity loaded'} destructive={Boolean(apiError)} />;
+function UsersTable({ users, apiError }: { users: UITenantDashboardUser[]; apiError: string }): React.ReactElement {
+  if (users.length === 0) {
+    return <DashboardMessage message={apiError || 'No users found'} destructive={Boolean(apiError)} />;
   }
   return (
-    <DataTable headers={['User', 'Tenant', 'Issuer', 'Subject']}>
-      <tr>
-        <DataCell strong>{user.userId}</DataCell>
-        <DataCell>{user.tenantId}</DataCell>
-        <DataCell>{user.issuer}</DataCell>
-        <DataCell>{user.subject}</DataCell>
-      </tr>
+    <DataTable headers={['User', 'Username', 'Tenant', 'Issuer', 'Subject']}>
+      {users.map((user) => (
+        <tr key={user.userId}>
+          <DataCell strong>{user.userId}</DataCell>
+          <DataCell>{user.username}</DataCell>
+          <DataCell>{user.tenantId}</DataCell>
+          <DataCell>{user.issuer}</DataCell>
+          <DataCell>{user.subject}</DataCell>
+        </tr>
+      ))}
     </DataTable>
   );
 }

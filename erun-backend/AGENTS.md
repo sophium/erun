@@ -20,4 +20,4 @@ Module-area guidance for `erun-backend`. Follow the repository root `AGENTS.md` 
 
 - Externally visible identifiers must be UUIDv7 values.
 - Keep internal database implementation details out of API-visible IDs.
-- Use `UUID` database columns for externally visible IDs in shared schema. PostgreSQL enforces UUID values, while SQLite accepts the PostgreSQL type name through its affinity rules.
+- Use PostgreSQL `UUID` database columns for externally visible IDs.

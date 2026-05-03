@@ -1,6 +1,6 @@
 CREATE TABLE builds (
-  build_id UUID PRIMARY KEY,
-  tenant_id UUID NOT NULL,
+  build_id UUID PRIMARY KEY DEFAULT uuidv7(),
+  tenant_id UUID NOT NULL DEFAULT erun_current_tenant_id(),
   review_id UUID NOT NULL,
   successful BOOLEAN NOT NULL,
   commit_id TEXT NOT NULL,

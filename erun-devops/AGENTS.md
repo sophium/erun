@@ -26,6 +26,9 @@ Additional guidance for `erun-devops` and its subtree.
   - the `erun-dind` sidecar provides the daemon
   - `/var/lib/docker` is persisted on the `erun-devops-docker` PVC
   - `/home/erun` is persisted on the `erun-devops-home` PVC
+  - the backend API uses PostgreSQL in the same pod, with database state stored under a dedicated `.erun/postgres` subpath on the home PVC
+  - the PostgreSQL password must live in a Kubernetes Secret and be consumed by the database, migration, and API containers through secret references
+- Keep the backend PostgreSQL container available before backend migrations run. If migrations remain an init step, the database must be a restartable init sidecar or an equivalent pod-startup mechanism that is ready before the migration container executes.
 - Do not move build cache, Docker state, or home-directory state onto `emptyDir` unless the change is deliberate and the persistence tradeoff is documented in the code review and tests.
 - Keep binfmt installation explicit for release builds. Multi-arch release support depends on the chart installing `amd64` and `arm64` emulation before the dind daemon is used.
 
