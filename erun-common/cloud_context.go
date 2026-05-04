@@ -310,11 +310,11 @@ func appendOptionalCloudContextRunArg(args []string, name, value string) []strin
 }
 
 func appendCloudContextProfileRunArg(args []string, config CloudContextConfig) []string {
-	if config.InstanceProfileARN != "" {
-		return append(args, "--iam-instance-profile", "Arn="+config.InstanceProfileARN)
-	}
 	if config.InstanceProfileName != "" {
 		return append(args, "--iam-instance-profile", "Name="+config.InstanceProfileName)
+	}
+	if config.InstanceProfileARN != "" {
+		return append(args, "--iam-instance-profile", "Arn="+config.InstanceProfileARN)
 	}
 	return args
 }
@@ -673,7 +673,13 @@ func createCloudContextSecurityGroup(ctx Context, deps CloudContextDependencies,
 		"--output", "text",
 	})
 	if err != nil {
-		return "", err
+		if !isDuplicateSecurityGroupError(err) {
+			return "", err
+		}
+		groupID, err = describeCloudContextSecurityGroupID(ctx, deps, provider, region, groupName)
+		if err != nil {
+			return "", err
+		}
 	}
 	groupID = strings.TrimSpace(groupID)
 	if groupID == "" {
@@ -686,7 +692,19 @@ func createCloudContextSecurityGroup(ctx Context, deps CloudContextDependencies,
 		"--port", "6443",
 		"--cidr", "0.0.0.0/0",
 	})
-	return groupID, err
+	if err != nil && !isDuplicateSecurityGroupPermissionError(err) {
+		return "", err
+	}
+	return groupID, nil
+}
+
+func describeCloudContextSecurityGroupID(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, groupName string) (string, error) {
+	return deps.RunAWS(ctx, provider, region, []string{
+		"ec2", "describe-security-groups",
+		"--group-names", groupName,
+		"--query", "SecurityGroups[0].GroupId",
+		"--output", "text",
+	})
 }
 
 type cloudContextInstanceProfile struct {
@@ -871,16 +889,48 @@ func cloudContextSelfStopPolicy(provider CloudProviderConfig, region, name strin
 	}
 	return map[string]any{
 		"Version": "2012-10-17",
-		"Statement": []map[string]any{{
-			"Effect":   "Allow",
-			"Action":   "ec2:StopInstances",
-			"Resource": fmt.Sprintf("arn:aws:ec2:%s:%s:instance/*", region, accountID),
-			"Condition": map[string]any{
-				"StringEquals": map[string]string{
-					"ec2:ResourceTag/erun:context": name,
+		"Statement": []map[string]any{
+			{
+				"Sid":      "AllowSelfStop",
+				"Effect":   "Allow",
+				"Action":   "ec2:StopInstances",
+				"Resource": fmt.Sprintf("arn:aws:ec2:%s:%s:instance/*", region, accountID),
+				"Condition": map[string]any{
+					"StringEquals": map[string]string{
+						"ec2:ResourceTag/erun:context": name,
+					},
 				},
 			},
-		}},
+			{
+				"Sid":    "AllowBedrockClaudeCode",
+				"Effect": "Allow",
+				"Action": []string{
+					"bedrock:InvokeModel",
+					"bedrock:InvokeModelWithResponseStream",
+					"bedrock:ListInferenceProfiles",
+					"bedrock:GetInferenceProfile",
+				},
+				"Resource": []string{
+					"arn:aws:bedrock:*:*:inference-profile/*",
+					"arn:aws:bedrock:*:*:application-inference-profile/*",
+					"arn:aws:bedrock:*:*:foundation-model/*",
+				},
+			},
+			{
+				"Sid":    "AllowBedrockMarketplaceAccess",
+				"Effect": "Allow",
+				"Action": []string{
+					"aws-marketplace:ViewSubscriptions",
+					"aws-marketplace:Subscribe",
+				},
+				"Resource": "*",
+				"Condition": map[string]any{
+					"StringEquals": map[string]string{
+						"aws:CalledViaLast": "bedrock.amazonaws.com",
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -994,6 +1044,20 @@ func isExistingInstanceProfileAssociationError(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "incorrectstate") && strings.Contains(message, "existing association")
+}
+
+func isDuplicateSecurityGroupError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "invalidgroup.duplicate")
+}
+
+func isDuplicateSecurityGroupPermissionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "invalidpermission.duplicate")
 }
 
 func describeCloudContextPublicIP(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, instanceID string) (string, error) {

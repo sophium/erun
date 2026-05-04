@@ -404,19 +404,37 @@ func TestRuntimeChartsExposeMCPAPIAndSSHPorts(t *testing.T) {
 			`{{- $sshPort := default 17022 .Values.sshPort -}}`,
 			`{{- $api := default dict .Values.api -}}`,
 			`{{- $oidcAllowedIssuers := default "" $api.oidcAllowedIssuers -}}`,
+			`{{- $postgres := default dict $api.postgres -}}`,
+			`{{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@127.0.0.1:%v/%s?sslmode=disable" $postgresUser $postgresPort $postgresDatabase) $api.databaseURL -}}`,
 			`{{- $cloudContext := default dict .Values.cloudContext -}}`,
 			`{{- $cloudContextName := default "" $cloudContext.name -}}`,
+			`{{- $cloudProvider := default "" $cloudContext.provider -}}`,
 			`{{- $cloudProviderAlias := default "" $cloudContext.providerAlias -}}`,
 			`{{- $cloudRegion := default "" $cloudContext.region -}}`,
 			`{{- $cloudInstanceID := default "" $cloudContext.instanceId -}}`,
 			"name: ERUN_CLOUD_CONTEXT_NAME",
+			"name: ERUN_CLOUD_PROVIDER",
 			"name: ERUN_CLOUD_PROVIDER_ALIAS",
 			"name: ERUN_CLOUD_REGION",
 			"name: ERUN_CLOUD_INSTANCE_ID",
+			`{{ if eq $cloudProvider "aws" }}`,
+			"name: CLAUDE_CODE_USE_BEDROCK",
+			"name: CLAUDE_CODE_USE_MANTLE",
+			"name: AWS_REGION",
+			"name: ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION",
+			"name: ERUN_CLAUDE_AVAILABLE_MODELS",
+			"name: CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+			"name: MAX_THINKING_TOKENS",
+			"name: ANTHROPIC_MODEL",
+			"name: ANTHROPIC_DEFAULT_SONNET_MODEL",
 			"name: ERUN_MCP_PORT",
 			"name: ERUN_API_PORT",
+			"name: ERUN_POSTGRES_PASSWORD",
+			"name: ERUN_DATABASE_URL",
 			"name: ERUN_OIDC_ALLOWED_ISSUERS",
 			"name: ERUN_SSHD_PORT",
+			"name: erun-backend-postgres",
+			"restartPolicy: Always",
 			"containerPort: {{ $mcpPort }}",
 			"name: mcp",
 			"containerPort: {{ $apiPort }}",
@@ -893,6 +911,7 @@ func TestResolveDeploySpecForContextAddsCloudHostStopMetadata(t *testing.T) {
 				}},
 				CloudContexts: []CloudContextConfig{{
 					Name:               "erun-001-020362606330-eu-west-2",
+					Provider:           CloudProviderAWS,
 					CloudProviderAlias: "team-cloud",
 					Region:             "eu-west-2",
 					InstanceID:         "i-073c3338f26fbb000",
@@ -931,11 +950,60 @@ func TestResolveDeploySpecForContextAddsCloudHostStopMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveDeploySpecForContext failed: %v", err)
 	}
-	if !spec.Deploy.ManagedCloud || spec.Deploy.CloudContextName != "erun-001-020362606330-eu-west-2" || spec.Deploy.CloudProviderAlias != "team-cloud" || spec.Deploy.CloudRegion != "eu-west-2" || spec.Deploy.CloudInstanceID != "i-073c3338f26fbb000" {
+	if !spec.Deploy.ManagedCloud || spec.Deploy.CloudContextName != "erun-001-020362606330-eu-west-2" || spec.Deploy.CloudProvider != CloudProviderAWS || spec.Deploy.CloudProviderAlias != "team-cloud" || spec.Deploy.CloudRegion != "eu-west-2" || spec.Deploy.CloudInstanceID != "i-073c3338f26fbb000" {
 		t.Fatalf("expected cloud host stop metadata, got %+v", spec.Deploy)
 	}
 	if spec.Deploy.OIDCAllowedIssuers != "https://issuer.team.example" {
 		t.Fatalf("expected tenant OIDC issuers, got %+v", spec.Deploy)
+	}
+}
+
+func TestResolveDeploySpecForContextAddsCloudProviderMetadataWithoutManagedCloud(t *testing.T) {
+	projectRoot := t.TempDir()
+	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
+	if err := os.WriteFile(filepath.Join(chartPath, "values.rihards-erun.yaml"), nil, 0o644); err != nil {
+		t.Fatalf("write remote values file: %v", err)
+	}
+
+	spec, err := resolveDeploySpecForContext(
+		openStore{
+			toolConfig: ERunConfig{
+				CloudProviders: []CloudProviderConfig{{
+					Alias:    "Rihards.Freimanis+020362606330@aws",
+					Provider: CloudProviderAWS,
+				}},
+			},
+		},
+		nil,
+		nil,
+		nil,
+		nil,
+		OpenResult{
+			Tenant:      "petios",
+			Environment: "rihards-erun",
+			RepoPath:    projectRoot,
+			EnvConfig: EnvConfig{
+				KubernetesContext:  "erun-002-020362606330-eu-west-2",
+				CloudProviderAlias: "Rihards.Freimanis+020362606330@aws",
+				Remote:             true,
+			},
+		},
+		KubernetesDeployContext{
+			ComponentName: "erun-devops",
+			ChartPath:     chartPath,
+		},
+		"",
+		false,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("resolveDeploySpecForContext failed: %v", err)
+	}
+	if spec.Deploy.ManagedCloud {
+		t.Fatalf("expected unmanaged cloud provider metadata, got %+v", spec.Deploy)
+	}
+	if spec.Deploy.CloudProvider != CloudProviderAWS || spec.Deploy.CloudProviderAlias != "Rihards.Freimanis+020362606330@aws" || spec.Deploy.CloudRegion != "eu-west-2" {
+		t.Fatalf("expected AWS cloud provider metadata for Claude setup, got %+v", spec.Deploy)
 	}
 }
 
@@ -1130,6 +1198,7 @@ printf '%s
 		SSHPort:            17122,
 		ManagedCloud:       true,
 		CloudContextName:   "erun-001-020362606330-eu-west-2",
+		CloudProvider:      CloudProviderAWS,
 		CloudProviderAlias: "team-cloud",
 		CloudRegion:        "eu-west-2",
 		CloudInstanceID:    "i-073c3338f26fbb000",
@@ -1163,6 +1232,7 @@ printf '%s
 	for _, want := range []string{
 		"--set\nmanagedCloud=true\n",
 		"--set-string\ncloudContext.name=erun-001-020362606330-eu-west-2\n",
+		"--set-string\ncloudContext.provider=aws\n",
 		"--set-string\ncloudContext.providerAlias=team-cloud\n",
 		"--set-string\ncloudContext.region=eu-west-2\n",
 		"--set-string\ncloudContext.instanceId=i-073c3338f26fbb000\n",

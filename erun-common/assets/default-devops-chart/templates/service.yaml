@@ -21,17 +21,63 @@
 {{- $oidcAllowedIssuers := default "" $api.oidcAllowedIssuers -}}
 {{- $awsIdentityStoreID := default "" $api.awsIdentityStoreID -}}
 {{- $awsIdentityStoreRegion := default "" $api.awsIdentityStoreRegion -}}
+{{- $postgres := default dict $api.postgres -}}
+{{- $postgresDatabase := default "erun" $postgres.database -}}
+{{- $postgresUser := default "erun" $postgres.user -}}
+{{- $postgresPort := default 5432 $postgres.port -}}
+{{- $postgresPasswordSecretName := default "erun-backend-postgres" $postgres.passwordSecretName -}}
+{{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
+{{- $postgresPassword := default "" $postgres.password -}}
+{{- $postgresReset := default false $postgres.reset -}}
+{{- $existingPostgresSecret := lookup "v1" "Secret" .Release.Namespace $postgresPasswordSecretName -}}
+{{- if and (eq $postgresPassword "") $existingPostgresSecret (hasKey $existingPostgresSecret.data $postgresPasswordSecretKey) -}}
+{{- $postgresPassword = (index $existingPostgresSecret.data $postgresPasswordSecretKey | b64dec) -}}
+{{- end -}}
+{{- if eq $postgresPassword "" -}}
+{{- $postgresPassword = randAlphaNum 32 -}}
+{{- end -}}
+{{- $postgresDataSubPath := default ".erun/postgres" $postgres.dataSubPath -}}
+{{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@127.0.0.1:%v/%s?sslmode=disable" $postgresUser $postgresPort $postgresDatabase) $api.databaseURL -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $backendDBImage := default (printf "erunpaas/erun-backend-db:%s" .Chart.AppVersion) (index $imageOverrides "erun-backend-db") -}}
 {{- $devopsImage := default (printf "erunpaas/erun-devops:%s" .Chart.AppVersion) (index $imageOverrides "erun-devops") -}}
 {{- $mcpImage := default (printf "erunpaas/erun-mcp:%s" .Chart.AppVersion) (index $imageOverrides "erun-mcp") -}}
 {{- $backendAPIImage := default (printf "erunpaas/erun-backend-api:%s" .Chart.AppVersion) (index $imageOverrides "erun-backend-api") -}}
+{{- $postgresImage := default "postgres:18" (index $imageOverrides "postgres") -}}
 {{- $dindImage := default "erunpaas/erun-dind:28.1.1" (index $imageOverrides "erun-dind") -}}
 {{- $cloudContext := default dict .Values.cloudContext -}}
 {{- $cloudContextName := default "" $cloudContext.name -}}
+{{- $cloudProvider := default "" $cloudContext.provider -}}
 {{- $cloudProviderAlias := default "" $cloudContext.providerAlias -}}
 {{- $cloudRegion := default "" $cloudContext.region -}}
 {{- $cloudInstanceID := default "" $cloudContext.instanceId -}}
+{{- $claude := default dict .Values.claude -}}
+{{- $claudeUseBedrock := default "1" $claude.useBedrock -}}
+{{- $claudeUseMantle := default "1" $claude.useMantle -}}
+{{- $claudeSmallFastRegion := default $cloudRegion $claude.smallFastModelAWSRegion -}}
+{{- $claudeAvailableModels := default "sonnet,haiku" $claude.availableModels -}}
+{{- $claudeModel := default "" $claude.model -}}
+{{- $claudeDefaultOpusModel := default "" $claude.defaultOpusModel -}}
+{{- $claudeDefaultSonnetModel := default "" $claude.defaultSonnetModel -}}
+{{- $claudeDefaultHaikuModel := default "" $claude.defaultHaikuModel -}}
+{{- $claudeBedrockBaseURL := default "" $claude.bedrockBaseURL -}}
+{{- $claudeMantleBaseURL := default "" $claude.mantleBaseURL -}}
+{{- $claudeBedrockServiceTier := default "" $claude.bedrockServiceTier -}}
+{{- $claudeSkipMantleAuth := default "" $claude.skipMantleAuth -}}
+{{- $claudeDisablePromptCaching := default "" $claude.disablePromptCaching -}}
+{{- $claudeEnablePromptCaching1H := default "" $claude.enablePromptCaching1H -}}
+{{- $claudeMaxOutputTokens := default "4096" $claude.maxOutputTokens -}}
+{{- $claudeMaxThinkingTokens := default "1024" $claude.maxThinkingTokens -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $postgresPasswordSecretName }}
+  labels:
+    app: __MODULE_NAME__
+type: Opaque
+stringData:
+  {{ $postgresPasswordSecretKey }}: {{ $postgresPassword | quote }}
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -158,14 +204,63 @@ spec:
             - amd64,arm64
           securityContext:
             privileged: true
+{{- if $postgresReset }}
+        - image: {{ $postgresImage }}
+          name: erun-backend-postgres-reset
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -lc
+            - rm -rf /home/erun/.erun/postgres && mkdir -p /home/erun/.erun/postgres
+          volumeMounts:
+            - name: erun-home
+              mountPath: /home/erun
+{{- end }}
+        - image: {{ $postgresImage }}
+          name: erun-backend-postgres
+          imagePullPolicy: IfNotPresent
+          restartPolicy: Always
+          env:
+            - name: POSTGRES_DB
+              value: {{ $postgresDatabase | quote }}
+            - name: POSTGRES_USER
+              value: {{ $postgresUser | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $postgresPasswordSecretName }}
+                  key: {{ $postgresPasswordSecretKey }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: {{ $postgresPort }}
+              name: postgres
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -lc
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1 -p {{ $postgresPort }}
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 60
+          volumeMounts:
+            - name: erun-home
+              mountPath: /var/lib/postgresql/data
+              subPath: {{ $postgresDataSubPath | quote }}
         - image: {{ $backendDBImage }}
           name: erun-backend-db
           imagePullPolicy: IfNotPresent
           env:
             - name: HOME
               value: /home/erun
+            - name: ERUN_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $postgresPasswordSecretName }}
+                  key: {{ $postgresPasswordSecretKey }}
             - name: ERUN_DATABASE_URL
-              value: {{ default "" $api.databaseURL | quote }}
+              value: {{ $databaseURL | quote }}
           volumeMounts:
             - name: erun-home
               mountPath: /home/erun
@@ -190,12 +285,70 @@ spec:
               value: {{ if $managedCloud }}"true"{{ else }}"false"{{ end }}
             - name: ERUN_CLOUD_CONTEXT_NAME
               value: {{ $cloudContextName | quote }}
+            - name: ERUN_CLOUD_PROVIDER
+              value: {{ $cloudProvider | quote }}
             - name: ERUN_CLOUD_PROVIDER_ALIAS
               value: {{ $cloudProviderAlias | quote }}
             - name: ERUN_CLOUD_REGION
               value: {{ $cloudRegion | quote }}
             - name: ERUN_CLOUD_INSTANCE_ID
               value: {{ $cloudInstanceID | quote }}
+            {{ if eq $cloudProvider "aws" }}
+            - name: CLAUDE_CODE_USE_BEDROCK
+              value: {{ $claudeUseBedrock | quote }}
+            - name: CLAUDE_CODE_USE_MANTLE
+              value: {{ $claudeUseMantle | quote }}
+            - name: AWS_REGION
+              value: {{ $cloudRegion | quote }}
+            - name: ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION
+              value: {{ $claudeSmallFastRegion | quote }}
+            - name: ERUN_CLAUDE_AVAILABLE_MODELS
+              value: {{ $claudeAvailableModels | quote }}
+            - name: CLAUDE_CODE_MAX_OUTPUT_TOKENS
+              value: {{ $claudeMaxOutputTokens | quote }}
+            - name: MAX_THINKING_TOKENS
+              value: {{ $claudeMaxThinkingTokens | quote }}
+            {{ if $claudeModel }}
+            - name: ANTHROPIC_MODEL
+              value: {{ $claudeModel | quote }}
+            {{ end }}
+            {{ if $claudeDefaultOpusModel }}
+            - name: ANTHROPIC_DEFAULT_OPUS_MODEL
+              value: {{ $claudeDefaultOpusModel | quote }}
+            {{ end }}
+            {{ if $claudeDefaultSonnetModel }}
+            - name: ANTHROPIC_DEFAULT_SONNET_MODEL
+              value: {{ $claudeDefaultSonnetModel | quote }}
+            {{ end }}
+            {{ if $claudeDefaultHaikuModel }}
+            - name: ANTHROPIC_DEFAULT_HAIKU_MODEL
+              value: {{ $claudeDefaultHaikuModel | quote }}
+            {{ end }}
+            {{ if $claudeBedrockBaseURL }}
+            - name: ANTHROPIC_BEDROCK_BASE_URL
+              value: {{ $claudeBedrockBaseURL | quote }}
+            {{ end }}
+            {{ if $claudeMantleBaseURL }}
+            - name: ANTHROPIC_BEDROCK_MANTLE_BASE_URL
+              value: {{ $claudeMantleBaseURL | quote }}
+            {{ end }}
+            {{ if $claudeBedrockServiceTier }}
+            - name: ANTHROPIC_BEDROCK_SERVICE_TIER
+              value: {{ $claudeBedrockServiceTier | quote }}
+            {{ end }}
+            {{ if $claudeSkipMantleAuth }}
+            - name: CLAUDE_CODE_SKIP_MANTLE_AUTH
+              value: {{ $claudeSkipMantleAuth | quote }}
+            {{ end }}
+            {{ if $claudeDisablePromptCaching }}
+            - name: DISABLE_PROMPT_CACHING
+              value: {{ $claudeDisablePromptCaching | quote }}
+            {{ end }}
+            {{ if $claudeEnablePromptCaching1H }}
+            - name: ENABLE_PROMPT_CACHING_1H
+              value: {{ $claudeEnablePromptCaching1H | quote }}
+            {{ end }}
+            {{ end }}
             - name: ERUN_KUBERNETES_CONTEXT
               value: in-cluster
             - name: ERUN_TENANT
@@ -290,8 +443,13 @@ spec:
               value: 0.0.0.0
             - name: ERUN_API_PORT
               value: {{ $apiPort | quote }}
+            - name: ERUN_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $postgresPasswordSecretName }}
+                  key: {{ $postgresPasswordSecretKey }}
             - name: ERUN_DATABASE_URL
-              value: {{ default "" $api.databaseURL | quote }}
+              value: {{ $databaseURL | quote }}
             - name: ERUN_OIDC_ALLOWED_ISSUERS
               value: {{ $oidcAllowedIssuers | quote }}
             - name: ERUN_AWS_IDENTITY_STORE_ID

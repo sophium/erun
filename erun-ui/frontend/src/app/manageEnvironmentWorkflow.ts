@@ -14,6 +14,7 @@ import { readError } from './errors';
 import { runtimePodConfigToDisplay, runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
 import type { HiddenSessionMode } from './model';
 import { defaultEnvironmentConfig, defaultManageDialog, type AppState, type ManageDialogState } from './state';
+import { rememberPastContainerRegistry } from './storage';
 import { formatDebugCommand, hiddenSessionBusyMessage } from './terminalStatus';
 import {
   deleteConfirmationValue,
@@ -290,6 +291,7 @@ export class ManageEnvironmentWorkflow {
         runtimePod: runtimePodConfigToKubernetes(dialog.config.runtimePod),
       };
       const result = (await SaveEnvironmentConfig(selection, saveConfig as Parameters<typeof SaveEnvironmentConfig>[1])) as UIEnvironmentConfig;
+      rememberPastContainerRegistry(result.containerRegistry || saveConfig.containerRegistry);
       this.state.manageDialog = {
         ...this.state.manageDialog,
         config: {

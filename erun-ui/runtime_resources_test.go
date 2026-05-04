@@ -115,3 +115,38 @@ func TestRuntimeResourceStatusFormatsZeroCPUCapacity(t *testing.T) {
 		t.Fatalf("expected message to include zero CPU, got %q", status.Message)
 	}
 }
+
+func TestRuntimeResourceStatusIgnoresTerminalPodAllocation(t *testing.T) {
+	var node kubernetesNode
+	node.Metadata.Name = "node-a"
+	node.Status.Allocatable.CPU = "4"
+	node.Status.Allocatable.Memory = "16140084Ki"
+
+	var completedInstallPod kubernetesPod
+	completedInstallPod.Metadata.Namespace = "kube-system"
+	completedInstallPod.Status.Phase = "Succeeded"
+	completedInstallPod.Spec.NodeName = "node-a"
+	completedInstallPod.Spec.Containers = []kubernetesContainer{{Name: "helm"}}
+	completedInstallPod.Spec.Containers[0].Resources.Limits.CPU = "32"
+	completedInstallPod.Spec.Containers[0].Resources.Limits.Memory = "32G"
+
+	var failedInstallPod kubernetesPod
+	failedInstallPod.Metadata.Namespace = "kube-system"
+	failedInstallPod.Status.Phase = "Failed"
+	failedInstallPod.Spec.NodeName = "node-a"
+	failedInstallPod.Spec.Containers = []kubernetesContainer{{Name: "helm"}}
+	failedInstallPod.Spec.Containers[0].Resources.Limits.CPU = "32"
+	failedInstallPod.Spec.Containers[0].Resources.Limits.Memory = "32G"
+
+	status := runtimeResourceStatusFromKubernetes(
+		uiRuntimeResourceInput{KubernetesContext: "cluster", Tenant: "team", Environment: "dev"},
+		kubernetesNodeList{Items: []kubernetesNode{node}},
+		kubernetesPodList{Items: []kubernetesPod{completedInstallPod, failedInstallPod}},
+	)
+	if !status.Available {
+		t.Fatalf("expected status to be available: %+v", status)
+	}
+	if status.CPU.Free != 4 || status.Memory.Free != 15.4 {
+		t.Fatalf("expected terminal pod limits to be ignored, got %+v", status)
+	}
+}

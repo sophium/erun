@@ -51,6 +51,7 @@ ARG GH_VERSION=2.74.2
 ARG GOLANGCI_LINT_VERSION=v2.2.2
 ARG NODE_VERSION=24.14.0
 ARG CODEX_VERSION=0.125.0
+ARG CLAUDE_CODE_VERSION=2.1.126
 ARG AWS_CLI_VERSION=2.32.16
 ARG ATLAS_VERSION=v1.2.0
 
@@ -93,7 +94,7 @@ RUN apt-get update && \
     curl -fsSL -o /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}-${AWS_CLI_VERSION}.zip" && \
     unzip -q /tmp/awscliv2.zip -d /tmp && \
     /tmp/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli && \
-    npm install -g "@openai/codex@${CODEX_VERSION}" && \
+    npm install -g "@openai/codex@${CODEX_VERSION}" "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" && \
     mv /usr/local/bin/codex /usr/local/bin/codex-real && \
     npm cache clean --force && \
     mkdir -p /usr/local/lib/docker/cli-plugins /usr/local/libexec/docker/cli-plugins && \
