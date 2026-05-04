@@ -264,6 +264,10 @@ func (ConfigStore) DeleteEnvConfig(tenant, envName string) error {
 	return DeleteEnvConfig(tenant, envName)
 }
 
+func (ConfigStore) LoadProjectConfig(projectRoot string) (ProjectConfig, string, error) {
+	return LoadProjectConfig(projectRoot)
+}
+
 func SaveERunConfig(config ERunConfig) error {
 	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, configFile))
 	if err != nil {

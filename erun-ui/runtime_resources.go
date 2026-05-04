@@ -51,6 +51,9 @@ func runtimeResourceStatusFromKubernetes(input uiRuntimeResourceInput, nodes kub
 	targetUsage := make(map[string]runtimeResourceTotals)
 	targetNode := ""
 	for _, pod := range pods.Items {
+		if isTerminalKubernetesPodPhase(pod.Status.Phase) {
+			continue
+		}
 		nodeName := strings.TrimSpace(pod.Spec.NodeName)
 		if nodeName == "" {
 			continue
@@ -147,6 +150,15 @@ func (t runtimeResourceTargetSpec) matches(pod kubernetesPod, container kubernet
 		t.container != "" &&
 		strings.TrimSpace(pod.Metadata.Namespace) == t.namespace &&
 		strings.TrimSpace(container.Name) == t.container
+}
+
+func isTerminalKubernetesPodPhase(phase string) bool {
+	switch strings.ToLower(strings.TrimSpace(phase)) {
+	case "succeeded", "failed":
+		return true
+	default:
+		return false
+	}
 }
 
 type runtimeResourceTotals struct {
@@ -279,6 +291,9 @@ type kubernetesPod struct {
 	Metadata struct {
 		Namespace string `json:"namespace"`
 	} `json:"metadata"`
+	Status struct {
+		Phase string `json:"phase"`
+	} `json:"status"`
 	Spec struct {
 		NodeName   string                `json:"nodeName"`
 		Containers []kubernetesContainer `json:"containers"`

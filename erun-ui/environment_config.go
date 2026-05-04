@@ -24,7 +24,8 @@ func (a *App) LoadEnvironmentConfig(selection uiSelection) (uiEnvironmentConfig,
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	return a.environmentConfigToUI(config, selection.Environment, ports)
+	registry := a.effectiveEnvironmentContainerRegistry(selection.Tenant, selection.Environment, config)
+	return a.environmentConfigToUI(config, selection.Environment, registry, ports)
 }
 
 func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentConfig) (uiEnvironmentConfig, error) {
@@ -51,7 +52,8 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	return a.environmentConfigToUI(updated, selection.Environment, ports)
+	registry := a.effectiveEnvironmentContainerRegistry(selection.Tenant, selection.Environment, updated)
+	return a.environmentConfigToUI(updated, selection.Environment, registry, ports)
 }
 
 func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing eruncommon.EnvConfig) (eruncommon.EnvConfig, error) {
@@ -94,10 +96,14 @@ func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated erun
 	return err
 }
 
-func (a *App) environmentConfigToUI(config eruncommon.EnvConfig, fallbackName string, ports eruncommon.EnvironmentLocalPorts) (uiEnvironmentConfig, error) {
+func (a *App) environmentConfigToUI(config eruncommon.EnvConfig, fallbackName, effectiveContainerRegistry string, ports eruncommon.EnvironmentLocalPorts) (uiEnvironmentConfig, error) {
 	name := strings.TrimSpace(config.Name)
 	if name == "" {
 		name = strings.TrimSpace(fallbackName)
+	}
+	containerRegistry := strings.TrimSpace(config.ContainerRegistry)
+	if containerRegistry == "" {
+		containerRegistry = strings.TrimSpace(effectiveContainerRegistry)
 	}
 	ports = eruncommon.LocalPortsForResult(eruncommon.OpenResult{
 		EnvConfig:  config,
@@ -107,7 +113,7 @@ func (a *App) environmentConfigToUI(config eruncommon.EnvConfig, fallbackName st
 		Name:                 name,
 		RepoPath:             strings.TrimSpace(config.RepoPath),
 		KubernetesContext:    strings.TrimSpace(config.KubernetesContext),
-		ContainerRegistry:    strings.TrimSpace(config.ContainerRegistry),
+		ContainerRegistry:    containerRegistry,
 		CloudProviderAlias:   strings.TrimSpace(config.CloudProviderAlias),
 		CloudProviderAliases: environmentCloudProviderAliases(a.deps.store, config.CloudProviderAlias),
 		RuntimeVersion:       strings.TrimSpace(config.RuntimeVersion),
@@ -142,6 +148,42 @@ func (a *App) environmentConfigToUI(config eruncommon.EnvConfig, fallbackName st
 		result.CloudContext = &status
 	}
 	return result, nil
+}
+
+func (a *App) effectiveEnvironmentContainerRegistry(tenant, environment string, config eruncommon.EnvConfig) string {
+	if registry := strings.TrimSpace(config.ContainerRegistry); registry != "" {
+		return registry
+	}
+	if a.deps.store == nil {
+		return ""
+	}
+	tenantConfig, _, err := a.deps.store.LoadTenantConfig(strings.TrimSpace(tenant))
+	if err != nil {
+		return ""
+	}
+	projectRoot := strings.TrimSpace(tenantConfig.ProjectRoot)
+	if projectRoot == "" {
+		projectRoot = strings.TrimSpace(config.RepoPath)
+	}
+	if projectRoot == "" {
+		return ""
+	}
+	loader, ok := a.deps.store.(projectConfigLoader)
+	if !ok {
+		return ""
+	}
+	projectConfig, _, err := loader.LoadProjectConfig(projectRoot)
+	if err != nil {
+		return ""
+	}
+	return projectConfig.ContainerRegistryForEnvironment(environmentName(environment, config))
+}
+
+func environmentName(fallbackName string, config eruncommon.EnvConfig) string {
+	if name := strings.TrimSpace(config.Name); name != "" {
+		return name
+	}
+	return strings.TrimSpace(fallbackName)
 }
 
 func environmentCloudProviderAliases(store eruncommon.CloudReadStore, current string) []string {
@@ -196,6 +238,7 @@ func canConnectLocalTCP(port int) bool {
 func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.EnvConfig) eruncommon.EnvConfig {
 	existing.Name = strings.TrimSpace(config.Name)
 	existing.CloudProviderAlias = strings.TrimSpace(config.CloudProviderAlias)
+	existing.ContainerRegistry = strings.TrimSpace(config.ContainerRegistry)
 	existing.RuntimePod = runtimePodConfigFromUI(config.RuntimePod)
 	existing.Idle = eruncommon.EnvironmentIdleConfig{
 		Timeout:          strings.TrimSpace(config.Idle.Timeout),

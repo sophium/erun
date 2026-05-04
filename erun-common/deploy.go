@@ -63,6 +63,7 @@ type HelmDeployParams struct {
 	SSHPort            int
 	ManagedCloud       bool
 	CloudContextName   string
+	CloudProvider      string
 	CloudProviderAlias string
 	CloudRegion        string
 	CloudInstanceID    string
@@ -94,6 +95,7 @@ type HelmDeploySpec struct {
 	SSHPort            int
 	ManagedCloud       bool
 	CloudContextName   string
+	CloudProvider      string
 	CloudProviderAlias string
 	CloudRegion        string
 	CloudInstanceID    string
@@ -309,6 +311,7 @@ func configureDeployInputMetadata(store DeployStore, target OpenResult, deployIn
 		return err
 	}
 	deployInput.ManagedCloud = managedCloud
+	applyCloudProviderDeployMetadata(store, target.EnvConfig, deployInput)
 	if managedCloud {
 		applyCloudContextStopMetadata(store, target.EnvConfig, deployInput)
 	}
@@ -707,15 +710,66 @@ func applyCloudContextStopMetadata(store CloudReadStore, env EnvConfig, deployIn
 	if deployInput == nil {
 		return
 	}
-	deployInput.CloudProviderAlias = strings.TrimSpace(env.CloudProviderAlias)
 	status, ok, err := findCloudContextForKubernetesContext(store, env.KubernetesContext)
 	if err != nil || !ok {
 		return
 	}
 	deployInput.CloudContextName = status.Name
+	deployInput.CloudProvider = status.Provider
 	deployInput.CloudProviderAlias = status.CloudProviderAlias
 	deployInput.CloudRegion = status.Region
 	deployInput.CloudInstanceID = status.InstanceID
+}
+
+func applyCloudProviderDeployMetadata(store CloudReadStore, env EnvConfig, deployInput *HelmDeploySpec) {
+	if deployInput == nil {
+		return
+	}
+	alias := strings.TrimSpace(env.CloudProviderAlias)
+	deployInput.CloudProviderAlias = alias
+	if alias != "" {
+		if provider, err := ResolveCloudProvider(store, alias); err == nil {
+			deployInput.CloudProvider = provider.Provider
+		} else if provider := cloudProviderFromAlias(alias); provider != "" {
+			deployInput.CloudProvider = provider
+		}
+	}
+
+	status, ok, err := findCloudContextForKubernetesContext(store, env.KubernetesContext)
+	if err == nil && ok {
+		if alias == "" || strings.TrimSpace(status.CloudProviderAlias) == alias {
+			deployInput.CloudContextName = status.Name
+			deployInput.CloudProvider = status.Provider
+			deployInput.CloudProviderAlias = status.CloudProviderAlias
+			deployInput.CloudRegion = status.Region
+			return
+		}
+	}
+	if deployInput.CloudRegion == "" && deployInput.CloudProvider == CloudProviderAWS {
+		deployInput.CloudRegion = cloudContextRegionFromName(env.KubernetesContext)
+	}
+}
+
+func cloudProviderFromAlias(alias string) string {
+	_, provider, ok := strings.Cut(strings.TrimSpace(alias), "@")
+	if !ok {
+		return ""
+	}
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == CloudProviderAWS {
+		return provider
+	}
+	return ""
+}
+
+func cloudContextRegionFromName(name string) string {
+	name = strings.TrimSpace(name)
+	for _, region := range CloudContextRegions() {
+		if strings.HasSuffix(name, "-"+region) || name == region {
+			return region
+		}
+	}
+	return ""
 }
 
 func resolveWorktreeStorage(target OpenResult) string {
@@ -766,6 +820,7 @@ func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 		SSHPort:            d.SSHPort,
 		ManagedCloud:       d.ManagedCloud,
 		CloudContextName:   d.CloudContextName,
+		CloudProvider:      d.CloudProvider,
 		CloudProviderAlias: d.CloudProviderAlias,
 		CloudRegion:        d.CloudRegion,
 		CloudInstanceID:    d.CloudInstanceID,
@@ -806,6 +861,7 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set", "sshPort="+formatHelmPort(d.SSHPort, DefaultSSHLocalPort),
 		"--set", "managedCloud="+formatHelmBool(d.ManagedCloud),
 		"--set-string", "cloudContext.name="+d.CloudContextName,
+		"--set-string", "cloudContext.provider="+d.CloudProvider,
 		"--set-string", "cloudContext.providerAlias="+d.CloudProviderAlias,
 		"--set-string", "cloudContext.region="+d.CloudRegion,
 		"--set-string", "cloudContext.instanceId="+d.CloudInstanceID,
@@ -1246,6 +1302,7 @@ func DeployHelmChart(params HelmDeployParams) error {
 		SSHPort:            params.SSHPort,
 		ManagedCloud:       params.ManagedCloud,
 		CloudContextName:   params.CloudContextName,
+		CloudProvider:      params.CloudProvider,
 		CloudProviderAlias: params.CloudProviderAlias,
 		CloudRegion:        params.CloudRegion,
 		CloudInstanceID:    params.CloudInstanceID,

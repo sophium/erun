@@ -1547,6 +1547,9 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	}
 	store := stubUIStore{
 		config: rootConfig,
+		projectConfigs: map[string]eruncommon.ProjectConfig{
+			projectRoot: {ContainerRegistry: "registry.example/project"},
+		},
 		tenants: map[string]eruncommon.TenantConfig{
 			"frs": {
 				Name:        "frs",
@@ -1628,7 +1631,7 @@ func assertLoadedEnvironmentConfig(t *testing.T, loaded uiEnvironmentConfig, pro
 func assertSavedEnvironmentConfig(t *testing.T, saved uiEnvironmentConfig, projectRoot string) {
 	t.Helper()
 
-	if saved.RepoPath != projectRoot || saved.KubernetesContext != "cluster-old" || saved.ContainerRegistry != "registry.example/old" || saved.RuntimeVersion != "1.0.0" || saved.CloudProviderAlias != "other-cloud" {
+	if saved.RepoPath != projectRoot || saved.KubernetesContext != "cluster-old" || saved.ContainerRegistry != "registry.example/team" || saved.RuntimeVersion != "1.0.0" || saved.CloudProviderAlias != "other-cloud" {
 		t.Fatalf("unexpected saved config: %+v", saved)
 	}
 	if saved.RuntimePod.CPU != "6" || saved.RuntimePod.Memory != "12Gi" {
@@ -1648,11 +1651,112 @@ func assertLocalPorts(t *testing.T, ports uiEnvironmentLocalPorts) {
 func assertStoredEnvironmentConfig(t *testing.T, stored eruncommon.EnvConfig, projectRoot string) {
 	t.Helper()
 
-	if stored.RepoPath != projectRoot || stored.Remote || stored.RuntimeVersion != "1.0.0" || stored.CloudProviderAlias != "other-cloud" || stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" || stored.Snapshot == nil || *stored.Snapshot {
+	if stored.RepoPath != projectRoot || stored.Remote || stored.RuntimeVersion != "1.0.0" || stored.ContainerRegistry != "registry.example/team" || stored.CloudProviderAlias != "other-cloud" || stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" || stored.Snapshot == nil || *stored.Snapshot {
 		t.Fatalf("unexpected stored config: %+v", stored)
 	}
 	if stored.RuntimePod.CPU != "6" || stored.RuntimePod.Memory != "12Gi" {
 		t.Fatalf("unexpected stored runtime pod config: %+v", stored.RuntimePod)
+	}
+}
+
+func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		projectConfigs: map[string]eruncommon.ProjectConfig{
+			projectRoot: {
+				ContainerRegistry: "registry.example/shared",
+				Environments: map[string]eruncommon.ProjectEnvironmentConfig{
+					"prod": {ContainerRegistry: "registry.example/prod"},
+				},
+			},
+		},
+		tenants: map[string]eruncommon.TenantConfig{
+			"frs": {
+				Name:        "frs",
+				ProjectRoot: projectRoot,
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/local": {
+				Name:              "local",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-local",
+			},
+			"frs/prod": {
+				Name:              "prod",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-prod",
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	local, err := app.LoadEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"})
+	if err != nil {
+		t.Fatalf("LoadEnvironmentConfig local failed: %v", err)
+	}
+	if local.ContainerRegistry != "registry.example/shared" {
+		t.Fatalf("expected local env to use project-wide registry, got %+v", local)
+	}
+
+	prod, err := app.LoadEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "prod"})
+	if err != nil {
+		t.Fatalf("LoadEnvironmentConfig prod failed: %v", err)
+	}
+	if prod.ContainerRegistry != "registry.example/prod" {
+		t.Fatalf("expected prod env to use environment registry override, got %+v", prod)
+	}
+}
+
+func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		projectConfigs: map[string]eruncommon.ProjectConfig{
+			projectRoot: {ContainerRegistry: "registry.example/shared"},
+		},
+		tenants: map[string]eruncommon.TenantConfig{
+			"frs": {
+				Name:        "frs",
+				ProjectRoot: projectRoot,
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/local": {
+				Name:              "local",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-local",
+				RuntimePod: eruncommon.RuntimePodResources{
+					CPU:    "4",
+					Memory: "8916Mi",
+				},
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+		Name:              "local",
+		RepoPath:          projectRoot,
+		KubernetesContext: "cluster-local",
+		RuntimePod: uiRuntimePodConfig{
+			CPU:    "6",
+			Memory: "12Gi",
+		},
+		Idle: uiIdleConfig{
+			Timeout:      eruncommon.DefaultEnvironmentIdleTimeout.String(),
+			WorkingHours: eruncommon.DefaultEnvironmentWorkingHours,
+		},
+		Snapshot: true,
+	})
+	if err != nil {
+		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
+	}
+	if saved.ContainerRegistry != "registry.example/shared" {
+		t.Fatalf("expected saved UI config to keep effective project registry, got %+v", saved)
+	}
+	stored := store.envs["frs/local"]
+	if stored.ContainerRegistry != "" {
+		t.Fatalf("expected env save not to copy project registry into env config, got %+v", stored)
 	}
 }
 
@@ -2444,9 +2548,10 @@ func TestBuildPastedImageCopyCommandTargetsRuntimeDeployment(t *testing.T) {
 }
 
 type stubUIStore struct {
-	config  *eruncommon.ERunConfig
-	tenants map[string]eruncommon.TenantConfig
-	envs    map[string]eruncommon.EnvConfig
+	config         *eruncommon.ERunConfig
+	projectConfigs map[string]eruncommon.ProjectConfig
+	tenants        map[string]eruncommon.TenantConfig
+	envs           map[string]eruncommon.EnvConfig
 }
 
 func testCloudContextDeps(actions *[]string) eruncommon.CloudContextDependencies {
@@ -2470,6 +2575,14 @@ func (s stubUIStore) LoadERunConfig() (eruncommon.ERunConfig, string, error) {
 		return eruncommon.ERunConfig{}, "", nil
 	}
 	return *s.config, "", nil
+}
+
+func (s stubUIStore) LoadProjectConfig(projectRoot string) (eruncommon.ProjectConfig, string, error) {
+	config, ok := s.projectConfigs[projectRoot]
+	if !ok {
+		return eruncommon.ProjectConfig{}, "", eruncommon.ErrNotInitialized
+	}
+	return config, "", nil
 }
 
 func (s stubUIStore) SaveERunConfig(config eruncommon.ERunConfig) error {

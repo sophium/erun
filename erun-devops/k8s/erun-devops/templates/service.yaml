@@ -44,9 +44,27 @@
 {{- $dindImage := default "erunpaas/erun-dind:28.1.1" (index $imageOverrides "erun-dind") -}}
 {{- $cloudContext := default dict .Values.cloudContext -}}
 {{- $cloudContextName := default "" $cloudContext.name -}}
+{{- $cloudProvider := default "" $cloudContext.provider -}}
 {{- $cloudProviderAlias := default "" $cloudContext.providerAlias -}}
 {{- $cloudRegion := default "" $cloudContext.region -}}
 {{- $cloudInstanceID := default "" $cloudContext.instanceId -}}
+{{- $claude := default dict .Values.claude -}}
+{{- $claudeUseBedrock := default "1" $claude.useBedrock -}}
+{{- $claudeUseMantle := default "1" $claude.useMantle -}}
+{{- $claudeSmallFastRegion := default $cloudRegion $claude.smallFastModelAWSRegion -}}
+{{- $claudeAvailableModels := default "sonnet,haiku" $claude.availableModels -}}
+{{- $claudeModel := default "" $claude.model -}}
+{{- $claudeDefaultOpusModel := default "" $claude.defaultOpusModel -}}
+{{- $claudeDefaultSonnetModel := default "" $claude.defaultSonnetModel -}}
+{{- $claudeDefaultHaikuModel := default "" $claude.defaultHaikuModel -}}
+{{- $claudeBedrockBaseURL := default "" $claude.bedrockBaseURL -}}
+{{- $claudeMantleBaseURL := default "" $claude.mantleBaseURL -}}
+{{- $claudeBedrockServiceTier := default "" $claude.bedrockServiceTier -}}
+{{- $claudeSkipMantleAuth := default "" $claude.skipMantleAuth -}}
+{{- $claudeDisablePromptCaching := default "" $claude.disablePromptCaching -}}
+{{- $claudeEnablePromptCaching1H := default "" $claude.enablePromptCaching1H -}}
+{{- $claudeMaxOutputTokens := default "4096" $claude.maxOutputTokens -}}
+{{- $claudeMaxThinkingTokens := default "1024" $claude.maxThinkingTokens -}}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -264,12 +282,70 @@ spec:
               value: {{ if $managedCloud }}"true"{{ else }}"false"{{ end }}
             - name: ERUN_CLOUD_CONTEXT_NAME
               value: {{ $cloudContextName | quote }}
+            - name: ERUN_CLOUD_PROVIDER
+              value: {{ $cloudProvider | quote }}
             - name: ERUN_CLOUD_PROVIDER_ALIAS
               value: {{ $cloudProviderAlias | quote }}
             - name: ERUN_CLOUD_REGION
               value: {{ $cloudRegion | quote }}
             - name: ERUN_CLOUD_INSTANCE_ID
               value: {{ $cloudInstanceID | quote }}
+            {{ if eq $cloudProvider "aws" }}
+            - name: CLAUDE_CODE_USE_BEDROCK
+              value: {{ $claudeUseBedrock | quote }}
+            - name: CLAUDE_CODE_USE_MANTLE
+              value: {{ $claudeUseMantle | quote }}
+            - name: AWS_REGION
+              value: {{ $cloudRegion | quote }}
+            - name: ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION
+              value: {{ $claudeSmallFastRegion | quote }}
+            - name: ERUN_CLAUDE_AVAILABLE_MODELS
+              value: {{ $claudeAvailableModels | quote }}
+            - name: CLAUDE_CODE_MAX_OUTPUT_TOKENS
+              value: {{ $claudeMaxOutputTokens | quote }}
+            - name: MAX_THINKING_TOKENS
+              value: {{ $claudeMaxThinkingTokens | quote }}
+            {{ if $claudeModel }}
+            - name: ANTHROPIC_MODEL
+              value: {{ $claudeModel | quote }}
+            {{ end }}
+            {{ if $claudeDefaultOpusModel }}
+            - name: ANTHROPIC_DEFAULT_OPUS_MODEL
+              value: {{ $claudeDefaultOpusModel | quote }}
+            {{ end }}
+            {{ if $claudeDefaultSonnetModel }}
+            - name: ANTHROPIC_DEFAULT_SONNET_MODEL
+              value: {{ $claudeDefaultSonnetModel | quote }}
+            {{ end }}
+            {{ if $claudeDefaultHaikuModel }}
+            - name: ANTHROPIC_DEFAULT_HAIKU_MODEL
+              value: {{ $claudeDefaultHaikuModel | quote }}
+            {{ end }}
+            {{ if $claudeBedrockBaseURL }}
+            - name: ANTHROPIC_BEDROCK_BASE_URL
+              value: {{ $claudeBedrockBaseURL | quote }}
+            {{ end }}
+            {{ if $claudeMantleBaseURL }}
+            - name: ANTHROPIC_BEDROCK_MANTLE_BASE_URL
+              value: {{ $claudeMantleBaseURL | quote }}
+            {{ end }}
+            {{ if $claudeBedrockServiceTier }}
+            - name: ANTHROPIC_BEDROCK_SERVICE_TIER
+              value: {{ $claudeBedrockServiceTier | quote }}
+            {{ end }}
+            {{ if $claudeSkipMantleAuth }}
+            - name: CLAUDE_CODE_SKIP_MANTLE_AUTH
+              value: {{ $claudeSkipMantleAuth | quote }}
+            {{ end }}
+            {{ if $claudeDisablePromptCaching }}
+            - name: DISABLE_PROMPT_CACHING
+              value: {{ $claudeDisablePromptCaching | quote }}
+            {{ end }}
+            {{ if $claudeEnablePromptCaching1H }}
+            - name: ENABLE_PROMPT_CACHING_1H
+              value: {{ $claudeEnablePromptCaching1H | quote }}
+            {{ end }}
+            {{ end }}
             - name: ERUN_KUBERNETES_CONTEXT
               value: in-cluster
             - name: ERUN_TENANT

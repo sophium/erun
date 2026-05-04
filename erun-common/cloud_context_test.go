@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -78,10 +79,38 @@ func requireCloudContextCommands(t *testing.T, awsCommands, kubectlCommands []st
 		"iam put-role-policy --role-name erun-001-123456789012-eu-west-2-host-stop --policy-name erun-self-stop",
 		"iam add-role-to-instance-profile --instance-profile-name erun-001-123456789012-eu-west-2-host-stop --role-name erun-001-123456789012-eu-west-2-host-stop",
 		"ec2 run-instances",
-		"--iam-instance-profile Arn=arn:aws:iam::123456789012:instance-profile/erun-001-123456789012-eu-west-2-host-stop",
+		"--iam-instance-profile Name=erun-001-123456789012-eu-west-2-host-stop",
 		"--metadata-options HttpEndpoint=enabled,HttpTokens=required,HttpPutResponseHopLimit=2",
 	} {
 		requireStringContains(t, joined, want, "expected AWS commands to contain "+want)
+	}
+}
+
+func TestCloudContextInstanceProfilePolicyAllowsClaudeCodeBedrock(t *testing.T) {
+	policy := cloudContextSelfStopPolicy(CloudProviderConfig{AccountID: "123456789012"}, DefaultCloudContextRegion, "team-context")
+	data, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatalf("marshal policy: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		`"Sid":"AllowSelfStop"`,
+		`"ec2:StopInstances"`,
+		`"ec2:ResourceTag/erun:context":"team-context"`,
+		`"Sid":"AllowBedrockClaudeCode"`,
+		`"bedrock:InvokeModel"`,
+		`"bedrock:InvokeModelWithResponseStream"`,
+		`"bedrock:ListInferenceProfiles"`,
+		`"bedrock:GetInferenceProfile"`,
+		`"arn:aws:bedrock:*:*:inference-profile/*"`,
+		`"arn:aws:bedrock:*:*:application-inference-profile/*"`,
+		`"arn:aws:bedrock:*:*:foundation-model/*"`,
+		`"Sid":"AllowBedrockMarketplaceAccess"`,
+		`"aws-marketplace:ViewSubscriptions"`,
+		`"aws-marketplace:Subscribe"`,
+		`"aws:CalledViaLast":"bedrock.amazonaws.com"`,
+	} {
+		requireStringContains(t, content, want, "expected instance profile policy to contain "+want)
 	}
 }
 
@@ -186,6 +215,41 @@ func TestEnsureCloudContextHostStopProfileAssociationReplacesExistingProfile(t *
 	}
 	if store.config.CloudContexts[0].InstanceProfileARN != "arn:aws:iam::123456789012:instance-profile/erun-team-context-host-stop" {
 		t.Fatalf("expected saved profile ARN, got %+v", store.config.CloudContexts[0])
+	}
+}
+
+func TestCreateCloudContextSecurityGroupReusesDuplicateGroup(t *testing.T) {
+	var awsCommands []string
+	groupID, err := createCloudContextSecurityGroup(Context{}, CloudContextDependencies{
+		RunAWS: func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) {
+			joined := strings.Join(args, " ")
+			awsCommands = append(awsCommands, joined)
+			switch {
+			case strings.Contains(joined, "create-security-group"):
+				return "", errors.New("An error occurred (InvalidGroup.Duplicate) when calling the CreateSecurityGroup operation: The security group 'team-context-k3s' already exists for VPC 'vpc-test'")
+			case strings.Contains(joined, "describe-security-groups"):
+				return "sg-existing\n", nil
+			case strings.Contains(joined, "authorize-security-group-ingress"):
+				return "", errors.New("An error occurred (InvalidPermission.Duplicate) when calling the AuthorizeSecurityGroupIngress operation: the specified rule already exists")
+			default:
+				return "", nil
+			}
+		},
+	}, CloudProviderConfig{}, DefaultCloudContextRegion, "team-context")
+	if err != nil {
+		t.Fatalf("createCloudContextSecurityGroup failed: %v", err)
+	}
+	if groupID != "sg-existing" {
+		t.Fatalf("expected existing security group ID, got %q", groupID)
+	}
+
+	joined := strings.Join(awsCommands, "\n")
+	for _, want := range []string{
+		"ec2 create-security-group --group-name team-context-k3s",
+		"ec2 describe-security-groups --group-names team-context-k3s --query SecurityGroups[0].GroupId --output text",
+		"ec2 authorize-security-group-ingress --group-id sg-existing",
+	} {
+		requireStringContains(t, joined, want, "expected AWS commands to contain "+want)
 	}
 }
 

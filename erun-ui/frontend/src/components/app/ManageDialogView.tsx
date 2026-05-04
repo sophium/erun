@@ -5,6 +5,7 @@ import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
 import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
 import type { AppState } from '@/app/state';
+import { loadSavedPastContainerRegistries } from '@/app/storage';
 import { deleteConfirmationValue, normalizeDialogValue, versionChoiceImage, versionChoiceKind, versionChoiceLabel } from '@/app/versionSuggestions';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -15,6 +16,7 @@ import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import type { UICloudContextStatus, UIPortStatus, UIVersionSuggestion } from '@/types';
 import { cn } from '@/lib/utils';
+import { EditableComboField, uniqueSuggestions } from './EditableComboField';
 import { RuntimeResourceControls } from './RuntimeResourceControls';
 
 const dialogErrorClassName =
@@ -87,11 +89,15 @@ function ManageDialogContent({ controller, state, confirmationRef, expected, con
 function ManageConfigFields({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
   const dialog = state.manageDialog;
   const config = dialog.config;
+  const containerRegistrySuggestions = React.useMemo(
+    () => uniqueSuggestions([config.containerRegistry, ...loadSavedPastContainerRegistries(), 'erunpaas']),
+    [config.containerRegistry],
+  );
   return (
     <>
       <ReadonlyField id="environment-config-repopath" label="Repository path" value={config.repoPath} />
       <ReadonlyField id="environment-config-kubernetescontext" label="Kubernetes context" value={config.kubernetesContext} />
-      <ReadonlyField id="environment-config-containerregistry" label="Container registry" value={config.containerRegistry} />
+      <EditableComboField id="environment-config-containerregistry" label="Container registry" value={config.containerRegistry} suggestions={containerRegistrySuggestions} disabled={dialog.busy || dialog.configLoading} onValueChange={(containerRegistry) => controller.updateManageConfig({ containerRegistry })} />
       <CloudAliasSelect id="environment-config-cloudprovideralias" value={config.cloudProviderAlias} options={config.cloudProviderAliases || []} disabled={dialog.busy} onChange={(cloudProviderAlias) => controller.updateManageConfig({ cloudProviderAlias })} />
       <CloudContextField context={config.cloudContext} cloudProviderAlias={config.cloudProviderAlias} disabled={dialog.busy || dialog.configLoading} loading={dialog.busyAction === 'cloud-context-power' && dialog.busyTarget === config.cloudContext?.name} onStart={(name) => void controller.startManageCloudContext(name)} onStop={(name) => void controller.stopManageCloudContext(name)} />
       <RuntimeDeployField configuredVersion={config.runtimeVersion} overrideVersion={dialog.version} suggestions={state.versionSuggestions} choicesOpen={dialog.choicesOpen} disabled={dialog.busy || dialog.configLoading} onValueChange={(version) => controller.updateManageDialog({ version })} onChoicesOpenChange={(open) => controller.setManageVersionChoicesOpen(open)} onSelect={(suggestion) => controller.selectManageVersionSuggestion(suggestion)} onDeploy={() => void controller.submitManageDeploy().catch((error: unknown) => controller.showTerminalMessage(readError(error)))} />

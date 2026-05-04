@@ -22,6 +22,10 @@ type erunUIStore interface {
 	SaveEnvConfig(string, eruncommon.EnvConfig) error
 }
 
+type projectConfigLoader interface {
+	LoadProjectConfig(string) (eruncommon.ProjectConfig, string, error)
+}
+
 type erunUIDeps struct {
 	store                erunUIStore
 	findProjectRoot      eruncommon.ProjectFinderFunc
