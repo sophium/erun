@@ -248,6 +248,16 @@ func DockerImagePusher(tag string, stdout, stderr io.Writer) error {
 }
 
 func DockerRegistryLogin(registry string, stdin io.Reader, stdout, stderr io.Writer) error {
+	if isGHCRRegistry(registry) {
+		ok, err := tryGHCRLoginViaGH(registry, stdout, stderr)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return nil
+		}
+	}
+
 	args := []string{"login"}
 	if registry != "" {
 		args = append(args, registry)
@@ -258,6 +268,53 @@ func DockerRegistryLogin(registry string, stdin io.Reader, stdout, stderr io.Wri
 	loginCmd.Stdout = stdout
 	loginCmd.Stderr = stderr
 	return loginCmd.Run()
+}
+
+func isGHCRRegistry(registry string) bool {
+	registry = strings.ToLower(strings.TrimSpace(registry))
+	return registry == "ghcr.io" || strings.HasPrefix(registry, "ghcr.io/")
+}
+
+func tryGHCRLoginViaGH(registry string, stdout, stderr io.Writer) (bool, error) {
+	if _, err := exec.LookPath("gh"); err != nil {
+		return false, nil
+	}
+
+	user, err := captureGHCommand("api", "user", "--jq", ".login")
+	if err != nil {
+		return false, nil
+	}
+	user = strings.TrimSpace(user)
+	if user == "" {
+		return false, nil
+	}
+
+	token, err := captureGHCommand("auth", "token")
+	if err != nil {
+		return false, nil
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return false, nil
+	}
+
+	loginCmd := exec.Command("docker", "login", "ghcr.io", "-u", user, "--password-stdin")
+	loginCmd.Stdin = strings.NewReader(token)
+	loginCmd.Stdout = stdout
+	loginCmd.Stderr = stderr
+	if err := loginCmd.Run(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func captureGHCommand(args ...string) (string, error) {
+	cmd := exec.Command("gh", args...)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(output), nil
 }
 
 func runScriptSpec(ctx Context, script scriptSpec, run BuildScriptRunnerFunc) error {

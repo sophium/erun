@@ -324,7 +324,7 @@ func TestBootstrapRunCreatesTenantDevopsModuleAndChart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read service template: %v", err)
 	}
-	if !strings.Contains(string(serviceTemplate), `printf "erunpaas/tenant-a-devops:%s" .Chart.AppVersion`) {
+	if !strings.Contains(string(serviceTemplate), `printf "ghcr.io/sophium/tenant-a-devops:%s" .Chart.AppVersion`) {
 		t.Fatalf("expected tenant image reference, got %q", string(serviceTemplate))
 	}
 	if !strings.Contains(string(serviceTemplate), "name: tenant-a-devops") {
@@ -352,7 +352,7 @@ func requireTenantDevopsFiles(t *testing.T, moduleRoot string) {
 func requireTenantDevopsDockerfile(t *testing.T, dockerfile string) {
 	t.Helper()
 	requireStringContains(t, dockerfile, "FROM ${ERUN_BASE_TAG}", "expected thin wrapper Dockerfile")
-	requireStringContains(t, dockerfile, "ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.2.3", "expected Dockerfile base tag to match init runtime version")
+	requireStringContains(t, dockerfile, "ARG ERUN_BASE_TAG=ghcr.io/sophium/erun-devops:1.2.3", "expected Dockerfile base tag to match init runtime version")
 	requireStringContains(t, dockerfile, "ENTRYPOINT [\"erun-devops-entrypoint\"]", "expected wrapper Dockerfile to delegate to base entrypoint")
 	requireCondition(t, !strings.Contains(dockerfile, "exec /bin/bash -i") && !strings.Contains(dockerfile, "entrypoint.sh") && !strings.Contains(dockerfile, "terraform"), "expected no duplicated runtime setup in Dockerfile, got %q", dockerfile)
 }
@@ -1156,7 +1156,7 @@ func TestBootstrapRunRemoteInitializesTenantInPodWorktree(t *testing.T) {
 		},
 		PromptRemoteRepositoryURL: remoteRepositoryPrompt(t, "frs", "dev", "git@github.com:sophium/frs.git"),
 		EnsureKubernetesNamespace: remoteNamespaceEnsurer(t, "cluster-remote", "frs-dev"),
-		DeployHelmChart:           remoteHelmDeployChecker(t, "frs", "1.2.3", `printf "erunpaas/frs-devops:%s" .Chart.AppVersion`),
+		DeployHelmChart:           remoteHelmDeployChecker(t, "frs", "1.2.3", `printf "ghcr.io/sophium/frs-devops:%s" .Chart.AppVersion`),
 		WaitForRemoteRuntime: func(req ShellLaunchParams) error {
 			waited = req
 			return nil
@@ -1403,7 +1403,7 @@ func TestBootstrapRunRemoteBootstrapCreatesTenantDevopsModuleAndChart(t *testing
 			t.Fatalf("expected bootstrap script to write %s, got:\n%s", path, bootstrapScript)
 		}
 	}
-	if !strings.Contains(bootstrapScript, "ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.2.3") {
+	if !strings.Contains(bootstrapScript, "ARG ERUN_BASE_TAG=ghcr.io/sophium/erun-devops:1.2.3") {
 		t.Fatalf("expected runtime version in bootstrap Dockerfile, got:\n%s", bootstrapScript)
 	}
 }

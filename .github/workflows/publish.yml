@@ -1,0 +1,130 @@
+name: Publish container images
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  REGISTRY_NAMESPACE: ghcr.io/sophium
+
+jobs:
+  ubuntu-base:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        run: |
+          tag=$(grep -oE 'FROM ubuntu:[^ ]+' erun-devops/docker/erun-ubuntu/Dockerfile | head -1 | cut -d: -f2)
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v5
+        with:
+          context: erun-devops/docker/erun-ubuntu
+          file: erun-devops/docker/erun-ubuntu/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.REGISTRY_NAMESPACE }}/erun-ubuntu:${{ steps.meta.outputs.tag }}
+
+  dind:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        run: |
+          tag=$(grep -oE 'DOCKER_VERSION=[^ ]+' erun-devops/docker/erun-dind/Dockerfile | head -1 | cut -d= -f2)
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v5
+        with:
+          context: erun-devops/docker/erun-dind
+          file: erun-devops/docker/erun-dind/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ env.REGISTRY_NAMESPACE }}/erun-dind:${{ steps.meta.outputs.tag }}
+
+  devops:
+    needs: ubuntu-base
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        run: |
+          version=$(tr -d '[:space:]' < erun-devops/VERSION)
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: erun-devops/docker/erun-devops/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            ERUN_VERSION=${{ steps.meta.outputs.version }}
+            ERUN_COMMIT=${{ github.sha }}
+            ERUN_DATE=${{ github.event.head_commit.timestamp }}
+          tags: ${{ env.REGISTRY_NAMESPACE }}/erun-devops:${{ steps.meta.outputs.version }}
+
+  downstream:
+    needs: devops
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - erun-backend-db
+          - erun-backend-api
+          - erun-mcp
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: erun-devops/docker/${{ matrix.image }}/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: |
+            ERUN_VERSION=${{ needs.devops.outputs.version }}
+          tags: ${{ env.REGISTRY_NAMESPACE }}/${{ matrix.image }}:${{ needs.devops.outputs.version }}

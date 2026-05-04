@@ -138,7 +138,7 @@ func TestOpenCommandRuntimeImageOverrideUsesSelectedImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile failed: %v", err)
 	}
-	if !strings.Contains(string(service), `printf "erunpaas/test-devops:%s" .Chart.AppVersion`) {
+	if !strings.Contains(string(service), `printf "ghcr.io/rihards-freimanis/test-devops:%s" .Chart.AppVersion`) {
 		t.Fatalf("expected selected runtime image in generated chart, got:\n%s", service)
 	}
 	if deployed.Version != "1.0.48" || deployed.ReleaseName != "test-devops" {

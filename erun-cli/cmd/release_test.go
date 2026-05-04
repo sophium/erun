@@ -42,7 +42,7 @@ func TestReleaseCommandDryRun(t *testing.T) {
 		"stage: sync-remote",
 		"git fetch origin",
 		"git rebase origin/develop",
-		"docker image: erunpaas/api:1.4.2-rc.",
+		"docker image: ghcr.io/rihards-freimanis/api:1.4.2-rc.",
 		"git commit -m '[skip ci] release 1.4.2-rc.",
 		"git tag -a",
 		"stage: push",

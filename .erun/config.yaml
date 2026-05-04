@@ -1,13 +1,13 @@
 environments:
     frs:
-        containerregistry: erunpaas
+        containerregistry: ghcr.io/rihards-freimanis
         docker:
             skipIfExists:
-                - erunpaas/erun-dind
-                - erunpaas/erun-ubuntu
+                - ghcr.io/rihards-freimanis/erun-dind
+                - ghcr.io/rihards-freimanis/erun-ubuntu
     local:
-        containerregistry: erunpaas
+        containerregistry: ghcr.io/rihards-freimanis
         docker:
             skipIfExists:
-                - erunpaas/erun-dind
-                - erunpaas/erun-ubuntu
+                - ghcr.io/rihards-freimanis/erun-dind
+                - ghcr.io/rihards-freimanis/erun-ubuntu

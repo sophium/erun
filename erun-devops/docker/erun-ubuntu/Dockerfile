@@ -1,5 +1,7 @@
 FROM ubuntu:noble-20260217
 
+LABEL org.opencontainers.image.source=https://github.com/sophium/erun
+
 ENV LANG=en_US.utf8
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Europe

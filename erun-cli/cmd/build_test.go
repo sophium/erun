@@ -2150,7 +2150,7 @@ func TestBuildCommandDryRunReleaseForceIncludesTagDeletionForStaleReleaseTag(t *
 		"git tag -d v1.4.2",
 		"git push --delete origin v1.4.2",
 		"docker buildx build --builder erun-multiarch --platform 'linux/amd64,linux/arm64'",
-		"-t erunpaas/api:1.4.2",
+		"-t ghcr.io/rihards-freimanis/api:1.4.2",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, output)

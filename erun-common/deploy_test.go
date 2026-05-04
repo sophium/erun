@@ -808,10 +808,10 @@ func TestRemoteBootstrapRuntimeUsesCanonicalImageWithTenantRelease(t *testing.T)
 	if !strings.Contains(content, "name: test-devops") {
 		t.Fatalf("expected tenant deployment identity in chart, got:\n%s", content)
 	}
-	if !strings.Contains(content, `printf "erunpaas/erun-devops:%s" .Chart.AppVersion`) {
+	if !strings.Contains(content, `printf "ghcr.io/sophium/erun-devops:%s" .Chart.AppVersion`) {
 		t.Fatalf("expected canonical runtime image in bootstrap chart, got:\n%s", content)
 	}
-	if strings.Contains(content, "image: erunpaas/test-devops:") {
+	if strings.Contains(content, "image: ghcr.io/sophium/test-devops:") {
 		t.Fatalf("bootstrap chart must not require tenant image before it exists, got:\n%s", content)
 	}
 }
@@ -845,10 +845,10 @@ func TestResolveOpenRuntimeDeploySpecUsesRemoteEnvRuntimeVersionForEmbeddedChart
 		t.Fatalf("read rendered chart template: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, `printf "erunpaas/erun-devops:%s" .Chart.AppVersion`) {
+	if !strings.Contains(content, `printf "ghcr.io/sophium/erun-devops:%s" .Chart.AppVersion`) {
 		t.Fatalf("expected canonical runtime image for remote deploy, got:\n%s", content)
 	}
-	if strings.Contains(content, "image: erunpaas/frs-devops:") {
+	if strings.Contains(content, "image: ghcr.io/sophium/frs-devops:") {
 		t.Fatalf("remote deploy must not require tenant image before it exists, got:\n%s", content)
 	}
 }

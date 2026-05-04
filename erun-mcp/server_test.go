@@ -516,7 +516,7 @@ func TestBuildToolPreviewVerboseIncludesTrace(t *testing.T) {
 	if len(output.Trace) == 0 {
 		t.Fatalf("expected trace output at preview verbosity 1, got %+v", output)
 	}
-	want := "docker build -t erunpaas/erun-devops:1.1.0 --build-arg ERUN_VERSION=1.1.0 -f " + filepath.Join(componentDir, "Dockerfile") + " ."
+	want := "docker build -t ghcr.io/rihards-freimanis/erun-devops:1.1.0 --build-arg ERUN_VERSION=1.1.0 -f " + filepath.Join(componentDir, "Dockerfile") + " ."
 	if output.Trace[0] != "cd "+projectRoot+" && "+want {
 		t.Fatalf("unexpected trace output: %+v", output.Trace)
 	}
@@ -561,7 +561,7 @@ func TestBuildToolPreviewReleaseIncludesReleaseAndBuildTrace(t *testing.T) {
 func hasReleaseBuildTrace(traces []string) bool {
 	for _, trace := range traces {
 		if strings.Contains(trace, "docker buildx build --builder erun-multiarch --platform 'linux/amd64,linux/arm64'") &&
-			strings.Contains(trace, "-t erunpaas/api:1.4.2-rc.") &&
+			strings.Contains(trace, "-t ghcr.io/rihards-freimanis/api:1.4.2-rc.") &&
 			strings.Contains(trace, "--push") {
 			return true
 		}

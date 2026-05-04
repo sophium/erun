@@ -139,7 +139,7 @@ function EnvironmentNameFields({
 
 function EnvironmentCreateFields({ controller, dialog }: { controller: ERunUIController; dialog: EnvironmentDialog }): React.ReactElement {
   const containerRegistrySuggestions = React.useMemo(
-    () => uniqueSuggestions([dialog.containerRegistry, ...loadSavedPastContainerRegistries(), 'erunpaas']),
+    () => uniqueSuggestions([dialog.containerRegistry, ...loadSavedPastContainerRegistries(), 'ghcr.io/rihards-freimanis']),
     [dialog.containerRegistry],
   );
 

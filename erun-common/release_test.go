@@ -33,7 +33,7 @@ func requireStableReleaseSpec(t *testing.T, spec ReleaseSpec, projectRoot string
 	requireCondition(t, spec.Mode == ReleaseModeStable && spec.Version == "1.4.2" && spec.NextVersion == "1.4.3", "unexpected release spec: %+v", spec)
 	requireEqual(t, spec.ReleaseRoot, filepath.Join(projectRoot, "erun-devops"), "unexpected release root")
 	requireCondition(t, len(spec.Charts) == 1 && spec.Charts[0].Version == "1.4.2" && spec.Charts[0].AppVersion == "1.4.2", "unexpected charts: %+v", spec.Charts)
-	requireCondition(t, len(spec.DockerImages) == 1 && spec.DockerImages[0].Tag == "erunpaas/api:1.4.2", "unexpected docker images: %+v", spec.DockerImages)
+	requireCondition(t, len(spec.DockerImages) == 1 && spec.DockerImages[0].Tag == "ghcr.io/sophium/api:1.4.2", "unexpected docker images: %+v", spec.DockerImages)
 	requireEqual(t, len(spec.Stages), 5, "stage count")
 	requireStableReleaseStageCommands(t, spec, projectRoot)
 }
