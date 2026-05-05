@@ -102,6 +102,12 @@ func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinde
 			}
 			return err
 		}
+		if ensureErr := internal.EnsureGlobalAgentInstructions(); ensureErr != nil {
+			ctx.Logger.Debug("could not ensure global agent instructions: " + ensureErr.Error())
+		}
+		if ensureErr := internal.EnsureClaudeSettings(); ensureErr != nil {
+			ctx.Logger.Debug("could not ensure claude settings: " + ensureErr.Error())
+		}
 		return nil
 	}
 }

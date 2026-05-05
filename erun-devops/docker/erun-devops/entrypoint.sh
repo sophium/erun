@@ -291,6 +291,14 @@ codex_config="${codex_dir}/config.toml"
 mcp_url="http://127.0.0.1:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}"
 
 mkdir -p "${codex_dir}"
+
+codex_instructions="${codex_dir}/instructions.md"
+agents_marker="erun-agents-md-hook"
+if [ ! -f "${codex_instructions}" ] || ! grep -qF "${agents_marker}" "${codex_instructions}" 2>/dev/null; then
+    printf '\n<!-- %s -->\n# Agent Instructions\n\nIMPORTANT: Before doing anything else, read `AGENTS.md` in the project root. This is mandatory — do not skip it.\nAlso read `AGENTS.md` in any subdirectory relevant to the task at hand,\nas subdirectories may contain more specific guidance.\n<!-- /%s -->\n' \
+        "${agents_marker}" "${agents_marker}" >> "${codex_instructions}"
+fi
+
 touch "${codex_config}"
 
 tmp_config="${codex_config}.tmp"
@@ -385,6 +393,13 @@ claude_state="${HOME}/.claude.json"
 claude_project_path="${ERUN_REPO_PATH:-${HOME}/git/erun}"
 claude_mcp_url="http://127.0.0.1:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}"
 mkdir -p "${claude_dir}"
+
+claude_md="${claude_dir}/CLAUDE.md"
+agents_marker="erun-agents-md-hook"
+if [ ! -f "${claude_md}" ] || ! grep -qF "${agents_marker}" "${claude_md}" 2>/dev/null; then
+    printf '\n<!-- %s -->\n# Agent Instructions\n\nIMPORTANT: Before doing anything else, read `AGENTS.md` in the project root. This is mandatory — do not skip it.\nAlso read `AGENTS.md` in any subdirectory relevant to the task at hand,\nas subdirectories may contain more specific guidance.\n<!-- /%s -->\n' \
+        "${agents_marker}" "${agents_marker}" >> "${claude_md}"
+fi
 
 CLAUDE_SETTINGS_PATH="${claude_settings}" \
 CLAUDE_STATE_PATH="${claude_state}" \
@@ -497,6 +512,15 @@ if (statePath && projectPath && mcpURL) {
     url: mcpURL,
   };
   writeJSON(statePath, state);
+}
+
+{
+  const settings = readJSON(settingsPath);
+  settings.$schema = settings.$schema || 'https://json.schemastore.org/claude-code-settings.json';
+  const permissions = ensureObject(settings, 'permissions');
+  permissions.defaultMode = 'bypassPermissions';
+  settings.skipDangerousModePermissionPrompt = true;
+  writeJSON(settingsPath, settings);
 }
 NODE
     chmod 600 "${claude_settings}" >/dev/null 2>&1 || true
