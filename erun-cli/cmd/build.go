@@ -90,7 +90,19 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 			if err != nil {
 				return err
 			}
-			return common.RunDockerPushSpec(ctx, pushInput, buildInput, buildDockerImage, push)
+			builder := buildDockerImage
+			if builder == nil {
+				builder = common.DockerImageBuilder
+			}
+			builderWithGuidance := func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
+				buildErr := builder(buildInput, stdout, stderr)
+				var authErr common.DockerRegistryAuthError
+				if errors.As(buildErr, &authErr) && common.IsDockerCreatePackageDenied(authErr.Message) {
+					printCreatePackageGuidance(stderr, authErr.Tag, authErr.Registry)
+				}
+				return buildErr
+			}
+			return common.RunDockerPushSpec(ctx, pushInput, buildInput, builderWithGuidance, push)
 		},
 	}
 	addDryRunFlag(cmd)
