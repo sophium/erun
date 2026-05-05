@@ -371,6 +371,56 @@ exit 1
 	}
 }
 
+func TestIsGHCRRegistryRecognizesHostnameAndNamespace(t *testing.T) {
+	cases := map[string]bool{
+		"":                       false,
+		"docker.io":              false,
+		"erunpaas":               false,
+		"ghcr.io":                true,
+		"GHCR.IO":                true,
+		"ghcr.io/sophium":        true,
+		"  ghcr.io/sophium/foo ": true,
+		"123456789.dkr.ecr.us-east-1.amazonaws.com": false,
+	}
+	for input, want := range cases {
+		if got := isGHCRRegistry(input); got != want {
+			t.Errorf("isGHCRRegistry(%q) = %v, want %v", input, got, want)
+		}
+	}
+}
+
+func TestTryGHCRLoginViaGHFallsBackWhenGHMissing(t *testing.T) {
+	emptyDir := t.TempDir()
+	t.Setenv("PATH", emptyDir)
+
+	ok, err := tryGHCRLoginViaGH("ghcr.io", io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("expected nil error when gh is missing, got %v", err)
+	}
+	if ok {
+		t.Fatalf("expected no-op when gh CLI is unavailable")
+	}
+}
+
+func TestIsDockerPushAuthorizationErrorDetectsRegistryDenials(t *testing.T) {
+	cases := map[string]bool{
+		"unauthorized: authentication required":                                  true,
+		"denied: requested access to the resource is denied":                     true,
+		"insufficient_scope: authorization failed":                               true,
+		"error from registry: denied\ndenied":                                    true,
+		"error from registry: permission_denied: The token provided does not match expected scopes.": true,
+		"errorresponse from daemon: pull access denied for image":                true,
+		"failed to copy: no basic auth credentials":                              true,
+		"network unreachable":                                                    false,
+		"unexpected EOF":                                                         false,
+	}
+	for message, want := range cases {
+		if got := IsDockerPushAuthorizationError(message); got != want {
+			t.Errorf("IsDockerPushAuthorizationError(%q) = %v, want %v", message, got, want)
+		}
+	}
+}
+
 func TestMissingBuildxPlatformsReportsRequiredPlatformsNotPresent(t *testing.T) {
 	output := `Name: erun-multiarch
 Driver: docker-container

@@ -184,6 +184,10 @@ func IsDockerPushAuthorizationError(message string) bool {
 		"access denied",
 		"requested access to the resource is denied",
 		"no basic auth credentials",
+		"error from registry: denied",
+		"denied: denied",
+		"permission_denied",
+		"does not match expected scopes",
 	} {
 		if strings.Contains(message, marker) {
 			return true

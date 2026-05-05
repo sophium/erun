@@ -35,8 +35,29 @@ func ResolveDefaultRuntimeRegistryVersions(ctx context.Context) (RuntimeRegistry
 }
 
 func ResolveRuntimeImageRegistryVersions(ctx context.Context, namespace, repository string) (RuntimeRegistryVersions, error) {
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := &http.Client{Timeout: 5 * time.Second}
+	if owner, ok := ghcrOwnerFromNamespace(namespace); ok {
+		return ResolveGHCRRuntimeRegistryVersions(ctx, client, owner, repository)
+	}
 	return ResolveDockerHubRuntimeRegistryVersions(ctx, client, namespace, repository)
+}
+
+func ghcrOwnerFromNamespace(namespace string) (string, bool) {
+	trimmed := strings.TrimSpace(namespace)
+	if trimmed == "" {
+		return "", false
+	}
+	const prefix = "ghcr.io"
+	if !strings.HasPrefix(trimmed, prefix) {
+		return "", false
+	}
+	rest := strings.TrimPrefix(trimmed, prefix)
+	rest = strings.TrimPrefix(rest, "/")
+	rest = strings.Trim(rest, "/")
+	if rest == "" {
+		return "", false
+	}
+	return rest, true
 }
 
 func ResolveDockerHubRuntimeRegistryVersions(ctx context.Context, client *http.Client, namespace, repository string) (RuntimeRegistryVersions, error) {
@@ -67,6 +88,139 @@ func ResolveDockerHubRuntimeRegistryVersions(ctx context.Context, client *http.C
 	versions := latestRuntimeVersionsFromTags(tags)
 	versions.Image = namespace + "/" + repository
 	return versions, nil
+}
+
+func ResolveGHCRRuntimeRegistryVersions(ctx context.Context, client *http.Client, owner, repository string) (RuntimeRegistryVersions, error) {
+	owner = strings.TrimSpace(owner)
+	repository = strings.TrimSpace(repository)
+	if owner == "" || repository == "" {
+		return RuntimeRegistryVersions{}, fmt.Errorf("ghcr owner and repository are required")
+	}
+	if client == nil {
+		client = http.DefaultClient
+	}
+
+	repoPath := strings.ToLower(url.PathEscape(owner) + "/" + url.PathEscape(repository))
+	token, err := fetchGHCRPullToken(ctx, client, repoPath)
+	if err != nil {
+		return RuntimeRegistryVersions{}, err
+	}
+
+	endpoint := "https://ghcr.io/v2/" + repoPath + "/tags/list"
+	tags := make([]string, 0, 128)
+	for endpoint != "" {
+		page, next, err := fetchGHCRTagPage(ctx, client, endpoint, token)
+		if err != nil {
+			return RuntimeRegistryVersions{}, err
+		}
+		for _, tag := range page.Tags {
+			if name := strings.TrimSpace(tag); name != "" {
+				tags = append(tags, name)
+			}
+		}
+		endpoint = next
+	}
+
+	versions := latestRuntimeVersionsFromTags(tags)
+	versions.Image = "ghcr.io/" + strings.ToLower(owner+"/"+repository)
+	return versions, nil
+}
+
+func fetchGHCRPullToken(ctx context.Context, client *http.Client, repoPath string) (string, error) {
+	tokenURL := "https://ghcr.io/token?service=ghcr.io&scope=repository:" + repoPath + ":pull"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tokenURL, nil)
+	if err != nil {
+		return "", err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("ghcr token request failed: %s", resp.Status)
+	}
+
+	var payload struct {
+		Token       string `json:"token"`
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return "", err
+	}
+	if payload.Token != "" {
+		return payload.Token, nil
+	}
+	return payload.AccessToken, nil
+}
+
+type ghcrTagPage struct {
+	Name string   `json:"name"`
+	Tags []string `json:"tags"`
+}
+
+func fetchGHCRTagPage(ctx context.Context, client *http.Client, endpoint, token string) (ghcrTagPage, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return ghcrTagPage{}, "", err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := client.Do(req)
+	if err != nil {
+		return ghcrTagPage{}, "", err
+	}
+	defer func() {
+		_ = resp.Body.Close()
+	}()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return ghcrTagPage{}, "", fmt.Errorf("ghcr tags request failed: %s", resp.Status)
+	}
+
+	var page ghcrTagPage
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		return ghcrTagPage{}, "", err
+	}
+	return page, nextLinkFromHeader(resp, endpoint), nil
+}
+
+func nextLinkFromHeader(resp *http.Response, baseEndpoint string) string {
+	link := resp.Header.Get("Link")
+	if link == "" {
+		return ""
+	}
+	for _, segment := range strings.Split(link, ",") {
+		segment = strings.TrimSpace(segment)
+		if !strings.Contains(segment, `rel="next"`) {
+			continue
+		}
+		start := strings.Index(segment, "<")
+		end := strings.Index(segment, ">")
+		if start < 0 || end < 0 || end <= start+1 {
+			continue
+		}
+		target := strings.TrimSpace(segment[start+1 : end])
+		if target == "" {
+			continue
+		}
+		if strings.HasPrefix(target, "/") {
+			base, err := url.Parse(baseEndpoint)
+			if err == nil {
+				ref, err := url.Parse(target)
+				if err == nil {
+					return base.ResolveReference(ref).String()
+				}
+			}
+		}
+		return target
+	}
+	return ""
 }
 
 type dockerHubTagPage struct {

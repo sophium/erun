@@ -104,6 +104,45 @@ func TestResolveDockerHubRuntimeRegistryVersionsFollowsPages(t *testing.T) {
 	}
 }
 
+func TestResolveGHCRRuntimeRegistryVersionsFollowsTokenAndPagination(t *testing.T) {
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/token":
+			if r.URL.Query().Get("scope") != "repository:sophium/erun-devops:pull" {
+				t.Errorf("unexpected token scope: %s", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`{"token":"abc"}`))
+		case r.URL.Path == "/v2/sophium/erun-devops/tags/list" && r.URL.Query().Get("last") == "":
+			if got := r.Header.Get("Authorization"); got != "Bearer abc" {
+				t.Errorf("missing bearer token, got %q", got)
+			}
+			w.Header().Set("Link", `</v2/sophium/erun-devops/tags/list?last=1.0.51-snapshot-20260424080000>; rel="next"`)
+			_, _ = w.Write([]byte(`{"name":"sophium/erun-devops","tags":["1.0.49","1.0.51-snapshot-20260424080000"]}`))
+		case r.URL.Path == "/v2/sophium/erun-devops/tags/list":
+			_, _ = w.Write([]byte(`{"name":"sophium/erun-devops","tags":["1.0.50","1.0.51-snapshot-20260424100000"]}`))
+		default:
+			t.Errorf("unexpected request: %s", r.URL.String())
+		}
+	}))
+	defer server.Close()
+
+	transport := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		req.URL.Scheme = "http"
+		req.URL.Host = strings.TrimPrefix(server.URL, "http://")
+		return http.DefaultTransport.RoundTrip(req)
+	})
+	client := &http.Client{Transport: transport}
+
+	got, err := ResolveGHCRRuntimeRegistryVersions(context.Background(), client, "sophium", "erun-devops")
+	if err != nil {
+		t.Fatalf("ResolveGHCRRuntimeRegistryVersions failed: %v", err)
+	}
+	if got.Image != "ghcr.io/sophium/erun-devops" || got.LatestStable != "1.0.50" || got.LatestSnapshot != "1.0.51-snapshot-20260424100000" || !got.HasVersion("1.0.49") {
+		t.Fatalf("unexpected versions: %+v", got)
+	}
+}
+
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
