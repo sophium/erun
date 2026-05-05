@@ -30,7 +30,7 @@ func ensureGlobalCodexInstructionsWithHomeDir(homeDir string) error {
 }
 
 func ensureAgentInstructionsFile(dir, filename string) error {
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
 	path := filepath.Join(dir, filename)
@@ -46,5 +46,5 @@ func ensureAgentInstructionsFile(dir, filename string) error {
 		content += "\n"
 	}
 	content += claudeMDBlock
-	return os.WriteFile(path, []byte(content), 0600)
+	return os.WriteFile(path, []byte(content), 0o600)
 }

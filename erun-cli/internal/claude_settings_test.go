@@ -26,11 +26,11 @@ func TestEnsureClaudeSettingsCreatesFile(t *testing.T) {
 func TestEnsureClaudeSettingsPreservesExistingContent(t *testing.T) {
 	dir := t.TempDir()
 	claudeDir := filepath.Join(dir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0700); err != nil {
+	if err := os.MkdirAll(claudeDir, 0o700); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	existing := `{"theme":"dark"}` + "\n"
-	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(existing), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(existing), 0o600); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	if err := ensureClaudeSettingsWithHomeDir(dir); err != nil {
@@ -71,11 +71,11 @@ func TestEnsureClaudeSettingsIdempotent(t *testing.T) {
 func TestEnsureClaudeSettingsUpdatesPartialSettings(t *testing.T) {
 	dir := t.TempDir()
 	claudeDir := filepath.Join(dir, ".claude")
-	if err := os.MkdirAll(claudeDir, 0700); err != nil {
+	if err := os.MkdirAll(claudeDir, 0o700); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	partial := `{"permissions":{"defaultMode":"default"}}` + "\n"
-	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(partial), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(partial), 0o600); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
 	if err := ensureClaudeSettingsWithHomeDir(dir); err != nil {
