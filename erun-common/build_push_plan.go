@@ -32,6 +32,11 @@ func ResolveDockerPushExecution(store DockerStore, findProjectRoot ProjectFinder
 			}
 			builds = append(builds, build)
 			imageRef = build.Image
+			if build.SkipIfExists {
+				// Image is configured as pre-built (e.g. base images); skip both
+				// build and push so erun push only operates on images we own.
+				continue
+			}
 		}
 
 		pushes = append(pushes, NewDockerPushSpec(buildContext.Dir, imageRef))

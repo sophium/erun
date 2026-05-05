@@ -90,7 +90,82 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 			if err != nil {
 				return err
 			}
-			return common.RunDockerPushSpec(ctx, pushInput, buildInput, buildDockerImage, push)
+			builder := buildDockerImage
+			if builder == nil {
+				builder = common.DockerImageBuilder
+			}
+			builderWithGuidance := func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
+				buildErr := builder(buildInput, stdout, stderr)
+				var authErr common.DockerRegistryAuthError
+				if !errors.As(buildErr, &authErr) || !common.IsDockerCreatePackageDenied(authErr.Message) {
+					return buildErr
+				}
+				if ok, _ := common.TryGHCRNamespaceLogin(authErr.Tag, stdout, stderr); ok {
+					if retryErr := builder(buildInput, stdout, stderr); retryErr == nil {
+						return nil
+					} else {
+						buildErr = retryErr
+					}
+				}
+				printCreatePackageGuidance(stderr, authErr.Tag, authErr.Registry)
+				return buildErr
+			}
+			return common.RunDockerPushSpec(ctx, pushInput, buildInput, builderWithGuidance, push)
+		},
+	}
+	addDryRunFlag(cmd)
+	addPushCommandTargetFlags(cmd, &target)
+	return cmd
+}
+
+// newRootPushCmd is the top-level "erun push" shorthand. It supports both
+// single-image push (when a Dockerfile exists in the current directory) and
+// multi-image push (when run from the project root with multiple docker
+// contexts). The nested "devops container push" command uses newPushCmd which
+// is single-image only.
+func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc) *cobra.Command {
+	target := common.DockerCommandTarget{}
+	cmd := &cobra.Command{
+		Use:           "push",
+		Short:         "Build and push the current container image",
+		Args:          cobra.NoArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext(cmd)
+			builder := buildDockerImage
+			if builder == nil {
+				builder = common.DockerImageBuilder
+			}
+			builderWithGuidance := func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
+				buildErr := builder(buildInput, stdout, stderr)
+				var authErr common.DockerRegistryAuthError
+				if !errors.As(buildErr, &authErr) || !common.IsDockerCreatePackageDenied(authErr.Message) {
+					return buildErr
+				}
+				if ok, _ := common.TryGHCRNamespaceLogin(authErr.Tag, stdout, stderr); ok {
+					if retryErr := builder(buildInput, stdout, stderr); retryErr == nil {
+						return nil
+					} else {
+						buildErr = retryErr
+					}
+				}
+				printCreatePackageGuidance(stderr, authErr.Tag, authErr.Registry)
+				return buildErr
+			}
+			buildContext, _ := resolveBuildContext()
+			if strings.TrimSpace(buildContext.DockerfilePath) != "" {
+				pushInput, buildInput, err := common.ResolveDockerPushSpec(store, findProjectRoot, resolveBuildContext, now, target)
+				if err != nil {
+					return err
+				}
+				return common.RunDockerPushSpec(ctx, pushInput, buildInput, builderWithGuidance, push)
+			}
+			execution, err := common.ResolveDockerPushExecution(store, findProjectRoot, resolveBuildContext, now, target)
+			if err != nil {
+				return err
+			}
+			return common.RunDockerPushExecution(ctx, execution, builderWithGuidance, push)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -107,6 +182,15 @@ func runDockerPushWithRetry(ctx common.Context, pushInput common.DockerPushSpec,
 	var authErr common.DockerRegistryAuthError
 	if !errors.As(err, &authErr) {
 		return err
+	}
+
+	if common.IsDockerCreatePackageDenied(authErr.Message) {
+		if ok, _ := common.TryGHCRNamespaceLogin(authErr.Tag, ctx.Stdout, ctx.Stderr); ok {
+			if retryErr := push(ctx, pushInput); retryErr == nil {
+				return nil
+			}
+		}
+		printCreatePackageGuidance(ctx.Stderr, authErr.Tag, authErr.Registry)
 	}
 
 	retry, promptErr := promptDockerLoginRetry(selectRunner, authErr.Registry)
@@ -138,6 +222,15 @@ func runDockerBuildWithRetry(ctx common.Context, buildInput common.DockerBuildSp
 	var authErr common.DockerRegistryAuthError
 	if !errors.As(err, &authErr) {
 		return err
+	}
+
+	if common.IsDockerCreatePackageDenied(authErr.Message) {
+		if ok, _ := common.TryGHCRNamespaceLogin(authErr.Tag, stdout, stderr); ok {
+			if retryErr := build(buildInput, stdout, stderr); retryErr == nil {
+				return nil
+			}
+		}
+		printCreatePackageGuidance(stderr, authErr.Tag, authErr.Registry)
 	}
 
 	retry, promptErr := promptDockerLoginRetry(selectRunner, authErr.Registry)
@@ -173,6 +266,59 @@ func addPushCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandT
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the resolved image version")
 	_ = cmd.Flags().MarkHidden("project-root")
 	_ = cmd.Flags().MarkHidden("environment")
+}
+
+func printCreatePackageGuidance(out io.Writer, tag, registry string) {
+	if out == nil {
+		return
+	}
+	namespace := common.DockerNamespaceFromTag(tag)
+	registryHost := strings.TrimSpace(registry)
+	if registryHost == "" {
+		registryHost = "the registry"
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n")
+	fmt.Fprintf(&sb, "%s rejected the push: only the namespace owner can create new packages under %s.\n\n", registryHost, namespacePath(registryHost, namespace))
+
+	if isGHCR(registryHost) {
+		owner := namespace
+		if owner == "" {
+			owner = "<owner>"
+		}
+		fmt.Fprintf(&sb, "To bootstrap the first version of this image, get a personal access token from the GitHub account that owns ghcr.io/%s/:\n", owner)
+		sb.WriteString("  1. Sign into github.com as that account.\n")
+		sb.WriteString("  2. Open https://github.com/settings/tokens/new (classic).\n")
+		sb.WriteString("  3. Generate a token with scopes: write:packages and read:packages.\n")
+		sb.WriteString("  4. docker logout ghcr.io\n")
+		fmt.Fprintf(&sb, "  5. echo $TOKEN | docker login ghcr.io -u %s --password-stdin\n", owner)
+		sb.WriteString("  6. Re-run erun push.\n\n")
+		sb.WriteString("After the package exists the owner can grant Write access to others (per-package settings, or via \"Inherit access from source repository\" on a linked repo). Future versions can then be pushed by anyone with that access — no PAT needed.\n")
+	} else {
+		sb.WriteString("Obtain credentials from the namespace owner or registry administrator and run:\n")
+		fmt.Fprintf(&sb, "  docker logout %s && docker login %s\n", registryHost, registryHost)
+		sb.WriteString("Then re-run erun push.\n")
+	}
+	sb.WriteString("\n")
+	_, _ = io.WriteString(out, sb.String())
+}
+
+func namespacePath(registry, namespace string) string {
+	registry = strings.TrimSpace(registry)
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return registry + "/"
+	}
+	if registry == "" {
+		return namespace + "/"
+	}
+	return registry + "/" + namespace + "/"
+}
+
+func isGHCR(registry string) bool {
+	registry = strings.ToLower(strings.TrimSpace(registry))
+	return registry == "ghcr.io" || strings.HasPrefix(registry, "ghcr.io/")
 }
 
 func promptDockerLoginRetry(run SelectRunner, registry string) (bool, error) {

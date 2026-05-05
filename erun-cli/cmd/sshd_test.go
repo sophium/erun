@@ -115,6 +115,7 @@ func TestRunSSHDInitCommandPersistsConfigAndDeploysRuntime(t *testing.T) {
 			savedEnv = config
 			return nil
 		},
+		func() (string, string, error) { return "tenant-a", t.TempDir(), nil },
 		func(target common.OpenResult) (common.DeploySpec, error) {
 			return common.DeploySpec{
 				Target: target,
@@ -171,6 +172,9 @@ func requireSSHDInitConfig(t *testing.T, savedTenant string, savedEnv common.Env
 	}
 	if !savedEnv.SSHD.Enabled || savedEnv.SSHD.LocalPort != 64022 || savedEnv.SSHD.PublicKeyPath != publicKeyPath {
 		t.Fatalf("unexpected saved env config: %+v", savedEnv)
+	}
+	if savedEnv.SSHD.WorkspaceSync.Enabled || savedEnv.SSHD.WorkspaceSync.LocalPath != "" {
+		t.Fatalf("unexpected saved SSHD workspace sync config: %+v", savedEnv.SSHD.WorkspaceSync)
 	}
 	if !deployed.SSHDEnabled {
 		t.Fatalf("expected deployment params to enable SSHD, got %+v", deployed)
@@ -229,6 +233,7 @@ func TestRunSSHDInitCommandUsesResolvedEnvironmentLocalPortByDefault(t *testing.
 			savedEnv = config
 			return nil
 		},
+		nil,
 		func(target common.OpenResult) (common.DeploySpec, error) {
 			return common.DeploySpec{
 				Target: target,

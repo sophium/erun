@@ -416,7 +416,7 @@ func assembleTestRootCmd(parts testRootCmdParts) *cobra.Command {
 	}, parts.resolveOpen, parts.store.SaveEnvConfig, parts.runInitForOpen, parts.promptRunner, parts.openShell, parts.runManagedDeploy, parts.deps.CheckKubernetesDeployment, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.activateMCP, parts.activateAPI, parts.activateSSHD, parts.launchVSCodeCmd, parts.launchIntelliJCmd)
 	sshdCmd := newSSHDCmd(func(ctx common.Context) common.Context {
 		return withCloudContextPreflight(ctx, parts.store)
-	}, parts.resolveOpen, parts.store.SaveEnvConfig, parts.runInitForOpen, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.deps.RunRemoteCommand, writeLocalSSHConfig)
+	}, parts.resolveOpen, parts.store.SaveEnvConfig, parts.runInitForOpen, parts.findProjectRoot, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.deps.RunRemoteCommand, writeLocalSSHConfig)
 	containerCmd := newCommandGroup(
 		"container",
 		"Container utilities",
@@ -466,7 +466,7 @@ func optionalTestPushCmd(parts testRootCmdParts) *cobra.Command {
 	if !hasOptionalPushCmd(parts.optionalBuildFindProjectRoot, parts.resolveDockerBuildContext) {
 		return nil
 	}
-	pushCmd := newPushCmd(parts.store, parts.findProjectRoot, parts.resolveDockerBuildContext, parts.now, parts.buildDockerImage, parts.push)
+	pushCmd := newRootPushCmd(parts.store, parts.findProjectRoot, parts.resolveDockerBuildContext, parts.now, parts.buildDockerImage, parts.push)
 	pushCmd.Short = optionalPushCmdShort(parts.optionalBuildFindProjectRoot, parts.resolveDockerBuildContext)
 	return pushCmd
 }

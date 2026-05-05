@@ -50,6 +50,12 @@ type DockerImageReference struct {
 	Registry            string
 	ImageName           string
 	Version             string
+	// BaseVersion is the stable semver without any snapshot suffix (e.g. "1.0.51").
+	// Set only for local snapshot builds where Version differs from BaseVersion.
+	// Used as the ERUN_VERSION build arg and as an additional local tag so that
+	// downstream images (FROM …:${ERUN_VERSION}) can resolve from the local Docker
+	// cache instead of pulling from the registry.
+	BaseVersion         string
 	Tag                 string
 	IsLocalBuild        bool
 	VersionFilePath     string

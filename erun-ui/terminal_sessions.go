@@ -39,6 +39,7 @@ func (a *App) StartSession(selection uiSelection, cols, rows int) (startSessionR
 	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
 		a.current = existing
 		a.mu.Unlock()
+		go a.startWorkspaceSyncForSelection(selection)
 		return startSessionResult{
 			SessionID: existing.serial,
 			Selection: existing.selection,
@@ -76,6 +77,7 @@ func (a *App) StartSession(selection uiSelection, cols, rows int) (startSessionR
 
 	a.recordTerminalActivity(selection)
 	go a.streamSession(managed)
+	go a.startWorkspaceSyncForSelection(selection)
 
 	return startSessionResult{
 		SessionID: serial,
@@ -530,6 +532,9 @@ func (a *App) streamSession(managed *managedTerminal) {
 				SessionID: managed.serial,
 				Reason:    reason,
 			})
+			if reason == "" && strings.HasPrefix(managed.key, "sshd-init\x00") {
+				go a.startWorkspaceSyncForSelection(managed.selection)
+			}
 			return
 		}
 	}

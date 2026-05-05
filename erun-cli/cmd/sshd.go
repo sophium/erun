@@ -2,12 +2,13 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	common "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
 )
 
-func newSSHDCmd(prepareContext func(common.Context) common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, runRemoteCommand common.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) *cobra.Command {
+func newSSHDCmd(prepareContext func(common.Context) common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, findProjectRoot common.ProjectFinderFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, runRemoteCommand common.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) *cobra.Command {
 	var publicKeyPath string
 	var localPort int
 	target := common.OpenParams{}
@@ -30,7 +31,7 @@ func newSSHDCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 			if err != nil {
 				return err
 			}
-			return runSSHDInitCommand(ctx, result, publicKeyPath, localPort, saveEnvConfig, resolveRuntimeDeploySpec, deployHelmChart, runRemoteCommand, writeLocalConfig)
+			return runSSHDInitCommand(ctx, result, publicKeyPath, localPort, saveEnvConfig, findProjectRoot, resolveRuntimeDeploySpec, deployHelmChart, runRemoteCommand, writeLocalConfig)
 		},
 	}
 	addDryRunFlag(initCmd)
@@ -42,11 +43,11 @@ func newSSHDCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 	return newCommandGroup("sshd", "Remote SSH utilities", initCmd)
 }
 
-func runSSHDInitCommand(ctx common.Context, result common.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, common.EnvConfig) error, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, runRemoteCommand common.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
+func runSSHDInitCommand(ctx common.Context, result common.OpenResult, publicKeyPath string, localPort int, saveEnvConfig func(string, common.EnvConfig) error, findProjectRoot common.ProjectFinderFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, runRemoteCommand common.RemoteCommandRunnerFunc, writeLocalConfig SSHDLocalConfigWriter) error {
 	if err := validateSSHDInitDependencies(result, saveEnvConfig, resolveRuntimeDeploySpec, deployHelmChart); err != nil {
 		return err
 	}
-	updatedEnv, err := resolveSSHDEnvConfig(result, publicKeyPath, localPort)
+	updatedEnv, err := resolveSSHDEnvConfig(result, publicKeyPath, localPort, findProjectRoot)
 	if err != nil {
 		return err
 	}
@@ -84,7 +85,7 @@ func validateSSHDInitDependencies(result common.OpenResult, saveEnvConfig func(s
 	return nil
 }
 
-func resolveSSHDEnvConfig(result common.OpenResult, publicKeyPath string, localPort int) (common.EnvConfig, error) {
+func resolveSSHDEnvConfig(result common.OpenResult, publicKeyPath string, localPort int, findProjectRoot common.ProjectFinderFunc) (common.EnvConfig, error) {
 	if publicKeyPath == "" {
 		publicKeyPath = result.EnvConfig.SSHD.PublicKeyPath
 	}
@@ -95,6 +96,11 @@ func resolveSSHDEnvConfig(result common.OpenResult, publicKeyPath string, localP
 	updatedEnv := result.EnvConfig
 	updatedEnv.SSHD.Enabled = true
 	updatedEnv.SSHD.PublicKeyPath = resolvedPublicKeyPath
+	if updatedEnv.SSHD.WorkspaceSync.Enabled {
+		if localPath := resolveSSHDWorkspaceSyncLocalPath(result, findProjectRoot); localPath != "" {
+			updatedEnv.SSHD.WorkspaceSync.LocalPath = localPath
+		}
+	}
 	if localPort > 0 {
 		updatedEnv.SSHD.LocalPort = localPort
 	}
@@ -104,9 +110,21 @@ func resolveSSHDEnvConfig(result common.OpenResult, publicKeyPath string, localP
 	return updatedEnv, nil
 }
 
+func resolveSSHDWorkspaceSyncLocalPath(result common.OpenResult, findProjectRoot common.ProjectFinderFunc) string {
+	if findProjectRoot != nil {
+		if _, projectRoot, err := findProjectRoot(); err == nil && strings.TrimSpace(projectRoot) != "" {
+			return strings.TrimSpace(projectRoot)
+		}
+	}
+	return strings.TrimSpace(result.EnvConfig.SSHD.WorkspaceSync.LocalPath)
+}
+
 func saveSSHDEnvConfig(ctx common.Context, result common.OpenResult, updatedEnv common.EnvConfig, saveEnvConfig func(string, common.EnvConfig) error) error {
 	if ctx.DryRun {
 		ctx.Trace(fmt.Sprintf("save SSHD config for %s/%s", result.Tenant, result.Environment))
+		if updatedEnv.SSHD.WorkspaceSync.Enabled {
+			ctx.Trace(fmt.Sprintf("enable SSHD workspace sync for %s/%s to %s", result.Tenant, result.Environment, valueOrNone(updatedEnv.SSHD.WorkspaceSync.LocalPath)))
+		}
 		return nil
 	}
 	return saveEnvConfig(result.Tenant, updatedEnv)

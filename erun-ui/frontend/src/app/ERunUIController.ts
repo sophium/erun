@@ -553,7 +553,7 @@ export class ERunUIController {
 
   openInitializeDialog(): void {
     const tenantDefault = this.state.selected?.tenant || this.state.tenants[0]?.name || '';
-    const containerRegistryDefault = loadSavedPastContainerRegistries()[0] || 'erunpaas';
+    const containerRegistryDefault = loadSavedPastContainerRegistries()[0] || 'ghcr.io/rihards-freimanis';
     this.state.environmentDialog = {
       open: true,
       actionMode: 'init',
@@ -758,6 +758,10 @@ export class ERunUIController {
 
   updateManageSSHDConfig(values: Partial<UIEnvironmentConfig['sshd']>): void {
     this.manageEnvironment.updateSSHDConfig(values);
+  }
+
+  async chooseWorkspaceSyncLocalFolder(): Promise<void> {
+    await this.manageEnvironment.chooseWorkspaceSyncLocalFolder();
   }
 
   async loadManageConfig(): Promise<void> {

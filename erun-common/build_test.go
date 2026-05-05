@@ -371,6 +371,112 @@ exit 1
 	}
 }
 
+func TestIsGHCRRegistryRecognizesHostnameAndNamespace(t *testing.T) {
+	cases := map[string]bool{
+		"":                       false,
+		"docker.io":              false,
+		"erunpaas":               false,
+		"ghcr.io":                true,
+		"GHCR.IO":                true,
+		"ghcr.io/sophium":        true,
+		"  ghcr.io/sophium/foo ": true,
+		"123456789.dkr.ecr.us-east-1.amazonaws.com": false,
+	}
+	for input, want := range cases {
+		if got := isGHCRRegistry(input); got != want {
+			t.Errorf("isGHCRRegistry(%q) = %v, want %v", input, got, want)
+		}
+	}
+}
+
+func TestTryGHCRNamespaceLoginNoOpsForNonGHCRTag(t *testing.T) {
+	ok, err := TryGHCRNamespaceLogin("erunpaas/erun-devops:1.0.0", io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("expected nil error for non-ghcr tag, got %v", err)
+	}
+	if ok {
+		t.Fatalf("expected no-op for non-ghcr tag")
+	}
+}
+
+func TestTryGHCRNamespaceLoginNoOpsWhenGHMissing(t *testing.T) {
+	emptyDir := t.TempDir()
+	t.Setenv("PATH", emptyDir)
+
+	ok, err := TryGHCRNamespaceLogin("ghcr.io/sophium/erun-devops:1.0.0", io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("expected nil error when gh is missing, got %v", err)
+	}
+	if ok {
+		t.Fatalf("expected no-op when gh CLI is unavailable")
+	}
+}
+
+func TestTryGHCRLoginViaGHFallsBackWhenGHMissing(t *testing.T) {
+	emptyDir := t.TempDir()
+	t.Setenv("PATH", emptyDir)
+
+	ok, err := tryGHCRLoginViaGH("ghcr.io", io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("expected nil error when gh is missing, got %v", err)
+	}
+	if ok {
+		t.Fatalf("expected no-op when gh CLI is unavailable")
+	}
+}
+
+func TestIsDockerCreatePackageDeniedRecognizesGHCRMessage(t *testing.T) {
+	cases := map[string]bool{
+		"":                                                                 false,
+		"unauthorized: authentication required":                            false,
+		"denied: permission_denied: create_package":                        true,
+		"failed to push: denied: permission_denied: create_package":        true,
+		"denied: requested access to the resource is denied":               false,
+	}
+	for input, want := range cases {
+		if got := IsDockerCreatePackageDenied(input); got != want {
+			t.Errorf("IsDockerCreatePackageDenied(%q) = %v, want %v", input, got, want)
+		}
+	}
+}
+
+func TestDockerNamespaceFromTagExtractsOwner(t *testing.T) {
+	cases := map[string]string{
+		"":                                       "",
+		"alpine:3.22":                            "",
+		"erunpaas/erun-devops:1.0.0":             "erunpaas",
+		"ghcr.io/sophium/erun-devops:1.0.0":      "sophium",
+		"ghcr.io/sophium/erun-devops":            "sophium",
+		"localhost:5000/team/image:latest":       "team",
+		"registry.example.com/team/image:1.2.3":  "team",
+		"123.dkr.ecr.us-east-1.amazonaws.com/x":  "",
+	}
+	for input, want := range cases {
+		if got := DockerNamespaceFromTag(input); got != want {
+			t.Errorf("DockerNamespaceFromTag(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestIsDockerPushAuthorizationErrorDetectsRegistryDenials(t *testing.T) {
+	cases := map[string]bool{
+		"unauthorized: authentication required":                                  true,
+		"denied: requested access to the resource is denied":                     true,
+		"insufficient_scope: authorization failed":                               true,
+		"error from registry: denied\ndenied":                                    true,
+		"error from registry: permission_denied: The token provided does not match expected scopes.": true,
+		"errorresponse from daemon: pull access denied for image":                true,
+		"failed to copy: no basic auth credentials":                              true,
+		"network unreachable":                                                    false,
+		"unexpected EOF":                                                         false,
+	}
+	for message, want := range cases {
+		if got := IsDockerPushAuthorizationError(message); got != want {
+			t.Errorf("IsDockerPushAuthorizationError(%q) = %v, want %v", message, got, want)
+		}
+	}
+}
+
 func TestMissingBuildxPlatformsReportsRequiredPlatformsNotPresent(t *testing.T) {
 	output := `Name: erun-multiarch
 Driver: docker-container
@@ -1033,10 +1139,10 @@ func requireReleaseDockerBuildExecution(t *testing.T, execution BuildExecutionSp
 	requireEqual(t, execution.release.Version, "1.4.2", "release version")
 	requireEqual(t, execution.release.NextVersion, "1.4.3", "next version")
 	requireEqual(t, len(execution.dockerBuilds), 1, "docker build count")
-	requireEqual(t, execution.dockerBuilds[0].Image.Tag, "erunpaas/api:1.4.2", "docker build tag")
+	requireEqual(t, execution.dockerBuilds[0].Image.Tag, "ghcr.io/sophium/api:1.4.2", "docker build tag")
 	requireMultiPlatformPushedBuild(t, execution.dockerBuilds[0])
 	requireEqual(t, len(execution.dockerPushes), 1, "docker push count")
-	requireEqual(t, execution.dockerPushes[0].Image.Tag, "erunpaas/api:1.4.2", "docker push tag")
+	requireEqual(t, execution.dockerPushes[0].Image.Tag, "ghcr.io/sophium/api:1.4.2", "docker push tag")
 }
 
 func requireMultiPlatformPushedBuild(t *testing.T, build DockerBuildSpec) {
@@ -1093,7 +1199,7 @@ func TestResolveBuildExecutionReleaseOnlyPushesReleaseTaggedDockerBuilds(t *test
 	if len(execution.dockerPushes) != 1 {
 		t.Fatalf("unexpected docker pushes: %+v", execution.dockerPushes)
 	}
-	if got := execution.dockerPushes[0].Image.Tag; got != "erunpaas/api:1.4.2" {
+	if got := execution.dockerPushes[0].Image.Tag; got != "ghcr.io/sophium/api:1.4.2" {
 		t.Fatalf("unexpected docker push tag: %q", got)
 	}
 }
@@ -1103,7 +1209,7 @@ func TestResolveBuildExecutionReleasePushesLocalDockerDependenciesAndDind(t *tes
 	releaseRoot := filepath.Join(projectRoot, "erun-devops")
 
 	apiDockerfilePath := filepath.Join(releaseRoot, "docker", "api", "Dockerfile")
-	requireNoError(t, os.WriteFile(apiDockerfilePath, []byte("FROM erunpaas/base:9.9.9\n"), 0o644), "write api Dockerfile")
+	requireNoError(t, os.WriteFile(apiDockerfilePath, []byte("FROM ghcr.io/sophium/base:9.9.9\n"), 0o644), "write api Dockerfile")
 
 	dindDir := filepath.Join(releaseRoot, "docker", "erun-dind")
 	requireNoError(t, os.MkdirAll(dindDir, 0o755), "mkdir dind dir")
@@ -1128,7 +1234,7 @@ func TestResolveBuildExecutionReleasePushesLocalDockerDependenciesAndDind(t *tes
 
 func requireReleaseDependencyPushes(t *testing.T, execution BuildExecutionSpec) {
 	t.Helper()
-	wantTags := []string{"erunpaas/api:1.4.2", "erunpaas/base:9.9.9", "erunpaas/erun-dind:28.1.1"}
+	wantTags := []string{"ghcr.io/sophium/api:1.4.2", "ghcr.io/sophium/base:9.9.9", "ghcr.io/sophium/erun-dind:28.1.1"}
 	pushTags := make([]string, 0, len(execution.dockerPushes))
 	for _, pushInput := range execution.dockerPushes {
 		pushTags = append(pushTags, pushInput.Image.Tag)
@@ -1258,7 +1364,7 @@ func TestRunBuildExecutionReleasePublishesResolvedVersionAsMultiPlatformBuild(t 
 		t.Fatalf("RunBuildExecution failed: %v", err)
 	}
 
-	if len(buildCalls) != 1 || buildCalls[0].Image.Tag != "erunpaas/api:1.4.2" {
+	if len(buildCalls) != 1 || buildCalls[0].Image.Tag != "ghcr.io/sophium/api:1.4.2" {
 		t.Fatalf("unexpected build calls: %+v", buildCalls)
 	}
 	if !buildCalls[0].Push || !reflect.DeepEqual(buildCalls[0].Platforms, []string{"linux/amd64", "linux/arm64"}) {
@@ -1338,6 +1444,175 @@ func TestRunBuildExecutionAndDeployDryRunReleaseReportsDeployedVersionLast(t *te
 func requireReleaseCandidateVersion(t *testing.T, version, label string) {
 	t.Helper()
 	requireCondition(t, version == "1.4.2-rc.0000000" || strings.HasPrefix(version, "1.4.2-rc."), "unexpected %s: %s", label, version)
+}
+
+func TestDockerPlatformsCovered(t *testing.T) {
+	cases := []struct {
+		name      string
+		available []string
+		required  []string
+		want      bool
+	}{
+		{
+			name:      "all required platforms present",
+			available: []string{"linux/amd64", "linux/arm64"},
+			required:  []string{"linux/amd64", "linux/arm64"},
+			want:      true,
+		},
+		{
+			name:      "only amd64 available, arm64 required",
+			available: []string{"linux/amd64"},
+			required:  []string{"linux/amd64", "linux/arm64"},
+			want:      false,
+		},
+		{
+			name:      "no available platforms (single-arch or absent)",
+			available: nil,
+			required:  []string{"linux/amd64", "linux/arm64"},
+			want:      false,
+		},
+		{
+			name:      "available is superset of required",
+			available: []string{"linux/amd64", "linux/arm64", "linux/s390x"},
+			required:  []string{"linux/amd64", "linux/arm64"},
+			want:      true,
+		},
+		{
+			name:      "empty required",
+			available: []string{"linux/amd64"},
+			required:  nil,
+			want:      true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := dockerPlatformsCovered(tc.available, tc.required)
+			if got != tc.want {
+				t.Fatalf("dockerPlatformsCovered(%v, %v) = %v, want %v", tc.available, tc.required, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunDockerBuildSkipsMultiPlatformBuildWhenManifestCoversAllPlatforms(t *testing.T) {
+	dockerDir := t.TempDir()
+	dockerPath := filepath.Join(dockerDir, "docker")
+	if err := os.WriteFile(dockerPath, []byte(`#!/bin/sh
+if [ "$1" = "manifest" ] && [ "$2" = "inspect" ]; then
+  printf '{"schemaVersion":2,"mediaType":"application/vnd.docker.distribution.manifest.list.v2+json","manifests":[{"platform":{"architecture":"amd64","os":"linux"}},{"platform":{"architecture":"arm64","os":"linux"}}]}'
+  exit 0
+fi
+echo "unexpected docker invocation: $@" >&2
+exit 1
+`), 0o755); err != nil {
+		t.Fatalf("write docker stub: %v", err)
+	}
+	t.Setenv("PATH", dockerDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	built := false
+	err := RunDockerBuild(Context{
+		Logger: NewLoggerWithWriters(1, io.Discard, io.Discard),
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+	}, DockerBuildSpec{
+		ContextDir:     "/tmp/base",
+		DockerfilePath: "/tmp/base/Dockerfile",
+		Image:          DockerImageReference{Tag: "erunpaas/erun-ubuntu:noble-20260217"},
+		Platforms:      []string{"linux/amd64", "linux/arm64"},
+		SkipIfExists:   true,
+		Push:           true,
+	}, func(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
+		built = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RunDockerBuild failed: %v", err)
+	}
+	if built {
+		t.Fatal("expected build to be skipped because multi-platform manifest already covers all required platforms")
+	}
+}
+
+func TestRunDockerBuildBuildsWhenMultiPlatformManifestMissesPlatform(t *testing.T) {
+	dockerDir := t.TempDir()
+	dockerPath := filepath.Join(dockerDir, "docker")
+	if err := os.WriteFile(dockerPath, []byte(`#!/bin/sh
+if [ "$1" = "manifest" ] && [ "$2" = "inspect" ]; then
+  printf '{"schemaVersion":2,"mediaType":"application/vnd.docker.distribution.manifest.list.v2+json","manifests":[{"platform":{"architecture":"amd64","os":"linux"}}]}'
+  exit 0
+fi
+if [ "$1" = "buildx" ] && [ "$2" = "inspect" ]; then exit 0; fi
+if [ "$1" = "buildx" ] && [ "$2" = "build" ]; then exit 0; fi
+echo "unexpected docker invocation: $@" >&2
+exit 1
+`), 0o755); err != nil {
+		t.Fatalf("write docker stub: %v", err)
+	}
+	t.Setenv("PATH", dockerDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	built := false
+	err := RunDockerBuild(Context{
+		Logger: NewLoggerWithWriters(1, io.Discard, io.Discard),
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+	}, DockerBuildSpec{
+		ContextDir:     "/tmp/base",
+		DockerfilePath: "/tmp/base/Dockerfile",
+		Image:          DockerImageReference{Tag: "erunpaas/erun-ubuntu:noble-20260217"},
+		Platforms:      []string{"linux/amd64", "linux/arm64"},
+		SkipIfExists:   true,
+		Push:           true,
+	}, func(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
+		built = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RunDockerBuild failed: %v", err)
+	}
+	if !built {
+		t.Fatal("expected build to run because arm64 platform is missing from manifest")
+	}
+}
+
+func TestRunDockerBuildBuildsWhenManifestIsSingleArchForMultiPlatformBuild(t *testing.T) {
+	dockerDir := t.TempDir()
+	dockerPath := filepath.Join(dockerDir, "docker")
+	if err := os.WriteFile(dockerPath, []byte(`#!/bin/sh
+if [ "$1" = "manifest" ] && [ "$2" = "inspect" ]; then
+  printf '{"schemaVersion":2,"mediaType":"application/vnd.docker.distribution.manifest.v2+json","config":{},"layers":[]}'
+  exit 0
+fi
+if [ "$1" = "buildx" ] && [ "$2" = "inspect" ]; then exit 0; fi
+if [ "$1" = "buildx" ] && [ "$2" = "build" ]; then exit 0; fi
+echo "unexpected docker invocation: $@" >&2
+exit 1
+`), 0o755); err != nil {
+		t.Fatalf("write docker stub: %v", err)
+	}
+	t.Setenv("PATH", dockerDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	built := false
+	err := RunDockerBuild(Context{
+		Logger: NewLoggerWithWriters(1, io.Discard, io.Discard),
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+	}, DockerBuildSpec{
+		ContextDir:     "/tmp/base",
+		DockerfilePath: "/tmp/base/Dockerfile",
+		Image:          DockerImageReference{Tag: "erunpaas/erun-ubuntu:noble-20260217"},
+		Platforms:      []string{"linux/amd64", "linux/arm64"},
+		SkipIfExists:   true,
+		Push:           true,
+	}, func(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
+		built = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RunDockerBuild failed: %v", err)
+	}
+	if !built {
+		t.Fatal("expected build to run because single-arch manifest cannot serve as multi-platform base")
+	}
 }
 
 func setupReleaseProjectGitRepo(t *testing.T, branch string) string {

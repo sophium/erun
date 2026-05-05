@@ -66,7 +66,7 @@ func renderDefaultDevopsModuleTemplate(assetPath, moduleName, runtimeVersion str
 
 	switch assetPath {
 	case "assets/default-devops-module/docker/component/Dockerfile":
-		content = strings.Replace(content, "ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.0.0", "ARG ERUN_BASE_TAG="+defaultDevopsBaseTag(runtimeVersion), 1)
+		content = strings.Replace(content, "ARG ERUN_BASE_TAG=ghcr.io/sophium/erun-devops:1.0.0", "ARG ERUN_BASE_TAG="+defaultDevopsBaseTag(runtimeVersion), 1)
 	}
 
 	return []byte(content)
@@ -77,7 +77,7 @@ func defaultDevopsBaseTag(runtimeVersion string) string {
 	if runtimeVersion == "" {
 		runtimeVersion = "dev"
 	}
-	return "erunpaas/erun-devops:" + runtimeVersion
+	return "ghcr.io/sophium/erun-devops:" + runtimeVersion
 }
 
 func ensureDefaultDevopsFile(ctx Context, path string, mode os.FileMode, content []byte) error {

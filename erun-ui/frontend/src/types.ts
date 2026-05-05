@@ -219,6 +219,10 @@ export interface UISSHDConfig {
   enabled: boolean;
   localPort: number;
   publicKeyPath: string;
+  workspaceSyncEnabled: boolean;
+  workspaceSyncLocalPath?: string;
+  workspaceSyncStatus?: string;
+  workspaceSyncStatusMessage?: string;
 }
 
 export interface UIEnvironmentLocalPorts {

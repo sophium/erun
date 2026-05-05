@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { AlertTriangle, Check, ChevronsUpDown, LoaderCircle, Play, Power, Rocket, Save, Server, Stethoscope, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, ChevronsUpDown, FolderOpen, LoaderCircle, Play, Power, Rocket, Save, Server, Stethoscope, Trash2 } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
@@ -10,7 +10,7 @@ import { deleteConfirmationValue, normalizeDialogValue, versionChoiceImage, vers
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -61,6 +61,7 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
         >
           <DialogHeader>
             <DialogTitle>{selection ? `${selection.tenant}-${selection.environment}` : 'Environment'}</DialogTitle>
+            <DialogDescription className="sr-only">Edit environment settings, run diagnostics, and delete the selected environment.</DialogDescription>
           </DialogHeader>
           <ManageDialogContent controller={controller} state={state} confirmationRef={confirmationRef} expected={expected} confirmingDelete={confirmingDelete} />
           <DialogError error={dialog.error} />
@@ -90,7 +91,7 @@ function ManageConfigFields({ controller, state }: { controller: ERunUIControlle
   const dialog = state.manageDialog;
   const config = dialog.config;
   const containerRegistrySuggestions = React.useMemo(
-    () => uniqueSuggestions([config.containerRegistry, ...loadSavedPastContainerRegistries(), 'erunpaas']),
+    () => uniqueSuggestions([config.containerRegistry, ...loadSavedPastContainerRegistries(), 'ghcr.io/rihards-freimanis']),
     [config.containerRegistry],
   );
   return (
@@ -155,6 +156,7 @@ function DiagnosticsSection({ controller, dialog }: { controller: ERunUIControll
 
 function SSHAccessSection({ controller, dialog }: { controller: ERunUIController; dialog: ManageDialog }): React.ReactElement {
   const config = dialog.config;
+  const syncPathRequired = config.sshd.workspaceSyncEnabled && !String(config.sshd.workspaceSyncLocalPath || '').trim();
   return (
     <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
       <div className="flex items-center justify-between gap-3">
@@ -162,8 +164,59 @@ function SSHAccessSection({ controller, dialog }: { controller: ERunUIController
         {!config.sshd.enabled && <Button type="button" variant="outline" size="sm" disabled={dialog.busy || dialog.configLoading || !config.remote} onClick={() => void controller.enableManageSSHD().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}><Server aria-hidden="true" />Enable SSHD</Button>}
       </div>
       <CheckboxField id="environment-config-sshd-enabled" label="Enabled" checked={config.sshd.enabled} disabled onChange={() => {}} />
+      <CheckboxField id="environment-config-sshd-sync-enabled" label="Enable workspace sync" checked={config.sshd.workspaceSyncEnabled} disabled={dialog.busy || dialog.configLoading || !config.sshd.enabled} onChange={(workspaceSyncEnabled) => controller.updateManageSSHDConfig({ workspaceSyncEnabled })} />
+      {config.sshd.workspaceSyncEnabled && (
+        <>
+          <WorkspaceSyncStatus sshd={config.sshd} />
+          <LocalSyncFolderField controller={controller} dialog={dialog} error={syncPathRequired ? 'Choose a local Git folder before saving.' : ''} />
+        </>
+      )}
       <ReadonlyField id="environment-config-sshd-localport" label="Local port" value={config.sshd.localPort > 0 ? String(config.sshd.localPort) : ''} />
       <ReadonlyField id="environment-config-sshd-publickeypath" label="Public key" value={config.sshd.publicKeyPath} />
+    </div>
+  );
+}
+
+function LocalSyncFolderField({ controller, dialog, error }: { controller: ERunUIController; dialog: ManageDialog; error: string }): React.ReactElement {
+  const disabled = dialog.busy || dialog.configLoading;
+  const describedBy = error ? 'environment-config-sshd-sync-localpath-error' : undefined;
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor="environment-config-sshd-sync-localpath">Local sync folder</Label>
+      <div className="flex gap-2">
+        <Input
+          id="environment-config-sshd-sync-localpath"
+          className="min-w-0 flex-1"
+          value={dialog.config.sshd.workspaceSyncLocalPath || ''}
+          type="text"
+          autoComplete="off"
+          spellCheck={false}
+          disabled={disabled}
+          aria-invalid={Boolean(error)}
+          aria-describedby={describedBy}
+          onChange={(event) => controller.updateManageSSHDConfig({ workspaceSyncLocalPath: event.target.value })}
+        />
+        <Button type="button" variant="outline" size="icon" aria-label="Select local sync folder" disabled={disabled} onClick={() => void controller.chooseWorkspaceSyncLocalFolder().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}>
+          <FolderOpen aria-hidden="true" />
+        </Button>
+      </div>
+      {error && <div id="environment-config-sshd-sync-localpath-error" className="text-[13px] leading-[1.35] text-destructive" role="alert">{error}</div>}
+    </div>
+  );
+}
+
+function WorkspaceSyncStatus({ sshd }: { sshd: ManageDialog['config']['sshd'] }): React.ReactElement | null {
+  const status = String(sshd.workspaceSyncStatus || '').trim();
+  const message = String(sshd.workspaceSyncStatusMessage || '').trim();
+  if (!status || status === 'stopped') {
+    return null;
+  }
+  return (
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-[var(--radius)] border border-border bg-muted/35 px-3 py-2 text-[13px] leading-[1.35]" role={status === 'error' ? 'alert' : 'status'}>
+      <StatusBadge status={status} />
+      <span className={cn('min-w-0 [overflow-wrap:anywhere]', message ? 'text-muted-foreground' : 'text-foreground')}>
+        {message || status.replace(/_/g, ' ')}
+      </span>
     </div>
   );
 }

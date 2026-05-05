@@ -68,6 +68,7 @@ type HelmDeployParams struct {
 	CloudRegion        string
 	CloudInstanceID    string
 	OIDCAllowedIssuers string
+	ContainerRegistry  string
 	ImageOverrides     map[string]string
 	ResetDatabase      bool
 	Idle               EnvironmentIdleConfig
@@ -100,6 +101,7 @@ type HelmDeploySpec struct {
 	CloudRegion        string
 	CloudInstanceID    string
 	OIDCAllowedIssuers string
+	ContainerRegistry  string
 	ImageOverrides     map[string]string
 	ResetDatabase      bool
 	Idle               EnvironmentIdleConfig
@@ -599,8 +601,12 @@ func resolveAdditionalDockerBuildsForDeploy(store DeployStore, findProjectRoot P
 	}
 
 	seenTags := make(map[string]struct{}, len(existing))
+	seenImageNames := make(map[string]struct{}, len(existing))
 	for _, plan := range existing {
 		seenTags[plan.Image.Tag] = struct{}{}
+		if name := strings.TrimSpace(plan.Image.ImageName); name != "" {
+			seenImageNames[name] = struct{}{}
+		}
 	}
 
 	builds := make([]DockerBuildSpec, 0, len(images))
@@ -615,11 +621,71 @@ func resolveAdditionalDockerBuildsForDeploy(store DeployStore, findProjectRoot P
 		if _, exists := seenTags[buildInput.Image.Tag]; exists {
 			continue
 		}
+		// Also deduplicate by image name: the chart may reference the same component
+		// using a non-registry prefix (e.g. "{{ .Chart.AppVersion }}/name:version")
+		// which produces a malformed tag.  If a build for this image name already
+		// exists in the pipeline (e.g. the main component build with the correct
+		// registry tag), skip the chart-discovered entry.
+		if name := strings.TrimSpace(buildInput.Image.ImageName); name != "" {
+			if _, exists := seenImageNames[name]; exists {
+				continue
+			}
+			seenImageNames[name] = struct{}{}
+		}
 		seenTags[buildInput.Image.Tag] = struct{}{}
 		builds = append(builds, buildInput)
 	}
 
+	// Also include any Dockerfile FROM dependencies of the resolved builds that
+	// have a local build context in the project (e.g. erun-ubuntu used as a base
+	// by erun-devops). This ensures base images are present in the registry with
+	// the correct platform support before multi-platform builds of their
+	// dependents start.  configureDockerBuildsForDeploy will set Platforms+Push
+	// on these entries; shouldSkipDockerBuild will then skip the rebuild when the
+	// registry manifest already covers all required platforms.
+	allBuilds := append(existing, builds...)
+	baseBuilds, err := resolveDockerfileBaseImageBuilds(store, findProjectRoot, resolveDockerBuildContext, now, projectRoot, environment, allBuilds, seenTags)
+	if err != nil {
+		return nil, err
+	}
+	// Prepend so orderedDockerBuildSpecs places base images before their consumers.
+	builds = append(baseBuilds, builds...)
+
 	return builds, nil
+}
+
+// resolveDockerfileBaseImageBuilds scans the Dockerfiles of the given builds
+// and returns DockerBuildSpec entries for any FROM-referenced images that have
+// a local build context in the project.  Only non-variable, non-scratch
+// references are considered.  Already-seen tags (tracked via seenTags) are
+// skipped and the map is updated in-place to prevent duplicate entries.
+func resolveDockerfileBaseImageBuilds(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, now NowFunc, projectRoot, environment string, builds []DockerBuildSpec, seenTags map[string]struct{}) ([]DockerBuildSpec, error) {
+	result := make([]DockerBuildSpec, 0)
+	for _, build := range builds {
+		data, err := os.ReadFile(build.DockerfilePath)
+		if err != nil {
+			continue
+		}
+		for _, match := range dockerfileFromPattern.FindAllStringSubmatch(string(data), -1) {
+			if len(match) < 2 {
+				continue
+			}
+			imageRef := strings.TrimSpace(match[1])
+			if imageRef == "" || strings.Contains(imageRef, "$") {
+				continue
+			}
+			buildSpec, ok, err := ResolveDockerBuildForImageReference(store, findProjectRoot, resolveDockerBuildContext, now, projectRoot, environment, imageRef)
+			if err != nil || !ok {
+				continue
+			}
+			if _, exists := seenTags[buildSpec.Image.Tag]; exists {
+				continue
+			}
+			seenTags[buildSpec.Image.Tag] = struct{}{}
+			result = append(result, buildSpec)
+		}
+	}
+	return result, nil
 }
 
 func configureDockerBuildsForDeploy(builds []DockerBuildSpec) []DockerBuildSpec {
@@ -699,11 +765,27 @@ func newHelmDeploySpec(target OpenResult, deployContext KubernetesDeployContext,
 		APIPort:            ports.API,
 		SSHPort:            ports.SSH,
 		CloudProviderAlias: target.EnvConfig.CloudProviderAlias,
+		ContainerRegistry:  resolveProjectContainerRegistry(target.RepoPath, target.Environment),
 		Idle:               target.EnvConfig.Idle,
 		RuntimePod:         NormalizeRuntimePodResources(target.EnvConfig.RuntimePod),
 		Version:            version,
 		Timeout:            DefaultHelmDeploymentTimeout,
 	}, nil
+}
+
+func resolveProjectContainerRegistry(projectRoot, environment string) string {
+	projectRoot = strings.TrimSpace(projectRoot)
+	if projectRoot == "" {
+		return ""
+	}
+	projectConfig, _, err := LoadProjectConfig(projectRoot)
+	if err != nil {
+		return ""
+	}
+	if registry := projectConfig.ContainerRegistryForEnvironment(environment); registry != "" {
+		return registry
+	}
+	return singleProjectContainerRegistry(projectConfig)
 }
 
 func applyCloudContextStopMetadata(store CloudReadStore, env EnvConfig, deployInput *HelmDeploySpec) {
@@ -825,6 +907,7 @@ func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 		CloudRegion:        d.CloudRegion,
 		CloudInstanceID:    d.CloudInstanceID,
 		OIDCAllowedIssuers: d.OIDCAllowedIssuers,
+		ContainerRegistry:  d.ContainerRegistry,
 		ImageOverrides:     cloneStringMap(d.ImageOverrides),
 		ResetDatabase:      d.ResetDatabase,
 		Idle:               d.Idle,
@@ -868,6 +951,9 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "api.oidcAllowedIssuers="+d.OIDCAllowedIssuers,
 		"--set", "api.postgres.reset="+formatHelmBool(d.ResetDatabase),
 	)
+	if registry := strings.TrimSpace(d.ContainerRegistry); registry != "" {
+		args = append(args, "--set-string", "containerRegistry="+registry)
+	}
 	for _, key := range sortedStringMapKeys(d.ImageOverrides) {
 		args = append(args, "--set-string", "imageOverrides."+key+"="+d.ImageOverrides[key])
 	}
@@ -1764,7 +1850,7 @@ func dockerImageFromChartLine(line, appVersion string) string {
 	}
 	value = strings.Trim(strings.TrimSpace(value), `"'`)
 	value = resolveChartVersionImageTag(value, appVersion)
-	if value == "" || strings.Contains(value, "{{") {
+	if value == "" || strings.Contains(value, "{{") || strings.Contains(value, "%") {
 		return ""
 	}
 	return value
@@ -1813,6 +1899,9 @@ func chartTemplateImageValue(line string) (string, bool) {
 				continue
 			}
 			if strings.Contains(value, "%s") && strings.Contains(line, ".Chart.AppVersion") {
+				if strings.Count(value, "%s") == 2 && strings.HasPrefix(value, "%s/") {
+					value = value[len("%s/"):]
+				}
 				value = strings.ReplaceAll(value, "%s", "{{ .Chart.AppVersion }}")
 			}
 			return value, true

@@ -1,6 +1,6 @@
 ARG ERUN_VERSION=1.0.0
 
-FROM erunpaas/erun-devops:${ERUN_VERSION}
+FROM ghcr.io/sophium/erun-devops:${ERUN_VERSION}
 
 USER root
 

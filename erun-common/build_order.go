@@ -57,6 +57,21 @@ func orderedDockerBuildSpecs(builds []DockerBuildSpec) []DockerBuildSpec {
 
 var dockerfileFromPattern = regexp.MustCompile(`(?im)^\s*FROM(?:\s+--platform=\S+)?\s+([^\s]+)`)
 
+var dockerfileVersionedFromPattern = regexp.MustCompile(`(?im)^\s*FROM(?:\s+--platform=\S+)?\s+[^\s]*\$\{?ERUN_VERSION\}?`)
+
+// dockerfileHasVersionedFrom reports whether the Dockerfile at the given path
+// contains a FROM instruction that references ${ERUN_VERSION} (or $ERUN_VERSION).
+// Such images use ERUN_VERSION only for base-image resolution, not for baking a
+// version string into a compiled binary, so they should receive the full snapshot
+// version as the ERUN_VERSION build arg rather than the stable semver.
+func dockerfileHasVersionedFrom(dockerfilePath string) bool {
+	data, err := os.ReadFile(dockerfilePath)
+	if err != nil {
+		return false
+	}
+	return dockerfileVersionedFromPattern.Match(data)
+}
+
 func dockerfileLocalBaseImageTags(dockerfilePath string, buildsByTag map[string]DockerBuildSpec) []string {
 	data, err := os.ReadFile(dockerfilePath)
 	if err != nil {

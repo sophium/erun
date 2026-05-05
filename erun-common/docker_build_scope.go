@@ -215,8 +215,14 @@ func dockerBuildEnvironmentFromDetectedProject(store DockerStore, findProjectRoo
 		}
 		return "", err
 	}
-	if projectRoot := strings.TrimSpace(tenantConfig.ProjectRoot); projectRoot != "" && filepath.Clean(projectRoot) != cleanProjectRoot {
-		return "", nil
+	// Remote tenants store the project root of the remote machine, not the local working
+	// directory. Skip the path check so that local builds still resolve the correct
+	// environment (e.g. "local" → snapshot versions) when the project was initialised
+	// on a different machine.
+	if !tenantConfig.Remote {
+		if projectRoot := strings.TrimSpace(tenantConfig.ProjectRoot); projectRoot != "" && filepath.Clean(projectRoot) != cleanProjectRoot {
+			return "", nil
+		}
 	}
 
 	return strings.TrimSpace(tenantConfig.DefaultEnvironment), nil

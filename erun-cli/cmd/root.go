@@ -161,7 +161,7 @@ func (d rootDependencies) openCommand() *cobra.Command {
 func (d rootDependencies) sshdCommand() *cobra.Command {
 	return newSSHDCmd(func(ctx common.Context) common.Context {
 		return withCloudContextPreflight(ctx, d.store)
-	}, d.resolveOpen, d.store.SaveEnvConfig, d.runInitForOpen, d.resolveRuntimeDeploySpec, d.recoveringDeployHelmChart, common.RunRemoteCommand, writeLocalSSHConfig)
+	}, d.resolveOpen, d.store.SaveEnvConfig, d.runInitForOpen, common.FindProjectRoot, d.resolveRuntimeDeploySpec, d.recoveringDeployHelmChart, common.RunRemoteCommand, writeLocalSSHConfig)
 }
 
 func (d rootDependencies) containerCommand() *cobra.Command {
@@ -194,7 +194,7 @@ func (d rootDependencies) optionalPushCommand() *cobra.Command {
 	if !hasOptionalPushCmd(common.FindProjectRoot, common.ResolveDockerBuildContext) {
 		return nil
 	}
-	pushCmd := newPushCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.DockerImageBuilder, d.push)
+	pushCmd := newRootPushCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.DockerImageBuilder, d.push)
 	pushCmd.Short = optionalPushCmdShort(common.FindProjectRoot, common.ResolveDockerBuildContext)
 	return pushCmd
 }

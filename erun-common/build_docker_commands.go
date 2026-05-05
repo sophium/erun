@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -17,6 +18,21 @@ func DockerImageBuilder(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 			return err
 		}
 	}
+	err := runDockerBuildOnce(buildInput, stdout, stderr)
+	if err == nil {
+		return nil
+	}
+	if buildInput.Push && shouldRetryAfterGHCRNamespaceLogin(err, buildInput.Image.Tag, stdout, stderr) {
+		if retryErr := runDockerBuildOnce(buildInput, stdout, stderr); retryErr == nil {
+			return nil
+		} else {
+			err = retryErr
+		}
+	}
+	return err
+}
+
+func runDockerBuildOnce(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
 	cmd := exec.Command("docker", dockerBuildArgs(buildInput)...)
 	cmd.Dir = buildInput.ContextDir
 	output := new(bytes.Buffer)
@@ -36,8 +52,19 @@ func DockerImageBuilder(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 			Err:      err,
 		}
 	}
-
 	return err
+}
+
+func shouldRetryAfterGHCRNamespaceLogin(err error, tag string, stdout, stderr io.Writer) bool {
+	var authErr DockerRegistryAuthError
+	if !errors.As(err, &authErr) {
+		return false
+	}
+	if !IsDockerCreatePackageDenied(authErr.Message) {
+		return false
+	}
+	ok, loginErr := TryGHCRNamespaceLogin(tag, stdout, stderr)
+	return loginErr == nil && ok
 }
 
 func DockerImageExists(tag string) (bool, error) {
@@ -74,6 +101,35 @@ func DockerManifestExists(tag string) (bool, error) {
 	return false, err
 }
 
+// dockerManifestPlatforms returns the platforms listed in a registry manifest for
+// the given tag. Returns nil when the tag does not exist, is a single-arch image
+// (no manifest list / OCI index), or when the manifest cannot be inspected.
+func dockerManifestPlatforms(tag string) ([]string, error) {
+	cmd := exec.Command("docker", "manifest", "inspect", tag)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, nil // tag absent or inaccessible
+	}
+	var manifest struct {
+		Manifests []struct {
+			Platform struct {
+				Architecture string `json:"architecture"`
+				OS           string `json:"os"`
+			} `json:"platform"`
+		} `json:"manifests"`
+	}
+	if err := json.Unmarshal(output, &manifest); err != nil || len(manifest.Manifests) == 0 {
+		return nil, nil // single-arch manifest or unrecognised format
+	}
+	platforms := make([]string, 0, len(manifest.Manifests))
+	for _, m := range manifest.Manifests {
+		if m.Platform.OS != "" && m.Platform.Architecture != "" {
+			platforms = append(platforms, m.Platform.OS+"/"+m.Platform.Architecture)
+		}
+	}
+	return platforms, nil
+}
+
 func dockerCommandOutputWriter(primary io.Writer, capture io.Writer) io.Writer {
 	writers := make([]io.Writer, 0, 2)
 	if primary != nil {
@@ -98,8 +154,25 @@ func dockerBuildArgs(buildInput DockerBuildSpec) []string {
 		args = []string{"buildx", "build", "--builder", multiPlatformBuildxBuilderName, "--platform", strings.Join(buildInput.Platforms, ",")}
 	}
 	args = append(args, "-t", tag)
-	if version := dockerImageTagVersion(tag); version != "" {
-		args = append(args, "--build-arg", "ERUN_VERSION="+version)
+	// For local snapshot builds, also tag the image with the stable snapshot
+	// identifier (e.g. "1.0.51-snapshot", no timestamp).  This lets wrapper
+	// images (FROM …:${ERUN_VERSION}) always resolve the same local tag, keeping
+	// the Docker build cache valid across pushes.  The stable tag is local-only
+	// and is never included in the push step.
+	if buildInput.Image.BaseVersion != "" {
+		stableTag := fmt.Sprintf("%s/%s:%s",
+			strings.TrimRight(buildInput.Image.Registry, "/"),
+			buildInput.Image.ImageName,
+			buildInput.Image.BaseVersion,
+		)
+		args = append(args, "-t", stableTag)
+	}
+	buildArgVersion := dockerImageTagVersion(tag)
+	if buildInput.Image.BaseVersion != "" {
+		buildArgVersion = buildInput.Image.BaseVersion
+	}
+	if buildArgVersion != "" {
+		args = append(args, "--build-arg", "ERUN_VERSION="+buildArgVersion)
 	}
 	if buildInput.Push {
 		args = append(args, "--push")
@@ -225,6 +298,21 @@ func BuildScriptRunner(dir, scriptPath string, env []string, stdin io.Reader, st
 }
 
 func DockerImagePusher(tag string, stdout, stderr io.Writer) error {
+	err := runDockerPushOnce(tag, stdout, stderr)
+	if err == nil {
+		return nil
+	}
+	if shouldRetryAfterGHCRNamespaceLogin(err, tag, stdout, stderr) {
+		if retryErr := runDockerPushOnce(tag, stdout, stderr); retryErr == nil {
+			return nil
+		} else {
+			err = retryErr
+		}
+	}
+	return err
+}
+
+func runDockerPushOnce(tag string, stdout, stderr io.Writer) error {
 	pushCmd := exec.Command("docker", "push", tag)
 	output := new(bytes.Buffer)
 	pushCmd.Stdout = dockerCommandOutputWriter(stdout, output)
@@ -243,11 +331,20 @@ func DockerImagePusher(tag string, stdout, stderr io.Writer) error {
 			Err:      err,
 		}
 	}
-
 	return err
 }
 
 func DockerRegistryLogin(registry string, stdin io.Reader, stdout, stderr io.Writer) error {
+	if isGHCRRegistry(registry) {
+		ok, err := tryGHCRLoginViaGH(registry, stdout, stderr)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return nil
+		}
+	}
+
 	args := []string{"login"}
 	if registry != "" {
 		args = append(args, registry)
@@ -258,6 +355,92 @@ func DockerRegistryLogin(registry string, stdin io.Reader, stdout, stderr io.Wri
 	loginCmd.Stdout = stdout
 	loginCmd.Stderr = stderr
 	return loginCmd.Run()
+}
+
+func isGHCRRegistry(registry string) bool {
+	registry = strings.ToLower(strings.TrimSpace(registry))
+	return registry == "ghcr.io" || strings.HasPrefix(registry, "ghcr.io/")
+}
+
+func tryGHCRLoginViaGH(registry string, stdout, stderr io.Writer) (bool, error) {
+	if _, err := exec.LookPath("gh"); err != nil {
+		return false, nil
+	}
+
+	user, err := captureGHCommand("api", "user", "--jq", ".login")
+	if err != nil {
+		return false, nil
+	}
+	user = strings.TrimSpace(user)
+	if user == "" {
+		return false, nil
+	}
+
+	token, err := captureGHCommand("auth", "token")
+	if err != nil {
+		return false, nil
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return false, nil
+	}
+
+	loginCmd := exec.Command("docker", "login", "ghcr.io", "-u", user, "--password-stdin")
+	loginCmd.Stdin = strings.NewReader(token)
+	loginCmd.Stdout = stdout
+	loginCmd.Stderr = stderr
+	if err := loginCmd.Run(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func captureGHCommand(args ...string) (string, error) {
+	cmd := exec.Command("gh", args...)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(output), nil
+}
+
+// TryGHCRNamespaceLogin re-authenticates docker to ghcr.io as the GitHub user
+// that owns the target namespace, when that user is also configured in the
+// local gh CLI. Returns (true, nil) on a successful login, (false, nil) when
+// the namespace cannot be impersonated (gh missing, account not logged in,
+// non-ghcr.io tag), and (false, err) when the eventual docker login fails.
+//
+// Use this after a push failure with IsDockerCreatePackageDenied to attempt
+// an automatic auth switch before falling back to an interactive prompt.
+func TryGHCRNamespaceLogin(tag string, stdout, stderr io.Writer) (bool, error) {
+	if !isGHCRRegistry(dockerRegistryFromImageTag(tag)) {
+		return false, nil
+	}
+	namespace := DockerNamespaceFromTag(tag)
+	if namespace == "" {
+		return false, nil
+	}
+	if _, err := exec.LookPath("gh"); err != nil {
+		return false, nil
+	}
+
+	token, err := captureGHCommand("auth", "token", "-u", namespace, "-h", "github.com")
+	if err != nil {
+		return false, nil
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return false, nil
+	}
+
+	loginCmd := exec.Command("docker", "login", "ghcr.io", "-u", namespace, "--password-stdin")
+	loginCmd.Stdin = strings.NewReader(token)
+	loginCmd.Stdout = stdout
+	loginCmd.Stderr = stderr
+	if err := loginCmd.Run(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func runScriptSpec(ctx Context, script scriptSpec, run BuildScriptRunnerFunc) error {
