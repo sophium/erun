@@ -1,7 +1,13 @@
 environments:
-    local:
-        containerregistry: ghcr.io/sophium
+    frs:
+        containerregistry: erunpaas
         docker:
             skipIfExists:
-                - ghcr.io/sophium/erun-dind
-                - ghcr.io/sophium/erun-ubuntu
+                - erunpaas/erun-dind
+                - erunpaas/erun-ubuntu
+    local:
+        containerregistry: erunpaas
+        docker:
+            skipIfExists:
+                - erunpaas/erun-dind
+                - erunpaas/erun-ubuntu
