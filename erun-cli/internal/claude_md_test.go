@@ -47,10 +47,10 @@ func TestEnsureGlobalAgentInstructionsAppendsWhenMissing(t *testing.T) {
 		{".codex", "instructions.md", ensureGlobalCodexInstructionsWithHomeDir},
 	} {
 		subDir := filepath.Join(dir, tc.dir)
-		if err := os.MkdirAll(subDir, 0700); err != nil {
+		if err := os.MkdirAll(subDir, 0o700); err != nil {
 			t.Fatalf("setup %s: %v", tc.dir, err)
 		}
-		if err := os.WriteFile(filepath.Join(subDir, tc.filename), []byte(existing), 0600); err != nil {
+		if err := os.WriteFile(filepath.Join(subDir, tc.filename), []byte(existing), 0o600); err != nil {
 			t.Fatalf("setup %s: %v", tc.dir, err)
 		}
 		if err := tc.ensureFn(dir); err != nil {
