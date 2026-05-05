@@ -3,11 +3,12 @@ package backendapi
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
-	"runtime"
-	"strings"
 	"testing"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/identitystore"
+	"github.com/aws/aws-sdk-go-v2/service/ssoadmin"
+	ssoadmintypes "github.com/aws/aws-sdk-go-v2/service/ssoadmin/types"
 )
 
 func TestClaimsFromOIDCTokenClaimsUsesAWSIdentityStoreUserID(t *testing.T) {
@@ -69,7 +70,8 @@ func (failingUsernameResolver) ResolveUsername(context.Context, UsernameResoluti
 }
 
 func TestAWSIdentityCenterUsernameResolverSkipsNonAWSTokens(t *testing.T) {
-	username, err := (AWSIdentityCenterUsernameResolver{IdentityStoreID: "d-1234567890"}).ResolveUsername(context.Background(), UsernameResolutionClaims{
+	r := &awsIdentityCenterUsernameResolver{identityStoreID: "d-1234567890"}
+	username, err := r.ResolveUsername(context.Background(), UsernameResolutionClaims{
 		Issuer:  "https://issuer.example",
 		Subject: "user-1",
 	})
@@ -82,24 +84,11 @@ func TestAWSIdentityCenterUsernameResolverSkipsNonAWSTokens(t *testing.T) {
 }
 
 func TestAWSIdentityCenterUsernameResolverUsesIdentityStoreUserID(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell helper uses POSIX sh")
+	r := &awsIdentityCenterUsernameResolver{
+		identityStoreID: "d-1234567890",
+		identityStore:   &mockIdentityStoreClient{username: "rihards.freimanis@example.com"},
 	}
-	dir := t.TempDir()
-	awsCLI := filepath.Join(dir, "aws")
-	if err := os.WriteFile(awsCLI, []byte(`#!/bin/sh
-printf '%s\n' "$*" > "$AWS_ARGS_FILE"
-printf 'rihards.freimanis@example.com\n'
-`), 0o755); err != nil {
-		t.Fatalf("write aws helper: %v", err)
-	}
-	argsFile := filepath.Join(dir, "args")
-	t.Setenv("AWS_ARGS_FILE", argsFile)
-
-	username, err := (AWSIdentityCenterUsernameResolver{
-		IdentityStoreID: "d-1234567890",
-		AWSCLIPath:      awsCLI,
-	}).ResolveUsername(context.Background(), UsernameResolutionClaims{
+	username, err := r.ResolveUsername(context.Background(), UsernameResolutionClaims{
 		AWSIdentityStoreUserID: "265222f4-f041-7008-6e0c-2d3993b555bf",
 		AWSSourceRegion:        "eu-west-2",
 	})
@@ -109,39 +98,14 @@ printf 'rihards.freimanis@example.com\n'
 	if username != "rihards.freimanis@example.com" {
 		t.Fatalf("unexpected username: %q", username)
 	}
-	args, err := os.ReadFile(argsFile)
-	if err != nil {
-		t.Fatalf("read aws args: %v", err)
-	}
-	gotArgs := strings.TrimSpace(string(args))
-	wantArgs := "identitystore describe-user --identity-store-id d-1234567890 --user-id 265222f4-f041-7008-6e0c-2d3993b555bf --query UserName --output text --region eu-west-2"
-	if gotArgs != wantArgs {
-		t.Fatalf("unexpected aws args:\nwant: %s\n got: %s", wantArgs, gotArgs)
-	}
 }
 
 func TestAWSIdentityCenterUsernameResolverDiscoversIdentityStoreID(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell helper uses POSIX sh")
+	r := &awsIdentityCenterUsernameResolver{
+		ssoAdmin:      &mockSSOAdminClient{identityStoreID: "d-1234567890"},
+		identityStore: &mockIdentityStoreClient{username: "Rihards.Freimanis"},
 	}
-	dir := t.TempDir()
-	awsCLI := filepath.Join(dir, "aws")
-	if err := os.WriteFile(awsCLI, []byte(`#!/bin/sh
-printf '%s\n' "$*" >> "$AWS_ARGS_FILE"
-case "$*" in
-  sso-admin*) printf 'd-1234567890\n' ;;
-  identitystore*) printf 'Rihards.Freimanis\n' ;;
-  *) printf 'unexpected command\n' >&2; exit 1 ;;
-esac
-`), 0o755); err != nil {
-		t.Fatalf("write aws helper: %v", err)
-	}
-	argsFile := filepath.Join(dir, "args")
-	t.Setenv("AWS_ARGS_FILE", argsFile)
-
-	username, err := (AWSIdentityCenterUsernameResolver{
-		AWSCLIPath: awsCLI,
-	}).ResolveUsername(context.Background(), UsernameResolutionClaims{
+	username, err := r.ResolveUsername(context.Background(), UsernameResolutionClaims{
 		AWSIdentityStoreUserID: "265222f4-f041-7008-6e0c-2d3993b555bf",
 		AWSSourceRegion:        "eu-west-2",
 	})
@@ -151,28 +115,45 @@ esac
 	if username != "Rihards.Freimanis" {
 		t.Fatalf("unexpected username: %q", username)
 	}
-	args, err := os.ReadFile(argsFile)
-	if err != nil {
-		t.Fatalf("read aws args: %v", err)
-	}
-	gotArgs := strings.TrimSpace(string(args))
-	for _, want := range []string{
-		"sso-admin list-instances --query Instances[0].IdentityStoreId --output text --region eu-west-2",
-		"identitystore describe-user --identity-store-id d-1234567890 --user-id 265222f4-f041-7008-6e0c-2d3993b555bf --query UserName --output text --region eu-west-2",
-	} {
-		if !strings.Contains(gotArgs, want) {
-			t.Fatalf("expected aws args to contain %q, got:\n%s", want, gotArgs)
-		}
-	}
 }
 
 func TestNewOIDCTokenVerifierWithOptionsConfiguresAWSUsernameResolver(t *testing.T) {
 	verifier := NewOIDCTokenVerifierWithOptions(OIDCTokenVerifierOptions{})
-	resolver, ok := verifier.usernameResolver.(AWSIdentityCenterUsernameResolver)
+	resolver, ok := verifier.usernameResolver.(*awsIdentityCenterUsernameResolver)
 	if !ok {
 		t.Fatalf("expected AWS Identity Center username resolver, got %T", verifier.usernameResolver)
 	}
-	if resolver.IdentityStoreID != "" {
-		t.Fatalf("unexpected identity store id: %q", resolver.IdentityStoreID)
+	if resolver.identityStoreID != "" {
+		t.Fatalf("unexpected identity store id: %q", resolver.identityStoreID)
 	}
+}
+
+type mockSSOAdminClient struct {
+	identityStoreID string
+	err             error
+}
+
+func (m *mockSSOAdminClient) ListInstances(ctx context.Context, params *ssoadmin.ListInstancesInput, optFns ...func(*ssoadmin.Options)) (*ssoadmin.ListInstancesOutput, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &ssoadmin.ListInstancesOutput{
+		Instances: []ssoadmintypes.InstanceMetadata{
+			{IdentityStoreId: aws.String(m.identityStoreID)},
+		},
+	}, nil
+}
+
+type mockIdentityStoreClient struct {
+	username string
+	err      error
+}
+
+func (m *mockIdentityStoreClient) DescribeUser(ctx context.Context, params *identitystore.DescribeUserInput, optFns ...func(*identitystore.Options)) (*identitystore.DescribeUserOutput, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &identitystore.DescribeUserOutput{
+		UserName: aws.String(m.username),
+	}, nil
 }
