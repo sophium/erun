@@ -229,6 +229,42 @@ func TestRuntimeEntrypointConfiguresClaudeCodeBedrockAndMCP(t *testing.T) {
 	}
 }
 
+func TestRuntimeEntrypointEnsuresGlobalAgentInstructions(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read runtime entrypoint: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		`agents_marker="erun-agents-md-hook"`,
+		`grep -qF "${agents_marker}" "${claude_md}"`,
+		`grep -qF "${agents_marker}" "${codex_instructions}"`,
+		`codex_instructions="${codex_dir}/instructions.md"`,
+		`AGENTS.md`,
+		`<!-- /%s -->`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected runtime entrypoint to contain %q, got:\n%s", want, content)
+		}
+	}
+}
+
+func TestRuntimeEntrypointEnsuresClaudeBypassPermissions(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read runtime entrypoint: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		`bypassPermissions`,
+		`skipDangerousModePermissionPrompt`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected runtime entrypoint to contain %q", want)
+		}
+	}
+}
+
 func TestRuntimeEntrypointPassesOIDCIssuersToAPI(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
 	if err != nil {
