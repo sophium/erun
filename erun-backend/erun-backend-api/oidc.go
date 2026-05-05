@@ -1,17 +1,19 @@
 package backendapi
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
-	"os/exec"
 	"strings"
 	"sync"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/identitystore"
+	"github.com/aws/aws-sdk-go-v2/service/ssoadmin"
 	"github.com/coreos/go-oidc/v3/oidc"
 )
 
@@ -41,7 +43,6 @@ type OIDCTokenVerifierOptions struct {
 	AllowedIssuers     []string
 	AWSIdentityStoreID string
 	AWSRegion          string
-	AWSCLIPath         string
 	UsernameResolver   UsernameResolver
 }
 
@@ -69,11 +70,7 @@ func NewOIDCTokenVerifierWithOptions(options OIDCTokenVerifierOptions) *OIDCToke
 	}
 	usernameResolver := options.UsernameResolver
 	if usernameResolver == nil {
-		usernameResolver = AWSIdentityCenterUsernameResolver{
-			IdentityStoreID: options.AWSIdentityStoreID,
-			Region:          options.AWSRegion,
-			AWSCLIPath:      options.AWSCLIPath,
-		}
+		usernameResolver = newAWSIdentityCenterUsernameResolver(options.AWSIdentityStoreID, options.AWSRegion)
 	}
 	return &OIDCTokenVerifier{
 		allowedIssuers:   allowed,
@@ -176,90 +173,87 @@ func (v *OIDCTokenVerifier) verifier(ctx context.Context, issuer string) (*oidc.
 	return verifier, nil
 }
 
-type AWSIdentityCenterUsernameResolver struct {
-	IdentityStoreID string
-	Region          string
-	AWSCLIPath      string
+type ssoadminClient interface {
+	ListInstances(ctx context.Context, params *ssoadmin.ListInstancesInput, optFns ...func(*ssoadmin.Options)) (*ssoadmin.ListInstancesOutput, error)
 }
 
-func (r AWSIdentityCenterUsernameResolver) ResolveUsername(ctx context.Context, claims UsernameResolutionClaims) (string, error) {
+type identitystoreClient interface {
+	DescribeUser(ctx context.Context, params *identitystore.DescribeUserInput, optFns ...func(*identitystore.Options)) (*identitystore.DescribeUserOutput, error)
+}
+
+type awsIdentityCenterUsernameResolver struct {
+	identityStoreID string
+	ssoAdmin        ssoadminClient
+	identityStore   identitystoreClient
+
+	resolveOnce             sync.Once
+	resolvedIdentityStoreID string
+	resolveErr              error
+}
+
+func newAWSIdentityCenterUsernameResolver(identityStoreID, region string) *awsIdentityCenterUsernameResolver {
+	cfg, err := config.LoadDefaultConfig(context.Background())
+	if err != nil {
+		// Return a resolver that will fail on first use with this error.
+		return &awsIdentityCenterUsernameResolver{
+			identityStoreID: identityStoreID,
+			resolveErr:      fmt.Errorf("load AWS config: %w", err),
+		}
+	}
+	if region != "" {
+		cfg.Region = region
+	}
+	return &awsIdentityCenterUsernameResolver{
+		identityStoreID: identityStoreID,
+		ssoAdmin:        ssoadmin.NewFromConfig(cfg),
+		identityStore:   identitystore.NewFromConfig(cfg),
+	}
+}
+
+func (r *awsIdentityCenterUsernameResolver) ResolveUsername(ctx context.Context, claims UsernameResolutionClaims) (string, error) {
 	userID := strings.TrimSpace(claims.AWSIdentityStoreUserID)
 	if userID == "" {
 		return "", nil
 	}
-	region := strings.TrimSpace(r.Region)
-	if region == "" {
-		region = strings.TrimSpace(claims.AWSSourceRegion)
+
+	identityStoreID, err := r.getIdentityStoreID(ctx)
+	if err != nil {
+		return "", err
 	}
-	awsCLI := strings.TrimSpace(r.AWSCLIPath)
-	if awsCLI == "" {
-		awsCLI = "aws"
-	}
-	identityStoreID := strings.TrimSpace(r.IdentityStoreID)
 	if identityStoreID == "" {
-		var err error
-		identityStoreID, err = r.resolveIdentityStoreID(ctx, region, awsCLI)
+		return "", nil
+	}
+
+	out, err := r.identityStore.DescribeUser(ctx, &identitystore.DescribeUserInput{
+		IdentityStoreId: aws.String(identityStoreID),
+		UserId:          aws.String(userID),
+	})
+	if err != nil {
+		return "", fmt.Errorf("resolve AWS Identity Center username: %w", err)
+	}
+	return aws.ToString(out.UserName), nil
+}
+
+// getIdentityStoreID returns the configured identity store ID, resolving it from
+// AWS SSO Admin on first call when it was not provided at construction time.
+func (r *awsIdentityCenterUsernameResolver) getIdentityStoreID(ctx context.Context) (string, error) {
+	if r.identityStoreID != "" {
+		return r.identityStoreID, nil
+	}
+	r.resolveOnce.Do(func() {
+		if r.resolveErr != nil {
+			return
+		}
+		out, err := r.ssoAdmin.ListInstances(ctx, &ssoadmin.ListInstancesInput{})
 		if err != nil {
-			return "", err
+			r.resolveErr = fmt.Errorf("resolve AWS Identity Center identity store id: %w", err)
+			return
 		}
-		if identityStoreID == "" {
-			return "", nil
+		if len(out.Instances) > 0 {
+			r.resolvedIdentityStoreID = aws.ToString(out.Instances[0].IdentityStoreId)
 		}
-	}
-
-	args := []string{
-		"identitystore", "describe-user",
-		"--identity-store-id", identityStoreID,
-		"--user-id", userID,
-		"--query", "UserName",
-		"--output", "text",
-	}
-	if region != "" {
-		args = append(args, "--region", region)
-	}
-	username, err := runAWSCLIText(ctx, awsCLI, args...)
-	if err != nil {
-		return "", fmt.Errorf("resolve AWS Identity Center username: %s", err)
-	}
-	if username == "None" || username == "null" {
-		return "", nil
-	}
-	return username, nil
-}
-
-func (r AWSIdentityCenterUsernameResolver) resolveIdentityStoreID(ctx context.Context, region string, awsCLI string) (string, error) {
-	args := []string{
-		"sso-admin", "list-instances",
-		"--query", "Instances[0].IdentityStoreId",
-		"--output", "text",
-	}
-	if region != "" {
-		args = append(args, "--region", region)
-	}
-	identityStoreID, err := runAWSCLIText(ctx, awsCLI, args...)
-	if err != nil {
-		return "", fmt.Errorf("resolve AWS Identity Center identity store id: %s", err)
-	}
-	if identityStoreID == "None" || identityStoreID == "null" {
-		return "", nil
-	}
-	return identityStoreID, nil
-}
-
-func runAWSCLIText(ctx context.Context, awsCLI string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, awsCLI, args...)
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		message := strings.TrimSpace(stderr.String())
-		if message == "" {
-			message = err.Error()
-		}
-		return "", errors.New(message)
-	}
-	return strings.TrimSpace(stdout.String()), nil
+	})
+	return r.resolvedIdentityStoreID, r.resolveErr
 }
 
 func issuerFromJWT(token string) (string, error) {
