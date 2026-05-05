@@ -196,6 +196,34 @@ func IsDockerPushAuthorizationError(message string) bool {
 	return false
 }
 
+func IsDockerCreatePackageDenied(message string) bool {
+	return strings.Contains(strings.ToLower(message), "create_package")
+}
+
+func DockerNamespaceFromTag(tag string) string {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return ""
+	}
+	if cut := strings.IndexByte(tag, ':'); cut >= 0 {
+		if last := strings.LastIndexByte(tag, '/'); last < 0 || cut > last {
+			tag = tag[:cut]
+		}
+	}
+	parts := strings.Split(tag, "/")
+	if len(parts) < 2 {
+		return ""
+	}
+	first := parts[0]
+	if strings.Contains(first, ".") || strings.Contains(first, ":") || first == "localhost" {
+		if len(parts) >= 3 {
+			return parts[1]
+		}
+		return ""
+	}
+	return parts[0]
+}
+
 func dockerRegistryFromImageTag(tag string) string {
 	first, _, ok := strings.Cut(tag, "/")
 	if !ok {
