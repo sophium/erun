@@ -322,8 +322,8 @@ func TestNewRootCmdRegistersContextAwareShorthandHelpWhenCurrentDirectoryIsProje
 		t.Fatalf("unexpected build short help: %q", buildCmd.Short)
 	}
 
-	if hasSubcommand(cmd, "push") {
-		t.Fatal("did not expect push shorthand command to be registered")
+	if !hasSubcommand(cmd, "push") {
+		t.Fatal("expected push shorthand command to be registered at project root")
 	}
 }
 
@@ -1011,6 +1011,7 @@ func TestDevopsContainerPushUsesResolvedImageTag(t *testing.T) {
 }
 
 func TestDevopsContainerPushPromptsLoginAndRetriesOnAuthError(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
 	projectRoot := t.TempDir()
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
 	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir build dir")
@@ -1451,6 +1452,7 @@ func TestDevopsContainerPushFailsWithoutDockerfile(t *testing.T) {
 }
 
 func TestDevopsContainerPushReturnsOriginalAuthErrorWhenLoginCancelled(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
 	projectRoot := t.TempDir()
 	workdir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
 	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir build dir")
@@ -2150,7 +2152,7 @@ func TestBuildCommandDryRunReleaseForceIncludesTagDeletionForStaleReleaseTag(t *
 		"git tag -d v1.4.2",
 		"git push --delete origin v1.4.2",
 		"docker buildx build --builder erun-multiarch --platform 'linux/amd64,linux/arm64'",
-		"-t erunpaas/api:1.4.2",
+		"-t ghcr.io/sophium/api:1.4.2",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, output)

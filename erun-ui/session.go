@@ -201,6 +201,21 @@ func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncom
 	return fmt.Errorf("activate MCP port-forward: %w: %s", err, detail)
 }
 
+func ensureSSHDViaOpenCommand(ctx context.Context, cliPath string, result eruncommon.OpenResult) error {
+	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
+	cmd := exec.CommandContext(ctx, cliPath, args...)
+	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(string(output))
+	if detail == "" {
+		return fmt.Errorf("activate SSHD port-forward: %w", err)
+	}
+	return fmt.Errorf("activate SSHD port-forward: %w: %s", err, detail)
+}
+
 func buildInitArgs(selection uiSelection) []string {
 	args := erunArgs(selection.Debug, "init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment), "--remote")
 	if version := strings.TrimSpace(selection.Version); version != "" {

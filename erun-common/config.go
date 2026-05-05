@@ -24,9 +24,19 @@ type ERunConfig struct {
 }
 
 type SSHDConfig struct {
-	Enabled       bool   `yaml:"enabled,omitempty"`
-	LocalPort     int    `yaml:"localport,omitempty"`
-	PublicKeyPath string `yaml:"publickeypath,omitempty"`
+	Enabled       bool                    `yaml:"enabled,omitempty"`
+	LocalPort     int                     `yaml:"localport,omitempty"`
+	PublicKeyPath string                  `yaml:"publickeypath,omitempty"`
+	WorkspaceSync SSHDWorkspaceSyncConfig `yaml:"workspacesync,omitempty"`
+}
+
+type SSHDWorkspaceSyncConfig struct {
+	Enabled   bool   `yaml:"enabled,omitempty"`
+	LocalPath string `yaml:"localpath,omitempty"`
+}
+
+func (c SSHDWorkspaceSyncConfig) IsZero() bool {
+	return !c.Enabled && strings.TrimSpace(c.LocalPath) == ""
 }
 
 func (c SSHDConfig) ResolvedLocalPort() int {

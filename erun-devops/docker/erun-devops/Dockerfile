@@ -37,7 +37,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     cd /src/erun-backend/erun-backend-api && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -o /out/eapi ./cmd/eapi
 
-FROM erunpaas/erun-ubuntu:noble-20260217
+FROM ghcr.io/sophium/erun-ubuntu:noble-20260217
 
 ARG TARGETARCH
 ARG KUBECTL_VERSION=v1.33.1

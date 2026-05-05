@@ -97,12 +97,75 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 			builderWithGuidance := func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
 				buildErr := builder(buildInput, stdout, stderr)
 				var authErr common.DockerRegistryAuthError
-				if errors.As(buildErr, &authErr) && common.IsDockerCreatePackageDenied(authErr.Message) {
-					printCreatePackageGuidance(stderr, authErr.Tag, authErr.Registry)
+				if !errors.As(buildErr, &authErr) || !common.IsDockerCreatePackageDenied(authErr.Message) {
+					return buildErr
 				}
+				if ok, _ := common.TryGHCRNamespaceLogin(authErr.Tag, stdout, stderr); ok {
+					if retryErr := builder(buildInput, stdout, stderr); retryErr == nil {
+						return nil
+					} else {
+						buildErr = retryErr
+					}
+				}
+				printCreatePackageGuidance(stderr, authErr.Tag, authErr.Registry)
 				return buildErr
 			}
 			return common.RunDockerPushSpec(ctx, pushInput, buildInput, builderWithGuidance, push)
+		},
+	}
+	addDryRunFlag(cmd)
+	addPushCommandTargetFlags(cmd, &target)
+	return cmd
+}
+
+// newRootPushCmd is the top-level "erun push" shorthand. It supports both
+// single-image push (when a Dockerfile exists in the current directory) and
+// multi-image push (when run from the project root with multiple docker
+// contexts). The nested "devops container push" command uses newPushCmd which
+// is single-image only.
+func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc) *cobra.Command {
+	target := common.DockerCommandTarget{}
+	cmd := &cobra.Command{
+		Use:           "push",
+		Short:         "Build and push the current container image",
+		Args:          cobra.NoArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext(cmd)
+			builder := buildDockerImage
+			if builder == nil {
+				builder = common.DockerImageBuilder
+			}
+			builderWithGuidance := func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
+				buildErr := builder(buildInput, stdout, stderr)
+				var authErr common.DockerRegistryAuthError
+				if !errors.As(buildErr, &authErr) || !common.IsDockerCreatePackageDenied(authErr.Message) {
+					return buildErr
+				}
+				if ok, _ := common.TryGHCRNamespaceLogin(authErr.Tag, stdout, stderr); ok {
+					if retryErr := builder(buildInput, stdout, stderr); retryErr == nil {
+						return nil
+					} else {
+						buildErr = retryErr
+					}
+				}
+				printCreatePackageGuidance(stderr, authErr.Tag, authErr.Registry)
+				return buildErr
+			}
+			buildContext, _ := resolveBuildContext()
+			if strings.TrimSpace(buildContext.DockerfilePath) != "" {
+				pushInput, buildInput, err := common.ResolveDockerPushSpec(store, findProjectRoot, resolveBuildContext, now, target)
+				if err != nil {
+					return err
+				}
+				return common.RunDockerPushSpec(ctx, pushInput, buildInput, builderWithGuidance, push)
+			}
+			execution, err := common.ResolveDockerPushExecution(store, findProjectRoot, resolveBuildContext, now, target)
+			if err != nil {
+				return err
+			}
+			return common.RunDockerPushExecution(ctx, execution, builderWithGuidance, push)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -122,6 +185,11 @@ func runDockerPushWithRetry(ctx common.Context, pushInput common.DockerPushSpec,
 	}
 
 	if common.IsDockerCreatePackageDenied(authErr.Message) {
+		if ok, _ := common.TryGHCRNamespaceLogin(authErr.Tag, ctx.Stdout, ctx.Stderr); ok {
+			if retryErr := push(ctx, pushInput); retryErr == nil {
+				return nil
+			}
+		}
 		printCreatePackageGuidance(ctx.Stderr, authErr.Tag, authErr.Registry)
 	}
 
@@ -157,6 +225,11 @@ func runDockerBuildWithRetry(ctx common.Context, buildInput common.DockerBuildSp
 	}
 
 	if common.IsDockerCreatePackageDenied(authErr.Message) {
+		if ok, _ := common.TryGHCRNamespaceLogin(authErr.Tag, stdout, stderr); ok {
+			if retryErr := build(buildInput, stdout, stderr); retryErr == nil {
+				return nil
+			}
+		}
 		printCreatePackageGuidance(stderr, authErr.Tag, authErr.Registry)
 	}
 

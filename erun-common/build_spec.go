@@ -87,9 +87,31 @@ func ResolveDockerBuildForImageReference(store DockerStore, findProjectRoot Proj
 		return DockerBuildSpec{}, false, nil
 	}
 
+	// Reject image references where the registry looks like a version string
+	// (e.g. "1.0.51-snapshot-20260505151841/image-name:tag").  Such references
+	// arise from helm chart printf templates that embed .Chart.AppVersion as a
+	// namespace prefix; they are not valid Docker registry hosts and would cause
+	// a push-time DNS lookup failure.
+	if dockerRegistryLooksLikeVersion(registry) {
+		return DockerBuildSpec{}, false, nil
+	}
+
+	if registry == "" {
+		resolved, err := resolveDockerBuildRegistryForEnvironment(projectRoot, environment)
+		if err != nil {
+			return DockerBuildSpec{}, false, err
+		}
+		registry = resolved
+	}
+
 	buildContext, ok, err := FindComponentDockerBuildContext(projectRoot, imageName)
 	if err != nil || !ok {
 		return DockerBuildSpec{}, false, err
+	}
+
+	tag := image
+	if !strings.Contains(image, "/") {
+		tag = fmt.Sprintf("%s/%s:%s", strings.TrimRight(registry, "/"), imageName, version)
 	}
 
 	imageRef := DockerImageReference{
@@ -98,7 +120,7 @@ func ResolveDockerBuildForImageReference(store DockerStore, findProjectRoot Proj
 		Registry:     registry,
 		ImageName:    imageName,
 		Version:      version,
-		Tag:          image,
+		Tag:          tag,
 		IsLocalBuild: isLocalEnvironment(environment),
 	}
 	skipIfExists, err := resolveDockerBuildSkipIfExists(projectRoot, environment, imageRef)
@@ -139,12 +161,12 @@ func resolveDockerImageReferenceForProject(now NowFunc, projectRoot, environment
 		return DockerImageReference{}, fmt.Errorf("could not determine image name from current directory")
 	}
 
-	version, versionFromBuildDir, versionFilePath, err := resolveDockerImageVersion(now, projectRoot, environment, buildDir, versionOverride)
+	version, baseVersion, versionFromBuildDir, versionFilePath, err := resolveDockerImageVersion(now, projectRoot, environment, buildDir, versionOverride)
 	if err != nil {
 		return DockerImageReference{}, err
 	}
 
-	return DockerImageReference{
+	ref := DockerImageReference{
 		ProjectRoot:         projectRoot,
 		Environment:         strings.TrimSpace(environment),
 		Registry:            registry,
@@ -154,26 +176,33 @@ func resolveDockerImageReferenceForProject(now NowFunc, projectRoot, environment
 		IsLocalBuild:        isLocalEnvironment(environment),
 		VersionFilePath:     versionFilePath,
 		VersionFromBuildDir: versionFromBuildDir,
-	}, nil
+	}
+	if baseVersion != version {
+		ref.BaseVersion = baseVersion
+	}
+	return ref, nil
 }
 
-func resolveDockerImageVersion(now NowFunc, projectRoot, environment, buildDir, versionOverride string) (string, bool, string, error) {
+// resolveDockerImageVersion returns (version, baseVersion, versionFromBuildDir, versionFilePath, error).
+// version is the full tag version (may include a snapshot suffix for local builds).
+// baseVersion is always the stable semver without snapshot suffix.
+func resolveDockerImageVersion(now NowFunc, projectRoot, environment, buildDir, versionOverride string) (string, string, bool, string, error) {
 	baseVersion, versionFromBuildDir, versionFilePath, err := ResolveDockerBuildVersion(buildDir, projectRoot)
 	if err != nil {
-		return "", false, "", err
+		return "", "", false, "", err
 	}
 
 	if versionOverride = strings.TrimSpace(versionOverride); versionOverride != "" {
 		if versionFromBuildDir {
-			return baseVersion, versionFromBuildDir, versionFilePath, nil
+			return baseVersion, baseVersion, versionFromBuildDir, versionFilePath, nil
 		}
-		return versionOverride, versionFromBuildDir, versionFilePath, nil
+		return versionOverride, versionOverride, versionFromBuildDir, versionFilePath, nil
 	}
 
 	if !isLocalEnvironment(environment) || versionFromBuildDir {
-		return baseVersion, versionFromBuildDir, versionFilePath, nil
+		return baseVersion, baseVersion, versionFromBuildDir, versionFilePath, nil
 	}
-	return formatLocalSnapshotVersion(baseVersion, now()), versionFromBuildDir, versionFilePath, nil
+	return formatLocalSnapshotVersion(baseVersion, now()), baseVersion, versionFromBuildDir, versionFilePath, nil
 }
 
 func newDockerBuildSpec(now NowFunc, projectRoot, environment string, buildContext DockerBuildContext, versionOverride string) (DockerBuildSpec, error) {
@@ -193,6 +222,28 @@ func newDockerBuildSpec(now NowFunc, projectRoot, environment string, buildConte
 	skipIfExists, err := resolveDockerBuildSkipIfExists(projectRoot, environment, imageRef)
 	if err != nil {
 		return DockerBuildSpec{}, err
+	}
+
+	// For images whose FROM instruction resolves via ${ERUN_VERSION} (e.g.
+	// erun-backend-api, erun-backend-db, erun-mcp), the snapshot version is
+	// the right ERUN_VERSION build arg because it matches the locally-built
+	// base image tag.  Clear BaseVersion so those images don't try to use the
+	// stable semver — that tag doesn't exist in the local Docker cache.
+	//
+	// Source-compiled images (e.g. erun-devops) use a fixed FROM and bake
+	// ERUN_VERSION into the binary via ldflags.  Keeping BaseVersion set on
+	// those images ensures the binary is stable across snapshot pushes so
+	// Docker can reuse existing registry layers.
+	// For local snapshot builds, append "-snapshot" to the stable base version
+	// so ERUN_VERSION reads "1.0.51-snapshot" rather than "1.0.51" (which would
+	// falsely claim a release).  All images — both source-compiled and wrapper —
+	// use this as their ERUN_VERSION build arg.  The build system also emits a
+	// stable local tag (e.g. erun-devops:1.0.51-snapshot) so that wrapper images
+	// whose FROM references ${ERUN_VERSION} always resolve the same local image,
+	// keeping the Docker build cache valid across pushes.  The stable local tag
+	// is never pushed; only the timestamped snapshot tag goes to the registry.
+	if imageRef.BaseVersion != "" {
+		imageRef.BaseVersion = imageRef.BaseVersion + "-snapshot"
 	}
 
 	return DockerBuildSpec{

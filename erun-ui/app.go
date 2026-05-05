@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"sync"
+	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -27,41 +28,46 @@ type projectConfigLoader interface {
 }
 
 type erunUIDeps struct {
-	store                erunUIStore
-	findProjectRoot      eruncommon.ProjectFinderFunc
-	resolveCLIPath       func() string
-	resolveBuildInfo     func() eruncommon.BuildInfo
-	resolveImageRegistry func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error)
-	cloudDeps            eruncommon.CloudDependencies
-	cloudContextDeps     eruncommon.CloudContextDependencies
-	deleteNamespace      eruncommon.NamespaceDeleterFunc
-	listKubeContexts     func() ([]string, error)
-	loadResourceStatus   func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
-	ensureMCP            func(context.Context, eruncommon.OpenResult) error
-	canConnectLocalPort  func(int) bool
-	setRemoteCloudAlias  func(context.Context, string, string, string, string) (eruncommon.EnvConfig, error)
-	startTerminal        func(startTerminalSessionParams) (terminalSession, error)
-	runIDECommand        func(context.Context, startTerminalSessionParams) (string, error)
-	savePastedImage      func(pastedImageSaveParams) (string, error)
-	loadDiff             func(context.Context, string, uiDiffOptions) (eruncommon.DiffResult, error)
-	loadIdleStatus       func(context.Context, string) (eruncommon.EnvironmentIdleStatus, error)
-	loadAPILog           func(context.Context, uiTenantDashboardInput) (string, error)
-	recordActivity       func(eruncommon.EnvironmentActivityParams) error
-	stopCloudContext     func(context.Context, string) (eruncommon.CloudContextStatus, error)
-	windowStatePath      string
-	windowMaximised      func(context.Context) bool
+	store                 erunUIStore
+	findProjectRoot       eruncommon.ProjectFinderFunc
+	resolveCLIPath        func() string
+	resolveBuildInfo      func() eruncommon.BuildInfo
+	resolveImageRegistry  func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error)
+	cloudDeps             eruncommon.CloudDependencies
+	cloudContextDeps      eruncommon.CloudContextDependencies
+	deleteNamespace       eruncommon.NamespaceDeleterFunc
+	listKubeContexts      func() ([]string, error)
+	loadResourceStatus    func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
+	ensureMCP             func(context.Context, eruncommon.OpenResult) error
+	ensureSSHD            func(context.Context, eruncommon.OpenResult) error
+	canConnectLocalPort   func(int) bool
+	setRemoteCloudAlias   func(context.Context, string, string, string, string) (eruncommon.EnvConfig, error)
+	startTerminal         func(startTerminalSessionParams) (terminalSession, error)
+	runIDECommand         func(context.Context, startTerminalSessionParams) (string, error)
+	savePastedImage       func(pastedImageSaveParams) (string, error)
+	loadDiff              func(context.Context, string, uiDiffOptions) (eruncommon.DiffResult, error)
+	loadIdleStatus        func(context.Context, string) (eruncommon.EnvironmentIdleStatus, error)
+	loadAPILog            func(context.Context, uiTenantDashboardInput) (string, error)
+	workspaceSyncReady    func(context.Context, string) error
+	syncWorkspace         func(context.Context, workspaceSyncParams) (workspaceSyncResult, error)
+	workspaceSyncInterval time.Duration
+	recordActivity        func(eruncommon.EnvironmentActivityParams) error
+	stopCloudContext      func(context.Context, string) (eruncommon.CloudContextStatus, error)
+	windowStatePath       string
+	windowMaximised       func(context.Context) bool
 }
 
 type App struct {
 	ctx  context.Context
 	deps erunUIDeps
 
-	mu         sync.Mutex
-	current    *managedTerminal
-	nextSerial int
-	sessions   map[string]*managedTerminal
-	idleStops  map[string]struct{}
-	busyEnvs   map[string]int
+	mu             sync.Mutex
+	current        *managedTerminal
+	nextSerial     int
+	sessions       map[string]*managedTerminal
+	idleStops      map[string]struct{}
+	busyEnvs       map[string]int
+	workspaceSyncs map[string]*workspaceSyncWorker
 }
 
 func NewApp(deps erunUIDeps) *App {
@@ -69,10 +75,11 @@ func NewApp(deps erunUIDeps) *App {
 	deps = withDefaultRuntimeDeps(deps)
 	deps = withDefaultUIDeps(deps)
 	return &App{
-		deps:      deps,
-		sessions:  make(map[string]*managedTerminal),
-		idleStops: make(map[string]struct{}),
-		busyEnvs:  make(map[string]int),
+		deps:           deps,
+		sessions:       make(map[string]*managedTerminal),
+		idleStops:      make(map[string]struct{}),
+		busyEnvs:       make(map[string]int),
+		workspaceSyncs: make(map[string]*workspaceSyncWorker),
 	}
 }
 
@@ -112,6 +119,11 @@ func withDefaultRuntimeDeps(deps erunUIDeps) erunUIDeps {
 			return ensureMCPViaOpenCommand(ctx, deps.resolveCLIPath(), result)
 		}
 	}
+	if deps.ensureSSHD == nil {
+		deps.ensureSSHD = func(ctx context.Context, result eruncommon.OpenResult) error {
+			return ensureSSHDViaOpenCommand(ctx, deps.resolveCLIPath(), result)
+		}
+	}
 	if deps.canConnectLocalPort == nil {
 		deps.canConnectLocalPort = canConnectLocalTCP
 	}
@@ -140,6 +152,15 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 	if deps.loadAPILog == nil {
 		deps.loadAPILog = loadAPILog
 	}
+	if deps.workspaceSyncReady == nil {
+		deps.workspaceSyncReady = workspaceSyncSSHReady
+	}
+	if deps.syncWorkspace == nil {
+		deps.syncWorkspace = syncWorkspaceOnce
+	}
+	if deps.workspaceSyncInterval <= 0 {
+		deps.workspaceSyncInterval = defaultWorkspaceSyncInterval
+	}
 	if deps.recordActivity == nil {
 		deps.recordActivity = eruncommon.RecordEnvironmentActivity
 	}
@@ -165,6 +186,7 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) shutdown(context.Context) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.stopAllWorkspaceSyncsLocked()
 	a.closeAllSessionsLocked()
 }
 

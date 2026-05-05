@@ -37,6 +37,24 @@ func shouldSkipDockerBuild(ctx Context, buildInput DockerBuildSpec, inspect Dock
 	if tag == "" {
 		return false, nil
 	}
+
+	// For multi-platform builds verify the registry manifest actually covers every
+	// required platform.  A single-arch manifest (or a manifest list that is missing
+	// one of the platforms) must be rebuilt so downstream images can use it as a
+	// multi-platform base image.
+	if buildInput.Push && len(buildInput.Platforms) > 0 {
+		ctx.TraceCommand("", "docker", "manifest", "inspect", tag)
+		available, err := dockerManifestPlatforms(tag)
+		if err != nil {
+			return false, err
+		}
+		if !dockerPlatformsCovered(available, buildInput.Platforms) {
+			return false, nil
+		}
+		ctx.Trace("skipping docker build because configured multi-platform image exists: " + tag)
+		return true, nil
+	}
+
 	inspectCommand := []string{"image", "inspect", tag}
 	if inspect == nil {
 		inspect = DockerImageExists
@@ -56,6 +74,23 @@ func shouldSkipDockerBuild(ctx Context, buildInput DockerBuildSpec, inspect Dock
 	}
 	ctx.Trace("skipping docker build because configured image exists: " + tag)
 	return true, nil
+}
+
+// dockerPlatformsCovered reports whether every platform in required is present in available.
+func dockerPlatformsCovered(available, required []string) bool {
+	if len(available) == 0 {
+		return false
+	}
+	supported := make(map[string]struct{}, len(available))
+	for _, p := range available {
+		supported[p] = struct{}{}
+	}
+	for _, p := range required {
+		if _, ok := supported[strings.TrimSpace(p)]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc) error {

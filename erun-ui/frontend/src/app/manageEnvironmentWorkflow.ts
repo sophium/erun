@@ -1,5 +1,6 @@
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import {
+  ChooseWorkspaceSyncLocalFolder,
   DeleteEnvironment,
   LoadEnvironmentConfig,
   LoadRuntimeResourceStatus,
@@ -192,6 +193,19 @@ export class ManageEnvironmentWorkflow {
     this.deps.emit();
   }
 
+  async chooseWorkspaceSyncLocalFolder(): Promise<void> {
+    const dialog = this.state.manageDialog;
+    const selection = dialog.selection;
+    if (dialog.busy || dialog.configLoading || !selection || !dialog.config.sshd.workspaceSyncEnabled) {
+      return;
+    }
+    const selected = String(await ChooseWorkspaceSyncLocalFolder(selection, dialog.config.sshd.workspaceSyncLocalPath || '') || '').trim();
+    if (!selected) {
+      return;
+    }
+    this.updateSSHDConfig({ workspaceSyncLocalPath: selected });
+  }
+
   async loadConfig(): Promise<void> {
     const dialog = this.state.manageDialog;
     const selection = dialog.selection;
@@ -303,7 +317,7 @@ export class ManageEnvironmentWorkflow {
         busyTarget: '',
         error: '',
       };
-      this.deps.showNotification('success', `Saved config for ${selection.tenant} / ${selection.environment}.`);
+      this.deps.showNotification('success', manageConfigSavedMessage(selection, result));
       this.closeDialog();
     } catch (error) {
       const message = readError(error);
@@ -507,4 +521,11 @@ export class ManageEnvironmentWorkflow {
   private get sessions(): TerminalSessionRegistry {
     return this.deps.sessions;
   }
+}
+
+function manageConfigSavedMessage(selection: UISelection, config: UIEnvironmentConfig): string {
+  if (config.sshd.workspaceSyncEnabled) {
+    return `Saved config and started workspace sync for ${selection.tenant} / ${selection.environment}.`;
+  }
+  return `Saved config for ${selection.tenant} / ${selection.environment}.`;
 }

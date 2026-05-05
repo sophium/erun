@@ -168,7 +168,16 @@ func hasOptionalBuildCmd(findProjectRoot common.ProjectFinderFunc, resolveBuildC
 
 func hasOptionalPushCmd(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc) bool {
 	buildContext, err := resolveBuildContext()
-	return err == nil && strings.TrimSpace(buildContext.DockerfilePath) != ""
+	if err == nil && strings.TrimSpace(buildContext.DockerfilePath) != "" {
+		return true
+	}
+	// Also register push at the project root so that "erun push" works alongside
+	// "erun build" when multiple docker contexts exist.
+	if currentBuildContextIsProjectRoot(findProjectRoot, buildContext) {
+		buildContexts, contextErr := common.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, common.DockerCommandTarget{})
+		return contextErr == nil && len(buildContexts) > 0
+	}
+	return false
 }
 
 func optionalBuildCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc) string {

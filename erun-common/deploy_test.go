@@ -808,10 +808,10 @@ func TestRemoteBootstrapRuntimeUsesCanonicalImageWithTenantRelease(t *testing.T)
 	if !strings.Contains(content, "name: test-devops") {
 		t.Fatalf("expected tenant deployment identity in chart, got:\n%s", content)
 	}
-	if !strings.Contains(content, `printf "erunpaas/erun-devops:%s" .Chart.AppVersion`) {
+	if !strings.Contains(content, `printf "ghcr.io/sophium/erun-devops:%s" .Chart.AppVersion`) {
 		t.Fatalf("expected canonical runtime image in bootstrap chart, got:\n%s", content)
 	}
-	if strings.Contains(content, "image: erunpaas/test-devops:") {
+	if strings.Contains(content, "image: ghcr.io/sophium/test-devops:") {
 		t.Fatalf("bootstrap chart must not require tenant image before it exists, got:\n%s", content)
 	}
 }
@@ -845,10 +845,10 @@ func TestResolveOpenRuntimeDeploySpecUsesRemoteEnvRuntimeVersionForEmbeddedChart
 		t.Fatalf("read rendered chart template: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, `printf "erunpaas/erun-devops:%s" .Chart.AppVersion`) {
+	if !strings.Contains(content, `printf "ghcr.io/sophium/erun-devops:%s" .Chart.AppVersion`) {
 		t.Fatalf("expected canonical runtime image for remote deploy, got:\n%s", content)
 	}
-	if strings.Contains(content, "image: erunpaas/frs-devops:") {
+	if strings.Contains(content, "image: ghcr.io/sophium/frs-devops:") {
 		t.Fatalf("remote deploy must not require tenant image before it exists, got:\n%s", content)
 	}
 }
@@ -1095,6 +1095,296 @@ func TestResolveDeploySpecForContextPublishesLocalRuntimeBuildsAsMultiPlatform(t
 	requireNoError(t, err, "resolveDeploySpecForContext failed")
 
 	requireMultiPlatformDeployBuilds(t, spec.Builds)
+}
+
+func TestResolveDeploySpecForContextIncludesDockerfileBaseImageDependencies(t *testing.T) {
+	projectRoot := t.TempDir()
+	componentRoot := filepath.Join(projectRoot, "tenant-a-devops")
+	chartPath := createComponentHelmChartFixture(t, projectRoot, "tenant-a-devops")
+
+	// Base image component: erun-ubuntu equivalent with a local Dockerfile.
+	baseImageDir := filepath.Join(componentRoot, "docker", "tenant-a-ubuntu")
+	requireNoError(t, os.MkdirAll(baseImageDir, 0o755), "mkdir base image docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(baseImageDir, "Dockerfile"), []byte("FROM ubuntu:noble-20260217\n"), 0o644), "write base Dockerfile")
+
+	// Main component Dockerfile references the base image via FROM.
+	runtimeWorkdir := filepath.Join(componentRoot, "docker", "tenant-a-devops")
+	requireNoError(t, os.MkdirAll(runtimeWorkdir, 0o755), "mkdir runtime docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(runtimeWorkdir, "Dockerfile"), []byte("FROM erunpaas/tenant-a-ubuntu:noble-20260217\nRUN echo hello\n"), 0o644), "write main Dockerfile")
+	writeVersionFileForTest(t, filepath.Join(componentRoot, "VERSION"), "1.0.0")
+
+	// Configure base image as SkipIfExists (it's a pre-built base, not rebuilt on every deploy).
+	projectConfig := ProjectConfig{}
+	projectConfig.SetContainerRegistryForEnvironment(DefaultEnvironment, "erunpaas")
+	projectConfig.Environments[DefaultEnvironment] = ProjectEnvironmentConfig{
+		ContainerRegistry: "erunpaas",
+		Docker: ProjectDockerConfig{
+			SkipIfExists: []string{"erunpaas/tenant-a-ubuntu"},
+		},
+	}
+	requireNoError(t, SaveProjectConfig(projectRoot, projectConfig), "save project config")
+
+	spec, err := resolveDeploySpecForContext(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{
+				Dir:            runtimeWorkdir,
+				DockerfilePath: filepath.Join(runtimeWorkdir, "Dockerfile"),
+			}, nil
+		},
+		nil,
+		func() time.Time { return time.Date(2026, time.April, 21, 18, 24, 44, 0, time.UTC) },
+		OpenResult{
+			Tenant:      "tenant-a",
+			Environment: DefaultEnvironment,
+			RepoPath:    projectRoot,
+			TenantConfig: TenantConfig{
+				Name:        "tenant-a",
+				ProjectRoot: projectRoot,
+			},
+			EnvConfig: EnvConfig{
+				Name:              DefaultEnvironment,
+				RepoPath:          projectRoot,
+				KubernetesContext: "erun",
+			},
+		},
+		KubernetesDeployContext{
+			Dir:           runtimeWorkdir,
+			ComponentName: "tenant-a-devops",
+			ChartPath:     chartPath,
+		},
+		"",
+		true,
+		nil,
+	)
+	requireNoError(t, err, "resolveDeploySpecForContext failed")
+
+	// Expect both the main component and the Dockerfile base image dependency.
+	requireEqual(t, len(spec.Builds), 2, "deploy build count")
+	for _, build := range spec.Builds {
+		requireMultiPlatformPushedBuild(t, build)
+	}
+	foundBase := false
+	for _, build := range spec.Builds {
+		if build.Image.ImageName == "tenant-a-ubuntu" {
+			foundBase = true
+			requireCondition(t, build.SkipIfExists, "expected base image build to be skippable, got %+v", build)
+		}
+	}
+	if !foundBase {
+		tags := make([]string, 0, len(spec.Builds))
+		for _, b := range spec.Builds {
+			tags = append(tags, b.Image.Tag)
+		}
+		t.Fatalf("expected Dockerfile base image dependency (tenant-a-ubuntu) in builds, got: %v", tags)
+	}
+}
+
+func TestResolveDeploySpecForContextIncludesChartSidecarWithRegistryAndAppVersionPrintf(t *testing.T) {
+	projectRoot := t.TempDir()
+	componentRoot := filepath.Join(projectRoot, "tenant-a-devops")
+	chartPath := createComponentHelmChartFixture(t, projectRoot, "tenant-a-devops")
+
+	runtimeWorkdir := filepath.Join(componentRoot, "docker", "tenant-a-devops")
+	writeDockerBuildFixture(t, runtimeWorkdir)
+	writeVersionFileForTest(t, filepath.Join(componentRoot, "VERSION"), "1.0.0")
+
+	sidecarWorkdir := filepath.Join(componentRoot, "docker", "tenant-a-sidecar")
+	writeDockerBuildFixture(t, sidecarWorkdir)
+
+	templatesPath := filepath.Join(chartPath, "templates")
+	requireNoError(t, os.MkdirAll(templatesPath, 0o755), "mkdir templates dir")
+	template := "{{- $reg := default \"erunpaas\" .Values.containerRegistry -}}\n" +
+		"{{- $sidecarImage := default (printf \"%s/tenant-a-sidecar:%s\" $reg .Chart.AppVersion) (index .Values.imageOverrides \"tenant-a-sidecar\") -}}\n" +
+		"apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n" +
+		"        - name: tenant-a-devops\n          image: erunpaas/tenant-a-devops:{{ .Chart.AppVersion }}\n" +
+		"        - name: sidecar\n          image: {{ $sidecarImage }}\n"
+	requireNoError(t, os.WriteFile(filepath.Join(templatesPath, "deployment.yaml"), []byte(template), 0o644), "write deployment template")
+
+	projectConfig := ProjectConfig{}
+	projectConfig.SetContainerRegistryForEnvironment(DefaultEnvironment, "erunpaas")
+	requireNoError(t, SaveProjectConfig(projectRoot, projectConfig), "save project config")
+
+	spec, err := resolveDeploySpecForContext(
+		ConfigStore{},
+		func() (string, string, error) { return "tenant-a", projectRoot, nil },
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{
+				Dir:            runtimeWorkdir,
+				DockerfilePath: filepath.Join(runtimeWorkdir, "Dockerfile"),
+			}, nil
+		},
+		nil,
+		func() time.Time { return time.Date(2026, time.April, 21, 18, 24, 44, 0, time.UTC) },
+		OpenResult{
+			Tenant:      "tenant-a",
+			Environment: DefaultEnvironment,
+			RepoPath:    projectRoot,
+			TenantConfig: TenantConfig{Name: "tenant-a", ProjectRoot: projectRoot},
+			EnvConfig:    EnvConfig{Name: DefaultEnvironment, RepoPath: projectRoot, KubernetesContext: "erun"},
+		},
+		KubernetesDeployContext{
+			Dir: runtimeWorkdir, ComponentName: "tenant-a-devops", ChartPath: chartPath,
+		},
+		"",
+		true,
+		nil,
+	)
+	requireNoError(t, err, "resolveDeploySpecForContext failed")
+
+	requireEqual(t, len(spec.Builds), 2, "deploy build count")
+	var sidecarBuild *DockerBuildSpec
+	for i := range spec.Builds {
+		if spec.Builds[i].Image.ImageName == "tenant-a-sidecar" {
+			sidecarBuild = &spec.Builds[i]
+		}
+	}
+	if sidecarBuild == nil {
+		t.Fatal("expected tenant-a-sidecar to be in deploy builds")
+	}
+	requireMultiPlatformPushedBuild(t, *sidecarBuild)
+	if sidecarBuild.Image.Registry == "" {
+		t.Fatal("sidecar build must have a registry")
+	}
+	if dockerRegistryLooksLikeVersion(sidecarBuild.Image.Registry) {
+		t.Fatalf("sidecar registry %q looks like a version", sidecarBuild.Image.Registry)
+	}
+}
+
+func TestResolveDeploySpecForContextSkipsChartImageWithVersionPrefixRegistry(t *testing.T) {
+	// Regression test: some helm charts reference sidecar images using the app
+	// version as a namespace prefix, e.g.:
+	//   image: "{{ printf "%s/erun-backend-db:%s" .Chart.AppVersion .Chart.AppVersion }}"
+	// This produces "1.0.51-snapshot-TSTAMP/erun-backend-db:1.0.51-snapshot-TSTAMP"
+	// where the "registry" is a snapshot version string, not a valid Docker host.
+	// ResolveDockerBuildForImageReference must reject such references (ok=false)
+	// so they are never added to the deploy builds list.
+	projectRoot := t.TempDir()
+	componentRoot := filepath.Join(projectRoot, "tenant-a-devops")
+	chartPath := createComponentHelmChartFixture(t, projectRoot, "tenant-a-devops")
+
+	// Main component Dockerfile.
+	runtimeWorkdir := filepath.Join(componentRoot, "docker", "tenant-a-devops")
+	writeDockerBuildFixture(t, runtimeWorkdir)
+	writeVersionFileForTest(t, filepath.Join(componentRoot, "VERSION"), "1.0.0")
+
+	// Sidecar component that the chart references via version-as-registry format only.
+	sidecarWorkdir := filepath.Join(componentRoot, "docker", "tenant-a-sidecar")
+	requireNoError(t, os.MkdirAll(sidecarWorkdir, 0o755), "mkdir sidecar docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(sidecarWorkdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write sidecar Dockerfile")
+
+	// Chart references the sidecar only via printf version-as-registry format, not via a
+	// real registry tag.  This is the scenario that caused the "no such host" push failure.
+	templatesPath := filepath.Join(chartPath, "templates")
+	requireNoError(t, os.MkdirAll(templatesPath, 0o755), "mkdir templates dir")
+	template := "apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: tenant-a-devops\n          image: erunpaas/tenant-a-devops:{{ .Chart.AppVersion }}\n        - name: sidecar\n          image: \"{{ printf \"%s/tenant-a-sidecar:%s\" .Chart.AppVersion .Chart.AppVersion }}\"\n"
+	requireNoError(t, os.WriteFile(filepath.Join(templatesPath, "deployment.yaml"), []byte(template), 0o644), "write deployment template")
+
+	projectConfig := ProjectConfig{}
+	projectConfig.SetContainerRegistryForEnvironment(DefaultEnvironment, "erunpaas")
+	requireNoError(t, SaveProjectConfig(projectRoot, projectConfig), "save project config")
+
+	spec, err := resolveDeploySpecForContext(
+		ConfigStore{},
+		func() (string, string, error) { return "tenant-a", projectRoot, nil },
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{
+				Dir:            runtimeWorkdir,
+				DockerfilePath: filepath.Join(runtimeWorkdir, "Dockerfile"),
+			}, nil
+		},
+		nil,
+		func() time.Time { return time.Date(2026, time.April, 21, 18, 24, 44, 0, time.UTC) },
+		OpenResult{
+			Tenant:      "tenant-a",
+			Environment: DefaultEnvironment,
+			RepoPath:    projectRoot,
+			TenantConfig: TenantConfig{Name: "tenant-a", ProjectRoot: projectRoot},
+			EnvConfig:    EnvConfig{Name: DefaultEnvironment, RepoPath: projectRoot, KubernetesContext: "erun"},
+		},
+		KubernetesDeployContext{
+			Dir: runtimeWorkdir, ComponentName: "tenant-a-devops", ChartPath: chartPath,
+		},
+		"",
+		true,
+		nil,
+	)
+	requireNoError(t, err, "resolveDeploySpecForContext failed")
+
+	// Only the main component build should be present.
+	// The sidecar image with version-as-registry prefix must be silently dropped.
+	requireEqual(t, len(spec.Builds), 1, "deploy build count")
+	build := spec.Builds[0]
+	requireMultiPlatformPushedBuild(t, build)
+	if dockerRegistryLooksLikeVersion(build.Image.Registry) {
+		t.Fatalf("build has version-like registry %q in tag %q", build.Image.Registry, build.Image.Tag)
+	}
+}
+
+func TestResolveDeploySpecForContextSkipsChartImageWithUnresolvedPrintfVerb(t *testing.T) {
+	// Regression test: some helm charts use printf with a non-AppVersion argument
+	// (e.g. .Release.Namespace) which leaves "%s" unresolved in the image tag:
+	//   image: "{{ printf "%s/erun-dind:28.1.1" .Release.Namespace }}"
+	// resolveChartVersionImageTag only substitutes .Chart.AppVersion placeholders,
+	// so .Release.Namespace stays as "%s".  Docker rejects "%s" as an invalid tag.
+	// dockerImageFromChartLine must return "" for any value containing "%".
+	projectRoot := t.TempDir()
+	componentRoot := filepath.Join(projectRoot, "tenant-a-devops")
+	chartPath := createComponentHelmChartFixture(t, projectRoot, "tenant-a-devops")
+
+	runtimeWorkdir := filepath.Join(componentRoot, "docker", "tenant-a-devops")
+	writeDockerBuildFixture(t, runtimeWorkdir)
+	writeVersionFileForTest(t, filepath.Join(componentRoot, "VERSION"), "1.0.0")
+
+	// Chart references a sidecar via printf with .Release.Namespace (not AppVersion),
+	// leaving "%s" unresolved in the image reference.
+	templatesPath := filepath.Join(chartPath, "templates")
+	requireNoError(t, os.MkdirAll(templatesPath, 0o755), "mkdir templates dir")
+	template := "apiVersion: apps/v1\nkind: Deployment\nspec:\n  template:\n    spec:\n      containers:\n        - name: tenant-a-devops\n          image: erunpaas/tenant-a-devops:{{ .Chart.AppVersion }}\n        - name: dind\n          image: \"{{ printf \\\"%s/erun-dind:28.1.1\\\" .Release.Namespace }}\"\n"
+	requireNoError(t, os.WriteFile(filepath.Join(templatesPath, "deployment.yaml"), []byte(template), 0o644), "write deployment template")
+
+	projectConfig := ProjectConfig{}
+	projectConfig.SetContainerRegistryForEnvironment(DefaultEnvironment, "erunpaas")
+	requireNoError(t, SaveProjectConfig(projectRoot, projectConfig), "save project config")
+
+	spec, err := resolveDeploySpecForContext(
+		ConfigStore{},
+		func() (string, string, error) { return "tenant-a", projectRoot, nil },
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{
+				Dir:            runtimeWorkdir,
+				DockerfilePath: filepath.Join(runtimeWorkdir, "Dockerfile"),
+			}, nil
+		},
+		nil,
+		func() time.Time { return time.Date(2026, time.April, 21, 18, 24, 44, 0, time.UTC) },
+		OpenResult{
+			Tenant:      "tenant-a",
+			Environment: DefaultEnvironment,
+			RepoPath:    projectRoot,
+			TenantConfig: TenantConfig{Name: "tenant-a", ProjectRoot: projectRoot},
+			EnvConfig:    EnvConfig{Name: DefaultEnvironment, RepoPath: projectRoot, KubernetesContext: "erun"},
+		},
+		KubernetesDeployContext{
+			Dir: runtimeWorkdir, ComponentName: "tenant-a-devops", ChartPath: chartPath,
+		},
+		"",
+		true,
+		nil,
+	)
+	requireNoError(t, err, "resolveDeploySpecForContext failed")
+
+	// Only the main component build should appear; the dind image with unresolved
+	// "%s" namespace prefix must be silently dropped (not cause an invalid-tag panic).
+	requireEqual(t, len(spec.Builds), 1, "deploy build count")
+	build := spec.Builds[0]
+	requireMultiPlatformPushedBuild(t, build)
+	if strings.Contains(build.Image.Tag, "%") {
+		t.Fatalf("build tag %q contains unresolved printf verb", build.Image.Tag)
+	}
 }
 
 func writeRuntimeDeploymentTemplate(t *testing.T, templatesPath string) {

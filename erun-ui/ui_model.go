@@ -143,9 +143,13 @@ type uiTenantDashboardAudit struct {
 }
 
 type uiSSHDConfig struct {
-	Enabled       bool   `json:"enabled"`
-	LocalPort     int    `json:"localPort"`
-	PublicKeyPath string `json:"publicKeyPath"`
+	Enabled                    bool   `json:"enabled"`
+	LocalPort                  int    `json:"localPort"`
+	PublicKeyPath              string `json:"publicKeyPath"`
+	WorkspaceSyncEnabled       bool   `json:"workspaceSyncEnabled"`
+	WorkspaceSyncLocalPath     string `json:"workspaceSyncLocalPath,omitempty"`
+	WorkspaceSyncStatus        string `json:"workspaceSyncStatus,omitempty"`
+	WorkspaceSyncStatusMessage string `json:"workspaceSyncStatusMessage,omitempty"`
 }
 
 type uiEnvironmentLocalPorts struct {

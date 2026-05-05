@@ -36,12 +36,13 @@
 {{- $postgresDataSubPath := default ".erun/postgres" $postgres.dataSubPath -}}
 {{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@127.0.0.1:%v/%s?sslmode=disable" $postgresUser $postgresPort $postgresDatabase) $api.databaseURL -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
-{{- $backendDBImage := default (printf "erunpaas/erun-backend-db:%s" .Chart.AppVersion) (index $imageOverrides "erun-backend-db") -}}
-{{- $devopsImage := default (printf "erunpaas/erun-devops:%s" .Chart.AppVersion) (index $imageOverrides "erun-devops") -}}
-{{- $mcpImage := default (printf "erunpaas/erun-mcp:%s" .Chart.AppVersion) (index $imageOverrides "erun-mcp") -}}
-{{- $backendAPIImage := default (printf "erunpaas/erun-backend-api:%s" .Chart.AppVersion) (index $imageOverrides "erun-backend-api") -}}
+{{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
+{{- $backendDBImage := default (printf "%s/erun-backend-db:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-backend-db") -}}
+{{- $devopsImage := default (printf "%s/erun-devops:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-devops") -}}
+{{- $mcpImage := default (printf "%s/erun-mcp:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-mcp") -}}
+{{- $backendAPIImage := default (printf "%s/erun-backend-api:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-backend-api") -}}
 {{- $postgresImage := default "postgres:18" (index $imageOverrides "postgres") -}}
-{{- $dindImage := default "erunpaas/erun-dind:28.1.1" (index $imageOverrides "erun-dind") -}}
+{{- $dindImage := default (printf "%s/erun-dind:28.1.1" $containerRegistry) (index $imageOverrides "erun-dind") -}}
 {{- $cloudContext := default dict .Values.cloudContext -}}
 {{- $cloudContextName := default "" $cloudContext.name -}}
 {{- $cloudProvider := default "" $cloudContext.provider -}}
