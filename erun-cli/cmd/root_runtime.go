@@ -112,8 +112,8 @@ func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinde
 	}
 }
 
-func resolveRuntimeDeploySpecForOpen(store common.DeployStore, findProjectRoot common.ProjectFinderFunc, resolveDockerBuildContext common.BuildContextResolverFunc, resolveKubernetesDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildInfo common.BuildInfo, target common.OpenResult) (common.DeploySpec, error) {
-	spec, err := common.ResolveOpenRuntimeDeploySpec(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
+func resolveRuntimeDeploySpecForOpen(store common.DeployStore, findProjectRoot common.ProjectFinderFunc, resolveDockerBuildContext common.BuildContextResolverFunc, resolveKubernetesDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildInfo common.BuildInfo, target common.OpenResult, allowLocalBuilds bool) (common.DeploySpec, error) {
+	spec, err := common.ResolveOpenRuntimeDeploySpec(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, allowLocalBuilds)
 	if err != nil {
 		return common.DeploySpec{}, err
 	}

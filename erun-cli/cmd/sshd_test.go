@@ -116,7 +116,7 @@ func TestRunSSHDInitCommandPersistsConfigAndDeploysRuntime(t *testing.T) {
 			return nil
 		},
 		func() (string, string, error) { return "tenant-a", t.TempDir(), nil },
-		func(target common.OpenResult) (common.DeploySpec, error) {
+		func(target common.OpenResult, _ bool) (common.DeploySpec, error) {
 			return common.DeploySpec{
 				Target: target,
 				Deploy: common.HelmDeploySpec{
@@ -234,7 +234,7 @@ func TestRunSSHDInitCommandUsesResolvedEnvironmentLocalPortByDefault(t *testing.
 			return nil
 		},
 		nil,
-		func(target common.OpenResult) (common.DeploySpec, error) {
+		func(target common.OpenResult, _ bool) (common.DeploySpec, error) {
 			return common.DeploySpec{
 				Target: target,
 				Deploy: common.HelmDeploySpec{
