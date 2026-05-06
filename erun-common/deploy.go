@@ -1613,23 +1613,23 @@ func deploymentMatchesExpectedSettings(params KubernetesDeploymentCheckParams) (
 		return false, fmt.Errorf("failed to parse deployment %q: %w", params.Name, err)
 	}
 
-	for _, container := range deployment.Spec.Template.Spec.Containers {
-		if strings.TrimSpace(container.Name) != params.Name {
-			continue
-		}
-		return deploymentContainerMatchesExpectedSettings(params, container.Env, container.Resources.Limits), nil
-	}
-
-	return false, nil
-}
-
-func deploymentContainerMatchesExpectedSettings(params KubernetesDeploymentCheckParams, envs []deploymentEnvVar, limits RuntimePodResources) bool {
 	matches := expectedDeploymentMatches(params)
-	for _, env := range envs {
-		matches.apply(params, env.Name, env.Value)
+	var runtimeLimits RuntimePodResources
+	runtimeFound := false
+	for _, container := range deployment.Spec.Template.Spec.Containers {
+		for _, env := range container.Env {
+			matches.apply(params, env.Name, env.Value)
+		}
+		if strings.TrimSpace(container.Name) == params.Name {
+			runtimeLimits = container.Resources.Limits
+			runtimeFound = true
+		}
 	}
-	matches.runtimePod = matchesExpectedRuntimePod(limits, params.ExpectedRuntimePod)
-	return matches.ok()
+	if !runtimeFound {
+		return false, nil
+	}
+	matches.runtimePod = matchesExpectedRuntimePod(runtimeLimits, params.ExpectedRuntimePod)
+	return matches.ok(), nil
 }
 
 type deploymentExpectedMatches struct {
