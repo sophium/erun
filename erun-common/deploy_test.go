@@ -1909,6 +1909,90 @@ exit 1
 	}
 }
 
+func TestCheckKubernetesDeploymentMatchesAcrossMultipleContainers(t *testing.T) {
+	kubectlDir := t.TempDir()
+	kubectlPath := filepath.Join(kubectlDir, "kubectl")
+	if err := os.WriteFile(kubectlPath, []byte(`#!/bin/sh
+if [ "$1" = "--context" ]; then shift 2; fi
+if [ "$1" = "--namespace" ]; then shift 2; fi
+if [ "$1" = "get" ] && [ "$2" = "deployment" ] && [ "$3" = "erun-devops" ] && [ "$4" = "-o" ] && [ "$5" = "name" ]; then
+  echo deployment/erun-devops
+  exit 0
+fi
+if [ "$1" = "get" ] && [ "$2" = "deployment" ] && [ "$3" = "erun-devops" ] && [ "$4" = "-o" ] && [ "$5" = "json" ]; then
+  cat <<'EOF'
+{"spec":{"template":{"spec":{"containers":[{"name":"erun-devops","env":[{"name":"ERUN_REPO_PATH","value":"/home/erun/git/erun"},{"name":"ERUN_SSHD_ENABLED","value":"false"},{"name":"ERUN_MCP_PORT","value":"17000"},{"name":"ERUN_SSHD_PORT","value":"17022"}]},{"name":"erun-mcp","env":[{"name":"ERUN_MCP_PORT","value":"17000"}]},{"name":"erun-backend-api","env":[{"name":"ERUN_API_PORT","value":"17033"}]}]}}}}
+EOF
+  exit 0
+fi
+echo "unexpected kubectl invocation: $@" >&2
+exit 1
+`), 0o755); err != nil {
+		t.Fatalf("write kubectl stub: %v", err)
+	}
+	t.Setenv("PATH", kubectlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	sshd := false
+	deployed, err := CheckKubernetesDeployment(KubernetesDeploymentCheckParams{
+		Name:              "erun-devops",
+		Namespace:         "erun-local",
+		KubernetesContext: "cluster-local",
+		ExpectedRepoPath:  "/home/erun/git/erun",
+		ExpectedSSHD:      &sshd,
+		ExpectedMCPPort:   17000,
+		ExpectedAPIPort:   17033,
+		ExpectedSSHPort:   17022,
+	})
+	if err != nil {
+		t.Fatalf("CheckKubernetesDeployment failed: %v", err)
+	}
+	if !deployed {
+		t.Fatalf("expected matcher to accept env vars spread across multiple containers")
+	}
+}
+
+func TestCheckKubernetesDeploymentReturnsFalseWhenAPIPortMissingAcrossAllContainers(t *testing.T) {
+	kubectlDir := t.TempDir()
+	kubectlPath := filepath.Join(kubectlDir, "kubectl")
+	if err := os.WriteFile(kubectlPath, []byte(`#!/bin/sh
+if [ "$1" = "--context" ]; then shift 2; fi
+if [ "$1" = "--namespace" ]; then shift 2; fi
+if [ "$1" = "get" ] && [ "$2" = "deployment" ] && [ "$3" = "erun-devops" ] && [ "$4" = "-o" ] && [ "$5" = "name" ]; then
+  echo deployment/erun-devops
+  exit 0
+fi
+if [ "$1" = "get" ] && [ "$2" = "deployment" ] && [ "$3" = "erun-devops" ] && [ "$4" = "-o" ] && [ "$5" = "json" ]; then
+  cat <<'EOF'
+{"spec":{"template":{"spec":{"containers":[{"name":"erun-devops","env":[{"name":"ERUN_REPO_PATH","value":"/home/erun/git/erun"},{"name":"ERUN_SSHD_ENABLED","value":"false"},{"name":"ERUN_MCP_PORT","value":"17000"},{"name":"ERUN_SSHD_PORT","value":"17022"}]},{"name":"erun-mcp","env":[{"name":"ERUN_MCP_PORT","value":"17000"}]}]}}}}
+EOF
+  exit 0
+fi
+echo "unexpected kubectl invocation: $@" >&2
+exit 1
+`), 0o755); err != nil {
+		t.Fatalf("write kubectl stub: %v", err)
+	}
+	t.Setenv("PATH", kubectlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	sshd := false
+	deployed, err := CheckKubernetesDeployment(KubernetesDeploymentCheckParams{
+		Name:              "erun-devops",
+		Namespace:         "erun-local",
+		KubernetesContext: "cluster-local",
+		ExpectedRepoPath:  "/home/erun/git/erun",
+		ExpectedSSHD:      &sshd,
+		ExpectedMCPPort:   17000,
+		ExpectedAPIPort:   17033,
+		ExpectedSSHPort:   17022,
+	})
+	if err != nil {
+		t.Fatalf("CheckKubernetesDeployment failed: %v", err)
+	}
+	if deployed {
+		t.Fatalf("expected missing API port across all containers to require redeploy")
+	}
+}
+
 func createHelmChartFixture(t *testing.T, projectRoot, componentName string) string {
 	t.Helper()
 
