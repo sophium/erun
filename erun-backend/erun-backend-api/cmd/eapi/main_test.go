@@ -29,17 +29,3 @@ func TestOpenDatabaseRequiresURL(t *testing.T) {
 		t.Fatalf("expected required URL error, got %v", err)
 	}
 }
-
-func TestConfigFromEnvLoadsAWSIdentityStoreConfig(t *testing.T) {
-	t.Setenv("ERUN_AWS_IDENTITY_STORE_ID", "d-1234567890")
-	t.Setenv("ERUN_AWS_IDENTITY_STORE_REGION", "eu-west-2")
-
-	cfg := configFromEnv()
-
-	if cfg.AWSIdentityStoreID != "d-1234567890" {
-		t.Fatalf("unexpected identity store id: %q", cfg.AWSIdentityStoreID)
-	}
-	if cfg.AWSIdentityStoreRegion != "eu-west-2" {
-		t.Fatalf("unexpected identity store region: %q", cfg.AWSIdentityStoreRegion)
-	}
-}

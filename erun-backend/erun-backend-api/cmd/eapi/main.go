@@ -31,8 +31,6 @@ func run(args []string) error {
 	flags.IntVar(&cfg.Port, "port", cfg.Port, "Port to bind the backend API HTTP server to")
 	flags.StringVar(&cfg.DatabaseURL, "database-url", cfg.DatabaseURL, "Backend PostgreSQL database URL")
 	flags.StringVar(&cfg.AllowedIssuers, "oidc-allowed-issuers", cfg.AllowedIssuers, "Comma-separated OIDC issuer allow-list; empty allows any issuer resolved from a token")
-	flags.StringVar(&cfg.AWSIdentityStoreID, "aws-identity-store-id", cfg.AWSIdentityStoreID, "AWS IAM Identity Center identity store ID used to resolve usernames from STS tokens")
-	flags.StringVar(&cfg.AWSIdentityStoreRegion, "aws-identity-store-region", cfg.AWSIdentityStoreRegion, "AWS region for Identity Store username lookup; defaults to the STS token source region")
 	if err := flags.Parse(args); err != nil {
 		return err
 	}
@@ -45,12 +43,11 @@ func run(args []string) error {
 
 	handler, err := backendapi.NewHandler(backendapi.HandlerOptions{
 		TokenVerifier: backendapi.NewOIDCTokenVerifierWithOptions(backendapi.OIDCTokenVerifierOptions{
-			AllowedIssuers:     splitCSV(cfg.AllowedIssuers),
-			AWSIdentityStoreID: cfg.AWSIdentityStoreID,
-			AWSRegion:          cfg.AWSIdentityStoreRegion,
+			AllowedIssuers: splitCSV(cfg.AllowedIssuers),
 		}),
-		DB:        db,
-		DBDialect: repository.DialectPostgres,
+		IdentityCache: backendapi.NewIdentityResolutionCache(backendapi.IdentityCacheOptions{}),
+		DB:            db,
+		DBDialect:     repository.DialectPostgres,
 	})
 	if err != nil {
 		return err
@@ -98,22 +95,18 @@ func countStatus(count int, err error) string {
 }
 
 type apiConfig struct {
-	Host                   string
-	Port                   int
-	DatabaseURL            string
-	AllowedIssuers         string
-	AWSIdentityStoreID     string
-	AWSIdentityStoreRegion string
+	Host           string
+	Port           int
+	DatabaseURL    string
+	AllowedIssuers string
 }
 
 func configFromEnv() apiConfig {
 	return apiConfig{
-		Host:                   envOrDefault("ERUN_API_HOST", "127.0.0.1"),
-		Port:                   intEnvOrDefault("ERUN_API_PORT", 17033),
-		DatabaseURL:            strings.TrimSpace(os.Getenv("ERUN_DATABASE_URL")),
-		AllowedIssuers:         strings.TrimSpace(os.Getenv("ERUN_OIDC_ALLOWED_ISSUERS")),
-		AWSIdentityStoreID:     strings.TrimSpace(os.Getenv("ERUN_AWS_IDENTITY_STORE_ID")),
-		AWSIdentityStoreRegion: strings.TrimSpace(os.Getenv("ERUN_AWS_IDENTITY_STORE_REGION")),
+		Host:           envOrDefault("ERUN_API_HOST", "127.0.0.1"),
+		Port:           intEnvOrDefault("ERUN_API_PORT", 17033),
+		DatabaseURL:    strings.TrimSpace(os.Getenv("ERUN_DATABASE_URL")),
+		AllowedIssuers: strings.TrimSpace(os.Getenv("ERUN_OIDC_ALLOWED_ISSUERS")),
 	}
 }
 
