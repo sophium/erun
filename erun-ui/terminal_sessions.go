@@ -13,7 +13,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-func (a *App) StartSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
 		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
@@ -26,7 +26,7 @@ func (a *App) StartSession(selection uiSelection, cols, rows int) (startSessionR
 		rows = 34
 	}
 
-	key := selectionKey(selection)
+	key := openSessionKey(selection, slot)
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
@@ -37,12 +37,12 @@ func (a *App) StartSession(selection uiSelection, cols, rows int) (startSessionR
 
 	a.mu.Lock()
 	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
-		a.current = existing
 		a.mu.Unlock()
 		go a.startWorkspaceSyncForSelection(selection)
 		return startSessionResult{
 			SessionID: existing.serial,
 			Selection: existing.selection,
+			Slot:      slot,
 		}, nil
 	}
 	a.mu.Unlock()
@@ -67,11 +67,11 @@ func (a *App) StartSession(selection uiSelection, cols, rows int) (startSessionR
 		selection:              selection,
 		key:                    key,
 		serial:                 serial,
+		slot:                   slot,
 		blocksIdleStop:         true,
 		clearIdleBlockOnOutput: true,
 	}
 	a.sessions[key] = managed
-	a.current = managed
 	a.busyEnvs[environmentBusyKey(selection)]++
 	a.mu.Unlock()
 
@@ -82,6 +82,7 @@ func (a *App) StartSession(selection uiSelection, cols, rows int) (startSessionR
 	return startSessionResult{
 		SessionID: serial,
 		Selection: selection,
+		Slot:      slot,
 	}, nil
 }
 
@@ -193,7 +194,6 @@ func (a *App) StartCloudInitAWSSession(cols, rows int) (startSessionResult, erro
 
 	a.mu.Lock()
 	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
-		a.current = existing
 		a.mu.Unlock()
 		return startSessionResult{
 			SessionID: existing.serial,
@@ -223,7 +223,6 @@ func (a *App) StartCloudInitAWSSession(cols, rows int) (startSessionResult, erro
 		serial:  serial,
 	}
 	a.sessions[key] = managed
-	a.current = managed
 	a.mu.Unlock()
 
 	go a.streamSession(managed)
@@ -296,7 +295,6 @@ func (a *App) startCommandSessionWithExecutable(selection uiSelection, cols, row
 
 	a.mu.Lock()
 	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
-		a.current = existing
 		a.mu.Unlock()
 		return startSessionResult{
 			SessionID: existing.serial,
@@ -328,7 +326,6 @@ func (a *App) startCommandSessionWithExecutable(selection uiSelection, cols, row
 		blocksIdleStop: true,
 	}
 	a.sessions[key] = managed
-	a.current = managed
 	a.busyEnvs[environmentBusyKey(selection)]++
 	a.mu.Unlock()
 
@@ -341,22 +338,22 @@ func (a *App) startCommandSessionWithExecutable(selection uiSelection, cols, row
 	}, nil
 }
 
-func (a *App) SendSessionInput(data string) error {
+func (a *App) SendSessionInput(sessionID int, data string) error {
 	if data == "" {
 		return nil
 	}
 
 	a.mu.Lock()
-	current := a.current
+	managed := a.sessionBySerialLocked(sessionID)
 	a.mu.Unlock()
-	if current == nil || current.session == nil {
+	if managed == nil || managed.session == nil {
 		return nil
 	}
 
-	if _, err := io.WriteString(current.session, data); err != nil {
+	if _, err := io.WriteString(managed.session, data); err != nil {
 		return err
 	}
-	a.recordTerminalActivity(current.selection)
+	a.recordTerminalActivity(managed.selection)
 	return nil
 }
 
@@ -372,22 +369,22 @@ func (a *App) recordTerminalActivity(selection uiSelection) {
 	})
 }
 
-func (a *App) SavePastedImage(payload pastedImagePayload) (pastedImageResult, error) {
+func (a *App) SavePastedImage(sessionID int, payload pastedImagePayload) (pastedImageResult, error) {
 	data, mimeType, err := decodePastedImagePayload(payload)
 	if err != nil {
 		return pastedImageResult{}, err
 	}
 
 	a.mu.Lock()
-	current := a.current
+	managed := a.sessionBySerialLocked(sessionID)
 	a.mu.Unlock()
-	if current == nil || current.session == nil {
+	if managed == nil || managed.session == nil {
 		return pastedImageResult{}, fmt.Errorf("no active terminal session")
 	}
 
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
-		Tenant:      current.selection.Tenant,
-		Environment: current.selection.Environment,
+		Tenant:      managed.selection.Tenant,
+		Environment: managed.selection.Environment,
 	})
 	if err != nil {
 		return pastedImageResult{}, err
@@ -449,19 +446,41 @@ func (a *App) ensureMCPAvailable(ctx context.Context, result eruncommon.OpenResu
 	return nil
 }
 
-func (a *App) ResizeSession(cols, rows int) error {
+func (a *App) ResizeSession(sessionID, cols, rows int) error {
 	if cols <= 0 || rows <= 0 {
 		return nil
 	}
 
 	a.mu.Lock()
-	current := a.current
+	managed := a.sessionBySerialLocked(sessionID)
 	a.mu.Unlock()
-	if current == nil || current.session == nil {
+	if managed == nil || managed.session == nil {
 		return nil
 	}
 
-	return current.session.Resize(cols, rows)
+	return managed.session.Resize(cols, rows)
+}
+
+func (a *App) CloseSession(sessionID int) error {
+	a.mu.Lock()
+	managed := a.sessionBySerialLocked(sessionID)
+	a.mu.Unlock()
+	if managed == nil || managed.session == nil {
+		return nil
+	}
+	return managed.session.Close()
+}
+
+func (a *App) sessionBySerialLocked(sessionID int) *managedTerminal {
+	if sessionID <= 0 {
+		return nil
+	}
+	for _, managed := range a.sessions {
+		if managed != nil && managed.serial == sessionID {
+			return managed
+		}
+	}
+	return nil
 }
 
 func decodePastedImagePayload(payload pastedImagePayload) ([]byte, string, error) {
@@ -524,9 +543,6 @@ func (a *App) streamSession(managed *managedTerminal) {
 				delete(a.sessions, managed.key)
 			}
 			a.releaseIdleBlockLocked(managed)
-			if a.current == managed {
-				a.current = nil
-			}
 			a.mu.Unlock()
 			a.emitEvent(terminalExitEvent, terminalExitPayload{
 				SessionID: managed.serial,
@@ -561,30 +577,19 @@ func (a *App) emitEvent(name string, payload any) {
 }
 
 func (a *App) closeAllSessionsLocked() {
-	closed := make(map[*managedTerminal]struct{}, len(a.sessions))
 	for _, session := range a.sessions {
 		if session == nil {
 			continue
 		}
-		if _, seen := closed[session]; seen {
-			continue
-		}
-		closed[session] = struct{}{}
 		_ = session.Close()
 	}
-	if a.current != nil {
-		if _, seen := closed[a.current]; !seen {
-			_ = a.current.Close()
-		}
-	}
 	a.sessions = make(map[string]*managedTerminal)
-	a.current = nil
 }
 
 func (a *App) closeSessionsForSelection(selection uiSelection) {
 	selection = normalizeSelection(selection)
 	prefixes := []string{
-		selectionKey(selection),
+		selectionKey(selection) + "\x00",
 		"init\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00",
 		"deploy\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00",
 	}
@@ -597,7 +602,7 @@ func (a *App) closeSessionsForSelection(selection uiSelection) {
 		}
 		matches := false
 		for _, prefix := range prefixes {
-			if key == prefix || strings.HasPrefix(key, prefix) {
+			if strings.HasPrefix(key, prefix) {
 				matches = true
 				break
 			}
@@ -607,9 +612,6 @@ func (a *App) closeSessionsForSelection(selection uiSelection) {
 		}
 		_ = session.Close()
 		delete(a.sessions, key)
-		if a.current == session {
-			a.current = nil
-		}
 	}
 }
 
@@ -627,6 +629,7 @@ type managedTerminal struct {
 	selection              uiSelection
 	key                    string
 	serial                 int
+	slot                   int
 	closed                 bool
 	blocksIdleStop         bool
 	clearIdleBlockOnOutput bool
@@ -643,6 +646,10 @@ func (s *managedTerminal) Close() error {
 func selectionKey(selection uiSelection) string {
 	selection = normalizeSelection(selection)
 	return selection.Tenant + "\x00" + selection.Environment + "\x00" + fmt.Sprintf("%t", selection.Debug)
+}
+
+func openSessionKey(selection uiSelection, slot int) string {
+	return selectionKey(selection) + "\x00" + fmt.Sprintf("%d", slot)
 }
 
 func environmentBusyKey(selection uiSelection) string {

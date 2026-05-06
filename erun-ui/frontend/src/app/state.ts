@@ -120,6 +120,11 @@ export interface AppNotification {
 export type TerminalStatusKind = 'info' | 'warning' | 'error';
 export type TerminalStatusAction = '' | 'wait-longer';
 
+export interface TerminalTab {
+  sessionId: number;
+  slot: number;
+}
+
 export interface AppState {
   tenants: UITenant[];
   cloudProviders: UICloudProviderStatus[];
@@ -132,6 +137,7 @@ export interface AppState {
   globalConfigDialog: GlobalConfigDialogState;
   collapsedTenants: Set<string>;
   sessionId: number;
+  tabsByEnv: Record<string, TerminalTab[]>;
   sidebarWidth: number;
   reviewWidth: number;
   filesWidth: number;

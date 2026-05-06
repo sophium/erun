@@ -293,6 +293,7 @@ export interface UIRuntimeResourceNode {
 export interface StartSessionResult {
   sessionId: number;
   selection: UISelection;
+  slot?: number;
 }
 
 export interface TerminalOutputPayload {

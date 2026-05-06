@@ -280,6 +280,7 @@ type uiCloudContextInitInput struct {
 type startSessionResult struct {
 	SessionID int         `json:"sessionId"`
 	Selection uiSelection `json:"selection"`
+	Slot      int         `json:"slot,omitempty"`
 }
 
 type deleteEnvironmentResult struct {

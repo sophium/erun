@@ -62,7 +62,6 @@ type App struct {
 	deps erunUIDeps
 
 	mu             sync.Mutex
-	current        *managedTerminal
 	nextSerial     int
 	sessions       map[string]*managedTerminal
 	idleStops      map[string]struct{}
