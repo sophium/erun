@@ -22,7 +22,7 @@ const (
 
 var currentHostOS = func() common.HostOS { return common.DetectHost().OS }
 
-func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateAPI APIForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
+func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), saveEnvConfig func(string, common.EnvConfig) error, runInitForOpen func(common.Context, common.OpenParams) error, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateAPI APIForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) *cobra.Command {
 	var noShell bool
 	var vscode bool
 	var intellij bool
@@ -65,14 +65,16 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 			if err != nil {
 				return err
 			}
+			allowLocalBuilds := snapshotOverride != nil && *snapshotOverride
 			return runResolvedOpenCommandWithAPI(ctx, result, openOptions{
-				NoShell:         noShell,
-				NoAliasPrompt:   noAliasPrompt,
-				VSCode:          vscode,
-				IntelliJ:        intellij,
-				VersionOverride: versionOverride,
-				RuntimeImage:    runtimeImage,
-				SaveEnvConfig:   saveEnvConfig,
+				NoShell:          noShell,
+				NoAliasPrompt:    noAliasPrompt,
+				VSCode:           vscode,
+				IntelliJ:         intellij,
+				VersionOverride:  versionOverride,
+				RuntimeImage:     runtimeImage,
+				AllowLocalBuilds: allowLocalBuilds,
+				SaveEnvConfig:    saveEnvConfig,
 			}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateAPI, activateSSHD, launchVSCode, launchIntelliJ)
 		},
 	}
@@ -91,13 +93,14 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 }
 
 type openOptions struct {
-	NoShell         bool
-	NoAliasPrompt   bool
-	VSCode          bool
-	IntelliJ        bool
-	VersionOverride string
-	RuntimeImage    string
-	SaveEnvConfig   func(string, common.EnvConfig) error
+	NoShell          bool
+	NoAliasPrompt    bool
+	VSCode           bool
+	IntelliJ         bool
+	VersionOverride  string
+	RuntimeImage     string
+	AllowLocalBuilds bool
+	SaveEnvConfig    func(string, common.EnvConfig) error
 }
 
 func applyOpenSnapshotPreference(result common.OpenResult, enabled *bool, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
@@ -122,19 +125,10 @@ func persistOpenRuntimeVersion(result common.OpenResult, version string, saveEnv
 	}
 
 	updated := result.EnvConfig
-	changed := false
-	if strings.TrimSpace(updated.RuntimeVersion) != version {
-		updated.RuntimeVersion = version
-		changed = true
-	}
-	snapshot := strings.Contains(version, "-snapshot-")
-	if updated.Snapshot == nil || *updated.Snapshot != snapshot {
-		updated.SetSnapshot(snapshot)
-		changed = true
-	}
-	if !changed {
+	if strings.TrimSpace(updated.RuntimeVersion) == version {
 		return result, nil
 	}
+	updated.RuntimeVersion = version
 
 	result.EnvConfig = updated
 	if err := saveEnvConfig(result.Tenant, updated); err != nil {
@@ -247,11 +241,11 @@ func resolveOpenWithInitRetryForParams(ctx common.Context, params common.OpenPar
 	return result, true, err
 }
 
-func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
+func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
 	return runResolvedOpenCommandWithAPI(ctx, result, options, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, nil, activateSSHD, launchVSCode, launchIntelliJ)
 }
 
-func runResolvedOpenCommandWithAPI(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateAPI APIForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
+func runResolvedOpenCommandWithAPI(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateAPI APIForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
 	runner := resolvedOpenRunner{
 		ctx:                       ctx,
 		result:                    result,
@@ -279,7 +273,7 @@ type resolvedOpenRunner struct {
 	openShell                 OpenShellRunner
 	runManagedDeploy          func(common.Context, common.OpenResult) error
 	checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc
-	resolveRuntimeDeploySpec  func(common.OpenResult) (common.DeploySpec, error)
+	resolveRuntimeDeploySpec  func(common.OpenResult, bool) (common.DeploySpec, error)
 	deployHelmChart           common.HelmChartDeployerFunc
 	activateMCP               MCPForwarder
 	activateAPI               APIForwarder
@@ -361,11 +355,11 @@ func (r *resolvedOpenRunner) maybeDeployRuntime(shellReq common.ShellLaunchParam
 }
 
 func (r *resolvedOpenRunner) resolveRuntimeExecution() (common.DeploySpec, error) {
-	execution, err := r.resolveRuntimeDeploySpec(r.result)
+	execution, err := r.resolveRuntimeDeploySpec(r.result, r.options.AllowLocalBuilds)
 	if err != nil {
 		return common.DeploySpec{}, err
 	}
-	execution, err = maybeCreateMissingRuntimeChart(r.ctx, r.result, r.promptRunner, r.resolveRuntimeDeploySpec, execution)
+	execution, err = maybeCreateMissingRuntimeChart(r.ctx, r.result, r.promptRunner, r.resolveRuntimeDeploySpec, r.options.AllowLocalBuilds, execution)
 	if err != nil {
 		return common.DeploySpec{}, err
 	}
@@ -553,7 +547,7 @@ func wrapOpenHelmDeployWithSpinner(ctx common.Context, releaseName string, deplo
 	}
 }
 
-func maybeCreateMissingRuntimeChart(ctx common.Context, result common.OpenResult, promptRunner PromptRunner, resolveRuntimeDeploySpec func(common.OpenResult) (common.DeploySpec, error), execution common.DeploySpec) (common.DeploySpec, error) {
+func maybeCreateMissingRuntimeChart(ctx common.Context, result common.OpenResult, promptRunner PromptRunner, resolveRuntimeDeploySpec func(common.OpenResult, bool) (common.DeploySpec, error), allowLocalBuilds bool, execution common.DeploySpec) (common.DeploySpec, error) {
 	if ctx.DryRun || promptRunner == nil || resolveRuntimeDeploySpec == nil {
 		return execution, nil
 	}
@@ -577,7 +571,7 @@ func maybeCreateMissingRuntimeChart(ctx common.Context, result common.OpenResult
 		return common.DeploySpec{}, err
 	}
 
-	return resolveRuntimeDeploySpec(result)
+	return resolveRuntimeDeploySpec(result, allowLocalBuilds)
 }
 
 func applyRuntimeDeployImageOverride(result common.OpenResult, execution common.DeploySpec, runtimeImage string) (common.DeploySpec, error) {

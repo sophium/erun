@@ -660,7 +660,7 @@ func TestResolveOpenRuntimeDeploySpecUsesTenantSpecificComponentBeforeSharedDefa
 		Environment: DefaultEnvironment,
 		RepoPath:    projectRoot,
 		EnvConfig:   EnvConfig{KubernetesContext: "cluster-local"},
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("ResolveOpenRuntimeDeploySpec failed: %v", err)
 	}
@@ -675,7 +675,7 @@ func TestResolveOpenRuntimeDeploySpecUsesTenantSpecificComponentBeforeSharedDefa
 	}
 }
 
-func TestResolveOpenRuntimeDeploySpecSkipsLocalBuildsWhenSnapshotDisabled(t *testing.T) {
+func TestResolveOpenRuntimeDeploySpecSkipsLocalBuildsWhenAllowLocalBuildsFalse(t *testing.T) {
 	projectRoot := t.TempDir()
 	createComponentHelmChartFixture(t, projectRoot, "frs-devops")
 	workdir := filepath.Join(projectRoot, "frs-devops", "docker", "frs-devops")
@@ -692,16 +692,14 @@ func TestResolveOpenRuntimeDeploySpecSkipsLocalBuildsWhenSnapshotDisabled(t *tes
 		t.Fatalf("save project config: %v", err)
 	}
 
-	snapshot := false
 	spec, err := ResolveOpenRuntimeDeploySpec(ConfigStore{}, FindProjectRoot, ResolveDockerBuildContext, ResolveKubernetesDeployContext, nil, OpenResult{
 		Tenant:      "frs",
 		Environment: DefaultEnvironment,
 		RepoPath:    projectRoot,
 		EnvConfig: EnvConfig{
 			KubernetesContext: "cluster-local",
-			Snapshot:          &snapshot,
 		},
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("ResolveOpenRuntimeDeploySpec failed: %v", err)
 	}
@@ -713,7 +711,7 @@ func TestResolveOpenRuntimeDeploySpecSkipsLocalBuildsWhenSnapshotDisabled(t *tes
 	}
 }
 
-func TestResolveOpenRuntimeDeploySpecIgnoresTenantSnapshotSetting(t *testing.T) {
+func TestResolveOpenRuntimeDeploySpecIgnoresPersistedSnapshotFlagWhenAllowLocalBuildsFalse(t *testing.T) {
 	projectRoot := t.TempDir()
 	createComponentHelmChartFixture(t, projectRoot, "frs-devops")
 	workdir := filepath.Join(projectRoot, "frs-devops", "docker", "frs-devops")
@@ -730,25 +728,56 @@ func TestResolveOpenRuntimeDeploySpecIgnoresTenantSnapshotSetting(t *testing.T) 
 		t.Fatalf("save project config: %v", err)
 	}
 
-	tenantSnapshot := false
 	envSnapshot := true
 	spec, err := ResolveOpenRuntimeDeploySpec(ConfigStore{}, FindProjectRoot, ResolveDockerBuildContext, ResolveKubernetesDeployContext, nil, OpenResult{
 		Tenant:      "frs",
 		Environment: DefaultEnvironment,
 		RepoPath:    projectRoot,
-		TenantConfig: TenantConfig{
-			Snapshot: &tenantSnapshot,
-		},
 		EnvConfig: EnvConfig{
 			KubernetesContext: "cluster-local",
 			Snapshot:          &envSnapshot,
 		},
-	})
+	}, false)
+	if err != nil {
+		t.Fatalf("ResolveOpenRuntimeDeploySpec failed: %v", err)
+	}
+	if len(spec.Builds) != 0 {
+		t.Fatalf("expected no builds when allowLocalBuilds=false even with persisted snapshot=true, got %+v", spec.Builds)
+	}
+}
+
+func TestResolveOpenRuntimeDeploySpecBuildsLocalImageWhenAllowLocalBuildsTrue(t *testing.T) {
+	projectRoot := t.TempDir()
+	createComponentHelmChartFixture(t, projectRoot, "frs-devops")
+	workdir := filepath.Join(projectRoot, "frs-devops", "docker", "frs-devops")
+	if err := os.MkdirAll(workdir, 0o755); err != nil {
+		t.Fatalf("mkdir docker dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "frs-devops", "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+		t.Fatalf("write module VERSION: %v", err)
+	}
+	if err := SaveProjectConfig(projectRoot, ProjectConfig{ContainerRegistry: "erunpaas"}); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	envSnapshot := false
+	spec, err := ResolveOpenRuntimeDeploySpec(ConfigStore{}, FindProjectRoot, ResolveDockerBuildContext, ResolveKubernetesDeployContext, nil, OpenResult{
+		Tenant:      "frs",
+		Environment: DefaultEnvironment,
+		RepoPath:    projectRoot,
+		EnvConfig: EnvConfig{
+			KubernetesContext: "cluster-local",
+			Snapshot:          &envSnapshot,
+		},
+	}, true)
 	if err != nil {
 		t.Fatalf("ResolveOpenRuntimeDeploySpec failed: %v", err)
 	}
 	if len(spec.Builds) == 0 {
-		t.Fatalf("expected tenant snapshot setting to be ignored, got %+v", spec.Builds)
+		t.Fatalf("expected local builds when allowLocalBuilds=true, got %+v", spec.Builds)
 	}
 }
 
@@ -760,7 +789,7 @@ func TestResolveOpenRuntimeDeploySpecFallsBackToEmbeddedDefaultChart(t *testing.
 		Environment: "dev",
 		RepoPath:    projectRoot,
 		EnvConfig:   EnvConfig{KubernetesContext: "cluster-dev"},
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("ResolveOpenRuntimeDeploySpec failed: %v", err)
 	}
@@ -830,7 +859,7 @@ func TestResolveOpenRuntimeDeploySpecUsesRemoteEnvRuntimeVersionForEmbeddedChart
 			Remote:            true,
 			RuntimeVersion:    "1.0.31",
 		},
-	})
+	}, false)
 	if err != nil {
 		t.Fatalf("ResolveOpenRuntimeDeploySpec failed: %v", err)
 	}
@@ -1385,6 +1414,192 @@ func TestResolveDeploySpecForContextSkipsChartImageWithUnresolvedPrintfVerb(t *t
 	if strings.Contains(build.Image.Tag, "%") {
 		t.Fatalf("build tag %q contains unresolved printf verb", build.Image.Tag)
 	}
+}
+
+func TestResolveDeploySpecForContextUsesPersistedSnapshotRuntimeVersionWhenSnapshotsDisabled(t *testing.T) {
+	projectRoot := t.TempDir()
+	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
+
+	const persistedVersion = "1.0.51-snapshot-20260506043656"
+
+	spec, err := resolveDeploySpecForContext(
+		ConfigStore{},
+		nil,
+		nil,
+		nil,
+		nil,
+		OpenResult{
+			Tenant:      "tenant-a",
+			Environment: DefaultEnvironment,
+			RepoPath:    projectRoot,
+			EnvConfig: EnvConfig{
+				Name:              DefaultEnvironment,
+				RepoPath:          projectRoot,
+				KubernetesContext: "erun",
+				RuntimeVersion:    persistedVersion,
+			},
+		},
+		KubernetesDeployContext{
+			ComponentName: "erun-devops",
+			ChartPath:     chartPath,
+		},
+		"",
+		false,
+		nil,
+	)
+	requireNoError(t, err, "resolveDeploySpecForContext failed")
+	requireEqual(t, spec.Deploy.Version, persistedVersion, "deploy version should fall back to persisted RuntimeVersion")
+	requireEqual(t, len(spec.Builds), 0, "snapshot disabled must not produce builds")
+}
+
+func TestResolveDeploySpecForContextUsesPersistedReleasedRuntimeVersionWhenSnapshotsDisabled(t *testing.T) {
+	projectRoot := t.TempDir()
+	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
+
+	const persistedVersion = "1.0.50"
+
+	spec, err := resolveDeploySpecForContext(
+		ConfigStore{},
+		nil,
+		nil,
+		nil,
+		nil,
+		OpenResult{
+			Tenant:      "tenant-a",
+			Environment: DefaultEnvironment,
+			RepoPath:    projectRoot,
+			EnvConfig: EnvConfig{
+				Name:              DefaultEnvironment,
+				RepoPath:          projectRoot,
+				KubernetesContext: "erun",
+				RuntimeVersion:    persistedVersion,
+			},
+		},
+		KubernetesDeployContext{
+			ComponentName: "erun-devops",
+			ChartPath:     chartPath,
+		},
+		"",
+		false,
+		nil,
+	)
+	requireNoError(t, err, "resolveDeploySpecForContext failed")
+	requireEqual(t, spec.Deploy.Version, persistedVersion, "deploy version should fall back to persisted RuntimeVersion")
+}
+
+func TestResolveDeploySpecForContextLeavesDeployVersionEmptyWithoutPersistedRuntimeVersion(t *testing.T) {
+	projectRoot := t.TempDir()
+	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
+
+	spec, err := resolveDeploySpecForContext(
+		ConfigStore{},
+		nil,
+		nil,
+		nil,
+		nil,
+		OpenResult{
+			Tenant:      "tenant-a",
+			Environment: DefaultEnvironment,
+			RepoPath:    projectRoot,
+			EnvConfig: EnvConfig{
+				Name:              DefaultEnvironment,
+				RepoPath:          projectRoot,
+				KubernetesContext: "erun",
+			},
+		},
+		KubernetesDeployContext{
+			ComponentName: "erun-devops",
+			ChartPath:     chartPath,
+		},
+		"",
+		false,
+		nil,
+	)
+	requireNoError(t, err, "resolveDeploySpecForContext failed")
+	requireEqual(t, spec.Deploy.Version, "", "deploy version must remain empty so chart default applies")
+}
+
+func TestResolveDeploySpecForContextSnapshotBuildVersionWinsOverPersistedRuntimeVersion(t *testing.T) {
+	projectRoot := t.TempDir()
+	componentRoot := filepath.Join(projectRoot, "tenant-a-devops")
+	chartPath := createComponentHelmChartFixture(t, projectRoot, "tenant-a-devops")
+
+	runtimeWorkdir := filepath.Join(componentRoot, "docker", "tenant-a-devops")
+	writeDockerBuildFixture(t, runtimeWorkdir)
+	writeVersionFileForTest(t, filepath.Join(componentRoot, "VERSION"), "1.0.0")
+
+	projectConfig := ProjectConfig{}
+	projectConfig.SetContainerRegistryForEnvironment(DefaultEnvironment, "erunpaas")
+	requireNoError(t, SaveProjectConfig(projectRoot, projectConfig), "save project config")
+
+	spec, err := resolveDeploySpecForContext(
+		ConfigStore{},
+		func() (string, string, error) { return "tenant-a", projectRoot, nil },
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{
+				Dir:            runtimeWorkdir,
+				DockerfilePath: filepath.Join(runtimeWorkdir, "Dockerfile"),
+			}, nil
+		},
+		nil,
+		func() time.Time { return time.Date(2026, time.April, 21, 18, 24, 44, 0, time.UTC) },
+		OpenResult{
+			Tenant:      "tenant-a",
+			Environment: DefaultEnvironment,
+			RepoPath:    projectRoot,
+			TenantConfig: TenantConfig{Name: "tenant-a", ProjectRoot: projectRoot},
+			EnvConfig: EnvConfig{
+				Name:              DefaultEnvironment,
+				RepoPath:          projectRoot,
+				KubernetesContext: "erun",
+				RuntimeVersion:    "1.0.50",
+			},
+		},
+		KubernetesDeployContext{
+			Dir:           runtimeWorkdir,
+			ComponentName: "tenant-a-devops",
+			ChartPath:     chartPath,
+		},
+		"",
+		true,
+		nil,
+	)
+	requireNoError(t, err, "resolveDeploySpecForContext failed")
+	requireCondition(t, spec.Deploy.Version != "1.0.50", "build-derived version must win over persisted RuntimeVersion, got %q", spec.Deploy.Version)
+	requireCondition(t, strings.Contains(spec.Deploy.Version, "-snapshot-"), "expected snapshot build version, got %q", spec.Deploy.Version)
+}
+
+func TestResolveDeploySpecForContextExplicitVersionOverrideWinsOverPersistedRuntimeVersion(t *testing.T) {
+	projectRoot := t.TempDir()
+	chartPath := createHelmChartFixture(t, projectRoot, "erun-devops")
+
+	spec, err := resolveDeploySpecForContext(
+		ConfigStore{},
+		nil,
+		nil,
+		nil,
+		nil,
+		OpenResult{
+			Tenant:      "tenant-a",
+			Environment: DefaultEnvironment,
+			RepoPath:    projectRoot,
+			EnvConfig: EnvConfig{
+				Name:              DefaultEnvironment,
+				RepoPath:          projectRoot,
+				KubernetesContext: "erun",
+				RuntimeVersion:    "1.0.50",
+			},
+		},
+		KubernetesDeployContext{
+			ComponentName: "erun-devops",
+			ChartPath:     chartPath,
+		},
+		"9.9.9",
+		false,
+		nil,
+	)
+	requireNoError(t, err, "resolveDeploySpecForContext failed")
+	requireEqual(t, spec.Deploy.Version, "9.9.9", "explicit version override must win over persisted RuntimeVersion")
 }
 
 func writeRuntimeDeploymentTemplate(t *testing.T, templatesPath string) {

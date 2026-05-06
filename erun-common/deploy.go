@@ -278,6 +278,10 @@ func resolveDeploySpecForContext(store DeployStore, findProjectRoot ProjectFinde
 		}
 	}
 
+	if strings.TrimSpace(versionOverride) == "" {
+		versionOverride = strings.TrimSpace(target.EnvConfig.RuntimeVersion)
+	}
+
 	deployInput, err := newHelmDeploySpec(target, deployContext, versionOverride)
 	if err != nil {
 		return DeploySpec{}, err
@@ -287,11 +291,13 @@ func resolveDeploySpecForContext(store DeployStore, findProjectRoot ProjectFinde
 		return DeploySpec{}, err
 	}
 
-	dependencyBuilds, err := resolveAdditionalDockerBuildsForDeploy(store, findProjectRoot, resolveDockerBuildContext, now, target.RepoPath, target.Environment, deployContext.ChartPath, deployInput.Version, builds)
-	if err != nil {
-		return DeploySpec{}, err
+	if allowLocalBuilds {
+		dependencyBuilds, err := resolveAdditionalDockerBuildsForDeploy(store, findProjectRoot, resolveDockerBuildContext, now, target.RepoPath, target.Environment, deployContext.ChartPath, deployInput.Version, builds)
+		if err != nil {
+			return DeploySpec{}, err
+		}
+		builds = append(builds, dependencyBuilds...)
 	}
-	builds = append(builds, dependencyBuilds...)
 	builds = configureDockerBuildsForDeploy(builds)
 
 	return DeploySpec{
@@ -386,9 +392,9 @@ func applyDeployKubernetesContext(store DeployStore, target OpenResult) OpenResu
 	return target
 }
 
-func ResolveOpenRuntimeDeploySpec(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult) (DeploySpec, error) {
+func ResolveOpenRuntimeDeploySpec(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
-	return resolveOpenRuntimeDeploySpec(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
+	return resolveOpenRuntimeDeploySpec(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, allowLocalBuilds)
 }
 
 type BuildDeployStore interface {

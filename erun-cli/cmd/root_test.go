@@ -50,6 +50,7 @@ func TestResolveRuntimeDeploySpecForOpenFallsBackToCurrentBuildVersionForRemoteR
 				Remote:            true,
 			},
 		},
+		false,
 	)
 	if err != nil {
 		t.Fatalf("resolveRuntimeDeploySpecForOpen failed: %v", err)

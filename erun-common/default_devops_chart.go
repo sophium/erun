@@ -85,12 +85,11 @@ func renderDefaultDevopsChartTemplate(assetPath, moduleName, imageName string, d
 	return []byte(content)
 }
 
-func resolveOpenRuntimeDeploySpec(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult) (DeploySpec, error) {
+func resolveOpenRuntimeDeploySpec(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
 	if target.RemoteRepo() {
 		return resolveDefaultDevopsDeploySpecWithImage(target, DevopsComponentName)
 	}
 
-	allowLocalBuilds := deployTargetSnapshotEnabled(target, nil)
 	for _, componentName := range openRuntimeComponentNames(target.Tenant) {
 		spec, err := resolveDeploySpecForOpenResult(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, componentName, "", allowLocalBuilds)
 		if err == nil {

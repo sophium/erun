@@ -449,7 +449,7 @@ func TestRunResolvedOpenCommandForcesSSHDEnabledOnRuntimeDeploy(t *testing.T) {
 		func(common.KubernetesDeploymentCheckParams) (bool, error) {
 			return false, nil
 		},
-		func(common.OpenResult) (common.DeploySpec, error) {
+		func(common.OpenResult, bool) (common.DeploySpec, error) {
 			return common.DeploySpec{
 				Deploy: common.HelmDeploySpec{
 					ReleaseName:       "tenant-a-devops",
@@ -527,7 +527,7 @@ func TestRunResolvedOpenCommandPersistsRuntimeVersionAfterDeploy(t *testing.T) {
 		func(common.KubernetesDeploymentCheckParams) (bool, error) {
 			return false, nil
 		},
-		func(common.OpenResult) (common.DeploySpec, error) {
+		func(common.OpenResult, bool) (common.DeploySpec, error) {
 			return common.DeploySpec{
 				Deploy: common.HelmDeploySpec{
 					ReleaseName:       "test-devops",
@@ -565,8 +565,8 @@ func TestRunResolvedOpenCommandPersistsRuntimeVersionAfterDeploy(t *testing.T) {
 	if saved.RuntimeVersion != deployedVersion {
 		t.Fatalf("expected persisted runtime version %q, got %q", deployedVersion, saved.RuntimeVersion)
 	}
-	if saved.Snapshot == nil || !*saved.Snapshot {
-		t.Fatalf("expected snapshot deployment to persist snapshot true, got %+v", saved)
+	if saved.Snapshot != nil {
+		t.Fatalf("expected persisted Snapshot to remain unchanged when deploying a snapshot tag, got %+v", saved)
 	}
 }
 
@@ -810,7 +810,7 @@ func TestRunResolvedOpenCommandRejectsIntelliJRuntimeRedeploy(t *testing.T) {
 			}
 			return false, nil
 		},
-		func(common.OpenResult) (common.DeploySpec, error) {
+		func(common.OpenResult, bool) (common.DeploySpec, error) {
 			return common.DeploySpec{
 				Deploy: common.HelmDeploySpec{
 					ReleaseName: "tenant-a-devops",
@@ -1201,7 +1201,7 @@ func TestOpenCommandDryRunRedeploysWhenRuntimeHasLocalBuilds(t *testing.T) {
 	})
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"-v", "open", "tenant-a", "local", "--dry-run"})
+	cmd.SetArgs([]string{"-v", "open", "tenant-a", "local", "--snapshot", "--dry-run"})
 
 	requireNoError(t, cmd.Execute(), "Execute failed")
 
@@ -1317,7 +1317,7 @@ func TestOpenCommandDryRunUsesConfiguredContextForLocalDeploy(t *testing.T) {
 	})
 	cmd.SetOut(stdout)
 	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"-v", "open", "erun", common.DefaultEnvironment, "--dry-run"})
+	cmd.SetArgs([]string{"-v", "open", "erun", common.DefaultEnvironment, "--snapshot", "--dry-run"})
 
 	requireNoError(t, cmd.Execute(), "Execute failed")
 
@@ -1408,6 +1408,75 @@ func TestOpenCommandUsesPersistedSnapshotPreferenceForLocalEnvironment(t *testin
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected dry-run output to contain %q, got %q", want, output)
+		}
+	}
+}
+
+func TestOpenCommandDoesNotBuildOrRedeployWhenPersistedSnapshotTrueWithoutFlag(t *testing.T) {
+	setupRootCmdTestConfigHome(t)
+	stubKubectlContexts(t, []string{"cluster-local"}, "cluster-local")
+
+	projectRoot := t.TempDir()
+	componentName := "tenant-a-devops"
+	componentRoot := filepath.Join(projectRoot, componentName)
+	chartPath := filepath.Join(componentRoot, "k8s", componentName)
+	requireNoError(t, os.MkdirAll(chartPath, 0o755), "mkdir chart dir")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "Chart.yaml"), []byte("apiVersion: v2\nname: "+componentName+"\nversion: 1.0.0\nappVersion: 1.0.0\n"), 0o644), "write Chart.yaml")
+	requireNoError(t, os.WriteFile(filepath.Join(chartPath, "values.local.yaml"), nil, 0o644), "write values.local.yaml")
+	workdir := filepath.Join(componentRoot, "docker", componentName)
+	requireNoError(t, os.MkdirAll(workdir, 0o755), "mkdir docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(workdir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
+	requireNoError(t, os.WriteFile(filepath.Join(componentRoot, "VERSION"), []byte("1.0.0\n"), 0o644), "write module VERSION")
+	requireNoError(t, common.SaveProjectConfig(projectRoot, projectConfigWithSingleRegistry("erunpaas")), "save project config")
+	snapshot := true
+	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{
+		Name:               "tenant-a",
+		ProjectRoot:        projectRoot,
+		DefaultEnvironment: common.DefaultEnvironment,
+	}), "save tenant config")
+	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{
+		Name:              common.DefaultEnvironment,
+		RepoPath:          projectRoot,
+		KubernetesContext: "cluster-local",
+		Snapshot:          &snapshot,
+	}), "save env config")
+
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	checkedDeployment := false
+	cmd := newTestRootCmd(testRootDeps{
+		Store: common.ConfigStore{},
+		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
+			checkedDeployment = true
+			return true, nil
+		},
+		DeployHelmChart: func(req common.HelmDeployParams) error {
+			t.Fatalf("did not expect runtime deployment when no --snapshot flag is passed: %+v", req)
+			return nil
+		},
+		LaunchShell: func(req common.ShellLaunchParams) error {
+			t.Fatalf("did not expect remote shell launch during dry-run: %+v", req)
+			return nil
+		},
+	})
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"-v", "open", "tenant-a", common.DefaultEnvironment, "--dry-run"})
+
+	requireNoError(t, cmd.Execute(), "Execute failed")
+	if !checkedDeployment {
+		t.Fatal("expected deployment existence check to gate redeploy decision")
+	}
+
+	output := stderr.String()
+	for _, unwanted := range []string{
+		"docker build -t",
+		"docker buildx build",
+		"docker push ",
+		"helm upgrade --install",
+	} {
+		if strings.Contains(output, unwanted) {
+			t.Fatalf("did not expect %q in dry-run output without --snapshot, got %q", unwanted, output)
 		}
 	}
 }

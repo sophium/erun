@@ -40,7 +40,7 @@ type rootDependencies struct {
 	runInitForOpen            func(common.Context, common.OpenParams) error
 	push                      common.DockerPushFunc
 	resolveOpen               func(common.OpenParams) (common.OpenResult, error)
-	resolveRuntimeDeploySpec  func(common.OpenResult) (common.DeploySpec, error)
+	resolveRuntimeDeploySpec  func(common.OpenResult, bool) (common.DeploySpec, error)
 	activateMCP               MCPForwarder
 	activateAPI               APIForwarder
 	activateSSHD              SSHDActivator
@@ -76,8 +76,8 @@ func (d rootDependencies) resolveOpenResult(params common.OpenParams) (common.Op
 	return common.ResolveOpen(d.store, params)
 }
 
-func (d rootDependencies) resolveRuntimeDeploySpecForOpenTarget(target common.OpenResult) (common.DeploySpec, error) {
-	return resolveRuntimeDeploySpecForOpen(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, currentBuildInfo(), target)
+func (d rootDependencies) resolveRuntimeDeploySpecForOpenTarget(target common.OpenResult, allowLocalBuilds bool) (common.DeploySpec, error) {
+	return resolveRuntimeDeploySpecForOpen(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, currentBuildInfo(), target, allowLocalBuilds)
 }
 
 func (d rootDependencies) runManagedDeployForOpen(ctx common.Context, target common.OpenResult) error {
