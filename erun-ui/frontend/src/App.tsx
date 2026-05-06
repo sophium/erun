@@ -1,10 +1,10 @@
 import * as React from 'react';
-import { CheckCircle2, ChevronDown, ChevronUp, Copy, LoaderCircle, Plus, Trash2, X } from 'lucide-react';
+import { CheckCircle2, ChevronDown, ChevronUp, Copy, LoaderCircle, Trash2 } from 'lucide-react';
 
 import { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
 import { useControllerState } from '@/app/useControllerState';
-import { selectionKey } from '@/app/versionSuggestions';
+import { TerminalTabStrip } from '@/components/app/TerminalTabStrip';
 import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
 import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
 import { ManageDialogView } from '@/components/app/ManageDialogView';
@@ -145,72 +145,15 @@ function TerminalPane({
           'grid-cols-[minmax(360px,1fr)_10px_minmax(420px,var(--review-width))] max-[980px]:grid-cols-[minmax(260px,1fr)_10px_minmax(360px,min(var(--review-width),58vw))]',
       )}
     >
-      <div className="grid h-full min-h-0 min-w-0 grid-rows-[28px_minmax(0,1fr)] overflow-hidden">
-        <TerminalTabs controller={controller} state={state} />
-        <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
+      <div className="grid h-full min-h-0 min-w-0 grid-rows-[32px_minmax(0,1fr)] overflow-hidden">
+        <TerminalTabStrip controller={controller} state={state} />
+        <div id="erun-terminal-pane" className="relative h-full min-h-0 min-w-0 overflow-hidden">
           <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full box-border px-4 py-3.5" />
           <TerminalBusyOverlay message={state.terminalBusy ? state.terminalMessage : ''} />
         </div>
       </div>
       <div className={cn(reviewSplitterClassName, !state.reviewOpen && 'hidden')} role="separator" aria-orientation="vertical" aria-label="Resize diff panel" onMouseDown={(event) => controller.startReviewResize(event)} />
       <ReviewPanel controller={controller} state={state} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} />
-    </div>
-  );
-}
-
-function TerminalTabs({ controller, state }: { controller: ERunUIController; state: ReturnType<typeof useControllerState> }): React.ReactElement | null {
-  const selection = state.selected;
-  if (!selection) {
-    return <div className="border-b border-[oklch(0.18_0_0)] bg-[oklch(0.06_0_0)]" />;
-  }
-  const tabs = state.tabsByEnv[selectionKey(selection)] || [];
-  return (
-    <div className="flex h-7 items-stretch gap-1 border-b border-[oklch(0.18_0_0)] bg-[oklch(0.06_0_0)] px-2">
-      {tabs.map((tab, index) => {
-        const active = tab.sessionId === state.sessionId;
-        return (
-          <div
-            key={tab.sessionId}
-            className={cn(
-              'group flex items-center gap-1 rounded-t-sm border-x border-t px-2 text-[11px] leading-none transition-colors',
-              active
-                ? 'border-[oklch(0.32_0_0)] bg-[oklch(0.12_0_0)] text-[oklch(0.96_0_0)]'
-                : 'border-transparent text-[oklch(0.66_0_0)] hover:text-[oklch(0.92_0_0)]',
-            )}
-          >
-            <button
-              type="button"
-              className="bg-transparent p-0 text-inherit"
-              aria-pressed={active}
-              onClick={() => controller.selectTerminalTab(tab.sessionId)}
-            >
-              Terminal {index + 1}
-            </button>
-            {tabs.length > 1 && (
-              <button
-                type="button"
-                className="ml-0.5 flex size-3.5 items-center justify-center rounded text-[oklch(0.56_0_0)] hover:bg-[oklch(0.18_0_0)] hover:text-[oklch(0.96_0_0)]"
-                aria-label={`Close terminal ${index + 1}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void controller.closeTerminalTab(tab.sessionId);
-                }}
-              >
-                <X className="size-3" aria-hidden="true" />
-              </button>
-            )}
-          </div>
-        );
-      })}
-      <button
-        type="button"
-        className="flex h-6 items-center gap-1 self-end rounded-t-sm px-1.5 text-[11px] leading-none text-[oklch(0.66_0_0)] hover:bg-[oklch(0.12_0_0)] hover:text-[oklch(0.96_0_0)]"
-        aria-label="Open new terminal"
-        onClick={() => { void controller.addTerminalTab(); }}
-      >
-        <Plus className="size-3.5" aria-hidden="true" />
-        <span className="sr-only">New terminal</span>
-      </button>
     </div>
   );
 }
