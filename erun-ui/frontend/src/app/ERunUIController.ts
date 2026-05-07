@@ -456,6 +456,14 @@ export class ERunUIController {
     }
   }
 
+  async refreshTenantDashboard(): Promise<void> {
+    const tenant = this.state.tenantDashboard.tenant;
+    await this.loadTenantDashboard(tenant);
+    if (this.state.tenantDashboard.tenant === tenant && !this.state.tenantDashboard.error) {
+      this.showNotification('success', 'Dashboard refreshed.');
+    }
+  }
+
   async openSelection(selection: UISelection): Promise<void> {
     this.state.tenantDashboard = defaultTenantDashboard();
     const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
@@ -1288,6 +1296,16 @@ export class ERunUIController {
         this.emit();
         this.scheduleReviewDiffRefresh();
       }
+    }
+  }
+
+  async refreshReviewDiff(): Promise<void> {
+    if (!this.state.selected) {
+      return;
+    }
+    await this.loadReviewDiff();
+    if (!this.state.diffError) {
+      this.showNotification('success', 'Diff refreshed.');
     }
   }
 

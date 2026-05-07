@@ -24,7 +24,7 @@ export function TenantDashboardView({ controller, state }: { controller: ERunUIC
             <h1 className="truncate text-[20px] font-semibold leading-tight tracking-normal">{dashboard.tenant}</h1>
             <p className="truncate text-sm text-muted-foreground">{tenantDashboardSubtitle(tenant, environmentName)}</p>
           </div>
-          <Button type="button" variant="outline" size="sm" disabled={dashboard.loading} onClick={() => { void controller.loadTenantDashboard(); }}>
+          <Button type="button" variant="outline" size="sm" disabled={dashboard.loading} onClick={() => { void controller.refreshTenantDashboard(); }}>
             {dashboard.loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
             Refresh
           </Button>

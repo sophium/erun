@@ -162,6 +162,7 @@ export class GlobalConfigWorkflow {
         error: '',
       };
       this.deps.emit();
+      this.deps.showNotification('success', 'Cloud aliases refreshed.');
     } catch (error) {
       const message = readError(error);
       this.state.globalConfigDialog = {
@@ -189,6 +190,7 @@ export class GlobalConfigWorkflow {
         error: '',
       };
       this.deps.emit();
+      this.deps.showNotification('success', 'Cloud contexts refreshed.');
     } catch (error) {
       const message = readError(error);
       this.state.globalConfigDialog = {

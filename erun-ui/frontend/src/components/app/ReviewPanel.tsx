@@ -214,7 +214,7 @@ function ChangedFilesHeader({ controller, state }: { controller: ERunUIControlle
             aria-label="Refresh diff"
             disabled={state.diffLoading}
             onClick={() => {
-              void controller.loadReviewDiff();
+              void controller.refreshReviewDiff();
             }}
           >
             <RefreshCw />
