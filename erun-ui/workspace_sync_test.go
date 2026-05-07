@@ -20,12 +20,14 @@ func TestParseWorkspaceSyncPathListFiltersUnsafePaths(t *testing.T) {
 	}
 }
 
-func TestWorkspaceSyncSSHArgsAreNonInteractiveAndAcceptLocalHostKey(t *testing.T) {
+func TestWorkspaceSyncSSHArgsAreNonInteractiveAndDoNotPolluteKnownHosts(t *testing.T) {
 	got := workspaceSyncSSHArgs(" erun-frs-dev ", "true")
 	want := []string{
 		"-o", "BatchMode=yes",
 		"-o", "ConnectTimeout=5",
-		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile=/dev/null",
+		"-o", "LogLevel=ERROR",
 		"erun-frs-dev",
 		"true",
 	}
