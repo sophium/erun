@@ -557,7 +557,7 @@ func TestHelmDeploySpecIncludesRuntimePodResourceLimits(t *testing.T) {
 	}
 }
 
-func TestHelmDeploySpecOmitsClaudeSetArgsWhenUnset(t *testing.T) {
+func TestHelmDeploySpecAppliesClaudeBoolDefaultsWhenUnset(t *testing.T) {
 	spec := HelmDeploySpec{
 		ReleaseName:     "erun-devops",
 		ChartPath:       "/tmp/chart",
@@ -570,8 +570,15 @@ func TestHelmDeploySpecOmitsClaudeSetArgsWhenUnset(t *testing.T) {
 	}
 
 	args := strings.Join(spec.command().Args, "\n")
-	if strings.Contains(args, "claude.") {
-		t.Fatalf("expected no claude.* flags when EnvironmentClaudeConfig is zero, got:\n%s", args)
+	for _, want := range []string{"claude.useMantle=0", "claude.useBedrock=0"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("expected Helm command to include %q when EnvironmentClaudeConfig is zero, got:\n%s", want, args)
+		}
+	}
+	for _, unwanted := range []string{"claude.availableModels=", "claude.maxOutputTokens="} {
+		if strings.Contains(args, unwanted) {
+			t.Fatalf("did not expect %q when models/tokens are not overridden, got:\n%s", unwanted, args)
+		}
 	}
 }
 
@@ -610,7 +617,7 @@ func TestHelmDeploySpecEmitsClaudeSetArgsWhenConfigured(t *testing.T) {
 }
 
 func TestHelmDeploySpecEmitsOnlySetClaudeFields(t *testing.T) {
-	useBedrock := false
+	useBedrock := true
 	spec := HelmDeploySpec{
 		ReleaseName:     "erun-devops",
 		ChartPath:       "/tmp/chart",
@@ -626,11 +633,12 @@ func TestHelmDeploySpecEmitsOnlySetClaudeFields(t *testing.T) {
 	}
 
 	args := strings.Join(spec.command().Args, "\n")
-	if !strings.Contains(args, "claude.useBedrock=0") {
-		t.Fatalf("expected claude.useBedrock=0, got:\n%s", args)
+	for _, want := range []string{"claude.useBedrock=1", "claude.useMantle=0"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("expected %q in args, got:\n%s", want, args)
+		}
 	}
 	for _, unwanted := range []string{
-		"claude.useMantle=",
 		"claude.availableModels=",
 		"claude.maxOutputTokens=",
 	} {

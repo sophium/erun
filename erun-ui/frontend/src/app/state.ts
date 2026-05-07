@@ -317,8 +317,8 @@ export const defaultRuntimePodConfig = (): { cpu: string; memory: string } => ({
 });
 
 export const defaultClaudeDefaults = (): UIEnvironmentConfig['claudeDefaults'] => ({
-  useMantle: true,
-  useBedrock: true,
+  useMantle: false,
+  useBedrock: false,
   models: ['sonnet', 'haiku'],
   maxOutputTokens: 4096,
   knownModels: ['opus', 'sonnet', 'haiku'],

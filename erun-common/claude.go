@@ -6,12 +6,12 @@ import (
 )
 
 const (
-	DefaultClaudeUseMantle        = true
-	DefaultClaudeUseBedrock       = true
-	DefaultClaudeMaxOutputTokens  = 4096
-	defaultClaudeAvailableModels  = "sonnet,haiku"
-	claudeMaxOutputTokensCeiling  = 200000
-	claudeMaxOutputTokensFloor    = 1
+	DefaultClaudeUseMantle       = false
+	DefaultClaudeUseBedrock      = false
+	DefaultClaudeMaxOutputTokens = 4096
+	defaultClaudeAvailableModels = "sonnet,haiku"
+	claudeMaxOutputTokensCeiling = 200000
+	claudeMaxOutputTokensFloor   = 1
 )
 
 func DefaultClaudeAvailableModels() []string {

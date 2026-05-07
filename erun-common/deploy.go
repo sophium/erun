@@ -1117,12 +1117,8 @@ func helmIdleTrafficBytes(config EnvironmentIdleConfig) int64 {
 
 func helmClaudeSetArgs(config EnvironmentClaudeConfig) []string {
 	args := make([]string, 0, 8)
-	if config.UseMantle != nil {
-		args = append(args, "--set-string", "claude.useMantle="+claudeFlagValue(*config.UseMantle))
-	}
-	if config.UseBedrock != nil {
-		args = append(args, "--set-string", "claude.useBedrock="+claudeFlagValue(*config.UseBedrock))
-	}
+	args = append(args, "--set-string", "claude.useMantle="+claudeFlagValue(resolveClaudeBool(config.UseMantle, DefaultClaudeUseMantle)))
+	args = append(args, "--set-string", "claude.useBedrock="+claudeFlagValue(resolveClaudeBool(config.UseBedrock, DefaultClaudeUseBedrock)))
 	if models := formatClaudeModels(config.Models); models != "" {
 		args = append(args, "--set-string", "claude.availableModels="+models)
 	}
@@ -1130,6 +1126,13 @@ func helmClaudeSetArgs(config EnvironmentClaudeConfig) []string {
 		args = append(args, "--set-string", "claude.maxOutputTokens="+strconv.Itoa(*config.MaxOutputTokens))
 	}
 	return args
+}
+
+func resolveClaudeBool(value *bool, fallback bool) bool {
+	if value == nil {
+		return fallback
+	}
+	return *value
 }
 
 // claudeFlagValue returns the "1"/"0" form expected by the chart template and
