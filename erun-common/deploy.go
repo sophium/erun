@@ -959,7 +959,7 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "cloudContext.providerAlias="+d.CloudProviderAlias,
 		"--set-string", "cloudContext.region="+d.CloudRegion,
 		"--set-string", "cloudContext.instanceId="+d.CloudInstanceID,
-		"--set-string", "api.oidcAllowedIssuers="+d.OIDCAllowedIssuers,
+		"--set-string", "api.oidcAllowedIssuers="+escapeHelmSetValue(d.OIDCAllowedIssuers),
 		"--set", "api.postgres.reset="+formatHelmBool(d.ResetDatabase),
 	)
 	if registry := strings.TrimSpace(d.ContainerRegistry); registry != "" {
@@ -1120,7 +1120,7 @@ func helmClaudeSetArgs(config EnvironmentClaudeConfig) []string {
 	args = append(args, "--set-string", "claude.useMantle="+claudeFlagValue(resolveClaudeBool(config.UseMantle, DefaultClaudeUseMantle)))
 	args = append(args, "--set-string", "claude.useBedrock="+claudeFlagValue(resolveClaudeBool(config.UseBedrock, DefaultClaudeUseBedrock)))
 	if models := formatClaudeModels(config.Models); models != "" {
-		args = append(args, "--set-string", "claude.availableModels="+models)
+		args = append(args, "--set-string", "claude.availableModels="+escapeHelmSetValue(models))
 	}
 	if config.MaxOutputTokens != nil {
 		args = append(args, "--set-string", "claude.maxOutputTokens="+strconv.Itoa(*config.MaxOutputTokens))
@@ -1142,6 +1142,14 @@ func claudeFlagValue(value bool) string {
 		return "1"
 	}
 	return "0"
+}
+
+// escapeHelmSetValue escapes characters that Helm's --set/--set-string parser
+// treats as structural so the input is preserved as a literal scalar value.
+// Helm splits values on commas, so a comma inside the value must be backslash-escaped.
+func escapeHelmSetValue(value string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `,`, `\,`)
+	return replacer.Replace(value)
 }
 
 func resolveDeployKubernetesContext(environment, configured string, currentContext func() (string, error)) string {
