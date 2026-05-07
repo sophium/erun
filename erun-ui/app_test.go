@@ -541,9 +541,9 @@ func TestBuildInitArgsIncludesRuntimeVersion(t *testing.T) {
 	}
 }
 
-func TestBuildDeployArgsIncludesRuntimeVersion(t *testing.T) {
-	got := buildDeployArgs(uiSelection{Tenant: " erun ", Environment: " remote ", Version: " 1.0.19 ", RuntimeImage: " erun-devops "})
-	want := []string{"open", "erun", "remote", "--no-shell", "--no-alias-prompt", "--version", "1.0.19", "--runtime-image", "erun-devops"}
+func TestBuildDeployArgsRunsDeploy(t *testing.T) {
+	got := buildDeployArgs(uiSelection{Tenant: " erun ", Environment: " remote ", Version: " 1.0.19 "})
+	want := []string{"deploy", "erun", "remote", "--version", "1.0.19"}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected args length: got %+v want %+v", got, want)
 	}
@@ -871,7 +871,7 @@ func TestStartDeploySessionStartsDeployCommand(t *testing.T) {
 	if started.Dir != projectRoot {
 		t.Fatalf("unexpected start dir: %q", started.Dir)
 	}
-	wantArgs := []string{"open", "erun", "remote", "--no-shell", "--no-alias-prompt", "--version", "1.0.19"}
+	wantArgs := []string{"deploy", "erun", "remote", "--version", "1.0.19"}
 	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
 		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
 	}

@@ -272,9 +272,8 @@ function appendInitDebugArgs(args: string[], selection: UISelection): void {
 }
 
 function appendDeployDebugArgs(args: string[], selection: UISelection): void {
-  args.push('open', selection.tenant, selection.environment, '--no-shell', '--no-alias-prompt');
+  args.push('deploy', selection.tenant, selection.environment);
   appendOptionalDebugArg(args, '--version', selection.version);
-  appendOptionalDebugArg(args, '--runtime-image', selection.runtimeImage);
 }
 
 function appendOptionalDebugArg(args: string[], name: string, value: string | undefined): void {
