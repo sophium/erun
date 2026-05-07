@@ -340,6 +340,10 @@ function EnvironmentRow({
   const selected = state.selected?.tenant === tenantName && state.selected?.environment === environmentName;
   const selection = { tenant: tenantName, environment: environmentName };
   const busy = environmentIsBusy(state, tenantName, environmentName);
+  const environment = state.tenants
+    .find((tenant) => tenant.name === tenantName)
+    ?.environments.find((env) => env.name === environmentName);
+  const isLocal = environment?.remote === false;
 
   return (
     <div
@@ -354,7 +358,7 @@ function EnvironmentRow({
           'flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent py-0 pr-2 pl-10 text-left text-sm leading-[1.2] tracking-normal text-inherit',
           selected ? 'font-medium' : 'font-normal',
         )}
-        title={`${tenantName} / ${environmentName}`}
+        title={`${tenantName} / ${environmentName}${isLocal ? ' (local)' : ''}`}
         aria-current={selected ? 'page' : undefined}
         onClick={() => {
           void controller.openSelection(selection).catch((error: unknown) => {
@@ -363,6 +367,19 @@ function EnvironmentRow({
         }}
       >
         <span className="min-w-0 truncate">{environmentName}</span>
+        {isLocal && (
+          <span
+            className={cn(
+              'flex-none rounded-[calc(var(--radius)-4px)] border px-1 py-px text-[10px] font-medium uppercase leading-none tracking-wide',
+              selected
+                ? 'border-primary-foreground/40 text-primary-foreground/85'
+                : 'border-border text-muted-foreground',
+            )}
+            aria-label="Local environment"
+          >
+            Local
+          </span>
+        )}
         {busy && <LoaderCircle className="size-3.5 flex-none animate-spin text-current opacity-75" aria-hidden="true" />}
       </button>
       <IconTooltip label="Edit environment settings">
