@@ -164,7 +164,7 @@ function primaryCloudProviderStatus(state: AppState, alias: string): UICloudProv
   return state.cloudProviders.find((candidate) => candidate.alias === alias) || { alias, provider: '', status: 'unknown' };
 }
 
-function CloudAliasPopoverRow({ icon, label, muted }: { icon: React.ReactElement; label: string; muted?: boolean }): React.ReactElement {
+function CloudAliasPopoverRow({ icon, label, muted }: { icon: React.ReactElement<{ className?: string; 'aria-hidden'?: boolean }>; label: string; muted?: boolean }): React.ReactElement {
   return (
     <div className={cn('flex min-w-0 items-center gap-2 rounded-sm px-2 py-1.5 text-sm', muted && 'text-muted-foreground')}>
       {React.cloneElement(icon, { className: 'size-4 shrink-0', 'aria-hidden': true })}

@@ -1111,7 +1111,7 @@ export class ERunUIController {
     this.state.tenantDialog = { ...dialog, busy: true, busyAction: 'save', busyTarget: '', error: '' };
     this.emit();
     try {
-      const result = (await SaveTenantConfig(dialog.config)) as UITenantConfig;
+      const result = (await SaveTenantConfig(dialog.config as Parameters<typeof SaveTenantConfig>[0])) as UITenantConfig;
       this.applySavedTenantConfig(result);
       this.state.tenantDialog = {
         ...this.state.tenantDialog,

@@ -24,6 +24,7 @@ import type {
   UICloudContextInitInput,
   UICloudContextStatus,
   UIERunConfig,
+  UISelection,
 } from '@/types';
 
 interface TerminalSize {
