@@ -619,6 +619,7 @@ function ClaudeSettingsSection({ controller, dialog }: { controller: ERunUIContr
       <ClaudeBoolField
         id="environment-config-claude-mantle"
         label="Use Mantle"
+        helper="When enabled, Claude requests for this environment are routed through Mantle. Default uses the global setting."
         defaultValue={defaults.useMantle}
         value={claude.useMantle}
         disabled={disabled}
@@ -627,6 +628,7 @@ function ClaudeSettingsSection({ controller, dialog }: { controller: ERunUIContr
       <ClaudeBoolField
         id="environment-config-claude-bedrock"
         label="Use Bedrock"
+        helper="When enabled, Claude requests are routed through AWS Bedrock. Mantle and Bedrock can both be enabled; the runtime decides which to use per request."
         defaultValue={defaults.useBedrock}
         value={claude.useBedrock}
         disabled={disabled}
@@ -648,7 +650,7 @@ function ClaudeSettingsSection({ controller, dialog }: { controller: ERunUIContr
   );
 }
 
-function ClaudeBoolField({ id, label, defaultValue, value, disabled, onChange }: { id: string; label: string; defaultValue: boolean; value: boolean | undefined; disabled?: boolean; onChange: (value: boolean | undefined) => void }): React.ReactElement {
+function ClaudeBoolField({ id, label, defaultValue, value, helper, disabled, onChange }: { id: string; label: string; defaultValue: boolean; value: boolean | undefined; helper?: string; disabled?: boolean; onChange: (value: boolean | undefined) => void }): React.ReactElement {
   const selectValue = value === undefined ? 'default' : value ? 'on' : 'off';
   const defaultLabel = defaultValue ? 'Default (enabled)' : 'Default (disabled)';
   return (
@@ -661,6 +663,7 @@ function ClaudeBoolField({ id, label, defaultValue, value, disabled, onChange }:
         { value: 'on', label: 'Enabled' },
         { value: 'off', label: 'Disabled' },
       ]}
+      helper={helper}
       disabled={disabled}
       onChange={(next) => {
         if (next === 'default') {

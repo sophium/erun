@@ -16,6 +16,7 @@ export function SelectField({
   options,
   placeholder,
   emptyLabel,
+  helper,
   disabled,
   required,
   onChange,
@@ -26,17 +27,19 @@ export function SelectField({
   options: SelectFieldOption[];
   placeholder?: string;
   emptyLabel?: string;
+  helper?: string;
   disabled?: boolean;
   required?: boolean;
   onChange: (value: string) => void;
 }): React.ReactElement {
   const noOptions = options.length === 0;
   const triggerDisabled = disabled || noOptions;
+  const helperId = helper ? `${id}-helper` : undefined;
   return (
     <div className="grid gap-2">
       <Label htmlFor={id}>{label}</Label>
       <Select value={value || undefined} required={required} disabled={triggerDisabled} onValueChange={onChange}>
-        <SelectTrigger id={id} className="w-full">
+        <SelectTrigger id={id} className="w-full" aria-describedby={helperId}>
           <SelectValue placeholder={noOptions ? (emptyLabel ?? 'No options') : (placeholder ?? '')} />
         </SelectTrigger>
         {!noOptions && (
@@ -49,6 +52,11 @@ export function SelectField({
           </SelectContent>
         )}
       </Select>
+      {helper && (
+        <p id={helperId} className="text-[12px] leading-[1.4] text-muted-foreground">
+          {helper}
+        </p>
+      )}
     </div>
   );
 }
