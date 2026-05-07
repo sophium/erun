@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import type { DiffCommit, DiffTreeNode } from '@/types';
-import { DiffList, ReviewStatus } from './DiffList';
+import { DiffErrorAlert, DiffList, ReviewStatus } from './DiffList';
 import { FileIcon } from './FileIcon';
 import { IconTooltip } from './IconTooltip';
 
@@ -234,7 +234,13 @@ function ChangedFileTree({ controller, state }: { controller: ERunUIController; 
     return <ReviewStatus>Loading...</ReviewStatus>;
   }
   if (state.diffError) {
-    return <ReviewStatus>{compactDiffError(state.diffError)}</ReviewStatus>;
+    return (
+      <DiffErrorAlert
+        message={compactDiffError(state.diffError)}
+        loading={state.diffLoading}
+        onRetry={() => { void controller.loadReviewDiff(); }}
+      />
+    );
   }
 
   const tree = visibleDiffTreeNodes(filterDiffTree(state.diff?.tree || [], state.diffFilter), state.collapsedDiffDirs);
@@ -270,6 +276,8 @@ function ChangedFileNode({
           type="button"
           className="flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-[var(--radius)] border-0 bg-transparent py-0 pr-2.5 pl-[calc(8px+(var(--depth)*18px))] text-left text-sm leading-[1.2] font-medium text-foreground hover:bg-accent"
           style={style}
+          aria-expanded={!collapsed}
+          aria-label={`${node.name} directory`}
           onClick={() => controller.toggleDiffDirectory(node.path)}
         >
           <ChevronRight className={cn('size-4 flex-none text-current', !collapsed && 'rotate-90')} aria-hidden="true" />
@@ -279,16 +287,18 @@ function ChangedFileNode({
     );
   }
 
+  const selected = node.path === state.selectedDiffPath;
   return (
     <div className="flex flex-col">
       <button
         type="button"
         className={cn(
           'flex h-[34px] w-full cursor-pointer items-center gap-2 rounded-[var(--radius)] border-0 bg-transparent py-0 pr-2.5 pl-[calc(8px+(var(--depth)*18px))] text-left text-sm leading-[1.2] text-foreground hover:bg-accent',
-          node.path === state.selectedDiffPath && 'bg-primary text-primary-foreground hover:bg-primary',
+          selected && 'bg-primary text-primary-foreground hover:bg-primary',
         )}
         style={style}
         data-path={node.path}
+        aria-current={selected ? 'true' : undefined}
         onClick={() => controller.selectDiffPath(node.path)}
       >
         <FileIcon filePath={node.path} />

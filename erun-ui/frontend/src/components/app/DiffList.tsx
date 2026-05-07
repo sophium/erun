@@ -1,8 +1,10 @@
 import * as React from 'react';
+import { AlertCircle, RefreshCw } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { compactDiffError, diffLineMark } from '@/app/diffUtils';
 import type { AppState } from '@/app/state';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { DiffFile, DiffHunk } from '@/types';
 
@@ -11,7 +13,7 @@ export function DiffList({ controller, state }: { controller: ERunUIController; 
     return <ReviewStatus>Loading diff...</ReviewStatus>;
   }
   if (state.diffError) {
-    return <ReviewStatus>{compactDiffError(state.diffError)}</ReviewStatus>;
+    return <DiffErrorAlert message={compactDiffError(state.diffError)} loading={state.diffLoading} onRetry={() => { void controller.loadReviewDiff(); }} />;
   }
   const files = state.diff?.files || [];
   if (files.length === 0) {
@@ -24,6 +26,25 @@ export function DiffList({ controller, state }: { controller: ERunUIController; 
       ))}
       <span className="sr-only">{controller.state.selectedDiffPath}</span>
     </>
+  );
+}
+
+export function DiffErrorAlert({ message, loading, onRetry }: { message: string; loading: boolean; onRetry: () => void }): React.ReactElement {
+  return (
+    <div
+      role="alert"
+      className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-3 rounded-[var(--radius)] border border-destructive/40 bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-3 py-2.5 text-[13px] leading-[1.4]"
+    >
+      <AlertCircle className="mt-px size-[18px] flex-none text-destructive" aria-hidden="true" />
+      <div className="min-w-0 [overflow-wrap:anywhere] text-foreground">
+        <div className="font-semibold text-destructive">Could not load diff</div>
+        <div className="text-muted-foreground">{message}</div>
+      </div>
+      <Button type="button" variant="outline" size="sm" disabled={loading} onClick={onRetry}>
+        <RefreshCw aria-hidden="true" />
+        Retry
+      </Button>
+    </div>
   );
 }
 
