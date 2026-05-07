@@ -18,7 +18,7 @@ export interface UITenant {
 }
 
 export type EnvironmentActionMode = 'init' | 'deploy';
-export type ManageTab = 'deploy' | 'config' | 'delete';
+export type ManageTab = 'general' | 'runtime' | 'claude' | 'network' | 'access' | 'delete';
 
 export interface UISelection {
   tenant: string;

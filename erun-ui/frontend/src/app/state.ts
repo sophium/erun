@@ -195,7 +195,7 @@ export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
 
 export const defaultManageDialog = (): ManageDialogState => ({
   open: false,
-  tab: 'config',
+  tab: 'general',
   selection: null,
   version: '',
   versionImage: '',

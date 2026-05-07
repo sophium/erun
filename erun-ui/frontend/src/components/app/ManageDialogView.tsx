@@ -14,7 +14,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import type { UICloudContextStatus, UIEnvironmentConfig, UIPortStatus, UIVersionSuggestion } from '@/types';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import type { ManageTab, UICloudContextStatus, UIEnvironmentConfig, UIPortStatus, UIVersionSuggestion } from '@/types';
 import { cn } from '@/lib/utils';
 import { EditableComboField, uniqueSuggestions } from './EditableComboField';
 import { RuntimeResourceControls } from './RuntimeResourceControls';
@@ -78,13 +79,81 @@ function ManageDialogContent({ controller, state, confirmationRef, expected, con
     return <div className="-mx-1 min-h-0 overflow-auto px-1 pb-1"><div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">Loading config...</div></div>;
   }
   return (
-    <div className="-mx-1 min-h-0 overflow-auto px-1 pb-1">
-      <div className="grid gap-3">
-        {dialog.pendingRedeploy && !confirmingDelete && <RedeployBanner controller={controller} dialog={dialog} />}
-        <ManageConfigFields controller={controller} state={state} />
-        {confirmingDelete && <DeleteConfirmationFields controller={controller} dialog={dialog} confirmationRef={confirmationRef} expected={expected} />}
-      </div>
+    <div className="flex min-h-0 flex-col gap-3">
+      {dialog.pendingRedeploy && !confirmingDelete && <RedeployBanner controller={controller} dialog={dialog} />}
+      <Tabs value={dialog.tab} onValueChange={(value) => controller.setManageTab(value as ManageTab)} className="min-h-0">
+        <TabsList className="w-full">
+          <TabsTrigger value="general">General</TabsTrigger>
+          <TabsTrigger value="runtime">Runtime</TabsTrigger>
+          <TabsTrigger value="claude">Claude</TabsTrigger>
+          <TabsTrigger value="network">Network</TabsTrigger>
+          <TabsTrigger value="access">Access</TabsTrigger>
+          <TabsTrigger value="delete">Delete</TabsTrigger>
+        </TabsList>
+        <div className="-mx-1 min-h-0 overflow-auto px-1 pb-1">
+          <TabsContent value="general" className="grid gap-3">
+            <GeneralTab controller={controller} state={state} />
+          </TabsContent>
+          <TabsContent value="runtime" className="grid gap-3">
+            <RuntimeTab controller={controller} state={state} />
+          </TabsContent>
+          <TabsContent value="claude" className="grid gap-3">
+            <ClaudeSettingsSection controller={controller} dialog={dialog} />
+          </TabsContent>
+          <TabsContent value="network" className="grid gap-3">
+            <NetworkTab dialog={dialog} />
+          </TabsContent>
+          <TabsContent value="access" className="grid gap-3">
+            <SSHAccessSection controller={controller} dialog={dialog} />
+            <DiagnosticsSection controller={controller} dialog={dialog} />
+          </TabsContent>
+          <TabsContent value="delete" className="grid gap-3">
+            <DeleteConfirmationFields controller={controller} dialog={dialog} confirmationRef={confirmationRef} expected={expected} />
+          </TabsContent>
+        </div>
+      </Tabs>
     </div>
+  );
+}
+
+function GeneralTab({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
+  const dialog = state.manageDialog;
+  const config = dialog.config;
+  const containerRegistrySuggestions = React.useMemo(
+    () => uniqueSuggestions([config.containerRegistry, ...loadSavedPastContainerRegistries(), 'ghcr.io/rihards-freimanis']),
+    [config.containerRegistry],
+  );
+  return (
+    <>
+      <ReadonlyField id="environment-config-repopath" label="Repository path" value={config.repoPath} />
+      <ReadonlyField id="environment-config-kubernetescontext" label="Kubernetes context" value={config.kubernetesContext} />
+      <EditableComboField id="environment-config-containerregistry" label="Container registry" value={config.containerRegistry} suggestions={containerRegistrySuggestions} disabled={dialog.busy || dialog.configLoading} onValueChange={(containerRegistry) => controller.updateManageConfig({ containerRegistry })} />
+      <CloudAliasSelect id="environment-config-cloudprovideralias" value={config.cloudProviderAlias} options={config.cloudProviderAliases || []} disabled={dialog.busy} onChange={(cloudProviderAlias) => controller.updateManageConfig({ cloudProviderAlias })} />
+      <CloudContextField context={config.cloudContext} cloudProviderAlias={config.cloudProviderAlias} disabled={dialog.busy || dialog.configLoading} loading={dialog.busyAction === 'cloud-context-power' && dialog.busyTarget === config.cloudContext?.name} onStart={(name) => void controller.startManageCloudContext(name)} onStop={(name) => void controller.stopManageCloudContext(name)} />
+      <CheckboxField id="environment-config-remote" label="Remote environment" checked={config.remote} disabled onChange={() => {}} />
+      <CheckboxField id="environment-config-snapshot" label="Snapshot deploy" checked={config.snapshot} disabled={dialog.busy} onChange={(snapshot) => controller.updateManageConfig({ snapshot })} />
+    </>
+  );
+}
+
+function RuntimeTab({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
+  const dialog = state.manageDialog;
+  return (
+    <>
+      <RuntimeDeployField configuredVersion={dialog.config.runtimeVersion} overrideVersion={dialog.version} suggestions={state.versionSuggestions} choicesOpen={dialog.choicesOpen} disabled={dialog.busy || dialog.configLoading} onValueChange={(version) => controller.updateManageDialog({ version })} onChoicesOpenChange={(open) => controller.setManageVersionChoicesOpen(open)} onSelect={(suggestion) => controller.selectManageVersionSuggestion(suggestion)} onDeploy={() => void controller.submitManageDeploy().catch((error: unknown) => controller.showTerminalMessage(readError(error)))} />
+      <RuntimePodFields controller={controller} dialog={dialog} />
+      <IdleStopFields controller={controller} dialog={dialog} />
+    </>
+  );
+}
+
+function NetworkTab({ dialog }: { dialog: ManageDialog }): React.ReactElement {
+  const config = dialog.config;
+  return (
+    <>
+      <ReadonlyField id="environment-config-localportrange" label="Assigned local port range" value={portRangeValue(config.localPorts.rangeStart, config.localPorts.rangeEnd)} />
+      <PortStatusTable rows={[{ service: 'mcp', port: config.localPorts.mcp, status: config.localPorts.mcpStatus }, { service: 'api', port: config.localPorts.api, status: config.localPorts.apiStatus }, { service: 'ssh', port: config.localPorts.ssh, status: config.localPorts.sshStatus }]} />
+    </>
   );
 }
 
@@ -112,34 +181,6 @@ function RedeployBanner({ controller, dialog }: { controller: ERunUIController; 
         </Button>
       </div>
     </div>
-  );
-}
-
-function ManageConfigFields({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
-  const dialog = state.manageDialog;
-  const config = dialog.config;
-  const containerRegistrySuggestions = React.useMemo(
-    () => uniqueSuggestions([config.containerRegistry, ...loadSavedPastContainerRegistries(), 'ghcr.io/rihards-freimanis']),
-    [config.containerRegistry],
-  );
-  return (
-    <>
-      <ReadonlyField id="environment-config-repopath" label="Repository path" value={config.repoPath} />
-      <ReadonlyField id="environment-config-kubernetescontext" label="Kubernetes context" value={config.kubernetesContext} />
-      <EditableComboField id="environment-config-containerregistry" label="Container registry" value={config.containerRegistry} suggestions={containerRegistrySuggestions} disabled={dialog.busy || dialog.configLoading} onValueChange={(containerRegistry) => controller.updateManageConfig({ containerRegistry })} />
-      <CloudAliasSelect id="environment-config-cloudprovideralias" value={config.cloudProviderAlias} options={config.cloudProviderAliases || []} disabled={dialog.busy} onChange={(cloudProviderAlias) => controller.updateManageConfig({ cloudProviderAlias })} />
-      <CloudContextField context={config.cloudContext} cloudProviderAlias={config.cloudProviderAlias} disabled={dialog.busy || dialog.configLoading} loading={dialog.busyAction === 'cloud-context-power' && dialog.busyTarget === config.cloudContext?.name} onStart={(name) => void controller.startManageCloudContext(name)} onStop={(name) => void controller.stopManageCloudContext(name)} />
-      <RuntimeDeployField configuredVersion={config.runtimeVersion} overrideVersion={dialog.version} suggestions={state.versionSuggestions} choicesOpen={dialog.choicesOpen} disabled={dialog.busy || dialog.configLoading} onValueChange={(version) => controller.updateManageDialog({ version })} onChoicesOpenChange={(open) => controller.setManageVersionChoicesOpen(open)} onSelect={(suggestion) => controller.selectManageVersionSuggestion(suggestion)} onDeploy={() => void controller.submitManageDeploy().catch((error: unknown) => controller.showTerminalMessage(readError(error)))} />
-      <RuntimePodFields controller={controller} dialog={dialog} />
-      <CheckboxField id="environment-config-remote" label="Remote environment" checked={config.remote} disabled onChange={() => {}} />
-      <CheckboxField id="environment-config-snapshot" label="Snapshot deploy" checked={config.snapshot} disabled={dialog.busy} onChange={(snapshot) => controller.updateManageConfig({ snapshot })} />
-      <IdleStopFields controller={controller} dialog={dialog} />
-      <ClaudeSettingsSection controller={controller} dialog={dialog} />
-      <ReadonlyField id="environment-config-localportrange" label="Assigned local port range" value={portRangeValue(config.localPorts.rangeStart, config.localPorts.rangeEnd)} />
-      <PortStatusTable rows={[{ service: 'mcp', port: config.localPorts.mcp, status: config.localPorts.mcpStatus }, { service: 'api', port: config.localPorts.api, status: config.localPorts.apiStatus }, { service: 'ssh', port: config.localPorts.ssh, status: config.localPorts.sshStatus }]} />
-      <DiagnosticsSection controller={controller} dialog={dialog} />
-      <SSHAccessSection controller={controller} dialog={dialog} />
-    </>
   );
 }
 
@@ -275,31 +316,23 @@ function DialogError({ error }: { error: string }): React.ReactElement | null {
 function ManageDialogFooter({ controller, dialog, confirmingDelete, deleteEnabled }: { controller: ERunUIController; dialog: ManageDialog; confirmingDelete: boolean; deleteEnabled: boolean }): React.ReactElement {
   const resourceError = runtimeResourceLimitMessage(dialog.config.runtimePod, dialog.resourceStatus);
   const saving = dialog.busyAction === 'save';
+  const deleting = dialog.busyAction === 'delete';
   return (
     <DialogFooter>
       <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => controller.closeManageDialog()}>Cancel</Button>
-      <DeleteButton controller={controller} dialog={dialog} confirmingDelete={confirmingDelete} deleteEnabled={deleteEnabled} />
-      {!confirmingDelete && <Button type="button" size="sm" disabled={dialog.busy || dialog.configLoading || Boolean(resourceError)} onClick={() => void controller.submitManageConfig().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}>{saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}{saving ? 'Saving...' : 'Save'}</Button>}
+      {confirmingDelete ? (
+        <Button type="button" variant="destructive" size="sm" disabled={dialog.busy || !deleteEnabled} onClick={() => void controller.submitManageDelete()}>
+          {deleting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
+          {deleting ? 'Deleting...' : 'Confirm delete'}
+        </Button>
+      ) : (
+        <Button type="button" size="sm" disabled={dialog.busy || dialog.configLoading || Boolean(resourceError)} onClick={() => void controller.submitManageConfig().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}>
+          {saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
+          {saving ? 'Saving...' : 'Save'}
+        </Button>
+      )}
     </DialogFooter>
   );
-}
-
-function DeleteButton({ controller, dialog, confirmingDelete, deleteEnabled }: { controller: ERunUIController; dialog: ManageDialog; confirmingDelete: boolean; deleteEnabled: boolean }): React.ReactElement {
-  const deleting = dialog.busyAction === 'delete';
-  return (
-    <Button type="button" variant={confirmingDelete ? 'destructive' : 'outline'} size="sm" disabled={dialog.busy || (confirmingDelete && !deleteEnabled)} onClick={() => submitOrStartDelete(controller, confirmingDelete)}>
-      {deleting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
-      {deleting ? 'Deleting...' : 'Delete'}
-    </Button>
-  );
-}
-
-function submitOrStartDelete(controller: ERunUIController, confirmingDelete: boolean): void {
-  if (confirmingDelete) {
-    void controller.submitManageDelete();
-    return;
-  }
-  controller.updateManageDialog({ tab: 'delete', confirmation: '' });
 }
 
 function CloudContextField({

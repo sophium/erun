@@ -64,7 +64,7 @@ export class ManageEnvironmentWorkflow {
   openDialog(selection: UISelection): void {
     this.state.manageDialog = {
       open: true,
-      tab: 'config',
+      tab: 'general',
       selection,
       version: '',
       versionImage: '',
@@ -108,7 +108,7 @@ export class ManageEnvironmentWorkflow {
       error: '',
     };
     this.deps.emit();
-    if (tab === 'config' && !this.state.manageDialog.configLoading && this.state.manageDialog.selection) {
+    if (tab !== 'delete' && !this.state.manageDialog.configLoading && this.state.manageDialog.selection) {
       void this.loadConfig();
     }
   }
