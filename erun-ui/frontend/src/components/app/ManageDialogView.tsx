@@ -6,7 +6,7 @@ import { readError } from '@/app/errors';
 import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
 import type { AppState } from '@/app/state';
 import { loadSavedPastContainerRegistries } from '@/app/storage';
-import { deleteConfirmationValue, normalizeDialogValue, versionChoiceImage, versionChoiceKind, versionChoiceLabel } from '@/app/versionSuggestions';
+import { deleteConfirmationValue, normalizeDialogValue, selectionKey, versionChoiceImage, versionChoiceKind, versionChoiceLabel } from '@/app/versionSuggestions';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -114,7 +114,7 @@ function ManageDialogContent({ controller, state, confirmationRef, expected, con
           </TabsContent>
           <TabsContent value="ssh" className="grid gap-3">
             <SSHAccessSection controller={controller} dialog={dialog} />
-            <DiagnosticsSection controller={controller} dialog={dialog} />
+            <DiagnosticsSection controller={controller} dialog={dialog} state={state} />
           </TabsContent>
         </div>
       </Tabs>
@@ -257,7 +257,8 @@ function IdleStopFields({ controller, dialog }: { controller: ERunUIController; 
   );
 }
 
-function DiagnosticsSection({ controller, dialog }: { controller: ERunUIController; dialog: ManageDialog }): React.ReactElement {
+function DiagnosticsSection({ controller, dialog, state }: { controller: ERunUIController; dialog: ManageDialog; state: AppState }): React.ReactElement {
+  const lastDoctor = dialog.selection ? state.lastDoctorBySelection[selectionKey(dialog.selection)] : undefined;
   return (
     <div className="grid gap-2 rounded-[var(--radius)] border border-border p-3">
       <div className="flex items-center justify-between gap-3">
@@ -267,8 +268,49 @@ function DiagnosticsSection({ controller, dialog }: { controller: ERunUIControll
           Run Doctor
         </Button>
       </div>
+      {lastDoctor && <DoctorLastRun outcome={lastDoctor} />}
     </div>
   );
+}
+
+function DoctorLastRun({ outcome }: { outcome: AppState['lastDoctorBySelection'][string] }): React.ReactElement {
+  const ago = relativeTimeFromNow(outcome.ranAt);
+  const tone: 'success' | 'destructive' = outcome.success ? 'success' : 'destructive';
+  const summary = outcome.success ? 'all checks passed' : (outcome.message || 'doctor failed');
+  return (
+    <div
+      role={outcome.success ? 'status' : 'alert'}
+      className={cn(
+        'grid grid-cols-[auto_minmax(0,1fr)] items-start gap-2 rounded-[var(--radius)] border px-3 py-2 text-[13px] leading-[1.4]',
+        tone === 'success'
+          ? 'border-green-600/35 bg-green-600/10 text-foreground'
+          : 'border-destructive/40 bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] text-foreground',
+      )}
+    >
+      <span className={cn('mt-px size-1.5 rounded-full', tone === 'success' ? 'bg-green-600' : 'bg-destructive')} aria-hidden="true" />
+      <span className="min-w-0 [overflow-wrap:anywhere]">
+        <span className="font-medium">Last run {ago}</span>
+        <span className="text-muted-foreground"> — {summary}</span>
+      </span>
+    </div>
+  );
+}
+
+function relativeTimeFromNow(timestamp: number): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (seconds < 60) {
+    return 'just now';
+  }
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `${minutes} min ago`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours} h ago`;
+  }
+  const days = Math.floor(hours / 24);
+  return `${days} d ago`;
 }
 
 function SSHAccessSection({ controller, dialog }: { controller: ERunUIController; dialog: ManageDialog }): React.ReactElement {
