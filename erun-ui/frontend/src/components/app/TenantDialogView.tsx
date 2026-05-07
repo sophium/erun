@@ -108,7 +108,7 @@ function CloudAliasesField({ controller, state }: { controller: ERunUIController
   );
 }
 
-function CloudAliasRow({ controller, dialog, config, provider, checked, primary, withBorder }: { controller: ERunUIController; dialog: AppState['tenantDialog']; config: AppState['tenantDialog']['config']; provider: AppState['tenantDialog']['config']['cloudProviders'][number]; checked: boolean; primary: string; withBorder: boolean }): React.ReactElement {
+function CloudAliasRow({ controller, dialog, config, provider, checked, primary, withBorder }: { controller: ERunUIController; dialog: AppState['tenantDialog']; config: AppState['tenantDialog']['config']; provider: NonNullable<AppState['tenantDialog']['config']['cloudProviders']>[number]; checked: boolean; primary: string; withBorder: boolean }): React.ReactElement {
   const alias = provider.alias.trim();
   const hasIssuer = Boolean(provider.oidcIssuerUrl?.trim());
   const oidcBusy = dialog.busy && dialog.busyAction === 'cloud-oidc' && dialog.busyTarget === alias;

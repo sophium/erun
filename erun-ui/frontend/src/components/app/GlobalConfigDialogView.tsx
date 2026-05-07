@@ -127,7 +127,7 @@ function CloudAliasList({ controller, dialog }: { controller: ERunUIController; 
   );
 }
 
-function CloudAliasSummary({ provider }: { provider: GlobalConfigDialog['config']['cloudProviders'][number] }): React.ReactElement {
+function CloudAliasSummary({ provider }: { provider: NonNullable<GlobalConfigDialog['config']['cloudProviders']>[number] }): React.ReactElement {
   return (
     <div className="grid min-w-0 gap-1">
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
@@ -252,7 +252,7 @@ function CloudContextList({ controller, dialog }: { controller: ERunUIController
   );
 }
 
-function CloudContextSummary({ context }: { context: GlobalConfigDialog['config']['cloudContexts'][number] }): React.ReactElement {
+function CloudContextSummary({ context }: { context: NonNullable<GlobalConfigDialog['config']['cloudContexts']>[number] }): React.ReactElement {
   return (
     <div className="grid min-w-0 gap-1">
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
