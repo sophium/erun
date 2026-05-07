@@ -9,6 +9,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { IconTooltip } from './IconTooltip';
 
 const dialogErrorClassName =
   'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
@@ -134,22 +135,25 @@ function CloudAliasIdentity({ alias, issuer }: { alias: string; issuer: string }
 }
 
 function CloudAliasOIDCButton({ controller, alias, hasIssuer, busy, oidcBusy }: { controller: ERunUIController; alias: string; hasIssuer: boolean; busy: boolean; oidcBusy: boolean }): React.ReactElement {
+  const label = hasIssuer ? `Refresh OIDC issuer for ${alias}` : `Set up OIDC issuer for ${alias}`;
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      className="size-8"
-      title={hasIssuer ? `Refresh OIDC issuer for ${alias}` : `Set up OIDC issuer for ${alias}`}
-      disabled={busy || !alias}
-      onClick={() => {
-        void controller.setupTenantCloudProviderOIDC(alias).catch((error: unknown) => {
-          controller.showTerminalMessage(readError(error));
-        });
-      }}
-    >
-      {oidcBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : hasIssuer ? <RefreshCw aria-hidden="true" /> : <Link aria-hidden="true" />}
-    </Button>
+    <IconTooltip label={label}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-8"
+        aria-label={label}
+        disabled={busy || !alias}
+        onClick={() => {
+          void controller.setupTenantCloudProviderOIDC(alias).catch((error: unknown) => {
+            controller.showTerminalMessage(readError(error));
+          });
+        }}
+      >
+        {oidcBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : hasIssuer ? <RefreshCw aria-hidden="true" /> : <Link aria-hidden="true" />}
+      </Button>
+    </IconTooltip>
   );
 }
 

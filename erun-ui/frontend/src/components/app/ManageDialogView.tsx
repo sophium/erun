@@ -147,7 +147,7 @@ function GeneralTab({ controller, state }: { controller: ERunUIController; state
       <EditableComboField id="environment-config-containerregistry" label="Container registry" value={config.containerRegistry} suggestions={containerRegistrySuggestions} disabled={dialog.busy || dialog.configLoading} onValueChange={(containerRegistry) => controller.updateManageConfig({ containerRegistry })} />
       <CloudAliasSelect id="environment-config-cloudprovideralias" value={config.cloudProviderAlias} options={config.cloudProviderAliases || []} disabled={dialog.busy} onChange={(cloudProviderAlias) => controller.updateManageConfig({ cloudProviderAlias })} />
       <CloudContextField context={config.cloudContext} cloudProviderAlias={config.cloudProviderAlias} disabled={dialog.busy || dialog.configLoading} loading={dialog.busyAction === 'cloud-context-power' && dialog.busyTarget === config.cloudContext?.name} onStart={(name) => void controller.startManageCloudContext(name)} onStop={(name) => void controller.stopManageCloudContext(name)} />
-      <CheckboxField id="environment-config-remote" label="Remote environment" checked={config.remote} disabled onChange={() => {}} />
+      <ReadonlyField id="environment-config-remote" label="Remote environment" value={config.remote ? 'Yes' : 'No'} />
       <CheckboxField id="environment-config-snapshot" label="Snapshot deploy" checked={config.snapshot} disabled={dialog.busy} onChange={(snapshot) => controller.updateManageConfig({ snapshot })} />
     </>
   );
@@ -224,8 +224,24 @@ function IdleStopFields({ controller, dialog }: { controller: ERunUIController; 
   return (
     <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
       <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Idle stop</div>
-      <TextField id="environment-config-idle-timeout" label="Timeout" value={config.idle.timeout} disabled={dialog.busy} onChange={(timeout) => controller.updateManageConfig({ idle: { ...config.idle, timeout } })} />
-      <TextField id="environment-config-idle-workinghours" label="Working hours" value={config.idle.workingHours} disabled={dialog.busy} onChange={(workingHours) => controller.updateManageConfig({ idle: { ...config.idle, workingHours } })} />
+      <TextField
+        id="environment-config-idle-timeout"
+        label="Timeout"
+        value={config.idle.timeout}
+        disabled={dialog.busy}
+        placeholder="e.g. 5m, 1h30m"
+        helper="Go duration (s, m, h). Default 5m."
+        onChange={(timeout) => controller.updateManageConfig({ idle: { ...config.idle, timeout } })}
+      />
+      <TextField
+        id="environment-config-idle-workinghours"
+        label="Working hours"
+        value={config.idle.workingHours}
+        disabled={dialog.busy}
+        placeholder="e.g. 08:00-20:00"
+        helper="Format HH:MM-HH:MM. Default 08:00-20:00."
+        onChange={(workingHours) => controller.updateManageConfig({ idle: { ...config.idle, workingHours } })}
+      />
       <TextField id="environment-config-idle-traffic" label="Idle SSH bytes" value={String(config.idle.idleTrafficBytes)} inputMode="numeric" disabled={dialog.busy} onChange={(idleTrafficBytes) => controller.updateManageConfig({ idle: { ...config.idle, idleTrafficBytes: parseIdleTrafficBytes(idleTrafficBytes) } })} />
     </div>
   );
@@ -254,7 +270,7 @@ function SSHAccessSection({ controller, dialog }: { controller: ERunUIController
         <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">SSH access</div>
         {!config.sshd.enabled && <Button type="button" variant="outline" size="sm" disabled={dialog.busy || dialog.configLoading || !config.remote} onClick={() => void controller.enableManageSSHD().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}><Server aria-hidden="true" />Enable SSHD</Button>}
       </div>
-      <CheckboxField id="environment-config-sshd-enabled" label="Enabled" checked={config.sshd.enabled} disabled onChange={() => {}} />
+      <ReadonlyField id="environment-config-sshd-enabled" label="SSHD" value={config.sshd.enabled ? 'Enabled' : 'Disabled'} />
       <CheckboxField id="environment-config-sshd-sync-enabled" label="Enable workspace sync" checked={config.sshd.workspaceSyncEnabled} disabled={dialog.busy || dialog.configLoading || !config.sshd.enabled} onChange={(workspaceSyncEnabled) => controller.updateManageSSHDConfig({ workspaceSyncEnabled })} />
       {config.sshd.workspaceSyncEnabled && (
         <>
@@ -530,11 +546,49 @@ function StatusBadge({ status }: { status: string }): React.ReactElement {
   );
 }
 
-function TextField({ id, label, value, disabled, inputMode, inputRef, onChange }: { id: string; label: string; value: string; disabled?: boolean; inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode']; inputRef?: React.Ref<HTMLInputElement>; onChange: (value: string) => void }): React.ReactElement {
+function TextField({
+  id,
+  label,
+  value,
+  disabled,
+  inputMode,
+  inputRef,
+  placeholder,
+  helper,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  disabled?: boolean;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>['inputMode'];
+  inputRef?: React.Ref<HTMLInputElement>;
+  placeholder?: string;
+  helper?: string;
+  onChange: (value: string) => void;
+}): React.ReactElement {
+  const helperId = helper ? `${id}-helper` : undefined;
   return (
     <div className="grid gap-2">
       <Label htmlFor={id}>{label}</Label>
-      <Input id={id} ref={inputRef} value={value} type="text" inputMode={inputMode} autoComplete="off" spellCheck={false} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
+      <Input
+        id={id}
+        ref={inputRef}
+        value={value}
+        type="text"
+        inputMode={inputMode}
+        autoComplete="off"
+        spellCheck={false}
+        disabled={disabled}
+        placeholder={placeholder}
+        aria-describedby={helperId}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {helper && (
+        <div id={helperId} className="text-[12px] leading-[1.4] text-muted-foreground">
+          {helper}
+        </div>
+      )}
     </div>
   );
 }
@@ -818,7 +872,7 @@ function PortStatusTable({ rows }: { rows: { service: string; port: number; stat
           <div key={row.service} className="grid min-h-8 grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-3 py-1 last:border-b-0">
             <div className="font-mono text-xs text-foreground">{row.port > 0 ? row.port : 'Not configured'}</div>
             <div className="text-foreground">{row.service}</div>
-            <AvailabilityDot status={row.status} />
+            <PortAvailability status={row.status} />
           </div>
         ))}
       </div>
@@ -826,11 +880,18 @@ function PortStatusTable({ rows }: { rows: { service: string; port: number; stat
   );
 }
 
-function AvailabilityDot({ status }: { status: UIPortStatus }): React.ReactElement {
-  const label = status.available ? 'available' : 'unavailable';
+function PortAvailability({ status }: { status: UIPortStatus }): React.ReactElement {
+  const available = status.available;
+  const label = available ? 'Available' : 'Unavailable';
   return (
-    <span className="inline-flex justify-end" aria-label={label} title={label}>
-      <span className={cn('size-2.5 rounded-full', status.available ? 'bg-green-600' : 'bg-destructive')} aria-hidden="true" />
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 text-xs font-medium',
+        available ? 'text-green-700 dark:text-green-400' : 'text-destructive',
+      )}
+    >
+      <span className={cn('size-2 rounded-full', available ? 'bg-green-600' : 'bg-destructive')} aria-hidden="true" />
+      {label}
     </span>
   );
 }
