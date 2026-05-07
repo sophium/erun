@@ -549,9 +549,10 @@ function ClaudeSettingsSection({ controller, dialog }: { controller: ERunUIContr
   const disabled = dialog.busy || dialog.configLoading;
   const overridden = isClaudeOverridden(claude);
   return (
-    <div className="grid gap-3">
-      {overridden && (
-        <div className="flex justify-end">
+    <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Claude</div>
+        {overridden && (
           <Button
             type="button"
             variant="ghost"
@@ -561,8 +562,8 @@ function ClaudeSettingsSection({ controller, dialog }: { controller: ERunUIContr
           >
             Reset all to defaults
           </Button>
-        </div>
-      )}
+        )}
+      </div>
       <ClaudeBoolField
         id="environment-config-claude-mantle"
         label="Use Mantle"
