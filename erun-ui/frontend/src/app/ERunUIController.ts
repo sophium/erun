@@ -177,6 +177,7 @@ export class ERunUIController {
     debugOpen: loadSavedDebugOpen(),
     debugHeight: loadSavedDebugHeight(),
     debugOutput: '',
+    lastDoctorBySelection: {},
   };
 
   private readonly subscribers = new Set<() => void>();
@@ -676,7 +677,7 @@ export class ERunUIController {
 
   openInitializeDialog(): void {
     const tenantDefault = this.state.selected?.tenant || this.state.tenants[0]?.name || '';
-    const containerRegistryDefault = loadSavedPastContainerRegistries()[0] || 'ghcr.io/rihards-freimanis';
+    const containerRegistryDefault = loadSavedPastContainerRegistries()[0] || '';
     this.state.environmentDialog = {
       open: true,
       actionMode: 'init',
@@ -1826,6 +1827,7 @@ export class ERunUIController {
     const reason = this.terminalExitReason(payload, selections);
     const failedOutput = this.recordTerminalExit(payload, reason, selections);
     this.dropExitedSessionFromTabs(payload.sessionId, selections.openSelection);
+    this.recordDoctorOutcome(payload, selections);
 
     if (selections.initSelection || selections.deploySelection || selections.sshdInitSelection) {
       await this.reloadStateAfterEnvironmentChange();
@@ -1842,6 +1844,24 @@ export class ERunUIController {
       return;
     }
     this.showTerminalMessage(reason);
+  }
+
+  private recordDoctorOutcome(payload: TerminalExitPayload, selections: TerminalExitSelections): void {
+    const selection = selections.doctorSelection;
+    if (!selection) {
+      return;
+    }
+    const key = selectionKey(selection);
+    const reason = (payload.reason || '').trim();
+    this.state.lastDoctorBySelection = {
+      ...this.state.lastDoctorBySelection,
+      [key]: {
+        ranAt: Date.now(),
+        success: !reason,
+        message: reason,
+      },
+    };
+    this.emit();
   }
 
   private takeTerminalExitSelections(sessionId: number): TerminalExitSelections {

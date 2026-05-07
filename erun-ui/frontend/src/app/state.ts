@@ -127,6 +127,12 @@ export interface TerminalTab {
   slot: number;
 }
 
+export interface DoctorOutcome {
+  ranAt: number;
+  success: boolean;
+  message: string;
+}
+
 export interface AppState {
   tenants: UITenant[];
   cloudProviders: UICloudProviderStatus[];
@@ -170,6 +176,7 @@ export interface AppState {
   debugOpen: boolean;
   debugHeight: number;
   debugOutput: string;
+  lastDoctorBySelection: Record<string, DoctorOutcome>;
 }
 
 export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
@@ -184,7 +191,7 @@ export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
   resourceStatus: null,
   resourceStatusLoading: false,
   runtimePod: defaultRuntimePodConfig(),
-  containerRegistry: 'ghcr.io/rihards-freimanis',
+  containerRegistry: '',
   noGit: false,
   bootstrap: false,
   setDefaultTenant: true,
