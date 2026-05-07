@@ -4,6 +4,7 @@ import { CheckCircle2, ChevronDown, ChevronUp, Copy, LoaderCircle, Trash2 } from
 import { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
 import { useControllerState } from '@/app/useControllerState';
+import { TerminalTabStrip } from '@/components/app/TerminalTabStrip';
 import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
 import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
 import { ManageDialogView } from '@/components/app/ManageDialogView';
@@ -144,9 +145,12 @@ function TerminalPane({
           'grid-cols-[minmax(360px,1fr)_10px_minmax(420px,var(--review-width))] max-[980px]:grid-cols-[minmax(260px,1fr)_10px_minmax(360px,min(var(--review-width),58vw))]',
       )}
     >
-      <div className="relative h-full min-h-0 min-w-0 overflow-hidden">
-        <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full box-border px-4 py-3.5" />
-        <TerminalBusyOverlay message={state.terminalBusy ? state.terminalMessage : ''} />
+      <div className="grid h-full min-h-0 min-w-0 grid-rows-[32px_minmax(0,1fr)] overflow-hidden">
+        <TerminalTabStrip controller={controller} state={state} />
+        <div id="erun-terminal-pane" className="relative h-full min-h-0 min-w-0 overflow-hidden">
+          <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full box-border px-4 py-3.5" />
+          <TerminalBusyOverlay message={state.terminalBusy ? state.terminalMessage : ''} />
+        </div>
       </div>
       <div className={cn(reviewSplitterClassName, !state.reviewOpen && 'hidden')} role="separator" aria-orientation="vertical" aria-label="Resize diff panel" onMouseDown={(event) => controller.startReviewResize(event)} />
       <ReviewPanel controller={controller} state={state} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} />

@@ -4,6 +4,7 @@ import { Terminal, type IDisposable } from '@xterm/xterm';
 
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import {
+  CloseSession,
   LoadDiff,
   LoadIdleStatus,
   LoadKubernetesContexts,
@@ -79,6 +80,7 @@ import {
   type TenantDashboardTab,
   type TenantDialogState,
   type TerminalStatusAction,
+  type TerminalTab,
 } from './state';
 import {
   clamp,
@@ -144,6 +146,7 @@ export class ERunUIController {
     globalConfigDialog: defaultGlobalConfigDialog(),
     collapsedTenants: new Set<string>(),
     sessionId: 0,
+    tabsByEnv: {},
     sidebarWidth: loadSavedSidebarWidth(),
     reviewWidth: loadSavedReviewWidth(),
     filesWidth: loadSavedFilesWidth(),
@@ -273,11 +276,11 @@ export class ERunUIController {
 
     this.terminalQueryResponseDisposables = registerTerminalQueryResponseHandlers(
       this.terminal,
-      SendSessionInput,
+      (data) => SendSessionInput(this.state.sessionId, data),
       (error) => this.showTerminalMessage(readError(error)),
     );
     this.terminalDataDisposable = this.terminal.onData((data) => {
-      SendSessionInput(data).catch((error: unknown) => {
+      SendSessionInput(this.state.sessionId, data).catch((error: unknown) => {
         this.showTerminalMessage(readError(error));
       });
     });
@@ -462,7 +465,8 @@ export class ERunUIController {
 
     this.prepareOpenSelection(selection, runSelection, previousSessionId, previousKnownSessionId);
     this.fitAddon?.fit();
-    const result = (await StartSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
+    const slot = this.activeSlotForSelection(runSelection);
+    const result = (await StartSession(runSelection, slot, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
     this.registerOpenSessionResult(key, result, runSelection, previousSessionId);
     this.showOpenSelectionStatus(result.sessionId, selection);
 
@@ -500,10 +504,121 @@ export class ERunUIController {
     this.registerDebugSession(result.sessionId, runSelection, 'open');
     rebuildTerminalDisplayBuffer(this.sessions, result.sessionId);
     this.state.sessionId = result.sessionId;
+    this.recordTab(key, result.sessionId, result.slot ?? 0);
     if (result.sessionId !== previousSessionId) {
       this.resetTerminal();
       this.writeTerminalBuffer(this.sessions.displayBuffer(result.sessionId));
     }
+  }
+
+  private activeSlotForSelection(selection: UISelection): number {
+    const tabs = this.state.tabsByEnv[selectionKey(selection)] || [];
+    if (tabs.length === 0) {
+      return 0;
+    }
+    const active = tabs.find((tab) => tab.sessionId === this.state.sessionId);
+    return (active ?? tabs[0]).slot;
+  }
+
+  private recordTab(key: string, sessionId: number, slot: number): void {
+    const tabs = this.state.tabsByEnv[key] ? [...this.state.tabsByEnv[key]] : [];
+    const existingIndex = tabs.findIndex((tab) => tab.slot === slot);
+    if (existingIndex >= 0) {
+      tabs[existingIndex] = { sessionId, slot };
+    } else {
+      tabs.push({ sessionId, slot });
+      tabs.sort((a, b) => a.slot - b.slot);
+    }
+    this.state.tabsByEnv = { ...this.state.tabsByEnv, [key]: tabs };
+  }
+
+  private removeTab(key: string, sessionId: number): TerminalTab[] {
+    const tabs = this.state.tabsByEnv[key];
+    if (!tabs || tabs.length === 0) {
+      return [];
+    }
+    const remaining = tabs.filter((tab) => tab.sessionId !== sessionId);
+    const next = { ...this.state.tabsByEnv };
+    if (remaining.length === 0) {
+      delete next[key];
+    } else {
+      next[key] = remaining;
+    }
+    this.state.tabsByEnv = next;
+    return remaining;
+  }
+
+  async addTerminalTab(): Promise<void> {
+    const selection = this.state.selected;
+    if (!selection) {
+      return;
+    }
+    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
+    const key = selectionKey(runSelection);
+    const tabs = this.state.tabsByEnv[key] || [];
+    const nextSlot = tabs.reduce((max, tab) => (tab.slot >= max ? tab.slot + 1 : max), 0);
+    const previousSessionId = this.state.sessionId;
+    try {
+      const result = (await StartSession(runSelection, nextSlot, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
+      this.registerOpenSessionResult(key, result, runSelection, previousSessionId);
+      this.focusTerminalSoon();
+      this.queueTerminalResize();
+      this.emit();
+    } catch (error: unknown) {
+      this.showTerminalMessage(readError(error));
+    }
+  }
+
+  selectTerminalTab(sessionId: number): void {
+    if (sessionId <= 0 || sessionId === this.state.sessionId) {
+      return;
+    }
+    this.state.sessionId = sessionId;
+    rebuildTerminalDisplayBuffer(this.sessions, sessionId);
+    this.resetTerminal();
+    this.writeTerminalBuffer(this.sessions.displayBuffer(sessionId));
+    const exitReason = this.sessions.exitReason(sessionId);
+    if (exitReason) {
+      this.state.terminalCopyOutput = this.sessions.exitOutput(sessionId);
+      this.state.terminalCopyStatus = '';
+      this.showTerminalMessage(exitReason);
+    } else {
+      this.hideTerminalMessage();
+    }
+    this.focusTerminalSoon();
+    this.queueTerminalResize();
+    this.emit();
+  }
+
+  async closeTerminalTab(sessionId: number): Promise<void> {
+    if (sessionId <= 0) {
+      return;
+    }
+    const selection = this.state.selected;
+    if (!selection) {
+      return;
+    }
+    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
+    const key = selectionKey(runSelection);
+    try {
+      await CloseSession(sessionId);
+    } catch (error: unknown) {
+      this.showTerminalMessage(readError(error));
+      return;
+    }
+    const remaining = this.removeTab(key, sessionId);
+    if (this.state.sessionId === sessionId) {
+      const next = remaining[remaining.length - 1];
+      if (next) {
+        this.selectTerminalTab(next.sessionId);
+      } else {
+        this.state.sessionId = 0;
+        this.resetTerminal();
+        this.emit();
+      }
+      return;
+    }
+    this.emit();
   }
 
   private showOpenSelectionStatus(sessionId: number, selection: UISelection): void {
@@ -1688,6 +1803,7 @@ export class ERunUIController {
     const selections = this.takeTerminalExitSelections(payload.sessionId);
     const reason = this.terminalExitReason(payload, selections);
     const failedOutput = this.recordTerminalExit(payload, reason, selections);
+    this.dropExitedSessionFromTabs(payload.sessionId, selections.openSelection);
 
     if (selections.initSelection || selections.deploySelection || selections.sshdInitSelection) {
       await this.reloadStateAfterEnvironmentChange();
@@ -1708,6 +1824,21 @@ export class ERunUIController {
 
   private takeTerminalExitSelections(sessionId: number): TerminalExitSelections {
     return this.sessions.takeExitSelections(sessionId);
+  }
+
+  private dropExitedSessionFromTabs(sessionId: number, openSelection: UISelection | undefined): void {
+    if (!openSelection) {
+      return;
+    }
+    const key = selectionKey(openSelection);
+    const remaining = this.removeTab(key, sessionId);
+    if (this.state.sessionId !== sessionId) {
+      return;
+    }
+    const next = remaining[remaining.length - 1];
+    if (next) {
+      this.selectTerminalTab(next.sessionId);
+    }
   }
 
   private recordTerminalExit(payload: TerminalExitPayload, reason: string, selections: TerminalExitSelections): string {
@@ -1810,7 +1941,7 @@ export class ERunUIController {
       this.applyLayoutVars();
       this.fitAddon?.fit();
       if (this.state.sessionId > 0 && this.terminal) {
-        ResizeSession(this.terminal.cols, this.terminal.rows).catch(() => {
+        ResizeSession(this.state.sessionId, this.terminal.cols, this.terminal.rows).catch(() => {
         });
       }
     }, 40);
@@ -1840,9 +1971,13 @@ export class ERunUIController {
     }
 
     event.preventDefault();
+    const sessionId = this.state.sessionId;
+    if (sessionId <= 0) {
+      return;
+    }
     const paths: string[] = [];
     for (const image of images) {
-      const result = (await SavePastedImage({
+      const result = (await SavePastedImage(sessionId, {
         data: await fileToBase64(image),
         mimeType: image.type,
         name: image.name,
@@ -1854,7 +1989,7 @@ export class ERunUIController {
     if (paths.length === 0) {
       return;
     }
-    await SendSessionInput(`${paths.join(' ')} `);
+    await SendSessionInput(sessionId, `${paths.join(' ')} `);
     this.focusTerminalSoon();
   }
 

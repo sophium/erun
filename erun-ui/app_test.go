@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -695,7 +696,7 @@ func TestStartInitSessionUsesSeparateSessionKey(t *testing.T) {
 	if _, err := app.StartInitSession(uiSelection{Tenant: "erun", Environment: "remote"}, 80, 24); err != nil {
 		t.Fatalf("StartInitSession failed: %v", err)
 	}
-	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 80, 24); err != nil {
+	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 	if startCalls != 2 {
@@ -953,7 +954,7 @@ func TestStartDeploySessionUsesSeparateSessionKey(t *testing.T) {
 	if _, err := app.StartDeploySession(uiSelection{Tenant: "erun", Environment: "remote", Version: "1.0.19"}, 80, 24); err != nil {
 		t.Fatalf("StartDeploySession failed: %v", err)
 	}
-	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 80, 24); err != nil {
+	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 	if startCalls != 3 {
@@ -1866,7 +1867,7 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if _, err := app.StartSession(uiSelection{Tenant: "frs", Environment: "prod"}, 80, 24); err != nil {
+	if _, err := app.StartSession(uiSelection{Tenant: "frs", Environment: "prod"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 
@@ -1975,6 +1976,115 @@ func TestLocalPortStatusReportsAvailability(t *testing.T) {
 	}
 }
 
+func TestStartSessionAllocatesIndependentSlots(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {
+				Name:               "erun",
+				ProjectRoot:        projectRoot,
+				DefaultEnvironment: "local",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/local": {
+				Name:              "local",
+				RepoPath:          projectRoot,
+				KubernetesContext: "rancher-desktop",
+			},
+		},
+	}
+
+	startCalls := 0
+	app := NewApp(erunUIDeps{
+		store:           store,
+		findProjectRoot: func() (string, string, error) { return "", "", eruncommon.ErrNotInGitRepository },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			startCalls++
+			return newStubTerminalSession(), nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	first, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
+	if err != nil {
+		t.Fatalf("first StartSession failed: %v", err)
+	}
+	second, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 1, 80, 24)
+	if err != nil {
+		t.Fatalf("second StartSession failed: %v", err)
+	}
+	reuse, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
+	if err != nil {
+		t.Fatalf("third StartSession failed: %v", err)
+	}
+
+	if startCalls != 2 {
+		t.Fatalf("start terminal called %d times, want 2", startCalls)
+	}
+	if first.SessionID == second.SessionID {
+		t.Fatalf("expected distinct session ids for different slots, got %d for both", first.SessionID)
+	}
+	if reuse.SessionID != first.SessionID {
+		t.Fatalf("expected slot 0 to reuse session %d, got %d", first.SessionID, reuse.SessionID)
+	}
+	if first.Slot != 0 || second.Slot != 1 {
+		t.Fatalf("unexpected slot values: first=%d second=%d", first.Slot, second.Slot)
+	}
+}
+
+func TestSendSessionInputRoutesPerSession(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "local"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/local": {Name: "local", RepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
+		},
+	}
+
+	var stubs []*stubTerminalSession
+	app := NewApp(erunUIDeps{
+		store:           store,
+		findProjectRoot: func() (string, string, error) { return "", "", eruncommon.ErrNotInGitRepository },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			s := newStubTerminalSession()
+			stubs = append(stubs, s)
+			return s, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	first, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
+	if err != nil {
+		t.Fatalf("first StartSession failed: %v", err)
+	}
+	second, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 1, 80, 24)
+	if err != nil {
+		t.Fatalf("second StartSession failed: %v", err)
+	}
+
+	if err := app.SendSessionInput(first.SessionID, "alpha"); err != nil {
+		t.Fatalf("SendSessionInput first failed: %v", err)
+	}
+	if err := app.SendSessionInput(second.SessionID, "beta"); err != nil {
+		t.Fatalf("SendSessionInput second failed: %v", err)
+	}
+
+	if len(stubs) != 2 {
+		t.Fatalf("expected two terminal stubs, got %d", len(stubs))
+	}
+	if got := stubs[0].WrittenString(); got != "alpha" {
+		t.Fatalf("slot 0 received %q, want %q", got, "alpha")
+	}
+	if got := stubs[1].WrittenString(); got != "beta" {
+		t.Fatalf("slot 1 received %q, want %q", got, "beta")
+	}
+}
+
 func TestStartSessionReusesExistingSessionForSelection(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
@@ -2006,12 +2116,12 @@ func TestStartSessionReusesExistingSessionForSelection(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	first, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 80, 24)
+	first, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
 	if err != nil {
 		t.Fatalf("first StartSession failed: %v", err)
 	}
 
-	second, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 80, 24)
+	second, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
 	if err != nil {
 		t.Fatalf("second StartSession failed: %v", err)
 	}
@@ -2057,10 +2167,11 @@ func TestSendSessionInputRecordsCLIActivityForCurrentEnvironment(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 80, 24); err != nil {
+	started, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
+	if err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
-	if err := app.SendSessionInput("date\r"); err != nil {
+	if err := app.SendSessionInput(started.SessionID, "date\r"); err != nil {
 		t.Fatalf("SendSessionInput failed: %v", err)
 	}
 
@@ -2433,14 +2544,20 @@ func TestSavePastedImageCopiesIntoCurrentRuntime(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
+	selection := uiSelection{Tenant: "erun", Environment: "local"}
 	app.mu.Lock()
-	app.current = &managedTerminal{
+	app.nextSerial++
+	serial := app.nextSerial
+	managed := &managedTerminal{
 		session:   newStubTerminalSession(),
-		selection: uiSelection{Tenant: "erun", Environment: "local"},
+		selection: selection,
+		key:       openSessionKey(selection, 0),
+		serial:    serial,
 	}
+	app.sessions[managed.key] = managed
 	app.mu.Unlock()
 
-	result, err := app.SavePastedImage(pastedImagePayload{
+	result, err := app.SavePastedImage(serial, pastedImagePayload{
 		Data:     base64.StdEncoding.EncodeToString(imageData),
 		MIMEType: "image/png",
 		Name:     "screenshot.png",
@@ -2655,6 +2772,8 @@ func (s stubUIStore) ListEnvConfigs(tenant string) ([]eruncommon.EnvConfig, erro
 type stubTerminalSession struct {
 	closeCh chan struct{}
 	waitErr error
+	mu      sync.Mutex
+	written []byte
 }
 
 func newStubTerminalSession() *stubTerminalSession {
@@ -2667,7 +2786,16 @@ func (s *stubTerminalSession) Read([]byte) (int, error) {
 }
 
 func (s *stubTerminalSession) Write(buffer []byte) (int, error) {
+	s.mu.Lock()
+	s.written = append(s.written, buffer...)
+	s.mu.Unlock()
 	return len(buffer), nil
+}
+
+func (s *stubTerminalSession) WrittenString() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return string(s.written)
 }
 
 func (s *stubTerminalSession) Resize(int, int) error {

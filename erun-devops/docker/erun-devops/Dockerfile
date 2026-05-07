@@ -96,6 +96,7 @@ RUN apt-get update && \
     /tmp/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli && \
     npm install -g "@openai/codex@${CODEX_VERSION}" "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" && \
     mv /usr/local/bin/codex /usr/local/bin/codex-real && \
+    mv /usr/local/bin/claude /usr/local/bin/claude-real && \
     npm cache clean --force && \
     mkdir -p /usr/local/lib/docker/cli-plugins /usr/local/libexec/docker/cli-plugins && \
     curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-buildx "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-${arch}" && \
@@ -115,6 +116,7 @@ COPY --from=builder --chmod=0755 /out/emcp /usr/local/bin/emcp
 COPY --from=builder --chmod=0755 /out/eapi /usr/local/bin/eapi
 COPY --chmod=0755 erun-devops/docker/erun-devops/entrypoint.sh /usr/local/bin/erun-devops-entrypoint
 COPY --chmod=0755 erun-devops/docker/erun-devops/codex-wrapper.sh /usr/local/bin/codex
+COPY --chmod=0755 erun-devops/docker/erun-devops/claude-wrapper.sh /usr/local/bin/claude
 COPY --chmod=0644 erun-devops/docker/erun-devops/bash_prompt.sh /etc/erun/bash_prompt.sh
 
 RUN /usr/local/bin/erun completion bash > /etc/bash_completion.d/erun && \

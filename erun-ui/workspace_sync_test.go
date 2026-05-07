@@ -137,7 +137,7 @@ func TestStartSessionStartsConfiguredWorkspaceSync(t *testing.T) {
 	})
 	defer app.shutdown(context.Background())
 
-	if _, err := app.StartSession(uiSelection{Tenant: "frs", Environment: "dev"}, 80, 24); err != nil {
+	if _, err := app.StartSession(uiSelection{Tenant: "frs", Environment: "dev"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
 
