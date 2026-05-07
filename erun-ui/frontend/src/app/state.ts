@@ -286,6 +286,8 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
     workingHours: '08:00-20:00',
     idleTrafficBytes: 0,
   },
+  claude: {},
+  claudeDefaults: defaultClaudeDefaults(),
   localPorts: {
     rangeStart: 0,
     rangeEnd: 0,
@@ -312,4 +314,14 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
 export const defaultRuntimePodConfig = (): { cpu: string; memory: string } => ({
   cpu: '4',
   memory: '8.7',
+});
+
+export const defaultClaudeDefaults = (): UIEnvironmentConfig['claudeDefaults'] => ({
+  useMantle: true,
+  useBedrock: true,
+  models: ['sonnet', 'haiku'],
+  maxOutputTokens: 4096,
+  knownModels: ['opus', 'sonnet', 'haiku'],
+  minTokens: 1,
+  maxTokens: 200000,
 });

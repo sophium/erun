@@ -557,6 +557,89 @@ func TestHelmDeploySpecIncludesRuntimePodResourceLimits(t *testing.T) {
 	}
 }
 
+func TestHelmDeploySpecOmitsClaudeSetArgsWhenUnset(t *testing.T) {
+	spec := HelmDeploySpec{
+		ReleaseName:     "erun-devops",
+		ChartPath:       "/tmp/chart",
+		ValuesFilePath:  "/tmp/chart/values.local.yaml",
+		Tenant:          "erun",
+		Environment:     "local",
+		Namespace:       "erun-local",
+		WorktreeStorage: WorktreeStorageHost,
+		Timeout:         DefaultHelmDeploymentTimeout,
+	}
+
+	args := strings.Join(spec.command().Args, "\n")
+	if strings.Contains(args, "claude.") {
+		t.Fatalf("expected no claude.* flags when EnvironmentClaudeConfig is zero, got:\n%s", args)
+	}
+}
+
+func TestHelmDeploySpecEmitsClaudeSetArgsWhenConfigured(t *testing.T) {
+	useMantle := false
+	useBedrock := true
+	maxTokens := 8192
+	spec := HelmDeploySpec{
+		ReleaseName:     "erun-devops",
+		ChartPath:       "/tmp/chart",
+		ValuesFilePath:  "/tmp/chart/values.local.yaml",
+		Tenant:          "erun",
+		Environment:     "local",
+		Namespace:       "erun-local",
+		WorktreeStorage: WorktreeStorageHost,
+		Timeout:         DefaultHelmDeploymentTimeout,
+		Claude: EnvironmentClaudeConfig{
+			UseMantle:       &useMantle,
+			UseBedrock:      &useBedrock,
+			Models:          []string{"opus", "sonnet"},
+			MaxOutputTokens: &maxTokens,
+		},
+	}
+
+	args := strings.Join(spec.command().Args, "\n")
+	for _, want := range []string{
+		"claude.useMantle=0",
+		"claude.useBedrock=1",
+		"claude.availableModels=opus,sonnet",
+		"claude.maxOutputTokens=8192",
+	} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("expected Helm command to include %q, got:\n%s", want, args)
+		}
+	}
+}
+
+func TestHelmDeploySpecEmitsOnlySetClaudeFields(t *testing.T) {
+	useBedrock := false
+	spec := HelmDeploySpec{
+		ReleaseName:     "erun-devops",
+		ChartPath:       "/tmp/chart",
+		ValuesFilePath:  "/tmp/chart/values.local.yaml",
+		Tenant:          "erun",
+		Environment:     "local",
+		Namespace:       "erun-local",
+		WorktreeStorage: WorktreeStorageHost,
+		Timeout:         DefaultHelmDeploymentTimeout,
+		Claude: EnvironmentClaudeConfig{
+			UseBedrock: &useBedrock,
+		},
+	}
+
+	args := strings.Join(spec.command().Args, "\n")
+	if !strings.Contains(args, "claude.useBedrock=0") {
+		t.Fatalf("expected claude.useBedrock=0, got:\n%s", args)
+	}
+	for _, unwanted := range []string{
+		"claude.useMantle=",
+		"claude.availableModels=",
+		"claude.maxOutputTokens=",
+	} {
+		if strings.Contains(args, unwanted) {
+			t.Fatalf("did not expect %q when only UseBedrock is set, got:\n%s", unwanted, args)
+		}
+	}
+}
+
 func TestNewHelmDeploySpecCanonicalizesWorktreeHostPath(t *testing.T) {
 	projectRoot := t.TempDir()
 	repoRoot := filepath.Join(projectRoot, "repo")

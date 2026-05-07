@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import type { UICloudContextStatus, UIPortStatus, UIVersionSuggestion } from '@/types';
+import type { UICloudContextStatus, UIEnvironmentConfig, UIPortStatus, UIVersionSuggestion } from '@/types';
 import { cn } from '@/lib/utils';
 import { EditableComboField, uniqueSuggestions } from './EditableComboField';
 import { RuntimeResourceControls } from './RuntimeResourceControls';
@@ -106,6 +106,7 @@ function ManageConfigFields({ controller, state }: { controller: ERunUIControlle
       <CheckboxField id="environment-config-remote" label="Remote environment" checked={config.remote} disabled onChange={() => {}} />
       <CheckboxField id="environment-config-snapshot" label="Snapshot deploy" checked={config.snapshot} disabled={dialog.busy} onChange={(snapshot) => controller.updateManageConfig({ snapshot })} />
       <IdleStopFields controller={controller} dialog={dialog} />
+      <ClaudeSettingsSection controller={controller} dialog={dialog} />
       <ReadonlyField id="environment-config-localportrange" label="Assigned local port range" value={portRangeValue(config.localPorts.rangeStart, config.localPorts.rangeEnd)} />
       <PortStatusTable rows={[{ service: 'mcp', port: config.localPorts.mcp, status: config.localPorts.mcpStatus }, { service: 'api', port: config.localPorts.api, status: config.localPorts.apiStatus }, { service: 'ssh', port: config.localPorts.ssh, status: config.localPorts.sshStatus }]} />
       <DiagnosticsSection controller={controller} dialog={dialog} />
@@ -441,6 +442,215 @@ function TextField({ id, label, value, disabled, inputMode, inputRef, onChange }
       <Input id={id} ref={inputRef} value={value} type="text" inputMode={inputMode} autoComplete="off" spellCheck={false} disabled={disabled} onChange={(event) => onChange(event.target.value)} />
     </div>
   );
+}
+
+const claudeSelectClassName =
+  'border-input bg-background ring-offset-background focus-visible:ring-ring flex h-10 w-full rounded-[var(--radius)] border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50';
+
+function ClaudeSettingsSection({ controller, dialog }: { controller: ERunUIController; dialog: ManageDialog }): React.ReactElement {
+  const config = dialog.config;
+  const claude = config.claude;
+  const defaults = config.claudeDefaults;
+  const disabled = dialog.busy || dialog.configLoading;
+  const overridden = isClaudeOverridden(claude);
+  return (
+    <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Claude</div>
+        {overridden && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={disabled}
+            onClick={() => controller.updateManageClaudeConfig({ useMantle: undefined, useBedrock: undefined, models: [], maxOutputTokens: undefined })}
+          >
+            Reset all to defaults
+          </Button>
+        )}
+      </div>
+      <ClaudeBoolField
+        id="environment-config-claude-mantle"
+        label="Use Mantle"
+        defaultValue={defaults.useMantle}
+        value={claude.useMantle}
+        disabled={disabled}
+        onChange={(useMantle) => controller.updateManageClaudeConfig({ useMantle })}
+      />
+      <ClaudeBoolField
+        id="environment-config-claude-bedrock"
+        label="Use Bedrock"
+        defaultValue={defaults.useBedrock}
+        value={claude.useBedrock}
+        disabled={disabled}
+        onChange={(useBedrock) => controller.updateManageClaudeConfig({ useBedrock })}
+      />
+      <ClaudeModelsField
+        defaults={defaults}
+        value={claude.models || []}
+        disabled={disabled}
+        onChange={(models) => controller.updateManageClaudeConfig({ models })}
+      />
+      <ClaudeMaxTokensField
+        defaults={defaults}
+        value={claude.maxOutputTokens}
+        disabled={disabled}
+        onChange={(maxOutputTokens) => controller.updateManageClaudeConfig({ maxOutputTokens })}
+      />
+    </div>
+  );
+}
+
+function ClaudeBoolField({ id, label, defaultValue, value, disabled, onChange }: { id: string; label: string; defaultValue: boolean; value: boolean | undefined; disabled?: boolean; onChange: (value: boolean | undefined) => void }): React.ReactElement {
+  const selectValue = value === undefined ? 'default' : value ? 'on' : 'off';
+  const defaultLabel = defaultValue ? 'Default (enabled)' : 'Default (disabled)';
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor={id}>{label}</Label>
+      <select
+        id={id}
+        className={claudeSelectClassName}
+        value={selectValue}
+        disabled={disabled}
+        onChange={(event) => {
+          const next = event.target.value;
+          if (next === 'default') {
+            onChange(undefined);
+          } else {
+            onChange(next === 'on');
+          }
+        }}
+      >
+        <option value="default">{defaultLabel}</option>
+        <option value="on">Enabled</option>
+        <option value="off">Disabled</option>
+      </select>
+    </div>
+  );
+}
+
+function ClaudeModelsField({ defaults, value, disabled, onChange }: { defaults: UIEnvironmentConfig['claudeDefaults']; value: string[]; disabled?: boolean; onChange: (value: string[]) => void }): React.ReactElement {
+  const overridden = value.length > 0;
+  const known = defaults.knownModels.length > 0 ? defaults.knownModels : defaults.models;
+  const displayValue = new Set(overridden ? value : defaults.models);
+  const baseId = 'environment-config-claude-models';
+  const helpId = `${baseId}-help`;
+  return (
+    <div className="grid gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <Label htmlFor={baseId}>Available models</Label>
+        {overridden && (
+          <Button type="button" variant="link" size="sm" className="h-auto px-0 text-[12px]" disabled={disabled} onClick={() => onChange([])}>
+            Reset to default
+          </Button>
+        )}
+      </div>
+      <div id={baseId} role="group" aria-describedby={helpId} className="flex flex-wrap gap-x-4 gap-y-2">
+        {known.map((model) => {
+          const checkboxId = `${baseId}-${model}`;
+          const checked = displayValue.has(model);
+          return (
+            <label key={model} htmlFor={checkboxId} className={cn('flex items-center gap-2 text-sm', overridden ? 'text-foreground' : 'text-muted-foreground')}>
+              <Checkbox
+                id={checkboxId}
+                checked={checked}
+                disabled={disabled}
+                onCheckedChange={(next) => {
+                  const base = overridden ? value : defaults.models;
+                  const set = new Set(base);
+                  if (next) {
+                    set.add(model);
+                  } else {
+                    set.delete(model);
+                  }
+                  const ordered = known.filter((entry) => set.has(entry));
+                  for (const entry of base) {
+                    if (!known.includes(entry) && set.has(entry)) {
+                      ordered.push(entry);
+                    }
+                  }
+                  onChange(ordered);
+                }}
+              />
+              {model}
+            </label>
+          );
+        })}
+      </div>
+      <div id={helpId} className="text-[12px] leading-[1.4] text-muted-foreground">
+        {overridden ? `Overridden. Default: ${defaults.models.join(', ') || 'none'}.` : `Using default (${defaults.models.join(', ') || 'none'}).`}
+      </div>
+    </div>
+  );
+}
+
+function ClaudeMaxTokensField({ defaults, value, disabled, onChange }: { defaults: UIEnvironmentConfig['claudeDefaults']; value: number | undefined; disabled?: boolean; onChange: (value: number | undefined) => void }): React.ReactElement {
+  const id = 'environment-config-claude-maxtokens';
+  const helpId = `${id}-help`;
+  const overridden = value !== undefined;
+  const [text, setText] = React.useState<string>(overridden ? String(value) : '');
+  React.useEffect(() => {
+    setText(overridden ? String(value) : '');
+  }, [value, overridden]);
+  const invalid = text.trim() !== '' && !isValidClaudeTokens(text, defaults);
+  return (
+    <div className="grid gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <Label htmlFor={id}>Max output tokens</Label>
+        {overridden && (
+          <Button type="button" variant="link" size="sm" className="h-auto px-0 text-[12px]" disabled={disabled} onClick={() => onChange(undefined)}>
+            Reset to default
+          </Button>
+        )}
+      </div>
+      <Input
+        id={id}
+        type="number"
+        inputMode="numeric"
+        min={defaults.minTokens}
+        max={defaults.maxTokens}
+        step={1}
+        autoComplete="off"
+        value={text}
+        placeholder={`Default: ${defaults.maxOutputTokens}`}
+        disabled={disabled}
+        aria-describedby={helpId}
+        aria-invalid={invalid}
+        onChange={(event) => {
+          const next = event.target.value;
+          setText(next);
+          if (next.trim() === '') {
+            onChange(undefined);
+            return;
+          }
+          if (!isValidClaudeTokens(next, defaults)) {
+            return;
+          }
+          onChange(Math.trunc(Number(next)));
+        }}
+      />
+      <div id={helpId} className={cn('text-[12px] leading-[1.4]', invalid ? 'text-destructive' : 'text-muted-foreground')}>
+        {invalid
+          ? `Enter an integer between ${defaults.minTokens} and ${defaults.maxTokens}.`
+          : overridden
+          ? `Overridden. Default: ${defaults.maxOutputTokens}.`
+          : `Using default (${defaults.maxOutputTokens}).`}
+      </div>
+    </div>
+  );
+}
+
+function isClaudeOverridden(claude: UIEnvironmentConfig['claude']): boolean {
+  return claude.useMantle !== undefined || claude.useBedrock !== undefined || (claude.models?.length ?? 0) > 0 || claude.maxOutputTokens !== undefined;
+}
+
+function isValidClaudeTokens(text: string, defaults: UIEnvironmentConfig['claudeDefaults']): boolean {
+  const trimmed = text.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    return false;
+  }
+  const value = Number(trimmed);
+  return Number.isFinite(value) && value >= defaults.minTokens && value <= defaults.maxTokens;
 }
 
 function CloudAliasSelect({ id, value, options, disabled, onChange }: { id: string; value: string; options: string[]; disabled?: boolean; onChange: (value: string) => void }): React.ReactElement {

@@ -175,6 +175,27 @@ export class ManageEnvironmentWorkflow {
     this.deps.emit();
   }
 
+  updateClaudeConfig(values: Partial<UIEnvironmentConfig['claude']>): void {
+    if (this.state.manageDialog.busy || this.state.manageDialog.configLoading) {
+      return;
+    }
+    const merged = { ...this.state.manageDialog.config.claude, ...values };
+    const next: UIEnvironmentConfig['claude'] = {};
+    if (merged.useMantle !== undefined) next.useMantle = merged.useMantle;
+    if (merged.useBedrock !== undefined) next.useBedrock = merged.useBedrock;
+    if (merged.models !== undefined && merged.models.length > 0) next.models = merged.models;
+    if (merged.maxOutputTokens !== undefined) next.maxOutputTokens = merged.maxOutputTokens;
+    this.state.manageDialog = {
+      ...this.state.manageDialog,
+      config: {
+        ...this.state.manageDialog.config,
+        claude: next,
+      },
+      error: '',
+    };
+    this.deps.emit();
+  }
+
   updateSSHDConfig(values: Partial<UIEnvironmentConfig['sshd']>): void {
     if (this.state.manageDialog.busy || this.state.manageDialog.configLoading) {
       return;

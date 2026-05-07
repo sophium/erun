@@ -257,9 +257,28 @@ export interface UIEnvironmentConfig {
     workingHours: string;
     idleTrafficBytes: number;
   };
+  claude: UIEnvironmentClaudeConfig;
+  claudeDefaults: UIEnvironmentClaudeDefaults;
   localPorts: UIEnvironmentLocalPorts;
   remote: boolean;
   snapshot: boolean;
+}
+
+export interface UIEnvironmentClaudeConfig {
+  useMantle?: boolean;
+  useBedrock?: boolean;
+  models?: string[];
+  maxOutputTokens?: number;
+}
+
+export interface UIEnvironmentClaudeDefaults {
+  useMantle: boolean;
+  useBedrock: boolean;
+  models: string[];
+  maxOutputTokens: number;
+  knownModels: string[];
+  minTokens: number;
+  maxTokens: number;
 }
 
 export interface UIRuntimePodConfig {
