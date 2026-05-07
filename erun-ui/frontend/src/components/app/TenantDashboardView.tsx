@@ -236,7 +236,7 @@ function tenantDashboardSubtitle(tenant: UITenant | undefined, environmentName: 
   const parts = [
     environmentName,
     `${environmentCount} environment${environmentCount === 1 ? '' : 's'}`,
-    alias ? `primary ${alias}` : '',
+    alias ? `Primary cloud: ${alias}` : '',
   ].filter(Boolean);
   return parts.join(', ');
 }
