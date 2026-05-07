@@ -64,7 +64,7 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
         >
           <DialogHeader>
             <DialogTitle>{selection ? `${selection.tenant}-${selection.environment}` : 'Environment'}</DialogTitle>
-            <DialogDescription className="sr-only">Edit environment settings, run diagnostics, and delete the selected environment.</DialogDescription>
+            <DialogDescription>Edit environment configuration, deploy a different runtime version, run diagnostics, or delete the environment.</DialogDescription>
           </DialogHeader>
           <ManageDialogContent controller={controller} state={state} confirmationRef={confirmationRef} expected={expected} confirmingDelete={confirmingDelete} />
           <DialogError error={dialog.error} />
@@ -325,7 +325,7 @@ function LocalSyncFolderField({ controller, dialog, error }: { controller: ERunU
 function WorkspaceSyncStatus({ sshd }: { sshd: ManageDialog['config']['sshd'] }): React.ReactElement | null {
   const status = String(sshd.workspaceSyncStatus || '').trim();
   const message = String(sshd.workspaceSyncStatusMessage || '').trim();
-  if (!status || status === 'stopped') {
+  if (!status) {
     return null;
   }
   return (

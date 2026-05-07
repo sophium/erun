@@ -40,7 +40,7 @@ export function GlobalConfigDialogView({ controller, state }: { controller: ERun
         >
           <DialogHeader>
             <DialogTitle>ERun settings</DialogTitle>
-            <DialogDescription className="sr-only">Manage default tenant and cloud aliases.</DialogDescription>
+            <DialogDescription>Default tenant, cloud aliases, and cloud contexts shared across the app.</DialogDescription>
           </DialogHeader>
           <GlobalConfigBody controller={controller} state={state} />
           <DialogError error={dialog.error} />
@@ -188,8 +188,8 @@ function CloudContextDraftForm({ controller, dialog }: { controller: ERunUIContr
           label="Region"
           value={dialog.cloudContextDraft.region || 'eu-west-2'}
           options={[
-            { value: 'eu-west-2', label: 'London' },
-            { value: 'eu-west-1', label: 'Ireland' },
+            { value: 'eu-west-2', label: cloudRegionLabel('eu-west-2') },
+            { value: 'eu-west-1', label: cloudRegionLabel('eu-west-1') },
           ]}
           disabled={dialog.busy}
           onChange={(region) => controller.updateCloudContextDraft({ region })}
@@ -348,15 +348,27 @@ function cloudContextSummary(context: { cloudProviderAlias: string; region: stri
   return parts.join(' - ');
 }
 
+const AWS_REGION_NAMES: Record<string, string> = {
+  'eu-west-1': 'Ireland',
+  'eu-west-2': 'London',
+  'eu-west-3': 'Paris',
+  'eu-central-1': 'Frankfurt',
+  'eu-north-1': 'Stockholm',
+  'eu-south-1': 'Milan',
+  'us-east-1': 'N. Virginia',
+  'us-east-2': 'Ohio',
+  'us-west-1': 'N. California',
+  'us-west-2': 'Oregon',
+  'ap-northeast-1': 'Tokyo',
+  'ap-northeast-2': 'Seoul',
+  'ap-south-1': 'Mumbai',
+  'ap-southeast-1': 'Singapore',
+  'ap-southeast-2': 'Sydney',
+};
+
 function cloudRegionLabel(region: string): string {
-  switch (region) {
-    case 'eu-west-2':
-      return 'London';
-    case 'eu-west-1':
-      return 'Ireland';
-    default:
-      return region;
-  }
+  const name = AWS_REGION_NAMES[region];
+  return name ? `${region} (${name})` : region;
 }
 
 function generatedContextName(provider: { alias: string; username?: string; accountId?: string } | undefined, region: string, contexts: Array<{ name: string; kubernetesContext: string }>): string {
