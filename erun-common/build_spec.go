@@ -255,20 +255,115 @@ func newDockerBuildSpec(now NowFunc, projectRoot, environment string, buildConte
 }
 
 func (b DockerBuildSpec) command() commandSpec {
-	args := dockerBuildArgs(b)
 	return commandSpec{
 		Dir:  b.ContextDir,
 		Name: "docker",
-		Args: args,
+		Args: dockerBuildArgs(b, ""),
 	}
 }
 
 func (b DockerBuildSpec) traceCommands() []commandSpec {
-	if len(b.Platforms) == 0 {
-		return []commandSpec{b.command()}
+	if b.Promote {
+		return promoteTraceCommands(b)
 	}
+	if len(b.Platforms) == 0 {
+		commands := []commandSpec{b.command()}
+		if b.Fingerprint != "" {
+			commands = append(commands, dockerTagTraceCommand(b.ContextDir, b.Image.Tag, fingerprintTag(b.Image, b.Fingerprint, "")))
+		}
+		return commands
+	}
+	return multiPlatformTraceCommands(b)
+}
 
-	return append(dockerBuildxSetupCommands(b.ContextDir), b.command())
+func multiPlatformTraceCommands(b DockerBuildSpec) []commandSpec {
+	commands := make([]commandSpec, 0, len(b.Platforms)*3+2)
+	perPlatformTags := make([]string, 0, len(b.Platforms))
+	for _, platform := range b.Platforms {
+		platformTag := platformSuffixedTag(b.Image.Tag, platform)
+		perPlatformTags = append(perPlatformTags, platformTag)
+		commands = append(commands, commandSpec{
+			Dir:  b.ContextDir,
+			Name: "docker",
+			Args: dockerBuildArgs(b, platform),
+		})
+		if b.Fingerprint != "" {
+			commands = append(commands, dockerTagTraceCommand(b.ContextDir, platformTag, fingerprintTag(b.Image, b.Fingerprint, platform)))
+		}
+	}
+	if !b.Push {
+		return commands
+	}
+	for _, platformTag := range perPlatformTags {
+		commands = append(commands, commandSpec{
+			Dir:  b.ContextDir,
+			Name: "docker",
+			Args: []string{"push", platformTag},
+		})
+	}
+	commands = append(commands, commandSpec{
+		Dir:  b.ContextDir,
+		Name: "docker",
+		Args: append([]string{"manifest", "create", "--amend", b.Image.Tag}, perPlatformTags...),
+	})
+	commands = append(commands, commandSpec{
+		Dir:  b.ContextDir,
+		Name: "docker",
+		Args: []string{"manifest", "push", b.Image.Tag},
+	})
+	return commands
+}
+
+func promoteTraceCommands(b DockerBuildSpec) []commandSpec {
+	if len(b.Platforms) == 0 {
+		commands := []commandSpec{
+			dockerTagTraceCommand(b.ContextDir, fingerprintTag(b.Image, b.Fingerprint, ""), b.Image.Tag),
+		}
+		if b.Push {
+			commands = append(commands, commandSpec{
+				Dir:  b.ContextDir,
+				Name: "docker",
+				Args: []string{"push", b.Image.Tag},
+			})
+		}
+		return commands
+	}
+	commands := make([]commandSpec, 0, len(b.Platforms)*2+2)
+	perPlatformTags := make([]string, 0, len(b.Platforms))
+	for _, platform := range b.Platforms {
+		platformTag := platformSuffixedTag(b.Image.Tag, platform)
+		perPlatformTags = append(perPlatformTags, platformTag)
+		commands = append(commands, dockerTagTraceCommand(b.ContextDir, fingerprintTag(b.Image, b.Fingerprint, platform), platformTag))
+	}
+	if !b.Push {
+		return commands
+	}
+	for _, platformTag := range perPlatformTags {
+		commands = append(commands, commandSpec{
+			Dir:  b.ContextDir,
+			Name: "docker",
+			Args: []string{"push", platformTag},
+		})
+	}
+	commands = append(commands, commandSpec{
+		Dir:  b.ContextDir,
+		Name: "docker",
+		Args: append([]string{"manifest", "create", "--amend", b.Image.Tag}, perPlatformTags...),
+	})
+	commands = append(commands, commandSpec{
+		Dir:  b.ContextDir,
+		Name: "docker",
+		Args: []string{"manifest", "push", b.Image.Tag},
+	})
+	return commands
+}
+
+func dockerTagTraceCommand(dir, source, target string) commandSpec {
+	return commandSpec{
+		Dir:  dir,
+		Name: "docker",
+		Args: []string{"tag", source, target},
+	}
 }
 
 func (p DockerPushSpec) command() commandSpec {

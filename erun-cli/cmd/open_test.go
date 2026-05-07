@@ -1207,19 +1207,17 @@ func TestOpenCommandDryRunRedeploysWhenRuntimeHasLocalBuilds(t *testing.T) {
 
 	output := stderr.String()
 	for _, want := range []string{
-		"docker buildx build --builder erun-multiarch",
-		"--platform 'linux/amd64,linux/arm64'",
-		"--build-arg ERUN_VERSION=1.0.0",
-		"--push",
+		"docker build --platform linux/amd64",
+		"docker build --platform linux/arm64",
+		"--build-arg ERUN_VERSION=1.0.0-snapshot",
+		"docker manifest create --amend",
+		"docker manifest push",
 		"helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace tenant-a-local --kube-context cluster-dev -f " + filepath.Join(chartPath, "values.local.yaml") + " --set-string tenant=tenant-a --set-string environment=local",
 		"kubectl --context cluster-dev --namespace tenant-a-local wait --for=condition=Available --timeout 2m0s deployment/tenant-a-devops",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected dry-run output to contain %q, got %q", want, output)
 		}
-	}
-	if strings.Contains(output, "docker push erunpaas/tenant-a-devops:1.0.0") {
-		t.Fatalf("did not expect separate docker push in dry-run output, got %q", output)
 	}
 }
 

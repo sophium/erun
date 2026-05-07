@@ -1,7 +1,9 @@
 package eruncommon
 
 import (
+	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
 )
 
@@ -20,6 +22,7 @@ func runDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBu
 	if skip {
 		return nil
 	}
+	traceIncrementalDecision(ctx, buildInput)
 	for _, command := range buildInput.traceCommands() {
 		ctx.TraceCommand(command.Dir, command.Name, command.Args...)
 	}
@@ -27,6 +30,32 @@ func runDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBu
 		return nil
 	}
 	return build(buildInput, ctx.Stdout, ctx.Stderr)
+}
+
+// traceIncrementalDecision mirrors shouldSkipDockerBuild's "<inspect> + <reason>"
+// trace pattern for the fingerprint-based incremental path. The inspect was
+// already executed during resolution (applyIncrementalPromotion), but emitting
+// it here keeps dry-run output complete and parallels the SkipIfExists output
+// style. Builds without a fingerprint (incremental disabled, or no fp tag was
+// looked up) produce no extra trace.
+func traceIncrementalDecision(ctx Context, buildInput DockerBuildSpec) {
+	if buildInput.Fingerprint == "" {
+		return
+	}
+	platforms := buildInput.Platforms
+	if len(platforms) == 0 {
+		platforms = []string{""}
+	}
+	for _, platform := range platforms {
+		fpTag := fingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
+		ctx.TraceCommand("", "docker", "image", "inspect", fpTag)
+	}
+	tag := strings.TrimSpace(buildInput.Image.Tag)
+	if buildInput.Promote {
+		ctx.Trace("promoting from cached fingerprint image: " + tag)
+	} else {
+		ctx.Trace("rebuilding because cached fingerprint image is missing or stale: " + tag)
+	}
 }
 
 func shouldSkipDockerBuild(ctx Context, buildInput DockerBuildSpec, inspect DockerImageInspectorFunc) (bool, error) {
@@ -51,6 +80,15 @@ func shouldSkipDockerBuild(ctx Context, buildInput DockerBuildSpec, inspect Dock
 		if !dockerPlatformsCovered(available, buildInput.Platforms) {
 			return false, nil
 		}
+		// The registry copy is authoritative. If the local Docker store has a
+		// single-arch copy of this tag, dependent builds resolving FROM <tag>
+		// for another platform will fail with "no match for platform in
+		// manifest" because the daemon prefers its local image and never falls
+		// back to the registry. Drop the stale local copy so each per-platform
+		// FROM resolution pulls fresh.
+		if err := removeStaleLocalImageForPlatforms(ctx, tag, buildInput.Platforms); err != nil {
+			return false, err
+		}
 		ctx.Trace("skipping docker build because configured multi-platform image exists: " + tag)
 		return true, nil
 	}
@@ -74,6 +112,32 @@ func shouldSkipDockerBuild(ctx Context, buildInput DockerBuildSpec, inspect Dock
 	}
 	ctx.Trace("skipping docker build because configured image exists: " + tag)
 	return true, nil
+}
+
+func removeStaleLocalImageForPlatforms(ctx Context, tag string, required []string) error {
+	localPlatforms, err := dockerLocalImagePlatforms(tag)
+	if err != nil {
+		return err
+	}
+	if len(localPlatforms) == 0 {
+		return nil
+	}
+	if dockerPlatformsCovered(localPlatforms, required) {
+		return nil
+	}
+	ctx.TraceCommand("", "docker", "image", "rm", tag)
+	if ctx.DryRun {
+		return nil
+	}
+	cmd := exec.Command("docker", "image", "rm", tag)
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // dockerPlatformsCovered reports whether every platform in required is present in available.

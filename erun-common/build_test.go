@@ -79,7 +79,7 @@ func TestDockerBuildArgsIncludeImageVersionAsBuildArg(t *testing.T) {
 		Image: DockerImageReference{
 			Tag: "erunpaas/erun-devops:1.0.0-snapshot-20260406123456",
 		},
-	})
+	}, "")
 	got := strings.Join(args, " ")
 	for _, want := range []string{
 		"build",
@@ -93,7 +93,7 @@ func TestDockerBuildArgsIncludeImageVersionAsBuildArg(t *testing.T) {
 	}
 }
 
-func TestDockerBuildArgsUseBuildxForMultiPlatformPush(t *testing.T) {
+func TestDockerBuildArgsAddPlatformAndPlatformSuffixedTagForMultiPlatform(t *testing.T) {
 	args := dockerBuildArgs(DockerBuildSpec{
 		DockerfilePath: "/tmp/Dockerfile",
 		Image: DockerImageReference{
@@ -101,24 +101,29 @@ func TestDockerBuildArgsUseBuildxForMultiPlatformPush(t *testing.T) {
 		},
 		Platforms: []string{"linux/amd64", "linux/arm64"},
 		Push:      true,
-	})
+	}, "linux/amd64")
 	got := strings.Join(args, " ")
 	for _, want := range []string{
-		"buildx build",
-		"--builder erun-multiarch",
-		"--platform linux/amd64,linux/arm64",
-		"-t erunpaas/erun-devops:1.0.0",
+		"build",
+		"--platform linux/amd64",
+		"--provenance=false",
+		"-t erunpaas/erun-devops:1.0.0-amd64",
 		"--build-arg ERUN_VERSION=1.0.0",
-		"--push",
 		"-f /tmp/Dockerfile .",
 	} {
 		if !strings.Contains(got, want) {
-			t.Fatalf("expected docker buildx args to contain %q, got %q", want, got)
+			t.Fatalf("expected docker build args to contain %q, got %q", want, got)
 		}
+	}
+	if strings.Contains(got, "--push") {
+		t.Fatalf("multi-platform per-platform build must not pass --push, got %q", got)
+	}
+	if strings.Contains(got, "buildx") {
+		t.Fatalf("multi-platform per-platform build must not use buildx, got %q", got)
 	}
 }
 
-func TestDockerBuildTraceCommandsIncludeBuildxBootstrapForMultiPlatformBuilds(t *testing.T) {
+func TestDockerBuildTraceCommandsExpandToPerPlatformBuildPushAndManifestForMultiPlatform(t *testing.T) {
 	buildInput := DockerBuildSpec{
 		ContextDir:     "/tmp/project",
 		DockerfilePath: "/tmp/project/Dockerfile",
@@ -130,20 +135,20 @@ func TestDockerBuildTraceCommandsIncludeBuildxBootstrapForMultiPlatformBuilds(t 
 	}
 
 	commands := buildInput.traceCommands()
-	if len(commands) != 4 {
-		t.Fatalf("unexpected trace commands: %+v", commands)
+	got := make([]string, len(commands))
+	for i, command := range commands {
+		got[i] = strings.Join(command.Args, " ")
 	}
-	if got := strings.Join(commands[0].Args, " "); got != "buildx inspect erun-multiarch" {
-		t.Fatalf("unexpected inspect command: %q", got)
+	want := []string{
+		"build --platform linux/amd64 --provenance=false -t erunpaas/erun-devops:1.0.0-amd64 --build-arg ERUN_VERSION=1.0.0 -f /tmp/project/Dockerfile .",
+		"build --platform linux/arm64 --provenance=false -t erunpaas/erun-devops:1.0.0-arm64 --build-arg ERUN_VERSION=1.0.0 -f /tmp/project/Dockerfile .",
+		"push erunpaas/erun-devops:1.0.0-amd64",
+		"push erunpaas/erun-devops:1.0.0-arm64",
+		"manifest create --amend erunpaas/erun-devops:1.0.0 erunpaas/erun-devops:1.0.0-amd64 erunpaas/erun-devops:1.0.0-arm64",
+		"manifest push erunpaas/erun-devops:1.0.0",
 	}
-	if got := strings.Join(commands[1].Args, " "); got != "buildx create --name erun-multiarch --driver docker-container" {
-		t.Fatalf("unexpected create command: %q", got)
-	}
-	if got := strings.Join(commands[2].Args, " "); got != "buildx inspect --builder erun-multiarch --bootstrap" {
-		t.Fatalf("unexpected bootstrap command: %q", got)
-	}
-	if got := strings.Join(commands[3].Args, " "); !strings.Contains(got, "buildx build --builder erun-multiarch --platform linux/amd64,linux/arm64") {
-		t.Fatalf("unexpected build command: %q", got)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected trace commands\n got: %+v\nwant: %+v", got, want)
 	}
 }
 
@@ -320,22 +325,17 @@ exit 1
 	}
 }
 
-func TestDockerImageBuilderReturnsRegistryAuthErrorForBuildxPushAuthFailure(t *testing.T) {
+func TestDockerImageBuilderReturnsRegistryAuthErrorForMultiPlatformPushAuthFailure(t *testing.T) {
 	dockerDir := t.TempDir()
 	dockerPath := filepath.Join(dockerDir, "docker")
 	if err := os.WriteFile(dockerPath, []byte(`#!/bin/sh
-if [ "$1" = "buildx" ] && [ "$2" = "inspect" ] && [ "$3" = "erun-multiarch" ]; then
+if [ "$1" = "build" ]; then
   exit 0
 fi
-if [ "$1" = "buildx" ] && [ "$2" = "inspect" ] && [ "$3" = "--builder" ] && [ "$4" = "erun-multiarch" ] && [ "$5" = "--bootstrap" ]; then
-  cat <<'EOF'
-Name: erun-multiarch
-Driver: docker-container
-Platforms: linux/amd64, linux/arm64
-EOF
+if [ "$1" = "tag" ]; then
   exit 0
 fi
-if [ "$1" = "buildx" ] && [ "$2" = "build" ]; then
+if [ "$1" = "push" ]; then
   echo "push access denied: insufficient_scope: authorization failed" >&2
   exit 1
 fi
@@ -363,7 +363,7 @@ exit 1
 	if !errors.As(err, &authErr) {
 		t.Fatalf("expected DockerRegistryAuthError, got %T: %v", err, err)
 	}
-	if authErr.Tag != "erunpaas/erun-devops:1.4.2" {
+	if !strings.HasPrefix(authErr.Tag, "erunpaas/erun-devops:1.4.2-") {
 		t.Fatalf("unexpected auth error tag: %+v", authErr)
 	}
 	if authErr.Registry != "" {
@@ -474,18 +474,6 @@ func TestIsDockerPushAuthorizationErrorDetectsRegistryDenials(t *testing.T) {
 		if got := IsDockerPushAuthorizationError(message); got != want {
 			t.Errorf("IsDockerPushAuthorizationError(%q) = %v, want %v", message, got, want)
 		}
-	}
-}
-
-func TestMissingBuildxPlatformsReportsRequiredPlatformsNotPresent(t *testing.T) {
-	output := `Name: erun-multiarch
-Driver: docker-container
-Platforms: linux/arm64
-`
-
-	missing := missingBuildxPlatforms(output, []string{"linux/amd64", "linux/arm64"})
-	if !reflect.DeepEqual(missing, []string{"linux/amd64"}) {
-		t.Fatalf("unexpected missing platforms: %+v", missing)
 	}
 }
 
@@ -811,7 +799,59 @@ func TestHasProjectBuildScriptIgnoresDockerArtifactBuildScripts(t *testing.T) {
 	}
 }
 
-func TestResolveBuildExecutionIncludesLinuxBuildScriptsAtProjectRoot(t *testing.T) {
+func TestResolveBuildExecutionSkipsLinuxBuildScriptsAtProjectRoot(t *testing.T) {
+	prevGOOS := currentGOOS
+	prevLookPath := hostLookPath
+	currentGOOS = func() string { return "linux" }
+	hostLookPath = func(file string) (string, error) { return "/usr/bin/" + file, nil }
+	t.Cleanup(func() {
+		currentGOOS = prevGOOS
+		hostLookPath = prevLookPath
+	})
+
+	projectRoot := t.TempDir()
+	linuxComponentDir := filepath.Join(projectRoot, "erun-devops", "linux", "erun-cli")
+	if err := os.MkdirAll(linuxComponentDir, 0o755); err != nil {
+		t.Fatalf("mkdir linux component dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.2.3\n"), 0o644); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(linuxComponentDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write build.sh: %v", err)
+	}
+	dockerDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
+	if err := os.MkdirAll(dockerDir, 0o755); err != nil {
+		t.Fatalf("mkdir docker dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dockerDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatalf("write Dockerfile: %v", err)
+	}
+
+	execution, err := ResolveBuildExecution(
+		ConfigStore{},
+		func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		func() (DockerBuildContext, error) {
+			return DockerBuildContext{Dir: projectRoot}, nil
+		},
+		nil,
+		DockerCommandTarget{},
+	)
+	if err != nil {
+		t.Fatalf("ResolveBuildExecution failed: %v", err)
+	}
+
+	if len(execution.linuxBuilds) != 0 {
+		t.Fatalf("expected no linux build scripts at project root, got %+v", execution.linuxBuilds)
+	}
+	if execution.skippedLinux {
+		t.Fatalf("expected skippedLinux=false (linux builds were never resolved at project root), got true")
+	}
+}
+
+func TestResolveBuildExecutionIncludesLinuxBuildScriptsWhenInsideLinuxComponentDir(t *testing.T) {
 	prevGOOS := currentGOOS
 	prevLookPath := hostLookPath
 	currentGOOS = func() string { return "linux" }
@@ -839,7 +879,7 @@ func TestResolveBuildExecutionIncludesLinuxBuildScriptsAtProjectRoot(t *testing.
 			return "tenant-a", projectRoot, nil
 		},
 		func() (DockerBuildContext, error) {
-			return DockerBuildContext{Dir: projectRoot}, nil
+			return DockerBuildContext{Dir: linuxComponentDir}, nil
 		},
 		nil,
 		DockerCommandTarget{},
@@ -849,7 +889,7 @@ func TestResolveBuildExecutionIncludesLinuxBuildScriptsAtProjectRoot(t *testing.
 	}
 
 	if len(execution.linuxBuilds) != 1 {
-		t.Fatalf("unexpected linux build scripts: %+v", execution.linuxBuilds)
+		t.Fatalf("expected linux build script when invoked from linux component dir, got %+v", execution.linuxBuilds)
 	}
 	if execution.linuxBuilds[0].Dir != linuxComponentDir || execution.linuxBuilds[0].Path != "./build.sh" {
 		t.Fatalf("unexpected linux build script: %+v", execution.linuxBuilds[0])
@@ -884,7 +924,7 @@ func TestResolveBuildExecutionSkipsLinuxBuildScriptsWhenHostIsNotLinux(t *testin
 			return "tenant-a", projectRoot, nil
 		},
 		func() (DockerBuildContext, error) {
-			return DockerBuildContext{Dir: projectRoot}, nil
+			return DockerBuildContext{Dir: linuxComponentDir}, nil
 		},
 		nil,
 		DockerCommandTarget{},
@@ -927,7 +967,7 @@ func TestResolveBuildExecutionSkipsLinuxBuildScriptsWhenDpkgDebUnavailable(t *te
 			return "tenant-a", projectRoot, nil
 		},
 		func() (DockerBuildContext, error) {
-			return DockerBuildContext{Dir: projectRoot}, nil
+			return DockerBuildContext{Dir: linuxComponentDir}, nil
 		},
 		nil,
 		DockerCommandTarget{},
@@ -1502,6 +1542,9 @@ if [ "$1" = "manifest" ] && [ "$2" = "inspect" ]; then
   printf '{"schemaVersion":2,"mediaType":"application/vnd.docker.distribution.manifest.list.v2+json","manifests":[{"platform":{"architecture":"amd64","os":"linux"}},{"platform":{"architecture":"arm64","os":"linux"}}]}'
   exit 0
 fi
+if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
+  exit 1
+fi
 echo "unexpected docker invocation: $@" >&2
 exit 1
 `), 0o755); err != nil {
@@ -1530,6 +1573,112 @@ exit 1
 	}
 	if built {
 		t.Fatal("expected build to be skipped because multi-platform manifest already covers all required platforms")
+	}
+}
+
+func TestRunDockerBuildRemovesStaleSingleArchLocalImageWhenSkippingMultiPlatform(t *testing.T) {
+	dockerDir := t.TempDir()
+	logPath := filepath.Join(dockerDir, "calls.log")
+	dockerPath := filepath.Join(dockerDir, "docker")
+	if err := os.WriteFile(dockerPath, []byte(`#!/bin/sh
+echo "$@" >> "`+logPath+`"
+if [ "$1" = "manifest" ] && [ "$2" = "inspect" ]; then
+  printf '{"schemaVersion":2,"mediaType":"application/vnd.docker.distribution.manifest.list.v2+json","manifests":[{"platform":{"architecture":"amd64","os":"linux"}},{"platform":{"architecture":"arm64","os":"linux"}}]}'
+  exit 0
+fi
+if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
+  printf '[{"Os":"linux","Architecture":"arm64"}]'
+  exit 0
+fi
+if [ "$1" = "image" ] && [ "$2" = "rm" ]; then
+  exit 0
+fi
+echo "unexpected docker invocation: $@" >&2
+exit 1
+`), 0o755); err != nil {
+		t.Fatalf("write docker stub: %v", err)
+	}
+	t.Setenv("PATH", dockerDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	built := false
+	err := RunDockerBuild(Context{
+		Logger: NewLoggerWithWriters(1, io.Discard, io.Discard),
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+	}, DockerBuildSpec{
+		ContextDir:     "/tmp/base",
+		DockerfilePath: "/tmp/base/Dockerfile",
+		Image:          DockerImageReference{Tag: "erunpaas/erun-ubuntu:noble-20260217"},
+		Platforms:      []string{"linux/amd64", "linux/arm64"},
+		SkipIfExists:   true,
+		Push:           true,
+	}, func(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
+		built = true
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RunDockerBuild failed: %v", err)
+	}
+	if built {
+		t.Fatal("expected build to be skipped because registry manifest already covers all required platforms")
+	}
+
+	calls, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read docker call log: %v", err)
+	}
+	got := string(calls)
+	if !strings.Contains(got, "image rm erunpaas/erun-ubuntu:noble-20260217") {
+		t.Fatalf("expected stale single-arch local image to be removed, got docker calls:\n%s", got)
+	}
+}
+
+func TestRunDockerBuildLeavesLocalImageWhenItCoversAllRequiredPlatforms(t *testing.T) {
+	dockerDir := t.TempDir()
+	logPath := filepath.Join(dockerDir, "calls.log")
+	dockerPath := filepath.Join(dockerDir, "docker")
+	if err := os.WriteFile(dockerPath, []byte(`#!/bin/sh
+echo "$@" >> "`+logPath+`"
+if [ "$1" = "manifest" ] && [ "$2" = "inspect" ]; then
+  printf '{"schemaVersion":2,"mediaType":"application/vnd.docker.distribution.manifest.list.v2+json","manifests":[{"platform":{"architecture":"amd64","os":"linux"}},{"platform":{"architecture":"arm64","os":"linux"}}]}'
+  exit 0
+fi
+if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then
+  printf '[{"Os":"linux","Architecture":"arm64","Manifests":[{"ImageData":{"Platform":{"os":"linux","architecture":"amd64"}}},{"ImageData":{"Platform":{"os":"linux","architecture":"arm64"}}}]}]'
+  exit 0
+fi
+echo "unexpected docker invocation: $@" >&2
+exit 1
+`), 0o755); err != nil {
+		t.Fatalf("write docker stub: %v", err)
+	}
+	t.Setenv("PATH", dockerDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	err := RunDockerBuild(Context{
+		Logger: NewLoggerWithWriters(1, io.Discard, io.Discard),
+		Stdout: io.Discard,
+		Stderr: io.Discard,
+	}, DockerBuildSpec{
+		ContextDir:     "/tmp/base",
+		DockerfilePath: "/tmp/base/Dockerfile",
+		Image:          DockerImageReference{Tag: "erunpaas/erun-ubuntu:noble-20260217"},
+		Platforms:      []string{"linux/amd64", "linux/arm64"},
+		SkipIfExists:   true,
+		Push:           true,
+	}, func(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
+		t.Fatalf("build should not run when registry covers all platforms: %+v", buildInput)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RunDockerBuild failed: %v", err)
+	}
+
+	calls, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read docker call log: %v", err)
+	}
+	if strings.Contains(string(calls), "image rm") {
+		t.Fatalf("expected multi-arch local image to be left in place, got docker calls:\n%s", string(calls))
 	}
 }
 

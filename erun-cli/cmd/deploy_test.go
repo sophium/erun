@@ -879,14 +879,17 @@ func TestRootDeployShorthandDryRunPrintsBuildAndDeployCommandsWithoutExecuting(t
 	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
-	if !strings.Contains(output, "docker buildx build --builder erun-multiarch") {
-		t.Fatalf("expected dry-run build trace, got %q", output)
-	}
-	if !strings.Contains(output, "--platform 'linux/amd64,linux/arm64'") || !strings.Contains(output, "--push") {
-		t.Fatalf("expected multi-platform dry-run build trace, got %q", output)
-	}
-	if strings.Contains(output, "docker push erunpaas/erun-devops:1.1.0") {
-		t.Fatalf("did not expect separate dry-run push trace, got %q", output)
+	for _, want := range []string{
+		"docker build --platform linux/amd64 --provenance=false -t erunpaas/erun-devops:1.1.0-amd64",
+		"docker build --platform linux/arm64 --provenance=false -t erunpaas/erun-devops:1.1.0-arm64",
+		"docker push erunpaas/erun-devops:1.1.0-amd64",
+		"docker push erunpaas/erun-devops:1.1.0-arm64",
+		"docker manifest create --amend erunpaas/erun-devops:1.1.0 erunpaas/erun-devops:1.1.0-amd64 erunpaas/erun-devops:1.1.0-arm64",
+		"docker manifest push erunpaas/erun-devops:1.1.0",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected dry-run trace to contain %q, got %q", want, output)
+		}
 	}
 	if !strings.Contains(output, "helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace tenant-a-local --kube-context cluster-local -f "+filepath.Join(chartPath, "values.local.yaml")+" --set-string tenant=tenant-a --set-string environment=local") {
 		t.Fatalf("expected dry-run deploy trace, got %q", output)
@@ -964,9 +967,6 @@ func TestRootDeployShorthandUsesPersistedSnapshotPreferenceForLocalEnvironment(t
 	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
-	if strings.Contains(output, "docker build -t") || strings.Contains(output, "docker push ") {
-		t.Fatalf("did not expect dry-run snapshot build or push, got %q", output)
-	}
 	if !strings.Contains(output, "helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace tenant-a-local --kube-context cluster-local -f "+filepath.Join(chartPath, "values.local.yaml")+" --set-string tenant=tenant-a --set-string environment=local") {
 		t.Fatalf("expected dry-run deploy trace, got %q", output)
 	}

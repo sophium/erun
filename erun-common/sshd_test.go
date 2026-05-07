@@ -87,7 +87,7 @@ func TestRuntimeDockerfileInstallsPinnedCodexCLI(t *testing.T) {
 	if !strings.Contains(content, "ARG CODEX_VERSION=0.125.0") {
 		t.Fatalf("expected runtime Dockerfile to pin the Codex CLI version, got:\n%s", content)
 	}
-	if !strings.Contains(content, "ARG CLAUDE_CODE_VERSION=2.1.126") {
+	if !strings.Contains(content, "ARG CLAUDE_CODE_VERSION=2.1.132") {
 		t.Fatalf("expected runtime Dockerfile to pin the Claude Code CLI version, got:\n%s", content)
 	}
 	if !strings.Contains(content, "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.gz") {
