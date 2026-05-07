@@ -335,19 +335,32 @@ function ManageDialogFooter({ controller, dialog, confirmingDelete, deleteEnable
   const saving = dialog.busyAction === 'save';
   const deleting = dialog.busyAction === 'delete';
   return (
-    <DialogFooter>
+    <DialogFooter className="sm:justify-between">
       <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => controller.closeManageDialog()}>Cancel</Button>
-      {confirmingDelete ? (
-        <Button type="button" variant="destructive" size="sm" disabled={dialog.busy || !deleteEnabled} onClick={() => void controller.submitManageDelete()}>
-          {deleting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
-          {deleting ? 'Deleting...' : 'Confirm delete'}
-        </Button>
-      ) : (
-        <Button type="button" size="sm" disabled={dialog.busy || dialog.configLoading || Boolean(resourceError)} onClick={() => void controller.submitManageConfig().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}>
-          {saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
-          {saving ? 'Saving...' : 'Save'}
-        </Button>
-      )}
+      <div className="flex items-center gap-2">
+        {confirmingDelete ? (
+          <>
+            <Button type="button" variant="ghost" size="sm" disabled={dialog.busy} onClick={() => controller.setManageTab('general')}>
+              Back to edit
+            </Button>
+            <Button type="button" variant="destructive" size="sm" disabled={dialog.busy || !deleteEnabled} onClick={() => void controller.submitManageDelete()}>
+              {deleting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
+              {deleting ? 'Deleting...' : 'Confirm delete'}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button type="button" variant="outline" size="sm" disabled={dialog.busy || dialog.configLoading} onClick={() => controller.setManageTab('delete')}>
+              <Trash2 aria-hidden="true" />
+              Delete
+            </Button>
+            <Button type="button" size="sm" disabled={dialog.busy || dialog.configLoading || Boolean(resourceError)} onClick={() => void controller.submitManageConfig().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}>
+              {saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
+              {saving ? 'Saving...' : 'Save'}
+            </Button>
+          </>
+        )}
+      </div>
     </DialogFooter>
   );
 }
