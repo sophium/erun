@@ -1436,10 +1436,13 @@ func DeployHelmChart(params HelmDeployParams) error {
 		CloudRegion:        params.CloudRegion,
 		CloudInstanceID:    params.CloudInstanceID,
 		OIDCAllowedIssuers: params.OIDCAllowedIssuers,
+		ContainerRegistry:  params.ContainerRegistry,
 		ImageOverrides:     cloneStringMap(params.ImageOverrides),
 		ResetDatabase:      params.ResetDatabase,
 		Idle:               params.Idle,
+		Claude:             params.Claude,
 		RuntimePod:         params.RuntimePod,
+		Version:            params.Version,
 		Timeout:            params.Timeout,
 	}.command()
 

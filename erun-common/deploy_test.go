@@ -1842,6 +1842,61 @@ printf '%s
 	}
 }
 
+func TestDeployHelmChartForwardsClaudeAndContainerRegistry(t *testing.T) {
+	helmDir := t.TempDir()
+	argsPath := filepath.Join(helmDir, "helm-args.txt")
+	helmPath := filepath.Join(helmDir, "helm")
+	if err := os.WriteFile(helmPath, []byte(`#!/bin/sh
+printf '%s
+' "$@" > "$ERUN_HELM_ARGS_FILE"
+`), 0o755); err != nil {
+		t.Fatalf("write helm stub: %v", err)
+	}
+	t.Setenv("ERUN_HELM_ARGS_FILE", argsPath)
+	t.Setenv("PATH", helmDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	chartPath := createHelmChartFixture(t, t.TempDir(), "erun-devops")
+	useMantle := true
+	maxTokens := 8192
+	if err := DeployHelmChart(HelmDeployParams{
+		ReleaseName:       "erun-devops",
+		ChartPath:         chartPath,
+		ValuesFilePath:    filepath.Join(chartPath, "values.local.yaml"),
+		Tenant:            "erun",
+		Environment:       "local",
+		Namespace:         "erun-local",
+		WorktreeStorage:   WorktreeStorageHost,
+		WorktreeRepoName:  "erun",
+		WorktreeHostPath:  "/home/erun/git/erun",
+		ContainerRegistry: "ghcr.io/sophium",
+		Claude: EnvironmentClaudeConfig{
+			UseMantle:       &useMantle,
+			Models:          []string{"opus", "sonnet"},
+			MaxOutputTokens: &maxTokens,
+		},
+		Timeout: DefaultHelmDeploymentTimeout,
+	}); err != nil {
+		t.Fatalf("DeployHelmChart failed: %v", err)
+	}
+
+	data, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read helm args: %v", err)
+	}
+	args := string(data)
+	for _, want := range []string{
+		"--set-string\ncontainerRegistry=ghcr.io/sophium\n",
+		"--set-string\nclaude.useMantle=1\n",
+		"--set-string\nclaude.useBedrock=0\n",
+		"--set-string\nclaude.availableModels=opus,sonnet\n",
+		"--set-string\nclaude.maxOutputTokens=8192\n",
+	} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("expected helm args to include %q, got:\n%s", want, args)
+		}
+	}
+}
+
 func TestDeployHelmChartReturnsPendingOperationError(t *testing.T) {
 	helmDir := t.TempDir()
 	helmPath := filepath.Join(helmDir, "helm")

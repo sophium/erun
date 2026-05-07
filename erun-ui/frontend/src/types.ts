@@ -18,7 +18,8 @@ export interface UITenant {
 }
 
 export type EnvironmentActionMode = 'init' | 'deploy';
-export type ManageTab = 'general' | 'runtime' | 'claude' | 'network' | 'access' | 'delete';
+export type ManageTab = 'general' | 'runtime' | 'ai' | 'ports' | 'ssh' | 'delete';
+export type ManageEditTab = Exclude<ManageTab, 'delete'>;
 
 export interface UISelection {
   tenant: string;

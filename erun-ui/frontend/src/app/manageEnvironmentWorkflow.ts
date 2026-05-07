@@ -72,6 +72,7 @@ export class ManageEnvironmentWorkflow {
         ...defaultEnvironmentConfig(),
         name: selection.environment,
       },
+      initialConfig: null,
       configLoading: true,
       resourceStatus: null,
       resourceStatusLoading: false,
@@ -108,9 +109,6 @@ export class ManageEnvironmentWorkflow {
       error: '',
     };
     this.deps.emit();
-    if (tab !== 'delete' && !this.state.manageDialog.configLoading && this.state.manageDialog.selection) {
-      void this.loadConfig();
-    }
   }
 
   updateDialog(values: Partial<ManageDialogState>): void {
@@ -242,12 +240,14 @@ export class ManageEnvironmentWorkflow {
     this.deps.emit();
     try {
       const result = (await LoadEnvironmentConfig(selection)) as UIEnvironmentConfig;
+      const displayConfig = {
+        ...result,
+        runtimePod: runtimePodConfigToDisplay(result.runtimePod),
+      };
       this.state.manageDialog = {
         ...this.state.manageDialog,
-        config: {
-          ...result,
-          runtimePod: runtimePodConfigToDisplay(result.runtimePod),
-        },
+        config: displayConfig,
+        initialConfig: cloneEnvironmentConfig(displayConfig),
         configLoading: false,
         resourceStatusLoading: true,
         error: '',
@@ -328,12 +328,14 @@ export class ManageEnvironmentWorkflow {
       };
       const result = (await SaveEnvironmentConfig(selection, saveConfig as Parameters<typeof SaveEnvironmentConfig>[1])) as UIEnvironmentConfig;
       rememberPastContainerRegistry(result.containerRegistry || saveConfig.containerRegistry);
+      const displayConfig = {
+        ...result,
+        runtimePod: runtimePodConfigToDisplay(result.runtimePod),
+      };
       this.state.manageDialog = {
         ...this.state.manageDialog,
-        config: {
-          ...result,
-          runtimePod: runtimePodConfigToDisplay(result.runtimePod),
-        },
+        config: displayConfig,
+        initialConfig: cloneEnvironmentConfig(displayConfig),
         busy: false,
         busyAction: '',
         busyTarget: '',
@@ -542,6 +544,33 @@ export class ManageEnvironmentWorkflow {
 
   private get sessions(): TerminalSessionRegistry {
     return this.deps.sessions;
+  }
+}
+
+function cloneEnvironmentConfig(config: UIEnvironmentConfig): UIEnvironmentConfig {
+  return JSON.parse(JSON.stringify(config));
+}
+
+export function manageDialogTabHasUnsavedChanges(tab: ManageTab, config: UIEnvironmentConfig, initial: UIEnvironmentConfig | null): boolean {
+  if (!initial) {
+    return false;
+  }
+  const compare = (...keys: Array<keyof UIEnvironmentConfig>): boolean =>
+    keys.some((key) => JSON.stringify(config[key]) !== JSON.stringify(initial[key]));
+  switch (tab) {
+    case 'general':
+      return compare('containerRegistry', 'cloudProviderAlias', 'snapshot');
+    case 'runtime':
+      return compare('runtimePod', 'idle');
+    case 'ai':
+      return compare('claude');
+    case 'ports':
+      return false;
+    case 'ssh':
+      return JSON.stringify(config.sshd?.workspaceSyncEnabled) !== JSON.stringify(initial.sshd?.workspaceSyncEnabled)
+        || JSON.stringify(config.sshd?.workspaceSyncLocalPath) !== JSON.stringify(initial.sshd?.workspaceSyncLocalPath);
+    case 'delete':
+      return false;
   }
 }
 

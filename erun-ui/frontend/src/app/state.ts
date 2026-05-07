@@ -69,6 +69,7 @@ export interface ManageDialogState {
   version: string;
   versionImage: string;
   config: UIEnvironmentConfig;
+  initialConfig: UIEnvironmentConfig | null;
   configLoading: boolean;
   resourceStatus: UIRuntimeResourceStatus | null;
   resourceStatusLoading: boolean;
@@ -200,6 +201,7 @@ export const defaultManageDialog = (): ManageDialogState => ({
   version: '',
   versionImage: '',
   config: defaultEnvironmentConfig(),
+  initialConfig: null,
   configLoading: false,
   resourceStatus: null,
   resourceStatusLoading: false,

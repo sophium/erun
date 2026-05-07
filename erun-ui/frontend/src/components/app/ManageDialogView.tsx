@@ -15,7 +15,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import type { ManageTab, UICloudContextStatus, UIEnvironmentConfig, UIPortStatus, UIVersionSuggestion } from '@/types';
+import { manageDialogTabHasUnsavedChanges } from '@/app/manageEnvironmentWorkflow';
+import type { ManageEditTab, ManageTab, UICloudContextStatus, UIEnvironmentConfig, UIPortStatus, UIVersionSuggestion } from '@/types';
 import { cn } from '@/lib/utils';
 import { EditableComboField, uniqueSuggestions } from './EditableComboField';
 import { RuntimeResourceControls } from './RuntimeResourceControls';
@@ -45,14 +46,14 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
   return (
     <Dialog open={dialog.open} onOpenChange={(open) => !open && controller.closeManageDialog()}>
       <DialogContent
-        className="max-h-[min(88vh,900px)] sm:max-w-2xl"
+        className="h-[min(85vh,800px)] sm:max-w-2xl"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           controller.focusTerminalSoon();
         }}
       >
         <form
-          className="flex max-h-[calc(min(88vh,900px)-3rem)] min-h-0 flex-col gap-4"
+          className="flex h-full min-h-0 flex-col gap-4"
           onSubmit={(event) => {
             event.preventDefault();
             if (confirmingDelete && deleteEnabled) {
@@ -76,43 +77,59 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
 function ManageDialogContent({ controller, state, confirmationRef, expected, confirmingDelete }: { controller: ERunUIController; state: AppState; confirmationRef: React.Ref<HTMLInputElement>; expected: string; confirmingDelete: boolean }): React.ReactElement {
   const dialog = state.manageDialog;
   if (dialog.configLoading) {
-    return <div className="-mx-1 min-h-0 overflow-auto px-1 pb-1"><div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">Loading config...</div></div>;
+    return <div className="flex flex-1 min-h-0 flex-col"><div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">Loading config...</div></div>;
   }
+  if (confirmingDelete) {
+    return (
+      <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-auto pb-1">
+        <DeleteConfirmationFields controller={controller} dialog={dialog} confirmationRef={confirmationRef} expected={expected} />
+      </div>
+    );
+  }
+  const editTab: ManageEditTab = dialog.tab === 'delete' ? 'general' : dialog.tab;
   return (
-    <div className="flex min-h-0 flex-col gap-3">
-      {dialog.pendingRedeploy && !confirmingDelete && <RedeployBanner controller={controller} dialog={dialog} />}
-      <Tabs value={dialog.tab} onValueChange={(value) => controller.setManageTab(value as ManageTab)} className="min-h-0">
+    <div className="flex flex-1 min-h-0 flex-col gap-3">
+      {dialog.pendingRedeploy && <RedeployBanner controller={controller} dialog={dialog} />}
+      <Tabs value={editTab} onValueChange={(value) => controller.setManageTab(value as ManageTab)} className="flex-1 min-h-0">
         <TabsList className="w-full">
-          <TabsTrigger value="general">General</TabsTrigger>
-          <TabsTrigger value="runtime">Runtime</TabsTrigger>
-          <TabsTrigger value="claude">Claude</TabsTrigger>
-          <TabsTrigger value="network">Network</TabsTrigger>
-          <TabsTrigger value="access">Access</TabsTrigger>
-          <TabsTrigger value="delete">Delete</TabsTrigger>
+          <DirtyAwareTabsTrigger value="general" label="General" dialog={dialog} />
+          <DirtyAwareTabsTrigger value="runtime" label="Runtime" dialog={dialog} />
+          <DirtyAwareTabsTrigger value="ai" label="AI" dialog={dialog} />
+          <DirtyAwareTabsTrigger value="ports" label="Ports" dialog={dialog} />
+          <DirtyAwareTabsTrigger value="ssh" label="SSH" dialog={dialog} />
         </TabsList>
-        <div className="-mx-1 min-h-0 overflow-auto px-1 pb-1">
+        <div className="-mx-1 min-h-0 flex-1 overflow-auto px-1 pb-1">
           <TabsContent value="general" className="grid gap-3">
             <GeneralTab controller={controller} state={state} />
           </TabsContent>
           <TabsContent value="runtime" className="grid gap-3">
             <RuntimeTab controller={controller} state={state} />
           </TabsContent>
-          <TabsContent value="claude" className="grid gap-3">
+          <TabsContent value="ai" className="grid gap-3">
             <ClaudeSettingsSection controller={controller} dialog={dialog} />
           </TabsContent>
-          <TabsContent value="network" className="grid gap-3">
-            <NetworkTab dialog={dialog} />
+          <TabsContent value="ports" className="grid gap-3">
+            <PortsTab dialog={dialog} />
           </TabsContent>
-          <TabsContent value="access" className="grid gap-3">
+          <TabsContent value="ssh" className="grid gap-3">
             <SSHAccessSection controller={controller} dialog={dialog} />
             <DiagnosticsSection controller={controller} dialog={dialog} />
-          </TabsContent>
-          <TabsContent value="delete" className="grid gap-3">
-            <DeleteConfirmationFields controller={controller} dialog={dialog} confirmationRef={confirmationRef} expected={expected} />
           </TabsContent>
         </div>
       </Tabs>
     </div>
+  );
+}
+
+function DirtyAwareTabsTrigger({ value, label, dialog }: { value: ManageEditTab; label: string; dialog: ManageDialog }): React.ReactElement {
+  const dirty = manageDialogTabHasUnsavedChanges(value, dialog.config, dialog.initialConfig);
+  return (
+    <TabsTrigger value={value} aria-label={dirty ? `${label}, has unsaved changes` : label}>
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {dirty && <span aria-hidden="true" className="size-1.5 rounded-full bg-primary" />}
+      </span>
+    </TabsTrigger>
   );
 }
 
@@ -147,7 +164,7 @@ function RuntimeTab({ controller, state }: { controller: ERunUIController; state
   );
 }
 
-function NetworkTab({ dialog }: { dialog: ManageDialog }): React.ReactElement {
+function PortsTab({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const config = dialog.config;
   return (
     <>
