@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { SelectField, type SelectFieldOption } from './SelectField';
 import { StatusBadge, cloudProviderStatusTone } from './StatusBadge';
 
 const dialogErrorClassName =
@@ -49,15 +50,28 @@ export function GlobalConfigDialogView({ controller, state }: { controller: ERun
   );
 }
 
+const NOT_CONFIGURED_VALUE = '__none__';
+
 function GlobalConfigBody({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
   const dialog = state.globalConfigDialog;
   if (dialog.configLoading) {
     return <div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">Loading config...</div>;
   }
-  const tenantOptions = optionValues(state.tenants.map((tenant) => tenant.name), dialog.config.defaultTenant);
+  const tenantNames = optionValues(state.tenants.map((tenant) => tenant.name), dialog.config.defaultTenant);
+  const tenantOptions: SelectFieldOption[] = tenantNames.length === 0
+    ? []
+    : [{ value: NOT_CONFIGURED_VALUE, label: 'Not configured' }, ...tenantNames.map((name) => ({ value: name, label: name }))];
   return (
     <div className="grid gap-3">
-      <SelectField id="global-config-defaulttenant" label="Default tenant" value={dialog.config.defaultTenant} options={tenantOptions} disabled={dialog.busy || tenantOptions.length === 0} onChange={(defaultTenant) => controller.updateGlobalConfig({ defaultTenant })} />
+      <SelectField
+        id="global-config-defaulttenant"
+        label="Default tenant"
+        value={dialog.config.defaultTenant || NOT_CONFIGURED_VALUE}
+        options={tenantOptions}
+        emptyLabel="No tenants"
+        disabled={dialog.busy}
+        onChange={(value) => controller.updateGlobalConfig({ defaultTenant: value === NOT_CONFIGURED_VALUE ? '' : value })}
+      />
       <CloudAliasesSection controller={controller} dialog={dialog} />
       <CloudContextsSection controller={controller} dialog={dialog} />
     </div>
@@ -136,10 +150,49 @@ function CloudContextDraftForm({ controller, dialog }: { controller: ERunUIContr
   return (
     <div className="grid gap-2 rounded-[var(--radius)] border border-border p-3">
       <div className="grid gap-2 sm:grid-cols-2">
-        <SelectInput id="global-config-cloudcontext-provider" label="Cloud provider" value={dialog.cloudContextDraft.cloudProviderAlias} options={(config.cloudProviders || []).map((provider) => provider.alias)} emptyLabel="No cloud aliases" disabled={dialog.busy || (config.cloudProviders || []).length === 0} onChange={(cloudProviderAlias) => controller.updateCloudContextDraft({ cloudProviderAlias })} />
-        <RegionSelectInput id="global-config-cloudcontext-region" value={dialog.cloudContextDraft.region} disabled={dialog.busy} onChange={(region) => controller.updateCloudContextDraft({ region })} />
-        <SelectInput id="global-config-cloudcontext-instancetype" label="Instance type" value={dialog.cloudContextDraft.instanceType} options={['c8gd.2xlarge', 't4g.xlarge']} disabled={dialog.busy} onChange={(instanceType) => controller.updateCloudContextDraft({ instanceType })} />
-        <SelectInput id="global-config-cloudcontext-disksize" label="Disk size" value={String(dialog.cloudContextDraft.diskSizeGb)} options={['100', '200']} disabled={dialog.busy} onChange={(diskSizeGb) => controller.updateCloudContextDraft({ diskSizeGb: Number(diskSizeGb) })} />
+        <SelectField
+          id="global-config-cloudcontext-provider"
+          label="Cloud provider"
+          value={dialog.cloudContextDraft.cloudProviderAlias}
+          options={(config.cloudProviders || []).map((provider) => ({ value: provider.alias, label: provider.alias }))}
+          emptyLabel="No cloud aliases"
+          placeholder="Select cloud alias"
+          disabled={dialog.busy}
+          onChange={(cloudProviderAlias) => controller.updateCloudContextDraft({ cloudProviderAlias })}
+        />
+        <SelectField
+          id="global-config-cloudcontext-region"
+          label="Region"
+          value={dialog.cloudContextDraft.region || 'eu-west-2'}
+          options={[
+            { value: 'eu-west-2', label: 'London' },
+            { value: 'eu-west-1', label: 'Ireland' },
+          ]}
+          disabled={dialog.busy}
+          onChange={(region) => controller.updateCloudContextDraft({ region })}
+        />
+        <SelectField
+          id="global-config-cloudcontext-instancetype"
+          label="Instance type"
+          value={dialog.cloudContextDraft.instanceType}
+          options={[
+            { value: 'c8gd.2xlarge', label: 'c8gd.2xlarge' },
+            { value: 't4g.xlarge', label: 't4g.xlarge' },
+          ]}
+          disabled={dialog.busy}
+          onChange={(instanceType) => controller.updateCloudContextDraft({ instanceType })}
+        />
+        <SelectField
+          id="global-config-cloudcontext-disksize"
+          label="Disk size"
+          value={String(dialog.cloudContextDraft.diskSizeGb)}
+          options={[
+            { value: '100', label: '100' },
+            { value: '200', label: '200' },
+          ]}
+          disabled={dialog.busy}
+          onChange={(diskSizeGb) => controller.updateCloudContextDraft({ diskSizeGb: Number(diskSizeGb) })}
+        />
       </div>
       <CloudContextNameField controller={controller} dialog={dialog} generatedName={generated} />
     </div>
@@ -347,84 +400,6 @@ function statusLabel(status: string): string {
     default:
       return 'Unknown';
   }
-}
-
-function RegionSelectInput({ id, value, disabled, onChange }: { id: string; value: string; disabled?: boolean; onChange: (value: string) => void }): React.ReactElement {
-  const regions = [
-    { value: 'eu-west-2', label: 'London' },
-    { value: 'eu-west-1', label: 'Ireland' },
-  ];
-  return (
-    <div className="grid gap-2">
-      <Label htmlFor={id}>Region</Label>
-      <select
-        id={id}
-        className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex h-10 w-full rounded-[var(--radius)] border px-3 py-2 text-sm file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-        value={value || 'eu-west-2'}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {regions.map((region) => (
-          <option key={region.value} value={region.value}>
-            {region.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
-function SelectInput({ id, label, value, options, disabled, emptyLabel, onChange }: { id: string; label: string; value: string; options: string[]; disabled?: boolean; emptyLabel?: string; onChange: (value: string) => void }): React.ReactElement {
-  return (
-    <div className="grid gap-2">
-      <Label htmlFor={id}>{label}</Label>
-      <select
-        id={id}
-        className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex h-10 w-full rounded-[var(--radius)] border px-3 py-2 text-sm file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {options.length === 0 ? (
-          <option value="">{emptyLabel || 'No options'}</option>
-        ) : (
-          options.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))
-        )}
-      </select>
-    </div>
-  );
-}
-
-function SelectField({ id, label, value, options, disabled, onChange }: { id: string; label: string; value: string; options: string[]; disabled?: boolean; onChange: (value: string) => void }): React.ReactElement {
-  return (
-    <div className="grid gap-2">
-      <Label htmlFor={id}>{label}</Label>
-      <select
-        id={id}
-        className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex h-10 w-full rounded-[var(--radius)] border px-3 py-2 text-sm file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {options.length === 0 ? (
-          <option value="">No tenants</option>
-        ) : (
-          <>
-            <option value="">Not configured</option>
-            {options.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </>
-        )}
-      </select>
-    </div>
-  );
 }
 
 function optionValues(values: string[], current: string): string[] {

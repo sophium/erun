@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { EditableComboField, uniqueSuggestions } from './EditableComboField';
 import { RuntimeResourceControls } from './RuntimeResourceControls';
+import { SelectField } from './SelectField';
 import { VersionField } from './VersionField';
 
 const dialogErrorClassName =
@@ -154,20 +155,20 @@ function EnvironmentCreateFields({ controller, dialog }: { controller: ERunUICon
 }
 
 function KubernetesContextSelect({ controller, dialog }: { controller: ERunUIController; dialog: EnvironmentDialog }): React.ReactElement {
+  const items = dialog.kubernetesContexts.map((context) => ({ value: context, label: context }));
+  const placeholder = dialog.kubernetesContextsLoading ? 'Loading contexts...' : 'Select Kubernetes context';
   return (
-    <div className="grid gap-2">
-      <Label htmlFor="environment-kubernetes-context">Kubernetes context</Label>
-      <select
-        id="environment-kubernetes-context"
-        className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex h-10 w-full rounded-[var(--radius)] border px-3 py-2 text-sm file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-        value={dialog.kubernetesContext}
-        required
-        disabled={dialog.busy || dialog.kubernetesContextsLoading || dialog.kubernetesContexts.length === 0}
-        onChange={(event) => controller.updateEnvironmentDialog({ kubernetesContext: event.target.value })}
-      >
-        {kubernetesContextOptions(dialog)}
-      </select>
-    </div>
+    <SelectField
+      id="environment-kubernetes-context"
+      label="Kubernetes context"
+      value={dialog.kubernetesContext}
+      options={items}
+      placeholder={placeholder}
+      emptyLabel="No Kubernetes contexts"
+      disabled={dialog.busy || dialog.kubernetesContextsLoading}
+      required
+      onChange={(kubernetesContext) => controller.updateEnvironmentDialog({ kubernetesContext })}
+    />
   );
 }
 
@@ -236,12 +237,3 @@ function environmentNameSuggestions(state: AppState, dialog: EnvironmentDialog):
   return uniqueSuggestions([dialog.environment, ...selectedTenantEnvironments, ...loadSavedPastEnvironments(), ...allEnvironments]);
 }
 
-function kubernetesContextOptions(dialog: EnvironmentDialog): React.ReactNode {
-  if (dialog.kubernetesContextsLoading) {
-    return <option value="">Loading contexts...</option>;
-  }
-  if (dialog.kubernetesContexts.length === 0) {
-    return <option value="">No Kubernetes contexts</option>;
-  }
-  return dialog.kubernetesContexts.map((context) => <option key={context} value={context}>{context}</option>);
-}

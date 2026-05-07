@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { IconTooltip } from './IconTooltip';
+import { SelectField, type SelectFieldOption } from './SelectField';
 
 const dialogErrorClassName =
   'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
@@ -72,7 +73,7 @@ function TenantDialogFields({ controller, state, environmentOptions, apiPlacehol
   return (
     <div className="grid gap-3">
       <ReadonlyField id="tenant-config-name" label="Tenant name" value={config.name} />
-      <SelectField id="tenant-config-defaultenvironment" label="Default environment" value={config.defaultEnvironment} options={environmentOptions} disabled={dialog.busy || environmentOptions.length === 0} onChange={(defaultEnvironment) => controller.updateTenantConfig({ defaultEnvironment })} />
+      <DefaultEnvironmentSelect id="tenant-config-defaultenvironment" label="Default environment" value={config.defaultEnvironment} options={environmentOptions} disabled={dialog.busy} onChange={(defaultEnvironment) => controller.updateTenantConfig({ defaultEnvironment })} />
       <TextField id="tenant-config-apiurl" label="API URL" value={config.apiUrl} disabled={dialog.busy} placeholder={apiPlaceholder} onChange={(apiUrl) => controller.updateTenantConfig({ apiUrl })} />
       <CloudAliasesField controller={controller} state={state} />
     </div>
@@ -191,31 +192,22 @@ function TextField({ id, label, value, disabled, placeholder, onChange }: { id: 
   );
 }
 
-function SelectField({ id, label, value, options, disabled, onChange }: { id: string; label: string; value: string; options: string[]; disabled?: boolean; onChange: (value: string) => void }): React.ReactElement {
+const TENANT_NOT_CONFIGURED = '__none__';
+
+function DefaultEnvironmentSelect({ id, label, value, options, disabled, onChange }: { id: string; label: string; value: string; options: string[]; disabled?: boolean; onChange: (value: string) => void }): React.ReactElement {
+  const fieldOptions: SelectFieldOption[] = options.length === 0
+    ? []
+    : [{ value: TENANT_NOT_CONFIGURED, label: 'Not configured' }, ...options.map((option) => ({ value: option, label: option }))];
   return (
-    <div className="grid gap-2">
-      <Label htmlFor={id}>{label}</Label>
-      <select
-        id={id}
-        className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex h-10 w-full rounded-[var(--radius)] border px-3 py-2 text-sm file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {options.length === 0 ? (
-          <option value="">No environments</option>
-        ) : (
-          <>
-            <option value="">Not configured</option>
-            {options.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </>
-        )}
-      </select>
-    </div>
+    <SelectField
+      id={id}
+      label={label}
+      value={value || TENANT_NOT_CONFIGURED}
+      options={fieldOptions}
+      emptyLabel="No environments"
+      disabled={disabled}
+      onChange={(next) => onChange(next === TENANT_NOT_CONFIGURED ? '' : next)}
+    />
   );
 }
 

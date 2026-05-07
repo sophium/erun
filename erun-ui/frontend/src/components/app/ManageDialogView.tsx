@@ -20,6 +20,7 @@ import type { ManageEditTab, ManageTab, UICloudContextStatus, UIEnvironmentConfi
 import { cn } from '@/lib/utils';
 import { EditableComboField, uniqueSuggestions } from './EditableComboField';
 import { RuntimeResourceControls } from './RuntimeResourceControls';
+import { SelectField } from './SelectField';
 
 const dialogErrorClassName =
   'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
@@ -593,9 +594,6 @@ function TextField({
   );
 }
 
-const claudeSelectClassName =
-  'border-input bg-background ring-offset-background focus-visible:ring-ring flex h-10 w-full rounded-[var(--radius)] border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50';
-
 function ClaudeSettingsSection({ controller, dialog }: { controller: ERunUIController; dialog: ManageDialog }): React.ReactElement {
   const config = dialog.config;
   const claude = config.claude;
@@ -654,27 +652,24 @@ function ClaudeBoolField({ id, label, defaultValue, value, disabled, onChange }:
   const selectValue = value === undefined ? 'default' : value ? 'on' : 'off';
   const defaultLabel = defaultValue ? 'Default (enabled)' : 'Default (disabled)';
   return (
-    <div className="grid gap-2">
-      <Label htmlFor={id}>{label}</Label>
-      <select
-        id={id}
-        className={claudeSelectClassName}
-        value={selectValue}
-        disabled={disabled}
-        onChange={(event) => {
-          const next = event.target.value;
-          if (next === 'default') {
-            onChange(undefined);
-          } else {
-            onChange(next === 'on');
-          }
-        }}
-      >
-        <option value="default">{defaultLabel}</option>
-        <option value="on">Enabled</option>
-        <option value="off">Disabled</option>
-      </select>
-    </div>
+    <SelectField
+      id={id}
+      label={label}
+      value={selectValue}
+      options={[
+        { value: 'default', label: defaultLabel },
+        { value: 'on', label: 'Enabled' },
+        { value: 'off', label: 'Disabled' },
+      ]}
+      disabled={disabled}
+      onChange={(next) => {
+        if (next === 'default') {
+          onChange(undefined);
+        } else {
+          onChange(next === 'on');
+        }
+      }}
+    />
   );
 }
 
@@ -805,40 +800,20 @@ function isValidClaudeTokens(text: string, defaults: UIEnvironmentConfig['claude
 function CloudAliasSelect({ id, value, options, disabled, onChange }: { id: string; value: string; options: string[]; disabled?: boolean; onChange: (value: string) => void }): React.ReactElement {
   const normalizedValue = value.trim();
   const normalizedOptions = options.map((option) => option.trim()).filter(Boolean);
-  const selectOptions = normalizedValue && !normalizedOptions.includes(normalizedValue) ? [normalizedValue, ...normalizedOptions] : normalizedOptions;
-  const selectDisabled = disabled || selectOptions.length === 0;
+  const selectOptions = normalizedValue && !normalizedOptions.includes(normalizedValue)
+    ? [normalizedValue, ...normalizedOptions]
+    : normalizedOptions;
   return (
-    <div className="grid gap-2">
-      <Label htmlFor={id}>Cloud alias</Label>
-      <select
-        id={id}
-        className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex h-10 w-full rounded-[var(--radius)] border px-3 py-2 text-sm file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-        value={normalizedValue}
-        disabled={selectDisabled}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {selectOptions.length === 0 ? (
-          <option value="">No cloud aliases configured</option>
-        ) : normalizedValue === '' ? (
-          <>
-            <option value="" disabled>
-              Select cloud alias
-            </option>
-            {selectOptions.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </>
-        ) : (
-          selectOptions.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))
-        )}
-      </select>
-    </div>
+    <SelectField
+      id={id}
+      label="Cloud alias"
+      value={normalizedValue}
+      options={selectOptions.map((option) => ({ value: option, label: option }))}
+      placeholder="Select cloud alias"
+      emptyLabel="No cloud aliases configured"
+      disabled={disabled}
+      onChange={onChange}
+    />
   );
 }
 
