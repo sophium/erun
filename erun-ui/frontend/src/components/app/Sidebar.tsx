@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import type { UICloudProviderStatus, UITenant } from '@/types';
+import { EmptyState } from './EmptyState';
 import { IconTooltip } from './IconTooltip';
 import { cloudProviderStatusTone } from './StatusBadge';
 
@@ -50,7 +51,19 @@ export function Sidebar({ controller, state }: { controller: ERunUIController; s
       </div>
       <div className="min-h-0 flex-1 overflow-auto pr-1">
         {state.tenants.length === 0 ? (
-          <div className="px-3.5 py-[18px] text-[13px] font-medium text-muted-foreground">No environments</div>
+          <div className="px-2 py-2">
+            <EmptyState
+              icon={<Plus />}
+              heading="No environments yet"
+              body="Initialize a remote environment to start working. You can also import an existing one from your kubeconfig."
+              action={
+                <Button type="button" size="sm" onClick={() => controller.openInitializeDialog()}>
+                  <Plus aria-hidden="true" />
+                  Initialize environment
+                </Button>
+              }
+            />
+          </div>
         ) : (
           state.tenants.map((tenant, index) => (
             <TenantGroup
