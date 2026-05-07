@@ -12,6 +12,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { EditableComboField, uniqueSuggestions } from './EditableComboField';
+import { EmptyState } from './EmptyState';
 import { RuntimeResourceControls } from './RuntimeResourceControls';
 import { SelectField } from './SelectField';
 import { VersionField } from './VersionField';
@@ -157,6 +158,17 @@ function EnvironmentCreateFields({ controller, dialog }: { controller: ERunUICon
 function KubernetesContextSelect({ controller, dialog }: { controller: ERunUIController; dialog: EnvironmentDialog }): React.ReactElement {
   const items = dialog.kubernetesContexts.map((context) => ({ value: context, label: context }));
   const placeholder = dialog.kubernetesContextsLoading ? 'Loading contexts...' : 'Select Kubernetes context';
+  if (!dialog.kubernetesContextsLoading && dialog.kubernetesContexts.length === 0) {
+    return (
+      <div className="grid gap-2">
+        <Label htmlFor="environment-kubernetes-context">Kubernetes context</Label>
+        <EmptyState
+          heading="No Kubernetes contexts found"
+          body="ERun reads contexts from your kubeconfig (~/.kube/config). Add a context with kubectl, then close and reopen this dialog to refresh the list."
+        />
+      </div>
+    );
+  }
   return (
     <SelectField
       id="environment-kubernetes-context"

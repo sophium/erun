@@ -6,6 +6,7 @@ import type { AppState } from '@/app/state';
 import type { UITenant, UITenantDashboardBuild, UITenantDashboardReview, UITenantDashboardUser } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { EmptyState } from './EmptyState';
 import { StatusBadge } from './StatusBadge';
 
 export function TenantDashboardView({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement | null {
@@ -67,7 +68,12 @@ function TenantDashboardTabContent({ data }: { data: AppState['tenantDashboard']
         <BuildsTable builds={view.builds} apiError={view.apiError} />
       </TabsContent>
       <TabsContent value="audit" className="min-h-0 overflow-auto">
-        <DashboardMessage message={view.auditLogMessage} />
+        <div className="mt-4">
+          <EmptyState
+            heading="Audit log coming soon"
+            body="Tenant audit events will surface here once the backend ships them. Check back in a future release."
+          />
+        </div>
       </TabsContent>
       <TabsContent value="api-log" className="min-h-0 overflow-auto">
         <APILogPanel log={view.apiLog} error={view.apiLogError} apiError={view.apiError} />

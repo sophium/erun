@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { EmptyState } from './EmptyState';
 import { SelectField, type SelectFieldOption } from './SelectField';
 import { StatusBadge, cloudProviderStatusTone } from './StatusBadge';
 
@@ -94,7 +95,21 @@ function CloudAliasesSection({ controller, dialog }: { controller: ERunUIControl
           </Button>
         </div>
       </div>
-      {providers.length === 0 ? <div className="px-0.5 py-2 text-[13px] leading-[1.35] text-muted-foreground">No cloud aliases configured</div> : <CloudAliasList controller={controller} dialog={dialog} />}
+      {providers.length === 0 ? (
+        <EmptyState
+          icon={<Cloud />}
+          heading="No cloud aliases yet"
+          body="Add a cloud account so ERun can deploy environments to it. AWS is the only provider supported today."
+          action={
+            <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => void controller.startAWSCloudInit()}>
+              {dialog.busyAction === 'cloud-provider-init' ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Plus aria-hidden="true" />}
+              Add AWS account
+            </Button>
+          }
+        />
+      ) : (
+        <CloudAliasList controller={controller} dialog={dialog} />
+      )}
     </div>
   );
 }
@@ -139,7 +154,15 @@ function CloudContextsSection({ controller, dialog }: { controller: ERunUIContro
         </Button>
       </div>
       <CloudContextDraftForm controller={controller} dialog={dialog} />
-      {contexts.length === 0 ? <div className="px-0.5 py-2 text-[13px] leading-[1.35] text-muted-foreground">No cloud contexts configured</div> : <CloudContextList controller={controller} dialog={dialog} />}
+      {contexts.length === 0 ? (
+        <EmptyState
+          icon={<Server />}
+          heading="No cloud contexts yet"
+          body="Pick a cloud alias and region above, then click Init to provision a new context. Contexts are reusable across environments."
+        />
+      ) : (
+        <CloudContextList controller={controller} dialog={dialog} />
+      )}
     </div>
   );
 }
