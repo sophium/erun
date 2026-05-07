@@ -10,12 +10,13 @@ import (
 )
 
 type BuildInput struct {
-	Component string `json:"component,omitempty" jsonschema:"optional component name to build from the runtime repo root; when empty, build all Docker component images"`
-	Version   string `json:"version,omitempty" jsonschema:"optional explicit image version override; disables local snapshot tagging when set"`
-	Deploy    bool   `json:"deploy,omitempty" jsonschema:"when true, push the built images and deploy the resolved Helm chart(s) using the built version"`
-	Release   bool   `json:"release,omitempty" jsonschema:"when true, run release first and publish the resolved release-tagged images"`
-	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
-	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	Component     string `json:"component,omitempty" jsonschema:"optional component name to build from the runtime repo root; when empty, build all Docker component images"`
+	Version       string `json:"version,omitempty" jsonschema:"optional explicit image version override; disables local snapshot tagging when set"`
+	Deploy        bool   `json:"deploy,omitempty" jsonschema:"when true, push the built images and deploy the resolved Helm chart(s) using the built version"`
+	Release       bool   `json:"release,omitempty" jsonschema:"when true, run release first and publish the resolved release-tagged images"`
+	NoIncremental bool   `json:"noIncremental,omitempty" jsonschema:"when true, disable fingerprint-based build caching and rebuild every image from scratch"`
+	Preview       bool   `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
+	Verbosity     int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
 type PushInput struct {
@@ -30,7 +31,7 @@ func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 		output, err := runRuntimeCommand(runtime, input.Preview, input.Verbosity, func(runCtx eruncommon.Context, workDir string) error {
 			component := strings.TrimSpace(input.Component)
 			version := strings.TrimSpace(input.Version)
-			execution, err := resolveRuntimeBuildExecution(runtime, workDir, component, version, input.Release)
+			execution, err := resolveRuntimeBuildExecution(runtime, workDir, component, version, input.Release, input.NoIncremental)
 			if err != nil {
 				return err
 			}
@@ -41,7 +42,7 @@ func buildTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest
 				return fmt.Errorf("build deploy is not supported for project build scripts")
 			}
 
-			deploySpecs, err := resolveRuntimeBuildDeploySpecs(runtime, workDir, component, version, input.Release)
+			deploySpecs, err := resolveRuntimeBuildDeploySpecs(runtime, workDir, component, version, input.Release, input.NoIncremental)
 			if err != nil {
 				return err
 			}
@@ -64,13 +65,14 @@ func pushTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 	}
 }
 
-func resolveRuntimeBuildExecution(runtime RuntimeConfig, projectRoot, component, versionOverride string, release bool) (eruncommon.BuildExecutionSpec, error) {
+func resolveRuntimeBuildExecution(runtime RuntimeConfig, projectRoot, component, versionOverride string, release, noIncremental bool) (eruncommon.BuildExecutionSpec, error) {
 	environment := strings.TrimSpace(runtime.Context.Environment)
 	target := eruncommon.DockerCommandTarget{
 		ProjectRoot:     projectRoot,
 		Environment:     environment,
 		VersionOverride: versionOverride,
 		Release:         release,
+		NoIncremental:   noIncremental,
 	}
 	findProjectRoot := func() (string, string, error) {
 		return runtimeFindProjectRoot(runtime.Context, projectRoot)
@@ -102,9 +104,9 @@ func resolveRuntimeBuildExecution(runtime RuntimeConfig, projectRoot, component,
 			Image:          imageRef,
 		}})
 		if releaseSpec != nil {
-			return eruncommon.BuildExecutionSpecWithRelease(execution, *releaseSpec), nil
+			execution = eruncommon.BuildExecutionSpecWithRelease(execution, *releaseSpec)
 		}
-		return execution, nil
+		return eruncommon.ApplyIncrementalToBuildExecution(execution, noIncremental)
 	}
 
 	return eruncommon.ResolveBuildExecution(runtime.Store, findProjectRoot, resolveBuildContext, nil, target)
@@ -166,12 +168,13 @@ func resolveRuntimePushExecution(runtime RuntimeConfig, projectRoot, component, 
 	}), nil
 }
 
-func resolveRuntimeBuildDeploySpecs(runtime RuntimeConfig, projectRoot, component, versionOverride string, release bool) ([]eruncommon.DeploySpec, error) {
+func resolveRuntimeBuildDeploySpecs(runtime RuntimeConfig, projectRoot, component, versionOverride string, release, noIncremental bool) ([]eruncommon.DeploySpec, error) {
 	target := eruncommon.DockerCommandTarget{
 		ProjectRoot:     projectRoot,
 		Environment:     strings.TrimSpace(runtime.Context.Environment),
 		VersionOverride: versionOverride,
 		Release:         release,
+		NoIncremental:   noIncremental,
 	}
 	findProjectRoot := func() (string, string, error) {
 		return runtimeFindProjectRoot(runtime.Context, projectRoot)

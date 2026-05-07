@@ -55,9 +55,9 @@ func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc,
 
 	execution := BuildExecutionSpec{linuxBuilds: linuxBuilds, dockerBuilds: builds, skippedLinux: hadLinuxBuilds && len(linuxBuilds) == 0}
 	if releaseSpec != nil {
-		return BuildExecutionSpecWithRelease(execution, *releaseSpec), nil
+		execution = BuildExecutionSpecWithRelease(execution, *releaseSpec)
 	}
-	return execution, nil
+	return ApplyIncrementalToBuildExecution(execution, target.NoIncremental)
 }
 
 func resolveBuildExecutionTargetAndScript(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (DockerCommandTarget, *ReleaseSpec, *scriptSpec, error) {

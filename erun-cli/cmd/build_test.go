@@ -2092,26 +2092,21 @@ func TestBuildCommandDryRunReleaseShowsPushCommandsForReleaseTaggedDockerBuilds(
 	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
-	if !strings.Contains(output, "docker buildx inspect erun-multiarch") {
-		t.Fatalf("expected buildx inspect trace, got:\n%s", output)
+	for _, want := range []string{
+		"docker build --platform linux/amd64 --provenance=false -t erunpaas/api:1.4.2-amd64",
+		"docker build --platform linux/arm64 --provenance=false -t erunpaas/api:1.4.2-arm64",
+		"docker push erunpaas/api:1.4.2-amd64",
+		"docker push erunpaas/api:1.4.2-arm64",
+		"docker manifest create --amend erunpaas/api:1.4.2 erunpaas/api:1.4.2-amd64 erunpaas/api:1.4.2-arm64",
+		"docker manifest push erunpaas/api:1.4.2",
+		"docker build -t erunpaas/base:9.9.9",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, output)
+		}
 	}
-	if !strings.Contains(output, "docker buildx create --name erun-multiarch --driver docker-container") {
-		t.Fatalf("expected buildx create trace, got:\n%s", output)
-	}
-	if !strings.Contains(output, "docker buildx inspect --builder erun-multiarch --bootstrap") {
-		t.Fatalf("expected buildx bootstrap trace, got:\n%s", output)
-	}
-	if !strings.Contains(output, "docker buildx build --builder erun-multiarch --platform 'linux/amd64,linux/arm64'") || !strings.Contains(output, "-t erunpaas/api:1.4.2") {
-		t.Fatalf("expected release build trace, got:\n%s", output)
-	}
-	if !strings.Contains(output, "docker build -t erunpaas/base:9.9.9") {
-		t.Fatalf("expected component-local build trace, got:\n%s", output)
-	}
-	if !strings.Contains(output, "--push") {
-		t.Fatalf("expected multi-platform release push trace, got:\n%s", output)
-	}
-	if strings.Contains(output, "docker push erunpaas/api:1.4.2") || strings.Contains(output, "docker push erunpaas/base:9.9.9") {
-		t.Fatalf("did not expect separate docker push trace, got:\n%s", output)
+	if strings.Contains(output, "docker buildx") {
+		t.Fatalf("did not expect buildx trace in per-platform release flow, got:\n%s", output)
 	}
 }
 
@@ -2151,8 +2146,10 @@ func TestBuildCommandDryRunReleaseForceIncludesTagDeletionForStaleReleaseTag(t *
 	for _, want := range []string{
 		"git tag -d v1.4.2",
 		"git push --delete origin v1.4.2",
-		"docker buildx build --builder erun-multiarch --platform 'linux/amd64,linux/arm64'",
-		"-t ghcr.io/sophium/api:1.4.2",
+		"docker build --platform linux/amd64 --provenance=false -t ghcr.io/sophium/api:1.4.2-amd64",
+		"docker build --platform linux/arm64 --provenance=false -t ghcr.io/sophium/api:1.4.2-arm64",
+		"docker manifest create --amend ghcr.io/sophium/api:1.4.2",
+		"docker manifest push ghcr.io/sophium/api:1.4.2",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected dry-run output to contain %q, got:\n%s", want, output)
@@ -2160,12 +2157,19 @@ func TestBuildCommandDryRunReleaseForceIncludesTagDeletionForStaleReleaseTag(t *
 	}
 }
 
-func TestBuildCommandDryRunBuildsLinuxPackagesFromProjectRoot(t *testing.T) {
+func TestBuildCommandDryRunSkipsLinuxPackagesFromProjectRoot(t *testing.T) {
+	// Project-root `erun build` no longer auto-discovers linux package contexts:
+	// the .deb has no consumer outside release publishing, so rebuilding it on
+	// every iteration was a 9-second tax for nothing. Release flow has its own
+	// resolver and is unaffected.
 	projectRoot := t.TempDir()
 	linuxComponentDir := filepath.Join(projectRoot, "erun-devops", "linux", "erun-cli")
 	requireNoError(t, os.MkdirAll(linuxComponentDir, 0o755), "mkdir linux component dir")
 	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.2.3\n"), 0o644), "write VERSION")
 	requireNoError(t, os.WriteFile(filepath.Join(linuxComponentDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755), "write build.sh")
+	dockerDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
+	requireNoError(t, os.MkdirAll(dockerDir, 0o755), "mkdir docker dir")
+	requireNoError(t, os.WriteFile(filepath.Join(dockerDir, "Dockerfile"), []byte("FROM scratch\n"), 0o644), "write Dockerfile")
 
 	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
@@ -2187,9 +2191,44 @@ func TestBuildCommandDryRunBuildsLinuxPackagesFromProjectRoot(t *testing.T) {
 	requireNoError(t, cmd.Execute(), "Execute failed")
 
 	output := stderr.String()
+	if strings.Contains(output, "./build.sh") {
+		t.Fatalf("did not expect linux build trace from project root, got:\n%s", output)
+	}
+	if strings.Contains(output, "skipping linux package scripts: host is not Linux or dpkg-deb is unavailable") {
+		t.Fatalf("did not expect linux skip trace from project root (linux build resolution shouldn't run at all), got:\n%s", output)
+	}
+}
+
+func TestBuildCommandDryRunBuildsLinuxPackagesWhenInvokedInsideLinuxComponentDir(t *testing.T) {
+	projectRoot := t.TempDir()
+	linuxComponentDir := filepath.Join(projectRoot, "erun-devops", "linux", "erun-cli")
+	requireNoError(t, os.MkdirAll(linuxComponentDir, 0o755), "mkdir linux component dir")
+	requireNoError(t, os.WriteFile(filepath.Join(projectRoot, "erun-devops", "VERSION"), []byte("1.2.3\n"), 0o644), "write VERSION")
+	requireNoError(t, os.WriteFile(filepath.Join(linuxComponentDir, "build.sh"), []byte("#!/bin/sh\n"), 0o755), "write build.sh")
+
+	cmd := newTestRootCmd(testRootDeps{
+		FindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		OptionalBuildFindProjectRoot: func() (string, string, error) {
+			return "tenant-a", projectRoot, nil
+		},
+		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
+			return common.DockerBuildContext{Dir: linuxComponentDir}, nil
+		},
+	})
+	stdout := new(bytes.Buffer)
+	stderr := new(bytes.Buffer)
+	cmd.SetOut(stdout)
+	cmd.SetErr(stderr)
+	cmd.SetArgs([]string{"build", "--dry-run"})
+
+	requireNoError(t, cmd.Execute(), "Execute failed")
+
+	output := stderr.String()
 	if common.LinuxPackageBuildsSupported() {
 		if !strings.Contains(output, "./build.sh") {
-			t.Fatalf("expected linux build trace, got:\n%s", output)
+			t.Fatalf("expected linux build trace from inside linux component dir, got:\n%s", output)
 		}
 	} else if !strings.Contains(output, "skipping linux package scripts: host is not Linux or dpkg-deb is unavailable") {
 		t.Fatalf("expected linux build skip trace, got:\n%s", output)

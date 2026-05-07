@@ -8,8 +8,6 @@ import (
 
 const localSnapshotTimestampFormat = "20060102150405"
 
-const multiPlatformBuildxBuilderName = "erun-multiarch"
-
 var (
 	ErrVersionFileNotFound        = errors.New("version file not found for current module")
 	ErrDockerBuildContextNotFound = errors.New("dockerfile not found in current directory")
@@ -69,6 +67,18 @@ type DockerBuildSpec struct {
 	Platforms      []string
 	Push           bool
 	SkipIfExists   bool
+	// Fingerprint is a content hash over the Dockerfile and every COPY source
+	// resolved against ContextDir, honoring .dockerignore. Set during incremental
+	// resolution. After a successful build, the image is locally tagged with
+	// fingerprintTag(...) so subsequent builds with the same Fingerprint can
+	// skip the build and promote (re-tag + push) instead.
+	Fingerprint string
+	// Promote indicates the build should be skipped because a local image already
+	// exists at fingerprintTag(...) for this Fingerprint. Instead of running
+	// docker build, the executor re-tags the existing fp-tagged image as the
+	// target tag (and per-platform tags + manifest assembly for multi-platform)
+	// and pushes it.
+	Promote bool
 }
 
 type DockerPushSpec struct {
@@ -103,6 +113,12 @@ type DockerCommandTarget struct {
 	Release         bool
 	Force           bool
 	Deploy          bool
+	// NoIncremental disables the default fingerprint-based incremental build
+	// caching. When false (the default), each docker build context is fingerprinted
+	// from its Dockerfile and COPY sources; if a local image with the matching
+	// fingerprint tag already exists, the build is skipped and the existing image
+	// is re-tagged and pushed instead of being rebuilt.
+	NoIncremental bool
 }
 
 type DockerRegistryAuthError struct {
