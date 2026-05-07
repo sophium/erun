@@ -8,7 +8,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "shadcn": "shadcn",
-    "shadcn:check": "shadcn add button checkbox command dialog input label popover tabs tooltip --overwrite --yes && git diff --exit-code -- src/components/ui src/lib/utils.ts src/styles/theme.css components.json package.json yarn.lock"
+    "shadcn:check": "shadcn add button checkbox command dialog input label popover select tabs tooltip --overwrite --yes && git diff --exit-code -- src/components/ui src/lib/utils.ts src/styles/theme.css components.json package.json yarn.lock"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
