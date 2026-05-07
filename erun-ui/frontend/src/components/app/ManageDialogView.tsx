@@ -178,14 +178,18 @@ function RedeployBanner({ controller, dialog }: { controller: ERunUIController; 
   const deploying = dialog.busyAction === 'save' || dialog.busy;
   return (
     <div
-      role="status"
+      role="alert"
       aria-live="polite"
-      className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--primary)_30%,transparent)] bg-[color-mix(in_oklch,var(--primary)_8%,transparent)] px-3 py-2.5 text-[13px] leading-[1.35]"
+      className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[var(--radius)] border-l-[3px] border-l-amber-500 border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-[13px] leading-[1.35]"
     >
-      <span className="text-foreground">Saved. Redeploy to apply changes to the running pod.</span>
+      <AlertTriangle className="size-[18px] text-amber-600 dark:text-amber-400" aria-hidden="true" />
+      <div className="min-w-0">
+        <div className="font-semibold text-foreground">Pending redeploy</div>
+        <div className="text-muted-foreground">Saved values are not yet applied to the running pod.</div>
+      </div>
       <div className="flex items-center gap-2">
-        <Button type="button" variant="outline" size="sm" disabled={deploying} onClick={() => controller.closeManageDialog()}>
-          Close
+        <Button type="button" variant="ghost" size="sm" disabled={deploying} onClick={() => controller.closeManageDialog()}>
+          Later
         </Button>
         <Button
           type="button"
