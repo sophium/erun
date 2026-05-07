@@ -141,6 +141,7 @@ function CloudContextDraftForm({ controller, dialog }: { controller: ERunUIContr
         <SelectInput id="global-config-cloudcontext-instancetype" label="Instance type" value={dialog.cloudContextDraft.instanceType} options={['c8gd.2xlarge', 't4g.xlarge']} disabled={dialog.busy} onChange={(instanceType) => controller.updateCloudContextDraft({ instanceType })} />
         <SelectInput id="global-config-cloudcontext-disksize" label="Disk size" value={String(dialog.cloudContextDraft.diskSizeGb)} options={['100', '200']} disabled={dialog.busy} onChange={(diskSizeGb) => controller.updateCloudContextDraft({ diskSizeGb: Number(diskSizeGb) })} />
       </div>
+      <p className="text-[12px] leading-[1.4] text-muted-foreground">Region, instance type, and disk size are common choices vetted for ERun. Contact an admin to expand the list.</p>
       <CloudContextNameField controller={controller} dialog={dialog} generatedName={generated} />
     </div>
   );

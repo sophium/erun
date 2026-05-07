@@ -129,7 +129,7 @@ function CloudAliasIdentity({ alias, issuer }: { alias: string; issuer: string }
         <Cloud className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="truncate">{alias}</span>
       </div>
-      <div className="truncate text-xs text-muted-foreground">{hasIssuer ? issuer : 'OIDC issuer required before linking'}</div>
+      <div className="truncate text-xs text-muted-foreground">{hasIssuer ? issuer : 'No OIDC issuer yet — use the link button to set one up.'}</div>
     </div>
   );
 }
