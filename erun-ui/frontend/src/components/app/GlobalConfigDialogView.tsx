@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { StatusBadge, cloudProviderStatusTone } from './StatusBadge';
 
 const dialogErrorClassName =
   'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
@@ -103,7 +104,7 @@ function CloudAliasSummary({ provider }: { provider: GlobalConfigDialog['config'
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
         <Cloud className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="truncate">{provider.alias}</span>
-        <StatusBadge status={provider.status} />
+        <CloudStatusBadge status={provider.status} />
       </div>
       <div className="truncate text-xs text-muted-foreground">
         {cloudProviderSummary(provider)}
@@ -180,7 +181,7 @@ function CloudContextSummary({ context }: { context: GlobalConfigDialog['config'
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
         <Server className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="truncate">{context.kubernetesContext || context.name}</span>
-        <StatusBadge status={context.status} />
+        <CloudStatusBadge status={context.status} />
       </div>
       <div className="truncate text-xs text-muted-foreground">
         {cloudContextSummary(context)}
@@ -207,19 +208,9 @@ function GlobalConfigFooter({ controller, dialog }: { controller: ERunUIControll
   );
 }
 
-function StatusBadge({ status }: { status: string }): React.ReactElement {
+function CloudStatusBadge({ status }: { status: string }): React.ReactElement {
   const normalized = status.trim() || 'unknown';
-  const className =
-    normalized === 'active' || normalized === 'running'
-      ? 'border-green-600/35 bg-green-600/10 text-green-700 dark:text-green-400'
-      : normalized === 'expired' || normalized === 'not_configured'
-        ? 'border-[color-mix(in_oklch,var(--destructive)_35%,var(--border))] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] text-destructive'
-        : 'border-border bg-muted/40 text-muted-foreground';
-  return (
-    <span className={`shrink-0 rounded-[calc(var(--radius)-2px)] border px-1.5 py-0.5 text-[11px] leading-none font-medium ${className}`}>
-      {statusLabel(normalized)}
-    </span>
-  );
+  return <StatusBadge tone={cloudProviderStatusTone(normalized)} label={statusLabel(normalized)} />;
 }
 
 function CloudAliasAction({ status, busy, loading, onLogin }: { status: string; busy: boolean; loading: boolean; onLogin: () => void }): React.ReactElement {

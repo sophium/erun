@@ -6,6 +6,7 @@ import type { AppState } from '@/app/state';
 import type { UITenant, UITenantDashboardBuild, UITenantDashboardReview, UITenantDashboardUser } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { StatusBadge } from './StatusBadge';
 
 export function TenantDashboardView({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement | null {
   const dashboard = state.tenantDashboard;
@@ -159,7 +160,12 @@ function BuildsTable({ builds, apiError }: { builds: UITenantDashboardBuild[]; a
         <tr key={build.buildId}>
           <DataCell strong>{build.buildId}</DataCell>
           <DataCell>{build.reviewName || build.reviewId}</DataCell>
-          <DataCell>{build.successful ? 'Successful' : 'Failed'}</DataCell>
+          <DataCell>
+            <StatusBadge
+              tone={build.successful ? 'success' : 'destructive'}
+              label={build.successful ? 'Successful' : 'Failed'}
+            />
+          </DataCell>
           <DataCell>{build.commitId}</DataCell>
           <DataCell>{build.version}</DataCell>
           <DataCell>{formatDate(build.createdAt)}</DataCell>

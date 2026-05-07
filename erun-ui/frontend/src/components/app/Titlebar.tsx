@@ -273,12 +273,23 @@ function statusIcon(status: TitlebarStatusValue): typeof LoaderCircle {
 }
 
 function StatusMessage({ status }: { status: TitlebarStatusValue }): React.ReactElement {
-  const title = status.detail ? `${status.message}. ${status.detail}` : status.message;
+  const fullText = status.detail ? `${status.message}. ${status.detail}` : status.message;
   return (
-    <span className="min-w-0 truncate" title={title}>
-      {status.message}
-      {status.detail && <span className="text-muted-foreground"> - {status.detail}</span>}
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className="min-w-0 truncate outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+          tabIndex={0}
+          aria-label={fullText}
+        >
+          {status.message}
+          {status.detail && <span className="text-muted-foreground"> - {status.detail}</span>}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-[360px] whitespace-normal text-left leading-5">
+        {fullText}
+      </TooltipContent>
+    </Tooltip>
   );
 }
 

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { CheckCircle2, Cloud, Copy, Folder, FolderOpen, LoaderCircle, LogIn, LogOut, MoreHorizontal, Plus, Settings, UserCircle2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Cloud, Copy, Folder, FolderOpen, LoaderCircle, LogIn, LogOut, MoreHorizontal, Plus, Settings, UserCircle2 } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
@@ -9,6 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { cn } from '@/lib/utils';
 import type { UICloudProviderStatus, UITenant } from '@/types';
 import { IconTooltip } from './IconTooltip';
+import { cloudProviderStatusTone } from './StatusBadge';
 
 export function Sidebar({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
   return (
@@ -73,6 +74,7 @@ function PrimaryCloudAliasControl({ controller, state }: { controller: ERunUICon
     return null;
   }
 
+  const triggerTone = cloudProviderStatusTone(view.provider.status);
   return (
     <Popover>
       <PopoverTrigger asChild>
@@ -81,7 +83,7 @@ function PrimaryCloudAliasControl({ controller, state }: { controller: ERunUICon
           className="mt-3 mr-1 flex min-h-10 min-w-0 items-center gap-2 rounded-md border border-sidebar-border bg-background/88 px-3 py-2 text-left text-sm text-foreground shadow-sm hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           aria-label={`${view.provider.alias} cloud status`}
         >
-          {view.active ? <CheckCircle2 className="size-4 shrink-0 text-green-700 dark:text-green-400" aria-hidden="true" /> : <UserCircle2 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
+          <CloudAliasTriggerIcon tone={triggerTone} />
           <span className="min-w-0 flex-1 truncate">{cloudProviderIdentity(view.provider)}</span>
         </button>
       </PopoverTrigger>
@@ -159,13 +161,33 @@ function CloudAliasPopoverRow({ icon, label, muted }: { icon: React.ReactElement
 }
 
 function CloudAliasStatus({ provider }: { provider: UICloudProviderStatus }): React.ReactElement {
-  const active = provider.status.trim() === 'active';
+  const tone = cloudProviderStatusTone(provider.status);
   return (
     <div className="flex min-w-0 items-center gap-2 rounded-sm px-2 py-1.5 text-sm">
-      {active ? <CheckCircle2 className="size-4 shrink-0 text-green-700 dark:text-green-400" aria-hidden="true" /> : <Cloud className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
-      <span className="min-w-0 flex-1 truncate">{active ? 'Connected' : statusLabel(provider.status)}</span>
+      <CloudAliasStatusIcon tone={tone} />
+      <span className="min-w-0 flex-1 truncate">{statusLabel(provider.status)}</span>
     </div>
   );
+}
+
+function CloudAliasTriggerIcon({ tone }: { tone: ReturnType<typeof cloudProviderStatusTone> }): React.ReactElement {
+  if (tone === 'success') {
+    return <CheckCircle2 className="size-4 shrink-0 text-green-700 dark:text-green-400" aria-hidden="true" />;
+  }
+  if (tone === 'destructive') {
+    return <AlertCircle className="size-4 shrink-0 text-destructive" aria-hidden="true" />;
+  }
+  return <UserCircle2 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />;
+}
+
+function CloudAliasStatusIcon({ tone }: { tone: ReturnType<typeof cloudProviderStatusTone> }): React.ReactElement {
+  if (tone === 'success') {
+    return <CheckCircle2 className="size-4 shrink-0 text-green-700 dark:text-green-400" aria-hidden="true" />;
+  }
+  if (tone === 'destructive') {
+    return <AlertCircle className="size-4 shrink-0 text-destructive" aria-hidden="true" />;
+  }
+  return <Cloud className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />;
 }
 
 function cloudProviderIdentity(provider: UICloudProviderStatus): string {
