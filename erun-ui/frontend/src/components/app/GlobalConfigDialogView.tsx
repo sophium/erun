@@ -194,6 +194,7 @@ function CloudContextDraftForm({ controller, dialog }: { controller: ERunUIContr
           onChange={(diskSizeGb) => controller.updateCloudContextDraft({ diskSizeGb: Number(diskSizeGb) })}
         />
       </div>
+      <p className="text-[12px] leading-[1.4] text-muted-foreground">Region, instance type, and disk size are common choices vetted for ERun. Contact an admin to expand the list.</p>
       <CloudContextNameField controller={controller} dialog={dialog} generatedName={generated} />
     </div>
   );

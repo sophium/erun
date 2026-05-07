@@ -187,19 +187,34 @@ function RuntimePodFields({ controller, dialog }: { controller: ERunUIController
 
 function EnvironmentCreateChecks({ controller, dialog }: { controller: ERunUIController; dialog: EnvironmentDialog }): React.ReactElement {
   return (
-    <div className="grid gap-2">
+    <div className="grid gap-3">
       <CheckboxField id="environment-default-tenant" label="Set as default tenant" checked={dialog.setDefaultTenant} disabled={dialog.busy} onCheckedChange={(setDefaultTenant) => controller.updateEnvironmentDialog({ setDefaultTenant })} />
       <CheckboxField id="environment-no-git" label="Initialize without Git checkout" checked={dialog.noGit} disabled={dialog.busy} onCheckedChange={(noGit) => controller.updateEnvironmentDialog({ noGit })} />
-      <CheckboxField id="environment-bootstrap" label="Create tenant devops module" checked={dialog.bootstrap} disabled={dialog.busy} onCheckedChange={(bootstrap) => controller.updateEnvironmentDialog({ bootstrap })} />
+      <CheckboxField
+        id="environment-bootstrap"
+        label="Create tenant DevOps repository"
+        helper="Generates the tenant's shared DevOps module — Helm values and deployment templates reused by every environment in this tenant."
+        checked={dialog.bootstrap}
+        disabled={dialog.busy}
+        onCheckedChange={(bootstrap) => controller.updateEnvironmentDialog({ bootstrap })}
+      />
     </div>
   );
 }
 
-function CheckboxField({ id, label, checked, disabled, onCheckedChange }: { id: string; label: string; checked: boolean; disabled: boolean; onCheckedChange: (checked: boolean) => void }): React.ReactElement {
+function CheckboxField({ id, label, helper, checked, disabled, onCheckedChange }: { id: string; label: string; helper?: string; checked: boolean; disabled: boolean; onCheckedChange: (checked: boolean) => void }): React.ReactElement {
+  const helperId = helper ? `${id}-helper` : undefined;
   return (
-    <div className="flex items-center gap-2">
-      <Checkbox id={id} checked={checked} disabled={disabled} onCheckedChange={(value) => onCheckedChange(value === true)} />
-      <Label htmlFor={id} className="text-sm font-normal">{label}</Label>
+    <div className="grid gap-1">
+      <div className="flex items-center gap-2">
+        <Checkbox id={id} checked={checked} disabled={disabled} onCheckedChange={(value) => onCheckedChange(value === true)} aria-describedby={helperId} />
+        <Label htmlFor={id} className="text-sm font-normal">{label}</Label>
+      </div>
+      {helper && (
+        <p id={helperId} className="text-[12px] leading-[1.4] text-muted-foreground pl-6">
+          {helper}
+        </p>
+      )}
     </div>
   );
 }

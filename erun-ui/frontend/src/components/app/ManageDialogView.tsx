@@ -138,7 +138,7 @@ function GeneralTab({ controller, state }: { controller: ERunUIController; state
   const dialog = state.manageDialog;
   const config = dialog.config;
   const containerRegistrySuggestions = React.useMemo(
-    () => uniqueSuggestions([config.containerRegistry, ...loadSavedPastContainerRegistries(), 'ghcr.io/rihards-freimanis']),
+    () => uniqueSuggestions([config.containerRegistry, ...loadSavedPastContainerRegistries()]),
     [config.containerRegistry],
   );
   return (
@@ -243,7 +243,16 @@ function IdleStopFields({ controller, dialog }: { controller: ERunUIController; 
         helper="Format HH:MM-HH:MM. Default 08:00-20:00."
         onChange={(workingHours) => controller.updateManageConfig({ idle: { ...config.idle, workingHours } })}
       />
-      <TextField id="environment-config-idle-traffic" label="Idle SSH bytes" value={String(config.idle.idleTrafficBytes)} inputMode="numeric" disabled={dialog.busy} onChange={(idleTrafficBytes) => controller.updateManageConfig({ idle: { ...config.idle, idleTrafficBytes: parseIdleTrafficBytes(idleTrafficBytes) } })} />
+      <TextField
+        id="environment-config-idle-traffic"
+        label="Idle SSH activity threshold"
+        value={String(config.idle.idleTrafficBytes)}
+        inputMode="numeric"
+        disabled={dialog.busy}
+        placeholder="e.g. 0"
+        helper="SSH bytes per check below which the connection counts as idle. 0 disables the check."
+        onChange={(idleTrafficBytes) => controller.updateManageConfig({ idle: { ...config.idle, idleTrafficBytes: parseIdleTrafficBytes(idleTrafficBytes) } })}
+      />
     </div>
   );
 }

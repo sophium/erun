@@ -22,13 +22,13 @@ export function Sidebar({ controller, state }: { controller: ERunUIController; s
       <div className="flex items-center justify-between gap-2 pr-1.5 pb-2.5 pl-3.5">
         <span className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Environments</span>
         <div className="flex items-center gap-1">
-          <IconTooltip label="Manage ERun config">
+          <IconTooltip label="Open ERun settings">
             <Button
               className="size-[26px] flex-none text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&_svg]:size-4"
               type="button"
               variant="ghost"
               size="icon-xs"
-              aria-label="Manage ERun config"
+              aria-label="Open ERun settings"
               onClick={() => controller.openGlobalConfigDialog()}
             >
               <Settings />
@@ -291,7 +291,7 @@ function TenantSelectButton({ controller, tenantName, active, related }: { contr
 
 function TenantManageButton({ controller, tenantName, active }: { controller: ERunUIController; tenantName: string; active: boolean }): React.ReactElement {
   return (
-    <IconTooltip label="Manage tenant">
+    <IconTooltip label="Edit tenant settings">
       <Button
         type="button"
         className={cn(
@@ -301,7 +301,7 @@ function TenantManageButton({ controller, tenantName, active }: { controller: ER
         )}
         variant="ghost"
         size="icon"
-        aria-label={`Manage ${tenantName}`}
+        aria-label={`Edit ${tenantName} settings`}
         onClick={(event) => {
           event.stopPropagation();
           controller.openTenantDialog(tenantName);
@@ -352,7 +352,7 @@ function EnvironmentRow({
         <span className="min-w-0 truncate">{environmentName}</span>
         {busy && <LoaderCircle className="size-3.5 flex-none animate-spin text-current opacity-75" aria-hidden="true" />}
       </button>
-      <IconTooltip label="Manage environment">
+      <IconTooltip label="Edit environment settings">
         <Button
           type="button"
           className={cn(
@@ -361,7 +361,7 @@ function EnvironmentRow({
           )}
           variant="ghost"
           size="icon"
-          aria-label={`Manage ${tenantName} / ${environmentName}`}
+          aria-label={`Edit ${tenantName} / ${environmentName} settings`}
           onClick={(event) => {
             event.stopPropagation();
             controller.openManageDialog(selection);
