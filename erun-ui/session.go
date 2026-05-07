@@ -251,14 +251,9 @@ func buildInitArgs(selection uiSelection) []string {
 }
 
 func buildDeployArgs(selection uiSelection) []string {
-	args := erunArgs(selection.Debug, "open", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment), "--no-shell", "--no-alias-prompt")
-	version := selection.Version
-	runtimeImage := selection.RuntimeImage
-	if version = strings.TrimSpace(version); version != "" {
+	args := erunArgs(selection.Debug, "deploy", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
+	if version := strings.TrimSpace(selection.Version); version != "" {
 		args = append(args, "--version", version)
-	}
-	if runtimeImage = strings.TrimSpace(runtimeImage); runtimeImage != "" {
-		args = append(args, "--runtime-image", runtimeImage)
 	}
 	return args
 }

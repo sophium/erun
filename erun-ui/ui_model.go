@@ -180,9 +180,28 @@ type uiEnvironmentConfig struct {
 	RuntimePod           uiRuntimePodConfig      `json:"runtimePod"`
 	SSHD                 uiSSHDConfig            `json:"sshd"`
 	Idle                 uiIdleConfig            `json:"idle"`
+	Claude               uiClaudeConfig          `json:"claude"`
+	ClaudeDefaults       uiClaudeDefaults        `json:"claudeDefaults"`
 	LocalPorts           uiEnvironmentLocalPorts `json:"localPorts"`
 	Remote               bool                    `json:"remote"`
 	Snapshot             bool                    `json:"snapshot"`
+}
+
+type uiClaudeConfig struct {
+	UseMantle       *bool    `json:"useMantle,omitempty"`
+	UseBedrock      *bool    `json:"useBedrock,omitempty"`
+	Models          []string `json:"models,omitempty"`
+	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
+}
+
+type uiClaudeDefaults struct {
+	UseMantle       bool     `json:"useMantle"`
+	UseBedrock      bool     `json:"useBedrock"`
+	Models          []string `json:"models"`
+	MaxOutputTokens int      `json:"maxOutputTokens"`
+	KnownModels     []string `json:"knownModels"`
+	MinTokens       int      `json:"minTokens"`
+	MaxTokens       int      `json:"maxTokens"`
 }
 
 type uiRuntimePodConfig struct {

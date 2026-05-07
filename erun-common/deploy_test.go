@@ -557,6 +557,97 @@ func TestHelmDeploySpecIncludesRuntimePodResourceLimits(t *testing.T) {
 	}
 }
 
+func TestHelmDeploySpecAppliesClaudeBoolDefaultsWhenUnset(t *testing.T) {
+	spec := HelmDeploySpec{
+		ReleaseName:     "erun-devops",
+		ChartPath:       "/tmp/chart",
+		ValuesFilePath:  "/tmp/chart/values.local.yaml",
+		Tenant:          "erun",
+		Environment:     "local",
+		Namespace:       "erun-local",
+		WorktreeStorage: WorktreeStorageHost,
+		Timeout:         DefaultHelmDeploymentTimeout,
+	}
+
+	args := strings.Join(spec.command().Args, "\n")
+	for _, want := range []string{"claude.useMantle=0", "claude.useBedrock=0"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("expected Helm command to include %q when EnvironmentClaudeConfig is zero, got:\n%s", want, args)
+		}
+	}
+	for _, unwanted := range []string{"claude.availableModels=", "claude.maxOutputTokens="} {
+		if strings.Contains(args, unwanted) {
+			t.Fatalf("did not expect %q when models/tokens are not overridden, got:\n%s", unwanted, args)
+		}
+	}
+}
+
+func TestHelmDeploySpecEmitsClaudeSetArgsWhenConfigured(t *testing.T) {
+	useMantle := false
+	useBedrock := true
+	maxTokens := 8192
+	spec := HelmDeploySpec{
+		ReleaseName:     "erun-devops",
+		ChartPath:       "/tmp/chart",
+		ValuesFilePath:  "/tmp/chart/values.local.yaml",
+		Tenant:          "erun",
+		Environment:     "local",
+		Namespace:       "erun-local",
+		WorktreeStorage: WorktreeStorageHost,
+		Timeout:         DefaultHelmDeploymentTimeout,
+		Claude: EnvironmentClaudeConfig{
+			UseMantle:       &useMantle,
+			UseBedrock:      &useBedrock,
+			Models:          []string{"opus", "sonnet"},
+			MaxOutputTokens: &maxTokens,
+		},
+	}
+
+	args := strings.Join(spec.command().Args, "\n")
+	for _, want := range []string{
+		"claude.useMantle=0",
+		"claude.useBedrock=1",
+		"claude.availableModels=opus,sonnet",
+		"claude.maxOutputTokens=8192",
+	} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("expected Helm command to include %q, got:\n%s", want, args)
+		}
+	}
+}
+
+func TestHelmDeploySpecEmitsOnlySetClaudeFields(t *testing.T) {
+	useBedrock := true
+	spec := HelmDeploySpec{
+		ReleaseName:     "erun-devops",
+		ChartPath:       "/tmp/chart",
+		ValuesFilePath:  "/tmp/chart/values.local.yaml",
+		Tenant:          "erun",
+		Environment:     "local",
+		Namespace:       "erun-local",
+		WorktreeStorage: WorktreeStorageHost,
+		Timeout:         DefaultHelmDeploymentTimeout,
+		Claude: EnvironmentClaudeConfig{
+			UseBedrock: &useBedrock,
+		},
+	}
+
+	args := strings.Join(spec.command().Args, "\n")
+	for _, want := range []string{"claude.useBedrock=1", "claude.useMantle=0"} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("expected %q in args, got:\n%s", want, args)
+		}
+	}
+	for _, unwanted := range []string{
+		"claude.availableModels=",
+		"claude.maxOutputTokens=",
+	} {
+		if strings.Contains(args, unwanted) {
+			t.Fatalf("did not expect %q when only UseBedrock is set, got:\n%s", unwanted, args)
+		}
+	}
+}
+
 func TestNewHelmDeploySpecCanonicalizesWorktreeHostPath(t *testing.T) {
 	projectRoot := t.TempDir()
 	repoRoot := filepath.Join(projectRoot, "repo")
@@ -1744,6 +1835,61 @@ printf '%s
 		"--set-string\napi.oidcAllowedIssuers=https://issuer.one.example,https://issuer.two.example\n",
 		"--set\napi.postgres.reset=true\n",
 		"--set-string\nimageOverrides.erun-backend-api=erunpaas/erun-backend-api:1.0.0-snapshot-20260503093000\n",
+	} {
+		if !strings.Contains(args, want) {
+			t.Fatalf("expected helm args to include %q, got:\n%s", want, args)
+		}
+	}
+}
+
+func TestDeployHelmChartForwardsClaudeAndContainerRegistry(t *testing.T) {
+	helmDir := t.TempDir()
+	argsPath := filepath.Join(helmDir, "helm-args.txt")
+	helmPath := filepath.Join(helmDir, "helm")
+	if err := os.WriteFile(helmPath, []byte(`#!/bin/sh
+printf '%s
+' "$@" > "$ERUN_HELM_ARGS_FILE"
+`), 0o755); err != nil {
+		t.Fatalf("write helm stub: %v", err)
+	}
+	t.Setenv("ERUN_HELM_ARGS_FILE", argsPath)
+	t.Setenv("PATH", helmDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	chartPath := createHelmChartFixture(t, t.TempDir(), "erun-devops")
+	useMantle := true
+	maxTokens := 8192
+	if err := DeployHelmChart(HelmDeployParams{
+		ReleaseName:       "erun-devops",
+		ChartPath:         chartPath,
+		ValuesFilePath:    filepath.Join(chartPath, "values.local.yaml"),
+		Tenant:            "erun",
+		Environment:       "local",
+		Namespace:         "erun-local",
+		WorktreeStorage:   WorktreeStorageHost,
+		WorktreeRepoName:  "erun",
+		WorktreeHostPath:  "/home/erun/git/erun",
+		ContainerRegistry: "ghcr.io/sophium",
+		Claude: EnvironmentClaudeConfig{
+			UseMantle:       &useMantle,
+			Models:          []string{"opus", "sonnet"},
+			MaxOutputTokens: &maxTokens,
+		},
+		Timeout: DefaultHelmDeploymentTimeout,
+	}); err != nil {
+		t.Fatalf("DeployHelmChart failed: %v", err)
+	}
+
+	data, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("read helm args: %v", err)
+	}
+	args := string(data)
+	for _, want := range []string{
+		"--set-string\ncontainerRegistry=ghcr.io/sophium\n",
+		"--set-string\nclaude.useMantle=1\n",
+		"--set-string\nclaude.useBedrock=0\n",
+		"--set-string\nclaude.availableModels=opus,sonnet\n",
+		"--set-string\nclaude.maxOutputTokens=8192\n",
 	} {
 		if !strings.Contains(args, want) {
 			t.Fatalf("expected helm args to include %q, got:\n%s", want, args)

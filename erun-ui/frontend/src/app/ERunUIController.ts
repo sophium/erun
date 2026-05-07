@@ -875,6 +875,10 @@ export class ERunUIController {
     this.manageEnvironment.updateSSHDConfig(values);
   }
 
+  updateManageClaudeConfig(values: Partial<UIEnvironmentConfig['claude']>): void {
+    this.manageEnvironment.updateClaudeConfig(values);
+  }
+
   async chooseWorkspaceSyncLocalFolder(): Promise<void> {
     await this.manageEnvironment.chooseWorkspaceSyncLocalFolder();
   }

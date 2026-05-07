@@ -50,8 +50,8 @@
 {{- $cloudRegion := default "" $cloudContext.region -}}
 {{- $cloudInstanceID := default "" $cloudContext.instanceId -}}
 {{- $claude := default dict .Values.claude -}}
-{{- $claudeUseBedrock := default "1" $claude.useBedrock -}}
-{{- $claudeUseMantle := default "1" $claude.useMantle -}}
+{{- $claudeUseBedrock := default "0" $claude.useBedrock -}}
+{{- $claudeUseMantle := default "0" $claude.useMantle -}}
 {{- $claudeSmallFastRegion := default $cloudRegion $claude.smallFastModelAWSRegion -}}
 {{- $claudeAvailableModels := default "sonnet,haiku" $claude.availableModels -}}
 {{- $claudeModel := default "" $claude.model -}}

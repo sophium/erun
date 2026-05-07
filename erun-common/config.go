@@ -67,9 +67,10 @@ type EnvConfig struct {
 	RuntimeVersion     string                `yaml:"runtimeversion,omitempty"`
 	RuntimePod         RuntimePodResources   `yaml:"runtimepod,omitempty"`
 	SSHD               SSHDConfig            `yaml:"sshd,omitempty"`
-	Idle               EnvironmentIdleConfig `yaml:"idle,omitempty"`
-	Remote             bool                  `yaml:"remote,omitempty"`
-	Snapshot           *bool                 `yaml:"snapshot,omitempty"`
+	Idle               EnvironmentIdleConfig   `yaml:"idle,omitempty"`
+	Claude             EnvironmentClaudeConfig `yaml:"claude,omitempty" json:"claude,omitempty"`
+	Remote             bool                    `yaml:"remote,omitempty"`
+	Snapshot           *bool                   `yaml:"snapshot,omitempty"`
 }
 
 func (c TenantConfig) SnapshotEnabled() bool {

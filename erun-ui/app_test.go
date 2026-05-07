@@ -541,9 +541,9 @@ func TestBuildInitArgsIncludesRuntimeVersion(t *testing.T) {
 	}
 }
 
-func TestBuildDeployArgsIncludesRuntimeVersion(t *testing.T) {
-	got := buildDeployArgs(uiSelection{Tenant: " erun ", Environment: " remote ", Version: " 1.0.19 ", RuntimeImage: " erun-devops "})
-	want := []string{"open", "erun", "remote", "--no-shell", "--no-alias-prompt", "--version", "1.0.19", "--runtime-image", "erun-devops"}
+func TestBuildDeployArgsRunsDeploy(t *testing.T) {
+	got := buildDeployArgs(uiSelection{Tenant: " erun ", Environment: " remote ", Version: " 1.0.19 "})
+	want := []string{"deploy", "erun", "remote", "--version", "1.0.19"}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected args length: got %+v want %+v", got, want)
 	}
@@ -871,7 +871,7 @@ func TestStartDeploySessionStartsDeployCommand(t *testing.T) {
 	if started.Dir != projectRoot {
 		t.Fatalf("unexpected start dir: %q", started.Dir)
 	}
-	wantArgs := []string{"open", "erun", "remote", "--no-shell", "--no-alias-prompt", "--version", "1.0.19"}
+	wantArgs := []string{"deploy", "erun", "remote", "--version", "1.0.19"}
 	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
 		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
 	}
@@ -1759,6 +1759,131 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 	if stored.ContainerRegistry != "" {
 		t.Fatalf("expected env save not to copy project registry into env config, got %+v", stored)
 	}
+}
+
+func TestLoadEnvironmentConfigExposesClaudeDefaultsAndOverrides(t *testing.T) {
+	projectRoot := t.TempDir()
+	useBedrock := false
+	maxTokens := 8192
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"frs": {Name: "frs", ProjectRoot: projectRoot},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/local": {
+				Name:              "local",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-local",
+				Claude: eruncommon.EnvironmentClaudeConfig{
+					UseBedrock:      &useBedrock,
+					Models:          []string{"opus", "sonnet"},
+					MaxOutputTokens: &maxTokens,
+				},
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	got, err := app.LoadEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"})
+	if err != nil {
+		t.Fatalf("LoadEnvironmentConfig failed: %v", err)
+	}
+
+	if got.Claude.UseBedrock == nil || *got.Claude.UseBedrock {
+		t.Fatalf("expected Claude.UseBedrock=false, got %+v", got.Claude)
+	}
+	if got.Claude.UseMantle != nil {
+		t.Fatalf("expected Claude.UseMantle to remain unset, got %+v", got.Claude)
+	}
+	if got.Claude.MaxOutputTokens == nil || *got.Claude.MaxOutputTokens != 8192 {
+		t.Fatalf("expected Claude.MaxOutputTokens=8192, got %+v", got.Claude)
+	}
+	if !equalStringSlices(got.Claude.Models, []string{"opus", "sonnet"}) {
+		t.Fatalf("expected Claude.Models=[opus sonnet], got %+v", got.Claude.Models)
+	}
+	if got.ClaudeDefaults.MaxOutputTokens != eruncommon.DefaultClaudeMaxOutputTokens {
+		t.Fatalf("expected default max output tokens, got %d", got.ClaudeDefaults.MaxOutputTokens)
+	}
+	if !equalStringSlices(got.ClaudeDefaults.Models, eruncommon.DefaultClaudeAvailableModels()) {
+		t.Fatalf("expected default models, got %+v", got.ClaudeDefaults.Models)
+	}
+	if !equalStringSlices(got.ClaudeDefaults.KnownModels, eruncommon.KnownClaudeModels()) {
+		t.Fatalf("expected known models list, got %+v", got.ClaudeDefaults.KnownModels)
+	}
+}
+
+func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"frs": {Name: "frs", ProjectRoot: projectRoot},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/local": {
+				Name:              "local",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-local",
+				RuntimePod: eruncommon.RuntimePodResources{
+					CPU:    "4",
+					Memory: "8916Mi",
+				},
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	useMantle := false
+	maxTokens := 16384
+	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+		Name:              "local",
+		RepoPath:          projectRoot,
+		KubernetesContext: "cluster-local",
+		RuntimePod: uiRuntimePodConfig{
+			CPU:    "4",
+			Memory: "8916Mi",
+		},
+		Idle: uiIdleConfig{
+			Timeout:      eruncommon.DefaultEnvironmentIdleTimeout.String(),
+			WorkingHours: eruncommon.DefaultEnvironmentWorkingHours,
+		},
+		Claude: uiClaudeConfig{
+			UseMantle:       &useMantle,
+			Models:          []string{"opus"},
+			MaxOutputTokens: &maxTokens,
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
+	}
+
+	if saved.Claude.UseMantle == nil || *saved.Claude.UseMantle {
+		t.Fatalf("expected saved UseMantle=false, got %+v", saved.Claude)
+	}
+	if saved.Claude.UseBedrock != nil {
+		t.Fatalf("expected saved UseBedrock unset, got %+v", saved.Claude)
+	}
+	stored := store.envs["frs/local"].Claude
+	if stored.UseMantle == nil || *stored.UseMantle {
+		t.Fatalf("expected stored UseMantle=false, got %+v", stored)
+	}
+	if stored.MaxOutputTokens == nil || *stored.MaxOutputTokens != 16384 {
+		t.Fatalf("expected stored MaxOutputTokens=16384, got %+v", stored)
+	}
+	if !equalStringSlices(stored.Models, []string{"opus"}) {
+		t.Fatalf("expected stored Models=[opus], got %+v", stored.Models)
+	}
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {

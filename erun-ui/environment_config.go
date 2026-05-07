@@ -193,6 +193,8 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 			WorkingHours:     idleConfigValue(config.Idle.WorkingHours, eruncommon.DefaultEnvironmentWorkingHours),
 			IdleTrafficBytes: config.Idle.IdleTrafficBytes,
 		},
+		Claude:         claudeConfigToUI(config.Claude),
+		ClaudeDefaults: claudeDefaultsForUI(),
 		LocalPorts: uiEnvironmentLocalPorts{
 			RangeStart: ports.RangeStart,
 			RangeEnd:   ports.RangeEnd,
@@ -312,8 +314,73 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 		WorkingHours:     strings.TrimSpace(config.Idle.WorkingHours),
 		IdleTrafficBytes: config.Idle.IdleTrafficBytes,
 	}
+	existing.Claude = claudeConfigFromUI(config.Claude)
 	existing.SetSnapshot(config.Snapshot)
 	return existing
+}
+
+func claudeConfigToUI(config eruncommon.EnvironmentClaudeConfig) uiClaudeConfig {
+	out := uiClaudeConfig{
+		UseMantle:       copyBoolPtr(config.UseMantle),
+		UseBedrock:      copyBoolPtr(config.UseBedrock),
+		MaxOutputTokens: copyIntPtr(config.MaxOutputTokens),
+	}
+	if models := config.NormalizedModels(); len(models) > 0 {
+		out.Models = models
+	}
+	return out
+}
+
+func claudeConfigFromUI(config uiClaudeConfig) eruncommon.EnvironmentClaudeConfig {
+	models := []string(nil)
+	if normalized := normalizeUIClaudeModels(config.Models); len(normalized) > 0 {
+		models = normalized
+	}
+	return eruncommon.EnvironmentClaudeConfig{
+		UseMantle:       copyBoolPtr(config.UseMantle),
+		UseBedrock:      copyBoolPtr(config.UseBedrock),
+		Models:          models,
+		MaxOutputTokens: copyIntPtr(config.MaxOutputTokens),
+	}
+}
+
+func claudeDefaultsForUI() uiClaudeDefaults {
+	minTokens, maxTokens := eruncommon.ClaudeMaxOutputTokensRange()
+	return uiClaudeDefaults{
+		UseMantle:       eruncommon.DefaultClaudeUseMantle,
+		UseBedrock:      eruncommon.DefaultClaudeUseBedrock,
+		Models:          eruncommon.DefaultClaudeAvailableModels(),
+		MaxOutputTokens: eruncommon.DefaultClaudeMaxOutputTokens,
+		KnownModels:     eruncommon.KnownClaudeModels(),
+		MinTokens:       minTokens,
+		MaxTokens:       maxTokens,
+	}
+}
+
+func normalizeUIClaudeModels(models []string) []string {
+	out := make([]string, 0, len(models))
+	for _, m := range models {
+		if m = strings.TrimSpace(m); m != "" {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func copyBoolPtr(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	v := *value
+	return &v
+}
+
+func copyIntPtr(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	v := *value
+	return &v
 }
 
 func runtimePodConfigToUI(config eruncommon.RuntimePodResources) uiRuntimePodConfig {

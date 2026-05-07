@@ -69,6 +69,7 @@ export interface ManageDialogState {
   version: string;
   versionImage: string;
   config: UIEnvironmentConfig;
+  initialConfig: UIEnvironmentConfig | null;
   configLoading: boolean;
   resourceStatus: UIRuntimeResourceStatus | null;
   resourceStatusLoading: boolean;
@@ -78,6 +79,7 @@ export interface ManageDialogState {
   busyTarget: string;
   choicesOpen: boolean;
   error: string;
+  pendingRedeploy: boolean;
 }
 
 export interface TenantDialogState {
@@ -194,11 +196,12 @@ export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
 
 export const defaultManageDialog = (): ManageDialogState => ({
   open: false,
-  tab: 'config',
+  tab: 'general',
   selection: null,
   version: '',
   versionImage: '',
   config: defaultEnvironmentConfig(),
+  initialConfig: null,
   configLoading: false,
   resourceStatus: null,
   resourceStatusLoading: false,
@@ -208,6 +211,7 @@ export const defaultManageDialog = (): ManageDialogState => ({
   busyTarget: '',
   choicesOpen: false,
   error: '',
+  pendingRedeploy: false,
 });
 
 export const defaultTenantDialog = (): TenantDialogState => ({
@@ -286,6 +290,8 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
     workingHours: '08:00-20:00',
     idleTrafficBytes: 0,
   },
+  claude: {},
+  claudeDefaults: defaultClaudeDefaults(),
   localPorts: {
     rangeStart: 0,
     rangeEnd: 0,
@@ -312,4 +318,14 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
 export const defaultRuntimePodConfig = (): { cpu: string; memory: string } => ({
   cpu: '4',
   memory: '8.7',
+});
+
+export const defaultClaudeDefaults = (): UIEnvironmentConfig['claudeDefaults'] => ({
+  useMantle: false,
+  useBedrock: false,
+  models: ['sonnet', 'haiku'],
+  maxOutputTokens: 4096,
+  knownModels: ['opus', 'sonnet', 'haiku'],
+  minTokens: 1,
+  maxTokens: 200000,
 });

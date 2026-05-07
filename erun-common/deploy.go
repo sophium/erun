@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,6 +73,7 @@ type HelmDeployParams struct {
 	ImageOverrides     map[string]string
 	ResetDatabase      bool
 	Idle               EnvironmentIdleConfig
+	Claude             EnvironmentClaudeConfig
 	RuntimePod         RuntimePodResources
 	Version            string
 	Timeout            string
@@ -105,6 +107,7 @@ type HelmDeploySpec struct {
 	ImageOverrides     map[string]string
 	ResetDatabase      bool
 	Idle               EnvironmentIdleConfig
+	Claude             EnvironmentClaudeConfig
 	RuntimePod         RuntimePodResources
 	Version            string
 	Timeout            string
@@ -773,6 +776,7 @@ func newHelmDeploySpec(target OpenResult, deployContext KubernetesDeployContext,
 		CloudProviderAlias: target.EnvConfig.CloudProviderAlias,
 		ContainerRegistry:  resolveProjectContainerRegistry(target.RepoPath, target.Environment),
 		Idle:               target.EnvConfig.Idle,
+		Claude:             target.EnvConfig.Claude,
 		RuntimePod:         NormalizeRuntimePodResources(target.EnvConfig.RuntimePod),
 		Version:            version,
 		Timeout:            DefaultHelmDeploymentTimeout,
@@ -917,6 +921,7 @@ func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 		ImageOverrides:     cloneStringMap(d.ImageOverrides),
 		ResetDatabase:      d.ResetDatabase,
 		Idle:               d.Idle,
+		Claude:             d.Claude,
 		RuntimePod:         NormalizeRuntimePodResources(d.RuntimePod),
 		Version:            d.Version,
 		Timeout:            d.Timeout,
@@ -969,6 +974,9 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set", "idle.trafficBytes="+formatHelmInt64(helmIdleTrafficBytes(d.Idle)),
 		"--set-string", "runtime.resources.limits.cpu="+NormalizeRuntimePodResources(d.RuntimePod).CPU,
 		"--set-string", "runtime.resources.limits.memory="+NormalizeRuntimePodResources(d.RuntimePod).Memory,
+	)
+	args = append(args, helmClaudeSetArgs(d.Claude)...)
+	args = append(args,
 		d.ReleaseName,
 		d.ChartPath,
 	)
@@ -1105,6 +1113,35 @@ func helmIdleTrafficBytes(config EnvironmentIdleConfig) int64 {
 		return DefaultEnvironmentIdleTrafficBytes
 	}
 	return policy.IdleTrafficBytes
+}
+
+func helmClaudeSetArgs(config EnvironmentClaudeConfig) []string {
+	args := make([]string, 0, 8)
+	args = append(args, "--set-string", "claude.useMantle="+claudeFlagValue(resolveClaudeBool(config.UseMantle, DefaultClaudeUseMantle)))
+	args = append(args, "--set-string", "claude.useBedrock="+claudeFlagValue(resolveClaudeBool(config.UseBedrock, DefaultClaudeUseBedrock)))
+	if models := formatClaudeModels(config.Models); models != "" {
+		args = append(args, "--set-string", "claude.availableModels="+models)
+	}
+	if config.MaxOutputTokens != nil {
+		args = append(args, "--set-string", "claude.maxOutputTokens="+strconv.Itoa(*config.MaxOutputTokens))
+	}
+	return args
+}
+
+func resolveClaudeBool(value *bool, fallback bool) bool {
+	if value == nil {
+		return fallback
+	}
+	return *value
+}
+
+// claudeFlagValue returns the "1"/"0" form expected by the chart template and
+// the entrypoint script, distinct from formatHelmBool's "true"/"false" form.
+func claudeFlagValue(value bool) string {
+	if value {
+		return "1"
+	}
+	return "0"
 }
 
 func resolveDeployKubernetesContext(environment, configured string, currentContext func() (string, error)) string {
@@ -1399,10 +1436,13 @@ func DeployHelmChart(params HelmDeployParams) error {
 		CloudRegion:        params.CloudRegion,
 		CloudInstanceID:    params.CloudInstanceID,
 		OIDCAllowedIssuers: params.OIDCAllowedIssuers,
+		ContainerRegistry:  params.ContainerRegistry,
 		ImageOverrides:     cloneStringMap(params.ImageOverrides),
 		ResetDatabase:      params.ResetDatabase,
 		Idle:               params.Idle,
+		Claude:             params.Claude,
 		RuntimePod:         params.RuntimePod,
+		Version:            params.Version,
 		Timeout:            params.Timeout,
 	}.command()
 

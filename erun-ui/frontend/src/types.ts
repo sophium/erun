@@ -18,7 +18,8 @@ export interface UITenant {
 }
 
 export type EnvironmentActionMode = 'init' | 'deploy';
-export type ManageTab = 'deploy' | 'config' | 'delete';
+export type ManageTab = 'general' | 'runtime' | 'ai' | 'ports' | 'ssh' | 'delete';
+export type ManageEditTab = Exclude<ManageTab, 'delete'>;
 
 export interface UISelection {
   tenant: string;
@@ -257,9 +258,28 @@ export interface UIEnvironmentConfig {
     workingHours: string;
     idleTrafficBytes: number;
   };
+  claude: UIEnvironmentClaudeConfig;
+  claudeDefaults: UIEnvironmentClaudeDefaults;
   localPorts: UIEnvironmentLocalPorts;
   remote: boolean;
   snapshot: boolean;
+}
+
+export interface UIEnvironmentClaudeConfig {
+  useMantle?: boolean;
+  useBedrock?: boolean;
+  models?: string[];
+  maxOutputTokens?: number;
+}
+
+export interface UIEnvironmentClaudeDefaults {
+  useMantle: boolean;
+  useBedrock: boolean;
+  models: string[];
+  maxOutputTokens: number;
+  knownModels: string[];
+  minTokens: number;
+  maxTokens: number;
 }
 
 export interface UIRuntimePodConfig {
