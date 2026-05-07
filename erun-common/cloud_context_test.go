@@ -86,6 +86,77 @@ func requireCloudContextCommands(t *testing.T, awsCommands, kubectlCommands []st
 	}
 }
 
+func TestInitCloudContextRetriesRunInstancesOnIAMConsistencyError(t *testing.T) {
+	store := &memoryCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{{
+		Alias:     "rihards+123456789012@aws",
+		Provider:  CloudProviderAWS,
+		Profile:   "erun-sso",
+		SSORegion: "eu-central-1",
+		AccountID: "123456789012",
+	}}}}
+	var runInstancesAttempts int
+	var sleeps []time.Duration
+	consistencyError := errors.New("aws ec2 run-instances failed: An error occurred (InvalidParameterValue) when calling the RunInstances operation: Value (erun-001-123456789012-eu-west-2-host-stop) for parameter iamInstanceProfile.name is invalid. Invalid IAM Instance Profile name")
+
+	_, err := InitCloudContext(Context{}, store, InitCloudContextParams{
+		CloudProviderAlias: "rihards+123456789012@aws",
+		DiskSizeGB:         AlternateCloudContextDiskSizeGB,
+	}, CloudContextDependencies{
+		Now:      func() time.Time { return time.Date(2026, 4, 27, 10, 0, 0, 0, time.UTC) },
+		NewToken: func() string { return "test-token" },
+		Sleep:    func(d time.Duration) { sleeps = append(sleeps, d) },
+		RunAWS: func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) {
+			joined := strings.Join(args, " ")
+			if strings.Contains(joined, "run-instances") {
+				runInstancesAttempts++
+				if runInstancesAttempts < 3 {
+					return "", consistencyError
+				}
+			}
+			return cloudContextAWSOutput(args), nil
+		},
+		RunKubectl: func(_ Context, _ []string) error { return nil },
+	})
+
+	requireNoError(t, err, "InitCloudContext should retry past IAM consistency errors")
+	requireEqual(t, runInstancesAttempts, 3, "run-instances attempts")
+	requireCondition(t, len(sleeps) == 2, "expected two backoff sleeps before success, got %+v", sleeps)
+}
+
+func TestInitCloudContextDoesNotRetryNonIAMRunInstancesErrors(t *testing.T) {
+	store := &memoryCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{{
+		Alias:     "rihards+123456789012@aws",
+		Provider:  CloudProviderAWS,
+		Profile:   "erun-sso",
+		SSORegion: "eu-central-1",
+		AccountID: "123456789012",
+	}}}}
+	var runInstancesAttempts int
+	otherError := errors.New("aws ec2 run-instances failed: SubnetNotFound")
+
+	_, err := InitCloudContext(Context{}, store, InitCloudContextParams{
+		CloudProviderAlias: "rihards+123456789012@aws",
+	}, CloudContextDependencies{
+		Now:      func() time.Time { return time.Date(2026, 4, 27, 10, 0, 0, 0, time.UTC) },
+		NewToken: func() string { return "test-token" },
+		Sleep:    func(time.Duration) { t.Fatalf("Sleep should not be called for non-IAM errors") },
+		RunAWS: func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) {
+			joined := strings.Join(args, " ")
+			if strings.Contains(joined, "run-instances") {
+				runInstancesAttempts++
+				return "", otherError
+			}
+			return cloudContextAWSOutput(args), nil
+		},
+		RunKubectl: func(_ Context, _ []string) error { return nil },
+	})
+
+	if err == nil {
+		t.Fatalf("expected non-IAM error to surface")
+	}
+	requireEqual(t, runInstancesAttempts, 1, "run-instances should not retry on non-IAM errors")
+}
+
 func TestCloudContextInstanceProfilePolicyAllowsClaudeCodeBedrock(t *testing.T) {
 	policy := cloudContextSelfStopPolicy(CloudProviderConfig{AccountID: "123456789012"}, DefaultCloudContextRegion, "team-context")
 	data, err := json.Marshal(policy)

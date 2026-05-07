@@ -264,7 +264,46 @@ func runInitCloudContextInstance(ctx Context, deps CloudContextDependencies, pro
 		return "", err
 	}
 	defer cleanup()
-	return deps.RunAWS(ctx, provider, config.Region, initCloudContextRunArgs(ami, userDataPath, params, *config))
+	args := initCloudContextRunArgs(ami, userDataPath, params, *config)
+	return runAWSWithIAMConsistencyRetry(ctx, deps, provider, config.Region, args)
+}
+
+const iamConsistencyMaxAttempts = 6
+
+var iamConsistencyBackoff = []time.Duration{
+	2 * time.Second,
+	4 * time.Second,
+	6 * time.Second,
+	8 * time.Second,
+	10 * time.Second,
+}
+
+func runAWSWithIAMConsistencyRetry(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region string, args []string) (string, error) {
+	var (
+		out string
+		err error
+	)
+	for attempt := 0; attempt < iamConsistencyMaxAttempts; attempt++ {
+		out, err = deps.RunAWS(ctx, provider, region, args)
+		if err == nil {
+			return out, nil
+		}
+		if !isIAMInstanceProfileConsistencyError(err) || attempt == iamConsistencyMaxAttempts-1 {
+			return out, err
+		}
+		ctx.Trace(fmt.Sprintf("IAM instance profile not yet visible to EC2; retrying in %s", iamConsistencyBackoff[attempt]))
+		deps.Sleep(iamConsistencyBackoff[attempt])
+	}
+	return out, err
+}
+
+func isIAMInstanceProfileConsistencyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "Invalid IAM Instance Profile name") ||
+		strings.Contains(message, "Invalid IAM Instance Profile ARN")
 }
 
 func initCloudContextAMI(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region string) (string, error) {
