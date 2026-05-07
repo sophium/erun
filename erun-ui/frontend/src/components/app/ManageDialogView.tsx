@@ -80,8 +80,36 @@ function ManageDialogContent({ controller, state, confirmationRef, expected, con
   return (
     <div className="-mx-1 min-h-0 overflow-auto px-1 pb-1">
       <div className="grid gap-3">
+        {dialog.pendingRedeploy && !confirmingDelete && <RedeployBanner controller={controller} dialog={dialog} />}
         <ManageConfigFields controller={controller} state={state} />
         {confirmingDelete && <DeleteConfirmationFields controller={controller} dialog={dialog} confirmationRef={confirmationRef} expected={expected} />}
+      </div>
+    </div>
+  );
+}
+
+function RedeployBanner({ controller, dialog }: { controller: ERunUIController; dialog: ManageDialog }): React.ReactElement {
+  const deploying = dialog.busyAction === 'save' || dialog.busy;
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--primary)_30%,transparent)] bg-[color-mix(in_oklch,var(--primary)_8%,transparent)] px-3 py-2.5 text-[13px] leading-[1.35]"
+    >
+      <span className="text-foreground">Saved. Redeploy to apply changes to the running pod.</span>
+      <div className="flex items-center gap-2">
+        <Button type="button" variant="outline" size="sm" disabled={deploying} onClick={() => controller.closeManageDialog()}>
+          Close
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          disabled={deploying}
+          onClick={() => void controller.submitManageDeploy().catch((error: unknown) => controller.showTerminalMessage(readError(error)))}
+        >
+          <Rocket aria-hidden="true" />
+          Redeploy now
+        </Button>
       </div>
     </div>
   );

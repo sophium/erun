@@ -78,6 +78,7 @@ export interface ManageDialogState {
   busyTarget: string;
   choicesOpen: boolean;
   error: string;
+  pendingRedeploy: boolean;
 }
 
 export interface TenantDialogState {
@@ -208,6 +209,7 @@ export const defaultManageDialog = (): ManageDialogState => ({
   busyTarget: '',
   choicesOpen: false,
   error: '',
+  pendingRedeploy: false,
 });
 
 export const defaultTenantDialog = (): TenantDialogState => ({

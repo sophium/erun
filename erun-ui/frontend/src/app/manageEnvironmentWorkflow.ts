@@ -81,6 +81,7 @@ export class ManageEnvironmentWorkflow {
       busyTarget: '',
       choicesOpen: false,
       error: '',
+      pendingRedeploy: false,
     };
     this.deps.emit();
     void this.refreshVersionSuggestions(false);
@@ -337,9 +338,9 @@ export class ManageEnvironmentWorkflow {
         busyAction: '',
         busyTarget: '',
         error: '',
+        pendingRedeploy: true,
       };
-      this.deps.showNotification('success', manageConfigSavedMessage(selection, result));
-      this.closeDialog();
+      this.deps.emit();
     } catch (error) {
       const message = readError(error);
       this.state.manageDialog = {
@@ -544,9 +545,3 @@ export class ManageEnvironmentWorkflow {
   }
 }
 
-function manageConfigSavedMessage(selection: UISelection, config: UIEnvironmentConfig): string {
-  if (config.sshd.workspaceSyncEnabled) {
-    return `Saved config and started workspace sync for ${selection.tenant} / ${selection.environment}.`;
-  }
-  return `Saved config for ${selection.tenant} / ${selection.environment}.`;
-}
