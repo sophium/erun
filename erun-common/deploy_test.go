@@ -607,7 +607,7 @@ func TestHelmDeploySpecEmitsClaudeSetArgsWhenConfigured(t *testing.T) {
 	for _, want := range []string{
 		"claude.useMantle=0",
 		"claude.useBedrock=1",
-		"claude.availableModels=opus,sonnet",
+		`claude.availableModels=opus\,sonnet`,
 		"claude.maxOutputTokens=8192",
 	} {
 		if !strings.Contains(args, want) {
@@ -1832,7 +1832,7 @@ printf '%s
 		"--set-string\ncloudContext.providerAlias=team-cloud\n",
 		"--set-string\ncloudContext.region=eu-west-2\n",
 		"--set-string\ncloudContext.instanceId=i-073c3338f26fbb000\n",
-		"--set-string\napi.oidcAllowedIssuers=https://issuer.one.example,https://issuer.two.example\n",
+		"--set-string\napi.oidcAllowedIssuers=https://issuer.one.example\\,https://issuer.two.example\n",
 		"--set\napi.postgres.reset=true\n",
 		"--set-string\nimageOverrides.erun-backend-api=erunpaas/erun-backend-api:1.0.0-snapshot-20260503093000\n",
 	} {
@@ -1888,7 +1888,7 @@ printf '%s
 		"--set-string\ncontainerRegistry=ghcr.io/sophium\n",
 		"--set-string\nclaude.useMantle=1\n",
 		"--set-string\nclaude.useBedrock=0\n",
-		"--set-string\nclaude.availableModels=opus,sonnet\n",
+		"--set-string\nclaude.availableModels=opus\\,sonnet\n",
 		"--set-string\nclaude.maxOutputTokens=8192\n",
 	} {
 		if !strings.Contains(args, want) {
