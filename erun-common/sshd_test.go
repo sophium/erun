@@ -266,9 +266,9 @@ func TestRuntimeEntrypointEnsuresClaudeBypassPermissions(t *testing.T) {
 }
 
 func TestRuntimeEntrypointPassesOIDCIssuersToAPI(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-backend-api", "entrypoint.sh"))
 	if err != nil {
-		t.Fatalf("read runtime entrypoint: %v", err)
+		t.Fatalf("read backend-api entrypoint: %v", err)
 	}
 	content := string(data)
 	for _, want := range []string{
@@ -276,7 +276,7 @@ func TestRuntimeEntrypointPassesOIDCIssuersToAPI(t *testing.T) {
 		`--oidc-allowed-issuers "${ERUN_OIDC_ALLOWED_ISSUERS}"`,
 	} {
 		if !strings.Contains(content, want) {
-			t.Fatalf("expected runtime entrypoint to contain %q, got:\n%s", want, content)
+			t.Fatalf("expected backend-api entrypoint to contain %q, got:\n%s", want, content)
 		}
 	}
 }
