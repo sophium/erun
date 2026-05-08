@@ -177,7 +177,30 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	if ctx.DryRun {
 		return nil
 	}
-	return deploy(deployInput.Params(ctx.Stdout, ctx.Stderr))
+
+	target := deployInput.Tenant + "/" + deployInput.Environment
+	if version := strings.TrimSpace(deployInput.Version); version != "" {
+		target += " " + version
+	}
+	ctx.Info("==> Deploying " + target)
+	ctx.Info("    namespace " + deployInput.Namespace + " on context " + deployInput.KubernetesContext)
+	if timeout := strings.TrimSpace(deployInput.Timeout); timeout != "" {
+		ctx.Info("    waiting for helm rollout (timeout " + timeout + ")...")
+	} else {
+		ctx.Info("    waiting for helm rollout...")
+	}
+
+	started := time.Now()
+	spinner := StartSpinner(ctx.Stderr, "deploying "+target)
+	err := deploy(deployInput.Params(ctx.Stdout, ctx.Stderr))
+	spinner.Stop()
+	elapsed := time.Since(started).Round(time.Second)
+	if err != nil {
+		ctx.Info("==> Deploy failed after " + elapsed.String())
+		return err
+	}
+	ctx.Info("==> Deployed " + target + " in " + elapsed.String())
+	return nil
 }
 
 func RunDeploySpec(ctx Context, execution DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {

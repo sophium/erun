@@ -27,6 +27,10 @@ var defaultRules = []Replacement{
 	{regexp.MustCompile(`\b20\d{12}\b`), "<TS_COMPACT>"},
 	// Temp dir paths the OS hands out (Linux/macOS).
 	{regexp.MustCompile(`/(?:var/)?(?:tmp|private/var/folders)/[^\s'"]+`), "<TMP>"},
+	// Elapsed durations after deploy/build progress markers
+	// ("in 0s", "after 1m23s"). The timeout literal "2m0s" is kept because
+	// it lacks the leading "in "/"after " context.
+	{regexp.MustCompile(` (in|after) \d+(?:[hm]\d+)*s\b`), " $1 <ELAPSED>"},
 	// Random hex tokens used for chart names (e.g., -f0bb16f86125afa9).
 	{regexp.MustCompile(`-[0-9a-f]{16}\b`), "-<HEX16>"},
 	// Random hex tokens of other lengths embedded in identifiers.
