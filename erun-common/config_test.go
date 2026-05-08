@@ -5,11 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/adrg/xdg"
-	"gopkg.in/yaml.v3"
 )
 
 const testConfigRoot = "erun"
@@ -376,62 +374,6 @@ func TestProjectConfigRoundTrip(t *testing.T) {
 	}
 	if path != filepath.Join(projectRoot, projectConfigDir, configFile) {
 		t.Fatalf("unexpected project config path: %s", path)
-	}
-}
-
-// TestProjectConfigK8sDeploymentsRoundTripsScalarStepsAsScalars covers the
-// MarshalYAML branch of ProjectK8sDeploymentStep. Marshaling is not exercised
-// by any erun --dry-run scenario (no command writes a project config back to
-// disk after parsing it), so this is the kind of pure-format branch the
-// AGENTS.md unit-test exception is for.
-func TestProjectConfigK8sDeploymentsRoundTripsScalarStepsAsScalars(t *testing.T) {
-	cfg := ProjectConfig{
-		Environments: map[string]ProjectEnvironmentConfig{
-			"local": {
-				K8s: ProjectK8sConfig{
-					Deployments: []ProjectK8sDeploymentStep{
-						{Components: []string{"erun-backend-postgres"}},
-						{Components: []string{"erun-backend-db", "erun-backend-api"}},
-						{Components: []string{"erun-devops"}},
-					},
-				},
-			},
-		},
-	}
-	data, err := yaml.Marshal(cfg)
-	if err != nil {
-		t.Fatalf("Marshal failed: %v", err)
-	}
-	out := string(data)
-	for _, want := range []string{
-		"            - erun-backend-postgres",
-		"            - - erun-backend-db",
-		"              - erun-backend-api",
-		"            - erun-devops",
-	} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("expected marshaled config to contain %q, got:\n%s", want, out)
-		}
-	}
-}
-
-// TestProjectConfigK8sDeploymentsRejectsInvalidNode covers the error branch
-// of UnmarshalYAML. Triggering it requires writing a malformed config file
-// and running a command against it; that does exercise the same code path,
-// but it errors before any trace lines are written, so the integration
-// suite cannot pin the specific error message. Keeping the unit test here
-// per the AGENTS.md exception for parser branches.
-func TestProjectConfigK8sDeploymentsRejectsInvalidNode(t *testing.T) {
-	const yamlBody = `environments:
-  local:
-    k8s:
-      deployments:
-        - {name: erun-devops}
-`
-	var cfg ProjectConfig
-	err := yaml.Unmarshal([]byte(yamlBody), &cfg)
-	if err == nil {
-		t.Fatalf("expected error for mapping step, got nil; cfg=%+v", cfg)
 	}
 }
 

@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -630,7 +631,7 @@ func LoadProjectConfig(projectRoot string) (ProjectConfig, string, error) {
 	}
 
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return config, configFilePath, ErrConfigCorrupted
+		return config, configFilePath, fmt.Errorf("%w: %v", ErrConfigCorrupted, err)
 	}
 
 	return config, configFilePath, nil

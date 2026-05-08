@@ -188,6 +188,26 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/project_k8s_plan_groups_parallel_step", normalize.Apply(result.Combined))
 	})
 
+	t.Run("project_k8s_plan_rejects_invalid_step_node", func(t *testing.T) {
+		// A k8s.deployments step must be either a component name or a
+		// list of component names. Anything else (a mapping, a number, …)
+		// must surface as a clear error from the project config loader,
+		// not silently parse to an empty step.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "environments:\n  dev:\n    k8s:\n      deployments:\n        - {name: erun-devops}\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for malformed k8s.deployments step, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "k8s.deployments item must be a component name or a list of component names") {
+			t.Errorf("expected schema error message, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/project_k8s_plan_rejects_invalid_step_node", normalize.Apply(result.Combined))
+	})
+
 	t.Run("components_rejects_unknown_name", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
