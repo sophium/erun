@@ -101,17 +101,12 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 			builderWithGuidance := func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
 				buildErr := builder(buildInput, stdout, stderr)
 				var authErr common.DockerRegistryAuthError
-				if !errors.As(buildErr, &authErr) || !common.IsDockerCreatePackageDenied(authErr.Message) {
+				if !errors.As(buildErr, &authErr) {
 					return buildErr
 				}
-				if ok, _ := common.TryGHCRNamespaceLogin(authErr.Tag, stdout, stderr); ok {
-					if retryErr := builder(buildInput, stdout, stderr); retryErr == nil {
-						return nil
-					} else {
-						buildErr = retryErr
-					}
+				if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return builder(buildInput, stdout, stderr) }, stdout, stderr); handled {
+					return finalErr
 				}
-				printCreatePackageGuidance(stderr, authErr.Tag, authErr.Registry)
 				return buildErr
 			}
 			return common.RunDockerPushSpec(ctx, pushInput, buildInput, builderWithGuidance, push)
@@ -149,17 +144,12 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 			builderWithGuidance := func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
 				buildErr := builder(buildInput, stdout, stderr)
 				var authErr common.DockerRegistryAuthError
-				if !errors.As(buildErr, &authErr) || !common.IsDockerCreatePackageDenied(authErr.Message) {
+				if !errors.As(buildErr, &authErr) {
 					return buildErr
 				}
-				if ok, _ := common.TryGHCRNamespaceLogin(authErr.Tag, stdout, stderr); ok {
-					if retryErr := builder(buildInput, stdout, stderr); retryErr == nil {
-						return nil
-					} else {
-						buildErr = retryErr
-					}
+				if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return builder(buildInput, stdout, stderr) }, stdout, stderr); handled {
+					return finalErr
 				}
-				printCreatePackageGuidance(stderr, authErr.Tag, authErr.Registry)
 				return buildErr
 			}
 			buildContext, _ := resolveBuildContext()
@@ -194,13 +184,8 @@ func runDockerPushWithRetry(ctx common.Context, pushInput common.DockerPushSpec,
 		return err
 	}
 
-	if common.IsDockerCreatePackageDenied(authErr.Message) {
-		if ok, _ := common.TryGHCRNamespaceLogin(authErr.Tag, ctx.Stdout, ctx.Stderr); ok {
-			if retryErr := push(ctx, pushInput); retryErr == nil {
-				return nil
-			}
-		}
-		printCreatePackageGuidance(ctx.Stderr, authErr.Tag, authErr.Registry)
+	if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return push(ctx, pushInput) }, ctx.Stdout, ctx.Stderr); handled {
+		return finalErr
 	}
 
 	retry, promptErr := promptDockerLoginRetry(selectRunner, authErr.Registry)
@@ -234,13 +219,8 @@ func runDockerBuildWithRetry(ctx common.Context, buildInput common.DockerBuildSp
 		return err
 	}
 
-	if common.IsDockerCreatePackageDenied(authErr.Message) {
-		if ok, _ := common.TryGHCRNamespaceLogin(authErr.Tag, stdout, stderr); ok {
-			if retryErr := build(buildInput, stdout, stderr); retryErr == nil {
-				return nil
-			}
-		}
-		printCreatePackageGuidance(stderr, authErr.Tag, authErr.Registry)
+	if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return build(buildInput, stdout, stderr) }, stdout, stderr); handled {
+		return finalErr
 	}
 
 	retry, promptErr := promptDockerLoginRetry(selectRunner, authErr.Registry)
@@ -277,6 +257,30 @@ func addPushCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandT
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the resolved image version")
 	_ = cmd.Flags().MarkHidden("project-root")
 	_ = cmd.Flags().MarkHidden("environment")
+}
+
+// handleNamespaceAuthError handles the create_package and scope-denied auth
+// errors by switching docker auth to the namespace owner via the gh CLI and
+// retrying. Returns (handled=true, finalErr=...) when the error matched one
+// of those cases — finalErr is nil on a successful retry, or the latest
+// error otherwise. Returns (false, nil) when the error did not match, in
+// which case the caller should fall through to the prompt-login path.
+func handleNamespaceAuthError(authErr common.DockerRegistryAuthError, retry func() error, stdout, stderr io.Writer) (bool, error) {
+	if !common.IsDockerCreatePackageDenied(authErr.Message) && !common.IsDockerScopeDenied(authErr.Message) {
+		return false, nil
+	}
+	var finalErr error
+	if ok, _ := common.TryGHCRNamespaceLogin(authErr.Tag, stdout, stderr); ok {
+		if retryErr := retry(); retryErr == nil {
+			return true, nil
+		} else {
+			finalErr = retryErr
+		}
+	}
+	if common.IsDockerCreatePackageDenied(authErr.Message) {
+		printCreatePackageGuidance(stderr, authErr.Tag, authErr.Registry)
+	}
+	return true, finalErr
 }
 
 func printCreatePackageGuidance(out io.Writer, tag, registry string) {
