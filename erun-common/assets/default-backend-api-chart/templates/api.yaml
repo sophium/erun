@@ -11,9 +11,7 @@
 {{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
 {{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@erun-postgres:%v/%s?sslmode=disable" $postgresUser $postgresPort $postgresDatabase) $api.databaseURL -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
-{{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
-{{- $backendDBImage := default (printf "%s/erun-backend-db:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-backend-db") -}}
-{{- $backendAPIImage := default (printf "%s/erun-backend-api:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-backend-api") -}}
+{{- $backendAPIImage := default (printf "ghcr.io/sophium/erun-backend-api:%s" .Chart.AppVersion) (index $imageOverrides "erun-backend-api") -}}
 apiVersion: v1
 kind: Service
 metadata:
@@ -47,20 +45,6 @@ spec:
       labels:
         app: erun-api
     spec:
-      initContainers:
-        - image: {{ $backendDBImage }}
-          name: erun-backend-db-migrate
-          imagePullPolicy: IfNotPresent
-          env:
-            - name: HOME
-              value: /home/erun
-            - name: ERUN_POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $postgresPasswordSecretName }}
-                  key: {{ $postgresPasswordSecretKey }}
-            - name: ERUN_DATABASE_URL
-              value: {{ $databaseURL | quote }}
       containers:
         - image: {{ $backendAPIImage }}
           name: erun-backend-api

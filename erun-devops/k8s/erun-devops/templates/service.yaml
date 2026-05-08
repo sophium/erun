@@ -14,17 +14,6 @@
 {{- $runtimeRequestCPU := default "0.25" $runtimeRequests.cpu -}}
 {{- $runtimeRequestMemory := default "1024Mi" $runtimeRequests.memory -}}
 {{- $managedCloud := default false .Values.managedCloud -}}
-{{- $postgres := default dict (default dict .Values.api).postgres -}}
-{{- $postgresPasswordSecretName := default "erun-backend-postgres" $postgres.passwordSecretName -}}
-{{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
-{{- $postgresPassword := default "" $postgres.password -}}
-{{- $existingPostgresSecret := lookup "v1" "Secret" .Release.Namespace $postgresPasswordSecretName -}}
-{{- if and (eq $postgresPassword "") $existingPostgresSecret (hasKey $existingPostgresSecret.data $postgresPasswordSecretKey) -}}
-{{- $postgresPassword = (index $existingPostgresSecret.data $postgresPasswordSecretKey | b64dec) -}}
-{{- end -}}
-{{- if eq $postgresPassword "" -}}
-{{- $postgresPassword = randAlphaNum 32 -}}
-{{- end -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
 {{- $devopsImage := default (printf "%s/erun-devops:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "erun-devops") -}}
@@ -53,16 +42,6 @@
 {{- $claudeEnablePromptCaching1H := default "" $claude.enablePromptCaching1H -}}
 {{- $claudeMaxOutputTokens := default "4096" $claude.maxOutputTokens -}}
 {{- $claudeMaxThinkingTokens := default "1024" $claude.maxThinkingTokens -}}
-apiVersion: v1
-kind: Secret
-metadata:
-  name: {{ $postgresPasswordSecretName }}
-  labels:
-    app: erun-devops
-type: Opaque
-stringData:
-  {{ $postgresPasswordSecretKey }}: {{ $postgresPassword | quote }}
----
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

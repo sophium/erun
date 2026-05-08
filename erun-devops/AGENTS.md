@@ -21,14 +21,19 @@ Additional guidance for `erun-devops` and its subtree.
 ## Runtime Chart Rules
 
 - Keep the shared runtime chart and any generated tenant chart contract in sync. The shared runtime is the template for tenant-specific DevOps modules, so deployment behavior must remain aligned across both.
+- The runtime stack is split into per-pod Helm releases under `erun-devops/k8s/`:
+  - `erun-devops` — the runtime pod (devops + dind sidecar). Always deployed; produces the shared `/home/erun` PVC, the docker daemon PVC, and the runtime ServiceAccount/RBAC.
+  - `erun-backend-postgres` — opt-in. Owns the postgres Deployment + Service + PVC and the postgres password Secret (`erun-backend-postgres`). Created on first deploy and reused via `lookup` on subsequent deploys.
+  - `erun-backend-db` — opt-in. Owns the migration Job. The Job is wired as a Helm `post-install,post-upgrade` hook with `helm.sh/hook-delete-policy: before-hook-creation` so each release run replaces the prior Job and migrations only run when this release is applied.
+  - `erun-backend-api` — opt-in. Owns the API Deployment + Service. Consumes the postgres Secret via `secretKeyRef`; expects `erun-backend-db` to have run before the API rolls.
 - The runtime pod contract is intentional:
   - the main `erun-devops` container uses `DOCKER_HOST=unix:///var/run/docker.sock`
   - the `erun-dind` sidecar provides the daemon
   - `/var/lib/docker` is persisted on the `erun-devops-docker` PVC
   - `/home/erun` is persisted on the `erun-devops-home` PVC
-  - the backend API uses PostgreSQL in the same pod, with database state stored under a dedicated `.erun/postgres` subpath on the home PVC
-  - the PostgreSQL password must live in a Kubernetes Secret and be consumed by the database, migration, and API containers through secret references
-- Keep the backend PostgreSQL container available before backend migrations run. If migrations remain an init step, the database must be a restartable init sidecar or an equivalent pod-startup mechanism that is ready before the migration container executes.
+- Backend deployment is opt-in via `erun deploy --components=...`. Default `erun deploy` brings up only the runtime pod. The opt-in component names match the chart directory names (`erun-backend-postgres`, `erun-backend-db`, `erun-backend-api`).
+- Charts deploy in dependency order regardless of `--components` input order: `erun-backend-postgres → erun-backend-db → erun-backend-api → erun-devops`. Postgres is brought up first so the migration Job's post-install hook can connect; the migration hook blocks helm until it finishes, gating the API rollout; the runtime pod is independent and rolls last.
+- When all locally-built images for a chart were promoted from a cached fingerprint (no rebuild), `erun deploy` skips the helm command and the redundant push for that chart. Charts with no locally-built images (e.g. `erun-backend-postgres`, which uses the public `postgres:18`) always deploy when included so chart-only changes still ship.
 - Do not move build cache, Docker state, or home-directory state onto `emptyDir` unless the change is deliberate and the persistence tradeoff is documented in the code review and tests.
 - Keep binfmt installation explicit for release builds. Multi-arch release support depends on the chart installing `amd64` and `arm64` emulation before the dind daemon is used.
 

@@ -5,8 +5,26 @@
 {{- $postgresPasswordSecretName := default "erun-backend-postgres" $postgres.passwordSecretName -}}
 {{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
 {{- $postgresStorage := default "10Gi" $postgres.storage -}}
+{{- $postgresPassword := default "" $postgres.password -}}
+{{- $existingPostgresSecret := lookup "v1" "Secret" .Release.Namespace $postgresPasswordSecretName -}}
+{{- if and (eq $postgresPassword "") $existingPostgresSecret (hasKey $existingPostgresSecret.data $postgresPasswordSecretKey) -}}
+{{- $postgresPassword = (index $existingPostgresSecret.data $postgresPasswordSecretKey | b64dec) -}}
+{{- end -}}
+{{- if eq $postgresPassword "" -}}
+{{- $postgresPassword = randAlphaNum 32 -}}
+{{- end -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $postgresImage := default "postgres:18" (index $imageOverrides "postgres") -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $postgresPasswordSecretName }}
+  labels:
+    app: erun-postgres
+type: Opaque
+stringData:
+  {{ $postgresPasswordSecretKey }}: {{ $postgresPassword | quote }}
+---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

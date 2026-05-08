@@ -94,6 +94,79 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_remote_env_uses_embedded_chart", normalize.Apply(result.Combined))
 	})
 
+	t.Run("default_skips_optin_backend_charts", func(t *testing.T) {
+		// Regression for issue #271: when a tenant repo contains the runtime
+		// chart and the three opt-in backend charts, `erun deploy` without
+		// --components must deploy only the runtime chart. The backend
+		// charts ship as separate Helm releases and are gated behind the
+		// --components flag.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if !strings.Contains(result.Combined, "deploy: resolved 1 spec(s)") {
+			t.Fatalf("expected default deploy to resolve only the runtime chart, got:\n%s", result.Combined)
+		}
+		for _, name := range []string{"erun-backend-postgres", "erun-backend-db", "erun-backend-api"} {
+			if strings.Contains(result.Combined, name) {
+				t.Fatalf("expected default deploy not to mention opt-in chart %q, got:\n%s", name, result.Combined)
+			}
+		}
+		golden.Equal(t, "deploy/default_skips_optin_backend_charts", normalize.Apply(result.Combined))
+	})
+
+	t.Run("components_includes_backend_in_deploy_order", func(t *testing.T) {
+		// With --components, the opt-in backend charts must deploy in the
+		// fixed dependency order (postgres -> db -> api -> runtime),
+		// regardless of the order they appear on the command line.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "erun-backend-api,erun-backend-db,erun-backend-postgres",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if !strings.Contains(result.Combined, "deploy: resolved 4 spec(s)") {
+			t.Fatalf("expected --components deploy to resolve all four charts, got:\n%s", result.Combined)
+		}
+		// helm releases must appear in dependency order, not the
+		// alphabetical or input order.
+		expectedOrder := []string{"erun-backend-postgres", "erun-backend-db", "erun-backend-api", "team-devops"}
+		var lastIndex int
+		for _, name := range expectedOrder {
+			idx := strings.Index(result.Combined[lastIndex:], name)
+			if idx < 0 {
+				t.Fatalf("expected helm release %q after position %d, got:\n%s", name, lastIndex, result.Combined)
+			}
+			lastIndex += idx + len(name)
+		}
+		golden.Equal(t, "deploy/components_includes_backend_in_deploy_order", normalize.Apply(result.Combined))
+	})
+
+	t.Run("components_rejects_unknown_name", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "bogus",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for unknown component, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, `unknown deploy component "bogus"`) {
+			t.Errorf("expected unknown-component error message, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/components_rejects_unknown_name", normalize.Apply(result.Combined))
+	})
+
 	t.Run("snapshot_conflict_errors", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")

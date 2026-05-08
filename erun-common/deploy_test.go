@@ -387,16 +387,33 @@ func TestRuntimeChartsInstallBinfmtForMultiArchBuilds(t *testing.T) {
 }
 
 func TestRuntimeChartsExposeMCPAPIAndSSHPorts(t *testing.T) {
-	chartDirs := []string{
-		filepath.Join("..", "erun-devops", "k8s", "erun-devops", "templates"),
-		filepath.Join("assets", "default-devops-chart", "templates"),
+	chartTrees := [][]string{
+		{
+			filepath.Join("..", "erun-devops", "k8s", "erun-devops", "templates"),
+			filepath.Join("..", "erun-devops", "k8s", "erun-backend-postgres", "templates"),
+			filepath.Join("..", "erun-devops", "k8s", "erun-backend-db", "templates"),
+			filepath.Join("..", "erun-devops", "k8s", "erun-backend-api", "templates"),
+		},
+		{
+			filepath.Join("assets", "default-devops-chart", "templates"),
+			filepath.Join("assets", "default-backend-postgres-chart", "templates"),
+			filepath.Join("assets", "default-backend-db-chart", "templates"),
+			filepath.Join("assets", "default-backend-api-chart", "templates"),
+		},
 	}
 
-	for _, dir := range chartDirs {
-		content, err := concatChartTemplates(dir)
-		if err != nil {
-			t.Fatalf("read templates in %q: %v", dir, err)
+	for _, dirs := range chartTrees {
+		var combined strings.Builder
+		for _, dir := range dirs {
+			part, err := concatChartTemplates(dir)
+			if err != nil {
+				t.Fatalf("read templates in %q: %v", dir, err)
+			}
+			combined.WriteString(part)
+			combined.WriteString("\n")
 		}
+		content := combined.String()
+		dir := dirs[0]
 		for _, want := range []string{
 			`{{- $mcpPort := default 17000 .Values.mcpPort -}}`,
 			`{{- $apiPort := default 17033 .Values.apiPort -}}`,
@@ -1362,9 +1379,9 @@ func TestResolveDeploySpecForContextIncludesChartSidecarWithRegistryAndAppVersio
 		nil,
 		func() time.Time { return time.Date(2026, time.April, 21, 18, 24, 44, 0, time.UTC) },
 		OpenResult{
-			Tenant:      "tenant-a",
-			Environment: DefaultEnvironment,
-			RepoPath:    projectRoot,
+			Tenant:       "tenant-a",
+			Environment:  DefaultEnvironment,
+			RepoPath:     projectRoot,
 			TenantConfig: TenantConfig{Name: "tenant-a", ProjectRoot: projectRoot},
 			EnvConfig:    EnvConfig{Name: DefaultEnvironment, RepoPath: projectRoot, KubernetesContext: "erun"},
 		},
@@ -1441,9 +1458,9 @@ func TestResolveDeploySpecForContextSkipsChartImageWithVersionPrefixRegistry(t *
 		nil,
 		func() time.Time { return time.Date(2026, time.April, 21, 18, 24, 44, 0, time.UTC) },
 		OpenResult{
-			Tenant:      "tenant-a",
-			Environment: DefaultEnvironment,
-			RepoPath:    projectRoot,
+			Tenant:       "tenant-a",
+			Environment:  DefaultEnvironment,
+			RepoPath:     projectRoot,
 			TenantConfig: TenantConfig{Name: "tenant-a", ProjectRoot: projectRoot},
 			EnvConfig:    EnvConfig{Name: DefaultEnvironment, RepoPath: projectRoot, KubernetesContext: "erun"},
 		},
@@ -1504,9 +1521,9 @@ func TestResolveDeploySpecForContextSkipsChartImageWithUnresolvedPrintfVerb(t *t
 		nil,
 		func() time.Time { return time.Date(2026, time.April, 21, 18, 24, 44, 0, time.UTC) },
 		OpenResult{
-			Tenant:      "tenant-a",
-			Environment: DefaultEnvironment,
-			RepoPath:    projectRoot,
+			Tenant:       "tenant-a",
+			Environment:  DefaultEnvironment,
+			RepoPath:     projectRoot,
 			TenantConfig: TenantConfig{Name: "tenant-a", ProjectRoot: projectRoot},
 			EnvConfig:    EnvConfig{Name: DefaultEnvironment, RepoPath: projectRoot, KubernetesContext: "erun"},
 		},
@@ -1657,9 +1674,9 @@ func TestResolveDeploySpecForContextSnapshotBuildVersionWinsOverPersistedRuntime
 		nil,
 		func() time.Time { return time.Date(2026, time.April, 21, 18, 24, 44, 0, time.UTC) },
 		OpenResult{
-			Tenant:      "tenant-a",
-			Environment: DefaultEnvironment,
-			RepoPath:    projectRoot,
+			Tenant:       "tenant-a",
+			Environment:  DefaultEnvironment,
+			RepoPath:     projectRoot,
 			TenantConfig: TenantConfig{Name: "tenant-a", ProjectRoot: projectRoot},
 			EnvConfig: EnvConfig{
 				Name:              DefaultEnvironment,

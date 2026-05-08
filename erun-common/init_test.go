@@ -378,10 +378,22 @@ func TestEnsureDefaultDevopsChartMigratesLegacyGeneratedServiceTemplate(t *testi
 		t.Fatalf("EnsureDefaultDevopsChart failed: %v", err)
 	}
 
-	content, err := concatChartTemplates(templatesDir)
-	if err != nil {
-		t.Fatalf("read migrated chart templates: %v", err)
+	chartDirs := []string{
+		templatesDir,
+		filepath.Join(projectRoot, moduleName, "k8s", "erun-backend-postgres", "templates"),
+		filepath.Join(projectRoot, moduleName, "k8s", "erun-backend-db", "templates"),
+		filepath.Join(projectRoot, moduleName, "k8s", "erun-backend-api", "templates"),
 	}
+	var combined strings.Builder
+	for _, dir := range chartDirs {
+		part, err := concatChartTemplates(dir)
+		if err != nil {
+			t.Fatalf("read migrated chart templates in %q: %v", dir, err)
+		}
+		combined.WriteString(part)
+		combined.WriteString("\n")
+	}
+	content := combined.String()
 	for _, want := range []string{
 		`{{- $mcpPort := default 17000 .Values.mcpPort -}}`,
 		`{{- $apiPort := default 17033 .Values.apiPort -}}`,

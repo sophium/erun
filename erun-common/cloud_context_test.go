@@ -620,8 +620,10 @@ func TestStartCloudContextForceOverridesWorkingHoursGate(t *testing.T) {
 		},
 	}
 	_, err := StartCloudContext(Context{DryRun: true}, store, CloudContextParams{Name: "team-cloud", Force: true}, CloudContextDependencies{
-		Now:        func() time.Time { return time.Date(2026, 4, 28, 22, 0, 0, 0, time.Local) },
-		RunAWS:     func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) { return "198.51.100.10\n", nil },
+		Now: func() time.Time { return time.Date(2026, 4, 28, 22, 0, 0, 0, time.Local) },
+		RunAWS: func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) {
+			return "198.51.100.10\n", nil
+		},
 		RunKubectl: func(Context, []string) error { return nil },
 	})
 	if err != nil {
@@ -660,8 +662,10 @@ func TestStartCloudContextAllowsStartWhenAnyAttachedEnvIsInWorkingHours(t *testi
 		},
 	}
 	_, err := StartCloudContext(Context{DryRun: true}, store, CloudContextParams{Name: "team-cloud"}, CloudContextDependencies{
-		Now:        func() time.Time { return time.Date(2026, 4, 28, 14, 0, 0, 0, time.Local) },
-		RunAWS:     func(_ Context, _ CloudProviderConfig, _ string, _ []string) (string, error) { return "198.51.100.10\n", nil },
+		Now: func() time.Time { return time.Date(2026, 4, 28, 14, 0, 0, 0, time.Local) },
+		RunAWS: func(_ Context, _ CloudProviderConfig, _ string, _ []string) (string, error) {
+			return "198.51.100.10\n", nil
+		},
 		RunKubectl: func(Context, []string) error { return nil },
 	})
 	if err != nil {
@@ -688,8 +692,10 @@ func TestStartCloudContextSkipsGateWhenNoEnvsReferenceContext(t *testing.T) {
 		},
 	}
 	_, err := StartCloudContext(Context{DryRun: true}, store, CloudContextParams{Name: "team-cloud"}, CloudContextDependencies{
-		Now:        func() time.Time { return time.Date(2026, 4, 28, 22, 0, 0, 0, time.Local) },
-		RunAWS:     func(_ Context, _ CloudProviderConfig, _ string, _ []string) (string, error) { return "198.51.100.10\n", nil },
+		Now: func() time.Time { return time.Date(2026, 4, 28, 22, 0, 0, 0, time.Local) },
+		RunAWS: func(_ Context, _ CloudProviderConfig, _ string, _ []string) (string, error) {
+			return "198.51.100.10\n", nil
+		},
 		RunKubectl: func(Context, []string) error { return nil },
 	})
 	if err != nil {

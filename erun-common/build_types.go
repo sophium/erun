@@ -43,11 +43,11 @@ type DockerBuildContext struct {
 }
 
 type DockerImageReference struct {
-	ProjectRoot         string
-	Environment         string
-	Registry            string
-	ImageName           string
-	Version             string
+	ProjectRoot string
+	Environment string
+	Registry    string
+	ImageName   string
+	Version     string
 	// BaseVersion is the stable semver without any snapshot suffix (e.g. "1.0.51").
 	// Set only for local snapshot builds where Version differs from BaseVersion.
 	// Used as the ERUN_VERSION build arg and as an additional local tag so that

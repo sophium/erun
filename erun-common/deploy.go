@@ -146,6 +146,10 @@ type DeployTarget struct {
 	RepoPath        string
 	VersionOverride string
 	Snapshot        *bool
+	// Components lists optional opt-in charts to include alongside the
+	// always-on charts (e.g. the per-tenant runtime). Names must come from
+	// optInDeployComponents; unknown names produce an error during resolve.
+	Components []string
 }
 
 type DeploySpec struct {
@@ -153,6 +157,12 @@ type DeploySpec struct {
 	DeployContext KubernetesDeployContext
 	Builds        []DockerBuildSpec
 	Deploy        HelmDeploySpec
+	// SkipHelm signals that every locally-built image for this chart was
+	// promoted from a cached fingerprint (no rebuild). RunDeploySpec then
+	// skips the helm command and the per-build push entirely so unchanged
+	// pods are not rolled. Charts with no locally-built images keep
+	// SkipHelm=false so chart-only changes still ship.
+	SkipHelm bool
 }
 
 func RunDeploySpecs(ctx Context, executions []DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
@@ -204,6 +214,10 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 }
 
 func RunDeploySpec(ctx Context, execution DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
+	if execution.SkipHelm {
+		ctx.Trace("deploy: skipping " + execution.DeployContext.ComponentName + " (all images cached, no rebuild)")
+		return nil
+	}
 	for _, buildInput := range orderedDockerBuildSpecs(execution.Builds) {
 		if err := RunDockerBuild(ctx, buildInput, build); err != nil {
 			return err
@@ -262,6 +276,11 @@ func ResolveCurrentDeploySpecs(store DeployStore, findProjectRoot ProjectFinderF
 	if err != nil {
 		return nil, err
 	}
+	deployContexts, err = filterDeployContextsByComponents(deployContexts, target.Components)
+	if err != nil {
+		return nil, err
+	}
+	sortDeployContextsByDeployOrder(deployContexts)
 	specs := make([]DeploySpec, 0, len(deployContexts))
 	allowLocalBuilds := deployTargetSnapshotEnabled(resolvedTarget, target.Snapshot)
 	var currentBuild *DockerBuildSpec
@@ -348,6 +367,7 @@ func resolveDeploySpecForContext(store DeployStore, findProjectRoot ProjectFinde
 		DeployContext: deployContext,
 		Builds:        builds,
 		Deploy:        deployInput,
+		SkipHelm:      allDockerBuildsPromoted(builds),
 	}, nil
 }
 
@@ -392,6 +412,7 @@ func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target OpenResult
 		DeployContext: deployContext,
 		Builds:        builds,
 		Deploy:        deployInput,
+		SkipHelm:      allDockerBuildsPromoted(builds),
 	}, nil
 }
 

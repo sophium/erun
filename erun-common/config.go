@@ -62,11 +62,11 @@ type EnvConfig struct {
 	RepoPath           string
 	KubernetesContext  string
 	ContainerRegistry  string
-	CloudProviderAlias string                `yaml:"cloudprovideralias,omitempty"`
-	ManagedCloud       bool                  `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
-	RuntimeVersion     string                `yaml:"runtimeversion,omitempty"`
-	RuntimePod         RuntimePodResources   `yaml:"runtimepod,omitempty"`
-	SSHD               SSHDConfig            `yaml:"sshd,omitempty"`
+	CloudProviderAlias string                  `yaml:"cloudprovideralias,omitempty"`
+	ManagedCloud       bool                    `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
+	RuntimeVersion     string                  `yaml:"runtimeversion,omitempty"`
+	RuntimePod         RuntimePodResources     `yaml:"runtimepod,omitempty"`
+	SSHD               SSHDConfig              `yaml:"sshd,omitempty"`
 	Idle               EnvironmentIdleConfig   `yaml:"idle,omitempty"`
 	Claude             EnvironmentClaudeConfig `yaml:"claude,omitempty" json:"claude,omitempty"`
 	AITool             string                  `yaml:"aitool,omitempty" json:"aiTool,omitempty"`

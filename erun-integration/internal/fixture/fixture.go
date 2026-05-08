@@ -195,6 +195,27 @@ func SeedDevopsRepo(t testing.TB, setup env.Setup, tenant, environment string) s
 	return chart
 }
 
+// SeedDevopsBackendCharts seeds the three opt-in backend charts
+// (erun-backend-postgres, erun-backend-db, erun-backend-api) alongside the
+// runtime chart created by SeedDevopsRepo. Each chart gets a Chart.yaml plus a
+// values.<environment>.yaml so deploy --dry-run can resolve them.
+func SeedDevopsBackendCharts(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	envSlug := strings.ToLower(strings.TrimSpace(environment))
+	k8s := filepath.Join(setup.Cwd, tenant+"-devops", "k8s")
+	for _, name := range []string{"erun-backend-postgres", "erun-backend-db", "erun-backend-api"} {
+		chart := filepath.Join(k8s, name)
+		if err := os.MkdirAll(chart, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", chart, err)
+		}
+		mustWrite(t, filepath.Join(chart, "Chart.yaml"),
+			"apiVersion: v2\nname: "+name+"\nversion: 0.0.1\n",
+		)
+		mustWrite(t, filepath.Join(chart, "values.yaml"), "tenant: "+tenant+"\n")
+		mustWrite(t, filepath.Join(chart, "values."+envSlug+".yaml"), "environment: "+environment+"\n")
+	}
+}
+
 // StubBinary writes a small POSIX shell script that the production runners
 // will pick up via the ERUN_<NAME>_BIN environment variable. The script
 // records each invocation to a JSON-Lines file inside callsDir and prints

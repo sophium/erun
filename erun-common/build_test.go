@@ -335,11 +335,11 @@ func TestTryGHCRLoginViaGHFallsBackWhenGHMissing(t *testing.T) {
 
 func TestIsDockerCreatePackageDeniedRecognizesGHCRMessage(t *testing.T) {
 	cases := map[string]bool{
-		"":                                                                 false,
-		"unauthorized: authentication required":                            false,
-		"denied: permission_denied: create_package":                        true,
-		"failed to push: denied: permission_denied: create_package":        true,
-		"denied: requested access to the resource is denied":               false,
+		"":                                      false,
+		"unauthorized: authentication required": false,
+		"denied: permission_denied: create_package":                 true,
+		"failed to push: denied: permission_denied: create_package": true,
+		"denied: requested access to the resource is denied":        false,
 	}
 	for input, want := range cases {
 		if got := IsDockerCreatePackageDenied(input); got != want {
@@ -350,14 +350,14 @@ func TestIsDockerCreatePackageDeniedRecognizesGHCRMessage(t *testing.T) {
 
 func TestDockerNamespaceFromTagExtractsOwner(t *testing.T) {
 	cases := map[string]string{
-		"":                                       "",
-		"alpine:3.22":                            "",
-		"erunpaas/erun-devops:1.0.0":             "erunpaas",
-		"ghcr.io/sophium/erun-devops:1.0.0":      "sophium",
-		"ghcr.io/sophium/erun-devops":            "sophium",
-		"localhost:5000/team/image:latest":       "team",
-		"registry.example.com/team/image:1.2.3":  "team",
-		"123.dkr.ecr.us-east-1.amazonaws.com/x":  "",
+		"":                                      "",
+		"alpine:3.22":                           "",
+		"erunpaas/erun-devops:1.0.0":            "erunpaas",
+		"ghcr.io/sophium/erun-devops:1.0.0":     "sophium",
+		"ghcr.io/sophium/erun-devops":           "sophium",
+		"localhost:5000/team/image:latest":      "team",
+		"registry.example.com/team/image:1.2.3": "team",
+		"123.dkr.ecr.us-east-1.amazonaws.com/x": "",
 	}
 	for input, want := range cases {
 		if got := DockerNamespaceFromTag(input); got != want {
@@ -368,15 +368,15 @@ func TestDockerNamespaceFromTagExtractsOwner(t *testing.T) {
 
 func TestIsDockerPushAuthorizationErrorDetectsRegistryDenials(t *testing.T) {
 	cases := map[string]bool{
-		"unauthorized: authentication required":                                  true,
-		"denied: requested access to the resource is denied":                     true,
-		"insufficient_scope: authorization failed":                               true,
-		"error from registry: denied\ndenied":                                    true,
+		"unauthorized: authentication required":                                                      true,
+		"denied: requested access to the resource is denied":                                         true,
+		"insufficient_scope: authorization failed":                                                   true,
+		"error from registry: denied\ndenied":                                                        true,
 		"error from registry: permission_denied: The token provided does not match expected scopes.": true,
-		"errorresponse from daemon: pull access denied for image":                true,
-		"failed to copy: no basic auth credentials":                              true,
-		"network unreachable":                                                    false,
-		"unexpected EOF":                                                         false,
+		"errorresponse from daemon: pull access denied for image":                                    true,
+		"failed to copy: no basic auth credentials":                                                  true,
+		"network unreachable":                                                                        false,
+		"unexpected EOF":                                                                             false,
 	}
 	for message, want := range cases {
 		if got := IsDockerPushAuthorizationError(message); got != want {
