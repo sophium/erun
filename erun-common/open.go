@@ -611,6 +611,7 @@ func remoteShellConfigForRequest(req ShellLaunchParams) (remoteShellConfig, erro
 func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig, workdir, title string) []string {
 	return []string{
 		"set -eu",
+		"export COLORTERM=truecolor",
 		fmt.Sprintf("mkdir -p %s", workdir),
 		fmt.Sprintf("cd %s", workdir),
 		"config_home=\"${XDG_CONFIG_HOME:-$HOME/.config}\"",

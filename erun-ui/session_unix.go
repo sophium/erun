@@ -20,7 +20,7 @@ type unixTerminalSession struct {
 func startTerminalSession(params startTerminalSessionParams) (terminalSession, error) {
 	cmd := exec.Command(params.Executable, params.Args...)
 	cmd.Dir = params.Dir
-	cmd.Env = append(os.Environ(), append(params.Env, "TERM=xterm-256color")...)
+	cmd.Env = append(os.Environ(), append(params.Env, "TERM=xterm-256color", "COLORTERM=truecolor")...)
 
 	file, err := pty.StartWithSize(cmd, &pty.Winsize{
 		Cols: uint16(params.Cols),

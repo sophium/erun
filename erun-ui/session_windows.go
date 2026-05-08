@@ -25,7 +25,7 @@ func startTerminalSession(params startTerminalSessionParams) (terminalSession, e
 		return nil, err
 	}
 
-	env := append(os.Environ(), params.Env...)
+	env := append(os.Environ(), append(params.Env, "TERM=xterm-256color", "COLORTERM=truecolor")...)
 	args := append([]string{params.Executable}, params.Args...)
 
 	pid, _, err := ptyDevice.Spawn(params.Executable, args, &syscall.ProcAttr{
