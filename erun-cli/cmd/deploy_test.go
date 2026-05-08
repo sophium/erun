@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/manifoldco/promptui"
 	common "github.com/sophium/erun/erun-common"
 )
 
@@ -162,15 +160,21 @@ func TestNewRootCmdRegistersDeployShorthandInDevopsDockerComponentDir(t *testing
 	}
 }
 
-func TestNewRootCmdOmitsDeployShorthandWhenKubernetesDeployContextAbsent(t *testing.T) {
+func TestNewRootCmdRegistersDeployShorthandEvenWhenKubernetesDeployContextAbsent(t *testing.T) {
+	// Regression for the redeploy regression caused by a7b4d08: the desktop
+	// Redeploy button invokes `erun deploy --version X` from the app's cwd,
+	// which may not contain a kubernetes deploy context. Deploy must always
+	// be registered so Cobra recognizes its flags; the underlying
+	// ResolveCurrentDeploySpecs path then surfaces a clear error if the
+	// caller's cwd genuinely cannot resolve one.
 	cmd := newTestRootCmd(testRootDeps{
 		ResolveKubernetesDeployContext: func() (common.KubernetesDeployContext, error) {
 			return common.KubernetesDeployContext{Dir: t.TempDir()}, nil
 		},
 	})
 
-	if hasSubcommand(cmd, "deploy") {
-		t.Fatal("did not expect deploy shorthand command to be registered")
+	if !hasSubcommand(cmd, "deploy") {
+		t.Fatal("expected deploy command to be registered even without a deploy context")
 	}
 }
 
@@ -1063,55 +1067,14 @@ func TestRootDeployShorthandBuildsAndPushesLiteralChartImageDependencies(t *test
 	}
 }
 
-func TestRootCommandTreatsDeployAsEnvironmentWhenDeployContextAbsent(t *testing.T) {
-	setupRootCmdTestConfigHome(t)
-
-	projectRoot := filepath.Join(t.TempDir(), "tenant-a-deploy")
-	requireNoError(t, os.MkdirAll(projectRoot, 0o755), "mkdir project root")
-	requireNoError(t, common.SaveERunConfig(common.ERunConfig{DefaultTenant: "tenant-a"}), "save erun config")
-	if err := common.SaveTenantConfig(common.TenantConfig{
-		Name:               "tenant-a",
-		ProjectRoot:        projectRoot,
-		DefaultEnvironment: "deploy",
-	}); err != nil {
-		t.Fatalf("save tenant config: %v", err)
-	}
-	if err := common.SaveEnvConfig("tenant-a", common.EnvConfig{
-		Name:              "deploy",
-		RepoPath:          projectRoot,
-		KubernetesContext: "cluster-deploy",
-	}); err != nil {
-		t.Fatalf("save env config: %v", err)
-	}
-
-	launched := common.ShellLaunchParams{}
-	cmd := newTestRootCmd(testRootDeps{
-		ResolveKubernetesDeployContext: func() (common.KubernetesDeployContext, error) {
-			return common.KubernetesDeployContext{Dir: t.TempDir()}, nil
-		},
-		PromptRunner: func(prompt promptui.Prompt) (string, error) {
-			if prompt.Label != fmt.Sprintf("create tenant-a-devops chart in %s", projectRoot) {
-				t.Fatalf("unexpected prompt label: %q", prompt.Label)
-			}
-			return "n", nil
-		},
-		DeployHelmChart: func(req common.HelmDeployParams) error {
-			t.Fatalf("unexpected deploy request: %+v", req)
-			return nil
-		},
-		LaunchShell: func(req common.ShellLaunchParams) error {
-			launched = req
-			return nil
-		},
-	})
-	cmd.SetArgs([]string{"deploy"})
-
-	requireNoError(t, cmd.Execute(), "Execute failed")
-
-	if launched.Dir != projectRoot || launched.Title != "tenant-a-deploy" {
-		t.Fatalf("unexpected shell launch: %+v", launched)
-	}
-}
+// Removed: TestRootCommandTreatsDeployAsEnvironmentWhenDeployContextAbsent.
+// That test locked in the workaround that the deploy command was only
+// registered when the cwd had a kubernetes deploy context, so `erun deploy`
+// from elsewhere would fall through to root and be parsed as an environment
+// name. That same gating caused the desktop Redeploy regression where
+// `erun deploy --version X` from the app's cwd produced "unknown flag:
+// --version". Deploy is now always registered; environments literally named
+// "deploy" must be opened via `erun open <tenant> deploy`.
 
 func createHelmChartFixture(t *testing.T, projectRoot, componentName string) string {
 	t.Helper()

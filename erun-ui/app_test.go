@@ -2809,6 +2809,10 @@ func testCloudContextDeps(actions *[]string) eruncommon.CloudContextDependencies
 			*actions = append(*actions, "kubectl "+strings.Join(args, " "))
 			return nil
 		},
+		// Pin "now" inside the default 08:00-20:00 working-hours window so
+		// tests that exercise StartCloudContext are not sensitive to the
+		// wall clock when the suite happens to run.
+		Now: func() time.Time { return time.Date(2026, 5, 8, 12, 0, 0, 0, time.Local) },
 	}
 }
 

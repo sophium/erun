@@ -1,0 +1,13 @@
+Start a managed ERun cloud context
+
+Usage:
+  erun context start CONTEXT [flags]
+
+Flags:
+      --dry-run   Resolve and trace mutating actions without executing them.
+      --force     Override the working-hours start gate
+  -h, --help      help for start
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

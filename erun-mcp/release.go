@@ -27,7 +27,7 @@ func releaseTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 		findProjectRoot := func() (string, string, error) {
 			return runtimeFindProjectRoot(runtime.Context, workDir)
 		}
-		spec, err := eruncommon.ResolveReleaseSpec(findProjectRoot, eruncommon.ReleaseParams{})
+		spec, err := eruncommon.ResolveReleaseSpec(eruncommon.Context{}, findProjectRoot, eruncommon.ReleaseParams{})
 		if err != nil {
 			return nil, ReleaseOutput{}, err
 		}

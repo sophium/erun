@@ -1,0 +1,28 @@
+audit: erun init --confirm-environment --container-registry registry.example/test --dry-run --kubernetes-context test-context --no-git --remote --set-default-tenant --version <VERSION> team dev
+Loading erun tool configuration, configPath=<TMP>
+Saving default config
+mkdir -p <TMP>
+write-yaml <TMP>
+Loaded erun tool configuration
+Loading tenant configuration
+Adding new tenant
+mkdir -p <TMP>
+write-yaml <TMP>
+Loaded tenant configuration
+Loading environment configuration
+kubectl --context test-context get namespace team-dev -o name
+kubectl --context test-context create namespace team-dev
+Adding new environment
+mkdir -p <TMP>
+write-yaml <TMP>
+kubectl --context test-context get namespace team-dev -o name
+kubectl --context test-context create namespace team-dev
+cd <TMP> && helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace team-dev --kube-context test-context -f <TMP> --set-string tenant=team --set-string environment=dev --set-string worktreeStorage=pvc --set-string worktreeRepoName=team --set-string worktreeHostPath=<HOME>/git/team --set sshdEnabled=false --set mcpPort=17000 --set apiPort=17033 --set sshPort=17022 --set managedCloud=false --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias= --set-string cloudContext.region= --set-string cloudContext.instanceId= --set-string api.oidcAllowedIssuers= --set api.postgres.reset=false --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=8916Mi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 team-devops <TMP>
+kubectl --context test-context --namespace team-dev wait --for=condition=Available --timeout 2m0s deployment/team-devops
+kubectl --context test-context --namespace team-dev exec deployment/team-devops -- /bin/sh -lc '<remote-script>'
+remote-worktree:
+  set -eu
+  mkdir -p '<HOME>/git/team'
+mkdir -p <TMP>
+write-yaml <TMP>
+Configuration initialized OK

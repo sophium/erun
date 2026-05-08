@@ -1,0 +1,28 @@
+Initialize configuration for the current project
+
+Usage:
+  erun init [TENANT] [ENVIRONMENT] [flags]
+
+Flags:
+      --bootstrap                      Create the tenant devops module and chart during initialization
+      --codecommit-ssh-key-id string   CodeCommit SSH public key ID to use for remote repository access
+      --confirm-environment            Confirm environment initialization without prompting
+      --container-registry string      Container registry to associate with the environment
+      --dry-run                        Resolve and trace mutating actions without executing them.
+      --environment string             Environment name
+  -h, --help                           help for init
+      --kubernetes-context string      Kubernetes context to associate with the environment
+      --no-git                         Skip remote Git checkout setup when used with --remote
+      --project-root string            Project root to bind to the tenant
+      --remote                         Initialize the tenant repository inside the runtime pod instead of the local host
+      --runtime-cpu string             Runtime pod CPU limit
+      --runtime-image string           Runtime image repository to initialize and deploy
+      --runtime-memory string          Runtime pod memory limit
+      --set-default-tenant             Set the initialized tenant as the default tenant
+      --tenant string                  Tenant name to initialize
+      --version string                 Runtime image version to initialize and deploy
+  -y, --yes                            Automatically approve initialization prompts
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

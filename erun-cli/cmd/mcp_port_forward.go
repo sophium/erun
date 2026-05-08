@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -88,7 +87,7 @@ func startMCPPortForward(statePath string, expectedState mcpPortForwardState, ar
 		_ = logFile.Close()
 	}()
 
-	cmd := exec.Command("kubectl", args...)
+	cmd := common.Command("kubectl", args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	detachBackgroundProcess(cmd)

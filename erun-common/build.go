@@ -218,7 +218,10 @@ func ResolveDockerBuildTarget(findProjectRoot ProjectFinderFunc, target DockerCo
 		return DockerCommandTarget{}, nil, fmt.Errorf("release build cannot be combined with explicit version override")
 	}
 
-	releaseSpec, err := ResolveReleaseSpec(findProjectRoot, ReleaseParams{ProjectRoot: target.ProjectRoot, Force: target.Force})
+	// Build callers don't currently surface a Context; passing the zero value
+	// is safe — Logger zero-value silently drops traces, so behavior matches
+	// what release planning produced before traces were added.
+	releaseSpec, err := ResolveReleaseSpec(Context{}, findProjectRoot, ReleaseParams{ProjectRoot: target.ProjectRoot, Force: target.Force})
 	if err != nil {
 		return DockerCommandTarget{}, nil, err
 	}

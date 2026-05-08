@@ -1,0 +1,21 @@
+Initialize a managed cloud k3s context
+
+Usage:
+  erun context init [flags]
+
+Flags:
+      --alias string               Cloud provider alias to use
+      --context string             Kubernetes context name to create
+      --disk-size int              Root disk size in GB (default 100)
+      --disk-type string           Root disk type (default "gp3")
+      --dry-run                    Resolve and trace mutating actions without executing them.
+  -h, --help                       help for init
+      --instance-type string       EC2 instance type (default "c8gd.2xlarge")
+      --key-name string            Optional EC2 key pair name
+      --region string              Cloud region for the context (default "eu-west-2")
+      --security-group-id string   Optional EC2 security group ID
+      --subnet-id string           Optional EC2 subnet ID
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

@@ -6,7 +6,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -971,6 +970,7 @@ func (d HelmDeploySpec) command() commandSpec {
 	args = append(args,
 		"--set-string", "idle.timeout="+helmIdleTimeout(d.Idle),
 		"--set-string", "idle.workingHours="+helmIdleWorkingHours(d.Idle),
+		"--set-string", "idle.timezone="+helmIdleTimezone(d.Idle),
 		"--set", "idle.trafficBytes="+formatHelmInt64(helmIdleTrafficBytes(d.Idle)),
 		"--set-string", "runtime.resources.limits.cpu="+NormalizeRuntimePodResources(d.RuntimePod).CPU,
 		"--set-string", "runtime.resources.limits.memory="+NormalizeRuntimePodResources(d.RuntimePod).Memory,
@@ -1113,6 +1113,14 @@ func helmIdleTrafficBytes(config EnvironmentIdleConfig) int64 {
 		return DefaultEnvironmentIdleTrafficBytes
 	}
 	return policy.IdleTrafficBytes
+}
+
+func helmIdleTimezone(config EnvironmentIdleConfig) string {
+	policy, err := config.Resolve()
+	if err != nil {
+		return ""
+	}
+	return policy.Timezone
 }
 
 func helmClaudeSetArgs(config EnvironmentClaudeConfig) []string {
@@ -1454,7 +1462,7 @@ func DeployHelmChart(params HelmDeployParams) error {
 		Timeout:            params.Timeout,
 	}.command()
 
-	cmd := exec.Command(command.Name, command.Args...)
+	cmd := Command(command.Name, command.Args...)
 	cmd.Dir = command.Dir
 	cmd.Stdout = params.Stdout
 	stderr := new(strings.Builder)
@@ -1485,7 +1493,7 @@ func ClearHelmReleasePendingOperation(params HelmReleaseRecoveryParams) error {
 	}
 
 	command := params.command()
-	cmd := exec.Command(command.Name, command.Args...)
+	cmd := Command(command.Name, command.Args...)
 	cmd.Stdout = params.Stdout
 	cmd.Stderr = params.Stderr
 	return cmd.Run()
@@ -1597,7 +1605,7 @@ func CheckKubernetesDeployment(params KubernetesDeploymentCheckParams) (bool, er
 	}
 	args = append(args, "get", "deployment", params.Name, "-o", "name")
 
-	output, err := exec.Command("kubectl", args...).CombinedOutput()
+	output, err := Command("kubectl", args...).CombinedOutput()
 	if err == nil {
 		if !hasExpectedDeploymentSettings(params) {
 			return true, nil
@@ -1637,7 +1645,7 @@ func deploymentMatchesExpectedSettings(params KubernetesDeploymentCheckParams) (
 	}
 	args = append(args, "get", "deployment", params.Name, "-o", "json")
 
-	output, err := exec.Command("kubectl", args...).CombinedOutput()
+	output, err := Command("kubectl", args...).CombinedOutput()
 	if err != nil {
 		return false, fmt.Errorf("failed to inspect deployment %q: %w", params.Name, err)
 	}

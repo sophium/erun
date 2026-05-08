@@ -1,0 +1,13 @@
+Set the cloud provider alias for an environment
+
+Usage:
+  erun cloud set TENANT ENVIRONMENT [flags]
+
+Flags:
+      --alias string   Cloud provider alias to assign
+      --dry-run        Resolve and trace mutating actions without executing them.
+  -h, --help           help for set
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

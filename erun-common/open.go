@@ -397,7 +397,7 @@ func resolveEffectiveKubernetesContext(environment, configured string, listConte
 }
 
 func listKubernetesContextNames() ([]string, error) {
-	output, err := exec.Command("kubectl", "config", "get-contexts", "-o=name").Output()
+	output, err := Command("kubectl", "config", "get-contexts", "-o=name").Output()
 	if err != nil {
 		return nil, err
 	}
@@ -415,7 +415,7 @@ func listKubernetesContextNames() ([]string, error) {
 }
 
 func currentKubernetesContextName() (string, error) {
-	output, err := exec.Command("kubectl", "config", "current-context").Output()
+	output, err := Command("kubectl", "config", "current-context").Output()
 	if err != nil {
 		return "", err
 	}
@@ -476,7 +476,7 @@ func ExecShell(req ShellLaunchParams) error {
 		return err
 	}
 
-	cmd := exec.Command("kubectl", kubectlExecArgs(req, script)...)
+	cmd := Command("kubectl", kubectlExecArgs(req, script)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -715,7 +715,7 @@ func isShellReplacementExit(err error) bool {
 }
 
 func resolveGitRemote(repoPath string) (string, string, string, error) {
-	output, err := exec.Command("git", "-C", repoPath, "remote", "get-url", "origin").Output()
+	output, err := Command("git", "-C", repoPath, "remote", "get-url", "origin").Output()
 	if err != nil {
 		return "", "", "", err
 	}

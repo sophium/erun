@@ -1,0 +1,14 @@
+Show environment idle stop status
+
+Usage:
+  erun idle [TENANT] [ENVIRONMENT] [flags]
+
+Flags:
+      --environment string   Environment
+  -h, --help                 help for idle
+      --json                 Write JSON output
+      --tenant string        Tenant
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

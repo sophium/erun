@@ -1,0 +1,16 @@
+Remote SSH utilities
+
+Usage:
+  erun sshd [command]
+
+Available Commands:
+  init        Enable SSH access for a remote environment
+
+Flags:
+  -h, --help   help for sshd
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.
+
+Use "erun sshd [command] --help" for more information about a command.

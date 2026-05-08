@@ -73,7 +73,16 @@ type InitCloudContextParams struct {
 }
 
 type CloudContextParams struct {
-	Name string
+	Name  string
+	Force bool
+}
+
+// CloudContextEnvLookup is an optional interface used by StartCloudContext to
+// enforce per-environment working hours when starting a cloud context. Stores
+// that do not implement it skip the working-hours gate.
+type CloudContextEnvLookup interface {
+	ListTenantConfigs() ([]TenantConfig, error)
+	ListEnvConfigs(string) ([]EnvConfig, error)
 }
 
 type CloudContextDependencies struct {
@@ -166,10 +175,18 @@ func InitCloudContext(ctx Context, store CloudContextStore, params InitCloudCont
 		return CloudContextStatus{}, fmt.Errorf("store is required")
 	}
 	deps = normalizeCloudContextDependencies(deps)
+	ctx.Trace(fmt.Sprintf("cloud-context init: alias=%s region=%s instance-type=%s disk=%dGB/%s",
+		strings.TrimSpace(params.CloudProviderAlias),
+		strings.TrimSpace(params.Region),
+		strings.TrimSpace(params.InstanceType),
+		params.DiskSizeGB,
+		strings.TrimSpace(params.DiskType)))
 	provider, config, err := initCloudContextConfig(store, params, deps)
 	if err != nil {
+		ctx.Trace("cloud-context init: configuration resolution failed: " + err.Error())
 		return CloudContextStatus{}, err
 	}
+	ctx.Trace(fmt.Sprintf("cloud-context init: resolved name=%s kube-context=%s", config.Name, config.KubernetesContext))
 	if err := prepareInitCloudContextResources(ctx, deps, provider, params, &config); err != nil {
 		return CloudContextStatus{}, err
 	}
@@ -376,10 +393,29 @@ func finalizeInitCloudContext(ctx Context, deps CloudContextDependencies, provid
 }
 
 func StopCloudContext(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies) (CloudContextStatus, error) {
+	ctx.Trace("cloud-context stop: " + strings.TrimSpace(params.Name))
 	return changeCloudContextPowerState(ctx, store, params, deps, "stop-instances", CloudContextStatusStopped)
 }
 
 func StartCloudContext(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies) (CloudContextStatus, error) {
+	deps = normalizeCloudContextDependencies(deps)
+	ctx.Trace(fmt.Sprintf("cloud-context start: name=%s force=%v", strings.TrimSpace(params.Name), params.Force))
+	if !params.Force {
+		if lookup, ok := store.(CloudContextEnvLookup); ok {
+			ctx.Trace("cloud-context start: checking working-hours gate")
+			reason, err := cloudContextStartBlockedByWorkingHours(store, lookup, params.Name, deps.Now())
+			if err != nil {
+				return CloudContextStatus{}, err
+			}
+			if reason != "" {
+				ctx.Trace("cloud-context start: gated: " + reason)
+				return CloudContextStatus{}, fmt.Errorf("cloud context %q cannot start: %s; pass force=true to override", strings.TrimSpace(params.Name), reason)
+			}
+			ctx.Trace("cloud-context start: working-hours gate clear")
+		}
+	} else {
+		ctx.Trace("cloud-context start: force=true bypasses working-hours gate")
+	}
 	if err := ensureCloudContextHostStopProfileAssociation(ctx, store, params, deps); err != nil {
 		ctx.Trace("skipping cloud context host-stop profile association: " + err.Error())
 	}
@@ -608,6 +644,68 @@ func CloudContextPreflight(store CloudContextStore, deps CloudContextDependencie
 		mu.Unlock()
 		return nil
 	}
+}
+
+// cloudContextStartBlockedByWorkingHours returns a non-empty reason when every
+// environment attached to the named cloud context is currently outside its
+// working hours. If any attached environment permits start, or no environments
+// reference this context, the gate is not engaged.
+func cloudContextStartBlockedByWorkingHours(store CloudReadStore, lookup CloudContextEnvLookup, contextName string, now time.Time) (string, error) {
+	contextName = strings.TrimSpace(contextName)
+	if contextName == "" {
+		return "", nil
+	}
+	config, ok, err := findCloudContext(store, contextName)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", nil
+	}
+	kubeContext := strings.TrimSpace(config.KubernetesContext)
+	if kubeContext == "" {
+		kubeContext = strings.TrimSpace(config.Name)
+	}
+	if kubeContext == "" {
+		return "", nil
+	}
+
+	tenants, err := lookup.ListTenantConfigs()
+	if err != nil {
+		return "", err
+	}
+	var blockedReason string
+	hasAttachedEnv := false
+	for _, tenant := range tenants {
+		envs, err := lookup.ListEnvConfigs(tenant.Name)
+		if err != nil {
+			return "", err
+		}
+		for _, env := range envs {
+			if strings.TrimSpace(env.KubernetesContext) != kubeContext {
+				continue
+			}
+			hasAttachedEnv = true
+			policy, err := env.Idle.Resolve()
+			if err != nil {
+				continue
+			}
+			outside, _, err := workingHoursStatus(policy.WorkingHours, policy.Timezone, now)
+			if err != nil {
+				continue
+			}
+			if !outside {
+				return "", nil
+			}
+			if blockedReason == "" {
+				blockedReason = fmt.Sprintf("outside working hours %s for environment %s/%s", policy.WorkingHours, tenant.Name, env.Name)
+			}
+		}
+	}
+	if !hasAttachedEnv {
+		return "", nil
+	}
+	return blockedReason, nil
 }
 
 func findCloudContextForKubernetesContext(store CloudReadStore, kubernetesContext string) (CloudContextStatus, bool, error) {

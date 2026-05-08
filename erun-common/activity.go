@@ -29,12 +29,14 @@ var environmentActivityKinds = []string{ActivityKindSSH, ActivityKindAPI, Activi
 type EnvironmentIdleConfig struct {
 	Timeout          string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	WorkingHours     string `yaml:"workinghours,omitempty" json:"workingHours,omitempty"`
+	Timezone         string `yaml:"timezone,omitempty" json:"timezone,omitempty"`
 	IdleTrafficBytes int64  `yaml:"idletrafficbytes,omitempty" json:"idleTrafficBytes,omitempty"`
 }
 
 type EnvironmentIdlePolicy struct {
 	Timeout          time.Duration `json:"timeout"`
 	WorkingHours     string        `json:"workingHours"`
+	Timezone         string        `json:"timezone,omitempty"`
 	IdleTrafficBytes int64         `json:"idleTrafficBytes"`
 }
 
@@ -100,6 +102,13 @@ func (c EnvironmentIdleConfig) Resolve() (EnvironmentIdlePolicy, error) {
 		return EnvironmentIdlePolicy{}, err
 	}
 
+	timezone := strings.TrimSpace(c.Timezone)
+	if timezone != "" {
+		if _, err := time.LoadLocation(timezone); err != nil {
+			return EnvironmentIdlePolicy{}, fmt.Errorf("invalid environment idle timezone %q: %w", timezone, err)
+		}
+	}
+
 	idleTrafficBytes := c.IdleTrafficBytes
 	if idleTrafficBytes < 0 {
 		return EnvironmentIdlePolicy{}, fmt.Errorf("environment idle traffic threshold must not be negative")
@@ -108,6 +117,7 @@ func (c EnvironmentIdleConfig) Resolve() (EnvironmentIdlePolicy, error) {
 	return EnvironmentIdlePolicy{
 		Timeout:          duration,
 		WorkingHours:     workingHours,
+		Timezone:         timezone,
 		IdleTrafficBytes: idleTrafficBytes,
 	}, nil
 }
@@ -132,7 +142,7 @@ func ResolveEnvironmentIdleStatus(config EnvironmentIdleConfig, activity map[str
 		activity = map[string]EnvironmentActivitySnapshot{}
 	}
 
-	outsideWorkingHours, secondsUntilWorkingHoursEnd, err := workingHoursStatus(policy.WorkingHours, now)
+	outsideWorkingHours, secondsUntilWorkingHoursEnd, err := workingHoursStatus(policy.WorkingHours, policy.Timezone, now)
 	if err != nil {
 		return EnvironmentIdleStatus{}, err
 	}
@@ -246,11 +256,11 @@ func loadEnvironmentIdleStopError() string {
 }
 
 func managedCloudEnvironment(store CloudReadStore, env EnvConfig) (bool, error) {
-	if !env.Remote {
-		return false, nil
-	}
 	if env.ManagedCloud {
 		return true, nil
+	}
+	if !env.Remote {
+		return false, nil
 	}
 	status, ok, err := findCloudContextForKubernetesContext(store, env.KubernetesContext)
 	if err != nil || !ok {
@@ -343,12 +353,6 @@ func activityIdleMarker(kind string, snapshot EnvironmentActivitySnapshot, polic
 		LastSeen:     snapshot.LastSeen,
 	}
 
-	if kind == ActivityKindSSH && snapshot.Bytes <= policy.IdleTrafficBytes {
-		marker.Idle = true
-		marker.Reason = "traffic is at or below idle threshold"
-		return marker
-	}
-
 	if snapshot.LastActivity.IsZero() {
 		marker.Idle = true
 		marker.Reason = "no activity recorded"
@@ -420,10 +424,17 @@ func validateWorkingHours(value string) error {
 	return nil
 }
 
-func workingHoursStatus(value string, now time.Time) (bool, int64, error) {
+func workingHoursStatus(value string, timezone string, now time.Time) (bool, int64, error) {
 	start, end, err := parseWorkingHours(value)
 	if err != nil {
 		return false, 0, err
+	}
+	if timezone = strings.TrimSpace(timezone); timezone != "" {
+		loc, locErr := time.LoadLocation(timezone)
+		if locErr != nil {
+			return false, 0, fmt.Errorf("invalid environment idle timezone %q: %w", timezone, locErr)
+		}
+		now = now.In(loc)
 	}
 	minute := now.Hour()*60 + now.Minute()
 	if start < end {

@@ -54,6 +54,9 @@ interface ManageEnvironmentWorkflowDeps {
   startDeploySelection: (selection: UISelection) => Promise<void>;
   showNotification: (kind: NonNullable<AppState['notification']>['kind'], message: string) => void;
   showTerminalMessage: (message: string, busy?: boolean) => void;
+  setPendingDebugHeader: (header: string) => void;
+  applyPendingDebugHeader: (sessionId: number) => void;
+  syncDebugDisplay: () => void;
 }
 
 export class ManageEnvironmentWorkflow {
@@ -416,6 +419,7 @@ export class ManageEnvironmentWorkflow {
       if (deletedSelected) {
         this.state.selected = null;
         this.state.sessionId = 0;
+        this.state.debugOutput = '';
         this.deps.resetTerminal();
       }
       await this.deps.reloadStateAfterEnvironmentChange();
@@ -473,7 +477,9 @@ export class ManageEnvironmentWorkflow {
     const result = (await starter(runSelection, terminalSize.cols, terminalSize.rows)) as StartSessionResult;
     this.trackHiddenSession(mode, result.sessionId, runSelection);
     this.sessions.registerDebugSession(result.sessionId, runSelection, 'hidden');
+    this.deps.applyPendingDebugHeader(result.sessionId);
     this.state.sessionId = result.sessionId;
+    this.deps.syncDebugDisplay();
 
     this.deps.resetTerminal();
     this.deps.focusTerminalSoon();
@@ -485,7 +491,7 @@ export class ManageEnvironmentWorkflow {
     this.state.selected = selection;
     this.state.manageDialog = defaultManageDialog();
     if (this.state.debugOpen) {
-      this.state.debugOutput = `$ ${formatDebugCommand(runSelection, mode)}\n`;
+      this.deps.setPendingDebugHeader(`$ ${formatDebugCommand(runSelection, mode)}\n`);
     }
     this.deps.emit();
     this.state.terminalCopyOutput = '';

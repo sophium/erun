@@ -80,7 +80,7 @@ func apiCommandArgs(host string, port int, databaseURL string, allowedIssuers st
 }
 
 func launchAPIProcess(stdin io.Reader, stdout, stderr io.Writer, args []string) error {
-	cmd := exec.Command(resolveAPIExecutable(), args...)
+	cmd := common.Command(resolveAPIExecutable(), args...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr

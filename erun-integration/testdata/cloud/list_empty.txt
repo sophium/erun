@@ -1,0 +1,19 @@
+Cloud provider utilities
+
+Usage:
+  erun cloud [command]
+
+Available Commands:
+  init        Initialize cloud provider configuration
+  login       Login to a configured cloud provider alias
+  oidc        Refresh the OIDC issuer for a configured cloud provider alias
+  set         Set the cloud provider alias for an environment
+
+Flags:
+  -h, --help   help for cloud
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.
+
+Use "erun cloud [command] --help" for more information about a command.

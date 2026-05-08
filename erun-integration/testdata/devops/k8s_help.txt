@@ -1,0 +1,16 @@
+Kubernetes utilities
+
+Usage:
+  erun devops k8s [command]
+
+Available Commands:
+  deploy      Deploy a component Helm chart
+
+Flags:
+  -h, --help   help for k8s
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.
+
+Use "erun devops k8s [command] --help" for more information about a command.

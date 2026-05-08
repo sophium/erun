@@ -474,6 +474,7 @@ func TestRuntimeChartsUseNilSafeNestedValueDefaults(t *testing.T) {
 			`{{- $idle := default dict .Values.idle -}}`,
 			`{{- $idleTimeout := default "5m0s" $idle.timeout -}}`,
 			`{{- $idleWorkingHours := default "08:00-20:00" $idle.workingHours -}}`,
+			`{{- $idleTimezone := default "" $idle.timezone -}}`,
 			`{{- $idleTrafficBytes := default 0 $idle.trafficBytes -}}`,
 			`{{- $runtime := default dict .Values.runtime -}}`,
 			`{{- $runtimeResources := default dict $runtime.resources -}}`,

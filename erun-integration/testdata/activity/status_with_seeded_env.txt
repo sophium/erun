@@ -1,0 +1,8 @@
+  stop eligible: off
+  stop blocked: environment is not cloud-managed
+  working-hours: idle (outside working hours 08:00-20:00)
+  ssh: idle (no activity recorded)
+  api: idle (no activity recorded)
+  mcp: idle (no activity recorded)
+  cli: idle (no activity recorded)
+  codex: idle (no activity recorded)

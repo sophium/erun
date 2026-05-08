@@ -33,6 +33,13 @@ type ContextActionInput struct {
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
+type ContextStartInput struct {
+	Name      string `json:"name" jsonschema:"managed cloud context name"`
+	Force     bool   `json:"force,omitempty" jsonschema:"when true, override the working-hours start gate"`
+	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without changing cloud resources"`
+	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+}
+
 type ContextListResult struct {
 	CloudContexts []eruncommon.CloudContextStatus `json:"cloudContexts,omitempty"`
 }
@@ -82,8 +89,19 @@ func contextStopTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolR
 	return contextPowerTool(runtime, eruncommon.StopCloudContext)
 }
 
-func contextStartTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
-	return contextPowerTool(runtime, eruncommon.StartCloudContext)
+func contextStartTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, ContextStartInput) (*mcp.CallToolResult, ContextActionResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input ContextStartInput) (*mcp.CallToolResult, ContextActionResult, error) {
+		if strings.TrimSpace(input.Name) == "" {
+			return nil, ContextActionResult{}, fmt.Errorf("cloud context name is required")
+		}
+		traceOutput := strings.Builder{}
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		status, err := eruncommon.StartCloudContext(ctx, runtime.Store, eruncommon.CloudContextParams{Name: input.Name, Force: input.Force}, eruncommon.CloudContextDependencies{})
+		if err != nil {
+			return nil, ContextActionResult{}, err
+		}
+		return nil, ContextActionResult{Preview: input.Preview, Context: status, Trace: normalizeTraceLines(traceOutput.String())}, nil
+	}
 }
 
 func contextPowerTool(runtime RuntimeConfig, run func(eruncommon.Context, eruncommon.CloudContextStore, eruncommon.CloudContextParams, eruncommon.CloudContextDependencies) (eruncommon.CloudContextStatus, error)) func(context.Context, *mcp.CallToolRequest, ContextActionInput) (*mcp.CallToolResult, ContextActionResult, error) {
