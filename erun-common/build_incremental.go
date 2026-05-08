@@ -412,15 +412,24 @@ type LocalDockerImageInspector func(tag string) (bool, error)
 // noIncremental is true it returns execution unchanged. Errors during fingerprint
 // computation propagate so callers can decide how to surface them.
 func ApplyIncrementalToBuildExecution(execution BuildExecutionSpec, noIncremental bool) (BuildExecutionSpec, error) {
-	if noIncremental || len(execution.dockerBuilds) == 0 {
-		return execution, nil
-	}
-	updated, err := applyIncrementalPromotion(execution.dockerBuilds, nil)
+	updated, err := ApplyIncrementalToDockerBuilds(execution.dockerBuilds, noIncremental)
 	if err != nil {
 		return BuildExecutionSpec{}, err
 	}
 	execution.dockerBuilds = updated
 	return execution, nil
+}
+
+// ApplyIncrementalToDockerBuilds applies fingerprint-based incremental
+// promotion to a slice of docker builds. When noIncremental is true the slice
+// is returned unchanged. This is the single entry point every command should
+// use so deploy, push, and runtime deploy paths share the same skip logic as
+// erun build.
+func ApplyIncrementalToDockerBuilds(builds []DockerBuildSpec, noIncremental bool) ([]DockerBuildSpec, error) {
+	if noIncremental || len(builds) == 0 {
+		return builds, nil
+	}
+	return applyIncrementalPromotion(builds, nil)
 }
 
 // applyIncrementalPromotion computes a fingerprint for each build and, when an

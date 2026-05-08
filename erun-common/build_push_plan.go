@@ -42,6 +42,11 @@ func ResolveDockerPushExecution(store DockerStore, findProjectRoot ProjectFinder
 		pushes = append(pushes, NewDockerPushSpec(buildContext.Dir, imageRef))
 	}
 
+	builds, err = ApplyIncrementalToDockerBuilds(builds, target.NoIncremental)
+	if err != nil {
+		return DockerPushExecutionSpec{}, err
+	}
+
 	return DockerPushExecutionSpec{builds: builds, pushes: pushes}, nil
 }
 
@@ -67,6 +72,11 @@ func ResolveDockerPushSpec(store DockerStore, findProjectRoot ProjectFinderFunc,
 		if err != nil {
 			return DockerPushSpec{}, nil, err
 		}
+		incremental, err := ApplyIncrementalToDockerBuilds([]DockerBuildSpec{resolvedBuild}, target.NoIncremental)
+		if err != nil {
+			return DockerPushSpec{}, nil, err
+		}
+		resolvedBuild = incremental[0]
 		build = &resolvedBuild
 		imageRef = resolvedBuild.Image
 	}

@@ -338,6 +338,10 @@ func resolveDeploySpecForContext(store DeployStore, findProjectRoot ProjectFinde
 		builds = append(builds, dependencyBuilds...)
 	}
 	builds = configureDockerBuildsForDeploy(builds)
+	builds, err = ApplyIncrementalToDockerBuilds(builds, false)
+	if err != nil {
+		return DeploySpec{}, err
+	}
 
 	return DeploySpec{
 		Target:        target,
@@ -367,6 +371,10 @@ func configureDeployInputMetadata(store DeployStore, target OpenResult, deployIn
 
 func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target OpenResult, deployContext KubernetesDeployContext, build DockerBuildSpec) (DeploySpec, error) {
 	builds := configureDockerBuildsForDeploy([]DockerBuildSpec{build})
+	builds, err := ApplyIncrementalToDockerBuilds(builds, false)
+	if err != nil {
+		return DeploySpec{}, err
+	}
 	deployInput, err := newHelmDeploySpec(target, deployContext, "")
 	if err != nil {
 		return DeploySpec{}, err
