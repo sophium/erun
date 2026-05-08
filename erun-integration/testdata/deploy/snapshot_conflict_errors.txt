@@ -1,0 +1,2 @@
+audit: erun deploy --dry-run --no-snapshot --snapshot --version <VERSION> team dev
+cannot use --snapshot and --no-snapshot with conflicting values

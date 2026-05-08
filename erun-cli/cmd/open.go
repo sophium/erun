@@ -406,6 +406,10 @@ func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq common.ShellLaunchPara
 		ExpectedRuntimePod: r.result.EnvConfig.RuntimePod,
 	})
 	if err != nil {
+		if r.ctx.DryRun {
+			r.ctx.Trace("open: dry-run: kubernetes deployment check failed (" + err.Error() + "), assuming not deployed")
+			return true, nil
+		}
 		return false, err
 	}
 	return !deployed, nil

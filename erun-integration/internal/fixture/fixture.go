@@ -52,6 +52,93 @@ func SeedTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 	)
 }
 
+// SeedRemoteTenantEnv writes the same minimal config tree as SeedTenantEnv
+// but marks the environment as remote so commands like `open`, `api`, and
+// `mcp` exercise the kubectl port-forward and remote-runtime traces. The
+// tenant's project root is rooted under setup.Home/git/<tenant> so cwd
+// resolution still works when the scenario chdirs into it.
+func SeedRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	repoPath := filepath.Join(setup.Home, "git", tenant)
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo %s: %v", repoPath, err)
+	}
+
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+repoPath+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+repoPath+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"runtimeversion: 1.0.0\n"+
+			"remote: true\n",
+	)
+}
+
+// SeedReleaseRepo materializes a minimal erun-devops layout (chart, two
+// dockerfiles, VERSION file) inside dir, runs `git init -b <branch>`, and
+// produces one initial commit. Use this for `release` scenarios that need
+// a project root with the layout the release command expects to find.
+// Returns the project root path (== dir).
+func SeedReleaseRepo(t testing.TB, dir, branch string) string {
+	t.Helper()
+	releaseRoot := filepath.Join(dir, "erun-devops")
+	for _, sub := range []string{
+		filepath.Join(releaseRoot, "k8s", "api"),
+		filepath.Join(releaseRoot, "docker", "api"),
+		filepath.Join(releaseRoot, "docker", "base"),
+	} {
+		if err := os.MkdirAll(sub, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", sub, err)
+		}
+	}
+	mustWrite(t, filepath.Join(releaseRoot, "VERSION"), "1.4.2\n")
+	mustWrite(t, filepath.Join(releaseRoot, "k8s", "api", "Chart.yaml"), "apiVersion: v2\nname: api\nversion: 0.1.0\nappVersion: 0.1.0\n")
+	mustWrite(t, filepath.Join(releaseRoot, "docker", "api", "Dockerfile"), "FROM alpine:3.22\n")
+	mustWrite(t, filepath.Join(releaseRoot, "docker", "base", "Dockerfile"), "FROM alpine:3.22\n")
+	mustWrite(t, filepath.Join(releaseRoot, "docker", "base", "VERSION"), "9.9.9\n")
+
+	if err := exec("git", []string{"init", "-q", "-b", branch}, dir); err != nil {
+		t.Fatalf("git init: %v", err)
+	}
+	if err := exec("git", []string{"config", "user.email", "test@example"}, dir); err != nil {
+		t.Fatalf("git config email: %v", err)
+	}
+	if err := exec("git", []string{"config", "user.name", "Test"}, dir); err != nil {
+		t.Fatalf("git config name: %v", err)
+	}
+	if err := exec("git", []string{"add", "."}, dir); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	if err := exec("git", []string{"commit", "-q", "-m", "initial"}, dir); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+	return dir
+}
+
+// RunGit runs `git <args...>` inside dir. Useful for scenarios that need
+// to set up branches, tags, or remotes after SeedReleaseRepo.
+func RunGit(t testing.TB, dir string, args ...string) {
+	t.Helper()
+	if err := exec("git", args, dir); err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+}
+
 // SeedDevopsRepo creates a minimal <tenant>-devops chart layout under
 // setup.Cwd so commands that look for a kubernetes deploy context find one.
 // Returns the path to the chart directory in case tests want to assert on it.

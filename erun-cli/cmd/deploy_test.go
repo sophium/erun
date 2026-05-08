@@ -13,6 +13,26 @@ import (
 	common "github.com/sophium/erun/erun-common"
 )
 
+// The deploy command's --dry-run trace is covered by the integration suite
+// (erun-integration/deploy_test.go: dry_run_from_devops_cwd, snapshot_conflict_errors,
+// version_flag_recognized_outside_devops_cwd). The cases below stay as unit
+// tests because they exercise either:
+//
+//   - Cobra registration logic that depends on the working directory's
+//     filesystem state (devops k8s scope present, docker component dir,
+//     project root with chart) — testable end-to-end only by running the
+//     integration suite from each cwd, which would multiply scenarios
+//     without covering new behavior beyond what the dry-run trace already
+//     locks in.
+//   - Real-execution dispatch that --dry-run gates off (helm runner
+//     invocation, kubectl namespace ensure before deploy, persisted
+//     snapshot preference applied without a flag, build-and-push of
+//     literal chart image dependencies). Driving these through stub
+//     binaries violates AGENTS.md.
+//
+// When new deploy behavior is added, prefer extending the integration
+// scenarios in erun-integration/deploy_test.go first.
+
 type deployBuildCall struct {
 	Dir            string
 	DockerfilePath string
@@ -50,54 +70,6 @@ func deployPushCallFunc(run func(deployPushCall) error) common.DockerImagePusher
 			Stdout: stdout,
 			Stderr: stderr,
 		})
-	}
-}
-
-func TestNewRootCmdRegistersDevopsK8sDeployCommand(t *testing.T) {
-	cmd := newTestRootCmd(testRootDeps{
-		ResolveKubernetesDeployContext: func() (common.KubernetesDeployContext, error) {
-			return common.KubernetesDeployContext{Dir: t.TempDir()}, nil
-		},
-	})
-
-	found, _, err := cmd.Find([]string{"devops", "k8s", "deploy"})
-	if err != nil {
-		t.Fatalf("Find(devops k8s deploy) failed: %v", err)
-	}
-	if found == nil || found.Name() != "deploy" || found.Parent() == nil || found.Parent().Name() != "k8s" {
-		t.Fatalf("expected devops k8s deploy command to be registered, got %+v", found)
-	}
-}
-
-func TestDeployHelpShowsTenantAndEnvironmentFlags(t *testing.T) {
-	cmd := newTestRootCmd(testRootDeps{
-		ResolveKubernetesDeployContext: func() (common.KubernetesDeployContext, error) {
-			return common.KubernetesDeployContext{
-				ComponentName: "erun-devops",
-				ChartPath:     filepath.Join(t.TempDir(), "erun-devops", "k8s", "erun-devops"),
-			}, nil
-		},
-	})
-	stdout := new(bytes.Buffer)
-	cmd.SetOut(stdout)
-	cmd.SetErr(new(bytes.Buffer))
-	cmd.SetArgs([]string{"deploy", "--help"})
-
-	requireNoError(t, cmd.Execute(), "Execute failed")
-
-	output := stdout.String()
-	for _, want := range []string{
-		"--tenant string",
-		"Deploy for a specific tenant",
-		"--environment string",
-		"Deploy for a specific environment; requires --tenant",
-	} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("expected deploy help to contain %q, got:\n%s", want, output)
-		}
-	}
-	if strings.Contains(output, "--repo-path") {
-		t.Fatalf("expected repo-path to remain hidden, got:\n%s", output)
 	}
 }
 

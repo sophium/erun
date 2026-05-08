@@ -6,41 +6,17 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"testing"
-
-	common "github.com/sophium/erun/erun-common"
 )
 
-func TestKubectlAPIPortForwardArgs(t *testing.T) {
-	got := kubectlAPIPortForwardArgs(common.OpenResult{
-		Tenant:      "tenant-a",
-		Environment: "dev",
-		EnvConfig: common.EnvConfig{
-			KubernetesContext: "cluster-dev",
-		},
-		LocalPorts: common.EnvironmentLocalPorts{
-			RangeStart: 17100,
-			RangeEnd:   17199,
-			MCP:        17100,
-			API:        17133,
-			SSH:        17122,
-		},
-	}, 17133)
-
-	want := []string{
-		"--context", "cluster-dev",
-		"--namespace", "tenant-a-dev",
-		"port-forward",
-		"deployment/tenant-a-devops",
-		"17133:17133",
-		"--address", "127.0.0.1",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("unexpected args:\ngot:  %v\nwant: %v", got, want)
-	}
-}
+// kubectlAPIPortForwardArgs is exercised end-to-end through the
+// `open/remote_dry_run_traces_port_forwards` integration scenario, which
+// asserts the trace shows the resolved kubectl port-forward command line.
+// The cases below stay as unit tests because they verify a real network
+// probe (canReachLocalAPIEndpoint) and log-file classification
+// (apiPortForwardTimeoutDetail) — neither is reachable from a --dry-run
+// scenario without a stub.
 
 func TestCanReachLocalAPIEndpointUsesHealthz(t *testing.T) {
 	var path string

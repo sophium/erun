@@ -10,6 +10,14 @@ import (
 	common "github.com/sophium/erun/erun-common"
 )
 
+// The helm-deploy recovery wrapper is exercised here as a unit test
+// because the contract it tests — "first deploy fails with
+// HelmReleasePendingOperationError, prompt user to clear metadata, then
+// retry deploy" — is real-execution behavior gated behind `if !ctx.DryRun`
+// in the deploy path. A --dry-run integration scenario would short-circuit
+// before any of this fires, and driving the failure path with a stub
+// `helm` binary is now a policy violation (see AGENTS.md).
+
 func TestHelmDeployRecoveryClearsPendingMetadataAndRetries(t *testing.T) {
 	stderr := new(bytes.Buffer)
 	deployCalls := 0

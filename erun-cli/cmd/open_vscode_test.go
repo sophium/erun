@@ -1,5 +1,15 @@
 package cmd
 
+// The open --vscode dry-run trace is covered by the integration suite
+// (erun-integration/open_test.go). The cases below stay as unit tests
+// because they exercise IDE-specific behavior the integration suite
+// cannot reach without VSCode installed: building the vscode-remote://
+// URI for the SSHD host, ensuring a known-host entry before launching,
+// formatting the launch command line, and the dry-run keyscan trace.
+// They are written against pure helpers and process-launch wiring rather
+// than the cobra command, so they verify the IDE integration plumbing
+// without introducing a stub `code` binary in the integration harness.
+
 import (
 	"bytes"
 	"errors"

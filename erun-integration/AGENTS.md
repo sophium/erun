@@ -67,23 +67,19 @@ Per the root `AGENTS.md`, `--dry-run` must produce a complete, side-effect-free 
 - `fixture.SeedGitRepo(t, dir)` runs `git init` + commit so release/diff/exec see a project root.
 - For commands that prompt interactively, prefer flags that bypass prompts (`--confirm-environment`, `--set-default-tenant=true`, `-y`) over scripted stdin. Goldens are easier to read without prompt redrawing.
 
-## Stub-binary injection
+## No stubs: `--dry-run` is the only allowed mode
 
-Production code goes through `eruncommon.Command(name, args...)`, which honors `ERUN_<NAME>_BIN` (e.g., `ERUN_KUBECTL_BIN=/path/to/stub`). This unlocks scenarios that need to walk the post-trace branches that `--dry-run` short-circuits past:
+Integration scenarios must drive `erun` with `--dry-run` only. `erun` is meant to be fully auditable: every action and every decision must surface as a trace line, so a complete dry-run output is sufficient evidence that the command would behave correctly. Reaching for stub binaries (`ERUN_<NAME>_BIN`, scripted `kubectl`/`helm`/`docker`/`git` replacements, or any other fake tool) is a code smell, not a coverage technique.
 
-```go
-stubs := setup.Cwd + "/stubs"
-fixture.StubBinary(t, stubs, "kubectl", "")
-fixture.StubBinary(t, stubs, "helm", "")
-envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm")...)
-result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-```
+If a code path cannot be reached from `--dry-run`, the defect is in the dry-run contract:
 
-Rules:
+- Identify the missing trace. If a side effect happens without a `ctx.TraceCommand(...)` (or equivalent) call in front of it, add the trace.
+- Gate the side effect with `if !ctx.DryRun { ... }` so the trace alone is enough to lock the behavior in the golden.
+- Then write the integration scenario against the new trace output. No stub needed.
 
-- Stubs return canned output via `echo`. Make the output match what the real tool would emit closely enough to drive the next branch — empty output is fine if the production code only checks exit status.
-- Reach for stubs only when `--dry-run` cannot reach the code path. If the path is gated by `if !ctx.DryRun { ... }`, the stub-driven scenario is the only way; otherwise add a richer `--dry-run` fixture instead.
-- Each `exec.Command` call site in production code must go through `eruncommon.Command(...)` so it picks up the override. Direct `exec.Command(...)` is forbidden in production paths — the harness can't intercept it.
+Do not introduce new stub-binary fixtures. When you encounter an existing stub-driven scenario, treat it as scaffolding to remove: migrate the production code to a fully-traced dry-run path and rewrite the scenario without the stub.
+
+`eruncommon.Command(name, args...)` and the `ERUN_<NAME>_BIN` overrides remain in the codebase as a development convenience for local debugging and for the few legacy paths still being migrated, but new scenarios must not depend on them.
 
 ## Goldens and normalization
 
@@ -97,6 +93,9 @@ Rules:
 - The threshold is a contract, not a target. Work that drops it must either restore coverage with new scenarios or open a discussion in the PR before lowering it.
 - Coverage scope is set in `internal/erun.CoverPkgs`. Extending it to other modules requires both that constant and a corresponding gate update; do them in the same change.
 - The gate measures statement coverage as reported by `go tool cover -func`. Function-touched rate is shown for diagnosis but not enforced.
+- Integration scenarios are the only coverage signal the gate honors. Unit tests inside `erun-cli` or `erun-common` do not contribute to the gate, so any coverage they appear to provide is invisible at merge time and any overlap with an integration scenario is duplication.
+- Therefore, prefer integration scenarios over unit tests for `erun-cli` and `erun-common` behavior. If an existing unit test covers the same statements as an integration scenario, delete the unit test instead of carrying both. Keep a unit test only when the behavior is unreachable from the compiled binary subprocess (pure parser, platform-specific branch the harness does not run); leave a one-line comment in the test file explaining why.
+- When closing a coverage gap, add or extend an integration scenario first — usually with a new flag combination or a stub-binary fixture. Only fall back to a unit test when no scenario can reach the code path.
 
 ## Adding a new command's tests
 

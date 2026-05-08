@@ -1,5 +1,19 @@
 package cmd
 
+// The open --intellij dry-run trace is covered by the integration suite
+// (erun-integration/open_test.go). The cases below stay as unit tests
+// because they exercise IDE-specific behavior that the integration suite
+// cannot reach from a --dry-run scenario without an installed IntelliJ
+// IDEA: launching the JetBrains Gateway URI, falling back to the
+// installed app when Gateway can't deploy, ensuring a known-host entry
+// for the SSHD alias before opening, resolving the most-recently-modified
+// JetBrains options dir, and the Windows-specific options-dir path. The
+// dry-run trace cases here (TestOpenInstalledIntelliJAppDryRunTracesLaunch,
+// TestRegisterIntelliJProjectDryRunTracesOptionsDir) test the trace
+// output of helpers that integration scenarios cannot drive without a
+// JetBrains config on disk; the unit tests inject filesystem-glob /
+// home-dir functions to exercise those paths deterministically.
+
 import (
 	"bytes"
 	"errors"
