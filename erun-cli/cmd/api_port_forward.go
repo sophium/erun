@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -66,7 +65,7 @@ func startAPIPortForward(statePath string, expectedState mcpPortForwardState, ar
 		_ = logFile.Close()
 	}()
 
-	cmd := exec.Command("kubectl", args...)
+	cmd := common.Command("kubectl", args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	if err := cmd.Start(); err != nil {

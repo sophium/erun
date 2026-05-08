@@ -1,0 +1,6 @@
+audit: erun release --dry-run
+release: resolving project root
+release: project root = <TMP>
+release: resolving release module root
+release: release module root resolution failed: version file not found for current module
+version file not found for current module

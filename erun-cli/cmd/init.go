@@ -3,7 +3,6 @@ package cmd
 import (
 	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/manifoldco/promptui"
@@ -275,13 +274,13 @@ func normalizeKubernetesContexts(contexts []string) []string {
 }
 
 func listKubernetesContexts() ([]string, error) {
-	output, err := exec.Command("kubectl", "config", "get-contexts", "-o=name").Output()
+	output, err := common.Command("kubectl", "config", "get-contexts", "-o=name").Output()
 	if err != nil {
 		return nil, err
 	}
 	contexts := strings.Split(string(output), "\n")
 
-	currentOutput, err := exec.Command("kubectl", "config", "current-context").Output()
+	currentOutput, err := common.Command("kubectl", "config", "current-context").Output()
 	if err == nil {
 		contexts = preferCurrentKubernetesContext(contexts, string(currentOutput))
 	}

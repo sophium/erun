@@ -1,0 +1,2 @@
+audit: erun delete --dry-run team dev
+rm -rf <TMP>

@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 func detachBackgroundProcess(cmd *exec.Cmd) {
@@ -14,7 +16,7 @@ func detachBackgroundProcess(cmd *exec.Cmd) {
 }
 
 func isPortForwardProcess(pid int) bool {
-	output, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=").Output()
+	output, err := eruncommon.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=").Output()
 	if err != nil {
 		return false
 	}
@@ -23,7 +25,7 @@ func isPortForwardProcess(pid int) bool {
 }
 
 func isSSHDActivityProxyProcess(pid int) bool {
-	output, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=").Output()
+	output, err := eruncommon.Command("ps", "-p", strconv.Itoa(pid), "-o", "command=").Output()
 	if err != nil {
 		return false
 	}

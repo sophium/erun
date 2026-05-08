@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"os/exec"
 	"sort"
 	"strings"
 )
@@ -13,7 +12,7 @@ import (
 type openKubectlRunnerFunc func(args []string, stdout, stderr io.Writer) error
 
 func runOpenKubectl(args []string, stdout, stderr io.Writer) error {
-	cmd := exec.Command("kubectl", args...)
+	cmd := Command("kubectl", args...)
 	if stdout != nil {
 		cmd.Stdout = stdout
 	}

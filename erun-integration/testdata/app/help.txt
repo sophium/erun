@@ -1,0 +1,12 @@
+Launch the ERun desktop app
+
+Usage:
+  erun app [flags]
+
+Flags:
+      --dry-run   Resolve and trace mutating actions without executing them.
+  -h, --help      help for app
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

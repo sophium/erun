@@ -292,7 +292,7 @@ func TestRuntimeEntrypointStopsCloudHostAfterIdle(t *testing.T) {
 		`runtime_cloud_instance_id()`,
 		`runtime_cloud_region()`,
 		`aws --cli-connect-timeout 5 --cli-read-timeout 20 ec2 stop-instances --region "${region}" --instance-ids "${instance_id}"`,
-		`kubectl --context "${ERUN_KUBERNETES_CONTEXT:-in-cluster}" --namespace "${namespace}" scale "deployment/${ERUN_RUNTIME_DEPLOYMENT:-erun-devops}" --replicas=0`,
+		`graceful_quit_clients >>"${HOME}/.erun/idle-stop.log" 2>&1 || true`,
 		`stop_cloud_host >>"${HOME}/.erun/idle-stop.log" 2>&1 || true`,
 		`http://169.254.169.254/latest/${path}`,
 		`imds_get "meta-data/instance-id"`,
@@ -301,6 +301,48 @@ func TestRuntimeEntrypointStopsCloudHostAfterIdle(t *testing.T) {
 		if !strings.Contains(content, want) {
 			t.Fatalf("expected runtime entrypoint to contain %q, got:\n%s", want, content)
 		}
+	}
+	// Stopping the EC2 host is what terminates the pod. The deployment should
+	// remain at replicas=1 so it returns automatically when the host starts back up.
+	if strings.Contains(content, "scale \"deployment/${ERUN_RUNTIME_DEPLOYMENT") {
+		t.Fatalf("expected runtime entrypoint to no longer scale the deployment to 0 before EC2 stop, got:\n%s", content)
+	}
+	gracefulIdx := strings.Index(content, `graceful_quit_clients >>"${HOME}/.erun/idle-stop.log"`)
+	stopIdx := strings.Index(content, `stop_cloud_host >>"${HOME}/.erun/idle-stop.log"`)
+	if gracefulIdx < 0 || stopIdx < 0 || gracefulIdx > stopIdx {
+		t.Fatalf("expected graceful_quit_clients to run before stop_cloud_host, got graceful=%d stop=%d", gracefulIdx, stopIdx)
+	}
+}
+
+func TestRuntimeEntrypointGracefullyQuitsClaudeAndCodexBeforeStop(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read runtime entrypoint: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		"graceful_quit_clients()",
+		`pkill -TERM -f "${pattern}"`,
+		`pgrep -f "${pattern}"`,
+		`'claude-real'`,
+		`'codex-real'`,
+		`'@anthropic-ai/claude-code'`,
+		`'@openai/codex'`,
+		"sync",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected runtime entrypoint to contain %q, got:\n%s", want, content)
+		}
+	}
+}
+
+func TestRuntimeImageInstallsProcps(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "Dockerfile"))
+	if err != nil {
+		t.Fatalf("read runtime Dockerfile: %v", err)
+	}
+	if !strings.Contains(string(data), "procps") {
+		t.Fatalf("expected runtime Dockerfile to apt-get install procps so graceful_quit_clients can use pkill/pgrep, got:\n%s", string(data))
 	}
 }
 
@@ -350,6 +392,7 @@ ${env_managed_cloud_line}
 idle:
   timeout: ${ERUN_IDLE_TIMEOUT:-5m0s}
   workinghours: ${ERUN_IDLE_WORKING_HOURS:-08:00-20:00}
+  timezone: ${ERUN_IDLE_TIMEZONE:-}
   idletrafficbytes: ${ERUN_IDLE_TRAFFIC_BYTES:-0}
 EOF`
 	if !strings.Contains(content, envConfig) {

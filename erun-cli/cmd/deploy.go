@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+
 	common "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
 )
@@ -29,10 +31,15 @@ func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinder
 				snapshotOverride = &snapshot
 			}
 			deployTarget.Snapshot = snapshotOverride
+			ctx.Trace(fmt.Sprintf("deploy: tenant=%s environment=%s version-override=%s snapshot=%v",
+				deployTarget.Tenant, deployTarget.Environment, deployTarget.VersionOverride,
+				snapshotOverride != nil && *snapshotOverride))
 			deploySpecs, err := common.ResolveCurrentDeploySpecs(store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 			if err != nil {
+				ctx.Trace("deploy: spec resolution failed: " + err.Error())
 				return err
 			}
+			ctx.Trace(fmt.Sprintf("deploy: resolved %d spec(s)", len(deploySpecs)))
 			return common.RunDeploySpecs(ctx, deploySpecs, buildDockerImage, push, deployHelmChart)
 		},
 	}

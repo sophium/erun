@@ -97,7 +97,7 @@ func mcpCommandArgs(host string, port int, path string, runtime mcpLaunchContext
 }
 
 func launchMCPProcess(stdin io.Reader, stdout, stderr io.Writer, args []string) error {
-	cmd := exec.Command(resolveMCPExecutable(), args...)
+	cmd := common.Command(resolveMCPExecutable(), args...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr

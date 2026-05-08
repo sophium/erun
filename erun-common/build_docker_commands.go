@@ -138,7 +138,7 @@ func platformShortSuffix(platform string) string {
 }
 
 func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, stdout, stderr io.Writer) error {
-	cmd := exec.Command("docker", args...)
+	cmd := Command("docker", args...)
 	cmd.Dir = dir
 	output := new(bytes.Buffer)
 	cmd.Stdout = dockerCommandOutputWriter(stdout, output)
@@ -161,7 +161,7 @@ func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, st
 }
 
 func runDockerSimpleCommand(args []string, stdout, stderr io.Writer) error {
-	cmd := exec.Command("docker", args...)
+	cmd := Command("docker", args...)
 	if stdout != nil {
 		cmd.Stdout = stdout
 	}
@@ -192,7 +192,7 @@ func DockerImageExists(tag string) (bool, error) {
 	if tag == "" {
 		return false, nil
 	}
-	cmd := exec.Command("docker", "image", "inspect", tag)
+	cmd := Command("docker", "image", "inspect", tag)
 	err := cmd.Run()
 	if err == nil {
 		return true, nil
@@ -209,7 +209,7 @@ func DockerManifestExists(tag string) (bool, error) {
 	if tag == "" {
 		return false, nil
 	}
-	cmd := exec.Command("docker", "manifest", "inspect", tag)
+	cmd := Command("docker", "manifest", "inspect", tag)
 	err := cmd.Run()
 	if err == nil {
 		return true, nil
@@ -225,7 +225,7 @@ func DockerManifestExists(tag string) (bool, error) {
 // the given tag. Returns nil when the tag does not exist, is a single-arch image
 // (no manifest list / OCI index), or when the manifest cannot be inspected.
 func dockerManifestPlatforms(tag string) ([]string, error) {
-	cmd := exec.Command("docker", "manifest", "inspect", tag)
+	cmd := Command("docker", "manifest", "inspect", tag)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, nil // tag absent or inaccessible
@@ -256,7 +256,7 @@ func dockerManifestPlatforms(tag string) ([]string, error) {
 // field reports every platform stored under that tag. Returns nil when the
 // image is not present locally.
 func dockerLocalImagePlatforms(tag string) ([]string, error) {
-	cmd := exec.Command("docker", "image", "inspect", tag)
+	cmd := Command("docker", "image", "inspect", tag)
 	output, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -380,7 +380,7 @@ func dockerImageTagVersion(tag string) string {
 }
 
 func BuildScriptRunner(dir, scriptPath string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	cmd := exec.Command(scriptPath)
+	cmd := Command(scriptPath)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
 	cmd.Stdin = stdin
@@ -405,7 +405,7 @@ func DockerImagePusher(tag string, stdout, stderr io.Writer) error {
 }
 
 func runDockerPushOnce(tag string, stdout, stderr io.Writer) error {
-	pushCmd := exec.Command("docker", "push", tag)
+	pushCmd := Command("docker", "push", tag)
 	output := new(bytes.Buffer)
 	pushCmd.Stdout = dockerCommandOutputWriter(stdout, output)
 	pushCmd.Stderr = dockerCommandOutputWriter(stderr, output)
@@ -442,7 +442,7 @@ func DockerRegistryLogin(registry string, stdin io.Reader, stdout, stderr io.Wri
 		args = append(args, registry)
 	}
 
-	loginCmd := exec.Command("docker", args...)
+	loginCmd := Command("docker", args...)
 	loginCmd.Stdin = stdin
 	loginCmd.Stdout = stdout
 	loginCmd.Stderr = stderr
@@ -477,7 +477,7 @@ func tryGHCRLoginViaGH(registry string, stdout, stderr io.Writer) (bool, error) 
 		return false, nil
 	}
 
-	loginCmd := exec.Command("docker", "login", "ghcr.io", "-u", user, "--password-stdin")
+	loginCmd := Command("docker", "login", "ghcr.io", "-u", user, "--password-stdin")
 	loginCmd.Stdin = strings.NewReader(token)
 	loginCmd.Stdout = stdout
 	loginCmd.Stderr = stderr
@@ -488,7 +488,7 @@ func tryGHCRLoginViaGH(registry string, stdout, stderr io.Writer) (bool, error) 
 }
 
 func captureGHCommand(args ...string) (string, error) {
-	cmd := exec.Command("gh", args...)
+	cmd := Command("gh", args...)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -525,7 +525,7 @@ func TryGHCRNamespaceLogin(tag string, stdout, stderr io.Writer) (bool, error) {
 		return false, nil
 	}
 
-	loginCmd := exec.Command("docker", "login", "ghcr.io", "-u", namespace, "--password-stdin")
+	loginCmd := Command("docker", "login", "ghcr.io", "-u", namespace, "--password-stdin")
 	loginCmd.Stdin = strings.NewReader(token)
 	loginCmd.Stdout = stdout
 	loginCmd.Stderr = stderr

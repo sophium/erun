@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -83,7 +82,7 @@ func startSSHDPortForward(statePath string, expectedState sshdPortForwardState, 
 		_ = logFile.Close()
 	}()
 
-	cmd := exec.Command("kubectl", args...)
+	cmd := common.Command("kubectl", args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	detachBackgroundProcess(cmd)

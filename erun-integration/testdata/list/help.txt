@@ -1,0 +1,11 @@
+List configured tenants and environments
+
+Usage:
+  erun list [flags]
+
+Flags:
+  -h, --help   help for list
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

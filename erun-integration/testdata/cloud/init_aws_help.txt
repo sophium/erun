@@ -1,0 +1,18 @@
+Initialize an AWS SSO cloud provider alias
+
+Usage:
+  erun cloud init aws [flags]
+
+Flags:
+      --account-id string        AWS account ID to use for SSO login
+      --dry-run                  Resolve and trace mutating actions without executing them.
+  -h, --help                     help for aws
+      --oidc-issuer-url string   OIDC issuer URL trusted by deployed ERun APIs
+      --region string            Default AWS region for the generated configuration
+      --role-name string         AWS role name to use for SSO login
+      --sso-region string        AWS IAM Identity Center region
+      --sso-start-url string     AWS IAM Identity Center start URL
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

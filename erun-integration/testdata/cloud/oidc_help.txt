@@ -1,0 +1,14 @@
+Refresh the OIDC issuer for a configured cloud provider alias
+
+Usage:
+  erun cloud oidc [flags]
+
+Flags:
+      --alias string      Cloud provider alias to refresh
+      --audience string   Audience for the AWS web identity bearer token (default "erun-api")
+      --dry-run           Resolve and trace mutating actions without executing them.
+  -h, --help              help for oidc
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

@@ -7,6 +7,7 @@
 {{- $idle := default dict .Values.idle -}}
 {{- $idleTimeout := default "5m0s" $idle.timeout -}}
 {{- $idleWorkingHours := default "08:00-20:00" $idle.workingHours -}}
+{{- $idleTimezone := default "" $idle.timezone -}}
 {{- $idleTrafficBytes := default 0 $idle.trafficBytes -}}
 {{- $runtime := default dict .Values.runtime -}}
 {{- $runtimeResources := default dict $runtime.resources -}}
@@ -365,6 +366,8 @@ spec:
               value: {{ $idleTimeout | quote }}
             - name: ERUN_IDLE_WORKING_HOURS
               value: {{ $idleWorkingHours | quote }}
+            - name: ERUN_IDLE_TIMEZONE
+              value: {{ $idleTimezone | quote }}
             - name: ERUN_IDLE_TRAFFIC_BYTES
               value: {{ $idleTrafficBytes | quote }}
             - name: ERUN_NAMESPACE

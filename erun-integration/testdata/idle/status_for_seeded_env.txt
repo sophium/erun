@@ -1,0 +1,10 @@
+  timeout: 300 seconds
+  seconds until stop: 0
+  stop eligible: off
+  stop blocked: environment is not cloud-managed
+  working-hours: idle
+  ssh: idle
+  api: idle
+  mcp: idle
+  cli: idle
+  codex: idle

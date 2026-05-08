@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 
+	eruncommon "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
 )
 
@@ -57,10 +58,10 @@ func newAppProcessCommand(goos string, executable string, args []string) *exec.C
 			openArgs = append(openArgs, "--args")
 			openArgs = append(openArgs, args...)
 		}
-		return exec.Command("open", openArgs...)
+		return eruncommon.Command("open", openArgs...)
 	}
 
-	cmd := exec.Command(executable, args...)
+	cmd := eruncommon.Command(executable, args...)
 	if goos == "darwin" {
 		cmd.Args[0] = "ERun"
 	}

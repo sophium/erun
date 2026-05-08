@@ -129,7 +129,7 @@ func removeStaleLocalImageForPlatforms(ctx Context, tag string, required []strin
 	if ctx.DryRun {
 		return nil
 	}
-	cmd := exec.Command("docker", "image", "rm", tag)
+	cmd := Command("docker", "image", "rm", tag)
 	if err := cmd.Run(); err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {

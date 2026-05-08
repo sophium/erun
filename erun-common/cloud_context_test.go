@@ -559,6 +559,144 @@ func TestInitCloudContextDryRunDoesNotSave(t *testing.T) {
 	}
 }
 
+func TestStartCloudContextRejectsStartOutsideWorkingHours(t *testing.T) {
+	store := &memoryCloudStore{
+		config: ERunConfig{CloudContexts: []CloudContextConfig{{
+			Name:               "team-cloud",
+			KubernetesContext:  "team-cloud-kube",
+			CloudProviderAlias: "rihards+123456789012@aws",
+			Region:             "eu-west-2",
+			InstanceID:         "i-test",
+			Status:             CloudContextStatusStopped,
+		}}},
+		envs: map[string]EnvConfig{
+			"team/dev": {
+				Name:              "dev",
+				KubernetesContext: "team-cloud-kube",
+				Idle:              EnvironmentIdleConfig{WorkingHours: "08:00-20:00"},
+			},
+		},
+	}
+	awsCalls := 0
+	_, err := StartCloudContext(Context{}, store, CloudContextParams{Name: "team-cloud"}, CloudContextDependencies{
+		Now:        func() time.Time { return time.Date(2026, 4, 28, 22, 0, 0, 0, time.Local) },
+		RunAWS:     func(Context, CloudProviderConfig, string, []string) (string, error) { awsCalls++; return "", nil },
+		RunKubectl: func(Context, []string) error { return nil },
+	})
+	if err == nil {
+		t.Fatalf("expected start outside working hours to fail")
+	}
+	if !strings.Contains(err.Error(), "outside working hours") {
+		t.Fatalf("expected working-hours error, got %v", err)
+	}
+	if awsCalls != 0 {
+		t.Fatalf("expected no AWS calls when gate rejects start, got %d", awsCalls)
+	}
+}
+
+func TestStartCloudContextForceOverridesWorkingHoursGate(t *testing.T) {
+	store := &memoryCloudStore{
+		config: ERunConfig{
+			CloudProviders: []CloudProviderConfig{{
+				Alias:    "rihards+123456789012@aws",
+				Provider: CloudProviderAWS,
+			}},
+			CloudContexts: []CloudContextConfig{{
+				Name:               "team-cloud",
+				KubernetesContext:  "team-cloud-kube",
+				CloudProviderAlias: "rihards+123456789012@aws",
+				Region:             "eu-west-2",
+				InstanceID:         "i-test",
+				Status:             CloudContextStatusStopped,
+				AdminToken:         "test-token",
+			}},
+		},
+		envs: map[string]EnvConfig{
+			"team/dev": {
+				Name:              "dev",
+				KubernetesContext: "team-cloud-kube",
+				Idle:              EnvironmentIdleConfig{WorkingHours: "08:00-20:00"},
+			},
+		},
+	}
+	_, err := StartCloudContext(Context{DryRun: true}, store, CloudContextParams{Name: "team-cloud", Force: true}, CloudContextDependencies{
+		Now:        func() time.Time { return time.Date(2026, 4, 28, 22, 0, 0, 0, time.Local) },
+		RunAWS:     func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) { return "198.51.100.10\n", nil },
+		RunKubectl: func(Context, []string) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("expected force=true to bypass working-hours gate, got %v", err)
+	}
+}
+
+func TestStartCloudContextAllowsStartWhenAnyAttachedEnvIsInWorkingHours(t *testing.T) {
+	store := &memoryCloudStore{
+		config: ERunConfig{
+			CloudProviders: []CloudProviderConfig{{
+				Alias:    "rihards+123456789012@aws",
+				Provider: CloudProviderAWS,
+			}},
+			CloudContexts: []CloudContextConfig{{
+				Name:               "team-cloud",
+				KubernetesContext:  "team-cloud-kube",
+				CloudProviderAlias: "rihards+123456789012@aws",
+				Region:             "eu-west-2",
+				InstanceID:         "i-test",
+				Status:             CloudContextStatusStopped,
+				AdminToken:         "test-token",
+			}},
+		},
+		envs: map[string]EnvConfig{
+			"team/early": {
+				Name:              "early",
+				KubernetesContext: "team-cloud-kube",
+				Idle:              EnvironmentIdleConfig{WorkingHours: "08:00-12:00"},
+			},
+			"team/late": {
+				Name:              "late",
+				KubernetesContext: "team-cloud-kube",
+				Idle:              EnvironmentIdleConfig{WorkingHours: "08:00-23:00"},
+			},
+		},
+	}
+	_, err := StartCloudContext(Context{DryRun: true}, store, CloudContextParams{Name: "team-cloud"}, CloudContextDependencies{
+		Now:        func() time.Time { return time.Date(2026, 4, 28, 14, 0, 0, 0, time.Local) },
+		RunAWS:     func(_ Context, _ CloudProviderConfig, _ string, _ []string) (string, error) { return "198.51.100.10\n", nil },
+		RunKubectl: func(Context, []string) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("expected start to succeed when at least one attached env permits it, got %v", err)
+	}
+}
+
+func TestStartCloudContextSkipsGateWhenNoEnvsReferenceContext(t *testing.T) {
+	store := &memoryCloudStore{
+		config: ERunConfig{
+			CloudProviders: []CloudProviderConfig{{
+				Alias:    "rihards+123456789012@aws",
+				Provider: CloudProviderAWS,
+			}},
+			CloudContexts: []CloudContextConfig{{
+				Name:               "team-cloud",
+				KubernetesContext:  "team-cloud-kube",
+				CloudProviderAlias: "rihards+123456789012@aws",
+				Region:             "eu-west-2",
+				InstanceID:         "i-test",
+				Status:             CloudContextStatusStopped,
+				AdminToken:         "test-token",
+			}},
+		},
+	}
+	_, err := StartCloudContext(Context{DryRun: true}, store, CloudContextParams{Name: "team-cloud"}, CloudContextDependencies{
+		Now:        func() time.Time { return time.Date(2026, 4, 28, 22, 0, 0, 0, time.Local) },
+		RunAWS:     func(_ Context, _ CloudProviderConfig, _ string, _ []string) (string, error) { return "198.51.100.10\n", nil },
+		RunKubectl: func(Context, []string) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("expected start to succeed when no envs reference the context, got %v", err)
+	}
+}
+
 func TestInitCloudContextGeneratedNameIncrementsForExistingContexts(t *testing.T) {
 	store := &memoryCloudStore{config: ERunConfig{
 		CloudProviders: []CloudProviderConfig{{

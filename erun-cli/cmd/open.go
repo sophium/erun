@@ -283,6 +283,10 @@ type resolvedOpenRunner struct {
 }
 
 func (r *resolvedOpenRunner) run() error {
+	r.ctx.Trace(fmt.Sprintf("open: tenant=%s environment=%s kubernetes-context=%s remote=%v no-shell=%v ide=%s",
+		r.result.Tenant, r.result.Environment,
+		r.result.EnvConfig.KubernetesContext, r.result.RemoteRepo(),
+		r.options.NoShell, openIDEKindLabel(r.options)))
 	if err := r.ctx.EnsureKubernetesContext(r.result.EnvConfig.KubernetesContext); err != nil {
 		return err
 	}
@@ -302,14 +306,27 @@ func (r *resolvedOpenRunner) run() error {
 		return err
 	}
 	if r.options.NoShell {
+		r.ctx.Trace("open: --no-shell selected, emitting setup commands instead of launching shell")
 		return r.emitNoShellSetup()
 	}
 
 	r.traceShellPreview(shellReq)
 	if r.ctx.DryRun {
+		r.ctx.Trace("open: dry-run complete; would have launched shell")
 		return nil
 	}
 	return r.runShellLoop(shellReq)
+}
+
+func openIDEKindLabel(options openOptions) string {
+	switch {
+	case options.VSCode:
+		return "vscode"
+	case options.IntelliJ:
+		return "intellij"
+	default:
+		return "shell"
+	}
 }
 
 func (r *resolvedOpenRunner) recordActivity() {

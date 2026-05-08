@@ -182,6 +182,7 @@ export class ERunUIController {
 
   private readonly subscribers = new Set<() => void>();
   private readonly sessions = new TerminalSessionRegistry();
+  private pendingDebugHeader = '';
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
   private terminalRoot: HTMLDivElement | null = null;
@@ -240,6 +241,9 @@ export class ERunUIController {
     startDeploySelection: (selection) => this.startDeploySelection(selection),
     showNotification: (kind, message) => this.showNotification(kind, message),
     showTerminalMessage: (message, busy) => this.showTerminalMessage(message, busy),
+    setPendingDebugHeader: (header) => this.setPendingDebugHeader(header),
+    applyPendingDebugHeader: (sessionId) => this.applyPendingDebugHeader(sessionId),
+    syncDebugDisplay: () => this.syncDebugDisplay(),
   });
 
   subscribe = (subscriber: () => void): (() => void) => {
@@ -381,7 +385,33 @@ export class ERunUIController {
 
   clearDebugOutput(): void {
     this.state.debugOutput = '';
+    this.sessions.clearSessionDebug(this.state.sessionId);
     this.emit();
+  }
+
+  setPendingDebugHeader(header: string): void {
+    this.pendingDebugHeader = header;
+    if (this.state.debugOpen) {
+      this.state.debugOutput = header;
+    }
+  }
+
+  applyPendingDebugHeader(sessionId: number): void {
+    if (!this.pendingDebugHeader || sessionId <= 0) {
+      this.pendingDebugHeader = '';
+      return;
+    }
+    if (this.state.debugOpen) {
+      this.sessions.setSessionDebug(sessionId, this.pendingDebugHeader);
+    }
+    this.pendingDebugHeader = '';
+  }
+
+  syncDebugDisplay(): void {
+    if (!this.state.debugOpen) {
+      return;
+    }
+    this.state.debugOutput = this.sessions.sessionDebug(this.state.sessionId);
   }
 
   toggleTenant(tenant: string): void {
@@ -500,7 +530,7 @@ export class ERunUIController {
       return;
     }
     if (this.state.debugOpen) {
-      this.state.debugOutput = `$ ${formatDebugCommand(runSelection)}\n`;
+      this.setPendingDebugHeader(`$ ${formatDebugCommand(runSelection)}\n`);
     }
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
@@ -511,8 +541,10 @@ export class ERunUIController {
   private registerOpenSessionResult(key: string, result: StartSessionResult, runSelection: UISelection, previousSessionId: number): void {
     this.sessions.trackOpenSession(key, result.sessionId, runSelection);
     this.registerDebugSession(result.sessionId, runSelection, 'open');
+    this.applyPendingDebugHeader(result.sessionId);
     rebuildTerminalDisplayBuffer(this.sessions, result.sessionId);
     this.state.sessionId = result.sessionId;
+    this.syncDebugDisplay();
     this.recordTab(key, result.sessionId, result.slot ?? 0);
     if (result.sessionId !== previousSessionId) {
       this.resetTerminal();
@@ -583,6 +615,7 @@ export class ERunUIController {
       return;
     }
     this.state.sessionId = sessionId;
+    this.syncDebugDisplay();
     rebuildTerminalDisplayBuffer(this.sessions, sessionId);
     this.resetTerminal();
     this.writeTerminalBuffer(this.sessions.displayBuffer(sessionId));
@@ -616,12 +649,14 @@ export class ERunUIController {
       return;
     }
     const remaining = this.removeTab(key, sessionId);
+    this.sessions.clearSessionDebug(sessionId);
     if (this.state.sessionId === sessionId) {
       const next = remaining[remaining.length - 1];
       if (next) {
         this.selectTerminalTab(next.sessionId);
       } else {
         this.state.sessionId = 0;
+        this.state.debugOutput = '';
         this.resetTerminal();
         this.emit();
       }
@@ -655,7 +690,9 @@ export class ERunUIController {
     const label = ideLabel(ide);
     this.state.selected = selection;
     if (this.state.debugOpen) {
-      this.state.debugOutput = `$ ${formatIDECommand(runSelection, ide)}\n`;
+      const header = `$ ${formatIDECommand(runSelection, ide)}\n`;
+      this.sessions.setSessionDebug(this.state.sessionId, header);
+      this.syncDebugDisplay();
     }
     this.emit();
     this.state.terminalCopyOutput = '';
@@ -1562,7 +1599,7 @@ export class ERunUIController {
     const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     this.state.selected = selection;
     if (this.state.debugOpen) {
-      this.state.debugOutput = `$ ${formatDebugCommand(runSelection, 'init')}\n`;
+      this.setPendingDebugHeader(`$ ${formatDebugCommand(runSelection, 'init')}\n`);
     }
     this.emit();
     this.state.terminalCopyOutput = '';
@@ -1573,7 +1610,9 @@ export class ERunUIController {
     const result = (await StartInitSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
     this.sessions.trackInitSession(result.sessionId, runSelection);
     this.registerDebugSession(result.sessionId, runSelection, 'hidden');
+    this.applyPendingDebugHeader(result.sessionId);
     this.state.sessionId = result.sessionId;
+    this.syncDebugDisplay();
 
     this.resetTerminal();
     this.focusTerminalSoon();
@@ -1585,7 +1624,7 @@ export class ERunUIController {
     const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     this.state.selected = selection;
     if (this.state.debugOpen) {
-      this.state.debugOutput = `$ ${formatDebugCommand(runSelection, 'deploy')}\n`;
+      this.setPendingDebugHeader(`$ ${formatDebugCommand(runSelection, 'deploy')}\n`);
     }
     this.emit();
     this.state.terminalCopyOutput = '';
@@ -1596,7 +1635,9 @@ export class ERunUIController {
     const result = (await StartDeploySession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
     this.sessions.trackDeploySession(result.sessionId, runSelection);
     this.registerDebugSession(result.sessionId, runSelection, 'hidden');
+    this.applyPendingDebugHeader(result.sessionId);
     this.state.sessionId = result.sessionId;
+    this.syncDebugDisplay();
 
     this.resetTerminal();
     this.focusTerminalSoon();
@@ -1786,12 +1827,17 @@ export class ERunUIController {
     this.showTerminalMessage(message, payload.busy === true);
   }
 
-  private appendDebugOutput(text: string): void {
+  private appendDebugOutput(text: string, fromSessionId?: number): void {
     if (!this.state.debugOpen || !text) {
       return;
     }
-    this.state.debugOutput = trimDebugOutput(this.state.debugOutput + text);
-    this.emit();
+    const target = fromSessionId !== undefined ? fromSessionId : this.state.sessionId;
+    const next = trimDebugOutput(this.sessions.sessionDebug(target) + text);
+    this.sessions.setSessionDebug(target, next);
+    if (target === this.state.sessionId) {
+      this.state.debugOutput = next;
+      this.emit();
+    }
   }
 
   private handleTerminalOutput(payload: TerminalOutputPayload): void {
@@ -1801,7 +1847,7 @@ export class ERunUIController {
     const data = decodeBase64Bytes(payload.data);
     this.sessions.appendSessionBuffer(payload.sessionId, data);
     const debugOutput = decodeDebugOutput(data);
-    this.appendDebugOutput(debugOutput);
+    this.appendDebugOutput(debugOutput, payload.sessionId);
     this.updateOpenStatusFromOutput(payload.sessionId, debugOutput);
     const displayData = filterTerminalDisplayData(this.sessions, payload.sessionId, data);
     if (displayData) {

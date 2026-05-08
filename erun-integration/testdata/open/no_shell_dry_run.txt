@@ -1,0 +1,3 @@
+audit: erun open --dry-run --no-alias-prompt --no-shell team dev
+open: tenant=team environment=dev kubernetes-context=test-context remote=false no-shell=true ide=shell
+failed to check deployment "team-devops": exit status 1

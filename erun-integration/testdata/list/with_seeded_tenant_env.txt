@@ -1,0 +1,25 @@
+Configuration:
+  directory: <TMP>
+Defaults:
+  tenant: team
+  environment: dev
+Current Directory:
+  path: none
+  repo: none
+  configured tenant: none
+  effective target: team/dev
+  kubernetes context: test-context
+  snapshot: off
+  assigned local port range: 17000-17099
+  assigned mcp local port: 17000 (when MCP is running or forwarded)
+  assigned api local port: 17033 (when API is running or forwarded)
+  api url: http://<VERSION>.1:17033
+  assigned ssh local port: 17022 (when SSH port-forward is active)
+  repo path: <TMP>
+Cloud Providers:
+  none
+Tenants:
+  team [default, effective]
+    default environment: dev
+    environments:
+      - dev [default, effective] context=test-context snapshot=off repo=<TMP> ports=17000-17099 mcp-port=17000 api-port=17033 api-url=http://<VERSION>.1:17033 ssh-port=17022

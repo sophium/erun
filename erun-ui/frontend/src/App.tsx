@@ -114,7 +114,7 @@ function MainPane({
     >
       {dashboardOpen && <TenantDashboardView controller={controller} state={state} />}
       <TerminalPane controller={controller} state={state} hidden={dashboardOpen} terminalRootRef={terminalRootRef} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} />
-      {!dashboardOpen && <DebugPanel controller={controller} open={state.debugOpen} output={state.debugOutput} />}
+      {!dashboardOpen && <DebugPanel controller={controller} open={state.debugOpen} output={state.debugOutput} sessionId={state.sessionId} />}
     </main>
   );
 }
@@ -173,14 +173,40 @@ function TerminalBusyOverlay({ message }: { message: string }): React.ReactEleme
   );
 }
 
-function DebugPanel({ controller, open, output }: { controller: ERunUIController; open: boolean; output: string }): React.ReactElement {
+function DebugPanel({ controller, open, output, sessionId }: { controller: ERunUIController; open: boolean; output: string; sessionId: number }): React.ReactElement {
   const outputRef = React.useRef<HTMLPreElement>(null);
+  const stuckToBottomRef = React.useRef(true);
   const [copyStatus, setCopyStatus] = React.useState('');
   const canCopy = output.trim().length > 0;
 
+  const handleScroll = React.useCallback(() => {
+    const el = outputRef.current;
+    if (!el) {
+      return;
+    }
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    stuckToBottomRef.current = distanceFromBottom <= 4;
+  }, []);
+
+  // When the active session changes, reset stick-to-bottom and snap to the
+  // bottom of the new buffer so users see the latest debug output for that tab.
   React.useEffect(() => {
+    stuckToBottomRef.current = true;
     if (open && outputRef.current) {
       outputRef.current.scrollTop = outputRef.current.scrollHeight;
+    }
+  }, [open, sessionId]);
+
+  React.useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const el = outputRef.current;
+    if (!el) {
+      return;
+    }
+    if (stuckToBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
     }
   }, [open, output]);
 
@@ -237,6 +263,7 @@ function DebugPanel({ controller, open, output }: { controller: ERunUIController
       {open && (
         <pre
           ref={outputRef}
+          onScroll={handleScroll}
           className="min-h-0 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-[1.35] text-[oklch(0.82_0_0)]"
         >
           {output || 'Run an environment command while Debug is expanded to stream erun -vv output here.'}

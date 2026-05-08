@@ -59,7 +59,7 @@ USER root
 
 # Keep external tooling installs pinned and centralized in one layer for traceability.
 RUN apt-get update && \
-    apt-get install -y git bash-completion bubblewrap dpkg-dev && \
+    apt-get install -y git bash-completion bubblewrap dpkg-dev procps && \
     rm -rf /var/lib/apt/lists/* && \
     case "${TARGETARCH}" in \
         amd64) arch=amd64; docker_arch=x86_64; node_arch=x64; aws_arch=x86_64 ;; \

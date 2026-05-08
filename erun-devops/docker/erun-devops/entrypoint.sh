@@ -151,6 +151,33 @@ stop_cloud_host() {
     aws --cli-connect-timeout 5 --cli-read-timeout 20 ec2 stop-instances --region "${region}" --instance-ids "${instance_id}" >/dev/null
 }
 
+graceful_quit_clients() {
+    # claude-real and codex-real are Node processes spawned by the wrappers in
+    # /usr/local/bin/{claude,codex}. Match against the full command line because
+    # Node may rewrite argv[0]; also match the npm package paths as a fallback
+    # when the launcher is a shebang script that exec's node with the cli.js.
+    for pattern in 'claude-real' 'codex-real' '@anthropic-ai/claude-code' '@openai/codex'; do
+        pkill -TERM -f "${pattern}" >/dev/null 2>&1 || true
+    done
+
+    deadline=$(( $(date +%s) + 20 ))
+    while [ "$(date +%s)" -lt "${deadline}" ]; do
+        any_running=0
+        for pattern in 'claude-real' 'codex-real' '@anthropic-ai/claude-code' '@openai/codex'; do
+            if pgrep -f "${pattern}" >/dev/null 2>&1; then
+                any_running=1
+                break
+            fi
+        done
+        if [ "${any_running}" -eq 0 ]; then
+            break
+        fi
+        sleep 1
+    done
+
+    sync
+}
+
 runtime_sshd_enabled() {
     case "${ERUN_SSHD_ENABLED:-}" in
         1|true|TRUE|True|yes|YES|on|ON)
@@ -274,6 +301,7 @@ ${env_managed_cloud_line}
 idle:
   timeout: ${ERUN_IDLE_TIMEOUT:-5m0s}
   workinghours: ${ERUN_IDLE_WORKING_HOURS:-08:00-20:00}
+  timezone: ${ERUN_IDLE_TIMEZONE:-}
   idletrafficbytes: ${ERUN_IDLE_TRAFFIC_BYTES:-0}
 EOF
 }
@@ -664,11 +692,8 @@ start_environment_idle_monitor() {
         while :; do
             sleep 30
             if erun activity stop-ready --tenant "${ERUN_TENANT}" --environment "${ERUN_ENVIRONMENT}" >/dev/null 2>&1; then
-                namespace=$(runtime_namespace)
-                if [ -n "${namespace}" ]; then
-                    kubectl --context "${ERUN_KUBERNETES_CONTEXT:-in-cluster}" --namespace "${namespace}" scale "deployment/${ERUN_RUNTIME_DEPLOYMENT:-erun-devops}" --replicas=0 >/dev/null 2>&1 || true
-                fi
                 mkdir -p "${HOME}/.erun"
+                graceful_quit_clients >>"${HOME}/.erun/idle-stop.log" 2>&1 || true
                 stop_cloud_host >>"${HOME}/.erun/idle-stop.log" 2>&1 || true
                 exit 0
             fi

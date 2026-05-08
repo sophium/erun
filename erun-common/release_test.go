@@ -16,6 +16,7 @@ func TestResolveReleaseSpecStableRelease(t *testing.T) {
 	projectRoot := setupReleaseProjectGitRepo(t, "main")
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
 		func(string) (string, error) { return "main", nil },
@@ -74,6 +75,7 @@ func TestResolveReleaseSpecSkipsLinuxScriptsWhenUnsupported(t *testing.T) {
 	}
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
 		func(string) (string, error) { return "main", nil },
@@ -93,6 +95,7 @@ func TestResolveReleaseSpecStableReleaseIncludesPackagingUpdatesWhenPresent(t *t
 	projectRoot := setupReleaseProject(t, releaseProjectOptions{WithPackaging: true})
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
 		func(string) (string, error) { return "main", nil },
@@ -142,6 +145,7 @@ func TestResolveReleaseSpecUsesConfiguredBranches(t *testing.T) {
 	})
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
 		func(string) (string, error) { return "integration", nil },
@@ -177,6 +181,7 @@ func TestRunReleaseSpecWritesFilesAndRunsGitStages(t *testing.T) {
 	projectRoot := setupReleaseProjectGitRepo(t, "develop")
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
 		func(string) (string, error) { return "main", nil },
@@ -239,6 +244,7 @@ func TestRunReleaseSpecRewritesStablePackagingMetadataWhenPresent(t *testing.T) 
 	projectRoot := setupReleaseProjectGitRepoWithOptions(t, "main", releaseProjectOptions{WithPackaging: true})
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
 		func(string) (string, error) { return "main", nil },
@@ -338,6 +344,7 @@ func TestRunReleaseSpecSkipsPackagingCommitWhenChecksumsAreAlreadyCurrent(t *tes
 	projectRoot := setupReleaseProjectGitRepoWithOptions(t, "main", releaseProjectOptions{WithPackaging: true})
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
 		func(string) (string, error) { return "main", nil },
@@ -446,6 +453,7 @@ func TestRunReleaseSpecCandidateRunsTagAndPush(t *testing.T) {
 	projectRoot := setupReleaseProjectGitRepo(t, "main")
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
 		func(string) (string, error) { return "develop", nil },
@@ -514,6 +522,7 @@ func TestRunReleaseSpecCandidateSkipsExistingTagAtHead(t *testing.T) {
 	}, "tag", "-a", "v1.4.2-rc.abc1234", "-m", "Release candidate 1.4.2-rc.abc1234")
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
 		func(string) (string, error) { return "develop", nil },
@@ -594,6 +603,7 @@ func TestRunReleaseSpecReturnsErrorWhenExistingTagPointsElsewhere(t *testing.T) 
 	}, "commit", "-m", "advance head")
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
 		func(string) (string, error) { return "develop", nil },
@@ -639,6 +649,7 @@ func TestRunReleaseSpecForceDeletesExistingTagAndRecreatesIt(t *testing.T) {
 	runGitWithEnv(t, projectRoot, nil, "push", "origin", "develop")
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
 		func(string) (string, error) { return "develop", nil },
@@ -678,6 +689,7 @@ func TestRunReleaseSpecReturnsErrorWhenWorktreeIsDirty(t *testing.T) {
 	projectRoot := setupReleaseProjectGitRepo(t, "main")
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
 		func(string) (string, error) { return "main", nil },
@@ -721,6 +733,7 @@ func TestResolveReleaseSpecStableReleaseUsesConfiguredDevelopBranchForSyncAndPus
 	})
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
 		func(string) (string, error) { return "trunk", nil },
@@ -750,6 +763,7 @@ func TestResolveReleaseSpecStableReleaseSkipsDevelopSyncWhenBranchMissing(t *tes
 	projectRoot := setupReleaseProject(t, releaseProjectOptions{})
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
 		func(string) (string, error) { return "main", nil },

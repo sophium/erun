@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os/exec"
 	"strings"
 )
 
@@ -126,7 +125,7 @@ func RunTracedRuntimeContainerCommand(ctx Context, runner RuntimeContainerComman
 }
 
 func RunRuntimeContainerCommand(req ShellLaunchParams, container, script string) (RemoteCommandResult, error) {
-	cmd := exec.Command("kubectl", kubectlContainerExecArgs(req, container, script)...)
+	cmd := Command("kubectl", kubectlContainerExecArgs(req, container, script)...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -139,7 +138,7 @@ func RunRuntimeContainerCommand(req ShellLaunchParams, container, script string)
 }
 
 func runDoctorKubectl(args []string, stdout io.Writer) (string, error) {
-	cmd := exec.Command("kubectl", args...)
+	cmd := Command("kubectl", args...)
 	if stdout != nil {
 		cmd.Stdout = stdout
 	}

@@ -18,7 +18,7 @@ func newReleaseCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCo
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			spec, err := common.ResolveReleaseSpec(findProjectRoot, common.ReleaseParams{Force: force})
+			spec, err := common.ResolveReleaseSpec(ctx, findProjectRoot, common.ReleaseParams{Force: force})
 			if err != nil {
 				return err
 			}

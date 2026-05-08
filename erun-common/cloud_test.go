@@ -10,9 +10,41 @@ import (
 )
 
 type memoryCloudStore struct {
-	config ERunConfig
-	envs   map[string]EnvConfig
-	err    error
+	config  ERunConfig
+	envs    map[string]EnvConfig
+	tenants []TenantConfig
+	err     error
+}
+
+func (s *memoryCloudStore) ListTenantConfigs() ([]TenantConfig, error) {
+	if s.tenants != nil {
+		return s.tenants, nil
+	}
+	seen := map[string]struct{}{}
+	tenants := make([]TenantConfig, 0)
+	for key := range s.envs {
+		name := key
+		if i := strings.IndexByte(key, '/'); i >= 0 {
+			name = key[:i]
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		tenants = append(tenants, TenantConfig{Name: name})
+	}
+	return tenants, nil
+}
+
+func (s *memoryCloudStore) ListEnvConfigs(tenant string) ([]EnvConfig, error) {
+	envs := make([]EnvConfig, 0)
+	prefix := tenant + "/"
+	for key, env := range s.envs {
+		if strings.HasPrefix(key, prefix) {
+			envs = append(envs, env)
+		}
+	}
+	return envs, nil
 }
 
 func (s *memoryCloudStore) LoadERunConfig() (ERunConfig, string, error) {

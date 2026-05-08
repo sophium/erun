@@ -117,7 +117,7 @@ func (d rootDependencies) commands() []*cobra.Command {
 		devopsCmd,
 		d.optionalBuildCommand(),
 		d.optionalPushCommand(),
-		d.optionalDeployCommand(),
+		d.deployCommand(),
 		newMCPCmd(d.resolveOpen, d.runInitForArgs, launchMCPProcess),
 		newAPICmd(d.resolveOpen, d.runInitForArgs, launchAPIProcess),
 		newAppCmd(launchAppProcess),
@@ -199,10 +199,12 @@ func (d rootDependencies) optionalPushCommand() *cobra.Command {
 	return pushCmd
 }
 
-func (d rootDependencies) optionalDeployCommand() *cobra.Command {
-	if !hasOptionalDeployCmd(common.ResolveKubernetesDeployContext) {
-		return nil
-	}
+// deployCommand returns the always-registered deploy subcommand. The desktop
+// Redeploy button invokes "erun deploy --version X" from the app's cwd, which
+// may not contain a kubernetes deploy context. The command must always be
+// present so Cobra recognizes its flags; ResolveCurrentDeploySpecs surfaces a
+// clear error when invoked outside a deploy context.
+func (d rootDependencies) deployCommand() *cobra.Command {
 	return newDeployCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, d.push, d.recoveringDeployHelmChart)
 }
 

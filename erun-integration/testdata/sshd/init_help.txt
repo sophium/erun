@@ -1,0 +1,16 @@
+Enable SSH access for a remote environment
+
+Usage:
+  erun sshd init [TENANT] [ENVIRONMENT] [flags]
+
+Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Enable SSH for a specific environment
+  -h, --help                 help for init
+      --local-port int       Fixed local port to use for kubectl port-forward
+      --public-key string    Public key to authorize for remote SSH access
+      --tenant string        Enable SSH for a specific tenant
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

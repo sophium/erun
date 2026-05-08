@@ -101,14 +101,15 @@ func runContextInitCommand(ctx common.Context, store common.CloudContextStore, p
 }
 
 func newContextStopCmd(store common.CloudContextStore, deps common.CloudContextDependencies) *cobra.Command {
-	return newContextPowerCmd("stop", "Stop a managed ERun cloud context", store, deps, common.StopCloudContext)
+	return newContextPowerCmd("stop", "Stop a managed ERun cloud context", false, store, deps, common.StopCloudContext)
 }
 
 func newContextStartCmd(store common.CloudContextStore, deps common.CloudContextDependencies) *cobra.Command {
-	return newContextPowerCmd("start", "Start a managed ERun cloud context", store, deps, common.StartCloudContext)
+	return newContextPowerCmd("start", "Start a managed ERun cloud context", true, store, deps, common.StartCloudContext)
 }
 
-func newContextPowerCmd(use, short string, store common.CloudContextStore, deps common.CloudContextDependencies, run func(common.Context, common.CloudContextStore, common.CloudContextParams, common.CloudContextDependencies) (common.CloudContextStatus, error)) *cobra.Command {
+func newContextPowerCmd(use, short string, supportsForce bool, store common.CloudContextStore, deps common.CloudContextDependencies, run func(common.Context, common.CloudContextStore, common.CloudContextParams, common.CloudContextDependencies) (common.CloudContextStatus, error)) *cobra.Command {
+	var force bool
 	cmd := &cobra.Command{
 		Use:          use + " CONTEXT",
 		Short:        short,
@@ -116,12 +117,15 @@ func newContextPowerCmd(use, short string, store common.CloudContextStore, deps 
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			status, err := run(ctx, store, common.CloudContextParams{Name: args[0]}, deps)
+			status, err := run(ctx, store, common.CloudContextParams{Name: args[0], Force: force}, deps)
 			if err != nil {
 				return err
 			}
 			return writeCloudContext(ctx, status)
 		},
+	}
+	if supportsForce {
+		cmd.Flags().BoolVar(&force, "force", false, "Override the working-hours start gate")
 	}
 	addDryRunFlag(cmd)
 	return cmd

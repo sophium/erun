@@ -30,6 +30,7 @@ Repository guidance for humans and coding agents working in this repo.
 - `erun-backend` - backend service area containing the API and database migration modules
 - `erun-devops` - runtime Docker images, Linux packaging, and Kubernetes chart assets used by build, open, deploy, and release flows
 - `erun-ui` - desktop app module built with Wails, using a Go backend and a TypeScript/Yarn frontend
+- `erun-integration` - cross-module integration test harness; runs the compiled `erun` binary with `--dry-run` against per-command goldens and gates merged coverage
 
 ## Module Boundaries
 
@@ -153,6 +154,15 @@ Repository guidance for humans and coding agents working in this repo.
 - Do not add new documentation files unless the user explicitly asks for them; add repository instructions to `AGENTS.md` instead.
 - Keep `AGENTS.md` focused on repository workflow and engineering guidance; do not document app behavior, command semantics, or end-user functionality in it.
 - Do not modify `README.md` unless the user explicitly asks for a README change.
+
+## Integration Test Gate (Mandatory)
+
+- Any change touching `erun-cli`, `erun-common`, the runtime entrypoint, or the chart deploy plumbing must keep `make integration-test` passing. The target builds the `erun` binary with coverage instrumentation, runs the suite under `erun-integration/`, merges counters, and fails when total statement coverage of `erun-cli` + `erun-common` drops below the configured threshold (`COVERAGE_THRESHOLD`, default 90%).
+- The integration suite runs the compiled binary as a subprocess against per-command `--dry-run` goldens. The contract for `--dry-run` is therefore a hard public-surface boundary: every action and every decision the command would take must appear as a trace line, regardless of whether downstream input resolution succeeds. Treat a missing trace as a bug, not a documentation gap.
+- When you add or change a command, add or update integration scenarios in `erun-integration/` for every flag combination that influences the resolved plan. Use `UPDATE_GOLDEN=1 go test ./erun-integration/...` to regenerate `testdata/<command>/<scenario>.txt`, then re-run without the flag to lock the snapshot in.
+- Do not skip integration scenarios to make the suite green. If a regression is discovered, leave the failing scenario in place so the gate fails until the regression is fixed; that is the suite working as designed.
+- Coverage is gated on `erun-cli` + `erun-common` only. Other modules (`erun-mcp`, `erun-backend`, `erun-ui`) are validated by their own per-module test suites and do not count toward this gate. To extend coverage scope, edit `erun-integration/internal/erun.CoverPkgs` and the script's threshold logic together.
+- See `erun-integration/AGENTS.md` for harness layout, scenario shape, fixture patterns, normalization rules, and stub-injection guidance.
 
 ## Release Rules
 

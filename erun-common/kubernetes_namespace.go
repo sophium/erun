@@ -2,7 +2,6 @@ package eruncommon
 
 import (
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
@@ -38,7 +37,7 @@ func EnsureKubernetesNamespace(contextName, namespace string) error {
 	}
 	args = append(args, "create", "namespace", namespace)
 
-	output, err := exec.Command("kubectl", args...).CombinedOutput()
+	output, err := Command("kubectl", args...).CombinedOutput()
 	if err != nil {
 		message := strings.TrimSpace(string(output))
 		if kubernetesNamespaceAlreadyExists(message) {
@@ -81,7 +80,7 @@ func DeleteKubernetesNamespace(contextName, namespace string) error {
 	}
 	args = append(args, "delete", "namespace", namespace, "--ignore-not-found")
 
-	output, err := exec.Command("kubectl", args...).CombinedOutput()
+	output, err := Command("kubectl", args...).CombinedOutput()
 	if err != nil {
 		message := strings.TrimSpace(string(output))
 		if message == "" {
@@ -115,7 +114,7 @@ func kubernetesNamespaceExists(contextName, namespace string) (bool, error) {
 	}
 	args = append(args, "get", "namespace", namespace, "-o", "name")
 
-	output, err := exec.Command("kubectl", args...).CombinedOutput()
+	output, err := Command("kubectl", args...).CombinedOutput()
 	if err == nil {
 		return true, nil
 	}

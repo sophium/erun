@@ -472,9 +472,6 @@ func optionalTestPushCmd(parts testRootCmdParts) *cobra.Command {
 }
 
 func optionalTestDeployCmd(parts testRootCmdParts) *cobra.Command {
-	if !hasOptionalDeployCmd(parts.resolveKubernetesDeployContext) {
-		return nil
-	}
 	return newDeployCmd(parts.store, parts.findProjectRoot, parts.resolveDockerBuildContext, parts.resolveKubernetesDeployContext, parts.now, parts.buildDockerImage, parts.push, parts.recoveringDeployHelmChart)
 }
 
