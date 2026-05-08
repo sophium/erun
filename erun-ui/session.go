@@ -334,6 +334,25 @@ func resolveAIToolCommand(configured string) string {
 	return defaultAITool
 }
 
+func formatLaunchCommand(params startTerminalSessionParams) string {
+	parts := make([]string, 0, len(params.Args)+1)
+	parts = append(parts, params.Executable)
+	parts = append(parts, params.Args...)
+	return strings.Join(parts, " ")
+}
+
+func formatLocalCommandLog(command, label string) string {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return ""
+	}
+	suffix := ""
+	if label = strings.TrimSpace(label); label != "" {
+		suffix = "  \x1b[2;3m(running in " + label + ")\x1b[0m"
+	}
+	return "\x1b[2m$ " + command + "\x1b[0m" + suffix + "\r\n"
+}
+
 func localSessionBanner(selection uiSelection) []byte {
 	tenant := strings.TrimSpace(selection.Tenant)
 	environment := strings.TrimSpace(selection.Environment)

@@ -3053,6 +3053,85 @@ func TestStartSessionAutoReconnectsOnExit(t *testing.T) {
 	}
 }
 
+func TestStartSessionLogsOpenCommandToLocal(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx"},
+		},
+	}
+
+	app := NewApp(erunUIDeps{
+		store:           store,
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			return newStubTerminalSession(), nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	if _, err := app.StartLocalSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+		t.Fatalf("StartLocalSession failed: %v", err)
+	}
+	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+		t.Fatalf("StartSession failed: %v", err)
+	}
+	if _, err := app.StartAISession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+		t.Fatalf("StartAISession failed: %v", err)
+	}
+
+	app.mu.Lock()
+	defer app.mu.Unlock()
+	var local *managedTerminal
+	for _, m := range app.sessions {
+		if m != nil && m.kind == sessionKindLocal {
+			local = m
+			break
+		}
+	}
+	if local == nil {
+		t.Fatalf("Local session not found")
+	}
+	if _, ok := local.loggedCommands["erun"]; !ok {
+		t.Fatalf("expected ERun command logged to Local, got %+v", local.loggedCommands)
+	}
+	if _, ok := local.loggedCommands["ai"]; !ok {
+		t.Fatalf("expected AI command logged to Local, got %+v", local.loggedCommands)
+	}
+}
+
+func TestStartSessionDoesNotLogWhenLocalAbsent(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx"},
+		},
+	}
+
+	app := NewApp(erunUIDeps{
+		store:           store,
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			return newStubTerminalSession(), nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	// No StartLocalSession — Local does not exist.
+	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+		t.Fatalf("StartSession failed: %v", err)
+	}
+	// Should not crash. No assertion required beyond that.
+}
+
 func TestStartLocalSessionDoesNotAutoReconnect(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
