@@ -28,25 +28,47 @@ var defaultDeployComponentOrder = []string{
 }
 
 // filterDeployContextsByComponents drops charts whose ComponentName is in the
-// opt-in set unless that name appears in components. Unknown component names
-// (not in the opt-in set) are rejected with an error so typos surface early
-// instead of silently deploying nothing extra.
-func filterDeployContextsByComponents(contexts []KubernetesDeployContext, components []string) ([]KubernetesDeployContext, error) {
+// opt-in set unless that name is explicitly included — either by the
+// --components flag or by being named in the project's k8s.deployments plan.
+// Listing a chart in the plan is an implicit opt-in: a user who configures
+// `environments.<env>.k8s.deployments: [..., erun-backend-api]` should get
+// that chart deployed without also having to pass --components on every run.
+// Unknown component names (not in the opt-in set) are rejected with an error
+// so typos surface early instead of silently deploying nothing extra.
+func filterDeployContextsByComponents(contexts []KubernetesDeployContext, components []string, plan ProjectK8sConfig) ([]KubernetesDeployContext, error) {
 	requested, err := normalizeRequestedComponents(components)
 	if err != nil {
 		return nil, err
 	}
+	planned := planComponentNames(plan)
 	out := make([]KubernetesDeployContext, 0, len(contexts))
 	for _, deployContext := range contexts {
 		name := strings.TrimSpace(deployContext.ComponentName)
 		if isOptInDeployComponent(name) {
-			if _, ok := requested[name]; !ok {
+			if _, byFlag := requested[name]; byFlag {
+				// included via --components
+			} else if _, byPlan := planned[name]; byPlan {
+				// included via project k8s.deployments
+			} else {
 				continue
 			}
 		}
 		out = append(out, deployContext)
 	}
 	return out, nil
+}
+
+func planComponentNames(plan ProjectK8sConfig) map[string]struct{} {
+	if len(plan.Deployments) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{})
+	for _, step := range plan.Deployments {
+		for _, name := range step.Components {
+			out[strings.TrimSpace(name)] = struct{}{}
+		}
+	}
+	return out
 }
 
 func isOptInDeployComponent(name string) bool {

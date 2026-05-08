@@ -355,11 +355,11 @@ func ResolveCurrentDeploySpecs(store DeployStore, findProjectRoot ProjectFinderF
 	if err != nil {
 		return nil, err
 	}
-	deployContexts, err = filterDeployContextsByComponents(deployContexts, target.Components)
+	projectK8s, err := loadProjectK8sPlanForRepo(resolvedTarget.RepoPath, resolvedTarget.Environment)
 	if err != nil {
 		return nil, err
 	}
-	projectK8s, err := loadProjectK8sPlanForRepo(resolvedTarget.RepoPath, resolvedTarget.Environment)
+	deployContexts, err = filterDeployContextsByComponents(deployContexts, target.Components, projectK8s)
 	if err != nil {
 		return nil, err
 	}

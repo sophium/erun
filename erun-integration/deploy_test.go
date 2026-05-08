@@ -188,6 +188,29 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/project_k8s_plan_groups_parallel_step", normalize.Apply(result.Combined))
 	})
 
+	t.Run("project_k8s_plan_includes_listed_charts_without_components_flag", func(t *testing.T) {
+		// Listing a chart under environments.<env>.k8s.deployments must
+		// imply --components for it: a user who has configured the plan
+		// should not also have to pass --components=erun-backend-... on
+		// every deploy. Without this, the opt-in filter would silently
+		// strip the backend charts even though the plan named them.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "environments:\n  dev:\n    k8s:\n      deployments:\n        - [team-devops, erun-backend-postgres]\n        - erun-backend-db\n        - erun-backend-api\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if !strings.Contains(result.Combined, "deploy: resolved 4 spec(s)") {
+			t.Fatalf("expected the plan to imply inclusion of all four charts, got:\n%s", result.Combined)
+		}
+		for _, name := range []string{"erun-backend-postgres", "erun-backend-db", "erun-backend-api", "team-devops"} {
+			if !strings.Contains(result.Combined, name) {
+				t.Fatalf("expected helm release for %q in dry-run output, got:\n%s", name, result.Combined)
+			}
+		}
+		golden.Equal(t, "deploy/project_k8s_plan_includes_listed_charts_without_components_flag", normalize.Apply(result.Combined))
+	})
+
 	t.Run("project_k8s_plan_rejects_invalid_step_node", func(t *testing.T) {
 		// A k8s.deployments step must be either a component name or a
 		// list of component names. Anything else (a mapping, a number, …)
