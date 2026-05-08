@@ -22,4 +22,20 @@ Tenants:
   team [default, effective]
     default environment: dev
     environments:
-      - dev [default, effective] context=test-context snapshot=off repo=<TMP> ports=17000-17099 mcp-port=17000 api-port=17033 api-url=http://<VERSION>.1:17033 ssh-port=17022
+      - dev [default, effective] context=test-context
+          remote: off
+          snapshot: off
+          repo: <TMP>
+          ports: 17000-17099
+          mcp-port: 17000
+          api-port: 17033
+          api-url: http://<VERSION>.1:17033
+          ssh-port: 17022
+          container-registry: registry.example/test
+          runtime-version: <VERSION>
+          runtime-pod: none
+          managed-cloud: off
+          ai-tool: none
+          claude: none
+          idle: none
+          sshd: off

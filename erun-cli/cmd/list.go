@@ -185,7 +185,19 @@ func writeTenantEntry(ctx common.Context, tenant common.ListTenantResult) error 
 		return err
 	}
 	for _, env := range tenant.Environments {
-		if _, err := fmt.Fprintln(ctx.Stdout, environmentLine(env)); err != nil {
+		if err := writeEnvironmentEntry(ctx, env); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeEnvironmentEntry(ctx common.Context, env common.ListEnvironmentResult) error {
+	if _, err := fmt.Fprintln(ctx.Stdout, environmentHeaderLine(env)); err != nil {
+		return err
+	}
+	for _, line := range environmentDetailLines(env) {
+		if _, err := fmt.Fprintln(ctx.Stdout, line); err != nil {
 			return err
 		}
 	}
@@ -200,7 +212,7 @@ func tenantHeaderLine(tenant common.ListTenantResult) string {
 	return header
 }
 
-func environmentLine(env common.ListEnvironmentResult) string {
+func environmentHeaderLine(env common.ListEnvironmentResult) string {
 	envLine := "      - " + env.Name
 	if markers := statusMarkers(env.IsDefault, env.IsEffective); len(markers) > 0 {
 		envLine += " [" + strings.Join(markers, ", ") + "]"
@@ -209,11 +221,97 @@ func environmentLine(env common.ListEnvironmentResult) string {
 	if strings.TrimSpace(env.CloudProviderAlias) != "" {
 		envLine += " cloud=" + quotedValueOrNone(env.CloudProviderAlias)
 	}
-	envLine += environmentBaseFields(env)
-	if env.SSH.Enabled {
-		envLine += environmentSSHFields(env.SSH)
-	}
 	return envLine
+}
+
+func environmentDetailLines(env common.ListEnvironmentResult) []string {
+	const indent = "          "
+	lines := []string{
+		indent + "remote: " + enabledDisabledLabel(env.Remote),
+		indent + "snapshot: " + enabledDisabledLabel(env.Snapshot),
+		indent + "repo: " + valueOrNone(env.RepoPath),
+		indent + "ports: " + portRangeLabel(env.LocalPorts),
+		indent + "mcp-port: " + fmt.Sprintf("%d", env.LocalPorts.MCP),
+		indent + "api-port: " + fmt.Sprintf("%d", env.LocalPorts.API),
+		indent + "api-url: " + valueOrNone(env.APIURL),
+		indent + "ssh-port: " + fmt.Sprintf("%d", env.LocalPorts.SSH),
+		indent + "container-registry: " + valueOrNone(env.ContainerRegistry),
+		indent + "runtime-version: " + valueOrNone(env.RuntimeVersion),
+		indent + "runtime-pod: " + runtimePodLabel(env.RuntimePod),
+		indent + "managed-cloud: " + enabledDisabledLabel(env.ManagedCloud),
+		indent + "ai-tool: " + valueOrNone(env.AITool),
+		indent + "claude: " + claudeLabel(env.Claude),
+		indent + "idle: " + idleLabel(env.Idle),
+	}
+	if env.SSH.Enabled {
+		lines = append(lines, environmentSSHDetailLines(env.SSH, indent)...)
+	} else {
+		lines = append(lines, indent+"sshd: off")
+	}
+	return lines
+}
+
+func environmentSSHDetailLines(ssh common.ListSSHResult, indent string) []string {
+	return []string{
+		indent + "sshd: on",
+		indent + "ssh-host: " + valueOrNone(ssh.HostAlias),
+		indent + "ssh-user: " + valueOrNone(ssh.User),
+		indent + "ssh-local-port: " + fmt.Sprintf("%d", ssh.LocalPort),
+		indent + "ssh-workspace: " + valueOrNone(ssh.WorkspacePath),
+		indent + "ssh-public-key-path: " + valueOrNone(ssh.PublicKeyPath),
+		indent + "ssh-workspace-sync: " + enabledDisabledLabel(ssh.WorkspaceSyncEnabled),
+		indent + "ssh-workspace-sync-local-path: " + valueOrNone(ssh.WorkspaceSyncLocalPath),
+	}
+}
+
+func runtimePodLabel(pod common.RuntimePodResources) string {
+	cpu := strings.TrimSpace(pod.CPU)
+	memory := strings.TrimSpace(pod.Memory)
+	if cpu == "" && memory == "" {
+		return "none"
+	}
+	return fmt.Sprintf("cpu=%s memory=%s", valueOrNone(cpu), valueOrNone(memory))
+}
+
+func claudeLabel(c common.EnvironmentClaudeConfig) string {
+	if c.IsZero() {
+		return "none"
+	}
+	parts := make([]string, 0, 4)
+	parts = append(parts, "use-mantle="+optionalBoolLabel(c.UseMantle))
+	parts = append(parts, "use-bedrock="+optionalBoolLabel(c.UseBedrock))
+	models := "none"
+	if len(c.Models) > 0 {
+		models = strings.Join(c.Models, ",")
+	}
+	parts = append(parts, "models="+models)
+	tokens := "unset"
+	if c.MaxOutputTokens != nil {
+		tokens = fmt.Sprintf("%d", *c.MaxOutputTokens)
+	}
+	parts = append(parts, "max-output-tokens="+tokens)
+	return strings.Join(parts, " ")
+}
+
+func idleLabel(idle common.EnvironmentIdleConfig) string {
+	timeout := strings.TrimSpace(idle.Timeout)
+	hours := strings.TrimSpace(idle.WorkingHours)
+	tz := strings.TrimSpace(idle.Timezone)
+	if timeout == "" && hours == "" && tz == "" && idle.IdleTrafficBytes == 0 {
+		return "none"
+	}
+	return fmt.Sprintf("timeout=%s working-hours=%s timezone=%s idle-traffic-bytes=%d",
+		valueOrNone(timeout), valueOrNone(hours), valueOrNone(tz), idle.IdleTrafficBytes)
+}
+
+func optionalBoolLabel(b *bool) string {
+	if b == nil {
+		return "unset"
+	}
+	if *b {
+		return "true"
+	}
+	return "false"
 }
 
 func statusMarkers(isDefault, isEffective bool) []string {
@@ -225,26 +323,6 @@ func statusMarkers(isDefault, isEffective bool) []string {
 		markers = append(markers, "effective")
 	}
 	return markers
-}
-
-func environmentBaseFields(env common.ListEnvironmentResult) string {
-	line := " snapshot=" + enabledDisabledLabel(env.Snapshot)
-	line += " repo=" + quotedValueOrNone(env.RepoPath)
-	line += " ports=" + portRangeLabel(env.LocalPorts)
-	line += " mcp-port=" + fmt.Sprintf("%d", env.LocalPorts.MCP)
-	line += " api-port=" + fmt.Sprintf("%d", env.LocalPorts.API)
-	line += " api-url=" + quotedValueOrNone(env.APIURL)
-	line += " ssh-port=" + fmt.Sprintf("%d", env.LocalPorts.SSH)
-	return line
-}
-
-func environmentSSHFields(ssh common.ListSSHResult) string {
-	line := " ssh=on"
-	line += " host=" + quotedValueOrNone(ssh.HostAlias)
-	line += " user=" + quotedValueOrNone(ssh.User)
-	line += " local-port=" + fmt.Sprintf("%d", ssh.LocalPort)
-	line += " workspace=" + quotedValueOrNone(ssh.WorkspacePath)
-	return line
 }
 
 func writeCloudProviders(ctx common.Context, providers []common.CloudProviderStatus) error {

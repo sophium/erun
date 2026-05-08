@@ -22,9 +22,57 @@ Tenants:
   tenant-a [default, effective]
     default environment: local
     environments:
-      - local [default, effective] context=cluster-local snapshot=off repo=<TMP> ports=17000-17099 mcp-port=17000 api-port=17033 api-url=http://<VERSION>.1:17033 ssh-port=17022
-      - prod context=cluster-prod snapshot=off repo=<TMP> ports=17100-17199 mcp-port=17100 api-port=17133 api-url=http://<VERSION>.1:17133 ssh-port=17122
+      - local [default, effective] context=cluster-local
+          remote: off
+          snapshot: off
+          repo: <TMP>
+          ports: 17000-17099
+          mcp-port: 17000
+          api-port: 17033
+          api-url: http://<VERSION>.1:17033
+          ssh-port: 17022
+          container-registry: none
+          runtime-version: none
+          runtime-pod: none
+          managed-cloud: off
+          ai-tool: none
+          claude: none
+          idle: none
+          sshd: off
+      - prod context=cluster-prod
+          remote: off
+          snapshot: off
+          repo: <TMP>
+          ports: 17100-17199
+          mcp-port: 17100
+          api-port: 17133
+          api-url: http://<VERSION>.1:17133
+          ssh-port: 17122
+          container-registry: none
+          runtime-version: none
+          runtime-pod: none
+          managed-cloud: off
+          ai-tool: none
+          claude: none
+          idle: none
+          sshd: off
   tenant-b
     default environment: dev
     environments:
-      - dev [default] context=cluster-b snapshot=off repo=<TMP> ports=17200-17299 mcp-port=17200 api-port=17233 api-url=http://<VERSION>.1:17233 ssh-port=17222
+      - dev [default] context=cluster-b
+          remote: off
+          snapshot: off
+          repo: <TMP>
+          ports: 17200-17299
+          mcp-port: 17200
+          api-port: 17233
+          api-url: http://<VERSION>.1:17233
+          ssh-port: 17222
+          container-registry: none
+          runtime-version: none
+          runtime-pod: none
+          managed-cloud: off
+          ai-tool: none
+          claude: none
+          idle: none
+          sshd: off

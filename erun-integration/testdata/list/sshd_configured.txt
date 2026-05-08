@@ -26,4 +26,27 @@ Tenants:
   tenant-a [default, effective]
     default environment: dev
     environments:
-      - dev [default, effective] context=cluster-dev snapshot=off repo=<TMP> ports=17000-17099 mcp-port=17000 api-port=17033 api-url=http://<VERSION>.1:17033 ssh-port=17022 ssh=on host=erun-tenant-a-dev user=erun local-port=17022 workspace=<HOME>/git/tenant-a
+      - dev [default, effective] context=cluster-dev
+          remote: on
+          snapshot: off
+          repo: <TMP>
+          ports: 17000-17099
+          mcp-port: 17000
+          api-port: 17033
+          api-url: http://<VERSION>.1:17033
+          ssh-port: 17022
+          container-registry: none
+          runtime-version: none
+          runtime-pod: none
+          managed-cloud: off
+          ai-tool: none
+          claude: none
+          idle: none
+          sshd: on
+          ssh-host: erun-tenant-a-dev
+          ssh-user: erun
+          ssh-local-port: 17022
+          ssh-workspace: <HOME>/git/tenant-a
+          ssh-public-key-path: <TMP>
+          ssh-workspace-sync: off
+          ssh-workspace-sync-local-path: none

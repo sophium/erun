@@ -73,6 +73,27 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_outside_devops_with_tenant_env", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_remote_env_uses_embedded_chart", func(t *testing.T) {
+		// Regression: a remote env (Remote=true) has its repopath on the
+		// remote host's filesystem (e.g. proxmox1: /home/erun/git/erun) and
+		// has no local checkout at all. Deploy from any cwd must still
+		// work: the embedded default-devops chart is materialized to a
+		// temp dir and used for the helm install. Pre-fix, deploy stat'd
+		// the remote repopath locally and failed with
+		// "open <remote-path>: no such file or directory".
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		// Note: no SeedDevopsRepo — there is no local checkout anywhere.
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if strings.Contains(result.Combined, "no such file or directory") {
+			t.Fatalf("regression: deploy stat'd remote repopath locally:\n%s", result.Combined)
+		}
+		if strings.Contains(result.Combined, "helm chart not found") {
+			t.Fatalf("regression: deploy did not fall back to embedded chart for remote env:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_uses_embedded_chart", normalize.Apply(result.Combined))
+	})
+
 	t.Run("snapshot_conflict_errors", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
