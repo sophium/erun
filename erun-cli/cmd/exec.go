@@ -24,6 +24,7 @@ func newExecDiffCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitC
 			return runExecDiffCommand(commandContext(cmd), findProjectRoot, runGit)
 		},
 	}
+	addDryRunFlag(cmd)
 	return cmd
 }
 
@@ -35,10 +36,47 @@ func newExecRawCmd(findProjectRoot common.ProjectFinderFunc, runRaw common.RawCo
 		SilenceUsage:       true,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runExecRawCommand(commandContext(cmd), findProjectRoot, runRaw, args)
+			rawArgs, dryRun := extractDryRunFlag(args)
+			ctx := commandContext(cmd)
+			if dryRun {
+				ctx.DryRun = true
+			}
+			return runExecRawCommand(ctx, findProjectRoot, runRaw, rawArgs)
 		},
 	}
+	addDryRunFlag(cmd)
 	return cmd
+}
+
+// extractDryRunFlag pulls erun's own --dry-run out of the pass-through args
+// for `exec raw`. Because the command sets DisableFlagParsing, cobra hands
+// the entire arg list through verbatim; without this the user has no way to
+// drive the wrapped command in dry-run mode and the integration suite
+// cannot exercise the trace path. A literal `--` ends erun-flag scanning so
+// the wrapped command can still receive its own `--dry-run` argument.
+func extractDryRunFlag(args []string) ([]string, bool) {
+	cleaned := make([]string, 0, len(args))
+	dryRun := false
+	passthrough := false
+	for _, arg := range args {
+		if passthrough {
+			cleaned = append(cleaned, arg)
+			continue
+		}
+		if arg == "--" {
+			passthrough = true
+			continue
+		}
+		switch arg {
+		case "--dry-run", "--dry-run=true":
+			dryRun = true
+		case "--dry-run=false":
+			dryRun = false
+		default:
+			cleaned = append(cleaned, arg)
+		}
+	}
+	return cleaned, dryRun
 }
 
 func runExecDiffCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc) error {
@@ -50,6 +88,9 @@ func runExecDiffCommand(ctx common.Context, findProjectRoot common.ProjectFinder
 		return err
 	}
 	ctx.TraceCommand(projectRoot, "git", "diff", "--no-color", "--no-ext-diff")
+	if ctx.DryRun {
+		return nil
+	}
 	result, err := common.ResolveGitDiff(projectRoot, runGit)
 	if err != nil {
 		return err

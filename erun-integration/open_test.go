@@ -47,4 +47,17 @@ func TestOpen(t *testing.T) {
 		result := erun.Run(t, []string{"-vv", "open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "open/verbose_no_shell_dry_run", normalize.Apply(result.Combined))
 	})
+
+	t.Run("remote_dry_run_traces_port_forwards", func(t *testing.T) {
+		// Exercises cmd/api_port_forward.go and cmd/mcp_port_forward.go:
+		// for a remote environment, --dry-run must trace the kubectl
+		// port-forward commands that would be started for both API and MCP
+		// (and the SSH host alias when SSHD is configured), with the
+		// resolved kubernetes context, namespace, deployment target, and
+		// local-port mapping derived from the tenant index.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "open/remote_dry_run_traces_port_forwards", normalize.Apply(result.Combined))
+	})
 }

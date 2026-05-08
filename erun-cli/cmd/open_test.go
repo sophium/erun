@@ -1,5 +1,32 @@
 package cmd
 
+// The open command's --dry-run trace, including remote-environment
+// orchestration (deployment-check fallback, helm-deploy plan, kubectl
+// MCP/API/SSH port-forwards, no-shell setup commands), is covered by the
+// integration suite (erun-integration/open_test.go). The cases below stay
+// as unit tests because they exercise:
+//
+//   - Real-execution dispatch --dry-run gates off: actual shell launch,
+//     IDE launch (VSCode/IntelliJ), runtime helm deploy, MCP/API/SSH
+//     activator invocations.
+//   - Internal orchestration ordering (MCP forwarded before shell, API
+//     forwarded after MCP, SSHD activated when configured) tested through
+//     mock activators — the public dry-run trace shows the resolved
+//     commands but not the exact call ordering between concurrent
+//     activators.
+//   - IDE rejection rules (--vscode/--intellij require sshd-enabled,
+//     mutual exclusion) — covered for the dry-run case by the IDE
+//     integration scenarios; the cases here also assert the cmd-level
+//     error formatting.
+//   - Platform-specific shell setup (PowerShell on Windows, bash/zsh
+//     elsewhere) and no-shell hint output that integration on Linux
+//     cannot reproduce.
+//   - Snapshot-preference persistence and version-override deploy paths
+//     that --dry-run cannot easily isolate without a richer fixture set.
+//
+// When new open behavior is added, prefer extending the integration
+// scenarios first.
+
 import (
 	"bytes"
 	"fmt"

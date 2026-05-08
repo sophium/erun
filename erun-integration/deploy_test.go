@@ -55,6 +55,20 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("snapshot_conflict_errors", func(t *testing.T) {
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--snapshot", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for conflicting snapshot flags, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "cannot use --snapshot and --no-snapshot with conflicting values") {
+			t.Errorf("expected conflict error message, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/snapshot_conflict_errors", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_via_stubs", func(t *testing.T) {
 		// Drive the non-dry-run helm/kubectl runners via stub binaries so
 		// the deploy execution path (deploy.go's run* helpers, post-helm

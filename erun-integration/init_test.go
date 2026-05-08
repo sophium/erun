@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -106,6 +107,20 @@ func TestInit(t *testing.T) {
 		}
 		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "init/yes_flag_replaces_confirms", normalize.Apply(result.Combined))
+	})
+
+	t.Run("remote_requires_environment", func(t *testing.T) {
+		// Exercises init.go --remote validation: passing --remote without
+		// an environment must fail with the standard error message
+		// before any side effect runs.
+		setup := env.New(t)
+		result := erun.Run(t, []string{"init", "--remote", "--tenant", "frs", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "environment is required with --remote") {
+			t.Errorf("expected remote-environment-required error, got:\n%s", result.Combined)
+		}
 	})
 
 	t.Run("real_run_via_stubs", func(t *testing.T) {

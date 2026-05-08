@@ -1,5 +1,29 @@
 package cmd
 
+// The build command's --dry-run trace is covered by the integration suite
+// (erun-integration/build_test.go). The cases below stay as unit tests
+// because they exercise:
+//
+//   - Cobra shorthand registration that branches on cwd (project root with
+//     devops chart, devops module root, docker component dir, missing
+//     dockerfile) — each context produces a different command tree, and
+//     integration help scenarios cannot cover every shape without
+//     multiplying fixture work.
+//   - Real-execution behavior --dry-run gates off: docker build/push
+//     dispatch, registry auth-error retry with login prompt, push command
+//     resolution, build-script invocation. Driving any of these through a
+//     stub `docker` or `helm` binary is a policy violation.
+//   - Pure resolver logic (resolveDockerBuildTag preferring current dir
+//     version, version override behavior, environment registry resolution)
+//     that has no observable side effect beyond a pure function output —
+//     the dry-run trace captures the resulting docker tag, but the
+//     interesting branches are easier to enumerate as table-driven unit
+//     tests.
+//
+// When new build/push behavior is added, prefer extending the integration
+// scenarios in erun-integration/build_test.go first; only fall back here
+// for the cwd-shorthand registration matrix or the auth-retry path.
+
 import (
 	"bytes"
 	"errors"

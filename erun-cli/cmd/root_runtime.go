@@ -102,6 +102,11 @@ func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinde
 			}
 			return err
 		}
+		ctx.TraceCommand("", "ensure-agent-instructions")
+		ctx.TraceCommand("", "ensure-claude-settings")
+		if ctx.DryRun {
+			return nil
+		}
 		if ensureErr := internal.EnsureGlobalAgentInstructions(); ensureErr != nil {
 			ctx.Logger.Debug("could not ensure global agent instructions: " + ensureErr.Error())
 		}
@@ -279,4 +284,3 @@ func projectRootForHelp(findProjectRoot common.ProjectFinderFunc) (string, error
 	}
 	return filepath.Clean(strings.TrimSpace(projectRoot)), nil
 }
-

@@ -35,6 +35,12 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 		LocalPort:         localPort,
 	}
 
+	if ctx.DryRun {
+		args := kubectlAPIPortForwardArgs(result, localPort)
+		ctx.TraceCommand("", "kubectl", args...)
+		return localPort, nil
+	}
+
 	if stateMatchesMCPTarget(state, expectedState) && canReachLocalAPIEndpoint(localPort) {
 		return localPort, nil
 	}
@@ -45,9 +51,6 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 
 	args := kubectlAPIPortForwardArgs(result, localPort)
 	ctx.TraceCommand("", "kubectl", args...)
-	if ctx.DryRun {
-		return localPort, nil
-	}
 
 	return startAPIPortForward(statePath, expectedState, args, localPort)
 }

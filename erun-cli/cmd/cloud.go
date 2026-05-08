@@ -229,6 +229,11 @@ func newCloudLoginCmd(store common.CloudStore, promptRunner PromptRunner, select
 func runCloudLoginCommand(ctx common.Context, store common.CloudStore, promptRunner PromptRunner, selectRunner SelectRunner, params common.CloudLoginParams, deps common.CloudDependencies) error {
 	alias := strings.TrimSpace(params.Alias)
 	if alias == "" {
+		if ctx.DryRun {
+			ctx.Trace("cloud login: dry-run requires --alias to be specified explicitly")
+			_, err := fmt.Fprintln(ctx.Stdout, "Dry run: cloud login planned.")
+			return err
+		}
 		selected, err := selectCloudAliasPrompt(store, selectRunner)
 		if err != nil {
 			return err
@@ -237,6 +242,12 @@ func runCloudLoginCommand(ctx common.Context, store common.CloudStore, promptRun
 	}
 	provider, err := common.ResolveCloudProvider(store, alias)
 	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		ctx.Trace("check cloud provider token status")
+		ctx.TraceCommand("", "aws", "sso", "login", "--profile", provider.Profile)
+		_, err := fmt.Fprintf(ctx.Stdout, "Dry run: cloud login planned for %s.\n", provider.Alias)
 		return err
 	}
 	status := common.CloudProviderTokenStatus(provider, deps)

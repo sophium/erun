@@ -1,0 +1,30 @@
+Configuration:
+  directory: <TMP>
+Defaults:
+  tenant: tenant-a
+  environment: local
+Current Directory:
+  path: <TMP>
+  repo: tenant-b
+  configured tenant: tenant-b
+  effective target: tenant-b/dev
+  kubernetes context: cluster-b
+  snapshot: off
+  assigned local port range: 17200-17299
+  assigned mcp local port: 17200 (when MCP is running or forwarded)
+  assigned api local port: 17233 (when API is running or forwarded)
+  api url: http://<VERSION>.1:17233
+  assigned ssh local port: 17222 (when SSH port-forward is active)
+  repo path: <TMP>
+Cloud Providers:
+  none
+Tenants:
+  tenant-a [default]
+    default environment: local
+    environments:
+      - local [default] context=cluster-local snapshot=off repo=<TMP> ports=17000-17099 mcp-port=17000 api-port=17033 api-url=http://<VERSION>.1:17033 ssh-port=17022
+      - prod context=cluster-prod snapshot=off repo=<TMP> ports=17100-17199 mcp-port=17100 api-port=17133 api-url=http://<VERSION>.1:17133 ssh-port=17122
+  tenant-b [effective]
+    default environment: dev
+    environments:
+      - dev [default, effective] context=cluster-b snapshot=off repo=<TMP> ports=17200-17299 mcp-port=17200 api-port=17233 api-url=http://<VERSION>.1:17233 ssh-port=17222

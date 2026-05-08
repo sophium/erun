@@ -12,19 +12,6 @@ import (
 	"time"
 )
 
-func TestResolveDockerBuildContextDirForProjectUsesProjectRootForModuleDockerDirs(t *testing.T) {
-	projectRoot := t.TempDir()
-	buildDir := filepath.Join(projectRoot, "erun-devops", "docker", "erun-devops")
-	if err := os.MkdirAll(buildDir, 0o755); err != nil {
-		t.Fatalf("mkdir build dir: %v", err)
-	}
-
-	contextDir := ResolveDockerBuildContextDirForProject(buildDir, projectRoot)
-	if contextDir != projectRoot {
-		t.Fatalf("unexpected context dir: %q", contextDir)
-	}
-}
-
 func TestResolveDockerBuildContextDetectsDockerfile(t *testing.T) {
 	workdir := t.TempDir()
 	dockerfilePath := filepath.Join(workdir, "Dockerfile")
@@ -70,85 +57,6 @@ func TestDockerRegistryFromImageTag(t *testing.T) {
 		if got := dockerRegistryFromImageTag(tag); got != want {
 			t.Fatalf("dockerRegistryFromImageTag(%q) = %q, want %q", tag, got, want)
 		}
-	}
-}
-
-func TestDockerBuildArgsIncludeImageVersionAsBuildArg(t *testing.T) {
-	args := dockerBuildArgs(DockerBuildSpec{
-		DockerfilePath: "/tmp/Dockerfile",
-		Image: DockerImageReference{
-			Tag: "erunpaas/erun-devops:1.0.0-snapshot-20260406123456",
-		},
-	}, "")
-	got := strings.Join(args, " ")
-	for _, want := range []string{
-		"build",
-		"-t erunpaas/erun-devops:1.0.0-snapshot-20260406123456",
-		"--build-arg ERUN_VERSION=1.0.0-snapshot-20260406123456",
-		"-f /tmp/Dockerfile .",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("expected docker build args to contain %q, got %q", want, got)
-		}
-	}
-}
-
-func TestDockerBuildArgsAddPlatformAndPlatformSuffixedTagForMultiPlatform(t *testing.T) {
-	args := dockerBuildArgs(DockerBuildSpec{
-		DockerfilePath: "/tmp/Dockerfile",
-		Image: DockerImageReference{
-			Tag: "erunpaas/erun-devops:1.0.0",
-		},
-		Platforms: []string{"linux/amd64", "linux/arm64"},
-		Push:      true,
-	}, "linux/amd64")
-	got := strings.Join(args, " ")
-	for _, want := range []string{
-		"build",
-		"--platform linux/amd64",
-		"--provenance=false",
-		"-t erunpaas/erun-devops:1.0.0-amd64",
-		"--build-arg ERUN_VERSION=1.0.0",
-		"-f /tmp/Dockerfile .",
-	} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("expected docker build args to contain %q, got %q", want, got)
-		}
-	}
-	if strings.Contains(got, "--push") {
-		t.Fatalf("multi-platform per-platform build must not pass --push, got %q", got)
-	}
-	if strings.Contains(got, "buildx") {
-		t.Fatalf("multi-platform per-platform build must not use buildx, got %q", got)
-	}
-}
-
-func TestDockerBuildTraceCommandsExpandToPerPlatformBuildPushAndManifestForMultiPlatform(t *testing.T) {
-	buildInput := DockerBuildSpec{
-		ContextDir:     "/tmp/project",
-		DockerfilePath: "/tmp/project/Dockerfile",
-		Image: DockerImageReference{
-			Tag: "erunpaas/erun-devops:1.0.0",
-		},
-		Platforms: []string{"linux/amd64", "linux/arm64"},
-		Push:      true,
-	}
-
-	commands := buildInput.traceCommands()
-	got := make([]string, len(commands))
-	for i, command := range commands {
-		got[i] = strings.Join(command.Args, " ")
-	}
-	want := []string{
-		"build --platform linux/amd64 --provenance=false -t erunpaas/erun-devops:1.0.0-amd64 --build-arg ERUN_VERSION=1.0.0 -f /tmp/project/Dockerfile .",
-		"build --platform linux/arm64 --provenance=false -t erunpaas/erun-devops:1.0.0-arm64 --build-arg ERUN_VERSION=1.0.0 -f /tmp/project/Dockerfile .",
-		"push erunpaas/erun-devops:1.0.0-amd64",
-		"push erunpaas/erun-devops:1.0.0-arm64",
-		"manifest create --amend erunpaas/erun-devops:1.0.0 erunpaas/erun-devops:1.0.0-amd64 erunpaas/erun-devops:1.0.0-arm64",
-		"manifest push erunpaas/erun-devops:1.0.0",
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("unexpected trace commands\n got: %+v\nwant: %+v", got, want)
 	}
 }
 

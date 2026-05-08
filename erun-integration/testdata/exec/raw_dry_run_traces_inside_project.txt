@@ -1,0 +1,2 @@
+audit: erun exec raw echo hello --dry-run
+cd <TMP> && echo hello

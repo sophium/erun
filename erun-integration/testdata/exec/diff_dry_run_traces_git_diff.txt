@@ -1,0 +1,2 @@
+audit: erun exec diff --dry-run
+cd <TMP> && git diff --no-color --no-ext-diff

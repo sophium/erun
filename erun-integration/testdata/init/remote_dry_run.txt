@@ -1090,3 +1090,5 @@ remote-default-devops-bootstrap:
 mkdir -p <TMP>
 write-yaml <TMP>
 Configuration initialized OK
+ensure-agent-instructions
+ensure-claude-settings
