@@ -69,6 +69,7 @@ type EnvConfig struct {
 	SSHD               SSHDConfig            `yaml:"sshd,omitempty"`
 	Idle               EnvironmentIdleConfig   `yaml:"idle,omitempty"`
 	Claude             EnvironmentClaudeConfig `yaml:"claude,omitempty" json:"claude,omitempty"`
+	AITool             string                  `yaml:"aitool,omitempty" json:"aiTool,omitempty"`
 	Remote             bool                    `yaml:"remote,omitempty"`
 	Snapshot           *bool                   `yaml:"snapshot,omitempty"`
 }

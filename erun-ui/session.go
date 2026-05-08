@@ -20,12 +20,13 @@ type terminalSession interface {
 }
 
 type startTerminalSessionParams struct {
-	Dir        string
-	Executable string
-	Args       []string
-	Env        []string
-	Cols       int
-	Rows       int
+	Dir          string
+	Executable   string
+	Args         []string
+	Env          []string
+	Cols         int
+	Rows         int
+	InitialInput []byte
 }
 
 func resolveCLIExecutable() string {
@@ -311,6 +312,41 @@ func resolveDeployStartDir(findProjectRoot eruncommon.ProjectFinderFunc, result 
 	}
 	return resolveTerminalStartDir(result.RepoPath)
 }
+
+const defaultAITool = "claude"
+
+func resolveLocalShellCommand(goos string) (string, []string) {
+	if shell := strings.TrimSpace(os.Getenv("SHELL")); shell != "" {
+		return shell, nil
+	}
+	switch strings.TrimSpace(goos) {
+	case "windows":
+		return "powershell.exe", []string{"-NoLogo"}
+	default:
+		return "/bin/bash", nil
+	}
+}
+
+func resolveAIToolCommand(configured string) string {
+	if tool := strings.TrimSpace(configured); tool != "" {
+		return tool
+	}
+	return defaultAITool
+}
+
+func localSessionBanner(selection uiSelection) []byte {
+	tenant := strings.TrimSpace(selection.Tenant)
+	environment := strings.TrimSpace(selection.Environment)
+	if tenant == "" || environment == "" {
+		return nil
+	}
+	// Emitted as a terminal-output event (not pty input) so it doesn't get
+	// fed to the shell. ANSI dim makes it look like an inline comment so it
+	// doesn't compete visually with real shell output.
+	banner := fmt.Sprintf("\x1b[2m# Local host shell for %s/%s — env shell in ERun tab, %s in AI tab\x1b[0m\r\n", tenant, environment, defaultAITool)
+	return []byte(banner)
+}
+
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"

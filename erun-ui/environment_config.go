@@ -195,6 +195,7 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 		},
 		Claude:         claudeConfigToUI(config.Claude),
 		ClaudeDefaults: claudeDefaultsForUI(),
+		AITool:         strings.TrimSpace(config.AITool),
 		LocalPorts: uiEnvironmentLocalPorts{
 			RangeStart: ports.RangeStart,
 			RangeEnd:   ports.RangeEnd,
@@ -315,6 +316,7 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 		IdleTrafficBytes: config.Idle.IdleTrafficBytes,
 	}
 	existing.Claude = claudeConfigFromUI(config.Claude)
+	existing.AITool = strings.TrimSpace(config.AITool)
 	existing.SetSnapshot(config.Snapshot)
 	return existing
 }

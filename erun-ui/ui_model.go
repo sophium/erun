@@ -182,6 +182,7 @@ type uiEnvironmentConfig struct {
 	Idle                 uiIdleConfig            `json:"idle"`
 	Claude               uiClaudeConfig          `json:"claude"`
 	ClaudeDefaults       uiClaudeDefaults        `json:"claudeDefaults"`
+	AITool               string                  `json:"aiTool,omitempty"`
 	LocalPorts           uiEnvironmentLocalPorts `json:"localPorts"`
 	Remote               bool                    `json:"remote"`
 	Snapshot             bool                    `json:"snapshot"`
@@ -300,6 +301,7 @@ type startSessionResult struct {
 	SessionID int         `json:"sessionId"`
 	Selection uiSelection `json:"selection"`
 	Slot      int         `json:"slot,omitempty"`
+	Kind      string      `json:"kind,omitempty"`
 }
 
 type deleteEnvironmentResult struct {
