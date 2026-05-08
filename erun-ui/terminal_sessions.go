@@ -85,6 +85,8 @@ func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSe
 	go a.streamSession(managed)
 	go a.startWorkspaceSyncForSelection(selection)
 
+	a.logSpawnedCommandToLocal(selection, "erun", formatLocalCommandLog(formatLaunchCommand(openParams), "ERun tab"))
+
 	return startSessionResult{
 		SessionID: serial,
 		Selection: selection,
@@ -237,6 +239,9 @@ func (a *App) StartAISession(selection uiSelection, slot, cols, rows int) (start
 	a.mu.Unlock()
 
 	go a.streamSession(managed)
+
+	a.logSpawnedCommandToLocal(selection, "ai", formatLocalCommandLog(formatLaunchCommand(params)+" && "+shellQuoteIfNeeded(tool), "AI tab"))
+
 	return startSessionResult{
 		SessionID: serial,
 		Selection: selection,
@@ -812,6 +817,39 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	return true
 }
 
+func (a *App) logSpawnedCommandToLocal(selection uiSelection, dedupKey, line string) {
+	a.mu.Lock()
+	var local *managedTerminal
+	for _, m := range a.sessions {
+		if m == nil || m.closed || m.kind != sessionKindLocal {
+			continue
+		}
+		if normalizeSelection(m.selection) != selection {
+			continue
+		}
+		local = m
+		break
+	}
+	if local == nil {
+		a.mu.Unlock()
+		return
+	}
+	if local.loggedCommands == nil {
+		local.loggedCommands = make(map[string]struct{})
+	}
+	if _, ok := local.loggedCommands[dedupKey]; ok {
+		a.mu.Unlock()
+		return
+	}
+	local.loggedCommands[dedupKey] = struct{}{}
+	serial := local.serial
+	a.mu.Unlock()
+	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+		SessionID: serial,
+		Data:      base64.StdEncoding.EncodeToString([]byte(line)),
+	})
+}
+
 func (a *App) emitReconnectMarker(sessionID int, exitReason string) {
 	suffix := ""
 	if reason := strings.TrimSpace(exitReason); reason != "" {
@@ -916,6 +954,7 @@ type managedTerminal struct {
 	blocksIdleStop         bool
 	clearIdleBlockOnOutput bool
 	respawn                func() (terminalSession, error)
+	loggedCommands         map[string]struct{}
 }
 
 type sessionKind string

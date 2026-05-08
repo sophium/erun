@@ -521,8 +521,17 @@ export class ERunUIController {
 
     this.prepareOpenSelection(selection, runSelection, previousSessionId, previousKnownSessionId);
     this.fitAddon?.fit();
+    const cols = this.terminal?.cols || 80;
+    const rows = this.terminal?.rows || 24;
+
+    // Spawn Local first so subsequent ERun/AI spawns can log into it.
+    const tabs = this.state.tabsByEnv[key] || [];
+    if (!tabs.some((tab) => tab.kind === 'local')) {
+      await this.spawnDefaultTab(key, runSelection, 'local', 'Local', cols, rows);
+    }
+
     const slot = this.activeSlotForSelection(runSelection);
-    const result = (await StartSession(runSelection, slot, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
+    const result = (await StartSession(runSelection, slot, cols, rows)) as StartSessionResult;
     this.registerOpenSessionResult(key, result, runSelection, previousSessionId);
     this.showOpenSelectionStatus(result.sessionId, selection);
 
