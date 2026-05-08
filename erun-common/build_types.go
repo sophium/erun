@@ -79,6 +79,18 @@ type DockerBuildSpec struct {
 	// target tag (and per-platform tags + manifest assembly for multi-platform)
 	// and pushes it.
 	Promote bool
+	// MissingFingerprintPlatforms lists platforms whose fp-tag was absent from
+	// the local Docker store when applyIncrementalPromotion ran. Empty when
+	// all expected fp-tags were present or when incremental did not run.
+	// Used by traceIncrementalDecision to explain why a build is rebuilding.
+	// For non-multi-platform builds the slot is the empty string.
+	MissingFingerprintPlatforms []string
+	// CascadeRebuildFromTag is set when this build's own fingerprint matched
+	// (its fp-tags were present) but a local FROM dependency is rebuilding,
+	// forcing this build to rebuild too. The value is the dependency's image
+	// tag. Captured so the trace can say "rebuilding because <dep> is
+	// rebuilding" instead of the misleading "fingerprint image is missing".
+	CascadeRebuildFromTag string
 }
 
 type DockerPushSpec struct {
