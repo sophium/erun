@@ -3,9 +3,16 @@
 Repository guidance for humans and coding agents working in this repo.
 
 - Follow this file for the whole repository.
-- When working inside a subdirectory that has its own `AGENTS.md`, follow the child file as additional, more specific guidance for that subtree.
-- Submodules may define their own `AGENTS.md` files with more specific guidance. See `erun-ui/AGENTS.md` for desktop-module guidance.
-- See `erun-devops/AGENTS.md` for runtime-image, chart, build-cache, and release-workflow guidance in the DevOps module.
+- **Always read every applicable `AGENTS.md` before touching files in its subtree, on every task, even when you have read it before in another conversation or earlier in this one.** "Applicable" means this root file plus the `AGENTS.md` of every directory that is an ancestor of, or contains, the files you are about to read, edit, run, or test. Read each one end-to-end and apply its guidance to the work; do not rely on memory or summaries.
+- When in doubt, list `AGENTS.md` files with `find . -name AGENTS.md -not -path '*/node_modules/*'` and read each one whose path is a prefix of, or descendant of, the area you are about to change. Skipping this step has caused real bugs (e.g. shell-syntax assumptions that broke zsh on macOS).
+- Current `AGENTS.md` files in this repo:
+  - `AGENTS.md` (this file) — repository-wide rules.
+  - `erun-ui/AGENTS.md` — desktop-module guidance, including macOS + Windows targets and Wails frontend rules.
+  - `erun-devops/AGENTS.md` — runtime-image, chart, build-cache, and release-workflow guidance.
+  - `erun-integration/AGENTS.md` — integration-test harness layout, scenario shape, and the coverage gate.
+  - `erun-backend/AGENTS.md` plus `erun-backend/erun-backend-api/AGENTS.md` and `erun-backend/erun-backend-db/AGENTS.md` — hosted-backend, API, and Atlas-migration guidance.
+- A child `AGENTS.md` is additional, not a replacement: parent rules still apply unless the child explicitly overrides them.
+- If you add a new `AGENTS.md` anywhere in the tree, also list it in the bullet above so future readers find it without searching.
 
 ## Contributing
 
