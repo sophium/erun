@@ -128,18 +128,13 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 	a.mu.Unlock()
 
 	executable, args := resolveLocalShellCommand(goruntime.GOOS)
-	var initialInput []byte
-	if repoPath != "" {
-		initialInput = []byte(buildLocalErunCommand(a.deps.resolveCLIPath(), buildOpenArgs(selection.Tenant, selection.Environment, selection.Debug)))
-	}
 	params := startTerminalSessionParams{
-		Dir:          resolveTerminalStartDir(repoPath),
-		Executable:   executable,
-		Args:         args,
-		Env:          []string{appSessionEnvVar + "=1"},
-		Cols:         cols,
-		Rows:         rows,
-		InitialInput: initialInput,
+		Dir:        resolveTerminalStartDir(repoPath),
+		Executable: executable,
+		Args:       args,
+		Env:        []string{appSessionEnvVar + "=1"},
+		Cols:       cols,
+		Rows:       rows,
 	}
 	session, err := a.deps.startTerminal(params)
 	if err != nil {
@@ -159,6 +154,13 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 	}
 	a.sessions[key] = managed
 	a.mu.Unlock()
+
+	if banner := localSessionBanner(selection); len(banner) > 0 {
+		a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+			SessionID: serial,
+			Data:      base64.StdEncoding.EncodeToString(banner),
+		})
+	}
 
 	go a.streamSession(managed)
 	return startSessionResult{
