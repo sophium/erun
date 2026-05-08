@@ -22,8 +22,10 @@ import {
   SaveTenantConfig,
   SendSessionInput,
   SetupCloudProviderOIDC,
+  StartAISession,
   StartDeploySession,
   StartInitSession,
+  StartLocalSession,
   StartSession,
 } from '../../wailsjs/go/main/App';
 import { ClipboardSetText, EventsOn, WindowToggleMaximise } from '../../wailsjs/runtime/runtime';
@@ -81,7 +83,20 @@ import {
   type TenantDialogState,
   type TerminalStatusAction,
   type TerminalTab,
+  type TerminalTabKind,
 } from './state';
+
+const TAB_KIND_ORDER: Record<TerminalTabKind, number> = {
+  local: 0,
+  erun: 1,
+  ai: 2,
+  extra: 3,
+};
+
+function compareTabs(a: TerminalTab, b: TerminalTab): number {
+  return TAB_KIND_ORDER[a.kind] - TAB_KIND_ORDER[b.kind] || a.slot - b.slot;
+}
+
 import {
   clamp,
   loadSavedDebugHeight,
@@ -147,6 +162,7 @@ export class ERunUIController {
     collapsedTenants: new Set<string>(),
     sessionId: 0,
     tabsByEnv: {},
+    selectedSessionByEnv: {},
     sidebarWidth: loadSavedSidebarWidth(),
     reviewWidth: loadSavedReviewWidth(),
     filesWidth: loadSavedFilesWidth(),
@@ -509,12 +525,65 @@ export class ERunUIController {
     this.registerOpenSessionResult(key, result, runSelection, previousSessionId);
     this.showOpenSelectionStatus(result.sessionId, selection);
 
+    await this.ensureDefaultEnvTabs(runSelection, key);
+    this.restoreSelectedTabForEnv(key);
+
     if (this.state.reviewOpen) {
       await this.loadReviewDiff();
     }
     this.focusTerminalSoon();
     this.queueTerminalResize();
     this.emit();
+  }
+
+  private async ensureDefaultEnvTabs(runSelection: UISelection, key: string): Promise<void> {
+    const tabs = this.state.tabsByEnv[key] || [];
+    const cols = this.terminal?.cols || 80;
+    const rows = this.terminal?.rows || 24;
+    if (!tabs.some((tab) => tab.kind === 'local')) {
+      await this.spawnDefaultTab(key, runSelection, 'local', 'Local', cols, rows);
+    }
+    if (!tabs.some((tab) => tab.kind === 'ai')) {
+      await this.spawnDefaultTab(key, runSelection, 'ai', 'AI', cols, rows);
+    }
+  }
+
+  private async spawnDefaultTab(
+    key: string,
+    runSelection: UISelection,
+    kind: 'local' | 'ai',
+    label: string,
+    cols: number,
+    rows: number,
+  ): Promise<void> {
+    const start = kind === 'local' ? StartLocalSession : StartAISession;
+    try {
+      const result = (await start(runSelection, 0, cols, rows)) as StartSessionResult;
+      this.recordTab(key, result.sessionId, result.slot ?? 0, kind, label);
+    } catch {
+      // Tool unavailable; future env opens will retry.
+    }
+  }
+
+  private rememberSelectedTabForCurrentEnv(sessionId: number): void {
+    const selection = this.state.selected;
+    if (!selection) {
+      return;
+    }
+    const key = selectionKey({ ...selection, debug: this.state.debugOpen || undefined });
+    this.state.selectedSessionByEnv = { ...this.state.selectedSessionByEnv, [key]: sessionId };
+  }
+
+  private restoreSelectedTabForEnv(key: string): void {
+    const tabs = this.state.tabsByEnv[key] || [];
+    const remembered = this.state.selectedSessionByEnv[key];
+    if (!remembered || !tabs.some((tab) => tab.sessionId === remembered)) {
+      return;
+    }
+    if (remembered === this.state.sessionId) {
+      return;
+    }
+    this.selectTerminalTab(remembered);
   }
 
   private prepareOpenSelection(selection: UISelection, runSelection: UISelection, previousSessionId: number, previousKnownSessionId: number): void {
@@ -544,8 +613,12 @@ export class ERunUIController {
     this.applyPendingDebugHeader(result.sessionId);
     rebuildTerminalDisplayBuffer(this.sessions, result.sessionId);
     this.state.sessionId = result.sessionId;
+    this.state.selectedSessionByEnv = { ...this.state.selectedSessionByEnv, [key]: result.sessionId };
     this.syncDebugDisplay();
-    this.recordTab(key, result.sessionId, result.slot ?? 0);
+    const slot = result.slot ?? 0;
+    const kind: TerminalTabKind = slot === 0 ? 'erun' : 'extra';
+    const label = kind === 'erun' ? 'ERun' : `Terminal ${slot}`;
+    this.recordTab(key, result.sessionId, slot, kind, label);
     if (result.sessionId !== previousSessionId) {
       this.resetTerminal();
       this.writeTerminalBuffer(this.sessions.displayBuffer(result.sessionId));
@@ -561,14 +634,14 @@ export class ERunUIController {
     return (active ?? tabs[0]).slot;
   }
 
-  private recordTab(key: string, sessionId: number, slot: number): void {
+  private recordTab(key: string, sessionId: number, slot: number, kind: TerminalTabKind, label: string): void {
     const tabs = this.state.tabsByEnv[key] ? [...this.state.tabsByEnv[key]] : [];
-    const existingIndex = tabs.findIndex((tab) => tab.slot === slot);
+    const existingIndex = tabs.findIndex((tab) => tab.kind === kind && tab.slot === slot);
     if (existingIndex >= 0) {
-      tabs[existingIndex] = { sessionId, slot };
+      tabs[existingIndex] = { sessionId, slot, kind, label };
     } else {
-      tabs.push({ sessionId, slot });
-      tabs.sort((a, b) => a.slot - b.slot);
+      tabs.push({ sessionId, slot, kind, label });
+      tabs.sort(compareTabs);
     }
     this.state.tabsByEnv = { ...this.state.tabsByEnv, [key]: tabs };
   }
@@ -586,6 +659,11 @@ export class ERunUIController {
       next[key] = remaining;
     }
     this.state.tabsByEnv = next;
+    if (this.state.selectedSessionByEnv[key] === sessionId) {
+      const updated = { ...this.state.selectedSessionByEnv };
+      delete updated[key];
+      this.state.selectedSessionByEnv = updated;
+    }
     return remaining;
   }
 
@@ -615,6 +693,7 @@ export class ERunUIController {
       return;
     }
     this.state.sessionId = sessionId;
+    this.rememberSelectedTabForCurrentEnv(sessionId);
     this.syncDebugDisplay();
     rebuildTerminalDisplayBuffer(this.sessions, sessionId);
     this.resetTerminal();
@@ -642,6 +721,11 @@ export class ERunUIController {
     }
     const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     const key = selectionKey(runSelection);
+    const tabs = this.state.tabsByEnv[key] || [];
+    const target = tabs.find((tab) => tab.sessionId === sessionId);
+    if (target && target.kind !== 'extra') {
+      return;
+    }
     try {
       await CloseSession(sessionId);
     } catch (error: unknown) {

@@ -78,7 +78,8 @@ export function TerminalTabStrip({
       {tabs.map((tab, index) => (
         <Tab
           key={tab.sessionId}
-          index={index}
+          label={tab.label || `Terminal ${index + 1}`}
+          closeable={tab.kind === 'extra'}
           active={tab.sessionId === activeId}
           ref={(node) => {
             tabRefs.current[index] = node;
@@ -103,7 +104,8 @@ export function TerminalTabStrip({
 }
 
 interface TabProps {
-  index: number;
+  label: string;
+  closeable: boolean;
   active: boolean;
   onSelect: () => void;
   onClose: () => void;
@@ -111,10 +113,9 @@ interface TabProps {
 }
 
 const Tab = React.forwardRef<HTMLButtonElement, TabProps>(function Tab(
-  { index, active, onSelect, onClose, onKeyDown },
+  { label, closeable, active, onSelect, onClose, onKeyDown },
   ref,
 ) {
-  const label = `Terminal ${index + 1}`;
   return (
     <div
       className={cn(
@@ -140,23 +141,25 @@ const Tab = React.forwardRef<HTMLButtonElement, TabProps>(function Tab(
       >
         {label}
       </button>
-      <IconTooltip label={`Close ${label}`}>
-        <button
-          type="button"
-          tabIndex={-1}
-          className={cn(
-            'mr-1 flex size-5 items-center justify-center rounded text-[oklch(0.56_0_0)] transition-opacity transition-colors hover:bg-[oklch(0.18_0_0)] hover:text-[oklch(0.96_0_0)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.62_0_0)]',
-            active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
-          )}
-          aria-label={`Close ${label}`}
-          onClick={(event) => {
-            event.stopPropagation();
-            onClose();
-          }}
-        >
-          <X className="size-3" aria-hidden="true" />
-        </button>
-      </IconTooltip>
+      {closeable && (
+        <IconTooltip label={`Close ${label}`}>
+          <button
+            type="button"
+            tabIndex={-1}
+            className={cn(
+              'mr-1 flex size-5 items-center justify-center rounded text-[oklch(0.56_0_0)] transition-opacity transition-colors hover:bg-[oklch(0.18_0_0)] hover:text-[oklch(0.96_0_0)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.62_0_0)]',
+              active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
+            )}
+            aria-label={`Close ${label}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onClose();
+            }}
+          >
+            <X className="size-3" aria-hidden="true" />
+          </button>
+        </IconTooltip>
+      )}
     </div>
   );
 });

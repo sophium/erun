@@ -312,6 +312,27 @@ func resolveDeployStartDir(findProjectRoot eruncommon.ProjectFinderFunc, result 
 	return resolveTerminalStartDir(result.RepoPath)
 }
 
+const defaultAITool = "claude"
+
+func resolveLocalShellCommand(goos string) (string, []string) {
+	if shell := strings.TrimSpace(os.Getenv("SHELL")); shell != "" {
+		return shell, nil
+	}
+	switch strings.TrimSpace(goos) {
+	case "windows":
+		return "powershell.exe", []string{"-NoLogo"}
+	default:
+		return "/bin/bash", nil
+	}
+}
+
+func resolveAIToolCommand(configured string) string {
+	if tool := strings.TrimSpace(configured); tool != "" {
+		return tool
+	}
+	return defaultAITool
+}
+
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -47,14 +48,15 @@ func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSe
 	}
 	a.mu.Unlock()
 
-	session, err := a.deps.startTerminal(startTerminalSessionParams{
+	openParams := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),
 		Args:       buildOpenArgs(result.Tenant, result.Environment, selection.Debug),
 		Env:        []string{appSessionEnvVar + "=1"},
 		Cols:       cols,
 		Rows:       rows,
-	})
+	}
+	session, err := a.deps.startTerminal(openParams)
 	if err != nil {
 		return startSessionResult{}, err
 	}
@@ -68,8 +70,12 @@ func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSe
 		key:                    key,
 		serial:                 serial,
 		slot:                   slot,
+		kind:                   sessionKindOpen,
 		blocksIdleStop:         true,
 		clearIdleBlockOnOutput: true,
+		respawn: func() (terminalSession, error) {
+			return a.deps.startTerminal(openParams)
+		},
 	}
 	a.sessions[key] = managed
 	a.busyEnvs[environmentBusyKey(selection)]++
@@ -83,6 +89,149 @@ func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSe
 		SessionID: serial,
 		Selection: selection,
 		Slot:      slot,
+		Kind:      string(sessionKindOpen),
+	}, nil
+}
+
+func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
+	selection = normalizeSelection(selection)
+	if selection.Tenant == "" || selection.Environment == "" {
+		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
+	}
+	if cols <= 0 {
+		cols = 120
+	}
+	if rows <= 0 {
+		rows = 34
+	}
+
+	key := localSessionKey(selection, slot)
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+	})
+	if err != nil {
+		return startSessionResult{}, err
+	}
+
+	a.mu.Lock()
+	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
+		a.mu.Unlock()
+		return startSessionResult{
+			SessionID: existing.serial,
+			Selection: existing.selection,
+			Slot:      slot,
+			Kind:      string(sessionKindLocal),
+		}, nil
+	}
+	a.mu.Unlock()
+
+	executable, args := resolveLocalShellCommand(goruntime.GOOS)
+	params := startTerminalSessionParams{
+		Dir:        resolveTerminalStartDir(result.RepoPath),
+		Executable: executable,
+		Args:       args,
+		Env:        []string{appSessionEnvVar + "=1"},
+		Cols:       cols,
+		Rows:       rows,
+	}
+	session, err := a.deps.startTerminal(params)
+	if err != nil {
+		return startSessionResult{}, err
+	}
+
+	a.mu.Lock()
+	a.nextSerial++
+	serial := a.nextSerial
+	managed := &managedTerminal{
+		session:   session,
+		selection: selection,
+		key:       key,
+		serial:    serial,
+		slot:      slot,
+		kind:      sessionKindLocal,
+	}
+	a.sessions[key] = managed
+	a.mu.Unlock()
+
+	go a.streamSession(managed)
+	return startSessionResult{
+		SessionID: serial,
+		Selection: selection,
+		Slot:      slot,
+		Kind:      string(sessionKindLocal),
+	}, nil
+}
+
+func (a *App) StartAISession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
+	selection = normalizeSelection(selection)
+	if selection.Tenant == "" || selection.Environment == "" {
+		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
+	}
+	if cols <= 0 {
+		cols = 120
+	}
+	if rows <= 0 {
+		rows = 34
+	}
+
+	key := aiSessionKey(selection, slot)
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+	})
+	if err != nil {
+		return startSessionResult{}, err
+	}
+
+	a.mu.Lock()
+	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
+		a.mu.Unlock()
+		return startSessionResult{
+			SessionID: existing.serial,
+			Selection: existing.selection,
+			Slot:      slot,
+			Kind:      string(sessionKindAI),
+		}, nil
+	}
+	a.mu.Unlock()
+
+	tool := resolveAIToolCommand(result.EnvConfig.AITool)
+	params := startTerminalSessionParams{
+		Dir:        resolveTerminalStartDir(result.RepoPath),
+		Executable: tool,
+		Env:        []string{appSessionEnvVar + "=1"},
+		Cols:       cols,
+		Rows:       rows,
+	}
+	session, err := a.deps.startTerminal(params)
+	if err != nil {
+		return startSessionResult{}, err
+	}
+
+	a.mu.Lock()
+	a.nextSerial++
+	serial := a.nextSerial
+	managed := &managedTerminal{
+		session:   session,
+		selection: selection,
+		key:       key,
+		serial:    serial,
+		slot:      slot,
+		kind:      sessionKindAI,
+		respawn: func() (terminalSession, error) {
+			return a.deps.startTerminal(params)
+		},
+	}
+	a.sessions[key] = managed
+	a.mu.Unlock()
+
+	go a.streamSession(managed)
+	return startSessionResult{
+		SessionID: serial,
+		Selection: selection,
+		Slot:      slot,
+		Kind:      string(sessionKindAI),
 	}, nil
 }
 
@@ -518,7 +667,11 @@ func (a *App) streamSession(managed *managedTerminal) {
 	buffer := make([]byte, 8192)
 	var lastOutputActivity time.Time
 	for {
-		count, err := managed.session.Read(buffer)
+		current := a.currentSessionFor(managed)
+		if current == nil {
+			return
+		}
+		count, err := current.Read(buffer)
 		if count > 0 {
 			payload := terminalOutputPayload{
 				SessionID: managed.serial,
@@ -535,25 +688,88 @@ func (a *App) streamSession(managed *managedTerminal) {
 				lastOutputActivity = time.Now()
 			}
 		}
-		if err != nil {
-			reason := terminalSessionExitReason(managed.session, err)
-			a.mu.Lock()
-			managed.closed = true
-			if existing := a.sessions[managed.key]; existing == managed {
-				delete(a.sessions, managed.key)
-			}
-			a.releaseIdleBlockLocked(managed)
-			a.mu.Unlock()
-			a.emitEvent(terminalExitEvent, terminalExitPayload{
-				SessionID: managed.serial,
-				Reason:    reason,
-			})
-			if reason == "" && strings.HasPrefix(managed.key, "sshd-init\x00") {
-				go a.startWorkspaceSyncForSelection(managed.selection)
-			}
-			return
+		if err == nil {
+			continue
 		}
+		reason := terminalSessionExitReason(current, err)
+		if a.tryReconnect(managed, reason) {
+			continue
+		}
+		a.mu.Lock()
+		managed.closed = true
+		if existing := a.sessions[managed.key]; existing == managed {
+			delete(a.sessions, managed.key)
+		}
+		a.releaseIdleBlockLocked(managed)
+		a.mu.Unlock()
+		a.emitEvent(terminalExitEvent, terminalExitPayload{
+			SessionID: managed.serial,
+			Reason:    reason,
+		})
+		if reason == "" && strings.HasPrefix(managed.key, "sshd-init\x00") {
+			go a.startWorkspaceSyncForSelection(managed.selection)
+		}
+		return
 	}
+}
+
+func (a *App) currentSessionFor(managed *managedTerminal) terminalSession {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if managed == nil || managed.closed {
+		return nil
+	}
+	return managed.session
+}
+
+func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
+	a.mu.Lock()
+	if managed == nil || managed.closed || managed.respawn == nil {
+		a.mu.Unlock()
+		return false
+	}
+	respawn := managed.respawn
+	a.mu.Unlock()
+
+	a.emitReconnectMarker(managed.serial, exitReason)
+	next, err := respawn()
+	if err != nil {
+		a.emitReconnectFailureMarker(managed.serial, err)
+		return false
+	}
+
+	a.mu.Lock()
+	if managed.closed {
+		a.mu.Unlock()
+		_ = next.Close()
+		return false
+	}
+	managed.session = next
+	a.mu.Unlock()
+	return true
+}
+
+func (a *App) emitReconnectMarker(sessionID int, exitReason string) {
+	suffix := ""
+	if reason := strings.TrimSpace(exitReason); reason != "" {
+		suffix = " " + reason
+	}
+	marker := "\r\n\x1b[2;33m── reconnecting" + suffix + " ──\x1b[0m\r\n"
+	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+		SessionID: sessionID,
+		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),
+	})
+}
+
+func (a *App) emitReconnectFailureMarker(sessionID int, err error) {
+	if err == nil {
+		return
+	}
+	marker := "\r\n\x1b[31m── reconnect failed: " + err.Error() + " ──\x1b[0m\r\n"
+	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+		SessionID: sessionID,
+		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),
+	})
 }
 
 func terminalSessionExitReason(session terminalSession, readErr error) string {
@@ -592,6 +808,8 @@ func (a *App) closeSessionsForSelection(selection uiSelection) {
 		selectionKey(selection) + "\x00",
 		"init\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00",
 		"deploy\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00",
+		"local\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00",
+		"ai\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00",
 	}
 
 	a.mu.Lock()
@@ -630,10 +848,21 @@ type managedTerminal struct {
 	key                    string
 	serial                 int
 	slot                   int
+	kind                   sessionKind
 	closed                 bool
 	blocksIdleStop         bool
 	clearIdleBlockOnOutput bool
+	respawn                func() (terminalSession, error)
 }
+
+type sessionKind string
+
+const (
+	sessionKindOpen    sessionKind = "erun"
+	sessionKindLocal   sessionKind = "local"
+	sessionKindAI      sessionKind = "ai"
+	sessionKindCommand sessionKind = "command"
+)
 
 func (s *managedTerminal) Close() error {
 	if s == nil || s.session == nil {
@@ -650,6 +879,14 @@ func selectionKey(selection uiSelection) string {
 
 func openSessionKey(selection uiSelection, slot int) string {
 	return selectionKey(selection) + "\x00" + fmt.Sprintf("%d", slot)
+}
+
+func localSessionKey(selection uiSelection, slot int) string {
+	return "local\x00" + selectionKey(selection) + "\x00" + fmt.Sprintf("%d", slot)
+}
+
+func aiSessionKey(selection uiSelection, slot int) string {
+	return "ai\x00" + selectionKey(selection) + "\x00" + fmt.Sprintf("%d", slot)
 }
 
 func environmentBusyKey(selection uiSelection) string {
