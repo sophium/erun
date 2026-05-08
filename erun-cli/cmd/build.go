@@ -78,6 +78,7 @@ func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRo
 
 func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc) *cobra.Command {
 	target := common.DockerCommandTarget{}
+	var force bool
 	cmd := &cobra.Command{
 		Use:           "push",
 		Short:         "Build and push the current container image",
@@ -85,6 +86,9 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if force {
+				target.NoIncremental = true
+			}
 			ctx := commandContext(cmd)
 			pushInput, buildInput, err := common.ResolveDockerPushSpec(store, findProjectRoot, resolveBuildContext, now, target)
 			if err != nil {
@@ -115,6 +119,7 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 	}
 	addDryRunFlag(cmd)
 	addPushCommandTargetFlags(cmd, &target)
+	cmd.Flags().BoolVar(&force, "force", false, "Rebuild and re-push every image, bypassing the fingerprint cache")
 	return cmd
 }
 
@@ -125,6 +130,7 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 // is single-image only.
 func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc) *cobra.Command {
 	target := common.DockerCommandTarget{}
+	var force bool
 	cmd := &cobra.Command{
 		Use:           "push",
 		Short:         "Build and push the current container image",
@@ -132,6 +138,9 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if force {
+				target.NoIncremental = true
+			}
 			ctx := commandContext(cmd)
 			builder := buildDockerImage
 			if builder == nil {
@@ -170,6 +179,7 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 	}
 	addDryRunFlag(cmd)
 	addPushCommandTargetFlags(cmd, &target)
+	cmd.Flags().BoolVar(&force, "force", false, "Rebuild and re-push every image, bypassing the fingerprint cache")
 	return cmd
 }
 
