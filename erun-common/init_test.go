@@ -360,13 +360,14 @@ func requireTenantDevopsDockerfile(t *testing.T, dockerfile string) {
 func TestEnsureDefaultDevopsChartMigratesLegacyGeneratedServiceTemplate(t *testing.T) {
 	projectRoot := t.TempDir()
 	moduleName := "tenant-a-devops"
-	serviceTemplatePath := filepath.Join(projectRoot, moduleName, "k8s", moduleName, "templates", "service.yaml")
+	templatesDir := filepath.Join(projectRoot, moduleName, "k8s", moduleName, "templates")
+	serviceTemplatePath := filepath.Join(templatesDir, "service.yaml")
 	current, err := defaultDevopsChartFiles.ReadFile("assets/default-devops-chart/templates/service.yaml")
 	if err != nil {
 		t.Fatalf("read embedded service template: %v", err)
 	}
 	rendered := renderDefaultDevopsChartTemplate("assets/default-devops-chart/templates/service.yaml", moduleName, moduleName, current)
-	if err := os.MkdirAll(filepath.Dir(serviceTemplatePath), 0o755); err != nil {
+	if err := os.MkdirAll(templatesDir, 0o755); err != nil {
 		t.Fatalf("mkdir service template dir: %v", err)
 	}
 	if err := os.WriteFile(serviceTemplatePath, []byte(legacyDefaultDevopsServiceTemplate(rendered)), 0o644); err != nil {
@@ -377,17 +378,14 @@ func TestEnsureDefaultDevopsChartMigratesLegacyGeneratedServiceTemplate(t *testi
 		t.Fatalf("EnsureDefaultDevopsChart failed: %v", err)
 	}
 
-	migrated, err := os.ReadFile(serviceTemplatePath)
+	content, err := concatChartTemplates(templatesDir)
 	if err != nil {
-		t.Fatalf("read migrated service template: %v", err)
+		t.Fatalf("read migrated chart templates: %v", err)
 	}
-	content := string(migrated)
 	for _, want := range []string{
 		`{{- $mcpPort := default 17000 .Values.mcpPort -}}`,
 		`{{- $apiPort := default 17033 .Values.apiPort -}}`,
 		`{{- $sshPort := default 17022 .Values.sshPort -}}`,
-		`{{- $postgres := default dict $api.postgres -}}`,
-		`{{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@127.0.0.1:%v/%s?sslmode=disable" $postgresUser $postgresPort $postgresDatabase) $api.databaseURL -}}`,
 		`{{- $cloudContext := default dict .Values.cloudContext -}}`,
 		`{{- $cloudContextName := default "" $cloudContext.name -}}`,
 		`{{- $cloudProvider := default "" $cloudContext.provider -}}`,
@@ -414,14 +412,15 @@ func TestEnsureDefaultDevopsChartMigratesLegacyGeneratedServiceTemplate(t *testi
 		"name: ERUN_POSTGRES_PASSWORD",
 		"name: ERUN_DATABASE_URL",
 		"name: ERUN_SSHD_PORT",
-		"name: erun-backend-postgres",
+		"name: erun-postgres",
+		"name: erun-api",
 		"restartPolicy: Always",
 		"containerPort: {{ $mcpPort }}",
 		"containerPort: {{ $apiPort }}",
 		"containerPort: {{ $sshPort }}",
 	} {
 		if !strings.Contains(content, want) {
-			t.Fatalf("expected migrated service template to contain %q, got:\n%s", want, content)
+			t.Fatalf("expected migrated chart templates to contain %q, got:\n%s", want, content)
 		}
 	}
 }
