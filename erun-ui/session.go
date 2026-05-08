@@ -334,6 +334,19 @@ func resolveAIToolCommand(configured string) string {
 	return defaultAITool
 }
 
+func localSessionBanner(selection uiSelection) []byte {
+	tenant := strings.TrimSpace(selection.Tenant)
+	environment := strings.TrimSpace(selection.Environment)
+	if tenant == "" || environment == "" {
+		return nil
+	}
+	// Bash treats the leading `#` as a comment so the line is shown but not
+	// executed; the user sees what the desktop is doing for this env without
+	// the host shell trying to run anything yet.
+	banner := fmt.Sprintf("# erun open %s %s — env shell in ERun tab, %s in AI tab\n", tenant, environment, defaultAITool)
+	return []byte(banner)
+}
+
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }

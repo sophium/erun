@@ -620,16 +620,26 @@ func TestResolveTerminalStartDirFallsBackToWorkingDirectory(t *testing.T) {
 	}
 }
 
-func TestStartInitSessionStartsRemoteInitCommand(t *testing.T) {
+func TestStartInitSessionPipesCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
+		},
+	}
 
-	var started startTerminalSessionParams
+	var sessions []*stubTerminalSession
 	app := NewApp(erunUIDeps{
-		findProjectRoot: func() (string, string, error) { return "project", projectRoot, nil },
+		store:           store,
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
 		resolveCLIPath:  func() string { return "/tmp/erun" },
-		startTerminal: func(params startTerminalSessionParams) (terminalSession, error) {
-			started = params
-			return newStubTerminalSession(), nil
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			s := newStubTerminalSession()
+			sessions = append(sessions, s)
+			return s, nil
 		},
 	})
 	defer app.shutdown(context.Background())
@@ -646,19 +656,16 @@ func TestStartInitSessionStartsRemoteInitCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartInitSession failed: %v", err)
 	}
-
-	if result.SessionID == 0 {
-		t.Fatalf("expected session id, got %+v", result)
+	if result.Kind != string(sessionKindLocal) {
+		t.Fatalf("expected local kind, got %q", result.Kind)
 	}
-	if started.Dir != projectRoot {
-		t.Fatalf("unexpected start dir: %q", started.Dir)
+	if len(sessions) != 1 {
+		t.Fatalf("expected 1 spawned session (Local), got %d", len(sessions))
 	}
-	if started.Executable != "/tmp/erun" {
-		t.Fatalf("unexpected executable: %q", started.Executable)
-	}
-	wantArgs := []string{"init", "erun", "remote", "--remote", "--version", "1.0.19", "--kubernetes-context", "orbstack", "--container-registry", "erunpaas", "--set-default-tenant=true", "--confirm-environment=true", "--no-git"}
-	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
-		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
+	written := sessions[0].WrittenString()
+	wantSubstr := "/tmp/erun init erun remote --remote --version 1.0.19 --kubernetes-context orbstack --container-registry erunpaas --set-default-tenant=true --confirm-environment=true --no-git\n"
+	if !strings.Contains(written, wantSubstr) {
+		t.Fatalf("expected Local pty to receive %q, got %q", wantSubstr, written)
 	}
 }
 
@@ -704,15 +711,27 @@ func TestStartInitSessionUsesSeparateSessionKey(t *testing.T) {
 	}
 }
 
-func TestStartInitSessionUsesVersionInSessionKey(t *testing.T) {
+func TestStartInitSessionReusesLocalAcrossInvocations(t *testing.T) {
 	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
+		},
+	}
+
 	startCalls := 0
+	var lastSession *stubTerminalSession
 	app := NewApp(erunUIDeps{
-		findProjectRoot: func() (string, string, error) { return "project", projectRoot, nil },
+		store:           store,
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
 		resolveCLIPath:  func() string { return "/tmp/erun" },
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			startCalls++
-			return newStubTerminalSession(), nil
+			lastSession = newStubTerminalSession()
+			return lastSession, nil
 		},
 	})
 	defer app.shutdown(context.Background())
@@ -723,38 +742,38 @@ func TestStartInitSessionUsesVersionInSessionKey(t *testing.T) {
 	if _, err := app.StartInitSession(uiSelection{Tenant: "erun", Environment: "remote", Version: "1.0.19"}, 80, 24); err != nil {
 		t.Fatalf("second StartInitSession failed: %v", err)
 	}
-	if startCalls != 2 {
-		t.Fatalf("start terminal called %d times, want 2", startCalls)
+	if startCalls != 1 {
+		t.Fatalf("expected Local to be reused (1 spawn), got %d", startCalls)
+	}
+	written := lastSession.WrittenString()
+	if !strings.Contains(written, "init erun remote --remote --version 1.0.18") {
+		t.Fatalf("expected first init command in Local, got %q", written)
+	}
+	if !strings.Contains(written, "init erun remote --remote --version 1.0.19") {
+		t.Fatalf("expected second init command in Local, got %q", written)
 	}
 }
 
-func TestStartSSHDInitSessionStartsSSHDInitCommand(t *testing.T) {
+func TestStartSSHDInitSessionPipesCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {
-				Name:               "erun",
-				ProjectRoot:        projectRoot,
-				DefaultEnvironment: "remote",
-			},
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {
-				Name:              "remote",
-				RepoPath:          projectRoot,
-				KubernetesContext: "rancher-desktop",
-			},
+			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
 
-	var started startTerminalSessionParams
+	var sessions []*stubTerminalSession
 	app := NewApp(erunUIDeps{
 		store:           store,
-		findProjectRoot: func() (string, string, error) { return "project", projectRoot, nil },
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
 		resolveCLIPath:  func() string { return "/tmp/erun" },
-		startTerminal: func(params startTerminalSessionParams) (terminalSession, error) {
-			started = params
-			return newStubTerminalSession(), nil
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			s := newStubTerminalSession()
+			sessions = append(sessions, s)
+			return s, nil
 		},
 	})
 	defer app.shutdown(context.Background())
@@ -763,49 +782,35 @@ func TestStartSSHDInitSessionStartsSSHDInitCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSSHDInitSession failed: %v", err)
 	}
-
-	if result.SessionID == 0 {
-		t.Fatalf("expected session id, got %+v", result)
+	if result.Kind != string(sessionKindLocal) {
+		t.Fatalf("expected local kind, got %q", result.Kind)
 	}
-	if started.Dir != projectRoot {
-		t.Fatalf("unexpected start dir: %q", started.Dir)
-	}
-	if started.Executable != "/tmp/erun" {
-		t.Fatalf("unexpected executable: %q", started.Executable)
-	}
-	wantArgs := []string{"sshd", "init", "erun", "remote"}
-	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
-		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
+	written := sessions[0].WrittenString()
+	if !strings.Contains(written, "/tmp/erun sshd init erun remote\n") {
+		t.Fatalf("expected sshd-init command in Local pty, got %q", written)
 	}
 }
 
-func TestStartDoctorSessionStartsDoctorCommand(t *testing.T) {
+func TestStartDoctorSessionPipesCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {
-				Name:               "erun",
-				ProjectRoot:        projectRoot,
-				DefaultEnvironment: "remote",
-			},
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {
-				Name:              "remote",
-				RepoPath:          projectRoot,
-				KubernetesContext: "rancher-desktop",
-			},
+			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
 
-	var started startTerminalSessionParams
+	var sessions []*stubTerminalSession
 	app := NewApp(erunUIDeps{
 		store:           store,
-		findProjectRoot: func() (string, string, error) { return "project", projectRoot, nil },
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
 		resolveCLIPath:  func() string { return "/tmp/erun" },
-		startTerminal: func(params startTerminalSessionParams) (terminalSession, error) {
-			started = params
-			return newStubTerminalSession(), nil
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			s := newStubTerminalSession()
+			sessions = append(sessions, s)
+			return s, nil
 		},
 	})
 	defer app.shutdown(context.Background())
@@ -814,49 +819,35 @@ func TestStartDoctorSessionStartsDoctorCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartDoctorSession failed: %v", err)
 	}
-
-	if result.SessionID == 0 {
-		t.Fatalf("expected session id, got %+v", result)
+	if result.Kind != string(sessionKindLocal) {
+		t.Fatalf("expected local kind, got %q", result.Kind)
 	}
-	if started.Dir != projectRoot {
-		t.Fatalf("unexpected start dir: %q", started.Dir)
-	}
-	if started.Executable != "/tmp/erun" {
-		t.Fatalf("unexpected executable: %q", started.Executable)
-	}
-	wantArgs := []string{"doctor", "erun", "remote"}
-	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
-		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
+	written := sessions[0].WrittenString()
+	if !strings.Contains(written, "/tmp/erun doctor erun remote\n") {
+		t.Fatalf("expected doctor command in Local pty, got %q", written)
 	}
 }
 
-func TestStartDeploySessionStartsDeployCommand(t *testing.T) {
+func TestStartDeploySessionPipesCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {
-				Name:               "erun",
-				ProjectRoot:        projectRoot,
-				DefaultEnvironment: "remote",
-			},
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {
-				Name:              "remote",
-				RepoPath:          projectRoot,
-				KubernetesContext: "rancher-desktop",
-			},
+			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
 
-	var started startTerminalSessionParams
+	var sessions []*stubTerminalSession
 	app := NewApp(erunUIDeps{
 		store:           store,
 		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
 		resolveCLIPath:  func() string { return "/tmp/erun" },
-		startTerminal: func(params startTerminalSessionParams) (terminalSession, error) {
-			started = params
-			return newStubTerminalSession(), nil
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			s := newStubTerminalSession()
+			sessions = append(sessions, s)
+			return s, nil
 		},
 	})
 	defer app.shutdown(context.Background())
@@ -865,81 +856,30 @@ func TestStartDeploySessionStartsDeployCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartDeploySession failed: %v", err)
 	}
-	if result.SessionID == 0 {
-		t.Fatalf("expected session id, got %+v", result)
+	if result.Kind != string(sessionKindLocal) {
+		t.Fatalf("expected local kind, got %q", result.Kind)
 	}
-	if started.Dir != projectRoot {
-		t.Fatalf("unexpected start dir: %q", started.Dir)
-	}
-	wantArgs := []string{"deploy", "erun", "remote", "--version", "1.0.19"}
-	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
-		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
+	written := sessions[0].WrittenString()
+	if !strings.Contains(written, "/tmp/erun deploy erun remote --version 1.0.19\n") {
+		t.Fatalf("expected deploy command in Local pty, got %q", written)
 	}
 }
 
-func TestStartDeploySessionUsesLocalProjectRootForRemoteEnvironment(t *testing.T) {
-	localRoot := t.TempDir()
-	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
-			"frs": {
-				Name:               "frs",
-				ProjectRoot:        "/home/erun/git/frs",
-				DefaultEnvironment: "prod",
-			},
-		},
-		envs: map[string]eruncommon.EnvConfig{
-			"frs/prod": {
-				Name:              "prod",
-				RepoPath:          "/home/erun/git/frs",
-				KubernetesContext: "rancher-desktop",
-				Remote:            true,
-			},
-		},
-	}
-
-	var started startTerminalSessionParams
-	app := NewApp(erunUIDeps{
-		store:           store,
-		findProjectRoot: func() (string, string, error) { return "frs", localRoot, nil },
-		resolveCLIPath:  func() string { return "/tmp/erun" },
-		startTerminal: func(params startTerminalSessionParams) (terminalSession, error) {
-			started = params
-			return newStubTerminalSession(), nil
-		},
-	})
-	defer app.shutdown(context.Background())
-
-	if _, err := app.StartDeploySession(uiSelection{Tenant: "frs", Environment: "prod", Version: "1.0.50"}, 80, 24); err != nil {
-		t.Fatalf("StartDeploySession failed: %v", err)
-	}
-	if started.Dir != localRoot {
-		t.Fatalf("expected local deploy start dir %q, got %q", localRoot, started.Dir)
-	}
-}
-
-func TestStartDeploySessionUsesSeparateSessionKey(t *testing.T) {
+func TestRunErunCommandReusesLocalAndERunSpawnsSeparately(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {
-				Name:               "erun",
-				ProjectRoot:        projectRoot,
-				DefaultEnvironment: "remote",
-			},
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
 		},
 		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {
-				Name:              "remote",
-				RepoPath:          projectRoot,
-				KubernetesContext: "rancher-desktop",
-			},
+			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
 		},
 	}
 
 	startCalls := 0
 	app := NewApp(erunUIDeps{
 		store:           store,
-		findProjectRoot: func() (string, string, error) { return "project", projectRoot, nil },
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
 		resolveCLIPath:  func() string { return "/tmp/erun" },
 		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
 			startCalls++
@@ -957,8 +897,8 @@ func TestStartDeploySessionUsesSeparateSessionKey(t *testing.T) {
 	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
 	}
-	if startCalls != 3 {
-		t.Fatalf("start terminal called %d times, want 3", startCalls)
+	if startCalls != 2 {
+		t.Fatalf("expected Local + ERun spawn (2 calls), got %d", startCalls)
 	}
 }
 

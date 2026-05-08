@@ -314,6 +314,7 @@ export interface StartSessionResult {
   sessionId: number;
   selection: UISelection;
   slot?: number;
+  kind?: string;
 }
 
 export interface TerminalOutputPayload {

@@ -106,12 +106,13 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 	}
 
 	key := localSessionKey(selection, slot)
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+
+	repoPath := ""
+	if result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
-	})
-	if err != nil {
-		return startSessionResult{}, err
+	}); err == nil {
+		repoPath = result.RepoPath
 	}
 
 	a.mu.Lock()
@@ -128,12 +129,13 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 
 	executable, args := resolveLocalShellCommand(goruntime.GOOS)
 	params := startTerminalSessionParams{
-		Dir:        resolveTerminalStartDir(result.RepoPath),
-		Executable: executable,
-		Args:       args,
-		Env:        []string{appSessionEnvVar + "=1"},
-		Cols:       cols,
-		Rows:       rows,
+		Dir:          resolveTerminalStartDir(repoPath),
+		Executable:   executable,
+		Args:         args,
+		Env:          []string{appSessionEnvVar + "=1"},
+		Cols:         cols,
+		Rows:         rows,
+		InitialInput: localSessionBanner(selection),
 	}
 	session, err := a.deps.startTerminal(params)
 	if err != nil {
@@ -238,52 +240,105 @@ func (a *App) StartAISession(selection uiSelection, slot, cols, rows int) (start
 }
 
 func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
-	return a.startCommandSession(selection, cols, rows, initSelectionKey(selection), buildInitArgs(selection), resolveInitStartDir(a.deps.findProjectRoot), []string{appSessionEnvVar + "=1"})
+	return a.runErunCommandInLocal(selection, cols, rows, buildInitArgs(selection))
 }
 
 func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
-	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
-	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
-		Tenant:      selection.Tenant,
-		Environment: selection.Environment,
-	})
-	if err != nil {
-		return startSessionResult{}, err
-	}
-	return a.startCommandSession(selection, cols, rows, deploySelectionKey(selection), buildDeployArgs(selection), resolveDeployStartDir(a.deps.findProjectRoot, result), []string{appSessionEnvVar + "=1"})
+	return a.runErunCommandInLocal(selection, cols, rows, buildDeployArgs(selection))
 }
 
 func (a *App) StartSSHDInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
-	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
-	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
-		Tenant:      selection.Tenant,
-		Environment: selection.Environment,
-	})
-	if err != nil {
-		return startSessionResult{}, err
-	}
-	return a.startCommandSession(selection, cols, rows, sshdInitSelectionKey(selection), buildSSHDInitArgs(selection), resolveDeployStartDir(a.deps.findProjectRoot, result), []string{appSessionEnvVar + "=1"})
+	return a.runErunCommandInLocal(selection, cols, rows, buildSSHDInitArgs(selection))
 }
 
 func (a *App) StartDoctorSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+	return a.runErunCommandInLocal(selection, cols, rows, buildDoctorArgs(selection))
+}
+
+func (a *App) runErunCommandInLocal(selection uiSelection, cols, rows int, args []string) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
 		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
 	}
-	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
-		Tenant:      selection.Tenant,
-		Environment: selection.Environment,
-	})
+
+	local, err := a.ensureLocalSession(selection, 0, cols, rows)
 	if err != nil {
 		return startSessionResult{}, err
 	}
-	return a.startCommandSession(selection, cols, rows, doctorSelectionKey(selection), buildDoctorArgs(selection), resolveDeployStartDir(a.deps.findProjectRoot, result), []string{appSessionEnvVar + "=1"})
+
+	a.mu.Lock()
+	target := local.session
+	a.mu.Unlock()
+	if target == nil {
+		return startSessionResult{}, fmt.Errorf("local session is not ready")
+	}
+
+	command := buildLocalErunCommand(a.deps.resolveCLIPath(), args)
+	if _, err := io.WriteString(target, command); err != nil {
+		return startSessionResult{}, err
+	}
+
+	a.recordTerminalActivity(selection)
+
+	return startSessionResult{
+		SessionID: local.serial,
+		Selection: selection,
+		Slot:      local.slot,
+		Kind:      string(sessionKindLocal),
+	}, nil
+}
+
+func (a *App) ensureLocalSession(selection uiSelection, slot, cols, rows int) (*managedTerminal, error) {
+	key := localSessionKey(selection, slot)
+
+	a.mu.Lock()
+	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
+		a.mu.Unlock()
+		return existing, nil
+	}
+	a.mu.Unlock()
+
+	if _, err := a.StartLocalSession(selection, slot, cols, rows); err != nil {
+		return nil, err
+	}
+
+	a.mu.Lock()
+	managed := a.sessions[key]
+	a.mu.Unlock()
+	if managed == nil {
+		return nil, fmt.Errorf("local session not registered after start")
+	}
+	return managed, nil
+}
+
+func buildLocalErunCommand(cliPath string, args []string) string {
+	cliPath = strings.TrimSpace(cliPath)
+	if cliPath == "" {
+		cliPath = "erun"
+	}
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, shellQuoteIfNeeded(cliPath))
+	for _, arg := range args {
+		parts = append(parts, shellQuoteIfNeeded(arg))
+	}
+	return strings.Join(parts, " ") + "\n"
+}
+
+func shellQuoteIfNeeded(value string) string {
+	if value == "" {
+		return "''"
+	}
+	for _, r := range value {
+		switch {
+		case r >= 'A' && r <= 'Z':
+		case r >= 'a' && r <= 'z':
+		case r >= '0' && r <= '9':
+		case r == '-' || r == '_' || r == '.' || r == '/' || r == '=' || r == '+' || r == ':' || r == '@' || r == ',':
+		default:
+			return shellQuote(value)
+		}
+	}
+	return value
 }
 
 func (a *App) OpenIDE(selection uiSelection, ide string) error {

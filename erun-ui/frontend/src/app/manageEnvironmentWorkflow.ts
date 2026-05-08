@@ -52,6 +52,7 @@ interface ManageEnvironmentWorkflowDeps {
   reloadStateAfterEnvironmentChange: () => Promise<void>;
   resolveRuntimeImage: (version: string) => string;
   startDeploySelection: (selection: UISelection) => Promise<void>;
+  activateLocalAfterCommand: (selection: UISelection, result: StartSessionResult) => Promise<void>;
   showNotification: (kind: NonNullable<AppState['notification']>['kind'], message: string) => void;
   showTerminalMessage: (message: string, busy?: boolean) => void;
   setPendingDebugHeader: (header: string) => void;
@@ -475,6 +476,10 @@ export class ManageEnvironmentWorkflow {
     this.deps.fitTerminal();
     const terminalSize = this.deps.terminalSize();
     const result = (await starter(runSelection, terminalSize.cols, terminalSize.rows)) as StartSessionResult;
+    if (result.kind === 'local') {
+      await this.deps.activateLocalAfterCommand(selection, result);
+      return;
+    }
     this.trackHiddenSession(mode, result.sessionId, runSelection);
     this.sessions.registerDebugSession(result.sessionId, runSelection, 'hidden');
     this.deps.applyPendingDebugHeader(result.sessionId);

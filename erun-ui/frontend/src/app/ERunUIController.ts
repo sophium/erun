@@ -255,6 +255,7 @@ export class ERunUIController {
     reloadStateAfterEnvironmentChange: () => this.reloadStateAfterEnvironmentChange(),
     resolveRuntimeImage: (version) => this.resolveManageRuntimeImage(version),
     startDeploySelection: (selection) => this.startDeploySelection(selection),
+    activateLocalAfterCommand: (selection, result) => this.activateLocalAfterCommand(selection, result),
     showNotification: (kind, message) => this.showNotification(kind, message),
     showTerminalMessage: (message, busy) => this.showTerminalMessage(message, busy),
     setPendingDebugHeader: (header) => this.setPendingDebugHeader(header),
@@ -1682,9 +1683,6 @@ export class ERunUIController {
   private async startInitSelection(selection: UISelection): Promise<void> {
     const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     this.state.selected = selection;
-    if (this.state.debugOpen) {
-      this.setPendingDebugHeader(`$ ${formatDebugCommand(runSelection, 'init')}\n`);
-    }
     this.emit();
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
@@ -1692,24 +1690,12 @@ export class ERunUIController {
 
     this.fitAddon?.fit();
     const result = (await StartInitSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
-    this.sessions.trackInitSession(result.sessionId, runSelection);
-    this.registerDebugSession(result.sessionId, runSelection, 'hidden');
-    this.applyPendingDebugHeader(result.sessionId);
-    this.state.sessionId = result.sessionId;
-    this.syncDebugDisplay();
-
-    this.resetTerminal();
-    this.focusTerminalSoon();
-    this.queueTerminalResize();
-    this.emit();
+    await this.activateLocalAfterCommand(selection, result);
   }
 
   private async startDeploySelection(selection: UISelection): Promise<void> {
     const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     this.state.selected = selection;
-    if (this.state.debugOpen) {
-      this.setPendingDebugHeader(`$ ${formatDebugCommand(runSelection, 'deploy')}\n`);
-    }
     this.emit();
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
@@ -1717,13 +1703,20 @@ export class ERunUIController {
 
     this.fitAddon?.fit();
     const result = (await StartDeploySession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
-    this.sessions.trackDeploySession(result.sessionId, runSelection);
-    this.registerDebugSession(result.sessionId, runSelection, 'hidden');
-    this.applyPendingDebugHeader(result.sessionId);
-    this.state.sessionId = result.sessionId;
-    this.syncDebugDisplay();
+    await this.activateLocalAfterCommand(selection, result);
+  }
 
+  async activateLocalAfterCommand(selection: UISelection, result: StartSessionResult): Promise<void> {
+    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
+    const key = selectionKey(runSelection);
+    this.recordTab(key, result.sessionId, result.slot ?? 0, 'local', 'Local');
+    await this.ensureDefaultEnvTabs(runSelection, key);
+    this.state.sessionId = result.sessionId;
+    this.state.selectedSessionByEnv = { ...this.state.selectedSessionByEnv, [key]: result.sessionId };
+    rebuildTerminalDisplayBuffer(this.sessions, result.sessionId);
     this.resetTerminal();
+    this.writeTerminalBuffer(this.sessions.displayBuffer(result.sessionId));
+    this.hideTerminalMessage();
     this.focusTerminalSoon();
     this.queueTerminalResize();
     this.emit();
