@@ -340,10 +340,9 @@ func localSessionBanner(selection uiSelection) []byte {
 	if tenant == "" || environment == "" {
 		return nil
 	}
-	// Bash treats the leading `#` as a comment so the line is shown but not
-	// executed; the user sees what the desktop is doing for this env without
-	// the host shell trying to run anything yet.
-	banner := fmt.Sprintf("# erun open %s %s — env shell in ERun tab, %s in AI tab\n", tenant, environment, defaultAITool)
+	// Emitted as a terminal-output event (not pty input) so it doesn't get
+	// fed to the shell. ANSI dim makes it look like an inline comment.
+	banner := fmt.Sprintf("\x1b[2m# erun open %s %s — env shell in ERun tab, %s in AI tab\x1b[0m\r\n", tenant, environment, defaultAITool)
 	return []byte(banner)
 }
 

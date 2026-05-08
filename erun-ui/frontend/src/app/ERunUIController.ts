@@ -541,11 +541,25 @@ export class ERunUIController {
     const tabs = this.state.tabsByEnv[key] || [];
     const cols = this.terminal?.cols || 80;
     const rows = this.terminal?.rows || 24;
+    if (!tabs.some((tab) => tab.kind === 'erun')) {
+      await this.spawnERunTabPassive(key, runSelection, cols, rows);
+    }
     if (!tabs.some((tab) => tab.kind === 'local')) {
       await this.spawnDefaultTab(key, runSelection, 'local', 'Local', cols, rows);
     }
     if (!tabs.some((tab) => tab.kind === 'ai')) {
       await this.spawnDefaultTab(key, runSelection, 'ai', 'AI', cols, rows);
+    }
+  }
+
+  private async spawnERunTabPassive(key: string, runSelection: UISelection, cols: number, rows: number): Promise<void> {
+    try {
+      const result = (await StartSession(runSelection, 0, cols, rows)) as StartSessionResult;
+      this.sessions.trackOpenSession(key, result.sessionId, runSelection);
+      this.registerDebugSession(result.sessionId, runSelection, 'open');
+      this.recordTab(key, result.sessionId, result.slot ?? 0, 'erun', 'ERun');
+    } catch {
+      // ERun failed to spawn; future env opens will retry.
     }
   }
 
