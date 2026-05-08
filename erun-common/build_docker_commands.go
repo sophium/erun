@@ -530,13 +530,22 @@ func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Wri
 	switchCmd := Command("gh", "auth", "switch", "-h", "github.com", "-u", namespace)
 	switchCmd.Stdout = stdout
 	switchCmd.Stderr = stderr
-	_ = switchCmd.Run()
+	switchErr := switchCmd.Run()
 
-	refreshCmd := Command("gh", "auth", "refresh", "-h", "github.com", "-s", "write:packages,read:packages")
-	refreshCmd.Stdin = stdin
-	refreshCmd.Stdout = stdout
-	refreshCmd.Stderr = stderr
-	if err := refreshCmd.Run(); err != nil {
+	var ghCmd *exec.Cmd
+	if switchErr == nil {
+		// Namespace owner is already logged in and is now the active
+		// account; widen its scopes.
+		ghCmd = Command("gh", "auth", "refresh", "-h", "github.com", "-s", "write:packages,read:packages")
+	} else {
+		// Namespace owner is not logged in. Add it via the interactive
+		// browser flow, requesting the package scopes up front.
+		ghCmd = Command("gh", "auth", "login", "-h", "github.com", "-s", "write:packages,read:packages", "-w", "--git-protocol", "https")
+	}
+	ghCmd.Stdin = stdin
+	ghCmd.Stdout = stdout
+	ghCmd.Stderr = stderr
+	if err := ghCmd.Run(); err != nil {
 		return false, err
 	}
 
