@@ -47,14 +47,14 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
   return (
     <Dialog open={dialog.open} onOpenChange={(open) => !open && controller.closeManageDialog()}>
       <DialogContent
-        className="max-h-[min(85vh,800px)] sm:max-w-2xl"
+        className="h-[min(85vh,800px)] sm:max-w-2xl"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           controller.focusTerminalSoon();
         }}
       >
         <form
-          className="flex max-h-[calc(min(85vh,800px)-3rem)] min-h-0 flex-col gap-4"
+          className="flex h-[calc(min(85vh,800px)-3rem)] min-h-0 flex-col gap-4"
           onSubmit={(event) => {
             event.preventDefault();
             if (confirmingDelete && deleteEnabled) {

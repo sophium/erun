@@ -41,7 +41,7 @@ func commandVerbosity(cmd *cobra.Command) int {
 	if err != nil {
 		return 0
 	}
-	if verbosity == 0 && isExecCommand(cmd) {
+	if verbosity == 0 && (isExecCommand(cmd) || isActionCommand(cmd)) {
 		return 1
 	}
 	return verbosity
@@ -126,6 +126,23 @@ func isSensitiveName(value string) bool {
 func isExecCommand(cmd *cobra.Command) bool {
 	for current := cmd; current != nil; current = current.Parent() {
 		if current.Name() == "exec" {
+			return true
+		}
+	}
+	return false
+}
+
+// isActionCommand reports whether cmd is a mutating top-level command whose
+// traced steps should be visible by default. Otherwise the user runs e.g.
+// `erun deploy <tenant> <env> --version X` and sees a blank screen for
+// minutes while helm waits, with no audit line, no helm command, no
+// kubectl-context prep printed. Visibility of system status is mandatory
+// for action flows (Nielsen heuristic #1), so we lift the verbosity floor
+// to 1 for these commands the same way exec already does.
+func isActionCommand(cmd *cobra.Command) bool {
+	for current := cmd; current != nil; current = current.Parent() {
+		switch current.Name() {
+		case "deploy", "build", "push", "release", "init", "delete":
 			return true
 		}
 	}

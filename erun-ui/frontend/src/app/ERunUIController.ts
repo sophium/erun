@@ -637,7 +637,18 @@ export class ERunUIController {
     this.applyPendingDebugHeader(result.sessionId);
     rebuildTerminalDisplayBuffer(this.sessions, result.sessionId);
     this.state.sessionId = result.sessionId;
-    this.state.selectedSessionByEnv = { ...this.state.selectedSessionByEnv, [key]: result.sessionId };
+    // Preserve the user's prior tab choice for this env across re-opens
+    // (Nielsen heuristic #4: consistency / user control). Only seed
+    // selectedSessionByEnv when nothing is remembered, or when the
+    // remembered session no longer exists in the live tabs for this env.
+    // restoreSelectedTabForEnv below switches the terminal back to the
+    // remembered tab when one exists.
+    const remembered = this.state.selectedSessionByEnv[key];
+    const liveTabs = this.state.tabsByEnv[key] || [];
+    const rememberedIsLive = remembered && liveTabs.some((tab) => tab.sessionId === remembered);
+    if (!rememberedIsLive) {
+      this.state.selectedSessionByEnv = { ...this.state.selectedSessionByEnv, [key]: result.sessionId };
+    }
     this.syncDebugDisplay();
     const slot = result.slot ?? 0;
     const kind: TerminalTabKind = slot === 0 ? 'erun' : 'extra';

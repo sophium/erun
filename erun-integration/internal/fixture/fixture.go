@@ -89,6 +89,39 @@ func SeedRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment stri
 	)
 }
 
+// SeedRemoteRepoPathTenantEnv writes a tenant/env tree where the env's
+// repopath points to a path that does not exist locally and the env is
+// flagged remote: true. The tenant projectroot still points at setup.Cwd so
+// chart resolution finds the local <tenant>-devops module via cwd-based
+// detection. Use this for regression scenarios where deploy must not
+// readdir() the env's remote-host path.
+func SeedRemoteRepoPathTenantEnv(t testing.TB, setup env.Setup, tenant, environment, remoteRepoPath string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+setup.Cwd+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+remoteRepoPath+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"runtimeversion: 1.0.0\n"+
+			"remote: true\n",
+	)
+}
+
 // SeedReleaseRepo materializes a minimal erun-devops layout (chart, two
 // dockerfiles, VERSION file) inside dir, runs `git init -b <branch>`, and
 // produces one initial commit. Use this for `release` scenarios that need

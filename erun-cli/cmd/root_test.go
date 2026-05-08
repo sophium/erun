@@ -386,10 +386,6 @@ func TestInitCommandPreservesExistingTenantDefaultEnvironmentWhenFlagOmitted(t *
 
 	requireNoError(t, cmd.Execute(), "Execute failed")
 
-	if got := buf.String(); got != "" {
-		t.Fatalf("expected no command output, got %q", got)
-	}
-
 	tenantConfig, _, err := common.LoadTenantConfig("tenant-a")
 	if err != nil {
 		t.Fatalf("LoadTenantConfig failed: %v", err)

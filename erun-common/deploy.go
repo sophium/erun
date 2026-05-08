@@ -221,6 +221,20 @@ func ResolveCurrentDeploySpecs(store DeployStore, findProjectRoot ProjectFinderF
 		return nil, err
 	}
 
+	if resolvedTarget.RemoteRepo() {
+		spec, err := resolveDefaultDevopsDeploySpecWithImage(resolvedTarget, DevopsComponentName)
+		if err != nil {
+			return nil, err
+		}
+		if versionOverride := strings.TrimSpace(target.VersionOverride); versionOverride != "" {
+			spec.Deploy.Version = versionOverride
+		}
+		if err := configureDeployInputMetadata(store, resolvedTarget, &spec.Deploy); err != nil {
+			return nil, err
+		}
+		return []DeploySpec{spec}, nil
+	}
+
 	deployContexts, err := ResolveCurrentKubernetesDeployContexts(findProjectRoot, resolveKubernetesDeployContext, resolvedTarget.RepoPath)
 	if err != nil {
 		return nil, err
