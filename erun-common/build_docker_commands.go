@@ -496,14 +496,21 @@ func captureGHCommand(args ...string) (string, error) {
 	return string(output), nil
 }
 
-// RefreshGHCRPackageScopes runs `gh auth refresh` for the given namespace
-// account to add write:packages,read:packages to the stored token, then
-// re-runs TryGHCRNamespaceLogin so docker is authed with the freshly-scoped
-// token. The gh refresh flow is interactive (browser device-code), so stdin
-// must be a real terminal. Returns (true, nil) when the refresh completed
-// and docker login was redone, (false, nil) when prerequisites are missing
-// (gh not installed, non-ghcr tag, missing namespace), and (false, err) for
-// gh or docker errors.
+// RefreshGHCRPackageScopes widens the gh-stored token's scopes to include
+// write:packages,read:packages and then re-runs TryGHCRNamespaceLogin so
+// docker is authed with the freshly-scoped token.
+//
+// `gh auth refresh` operates on the currently active gh account and does
+// not accept a `-u` flag, so this helper first runs `gh auth switch -u
+// <namespace>` best-effort to make the namespace owner active. If switch
+// fails (single-account install, account not logged in), the refresh runs
+// against whichever account is active.
+//
+// The refresh flow is interactive (browser device-code), so stdin must be
+// a real terminal. Returns (true, nil) when the refresh completed and
+// docker login was redone, (false, nil) when prerequisites are missing
+// (gh not installed, non-ghcr tag, missing namespace), and (false, err)
+// for gh or docker errors.
 //
 // Use this only after TryGHCRNamespaceLogin + retry fails with a
 // scope-denied error: that signals the gh-stored token itself lacks the
@@ -520,7 +527,12 @@ func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Wri
 		return false, nil
 	}
 
-	refreshCmd := Command("gh", "auth", "refresh", "-h", "github.com", "-s", "write:packages,read:packages", "-u", namespace)
+	switchCmd := Command("gh", "auth", "switch", "-h", "github.com", "-u", namespace)
+	switchCmd.Stdout = stdout
+	switchCmd.Stderr = stderr
+	_ = switchCmd.Run()
+
+	refreshCmd := Command("gh", "auth", "refresh", "-h", "github.com", "-s", "write:packages,read:packages")
 	refreshCmd.Stdin = stdin
 	refreshCmd.Stdout = stdout
 	refreshCmd.Stderr = stderr
