@@ -379,32 +379,11 @@ func TestProjectConfigRoundTrip(t *testing.T) {
 	}
 }
 
-func TestProjectConfigK8sDeploymentsAcceptsScalarAndSequenceItems(t *testing.T) {
-	const yamlBody = `environments:
-  local:
-    k8s:
-      deployments:
-        - erun-backend-postgres
-        - [erun-backend-db, erun-backend-api]
-        - erun-devops
-`
-	var cfg ProjectConfig
-	if err := yaml.Unmarshal([]byte(yamlBody), &cfg); err != nil {
-		t.Fatalf("Unmarshal failed: %v", err)
-	}
-	want := []ProjectK8sDeploymentStep{
-		{Components: []string{"erun-backend-postgres"}},
-		{Components: []string{"erun-backend-db", "erun-backend-api"}},
-		{Components: []string{"erun-devops"}},
-	}
-	if got := cfg.K8sForEnvironment("local").Deployments; !reflect.DeepEqual(got, want) {
-		t.Fatalf("unexpected environments.local.k8s.deployments:\n got: %+v\nwant: %+v", got, want)
-	}
-	if plan := cfg.K8sForEnvironment("missing"); !plan.IsZero() {
-		t.Fatalf("expected missing environment to yield an empty plan, got %+v", plan)
-	}
-}
-
+// TestProjectConfigK8sDeploymentsRoundTripsScalarStepsAsScalars covers the
+// MarshalYAML branch of ProjectK8sDeploymentStep. Marshaling is not exercised
+// by any erun --dry-run scenario (no command writes a project config back to
+// disk after parsing it), so this is the kind of pure-format branch the
+// AGENTS.md unit-test exception is for.
 func TestProjectConfigK8sDeploymentsRoundTripsScalarStepsAsScalars(t *testing.T) {
 	cfg := ProjectConfig{
 		Environments: map[string]ProjectEnvironmentConfig{
@@ -436,6 +415,12 @@ func TestProjectConfigK8sDeploymentsRoundTripsScalarStepsAsScalars(t *testing.T)
 	}
 }
 
+// TestProjectConfigK8sDeploymentsRejectsInvalidNode covers the error branch
+// of UnmarshalYAML. Triggering it requires writing a malformed config file
+// and running a command against it; that does exercise the same code path,
+// but it errors before any trace lines are written, so the integration
+// suite cannot pin the specific error message. Keeping the unit test here
+// per the AGENTS.md exception for parser branches.
 func TestProjectConfigK8sDeploymentsRejectsInvalidNode(t *testing.T) {
 	const yamlBody = `environments:
   local:

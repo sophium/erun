@@ -1,49 +1,14 @@
-erun helps to run and manage multiple tenants/environments.
-
-Verbosity levels:
-  -v    print trace logs for command flow and side effects
-
-Dry-run:
-  --dry-run runs the same resolution flow but skips mutating operations
-
-Timing:
-  --time prints the elapsed runtime after the command finishes
+Build and push the current container image
 
 Usage:
-  erun [flags]
-  erun [command]
-
-Examples:
-  erun deploy --dry-run
-  erun -v deploy --dry-run
-  erun -vv init -y
-  alias tenant-environment='eval "$(erun open tenant environment --no-shell)"'
-
-Available Commands:
-  api         Run ERun backend API over HTTP
-  app         Launch the ERun desktop app
-  cloud       Cloud provider utilities
-  completion  Generate the autocompletion script for the specified shell
-  context     Manage ERun cloud Kubernetes contexts
-  delete      Delete an environment from ERun configuration and remove its remote runtime namespace
-  deploy      Deploy the current Helm chart or all charts in the current devops k8s scope
-  devops      DevOps utilities
-  doctor      Inspect the DevOps runtime and offer Docker cleanup actions
-  exec        Repository execution utilities
-  help        Help about any command
-  idle        Show environment idle stop status
-  init        Initialize configuration for the current project
-  list        List configured tenants and environments
-  mcp         Run ERun as an MCP server over HTTP
-  open        Open a shell in the tenant environment worktree
-  release     Plan and execute a project release
-  sshd        Remote SSH utilities
-  version     Print build information
+  erun push [flags]
 
 Flags:
-      --dry-run         Resolve and trace mutating actions without executing them.
-  -h, --help            help for erun
+      --dry-run          Resolve and trace mutating actions without executing them.
+      --force            Rebuild and re-push every image, bypassing the fingerprint cache
+  -h, --help             help for push
+      --version string   Override the resolved image version
+
+Global Flags:
       --time            Print the elapsed runtime after the command finishes.
   -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.
-
-Use "erun [command] --help" for more information about a command.

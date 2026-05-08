@@ -195,6 +195,14 @@ func SeedDevopsRepo(t testing.TB, setup env.Setup, tenant, environment string) s
 	return chart
 }
 
+// SeedProjectDockerfile writes a minimal Dockerfile under setup.Cwd so
+// commands that key off "current directory contains a Dockerfile" (notably
+// the root `erun push` shorthand) register for the test invocation.
+func SeedProjectDockerfile(t testing.TB, setup env.Setup) {
+	t.Helper()
+	mustWrite(t, filepath.Join(setup.Cwd, "Dockerfile"), "FROM alpine\n")
+}
+
 // SeedProjectK8sConfig writes setup.Cwd/.erun/config.yaml with a k8s
 // section so deploy commands pick up the configured deployment plan
 // (ordering + parallel grouping) instead of the hardcoded fallback.

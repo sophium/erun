@@ -217,53 +217,6 @@ func TestNewRootCmdRegistersDevopsContainerPushCommand(t *testing.T) {
 	}
 }
 
-func TestRootPushCmdExposesForceFlag(t *testing.T) {
-	cmd := newTestRootCmd(testRootDeps{
-		FindProjectRoot: func() (string, string, error) {
-			return "tenant-a", t.TempDir(), nil
-		},
-		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
-			dir := t.TempDir()
-			return common.DockerBuildContext{
-				Dir:            dir,
-				DockerfilePath: filepath.Join(dir, "Dockerfile"),
-			}, nil
-		},
-	})
-
-	pushCmd, _, err := cmd.Find([]string{"push"})
-	if err != nil {
-		t.Fatalf("Find(push) failed: %v", err)
-	}
-	flag := pushCmd.Flags().Lookup("force")
-	if flag == nil {
-		t.Fatal("expected push command to expose --force flag")
-	}
-	if flag.Value.Type() != "bool" {
-		t.Fatalf("expected --force to be a bool, got %s", flag.Value.Type())
-	}
-}
-
-func TestDevopsContainerPushCmdExposesForceFlag(t *testing.T) {
-	cmd := newTestRootCmd(testRootDeps{
-		ResolveDockerBuildContext: func() (common.DockerBuildContext, error) {
-			return common.DockerBuildContext{Dir: t.TempDir()}, nil
-		},
-	})
-
-	pushCmd, _, err := cmd.Find([]string{"devops", "container", "push"})
-	if err != nil {
-		t.Fatalf("Find(devops container push) failed: %v", err)
-	}
-	flag := pushCmd.Flags().Lookup("force")
-	if flag == nil {
-		t.Fatal("expected devops container push command to expose --force flag")
-	}
-	if flag.Value.Type() != "bool" {
-		t.Fatalf("expected --force to be a bool, got %s", flag.Value.Type())
-	}
-}
-
 func TestNewRootCmdRegistersBuildShorthandWhenDockerfilePresent(t *testing.T) {
 	cmd := newTestRootCmd(testRootDeps{
 		FindProjectRoot: func() (string, string, error) {
