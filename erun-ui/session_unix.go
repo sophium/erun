@@ -30,6 +30,13 @@ func startTerminalSession(params startTerminalSessionParams) (terminalSession, e
 		return nil, err
 	}
 
+	if len(params.InitialInput) > 0 {
+		if _, writeErr := file.Write(params.InitialInput); writeErr != nil {
+			_ = file.Close()
+			return nil, writeErr
+		}
+	}
+
 	session := &unixTerminalSession{
 		ptyFile: file,
 		cmd:     cmd,

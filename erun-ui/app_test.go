@@ -2986,7 +2986,7 @@ func TestStartLocalSessionStartsShellAtRepoPath(t *testing.T) {
 	}
 }
 
-func TestStartAISessionDefaultsToClaude(t *testing.T) {
+func TestStartAISessionRunsErunOpenWithClaudeInitialInput(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
@@ -3001,6 +3001,7 @@ func TestStartAISessionDefaultsToClaude(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store:           store,
 		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
 		startTerminal: func(params startTerminalSessionParams) (terminalSession, error) {
 			started = params
 			return newStubTerminalSession(), nil
@@ -3015,11 +3016,15 @@ func TestStartAISessionDefaultsToClaude(t *testing.T) {
 	if result.Kind != string(sessionKindAI) {
 		t.Fatalf("expected kind %q, got %q", sessionKindAI, result.Kind)
 	}
-	if started.Executable != defaultAITool {
-		t.Fatalf("expected default executable %q, got %q", defaultAITool, started.Executable)
+	if started.Executable != "/tmp/erun" {
+		t.Fatalf("expected erun executable, got %q", started.Executable)
 	}
-	if started.Dir != projectRoot {
-		t.Fatalf("unexpected start dir: %q", started.Dir)
+	wantArgs := []string{"open", "erun", "remote"}
+	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
+		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
+	}
+	if string(started.InitialInput) != defaultAITool+"\n" {
+		t.Fatalf("expected initial input %q, got %q", defaultAITool+"\n", string(started.InitialInput))
 	}
 }
 
@@ -3038,6 +3043,7 @@ func TestStartAISessionUsesConfiguredAITool(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store:           store,
 		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
 		startTerminal: func(params startTerminalSessionParams) (terminalSession, error) {
 			started = params
 			return newStubTerminalSession(), nil
@@ -3048,8 +3054,8 @@ func TestStartAISessionUsesConfiguredAITool(t *testing.T) {
 	if _, err := app.StartAISession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartAISession failed: %v", err)
 	}
-	if started.Executable != "codex" {
-		t.Fatalf("expected configured AI tool %q, got %q", "codex", started.Executable)
+	if string(started.InitialInput) != "codex\n" {
+		t.Fatalf("expected configured AI initial input %q, got %q", "codex\n", string(started.InitialInput))
 	}
 }
 

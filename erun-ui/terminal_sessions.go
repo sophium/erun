@@ -198,11 +198,13 @@ func (a *App) StartAISession(selection uiSelection, slot, cols, rows int) (start
 
 	tool := resolveAIToolCommand(result.EnvConfig.AITool)
 	params := startTerminalSessionParams{
-		Dir:        resolveTerminalStartDir(result.RepoPath),
-		Executable: tool,
-		Env:        []string{appSessionEnvVar + "=1"},
-		Cols:       cols,
-		Rows:       rows,
+		Dir:          resolveTerminalStartDir(result.RepoPath),
+		Executable:   a.deps.resolveCLIPath(),
+		Args:         buildOpenArgs(result.Tenant, result.Environment, selection.Debug),
+		Env:          []string{appSessionEnvVar + "=1"},
+		Cols:         cols,
+		Rows:         rows,
+		InitialInput: []byte(tool + "\n"),
 	}
 	session, err := a.deps.startTerminal(params)
 	if err != nil {

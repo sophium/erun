@@ -20,12 +20,13 @@ type terminalSession interface {
 }
 
 type startTerminalSessionParams struct {
-	Dir        string
-	Executable string
-	Args       []string
-	Env        []string
-	Cols       int
-	Rows       int
+	Dir          string
+	Executable   string
+	Args         []string
+	Env          []string
+	Cols         int
+	Rows         int
+	InitialInput []byte
 }
 
 func resolveCLIExecutable() string {

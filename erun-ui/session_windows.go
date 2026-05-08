@@ -43,6 +43,14 @@ func startTerminalSession(params startTerminalSessionParams) (terminalSession, e
 		return nil, err
 	}
 
+	if len(params.InitialInput) > 0 {
+		if _, writeErr := ptyDevice.Write(params.InitialInput); writeErr != nil {
+			_ = process.Kill()
+			_ = ptyDevice.Close()
+			return nil, writeErr
+		}
+	}
+
 	session := &windowsTerminalSession{
 		pty:     ptyDevice,
 		outPipe: ptyDevice.OutPipe(),
