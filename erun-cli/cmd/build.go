@@ -104,7 +104,7 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 				if !errors.As(buildErr, &authErr) {
 					return buildErr
 				}
-				if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return builder(buildInput, stdout, stderr) }, stdout, stderr); handled {
+				if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return builder(buildInput, stdout, stderr) }, ctx.Stdin, stdout, stderr); handled {
 					return finalErr
 				}
 				return buildErr
@@ -147,7 +147,7 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 				if !errors.As(buildErr, &authErr) {
 					return buildErr
 				}
-				if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return builder(buildInput, stdout, stderr) }, stdout, stderr); handled {
+				if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return builder(buildInput, stdout, stderr) }, ctx.Stdin, stdout, stderr); handled {
 					return finalErr
 				}
 				return buildErr
@@ -184,7 +184,7 @@ func runDockerPushWithRetry(ctx common.Context, pushInput common.DockerPushSpec,
 		return err
 	}
 
-	if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return push(ctx, pushInput) }, ctx.Stdout, ctx.Stderr); handled {
+	if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return push(ctx, pushInput) }, ctx.Stdin, ctx.Stdout, ctx.Stderr); handled {
 		return finalErr
 	}
 
@@ -219,7 +219,7 @@ func runDockerBuildWithRetry(ctx common.Context, buildInput common.DockerBuildSp
 		return err
 	}
 
-	if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return build(buildInput, stdout, stderr) }, stdout, stderr); handled {
+	if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return build(buildInput, stdout, stderr) }, ctx.Stdin, stdout, stderr); handled {
 		return finalErr
 	}
 
@@ -265,22 +265,67 @@ func addPushCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandT
 // of those cases — finalErr is nil on a successful retry, or the latest
 // error otherwise. Returns (false, nil) when the error did not match, in
 // which case the caller should fall through to the prompt-login path.
-func handleNamespaceAuthError(authErr common.DockerRegistryAuthError, retry func() error, stdout, stderr io.Writer) (bool, error) {
+//
+// On scope denial the helper escalates: if the first auto-relogin retry
+// still fails with a scope error (the stored gh token itself lacks the
+// scope), it runs `gh auth refresh -s write:packages,read:packages`
+// interactively and retries once more. The user only types a one-time
+// device code; the rest is automated.
+func handleNamespaceAuthError(authErr common.DockerRegistryAuthError, retry func() error, stdin io.Reader, stdout, stderr io.Writer) (bool, error) {
 	if !common.IsDockerCreatePackageDenied(authErr.Message) && !common.IsDockerScopeDenied(authErr.Message) {
 		return false, nil
 	}
-	var finalErr error
-	if ok, _ := common.TryGHCRNamespaceLogin(authErr.Tag, stdout, stderr); ok {
-		if retryErr := retry(); retryErr == nil {
+	finalErr := retryAfterNamespaceLogin(authErr, retry, stdout, stderr)
+	if finalErr == nil {
+		return true, nil
+	}
+	if scopeStillDenied(finalErr) {
+		if refreshErr := retryAfterScopeRefresh(authErr, retry, stdin, stdout, stderr); refreshErr == nil {
 			return true, nil
 		} else {
-			finalErr = retryErr
+			finalErr = refreshErr
 		}
 	}
 	if common.IsDockerCreatePackageDenied(authErr.Message) {
 		printCreatePackageGuidance(stderr, authErr.Tag, authErr.Registry)
 	}
 	return true, finalErr
+}
+
+// retryAfterNamespaceLogin runs TryGHCRNamespaceLogin and retries once.
+// Returns nil on retry success, the original auth error when the namespace
+// switch is not applicable, or the retry error otherwise.
+func retryAfterNamespaceLogin(authErr common.DockerRegistryAuthError, retry func() error, stdout, stderr io.Writer) error {
+	ok, _ := common.TryGHCRNamespaceLogin(authErr.Tag, stdout, stderr)
+	if !ok {
+		return authErr
+	}
+	if retryErr := retry(); retryErr != nil {
+		return retryErr
+	}
+	return nil
+}
+
+// retryAfterScopeRefresh escalates by running `gh auth refresh` to widen the
+// stored token's scopes, then retries. Returns nil on retry success or the
+// refresh / retry error.
+func retryAfterScopeRefresh(authErr common.DockerRegistryAuthError, retry func() error, stdin io.Reader, stdout, stderr io.Writer) error {
+	ok, refreshErr := common.RefreshGHCRPackageScopes(authErr.Tag, stdin, stdout, stderr)
+	if refreshErr != nil {
+		return refreshErr
+	}
+	if !ok {
+		return authErr
+	}
+	return retry()
+}
+
+func scopeStillDenied(err error) bool {
+	var authErr common.DockerRegistryAuthError
+	if !errors.As(err, &authErr) {
+		return false
+	}
+	return common.IsDockerScopeDenied(authErr.Message)
 }
 
 func printCreatePackageGuidance(out io.Writer, tag, registry string) {

@@ -496,6 +496,41 @@ func captureGHCommand(args ...string) (string, error) {
 	return string(output), nil
 }
 
+// RefreshGHCRPackageScopes runs `gh auth refresh` for the given namespace
+// account to add write:packages,read:packages to the stored token, then
+// re-runs TryGHCRNamespaceLogin so docker is authed with the freshly-scoped
+// token. The gh refresh flow is interactive (browser device-code), so stdin
+// must be a real terminal. Returns (true, nil) when the refresh completed
+// and docker login was redone, (false, nil) when prerequisites are missing
+// (gh not installed, non-ghcr tag, missing namespace), and (false, err) for
+// gh or docker errors.
+//
+// Use this only after TryGHCRNamespaceLogin + retry fails with a
+// scope-denied error: that signals the gh-stored token itself lacks the
+// scope, and the only remedy is replacing the token.
+func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Writer) (bool, error) {
+	if !isGHCRRegistry(dockerRegistryFromImageTag(tag)) {
+		return false, nil
+	}
+	namespace := DockerNamespaceFromTag(tag)
+	if namespace == "" {
+		return false, nil
+	}
+	if _, err := exec.LookPath("gh"); err != nil {
+		return false, nil
+	}
+
+	refreshCmd := Command("gh", "auth", "refresh", "-h", "github.com", "-s", "write:packages,read:packages", "-u", namespace)
+	refreshCmd.Stdin = stdin
+	refreshCmd.Stdout = stdout
+	refreshCmd.Stderr = stderr
+	if err := refreshCmd.Run(); err != nil {
+		return false, err
+	}
+
+	return TryGHCRNamespaceLogin(tag, stdout, stderr)
+}
+
 // TryGHCRNamespaceLogin re-authenticates docker to ghcr.io as the GitHub user
 // that owns the target namespace, when that user is also configured in the
 // local gh CLI. Returns (true, nil) on a successful login, (false, nil) when
