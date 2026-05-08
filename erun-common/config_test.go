@@ -5,9 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/adrg/xdg"
+	"gopkg.in/yaml.v3"
 )
 
 const testConfigRoot = "erun"
@@ -374,6 +376,66 @@ func TestProjectConfigRoundTrip(t *testing.T) {
 	}
 	if path != filepath.Join(projectRoot, projectConfigDir, configFile) {
 		t.Fatalf("unexpected project config path: %s", path)
+	}
+}
+
+func TestProjectConfigK8sDeploymentsAcceptsScalarAndSequenceItems(t *testing.T) {
+	const yamlBody = `k8s:
+  deployments:
+    - erun-backend-postgres
+    - [erun-backend-db, erun-backend-api]
+    - erun-devops
+`
+	var cfg ProjectConfig
+	if err := yaml.Unmarshal([]byte(yamlBody), &cfg); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+	want := []ProjectK8sDeploymentStep{
+		{Components: []string{"erun-backend-postgres"}},
+		{Components: []string{"erun-backend-db", "erun-backend-api"}},
+		{Components: []string{"erun-devops"}},
+	}
+	if !reflect.DeepEqual(cfg.K8s.Deployments, want) {
+		t.Fatalf("unexpected k8s.deployments:\n got: %+v\nwant: %+v", cfg.K8s.Deployments, want)
+	}
+}
+
+func TestProjectConfigK8sDeploymentsRoundTripsScalarStepsAsScalars(t *testing.T) {
+	cfg := ProjectConfig{
+		K8s: ProjectK8sConfig{
+			Deployments: []ProjectK8sDeploymentStep{
+				{Components: []string{"erun-backend-postgres"}},
+				{Components: []string{"erun-backend-db", "erun-backend-api"}},
+				{Components: []string{"erun-devops"}},
+			},
+		},
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+	out := string(data)
+	for _, want := range []string{
+		"        - erun-backend-postgres",
+		"        - - erun-backend-db",
+		"          - erun-backend-api",
+		"        - erun-devops",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected marshaled config to contain %q, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestProjectConfigK8sDeploymentsRejectsInvalidNode(t *testing.T) {
+	const yamlBody = `k8s:
+  deployments:
+    - {name: erun-devops}
+`
+	var cfg ProjectConfig
+	err := yaml.Unmarshal([]byte(yamlBody), &cfg)
+	if err == nil {
+		t.Fatalf("expected error for mapping step, got nil; cfg=%+v", cfg)
 	}
 }
 

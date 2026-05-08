@@ -147,6 +147,47 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/components_includes_backend_in_deploy_order", normalize.Apply(result.Combined))
 	})
 
+	t.Run("project_k8s_plan_groups_parallel_step", func(t *testing.T) {
+		// When .erun/config.yaml declares a k8s.deployments plan with a
+		// parallel-group step (a list as the item), deploy must group those
+		// charts into one step and emit a single "step N (parallel): ..."
+		// trace line. Other steps stay serial. Order across steps matches
+		// the config, not the alphabetical chart-discovery order.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "k8s:\n  deployments:\n    - [team-devops, erun-backend-postgres]\n    - erun-backend-db\n    - erun-backend-api\n")
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--version", "1.0.0",
+			"--components", "erun-backend-postgres,erun-backend-db,erun-backend-api",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if !strings.Contains(result.Combined, "deploy: step 1 (parallel): team-devops, erun-backend-postgres") {
+			t.Fatalf("expected step-1 parallel trace for runtime + postgres, got:\n%s", result.Combined)
+		}
+		// Subsequent single-spec steps should NOT emit a parallel trace.
+		if strings.Contains(result.Combined, "deploy: step 2 (parallel)") || strings.Contains(result.Combined, "deploy: step 3 (parallel)") {
+			t.Fatalf("expected single-spec steps to skip the parallel trace, got:\n%s", result.Combined)
+		}
+		expectedHelmOrder := []string{"team-devops", "erun-backend-postgres", "erun-backend-db", "erun-backend-api"}
+		var lastIndex int
+		for _, name := range expectedHelmOrder {
+			idx := strings.Index(result.Combined[lastIndex:], "helm upgrade --install")
+			if idx < 0 {
+				t.Fatalf("expected helm release for %q after position %d, got:\n%s", name, lastIndex, result.Combined)
+			}
+			lastIndex += idx + len("helm upgrade --install")
+			tail := result.Combined[lastIndex:]
+			nameIdx := strings.Index(tail, name)
+			if nameIdx < 0 || nameIdx > 800 {
+				t.Fatalf("expected helm release %q within next chunk, got:\n%s", name, result.Combined)
+			}
+		}
+		golden.Equal(t, "deploy/project_k8s_plan_groups_parallel_step", normalize.Apply(result.Combined))
+	})
+
 	t.Run("components_rejects_unknown_name", func(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")

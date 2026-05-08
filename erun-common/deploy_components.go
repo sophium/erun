@@ -17,14 +17,11 @@ var optInDeployComponents = []string{
 	"erun-backend-api",
 }
 
-// deployComponentOrder defines the rank used when sorting charts that are
-// resolved together in a single deploy. Lower rank deploys first. Charts not
-// listed here keep their relative order at the end.
-//
-// Postgres comes up first so the migration job can connect; the migration
-// job's post-install hook blocks helm until it succeeds, which gates the API
-// rollout; the runtime pod is independent and rolls last.
-var deployComponentOrder = []string{
+// defaultDeployComponentOrder is the fallback rank used when the project
+// config has no k8s.deployments plan. Postgres → db → api; other components
+// (e.g. the runtime chart) sort to the end so backend dependencies come up
+// first.
+var defaultDeployComponentOrder = []string{
 	"erun-backend-postgres",
 	"erun-backend-db",
 	"erun-backend-api",
@@ -71,26 +68,97 @@ func normalizeRequestedComponents(components []string) (map[string]struct{}, err
 	return out, nil
 }
 
-// sortDeployContextsByDeployOrder reorders contexts so listed components run
-// first in the order defined by deployComponentOrder. Stable so charts not in
-// the order list keep their relative input order.
-func sortDeployContextsByDeployOrder(contexts []KubernetesDeployContext) {
-	rank := make(map[string]int, len(deployComponentOrder))
-	for i, name := range deployComponentOrder {
-		rank[name] = i
-	}
-	defaultRank := len(deployComponentOrder)
+// sortDeployContextsByDeployOrder reorders contexts according to the given
+// project k8s plan (or the hardcoded fallback if the plan is empty). The sort
+// is stable so contexts not mentioned in the plan keep their relative input
+// order at the end of the list.
+func sortDeployContextsByDeployOrder(contexts []KubernetesDeployContext, plan ProjectK8sConfig) {
+	rank := componentRankByPlan(plan)
 	sort.SliceStable(contexts, func(i, j int) bool {
-		ra, ok := rank[strings.TrimSpace(contexts[i].ComponentName)]
-		if !ok {
-			ra = defaultRank
-		}
-		rb, ok := rank[strings.TrimSpace(contexts[j].ComponentName)]
-		if !ok {
-			rb = defaultRank
-		}
-		return ra < rb
+		return rank(contexts[i].ComponentName) < rank(contexts[j].ComponentName)
 	})
+}
+
+// componentRankByPlan returns the rank function used for ordering. When the
+// plan declares steps, components in step i have rank i; components not in
+// any step rank at the end.
+func componentRankByPlan(plan ProjectK8sConfig) func(name string) int {
+	if len(plan.Deployments) == 0 {
+		rank := make(map[string]int, len(defaultDeployComponentOrder))
+		for i, name := range defaultDeployComponentOrder {
+			rank[name] = i
+		}
+		fallback := len(defaultDeployComponentOrder)
+		return func(name string) int {
+			if r, ok := rank[strings.TrimSpace(name)]; ok {
+				return r
+			}
+			return fallback
+		}
+	}
+	rank := make(map[string]int)
+	for i, step := range plan.Deployments {
+		for _, name := range step.Components {
+			rank[strings.TrimSpace(name)] = i
+		}
+	}
+	fallback := len(plan.Deployments)
+	return func(name string) int {
+		if r, ok := rank[strings.TrimSpace(name)]; ok {
+			return r
+		}
+		return fallback
+	}
+}
+
+// groupDeploySpecsByPlan slots each resolved spec into a step. Specs whose
+// component is mentioned in the same plan step end up in the same group;
+// specs not mentioned in the plan each get their own trailing group,
+// preserving input order. With an empty plan, each spec is its own step
+// (strictly serial deploys, matching the pre-config behavior).
+func groupDeploySpecsByPlan(specs []DeploySpec, plan ProjectK8sConfig) [][]DeploySpec {
+	if len(specs) == 0 {
+		return nil
+	}
+	if len(plan.Deployments) == 0 {
+		groups := make([][]DeploySpec, 0, len(specs))
+		for _, spec := range specs {
+			groups = append(groups, []DeploySpec{spec})
+		}
+		return groups
+	}
+	specsByName := make(map[string]DeploySpec, len(specs))
+	stepIndex := make(map[string]int)
+	for i, step := range plan.Deployments {
+		for _, name := range step.Components {
+			stepIndex[strings.TrimSpace(name)] = i
+		}
+	}
+	var trailing []DeploySpec
+	for _, spec := range specs {
+		name := strings.TrimSpace(spec.DeployContext.ComponentName)
+		if _, planned := stepIndex[name]; planned {
+			specsByName[name] = spec
+			continue
+		}
+		trailing = append(trailing, spec)
+	}
+	out := make([][]DeploySpec, 0, len(plan.Deployments)+len(trailing))
+	for _, step := range plan.Deployments {
+		group := make([]DeploySpec, 0, len(step.Components))
+		for _, name := range step.Components {
+			if spec, ok := specsByName[strings.TrimSpace(name)]; ok {
+				group = append(group, spec)
+			}
+		}
+		if len(group) > 0 {
+			out = append(out, group)
+		}
+	}
+	for _, spec := range trailing {
+		out = append(out, []DeploySpec{spec})
+	}
+	return out
 }
 
 // allDockerBuildsPromoted reports whether every build in the slice was marked

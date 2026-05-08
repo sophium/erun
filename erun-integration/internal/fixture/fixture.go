@@ -195,6 +195,18 @@ func SeedDevopsRepo(t testing.TB, setup env.Setup, tenant, environment string) s
 	return chart
 }
 
+// SeedProjectK8sConfig writes setup.Cwd/.erun/config.yaml with a k8s
+// section so deploy commands pick up the configured deployment plan
+// (ordering + parallel grouping) instead of the hardcoded fallback.
+func SeedProjectK8sConfig(t testing.TB, setup env.Setup, body string) {
+	t.Helper()
+	dir := filepath.Join(setup.Cwd, ".erun")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	mustWrite(t, filepath.Join(dir, "config.yaml"), body)
+}
+
 // SeedDevopsBackendCharts seeds the three opt-in backend charts
 // (erun-backend-postgres, erun-backend-db, erun-backend-api) alongside the
 // runtime chart created by SeedDevopsRepo. Each chart gets a Chart.yaml plus a

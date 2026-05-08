@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -166,12 +167,79 @@ type DeploySpec struct {
 }
 
 func RunDeploySpecs(ctx Context, executions []DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
-	for _, execution := range executions {
-		if err := RunDeploySpec(ctx, execution, build, push, deploy); err != nil {
+	if len(executions) == 0 {
+		return nil
+	}
+	plan := loadProjectK8sPlanForDeploy(executions)
+	groups := groupDeploySpecsByPlan(executions, plan)
+	for stepIndex, group := range groups {
+		if err := runDeployStep(ctx, stepIndex, group, build, push, deploy); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// loadProjectK8sPlanForDeploy reads the k8s deploy plan from the project root
+// of the first spec that has a usable RepoPath. All specs in a single deploy
+// share a target/repo, so the first one is authoritative. A missing or
+// unreadable project config yields an empty plan, which the grouper treats as
+// "one chart per step, in default order".
+func loadProjectK8sPlanForDeploy(executions []DeploySpec) ProjectK8sConfig {
+	for _, execution := range executions {
+		if plan := loadProjectK8sPlanForRepo(execution.Target.RepoPath); !plan.IsZero() {
+			return plan
+		}
+	}
+	return ProjectK8sConfig{}
+}
+
+func loadProjectK8sPlanForRepo(repoPath string) ProjectK8sConfig {
+	repoPath = strings.TrimSpace(repoPath)
+	if repoPath == "" {
+		return ProjectK8sConfig{}
+	}
+	config, _, err := LoadProjectConfig(repoPath)
+	if err != nil {
+		return ProjectK8sConfig{}
+	}
+	return config.K8s
+}
+
+// runDeployStep runs every spec in the group. Single-spec steps and dry-run
+// invocations execute serially so traces remain deterministic; real runs with
+// multiple specs in the same step launch goroutines and wait for all to
+// finish, surfacing the joined error if any failed.
+func runDeployStep(ctx Context, stepIndex int, specs []DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
+	if len(specs) == 0 {
+		return nil
+	}
+	if len(specs) > 1 {
+		names := make([]string, 0, len(specs))
+		for _, spec := range specs {
+			names = append(names, spec.DeployContext.ComponentName)
+		}
+		ctx.Trace(fmt.Sprintf("deploy: step %d (parallel): %s", stepIndex+1, strings.Join(names, ", ")))
+	}
+	if ctx.DryRun || len(specs) == 1 {
+		for _, spec := range specs {
+			if err := RunDeploySpec(ctx, spec, build, push, deploy); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	var wg sync.WaitGroup
+	errs := make([]error, len(specs))
+	for i, spec := range specs {
+		wg.Add(1)
+		go func(i int, spec DeploySpec) {
+			defer wg.Done()
+			errs[i] = RunDeploySpec(ctx, spec, build, push, deploy)
+		}(i, spec)
+	}
+	wg.Wait()
+	return errors.Join(errs...)
 }
 
 func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc) error {
@@ -280,7 +348,8 @@ func ResolveCurrentDeploySpecs(store DeployStore, findProjectRoot ProjectFinderF
 	if err != nil {
 		return nil, err
 	}
-	sortDeployContextsByDeployOrder(deployContexts)
+	projectK8s := loadProjectK8sPlanForRepo(resolvedTarget.RepoPath)
+	sortDeployContextsByDeployOrder(deployContexts, projectK8s)
 	specs := make([]DeploySpec, 0, len(deployContexts))
 	allowLocalBuilds := deployTargetSnapshotEnabled(resolvedTarget, target.Snapshot)
 	var currentBuild *DockerBuildSpec

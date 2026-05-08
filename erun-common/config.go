@@ -126,6 +126,69 @@ type ProjectConfig struct {
 	ContainerRegistry string                              `yaml:"containerregistry,omitempty"`
 	Environments      map[string]ProjectEnvironmentConfig `yaml:"environments,omitempty"`
 	Release           ReleaseConfig                       `yaml:"release,omitempty"`
+	K8s               ProjectK8sConfig                    `yaml:"k8s,omitempty"`
+}
+
+// ProjectK8sConfig declares the deploy plan for `erun deploy` in this project.
+// Deployments lists the steps in the order they must run; each step is a
+// group of components to deploy in parallel. A step may be a single
+// component name (scalar) or a sequence of names (parallel group).
+type ProjectK8sConfig struct {
+	Deployments []ProjectK8sDeploymentStep `yaml:"deployments,omitempty"`
+}
+
+func (c ProjectK8sConfig) IsZero() bool {
+	return len(c.Deployments) == 0
+}
+
+// ProjectK8sDeploymentStep is one ordered step in the deploy plan. The
+// Components slice always holds the parallel group; YAML unmarshaling lifts a
+// scalar single-component form into a one-element slice so users can write
+// either form interchangeably.
+type ProjectK8sDeploymentStep struct {
+	Components []string
+}
+
+func (s *ProjectK8sDeploymentStep) UnmarshalYAML(node *yaml.Node) error {
+	if s == nil {
+		return errors.New("nil ProjectK8sDeploymentStep")
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		value := strings.TrimSpace(node.Value)
+		if value == "" {
+			s.Components = nil
+			return nil
+		}
+		s.Components = []string{value}
+		return nil
+	case yaml.SequenceNode:
+		components := make([]string, 0, len(node.Content))
+		for _, child := range node.Content {
+			if child.Kind != yaml.ScalarNode {
+				return errors.New("k8s.deployments parallel group must contain only component names")
+			}
+			value := strings.TrimSpace(child.Value)
+			if value == "" {
+				continue
+			}
+			components = append(components, value)
+		}
+		s.Components = components
+		return nil
+	default:
+		return errors.New("k8s.deployments item must be a component name or a list of component names")
+	}
+}
+
+// MarshalYAML emits the natural form: a scalar when the step has exactly one
+// component, a flow-style sequence when it has multiple. This keeps
+// round-tripped configs readable instead of forcing every step into a list.
+func (s ProjectK8sDeploymentStep) MarshalYAML() (any, error) {
+	if len(s.Components) == 1 {
+		return s.Components[0], nil
+	}
+	return s.Components, nil
 }
 
 func (c ProjectConfig) ContainerRegistryForEnvironment(environment string) string {

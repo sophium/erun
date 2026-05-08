@@ -5,3 +5,8 @@ environments:
             skipIfExists:
                 - ghcr.io/sophium/erun-dind
                 - ghcr.io/sophium/erun-ubuntu
+k8s:
+    deployments:
+        - [erun-devops, erun-backend-postgres]
+        - erun-backend-db
+        - erun-backend-api
