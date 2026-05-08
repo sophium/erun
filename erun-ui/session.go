@@ -334,17 +334,6 @@ func resolveAIToolCommand(configured string) string {
 	return defaultAITool
 }
 
-func localSessionBanner(selection uiSelection) []byte {
-	tenant := strings.TrimSpace(selection.Tenant)
-	environment := strings.TrimSpace(selection.Environment)
-	if tenant == "" || environment == "" {
-		return nil
-	}
-	// Emitted as a terminal-output event (not pty input) so it doesn't get
-	// fed to the shell. ANSI dim makes it look like an inline comment.
-	banner := fmt.Sprintf("\x1b[2m# erun open %s %s — env shell in ERun tab, %s in AI tab\x1b[0m\r\n", tenant, environment, defaultAITool)
-	return []byte(banner)
-}
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
