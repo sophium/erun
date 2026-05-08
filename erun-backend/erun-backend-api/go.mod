@@ -1,6 +1,6 @@
 module github.com/sophium/erun/erun-backend/erun-backend-api
 
-go 1.25.5
+go 1.26.0
 
 require (
 	github.com/coreos/go-oidc/v3 v3.18.0
