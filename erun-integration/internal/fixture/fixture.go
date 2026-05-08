@@ -141,8 +141,10 @@ func RunGit(t testing.TB, dir string, args ...string) {
 
 // SeedDevopsRepo creates a minimal <tenant>-devops chart layout under
 // setup.Cwd so commands that look for a kubernetes deploy context find one.
-// Returns the path to the chart directory in case tests want to assert on it.
-func SeedDevopsRepo(t testing.TB, setup env.Setup, tenant string) string {
+// Writes a values.<environment>.yaml so deploy --dry-run can resolve the
+// per-environment values file. Returns the path to the chart directory in case
+// tests want to assert on it.
+func SeedDevopsRepo(t testing.TB, setup env.Setup, tenant, environment string) string {
 	t.Helper()
 	devops := filepath.Join(setup.Cwd, tenant+"-devops")
 	chart := filepath.Join(devops, "k8s", tenant+"-devops")
@@ -153,6 +155,9 @@ func SeedDevopsRepo(t testing.TB, setup env.Setup, tenant string) string {
 		"apiVersion: v2\nname: "+tenant+"-devops\nversion: 0.0.1\n",
 	)
 	mustWrite(t, filepath.Join(chart, "values.yaml"), "tenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(chart, "values."+strings.ToLower(strings.TrimSpace(environment))+".yaml"),
+		"environment: "+environment+"\n",
+	)
 	mustWrite(t, filepath.Join(devops, "VERSION"), "1.0.0\n")
 	return chart
 }
