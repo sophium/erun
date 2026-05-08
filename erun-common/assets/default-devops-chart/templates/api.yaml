@@ -1,0 +1,93 @@
+{{- $apiPort := default 17033 .Values.apiPort -}}
+{{- $api := default dict .Values.api -}}
+{{- $oidcAllowedIssuers := default "" $api.oidcAllowedIssuers -}}
+{{- $awsIdentityStoreID := default "" $api.awsIdentityStoreID -}}
+{{- $awsIdentityStoreRegion := default "" $api.awsIdentityStoreRegion -}}
+{{- $postgres := default dict $api.postgres -}}
+{{- $postgresDatabase := default "erun" $postgres.database -}}
+{{- $postgresUser := default "erun" $postgres.user -}}
+{{- $postgresPort := default 5432 $postgres.port -}}
+{{- $postgresPasswordSecretName := default "erun-backend-postgres" $postgres.passwordSecretName -}}
+{{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
+{{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@erun-postgres:%v/%s?sslmode=disable" $postgresUser $postgresPort $postgresDatabase) $api.databaseURL -}}
+{{- $imageOverrides := default dict .Values.imageOverrides -}}
+{{- $backendDBImage := default (printf "ghcr.io/sophium/erun-backend-db:%s" .Chart.AppVersion) (index $imageOverrides "erun-backend-db") -}}
+{{- $backendAPIImage := default (printf "ghcr.io/sophium/erun-backend-api:%s" .Chart.AppVersion) (index $imageOverrides "erun-backend-api") -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: erun-api
+  labels:
+    app: erun-api
+spec:
+  type: ClusterIP
+  selector:
+    app: erun-api
+  ports:
+    - name: api
+      port: {{ $apiPort }}
+      targetPort: api
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: erun-api
+  labels:
+    app: erun-api
+spec:
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: erun-api
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: erun-api
+    spec:
+      initContainers:
+        - image: {{ $backendDBImage }}
+          name: erun-backend-db-migrate
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HOME
+              value: /home/erun
+            - name: ERUN_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $postgresPasswordSecretName }}
+                  key: {{ $postgresPasswordSecretKey }}
+            - name: ERUN_DATABASE_URL
+              value: {{ $databaseURL | quote }}
+      containers:
+        - image: {{ $backendAPIImage }}
+          name: erun-backend-api
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: HOME
+              value: /home/erun
+            - name: ERUN_API_HOST
+              value: 0.0.0.0
+            - name: ERUN_API_PORT
+              value: {{ $apiPort | quote }}
+            - name: ERUN_POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $postgresPasswordSecretName }}
+                  key: {{ $postgresPasswordSecretKey }}
+            - name: ERUN_DATABASE_URL
+              value: {{ $databaseURL | quote }}
+            - name: ERUN_OIDC_ALLOWED_ISSUERS
+              value: {{ $oidcAllowedIssuers | quote }}
+            - name: ERUN_AWS_IDENTITY_STORE_ID
+              value: {{ $awsIdentityStoreID | quote }}
+            - name: ERUN_AWS_IDENTITY_STORE_REGION
+              value: {{ $awsIdentityStoreRegion | quote }}
+            - name: ERUN_TENANT
+              value: {{ required "tenant is required" .Values.tenant | quote }}
+            - name: ERUN_ENVIRONMENT
+              value: {{ required "environment is required" .Values.environment | quote }}
+          ports:
+            - containerPort: {{ $apiPort }}
+              name: api

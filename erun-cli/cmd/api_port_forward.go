@@ -111,7 +111,7 @@ func kubectlAPIPortForwardArgs(result common.OpenResult, localPort int) []string
 	}
 	args = append(args,
 		"port-forward",
-		"deployment/"+common.RuntimeReleaseName(result.Tenant),
+		"service/erun-api",
 		fmt.Sprintf("%d:%d", localPort, common.APIPortForResult(result)),
 		"--address", "127.0.0.1",
 	)
