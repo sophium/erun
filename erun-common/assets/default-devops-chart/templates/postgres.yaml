@@ -1,0 +1,101 @@
+{{- $postgres := default dict (default dict .Values.api).postgres -}}
+{{- $postgresDatabase := default "erun" $postgres.database -}}
+{{- $postgresUser := default "erun" $postgres.user -}}
+{{- $postgresPort := default 5432 $postgres.port -}}
+{{- $postgresPasswordSecretName := default "erun-backend-postgres" $postgres.passwordSecretName -}}
+{{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
+{{- $postgresStorage := default "10Gi" $postgres.storage -}}
+{{- $imageOverrides := default dict .Values.imageOverrides -}}
+{{- $postgresImage := default "postgres:18" (index $imageOverrides "postgres") -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: erun-postgres-data
+  labels:
+    app: erun-postgres
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ $postgresStorage | quote }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: erun-postgres
+  labels:
+    app: erun-postgres
+spec:
+  type: ClusterIP
+  selector:
+    app: erun-postgres
+  ports:
+    - name: postgres
+      port: {{ $postgresPort }}
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: erun-postgres
+  labels:
+    app: erun-postgres
+spec:
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: erun-postgres
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: erun-postgres
+    spec:
+      securityContext:
+        fsGroup: 999
+      containers:
+        - image: {{ $postgresImage }}
+          name: erun-postgres
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: POSTGRES_DB
+              value: {{ $postgresDatabase | quote }}
+            - name: POSTGRES_USER
+              value: {{ $postgresUser | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $postgresPasswordSecretName }}
+                  key: {{ $postgresPasswordSecretKey }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: {{ $postgresPort }}
+              name: postgres
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -lc
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1 -p {{ $postgresPort }}
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -lc
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1 -p {{ $postgresPort }}
+            periodSeconds: 5
+            timeoutSeconds: 2
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: erun-postgres-data
+      restartPolicy: Always

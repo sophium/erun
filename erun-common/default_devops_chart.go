@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-//go:embed assets/default-devops-chart/Chart.yaml assets/default-devops-chart/values.local.yaml assets/default-devops-chart/templates/service.yaml
+//go:embed assets/default-devops-chart/Chart.yaml assets/default-devops-chart/values.local.yaml assets/default-devops-chart/templates/service.yaml assets/default-devops-chart/templates/postgres.yaml assets/default-devops-chart/templates/api.yaml
 var defaultDevopsChartFiles embed.FS
 
 type defaultDevopsChartTemplate struct {
@@ -34,6 +34,16 @@ var defaultDevopsChartTemplates = []defaultDevopsChartTemplate{
 	{
 		AssetPath:  "assets/default-devops-chart/templates/service.yaml",
 		TargetPath: "__MODULE_NAME__/k8s/__MODULE_NAME__/templates/service.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-devops-chart/templates/postgres.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/__MODULE_NAME__/templates/postgres.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-devops-chart/templates/api.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/__MODULE_NAME__/templates/api.yaml",
 		Mode:       0o644,
 	},
 }

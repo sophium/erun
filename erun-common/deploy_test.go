@@ -387,25 +387,22 @@ func TestRuntimeChartsInstallBinfmtForMultiArchBuilds(t *testing.T) {
 }
 
 func TestRuntimeChartsExposeMCPAPIAndSSHPorts(t *testing.T) {
-	paths := []string{
-		filepath.Join("..", "erun-devops", "k8s", "erun-devops", "templates", "service.yaml"),
-		filepath.Join("assets", "default-devops-chart", "templates", "service.yaml"),
+	chartDirs := []string{
+		filepath.Join("..", "erun-devops", "k8s", "erun-devops", "templates"),
+		filepath.Join("assets", "default-devops-chart", "templates"),
 	}
 
-	for _, path := range paths {
-		data, err := os.ReadFile(path)
+	for _, dir := range chartDirs {
+		content, err := concatChartTemplates(dir)
 		if err != nil {
-			t.Fatalf("read %q: %v", path, err)
+			t.Fatalf("read templates in %q: %v", dir, err)
 		}
-		content := string(data)
 		for _, want := range []string{
 			`{{- $mcpPort := default 17000 .Values.mcpPort -}}`,
 			`{{- $apiPort := default 17033 .Values.apiPort -}}`,
 			`{{- $sshPort := default 17022 .Values.sshPort -}}`,
 			`{{- $api := default dict .Values.api -}}`,
 			`{{- $oidcAllowedIssuers := default "" $api.oidcAllowedIssuers -}}`,
-			`{{- $postgres := default dict $api.postgres -}}`,
-			`{{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@127.0.0.1:%v/%s?sslmode=disable" $postgresUser $postgresPort $postgresDatabase) $api.databaseURL -}}`,
 			`{{- $cloudContext := default dict .Values.cloudContext -}}`,
 			`{{- $cloudContextName := default "" $cloudContext.name -}}`,
 			`{{- $cloudProvider := default "" $cloudContext.provider -}}`,
@@ -433,7 +430,8 @@ func TestRuntimeChartsExposeMCPAPIAndSSHPorts(t *testing.T) {
 			"name: ERUN_DATABASE_URL",
 			"name: ERUN_OIDC_ALLOWED_ISSUERS",
 			"name: ERUN_SSHD_PORT",
-			"name: erun-backend-postgres",
+			"name: erun-postgres",
+			"name: erun-api",
 			"restartPolicy: Always",
 			"containerPort: {{ $mcpPort }}",
 			"name: mcp",
@@ -443,7 +441,7 @@ func TestRuntimeChartsExposeMCPAPIAndSSHPorts(t *testing.T) {
 			"name: ssh",
 		} {
 			if !strings.Contains(content, want) {
-				t.Fatalf("expected %q to contain %q, got:\n%s", path, want, content)
+				t.Fatalf("expected templates in %q to contain %q, got:\n%s", dir, want, content)
 			}
 		}
 		for _, forbidden := range []string{
@@ -452,10 +450,33 @@ func TestRuntimeChartsExposeMCPAPIAndSSHPorts(t *testing.T) {
 			"containerPort: 17023",
 		} {
 			if strings.Contains(content, forbidden) {
-				t.Fatalf("expected %q not to expose SSHD target port marker %q, got:\n%s", path, forbidden, content)
+				t.Fatalf("expected templates in %q not to expose SSHD target port marker %q, got:\n%s", dir, forbidden, content)
 			}
 		}
 	}
+}
+
+// concatChartTemplates returns the concatenated contents of every *.yaml file
+// in dir. Tests that assert a Helm chart contains a specific token use this
+// helper so they don't care which template file in the chart owns the token.
+func concatChartTemplates(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	var buf strings.Builder
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return "", err
+		}
+		buf.Write(data)
+		buf.WriteString("\n")
+	}
+	return buf.String(), nil
 }
 
 func TestRuntimeChartsUseNilSafeNestedValueDefaults(t *testing.T) {
