@@ -182,19 +182,19 @@ func RunDeploySpecs(ctx Context, executions []DeploySpec, build DockerImageBuild
 
 // loadProjectK8sPlanForDeploy reads the k8s deploy plan from the project root
 // of the first spec that has a usable RepoPath. All specs in a single deploy
-// share a target/repo, so the first one is authoritative. A missing or
-// unreadable project config yields an empty plan, which the grouper treats as
-// "one chart per step, in default order".
+// share a target/repo and an environment, so the first one is authoritative.
+// A missing or unreadable project config yields an empty plan, which the
+// grouper treats as "one chart per step, in default order".
 func loadProjectK8sPlanForDeploy(executions []DeploySpec) ProjectK8sConfig {
 	for _, execution := range executions {
-		if plan := loadProjectK8sPlanForRepo(execution.Target.RepoPath); !plan.IsZero() {
+		if plan := loadProjectK8sPlanForRepo(execution.Target.RepoPath, execution.Target.Environment); !plan.IsZero() {
 			return plan
 		}
 	}
 	return ProjectK8sConfig{}
 }
 
-func loadProjectK8sPlanForRepo(repoPath string) ProjectK8sConfig {
+func loadProjectK8sPlanForRepo(repoPath, environment string) ProjectK8sConfig {
 	repoPath = strings.TrimSpace(repoPath)
 	if repoPath == "" {
 		return ProjectK8sConfig{}
@@ -203,7 +203,7 @@ func loadProjectK8sPlanForRepo(repoPath string) ProjectK8sConfig {
 	if err != nil {
 		return ProjectK8sConfig{}
 	}
-	return config.K8s
+	return config.K8sForEnvironment(environment)
 }
 
 // runDeployStep runs every spec in the group. Single-spec steps and dry-run
@@ -348,7 +348,7 @@ func ResolveCurrentDeploySpecs(store DeployStore, findProjectRoot ProjectFinderF
 	if err != nil {
 		return nil, err
 	}
-	projectK8s := loadProjectK8sPlanForRepo(resolvedTarget.RepoPath)
+	projectK8s := loadProjectK8sPlanForRepo(resolvedTarget.RepoPath, resolvedTarget.Environment)
 	sortDeployContextsByDeployOrder(deployContexts, projectK8s)
 	specs := make([]DeploySpec, 0, len(deployContexts))
 	allowLocalBuilds := deployTargetSnapshotEnabled(resolvedTarget, target.Snapshot)

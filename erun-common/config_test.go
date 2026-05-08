@@ -380,11 +380,13 @@ func TestProjectConfigRoundTrip(t *testing.T) {
 }
 
 func TestProjectConfigK8sDeploymentsAcceptsScalarAndSequenceItems(t *testing.T) {
-	const yamlBody = `k8s:
-  deployments:
-    - erun-backend-postgres
-    - [erun-backend-db, erun-backend-api]
-    - erun-devops
+	const yamlBody = `environments:
+  local:
+    k8s:
+      deployments:
+        - erun-backend-postgres
+        - [erun-backend-db, erun-backend-api]
+        - erun-devops
 `
 	var cfg ProjectConfig
 	if err := yaml.Unmarshal([]byte(yamlBody), &cfg); err != nil {
@@ -395,18 +397,25 @@ func TestProjectConfigK8sDeploymentsAcceptsScalarAndSequenceItems(t *testing.T) 
 		{Components: []string{"erun-backend-db", "erun-backend-api"}},
 		{Components: []string{"erun-devops"}},
 	}
-	if !reflect.DeepEqual(cfg.K8s.Deployments, want) {
-		t.Fatalf("unexpected k8s.deployments:\n got: %+v\nwant: %+v", cfg.K8s.Deployments, want)
+	if got := cfg.K8sForEnvironment("local").Deployments; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected environments.local.k8s.deployments:\n got: %+v\nwant: %+v", got, want)
+	}
+	if plan := cfg.K8sForEnvironment("missing"); !plan.IsZero() {
+		t.Fatalf("expected missing environment to yield an empty plan, got %+v", plan)
 	}
 }
 
 func TestProjectConfigK8sDeploymentsRoundTripsScalarStepsAsScalars(t *testing.T) {
 	cfg := ProjectConfig{
-		K8s: ProjectK8sConfig{
-			Deployments: []ProjectK8sDeploymentStep{
-				{Components: []string{"erun-backend-postgres"}},
-				{Components: []string{"erun-backend-db", "erun-backend-api"}},
-				{Components: []string{"erun-devops"}},
+		Environments: map[string]ProjectEnvironmentConfig{
+			"local": {
+				K8s: ProjectK8sConfig{
+					Deployments: []ProjectK8sDeploymentStep{
+						{Components: []string{"erun-backend-postgres"}},
+						{Components: []string{"erun-backend-db", "erun-backend-api"}},
+						{Components: []string{"erun-devops"}},
+					},
+				},
 			},
 		},
 	}
@@ -416,10 +425,10 @@ func TestProjectConfigK8sDeploymentsRoundTripsScalarStepsAsScalars(t *testing.T)
 	}
 	out := string(data)
 	for _, want := range []string{
-		"        - erun-backend-postgres",
-		"        - - erun-backend-db",
-		"          - erun-backend-api",
-		"        - erun-devops",
+		"            - erun-backend-postgres",
+		"            - - erun-backend-db",
+		"              - erun-backend-api",
+		"            - erun-devops",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected marshaled config to contain %q, got:\n%s", want, out)
@@ -428,9 +437,11 @@ func TestProjectConfigK8sDeploymentsRoundTripsScalarStepsAsScalars(t *testing.T)
 }
 
 func TestProjectConfigK8sDeploymentsRejectsInvalidNode(t *testing.T) {
-	const yamlBody = `k8s:
-  deployments:
-    - {name: erun-devops}
+	const yamlBody = `environments:
+  local:
+    k8s:
+      deployments:
+        - {name: erun-devops}
 `
 	var cfg ProjectConfig
 	err := yaml.Unmarshal([]byte(yamlBody), &cfg)

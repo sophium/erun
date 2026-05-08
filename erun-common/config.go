@@ -107,6 +107,7 @@ func (c *EnvConfig) SetSnapshot(enabled bool) {
 type ProjectEnvironmentConfig struct {
 	ContainerRegistry string              `yaml:"containerregistry,omitempty"`
 	Docker            ProjectDockerConfig `yaml:"docker,omitempty"`
+	K8s               ProjectK8sConfig    `yaml:"k8s,omitempty"`
 }
 
 type ProjectDockerConfig struct {
@@ -126,7 +127,22 @@ type ProjectConfig struct {
 	ContainerRegistry string                              `yaml:"containerregistry,omitempty"`
 	Environments      map[string]ProjectEnvironmentConfig `yaml:"environments,omitempty"`
 	Release           ReleaseConfig                       `yaml:"release,omitempty"`
-	K8s               ProjectK8sConfig                    `yaml:"k8s,omitempty"`
+}
+
+// K8sForEnvironment returns the k8s deploy plan declared for the given
+// environment in this project config, or an empty plan when none exists.
+// Mirrors ContainerRegistryForEnvironment in shape so callers can resolve a
+// plan by environment without reaching into the Environments map.
+func (c ProjectConfig) K8sForEnvironment(environment string) ProjectK8sConfig {
+	environment = strings.TrimSpace(environment)
+	if environment == "" || c.Environments == nil {
+		return ProjectK8sConfig{}
+	}
+	envConfig, ok := c.Environments[environment]
+	if !ok {
+		return ProjectK8sConfig{}
+	}
+	return envConfig.K8s
 }
 
 // ProjectK8sConfig declares the deploy plan for `erun deploy` in this project.

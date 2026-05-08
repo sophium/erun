@@ -157,7 +157,7 @@ func TestDeploy(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
-		fixture.SeedProjectK8sConfig(t, setup, "k8s:\n  deployments:\n    - [team-devops, erun-backend-postgres]\n    - erun-backend-db\n    - erun-backend-api\n")
+		fixture.SeedProjectK8sConfig(t, setup, "environments:\n  dev:\n    k8s:\n      deployments:\n        - [team-devops, erun-backend-postgres]\n        - erun-backend-db\n        - erun-backend-api\n")
 		result := erun.Run(t, []string{
 			"deploy", "team", "dev",
 			"--version", "1.0.0",
