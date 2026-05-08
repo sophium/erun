@@ -221,7 +221,7 @@ func ResolveCurrentDeploySpecs(store DeployStore, findProjectRoot ProjectFinderF
 		return nil, err
 	}
 
-	deployContexts, err := ResolveCurrentKubernetesDeployContexts(findProjectRoot, resolveKubernetesDeployContext, target.RepoPath)
+	deployContexts, err := ResolveCurrentKubernetesDeployContexts(findProjectRoot, resolveKubernetesDeployContext, resolvedTarget.RepoPath)
 	if err != nil {
 		return nil, err
 	}
@@ -1305,13 +1305,13 @@ func resolveCurrentDevopsK8sDir(findProjectRoot ProjectFinderFunc, dir, projectR
 		return k8sDir, ok, err
 	}
 
-	projectRoot := strings.TrimSpace(projectRootOverride)
-	if projectRoot == "" {
-		var err error
-		projectRoot, err = resolveDockerBuildProjectRoot(findProjectRoot, DockerCommandTarget{})
-		if err != nil {
-			return "", false, err
-		}
+	if projectRoot := strings.TrimSpace(projectRootOverride); projectRoot != "" {
+		return resolveProjectRootDevopsK8sDir(findProjectRoot, projectRoot)
+	}
+
+	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, DockerCommandTarget{})
+	if err != nil {
+		return "", false, err
 	}
 	if projectRoot == "" || dir != filepath.Clean(projectRoot) {
 		return "", false, nil

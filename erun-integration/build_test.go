@@ -14,7 +14,7 @@ import (
 func TestBuild(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
-		fixture.SeedDevopsRepo(t, setup, "team")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"build", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -24,7 +24,7 @@ func TestBuild(t *testing.T) {
 
 	t.Run("dry_run_from_devops_cwd", func(t *testing.T) {
 		setup := env.New(t)
-		fixture.SeedDevopsRepo(t, setup, "team")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"build", "--dry-run", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "build/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
 	})
