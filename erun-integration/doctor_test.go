@@ -41,5 +41,6 @@ func TestDoctor(t *testing.T) {
 				t.Errorf("expected trace to contain %q, got stderr:\n%s", want, result.Stderr)
 			}
 		}
+		golden.Equal(t, "doctor/dry_run_prune_images_traces_dind_exec", normalize.Apply(result.Combined))
 	})
 }

@@ -1,0 +1,9 @@
+diff --git a/README.md b/README.md
+index 83c831f..d597f6c 100644
+--- a/README.md
++++ b/README.md
+@@ -1 +1 @@
+-# test
++rewritten
+audit: erun exec diff
+cd <TMP> && git diff --no-color --no-ext-diff

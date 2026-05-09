@@ -177,6 +177,7 @@ func TestCloud(t *testing.T) {
 		if !strings.Contains(result.Stdout, "test-user@aws") {
 			t.Errorf("expected stdout to mention the resolved alias, got:\n%s", result.Stdout)
 		}
+		golden.Equal(t, "cloud/login_real_run_invokes_aws_sso_login_via_stub", normalize.Apply(result.Combined))
 	})
 
 	t.Run("login_dry_run_traces_aws_sso_login", func(t *testing.T) {
@@ -192,6 +193,7 @@ func TestCloud(t *testing.T) {
 		if !strings.Contains(result.Stderr, "aws sso login --profile test-profile") {
 			t.Errorf("expected dry-run trace to contain aws sso login command, got stderr:\n%s", result.Stderr)
 		}
+		golden.Equal(t, "cloud/login_dry_run_traces_aws_sso_login", normalize.Apply(result.Combined))
 	})
 
 	t.Run("oidc_dry_run_traces_bearer_token_command", func(t *testing.T) {
@@ -208,6 +210,7 @@ func TestCloud(t *testing.T) {
 		if !strings.Contains(result.Stderr, "test-profile") || !strings.Contains(result.Stderr, "https://api.example") {
 			t.Errorf("expected dry-run trace to mention profile and audience, got stderr:\n%s", result.Stderr)
 		}
+		golden.Equal(t, "cloud/oidc_dry_run_traces_bearer_token_command", normalize.Apply(result.Combined))
 	})
 
 	t.Run("set_dry_run_traces_env_alias_write", func(t *testing.T) {
@@ -223,6 +226,7 @@ func TestCloud(t *testing.T) {
 		if !strings.Contains(result.Stderr, "team-cloud") {
 			t.Errorf("expected dry-run trace to mention team-cloud alias, got stderr:\n%s", result.Stderr)
 		}
+		golden.Equal(t, "cloud/set_dry_run_traces_env_alias_write", normalize.Apply(result.Combined))
 	})
 }
 

@@ -1,0 +1,17 @@
+audit: erun push
+cd <TMP> && docker push ghcr.io/sophium/api:<VERSION>
+denied: denied: create_package permission_denied
+
+ghcr.io rejected the push: only the namespace owner can create new packages under ghcr.io/sophium/.
+
+To bootstrap the first version of this image, get a personal access token from the GitHub account that owns ghcr.io/sophium/:
+  1. Sign into github.com as that account.
+  2. Open https://github.com/settings/tokens/new (classic).
+  3. Generate a token with scopes: write:packages and read:packages.
+  4. docker logout ghcr.io
+  5. echo $TOKEN | docker login ghcr.io -u sophium --password-stdin
+  6. Re-run erun push.
+
+After the package exists the owner can grant Write access to others (per-package settings, or via "Inherit access from source repository" on a linked repo). Future versions can then be pushed by anyone with that access — no PAT needed.
+
+denied: denied: create_package permission_denied

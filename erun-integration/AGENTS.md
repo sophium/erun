@@ -128,6 +128,21 @@ Reaching for a stub to "make this look real enough to reach the branch" is hidin
 - Set `UPDATE_GOLDEN=1` to (re)write the file. Default mode is read-and-compare.
 - Goldens are reviewed artifacts. Treat a diff in any golden file as a behavior change to inspect, not as noise. If a trace line drift reflects an intentional change, update and explain in the PR. If it doesn't, the test is doing its job.
 
+### Goldens vs `strings.Contains` substring assertions
+
+- **Default to `golden.Equal`.** It locks the entire output, so any unrelated trace drift fails loudly. Substring asserts only fail when the targeted line breaks; everything else can rot silently.
+- Add `strings.Contains` only as a *regression marker* alongside a golden — the substring makes a failure self-explanatory ("expected docker push line"), but the golden remains the ground truth. Use it as a precondition that fails fast before the golden diff produces a long block of text.
+- Substring-only (no golden) is acceptable in three narrow cases:
+  1. **Captured output is genuinely nondeterministic** even after normalization — e.g. fixture-temp dirs that vary in path depth, Go-test-generated tmpfile names, real-network responses. If you reach this case, first try to add a `normalize` rule. Reach for substring-only after the rule attempt fails.
+  2. **Asserting a single decision branch** in output that's otherwise covered by another scenario's golden — e.g. `--time` causes an `elapsed:` line; the surrounding output is already locked by a paired scenario without `--time`. Even here, prefer adding a golden specifically for the new line if practical.
+  3. **Filesystem-effect assertions** (e.g. "the env config tree was removed", "this file was written"). The golden checks stdout/stderr; filesystem state needs `os.Stat` / `os.ReadFile` checks alongside.
+- When converting a substring-only scenario to a golden, the workflow is:
+  1. `UPDATE_GOLDEN=1 go test -run Test<Command>/<scenario> ./...` to seed the file.
+  2. Inspect the generated `testdata/...` file by hand. Look for fixture-specific paths, generated tmp dirs, hashes, timestamps.
+  3. Add or extend a rule in `internal/normalize/` for any new nondeterminism; regenerate.
+  4. Re-run without `UPDATE_GOLDEN=1` to confirm the golden passes deterministically.
+  5. If the captured output cannot be made stable after several attempts, fall back to substring-only and document the why in the scenario comment.
+
 ## Coverage gate
 
 - `make integration-test` from the repo root: cleans `coverage/raw`, builds instrumented `erun`, runs `go test ./...` with `GOCOVERDIR` set, merges counters with `go tool covdata textfmt`, and fails non-zero if total statement coverage of `erun-cli` + `erun-common` falls below `COVERAGE_THRESHOLD` (default 90).

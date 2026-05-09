@@ -121,6 +121,7 @@ func TestInit(t *testing.T) {
 		if !strings.Contains(result.Combined, "environment is required with --remote") {
 			t.Errorf("expected remote-environment-required error, got:\n%s", result.Combined)
 		}
+		golden.Equal(t, "init/remote_requires_environment", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_via_stubs", func(t *testing.T) {

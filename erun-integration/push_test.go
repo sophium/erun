@@ -72,6 +72,7 @@ func TestPush(t *testing.T) {
 		if !strings.Contains(result.Combined, "docker login") {
 			t.Errorf("expected retry trace to mention docker login, got:\n%s", result.Combined)
 		}
+		golden.Equal(t, "push/real_run_auth_failure_retries_after_login_via_auto_login_env", normalize.Apply(result.Combined))
 	})
 
 	t.Run("devops_container_push_real_run_resolves_single_image_spec", func(t *testing.T) {
@@ -103,6 +104,7 @@ func TestPush(t *testing.T) {
 		if !strings.Contains(result.Combined, "docker push") {
 			t.Errorf("expected devops container push to invoke docker push, got:\n%s", result.Combined)
 		}
+		golden.Equal(t, "push/devops_container_push_real_run_resolves_single_image_spec", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_create_package_denied_emits_guidance", func(t *testing.T) {
@@ -147,6 +149,7 @@ func TestPush(t *testing.T) {
 				t.Errorf("expected create-package guidance to contain %q, got:\n%s", want, result.Combined)
 			}
 		}
+		golden.Equal(t, "push/real_run_create_package_denied_emits_guidance", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_scope_denied_attempts_scope_refresh", func(t *testing.T) {
@@ -202,5 +205,6 @@ func TestPush(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
+		golden.Equal(t, "push/real_run_scope_denied_attempts_scope_refresh", normalize.Apply(result.Combined))
 	})
 }

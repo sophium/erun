@@ -48,6 +48,7 @@ func TestDelete(t *testing.T) {
 		if !strings.Contains(result.Combined, "kubectl --context test-context delete namespace team-dev --ignore-not-found") {
 			t.Errorf("expected namespace delete trace, got:\n%s", result.Combined)
 		}
+		golden.Equal(t, "delete/dry_run_with_remote_env_traces_namespace_delete", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_with_yes_flag_skips_confirmation_and_removes_config", func(t *testing.T) {
@@ -75,5 +76,6 @@ func TestDelete(t *testing.T) {
 		if _, err := os.Stat(envDir); !os.IsNotExist(err) {
 			t.Errorf("expected env config tree to be removed at %s, stat err: %v", envDir, err)
 		}
+		golden.Equal(t, "delete/real_run_with_yes_flag_skips_confirmation_and_removes_config", normalize.Apply(result.Combined))
 	})
 }

@@ -53,6 +53,7 @@ func TestAPI(t *testing.T) {
 				t.Errorf("expected trace to contain %q, got stderr:\n%s", want, result.Stderr)
 			}
 		}
+		golden.Equal(t, "api/dry_run_traces_eapi_launch", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_uses_environment_local_port_by_default", func(t *testing.T) {
@@ -71,5 +72,6 @@ func TestAPI(t *testing.T) {
 		if !strings.Contains(result.Stderr, "--port 17133") {
 			t.Errorf("expected trace to use environment-scoped port 17133, got stderr:\n%s", result.Stderr)
 		}
+		golden.Equal(t, "api/dry_run_uses_environment_local_port_by_default", normalize.Apply(result.Combined))
 	})
 }

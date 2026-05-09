@@ -44,7 +44,9 @@ func TestVersion(t *testing.T) {
 
 	t.Run("time_flag_prints_elapsed", func(t *testing.T) {
 		// Exercises feedback_render.go printElapsedTime: the --time flag must
-		// emit an "elapsed:" line on stderr after a successful run.
+		// emit an "elapsed:" line on stderr after a successful run. The
+		// substring is a regression marker; the golden locks the surrounding
+		// output (version line + elapsed format).
 		setup := env.New(t)
 		result := erun.Run(t, []string{"version", "--no-registry", "--time"}, erun.RunOptions{
 			Cwd: setup.Cwd,
@@ -56,6 +58,7 @@ func TestVersion(t *testing.T) {
 		if !strings.Contains(result.Stderr, "elapsed:") {
 			t.Errorf("expected stderr to contain 'elapsed:', got:\n%s", result.Stderr)
 		}
+		golden.Equal(t, "version/time_flag_prints_elapsed", normalize.Apply(result.Combined))
 	})
 
 	t.Run("version_file_in_cwd_overrides_build_info", func(t *testing.T) {
@@ -76,6 +79,7 @@ func TestVersion(t *testing.T) {
 		if !strings.HasPrefix(strings.TrimSpace(result.Stdout), "erun 9.9.9") {
 			t.Errorf("expected stdout to start with 'erun 9.9.9', got:\n%s", result.Stdout)
 		}
+		golden.Equal(t, "version/version_file_in_cwd_overrides_build_info", normalize.Apply(result.Combined))
 	})
 
 	t.Run("registry_dockerhub_stub_returns_latest_stable_and_snapshot", func(t *testing.T) {
@@ -194,5 +198,6 @@ func TestVersion(t *testing.T) {
 		if !strings.Contains(result.Stderr, "audit: erun version") {
 			t.Errorf("expected audit line on stderr, got:\n%s", result.Stderr)
 		}
+		golden.Equal(t, "version/verbose_flag_prints_audit", normalize.Apply(result.Combined))
 	})
 }

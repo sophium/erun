@@ -99,5 +99,6 @@ func TestSSHD(t *testing.T) {
 				t.Errorf("expected dry-run trace to contain %q, got combined output:\n%s", want, result.Combined)
 			}
 		}
+		golden.Equal(t, "sshd/init_dry_run_traces_full_flow", normalize.Apply(result.Combined))
 	})
 }

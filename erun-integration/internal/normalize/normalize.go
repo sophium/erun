@@ -38,6 +38,14 @@ var defaultRules = []Replacement{
 	// ("in 0s", "after 1m23s"). The timeout literal "2m0s" is kept because
 	// it lacks the leading "in "/"after " context.
 	{regexp.MustCompile(` (in|after) \d+(?:[hm]\d+)*s\b`), " $1 <ELAPSED>"},
+	// `elapsed: 1ms` / `elapsed: 12.3s` / `elapsed: 1m4s` from --time
+	// feedback. Numeric run with optional fractional component + unit
+	// suffix (Go time.Duration formatting).
+	{regexp.MustCompile(`elapsed: \d+(?:\.\d+)?[a-zµμ]+(?:\d+(?:\.\d+)?[a-zµμ]+)*\b`), "elapsed: <ELAPSED>"},
+	// Random base64url tokens used by cloud_context.newCloudContextToken
+	// (32 bytes -> 43-char base64url) and similar. Match a 30+ length
+	// base64url run after `--token ` so we don't catch unrelated text.
+	{regexp.MustCompile(`--token [A-Za-z0-9_-]{30,}`), "--token <TOKEN>"},
 	// Random hex tokens used for chart names (e.g., -f0bb16f86125afa9).
 	{regexp.MustCompile(`-[0-9a-f]{16}\b`), "-<HEX16>"},
 	// Random hex tokens of other lengths embedded in identifiers.

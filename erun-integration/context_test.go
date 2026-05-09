@@ -108,6 +108,7 @@ func TestContext(t *testing.T) {
 				t.Errorf("expected dry-run trace to contain %q, got:\n%s", want, result.Combined)
 			}
 		}
+		golden.Equal(t, "context/stop_dry_run_traces_aws_stop_instances", normalize.Apply(result.Combined))
 	})
 
 	t.Run("start_force_dry_run_traces_aws_start_and_profile_setup", func(t *testing.T) {
@@ -138,6 +139,7 @@ func TestContext(t *testing.T) {
 				t.Errorf("expected dry-run trace to contain %q, got:\n%s", want, result.Combined)
 			}
 		}
+		golden.Equal(t, "context/start_force_dry_run_traces_aws_start_and_profile_setup", normalize.Apply(result.Combined))
 	})
 
 	t.Run("init_dry_run_traces_aws_security_group_and_run_instances", func(t *testing.T) {
@@ -176,6 +178,7 @@ func TestContext(t *testing.T) {
 				t.Errorf("expected init dry-run trace to contain %q, got:\n%s", want, result.Combined)
 			}
 		}
+		golden.Equal(t, "context/init_dry_run_traces_aws_security_group_and_run_instances", normalize.Apply(result.Combined))
 	})
 
 	t.Run("start_without_force_blocks_outside_working_hours", func(t *testing.T) {
@@ -218,6 +221,7 @@ func TestContext(t *testing.T) {
 				t.Errorf("expected gated trace to contain %q, got:\n%s", want, result.Combined)
 			}
 		}
+		golden.Equal(t, "context/start_without_force_blocks_outside_working_hours", normalize.Apply(result.Combined))
 	})
 
 	t.Run("list_help", func(t *testing.T) {

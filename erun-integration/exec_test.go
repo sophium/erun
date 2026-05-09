@@ -99,6 +99,7 @@ func TestExec(t *testing.T) {
 		if !strings.Contains(result.Combined, "cannot find git project") {
 			t.Errorf("expected 'cannot find git project' message, got:\n%s", result.Combined)
 		}
+		golden.Equal(t, "exec/diff_dry_run_errors_outside_git_project", normalize.Apply(result.Combined))
 	})
 
 	t.Run("diff_json_emits_structured_result", func(t *testing.T) {
@@ -247,6 +248,7 @@ func TestExec(t *testing.T) {
 		if !strings.Contains(result.Stdout, "+rewritten") {
 			t.Errorf("expected added-line marker '+rewritten' in raw diff, got:\n%s", result.Stdout)
 		}
+		golden.Equal(t, "exec/diff_raw_output_includes_deletions", normalize.Apply(result.Combined))
 	})
 
 	t.Run("diff_selected_commit_without_scope_errors", func(t *testing.T) {
@@ -261,6 +263,7 @@ func TestExec(t *testing.T) {
 		if !strings.Contains(result.Combined, "--selected-commit requires --scope=commit") {
 			t.Errorf("expected scope guard error, got:\n%s", result.Combined)
 		}
+		golden.Equal(t, "exec/diff_selected_commit_without_scope_errors", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_with_time_flag_prints_elapsed_on_error", func(t *testing.T) {
@@ -276,5 +279,6 @@ func TestExec(t *testing.T) {
 		if !strings.Contains(result.Stderr, "elapsed:") {
 			t.Errorf("expected --time to print elapsed even on error, got stderr:\n%s", result.Stderr)
 		}
+		golden.Equal(t, "exec/dry_run_with_time_flag_prints_elapsed_on_error", normalize.Apply(result.Combined))
 	})
 }
