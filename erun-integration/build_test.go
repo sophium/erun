@@ -59,6 +59,7 @@ func TestBuild(t *testing.T) {
 				t.Errorf("expected dry-run trace to contain %q, got stderr:\n%s", want, result.Stderr)
 			}
 		}
+		golden.Equal(t, "build/dry_run_from_release_repo_traces_docker_builds", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_release_includes_release_and_build_traces", func(t *testing.T) {
@@ -82,6 +83,7 @@ func TestBuild(t *testing.T) {
 				t.Errorf("expected --release dry-run trace to contain %q, got stderr:\n%s", want, result.Stderr)
 			}
 		}
+		golden.Equal(t, "build/dry_run_release_includes_release_and_build_traces", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_configured_fingerprint_traces_pull_and_tag", func(t *testing.T) {
@@ -114,6 +116,7 @@ func TestBuild(t *testing.T) {
 				t.Errorf("expected configured-fingerprint dry-run trace to contain %q, got stderr:\n%s", want, result.Stderr)
 			}
 		}
+		golden.Equal(t, "build/dry_run_configured_fingerprint_traces_pull_and_tag", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_via_docker_stub_drives_multi_platform_build", func(t *testing.T) {
@@ -150,6 +153,7 @@ func TestBuild(t *testing.T) {
 				t.Errorf("expected real-run output to contain %q, got:\n%s", want, result.Combined)
 			}
 		}
+		golden.Equal(t, "build/real_run_via_docker_stub_drives_multi_platform_build", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_no_incremental_skips_fingerprint_short_circuit", func(t *testing.T) {
@@ -171,6 +175,7 @@ func TestBuild(t *testing.T) {
 		if !strings.Contains(result.Combined, "docker build --platform linux/amd64") {
 			t.Errorf("expected docker build trace under --no-incremental, got:\n%s", result.Combined)
 		}
+		golden.Equal(t, "build/dry_run_no_incremental_skips_fingerprint_short_circuit", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_with_project_build_script_traces_script_invocation", func(t *testing.T) {
@@ -200,6 +205,7 @@ func TestBuild(t *testing.T) {
 		if strings.Contains(result.Combined, "docker build --platform") {
 			t.Errorf("expected build.sh path to skip docker build, but trace mentions docker build:\n%s", result.Combined)
 		}
+		golden.Equal(t, "build/dry_run_with_project_build_script_traces_script_invocation", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_with_project_build_script_executes_script", func(t *testing.T) {
@@ -269,6 +275,7 @@ func TestBuild(t *testing.T) {
 				t.Errorf("expected configured-fingerprint trace to contain %q, got:\n%s", want, result.Combined)
 			}
 		}
+		golden.Equal(t, "build/real_run_configured_fingerprint_inspects_remote_manifest", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_with_dockerignore_drives_ignore_pattern_parser", func(t *testing.T) {
@@ -308,6 +315,7 @@ func TestBuild(t *testing.T) {
 		if !strings.Contains(result.Combined, "docker build --platform linux/amd64") {
 			t.Errorf("expected build trace despite dockerignore, got:\n%s", result.Combined)
 		}
+		golden.Equal(t, "build/dry_run_with_dockerignore_drives_ignore_pattern_parser", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_with_existing_fingerprint_promotes_via_tag", func(t *testing.T) {
@@ -334,6 +342,7 @@ func TestBuild(t *testing.T) {
 		if !strings.Contains(result.Combined, "docker tag ") {
 			t.Errorf("expected promote path to run docker tag, got:\n%s", result.Combined)
 		}
+		golden.Equal(t, "build/real_run_with_existing_fingerprint_promotes_via_tag", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_release_pushes_multi_platform_manifest", func(t *testing.T) {
@@ -373,6 +382,7 @@ func TestBuild(t *testing.T) {
 				t.Errorf("expected real-run release trace to contain %q, got:\n%s", want, result.Combined)
 			}
 		}
+		golden.Equal(t, "build/real_run_release_pushes_multi_platform_manifest", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_release_pushes_release_tagged_docker_builds", func(t *testing.T) {
@@ -389,5 +399,6 @@ func TestBuild(t *testing.T) {
 		if !strings.Contains(result.Stderr, "docker push") {
 			t.Errorf("expected release dry-run to trace docker push, got stderr:\n%s", result.Stderr)
 		}
+		golden.Equal(t, "build/dry_run_release_pushes_release_tagged_docker_builds", normalize.Apply(result.Combined))
 	})
 }
