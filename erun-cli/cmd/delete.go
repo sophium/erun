@@ -11,20 +11,22 @@ import (
 )
 
 func newDeleteCmd(store common.DeleteStore, promptRunner PromptRunner, deleteNamespace common.NamespaceDeleterFunc) *cobra.Command {
+	var yes bool
 	cmd := &cobra.Command{
 		Use:          "delete TENANT ENVIRONMENT",
 		Short:        "Delete an environment from ERun configuration and remove its remote runtime namespace",
 		Args:         cobra.ExactArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDeleteCommand(withCloudContextPreflight(commandContext(cmd), store), store, promptRunner, deleteNamespace, args[0], args[1])
+			return runDeleteCommand(withCloudContextPreflight(commandContext(cmd), store), store, promptRunner, deleteNamespace, args[0], args[1], yes)
 		},
 	}
 	addDryRunFlag(cmd)
+	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip the confirmation prompt (for non-interactive callers)")
 	return cmd
 }
 
-func runDeleteCommand(ctx common.Context, store common.DeleteStore, promptRunner PromptRunner, deleteNamespace common.NamespaceDeleterFunc, tenant, environment string) error {
+func runDeleteCommand(ctx common.Context, store common.DeleteStore, promptRunner PromptRunner, deleteNamespace common.NamespaceDeleterFunc, tenant, environment string, yes bool) error {
 	tenant = strings.TrimSpace(tenant)
 	environment = strings.TrimSpace(environment)
 	expected := common.DeleteEnvironmentConfirmation(tenant, environment)
@@ -32,7 +34,7 @@ func runDeleteCommand(ctx common.Context, store common.DeleteStore, promptRunner
 		return fmt.Errorf("tenant and environment are required")
 	}
 
-	if !ctx.DryRun {
+	if !ctx.DryRun && !yes {
 		if err := confirmDeleteCommand(promptRunner, expected); err != nil {
 			return err
 		}
