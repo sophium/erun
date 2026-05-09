@@ -45,10 +45,12 @@ func TestBuild(t *testing.T) {
 		}
 		for _, want := range []string{
 			"docker image inspect",
-			"&& docker build -t ghcr.io/sophium/api:1.4.2 --build-arg ERUN_VERSION=1.4.2 -f",
+			"&& docker build --platform linux/amd64 --provenance=false -t ghcr.io/sophium/api:1.4.2-amd64 --build-arg ERUN_VERSION=1.4.2 -f",
+			"&& docker build --platform linux/arm64 --provenance=false -t ghcr.io/sophium/api:1.4.2-arm64 --build-arg ERUN_VERSION=1.4.2 -f",
 			"erun-devops/docker/api/Dockerfile .",
-			"docker tag ghcr.io/sophium/api:1.4.2 ghcr.io/sophium/api:fp-",
-			"&& docker build -t ghcr.io/sophium/base:9.9.9 --build-arg ERUN_VERSION=9.9.9 -f",
+			"docker tag ghcr.io/sophium/api:1.4.2-amd64 ghcr.io/sophium/api:fp-",
+			"docker tag ghcr.io/sophium/api:1.4.2-arm64 ghcr.io/sophium/api:fp-",
+			"&& docker build --platform linux/amd64 --provenance=false -t ghcr.io/sophium/base:9.9.9-amd64 --build-arg ERUN_VERSION=9.9.9 -f",
 			"erun-devops/docker/base/Dockerfile .",
 		} {
 			if !strings.Contains(result.Stderr, want) {
@@ -81,17 +83,18 @@ func TestBuild(t *testing.T) {
 	})
 
 	t.Run("dry_run_release_pushes_release_tagged_docker_builds", func(t *testing.T) {
-		// Exercises build.go --release path: docker buildx build with
-		// --push and the release-tagged image must appear in the dry-run
-		// trace, plus the local tag for downstream dependencies.
+		// Exercises build.go --release path: per-platform docker build +
+		// docker push trace must appear in the dry-run output for the
+		// release-tagged image, plus the local tag for downstream
+		// dependencies.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
 		result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		if !strings.Contains(result.Stderr, "docker push") && !strings.Contains(result.Stderr, "docker buildx build") {
-			t.Errorf("expected release dry-run to trace docker push/buildx, got stderr:\n%s", result.Stderr)
+		if !strings.Contains(result.Stderr, "docker push") {
+			t.Errorf("expected release dry-run to trace docker push, got stderr:\n%s", result.Stderr)
 		}
 	})
 }

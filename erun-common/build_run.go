@@ -49,12 +49,8 @@ func traceIncrementalDecision(ctx Context, buildInput DockerBuildSpec) {
 	if buildInput.Fingerprint == "" {
 		return
 	}
-	platforms := buildInput.Platforms
-	if len(platforms) == 0 {
-		platforms = []string{""}
-	}
 	missing := missingFingerprintPlatformSet(buildInput)
-	for _, platform := range platforms {
+	for _, platform := range buildInput.Platforms {
 		fpTag := fingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
 		ctx.TraceCommand("", "docker", "image", "inspect", fpTag)
 		if _, isMissing := missing[platform]; isMissing {
@@ -116,8 +112,7 @@ func shouldSkipDockerBuild(ctx Context, buildInput DockerBuildSpec, inspect Dock
 	// one of the platforms) must be rebuilt so downstream images can use it as a
 	// multi-platform base image.
 	if buildInput.Push && len(buildInput.Platforms) > 0 {
-		ctx.TraceCommand("", "docker", "manifest", "inspect", tag)
-		available, err := dockerManifestPlatforms(tag)
+		available, err := dockerManifestPlatforms(ctx, tag)
 		if err != nil {
 			return false, err
 		}
@@ -159,7 +154,7 @@ func shouldSkipDockerBuild(ctx Context, buildInput DockerBuildSpec, inspect Dock
 }
 
 func removeStaleLocalImageForPlatforms(ctx Context, tag string, required []string) error {
-	localPlatforms, err := dockerLocalImagePlatforms(tag)
+	localPlatforms, err := dockerLocalImagePlatforms(ctx, tag)
 	if err != nil {
 		return err
 	}

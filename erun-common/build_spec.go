@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -133,6 +134,7 @@ func ResolveDockerBuildForImageReference(store DockerStore, findProjectRoot Proj
 		DockerfilePath: buildContext.DockerfilePath,
 		Image:          imageRef,
 		SkipIfExists:   skipIfExists,
+		Platforms:      slices.Clone(multiPlatformDockerBuilds),
 	}, true, nil
 }
 
@@ -251,27 +253,13 @@ func newDockerBuildSpec(now NowFunc, projectRoot, environment string, buildConte
 		DockerfilePath: buildContext.DockerfilePath,
 		Image:          imageRef,
 		SkipIfExists:   skipIfExists,
+		Platforms:      slices.Clone(multiPlatformDockerBuilds),
 	}, nil
-}
-
-func (b DockerBuildSpec) command() commandSpec {
-	return commandSpec{
-		Dir:  b.ContextDir,
-		Name: "docker",
-		Args: dockerBuildArgs(b, ""),
-	}
 }
 
 func (b DockerBuildSpec) traceCommands() []commandSpec {
 	if b.Promote {
 		return promoteTraceCommands(b)
-	}
-	if len(b.Platforms) == 0 {
-		commands := []commandSpec{b.command()}
-		if b.Fingerprint != "" {
-			commands = append(commands, dockerTagTraceCommand(b.ContextDir, b.Image.Tag, fingerprintTag(b.Image, b.Fingerprint, "")))
-		}
-		return commands
 	}
 	return multiPlatformTraceCommands(b)
 }
@@ -315,19 +303,6 @@ func multiPlatformTraceCommands(b DockerBuildSpec) []commandSpec {
 }
 
 func promoteTraceCommands(b DockerBuildSpec) []commandSpec {
-	if len(b.Platforms) == 0 {
-		commands := []commandSpec{
-			dockerTagTraceCommand(b.ContextDir, fingerprintTag(b.Image, b.Fingerprint, ""), b.Image.Tag),
-		}
-		if b.Push {
-			commands = append(commands, commandSpec{
-				Dir:  b.ContextDir,
-				Name: "docker",
-				Args: []string{"push", b.Image.Tag},
-			})
-		}
-		return commands
-	}
 	commands := make([]commandSpec, 0, len(b.Platforms)*2+2)
 	perPlatformTags := make([]string, 0, len(b.Platforms))
 	for _, platform := range b.Platforms {

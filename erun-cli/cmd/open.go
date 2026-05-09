@@ -241,10 +241,6 @@ func resolveOpenWithInitRetryForParams(ctx common.Context, params common.OpenPar
 	return result, true, err
 }
 
-func runResolvedOpenCommand(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
-	return runResolvedOpenCommandWithAPI(ctx, result, options, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, nil, activateSSHD, launchVSCode, launchIntelliJ)
-}
-
 func runResolvedOpenCommandWithAPI(ctx common.Context, result common.OpenResult, options openOptions, promptRunner PromptRunner, openShell OpenShellRunner, runManagedDeploy func(common.Context, common.OpenResult) error, checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc, resolveRuntimeDeploySpec func(common.OpenResult, bool) (common.DeploySpec, error), deployHelmChart common.HelmChartDeployerFunc, activateMCP MCPForwarder, activateAPI APIForwarder, activateSSHD SSHDActivator, launchVSCode VSCodeLauncher, launchIntelliJ IntelliJLauncher) error {
 	runner := resolvedOpenRunner{
 		ctx:                       ctx,
@@ -394,7 +390,7 @@ func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq common.ShellLaunchPara
 	if r.checkKubernetesDeployment == nil {
 		return false, nil
 	}
-	deployed, err := r.checkKubernetesDeployment(common.KubernetesDeploymentCheckParams{
+	deployed, err := r.checkKubernetesDeployment(r.ctx, common.KubernetesDeploymentCheckParams{
 		Name:               common.RuntimeReleaseName(r.result.Tenant),
 		Namespace:          common.KubernetesNamespaceName(r.result.Tenant, r.result.Environment),
 		KubernetesContext:  r.result.EnvConfig.KubernetesContext,

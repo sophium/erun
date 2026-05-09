@@ -19,9 +19,9 @@ func TestResolveReleaseSpecStableRelease(t *testing.T) {
 		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "main", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "main", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	requireNoError(t, err, "resolveReleaseSpec failed")
@@ -78,9 +78,9 @@ func TestResolveReleaseSpecSkipsLinuxScriptsWhenUnsupported(t *testing.T) {
 		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "main", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "main", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -98,9 +98,9 @@ func TestResolveReleaseSpecStableReleaseIncludesPackagingUpdatesWhenPresent(t *t
 		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "main", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "main", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -148,9 +148,9 @@ func TestResolveReleaseSpecUsesConfiguredBranches(t *testing.T) {
 		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "integration", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "integration", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -184,9 +184,9 @@ func TestRunReleaseSpecWritesFilesAndRunsGitStages(t *testing.T) {
 		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "main", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "main", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -247,9 +247,9 @@ func TestRunReleaseSpecRewritesStablePackagingMetadataWhenPresent(t *testing.T) 
 		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "main", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "main", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -347,9 +347,9 @@ func TestRunReleaseSpecSkipsPackagingCommitWhenChecksumsAreAlreadyCurrent(t *tes
 		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "main", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "main", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -456,9 +456,9 @@ func TestRunReleaseSpecCandidateRunsTagAndPush(t *testing.T) {
 		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "develop", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "develop", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -525,9 +525,9 @@ func TestRunReleaseSpecCandidateSkipsExistingTagAtHead(t *testing.T) {
 		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "develop", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "develop", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -606,9 +606,9 @@ func TestRunReleaseSpecReturnsErrorWhenExistingTagPointsElsewhere(t *testing.T) 
 		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "develop", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "develop", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -652,9 +652,9 @@ func TestRunReleaseSpecForceDeletesExistingTagAndRecreatesIt(t *testing.T) {
 		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "develop", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "develop", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{Force: true},
 	)
 	if err != nil {
@@ -692,9 +692,9 @@ func TestRunReleaseSpecReturnsErrorWhenWorktreeIsDirty(t *testing.T) {
 		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "main", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "main", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -736,9 +736,9 @@ func TestResolveReleaseSpecStableReleaseUsesConfiguredDevelopBranchForSyncAndPus
 		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "trunk", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "trunk", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -766,9 +766,9 @@ func TestResolveReleaseSpecStableReleaseSkipsDevelopSyncWhenBranchMissing(t *tes
 		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "main", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return false, nil },
+		func(Context, string) (string, error) { return "main", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return false, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -925,6 +925,11 @@ end
   ]
 }
 `), 0o644), "write scoop manifest")
+}
+
+func setupReleaseProjectGitRepo(t *testing.T, branch string) string {
+	t.Helper()
+	return setupReleaseProjectGitRepoWithOptions(t, branch, releaseProjectOptions{})
 }
 
 func setupReleaseProjectGitRepoWithOptions(t *testing.T, branch string, options releaseProjectOptions) string {

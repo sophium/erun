@@ -12,6 +12,30 @@ import (
 	"github.com/adrg/xdg"
 )
 
+// concatChartTemplates joins every top-level *.yaml file found in dir into a
+// single string. Tests that assert a Helm chart contains a specific token use
+// this helper so they don't care which template file in the chart owns the
+// token.
+func concatChartTemplates(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	var buf strings.Builder
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return "", err
+		}
+		buf.Write(data)
+		buf.WriteString("\n")
+	}
+	return buf.String(), nil
+}
+
 func setupXDGConfigHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()

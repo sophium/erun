@@ -489,18 +489,13 @@ func applyIncrementalPromotion(builds []DockerBuildSpec, inspect LocalDockerImag
 // inspectFingerprintTags returns the list of platforms whose fp-tag is
 // absent from the local Docker store. An empty slice means every expected
 // fp-tag was found and the build is eligible for promotion. The platform
-// list mirrors build.Platforms; for non-multi-platform builds the slot key
-// is the empty string.
+// list mirrors build.Platforms.
 func inspectFingerprintTags(build DockerBuildSpec, inspect LocalDockerImageInspector) ([]string, error) {
 	if build.Fingerprint == "" {
 		return nil, nil
 	}
-	platforms := build.Platforms
-	if len(platforms) == 0 {
-		platforms = []string{""}
-	}
 	var missing []string
-	for _, platform := range platforms {
+	for _, platform := range build.Platforms {
 		ok, err := inspect(fingerprintTag(build.Image, build.Fingerprint, platform))
 		if err != nil {
 			return nil, err

@@ -3,7 +3,6 @@ package eruncommon
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 )
 
@@ -124,7 +123,6 @@ func BuildExecutionSpecWithRelease(execution BuildExecutionSpec, release Release
 			if _, ok := releaseTags[strings.TrimSpace(execution.dockerBuilds[i].Image.Tag)]; !ok {
 				continue
 			}
-			execution.dockerBuilds[i].Platforms = slices.Clone(multiPlatformDockerBuilds)
 			execution.dockerBuilds[i].Push = true
 		}
 	}

@@ -32,7 +32,7 @@ type DeployStore interface {
 
 type (
 	DeployContextResolverFunc       func() (KubernetesDeployContext, error)
-	KubernetesDeploymentCheckerFunc func(KubernetesDeploymentCheckParams) (bool, error)
+	KubernetesDeploymentCheckerFunc func(Context, KubernetesDeploymentCheckParams) (bool, error)
 	HelmChartDeployerFunc           func(HelmDeployParams) error
 	HelmReleaseRecovererFunc        func(HelmReleaseRecoveryParams) error
 )
@@ -847,7 +847,6 @@ func resolveDockerfileBaseImageBuilds(store DeployStore, findProjectRoot Project
 
 func configureDockerBuildsForDeploy(builds []DockerBuildSpec) []DockerBuildSpec {
 	for i := range builds {
-		builds[i].Platforms = slices.Clone(multiPlatformDockerBuilds)
 		builds[i].Push = true
 	}
 	return builds
@@ -1744,7 +1743,7 @@ func overrideHelmChartVersion(chartPath, version string) error {
 	return os.WriteFile(chartFilePath, updated, 0o644)
 }
 
-func CheckKubernetesDeployment(params KubernetesDeploymentCheckParams) (bool, error) {
+func CheckKubernetesDeployment(ctx Context, params KubernetesDeploymentCheckParams) (bool, error) {
 	args := make([]string, 0, 8)
 	if strings.TrimSpace(params.KubernetesContext) != "" {
 		args = append(args, "--context", params.KubernetesContext)
@@ -1754,12 +1753,13 @@ func CheckKubernetesDeployment(params KubernetesDeploymentCheckParams) (bool, er
 	}
 	args = append(args, "get", "deployment", params.Name, "-o", "name")
 
+	ctx.TraceCommand("", "kubectl", args...)
 	output, err := Command("kubectl", args...).CombinedOutput()
 	if err == nil {
 		if !hasExpectedDeploymentSettings(params) {
 			return true, nil
 		}
-		return deploymentMatchesExpectedSettings(params)
+		return deploymentMatchesExpectedSettings(ctx, params)
 	}
 
 	message := strings.ToLower(string(output))
@@ -1784,7 +1784,7 @@ type deploymentEnvVar struct {
 	Value string `json:"value"`
 }
 
-func deploymentMatchesExpectedSettings(params KubernetesDeploymentCheckParams) (bool, error) {
+func deploymentMatchesExpectedSettings(ctx Context, params KubernetesDeploymentCheckParams) (bool, error) {
 	args := make([]string, 0, 8)
 	if strings.TrimSpace(params.KubernetesContext) != "" {
 		args = append(args, "--context", params.KubernetesContext)
@@ -1794,6 +1794,7 @@ func deploymentMatchesExpectedSettings(params KubernetesDeploymentCheckParams) (
 	}
 	args = append(args, "get", "deployment", params.Name, "-o", "json")
 
+	ctx.TraceCommand("", "kubectl", args...)
 	output, err := Command("kubectl", args...).CombinedOutput()
 	if err != nil {
 		return false, fmt.Errorf("failed to inspect deployment %q: %w", params.Name, err)
