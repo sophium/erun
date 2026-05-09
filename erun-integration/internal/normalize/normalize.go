@@ -24,8 +24,11 @@ var defaultRules = []Replacement{
 	// the version regex would otherwise eat "127.0.0" and leave a dangling
 	// ".1" suffix in the golden).
 	{regexp.MustCompile(`\b127\.0\.0\.1\b`), "<LOOPBACK>"},
-	// Build version: 1.0.51-snapshot-20260508025226 or 1.0.51 or 1.0.51-rc.1
-	{regexp.MustCompile(`\b\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?`), "<VERSION>"},
+	// Build version: 1.0.51-snapshot-20260508025226 or 1.0.51 or 1.0.51-rc.1.
+	// Also match a leading 'v' prefix common in git tags
+	// (v1.4.2-rc.7ad18f4) — without the alternation the \b would refuse to
+	// match when 'v' is a word char immediately before '1'.
+	{regexp.MustCompile(`(?:\bv|\b)\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?`), "<VERSION>"},
 	// ISO 8601 timestamps with or without zone.
 	{regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?`), "<TS>"},
 	// Compact timestamps used in snapshot labels (YYYYMMDDHHMMSS).
@@ -38,10 +41,21 @@ var defaultRules = []Replacement{
 	// ("in 0s", "after 1m23s"). The timeout literal "2m0s" is kept because
 	// it lacks the leading "in "/"after " context.
 	{regexp.MustCompile(` (in|after) \d+(?:[hm]\d+)*s\b`), " $1 <ELAPSED>"},
+	// `elapsed: 1ms` / `elapsed: 12.3s` / `elapsed: 1m4s` from --time
+	// feedback. Numeric run with optional fractional component + unit
+	// suffix (Go time.Duration formatting).
+	{regexp.MustCompile(`elapsed: \d+(?:\.\d+)?[a-zµμ]+(?:\d+(?:\.\d+)?[a-zµμ]+)*\b`), "elapsed: <ELAPSED>"},
+	// Random base64url tokens used by cloud_context.newCloudContextToken
+	// (32 bytes -> 43-char base64url) and similar. Match a 30+ length
+	// base64url run after `--token ` so we don't catch unrelated text.
+	{regexp.MustCompile(`--token [A-Za-z0-9_-]{30,}`), "--token <TOKEN>"},
 	// Random hex tokens used for chart names (e.g., -f0bb16f86125afa9).
 	{regexp.MustCompile(`-[0-9a-f]{16}\b`), "-<HEX16>"},
 	// Random hex tokens of other lengths embedded in identifiers.
 	{regexp.MustCompile(`\b[0-9a-f]{32,}\b`), "<HEX>"},
+	// Git short commit SHAs (7-12 hex chars after `commit = ` or as
+	// standalone tokens in tag names like `v1.4.2-rc.7ad18f4`).
+	{regexp.MustCompile(`\bcommit = [0-9a-f]{7,12}\b`), "commit = <SHORTSHA>"},
 	// User home dir prefix when it leaks despite HOME override.
 	{regexp.MustCompile(`/Users/[^/\s'"]+`), "<HOME>"},
 	{regexp.MustCompile(`/home/[^/\s'"]+`), "<HOME>"},

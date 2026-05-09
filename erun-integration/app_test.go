@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -30,8 +29,6 @@ func TestApp(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		if !strings.Contains(result.Stderr, "erun-app") {
-			t.Errorf("expected dry-run trace to mention erun-app executable, got stderr:\n%s", result.Stderr)
-		}
+		golden.Equal(t, "app/dry_run_traces_app_executable_without_launching", normalize.Apply(result.Combined))
 	})
 }

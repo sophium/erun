@@ -4,11 +4,14 @@
 package fixture
 
 import (
+	"fmt"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -379,6 +382,30 @@ func shellSingleQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
+// StubBinaryWithScript writes a stub binary whose POSIX-shell body is the
+// caller-supplied script. Use this when a stub must branch on argv (e.g.,
+// the AWS CLI returning JSON for sts get-caller-identity but exit 0 for
+// configure set). Less ergonomic than StubBinary, so prefer that for
+// scenarios where one fixed response is enough.
+//
+// The script body has full shell access; "$*" / "$1" / "$2" are the args
+// the production code passed. The body should end with an explicit exit.
+func StubBinaryWithScript(t testing.TB, dir, name, scriptBody string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	path := filepath.Join(dir, name)
+	body := "#!/bin/sh\n# erun integration stub for " + name + "\n" + scriptBody
+	if !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write stub %s: %v", path, err)
+	}
+	return path
+}
+
 // StubEnv returns the env-var pairs that route the named binary lookups to
 // the stub at dir/<name>. Pass each result through env.Setup.Env() concat.
 func StubEnv(dir string, names ...string) []string {
@@ -427,3 +454,159 @@ func mustWrite(t testing.TB, path, contents string) {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }
+
+var (
+	portSimBuildOnce sync.Once
+	portSimPath      string
+	portSimBuildErr  error
+)
+
+// PortSimBinary builds (once per process) a small Go program that listens on
+// a TCP port until killed. Used as the body of a `kubectl port-forward` stub
+// so production code's "is the local port reachable?" polling can succeed in
+// integration tests without standing up a real cluster.
+func PortSimBinary(t testing.TB) string {
+	t.Helper()
+	portSimBuildOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "erun-portsim-*")
+		if err != nil {
+			portSimBuildErr = fmt.Errorf("mkdir portsim cache: %w", err)
+			return
+		}
+		out := filepath.Join(dir, "portsim")
+		_, thisFile, _, ok := runtime.Caller(0)
+		if !ok {
+			portSimBuildErr = fmt.Errorf("resolve fixture package path")
+			return
+		}
+		pkgDir := filepath.Join(filepath.Dir(thisFile), "portsim")
+		cmd := osexec.Command("go", "build", "-o", out, ".")
+		cmd.Dir = pkgDir
+		cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+		if combined, err := cmd.CombinedOutput(); err != nil {
+			portSimBuildErr = fmt.Errorf("build portsim: %w: %s", err, combined)
+			return
+		}
+		portSimPath = out
+	})
+	if portSimBuildErr != nil {
+		t.Fatalf("%v", portSimBuildErr)
+	}
+	return portSimPath
+}
+
+// KubectlDeployedStubSpec describes the deployment shape the stubbed
+// `kubectl get deployment ... -o json` should report so production code's
+// deployment-match check (eruncommon/deploy.go::deploymentMatchesExpectedSettings)
+// returns true and the open flow proceeds past the redeploy gate.
+type KubectlDeployedStubSpec struct {
+	DeploymentName string
+	ContainerName  string
+	RepoPath       string
+	SSHDEnabled    bool
+	MCPPort        int
+	APIPort        int
+	SSHPort        int
+}
+
+// StubKubectlDeployed writes a kubectl stub at <stubsDir>/kubectl that
+// reports the named deployment as present and matching the spec for
+// deployment-check JSON queries, runs the port-forward simulator for any
+// `port-forward` invocation, and exits 0 silently for everything else.
+//
+// The simulator processes are tracked via a PID file inside stubsDir so
+// the t.Cleanup hook can reap them after the test; otherwise leftover
+// listeners would hold the production ports across runs and break the
+// next scenario with "local SSH port already in use".
+//
+// The returned env-var slice routes production kubectl invocations through
+// the stub via ERUN_KUBECTL_BIN.
+func StubKubectlDeployed(t testing.TB, stubsDir string, spec KubectlDeployedStubSpec) []string {
+	t.Helper()
+	if err := os.MkdirAll(stubsDir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", stubsDir, err)
+	}
+	portsim := PortSimBinary(t)
+	pidFile := filepath.Join(stubsDir, "portsim-pids")
+	deploymentJSON := fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":%q,"env":[{"name":"ERUN_REPO_PATH","value":%q},{"name":"ERUN_SSHD_ENABLED","value":%q},{"name":"ERUN_MCP_PORT","value":"%d"},{"name":"ERUN_API_PORT","value":"%d"},{"name":"ERUN_SSHD_PORT","value":"%d"}],"resources":{"limits":{}}}]}}}}`,
+		spec.ContainerName, spec.RepoPath, formatStubBool(spec.SSHDEnabled), spec.MCPPort, spec.APIPort, spec.SSHPort)
+	script := strings.Join([]string{
+		// Find the local port in `port-forward ... LOCAL:REMOTE [...]` argv.
+		// Production passes the mapping as a single positional after the
+		// resource reference (e.g. "deployment/team-devops 17000:17000").
+		`is_port_forward=0`,
+		`local_port=""`,
+		`for arg in "$@"; do`,
+		`  case "$arg" in`,
+		`    port-forward) is_port_forward=1 ;;`,
+		`    *:*)`,
+		`      if [ "$is_port_forward" = "1" ]; then`,
+		`        case "$arg" in`,
+		`          *[!0-9:]*) : ;;`,
+		`          *) local_port="${arg%%:*}" ;;`,
+		`        esac`,
+		`      fi ;;`,
+		`  esac`,
+		`done`,
+		`if [ "$is_port_forward" = "1" ] && [ -n "$local_port" ]; then`,
+		// Production-side reachability checks differ by service:
+		//   SSH expects the first 4 bytes to be "SSH-"
+		//   MCP expects an HTTP response on POST /mcp
+		//   API expects an HTTP response on /healthz
+		// The simulator sends a per-port banner that satisfies the SSH
+		// check; MCP/API checks fall back to bare-TCP-reachable on a
+		// 200ms timeout, which a plain accept-and-close already passes.
+		`  banner=""`,
+		`  if [ "$local_port" = "` + strconv.Itoa(spec.SSHPort) + `" ]; then`,
+		`    banner="SSH-2.0-erun-portsim\r\n"`,
+		`  fi`,
+		`  ` + portsim + ` --port "$local_port" --banner "$banner" >/dev/null 2>&1 &`,
+		`  pid=$!`,
+		`  printf '%s\n' "$pid" >> '` + pidFile + `'`,
+		`  # Stay alive while the simulator runs so production code that`,
+		`  # treats the kubectl process as the port-forward owner sees it`,
+		`  # as live. Block until the simulator exits.`,
+		`  wait "$pid"`,
+		`  exit 0`,
+		`fi`,
+		`# Argv-driven branching for non-port-forward kubectl invocations.`,
+		`case "$*" in`,
+		`  *"get deployment ` + spec.DeploymentName + ` -o name"*)`,
+		`    printf 'deployment.apps/%s\n' '` + spec.DeploymentName + `' ;;`,
+		`  *"get deployment ` + spec.DeploymentName + ` -o json"*)`,
+		`    printf '%s' '` + deploymentJSON + `' ;;`,
+		`  *) : ;;`,
+		`esac`,
+		`exit 0`,
+	}, "\n")
+	StubBinaryWithScript(t, stubsDir, "kubectl", script)
+	t.Cleanup(func() {
+		raw, err := os.ReadFile(pidFile)
+		if err != nil {
+			return
+		}
+		for _, line := range strings.Split(string(raw), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			pid, err := strconv.Atoi(line)
+			if err != nil || pid <= 0 {
+				continue
+			}
+			if proc, err := os.FindProcess(pid); err == nil {
+				_ = proc.Kill()
+			}
+		}
+	})
+	return StubEnv(stubsDir, "kubectl")
+}
+
+
+func formatStubBool(value bool) string {
+	if value {
+		return "true"
+	}
+	return "false"
+}
+

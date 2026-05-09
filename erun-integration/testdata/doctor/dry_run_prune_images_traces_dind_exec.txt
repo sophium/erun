@@ -1,0 +1,19 @@
+Target: team/dev
+Running: Remove unused Docker images
+audit: erun doctor --dry-run --prune-images team dev
+kubectl --context test-context --namespace team-dev wait --for=condition=Available --timeout 2m0s deployment/team-devops
+kubectl --context test-context --namespace team-dev exec -c erun-dind deployment/team-devops -- /bin/sh -lc '<remote-script>'
+doctor-inspect:
+  set -eu
+  printf '== Disk usage (/var/lib/docker) ==\n'
+  df -h /var/lib/docker
+  printf '\n== Inode usage (/var/lib/docker) ==\n'
+  df -i /var/lib/docker
+  printf '\n== Docker system df ==\n'
+  docker system df
+kubectl --context test-context --namespace team-dev wait --for=condition=Available --timeout 2m0s deployment/team-devops
+kubectl --context test-context --namespace team-dev exec -c erun-dind deployment/team-devops -- /bin/sh -lc '<remote-script>'
+doctor-prune_images:
+  set -eu
+  docker image prune -a -f
+  docker system df

@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -118,9 +117,7 @@ func TestInit(t *testing.T) {
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
 		}
-		if !strings.Contains(result.Combined, "environment is required with --remote") {
-			t.Errorf("expected remote-environment-required error, got:\n%s", result.Combined)
-		}
+		golden.Equal(t, "init/remote_requires_environment", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_via_stubs", func(t *testing.T) {

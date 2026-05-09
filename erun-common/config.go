@@ -19,9 +19,31 @@ const (
 )
 
 type ERunConfig struct {
-	DefaultTenant  string
-	CloudProviders []CloudProviderConfig `yaml:"cloudproviders,omitempty"`
-	CloudContexts  []CloudContextConfig  `yaml:"cloudcontexts,omitempty"`
+	DefaultTenant   string
+	CloudProviders  []CloudProviderConfig `yaml:"cloudproviders,omitempty"`
+	CloudContexts   []CloudContextConfig  `yaml:"cloudcontexts,omitempty"`
+	RuntimeRegistry RuntimeRegistryConfig `yaml:"runtimeregistry,omitempty"`
+}
+
+// RuntimeRegistryConfig overrides where `erun version` checks for available
+// runtime images. Operators running internal mirrors of `erun-devops`
+// (Harbor, ECR, Artifactory, a self-hosted GHCR) point Namespace and
+// BaseURL at their mirror so the version check stops talking to the
+// public registries baked into the binary.
+//
+// All fields are optional. When unset, defaults are
+// `ghcr.io/sophium/erun-devops` with the standard ghcr.io endpoints, which
+// matches the previous hardcoded behavior.
+type RuntimeRegistryConfig struct {
+	Namespace  string `yaml:"namespace,omitempty"`
+	Repository string `yaml:"repository,omitempty"`
+	// BaseURL overrides the registry HTTP endpoint. Default depends on the
+	// resolved namespace prefix: `https://hub.docker.com` for Docker Hub
+	// namespaces, `https://ghcr.io` for `ghcr.io/...` namespaces.
+	BaseURL string `yaml:"baseurl,omitempty"`
+	// TokenURL overrides the GHCR token endpoint. Default `https://ghcr.io`.
+	// Only consulted on the GHCR flow.
+	TokenURL string `yaml:"tokenurl,omitempty"`
 }
 
 type SSHDConfig struct {

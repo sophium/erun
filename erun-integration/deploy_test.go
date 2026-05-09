@@ -1,6 +1,8 @@
 package integration
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -24,12 +26,6 @@ func TestDeploy(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		if !strings.Contains(result.Stdout, "Deploy the current Helm chart") {
-			t.Errorf("expected deploy command help, got root help:\n%s", result.Combined)
-		}
-		if !strings.Contains(result.Stdout, "--version string") {
-			t.Errorf("expected --version flag in deploy help, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "deploy/help_outside_devops_cwd", normalize.Apply(result.Combined))
 	})
 
@@ -41,9 +37,6 @@ func TestDeploy(t *testing.T) {
 		// fails until the deploy registration fix lands.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"deploy", "missing", "missing", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if strings.Contains(result.Combined, "unknown flag: --version") {
-			t.Fatalf("regression: deploy still rejects --version outside devops cwd:\n%s", result.Combined)
-		}
 		golden.Equal(t, "deploy/version_flag_recognized_outside_devops_cwd", normalize.Apply(result.Combined))
 	})
 
@@ -64,12 +57,6 @@ func TestDeploy(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--force", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if !strings.Contains(result.Combined, "force=true") {
-			t.Fatalf("expected --force to surface in deploy trace, got:\n%s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, "helm upgrade --install") {
-			t.Fatalf("expected --force deploy to still emit helm upgrade trace, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "deploy/force_flag_appears_in_trace", normalize.Apply(result.Combined))
 	})
 
@@ -85,9 +72,6 @@ func TestDeploy(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
-		if strings.Contains(result.Combined, "helm chart not found") {
-			t.Fatalf("regression: deploy from outside devops cwd hit helm-chart-not-found:\n%s", result.Combined)
-		}
 		golden.Equal(t, "deploy/dry_run_outside_devops_with_tenant_env", normalize.Apply(result.Combined))
 	})
 
@@ -103,12 +87,6 @@ func TestDeploy(t *testing.T) {
 		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 		// Note: no SeedDevopsRepo — there is no local checkout anywhere.
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
-		if strings.Contains(result.Combined, "no such file or directory") {
-			t.Fatalf("regression: deploy stat'd remote repopath locally:\n%s", result.Combined)
-		}
-		if strings.Contains(result.Combined, "helm chart not found") {
-			t.Fatalf("regression: deploy did not fall back to embedded chart for remote env:\n%s", result.Combined)
-		}
 		golden.Equal(t, "deploy/dry_run_remote_env_uses_embedded_chart", normalize.Apply(result.Combined))
 	})
 
@@ -123,14 +101,6 @@ func TestDeploy(t *testing.T) {
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if !strings.Contains(result.Combined, "deploy: resolved 1 spec(s)") {
-			t.Fatalf("expected default deploy to resolve only the runtime chart, got:\n%s", result.Combined)
-		}
-		for _, name := range []string{"erun-backend-postgres", "erun-backend-db", "erun-backend-api"} {
-			if strings.Contains(result.Combined, name) {
-				t.Fatalf("expected default deploy not to mention opt-in chart %q, got:\n%s", name, result.Combined)
-			}
-		}
 		golden.Equal(t, "deploy/default_skips_optin_backend_charts", normalize.Apply(result.Combined))
 	})
 
@@ -148,20 +118,6 @@ func TestDeploy(t *testing.T) {
 			"--components", "erun-backend-api,erun-backend-db,erun-backend-postgres",
 			"--dry-run",
 		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if !strings.Contains(result.Combined, "deploy: resolved 4 spec(s)") {
-			t.Fatalf("expected --components deploy to resolve all four charts, got:\n%s", result.Combined)
-		}
-		// helm releases must appear in dependency order, not the
-		// alphabetical or input order.
-		expectedOrder := []string{"erun-backend-postgres", "erun-backend-db", "erun-backend-api", "team-devops"}
-		var lastIndex int
-		for _, name := range expectedOrder {
-			idx := strings.Index(result.Combined[lastIndex:], name)
-			if idx < 0 {
-				t.Fatalf("expected helm release %q after position %d, got:\n%s", name, lastIndex, result.Combined)
-			}
-			lastIndex += idx + len(name)
-		}
 		golden.Equal(t, "deploy/components_includes_backend_in_deploy_order", normalize.Apply(result.Combined))
 	})
 
@@ -182,27 +138,6 @@ func TestDeploy(t *testing.T) {
 			"--components", "erun-backend-postgres,erun-backend-db,erun-backend-api",
 			"--dry-run",
 		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if !strings.Contains(result.Combined, "deploy: step 1 (parallel): team-devops, erun-backend-postgres") {
-			t.Fatalf("expected step-1 parallel trace for runtime + postgres, got:\n%s", result.Combined)
-		}
-		// Subsequent single-spec steps should NOT emit a parallel trace.
-		if strings.Contains(result.Combined, "deploy: step 2 (parallel)") || strings.Contains(result.Combined, "deploy: step 3 (parallel)") {
-			t.Fatalf("expected single-spec steps to skip the parallel trace, got:\n%s", result.Combined)
-		}
-		expectedHelmOrder := []string{"team-devops", "erun-backend-postgres", "erun-backend-db", "erun-backend-api"}
-		var lastIndex int
-		for _, name := range expectedHelmOrder {
-			idx := strings.Index(result.Combined[lastIndex:], "helm upgrade --install")
-			if idx < 0 {
-				t.Fatalf("expected helm release for %q after position %d, got:\n%s", name, lastIndex, result.Combined)
-			}
-			lastIndex += idx + len("helm upgrade --install")
-			tail := result.Combined[lastIndex:]
-			nameIdx := strings.Index(tail, name)
-			if nameIdx < 0 || nameIdx > 800 {
-				t.Fatalf("expected helm release %q within next chunk, got:\n%s", name, result.Combined)
-			}
-		}
 		golden.Equal(t, "deploy/project_k8s_plan_groups_parallel_step", normalize.Apply(result.Combined))
 	})
 
@@ -218,14 +153,6 @@ func TestDeploy(t *testing.T) {
 		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
 		fixture.SeedProjectK8sConfig(t, setup, "environments:\n  dev:\n    k8s:\n      deployments:\n        - [team-devops, erun-backend-postgres]\n        - erun-backend-db\n        - erun-backend-api\n")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if !strings.Contains(result.Combined, "deploy: resolved 4 spec(s)") {
-			t.Fatalf("expected the plan to imply inclusion of all four charts, got:\n%s", result.Combined)
-		}
-		for _, name := range []string{"erun-backend-postgres", "erun-backend-db", "erun-backend-api", "team-devops"} {
-			if !strings.Contains(result.Combined, name) {
-				t.Fatalf("expected helm release for %q in dry-run output, got:\n%s", name, result.Combined)
-			}
-		}
 		golden.Equal(t, "deploy/project_k8s_plan_includes_listed_charts_without_components_flag", normalize.Apply(result.Combined))
 	})
 
@@ -242,9 +169,6 @@ func TestDeploy(t *testing.T) {
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for malformed k8s.deployments step, got 0:\n%s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, "k8s.deployments item must be a component name or a list of component names") {
-			t.Errorf("expected schema error message, got:\n%s", result.Combined)
 		}
 		golden.Equal(t, "deploy/project_k8s_plan_rejects_invalid_step_node", normalize.Apply(result.Combined))
 	})
@@ -263,9 +187,6 @@ func TestDeploy(t *testing.T) {
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for unknown component, got 0:\n%s", result.Combined)
 		}
-		if !strings.Contains(result.Combined, `unknown deploy component "bogus"`) {
-			t.Errorf("expected unknown-component error message, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "deploy/components_rejects_unknown_name", normalize.Apply(result.Combined))
 	})
 
@@ -276,9 +197,6 @@ func TestDeploy(t *testing.T) {
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--snapshot", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for conflicting snapshot flags, got 0:\n%s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, "cannot use --snapshot and --no-snapshot with conflicting values") {
-			t.Errorf("expected conflict error message, got:\n%s", result.Combined)
 		}
 		golden.Equal(t, "deploy/snapshot_conflict_errors", normalize.Apply(result.Combined))
 	})
@@ -297,5 +215,78 @@ func TestDeploy(t *testing.T) {
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "deploy/real_run_via_stubs", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_with_managed_cloud_traces_helm_set_strings", func(t *testing.T) {
+		// Exercises eruncommon.applyCloudProviderDeployMetadata,
+		// findCloudContextForKubernetesContext, cloudContextRegionFromName,
+		// and the managed-cloud helm --set-string lines that come from
+		// per-tenant cloud provider/context resolution. Seeds an env with
+		// managedcloud=true, cloudprovideralias=dev, and a matching cloud
+		// context that points at the same kubernetes context.
+		setup := env.New(t)
+		seedCloudContextConfig(t, setup, "edge")
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "managed")
+		envDir := filepath.Join(tenantDir, "prod")
+		for _, dir := range []string{tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(tenantDir, "config.yaml"),
+			[]byte("name: managed\nprojectroot: "+setup.Cwd+"\ndefaultenvironment: prod\n"), 0o644); err != nil {
+			t.Fatalf("tenant cfg: %v", err)
+		}
+		envBody := "name: prod\nrepopath: " + setup.Cwd + "\nkubernetescontext: edge\ncontainerregistry: registry.example/test\nruntimeversion: 1.0.0\nmanagedcloud: true\ncloudprovideralias: dev\n"
+		if err := os.WriteFile(filepath.Join(envDir, "config.yaml"), []byte(envBody), 0o644); err != nil {
+			t.Fatalf("env cfg: %v", err)
+		}
+		fixture.SeedDevopsRepo(t, setup, "managed", "prod")
+		result := erun.Run(t, []string{"deploy", "managed", "prod", "--version", "1.0.0", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_with_managed_cloud_traces_helm_set_strings", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_helm_pending_recovery_via_auto_recover_env", func(t *testing.T) {
+		// Exercises wrapHelmDeployWithReleaseRecovery + the production
+		// helm-recovery path: a stubbed `helm` exits with the pending
+		// upgrade error message on the first invocation, succeeds on
+		// the retry, and exits 0 for the recovery rollback. The new
+		// ERUN_AUTO_RECOVER_HELM=1 env var bypasses the interactive
+		// confirmation prompt so this can run from the harness.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		// Counter-driven helm stub: print the pending-operation message
+		// on the first `upgrade --install` call, exit 0 on every other
+		// invocation (rollback recovery + retry upgrade).
+		counter := filepath.Join(stubs, "helm-counter")
+		fixture.StubBinaryWithScript(t, stubs, "helm", strings.Join([]string{
+			`first_arg="$1"`,
+			`if [ "$first_arg" = "upgrade" ]; then`,
+			`  count=0`,
+			`  if [ -f '` + counter + `' ]; then count=$(cat '` + counter + `'); fi`,
+			`  count=$((count + 1))`,
+			`  printf '%s' "$count" > '` + counter + `'`,
+			`  if [ "$count" = "1" ]; then`,
+			`    printf '%s\n' "Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress" >&2`,
+			`    exit 1`,
+			`  fi`,
+			`fi`,
+			`exit 0`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		envVars = append(envVars, "ERUN_AUTO_RECOVER_HELM=1")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_helm_pending_recovery_via_auto_recover_env", normalize.Apply(result.Combined))
 	})
 }

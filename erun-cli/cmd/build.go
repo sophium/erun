@@ -382,6 +382,13 @@ func isGHCR(registry string) bool {
 }
 
 func promptDockerLoginRetry(run SelectRunner, registry string) (bool, error) {
+	// CI / non-interactive callers can opt in to "yes, log in and retry"
+	// by setting ERUN_AUTO_LOGIN_ON_PUSH=1, mirroring the loginAndRetry
+	// option without a TTY. The actual `docker login` step still has to
+	// be wired by the caller; this just unblocks the prompt.
+	if isTrueishEnv("ERUN_AUTO_LOGIN_ON_PUSH") {
+		return true, nil
+	}
 	label := fmt.Sprintf("Docker push requires login to %s", common.DockerRegistryDisplayName(registry))
 	prompt := promptui.Select{
 		Label: label,

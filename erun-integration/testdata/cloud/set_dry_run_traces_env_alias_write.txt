@@ -1,0 +1,3 @@
+Dry run: cloud provider alias update planned.
+audit: erun cloud set --alias team-cloud --dry-run team dev
+write erun environment cloud provider alias team/dev

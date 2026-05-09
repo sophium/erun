@@ -1,7 +1,8 @@
 package integration
 
 import (
-	"strings"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -43,8 +44,33 @@ func TestDelete(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		if !strings.Contains(result.Combined, "kubectl --context test-context delete namespace team-dev --ignore-not-found") {
-			t.Errorf("expected namespace delete trace, got:\n%s", result.Combined)
+		golden.Equal(t, "delete/dry_run_with_remote_env_traces_namespace_delete", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_with_yes_flag_skips_confirmation_and_removes_config", func(t *testing.T) {
+		// Exercises delete.go runDeleteCommand real-run path with --yes:
+		// the confirmation prompt is bypassed, the env config tree is
+		// physically removed, and the "deleted environment" line shows on
+		// stdout. Stubs kubectl so the namespace delete succeeds without
+		// touching a cluster.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		envDir := filepath.Join(setup.ConfigHome, "erun", "team", "dev")
+		if _, err := os.Stat(envDir); err != nil {
+			t.Fatalf("seeded env config missing before delete: %v", err)
 		}
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"delete", "team", "dev", "--yes"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// Filesystem state — golden cannot assert this; keep the os.Stat
+		// check.
+		if _, err := os.Stat(envDir); !os.IsNotExist(err) {
+			t.Errorf("expected env config tree to be removed at %s, stat err: %v", envDir, err)
+		}
+		golden.Equal(t, "delete/real_run_with_yes_flag_skips_confirmation_and_removes_config", normalize.Apply(result.Combined))
 	})
 }

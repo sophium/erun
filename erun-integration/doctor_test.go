@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -32,14 +31,6 @@ func TestDoctor(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		for _, want := range []string{
-			"kubectl --context test-context --namespace team-dev wait --for=condition=Available --timeout 2m0s deployment/team-devops",
-			"kubectl --context test-context --namespace team-dev exec -c erun-dind deployment/team-devops",
-			"docker image prune -a -f",
-		} {
-			if !strings.Contains(result.Stderr, want) {
-				t.Errorf("expected trace to contain %q, got stderr:\n%s", want, result.Stderr)
-			}
-		}
+		golden.Equal(t, "doctor/dry_run_prune_images_traces_dind_exec", normalize.Apply(result.Combined))
 	})
 }

@@ -1,0 +1,4 @@
+  - edge provider=aws alias=dev region=us-east-1 instance=i-0123456789abcdef0 type=t3.medium disk=50GB/gp3 kube-context=edge status=stopped
+audit: erun context stop --dry-run edge
+cloud-context stop: edge
+aws ec2 stop-instances --instance-ids i-0123456789abcdef0 --region us-east-1 --profile dev

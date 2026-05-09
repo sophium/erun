@@ -1,0 +1,2 @@
+audit: erun init --dry-run --remote --tenant frs
+environment is required with --remote

@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -37,20 +36,7 @@ func TestMCP(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		for _, want := range []string{
-			"emcp",
-			"--host 0.0.0.0",
-			"--port 17001",
-			"--path custom",
-			"--tenant team",
-			"--environment dev",
-			"--kubernetes-context test-context",
-			"--namespace team-dev",
-		} {
-			if !strings.Contains(result.Stderr, want) {
-				t.Errorf("expected trace to contain %q, got stderr:\n%s", want, result.Stderr)
-			}
-		}
+		golden.Equal(t, "mcp/dry_run_traces_emcp_launch", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_uses_environment_local_port_by_default", func(t *testing.T) {
@@ -66,8 +52,6 @@ func TestMCP(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		if !strings.Contains(result.Stderr, "--port 17100") {
-			t.Errorf("expected trace to use environment-scoped port 17100, got stderr:\n%s", result.Stderr)
-		}
+		golden.Equal(t, "mcp/dry_run_uses_environment_local_port_by_default", normalize.Apply(result.Combined))
 	})
 }

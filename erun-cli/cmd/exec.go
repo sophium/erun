@@ -1,6 +1,9 @@
 package cmd
 
 import (
+	"encoding/json"
+	"fmt"
+
 	common "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
 )
@@ -15,16 +18,28 @@ func newExecCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitComma
 }
 
 func newExecDiffCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc) *cobra.Command {
+	var (
+		jsonOutput     bool
+		scope          string
+		selectedCommit string
+	)
 	cmd := &cobra.Command{
 		Use:          "diff",
 		Short:        "Show the current git diff",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runExecDiffCommand(commandContext(cmd), findProjectRoot, runGit)
+			return runExecDiffCommand(commandContext(cmd), findProjectRoot, runGit, execDiffOptions{
+				JSON:           jsonOutput,
+				Scope:          scope,
+				SelectedCommit: selectedCommit,
+			})
 		},
 	}
 	addDryRunFlag(cmd)
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write the parsed diff as JSON instead of raw text")
+	cmd.Flags().StringVar(&scope, "scope", "", "Diff scope: current (default), all, or commit")
+	cmd.Flags().StringVar(&selectedCommit, "selected-commit", "", "Oldest commit hash to include when --scope=commit")
 	return cmd
 }
 
@@ -79,7 +94,13 @@ func extractDryRunFlag(args []string) ([]string, bool) {
 	return cleaned, dryRun
 }
 
-func runExecDiffCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc) error {
+type execDiffOptions struct {
+	JSON           bool
+	Scope          string
+	SelectedCommit string
+}
+
+func runExecDiffCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, runGit common.GitCommandRunnerFunc, opts execDiffOptions) error {
 	if findProjectRoot == nil {
 		findProjectRoot = common.FindProjectRoot
 	}
@@ -91,11 +112,29 @@ func runExecDiffCommand(ctx common.Context, findProjectRoot common.ProjectFinder
 	if ctx.DryRun {
 		return nil
 	}
-	result, err := common.ResolveGitDiff(projectRoot, runGit)
+	result, err := resolveExecDiff(projectRoot, runGit, opts)
 	if err != nil {
 		return err
 	}
+	if opts.JSON {
+		encoder := json.NewEncoder(ctx.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(result)
+	}
 	return common.WriteRawDiff(ctx.Stdout, result)
+}
+
+func resolveExecDiff(projectRoot string, runGit common.GitCommandRunnerFunc, opts execDiffOptions) (common.DiffResult, error) {
+	if opts.Scope == "" && opts.SelectedCommit == "" {
+		return common.ResolveGitDiff(projectRoot, runGit)
+	}
+	if opts.SelectedCommit != "" && opts.Scope != "commit" {
+		return common.DiffResult{}, fmt.Errorf("--selected-commit requires --scope=commit")
+	}
+	return common.ResolveGitDiffWithOptions(projectRoot, common.DiffOptions{
+		Scope:          opts.Scope,
+		SelectedCommit: opts.SelectedCommit,
+	}, runGit)
 }
 
 func runExecRawCommand(ctx common.Context, findProjectRoot common.ProjectFinderFunc, runRaw common.RawCommandRunnerFunc, args []string) error {
