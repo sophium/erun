@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -298,6 +299,47 @@ func TestDeploy(t *testing.T) {
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "deploy/real_run_via_stubs", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_with_managed_cloud_traces_helm_set_strings", func(t *testing.T) {
+		// Exercises eruncommon.applyCloudProviderDeployMetadata,
+		// findCloudContextForKubernetesContext, cloudContextRegionFromName,
+		// and the managed-cloud helm --set-string lines that come from
+		// per-tenant cloud provider/context resolution. Seeds an env with
+		// managedcloud=true, cloudprovideralias=dev, and a matching cloud
+		// context that points at the same kubernetes context.
+		setup := env.New(t)
+		seedCloudContextConfig(t, setup, "edge")
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "managed")
+		envDir := filepath.Join(tenantDir, "prod")
+		for _, dir := range []string{tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(tenantDir, "config.yaml"),
+			[]byte("name: managed\nprojectroot: "+setup.Cwd+"\ndefaultenvironment: prod\n"), 0o644); err != nil {
+			t.Fatalf("tenant cfg: %v", err)
+		}
+		envBody := "name: prod\nrepopath: " + setup.Cwd + "\nkubernetescontext: edge\ncontainerregistry: registry.example/test\nruntimeversion: 1.0.0\nmanagedcloud: true\ncloudprovideralias: dev\n"
+		if err := os.WriteFile(filepath.Join(envDir, "config.yaml"), []byte(envBody), 0o644); err != nil {
+			t.Fatalf("env cfg: %v", err)
+		}
+		fixture.SeedDevopsRepo(t, setup, "managed", "prod")
+		result := erun.Run(t, []string{"deploy", "managed", "prod", "--version", "1.0.0", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		for _, want := range []string{
+			"managedCloud=true",
+			"cloudContext.provider=aws",
+			"cloudContext.providerAlias=dev",
+		} {
+			if !strings.Contains(result.Combined, want) {
+				t.Errorf("expected helm trace to contain %q, got:\n%s", want, result.Combined)
+			}
+		}
 	})
 
 	t.Run("real_run_helm_pending_recovery_via_auto_recover_env", func(t *testing.T) {

@@ -150,6 +150,27 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
+	t.Run("dry_run_no_incremental_skips_fingerprint_short_circuit", func(t *testing.T) {
+		// Exercises the --no-incremental branch in build orchestration
+		// (BuildExecution.NoIncremental, BuildOrderForRefactoredFingerprints
+		// path). With --no-incremental, the build trace must run
+		// `docker build` for every image even when a fingerprint tag
+		// exists — there's no `docker image inspect` short-circuit and
+		// no `(skipping)` lines.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		result := erun.Run(t, []string{"build", "--dry-run", "--no-incremental"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "skipping rebuild of") {
+			t.Errorf("expected --no-incremental to skip the fingerprint short-circuit, but trace still mentions skipping:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "docker build --platform linux/amd64") {
+			t.Errorf("expected docker build trace under --no-incremental, got:\n%s", result.Combined)
+		}
+	})
+
 	t.Run("dry_run_release_pushes_release_tagged_docker_builds", func(t *testing.T) {
 		// Exercises build.go --release path: per-platform docker build +
 		// docker push trace must appear in the dry-run output for the
