@@ -271,6 +271,45 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
+	t.Run("dry_run_with_dockerignore_drives_ignore_pattern_parser", func(t *testing.T) {
+		// Exercises eruncommon/build_incremental.go ignoreSet parser:
+		// parseIgnoreData, patternMatchesPath, globMatch, globToRegex.
+		// Seeds .dockerignore in the project root with a mix of negation
+		// (!), comment, glob (*), and directory patterns. The fingerprint
+		// computation walks the build context, calls loadIgnoreFile,
+		// which parses these patterns and applies them.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		dockerignore := strings.Join([]string{
+			"# build context excludes",
+			"node_modules/",
+			"*.log",
+			"!keep.log",
+			"docs/**/*.md",
+			"",
+		}, "\n")
+		if err := os.WriteFile(filepath.Join(setup.Cwd, ".dockerignore"), []byte(dockerignore), 0o644); err != nil {
+			t.Fatalf("write .dockerignore: %v", err)
+		}
+		// Add a file that matches a pattern so the parser actually runs
+		// against a non-empty context. Without commit it's still in the
+		// build context for fingerprinting.
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "noisy.log"), []byte("ignored"), 0o644); err != nil {
+			t.Fatalf("write noisy.log: %v", err)
+		}
+		fixture.RunGit(t, setup.Cwd, "add", ".dockerignore", "noisy.log")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add dockerignore + noisy file")
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		// Build should still trace docker build for both images, even
+		// though the dockerignore parser fires during fingerprint walk.
+		if !strings.Contains(result.Combined, "docker build --platform linux/amd64") {
+			t.Errorf("expected build trace despite dockerignore, got:\n%s", result.Combined)
+		}
+	})
+
 	t.Run("real_run_with_existing_fingerprint_promotes_via_tag", func(t *testing.T) {
 		// Exercises promoteDockerImage + runDockerTag promote path:
 		// when `docker image inspect <fp-tag>` returns success, the
