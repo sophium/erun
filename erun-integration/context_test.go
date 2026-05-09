@@ -140,6 +140,44 @@ func TestContext(t *testing.T) {
 		}
 	})
 
+	t.Run("init_dry_run_traces_aws_security_group_and_run_instances", func(t *testing.T) {
+		// Exercises eruncommon.InitCloudContext: with the cloud provider
+		// pre-seeded and all init flags supplied, dry-run skips prompts
+		// and traces the would-execute aws calls that prepare a security
+		// group, fetch the AMI, build the run-instances arguments, and
+		// associate the instance profile.
+		setup := env.New(t)
+		seedCloudContextConfig(t, setup, "preexisting")
+		args := []string{
+			"context", "init",
+			"--alias", "dev",
+			"--context", "fresh",
+			"--region", "eu-west-2",
+			"--instance-type", "c8gd.2xlarge",
+			"--disk-size", "100",
+			"--dry-run", "-v",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		for _, want := range []string{
+			"aws ec2 create-security-group --group-name fresh-k3s",
+			"aws ec2 authorize-security-group-ingress",
+			"aws iam create-role --role-name erun-fresh-host-stop",
+			"aws iam create-instance-profile --instance-profile-name erun-fresh-host-stop",
+			"aws ssm get-parameter --name /aws/service/canonical/ubuntu",
+			"aws ec2 run-instances",
+			"--instance-type c8gd.2xlarge",
+			"aws ec2 wait instance-running",
+			"Dry run: cloud context initialization planned.",
+		} {
+			if !strings.Contains(result.Combined, want) {
+				t.Errorf("expected init dry-run trace to contain %q, got:\n%s", want, result.Combined)
+			}
+		}
+	})
+
 	t.Run("start_without_force_blocks_outside_working_hours", func(t *testing.T) {
 		// Exercises eruncommon.cloudContextStartBlockedByWorkingHours: when
 		// any attached environment has a working-hours window that excludes
