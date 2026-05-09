@@ -57,6 +57,23 @@ func TestIdle(t *testing.T) {
 		}
 	})
 
+	t.Run("status_json_output", func(t *testing.T) {
+		// Exercises idle.go --json branch: instead of writeIdleStatus's
+		// labeled-value output, the status should be emitted as JSON via
+		// json.NewEncoder. The structured fields (timeout, markers) must
+		// parse cleanly back into common.EnvironmentIdleStatus.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"idle", "team", "dev", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		stdout := strings.TrimSpace(result.Stdout)
+		if !strings.HasPrefix(stdout, "{") || !strings.Contains(stdout, "\"markers\"") {
+			t.Errorf("expected JSON object with markers field, got:\n%s", stdout)
+		}
+	})
+
 	t.Run("missing_env_errors", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"idle", "missing", "missing"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
