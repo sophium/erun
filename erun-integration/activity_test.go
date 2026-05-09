@@ -1,6 +1,8 @@
 package integration
 
 import (
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -27,10 +29,33 @@ func TestActivity(t *testing.T) {
 	})
 
 	t.Run("status_with_seeded_env", func(t *testing.T) {
+		// Exercises erun-cli/cmd/activity.go writeActivityStatus + the
+		// shared idle resolver. The working-hours line varies by wall
+		// clock; assert the stable lines exactly and the variable line
+		// structurally so the test is time-of-day-agnostic.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"activity", "status", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		golden.Equal(t, "activity/status_with_seeded_env", normalize.Apply(result.Combined))
+		stableLines := []string{
+			"stop eligible: off",
+			"stop blocked: environment is not cloud-managed",
+			"ssh: idle (no activity recorded)",
+			"api: idle (no activity recorded)",
+			"mcp: idle (no activity recorded)",
+			"cli: idle (no activity recorded)",
+			"codex: idle (no activity recorded)",
+		}
+		for _, line := range stableLines {
+			if !strings.Contains(result.Stdout, line) {
+				t.Errorf("expected stdout to contain %q, got:\n%s", line, result.Stdout)
+			}
+		}
+		// working-hours: idle (outside working hours 08:00-20:00) OR
+		// active (inside working hours 08:00-20:00) — both shapes valid.
+		workingHours := regexp.MustCompile(`(?m)^\s*working-hours: (idle|active) \((inside|outside) working hours \d{2}:\d{2}-\d{2}:\d{2}\)\s*$`)
+		if !workingHours.MatchString(result.Stdout) {
+			t.Errorf("expected working-hours marker line, got:\n%s", result.Stdout)
+		}
 	})
 
 	t.Run("stop_ready_blocks_when_active", func(t *testing.T) {
