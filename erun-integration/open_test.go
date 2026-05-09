@@ -33,6 +33,21 @@ func stubKubectlNotFound(t *testing.T, setup env.Setup) []string {
 	return append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
 }
 
+// stubKubectlGenericError writes a kubectl stub that exits non-zero with a
+// message that does not match the "NotFound" / "no resources found" tokens
+// CheckKubernetesDeployment treats as an absent deployment. Used to lock the
+// dry-run "kubernetes deployment check failed, assuming not deployed"
+// fallback in shouldDeployRuntime (open.go:407-410).
+func stubKubectlGenericError(t *testing.T, setup env.Setup) []string {
+	t.Helper()
+	stubs := setup.Cwd + "/stubs"
+	fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{
+		Stderr:   `Unable to connect to the server: dial tcp 10.0.0.1:443: i/o timeout`,
+		ExitCode: 2,
+	})
+	return append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+}
+
 func TestOpen(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
@@ -207,4 +222,82 @@ func TestOpen(t *testing.T) {
 		}
 		golden.Equal(t, "open/default_tenant_environment_resolves_from_root_config", normalize.Apply(result.Combined))
 	})
+
+	t.Run("kubectl_error_assumes_not_deployed", func(t *testing.T) {
+		// kubectl stub exits non-zero with a non-NotFound error. In
+		// dry-run, shouldDeployRuntime traces "assuming not deployed" and
+		// proceeds with the helm upgrade. Locks the dry-run fallback in
+		// shouldDeployRuntime (open.go:407-410).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlGenericError(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if !strings.Contains(result.Combined, "assuming not deployed") {
+			t.Fatalf("expected dry-run fallback trace when kubectl errors generically, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "open/kubectl_error_assumes_not_deployed", normalize.Apply(result.Combined))
+	})
+
+	t.Run("not_initialized_triggers_init_retry", func(t *testing.T) {
+		// `erun open team dev` with no config triggers
+		// resolveOpenWithInitStopForParams' init-fired branch:
+		// resolveOpen errors with ErrNotInitialized, shouldRunInitForOpenCommand
+		// matches, runInitBeforeOpenForParams runs init in dry-run, and the
+		// command exits via initRan=true (open.go:226-230). The init dry-run
+		// trace is captured in the golden alongside open's audit line.
+		setup := env.New(t)
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/not_initialized_triggers_init_retry", normalize.Apply(result.Combined))
+	})
+
+	t.Run("tenant_flag_only_resolves_default_env", func(t *testing.T) {
+		// `erun open --tenant team` (flag, no positional args) lands in
+		// resolveOpenParams' "tenant set, environment empty" switch case
+		// (open.go:172-174), with UseDefaultEnvironment=true so the env
+		// resolves from the tenant config. OpenParamsForArgs treats a
+		// single positional arg as the *environment*, not the tenant, so
+		// the tenant-only branch is only reachable via the --tenant flag.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "--tenant", "team", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if !strings.Contains(result.Combined, "tenant=team environment=dev") {
+			t.Fatalf("expected default env to resolve from tenant config, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "open/tenant_flag_only_resolves_default_env", normalize.Apply(result.Combined))
+	})
+
+	t.Run("environment_positional_resolves_default_tenant", func(t *testing.T) {
+		// `erun open dev` (single positional arg) lands in
+		// resolveOpenParams' "tenant empty, environment set" switch case
+		// (open.go:169-171), with UseDefaultTenant=true so the tenant
+		// resolves from the root config's defaulttenant. Locks the second
+		// switch case which existing 0-arg and 2-arg scenarios skip.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if !strings.Contains(result.Combined, "tenant=team environment=dev") {
+			t.Fatalf("expected default tenant to resolve from root config, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "open/environment_positional_resolves_default_tenant", normalize.Apply(result.Combined))
+	})
+
+	t.Run("remote_runtime_image_override", func(t *testing.T) {
+		// Remote env + --runtime-image rewrites the runtime release to
+		// use the embedded default-devops chart with the chosen image.
+		// Locks the RemoteRepo() branch in applyRuntimeDeployImageOverride
+		// (open.go:602-603), which the local-env runtime_image scenario
+		// does not reach.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--runtime-image", "ghcr.io/example/custom-runtime", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if !strings.Contains(result.Combined, "ghcr.io/example/custom-runtime") {
+			t.Fatalf("expected --runtime-image to surface in helm trace, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "open/remote_runtime_image_override", normalize.Apply(result.Combined))
+	})
+
 }
