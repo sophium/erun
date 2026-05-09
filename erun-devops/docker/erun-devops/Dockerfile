@@ -40,6 +40,7 @@ ARG HELM_VERSION=v3.18.2
 ARG TERRAFORM_VERSION=1.12.2
 ARG K9S_VERSION=v0.50.9
 ARG DOCKER_VERSION=28.1.1
+ARG BUILDX_VERSION=v0.18.0
 ARG DIFFT_VERSION=0.68.0
 ARG GH_VERSION=2.74.2
 ARG GOLANGCI_LINT_VERSION=v2.2.2
@@ -83,6 +84,8 @@ RUN apt-get update && \
     curl -fsSL -o /tmp/docker.tgz "https://download.docker.com/linux/static/stable/${docker_arch}/docker-${DOCKER_VERSION}.tgz" && \
     tar -xzf /tmp/docker.tgz -C /tmp && \
     install -m 0755 /tmp/docker/docker /usr/local/bin/docker && \
+    curl -fsSL -o /tmp/docker-buildx "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-${arch}" && \
+    install -D -m 0755 /tmp/docker-buildx /usr/local/lib/docker/cli-plugins/docker-buildx && \
     curl -fsSL -o /tmp/node.tar.gz "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.gz" && \
     tar -xzf /tmp/node.tar.gz -C /usr/local --strip-components=1 && \
     curl -fsSL -o /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}-${AWS_CLI_VERSION}.zip" && \
@@ -92,7 +95,7 @@ RUN apt-get update && \
     mv /usr/local/bin/codex /usr/local/bin/codex-real && \
     mv /usr/local/bin/claude /usr/local/bin/claude-real && \
     npm cache clean --force && \
-    rm -rf /tmp/helm.tar.gz /tmp/terraform.zip /tmp/k9s.tar.gz /tmp/difft.tar.gz /tmp/gh.tar.gz /tmp/golangci-lint.tar.gz /tmp/docker.tgz /tmp/node.tar.gz /tmp/awscliv2.zip "/tmp/linux-${arch}" "/tmp/gh_${GH_VERSION}_linux_${arch}" "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION#v}-linux-${arch}" /tmp/terraform /tmp/k9s /tmp/difft /tmp/docker /tmp/aws && \
+    rm -rf /tmp/helm.tar.gz /tmp/terraform.zip /tmp/k9s.tar.gz /tmp/difft.tar.gz /tmp/gh.tar.gz /tmp/golangci-lint.tar.gz /tmp/docker.tgz /tmp/docker-buildx /tmp/node.tar.gz /tmp/awscliv2.zip "/tmp/linux-${arch}" "/tmp/gh_${GH_VERSION}_linux_${arch}" "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION#v}-linux-${arch}" /tmp/terraform /tmp/k9s /tmp/difft /tmp/docker /tmp/aws && \
     groupmod -n erun ubuntu && \
     usermod -l erun -d /home/erun -m -g erun ubuntu && \
     passwd -d erun && \
