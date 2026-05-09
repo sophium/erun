@@ -14,7 +14,8 @@
 {{- $postgresPassword = randAlphaNum 32 -}}
 {{- end -}}
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
-{{- $postgresImage := default "postgres:18" (index $imageOverrides "postgres") -}}
+{{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
+{{- $postgresImage := default (printf "%s/erun-backend-postgres:18.3" $containerRegistry) (index $imageOverrides "erun-backend-postgres") -}}
 apiVersion: v1
 kind: Secret
 metadata:

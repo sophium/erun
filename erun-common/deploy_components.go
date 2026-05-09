@@ -185,9 +185,8 @@ func groupDeploySpecsByPlan(specs []DeploySpec, plan ProjectK8sConfig) [][]Deplo
 
 // allDockerBuildsPromoted reports whether every build in the slice was marked
 // for fingerprint promotion (cached fp-tag hit). An empty slice returns false:
-// charts with no locally-built images (e.g. erun-backend-postgres referencing
-// only the public postgres image) should keep deploying so chart-only changes
-// (templates, values) still ship.
+// charts with no locally-built images at all should keep deploying so
+// chart-only changes (templates, values) still ship.
 func allDockerBuildsPromoted(builds []DockerBuildSpec) bool {
 	if len(builds) == 0 {
 		return false
