@@ -2,6 +2,7 @@ package integration
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -70,6 +71,37 @@ func TestPush(t *testing.T) {
 		}
 		if !strings.Contains(result.Combined, "docker login") {
 			t.Errorf("expected retry trace to mention docker login, got:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("devops_container_push_real_run_resolves_single_image_spec", func(t *testing.T) {
+		// Exercises eruncommon.ResolveDockerPushSpec via the
+		// `devops container push` nested command. With a Dockerfile in
+		// the current directory and seeded devops chart context, the
+		// command resolves a single-image push spec, runs the build,
+		// and pushes the resolved image tag.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectDockerfile(t, setup)
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+			t.Fatalf("write VERSION: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"devops", "container", "push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "docker push") {
+			t.Errorf("expected devops container push to invoke docker push, got:\n%s", result.Combined)
 		}
 	})
 

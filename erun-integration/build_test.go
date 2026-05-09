@@ -202,6 +202,101 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
+	t.Run("real_run_with_project_build_script_executes_script", func(t *testing.T) {
+		// Real-run companion to dry_run_with_project_build_script_traces_script_invocation:
+		// runs the build flow without --dry-run so eruncommon.BuildScriptRunner
+		// actually invokes ./build.sh. Asserts the command exits 0 and a
+		// marker file the script writes appears, confirming the script
+		// process actually ran.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		marker := filepath.Join(setup.Cwd, "build-script-marker")
+		scriptBody := "#!/bin/sh\nprintf 'ran with %s\\n' \"$ERUN_BUILD_VERSION\" > '" + marker + "'\nexit 0\n"
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "build.sh"), []byte(scriptBody), 0o755); err != nil {
+			t.Fatalf("write build.sh: %v", err)
+		}
+		fixture.RunGit(t, setup.Cwd, "add", "build.sh")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add build script")
+		result := erun.Run(t, []string{"build"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		body, err := os.ReadFile(marker)
+		if err != nil {
+			t.Fatalf("read marker: %v", err)
+		}
+		if !strings.HasPrefix(string(body), "ran with ") {
+			t.Errorf("expected marker prefix 'ran with ', got: %q", body)
+		}
+	})
+
+	t.Run("real_run_configured_fingerprint_inspects_remote_manifest", func(t *testing.T) {
+		// Exercises pullAndTagConfiguredFingerprint + DockerManifestExists
+		// on the materialize-configured-fingerprint path. Stubs docker so
+		// `image inspect <fp-tag>` fails (no local fingerprint), forcing
+		// the materialize step, which then runs `docker manifest inspect`
+		// and `docker pull` against the configured source tag.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      fingerprints:\n"+
+				"        base: 0123456789abcdef\n",
+		)
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1 $2" in`,
+			// Local fingerprint missing → forces materialize path.
+			`  "image inspect") exit 1 ;;`,
+			// Remote manifest present → DockerManifestExists returns true.
+			`  "manifest inspect") exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"build", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		for _, want := range []string{
+			"docker manifest inspect ghcr.io/sophium/base:9.9.9",
+			"docker pull --platform linux/amd64 ghcr.io/sophium/base:9.9.9",
+			"docker tag ghcr.io/sophium/base:9.9.9 ghcr.io/sophium/base:fp-0123456789abcdef-amd64",
+		} {
+			if !strings.Contains(result.Combined, want) {
+				t.Errorf("expected configured-fingerprint trace to contain %q, got:\n%s", want, result.Combined)
+			}
+		}
+	})
+
+	t.Run("real_run_with_existing_fingerprint_promotes_via_tag", func(t *testing.T) {
+		// Exercises promoteDockerImage + runDockerTag promote path:
+		// when `docker image inspect <fp-tag>` returns success, the
+		// build flow sets DockerBuildSpec.Promote=true and re-tags
+		// the existing fingerprint image to the version tag instead
+		// of running docker build. Stubs docker so `image inspect`
+		// always succeeds, then asserts no `docker build` calls
+		// appear and `docker tag` re-tagging from the fingerprint
+		// does.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"build", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if strings.Contains(result.Combined, "docker build --platform") {
+			t.Errorf("expected promote path to skip docker build, but trace mentions docker build:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "docker tag ") {
+			t.Errorf("expected promote path to run docker tag, got:\n%s", result.Combined)
+		}
+	})
+
 	t.Run("real_run_release_pushes_multi_platform_manifest", func(t *testing.T) {
 		// Exercises pushMultiPlatformImage (and the manifest create+push
 		// path) plus runDockerPushOnce in real-run release mode. The
