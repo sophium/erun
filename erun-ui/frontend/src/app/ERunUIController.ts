@@ -424,6 +424,10 @@ export class ERunUIController {
     this.pendingDebugHeader = '';
   }
 
+  activeSessionDebug(sessionId: number): boolean {
+    return sessionId > 0 && this.sessions.debugMode(sessionId) !== undefined;
+  }
+
   syncDebugDisplay(): void {
     if (!this.state.debugOpen) {
       return;

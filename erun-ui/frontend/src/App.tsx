@@ -114,7 +114,7 @@ function MainPane({
     >
       {dashboardOpen && <TenantDashboardView controller={controller} state={state} />}
       <TerminalPane controller={controller} state={state} hidden={dashboardOpen} terminalRootRef={terminalRootRef} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} />
-      {!dashboardOpen && <DebugPanel controller={controller} open={state.debugOpen} output={state.debugOutput} sessionId={state.sessionId} />}
+      {!dashboardOpen && <DebugPanel controller={controller} open={state.debugOpen} output={state.debugOutput} sessionId={state.sessionId} verbose={controller.activeSessionDebug(state.sessionId)} />}
     </main>
   );
 }
@@ -173,8 +173,8 @@ function TerminalBusyOverlay({ message }: { message: string }): React.ReactEleme
   );
 }
 
-function DebugPanel({ controller, open, output, sessionId }: { controller: ERunUIController; open: boolean; output: string; sessionId: number }): React.ReactElement {
-  const outputRef = React.useRef<HTMLPreElement>(null);
+function DebugPanel({ controller, open, output, sessionId, verbose }: { controller: ERunUIController; open: boolean; output: string; sessionId: number; verbose: boolean }): React.ReactElement {
+  const outputRef = React.useRef<HTMLDivElement>(null);
   const stuckToBottomRef = React.useRef(true);
   const [copyStatus, setCopyStatus] = React.useState('');
   const canCopy = output.trim().length > 0;
@@ -261,13 +261,20 @@ function DebugPanel({ controller, open, output, sessionId }: { controller: ERunU
         )}
       </div>
       {open && (
-        <pre
+        <div
           ref={outputRef}
           onScroll={handleScroll}
-          className="min-h-0 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-[11px] leading-[1.35] text-[oklch(0.82_0_0)]"
+          className="min-h-0 overflow-auto px-3 py-2 font-mono text-[11px] leading-[1.35] text-[oklch(0.82_0_0)]"
         >
-          {output || 'Run an environment command while Debug is expanded to stream erun -vv output here.'}
-        </pre>
+          {!verbose && sessionId > 0 && (
+            <div className="mb-2 rounded border border-[oklch(0.32_0_0)] bg-[oklch(0.10_0_0)] px-3 py-2 text-[11px] leading-[1.4] text-[oklch(0.74_0_0)]">
+              Active session was not started with <code>-vv</code>, so trace lines won't appear here. To capture verbose output: run <code>erun -vv &lt;command&gt;</code> in this shell, or open this Debug panel before launching commands from the UI.
+            </div>
+          )}
+          <pre className="m-0 whitespace-pre-wrap break-words font-mono text-[11px] leading-[1.35]">
+            {output || 'Run an environment command while Debug is expanded to stream erun -vv output here.'}
+          </pre>
+        </div>
       )}
     </section>
   );
