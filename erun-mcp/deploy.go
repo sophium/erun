@@ -13,6 +13,7 @@ type DeployInput struct {
 	Components []string `json:"components,omitempty" jsonschema:"opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api); ignored when component is set"`
 	Version    string   `json:"version,omitempty" jsonschema:"optional explicit version override for the deployed chart"`
 	Snapshot   *bool    `json:"snapshot,omitempty" jsonschema:"optional local snapshot override; when false, skips local snapshot builds in the local environment"`
+	Force      bool     `json:"force,omitempty" jsonschema:"when true, bypass the fingerprint cache and re-run helm upgrade even when no source change is detected"`
 	Preview    bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity  int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
@@ -37,6 +38,7 @@ func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 				VersionOverride: strings.TrimSpace(input.Version),
 				Snapshot:        input.Snapshot,
 				Components:      input.Components,
+				Force:           input.Force,
 			}
 
 			component := strings.TrimSpace(input.Component)

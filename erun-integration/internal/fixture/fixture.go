@@ -7,6 +7,7 @@ import (
 	"os"
 	osexec "os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -49,6 +50,80 @@ func SeedTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 			"kubernetescontext: test-context\n"+
 			"containerregistry: registry.example/test\n"+
 			"runtimeversion: 1.0.0\n",
+	)
+}
+
+// SeedTenantEnvWithSnapshot writes the same minimal config tree as
+// SeedTenantEnv but persists snapshot=<enabled> on the env config so
+// commands that key off EnvConfig.SnapshotEnabled() (notably `erun open`)
+// exercise the persisted-preference branch instead of relying on the user
+// passing --snapshot every time.
+func SeedTenantEnvWithSnapshot(t testing.TB, setup env.Setup, tenant, environment string, enabled bool) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+setup.Cwd+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	snapshot := "false"
+	if enabled {
+		snapshot = "true"
+	}
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+setup.Cwd+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"runtimeversion: 1.0.0\n"+
+			"snapshot: "+snapshot+"\n",
+	)
+}
+
+// SeedRemoteTenantEnvWithSSHD writes the same tree as SeedRemoteTenantEnv
+// and additionally marks SSHD as enabled, so commands that gate on the
+// SSHD-enabled remote environment (notably `erun open --vscode` and
+// `--intellij`) reach past the validateIDEOptions guard.
+func SeedRemoteTenantEnvWithSSHD(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	repoPath := filepath.Join(setup.Home, "git", tenant)
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo %s: %v", repoPath, err)
+	}
+
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+repoPath+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+repoPath+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"runtimeversion: 1.0.0\n"+
+			"remote: true\n"+
+			"sshd:\n"+
+			"  enabled: true\n",
 	)
 }
 
@@ -195,6 +270,19 @@ func SeedDevopsRepo(t testing.TB, setup env.Setup, tenant, environment string) s
 	return chart
 }
 
+// SeedDevopsRuntimeDockerfile writes a Dockerfile at the canonical location
+// <setup.Cwd>/<tenant>-devops/docker/<tenant>-devops/Dockerfile so commands
+// that resolve runtime-image builds (notably `erun open --snapshot` for the
+// local environment) reach the docker-build branch in dry-run.
+func SeedDevopsRuntimeDockerfile(t testing.TB, setup env.Setup, tenant string) {
+	t.Helper()
+	dir := filepath.Join(setup.Cwd, tenant+"-devops", "docker", tenant+"-devops")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	mustWrite(t, filepath.Join(dir, "Dockerfile"), "FROM alpine:3.22\n")
+}
+
 // SeedProjectDockerfile writes a minimal Dockerfile under setup.Cwd so
 // commands that key off "current directory contains a Dockerfile" (notably
 // the root `erun push` shorthand) register for the test invocation.
@@ -237,26 +325,58 @@ func SeedDevopsBackendCharts(t testing.TB, setup env.Setup, tenant, environment 
 }
 
 // StubBinary writes a small POSIX shell script that the production runners
-// will pick up via the ERUN_<NAME>_BIN environment variable. The script
-// records each invocation to a JSON-Lines file inside callsDir and prints
-// stdout. Tests use this to drive non-dry-run code paths without needing the
-// real `aws`/`kubectl`/`helm`/`docker` binaries on PATH.
+// pick up via the ERUN_<NAME>_BIN environment variable. The script prints
+// stdout and exits 0. Tests use this to drive non-dry-run code paths without
+// needing the real `aws`/`kubectl`/`helm`/`docker` binaries on PATH.
+//
+// For dry-run scenarios that need the stub to produce decision-input output
+// (e.g. kubectl reporting "deployment exists" vs "not found" so the open
+// runner can pick its branch), prefer StubBinaryAdvanced which also lets
+// callers set stderr and exit code.
 //
 // Returns the absolute path to the stub. Set ERUN_<NAME>_BIN to that path in
 // the subprocess env to route invocations through the stub.
 func StubBinary(t testing.TB, dir, name, stdout string) string {
+	return StubBinaryAdvanced(t, dir, name, StubBinarySpec{Stdout: stdout})
+}
+
+// StubBinarySpec configures a stub binary's response. The stub always
+// matches its argv to the spec deterministically: same Stdout/Stderr/ExitCode
+// regardless of how it is called. Use one stub per per-binary persona; if a
+// scenario needs a binary to behave differently across calls, write multiple
+// stubs at distinct paths.
+type StubBinarySpec struct {
+	Stdout   string
+	Stderr   string
+	ExitCode int
+}
+
+// StubBinaryAdvanced writes a POSIX shell stub that emits the given stdout
+// and stderr and exits with the given code. See StubBinary for the env-var
+// routing contract.
+func StubBinaryAdvanced(t testing.TB, dir, name string, spec StubBinarySpec) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", dir, err)
 	}
 	path := filepath.Join(dir, name)
 	body := "#!/bin/sh\n" +
-		"# erun integration stub for " + name + "\n" +
-		"echo \"" + stdout + "\"\n"
+		"# erun integration stub for " + name + "\n"
+	if spec.Stdout != "" {
+		body += "printf '%s\\n' " + shellSingleQuote(spec.Stdout) + "\n"
+	}
+	if spec.Stderr != "" {
+		body += "printf '%s\\n' " + shellSingleQuote(spec.Stderr) + " >&2\n"
+	}
+	body += "exit " + strconv.Itoa(spec.ExitCode) + "\n"
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
 		t.Fatalf("write stub %s: %v", path, err)
 	}
 	return path
+}
+
+func shellSingleQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
 // StubEnv returns the env-var pairs that route the named binary lookups to

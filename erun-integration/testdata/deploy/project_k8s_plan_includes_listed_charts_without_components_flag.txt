@@ -1,5 +1,5 @@
 audit: erun deploy --dry-run --version <VERSION> team dev
-deploy: tenant=team environment=dev version-override=<VERSION> snapshot=true components=[]
+deploy: tenant=team environment=dev version-override=<VERSION> snapshot=true components=[] force=false
 deploy: resolved 4 spec(s)
 deploy: step 1 (parallel): team-devops, erun-backend-postgres
 kubectl --context test-context get namespace team-dev -o name

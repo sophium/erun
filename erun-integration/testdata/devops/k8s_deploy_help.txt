@@ -6,6 +6,7 @@ Usage:
 Flags:
       --dry-run              Resolve and trace mutating actions without executing them.
       --environment string   Deploy for a specific environment; requires --tenant
+      --force                Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected
   -h, --help                 help for deploy
       --no-snapshot          Alias for --snapshot=false
       --snapshot             Build and deploy local snapshot images in the local environment (default true)

@@ -65,7 +65,10 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 			if err != nil {
 				return err
 			}
-			allowLocalBuilds := snapshotOverride != nil && *snapshotOverride
+			allowLocalBuilds := result.EnvConfig.SnapshotEnabled()
+			if snapshotOverride != nil {
+				allowLocalBuilds = *snapshotOverride
+			}
 			return runResolvedOpenCommandWithAPI(ctx, result, openOptions{
 				NoShell:          noShell,
 				NoAliasPrompt:    noAliasPrompt,

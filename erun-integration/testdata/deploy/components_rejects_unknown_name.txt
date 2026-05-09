@@ -1,4 +1,4 @@
 audit: erun deploy --components [bogus] --dry-run --version <VERSION> team dev
-deploy: tenant=team environment=dev version-override=<VERSION> snapshot=true components=[bogus]
+deploy: tenant=team environment=dev version-override=<VERSION> snapshot=true components=[bogus] force=false
 deploy: spec resolution failed: unknown deploy component "bogus"; valid opt-in components are: erun-backend-postgres, erun-backend-db, erun-backend-api
 unknown deploy component "bogus"; valid opt-in components are: erun-backend-postgres, erun-backend-db, erun-backend-api

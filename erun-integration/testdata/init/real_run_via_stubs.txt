@@ -1,4 +1,3 @@
-
 ==> Deploying team/dev <VERSION>
     namespace team-dev on context test-context
     waiting for helm rollout (timeout 2m0s)...
