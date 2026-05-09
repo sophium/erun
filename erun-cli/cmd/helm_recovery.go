@@ -3,6 +3,7 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/manifoldco/promptui"
@@ -53,6 +54,13 @@ func confirmHelmReleaseRecovery(run PromptRunner, pending *common.HelmReleasePen
 		Default:   "y",
 	}
 
+	// CI / non-interactive callers can opt in to the default-accept path
+	// by setting ERUN_AUTO_RECOVER_HELM=1, which mirrors the prompt's
+	// own Default="y" behavior without requiring a TTY.
+	if isTrueishEnv("ERUN_AUTO_RECOVER_HELM") {
+		return true, nil
+	}
+
 	result, err := run(prompt)
 	if err != nil {
 		if errors.Is(err, promptui.ErrInterrupt) {
@@ -67,6 +75,17 @@ func confirmHelmReleaseRecovery(run PromptRunner, pending *common.HelmReleasePen
 		return true, nil
 	}
 	return strings.EqualFold(strings.TrimSpace(result), "y"), nil
+}
+
+// isTrueishEnv returns true when the named env var is set to a value that
+// callers commonly use to mean "yes": 1, true, yes, on (case-insensitive).
+// Empty / unset / 0 / false / no / off all return false.
+func isTrueishEnv(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 func helmReleaseRecoveryPromptLabel(pending *common.HelmReleasePendingOperationError) string {

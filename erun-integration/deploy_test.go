@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -297,5 +298,47 @@ func TestDeploy(t *testing.T) {
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "deploy/real_run_via_stubs", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_helm_pending_recovery_via_auto_recover_env", func(t *testing.T) {
+		// Exercises wrapHelmDeployWithReleaseRecovery + the production
+		// helm-recovery path: a stubbed `helm` exits with the pending
+		// upgrade error message on the first invocation, succeeds on
+		// the retry, and exits 0 for the recovery rollback. The new
+		// ERUN_AUTO_RECOVER_HELM=1 env var bypasses the interactive
+		// confirmation prompt so this can run from the harness.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		// Counter-driven helm stub: print the pending-operation message
+		// on the first `upgrade --install` call, exit 0 on every other
+		// invocation (rollback recovery + retry upgrade).
+		counter := filepath.Join(stubs, "helm-counter")
+		fixture.StubBinaryWithScript(t, stubs, "helm", strings.Join([]string{
+			`first_arg="$1"`,
+			`if [ "$first_arg" = "upgrade" ]; then`,
+			`  count=0`,
+			`  if [ -f '` + counter + `' ]; then count=$(cat '` + counter + `'); fi`,
+			`  count=$((count + 1))`,
+			`  printf '%s' "$count" > '` + counter + `'`,
+			`  if [ "$count" = "1" ]; then`,
+			`    printf '%s\n' "Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress" >&2`,
+			`    exit 1`,
+			`  fi`,
+			`fi`,
+			`exit 0`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		envVars = append(envVars, "ERUN_AUTO_RECOVER_HELM=1")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "clearing pending helm metadata") {
+			t.Errorf("expected recovery trace to mention clearing pending helm metadata, got:\n%s", result.Combined)
+		}
 	})
 }
