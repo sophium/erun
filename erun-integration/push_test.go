@@ -116,4 +116,59 @@ func TestPush(t *testing.T) {
 			}
 		}
 	})
+
+	t.Run("real_run_scope_denied_attempts_scope_refresh", func(t *testing.T) {
+		// Exercises retryAfterScopeRefresh + RefreshGHCRPackageScopes
+		// + scopeStillDenied: the docker push first fails with a
+		// "does not match expected scopes" error (matches IsDockerScopeDenied
+		// but NOT IsDockerCreatePackageDenied), the namespace login is
+		// not applicable, then handleNamespaceAuthError calls
+		// retryAfterScopeRefresh which runs `gh auth refresh`. The
+		// stubbed gh exits 0 so RefreshGHCRPackageScopes returns true,
+		// and the retry push succeeds on the second invocation.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		counter := setup.Cwd + "/docker-push-counter"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  push)`,
+			`    count=0`,
+			`    if [ -f '` + counter + `' ]; then count=$(cat '` + counter + `'); fi`,
+			`    count=$((count + 1))`,
+			`    printf '%s' "$count" > '` + counter + `'`,
+			// Push #1: original failure that triggers handleNamespaceAuthError.
+			// Push #2: namespace-login retry path also fails so scopeStillDenied
+			//   stays true and retryAfterScopeRefresh runs.
+			// Push #3+: succeed (after gh auth refresh).
+			`    if [ "$count" -le "2" ]; then`,
+			`      printf 'denied: token does not match expected scopes\n' >&2`,
+			`      exit 1`,
+			`    fi`,
+			`    exit 0 ;;`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		// Stub gh: auth switch fails (so RefreshGHCRPackageScopes uses
+		// the auth-refresh path against the active account), auth
+		// refresh succeeds, auth token returns a non-empty token so
+		// TryGHCRNamespaceLogin's docker-login attempt runs.
+		fixture.StubBinaryWithScript(t, stubs, "gh", strings.Join([]string{
+			`case "$1 $2" in`,
+			`  "auth switch") exit 1 ;;`,
+			`  "auth refresh") exit 0 ;;`,
+			`  "auth token") printf 'gh-token\n'; exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh")...)
+		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
+		result := erun.Run(t, []string{"push", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+	})
 }
