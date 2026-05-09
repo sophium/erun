@@ -183,24 +183,19 @@ func groupDeploySpecsByPlan(specs []DeploySpec, plan ProjectK8sConfig) [][]Deplo
 	return out
 }
 
-// allDockerBuildsPromoted reports whether every fingerprint-tracked build in
-// the slice was marked for promotion (cached fp-tag hit). SkipIfExists builds
-// (pre-built bases like erun-ubuntu / erun-dind) are excluded: they are never
-// part of the fingerprint scheme so their Promote field is always false, and
-// including them would prevent SkipHelm from ever being set when a base image
-// is in the build list. An empty slice (or a slice with only SkipIfExists
-// entries) returns false: charts with no locally-built images should keep
-// deploying so chart-only changes (templates, values) still ship.
+// allDockerBuildsPromoted reports whether every build in the slice was marked
+// for fingerprint promotion (cached fp-tag hit). An empty slice returns false:
+// charts with no locally-built images (e.g. erun-backend-postgres referencing
+// only the public postgres image) should keep deploying so chart-only changes
+// (templates, values) still ship.
 func allDockerBuildsPromoted(builds []DockerBuildSpec) bool {
-	tracked := 0
+	if len(builds) == 0 {
+		return false
+	}
 	for _, build := range builds {
-		if build.SkipIfExists {
-			continue
-		}
-		tracked++
 		if !build.Promote {
 			return false
 		}
 	}
-	return tracked > 0
+	return true
 }
