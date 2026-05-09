@@ -138,10 +138,10 @@ Reaching for a stub to "make this look real enough to reach the branch" is hidin
   3. **A specific line is intrinsically variable and cannot be normalized.** Output that genuinely depends on host clock, host platform, or other unstable inputs that no normalization rule can pin down. Match the variable line with a regex or pattern, accept that locking the whole stream is not possible, and document the reason in the test.
 - Workflow for a new scenario:
   1. Decide what the scenario actually needs to assert. Most of the time it is one whole-output snapshot. Sometimes it is also a side-effect check from one of the cases above.
-  2. Regenerate the snapshot file from a passing run.
-  3. Read the generated file end to end. Look for anything that will differ between machines, runs, or developers: paths, generated identifiers, hashes, timestamps, sizes, ordering.
-  4. Extend the normalization layer to cover any new source of nondeterminism. Regenerate.
-  5. Re-run without regeneration to confirm the snapshot is stable.
+  2. Run in record mode so the run captures the current output and writes it as the snapshot.
+  3. Read the snapshot end to end. Look for anything that will differ between machines, runs, or developers: paths, generated identifiers, hashes, timestamps, sizes, ordering.
+  4. For each source of variability, extend the normalization layer with a rule that maps it to a stable token, then re-record.
+  5. Run in compare mode (the default) and confirm the snapshot is reproduced exactly. Repeat the run on a clean state at least once before trusting it.
   6. If the output refuses to stabilize and the scenario does not match one of the documented exceptions, the fix usually belongs in production code, not in the test: lift the missing trace, gate the side effect on the dry-run boundary, or surface the decision the test wants to assert. Do not work around an unstable trace with a substring-only assertion.
 
 ## Coverage gate
