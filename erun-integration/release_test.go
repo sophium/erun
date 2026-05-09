@@ -2,7 +2,9 @@ package integration
 
 import (
 	"os"
+	osexec "os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -120,8 +122,15 @@ func TestRelease(t *testing.T) {
 		// Exercises release.go linux package release path: --dry-run must
 		// trace the per-component release script invocation with
 		// ERUN_BUILD_VERSION when the host supports Linux package builds.
-		// The integration harness only runs on Linux, so the support
-		// branch is always taken.
+		// LinuxPackageBuildsSupported requires GOOS=linux and dpkg-deb in
+		// PATH, so skip on hosts that cannot reach the support branch
+		// (notably macOS dev machines).
+		if runtime.GOOS != "linux" {
+			t.Skip("linux release scripts only run on Linux hosts")
+		}
+		if _, err := osexec.LookPath("dpkg-deb"); err != nil {
+			t.Skip("linux release scripts require dpkg-deb in PATH")
+		}
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
 		linuxComponentDir := filepath.Join(setup.Cwd, "erun-devops", "linux", "erun-cli")
