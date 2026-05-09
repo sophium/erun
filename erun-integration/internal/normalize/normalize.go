@@ -19,6 +19,11 @@ var defaultRules = []Replacement{
 	// Strip ANSI escape sequences before anything else so subsequent rules
 	// don't have to account for them.
 	{regexp.MustCompile(`\x1b\[[0-9;?]*[a-zA-Z]`), ""},
+	// Loopback IP — emit a stable token before the version rule so its
+	// dotted-numeric form isn't trimmed (RE2 has no negative lookahead, so
+	// the version regex would otherwise eat "127.0.0" and leave a dangling
+	// ".1" suffix in the golden).
+	{regexp.MustCompile(`\b127\.0\.0\.1\b`), "<LOOPBACK>"},
 	// Build version: 1.0.51-snapshot-20260508025226 or 1.0.51 or 1.0.51-rc.1
 	{regexp.MustCompile(`\b\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.\-]+)?`), "<VERSION>"},
 	// ISO 8601 timestamps with or without zone.

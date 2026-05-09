@@ -1,4 +1,4 @@
 audit: erun deploy --dry-run --version <VERSION> team dev
-deploy: tenant=team environment=dev version-override=<VERSION> snapshot=true components=[]
+deploy: tenant=team environment=dev version-override=<VERSION> snapshot=true components=[] force=false
 deploy: spec resolution failed: config file cannot be unmarshaled: k8s.deployments item must be a component name or a list of component names
 config file cannot be unmarshaled: k8s.deployments item must be a component name or a list of component names

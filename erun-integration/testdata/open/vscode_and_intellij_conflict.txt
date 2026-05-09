@@ -1,0 +1,2 @@
+audit: erun open --dry-run --intellij --vscode team dev
+--vscode and --intellij cannot be used together

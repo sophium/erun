@@ -67,19 +67,60 @@ Per the root `AGENTS.md`, `--dry-run` must produce a complete, side-effect-free 
 - `fixture.SeedGitRepo(t, dir)` runs `git init` + commit so release/diff/exec see a project root.
 - For commands that prompt interactively, prefer flags that bypass prompts (`--confirm-environment`, `--set-default-tenant=true`, `-y`) over scripted stdin. Goldens are easier to read without prompt redrawing.
 
-## No stubs: `--dry-run` is the only allowed mode
+## Stubbing rules: dry-run-first, decision-input second
 
-Integration scenarios must drive `erun` with `--dry-run` only. `erun` is meant to be fully auditable: every action and every decision must surface as a trace line, so a complete dry-run output is sufficient evidence that the command would behave correctly. Reaching for stub binaries (`ERUN_<NAME>_BIN`, scripted `kubectl`/`helm`/`docker`/`git` replacements, or any other fake tool) is a code smell, not a coverage technique.
+Integration scenarios run `erun` in `--dry-run` mode by default. Dry-run is meant to be fully auditable: every action and every decision must surface as a trace line, so a complete dry-run output is sufficient evidence that the command would behave correctly. Pile on stubs only when the dry-run trace already shows the action; never use stubs to *replace* a missing trace.
 
-If a code path cannot be reached from `--dry-run`, the defect is in the dry-run contract:
+There are two legitimate uses of stub binaries in this suite, and one anti-pattern:
+
+### Allowed: stubs as dry-run decision input
+
+Some commands branch on the *output* of an external binary, not on its side effect. `erun open`, for instance, calls `kubectl get deployment` to decide whether to redeploy the runtime. Even with `--dry-run` the decision needs an answer: "does the deployment exist?" Without a stub, the command falls through to whatever `kubectl` happens to be installed and points at, the developer's machine drives the branch, and goldens drift between machines.
+
+For these scenarios it is correct to stub the binary so its output is deterministic. The stub is decision input, not a side-effect replacement: the dry-run contract still applies (no real cluster mutation, no helm install), but the branch the runner picks is now reproducible.
+
+Worked example — `open_test.go::no_shell_dry_run`:
+
+```go
+stubs := setup.Cwd + "/stubs"
+fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{
+    Stderr:   `Error from server (NotFound): deployments.apps "team-devops" not found`,
+    ExitCode: 1,
+})
+envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+```
+
+The stub returns "NotFound" so `CheckKubernetesDeployment` reports "not deployed" and the runner traces the redeploy branch. A second scenario can stub the same binary with `Stdout: "deployment.apps/team-devops"` + `ExitCode: 0` to reach the "already deployed, skip helm" branch. The two scenarios together lock both branches in goldens.
+
+When you reach for this pattern, the test comment must say *which branch* the stub is unlocking and *why* the dry-run trace alone cannot reach it. If the answer is "the production code does not trace its decision," fix the production code first — see the next section.
+
+### Allowed: stubs to drive non-dry-run side effects
+
+A handful of scenarios run without `--dry-run` to exercise the real execution path: helm rollout waits, helm-recovery branches, retry loops, post-deploy kubectl polling. These cannot be reached from dry-run because their decisions depend on the side effect, not on a pre-action trace. `deploy_test.go::real_run_via_stubs` is the canonical example: it stubs `kubectl`, `helm`, and `docker` to return zero, then asserts on the user-facing `==> Deploying ... ==> Deployed in <ELAPSED>` lines that production code emits via `Info` (not `Trace`).
+
+Real-run scenarios should be the minority. Add one only when:
+- The behavior under test (e.g. spinner output, retry on auth error) is *only* visible in non-dry-run mode.
+- The side effects can be fully captured by short-lived stub processes (no real network, no port binding the host might have in use).
+- The scenario does not depend on the developer's filesystem layout, IDE installs, TTY state, or running ports.
+
+### Not allowed: stubs that paper over a missing trace
+
+If a code path cannot be reached from `--dry-run` because the production code does not trace its action, the defect is in the dry-run contract:
 
 - Identify the missing trace. If a side effect happens without a `ctx.TraceCommand(...)` (or equivalent) call in front of it, add the trace.
 - Gate the side effect with `if !ctx.DryRun { ... }` so the trace alone is enough to lock the behavior in the golden.
 - Then write the integration scenario against the new trace output. No stub needed.
 
-Do not introduce new stub-binary fixtures. When you encounter an existing stub-driven scenario, treat it as scaffolding to remove: migrate the production code to a fully-traced dry-run path and rewrite the scenario without the stub.
+Reaching for a stub to "make this look real enough to reach the branch" is hiding a production bug. Resist it.
 
-`eruncommon.Command(name, args...)` and the `ERUN_<NAME>_BIN` overrides remain in the codebase as a development convenience for local debugging and for the few legacy paths still being migrated, but new scenarios must not depend on them.
+### Stub helpers
+
+- `fixture.StubBinary(t, dir, name, stdout)` — stub that prints `stdout` and exits 0. Use for the non-dry-run real-run pattern when the call only needs to succeed.
+- `fixture.StubBinaryAdvanced(t, dir, name, fixture.StubBinarySpec{Stdout, Stderr, ExitCode})` — full control over the stub's response. Use this for decision-input stubs that need a specific exit code or stderr message (e.g. `kubectl` reporting `NotFound`).
+- `fixture.StubEnv(dir, names...)` — emits the `ERUN_<NAME>_BIN` env-var pairs that route production `Command(name, ...)` lookups to your stubs. Append to `setup.Env()` and pass via `erun.RunOptions.Env`.
+
+`eruncommon.Command(name, args...)` honors `ERUN_<NAME>_BIN` so stubs work transparently for any production code path that uses `Command` to spawn external binaries.
 
 ## Goldens and normalization
 
@@ -105,6 +146,20 @@ Do not introduce new stub-binary fixtures. When you encounter an existing stub-d
 3. `UPDATE_GOLDEN=1 go test -run Test<Command> ./...` to seed.
 4. Run without the flag to confirm goldens diff cleanly.
 5. Inspect the new goldens by hand. Does the trace cover every action and decision the command would take? If not, add the trace lines in production code, regenerate, repeat.
+
+## Known integration coverage gaps
+
+Some functions in `erun-cli/cmd` cannot be exercised from a CLI subprocess driven by `--dry-run` traces alone, even with stubs. They show as 0% in the integration coverage report and the gate carries them as a known shortfall rather than a regression:
+
+- **IDE launchers** (`open_ide.go`): functions like `intelliJGatewayProjectURI`, `vscodeRemoteFolderURI`, and the `runJetBrainsBootstrapAttempt` helpers compute URIs and command lines that production code passes directly to `exec.Command` without first emitting them to the trace stream. Until production traces "would launch IDE with: …" before the spawn, dry-run cannot lock these paths and integration scenarios cannot diff their output.
+- **TTY-gated alias setup** (`maybeConfigureOpenNoShellAlias`, `writeOpenNoShellHintLines`, `appendOpenNoShellAlias`): these only run when stdout is a TTY (`info.Mode() & os.ModeCharDevice != 0`). The integration runner pipes stdout into a buffer, so the stat check fails and the entire alias-prompt branch is unreachable from this suite.
+- **Live shell loop** (`runShellLoop`, `traceShellPreview`): the loop calls back into `kubectl exec` and spawns interactive subprocesses; integration cannot drive the reattach/replace-pod cycle without a TTY.
+
+The right fix for the IDE launchers is to lift the URI/command computation in front of a `ctx.TraceCommand(...)` call so dry-run mode can show what would be launched and stop there. Once that lands, the IDE branches become reachable from `--dry-run` and the matching scenarios can be added without stubs.
+
+For the TTY-gated paths, the alternative is to expose a deterministic test hook that overrides the TTY check (e.g. a `ERUN_FORCE_TTY=1` env var read from the runner). Until that exists, those branches stay covered by same-package unit tests in `erun-cli/cmd/open_*_test.go`. AGENTS.md flags those unit tests as not contributing to the gate; treat them as documentation of expected behavior, not as coverage.
+
+When you add a new branch to `open` (or any command), check first whether `--dry-run` can reach it — if not, lift the trace, do not extend the unit-test island.
 
 ## Anti-patterns
 

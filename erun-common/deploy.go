@@ -151,6 +151,10 @@ type DeployTarget struct {
 	// always-on charts (e.g. the per-tenant runtime). Names must come from
 	// optInDeployComponents; unknown names produce an error during resolve.
 	Components []string
+	// Force disables fingerprint-based incremental promotion so every image
+	// rebuilds from scratch, which also clears SkipHelm and re-runs the
+	// helm upgrade even when no source change is detected.
+	Force bool
 }
 
 type DeploySpec struct {
@@ -326,7 +330,7 @@ func ResolveDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFi
 	if err != nil {
 		return DeploySpec{}, err
 	}
-	return resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, componentName, versionOverride, deployTargetSnapshotEnabled(resolvedTarget, target.Snapshot))
+	return resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, componentName, versionOverride, deployTargetSnapshotEnabled(resolvedTarget, target.Snapshot), target.Force)
 }
 
 func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) ([]DeploySpec, error) {
@@ -374,7 +378,7 @@ func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 		}
 	}
 	for _, deployContext := range deployContexts {
-		spec, err := resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, deployContext, target.VersionOverride, allowLocalBuilds, currentBuild)
+		spec, err := resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, deployContext, target.VersionOverride, allowLocalBuilds, target.Force, currentBuild)
 		if err != nil {
 			return nil, err
 		}
@@ -385,10 +389,10 @@ func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 }
 
 func ResolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, componentName, versionOverride string) (DeploySpec, error) {
-	return resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, componentName, versionOverride, true)
+	return resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, componentName, versionOverride, true, false)
 }
 
-func resolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, componentName, versionOverride string, allowLocalBuilds bool) (DeploySpec, error) {
+func resolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, componentName, versionOverride string, allowLocalBuilds, force bool) (DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 
 	deployContext, err := resolveDeployContextForTarget(findProjectRoot, resolveKubernetesDeployContext, target, componentName)
@@ -396,15 +400,15 @@ func resolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectR
 		return DeploySpec{}, err
 	}
 
-	return resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, deployContext, versionOverride, allowLocalBuilds, nil)
+	return resolveDeploySpecForContext(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, deployContext, versionOverride, allowLocalBuilds, force, nil)
 }
 
-func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, deployContext KubernetesDeployContext, versionOverride string, allowLocalBuilds bool, currentBuild *DockerBuildSpec) (DeploySpec, error) {
+func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, deployContext KubernetesDeployContext, versionOverride string, allowLocalBuilds, force bool, currentBuild *DockerBuildSpec) (DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
 	target = applyDeployKubernetesContext(store, target)
 
 	if currentBuild != nil && deployContextOwnsDockerBuild(deployContext, *currentBuild) {
-		return resolveDeploySpecForCurrentDockerBuild(ctx, store, target, deployContext, *currentBuild)
+		return resolveDeploySpecForCurrentDockerBuild(ctx, store, target, deployContext, *currentBuild, force)
 	}
 
 	builds := make([]DockerBuildSpec, 0, 2)
@@ -440,7 +444,7 @@ func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot
 		builds = append(builds, dependencyBuilds...)
 	}
 	builds = configureDockerBuildsForDeploy(builds)
-	builds, err = ApplyIncrementalToDockerBuilds(ctx, builds, false)
+	builds, err = ApplyIncrementalToDockerBuilds(ctx, builds, force)
 	if err != nil {
 		return DeploySpec{}, err
 	}
@@ -472,9 +476,9 @@ func configureDeployInputMetadata(store DeployStore, target OpenResult, deployIn
 	return nil
 }
 
-func resolveDeploySpecForCurrentDockerBuild(ctx Context, store DeployStore, target OpenResult, deployContext KubernetesDeployContext, build DockerBuildSpec) (DeploySpec, error) {
+func resolveDeploySpecForCurrentDockerBuild(ctx Context, store DeployStore, target OpenResult, deployContext KubernetesDeployContext, build DockerBuildSpec, force bool) (DeploySpec, error) {
 	builds := configureDockerBuildsForDeploy([]DockerBuildSpec{build})
-	builds, err := ApplyIncrementalToDockerBuilds(ctx, builds, false)
+	builds, err := ApplyIncrementalToDockerBuilds(ctx, builds, force)
 	if err != nil {
 		return DeploySpec{}, err
 	}
@@ -674,6 +678,7 @@ func resolveDeployTargetForDockerTarget(store BuildDeployStore, findProjectRoot 
 		Environment:     environment,
 		RepoPath:        projectRoot,
 		VersionOverride: strings.TrimSpace(target.VersionOverride),
+		Force:           target.NoIncremental,
 	}, nil
 }
 

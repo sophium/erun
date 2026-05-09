@@ -4,7 +4,7 @@ Usage:
   erun api [TENANT] [ENVIRONMENT] [flags]
 
 Examples:
-  erun api --host <VERSION>.1 --port 17033
+  erun api --host <LOOPBACK> --port 17033
   erun api tenant-a dev
 
 Flags:
@@ -13,7 +13,7 @@ Flags:
       --database-url string                Backend PostgreSQL database URL; defaults to ERUN_DATABASE_URL
       --dry-run                            Resolve and trace mutating actions without executing them.
   -h, --help                               help for api
-      --host string                        Host interface to bind the backend API HTTP server to (default "<VERSION>.1")
+      --host string                        Host interface to bind the backend API HTTP server to (default "<LOOPBACK>")
       --oidc-allowed-issuers string        Comma-separated OIDC issuer allow-list
       --port int                           Port to bind the backend API HTTP server to (default 17033)
 

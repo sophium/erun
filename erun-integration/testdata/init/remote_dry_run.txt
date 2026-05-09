@@ -959,7 +959,7 @@ remote-default-devops-bootstrap:
                 command:
                   - sh
                   - -lc
-                  - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h <VERSION>.1 -p {{ $postgresPort }}
+                  - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h <LOOPBACK> -p {{ $postgresPort }}
               periodSeconds: 2
               timeoutSeconds: 2
               failureThreshold: 60
@@ -968,7 +968,7 @@ remote-default-devops-bootstrap:
                 command:
                   - sh
                   - -lc
-                  - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h <VERSION>.1 -p {{ $postgresPort }}
+                  - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h <LOOPBACK> -p {{ $postgresPort }}
               periodSeconds: 5
               timeoutSeconds: 2
             volumeMounts:

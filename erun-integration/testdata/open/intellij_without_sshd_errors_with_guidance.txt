@@ -1,0 +1,3 @@
+audit: erun open --dry-run --intellij team dev
+open: tenant=team environment=dev kubernetes-context=test-context remote=false no-shell=false ide=intellij
+--intellij requires sshd-enabled remote environment; run `erun sshd init team dev` first

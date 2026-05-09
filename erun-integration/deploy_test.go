@@ -55,6 +55,24 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("force_flag_appears_in_trace", func(t *testing.T) {
+		// --force surfaces in the deploy trace so dry-run callers can see
+		// the cache-bypass decision, and it propagates to the resolved
+		// plan: SkipHelm cannot short-circuit when fingerprint promotion
+		// is disabled, so the helm upgrade always runs.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--force", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if !strings.Contains(result.Combined, "force=true") {
+			t.Fatalf("expected --force to surface in deploy trace, got:\n%s", result.Combined)
+		}
+		if !strings.Contains(result.Combined, "helm upgrade --install") {
+			t.Fatalf("expected --force deploy to still emit helm upgrade trace, got:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/force_flag_appears_in_trace", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_outside_devops_with_tenant_env", func(t *testing.T) {
 		// Regression for issue #252: when erun deploy <tenant> <env> is
 		// invoked from a cwd outside the devops module (e.g. the desktop

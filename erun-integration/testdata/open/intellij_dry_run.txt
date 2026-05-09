@@ -1,3 +1,4 @@
 audit: erun open --dry-run --intellij team dev
-open: tenant=team environment=dev kubernetes-context=test-context remote=false no-shell=false ide=intellij
---intellij requires sshd-enabled remote environment; run `erun sshd init team dev` first
+open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=intellij
+kubectl --context test-context --namespace team-dev get deployment team-devops -o name
+opening IntelliJ IDEA requires updating the runtime deployment for team/dev; run `erun sshd init team dev` or `erun open team dev` first, then retry
