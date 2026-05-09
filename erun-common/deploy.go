@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -267,6 +268,7 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	TraceEnsureKubernetesNamespace(ctx, deployInput.KubernetesContext, deployInput.Namespace)
 	command := deployInput.command()
 	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
+	tracePodWatchAction(ctx, deployInput.ReleaseName, deployInput.Namespace, deployInput.KubernetesContext)
 	if ctx.DryRun {
 		return nil
 	}
@@ -1624,17 +1626,92 @@ func DeployHelmChart(params HelmDeployParams) error {
 	} else {
 		cmd.Stderr = stderr
 	}
-	err := cmd.Run()
-	if err != nil && isHelmReleasePendingOperationMessage(stderr.String()) {
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	watchCtx, cancelWatch := context.WithCancel(context.Background())
+	defer cancelWatch()
+	watchDone := make(chan podWatchOutcome, 1)
+	go func() {
+		watchDone <- watchReleasePods(watchCtx, podWatchParams{
+			ReleaseName:       params.ReleaseName,
+			Namespace:         params.Namespace,
+			KubernetesContext: params.KubernetesContext,
+			StatusOut:         params.Stderr,
+		})
+	}()
+
+	helmDone := make(chan error, 1)
+	go func() { helmDone <- cmd.Wait() }()
+
+	var (
+		helmErr       error
+		watchOutcome  podWatchOutcome
+		helmFinished  bool
+		watchFinished bool
+	)
+	for !helmFinished || !watchFinished {
+		select {
+		case helmErr = <-helmDone:
+			helmFinished = true
+			cancelWatch()
+		case watchOutcome = <-watchDone:
+			watchFinished = true
+			if watchOutcome.Failure != nil && !helmFinished {
+				_ = cmd.Process.Signal(os.Interrupt)
+				go func() {
+					time.Sleep(2 * time.Second)
+					_ = cmd.Process.Kill()
+				}()
+				helmErr = <-helmDone
+				helmFinished = true
+				cancelWatch()
+			}
+		}
+	}
+
+	if watchOutcome.Failure != nil {
+		failure := watchOutcome.Failure
+		failure.Err = helmErr
+		return failure
+	}
+	if helmErr != nil && isHelmReleasePendingOperationMessage(stderr.String()) {
 		return &HelmReleasePendingOperationError{
 			ReleaseName:       params.ReleaseName,
 			Namespace:         params.Namespace,
 			KubernetesContext: params.KubernetesContext,
 			Message:           stderr.String(),
-			Err:               err,
+			Err:               helmErr,
 		}
 	}
-	return err
+	return helmErr
+}
+
+// tracePodWatchAction records the watcher action in the dry-run trace so the
+// --dry-run contract holds: every action a real run would take must appear
+// in the trace. The watcher itself only fires in real-run mode (DeployHelmChart
+// runs after RunHelmDeploy's DryRun early-return), but the trace here lets a
+// reader audit the plan before executing it.
+func tracePodWatchAction(ctx Context, releaseName, namespace, kubernetesContext string) {
+	releaseName = strings.TrimSpace(releaseName)
+	namespace = strings.TrimSpace(namespace)
+	if releaseName == "" || namespace == "" {
+		return
+	}
+	descriptor := "deploy: watching pods in " + namespace
+	if c := strings.TrimSpace(kubernetesContext); c != "" {
+		descriptor += " on context " + c
+	}
+	descriptor += " for early container failure (release " + releaseName + ")"
+	ctx.Trace(descriptor)
+	args := []string{}
+	if c := strings.TrimSpace(kubernetesContext); c != "" {
+		args = append(args, "--context", c)
+	}
+	args = append(args, "--namespace", namespace, "get", "pods", "-o", "json")
+	ctx.TraceCommand("", "kubectl", args...)
 }
 
 func ClearHelmReleasePendingOperation(params HelmReleaseRecoveryParams) error {

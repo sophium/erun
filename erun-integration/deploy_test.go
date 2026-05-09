@@ -289,4 +289,148 @@ func TestDeploy(t *testing.T) {
 		}
 		golden.Equal(t, "deploy/real_run_helm_pending_recovery_via_auto_recover_env", normalize.Apply(result.Combined))
 	})
+
+	t.Run("real_run_pod_watch_logs_clean_rollout", func(t *testing.T) {
+		// Exercises the in-flight pod watcher started by DeployHelmChart.
+		// The kubectl stub returns a pod owned by this helm release with
+		// every container Running+Ready, so the watcher prints a single
+		// status line and lets helm finish naturally. Locks the dry-run
+		// trace's "watching pods" promise to a real-run summary line.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{Stdout: cleanRolloutPodJSON})
+		fixture.StubBinaryWithScript(t, stubs, "helm", "sleep 0.5\nexit 0\n")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		envVars = append(envVars, "ERUN_DEPLOY_POD_WATCH_INTERVAL=100ms")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		out := normalize.Apply(result.Combined)
+		if !strings.Contains(out, "    pod team-devops-aaaaaa: erun-devops Running (Ready), erun-dind Running (Ready)") {
+			t.Fatalf("missing pod-watch summary line in output:\n%s", out)
+		}
+		if !strings.Contains(out, "==> Deployed team/dev <VERSION>") {
+			t.Fatalf("expected clean deploy completion in output:\n%s", out)
+		}
+	})
+
+	t.Run("real_run_pod_watch_aborts_on_image_pull_backoff", func(t *testing.T) {
+		// kubectl stub reports a pod with one container in
+		// ImagePullBackOff. helm sleeps so the watcher fires first and
+		// kills it. Locks the structured early-fail error message.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{Stdout: imagePullBackOffPodJSON})
+		fixture.StubBinaryWithScript(t, stubs, "helm", "exec sleep 30\n")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		envVars = append(envVars, "ERUN_DEPLOY_POD_WATCH_INTERVAL=100ms")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
+		}
+		out := normalize.Apply(result.Combined)
+		if !strings.Contains(out, "    pod team-devops-7d4b4c: erun-dind Waiting (ImagePullBackOff)") {
+			t.Fatalf("missing pod-watch summary line in output:\n%s", out)
+		}
+		if !strings.Contains(out, `deploy failed early: pod team-devops-7d4b4c container erun-dind ImagePullBackOff: Back-off pulling image "ghcr.io/sophium/erun-dind:<VERSION>"`) {
+			t.Fatalf("missing structured early-fail error in output:\n%s", out)
+		}
+	})
+
+	t.Run("real_run_pod_watch_aborts_on_crashloop_after_threshold", func(t *testing.T) {
+		// kubectl stub reports a CrashLoopBackOff with restartCount above
+		// the threshold. The watcher kills helm and surfaces the last
+		// terminated message so the user sees why the container is
+		// crashing, not just helm's generic timeout.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{Stdout: crashLoopPodJSON})
+		fixture.StubBinaryWithScript(t, stubs, "helm", "exec sleep 30\n")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		envVars = append(envVars, "ERUN_DEPLOY_POD_WATCH_INTERVAL=100ms")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
+		}
+		out := normalize.Apply(result.Combined)
+		if !strings.Contains(out, "deploy failed early: pod team-devops-crash container erun-devops CrashLoopBackOff") {
+			t.Fatalf("missing structured early-fail error in output:\n%s", out)
+		}
+		if !strings.Contains(out, "exited with code 137") {
+			t.Fatalf("missing last-terminated message in output:\n%s", out)
+		}
+	})
 }
+
+const cleanRolloutPodJSON = `{
+  "items": [
+    {
+      "metadata": {
+        "name": "team-devops-aaaaaa",
+        "annotations": {"meta.helm.sh/release-name": "team-devops"}
+      },
+      "status": {
+        "phase": "Running",
+        "containerStatuses": [
+          {"name": "erun-devops", "ready": true, "restartCount": 0, "state": {"running": {"startedAt": "2026-05-09T12:00:00Z"}}},
+          {"name": "erun-dind", "ready": true, "restartCount": 0, "state": {"running": {"startedAt": "2026-05-09T12:00:00Z"}}}
+        ]
+      }
+    }
+  ]
+}`
+
+const imagePullBackOffPodJSON = `{
+  "items": [
+    {
+      "metadata": {
+        "name": "team-devops-7d4b4c",
+        "annotations": {"meta.helm.sh/release-name": "team-devops"}
+      },
+      "status": {
+        "phase": "Pending",
+        "containerStatuses": [
+          {
+            "name": "erun-dind",
+            "ready": false,
+            "restartCount": 0,
+            "state": {"waiting": {"reason": "ImagePullBackOff", "message": "Back-off pulling image \"ghcr.io/sophium/erun-dind:1.0.0\""}}
+          }
+        ]
+      }
+    }
+  ]
+}`
+
+const crashLoopPodJSON = `{
+  "items": [
+    {
+      "metadata": {
+        "name": "team-devops-crash",
+        "annotations": {"meta.helm.sh/release-name": "team-devops"}
+      },
+      "status": {
+        "phase": "Running",
+        "containerStatuses": [
+          {
+            "name": "erun-devops",
+            "ready": false,
+            "restartCount": 3,
+            "state": {"waiting": {"reason": "CrashLoopBackOff", "message": "back-off 5m restarting failed container"}},
+            "lastState": {"terminated": {"reason": "Error", "exitCode": 137, "message": "exited with code 137"}}
+          }
+        ]
+      }
+    }
+  ]
+}`
