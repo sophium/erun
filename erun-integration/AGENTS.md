@@ -122,6 +122,25 @@ Reaching for a stub to "make this look real enough to reach the branch" is hidin
 
 `eruncommon.Command(name, args...)` honors `ERUN_<NAME>_BIN` so stubs work transparently for any production code path that uses `Command` to spawn external binaries.
 
+## Platform-dependent goldens: pin via `ERUN_HOST_OS_OVERRIDE`
+
+Some commands branch on host OS — IDE launchers (`open`/`xdg-open`/`cmd /c start`), JetBrains options-dir resolution, container-runtime socket candidates. A scenario that exercises one of those branches captures the host OS of the machine that ran `UPDATE_GOLDEN=1`, so the same golden is red on every other host.
+
+Production code resolves the host OS through `eruncommon.DetectHost`, which honors the `ERUN_HOST_OS_OVERRIDE` env var (`darwin`/`linux`/`windows`). Use it to pin the scenario to a single canonical OS so the golden is deterministic everywhere:
+
+```go
+envVars := append(setup.Env(), "ERUN_HOST_OS_OVERRIDE=darwin")
+result := erun.Run(t, []string{"open", "team", "dev", "--vscode", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+golden.Equal(t, "open/vscode_dry_run", normalize.Apply(result.Combined))
+```
+
+Rules:
+
+- Pick the host OS that best represents production usage (today most CLI flows are exercised on darwin) and set the override on every scenario whose output crosses an OS branch.
+- If the same command needs coverage on more than one platform, add separate scenarios with separate goldens — `vscode_dry_run_darwin.txt` / `vscode_dry_run_linux.txt` — each one pinning a different `ERUN_HOST_OS_OVERRIDE`. Do not let "the test passes on someone's machine" stand in for explicit platform coverage.
+- Document the override in the test comment so a future reader does not delete it. Without the override the scenario would silently re-shape the golden to whatever host ran `UPDATE_GOLDEN=1` last.
+- The override is a deliberate test seam, not a production knob. If you find yourself wanting to set it from a CLI command or MCP tool, that is a sign the production code should be detecting differently — fix the detection.
+
 ## Goldens and normalization
 
 - `golden.Equal(t, "command/scenario", normalize.Apply(out))` is the standard assertion. Normalization strips ANSI escapes, version numbers, ISO timestamps, compact timestamps, OS temp paths, hex tokens, and home-dir prefixes. Add new rules to `internal/normalize/` if a fresh source of nondeterminism appears in output.
