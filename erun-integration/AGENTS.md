@@ -130,18 +130,20 @@ Reaching for a stub to "make this look real enough to reach the branch" is hidin
 
 ### Goldens vs `strings.Contains` substring assertions
 
-- **Default to `golden.Equal`.** It locks the entire output, so any unrelated trace drift fails loudly. Substring asserts only fail when the targeted line breaks; everything else can rot silently.
-- Add `strings.Contains` only as a *regression marker* alongside a golden — the substring makes a failure self-explanatory ("expected docker push line"), but the golden remains the ground truth. Use it as a precondition that fails fast before the golden diff produces a long block of text.
-- Substring-only (no golden) is acceptable in three narrow cases:
-  1. **Captured output is genuinely nondeterministic** even after normalization — e.g. fixture-temp dirs that vary in path depth, Go-test-generated tmpfile names, real-network responses. If you reach this case, first try to add a `normalize` rule. Reach for substring-only after the rule attempt fails.
-  2. **Asserting a single decision branch** in output that's otherwise covered by another scenario's golden — e.g. `--time` causes an `elapsed:` line; the surrounding output is already locked by a paired scenario without `--time`. Even here, prefer adding a golden specifically for the new line if practical.
-  3. **Filesystem-effect assertions** (e.g. "the env config tree was removed", "this file was written"). The golden checks stdout/stderr; filesystem state needs `os.Stat` / `os.ReadFile` checks alongside.
-- When converting a substring-only scenario to a golden, the workflow is:
-  1. `UPDATE_GOLDEN=1 go test -run Test<Command>/<scenario> ./...` to seed the file.
-  2. Inspect the generated `testdata/...` file by hand. Look for fixture-specific paths, generated tmp dirs, hashes, timestamps.
-  3. Add or extend a rule in `internal/normalize/` for any new nondeterminism; regenerate.
-  4. Re-run without `UPDATE_GOLDEN=1` to confirm the golden passes deterministically.
-  5. If the captured output cannot be made stable after several attempts, fall back to substring-only and document the why in the scenario comment.
+- **Default to `golden.Equal` only.** It locks the entire output, so any unrelated trace drift fails loudly with a complete diff. The diff *is* the failure message — you don't need a substring's "expected X" preamble.
+- **Do not pair a substring assert with a golden.** When both are present, the substring is redundant: if the golden passes the substring passes; if the golden fails the diff already shows the broken line. The redundant pair makes failures more confusing (two messages instead of one) and rots — when someone updates the golden but forgets the substring, the substring silently asserts the old line.
+- `strings.Contains` is appropriate **only when the golden cannot make the assertion**, which is rare. The known exceptions:
+  1. **Captured output where normalization masks the asserted value.** E.g. a stub-server returns `latest stable: 1.4.0` and the test's contract is "the stub-driven version reaches stdout"; the `<VERSION>` normalize rule collapses both `1.4.0` and any other version to the same token, so the golden cannot distinguish them. The substring is the only way to assert the specific stub-driven value.
+  2. **Filesystem-state assertions.** `golden.Equal` checks output streams; checking that a file got written, a directory got removed, or an XML config has the expected entry needs `os.Stat` / `os.ReadFile` and a `strings.Contains` (or other shape check) on the read body. These belong alongside a golden of the output, not instead of one.
+  3. **Stub-server recorded state.** A test that wants to assert "the runner hit endpoint X with these params" can record requests in the stub closure and assert on that map after the run. Same shape as exception 2: complementary to a golden, not a replacement.
+  4. **Wall-clock-dependent output that cannot be normalized.** E.g. the working-hours marker line whose value depends on the actual time of day. Use a regex-match (or substring) for the variable line and accept that a golden of the surrounding output isn't possible. Document the choice in the scenario comment.
+- When you write a new scenario, the workflow is:
+  1. Add the assertions you actually need: `golden.Equal(t, ...)` for output, plus filesystem/stub-state checks if the scenario demands them.
+  2. `UPDATE_GOLDEN=1 go test -run Test<Command>/<scenario> ./...` to seed the file.
+  3. Inspect the generated `testdata/...` file by hand. Look for fixture-specific paths, generated tmp dirs, hashes, timestamps.
+  4. Add or extend a rule in `internal/normalize/` for any new nondeterminism; regenerate.
+  5. Re-run without `UPDATE_GOLDEN=1` to confirm the golden passes deterministically.
+  6. If the captured output cannot be made stable after several attempts and the scenario is not one of the listed exceptions, the right fix is usually in production: lift the trace, gate the side effect, fix the dry-run contract. Don't paper over with substring-only.
 
 ## Coverage gate
 
