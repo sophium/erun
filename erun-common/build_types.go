@@ -66,7 +66,6 @@ type DockerBuildSpec struct {
 	Image          DockerImageReference
 	Platforms      []string
 	Push           bool
-	SkipIfExists   bool
 	// Fingerprint is a content hash over the Dockerfile and every COPY source
 	// resolved against ContextDir, honoring .dockerignore. Set during incremental
 	// resolution. After a successful build, the image is locally tagged with

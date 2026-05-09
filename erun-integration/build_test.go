@@ -82,6 +82,38 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
+	t.Run("dry_run_configured_fingerprint_traces_pull_and_tag", func(t *testing.T) {
+		// Exercises docker.fingerprints config: when an image name matches a
+		// configured fingerprint, the materialize step traces docker manifest
+		// inspect / docker pull / docker tag for each platform before the
+		// regular fingerprint inspect runs. The dry-run does not actually
+		// pull; it traces the would-be commands so the maintainer can audit.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"environments:\n"+
+				"  local:\n"+
+				"    docker:\n"+
+				"      fingerprints:\n"+
+				"        base: 0123456789abcdef\n",
+		)
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		for _, want := range []string{
+			"docker manifest inspect ghcr.io/sophium/base:9.9.9",
+			"docker pull --platform linux/amd64 ghcr.io/sophium/base:9.9.9",
+			"docker tag ghcr.io/sophium/base:9.9.9 ghcr.io/sophium/base:fp-0123456789abcdef-amd64",
+			"docker pull --platform linux/arm64 ghcr.io/sophium/base:9.9.9",
+			"docker tag ghcr.io/sophium/base:9.9.9 ghcr.io/sophium/base:fp-0123456789abcdef-arm64",
+		} {
+			if !strings.Contains(result.Stderr, want) {
+				t.Errorf("expected configured-fingerprint dry-run trace to contain %q, got stderr:\n%s", want, result.Stderr)
+			}
+		}
+	})
+
 	t.Run("dry_run_release_pushes_release_tagged_docker_builds", func(t *testing.T) {
 		// Exercises build.go --release path: per-platform docker build +
 		// docker push trace must appear in the dry-run output for the

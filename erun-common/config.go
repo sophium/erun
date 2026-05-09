@@ -111,12 +111,21 @@ type ProjectEnvironmentConfig struct {
 	K8s               ProjectK8sConfig    `yaml:"k8s,omitempty"`
 }
 
+// ProjectDockerConfig holds project-level docker settings per environment.
+// Fingerprints maps an image name (the build-context dir name, e.g.
+// "erun-ubuntu") to its canonical content fingerprint as published by release
+// CI. When set, the incremental build flow pulls <image>:<VERSION> from the
+// registry and tags it locally as <image>:fp-<configured>-<arch> before
+// running fingerprint promotion. This lets fresh dev clones promote pinned
+// bases without rebuilding them, while local Dockerfile edits still trigger a
+// rebuild because the locally-computed fingerprint diverges from the tagged
+// hash.
 type ProjectDockerConfig struct {
-	SkipIfExists []string `yaml:"skipIfExists,omitempty"`
+	Fingerprints map[string]string `yaml:"fingerprints,omitempty"`
 }
 
 func (c ProjectDockerConfig) IsZero() bool {
-	return len(c.SkipIfExists) == 0
+	return len(c.Fingerprints) == 0
 }
 
 type ReleaseConfig struct {
@@ -208,6 +217,36 @@ func (s ProjectK8sDeploymentStep) MarshalYAML() (any, error) {
 	return s.Components, nil
 }
 
+// DockerFingerprintsForEnvironment returns the configured image-name →
+// fingerprint map for the given environment, or nil when none is set. Empty
+// keys and values are dropped. Hash values are validated lazily by the
+// materialization step rather than at load time, so a malformed entry
+// surfaces in the build trace instead of breaking unrelated commands that
+// just want to read other parts of the config.
+func (c ProjectConfig) DockerFingerprintsForEnvironment(environment string) map[string]string {
+	environment = strings.TrimSpace(environment)
+	if environment == "" || c.Environments == nil {
+		return nil
+	}
+	envConfig, ok := c.Environments[environment]
+	if !ok || len(envConfig.Docker.Fingerprints) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(envConfig.Docker.Fingerprints))
+	for name, hash := range envConfig.Docker.Fingerprints {
+		name = strings.TrimSpace(name)
+		hash = strings.TrimSpace(hash)
+		if name == "" || hash == "" {
+			continue
+		}
+		out[name] = hash
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func (c ProjectConfig) ContainerRegistryForEnvironment(environment string) string {
 	environment = strings.TrimSpace(environment)
 	if environment != "" && c.Environments != nil {
@@ -219,26 +258,6 @@ func (c ProjectConfig) ContainerRegistryForEnvironment(environment string) strin
 	}
 
 	return strings.TrimSpace(c.ContainerRegistry)
-}
-
-func (c ProjectConfig) DockerSkipIfExistsForEnvironment(environment string) []string {
-	environment = strings.TrimSpace(environment)
-	if environment == "" || c.Environments == nil {
-		return nil
-	}
-
-	envConfig, ok := c.Environments[environment]
-	if !ok || len(envConfig.Docker.SkipIfExists) == 0 {
-		return nil
-	}
-
-	values := make([]string, 0, len(envConfig.Docker.SkipIfExists))
-	for _, value := range envConfig.Docker.SkipIfExists {
-		if value = strings.TrimSpace(value); value != "" {
-			values = append(values, value)
-		}
-	}
-	return values
 }
 
 func (c *ProjectConfig) SetContainerRegistryForEnvironment(environment, registry string) {
