@@ -285,7 +285,7 @@ remote-default-devops-bootstrap:
         securityContext:
           fsGroup: 1000
         initContainers:
-          - image: tonistiigi/binfmt:qemu-v10.0.4-56
+          - image: tonistiigi/binfmt:qemu-<VERSION>
             name: install-binfmt
             imagePullPolicy: IfNotPresent
             args:
@@ -658,7 +658,7 @@ remote-default-devops-bootstrap:
         securityContext:
           fsGroup: 1000
         initContainers:
-          - image: tonistiigi/binfmt:qemu-v10.0.4-56
+          - image: tonistiigi/binfmt:qemu-<VERSION>
             name: install-binfmt
             imagePullPolicy: IfNotPresent
             args:

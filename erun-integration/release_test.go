@@ -60,6 +60,7 @@ func TestRelease(t *testing.T) {
 				t.Errorf("expected dry-run output to contain %q, got stderr:\n%s", want, result.Stderr)
 			}
 		}
+		golden.Equal(t, "release/dry_run_develop_emits_candidate_plan", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_main_with_develop_emits_stable_plan", func(t *testing.T) {
@@ -92,6 +93,7 @@ func TestRelease(t *testing.T) {
 				t.Errorf("expected stable plan to contain %q, got stderr:\n%s", want, result.Stderr)
 			}
 		}
+		golden.Equal(t, "release/dry_run_main_with_develop_emits_stable_plan", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_main_without_develop_pushes_only_main", func(t *testing.T) {
@@ -116,6 +118,7 @@ func TestRelease(t *testing.T) {
 		if strings.Contains(result.Stderr, "git push --follow-tags origin main develop") {
 			t.Errorf("did not expect develop in push target:\n%s", result.Stderr)
 		}
+		golden.Equal(t, "release/dry_run_main_without_develop_pushes_only_main", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_includes_linux_release_scripts", func(t *testing.T) {
@@ -155,6 +158,7 @@ func TestRelease(t *testing.T) {
 				t.Errorf("expected linux release trace to contain %q, got stderr:\n%s", want, result.Stderr)
 			}
 		}
+		golden.Equal(t, "release/dry_run_includes_linux_release_scripts", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_force_includes_tag_deletion_for_stale_release_tag", func(t *testing.T) {
@@ -186,5 +190,6 @@ func TestRelease(t *testing.T) {
 				t.Errorf("expected dry-run output to contain %q, got stderr:\n%s", want, result.Stderr)
 			}
 		}
+		golden.Equal(t, "release/dry_run_force_includes_tag_deletion_for_stale_release_tag", normalize.Apply(result.Combined))
 	})
 }
