@@ -1,26 +1,13 @@
 package eruncommon
 
 import (
-	"errors"
 	"fmt"
-	"os/exec"
 	"strings"
 )
 
 func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc) error {
-	return runDockerBuild(ctx, buildInput, build, nil)
-}
-
-func runDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc, inspect DockerImageInspectorFunc) error {
 	if build == nil {
 		build = DockerImageBuilder
-	}
-	skip, err := shouldSkipDockerBuild(ctx, buildInput, inspect)
-	if err != nil {
-		return err
-	}
-	if skip {
-		return nil
 	}
 	traceIncrementalDecision(ctx, buildInput)
 	for _, command := range buildInput.traceCommands() {
@@ -32,12 +19,11 @@ func runDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBu
 	return build(buildInput, ctx.Stdout, ctx.Stderr)
 }
 
-// traceIncrementalDecision mirrors shouldSkipDockerBuild's "<inspect> + <reason>"
-// trace pattern for the fingerprint-based incremental path. The inspect was
-// already executed during resolution (applyIncrementalPromotion), but emitting
-// it here keeps dry-run output complete and parallels the SkipIfExists output
-// style. Builds without a fingerprint (incremental disabled, or no fp tag was
-// looked up) produce no extra trace.
+// traceIncrementalDecision emits the "<inspect> + <reason>" trace pattern for
+// the fingerprint-based incremental path. The inspect was already executed
+// during resolution (applyIncrementalPromotion), but emitting it here keeps
+// dry-run output complete. Builds without a fingerprint (incremental disabled,
+// or no fp tag was looked up) produce no extra trace.
 //
 // The trace is intentionally explicit: each fp-tag inspect line is followed
 // by a "found"/"missing" result line, and the summary line names the actual
@@ -98,111 +84,9 @@ func describeMissingPlatforms(platforms []string) string {
 	return "platforms [" + strings.Join(labels, ", ") + "]"
 }
 
-func shouldSkipDockerBuild(ctx Context, buildInput DockerBuildSpec, inspect DockerImageInspectorFunc) (bool, error) {
-	if !buildInput.SkipIfExists {
-		return false, nil
-	}
-	tag := strings.TrimSpace(buildInput.Image.Tag)
-	if tag == "" {
-		return false, nil
-	}
-
-	// For multi-platform builds verify the registry manifest actually covers every
-	// required platform.  A single-arch manifest (or a manifest list that is missing
-	// one of the platforms) must be rebuilt so downstream images can use it as a
-	// multi-platform base image.
-	if buildInput.Push && len(buildInput.Platforms) > 0 {
-		available, err := dockerManifestPlatforms(ctx, tag)
-		if err != nil {
-			return false, err
-		}
-		if !dockerPlatformsCovered(available, buildInput.Platforms) {
-			return false, nil
-		}
-		// The registry copy is authoritative. If the local Docker store has a
-		// single-arch copy of this tag, dependent builds resolving FROM <tag>
-		// for another platform will fail with "no match for platform in
-		// manifest" because the daemon prefers its local image and never falls
-		// back to the registry. Drop the stale local copy so each per-platform
-		// FROM resolution pulls fresh.
-		if err := removeStaleLocalImageForPlatforms(ctx, tag, buildInput.Platforms); err != nil {
-			return false, err
-		}
-		ctx.Trace("skipping docker build because configured multi-platform image exists: " + tag)
-		return true, nil
-	}
-
-	inspectCommand := []string{"image", "inspect", tag}
-	if inspect == nil {
-		inspect = DockerImageExists
-		if buildInput.Push {
-			inspect = DockerManifestExists
-			inspectCommand = []string{"manifest", "inspect", tag}
-		}
-	}
-
-	ctx.TraceCommand("", "docker", inspectCommand...)
-	exists, err := inspect(tag)
-	if err != nil {
-		return false, err
-	}
-	if !exists {
-		return false, nil
-	}
-	ctx.Trace("skipping docker build because configured image exists: " + tag)
-	return true, nil
-}
-
-func removeStaleLocalImageForPlatforms(ctx Context, tag string, required []string) error {
-	localPlatforms, err := dockerLocalImagePlatforms(ctx, tag)
-	if err != nil {
-		return err
-	}
-	if len(localPlatforms) == 0 {
-		return nil
-	}
-	if dockerPlatformsCovered(localPlatforms, required) {
-		return nil
-	}
-	ctx.TraceCommand("", "docker", "image", "rm", tag)
-	if ctx.DryRun {
-		return nil
-	}
-	cmd := Command("docker", "image", "rm", tag)
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return nil
-		}
-		return err
-	}
-	return nil
-}
-
-// dockerPlatformsCovered reports whether every platform in required is present in available.
-func dockerPlatformsCovered(available, required []string) bool {
-	if len(available) == 0 {
-		return false
-	}
-	supported := make(map[string]struct{}, len(available))
-	for _, p := range available {
-		supported[p] = struct{}{}
-	}
-	for _, p := range required {
-		if _, ok := supported[strings.TrimSpace(p)]; !ok {
-			return false
-		}
-	}
-	return true
-}
-
 func RunDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc) error {
-	return runDockerBuilds(ctx, builds, build, nil)
-}
-
-func runDockerBuilds(ctx Context, builds []DockerBuildSpec, build DockerImageBuilderFunc, inspect DockerImageInspectorFunc) error {
 	for _, buildInput := range orderedDockerBuildSpecs(builds) {
-		if err := runDockerBuild(ctx, buildInput, build, inspect); err != nil {
+		if err := RunDockerBuild(ctx, buildInput, build); err != nil {
 			return err
 		}
 	}
@@ -355,7 +239,7 @@ func RunDockerPush(ctx Context, pushInput DockerPushSpec, push DockerImagePusher
 
 func RunDockerPushSpec(ctx Context, pushInput DockerPushSpec, buildInput *DockerBuildSpec, build DockerImageBuilderFunc, push DockerPushFunc) error {
 	if buildInput != nil {
-		if err := runDockerBuild(ctx, *buildInput, build, nil); err != nil {
+		if err := RunDockerBuild(ctx, *buildInput, build); err != nil {
 			return err
 		}
 		if buildInput.Push {

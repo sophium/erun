@@ -288,7 +288,7 @@ type testRootCmdParts struct {
 	now                            common.NowFunc
 	openDeployHelmChart            common.HelmChartDeployerFunc
 	resolveOpen                    func(common.OpenParams) (common.OpenResult, error)
-	resolveRuntimeDeploySpec       func(common.OpenResult, bool) (common.DeploySpec, error)
+	resolveRuntimeDeploySpec       func(common.Context, common.OpenResult, bool) (common.DeploySpec, error)
 	activateMCP                    MCPForwarder
 	activateAPI                    APIForwarder
 	activateSSHD                   SSHDActivator
@@ -328,8 +328,8 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	resolveOpen := func(params common.OpenParams) (common.OpenResult, error) {
 		return common.ResolveOpen(store, params)
 	}
-	resolveRuntimeDeploySpec := func(target common.OpenResult, allowLocalBuilds bool) (common.DeploySpec, error) {
-		return resolveRuntimeDeploySpecForOpen(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, currentBuildInfo(), target, allowLocalBuilds)
+	resolveRuntimeDeploySpec := func(ctx common.Context, target common.OpenResult, allowLocalBuilds bool) (common.DeploySpec, error) {
+		return resolveRuntimeDeploySpecForOpen(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, currentBuildInfo(), target, allowLocalBuilds)
 	}
 	activateMCP := testMCPForwarderOrDefault(deps.ForwardMCP)
 	activateAPI := testAPIForwarderOrDefault(deps.ForwardAPI)
@@ -340,6 +340,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	runManagedDeploy := func(ctx common.Context, target common.OpenResult) error {
 		ctx = withCloudContextPreflight(ctx, store)
 		specs, err := common.ResolveCurrentDeploySpecs(
+			ctx,
 			store,
 			findProjectRoot,
 			resolveDockerBuildContext,

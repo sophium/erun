@@ -2,7 +2,6 @@ package eruncommon
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -186,94 +185,6 @@ func DockerManifestExists(tag string) (bool, error) {
 		return false, nil
 	}
 	return false, err
-}
-
-// dockerManifestPlatforms returns the platforms listed in a registry manifest for
-// the given tag. Returns nil when the tag does not exist, is a single-arch image
-// (no manifest list / OCI index), or when the manifest cannot be inspected.
-func dockerManifestPlatforms(ctx Context, tag string) ([]string, error) {
-	ctx.TraceCommand("", "docker", "manifest", "inspect", tag)
-	cmd := Command("docker", "manifest", "inspect", tag)
-	output, err := cmd.Output()
-	if err != nil {
-		return nil, nil // tag absent or inaccessible
-	}
-	var manifest struct {
-		Manifests []struct {
-			Platform struct {
-				Architecture string `json:"architecture"`
-				OS           string `json:"os"`
-			} `json:"platform"`
-		} `json:"manifests"`
-	}
-	if err := json.Unmarshal(output, &manifest); err != nil || len(manifest.Manifests) == 0 {
-		return nil, nil // single-arch manifest or unrecognised format
-	}
-	platforms := make([]string, 0, len(manifest.Manifests))
-	for _, m := range manifest.Manifests {
-		if m.Platform.OS != "" && m.Platform.Architecture != "" {
-			platforms = append(platforms, m.Platform.OS+"/"+m.Platform.Architecture)
-		}
-	}
-	return platforms, nil
-}
-
-// dockerLocalImagePlatforms returns the platforms covered by the local Docker
-// image store for the given tag. With the traditional image store, a tag holds
-// one platform; with the containerd image store, the inspect output's Manifests
-// field reports every platform stored under that tag. Returns nil when the
-// image is not present locally.
-func dockerLocalImagePlatforms(ctx Context, tag string) ([]string, error) {
-	ctx.TraceCommand("", "docker", "image", "inspect", tag)
-	cmd := Command("docker", "image", "inspect", tag)
-	output, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return nil, nil // image absent
-		}
-		return nil, err
-	}
-	var entries []struct {
-		Os           string `json:"Os"`
-		Architecture string `json:"Architecture"`
-		Manifests    []struct {
-			ImageData struct {
-				Platform struct {
-					OS           string `json:"os"`
-					Architecture string `json:"architecture"`
-				} `json:"Platform"`
-			} `json:"ImageData"`
-		} `json:"Manifests"`
-	}
-	if err := json.Unmarshal(output, &entries); err != nil || len(entries) == 0 {
-		return nil, nil
-	}
-	seen := make(map[string]struct{}, 4)
-	platforms := make([]string, 0, 4)
-	add := func(os, arch string) {
-		if os == "" || arch == "" {
-			return
-		}
-		platform := os + "/" + arch
-		if _, ok := seen[platform]; ok {
-			return
-		}
-		seen[platform] = struct{}{}
-		platforms = append(platforms, platform)
-	}
-	for _, entry := range entries {
-		for _, m := range entry.Manifests {
-			add(m.ImageData.Platform.OS, m.ImageData.Platform.Architecture)
-		}
-		if len(entry.Manifests) == 0 {
-			add(entry.Os, entry.Architecture)
-		}
-	}
-	if len(platforms) == 0 {
-		return nil, nil
-	}
-	return platforms, nil
 }
 
 func dockerCommandOutputWriter(primary io.Writer, capture io.Writer) io.Writer {

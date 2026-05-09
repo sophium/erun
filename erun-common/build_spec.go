@@ -124,16 +124,11 @@ func ResolveDockerBuildForImageReference(store DockerStore, findProjectRoot Proj
 		Tag:          tag,
 		IsLocalBuild: isLocalEnvironment(environment),
 	}
-	skipIfExists, err := resolveDockerBuildSkipIfExists(projectRoot, environment, imageRef)
-	if err != nil {
-		return DockerBuildSpec{}, false, err
-	}
 
 	return DockerBuildSpec{
 		ContextDir:     ResolveDockerBuildContextDirForProject(buildContext.Dir, projectRoot),
 		DockerfilePath: buildContext.DockerfilePath,
 		Image:          imageRef,
-		SkipIfExists:   skipIfExists,
 		Platforms:      slices.Clone(multiPlatformDockerBuilds),
 	}, true, nil
 }
@@ -221,10 +216,6 @@ func newDockerBuildSpec(now NowFunc, projectRoot, environment string, buildConte
 	if err != nil {
 		return DockerBuildSpec{}, err
 	}
-	skipIfExists, err := resolveDockerBuildSkipIfExists(projectRoot, environment, imageRef)
-	if err != nil {
-		return DockerBuildSpec{}, err
-	}
 
 	// For images whose FROM instruction resolves via ${ERUN_VERSION} (e.g.
 	// erun-backend-api, erun-backend-db, erun-mcp), the snapshot version is
@@ -252,7 +243,6 @@ func newDockerBuildSpec(now NowFunc, projectRoot, environment string, buildConte
 		ContextDir:     contextDir,
 		DockerfilePath: buildContext.DockerfilePath,
 		Image:          imageRef,
-		SkipIfExists:   skipIfExists,
 		Platforms:      slices.Clone(multiPlatformDockerBuilds),
 	}, nil
 }

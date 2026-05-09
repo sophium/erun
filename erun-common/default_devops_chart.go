@@ -130,13 +130,13 @@ func renderDefaultDevopsChartTemplate(assetPath, moduleName, imageName string, d
 	return []byte(content)
 }
 
-func resolveOpenRuntimeDeploySpec(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
+func resolveOpenRuntimeDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
 	if target.RemoteRepo() {
 		return resolveDefaultDevopsDeploySpecWithImage(target, DevopsComponentName)
 	}
 
 	for _, componentName := range openRuntimeComponentNames(target.Tenant) {
-		spec, err := resolveDeploySpecForOpenResult(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, componentName, "", allowLocalBuilds)
+		spec, err := resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, componentName, "", allowLocalBuilds)
 		if err == nil {
 			spec.Deploy.ReleaseName = RuntimeReleaseName(target.Tenant)
 			return spec, nil

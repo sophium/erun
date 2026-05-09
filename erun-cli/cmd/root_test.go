@@ -27,6 +27,7 @@ import (
 
 func TestResolveRuntimeDeploySpecForOpenFallsBackToCurrentBuildVersionForRemoteRepo(t *testing.T) {
 	spec, err := resolveRuntimeDeploySpecForOpen(
+		common.Context{},
 		common.ConfigStore{},
 		common.FindProjectRoot,
 		common.ResolveDockerBuildContext,

@@ -35,59 +35,6 @@ func resolveDockerBuildRegistryForEnvironment(projectRoot, environment string) (
 	return registry, nil
 }
 
-func resolveDockerBuildSkipIfExists(projectRoot, environment string, image DockerImageReference) (bool, error) {
-	if strings.TrimSpace(projectRoot) == "" {
-		return false, nil
-	}
-
-	projectConfig, _, err := LoadProjectConfig(projectRoot)
-	if err != nil {
-		if errors.Is(err, ErrNotInitialized) {
-			return false, nil
-		}
-		return false, err
-	}
-
-	return dockerSkipIfExistsMatches(image, projectConfig.DockerSkipIfExistsForEnvironment(environment)), nil
-}
-
-func dockerSkipIfExistsMatches(image DockerImageReference, configured []string) bool {
-	if len(configured) == 0 {
-		return false
-	}
-
-	imageName := normalizeDockerSkipImageName(image.ImageName)
-	repository := normalizeDockerSkipImageName(dockerImageRepository(image.Tag))
-	for _, candidate := range configured {
-		candidate = normalizeDockerSkipImageName(candidate)
-		if candidate == "" {
-			continue
-		}
-		if candidate == imageName || candidate == repository {
-			return true
-		}
-	}
-	return false
-}
-
-func normalizeDockerSkipImageName(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	return dockerImageRepository(value)
-}
-
-func dockerImageRepository(value string) string {
-	value = strings.TrimSpace(value)
-	lastSlash := strings.LastIndex(value, "/")
-	lastColon := strings.LastIndex(value, ":")
-	if lastColon > lastSlash {
-		return value[:lastColon]
-	}
-	return value
-}
-
 func ResolveDockerBuildContextDirForProject(buildDir, projectRoot string) string {
 	if shouldUseProjectRootAsDockerContext(buildDir, projectRoot) {
 		return projectRoot

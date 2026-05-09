@@ -36,7 +36,7 @@ func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinder
 			ctx.Trace(fmt.Sprintf("deploy: tenant=%s environment=%s version-override=%s snapshot=%v components=%v",
 				deployTarget.Tenant, deployTarget.Environment, deployTarget.VersionOverride,
 				snapshotOverride != nil && *snapshotOverride, components))
-			deploySpecs, err := common.ResolveCurrentDeploySpecs(store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
+			deploySpecs, err := common.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 			if err != nil {
 				ctx.Trace("deploy: spec resolution failed: " + err.Error())
 				return err
@@ -71,7 +71,7 @@ func newK8sDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFin
 				snapshotOverride = &snapshot
 			}
 			target.Snapshot = snapshotOverride
-			deploySpec, err := common.ResolveDeploySpec(store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, args[0], "")
+			deploySpec, err := common.ResolveDeploySpec(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, args[0], "")
 			if err != nil {
 				return err
 			}

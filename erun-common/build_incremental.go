@@ -411,8 +411,8 @@ type LocalDockerImageInspector func(tag string) (bool, error)
 // fingerprint-based incremental promotion applied to its docker builds. When
 // noIncremental is true it returns execution unchanged. Errors during fingerprint
 // computation propagate so callers can decide how to surface them.
-func ApplyIncrementalToBuildExecution(execution BuildExecutionSpec, noIncremental bool) (BuildExecutionSpec, error) {
-	updated, err := ApplyIncrementalToDockerBuilds(execution.dockerBuilds, noIncremental)
+func ApplyIncrementalToBuildExecution(ctx Context, execution BuildExecutionSpec, noIncremental bool) (BuildExecutionSpec, error) {
+	updated, err := ApplyIncrementalToDockerBuilds(ctx, execution.dockerBuilds, noIncremental)
 	if err != nil {
 		return BuildExecutionSpec{}, err
 	}
@@ -425,11 +425,32 @@ func ApplyIncrementalToBuildExecution(execution BuildExecutionSpec, noIncrementa
 // is returned unchanged. This is the single entry point every command should
 // use so deploy, push, and runtime deploy paths share the same skip logic as
 // erun build.
-func ApplyIncrementalToDockerBuilds(builds []DockerBuildSpec, noIncremental bool) ([]DockerBuildSpec, error) {
+//
+// Builds whose image name is listed in the project's docker.fingerprints
+// config get a pre-step: <image>:<VERSION> is pulled from the registry and
+// tagged locally as <image>:fp-<configured>-<arch>. The downstream
+// applyIncrementalPromotion then finds the tagged image and promotes the
+// build. In dry-run, the pull+tag commands are traced but not executed; a
+// composed inspector treats those would-be tags as present so the trace
+// reflects the would-be promote path.
+func ApplyIncrementalToDockerBuilds(ctx Context, builds []DockerBuildSpec, noIncremental bool) ([]DockerBuildSpec, error) {
 	if noIncremental || len(builds) == 0 {
 		return builds, nil
 	}
-	return applyIncrementalPromotion(builds, nil)
+	materialized, err := materializeConfiguredFingerprints(ctx, builds)
+	if err != nil {
+		return nil, err
+	}
+	var inspect LocalDockerImageInspector
+	if len(materialized) > 0 {
+		inspect = func(tag string) (bool, error) {
+			if _, ok := materialized[tag]; ok {
+				return true, nil
+			}
+			return DockerImageExists(tag)
+		}
+	}
+	return applyIncrementalPromotion(builds, inspect)
 }
 
 // applyIncrementalPromotion computes a fingerprint for each build and, when an
@@ -438,14 +459,6 @@ func ApplyIncrementalToDockerBuilds(builds []DockerBuildSpec, noIncremental bool
 // fingerprint cannot be computed, or whose fp-tagged image is missing, are left
 // to rebuild as normal. A rebuilt local-base image cascades: any dependent that
 // FROMs it must also rebuild, even if its own fingerprint matches.
-//
-// SkipIfExists builds (pre-built bases like erun-ubuntu / erun-dind) are not
-// part of the local-fingerprint scheme: their `docker build` is skipped, so the
-// post-build fp tag is never written. Including them here would leave them
-// permanently in the rebuild set and cascade-invalidate every dependent. Their
-// pinned tag is already encoded in dependents' Dockerfiles, which are part of
-// each dependent's own fingerprint, so a base-tag bump still invalidates the
-// dependent correctly.
 func applyIncrementalPromotion(builds []DockerBuildSpec, inspect LocalDockerImageInspector) ([]DockerBuildSpec, error) {
 	if len(builds) == 0 {
 		return builds, nil
@@ -457,9 +470,6 @@ func applyIncrementalPromotion(builds []DockerBuildSpec, inspect LocalDockerImag
 	copy(out, builds)
 	rebuildSet := make(map[string]struct{}, len(out))
 	for i := range out {
-		if out[i].SkipIfExists {
-			continue
-		}
 		fingerprint, err := computeBuildFingerprint(out[i])
 		if err != nil {
 			rebuildSet[strings.TrimSpace(out[i].Image.Tag)] = struct{}{}

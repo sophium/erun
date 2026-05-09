@@ -41,14 +41,14 @@ func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 
 			component := strings.TrimSpace(input.Component)
 			if component != "" {
-				execution, err := eruncommon.ResolveDeploySpec(runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target, component, strings.TrimSpace(input.Version))
+				execution, err := eruncommon.ResolveDeploySpec(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target, component, strings.TrimSpace(input.Version))
 				if err != nil {
 					return err
 				}
 				return eruncommon.RunDeploySpec(runCtx, execution, runtime.BuildDockerImage, runtimePushFunc(runtime), runtime.DeployHelmChart)
 			}
 
-			executions, err := eruncommon.ResolveCurrentDeploySpecs(runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target)
+			executions, err := eruncommon.ResolveCurrentDeploySpecs(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target)
 			if err != nil {
 				return err
 			}

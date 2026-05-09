@@ -2,9 +2,9 @@ environments:
     local:
         containerregistry: ghcr.io/sophium
         docker:
-            skipIfExists:
-                - ghcr.io/sophium/erun-dind
-                - ghcr.io/sophium/erun-ubuntu
+            fingerprints:
+                erun-ubuntu: 6ffef71a59498123
+                erun-dind: bdee80a398a69e36
         k8s:
             deployments:
                 - [erun-devops, erun-backend-postgres]

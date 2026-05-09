@@ -26,7 +26,7 @@ func ResolveCurrentDockerBuildSpecs(store DockerStore, findProjectRoot ProjectFi
 	return builds, nil
 }
 
-func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (BuildExecutionSpec, error) {
+func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (BuildExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	target, releaseSpec, script, err := resolveBuildExecutionTargetAndScript(findProjectRoot, target)
@@ -56,7 +56,7 @@ func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc,
 	if releaseSpec != nil {
 		execution = BuildExecutionSpecWithRelease(execution, *releaseSpec)
 	}
-	return ApplyIncrementalToBuildExecution(execution, target.NoIncremental)
+	return ApplyIncrementalToBuildExecution(ctx, execution, target.NoIncremental)
 }
 
 func resolveBuildExecutionTargetAndScript(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (DockerCommandTarget, *ReleaseSpec, *scriptSpec, error) {

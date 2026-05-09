@@ -36,7 +36,7 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 }
 
 func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, target common.DockerCommandTarget, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) error {
-	execution, err := common.ResolveBuildExecution(store, findProjectRoot, resolveBuildContext, now, target)
+	execution, err := common.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 	if err != nil {
 		return err
 	}
@@ -68,7 +68,7 @@ func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRo
 		return errors.New("store does not support deploy resolution")
 	}
 
-	deploySpecs, err := common.ResolveCurrentDeploySpecsForDockerTarget(buildDeployStore, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target)
+	deploySpecs, err := common.ResolveCurrentDeploySpecsForDockerTarget(ctx, buildDeployStore, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target)
 	if err != nil {
 		return err
 	}
@@ -90,7 +90,7 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 				target.NoIncremental = true
 			}
 			ctx := commandContext(cmd)
-			pushInput, buildInput, err := common.ResolveDockerPushSpec(store, findProjectRoot, resolveBuildContext, now, target)
+			pushInput, buildInput, err := common.ResolveDockerPushSpec(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 			if err != nil {
 				return err
 			}
@@ -154,13 +154,13 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 			}
 			buildContext, _ := resolveBuildContext()
 			if strings.TrimSpace(buildContext.DockerfilePath) != "" {
-				pushInput, buildInput, err := common.ResolveDockerPushSpec(store, findProjectRoot, resolveBuildContext, now, target)
+				pushInput, buildInput, err := common.ResolveDockerPushSpec(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 				if err != nil {
 					return err
 				}
 				return common.RunDockerPushSpec(ctx, pushInput, buildInput, builderWithGuidance, push)
 			}
-			execution, err := common.ResolveDockerPushExecution(store, findProjectRoot, resolveBuildContext, now, target)
+			execution, err := common.ResolveDockerPushExecution(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 			if err != nil {
 				return err
 			}
