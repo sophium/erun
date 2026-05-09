@@ -4,6 +4,7 @@ Usage:
   erun deploy [TENANT] [ENVIRONMENT] [flags]
 
 Flags:
+      --components strings   Opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api)
       --dry-run              Resolve and trace mutating actions without executing them.
       --environment string   Deploy for a specific environment; requires --tenant
   -h, --help                 help for deploy

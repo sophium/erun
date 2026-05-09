@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-//go:embed assets/default-devops-chart/Chart.yaml assets/default-devops-chart/values.local.yaml assets/default-devops-chart/templates/service.yaml assets/default-devops-chart/templates/postgres.yaml assets/default-devops-chart/templates/api.yaml
+//go:embed assets/default-devops-chart/Chart.yaml assets/default-devops-chart/values.local.yaml assets/default-devops-chart/templates/service.yaml assets/default-backend-postgres-chart/Chart.yaml assets/default-backend-postgres-chart/values.local.yaml assets/default-backend-postgres-chart/templates/postgres.yaml assets/default-backend-db-chart/Chart.yaml assets/default-backend-db-chart/values.local.yaml assets/default-backend-db-chart/templates/migrate-job.yaml assets/default-backend-api-chart/Chart.yaml assets/default-backend-api-chart/values.local.yaml assets/default-backend-api-chart/templates/api.yaml
 var defaultDevopsChartFiles embed.FS
 
 type defaultDevopsChartTemplate struct {
@@ -37,13 +37,48 @@ var defaultDevopsChartTemplates = []defaultDevopsChartTemplate{
 		Mode:       0o644,
 	},
 	{
-		AssetPath:  "assets/default-devops-chart/templates/postgres.yaml",
-		TargetPath: "__MODULE_NAME__/k8s/__MODULE_NAME__/templates/postgres.yaml",
+		AssetPath:  "assets/default-backend-postgres-chart/Chart.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-postgres/Chart.yaml",
 		Mode:       0o644,
 	},
 	{
-		AssetPath:  "assets/default-devops-chart/templates/api.yaml",
-		TargetPath: "__MODULE_NAME__/k8s/__MODULE_NAME__/templates/api.yaml",
+		AssetPath:  "assets/default-backend-postgres-chart/values.local.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-postgres/values.local.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-backend-postgres-chart/templates/postgres.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-postgres/templates/postgres.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-backend-db-chart/Chart.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-db/Chart.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-backend-db-chart/values.local.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-db/values.local.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-backend-db-chart/templates/migrate-job.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-db/templates/migrate-job.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-backend-api-chart/Chart.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-api/Chart.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-backend-api-chart/values.local.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-api/values.local.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-backend-api-chart/templates/api.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-api/templates/api.yaml",
 		Mode:       0o644,
 	},
 }

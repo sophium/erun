@@ -105,8 +105,7 @@ func TestResolveDockerHubRuntimeRegistryVersionsFollowsPages(t *testing.T) {
 }
 
 func TestResolveGHCRRuntimeRegistryVersionsFollowsTokenAndPagination(t *testing.T) {
-	var server *httptest.Server
-	server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	var server *httptest.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/token":
 			if r.URL.Query().Get("scope") != "repository:sophium/erun-devops:pull" {

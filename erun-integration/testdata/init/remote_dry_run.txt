@@ -140,17 +140,6 @@ remote-default-devops-bootstrap:
   {{- $runtimeRequestCPU := default "0.25" $runtimeRequests.cpu -}}
   {{- $runtimeRequestMemory := default "1024Mi" $runtimeRequests.memory -}}
   {{- $managedCloud := default false .Values.managedCloud -}}
-  {{- $postgres := default dict (default dict .Values.api).postgres -}}
-  {{- $postgresPasswordSecretName := default "erun-backend-postgres" $postgres.passwordSecretName -}}
-  {{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
-  {{- $postgresPassword := default "" $postgres.password -}}
-  {{- $existingPostgresSecret := lookup "v1" "Secret" .Release.Namespace $postgresPasswordSecretName -}}
-  {{- if and (eq $postgresPassword "") $existingPostgresSecret (hasKey $existingPostgresSecret.data $postgresPasswordSecretKey) -}}
-  {{- $postgresPassword = (index $existingPostgresSecret.data $postgresPasswordSecretKey | b64dec) -}}
-  {{- end -}}
-  {{- if eq $postgresPassword "" -}}
-  {{- $postgresPassword = randAlphaNum 32 -}}
-  {{- end -}}
   {{- $imageOverrides := default dict .Values.imageOverrides -}}
   {{- $devopsImage := default (printf "ghcr.io/sophium/team-devops:%s" .Chart.AppVersion) (index $imageOverrides "team-devops") -}}
   {{- $mcpImage := default (printf "ghcr.io/sophium/erun-mcp:%s" .Chart.AppVersion) (index $imageOverrides "erun-mcp") -}}
@@ -178,16 +167,6 @@ remote-default-devops-bootstrap:
   {{- $claudeEnablePromptCaching1H := default "" $claude.enablePromptCaching1H -}}
   {{- $claudeMaxOutputTokens := default "4096" $claude.maxOutputTokens -}}
   {{- $claudeMaxThinkingTokens := default "1024" $claude.maxThinkingTokens -}}
-  apiVersion: v1
-  kind: Secret
-  metadata:
-    name: {{ $postgresPasswordSecretName }}
-    labels:
-      app: team-devops
-  type: Opaque
-  stringData:
-    {{ $postgresPasswordSecretKey }}: {{ $postgresPassword | quote }}
-  ---
   apiVersion: v1
   kind: PersistentVolumeClaim
   metadata:
@@ -557,31 +536,10 @@ remote-default-devops-bootstrap:
   {{- $runtimeRequestCPU := default "0.25" $runtimeRequests.cpu -}}
   {{- $runtimeRequestMemory := default "1024Mi" $runtimeRequests.memory -}}
   {{- $managedCloud := default false .Values.managedCloud -}}
-  {{- $postgres := default dict (default dict .Values.api).postgres -}}
-  {{- $postgresPasswordSecretName := default "erun-backend-postgres" $postgres.passwordSecretName -}}
-  {{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
-  {{- $postgresPassword := default "" $postgres.password -}}
-  {{- $existingPostgresSecret := lookup "v1" "Secret" .Release.Namespace $postgresPasswordSecretName -}}
-  {{- if and (eq $postgresPassword "") $existingPostgresSecret (hasKey $existingPostgresSecret.data $postgresPasswordSecretKey) -}}
-  {{- $postgresPassword = (index $existingPostgresSecret.data $postgresPasswordSecretKey | b64dec) -}}
-  {{- end -}}
-  {{- if eq $postgresPassword "" -}}
-  {{- $postgresPassword = randAlphaNum 32 -}}
-  {{- end -}}
   {{- $imageOverrides := default dict .Values.imageOverrides -}}
   {{- $devopsImage := default (printf "ghcr.io/sophium/team-devops:%s" .Chart.AppVersion) (index $imageOverrides "team-devops") -}}
   {{- $mcpImage := default (printf "ghcr.io/sophium/erun-mcp:%s" .Chart.AppVersion) (index $imageOverrides "erun-mcp") -}}
   {{- $dindImage := default "ghcr.io/sophium/erun-dind:<VERSION>" (index $imageOverrides "erun-dind") -}}
-  apiVersion: v1
-  kind: Secret
-  metadata:
-    name: {{ $postgresPasswordSecretName }}
-    labels:
-      app: team-devops
-  type: Opaque
-  stringData:
-    {{ $postgresPasswordSecretKey }}: {{ $postgresPassword | quote }}
-  ---
   apiVersion: v1
   kind: PersistentVolumeClaim
   metadata:
@@ -864,9 +822,43 @@ remote-default-devops-bootstrap:
   fi
   if [ "$replace" = true ]; then cp "$erun_bootstrap_tmp_4" '<HOME>/git/team/team-devops/k8s/team-devops/templates/service.yaml'; chmod '644' '<HOME>/git/team/team-devops/k8s/team-devops/templates/service.yaml'; fi
   rm -f "$erun_bootstrap_tmp_4"
-  mkdir -p '<HOME>/git/team/team-devops/k8s/team-devops/templates'
-  if [ -d '<HOME>/git/team/team-devops/k8s/team-devops/templates/postgres.yaml' ]; then echo '"<HOME>/git/team/team-devops/k8s/team-devops/templates/postgres.yaml" is a directory' >&2; exit 1; fi
+  mkdir -p '<HOME>/git/team/team-devops/k8s/erun-backend-postgres'
+  if [ -d '<HOME>/git/team/team-devops/k8s/erun-backend-postgres/Chart.yaml' ]; then echo '"<HOME>/git/team/team-devops/k8s/erun-backend-postgres/Chart.yaml" is a directory' >&2; exit 1; fi
   erun_bootstrap_tmp_5=$(mktemp)
+  printf %s 'apiVersion: v2
+  name: erun-backend-postgres
+  description: ERun backend PostgreSQL
+  type: application
+  version: "<VERSION>"
+  appVersion: "<VERSION>"
+  ' > "$erun_bootstrap_tmp_5"
+  replace=false
+  if [ ! -e '<HOME>/git/team/team-devops/k8s/erun-backend-postgres/Chart.yaml' ]; then
+    replace=true
+  elif cmp -s "$erun_bootstrap_tmp_5" '<HOME>/git/team/team-devops/k8s/erun-backend-postgres/Chart.yaml'; then
+    replace=false
+  else
+    replace=false
+  fi
+  if [ "$replace" = true ]; then cp "$erun_bootstrap_tmp_5" '<HOME>/git/team/team-devops/k8s/erun-backend-postgres/Chart.yaml'; chmod '644' '<HOME>/git/team/team-devops/k8s/erun-backend-postgres/Chart.yaml'; fi
+  rm -f "$erun_bootstrap_tmp_5"
+  mkdir -p '<HOME>/git/team/team-devops/k8s/erun-backend-postgres'
+  if [ -d '<HOME>/git/team/team-devops/k8s/erun-backend-postgres/values.local.yaml' ]; then echo '"<HOME>/git/team/team-devops/k8s/erun-backend-postgres/values.local.yaml" is a directory' >&2; exit 1; fi
+  erun_bootstrap_tmp_6=$(mktemp)
+  printf %s '' > "$erun_bootstrap_tmp_6"
+  replace=false
+  if [ ! -e '<HOME>/git/team/team-devops/k8s/erun-backend-postgres/values.local.yaml' ]; then
+    replace=true
+  elif cmp -s "$erun_bootstrap_tmp_6" '<HOME>/git/team/team-devops/k8s/erun-backend-postgres/values.local.yaml'; then
+    replace=false
+  else
+    replace=false
+  fi
+  if [ "$replace" = true ]; then cp "$erun_bootstrap_tmp_6" '<HOME>/git/team/team-devops/k8s/erun-backend-postgres/values.local.yaml'; chmod '644' '<HOME>/git/team/team-devops/k8s/erun-backend-postgres/values.local.yaml'; fi
+  rm -f "$erun_bootstrap_tmp_6"
+  mkdir -p '<HOME>/git/team/team-devops/k8s/erun-backend-postgres/templates'
+  if [ -d '<HOME>/git/team/team-devops/k8s/erun-backend-postgres/templates/postgres.yaml' ]; then echo '"<HOME>/git/team/team-devops/k8s/erun-backend-postgres/templates/postgres.yaml" is a directory' >&2; exit 1; fi
+  erun_bootstrap_tmp_7=$(mktemp)
   printf %s '{{- $postgres := default dict (default dict .Values.api).postgres -}}
   {{- $postgresDatabase := default "erun" $postgres.database -}}
   {{- $postgresUser := default "erun" $postgres.user -}}
@@ -874,8 +866,26 @@ remote-default-devops-bootstrap:
   {{- $postgresPasswordSecretName := default "erun-backend-postgres" $postgres.passwordSecretName -}}
   {{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
   {{- $postgresStorage := default "10Gi" $postgres.storage -}}
+  {{- $postgresPassword := default "" $postgres.password -}}
+  {{- $existingPostgresSecret := lookup "v1" "Secret" .Release.Namespace $postgresPasswordSecretName -}}
+  {{- if and (eq $postgresPassword "") $existingPostgresSecret (hasKey $existingPostgresSecret.data $postgresPasswordSecretKey) -}}
+  {{- $postgresPassword = (index $existingPostgresSecret.data $postgresPasswordSecretKey | b64dec) -}}
+  {{- end -}}
+  {{- if eq $postgresPassword "" -}}
+  {{- $postgresPassword = randAlphaNum 32 -}}
+  {{- end -}}
   {{- $imageOverrides := default dict .Values.imageOverrides -}}
   {{- $postgresImage := default "postgres:18" (index $imageOverrides "postgres") -}}
+  apiVersion: v1
+  kind: Secret
+  metadata:
+    name: {{ $postgresPasswordSecretName }}
+    labels:
+      app: erun-postgres
+  type: Opaque
+  stringData:
+    {{ $postgresPasswordSecretKey }}: {{ $postgresPassword | quote }}
+  ---
   apiVersion: v1
   kind: PersistentVolumeClaim
   metadata:
@@ -968,20 +978,143 @@ remote-default-devops-bootstrap:
             persistentVolumeClaim:
               claimName: erun-postgres-data
         restartPolicy: Always
-  ' > "$erun_bootstrap_tmp_5"
+  ' > "$erun_bootstrap_tmp_7"
   replace=false
-  if [ ! -e '<HOME>/git/team/team-devops/k8s/team-devops/templates/postgres.yaml' ]; then
+  if [ ! -e '<HOME>/git/team/team-devops/k8s/erun-backend-postgres/templates/postgres.yaml' ]; then
     replace=true
-  elif cmp -s "$erun_bootstrap_tmp_5" '<HOME>/git/team/team-devops/k8s/team-devops/templates/postgres.yaml'; then
+  elif cmp -s "$erun_bootstrap_tmp_7" '<HOME>/git/team/team-devops/k8s/erun-backend-postgres/templates/postgres.yaml'; then
     replace=false
   else
     replace=false
   fi
-  if [ "$replace" = true ]; then cp "$erun_bootstrap_tmp_5" '<HOME>/git/team/team-devops/k8s/team-devops/templates/postgres.yaml'; chmod '644' '<HOME>/git/team/team-devops/k8s/team-devops/templates/postgres.yaml'; fi
-  rm -f "$erun_bootstrap_tmp_5"
-  mkdir -p '<HOME>/git/team/team-devops/k8s/team-devops/templates'
-  if [ -d '<HOME>/git/team/team-devops/k8s/team-devops/templates/api.yaml' ]; then echo '"<HOME>/git/team/team-devops/k8s/team-devops/templates/api.yaml" is a directory' >&2; exit 1; fi
-  erun_bootstrap_tmp_6=$(mktemp)
+  if [ "$replace" = true ]; then cp "$erun_bootstrap_tmp_7" '<HOME>/git/team/team-devops/k8s/erun-backend-postgres/templates/postgres.yaml'; chmod '644' '<HOME>/git/team/team-devops/k8s/erun-backend-postgres/templates/postgres.yaml'; fi
+  rm -f "$erun_bootstrap_tmp_7"
+  mkdir -p '<HOME>/git/team/team-devops/k8s/erun-backend-db'
+  if [ -d '<HOME>/git/team/team-devops/k8s/erun-backend-db/Chart.yaml' ]; then echo '"<HOME>/git/team/team-devops/k8s/erun-backend-db/Chart.yaml" is a directory' >&2; exit 1; fi
+  erun_bootstrap_tmp_8=$(mktemp)
+  printf %s 'apiVersion: v2
+  name: erun-backend-db
+  description: ERun backend database migration job
+  type: application
+  version: "<VERSION>"
+  appVersion: "<VERSION>"
+  ' > "$erun_bootstrap_tmp_8"
+  replace=false
+  if [ ! -e '<HOME>/git/team/team-devops/k8s/erun-backend-db/Chart.yaml' ]; then
+    replace=true
+  elif cmp -s "$erun_bootstrap_tmp_8" '<HOME>/git/team/team-devops/k8s/erun-backend-db/Chart.yaml'; then
+    replace=false
+  else
+    replace=false
+  fi
+  if [ "$replace" = true ]; then cp "$erun_bootstrap_tmp_8" '<HOME>/git/team/team-devops/k8s/erun-backend-db/Chart.yaml'; chmod '644' '<HOME>/git/team/team-devops/k8s/erun-backend-db/Chart.yaml'; fi
+  rm -f "$erun_bootstrap_tmp_8"
+  mkdir -p '<HOME>/git/team/team-devops/k8s/erun-backend-db'
+  if [ -d '<HOME>/git/team/team-devops/k8s/erun-backend-db/values.local.yaml' ]; then echo '"<HOME>/git/team/team-devops/k8s/erun-backend-db/values.local.yaml" is a directory' >&2; exit 1; fi
+  erun_bootstrap_tmp_9=$(mktemp)
+  printf %s '' > "$erun_bootstrap_tmp_9"
+  replace=false
+  if [ ! -e '<HOME>/git/team/team-devops/k8s/erun-backend-db/values.local.yaml' ]; then
+    replace=true
+  elif cmp -s "$erun_bootstrap_tmp_9" '<HOME>/git/team/team-devops/k8s/erun-backend-db/values.local.yaml'; then
+    replace=false
+  else
+    replace=false
+  fi
+  if [ "$replace" = true ]; then cp "$erun_bootstrap_tmp_9" '<HOME>/git/team/team-devops/k8s/erun-backend-db/values.local.yaml'; chmod '644' '<HOME>/git/team/team-devops/k8s/erun-backend-db/values.local.yaml'; fi
+  rm -f "$erun_bootstrap_tmp_9"
+  mkdir -p '<HOME>/git/team/team-devops/k8s/erun-backend-db/templates'
+  if [ -d '<HOME>/git/team/team-devops/k8s/erun-backend-db/templates/migrate-job.yaml' ]; then echo '"<HOME>/git/team/team-devops/k8s/erun-backend-db/templates/migrate-job.yaml" is a directory' >&2; exit 1; fi
+  erun_bootstrap_tmp_10=$(mktemp)
+  printf %s '{{- $api := default dict .Values.api -}}
+  {{- $postgres := default dict $api.postgres -}}
+  {{- $postgresDatabase := default "erun" $postgres.database -}}
+  {{- $postgresUser := default "erun" $postgres.user -}}
+  {{- $postgresPort := default 5432 $postgres.port -}}
+  {{- $postgresPasswordSecretName := default "erun-backend-postgres" $postgres.passwordSecretName -}}
+  {{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
+  {{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@erun-postgres:%v/%s?sslmode=disable" $postgresUser $postgresPort $postgresDatabase) $api.databaseURL -}}
+  {{- $imageOverrides := default dict .Values.imageOverrides -}}
+  {{- $backendDBImage := default (printf "ghcr.io/sophium/erun-backend-db:%s" .Chart.AppVersion) (index $imageOverrides "erun-backend-db") -}}
+  apiVersion: batch/v1
+  kind: Job
+  metadata:
+    name: erun-backend-db-migrate
+    labels:
+      app: erun-backend-db-migrate
+    annotations:
+      "helm.sh/hook": post-install,post-upgrade
+      "helm.sh/hook-delete-policy": before-hook-creation
+  spec:
+    backoffLimit: 0
+    template:
+      metadata:
+        labels:
+          app: erun-backend-db-migrate
+      spec:
+        restartPolicy: Never
+        containers:
+          - image: {{ $backendDBImage }}
+            name: erun-backend-db-migrate
+            imagePullPolicy: IfNotPresent
+            env:
+              - name: HOME
+                value: <HOME>
+              - name: ERUN_POSTGRES_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: {{ $postgresPasswordSecretName }}
+                    key: {{ $postgresPasswordSecretKey }}
+              - name: ERUN_DATABASE_URL
+                value: {{ $databaseURL | quote }}
+  ' > "$erun_bootstrap_tmp_10"
+  replace=false
+  if [ ! -e '<HOME>/git/team/team-devops/k8s/erun-backend-db/templates/migrate-job.yaml' ]; then
+    replace=true
+  elif cmp -s "$erun_bootstrap_tmp_10" '<HOME>/git/team/team-devops/k8s/erun-backend-db/templates/migrate-job.yaml'; then
+    replace=false
+  else
+    replace=false
+  fi
+  if [ "$replace" = true ]; then cp "$erun_bootstrap_tmp_10" '<HOME>/git/team/team-devops/k8s/erun-backend-db/templates/migrate-job.yaml'; chmod '644' '<HOME>/git/team/team-devops/k8s/erun-backend-db/templates/migrate-job.yaml'; fi
+  rm -f "$erun_bootstrap_tmp_10"
+  mkdir -p '<HOME>/git/team/team-devops/k8s/erun-backend-api'
+  if [ -d '<HOME>/git/team/team-devops/k8s/erun-backend-api/Chart.yaml' ]; then echo '"<HOME>/git/team/team-devops/k8s/erun-backend-api/Chart.yaml" is a directory' >&2; exit 1; fi
+  erun_bootstrap_tmp_11=$(mktemp)
+  printf %s 'apiVersion: v2
+  name: erun-backend-api
+  description: ERun backend API
+  type: application
+  version: "<VERSION>"
+  appVersion: "<VERSION>"
+  ' > "$erun_bootstrap_tmp_11"
+  replace=false
+  if [ ! -e '<HOME>/git/team/team-devops/k8s/erun-backend-api/Chart.yaml' ]; then
+    replace=true
+  elif cmp -s "$erun_bootstrap_tmp_11" '<HOME>/git/team/team-devops/k8s/erun-backend-api/Chart.yaml'; then
+    replace=false
+  else
+    replace=false
+  fi
+  if [ "$replace" = true ]; then cp "$erun_bootstrap_tmp_11" '<HOME>/git/team/team-devops/k8s/erun-backend-api/Chart.yaml'; chmod '644' '<HOME>/git/team/team-devops/k8s/erun-backend-api/Chart.yaml'; fi
+  rm -f "$erun_bootstrap_tmp_11"
+  mkdir -p '<HOME>/git/team/team-devops/k8s/erun-backend-api'
+  if [ -d '<HOME>/git/team/team-devops/k8s/erun-backend-api/values.local.yaml' ]; then echo '"<HOME>/git/team/team-devops/k8s/erun-backend-api/values.local.yaml" is a directory' >&2; exit 1; fi
+  erun_bootstrap_tmp_12=$(mktemp)
+  printf %s '' > "$erun_bootstrap_tmp_12"
+  replace=false
+  if [ ! -e '<HOME>/git/team/team-devops/k8s/erun-backend-api/values.local.yaml' ]; then
+    replace=true
+  elif cmp -s "$erun_bootstrap_tmp_12" '<HOME>/git/team/team-devops/k8s/erun-backend-api/values.local.yaml'; then
+    replace=false
+  else
+    replace=false
+  fi
+  if [ "$replace" = true ]; then cp "$erun_bootstrap_tmp_12" '<HOME>/git/team/team-devops/k8s/erun-backend-api/values.local.yaml'; chmod '644' '<HOME>/git/team/team-devops/k8s/erun-backend-api/values.local.yaml'; fi
+  rm -f "$erun_bootstrap_tmp_12"
+  mkdir -p '<HOME>/git/team/team-devops/k8s/erun-backend-api/templates'
+  if [ -d '<HOME>/git/team/team-devops/k8s/erun-backend-api/templates/api.yaml' ]; then echo '"<HOME>/git/team/team-devops/k8s/erun-backend-api/templates/api.yaml" is a directory' >&2; exit 1; fi
+  erun_bootstrap_tmp_13=$(mktemp)
   printf %s '{{- $apiPort := default 17033 .Values.apiPort -}}
   {{- $api := default dict .Values.api -}}
   {{- $oidcAllowedIssuers := default "" $api.oidcAllowedIssuers -}}
@@ -995,7 +1128,6 @@ remote-default-devops-bootstrap:
   {{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
   {{- $databaseURL := default (printf "postgres://%s:$(ERUN_POSTGRES_PASSWORD)@erun-postgres:%v/%s?sslmode=disable" $postgresUser $postgresPort $postgresDatabase) $api.databaseURL -}}
   {{- $imageOverrides := default dict .Values.imageOverrides -}}
-  {{- $backendDBImage := default (printf "ghcr.io/sophium/erun-backend-db:%s" .Chart.AppVersion) (index $imageOverrides "erun-backend-db") -}}
   {{- $backendAPIImage := default (printf "ghcr.io/sophium/erun-backend-api:%s" .Chart.AppVersion) (index $imageOverrides "erun-backend-api") -}}
   apiVersion: v1
   kind: Service
@@ -1030,20 +1162,6 @@ remote-default-devops-bootstrap:
         labels:
           app: erun-api
       spec:
-        initContainers:
-          - image: {{ $backendDBImage }}
-            name: erun-backend-db-migrate
-            imagePullPolicy: IfNotPresent
-            env:
-              - name: HOME
-                value: <HOME>
-              - name: ERUN_POSTGRES_PASSWORD
-                valueFrom:
-                  secretKeyRef:
-                    name: {{ $postgresPasswordSecretName }}
-                    key: {{ $postgresPasswordSecretKey }}
-              - name: ERUN_DATABASE_URL
-                value: {{ $databaseURL | quote }}
         containers:
           - image: {{ $backendAPIImage }}
             name: erun-backend-api
@@ -1075,31 +1193,31 @@ remote-default-devops-bootstrap:
             ports:
               - containerPort: {{ $apiPort }}
                 name: api
-  ' > "$erun_bootstrap_tmp_6"
+  ' > "$erun_bootstrap_tmp_13"
   replace=false
-  if [ ! -e '<HOME>/git/team/team-devops/k8s/team-devops/templates/api.yaml' ]; then
+  if [ ! -e '<HOME>/git/team/team-devops/k8s/erun-backend-api/templates/api.yaml' ]; then
     replace=true
-  elif cmp -s "$erun_bootstrap_tmp_6" '<HOME>/git/team/team-devops/k8s/team-devops/templates/api.yaml'; then
+  elif cmp -s "$erun_bootstrap_tmp_13" '<HOME>/git/team/team-devops/k8s/erun-backend-api/templates/api.yaml'; then
     replace=false
   else
     replace=false
   fi
-  if [ "$replace" = true ]; then cp "$erun_bootstrap_tmp_6" '<HOME>/git/team/team-devops/k8s/team-devops/templates/api.yaml'; chmod '644' '<HOME>/git/team/team-devops/k8s/team-devops/templates/api.yaml'; fi
-  rm -f "$erun_bootstrap_tmp_6"
+  if [ "$replace" = true ]; then cp "$erun_bootstrap_tmp_13" '<HOME>/git/team/team-devops/k8s/erun-backend-api/templates/api.yaml'; chmod '644' '<HOME>/git/team/team-devops/k8s/erun-backend-api/templates/api.yaml'; fi
+  rm -f "$erun_bootstrap_tmp_13"
   mkdir -p '<HOME>/git/team/team-devops/k8s/team-devops'
   if [ -d '<HOME>/git/team/team-devops/k8s/team-devops/values.dev.yaml' ]; then echo '"<HOME>/git/team/team-devops/k8s/team-devops/values.dev.yaml" is a directory' >&2; exit 1; fi
-  erun_bootstrap_tmp_7=$(mktemp)
-  printf %s '' > "$erun_bootstrap_tmp_7"
+  erun_bootstrap_tmp_14=$(mktemp)
+  printf %s '' > "$erun_bootstrap_tmp_14"
   replace=false
   if [ ! -e '<HOME>/git/team/team-devops/k8s/team-devops/values.dev.yaml' ]; then
     replace=true
-  elif cmp -s "$erun_bootstrap_tmp_7" '<HOME>/git/team/team-devops/k8s/team-devops/values.dev.yaml'; then
+  elif cmp -s "$erun_bootstrap_tmp_14" '<HOME>/git/team/team-devops/k8s/team-devops/values.dev.yaml'; then
     replace=false
   else
     replace=false
   fi
-  if [ "$replace" = true ]; then cp "$erun_bootstrap_tmp_7" '<HOME>/git/team/team-devops/k8s/team-devops/values.dev.yaml'; chmod '644' '<HOME>/git/team/team-devops/k8s/team-devops/values.dev.yaml'; fi
-  rm -f "$erun_bootstrap_tmp_7"
+  if [ "$replace" = true ]; then cp "$erun_bootstrap_tmp_14" '<HOME>/git/team/team-devops/k8s/team-devops/values.dev.yaml'; chmod '644' '<HOME>/git/team/team-devops/k8s/team-devops/values.dev.yaml'; fi
+  rm -f "$erun_bootstrap_tmp_14"
 mkdir -p <TMP>
 write-yaml <TMP>
 Configuration initialized OK

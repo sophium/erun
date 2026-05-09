@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -31,7 +32,7 @@ type DeployStore interface {
 
 type (
 	DeployContextResolverFunc       func() (KubernetesDeployContext, error)
-	KubernetesDeploymentCheckerFunc func(KubernetesDeploymentCheckParams) (bool, error)
+	KubernetesDeploymentCheckerFunc func(Context, KubernetesDeploymentCheckParams) (bool, error)
 	HelmChartDeployerFunc           func(HelmDeployParams) error
 	HelmReleaseRecovererFunc        func(HelmReleaseRecoveryParams) error
 )
@@ -146,6 +147,10 @@ type DeployTarget struct {
 	RepoPath        string
 	VersionOverride string
 	Snapshot        *bool
+	// Components lists optional opt-in charts to include alongside the
+	// always-on charts (e.g. the per-tenant runtime). Names must come from
+	// optInDeployComponents; unknown names produce an error during resolve.
+	Components []string
 }
 
 type DeploySpec struct {
@@ -153,15 +158,99 @@ type DeploySpec struct {
 	DeployContext KubernetesDeployContext
 	Builds        []DockerBuildSpec
 	Deploy        HelmDeploySpec
+	// SkipHelm signals that every locally-built image for this chart was
+	// promoted from a cached fingerprint (no rebuild). RunDeploySpec then
+	// skips the helm command and the per-build push entirely so unchanged
+	// pods are not rolled. Charts with no locally-built images keep
+	// SkipHelm=false so chart-only changes still ship.
+	SkipHelm bool
 }
 
 func RunDeploySpecs(ctx Context, executions []DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
-	for _, execution := range executions {
-		if err := RunDeploySpec(ctx, execution, build, push, deploy); err != nil {
+	if len(executions) == 0 {
+		return nil
+	}
+	plan, err := loadProjectK8sPlanForDeploy(executions)
+	if err != nil {
+		return err
+	}
+	groups := groupDeploySpecsByPlan(executions, plan)
+	for stepIndex, group := range groups {
+		if err := runDeployStep(ctx, stepIndex, group, build, push, deploy); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// loadProjectK8sPlanForDeploy reads the k8s deploy plan from the project root
+// of the first spec that has a usable RepoPath. All specs in a single deploy
+// share a target/repo and an environment, so the first one is authoritative.
+// A missing project config yields an empty plan, which the grouper treats as
+// "one chart per step, in default order"; a malformed project config
+// surfaces as an error so silent misconfiguration cannot ship a wrong plan.
+func loadProjectK8sPlanForDeploy(executions []DeploySpec) (ProjectK8sConfig, error) {
+	for _, execution := range executions {
+		plan, err := loadProjectK8sPlanForRepo(execution.Target.RepoPath, execution.Target.Environment)
+		if err != nil {
+			return ProjectK8sConfig{}, err
+		}
+		if !plan.IsZero() {
+			return plan, nil
+		}
+	}
+	return ProjectK8sConfig{}, nil
+}
+
+func loadProjectK8sPlanForRepo(repoPath, environment string) (ProjectK8sConfig, error) {
+	repoPath = strings.TrimSpace(repoPath)
+	if repoPath == "" {
+		return ProjectK8sConfig{}, nil
+	}
+	config, _, err := LoadProjectConfig(repoPath)
+	if err != nil {
+		if errors.Is(err, ErrNotInitialized) {
+			return ProjectK8sConfig{}, nil
+		}
+		return ProjectK8sConfig{}, err
+	}
+	return config.K8sForEnvironment(environment), nil
+}
+
+// runDeployStep runs every spec in the group. Single-spec steps and dry-run
+// invocations execute serially so traces remain deterministic; real runs with
+// multiple specs in the same step launch goroutines and wait for all to
+// finish, surfacing the joined error if any failed.
+func runDeployStep(ctx Context, stepIndex int, specs []DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
+	if len(specs) == 0 {
+		return nil
+	}
+	if len(specs) > 1 {
+		names := make([]string, 0, len(specs))
+		for _, spec := range specs {
+			names = append(names, spec.DeployContext.ComponentName)
+		}
+		ctx.Trace(fmt.Sprintf("deploy: step %d (parallel): %s", stepIndex+1, strings.Join(names, ", ")))
+	}
+	if ctx.DryRun || len(specs) == 1 {
+		for _, spec := range specs {
+			if err := RunDeploySpec(ctx, spec, build, push, deploy); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	var wg sync.WaitGroup
+	errs := make([]error, len(specs))
+	for i, spec := range specs {
+		wg.Add(1)
+		go func(i int, spec DeploySpec) {
+			defer wg.Done()
+			errs[i] = RunDeploySpec(ctx, spec, build, push, deploy)
+		}(i, spec)
+	}
+	wg.Wait()
+	return errors.Join(errs...)
 }
 
 func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc) error {
@@ -204,6 +293,10 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 }
 
 func RunDeploySpec(ctx Context, execution DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
+	if execution.SkipHelm {
+		ctx.Trace("deploy: skipping " + execution.DeployContext.ComponentName + " (all images cached, no rebuild)")
+		return nil
+	}
 	for _, buildInput := range orderedDockerBuildSpecs(execution.Builds) {
 		if err := RunDockerBuild(ctx, buildInput, build); err != nil {
 			return err
@@ -262,6 +355,15 @@ func ResolveCurrentDeploySpecs(store DeployStore, findProjectRoot ProjectFinderF
 	if err != nil {
 		return nil, err
 	}
+	projectK8s, err := loadProjectK8sPlanForRepo(resolvedTarget.RepoPath, resolvedTarget.Environment)
+	if err != nil {
+		return nil, err
+	}
+	deployContexts, err = filterDeployContextsByComponents(deployContexts, target.Components, projectK8s)
+	if err != nil {
+		return nil, err
+	}
+	sortDeployContextsByDeployOrder(deployContexts, projectK8s)
 	specs := make([]DeploySpec, 0, len(deployContexts))
 	allowLocalBuilds := deployTargetSnapshotEnabled(resolvedTarget, target.Snapshot)
 	var currentBuild *DockerBuildSpec
@@ -348,6 +450,7 @@ func resolveDeploySpecForContext(store DeployStore, findProjectRoot ProjectFinde
 		DeployContext: deployContext,
 		Builds:        builds,
 		Deploy:        deployInput,
+		SkipHelm:      allDockerBuildsPromoted(builds),
 	}, nil
 }
 
@@ -392,6 +495,7 @@ func resolveDeploySpecForCurrentDockerBuild(store DeployStore, target OpenResult
 		DeployContext: deployContext,
 		Builds:        builds,
 		Deploy:        deployInput,
+		SkipHelm:      allDockerBuildsPromoted(builds),
 	}, nil
 }
 
@@ -743,7 +847,6 @@ func resolveDockerfileBaseImageBuilds(store DeployStore, findProjectRoot Project
 
 func configureDockerBuildsForDeploy(builds []DockerBuildSpec) []DockerBuildSpec {
 	for i := range builds {
-		builds[i].Platforms = slices.Clone(multiPlatformDockerBuilds)
 		builds[i].Push = true
 	}
 	return builds
@@ -1640,7 +1743,7 @@ func overrideHelmChartVersion(chartPath, version string) error {
 	return os.WriteFile(chartFilePath, updated, 0o644)
 }
 
-func CheckKubernetesDeployment(params KubernetesDeploymentCheckParams) (bool, error) {
+func CheckKubernetesDeployment(ctx Context, params KubernetesDeploymentCheckParams) (bool, error) {
 	args := make([]string, 0, 8)
 	if strings.TrimSpace(params.KubernetesContext) != "" {
 		args = append(args, "--context", params.KubernetesContext)
@@ -1650,12 +1753,13 @@ func CheckKubernetesDeployment(params KubernetesDeploymentCheckParams) (bool, er
 	}
 	args = append(args, "get", "deployment", params.Name, "-o", "name")
 
+	ctx.TraceCommand("", "kubectl", args...)
 	output, err := Command("kubectl", args...).CombinedOutput()
 	if err == nil {
 		if !hasExpectedDeploymentSettings(params) {
 			return true, nil
 		}
-		return deploymentMatchesExpectedSettings(params)
+		return deploymentMatchesExpectedSettings(ctx, params)
 	}
 
 	message := strings.ToLower(string(output))
@@ -1680,7 +1784,7 @@ type deploymentEnvVar struct {
 	Value string `json:"value"`
 }
 
-func deploymentMatchesExpectedSettings(params KubernetesDeploymentCheckParams) (bool, error) {
+func deploymentMatchesExpectedSettings(ctx Context, params KubernetesDeploymentCheckParams) (bool, error) {
 	args := make([]string, 0, 8)
 	if strings.TrimSpace(params.KubernetesContext) != "" {
 		args = append(args, "--context", params.KubernetesContext)
@@ -1690,6 +1794,7 @@ func deploymentMatchesExpectedSettings(params KubernetesDeploymentCheckParams) (
 	}
 	args = append(args, "get", "deployment", params.Name, "-o", "json")
 
+	ctx.TraceCommand("", "kubectl", args...)
 	output, err := Command("kubectl", args...).CombinedOutput()
 	if err != nil {
 		return false, fmt.Errorf("failed to inspect deployment %q: %w", params.Name, err)

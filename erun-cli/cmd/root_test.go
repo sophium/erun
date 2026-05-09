@@ -502,7 +502,7 @@ func TestRootCommandDryRunOpensByPlanningWithoutLaunchingShell(t *testing.T) {
 	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "dev", RepoPath: projectRoot, KubernetesContext: "cluster-dev"}), "save env config")
 
 	cmd := newTestRootCmd(testRootDeps{
-		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
+		CheckKubernetesDeployment: func(_ common.Context, req common.KubernetesDeploymentCheckParams) (bool, error) {
 			return true, nil
 		},
 		LaunchShell: func(req common.ShellLaunchParams) error {

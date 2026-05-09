@@ -35,10 +35,23 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 		LocalPort:         localPort,
 	}
 
+	checkArgs := kubectlAPIDeploymentCheckArgs(expectedState.KubernetesContext, expectedState.Namespace)
+	ctx.TraceCommand("", "kubectl", checkArgs...)
+
 	if ctx.DryRun {
 		args := kubectlAPIPortForwardArgs(result, localPort)
 		ctx.TraceCommand("", "kubectl", args...)
 		return localPort, nil
+	}
+
+	exists, err := checkAPIDeploymentPresent(checkArgs)
+	if err != nil {
+		return 0, err
+	}
+	if !exists {
+		ctx.Trace(fmt.Sprintf("open: erun-api deployment not present in %s; skipping API port-forward", expectedState.Namespace))
+		stopStaleMCPPortForward(state, expectedState, localPort)
+		return 0, nil
 	}
 
 	if stateMatchesMCPTarget(state, expectedState) && canReachLocalAPIEndpoint(localPort) {
@@ -53,6 +66,31 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 	ctx.TraceCommand("", "kubectl", args...)
 
 	return startAPIPortForward(statePath, expectedState, args, localPort)
+}
+
+func kubectlAPIDeploymentCheckArgs(kubernetesContext, namespace string) []string {
+	args := make([]string, 0, 7)
+	if strings.TrimSpace(kubernetesContext) != "" {
+		args = append(args, "--context", kubernetesContext)
+	}
+	if strings.TrimSpace(namespace) != "" {
+		args = append(args, "--namespace", namespace)
+	}
+	return append(args, "get", "deployment", "erun-api", "-o", "name")
+}
+
+func checkAPIDeploymentPresent(args []string) (bool, error) {
+	output, err := common.Command("kubectl", args...).CombinedOutput()
+	if err == nil {
+		return true, nil
+	}
+	message := strings.ToLower(string(output))
+	if strings.Contains(message, "notfound") ||
+		strings.Contains(message, "not found") ||
+		strings.Contains(message, "no resources found") {
+		return false, nil
+	}
+	return false, fmt.Errorf("failed to check deployment erun-api: %w: %s", err, strings.TrimSpace(string(output)))
 }
 
 func startAPIPortForward(statePath string, expectedState mcpPortForwardState, args []string, localPort int) (int, error) {

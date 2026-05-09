@@ -1,6 +1,6 @@
 module github.com/sophium/erun/erun-common
 
-go 1.25.5
+go 1.26.0
 
 require (
 	github.com/adrg/xdg v0.5.3

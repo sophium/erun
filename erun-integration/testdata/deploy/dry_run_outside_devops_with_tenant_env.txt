@@ -1,5 +1,5 @@
 audit: erun deploy --dry-run --version <VERSION> team dev
-deploy: tenant=team environment=dev version-override=<VERSION> snapshot=true
+deploy: tenant=team environment=dev version-override=<VERSION> snapshot=true components=[]
 deploy: resolved 1 spec(s)
 kubectl --context test-context get namespace team-dev -o name
 kubectl --context test-context create namespace team-dev

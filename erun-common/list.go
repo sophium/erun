@@ -80,13 +80,13 @@ type ListEnvironmentResult struct {
 }
 
 type ListSSHResult struct {
-	Enabled               bool   `json:"enabled,omitempty"`
-	HostAlias             string `json:"hostAlias,omitempty"`
-	User                  string `json:"user,omitempty"`
-	LocalPort             int    `json:"localPort,omitempty"`
-	WorkspacePath         string `json:"workspacePath,omitempty"`
-	PublicKeyPath         string `json:"publicKeyPath,omitempty"`
-	WorkspaceSyncEnabled  bool   `json:"workspaceSyncEnabled,omitempty"`
+	Enabled                bool   `json:"enabled,omitempty"`
+	HostAlias              string `json:"hostAlias,omitempty"`
+	User                   string `json:"user,omitempty"`
+	LocalPort              int    `json:"localPort,omitempty"`
+	WorkspacePath          string `json:"workspacePath,omitempty"`
+	PublicKeyPath          string `json:"publicKeyPath,omitempty"`
+	WorkspaceSyncEnabled   bool   `json:"workspaceSyncEnabled,omitempty"`
 	WorkspaceSyncLocalPath string `json:"workspaceSyncLocalPath,omitempty"`
 }
 

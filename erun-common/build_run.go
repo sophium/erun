@@ -38,24 +38,64 @@ func runDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBu
 // it here keeps dry-run output complete and parallels the SkipIfExists output
 // style. Builds without a fingerprint (incremental disabled, or no fp tag was
 // looked up) produce no extra trace.
+//
+// The trace is intentionally explicit: each fp-tag inspect line is followed
+// by a "found"/"missing" result line, and the summary line names the actual
+// trigger (specific platforms missing, or a cascading dependency rebuild).
+// "rebuilding because cached fingerprint image is missing or stale" was too
+// vague to debug — a maintainer could not tell from the trace which fp-tag
+// failed to look up or whether the rebuild was driven by a FROM dependency.
 func traceIncrementalDecision(ctx Context, buildInput DockerBuildSpec) {
 	if buildInput.Fingerprint == "" {
 		return
 	}
-	platforms := buildInput.Platforms
-	if len(platforms) == 0 {
-		platforms = []string{""}
-	}
-	for _, platform := range platforms {
+	missing := missingFingerprintPlatformSet(buildInput)
+	for _, platform := range buildInput.Platforms {
 		fpTag := fingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
 		ctx.TraceCommand("", "docker", "image", "inspect", fpTag)
+		if _, isMissing := missing[platform]; isMissing {
+			ctx.Trace("fingerprint image not found locally: " + fpTag)
+		} else {
+			ctx.Trace("fingerprint image present locally: " + fpTag)
+		}
 	}
 	tag := strings.TrimSpace(buildInput.Image.Tag)
-	if buildInput.Promote {
+	switch {
+	case buildInput.Promote:
 		ctx.Trace("promoting from cached fingerprint image: " + tag)
-	} else {
-		ctx.Trace("rebuilding because cached fingerprint image is missing or stale: " + tag)
+	case strings.TrimSpace(buildInput.CascadeRebuildFromTag) != "":
+		ctx.Trace("rebuilding " + tag + " because dependency " + strings.TrimSpace(buildInput.CascadeRebuildFromTag) + " is rebuilding")
+	case len(buildInput.MissingFingerprintPlatforms) > 0:
+		ctx.Trace("rebuilding " + tag + " because fingerprint image is missing for " + describeMissingPlatforms(buildInput.MissingFingerprintPlatforms))
+	default:
+		ctx.Trace("rebuilding " + tag + " (no cached fingerprint image)")
 	}
+}
+
+func missingFingerprintPlatformSet(build DockerBuildSpec) map[string]struct{} {
+	if len(build.MissingFingerprintPlatforms) == 0 {
+		return nil
+	}
+	out := make(map[string]struct{}, len(build.MissingFingerprintPlatforms))
+	for _, platform := range build.MissingFingerprintPlatforms {
+		out[platform] = struct{}{}
+	}
+	return out
+}
+
+func describeMissingPlatforms(platforms []string) string {
+	labels := make([]string, 0, len(platforms))
+	for _, platform := range platforms {
+		if strings.TrimSpace(platform) == "" {
+			labels = append(labels, "<no platform>")
+			continue
+		}
+		labels = append(labels, platform)
+	}
+	if len(labels) == 1 {
+		return "platform " + labels[0]
+	}
+	return "platforms [" + strings.Join(labels, ", ") + "]"
 }
 
 func shouldSkipDockerBuild(ctx Context, buildInput DockerBuildSpec, inspect DockerImageInspectorFunc) (bool, error) {
@@ -72,8 +112,7 @@ func shouldSkipDockerBuild(ctx Context, buildInput DockerBuildSpec, inspect Dock
 	// one of the platforms) must be rebuilt so downstream images can use it as a
 	// multi-platform base image.
 	if buildInput.Push && len(buildInput.Platforms) > 0 {
-		ctx.TraceCommand("", "docker", "manifest", "inspect", tag)
-		available, err := dockerManifestPlatforms(tag)
+		available, err := dockerManifestPlatforms(ctx, tag)
 		if err != nil {
 			return false, err
 		}
@@ -115,7 +154,7 @@ func shouldSkipDockerBuild(ctx Context, buildInput DockerBuildSpec, inspect Dock
 }
 
 func removeStaleLocalImageForPlatforms(ctx Context, tag string, required []string) error {
-	localPlatforms, err := dockerLocalImagePlatforms(tag)
+	localPlatforms, err := dockerLocalImagePlatforms(ctx, tag)
 	if err != nil {
 		return err
 	}

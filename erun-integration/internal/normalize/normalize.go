@@ -26,7 +26,9 @@ var defaultRules = []Replacement{
 	// Compact timestamps used in snapshot labels (YYYYMMDDHHMMSS).
 	{regexp.MustCompile(`\b20\d{12}\b`), "<TS_COMPACT>"},
 	// Temp dir paths the OS hands out (Linux/macOS).
-	{regexp.MustCompile(`/(?:var/)?(?:tmp|private/var/folders)/[^\s'"]+`), "<TMP>"},
+	// Matches /tmp/..., /var/tmp/..., /var/folders/... (macOS $TMPDIR), and
+	// the /private-prefixed variants on macOS.
+	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]+`), "<TMP>"},
 	// Elapsed durations after deploy/build progress markers
 	// ("in 0s", "after 1m23s"). The timeout literal "2m0s" is kept because
 	// it lacks the leading "in "/"after " context.

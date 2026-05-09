@@ -12,6 +12,30 @@ import (
 	"github.com/adrg/xdg"
 )
 
+// concatChartTemplates joins every top-level *.yaml file found in dir into a
+// single string. Tests that assert a Helm chart contains a specific token use
+// this helper so they don't care which template file in the chart owns the
+// token.
+func concatChartTemplates(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	var buf strings.Builder
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return "", err
+		}
+		buf.Write(data)
+		buf.WriteString("\n")
+	}
+	return buf.String(), nil
+}
+
 func setupXDGConfigHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -378,10 +402,22 @@ func TestEnsureDefaultDevopsChartMigratesLegacyGeneratedServiceTemplate(t *testi
 		t.Fatalf("EnsureDefaultDevopsChart failed: %v", err)
 	}
 
-	content, err := concatChartTemplates(templatesDir)
-	if err != nil {
-		t.Fatalf("read migrated chart templates: %v", err)
+	chartDirs := []string{
+		templatesDir,
+		filepath.Join(projectRoot, moduleName, "k8s", "erun-backend-postgres", "templates"),
+		filepath.Join(projectRoot, moduleName, "k8s", "erun-backend-db", "templates"),
+		filepath.Join(projectRoot, moduleName, "k8s", "erun-backend-api", "templates"),
 	}
+	var combined strings.Builder
+	for _, dir := range chartDirs {
+		part, err := concatChartTemplates(dir)
+		if err != nil {
+			t.Fatalf("read migrated chart templates in %q: %v", dir, err)
+		}
+		combined.WriteString(part)
+		combined.WriteString("\n")
+	}
+	content := combined.String()
 	for _, want := range []string{
 		`{{- $mcpPort := default 17000 .Values.mcpPort -}}`,
 		`{{- $apiPort := default 17033 .Values.apiPort -}}`,

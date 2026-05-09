@@ -28,9 +28,9 @@ const (
 )
 
 type (
-	GitValueResolverFunc func(string) (string, error)
+	GitValueResolverFunc func(Context, string) (string, error)
 	GitCommandRunnerFunc func(string, io.Writer, io.Writer, ...string) error
-	GitBranchCheckerFunc func(string, string) (bool, error)
+	GitBranchCheckerFunc func(Context, string, string) (bool, error)
 )
 
 type ReleaseMode string
@@ -209,7 +209,7 @@ func ensureReleaseWorktreeClean(ctx Context, projectRoot string) error {
 	if ctx.DryRun {
 		return nil
 	}
-	clean, err := gitWorktreeClean(projectRoot)
+	clean, err := gitWorktreeClean(ctx, projectRoot)
 	if err != nil {
 		return err
 	}
@@ -304,16 +304,16 @@ func prepareReleaseTag(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFun
 		}
 		return false, nil
 	}
-	return canSkipExistingReleaseTag(command.Dir, tag)
+	return canSkipExistingReleaseTag(ctx, command.Dir, tag)
 }
 
-func canSkipExistingReleaseTag(projectRoot, tag string) (bool, error) {
+func canSkipExistingReleaseTag(ctx Context, projectRoot, tag string) (bool, error) {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {
 		return false, nil
 	}
 
-	tagCommit, ok, err := gitResolvedRef(projectRoot, tag+"^{}")
+	tagCommit, ok, err := gitResolvedRef(ctx, projectRoot, tag+"^{}")
 	if err != nil {
 		return false, err
 	}
@@ -321,7 +321,7 @@ func canSkipExistingReleaseTag(projectRoot, tag string) (bool, error) {
 		return false, nil
 	}
 
-	headCommit, ok, err := gitResolvedRef(projectRoot, "HEAD")
+	headCommit, ok, err := gitResolvedRef(ctx, projectRoot, "HEAD")
 	if err != nil {
 		return false, err
 	}
@@ -336,7 +336,7 @@ func canSkipExistingReleaseTag(projectRoot, tag string) (bool, error) {
 }
 
 func deleteExistingReleaseTag(ctx Context, projectRoot, tag string, runGit GitCommandRunnerFunc) error {
-	localExists, err := gitTagExists(projectRoot, tag)
+	localExists, err := gitTagExists(ctx, projectRoot, tag)
 	if err != nil {
 		return err
 	}
@@ -349,7 +349,7 @@ func deleteExistingReleaseTag(ctx Context, projectRoot, tag string, runGit GitCo
 		}
 	}
 
-	remoteExists, err := gitRemoteTagExists(projectRoot, "origin", tag)
+	remoteExists, err := gitRemoteTagExists(ctx, projectRoot, "origin", tag)
 	if err != nil {
 		return err
 	}
@@ -365,18 +365,19 @@ func deleteExistingReleaseTag(ctx Context, projectRoot, tag string, runGit GitCo
 	return nil
 }
 
-func gitTagExists(projectRoot, tag string) (bool, error) {
-	_, ok, err := gitResolvedRef(projectRoot, tag+"^{}")
+func gitTagExists(ctx Context, projectRoot, tag string) (bool, error) {
+	_, ok, err := gitResolvedRef(ctx, projectRoot, tag+"^{}")
 	return ok, err
 }
 
-func gitRemoteTagExists(projectRoot, remote, tag string) (bool, error) {
+func gitRemoteTagExists(ctx Context, projectRoot, remote, tag string) (bool, error) {
 	remote = strings.TrimSpace(remote)
 	tag = strings.TrimSpace(tag)
 	if remote == "" || tag == "" {
 		return false, nil
 	}
 
+	ctx.TraceCommand("", "git", "-C", projectRoot, "ls-remote", "--tags", "--refs", remote, "refs/tags/"+tag)
 	output, err := Command("git", "-C", projectRoot, "ls-remote", "--tags", "--refs", remote, "refs/tags/"+tag).CombinedOutput()
 	if err != nil {
 		return false, err
@@ -384,7 +385,8 @@ func gitRemoteTagExists(projectRoot, remote, tag string) (bool, error) {
 	return strings.TrimSpace(string(output)) != "", nil
 }
 
-func gitResolvedRef(projectRoot, ref string) (string, bool, error) {
+func gitResolvedRef(ctx Context, projectRoot, ref string) (string, bool, error) {
+	ctx.TraceCommand("", "git", "-C", projectRoot, "rev-parse", ref)
 	output, err := Command("git", "-C", projectRoot, "rev-parse", ref).CombinedOutput()
 	if err == nil {
 		return strings.TrimSpace(string(output)), true, nil
@@ -397,7 +399,8 @@ func gitResolvedRef(projectRoot, ref string) (string, bool, error) {
 	return "", false, err
 }
 
-func GitCurrentBranch(projectRoot string) (string, error) {
+func GitCurrentBranch(ctx Context, projectRoot string) (string, error) {
+	ctx.TraceCommand("", "git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD")
 	output, err := Command("git", "-C", projectRoot, "rev-parse", "--abbrev-ref", "HEAD").Output()
 	if err != nil {
 		return "", err
@@ -405,7 +408,8 @@ func GitCurrentBranch(projectRoot string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-func GitShortCommit(projectRoot string) (string, error) {
+func GitShortCommit(ctx Context, projectRoot string) (string, error) {
+	ctx.TraceCommand("", "git", "-C", projectRoot, "rev-parse", "--short", "HEAD")
 	output, err := Command("git", "-C", projectRoot, "rev-parse", "--short", "HEAD").Output()
 	if err != nil {
 		return "", err
@@ -413,12 +417,13 @@ func GitShortCommit(projectRoot string) (string, error) {
 	return strings.TrimSpace(string(output)), nil
 }
 
-func GitLocalBranchExists(projectRoot, branch string) (bool, error) {
+func GitLocalBranchExists(ctx Context, projectRoot, branch string) (bool, error) {
 	branch = strings.TrimSpace(branch)
 	if branch == "" {
 		return false, nil
 	}
 
+	ctx.TraceCommand("", "git", "-C", projectRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
 	cmd := Command("git", "-C", projectRoot, "show-ref", "--verify", "--quiet", "refs/heads/"+branch)
 	err := cmd.Run()
 	if err == nil {
@@ -441,7 +446,8 @@ func GitCommandRunner(dir string, stdout, stderr io.Writer, args ...string) erro
 	return cmd.Run()
 }
 
-func gitWorktreeClean(projectRoot string) (bool, error) {
+func gitWorktreeClean(ctx Context, projectRoot string) (bool, error) {
+	ctx.TraceCommand("", "git", "-C", projectRoot, "status", "--porcelain")
 	output, err := Command("git", "-C", projectRoot, "status", "--porcelain").CombinedOutput()
 	if err != nil {
 		return false, err
@@ -574,7 +580,7 @@ func resolveReleaseInputs(ctx Context, findProjectRoot ProjectFinderFunc, loadPr
 	ctx.Trace(fmt.Sprintf("release: main branch = %s, develop branch = %s", releaseConfig.MainBranch, releaseConfig.DevelopBranch))
 
 	ctx.Trace("release: resolving git branch and commit")
-	branch, commit, err := resolveReleaseGitState(projectRoot, resolveBranch, resolveCommit)
+	branch, commit, err := resolveReleaseGitState(ctx, projectRoot, resolveBranch, resolveCommit)
 	if err != nil {
 		ctx.Trace("release: git state resolution failed: " + err.Error())
 		return releaseInputs{}, err
@@ -591,7 +597,7 @@ func resolveReleaseInputs(ctx Context, findProjectRoot ProjectFinderFunc, loadPr
 
 	mode := classifyReleaseMode(branch, releaseConfig)
 	ctx.Trace("release: classified mode = " + string(mode))
-	developBranchExists, err := branchExists(projectRoot, releaseConfig.DevelopBranch)
+	developBranchExists, err := branchExists(ctx, projectRoot, releaseConfig.DevelopBranch)
 	if err != nil {
 		ctx.Trace("release: develop branch lookup failed: " + err.Error())
 		return releaseInputs{}, err
@@ -620,12 +626,12 @@ func loadReleaseConfig(projectRoot string, loadProjectConfig ProjectConfigLoader
 	return projectConfig.NormalizedReleaseConfig(), nil
 }
 
-func resolveReleaseGitState(projectRoot string, resolveBranch, resolveCommit GitValueResolverFunc) (string, string, error) {
-	branch, err := resolveBranch(projectRoot)
+func resolveReleaseGitState(ctx Context, projectRoot string, resolveBranch, resolveCommit GitValueResolverFunc) (string, string, error) {
+	branch, err := resolveBranch(ctx, projectRoot)
 	if err != nil {
 		return "", "", err
 	}
-	commit, err := resolveCommit(projectRoot)
+	commit, err := resolveCommit(ctx, projectRoot)
 	if err != nil {
 		return "", "", err
 	}

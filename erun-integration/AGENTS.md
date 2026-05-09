@@ -45,7 +45,7 @@ t.Run("name_of_scenario", func(t *testing.T) {
 })
 ```
 
-- One scenario per flag combination that materially changes the resolved plan. Variants of the same plan (e.g., different tenant names) belong in unit tests, not here.
+- One scenario per flag combination that materially changes the resolved plan. Variants that don't change the plan (e.g., different tenant names with the same resolved spec) are not worth a separate scenario at all — they don't catch a different bug. Don't relocate them to unit tests; just leave them out.
 - Always pass `--dry-run` unless the scenario is intentionally testing real-mode execution via stub binaries. The harness has no real cluster, real cloud, or live runtime to talk to.
 - Capture `result.Combined` (stdout + stderr) for the golden. The audit line and the trace lines are both relevant; splitting them hides ordering bugs.
 - Assert sparingly outside `golden.Equal`. Hard-coded substring checks (e.g., "expected `Deploy the current Helm chart` in help") are valuable for *regression markers* — they make a failing test self-explanatory — but the golden is the ground truth.
@@ -94,8 +94,9 @@ Do not introduce new stub-binary fixtures. When you encounter an existing stub-d
 - Coverage scope is set in `internal/erun.CoverPkgs`. Extending it to other modules requires both that constant and a corresponding gate update; do them in the same change.
 - The gate measures statement coverage as reported by `go tool cover -func`. Function-touched rate is shown for diagnosis but not enforced.
 - Integration scenarios are the only coverage signal the gate honors. Unit tests inside `erun-cli` or `erun-common` do not contribute to the gate, so any coverage they appear to provide is invisible at merge time and any overlap with an integration scenario is duplication.
-- Therefore, prefer integration scenarios over unit tests for `erun-cli` and `erun-common` behavior. If an existing unit test covers the same statements as an integration scenario, delete the unit test instead of carrying both. Keep a unit test only when the behavior is unreachable from the compiled binary subprocess (pure parser, platform-specific branch the harness does not run); leave a one-line comment in the test file explaining why.
-- When closing a coverage gap, add or extend an integration scenario first — usually with a new flag combination or a stub-binary fixture. Only fall back to a unit test when no scenario can reach the code path.
+- Therefore, write integration scenarios for `erun-cli` and `erun-common` behavior. If an existing unit test covers the same statements as an integration scenario, delete the unit test instead of carrying both.
+- If a branch looks unreachable from the binary subprocess (e.g. an error message that never escapes a wrapper, a pure-parser branch with no production caller), the bug is almost always in the production path — not in the test strategy. Fix the production code so the branch becomes reachable from `--dry-run`, then write the integration scenario. Resist the urge to carve out a unit-test exception; leaving one is documentation that pushes the next reader to keep adding unit tests.
+- When closing a coverage gap, extend an integration scenario. New flag combinations and richer fixtures are the lever; unit tests are not.
 
 ## Adding a new command's tests
 

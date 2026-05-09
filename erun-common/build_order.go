@@ -89,9 +89,7 @@ func dockerfileLocalBaseImageTags(dockerfilePath string, buildsByTag map[string]
 			continue
 		}
 		if _, ok := buildsByTag[imageRef]; !ok {
-			for _, tag := range dockerfileLocalBaseImageVersionedTags(imageRef, buildsByTag) {
-				dependencies = append(dependencies, tag)
-			}
+			dependencies = append(dependencies, dockerfileLocalBaseImageVersionedTags(imageRef, buildsByTag)...)
 			continue
 		}
 		dependencies = append(dependencies, imageRef)

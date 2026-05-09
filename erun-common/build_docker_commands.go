@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -17,26 +16,7 @@ func DockerImageBuilder(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 	if buildInput.Promote {
 		return promoteDockerImage(buildInput, stdout, stderr)
 	}
-	if len(buildInput.Platforms) == 0 {
-		return runSinglePlatformBuild(buildInput, stdout, stderr)
-	}
 	return runMultiPlatformBuild(buildInput, stdout, stderr)
-}
-
-func runSinglePlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
-	args := dockerBuildArgs(buildInput, "")
-	err := runDockerBuildOnce(args, buildInput.ContextDir, buildInput.Image.Tag, buildInput.Push, stdout, stderr)
-	if err != nil && buildInput.Push && shouldRetryAfterGHCRNamespaceLogin(err, buildInput.Image.Tag, stdout, stderr) {
-		if retryErr := runDockerBuildOnce(args, buildInput.ContextDir, buildInput.Image.Tag, buildInput.Push, stdout, stderr); retryErr == nil {
-			err = nil
-		} else {
-			err = retryErr
-		}
-	}
-	if err != nil {
-		return err
-	}
-	return tagFingerprintAfterBuild(buildInput, "", stdout, stderr)
 }
 
 func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
@@ -59,16 +39,6 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 }
 
 func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
-	if len(buildInput.Platforms) == 0 {
-		fpTag := fingerprintTag(buildInput.Image, buildInput.Fingerprint, "")
-		if err := runDockerTag(fpTag, buildInput.Image.Tag, stdout, stderr); err != nil {
-			return err
-		}
-		if !buildInput.Push {
-			return nil
-		}
-		return DockerImagePusher(buildInput.Image.Tag, stdout, stderr)
-	}
 	perPlatformTags := make([]string, 0, len(buildInput.Platforms))
 	for _, platform := range buildInput.Platforms {
 		fpTag := fingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
@@ -101,10 +71,7 @@ func tagFingerprintAfterBuild(buildInput DockerBuildSpec, platform string, stdou
 	if buildInput.Fingerprint == "" {
 		return nil
 	}
-	sourceTag := buildInput.Image.Tag
-	if platform != "" {
-		sourceTag = platformSuffixedTag(buildInput.Image.Tag, platform)
-	}
+	sourceTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 	target := fingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
 	if sourceTag == target {
 		return nil
@@ -224,7 +191,8 @@ func DockerManifestExists(tag string) (bool, error) {
 // dockerManifestPlatforms returns the platforms listed in a registry manifest for
 // the given tag. Returns nil when the tag does not exist, is a single-arch image
 // (no manifest list / OCI index), or when the manifest cannot be inspected.
-func dockerManifestPlatforms(tag string) ([]string, error) {
+func dockerManifestPlatforms(ctx Context, tag string) ([]string, error) {
+	ctx.TraceCommand("", "docker", "manifest", "inspect", tag)
 	cmd := Command("docker", "manifest", "inspect", tag)
 	output, err := cmd.Output()
 	if err != nil {
@@ -255,7 +223,8 @@ func dockerManifestPlatforms(tag string) ([]string, error) {
 // one platform; with the containerd image store, the inspect output's Manifests
 // field reports every platform stored under that tag. Returns nil when the
 // image is not present locally.
-func dockerLocalImagePlatforms(tag string) ([]string, error) {
+func dockerLocalImagePlatforms(ctx Context, tag string) ([]string, error) {
+	ctx.TraceCommand("", "docker", "image", "inspect", tag)
 	cmd := Command("docker", "image", "inspect", tag)
 	output, err := cmd.Output()
 	if err != nil {
@@ -325,43 +294,20 @@ func dockerCommandOutputWriter(primary io.Writer, capture io.Writer) io.Writer {
 }
 
 func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
-	tag := strings.TrimSpace(buildInput.Image.Tag)
-	if platform != "" {
-		tag = platformSuffixedTag(tag, platform)
-	}
-	args := []string{"build"}
-	if platform != "" {
-		// BuildKit's default exporter wraps each per-platform image in an OCI
-		// index alongside a provenance attestation manifest, which makes the
-		// resulting tag a manifest list. `docker manifest create` rejects
-		// manifest-list inputs ("<tag> is a manifest list"), so disable
-		// provenance for per-platform builds — each tag stays a plain image
-		// manifest that the manifest-list assembly step can consume.
-		args = append(args, "--platform", platform, "--provenance=false")
-	}
-	args = append(args, "-t", tag)
-	// For local snapshot builds, also tag the image with the stable snapshot
-	// identifier (e.g. "1.0.51-snapshot", no timestamp). This lets wrapper
-	// images (FROM …:${ERUN_VERSION}) always resolve the same local tag, keeping
-	// the Docker build cache valid across pushes. The stable tag is local-only
-	// and is never included in the push step.
-	if platform == "" && buildInput.Image.BaseVersion != "" {
-		stableTag := fmt.Sprintf("%s/%s:%s",
-			strings.TrimRight(buildInput.Image.Registry, "/"),
-			buildInput.Image.ImageName,
-			buildInput.Image.BaseVersion,
-		)
-		args = append(args, "-t", stableTag)
-	}
+	tag := platformSuffixedTag(strings.TrimSpace(buildInput.Image.Tag), platform)
+	// BuildKit's default exporter wraps each per-platform image in an OCI
+	// index alongside a provenance attestation manifest, which makes the
+	// resulting tag a manifest list. `docker manifest create` rejects
+	// manifest-list inputs ("<tag> is a manifest list"), so provenance stays
+	// off and each per-arch tag is a plain image manifest the assembly step
+	// can consume.
+	args := []string{"build", "--platform", platform, "--provenance=false", "-t", tag}
 	buildArgVersion := dockerImageTagVersion(strings.TrimSpace(buildInput.Image.Tag))
 	if buildInput.Image.BaseVersion != "" {
 		buildArgVersion = buildInput.Image.BaseVersion
 	}
 	if buildArgVersion != "" {
 		args = append(args, "--build-arg", "ERUN_VERSION="+buildArgVersion)
-	}
-	if platform == "" && buildInput.Push {
-		args = append(args, "--push")
 	}
 	args = append(args, "-f", buildInput.DockerfilePath, ".")
 	return args
@@ -494,6 +440,62 @@ func captureGHCommand(args ...string) (string, error) {
 		return "", err
 	}
 	return string(output), nil
+}
+
+// RefreshGHCRPackageScopes widens the gh-stored token's scopes to include
+// write:packages,read:packages and then re-runs TryGHCRNamespaceLogin so
+// docker is authed with the freshly-scoped token.
+//
+// `gh auth refresh` operates on the currently active gh account and does
+// not accept a `-u` flag, so this helper first runs `gh auth switch -u
+// <namespace>` best-effort to make the namespace owner active. If switch
+// fails (single-account install, account not logged in), the refresh runs
+// against whichever account is active.
+//
+// The refresh flow is interactive (browser device-code), so stdin must be
+// a real terminal. Returns (true, nil) when the refresh completed and
+// docker login was redone, (false, nil) when prerequisites are missing
+// (gh not installed, non-ghcr tag, missing namespace), and (false, err)
+// for gh or docker errors.
+//
+// Use this only after TryGHCRNamespaceLogin + retry fails with a
+// scope-denied error: that signals the gh-stored token itself lacks the
+// scope, and the only remedy is replacing the token.
+func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Writer) (bool, error) {
+	if !isGHCRRegistry(dockerRegistryFromImageTag(tag)) {
+		return false, nil
+	}
+	namespace := DockerNamespaceFromTag(tag)
+	if namespace == "" {
+		return false, nil
+	}
+	if _, err := exec.LookPath("gh"); err != nil {
+		return false, nil
+	}
+
+	switchCmd := Command("gh", "auth", "switch", "-h", "github.com", "-u", namespace)
+	switchCmd.Stdout = stdout
+	switchCmd.Stderr = stderr
+	switchErr := switchCmd.Run()
+
+	var ghCmd *exec.Cmd
+	if switchErr == nil {
+		// Namespace owner is already logged in and is now the active
+		// account; widen its scopes.
+		ghCmd = Command("gh", "auth", "refresh", "-h", "github.com", "-s", "write:packages,read:packages")
+	} else {
+		// Namespace owner is not logged in. Add it via the interactive
+		// browser flow, requesting the package scopes up front.
+		ghCmd = Command("gh", "auth", "login", "-h", "github.com", "-s", "write:packages,read:packages", "-w", "--git-protocol", "https")
+	}
+	ghCmd.Stdin = stdin
+	ghCmd.Stdout = stdout
+	ghCmd.Stderr = stderr
+	if err := ghCmd.Run(); err != nil {
+		return false, err
+	}
+
+	return TryGHCRNamespaceLogin(tag, stdout, stderr)
 }
 
 // TryGHCRNamespaceLogin re-authenticates docker to ghcr.io as the GitHub user

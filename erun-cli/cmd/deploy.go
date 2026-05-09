@@ -11,6 +11,7 @@ func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinder
 	target := common.DeployTarget{}
 	var snapshot bool
 	var noSnapshot bool
+	var components []string
 	cmd := &cobra.Command{
 		Use:           "deploy [TENANT] [ENVIRONMENT]",
 		Short:         "Deploy the current Helm chart or all charts in the current devops k8s scope",
@@ -31,9 +32,10 @@ func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinder
 				snapshotOverride = &snapshot
 			}
 			deployTarget.Snapshot = snapshotOverride
-			ctx.Trace(fmt.Sprintf("deploy: tenant=%s environment=%s version-override=%s snapshot=%v",
+			deployTarget.Components = components
+			ctx.Trace(fmt.Sprintf("deploy: tenant=%s environment=%s version-override=%s snapshot=%v components=%v",
 				deployTarget.Tenant, deployTarget.Environment, deployTarget.VersionOverride,
-				snapshotOverride != nil && *snapshotOverride))
+				snapshotOverride != nil && *snapshotOverride, components))
 			deploySpecs, err := common.ResolveCurrentDeploySpecs(store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 			if err != nil {
 				ctx.Trace("deploy: spec resolution failed: " + err.Error())
@@ -45,6 +47,7 @@ func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinder
 	}
 	addDryRunFlag(cmd)
 	addDeployCommandTargetFlags(cmd, &target, &snapshot, &noSnapshot)
+	cmd.Flags().StringSliceVar(&components, "components", nil, "Opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api)")
 	return cmd
 }
 

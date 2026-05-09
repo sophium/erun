@@ -201,6 +201,35 @@ func IsDockerCreatePackageDenied(message string) bool {
 	return strings.Contains(strings.ToLower(message), "create_package")
 }
 
+// IsDockerScopeDenied reports whether a registry auth error matches the
+// GitHub-specific scope-mismatch case where the docker login token lacks
+// write:packages (or otherwise doesn't satisfy the required scopes).
+// This is distinct from IsDockerCreatePackageDenied (org-policy "cannot
+// create a new package") and from a missing-credentials case (which a
+// generic re-login would fix). When true, callers should attempt
+// TryGHCRNamespaceLogin to re-auth as the namespace owner via gh, since
+// the prompt-driven `docker login` flow will not change which token
+// docker holds.
+//
+// Markers are intentionally narrow to avoid swallowing the generic
+// "insufficient_scope" / "denied" cases that the prompt-retry path
+// handles correctly.
+func IsDockerScopeDenied(message string) bool {
+	msg := strings.ToLower(message)
+	if strings.Contains(msg, "create_package") {
+		return false
+	}
+	for _, marker := range []string{
+		"does not match expected scopes",
+		"permission_denied",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func DockerNamespaceFromTag(tag string) string {
 	tag = strings.TrimSpace(tag)
 	if tag == "" {

@@ -466,11 +466,12 @@ func applyIncrementalPromotion(builds []DockerBuildSpec, inspect LocalDockerImag
 			continue
 		}
 		out[i].Fingerprint = fingerprint
-		ok, err := allFingerprintTagsExist(out[i], inspect)
+		missing, err := inspectFingerprintTags(out[i], inspect)
 		if err != nil {
 			return nil, err
 		}
-		if !ok {
+		if len(missing) > 0 {
+			out[i].MissingFingerprintPlatforms = missing
 			rebuildSet[strings.TrimSpace(out[i].Image.Tag)] = struct{}{}
 			continue
 		}
@@ -485,23 +486,25 @@ func applyIncrementalPromotion(builds []DockerBuildSpec, inspect LocalDockerImag
 	return out, nil
 }
 
-func allFingerprintTagsExist(build DockerBuildSpec, inspect LocalDockerImageInspector) (bool, error) {
+// inspectFingerprintTags returns the list of platforms whose fp-tag is
+// absent from the local Docker store. An empty slice means every expected
+// fp-tag was found and the build is eligible for promotion. The platform
+// list mirrors build.Platforms.
+func inspectFingerprintTags(build DockerBuildSpec, inspect LocalDockerImageInspector) ([]string, error) {
 	if build.Fingerprint == "" {
-		return false, nil
+		return nil, nil
 	}
-	if len(build.Platforms) == 0 {
-		return inspect(fingerprintTag(build.Image, build.Fingerprint, ""))
-	}
+	var missing []string
 	for _, platform := range build.Platforms {
 		ok, err := inspect(fingerprintTag(build.Image, build.Fingerprint, platform))
 		if err != nil {
-			return false, err
+			return nil, err
 		}
 		if !ok {
-			return false, nil
+			missing = append(missing, platform)
 		}
 	}
-	return true, nil
+	return missing, nil
 }
 
 func cascadeRebuildsThroughLocalDeps(builds []DockerBuildSpec, rebuildSet map[string]struct{}) {
@@ -519,10 +522,14 @@ func cascadeRebuildsThroughLocalDeps(builds []DockerBuildSpec, rebuildSet map[st
 			}
 			deps := dockerfileLocalBaseImageTags(builds[i].DockerfilePath, buildsByTag)
 			for _, dep := range deps {
-				if _, ok := rebuildSet[strings.TrimSpace(dep)]; !ok {
+				dep = strings.TrimSpace(dep)
+				if _, ok := rebuildSet[dep]; !ok {
 					continue
 				}
 				rebuildSet[tag] = struct{}{}
+				if builds[i].CascadeRebuildFromTag == "" {
+					builds[i].CascadeRebuildFromTag = dep
+				}
 				changed = true
 				break
 			}

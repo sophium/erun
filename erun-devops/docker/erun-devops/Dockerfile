@@ -40,7 +40,6 @@ ARG HELM_VERSION=v3.18.2
 ARG TERRAFORM_VERSION=1.12.2
 ARG K9S_VERSION=v0.50.9
 ARG DOCKER_VERSION=28.1.1
-ARG BUILDX_VERSION=v0.24.0
 ARG DIFFT_VERSION=0.68.0
 ARG GH_VERSION=2.74.2
 ARG GOLANGCI_LINT_VERSION=v2.2.2
@@ -93,9 +92,6 @@ RUN apt-get update && \
     mv /usr/local/bin/codex /usr/local/bin/codex-real && \
     mv /usr/local/bin/claude /usr/local/bin/claude-real && \
     npm cache clean --force && \
-    mkdir -p /usr/local/lib/docker/cli-plugins /usr/local/libexec/docker/cli-plugins && \
-    curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-buildx "https://github.com/docker/buildx/releases/download/${BUILDX_VERSION}/buildx-${BUILDX_VERSION}.linux-${arch}" && \
-    ln -sf /usr/local/lib/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx && \
     rm -rf /tmp/helm.tar.gz /tmp/terraform.zip /tmp/k9s.tar.gz /tmp/difft.tar.gz /tmp/gh.tar.gz /tmp/golangci-lint.tar.gz /tmp/docker.tgz /tmp/node.tar.gz /tmp/awscliv2.zip "/tmp/linux-${arch}" "/tmp/gh_${GH_VERSION}_linux_${arch}" "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION#v}-linux-${arch}" /tmp/terraform /tmp/k9s /tmp/difft /tmp/docker /tmp/aws && \
     groupmod -n erun ubuntu && \
     usermod -l erun -d /home/erun -m -g erun ubuntu && \
@@ -103,7 +99,7 @@ RUN apt-get update && \
     mkdir -p /home/erun/git /home/erun/.kube /home/erun/.config/k9s /etc/erun /etc/bash_completion.d && \
     printf '\n[ -r /usr/share/bash-completion/bash_completion ] && . /usr/share/bash-completion/bash_completion\n[ -r /etc/bash_completion.d/erun ] && . /etc/bash_completion.d/erun\n[ -r /etc/erun/bash_prompt.sh ] && . /etc/erun/bash_prompt.sh\n' >> /etc/bash.bashrc && \
     chown -R erun:erun /home/erun && \
-    chmod 0755 /usr/local/bin/kubectl /usr/local/bin/atlas /usr/local/bin/helm /usr/local/bin/terraform /usr/local/bin/k9s /usr/local/bin/difft /usr/local/bin/docker /usr/local/bin/aws /usr/local/lib/docker/cli-plugins/docker-buildx /usr/local/libexec/docker/cli-plugins/docker-buildx
+    chmod 0755 /usr/local/bin/kubectl /usr/local/bin/atlas /usr/local/bin/helm /usr/local/bin/terraform /usr/local/bin/k9s /usr/local/bin/difft /usr/local/bin/docker /usr/local/bin/aws
 
 COPY --from=builder /usr/local/go /usr/local/go
 COPY --from=builder --chmod=0755 /out/erun /usr/local/bin/erun

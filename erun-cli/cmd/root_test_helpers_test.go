@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -50,11 +48,6 @@ func requireNoError(t *testing.T, err error, context string) {
 	if err != nil {
 		t.Fatalf("%s: %v", context, err)
 	}
-}
-
-func requireMkdirAll(t *testing.T, path string, perm os.FileMode, context string) {
-	t.Helper()
-	requireNoError(t, os.MkdirAll(path, perm), context)
 }
 
 func requireWriteFile(t *testing.T, path string, data []byte, perm os.FileMode, context string) {
@@ -487,24 +480,4 @@ func testRootRunner(parts testRootCmdParts) func(*cobra.Command, []string) error
 		}
 		return runResolvedOpenCommandWithAPI(ctx, result, openOptions{}, parts.promptRunner, parts.openShell, parts.runManagedDeploy, parts.deps.CheckKubernetesDeployment, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.activateMCP, parts.activateAPI, parts.activateSSHD, parts.launchVSCodeCmd, parts.launchIntelliJCmd)
 	}
-}
-
-func stubKubectlContexts(t *testing.T, contexts []string, current string) {
-	t.Helper()
-
-	kubectlDir := t.TempDir()
-	kubectlPath := filepath.Join(kubectlDir, "kubectl")
-	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = \"config\" ] && [ \"$2\" = \"get-contexts\" ] && [ \"$3\" = \"-o=name\" ]; then\n" +
-		"  cat <<'EOF'\n" + strings.Join(contexts, "\n") + "\nEOF\n" +
-		"  exit 0\n" +
-		"fi\n" +
-		"if [ \"$1\" = \"config\" ] && [ \"$2\" = \"current-context\" ]; then\n" +
-		"  printf '%s\\n' '" + current + "'\n" +
-		"  exit 0\n" +
-		"fi\n" +
-		"echo \"unexpected kubectl invocation: $@\" >&2\n" +
-		"exit 1\n"
-	requireNoError(t, os.WriteFile(kubectlPath, []byte(script), 0o755), "write kubectl stub")
-	t.Setenv("PATH", kubectlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
