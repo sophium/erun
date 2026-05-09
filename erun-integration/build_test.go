@@ -45,20 +45,6 @@ func TestBuild(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		for _, want := range []string{
-			"docker image inspect",
-			"&& docker build --platform linux/amd64 --provenance=false -t ghcr.io/sophium/api:1.4.2-amd64 --build-arg ERUN_VERSION=1.4.2 -f",
-			"&& docker build --platform linux/arm64 --provenance=false -t ghcr.io/sophium/api:1.4.2-arm64 --build-arg ERUN_VERSION=1.4.2 -f",
-			"erun-devops/docker/api/Dockerfile .",
-			"docker tag ghcr.io/sophium/api:1.4.2-amd64 ghcr.io/sophium/api:fp-",
-			"docker tag ghcr.io/sophium/api:1.4.2-arm64 ghcr.io/sophium/api:fp-",
-			"&& docker build --platform linux/amd64 --provenance=false -t ghcr.io/sophium/base:9.9.9-amd64 --build-arg ERUN_VERSION=9.9.9 -f",
-			"erun-devops/docker/base/Dockerfile .",
-		} {
-			if !strings.Contains(result.Stderr, want) {
-				t.Errorf("expected dry-run trace to contain %q, got stderr:\n%s", want, result.Stderr)
-			}
-		}
 		golden.Equal(t, "build/dry_run_from_release_repo_traces_docker_builds", normalize.Apply(result.Combined))
 	})
 
@@ -71,17 +57,6 @@ func TestBuild(t *testing.T) {
 		result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		for _, want := range []string{
-			"release: branch=develop mode=candidate version=1.4.2-rc.",
-			"docker build --platform linux/amd64",
-			"-t ghcr.io/sophium/api:1.4.2-rc.",
-			"--build-arg ERUN_VERSION=1.4.2-rc.",
-			"docker manifest create --amend ghcr.io/sophium/api:1.4.2-rc.",
-		} {
-			if !strings.Contains(result.Stderr, want) {
-				t.Errorf("expected --release dry-run trace to contain %q, got stderr:\n%s", want, result.Stderr)
-			}
 		}
 		golden.Equal(t, "build/dry_run_release_includes_release_and_build_traces", normalize.Apply(result.Combined))
 	})
@@ -104,17 +79,6 @@ func TestBuild(t *testing.T) {
 		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		for _, want := range []string{
-			"docker manifest inspect ghcr.io/sophium/base:9.9.9",
-			"docker pull --platform linux/amd64 ghcr.io/sophium/base:9.9.9",
-			"docker tag ghcr.io/sophium/base:9.9.9 ghcr.io/sophium/base:fp-0123456789abcdef-amd64",
-			"docker pull --platform linux/arm64 ghcr.io/sophium/base:9.9.9",
-			"docker tag ghcr.io/sophium/base:9.9.9 ghcr.io/sophium/base:fp-0123456789abcdef-arm64",
-		} {
-			if !strings.Contains(result.Stderr, want) {
-				t.Errorf("expected configured-fingerprint dry-run trace to contain %q, got stderr:\n%s", want, result.Stderr)
-			}
 		}
 		golden.Equal(t, "build/dry_run_configured_fingerprint_traces_pull_and_tag", normalize.Apply(result.Combined))
 	})
@@ -144,15 +108,6 @@ func TestBuild(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		for _, want := range []string{
-			"linux/amd64",
-			"linux/arm64",
-			"ghcr.io/sophium/api:1.4.2",
-		} {
-			if !strings.Contains(result.Combined, want) {
-				t.Errorf("expected real-run output to contain %q, got:\n%s", want, result.Combined)
-			}
-		}
 		golden.Equal(t, "build/real_run_via_docker_stub_drives_multi_platform_build", normalize.Apply(result.Combined))
 	})
 
@@ -168,12 +123,6 @@ func TestBuild(t *testing.T) {
 		result := erun.Run(t, []string{"build", "--dry-run", "--no-incremental"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if strings.Contains(result.Combined, "skipping rebuild of") {
-			t.Errorf("expected --no-incremental to skip the fingerprint short-circuit, but trace still mentions skipping:\n%s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, "docker build --platform linux/amd64") {
-			t.Errorf("expected docker build trace under --no-incremental, got:\n%s", result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_no_incremental_skips_fingerprint_short_circuit", normalize.Apply(result.Combined))
 	})
@@ -196,14 +145,6 @@ func TestBuild(t *testing.T) {
 		result := erun.Run(t, []string{"build", "--dry-run", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, "./build.sh") {
-			t.Errorf("expected build script trace to mention ./build.sh, got:\n%s", result.Combined)
-		}
-		// Docker builds must NOT be traced when a project build script
-		// owns the build phase.
-		if strings.Contains(result.Combined, "docker build --platform") {
-			t.Errorf("expected build.sh path to skip docker build, but trace mentions docker build:\n%s", result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_with_project_build_script_traces_script_invocation", normalize.Apply(result.Combined))
 	})
@@ -266,15 +207,6 @@ func TestBuild(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		for _, want := range []string{
-			"docker manifest inspect ghcr.io/sophium/base:9.9.9",
-			"docker pull --platform linux/amd64 ghcr.io/sophium/base:9.9.9",
-			"docker tag ghcr.io/sophium/base:9.9.9 ghcr.io/sophium/base:fp-0123456789abcdef-amd64",
-		} {
-			if !strings.Contains(result.Combined, want) {
-				t.Errorf("expected configured-fingerprint trace to contain %q, got:\n%s", want, result.Combined)
-			}
-		}
 		golden.Equal(t, "build/real_run_configured_fingerprint_inspects_remote_manifest", normalize.Apply(result.Combined))
 	})
 
@@ -312,9 +244,6 @@ func TestBuild(t *testing.T) {
 		}
 		// Build should still trace docker build for both images, even
 		// though the dockerignore parser fires during fingerprint walk.
-		if !strings.Contains(result.Combined, "docker build --platform linux/amd64") {
-			t.Errorf("expected build trace despite dockerignore, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "build/dry_run_with_dockerignore_drives_ignore_pattern_parser", normalize.Apply(result.Combined))
 	})
 
@@ -335,12 +264,6 @@ func TestBuild(t *testing.T) {
 		result := erun.Run(t, []string{"build", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if strings.Contains(result.Combined, "docker build --platform") {
-			t.Errorf("expected promote path to skip docker build, but trace mentions docker build:\n%s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, "docker tag ") {
-			t.Errorf("expected promote path to run docker tag, got:\n%s", result.Combined)
 		}
 		golden.Equal(t, "build/real_run_with_existing_fingerprint_promotes_via_tag", normalize.Apply(result.Combined))
 	})
@@ -373,15 +296,6 @@ func TestBuild(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		for _, want := range []string{
-			"docker push",
-			"docker manifest create",
-			"docker manifest push",
-		} {
-			if !strings.Contains(result.Combined, want) {
-				t.Errorf("expected real-run release trace to contain %q, got:\n%s", want, result.Combined)
-			}
-		}
 		golden.Equal(t, "build/real_run_release_pushes_multi_platform_manifest", normalize.Apply(result.Combined))
 	})
 
@@ -395,9 +309,6 @@ func TestBuild(t *testing.T) {
 		result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Stderr, "docker push") {
-			t.Errorf("expected release dry-run to trace docker push, got stderr:\n%s", result.Stderr)
 		}
 		golden.Equal(t, "build/dry_run_release_pushes_release_tagged_docker_builds", normalize.Apply(result.Combined))
 	})

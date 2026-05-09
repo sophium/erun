@@ -96,9 +96,6 @@ func TestExec(t *testing.T) {
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit outside a git project, got 0:\n%s", result.Combined)
 		}
-		if !strings.Contains(result.Combined, "cannot find git project") {
-			t.Errorf("expected 'cannot find git project' message, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "exec/diff_dry_run_errors_outside_git_project", normalize.Apply(result.Combined))
 	})
 
@@ -239,15 +236,6 @@ func TestExec(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		if !strings.Contains(result.Stdout, "diff --git a/README.md") {
-			t.Errorf("expected raw diff header on stdout, got:\n%s", result.Stdout)
-		}
-		if !strings.Contains(result.Stdout, "-# test") {
-			t.Errorf("expected deleted-line marker '-# test' in raw diff, got:\n%s", result.Stdout)
-		}
-		if !strings.Contains(result.Stdout, "+rewritten") {
-			t.Errorf("expected added-line marker '+rewritten' in raw diff, got:\n%s", result.Stdout)
-		}
 		golden.Equal(t, "exec/diff_raw_output_includes_deletions", normalize.Apply(result.Combined))
 	})
 
@@ -259,9 +247,6 @@ func TestExec(t *testing.T) {
 		result := erun.Run(t, []string{"exec", "diff", "--selected-commit=abc1234"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, "--selected-commit requires --scope=commit") {
-			t.Errorf("expected scope guard error, got:\n%s", result.Combined)
 		}
 		golden.Equal(t, "exec/diff_selected_commit_without_scope_errors", normalize.Apply(result.Combined))
 	})
@@ -275,9 +260,6 @@ func TestExec(t *testing.T) {
 		result := erun.Run(t, []string{"exec", "diff", "--dry-run", "--time"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit (no git project), got 0:\n%s", result.Combined)
-		}
-		if !strings.Contains(result.Stderr, "elapsed:") {
-			t.Errorf("expected --time to print elapsed even on error, got stderr:\n%s", result.Stderr)
 		}
 		golden.Equal(t, "exec/dry_run_with_time_flag_prints_elapsed_on_error", normalize.Apply(result.Combined))
 	})

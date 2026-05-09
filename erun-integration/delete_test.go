@@ -3,7 +3,6 @@ package integration
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -45,9 +44,6 @@ func TestDelete(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		if !strings.Contains(result.Combined, "kubectl --context test-context delete namespace team-dev --ignore-not-found") {
-			t.Errorf("expected namespace delete trace, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "delete/dry_run_with_remote_env_traces_namespace_delete", normalize.Apply(result.Combined))
 	})
 
@@ -70,9 +66,8 @@ func TestDelete(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		if !strings.Contains(result.Stdout, "deleted environment: team/dev") {
-			t.Errorf("expected stdout to confirm deletion, got:\n%s", result.Stdout)
-		}
+		// Filesystem state — golden cannot assert this; keep the os.Stat
+		// check.
 		if _, err := os.Stat(envDir); !os.IsNotExist(err) {
 			t.Errorf("expected env config tree to be removed at %s, stat err: %v", envDir, err)
 		}

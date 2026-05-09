@@ -36,17 +36,14 @@ func TestVersion(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("erun version --no-registry exited %d:\n%s", result.ExitCode, result.Combined)
 		}
-		if !strings.HasPrefix(strings.TrimSpace(result.Stdout), "erun ") {
-			t.Errorf("expected stdout to start with 'erun ', got:\n%s", result.Stdout)
-		}
 		golden.Equal(t, "version/no_registry", normalize.Apply(result.Combined))
 	})
 
 	t.Run("time_flag_prints_elapsed", func(t *testing.T) {
 		// Exercises feedback_render.go printElapsedTime: the --time flag must
 		// emit an "elapsed:" line on stderr after a successful run. The
-		// substring is a regression marker; the golden locks the surrounding
-		// output (version line + elapsed format).
+		// golden's normalize rule turns the variable duration into
+		// `elapsed: <ELAPSED>`, locking both presence and format.
 		setup := env.New(t)
 		result := erun.Run(t, []string{"version", "--no-registry", "--time"}, erun.RunOptions{
 			Cwd: setup.Cwd,
@@ -55,16 +52,16 @@ func TestVersion(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("erun version --time exited %d:\n%s", result.ExitCode, result.Combined)
 		}
-		if !strings.Contains(result.Stderr, "elapsed:") {
-			t.Errorf("expected stderr to contain 'elapsed:', got:\n%s", result.Stderr)
-		}
 		golden.Equal(t, "version/time_flag_prints_elapsed", normalize.Apply(result.Combined))
 	})
 
 	t.Run("version_file_in_cwd_overrides_build_info", func(t *testing.T) {
 		// Exercises version.go resolveBuildInfo: when a VERSION file lives
 		// in the current working directory, its contents must replace the
-		// compiled-in version string in the output.
+		// compiled-in version string in the output. The golden captures
+		// `erun <VERSION>` (normalized from "9.9.9"); without VERSION the
+		// compiled "dev" doesn't match the VERSION pattern and the diff
+		// fails loudly.
 		setup := env.New(t)
 		if err := os.WriteFile(filepath.Join(setup.Cwd, "VERSION"), []byte("9.9.9\n"), 0o644); err != nil {
 			t.Fatalf("write VERSION: %v", err)
@@ -75,9 +72,6 @@ func TestVersion(t *testing.T) {
 		})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.HasPrefix(strings.TrimSpace(result.Stdout), "erun 9.9.9") {
-			t.Errorf("expected stdout to start with 'erun 9.9.9', got:\n%s", result.Stdout)
 		}
 		golden.Equal(t, "version/version_file_in_cwd_overrides_build_info", normalize.Apply(result.Combined))
 	})
@@ -118,6 +112,10 @@ func TestVersion(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
+		// These are substring-asserted (not golden-locked) because the
+		// surrounding normalize rules collapse 1.4.0 / 1.5.0-snapshot-...
+		// to <VERSION>, which would erase the actual stub-driven values
+		// the test cares about.
 		if !strings.Contains(result.Stdout, "latest stable: "+stableLatest) {
 			t.Errorf("expected stdout to include latest stable %q, got:\n%s", stableLatest, result.Stdout)
 		}
@@ -194,9 +192,6 @@ func TestVersion(t *testing.T) {
 		})
 		if result.ExitCode != 0 {
 			t.Fatalf("erun version -v exited %d:\n%s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Stderr, "audit: erun version") {
-			t.Errorf("expected audit line on stderr, got:\n%s", result.Stderr)
 		}
 		golden.Equal(t, "version/verbose_flag_prints_audit", normalize.Apply(result.Combined))
 	})

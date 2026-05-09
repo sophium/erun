@@ -100,14 +100,6 @@ func TestContext(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		for _, want := range []string{
-			"cloud-context stop: edge",
-			"aws ec2 stop-instances --instance-ids i-0123456789abcdef0",
-		} {
-			if !strings.Contains(result.Combined, want) {
-				t.Errorf("expected dry-run trace to contain %q, got:\n%s", want, result.Combined)
-			}
-		}
 		golden.Equal(t, "context/stop_dry_run_traces_aws_stop_instances", normalize.Apply(result.Combined))
 	})
 
@@ -122,22 +114,6 @@ func TestContext(t *testing.T) {
 		result := erun.Run(t, []string{"context", "start", "edge", "--force", "--dry-run", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		for _, want := range []string{
-			"cloud-context start: name=edge force=true",
-			"force=true bypasses working-hours gate",
-			"aws iam create-role --role-name erun-edge-host-stop",
-			"aws iam create-instance-profile --instance-profile-name erun-edge-host-stop",
-			"aws ec2 describe-iam-instance-profile-associations",
-			"aws ec2 associate-iam-instance-profile --instance-id i-0123456789abcdef0",
-			"aws ec2 start-instances --instance-ids i-0123456789abcdef0",
-			"aws ec2 wait instance-running --instance-ids i-0123456789abcdef0",
-			"aws ec2 describe-instances --instance-ids i-0123456789abcdef0",
-			"kubectl config set-cluster edge",
-		} {
-			if !strings.Contains(result.Combined, want) {
-				t.Errorf("expected dry-run trace to contain %q, got:\n%s", want, result.Combined)
-			}
 		}
 		golden.Equal(t, "context/start_force_dry_run_traces_aws_start_and_profile_setup", normalize.Apply(result.Combined))
 	})
@@ -162,21 +138,6 @@ func TestContext(t *testing.T) {
 		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		for _, want := range []string{
-			"aws ec2 create-security-group --group-name fresh-k3s",
-			"aws ec2 authorize-security-group-ingress",
-			"aws iam create-role --role-name erun-fresh-host-stop",
-			"aws iam create-instance-profile --instance-profile-name erun-fresh-host-stop",
-			"aws ssm get-parameter --name /aws/service/canonical/ubuntu",
-			"aws ec2 run-instances",
-			"--instance-type c8gd.2xlarge",
-			"aws ec2 wait instance-running",
-			"Dry run: cloud context initialization planned.",
-		} {
-			if !strings.Contains(result.Combined, want) {
-				t.Errorf("expected init dry-run trace to contain %q, got:\n%s", want, result.Combined)
-			}
 		}
 		golden.Equal(t, "context/init_dry_run_traces_aws_security_group_and_run_instances", normalize.Apply(result.Combined))
 	})
@@ -211,15 +172,6 @@ func TestContext(t *testing.T) {
 		result := erun.Run(t, []string{"context", "start", "edge", "--dry-run", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit when working-hours gate refuses, got 0:\n%s", result.Combined)
-		}
-		for _, want := range []string{
-			"cloud-context start: checking working-hours gate",
-			"cloud-context start: gated:",
-			"outside working hours 23:00-23:01",
-		} {
-			if !strings.Contains(result.Combined, want) {
-				t.Errorf("expected gated trace to contain %q, got:\n%s", want, result.Combined)
-			}
 		}
 		golden.Equal(t, "context/start_without_force_blocks_outside_working_hours", normalize.Apply(result.Combined))
 	})

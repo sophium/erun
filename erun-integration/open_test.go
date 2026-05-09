@@ -93,9 +93,6 @@ func TestOpen(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if !strings.Contains(result.Combined, "deploying the devops runtime before opening the shell") {
-			t.Fatalf("expected redeploy decision when stub kubectl reports NotFound, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "open/no_shell_dry_run", normalize.Apply(result.Combined))
 	})
 
@@ -112,9 +109,6 @@ func TestOpen(t *testing.T) {
 		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
 		envVars := stubKubectlNotFound(t, setup)
 		result := erun.Run(t, []string{"open", "team", "local", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if !strings.Contains(result.Combined, "docker build") {
-			t.Fatalf("expected snapshot=true env config to drive local docker build in dry-run, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "open/snapshot_env_config_drives_local_build", normalize.Apply(result.Combined))
 	})
 
@@ -128,9 +122,6 @@ func TestOpen(t *testing.T) {
 		fixture.SeedDevopsRepo(t, setup, "team", "local")
 		envVars := stubKubectlNotFound(t, setup)
 		result := erun.Run(t, []string{"open", "team", "local", "--no-shell", "--no-alias-prompt", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if strings.Contains(result.Combined, "docker build") {
-			t.Fatalf("expected --no-snapshot to skip local docker build, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "open/no_snapshot_skips_local_build", normalize.Apply(result.Combined))
 	})
 
@@ -143,9 +134,6 @@ func TestOpen(t *testing.T) {
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
 		result := erun.Run(t, []string{"open", "team", "dev", "--version", "9.9.9", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if strings.Contains(result.Combined, "docker build") {
-			t.Fatalf("expected --version override to skip docker build, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "open/version_override_skips_local_build", normalize.Apply(result.Combined))
 	})
 
@@ -159,9 +147,6 @@ func TestOpen(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
 		result := erun.Run(t, []string{"open", "team", "dev", "--runtime-image", "ghcr.io/example/custom-runtime", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if !strings.Contains(result.Combined, "ghcr.io/example/custom-runtime") {
-			t.Fatalf("expected --runtime-image to surface in helm trace, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "open/runtime_image_override_uses_default_chart", normalize.Apply(result.Combined))
 	})
 
@@ -169,9 +154,6 @@ func TestOpen(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"open", "team", "dev", "--vscode", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if !strings.Contains(result.Combined, "--vscode requires sshd-enabled") {
-			t.Fatalf("expected sshd-required guidance, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "open/vscode_without_sshd_errors_with_guidance", normalize.Apply(result.Combined))
 	})
 
@@ -179,9 +161,6 @@ func TestOpen(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if !strings.Contains(result.Combined, "--intellij requires sshd-enabled") {
-			t.Fatalf("expected sshd-required guidance, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "open/intellij_without_sshd_errors_with_guidance", normalize.Apply(result.Combined))
 	})
 
@@ -191,9 +170,6 @@ func TestOpen(t *testing.T) {
 		result := erun.Run(t, []string{"open", "team", "dev", "--vscode", "--intellij", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for conflicting flags, got:\n%s", result.Combined)
-		}
-		if !strings.Contains(result.Combined, "--vscode and --intellij cannot be used together") {
-			t.Errorf("expected conflict error, got:\n%s", result.Combined)
 		}
 		golden.Equal(t, "open/vscode_and_intellij_conflict", normalize.Apply(result.Combined))
 	})
@@ -209,9 +185,6 @@ func TestOpen(t *testing.T) {
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if !strings.Contains(result.Combined, "port-forward") {
-			t.Fatalf("expected remote env to emit port-forward trace, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "open/remote_dry_run_traces_port_forwards", normalize.Apply(result.Combined))
 	})
 
@@ -368,9 +341,6 @@ func TestOpen(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
 		result := erun.Run(t, []string{"open", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if !strings.Contains(result.Combined, "tenant=team environment=dev") {
-			t.Fatalf("expected default tenant/env to resolve, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "open/default_tenant_environment_resolves_from_root_config", normalize.Apply(result.Combined))
 	})
 
@@ -383,9 +353,6 @@ func TestOpen(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlGenericError(t, setup)
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if !strings.Contains(result.Combined, "assuming not deployed") {
-			t.Fatalf("expected dry-run fallback trace when kubectl errors generically, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "open/kubectl_error_assumes_not_deployed", normalize.Apply(result.Combined))
 	})
 
@@ -413,9 +380,6 @@ func TestOpen(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
 		result := erun.Run(t, []string{"open", "--tenant", "team", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if !strings.Contains(result.Combined, "tenant=team environment=dev") {
-			t.Fatalf("expected default env to resolve from tenant config, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "open/tenant_flag_only_resolves_default_env", normalize.Apply(result.Combined))
 	})
 
@@ -429,9 +393,6 @@ func TestOpen(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
 		result := erun.Run(t, []string{"open", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if !strings.Contains(result.Combined, "tenant=team environment=dev") {
-			t.Fatalf("expected default tenant to resolve from root config, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "open/environment_positional_resolves_default_tenant", normalize.Apply(result.Combined))
 	})
 
@@ -445,9 +406,6 @@ func TestOpen(t *testing.T) {
 		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
 		result := erun.Run(t, []string{"open", "team", "dev", "--runtime-image", "ghcr.io/example/custom-runtime", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		if !strings.Contains(result.Combined, "ghcr.io/example/custom-runtime") {
-			t.Fatalf("expected --runtime-image to surface in helm trace, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "open/remote_runtime_image_override", normalize.Apply(result.Combined))
 	})
 

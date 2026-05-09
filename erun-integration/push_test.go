@@ -26,9 +26,6 @@ func TestPush(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		if !strings.Contains(result.Stdout, "--force") {
-			t.Fatalf("expected push help to advertise --force, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "push/help", normalize.Apply(result.Combined))
 	})
 
@@ -69,9 +66,6 @@ func TestPush(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		if !strings.Contains(result.Combined, "docker login") {
-			t.Errorf("expected retry trace to mention docker login, got:\n%s", result.Combined)
-		}
 		golden.Equal(t, "push/real_run_auth_failure_retries_after_login_via_auto_login_env", normalize.Apply(result.Combined))
 	})
 
@@ -100,9 +94,6 @@ func TestPush(t *testing.T) {
 		result := erun.Run(t, []string{"devops", "container", "push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Combined, "docker push") {
-			t.Errorf("expected devops container push to invoke docker push, got:\n%s", result.Combined)
 		}
 		golden.Equal(t, "push/devops_container_push_real_run_resolves_single_image_spec", normalize.Apply(result.Combined))
 	})
@@ -140,14 +131,6 @@ func TestPush(t *testing.T) {
 		result := erun.Run(t, []string{"push", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit when create_package is denied, got 0:\n%s", result.Combined)
-		}
-		for _, want := range []string{
-			"rejected the push",
-			"only the namespace owner can create new packages",
-		} {
-			if !strings.Contains(result.Combined, want) {
-				t.Errorf("expected create-package guidance to contain %q, got:\n%s", want, result.Combined)
-			}
 		}
 		golden.Equal(t, "push/real_run_create_package_denied_emits_guidance", normalize.Apply(result.Combined))
 	})

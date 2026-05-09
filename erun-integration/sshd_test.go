@@ -87,18 +87,6 @@ func TestSSHD(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		for _, want := range []string{
-			"save SSHD config for team/dev",
-			"helm upgrade --install",
-			"sshdEnabled=true",
-			"authorized_keys",
-			"ssh-ed25519 AAAATEST user@example",
-			"write ssh config host erun-team-dev",
-		} {
-			if !strings.Contains(result.Combined, want) {
-				t.Errorf("expected dry-run trace to contain %q, got combined output:\n%s", want, result.Combined)
-			}
-		}
 		golden.Equal(t, "sshd/init_dry_run_traces_full_flow", normalize.Apply(result.Combined))
 	})
 }

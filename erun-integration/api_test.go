@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -40,19 +39,6 @@ func TestAPI(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		for _, want := range []string{
-			"eapi",
-			"--host 0.0.0.0",
-			"--port 17034",
-			"--database-url 'postgres://erun@example/erun'",
-			"--oidc-allowed-issuers https://issuer.example",
-			"--aws-identity-store-id d-1234567890",
-			"--aws-identity-store-region eu-west-2",
-		} {
-			if !strings.Contains(result.Stderr, want) {
-				t.Errorf("expected trace to contain %q, got stderr:\n%s", want, result.Stderr)
-			}
-		}
 		golden.Equal(t, "api/dry_run_traces_eapi_launch", normalize.Apply(result.Combined))
 	})
 
@@ -68,9 +54,6 @@ func TestAPI(t *testing.T) {
 		result := erun.Run(t, []string{"-v", "api", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
-		}
-		if !strings.Contains(result.Stderr, "--port 17133") {
-			t.Errorf("expected trace to use environment-scoped port 17133, got stderr:\n%s", result.Stderr)
 		}
 		golden.Equal(t, "api/dry_run_uses_environment_local_port_by_default", normalize.Apply(result.Combined))
 	})
