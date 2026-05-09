@@ -1,0 +1,35 @@
+<VERSION>
+audit: erun release --dry-run
+release: resolving project root
+release: project root = <TMP>
+release: resolving release module root
+release: release root = <TMP>
+release: loading release config from project
+release: main branch = main, develop branch = develop
+release: resolving git branch and commit
+git -C <TMP> rev-parse --abbrev-ref HEAD
+git -C <TMP> rev-parse --short HEAD
+release: branch = develop, commit = <SHORTSHA>
+release: resolving base version from VERSION file
+release: base version = <VERSION> (from <TMP>
+release: classified mode = candidate
+git -C <TMP> show-ref --verify --quiet refs/heads/develop
+release: develop branch "develop" exists = true
+release: branch=develop mode=candidate version=<VERSION>
+docker image: ghcr.io/sophium/api:<VERSION>
+stage: sync-remote
+cd <TMP> && git fetch origin
+cd <TMP> && git rebase origin/develop
+stage: release
+write <TMP>
+  apiVersion: v2
+  appVersion: <VERSION>
+  name: api
+  version: <VERSION>
+cd <TMP> && git add erun-devops/k8s/api/Chart.yaml
+cd <TMP> && git commit -m '[skip ci] release <VERSION>'
+git -C <TMP> rev-parse '<VERSION>^{}'
+cd <TMP> && git tag -a <VERSION> -m 'Release candidate <VERSION>'
+stage: push
+cd <TMP> && git push --follow-tags origin develop
+cd <TMP> && ERUN_BUILD_VERSION=<VERSION> ./release.sh

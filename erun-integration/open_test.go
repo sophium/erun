@@ -194,17 +194,24 @@ func TestOpen(t *testing.T) {
 		// IDE-launch traces. The launchVSCode dependency is a no-op in
 		// dry-run (nil launcher) so this scenario stops at the trace
 		// boundary without invoking real `code`.
+		// Pin host OS to darwin via ERUN_HOST_OS_OVERRIDE so the IDE
+		// launch command (`open` vs `xdg-open`) is deterministic across
+		// developer machines and CI hosts.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnvWithSSHD(t, setup, "team", "dev")
-		envVars := stubKubectlNotFound(t, setup)
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
 		result := erun.Run(t, []string{"open", "team", "dev", "--vscode", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/vscode_dry_run", normalize.Apply(result.Combined))
 	})
 
 	t.Run("intellij_dry_run", func(t *testing.T) {
+		// See vscode_dry_run for the host-OS pinning rationale; IntelliJ
+		// has its own platform-conditional code paths (Gateway lookup,
+		// installed-app fallback) that diverge by OS, so the golden
+		// would otherwise drift between Linux and darwin runners.
 		setup := env.New(t)
 		fixture.SeedRemoteTenantEnvWithSSHD(t, setup, "team", "dev")
-		envVars := stubKubectlNotFound(t, setup)
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
 		result := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/intellij_dry_run", normalize.Apply(result.Combined))
 	})
