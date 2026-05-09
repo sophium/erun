@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -69,6 +70,50 @@ func TestPush(t *testing.T) {
 		}
 		if !strings.Contains(result.Combined, "docker login") {
 			t.Errorf("expected retry trace to mention docker login, got:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("real_run_create_package_denied_emits_guidance", func(t *testing.T) {
+		// Exercises handleNamespaceAuthError + retryAfterNamespaceLogin
+		// + printCreatePackageGuidance + namespacePath + isGHCR for the
+		// GHCR-specific "create_package" denial path. With `gh` absent
+		// from PATH (the integration harness's PATH does not include the
+		// dev's gh install at the stub-level), TryGHCRNamespaceLogin
+		// returns false, the retry returns the auth error, and the user
+		// gets the create-a-new-package guidance text. Asserts the
+		// guidance markers appear and the command exits non-zero.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  push)`,
+			`    printf 'denied: denied: create_package permission_denied\n' >&2`,
+			`    exit 1 ;;`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		// Stub `gh` to "exist but fail" so TryGHCRNamespaceLogin's
+		// LookPath finds it, runs it, and falls through gracefully.
+		fixture.StubBinaryAdvanced(t, stubs, "gh", fixture.StubBinarySpec{ExitCode: 1})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh")...)
+		// Force PATH so `exec.LookPath("gh")` finds our stub (production
+		// uses LookPath directly, not the ERUN_<NAME>_BIN override).
+		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
+		result := erun.Run(t, []string{"push", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when create_package is denied, got 0:\n%s", result.Combined)
+		}
+		for _, want := range []string{
+			"rejected the push",
+			"only the namespace owner can create new packages",
+		} {
+			if !strings.Contains(result.Combined, want) {
+				t.Errorf("expected create-package guidance to contain %q, got:\n%s", want, result.Combined)
+			}
 		}
 	})
 }
