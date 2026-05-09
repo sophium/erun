@@ -340,6 +340,7 @@ func TestDeploy(t *testing.T) {
 				t.Errorf("expected helm trace to contain %q, got:\n%s", want, result.Combined)
 			}
 		}
+		golden.Equal(t, "deploy/dry_run_with_managed_cloud_traces_helm_set_strings", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_helm_pending_recovery_via_auto_recover_env", func(t *testing.T) {
@@ -382,5 +383,6 @@ func TestDeploy(t *testing.T) {
 		if !strings.Contains(result.Combined, "clearing pending helm metadata") {
 			t.Errorf("expected recovery trace to mention clearing pending helm metadata, got:\n%s", result.Combined)
 		}
+		golden.Equal(t, "deploy/real_run_helm_pending_recovery_via_auto_recover_env", normalize.Apply(result.Combined))
 	})
 }
