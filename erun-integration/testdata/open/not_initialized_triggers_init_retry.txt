@@ -1,0 +1,5 @@
+audit: erun open --dry-run team dev
+running init before resolving open target
+Loading erun tool configuration, configPath=<TMP>
+Trying to detect current project directory
+erun config is not initialized. Run erun in project directory.
