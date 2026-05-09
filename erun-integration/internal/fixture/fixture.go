@@ -379,6 +379,30 @@ func shellSingleQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
+// StubBinaryWithScript writes a stub binary whose POSIX-shell body is the
+// caller-supplied script. Use this when a stub must branch on argv (e.g.,
+// the AWS CLI returning JSON for sts get-caller-identity but exit 0 for
+// configure set). Less ergonomic than StubBinary, so prefer that for
+// scenarios where one fixed response is enough.
+//
+// The script body has full shell access; "$*" / "$1" / "$2" are the args
+// the production code passed. The body should end with an explicit exit.
+func StubBinaryWithScript(t testing.TB, dir, name, scriptBody string) string {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dir, err)
+	}
+	path := filepath.Join(dir, name)
+	body := "#!/bin/sh\n# erun integration stub for " + name + "\n" + scriptBody
+	if !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("write stub %s: %v", path, err)
+	}
+	return path
+}
+
 // StubEnv returns the env-var pairs that route the named binary lookups to
 // the stub at dir/<name>. Pass each result through env.Setup.Env() concat.
 func StubEnv(dir string, names ...string) []string {

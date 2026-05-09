@@ -114,6 +114,42 @@ func TestBuild(t *testing.T) {
 		}
 	})
 
+	t.Run("real_run_via_docker_stub_drives_multi_platform_build", func(t *testing.T) {
+		// Exercises eruncommon/build_docker_commands.go DockerImageBuilder,
+		// runMultiPlatformBuild, runDockerBuildOnce, and tagFingerprintAfterBuild.
+		// Stubs `docker` to exit 0 for every invocation so the build flow
+		// runs to completion across both platforms without touching a real
+		// daemon. Asserts the user-facing "Built" / "Tagged" lines appear.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image)`,
+			`    case "$2" in`,
+			`      inspect) exit 1 ;;`,
+			`      *) exit 0 ;;`,
+			`    esac`,
+			`    ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"build", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		for _, want := range []string{
+			"linux/amd64",
+			"linux/arm64",
+			"ghcr.io/sophium/api:1.4.2",
+		} {
+			if !strings.Contains(result.Combined, want) {
+				t.Errorf("expected real-run output to contain %q, got:\n%s", want, result.Combined)
+			}
+		}
+	})
+
 	t.Run("dry_run_release_pushes_release_tagged_docker_builds", func(t *testing.T) {
 		// Exercises build.go --release path: per-platform docker build +
 		// docker push trace must appear in the dry-run output for the
