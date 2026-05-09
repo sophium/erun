@@ -1,6 +1,8 @@
 package integration
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -168,6 +170,74 @@ func TestBuild(t *testing.T) {
 		}
 		if !strings.Contains(result.Combined, "docker build --platform linux/amd64") {
 			t.Errorf("expected docker build trace under --no-incremental, got:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("dry_run_with_project_build_script_traces_script_invocation", func(t *testing.T) {
+		// Exercises eruncommon/project_build_script.go (HasProjectBuildScript,
+		// resolveProjectRootBuildScript) + build_docker_commands.go
+		// (runScriptSpec, scriptTraceCommand, buildScriptEnv): when a
+		// build.sh exists at the project root, the build flow calls the
+		// script instead of running docker builds. Dry-run traces the
+		// resolved script path with ERUN_BUILD_VERSION and skips the
+		// docker build chain.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write build.sh: %v", err)
+		}
+		fixture.RunGit(t, setup.Cwd, "add", "build.sh")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add build script")
+		result := erun.Run(t, []string{"build", "--dry-run", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Combined, "./build.sh") {
+			t.Errorf("expected build script trace to mention ./build.sh, got:\n%s", result.Combined)
+		}
+		// Docker builds must NOT be traced when a project build script
+		// owns the build phase.
+		if strings.Contains(result.Combined, "docker build --platform") {
+			t.Errorf("expected build.sh path to skip docker build, but trace mentions docker build:\n%s", result.Combined)
+		}
+	})
+
+	t.Run("real_run_release_pushes_multi_platform_manifest", func(t *testing.T) {
+		// Exercises pushMultiPlatformImage (and the manifest create+push
+		// path) plus runDockerPushOnce in real-run release mode. The
+		// release branch sets DockerBuildSpec.Push=true for release-tagged
+		// images, which drives runMultiPlatformBuild's push branch.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		// Release flow runs git tag/push; stub git verb-by-verb so the
+		// release stage succeeds without touching a real remote.
+		fixture.StubBinary(t, stubs, "git", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		// Keep real git for SeedReleaseRepo's repo setup and use the stub
+		// only for erun's release operations: the production code resolves
+		// `git` via common.Command which honors ERUN_GIT_BIN. The repo
+		// already exists via the seed.
+		envVars = append(envVars, fixture.StubEnv(stubs, "git")...)
+		result := erun.Run(t, []string{"build", "--release", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		for _, want := range []string{
+			"docker push",
+			"docker manifest create",
+			"docker manifest push",
+		} {
+			if !strings.Contains(result.Combined, want) {
+				t.Errorf("expected real-run release trace to contain %q, got:\n%s", want, result.Combined)
+			}
 		}
 	})
 
