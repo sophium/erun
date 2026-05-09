@@ -137,6 +137,14 @@ export interface DoctorOutcome {
   message: string;
 }
 
+export type ReconnectStatus = 'idle' | 'confirm' | 'running' | 'error';
+
+export interface ReconnectState {
+  status: ReconnectStatus;
+  lastLine: string;
+  error: string;
+}
+
 export interface AppState {
   tenants: UITenant[];
   cloudProviders: UICloudProviderStatus[];
@@ -161,6 +169,8 @@ export interface AppState {
   diff: DiffResult | null;
   diffLoading: boolean;
   diffError: string;
+  diffErrorReconnectable: boolean;
+  reconnect: ReconnectState;
   selectedDiffPath: string;
   selectedReviewScope: 'current' | 'commit' | 'all';
   selectedReviewCommit: string;

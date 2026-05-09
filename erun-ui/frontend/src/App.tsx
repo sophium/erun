@@ -8,6 +8,7 @@ import { TerminalTabStrip } from '@/components/app/TerminalTabStrip';
 import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
 import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
 import { ManageDialogView } from '@/components/app/ManageDialogView';
+import { ReconnectDialog } from '@/components/app/ReconnectDialog';
 import { ReviewPanel } from '@/components/app/ReviewPanel';
 import { Sidebar } from '@/components/app/Sidebar';
 import { TenantDashboardView } from '@/components/app/TenantDashboardView';
@@ -81,6 +82,7 @@ export function App(): React.ReactElement {
       <EnvironmentDialogView controller={controller} state={state} />
       <GlobalConfigDialogView controller={controller} state={state} />
       <ManageDialogView controller={controller} state={state} />
+      <ReconnectDialog controller={controller} state={state} />
       <TenantDialogView controller={controller} state={state} />
     </TooltipProvider>
   );

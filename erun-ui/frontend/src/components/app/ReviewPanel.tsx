@@ -238,7 +238,9 @@ function ChangedFileTree({ controller, state }: { controller: ERunUIController; 
       <DiffErrorAlert
         message={compactDiffError(state.diffError)}
         loading={state.diffLoading}
+        reconnectable={state.diffErrorReconnectable}
         onRetry={() => { void controller.loadReviewDiff(); }}
+        onReconnect={() => controller.requestReconnect()}
       />
     );
   }

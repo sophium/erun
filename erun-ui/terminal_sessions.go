@@ -637,18 +637,16 @@ func (a *App) LoadDiff(selection uiSelection, options uiDiffOptions) (eruncommon
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if err := a.ensureMCPAvailable(ctx, result); err != nil {
-		return eruncommon.DiffResult{}, err
+	mcpPort := eruncommon.MCPPortForResult(result)
+	if a.deps.canConnectLocalPort != nil && !a.deps.canConnectLocalPort(mcpPort) {
+		return eruncommon.DiffResult{}, wrapMCPUnreachableError(fmt.Errorf("mcp port %d is not reachable", mcpPort))
 	}
 	endpoint := mcpEndpointForOpenResult(result)
 	diff, err := a.deps.loadDiff(ctx, endpoint, options)
-	if err == nil || a.deps.ensureMCP == nil {
-		return diff, err
+	if err != nil && isMCPDialFailure(err) {
+		return eruncommon.DiffResult{}, wrapMCPUnreachableError(err)
 	}
-	if ensureErr := a.deps.ensureMCP(ctx, result); ensureErr != nil {
-		return eruncommon.DiffResult{}, err
-	}
-	return a.deps.loadDiff(ctx, endpoint, options)
+	return diff, err
 }
 
 func (a *App) ensureMCPAvailable(ctx context.Context, result eruncommon.OpenResult) error {
@@ -661,6 +659,42 @@ func (a *App) ensureMCPAvailable(ctx context.Context, result eruncommon.OpenResu
 		}
 	}
 	return nil
+}
+
+// ReconnectMCP runs `erun open --no-shell` for the selected environment so
+// the local MCP port-forward (and, if the runtime pod is missing, the
+// runtime itself) gets re-established. This is the only desktop path that
+// may invoke the open command implicitly on the user's behalf, and it is
+// gated on an explicit user click in the review panel's unreachable state.
+//
+// Stdout/stderr lines are streamed to the frontend via the
+// mcpReconnectLineEvent so a long-running deploy does not look frozen.
+func (a *App) ReconnectMCP(selection uiSelection) error {
+	selection = normalizeSelection(selection)
+	if selection.Tenant == "" || selection.Environment == "" {
+		return fmt.Errorf("tenant and environment are required")
+	}
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+	})
+	if err != nil {
+		return err
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if a.deps.reconnectMCP == nil {
+		return fmt.Errorf("reconnect is not configured")
+	}
+	emit := func(line string) {
+		if a.ctx == nil {
+			return
+		}
+		runtime.EventsEmit(a.ctx, mcpReconnectLineEvent, line)
+	}
+	return a.deps.reconnectMCP(ctx, result, emit)
 }
 
 func (a *App) ResizeSession(sessionID, cols, rows int) error {

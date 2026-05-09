@@ -349,14 +349,14 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 		},
 	}
 	var gotEndpoint string
-	var ensured eruncommon.OpenResult
+	ensureCalls := 0
 	app := NewApp(erunUIDeps{
 		store: store,
 		canConnectLocalPort: func(int) bool {
-			return false
+			return true
 		},
-		ensureMCP: func(_ context.Context, result eruncommon.OpenResult) error {
-			ensured = result
+		ensureMCP: func(_ context.Context, _ eruncommon.OpenResult) error {
+			ensureCalls++
 			return nil
 		},
 		loadDiff: func(_ context.Context, endpoint string, options uiDiffOptions) (eruncommon.DiffResult, error) {
@@ -375,15 +375,15 @@ func TestLoadDiffUsesSelectedMCPPort(t *testing.T) {
 	if gotEndpoint != "http://127.0.0.1:17000/mcp" {
 		t.Fatalf("unexpected endpoint: %q", gotEndpoint)
 	}
-	if ensured.Tenant != "erun" || ensured.Environment != "local" {
-		t.Fatalf("expected MCP forward to be ensured before diff, got %+v", ensured)
+	if ensureCalls != 0 {
+		t.Fatalf("LoadDiff must not implicitly run erun open; got ensureCalls=%d", ensureCalls)
 	}
 	if result.RawDiff == "" {
 		t.Fatalf("unexpected diff result: %+v", result)
 	}
 }
 
-func TestLoadDiffReactivatesMCPAfterConnectionError(t *testing.T) {
+func TestLoadDiffReturnsUnreachableWhenPortClosed(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
@@ -406,36 +406,118 @@ func TestLoadDiffReactivatesMCPAfterConnectionError(t *testing.T) {
 	app := NewApp(erunUIDeps{
 		store: store,
 		canConnectLocalPort: func(int) bool {
-			return true
+			return false
 		},
-		ensureMCP: func(_ context.Context, result eruncommon.OpenResult) error {
+		ensureMCP: func(_ context.Context, _ eruncommon.OpenResult) error {
 			ensureCalls++
-			if result.Tenant != "erun" || result.Environment != "test" {
-				t.Fatalf("unexpected MCP target: %+v", result)
-			}
 			return nil
 		},
-		loadDiff: func(_ context.Context, endpoint string, _ uiDiffOptions) (eruncommon.DiffResult, error) {
+		loadDiff: func(_ context.Context, _ string, _ uiDiffOptions) (eruncommon.DiffResult, error) {
 			loadCalls++
-			if endpoint != "http://127.0.0.1:17000/mcp" {
-				t.Fatalf("unexpected endpoint: %q", endpoint)
-			}
-			if loadCalls == 1 {
-				return eruncommon.DiffResult{}, errors.New("EOF")
-			}
-			return eruncommon.DiffResult{RawDiff: "diff --git a/a.txt b/a.txt\n"}, nil
+			return eruncommon.DiffResult{}, nil
 		},
 	})
 
-	result, err := app.LoadDiff(uiSelection{Tenant: "erun", Environment: "test"}, uiDiffOptions{})
-	if err != nil {
-		t.Fatalf("LoadDiff failed: %v", err)
+	_, err := app.LoadDiff(uiSelection{Tenant: "erun", Environment: "test"}, uiDiffOptions{})
+	if err == nil {
+		t.Fatalf("expected unreachable error when port is closed")
 	}
-	if ensureCalls != 1 || loadCalls != 2 {
-		t.Fatalf("expected one MCP reactivation and retry, got ensure=%d load=%d", ensureCalls, loadCalls)
+	if !errors.Is(err, errMCPUnreachable) {
+		t.Fatalf("expected errMCPUnreachable, got %v", err)
 	}
-	if result.RawDiff == "" {
-		t.Fatalf("unexpected diff result: %+v", result)
+	if ensureCalls != 0 || loadCalls != 0 {
+		t.Fatalf("LoadDiff must not run erun open or attempt the dial when the port is closed; got ensure=%d load=%d", ensureCalls, loadCalls)
+	}
+}
+
+func TestLoadDiffWrapsDialFailureAsUnreachable(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {
+				Name:               "erun",
+				ProjectRoot:        projectRoot,
+				DefaultEnvironment: "test",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/test": {
+				Name:              "test",
+				RepoPath:          projectRoot,
+				KubernetesContext: "orbstack",
+			},
+		},
+	}
+	ensureCalls := 0
+	app := NewApp(erunUIDeps{
+		store: store,
+		canConnectLocalPort: func(int) bool {
+			return true
+		},
+		ensureMCP: func(_ context.Context, _ eruncommon.OpenResult) error {
+			ensureCalls++
+			return nil
+		},
+		loadDiff: func(_ context.Context, _ string, _ uiDiffOptions) (eruncommon.DiffResult, error) {
+			return eruncommon.DiffResult{}, errors.New("EOF")
+		},
+	})
+
+	_, err := app.LoadDiff(uiSelection{Tenant: "erun", Environment: "test"}, uiDiffOptions{})
+	if err == nil {
+		t.Fatalf("expected dial failure to surface as unreachable")
+	}
+	if !errors.Is(err, errMCPUnreachable) {
+		t.Fatalf("expected errMCPUnreachable, got %v", err)
+	}
+	if ensureCalls != 0 {
+		t.Fatalf("LoadDiff must not implicitly run erun open after a dial failure; got ensureCalls=%d", ensureCalls)
+	}
+}
+
+func TestReconnectMCPRunsOpenAndStreamsLines(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {
+				Name:               "erun",
+				ProjectRoot:        projectRoot,
+				DefaultEnvironment: "test",
+			},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/test": {
+				Name:              "test",
+				RepoPath:          projectRoot,
+				KubernetesContext: "orbstack",
+			},
+		},
+	}
+	calls := 0
+	var lines []string
+	app := NewApp(erunUIDeps{
+		store: store,
+		reconnectMCP: func(_ context.Context, result eruncommon.OpenResult, onLine func(string)) error {
+			calls++
+			if result.Tenant != "erun" || result.Environment != "test" {
+				t.Fatalf("unexpected target: %+v", result)
+			}
+			onLine("step: deploying erun-devops")
+			lines = append(lines, "step: deploying erun-devops")
+			onLine("==> Deployed erun/test")
+			lines = append(lines, "==> Deployed erun/test")
+			return nil
+		},
+	})
+
+	if err := app.ReconnectMCP(uiSelection{Tenant: " erun ", Environment: " test "}); err != nil {
+		t.Fatalf("ReconnectMCP failed: %v", err)
+	}
+	if calls != 1 {
+		t.Fatalf("expected reconnect to invoke open exactly once, got %d", calls)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("expected two streamed lines, got %d", len(lines))
 	}
 }
 
