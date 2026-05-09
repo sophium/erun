@@ -128,22 +128,21 @@ Reaching for a stub to "make this look real enough to reach the branch" is hidin
 - Set `UPDATE_GOLDEN=1` to (re)write the file. Default mode is read-and-compare.
 - Goldens are reviewed artifacts. Treat a diff in any golden file as a behavior change to inspect, not as noise. If a trace line drift reflects an intentional change, update and explain in the PR. If it doesn't, the test is doing its job.
 
-### Goldens vs `strings.Contains` substring assertions
+### Whole-output snapshots vs targeted substring assertions
 
-- **Default to `golden.Equal` only.** It locks the entire output, so any unrelated trace drift fails loudly with a complete diff. The diff *is* the failure message — you don't need a substring's "expected X" preamble.
-- **Do not pair a substring assert with a golden.** When both are present, the substring is redundant: if the golden passes the substring passes; if the golden fails the diff already shows the broken line. The redundant pair makes failures more confusing (two messages instead of one) and rots — when someone updates the golden but forgets the substring, the substring silently asserts the old line.
-- `strings.Contains` is appropriate **only when the golden cannot make the assertion**, which is rare. The known exceptions:
-  1. **Captured output where normalization masks the asserted value.** E.g. a stub-server returns `latest stable: 1.4.0` and the test's contract is "the stub-driven version reaches stdout"; the `<VERSION>` normalize rule collapses both `1.4.0` and any other version to the same token, so the golden cannot distinguish them. The substring is the only way to assert the specific stub-driven value.
-  2. **Filesystem-state assertions.** `golden.Equal` checks output streams; checking that a file got written, a directory got removed, or an XML config has the expected entry needs `os.Stat` / `os.ReadFile` and a `strings.Contains` (or other shape check) on the read body. These belong alongside a golden of the output, not instead of one.
-  3. **Stub-server recorded state.** A test that wants to assert "the runner hit endpoint X with these params" can record requests in the stub closure and assert on that map after the run. Same shape as exception 2: complementary to a golden, not a replacement.
-  4. **Wall-clock-dependent output that cannot be normalized.** E.g. the working-hours marker line whose value depends on the actual time of day. Use a regex-match (or substring) for the variable line and accept that a golden of the surrounding output isn't possible. Document the choice in the scenario comment.
-- When you write a new scenario, the workflow is:
-  1. Add the assertions you actually need: `golden.Equal(t, ...)` for output, plus filesystem/stub-state checks if the scenario demands them.
-  2. `UPDATE_GOLDEN=1 go test -run Test<Command>/<scenario> ./...` to seed the file.
-  3. Inspect the generated `testdata/...` file by hand. Look for fixture-specific paths, generated tmp dirs, hashes, timestamps.
-  4. Add or extend a rule in `internal/normalize/` for any new nondeterminism; regenerate.
-  5. Re-run without `UPDATE_GOLDEN=1` to confirm the golden passes deterministically.
-  6. If the captured output cannot be made stable after several attempts and the scenario is not one of the listed exceptions, the right fix is usually in production: lift the trace, gate the side effect, fix the dry-run contract. Don't paper over with substring-only.
+- **Default to a whole-output snapshot assertion.** It locks the entire captured output, so any unrelated drift fails loudly with a complete diff. The diff is the failure message — you do not need a substring's "expected X" preamble.
+- **Do not pair a substring assertion with a snapshot of the same stream.** When both run, the substring is redundant: if the snapshot passes, every substring within it passes; if the snapshot fails, the diff already shows the broken line. A redundant pair makes failures harder to read (two messages where one would do) and rots over time — when someone regenerates the snapshot but forgets the substring, the substring silently locks the old wording.
+- A targeted substring (or shape) assertion is appropriate **only when the snapshot literally cannot make the assertion.** That is narrow, and tends to fall into one of these shapes:
+  1. **The asserted value is masked by output normalization.** When the test's contract is "this specific dynamic value flowed through to the output" but the normalizer collapses every value of that shape to the same token, the snapshot cannot tell two valid values apart. A substring on the un-normalized capture is then the only way to assert the value the test actually cares about.
+  2. **The assertion is on a side effect outside the captured streams.** Filesystem state, persisted config, recorded stub-server calls, parsed structured output — none of these are in the streams the snapshot covers. Use the appropriate read/inspection plus a shape check; this complements the snapshot, it does not replace it.
+  3. **A specific line is intrinsically variable and cannot be normalized.** Output that genuinely depends on host clock, host platform, or other unstable inputs that no normalization rule can pin down. Match the variable line with a regex or pattern, accept that locking the whole stream is not possible, and document the reason in the test.
+- Workflow for a new scenario:
+  1. Decide what the scenario actually needs to assert. Most of the time it is one whole-output snapshot. Sometimes it is also a side-effect check from one of the cases above.
+  2. Regenerate the snapshot file from a passing run.
+  3. Read the generated file end to end. Look for anything that will differ between machines, runs, or developers: paths, generated identifiers, hashes, timestamps, sizes, ordering.
+  4. Extend the normalization layer to cover any new source of nondeterminism. Regenerate.
+  5. Re-run without regeneration to confirm the snapshot is stable.
+  6. If the output refuses to stabilize and the scenario does not match one of the documented exceptions, the fix usually belongs in production code, not in the test: lift the missing trace, gate the side effect on the dry-run boundary, or surface the decision the test wants to assert. Do not work around an unstable trace with a substring-only assertion.
 
 ## Coverage gate
 
