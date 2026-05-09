@@ -10,10 +10,11 @@ import (
 )
 
 const (
-	terminalOutputEvent = "terminal-output"
-	terminalExitEvent   = "terminal-exit"
-	appStatusEvent      = "app-status"
-	appSessionEnvVar    = "ERUN_UI_SESSION"
+	terminalOutputEvent   = "terminal-output"
+	terminalExitEvent     = "terminal-exit"
+	appStatusEvent        = "app-status"
+	mcpReconnectLineEvent = "mcp-reconnect-line"
+	appSessionEnvVar      = "ERUN_UI_SESSION"
 )
 
 type erunUIStore interface {
@@ -39,6 +40,7 @@ type erunUIDeps struct {
 	listKubeContexts      func() ([]string, error)
 	loadResourceStatus    func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
 	ensureMCP             func(context.Context, eruncommon.OpenResult) error
+	reconnectMCP          func(context.Context, eruncommon.OpenResult, func(string)) error
 	ensureSSHD            func(context.Context, eruncommon.OpenResult) error
 	canConnectLocalPort   func(int) bool
 	setRemoteCloudAlias   func(context.Context, string, string, string, string) (eruncommon.EnvConfig, error)
@@ -116,6 +118,11 @@ func withDefaultRuntimeDeps(deps erunUIDeps) erunUIDeps {
 	if deps.ensureMCP == nil {
 		deps.ensureMCP = func(ctx context.Context, result eruncommon.OpenResult) error {
 			return ensureMCPViaOpenCommand(ctx, deps.resolveCLIPath(), result)
+		}
+	}
+	if deps.reconnectMCP == nil {
+		deps.reconnectMCP = func(ctx context.Context, result eruncommon.OpenResult, onLine func(string)) error {
+			return runOpenForReconnect(ctx, deps.resolveCLIPath(), result, onLine)
 		}
 	}
 	if deps.ensureSSHD == nil {

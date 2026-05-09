@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -200,6 +201,59 @@ func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncom
 		return fmt.Errorf("activate MCP port-forward: %w", err)
 	}
 	return fmt.Errorf("activate MCP port-forward: %w: %s", err, detail)
+}
+
+// runOpenForReconnect runs the same `erun open --no-shell --no-alias-prompt`
+// child process as ensureMCPViaOpenCommand, but streams stdout/stderr lines
+// via onLine so the desktop UI can show progress while the open (and any
+// runtime deploy it triggers) is in flight. The trailing buffered output is
+// included verbatim in the returned error so the user still sees the
+// actionable detail when the command exits non-zero.
+func runOpenForReconnect(ctx context.Context, cliPath string, result eruncommon.OpenResult, onLine func(string)) error {
+	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
+	cmd := exec.CommandContext(ctx, cliPath, args...)
+	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("activate MCP port-forward: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("activate MCP port-forward: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("activate MCP port-forward: %w", err)
+	}
+	var lastErr strings.Builder
+	scan := func(reader io.Reader, captureErr bool) {
+		scanner := bufio.NewScanner(reader)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if onLine != nil && strings.TrimSpace(line) != "" {
+				onLine(line)
+			}
+			if captureErr {
+				if lastErr.Len() > 0 {
+					lastErr.WriteByte('\n')
+				}
+				lastErr.WriteString(line)
+			}
+		}
+	}
+	done := make(chan struct{}, 2)
+	go func() { scan(stdout, false); done <- struct{}{} }()
+	go func() { scan(stderr, true); done <- struct{}{} }()
+	<-done
+	<-done
+	if err := cmd.Wait(); err != nil {
+		detail := strings.TrimSpace(lastErr.String())
+		if detail == "" {
+			return fmt.Errorf("activate MCP port-forward: %w", err)
+		}
+		return fmt.Errorf("activate MCP port-forward: %w: %s", err, detail)
+	}
+	return nil
 }
 
 func ensureSSHDViaOpenCommand(ctx context.Context, cliPath string, result eruncommon.OpenResult) error {

@@ -1,8 +1,9 @@
 import * as React from 'react';
-import { AlertCircle, RefreshCw } from 'lucide-react';
+import { AlertCircle, PlugZap, RefreshCw } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { compactDiffError, diffLineMark } from '@/app/diffUtils';
+import { reconnectCopy } from '@/app/reconnectCopy';
 import type { AppState } from '@/app/state';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -13,7 +14,15 @@ export function DiffList({ controller, state }: { controller: ERunUIController; 
     return <ReviewStatus>Loading diff...</ReviewStatus>;
   }
   if (state.diffError) {
-    return <DiffErrorAlert message={compactDiffError(state.diffError)} loading={state.diffLoading} onRetry={() => { void controller.loadReviewDiff(); }} />;
+    return (
+      <DiffErrorAlert
+        message={compactDiffError(state.diffError)}
+        loading={state.diffLoading}
+        reconnectable={state.diffErrorReconnectable}
+        onRetry={() => { void controller.loadReviewDiff(); }}
+        onReconnect={() => controller.requestReconnect()}
+      />
+    );
   }
   const files = state.diff?.files || [];
   if (files.length === 0) {
@@ -29,7 +38,21 @@ export function DiffList({ controller, state }: { controller: ERunUIController; 
   );
 }
 
-export function DiffErrorAlert({ message, loading, onRetry }: { message: string; loading: boolean; onRetry: () => void }): React.ReactElement {
+export function DiffErrorAlert({
+  message,
+  loading,
+  reconnectable,
+  onRetry,
+  onReconnect,
+}: {
+  message: string;
+  loading: boolean;
+  reconnectable?: boolean;
+  onRetry: () => void;
+  onReconnect?: () => void;
+}): React.ReactElement {
+  const title = reconnectable ? reconnectCopy.errorTitle : 'Could not load diff';
+  const body = reconnectable ? reconnectCopy.errorBody : message;
   return (
     <div
       role="alert"
@@ -37,13 +60,24 @@ export function DiffErrorAlert({ message, loading, onRetry }: { message: string;
     >
       <AlertCircle className="mt-px size-[18px] flex-none text-destructive" aria-hidden="true" />
       <div className="min-w-0 [overflow-wrap:anywhere] text-foreground">
-        <div className="font-semibold text-destructive">Could not load diff</div>
-        <div className="text-muted-foreground">{message}</div>
+        <div className="font-semibold text-destructive">{title}</div>
+        <div className="text-muted-foreground">{body}</div>
+        {reconnectable && message && message !== body && (
+          <div className="mt-1 truncate font-mono text-[12px] text-muted-foreground">{message}</div>
+        )}
       </div>
-      <Button type="button" variant="outline" size="sm" disabled={loading} onClick={onRetry}>
-        <RefreshCw aria-hidden="true" />
-        Retry
-      </Button>
+      <div className="flex flex-col items-end gap-1.5">
+        <Button type="button" variant="outline" size="sm" disabled={loading} onClick={onRetry}>
+          <RefreshCw aria-hidden="true" />
+          {reconnectCopy.retryAction}
+        </Button>
+        {reconnectable && onReconnect && (
+          <Button type="button" variant="outline" size="sm" disabled={loading} onClick={onReconnect}>
+            <PlugZap aria-hidden="true" />
+            {reconnectCopy.reconnectAction}
+          </Button>
+        )}
+      </div>
     </div>
   );
 }

@@ -17,6 +17,7 @@ import {
   LoginCloudProvider,
   LogoutCloudProvider,
   OpenIDE,
+  ReconnectMCP,
   ResizeSession,
   SavePastedImage,
   SaveTenantConfig,
@@ -32,6 +33,7 @@ import { ClipboardSetText, EventsOn, WindowToggleMaximise } from '../../wailsjs/
 import { fileToBase64, decodeBase64Bytes, isTerminalPasteTarget, pastedImageFiles } from './clipboard';
 import { replaceCloudProvider } from './cloudContextState';
 import { chooseSelectedDiffPath } from './diffUtils';
+import { isMcpUnreachableMessage, stripMcpUnreachableMarker } from './reconnectCopy';
 import {
   normalizedEnvironmentDialogValues,
   rememberEnvironmentDialogSelection,
@@ -173,6 +175,8 @@ export class ERunUIController {
     diff: null,
     diffLoading: false,
     diffError: '',
+    diffErrorReconnectable: false,
+    reconnect: { status: 'idle', lastLine: '', error: '' },
     selectedDiffPath: '',
     selectedReviewScope: 'current',
     selectedReviewCommit: '',
@@ -224,6 +228,7 @@ export class ERunUIController {
   private terminalOutputOff: (() => void) | null = null;
   private terminalExitOff: (() => void) | null = null;
   private appStatusOff: (() => void) | null = null;
+  private reconnectLineOff: (() => void) | null = null;
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
   private terminalStatusRetrySelection: UISelection | null = null;
   private readonly globalConfig = new GlobalConfigWorkflow({
@@ -329,6 +334,9 @@ export class ERunUIController {
     this.appStatusOff = EventsOn('app-status', (payload: AppStatusPayload) => {
       this.handleAppStatus(payload);
     });
+    this.reconnectLineOff = EventsOn('mcp-reconnect-line', (line: string) => {
+      this.handleReconnectLine(line);
+    });
 
     if (!this.bootStarted) {
       this.bootStarted = true;
@@ -349,6 +357,7 @@ export class ERunUIController {
     this.terminalOutputOff?.();
     this.terminalExitOff?.();
     this.appStatusOff?.();
+    this.reconnectLineOff?.();
     window.clearTimeout(this.notificationTimer);
     window.clearTimeout(this.terminalCopyStatusTimer);
     window.clearTimeout(this.idleStatusTimer);
@@ -359,6 +368,7 @@ export class ERunUIController {
     this.terminalOutputOff = null;
     this.terminalExitOff = null;
     this.appStatusOff = null;
+    this.reconnectLineOff = null;
     this.terminalQueryResponseDisposables = [];
     this.terminal?.dispose();
     this.terminal = null;
@@ -1435,6 +1445,7 @@ export class ERunUIController {
       }
       this.state.diff = diff;
       this.state.diffError = '';
+      this.state.diffErrorReconnectable = false;
       this.state.selectedReviewScope = diff.scope || 'current';
       this.state.selectedReviewCommit = diff.selectedCommit || '';
       this.state.selectedDiffPath = chooseSelectedDiffPath(diff, this.state.selectedDiffPath);
@@ -1448,7 +1459,14 @@ export class ERunUIController {
       if (!options.silent || !this.state.diff) {
         this.state.diff = null;
       }
-      this.state.diffError = readError(error);
+      const message = readError(error);
+      if (isMcpUnreachableMessage(message)) {
+        this.state.diffError = stripMcpUnreachableMarker(message);
+        this.state.diffErrorReconnectable = true;
+      } else {
+        this.state.diffError = message;
+        this.state.diffErrorReconnectable = false;
+      }
     } finally {
       if (request === this.reviewDiffRequest) {
         if (!options.silent) {
@@ -1496,6 +1514,59 @@ export class ERunUIController {
   private stopReviewDiffRefresh(): void {
     window.clearTimeout(this.reviewDiffRefreshTimer);
     this.reviewDiffRefreshTimer = 0;
+  }
+
+  // requestReconnect opens the explicit-confirmation dialog for the
+  // unreachable-MCP recovery flow. The dialog runs `erun open`, which can
+  // redeploy the runtime, so the action is gated on a deliberate user click.
+  requestReconnect(): void {
+    if (!this.state.selected) {
+      return;
+    }
+    this.state.reconnect = { status: 'confirm', lastLine: '', error: '' };
+    this.emit();
+  }
+
+  cancelReconnect(): void {
+    if (this.state.reconnect.status === 'running') {
+      return;
+    }
+    this.state.reconnect = { status: 'idle', lastLine: '', error: '' };
+    this.emit();
+  }
+
+  async confirmReconnect(): Promise<void> {
+    const selection = this.state.selected;
+    if (!selection || this.state.reconnect.status === 'running') {
+      return;
+    }
+    this.state.reconnect = { status: 'running', lastLine: '', error: '' };
+    this.emit();
+    try {
+      await ReconnectMCP(selection);
+      this.state.reconnect = { status: 'idle', lastLine: '', error: '' };
+      this.emit();
+      await this.loadReviewDiff();
+    } catch (error: unknown) {
+      this.state.reconnect = {
+        status: 'error',
+        lastLine: this.state.reconnect.lastLine,
+        error: readError(error),
+      };
+      this.emit();
+    }
+  }
+
+  private handleReconnectLine(line: string): void {
+    const trimmed = (line || '').trim();
+    if (!trimmed) {
+      return;
+    }
+    if (this.state.reconnect.status !== 'running') {
+      return;
+    }
+    this.state.reconnect = { ...this.state.reconnect, lastLine: trimmed };
+    this.emit();
   }
 
   toggleDiffDirectory(path: string): void {
