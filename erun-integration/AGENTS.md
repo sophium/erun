@@ -136,13 +136,24 @@ Reaching for a stub to "make this look real enough to reach the branch" is hidin
   1. **The asserted value is masked by output normalization.** When the test's contract is "this specific dynamic value flowed through to the output" but the normalizer collapses every value of that shape to the same token, the snapshot cannot tell two valid values apart. A substring on the un-normalized capture is then the only way to assert the value the test actually cares about.
   2. **The assertion is on a side effect outside the captured streams.** Filesystem state, persisted config, recorded stub-server calls, parsed structured output — none of these are in the streams the snapshot covers. Use the appropriate read/inspection plus a shape check; this complements the snapshot, it does not replace it.
   3. **A specific line is intrinsically variable and cannot be normalized.** Output that genuinely depends on host clock, host platform, or other unstable inputs that no normalization rule can pin down. Match the variable line with a regex or pattern, accept that locking the whole stream is not possible, and document the reason in the test.
-- Workflow for a new scenario:
-  1. Decide what the scenario actually needs to assert. Most of the time it is one whole-output snapshot. Sometimes it is also a side-effect check from one of the cases above.
-  2. Run in record mode so the run captures the current output and writes it as the snapshot.
-  3. Read the snapshot end to end. Look for anything that will differ between machines, runs, or developers: paths, generated identifiers, hashes, timestamps, sizes, ordering.
-  4. For each source of variability, extend the normalization layer with a rule that maps it to a stable token, then re-record.
-  5. Run in compare mode (the default) and confirm the snapshot is reproduced exactly. Repeat the run on a clean state at least once before trusting it.
-  6. If the output refuses to stabilize and the scenario does not match one of the documented exceptions, the fix usually belongs in production code, not in the test: lift the missing trace, gate the side effect on the dry-run boundary, or surface the decision the test wants to assert. Do not work around an unstable trace with a substring-only assertion.
+### Treat the snapshot as a specification, not just a string
+
+The reason a whole-output snapshot is the right default is that the snapshot file becomes a readable, reviewable specification of what the command does. The diff in a PR is not just a regression signal — it is the way the command's behavior gets reviewed and remembered. That only works if the snapshot is honest about what the command would actually do.
+
+Two failure modes to guard against:
+
+- **A snapshot that locks output without locking intent.** A snapshot can stabilize on output that is technically deterministic but does not describe the command's contract — for example, a trace that goes silent before the real work, or a trace that names a side effect without naming the decision behind it. The test will pass forever, but a reviewer reading the snapshot cannot tell what the command is supposed to do, and the next person to change the production code can reshape behavior without the snapshot noticing.
+- **A dry-run snapshot that diverges from real-run behavior.** The dry-run contract says the trace must show every action and every decision the command would take, in the same order, with the same inputs, so a developer can audit the plan before the real run. A snapshot whose dry-run trace omits an action that real-run performs, or shows an action real-run wouldn't take, is locking a lie. Adding more snapshots on top of a broken dry-run contract makes the lie permanent.
+
+So a usable workflow is closer to:
+
+  1. Decide what behavior the scenario is meant to pin down. Write that as a one-line description in the test comment so a future reader can compare the snapshot against the intent.
+  2. Run in record mode and read the snapshot end to end against that description. Does it actually describe the command? Does each line correspond to a decision or action the command takes? Are the right things absent in dry-run, and the right things present?
+  3. If the snapshot is missing the action or decision the test cares about, the production code probably isn't tracing it. Fix that first; do not reach for a substring assert to bridge the gap.
+  4. If the dry-run snapshot says one thing and real-run does another, the dry-run contract is broken at that point. Fix the production code so dry-run faithfully reflects what real-run would do.
+  5. Look for anything in the snapshot that will differ between machines, runs, or developers — paths, generated identifiers, hashes, timestamps, sizes, ordering — and add a normalization rule for each. Re-record.
+  6. Run in compare mode and reproduce the snapshot exactly. Repeat on a clean state at least once before trusting it.
+  7. In review, treat any snapshot diff as a behavior diff. Walk through the new content the same way you would walk through prose documentation: does it still describe what the command should do?
 
 ## Coverage gate
 
