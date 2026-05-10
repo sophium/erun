@@ -3,10 +3,10 @@ import { CheckCircle2, ChevronDown, ChevronUp, Copy, LoaderCircle, Trash2 } from
 
 import { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
-import { useDeployQueue, useTerminalLockState } from '@/app/deployQueueState';
+import { useActivityQueue, useTerminalActivityLockState } from '@/app/activityQueueState';
 import { useControllerState } from '@/app/useControllerState';
-import { DeployLockOverlay } from '@/components/app/DeployLockOverlay';
-import { DeployQueueDrawer } from '@/components/app/DeployQueueDrawer';
+import { ActivityLockOverlay } from '@/components/app/ActivityLockOverlay';
+import { ActivityQueueDrawer } from '@/components/app/ActivityQueueDrawer';
 import { TerminalTabStrip } from '@/components/app/TerminalTabStrip';
 import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
 import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
@@ -40,7 +40,7 @@ export function App(): React.ReactElement {
   const reviewViewRef = React.useRef<HTMLElement>(null);
   const reviewMainRef = React.useRef<HTMLDivElement>(null);
   const diffListRef = React.useRef<HTMLDivElement>(null);
-  const [deployQueueOpen, setDeployQueueOpen] = React.useState(false);
+  const [activityQueueOpen, setActivityQueueOpen] = React.useState(false);
 
   React.useEffect(() => {
     if (!terminalRootRef.current || !terminalPaneRef.current || !reviewViewRef.current || !reviewMainRef.current || !diffListRef.current) {
@@ -81,7 +81,7 @@ export function App(): React.ReactElement {
             reviewViewRef={reviewViewRef}
             reviewMainRef={reviewMainRef}
             diffListRef={diffListRef}
-            onOpenDeployQueue={() => setDeployQueueOpen(true)}
+            onOpenActivityQueue={() => setActivityQueueOpen(true)}
           />
         </div>
       </div>
@@ -90,18 +90,18 @@ export function App(): React.ReactElement {
       <ManageDialogView controller={controller} state={state} />
       <ReconnectDialog controller={controller} state={state} />
       <TenantDialogView controller={controller} state={state} />
-      <DeployQueueLauncher open={deployQueueOpen} onOpen={() => setDeployQueueOpen(true)} onClose={() => setDeployQueueOpen(false)} />
+      <ActivityQueueLauncher open={activityQueueOpen} onOpen={() => setActivityQueueOpen(true)} onClose={() => setActivityQueueOpen(false)} />
     </TooltipProvider>
   );
 }
 
-// DeployQueueLauncher renders a floating action button that opens the
+// ActivityQueueLauncher renders a floating action button that opens the
 // deploy-queue drawer. It deliberately mounts the drawer so its subscription
 // to deploy:state events is always live — even when the drawer is closed —
 // so the badge count reflects active deploys without the user having opened
 // the drawer first.
-function DeployQueueLauncher({ open, onOpen, onClose }: { open: boolean; onOpen: () => void; onClose: () => void }): React.ReactElement {
-  const { entries } = useDeployQueue();
+function ActivityQueueLauncher({ open, onOpen, onClose }: { open: boolean; onOpen: () => void; onClose: () => void }): React.ReactElement {
+  const { entries } = useActivityQueue();
   const activeCount = entries.filter((entry) => entry.status === 'running').length;
   return (
     <>
@@ -125,7 +125,7 @@ function DeployQueueLauncher({ open, onOpen, onClose }: { open: boolean; onOpen:
         </TooltipTrigger>
         <TooltipContent side="left">{activeCount > 0 ? `${activeCount} deploy${activeCount > 1 ? 's' : ''} in progress` : 'Deploys'}</TooltipContent>
       </Tooltip>
-      <DeployQueueDrawer open={open} onClose={onClose} />
+      <ActivityQueueDrawer open={open} onClose={onClose} />
     </>
   );
 }
@@ -138,7 +138,7 @@ function MainPane({
   reviewViewRef,
   reviewMainRef,
   diffListRef,
-  onOpenDeployQueue,
+  onOpenActivityQueue,
 }: {
   controller: ERunUIController;
   state: ReturnType<typeof useControllerState>;
@@ -147,7 +147,7 @@ function MainPane({
   reviewViewRef: React.RefObject<HTMLElement | null>;
   reviewMainRef: React.RefObject<HTMLDivElement | null>;
   diffListRef: React.RefObject<HTMLDivElement | null>;
-  onOpenDeployQueue: () => void;
+  onOpenActivityQueue: () => void;
 }): React.ReactElement {
   const dashboardOpen = Boolean(state.tenantDashboard.tenant);
   return (
@@ -159,7 +159,7 @@ function MainPane({
       )}
     >
       {dashboardOpen && <TenantDashboardView controller={controller} state={state} />}
-      <TerminalPane controller={controller} state={state} hidden={dashboardOpen} terminalRootRef={terminalRootRef} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} onOpenDeployQueue={onOpenDeployQueue} />
+      <TerminalPane controller={controller} state={state} hidden={dashboardOpen} terminalRootRef={terminalRootRef} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} onOpenActivityQueue={onOpenActivityQueue} />
       {!dashboardOpen && <DebugPanel controller={controller} open={state.debugOpen} output={state.debugOutput} sessionId={state.sessionId} verbose={controller.activeSessionDebug(state.sessionId)} />}
     </main>
   );
@@ -173,7 +173,7 @@ function TerminalPane({
   reviewViewRef,
   reviewMainRef,
   diffListRef,
-  onOpenDeployQueue,
+  onOpenActivityQueue,
 }: {
   controller: ERunUIController;
   state: ReturnType<typeof useControllerState>;
@@ -182,9 +182,9 @@ function TerminalPane({
   reviewViewRef: React.RefObject<HTMLElement | null>;
   reviewMainRef: React.RefObject<HTMLDivElement | null>;
   diffListRef: React.RefObject<HTMLDivElement | null>;
-  onOpenDeployQueue: () => void;
+  onOpenActivityQueue: () => void;
 }): React.ReactElement {
-  const locks = useTerminalLockState();
+  const locks = useTerminalActivityLockState();
   const activeLock = locks.get(state.sessionId) ?? null;
   return (
     <div
@@ -200,7 +200,7 @@ function TerminalPane({
         <div id="erun-terminal-pane" className="relative h-full min-h-0 min-w-0 overflow-hidden">
           <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full box-border px-4 py-3.5" />
           <TerminalBusyOverlay message={state.terminalBusy ? state.terminalMessage : ''} />
-          {activeLock && <DeployLockOverlay lock={activeLock} onOpenQueue={onOpenDeployQueue} />}
+          {activeLock && <ActivityLockOverlay lock={activeLock} onOpenQueue={onOpenActivityQueue} />}
         </div>
       </div>
       <div className={cn(reviewSplitterClassName, !state.reviewOpen && 'hidden')} role="separator" aria-orientation="vertical" aria-label="Resize diff panel" onMouseDown={(event) => controller.startReviewResize(event)} />

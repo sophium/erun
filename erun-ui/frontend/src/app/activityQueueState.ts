@@ -3,9 +3,9 @@ import * as React from 'react';
 import { DismissDeploy, ListDeploys } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 
-export type DeployQueueStatus = 'running' | 'succeeded' | 'failed' | 'skipped';
+export type ActivityQueueStatus = 'running' | 'succeeded' | 'failed' | 'skipped';
 
-export type DeployQueueContainerStatus = {
+export type ActivityQueueContainerStatus = {
   name: string;
   image: string;
   phase: string;
@@ -15,7 +15,7 @@ export type DeployQueueContainerStatus = {
   message?: string;
 };
 
-export type DeployQueueEntry = {
+export type ActivityQueueEntry = {
   id: string;
   tenant: string;
   environment: string;
@@ -23,15 +23,15 @@ export type DeployQueueEntry = {
   release: string;
   namespace: string;
   kubernetesContext: string;
-  status: DeployQueueStatus;
+  status: ActivityQueueStatus;
   startedAt: string;
   endedAt?: string;
   lastUpdated: string;
-  containers?: DeployQueueContainerStatus[];
+  containers?: ActivityQueueContainerStatus[];
   error?: string;
 };
 
-export type DeployLockEvent = {
+export type ActivityLockEvent = {
   sessionId: number;
   tenant: string;
   environment: string;
@@ -41,26 +41,26 @@ export type DeployLockEvent = {
   deployTarget?: string;
 };
 
-const deployStateEvent = 'deploy:state';
-const deployLockEvent = 'deploy:lock';
+const deployStateEvent = 'activity:state';
+const deployLockEvent = 'activity:lock';
 
-// useDeployQueue subscribes to the backend deploy:state stream and exposes a
+// useActivityQueue subscribes to the backend deploy:state stream and exposes a
 // stable, sorted snapshot to React. Initial state is fetched once via
 // ListDeploys; subsequent updates are merged in place from event payloads so
 // the queue reflects backend transitions without polling.
-export function useDeployQueue(): {
-  entries: DeployQueueEntry[];
+export function useActivityQueue(): {
+  entries: ActivityQueueEntry[];
   dismiss: (id: string) => Promise<void>;
 } {
-  const [entries, setEntries] = React.useState<DeployQueueEntry[]>([]);
+  const [entries, setEntries] = React.useState<ActivityQueueEntry[]>([]);
 
   React.useEffect(() => {
     let cancelled = false;
     void ListDeploys().then((initial) => {
       if (cancelled) return;
-      setEntries(sortDeployEntries((initial as DeployQueueEntry[]) ?? []));
+      setEntries(sortDeployEntries((initial as ActivityQueueEntry[]) ?? []));
     });
-    const off = EventsOn(deployStateEvent, (entry: DeployQueueEntry) => {
+    const off = EventsOn(deployStateEvent, (entry: ActivityQueueEntry) => {
       setEntries((prev) => mergeDeployEntry(prev, entry));
     });
     return () => {
@@ -79,15 +79,15 @@ export function useDeployQueue(): {
   return { entries, dismiss };
 }
 
-// useTerminalLockState exposes the live map of session lock states keyed by
+// useTerminalActivityLockState exposes the live map of session lock states keyed by
 // terminal sessionId. Frontend renders a lock overlay on any terminal whose
 // id is present in the map. The hook also exposes the deployTarget so the
 // overlay can show "Waiting for deploy of team/dev 1.0.0".
-export function useTerminalLockState(): Map<number, DeployLockEvent> {
-  const [locks, setLocks] = React.useState<Map<number, DeployLockEvent>>(() => new Map());
+export function useTerminalActivityLockState(): Map<number, ActivityLockEvent> {
+  const [locks, setLocks] = React.useState<Map<number, ActivityLockEvent>>(() => new Map());
 
   React.useEffect(() => {
-    const off = EventsOn(deployLockEvent, (event: DeployLockEvent) => {
+    const off = EventsOn(deployLockEvent, (event: ActivityLockEvent) => {
       setLocks((prev) => {
         const next = new Map(prev);
         if (event.locked) {
@@ -104,7 +104,7 @@ export function useTerminalLockState(): Map<number, DeployLockEvent> {
   return locks;
 }
 
-function mergeDeployEntry(prev: DeployQueueEntry[], entry: DeployQueueEntry): DeployQueueEntry[] {
+function mergeDeployEntry(prev: ActivityQueueEntry[], entry: ActivityQueueEntry): ActivityQueueEntry[] {
   const idx = prev.findIndex((existing) => existing.id === entry.id);
   if (idx === -1) {
     return sortDeployEntries([entry, ...prev]);
@@ -114,15 +114,15 @@ function mergeDeployEntry(prev: DeployQueueEntry[], entry: DeployQueueEntry): De
   return sortDeployEntries(next);
 }
 
-function sortDeployEntries(entries: DeployQueueEntry[]): DeployQueueEntry[] {
+function sortDeployEntries(entries: ActivityQueueEntry[]): ActivityQueueEntry[] {
   const copy = entries.slice();
   copy.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
   return copy;
 }
 
-// activeDeployForSelection finds the running entry that targets the given
+// activeActivityForSelection finds the running entry that targets the given
 // tenant/environment. Used by the deploy button gate.
-export function activeDeployForSelection(entries: DeployQueueEntry[], tenant: string, environment: string): DeployQueueEntry | null {
+export function activeActivityForSelection(entries: ActivityQueueEntry[], tenant: string, environment: string): ActivityQueueEntry | null {
   return entries.find((entry) => entry.status === 'running' && entry.tenant === tenant && entry.environment === environment) ?? null;
 }
 
