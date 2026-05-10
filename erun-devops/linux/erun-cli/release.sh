@@ -67,8 +67,17 @@ ensure_github_public_key_scope() {
   gh auth refresh --hostname github.com --scopes admin:public_key
 }
 
+remote_git_ssh_works() {
+  GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new" \
+    git -C "$repo_root" ls-remote origin HEAD >/dev/null 2>&1
+}
+
 ensure_github_ssh_key_uploaded() {
   local public_key_path public_key_data key_title uploaded_keys
+
+  if remote_git_ssh_works; then
+    return
+  fi
 
   public_key_path=$(ensure_local_ssh_key)
   public_key_data=$(<"$public_key_path")
