@@ -63,25 +63,49 @@ type App struct {
 	ctx  context.Context
 	deps erunUIDeps
 
-	mu             sync.Mutex
-	nextSerial     int
-	sessions       map[string]*managedTerminal
-	idleStops      map[string]struct{}
-	busyEnvs       map[string]int
-	workspaceSyncs map[string]*workspaceSyncWorker
+	mu                 sync.Mutex
+	nextSerial         int
+	sessions           map[string]*managedTerminal
+	idleStops          map[string]struct{}
+	busyEnvs           map[string]int
+	workspaceSyncs     map[string]*workspaceSyncWorker
+	deployQueue        *deployQueueStore
+	deployStatusPoller func(deployQueueEntry)
 }
 
 func NewApp(deps erunUIDeps) *App {
 	deps = withDefaultCoreDeps(deps)
 	deps = withDefaultRuntimeDeps(deps)
 	deps = withDefaultUIDeps(deps)
-	return &App{
+	app := &App{
 		deps:           deps,
 		sessions:       make(map[string]*managedTerminal),
 		idleStops:      make(map[string]struct{}),
 		busyEnvs:       make(map[string]int),
 		workspaceSyncs: make(map[string]*workspaceSyncWorker),
 	}
+	statePath := defaultDeployQueueStatePath()
+	app.deployQueue = newDeployQueueStore(
+		func(entries []*deployQueueEntry) error {
+			if statePath == "" {
+				return nil
+			}
+			return writeDeployQueueStateAtomic(statePath, entries)
+		},
+		func(entry deployQueueEntry) {
+			app.emitDeployState(entry)
+		},
+		nil,
+	)
+	if statePath != "" {
+		if entries, err := loadDeployQueueStateFromDisk(statePath); err == nil && entries != nil {
+			app.deployQueue.load(entries)
+		}
+	}
+	app.deployStatusPoller = func(entry deployQueueEntry) {
+		go app.pollDeployContainerStatuses(context.Background(), entry)
+	}
+	return app
 }
 
 func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
