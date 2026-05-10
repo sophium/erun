@@ -16,24 +16,29 @@ func newReleaseCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCo
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := commandContext(cmd)
-			spec, err := common.ResolveReleaseSpec(ctx, findProjectRoot, common.ReleaseParams{Force: force})
-			if err != nil {
-				return err
-			}
-			if _, err := fmt.Fprintln(ctx.Stdout, spec.Version); err != nil {
-				return err
-			}
-			return common.RunReleaseSpec(ctx, spec, func(dir string, stdout, stderr io.Writer, args ...string) error {
-				if runGit == nil {
-					runGit = common.GitCommandRunner
+		RunE: withRunningCommandMarker(
+			func(*cobra.Command, []string) runningCommandSeed {
+				return runningCommandSeed{command: "release", summary: "release"}
+			},
+			func(cmd *cobra.Command, args []string) error {
+				ctx := commandContext(cmd)
+				spec, err := common.ResolveReleaseSpec(ctx, findProjectRoot, common.ReleaseParams{Force: force})
+				if err != nil {
+					return err
 				}
-				return runGit(dir, ctx.Stderr, stderr, args...)
-			}, func(dir, path string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
-				return common.BuildScriptRunner(dir, path, env, stdin, ctx.Stderr, stderr)
-			})
-		},
+				if _, err := fmt.Fprintln(ctx.Stdout, spec.Version); err != nil {
+					return err
+				}
+				return common.RunReleaseSpec(ctx, spec, func(dir string, stdout, stderr io.Writer, args ...string) error {
+					if runGit == nil {
+						runGit = common.GitCommandRunner
+					}
+					return runGit(dir, ctx.Stderr, stderr, args...)
+				}, func(dir, path string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
+					return common.BuildScriptRunner(dir, path, env, stdin, ctx.Stderr, stderr)
+				})
+			},
+		),
 	}
 	addDryRunFlag(cmd)
 	cmd.Flags().BoolVar(&force, "force", false, "Delete and recreate conflicting release tags before tagging")
