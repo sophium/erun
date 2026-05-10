@@ -262,8 +262,8 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	if deploy == nil {
 		return fmt.Errorf("helm deployer is required")
 	}
-	if err := ctx.EnsureKubernetesContext(deployInput.KubernetesContext); err != nil {
-		return err
+	if err := ctx.RequireKubernetesContext(deployInput.KubernetesContext); err != nil {
+		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
 	}
 	TraceEnsureKubernetesNamespace(ctx, deployInput.KubernetesContext, deployInput.Namespace)
 	command := deployInput.command()
