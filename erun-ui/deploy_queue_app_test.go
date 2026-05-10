@@ -159,6 +159,57 @@ func TestReleaseNameForTenant(t *testing.T) {
 	}
 }
 
+func TestDeployTraceLineHandlerAutoRegistersOnDeployingLine(t *testing.T) {
+	// Regression: a deploy kicked off in the ERun tab (or anywhere outside
+	// the desktop's Deploy button) prints `==> Deploying tenant/env version`
+	// to its PTY but never calls StartDeploySession. The trace handler must
+	// auto-register an entry from the printed line so the queue drawer sees
+	// every deploy regardless of which tab it was started in.
+	app := newTestAppForDeployQueue(t)
+	selection := uiSelection{Tenant: "erun", Environment: "local", KubernetesContext: "orbstack"}
+	handler := newDeployTraceLineHandler(app, selection)
+	handler("==> Deploying erun/local 1.0.51-snapshot-20260510080136")
+	entry, ok := app.deployQueue.findActive("erun", "local")
+	if !ok {
+		t.Fatal("expected deploy auto-registered from trace line")
+	}
+	if entry.Version != "1.0.51-snapshot-20260510080136" {
+		t.Fatalf("version = %q, want 1.0.51-snapshot-20260510080136", entry.Version)
+	}
+	if entry.Release != "erun-devops" {
+		t.Fatalf("release = %q, want erun-devops", entry.Release)
+	}
+	if entry.Namespace != "erun-local" {
+		t.Fatalf("namespace = %q, want erun-local", entry.Namespace)
+	}
+	if entry.KubernetesContext != "orbstack" {
+		t.Fatalf("context = %q, want orbstack", entry.KubernetesContext)
+	}
+
+	// Versionless deploy line (e.g. local snapshot deploy without explicit
+	// --version) still registers, just with empty Version.
+	app2 := newTestAppForDeployQueue(t)
+	handler2 := newDeployTraceLineHandler(app2, uiSelection{Tenant: "team", Environment: "dev"})
+	handler2("==> Deploying team/dev")
+	if _, ok := app2.deployQueue.findActive("team", "dev"); !ok {
+		t.Fatal("versionless deploy line did not register entry")
+	}
+}
+
+func TestDeployTraceLineHandlerDoesNotDoubleRegister(t *testing.T) {
+	app := newTestAppForDeployQueue(t)
+	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	app.startDeployTracking(selection, 0)
+	first, _ := app.deployQueue.findActive("erun", "local")
+
+	handler := newDeployTraceLineHandler(app, selection)
+	handler("==> Deploying erun/local 1.0.0")
+	second, _ := app.deployQueue.findActive("erun", "local")
+	if first.ID != second.ID {
+		t.Fatalf("trace line registered a duplicate entry: %s vs %s", first.ID, second.ID)
+	}
+}
+
 func TestNewAppDoesNotPersistWithoutExplicitPath(t *testing.T) {
 	// Regression: an earlier draft auto-resolved the persistence path inside
 	// NewApp via os.UserConfigDir. Tests that exercised StartDeploySession

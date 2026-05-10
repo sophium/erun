@@ -301,10 +301,24 @@ func namespaceForTenantEnv(tenant, environment string) string {
 	}
 }
 
-// deployTraceLineHandler scans the Local PTY output for the trace lines
-// emitted by erun deploy and feeds lifecycle transitions back into the deploy
-// queue. The handler is created per deploy session and invoked from the
-// session's output stream.
+// deployingLineRe matches the "==> Deploying tenant/env [version]" trace
+// emitted by RunHelmDeploy. Capture groups: tenant, environment, optional
+// trailing version. Used by the trace handler to auto-register a deploy
+// entry when the user runs `erun deploy` directly in any tab (not just via
+// the desktop's Deploy button).
+var deployingLineRe = regexp.MustCompile(`^==> Deploying ([^/\s]+)/([^/\s]+)(?:\s+(\S+))?\s*$`)
+
+// newDeployTraceLineHandler scans PTY output for the trace lines emitted by
+// erun deploy and feeds lifecycle transitions back into the deploy queue.
+// The handler operates on the source-of-truth printed text rather than on
+// any in-band signal from the desktop button, so it works regardless of
+// which tab the user kicked the deploy off in (Local from the Deploy
+// button, ERun from a manual `erun deploy`, AI from claude inside the pod).
+//
+// The selection argument is the tab's resolved tenant/env. It is used as the
+// fallback (tenant, env) when the trace itself doesn't carry one — for
+// example a `==> Deploy failed` line without a preceding `==> Deploying`
+// (which happens when the deploy aborts before the spec resolves).
 func newDeployTraceLineHandler(app *App, selection uiSelection) func(string) {
 	deployedRe := regexp.MustCompile(`^==> Deployed `)
 	failedRe := regexp.MustCompile(`^==> Deploy failed`)
@@ -312,6 +326,10 @@ func newDeployTraceLineHandler(app *App, selection uiSelection) func(string) {
 	errorRe := regexp.MustCompile(`(?i)^Error: `)
 	return func(line string) {
 		line = strings.TrimSpace(line)
+		if match := deployingLineRe.FindStringSubmatch(line); match != nil {
+			app.startDeployTrackingFromTrace(selection, match[1], match[2], match[3])
+			return
+		}
 		switch {
 		case deployedRe.MatchString(line):
 			app.finishDeployTracking(selection, deployQueueStatusSucceeded, "")
@@ -327,6 +345,42 @@ func newDeployTraceLineHandler(app *App, selection uiSelection) func(string) {
 			// a useful hint.
 			app.captureDeployErrorIfRunning(selection, line)
 		}
+	}
+}
+
+// startDeployTrackingFromTrace registers a deploy in the queue based on a
+// trace line we observed in any tab's PTY. If an active entry already
+// exists for (tenant, environment) (e.g. because the desktop's Deploy
+// button already registered it), this is a no-op. Otherwise a new entry
+// is started with the parsed fields. The selection's KubernetesContext is
+// used when available so the pod-status poller has somewhere to query.
+func (a *App) startDeployTrackingFromTrace(selection uiSelection, tenant, environment, version string) {
+	if a.deployQueue == nil {
+		return
+	}
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	version = strings.TrimSpace(version)
+	if tenant == "" || environment == "" {
+		return
+	}
+	if _, ok := a.deployQueue.findActive(tenant, environment); ok {
+		return
+	}
+	entry, fresh := a.deployQueue.start(deployQueueEntry{
+		Tenant:            tenant,
+		Environment:       environment,
+		Version:           version,
+		Release:           releaseNameForTenant(tenant),
+		Namespace:         namespaceForTenantEnv(tenant, environment),
+		KubernetesContext: strings.TrimSpace(selection.KubernetesContext),
+	})
+	if !fresh {
+		return
+	}
+	a.lockTerminalsForDeploy(entry)
+	if a.deployStatusPoller != nil {
+		a.deployStatusPoller(entry)
 	}
 }
 
@@ -500,19 +554,23 @@ func deployTargetForRuntime(entry deployQueueEntry) string {
 	return target
 }
 
-// feedDeployTraceFromTerminal accumulates Local PTY output, splits on
+// feedDeployTraceFromTerminal accumulates PTY output for any tab that hosts
+// a running erun process (Local from the Deploy button, ERun from a manual
+// `erun deploy`, AI from claude calling deploy inside the pod), splits on
 // newlines, and dispatches each complete line through the deploy trace
-// handler when an active deploy targets the session's selection. Other
-// session kinds and selections without an active deploy short-circuit
-// without touching the deploy queue, so the hot path stays light.
+// handler. The trace handler is the source-of-truth for deploy lifecycle:
+// it auto-registers an entry on `==> Deploying` and finishes it on
+// Deployed/failed/Skipping. Selections without a tenant/env are ignored.
 func (a *App) feedDeployTraceFromTerminal(managed *managedTerminal, chunk []byte) {
 	if managed == nil || a.deployQueue == nil {
 		return
 	}
-	if managed.kind != sessionKindLocal {
+	if managed.selection.Tenant == "" || managed.selection.Environment == "" {
 		return
 	}
-	if _, ok := a.deployQueue.findActive(managed.selection.Tenant, managed.selection.Environment); !ok {
+	switch managed.kind {
+	case sessionKindLocal, sessionKindOpen, sessionKindAI, sessionKindCommand:
+	default:
 		return
 	}
 	a.mu.Lock()
