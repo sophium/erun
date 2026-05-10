@@ -2,6 +2,7 @@ package integration
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -441,9 +442,15 @@ func TestDeploy(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		// PID 0 is invalid for kill(0); the helper treats it as not-alive.
+		// Use a real reaped child PID (positive, dead) instead of PID 0.
+		// PID 0 short-circuits in isProcessAlive without ever calling
+		// Signal(0); a reaped PID forces the live signal-error path that
+		// surfaces darwin's os.ErrProcessDone vs. linux's ESRCH. Without
+		// that distinction the marker stays "alive" on darwin and deploy
+		// is locked out for the full 15-minute max-age fallback.
+		deadPID := reapedChildPID(t)
 		fixture.SeedDeployInflightMarker(t, setup, "test-context", "team-dev", "team-devops", fixture.DeployInflightRecord{
-			PID:         0,
+			PID:         deadPID,
 			ParamsHash:  "0000000000000000",
 			Tenant:      "team",
 			Environment: "dev",
@@ -490,6 +497,24 @@ func extractDedupHash(t *testing.T, raw string) string {
 
 func isHex(c byte) bool {
 	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+}
+
+// reapedChildPID spawns a short-lived child, waits for it to exit, and
+// returns its now-dead PID. Calling isProcessAlive against this PID
+// exercises the real signal(0) error path: ESRCH on linux,
+// os.ErrProcessDone on darwin. PID reuse is theoretically possible but
+// vanishingly unlikely between the wait return and the marker read.
+func reapedChildPID(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command("/bin/sh", "-c", "exit 0")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("seed reaped child: %v", err)
+	}
+	pid := cmd.ProcessState.Pid()
+	if pid <= 0 {
+		t.Fatalf("seed reaped child returned invalid pid %d", pid)
+	}
+	return pid
 }
 
 const cleanRolloutPodJSON = `{

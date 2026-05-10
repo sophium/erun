@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 // newTestAppForActivityQueue builds a minimal App with an in-memory queue
@@ -95,6 +97,79 @@ func TestActivityTraceLineHandlerFinalizesOnDeployedAndFailed(t *testing.T) {
 	}
 	if !strings.Contains(all2[0].Error, "Deploy failed") && !strings.Contains(all2[0].Error, "UPGRADE FAILED") {
 		t.Fatalf("error not captured: %q", all2[0].Error)
+	}
+}
+
+func TestActivityTraceLineHandlerFinalizesUsingTenantEnvFromLine(t *testing.T) {
+	// Regression: the trace handler used to look up the active deploy
+	// entry by the *session selection's* tenant/env when ==> Deployed
+	// arrived. If the trace appeared in a tab whose selection was empty
+	// (a generic Local shell where the user invoked `erun open foo bar`
+	// manually), the lookup failed and the entry stayed running forever.
+	// The fix parses tenant/env directly out of the ==> Deployed line so
+	// finalization works regardless of which tab observed it.
+	app := newTestAppForActivityQueue(t)
+	app.activityQueue.start(activityQueueEntry{
+		Command:     "deploy",
+		Tenant:      "erun",
+		Environment: "ux",
+		Version:     "1.0.51-snapshot-20260508135009",
+		Source:      "trace",
+	})
+	emptySelection := uiSelection{}
+	handler := newActivityTraceLineHandler(app, emptySelection, sessionKindLocal)
+	handler("==> Deployed erun/ux 1.0.51-snapshot-20260508135009 in 52s")
+	if _, ok := app.activityQueue.findActive("erun", "ux"); ok {
+		t.Fatal("entry should be finished from line tenant/env even with empty selection")
+	}
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusSucceeded {
+		t.Fatalf("expected one succeeded entry, got %+v", all)
+	}
+}
+
+func TestActivityTraceLineHandlerFinalizesSkippingFromLine(t *testing.T) {
+	// `==> Skipping <tenant>/<env> ...` is the dedup-skip outcome from
+	// the deploy singleflight. Same finalization shape as ==> Deployed:
+	// parse tenant/env from the line so a tab with no selection still
+	// closes out the queue entry.
+	app := newTestAppForActivityQueue(t)
+	app.activityQueue.start(activityQueueEntry{
+		Command:     "deploy",
+		Tenant:      "erun",
+		Environment: "ux",
+		Source:      "trace",
+	})
+	handler := newActivityTraceLineHandler(app, uiSelection{}, sessionKindLocal)
+	handler("==> Skipping erun/ux 1.0.51 (identical deploy already in progress)")
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusSkipped {
+		t.Fatalf("expected one skipped entry, got %+v", all)
+	}
+}
+
+func TestResolveActivityKubeContextFallsBackToEnvConfig(t *testing.T) {
+	// startDeployFromTrace registers entries with a kube context drawn
+	// first from the session selection, falling back to the env config
+	// on file. Without this fallback, generic Local tabs (selection
+	// empty) emit entries with an empty KubernetesContext, and the
+	// container-status poller's kubectl invocation hits whatever the
+	// host's `current-context` happens to be — orbstack on a developer
+	// machine — instead of the env's real cluster, so the deploy card
+	// renders without container pills.
+	app := newTestAppForActivityQueue(t)
+	app.deps.store = stubUIStore{
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/ux": {Name: "ux", KubernetesContext: "erun"},
+		},
+	}
+	got := app.resolveActivityKubeContext(uiSelection{}, "erun", "ux")
+	if got != "erun" {
+		t.Fatalf("kube context = %q, want %q", got, "erun")
+	}
+	got = app.resolveActivityKubeContext(uiSelection{KubernetesContext: "session-context"}, "erun", "ux")
+	if got != "session-context" {
+		t.Fatalf("selection should win when present, got %q", got)
 	}
 }
 
@@ -282,6 +357,50 @@ func TestParseHelmUpdatedAcceptsHelmFormats(t *testing.T) {
 	if _, ok := parseHelmUpdated("not a timestamp"); ok {
 		t.Error("parseHelmUpdated must reject garbage input")
 	}
+}
+
+// TestHelmListArgsAvoidsDeprecatedAllFlag pins the arguments we pass to
+// `helm list`. helm v4 removed the `--all` umbrella flag; if it slips
+// back in, every poll errors out, the whole reconcile channel goes
+// silent, and entries get stuck running in the activity panel without
+// any visible failure mode.
+func TestHelmListArgsAvoidsDeprecatedAllFlag(t *testing.T) {
+	args := helmListTenantDevopsArgs("erun")
+	for _, a := range args {
+		if a == "--all" {
+			t.Fatalf("--all is deprecated in helm v4; args = %v", args)
+		}
+	}
+	for _, want := range []string{"--deployed", "--pending", "--failed", "--uninstalling"} {
+		if !containsString(args, want) {
+			t.Errorf("missing %s in helm list args: %v", want, args)
+		}
+	}
+	if !containsPair(args, "--kube-context", "erun") {
+		t.Errorf("expected --kube-context erun in args: %v", args)
+	}
+	bare := helmListTenantDevopsArgs("")
+	if containsString(bare, "--kube-context") {
+		t.Errorf("empty kube context should not append --kube-context; args = %v", bare)
+	}
+}
+
+func containsString(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsPair(args []string, flag, value string) bool {
+	for i := 0; i < len(args)-1; i++ {
+		if args[i] == flag && args[i+1] == value {
+			return true
+		}
+	}
+	return false
 }
 
 // helmUpdatedNow returns the current time formatted in helm's default

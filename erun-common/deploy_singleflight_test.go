@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -353,6 +354,20 @@ func TestHelmDeployParamsHashStable(t *testing.T) {
 	deploy.ImageOverrides["erun-dind"] = "ghcr.io/sophium/erun-dind:other"
 	if helmDeployParamsHash(deploy) == first {
 		t.Fatalf("hash did not change when image override changed")
+	}
+}
+
+func TestIsProcessAliveReportsReapedChildAsDead(t *testing.T) {
+	cmd := exec.Command("/bin/sh", "-c", "exit 0")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("seed process failed: %v", err)
+	}
+	pid := cmd.ProcessState.Pid()
+	if pid <= 0 {
+		t.Fatalf("seed process has invalid pid: %d", pid)
+	}
+	if isProcessAlive(pid) {
+		t.Fatalf("isProcessAlive(%d) returned true for a reaped child", pid)
 	}
 }
 
