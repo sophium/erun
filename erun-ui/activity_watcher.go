@@ -46,8 +46,9 @@ func (a *App) runActivityMarkerWatcher(stop <-chan struct{}) {
 // reconcileActivityMarkers reads every marker in dir, registers any that
 // the queue does not already track, finalizes entries whose marker has
 // recorded a terminal status, prunes markers whose PID is no longer
-// alive, and finalizes entries whose marker is gone. Errors reading
-// individual markers are tolerated — the next tick re-tries.
+// alive or whose command type is no longer tracked, and finalizes
+// entries whose marker is gone. Errors reading individual markers are
+// tolerated — the next tick re-tries.
 func (a *App) reconcileActivityMarkers(dir string) {
 	if a.activityQueue == nil {
 		return
@@ -58,11 +59,19 @@ func (a *App) reconcileActivityMarkers(dir string) {
 	}
 	seenIDs := make(map[string]struct{}, len(records))
 	for _, record := range records {
+		if isOutdatedCLICommand(record.Command) {
+			// Markers for command types the current desktop no longer
+			// tracks (open, init) are unmistakably from an older `erun`
+			// CLI on PATH. Prune them and surface a one-time warning
+			// so the user knows to update the CLI.
+			a.pruneStaleMarker(dir, record)
+			a.notifyCLIOutdatedOnce(record)
+			continue
+		}
 		if record.Status == "" && !isProcessAliveOrDefault(record.PID) {
 			// CLI exited without finalizing (crashed, killed via
-			// SIGKILL, host shutdown, or an old binary that wrote a
-			// marker but never removed it). Clean up so the queue
-			// doesn't show a phantom-running entry forever.
+			// SIGKILL, host shutdown). Clean up so the queue doesn't
+			// show a phantom-running entry forever.
 			a.pruneStaleMarker(dir, record)
 			continue
 		}
@@ -83,6 +92,55 @@ func (a *App) reconcileActivityMarkers(dir string) {
 		}
 	}
 	a.finalizeMissingMarkers(seenIDs)
+}
+
+// outdatedCLICommands lists command types that the current desktop no
+// longer registers as RunningCommand markers. A marker bearing one of
+// these commands must have been written by an older `erun` CLI on PATH;
+// the desktop prunes the marker and warns once so the user updates the
+// CLI.
+var outdatedCLICommands = map[string]struct{}{
+	"open": {},
+	"init": {},
+}
+
+func isOutdatedCLICommand(command string) bool {
+	_, ok := outdatedCLICommands[strings.TrimSpace(command)]
+	return ok
+}
+
+// notifyCLIOutdatedOnce emits a single `activity:cli-outdated` event per
+// (command, command-id) pair so the frontend can render a banner. The
+// event payload includes the offending command so the toast can suggest
+// the right rebuild target.
+func (a *App) notifyCLIOutdatedOnce(record eruncommon.RunningCommand) {
+	a.cliOutdatedMu.Lock()
+	defer a.cliOutdatedMu.Unlock()
+	if a.cliOutdatedSeen == nil {
+		a.cliOutdatedSeen = make(map[string]struct{})
+	}
+	key := strings.TrimSpace(record.Command) + "\x00" + strings.TrimSpace(record.ID)
+	if _, ok := a.cliOutdatedSeen[key]; ok {
+		return
+	}
+	a.cliOutdatedSeen[key] = struct{}{}
+	a.emitEvent(activityCLIOutdatedEvent, cliOutdatedPayload{
+		Command:  strings.TrimSpace(record.Command),
+		Tenant:   strings.TrimSpace(record.Tenant),
+		PID:      record.PID,
+		Reason:   "Activity marker written by an older `erun` CLI on PATH; rebuild and reinstall the CLI to clear this warning.",
+		Suggest:  "make install / go install ./erun-cli/...",
+	})
+}
+
+const activityCLIOutdatedEvent = "activity:cli-outdated"
+
+type cliOutdatedPayload struct {
+	Command string `json:"command"`
+	Tenant  string `json:"tenant,omitempty"`
+	PID     int    `json:"pid,omitempty"`
+	Reason  string `json:"reason"`
+	Suggest string `json:"suggest,omitempty"`
 }
 
 // pruneStaleMarker removes the on-disk marker for a process that is no

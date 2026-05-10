@@ -79,11 +79,15 @@ if [ "$TARGET_GOOS" = "darwin" ]; then
 	export CGO_LDFLAGS="${CGO_LDFLAGS:+$CGO_LDFLAGS }$MACOS_MIN_FLAG"
 fi
 
+printf '>> rebuilding erun desktop binary (%s)... ' "$BUILD_VERSION" >&2
+build_started_at=$(date +%s)
 go build \
 	-tags "desktop,production" \
 	-ldflags "$LDFLAGS" \
 	-o "$TARGET" \
 	./
+build_finished_at=$(date +%s)
+printf 'ok (%ss) -> %s\n' "$((build_finished_at - build_started_at))" "$TARGET" >&2
 
 if [ "$TARGET_GOOS" = "darwin" ]; then
 	APP_BUNDLE="$(dirname "$TARGET")/ERun.app"
