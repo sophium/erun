@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"time"
 
@@ -57,7 +56,6 @@ type erunUIDeps struct {
 	recordActivity        func(eruncommon.EnvironmentActivityParams) error
 	stopCloudContext      func(context.Context, string) (eruncommon.CloudContextStatus, error)
 	windowStatePath       string
-	activityQueueStatePath  string
 	windowMaximised       func(context.Context) bool
 }
 
@@ -65,17 +63,20 @@ type App struct {
 	ctx  context.Context
 	deps erunUIDeps
 
-	mu                   sync.Mutex
-	nextSerial           int
-	sessions             map[string]*managedTerminal
-	idleStops            map[string]struct{}
-	busyEnvs             map[string]int
-	workspaceSyncs       map[string]*workspaceSyncWorker
-	activityQueue        *activityQueueStore
-	activityStatusPoller func(activityQueueEntry)
-	activityWatcherStop  chan struct{}
-	activityIgnoredMu    sync.Mutex
-	activityIgnored      map[string]struct{}
+	mu                        sync.Mutex
+	nextSerial                int
+	sessions                  map[string]*managedTerminal
+	idleStops                 map[string]struct{}
+	busyEnvs                  map[string]int
+	workspaceSyncs            map[string]*workspaceSyncWorker
+	activityQueue             *activityQueueStore
+	activityStatusPoller      func(activityQueueEntry)
+	activityPollersStop       chan struct{}
+	activityWatchedContextsMu sync.Mutex
+	activityWatchedContexts   map[string]struct{}
+	actionQueueMu             sync.Mutex
+	actionQueues              map[string]*envActionQueue
+	actionCancels             map[string]context.CancelFunc
 }
 
 func NewApp(deps erunUIDeps) *App {
@@ -89,30 +90,14 @@ func NewApp(deps erunUIDeps) *App {
 		busyEnvs:       make(map[string]int),
 		workspaceSyncs: make(map[string]*workspaceSyncWorker),
 	}
-	statePath := strings.TrimSpace(deps.activityQueueStatePath)
 	app.activityQueue = newActivityQueueStore(
-		func(entries []*activityQueueEntry) error {
-			if statePath == "" {
-				return nil
-			}
-			return writeActivityQueueStateAtomic(statePath, entries)
-		},
 		func(entry activityQueueEntry) {
 			app.emitActivityState(entry)
 		},
 		nil,
 	)
-	if statePath != "" {
-		if entries, err := loadActivityQueueStateFromDisk(statePath); err == nil && entries != nil {
-			app.activityQueue.load(entries)
-		}
-	}
 	app.activityStatusPoller = func(entry activityQueueEntry) {
 		go app.pollActivityContainerStatuses(context.Background(), entry)
-	}
-	if statePath != "" {
-		app.activityWatcherStop = make(chan struct{})
-		go app.runActivityMarkerWatcher(app.activityWatcherStop)
 	}
 	return app
 }
@@ -220,10 +205,12 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	configureAppIdentity("ERun")
+	a.startActivityPollers()
 }
 
 func (a *App) shutdown(context.Context) {
-	a.stopActivityMarkerWatcher()
+	a.stopActivityPollers()
+	a.stopActionRunners()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.stopAllWorkspaceSyncsLocked()

@@ -1,7 +1,13 @@
 import * as React from 'react';
-import { AlertOctagon, CheckCircle2, ChevronRight, LoaderCircle, Trash2, X } from 'lucide-react';
+import { AlertOctagon, Ban, CheckCircle2, ChevronRight, Clock, LoaderCircle, Trash2, X } from 'lucide-react';
 
-import { activeActivityForSelection, type ActivityQueueContainerStatus, type ActivityQueueEntry, formatElapsed, useActivityQueue } from '@/app/activityQueueState';
+import {
+  type ActivityQueueContainerStatus,
+  type ActivityQueueEntry,
+  type ActivityRecoveryResult,
+  formatElapsed,
+  useActivityQueue,
+} from '@/app/activityQueueState';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { StartForceDeploySession } from '../../../wailsjs/go/main/App';
@@ -20,22 +26,46 @@ const drawerHiddenClassName = 'translate-x-full';
 const drawerVisibleClassName = 'translate-x-0';
 
 // ActivityQueueDrawer renders the right-side activity queue as a slide-in
-// sheet. Active entries group at the top with live container status
-// pills; finished entries form the history below with a dismiss action.
-// Active entries also expose a force-dismiss for cases where the watcher
-// cannot finalize on its own (most commonly: a deploy whose marker is on
-// the runtime pod's filesystem and unreachable from the host).
+// sheet split into three sections:
+//
+//   - Now: entries currently running plus observational running
+//     entries (helm-pending deploys, stale shells).
+//   - Next: action entries waiting in the per-env runner queue. The
+//     user can Cancel a waiting entry before it starts.
+//   - Recent: finished entries (succeeded / failed / skipped /
+//     cancelled), capped at 50 newest.
+//
+// The queue is rebuilt on every desktop launch from real cluster + host
+// objects plus desktop actions enqueued in this session: helm releases
+// drive observational deploy entries, live PTY sessions drive shell
+// entries, and Wails-exported actions register through the action
+// runner. There is no cross-restart persistence, so failed activities
+// from previous sessions don't reappear.
 export function ActivityQueueDrawer({ open, onClose }: ActivityQueueDrawerProps): React.ReactElement {
-  const { entries, dismiss, forceDismiss } = useActivityQueue();
-  const activeEntries = entries.filter((entry) => entry.status === 'running');
-  const historyEntries = entries.filter((entry) => entry.status !== 'running');
+  const { entries, dismiss, forceDismiss, recoverPendingHelm, killSession, cancelWaiting } = useActivityQueue();
+  const nowEntries = entries.filter((entry) => entry.status === 'running');
+  const nextEntries = entries.filter((entry) => entry.status === 'waiting');
+  const historyEntries = entries.filter((entry) =>
+    entry.status === 'succeeded' ||
+    entry.status === 'failed' ||
+    entry.status === 'skipped' ||
+    entry.status === 'cancelled',
+  );
+  const [recoveryFeedback, setRecoveryFeedback] = React.useState<ActivityRecoveryResult | null>(null);
 
-  const dismissAllActive = React.useCallback(async () => {
-    await Promise.all(activeEntries.map((entry) => forceDismiss(entry.id)));
-  }, [activeEntries, forceDismiss]);
+  const dismissAllNow = React.useCallback(async () => {
+    await Promise.all(nowEntries.map((entry) => forceDismiss(entry.id)));
+  }, [nowEntries, forceDismiss]);
+  const cancelAllNext = React.useCallback(async () => {
+    await Promise.all(nextEntries.map((entry) => cancelWaiting(entry.id)));
+  }, [nextEntries, cancelWaiting]);
   const dismissAllHistory = React.useCallback(async () => {
     await Promise.all(historyEntries.map((entry) => dismiss(entry.id)));
   }, [historyEntries, dismiss]);
+  const onRecoverPendingHelm = React.useCallback(async (id: string) => {
+    const result = await recoverPendingHelm(id);
+    setRecoveryFeedback(result);
+  }, [recoverPendingHelm]);
 
   return (
     <>
@@ -50,7 +80,7 @@ export function ActivityQueueDrawer({ open, onClose }: ActivityQueueDrawerProps)
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold">Activities</h2>
             <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground" aria-live="polite">
-              {activeEntries.length} active
+              {nowEntries.length} now · {nextEntries.length} next
             </span>
           </div>
           <Button type="button" variant="ghost" size="icon" aria-label="Close activity queue" onClick={onClose}>
@@ -58,14 +88,26 @@ export function ActivityQueueDrawer({ open, onClose }: ActivityQueueDrawerProps)
           </Button>
         </header>
         <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-3" aria-live="polite">
+          {recoveryFeedback && <RecoveryFeedback result={recoveryFeedback} onDismiss={() => setRecoveryFeedback(null)} />}
           <ActivitySection
-            title="Active"
-            entries={activeEntries}
-            emptyText="No activities in progress."
+            title="Now"
+            entries={nowEntries}
+            emptyText="Nothing running."
             onForceDismiss={forceDismiss}
-            onClearAll={activeEntries.length > 1 ? dismissAllActive : undefined}
+            onRecoverPendingHelm={onRecoverPendingHelm}
+            onKillSession={killSession}
+            onClearAll={nowEntries.length > 1 ? dismissAllNow : undefined}
             clearAllLabel="Force dismiss all"
-            clearAllHint="Removes every active entry from the queue. Underlying processes (open shells, running deploys) are not killed."
+            clearAllHint="Removes every running entry from the queue. Underlying processes are not killed unless you also use Kill on a shell entry."
+          />
+          <ActivitySection
+            title="Next"
+            entries={nextEntries}
+            emptyText="Queue is empty."
+            onCancelWaiting={cancelWaiting}
+            onClearAll={nextEntries.length > 1 ? cancelAllNext : undefined}
+            clearAllLabel="Cancel all"
+            clearAllHint="Cancels every queued action that hasn't started yet."
           />
           <ActivitySection
             title="Recent"
@@ -81,18 +123,58 @@ export function ActivityQueueDrawer({ open, onClose }: ActivityQueueDrawerProps)
   );
 }
 
+function RecoveryFeedback({ result, onDismiss }: { result: ActivityRecoveryResult; onDismiss: () => void }): React.ReactElement {
+  return (
+    <section
+      role="status"
+      className={cn(
+        'rounded-md border px-3 py-2 text-xs',
+        result.ok ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-900' : 'border-destructive/40 bg-destructive/10 text-destructive',
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <p className="font-medium">{result.ok ? 'Recovery succeeded' : 'Recovery failed'}</p>
+        <Button type="button" variant="ghost" size="icon" aria-label="Dismiss recovery message" onClick={onDismiss}>
+          <X aria-hidden="true" className="size-3.5" />
+        </Button>
+      </div>
+      {result.error && <p className="mt-1 break-words font-mono text-[10.5px]">{result.error}</p>}
+      {result.output && (
+        <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded-sm bg-background/40 p-2 font-mono text-[10.5px] text-foreground">
+          {result.output}
+        </pre>
+      )}
+    </section>
+  );
+}
+
 type ActivitySectionProps = {
   title: string;
   entries: ActivityQueueEntry[];
   emptyText: string;
   onDismiss?: (id: string) => Promise<void>;
   onForceDismiss?: (id: string) => Promise<void>;
+  onCancelWaiting?: (id: string) => Promise<boolean>;
+  onRecoverPendingHelm?: (id: string) => Promise<void>;
+  onKillSession?: (sessionId: number) => Promise<boolean>;
   onClearAll?: () => Promise<void>;
   clearAllLabel?: string;
   clearAllHint?: string;
 };
 
-function ActivitySection({ title, entries, emptyText, onDismiss, onForceDismiss, onClearAll, clearAllLabel, clearAllHint }: ActivitySectionProps): React.ReactElement {
+function ActivitySection({
+  title,
+  entries,
+  emptyText,
+  onDismiss,
+  onForceDismiss,
+  onCancelWaiting,
+  onRecoverPendingHelm,
+  onKillSession,
+  onClearAll,
+  clearAllLabel,
+  clearAllHint,
+}: ActivitySectionProps): React.ReactElement {
   return (
     <section aria-labelledby={`activity-section-${title.toLowerCase()}`}>
       <div className="flex items-center justify-between px-1 pb-1.5">
@@ -120,7 +202,14 @@ function ActivitySection({ title, entries, emptyText, onDismiss, onForceDismiss,
         <ul className="space-y-2">
           {entries.map((entry) => (
             <li key={entry.id}>
-              <ActivityCard entry={entry} onDismiss={onDismiss} onForceDismiss={onForceDismiss} />
+              <ActivityCard
+                entry={entry}
+                onDismiss={onDismiss}
+                onForceDismiss={onForceDismiss}
+                onCancelWaiting={onCancelWaiting}
+                onRecoverPendingHelm={onRecoverPendingHelm}
+                onKillSession={onKillSession}
+              />
             </li>
           ))}
         </ul>
@@ -133,6 +222,9 @@ type ActivityCardProps = {
   entry: ActivityQueueEntry;
   onDismiss?: (id: string) => Promise<void>;
   onForceDismiss?: (id: string) => Promise<void>;
+  onCancelWaiting?: (id: string) => Promise<boolean>;
+  onRecoverPendingHelm?: (id: string) => Promise<void>;
+  onKillSession?: (sessionId: number) => Promise<boolean>;
 };
 
 // useTickingNow provides a per-component ticking timestamp without
@@ -150,25 +242,49 @@ function useTickingNow(active: boolean): number {
   return now;
 }
 
-const ActivityCard = React.memo(function ActivityCard({ entry, onDismiss, onForceDismiss }: ActivityCardProps): React.ReactElement {
-  const isActive = entry.status === 'running';
-  const now = useTickingNow(isActive);
-  const elapsed = isActive
-    ? formatElapsed(entry.startedAt, now)
+const ActivityCard = React.memo(function ActivityCard({
+  entry,
+  onDismiss,
+  onForceDismiss,
+  onCancelWaiting,
+  onRecoverPendingHelm,
+  onKillSession,
+}: ActivityCardProps): React.ReactElement {
+  const isRunning = entry.status === 'running';
+  const isWaiting = entry.status === 'waiting';
+  const tickingActive = isRunning || isWaiting;
+  const now = useTickingNow(tickingActive);
+  const elapsedAnchor = isWaiting && entry.enqueuedAt ? entry.enqueuedAt : entry.startedAt;
+  const elapsed = tickingActive
+    ? formatElapsed(elapsedAnchor, now)
     : entry.endedAt
       ? formatElapsed(entry.startedAt, Date.parse(entry.endedAt))
       : formatElapsed(entry.startedAt, Date.parse(entry.lastUpdated));
   const handleDismiss = React.useCallback(() => {
-    if (isActive && onForceDismiss) {
+    if (isWaiting && onCancelWaiting) {
+      void onCancelWaiting(entry.id);
+      return;
+    }
+    if (isRunning && onForceDismiss) {
       void onForceDismiss(entry.id);
       return;
     }
     if (onDismiss) {
       void onDismiss(entry.id);
     }
-  }, [entry.id, isActive, onDismiss, onForceDismiss]);
-  const dismissAvailable = isActive ? Boolean(onForceDismiss) : Boolean(onDismiss);
-  const dismissLabel = isActive ? 'Force dismiss (entry only — does not stop the underlying process)' : 'Dismiss';
+  }, [entry.id, isRunning, isWaiting, onCancelWaiting, onDismiss, onForceDismiss]);
+  let dismissAvailable: boolean;
+  let dismissLabel: string;
+  if (isWaiting) {
+    dismissAvailable = Boolean(onCancelWaiting);
+    dismissLabel = 'Cancel — removes this entry from the queue before it starts.';
+  } else if (isRunning) {
+    dismissAvailable = Boolean(onForceDismiss);
+    dismissLabel = 'Force dismiss (entry only — does not stop the underlying process)';
+  } else {
+    dismissAvailable = Boolean(onDismiss);
+    dismissLabel = 'Dismiss';
+  }
   return (
     <article className={cn('rounded-md border bg-card p-3 shadow-sm', cardBorderClassName(entry.status))}>
       <header className="flex items-start justify-between gap-2">
@@ -203,12 +319,74 @@ const ActivityCard = React.memo(function ActivityCard({ entry, onDismiss, onForc
           {entry.error}
         </p>
       )}
+      <RecoveryActionRow entry={entry} onRecoverPendingHelm={onRecoverPendingHelm} onKillSession={onKillSession} />
       {entry.command === 'deploy' && entry.containers && entry.containers.length > 0 && (
         <ContainerStatusList containers={entry.containers} deploy={entry} />
       )}
     </article>
   );
 });
+
+function shouldShowHelmRecovery(entry: ActivityQueueEntry, onRecover?: (id: string) => Promise<void>): boolean {
+  if (!onRecover) return false;
+  if (entry.source !== 'helm') return false;
+  return Boolean(entry.release && entry.namespace);
+}
+
+function shellSessionIdFromEntry(entry: ActivityQueueEntry): number {
+  const parsed = entry.sessionId ? Number(entry.sessionId) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+// RecoveryActionRow renders the per-card recovery affordances. Helm-source
+// deploys get a "Clear pending helm release" button; shell-source entries
+// get a destructive "Kill shell" button. The row collapses to nothing
+// when no recovery applies.
+function RecoveryActionRow({
+  entry,
+  onRecoverPendingHelm,
+  onKillSession,
+}: {
+  entry: ActivityQueueEntry;
+  onRecoverPendingHelm?: (id: string) => Promise<void>;
+  onKillSession?: (sessionId: number) => Promise<boolean>;
+}): React.ReactElement | null {
+  if (entry.status !== 'running') return null;
+  const showHelm = shouldShowHelmRecovery(entry, onRecoverPendingHelm);
+  const sessionId = onKillSession ? shellSessionIdFromEntry(entry) : 0;
+  const showShell = entry.source === 'shell' && sessionId > 0;
+  if (!showHelm && !showShell) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {showHelm && onRecoverPendingHelm && (
+        <Button
+          type="button"
+          variant="default"
+          size="xs"
+          className="h-6 text-[11px]"
+          onClick={() => {
+            void onRecoverPendingHelm(entry.id);
+          }}
+        >
+          Clear pending helm release
+        </Button>
+      )}
+      {showShell && onKillSession && (
+        <Button
+          type="button"
+          variant="destructive"
+          size="xs"
+          className="h-6 text-[11px]"
+          onClick={() => {
+            void onKillSession(sessionId);
+          }}
+        >
+          Kill shell
+        </Button>
+      )}
+    </div>
+  );
+}
 
 function CommandBadge({ command }: { command: string }): React.ReactElement | null {
   if (!command) return null;
@@ -452,6 +630,8 @@ async function copyToClipboard(text: string): Promise<void> {
 
 function ActivityStatusIcon({ status }: { status: ActivityQueueEntry['status'] }): React.ReactElement {
   switch (status) {
+    case 'waiting':
+      return <Clock aria-hidden="true" className="size-3.5 text-muted-foreground" />;
     case 'running':
       return <LoaderCircle aria-hidden="true" className="size-3.5 animate-spin text-blue-500" />;
     case 'succeeded':
@@ -460,11 +640,15 @@ function ActivityStatusIcon({ status }: { status: ActivityQueueEntry['status'] }
       return <AlertOctagon aria-hidden="true" className="size-3.5 text-destructive" />;
     case 'skipped':
       return <ChevronRight aria-hidden="true" className="size-3.5 text-muted-foreground" />;
+    case 'cancelled':
+      return <Ban aria-hidden="true" className="size-3.5 text-muted-foreground" />;
   }
 }
 
 function cardBorderClassName(status: ActivityQueueEntry['status']): string {
   switch (status) {
+    case 'waiting':
+      return 'border-muted-foreground/30';
     case 'running':
       return 'border-blue-500/40';
     case 'succeeded':
@@ -472,6 +656,8 @@ function cardBorderClassName(status: ActivityQueueEntry['status']): string {
     case 'failed':
       return 'border-destructive/50';
     case 'skipped':
+      return 'border-muted';
+    case 'cancelled':
       return 'border-muted';
   }
 }

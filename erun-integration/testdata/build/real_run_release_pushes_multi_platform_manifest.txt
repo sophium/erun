@@ -1,5 +1,4 @@
 audit: erun build --release
-running-command: register command=build id=<COMMAND_ID>
 release: branch= mode=prerelease version=<VERSION>
 docker image: ghcr.io/sophium/api:<VERSION>
 git -C <TMP> status --porcelain

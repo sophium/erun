@@ -1,5 +1,4 @@
 audit: erun build
-running-command: register command=build id=<COMMAND_ID>
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image present locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-arm64

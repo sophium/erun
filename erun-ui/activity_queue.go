@@ -1,10 +1,7 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -16,11 +13,26 @@ import (
 type activityQueueStatus string
 
 const (
+	activityQueueStatusWaiting   activityQueueStatus = "waiting"
 	activityQueueStatusRunning   activityQueueStatus = "running"
 	activityQueueStatusSucceeded activityQueueStatus = "succeeded"
 	activityQueueStatusFailed    activityQueueStatus = "failed"
 	activityQueueStatusSkipped   activityQueueStatus = "skipped"
+	activityQueueStatusCancelled activityQueueStatus = "cancelled"
 )
+
+// activityQueueStatusIsTerminal reports whether the status represents a
+// finished entry that should not transition further.
+func activityQueueStatusIsTerminal(s activityQueueStatus) bool {
+	switch s {
+	case activityQueueStatusSucceeded,
+		activityQueueStatusFailed,
+		activityQueueStatusSkipped,
+		activityQueueStatusCancelled:
+		return true
+	}
+	return false
+}
 
 // activityQueueContainerStatus is one container's last observed state under the
 // deploy's release. The frontend renders these as per-container pills.
@@ -34,10 +46,9 @@ type activityQueueContainerStatus struct {
 	Message  string `json:"message,omitempty"`
 }
 
-// activityQueueEntry is a single tracked long-running command. It survives
-// across desktop restarts via on-disk persistence so a long rollout the
-// user kicked off before closing the app remains visible when they
-// reopen.
+// activityQueueEntry is a single tracked long-running command. Entries are
+// rebuilt on every desktop launch from real cluster/host objects (helm
+// releases, live PTY sessions); they are not persisted to disk.
 type activityQueueEntry struct {
 	ID                string                         `json:"id"`
 	Command           string                         `json:"command"`
@@ -56,45 +67,98 @@ type activityQueueEntry struct {
 	LastUpdated       time.Time                      `json:"lastUpdated"`
 	Containers        []activityQueueContainerStatus `json:"containers,omitempty"`
 	Error             string                         `json:"error,omitempty"`
-	// MarkerPath records where the on-disk RunningCommand marker for this
-	// entry lives. Empty for entries that originated outside the marker
-	// watcher (e.g. legacy in-memory state). Populated by the watcher so
-	// it can detect marker disappearance and finalize the entry.
-	MarkerPath string `json:"-"`
+	// Source identifies the real-world object that produced this entry,
+	// such as "helm" for helm-release-derived deploys, "shell" for live
+	// PTY sessions, "trace" for entries created from `==> Deploying`
+	// PTY trace lines, or "action" for entries enqueued through the
+	// desktop action runner. Used by recovery actions and the gating
+	// logic to decide which lifecycle rules apply.
+	Source string `json:"source,omitempty"`
+	// SessionID is set for shell-source entries so the user can target
+	// the live PTY session for kill/recovery.
+	SessionID string `json:"sessionId,omitempty"`
+	// ActionKind labels the user-action that produced this entry:
+	// "open", "ai", "local", "init", "deploy", "force-deploy",
+	// "sshd-init", "doctor", "reconnect-mcp", "open-ide",
+	// "delete-environment", "cloud-context-start", "cloud-context-stop",
+	// "cloud-context-init", "cloud-provider-init",
+	// "cloud-provider-login", "cloud-provider-logout",
+	// "cloud-provider-oidc-setup", "cloud-provider-alias-save".
+	// Empty for observational entries (helm/trace/shell).
+	ActionKind string `json:"actionKind,omitempty"`
+	// EnqueuedAt is when the entry first entered the runner's waiting
+	// queue. Set only on action-source entries.
+	EnqueuedAt *time.Time `json:"enqueuedAt,omitempty"`
+	// StartedRunningAt is when the entry was promoted from waiting to
+	// running. Used by the drawer to show how long the user has been
+	// blocked.
+	StartedRunningAt *time.Time `json:"startedRunningAt,omitempty"`
 }
 
-// activityQueueStore keeps active and recent deploy entries. Callers mutate
-// state through start/update/finish/dismiss; reads return cloned snapshots so
-// callers can pass them to Wails event emitters without races.
+// activityQueueStore keeps active and recent deploy entries. Callers
+// mutate state through start/update/finish/dismiss; reads return cloned
+// snapshots so callers can pass them to Wails event emitters without
+// races. There is no persistence — state is reconstructed each desktop
+// launch from real cluster/host objects (helm releases, live PTY
+// sessions); see activity_helm_poller.go and activity_stale_sessions.go.
+//
+// Notifications: state-change events are forwarded through notifyCh to
+// a single drain goroutine that calls notify(...) in arrival order.
+// The previous design used `go notify(...)` per event, which let two
+// independently-scheduled goroutines deliver `waiting` and `running`
+// out of order — causing the frontend to settle on the older state.
+// Serializing through one goroutine guarantees the frontend sees
+// transitions in the order the store applied them.
 type activityQueueStore struct {
-	mu      sync.Mutex
-	active  map[string]*activityQueueEntry
-	history []*activityQueueEntry
-	persist func([]*activityQueueEntry) error
-	now     func() time.Time
-	notify  func(activityQueueEntry)
+	mu              sync.Mutex
+	active          map[string]*activityQueueEntry
+	history         []*activityQueueEntry
+	now             func() time.Time
+	notify          func(activityQueueEntry)
+	notifyCh        chan activityQueueEntry
+	closeNotifyOnce sync.Once
 }
 
-// activityQueueHistoryCapacity caps the in-memory + on-disk history length so
-// the persisted file stays small even after many deploys.
+// activityQueueHistoryCapacity caps in-memory history length so the
+// drawer doesn't grow unbounded over a long desktop session.
 const activityQueueHistoryCapacity = 50
 
-// activityQueueRunningStaleAfter is the threshold past which a "running" entry
-// loaded from disk is reconciled to "failed". The desktop process owning the
-// deploy died without writing a terminal status; the user shouldn't see a
-// permanent ghost-running card.
-const activityQueueRunningStaleAfter = 30 * time.Minute
+// activityQueueNotifyBuffer sizes the in-order notify pipeline. Sized
+// well above expected burst depth (a few entries × per-card poll cadence)
+// so the producer side never has to drop snapshots in normal use.
+const activityQueueNotifyBuffer = 256
 
-func newActivityQueueStore(persist func([]*activityQueueEntry) error, notify func(activityQueueEntry), now func() time.Time) *activityQueueStore {
+func newActivityQueueStore(notify func(activityQueueEntry), now func() time.Time) *activityQueueStore {
 	if now == nil {
 		now = time.Now
 	}
-	return &activityQueueStore{
-		active:  make(map[string]*activityQueueEntry),
-		persist: persist,
-		notify:  notify,
-		now:     now,
+	s := &activityQueueStore{
+		active:   make(map[string]*activityQueueEntry),
+		now:      now,
+		notify:   notify,
+		notifyCh: make(chan activityQueueEntry, activityQueueNotifyBuffer),
 	}
+	go s.runNotifyLoop()
+	return s
+}
+
+// runNotifyLoop drains notifyCh in order, calling notify per snapshot.
+// Exits when notifyCh is closed (closeNotifyLoop, called from App
+// shutdown). A nil notify drains silently so unit tests that don't
+// wire a notifier don't accumulate snapshots in the buffer.
+func (s *activityQueueStore) runNotifyLoop() {
+	for snapshot := range s.notifyCh {
+		if s.notify != nil {
+			s.notify(snapshot)
+		}
+	}
+}
+
+// closeNotifyLoop terminates the drain goroutine. Idempotent.
+func (s *activityQueueStore) closeNotifyLoop() {
+	s.closeNotifyOnce.Do(func() {
+		close(s.notifyCh)
+	})
 }
 
 // list returns a chronological snapshot (newest first) of every tracked
@@ -132,10 +196,51 @@ func (s *activityQueueStore) findActiveByCommand(command, tenant, environment st
 	return activityQueueEntry{}, false
 }
 
+// findRunning returns the first running (status=running) entry matching
+// the predicate. Used for terminal-lock decisions, which only fire on
+// running deploys.
+func (s *activityQueueStore) findRunning(tenant, environment string) (activityQueueEntry, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, entry := range s.active {
+		if entry.Status != activityQueueStatusRunning {
+			continue
+		}
+		if entry.Tenant == tenant && entry.Environment == environment {
+			return *cloneActivityQueueEntry(entry), true
+		}
+	}
+	return activityQueueEntry{}, false
+}
+
+// promoteToRunning moves a waiting entry into the running state and
+// records StartedRunningAt. Returns the snapshot and true when the
+// entry existed and was waiting; false when missing or already running
+// (the latter is harmless — the runner's per-env worker pops one at a
+// time, so promoting twice cannot happen normally).
+func (s *activityQueueStore) promoteToRunning(id string) (activityQueueEntry, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	entry, ok := s.active[id]
+	if !ok {
+		return activityQueueEntry{}, false
+	}
+	if entry.Status != activityQueueStatusWaiting {
+		return *cloneActivityQueueEntry(entry), false
+	}
+	entry.Status = activityQueueStatusRunning
+	now := s.now().UTC()
+	entry.StartedRunningAt = &now
+	entry.LastUpdated = now
+	snapshot := *cloneActivityQueueEntry(entry)
+	s.notifyLocked(snapshot)
+	return snapshot, true
+}
+
 // start registers a new active activity. If an entry with the same ID
-// already exists, the existing entry is returned so callers (the marker
-// watcher and explicit registration paths) can collapse into the same
-// record without duplicates.
+// already exists, the existing entry is returned so the helm/shell
+// reconciliation pollers and explicit registration paths can collapse
+// into the same record without duplicates.
 func (s *activityQueueStore) start(seed activityQueueEntry) (activityQueueEntry, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -156,7 +261,6 @@ func (s *activityQueueStore) start(seed activityQueueEntry) (activityQueueEntry,
 	entry := seed
 	s.active[entry.ID] = &entry
 	snapshot := *cloneActivityQueueEntry(&entry)
-	s.flushLocked()
 	s.notifyLocked(snapshot)
 	return snapshot, true
 }
@@ -173,7 +277,6 @@ func (s *activityQueueStore) updateContainers(id string, containers []activityQu
 	entry.Containers = append(entry.Containers[:0:0], containers...)
 	entry.LastUpdated = s.now().UTC()
 	snapshot := *cloneActivityQueueEntry(entry)
-	s.flushLocked()
 	s.notifyLocked(snapshot)
 }
 
@@ -200,7 +303,6 @@ func (s *activityQueueStore) finish(id string, status activityQueueStatus, errMs
 		s.history = s.history[:activityQueueHistoryCapacity]
 	}
 	snapshot := *cloneActivityQueueEntry(entry)
-	s.flushLocked()
 	s.notifyLocked(snapshot)
 	return snapshot, true
 }
@@ -214,7 +316,6 @@ func (s *activityQueueStore) dismiss(id string) bool {
 	for i, entry := range s.history {
 		if entry.ID == id {
 			s.history = append(s.history[:i], s.history[i+1:]...)
-			s.flushLocked()
 			return true
 		}
 	}
@@ -222,65 +323,26 @@ func (s *activityQueueStore) dismiss(id string) bool {
 }
 
 // forceDismiss removes an entry from active or history regardless of
-// status. Returns the active entry's MarkerPath when it was on the host
-// filesystem so the caller (the desktop) can also delete the on-disk
-// marker — without that, the watcher would re-register the entry on its
-// next tick. The boolean return is true when an entry was found and
-// removed.
+// status. The returned entry lets the caller decide on follow-up
+// actions (e.g. killing a live PTY shell or running a helm
+// clear-pending recovery). The removedFromActive boolean is true when
+// the entry was active at the time of the call.
 func (s *activityQueueStore) forceDismiss(id string) (entry activityQueueEntry, removedFromActive bool, ok bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if existing, found := s.active[id]; found {
 		entry = *cloneActivityQueueEntry(existing)
 		delete(s.active, id)
-		s.flushLocked()
 		return entry, true, true
 	}
 	for i, candidate := range s.history {
 		if candidate.ID == id {
 			entry = *cloneActivityQueueEntry(candidate)
 			s.history = append(s.history[:i], s.history[i+1:]...)
-			s.flushLocked()
 			return entry, false, true
 		}
 	}
 	return activityQueueEntry{}, false, false
-}
-
-// load replaces the in-memory state with the supplied snapshot. Active
-// entries from older builds (or older desktop sessions) are coerced into
-// history with a "lost-state" failure reason because the process that
-// owned the marker is no longer addressable from this desktop. This is
-// always safe: if the underlying CLI is genuinely still running, the
-// activity-marker watcher will rediscover it on its next tick.
-func (s *activityQueueStore) load(entries []*activityQueueEntry) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.active = make(map[string]*activityQueueEntry)
-	s.history = nil
-	for _, entry := range entries {
-		if entry == nil {
-			continue
-		}
-		clone := cloneActivityQueueEntry(entry)
-		if clone.Status == activityQueueStatusRunning {
-			clone.Status = activityQueueStatusFailed
-			ended := s.now().UTC()
-			clone.EndedAt = &ended
-			clone.LastUpdated = ended
-			if clone.Error == "" {
-				clone.Error = "activity state lost across desktop restart; the marker watcher will re-register if still running"
-			}
-		}
-		s.history = append(s.history, clone)
-	}
-	sort.SliceStable(s.history, func(i, j int) bool {
-		return s.history[i].StartedAt.After(s.history[j].StartedAt)
-	})
-	if len(s.history) > activityQueueHistoryCapacity {
-		s.history = s.history[:activityQueueHistoryCapacity]
-	}
-	s.flushLocked()
 }
 
 func (s *activityQueueStore) snapshotLocked() []activityQueueEntry {
@@ -297,31 +359,20 @@ func (s *activityQueueStore) snapshotLocked() []activityQueueEntry {
 	return out
 }
 
-func (s *activityQueueStore) flushLocked() {
-	if s.persist == nil {
-		return
-	}
-	// Persist HISTORY only. Active entries are rediscovered from
-	// running RunningCommand markers on the next launch — persisting
-	// them across restarts produces phantom-running entries when the
-	// process that owned the marker is gone (or worse: an older `erun`
-	// CLI wrote an entry that the current desktop no longer tracks).
-	// History is the durable record the user reads.
-	snapshot := make([]*activityQueueEntry, 0, len(s.history))
-	for _, entry := range s.history {
-		snapshot = append(snapshot, cloneActivityQueueEntry(entry))
-	}
-	sort.SliceStable(snapshot, func(i, j int) bool {
-		return snapshot[i].StartedAt.After(snapshot[j].StartedAt)
-	})
-	_ = s.persist(snapshot)
-}
-
+// notifyLocked enqueues the snapshot for in-order delivery. Caller must
+// hold s.mu (the channel send is non-blocking, so the lock is held only
+// briefly). On a full buffer the snapshot is dropped — frontend
+// resilience is provided by the runner's belt-and-braces re-emit and
+// by the pollers' periodic re-snapshots, so a single dropped event is
+// recoverable.
 func (s *activityQueueStore) notifyLocked(snapshot activityQueueEntry) {
 	if s.notify == nil {
 		return
 	}
-	go s.notify(snapshot)
+	select {
+	case s.notifyCh <- snapshot:
+	default:
+	}
 }
 
 func cloneActivityQueueEntry(e *activityQueueEntry) *activityQueueEntry {
@@ -348,71 +399,4 @@ func sanitizeActivityQueueIDPart(s string) string {
 		return "_"
 	}
 	return s
-}
-
-func activityQueueStatePath(stateDir string) string {
-	return filepath.Join(stateDir, "deploy_queue.json")
-}
-
-// defaultActivityQueueStatePath returns the platform user-config path the
-// desktop persists deploy-queue state to. Returns "" when the OS doesn't
-// expose a config dir; callers treat that as "skip persistence".
-func defaultActivityQueueStatePath() string {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(configDir, "ERun", "deploy_queue.json")
-}
-
-// loadActivityQueueStateFromDisk reads the persisted snapshot at path. Missing
-// file is not an error — the desktop returns an empty list and starts fresh.
-// Malformed JSON is logged via the caller's logger and treated as empty so a
-// corrupt file can never block the desktop from starting.
-func loadActivityQueueStateFromDisk(path string) ([]*activityQueueEntry, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var entries []*activityQueueEntry
-	if err := json.Unmarshal(data, &entries); err != nil {
-		return nil, err
-	}
-	return entries, nil
-}
-
-// writeActivityQueueStateAtomic writes the snapshot under a temp file then
-// renames so a crash mid-write cannot truncate the persisted state.
-func writeActivityQueueStateAtomic(path string, entries []*activityQueueEntry) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, "deploy_queue-*.tmp")
-	if err != nil {
-		return err
-	}
-	cleanup := true
-	defer func() {
-		if cleanup {
-			_ = os.Remove(tmp.Name())
-		}
-	}()
-	enc := json.NewEncoder(tmp)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(entries); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
-		return err
-	}
-	cleanup = false
-	return nil
 }

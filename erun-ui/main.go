@@ -20,11 +20,10 @@ func main() {
 	}
 
 	app := NewApp(erunUIDeps{
-		store:                eruncommon.ConfigStore{},
-		findProjectRoot:      eruncommon.FindProjectRoot,
-		resolveCLIPath:       resolveCLIExecutable,
-		windowStatePath:      windowStatePath,
-		activityQueueStatePath: defaultActivityQueueStatePath(),
+		store:           eruncommon.ConfigStore{},
+		findProjectRoot: eruncommon.FindProjectRoot,
+		resolveCLIPath:  resolveCLIExecutable,
+		windowStatePath: windowStatePath,
 	})
 
 	err := wails.Run(&options.App{

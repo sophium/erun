@@ -72,6 +72,13 @@ func (s *windowsTerminalSession) Resize(cols, rows int) error {
 	return s.pty.Resize(uint16(cols), uint16(rows))
 }
 
+func (s *windowsTerminalSession) Pid() int {
+	if s == nil || s.process == nil {
+		return 0
+	}
+	return s.process.Pid
+}
+
 func (s *windowsTerminalSession) Wait() error {
 	if s == nil {
 		return nil

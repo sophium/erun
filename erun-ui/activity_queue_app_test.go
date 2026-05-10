@@ -1,24 +1,18 @@
 package main
 
 import (
-	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
-
-	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 // newTestAppForActivityQueue builds a minimal App with an in-memory queue
-// and no on-disk persistence/watcher.
+// and no background pollers.
 func newTestAppForActivityQueue(t *testing.T) *App {
 	t.Helper()
 	app := &App{
 		sessions: make(map[string]*managedTerminal),
 	}
-	app.activityQueue = newActivityQueueStore(nil, nil, nil)
+	app.activityQueue = newActivityQueueStore(nil, nil)
 	return app
 }
 
@@ -103,39 +97,28 @@ func TestActivityTraceLineHandlerFinalizesOnDeployedAndFailed(t *testing.T) {
 	}
 }
 
-func TestActivityTraceLineHandlerDoesNotAutoRegisterForHostSessions(t *testing.T) {
-	// Host-side sessions (Local, Command) rely on the on-disk
-	// RunningCommand marker the watcher reads — the trace handler must
-	// not auto-register from the trace, so it doesn't conflict with the
-	// authoritative marker channel.
-	app := newTestAppForActivityQueue(t)
-	handler := newActivityTraceLineHandler(app, uiSelection{Tenant: "team", Environment: "dev"}, sessionKindLocal)
-	handler("==> Deploying team/dev 1.0.0")
-	if entries := app.activityQueue.list(); len(entries) != 0 {
-		t.Fatalf("expected no auto-registered entries from host-side trace, got %+v", entries)
-	}
-}
-
-func TestActivityTraceLineHandlerRegistersForInPodSessions(t *testing.T) {
-	// In-pod sessions (Open, AI) live inside the runtime pod via
-	// kubectl exec. The CLI inside the pod writes its marker to the
-	// pod's filesystem, which the host-side watcher cannot see. Trace
-	// observation is the only signal we have for those, so the handler
-	// MUST register entries from `==> Deploying` lines on those
-	// sessions.
-	app := newTestAppForActivityQueue(t)
-	selection := uiSelection{Tenant: "erun", Environment: "local", KubernetesContext: "orbstack"}
-	handler := newActivityTraceLineHandler(app, selection, sessionKindOpen)
-	handler("==> Deploying erun/local 1.0.51-snapshot-20260510080136")
-	entry, ok := app.activityQueue.findActiveByCommand("deploy", "erun", "local")
-	if !ok {
-		t.Fatal("expected in-pod deploy auto-registered from trace")
-	}
-	if entry.Version != "1.0.51-snapshot-20260510080136" {
-		t.Fatalf("version = %q", entry.Version)
-	}
-	if entry.Command != "deploy" {
-		t.Fatalf("command = %q, want deploy", entry.Command)
+func TestActivityTraceLineHandlerRegistersForAllSessionKinds(t *testing.T) {
+	// The PTY trace handler is the universal early-detection signal
+	// for deploys, regardless of session kind. Host-side sessions
+	// (Local, Command) and in-pod sessions (Open, AI) all register an
+	// entry from `==> Deploying`; the helm poller converges onto the
+	// same record by ID, so duplicates can't drift.
+	cases := []sessionKind{sessionKindLocal, sessionKindCommand, sessionKindOpen, sessionKindAI}
+	for _, kind := range cases {
+		app := newTestAppForActivityQueue(t)
+		selection := uiSelection{Tenant: "erun", Environment: "local", KubernetesContext: "orbstack"}
+		handler := newActivityTraceLineHandler(app, selection, kind)
+		handler("==> Deploying erun/local 1.0.51-snapshot-20260510080136")
+		entry, ok := app.activityQueue.findActiveByCommand("deploy", "erun", "local")
+		if !ok {
+			t.Fatalf("kind %q: expected deploy auto-registered from trace", kind)
+		}
+		if entry.Version != "1.0.51-snapshot-20260510080136" {
+			t.Fatalf("kind %q: version = %q", kind, entry.Version)
+		}
+		if entry.Source != "trace" {
+			t.Fatalf("kind %q: source = %q, want trace", kind, entry.Source)
+		}
 	}
 }
 
@@ -164,47 +147,6 @@ func TestReleaseNameForTenant(t *testing.T) {
 	}
 	if got := releaseNameForTenant(""); got != "" {
 		t.Fatalf("got %q, want empty", got)
-	}
-}
-
-func TestNewAppDoesNotPersistWithoutExplicitPath(t *testing.T) {
-	// Regression: persistence path now flows through erunUIDeps so tests
-	// that don't pass it never write to the developer's real config dir.
-	app := NewApp(erunUIDeps{})
-	if app.activityQueue == nil {
-		t.Fatal("activityQueue not initialized")
-	}
-	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "leak", Environment: "dev", Version: "1", Release: "leak-devops"})
-}
-
-func TestApplyMarkerRecordRegistersEntryAndIsIdempotent(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
-	dir := t.TempDir()
-	record := eruncommon.RunningCommand{
-		ID:                "deploy-erun-local-1",
-		Command:           "deploy",
-		Tenant:            "erun",
-		Environment:       "local",
-		Version:           "1.0.0",
-		Release:           "erun-devops",
-		Namespace:         "erun-local",
-		KubernetesContext: "orbstack",
-		StartedAt:         time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC),
-	}
-	first, fresh := app.applyMarkerRecord(dir, record)
-	if !fresh {
-		t.Fatal("first apply should register a fresh entry")
-	}
-	if first.ID != record.ID {
-		t.Fatalf("ID = %q, want %q", first.ID, record.ID)
-	}
-	expectedPath := filepath.Join(dir, sanitizeFilenameForActivity(record.ID)+".json")
-	if first.MarkerPath != expectedPath {
-		t.Fatalf("MarkerPath = %q, want %q", first.MarkerPath, expectedPath)
-	}
-	_, fresh = app.applyMarkerRecord(dir, record)
-	if fresh {
-		t.Fatal("second apply should be a no-op")
 	}
 }
 
@@ -254,105 +196,22 @@ func TestAllContainersReadyAndHealthyHandlesFailureReasons(t *testing.T) {
 	}
 }
 
-func TestForceDismissActivityRemovesActiveAndIgnoresFutureRegistrations(t *testing.T) {
+func TestForceDismissActivityRemovesActiveEntry(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
-	dir := t.TempDir()
-	record := eruncommon.RunningCommand{
-		ID:        "deploy-erun-local-stuck",
-		Command:   "deploy",
-		Tenant:    "erun",
+	entry, _ := app.activityQueue.start(activityQueueEntry{
+		Command:     "deploy",
+		Tenant:      "erun",
 		Environment: "local",
-		StartedAt: time.Now().UTC(),
-	}
-	// Seed a marker file so applyMarkerRecord populates MarkerPath.
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	path := filepath.Join(dir, sanitizeFilenameForActivity(record.ID)+".json")
-	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
-		t.Fatalf("write seed: %v", err)
-	}
-	entry, _ := app.applyMarkerRecord(dir, record)
-	if entry.MarkerPath == "" {
-		t.Fatal("MarkerPath should be set after applyMarkerRecord")
-	}
-
+		Version:     "1.0.0",
+		Release:     "erun-devops",
+	})
 	if !app.ForceDismissActivity(entry.ID) {
 		t.Fatal("ForceDismissActivity should return true for an active entry")
 	}
 	if _, ok := app.activityQueue.findActive("erun", "local"); ok {
 		t.Fatal("entry should be removed from active after force dismiss")
 	}
-	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("marker file should be removed: %v", statErr)
-	}
-	if !app.isActivityIgnored(entry.ID) {
-		t.Fatal("dismissed ID should be on the ignored list so the watcher skips it")
-	}
-
-	// A subsequent applyMarkerRecord with the same ID should still register
-	// (the public path through reconcileActivityMarkers is what consults
-	// the ignored set). Verify the ignored check works at that level.
-	if !app.isActivityIgnored(entry.ID) {
-		t.Fatal("ignored set lost track of dismissed ID")
-	}
-}
-
-func TestPruneStaleMarkerRemovesDeadPidMarker(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
-	dir := t.TempDir()
-	record := eruncommon.RunningCommand{
-		ID:        "open-erun-local-1",
-		Command:   "open",
-		Tenant:    "erun",
-		Environment: "local",
-		PID:       0, // sentinel for "definitely not alive" in pruneStaleMarker
-		StartedAt: time.Now().UTC(),
-	}
-	// Seed a marker file at the expected path.
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	path := filepath.Join(dir, sanitizeFilenameForActivity(record.ID)+".json")
-	if err := os.WriteFile(path, []byte(`{"id":"open-erun-local-1","command":"open"}`), 0o600); err != nil {
-		t.Fatalf("write seed marker: %v", err)
-	}
-	app.applyMarkerRecord(dir, record)
-	if _, ok := app.activityQueue.findActive("erun", "local"); !ok {
-		t.Fatal("expected entry registered before prune")
-	}
-	app.pruneStaleMarker(dir, record)
-	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
-		t.Fatalf("marker not removed: %v", statErr)
-	}
-	if _, ok := app.activityQueue.findActive("erun", "local"); ok {
-		t.Fatal("entry should be finalized after prune")
-	}
-	all := app.activityQueue.list()
-	if len(all) != 1 || all[0].Status != activityQueueStatusFailed {
-		t.Fatalf("expected one failed entry, got %+v", all)
-	}
-	if !strings.Contains(all[0].Error, "killed") {
-		t.Fatalf("expected error reason about killed/abandoned, got %q", all[0].Error)
-	}
-}
-
-func TestFinalizeMissingMarkersClosesUnseenActiveEntries(t *testing.T) {
-	app := newTestAppForActivityQueue(t)
-	dir := t.TempDir()
-	app.applyMarkerRecord(dir, eruncommon.RunningCommand{ID: "deploy-1", Command: "deploy", Tenant: "t", Environment: "e", StartedAt: time.Now().UTC()})
-	app.applyMarkerRecord(dir, eruncommon.RunningCommand{ID: "build-1", Command: "build", Tenant: "t", Component: "erun-devops", StartedAt: time.Now().UTC()})
-	if len(app.activityQueue.list()) != 2 {
-		t.Fatalf("expected 2 active before finalize, got %d", len(app.activityQueue.list()))
-	}
-	app.finalizeMissingMarkers(map[string]struct{}{"deploy-1": {}})
-	active := 0
-	for _, e := range app.activityQueue.list() {
-		if e.Status == activityQueueStatusRunning {
-			active++
-		}
-	}
-	if active != 1 {
-		t.Fatalf("expected 1 active after finalize, got %d", active)
+	if app.ForceDismissActivity(entry.ID) {
+		t.Fatal("second ForceDismissActivity should return false (entry already gone)")
 	}
 }

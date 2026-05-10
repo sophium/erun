@@ -87,12 +87,10 @@ func (a *App) DismissDeploy(id string) bool {
 }
 
 // ForceDismissActivity removes any entry — active or finished — from the
-// queue. Used for stuck active entries the watcher cannot finalize on its
-// own (typically a deploy whose marker is on the runtime pod's filesystem
-// and unreachable from the host, or an `erun open` whose backing process
-// was killed externally). The desktop also removes the on-disk marker
-// when the host can reach it, and adds the ID to an ignore set so the
-// watcher does not re-register it on its next tick. Wails-exported.
+// queue. Used for stuck active entries the user has confirmed are no
+// longer running (e.g. a stale shell whose PID exited unnoticed, or a
+// deploy entry whose helm release was deleted out from under the
+// poller). Wails-exported.
 func (a *App) ForceDismissActivity(id string) bool {
 	if a.activityQueue == nil {
 		return false
@@ -102,36 +100,8 @@ func (a *App) ForceDismissActivity(id string) bool {
 		return false
 	}
 	a.unlockTerminalsForActivity(entry)
-	a.markActivityIgnored(entry.ID)
-	if path := strings.TrimSpace(entry.MarkerPath); path != "" {
-		_ = removeFileIfExists(path)
-	}
 	a.emitActivityState(entry)
 	return true
-}
-
-// markActivityIgnored records an ID the user explicitly dismissed so the
-// marker watcher won't re-register it on the next tick. The set is
-// process-local; on next desktop launch the marker (if it still exists)
-// is reconsidered fresh.
-func (a *App) markActivityIgnored(id string) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return
-	}
-	a.activityIgnoredMu.Lock()
-	defer a.activityIgnoredMu.Unlock()
-	if a.activityIgnored == nil {
-		a.activityIgnored = make(map[string]struct{})
-	}
-	a.activityIgnored[id] = struct{}{}
-}
-
-func (a *App) isActivityIgnored(id string) bool {
-	a.activityIgnoredMu.Lock()
-	defer a.activityIgnoredMu.Unlock()
-	_, ok := a.activityIgnored[strings.TrimSpace(id)]
-	return ok
 }
 
 // FindActiveDeployForSelection returns the active entry for (tenant, env)
@@ -147,14 +117,6 @@ func (a *App) FindActiveDeployForSelection(selection uiSelection) activityQueueE
 	}
 	return activityQueueEntry{}
 }
-
-// activityRegistrationIsAuthoritative documents that this desktop no
-// longer maintains a desktop-side "explicit deploy registration" path:
-// the on-disk RunningCommand marker every CLI deploy writes is the
-// authoritative source, picked up by runActivityMarkerWatcher within one
-// poll tick. The helper below stays for tests that exercise the lock
-// transitions; it does not start a tracking entry on its own anymore.
-func activityRegistrationIsAuthoritative() {}
 
 // finishActivityTracking moves the active deploy for this selection to a
 // terminal status. Idempotent: a no-op when no active entry exists for the
@@ -336,24 +298,25 @@ func namespaceForTenantEnv(tenant, environment string) string {
 
 // activityDeployingLineRe matches the `==> Deploying tenant/env [version]`
 // trace emitted by RunHelmDeploy at deploy start. Captures: tenant,
-// environment, optional version. Used by trace-based registration when the
-// deploy runs inside the runtime pod (the marker watcher cannot read the
-// pod's filesystem from the host).
+// environment, optional version.
 var activityDeployingLineRe = regexp.MustCompile(`^==> Deploying ([^/\s]+)/([^/\s]+)(?:\s+(\S+))?\s*$`)
 
 // newActivityTraceLineHandler scans PTY output for trace lines emitted by
-// erun commands and updates the activity queue accordingly.
+// erun deploy and updates the activity queue accordingly.
 //
 // Two channels feed the queue:
 //
-//   - Marker watcher (runActivityMarkerWatcher) — authoritative for every
-//     command running on the host filesystem the desktop can read.
-//   - PTY trace observation — fallback for commands running inside the
-//     runtime pod, whose marker file is on the pod's filesystem and not
-//     visible to the host. Trace-based registration is gated on session
-//     kind: only Open/AI sessions (kubectl-exec'd into the pod) trigger
-//     it, so the host marker channel stays the single source of truth
-//     for host-side commands.
+//   - PTY trace observation — fast-path early-detection: as soon as
+//     `==> Deploying tenant/env [version]` is observed in any session
+//     (host-side Local/Command tabs OR in-pod Open/AI tabs), an entry
+//     is registered. The trace handler is the responsive signal; the
+//     user sees activity in the drawer before any cluster state has
+//     to settle.
+//   - Helm release poller (activity_helm_poller.go) — authoritative
+//     for deploys reflected in cluster state. It collapses onto the
+//     same entry by ID, and finalizes the entry when helm reports
+//     deployed/failed regardless of whether the trace ever observed
+//     the corresponding ==> line.
 //
 // Terminal-state lines (==> Deployed / ==> Deploy failed / ==> Skipping /
 // Error:) finalize the matching active entry from either channel.
@@ -362,13 +325,12 @@ func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKi
 	failedRe := regexp.MustCompile(`^==> Deploy failed`)
 	skippedRe := regexp.MustCompile(`^==> Skipping `)
 	errorRe := regexp.MustCompile(`(?i)^Error: `)
+	_ = kind
 	return func(line string) {
 		line = strings.TrimSpace(line)
-		if isInPodSession(kind) {
-			if match := activityDeployingLineRe.FindStringSubmatch(line); match != nil {
-				app.startInPodDeployFromTrace(selection, match[1], match[2], match[3])
-				return
-			}
+		if match := activityDeployingLineRe.FindStringSubmatch(line); match != nil {
+			app.startDeployFromTrace(selection, match[1], match[2], match[3])
+			return
 		}
 		switch {
 		case deployedRe.MatchString(line):
@@ -383,14 +345,11 @@ func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKi
 	}
 }
 
-func isInPodSession(kind sessionKind) bool {
-	return kind == sessionKindOpen || kind == sessionKindAI
-}
-
-// startInPodDeployFromTrace registers a deploy entry from a `==> Deploying`
-// trace observed on an in-pod session's PTY. No-op when an entry already
-// exists for the selection so the host marker channel stays authoritative.
-func (a *App) startInPodDeployFromTrace(selection uiSelection, tenant, environment, version string) {
+// startDeployFromTrace registers a deploy entry from a `==> Deploying`
+// trace observed in any session's PTY. No-op when an active entry
+// already exists for the selection so the helm poller and trace
+// handler converge on the same record.
+func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, version string) {
 	if a.activityQueue == nil {
 		return
 	}
@@ -403,6 +362,7 @@ func (a *App) startInPodDeployFromTrace(selection uiSelection, tenant, environme
 	if _, ok := a.activityQueue.findActiveByCommand("deploy", tenant, environment); ok {
 		return
 	}
+	kubeContext := strings.TrimSpace(selection.KubernetesContext)
 	entry, fresh := a.activityQueue.start(activityQueueEntry{
 		Command:           "deploy",
 		Tenant:            tenant,
@@ -410,13 +370,18 @@ func (a *App) startInPodDeployFromTrace(selection uiSelection, tenant, environme
 		Version:           version,
 		Release:           releaseNameForTenant(tenant),
 		Namespace:         namespaceForTenantEnv(tenant, environment),
-		KubernetesContext: strings.TrimSpace(selection.KubernetesContext),
+		KubernetesContext: kubeContext,
+		Source:            "trace",
 		Summary:           "deploy " + tenant + "/" + environment,
 	})
 	if !fresh {
 		return
 	}
+	a.rememberKubeContextForActivity(kubeContext)
 	a.lockTerminalsForActivity(entry)
+	if a.activityStatusPoller != nil {
+		a.activityStatusPoller(entry)
+	}
 }
 
 // allContainersReadyAndHealthy returns true when every container in the
@@ -689,8 +654,19 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 		if idx < 0 {
 			break
 		}
-		line := managed.activityTraceBuffer[:idx]
-		if r := strings.IndexByte(line, '\r'); r >= 0 {
+		raw := managed.activityTraceBuffer[:idx]
+		// PTY output ends lines with `\r\n`, so strip a trailing `\r`
+		// before considering carriage returns. Then, if the line still
+		// contains a `\r` in the middle (spinner-style overwrite —
+		// e.g. `\rprogress\rprogress\rfinal\n`), keep only the
+		// content after the LAST `\r` so the rendered text matches
+		// what the user actually sees on the terminal. The previous
+		// implementation took content after the FIRST `\r`, which on
+		// the common `text\r\n` case left an empty string and broke
+		// every downstream matcher (deploy trace, session-ready
+		// detection).
+		line := strings.TrimRight(raw, "\r")
+		if r := strings.LastIndexByte(line, '\r'); r >= 0 {
 			line = line[r+1:]
 		}
 		lines = append(lines, line)
@@ -703,6 +679,36 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 	handler := newActivityTraceLineHandler(a, managed.selection, managed.kind)
 	for _, line := range lines {
 		handler(line)
+		signalSessionReadyOnLine(managed, line)
+	}
+}
+
+// sessionReady*Re match lines that indicate the session's setup phase
+// is done. signalSessionReadyOnLine uses them to release the desktop
+// action runner's gate so the next queued action can start. The
+// matchers are intentionally broad — any of them firing means the user
+// is past the setup phase and a parallel queued action can safely run.
+var (
+	sessionReadyDeployedRe   = regexp.MustCompile(`^==> Deployed `)
+	sessionReadyFailedRe     = regexp.MustCompile(`^==> Deploy failed`)
+	sessionReadySkippedRe    = regexp.MustCompile(`^==> Skipping `)
+	sessionReadyAttachedRe   = regexp.MustCompile(`^Defaulted container "[^"]+" out of:`)
+	sessionReadyShellPromptRe = regexp.MustCompile(`[\w][\w.-]*@[\w][\w.-]*:[~/].*[\$#]\s*$`)
+)
+
+func signalSessionReadyOnLine(managed *managedTerminal, line string) {
+	if managed == nil {
+		return
+	}
+	trimmed := strings.TrimSpace(line)
+	switch {
+	case sessionReadyDeployedRe.MatchString(trimmed),
+		sessionReadySkippedRe.MatchString(trimmed),
+		sessionReadyAttachedRe.MatchString(trimmed),
+		sessionReadyShellPromptRe.MatchString(trimmed):
+		managed.signalReady(nil)
+	case sessionReadyFailedRe.MatchString(trimmed):
+		managed.signalReady(fmt.Errorf("%s", trimmed))
 	}
 }
 

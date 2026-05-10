@@ -1,9 +1,18 @@
 import * as React from 'react';
 
-import { DismissDeploy, ForceDismissActivity, ListDeploys } from '../../wailsjs/go/main/App';
+import {
+  CancelWaitingAction,
+  DismissDeploy,
+  ForceDismissActivity,
+  KillSession,
+  ListDeploys,
+  RecoverPendingHelmRelease,
+} from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 
-export type ActivityQueueStatus = 'running' | 'succeeded' | 'failed' | 'skipped';
+export type ActivityQueueStatus = 'waiting' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'cancelled';
+
+export type ActivityQueueSource = 'helm' | 'shell' | 'trace' | 'action' | '';
 
 export type ActivityQueueContainerStatus = {
   name: string;
@@ -13,6 +22,12 @@ export type ActivityQueueContainerStatus = {
   restarts: number;
   reason?: string;
   message?: string;
+};
+
+export type ActivityRecoveryResult = {
+  ok: boolean;
+  output: string;
+  error?: string;
 };
 
 export type ActivityQueueEntry = {
@@ -33,6 +48,11 @@ export type ActivityQueueEntry = {
   lastUpdated: string;
   containers?: ActivityQueueContainerStatus[];
   error?: string;
+  source?: ActivityQueueSource;
+  sessionId?: string;
+  actionKind?: string;
+  enqueuedAt?: string;
+  startedRunningAt?: string;
 };
 
 export type ActivityLockEvent = {
@@ -55,12 +75,17 @@ const activityLockEventName = 'activity:lock';
 // polling.
 //
 // dismiss removes a finished entry; forceDismiss removes ANY entry
-// (including an active one). The latter is for stuck entries the
-// watcher cannot finalize on its own — see App.ForceDismissActivity.
+// (including an active one). recoverPendingHelm clears a stuck helm
+// pending-* lock and removes the entry; killSession terminates a stale
+// PTY session and removes its activity entry. All four are bound to
+// the activity drawer's recovery affordances.
 export function useActivityQueue(): {
   entries: ActivityQueueEntry[];
   dismiss: (id: string) => Promise<void>;
   forceDismiss: (id: string) => Promise<void>;
+  recoverPendingHelm: (id: string) => Promise<ActivityRecoveryResult>;
+  killSession: (sessionId: number) => Promise<boolean>;
+  cancelWaiting: (id: string) => Promise<boolean>;
 } {
   const [entries, setEntries] = React.useState<ActivityQueueEntry[]>([]);
 
@@ -93,7 +118,32 @@ export function useActivityQueue(): {
     }
   }, []);
 
-  return { entries, dismiss, forceDismiss };
+  const recoverPendingHelm = React.useCallback(async (id: string): Promise<ActivityRecoveryResult> => {
+    const result = (await RecoverPendingHelmRelease(id)) as ActivityRecoveryResult;
+    if (result.ok) {
+      setEntries((prev) => prev.filter((entry) => entry.id !== id));
+    }
+    return result;
+  }, []);
+
+  const killSession = React.useCallback(async (sessionId: number): Promise<boolean> => {
+    if (!Number.isFinite(sessionId) || sessionId <= 0) return false;
+    const ok = await KillSession(sessionId);
+    if (ok) {
+      setEntries((prev) => prev.filter((entry) => entry.sessionId !== String(sessionId)));
+    }
+    return ok;
+  }, []);
+
+  const cancelWaiting = React.useCallback(async (id: string): Promise<boolean> => {
+    const ok = await CancelWaitingAction(id);
+    // No optimistic removal — the entry transitions to status=cancelled
+    // via the activity:state event from the backend, and we want it to
+    // appear in Recent rather than vanish.
+    return ok;
+  }, []);
+
+  return { entries, dismiss, forceDismiss, recoverPendingHelm, killSession, cancelWaiting };
 }
 
 // useTerminalActivityLockState exposes the live map of session lock

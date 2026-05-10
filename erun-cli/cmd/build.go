@@ -26,40 +26,13 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
-		RunE: withRunningCommandMarker(
-			func(*cobra.Command, []string) runningCommandSeed {
-				return runningCommandSeed{
-					command:     "build",
-					environment: target.Environment,
-					version:     target.VersionOverride,
-					summary:     buildCommandSummary(target),
-				}
-			},
-			func(cmd *cobra.Command, args []string) error {
-				return runBuildCommand(commandContext(cmd), store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push, deployHelmChart)
-			},
-		),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runBuildCommand(commandContext(cmd), store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, runBuildScript, buildDockerImage, loginToDockerRegistry, selectRunner, push, deployHelmChart)
+		},
 	}
 	addDryRunFlag(cmd)
 	addBuildCommandTargetFlags(cmd, &target)
 	return cmd
-}
-
-func buildCommandSummary(target common.DockerCommandTarget) string {
-	parts := []string{"build"}
-	if env := strings.TrimSpace(target.Environment); env != "" {
-		parts = append(parts, env)
-	}
-	if version := strings.TrimSpace(target.VersionOverride); version != "" {
-		parts = append(parts, version)
-	}
-	if target.Release {
-		parts = append(parts, "(release)")
-	}
-	if target.Deploy {
-		parts = append(parts, "(deploy)")
-	}
-	return strings.Join(parts, " ")
 }
 
 func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, target common.DockerCommandTarget, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) error {

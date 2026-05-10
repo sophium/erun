@@ -258,7 +258,7 @@ func runDeployStep(ctx Context, stepIndex int, specs []DeploySpec, build DockerI
 	return errors.Join(errs...)
 }
 
-func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc) (deployFinalErr error) {
+func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDeployerFunc) error {
 	if deploy == nil {
 		return fmt.Errorf("helm deployer is required")
 	}
@@ -284,25 +284,6 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	}
 	defer handle.Release()
 
-	runningHandle, runningErr := RegisterRunningCommand(ctx, RunningCommand{
-		Command:           "deploy",
-		Tenant:            deployInput.Tenant,
-		Environment:       deployInput.Environment,
-		Version:           deployInput.Version,
-		Release:           deployInput.ReleaseName,
-		Namespace:         deployInput.Namespace,
-		KubernetesContext: deployInput.KubernetesContext,
-		Summary:           "deploy " + target,
-	})
-	if runningErr != nil {
-		ctx.Trace("running-command: register failed (" + runningErr.Error() + ")")
-	}
-	defer func() {
-		// Finalized at the end so the desktop watcher sees the terminal
-		// status (and any failure reason) on its next poll. Replaces a
-		// plain Release that would have masked the cause.
-		FinalizeRunningCommand(runningHandle, runningCommandStatusForError(deployFinalErr), errorMessageOrEmpty(deployFinalErr), time.Time{}, FinalizeRunningCommandPollWindow)
-	}()
 	if ctx.DryRun {
 		return nil
 	}
@@ -317,29 +298,15 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 
 	started := time.Now()
 	spinner := StartSpinner(ctx.Stderr, "deploying "+target)
-	deployFinalErr = deploy(deployInput.Params(ctx.Stdout, ctx.Stderr))
+	deployErr := deploy(deployInput.Params(ctx.Stdout, ctx.Stderr))
 	spinner.Stop()
 	elapsed := time.Since(started).Round(time.Second)
-	if deployFinalErr != nil {
+	if deployErr != nil {
 		ctx.Info("==> Deploy failed after " + elapsed.String())
-		return deployFinalErr
+		return deployErr
 	}
 	ctx.Info("==> Deployed " + target + " in " + elapsed.String())
 	return nil
-}
-
-func runningCommandStatusForError(err error) string {
-	if err == nil {
-		return "succeeded"
-	}
-	return "failed"
-}
-
-func errorMessageOrEmpty(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
 }
 
 func RunDeploySpec(ctx Context, execution DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
