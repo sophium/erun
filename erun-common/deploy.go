@@ -283,6 +283,21 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 		return nil
 	}
 	defer handle.Release()
+
+	runningHandle, runningErr := RegisterRunningCommand(ctx, RunningCommand{
+		Command:           "deploy",
+		Tenant:            deployInput.Tenant,
+		Environment:       deployInput.Environment,
+		Version:           deployInput.Version,
+		Release:           deployInput.ReleaseName,
+		Namespace:         deployInput.Namespace,
+		KubernetesContext: deployInput.KubernetesContext,
+		Summary:           "deploy " + target,
+	})
+	if runningErr != nil {
+		ctx.Trace("running-command: register failed (" + runningErr.Error() + ")")
+	}
+	defer runningHandle.Release()
 	if ctx.DryRun {
 		return nil
 	}
