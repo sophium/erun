@@ -19,11 +19,14 @@ const drawerHiddenClassName = 'translate-x-full';
 
 const drawerVisibleClassName = 'translate-x-0';
 
-// ActivityQueueDrawer renders the right-side deploy queue as a slide-in sheet.
-// Active deploys group at the top with live container status pills; finished
-// entries form the history below with a dismiss action per card.
+// ActivityQueueDrawer renders the right-side activity queue as a slide-in
+// sheet. Active entries group at the top with live container status
+// pills; finished entries form the history below with a dismiss action.
+// Active entries also expose a force-dismiss for cases where the watcher
+// cannot finalize on its own (most commonly: a deploy whose marker is on
+// the runtime pod's filesystem and unreachable from the host).
 export function ActivityQueueDrawer({ open, onClose }: ActivityQueueDrawerProps): React.ReactElement {
-  const { entries, dismiss } = useActivityQueue();
+  const { entries, dismiss, forceDismiss } = useActivityQueue();
   const [now, setNow] = React.useState(() => Date.now());
   React.useEffect(() => {
     if (!open) return undefined;
@@ -55,7 +58,7 @@ export function ActivityQueueDrawer({ open, onClose }: ActivityQueueDrawerProps)
           </Button>
         </header>
         <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-3" aria-live="polite">
-          <ActivitySection title="Active" entries={activeEntries} now={now} emptyText="No activities in progress." />
+          <ActivitySection title="Active" entries={activeEntries} now={now} emptyText="No activities in progress." onForceDismiss={forceDismiss} />
           <ActivitySection
             title="Recent"
             entries={historyEntries}
@@ -75,12 +78,13 @@ type ActivitySectionProps = {
   now: number;
   emptyText: string;
   onDismiss?: (id: string) => Promise<void>;
+  onForceDismiss?: (id: string) => Promise<void>;
 };
 
-function ActivitySection({ title, entries, now, emptyText, onDismiss }: ActivitySectionProps): React.ReactElement {
+function ActivitySection({ title, entries, now, emptyText, onDismiss, onForceDismiss }: ActivitySectionProps): React.ReactElement {
   return (
-    <section aria-labelledby={`deploy-section-${title.toLowerCase()}`}>
-      <h3 id={`deploy-section-${title.toLowerCase()}`} className="px-1 pb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
+    <section aria-labelledby={`activity-section-${title.toLowerCase()}`}>
+      <h3 id={`activity-section-${title.toLowerCase()}`} className="px-1 pb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
         {title}
       </h3>
       {entries.length === 0 ? (
@@ -89,7 +93,7 @@ function ActivitySection({ title, entries, now, emptyText, onDismiss }: Activity
         <ul className="space-y-2">
           {entries.map((entry) => (
             <li key={entry.id}>
-              <ActivityCard entry={entry} now={now} onDismiss={onDismiss} />
+              <ActivityCard entry={entry} now={now} onDismiss={onDismiss} onForceDismiss={onForceDismiss} />
             </li>
           ))}
         </ul>
@@ -102,14 +106,29 @@ type ActivityCardProps = {
   entry: ActivityQueueEntry;
   now: number;
   onDismiss?: (id: string) => Promise<void>;
+  onForceDismiss?: (id: string) => Promise<void>;
 };
 
-function ActivityCard({ entry, now, onDismiss }: ActivityCardProps): React.ReactElement {
+const ActivityCard = React.memo(function ActivityCard({ entry, now, onDismiss, onForceDismiss }: ActivityCardProps): React.ReactElement {
   const elapsed = entry.status === 'running'
     ? formatElapsed(entry.startedAt, now)
     : entry.endedAt
       ? formatElapsed(entry.startedAt, Date.parse(entry.endedAt))
       : formatElapsed(entry.startedAt, now);
+  const isActive = entry.status === 'running';
+  const handleDismiss = React.useCallback(() => {
+    if (isActive) {
+      if (onForceDismiss) {
+        void onForceDismiss(entry.id);
+      }
+      return;
+    }
+    if (onDismiss) {
+      void onDismiss(entry.id);
+    }
+  }, [entry.id, isActive, onDismiss, onForceDismiss]);
+  const dismissAvailable = isActive ? Boolean(onForceDismiss) : Boolean(onDismiss);
+  const dismissLabel = isActive ? 'Force dismiss (entry only — does not stop the underlying process)' : 'Dismiss';
   return (
     <article className={cn('rounded-md border bg-card p-3 shadow-sm', cardBorderClassName(entry.status))}>
       <header className="flex items-start justify-between gap-2">
@@ -124,16 +143,15 @@ function ActivityCard({ entry, now, onDismiss }: ActivityCardProps): React.React
           </div>
         </div>
         <div className="flex flex-none items-center gap-2 text-xs text-muted-foreground">
-          <span>{elapsed}</span>
-          {onDismiss && entry.status !== 'running' && (
+          <span className="font-mono tabular-nums">{elapsed}</span>
+          {dismissAvailable && (
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              aria-label="Dismiss"
-              onClick={() => {
-                void onDismiss(entry.id);
-              }}
+              aria-label={dismissLabel}
+              title={dismissLabel}
+              onClick={handleDismiss}
             >
               <Trash2 aria-hidden="true" className="size-3.5" />
             </Button>
@@ -150,7 +168,7 @@ function ActivityCard({ entry, now, onDismiss }: ActivityCardProps): React.React
       )}
     </article>
   );
-}
+});
 
 function CommandBadge({ command }: { command: string }): React.ReactElement | null {
   if (!command) return null;

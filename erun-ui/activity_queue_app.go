@@ -78,6 +78,54 @@ func (a *App) DismissDeploy(id string) bool {
 	return a.activityQueue.dismiss(id)
 }
 
+// ForceDismissActivity removes any entry — active or finished — from the
+// queue. Used for stuck active entries the watcher cannot finalize on its
+// own (typically a deploy whose marker is on the runtime pod's filesystem
+// and unreachable from the host, or an `erun open` whose backing process
+// was killed externally). The desktop also removes the on-disk marker
+// when the host can reach it, and adds the ID to an ignore set so the
+// watcher does not re-register it on its next tick. Wails-exported.
+func (a *App) ForceDismissActivity(id string) bool {
+	if a.activityQueue == nil {
+		return false
+	}
+	entry, _, ok := a.activityQueue.forceDismiss(id)
+	if !ok {
+		return false
+	}
+	a.unlockTerminalsForActivity(entry)
+	a.markActivityIgnored(entry.ID)
+	if path := strings.TrimSpace(entry.MarkerPath); path != "" {
+		_ = removeFileIfExists(path)
+	}
+	a.emitActivityState(entry)
+	return true
+}
+
+// markActivityIgnored records an ID the user explicitly dismissed so the
+// marker watcher won't re-register it on the next tick. The set is
+// process-local; on next desktop launch the marker (if it still exists)
+// is reconsidered fresh.
+func (a *App) markActivityIgnored(id string) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return
+	}
+	a.activityIgnoredMu.Lock()
+	defer a.activityIgnoredMu.Unlock()
+	if a.activityIgnored == nil {
+		a.activityIgnored = make(map[string]struct{})
+	}
+	a.activityIgnored[id] = struct{}{}
+}
+
+func (a *App) isActivityIgnored(id string) bool {
+	a.activityIgnoredMu.Lock()
+	defer a.activityIgnoredMu.Unlock()
+	_, ok := a.activityIgnored[strings.TrimSpace(id)]
+	return ok
+}
+
 // FindActiveDeployForSelection returns the active entry for (tenant, env)
 // when one exists; the frontend uses this for deploy-button gating without
 // having to walk the full ListDeploys snapshot. Wails-exported.

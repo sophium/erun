@@ -59,6 +59,9 @@ func (a *App) reconcileActivityMarkers(dir string) {
 	}
 	seenIDs := make(map[string]struct{}, len(records))
 	for _, record := range records {
+		if a.isActivityIgnored(record.ID) {
+			continue
+		}
 		if record.Status == "" && !isProcessAliveOrDefault(record.PID) {
 			// CLI exited without finalizing (crashed, killed via
 			// SIGKILL, host shutdown). Clean up so the queue doesn't
@@ -218,6 +221,23 @@ func (a *App) activityWatcherCtx() context.Context {
 		return a.ctx
 	}
 	return context.Background()
+}
+
+// removeFileIfExists deletes the file at path. Missing paths are
+// tolerated (we may be looking at a marker that was on a different
+// filesystem). Returns the underlying error from os.Remove for callers
+// that want to surface it.
+func removeFileIfExists(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	if err := os.Remove(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 func sanitizeFilenameForActivity(s string) string {

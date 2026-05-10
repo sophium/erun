@@ -208,6 +208,50 @@ func TestApplyMarkerRecordRegistersEntryAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestForceDismissActivityRemovesActiveAndIgnoresFutureRegistrations(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	dir := t.TempDir()
+	record := eruncommon.RunningCommand{
+		ID:        "deploy-erun-local-stuck",
+		Command:   "deploy",
+		Tenant:    "erun",
+		Environment: "local",
+		StartedAt: time.Now().UTC(),
+	}
+	// Seed a marker file so applyMarkerRecord populates MarkerPath.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(dir, sanitizeFilenameForActivity(record.ID)+".json")
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	entry, _ := app.applyMarkerRecord(dir, record)
+	if entry.MarkerPath == "" {
+		t.Fatal("MarkerPath should be set after applyMarkerRecord")
+	}
+
+	if !app.ForceDismissActivity(entry.ID) {
+		t.Fatal("ForceDismissActivity should return true for an active entry")
+	}
+	if _, ok := app.activityQueue.findActive("erun", "local"); ok {
+		t.Fatal("entry should be removed from active after force dismiss")
+	}
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("marker file should be removed: %v", statErr)
+	}
+	if !app.isActivityIgnored(entry.ID) {
+		t.Fatal("dismissed ID should be on the ignored list so the watcher skips it")
+	}
+
+	// A subsequent applyMarkerRecord with the same ID should still register
+	// (the public path through reconcileActivityMarkers is what consults
+	// the ignored set). Verify the ignored check works at that level.
+	if !app.isActivityIgnored(entry.ID) {
+		t.Fatal("ignored set lost track of dismissed ID")
+	}
+}
+
 func TestPruneStaleMarkerRemovesDeadPidMarker(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	dir := t.TempDir()

@@ -74,6 +74,8 @@ type App struct {
 	activityQueue        *activityQueueStore
 	activityStatusPoller func(activityQueueEntry)
 	activityWatcherStop  chan struct{}
+	activityIgnoredMu    sync.Mutex
+	activityIgnored      map[string]struct{}
 }
 
 func NewApp(deps erunUIDeps) *App {

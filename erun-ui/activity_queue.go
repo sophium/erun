@@ -206,7 +206,8 @@ func (s *activityQueueStore) finish(id string, status activityQueueStatus, errMs
 }
 
 // dismiss removes a finished entry from history. Active entries are never
-// dismissed — the user must wait for the deploy to reach a terminal state.
+// dismissed through this path — see forceDismiss for the user-driven
+// override that handles stuck active entries.
 func (s *activityQueueStore) dismiss(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -218,6 +219,32 @@ func (s *activityQueueStore) dismiss(id string) bool {
 		}
 	}
 	return false
+}
+
+// forceDismiss removes an entry from active or history regardless of
+// status. Returns the active entry's MarkerPath when it was on the host
+// filesystem so the caller (the desktop) can also delete the on-disk
+// marker — without that, the watcher would re-register the entry on its
+// next tick. The boolean return is true when an entry was found and
+// removed.
+func (s *activityQueueStore) forceDismiss(id string) (entry activityQueueEntry, removedFromActive bool, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, found := s.active[id]; found {
+		entry = *cloneActivityQueueEntry(existing)
+		delete(s.active, id)
+		s.flushLocked()
+		return entry, true, true
+	}
+	for i, candidate := range s.history {
+		if candidate.ID == id {
+			entry = *cloneActivityQueueEntry(candidate)
+			s.history = append(s.history[:i], s.history[i+1:]...)
+			s.flushLocked()
+			return entry, false, true
+		}
+	}
+	return activityQueueEntry{}, false, false
 }
 
 // load replaces the in-memory state with the supplied snapshot. Active
