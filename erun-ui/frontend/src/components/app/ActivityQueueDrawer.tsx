@@ -144,7 +144,7 @@ function ActivityCard({ entry, now, onDismiss }: ActivityCardProps): React.React
         </p>
       )}
       {entry.command === 'deploy' && entry.containers && entry.containers.length > 0 && (
-        <ContainerStatusList containers={entry.containers} />
+        <ContainerStatusList containers={entry.containers} deploy={entry} />
       )}
     </article>
   );
@@ -204,21 +204,123 @@ function commandSubtitle(entry: ActivityQueueEntry): string {
   return parts.length > 0 ? parts.join(' · ') : '—';
 }
 
-function ContainerStatusList({ containers }: { containers: ActivityQueueContainerStatus[] }): React.ReactElement {
+function ContainerStatusList({ containers, deploy }: { containers: ActivityQueueContainerStatus[]; deploy: ActivityQueueEntry }): React.ReactElement {
   return (
     <ul className="mt-2 space-y-1">
       {containers.map((container) => (
-        <li key={container.name} className="flex items-center justify-between gap-2 rounded-sm bg-muted/40 px-2 py-1 text-[11px]">
-          <span className="truncate font-medium">{container.name}</span>
-          <span className={cn('flex items-center gap-1 text-[10px] uppercase tracking-wider', containerPhaseClassName(container))}>
-            <span aria-hidden="true" className={cn('inline-block size-1.5 rounded-full', containerPhaseDotClassName(container))} />
-            {containerPhaseLabel(container)}
-            {container.restarts > 0 && <span className="text-muted-foreground">· {container.restarts} restart{container.restarts > 1 ? 's' : ''}</span>}
-          </span>
+        <li key={container.name}>
+          <ContainerStatusRow container={container} deploy={deploy} />
         </li>
       ))}
     </ul>
   );
+}
+
+function ContainerStatusRow({ container, deploy }: { container: ActivityQueueContainerStatus; deploy: ActivityQueueEntry }): React.ReactElement {
+  const failing = containerIsFailing(container);
+  const [expanded, setExpanded] = React.useState<boolean>(failing);
+  // Failing containers default to expanded so the user sees the cause
+  // without an extra click; user can still collapse and re-expand.
+  React.useEffect(() => {
+    setExpanded(failing);
+  }, [failing]);
+
+  const hasDetails = Boolean(container.image || container.message || container.reason);
+  return (
+    <div className={cn('rounded-sm border border-transparent bg-muted/40 px-2 py-1', failing && 'border-destructive/30')}>
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-2 text-left text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+        aria-expanded={expanded}
+        aria-controls={`container-detail-${container.name}`}
+        disabled={!hasDetails}
+        onClick={() => setExpanded((value) => !value)}
+      >
+        <span className="flex items-center gap-1 truncate font-medium">
+          {hasDetails && (
+            <ChevronRight aria-hidden="true" className={cn('size-3 transition-transform text-muted-foreground', expanded && 'rotate-90')} />
+          )}
+          <span className="truncate">{container.name}</span>
+        </span>
+        <span className={cn('flex flex-none items-center gap-1 text-[10px] uppercase tracking-wider', containerPhaseClassName(container))}>
+          <span aria-hidden="true" className={cn('inline-block size-1.5 rounded-full', containerPhaseDotClassName(container))} />
+          {containerPhaseLabel(container)}
+          {container.restarts > 0 && <span className="text-muted-foreground">· {container.restarts} restart{container.restarts > 1 ? 's' : ''}</span>}
+        </span>
+      </button>
+      {expanded && hasDetails && (
+        <ContainerStatusDetail id={`container-detail-${container.name}`} container={container} deploy={deploy} />
+      )}
+    </div>
+  );
+}
+
+function ContainerStatusDetail({ id, container, deploy }: { id: string; container: ActivityQueueContainerStatus; deploy: ActivityQueueEntry }): React.ReactElement {
+  return (
+    <dl id={id} className="mt-1 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+      {container.image && (
+        <>
+          <dt className="font-medium text-foreground">Image</dt>
+          <dd className="break-all font-mono text-[10.5px]">{container.image}</dd>
+        </>
+      )}
+      {container.reason && (
+        <>
+          <dt className="font-medium text-foreground">Reason</dt>
+          <dd className={cn('font-mono text-[10.5px]', containerIsFailing(container) && 'text-destructive')}>{container.reason}</dd>
+        </>
+      )}
+      {container.message && (
+        <>
+          <dt className="font-medium text-foreground">Message</dt>
+          <dd className="whitespace-pre-wrap break-words">{container.message}</dd>
+        </>
+      )}
+      <dt className="font-medium text-foreground">Inspect</dt>
+      <dd className="break-all font-mono text-[10px]">
+        <code className="text-foreground">{kubectlDescribeCommand(container, deploy)}</code>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          className="ml-1 h-5 px-1 text-[10px]"
+          onClick={() => {
+            void copyToClipboard(kubectlDescribeCommand(container, deploy));
+          }}
+        >
+          Copy
+        </Button>
+      </dd>
+    </dl>
+  );
+}
+
+function kubectlDescribeCommand(container: ActivityQueueContainerStatus, deploy: ActivityQueueEntry): string {
+  const parts = ['kubectl'];
+  const ctx = deploy.kubernetesContext?.trim();
+  if (ctx) {
+    parts.push('--context', ctx);
+  }
+  const ns = deploy.namespace?.trim();
+  if (ns) {
+    parts.push('-n', ns);
+  }
+  const release = deploy.release?.trim();
+  if (release) {
+    parts.push('describe', 'pod', '-l', `app=${release}`);
+  } else {
+    parts.push('describe', 'pod');
+  }
+  parts.push(`# container ${container.name}`);
+  return parts.join(' ');
+}
+
+async function copyToClipboard(text: string): Promise<void> {
+  try {
+    await navigator.clipboard?.writeText(text);
+  } catch {
+    /* clipboard API may not be available in some Wails wraps; ignore */
+  }
 }
 
 function ActivityStatusIcon({ status }: { status: ActivityQueueEntry['status'] }): React.ReactElement {
