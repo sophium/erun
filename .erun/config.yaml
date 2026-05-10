@@ -4,7 +4,6 @@ environments:
         docker:
             fingerprints:
                 erun-ubuntu: 6ffef71a59498123
-                erun-dind: bdee80a398a69e36
         k8s:
             deployments:
                 - [erun-devops, erun-backend-postgres]
