@@ -171,6 +171,55 @@ type DeploySpec struct {
 	SkipHelm bool
 }
 
+// EnvConfigSaver writes an updated env config to disk. The contract
+// matches what (ConfigStore).SaveEnvConfig provides; CLI and MCP wire
+// it through their stores so shared code can persist post-deploy
+// state without depending on the full ConfigStore.
+type EnvConfigSaver func(tenant string, config EnvConfig) error
+
+// PersistRuntimeVersionFromDeploySpecs writes the version of the
+// runtime chart that was just deployed back into the env config so
+// downstream readers (the desktop runtime dialog, `erun list`, and any
+// `erun open` invocation that doesn't pass --version) reflect the
+// deployed state. Without this, `erun deploy --version 1.0.54` left
+// env config's runtimeversion at the previously persisted value and
+// the dialog kept rendering the stale string.
+//
+// Looks for the spec whose ReleaseName equals <tenant>-devops; if
+// found and its Deploy.Version differs from the env config's
+// RuntimeVersion, the env config is rewritten with the deployed
+// version. Component-only deploys (no runtime chart in the spec list)
+// are no-ops, as are dry-runs and calls with a nil saver.
+func PersistRuntimeVersionFromDeploySpecs(ctx Context, specs []DeploySpec, save EnvConfigSaver) error {
+	if save == nil || ctx.DryRun || len(specs) == 0 {
+		return nil
+	}
+	for _, spec := range specs {
+		if !specDeploysRuntimeChart(spec) {
+			continue
+		}
+		version := strings.TrimSpace(spec.Deploy.Version)
+		if version == "" {
+			continue
+		}
+		envConfig := spec.Target.EnvConfig
+		if strings.TrimSpace(envConfig.RuntimeVersion) == version {
+			return nil
+		}
+		envConfig.RuntimeVersion = version
+		if err := save(spec.Target.Tenant, envConfig); err != nil {
+			return fmt.Errorf("persist runtime version after deploy: %w", err)
+		}
+		return nil
+	}
+	return nil
+}
+
+func specDeploysRuntimeChart(spec DeploySpec) bool {
+	tenant := strings.TrimSpace(spec.Target.Tenant)
+	return tenant != "" && strings.TrimSpace(spec.Deploy.ReleaseName) == RuntimeReleaseName(tenant)
+}
+
 func RunDeploySpecs(ctx Context, executions []DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
 	if len(executions) == 0 {
 		return nil

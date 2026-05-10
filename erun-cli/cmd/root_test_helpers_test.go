@@ -420,7 +420,7 @@ func assembleTestRootCmd(parts testRootCmdParts) *cobra.Command {
 	k8sCmd := newCommandGroup(
 		"k8s",
 		"Kubernetes utilities",
-		newK8sDeployCmd(parts.store, parts.findProjectRoot, parts.resolveDockerBuildContext, parts.resolveKubernetesDeployContext, parts.now, parts.buildDockerImage, parts.push, parts.recoveringDeployHelmChart),
+		newK8sDeployCmd(parts.store, parts.store.SaveEnvConfig, parts.findProjectRoot, parts.resolveDockerBuildContext, parts.resolveKubernetesDeployContext, parts.now, parts.buildDockerImage, parts.push, parts.recoveringDeployHelmChart),
 	)
 	devopsCmd := newCommandGroup("devops", "DevOps utilities", containerCmd, k8sCmd)
 	buildCmd := optionalTestBuildCmd(parts)
@@ -466,7 +466,7 @@ func optionalTestPushCmd(parts testRootCmdParts) *cobra.Command {
 }
 
 func optionalTestDeployCmd(parts testRootCmdParts) *cobra.Command {
-	return newDeployCmd(parts.store, parts.findProjectRoot, parts.resolveDockerBuildContext, parts.resolveKubernetesDeployContext, parts.now, parts.buildDockerImage, parts.push, parts.recoveringDeployHelmChart)
+	return newDeployCmd(parts.store, parts.store.SaveEnvConfig, parts.findProjectRoot, parts.resolveDockerBuildContext, parts.resolveKubernetesDeployContext, parts.now, parts.buildDockerImage, parts.push, parts.recoveringDeployHelmChart)
 }
 
 func testRootRunner(parts testRootCmdParts) func(*cobra.Command, []string) error {

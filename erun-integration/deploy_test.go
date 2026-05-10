@@ -218,6 +218,35 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/real_run_via_stubs", normalize.Apply(result.Combined))
 	})
 
+	t.Run("real_run_persists_runtime_version_to_env_config", func(t *testing.T) {
+		// Regression: `erun deploy --version X` updates helm's release
+		// appVersion but used to leave EnvConfig.RuntimeVersion at the
+		// previously persisted value, so the desktop runtime dialog and
+		// `erun list` kept showing the stale string. Real-run deploy now
+		// writes the deployed version back to the env config.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.99", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		envCfgPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		raw, err := os.ReadFile(envCfgPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		body := string(raw)
+		if !strings.Contains(body, "runtimeversion: 1.0.99") {
+			t.Fatalf("expected env config to be rewritten with runtimeversion: 1.0.99, got:\n%s", body)
+		}
+	})
+
 	t.Run("dry_run_with_managed_cloud_traces_helm_set_strings", func(t *testing.T) {
 		// Exercises eruncommon.applyCloudProviderDeployMetadata,
 		// findCloudContextForKubernetesContext, cloudContextRegionFromName,
