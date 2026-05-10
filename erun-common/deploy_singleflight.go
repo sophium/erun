@@ -117,6 +117,16 @@ func (d helmDeploySingleFlightDeps) resolved() helmDeploySingleFlightDeps {
 
 const deployInflightDirName = "deploys"
 
+// helmDeploySingleFlightMaxAge is the upper bound on how long a marker can
+// reasonably represent a real in-flight deploy. Helm's default rollout
+// timeout is 5 minutes; chains with multiple charts and large rollouts can
+// stretch to ~10 minutes; anything beyond that is almost certainly a stale
+// marker left behind by a CLI that died (commonly: a deploy CLI inside a
+// runtime pod that was killed when the pod restarted, leaving a marker
+// whose recorded PID is coincidentally alive in the new pod's PID
+// namespace). Reclaiming on age covers that hole.
+const helmDeploySingleFlightMaxAge = 15 * time.Minute
+
 // AcquireHelmDeploySingleFlight tries to claim exclusive ownership of the
 // helm release for the duration of a deploy. Behavior:
 //
@@ -196,6 +206,19 @@ func acquireHelmDeploySingleFlight(ctx Context, deploy HelmDeploySpec, deps helm
 			ctx.Trace(fmt.Sprintf("dedup: reclaim (release=%s, prior pid=%d is dead)", releaseKey, existing.PID))
 			if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 				return HelmDeploySingleFlightProceed, nil, fmt.Errorf("remove stale in-flight marker: %w", rmErr)
+			}
+			continue
+		}
+		// PID liveness alone is not sufficient inside containers: a pod
+		// restart resets the PID namespace, and a coincidentally-alive
+		// new PID can shadow the dead deploy's recorded PID. Fall back
+		// to a max-age check so any marker older than a sensible deploy
+		// ceiling is reclaimed regardless of what PID the kernel hands
+		// out.
+		if !existing.StartedAt.IsZero() && deps.now().Sub(existing.StartedAt) > helmDeploySingleFlightMaxAge {
+			ctx.Trace(fmt.Sprintf("dedup: reclaim (release=%s, marker age %s exceeds max %s)", releaseKey, deps.now().Sub(existing.StartedAt).Round(time.Second), helmDeploySingleFlightMaxAge))
+			if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+				return HelmDeploySingleFlightProceed, nil, fmt.Errorf("remove aged-out in-flight marker: %w", rmErr)
 			}
 			continue
 		}

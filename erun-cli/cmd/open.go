@@ -38,53 +38,60 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 		Short:        "Open a shell in the tenant environment worktree",
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			// `erun open` is a long-running shell wrapper / port-forward
-			// supervisor — registering it as an activity would overwhelm
-			// the desktop queue with one entry per terminal tab. The
-			// queue tracks long-running mutating operations
-			// (build, deploy, release); shells live in the tab strip.
-			ctx := commandContext(cmd)
-			if prepareContext != nil {
-				ctx = prepareContext(ctx)
-			}
-			if vscode && intellij {
-				return fmt.Errorf("--vscode and --intellij cannot be used together")
-			}
-			params, err := resolveOpenParams(args, target)
-			if err != nil {
-				return err
-			}
-			result, initRan, err := resolveOpenWithInitStopForParams(ctx, params, shouldRunInitForOpenCommand, resolveOpen, runInitForOpen)
-			if err != nil {
-				return err
-			}
-			if initRan {
-				return nil
-			}
-			snapshotOverride, err := resolveSnapshotFlagOverride(cmd, snapshot, noSnapshot)
-			if err != nil {
-				return err
-			}
-			result, err = applyOpenSnapshotPreference(result, snapshotOverride, saveEnvConfig)
-			if err != nil {
-				return err
-			}
-			allowLocalBuilds := result.EnvConfig.SnapshotEnabled()
-			if snapshotOverride != nil {
-				allowLocalBuilds = *snapshotOverride
-			}
-			return runResolvedOpenCommandWithAPI(ctx, result, openOptions{
-				NoShell:          noShell,
-				NoAliasPrompt:    noAliasPrompt,
-				VSCode:           vscode,
-				IntelliJ:         intellij,
-				VersionOverride:  versionOverride,
-				RuntimeImage:     runtimeImage,
-				AllowLocalBuilds: allowLocalBuilds,
-				SaveEnvConfig:    saveEnvConfig,
-			}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateAPI, activateSSHD, launchVSCode, launchIntelliJ)
-		},
+		RunE: withRunningCommandMarker(
+			func(cmd *cobra.Command, args []string) runningCommandSeed {
+				params, _ := resolveOpenParams(args, target)
+				return runningCommandSeed{
+					command:     "open",
+					tenant:      params.Tenant,
+					environment: params.Environment,
+					version:     versionOverride,
+					summary:     "open " + strings.TrimSpace(params.Tenant+"/"+params.Environment),
+				}
+			},
+			func(cmd *cobra.Command, args []string) error {
+				ctx := commandContext(cmd)
+				if prepareContext != nil {
+					ctx = prepareContext(ctx)
+				}
+				if vscode && intellij {
+					return fmt.Errorf("--vscode and --intellij cannot be used together")
+				}
+				params, err := resolveOpenParams(args, target)
+				if err != nil {
+					return err
+				}
+				result, initRan, err := resolveOpenWithInitStopForParams(ctx, params, shouldRunInitForOpenCommand, resolveOpen, runInitForOpen)
+				if err != nil {
+					return err
+				}
+				if initRan {
+					return nil
+				}
+				snapshotOverride, err := resolveSnapshotFlagOverride(cmd, snapshot, noSnapshot)
+				if err != nil {
+					return err
+				}
+				result, err = applyOpenSnapshotPreference(result, snapshotOverride, saveEnvConfig)
+				if err != nil {
+					return err
+				}
+				allowLocalBuilds := result.EnvConfig.SnapshotEnabled()
+				if snapshotOverride != nil {
+					allowLocalBuilds = *snapshotOverride
+				}
+				return runResolvedOpenCommandWithAPI(ctx, result, openOptions{
+					NoShell:          noShell,
+					NoAliasPrompt:    noAliasPrompt,
+					VSCode:           vscode,
+					IntelliJ:         intellij,
+					VersionOverride:  versionOverride,
+					RuntimeImage:     runtimeImage,
+					AllowLocalBuilds: allowLocalBuilds,
+					SaveEnvConfig:    saveEnvConfig,
+				}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateAPI, activateSSHD, launchVSCode, launchIntelliJ)
+			},
+		),
 	}
 
 	addDryRunFlag(cmd)
