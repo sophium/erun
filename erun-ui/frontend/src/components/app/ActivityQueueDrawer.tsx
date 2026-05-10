@@ -27,15 +27,15 @@ const drawerVisibleClassName = 'translate-x-0';
 // the runtime pod's filesystem and unreachable from the host).
 export function ActivityQueueDrawer({ open, onClose }: ActivityQueueDrawerProps): React.ReactElement {
   const { entries, dismiss, forceDismiss } = useActivityQueue();
-  const [now, setNow] = React.useState(() => Date.now());
-  React.useEffect(() => {
-    if (!open) return undefined;
-    const id = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(id);
-  }, [open]);
-
   const activeEntries = entries.filter((entry) => entry.status === 'running');
   const historyEntries = entries.filter((entry) => entry.status !== 'running');
+
+  const dismissAllActive = React.useCallback(async () => {
+    await Promise.all(activeEntries.map((entry) => forceDismiss(entry.id)));
+  }, [activeEntries, forceDismiss]);
+  const dismissAllHistory = React.useCallback(async () => {
+    await Promise.all(historyEntries.map((entry) => dismiss(entry.id)));
+  }, [historyEntries, dismiss]);
 
   return (
     <>
@@ -58,13 +58,22 @@ export function ActivityQueueDrawer({ open, onClose }: ActivityQueueDrawerProps)
           </Button>
         </header>
         <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-3" aria-live="polite">
-          <ActivitySection title="Active" entries={activeEntries} now={now} emptyText="No activities in progress." onForceDismiss={forceDismiss} />
+          <ActivitySection
+            title="Active"
+            entries={activeEntries}
+            emptyText="No activities in progress."
+            onForceDismiss={forceDismiss}
+            onClearAll={activeEntries.length > 1 ? dismissAllActive : undefined}
+            clearAllLabel="Force dismiss all"
+            clearAllHint="Removes every active entry from the queue. Underlying processes (open shells, running deploys) are not killed."
+          />
           <ActivitySection
             title="Recent"
             entries={historyEntries}
-            now={now}
             emptyText="No recent activities."
             onDismiss={dismiss}
+            onClearAll={historyEntries.length > 1 ? dismissAllHistory : undefined}
+            clearAllLabel="Clear history"
           />
         </div>
       </aside>
@@ -75,25 +84,43 @@ export function ActivityQueueDrawer({ open, onClose }: ActivityQueueDrawerProps)
 type ActivitySectionProps = {
   title: string;
   entries: ActivityQueueEntry[];
-  now: number;
   emptyText: string;
   onDismiss?: (id: string) => Promise<void>;
   onForceDismiss?: (id: string) => Promise<void>;
+  onClearAll?: () => Promise<void>;
+  clearAllLabel?: string;
+  clearAllHint?: string;
 };
 
-function ActivitySection({ title, entries, now, emptyText, onDismiss, onForceDismiss }: ActivitySectionProps): React.ReactElement {
+function ActivitySection({ title, entries, emptyText, onDismiss, onForceDismiss, onClearAll, clearAllLabel, clearAllHint }: ActivitySectionProps): React.ReactElement {
   return (
     <section aria-labelledby={`activity-section-${title.toLowerCase()}`}>
-      <h3 id={`activity-section-${title.toLowerCase()}`} className="px-1 pb-1.5 text-[11px] uppercase tracking-wider text-muted-foreground">
-        {title}
-      </h3>
+      <div className="flex items-center justify-between px-1 pb-1.5">
+        <h3 id={`activity-section-${title.toLowerCase()}`} className="text-[11px] uppercase tracking-wider text-muted-foreground">
+          {title}
+        </h3>
+        {onClearAll && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="h-5 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+            title={clearAllHint}
+            onClick={() => {
+              void onClearAll();
+            }}
+          >
+            {clearAllLabel ?? 'Clear'}
+          </Button>
+        )}
+      </div>
       {entries.length === 0 ? (
         <p className="rounded-md border border-dashed bg-muted/40 px-3 py-2 text-xs text-muted-foreground">{emptyText}</p>
       ) : (
         <ul className="space-y-2">
           {entries.map((entry) => (
             <li key={entry.id}>
-              <ActivityCard entry={entry} now={now} onDismiss={onDismiss} onForceDismiss={onForceDismiss} />
+              <ActivityCard entry={entry} onDismiss={onDismiss} onForceDismiss={onForceDismiss} />
             </li>
           ))}
         </ul>
@@ -104,23 +131,36 @@ function ActivitySection({ title, entries, now, emptyText, onDismiss, onForceDis
 
 type ActivityCardProps = {
   entry: ActivityQueueEntry;
-  now: number;
   onDismiss?: (id: string) => Promise<void>;
   onForceDismiss?: (id: string) => Promise<void>;
 };
 
-const ActivityCard = React.memo(function ActivityCard({ entry, now, onDismiss, onForceDismiss }: ActivityCardProps): React.ReactElement {
-  const elapsed = entry.status === 'running'
+// useTickingNow provides a per-component ticking timestamp without
+// surfacing it as a prop. Parent re-renders no longer cascade into every
+// card every second; only this card re-renders when its own elapsed
+// label crosses a second boundary. Active entries tick once a second;
+// finished entries are static.
+function useTickingNow(active: boolean): number {
+  const [now, setNow] = React.useState(() => Date.now());
+  React.useEffect(() => {
+    if (!active) return undefined;
+    const id = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(id);
+  }, [active]);
+  return now;
+}
+
+const ActivityCard = React.memo(function ActivityCard({ entry, onDismiss, onForceDismiss }: ActivityCardProps): React.ReactElement {
+  const isActive = entry.status === 'running';
+  const now = useTickingNow(isActive);
+  const elapsed = isActive
     ? formatElapsed(entry.startedAt, now)
     : entry.endedAt
       ? formatElapsed(entry.startedAt, Date.parse(entry.endedAt))
-      : formatElapsed(entry.startedAt, now);
-  const isActive = entry.status === 'running';
+      : formatElapsed(entry.startedAt, Date.parse(entry.lastUpdated));
   const handleDismiss = React.useCallback(() => {
-    if (isActive) {
-      if (onForceDismiss) {
-        void onForceDismiss(entry.id);
-      }
+    if (isActive && onForceDismiss) {
+      void onForceDismiss(entry.id);
       return;
     }
     if (onDismiss) {
