@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -42,8 +45,9 @@ func (a *App) runActivityMarkerWatcher(stop <-chan struct{}) {
 
 // reconcileActivityMarkers reads every marker in dir, registers any that
 // the queue does not already track, finalizes entries whose marker has
-// recorded a terminal status, and finalizes entries whose marker is gone.
-// Errors reading individual markers are tolerated — the next tick re-tries.
+// recorded a terminal status, prunes markers whose PID is no longer
+// alive, and finalizes entries whose marker is gone. Errors reading
+// individual markers are tolerated — the next tick re-tries.
 func (a *App) reconcileActivityMarkers(dir string) {
 	if a.activityQueue == nil {
 		return
@@ -54,6 +58,14 @@ func (a *App) reconcileActivityMarkers(dir string) {
 	}
 	seenIDs := make(map[string]struct{}, len(records))
 	for _, record := range records {
+		if record.Status == "" && !isProcessAliveOrDefault(record.PID) {
+			// CLI exited without finalizing (crashed, killed via
+			// SIGKILL, host shutdown, or an old binary that wrote a
+			// marker but never removed it). Clean up so the queue
+			// doesn't show a phantom-running entry forever.
+			a.pruneStaleMarker(dir, record)
+			continue
+		}
 		entry, fresh := a.applyMarkerRecord(dir, record)
 		if entry.ID != "" {
 			seenIDs[entry.ID] = struct{}{}
@@ -71,6 +83,46 @@ func (a *App) reconcileActivityMarkers(dir string) {
 		}
 	}
 	a.finalizeMissingMarkers(seenIDs)
+}
+
+// pruneStaleMarker removes the on-disk marker for a process that is no
+// longer alive. If the marker's record matches an active queue entry the
+// entry is finalized as "failed" with a clear reason so the user sees the
+// abandoned activity rather than nothing.
+func (a *App) pruneStaleMarker(dir string, record eruncommon.RunningCommand) {
+	id := strings.TrimSpace(record.ID)
+	if id == "" {
+		return
+	}
+	path := filepath.Join(dir, sanitizeFilenameForActivity(id)+".json")
+	_ = os.Remove(path)
+	if a.activityQueue == nil {
+		return
+	}
+	if final, ok := a.activityQueue.finish(id, activityQueueStatusFailed, "command exited without recording a terminal status (likely killed)"); ok {
+		a.unlockTerminalsForActivity(final)
+	}
+}
+
+// isProcessAliveOrDefault returns true when the supplied PID is currently
+// running, with a permissive fallback when the PID is unset or invalid
+// (which happens for older markers written before PID was recorded).
+func isProcessAliveOrDefault(pid int) bool {
+	if pid <= 0 {
+		return true
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	signalErr := proc.Signal(syscall.Signal(0))
+	if signalErr == nil {
+		return true
+	}
+	if errors.Is(signalErr, syscall.ESRCH) {
+		return false
+	}
+	return true
 }
 
 // finalStatusFromMarker translates the marker's Status field (set by

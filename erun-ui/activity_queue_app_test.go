@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -203,6 +205,45 @@ func TestApplyMarkerRecordRegistersEntryAndIsIdempotent(t *testing.T) {
 	_, fresh = app.applyMarkerRecord(dir, record)
 	if fresh {
 		t.Fatal("second apply should be a no-op")
+	}
+}
+
+func TestPruneStaleMarkerRemovesDeadPidMarker(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	dir := t.TempDir()
+	record := eruncommon.RunningCommand{
+		ID:        "open-erun-local-1",
+		Command:   "open",
+		Tenant:    "erun",
+		Environment: "local",
+		PID:       0, // sentinel for "definitely not alive" in pruneStaleMarker
+		StartedAt: time.Now().UTC(),
+	}
+	// Seed a marker file at the expected path.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	path := filepath.Join(dir, sanitizeFilenameForActivity(record.ID)+".json")
+	if err := os.WriteFile(path, []byte(`{"id":"open-erun-local-1","command":"open"}`), 0o600); err != nil {
+		t.Fatalf("write seed marker: %v", err)
+	}
+	app.applyMarkerRecord(dir, record)
+	if _, ok := app.activityQueue.findActive("erun", "local"); !ok {
+		t.Fatal("expected entry registered before prune")
+	}
+	app.pruneStaleMarker(dir, record)
+	if _, statErr := os.Stat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("marker not removed: %v", statErr)
+	}
+	if _, ok := app.activityQueue.findActive("erun", "local"); ok {
+		t.Fatal("entry should be finalized after prune")
+	}
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusFailed {
+		t.Fatalf("expected one failed entry, got %+v", all)
+	}
+	if !strings.Contains(all[0].Error, "killed") {
+		t.Fatalf("expected error reason about killed/abandoned, got %q", all[0].Error)
 	}
 }
 
