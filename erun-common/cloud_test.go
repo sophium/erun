@@ -1,14 +1,50 @@
 package eruncommon
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 )
 
 type memoryCloudStore struct {
-	config ERunConfig
-	envs   map[string]EnvConfig
-	err    error
+	config  ERunConfig
+	envs    map[string]EnvConfig
+	tenants []TenantConfig
+	err     error
+}
+
+func (s *memoryCloudStore) ListTenantConfigs() ([]TenantConfig, error) {
+	if s.tenants != nil {
+		return s.tenants, nil
+	}
+	seen := map[string]struct{}{}
+	tenants := make([]TenantConfig, 0)
+	for key := range s.envs {
+		name := key
+		if i := strings.IndexByte(key, '/'); i >= 0 {
+			name = key[:i]
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		tenants = append(tenants, TenantConfig{Name: name})
+	}
+	return tenants, nil
+}
+
+func (s *memoryCloudStore) ListEnvConfigs(tenant string) ([]EnvConfig, error) {
+	envs := make([]EnvConfig, 0)
+	prefix := tenant + "/"
+	for key, env := range s.envs {
+		if strings.HasPrefix(key, prefix) {
+			envs = append(envs, env)
+		}
+	}
+	return envs, nil
 }
 
 func (s *memoryCloudStore) LoadERunConfig() (ERunConfig, string, error) {
@@ -48,11 +84,19 @@ func TestInitAWSCloudProviderStoresAliasInRootConfig(t *testing.T) {
 			loginCalled = true
 			return nil
 		},
+		RunAWSBearerToken: func(_ Context, profile, audience string) (string, error) {
+			requireEqual(t, profile, "dev", "bearer profile")
+			requireEqual(t, audience, CloudProviderBearerAudience, "bearer audience")
+			return testJWTWithIssuer(t, "https://sts.aws.example"), nil
+		},
 		ResolveAWSIdentity: func(Context, string) (AWSIdentity, error) {
 			return AWSIdentity{
 				Account: "123456789012",
 				Arn:     "arn:aws:sts::123456789012:assumed-role/Admin/rihards",
 			}, nil
+		},
+		CheckAWSStatus: func(_ Context, provider CloudProviderConfig) CloudProviderStatus {
+			return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusActive}
 		},
 	})
 	if err != nil {
@@ -64,8 +108,14 @@ func TestInitAWSCloudProviderStoresAliasInRootConfig(t *testing.T) {
 	if provider.Alias != "rihards+123456789012@aws" {
 		t.Fatalf("unexpected alias: %+v", provider)
 	}
+	if provider.OIDCIssuerURL != "https://sts.aws.example" {
+		t.Fatalf("expected OIDC issuer to be derived from AWS bearer token, got %+v", provider)
+	}
 	if len(store.config.CloudProviders) != 1 || store.config.CloudProviders[0].Alias != provider.Alias {
 		t.Fatalf("expected provider to be saved in root config, got %+v", store.config)
+	}
+	if store.config.CloudProviders[0].OIDCIssuerURL != "https://sts.aws.example" {
+		t.Fatalf("expected stored OIDC issuer, got %+v", store.config)
 	}
 }
 
@@ -90,6 +140,11 @@ func TestInitAWSCloudProviderCreatesProfileAndDerivesAliasFromLoginIdentity(t *t
 			loginProfile = profile
 			return nil
 		},
+		RunAWSBearerToken: func(_ Context, profile, audience string) (string, error) {
+			requireCondition(t, profile != "", "expected bearer token profile")
+			requireEqual(t, audience, CloudProviderBearerAudience, "bearer audience")
+			return testJWTWithIssuer(t, "https://sts.aws.example/"), nil
+		},
 		ResolveAWSIdentity: func(_ Context, profile string) (AWSIdentity, error) {
 			identityProfile = profile
 			return AWSIdentity{
@@ -97,9 +152,100 @@ func TestInitAWSCloudProviderCreatesProfileAndDerivesAliasFromLoginIdentity(t *t
 				Arn:     "arn:aws:sts::123456789012:assumed-role/Admin/rihards",
 			}, nil
 		},
+		CheckAWSStatus: func(_ Context, provider CloudProviderConfig) CloudProviderStatus {
+			return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusActive}
+		},
 	})
 	requireNoError(t, err, "InitAWSCloudProvider failed")
 	requireGeneratedAWSProfile(t, provider, configuredProfile, loginProfile, identityProfile)
+	requireEqual(t, provider.OIDCIssuerURL, "https://sts.aws.example", "derived OIDC issuer")
+}
+
+func TestSetupCloudProviderOIDCRefreshesIssuerAndReturnsBearer(t *testing.T) {
+	store := &memoryCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{{
+		Alias:         "rihards+123456789012@aws",
+		Provider:      CloudProviderAWS,
+		Profile:       "dev",
+		OIDCIssuerURL: "https://old.example",
+	}}}}
+	jwt := testJWTWithIssuer(t, "https://sts.aws.example/.well-known/openid-configuration")
+	loginCalled := false
+	status, token, err := SetupCloudProviderOIDC(Context{}, store, CloudBearerParams{
+		Alias:    "rihards+123456789012@aws",
+		Audience: "https://api.example",
+	}, CloudDependencies{
+		RunAWSLogin: func(_ Context, profile string) error {
+			loginCalled = true
+			requireEqual(t, profile, "dev", "login profile")
+			return nil
+		},
+		RunAWSBearerToken: func(_ Context, profile, audience string) (string, error) {
+			requireEqual(t, profile, "dev", "bearer profile")
+			requireEqual(t, audience, "https://api.example", "bearer audience")
+			return jwt, nil
+		},
+		CheckAWSStatus: func(_ Context, provider CloudProviderConfig) CloudProviderStatus {
+			return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusExpired}
+		},
+	})
+	requireNoError(t, err, "SetupCloudProviderOIDC failed")
+	requireCondition(t, loginCalled, "expected setup to login before getting bearer token")
+	requireEqual(t, token.Token, jwt, "bearer token")
+	requireEqual(t, token.Issuer, "https://sts.aws.example", "token issuer")
+	requireEqual(t, status.OIDCIssuerURL, "https://sts.aws.example", "status issuer")
+	requireEqual(t, store.config.CloudProviders[0].OIDCIssuerURL, "https://sts.aws.example", "stored issuer")
+}
+
+func TestCloudProviderBearerTokenEnablesOutboundFederationWhenDisabled(t *testing.T) {
+	store := &memoryCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{{
+		Alias:    "rihards+123456789012@aws",
+		Provider: CloudProviderAWS,
+		Profile:  "dev",
+	}}}}
+	tokenCalls := 0
+	enableCalled := false
+	token, err := CloudProviderBearerToken(Context{}, store, CloudBearerParams{Alias: "rihards+123456789012@aws"}, CloudDependencies{
+		RunAWSBearerToken: func(_ Context, profile, audience string) (string, error) {
+			requireEqual(t, profile, "dev", "bearer profile")
+			requireEqual(t, audience, CloudProviderBearerAudience, "bearer audience")
+			tokenCalls++
+			if tokenCalls == 1 {
+				return "", fmt.Errorf("get AWS web identity token: An error occurred (OutboundWebIdentityFederationDisabledException) when calling the GetWebIdentityToken operation: OutboundWebIdentityFederation is disabled.")
+			}
+			return testJWTWithIssuer(t, "https://sts.aws.example"), nil
+		},
+		RunAWSEnableOIDC: func(_ Context, profile string) (string, error) {
+			enableCalled = true
+			requireEqual(t, profile, "dev", "enable profile")
+			return "https://sts.aws.example", nil
+		},
+		CheckAWSStatus: func(_ Context, provider CloudProviderConfig) CloudProviderStatus {
+			return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusActive}
+		},
+	})
+	requireNoError(t, err, "CloudProviderBearerToken failed")
+	requireCondition(t, enableCalled, "expected outbound federation enable to run")
+	requireEqual(t, tokenCalls, 2, "bearer token calls")
+	requireEqual(t, token.Issuer, "https://sts.aws.example", "issuer")
+}
+
+func TestCloudProviderBearerTokenRequiresJWTIssuer(t *testing.T) {
+	store := &memoryCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{{
+		Alias:    "rihards+123456789012@aws",
+		Provider: CloudProviderAWS,
+		Profile:  "dev",
+	}}}}
+	_, err := CloudProviderBearerToken(Context{}, store, CloudBearerParams{Alias: "rihards+123456789012@aws"}, CloudDependencies{
+		RunAWSBearerToken: func(Context, string, string) (string, error) {
+			return "not-a-jwt", nil
+		},
+		CheckAWSStatus: func(_ Context, provider CloudProviderConfig) CloudProviderStatus {
+			return CloudProviderStatus{CloudProviderConfig: provider, Status: CloudTokenStatusActive}
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "not a JWT") {
+		t.Fatalf("expected JWT issuer error, got %v", err)
+	}
 }
 
 func requireAWSProfileConfig(t *testing.T, config AWSProfileConfig) {
@@ -143,6 +289,39 @@ func TestLoginCloudProviderAliasRunsLoginWhenStatusIsExpired(t *testing.T) {
 	}
 	if status.Status != CloudTokenStatusActive {
 		t.Fatalf("unexpected status: %+v", status)
+	}
+}
+
+func TestResolveTenantCloudProviderIssuersUsesAllLinkedAliases(t *testing.T) {
+	store := &memoryCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{
+		{
+			Alias:         "primary-cloud",
+			Provider:      CloudProviderAWS,
+			OIDCIssuerURL: "https://issuer.primary.example/.well-known/openid-configuration",
+		},
+		{
+			Alias:         "review-cloud",
+			Provider:      CloudProviderAWS,
+			OIDCIssuerURL: "https://issuer.review.example/",
+		},
+	}}}
+	issuers, err := ResolveTenantCloudProviderIssuers(store, TenantConfig{
+		CloudProviderAliases:      []string{"review-cloud", "primary-cloud", "primary-cloud"},
+		PrimaryCloudProviderAlias: "primary-cloud",
+	})
+	requireNoError(t, err, "ResolveTenantCloudProviderIssuers failed")
+	requireEqual(t, strings.Join(issuers, ","), "https://issuer.primary.example,https://issuer.review.example", "resolved issuers")
+}
+
+func TestResolveTenantCloudProviderIssuersRequiresIssuerURL(t *testing.T) {
+	store := &memoryCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{{
+		Alias:       "portal-cloud",
+		Provider:    CloudProviderAWS,
+		SSOStartURL: "https://example.awsapps.com/start",
+	}}}}
+	_, err := ResolveTenantCloudProviderIssuers(store, TenantConfig{CloudProviderAliases: []string{"portal-cloud"}})
+	if err == nil || !strings.Contains(err.Error(), "does not have an OIDC issuer URL") {
+		t.Fatalf("expected missing issuer error, got %v", err)
 	}
 }
 
@@ -208,4 +387,13 @@ func requireStoredCloudAliasConfig(t *testing.T, stored EnvConfig) {
 	requireCondition(t, stored.RepoPath == "/workspace/frs" && stored.KubernetesContext == "cluster-dev" && stored.ContainerRegistry == "registry.example.com/frs" && stored.RuntimeVersion == "1.0.0", "unexpected stored config: %+v", stored)
 	requireCondition(t, stored.SSHD.Enabled && stored.SSHD.LocalPort == 60022 && stored.SSHD.PublicKeyPath == "/tmp/id.pub", "unexpected stored SSH config: %+v", stored)
 	requireCondition(t, stored.Remote && stored.ManagedCloud && stored.Snapshot != nil && *stored.Snapshot, "unexpected stored flags: %+v", stored)
+}
+
+func testJWTWithIssuer(t *testing.T, issuer string) string {
+	t.Helper()
+	header, err := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT"})
+	requireNoError(t, err, "marshal JWT header")
+	payload, err := json.Marshal(map[string]string{"iss": issuer})
+	requireNoError(t, err, "marshal JWT payload")
+	return base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload) + ".signature"
 }

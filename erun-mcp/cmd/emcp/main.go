@@ -45,6 +45,7 @@ func run(args []string, stderr io.Writer, info eruncommon.BuildInfo, runServer s
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	_, _ = fmt.Fprintf(stderr, "erun mcp listening on %s:%d%s tenant=%q environment=%q namespace=%q\n", cfg.Host, cfg.Port, cfg.Path, runtime.Context.Tenant, runtime.Context.Environment, runtime.Context.Namespace)
 	if err := runServer(ctx, info, cfg, runtime); err != nil {
 		_, _ = fmt.Fprintln(stderr, err)
 		return 1

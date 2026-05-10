@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-//go:embed assets/default-devops-chart/Chart.yaml assets/default-devops-chart/values.local.yaml assets/default-devops-chart/templates/service.yaml
+//go:embed assets/default-devops-chart/Chart.yaml assets/default-devops-chart/values.local.yaml assets/default-devops-chart/templates/service.yaml assets/default-backend-postgres-chart/Chart.yaml assets/default-backend-postgres-chart/values.local.yaml assets/default-backend-postgres-chart/templates/postgres.yaml assets/default-backend-db-chart/Chart.yaml assets/default-backend-db-chart/values.local.yaml assets/default-backend-db-chart/templates/migrate-job.yaml assets/default-backend-api-chart/Chart.yaml assets/default-backend-api-chart/values.local.yaml assets/default-backend-api-chart/templates/api.yaml
 var defaultDevopsChartFiles embed.FS
 
 type defaultDevopsChartTemplate struct {
@@ -34,6 +34,51 @@ var defaultDevopsChartTemplates = []defaultDevopsChartTemplate{
 	{
 		AssetPath:  "assets/default-devops-chart/templates/service.yaml",
 		TargetPath: "__MODULE_NAME__/k8s/__MODULE_NAME__/templates/service.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-backend-postgres-chart/Chart.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-postgres/Chart.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-backend-postgres-chart/values.local.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-postgres/values.local.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-backend-postgres-chart/templates/postgres.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-postgres/templates/postgres.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-backend-db-chart/Chart.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-db/Chart.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-backend-db-chart/values.local.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-db/values.local.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-backend-db-chart/templates/migrate-job.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-db/templates/migrate-job.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-backend-api-chart/Chart.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-api/Chart.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-backend-api-chart/values.local.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-api/values.local.yaml",
+		Mode:       0o644,
+	},
+	{
+		AssetPath:  "assets/default-backend-api-chart/templates/api.yaml",
+		TargetPath: "__MODULE_NAME__/k8s/erun-backend-api/templates/api.yaml",
 		Mode:       0o644,
 	},
 }
@@ -79,19 +124,19 @@ func renderDefaultDevopsChartTemplate(assetPath, moduleName, imageName string, d
 		imageName = moduleName
 	}
 	if assetPath == "assets/default-devops-chart/templates/service.yaml" {
-		content = strings.Replace(content, "image: erunpaas/erun-devops:{{ .Chart.AppVersion }}", "image: erunpaas/"+imageName+":{{ .Chart.AppVersion }}", 1)
+		content = strings.Replace(content, `printf "ghcr.io/sophium/erun-devops:%s"`, `printf "ghcr.io/sophium/`+imageName+`:%s"`, 1)
+		content = strings.Replace(content, `index $imageOverrides "erun-devops"`, `index $imageOverrides "`+imageName+`"`, 1)
 	}
 	return []byte(content)
 }
 
-func resolveOpenRuntimeDeploySpec(store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult) (DeploySpec, error) {
+func resolveOpenRuntimeDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
 	if target.RemoteRepo() {
 		return resolveDefaultDevopsDeploySpecWithImage(target, DevopsComponentName)
 	}
 
-	allowLocalBuilds := deployTargetSnapshotEnabled(target, nil)
 	for _, componentName := range openRuntimeComponentNames(target.Tenant) {
-		spec, err := resolveDeploySpecForOpenResult(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, componentName, "", allowLocalBuilds)
+		spec, err := resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, componentName, "", allowLocalBuilds, false)
 		if err == nil {
 			spec.Deploy.ReleaseName = RuntimeReleaseName(target.Tenant)
 			return spec, nil

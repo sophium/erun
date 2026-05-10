@@ -1,28 +1,39 @@
 import type * as React from 'react';
 import { FitAddon } from '@xterm/addon-fit';
-import { Terminal } from '@xterm/xterm';
+import { Terminal, type IDisposable } from '@xterm/xterm';
 
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import {
+  CloseSession,
   LoadDiff,
   LoadIdleStatus,
   LoadKubernetesContexts,
   LoadRuntimeResourceStatus,
   LoadState,
+  LoadTenantDashboard,
   LoadTenantConfig,
   LoadVersionSuggestions,
+  GetCloudProviderBearerToken,
+  LoginCloudProvider,
+  LogoutCloudProvider,
   OpenIDE,
+  ReconnectMCP,
   ResizeSession,
   SavePastedImage,
   SaveTenantConfig,
   SendSessionInput,
+  SetupCloudProviderOIDC,
+  StartAISession,
   StartDeploySession,
   StartInitSession,
+  StartLocalSession,
   StartSession,
 } from '../../wailsjs/go/main/App';
 import { ClipboardSetText, EventsOn, WindowToggleMaximise } from '../../wailsjs/runtime/runtime';
 import { fileToBase64, decodeBase64Bytes, isTerminalPasteTarget, pastedImageFiles } from './clipboard';
+import { replaceCloudProvider } from './cloudContextState';
 import { chooseSelectedDiffPath } from './diffUtils';
+import { isMcpUnreachableMessage, stripMcpUnreachableMarker } from './reconnectCopy';
 import {
   normalizedEnvironmentDialogValues,
   rememberEnvironmentDialogSelection,
@@ -43,6 +54,7 @@ import {
 import { readError } from './errors';
 import { runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
 import { scrollSelectedDiffIntoView, visibleDiffPath } from './reviewDiffNavigation';
+import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses';
 import type {
   AppStatusPayload,
   DebugSessionMode,
@@ -63,14 +75,30 @@ import {
   defaultEnvironmentDialog,
   defaultGlobalConfigDialog,
   defaultManageDialog,
+  defaultTenantDashboard,
   defaultTenantDialog,
   type AppState,
   type EnvironmentDialogState,
   type GlobalConfigDialogState,
   type ManageDialogState,
+  type TenantDashboardTab,
   type TenantDialogState,
   type TerminalStatusAction,
+  type TerminalTab,
+  type TerminalTabKind,
 } from './state';
+
+const TAB_KIND_ORDER: Record<TerminalTabKind, number> = {
+  local: 0,
+  erun: 1,
+  ai: 2,
+  extra: 3,
+};
+
+function compareTabs(a: TerminalTab, b: TerminalTab): number {
+  return TAB_KIND_ORDER[a.kind] - TAB_KIND_ORDER[b.kind] || a.slot - b.slot;
+}
+
 import {
   clamp,
   loadSavedDebugHeight,
@@ -105,37 +133,53 @@ import type {
   TerminalExitPayload,
   TerminalOutputPayload,
   UICloudContextInitInput,
+  UICloudProviderBearerToken,
+  UICloudProviderStatus,
   UIERunConfig,
   UIEnvironmentConfig,
   UIIdleStatus,
   UIRuntimeResourceStatus,
   UISelection,
   UIState,
+  UITenant,
+  UITenantDashboardInput,
+  UITenantDashboard,
   UITenantConfig,
   UIVersionSuggestion,
 } from '@/types';
 
+const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
+
 export class ERunUIController {
   readonly state: AppState = {
     tenants: [],
+    cloudProviders: [],
     selected: null,
     versionSuggestions: [],
     environmentDialog: defaultEnvironmentDialog(),
     manageDialog: defaultManageDialog(),
     tenantDialog: defaultTenantDialog(),
+    tenantDashboard: defaultTenantDashboard(),
     globalConfigDialog: defaultGlobalConfigDialog(),
     collapsedTenants: new Set<string>(),
     sessionId: 0,
+    tabsByEnv: {},
+    selectedSessionByEnv: {},
     sidebarWidth: loadSavedSidebarWidth(),
     reviewWidth: loadSavedReviewWidth(),
     filesWidth: loadSavedFilesWidth(),
     filesOpen: loadSavedFilesOpen(),
     sidebarHidden: false,
     reviewOpen: false,
+    changedFilesOpen: true,
     diff: null,
     diffLoading: false,
     diffError: '',
+    diffErrorReconnectable: false,
+    reconnect: { status: 'idle', lastLine: '', error: '' },
     selectedDiffPath: '',
+    selectedReviewScope: 'current',
+    selectedReviewCommit: '',
     diffFilter: '',
     collapsedDiffDirs: new Set<string>(),
     notification: null,
@@ -148,13 +192,17 @@ export class ERunUIController {
     terminalCopyStatus: '',
     idleStatus: null,
     idleCloudContextBusy: false,
+    sidebarCloudAliasBusy: false,
+    sidebarCloudAliasAction: '',
     debugOpen: loadSavedDebugOpen(),
     debugHeight: loadSavedDebugHeight(),
     debugOutput: '',
+    lastDoctorBySelection: {},
   };
 
   private readonly subscribers = new Set<() => void>();
   private readonly sessions = new TerminalSessionRegistry();
+  private pendingDebugHeader = '';
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
   private terminalRoot: HTMLDivElement | null = null;
@@ -169,14 +217,18 @@ export class ERunUIController {
   private notificationTimer = 0;
   private terminalCopyStatusTimer = 0;
   private idleStatusTimer = 0;
+  private reviewDiffRefreshTimer = 0;
+  private reviewDiffRequest = 0;
   private idleStatusRequest = 0;
   private versionSuggestionRequest = 0;
   private environmentResourceStatusRequest = 0;
   private bootStarted = false;
   private terminalDataDisposable: TerminalDataDisposable | null = null;
+  private terminalQueryResponseDisposables: IDisposable[] = [];
   private terminalOutputOff: (() => void) | null = null;
   private terminalExitOff: (() => void) | null = null;
   private appStatusOff: (() => void) | null = null;
+  private reconnectLineOff: (() => void) | null = null;
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
   private terminalStatusRetrySelection: UISelection | null = null;
   private readonly globalConfig = new GlobalConfigWorkflow({
@@ -188,6 +240,7 @@ export class ERunUIController {
     emit: () => this.emit(),
     focusTerminalSoon: () => this.focusTerminalSoon(),
     queueTerminalResize: () => this.queueTerminalResize(),
+    openSelection: (selection) => this.openSelection(selection),
     refreshIdleStatus: () => { void this.refreshIdleStatus(); },
     refreshKubernetesContexts: () => { void this.refreshKubernetesContexts(); },
     hideTerminalMessage: () => this.hideTerminalMessage(),
@@ -207,8 +260,12 @@ export class ERunUIController {
     reloadStateAfterEnvironmentChange: () => this.reloadStateAfterEnvironmentChange(),
     resolveRuntimeImage: (version) => this.resolveManageRuntimeImage(version),
     startDeploySelection: (selection) => this.startDeploySelection(selection),
+    activateLocalAfterCommand: (selection, result) => this.activateLocalAfterCommand(selection, result),
     showNotification: (kind, message) => this.showNotification(kind, message),
     showTerminalMessage: (message, busy) => this.showTerminalMessage(message, busy),
+    setPendingDebugHeader: (header) => this.setPendingDebugHeader(header),
+    applyPendingDebugHeader: (sessionId) => this.applyPendingDebugHeader(sessionId),
+    syncDebugDisplay: () => this.syncDebugDisplay(),
   });
 
   subscribe = (subscriber: () => void): (() => void) => {
@@ -244,8 +301,13 @@ export class ERunUIController {
     this.terminal.open(elements.terminalRoot);
     this.fitAddon.fit();
 
+    this.terminalQueryResponseDisposables = registerTerminalQueryResponseHandlers(
+      this.terminal,
+      (data) => SendSessionInput(this.state.sessionId, data),
+      (error) => this.showTerminalMessage(readError(error)),
+    );
     this.terminalDataDisposable = this.terminal.onData((data) => {
-      SendSessionInput(data).catch((error: unknown) => {
+      SendSessionInput(this.state.sessionId, data).catch((error: unknown) => {
         this.showTerminalMessage(readError(error));
       });
     });
@@ -272,6 +334,9 @@ export class ERunUIController {
     this.appStatusOff = EventsOn('app-status', (payload: AppStatusPayload) => {
       this.handleAppStatus(payload);
     });
+    this.reconnectLineOff = EventsOn('mcp-reconnect-line', (line: string) => {
+      this.handleReconnectLine(line);
+    });
 
     if (!this.bootStarted) {
       this.bootStarted = true;
@@ -286,18 +351,25 @@ export class ERunUIController {
     window.removeEventListener('resize', this.queueTerminalResize);
     this.resizeObserver?.disconnect();
     this.terminalDataDisposable?.dispose();
+    for (const disposable of this.terminalQueryResponseDisposables) {
+      disposable.dispose();
+    }
     this.terminalOutputOff?.();
     this.terminalExitOff?.();
     this.appStatusOff?.();
+    this.reconnectLineOff?.();
     window.clearTimeout(this.notificationTimer);
     window.clearTimeout(this.terminalCopyStatusTimer);
     window.clearTimeout(this.idleStatusTimer);
+    this.stopReviewDiffRefresh();
     if (this.pasteHandler && this.terminalRoot) {
       this.terminalRoot.removeEventListener('paste', this.pasteHandler, true);
     }
     this.terminalOutputOff = null;
     this.terminalExitOff = null;
     this.appStatusOff = null;
+    this.reconnectLineOff = null;
+    this.terminalQueryResponseDisposables = [];
     this.terminal?.dispose();
     this.terminal = null;
     this.fitAddon = null;
@@ -325,6 +397,9 @@ export class ERunUIController {
 
   toggleReview(): void {
     toggleReviewPanel(this.state, { ...this.layoutCallbacks(), loadReviewDiff: () => { void this.loadReviewDiff(); } });
+    if (!this.state.reviewOpen) {
+      this.stopReviewDiffRefresh();
+    }
   }
 
   setFilesOpen(open: boolean, persist = true): void {
@@ -337,7 +412,37 @@ export class ERunUIController {
 
   clearDebugOutput(): void {
     this.state.debugOutput = '';
+    this.sessions.clearSessionDebug(this.state.sessionId);
     this.emit();
+  }
+
+  setPendingDebugHeader(header: string): void {
+    this.pendingDebugHeader = header;
+    if (this.state.debugOpen) {
+      this.state.debugOutput = header;
+    }
+  }
+
+  applyPendingDebugHeader(sessionId: number): void {
+    if (!this.pendingDebugHeader || sessionId <= 0) {
+      this.pendingDebugHeader = '';
+      return;
+    }
+    if (this.state.debugOpen) {
+      this.sessions.setSessionDebug(sessionId, this.pendingDebugHeader);
+    }
+    this.pendingDebugHeader = '';
+  }
+
+  activeSessionDebug(sessionId: number): boolean {
+    return sessionId > 0 && this.sessions.debugMode(sessionId) !== undefined;
+  }
+
+  syncDebugDisplay(): void {
+    if (!this.state.debugOpen) {
+      return;
+    }
+    this.state.debugOutput = this.sessions.sessionDebug(this.state.sessionId);
   }
 
   toggleTenant(tenant: string): void {
@@ -349,7 +454,80 @@ export class ERunUIController {
     this.emit();
   }
 
+  openTenantDashboard(tenant: string): void {
+    tenant = tenant.trim();
+    if (!tenant) {
+      return;
+    }
+    this.state.selected = null;
+    this.state.idleStatus = null;
+    this.state.tenantDashboard = {
+      tenant,
+      tab: this.state.tenantDashboard.tenant === tenant ? this.state.tenantDashboard.tab : 'users',
+      loading: true,
+      error: '',
+      data: null,
+    };
+    this.state.reviewOpen = false;
+    this.showTerminalMessage('');
+    this.emit();
+    void this.loadTenantDashboard(tenant);
+  }
+
+  setTenantDashboardTab(tab: TenantDashboardTab): void {
+    this.state.tenantDashboard = {
+      ...this.state.tenantDashboard,
+      tab,
+    };
+    this.emit();
+  }
+
+  async loadTenantDashboard(tenant = this.state.tenantDashboard.tenant): Promise<void> {
+    tenant = tenant.trim();
+    if (!tenant || this.state.tenantDashboard.tenant !== tenant) {
+      return;
+    }
+    const tenantState = this.state.tenants.find((candidate) => candidate.name === tenant);
+    const input = tenantDashboardInput(tenantState);
+    if (!input) {
+      this.state.tenantDashboard = {
+        ...this.state.tenantDashboard,
+        loading: false,
+        error: 'Tenant dashboard requires an API URL and a primary cloud alias.',
+        data: null,
+      };
+      this.emit();
+      return;
+    }
+    this.state.tenantDashboard = { ...this.state.tenantDashboard, loading: true, error: '' };
+    this.emit();
+    try {
+      const loadedData = (await LoadTenantDashboard(input)) as UITenantDashboard;
+      if (this.state.tenantDashboard.tenant !== tenant) {
+        return;
+      }
+      const data = { ...loadedData, environment: loadedData.environment || input.environment };
+      this.state.tenantDashboard = { ...this.state.tenantDashboard, loading: false, error: '', data };
+      this.emit();
+    } catch (error) {
+      if (this.state.tenantDashboard.tenant !== tenant) {
+        return;
+      }
+      this.state.tenantDashboard = { ...this.state.tenantDashboard, loading: false, error: readError(error), data: null };
+      this.emit();
+    }
+  }
+
+  async refreshTenantDashboard(): Promise<void> {
+    const tenant = this.state.tenantDashboard.tenant;
+    await this.loadTenantDashboard(tenant);
+    if (this.state.tenantDashboard.tenant === tenant && !this.state.tenantDashboard.error) {
+      this.showNotification('success', 'Dashboard refreshed.');
+    }
+  }
+
   async openSelection(selection: UISelection): Promise<void> {
+    this.state.tenantDashboard = defaultTenantDashboard();
     const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     const key = selectionKey(runSelection);
     const previousSessionId = this.state.sessionId;
@@ -357,9 +535,22 @@ export class ERunUIController {
 
     this.prepareOpenSelection(selection, runSelection, previousSessionId, previousKnownSessionId);
     this.fitAddon?.fit();
-    const result = (await StartSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
+    const cols = this.terminal?.cols || 80;
+    const rows = this.terminal?.rows || 24;
+
+    // Spawn Local first so subsequent ERun/AI spawns can log into it.
+    const tabs = this.state.tabsByEnv[key] || [];
+    if (!tabs.some((tab) => tab.kind === 'local')) {
+      await this.spawnDefaultTab(key, runSelection, 'local', 'Local', cols, rows);
+    }
+
+    const slot = this.activeSlotForSelection(runSelection);
+    const result = (await StartSession(runSelection, slot, cols, rows)) as StartSessionResult;
     this.registerOpenSessionResult(key, result, runSelection, previousSessionId);
     this.showOpenSelectionStatus(result.sessionId, selection);
+
+    await this.ensureDefaultEnvTabs(runSelection, key);
+    this.restoreSelectedTabForEnv(key);
 
     if (this.state.reviewOpen) {
       await this.loadReviewDiff();
@@ -369,7 +560,76 @@ export class ERunUIController {
     this.emit();
   }
 
+  private async ensureDefaultEnvTabs(runSelection: UISelection, key: string): Promise<void> {
+    const tabs = this.state.tabsByEnv[key] || [];
+    const cols = this.terminal?.cols || 80;
+    const rows = this.terminal?.rows || 24;
+    if (!tabs.some((tab) => tab.kind === 'erun')) {
+      await this.spawnERunTabPassive(key, runSelection, cols, rows);
+    }
+    if (!tabs.some((tab) => tab.kind === 'local')) {
+      await this.spawnDefaultTab(key, runSelection, 'local', 'Local', cols, rows);
+    }
+    if (!tabs.some((tab) => tab.kind === 'ai')) {
+      await this.spawnDefaultTab(key, runSelection, 'ai', 'AI', cols, rows);
+    }
+  }
+
+  private async spawnERunTabPassive(key: string, runSelection: UISelection, cols: number, rows: number): Promise<void> {
+    try {
+      const result = (await StartSession(runSelection, 0, cols, rows)) as StartSessionResult;
+      this.sessions.trackOpenSession(key, result.sessionId, runSelection);
+      this.registerDebugSession(result.sessionId, runSelection, 'open');
+      this.recordTab(key, result.sessionId, result.slot ?? 0, 'erun', 'ERun');
+    } catch {
+      // ERun failed to spawn; future env opens will retry.
+    }
+  }
+
+  private async spawnDefaultTab(
+    key: string,
+    runSelection: UISelection,
+    kind: 'local' | 'ai',
+    label: string,
+    cols: number,
+    rows: number,
+  ): Promise<void> {
+    const start = kind === 'local' ? StartLocalSession : StartAISession;
+    try {
+      const result = (await start(runSelection, 0, cols, rows)) as StartSessionResult;
+      this.recordTab(key, result.sessionId, result.slot ?? 0, kind, label);
+    } catch {
+      // Tool unavailable; future env opens will retry.
+    }
+  }
+
+  private rememberSelectedTabForCurrentEnv(sessionId: number): void {
+    const selection = this.state.selected;
+    if (!selection) {
+      return;
+    }
+    const key = selectionKey({ ...selection, debug: this.state.debugOpen || undefined });
+    this.state.selectedSessionByEnv = { ...this.state.selectedSessionByEnv, [key]: sessionId };
+  }
+
+  private restoreSelectedTabForEnv(key: string): void {
+    const tabs = this.state.tabsByEnv[key] || [];
+    const remembered = this.state.selectedSessionByEnv[key];
+    if (!remembered || !tabs.some((tab) => tab.sessionId === remembered)) {
+      return;
+    }
+    if (remembered === this.state.sessionId) {
+      return;
+    }
+    this.selectTerminalTab(remembered);
+  }
+
   private prepareOpenSelection(selection: UISelection, runSelection: UISelection, previousSessionId: number, previousKnownSessionId: number): void {
+    if (selectionKey(selection) !== selectionKey(this.state.selected || { tenant: '', environment: '' })) {
+      this.state.selectedReviewScope = 'current';
+      this.state.selectedReviewCommit = '';
+      this.state.selectedDiffPath = '';
+    }
     this.state.selected = selection;
     this.state.idleStatus = null;
     if (!isNewSessionSelection(previousSessionId, previousKnownSessionId)) {
@@ -377,7 +637,7 @@ export class ERunUIController {
       return;
     }
     if (this.state.debugOpen) {
-      this.state.debugOutput = `$ ${formatDebugCommand(runSelection)}\n`;
+      this.setPendingDebugHeader(`$ ${formatDebugCommand(runSelection)}\n`);
     }
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
@@ -388,12 +648,154 @@ export class ERunUIController {
   private registerOpenSessionResult(key: string, result: StartSessionResult, runSelection: UISelection, previousSessionId: number): void {
     this.sessions.trackOpenSession(key, result.sessionId, runSelection);
     this.registerDebugSession(result.sessionId, runSelection, 'open');
+    this.applyPendingDebugHeader(result.sessionId);
     rebuildTerminalDisplayBuffer(this.sessions, result.sessionId);
     this.state.sessionId = result.sessionId;
+    // Preserve the user's prior tab choice for this env across re-opens
+    // (Nielsen heuristic #4: consistency / user control). Only seed
+    // selectedSessionByEnv when nothing is remembered, or when the
+    // remembered session no longer exists in the live tabs for this env.
+    // restoreSelectedTabForEnv below switches the terminal back to the
+    // remembered tab when one exists.
+    const remembered = this.state.selectedSessionByEnv[key];
+    const liveTabs = this.state.tabsByEnv[key] || [];
+    const rememberedIsLive = remembered && liveTabs.some((tab) => tab.sessionId === remembered);
+    if (!rememberedIsLive) {
+      this.state.selectedSessionByEnv = { ...this.state.selectedSessionByEnv, [key]: result.sessionId };
+    }
+    this.syncDebugDisplay();
+    const slot = result.slot ?? 0;
+    const kind: TerminalTabKind = slot === 0 ? 'erun' : 'extra';
+    const label = kind === 'erun' ? 'ERun' : `Terminal ${slot}`;
+    this.recordTab(key, result.sessionId, slot, kind, label);
     if (result.sessionId !== previousSessionId) {
       this.resetTerminal();
       this.writeTerminalBuffer(this.sessions.displayBuffer(result.sessionId));
     }
+  }
+
+  private activeSlotForSelection(selection: UISelection): number {
+    const tabs = this.state.tabsByEnv[selectionKey(selection)] || [];
+    if (tabs.length === 0) {
+      return 0;
+    }
+    const active = tabs.find((tab) => tab.sessionId === this.state.sessionId);
+    return (active ?? tabs[0]).slot;
+  }
+
+  private recordTab(key: string, sessionId: number, slot: number, kind: TerminalTabKind, label: string): void {
+    const tabs = this.state.tabsByEnv[key] ? [...this.state.tabsByEnv[key]] : [];
+    const existingIndex = tabs.findIndex((tab) => tab.kind === kind && tab.slot === slot);
+    if (existingIndex >= 0) {
+      tabs[existingIndex] = { sessionId, slot, kind, label };
+    } else {
+      tabs.push({ sessionId, slot, kind, label });
+      tabs.sort(compareTabs);
+    }
+    this.state.tabsByEnv = { ...this.state.tabsByEnv, [key]: tabs };
+  }
+
+  private removeTab(key: string, sessionId: number): TerminalTab[] {
+    const tabs = this.state.tabsByEnv[key];
+    if (!tabs || tabs.length === 0) {
+      return [];
+    }
+    const remaining = tabs.filter((tab) => tab.sessionId !== sessionId);
+    const next = { ...this.state.tabsByEnv };
+    if (remaining.length === 0) {
+      delete next[key];
+    } else {
+      next[key] = remaining;
+    }
+    this.state.tabsByEnv = next;
+    if (this.state.selectedSessionByEnv[key] === sessionId) {
+      const updated = { ...this.state.selectedSessionByEnv };
+      delete updated[key];
+      this.state.selectedSessionByEnv = updated;
+    }
+    return remaining;
+  }
+
+  async addTerminalTab(): Promise<void> {
+    const selection = this.state.selected;
+    if (!selection) {
+      return;
+    }
+    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
+    const key = selectionKey(runSelection);
+    const tabs = this.state.tabsByEnv[key] || [];
+    const nextSlot = tabs.reduce((max, tab) => (tab.slot >= max ? tab.slot + 1 : max), 0);
+    const previousSessionId = this.state.sessionId;
+    try {
+      const result = (await StartSession(runSelection, nextSlot, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
+      this.registerOpenSessionResult(key, result, runSelection, previousSessionId);
+      this.focusTerminalSoon();
+      this.queueTerminalResize();
+      this.emit();
+    } catch (error: unknown) {
+      this.showTerminalMessage(readError(error));
+    }
+  }
+
+  selectTerminalTab(sessionId: number): void {
+    if (sessionId <= 0 || sessionId === this.state.sessionId) {
+      return;
+    }
+    this.state.sessionId = sessionId;
+    this.rememberSelectedTabForCurrentEnv(sessionId);
+    this.syncDebugDisplay();
+    rebuildTerminalDisplayBuffer(this.sessions, sessionId);
+    this.resetTerminal();
+    this.writeTerminalBuffer(this.sessions.displayBuffer(sessionId));
+    const exitReason = this.sessions.exitReason(sessionId);
+    if (exitReason) {
+      this.state.terminalCopyOutput = this.sessions.exitOutput(sessionId);
+      this.state.terminalCopyStatus = '';
+      this.showTerminalMessage(exitReason);
+    } else {
+      this.hideTerminalMessage();
+    }
+    this.focusTerminalSoon();
+    this.queueTerminalResize();
+    this.emit();
+  }
+
+  async closeTerminalTab(sessionId: number): Promise<void> {
+    if (sessionId <= 0) {
+      return;
+    }
+    const selection = this.state.selected;
+    if (!selection) {
+      return;
+    }
+    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
+    const key = selectionKey(runSelection);
+    const tabs = this.state.tabsByEnv[key] || [];
+    const target = tabs.find((tab) => tab.sessionId === sessionId);
+    if (target && target.kind !== 'extra') {
+      return;
+    }
+    try {
+      await CloseSession(sessionId);
+    } catch (error: unknown) {
+      this.showTerminalMessage(readError(error));
+      return;
+    }
+    const remaining = this.removeTab(key, sessionId);
+    this.sessions.clearSessionDebug(sessionId);
+    if (this.state.sessionId === sessionId) {
+      const next = remaining[remaining.length - 1];
+      if (next) {
+        this.selectTerminalTab(next.sessionId);
+      } else {
+        this.state.sessionId = 0;
+        this.state.debugOutput = '';
+        this.resetTerminal();
+        this.emit();
+      }
+      return;
+    }
+    this.emit();
   }
 
   private showOpenSelectionStatus(sessionId: number, selection: UISelection): void {
@@ -421,7 +823,9 @@ export class ERunUIController {
     const label = ideLabel(ide);
     this.state.selected = selection;
     if (this.state.debugOpen) {
-      this.state.debugOutput = `$ ${formatIDECommand(runSelection, ide)}\n`;
+      const header = `$ ${formatIDECommand(runSelection, ide)}\n`;
+      this.sessions.setSessionDebug(this.state.sessionId, header);
+      this.syncDebugDisplay();
     }
     this.emit();
     this.state.terminalCopyOutput = '';
@@ -443,7 +847,7 @@ export class ERunUIController {
 
   openInitializeDialog(): void {
     const tenantDefault = this.state.selected?.tenant || this.state.tenants[0]?.name || '';
-    const containerRegistryDefault = loadSavedPastContainerRegistries()[0] || 'erunpaas';
+    const containerRegistryDefault = loadSavedPastContainerRegistries()[0] || '';
     this.state.environmentDialog = {
       open: true,
       actionMode: 'init',
@@ -650,6 +1054,14 @@ export class ERunUIController {
     this.manageEnvironment.updateSSHDConfig(values);
   }
 
+  updateManageClaudeConfig(values: Partial<UIEnvironmentConfig['claude']>): void {
+    this.manageEnvironment.updateClaudeConfig(values);
+  }
+
+  async chooseWorkspaceSyncLocalFolder(): Promise<void> {
+    await this.manageEnvironment.chooseWorkspaceSyncLocalFolder();
+  }
+
   async loadManageConfig(): Promise<void> {
     await this.manageEnvironment.loadConfig();
   }
@@ -730,6 +1142,42 @@ export class ERunUIController {
     await this.globalConfig.loginCloudProvider(alias);
   }
 
+  async loginPrimaryCloudProvider(alias: string): Promise<void> {
+    await this.updatePrimaryCloudProvider(alias, 'login', LoginCloudProvider);
+  }
+
+  async logoutPrimaryCloudProvider(alias: string): Promise<void> {
+    await this.updatePrimaryCloudProvider(alias, 'logout', LogoutCloudProvider);
+  }
+
+  async getPrimaryCloudProviderBearerToken(alias: string): Promise<void> {
+    alias = alias.trim();
+    if (!alias || this.state.sidebarCloudAliasBusy) {
+      return;
+    }
+    this.state.sidebarCloudAliasBusy = true;
+    this.state.sidebarCloudAliasAction = 'bearer';
+    this.emit();
+    try {
+      const result = (await GetCloudProviderBearerToken(alias)) as UICloudProviderBearerToken;
+      await ClipboardSetText(result.token);
+      this.state.cloudProviders = replaceCloudProvider(this.state.cloudProviders, result.provider);
+      this.state.sidebarCloudAliasBusy = false;
+      this.state.sidebarCloudAliasAction = '';
+      const issuer = result.issuer?.trim();
+      this.showTerminalMessage(issuer ? `Copied bearer token for ${result.alias}. Issuer: ${issuer}` : `Copied bearer token for ${result.alias}.`);
+      this.showNotification('success', `Copied bearer token for ${result.alias}.`);
+      this.emit();
+    } catch (error) {
+      const message = readError(error);
+      this.state.sidebarCloudAliasBusy = false;
+      this.state.sidebarCloudAliasAction = '';
+      this.showTerminalMessage(message);
+      this.showNotification('error', message);
+      this.emit();
+    }
+  }
+
   async submitGlobalConfig(): Promise<void> {
     await this.globalConfig.submitConfig();
   }
@@ -741,9 +1189,15 @@ export class ERunUIController {
       config: {
         name: tenant,
         defaultEnvironment: '',
+        apiUrl: '',
+        cloudProviderAliases: [],
+        primaryCloudProviderAlias: '',
+        cloudProviders: [],
       },
       configLoading: true,
       busy: false,
+      busyAction: '',
+      busyTarget: '',
       error: '',
     };
     this.emit();
@@ -796,6 +1250,9 @@ export class ERunUIController {
     this.emit();
     try {
       const result = (await LoadTenantConfig(dialog.tenant)) as UITenantConfig;
+      if (result.cloudProviders) {
+        this.state.cloudProviders = result.cloudProviders;
+      }
       this.state.tenantDialog = {
         ...this.state.tenantDialog,
         config: result,
@@ -822,14 +1279,17 @@ export class ERunUIController {
       this.closeTenantDialog();
       return;
     }
-    this.state.tenantDialog = { ...dialog, busy: true, error: '' };
+    this.state.tenantDialog = { ...dialog, busy: true, busyAction: 'save', busyTarget: '', error: '' };
     this.emit();
     try {
-      const result = (await SaveTenantConfig(dialog.config)) as UITenantConfig;
+      const result = (await SaveTenantConfig(dialog.config as Parameters<typeof SaveTenantConfig>[0])) as UITenantConfig;
+      this.applySavedTenantConfig(result);
       this.state.tenantDialog = {
         ...this.state.tenantDialog,
         config: result,
         busy: false,
+        busyAction: '',
+        busyTarget: '',
         error: '',
       };
       this.showNotification('success', `Saved config for ${result.name}.`);
@@ -839,10 +1299,97 @@ export class ERunUIController {
       this.state.tenantDialog = {
         ...this.state.tenantDialog,
         busy: false,
+        busyAction: '',
+        busyTarget: '',
         error: message,
       };
       this.showTerminalMessage(message);
       this.emit();
+    }
+  }
+
+  async setupTenantCloudProviderOIDC(alias: string): Promise<void> {
+    alias = alias.trim();
+    const dialog = this.state.tenantDialog;
+    if (!alias || dialog.busy || dialog.configLoading) {
+      return;
+    }
+    this.state.tenantDialog = { ...dialog, busy: true, busyAction: 'cloud-oidc', busyTarget: alias, error: '' };
+    this.emit();
+    try {
+      const provider = (await SetupCloudProviderOIDC(alias)) as UICloudProviderStatus;
+      this.state.cloudProviders = replaceCloudProvider(this.state.cloudProviders, provider);
+      const currentProviders = this.state.tenantDialog.config.cloudProviders || [];
+      this.state.tenantDialog = {
+        ...this.state.tenantDialog,
+        config: {
+          ...this.state.tenantDialog.config,
+          cloudProviders: replaceCloudProvider(currentProviders, provider),
+        },
+        busy: false,
+        busyAction: '',
+        busyTarget: '',
+        error: '',
+      };
+      this.showNotification('success', `Updated OIDC issuer for ${provider.alias}.`);
+      this.emit();
+    } catch (error) {
+      const message = readError(error);
+      this.state.tenantDialog = {
+        ...this.state.tenantDialog,
+        busy: false,
+        busyAction: '',
+        busyTarget: '',
+        error: message,
+      };
+      this.showTerminalMessage(message);
+      this.showNotification('error', message);
+      this.emit();
+    }
+  }
+
+  private async updatePrimaryCloudProvider(alias: string, action: 'login' | 'logout', run: (alias: string) => Promise<unknown>): Promise<void> {
+    alias = alias.trim();
+    if (!alias || this.state.sidebarCloudAliasBusy) {
+      return;
+    }
+    this.state.sidebarCloudAliasBusy = true;
+    this.state.sidebarCloudAliasAction = action;
+    this.emit();
+    try {
+      const provider = (await run(alias)) as UICloudProviderStatus;
+      this.state.cloudProviders = replaceCloudProvider(this.state.cloudProviders, provider);
+      this.state.sidebarCloudAliasBusy = false;
+      this.state.sidebarCloudAliasAction = '';
+      this.showTerminalMessage(`${provider.alias}: ${provider.status}`);
+      this.emit();
+    } catch (error) {
+      const message = readError(error);
+      this.state.sidebarCloudAliasBusy = false;
+      this.state.sidebarCloudAliasAction = '';
+      this.showTerminalMessage(message);
+      this.showNotification('error', message);
+      this.emit();
+    }
+  }
+
+  private applySavedTenantConfig(config: UITenantConfig): void {
+    const tenantName = config.name.trim();
+    if (!tenantName) {
+      return;
+    }
+    this.state.tenants = this.state.tenants.map((tenant) => {
+      if (tenant.name !== tenantName) {
+        return tenant;
+      }
+      return {
+        ...tenant,
+        cloudProviderAliases: config.cloudProviderAliases || [],
+        primaryCloudProviderAlias: config.primaryCloudProviderAlias || '',
+      };
+    });
+    if (config.cloudProviders) {
+      this.state.cloudProviders = config.cloudProviders;
     }
   }
 
@@ -859,24 +1406,167 @@ export class ERunUIController {
     this.emit();
   }
 
-  async loadReviewDiff(): Promise<void> {
+  toggleChangedFiles(): void {
+    this.state.changedFilesOpen = !this.state.changedFilesOpen;
+    this.emit();
+  }
+
+  selectReviewRange(scope: AppState['selectedReviewScope'], hash = ''): void {
+    const selected = hash.trim();
+    if ((scope === this.state.selectedReviewScope && selected === this.state.selectedReviewCommit) || this.state.diffLoading) {
+      return;
+    }
+    this.state.selectedReviewScope = scope;
+    this.state.selectedReviewCommit = selected;
+    void this.loadReviewDiff();
+  }
+
+  async loadReviewDiff(options: { silent?: boolean } = {}): Promise<void> {
+    const selection = this.state.selected;
+    if (!selection) {
+      return;
+    }
+    const request = ++this.reviewDiffRequest;
+    const selectedKey = selectionKey(selection);
+    const scope = this.state.selectedReviewScope;
+    const selectedCommit = this.state.selectedReviewCommit;
+    if (!options.silent) {
+      this.state.diffLoading = true;
+      this.state.diffError = '';
+      this.emit();
+    }
+    try {
+      const diff = (await LoadDiff(selection, {
+        scope,
+        selectedCommit,
+      })) as DiffResult;
+      if (!this.isCurrentReviewDiffRequest(request, selectedKey)) {
+        return;
+      }
+      this.state.diff = diff;
+      this.state.diffError = '';
+      this.state.diffErrorReconnectable = false;
+      this.state.selectedReviewScope = diff.scope || 'current';
+      this.state.selectedReviewCommit = diff.selectedCommit || '';
+      this.state.selectedDiffPath = chooseSelectedDiffPath(diff, this.state.selectedDiffPath);
+    } catch (error: unknown) {
+      if (!this.isCurrentReviewDiffRequest(request, selectedKey)) {
+        return;
+      }
+      if (options.silent && this.state.diff) {
+        return;
+      }
+      if (!options.silent || !this.state.diff) {
+        this.state.diff = null;
+      }
+      const message = readError(error);
+      if (isMcpUnreachableMessage(message)) {
+        this.state.diffError = stripMcpUnreachableMarker(message);
+        this.state.diffErrorReconnectable = true;
+      } else {
+        this.state.diffError = message;
+        this.state.diffErrorReconnectable = false;
+      }
+    } finally {
+      if (request === this.reviewDiffRequest) {
+        if (!options.silent) {
+          this.state.diffLoading = false;
+        }
+        this.emit();
+        this.scheduleReviewDiffRefresh();
+      }
+    }
+  }
+
+  async refreshReviewDiff(): Promise<void> {
     if (!this.state.selected) {
       return;
     }
-    this.state.diffLoading = true;
-    this.state.diffError = '';
+    await this.loadReviewDiff();
+    if (!this.state.diffError) {
+      this.showNotification('success', 'Diff refreshed.');
+    }
+  }
+
+  private isCurrentReviewDiffRequest(request: number, selectedKey: string): boolean {
+    return request === this.reviewDiffRequest && selectedKey === selectionKey(this.state.selected || { tenant: '', environment: '' });
+  }
+
+  private scheduleReviewDiffRefresh(delay = REVIEW_DIFF_REFRESH_INTERVAL_MS): void {
+    window.clearTimeout(this.reviewDiffRefreshTimer);
+    if (!this.state.reviewOpen || !this.state.selected) {
+      this.reviewDiffRefreshTimer = 0;
+      return;
+    }
+    this.reviewDiffRefreshTimer = window.setTimeout(() => {
+      if (!this.state.reviewOpen || !this.state.selected) {
+        this.stopReviewDiffRefresh();
+        return;
+      }
+      if (this.state.diffLoading) {
+        this.scheduleReviewDiffRefresh();
+        return;
+      }
+      void this.loadReviewDiff({ silent: true });
+    }, delay);
+  }
+
+  private stopReviewDiffRefresh(): void {
+    window.clearTimeout(this.reviewDiffRefreshTimer);
+    this.reviewDiffRefreshTimer = 0;
+  }
+
+  // requestReconnect opens the explicit-confirmation dialog for the
+  // unreachable-MCP recovery flow. The dialog runs `erun open`, which can
+  // redeploy the runtime, so the action is gated on a deliberate user click.
+  requestReconnect(): void {
+    if (!this.state.selected) {
+      return;
+    }
+    this.state.reconnect = { status: 'confirm', lastLine: '', error: '' };
+    this.emit();
+  }
+
+  cancelReconnect(): void {
+    if (this.state.reconnect.status === 'running') {
+      return;
+    }
+    this.state.reconnect = { status: 'idle', lastLine: '', error: '' };
+    this.emit();
+  }
+
+  async confirmReconnect(): Promise<void> {
+    const selection = this.state.selected;
+    if (!selection || this.state.reconnect.status === 'running') {
+      return;
+    }
+    this.state.reconnect = { status: 'running', lastLine: '', error: '' };
     this.emit();
     try {
-      const diff = (await LoadDiff(this.state.selected)) as DiffResult;
-      this.state.diff = diff;
-      this.state.selectedDiffPath = chooseSelectedDiffPath(diff, this.state.selectedDiffPath);
+      await ReconnectMCP(selection);
+      this.state.reconnect = { status: 'idle', lastLine: '', error: '' };
+      this.emit();
+      await this.loadReviewDiff();
     } catch (error: unknown) {
-      this.state.diff = null;
-      this.state.diffError = readError(error);
-    } finally {
-      this.state.diffLoading = false;
+      this.state.reconnect = {
+        status: 'error',
+        lastLine: this.state.reconnect.lastLine,
+        error: readError(error),
+      };
       this.emit();
     }
+  }
+
+  private handleReconnectLine(line: string): void {
+    const trimmed = (line || '').trim();
+    if (!trimmed) {
+      return;
+    }
+    if (this.state.reconnect.status !== 'running') {
+      return;
+    }
+    this.state.reconnect = { ...this.state.reconnect, lastLine: trimmed };
+    this.emit();
   }
 
   toggleDiffDirectory(path: string): void {
@@ -1077,6 +1767,7 @@ export class ERunUIController {
       this.showTerminalMessage('Loading environments...', true);
       const loaded = (await LoadState()) as UIState;
       this.state.tenants = loaded.tenants || [];
+      this.state.cloudProviders = loaded.cloudProviders || [];
       this.state.selected = loaded.selected || null;
       this.state.versionSuggestions = normalizeVersionSuggestions(loaded.versionSuggestions || []);
       this.selectLoadedKubernetesContexts(loaded.kubernetesContexts || []);
@@ -1101,9 +1792,6 @@ export class ERunUIController {
   private async startInitSelection(selection: UISelection): Promise<void> {
     const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     this.state.selected = selection;
-    if (this.state.debugOpen) {
-      this.state.debugOutput = `$ ${formatDebugCommand(runSelection, 'init')}\n`;
-    }
     this.emit();
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
@@ -1111,22 +1799,12 @@ export class ERunUIController {
 
     this.fitAddon?.fit();
     const result = (await StartInitSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
-    this.sessions.trackInitSession(result.sessionId, runSelection);
-    this.registerDebugSession(result.sessionId, runSelection, 'hidden');
-    this.state.sessionId = result.sessionId;
-
-    this.resetTerminal();
-    this.focusTerminalSoon();
-    this.queueTerminalResize();
-    this.emit();
+    await this.activateLocalAfterCommand(selection, result);
   }
 
   private async startDeploySelection(selection: UISelection): Promise<void> {
     const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     this.state.selected = selection;
-    if (this.state.debugOpen) {
-      this.state.debugOutput = `$ ${formatDebugCommand(runSelection, 'deploy')}\n`;
-    }
     this.emit();
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
@@ -1134,11 +1812,20 @@ export class ERunUIController {
 
     this.fitAddon?.fit();
     const result = (await StartDeploySession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
-    this.sessions.trackDeploySession(result.sessionId, runSelection);
-    this.registerDebugSession(result.sessionId, runSelection, 'hidden');
-    this.state.sessionId = result.sessionId;
+    await this.activateLocalAfterCommand(selection, result);
+  }
 
+  async activateLocalAfterCommand(selection: UISelection, result: StartSessionResult): Promise<void> {
+    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
+    const key = selectionKey(runSelection);
+    this.recordTab(key, result.sessionId, result.slot ?? 0, 'local', 'Local');
+    await this.ensureDefaultEnvTabs(runSelection, key);
+    this.state.sessionId = result.sessionId;
+    this.state.selectedSessionByEnv = { ...this.state.selectedSessionByEnv, [key]: result.sessionId };
+    rebuildTerminalDisplayBuffer(this.sessions, result.sessionId);
     this.resetTerminal();
+    this.writeTerminalBuffer(this.sessions.displayBuffer(result.sessionId));
+    this.hideTerminalMessage();
     this.focusTerminalSoon();
     this.queueTerminalResize();
     this.emit();
@@ -1148,6 +1835,7 @@ export class ERunUIController {
     try {
       const loaded = (await LoadState()) as UIState;
       this.state.tenants = loaded.tenants || [];
+      this.state.cloudProviders = loaded.cloudProviders || this.state.cloudProviders;
       this.state.versionSuggestions = normalizeVersionSuggestions(loaded.versionSuggestions || this.state.versionSuggestions);
       this.selectLoadedKubernetesContexts(loaded.kubernetesContexts || []);
       this.emit();
@@ -1325,12 +2013,17 @@ export class ERunUIController {
     this.showTerminalMessage(message, payload.busy === true);
   }
 
-  private appendDebugOutput(text: string): void {
+  private appendDebugOutput(text: string, fromSessionId?: number): void {
     if (!this.state.debugOpen || !text) {
       return;
     }
-    this.state.debugOutput = trimDebugOutput(this.state.debugOutput + text);
-    this.emit();
+    const target = fromSessionId !== undefined ? fromSessionId : this.state.sessionId;
+    const next = trimDebugOutput(this.sessions.sessionDebug(target) + text);
+    this.sessions.setSessionDebug(target, next);
+    if (target === this.state.sessionId) {
+      this.state.debugOutput = next;
+      this.emit();
+    }
   }
 
   private handleTerminalOutput(payload: TerminalOutputPayload): void {
@@ -1340,7 +2033,7 @@ export class ERunUIController {
     const data = decodeBase64Bytes(payload.data);
     this.sessions.appendSessionBuffer(payload.sessionId, data);
     const debugOutput = decodeDebugOutput(data);
-    this.appendDebugOutput(debugOutput);
+    this.appendDebugOutput(debugOutput, payload.sessionId);
     this.updateOpenStatusFromOutput(payload.sessionId, debugOutput);
     const displayData = filterTerminalDisplayData(this.sessions, payload.sessionId, data);
     if (displayData) {
@@ -1365,6 +2058,8 @@ export class ERunUIController {
     const selections = this.takeTerminalExitSelections(payload.sessionId);
     const reason = this.terminalExitReason(payload, selections);
     const failedOutput = this.recordTerminalExit(payload, reason, selections);
+    this.dropExitedSessionFromTabs(payload.sessionId, selections.openSelection);
+    this.recordDoctorOutcome(payload, selections);
 
     if (selections.initSelection || selections.deploySelection || selections.sshdInitSelection) {
       await this.reloadStateAfterEnvironmentChange();
@@ -1383,8 +2078,41 @@ export class ERunUIController {
     this.showTerminalMessage(reason);
   }
 
+  private recordDoctorOutcome(payload: TerminalExitPayload, selections: TerminalExitSelections): void {
+    const selection = selections.doctorSelection;
+    if (!selection) {
+      return;
+    }
+    const key = selectionKey(selection);
+    const reason = (payload.reason || '').trim();
+    this.state.lastDoctorBySelection = {
+      ...this.state.lastDoctorBySelection,
+      [key]: {
+        ranAt: Date.now(),
+        success: !reason,
+        message: reason,
+      },
+    };
+    this.emit();
+  }
+
   private takeTerminalExitSelections(sessionId: number): TerminalExitSelections {
     return this.sessions.takeExitSelections(sessionId);
+  }
+
+  private dropExitedSessionFromTabs(sessionId: number, openSelection: UISelection | undefined): void {
+    if (!openSelection) {
+      return;
+    }
+    const key = selectionKey(openSelection);
+    const remaining = this.removeTab(key, sessionId);
+    if (this.state.sessionId !== sessionId) {
+      return;
+    }
+    const next = remaining[remaining.length - 1];
+    if (next) {
+      this.selectTerminalTab(next.sessionId);
+    }
   }
 
   private recordTerminalExit(payload: TerminalExitPayload, reason: string, selections: TerminalExitSelections): string {
@@ -1487,7 +2215,7 @@ export class ERunUIController {
       this.applyLayoutVars();
       this.fitAddon?.fit();
       if (this.state.sessionId > 0 && this.terminal) {
-        ResizeSession(this.terminal.cols, this.terminal.rows).catch(() => {
+        ResizeSession(this.state.sessionId, this.terminal.cols, this.terminal.rows).catch(() => {
         });
       }
     }, 40);
@@ -1517,9 +2245,13 @@ export class ERunUIController {
     }
 
     event.preventDefault();
+    const sessionId = this.state.sessionId;
+    if (sessionId <= 0) {
+      return;
+    }
     const paths: string[] = [];
     for (const image of images) {
-      const result = (await SavePastedImage({
+      const result = (await SavePastedImage(sessionId, {
         data: await fileToBase64(image),
         mimeType: image.type,
         name: image.name,
@@ -1531,7 +2263,7 @@ export class ERunUIController {
     if (paths.length === 0) {
       return;
     }
-    await SendSessionInput(`${paths.join(' ')} `);
+    await SendSessionInput(sessionId, `${paths.join(' ')} `);
     this.focusTerminalSoon();
   }
 
@@ -1544,4 +2276,34 @@ export class ERunUIController {
       this.terminal?.write(chunk);
     }
   }
+}
+
+function tenantDashboardInput(tenant: UITenant | undefined): UITenantDashboardInput | null {
+  if (!tenant) {
+    return null;
+  }
+  const environment = tenantDashboardEnvironment(tenant);
+  const apiUrl = trimOptional(environment?.apiUrl);
+  const cloudProviderAlias = trimOptional(tenant.primaryCloudProviderAlias);
+  if (!apiUrl || !cloudProviderAlias) {
+    return null;
+  }
+  return {
+    tenant: tenant.name,
+    environment: trimOptional(environment?.name),
+    apiUrl,
+    mcpUrl: trimOptional(environment?.mcpUrl),
+    kubernetesContext: trimOptional(environment?.kubernetesContext),
+    cloudProviderAlias,
+  };
+}
+
+function tenantDashboardEnvironment(tenant: UITenant): UITenant['environments'][number] | undefined {
+  const defaultEnvironment = tenant.defaultEnvironment?.trim();
+  return tenant.environments.find((candidate) => candidate.name === defaultEnvironment && candidate.apiUrl) ||
+    tenant.environments.find((candidate) => candidate.apiUrl);
+}
+
+function trimOptional(value: string | undefined): string {
+  return value?.trim() || '';
 }

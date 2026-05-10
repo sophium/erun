@@ -20,7 +20,7 @@ type unixTerminalSession struct {
 func startTerminalSession(params startTerminalSessionParams) (terminalSession, error) {
 	cmd := exec.Command(params.Executable, params.Args...)
 	cmd.Dir = params.Dir
-	cmd.Env = append(os.Environ(), append(params.Env, "TERM=xterm-256color")...)
+	cmd.Env = append(os.Environ(), append(params.Env, "TERM=xterm-256color", "COLORTERM=truecolor")...)
 
 	file, err := pty.StartWithSize(cmd, &pty.Winsize{
 		Cols: uint16(params.Cols),
@@ -28,6 +28,13 @@ func startTerminalSession(params startTerminalSessionParams) (terminalSession, e
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	if len(params.InitialInput) > 0 {
+		if _, writeErr := file.Write(params.InitialInput); writeErr != nil {
+			_ = file.Close()
+			return nil, writeErr
+		}
 	}
 
 	session := &unixTerminalSession{
@@ -62,6 +69,13 @@ func (s *unixTerminalSession) Wait() error {
 		}
 	})
 	return s.waitErr
+}
+
+func (s *unixTerminalSession) Pid() int {
+	if s == nil || s.cmd == nil || s.cmd.Process == nil {
+		return 0
+	}
+	return s.cmd.Process.Pid
 }
 
 func (s *unixTerminalSession) Close() error {

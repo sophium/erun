@@ -1,5 +1,5 @@
 {
-  "version": "1.0.50",
+  "version": "1.0.51",
   "description": "Multi-tenant multi-environment deployment and management tool",
   "homepage": "https://github.com/sophium/erun",
   "license": "MIT",
@@ -9,9 +9,9 @@
     "nodejs",
     "yarn"
   ],
-  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.50.zip",
-  "hash": "9c6b14e21ea58adad45281d4ada478577d8e090d32fb69e67dc7c2d3fd626889",
-  "extract_dir": "erun-1.0.50",
+  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.51.zip",
+  "hash": "df022c0325139fbfb15651918a0190beab79ec5cb42e77f922a5a38a04943152",
+  "extract_dir": "erun-1.0.51",
   "installer": {
     "script": [
       "$env:CGO_ENABLED = '0'",
@@ -24,6 +24,11 @@
       "Push-Location \"$dir\\erun-mcp\"",
       "go build -trimpath -ldflags $mcpLdflags -o \"$dir\\emcp.exe\" ./cmd/emcp",
       "if ($LASTEXITCODE -ne 0) { throw 'failed to build emcp.exe' }",
+      "Pop-Location",
+      "$apiLdflags = \"-s -w\"",
+      "Push-Location \"$dir\\erun-backend\\erun-backend-api\"",
+      "go build -trimpath -ldflags $apiLdflags -o \"$dir\\eapi.exe\" ./cmd/eapi",
+      "if ($LASTEXITCODE -ne 0) { throw 'failed to build eapi.exe' }",
       "Pop-Location",
       "Remove-Item Env:CGO_ENABLED -ErrorAction SilentlyContinue",
       "if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) { throw 'building erun-app.exe requires a C compiler such as MinGW for the Wails CGO build' }",
@@ -53,6 +58,7 @@
   "bin": [
     "erun.exe",
     "emcp.exe",
+    "eapi.exe",
     "erun-app.exe"
   ]
 }

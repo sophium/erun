@@ -53,6 +53,7 @@ mkdir -p "$package_root/DEBIAN" "$package_root/usr/bin" "$package_root/usr/share
 
 cli_ldflags="-s -w -X github.com/sophium/erun/cmd.buildVersion=$version"
 mcp_ldflags="-s -w -X github.com/sophium/erun/erun-mcp.buildVersion=$version"
+api_ldflags="-s -w"
 
 (
   cd "$repo_root/erun-cli"
@@ -64,6 +65,11 @@ mcp_ldflags="-s -w -X github.com/sophium/erun/erun-mcp.buildVersion=$version"
   CGO_ENABLED=0 go build -trimpath -ldflags "$mcp_ldflags" -o "$package_root/usr/bin/emcp" ./cmd/emcp
 )
 
+(
+  cd "$repo_root/erun-backend/erun-backend-api"
+  CGO_ENABLED=0 go build -trimpath -ldflags "$api_ldflags" -o "$package_root/usr/bin/eapi" ./cmd/eapi
+)
+
 cat >"$package_root/DEBIAN/control" <<EOF
 Package: erun
 Version: $version
@@ -73,7 +79,7 @@ Architecture: $deb_arch
 Maintainer: $maintainer
 Homepage: https://github.com/sophium/erun
 Description: Multi-tenant multi-environment deployment and management tool
- ERun ships the erun CLI together with the emcp executable.
+ ERun ships the erun CLI together with the emcp and eapi executables.
 EOF
 
 install -m 0644 "$repo_root/LICENSE" "$package_root/usr/share/doc/erun/copyright"

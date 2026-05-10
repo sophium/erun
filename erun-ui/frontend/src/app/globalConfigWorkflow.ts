@@ -24,6 +24,7 @@ import type {
   UICloudContextInitInput,
   UICloudContextStatus,
   UIERunConfig,
+  UISelection,
 } from '@/types';
 
 interface TerminalSize {
@@ -40,6 +41,7 @@ interface GlobalConfigWorkflowDeps {
   emit: () => void;
   focusTerminalSoon: () => void;
   queueTerminalResize: () => void;
+  openSelection: (selection: UISelection) => Promise<void>;
   refreshIdleStatus: () => void;
   refreshKubernetesContexts: () => void;
   hideTerminalMessage: () => void;
@@ -161,6 +163,7 @@ export class GlobalConfigWorkflow {
         error: '',
       };
       this.deps.emit();
+      this.deps.showNotification('success', 'Cloud aliases refreshed.');
     } catch (error) {
       const message = readError(error);
       this.state.globalConfigDialog = {
@@ -188,6 +191,7 @@ export class GlobalConfigWorkflow {
         error: '',
       };
       this.deps.emit();
+      this.deps.showNotification('success', 'Cloud contexts refreshed.');
     } catch (error) {
       const message = readError(error);
       this.state.globalConfigDialog = {
@@ -255,6 +259,7 @@ export class GlobalConfigWorkflow {
     if (!action) {
       return;
     }
+    const selection = this.state.selected ? { ...this.state.selected } : null;
     this.state.idleCloudContextBusy = true;
     this.deps.emit();
     try {
@@ -265,6 +270,9 @@ export class GlobalConfigWorkflow {
       this.deps.emit();
       if (action.refreshKubernetesContexts) {
         this.deps.refreshKubernetesContexts();
+      }
+      if (action.operation === 'start' && selection) {
+        await this.deps.openSelection(selection);
       }
       this.deps.refreshIdleStatus();
     } catch (error) {

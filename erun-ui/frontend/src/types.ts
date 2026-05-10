@@ -1,18 +1,25 @@
 export interface UIEnvironment {
   name: string;
   mcpUrl?: string;
+  apiUrl?: string;
   runtimeVersion?: string;
+  kubernetesContext?: string;
   isActive?: boolean;
   sshdEnabled?: boolean;
+  remote: boolean;
 }
 
 export interface UITenant {
   name: string;
+  defaultEnvironment?: string;
+  cloudProviderAliases?: string[];
+  primaryCloudProviderAlias?: string;
   environments: UIEnvironment[];
 }
 
 export type EnvironmentActionMode = 'init' | 'deploy';
-export type ManageTab = 'deploy' | 'config' | 'delete';
+export type ManageTab = 'general' | 'runtime' | 'ai' | 'ports' | 'ssh' | 'delete';
+export type ManageEditTab = Exclude<ManageTab, 'delete'>;
 
 export interface UISelection {
   tenant: string;
@@ -43,6 +50,75 @@ export interface UIState {
   build?: UIBuildDetails;
   versionSuggestions?: UIVersionSuggestion[];
   kubernetesContexts?: string[];
+  cloudProviders?: UICloudProviderStatus[];
+}
+
+export interface UITenantDashboardInput {
+  tenant: string;
+  environment?: string;
+  apiUrl: string;
+  mcpUrl?: string;
+  kubernetesContext?: string;
+  cloudProviderAlias: string;
+}
+
+export interface UITenantDashboard {
+  tenant: string;
+  environment?: string;
+  apiUrl?: string;
+  apiError?: string;
+  apiLog?: string;
+  apiLogError?: string;
+  user?: UITenantDashboardUser;
+  reviews?: UITenantDashboardReview[];
+  mergeQueue?: UITenantDashboardReview[];
+  builds?: UITenantDashboardBuild[];
+  auditEvents?: UITenantDashboardAudit[];
+  auditLogMessage?: string;
+}
+
+export interface UITenantDashboardUser {
+  tenantId: string;
+  userId: string;
+  username?: string;
+  roles?: string[];
+  issuer?: string;
+  subject?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UITenantDashboardReview {
+  reviewId: string;
+  tenantId: string;
+  name: string;
+  targetBranch: string;
+  sourceBranch: string;
+  status: string;
+  lastFailedBuildId?: string;
+  lastReadyBuildId?: string;
+  lastMergedBuildId?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UITenantDashboardBuild {
+  buildId: string;
+  tenantId: string;
+  reviewId: string;
+  reviewName?: string;
+  successful: boolean;
+  commitId: string;
+  version: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface UITenantDashboardAudit {
+  type: string;
+  actor?: string;
+  action: string;
+  createdAt?: string;
 }
 
 export interface UIIdleStatus {
@@ -85,8 +161,16 @@ export interface UICloudProviderStatus {
   username?: string;
   accountId?: string;
   profile?: string;
+  oidcIssuerUrl?: string;
   status: string;
   message?: string;
+}
+
+export interface UICloudProviderBearerToken {
+  alias: string;
+  issuer?: string;
+  token: string;
+  provider: UICloudProviderStatus;
 }
 
 export interface UIAWSCloudAliasInput {
@@ -96,6 +180,7 @@ export interface UIAWSCloudAliasInput {
   profile: string;
   ssoRegion: string;
   ssoStartUrl: string;
+  oidcIssuerUrl: string;
 }
 
 export interface UICloudContextStatus {
@@ -125,20 +210,30 @@ export interface UICloudContextInitInput {
 export interface UITenantConfig {
   name: string;
   defaultEnvironment: string;
+  apiUrl: string;
+  cloudProviderAliases?: string[];
+  primaryCloudProviderAlias?: string;
+  cloudProviders?: UICloudProviderStatus[];
 }
 
 export interface UISSHDConfig {
   enabled: boolean;
   localPort: number;
   publicKeyPath: string;
+  workspaceSyncEnabled: boolean;
+  workspaceSyncLocalPath?: string;
+  workspaceSyncStatus?: string;
+  workspaceSyncStatusMessage?: string;
 }
 
 export interface UIEnvironmentLocalPorts {
   rangeStart: number;
   rangeEnd: number;
   mcp: number;
+  api: number;
   ssh: number;
   mcpStatus: UIPortStatus;
+  apiStatus: UIPortStatus;
   sshStatus: UIPortStatus;
 }
 
@@ -163,9 +258,28 @@ export interface UIEnvironmentConfig {
     workingHours: string;
     idleTrafficBytes: number;
   };
+  claude: UIEnvironmentClaudeConfig;
+  claudeDefaults: UIEnvironmentClaudeDefaults;
   localPorts: UIEnvironmentLocalPorts;
   remote: boolean;
   snapshot: boolean;
+}
+
+export interface UIEnvironmentClaudeConfig {
+  useMantle?: boolean;
+  useBedrock?: boolean;
+  models?: string[];
+  maxOutputTokens?: number;
+}
+
+export interface UIEnvironmentClaudeDefaults {
+  useMantle: boolean;
+  useBedrock: boolean;
+  models: string[];
+  maxOutputTokens: number;
+  knownModels: string[];
+  minTokens: number;
+  maxTokens: number;
 }
 
 export interface UIRuntimePodConfig {
@@ -199,6 +313,8 @@ export interface UIRuntimeResourceNode {
 export interface StartSessionResult {
   sessionId: number;
   selection: UISelection;
+  slot?: number;
+  kind?: string;
 }
 
 export interface TerminalOutputPayload {
@@ -230,6 +346,11 @@ export interface DiffResult {
   summary: DiffSummary;
   files?: DiffFile[];
   tree?: DiffTreeNode[];
+  reviewBase?: DiffReviewBase;
+  reviewCommits?: DiffCommit[];
+  scope?: 'current' | 'commit' | 'all';
+  selectedCommit?: string;
+  includesWorktree?: boolean;
 }
 
 export interface DiffSummary {
@@ -274,4 +395,18 @@ export interface DiffTreeNode {
   status?: string;
   additions?: number;
   deletions?: number;
+}
+
+export interface DiffReviewBase {
+  branch?: string;
+  commit?: string;
+  shortCommit?: string;
+}
+
+export interface DiffCommit {
+  hash: string;
+  shortHash: string;
+  subject: string;
+  author: string;
+  date: string;
 }

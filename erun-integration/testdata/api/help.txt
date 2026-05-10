@@ -1,0 +1,22 @@
+Run ERun backend API over HTTP
+
+Usage:
+  erun api [TENANT] [ENVIRONMENT] [flags]
+
+Examples:
+  erun api --host <LOOPBACK> --port 17033
+  erun api tenant-a dev
+
+Flags:
+      --aws-identity-store-id string       AWS IAM Identity Center identity store ID used to resolve usernames from STS tokens
+      --aws-identity-store-region string   AWS region for Identity Store username lookup
+      --database-url string                Backend PostgreSQL database URL; defaults to ERUN_DATABASE_URL
+      --dry-run                            Resolve and trace mutating actions without executing them.
+  -h, --help                               help for api
+      --host string                        Host interface to bind the backend API HTTP server to (default "<LOOPBACK>")
+      --oidc-allowed-issuers string        Comma-separated OIDC issuer allow-list
+      --port int                           Port to bind the backend API HTTP server to (default 17033)
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

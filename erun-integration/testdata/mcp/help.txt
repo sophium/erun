@@ -1,0 +1,19 @@
+Run ERun as an MCP server over HTTP
+
+Usage:
+  erun mcp [TENANT] [ENVIRONMENT] [flags]
+
+Examples:
+  erun mcp --host <LOOPBACK> --port 17000 --path /mcp
+  erun mcp tenant-a dev
+
+Flags:
+      --dry-run       Resolve and trace mutating actions without executing them.
+  -h, --help          help for mcp
+      --host string   Host interface to bind the MCP HTTP server to (default "<LOOPBACK>")
+      --path string   HTTP path to serve the MCP endpoint from (default "/mcp")
+      --port int      Port to bind the MCP HTTP server to (default 17000)
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

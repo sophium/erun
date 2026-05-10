@@ -11,6 +11,14 @@ import (
 	common "github.com/sophium/erun/erun-common"
 )
 
+// The delete command's --dry-run trace is covered by the integration suite
+// (erun-integration/delete_test.go). The cases below stay as unit tests
+// because they exercise real-execution behavior that --dry-run gates off:
+// the confirmation prompt loop, the namespace-delete-failure / config-
+// still-deleted recovery path, and the mismatched-confirmation rejection.
+// Driving any of these through a stub `kubectl` is a policy violation,
+// and the prompt itself only runs when ctx.DryRun is false.
+
 func TestDeleteCommandDeletesRemoteNamespaceAndConfigAfterConfirmation(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
@@ -106,35 +114,5 @@ func TestDeleteCommandRejectsMismatchedConfirmation(t *testing.T) {
 	}
 	if _, _, err := common.LoadEnvConfig("tenant-a", "dev"); err != nil {
 		t.Fatalf("expected env config to remain, got %v", err)
-	}
-}
-
-func TestDeleteCommandDryRunSkipsPromptAndDeletion(t *testing.T) {
-	setupRootCmdTestConfigHome(t)
-
-	requireNoError(t, common.SaveTenantConfig(common.TenantConfig{Name: "tenant-a", DefaultEnvironment: "dev"}), "SaveTenantConfig failed")
-	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "dev", KubernetesContext: "cluster-dev", Remote: true}), "SaveEnvConfig failed")
-
-	stderr := new(bytes.Buffer)
-	cmd := newTestRootCmd(testRootDeps{
-		PromptRunner: func(promptui.Prompt) (string, error) {
-			t.Fatal("did not expect confirmation prompt during dry-run")
-			return "", nil
-		},
-		DeleteKubernetesNamespace: func(string, string) error {
-			t.Fatal("did not expect namespace deletion during dry-run")
-			return nil
-		},
-	})
-	cmd.SetOut(new(bytes.Buffer))
-	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"delete", "tenant-a", "dev", "--dry-run"})
-
-	requireNoError(t, cmd.Execute(), "Execute failed")
-	if _, _, err := common.LoadEnvConfig("tenant-a", "dev"); err != nil {
-		t.Fatalf("expected env config to remain during dry-run, got %v", err)
-	}
-	if !strings.Contains(stderr.String(), "kubectl --context cluster-dev delete namespace tenant-a-dev --ignore-not-found") {
-		t.Fatalf("expected dry-run trace, got %q", stderr.String())
 	}
 }

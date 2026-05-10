@@ -8,8 +8,19 @@ import (
 	"strings"
 )
 
+// ResolveCurrentLinuxBuildScripts returns linux package build.sh scripts for
+// the current build context, but only when the caller is explicitly positioned
+// inside a linux package directory (linux/<component>) or directly inside a
+// linux/ dir. Project-root and <tenant>-devops invocations no longer auto-
+// discover linux package contexts here: nothing outside the release flow
+// consumes the .deb output, so rebuilding it on every `erun build` /
+// `erun deploy` from the project root just adds 10s of `go build` for no
+// benefit. Release publishing has its own resolver
+// (release.go:discoverReleaseLinuxScripts) that walks the release root, so
+// `erun build --release` and `erun release` continue to produce and upload the
+// .deb.
 func ResolveCurrentLinuxBuildScripts(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget, version string) ([]scriptSpec, error) {
-	contexts, err := ResolveCurrentLinuxPackageContexts(findProjectRoot, resolveBuildContext, target)
+	contexts, err := resolveExplicitLinuxPackageContexts(resolveBuildContext)
 	if err != nil {
 		return nil, err
 	}
@@ -25,6 +36,38 @@ func ResolveCurrentLinuxBuildScripts(findProjectRoot ProjectFinderFunc, resolveB
 		return nil, ErrLinuxPackageBuildNotFound
 	}
 	return scripts, nil
+}
+
+// resolveExplicitLinuxPackageContexts mirrors the first two steps of
+// ResolveCurrentLinuxPackageContexts (current dir is linux/<component>, or
+// current dir is the linux/ parent), but omits the auto-discovery walk into
+// <tenant>-devops/linux/ that ResolveCurrentLinuxPackageContexts performs for
+// command-registration purposes. Callers that should only fire when the user
+// is intentionally working on packaging use this.
+func resolveExplicitLinuxPackageContexts(resolveBuildContext BuildContextResolverFunc) ([]LinuxPackageContext, error) {
+	if resolveBuildContext == nil {
+		resolveBuildContext = ResolveDockerBuildContext
+	}
+
+	buildContext, err := resolveBuildContext()
+	if err != nil {
+		return nil, err
+	}
+
+	if context, ok, err := LinuxPackageContextAtDir(buildContext.Dir); err != nil {
+		return nil, err
+	} else if ok {
+		return []LinuxPackageContext{context}, nil
+	}
+
+	contexts, err := ResolveLinuxPackageContextsAtDir(buildContext.Dir)
+	if err != nil {
+		if errors.Is(err, ErrLinuxPackageBuildNotFound) {
+			return nil, ErrLinuxPackageBuildNotFound
+		}
+		return nil, err
+	}
+	return contexts, nil
 }
 
 func ResolveCurrentLinuxReleaseScripts(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget, version string) ([]scriptSpec, error) {

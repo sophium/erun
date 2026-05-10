@@ -1,0 +1,273 @@
+import * as React from 'react';
+import { RefreshCw, LoaderCircle } from 'lucide-react';
+
+import type { ERunUIController } from '@/app/ERunUIController';
+import type { AppState } from '@/app/state';
+import type { UITenant, UITenantDashboardBuild, UITenantDashboardReview, UITenantDashboardUser } from '@/types';
+import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { EmptyState } from './EmptyState';
+import { StatusBadge } from './StatusBadge';
+
+export function TenantDashboardView({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement | null {
+  const dashboard = state.tenantDashboard;
+  if (!dashboard.tenant) {
+    return null;
+  }
+  const tenant = state.tenants.find((candidate) => candidate.name === dashboard.tenant);
+  const environmentName = tenantDashboardEnvironmentName(tenant, dashboard.data?.environment);
+  return (
+    <section className="grid h-full min-h-0 bg-background text-foreground">
+      <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
+        <header className="flex min-w-0 items-center justify-between border-b border-border px-5 py-4">
+          <div className="min-w-0">
+            <h1 className="truncate text-[20px] font-semibold leading-tight tracking-normal">{dashboard.tenant}</h1>
+            <p className="truncate text-sm text-muted-foreground">{tenantDashboardSubtitle(tenant, environmentName)}</p>
+          </div>
+          <Button type="button" variant="outline" size="sm" disabled={dashboard.loading} onClick={() => { void controller.refreshTenantDashboard(); }}>
+            {dashboard.loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
+            Refresh
+          </Button>
+        </header>
+        <Tabs value={dashboard.tab} onValueChange={(value) => controller.setTenantDashboardTab(value as AppState['tenantDashboard']['tab'])} className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] px-5 py-4">
+          <TabsList className="w-fit">
+            <TabsTrigger value="users">Users</TabsTrigger>
+            <TabsTrigger value="queue">Merge queue</TabsTrigger>
+            <TabsTrigger value="builds">Builds</TabsTrigger>
+            <TabsTrigger value="audit">Audit log</TabsTrigger>
+            <TabsTrigger value="api-log">API log</TabsTrigger>
+          </TabsList>
+          <TenantDashboardBody dashboard={dashboard} />
+        </Tabs>
+      </div>
+    </section>
+  );
+}
+
+function TenantDashboardBody({ dashboard }: { dashboard: AppState['tenantDashboard'] }): React.ReactElement {
+  if (dashboard.loading) {
+    return <DashboardMessage icon={<LoaderCircle className="animate-spin" aria-hidden="true" />} message="Loading tenant dashboard..." />;
+  }
+  if (dashboard.error) {
+    return <DashboardMessage message={dashboard.error} destructive />;
+  }
+  return <TenantDashboardTabContent data={dashboard.data} />;
+}
+
+function TenantDashboardTabContent({ data }: { data: AppState['tenantDashboard']['data'] }): React.ReactElement {
+  const view = tenantDashboardViewData(data);
+  return (
+    <>
+      <TabsContent value="users" className="min-h-0 overflow-auto">
+        <UsersTable users={view.users} apiError={view.apiError} />
+      </TabsContent>
+      <TabsContent value="queue" className="min-h-0 overflow-auto">
+        <ReviewsTable reviews={view.mergeQueue} empty={view.apiError || 'No reviews are waiting in the merge queue'} destructive={view.hasAPIError} />
+      </TabsContent>
+      <TabsContent value="builds" className="min-h-0 overflow-auto">
+        <BuildsTable builds={view.builds} apiError={view.apiError} />
+      </TabsContent>
+      <TabsContent value="audit" className="min-h-0 overflow-auto">
+        <div className="mt-4">
+          <EmptyState
+            heading="Audit log coming soon"
+            body="Tenant audit events will surface here once the backend ships them. Check back in a future release."
+          />
+        </div>
+      </TabsContent>
+      <TabsContent value="api-log" className="min-h-0 overflow-auto">
+        <APILogPanel log={view.apiLog} error={view.apiLogError} apiError={view.apiError} />
+      </TabsContent>
+    </>
+  );
+}
+
+interface TenantDashboardViewData {
+  users: UITenantDashboardUser[];
+  apiError: string;
+  hasAPIError: boolean;
+  mergeQueue: UITenantDashboardReview[];
+  builds: UITenantDashboardBuild[];
+  auditLogMessage: string;
+  apiLog: string;
+  apiLogError: string;
+}
+
+const emptyTenantDashboardViewData: TenantDashboardViewData = {
+  users: [],
+  apiError: '',
+  hasAPIError: false,
+  mergeQueue: [],
+  builds: [],
+  auditLogMessage: 'No audit events',
+  apiLog: '',
+  apiLogError: '',
+};
+
+function tenantDashboardViewData(data: AppState['tenantDashboard']['data']): TenantDashboardViewData {
+  if (!data) {
+    return emptyTenantDashboardViewData;
+  }
+  const apiError = data.apiError ?? '';
+  return {
+    users: data.user ? [data.user] : [],
+    apiError,
+    hasAPIError: apiError.length > 0,
+    mergeQueue: data.mergeQueue ?? [],
+    builds: data.builds ?? [],
+    auditLogMessage: data.auditLogMessage ?? 'No audit events',
+    apiLog: data.apiLog ?? '',
+    apiLogError: data.apiLogError ?? '',
+  };
+}
+
+function UsersTable({ users, apiError }: { users: UITenantDashboardUser[]; apiError: string }): React.ReactElement {
+  if (users.length === 0) {
+    return <DashboardMessage message={apiError || 'No users found'} destructive={Boolean(apiError)} />;
+  }
+  return (
+    <DataTable headers={['Username', 'Roles']}>
+      {users.map((user) => (
+        <tr key={user.userId || user.username || user.subject}>
+          <DataCell strong>{displayUsername(user)}</DataCell>
+          <DataCell>{formatRoles(user.roles)}</DataCell>
+        </tr>
+      ))}
+    </DataTable>
+  );
+}
+
+function ReviewsTable({ reviews, empty, destructive }: { reviews: UITenantDashboardReview[]; empty: string; destructive?: boolean }): React.ReactElement {
+  if (reviews.length === 0) {
+    return <DashboardMessage message={empty} destructive={destructive} />;
+  }
+  return (
+    <DataTable headers={['Review', 'Status', 'Target', 'Source', 'Updated']}>
+      {reviews.map((review) => (
+        <tr key={review.reviewId}>
+          <DataCell strong>{review.name || review.reviewId}</DataCell>
+          <DataCell>{review.status}</DataCell>
+          <DataCell>{review.targetBranch}</DataCell>
+          <DataCell>{review.sourceBranch}</DataCell>
+          <DataCell>{formatDate(review.updatedAt)}</DataCell>
+        </tr>
+      ))}
+    </DataTable>
+  );
+}
+
+function BuildsTable({ builds, apiError }: { builds: UITenantDashboardBuild[]; apiError: string }): React.ReactElement {
+  if (builds.length === 0) {
+    return <DashboardMessage message={apiError || 'No review builds found'} destructive={Boolean(apiError)} />;
+  }
+  return (
+    <DataTable headers={['Build', 'Review', 'Result', 'Commit', 'Version', 'Created']}>
+      {builds.map((build) => (
+        <tr key={build.buildId}>
+          <DataCell strong>{build.buildId}</DataCell>
+          <DataCell>{build.reviewName || build.reviewId}</DataCell>
+          <DataCell>
+            <StatusBadge
+              tone={build.successful ? 'success' : 'destructive'}
+              label={build.successful ? 'Successful' : 'Failed'}
+            />
+          </DataCell>
+          <DataCell>{build.commitId}</DataCell>
+          <DataCell>{build.version}</DataCell>
+          <DataCell>{formatDate(build.createdAt)}</DataCell>
+        </tr>
+      ))}
+    </DataTable>
+  );
+}
+
+function APILogPanel({ log, error, apiError }: { log: string; error: string; apiError: string }): React.ReactElement {
+  if (error) {
+    return <DashboardMessage message={error} destructive />;
+  }
+  if (!log.trim()) {
+    return <DashboardMessage message={apiError || 'No API log returned'} destructive={Boolean(apiError)} />;
+  }
+  return (
+    <>
+      {apiError && <DashboardMessage message={apiError} destructive />}
+      <pre className="mt-4 max-h-full overflow-auto rounded-[var(--radius)] border border-border bg-muted/30 px-3 py-2.5 font-mono text-xs leading-relaxed text-foreground whitespace-pre-wrap">
+        {log}
+      </pre>
+    </>
+  );
+}
+
+function DataTable({ headers, children }: { headers: string[]; children: React.ReactNode }): React.ReactElement {
+  return (
+    <table className="mt-4 w-full table-fixed border-collapse text-sm">
+      <thead>
+        <tr className="border-b border-border text-left text-xs font-medium uppercase text-muted-foreground">
+          {headers.map((header) => <th key={header} className="px-2 py-2">{header}</th>)}
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-border">{children}</tbody>
+    </table>
+  );
+}
+
+function DataCell({ children, strong }: { children: React.ReactNode; strong?: boolean }): React.ReactElement {
+  return <td className={`truncate px-2 py-2.5 ${strong ? 'font-medium' : 'text-muted-foreground'}`}>{children || '-'}</td>;
+}
+
+function DashboardMessage({ message, icon, destructive }: { message: string; icon?: React.ReactElement; destructive?: boolean }): React.ReactElement {
+  return (
+    <div className={`mt-4 flex items-center gap-2 rounded-[var(--radius)] border px-3 py-2.5 text-sm ${destructive ? 'border-destructive/35 text-destructive' : 'border-border text-muted-foreground'}`}>
+      {icon}
+      <span>{message}</span>
+    </div>
+  );
+}
+
+function displayUsername(user: UITenantDashboardUser): string {
+  return user.username?.trim() || user.subject?.trim() || user.userId?.trim() || 'Unknown user';
+}
+
+function formatRoles(roles: string[] | undefined): string {
+  const names = roles?.map((role) => role.trim()).filter(Boolean) ?? [];
+  return names.length > 0 ? names.join(', ') : 'No roles assigned';
+}
+
+function tenantDashboardSubtitle(tenant: UITenant | undefined, environmentName: string): string {
+  if (!tenant) {
+    return environmentName || 'Tenant dashboard';
+  }
+  const environmentCount = tenant.environments.length;
+  const alias = tenant.primaryCloudProviderAlias?.trim();
+  const parts = [
+    environmentName,
+    `${environmentCount} environment${environmentCount === 1 ? '' : 's'}`,
+    alias ? `Primary cloud: ${alias}` : '',
+  ].filter(Boolean);
+  return parts.join(', ');
+}
+
+function tenantDashboardEnvironmentName(tenant: UITenant | undefined, loadedEnvironment: string | undefined): string {
+  const environmentName = loadedEnvironment?.trim();
+  if (environmentName) {
+    return environmentName;
+  }
+  if (!tenant) {
+    return '';
+  }
+  const defaultEnvironment = tenant.defaultEnvironment?.trim();
+  const environment = tenant.environments.find((candidate) => candidate.name === defaultEnvironment && candidate.apiUrl) ||
+    tenant.environments.find((candidate) => candidate.apiUrl);
+  return environment?.name?.trim() || '';
+}
+
+function formatDate(value: string | undefined): string {
+  if (!value) {
+    return '-';
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleString();
+}

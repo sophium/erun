@@ -1,0 +1,19 @@
+Deploy the current Helm chart or all charts in the current devops k8s scope
+
+Usage:
+  erun deploy [TENANT] [ENVIRONMENT] [flags]
+
+Flags:
+      --components strings   Opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api)
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Deploy for a specific environment; requires --tenant
+      --force                Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected
+  -h, --help                 help for deploy
+      --no-snapshot          Alias for --snapshot=false
+      --snapshot             Build and deploy local snapshot images in the local environment (default true)
+      --tenant string        Deploy for a specific tenant
+      --version string       Override the deployed chart and image version
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

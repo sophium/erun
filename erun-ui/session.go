@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -17,15 +18,22 @@ type terminalSession interface {
 	io.ReadWriteCloser
 	Resize(cols, rows int) error
 	Wait() error
+	// Pid returns the OS process id of the underlying shell when one is
+	// known, or 0 when the implementation does not back the session
+	// with a real process. The stale-shell detector consults this to
+	// decide whether a session whose Wait hasn't returned is still
+	// alive.
+	Pid() int
 }
 
 type startTerminalSessionParams struct {
-	Dir        string
-	Executable string
-	Args       []string
-	Env        []string
-	Cols       int
-	Rows       int
+	Dir          string
+	Executable   string
+	Args         []string
+	Env          []string
+	Cols         int
+	Rows         int
+	InitialInput []byte
 }
 
 func resolveCLIExecutable() string {
@@ -100,6 +108,80 @@ func buildOpenIDEArgs(selection uiSelection, ide string) []string {
 	}
 }
 
+func buildLocalOpenIDEParams(result eruncommon.OpenResult, ide string) (startTerminalSessionParams, error) {
+	projectPath := strings.TrimSpace(result.RepoPath)
+	if projectPath == "" {
+		return startTerminalSessionParams{}, fmt.Errorf("local project path is required")
+	}
+	executable, args, err := localOpenIDECommand(runtime.GOOS, strings.TrimSpace(ide), projectPath)
+	if err != nil {
+		return startTerminalSessionParams{}, err
+	}
+	return startTerminalSessionParams{
+		Dir:        projectPath,
+		Executable: executable,
+		Args:       args,
+	}, nil
+}
+
+func localOpenIDECommand(goos, ide, projectPath string) (string, []string, error) {
+	switch strings.TrimSpace(goos) {
+	case "darwin":
+		appName, err := localOpenIDEAppName(ide)
+		if err != nil {
+			return "", nil, err
+		}
+		return "open", []string{"-a", appName, projectPath}, nil
+	case "linux":
+		command, err := localOpenIDEExecutable(ide)
+		if err != nil {
+			return "", nil, err
+		}
+		return command, []string{projectPath}, nil
+	case "windows":
+		command, err := localOpenIDEWindowsCommand(ide)
+		if err != nil {
+			return "", nil, err
+		}
+		return "cmd", []string{"/c", "start", "", command, projectPath}, nil
+	default:
+		return "", nil, fmt.Errorf("opening local IDE projects is unsupported on %s", goos)
+	}
+}
+
+func localOpenIDEAppName(ide string) (string, error) {
+	switch strings.TrimSpace(ide) {
+	case "vscode":
+		return "Visual Studio Code", nil
+	case "intellij":
+		return "IntelliJ IDEA", nil
+	default:
+		return "", fmt.Errorf("unsupported IDE %q", ide)
+	}
+}
+
+func localOpenIDEExecutable(ide string) (string, error) {
+	switch strings.TrimSpace(ide) {
+	case "vscode":
+		return "code", nil
+	case "intellij":
+		return "idea", nil
+	default:
+		return "", fmt.Errorf("unsupported IDE %q", ide)
+	}
+}
+
+func localOpenIDEWindowsCommand(ide string) (string, error) {
+	switch strings.TrimSpace(ide) {
+	case "vscode":
+		return "code", nil
+	case "intellij":
+		return "idea64", nil
+	default:
+		return "", fmt.Errorf("unsupported IDE %q", ide)
+	}
+}
+
 func buildSSHDInitArgs(selection uiSelection) []string {
 	return erunArgs(selection.Debug, "sshd", "init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
 }
@@ -125,6 +207,74 @@ func ensureMCPViaOpenCommand(ctx context.Context, cliPath string, result eruncom
 		return fmt.Errorf("activate MCP port-forward: %w", err)
 	}
 	return fmt.Errorf("activate MCP port-forward: %w: %s", err, detail)
+}
+
+// runOpenForReconnect runs the same `erun open --no-shell --no-alias-prompt`
+// child process as ensureMCPViaOpenCommand, but streams stdout/stderr lines
+// via onLine so the desktop UI can show progress while the open (and any
+// runtime deploy it triggers) is in flight. The trailing buffered output is
+// included verbatim in the returned error so the user still sees the
+// actionable detail when the command exits non-zero.
+func runOpenForReconnect(ctx context.Context, cliPath string, result eruncommon.OpenResult, onLine func(string)) error {
+	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
+	cmd := exec.CommandContext(ctx, cliPath, args...)
+	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("activate MCP port-forward: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("activate MCP port-forward: %w", err)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("activate MCP port-forward: %w", err)
+	}
+	var lastErr strings.Builder
+	scan := func(reader io.Reader, captureErr bool) {
+		scanner := bufio.NewScanner(reader)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if onLine != nil && strings.TrimSpace(line) != "" {
+				onLine(line)
+			}
+			if captureErr {
+				if lastErr.Len() > 0 {
+					lastErr.WriteByte('\n')
+				}
+				lastErr.WriteString(line)
+			}
+		}
+	}
+	done := make(chan struct{}, 2)
+	go func() { scan(stdout, false); done <- struct{}{} }()
+	go func() { scan(stderr, true); done <- struct{}{} }()
+	<-done
+	<-done
+	if err := cmd.Wait(); err != nil {
+		detail := strings.TrimSpace(lastErr.String())
+		if detail == "" {
+			return fmt.Errorf("activate MCP port-forward: %w", err)
+		}
+		return fmt.Errorf("activate MCP port-forward: %w: %s", err, detail)
+	}
+	return nil
+}
+
+func ensureSSHDViaOpenCommand(ctx context.Context, cliPath string, result eruncommon.OpenResult) error {
+	args := buildOpenNoShellArgs(result.Tenant, result.Environment)
+	cmd := exec.CommandContext(ctx, cliPath, args...)
+	cmd.Env = append(os.Environ(), "ERUN_IDLE_PROBE=1")
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	detail := strings.TrimSpace(string(output))
+	if detail == "" {
+		return fmt.Errorf("activate SSHD port-forward: %w", err)
+	}
+	return fmt.Errorf("activate SSHD port-forward: %w: %s", err, detail)
 }
 
 func buildInitArgs(selection uiSelection) []string {
@@ -162,14 +312,9 @@ func buildInitArgs(selection uiSelection) []string {
 }
 
 func buildDeployArgs(selection uiSelection) []string {
-	args := erunArgs(selection.Debug, "open", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment), "--no-shell", "--no-alias-prompt")
-	version := selection.Version
-	runtimeImage := selection.RuntimeImage
-	if version = strings.TrimSpace(version); version != "" {
+	args := erunArgs(selection.Debug, "deploy", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
+	if version := strings.TrimSpace(selection.Version); version != "" {
 		args = append(args, "--version", version)
-	}
-	if runtimeImage = strings.TrimSpace(runtimeImage); runtimeImage != "" {
-		args = append(args, "--runtime-image", runtimeImage)
 	}
 	return args
 }
@@ -227,6 +372,60 @@ func resolveDeployStartDir(findProjectRoot eruncommon.ProjectFinderFunc, result 
 	}
 	return resolveTerminalStartDir(result.RepoPath)
 }
+
+const defaultAITool = "claude"
+
+func resolveLocalShellCommand(goos string) (string, []string) {
+	if shell := strings.TrimSpace(os.Getenv("SHELL")); shell != "" {
+		return shell, nil
+	}
+	switch strings.TrimSpace(goos) {
+	case "windows":
+		return "powershell.exe", []string{"-NoLogo"}
+	default:
+		return "/bin/bash", nil
+	}
+}
+
+func resolveAIToolCommand(configured string) string {
+	if tool := strings.TrimSpace(configured); tool != "" {
+		return tool
+	}
+	return defaultAITool
+}
+
+func formatLaunchCommand(params startTerminalSessionParams) string {
+	parts := make([]string, 0, len(params.Args)+1)
+	parts = append(parts, params.Executable)
+	parts = append(parts, params.Args...)
+	return strings.Join(parts, " ")
+}
+
+func formatLocalCommandLog(command, label string) string {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return ""
+	}
+	suffix := ""
+	if label = strings.TrimSpace(label); label != "" {
+		suffix = "  \x1b[2;3m(running in " + label + ")\x1b[0m"
+	}
+	return "\x1b[2m$ " + command + "\x1b[0m" + suffix + "\r\n"
+}
+
+func localSessionBanner(selection uiSelection) []byte {
+	tenant := strings.TrimSpace(selection.Tenant)
+	environment := strings.TrimSpace(selection.Environment)
+	if tenant == "" || environment == "" {
+		return nil
+	}
+	// Emitted as a terminal-output event (not pty input) so it doesn't get
+	// fed to the shell. ANSI dim makes it look like an inline comment so it
+	// doesn't compete visually with real shell output.
+	banner := fmt.Sprintf("\x1b[2m# Local host shell for %s/%s — env shell in ERun tab, %s in AI tab\x1b[0m\r\n", tenant, environment, defaultAITool)
+	return []byte(banner)
+}
+
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"

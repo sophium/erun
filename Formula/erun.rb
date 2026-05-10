@@ -1,8 +1,8 @@
 class Erun < Formula
   desc "Multi-tenant multi-environment deployment and management tool"
   homepage "https://github.com/sophium/erun"
-  url "https://github.com/sophium/erun/archive/refs/tags/v1.0.50.tar.gz"
-  sha256 "e336e9f4b9b3fe147b0354cbc96f5cdc0a6b45bf9f1253bc6b695cbb35b8ef2e"
+  url "https://github.com/sophium/erun/archive/refs/tags/v1.0.51.tar.gz"
+  sha256 "46cfa313729122a25026de66de3cb5e44920a1867cb88745d14e26490f8c25e0"
   license "MIT"
 
   depends_on "go" => :build
@@ -26,6 +26,15 @@ class Erun < Formula
                ldflags: "-s -w -X github.com/sophium/erun/erun-mcp.buildVersion=#{version}",
              ),
              "./cmd/emcp"
+    end
+
+    cd "erun-backend/erun-backend-api" do
+      system "go", "build",
+             *std_go_args(
+               output:  bin/"eapi",
+               ldflags: "-s -w",
+             ),
+             "./cmd/eapi"
     end
 
     cd "erun-ui" do
@@ -59,6 +68,7 @@ class Erun < Formula
     assert_match "Tenants:", shell_output("#{bin}/erun list")
     assert_match "Launch the ERun desktop app", shell_output("#{bin}/erun help app")
     assert_match "Usage of emcp:", shell_output("#{bin}/emcp --help 2>&1")
+    assert_match "Usage of eapi:", shell_output("#{bin}/eapi --help 2>&1")
     assert_predicate bin/"erun-app", :exist?
   end
 end

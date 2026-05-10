@@ -6,16 +6,27 @@ import type { UICloudContextInitInput, UICloudContextStatus, UICloudProviderStat
 
 export function idleCloudContextAction(idleStatus: UIIdleStatus | null, busy: boolean): IdleCloudContextAction | null {
   const name = normalizeDialogValue(idleStatus?.cloudContextName || '');
-  if (!idleStatus || !idleStatus.managedCloud || !name || busy) {
+  if (!idleStatus?.managedCloud || !name || busy) {
     return null;
   }
   const running = normalizeDialogValue(idleStatus.cloudContextStatus || '').toLowerCase() === 'running';
+  if (running) {
+    return {
+      idleStatus,
+      operation: 'stop',
+      name,
+      run: StopCloudContext,
+      label: 'Stopped',
+      refreshKubernetesContexts: false,
+    };
+  }
   return {
     idleStatus,
+    operation: 'start',
     name,
-    run: running ? StopCloudContext : StartCloudContext,
-    label: running ? 'Stopped' : 'Started',
-    refreshKubernetesContexts: !running,
+    run: StartCloudContext,
+    label: 'Started',
+    refreshKubernetesContexts: true,
   };
 }
 

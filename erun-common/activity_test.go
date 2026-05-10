@@ -167,6 +167,88 @@ func TestResolveStoredEnvironmentIdleStatusStopsOnlyCloudManagedEnvironments(t *
 	}
 }
 
+func TestResolveEnvironmentIdleStatusUsesConfiguredTimezone(t *testing.T) {
+	// 06:00 UTC is before the 08:00 working-hours start when interpreted as UTC,
+	// but it is 15:00 on the same day in Asia/Tokyo (UTC+9) — inside working hours.
+	now := time.Date(2026, 4, 28, 6, 0, 0, 0, time.UTC)
+
+	statusUTC, err := ResolveEnvironmentIdleStatus(EnvironmentIdleConfig{
+		Timeout:      "5m",
+		WorkingHours: "08:00-20:00",
+	}, nil, now)
+	if err != nil {
+		t.Fatalf("UTC resolve failed: %v", err)
+	}
+	if !statusUTC.OutsideWorkingHours {
+		t.Fatalf("expected 06:00 (now's native timezone, here UTC) to be outside 08:00-20:00 when no timezone override is configured")
+	}
+
+	statusJST, err := ResolveEnvironmentIdleStatus(EnvironmentIdleConfig{
+		Timeout:      "5m",
+		WorkingHours: "08:00-20:00",
+		Timezone:     "Asia/Tokyo",
+	}, nil, now)
+	if err != nil {
+		t.Fatalf("Asia/Tokyo resolve failed: %v", err)
+	}
+	if statusJST.OutsideWorkingHours {
+		t.Fatalf("expected 06:00 UTC (= 15:00 JST) to be inside 08:00-20:00 Asia/Tokyo, got OutsideWorkingHours=true")
+	}
+}
+
+func TestSSHMarkerIdlesOnLastActivityRegardlessOfAccumulatedBytes(t *testing.T) {
+	// Regression: Bytes accumulates monotonically in the activity snapshot.
+	// The marker should still go idle once LastActivity exceeds the timeout,
+	// even though Bytes is large from earlier traffic.
+	now := time.Date(2026, 4, 28, 12, 0, 0, 0, time.Local)
+	status, err := ResolveEnvironmentIdleStatus(EnvironmentIdleConfig{
+		Timeout:      "5m",
+		WorkingHours: "08:00-20:00",
+	}, map[string]EnvironmentActivitySnapshot{
+		ActivityKindSSH:   {LastActivity: now.Add(-10 * time.Minute), Bytes: 1_000_000},
+		ActivityKindMCP:   {LastActivity: now.Add(-10 * time.Minute)},
+		ActivityKindCLI:   {LastActivity: now.Add(-10 * time.Minute)},
+		ActivityKindCodex: {LastActivity: now.Add(-10 * time.Minute)},
+	}, now)
+	if err != nil {
+		t.Fatalf("ResolveEnvironmentIdleStatus failed: %v", err)
+	}
+	if !status.StopEligible {
+		t.Fatalf("expected SSH marker to idle on LastActivity timeout regardless of accumulated bytes, markers=%+v", status.Markers)
+	}
+}
+
+func TestEnvironmentIdleConfigRejectsInvalidTimezone(t *testing.T) {
+	_, err := EnvironmentIdleConfig{Timezone: "Not/A_Place"}.Resolve()
+	if err == nil {
+		t.Fatalf("expected invalid timezone error")
+	}
+}
+
+func TestResolveStoredEnvironmentIdleStatusDetectsManagedCloudWhenRepoIsLocal(t *testing.T) {
+	now := time.Date(2026, 4, 28, 21, 0, 0, 0, time.Local)
+	store := idleStatusTestStore{
+		envs: map[string]EnvConfig{
+			"tenant/cloud": {
+				Name:              "cloud",
+				KubernetesContext: "in-cluster",
+				ManagedCloud:      true,
+			},
+		},
+	}
+
+	status, err := ResolveStoredEnvironmentIdleStatus(store, "tenant", "cloud", now)
+	if err != nil {
+		t.Fatalf("ResolveStoredEnvironmentIdleStatus failed: %v", err)
+	}
+	if !status.ManagedCloud {
+		t.Fatalf("expected env with ManagedCloud=true to be detected as managed cloud even when Remote=false (chart-deployed pods set Remote=false)")
+	}
+	if !status.StopEligible {
+		t.Fatalf("expected outside-working-hours managed cloud env to be stop eligible: %s", status.StopBlockedReason)
+	}
+}
+
 func TestResolveStoredEnvironmentIdleStatusIncludesStopError(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

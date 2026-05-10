@@ -1,0 +1,13 @@
+Delete an environment from ERun configuration and remove its remote runtime namespace
+
+Usage:
+  erun delete TENANT ENVIRONMENT [flags]
+
+Flags:
+      --dry-run   Resolve and trace mutating actions without executing them.
+  -h, --help      help for delete
+  -y, --yes       Skip the confirmation prompt (for non-interactive callers)
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

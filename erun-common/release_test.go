@@ -16,11 +16,12 @@ func TestResolveReleaseSpecStableRelease(t *testing.T) {
 	projectRoot := setupReleaseProjectGitRepo(t, "main")
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "main", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "main", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	requireNoError(t, err, "resolveReleaseSpec failed")
@@ -33,7 +34,7 @@ func requireStableReleaseSpec(t *testing.T, spec ReleaseSpec, projectRoot string
 	requireCondition(t, spec.Mode == ReleaseModeStable && spec.Version == "1.4.2" && spec.NextVersion == "1.4.3", "unexpected release spec: %+v", spec)
 	requireEqual(t, spec.ReleaseRoot, filepath.Join(projectRoot, "erun-devops"), "unexpected release root")
 	requireCondition(t, len(spec.Charts) == 1 && spec.Charts[0].Version == "1.4.2" && spec.Charts[0].AppVersion == "1.4.2", "unexpected charts: %+v", spec.Charts)
-	requireCondition(t, len(spec.DockerImages) == 1 && spec.DockerImages[0].Tag == "erunpaas/api:1.4.2", "unexpected docker images: %+v", spec.DockerImages)
+	requireCondition(t, len(spec.DockerImages) == 1 && spec.DockerImages[0].Tag == "ghcr.io/sophium/api:1.4.2", "unexpected docker images: %+v", spec.DockerImages)
 	requireEqual(t, len(spec.Stages), 5, "stage count")
 	requireStableReleaseStageCommands(t, spec, projectRoot)
 }
@@ -74,11 +75,12 @@ func TestResolveReleaseSpecSkipsLinuxScriptsWhenUnsupported(t *testing.T) {
 	}
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "main", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "main", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -93,11 +95,12 @@ func TestResolveReleaseSpecStableReleaseIncludesPackagingUpdatesWhenPresent(t *t
 	projectRoot := setupReleaseProject(t, releaseProjectOptions{WithPackaging: true})
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "main", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "main", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -142,11 +145,12 @@ func TestResolveReleaseSpecUsesConfiguredBranches(t *testing.T) {
 	})
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "integration", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "integration", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -177,11 +181,12 @@ func TestRunReleaseSpecWritesFilesAndRunsGitStages(t *testing.T) {
 	projectRoot := setupReleaseProjectGitRepo(t, "develop")
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "main", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "main", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -239,11 +244,12 @@ func TestRunReleaseSpecRewritesStablePackagingMetadataWhenPresent(t *testing.T) 
 	projectRoot := setupReleaseProjectGitRepoWithOptions(t, "main", releaseProjectOptions{WithPackaging: true})
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "main", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "main", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -292,7 +298,8 @@ end
   },
   "bin": [
     "erun.exe",
-    "emcp.exe"
+    "emcp.exe",
+    "eapi.exe"
   ]
 }
 `,
@@ -337,11 +344,12 @@ func TestRunReleaseSpecSkipsPackagingCommitWhenChecksumsAreAlreadyCurrent(t *tes
 	projectRoot := setupReleaseProjectGitRepoWithOptions(t, "main", releaseProjectOptions{WithPackaging: true})
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "main", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "main", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -424,7 +432,8 @@ func TestUpdateScoopManifestReleaseChecksum(t *testing.T) {
   },
   "bin": [
     "erun.exe",
-    "emcp.exe"
+    "emcp.exe",
+    "eapi.exe"
   ]
 }
 `), 0o644); err != nil {
@@ -444,11 +453,12 @@ func TestRunReleaseSpecCandidateRunsTagAndPush(t *testing.T) {
 	projectRoot := setupReleaseProjectGitRepo(t, "main")
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "develop", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "develop", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -512,11 +522,12 @@ func TestRunReleaseSpecCandidateSkipsExistingTagAtHead(t *testing.T) {
 	}, "tag", "-a", "v1.4.2-rc.abc1234", "-m", "Release candidate 1.4.2-rc.abc1234")
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "develop", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "develop", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -592,11 +603,12 @@ func TestRunReleaseSpecReturnsErrorWhenExistingTagPointsElsewhere(t *testing.T) 
 	}, "commit", "-m", "advance head")
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "develop", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "develop", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -637,11 +649,12 @@ func TestRunReleaseSpecForceDeletesExistingTagAndRecreatesIt(t *testing.T) {
 	runGitWithEnv(t, projectRoot, nil, "push", "origin", "develop")
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "develop", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "develop", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{Force: true},
 	)
 	if err != nil {
@@ -676,11 +689,12 @@ func TestRunReleaseSpecReturnsErrorWhenWorktreeIsDirty(t *testing.T) {
 	projectRoot := setupReleaseProjectGitRepo(t, "main")
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "main", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "main", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -719,11 +733,12 @@ func TestResolveReleaseSpecStableReleaseUsesConfiguredDevelopBranchForSyncAndPus
 	})
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "trunk", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return true, nil },
+		func(Context, string) (string, error) { return "trunk", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return true, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -748,11 +763,12 @@ func TestResolveReleaseSpecStableReleaseSkipsDevelopSyncWhenBranchMissing(t *tes
 	projectRoot := setupReleaseProject(t, releaseProjectOptions{})
 
 	spec, err := resolveReleaseSpec(
+		Context{},
 		func() (string, string, error) { return "tenant-a", projectRoot, nil },
 		LoadProjectConfig,
-		func(string) (string, error) { return "main", nil },
-		func(string) (string, error) { return "abc1234", nil },
-		func(string, string) (bool, error) { return false, nil },
+		func(Context, string) (string, error) { return "main", nil },
+		func(Context, string) (string, error) { return "abc1234", nil },
+		func(Context, string, string) (bool, error) { return false, nil },
 		ReleaseParams{},
 	)
 	if err != nil {
@@ -904,10 +920,16 @@ end
   },
   "bin": [
     "erun.exe",
-    "emcp.exe"
+    "emcp.exe",
+    "eapi.exe"
   ]
 }
 `), 0o644), "write scoop manifest")
+}
+
+func setupReleaseProjectGitRepo(t *testing.T, branch string) string {
+	t.Helper()
+	return setupReleaseProjectGitRepoWithOptions(t, branch, releaseProjectOptions{})
 }
 
 func setupReleaseProjectGitRepoWithOptions(t *testing.T, branch string, options releaseProjectOptions) string {

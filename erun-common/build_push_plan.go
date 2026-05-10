@@ -9,7 +9,7 @@ func DockerPushExecutionSpecFromSpecs(builds []DockerBuildSpec, pushes []DockerP
 	return DockerPushExecutionSpec{builds: builds, pushes: pushes}
 }
 
-func ResolveDockerPushExecution(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (DockerPushExecutionSpec, error) {
+func ResolveDockerPushExecution(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (DockerPushExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	buildContexts, err := ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, target)
@@ -37,10 +37,15 @@ func ResolveDockerPushExecution(store DockerStore, findProjectRoot ProjectFinder
 		pushes = append(pushes, NewDockerPushSpec(buildContext.Dir, imageRef))
 	}
 
+	builds, err = ApplyIncrementalToDockerBuilds(ctx, builds, target.NoIncremental)
+	if err != nil {
+		return DockerPushExecutionSpec{}, err
+	}
+
 	return DockerPushExecutionSpec{builds: builds, pushes: pushes}, nil
 }
 
-func ResolveDockerPushSpec(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (DockerPushSpec, *DockerBuildSpec, error) {
+func ResolveDockerPushSpec(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (DockerPushSpec, *DockerBuildSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	buildContext, err := resolveBuildContext()
@@ -62,6 +67,11 @@ func ResolveDockerPushSpec(store DockerStore, findProjectRoot ProjectFinderFunc,
 		if err != nil {
 			return DockerPushSpec{}, nil, err
 		}
+		incremental, err := ApplyIncrementalToDockerBuilds(ctx, []DockerBuildSpec{resolvedBuild}, target.NoIncremental)
+		if err != nil {
+			return DockerPushSpec{}, nil, err
+		}
+		resolvedBuild = incremental[0]
 		build = &resolvedBuild
 		imageRef = resolvedBuild.Image
 	}

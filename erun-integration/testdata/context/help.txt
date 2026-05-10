@@ -1,0 +1,19 @@
+Manage ERun cloud Kubernetes contexts
+
+Usage:
+  erun context [command]
+
+Available Commands:
+  init        Initialize a managed cloud k3s context
+  list        List managed ERun cloud contexts
+  start       Start a managed ERun cloud context
+  stop        Stop a managed ERun cloud context
+
+Flags:
+  -h, --help   help for context
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.
+
+Use "erun context [command] --help" for more information about a command.

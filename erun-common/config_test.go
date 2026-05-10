@@ -128,7 +128,14 @@ func TestTenantConfigRoundTrip(t *testing.T) {
 	setupConfigTestXDGConfigHome(t)
 
 	snapshot := false
-	cfg := TenantConfig{ProjectRoot: "/tmp/project", Name: "tenant-a", DefaultEnvironment: "dev", Snapshot: &snapshot}
+	cfg := TenantConfig{
+		ProjectRoot:               "/tmp/project",
+		Name:                      "tenant-a",
+		DefaultEnvironment:        "dev",
+		CloudProviderAliases:      []string{"primary-cloud", "review-cloud"},
+		PrimaryCloudProviderAlias: "primary-cloud",
+		Snapshot:                  &snapshot,
+	}
 	if err := SaveTenantConfig(cfg); err != nil {
 		t.Fatalf("SaveTenantConfig failed: %v", err)
 	}
@@ -345,13 +352,8 @@ func TestProjectConfigRoundTrip(t *testing.T) {
 
 	cfg := ProjectConfig{
 		Environments: map[string]ProjectEnvironmentConfig{
-			"local": {
-				ContainerRegistry: "erunpaas",
-				Docker: ProjectDockerConfig{
-					SkipIfExists: []string{"erunpaas/base", "erunpaas/erun-ubuntu"},
-				},
-			},
-			"prod": {ContainerRegistry: "registry.example/team"},
+			"local": {ContainerRegistry: "erunpaas"},
+			"prod":  {ContainerRegistry: "registry.example/team"},
 		},
 	}
 	if err := SaveProjectConfig(projectRoot, cfg); err != nil {

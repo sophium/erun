@@ -167,6 +167,10 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Description: "Login to a configured cloud provider alias, with preview support",
 	}, cloudLoginTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cloud_oidc",
+		Description: "Refresh the OIDC issuer for a configured cloud provider alias, with preview support",
+	}, cloudOIDCTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "cloud_set",
 		Description: "Set the cloud provider alias for a tenant environment, with preview support",
 	}, cloudSetTool(runtime))

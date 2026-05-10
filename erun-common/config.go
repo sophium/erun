@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -18,15 +19,47 @@ const (
 )
 
 type ERunConfig struct {
-	DefaultTenant  string
-	CloudProviders []CloudProviderConfig `yaml:"cloudproviders,omitempty"`
-	CloudContexts  []CloudContextConfig  `yaml:"cloudcontexts,omitempty"`
+	DefaultTenant   string
+	CloudProviders  []CloudProviderConfig `yaml:"cloudproviders,omitempty"`
+	CloudContexts   []CloudContextConfig  `yaml:"cloudcontexts,omitempty"`
+	RuntimeRegistry RuntimeRegistryConfig `yaml:"runtimeregistry,omitempty"`
+}
+
+// RuntimeRegistryConfig overrides where `erun version` checks for available
+// runtime images. Operators running internal mirrors of `erun-devops`
+// (Harbor, ECR, Artifactory, a self-hosted GHCR) point Namespace and
+// BaseURL at their mirror so the version check stops talking to the
+// public registries baked into the binary.
+//
+// All fields are optional. When unset, defaults are
+// `ghcr.io/sophium/erun-devops` with the standard ghcr.io endpoints, which
+// matches the previous hardcoded behavior.
+type RuntimeRegistryConfig struct {
+	Namespace  string `yaml:"namespace,omitempty"`
+	Repository string `yaml:"repository,omitempty"`
+	// BaseURL overrides the registry HTTP endpoint. Default depends on the
+	// resolved namespace prefix: `https://hub.docker.com` for Docker Hub
+	// namespaces, `https://ghcr.io` for `ghcr.io/...` namespaces.
+	BaseURL string `yaml:"baseurl,omitempty"`
+	// TokenURL overrides the GHCR token endpoint. Default `https://ghcr.io`.
+	// Only consulted on the GHCR flow.
+	TokenURL string `yaml:"tokenurl,omitempty"`
 }
 
 type SSHDConfig struct {
-	Enabled       bool   `yaml:"enabled,omitempty"`
-	LocalPort     int    `yaml:"localport,omitempty"`
-	PublicKeyPath string `yaml:"publickeypath,omitempty"`
+	Enabled       bool                    `yaml:"enabled,omitempty"`
+	LocalPort     int                     `yaml:"localport,omitempty"`
+	PublicKeyPath string                  `yaml:"publickeypath,omitempty"`
+	WorkspaceSync SSHDWorkspaceSyncConfig `yaml:"workspacesync,omitempty"`
+}
+
+type SSHDWorkspaceSyncConfig struct {
+	Enabled   bool   `yaml:"enabled,omitempty"`
+	LocalPath string `yaml:"localpath,omitempty"`
+}
+
+func (c SSHDWorkspaceSyncConfig) IsZero() bool {
+	return !c.Enabled && strings.TrimSpace(c.LocalPath) == ""
 }
 
 func (c SSHDConfig) ResolvedLocalPort() int {
@@ -37,11 +70,14 @@ func (c SSHDConfig) ResolvedLocalPort() int {
 }
 
 type TenantConfig struct {
-	ProjectRoot        string
-	Name               string
-	DefaultEnvironment string
-	Remote             bool  `yaml:"remote,omitempty"`
-	Snapshot           *bool `yaml:"snapshot,omitempty"`
+	ProjectRoot               string
+	Name                      string
+	DefaultEnvironment        string
+	APIURL                    string   `yaml:"api_url,omitempty" json:"apiUrl,omitempty"`
+	CloudProviderAliases      []string `yaml:"cloudprovideraliases,omitempty" json:"cloudProviderAliases,omitempty"`
+	PrimaryCloudProviderAlias string   `yaml:"primarycloudprovideralias,omitempty" json:"primaryCloudProviderAlias,omitempty"`
+	Remote                    bool     `yaml:"remote,omitempty"`
+	Snapshot                  *bool    `yaml:"snapshot,omitempty"`
 }
 
 type EnvConfig struct {
@@ -49,14 +85,16 @@ type EnvConfig struct {
 	RepoPath           string
 	KubernetesContext  string
 	ContainerRegistry  string
-	CloudProviderAlias string                `yaml:"cloudprovideralias,omitempty"`
-	ManagedCloud       bool                  `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
-	RuntimeVersion     string                `yaml:"runtimeversion,omitempty"`
-	RuntimePod         RuntimePodResources   `yaml:"runtimepod,omitempty"`
-	SSHD               SSHDConfig            `yaml:"sshd,omitempty"`
-	Idle               EnvironmentIdleConfig `yaml:"idle,omitempty"`
-	Remote             bool                  `yaml:"remote,omitempty"`
-	Snapshot           *bool                 `yaml:"snapshot,omitempty"`
+	CloudProviderAlias string                  `yaml:"cloudprovideralias,omitempty"`
+	ManagedCloud       bool                    `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
+	RuntimeVersion     string                  `yaml:"runtimeversion,omitempty"`
+	RuntimePod         RuntimePodResources     `yaml:"runtimepod,omitempty"`
+	SSHD               SSHDConfig              `yaml:"sshd,omitempty"`
+	Idle               EnvironmentIdleConfig   `yaml:"idle,omitempty"`
+	Claude             EnvironmentClaudeConfig `yaml:"claude,omitempty" json:"claude,omitempty"`
+	AITool             string                  `yaml:"aitool,omitempty" json:"aiTool,omitempty"`
+	Remote             bool                    `yaml:"remote,omitempty"`
+	Snapshot           *bool                   `yaml:"snapshot,omitempty"`
 }
 
 func (c TenantConfig) SnapshotEnabled() bool {
@@ -92,14 +130,24 @@ func (c *EnvConfig) SetSnapshot(enabled bool) {
 type ProjectEnvironmentConfig struct {
 	ContainerRegistry string              `yaml:"containerregistry,omitempty"`
 	Docker            ProjectDockerConfig `yaml:"docker,omitempty"`
+	K8s               ProjectK8sConfig    `yaml:"k8s,omitempty"`
 }
 
+// ProjectDockerConfig holds project-level docker settings per environment.
+// Fingerprints maps an image name (the build-context dir name, e.g.
+// "erun-ubuntu") to its canonical content fingerprint as published by release
+// CI. When set, the incremental build flow pulls <image>:<VERSION> from the
+// registry and tags it locally as <image>:fp-<configured>-<arch> before
+// running fingerprint promotion. This lets fresh dev clones promote pinned
+// bases without rebuilding them, while local Dockerfile edits still trigger a
+// rebuild because the locally-computed fingerprint diverges from the tagged
+// hash.
 type ProjectDockerConfig struct {
-	SkipIfExists []string `yaml:"skipIfExists,omitempty"`
+	Fingerprints map[string]string `yaml:"fingerprints,omitempty"`
 }
 
 func (c ProjectDockerConfig) IsZero() bool {
-	return len(c.SkipIfExists) == 0
+	return len(c.Fingerprints) == 0
 }
 
 type ReleaseConfig struct {
@@ -113,6 +161,114 @@ type ProjectConfig struct {
 	Release           ReleaseConfig                       `yaml:"release,omitempty"`
 }
 
+// K8sForEnvironment returns the k8s deploy plan declared for the given
+// environment in this project config, or an empty plan when none exists.
+// Mirrors ContainerRegistryForEnvironment in shape so callers can resolve a
+// plan by environment without reaching into the Environments map.
+func (c ProjectConfig) K8sForEnvironment(environment string) ProjectK8sConfig {
+	environment = strings.TrimSpace(environment)
+	if environment == "" || c.Environments == nil {
+		return ProjectK8sConfig{}
+	}
+	envConfig, ok := c.Environments[environment]
+	if !ok {
+		return ProjectK8sConfig{}
+	}
+	return envConfig.K8s
+}
+
+// ProjectK8sConfig declares the deploy plan for `erun deploy` in this project.
+// Deployments lists the steps in the order they must run; each step is a
+// group of components to deploy in parallel. A step may be a single
+// component name (scalar) or a sequence of names (parallel group).
+type ProjectK8sConfig struct {
+	Deployments []ProjectK8sDeploymentStep `yaml:"deployments,omitempty"`
+}
+
+func (c ProjectK8sConfig) IsZero() bool {
+	return len(c.Deployments) == 0
+}
+
+// ProjectK8sDeploymentStep is one ordered step in the deploy plan. The
+// Components slice always holds the parallel group; YAML unmarshaling lifts a
+// scalar single-component form into a one-element slice so users can write
+// either form interchangeably.
+type ProjectK8sDeploymentStep struct {
+	Components []string
+}
+
+func (s *ProjectK8sDeploymentStep) UnmarshalYAML(node *yaml.Node) error {
+	if s == nil {
+		return errors.New("nil ProjectK8sDeploymentStep")
+	}
+	switch node.Kind {
+	case yaml.ScalarNode:
+		value := strings.TrimSpace(node.Value)
+		if value == "" {
+			s.Components = nil
+			return nil
+		}
+		s.Components = []string{value}
+		return nil
+	case yaml.SequenceNode:
+		components := make([]string, 0, len(node.Content))
+		for _, child := range node.Content {
+			if child.Kind != yaml.ScalarNode {
+				return errors.New("k8s.deployments parallel group must contain only component names")
+			}
+			value := strings.TrimSpace(child.Value)
+			if value == "" {
+				continue
+			}
+			components = append(components, value)
+		}
+		s.Components = components
+		return nil
+	default:
+		return errors.New("k8s.deployments item must be a component name or a list of component names")
+	}
+}
+
+// MarshalYAML emits the natural form: a scalar when the step has exactly one
+// component, a flow-style sequence when it has multiple. This keeps
+// round-tripped configs readable instead of forcing every step into a list.
+func (s ProjectK8sDeploymentStep) MarshalYAML() (any, error) {
+	if len(s.Components) == 1 {
+		return s.Components[0], nil
+	}
+	return s.Components, nil
+}
+
+// DockerFingerprintsForEnvironment returns the configured image-name →
+// fingerprint map for the given environment, or nil when none is set. Empty
+// keys and values are dropped. Hash values are validated lazily by the
+// materialization step rather than at load time, so a malformed entry
+// surfaces in the build trace instead of breaking unrelated commands that
+// just want to read other parts of the config.
+func (c ProjectConfig) DockerFingerprintsForEnvironment(environment string) map[string]string {
+	environment = strings.TrimSpace(environment)
+	if environment == "" || c.Environments == nil {
+		return nil
+	}
+	envConfig, ok := c.Environments[environment]
+	if !ok || len(envConfig.Docker.Fingerprints) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(envConfig.Docker.Fingerprints))
+	for name, hash := range envConfig.Docker.Fingerprints {
+		name = strings.TrimSpace(name)
+		hash = strings.TrimSpace(hash)
+		if name == "" || hash == "" {
+			continue
+		}
+		out[name] = hash
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func (c ProjectConfig) ContainerRegistryForEnvironment(environment string) string {
 	environment = strings.TrimSpace(environment)
 	if environment != "" && c.Environments != nil {
@@ -124,26 +280,6 @@ func (c ProjectConfig) ContainerRegistryForEnvironment(environment string) strin
 	}
 
 	return strings.TrimSpace(c.ContainerRegistry)
-}
-
-func (c ProjectConfig) DockerSkipIfExistsForEnvironment(environment string) []string {
-	environment = strings.TrimSpace(environment)
-	if environment == "" || c.Environments == nil {
-		return nil
-	}
-
-	envConfig, ok := c.Environments[environment]
-	if !ok || len(envConfig.Docker.SkipIfExists) == 0 {
-		return nil
-	}
-
-	values := make([]string, 0, len(envConfig.Docker.SkipIfExists))
-	for _, value := range envConfig.Docker.SkipIfExists {
-		if value = strings.TrimSpace(value); value != "" {
-			values = append(values, value)
-		}
-	}
-	return values
 }
 
 func (c *ProjectConfig) SetContainerRegistryForEnvironment(environment, registry string) {
@@ -261,6 +397,10 @@ func (ConfigStore) DeleteEnvConfig(tenant, envName string) error {
 	return DeleteEnvConfig(tenant, envName)
 }
 
+func (ConfigStore) LoadProjectConfig(projectRoot string) (ProjectConfig, string, error) {
+	return LoadProjectConfig(projectRoot)
+}
+
 func SaveERunConfig(config ERunConfig) error {
 	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, configFile))
 	if err != nil {
@@ -303,6 +443,7 @@ func LoadERunConfig() (ERunConfig, string, error) {
 }
 
 func SaveTenantConfig(config TenantConfig) error {
+	config = NormalizeTenantConfig(config)
 	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, config.Name, configFile))
 	if err != nil {
 		return ErrNoUserDataFolder
@@ -322,6 +463,14 @@ func SaveTenantConfig(config TenantConfig) error {
 	}
 
 	return nil
+}
+
+func NormalizeTenantConfig(config TenantConfig) TenantConfig {
+	config.Name = strings.TrimSpace(config.Name)
+	config.DefaultEnvironment = strings.TrimSpace(config.DefaultEnvironment)
+	config.APIURL = strings.TrimSpace(config.APIURL)
+	config.CloudProviderAliases, config.PrimaryCloudProviderAlias = NormalizeTenantCloudProviderAliases(config.CloudProviderAliases, config.PrimaryCloudProviderAlias)
+	return config
 }
 
 func DeleteTenantConfig(tenant string) error {
@@ -352,7 +501,7 @@ func LoadTenantConfig(tenant string) (TenantConfig, string, error) {
 		return config, configFilePath, ErrConfigCorrupted
 	}
 
-	return config, configFilePath, nil
+	return NormalizeTenantConfig(config), configFilePath, nil
 }
 
 func ListTenantConfigs() ([]TenantConfig, error) {
@@ -523,7 +672,7 @@ func LoadProjectConfig(projectRoot string) (ProjectConfig, string, error) {
 	}
 
 	if err := yaml.Unmarshal(data, &config); err != nil {
-		return config, configFilePath, ErrConfigCorrupted
+		return config, configFilePath, fmt.Errorf("%w: %v", ErrConfigCorrupted, err)
 	}
 
 	return config, configFilePath, nil

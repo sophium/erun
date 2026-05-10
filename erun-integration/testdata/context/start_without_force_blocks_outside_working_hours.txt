@@ -1,0 +1,5 @@
+audit: erun context start --dry-run edge
+cloud-context start: name=edge force=false
+cloud-context start: checking working-hours gate
+cloud-context start: gated: outside working hours 23:00-23:01 for environment team/dev
+cloud context "edge" cannot start: outside working hours 23:00-23:01 for environment team/dev; pass force=true to override

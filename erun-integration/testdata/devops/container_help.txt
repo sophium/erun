@@ -1,0 +1,17 @@
+Container utilities
+
+Usage:
+  erun devops container [command]
+
+Available Commands:
+  build       Build the container image in the current directory
+  push        Build and push the current container image
+
+Flags:
+  -h, --help   help for container
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.
+
+Use "erun devops container [command] --help" for more information about a command.

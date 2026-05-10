@@ -36,7 +36,7 @@ func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderF
 }
 
 func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, target common.DockerCommandTarget, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) error {
-	execution, err := common.ResolveBuildExecution(store, findProjectRoot, resolveBuildContext, now, target)
+	execution, err := common.ResolveBuildExecution(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 	if err != nil {
 		return err
 	}
@@ -68,7 +68,7 @@ func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRo
 		return errors.New("store does not support deploy resolution")
 	}
 
-	deploySpecs, err := common.ResolveCurrentDeploySpecsForDockerTarget(buildDeployStore, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target)
+	deploySpecs, err := common.ResolveCurrentDeploySpecsForDockerTarget(ctx, buildDeployStore, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target)
 	if err != nil {
 		return err
 	}
@@ -78,6 +78,7 @@ func runBuildCommand(ctx common.Context, store common.DockerStore, findProjectRo
 
 func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc) *cobra.Command {
 	target := common.DockerCommandTarget{}
+	var force bool
 	cmd := &cobra.Command{
 		Use:           "push",
 		Short:         "Build and push the current container image",
@@ -85,16 +86,90 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if force {
+				target.NoIncremental = true
+			}
 			ctx := commandContext(cmd)
-			pushInput, buildInput, err := common.ResolveDockerPushSpec(store, findProjectRoot, resolveBuildContext, now, target)
+			pushInput, buildInput, err := common.ResolveDockerPushSpec(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 			if err != nil {
 				return err
 			}
-			return common.RunDockerPushSpec(ctx, pushInput, buildInput, buildDockerImage, push)
+			builder := buildDockerImage
+			if builder == nil {
+				builder = common.DockerImageBuilder
+			}
+			builderWithGuidance := func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
+				buildErr := builder(buildInput, stdout, stderr)
+				var authErr common.DockerRegistryAuthError
+				if !errors.As(buildErr, &authErr) {
+					return buildErr
+				}
+				if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return builder(buildInput, stdout, stderr) }, ctx.Stdin, stdout, stderr); handled {
+					return finalErr
+				}
+				return buildErr
+			}
+			return common.RunDockerPushSpec(ctx, pushInput, buildInput, builderWithGuidance, push)
 		},
 	}
 	addDryRunFlag(cmd)
 	addPushCommandTargetFlags(cmd, &target)
+	cmd.Flags().BoolVar(&force, "force", false, "Rebuild and re-push every image, bypassing the fingerprint cache")
+	return cmd
+}
+
+// newRootPushCmd is the top-level "erun push" shorthand. It supports both
+// single-image push (when a Dockerfile exists in the current directory) and
+// multi-image push (when run from the project root with multiple docker
+// contexts). The nested "devops container push" command uses newPushCmd which
+// is single-image only.
+func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc) *cobra.Command {
+	target := common.DockerCommandTarget{}
+	var force bool
+	cmd := &cobra.Command{
+		Use:           "push",
+		Short:         "Build and push the current container image",
+		Args:          cobra.NoArgs,
+		SilenceErrors: true,
+		SilenceUsage:  true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if force {
+				target.NoIncremental = true
+			}
+			ctx := commandContext(cmd)
+			builder := buildDockerImage
+			if builder == nil {
+				builder = common.DockerImageBuilder
+			}
+			builderWithGuidance := func(buildInput common.DockerBuildSpec, stdout, stderr io.Writer) error {
+				buildErr := builder(buildInput, stdout, stderr)
+				var authErr common.DockerRegistryAuthError
+				if !errors.As(buildErr, &authErr) {
+					return buildErr
+				}
+				if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return builder(buildInput, stdout, stderr) }, ctx.Stdin, stdout, stderr); handled {
+					return finalErr
+				}
+				return buildErr
+			}
+			buildContext, _ := resolveBuildContext()
+			if strings.TrimSpace(buildContext.DockerfilePath) != "" {
+				pushInput, buildInput, err := common.ResolveDockerPushSpec(ctx, store, findProjectRoot, resolveBuildContext, now, target)
+				if err != nil {
+					return err
+				}
+				return common.RunDockerPushSpec(ctx, pushInput, buildInput, builderWithGuidance, push)
+			}
+			execution, err := common.ResolveDockerPushExecution(ctx, store, findProjectRoot, resolveBuildContext, now, target)
+			if err != nil {
+				return err
+			}
+			return common.RunDockerPushExecution(ctx, execution, builderWithGuidance, push)
+		},
+	}
+	addDryRunFlag(cmd)
+	addPushCommandTargetFlags(cmd, &target)
+	cmd.Flags().BoolVar(&force, "force", false, "Rebuild and re-push every image, bypassing the fingerprint cache")
 	return cmd
 }
 
@@ -107,6 +182,10 @@ func runDockerPushWithRetry(ctx common.Context, pushInput common.DockerPushSpec,
 	var authErr common.DockerRegistryAuthError
 	if !errors.As(err, &authErr) {
 		return err
+	}
+
+	if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return push(ctx, pushInput) }, ctx.Stdin, ctx.Stdout, ctx.Stderr); handled {
+		return finalErr
 	}
 
 	retry, promptErr := promptDockerLoginRetry(selectRunner, authErr.Registry)
@@ -140,6 +219,10 @@ func runDockerBuildWithRetry(ctx common.Context, buildInput common.DockerBuildSp
 		return err
 	}
 
+	if handled, finalErr := handleNamespaceAuthError(authErr, func() error { return build(buildInput, stdout, stderr) }, ctx.Stdin, stdout, stderr); handled {
+		return finalErr
+	}
+
 	retry, promptErr := promptDockerLoginRetry(selectRunner, authErr.Registry)
 	if promptErr != nil {
 		return promptErr
@@ -165,6 +248,7 @@ func addBuildCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommand
 	cmd.Flags().BoolVar(&target.Deploy, "deploy", false, "Deploy the built version after the build completes")
 	cmd.Flags().BoolVar(&target.Release, "release", false, "Run release first and publish the release-tagged images")
 	cmd.Flags().BoolVar(&target.Force, "force", false, "Delete and recreate conflicting release tags when combined with --release")
+	cmd.Flags().BoolVar(&target.NoIncremental, "no-incremental", false, "Disable fingerprint-based build caching and rebuild every image from scratch")
 }
 
 func addPushCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandTarget) {
@@ -175,7 +259,136 @@ func addPushCommandTargetFlags(cmd *cobra.Command, target *common.DockerCommandT
 	_ = cmd.Flags().MarkHidden("environment")
 }
 
+// handleNamespaceAuthError handles the create_package and scope-denied auth
+// errors by switching docker auth to the namespace owner via the gh CLI and
+// retrying. Returns (handled=true, finalErr=...) when the error matched one
+// of those cases — finalErr is nil on a successful retry, or the latest
+// error otherwise. Returns (false, nil) when the error did not match, in
+// which case the caller should fall through to the prompt-login path.
+//
+// On scope denial the helper escalates: if the first auto-relogin retry
+// still fails with a scope error (the stored gh token itself lacks the
+// scope), it runs `gh auth refresh -s write:packages,read:packages`
+// interactively and retries once more. The user only types a one-time
+// device code; the rest is automated.
+func handleNamespaceAuthError(authErr common.DockerRegistryAuthError, retry func() error, stdin io.Reader, stdout, stderr io.Writer) (bool, error) {
+	if !common.IsDockerCreatePackageDenied(authErr.Message) && !common.IsDockerScopeDenied(authErr.Message) {
+		return false, nil
+	}
+	finalErr := retryAfterNamespaceLogin(authErr, retry, stdout, stderr)
+	if finalErr == nil {
+		return true, nil
+	}
+	if scopeStillDenied(finalErr) {
+		if refreshErr := retryAfterScopeRefresh(authErr, retry, stdin, stdout, stderr); refreshErr == nil {
+			return true, nil
+		} else {
+			finalErr = refreshErr
+		}
+	}
+	if common.IsDockerCreatePackageDenied(authErr.Message) {
+		printCreatePackageGuidance(stderr, authErr.Tag, authErr.Registry)
+	}
+	return true, finalErr
+}
+
+// retryAfterNamespaceLogin runs TryGHCRNamespaceLogin and retries once.
+// Returns nil on retry success, the original auth error when the namespace
+// switch is not applicable, or the retry error otherwise.
+func retryAfterNamespaceLogin(authErr common.DockerRegistryAuthError, retry func() error, stdout, stderr io.Writer) error {
+	ok, _ := common.TryGHCRNamespaceLogin(authErr.Tag, stdout, stderr)
+	if !ok {
+		return authErr
+	}
+	if retryErr := retry(); retryErr != nil {
+		return retryErr
+	}
+	return nil
+}
+
+// retryAfterScopeRefresh escalates by running `gh auth refresh` to widen the
+// stored token's scopes, then retries. Returns nil on retry success or the
+// refresh / retry error.
+func retryAfterScopeRefresh(authErr common.DockerRegistryAuthError, retry func() error, stdin io.Reader, stdout, stderr io.Writer) error {
+	ok, refreshErr := common.RefreshGHCRPackageScopes(authErr.Tag, stdin, stdout, stderr)
+	if refreshErr != nil {
+		return refreshErr
+	}
+	if !ok {
+		return authErr
+	}
+	return retry()
+}
+
+func scopeStillDenied(err error) bool {
+	var authErr common.DockerRegistryAuthError
+	if !errors.As(err, &authErr) {
+		return false
+	}
+	return common.IsDockerScopeDenied(authErr.Message)
+}
+
+func printCreatePackageGuidance(out io.Writer, tag, registry string) {
+	if out == nil {
+		return
+	}
+	namespace := common.DockerNamespaceFromTag(tag)
+	registryHost := strings.TrimSpace(registry)
+	if registryHost == "" {
+		registryHost = "the registry"
+	}
+
+	var sb strings.Builder
+	sb.WriteString("\n")
+	fmt.Fprintf(&sb, "%s rejected the push: only the namespace owner can create new packages under %s.\n\n", registryHost, namespacePath(registryHost, namespace))
+
+	if isGHCR(registryHost) {
+		owner := namespace
+		if owner == "" {
+			owner = "<owner>"
+		}
+		fmt.Fprintf(&sb, "To bootstrap the first version of this image, get a personal access token from the GitHub account that owns ghcr.io/%s/:\n", owner)
+		sb.WriteString("  1. Sign into github.com as that account.\n")
+		sb.WriteString("  2. Open https://github.com/settings/tokens/new (classic).\n")
+		sb.WriteString("  3. Generate a token with scopes: write:packages and read:packages.\n")
+		sb.WriteString("  4. docker logout ghcr.io\n")
+		fmt.Fprintf(&sb, "  5. echo $TOKEN | docker login ghcr.io -u %s --password-stdin\n", owner)
+		sb.WriteString("  6. Re-run erun push.\n\n")
+		sb.WriteString("After the package exists the owner can grant Write access to others (per-package settings, or via \"Inherit access from source repository\" on a linked repo). Future versions can then be pushed by anyone with that access — no PAT needed.\n")
+	} else {
+		sb.WriteString("Obtain credentials from the namespace owner or registry administrator and run:\n")
+		fmt.Fprintf(&sb, "  docker logout %s && docker login %s\n", registryHost, registryHost)
+		sb.WriteString("Then re-run erun push.\n")
+	}
+	sb.WriteString("\n")
+	_, _ = io.WriteString(out, sb.String())
+}
+
+func namespacePath(registry, namespace string) string {
+	registry = strings.TrimSpace(registry)
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return registry + "/"
+	}
+	if registry == "" {
+		return namespace + "/"
+	}
+	return registry + "/" + namespace + "/"
+}
+
+func isGHCR(registry string) bool {
+	registry = strings.ToLower(strings.TrimSpace(registry))
+	return registry == "ghcr.io" || strings.HasPrefix(registry, "ghcr.io/")
+}
+
 func promptDockerLoginRetry(run SelectRunner, registry string) (bool, error) {
+	// CI / non-interactive callers can opt in to "yes, log in and retry"
+	// by setting ERUN_AUTO_LOGIN_ON_PUSH=1, mirroring the loginAndRetry
+	// option without a TTY. The actual `docker login` step still has to
+	// be wired by the caller; this just unblocks the prompt.
+	if isTrueishEnv("ERUN_AUTO_LOGIN_ON_PUSH") {
+		return true, nil
+	}
 	label := fmt.Sprintf("Docker push requires login to %s", common.DockerRegistryDisplayName(registry))
 	prompt := promptui.Select{
 		Label: label,

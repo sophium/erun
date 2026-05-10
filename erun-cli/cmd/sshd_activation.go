@@ -46,7 +46,12 @@ func newSSHDActivator(runRemoteCommand common.RemoteCommandRunnerFunc) SSHDActiv
 func syncRemoteSSHDKey(ctx common.Context, result common.OpenResult, runRemoteCommand common.RemoteCommandRunnerFunc) (string, error) {
 	publicKeyPath, publicKey, err := resolveSSHDPublicKey(result.EnvConfig.SSHD.PublicKeyPath)
 	if err != nil {
-		return "", err
+		if !ctx.DryRun {
+			return "", err
+		}
+		ctx.Trace("sshd: dry-run: " + err.Error() + "; using placeholder key for trace")
+		publicKeyPath = "<no-public-key>"
+		publicKey = "<placeholder-public-key>"
 	}
 	req := common.ShellLaunchParamsFromResult(result)
 	script := common.BuildRemoteAuthorizedKeysSyncScript(publicKey)

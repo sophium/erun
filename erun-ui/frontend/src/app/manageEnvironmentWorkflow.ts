@@ -1,5 +1,6 @@
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import {
+  ChooseWorkspaceSyncLocalFolder,
   DeleteEnvironment,
   LoadEnvironmentConfig,
   LoadRuntimeResourceStatus,
@@ -14,6 +15,7 @@ import { readError } from './errors';
 import { runtimePodConfigToDisplay, runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
 import type { HiddenSessionMode } from './model';
 import { defaultEnvironmentConfig, defaultManageDialog, type AppState, type ManageDialogState } from './state';
+import { rememberPastContainerRegistry } from './storage';
 import { formatDebugCommand, hiddenSessionBusyMessage } from './terminalStatus';
 import {
   deleteConfirmationValue,
@@ -50,8 +52,12 @@ interface ManageEnvironmentWorkflowDeps {
   reloadStateAfterEnvironmentChange: () => Promise<void>;
   resolveRuntimeImage: (version: string) => string;
   startDeploySelection: (selection: UISelection) => Promise<void>;
+  activateLocalAfterCommand: (selection: UISelection, result: StartSessionResult) => Promise<void>;
   showNotification: (kind: NonNullable<AppState['notification']>['kind'], message: string) => void;
   showTerminalMessage: (message: string, busy?: boolean) => void;
+  setPendingDebugHeader: (header: string) => void;
+  applyPendingDebugHeader: (sessionId: number) => void;
+  syncDebugDisplay: () => void;
 }
 
 export class ManageEnvironmentWorkflow {
@@ -62,7 +68,7 @@ export class ManageEnvironmentWorkflow {
   openDialog(selection: UISelection): void {
     this.state.manageDialog = {
       open: true,
-      tab: 'config',
+      tab: 'general',
       selection,
       version: '',
       versionImage: '',
@@ -70,6 +76,7 @@ export class ManageEnvironmentWorkflow {
         ...defaultEnvironmentConfig(),
         name: selection.environment,
       },
+      initialConfig: null,
       configLoading: true,
       resourceStatus: null,
       resourceStatusLoading: false,
@@ -79,6 +86,7 @@ export class ManageEnvironmentWorkflow {
       busyTarget: '',
       choicesOpen: false,
       error: '',
+      pendingRedeploy: false,
     };
     this.deps.emit();
     void this.refreshVersionSuggestions(false);
@@ -105,9 +113,6 @@ export class ManageEnvironmentWorkflow {
       error: '',
     };
     this.deps.emit();
-    if (tab === 'config' && !this.state.manageDialog.configLoading && this.state.manageDialog.selection) {
-      void this.loadConfig();
-    }
   }
 
   updateDialog(values: Partial<ManageDialogState>): void {
@@ -173,6 +178,27 @@ export class ManageEnvironmentWorkflow {
     this.deps.emit();
   }
 
+  updateClaudeConfig(values: Partial<UIEnvironmentConfig['claude']>): void {
+    if (this.state.manageDialog.busy || this.state.manageDialog.configLoading) {
+      return;
+    }
+    const merged = { ...this.state.manageDialog.config.claude, ...values };
+    const next: UIEnvironmentConfig['claude'] = {};
+    if (merged.useMantle !== undefined) next.useMantle = merged.useMantle;
+    if (merged.useBedrock !== undefined) next.useBedrock = merged.useBedrock;
+    if (merged.models !== undefined && merged.models.length > 0) next.models = merged.models;
+    if (merged.maxOutputTokens !== undefined) next.maxOutputTokens = merged.maxOutputTokens;
+    this.state.manageDialog = {
+      ...this.state.manageDialog,
+      config: {
+        ...this.state.manageDialog.config,
+        claude: next,
+      },
+      error: '',
+    };
+    this.deps.emit();
+  }
+
   updateSSHDConfig(values: Partial<UIEnvironmentConfig['sshd']>): void {
     if (this.state.manageDialog.busy || this.state.manageDialog.configLoading) {
       return;
@@ -191,6 +217,19 @@ export class ManageEnvironmentWorkflow {
     this.deps.emit();
   }
 
+  async chooseWorkspaceSyncLocalFolder(): Promise<void> {
+    const dialog = this.state.manageDialog;
+    const selection = dialog.selection;
+    if (dialog.busy || dialog.configLoading || !selection || !dialog.config.sshd.workspaceSyncEnabled) {
+      return;
+    }
+    const selected = String(await ChooseWorkspaceSyncLocalFolder(selection, dialog.config.sshd.workspaceSyncLocalPath || '') || '').trim();
+    if (!selected) {
+      return;
+    }
+    this.updateSSHDConfig({ workspaceSyncLocalPath: selected });
+  }
+
   async loadConfig(): Promise<void> {
     const dialog = this.state.manageDialog;
     const selection = dialog.selection;
@@ -205,12 +244,14 @@ export class ManageEnvironmentWorkflow {
     this.deps.emit();
     try {
       const result = (await LoadEnvironmentConfig(selection)) as UIEnvironmentConfig;
+      const displayConfig = {
+        ...result,
+        runtimePod: runtimePodConfigToDisplay(result.runtimePod),
+      };
       this.state.manageDialog = {
         ...this.state.manageDialog,
-        config: {
-          ...result,
-          runtimePod: runtimePodConfigToDisplay(result.runtimePod),
-        },
+        config: displayConfig,
+        initialConfig: cloneEnvironmentConfig(displayConfig),
         configLoading: false,
         resourceStatusLoading: true,
         error: '',
@@ -290,19 +331,22 @@ export class ManageEnvironmentWorkflow {
         runtimePod: runtimePodConfigToKubernetes(dialog.config.runtimePod),
       };
       const result = (await SaveEnvironmentConfig(selection, saveConfig as Parameters<typeof SaveEnvironmentConfig>[1])) as UIEnvironmentConfig;
+      rememberPastContainerRegistry(result.containerRegistry || saveConfig.containerRegistry);
+      const displayConfig = {
+        ...result,
+        runtimePod: runtimePodConfigToDisplay(result.runtimePod),
+      };
       this.state.manageDialog = {
         ...this.state.manageDialog,
-        config: {
-          ...result,
-          runtimePod: runtimePodConfigToDisplay(result.runtimePod),
-        },
+        config: displayConfig,
+        initialConfig: cloneEnvironmentConfig(displayConfig),
         busy: false,
         busyAction: '',
         busyTarget: '',
         error: '',
+        pendingRedeploy: true,
       };
-      this.deps.showNotification('success', `Saved config for ${selection.tenant} / ${selection.environment}.`);
-      this.closeDialog();
+      this.deps.emit();
     } catch (error) {
       const message = readError(error);
       this.state.manageDialog = {
@@ -376,6 +420,7 @@ export class ManageEnvironmentWorkflow {
       if (deletedSelected) {
         this.state.selected = null;
         this.state.sessionId = 0;
+        this.state.debugOutput = '';
         this.deps.resetTerminal();
       }
       await this.deps.reloadStateAfterEnvironmentChange();
@@ -431,9 +476,15 @@ export class ManageEnvironmentWorkflow {
     this.deps.fitTerminal();
     const terminalSize = this.deps.terminalSize();
     const result = (await starter(runSelection, terminalSize.cols, terminalSize.rows)) as StartSessionResult;
+    if (result.kind === 'local') {
+      await this.deps.activateLocalAfterCommand(selection, result);
+      return;
+    }
     this.trackHiddenSession(mode, result.sessionId, runSelection);
     this.sessions.registerDebugSession(result.sessionId, runSelection, 'hidden');
+    this.deps.applyPendingDebugHeader(result.sessionId);
     this.state.sessionId = result.sessionId;
+    this.deps.syncDebugDisplay();
 
     this.deps.resetTerminal();
     this.deps.focusTerminalSoon();
@@ -445,7 +496,7 @@ export class ManageEnvironmentWorkflow {
     this.state.selected = selection;
     this.state.manageDialog = defaultManageDialog();
     if (this.state.debugOpen) {
-      this.state.debugOutput = `$ ${formatDebugCommand(runSelection, mode)}\n`;
+      this.deps.setPendingDebugHeader(`$ ${formatDebugCommand(runSelection, mode)}\n`);
     }
     this.deps.emit();
     this.state.terminalCopyOutput = '';
@@ -506,3 +557,31 @@ export class ManageEnvironmentWorkflow {
     return this.deps.sessions;
   }
 }
+
+function cloneEnvironmentConfig(config: UIEnvironmentConfig): UIEnvironmentConfig {
+  return JSON.parse(JSON.stringify(config));
+}
+
+export function manageDialogTabHasUnsavedChanges(tab: ManageTab, config: UIEnvironmentConfig, initial: UIEnvironmentConfig | null): boolean {
+  if (!initial) {
+    return false;
+  }
+  const compare = (...keys: Array<keyof UIEnvironmentConfig>): boolean =>
+    keys.some((key) => JSON.stringify(config[key]) !== JSON.stringify(initial[key]));
+  switch (tab) {
+    case 'general':
+      return compare('containerRegistry', 'cloudProviderAlias', 'snapshot');
+    case 'runtime':
+      return compare('runtimePod', 'idle');
+    case 'ai':
+      return compare('claude');
+    case 'ports':
+      return false;
+    case 'ssh':
+      return JSON.stringify(config.sshd?.workspaceSyncEnabled) !== JSON.stringify(initial.sshd?.workspaceSyncEnabled)
+        || JSON.stringify(config.sshd?.workspaceSyncLocalPath) !== JSON.stringify(initial.sshd?.workspaceSyncLocalPath);
+    case 'delete':
+      return false;
+  }
+}
+

@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -78,10 +79,109 @@ func requireCloudContextCommands(t *testing.T, awsCommands, kubectlCommands []st
 		"iam put-role-policy --role-name erun-001-123456789012-eu-west-2-host-stop --policy-name erun-self-stop",
 		"iam add-role-to-instance-profile --instance-profile-name erun-001-123456789012-eu-west-2-host-stop --role-name erun-001-123456789012-eu-west-2-host-stop",
 		"ec2 run-instances",
-		"--iam-instance-profile Arn=arn:aws:iam::123456789012:instance-profile/erun-001-123456789012-eu-west-2-host-stop",
+		"--iam-instance-profile Name=erun-001-123456789012-eu-west-2-host-stop",
 		"--metadata-options HttpEndpoint=enabled,HttpTokens=required,HttpPutResponseHopLimit=2",
 	} {
 		requireStringContains(t, joined, want, "expected AWS commands to contain "+want)
+	}
+}
+
+func TestInitCloudContextRetriesRunInstancesOnIAMConsistencyError(t *testing.T) {
+	store := &memoryCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{{
+		Alias:     "rihards+123456789012@aws",
+		Provider:  CloudProviderAWS,
+		Profile:   "erun-sso",
+		SSORegion: "eu-central-1",
+		AccountID: "123456789012",
+	}}}}
+	var runInstancesAttempts int
+	var sleeps []time.Duration
+	consistencyError := errors.New("aws ec2 run-instances failed: An error occurred (InvalidParameterValue) when calling the RunInstances operation: Value (erun-001-123456789012-eu-west-2-host-stop) for parameter iamInstanceProfile.name is invalid. Invalid IAM Instance Profile name")
+
+	_, err := InitCloudContext(Context{}, store, InitCloudContextParams{
+		CloudProviderAlias: "rihards+123456789012@aws",
+		DiskSizeGB:         AlternateCloudContextDiskSizeGB,
+	}, CloudContextDependencies{
+		Now:      func() time.Time { return time.Date(2026, 4, 27, 10, 0, 0, 0, time.UTC) },
+		NewToken: func() string { return "test-token" },
+		Sleep:    func(d time.Duration) { sleeps = append(sleeps, d) },
+		RunAWS: func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) {
+			joined := strings.Join(args, " ")
+			if strings.Contains(joined, "run-instances") {
+				runInstancesAttempts++
+				if runInstancesAttempts < 3 {
+					return "", consistencyError
+				}
+			}
+			return cloudContextAWSOutput(args), nil
+		},
+		RunKubectl: func(_ Context, _ []string) error { return nil },
+	})
+
+	requireNoError(t, err, "InitCloudContext should retry past IAM consistency errors")
+	requireEqual(t, runInstancesAttempts, 3, "run-instances attempts")
+	requireCondition(t, len(sleeps) == 2, "expected two backoff sleeps before success, got %+v", sleeps)
+}
+
+func TestInitCloudContextDoesNotRetryNonIAMRunInstancesErrors(t *testing.T) {
+	store := &memoryCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{{
+		Alias:     "rihards+123456789012@aws",
+		Provider:  CloudProviderAWS,
+		Profile:   "erun-sso",
+		SSORegion: "eu-central-1",
+		AccountID: "123456789012",
+	}}}}
+	var runInstancesAttempts int
+	otherError := errors.New("aws ec2 run-instances failed: SubnetNotFound")
+
+	_, err := InitCloudContext(Context{}, store, InitCloudContextParams{
+		CloudProviderAlias: "rihards+123456789012@aws",
+	}, CloudContextDependencies{
+		Now:      func() time.Time { return time.Date(2026, 4, 27, 10, 0, 0, 0, time.UTC) },
+		NewToken: func() string { return "test-token" },
+		Sleep:    func(time.Duration) { t.Fatalf("Sleep should not be called for non-IAM errors") },
+		RunAWS: func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) {
+			joined := strings.Join(args, " ")
+			if strings.Contains(joined, "run-instances") {
+				runInstancesAttempts++
+				return "", otherError
+			}
+			return cloudContextAWSOutput(args), nil
+		},
+		RunKubectl: func(_ Context, _ []string) error { return nil },
+	})
+
+	if err == nil {
+		t.Fatalf("expected non-IAM error to surface")
+	}
+	requireEqual(t, runInstancesAttempts, 1, "run-instances should not retry on non-IAM errors")
+}
+
+func TestCloudContextInstanceProfilePolicyAllowsClaudeCodeBedrock(t *testing.T) {
+	policy := cloudContextSelfStopPolicy(CloudProviderConfig{AccountID: "123456789012"}, DefaultCloudContextRegion, "team-context")
+	data, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatalf("marshal policy: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		`"Sid":"AllowSelfStop"`,
+		`"ec2:StopInstances"`,
+		`"ec2:ResourceTag/erun:context":"team-context"`,
+		`"Sid":"AllowBedrockClaudeCode"`,
+		`"bedrock:InvokeModel"`,
+		`"bedrock:InvokeModelWithResponseStream"`,
+		`"bedrock:ListInferenceProfiles"`,
+		`"bedrock:GetInferenceProfile"`,
+		`"arn:aws:bedrock:*:*:inference-profile/*"`,
+		`"arn:aws:bedrock:*:*:application-inference-profile/*"`,
+		`"arn:aws:bedrock:*:*:foundation-model/*"`,
+		`"Sid":"AllowBedrockMarketplaceAccess"`,
+		`"aws-marketplace:ViewSubscriptions"`,
+		`"aws-marketplace:Subscribe"`,
+		`"aws:CalledViaLast":"bedrock.amazonaws.com"`,
+	} {
+		requireStringContains(t, content, want, "expected instance profile policy to contain "+want)
 	}
 }
 
@@ -186,6 +286,41 @@ func TestEnsureCloudContextHostStopProfileAssociationReplacesExistingProfile(t *
 	}
 	if store.config.CloudContexts[0].InstanceProfileARN != "arn:aws:iam::123456789012:instance-profile/erun-team-context-host-stop" {
 		t.Fatalf("expected saved profile ARN, got %+v", store.config.CloudContexts[0])
+	}
+}
+
+func TestCreateCloudContextSecurityGroupReusesDuplicateGroup(t *testing.T) {
+	var awsCommands []string
+	groupID, err := createCloudContextSecurityGroup(Context{}, CloudContextDependencies{
+		RunAWS: func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) {
+			joined := strings.Join(args, " ")
+			awsCommands = append(awsCommands, joined)
+			switch {
+			case strings.Contains(joined, "create-security-group"):
+				return "", errors.New("An error occurred (InvalidGroup.Duplicate) when calling the CreateSecurityGroup operation: The security group 'team-context-k3s' already exists for VPC 'vpc-test'")
+			case strings.Contains(joined, "describe-security-groups"):
+				return "sg-existing\n", nil
+			case strings.Contains(joined, "authorize-security-group-ingress"):
+				return "", errors.New("An error occurred (InvalidPermission.Duplicate) when calling the AuthorizeSecurityGroupIngress operation: the specified rule already exists")
+			default:
+				return "", nil
+			}
+		},
+	}, CloudProviderConfig{}, DefaultCloudContextRegion, "team-context")
+	if err != nil {
+		t.Fatalf("createCloudContextSecurityGroup failed: %v", err)
+	}
+	if groupID != "sg-existing" {
+		t.Fatalf("expected existing security group ID, got %q", groupID)
+	}
+
+	joined := strings.Join(awsCommands, "\n")
+	for _, want := range []string{
+		"ec2 create-security-group --group-name team-context-k3s",
+		"ec2 describe-security-groups --group-names team-context-k3s --query SecurityGroups[0].GroupId --output text",
+		"ec2 authorize-security-group-ingress --group-id sg-existing",
+	} {
+		requireStringContains(t, joined, want, "expected AWS commands to contain "+want)
 	}
 }
 
@@ -421,6 +556,150 @@ func TestInitCloudContextDryRunDoesNotSave(t *testing.T) {
 	}
 	if len(store.config.CloudContexts) != 0 {
 		t.Fatalf("dry-run should not save cloud contexts, got %+v", store.config.CloudContexts)
+	}
+}
+
+func TestStartCloudContextRejectsStartOutsideWorkingHours(t *testing.T) {
+	store := &memoryCloudStore{
+		config: ERunConfig{CloudContexts: []CloudContextConfig{{
+			Name:               "team-cloud",
+			KubernetesContext:  "team-cloud-kube",
+			CloudProviderAlias: "rihards+123456789012@aws",
+			Region:             "eu-west-2",
+			InstanceID:         "i-test",
+			Status:             CloudContextStatusStopped,
+		}}},
+		envs: map[string]EnvConfig{
+			"team/dev": {
+				Name:              "dev",
+				KubernetesContext: "team-cloud-kube",
+				Idle:              EnvironmentIdleConfig{WorkingHours: "08:00-20:00"},
+			},
+		},
+	}
+	awsCalls := 0
+	_, err := StartCloudContext(Context{}, store, CloudContextParams{Name: "team-cloud"}, CloudContextDependencies{
+		Now:        func() time.Time { return time.Date(2026, 4, 28, 22, 0, 0, 0, time.Local) },
+		RunAWS:     func(Context, CloudProviderConfig, string, []string) (string, error) { awsCalls++; return "", nil },
+		RunKubectl: func(Context, []string) error { return nil },
+	})
+	if err == nil {
+		t.Fatalf("expected start outside working hours to fail")
+	}
+	if !strings.Contains(err.Error(), "outside working hours") {
+		t.Fatalf("expected working-hours error, got %v", err)
+	}
+	if awsCalls != 0 {
+		t.Fatalf("expected no AWS calls when gate rejects start, got %d", awsCalls)
+	}
+}
+
+func TestStartCloudContextForceOverridesWorkingHoursGate(t *testing.T) {
+	store := &memoryCloudStore{
+		config: ERunConfig{
+			CloudProviders: []CloudProviderConfig{{
+				Alias:    "rihards+123456789012@aws",
+				Provider: CloudProviderAWS,
+			}},
+			CloudContexts: []CloudContextConfig{{
+				Name:               "team-cloud",
+				KubernetesContext:  "team-cloud-kube",
+				CloudProviderAlias: "rihards+123456789012@aws",
+				Region:             "eu-west-2",
+				InstanceID:         "i-test",
+				Status:             CloudContextStatusStopped,
+				AdminToken:         "test-token",
+			}},
+		},
+		envs: map[string]EnvConfig{
+			"team/dev": {
+				Name:              "dev",
+				KubernetesContext: "team-cloud-kube",
+				Idle:              EnvironmentIdleConfig{WorkingHours: "08:00-20:00"},
+			},
+		},
+	}
+	_, err := StartCloudContext(Context{DryRun: true}, store, CloudContextParams{Name: "team-cloud", Force: true}, CloudContextDependencies{
+		Now: func() time.Time { return time.Date(2026, 4, 28, 22, 0, 0, 0, time.Local) },
+		RunAWS: func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) {
+			return "198.51.100.10\n", nil
+		},
+		RunKubectl: func(Context, []string) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("expected force=true to bypass working-hours gate, got %v", err)
+	}
+}
+
+func TestStartCloudContextAllowsStartWhenAnyAttachedEnvIsInWorkingHours(t *testing.T) {
+	store := &memoryCloudStore{
+		config: ERunConfig{
+			CloudProviders: []CloudProviderConfig{{
+				Alias:    "rihards+123456789012@aws",
+				Provider: CloudProviderAWS,
+			}},
+			CloudContexts: []CloudContextConfig{{
+				Name:               "team-cloud",
+				KubernetesContext:  "team-cloud-kube",
+				CloudProviderAlias: "rihards+123456789012@aws",
+				Region:             "eu-west-2",
+				InstanceID:         "i-test",
+				Status:             CloudContextStatusStopped,
+				AdminToken:         "test-token",
+			}},
+		},
+		envs: map[string]EnvConfig{
+			"team/early": {
+				Name:              "early",
+				KubernetesContext: "team-cloud-kube",
+				Idle:              EnvironmentIdleConfig{WorkingHours: "08:00-12:00"},
+			},
+			"team/late": {
+				Name:              "late",
+				KubernetesContext: "team-cloud-kube",
+				Idle:              EnvironmentIdleConfig{WorkingHours: "08:00-23:00"},
+			},
+		},
+	}
+	_, err := StartCloudContext(Context{DryRun: true}, store, CloudContextParams{Name: "team-cloud"}, CloudContextDependencies{
+		Now: func() time.Time { return time.Date(2026, 4, 28, 14, 0, 0, 0, time.Local) },
+		RunAWS: func(_ Context, _ CloudProviderConfig, _ string, _ []string) (string, error) {
+			return "198.51.100.10\n", nil
+		},
+		RunKubectl: func(Context, []string) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("expected start to succeed when at least one attached env permits it, got %v", err)
+	}
+}
+
+func TestStartCloudContextSkipsGateWhenNoEnvsReferenceContext(t *testing.T) {
+	store := &memoryCloudStore{
+		config: ERunConfig{
+			CloudProviders: []CloudProviderConfig{{
+				Alias:    "rihards+123456789012@aws",
+				Provider: CloudProviderAWS,
+			}},
+			CloudContexts: []CloudContextConfig{{
+				Name:               "team-cloud",
+				KubernetesContext:  "team-cloud-kube",
+				CloudProviderAlias: "rihards+123456789012@aws",
+				Region:             "eu-west-2",
+				InstanceID:         "i-test",
+				Status:             CloudContextStatusStopped,
+				AdminToken:         "test-token",
+			}},
+		},
+	}
+	_, err := StartCloudContext(Context{DryRun: true}, store, CloudContextParams{Name: "team-cloud"}, CloudContextDependencies{
+		Now: func() time.Time { return time.Date(2026, 4, 28, 22, 0, 0, 0, time.Local) },
+		RunAWS: func(_ Context, _ CloudProviderConfig, _ string, _ []string) (string, error) {
+			return "198.51.100.10\n", nil
+		},
+		RunKubectl: func(Context, []string) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("expected start to succeed when no envs reference the context, got %v", err)
 	}
 }
 

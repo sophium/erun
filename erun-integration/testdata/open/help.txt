@@ -1,0 +1,22 @@
+Open a shell in the tenant environment worktree
+
+Usage:
+  erun open [TENANT] [ENVIRONMENT] [flags]
+
+Flags:
+      --dry-run                Resolve and trace mutating actions without executing them.
+      --environment string     Open a specific environment
+  -h, --help                   help for open
+      --intellij               Open the remote environment in IntelliJ IDEA instead of a shell
+      --no-alias-prompt        Skip prompting to add a local shell alias with --no-shell
+      --no-shell               Print shell commands to switch kubectl context, namespace, and worktree locally
+      --no-snapshot            Alias for --snapshot=false
+      --runtime-image string   Override the runtime image repository before opening
+      --snapshot               Build and deploy a local snapshot when opening the local environment (default true)
+      --tenant string          Open a specific tenant
+      --version string         Override the runtime chart and image version before opening
+      --vscode                 Open the remote environment in VS Code instead of a shell
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

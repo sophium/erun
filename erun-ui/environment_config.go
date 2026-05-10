@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 func (a *App) LoadEnvironmentConfig(selection uiSelection) (uiEnvironmentConfig, error) {
@@ -24,7 +26,8 @@ func (a *App) LoadEnvironmentConfig(selection uiSelection) (uiEnvironmentConfig,
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	return a.environmentConfigToUI(config, selection.Environment, ports)
+	registry := a.effectiveEnvironmentContainerRegistry(selection.Tenant, selection.Environment, config)
+	return a.environmentConfigToUI(selection.Tenant, config, selection.Environment, registry, ports)
 }
 
 func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentConfig) (uiEnvironmentConfig, error) {
@@ -47,11 +50,47 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 	if err := a.deps.store.SaveEnvConfig(selection.Tenant, updated); err != nil {
 		return uiEnvironmentConfig{}, err
 	}
+	a.reconcileWorkspaceSyncForSelection(selection, updated.SSHD.WorkspaceSync.Enabled)
 	ports, err := eruncommon.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	return a.environmentConfigToUI(updated, selection.Environment, ports)
+	registry := a.effectiveEnvironmentContainerRegistry(selection.Tenant, selection.Environment, updated)
+	return a.environmentConfigToUI(selection.Tenant, updated, selection.Environment, registry, ports)
+}
+
+func (a *App) ChooseWorkspaceSyncLocalFolder(selection uiSelection, current string) (string, error) {
+	selection = normalizeSelection(selection)
+	if selection.Tenant == "" || selection.Environment == "" {
+		return "", fmt.Errorf("tenant and environment are required")
+	}
+	if a.ctx == nil {
+		return "", fmt.Errorf("application context is not ready")
+	}
+	defaultDirectory := strings.TrimSpace(current)
+	if defaultDirectory == "" {
+		defaultDirectory = resolveWorkspaceSyncDialogDefaultDirectory(a.deps.findProjectRoot)
+	}
+	if defaultDirectory != "" {
+		if info, err := os.Stat(defaultDirectory); err != nil || !info.IsDir() {
+			defaultDirectory = ""
+		}
+	}
+	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:            fmt.Sprintf("Select local sync folder for %s/%s", selection.Tenant, selection.Environment),
+		DefaultDirectory: defaultDirectory,
+	})
+}
+
+func resolveWorkspaceSyncDialogDefaultDirectory(findProjectRoot eruncommon.ProjectFinderFunc) string {
+	if findProjectRoot == nil {
+		return ""
+	}
+	_, projectRoot, err := findProjectRoot()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(projectRoot)
 }
 
 func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing eruncommon.EnvConfig) (eruncommon.EnvConfig, error) {
@@ -62,6 +101,9 @@ func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing erun
 	if err := eruncommon.ValidateRuntimePodResources(updated.RuntimePod); err != nil {
 		return eruncommon.EnvConfig{}, err
 	}
+	if err := a.validateWorkspaceSyncConfig(updated); err != nil {
+		return eruncommon.EnvConfig{}, err
+	}
 	if updated.Remote && strings.TrimSpace(updated.CloudProviderAlias) != "" {
 		if _, ok, err := a.linkedCloudContext(updated); err != nil {
 			return eruncommon.EnvConfig{}, err
@@ -70,6 +112,24 @@ func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing erun
 		}
 	}
 	return updated, nil
+}
+
+func (a *App) validateWorkspaceSyncConfig(config eruncommon.EnvConfig) error {
+	if !config.SSHD.WorkspaceSync.Enabled {
+		return nil
+	}
+	localPath := strings.TrimSpace(config.SSHD.WorkspaceSync.LocalPath)
+	if localPath == "" {
+		return fmt.Errorf("local sync folder is required when workspace sync is enabled")
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ensureLocalWorkspaceSyncTarget(ctx, localPath); err != nil {
+		return fmt.Errorf("local sync folder: %w", err)
+	}
+	return nil
 }
 
 func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated eruncommon.EnvConfig) error {
@@ -94,40 +154,56 @@ func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated erun
 	return err
 }
 
-func (a *App) environmentConfigToUI(config eruncommon.EnvConfig, fallbackName string, ports eruncommon.EnvironmentLocalPorts) (uiEnvironmentConfig, error) {
+func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, fallbackName, effectiveContainerRegistry string, ports eruncommon.EnvironmentLocalPorts) (uiEnvironmentConfig, error) {
 	name := strings.TrimSpace(config.Name)
 	if name == "" {
 		name = strings.TrimSpace(fallbackName)
+	}
+	syncStatus := a.workspaceSyncStatus(uiSelection{Tenant: tenant, Environment: name})
+	containerRegistry := strings.TrimSpace(config.ContainerRegistry)
+	if containerRegistry == "" {
+		containerRegistry = strings.TrimSpace(effectiveContainerRegistry)
 	}
 	ports = eruncommon.LocalPortsForResult(eruncommon.OpenResult{
 		EnvConfig:  config,
 		LocalPorts: ports,
 	})
+	workspaceSyncLocalPath := strings.TrimSpace(config.SSHD.WorkspaceSync.LocalPath)
+	workspaceSyncEnabled := config.SSHD.WorkspaceSync.Enabled && workspaceSyncLocalPath != ""
 	result := uiEnvironmentConfig{
 		Name:                 name,
 		RepoPath:             strings.TrimSpace(config.RepoPath),
 		KubernetesContext:    strings.TrimSpace(config.KubernetesContext),
-		ContainerRegistry:    strings.TrimSpace(config.ContainerRegistry),
+		ContainerRegistry:    containerRegistry,
 		CloudProviderAlias:   strings.TrimSpace(config.CloudProviderAlias),
 		CloudProviderAliases: environmentCloudProviderAliases(a.deps.store, config.CloudProviderAlias),
 		RuntimeVersion:       strings.TrimSpace(config.RuntimeVersion),
 		RuntimePod:           runtimePodConfigToUI(config.RuntimePod),
 		SSHD: uiSSHDConfig{
-			Enabled:       config.SSHD.Enabled,
-			LocalPort:     config.SSHD.LocalPort,
-			PublicKeyPath: strings.TrimSpace(config.SSHD.PublicKeyPath),
+			Enabled:                    config.SSHD.Enabled,
+			LocalPort:                  config.SSHD.LocalPort,
+			PublicKeyPath:              strings.TrimSpace(config.SSHD.PublicKeyPath),
+			WorkspaceSyncEnabled:       workspaceSyncEnabled,
+			WorkspaceSyncLocalPath:     workspaceSyncLocalPath,
+			WorkspaceSyncStatus:        syncStatus.Status,
+			WorkspaceSyncStatusMessage: syncStatus.Message,
 		},
 		Idle: uiIdleConfig{
 			Timeout:          idleConfigValue(config.Idle.Timeout, eruncommon.DefaultEnvironmentIdleTimeout.String()),
 			WorkingHours:     idleConfigValue(config.Idle.WorkingHours, eruncommon.DefaultEnvironmentWorkingHours),
 			IdleTrafficBytes: config.Idle.IdleTrafficBytes,
 		},
+		Claude:         claudeConfigToUI(config.Claude),
+		ClaudeDefaults: claudeDefaultsForUI(),
+		AITool:         strings.TrimSpace(config.AITool),
 		LocalPorts: uiEnvironmentLocalPorts{
 			RangeStart: ports.RangeStart,
 			RangeEnd:   ports.RangeEnd,
 			MCP:        ports.MCP,
+			API:        ports.API,
 			SSH:        ports.SSH,
 			MCPStatus:  localPortStatus(ports.MCP),
+			APIStatus:  localPortStatus(ports.API),
 			SSHStatus:  localPortStatus(ports.SSH),
 		},
 		Remote:   config.Remote,
@@ -140,6 +216,42 @@ func (a *App) environmentConfigToUI(config eruncommon.EnvConfig, fallbackName st
 		result.CloudContext = &status
 	}
 	return result, nil
+}
+
+func (a *App) effectiveEnvironmentContainerRegistry(tenant, environment string, config eruncommon.EnvConfig) string {
+	if registry := strings.TrimSpace(config.ContainerRegistry); registry != "" {
+		return registry
+	}
+	if a.deps.store == nil {
+		return ""
+	}
+	tenantConfig, _, err := a.deps.store.LoadTenantConfig(strings.TrimSpace(tenant))
+	if err != nil {
+		return ""
+	}
+	projectRoot := strings.TrimSpace(tenantConfig.ProjectRoot)
+	if projectRoot == "" {
+		projectRoot = strings.TrimSpace(config.RepoPath)
+	}
+	if projectRoot == "" {
+		return ""
+	}
+	loader, ok := a.deps.store.(projectConfigLoader)
+	if !ok {
+		return ""
+	}
+	projectConfig, _, err := loader.LoadProjectConfig(projectRoot)
+	if err != nil {
+		return ""
+	}
+	return projectConfig.ContainerRegistryForEnvironment(environmentName(environment, config))
+}
+
+func environmentName(fallbackName string, config eruncommon.EnvConfig) string {
+	if name := strings.TrimSpace(config.Name); name != "" {
+		return name
+	}
+	return strings.TrimSpace(fallbackName)
 }
 
 func environmentCloudProviderAliases(store eruncommon.CloudReadStore, current string) []string {
@@ -194,14 +306,83 @@ func canConnectLocalTCP(port int) bool {
 func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.EnvConfig) eruncommon.EnvConfig {
 	existing.Name = strings.TrimSpace(config.Name)
 	existing.CloudProviderAlias = strings.TrimSpace(config.CloudProviderAlias)
+	existing.ContainerRegistry = strings.TrimSpace(config.ContainerRegistry)
 	existing.RuntimePod = runtimePodConfigFromUI(config.RuntimePod)
+	existing.SSHD.WorkspaceSync.Enabled = config.SSHD.WorkspaceSyncEnabled
+	existing.SSHD.WorkspaceSync.LocalPath = strings.TrimSpace(config.SSHD.WorkspaceSyncLocalPath)
 	existing.Idle = eruncommon.EnvironmentIdleConfig{
 		Timeout:          strings.TrimSpace(config.Idle.Timeout),
 		WorkingHours:     strings.TrimSpace(config.Idle.WorkingHours),
 		IdleTrafficBytes: config.Idle.IdleTrafficBytes,
 	}
+	existing.Claude = claudeConfigFromUI(config.Claude)
+	existing.AITool = strings.TrimSpace(config.AITool)
 	existing.SetSnapshot(config.Snapshot)
 	return existing
+}
+
+func claudeConfigToUI(config eruncommon.EnvironmentClaudeConfig) uiClaudeConfig {
+	out := uiClaudeConfig{
+		UseMantle:       copyBoolPtr(config.UseMantle),
+		UseBedrock:      copyBoolPtr(config.UseBedrock),
+		MaxOutputTokens: copyIntPtr(config.MaxOutputTokens),
+	}
+	if models := config.NormalizedModels(); len(models) > 0 {
+		out.Models = models
+	}
+	return out
+}
+
+func claudeConfigFromUI(config uiClaudeConfig) eruncommon.EnvironmentClaudeConfig {
+	models := []string(nil)
+	if normalized := normalizeUIClaudeModels(config.Models); len(normalized) > 0 {
+		models = normalized
+	}
+	return eruncommon.EnvironmentClaudeConfig{
+		UseMantle:       copyBoolPtr(config.UseMantle),
+		UseBedrock:      copyBoolPtr(config.UseBedrock),
+		Models:          models,
+		MaxOutputTokens: copyIntPtr(config.MaxOutputTokens),
+	}
+}
+
+func claudeDefaultsForUI() uiClaudeDefaults {
+	minTokens, maxTokens := eruncommon.ClaudeMaxOutputTokensRange()
+	return uiClaudeDefaults{
+		UseMantle:       eruncommon.DefaultClaudeUseMantle,
+		UseBedrock:      eruncommon.DefaultClaudeUseBedrock,
+		Models:          eruncommon.DefaultClaudeAvailableModels(),
+		MaxOutputTokens: eruncommon.DefaultClaudeMaxOutputTokens,
+		KnownModels:     eruncommon.KnownClaudeModels(),
+		MinTokens:       minTokens,
+		MaxTokens:       maxTokens,
+	}
+}
+
+func normalizeUIClaudeModels(models []string) []string {
+	out := make([]string, 0, len(models))
+	for _, m := range models {
+		if m = strings.TrimSpace(m); m != "" {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
+func copyBoolPtr(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	v := *value
+	return &v
+}
+
+func copyIntPtr(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	v := *value
+	return &v
 }
 
 func runtimePodConfigToUI(config eruncommon.RuntimePodResources) uiRuntimePodConfig {
@@ -264,6 +445,7 @@ func (a *App) ensureLinkedCloudContextRunning(config eruncommon.EnvConfig) (erun
 	if err != nil {
 		return eruncommon.CloudContextStatus{}, true, err
 	}
+	a.clearIdleStopsForCloudContext(status.Name)
 	a.emitAppStatus(fmt.Sprintf("Cloud context %s is running. Opening environment...", cloudContextDisplayName(status)), true)
 	return status, true, nil
 }

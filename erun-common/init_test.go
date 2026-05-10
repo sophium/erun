@@ -12,6 +12,30 @@ import (
 	"github.com/adrg/xdg"
 )
 
+// concatChartTemplates joins every top-level *.yaml file found in dir into a
+// single string. Tests that assert a Helm chart contains a specific token use
+// this helper so they don't care which template file in the chart owns the
+// token.
+func concatChartTemplates(dir string) (string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", err
+	}
+	var buf strings.Builder
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, entry.Name()))
+		if err != nil {
+			return "", err
+		}
+		buf.Write(data)
+		buf.WriteString("\n")
+	}
+	return buf.String(), nil
+}
+
 func setupXDGConfigHome(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -324,7 +348,7 @@ func TestBootstrapRunCreatesTenantDevopsModuleAndChart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read service template: %v", err)
 	}
-	if !strings.Contains(string(serviceTemplate), "image: erunpaas/tenant-a-devops:{{ .Chart.AppVersion }}") {
+	if !strings.Contains(string(serviceTemplate), `printf "ghcr.io/sophium/tenant-a-devops:%s" .Chart.AppVersion`) {
 		t.Fatalf("expected tenant image reference, got %q", string(serviceTemplate))
 	}
 	if !strings.Contains(string(serviceTemplate), "name: tenant-a-devops") {
@@ -352,7 +376,7 @@ func requireTenantDevopsFiles(t *testing.T, moduleRoot string) {
 func requireTenantDevopsDockerfile(t *testing.T, dockerfile string) {
 	t.Helper()
 	requireStringContains(t, dockerfile, "FROM ${ERUN_BASE_TAG}", "expected thin wrapper Dockerfile")
-	requireStringContains(t, dockerfile, "ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.2.3", "expected Dockerfile base tag to match init runtime version")
+	requireStringContains(t, dockerfile, "ARG ERUN_BASE_TAG=ghcr.io/sophium/erun-devops:1.2.3", "expected Dockerfile base tag to match init runtime version")
 	requireStringContains(t, dockerfile, "ENTRYPOINT [\"erun-devops-entrypoint\"]", "expected wrapper Dockerfile to delegate to base entrypoint")
 	requireCondition(t, !strings.Contains(dockerfile, "exec /bin/bash -i") && !strings.Contains(dockerfile, "entrypoint.sh") && !strings.Contains(dockerfile, "terraform"), "expected no duplicated runtime setup in Dockerfile, got %q", dockerfile)
 }
@@ -360,13 +384,14 @@ func requireTenantDevopsDockerfile(t *testing.T, dockerfile string) {
 func TestEnsureDefaultDevopsChartMigratesLegacyGeneratedServiceTemplate(t *testing.T) {
 	projectRoot := t.TempDir()
 	moduleName := "tenant-a-devops"
-	serviceTemplatePath := filepath.Join(projectRoot, moduleName, "k8s", moduleName, "templates", "service.yaml")
+	templatesDir := filepath.Join(projectRoot, moduleName, "k8s", moduleName, "templates")
+	serviceTemplatePath := filepath.Join(templatesDir, "service.yaml")
 	current, err := defaultDevopsChartFiles.ReadFile("assets/default-devops-chart/templates/service.yaml")
 	if err != nil {
 		t.Fatalf("read embedded service template: %v", err)
 	}
 	rendered := renderDefaultDevopsChartTemplate("assets/default-devops-chart/templates/service.yaml", moduleName, moduleName, current)
-	if err := os.MkdirAll(filepath.Dir(serviceTemplatePath), 0o755); err != nil {
+	if err := os.MkdirAll(templatesDir, 0o755); err != nil {
 		t.Fatalf("mkdir service template dir: %v", err)
 	}
 	if err := os.WriteFile(serviceTemplatePath, []byte(legacyDefaultDevopsServiceTemplate(rendered)), 0o644); err != nil {
@@ -377,30 +402,61 @@ func TestEnsureDefaultDevopsChartMigratesLegacyGeneratedServiceTemplate(t *testi
 		t.Fatalf("EnsureDefaultDevopsChart failed: %v", err)
 	}
 
-	migrated, err := os.ReadFile(serviceTemplatePath)
-	if err != nil {
-		t.Fatalf("read migrated service template: %v", err)
+	chartDirs := []string{
+		templatesDir,
+		filepath.Join(projectRoot, moduleName, "k8s", "erun-backend-postgres", "templates"),
+		filepath.Join(projectRoot, moduleName, "k8s", "erun-backend-db", "templates"),
+		filepath.Join(projectRoot, moduleName, "k8s", "erun-backend-api", "templates"),
 	}
-	content := string(migrated)
+	var combined strings.Builder
+	for _, dir := range chartDirs {
+		part, err := concatChartTemplates(dir)
+		if err != nil {
+			t.Fatalf("read migrated chart templates in %q: %v", dir, err)
+		}
+		combined.WriteString(part)
+		combined.WriteString("\n")
+	}
+	content := combined.String()
 	for _, want := range []string{
 		`{{- $mcpPort := default 17000 .Values.mcpPort -}}`,
+		`{{- $apiPort := default 17033 .Values.apiPort -}}`,
 		`{{- $sshPort := default 17022 .Values.sshPort -}}`,
 		`{{- $cloudContext := default dict .Values.cloudContext -}}`,
 		`{{- $cloudContextName := default "" $cloudContext.name -}}`,
+		`{{- $cloudProvider := default "" $cloudContext.provider -}}`,
 		`{{- $cloudProviderAlias := default "" $cloudContext.providerAlias -}}`,
 		`{{- $cloudRegion := default "" $cloudContext.region -}}`,
 		`{{- $cloudInstanceID := default "" $cloudContext.instanceId -}}`,
 		"name: ERUN_CLOUD_CONTEXT_NAME",
+		"name: ERUN_CLOUD_PROVIDER",
 		"name: ERUN_CLOUD_PROVIDER_ALIAS",
 		"name: ERUN_CLOUD_REGION",
 		"name: ERUN_CLOUD_INSTANCE_ID",
+		`{{ if eq $cloudProvider "aws" }}`,
+		"name: CLAUDE_CODE_USE_BEDROCK",
+		"name: CLAUDE_CODE_USE_MANTLE",
+		"name: AWS_REGION",
+		"name: ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION",
+		"name: ERUN_CLAUDE_AVAILABLE_MODELS",
+		"name: CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+		"name: MAX_THINKING_TOKENS",
+		"name: ANTHROPIC_MODEL",
+		"name: ANTHROPIC_DEFAULT_SONNET_MODEL",
 		"name: ERUN_MCP_PORT",
+		"name: ERUN_API_PORT",
+		"name: ERUN_POSTGRES_PASSWORD",
+		"name: ERUN_DATABASE_URL",
 		"name: ERUN_SSHD_PORT",
+		"name: erun-postgres",
+		"name: erun-api",
+		"restartPolicy: Always",
 		"containerPort: {{ $mcpPort }}",
+		"containerPort: {{ $apiPort }}",
 		"containerPort: {{ $sshPort }}",
 	} {
 		if !strings.Contains(content, want) {
-			t.Fatalf("expected migrated service template to contain %q, got:\n%s", want, content)
+			t.Fatalf("expected migrated chart templates to contain %q, got:\n%s", want, content)
 		}
 	}
 }
@@ -1135,7 +1191,7 @@ func TestBootstrapRunRemoteInitializesTenantInPodWorktree(t *testing.T) {
 		},
 		PromptRemoteRepositoryURL: remoteRepositoryPrompt(t, "frs", "dev", "git@github.com:sophium/frs.git"),
 		EnsureKubernetesNamespace: remoteNamespaceEnsurer(t, "cluster-remote", "frs-dev"),
-		DeployHelmChart:           remoteHelmDeployChecker(t, "frs", "1.2.3", "image: erunpaas/frs-devops:{{ .Chart.AppVersion }}"),
+		DeployHelmChart:           remoteHelmDeployChecker(t, "frs", "1.2.3", `printf "ghcr.io/sophium/frs-devops:%s" .Chart.AppVersion`),
 		WaitForRemoteRuntime: func(req ShellLaunchParams) error {
 			waited = req
 			return nil
@@ -1382,7 +1438,7 @@ func TestBootstrapRunRemoteBootstrapCreatesTenantDevopsModuleAndChart(t *testing
 			t.Fatalf("expected bootstrap script to write %s, got:\n%s", path, bootstrapScript)
 		}
 	}
-	if !strings.Contains(bootstrapScript, "ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.2.3") {
+	if !strings.Contains(bootstrapScript, "ARG ERUN_BASE_TAG=ghcr.io/sophium/erun-devops:1.2.3") {
 		t.Fatalf("expected runtime version in bootstrap Dockerfile, got:\n%s", bootstrapScript)
 	}
 }

@@ -1,13 +1,11 @@
 environments:
-    frs:
-        containerregistry: erunpaas
-        docker:
-            skipIfExists:
-                - erunpaas/erun-dind
-                - erunpaas/erun-ubuntu
     local:
-        containerregistry: erunpaas
+        containerregistry: ghcr.io/sophium
         docker:
-            skipIfExists:
-                - erunpaas/erun-dind
-                - erunpaas/erun-ubuntu
+            fingerprints:
+                erun-ubuntu: 6ffef71a59498123
+        k8s:
+            deployments:
+                - [erun-devops, erun-backend-postgres]
+                - erun-backend-db
+                - erun-backend-api

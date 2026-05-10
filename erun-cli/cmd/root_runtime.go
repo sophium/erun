@@ -102,12 +102,23 @@ func newRunInit(store common.BootstrapStore, findProjectRoot common.ProjectFinde
 			}
 			return err
 		}
+		ctx.TraceCommand("", "ensure-agent-instructions")
+		ctx.TraceCommand("", "ensure-claude-settings")
+		if ctx.DryRun {
+			return nil
+		}
+		if ensureErr := internal.EnsureGlobalAgentInstructions(); ensureErr != nil {
+			ctx.Logger.Debug("could not ensure global agent instructions: " + ensureErr.Error())
+		}
+		if ensureErr := internal.EnsureClaudeSettings(); ensureErr != nil {
+			ctx.Logger.Debug("could not ensure claude settings: " + ensureErr.Error())
+		}
 		return nil
 	}
 }
 
-func resolveRuntimeDeploySpecForOpen(store common.DeployStore, findProjectRoot common.ProjectFinderFunc, resolveDockerBuildContext common.BuildContextResolverFunc, resolveKubernetesDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildInfo common.BuildInfo, target common.OpenResult) (common.DeploySpec, error) {
-	spec, err := common.ResolveOpenRuntimeDeploySpec(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
+func resolveRuntimeDeploySpecForOpen(ctx common.Context, store common.DeployStore, findProjectRoot common.ProjectFinderFunc, resolveDockerBuildContext common.BuildContextResolverFunc, resolveKubernetesDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildInfo common.BuildInfo, target common.OpenResult, allowLocalBuilds bool) (common.DeploySpec, error) {
+	spec, err := common.ResolveOpenRuntimeDeploySpec(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, allowLocalBuilds)
 	if err != nil {
 		return common.DeploySpec{}, err
 	}
@@ -168,7 +179,16 @@ func hasOptionalBuildCmd(findProjectRoot common.ProjectFinderFunc, resolveBuildC
 
 func hasOptionalPushCmd(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc) bool {
 	buildContext, err := resolveBuildContext()
-	return err == nil && strings.TrimSpace(buildContext.DockerfilePath) != ""
+	if err == nil && strings.TrimSpace(buildContext.DockerfilePath) != "" {
+		return true
+	}
+	// Also register push at the project root so that "erun push" works alongside
+	// "erun build" when multiple docker contexts exist.
+	if currentBuildContextIsProjectRoot(findProjectRoot, buildContext) {
+		buildContexts, contextErr := common.ResolveCurrentDockerBuildContexts(findProjectRoot, resolveBuildContext, common.DockerCommandTarget{})
+		return contextErr == nil && len(buildContexts) > 0
+	}
+	return false
 }
 
 func optionalBuildCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc) string {
@@ -263,52 +283,4 @@ func projectRootForHelp(findProjectRoot common.ProjectFinderFunc) (string, error
 		return "", err
 	}
 	return filepath.Clean(strings.TrimSpace(projectRoot)), nil
-}
-
-func hasOptionalDeployCmd(resolveDeployContext common.DeployContextResolverFunc) bool {
-	if resolveDeployContext == nil {
-		return false
-	}
-
-	deployContext, err := resolveDeployContext()
-	if err != nil {
-		return false
-	}
-	if strings.TrimSpace(deployContext.ChartPath) != "" {
-		return true
-	}
-	if hasDeployContextsAtDir(deployContext.Dir) {
-		return true
-	}
-	k8sDir := filepath.Join(strings.TrimSpace(deployContext.Dir), "k8s")
-	if hasDeployContextsAtDir(k8sDir) {
-		return true
-	}
-	return hasSingleNestedDevopsDeployContext(deployContext.Dir)
-}
-
-func hasDeployContextsAtDir(dir string) bool {
-	deployContexts, err := common.ResolveKubernetesDeployContextsAtDir(dir)
-	return err == nil && len(deployContexts) > 0
-}
-
-func hasSingleNestedDevopsDeployContext(dir string) bool {
-	entries, err := os.ReadDir(strings.TrimSpace(dir))
-	if err != nil {
-		return false
-	}
-	found := false
-	for _, entry := range entries {
-		if !entry.IsDir() || !strings.HasSuffix(entry.Name(), "-devops") {
-			continue
-		}
-		k8sDir := filepath.Join(strings.TrimSpace(dir), entry.Name(), "k8s")
-		if hasDeployContextsAtDir(k8sDir) {
-			if found {
-				return false
-			}
-			found = true
-		}
-	}
-	return found
 }

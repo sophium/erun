@@ -1,0 +1,20 @@
+kubectl config use-context 'test-context' >/dev/null &&
+kubectl config set-context --current --namespace='team-dev' >/dev/null &&
+cd '<TMP>'
+audit: erun open --dry-run --no-alias-prompt --no-shell team dev
+open: tenant=team environment=dev kubernetes-context=test-context remote=false no-shell=true ide=shell
+kubectl --context test-context --namespace team-dev get deployment team-devops -o name
+deploying the devops runtime before opening the shell
+kubectl --context test-context get namespace team-dev -o name
+kubectl --context test-context create namespace team-dev
+cd <TMP> && helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace team-dev --kube-context test-context -f <TMP> --set-string tenant=team --set-string environment=dev --set-string worktreeStorage=host --set-string worktreeRepoName=cwd --set-string worktreeHostPath=<TMP> --set sshdEnabled=false --set mcpPort=17000 --set apiPort=17033 --set sshPort=17022 --set managedCloud=false --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias= --set-string cloudContext.region= --set-string cloudContext.instanceId= --set-string api.oidcAllowedIssuers= --set api.postgres.reset=false --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=8916Mi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 team-devops <TMP>
+deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
+kubectl --context test-context --namespace team-dev get pods -o json
+dedup: ready (release=test-context-team-dev-team-devops, hash=<HASH>)
+kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address <LOOPBACK>
+kubectl --context test-context --namespace team-dev get deployment erun-api -o name
+kubectl --context test-context --namespace team-dev port-forward service/erun-api 17033:17033 --address <LOOPBACK>
+open: --no-shell selected, emitting setup commands instead of launching shell
+kubectl config use-context test-context
+kubectl config set-context --current --namespace=team-dev
+cd <TMP>

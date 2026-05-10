@@ -4,8 +4,10 @@ import type {
   ManageTab,
   UIERunConfig,
   UIEnvironmentConfig,
+  UICloudProviderStatus,
   UIIdleStatus,
   UICloudContextInitInput,
+  UITenantDashboard,
   UIRuntimeResourceStatus,
   UISelection,
   UITenantConfig,
@@ -67,6 +69,7 @@ export interface ManageDialogState {
   version: string;
   versionImage: string;
   config: UIEnvironmentConfig;
+  initialConfig: UIEnvironmentConfig | null;
   configLoading: boolean;
   resourceStatus: UIRuntimeResourceStatus | null;
   resourceStatusLoading: boolean;
@@ -76,6 +79,7 @@ export interface ManageDialogState {
   busyTarget: string;
   choicesOpen: boolean;
   error: string;
+  pendingRedeploy: boolean;
 }
 
 export interface TenantDialogState {
@@ -84,7 +88,19 @@ export interface TenantDialogState {
   config: UITenantConfig;
   configLoading: boolean;
   busy: boolean;
+  busyAction: '' | 'save' | 'cloud-oidc';
+  busyTarget: string;
   error: string;
+}
+
+export type TenantDashboardTab = 'users' | 'queue' | 'builds' | 'audit' | 'api-log';
+
+export interface TenantDashboardState {
+  tenant: string;
+  tab: TenantDashboardTab;
+  loading: boolean;
+  error: string;
+  data: UITenantDashboard | null;
 }
 
 export interface GlobalConfigDialogState {
@@ -106,26 +122,58 @@ export interface AppNotification {
 export type TerminalStatusKind = 'info' | 'warning' | 'error';
 export type TerminalStatusAction = '' | 'wait-longer';
 
+export type TerminalTabKind = 'local' | 'erun' | 'ai' | 'extra';
+
+export interface TerminalTab {
+  sessionId: number;
+  slot: number;
+  kind: TerminalTabKind;
+  label: string;
+}
+
+export interface DoctorOutcome {
+  ranAt: number;
+  success: boolean;
+  message: string;
+}
+
+export type ReconnectStatus = 'idle' | 'confirm' | 'running' | 'error';
+
+export interface ReconnectState {
+  status: ReconnectStatus;
+  lastLine: string;
+  error: string;
+}
+
 export interface AppState {
   tenants: UITenant[];
+  cloudProviders: UICloudProviderStatus[];
   selected: UISelection | null;
   versionSuggestions: UIVersionSuggestion[];
   environmentDialog: EnvironmentDialogState;
   manageDialog: ManageDialogState;
   tenantDialog: TenantDialogState;
+  tenantDashboard: TenantDashboardState;
   globalConfigDialog: GlobalConfigDialogState;
   collapsedTenants: Set<string>;
   sessionId: number;
+  tabsByEnv: Record<string, TerminalTab[]>;
+  selectedSessionByEnv: Record<string, number>;
   sidebarWidth: number;
   reviewWidth: number;
   filesWidth: number;
   filesOpen: boolean;
   sidebarHidden: boolean;
   reviewOpen: boolean;
+  changedFilesOpen: boolean;
   diff: DiffResult | null;
   diffLoading: boolean;
   diffError: string;
+  diffErrorReconnectable: boolean;
+  reconnect: ReconnectState;
   selectedDiffPath: string;
+  selectedReviewScope: 'current' | 'commit' | 'all';
+  selectedReviewCommit: string;
   diffFilter: string;
   collapsedDiffDirs: Set<string>;
   notification: AppNotification | null;
@@ -138,9 +186,12 @@ export interface AppState {
   terminalCopyStatus: string;
   idleStatus: UIIdleStatus | null;
   idleCloudContextBusy: boolean;
+  sidebarCloudAliasBusy: boolean;
+  sidebarCloudAliasAction: '' | 'login' | 'logout' | 'bearer';
   debugOpen: boolean;
   debugHeight: number;
   debugOutput: string;
+  lastDoctorBySelection: Record<string, DoctorOutcome>;
 }
 
 export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
@@ -155,7 +206,7 @@ export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
   resourceStatus: null,
   resourceStatusLoading: false,
   runtimePod: defaultRuntimePodConfig(),
-  containerRegistry: 'erunpaas',
+  containerRegistry: '',
   noGit: false,
   bootstrap: false,
   setDefaultTenant: true,
@@ -167,11 +218,12 @@ export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
 
 export const defaultManageDialog = (): ManageDialogState => ({
   open: false,
-  tab: 'config',
+  tab: 'general',
   selection: null,
   version: '',
   versionImage: '',
   config: defaultEnvironmentConfig(),
+  initialConfig: null,
   configLoading: false,
   resourceStatus: null,
   resourceStatusLoading: false,
@@ -181,6 +233,7 @@ export const defaultManageDialog = (): ManageDialogState => ({
   busyTarget: '',
   choicesOpen: false,
   error: '',
+  pendingRedeploy: false,
 });
 
 export const defaultTenantDialog = (): TenantDialogState => ({
@@ -189,7 +242,17 @@ export const defaultTenantDialog = (): TenantDialogState => ({
   config: defaultTenantConfig(),
   configLoading: false,
   busy: false,
+  busyAction: '',
+  busyTarget: '',
   error: '',
+});
+
+export const defaultTenantDashboard = (): TenantDashboardState => ({
+  tenant: '',
+  tab: 'users',
+  loading: false,
+  error: '',
+  data: null,
 });
 
 export const defaultGlobalConfigDialog = (): GlobalConfigDialogState => ({
@@ -221,6 +284,10 @@ export const defaultCloudContextInitInput = (): UICloudContextInitInput => ({
 export const defaultTenantConfig = (): UITenantConfig => ({
   name: '',
   defaultEnvironment: '',
+  apiUrl: '',
+  cloudProviderAliases: [],
+  primaryCloudProviderAlias: '',
+  cloudProviders: [],
 });
 
 export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
@@ -235,18 +302,29 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
     enabled: false,
     localPort: 0,
     publicKeyPath: '',
+    workspaceSyncEnabled: false,
+    workspaceSyncLocalPath: '',
+    workspaceSyncStatus: '',
+    workspaceSyncStatusMessage: '',
   },
   idle: {
     timeout: '5m0s',
     workingHours: '08:00-20:00',
     idleTrafficBytes: 0,
   },
+  claude: {},
+  claudeDefaults: defaultClaudeDefaults(),
   localPorts: {
     rangeStart: 0,
     rangeEnd: 0,
     mcp: 0,
+    api: 0,
     ssh: 0,
     mcpStatus: {
+      available: false,
+      status: '',
+    },
+    apiStatus: {
       available: false,
       status: '',
     },
@@ -262,4 +340,14 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
 export const defaultRuntimePodConfig = (): { cpu: string; memory: string } => ({
   cpu: '4',
   memory: '8.7',
+});
+
+export const defaultClaudeDefaults = (): UIEnvironmentConfig['claudeDefaults'] => ({
+  useMantle: false,
+  useBedrock: false,
+  models: ['sonnet', 'haiku'],
+  maxOutputTokens: 4096,
+  knownModels: ['opus', 'sonnet', 'haiku'],
+  minTokens: 1,
+  maxTokens: 200000,
 });

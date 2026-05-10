@@ -1,13 +1,16 @@
 import * as React from 'react';
-import { Folder, FolderOpen, LoaderCircle, MoreHorizontal, Plus, Settings } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Cloud, Copy, Folder, FolderOpen, LoaderCircle, LogIn, LogOut, MoreHorizontal, Plus, Settings, UserCircle2 } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
 import type { AppState } from '@/app/state';
 import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-import type { UITenant } from '@/types';
+import type { UICloudProviderStatus, UITenant } from '@/types';
+import { EmptyState } from './EmptyState';
 import { IconTooltip } from './IconTooltip';
+import { cloudProviderStatusTone } from './StatusBadge';
 
 export function Sidebar({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
   return (
@@ -20,13 +23,13 @@ export function Sidebar({ controller, state }: { controller: ERunUIController; s
       <div className="flex items-center justify-between gap-2 pr-1.5 pb-2.5 pl-3.5">
         <span className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Environments</span>
         <div className="flex items-center gap-1">
-          <IconTooltip label="Manage ERun config">
+          <IconTooltip label="Open ERun settings">
             <Button
               className="size-[26px] flex-none text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&_svg]:size-4"
               type="button"
               variant="ghost"
               size="icon-xs"
-              aria-label="Manage ERun config"
+              aria-label="Open ERun settings"
               onClick={() => controller.openGlobalConfigDialog()}
             >
               <Settings />
@@ -46,9 +49,21 @@ export function Sidebar({ controller, state }: { controller: ERunUIController; s
           </IconTooltip>
         </div>
       </div>
-      <div className="min-h-0 overflow-auto pr-1">
+      <div className="min-h-0 flex-1 overflow-auto pr-1">
         {state.tenants.length === 0 ? (
-          <div className="px-3.5 py-[18px] text-[13px] font-medium text-muted-foreground">No environments</div>
+          <div className="px-2 py-2">
+            <EmptyState
+              icon={<Plus />}
+              heading="No environments yet"
+              body="Initialize a remote environment to start working. You can also import an existing one from your kubeconfig."
+              action={
+                <Button type="button" size="sm" onClick={() => controller.openInitializeDialog()}>
+                  <Plus aria-hidden="true" />
+                  Initialize environment
+                </Button>
+              }
+            />
+          </div>
         ) : (
           state.tenants.map((tenant, index) => (
             <TenantGroup
@@ -61,8 +76,148 @@ export function Sidebar({ controller, state }: { controller: ERunUIController; s
           ))
         )}
       </div>
+      <PrimaryCloudAliasControl controller={controller} state={state} />
     </aside>
   );
+}
+
+function PrimaryCloudAliasControl({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement | null {
+  const view = primaryCloudAliasView(state);
+  if (!view) {
+    return null;
+  }
+
+  const triggerTone = cloudProviderStatusTone(view.provider.status);
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="mt-3 mr-1 flex min-h-10 min-w-0 items-center gap-2 rounded-md border border-sidebar-border bg-background/88 px-3 py-2 text-left text-sm text-foreground shadow-sm hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          aria-label={`${view.provider.alias} cloud status`}
+        >
+          <CloudAliasTriggerIcon tone={triggerTone} />
+          <span className="min-w-0 flex-1 truncate">{cloudProviderIdentity(view.provider)}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[min(360px,calc(var(--sidebar-width)-24px))] p-2" side="top" align="start">
+        <div className="grid gap-1">
+          <CloudAliasPopoverRow icon={<UserCircle2 />} label={cloudProviderIdentity(view.provider)} muted />
+          <CloudAliasPopoverRow icon={<Cloud />} label={view.provider.alias} muted />
+          <div className="my-1 border-t border-border" />
+          <CloudAliasStatus provider={view.provider} />
+          {view.active ? (
+            <>
+              <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={view.busy} onClick={() => void controller.getPrimaryCloudProviderBearerToken(view.provider.alias)}>
+                {view.bearerBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Copy aria-hidden="true" />}
+                {view.bearerBusy ? 'Copying token...' : 'Get bearer token'}
+              </Button>
+              <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={view.busy} onClick={() => void controller.logoutPrimaryCloudProvider(view.provider.alias)}>
+                {view.logoutBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <LogOut aria-hidden="true" />}
+                {view.logoutBusy ? 'Logging out...' : 'Log out'}
+              </Button>
+            </>
+          ) : (
+            <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={view.busy} onClick={() => void controller.loginPrimaryCloudProvider(view.provider.alias)}>
+              {view.loginBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <LogIn aria-hidden="true" />}
+              {view.loginBusy ? 'Logging in...' : 'Log in'}
+            </Button>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+interface PrimaryCloudAliasView {
+  provider: UICloudProviderStatus;
+  active: boolean;
+  busy: boolean;
+  loginBusy: boolean;
+  logoutBusy: boolean;
+  bearerBusy: boolean;
+}
+
+function primaryCloudAliasView(state: AppState): PrimaryCloudAliasView | null {
+  const tenant = state.tenants.find((candidate) => candidate.name === primaryCloudTenantName(state));
+  const alias = tenant?.primaryCloudProviderAlias?.trim();
+  if (!alias) {
+    return null;
+  }
+  const provider = primaryCloudProviderStatus(state, alias);
+  const busy = state.sidebarCloudAliasBusy;
+  return {
+    provider,
+    active: provider.status.trim() === 'active',
+    busy,
+    loginBusy: busy && state.sidebarCloudAliasAction === 'login',
+    logoutBusy: busy && state.sidebarCloudAliasAction === 'logout',
+    bearerBusy: busy && state.sidebarCloudAliasAction === 'bearer',
+  };
+}
+
+function primaryCloudTenantName(state: AppState): string {
+  return state.tenantDashboard.tenant || state.selected?.tenant || '';
+}
+
+function primaryCloudProviderStatus(state: AppState, alias: string): UICloudProviderStatus {
+  return state.cloudProviders.find((candidate) => candidate.alias === alias) || { alias, provider: '', status: 'unknown' };
+}
+
+function CloudAliasPopoverRow({ icon, label, muted }: { icon: React.ReactElement<{ className?: string; 'aria-hidden'?: boolean }>; label: string; muted?: boolean }): React.ReactElement {
+  return (
+    <div className={cn('flex min-w-0 items-center gap-2 rounded-sm px-2 py-1.5 text-sm', muted && 'text-muted-foreground')}>
+      {React.cloneElement(icon, { className: 'size-4 shrink-0', 'aria-hidden': true })}
+      <span className="truncate">{label}</span>
+    </div>
+  );
+}
+
+function CloudAliasStatus({ provider }: { provider: UICloudProviderStatus }): React.ReactElement {
+  const tone = cloudProviderStatusTone(provider.status);
+  return (
+    <div className="flex min-w-0 items-center gap-2 rounded-sm px-2 py-1.5 text-sm">
+      <CloudAliasStatusIcon tone={tone} />
+      <span className="min-w-0 flex-1 truncate">{statusLabel(provider.status)}</span>
+    </div>
+  );
+}
+
+function CloudAliasTriggerIcon({ tone }: { tone: ReturnType<typeof cloudProviderStatusTone> }): React.ReactElement {
+  if (tone === 'success') {
+    return <CheckCircle2 className="size-4 shrink-0 text-green-700 dark:text-green-400" aria-hidden="true" />;
+  }
+  if (tone === 'destructive') {
+    return <AlertCircle className="size-4 shrink-0 text-destructive" aria-hidden="true" />;
+  }
+  return <UserCircle2 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />;
+}
+
+function CloudAliasStatusIcon({ tone }: { tone: ReturnType<typeof cloudProviderStatusTone> }): React.ReactElement {
+  if (tone === 'success') {
+    return <CheckCircle2 className="size-4 shrink-0 text-green-700 dark:text-green-400" aria-hidden="true" />;
+  }
+  if (tone === 'destructive') {
+    return <AlertCircle className="size-4 shrink-0 text-destructive" aria-hidden="true" />;
+  }
+  return <Cloud className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />;
+}
+
+function cloudProviderIdentity(provider: UICloudProviderStatus): string {
+  return provider.username?.trim() || provider.alias;
+}
+
+function statusLabel(status: string): string {
+  switch (status.trim()) {
+    case 'expired':
+      return 'Login expired';
+    case 'not_configured':
+      return 'Not configured';
+    case 'active':
+      return 'Connected';
+    default:
+      return 'Status unknown';
+  }
 }
 
 function TenantGroup({
@@ -77,38 +232,20 @@ function TenantGroup({
   spaced: boolean;
 }): React.ReactElement {
   const collapsed = state.collapsedTenants.has(tenant.name);
+  const active = state.tenantDashboard.tenant === tenant.name;
+  const related = active || state.selected?.tenant === tenant.name;
 
   return (
     <div className={cn('flex flex-col', spaced && 'mt-2.5')}>
-      <div className="group/tenant flex items-center pr-1">
-        <button
-          className="flex min-w-0 flex-1 cursor-pointer items-center gap-[9px] border-0 bg-transparent px-3 py-[4px] pb-1.5 text-left text-[15px] leading-[1.25] font-medium tracking-normal text-muted-foreground hover:text-foreground"
-          type="button"
-          title={tenant.name}
-          onClick={() => controller.toggleTenant(tenant.name)}
-        >
-          {collapsed ? (
-            <Folder className="size-[18px] flex-none" aria-hidden="true" />
-          ) : (
-            <FolderOpen className="size-[18px] flex-none" aria-hidden="true" />
-          )}
-          <span className="truncate">{tenant.name}</span>
-        </button>
-        <IconTooltip label="Manage tenant">
-          <Button
-            type="button"
-            className="pointer-events-none size-[26px] flex-none cursor-pointer text-muted-foreground opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-hover/tenant:pointer-events-auto group-hover/tenant:opacity-100 group-focus-within/tenant:pointer-events-auto group-focus-within/tenant:opacity-100 [&_svg]:size-4"
-            variant="ghost"
-            size="icon"
-            aria-label={`Manage ${tenant.name}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              controller.openTenantDialog(tenant.name);
-            }}
-          >
-            <MoreHorizontal />
-          </Button>
-        </IconTooltip>
+      <div
+        className={cn(
+          'group/tenant mr-1 ml-1 flex h-8 items-center rounded-md pr-1 text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+          active && 'bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground',
+        )}
+      >
+        <TenantToggleButton controller={controller} tenantName={tenant.name} collapsed={collapsed} active={active} />
+        <TenantSelectButton controller={controller} tenantName={tenant.name} active={active} related={related} />
+        <TenantManageButton controller={controller} tenantName={tenant.name} active={active} />
       </div>
       {!collapsed && (
         <div className="flex flex-col gap-0 pt-0">
@@ -127,6 +264,68 @@ function TenantGroup({
   );
 }
 
+function TenantToggleButton({ controller, tenantName, collapsed, active }: { controller: ERunUIController; tenantName: string; collapsed: boolean; active: boolean }): React.ReactElement {
+  return (
+    <IconTooltip label={collapsed ? 'Expand tenant' : 'Collapse tenant'}>
+      <Button
+        type="button"
+        className={cn(
+          'size-[26px] flex-none text-current hover:bg-[color-mix(in_oklch,currentColor_12%,transparent)] hover:text-current [&_svg]:size-[18px]',
+          !active && 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+        )}
+        variant="ghost"
+        size="icon"
+        aria-label={collapsed ? `Expand ${tenantName}` : `Collapse ${tenantName}`}
+        aria-expanded={!collapsed}
+        onClick={() => controller.toggleTenant(tenantName)}
+      >
+        {collapsed ? <Folder aria-hidden="true" /> : <FolderOpen aria-hidden="true" />}
+      </Button>
+    </IconTooltip>
+  );
+}
+
+function TenantSelectButton({ controller, tenantName, active, related }: { controller: ERunUIController; tenantName: string; active: boolean; related: boolean }): React.ReactElement {
+  return (
+    <button
+      className={cn(
+        'flex min-w-0 flex-1 cursor-pointer items-center border-0 bg-transparent py-[4px] pr-3 pl-2 pb-1.5 text-left text-[15px] leading-[1.25] tracking-normal text-inherit disabled:cursor-default disabled:opacity-50',
+        related ? 'font-medium' : 'font-normal',
+      )}
+      type="button"
+      title={tenantName}
+      aria-current={active ? 'page' : undefined}
+      onClick={() => controller.openTenantDashboard(tenantName)}
+    >
+      <span className="truncate">{tenantName}</span>
+    </button>
+  );
+}
+
+function TenantManageButton({ controller, tenantName, active }: { controller: ERunUIController; tenantName: string; active: boolean }): React.ReactElement {
+  return (
+    <IconTooltip label="Edit tenant settings">
+      <Button
+        type="button"
+        className={cn(
+          'pointer-events-none size-[26px] flex-none cursor-pointer text-current opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-[color-mix(in_oklch,currentColor_12%,transparent)] hover:text-current group-hover/tenant:pointer-events-auto group-hover/tenant:opacity-100 group-focus-within/tenant:pointer-events-auto group-focus-within/tenant:opacity-100 [&_svg]:size-4',
+          !active && 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+          active && 'pointer-events-auto opacity-100',
+        )}
+        variant="ghost"
+        size="icon"
+        aria-label={`Edit ${tenantName} settings`}
+        onClick={(event) => {
+          event.stopPropagation();
+          controller.openTenantDialog(tenantName);
+        }}
+      >
+        <MoreHorizontal />
+      </Button>
+    </IconTooltip>
+  );
+}
+
 function EnvironmentRow({
   controller,
   state,
@@ -141,6 +340,10 @@ function EnvironmentRow({
   const selected = state.selected?.tenant === tenantName && state.selected?.environment === environmentName;
   const selection = { tenant: tenantName, environment: environmentName };
   const busy = environmentIsBusy(state, tenantName, environmentName);
+  const environment = state.tenants
+    .find((tenant) => tenant.name === tenantName)
+    ?.environments.find((env) => env.name === environmentName);
+  const isLocal = environment?.remote === false;
 
   return (
     <div
@@ -155,7 +358,7 @@ function EnvironmentRow({
           'flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent py-0 pr-2 pl-10 text-left text-sm leading-[1.2] tracking-normal text-inherit',
           selected ? 'font-medium' : 'font-normal',
         )}
-        title={`${tenantName} / ${environmentName}`}
+        title={`${tenantName} / ${environmentName}${isLocal ? ' (local)' : ''}`}
         aria-current={selected ? 'page' : undefined}
         onClick={() => {
           void controller.openSelection(selection).catch((error: unknown) => {
@@ -164,9 +367,22 @@ function EnvironmentRow({
         }}
       >
         <span className="min-w-0 truncate">{environmentName}</span>
+        {isLocal && (
+          <span
+            className={cn(
+              'flex-none rounded-[calc(var(--radius)-4px)] border px-1 py-px text-[10px] font-medium uppercase leading-none tracking-wide',
+              selected
+                ? 'border-primary-foreground/40 text-primary-foreground/85'
+                : 'border-border text-muted-foreground',
+            )}
+            aria-label="Local environment"
+          >
+            Local
+          </span>
+        )}
         {busy && <LoaderCircle className="size-3.5 flex-none animate-spin text-current opacity-75" aria-hidden="true" />}
       </button>
-      <IconTooltip label="Manage environment">
+      <IconTooltip label="Edit environment settings">
         <Button
           type="button"
           className={cn(
@@ -175,7 +391,7 @@ function EnvironmentRow({
           )}
           variant="ghost"
           size="icon"
-          aria-label={`Manage ${tenantName} / ${environmentName}`}
+          aria-label={`Edit ${tenantName} / ${environmentName} settings`}
           onClick={(event) => {
             event.stopPropagation();
             controller.openManageDialog(selection);

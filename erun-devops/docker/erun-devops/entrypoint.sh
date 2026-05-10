@@ -72,6 +72,18 @@ runtime_cloud_environment() {
     return 1
 }
 
+runtime_cloud_provider() {
+    if [ -n "${ERUN_CLOUD_PROVIDER:-}" ]; then
+        printf '%s\n' "${ERUN_CLOUD_PROVIDER}"
+        return
+    fi
+    case "${ERUN_CLOUD_PROVIDER_ALIAS:-}" in
+        *@aws)
+            printf '%s\n' "aws"
+            ;;
+    esac
+}
+
 runtime_namespace() {
     if [ -n "${ERUN_NAMESPACE:-}" ]; then
         printf '%s\n' "${ERUN_NAMESPACE}"
@@ -139,6 +151,33 @@ stop_cloud_host() {
     aws --cli-connect-timeout 5 --cli-read-timeout 20 ec2 stop-instances --region "${region}" --instance-ids "${instance_id}" >/dev/null
 }
 
+graceful_quit_clients() {
+    # claude-real and codex-real are Node processes spawned by the wrappers in
+    # /usr/local/bin/{claude,codex}. Match against the full command line because
+    # Node may rewrite argv[0]; also match the npm package paths as a fallback
+    # when the launcher is a shebang script that exec's node with the cli.js.
+    for pattern in 'claude-real' 'codex-real' '@anthropic-ai/claude-code' '@openai/codex'; do
+        pkill -TERM -f "${pattern}" >/dev/null 2>&1 || true
+    done
+
+    deadline=$(( $(date +%s) + 20 ))
+    while [ "$(date +%s)" -lt "${deadline}" ]; do
+        any_running=0
+        for pattern in 'claude-real' 'codex-real' '@anthropic-ai/claude-code' '@openai/codex'; do
+            if pgrep -f "${pattern}" >/dev/null 2>&1; then
+                any_running=1
+                break
+            fi
+        done
+        if [ "${any_running}" -eq 0 ]; then
+            break
+        fi
+        sleep 1
+    done
+
+    sync
+}
+
 runtime_sshd_enabled() {
     case "${ERUN_SSHD_ENABLED:-}" in
         1|true|TRUE|True|yes|YES|on|ON)
@@ -171,17 +210,30 @@ initialize_erun_config() {
     environment="${ERUN_ENVIRONMENT:-}"
     config_home="${XDG_CONFIG_HOME:-${HOME}/.config}"
     config_dir="${config_home}/erun"
+    cloud_provider=$(runtime_cloud_provider)
+    cloud_provider_alias="${ERUN_CLOUD_PROVIDER_ALIAS:-}"
+    cloud_region=""
+    cloud_instance_id=""
+    cloud_context_name="${ERUN_CLOUD_CONTEXT_NAME:-${ERUN_KUBERNETES_CONTEXT:-in-cluster}}"
     env_remote_line=""
     env_managed_cloud_line=""
+    env_cloud_provider_alias_line=""
 
     if [ -z "${tenant}" ] || [ -z "${environment}" ]; then
         return
+    fi
+    if [ -n "${cloud_provider}" ]; then
+        cloud_region=$(runtime_cloud_region)
+        cloud_instance_id=$(runtime_cloud_instance_id)
     fi
 
     if runtime_repo_is_remote; then
         env_remote_line="remote: true"
     fi
-    if runtime_cloud_environment; then
+    if [ -n "${cloud_provider_alias}" ]; then
+        env_cloud_provider_alias_line="cloudprovideralias: ${cloud_provider_alias}"
+    fi
+    if runtime_cloud_environment || { runtime_repo_is_remote && [ -n "${cloud_provider}" ] && [ -n "${cloud_provider_alias}" ] && [ -n "${cloud_region}" ]; }; then
         env_managed_cloud_line="managedcloud: true"
     fi
 
@@ -190,6 +242,48 @@ initialize_erun_config() {
     cat >"${config_dir}/config.yaml" <<EOF
 defaulttenant: ${tenant}
 EOF
+    if [ -n "${cloud_provider}" ] && [ -n "${cloud_provider_alias}" ]; then
+        cloud_username=""
+        cloud_account_id=""
+        case "${cloud_provider_alias}" in
+            *+*@*)
+                cloud_username="${cloud_provider_alias%%+*}"
+                cloud_account_part="${cloud_provider_alias#*+}"
+                cloud_account_id="${cloud_account_part%@*}"
+                ;;
+        esac
+        cat >>"${config_dir}/config.yaml" <<EOF
+cloudproviders:
+  - alias: ${cloud_provider_alias}
+    provider: ${cloud_provider}
+EOF
+        if [ -n "${cloud_username}" ]; then
+            cat >>"${config_dir}/config.yaml" <<EOF
+    username: ${cloud_username}
+EOF
+        fi
+        if [ -n "${cloud_account_id}" ]; then
+            cat >>"${config_dir}/config.yaml" <<EOF
+    accountid: "${cloud_account_id}"
+EOF
+        fi
+        if [ -n "${cloud_region}" ]; then
+            cat >>"${config_dir}/config.yaml" <<EOF
+cloudcontexts:
+  - name: ${cloud_context_name}
+    provider: ${cloud_provider}
+    cloudprovideralias: ${cloud_provider_alias}
+    region: ${cloud_region}
+    kubernetescontext: ${ERUN_KUBERNETES_CONTEXT:-in-cluster}
+    status: running
+EOF
+            if [ -n "${cloud_instance_id}" ]; then
+                cat >>"${config_dir}/config.yaml" <<EOF
+    instanceid: ${cloud_instance_id}
+EOF
+            fi
+        fi
+    fi
 
     cat >"${config_dir}/${tenant}/config.yaml" <<EOF
 projectroot: ${repo_dir}
@@ -202,10 +296,12 @@ name: ${environment}
 repopath: ${repo_dir}
 kubernetescontext: ${ERUN_KUBERNETES_CONTEXT:-in-cluster}
 ${env_remote_line}
+${env_cloud_provider_alias_line}
 ${env_managed_cloud_line}
 idle:
   timeout: ${ERUN_IDLE_TIMEOUT:-5m0s}
   workinghours: ${ERUN_IDLE_WORKING_HOURS:-08:00-20:00}
+  timezone: ${ERUN_IDLE_TIMEZONE:-}
   idletrafficbytes: ${ERUN_IDLE_TRAFFIC_BYTES:-0}
 EOF
 }
@@ -223,13 +319,33 @@ codex_config="${codex_dir}/config.toml"
 mcp_url="http://127.0.0.1:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}"
 
 mkdir -p "${codex_dir}"
+
+codex_instructions="${codex_dir}/instructions.md"
+agents_marker="erun-agents-md-hook"
+if [ ! -f "${codex_instructions}" ] || ! grep -qF "${agents_marker}" "${codex_instructions}" 2>/dev/null; then
+    printf '\n<!-- %s -->\n# Agent Instructions\n\nIMPORTANT: Before doing anything else, read `AGENTS.md` in the project root. This is mandatory — do not skip it.\nAlso read `AGENTS.md` in any subdirectory relevant to the task at hand,\nas subdirectories may contain more specific guidance.\n<!-- /%s -->\n' \
+        "${agents_marker}" "${agents_marker}" >> "${codex_instructions}"
+fi
+
 touch "${codex_config}"
 
 tmp_config="${codex_config}.tmp"
 awk '
+    function write_codex_policy() {
+        if (!wrote_policy) {
+            print ""
+            print "sandbox_mode = \"danger-full-access\""
+            print "approval_policy = \"on-request\""
+            wrote_policy = 1
+        }
+    }
+    /^sandbox_mode = / { next }
+    /^approval_policy = / { next }
     /^\[mcp_servers\.erun\]$/ { skip = 1; next }
     /^\[/ && skip { skip = 0 }
+    /^\[/ && !skip { write_codex_policy() }
     !skip { print }
+    END { write_codex_policy() }
 ' "${codex_config}" >"${tmp_config}"
 mv "${tmp_config}" "${codex_config}"
 
@@ -242,6 +358,204 @@ EOF
 CODEX_CONFIG_SCRIPT
     chmod 700 "${codex_configure}"
     "${codex_configure}" >/dev/null 2>&1 || true
+    install_shell_profile_hook "${HOME}/.bashrc"
+    install_shell_profile_hook "${HOME}/.profile"
+    if [ -f "${HOME}/.bash_profile" ]; then
+        install_shell_profile_hook "${HOME}/.bash_profile"
+    fi
+}
+
+initialize_claude_config() {
+    claude_configure="${HOME}/.erun/configure-claude-code.sh"
+
+    mkdir -p "$(dirname "${claude_configure}")"
+    cat >"${claude_configure}" <<'CLAUDE_CONFIG_SCRIPT'
+#!/bin/sh
+set -eu
+
+imds_get() {
+    path="${1:-}"
+    if [ -z "${path}" ]; then
+        return
+    fi
+    token=$(curl -fsS -m 2 -X PUT "http://169.254.169.254/latest/api/token" \
+        -H "X-aws-ec2-metadata-token-ttl-seconds: 60" 2>/dev/null || true)
+    if [ -n "${token}" ]; then
+        curl -fsS -m 2 -H "X-aws-ec2-metadata-token: ${token}" "http://169.254.169.254/latest/${path}" 2>/dev/null || true
+        return
+    fi
+    curl -fsS -m 2 "http://169.254.169.254/latest/${path}" 2>/dev/null || true
+}
+
+imds_region() {
+    imds_get "dynamic/instance-identity/document" | sed -n 's/.*"region"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1
+}
+
+cloud_provider="${ERUN_CLOUD_PROVIDER:-}"
+if [ -z "${cloud_provider}" ]; then
+    case "${ERUN_CLOUD_PROVIDER_ALIAS:-}" in
+        *@aws)
+            cloud_provider=aws
+            ;;
+    esac
+fi
+
+configure_bedrock=0
+if [ "${cloud_provider}" != "aws" ] && [ -z "${CLAUDE_CODE_USE_BEDROCK:-}" ] && [ -z "${CLAUDE_CODE_USE_MANTLE:-}" ]; then
+    configure_bedrock=0
+else
+    configure_bedrock=1
+fi
+
+claude_region="${AWS_REGION:-${ERUN_CLOUD_REGION:-}}"
+if [ -z "${claude_region}" ] && [ "${cloud_provider}" = "aws" ]; then
+    claude_region=$(imds_region)
+fi
+if [ -z "${claude_region}" ]; then
+    configure_bedrock=0
+fi
+
+claude_dir="${HOME}/.claude"
+claude_settings="${claude_dir}/settings.json"
+claude_state="${HOME}/.claude.json"
+claude_project_path="${ERUN_REPO_PATH:-${HOME}/git/erun}"
+claude_mcp_url="http://127.0.0.1:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}"
+mkdir -p "${claude_dir}"
+
+claude_md="${claude_dir}/CLAUDE.md"
+agents_marker="erun-agents-md-hook"
+if [ ! -f "${claude_md}" ] || ! grep -qF "${agents_marker}" "${claude_md}" 2>/dev/null; then
+    printf '\n<!-- %s -->\n# Agent Instructions\n\nIMPORTANT: Before doing anything else, read `AGENTS.md` in the project root. This is mandatory — do not skip it.\nAlso read `AGENTS.md` in any subdirectory relevant to the task at hand,\nas subdirectories may contain more specific guidance.\n<!-- /%s -->\n' \
+        "${agents_marker}" "${agents_marker}" >> "${claude_md}"
+fi
+
+CLAUDE_SETTINGS_PATH="${claude_settings}" \
+CLAUDE_STATE_PATH="${claude_state}" \
+ERUN_CLAUDE_CONFIGURE_BEDROCK="${configure_bedrock}" \
+ERUN_CLAUDE_REGION="${claude_region}" \
+ERUN_CLAUDE_PROJECT_PATH="${claude_project_path}" \
+ERUN_CLAUDE_MCP_URL="${claude_mcp_url}" \
+node <<'NODE'
+const fs = require('fs');
+
+const settingsPath = process.env.CLAUDE_SETTINGS_PATH;
+const statePath = process.env.CLAUDE_STATE_PATH;
+const configureBedrock = process.env.ERUN_CLAUDE_CONFIGURE_BEDROCK === '1';
+const region = (process.env.ERUN_CLAUDE_REGION || '').trim();
+
+function readJSON(path) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path, 'utf8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch (_) {
+  }
+  return {};
+}
+
+function writeJSON(path, value) {
+  fs.writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+}
+
+function envValue(name, fallback = '') {
+  return (process.env[name] || fallback || '').trim();
+}
+
+function ensureObject(parent, name) {
+  if (!parent[name] || typeof parent[name] !== 'object' || Array.isArray(parent[name])) {
+    parent[name] = {};
+  }
+  return parent[name];
+}
+
+function setEnv(settings, name, value) {
+  const normalized = (value || '').trim();
+  if (!normalized) {
+    return;
+  }
+  settings.env[name] = normalized;
+}
+
+function listValue(value) {
+  const result = [];
+  const seen = new Set();
+  for (const entry of (value || '').split(',')) {
+    const normalized = entry.trim();
+    const key = normalized.toLowerCase();
+    if (!normalized || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(normalized);
+  }
+  return result;
+}
+
+if (configureBedrock) {
+  const settings = readJSON(settingsPath);
+  settings.$schema = settings.$schema || 'https://json.schemastore.org/claude-code-settings.json';
+  settings.env = ensureObject(settings, 'env');
+
+  setEnv(settings, 'CLAUDE_CODE_USE_BEDROCK', envValue('CLAUDE_CODE_USE_BEDROCK', '1'));
+  setEnv(settings, 'CLAUDE_CODE_USE_MANTLE', envValue('CLAUDE_CODE_USE_MANTLE', '1'));
+  setEnv(settings, 'AWS_REGION', region);
+  setEnv(settings, 'ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION', envValue('ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION', region));
+  setEnv(settings, 'CLAUDE_CODE_MAX_OUTPUT_TOKENS', envValue('CLAUDE_CODE_MAX_OUTPUT_TOKENS', '4096'));
+  setEnv(settings, 'MAX_THINKING_TOKENS', envValue('MAX_THINKING_TOKENS', '1024'));
+
+  for (const name of [
+    'AWS_PROFILE',
+    'ANTHROPIC_MODEL',
+    'ANTHROPIC_DEFAULT_OPUS_MODEL',
+    'ANTHROPIC_DEFAULT_SONNET_MODEL',
+    'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+    'ANTHROPIC_BEDROCK_BASE_URL',
+    'ANTHROPIC_BEDROCK_MANTLE_BASE_URL',
+    'ANTHROPIC_BEDROCK_SERVICE_TIER',
+    'CLAUDE_CODE_SKIP_MANTLE_AUTH',
+    'DISABLE_PROMPT_CACHING',
+    'ENABLE_PROMPT_CACHING_1H',
+  ]) {
+    setEnv(settings, name, envValue(name));
+  }
+
+  const availableModels = listValue(envValue('ERUN_CLAUDE_AVAILABLE_MODELS'));
+  if (availableModels.length > 0) {
+    settings.availableModels = availableModels;
+  }
+
+  writeJSON(settingsPath, settings);
+}
+
+const projectPath = envValue('ERUN_CLAUDE_PROJECT_PATH');
+const mcpURL = envValue('ERUN_CLAUDE_MCP_URL');
+if (statePath && projectPath && mcpURL) {
+  const state = readJSON(statePath);
+  const projects = ensureObject(state, 'projects');
+  const project = ensureObject(projects, projectPath);
+  const mcpServers = ensureObject(project, 'mcpServers');
+  mcpServers.erun = {
+    type: 'http',
+    url: mcpURL,
+  };
+  writeJSON(statePath, state);
+}
+
+{
+  const settings = readJSON(settingsPath);
+  settings.$schema = settings.$schema || 'https://json.schemastore.org/claude-code-settings.json';
+  const permissions = ensureObject(settings, 'permissions');
+  permissions.defaultMode = 'bypassPermissions';
+  settings.skipDangerousModePermissionPrompt = true;
+  writeJSON(settingsPath, settings);
+}
+NODE
+    chmod 600 "${claude_settings}" >/dev/null 2>&1 || true
+    chmod 600 "${claude_state}" >/dev/null 2>&1 || true
+CLAUDE_CONFIG_SCRIPT
+    chmod 700 "${claude_configure}"
+    "${claude_configure}" >/dev/null 2>&1 || true
     install_shell_profile_hook "${HOME}/.bashrc"
     install_shell_profile_hook "${HOME}/.profile"
     if [ -f "${HOME}/.bash_profile" ]; then
@@ -267,6 +581,10 @@ install_shell_profile_hook() {
     cat >"${hook_file}" <<'EOF'
 if [ -x "${HOME}/.erun/configure-codex-mcp.sh" ]; then
     "${HOME}/.erun/configure-codex-mcp.sh" >/dev/null 2>&1 || true
+fi
+
+if [ -x "${HOME}/.erun/configure-claude-code.sh" ]; then
+    "${HOME}/.erun/configure-claude-code.sh" >/dev/null 2>&1 || true
 fi
 
 __erun_record_cli_activity() {
@@ -374,11 +692,8 @@ start_environment_idle_monitor() {
         while :; do
             sleep 30
             if erun activity stop-ready --tenant "${ERUN_TENANT}" --environment "${ERUN_ENVIRONMENT}" >/dev/null 2>&1; then
-                namespace=$(runtime_namespace)
-                if [ -n "${namespace}" ]; then
-                    kubectl --context "${ERUN_KUBERNETES_CONTEXT:-in-cluster}" --namespace "${namespace}" scale "deployment/${ERUN_RUNTIME_DEPLOYMENT:-erun-devops}" --replicas=0 >/dev/null 2>&1 || true
-                fi
                 mkdir -p "${HOME}/.erun"
+                graceful_quit_clients >>"${HOME}/.erun/idle-stop.log" 2>&1 || true
                 stop_cloud_host >>"${HOME}/.erun/idle-stop.log" 2>&1 || true
                 exit 0
             fi
@@ -408,26 +723,42 @@ if [ "${1:-}" = "shell" ]; then
     shift
     initialize_erun_config
     initialize_codex_config
+    initialize_claude_config
     record_activity cli
     run_shell "$@"
 fi
 
-initialize_erun_config
-initialize_codex_config
-record_activity mcp
+if [ "${1:-}" = "mcp" ]; then
+    shift
+    initialize_erun_config
+    initialize_codex_config
+    initialize_claude_config
+    record_activity mcp
 
-set -- emcp "$@" \
-    --host "${ERUN_MCP_HOST:-0.0.0.0}" \
-    --port "${ERUN_MCP_PORT:-17000}" \
-    --path "${ERUN_MCP_PATH:-/mcp}" \
-    --tenant "${ERUN_TENANT:-}" \
-    --environment "${ERUN_ENVIRONMENT:-}" \
-    --repo-path "$(runtime_repo_dir)" \
-    --kubernetes-context "${ERUN_KUBERNETES_CONTEXT:-in-cluster}"
+    set -- emcp "$@" \
+        --host "${ERUN_MCP_HOST:-0.0.0.0}" \
+        --port "${ERUN_MCP_PORT:-17000}" \
+        --path "${ERUN_MCP_PATH:-/mcp}" \
+        --tenant "${ERUN_TENANT:-}" \
+        --environment "${ERUN_ENVIRONMENT:-}" \
+        --repo-path "$(runtime_repo_dir)" \
+        --kubernetes-context "${ERUN_KUBERNETES_CONTEXT:-in-cluster}"
 
-namespace=$(runtime_namespace)
-if [ -n "${namespace}" ]; then
-    set -- "$@" --namespace "${namespace}"
+    namespace=$(runtime_namespace)
+    if [ -n "${namespace}" ]; then
+        set -- "$@" --namespace "${namespace}"
+    fi
+
+    echo "starting erun MCP on ${ERUN_MCP_HOST:-0.0.0.0}:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}"
+    exec "$@"
+fi
+
+if [ "${1:-}" = "devops" ] || [ "$#" -eq 0 ]; then
+    initialize_erun_config
+    initialize_codex_config
+    initialize_claude_config
+    record_activity devops
+    exec sleep infinity
 fi
 
 exec "$@"

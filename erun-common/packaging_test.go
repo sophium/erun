@@ -52,6 +52,7 @@ func requireHomebrewFormulaTracksLatestTag(t *testing.T, formula, latestTag stri
 	requireStringContains(t, formula, `url "https://github.com/sophium/erun/archive/refs/tags/`+latestTag+`.tar.gz"`, "formula does not target latest stable tag "+latestTag)
 	requireStringContains(t, formula, `bin/"erun"`, "formula does not build erun")
 	requireStringContains(t, formula, `bin/"emcp"`, "formula does not build emcp")
+	requireStringContains(t, formula, `bin/"eapi"`, "formula does not build eapi")
 	requireStringContains(t, formula, `depends_on "node" => :build`, "formula missing node dependency")
 	requireStringContains(t, formula, `depends_on "yarn" => :build`, "formula missing yarn dependency")
 	requireStringContains(t, formula, `system "yarn", "install", "--frozen-lockfile"`, "formula does not install frontend dependencies")
@@ -93,13 +94,14 @@ func requireScoopManifestCommands(t *testing.T, manifest scoopManifestForTest) {
 	requireCondition(t, containsString(manifest.Depends, "mingw"), "scoop manifest missing mingw dependency: %+v", manifest.Depends)
 	requireCondition(t, containsString(manifest.Depends, "nodejs"), "scoop manifest missing nodejs dependency: %+v", manifest.Depends)
 	requireCondition(t, containsString(manifest.Depends, "yarn"), "scoop manifest missing yarn dependency: %+v", manifest.Depends)
-	requireCondition(t, containsString(manifest.Bin, "erun.exe") && containsString(manifest.Bin, "emcp.exe"), "scoop manifest does not shim both executables: %+v", manifest.Bin)
+	requireCondition(t, containsString(manifest.Bin, "erun.exe") && containsString(manifest.Bin, "emcp.exe") && containsString(manifest.Bin, "eapi.exe"), "scoop manifest does not shim expected executables: %+v", manifest.Bin)
 }
 
 func requireScoopInstallerBuildsDesktopApp(t *testing.T, script string) {
 	t.Helper()
 	requireStringContains(t, script, `go build -trimpath -ldflags $cliLdflags -o "$dir\erun.exe" .`, "scoop installer does not build erun.exe")
 	requireStringContains(t, script, `go build -trimpath -ldflags $mcpLdflags -o "$dir\emcp.exe" ./cmd/emcp`, "scoop installer does not build emcp.exe")
+	requireStringContains(t, script, `go build -trimpath -ldflags $apiLdflags -o "$dir\eapi.exe" ./cmd/eapi`, "scoop installer does not build eapi.exe")
 	requireStringContains(t, script, `building erun-app.exe requires a C compiler such as MinGW for the Wails CGO build`, "scoop installer does not explain Wails CGO compiler requirement")
 	requireStringContains(t, script, `yarn install --frozen-lockfile`, "scoop installer does not install frontend dependencies")
 	requireStringContains(t, script, `go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2`, "scoop installer does not resolve Wails version")
@@ -108,7 +110,7 @@ func requireScoopInstallerBuildsDesktopApp(t *testing.T, script string) {
 	requireStringContains(t, script, `yarn build`, "scoop installer does not build frontend assets")
 }
 
-func TestAptBuildScriptBuildsDebianPackageForBothExecutables(t *testing.T) {
+func TestAptBuildScriptBuildsDebianPackageForExecutables(t *testing.T) {
 	repoRoot := repoRootForPackagingTest(t)
 	scriptPath := filepath.Join(repoRoot, "packaging", "apt", "build-deb.sh")
 
@@ -126,6 +128,9 @@ func TestAptBuildScriptBuildsDebianPackageForBothExecutables(t *testing.T) {
 	}
 	if !strings.Contains(script, `go build -trimpath -ldflags "$mcp_ldflags" -o "$package_root/usr/bin/emcp" ./cmd/emcp`) {
 		t.Fatalf("apt build script does not build emcp:\n%s", script)
+	}
+	if !strings.Contains(script, `go build -trimpath -ldflags "$api_ldflags" -o "$package_root/usr/bin/eapi" ./cmd/eapi`) {
+		t.Fatalf("apt build script does not build eapi:\n%s", script)
 	}
 	if !strings.Contains(script, `dpkg-deb --build --root-owner-group "$package_root" "$output_path"`) {
 		t.Fatalf("apt build script does not emit a .deb package:\n%s", script)

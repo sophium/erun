@@ -14,18 +14,26 @@ type CloudListInput struct {
 }
 
 type CloudInitAWSInput struct {
-	SSOStartURL string `json:"ssoStartUrl" jsonschema:"AWS IAM Identity Center start URL"`
-	SSORegion   string `json:"ssoRegion" jsonschema:"AWS IAM Identity Center region"`
-	AccountID   string `json:"accountId" jsonschema:"AWS account ID to use for SSO login"`
-	RoleName    string `json:"roleName" jsonschema:"AWS role name to use for SSO login"`
-	Region      string `json:"region,omitempty" jsonschema:"default AWS region for the generated configuration; defaults to ssoRegion"`
-	Preview     bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without executing login or saving config"`
-	Verbosity   int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	SSOStartURL   string `json:"ssoStartUrl" jsonschema:"AWS IAM Identity Center start URL"`
+	SSORegion     string `json:"ssoRegion" jsonschema:"AWS IAM Identity Center region"`
+	AccountID     string `json:"accountId" jsonschema:"AWS account ID to use for SSO login"`
+	RoleName      string `json:"roleName" jsonschema:"AWS role name to use for SSO login"`
+	Region        string `json:"region,omitempty" jsonschema:"default AWS region for the generated configuration; defaults to ssoRegion"`
+	OIDCIssuerURL string `json:"oidcIssuerUrl,omitempty" jsonschema:"OIDC issuer URL trusted by deployed ERun APIs"`
+	Preview       bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without executing login or saving config"`
+	Verbosity     int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
 type CloudLoginInput struct {
 	Alias     string `json:"alias" jsonschema:"configured cloud provider alias to login"`
 	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without executing login"`
+	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+}
+
+type CloudOIDCInput struct {
+	Alias     string `json:"alias" jsonschema:"configured cloud provider alias to refresh"`
+	Audience  string `json:"audience,omitempty" jsonschema:"audience for the AWS web identity bearer token; defaults to erun-api"`
+	Preview   bool   `json:"preview,omitempty" jsonschema:"when true, return the planned operation without executing login or saving config"`
 	Verbosity int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
 
@@ -72,11 +80,12 @@ func cloudInitAWSTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTool
 		traceOutput := strings.Builder{}
 		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
 		params := eruncommon.InitAWSCloudProviderParams{
-			SSOStartURL: input.SSOStartURL,
-			SSORegion:   input.SSORegion,
-			AccountID:   input.AccountID,
-			RoleName:    input.RoleName,
-			Region:      input.Region,
+			SSOStartURL:   input.SSOStartURL,
+			SSORegion:     input.SSORegion,
+			AccountID:     input.AccountID,
+			RoleName:      input.RoleName,
+			Region:        input.Region,
+			OIDCIssuerURL: input.OIDCIssuerURL,
 		}
 		if input.Preview {
 			plan := []string{
@@ -86,7 +95,10 @@ func cloudInitAWSTool(runtime RuntimeConfig) func(context.Context, *mcp.CallTool
 				"aws configure set sso_role_name " + strings.TrimSpace(input.RoleName) + " --profile erun-sso-<timestamp>",
 				"aws sso login --profile erun-sso-<timestamp>",
 				"aws sts get-caller-identity --profile erun-sso-<timestamp>",
+				"aws iam enable-outbound-web-identity-federation --query IssuerIdentifier --output text --profile erun-sso-<timestamp> if AWS outbound web identity federation is disabled",
+				"aws sts get-web-identity-token --audience " + eruncommon.CloudProviderBearerAudience + " --signing-algorithm RS256 --duration-seconds 900 --query WebIdentityToken --output text --profile erun-sso-<timestamp>",
 				"save root cloud provider alias resolved from AWS identity",
+				"save cloud provider OIDC issuer resolved from AWS web identity token",
 			}
 			return nil, CloudActionResult{Preview: true, Plan: plan}, nil
 		}
@@ -118,6 +130,38 @@ func cloudLoginTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRe
 	}
 }
 
+func cloudOIDCTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudOIDCInput) (*mcp.CallToolResult, CloudActionResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudOIDCInput) (*mcp.CallToolResult, CloudActionResult, error) {
+		alias := strings.TrimSpace(input.Alias)
+		if alias == "" {
+			return nil, CloudActionResult{}, fmt.Errorf("cloud provider alias is required")
+		}
+		traceOutput := strings.Builder{}
+		ctx := runtimeCallContext(input.Preview, input.Verbosity, nil, &traceOutput, &traceOutput)
+		if input.Preview {
+			return nil, CloudActionResult{
+				Preview: true,
+				Alias:   alias,
+				Plan: []string{
+					"check cloud provider token status",
+					"run provider login if token is expired",
+					"enable AWS outbound web identity federation if disabled",
+					"request AWS STS web identity token for audience " + cloudAudienceForPlan(input.Audience),
+					"save cloud provider OIDC issuer resolved from bearer token",
+				},
+			}, nil
+		}
+		status, _, err := eruncommon.SetupCloudProviderOIDC(ctx, runtime.Store, eruncommon.CloudBearerParams{
+			Alias:    alias,
+			Audience: input.Audience,
+		}, eruncommon.CloudDependencies{})
+		if err != nil {
+			return nil, CloudActionResult{}, err
+		}
+		return nil, CloudActionResult{Alias: alias, Provider: status, Trace: normalizeTraceLines(traceOutput.String())}, nil
+	}
+}
+
 func cloudSetTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, CloudSetInput) (*mcp.CallToolResult, CloudSetResult, error) {
 	return func(_ context.Context, _ *mcp.CallToolRequest, input CloudSetInput) (*mcp.CallToolResult, CloudSetResult, error) {
 		tenant := firstNonEmpty(strings.TrimSpace(input.Tenant), strings.TrimSpace(runtime.Context.Tenant))
@@ -140,4 +184,12 @@ func cloudSetTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequ
 			Trace:       normalizeTraceLines(traceOutput.String()),
 		}, nil
 	}
+}
+
+func cloudAudienceForPlan(audience string) string {
+	audience = strings.TrimSpace(audience)
+	if audience == "" {
+		return eruncommon.CloudProviderBearerAudience
+	}
+	return audience
 }

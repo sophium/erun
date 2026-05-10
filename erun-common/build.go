@@ -3,7 +3,6 @@ package eruncommon
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 )
 
@@ -27,7 +26,7 @@ func ResolveCurrentDockerBuildSpecs(store DockerStore, findProjectRoot ProjectFi
 	return builds, nil
 }
 
-func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (BuildExecutionSpec, error) {
+func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (BuildExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
 	target, releaseSpec, script, err := resolveBuildExecutionTargetAndScript(findProjectRoot, target)
@@ -55,9 +54,9 @@ func ResolveBuildExecution(store DockerStore, findProjectRoot ProjectFinderFunc,
 
 	execution := BuildExecutionSpec{linuxBuilds: linuxBuilds, dockerBuilds: builds, skippedLinux: hadLinuxBuilds && len(linuxBuilds) == 0}
 	if releaseSpec != nil {
-		return BuildExecutionSpecWithRelease(execution, *releaseSpec), nil
+		execution = BuildExecutionSpecWithRelease(execution, *releaseSpec)
 	}
-	return execution, nil
+	return ApplyIncrementalToBuildExecution(ctx, execution, target.NoIncremental)
 }
 
 func resolveBuildExecutionTargetAndScript(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (DockerCommandTarget, *ReleaseSpec, *scriptSpec, error) {
@@ -124,7 +123,6 @@ func BuildExecutionSpecWithRelease(execution BuildExecutionSpec, release Release
 			if _, ok := releaseTags[strings.TrimSpace(execution.dockerBuilds[i].Image.Tag)]; !ok {
 				continue
 			}
-			execution.dockerBuilds[i].Platforms = slices.Clone(multiPlatformDockerBuilds)
 			execution.dockerBuilds[i].Push = true
 		}
 	}
@@ -218,7 +216,10 @@ func ResolveDockerBuildTarget(findProjectRoot ProjectFinderFunc, target DockerCo
 		return DockerCommandTarget{}, nil, fmt.Errorf("release build cannot be combined with explicit version override")
 	}
 
-	releaseSpec, err := ResolveReleaseSpec(findProjectRoot, ReleaseParams{ProjectRoot: target.ProjectRoot, Force: target.Force})
+	// Build callers don't currently surface a Context; passing the zero value
+	// is safe — Logger zero-value silently drops traces, so behavior matches
+	// what release planning produced before traces were added.
+	releaseSpec, err := ResolveReleaseSpec(Context{}, findProjectRoot, ReleaseParams{ProjectRoot: target.ProjectRoot, Force: target.Force})
 	if err != nil {
 		return DockerCommandTarget{}, nil, err
 	}

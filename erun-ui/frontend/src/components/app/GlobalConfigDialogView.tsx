@@ -8,6 +8,9 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { EmptyState } from './EmptyState';
+import { SelectField, type SelectFieldOption } from './SelectField';
+import { StatusBadge, cloudProviderStatusTone } from './StatusBadge';
 
 const dialogErrorClassName =
   'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
@@ -37,7 +40,7 @@ export function GlobalConfigDialogView({ controller, state }: { controller: ERun
         >
           <DialogHeader>
             <DialogTitle>ERun settings</DialogTitle>
-            <DialogDescription className="sr-only">Manage default tenant and cloud aliases.</DialogDescription>
+            <DialogDescription>Default tenant, cloud aliases, and cloud contexts shared across the app.</DialogDescription>
           </DialogHeader>
           <GlobalConfigBody controller={controller} state={state} />
           <DialogError error={dialog.error} />
@@ -48,15 +51,28 @@ export function GlobalConfigDialogView({ controller, state }: { controller: ERun
   );
 }
 
+const NOT_CONFIGURED_VALUE = '__none__';
+
 function GlobalConfigBody({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
   const dialog = state.globalConfigDialog;
   if (dialog.configLoading) {
     return <div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">Loading config...</div>;
   }
-  const tenantOptions = optionValues(state.tenants.map((tenant) => tenant.name), dialog.config.defaultTenant);
+  const tenantNames = optionValues(state.tenants.map((tenant) => tenant.name), dialog.config.defaultTenant);
+  const tenantOptions: SelectFieldOption[] = tenantNames.length === 0
+    ? []
+    : [{ value: NOT_CONFIGURED_VALUE, label: 'Not configured' }, ...tenantNames.map((name) => ({ value: name, label: name }))];
   return (
     <div className="grid gap-3">
-      <SelectField id="global-config-defaulttenant" label="Default tenant" value={dialog.config.defaultTenant} options={tenantOptions} disabled={dialog.busy || tenantOptions.length === 0} onChange={(defaultTenant) => controller.updateGlobalConfig({ defaultTenant })} />
+      <SelectField
+        id="global-config-defaulttenant"
+        label="Default tenant"
+        value={dialog.config.defaultTenant || NOT_CONFIGURED_VALUE}
+        options={tenantOptions}
+        emptyLabel="No tenants"
+        disabled={dialog.busy}
+        onChange={(value) => controller.updateGlobalConfig({ defaultTenant: value === NOT_CONFIGURED_VALUE ? '' : value })}
+      />
       <CloudAliasesSection controller={controller} dialog={dialog} />
       <CloudContextsSection controller={controller} dialog={dialog} />
     </div>
@@ -79,7 +95,21 @@ function CloudAliasesSection({ controller, dialog }: { controller: ERunUIControl
           </Button>
         </div>
       </div>
-      {providers.length === 0 ? <div className="px-0.5 py-2 text-[13px] leading-[1.35] text-muted-foreground">No cloud aliases configured</div> : <CloudAliasList controller={controller} dialog={dialog} />}
+      {providers.length === 0 ? (
+        <EmptyState
+          icon={<Cloud />}
+          heading="No cloud aliases yet"
+          body="Add a cloud account so ERun can deploy environments to it. AWS is the only provider supported today."
+          action={
+            <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => void controller.startAWSCloudInit()}>
+              {dialog.busyAction === 'cloud-provider-init' ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Plus aria-hidden="true" />}
+              Add AWS account
+            </Button>
+          }
+        />
+      ) : (
+        <CloudAliasList controller={controller} dialog={dialog} />
+      )}
     </div>
   );
 }
@@ -97,13 +127,13 @@ function CloudAliasList({ controller, dialog }: { controller: ERunUIController; 
   );
 }
 
-function CloudAliasSummary({ provider }: { provider: GlobalConfigDialog['config']['cloudProviders'][number] }): React.ReactElement {
+function CloudAliasSummary({ provider }: { provider: NonNullable<GlobalConfigDialog['config']['cloudProviders']>[number] }): React.ReactElement {
   return (
     <div className="grid min-w-0 gap-1">
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
         <Cloud className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="truncate">{provider.alias}</span>
-        <StatusBadge status={provider.status} />
+        <CloudStatusBadge status={provider.status} />
       </div>
       <div className="truncate text-xs text-muted-foreground">
         {cloudProviderSummary(provider)}
@@ -124,7 +154,15 @@ function CloudContextsSection({ controller, dialog }: { controller: ERunUIContro
         </Button>
       </div>
       <CloudContextDraftForm controller={controller} dialog={dialog} />
-      {contexts.length === 0 ? <div className="px-0.5 py-2 text-[13px] leading-[1.35] text-muted-foreground">No cloud contexts configured</div> : <CloudContextList controller={controller} dialog={dialog} />}
+      {contexts.length === 0 ? (
+        <EmptyState
+          icon={<Server />}
+          heading="No cloud contexts yet"
+          body="Pick a cloud alias and region above, then click Init to provision a new context. Contexts are reusable across environments."
+        />
+      ) : (
+        <CloudContextList controller={controller} dialog={dialog} />
+      )}
     </div>
   );
 }
@@ -135,11 +173,51 @@ function CloudContextDraftForm({ controller, dialog }: { controller: ERunUIContr
   return (
     <div className="grid gap-2 rounded-[var(--radius)] border border-border p-3">
       <div className="grid gap-2 sm:grid-cols-2">
-        <SelectInput id="global-config-cloudcontext-provider" label="Cloud provider" value={dialog.cloudContextDraft.cloudProviderAlias} options={(config.cloudProviders || []).map((provider) => provider.alias)} emptyLabel="No cloud aliases" disabled={dialog.busy || (config.cloudProviders || []).length === 0} onChange={(cloudProviderAlias) => controller.updateCloudContextDraft({ cloudProviderAlias })} />
-        <RegionSelectInput id="global-config-cloudcontext-region" value={dialog.cloudContextDraft.region} disabled={dialog.busy} onChange={(region) => controller.updateCloudContextDraft({ region })} />
-        <SelectInput id="global-config-cloudcontext-instancetype" label="Instance type" value={dialog.cloudContextDraft.instanceType} options={['c8gd.2xlarge', 't4g.xlarge']} disabled={dialog.busy} onChange={(instanceType) => controller.updateCloudContextDraft({ instanceType })} />
-        <SelectInput id="global-config-cloudcontext-disksize" label="Disk size" value={String(dialog.cloudContextDraft.diskSizeGb)} options={['100', '200']} disabled={dialog.busy} onChange={(diskSizeGb) => controller.updateCloudContextDraft({ diskSizeGb: Number(diskSizeGb) })} />
+        <SelectField
+          id="global-config-cloudcontext-provider"
+          label="Cloud provider"
+          value={dialog.cloudContextDraft.cloudProviderAlias}
+          options={(config.cloudProviders || []).map((provider) => ({ value: provider.alias, label: provider.alias }))}
+          emptyLabel="No cloud aliases"
+          placeholder="Select cloud alias"
+          disabled={dialog.busy}
+          onChange={(cloudProviderAlias) => controller.updateCloudContextDraft({ cloudProviderAlias })}
+        />
+        <SelectField
+          id="global-config-cloudcontext-region"
+          label="Region"
+          value={dialog.cloudContextDraft.region || 'eu-west-2'}
+          options={[
+            { value: 'eu-west-2', label: cloudRegionLabel('eu-west-2') },
+            { value: 'eu-west-1', label: cloudRegionLabel('eu-west-1') },
+          ]}
+          disabled={dialog.busy}
+          onChange={(region) => controller.updateCloudContextDraft({ region })}
+        />
+        <SelectField
+          id="global-config-cloudcontext-instancetype"
+          label="Instance type"
+          value={dialog.cloudContextDraft.instanceType}
+          options={[
+            { value: 'c8gd.2xlarge', label: 'c8gd.2xlarge' },
+            { value: 't4g.xlarge', label: 't4g.xlarge' },
+          ]}
+          disabled={dialog.busy}
+          onChange={(instanceType) => controller.updateCloudContextDraft({ instanceType })}
+        />
+        <SelectField
+          id="global-config-cloudcontext-disksize"
+          label="Disk size"
+          value={String(dialog.cloudContextDraft.diskSizeGb)}
+          options={[
+            { value: '100', label: '100' },
+            { value: '200', label: '200' },
+          ]}
+          disabled={dialog.busy}
+          onChange={(diskSizeGb) => controller.updateCloudContextDraft({ diskSizeGb: Number(diskSizeGb) })}
+        />
       </div>
+      <p className="text-[12px] leading-[1.4] text-muted-foreground">Region, instance type, and disk size are common choices vetted for ERun. Contact an admin to expand the list.</p>
       <CloudContextNameField controller={controller} dialog={dialog} generatedName={generated} />
     </div>
   );
@@ -174,13 +252,13 @@ function CloudContextList({ controller, dialog }: { controller: ERunUIController
   );
 }
 
-function CloudContextSummary({ context }: { context: GlobalConfigDialog['config']['cloudContexts'][number] }): React.ReactElement {
+function CloudContextSummary({ context }: { context: NonNullable<GlobalConfigDialog['config']['cloudContexts']>[number] }): React.ReactElement {
   return (
     <div className="grid min-w-0 gap-1">
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
         <Server className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="truncate">{context.kubernetesContext || context.name}</span>
-        <StatusBadge status={context.status} />
+        <CloudStatusBadge status={context.status} />
       </div>
       <div className="truncate text-xs text-muted-foreground">
         {cloudContextSummary(context)}
@@ -207,19 +285,9 @@ function GlobalConfigFooter({ controller, dialog }: { controller: ERunUIControll
   );
 }
 
-function StatusBadge({ status }: { status: string }): React.ReactElement {
+function CloudStatusBadge({ status }: { status: string }): React.ReactElement {
   const normalized = status.trim() || 'unknown';
-  const className =
-    normalized === 'active' || normalized === 'running'
-      ? 'border-green-600/35 bg-green-600/10 text-green-700 dark:text-green-400'
-      : normalized === 'expired' || normalized === 'not_configured'
-        ? 'border-[color-mix(in_oklch,var(--destructive)_35%,var(--border))] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] text-destructive'
-        : 'border-border bg-muted/40 text-muted-foreground';
-  return (
-    <span className={`shrink-0 rounded-[calc(var(--radius)-2px)] border px-1.5 py-0.5 text-[11px] leading-none font-medium ${className}`}>
-      {statusLabel(normalized)}
-    </span>
-  );
+  return <StatusBadge tone={cloudProviderStatusTone(normalized)} label={statusLabel(normalized)} />;
 }
 
 function CloudAliasAction({ status, busy, loading, onLogin }: { status: string; busy: boolean; loading: boolean; onLogin: () => void }): React.ReactElement {
@@ -280,15 +348,27 @@ function cloudContextSummary(context: { cloudProviderAlias: string; region: stri
   return parts.join(' - ');
 }
 
+const AWS_REGION_NAMES: Record<string, string> = {
+  'eu-west-1': 'Ireland',
+  'eu-west-2': 'London',
+  'eu-west-3': 'Paris',
+  'eu-central-1': 'Frankfurt',
+  'eu-north-1': 'Stockholm',
+  'eu-south-1': 'Milan',
+  'us-east-1': 'N. Virginia',
+  'us-east-2': 'Ohio',
+  'us-west-1': 'N. California',
+  'us-west-2': 'Oregon',
+  'ap-northeast-1': 'Tokyo',
+  'ap-northeast-2': 'Seoul',
+  'ap-south-1': 'Mumbai',
+  'ap-southeast-1': 'Singapore',
+  'ap-southeast-2': 'Sydney',
+};
+
 function cloudRegionLabel(region: string): string {
-  switch (region) {
-    case 'eu-west-2':
-      return 'London';
-    case 'eu-west-1':
-      return 'Ireland';
-    default:
-      return region;
-  }
+  const name = AWS_REGION_NAMES[region];
+  return name ? `${region} (${name})` : region;
 }
 
 function generatedContextName(provider: { alias: string; username?: string; accountId?: string } | undefined, region: string, contexts: Array<{ name: string; kubernetesContext: string }>): string {
@@ -356,84 +436,6 @@ function statusLabel(status: string): string {
     default:
       return 'Unknown';
   }
-}
-
-function RegionSelectInput({ id, value, disabled, onChange }: { id: string; value: string; disabled?: boolean; onChange: (value: string) => void }): React.ReactElement {
-  const regions = [
-    { value: 'eu-west-2', label: 'London' },
-    { value: 'eu-west-1', label: 'Ireland' },
-  ];
-  return (
-    <div className="grid gap-2">
-      <Label htmlFor={id}>Region</Label>
-      <select
-        id={id}
-        className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex h-10 w-full rounded-[var(--radius)] border px-3 py-2 text-sm file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-        value={value || 'eu-west-2'}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {regions.map((region) => (
-          <option key={region.value} value={region.value}>
-            {region.label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
-function SelectInput({ id, label, value, options, disabled, emptyLabel, onChange }: { id: string; label: string; value: string; options: string[]; disabled?: boolean; emptyLabel?: string; onChange: (value: string) => void }): React.ReactElement {
-  return (
-    <div className="grid gap-2">
-      <Label htmlFor={id}>{label}</Label>
-      <select
-        id={id}
-        className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex h-10 w-full rounded-[var(--radius)] border px-3 py-2 text-sm file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {options.length === 0 ? (
-          <option value="">{emptyLabel || 'No options'}</option>
-        ) : (
-          options.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))
-        )}
-      </select>
-    </div>
-  );
-}
-
-function SelectField({ id, label, value, options, disabled, onChange }: { id: string; label: string; value: string; options: string[]; disabled?: boolean; onChange: (value: string) => void }): React.ReactElement {
-  return (
-    <div className="grid gap-2">
-      <Label htmlFor={id}>{label}</Label>
-      <select
-        id={id}
-        className="border-input bg-background ring-offset-background placeholder:text-muted-foreground focus-visible:ring-ring flex h-10 w-full rounded-[var(--radius)] border px-3 py-2 text-sm file:border-0 file:bg-transparent file:text-sm file:font-medium focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
-        value={value}
-        disabled={disabled}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        {options.length === 0 ? (
-          <option value="">No tenants</option>
-        ) : (
-          <>
-            <option value="">Not configured</option>
-            {options.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </>
-        )}
-      </select>
-    </div>
-  );
 }
 
 function optionValues(values: string[], current: string): string[] {

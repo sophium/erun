@@ -9,7 +9,9 @@ import (
 )
 
 type DiffInput struct {
-	Verbosity int `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	Verbosity      int    `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
+	Scope          string `json:"scope,omitempty" jsonschema:"diff scope: current, commit, or all"`
+	SelectedCommit string `json:"selectedCommit,omitempty" jsonschema:"oldest commit hash to include when scope is commit"`
 }
 
 func diffTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, DiffInput) (*mcp.CallToolResult, eruncommon.DiffResult, error) {
@@ -21,7 +23,10 @@ func diffTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 		traceOutput := new(strings.Builder)
 		ctx := runtimeCallContext(false, input.Verbosity, nil, traceOutput, traceOutput)
 		ctx.TraceCommand(workDir, "git", "diff", "--no-color", "--no-ext-diff")
-		result, err := eruncommon.ResolveGitDiff(workDir, eruncommon.GitCommandRunner)
+		result, err := eruncommon.ResolveGitDiffWithOptions(workDir, eruncommon.DiffOptions{
+			Scope:          input.Scope,
+			SelectedCommit: input.SelectedCommit,
+		}, eruncommon.GitCommandRunner)
 		return nil, result, err
 	}
 }

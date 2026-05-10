@@ -1,0 +1,2 @@
+audit: erun devops container push --version <VERSION>
+cd <TMP> && docker push ghcr.io/sophium/cwd:<VERSION>

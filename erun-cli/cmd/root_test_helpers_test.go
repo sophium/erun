@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -32,7 +30,9 @@ type testRootDeps struct {
 	DeployHelmChart                common.HelmChartDeployerFunc
 	RecoverHelmRelease             common.HelmReleaseRecovererFunc
 	LaunchMCP                      MCPLauncher
+	LaunchAPI                      APILauncher
 	ForwardMCP                     MCPForwarder
+	ForwardAPI                     APIForwarder
 	LaunchApp                      AppLauncher
 	LaunchShell                    common.ShellLauncherFunc
 	WaitForRemoteRuntime           common.RemoteRuntimeWaitFunc
@@ -48,11 +48,6 @@ func requireNoError(t *testing.T, err error, context string) {
 	if err != nil {
 		t.Fatalf("%s: %v", context, err)
 	}
-}
-
-func requireMkdirAll(t *testing.T, path string, perm os.FileMode, context string) {
-	t.Helper()
-	requireNoError(t, os.MkdirAll(path, perm), context)
 }
 
 func requireWriteFile(t *testing.T, path string, data []byte, perm os.FileMode, context string) {
@@ -199,6 +194,13 @@ func testMCPLauncherOrDefault(launch MCPLauncher) MCPLauncher {
 	return launch
 }
 
+func testAPILauncherOrDefault(launch APILauncher) APILauncher {
+	if launch == nil {
+		return launchAPIProcess
+	}
+	return launch
+}
+
 func testAppLauncherOrDefault(launch AppLauncher) AppLauncher {
 	if launch == nil {
 		return launchAppProcess
@@ -243,6 +245,13 @@ func testMCPForwarderOrDefault(forward MCPForwarder) MCPForwarder {
 	return forward
 }
 
+func testAPIForwarderOrDefault(forward APIForwarder) APIForwarder {
+	if forward == nil {
+		return func(common.Context, common.OpenResult) error { return nil }
+	}
+	return forward
+}
+
 func testVSCodeLauncherOrDefault(launch VSCodeLauncher) VSCodeLauncher {
 	if launch == nil {
 		return launchVSCode
@@ -272,14 +281,16 @@ type testRootCmdParts struct {
 	loginToDockerRegistry          common.DockerRegistryLoginFunc
 	recoveringDeployHelmChart      common.HelmChartDeployerFunc
 	launchMCP                      MCPLauncher
+	launchAPI                      APILauncher
 	launchApp                      AppLauncher
 	runGit                         common.GitCommandRunnerFunc
 	openShell                      OpenShellRunner
 	now                            common.NowFunc
 	openDeployHelmChart            common.HelmChartDeployerFunc
 	resolveOpen                    func(common.OpenParams) (common.OpenResult, error)
-	resolveRuntimeDeploySpec       func(common.OpenResult) (common.DeploySpec, error)
+	resolveRuntimeDeploySpec       func(common.Context, common.OpenResult, bool) (common.DeploySpec, error)
 	activateMCP                    MCPForwarder
+	activateAPI                    APIForwarder
 	activateSSHD                   SSHDActivator
 	launchVSCodeCmd                VSCodeLauncher
 	launchIntelliJCmd              IntelliJLauncher
@@ -307,6 +318,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	deployHelmChart := testHelmDeployerOrDefault(deps.DeployHelmChart, deps.EnsureKubernetesNamespace)
 	recoveringDeployHelmChart := wrapHelmDeployWithReleaseRecovery(promptRunner, deployHelmChart, deps.RecoverHelmRelease)
 	launchMCP := testMCPLauncherOrDefault(deps.LaunchMCP)
+	launchAPI := testAPILauncherOrDefault(deps.LaunchAPI)
 	launchApp := testAppLauncherOrDefault(deps.LaunchApp)
 	runGit := testGitRunnerOrDefault(deps.RunGit)
 	openShell := testOpenShellRunnerOrDefault(deps.LaunchShell)
@@ -316,10 +328,11 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	resolveOpen := func(params common.OpenParams) (common.OpenResult, error) {
 		return common.ResolveOpen(store, params)
 	}
-	resolveRuntimeDeploySpec := func(target common.OpenResult) (common.DeploySpec, error) {
-		return resolveRuntimeDeploySpecForOpen(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, currentBuildInfo(), target)
+	resolveRuntimeDeploySpec := func(ctx common.Context, target common.OpenResult, allowLocalBuilds bool) (common.DeploySpec, error) {
+		return resolveRuntimeDeploySpecForOpen(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, currentBuildInfo(), target, allowLocalBuilds)
 	}
 	activateMCP := testMCPForwarderOrDefault(deps.ForwardMCP)
+	activateAPI := testAPIForwarderOrDefault(deps.ForwardAPI)
 	activateSSHD := newSSHDActivator(deps.RunRemoteCommand)
 	launchVSCodeCmd := testVSCodeLauncherOrDefault(deps.LaunchVSCode)
 	launchIntelliJCmd := testIntelliJLauncherOrDefault(deps.LaunchIntelliJ)
@@ -327,6 +340,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 	runManagedDeploy := func(ctx common.Context, target common.OpenResult) error {
 		ctx = withCloudContextPreflight(ctx, store)
 		specs, err := common.ResolveCurrentDeploySpecs(
+			ctx,
 			store,
 			findProjectRoot,
 			resolveDockerBuildContext,
@@ -368,6 +382,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 		loginToDockerRegistry:          loginToDockerRegistry,
 		recoveringDeployHelmChart:      recoveringDeployHelmChart,
 		launchMCP:                      launchMCP,
+		launchAPI:                      launchAPI,
 		launchApp:                      launchApp,
 		runGit:                         runGit,
 		openShell:                      openShell,
@@ -376,6 +391,7 @@ func newTestRootCmd(deps testRootDeps) *cobra.Command {
 		resolveOpen:                    resolveOpen,
 		resolveRuntimeDeploySpec:       resolveRuntimeDeploySpec,
 		activateMCP:                    activateMCP,
+		activateAPI:                    activateAPI,
 		activateSSHD:                   activateSSHD,
 		launchVSCodeCmd:                launchVSCodeCmd,
 		launchIntelliJCmd:              launchIntelliJCmd,
@@ -391,10 +407,10 @@ func assembleTestRootCmd(parts testRootCmdParts) *cobra.Command {
 	initCmd := newInitCmd(parts.runInit)
 	openCmd := newOpenCmd(func(ctx common.Context) common.Context {
 		return withCloudContextPreflight(ctx, parts.store)
-	}, parts.resolveOpen, parts.store.SaveEnvConfig, parts.runInitForOpen, parts.promptRunner, parts.openShell, parts.runManagedDeploy, parts.deps.CheckKubernetesDeployment, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.activateMCP, parts.activateSSHD, parts.launchVSCodeCmd, parts.launchIntelliJCmd)
+	}, parts.resolveOpen, parts.store.SaveEnvConfig, parts.runInitForOpen, parts.promptRunner, parts.openShell, parts.runManagedDeploy, parts.deps.CheckKubernetesDeployment, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.activateMCP, parts.activateAPI, parts.activateSSHD, parts.launchVSCodeCmd, parts.launchIntelliJCmd)
 	sshdCmd := newSSHDCmd(func(ctx common.Context) common.Context {
 		return withCloudContextPreflight(ctx, parts.store)
-	}, parts.resolveOpen, parts.store.SaveEnvConfig, parts.runInitForOpen, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.deps.RunRemoteCommand, writeLocalSSHConfig)
+	}, parts.resolveOpen, parts.store.SaveEnvConfig, parts.runInitForOpen, parts.findProjectRoot, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.deps.RunRemoteCommand, writeLocalSSHConfig)
 	containerCmd := newCommandGroup(
 		"container",
 		"Container utilities",
@@ -418,6 +434,7 @@ func assembleTestRootCmd(parts testRootCmdParts) *cobra.Command {
 	addCommands(cmd,
 		initCmd, openCmd, sshdCmd, devopsCmd, buildCmd, pushCmd, deployCmd,
 		newMCPCmd(parts.resolveOpen, parts.runInitForArgs, parts.launchMCP),
+		newAPICmd(parts.resolveOpen, parts.runInitForArgs, parts.launchAPI),
 		newAppCmd(parts.launchApp),
 		newExecCmd(parts.findProjectRoot, parts.runGit, parts.deps.RunRawCommand),
 		newCloudCmd(testCloudStoreOrDefault(parts.store), parts.promptRunner, parts.selectRunner, common.CloudDependencies{}),
@@ -443,15 +460,12 @@ func optionalTestPushCmd(parts testRootCmdParts) *cobra.Command {
 	if !hasOptionalPushCmd(parts.optionalBuildFindProjectRoot, parts.resolveDockerBuildContext) {
 		return nil
 	}
-	pushCmd := newPushCmd(parts.store, parts.findProjectRoot, parts.resolveDockerBuildContext, parts.now, parts.buildDockerImage, parts.push)
+	pushCmd := newRootPushCmd(parts.store, parts.findProjectRoot, parts.resolveDockerBuildContext, parts.now, parts.buildDockerImage, parts.push)
 	pushCmd.Short = optionalPushCmdShort(parts.optionalBuildFindProjectRoot, parts.resolveDockerBuildContext)
 	return pushCmd
 }
 
 func optionalTestDeployCmd(parts testRootCmdParts) *cobra.Command {
-	if !hasOptionalDeployCmd(parts.resolveKubernetesDeployContext) {
-		return nil
-	}
 	return newDeployCmd(parts.store, parts.findProjectRoot, parts.resolveDockerBuildContext, parts.resolveKubernetesDeployContext, parts.now, parts.buildDockerImage, parts.push, parts.recoveringDeployHelmChart)
 }
 
@@ -465,26 +479,6 @@ func testRootRunner(parts testRootCmdParts) func(*cobra.Command, []string) error
 		if initRan {
 			return nil
 		}
-		return runResolvedOpenCommand(ctx, result, openOptions{}, parts.promptRunner, parts.openShell, parts.runManagedDeploy, parts.deps.CheckKubernetesDeployment, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.activateMCP, parts.activateSSHD, parts.launchVSCodeCmd, parts.launchIntelliJCmd)
+		return runResolvedOpenCommandWithAPI(ctx, result, openOptions{}, parts.promptRunner, parts.openShell, parts.runManagedDeploy, parts.deps.CheckKubernetesDeployment, parts.resolveRuntimeDeploySpec, parts.openDeployHelmChart, parts.activateMCP, parts.activateAPI, parts.activateSSHD, parts.launchVSCodeCmd, parts.launchIntelliJCmd)
 	}
-}
-
-func stubKubectlContexts(t *testing.T, contexts []string, current string) {
-	t.Helper()
-
-	kubectlDir := t.TempDir()
-	kubectlPath := filepath.Join(kubectlDir, "kubectl")
-	script := "#!/bin/sh\n" +
-		"if [ \"$1\" = \"config\" ] && [ \"$2\" = \"get-contexts\" ] && [ \"$3\" = \"-o=name\" ]; then\n" +
-		"  cat <<'EOF'\n" + strings.Join(contexts, "\n") + "\nEOF\n" +
-		"  exit 0\n" +
-		"fi\n" +
-		"if [ \"$1\" = \"config\" ] && [ \"$2\" = \"current-context\" ]; then\n" +
-		"  printf '%s\\n' '" + current + "'\n" +
-		"  exit 0\n" +
-		"fi\n" +
-		"echo \"unexpected kubectl invocation: $@\" >&2\n" +
-		"exit 1\n"
-	requireNoError(t, os.WriteFile(kubectlPath, []byte(script), 0o755), "write kubectl stub")
-	t.Setenv("PATH", kubectlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 }

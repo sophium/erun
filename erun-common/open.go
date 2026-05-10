@@ -24,6 +24,7 @@ var (
 	ErrKubernetesContextNotConfigured  = errors.New("kubernetes context is not configured")
 	ErrRepoPathNotConfigured           = errors.New("repo path is not configured")
 	ErrShellReattachDeploy             = errors.New("remote shell requested deploy handoff and reattach")
+	ErrShellPodReplaced                = errors.New("remote shell pod was replaced; reattach")
 
 	openUserHomeDir = os.UserHomeDir
 )
@@ -396,7 +397,7 @@ func resolveEffectiveKubernetesContext(environment, configured string, listConte
 }
 
 func listKubernetesContextNames() ([]string, error) {
-	output, err := exec.Command("kubectl", "config", "get-contexts", "-o=name").Output()
+	output, err := Command("kubectl", "config", "get-contexts", "-o=name").Output()
 	if err != nil {
 		return nil, err
 	}
@@ -414,7 +415,7 @@ func listKubernetesContextNames() ([]string, error) {
 }
 
 func currentKubernetesContextName() (string, error) {
-	output, err := exec.Command("kubectl", "config", "current-context").Output()
+	output, err := Command("kubectl", "config", "current-context").Output()
 	if err != nil {
 		return "", err
 	}
@@ -463,10 +464,10 @@ func LaunchShell(req ShellLaunchParams) error {
 }
 
 func WaitForShellDeployment(req ShellLaunchParams) error {
-	waitCmd := exec.Command("kubectl", kubectlDeploymentWaitArgs(req)...)
-	waitCmd.Stdout = io.Discard
-	waitCmd.Stderr = os.Stderr
-	return waitCmd.Run()
+	if err := runOpenKubectl(kubectlDeploymentWaitArgs(req), io.Discard, os.Stderr); err != nil {
+		return enrichShellDeploymentError(req, err, runOpenKubectl)
+	}
+	return nil
 }
 
 func ExecShell(req ShellLaunchParams) error {
@@ -475,7 +476,7 @@ func ExecShell(req ShellLaunchParams) error {
 		return err
 	}
 
-	cmd := exec.Command("kubectl", kubectlExecArgs(req, script)...)
+	cmd := Command("kubectl", kubectlExecArgs(req, script)...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -483,7 +484,10 @@ func ExecShell(req ShellLaunchParams) error {
 		if isShellReattachDeployExit(err) {
 			return ErrShellReattachDeploy
 		}
-		return err
+		if isShellReplacementExit(err) && shellReplacementPodReady(req, runOpenKubectl) {
+			return ErrShellPodReplaced
+		}
+		return enrichShellDeploymentError(req, err, runOpenKubectl)
 	}
 	return nil
 }
@@ -607,6 +611,7 @@ func remoteShellConfigForRequest(req ShellLaunchParams) (remoteShellConfig, erro
 func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig, workdir, title string) []string {
 	return []string{
 		"set -eu",
+		"export COLORTERM=truecolor",
 		fmt.Sprintf("mkdir -p %s", workdir),
 		fmt.Sprintf("cd %s", workdir),
 		"config_home=\"${XDG_CONFIG_HOME:-$HOME/.config}\"",
@@ -702,8 +707,16 @@ func isShellReattachDeployExit(err error) bool {
 	return exitErr.ExitCode() == remoteShellReattachDeployExitCode
 }
 
+func isShellReplacementExit(err error) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	return exitErr.ExitCode() == 137
+}
+
 func resolveGitRemote(repoPath string) (string, string, string, error) {
-	output, err := exec.Command("git", "-C", repoPath, "remote", "get-url", "origin").Output()
+	output, err := Command("git", "-C", repoPath, "remote", "get-url", "origin").Output()
 	if err != nil {
 		return "", "", "", err
 	}

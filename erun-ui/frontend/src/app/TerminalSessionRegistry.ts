@@ -16,6 +16,7 @@ export class TerminalSessionRegistry {
   private readonly sessionExitOutputs = new Map<number, string>();
   private readonly debugOpenFilters = new Map<number, DebugOpenFilter>();
   private readonly debugSessionModes = new Map<number, DebugSessionMode>();
+  private readonly sessionDebugBuffers = new Map<number, string>();
 
   knownSelectionSession(key: string): number {
     return this.selectionSessions.get(key) || 0;
@@ -110,6 +111,7 @@ export class TerminalSessionRegistry {
     this.openSessionSelections.delete(sessionId);
     this.cloudInitSessions.delete(sessionId);
     this.debugSessionModes.delete(sessionId);
+    this.sessionDebugBuffers.delete(sessionId);
     if (selections.openSelection) {
       this.selectionSessions.delete(selectionKey(selections.openSelection));
     }
@@ -137,5 +139,21 @@ export class TerminalSessionRegistry {
       return;
     }
     this.debugSessionModes.set(sessionId, mode);
+  }
+
+  sessionDebug(sessionId: number): string {
+    return this.sessionDebugBuffers.get(sessionId) || '';
+  }
+
+  setSessionDebug(sessionId: number, value: string): void {
+    if (!value) {
+      this.sessionDebugBuffers.delete(sessionId);
+      return;
+    }
+    this.sessionDebugBuffers.set(sessionId, value);
+  }
+
+  clearSessionDebug(sessionId: number): void {
+    this.sessionDebugBuffers.delete(sessionId);
   }
 }

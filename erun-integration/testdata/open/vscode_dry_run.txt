@@ -1,0 +1,36 @@
+SSH:
+  host: <LOOPBACK>
+  alias: erun-team-dev
+  port: 17022
+  user: erun
+  key: none
+  workspace: <HOME>/git/team
+audit: erun open --dry-run --vscode team dev
+open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=vscode
+kubectl --context test-context --namespace team-dev get deployment team-devops -o name
+open: dry-run: would deploy runtime for team/dev before launching VS Code; in real mode the user must run `erun sshd init team dev` or `erun open team dev` first
+sshd: dry-run: no SSH public key found; use --public-key to choose one; using placeholder key for trace
+kubectl --context test-context --namespace team-dev exec deployment/team-devops -- /bin/sh -lc '<remote-script>'
+remote-ssh-authorized-keys:
+  set -eu
+  mkdir -p "$HOME/.ssh"
+  chmod 700 "$HOME/.ssh"
+  key_file="$HOME/.ssh/authorized_keys"
+  tmp_keys="$(mktemp)"
+  tmp_new="$(mktemp)"
+  touch "$key_file"
+  chmod 600 "$key_file"
+  cat > "$tmp_new" <<'EOF'
+  <placeholder-public-key>
+  EOF
+  grep -Fvx -f "$tmp_new" "$key_file" > "$tmp_keys" || true
+  cat "$tmp_new" >> "$tmp_keys"
+  mv "$tmp_keys" "$key_file"
+  rm -f "$tmp_new"
+  chmod 600 "$key_file"
+kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17022:17022 --address <LOOPBACK>
+kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address <LOOPBACK>
+kubectl --context test-context --namespace team-dev get deployment erun-api -o name
+kubectl --context test-context --namespace team-dev port-forward service/erun-api 17033:17033 --address <LOOPBACK>
+ssh-keyscan -p 17022 <LOOPBACK>
+open vscode://vscode-remote/ssh-remote+erun-team-dev<HOME>/git/team

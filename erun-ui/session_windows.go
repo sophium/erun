@@ -25,7 +25,7 @@ func startTerminalSession(params startTerminalSessionParams) (terminalSession, e
 		return nil, err
 	}
 
-	env := append(os.Environ(), params.Env...)
+	env := append(os.Environ(), append(params.Env, "TERM=xterm-256color", "COLORTERM=truecolor")...)
 	args := append([]string{params.Executable}, params.Args...)
 
 	pid, _, err := ptyDevice.Spawn(params.Executable, args, &syscall.ProcAttr{
@@ -41,6 +41,14 @@ func startTerminalSession(params startTerminalSessionParams) (terminalSession, e
 	if err != nil {
 		_ = ptyDevice.Close()
 		return nil, err
+	}
+
+	if len(params.InitialInput) > 0 {
+		if _, writeErr := ptyDevice.Write(params.InitialInput); writeErr != nil {
+			_ = process.Kill()
+			_ = ptyDevice.Close()
+			return nil, writeErr
+		}
 	}
 
 	session := &windowsTerminalSession{
@@ -62,6 +70,13 @@ func (s *windowsTerminalSession) Write(buffer []byte) (int, error) {
 
 func (s *windowsTerminalSession) Resize(cols, rows int) error {
 	return s.pty.Resize(uint16(cols), uint16(rows))
+}
+
+func (s *windowsTerminalSession) Pid() int {
+	if s == nil || s.process == nil {
+		return 0
+	}
+	return s.process.Pid
 }
 
 func (s *windowsTerminalSession) Wait() error {

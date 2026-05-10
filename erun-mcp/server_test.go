@@ -165,7 +165,7 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListTools failed: %v", err)
 	}
-	if len(tools.Tools) != 20 {
+	if len(tools.Tools) != 21 {
 		t.Fatalf("unexpected tools: %+v", tools.Tools)
 	}
 
@@ -516,10 +516,31 @@ func TestBuildToolPreviewVerboseIncludesTrace(t *testing.T) {
 	if len(output.Trace) == 0 {
 		t.Fatalf("expected trace output at preview verbosity 1, got %+v", output)
 	}
-	want := "docker build -t erunpaas/erun-devops:1.1.0 --build-arg ERUN_VERSION=1.1.0 -f " + filepath.Join(componentDir, "Dockerfile") + " ."
-	if output.Trace[0] != "cd "+projectRoot+" && "+want {
-		t.Fatalf("unexpected trace output: %+v", output.Trace)
+	want := "cd " + projectRoot + " && docker build -t ghcr.io/sophium/erun-devops:1.1.0 --build-arg ERUN_VERSION=1.1.0 -f " + filepath.Join(componentDir, "Dockerfile") + " ."
+	if !traceContains(output.Trace, want) {
+		t.Fatalf("expected build trace line %q, got %+v", want, output.Trace)
 	}
+	if !traceMatchesContains(output.Trace, "docker tag ghcr.io/sophium/erun-devops:1.1.0 ghcr.io/sophium/erun-devops:fp-") {
+		t.Fatalf("expected fingerprint tag trace, got %+v", output.Trace)
+	}
+}
+
+func traceContains(trace []string, line string) bool {
+	for _, entry := range trace {
+		if entry == line {
+			return true
+		}
+	}
+	return false
+}
+
+func traceMatchesContains(trace []string, substring string) bool {
+	for _, entry := range trace {
+		if strings.Contains(entry, substring) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestBuildToolPreviewReleaseIncludesReleaseAndBuildTrace(t *testing.T) {
@@ -559,14 +580,19 @@ func TestBuildToolPreviewReleaseIncludesReleaseAndBuildTrace(t *testing.T) {
 }
 
 func hasReleaseBuildTrace(traces []string) bool {
+	hasAmd, hasArm, hasManifestPush := false, false, false
 	for _, trace := range traces {
-		if strings.Contains(trace, "docker buildx build --builder erun-multiarch --platform 'linux/amd64,linux/arm64'") &&
-			strings.Contains(trace, "-t erunpaas/api:1.4.2-rc.") &&
-			strings.Contains(trace, "--push") {
-			return true
+		if strings.Contains(trace, "docker build --platform linux/amd64") && strings.Contains(trace, "/api:1.4.2-rc.") && strings.Contains(trace, "-amd64") {
+			hasAmd = true
+		}
+		if strings.Contains(trace, "docker build --platform linux/arm64") && strings.Contains(trace, "/api:1.4.2-rc.") && strings.Contains(trace, "-arm64") {
+			hasArm = true
+		}
+		if strings.Contains(trace, "docker manifest push") && strings.Contains(trace, "/api:1.4.2-rc.") {
+			hasManifestPush = true
 		}
 	}
-	return false
+	return hasAmd && hasArm && hasManifestPush
 }
 
 func hasReleaseVersionReport(traces []string) bool {
@@ -622,7 +648,10 @@ func TestBuildToolPreviewAtRepoRootIncludesBuildTrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildTool failed: %v", err)
 	}
-	if len(output.Trace) != 2 {
+	// Per build context: 1 incremental fp inspect + 1 incremental decision +
+	// 1 docker build + 1 fingerprint docker tag = 4 entries. Two build contexts
+	// (tenant-a-devops + erun-dind) → 8 trace entries.
+	if len(output.Trace) != 8 {
 		t.Fatalf("unexpected trace output: %+v", output.Trace)
 	}
 }

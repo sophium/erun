@@ -1,0 +1,42 @@
+# Keep the build context lean and stable. Mirrors .gitignore plus VCS,
+# IDE, and tooling state that must never enter the image or perturb cache keys.
+
+# Version control / hooks
+.git
+.githooks
+.github
+
+# IDE / editor / agent state
+.idea
+.vscode
+.claude
+.codex
+.erun
+
+# Go build artifacts and test output
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+__debug_bin*
+.gomodcache
+
+# Local packaging / release artifacts
+/packaging/apt/dist
+/erun-devops/linux/*/dist
+/erun-cli/bin/erun-app
+
+# Desktop UI build outputs (not consumed by service Dockerfiles)
+/erun-ui/bin
+/erun-ui/frontend/node_modules
+/erun-ui/frontend/dist
+/erun-ui/frontend/wailsjs
+
+# Env files
+.env

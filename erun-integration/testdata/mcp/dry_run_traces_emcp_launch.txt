@@ -1,0 +1,2 @@
+audit: erun mcp --dry-run --host <VERSION>.0 --path custom --port 17001 team dev
+emcp --host <VERSION>.0 --port 17001 --path custom --tenant team --environment dev --repo-path <TMP> --kubernetes-context test-context --namespace team-dev

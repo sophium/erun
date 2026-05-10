@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+
 	common "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
 )
@@ -9,6 +11,7 @@ func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinder
 	target := common.DeployTarget{}
 	var snapshot bool
 	var noSnapshot bool
+	var components []string
 	cmd := &cobra.Command{
 		Use:           "deploy [TENANT] [ENVIRONMENT]",
 		Short:         "Deploy the current Helm chart or all charts in the current devops k8s scope",
@@ -29,15 +32,22 @@ func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinder
 				snapshotOverride = &snapshot
 			}
 			deployTarget.Snapshot = snapshotOverride
-			deploySpecs, err := common.ResolveCurrentDeploySpecs(store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
+			deployTarget.Components = components
+			ctx.Trace(fmt.Sprintf("deploy: tenant=%s environment=%s version-override=%s snapshot=%v components=%v force=%v",
+				deployTarget.Tenant, deployTarget.Environment, deployTarget.VersionOverride,
+				snapshotOverride != nil && *snapshotOverride, components, deployTarget.Force))
+			deploySpecs, err := common.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 			if err != nil {
+				ctx.Trace("deploy: spec resolution failed: " + err.Error())
 				return err
 			}
+			ctx.Trace(fmt.Sprintf("deploy: resolved %d spec(s)", len(deploySpecs)))
 			return common.RunDeploySpecs(ctx, deploySpecs, buildDockerImage, push, deployHelmChart)
 		},
 	}
 	addDryRunFlag(cmd)
 	addDeployCommandTargetFlags(cmd, &target, &snapshot, &noSnapshot)
+	cmd.Flags().StringSliceVar(&components, "components", nil, "Opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api)")
 	return cmd
 }
 
@@ -61,7 +71,7 @@ func newK8sDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFin
 				snapshotOverride = &snapshot
 			}
 			target.Snapshot = snapshotOverride
-			deploySpec, err := common.ResolveDeploySpec(store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, args[0], "")
+			deploySpec, err := common.ResolveDeploySpec(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, args[0], "")
 			if err != nil {
 				return err
 			}
@@ -78,6 +88,7 @@ func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget
 	addSnapshotFlags(cmd, snapshot, noSnapshot, "Build and deploy local snapshot images in the local environment")
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Deploy for a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Deploy for a specific environment; requires --tenant")
+	cmd.Flags().BoolVar(&target.Force, "force", false, "Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected")
 	cmd.Flags().StringVar(&target.RepoPath, "repo-path", "", "Repo path override for internal tooling")
 	_ = cmd.Flags().MarkHidden("repo-path")
 }

@@ -1,0 +1,6 @@
+audit: erun push
+cd <TMP> && docker push ghcr.io/sophium/api:<VERSION>
+unauthorized: authentication required: denied: requested access to the resource is denied
+cd <TMP> && docker login ghcr.io
+cd <TMP> && docker push ghcr.io/sophium/api:<VERSION>
+cd <TMP> && docker push ghcr.io/sophium/base:<VERSION>

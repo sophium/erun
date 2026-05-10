@@ -3,9 +3,16 @@
 Repository guidance for humans and coding agents working in this repo.
 
 - Follow this file for the whole repository.
-- When working inside a subdirectory that has its own `AGENTS.md`, follow the child file as additional, more specific guidance for that subtree.
-- Submodules may define their own `AGENTS.md` files with more specific guidance. See `erun-ui/AGENTS.md` for desktop-module guidance.
-- See `erun-devops/AGENTS.md` for runtime-image, chart, build-cache, and release-workflow guidance in the DevOps module.
+- **Always read every applicable `AGENTS.md` before touching files in its subtree, on every task, even when you have read it before in another conversation or earlier in this one.** "Applicable" means this root file plus the `AGENTS.md` of every directory that is an ancestor of, or contains, the files you are about to read, edit, run, or test. Read each one end-to-end and apply its guidance to the work; do not rely on memory or summaries.
+- When in doubt, list `AGENTS.md` files with `find . -name AGENTS.md -not -path '*/node_modules/*'` and read each one whose path is a prefix of, or descendant of, the area you are about to change. Skipping this step has caused real bugs (e.g. shell-syntax assumptions that broke zsh on macOS).
+- Current `AGENTS.md` files in this repo:
+  - `AGENTS.md` (this file) — repository-wide rules.
+  - `erun-ui/AGENTS.md` — desktop-module guidance, including macOS + Windows targets and Wails frontend rules.
+  - `erun-devops/AGENTS.md` — runtime-image, chart, build-cache, and release-workflow guidance.
+  - `erun-integration/AGENTS.md` — integration-test harness layout, scenario shape, and the coverage gate.
+  - `erun-backend/AGENTS.md` plus `erun-backend/erun-backend-api/AGENTS.md` and `erun-backend/erun-backend-db/AGENTS.md` — hosted-backend, API, and Atlas-migration guidance.
+- A child `AGENTS.md` is additional, not a replacement: parent rules still apply unless the child explicitly overrides them.
+- If you add a new `AGENTS.md` anywhere in the tree, also list it in the bullet above so future readers find it without searching.
 
 ## Contributing
 
@@ -27,8 +34,10 @@ Repository guidance for humans and coding agents working in this repo.
 - `erun-cli` - CLI utility
 - `erun-common` - shared common module
 - `erun-mcp` - MCP server module
+- `erun-backend` - backend service area containing the API and database migration modules
 - `erun-devops` - runtime Docker images, Linux packaging, and Kubernetes chart assets used by build, open, deploy, and release flows
 - `erun-ui` - desktop app module built with Wails, using a Go backend and a TypeScript/Yarn frontend
+- `erun-integration` - cross-module integration test harness; runs the compiled `erun` binary with `--dry-run` against per-command goldens and gates merged coverage
 
 ## Module Boundaries
 
@@ -44,6 +53,9 @@ Repository guidance for humans and coding agents working in this repo.
 - `erun-ui` may depend on `erun-common`, and it may launch the installed `erun` executable as a child process for interactive terminal sessions, but it must not import `erun-cli` packages.
 - `erun-mcp` owns MCP transport concerns: server startup, HTTP handler wiring, SDK integration, tool registration, and the `cmd/emcp` executable.
 - Keep MCP-specific configuration, flag parsing, and transport wiring in `erun-mcp`, not in `erun-cli` or `erun-common`.
+- `erun-backend-api` owns hosted backend HTTP API concerns: request authentication, tenant resolution from OIDC claims, API routing, and server-side transport contracts.
+- `erun-backend-db` owns backend database schema and migration concerns. Manage schema changes through Atlas migrations in that module instead of embedding schema setup in API startup code.
+- `erun-cli` and `erun-mcp` should reach backend functionality through transport-neutral clients and contracts in `erun-common`, not by importing backend API packages directly.
 - Keep `erun-common` usable as a standalone library for third parties. Shared code placed there must be transport-agnostic and should not depend on Cobra, the MCP SDK, or module-specific orchestration.
 - When sharing operation contracts across modules, prefer transport-neutral names such as plan, request, result, or input/output. Do not put MCP-only wrapper types in `erun-common` unless they are intentionally generic library contracts.
 - Prefer reusing a shared struct over creating a transport-local duplicate with the same shape. When one shared struct is the canonical contract for both CLI and MCP, transport-specific annotations such as `json` tags are acceptable in `erun-common` to avoid structure duplication.
@@ -124,6 +136,7 @@ Repository guidance for humans and coding agents working in this repo.
 ## Working Rules
 
 - Start each non-trivial change by identifying the smallest coherent outcome that would satisfy the request, the modules likely affected, and the validation scope needed for confidence.
+- When asking the user to confirm a plan, show a plan only for the intended change, not for discovery by itself. Describe the actual changes to make: the behavior that will change, the user-visible outcome, the likely files or modules to edit, and the validation that will prove the change. Keep investigation or discovery steps out of the plan unless they materially affect the proposed implementation.
 - Prefer fast, evidence-driven iteration. Use existing behavior, failing symptoms, tests, and screenshots as the source of truth, then tighten the implementation around the observed problem.
 - Keep work centered on the current user goal. Avoid opportunistic cleanup, broad redesign, or unrelated polish unless it directly reduces risk for the requested change.
 - When a problem crosses module boundaries, solve it at the lowest shared layer that owns the behavior, then keep transport-specific code focused on adaptation and presentation.
@@ -144,11 +157,25 @@ Repository guidance for humans and coding agents working in this repo.
 - CLI prompts are acceptable in interactive flows, but MCP-exposed paths should receive all required input explicitly and fail clearly when input is missing.
 - Prefer deterministic command behavior so tool calls are safe to run repeatedly and concurrently.
 - Prefer safety and clarity over micro-optimizations.
-- When answering whether an issue, bug, or feature is done, blocked, or regresssed, report concrete evidence from code, tests, linked PRs, commits, or observed behavior. Do not answer from personal opinion or confidence alone.
-- If evidence is incomplete, say what was checked and what is still missing instead of filling the gap with a judgment call.
+- For documentation-only guidance changes, do not change app behavior. Update the nearest applicable `AGENTS.md` and validate by reviewing the edited guidance for consistency.
 - Do not add new documentation files unless the user explicitly asks for them; add repository instructions to `AGENTS.md` instead.
 - Keep `AGENTS.md` focused on repository workflow and engineering guidance; do not document app behavior, command semantics, or end-user functionality in it.
 - Do not modify `README.md` unless the user explicitly asks for a README change.
+
+## Integration Test Gate (Mandatory)
+
+- `make integration-test` must be green on `main` at all times. Do not merge a PR that leaves any scenario red, including scenarios that were already failing before your branch — if you discover a preexisting red, either fix it in the same PR or open a tracking issue and a follow-up PR before merging anything else that touches the suite. "Some tests were already broken" is not a license to add more.
+- Run `go test ./...` (or `make integration-test`) under `erun-integration/` before pushing any change that touches `erun-cli`, `erun-common`, the runtime entrypoint, the chart deploy plumbing, or any integration golden. If a scenario is red on your machine but you believe it is "platform-dependent" or "flaky", that is a defect to fix (see the host-OS pinning guidance in `erun-integration/AGENTS.md`), not a reason to ship.
+- Any change touching `erun-cli`, `erun-common`, the runtime entrypoint, or the chart deploy plumbing must keep `make integration-test` passing. The target builds the `erun` binary with coverage instrumentation, runs the suite under `erun-integration/`, merges counters, and fails when total statement coverage of `erun-cli` + `erun-common` drops below the configured threshold (`COVERAGE_THRESHOLD`, default 90%).
+- The integration suite runs the compiled binary as a subprocess against per-command `--dry-run` goldens. The contract for `--dry-run` is therefore a hard public-surface boundary: every action and every decision the command would take must appear as a trace line, regardless of whether downstream input resolution succeeds. Treat a missing trace as a bug, not a documentation gap.
+- Integration scenarios must use `--dry-run` only. `erun` is meant to be fully auditable: if a code path cannot be reached or proven correct from a dry-run trace, that is a defect in the dry-run contract, not a license to bring in stubs. Reaching for stub binaries (`ERUN_<NAME>_BIN`, scripted `kubectl`/`helm`/`docker`/`git` replacements, etc.) to drive an integration scenario is a code smell. The fix is in production code: add the missing trace lines, gate the side effect behind `if !ctx.DryRun`, and then write the scenario against the dry-run output.
+- When you add or change a command, add or update integration scenarios in `erun-integration/` for every flag combination that influences the resolved plan. Use `UPDATE_GOLDEN=1 go test ./erun-integration/...` to regenerate `testdata/<command>/<scenario>.txt`, then re-run without the flag to lock the snapshot in.
+- Do not skip integration scenarios to make the suite green. If a regression is discovered, leave the failing scenario in place so the gate fails until the regression is fixed; that is the suite working as designed.
+- Coverage is gated on `erun-cli` + `erun-common` only. Other modules (`erun-mcp`, `erun-backend`, `erun-ui`) are validated by their own per-module test suites and do not count toward this gate. To extend coverage scope, edit `erun-integration/internal/erun.CoverPkgs` and the script's threshold logic together.
+- Test `erun-cli` and `erun-common` behavior with integration scenarios. The integration suite is the single source of truth for coverage on those modules: it exercises the compiled binary end-to-end and is the only signal the gate enforces. Unit tests in those packages do not contribute to the gate, so any coverage they appear to provide is invisible at merge time.
+- When you add or change behavior in `erun-cli` or `erun-common`, write the integration scenario. If a code branch looks unreachable from the binary subprocess (e.g. an error wrapped opaquely, a pure parser with no production caller), the defect is almost always in the production path — wrap the error, expose the trace, or remove the dead branch — not in the test strategy. Fix the production code so the branch becomes reachable, then write the scenario.
+- When a unit test in `erun-cli` or `erun-common` overlaps with an existing integration scenario, delete the unit test. Keeping both forks the source of truth, hides drift, and inflates per-module coverage numbers without moving the gate.
+- See `erun-integration/AGENTS.md` for harness layout, scenario shape, fixture patterns, normalization rules, and stub-injection guidance.
 
 ## Release Rules
 
@@ -156,8 +183,8 @@ Repository guidance for humans and coding agents working in this repo.
 - When release, launcher, or desktop packaging behavior changes affect the desktop app, validate `erun-ui` too and keep package-manager metadata aligned with the desktop build outputs.
 - Keep stable release automation responsible for all repository metadata that must move with the release, including versioned charts, package-manager metadata, and generated release references; when that metadata references GitHub archive assets, update both version fields and checksums instead of rewriting only URLs.
 - Treat release-time Docker images as dependency graphs, not isolated targets. If a release image depends on local base images, publish those local dependencies before publishing the dependent image.
-- Release-tagged runtime images must be published for both `linux/amd64` and `linux/arm64`. Do not rely on the local daemon default platform for stable releases.
-- Multi-architecture release builds must verify builder capability explicitly. Fail with a direct error when the selected buildx builder does not report all required target platforms.
+- Every Docker build — `erun build`, `erun build --release`, and `erun deploy` — produces both `linux/amd64` and `linux/arm64`. There is no single-platform code path. A single-arch artifact built locally cannot be deployed to a cluster of a different architecture, and arch-specific Dockerfile bugs should fail at developer-machine build time, not at remote deploy time. Release-tagged builds additionally push and assemble the multi-arch manifest list; non-release `erun build` stops after the per-arch local builds.
+- Multi-architecture builds must verify daemon capability explicitly. Fail with a direct error when the local Docker daemon cannot produce all required target platforms (e.g. binfmt is missing for the foreign arch), rather than letting the per-platform `docker build` fail with a confusing message.
 - Keep the runtime deployment and release-build environment aligned. If the runtime pod performs release builds through dind, ensure the deployment installs the required binfmt or emulator support before the daemon is used for multi-arch builds.
 - Prefer pinned versions for release-critical infrastructure images such as binfmt helpers, dind, and runtime base images so release behavior stays reproducible.
 - When release automation pushes tags or branches mid-flow, add the follow-up verification needed for later steps. Do not assume remote state, package archives, or checksums are available without checking.

@@ -1,0 +1,17 @@
+Repository execution utilities
+
+Usage:
+  erun exec [command]
+
+Available Commands:
+  diff        Show the current git diff
+  raw         Run a raw command from the project root
+
+Flags:
+  -h, --help   help for exec
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.
+
+Use "erun exec [command] --help" for more information about a command.

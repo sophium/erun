@@ -23,6 +23,8 @@ profile.cov
 # env file
 .env
 
+.claude
+
 # Editor/IDE
 # .idea/
 # .vscode/

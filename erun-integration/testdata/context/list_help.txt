@@ -1,0 +1,11 @@
+List managed ERun cloud contexts
+
+Usage:
+  erun context list [flags]
+
+Flags:
+  -h, --help   help for list
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 var userHomeDir = os.UserHomeDir
@@ -60,7 +61,7 @@ func UpsertKnownHost(path, alias, host string, port int) error {
 }
 
 func scanHostKeys(host string, port int) ([]string, error) {
-	cmd := exec.Command("ssh-keyscan", "-p", fmt.Sprintf("%d", port), host)
+	cmd := eruncommon.Command("ssh-keyscan", "-p", fmt.Sprintf("%d", port), host)
 	output := new(bytes.Buffer)
 	cmd.Stdout = output
 	cmd.Stderr = output

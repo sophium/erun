@@ -40,39 +40,54 @@ type ListEffectiveTargetResult struct {
 	KubernetesContext  string                `json:"kubernetesContext"`
 	CloudProviderAlias string                `json:"cloudProviderAlias,omitempty"`
 	RepoPath           string                `json:"repoPath"`
+	APIURL             string                `json:"apiUrl,omitempty"`
 	Snapshot           bool                  `json:"snapshot"`
 	LocalPorts         EnvironmentLocalPorts `json:"localPorts,omitempty"`
 	SSH                ListSSHResult         `json:"ssh,omitempty"`
 }
 
 type ListTenantResult struct {
-	Name               string                  `json:"name"`
-	DefaultEnvironment string                  `json:"defaultEnvironment,omitempty"`
-	IsDefault          bool                    `json:"isDefault,omitempty"`
-	IsEffective        bool                    `json:"isEffective,omitempty"`
-	Environments       []ListEnvironmentResult `json:"environments,omitempty"`
+	Name                      string                  `json:"name"`
+	DefaultEnvironment        string                  `json:"defaultEnvironment,omitempty"`
+	APIURL                    string                  `json:"apiUrl,omitempty"`
+	CloudProviderAliases      []string                `json:"cloudProviderAliases,omitempty"`
+	PrimaryCloudProviderAlias string                  `json:"primaryCloudProviderAlias,omitempty"`
+	IsDefault                 bool                    `json:"isDefault,omitempty"`
+	IsEffective               bool                    `json:"isEffective,omitempty"`
+	Environments              []ListEnvironmentResult `json:"environments,omitempty"`
 }
 
 type ListEnvironmentResult struct {
-	Name               string                `json:"name"`
-	KubernetesContext  string                `json:"kubernetesContext,omitempty"`
-	CloudProviderAlias string                `json:"cloudProviderAlias,omitempty"`
-	RepoPath           string                `json:"repoPath,omitempty"`
-	RuntimeVersion     string                `json:"runtimeVersion,omitempty"`
-	Snapshot           bool                  `json:"snapshot"`
-	IsActive           bool                  `json:"isActive,omitempty"`
-	LocalPorts         EnvironmentLocalPorts `json:"localPorts,omitempty"`
-	IsDefault          bool                  `json:"isDefault,omitempty"`
-	IsEffective        bool                  `json:"isEffective,omitempty"`
-	SSH                ListSSHResult         `json:"ssh,omitempty"`
+	Name               string                  `json:"name"`
+	APIURL             string                  `json:"apiUrl,omitempty"`
+	KubernetesContext  string                  `json:"kubernetesContext,omitempty"`
+	CloudProviderAlias string                  `json:"cloudProviderAlias,omitempty"`
+	RepoPath           string                  `json:"repoPath,omitempty"`
+	ContainerRegistry  string                  `json:"containerRegistry,omitempty"`
+	RuntimeVersion     string                  `json:"runtimeVersion,omitempty"`
+	RuntimePod         RuntimePodResources     `json:"runtimePod,omitempty"`
+	Remote             bool                    `json:"remote,omitempty"`
+	ManagedCloud       bool                    `json:"managedCloud,omitempty"`
+	AITool             string                  `json:"aiTool,omitempty"`
+	Claude             EnvironmentClaudeConfig `json:"claude,omitempty"`
+	Idle               EnvironmentIdleConfig   `json:"idle,omitempty"`
+	Snapshot           bool                    `json:"snapshot"`
+	IsActive           bool                    `json:"isActive,omitempty"`
+	LocalPorts         EnvironmentLocalPorts   `json:"localPorts,omitempty"`
+	IsDefault          bool                    `json:"isDefault,omitempty"`
+	IsEffective        bool                    `json:"isEffective,omitempty"`
+	SSH                ListSSHResult           `json:"ssh,omitempty"`
 }
 
 type ListSSHResult struct {
-	Enabled       bool   `json:"enabled,omitempty"`
-	HostAlias     string `json:"hostAlias,omitempty"`
-	User          string `json:"user,omitempty"`
-	LocalPort     int    `json:"localPort,omitempty"`
-	WorkspacePath string `json:"workspacePath,omitempty"`
+	Enabled                bool   `json:"enabled,omitempty"`
+	HostAlias              string `json:"hostAlias,omitempty"`
+	User                   string `json:"user,omitempty"`
+	LocalPort              int    `json:"localPort,omitempty"`
+	WorkspacePath          string `json:"workspacePath,omitempty"`
+	PublicKeyPath          string `json:"publicKeyPath,omitempty"`
+	WorkspaceSyncEnabled   bool   `json:"workspaceSyncEnabled,omitempty"`
+	WorkspaceSyncLocalPath string `json:"workspaceSyncLocalPath,omitempty"`
 }
 
 func ResolveListResult(store ListStore, findProjectRoot ProjectFinderFunc, params OpenParams) (ListResult, error) {
@@ -146,6 +161,7 @@ func listCurrentDirectoryResult(current ListCurrentDirectoryResult, effective Op
 		KubernetesContext:  strings.TrimSpace(effective.EnvConfig.KubernetesContext),
 		CloudProviderAlias: strings.TrimSpace(effective.EnvConfig.CloudProviderAlias),
 		RepoPath:           effective.RepoPath,
+		APIURL:             APIURLForListEnvironment(effective.TenantConfig, LocalPortsForResult(effective)),
 		Snapshot:           deployTargetSnapshotEnabled(effective, nil),
 		LocalPorts:         LocalPortsForResult(effective),
 		SSH:                listSSHResult(effective),
@@ -159,11 +175,14 @@ func listTenantResult(store ListStore, tenant TenantConfig, defaultTenant string
 		return ListTenantResult{}, err
 	}
 	result := ListTenantResult{
-		Name:               tenant.Name,
-		DefaultEnvironment: tenant.DefaultEnvironment,
-		IsDefault:          tenant.Name == defaultTenant,
-		IsEffective:        effectiveErr == nil && tenant.Name == effective.Tenant,
-		Environments:       make([]ListEnvironmentResult, 0, len(envs)),
+		Name:                      tenant.Name,
+		DefaultEnvironment:        tenant.DefaultEnvironment,
+		APIURL:                    strings.TrimSpace(tenant.APIURL),
+		CloudProviderAliases:      append([]string(nil), tenant.CloudProviderAliases...),
+		PrimaryCloudProviderAlias: strings.TrimSpace(tenant.PrimaryCloudProviderAlias),
+		IsDefault:                 tenant.Name == defaultTenant,
+		IsEffective:               effectiveErr == nil && tenant.Name == effective.Tenant,
+		Environments:              make([]ListEnvironmentResult, 0, len(envs)),
 	}
 	for _, env := range envs {
 		result.Environments = append(result.Environments, listEnvironmentResult(store, tenant, env, effective, effectiveErr, portAllocations))
@@ -175,10 +194,18 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 	localPorts := listEnvironmentLocalPorts(tenant.Name, env, portAllocations)
 	return ListEnvironmentResult{
 		Name:               env.Name,
+		APIURL:             APIURLForListEnvironment(tenant, localPorts),
 		KubernetesContext:  strings.TrimSpace(env.KubernetesContext),
 		CloudProviderAlias: strings.TrimSpace(env.CloudProviderAlias),
 		RepoPath:           strings.TrimSpace(env.RepoPath),
+		ContainerRegistry:  strings.TrimSpace(env.ContainerRegistry),
 		RuntimeVersion:     strings.TrimSpace(env.RuntimeVersion),
+		RuntimePod:         env.RuntimePod,
+		Remote:             env.Remote,
+		ManagedCloud:       env.ManagedCloud,
+		AITool:             strings.TrimSpace(env.AITool),
+		Claude:             env.Claude,
+		Idle:               env.Idle,
 		Snapshot:           env.SnapshotEnabled(),
 		IsActive:           listEnvironmentIsActive(store, env),
 		LocalPorts:         localPorts,
@@ -186,6 +213,17 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 		IsEffective:        effectiveErr == nil && tenant.Name == effective.Tenant && env.Name == effective.Environment,
 		SSH:                listSSHResult(listEnvironmentOpenResult(tenant, env, localPorts)),
 	}
+}
+
+func APIURLForListEnvironment(tenant TenantConfig, localPorts EnvironmentLocalPorts) string {
+	if apiURL := strings.TrimSpace(tenant.APIURL); apiURL != "" {
+		return apiURL
+	}
+	port := localPorts.API
+	if port <= 0 {
+		port = APIServicePort
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d", port)
 }
 
 func listEnvironmentLocalPorts(tenant string, env EnvConfig, portAllocations map[string]EnvironmentLocalPorts) EnvironmentLocalPorts {
@@ -231,12 +269,16 @@ func listSSHResult(result OpenResult) ListSSHResult {
 	}
 
 	info := SSHConnectionInfoForResult(result)
+	sync := result.EnvConfig.SSHD.WorkspaceSync
 	return ListSSHResult{
-		Enabled:       true,
-		HostAlias:     info.HostAlias,
-		User:          info.User,
-		LocalPort:     info.Port,
-		WorkspacePath: info.WorkspacePath,
+		Enabled:                true,
+		HostAlias:              info.HostAlias,
+		User:                   info.User,
+		LocalPort:              info.Port,
+		WorkspacePath:          info.WorkspacePath,
+		PublicKeyPath:          strings.TrimSpace(result.EnvConfig.SSHD.PublicKeyPath),
+		WorkspaceSyncEnabled:   sync.Enabled,
+		WorkspaceSyncLocalPath: strings.TrimSpace(sync.LocalPath),
 	}
 }
 

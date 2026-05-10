@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -32,59 +33,6 @@ func resolveDockerBuildRegistryForEnvironment(projectRoot, environment string) (
 	}
 
 	return registry, nil
-}
-
-func resolveDockerBuildSkipIfExists(projectRoot, environment string, image DockerImageReference) (bool, error) {
-	if strings.TrimSpace(projectRoot) == "" {
-		return false, nil
-	}
-
-	projectConfig, _, err := LoadProjectConfig(projectRoot)
-	if err != nil {
-		if errors.Is(err, ErrNotInitialized) {
-			return false, nil
-		}
-		return false, err
-	}
-
-	return dockerSkipIfExistsMatches(image, projectConfig.DockerSkipIfExistsForEnvironment(environment)), nil
-}
-
-func dockerSkipIfExistsMatches(image DockerImageReference, configured []string) bool {
-	if len(configured) == 0 {
-		return false
-	}
-
-	imageName := normalizeDockerSkipImageName(image.ImageName)
-	repository := normalizeDockerSkipImageName(dockerImageRepository(image.Tag))
-	for _, candidate := range configured {
-		candidate = normalizeDockerSkipImageName(candidate)
-		if candidate == "" {
-			continue
-		}
-		if candidate == imageName || candidate == repository {
-			return true
-		}
-	}
-	return false
-}
-
-func normalizeDockerSkipImageName(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	return dockerImageRepository(value)
-}
-
-func dockerImageRepository(value string) string {
-	value = strings.TrimSpace(value)
-	lastSlash := strings.LastIndex(value, "/")
-	lastColon := strings.LastIndex(value, ":")
-	if lastColon > lastSlash {
-		return value[:lastColon]
-	}
-	return value
 }
 
 func ResolveDockerBuildContextDirForProject(buildDir, projectRoot string) string {
@@ -184,12 +132,73 @@ func IsDockerPushAuthorizationError(message string) bool {
 		"access denied",
 		"requested access to the resource is denied",
 		"no basic auth credentials",
+		"error from registry: denied",
+		"denied: denied",
+		"permission_denied",
+		"does not match expected scopes",
 	} {
 		if strings.Contains(message, marker) {
 			return true
 		}
 	}
 	return false
+}
+
+func IsDockerCreatePackageDenied(message string) bool {
+	return strings.Contains(strings.ToLower(message), "create_package")
+}
+
+// IsDockerScopeDenied reports whether a registry auth error matches the
+// GitHub-specific scope-mismatch case where the docker login token lacks
+// write:packages (or otherwise doesn't satisfy the required scopes).
+// This is distinct from IsDockerCreatePackageDenied (org-policy "cannot
+// create a new package") and from a missing-credentials case (which a
+// generic re-login would fix). When true, callers should attempt
+// TryGHCRNamespaceLogin to re-auth as the namespace owner via gh, since
+// the prompt-driven `docker login` flow will not change which token
+// docker holds.
+//
+// Markers are intentionally narrow to avoid swallowing the generic
+// "insufficient_scope" / "denied" cases that the prompt-retry path
+// handles correctly.
+func IsDockerScopeDenied(message string) bool {
+	msg := strings.ToLower(message)
+	if strings.Contains(msg, "create_package") {
+		return false
+	}
+	for _, marker := range []string{
+		"does not match expected scopes",
+		"permission_denied",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func DockerNamespaceFromTag(tag string) string {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return ""
+	}
+	if cut := strings.IndexByte(tag, ':'); cut >= 0 {
+		if last := strings.LastIndexByte(tag, '/'); last < 0 || cut > last {
+			tag = tag[:cut]
+		}
+	}
+	parts := strings.Split(tag, "/")
+	if len(parts) < 2 {
+		return ""
+	}
+	first := parts[0]
+	if strings.Contains(first, ".") || strings.Contains(first, ":") || first == "localhost" {
+		if len(parts) >= 3 {
+			return parts[1]
+		}
+		return ""
+	}
+	return parts[0]
 }
 
 func dockerRegistryFromImageTag(tag string) string {
@@ -241,6 +250,32 @@ func singleProjectContainerRegistry(projectConfig ProjectConfig) string {
 		registry = current
 	}
 	return registry
+}
+
+// dockerVersionRegistryPattern matches strings that look like a semantic version
+// (e.g. "1.0.51-snapshot-20260505151841") rather than a Docker registry hostname
+// (e.g. "ghcr.io", "docker.io", "localhost:5000").  Such strings arise when helm
+// chart templates use the app version as a namespace prefix:
+//
+//	{{ printf "%s/image-name:%s" .Chart.AppVersion .Chart.AppVersion }}
+//
+// A valid Docker registry hostname starts with a letter or is an IP:port pair;
+// it never starts with DIGIT.DIGIT.DIGIT.
+var dockerVersionRegistryPattern = regexp.MustCompile(`^\d+\.\d+\.\d+`)
+
+// dockerRegistryLooksLikeVersion reports whether registry appears to be a
+// semver/snapshot version string masquerading as a registry hostname.  Docker
+// will fail to push to such addresses because they are not resolvable hostnames.
+func dockerRegistryLooksLikeVersion(registry string) bool {
+	registry = strings.TrimSpace(registry)
+	if registry == "" {
+		return false
+	}
+	// Explicit port (e.g. "localhost:5000" or "192.168.1.1:5000") → real registry.
+	if strings.Contains(registry, ":") {
+		return false
+	}
+	return dockerVersionRegistryPattern.MatchString(registry)
 }
 
 func loadVersionValue(path string) (string, bool, error) {

@@ -73,7 +73,16 @@ type InitCloudContextParams struct {
 }
 
 type CloudContextParams struct {
-	Name string
+	Name  string
+	Force bool
+}
+
+// CloudContextEnvLookup is an optional interface used by StartCloudContext to
+// enforce per-environment working hours when starting a cloud context. Stores
+// that do not implement it skip the working-hours gate.
+type CloudContextEnvLookup interface {
+	ListTenantConfigs() ([]TenantConfig, error)
+	ListEnvConfigs(string) ([]EnvConfig, error)
 }
 
 type CloudContextDependencies struct {
@@ -166,10 +175,18 @@ func InitCloudContext(ctx Context, store CloudContextStore, params InitCloudCont
 		return CloudContextStatus{}, fmt.Errorf("store is required")
 	}
 	deps = normalizeCloudContextDependencies(deps)
+	ctx.Trace(fmt.Sprintf("cloud-context init: alias=%s region=%s instance-type=%s disk=%dGB/%s",
+		strings.TrimSpace(params.CloudProviderAlias),
+		strings.TrimSpace(params.Region),
+		strings.TrimSpace(params.InstanceType),
+		params.DiskSizeGB,
+		strings.TrimSpace(params.DiskType)))
 	provider, config, err := initCloudContextConfig(store, params, deps)
 	if err != nil {
+		ctx.Trace("cloud-context init: configuration resolution failed: " + err.Error())
 		return CloudContextStatus{}, err
 	}
+	ctx.Trace(fmt.Sprintf("cloud-context init: resolved name=%s kube-context=%s", config.Name, config.KubernetesContext))
 	if err := prepareInitCloudContextResources(ctx, deps, provider, params, &config); err != nil {
 		return CloudContextStatus{}, err
 	}
@@ -264,7 +281,46 @@ func runInitCloudContextInstance(ctx Context, deps CloudContextDependencies, pro
 		return "", err
 	}
 	defer cleanup()
-	return deps.RunAWS(ctx, provider, config.Region, initCloudContextRunArgs(ami, userDataPath, params, *config))
+	args := initCloudContextRunArgs(ami, userDataPath, params, *config)
+	return runAWSWithIAMConsistencyRetry(ctx, deps, provider, config.Region, args)
+}
+
+const iamConsistencyMaxAttempts = 6
+
+var iamConsistencyBackoff = []time.Duration{
+	2 * time.Second,
+	4 * time.Second,
+	6 * time.Second,
+	8 * time.Second,
+	10 * time.Second,
+}
+
+func runAWSWithIAMConsistencyRetry(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region string, args []string) (string, error) {
+	var (
+		out string
+		err error
+	)
+	for attempt := 0; attempt < iamConsistencyMaxAttempts; attempt++ {
+		out, err = deps.RunAWS(ctx, provider, region, args)
+		if err == nil {
+			return out, nil
+		}
+		if !isIAMInstanceProfileConsistencyError(err) || attempt == iamConsistencyMaxAttempts-1 {
+			return out, err
+		}
+		ctx.Trace(fmt.Sprintf("IAM instance profile not yet visible to EC2; retrying in %s", iamConsistencyBackoff[attempt]))
+		deps.Sleep(iamConsistencyBackoff[attempt])
+	}
+	return out, err
+}
+
+func isIAMInstanceProfileConsistencyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "Invalid IAM Instance Profile name") ||
+		strings.Contains(message, "Invalid IAM Instance Profile ARN")
 }
 
 func initCloudContextAMI(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region string) (string, error) {
@@ -310,11 +366,11 @@ func appendOptionalCloudContextRunArg(args []string, name, value string) []strin
 }
 
 func appendCloudContextProfileRunArg(args []string, config CloudContextConfig) []string {
-	if config.InstanceProfileARN != "" {
-		return append(args, "--iam-instance-profile", "Arn="+config.InstanceProfileARN)
-	}
 	if config.InstanceProfileName != "" {
 		return append(args, "--iam-instance-profile", "Name="+config.InstanceProfileName)
+	}
+	if config.InstanceProfileARN != "" {
+		return append(args, "--iam-instance-profile", "Arn="+config.InstanceProfileARN)
 	}
 	return args
 }
@@ -337,10 +393,29 @@ func finalizeInitCloudContext(ctx Context, deps CloudContextDependencies, provid
 }
 
 func StopCloudContext(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies) (CloudContextStatus, error) {
+	ctx.Trace("cloud-context stop: " + strings.TrimSpace(params.Name))
 	return changeCloudContextPowerState(ctx, store, params, deps, "stop-instances", CloudContextStatusStopped)
 }
 
 func StartCloudContext(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies) (CloudContextStatus, error) {
+	deps = normalizeCloudContextDependencies(deps)
+	ctx.Trace(fmt.Sprintf("cloud-context start: name=%s force=%v", strings.TrimSpace(params.Name), params.Force))
+	if !params.Force {
+		if lookup, ok := store.(CloudContextEnvLookup); ok {
+			ctx.Trace("cloud-context start: checking working-hours gate")
+			reason, err := cloudContextStartBlockedByWorkingHours(store, lookup, params.Name, deps.Now())
+			if err != nil {
+				return CloudContextStatus{}, err
+			}
+			if reason != "" {
+				ctx.Trace("cloud-context start: gated: " + reason)
+				return CloudContextStatus{}, fmt.Errorf("cloud context %q cannot start: %s; pass force=true to override", strings.TrimSpace(params.Name), reason)
+			}
+			ctx.Trace("cloud-context start: working-hours gate clear")
+		}
+	} else {
+		ctx.Trace("cloud-context start: force=true bypasses working-hours gate")
+	}
 	if err := ensureCloudContextHostStopProfileAssociation(ctx, store, params, deps); err != nil {
 		ctx.Trace("skipping cloud context host-stop profile association: " + err.Error())
 	}
@@ -571,6 +646,68 @@ func CloudContextPreflight(store CloudContextStore, deps CloudContextDependencie
 	}
 }
 
+// cloudContextStartBlockedByWorkingHours returns a non-empty reason when every
+// environment attached to the named cloud context is currently outside its
+// working hours. If any attached environment permits start, or no environments
+// reference this context, the gate is not engaged.
+func cloudContextStartBlockedByWorkingHours(store CloudReadStore, lookup CloudContextEnvLookup, contextName string, now time.Time) (string, error) {
+	contextName = strings.TrimSpace(contextName)
+	if contextName == "" {
+		return "", nil
+	}
+	config, ok, err := findCloudContext(store, contextName)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", nil
+	}
+	kubeContext := strings.TrimSpace(config.KubernetesContext)
+	if kubeContext == "" {
+		kubeContext = strings.TrimSpace(config.Name)
+	}
+	if kubeContext == "" {
+		return "", nil
+	}
+
+	tenants, err := lookup.ListTenantConfigs()
+	if err != nil {
+		return "", err
+	}
+	var blockedReason string
+	hasAttachedEnv := false
+	for _, tenant := range tenants {
+		envs, err := lookup.ListEnvConfigs(tenant.Name)
+		if err != nil {
+			return "", err
+		}
+		for _, env := range envs {
+			if strings.TrimSpace(env.KubernetesContext) != kubeContext {
+				continue
+			}
+			hasAttachedEnv = true
+			policy, err := env.Idle.Resolve()
+			if err != nil {
+				continue
+			}
+			outside, _, err := workingHoursStatus(policy.WorkingHours, policy.Timezone, now)
+			if err != nil {
+				continue
+			}
+			if !outside {
+				return "", nil
+			}
+			if blockedReason == "" {
+				blockedReason = fmt.Sprintf("outside working hours %s for environment %s/%s", policy.WorkingHours, tenant.Name, env.Name)
+			}
+		}
+	}
+	if !hasAttachedEnv {
+		return "", nil
+	}
+	return blockedReason, nil
+}
+
 func findCloudContextForKubernetesContext(store CloudReadStore, kubernetesContext string) (CloudContextStatus, bool, error) {
 	kubernetesContext = strings.TrimSpace(kubernetesContext)
 	if kubernetesContext == "" {
@@ -673,7 +810,13 @@ func createCloudContextSecurityGroup(ctx Context, deps CloudContextDependencies,
 		"--output", "text",
 	})
 	if err != nil {
-		return "", err
+		if !isDuplicateSecurityGroupError(err) {
+			return "", err
+		}
+		groupID, err = describeCloudContextSecurityGroupID(ctx, deps, provider, region, groupName)
+		if err != nil {
+			return "", err
+		}
 	}
 	groupID = strings.TrimSpace(groupID)
 	if groupID == "" {
@@ -686,7 +829,19 @@ func createCloudContextSecurityGroup(ctx Context, deps CloudContextDependencies,
 		"--port", "6443",
 		"--cidr", "0.0.0.0/0",
 	})
-	return groupID, err
+	if err != nil && !isDuplicateSecurityGroupPermissionError(err) {
+		return "", err
+	}
+	return groupID, nil
+}
+
+func describeCloudContextSecurityGroupID(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, groupName string) (string, error) {
+	return deps.RunAWS(ctx, provider, region, []string{
+		"ec2", "describe-security-groups",
+		"--group-names", groupName,
+		"--query", "SecurityGroups[0].GroupId",
+		"--output", "text",
+	})
 }
 
 type cloudContextInstanceProfile struct {
@@ -871,16 +1026,48 @@ func cloudContextSelfStopPolicy(provider CloudProviderConfig, region, name strin
 	}
 	return map[string]any{
 		"Version": "2012-10-17",
-		"Statement": []map[string]any{{
-			"Effect":   "Allow",
-			"Action":   "ec2:StopInstances",
-			"Resource": fmt.Sprintf("arn:aws:ec2:%s:%s:instance/*", region, accountID),
-			"Condition": map[string]any{
-				"StringEquals": map[string]string{
-					"ec2:ResourceTag/erun:context": name,
+		"Statement": []map[string]any{
+			{
+				"Sid":      "AllowSelfStop",
+				"Effect":   "Allow",
+				"Action":   "ec2:StopInstances",
+				"Resource": fmt.Sprintf("arn:aws:ec2:%s:%s:instance/*", region, accountID),
+				"Condition": map[string]any{
+					"StringEquals": map[string]string{
+						"ec2:ResourceTag/erun:context": name,
+					},
 				},
 			},
-		}},
+			{
+				"Sid":    "AllowBedrockClaudeCode",
+				"Effect": "Allow",
+				"Action": []string{
+					"bedrock:InvokeModel",
+					"bedrock:InvokeModelWithResponseStream",
+					"bedrock:ListInferenceProfiles",
+					"bedrock:GetInferenceProfile",
+				},
+				"Resource": []string{
+					"arn:aws:bedrock:*:*:inference-profile/*",
+					"arn:aws:bedrock:*:*:application-inference-profile/*",
+					"arn:aws:bedrock:*:*:foundation-model/*",
+				},
+			},
+			{
+				"Sid":    "AllowBedrockMarketplaceAccess",
+				"Effect": "Allow",
+				"Action": []string{
+					"aws-marketplace:ViewSubscriptions",
+					"aws-marketplace:Subscribe",
+				},
+				"Resource": "*",
+				"Condition": map[string]any{
+					"StringEquals": map[string]string{
+						"aws:CalledViaLast": "bedrock.amazonaws.com",
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -994,6 +1181,20 @@ func isExistingInstanceProfileAssociationError(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "incorrectstate") && strings.Contains(message, "existing association")
+}
+
+func isDuplicateSecurityGroupError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "invalidgroup.duplicate")
+}
+
+func isDuplicateSecurityGroupPermissionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "invalidpermission.duplicate")
 }
 
 func describeCloudContextPublicIP(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region, instanceID string) (string, error) {

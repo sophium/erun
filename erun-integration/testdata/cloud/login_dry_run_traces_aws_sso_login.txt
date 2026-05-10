@@ -1,0 +1,4 @@
+Dry run: cloud login planned for rihards+123456789012@aws.
+audit: erun cloud login --alias rihards+123456789012@aws --dry-run
+check cloud provider token status
+aws sso login --profile test-profile

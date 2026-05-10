@@ -15,7 +15,7 @@ import (
 
 const (
 	DefaultEnvironment       = "local"
-	DefaultContainerRegistry = "erunpaas"
+	DefaultContainerRegistry = "ghcr.io/sophium"
 	InitializeCurrentProject = "Initialize current project"
 )
 

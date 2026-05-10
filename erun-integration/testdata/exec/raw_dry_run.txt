@@ -1,0 +1,2 @@
+audit: erun exec raw echo hello --dry-run
+cannot find git project

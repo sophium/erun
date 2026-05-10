@@ -1,0 +1,2 @@
+audit: erun api --aws-identity-store-id d-1234567890 --aws-identity-store-region eu-west-2 --database-url postgres://erun@example/erun --dry-run --host <VERSION>.0 --oidc-allowed-issuers https://issuer.example --port 17034 team dev
+eapi --host <VERSION>.0 --port 17034 --database-url 'postgres://erun@example/erun' --oidc-allowed-issuers https://issuer.example --aws-identity-store-id d-1234567890 --aws-identity-store-region eu-west-2

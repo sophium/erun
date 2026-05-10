@@ -1,0 +1,13 @@
+Login to a configured cloud provider alias
+
+Usage:
+  erun cloud login [flags]
+
+Flags:
+      --alias string   Cloud provider alias to login
+      --dry-run        Resolve and trace mutating actions without executing them.
+  -h, --help           help for login
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

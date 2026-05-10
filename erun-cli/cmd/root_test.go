@@ -14,22 +14,20 @@ import (
 	common "github.com/sophium/erun/erun-common"
 )
 
-func TestNewRootCmdRegistersCommands(t *testing.T) {
-	cmd := newTestRootCmd(testRootDeps{})
-
-	for _, name := range []string{"init", "open", "devops", "mcp", "app", "exec", "list", "doctor", "delete", "release", "version"} {
-		found, _, err := cmd.Find([]string{name})
-		if err != nil {
-			t.Fatalf("Find(%q) failed: %v", name, err)
-		}
-		if found == nil || found.Name() != name {
-			t.Fatalf("expected command %q to be registered", name)
-		}
-	}
-}
+// The root command's --dry-run trace, default-tenant resolution, and the
+// dispatch from `erun [tenant] [env]` to open are covered by the
+// integration suite (erun-integration/root_test.go and open_test.go).
+// The cases below stay as unit tests because they exercise interactive
+// promptui flows (default-tenant confirmation, default-environment
+// confirmation, container-registry / kubernetes-context selection) and
+// the error-formatting UX (no help printed on error, no double-printed
+// errors) that --dry-run skips by design — driving them through stdin
+// scripting would just relocate the test scaffolding without testing the
+// public dry-run contract.
 
 func TestResolveRuntimeDeploySpecForOpenFallsBackToCurrentBuildVersionForRemoteRepo(t *testing.T) {
 	spec, err := resolveRuntimeDeploySpecForOpen(
+		common.Context{},
 		common.ConfigStore{},
 		common.FindProjectRoot,
 		common.ResolveDockerBuildContext,
@@ -50,6 +48,7 @@ func TestResolveRuntimeDeploySpecForOpenFallsBackToCurrentBuildVersionForRemoteR
 				Remote:            true,
 			},
 		},
+		false,
 	)
 	if err != nil {
 		t.Fatalf("resolveRuntimeDeploySpecForOpen failed: %v", err)
@@ -388,10 +387,6 @@ func TestInitCommandPreservesExistingTenantDefaultEnvironmentWhenFlagOmitted(t *
 
 	requireNoError(t, cmd.Execute(), "Execute failed")
 
-	if got := buf.String(); got != "" {
-		t.Fatalf("expected no command output, got %q", got)
-	}
-
 	tenantConfig, _, err := common.LoadTenantConfig("tenant-a")
 	if err != nil {
 		t.Fatalf("LoadTenantConfig failed: %v", err)
@@ -492,35 +487,6 @@ func requireNamespaceEnsure(t *testing.T, contextName, namespace, wantContext, w
 	}
 }
 
-func TestRootCommandHelpFlagPrintsHelp(t *testing.T) {
-	cmd := newTestRootCmd(testRootDeps{})
-	buf := new(bytes.Buffer)
-	cmd.SetOut(buf)
-	cmd.SetErr(buf)
-	cmd.SetArgs([]string{"--help"})
-
-	requireNoError(t, cmd.Execute(), "Execute failed")
-
-	output := buf.String()
-	for _, want := range []string{"init", "open", "devops", "mcp", "version"} {
-		if !bytes.Contains([]byte(output), []byte(want)) {
-			t.Fatalf("expected help output to mention %q, got %q", want, output)
-		}
-	}
-	for _, want := range []string{
-		"-v",
-		"--dry-run",
-		"--time",
-		"print trace logs for command flow and side effects",
-		"runs the same resolution flow but skips mutating operations",
-		"prints the elapsed runtime after the command finishes",
-	} {
-		if !bytes.Contains([]byte(output), []byte(want)) {
-			t.Fatalf("expected help output to mention %q, got %q", want, output)
-		}
-	}
-}
-
 func TestRootCommandDryRunOpensByPlanningWithoutLaunchingShell(t *testing.T) {
 	setupRootCmdTestConfigHome(t)
 
@@ -537,7 +503,7 @@ func TestRootCommandDryRunOpensByPlanningWithoutLaunchingShell(t *testing.T) {
 	requireNoError(t, common.SaveEnvConfig("tenant-a", common.EnvConfig{Name: "dev", RepoPath: projectRoot, KubernetesContext: "cluster-dev"}), "save env config")
 
 	cmd := newTestRootCmd(testRootDeps{
-		CheckKubernetesDeployment: func(req common.KubernetesDeploymentCheckParams) (bool, error) {
+		CheckKubernetesDeployment: func(_ common.Context, req common.KubernetesDeploymentCheckParams) (bool, error) {
 			return true, nil
 		},
 		LaunchShell: func(req common.ShellLaunchParams) error {

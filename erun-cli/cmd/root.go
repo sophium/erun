@@ -14,6 +14,7 @@ type (
 	SelectRunner             func(promptui.Select) (int, string, error)
 	KubernetesContextsLister func() ([]string, error)
 	MCPLauncher              func(io.Reader, io.Writer, io.Writer, []string) error
+	APILauncher              func(io.Reader, io.Writer, io.Writer, []string) error
 )
 
 func runPrompt(prompt promptui.Prompt) (string, error) {
@@ -39,8 +40,9 @@ type rootDependencies struct {
 	runInitForOpen            func(common.Context, common.OpenParams) error
 	push                      common.DockerPushFunc
 	resolveOpen               func(common.OpenParams) (common.OpenResult, error)
-	resolveRuntimeDeploySpec  func(common.OpenResult) (common.DeploySpec, error)
+	resolveRuntimeDeploySpec  func(common.Context, common.OpenResult, bool) (common.DeploySpec, error)
 	activateMCP               MCPForwarder
+	activateAPI               APIForwarder
 	activateSSHD              SSHDActivator
 	runManagedDeploy          func(common.Context, common.OpenResult) error
 }
@@ -61,6 +63,7 @@ func newRootDependencies() rootDependencies {
 		runInitForOpen:            newRunInitForOpen(store, runInit),
 		push:                      newPushOperation(nil, common.DockerRegistryLogin, runSelect),
 		activateMCP:               newMCPForwarder(),
+		activateAPI:               newAPIForwarder(),
 		activateSSHD:              newSSHDActivator(common.RunRemoteCommand),
 	}
 	deps.resolveOpen = deps.resolveOpenResult
@@ -73,13 +76,14 @@ func (d rootDependencies) resolveOpenResult(params common.OpenParams) (common.Op
 	return common.ResolveOpen(d.store, params)
 }
 
-func (d rootDependencies) resolveRuntimeDeploySpecForOpenTarget(target common.OpenResult) (common.DeploySpec, error) {
-	return resolveRuntimeDeploySpecForOpen(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, currentBuildInfo(), target)
+func (d rootDependencies) resolveRuntimeDeploySpecForOpenTarget(ctx common.Context, target common.OpenResult, allowLocalBuilds bool) (common.DeploySpec, error) {
+	return resolveRuntimeDeploySpecForOpen(ctx, d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, currentBuildInfo(), target, allowLocalBuilds)
 }
 
 func (d rootDependencies) runManagedDeployForOpen(ctx common.Context, target common.OpenResult) error {
 	ctx = withCloudContextPreflight(ctx, d.store)
 	specs, err := common.ResolveCurrentDeploySpecs(
+		ctx,
 		d.store,
 		common.FindProjectRoot,
 		common.ResolveDockerBuildContext,
@@ -114,8 +118,9 @@ func (d rootDependencies) commands() []*cobra.Command {
 		devopsCmd,
 		d.optionalBuildCommand(),
 		d.optionalPushCommand(),
-		d.optionalDeployCommand(),
+		d.deployCommand(),
 		newMCPCmd(d.resolveOpen, d.runInitForArgs, launchMCPProcess),
+		newAPICmd(d.resolveOpen, d.runInitForArgs, launchAPIProcess),
 		newAppCmd(launchAppProcess),
 		newExecCmd(common.FindProjectRoot, common.GitCommandRunner, nil),
 		newCloudCmd(d.configStore, runPrompt, runSelect, common.CloudDependencies{}),
@@ -147,6 +152,7 @@ func (d rootDependencies) openCommand() *cobra.Command {
 		d.resolveRuntimeDeploySpec,
 		d.deployHelmChart,
 		d.activateMCP,
+		d.activateAPI,
 		d.activateSSHD,
 		launchVSCode,
 		launchIntelliJ,
@@ -156,7 +162,7 @@ func (d rootDependencies) openCommand() *cobra.Command {
 func (d rootDependencies) sshdCommand() *cobra.Command {
 	return newSSHDCmd(func(ctx common.Context) common.Context {
 		return withCloudContextPreflight(ctx, d.store)
-	}, d.resolveOpen, d.store.SaveEnvConfig, d.runInitForOpen, d.resolveRuntimeDeploySpec, d.recoveringDeployHelmChart, common.RunRemoteCommand, writeLocalSSHConfig)
+	}, d.resolveOpen, d.store.SaveEnvConfig, d.runInitForOpen, common.FindProjectRoot, d.resolveRuntimeDeploySpec, d.recoveringDeployHelmChart, common.RunRemoteCommand, writeLocalSSHConfig)
 }
 
 func (d rootDependencies) containerCommand() *cobra.Command {
@@ -189,15 +195,17 @@ func (d rootDependencies) optionalPushCommand() *cobra.Command {
 	if !hasOptionalPushCmd(common.FindProjectRoot, common.ResolveDockerBuildContext) {
 		return nil
 	}
-	pushCmd := newPushCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.DockerImageBuilder, d.push)
+	pushCmd := newRootPushCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, time.Now, common.DockerImageBuilder, d.push)
 	pushCmd.Short = optionalPushCmdShort(common.FindProjectRoot, common.ResolveDockerBuildContext)
 	return pushCmd
 }
 
-func (d rootDependencies) optionalDeployCommand() *cobra.Command {
-	if !hasOptionalDeployCmd(common.ResolveKubernetesDeployContext) {
-		return nil
-	}
+// deployCommand returns the always-registered deploy subcommand. The desktop
+// Redeploy button invokes "erun deploy --version X" from the app's cwd, which
+// may not contain a kubernetes deploy context. The command must always be
+// present so Cobra recognizes its flags; ResolveCurrentDeploySpecs surfaces a
+// clear error when invoked outside a deploy context.
+func (d rootDependencies) deployCommand() *cobra.Command {
 	return newDeployCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, d.push, d.recoveringDeployHelmChart)
 }
 
@@ -210,7 +218,7 @@ func (d rootDependencies) runRoot(cmd *cobra.Command, args []string) error {
 	if initRan {
 		return nil
 	}
-	return runResolvedOpenCommand(ctx, result, openOptions{}, runPrompt, newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell), d.runManagedDeploy, common.CheckKubernetesDeployment, d.resolveRuntimeDeploySpec, d.deployHelmChart, d.activateMCP, d.activateSSHD, launchVSCode, launchIntelliJ)
+	return runResolvedOpenCommandWithAPI(ctx, result, openOptions{}, runPrompt, newOpenShellRunner(common.WaitForShellDeployment, common.ExecShell), d.runManagedDeploy, common.CheckKubernetesDeployment, d.resolveRuntimeDeploySpec, d.deployHelmChart, d.activateMCP, d.activateAPI, d.activateSSHD, launchVSCode, launchIntelliJ)
 }
 
 func withCloudContextPreflight(ctx common.Context, store any) common.Context {

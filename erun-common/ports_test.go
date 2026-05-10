@@ -15,6 +15,13 @@ func TestMCPServicePortUsesOffsetFromLowerServicePort(t *testing.T) {
 	}
 }
 
+func TestAPIServicePortUsesOffsetFromLowerServicePort(t *testing.T) {
+	want := LowerServicePort + APIServicePortOffset
+	if APIServicePort != want {
+		t.Fatalf("expected API service port %d, got %d", want, APIServicePort)
+	}
+}
+
 func TestResolveEnvironmentLocalPortsUsesSortedTenantEnvironmentOrder(t *testing.T) {
 	store := listStore{
 		openStore: openStore{
@@ -37,7 +44,7 @@ func TestResolveEnvironmentLocalPortsUsesSortedTenantEnvironmentOrder(t *testing
 	if ports.RangeStart != 17200 || ports.RangeEnd != 17299 {
 		t.Fatalf("unexpected local port range: %+v", ports)
 	}
-	if ports.MCP != 17200 || ports.SSH != 17222 {
+	if ports.MCP != 17200 || ports.API != 17233 || ports.SSH != 17222 {
 		t.Fatalf("unexpected local service ports: %+v", ports)
 	}
 }

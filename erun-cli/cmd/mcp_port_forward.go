@@ -6,7 +6,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -50,6 +49,12 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 		LocalPort:         localPort,
 	}
 
+	if ctx.DryRun {
+		args := kubectlMCPPortForwardArgs(result, localPort)
+		ctx.TraceCommand("", "kubectl", args...)
+		return localPort, nil
+	}
+
 	if stateMatchesMCPTarget(state, expectedState) && canReachLocalMCPEndpoint(localPort) {
 		return localPort, nil
 	}
@@ -60,9 +65,6 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 
 	args := kubectlMCPPortForwardArgs(result, localPort)
 	ctx.TraceCommand("", "kubectl", args...)
-	if ctx.DryRun {
-		return localPort, nil
-	}
 
 	return startMCPPortForward(statePath, expectedState, args, localPort)
 }
@@ -88,7 +90,7 @@ func startMCPPortForward(statePath string, expectedState mcpPortForwardState, ar
 		_ = logFile.Close()
 	}()
 
-	cmd := exec.Command("kubectl", args...)
+	cmd := common.Command("kubectl", args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	detachBackgroundProcess(cmd)

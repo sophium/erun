@@ -1,19 +1,31 @@
 package cmd
 
 import (
-	"bytes"
 	"errors"
 	"net"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
 	common "github.com/sophium/erun/erun-common"
 )
+
+// `runSSHDInitCommand` is exercised end-to-end through the
+// `sshd/init_dry_run_traces_full_flow` integration scenario, which asserts
+// the trace shows the env-config save, helm deploy with sshdEnabled=true,
+// the remote authorized_keys script, and the local SSH config write — all
+// reachable from a single `sshd init --dry-run` invocation. The cases
+// below stay as unit tests because they exercise behavior the integration
+// suite cannot reach from --dry-run: a real network probe
+// (canReachLocalSSHEndpoint), retry logic gated on package-level globals
+// (waitForSSHDRemoteDeployment, sleepBeforeSSHDRemoteExecRetry), a pure
+// stderr classifier (sshdRemoteExecNeedsDeploymentRetry), and the kubectl
+// port-forward arg builder used by the SSHD activator path that none of
+// the current integration scenarios reach (no remote+sshd-enabled fixture
+// exists yet).
 
 func TestKubectlSSHDPortForwardArgs(t *testing.T) {
 	got := kubectlPortForwardArgs(common.OpenResult{
@@ -76,191 +88,6 @@ func TestCanReachLocalSSHEndpointRequiresSSHBanner(t *testing.T) {
 	}
 }
 
-func TestRunSSHDInitCommandPersistsConfigAndDeploysRuntime(t *testing.T) {
-	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
-
-	publicKeyPath := filepath.Join(t.TempDir(), "id_ed25519.pub")
-	requireNoError(t, os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644), "write public key")
-
-	var savedTenant string
-	var savedEnv common.EnvConfig
-	var deployed common.HelmDeployParams
-	var remoteScript string
-	ctx := common.Context{
-		Logger: common.NewLoggerWithWriters(1, new(bytes.Buffer), new(bytes.Buffer)),
-		Stdout: new(bytes.Buffer),
-		Stderr: new(bytes.Buffer),
-	}
-	err := runSSHDInitCommand(
-		ctx,
-		common.OpenResult{
-			Tenant:      "tenant-a",
-			Environment: "dev",
-			RepoPath:    "/home/erun/git/tenant-a",
-			TenantConfig: common.TenantConfig{
-				Name: "tenant-a",
-			},
-			EnvConfig: common.EnvConfig{
-				Name:              "dev",
-				RepoPath:          "/home/erun/git/tenant-a",
-				KubernetesContext: "cluster-dev",
-				Remote:            true,
-			},
-		},
-		publicKeyPath,
-		64022,
-		func(tenant string, config common.EnvConfig) error {
-			savedTenant = tenant
-			savedEnv = config
-			return nil
-		},
-		func(target common.OpenResult) (common.DeploySpec, error) {
-			return common.DeploySpec{
-				Target: target,
-				Deploy: common.HelmDeploySpec{
-					ReleaseName:       common.RuntimeReleaseName(target.Tenant),
-					ChartPath:         "/tmp/chart",
-					ValuesFilePath:    "/tmp/chart/values.dev.yaml",
-					Tenant:            target.Tenant,
-					Environment:       target.Environment,
-					Namespace:         common.KubernetesNamespaceName(target.Tenant, target.Environment),
-					KubernetesContext: target.EnvConfig.KubernetesContext,
-					WorktreeStorage:   common.WorktreeStoragePVC,
-					WorktreeRepoName:  "tenant-a",
-					WorktreeHostPath:  "/tmp/ignored",
-					SSHDEnabled:       target.EnvConfig.SSHD.Enabled,
-					Timeout:           common.DefaultHelmDeploymentTimeout,
-				},
-			}, nil
-		},
-		func(params common.HelmDeployParams) error {
-			deployed = params
-			return nil
-		},
-		func(_ common.ShellLaunchParams, script string) (common.RemoteCommandResult, error) {
-			remoteScript = script
-			return common.RemoteCommandResult{}, nil
-		},
-		writeLocalSSHConfig,
-	)
-	requireNoError(t, err, "runSSHDInitCommand failed")
-
-	requireSSHDInitConfig(t, savedTenant, savedEnv, deployed, remoteScript, publicKeyPath)
-	sshConfigData, err := os.ReadFile(filepath.Join(homeDir, ".ssh", "config"))
-	requireNoError(t, err, "read ssh config")
-	requireContainsAll(t, string(sshConfigData), []string{
-		"Host erun-tenant-a-dev",
-		"HostName 127.0.0.1",
-		"Port 64022",
-		"User erun",
-		"HostKeyAlias erun-tenant-a-dev",
-		"IdentityFile " + strings.TrimSuffix(publicKeyPath, ".pub"),
-	}, "ssh config")
-	stdout := ctx.Stdout.(*bytes.Buffer).String()
-	requireContainsAll(t, stdout, []string{
-		"host: erun-tenant-a-dev",
-		"config: " + filepath.Join(homeDir, ".ssh", "config"),
-	}, "stdout")
-}
-
-func requireSSHDInitConfig(t *testing.T, savedTenant string, savedEnv common.EnvConfig, deployed common.HelmDeployParams, remoteScript, publicKeyPath string) {
-	t.Helper()
-	if savedTenant != "tenant-a" {
-		t.Fatalf("unexpected saved tenant: %q", savedTenant)
-	}
-	if !savedEnv.SSHD.Enabled || savedEnv.SSHD.LocalPort != 64022 || savedEnv.SSHD.PublicKeyPath != publicKeyPath {
-		t.Fatalf("unexpected saved env config: %+v", savedEnv)
-	}
-	if !deployed.SSHDEnabled {
-		t.Fatalf("expected deployment params to enable SSHD, got %+v", deployed)
-	}
-	if !strings.Contains(remoteScript, "authorized_keys") || !strings.Contains(remoteScript, "ssh-ed25519 AAAATEST user@example") {
-		t.Fatalf("unexpected remote authorized_keys script:\n%s", remoteScript)
-	}
-}
-
-func requireContainsAll(t *testing.T, value string, wants []string, context string) {
-	t.Helper()
-	for _, want := range wants {
-		if !strings.Contains(value, want) {
-			t.Fatalf("expected %s to contain %q, got:\n%s", context, want, value)
-		}
-	}
-}
-
-func TestRunSSHDInitCommandUsesResolvedEnvironmentLocalPortByDefault(t *testing.T) {
-	homeDir := t.TempDir()
-	t.Setenv("HOME", homeDir)
-
-	publicKeyPath := filepath.Join(t.TempDir(), "id_ed25519.pub")
-	requireNoError(t, os.WriteFile(publicKeyPath, []byte("ssh-ed25519 AAAATEST user@example\n"), 0o644), "write public key")
-
-	var savedEnv common.EnvConfig
-	err := runSSHDInitCommand(
-		common.Context{
-			Logger: common.NewLoggerWithWriters(1, new(bytes.Buffer), new(bytes.Buffer)),
-			Stdout: new(bytes.Buffer),
-			Stderr: new(bytes.Buffer),
-		},
-		common.OpenResult{
-			Tenant:      "tenant-a",
-			Environment: "prod",
-			RepoPath:    "/home/erun/git/tenant-a",
-			TenantConfig: common.TenantConfig{
-				Name: "tenant-a",
-			},
-			EnvConfig: common.EnvConfig{
-				Name:              "prod",
-				RepoPath:          "/home/erun/git/tenant-a",
-				KubernetesContext: "cluster-prod",
-				Remote:            true,
-			},
-			LocalPorts: common.EnvironmentLocalPorts{
-				RangeStart: 17100,
-				RangeEnd:   17199,
-				MCP:        17100,
-				SSH:        17122,
-			},
-		},
-		publicKeyPath,
-		0,
-		func(_ string, config common.EnvConfig) error {
-			savedEnv = config
-			return nil
-		},
-		func(target common.OpenResult) (common.DeploySpec, error) {
-			return common.DeploySpec{
-				Target: target,
-				Deploy: common.HelmDeploySpec{
-					ReleaseName:       common.RuntimeReleaseName(target.Tenant),
-					ChartPath:         "/tmp/chart",
-					ValuesFilePath:    "/tmp/chart/values.prod.yaml",
-					Tenant:            target.Tenant,
-					Environment:       target.Environment,
-					Namespace:         common.KubernetesNamespaceName(target.Tenant, target.Environment),
-					KubernetesContext: target.EnvConfig.KubernetesContext,
-					SSHDEnabled:       target.EnvConfig.SSHD.Enabled,
-					Timeout:           common.DefaultHelmDeploymentTimeout,
-				},
-			}, nil
-		},
-		func(common.HelmDeployParams) error { return nil },
-		func(_ common.ShellLaunchParams, _ string) (common.RemoteCommandResult, error) {
-			return common.RemoteCommandResult{}, nil
-		},
-		func(common.OpenResult) (SSHDLocalConfigResult, error) {
-			return SSHDLocalConfigResult{}, nil
-		},
-	)
-	if err != nil {
-		t.Fatalf("runSSHDInitCommand failed: %v", err)
-	}
-	if savedEnv.SSHD.LocalPort != 17122 {
-		t.Fatalf("expected resolved environment SSH port, got %+v", savedEnv.SSHD)
-	}
-}
-
 func TestSyncRemoteSSHDKeyRetriesWhenDeploymentIsNotReady(t *testing.T) {
 	prevWait := waitForSSHDRemoteDeployment
 	prevSleep := sleepBeforeSSHDRemoteExecRetry
@@ -282,7 +109,7 @@ func TestSyncRemoteSSHDKeyRetriesWhenDeploymentIsNotReady(t *testing.T) {
 	attempts := 0
 	got, err := syncRemoteSSHDKey(
 		common.Context{
-			Logger: common.NewLoggerWithWriters(1, new(bytes.Buffer), new(bytes.Buffer)),
+			Logger: common.NewLoggerWithWriters(1, nil, nil),
 		},
 		common.OpenResult{
 			Tenant:      "tenant-a",
@@ -351,7 +178,7 @@ func TestSyncRemoteSSHDKeyRetriesWhenKubeletProxyIsStarting(t *testing.T) {
 	attempts := 0
 	_, err := syncRemoteSSHDKey(
 		common.Context{
-			Logger: common.NewLoggerWithWriters(1, new(bytes.Buffer), new(bytes.Buffer)),
+			Logger: common.NewLoggerWithWriters(1, nil, nil),
 		},
 		common.OpenResult{
 			Tenant:      "petios",

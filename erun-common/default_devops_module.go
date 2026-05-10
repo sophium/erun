@@ -66,7 +66,7 @@ func renderDefaultDevopsModuleTemplate(assetPath, moduleName, runtimeVersion str
 
 	switch assetPath {
 	case "assets/default-devops-module/docker/component/Dockerfile":
-		content = strings.Replace(content, "ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.0.0", "ARG ERUN_BASE_TAG="+defaultDevopsBaseTag(runtimeVersion), 1)
+		content = strings.Replace(content, "ARG ERUN_BASE_TAG=ghcr.io/sophium/erun-devops:1.0.0", "ARG ERUN_BASE_TAG="+defaultDevopsBaseTag(runtimeVersion), 1)
 	}
 
 	return []byte(content)
@@ -77,7 +77,7 @@ func defaultDevopsBaseTag(runtimeVersion string) string {
 	if runtimeVersion == "" {
 		runtimeVersion = "dev"
 	}
-	return "erunpaas/erun-devops:" + runtimeVersion
+	return "ghcr.io/sophium/erun-devops:" + runtimeVersion
 }
 
 func ensureDefaultDevopsFile(ctx Context, path string, mode os.FileMode, content []byte) error {
@@ -152,15 +152,19 @@ func defaultDevopsLegacyContents(path string, content []byte) []string {
 
 func legacyDefaultDevopsServiceTemplate(content []byte) string {
 	return strings.NewReplacer(
-		"{{- $mcpPort := default 17000 .Values.mcpPort -}}\n{{- $sshPort := default 17022 .Values.sshPort -}}\n",
+		"{{- $mcpPort := default 17000 .Values.mcpPort -}}\n{{- $apiPort := default 17033 .Values.apiPort -}}\n{{- $sshPort := default 17022 .Values.sshPort -}}\n",
 		"",
-		"{{- $cloudContext := default dict .Values.cloudContext -}}\n{{- $cloudContextName := default \"\" $cloudContext.name -}}\n{{- $cloudProviderAlias := default \"\" $cloudContext.providerAlias -}}\n{{- $cloudRegion := default \"\" $cloudContext.region -}}\n{{- $cloudInstanceID := default \"\" $cloudContext.instanceId -}}\n",
+		"{{- $api := default dict .Values.api -}}\n{{- $oidcAllowedIssuers := default \"\" $api.oidcAllowedIssuers -}}\n",
 		"",
-		"            - name: ERUN_CLOUD_CONTEXT_NAME\n              value: {{ $cloudContextName | quote }}\n            - name: ERUN_CLOUD_PROVIDER_ALIAS\n              value: {{ $cloudProviderAlias | quote }}\n            - name: ERUN_CLOUD_REGION\n              value: {{ $cloudRegion | quote }}\n            - name: ERUN_CLOUD_INSTANCE_ID\n              value: {{ $cloudInstanceID | quote }}\n",
+		"{{- $cloudContext := default dict .Values.cloudContext -}}\n{{- $cloudContextName := default \"\" $cloudContext.name -}}\n{{- $cloudProvider := default \"\" $cloudContext.provider -}}\n{{- $cloudProviderAlias := default \"\" $cloudContext.providerAlias -}}\n{{- $cloudRegion := default \"\" $cloudContext.region -}}\n{{- $cloudInstanceID := default \"\" $cloudContext.instanceId -}}\n",
 		"",
-		"            - name: ERUN_MCP_PORT\n              value: {{ $mcpPort | quote }}\n            - name: ERUN_SSHD_PORT\n              value: {{ $sshPort | quote }}\n",
+		"{{- $claude := default dict .Values.claude -}}\n{{- $claudeUseBedrock := default \"0\" $claude.useBedrock -}}\n{{- $claudeUseMantle := default \"0\" $claude.useMantle -}}\n{{- $claudeSmallFastRegion := default $cloudRegion $claude.smallFastModelAWSRegion -}}\n{{- $claudeAvailableModels := default \"sonnet,haiku\" $claude.availableModels -}}\n{{- $claudeModel := default \"\" $claude.model -}}\n{{- $claudeDefaultOpusModel := default \"\" $claude.defaultOpusModel -}}\n{{- $claudeDefaultSonnetModel := default \"\" $claude.defaultSonnetModel -}}\n{{- $claudeDefaultHaikuModel := default \"\" $claude.defaultHaikuModel -}}\n{{- $claudeBedrockBaseURL := default \"\" $claude.bedrockBaseURL -}}\n{{- $claudeMantleBaseURL := default \"\" $claude.mantleBaseURL -}}\n{{- $claudeBedrockServiceTier := default \"\" $claude.bedrockServiceTier -}}\n{{- $claudeSkipMantleAuth := default \"\" $claude.skipMantleAuth -}}\n{{- $claudeDisablePromptCaching := default \"\" $claude.disablePromptCaching -}}\n{{- $claudeEnablePromptCaching1H := default \"\" $claude.enablePromptCaching1H -}}\n{{- $claudeMaxOutputTokens := default \"4096\" $claude.maxOutputTokens -}}\n{{- $claudeMaxThinkingTokens := default \"1024\" $claude.maxThinkingTokens -}}\n",
 		"",
-		"            - containerPort: {{ $mcpPort }}\n              name: mcp\n            - containerPort: {{ $sshPort }}\n              name: ssh",
+		"            - name: ERUN_CLOUD_CONTEXT_NAME\n              value: {{ $cloudContextName | quote }}\n            - name: ERUN_CLOUD_PROVIDER\n              value: {{ $cloudProvider | quote }}\n            - name: ERUN_CLOUD_PROVIDER_ALIAS\n              value: {{ $cloudProviderAlias | quote }}\n            - name: ERUN_CLOUD_REGION\n              value: {{ $cloudRegion | quote }}\n            - name: ERUN_CLOUD_INSTANCE_ID\n              value: {{ $cloudInstanceID | quote }}\n            {{ if eq $cloudProvider \"aws\" }}\n            - name: CLAUDE_CODE_USE_BEDROCK\n              value: {{ $claudeUseBedrock | quote }}\n            - name: CLAUDE_CODE_USE_MANTLE\n              value: {{ $claudeUseMantle | quote }}\n            - name: AWS_REGION\n              value: {{ $cloudRegion | quote }}\n            - name: ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION\n              value: {{ $claudeSmallFastRegion | quote }}\n            - name: ERUN_CLAUDE_AVAILABLE_MODELS\n              value: {{ $claudeAvailableModels | quote }}\n            - name: CLAUDE_CODE_MAX_OUTPUT_TOKENS\n              value: {{ $claudeMaxOutputTokens | quote }}\n            - name: MAX_THINKING_TOKENS\n              value: {{ $claudeMaxThinkingTokens | quote }}\n            {{ if $claudeModel }}\n            - name: ANTHROPIC_MODEL\n              value: {{ $claudeModel | quote }}\n            {{ end }}\n            {{ if $claudeDefaultOpusModel }}\n            - name: ANTHROPIC_DEFAULT_OPUS_MODEL\n              value: {{ $claudeDefaultOpusModel | quote }}\n            {{ end }}\n            {{ if $claudeDefaultSonnetModel }}\n            - name: ANTHROPIC_DEFAULT_SONNET_MODEL\n              value: {{ $claudeDefaultSonnetModel | quote }}\n            {{ end }}\n            {{ if $claudeDefaultHaikuModel }}\n            - name: ANTHROPIC_DEFAULT_HAIKU_MODEL\n              value: {{ $claudeDefaultHaikuModel | quote }}\n            {{ end }}\n            {{ if $claudeBedrockBaseURL }}\n            - name: ANTHROPIC_BEDROCK_BASE_URL\n              value: {{ $claudeBedrockBaseURL | quote }}\n            {{ end }}\n            {{ if $claudeMantleBaseURL }}\n            - name: ANTHROPIC_BEDROCK_MANTLE_BASE_URL\n              value: {{ $claudeMantleBaseURL | quote }}\n            {{ end }}\n            {{ if $claudeBedrockServiceTier }}\n            - name: ANTHROPIC_BEDROCK_SERVICE_TIER\n              value: {{ $claudeBedrockServiceTier | quote }}\n            {{ end }}\n            {{ if $claudeSkipMantleAuth }}\n            - name: CLAUDE_CODE_SKIP_MANTLE_AUTH\n              value: {{ $claudeSkipMantleAuth | quote }}\n            {{ end }}\n            {{ if $claudeDisablePromptCaching }}\n            - name: DISABLE_PROMPT_CACHING\n              value: {{ $claudeDisablePromptCaching | quote }}\n            {{ end }}\n            {{ if $claudeEnablePromptCaching1H }}\n            - name: ENABLE_PROMPT_CACHING_1H\n              value: {{ $claudeEnablePromptCaching1H | quote }}\n            {{ end }}\n            {{ end }}\n",
+		"",
+		"            - name: ERUN_MCP_PORT\n              value: {{ $mcpPort | quote }}\n            - name: ERUN_API_PORT\n              value: {{ $apiPort | quote }}\n            - name: ERUN_OIDC_ALLOWED_ISSUERS\n              value: {{ $oidcAllowedIssuers | quote }}\n            - name: ERUN_SSHD_PORT\n              value: {{ $sshPort | quote }}\n",
+		"",
+		"            - containerPort: {{ $mcpPort }}\n              name: mcp\n            - containerPort: {{ $apiPort }}\n              name: api\n            - containerPort: {{ $sshPort }}\n              name: ssh",
 		"            - containerPort: 17000\n              name: mcp\n            - containerPort: 2222\n              name: ssh",
 	).Replace(string(content))
 }

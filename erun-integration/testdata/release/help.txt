@@ -1,0 +1,22 @@
+Plan and execute a project release.
+
+Release policy is loaded from .erun/config.yaml.
+
+Dry-run:
+  --dry-run resolves the release version, file updates, and git actions without executing them.
+
+Usage:
+  erun release [flags]
+
+Examples:
+  erun release --dry-run
+  erun -v release --dry-run
+
+Flags:
+      --dry-run   Resolve and trace mutating actions without executing them.
+      --force     Delete and recreate conflicting release tags before tagging
+  -h, --help      help for release
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

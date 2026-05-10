@@ -84,14 +84,17 @@ func TestRuntimeDockerfileInstallsPinnedCodexCLI(t *testing.T) {
 	if !strings.Contains(content, "ARG NODE_VERSION=24.14.0") {
 		t.Fatalf("expected runtime Dockerfile to pin the Node.js version for Codex CLI, got:\n%s", content)
 	}
-	if !strings.Contains(content, "ARG CODEX_VERSION=0.124.0") {
+	if !strings.Contains(content, "ARG CODEX_VERSION=0.125.0") {
 		t.Fatalf("expected runtime Dockerfile to pin the Codex CLI version, got:\n%s", content)
+	}
+	if !strings.Contains(content, "ARG CLAUDE_CODE_VERSION=2.1.132") {
+		t.Fatalf("expected runtime Dockerfile to pin the Claude Code CLI version, got:\n%s", content)
 	}
 	if !strings.Contains(content, "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${node_arch}.tar.gz") {
 		t.Fatalf("expected runtime Dockerfile to install Node.js from a pinned upstream tarball, got:\n%s", content)
 	}
-	if !strings.Contains(content, "npm install -g \"@openai/codex@${CODEX_VERSION}\"") {
-		t.Fatalf("expected runtime Dockerfile to install the pinned Codex CLI globally, got:\n%s", content)
+	if !strings.Contains(content, "npm install -g \"@openai/codex@${CODEX_VERSION}\" \"@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}\"") {
+		t.Fatalf("expected runtime Dockerfile to install the pinned Codex and Claude Code CLIs globally, got:\n%s", content)
 	}
 	if !strings.Contains(content, "bubblewrap") {
 		t.Fatalf("expected runtime Dockerfile to install bubblewrap for Codex CLI sandboxing, got:\n%s", content)
@@ -126,6 +129,30 @@ func TestRuntimeEntrypointDisablesStrictModesForPVCBackedHome(t *testing.T) {
 	}
 }
 
+func TestRuntimeEntrypointGeneratesCloudManagedConfigFromAlias(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read runtime entrypoint: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		`runtime_cloud_provider()`,
+		`*@aws)`,
+		`cloud_provider=$(runtime_cloud_provider)`,
+		`cloud_region=$(runtime_cloud_region)`,
+		`cloudproviders:`,
+		`cloudcontexts:`,
+		`cloudprovideralias: ${cloud_provider_alias}`,
+		`kubernetescontext: ${ERUN_KUBERNETES_CONTEXT:-in-cluster}`,
+		`if runtime_cloud_environment || { runtime_repo_is_remote && [ -n "${cloud_provider}" ] && [ -n "${cloud_provider_alias}" ] && [ -n "${cloud_region}" ]; }; then`,
+		`env_managed_cloud_line="managedcloud: true"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected runtime entrypoint to contain %q, got:\n%s", want, content)
+		}
+	}
+}
+
 func TestRuntimeEntrypointConfiguresCodexMCP(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
 	if err != nil {
@@ -137,6 +164,13 @@ func TestRuntimeEntrypointConfiguresCodexMCP(t *testing.T) {
 		`configure-codex-mcp.sh`,
 		`install_shell_profile_hook "${HOME}/.bashrc"`,
 		`install_shell_profile_hook "${HOME}/.profile"`,
+		`function write_codex_policy()`,
+		`/^sandbox_mode = / { next }`,
+		`/^approval_policy = / { next }`,
+		`/^\[/ && !skip { write_codex_policy() }`,
+		`END { write_codex_policy() }`,
+		`print "sandbox_mode = \"danger-full-access\""`,
+		`print "approval_policy = \"on-request\""`,
 		`[mcp_servers.erun]`,
 		`url = "${mcp_url}"`,
 		`tool_timeout_sec = 600`,
@@ -144,6 +178,105 @@ func TestRuntimeEntrypointConfiguresCodexMCP(t *testing.T) {
 	} {
 		if !strings.Contains(content, want) {
 			t.Fatalf("expected runtime entrypoint to contain %q, got:\n%s", want, content)
+		}
+	}
+}
+
+func TestRuntimeEntrypointConfiguresClaudeCodeBedrockAndMCP(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read runtime entrypoint: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		`initialize_claude_config`,
+		`configure-claude-code.sh`,
+		`"${HOME}/.erun/configure-claude-code.sh" >/dev/null 2>&1 || true`,
+		`install_shell_profile_hook "${HOME}/.bashrc"`,
+		`install_shell_profile_hook "${HOME}/.profile"`,
+		`claude_settings="${claude_dir}/settings.json"`,
+		`claude_state="${HOME}/.claude.json"`,
+		`claude_project_path="${ERUN_REPO_PATH:-${HOME}/git/erun}"`,
+		`claude_mcp_url="http://127.0.0.1:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}"`,
+		`case "${ERUN_CLOUD_PROVIDER_ALIAS:-}" in`,
+		`*@aws)`,
+		`claude_region=$(imds_region)`,
+		`CLAUDE_SETTINGS_PATH="${claude_settings}"`,
+		`CLAUDE_STATE_PATH="${claude_state}"`,
+		`settings.$schema = settings.$schema || 'https://json.schemastore.org/claude-code-settings.json';`,
+		`setEnv(settings, 'CLAUDE_CODE_USE_BEDROCK', envValue('CLAUDE_CODE_USE_BEDROCK', '1'));`,
+		`setEnv(settings, 'CLAUDE_CODE_USE_MANTLE', envValue('CLAUDE_CODE_USE_MANTLE', '1'));`,
+		`setEnv(settings, 'AWS_REGION', region);`,
+		`setEnv(settings, 'ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION', envValue('ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION', region));`,
+		`setEnv(settings, 'CLAUDE_CODE_MAX_OUTPUT_TOKENS', envValue('CLAUDE_CODE_MAX_OUTPUT_TOKENS', '4096'));`,
+		`setEnv(settings, 'MAX_THINKING_TOKENS', envValue('MAX_THINKING_TOKENS', '1024'));`,
+		`'AWS_PROFILE',`,
+		`'ANTHROPIC_MODEL',`,
+		`'ANTHROPIC_DEFAULT_SONNET_MODEL',`,
+		`const availableModels = listValue(envValue('ERUN_CLAUDE_AVAILABLE_MODELS'));`,
+		`settings.availableModels = availableModels;`,
+		`const projects = ensureObject(state, 'projects');`,
+		`const project = ensureObject(projects, projectPath);`,
+		`const mcpServers = ensureObject(project, 'mcpServers');`,
+		`mcpServers.erun = {`,
+		`type: 'http',`,
+		`url: mcpURL,`,
+		"fs.writeFileSync(path, `${JSON.stringify(value, null, 2)}\\n`, { mode: 0o600 });",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected runtime entrypoint to contain %q, got:\n%s", want, content)
+		}
+	}
+}
+
+func TestRuntimeEntrypointEnsuresGlobalAgentInstructions(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read runtime entrypoint: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		`agents_marker="erun-agents-md-hook"`,
+		`grep -qF "${agents_marker}" "${claude_md}"`,
+		`grep -qF "${agents_marker}" "${codex_instructions}"`,
+		`codex_instructions="${codex_dir}/instructions.md"`,
+		`AGENTS.md`,
+		`<!-- /%s -->`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected runtime entrypoint to contain %q, got:\n%s", want, content)
+		}
+	}
+}
+
+func TestRuntimeEntrypointEnsuresClaudeBypassPermissions(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read runtime entrypoint: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		`bypassPermissions`,
+		`skipDangerousModePermissionPrompt`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected runtime entrypoint to contain %q", want)
+		}
+	}
+}
+
+func TestRuntimeEntrypointPassesOIDCIssuersToAPI(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-backend-api", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read backend-api entrypoint: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		`if [ -n "${ERUN_OIDC_ALLOWED_ISSUERS:-}" ]; then`,
+		`--oidc-allowed-issuers "${ERUN_OIDC_ALLOWED_ISSUERS}"`,
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected backend-api entrypoint to contain %q, got:\n%s", want, content)
 		}
 	}
 }
@@ -159,7 +292,7 @@ func TestRuntimeEntrypointStopsCloudHostAfterIdle(t *testing.T) {
 		`runtime_cloud_instance_id()`,
 		`runtime_cloud_region()`,
 		`aws --cli-connect-timeout 5 --cli-read-timeout 20 ec2 stop-instances --region "${region}" --instance-ids "${instance_id}"`,
-		`kubectl --context "${ERUN_KUBERNETES_CONTEXT:-in-cluster}" --namespace "${namespace}" scale "deployment/${ERUN_RUNTIME_DEPLOYMENT:-erun-devops}" --replicas=0`,
+		`graceful_quit_clients >>"${HOME}/.erun/idle-stop.log" 2>&1 || true`,
 		`stop_cloud_host >>"${HOME}/.erun/idle-stop.log" 2>&1 || true`,
 		`http://169.254.169.254/latest/${path}`,
 		`imds_get "meta-data/instance-id"`,
@@ -168,6 +301,48 @@ func TestRuntimeEntrypointStopsCloudHostAfterIdle(t *testing.T) {
 		if !strings.Contains(content, want) {
 			t.Fatalf("expected runtime entrypoint to contain %q, got:\n%s", want, content)
 		}
+	}
+	// Stopping the EC2 host is what terminates the pod. The deployment should
+	// remain at replicas=1 so it returns automatically when the host starts back up.
+	if strings.Contains(content, "scale \"deployment/${ERUN_RUNTIME_DEPLOYMENT") {
+		t.Fatalf("expected runtime entrypoint to no longer scale the deployment to 0 before EC2 stop, got:\n%s", content)
+	}
+	gracefulIdx := strings.Index(content, `graceful_quit_clients >>"${HOME}/.erun/idle-stop.log"`)
+	stopIdx := strings.Index(content, `stop_cloud_host >>"${HOME}/.erun/idle-stop.log"`)
+	if gracefulIdx < 0 || stopIdx < 0 || gracefulIdx > stopIdx {
+		t.Fatalf("expected graceful_quit_clients to run before stop_cloud_host, got graceful=%d stop=%d", gracefulIdx, stopIdx)
+	}
+}
+
+func TestRuntimeEntrypointGracefullyQuitsClaudeAndCodexBeforeStop(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read runtime entrypoint: %v", err)
+	}
+	content := string(data)
+	for _, want := range []string{
+		"graceful_quit_clients()",
+		`pkill -TERM -f "${pattern}"`,
+		`pgrep -f "${pattern}"`,
+		`'claude-real'`,
+		`'codex-real'`,
+		`'@anthropic-ai/claude-code'`,
+		`'@openai/codex'`,
+		"sync",
+	} {
+		if !strings.Contains(content, want) {
+			t.Fatalf("expected runtime entrypoint to contain %q, got:\n%s", want, content)
+		}
+	}
+}
+
+func TestRuntimeImageInstallsProcps(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "Dockerfile"))
+	if err != nil {
+		t.Fatalf("read runtime Dockerfile: %v", err)
+	}
+	if !strings.Contains(string(data), "procps") {
+		t.Fatalf("expected runtime Dockerfile to apt-get install procps so graceful_quit_clients can use pkill/pgrep, got:\n%s", string(data))
 	}
 }
 
@@ -212,10 +387,12 @@ name: ${environment}
 repopath: ${repo_dir}
 kubernetescontext: ${ERUN_KUBERNETES_CONTEXT:-in-cluster}
 ${env_remote_line}
+${env_cloud_provider_alias_line}
 ${env_managed_cloud_line}
 idle:
   timeout: ${ERUN_IDLE_TIMEOUT:-5m0s}
   workinghours: ${ERUN_IDLE_WORKING_HOURS:-08:00-20:00}
+  timezone: ${ERUN_IDLE_TIMEZONE:-}
   idletrafficbytes: ${ERUN_IDLE_TRAFFIC_BYTES:-0}
 EOF`
 	if !strings.Contains(content, envConfig) {

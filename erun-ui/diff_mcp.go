@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -23,7 +24,7 @@ func (t idleProbeRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 	return base.RoundTrip(req)
 }
 
-func loadDiffFromMCP(ctx context.Context, endpoint string) (eruncommon.DiffResult, error) {
+func loadDiffFromMCP(ctx context.Context, endpoint string, options uiDiffOptions) (eruncommon.DiffResult, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint:             endpoint,
@@ -36,7 +37,13 @@ func loadDiffFromMCP(ctx context.Context, endpoint string) (eruncommon.DiffResul
 		_ = session.Close()
 	}()
 
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "diff"})
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "diff",
+		Arguments: map[string]any{
+			"scope":          strings.TrimSpace(options.Scope),
+			"selectedCommit": strings.TrimSpace(options.SelectedCommit),
+		},
+	})
 	if err != nil {
 		return eruncommon.DiffResult{}, err
 	}
@@ -120,4 +127,48 @@ func loadIdleStatusFromMCP(ctx context.Context, endpoint string) (eruncommon.Env
 		return eruncommon.EnvironmentIdleStatus{}, err
 	}
 	return status, nil
+}
+
+func loadAPILogFromMCP(ctx context.Context, endpoint string) (string, error) {
+	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
+	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint:             endpoint,
+		DisableStandaloneSSE: true,
+	}, nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		_ = session.Close()
+	}()
+
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "raw",
+		Arguments: map[string]any{
+			"command": []string{"sh", "-lc", "namespace=${ERUN_NAMESPACE:-}; if [ -z \"$namespace\" ] && [ -r /var/run/secrets/kubernetes.io/serviceaccount/namespace ]; then namespace=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace); fi; kubectl --context \"${ERUN_KUBERNETES_CONTEXT:-in-cluster}\" --namespace \"$namespace\" logs \"deployment/${ERUN_TENANT:-erun}-devops\" -c erun-backend-api --tail 400"},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+
+	data, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		return "", err
+	}
+	var output struct {
+		Stdout string `json:"stdout"`
+		Stderr string `json:"stderr"`
+	}
+	if err := json.Unmarshal(data, &output); err != nil {
+		return "", err
+	}
+	log := strings.TrimRight(output.Stdout, "\n")
+	if stderr := strings.TrimSpace(output.Stderr); stderr != "" {
+		if log != "" {
+			log += "\n"
+		}
+		log += stderr
+	}
+	return log, nil
 }

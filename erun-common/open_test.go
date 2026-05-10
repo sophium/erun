@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,7 +46,7 @@ func TestOpenResolveUsesDefaultTenantAndEnvironment(t *testing.T) {
 	if result.RepoPath != repoPath || result.Title != "tenant-a-dev" {
 		t.Fatalf("unexpected shell target: %+v", result)
 	}
-	if result.LocalPorts.RangeStart != 17000 || result.LocalPorts.SSH != 17022 {
+	if result.LocalPorts.RangeStart != 17000 || result.LocalPorts.API != 17033 || result.LocalPorts.SSH != 17022 {
 		t.Fatalf("unexpected local ports: %+v", result.LocalPorts)
 	}
 }
@@ -145,7 +146,7 @@ func TestOpenResolveUsesCurrentDirectoryTenantBeforeDefault(t *testing.T) {
 	})
 	requireNoError(t, err, "Resolve failed")
 	requireCondition(t, result.Tenant == "tenant-a" && result.Environment == "dev", "expected current directory tenant to win, got %+v", result)
-	requireCondition(t, result.LocalPorts.RangeStart == 17000 && result.LocalPorts.SSH == 17022, "unexpected local ports: %+v", result.LocalPorts)
+	requireCondition(t, result.LocalPorts.RangeStart == 17000 && result.LocalPorts.API == 17033 && result.LocalPorts.SSH == 17022, "unexpected local ports: %+v", result.LocalPorts)
 }
 
 func TestOpenResolveAssignsEnvironmentLocalPortsFromSortedTenantEnvironmentOrder(t *testing.T) {
@@ -167,7 +168,7 @@ func TestOpenResolveAssignsEnvironmentLocalPortsFromSortedTenantEnvironmentOrder
 	if err != nil {
 		t.Fatalf("ResolveOpen failed: %v", err)
 	}
-	if result.LocalPorts.RangeStart != 17200 || result.LocalPorts.MCP != 17200 || result.LocalPorts.SSH != 17222 {
+	if result.LocalPorts.RangeStart != 17200 || result.LocalPorts.MCP != 17200 || result.LocalPorts.API != 17233 || result.LocalPorts.SSH != 17222 {
 		t.Fatalf("unexpected local ports: %+v", result.LocalPorts)
 	}
 }
@@ -701,6 +702,112 @@ func TestKubectlDeploymentWaitArgs(t *testing.T) {
 	}
 	if strings.Join(args, "\n") != strings.Join(expected, "\n") {
 		t.Fatalf("unexpected wait args:\nwant: %#v\ngot:  %#v", expected, args)
+	}
+}
+
+func TestShellDeploymentFailureDiagnosticIncludesPodExitDetails(t *testing.T) {
+	req := ShellLaunchParams{
+		Tenant:            "tenant-a",
+		Environment:       "local",
+		Namespace:         "tenant-a-local",
+		KubernetesContext: "cluster-local",
+	}
+	runner := func(args []string, stdout, stderr io.Writer) error {
+		command := strings.Join(args, " ")
+		switch {
+		case strings.Contains(command, " get pods "):
+			_, _ = io.WriteString(stdout, `{
+				"items": [{
+					"metadata": {"name": "tenant-a-devops-abc123"},
+					"status": {
+						"phase": "Running",
+						"conditions": [{
+							"type": "Ready",
+							"status": "False",
+							"reason": "ContainersNotReady",
+							"message": "containers with unready status: [erun-devops]"
+						}],
+						"containerStatuses": [{
+							"name": "erun-devops",
+							"ready": false,
+							"restartCount": 1,
+							"state": {"running": {"startedAt": "2026-04-30T20:33:30Z"}},
+							"lastState": {"terminated": {
+								"exitCode": 137,
+								"reason": "OOMKilled",
+								"message": "Container was killed because it used too much memory",
+								"startedAt": "2026-04-30T20:33:28Z",
+								"finishedAt": "2026-04-30T20:34:00Z"
+							}}
+						}]
+					}
+				}]
+			}`)
+		case strings.Contains(command, " get events "):
+			_, _ = io.WriteString(stdout, `{
+				"items": [{
+					"type": "Normal",
+					"reason": "Pulled",
+					"message": "Successfully pulled image",
+					"lastTimestamp": "2026-04-30T20:33:29Z"
+				}, {
+					"type": "Warning",
+					"reason": "OOMKilling",
+					"message": "Memory cgroup out of memory: Killed process 123",
+					"count": 2,
+					"lastTimestamp": "2026-04-30T20:34:00Z",
+					"involvedObject": {"name": "tenant-a-devops-abc123"}
+				}]
+			}`)
+		default:
+			t.Fatalf("unexpected kubectl args: %#v", args)
+		}
+		return nil
+	}
+
+	err := enrichShellDeploymentError(req, errors.New("exit status 137"), runner)
+	if err == nil {
+		t.Fatal("expected enriched error")
+	}
+	got := err.Error()
+	for _, want := range []string{
+		"exit status 137",
+		"Runtime pod diagnostics:",
+		"Pod tenant-a-devops-abc123: phase=Running",
+		"Ready=False (ContainersNotReady: containers with unready status: [erun-devops])",
+		"Container erun-devops: ready=false restartCount=1",
+		"lastState=terminated (exitCode=137, reason=OOMKilled, message=Container was killed because it used too much memory",
+		"Warning OOMKilling: Memory cgroup out of memory: Killed process 123 (x2)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected diagnostic to contain %q, got:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Successfully pulled image") {
+		t.Fatalf("expected normal events to be omitted, got:\n%s", got)
+	}
+}
+
+func TestRuntimePodLooksLikeCleanReplacement(t *testing.T) {
+	pod := runtimePodDiagnostic{}
+	pod.Status.Phase = "Running"
+	pod.Status.Conditions = []runtimePodConditionDiagnostic{
+		{Type: "Ready", Status: "True"},
+		{Type: "ContainersReady", Status: "True"},
+	}
+	pod.Status.ContainerStatuses = []runtimeContainerStatusDiagnostic{
+		{Name: "erun-devops", Ready: true, State: runtimeContainerStateDiagnostic{Running: &runtimeContainerRunningDiagnostic{StartedAt: "2026-05-02T10:41:48Z"}}},
+		{Name: "erun-dind", Ready: true, State: runtimeContainerStateDiagnostic{Running: &runtimeContainerRunningDiagnostic{StartedAt: "2026-05-02T10:41:49Z"}}},
+	}
+
+	if !runtimePodLooksLikeCleanReplacement(pod) {
+		t.Fatalf("expected clean replacement pod to be ready")
+	}
+
+	pod.Status.ContainerStatuses[0].RestartCount = 1
+	pod.Status.ContainerStatuses[0].LastState.Terminated = &runtimeContainerTerminatedDiagnostic{ExitCode: 137, Reason: "OOMKilled"}
+	if runtimePodLooksLikeCleanReplacement(pod) {
+		t.Fatalf("did not expect restarted pod to look like a clean replacement")
 	}
 }
 

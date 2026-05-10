@@ -1,17 +1,23 @@
 package cmd
 
 import (
-	"bytes"
 	"errors"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 
-	"github.com/adrg/xdg"
 	"github.com/manifoldco/promptui"
 	common "github.com/sophium/erun/erun-common"
 )
+
+// The init command's dry-run trace, --remote validation, positional-arg
+// mapping, runtime-version override, and default-selection overrides are
+// covered by the integration suite (erun-integration/init_test.go). The
+// kubectl namespace check/create branches that were previously unit-tested
+// via PATH stubs were removed because driving production code with a stub
+// `kubectl` binary is a policy violation (see AGENTS.md). The cases below
+// stay as unit tests because they exercise interactive promptui flows
+// (kubectl-context selection, container-registry default/cancel) that
+// integration scenarios cannot reach without scripting stdin, plus a pure
+// helper that reorders contexts.
 
 func TestKubernetesContextPromptSelectsExistingContext(t *testing.T) {
 	got, err := kubernetesContextPrompt(
@@ -143,238 +149,5 @@ func TestContainerRegistryPromptReturnsCancellationOnAbort(t *testing.T) {
 	}, "Choose registry")
 	if !errors.Is(err, common.ErrContainerRegistryCancelled) {
 		t.Fatalf("expected ErrContainerRegistryCancelled, got %v", err)
-	}
-}
-
-func TestInitCommandDryRunDoesNotPersistConfiguration(t *testing.T) {
-	setupRootCmdTestConfigHome(t)
-
-	projectRoot := t.TempDir()
-	namespaceEnsured := false
-	cmd := newTestRootCmd(testRootDeps{
-		FindProjectRoot: func() (string, string, error) {
-			return "tenant-a", projectRoot, nil
-		},
-		PromptRunner: func(prompt promptui.Prompt) (string, error) {
-			if prompt.IsConfirm {
-				return "y", nil
-			}
-			return "", nil
-		},
-		SelectRunner: func(prompt promptui.Select) (int, string, error) {
-			return 0, "cluster-local", nil
-		},
-		ListKubernetesContexts: func() ([]string, error) {
-			return []string{"cluster-local"}, nil
-		},
-		EnsureKubernetesNamespace: func(contextName, namespace string) error {
-			namespaceEnsured = true
-			return nil
-		},
-	})
-	stdout := new(bytes.Buffer)
-	stderr := new(bytes.Buffer)
-	cmd.SetOut(stdout)
-	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"init", "--dry-run", "-v"})
-
-	requireNoError(t, cmd.Execute(), "Execute failed")
-
-	if namespaceEnsured {
-		t.Fatal("did not expect namespace creation during dry-run")
-	}
-	if _, _, err := common.LoadERunConfig(); !errors.Is(err, common.ErrNotInitialized) {
-		t.Fatalf("expected erun config to remain absent, got %v", err)
-	}
-	if _, _, err := common.LoadTenantConfig("tenant-a"); !errors.Is(err, common.ErrNotInitialized) {
-		t.Fatalf("expected tenant config to remain absent, got %v", err)
-	}
-	if _, _, err := common.LoadEnvConfig("tenant-a", common.DefaultEnvironment); !errors.Is(err, common.ErrNotInitialized) {
-		t.Fatalf("expected env config to remain absent, got %v", err)
-	}
-	if got := stderr.String(); !bytes.Contains([]byte(got), []byte("write-yaml")) {
-		t.Fatalf("expected dry-run trace output, got %q", got)
-	}
-}
-
-func TestInitCommandDryRunPrintsConcretePlannedActions(t *testing.T) {
-	setupRootCmdTestConfigHome(t)
-
-	projectRoot := t.TempDir()
-	cmd := newTestRootCmd(testRootDeps{
-		FindProjectRoot: func() (string, string, error) {
-			return "tenant-a", projectRoot, nil
-		},
-		PromptRunner: func(prompt promptui.Prompt) (string, error) {
-			if prompt.IsConfirm {
-				return "y", nil
-			}
-			return "", nil
-		},
-		SelectRunner: func(prompt promptui.Select) (int, string, error) {
-			return 0, "cluster-local", nil
-		},
-		ListKubernetesContexts: func() ([]string, error) {
-			return []string{"cluster-local"}, nil
-		},
-	})
-	stderr := new(bytes.Buffer)
-	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"init", "--dry-run", "-v"})
-
-	requireNoError(t, cmd.Execute(), "Execute failed")
-
-	rootConfigPath, err := xdg.ConfigFile(filepath.Join("erun", "config.yaml"))
-	if err != nil {
-		t.Fatalf("xdg config path: %v", err)
-	}
-	tenantConfigPath, err := xdg.ConfigFile(filepath.Join("erun", "tenant-a", "config.yaml"))
-	if err != nil {
-		t.Fatalf("xdg tenant path: %v", err)
-	}
-	envConfigPath, err := xdg.ConfigFile(filepath.Join("erun", "tenant-a", common.DefaultEnvironment, "config.yaml"))
-	if err != nil {
-		t.Fatalf("xdg env path: %v", err)
-	}
-	projectConfigPath := filepath.Join(projectRoot, ".erun", "config.yaml")
-	devopsVersionPath := filepath.Join(projectRoot, "tenant-a-devops", "VERSION")
-	devopsDockerfilePath := filepath.Join(projectRoot, "tenant-a-devops", "docker", "tenant-a-devops", "Dockerfile")
-	devopsChartPath := filepath.Join(projectRoot, "tenant-a-devops", "k8s", "tenant-a-devops", "Chart.yaml")
-	devopsValuesPath := filepath.Join(projectRoot, "tenant-a-devops", "k8s", "tenant-a-devops", "values.local.yaml")
-	devopsTemplatePath := filepath.Join(projectRoot, "tenant-a-devops", "k8s", "tenant-a-devops", "templates", "service.yaml")
-
-	output := stderr.String()
-	for _, want := range []string{
-		"kubectl --context cluster-local get namespace tenant-a-local -o name",
-		"kubectl --context cluster-local create namespace tenant-a-local",
-		"write-yaml " + rootConfigPath,
-		"write-yaml " + tenantConfigPath,
-		"write-yaml " + envConfigPath,
-		"write-yaml " + projectConfigPath,
-		"write-file " + devopsVersionPath,
-		"write-file " + devopsDockerfilePath,
-		"write-file " + devopsChartPath,
-		"write-file " + devopsValuesPath,
-		"write-file " + devopsTemplatePath,
-	} {
-		if !bytes.Contains([]byte(output), []byte(want)) {
-			t.Fatalf("expected dry-run output to contain %q, got %q", want, output)
-		}
-	}
-}
-
-func TestEnsureKubernetesNamespaceReturnsNilWhenNamespaceAlreadyExists(t *testing.T) {
-	kubectlDir := t.TempDir()
-	kubectlPath := filepath.Join(kubectlDir, "kubectl")
-	if err := os.WriteFile(kubectlPath, []byte(`#!/bin/sh
-if [ "$1" = "--context" ] && [ "$3" = "get" ] && [ "$4" = "namespace" ] && [ "$5" = "tenant-a-local" ]; then
-  echo "namespace/tenant-a-local"
-  exit 0
-fi
-echo "unexpected kubectl invocation: $@" >&2
-exit 1
-`), 0o755); err != nil {
-		t.Fatalf("write kubectl stub: %v", err)
-	}
-	t.Setenv("PATH", kubectlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	requireNoError(t, ensureKubernetesNamespace("cluster-local", "tenant-a-local"), "ensureKubernetesNamespace failed")
-}
-
-func TestEnsureKubernetesNamespaceCreatesWhenNamespaceMissing(t *testing.T) {
-	kubectlDir := t.TempDir()
-	kubectlPath := filepath.Join(kubectlDir, "kubectl")
-	if err := os.WriteFile(kubectlPath, []byte(`#!/bin/sh
-if [ "$1" = "--context" ] && [ "$3" = "get" ] && [ "$4" = "namespace" ] && [ "$5" = "tenant-a-local" ]; then
-  echo 'Error from server (NotFound): namespaces "tenant-a-local" not found' >&2
-  exit 1
-fi
-if [ "$1" = "--context" ] && [ "$3" = "create" ] && [ "$4" = "namespace" ] && [ "$5" = "tenant-a-local" ]; then
-  echo "namespace/tenant-a-local"
-  exit 0
-fi
-echo "unexpected kubectl invocation: $@" >&2
-exit 1
-`), 0o755); err != nil {
-		t.Fatalf("write kubectl stub: %v", err)
-	}
-	t.Setenv("PATH", kubectlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-
-	requireNoError(t, ensureKubernetesNamespace("cluster-local", "tenant-a-local"), "ensureKubernetesNamespace failed")
-}
-
-func TestInitCommandRemoteRequiresEnvironment(t *testing.T) {
-	setupRootCmdTestConfigHome(t)
-
-	cmd := newTestRootCmd(testRootDeps{})
-	cmd.SetArgs([]string{"init", "--remote", "--tenant", "frs"})
-
-	err := cmd.Execute()
-	if err == nil || !strings.Contains(err.Error(), "environment is required with --remote") {
-		t.Fatalf("expected remote environment validation error, got %v", err)
-	}
-}
-
-func TestInitCommandMapsPositionalTenantAndEnvironmentArgs(t *testing.T) {
-	var got common.BootstrapInitParams
-	cmd := newInitCmd(func(_ common.Context, params common.BootstrapInitParams) error {
-		got = params
-		return nil
-	})
-	cmd.SetArgs([]string{"erun", "rtest"})
-
-	requireNoError(t, cmd.Execute(), "Execute failed")
-	if got.Tenant != "erun" || got.Environment != "rtest" {
-		t.Fatalf("unexpected init params: %+v", got)
-	}
-}
-
-func TestInitCommandHelpShowsPositionalTenantAndEnvironment(t *testing.T) {
-	cmd := newInitCmd(func(common.Context, common.BootstrapInitParams) error {
-		t.Fatal("did not expect init execution")
-		return nil
-	})
-	stdout := new(bytes.Buffer)
-	stderr := new(bytes.Buffer)
-	cmd.SetOut(stdout)
-	cmd.SetErr(stderr)
-	cmd.SetArgs([]string{"--help"})
-
-	requireNoError(t, cmd.Execute(), "Execute failed")
-
-	output := stdout.String() + stderr.String()
-	if !strings.Contains(output, "Usage:\n  init [TENANT] [ENVIRONMENT] [flags]") {
-		t.Fatalf("unexpected help output: %q", output)
-	}
-}
-
-func TestInitCommandAcceptsRuntimeVersionOverride(t *testing.T) {
-	var got common.BootstrapInitParams
-	cmd := newInitCmd(func(_ common.Context, params common.BootstrapInitParams) error {
-		got = params
-		return nil
-	})
-	cmd.SetArgs([]string{"erun", "local", "--version", "1.0.19-snapshot-20260418141901", "--runtime-image", "erun-devops", "--no-git", "--bootstrap"})
-
-	requireNoError(t, cmd.Execute(), "Execute failed")
-	if got.RuntimeVersion != "1.0.19-snapshot-20260418141901" || got.RuntimeImage != "erun-devops" || !got.NoGit || !got.Bootstrap {
-		t.Fatalf("unexpected init params: %+v", got)
-	}
-}
-
-func TestInitCommandAcceptsDefaultSelectionOverrides(t *testing.T) {
-	var got common.BootstrapInitParams
-	cmd := newInitCmd(func(_ common.Context, params common.BootstrapInitParams) error {
-		got = params
-		return nil
-	})
-	cmd.SetArgs([]string{"erun", "local", "--set-default-tenant=false", "--confirm-environment=true"})
-
-	requireNoError(t, cmd.Execute(), "Execute failed")
-	if got.ConfirmTenant == nil || *got.ConfirmTenant {
-		t.Fatalf("unexpected tenant confirmation: %+v", got.ConfirmTenant)
-	}
-	if got.ConfirmEnvironment == nil || !*got.ConfirmEnvironment {
-		t.Fatalf("unexpected environment confirmation: %+v", got.ConfirmEnvironment)
 	}
 }

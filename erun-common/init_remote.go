@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"net/url"
-	"os/exec"
 	"path"
 	"regexp"
 	"strings"
@@ -628,7 +627,7 @@ func kubectlRemoteExecArgs(req ShellLaunchParams, script string) []string {
 }
 
 func RunRemoteCommand(req ShellLaunchParams, script string) (RemoteCommandResult, error) {
-	cmd := exec.Command("kubectl", kubectlRemoteExecArgs(req, script)...)
+	cmd := Command("kubectl", kubectlRemoteExecArgs(req, script)...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout

@@ -1,0 +1,14 @@
+Build and push the current container image
+
+Usage:
+  erun push [flags]
+
+Flags:
+      --dry-run          Resolve and trace mutating actions without executing them.
+      --force            Rebuild and re-push every image, bypassing the fingerprint cache
+  -h, --help             help for push
+      --version string   Override the resolved image version
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.

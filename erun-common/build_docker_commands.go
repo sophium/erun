@@ -3,22 +3,109 @@ package eruncommon
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"regexp"
 	"strings"
 )
 
+const fingerprintTagPrefix = "fp-"
+
 func DockerImageBuilder(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
-	if len(buildInput.Platforms) > 0 {
-		if err := ensureDockerBuildxBuilder(buildInput.ContextDir, buildInput.Platforms, stdout, stderr); err != nil {
+	if buildInput.Promote {
+		return promoteDockerImage(buildInput, stdout, stderr)
+	}
+	return runMultiPlatformBuild(buildInput, stdout, stderr)
+}
+
+func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
+	perPlatformTags := make([]string, 0, len(buildInput.Platforms))
+	for _, platform := range buildInput.Platforms {
+		platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
+		perPlatformTags = append(perPlatformTags, platformTag)
+		args := dockerBuildArgs(buildInput, platform)
+		if err := runDockerBuildOnce(args, buildInput.ContextDir, buildInput.Image.Tag, false, stdout, stderr); err != nil {
+			return err
+		}
+		if err := tagFingerprintAfterBuild(buildInput, platform, stdout, stderr); err != nil {
 			return err
 		}
 	}
-	cmd := exec.Command("docker", dockerBuildArgs(buildInput)...)
-	cmd.Dir = buildInput.ContextDir
+	if !buildInput.Push {
+		return nil
+	}
+	return pushMultiPlatformImage(buildInput.Image.Tag, perPlatformTags, stdout, stderr)
+}
+
+func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
+	perPlatformTags := make([]string, 0, len(buildInput.Platforms))
+	for _, platform := range buildInput.Platforms {
+		fpTag := fingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
+		platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
+		perPlatformTags = append(perPlatformTags, platformTag)
+		if err := runDockerTag(fpTag, platformTag, stdout, stderr); err != nil {
+			return err
+		}
+	}
+	if !buildInput.Push {
+		return nil
+	}
+	return pushMultiPlatformImage(buildInput.Image.Tag, perPlatformTags, stdout, stderr)
+}
+
+func pushMultiPlatformImage(tag string, perPlatformTags []string, stdout, stderr io.Writer) error {
+	for _, platformTag := range perPlatformTags {
+		if err := DockerImagePusher(platformTag, stdout, stderr); err != nil {
+			return err
+		}
+	}
+	createArgs := append([]string{"manifest", "create", "--amend", tag}, perPlatformTags...)
+	if err := runDockerSimpleCommand(createArgs, stdout, stderr); err != nil {
+		return err
+	}
+	return runDockerSimpleCommand([]string{"manifest", "push", tag}, stdout, stderr)
+}
+
+func tagFingerprintAfterBuild(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
+	if buildInput.Fingerprint == "" {
+		return nil
+	}
+	sourceTag := platformSuffixedTag(buildInput.Image.Tag, platform)
+	target := fingerprintTag(buildInput.Image, buildInput.Fingerprint, platform)
+	if sourceTag == target {
+		return nil
+	}
+	return runDockerTag(sourceTag, target, stdout, stderr)
+}
+
+func fingerprintTag(image DockerImageReference, fingerprint, platform string) string {
+	registry := strings.TrimSpace(image.Registry)
+	repo := image.ImageName
+	if registry != "" {
+		repo = strings.TrimRight(registry, "/") + "/" + image.ImageName
+	}
+	suffix := fingerprintTagPrefix + fingerprint
+	if platform != "" {
+		suffix = suffix + "-" + platformShortSuffix(platform)
+	}
+	return repo + ":" + suffix
+}
+
+func platformSuffixedTag(tag, platform string) string {
+	return tag + "-" + platformShortSuffix(platform)
+}
+
+func platformShortSuffix(platform string) string {
+	parts := strings.SplitN(platform, "/", 2)
+	if len(parts) == 2 && parts[1] != "" {
+		return parts[1]
+	}
+	return strings.ReplaceAll(platform, "/", "-")
+}
+
+func runDockerBuildOnce(args []string, dir, authContextTag string, push bool, stdout, stderr io.Writer) error {
+	cmd := Command("docker", args...)
+	cmd.Dir = dir
 	output := new(bytes.Buffer)
 	cmd.Stdout = dockerCommandOutputWriter(stdout, output)
 	cmd.Stderr = dockerCommandOutputWriter(stderr, output)
@@ -28,16 +115,42 @@ func DockerImageBuilder(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 	}
 
 	message := output.String()
-	if buildInput.Push && IsDockerPushAuthorizationError(message) {
+	if push && IsDockerPushAuthorizationError(message) {
 		return DockerRegistryAuthError{
-			Tag:      buildInput.Image.Tag,
-			Registry: dockerRegistryFromImageTag(buildInput.Image.Tag),
+			Tag:      authContextTag,
+			Registry: dockerRegistryFromImageTag(authContextTag),
 			Message:  strings.TrimSpace(message),
 			Err:      err,
 		}
 	}
-
 	return err
+}
+
+func runDockerSimpleCommand(args []string, stdout, stderr io.Writer) error {
+	cmd := Command("docker", args...)
+	if stdout != nil {
+		cmd.Stdout = stdout
+	}
+	if stderr != nil {
+		cmd.Stderr = stderr
+	}
+	return cmd.Run()
+}
+
+func runDockerTag(source, target string, stdout, stderr io.Writer) error {
+	return runDockerSimpleCommand([]string{"tag", source, target}, stdout, stderr)
+}
+
+func shouldRetryAfterGHCRNamespaceLogin(err error, tag string, stdout, stderr io.Writer) bool {
+	var authErr DockerRegistryAuthError
+	if !errors.As(err, &authErr) {
+		return false
+	}
+	if !IsDockerCreatePackageDenied(authErr.Message) {
+		return false
+	}
+	ok, loginErr := TryGHCRNamespaceLogin(tag, stdout, stderr)
+	return loginErr == nil && ok
 }
 
 func DockerImageExists(tag string) (bool, error) {
@@ -45,7 +158,7 @@ func DockerImageExists(tag string) (bool, error) {
 	if tag == "" {
 		return false, nil
 	}
-	cmd := exec.Command("docker", "image", "inspect", tag)
+	cmd := Command("docker", "image", "inspect", tag)
 	err := cmd.Run()
 	if err == nil {
 		return true, nil
@@ -62,7 +175,7 @@ func DockerManifestExists(tag string) (bool, error) {
 	if tag == "" {
 		return false, nil
 	}
-	cmd := exec.Command("docker", "manifest", "inspect", tag)
+	cmd := Command("docker", "manifest", "inspect", tag)
 	err := cmd.Run()
 	if err == nil {
 		return true, nil
@@ -91,115 +204,24 @@ func dockerCommandOutputWriter(primary io.Writer, capture io.Writer) io.Writer {
 	return io.MultiWriter(writers...)
 }
 
-func dockerBuildArgs(buildInput DockerBuildSpec) []string {
-	tag := strings.TrimSpace(buildInput.Image.Tag)
-	args := []string{"build"}
-	if len(buildInput.Platforms) > 0 {
-		args = []string{"buildx", "build", "--builder", multiPlatformBuildxBuilderName, "--platform", strings.Join(buildInput.Platforms, ",")}
+func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
+	tag := platformSuffixedTag(strings.TrimSpace(buildInput.Image.Tag), platform)
+	// BuildKit's default exporter wraps each per-platform image in an OCI
+	// index alongside a provenance attestation manifest, which makes the
+	// resulting tag a manifest list. `docker manifest create` rejects
+	// manifest-list inputs ("<tag> is a manifest list"), so provenance stays
+	// off and each per-arch tag is a plain image manifest the assembly step
+	// can consume.
+	args := []string{"build", "--platform", platform, "--provenance=false", "-t", tag}
+	buildArgVersion := dockerImageTagVersion(strings.TrimSpace(buildInput.Image.Tag))
+	if buildInput.Image.BaseVersion != "" {
+		buildArgVersion = buildInput.Image.BaseVersion
 	}
-	args = append(args, "-t", tag)
-	if version := dockerImageTagVersion(tag); version != "" {
-		args = append(args, "--build-arg", "ERUN_VERSION="+version)
-	}
-	if buildInput.Push {
-		args = append(args, "--push")
+	if buildArgVersion != "" {
+		args = append(args, "--build-arg", "ERUN_VERSION="+buildArgVersion)
 	}
 	args = append(args, "-f", buildInput.DockerfilePath, ".")
 	return args
-}
-
-func dockerBuildxSetupCommands(dir string) []commandSpec {
-	return []commandSpec{
-		{
-			Dir:  dir,
-			Name: "docker",
-			Args: []string{"buildx", "inspect", multiPlatformBuildxBuilderName},
-		},
-		{
-			Dir:  dir,
-			Name: "docker",
-			Args: []string{"buildx", "create", "--name", multiPlatformBuildxBuilderName, "--driver", "docker-container"},
-		},
-		{
-			Dir:  dir,
-			Name: "docker",
-			Args: []string{"buildx", "inspect", "--builder", multiPlatformBuildxBuilderName, "--bootstrap"},
-		},
-	}
-}
-
-var buildxPlatformsPattern = regexp.MustCompile(`(?m)^\s*Platforms:\s*(.+)$`)
-
-func ensureDockerBuildxBuilder(dir string, requiredPlatforms []string, stdout, stderr io.Writer) error {
-	inspect := exec.Command("docker", "buildx", "inspect", multiPlatformBuildxBuilderName)
-	inspect.Dir = dir
-	inspect.Stdout = io.Discard
-	inspect.Stderr = io.Discard
-	if err := inspect.Run(); err != nil {
-		create := exec.Command("docker", "buildx", "create", "--name", multiPlatformBuildxBuilderName, "--driver", "docker-container")
-		create.Dir = dir
-		create.Stdout = stdout
-		create.Stderr = stderr
-		if err := create.Run(); err != nil {
-			return err
-		}
-	}
-
-	bootstrap := exec.Command("docker", "buildx", "inspect", "--builder", multiPlatformBuildxBuilderName, "--bootstrap")
-	bootstrap.Dir = dir
-	output := new(bytes.Buffer)
-	bootstrap.Stdout = io.MultiWriter(stdout, output)
-	bootstrap.Stderr = io.MultiWriter(stderr, output)
-	if err := bootstrap.Run(); err != nil {
-		return err
-	}
-	if missingPlatforms := missingBuildxPlatforms(output.String(), requiredPlatforms); len(missingPlatforms) > 0 {
-		availablePlatforms := buildxPlatforms(output.String())
-		if len(availablePlatforms) == 0 {
-			return fmt.Errorf("multi-platform release builder %q did not report supported platforms after bootstrap", multiPlatformBuildxBuilderName)
-		}
-		return fmt.Errorf("multi-platform release builder %q does not support required platforms: %s (available: %s)", multiPlatformBuildxBuilderName, strings.Join(missingPlatforms, ", "), strings.Join(availablePlatforms, ", "))
-	}
-	return nil
-}
-
-func buildxPlatforms(output string) []string {
-	match := buildxPlatformsPattern.FindStringSubmatch(output)
-	if len(match) < 2 {
-		return nil
-	}
-	rawPlatforms := strings.Split(match[1], ",")
-	platforms := make([]string, 0, len(rawPlatforms))
-	for _, platform := range rawPlatforms {
-		platform = strings.TrimSpace(platform)
-		if platform == "" {
-			continue
-		}
-		platforms = append(platforms, platform)
-	}
-	return platforms
-}
-
-func missingBuildxPlatforms(output string, requiredPlatforms []string) []string {
-	if len(requiredPlatforms) == 0 {
-		return nil
-	}
-	supported := make(map[string]struct{}, len(requiredPlatforms))
-	for _, platform := range buildxPlatforms(output) {
-		supported[platform] = struct{}{}
-	}
-	missing := make([]string, 0, len(requiredPlatforms))
-	for _, platform := range requiredPlatforms {
-		platform = strings.TrimSpace(platform)
-		if platform == "" {
-			continue
-		}
-		if _, ok := supported[platform]; ok {
-			continue
-		}
-		missing = append(missing, platform)
-	}
-	return missing
 }
 
 func dockerImageTagVersion(tag string) string {
@@ -215,7 +237,7 @@ func dockerImageTagVersion(tag string) string {
 }
 
 func BuildScriptRunner(dir, scriptPath string, env []string, stdin io.Reader, stdout, stderr io.Writer) error {
-	cmd := exec.Command(scriptPath)
+	cmd := Command(scriptPath)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
 	cmd.Stdin = stdin
@@ -225,7 +247,22 @@ func BuildScriptRunner(dir, scriptPath string, env []string, stdin io.Reader, st
 }
 
 func DockerImagePusher(tag string, stdout, stderr io.Writer) error {
-	pushCmd := exec.Command("docker", "push", tag)
+	err := runDockerPushOnce(tag, stdout, stderr)
+	if err == nil {
+		return nil
+	}
+	if shouldRetryAfterGHCRNamespaceLogin(err, tag, stdout, stderr) {
+		if retryErr := runDockerPushOnce(tag, stdout, stderr); retryErr == nil {
+			return nil
+		} else {
+			err = retryErr
+		}
+	}
+	return err
+}
+
+func runDockerPushOnce(tag string, stdout, stderr io.Writer) error {
+	pushCmd := Command("docker", "push", tag)
 	output := new(bytes.Buffer)
 	pushCmd.Stdout = dockerCommandOutputWriter(stdout, output)
 	pushCmd.Stderr = dockerCommandOutputWriter(stderr, output)
@@ -243,21 +280,172 @@ func DockerImagePusher(tag string, stdout, stderr io.Writer) error {
 			Err:      err,
 		}
 	}
-
 	return err
 }
 
 func DockerRegistryLogin(registry string, stdin io.Reader, stdout, stderr io.Writer) error {
+	if isGHCRRegistry(registry) {
+		ok, err := tryGHCRLoginViaGH(registry, stdout, stderr)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return nil
+		}
+	}
+
 	args := []string{"login"}
 	if registry != "" {
 		args = append(args, registry)
 	}
 
-	loginCmd := exec.Command("docker", args...)
+	loginCmd := Command("docker", args...)
 	loginCmd.Stdin = stdin
 	loginCmd.Stdout = stdout
 	loginCmd.Stderr = stderr
 	return loginCmd.Run()
+}
+
+func isGHCRRegistry(registry string) bool {
+	registry = strings.ToLower(strings.TrimSpace(registry))
+	return registry == "ghcr.io" || strings.HasPrefix(registry, "ghcr.io/")
+}
+
+func tryGHCRLoginViaGH(registry string, stdout, stderr io.Writer) (bool, error) {
+	if _, err := exec.LookPath("gh"); err != nil {
+		return false, nil
+	}
+
+	user, err := captureGHCommand("api", "user", "--jq", ".login")
+	if err != nil {
+		return false, nil
+	}
+	user = strings.TrimSpace(user)
+	if user == "" {
+		return false, nil
+	}
+
+	token, err := captureGHCommand("auth", "token")
+	if err != nil {
+		return false, nil
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return false, nil
+	}
+
+	loginCmd := Command("docker", "login", "ghcr.io", "-u", user, "--password-stdin")
+	loginCmd.Stdin = strings.NewReader(token)
+	loginCmd.Stdout = stdout
+	loginCmd.Stderr = stderr
+	if err := loginCmd.Run(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func captureGHCommand(args ...string) (string, error) {
+	cmd := Command("gh", args...)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(output), nil
+}
+
+// RefreshGHCRPackageScopes widens the gh-stored token's scopes to include
+// write:packages,read:packages and then re-runs TryGHCRNamespaceLogin so
+// docker is authed with the freshly-scoped token.
+//
+// `gh auth refresh` operates on the currently active gh account and does
+// not accept a `-u` flag, so this helper first runs `gh auth switch -u
+// <namespace>` best-effort to make the namespace owner active. If switch
+// fails (single-account install, account not logged in), the refresh runs
+// against whichever account is active.
+//
+// The refresh flow is interactive (browser device-code), so stdin must be
+// a real terminal. Returns (true, nil) when the refresh completed and
+// docker login was redone, (false, nil) when prerequisites are missing
+// (gh not installed, non-ghcr tag, missing namespace), and (false, err)
+// for gh or docker errors.
+//
+// Use this only after TryGHCRNamespaceLogin + retry fails with a
+// scope-denied error: that signals the gh-stored token itself lacks the
+// scope, and the only remedy is replacing the token.
+func RefreshGHCRPackageScopes(tag string, stdin io.Reader, stdout, stderr io.Writer) (bool, error) {
+	if !isGHCRRegistry(dockerRegistryFromImageTag(tag)) {
+		return false, nil
+	}
+	namespace := DockerNamespaceFromTag(tag)
+	if namespace == "" {
+		return false, nil
+	}
+	if _, err := exec.LookPath("gh"); err != nil {
+		return false, nil
+	}
+
+	switchCmd := Command("gh", "auth", "switch", "-h", "github.com", "-u", namespace)
+	switchCmd.Stdout = stdout
+	switchCmd.Stderr = stderr
+	switchErr := switchCmd.Run()
+
+	var ghCmd *exec.Cmd
+	if switchErr == nil {
+		// Namespace owner is already logged in and is now the active
+		// account; widen its scopes.
+		ghCmd = Command("gh", "auth", "refresh", "-h", "github.com", "-s", "write:packages,read:packages")
+	} else {
+		// Namespace owner is not logged in. Add it via the interactive
+		// browser flow, requesting the package scopes up front.
+		ghCmd = Command("gh", "auth", "login", "-h", "github.com", "-s", "write:packages,read:packages", "-w", "--git-protocol", "https")
+	}
+	ghCmd.Stdin = stdin
+	ghCmd.Stdout = stdout
+	ghCmd.Stderr = stderr
+	if err := ghCmd.Run(); err != nil {
+		return false, err
+	}
+
+	return TryGHCRNamespaceLogin(tag, stdout, stderr)
+}
+
+// TryGHCRNamespaceLogin re-authenticates docker to ghcr.io as the GitHub user
+// that owns the target namespace, when that user is also configured in the
+// local gh CLI. Returns (true, nil) on a successful login, (false, nil) when
+// the namespace cannot be impersonated (gh missing, account not logged in,
+// non-ghcr.io tag), and (false, err) when the eventual docker login fails.
+//
+// Use this after a push failure with IsDockerCreatePackageDenied to attempt
+// an automatic auth switch before falling back to an interactive prompt.
+func TryGHCRNamespaceLogin(tag string, stdout, stderr io.Writer) (bool, error) {
+	if !isGHCRRegistry(dockerRegistryFromImageTag(tag)) {
+		return false, nil
+	}
+	namespace := DockerNamespaceFromTag(tag)
+	if namespace == "" {
+		return false, nil
+	}
+	if _, err := exec.LookPath("gh"); err != nil {
+		return false, nil
+	}
+
+	token, err := captureGHCommand("auth", "token", "-u", namespace, "-h", "github.com")
+	if err != nil {
+		return false, nil
+	}
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return false, nil
+	}
+
+	loginCmd := Command("docker", "login", "ghcr.io", "-u", namespace, "--password-stdin")
+	loginCmd.Stdin = strings.NewReader(token)
+	loginCmd.Stdout = stdout
+	loginCmd.Stderr = stderr
+	if err := loginCmd.Run(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func runScriptSpec(ctx Context, script scriptSpec, run BuildScriptRunnerFunc) error {

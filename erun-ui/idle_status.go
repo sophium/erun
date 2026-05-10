@@ -117,10 +117,19 @@ func mergeNewerActivityMarkers(status, local eruncommon.EnvironmentIdleStatus) e
 		if localMarker.Name == "working-hours" || localMarker.LastActivity.IsZero() {
 			continue
 		}
+		found := false
 		for index, marker := range status.Markers {
-			if marker.Name == localMarker.Name && localMarker.LastActivity.After(marker.LastActivity) {
-				status.Markers[index] = localMarker
+			if marker.Name != localMarker.Name {
+				continue
 			}
+			found = true
+			if localMarker.LastActivity.After(marker.LastActivity) {
+				status.Markers[index] = localMarker
+				break
+			}
+		}
+		if !found {
+			status.Markers = append(status.Markers, localMarker)
 		}
 	}
 	return recomputeStopEligible(status)
@@ -209,6 +218,39 @@ func (a *App) maybeStopIdleCloudEnvironment(result eruncommon.OpenResult, status
 		}
 		a.emitAppStatus(fmt.Sprintf("Stopped idle cloud context %s.", cloudContextDisplayName(cloudContext)), false)
 	}()
+}
+
+func (a *App) clearIdleStopsForCloudContext(name string) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return
+	}
+	tenants, err := a.deps.store.ListTenantConfigs()
+	if err != nil {
+		return
+	}
+	cleared := make([]string, 0)
+	for _, tenant := range tenants {
+		envs, err := a.deps.store.ListEnvConfigs(tenant.Name)
+		if err != nil {
+			continue
+		}
+		for _, env := range envs {
+			cloudContext, ok, err := a.linkedCloudContext(env)
+			if err != nil || !ok || strings.TrimSpace(cloudContext.Name) != name {
+				continue
+			}
+			cleared = append(cleared, selectionKey(uiSelection{Tenant: tenant.Name, Environment: env.Name}))
+		}
+	}
+	if len(cleared) == 0 {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, key := range cleared {
+		delete(a.idleStops, key)
+	}
 }
 
 func activitySecondsUntilIdle(status eruncommon.EnvironmentIdleStatus) int64 {
