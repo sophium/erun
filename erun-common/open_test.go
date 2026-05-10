@@ -451,6 +451,42 @@ func TestOpenRunLaunchesShell(t *testing.T) {
 	}
 }
 
+func TestRemoteShellScriptGitSeedTolerantOfConcurrentRunners(t *testing.T) {
+	// Regression: when the user opens a runtime pod from two tabs at
+	// once (the OPEN tab and the AI tab kicking off `erun open` in
+	// parallel), both kubectl-exec the post-deploy seed script and
+	// race on `git config --global`'s ~/.gitconfig.lock. The loser
+	// errored with "could not lock config file: File exists" and
+	// `set -eu` aborted the whole setup.
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	repoDir := createGitRepoWithRemote(t, "git@github.com:sophium/erun.git")
+	script, err := buildRemoteShellScript(ShellLaunchParams{
+		Dir:               repoDir,
+		Tenant:            "tenant-a",
+		Environment:       "local",
+		Title:             "tenant-a-local",
+		KubernetesContext: "in-cluster",
+	}, false)
+	requireNoError(t, err, "buildRemoteShellScript failed")
+
+	// Skip the write when the value is already configured so the
+	// loser doesn't even attempt to acquire the lock.
+	requireStringContains(t, script,
+		"if ! git config --global --get-all safe.directory 2>/dev/null | grep -qFx '*'; then",
+		"git seed must guard the config write on the current value")
+	// Tolerate a tight race past the guard: the racing process is
+	// performing the same idempotent write, end state is identical.
+	requireStringContains(t, script,
+		"git config --global --add safe.directory '*' 2>/dev/null || true",
+		"git seed must tolerate gitconfig.lock contention with || true")
+	// The unguarded `--add` is exactly the line that broke under the
+	// race; make sure it does not come back as a copy-paste regression.
+	requireCondition(t,
+		!strings.Contains(script, "git config --global --add safe.directory '*'; fi"),
+		"git seed should not run unguarded `--add` followed immediately by `fi`; got:\n%s", script)
+}
+
 func TestRemoteShellScriptSeedsConfigsAndCloneCommand(t *testing.T) {
 	homeDir := t.TempDir()
 	t.Setenv("HOME", homeDir)
@@ -500,7 +536,7 @@ func requireRemoteShellScriptPatterns(t *testing.T, script, remoteWorkdir string
 		"request_file=\"$HOME/.erun-shell-request\"",
 		"export ERUN_SHELL_REQUEST_FILE=\"$request_file\"",
 		"IdentityFile ~/.ssh/keys",
-		"if command -v git >/dev/null 2>&1; then if [ ! -d .git ]; then git clone git@github.com:'sophium'/'erun'.git .; fi; git config --global --add safe.directory '*'; fi",
+		"if command -v git >/dev/null 2>&1; then if [ ! -d .git ]; then git clone git@github.com:'sophium'/'erun'.git .; fi; if ! git config --global --get-all safe.directory 2>/dev/null | grep -qFx '*'; then git config --global --add safe.directory '*' 2>/dev/null || true; fi; fi",
 		"/bin/bash --rcfile \"$HOME/.erun_bashrc\" -i || shell_status=$?",
 		fmt.Sprintf("if [ -e \"$request_file\" ]; then rm -f \"$request_file\"; exit %d; fi", remoteShellReattachDeployExitCode),
 		"exit \"$shell_status\"",
