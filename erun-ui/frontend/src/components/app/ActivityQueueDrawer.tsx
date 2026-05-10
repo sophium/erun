@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { CheckCircle2, ChevronRight, LoaderCircle, Trash2, Wrench, X } from 'lucide-react';
+import { AlertOctagon, CheckCircle2, ChevronRight, LoaderCircle, Trash2, X } from 'lucide-react';
 
 import { activeActivityForSelection, type ActivityQueueContainerStatus, type ActivityQueueEntry, formatElapsed, useActivityQueue } from '@/app/activityQueueState';
 import { Button } from '@/components/ui/button';
@@ -139,7 +139,7 @@ function ActivityCard({ entry, now, onDismiss }: ActivityCardProps): React.React
         </div>
       </header>
       {entry.error && (
-        <p className="mt-2 break-words rounded-sm border border-destructive/30 bg-destructive/10 px-2 py-1 text-xs text-destructive-foreground">
+        <p className="mt-2 break-words rounded-sm border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive">
           {entry.error}
         </p>
       )}
@@ -162,14 +162,23 @@ function CommandBadge({ command }: { command: string }): React.ReactElement | nu
 function commandBadgeClassName(command: string): string {
   switch (command) {
     case 'deploy':
+      // Primary mutating operation — saturated blue stands out as the
+      // most consequential card type.
       return 'bg-blue-500/15 text-blue-700';
     case 'build':
+      // Long-running prep — amber differentiates from deploy without
+      // implying status (success/failure has its own border + icon).
       return 'bg-amber-500/15 text-amber-700';
     case 'release':
+      // Rare and high-stakes — distinct purple keeps it visually
+      // separate from the routine commands.
       return 'bg-purple-500/15 text-purple-700';
     case 'open':
-      return 'bg-emerald-500/15 text-emerald-700';
+      // Long-running session, not a success — sky avoids the green/READY
+      // collision that made open shells look like succeeded deploys.
+      return 'bg-sky-500/15 text-sky-700';
     case 'init':
+      // One-shot bootstrap — neutral slate.
       return 'bg-slate-500/15 text-slate-700';
     default:
       return 'bg-muted text-muted-foreground';
@@ -219,7 +228,7 @@ function ActivityStatusIcon({ status }: { status: ActivityQueueEntry['status'] }
     case 'succeeded':
       return <CheckCircle2 aria-hidden="true" className="size-3.5 text-emerald-500" />;
     case 'failed':
-      return <Wrench aria-hidden="true" className="size-3.5 text-destructive" />;
+      return <AlertOctagon aria-hidden="true" className="size-3.5 text-destructive" />;
     case 'skipped':
       return <ChevronRight aria-hidden="true" className="size-3.5 text-muted-foreground" />;
   }
@@ -254,16 +263,38 @@ function containerPhaseLabel(container: ActivityQueueContainerStatus): string {
   return container.phase || 'Pending';
 }
 
+// failingContainerReasons are kubelet-reported reasons that mean the
+// container is stuck in a failure mode rather than legitimately waiting
+// (e.g. ContainerCreating). They render red so the user spots the bad
+// container at a glance instead of mistaking IMAGEPULLBACKOFF for normal
+// progress.
+const failingContainerReasons = new Set([
+  'ImagePullBackOff',
+  'ErrImagePull',
+  'CrashLoopBackOff',
+  'CreateContainerConfigError',
+  'CreateContainerError',
+  'InvalidImageName',
+  'OOMKilled',
+  'Error',
+  'RunContainerError',
+]);
+
+function containerIsFailing(container: ActivityQueueContainerStatus): boolean {
+  if (container.phase === 'Terminated') return true;
+  return failingContainerReasons.has((container.reason ?? '').trim());
+}
+
 function containerPhaseClassName(container: ActivityQueueContainerStatus): string {
+  if (containerIsFailing(container)) return 'text-destructive';
   if (container.phase === 'Running' && container.ready) return 'text-emerald-700';
-  if (container.phase === 'Terminated') return 'text-destructive';
   if (container.phase === 'Waiting') return 'text-amber-700';
   return 'text-muted-foreground';
 }
 
 function containerPhaseDotClassName(container: ActivityQueueContainerStatus): string {
+  if (containerIsFailing(container)) return 'bg-destructive';
   if (container.phase === 'Running' && container.ready) return 'bg-emerald-500';
-  if (container.phase === 'Terminated') return 'bg-destructive';
   if (container.phase === 'Waiting') return 'bg-amber-500';
   return 'bg-muted-foreground';
 }
