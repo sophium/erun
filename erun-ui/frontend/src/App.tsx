@@ -220,8 +220,9 @@ function TerminalPane({
     >
       <div className="grid h-full min-h-0 min-w-0 grid-rows-[32px_minmax(0,1fr)] overflow-hidden">
         <TerminalTabStrip controller={controller} state={state} />
-        <div id="erun-terminal-pane" className="relative h-full min-h-0 min-w-0 overflow-hidden">
-          <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full box-border px-4 py-3.5" />
+        {/* Padding lives on the wrapper, not on the FitAddon parent: xterm's FitAddon reads the parent's computed height but does not subtract its padding, so any padding on terminalRoot would over-count rows and clip the bottom line. */}
+        <div id="erun-terminal-pane" className="relative h-full min-h-0 min-w-0 overflow-hidden box-border px-4 pt-3.5">
+          <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full" />
           <TerminalBusyOverlay message={state.terminalBusy ? state.terminalMessage : ''} />
           {activeLock && <ActivityLockOverlay lock={activeLock} onOpenQueue={onOpenActivityQueue} onProceedAnyway={hideActiveLock} />}
         </div>

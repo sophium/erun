@@ -109,10 +109,107 @@ func (a *App) applyHelmReleaseSnapshot(kubeContext string, release helmReleaseSn
 	case "pending-install", "pending-upgrade", "pending-rollback", "uninstalling":
 		a.upsertHelmActivity(tenant, environment, kubeContext, release)
 	case "deployed":
-		a.finishHelmActivityIfActive(tenant, environment, activityQueueStatusSucceeded, "")
+		a.finishHelmDeployedIfActive(tenant, environment, release)
 	case "failed":
 		a.finishHelmActivityIfActive(tenant, environment, activityQueueStatusFailed, "helm release failed")
 	}
+}
+
+// helmDeployedFreshnessSkew is the tolerance applied when comparing a
+// helm release's Updated timestamp against the entry's StartedAt. It
+// covers the realistic gap between helm marking a release Updated and
+// the desktop registering the corresponding entry — a few poller
+// intervals plus modest clock skew — without being so loose that a
+// stale prior deploy from minutes ago slips through.
+const helmDeployedFreshnessSkew = 60 * time.Second
+
+// finishHelmDeployedIfActive finalizes an active deploy entry when helm
+// reports the release as "deployed", but only when the snapshot
+// describes the deploy this entry is tracking.
+//
+// Two checks gate finalization:
+//
+//   - Version match: helm's release.AppVersion must equal entry.Version.
+//     A "deployed" status with the previous deploy's AppVersion is the
+//     stale state we're racing — finalizing on it would mark the
+//     activity done with the user's new version still rolling out.
+//   - Updated freshness: release.Updated must be within
+//     helmDeployedFreshnessSkew of (or after) entry.StartedAt. This
+//     catches same-version redeploys (common in snapshot workflows)
+//     where AppVersion alone can't distinguish the prior "deployed"
+//     from the new one.
+//
+// Either check missing data (unparseable Updated, empty AppVersion or
+// Version) is treated as inconclusive and we defer to the trace
+// handler's `==> Deployed` line and the pod-readiness watchdog. Helm
+// "failed" still finalizes unconditionally so a PTY that dies mid-deploy
+// cannot leave an entry stuck running.
+func (a *App) finishHelmDeployedIfActive(tenant, environment string, release helmReleaseSnapshot) {
+	if a.activityQueue == nil {
+		return
+	}
+	active, ok := a.activityQueue.findActiveByCommand("deploy", tenant, environment)
+	if !ok {
+		return
+	}
+	if !helmDeployedSnapshotMatchesEntry(release, active) {
+		return
+	}
+	if final, finished := a.activityQueue.finish(active.ID, activityQueueStatusSucceeded, ""); finished {
+		a.unlockTerminalsForActivity(final)
+	}
+}
+
+// helmDeployedSnapshotMatchesEntry reports whether a "deployed" helm
+// release snapshot describes the deploy that the supplied entry is
+// tracking, by checking version match and Updated freshness. Returns
+// false (defer finalization) whenever evidence is missing — a missing
+// AppVersion, an unparseable Updated, or an Updated older than the
+// entry's StartedAt by more than the skew tolerance.
+func helmDeployedSnapshotMatchesEntry(release helmReleaseSnapshot, entry activityQueueEntry) bool {
+	expected := strings.TrimSpace(entry.Version)
+	observed := strings.TrimSpace(release.AppVersion)
+	if expected == "" || observed == "" || expected != observed {
+		return false
+	}
+	updated, ok := parseHelmUpdated(release.Updated)
+	if !ok {
+		return false
+	}
+	if updated.Add(helmDeployedFreshnessSkew).Before(entry.StartedAt) {
+		return false
+	}
+	return true
+}
+
+// helmUpdatedLayouts lists the timestamp formats `helm list -o json`
+// has been observed to emit. Helm v3+ uses Go's default
+// time.Time.String() shape ("2006-01-02 15:04:05.999999999 -0700 MST");
+// some versions trim sub-second precision or omit the timezone
+// abbreviation. We try each in order and accept the first that parses.
+var helmUpdatedLayouts = []string{
+	"2006-01-02 15:04:05.999999999 -0700 MST",
+	"2006-01-02 15:04:05 -0700 MST",
+	"2006-01-02 15:04:05.999999999 -0700",
+	"2006-01-02 15:04:05 -0700",
+	time.RFC3339Nano,
+	time.RFC3339,
+}
+
+// parseHelmUpdated parses the `updated` field from `helm list -o json`.
+// The string is the Go default time.Time format; we accept a few
+// variants for robustness across helm versions.
+func parseHelmUpdated(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range helmUpdatedLayouts {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // upsertHelmActivity registers a new running entry for a pending helm
