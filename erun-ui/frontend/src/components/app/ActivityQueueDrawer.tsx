@@ -4,6 +4,8 @@ import { AlertOctagon, CheckCircle2, ChevronRight, LoaderCircle, Trash2, X } fro
 import { activeActivityForSelection, type ActivityQueueContainerStatus, type ActivityQueueEntry, formatElapsed, useActivityQueue } from '@/app/activityQueueState';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { StartForceDeploySession } from '../../../wailsjs/go/main/App';
+import type { main as wailsMain } from '../../../wailsjs/go/models';
 
 type ActivityQueueDrawerProps = {
   open: boolean;
@@ -256,6 +258,7 @@ function ContainerStatusRow({ container, deploy }: { container: ActivityQueueCon
 }
 
 function ContainerStatusDetail({ id, container, deploy }: { id: string; container: ActivityQueueContainerStatus; deploy: ActivityQueueEntry }): React.ReactElement {
+  const recovery = recoveryActionForContainer(container, deploy);
   return (
     <dl id={id} className="mt-1 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
       {container.image && (
@@ -291,8 +294,74 @@ function ContainerStatusDetail({ id, container, deploy }: { id: string; containe
           Copy
         </Button>
       </dd>
+      {recovery && (
+        <>
+          <dt className="font-medium text-foreground">Recover</dt>
+          <dd className="space-y-1">
+            <p className="text-[11px] text-muted-foreground">{recovery.hint}</p>
+            <Button
+              type="button"
+              variant="default"
+              size="xs"
+              className="h-6 text-[11px]"
+              onClick={() => {
+                void recovery.action();
+              }}
+            >
+              {recovery.label}
+            </Button>
+          </dd>
+        </>
+      )}
     </dl>
   );
+}
+
+type recoveryAction = {
+  hint: string;
+  label: string;
+  action: () => Promise<void>;
+};
+
+// recoveryActionForContainer returns a one-click recovery affordance when
+// the container's failure mode has a known mitigation. The most common
+// case is a registry miss: the kubelet message contains "not found"
+// against an image tag the chart references, which usually means the
+// chart bumped the tag without publishing it. `erun deploy --force`
+// rebuilds every image bypassing the fingerprint cache and pushes them
+// to the registry, so the missing tag becomes available.
+function recoveryActionForContainer(container: ActivityQueueContainerStatus, deploy: ActivityQueueEntry): recoveryAction | null {
+  if (!containerIsFailing(container)) return null;
+  const message = (container.message ?? '').toLowerCase();
+  const reason = (container.reason ?? '').toLowerCase();
+  const looksLikeMissingImage =
+    reason === 'imagepullbackoff' ||
+    reason === 'errimagepull' ||
+    message.includes('not found') ||
+    message.includes('manifest unknown');
+  if (!looksLikeMissingImage) return null;
+  const selection: wailsMain.uiSelection = {
+    tenant: deploy.tenant,
+    environment: deploy.environment,
+    version: deploy.version ?? '',
+    runtimeImage: '',
+    runtimeCpu: '',
+    runtimeMemory: '',
+    kubernetesContext: deploy.kubernetesContext ?? '',
+    containerRegistry: '',
+    noGit: false,
+    bootstrap: false,
+    setDefaultTenant: false,
+    action: 'deploy',
+    debug: false,
+  };
+  return {
+    hint: `${container.image || 'The image referenced by the chart'} is not in the registry. Rebuild every image bypassing the fingerprint cache and push them.`,
+    label: 'Rebuild & redeploy',
+    action: async () => {
+      await StartForceDeploySession(selection, 120, 34);
+    },
+  };
 }
 
 function kubectlDescribeCommand(container: ActivityQueueContainerStatus, deploy: ActivityQueueEntry): string {

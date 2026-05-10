@@ -261,6 +261,16 @@ func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSe
 	return a.runErunCommandInLocal(selection, cols, rows, buildDeployArgs(selection))
 }
 
+// StartForceDeploySession runs `erun deploy --force` in the Local tab.
+// Wails-exposed: bound to the "Rebuild & redeploy" affordance shown next
+// to a failing container in the activity drawer when the kubelet error
+// looks like a missing-image case (the registry doesn't have the chart's
+// referenced tag yet, so a forced rebuild + push is the recovery path).
+func (a *App) StartForceDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+	args := append(buildDeployArgs(selection), "--force")
+	return a.runErunCommandInLocal(selection, cols, rows, args)
+}
+
 func (a *App) StartSSHDInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
 	return a.runErunCommandInLocal(selection, cols, rows, buildSSHDInitArgs(selection))
 }
