@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"time"
+
 	common "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
 )
@@ -21,14 +23,18 @@ type runningCommandSeed struct {
 }
 
 // withRunningCommandMarker wraps a cobra RunE so the desktop's running-
-// command queue picks up every invocation, regardless of who launched
-// the binary. Dry-run does not write a marker (RegisterRunningCommand
+// command queue picks up every invocation, regardless of who launched the
+// binary. Dry-run does not write a marker (RegisterRunningCommand
 // short-circuits), so integration scenarios are unaffected.
 //
-// The seedFn is called inside the cobra wrapper so it can read flag
-// values populated by cobra before RunE runs but after parsing.
+// On exit, the wrapper calls FinalizeRunningCommand with the run's
+// terminal status — "failed" + error reason when run returned an error,
+// "succeeded" otherwise. That populates the marker's Status field briefly
+// before deletion so the desktop watcher can render the failure cause
+// (this matters for `erun open` which can transitively invoke deploy:
+// when that deploy fails the user must see why).
 func withRunningCommandMarker(seedFn func(*cobra.Command, []string) runningCommandSeed, run func(*cobra.Command, []string) error) func(*cobra.Command, []string) error {
-	return func(cmd *cobra.Command, args []string) error {
+	return func(cmd *cobra.Command, args []string) (err error) {
 		seed := seedFn(cmd, args)
 		if seed.command == "" {
 			return run(cmd, args)
@@ -45,7 +51,15 @@ func withRunningCommandMarker(seedFn func(*cobra.Command, []string) runningComma
 		if regErr != nil {
 			ctx.Trace("running-command: register failed (" + regErr.Error() + ")")
 		}
-		defer handle.Release()
+		defer func() {
+			status := "succeeded"
+			errMsg := ""
+			if err != nil {
+				status = "failed"
+				errMsg = err.Error()
+			}
+			common.FinalizeRunningCommand(handle, status, errMsg, time.Time{}, common.FinalizeRunningCommandPollWindow)
+		}()
 		return run(cmd, args)
 	}
 }

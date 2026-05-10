@@ -40,10 +40,10 @@ func (a *App) runActivityMarkerWatcher(stop <-chan struct{}) {
 	}
 }
 
-// reconcileActivityMarkers reads every marker in dir, registers any that the
-// queue does not already track, and finalizes any active queue entry whose
-// marker is gone. Errors reading individual markers are tolerated — the
-// next tick re-tries.
+// reconcileActivityMarkers reads every marker in dir, registers any that
+// the queue does not already track, finalizes entries whose marker has
+// recorded a terminal status, and finalizes entries whose marker is gone.
+// Errors reading individual markers are tolerated — the next tick re-tries.
 func (a *App) reconcileActivityMarkers(dir string) {
 	if a.activityQueue == nil {
 		return
@@ -64,8 +64,28 @@ func (a *App) reconcileActivityMarkers(dir string) {
 				a.activityStatusPoller(entry)
 			}
 		}
+		if status := finalStatusFromMarker(record); status != "" {
+			if final, ok := a.activityQueue.finish(entry.ID, status, strings.TrimSpace(record.Error)); ok {
+				a.unlockTerminalsForActivity(final)
+			}
+		}
 	}
 	a.finalizeMissingMarkers(seenIDs)
+}
+
+// finalStatusFromMarker translates the marker's Status field (set by
+// FinalizeRunningCommand) into the desktop's queue status enum.
+func finalStatusFromMarker(record eruncommon.RunningCommand) activityQueueStatus {
+	switch strings.TrimSpace(record.Status) {
+	case "succeeded":
+		return activityQueueStatusSucceeded
+	case "failed":
+		return activityQueueStatusFailed
+	case "skipped":
+		return activityQueueStatusSkipped
+	default:
+		return ""
+	}
 }
 
 func (a *App) applyMarkerRecord(dir string, record eruncommon.RunningCommand) (activityQueueEntry, bool) {

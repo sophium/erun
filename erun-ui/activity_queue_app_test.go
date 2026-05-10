@@ -77,7 +77,7 @@ func TestActivityTraceLineHandlerFinalizesOnDeployedAndFailed(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
 	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0"})
-	handler := newActivityTraceLineHandler(app, selection)
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
 	handler("==> Deployed team/dev 1.0.0 in 12s")
 	if _, ok := app.activityQueue.findActive("team", "dev"); ok {
 		t.Fatal("entry should be finished after ==> Deployed")
@@ -89,7 +89,7 @@ func TestActivityTraceLineHandlerFinalizesOnDeployedAndFailed(t *testing.T) {
 
 	app2 := newTestAppForActivityQueue(t)
 	app2.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0"})
-	handler2 := newActivityTraceLineHandler(app2, selection)
+	handler2 := newActivityTraceLineHandler(app2, selection, sessionKindLocal)
 	handler2("Error: UPGRADE FAILED: timeout")
 	handler2("==> Deploy failed after 2m0s")
 	all2 := app2.activityQueue.list()
@@ -101,16 +101,39 @@ func TestActivityTraceLineHandlerFinalizesOnDeployedAndFailed(t *testing.T) {
 	}
 }
 
-func TestActivityTraceLineHandlerDoesNotAutoRegister(t *testing.T) {
-	// Source-of-truth for "started" is the on-disk RunningCommand marker
-	// the watcher reads. The trace handler must NOT auto-register entries
-	// — that path was a workaround that conflated observation with
-	// authority and produced phantom entries.
+func TestActivityTraceLineHandlerDoesNotAutoRegisterForHostSessions(t *testing.T) {
+	// Host-side sessions (Local, Command) rely on the on-disk
+	// RunningCommand marker the watcher reads — the trace handler must
+	// not auto-register from the trace, so it doesn't conflict with the
+	// authoritative marker channel.
 	app := newTestAppForActivityQueue(t)
-	handler := newActivityTraceLineHandler(app, uiSelection{Tenant: "team", Environment: "dev"})
+	handler := newActivityTraceLineHandler(app, uiSelection{Tenant: "team", Environment: "dev"}, sessionKindLocal)
 	handler("==> Deploying team/dev 1.0.0")
 	if entries := app.activityQueue.list(); len(entries) != 0 {
-		t.Fatalf("expected no auto-registered entries, got %+v", entries)
+		t.Fatalf("expected no auto-registered entries from host-side trace, got %+v", entries)
+	}
+}
+
+func TestActivityTraceLineHandlerRegistersForInPodSessions(t *testing.T) {
+	// In-pod sessions (Open, AI) live inside the runtime pod via
+	// kubectl exec. The CLI inside the pod writes its marker to the
+	// pod's filesystem, which the host-side watcher cannot see. Trace
+	// observation is the only signal we have for those, so the handler
+	// MUST register entries from `==> Deploying` lines on those
+	// sessions.
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "erun", Environment: "local", KubernetesContext: "orbstack"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindOpen)
+	handler("==> Deploying erun/local 1.0.51-snapshot-20260510080136")
+	entry, ok := app.activityQueue.findActiveByCommand("deploy", "erun", "local")
+	if !ok {
+		t.Fatal("expected in-pod deploy auto-registered from trace")
+	}
+	if entry.Version != "1.0.51-snapshot-20260510080136" {
+		t.Fatalf("version = %q", entry.Version)
+	}
+	if entry.Command != "deploy" {
+		t.Fatalf("command = %q, want deploy", entry.Command)
 	}
 }
 

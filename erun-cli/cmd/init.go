@@ -25,25 +25,17 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 		Short:        "Initialize configuration for the current project",
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
-		RunE: withRunningCommandMarker(
-			func(cmd *cobra.Command, args []string) runningCommandSeed {
-				runParams, _ := initRunParams(cmd, args, params, setDefaultTenant, confirmEnvironment)
-				return runningCommandSeed{
-					command:     "init",
-					tenant:      runParams.Tenant,
-					environment: runParams.Environment,
-					version:     runParams.RuntimeVersion,
-					summary:     "init " + strings.TrimSpace(runParams.Tenant+"/"+runParams.Environment),
-				}
-			},
-			func(cmd *cobra.Command, args []string) error {
-				runParams, err := initRunParams(cmd, args, params, setDefaultTenant, confirmEnvironment)
-				if err != nil {
-					return err
-				}
-				return runInit(commandContext(cmd), runParams)
-			},
-		),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			// init is short-lived bootstrap work; it is not registered as
+			// a running-command activity because the desktop queue is for
+			// long-running mutating operations the user wants to track
+			// (build, deploy, release).
+			runParams, err := initRunParams(cmd, args, params, setDefaultTenant, confirmEnvironment)
+			if err != nil {
+				return err
+			}
+			return runInit(commandContext(cmd), runParams)
+		},
 	}
 
 	cmd.Flags().StringVar(&params.Tenant, "tenant", "", "Tenant name to initialize")

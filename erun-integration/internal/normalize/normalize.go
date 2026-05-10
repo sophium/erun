@@ -53,6 +53,10 @@ var defaultRules = []Replacement{
 	// Computed from the helm command + chart path + values file path, all of
 	// which include per-test temp dirs, so the raw hex differs across runs.
 	{regexp.MustCompile(`hash=[0-9a-f]{16}\b`), "hash=<HASH>"},
+	// Running-command marker id (e.g., id=build-1778402661251293000 or
+	// id=deploy-team-dev-team-devops-1778402661251293000). The trailing
+	// nanosecond timestamp varies per invocation so normalize the id token.
+	{regexp.MustCompile(`id=[A-Za-z0-9_./-]*-\d{10,}\b`), "id=<COMMAND_ID>"},
 	// Random hex tokens used for chart names (e.g., -f0bb16f86125afa9).
 	{regexp.MustCompile(`-[0-9a-f]{16}\b`), "-<HEX16>"},
 	// Random hex tokens of other lengths embedded in identifiers.

@@ -224,12 +224,18 @@ func (a *App) unlockTerminalsForActivity(entry activityQueueEntry) {
 	}
 }
 
-// sessionMatchesActivity reports whether a managed terminal targets the same
-// (tenant, environment) as the deploy entry. Local-tab sessions are not
-// locked because they are the place the user kicked off the deploy from and
-// need to remain interactive to read trace output / acknowledge prompts.
+// sessionMatchesActivity reports whether a managed terminal targets the
+// same (tenant, environment) as the activity entry AND the activity is one
+// that warrants locking sibling terminals. Only deploys lock terminals —
+// they roll out the runtime that hosts the env/AI sessions, so the shell
+// becomes meaningless until the deploy finishes. Builds, releases, and
+// other activities don't disturb the running runtime, so their cards
+// appear in the queue without locking any terminals.
 func sessionMatchesActivity(managed *managedTerminal, entry activityQueueEntry) bool {
 	if managed == nil {
+		return false
+	}
+	if entry.Command != "deploy" {
 		return false
 	}
 	if managed.selection.Tenant != entry.Tenant || managed.selection.Environment != entry.Environment {
@@ -272,19 +278,42 @@ func namespaceForTenantEnv(tenant, environment string) string {
 	}
 }
 
-// newActivityTraceLineHandler scans PTY output for terminal-state trace
-// lines emitted by erun deploy (==> Deployed, ==> Deploy failed,
-// ==> Skipping, Error:) and finalizes the matching active queue entry.
-// It does NOT register entries — the on-disk RunningCommand marker the
-// CLI writes is the source of truth for "started", picked up by
-// runActivityMarkerWatcher.
-func newActivityTraceLineHandler(app *App, selection uiSelection) func(string) {
+// activityDeployingLineRe matches the `==> Deploying tenant/env [version]`
+// trace emitted by RunHelmDeploy at deploy start. Captures: tenant,
+// environment, optional version. Used by trace-based registration when the
+// deploy runs inside the runtime pod (the marker watcher cannot read the
+// pod's filesystem from the host).
+var activityDeployingLineRe = regexp.MustCompile(`^==> Deploying ([^/\s]+)/([^/\s]+)(?:\s+(\S+))?\s*$`)
+
+// newActivityTraceLineHandler scans PTY output for trace lines emitted by
+// erun commands and updates the activity queue accordingly.
+//
+// Two channels feed the queue:
+//
+//   - Marker watcher (runActivityMarkerWatcher) — authoritative for every
+//     command running on the host filesystem the desktop can read.
+//   - PTY trace observation — fallback for commands running inside the
+//     runtime pod, whose marker file is on the pod's filesystem and not
+//     visible to the host. Trace-based registration is gated on session
+//     kind: only Open/AI sessions (kubectl-exec'd into the pod) trigger
+//     it, so the host marker channel stays the single source of truth
+//     for host-side commands.
+//
+// Terminal-state lines (==> Deployed / ==> Deploy failed / ==> Skipping /
+// Error:) finalize the matching active entry from either channel.
+func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKind) func(string) {
 	deployedRe := regexp.MustCompile(`^==> Deployed `)
 	failedRe := regexp.MustCompile(`^==> Deploy failed`)
 	skippedRe := regexp.MustCompile(`^==> Skipping `)
 	errorRe := regexp.MustCompile(`(?i)^Error: `)
 	return func(line string) {
 		line = strings.TrimSpace(line)
+		if isInPodSession(kind) {
+			if match := activityDeployingLineRe.FindStringSubmatch(line); match != nil {
+				app.startInPodDeployFromTrace(selection, match[1], match[2], match[3])
+				return
+			}
+		}
 		switch {
 		case deployedRe.MatchString(line):
 			app.finishActivityTracking(selection, activityQueueStatusSucceeded, "")
@@ -296,6 +325,42 @@ func newActivityTraceLineHandler(app *App, selection uiSelection) func(string) {
 			app.captureActivityErrorIfRunning(selection, line)
 		}
 	}
+}
+
+func isInPodSession(kind sessionKind) bool {
+	return kind == sessionKindOpen || kind == sessionKindAI
+}
+
+// startInPodDeployFromTrace registers a deploy entry from a `==> Deploying`
+// trace observed on an in-pod session's PTY. No-op when an entry already
+// exists for the selection so the host marker channel stays authoritative.
+func (a *App) startInPodDeployFromTrace(selection uiSelection, tenant, environment, version string) {
+	if a.activityQueue == nil {
+		return
+	}
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	version = strings.TrimSpace(version)
+	if tenant == "" || environment == "" {
+		return
+	}
+	if _, ok := a.activityQueue.findActiveByCommand("deploy", tenant, environment); ok {
+		return
+	}
+	entry, fresh := a.activityQueue.start(activityQueueEntry{
+		Command:           "deploy",
+		Tenant:            tenant,
+		Environment:       environment,
+		Version:           version,
+		Release:           releaseNameForTenant(tenant),
+		Namespace:         namespaceForTenantEnv(tenant, environment),
+		KubernetesContext: strings.TrimSpace(selection.KubernetesContext),
+		Summary:           "deploy " + tenant + "/" + environment,
+	})
+	if !fresh {
+		return
+	}
+	a.lockTerminalsForActivity(entry)
 }
 
 func (a *App) captureActivityErrorIfRunning(selection uiSelection, line string) {
@@ -506,7 +571,7 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 	if len(lines) == 0 {
 		return
 	}
-	handler := newActivityTraceLineHandler(a, managed.selection)
+	handler := newActivityTraceLineHandler(a, managed.selection, managed.kind)
 	for _, line := range lines {
 		handler(line)
 	}

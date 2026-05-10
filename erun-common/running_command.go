@@ -24,20 +24,33 @@ import (
 // Summary field is a free-form one-line description rendered when no
 // command-specific renderer applies.
 type RunningCommand struct {
-	ID                string    `json:"id"`
-	Command           string    `json:"command"`
-	PID               int       `json:"pid"`
-	StartedAt         time.Time `json:"started_at"`
-	Tenant            string    `json:"tenant,omitempty"`
-	Environment       string    `json:"environment,omitempty"`
-	Version           string    `json:"version,omitempty"`
-	Release           string    `json:"release,omitempty"`
-	Namespace         string    `json:"namespace,omitempty"`
-	KubernetesContext string    `json:"kubernetes_context,omitempty"`
-	Component         string    `json:"component,omitempty"`
-	Image             string    `json:"image,omitempty"`
-	Summary           string    `json:"summary,omitempty"`
-	ParamsHash        string    `json:"params_hash,omitempty"`
+	ID                string     `json:"id"`
+	Command           string     `json:"command"`
+	PID               int        `json:"pid"`
+	StartedAt         time.Time  `json:"started_at"`
+	Tenant            string     `json:"tenant,omitempty"`
+	Environment       string     `json:"environment,omitempty"`
+	Version           string     `json:"version,omitempty"`
+	Release           string     `json:"release,omitempty"`
+	Namespace         string     `json:"namespace,omitempty"`
+	KubernetesContext string     `json:"kubernetes_context,omitempty"`
+	Component         string     `json:"component,omitempty"`
+	Image             string     `json:"image,omitempty"`
+	Summary           string     `json:"summary,omitempty"`
+	ParamsHash        string     `json:"params_hash,omitempty"`
+	// Status is set by FinalizeRunningCommand once the command exits.
+	// Empty string means the command is still running. Allowed terminal
+	// values: "succeeded", "failed", "skipped". The desktop watcher
+	// finalizes the queue entry as soon as it observes a non-empty
+	// Status, so a failed command's reason stays visible to the user
+	// even though the marker is about to be removed.
+	Status string `json:"status,omitempty"`
+	// Error carries the failure reason when Status == "failed". Surfaced
+	// directly on the desktop activity card.
+	Error string `json:"error,omitempty"`
+	// EndedAt is the wall-clock time the command finished. Used by the
+	// desktop to compute final elapsed time.
+	EndedAt *time.Time `json:"ended_at,omitempty"`
 }
 
 // RunningCommandHandle owns an on-disk command marker. Callers must
@@ -47,13 +60,77 @@ type RunningCommandHandle struct {
 	path string
 }
 
-// Release removes the marker so subsequent runs and the desktop watcher
-// see the command as completed.
+// Release removes the marker. Prefer FinalizeRunningCommand(handle,...)
+// when a terminal status / error message should be visible to the desktop
+// watcher before the marker is deleted; calling Release() directly drops
+// the activity from the queue without recording why.
 func (h *RunningCommandHandle) Release() {
 	if h == nil || h.path == "" {
 		return
 	}
 	_ = os.Remove(h.path)
+}
+
+// FinalizeRunningCommand writes the terminal status / error into the
+// marker and then removes it after a short grace period so the desktop
+// watcher can observe the final state on its next poll. Safe to call on a
+// nil handle; safe to call after Release. status is one of "succeeded",
+// "failed", or "skipped"; errMsg is rendered as the activity error when
+// status == "failed". The grace period defaults to 2 polls of the
+// watcher's interval, which is long enough that a 1.5s-tick watcher
+// reliably catches the final state. Use a non-zero `now` for tests.
+func FinalizeRunningCommand(handle *RunningCommandHandle, status, errMsg string, now time.Time, gracePeriod time.Duration) {
+	finalizeRunningCommand(handle, status, errMsg, now, gracePeriod, time.Sleep)
+}
+
+func finalizeRunningCommand(handle *RunningCommandHandle, status, errMsg string, now time.Time, gracePeriod time.Duration, sleep func(time.Duration)) {
+	if handle == nil || handle.path == "" {
+		return
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	data, err := os.ReadFile(handle.path)
+	if err != nil {
+		return
+	}
+	var record RunningCommand
+	if jsonErr := decodeRunningCommandRecord(data, &record); jsonErr != nil {
+		_ = os.Remove(handle.path)
+		return
+	}
+	record.Status = status
+	if status == "failed" && strings.TrimSpace(errMsg) != "" {
+		record.Error = strings.TrimSpace(errMsg)
+	}
+	ended := now.UTC()
+	record.EndedAt = &ended
+	updated, encodeErr := encodeRunningCommandRecord(record)
+	if encodeErr == nil {
+		_ = os.WriteFile(handle.path, updated, 0o600)
+	}
+	if gracePeriod > 0 && status != "succeeded" {
+		// Only delay for non-success terminal states. A successful
+		// command does not need to broadcast an error reason; the
+		// watcher's "missing marker" path already finalizes it as
+		// succeeded if the trace handler hasn't already.
+		sleep(gracePeriod)
+	}
+	_ = os.Remove(handle.path)
+}
+
+// FinalizeRunningCommandPollWindow is the grace period callers should
+// pass to FinalizeRunningCommand to ensure the desktop watcher catches
+// the final state at least once before the marker is deleted. Sized at
+// 2× the watcher's poll interval (1.5s) plus a small buffer.
+const FinalizeRunningCommandPollWindow = 3500 * time.Millisecond
+
+func decodeRunningCommandRecord(data []byte, record *RunningCommand) error {
+	return json.Unmarshal(data, record)
+}
+
+func encodeRunningCommandRecord(record RunningCommand) ([]byte, error) {
+	return json.MarshalIndent(record, "", "  ")
 }
 
 // Path returns the on-disk path of the marker. Empty when the handle is
