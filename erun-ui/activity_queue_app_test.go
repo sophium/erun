@@ -208,6 +208,52 @@ func TestApplyMarkerRecordRegistersEntryAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestFinalizeDeployFromPodReadinessTransitionsToSucceeded(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	entry, _ := app.activityQueue.start(activityQueueEntry{
+		Command:     "deploy",
+		Tenant:      "erun",
+		Environment: "local",
+		Version:     "1.0.0",
+		Release:     "erun-devops",
+	})
+	app.finalizeDeployFromPodReadiness(entry.ID)
+	if _, stillActive := app.activityQueue.findActive("erun", "local"); stillActive {
+		t.Fatal("entry should be moved out of active after pod-readiness finalize")
+	}
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusSucceeded {
+		t.Fatalf("expected one succeeded entry in history, got %+v", all)
+	}
+}
+
+func TestAllContainersReadyAndHealthyHandlesFailureReasons(t *testing.T) {
+	healthy := []activityQueueContainerStatus{
+		{Name: "a", Phase: "Running", Ready: true},
+		{Name: "b", Phase: "Running", Ready: true},
+	}
+	if !allContainersReadyAndHealthy(healthy) {
+		t.Fatal("expected healthy snapshot to be Ready+healthy")
+	}
+	withImagePullBackoff := []activityQueueContainerStatus{
+		{Name: "a", Phase: "Running", Ready: true},
+		{Name: "b", Phase: "Waiting", Ready: true, Reason: "ImagePullBackOff"},
+	}
+	if allContainersReadyAndHealthy(withImagePullBackoff) {
+		t.Fatal("a Ready=true container with ImagePullBackOff reason must not pass the gate")
+	}
+	withTerminated := []activityQueueContainerStatus{
+		{Name: "a", Phase: "Running", Ready: true},
+		{Name: "b", Phase: "Terminated", Ready: true},
+	}
+	if allContainersReadyAndHealthy(withTerminated) {
+		t.Fatal("a terminated container must not pass the gate")
+	}
+	if allContainersReadyAndHealthy(nil) {
+		t.Fatal("empty snapshot must not pass the gate")
+	}
+}
+
 func TestForceDismissActivityRemovesActiveAndIgnoresFutureRegistrations(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	dir := t.TempDir()

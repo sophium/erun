@@ -185,7 +185,30 @@ function TerminalPane({
   onOpenActivityQueue: () => void;
 }): React.ReactElement {
   const locks = useTerminalActivityLockState();
-  const activeLock = locks.get(state.sessionId) ?? null;
+  const [hiddenLockSessions, setHiddenLockSessions] = React.useState<Set<number>>(() => new Set());
+  const liveLock = locks.get(state.sessionId) ?? null;
+  // The user can dismiss the overlay locally for a session if it's
+  // covering output they need to read or input they need to provide
+  // (e.g. the in-pod CLI's helm-recovery prompt). Backend keeps the
+  // lock state intact; only this desktop's view of it is hidden.
+  React.useEffect(() => {
+    if (!liveLock) {
+      setHiddenLockSessions((prev) => {
+        if (prev.size === 0) return prev;
+        const next = new Set(prev);
+        next.delete(state.sessionId);
+        return next;
+      });
+    }
+  }, [liveLock, state.sessionId]);
+  const activeLock = liveLock && !hiddenLockSessions.has(state.sessionId) ? liveLock : null;
+  const hideActiveLock = React.useCallback(() => {
+    setHiddenLockSessions((prev) => {
+      const next = new Set(prev);
+      next.add(state.sessionId);
+      return next;
+    });
+  }, [state.sessionId]);
   return (
     <div
       className={cn(
@@ -200,7 +223,7 @@ function TerminalPane({
         <div id="erun-terminal-pane" className="relative h-full min-h-0 min-w-0 overflow-hidden">
           <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full box-border px-4 py-3.5" />
           <TerminalBusyOverlay message={state.terminalBusy ? state.terminalMessage : ''} />
-          {activeLock && <ActivityLockOverlay lock={activeLock} onOpenQueue={onOpenActivityQueue} />}
+          {activeLock && <ActivityLockOverlay lock={activeLock} onOpenQueue={onOpenActivityQueue} onProceedAnyway={hideActiveLock} />}
         </div>
       </div>
       <div className={cn(reviewSplitterClassName, !state.reviewOpen && 'hidden')} role="separator" aria-orientation="vertical" aria-label="Resize diff panel" onMouseDown={(event) => controller.startReviewResize(event)} />

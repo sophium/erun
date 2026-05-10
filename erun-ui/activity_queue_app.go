@@ -26,6 +26,14 @@ const (
 	// the user sees pods transition; long enough that polling load is
 	// negligible against modest cluster sizes.
 	activityQueuePollInterval = 2 * time.Second
+
+	// activitySteadyReadyTicks is the number of consecutive poll ticks
+	// (≈ 2s each) over which every container must report Ready and not
+	// failing before the desktop finalizes the deploy as succeeded. The
+	// short hysteresis avoids declaring success during a flap (e.g. a
+	// container briefly Ready then CrashLoopBackOff) while still
+	// finalizing within ~6 seconds of the rollout completing.
+	activitySteadyReadyTicks = 3
 )
 
 // activityStateEvent is the payload shape pushed to the frontend on each
@@ -411,6 +419,59 @@ func (a *App) startInPodDeployFromTrace(selection uiSelection, tenant, environme
 	a.lockTerminalsForActivity(entry)
 }
 
+// allContainersReadyAndHealthy returns true when every container in the
+// snapshot is in a healthy Ready state. Empty snapshots are treated as
+// not-ready (we don't have evidence of a healthy rollout yet). Failing
+// reasons override Ready=true even if kubelet temporarily reports both.
+func allContainersReadyAndHealthy(statuses []activityQueueContainerStatus) bool {
+	if len(statuses) == 0 {
+		return false
+	}
+	for _, status := range statuses {
+		if !status.Ready {
+			return false
+		}
+		if !containerHealthy(status) {
+			return false
+		}
+	}
+	return true
+}
+
+func containerHealthy(status activityQueueContainerStatus) bool {
+	if status.Phase == "Terminated" {
+		return false
+	}
+	switch strings.TrimSpace(status.Reason) {
+	case "ImagePullBackOff",
+		"ErrImagePull",
+		"CrashLoopBackOff",
+		"CreateContainerConfigError",
+		"CreateContainerError",
+		"InvalidImageName",
+		"OOMKilled",
+		"Error",
+		"RunContainerError":
+		return false
+	}
+	return true
+}
+
+// finalizeDeployFromPodReadiness moves a still-running deploy entry into
+// history with success status. Used by the pod-status poller when every
+// container has been Ready and healthy across activitySteadyReadyTicks
+// consecutive ticks. Idempotent — finish() returns false on a second
+// call so a racing trace handler that also tries to finish the same
+// entry is harmless.
+func (a *App) finalizeDeployFromPodReadiness(id string) {
+	if a.activityQueue == nil {
+		return
+	}
+	if final, ok := a.activityQueue.finish(id, activityQueueStatusSucceeded, ""); ok {
+		a.unlockTerminalsForActivity(final)
+	}
+}
+
 func (a *App) captureActivityErrorIfRunning(selection uiSelection, line string) {
 	if a.activityQueue == nil {
 		return
@@ -430,25 +491,45 @@ func (a *App) captureActivityErrorIfRunning(selection uiSelection, line string) 
 	a.activityQueue.updateContainers(entry.ID, entry.Containers)
 }
 
-// pollActivityContainerStatuses runs an ad-hoc kubectl poll loop while the
-// supplied deploy entry is active. Each tick parses pod JSON for the helm
-// release's pods and pushes a snapshot into the queue. The loop exits when
-// the entry is no longer active in the store or ctx is cancelled.
+// pollActivityContainerStatuses runs an ad-hoc kubectl poll loop while
+// the supplied deploy entry is active. Each tick parses pod JSON for the
+// helm release's pods and pushes a snapshot into the queue.
+//
+// When all containers in the snapshot are Ready and none are failing for
+// activitySteadyReadyWindow consecutive ticks, finalize the entry as
+// succeeded — the marker file may be on a runtime-pod filesystem the
+// host cannot read, so the in-pod CLI's FinalizeRunningCommand call is
+// invisible from here. Pod readiness is the user-visible definition of
+// "deploy is done", and using it lifts the terminal lock that depends
+// on the entry's running state.
+//
+// The loop exits when the entry is no longer active or ctx is cancelled.
 func (a *App) pollActivityContainerStatuses(ctx context.Context, entry activityQueueEntry) {
 	if a.activityQueue == nil {
 		return
 	}
 	ticker := time.NewTicker(activityQueuePollInterval)
 	defer ticker.Stop()
+	steadyReadyTicks := 0
 	pollOnce := func() bool {
 		if _, ok := a.activityQueue.findActive(entry.Tenant, entry.Environment); !ok {
 			return false
 		}
 		statuses, err := a.fetchActivityContainerStatuses(ctx, entry)
 		if err != nil {
+			steadyReadyTicks = 0
 			return true
 		}
 		a.activityQueue.updateContainers(entry.ID, statuses)
+		if allContainersReadyAndHealthy(statuses) {
+			steadyReadyTicks++
+			if steadyReadyTicks >= activitySteadyReadyTicks {
+				a.finalizeDeployFromPodReadiness(entry.ID)
+				return false
+			}
+		} else {
+			steadyReadyTicks = 0
+		}
 		return true
 	}
 	if !pollOnce() {
