@@ -3,7 +3,10 @@ import { CheckCircle2, ChevronDown, ChevronUp, Copy, LoaderCircle, Trash2 } from
 
 import { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
+import { useDeployQueue, useTerminalLockState } from '@/app/deployQueueState';
 import { useControllerState } from '@/app/useControllerState';
+import { DeployLockOverlay } from '@/components/app/DeployLockOverlay';
+import { DeployQueueDrawer } from '@/components/app/DeployQueueDrawer';
 import { TerminalTabStrip } from '@/components/app/TerminalTabStrip';
 import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
 import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
@@ -15,9 +18,10 @@ import { TenantDashboardView } from '@/components/app/TenantDashboardView';
 import { TenantDialogView } from '@/components/app/TenantDialogView';
 import { Titlebar } from '@/components/app/Titlebar';
 import { Button } from '@/components/ui/button';
-import { TooltipProvider } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { ClipboardSetText } from '../wailsjs/runtime/runtime';
+import { Rocket } from 'lucide-react';
 
 const splitterClassName =
   'relative cursor-col-resize bg-transparent before:absolute before:top-0 before:bottom-0 before:left-1 before:w-px before:bg-transparent before:transition-colors hover:before:bg-border [.is-resizing_&]:before:bg-border';
@@ -36,6 +40,7 @@ export function App(): React.ReactElement {
   const reviewViewRef = React.useRef<HTMLElement>(null);
   const reviewMainRef = React.useRef<HTMLDivElement>(null);
   const diffListRef = React.useRef<HTMLDivElement>(null);
+  const [deployQueueOpen, setDeployQueueOpen] = React.useState(false);
 
   React.useEffect(() => {
     if (!terminalRootRef.current || !terminalPaneRef.current || !reviewViewRef.current || !reviewMainRef.current || !diffListRef.current) {
@@ -76,6 +81,7 @@ export function App(): React.ReactElement {
             reviewViewRef={reviewViewRef}
             reviewMainRef={reviewMainRef}
             diffListRef={diffListRef}
+            onOpenDeployQueue={() => setDeployQueueOpen(true)}
           />
         </div>
       </div>
@@ -84,7 +90,43 @@ export function App(): React.ReactElement {
       <ManageDialogView controller={controller} state={state} />
       <ReconnectDialog controller={controller} state={state} />
       <TenantDialogView controller={controller} state={state} />
+      <DeployQueueLauncher open={deployQueueOpen} onOpen={() => setDeployQueueOpen(true)} onClose={() => setDeployQueueOpen(false)} />
     </TooltipProvider>
+  );
+}
+
+// DeployQueueLauncher renders a floating action button that opens the
+// deploy-queue drawer. It deliberately mounts the drawer so its subscription
+// to deploy:state events is always live — even when the drawer is closed —
+// so the badge count reflects active deploys without the user having opened
+// the drawer first.
+function DeployQueueLauncher({ open, onOpen, onClose }: { open: boolean; onOpen: () => void; onClose: () => void }): React.ReactElement {
+  const { entries } = useDeployQueue();
+  const activeCount = entries.filter((entry) => entry.status === 'running').length;
+  return (
+    <>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="fixed bottom-5 right-5 z-20 size-10 rounded-full shadow-lg"
+            aria-label={activeCount > 0 ? `Open deploy queue (${activeCount} active)` : 'Open deploy queue'}
+            onClick={onOpen}
+          >
+            <Rocket aria-hidden="true" className="size-4" />
+            {activeCount > 0 && (
+              <span className="absolute -top-1 -right-1 inline-flex size-4 items-center justify-center rounded-full bg-blue-500 text-[10px] font-medium text-white">
+                {activeCount}
+              </span>
+            )}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="left">{activeCount > 0 ? `${activeCount} deploy${activeCount > 1 ? 's' : ''} in progress` : 'Deploys'}</TooltipContent>
+      </Tooltip>
+      <DeployQueueDrawer open={open} onClose={onClose} />
+    </>
   );
 }
 
@@ -96,6 +138,7 @@ function MainPane({
   reviewViewRef,
   reviewMainRef,
   diffListRef,
+  onOpenDeployQueue,
 }: {
   controller: ERunUIController;
   state: ReturnType<typeof useControllerState>;
@@ -104,6 +147,7 @@ function MainPane({
   reviewViewRef: React.RefObject<HTMLElement | null>;
   reviewMainRef: React.RefObject<HTMLDivElement | null>;
   diffListRef: React.RefObject<HTMLDivElement | null>;
+  onOpenDeployQueue: () => void;
 }): React.ReactElement {
   const dashboardOpen = Boolean(state.tenantDashboard.tenant);
   return (
@@ -115,7 +159,7 @@ function MainPane({
       )}
     >
       {dashboardOpen && <TenantDashboardView controller={controller} state={state} />}
-      <TerminalPane controller={controller} state={state} hidden={dashboardOpen} terminalRootRef={terminalRootRef} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} />
+      <TerminalPane controller={controller} state={state} hidden={dashboardOpen} terminalRootRef={terminalRootRef} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} onOpenDeployQueue={onOpenDeployQueue} />
       {!dashboardOpen && <DebugPanel controller={controller} open={state.debugOpen} output={state.debugOutput} sessionId={state.sessionId} verbose={controller.activeSessionDebug(state.sessionId)} />}
     </main>
   );
@@ -129,6 +173,7 @@ function TerminalPane({
   reviewViewRef,
   reviewMainRef,
   diffListRef,
+  onOpenDeployQueue,
 }: {
   controller: ERunUIController;
   state: ReturnType<typeof useControllerState>;
@@ -137,7 +182,10 @@ function TerminalPane({
   reviewViewRef: React.RefObject<HTMLElement | null>;
   reviewMainRef: React.RefObject<HTMLDivElement | null>;
   diffListRef: React.RefObject<HTMLDivElement | null>;
+  onOpenDeployQueue: () => void;
 }): React.ReactElement {
+  const locks = useTerminalLockState();
+  const activeLock = locks.get(state.sessionId) ?? null;
   return (
     <div
       className={cn(
@@ -152,6 +200,7 @@ function TerminalPane({
         <div id="erun-terminal-pane" className="relative h-full min-h-0 min-w-0 overflow-hidden">
           <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full box-border px-4 py-3.5" />
           <TerminalBusyOverlay message={state.terminalBusy ? state.terminalMessage : ''} />
+          {activeLock && <DeployLockOverlay lock={activeLock} onOpenQueue={onOpenDeployQueue} />}
         </div>
       </div>
       <div className={cn(reviewSplitterClassName, !state.reviewOpen && 'hidden')} role="separator" aria-orientation="vertical" aria-label="Resize diff panel" onMouseDown={(event) => controller.startReviewResize(event)} />
