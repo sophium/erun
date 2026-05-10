@@ -71,6 +71,7 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 - Preserve CSS variables for runtime-sized panels and computed values such as sidebar width, review width, file-list width, tree depth, and diff content width.
 - Use semantic Tailwind tokens such as `bg-background`, `text-foreground`, `border-border`, `bg-sidebar`, and app-owned tokens from app theme files instead of repeating raw color values in component markup.
 - Avoid reintroducing broad semantic CSS class files for ordinary component styling. If a selector is only used by one React component and does not require a true global rule, keep the styling beside that component in `className`.
+- Do not add padding (or borders that affect layout) directly to the element passed to `Terminal.open` (`terminalRoot`). xterm's `FitAddon` reads that element's computed height to compute row count but does not subtract its own padding, so padding there over-counts rows and clips the bottom line behind whatever sits beneath the terminal (tab strip, debug panel, status bar). Keep visual padding on a wrapper around `terminalRoot` instead.
 - For frontend styling changes, run `yarn build`, `yarn shadcn:check`, and `go test ./...` from the relevant module paths unless the change is documentation-only.
 
 ## Professional UX
