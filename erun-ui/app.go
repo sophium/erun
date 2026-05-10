@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -56,6 +57,7 @@ type erunUIDeps struct {
 	recordActivity        func(eruncommon.EnvironmentActivityParams) error
 	stopCloudContext      func(context.Context, string) (eruncommon.CloudContextStatus, error)
 	windowStatePath       string
+	deployQueueStatePath  string
 	windowMaximised       func(context.Context) bool
 }
 
@@ -84,7 +86,7 @@ func NewApp(deps erunUIDeps) *App {
 		busyEnvs:       make(map[string]int),
 		workspaceSyncs: make(map[string]*workspaceSyncWorker),
 	}
-	statePath := defaultDeployQueueStatePath()
+	statePath := strings.TrimSpace(deps.deployQueueStatePath)
 	app.deployQueue = newDeployQueueStore(
 		func(entries []*deployQueueEntry) error {
 			if statePath == "" {

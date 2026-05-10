@@ -158,3 +158,18 @@ func TestReleaseNameForTenant(t *testing.T) {
 		t.Fatalf("got %q, want empty", got)
 	}
 }
+
+func TestNewAppDoesNotPersistWithoutExplicitPath(t *testing.T) {
+	// Regression: an earlier draft auto-resolved the persistence path inside
+	// NewApp via os.UserConfigDir. Tests that exercised StartDeploySession
+	// (e.g. the existing TestStartDeploySession_* fixtures using
+	// "team-busy/dev-busy" and "erun/remote") wrote running entries into
+	// the developer's real ~/Library/Application Support/ERun/deploy_queue.json.
+	// Persistence path now flows through erunUIDeps so production opts in
+	// from main.go and tests never touch real disk.
+	app := NewApp(erunUIDeps{})
+	if app.deployQueue == nil {
+		t.Fatal("deployQueue not initialized")
+	}
+	app.deployQueue.start(deployQueueEntry{Tenant: "leak", Environment: "dev", Version: "1", Release: "leak-devops"})
+}
