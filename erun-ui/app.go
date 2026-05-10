@@ -63,25 +63,43 @@ type App struct {
 	ctx  context.Context
 	deps erunUIDeps
 
-	mu             sync.Mutex
-	nextSerial     int
-	sessions       map[string]*managedTerminal
-	idleStops      map[string]struct{}
-	busyEnvs       map[string]int
-	workspaceSyncs map[string]*workspaceSyncWorker
+	mu                        sync.Mutex
+	nextSerial                int
+	sessions                  map[string]*managedTerminal
+	idleStops                 map[string]struct{}
+	busyEnvs                  map[string]int
+	workspaceSyncs            map[string]*workspaceSyncWorker
+	activityQueue             *activityQueueStore
+	activityStatusPoller      func(activityQueueEntry)
+	activityPollersStop       chan struct{}
+	activityWatchedContextsMu sync.Mutex
+	activityWatchedContexts   map[string]struct{}
+	actionQueueMu             sync.Mutex
+	actionQueues              map[string]*envActionQueue
+	actionCancels             map[string]context.CancelFunc
 }
 
 func NewApp(deps erunUIDeps) *App {
 	deps = withDefaultCoreDeps(deps)
 	deps = withDefaultRuntimeDeps(deps)
 	deps = withDefaultUIDeps(deps)
-	return &App{
+	app := &App{
 		deps:           deps,
 		sessions:       make(map[string]*managedTerminal),
 		idleStops:      make(map[string]struct{}),
 		busyEnvs:       make(map[string]int),
 		workspaceSyncs: make(map[string]*workspaceSyncWorker),
 	}
+	app.activityQueue = newActivityQueueStore(
+		func(entry activityQueueEntry) {
+			app.emitActivityState(entry)
+		},
+		nil,
+	)
+	app.activityStatusPoller = func(entry activityQueueEntry) {
+		go app.pollActivityContainerStatuses(context.Background(), entry)
+	}
+	return app
 }
 
 func withDefaultCoreDeps(deps erunUIDeps) erunUIDeps {
@@ -187,9 +205,12 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	configureAppIdentity("ERun")
+	a.startActivityPollers()
 }
 
 func (a *App) shutdown(context.Context) {
+	a.stopActivityPollers()
+	a.stopActionRunners()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.stopAllWorkspaceSyncsLocked()

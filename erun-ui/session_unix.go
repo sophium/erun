@@ -71,6 +71,13 @@ func (s *unixTerminalSession) Wait() error {
 	return s.waitErr
 }
 
+func (s *unixTerminalSession) Pid() int {
+	if s == nil || s.cmd == nil || s.cmd.Process == nil {
+		return 0
+	}
+	return s.cmd.Process.Pid
+}
+
 func (s *unixTerminalSession) Close() error {
 	if s == nil {
 		return nil

@@ -25,10 +25,14 @@ if git -C "$SCRIPT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 	BUILD_DATE=$(git -C "$SCRIPT_DIR" show -s --format=%cI HEAD)
 fi
 
+printf '>> rebuilding erun CLI (%s)... ' "$BUILD_VERSION" >&2
+build_started_at=$(date +%s)
 go build \
 	-ldflags "-X github.com/sophium/erun/cmd.buildVersion=${BUILD_VERSION} -X github.com/sophium/erun/cmd.buildCommit=${BUILD_COMMIT} -X github.com/sophium/erun/cmd.buildDate=${BUILD_DATE}" \
 	-o "$TARGET" \
 	./
+build_finished_at=$(date +%s)
+printf 'ok (%ss) -> %s\n' "$((build_finished_at - build_started_at))" "$TARGET" >&2
 
 COMMAND_NAME=
 for arg in "$@"; do

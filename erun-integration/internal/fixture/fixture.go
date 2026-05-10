@@ -610,3 +610,70 @@ func formatStubBool(value bool) string {
 	return "false"
 }
 
+// SeedDeployInflightMarker writes an in-flight deploy marker into the test's
+// XDG config dir so erun deploy --dry-run exercises the dedup branches
+// (skip on identical hash, conflict on different hash, reclaim on dead PID).
+// The marker filename mirrors the format produced by erun-common's
+// helmDeployReleaseKey: `<context>-<namespace>-<release>.json`. Tests pass
+// the desired pid and params hash directly; pid=0 means "use a definitely-not-
+// running pid" (1 is always init, but for a probe via signal-0 we want a
+// known-dead pid; tests use 1 to mean alive-init or pass an explicit dead
+// pid). The intent is captured per scenario in the calling test.
+func SeedDeployInflightMarker(t testing.TB, setup env.Setup, kubernetesContext, namespace, releaseName string, record DeployInflightRecord) string {
+	t.Helper()
+	if record.StartedAt == "" {
+		record.StartedAt = "2026-05-10T12:00:00Z"
+	}
+	dir := filepath.Join(setup.ConfigHome, "erun", "deploys")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir deploys dir: %v", err)
+	}
+	key := sanitizeFilename(kubernetesContext) + "-" + sanitizeFilename(namespace) + "-" + sanitizeFilename(releaseName)
+	path := filepath.Join(dir, key+".json")
+	body := fmt.Sprintf(`{
+  "pid": %d,
+  "started_at": %q,
+  "params_hash": %q,
+  "tenant": %q,
+  "environment": %q,
+  "version": %q
+}
+`, record.PID, record.StartedAt, record.ParamsHash, record.Tenant, record.Environment, record.Version)
+	mustWrite(t, path, body)
+	return path
+}
+
+// DeployInflightRecord captures the fields tests need to seed for the dedup
+// integration scenarios.
+type DeployInflightRecord struct {
+	PID         int
+	StartedAt   string
+	ParamsHash  string
+	Tenant      string
+	Environment string
+	Version     string
+}
+
+func sanitizeFilename(s string) string {
+	if s == "" {
+		return "_"
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z',
+			r >= 'A' && r <= 'Z',
+			r >= '0' && r <= '9',
+			r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	if b.Len() == 0 {
+		return "_"
+	}
+	return b.String()
+}
+

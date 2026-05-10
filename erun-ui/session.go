@@ -18,6 +18,12 @@ type terminalSession interface {
 	io.ReadWriteCloser
 	Resize(cols, rows int) error
 	Wait() error
+	// Pid returns the OS process id of the underlying shell when one is
+	// known, or 0 when the implementation does not back the session
+	// with a real process. The stale-shell detector consults this to
+	// decide whether a session whose Wait hasn't returned is still
+	// alive.
+	Pid() int
 }
 
 type startTerminalSessionParams struct {

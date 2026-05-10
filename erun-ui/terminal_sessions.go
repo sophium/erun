@@ -8,18 +8,35 @@ import (
 	"io"
 	goruntime "runtime"
 	"strings"
+	"sync"
 	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+// StartSession spawns the ERun tab's `erun open` PTY for (selection,
+// slot). The work is queued through the per-(tenant,env) desktop action
+// runner so a parallel AI tab open for the same env doesn't race a
+// duplicate build+deploy. The Wails caller blocks until the session is
+// created (or fails); the runner gate is released when the underlying
+// `erun open` reaches its ready marker (==> Deployed / Defaulted
+// container) or exits.
 func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
 		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
 	}
+	return a.enqueueGatedSession(selection, "open", func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
+		return a.runOpenSession(ctx, selection, slot, cols, rows)
+	})
+}
 
+// runOpenSession is the original spawn logic for the ERun tab,
+// wrapped so the desktop action runner can call it on its turn.
+// Returns the result the Wails caller wants and the managedTerminal so
+// the runner can wait on its ready signal.
+func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, cols, rows int) (startSessionResult, *managedTerminal, error) {
 	if cols <= 0 {
 		cols = 120
 	}
@@ -33,18 +50,21 @@ func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSe
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return startSessionResult{}, err
+		return startSessionResult{}, nil, err
 	}
 
 	a.mu.Lock()
 	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
 		a.mu.Unlock()
 		go a.startWorkspaceSyncForSelection(selection)
+		// Reusing an existing session — already past setup, gate
+		// can release immediately.
+		existing.signalReady(nil)
 		return startSessionResult{
 			SessionID: existing.serial,
 			Selection: existing.selection,
 			Slot:      slot,
-		}, nil
+		}, existing, nil
 	}
 	a.mu.Unlock()
 
@@ -58,7 +78,7 @@ func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSe
 	}
 	session, err := a.deps.startTerminal(openParams)
 	if err != nil {
-		return startSessionResult{}, err
+		return startSessionResult{}, nil, err
 	}
 
 	a.mu.Lock()
@@ -76,23 +96,25 @@ func (a *App) StartSession(selection uiSelection, slot, cols, rows int) (startSe
 		respawn: func() (terminalSession, error) {
 			return a.deps.startTerminal(openParams)
 		},
+		startedAt: time.Now(),
 	}
 	a.sessions[key] = managed
 	a.busyEnvs[environmentBusyKey(selection)]++
 	a.mu.Unlock()
 
 	a.recordTerminalActivity(selection)
+	a.rememberKubeContextForActivity(selection.KubernetesContext)
 	go a.streamSession(managed)
 	go a.startWorkspaceSyncForSelection(selection)
 
 	a.logSpawnedCommandToLocal(selection, "erun", formatLocalCommandLog(formatLaunchCommand(openParams), "ERun tab"))
-
+	_ = ctx
 	return startSessionResult{
 		SessionID: serial,
 		Selection: selection,
 		Slot:      slot,
 		Kind:      string(sessionKindOpen),
-	}, nil
+	}, managed, nil
 }
 
 func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
@@ -153,6 +175,7 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 		serial:    serial,
 		slot:      slot,
 		kind:      sessionKindLocal,
+		startedAt: time.Now(),
 	}
 	a.sessions[key] = managed
 	a.mu.Unlock()
@@ -173,11 +196,21 @@ func (a *App) StartLocalSession(selection uiSelection, slot, cols, rows int) (st
 	}, nil
 }
 
+// StartAISession spawns the AI tab's `erun open` PTY and pipes the
+// configured AI tool's startup command into stdin. Same per-env queue
+// gating as StartSession so an AI tab opened alongside an ERun tab
+// doesn't trigger a duplicate build+deploy.
 func (a *App) StartAISession(selection uiSelection, slot, cols, rows int) (startSessionResult, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
 		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
 	}
+	return a.enqueueGatedSession(selection, "ai", func(ctx context.Context) (startSessionResult, *managedTerminal, error) {
+		return a.runAISession(ctx, selection, slot, cols, rows)
+	})
+}
+
+func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, cols, rows int) (startSessionResult, *managedTerminal, error) {
 	if cols <= 0 {
 		cols = 120
 	}
@@ -191,18 +224,19 @@ func (a *App) StartAISession(selection uiSelection, slot, cols, rows int) (start
 		Environment: selection.Environment,
 	})
 	if err != nil {
-		return startSessionResult{}, err
+		return startSessionResult{}, nil, err
 	}
 
 	a.mu.Lock()
 	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
 		a.mu.Unlock()
+		existing.signalReady(nil)
 		return startSessionResult{
 			SessionID: existing.serial,
 			Selection: existing.selection,
 			Slot:      slot,
 			Kind:      string(sessionKindAI),
-		}, nil
+		}, existing, nil
 	}
 	a.mu.Unlock()
 
@@ -218,7 +252,7 @@ func (a *App) StartAISession(selection uiSelection, slot, cols, rows int) (start
 	}
 	session, err := a.deps.startTerminal(params)
 	if err != nil {
-		return startSessionResult{}, err
+		return startSessionResult{}, nil, err
 	}
 
 	a.mu.Lock()
@@ -234,20 +268,22 @@ func (a *App) StartAISession(selection uiSelection, slot, cols, rows int) (start
 		respawn: func() (terminalSession, error) {
 			return a.deps.startTerminal(params)
 		},
+		startedAt: time.Now(),
 	}
 	a.sessions[key] = managed
 	a.mu.Unlock()
 
+	a.rememberKubeContextForActivity(selection.KubernetesContext)
 	go a.streamSession(managed)
 
 	a.logSpawnedCommandToLocal(selection, "ai", formatLocalCommandLog(formatLaunchCommand(params)+" && "+shellQuoteIfNeeded(tool), "AI tab"))
-
+	_ = ctx
 	return startSessionResult{
 		SessionID: serial,
 		Selection: selection,
 		Slot:      slot,
 		Kind:      string(sessionKindAI),
-	}, nil
+	}, managed, nil
 }
 
 func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
@@ -255,7 +291,21 @@ func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSess
 }
 
 func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+	// The PTY trace handler picks up `==> Deploying tenant/env <ver>`
+	// from the Local tab and registers a deploy entry within milliseconds.
+	// The helm release poller converges onto the same record by ID once
+	// the cluster sees the pending release.
 	return a.runErunCommandInLocal(selection, cols, rows, buildDeployArgs(selection))
+}
+
+// StartForceDeploySession runs `erun deploy --force` in the Local tab.
+// Wails-exposed: bound to the "Rebuild & redeploy" affordance shown next
+// to a failing container in the activity drawer when the kubelet error
+// looks like a missing-image case (the registry doesn't have the chart's
+// referenced tag yet, so a forced rebuild + push is the recovery path).
+func (a *App) StartForceDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+	args := append(buildDeployArgs(selection), "--force")
+	return a.runErunCommandInLocal(selection, cols, rows, args)
 }
 
 func (a *App) StartSSHDInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
@@ -435,9 +485,10 @@ func (a *App) StartCloudInitAWSSession(cols, rows int) (startSessionResult, erro
 	a.nextSerial++
 	serial := a.nextSerial
 	managed := &managedTerminal{
-		session: session,
-		key:     key,
-		serial:  serial,
+		session:   session,
+		key:       key,
+		serial:    serial,
+		startedAt: time.Now(),
 	}
 	a.sessions[key] = managed
 	a.mu.Unlock()
@@ -540,13 +591,16 @@ func (a *App) startCommandSessionWithExecutable(selection uiSelection, cols, row
 		selection:      selection,
 		key:            key,
 		serial:         serial,
+		kind:           sessionKindCommand,
 		blocksIdleStop: true,
+		startedAt:      time.Now(),
 	}
 	a.sessions[key] = managed
 	a.busyEnvs[environmentBusyKey(selection)]++
 	a.mu.Unlock()
 
 	a.recordTerminalActivity(selection)
+	a.rememberKubeContextForActivity(selection.KubernetesContext)
 	go a.streamSession(managed)
 
 	return startSessionResult{
@@ -780,6 +834,7 @@ func (a *App) streamSession(managed *managedTerminal) {
 				Data:      base64.StdEncoding.EncodeToString(buffer[:count]),
 			}
 			a.emitEvent(terminalOutputEvent, payload)
+			a.feedActivityTraceFromTerminal(managed, buffer[:count])
 			if managed.clearIdleBlockOnOutput {
 				a.mu.Lock()
 				a.releaseIdleBlockLocked(managed)
@@ -808,6 +863,15 @@ func (a *App) streamSession(managed *managedTerminal) {
 			SessionID: managed.serial,
 			Reason:    reason,
 		})
+		// Release any action runner waiting on this session's ready
+		// signal. If the session never reached its setup-complete
+		// marker (e.g. process exited mid-build), the gate would
+		// otherwise hold until the action's hard timeout.
+		var readyErr error
+		if reason != "" {
+			readyErr = fmt.Errorf("%s", reason)
+		}
+		managed.signalReady(readyErr)
 		if reason == "" && strings.HasPrefix(managed.key, "sshd-init\x00") {
 			go a.startWorkspaceSyncForSelection(managed.selection)
 		}
@@ -989,6 +1053,81 @@ type managedTerminal struct {
 	clearIdleBlockOnOutput bool
 	respawn                func() (terminalSession, error)
 	loggedCommands         map[string]struct{}
+	lockedByActivity       string
+	activityTraceBuffer    string
+	startedAt              time.Time
+
+	// readyMu / readyCh / readyErr / readyClosed track the
+	// "session is past its setup phase" signal. The desktop action
+	// runner blocks on waitReady so the per-env queue gate releases
+	// only when the underlying `erun open` has finished its build +
+	// deploy work (or fast-pathed straight to kubectl-exec). Detected
+	// by feedActivityTraceFromTerminal observing one of:
+	//   ==> Deployed / ==> Deploy failed / ==> Skipping
+	//   Defaulted container "..."
+	// or the session closing.
+	readyMu     sync.Mutex
+	readyCh     chan struct{}
+	readyErr    error
+	readyClosed bool
+}
+
+// waitReady blocks until the session signals it has reached an
+// interactive-ready state, the underlying process exits, ctx is
+// cancelled, or `timeout` elapses (use 0 for "no timeout"). Returns
+// nil on success, ctx.Err() on cancellation, the session's exit error
+// on premature close, or context.DeadlineExceeded on timeout.
+func (m *managedTerminal) waitReady(ctx context.Context, timeout time.Duration) error {
+	if m == nil {
+		return nil
+	}
+	m.readyMu.Lock()
+	if m.readyCh == nil {
+		m.readyCh = make(chan struct{})
+	}
+	ch := m.readyCh
+	closed := m.readyClosed
+	storedErr := m.readyErr
+	m.readyMu.Unlock()
+	if closed {
+		return storedErr
+	}
+	var timer <-chan time.Time
+	if timeout > 0 {
+		t := time.NewTimer(timeout)
+		defer t.Stop()
+		timer = t.C
+	}
+	select {
+	case <-ch:
+		m.readyMu.Lock()
+		defer m.readyMu.Unlock()
+		return m.readyErr
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer:
+		return context.DeadlineExceeded
+	}
+}
+
+// signalReady marks the session ready exactly once. Subsequent calls
+// are no-ops, which is the right behaviour: the first observed
+// terminal-state line is authoritative.
+func (m *managedTerminal) signalReady(err error) {
+	if m == nil {
+		return
+	}
+	m.readyMu.Lock()
+	defer m.readyMu.Unlock()
+	if m.readyClosed {
+		return
+	}
+	if m.readyCh == nil {
+		m.readyCh = make(chan struct{})
+	}
+	m.readyErr = err
+	m.readyClosed = true
+	close(m.readyCh)
 }
 
 type sessionKind string

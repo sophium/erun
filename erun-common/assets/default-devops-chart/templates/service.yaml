@@ -20,7 +20,7 @@
 {{- $imageOverrides := default dict .Values.imageOverrides -}}
 {{- $devopsImage := default (printf "ghcr.io/sophium/erun-devops:%s" .Chart.AppVersion) (index $imageOverrides "erun-devops") -}}
 {{- $mcpImage := default (printf "ghcr.io/sophium/erun-mcp:%s" .Chart.AppVersion) (index $imageOverrides "erun-mcp") -}}
-{{- $dindImage := default "ghcr.io/sophium/erun-dind:28.1.1" (index $imageOverrides "erun-dind") -}}
+{{- $dindImage := default "ghcr.io/sophium/erun-dind:28.1.1-1" (index $imageOverrides "erun-dind") -}}
 {{- $cloudContext := default dict .Values.cloudContext -}}
 {{- $cloudContextName := default "" $cloudContext.name -}}
 {{- $cloudProvider := default "" $cloudContext.provider -}}

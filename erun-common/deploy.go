@@ -269,14 +269,25 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	command := deployInput.command()
 	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
 	tracePodWatchAction(ctx, deployInput.ReleaseName, deployInput.Namespace, deployInput.KubernetesContext)
-	if ctx.DryRun {
-		return nil
-	}
 
+	outcome, handle, err := AcquireHelmDeploySingleFlight(ctx, deployInput)
+	if err != nil {
+		return err
+	}
 	target := deployInput.Tenant + "/" + deployInput.Environment
 	if version := strings.TrimSpace(deployInput.Version); version != "" {
 		target += " " + version
 	}
+	if outcome == HelmDeploySingleFlightSkipDuplicate {
+		ctx.Info("==> Skipping " + target + " (identical deploy already in progress)")
+		return nil
+	}
+	defer handle.Release()
+
+	if ctx.DryRun {
+		return nil
+	}
+
 	ctx.Info("==> Deploying " + target)
 	ctx.Info("    namespace " + deployInput.Namespace + " on context " + deployInput.KubernetesContext)
 	if timeout := strings.TrimSpace(deployInput.Timeout); timeout != "" {
@@ -287,12 +298,12 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 
 	started := time.Now()
 	spinner := StartSpinner(ctx.Stderr, "deploying "+target)
-	err := deploy(deployInput.Params(ctx.Stdout, ctx.Stderr))
+	deployErr := deploy(deployInput.Params(ctx.Stdout, ctx.Stderr))
 	spinner.Stop()
 	elapsed := time.Since(started).Round(time.Second)
-	if err != nil {
+	if deployErr != nil {
 		ctx.Info("==> Deploy failed after " + elapsed.String())
-		return err
+		return deployErr
 	}
 	ctx.Info("==> Deployed " + target + " in " + elapsed.String())
 	return nil

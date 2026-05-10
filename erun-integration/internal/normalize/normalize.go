@@ -49,6 +49,14 @@ var defaultRules = []Replacement{
 	// (32 bytes -> 43-char base64url) and similar. Match a 30+ length
 	// base64url run after `--token ` so we don't catch unrelated text.
 	{regexp.MustCompile(`--token [A-Za-z0-9_-]{30,}`), "--token <TOKEN>"},
+	// Deploy single-flight params hash (e.g., hash=80b663e6beea3955).
+	// Computed from the helm command + chart path + values file path, all of
+	// which include per-test temp dirs, so the raw hex differs across runs.
+	{regexp.MustCompile(`hash=[0-9a-f]{16}\b`), "hash=<HASH>"},
+	// Running-command marker id (e.g., id=build-1778402661251293000 or
+	// id=deploy-team-dev-team-devops-1778402661251293000). The trailing
+	// nanosecond timestamp varies per invocation so normalize the id token.
+	{regexp.MustCompile(`id=[A-Za-z0-9_./-]*-\d{10,}\b`), "id=<COMMAND_ID>"},
 	// Random hex tokens used for chart names (e.g., -f0bb16f86125afa9).
 	{regexp.MustCompile(`-[0-9a-f]{16}\b`), "-<HEX16>"},
 	// Random hex tokens of other lengths embedded in identifiers.

@@ -2921,17 +2921,37 @@ func (s stubUIStore) ListEnvConfigs(tenant string) ([]eruncommon.EnvConfig, erro
 }
 
 type stubTerminalSession struct {
-	closeCh chan struct{}
-	waitErr error
-	mu      sync.Mutex
-	written []byte
+	closeCh       chan struct{}
+	waitErr       error
+	mu            sync.Mutex
+	written       []byte
+	initialOutput []byte
 }
+
+// stubSessionReadyOutput is the line every newStubTerminalSession emits
+// on its first Read so the desktop's session-ready trace handler
+// observes the equivalent of `kubectl exec` attaching, signals the
+// session ready, and releases the per-env action runner gate. Without
+// this, tests calling StartSession twice in a row would wedge on the
+// second call's enqueue waiting 10 min for the first action's gate.
+const stubSessionReadyOutput = `Defaulted container "stub" out of: stub` + "\n"
 
 func newStubTerminalSession() *stubTerminalSession {
-	return &stubTerminalSession{closeCh: make(chan struct{})}
+	return &stubTerminalSession{
+		closeCh:       make(chan struct{}),
+		initialOutput: []byte(stubSessionReadyOutput),
+	}
 }
 
-func (s *stubTerminalSession) Read([]byte) (int, error) {
+func (s *stubTerminalSession) Read(buf []byte) (int, error) {
+	s.mu.Lock()
+	if len(s.initialOutput) > 0 {
+		n := copy(buf, s.initialOutput)
+		s.initialOutput = s.initialOutput[n:]
+		s.mu.Unlock()
+		return n, nil
+	}
+	s.mu.Unlock()
 	<-s.closeCh
 	return 0, io.EOF
 }
@@ -2955,6 +2975,10 @@ func (s *stubTerminalSession) Resize(int, int) error {
 
 func (s *stubTerminalSession) Wait() error {
 	return s.waitErr
+}
+
+func (s *stubTerminalSession) Pid() int {
+	return 0
 }
 
 func (s *stubTerminalSession) Close() error {
