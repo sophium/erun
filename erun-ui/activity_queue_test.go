@@ -104,31 +104,43 @@ func TestDeployQueueDismissDoesNotRemoveActive(t *testing.T) {
 	}
 }
 
-func TestDeployQueueLoadReconcilesStaleRunning(t *testing.T) {
+func TestActivityQueueLoadCoercesRunningToHistoryFailed(t *testing.T) {
+	// Persisted "running" entries from a prior desktop session are
+	// always stale: the desktop process that owned them is dead. Load()
+	// coerces them to history (failed) with a clear reason; the
+	// marker-watcher will re-register if the underlying CLI is still
+	// alive. This eliminates phantom-running entries that used to
+	// persist across desktop restarts and never get cleaned up.
 	store := newActivityQueueStore(nil, nil, func() time.Time { return time.Date(2026, 5, 10, 13, 0, 0, 0, time.UTC) })
-	stale := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
 	store.load([]*activityQueueEntry{{
-		ID:          "stale",
+		ID:          "ghost",
 		Tenant:      "t",
 		Environment: "e",
 		Version:     "1",
 		Status:      activityQueueStatusRunning,
-		StartedAt:   stale,
-		LastUpdated: stale,
+		StartedAt:   time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC),
+		LastUpdated: time.Date(2026, 5, 10, 12, 30, 0, 0, time.UTC),
 	}})
 	all := store.list()
 	if len(all) != 1 {
 		t.Fatalf("list len = %d, want 1", len(all))
 	}
 	if all[0].Status != activityQueueStatusFailed {
-		t.Fatalf("stale running status = %q, want failed", all[0].Status)
+		t.Fatalf("running entry on load should become failed, got %q", all[0].Status)
 	}
 	if all[0].Error == "" {
-		t.Fatal("stale entry should carry an explanatory error")
+		t.Fatal("loaded running entry should carry a lost-state reason")
+	}
+	if _, stillActive := store.findActive("t", "e"); stillActive {
+		t.Fatal("loaded running entry must not stay in the active map")
 	}
 }
 
-func TestDeployQueuePersistenceRoundTrip(t *testing.T) {
+func TestActivityQueuePersistenceOnlyKeepsHistory(t *testing.T) {
+	// Active entries should not survive a desktop restart. Only the
+	// history (recent succeeded/failed/skipped) is durable. Round-trip
+	// confirms a still-active entry is dropped from the persisted file
+	// while a finished entry survives.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "deploy_queue.json")
 	store := newActivityQueueStore(
@@ -138,27 +150,24 @@ func TestDeployQueuePersistenceRoundTrip(t *testing.T) {
 		nil,
 		func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 	)
-	entry, _ := store.start(activityQueueEntry{Tenant: "team", Environment: "dev", Version: "1.0.0", Release: "team-devops"})
-	store.updateContainers(entry.ID, []activityQueueContainerStatus{{Name: "erun-devops", Image: "img:1", Ready: true, Phase: "Running"}})
-	if _, ok := store.finish(entry.ID, activityQueueStatusSucceeded, ""); !ok {
+	active, _ := store.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0", Release: "team-devops"})
+	finished, _ := store.start(activityQueueEntry{Command: "build", Tenant: "team", Environment: "dev", Version: "1.0.0", Component: "erun-devops"})
+	if _, ok := store.finish(finished.ID, activityQueueStatusSucceeded, ""); !ok {
 		t.Fatal("finish failed")
 	}
-
+	// `active` is still running; persisted file must NOT include it.
 	loaded, err := loadActivityQueueStateFromDisk(path)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
 	if len(loaded) != 1 {
-		t.Fatalf("loaded len = %d, want 1", len(loaded))
+		t.Fatalf("expected 1 persisted history entry (running entries skipped), got %d", len(loaded))
 	}
-	if loaded[0].ID != entry.ID {
-		t.Fatalf("ID drift across persistence: in=%s out=%s", entry.ID, loaded[0].ID)
+	if loaded[0].ID != finished.ID {
+		t.Fatalf("persisted entry mismatch: got %s want %s (the active entry must be excluded)", loaded[0].ID, finished.ID)
 	}
-	if loaded[0].Status != activityQueueStatusSucceeded {
-		t.Fatalf("status = %q, want succeeded", loaded[0].Status)
-	}
-	if len(loaded[0].Containers) != 1 || loaded[0].Containers[0].Name != "erun-devops" {
-		t.Fatalf("containers not preserved: %+v", loaded[0].Containers)
+	if loaded[0].ID == active.ID {
+		t.Fatalf("active entry %s leaked into persisted file", active.ID)
 	}
 }
 

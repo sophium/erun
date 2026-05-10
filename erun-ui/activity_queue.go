@@ -220,34 +220,32 @@ func (s *activityQueueStore) dismiss(id string) bool {
 	return false
 }
 
-// load replaces the in-memory state with the supplied snapshot. Stale running
-// entries (older than activityQueueRunningStaleAfter) are reconciled to
-// failed because the process that owned them is no longer alive.
+// load replaces the in-memory state with the supplied snapshot. Active
+// entries from older builds (or older desktop sessions) are coerced into
+// history with a "lost-state" failure reason because the process that
+// owned the marker is no longer addressable from this desktop. This is
+// always safe: if the underlying CLI is genuinely still running, the
+// activity-marker watcher will rediscover it on its next tick.
 func (s *activityQueueStore) load(entries []*activityQueueEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.active = make(map[string]*activityQueueEntry)
 	s.history = nil
-	cutoff := s.now().UTC().Add(-activityQueueRunningStaleAfter)
 	for _, entry := range entries {
 		if entry == nil {
 			continue
 		}
 		clone := cloneActivityQueueEntry(entry)
-		if clone.Status == activityQueueStatusRunning && clone.LastUpdated.Before(cutoff) {
+		if clone.Status == activityQueueStatusRunning {
 			clone.Status = activityQueueStatusFailed
 			ended := s.now().UTC()
 			clone.EndedAt = &ended
 			clone.LastUpdated = ended
 			if clone.Error == "" {
-				clone.Error = "deploy state lost (desktop restart before completion)"
+				clone.Error = "activity state lost across desktop restart; the marker watcher will re-register if still running"
 			}
 		}
-		if clone.Status == activityQueueStatusRunning {
-			s.active[clone.ID] = clone
-		} else {
-			s.history = append(s.history, clone)
-		}
+		s.history = append(s.history, clone)
 	}
 	sort.SliceStable(s.history, func(i, j int) bool {
 		return s.history[i].StartedAt.After(s.history[j].StartedAt)
@@ -276,10 +274,13 @@ func (s *activityQueueStore) flushLocked() {
 	if s.persist == nil {
 		return
 	}
-	snapshot := make([]*activityQueueEntry, 0, len(s.active)+len(s.history))
-	for _, entry := range s.active {
-		snapshot = append(snapshot, cloneActivityQueueEntry(entry))
-	}
+	// Persist HISTORY only. Active entries are rediscovered from
+	// running RunningCommand markers on the next launch — persisting
+	// them across restarts produces phantom-running entries when the
+	// process that owned the marker is gone (or worse: an older `erun`
+	// CLI wrote an entry that the current desktop no longer tracks).
+	// History is the durable record the user reads.
+	snapshot := make([]*activityQueueEntry, 0, len(s.history))
 	for _, entry := range s.history {
 		snapshot = append(snapshot, cloneActivityQueueEntry(entry))
 	}
