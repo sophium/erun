@@ -88,13 +88,11 @@ ensure_github_ssh_key_uploaded() {
   fi
 }
 
-ensure_github_cli_auth() {
+ensure_github_login() {
   if ! gh auth status >/dev/null 2>&1; then
     echo "GitHub CLI is not authenticated. Starting gh auth login..." >&2
     gh auth login --hostname github.com --git-protocol ssh --web --skip-ssh-key --scopes admin:public_key
   fi
-
-  ensure_github_ssh_key_uploaded
 }
 
 ensure_remote_release_tag() {
@@ -112,7 +110,7 @@ ensure_remote_release_tag() {
   git -C "$repo_root" push origin "$tag"
 }
 
-ensure_github_cli_auth
+ensure_github_login
 
 artifact_path=$("$script_dir/build.sh")
 tag="v${version}"
@@ -122,6 +120,7 @@ if gh release view "$tag" >/dev/null 2>&1; then
   exit 0
 fi
 
+ensure_github_ssh_key_uploaded
 ensure_remote_release_tag "$tag"
 
 release_args=("$tag" "$artifact_path" "--title" "Release $version")
