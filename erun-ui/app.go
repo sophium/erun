@@ -57,7 +57,7 @@ type erunUIDeps struct {
 	recordActivity        func(eruncommon.EnvironmentActivityParams) error
 	stopCloudContext      func(context.Context, string) (eruncommon.CloudContextStatus, error)
 	windowStatePath       string
-	deployQueueStatePath  string
+	activityQueueStatePath  string
 	windowMaximised       func(context.Context) bool
 }
 
@@ -65,14 +65,15 @@ type App struct {
 	ctx  context.Context
 	deps erunUIDeps
 
-	mu                 sync.Mutex
-	nextSerial         int
-	sessions           map[string]*managedTerminal
-	idleStops          map[string]struct{}
-	busyEnvs           map[string]int
-	workspaceSyncs     map[string]*workspaceSyncWorker
-	deployQueue        *deployQueueStore
-	deployStatusPoller func(deployQueueEntry)
+	mu                   sync.Mutex
+	nextSerial           int
+	sessions             map[string]*managedTerminal
+	idleStops            map[string]struct{}
+	busyEnvs             map[string]int
+	workspaceSyncs       map[string]*workspaceSyncWorker
+	activityQueue        *activityQueueStore
+	activityStatusPoller func(activityQueueEntry)
+	activityWatcherStop  chan struct{}
 }
 
 func NewApp(deps erunUIDeps) *App {
@@ -86,26 +87,30 @@ func NewApp(deps erunUIDeps) *App {
 		busyEnvs:       make(map[string]int),
 		workspaceSyncs: make(map[string]*workspaceSyncWorker),
 	}
-	statePath := strings.TrimSpace(deps.deployQueueStatePath)
-	app.deployQueue = newDeployQueueStore(
-		func(entries []*deployQueueEntry) error {
+	statePath := strings.TrimSpace(deps.activityQueueStatePath)
+	app.activityQueue = newActivityQueueStore(
+		func(entries []*activityQueueEntry) error {
 			if statePath == "" {
 				return nil
 			}
-			return writeDeployQueueStateAtomic(statePath, entries)
+			return writeActivityQueueStateAtomic(statePath, entries)
 		},
-		func(entry deployQueueEntry) {
-			app.emitDeployState(entry)
+		func(entry activityQueueEntry) {
+			app.emitActivityState(entry)
 		},
 		nil,
 	)
 	if statePath != "" {
-		if entries, err := loadDeployQueueStateFromDisk(statePath); err == nil && entries != nil {
-			app.deployQueue.load(entries)
+		if entries, err := loadActivityQueueStateFromDisk(statePath); err == nil && entries != nil {
+			app.activityQueue.load(entries)
 		}
 	}
-	app.deployStatusPoller = func(entry deployQueueEntry) {
-		go app.pollDeployContainerStatuses(context.Background(), entry)
+	app.activityStatusPoller = func(entry activityQueueEntry) {
+		go app.pollActivityContainerStatuses(context.Background(), entry)
+	}
+	if statePath != "" {
+		app.activityWatcherStop = make(chan struct{})
+		go app.runActivityMarkerWatcher(app.activityWatcherStop)
 	}
 	return app
 }
@@ -216,6 +221,7 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(context.Context) {
+	a.stopActivityMarkerWatcher()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.stopAllWorkspaceSyncsLocked()

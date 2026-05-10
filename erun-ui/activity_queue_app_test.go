@@ -1,0 +1,204 @@
+package main
+
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	eruncommon "github.com/sophium/erun/erun-common"
+)
+
+// newTestAppForActivityQueue builds a minimal App with an in-memory queue
+// and no on-disk persistence/watcher.
+func newTestAppForActivityQueue(t *testing.T) *App {
+	t.Helper()
+	app := &App{
+		sessions: make(map[string]*managedTerminal),
+	}
+	app.activityQueue = newActivityQueueStore(nil, nil, nil)
+	return app
+}
+
+func TestLockTerminalsForActivityLocksMatchingSessions(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
+	envSession := &managedTerminal{selection: selection, key: "env\x00team\x00dev", serial: 1, kind: sessionKindOpen}
+	aiSession := &managedTerminal{selection: selection, key: "ai\x00team\x00dev", serial: 2, kind: sessionKindAI}
+	localSession := &managedTerminal{selection: selection, key: "local\x00team\x00dev", serial: 3, kind: sessionKindLocal}
+	otherSelection := uiSelection{Tenant: "other", Environment: "dev", Version: "1.0.0"}
+	unrelated := &managedTerminal{selection: otherSelection, key: "env\x00other\x00dev", serial: 4, kind: sessionKindOpen}
+	app.sessions[envSession.key] = envSession
+	app.sessions[aiSession.key] = aiSession
+	app.sessions[localSession.key] = localSession
+	app.sessions[unrelated.key] = unrelated
+
+	entry, _ := app.activityQueue.start(activityQueueEntry{
+		Command:     "deploy",
+		Tenant:      "team",
+		Environment: "dev",
+		Version:     "1.0.0",
+		Release:     "team-devops",
+	})
+	app.lockTerminalsForActivity(entry)
+
+	if envSession.lockedByActivity != entry.ID {
+		t.Fatalf("env session not locked: %q want %q", envSession.lockedByActivity, entry.ID)
+	}
+	if aiSession.lockedByActivity != entry.ID {
+		t.Fatalf("ai session not locked: %q", aiSession.lockedByActivity)
+	}
+	if localSession.lockedByActivity != "" {
+		t.Fatalf("local session unexpectedly locked: %q", localSession.lockedByActivity)
+	}
+	if unrelated.lockedByActivity != "" {
+		t.Fatalf("unrelated tenant locked: %q", unrelated.lockedByActivity)
+	}
+}
+
+func TestUnlockTerminalsForActivityClearsMatchingLocks(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
+	envSession := &managedTerminal{selection: selection, key: "env\x00team\x00dev", serial: 1, kind: sessionKindOpen}
+	app.sessions[envSession.key] = envSession
+	entry, _ := app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0"})
+	app.lockTerminalsForActivity(entry)
+	if envSession.lockedByActivity == "" {
+		t.Fatal("session not locked at start")
+	}
+	final, _ := app.activityQueue.finish(entry.ID, activityQueueStatusSucceeded, "")
+	app.unlockTerminalsForActivity(final)
+	if envSession.lockedByActivity != "" {
+		t.Fatalf("session still locked after unlock: %q", envSession.lockedByActivity)
+	}
+}
+
+func TestActivityTraceLineHandlerFinalizesOnDeployedAndFailed(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
+	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0"})
+	handler := newActivityTraceLineHandler(app, selection)
+	handler("==> Deployed team/dev 1.0.0 in 12s")
+	if _, ok := app.activityQueue.findActive("team", "dev"); ok {
+		t.Fatal("entry should be finished after ==> Deployed")
+	}
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusSucceeded {
+		t.Fatalf("expected one succeeded entry, got %+v", all)
+	}
+
+	app2 := newTestAppForActivityQueue(t)
+	app2.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "team", Environment: "dev", Version: "1.0.0"})
+	handler2 := newActivityTraceLineHandler(app2, selection)
+	handler2("Error: UPGRADE FAILED: timeout")
+	handler2("==> Deploy failed after 2m0s")
+	all2 := app2.activityQueue.list()
+	if len(all2) != 1 || all2[0].Status != activityQueueStatusFailed {
+		t.Fatalf("expected one failed entry, got %+v", all2)
+	}
+	if !strings.Contains(all2[0].Error, "Deploy failed") && !strings.Contains(all2[0].Error, "UPGRADE FAILED") {
+		t.Fatalf("error not captured: %q", all2[0].Error)
+	}
+}
+
+func TestActivityTraceLineHandlerDoesNotAutoRegister(t *testing.T) {
+	// Source-of-truth for "started" is the on-disk RunningCommand marker
+	// the watcher reads. The trace handler must NOT auto-register entries
+	// — that path was a workaround that conflated observation with
+	// authority and produced phantom entries.
+	app := newTestAppForActivityQueue(t)
+	handler := newActivityTraceLineHandler(app, uiSelection{Tenant: "team", Environment: "dev"})
+	handler("==> Deploying team/dev 1.0.0")
+	if entries := app.activityQueue.list(); len(entries) != 0 {
+		t.Fatalf("expected no auto-registered entries, got %+v", entries)
+	}
+}
+
+func TestNamespaceForTenantEnv(t *testing.T) {
+	cases := []struct {
+		tenant, environment, want string
+	}{
+		{"team", "dev", "team-dev"},
+		{"team", "", "team"},
+		{"", "dev", "dev"},
+		{"", "", ""},
+	}
+	for _, c := range cases {
+		if got := namespaceForTenantEnv(c.tenant, c.environment); got != c.want {
+			t.Fatalf("namespaceForTenantEnv(%q,%q) = %q, want %q", c.tenant, c.environment, got, c.want)
+		}
+	}
+}
+
+func TestReleaseNameForTenant(t *testing.T) {
+	if got := releaseNameForTenant("team"); got != "team-devops" {
+		t.Fatalf("got %q, want team-devops", got)
+	}
+	if got := releaseNameForTenant("  spaced  "); got != "spaced-devops" {
+		t.Fatalf("got %q, want spaced-devops", got)
+	}
+	if got := releaseNameForTenant(""); got != "" {
+		t.Fatalf("got %q, want empty", got)
+	}
+}
+
+func TestNewAppDoesNotPersistWithoutExplicitPath(t *testing.T) {
+	// Regression: persistence path now flows through erunUIDeps so tests
+	// that don't pass it never write to the developer's real config dir.
+	app := NewApp(erunUIDeps{})
+	if app.activityQueue == nil {
+		t.Fatal("activityQueue not initialized")
+	}
+	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "leak", Environment: "dev", Version: "1", Release: "leak-devops"})
+}
+
+func TestApplyMarkerRecordRegistersEntryAndIsIdempotent(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	dir := t.TempDir()
+	record := eruncommon.RunningCommand{
+		ID:                "deploy-erun-local-1",
+		Command:           "deploy",
+		Tenant:            "erun",
+		Environment:       "local",
+		Version:           "1.0.0",
+		Release:           "erun-devops",
+		Namespace:         "erun-local",
+		KubernetesContext: "orbstack",
+		StartedAt:         time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC),
+	}
+	first, fresh := app.applyMarkerRecord(dir, record)
+	if !fresh {
+		t.Fatal("first apply should register a fresh entry")
+	}
+	if first.ID != record.ID {
+		t.Fatalf("ID = %q, want %q", first.ID, record.ID)
+	}
+	expectedPath := filepath.Join(dir, sanitizeFilenameForActivity(record.ID)+".json")
+	if first.MarkerPath != expectedPath {
+		t.Fatalf("MarkerPath = %q, want %q", first.MarkerPath, expectedPath)
+	}
+	_, fresh = app.applyMarkerRecord(dir, record)
+	if fresh {
+		t.Fatal("second apply should be a no-op")
+	}
+}
+
+func TestFinalizeMissingMarkersClosesUnseenActiveEntries(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	dir := t.TempDir()
+	app.applyMarkerRecord(dir, eruncommon.RunningCommand{ID: "deploy-1", Command: "deploy", Tenant: "t", Environment: "e", StartedAt: time.Now().UTC()})
+	app.applyMarkerRecord(dir, eruncommon.RunningCommand{ID: "build-1", Command: "build", Tenant: "t", Component: "erun-devops", StartedAt: time.Now().UTC()})
+	if len(app.activityQueue.list()) != 2 {
+		t.Fatalf("expected 2 active before finalize, got %d", len(app.activityQueue.list()))
+	}
+	app.finalizeMissingMarkers(map[string]struct{}{"deploy-1": {}})
+	active := 0
+	for _, e := range app.activityQueue.list() {
+		if e.Status == activityQueueStatusRunning {
+			active++
+		}
+	}
+	if active != 1 {
+		t.Fatalf("expected 1 active after finalize, got %d", active)
+	}
+}

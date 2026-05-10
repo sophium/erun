@@ -24,7 +24,7 @@ func main() {
 		findProjectRoot:      eruncommon.FindProjectRoot,
 		resolveCLIPath:       resolveCLIExecutable,
 		windowStatePath:      windowStatePath,
-		deployQueueStatePath: defaultDeployQueueStatePath(),
+		activityQueueStatePath: defaultActivityQueueStatePath(),
 	})
 
 	err := wails.Run(&options.App{

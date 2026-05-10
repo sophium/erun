@@ -11,31 +11,31 @@ import (
 )
 
 const (
-	// deployQueueStateEvent is emitted whenever a deploy entry changes state.
+	// activityQueueStateEvent is emitted whenever a deploy entry changes state.
 	// Frontend subscribes to this to refresh the queue drawer and per-card
 	// container statuses without polling.
-	deployQueueStateEvent = "deploy:state"
+	activityQueueStateEvent = "activity:state"
 
-	// deployQueueLockEvent is emitted whenever a terminal session's locked
+	// activityQueueLockEvent is emitted whenever a terminal session's locked
 	// status changes. Frontend uses it to render or hide the lock overlay
 	// on the affected terminal.
-	deployQueueLockEvent = "deploy:lock"
+	activityQueueLockEvent = "activity:lock"
 
-	// deployQueuePollInterval governs how often the desktop polls kubectl
+	// activityQueuePollInterval governs how often the desktop polls kubectl
 	// for container statuses while a deploy is running. Short enough that
 	// the user sees pods transition; long enough that polling load is
 	// negligible against modest cluster sizes.
-	deployQueuePollInterval = 2 * time.Second
+	activityQueuePollInterval = 2 * time.Second
 )
 
-// deployStateEvent is the payload shape pushed to the frontend on each
+// activityStateEvent is the payload shape pushed to the frontend on each
 // transition. Wails serializes the embedded entry directly; the type alias
 // keeps the contract documented and stable.
-type deployStateEvent = deployQueueEntry
+type activityStateEvent = activityQueueEntry
 
-// deployLockEvent describes a terminal lock transition driven by the deploy
+// activityLockEvent describes a terminal lock transition driven by the deploy
 // queue. The frontend keys overlays by SessionID.
-type deployLockEvent struct {
+type activityLockEvent struct {
 	SessionID    int    `json:"sessionId"`
 	Tenant       string `json:"tenant"`
 	Environment  string `json:"environment"`
@@ -47,133 +47,104 @@ type deployLockEvent struct {
 
 // ListDeploys returns the current and recent deploy entries (newest first).
 // Wails-exported.
-func (a *App) ListDeploys() []deployQueueEntry {
-	if a.deployQueue == nil {
+func (a *App) ListDeploys() []activityQueueEntry {
+	if a.activityQueue == nil {
 		return nil
 	}
-	return a.deployQueue.list()
+	return a.activityQueue.list()
 }
 
 // GetDeploy returns a single deploy entry by ID, or zero value if not found.
 // Wails-exported.
-func (a *App) GetDeploy(id string) deployQueueEntry {
-	if a.deployQueue == nil {
-		return deployQueueEntry{}
+func (a *App) GetDeploy(id string) activityQueueEntry {
+	if a.activityQueue == nil {
+		return activityQueueEntry{}
 	}
-	for _, entry := range a.deployQueue.list() {
+	for _, entry := range a.activityQueue.list() {
 		if entry.ID == id {
 			return entry
 		}
 	}
-	return deployQueueEntry{}
+	return activityQueueEntry{}
 }
 
 // DismissDeploy removes a finished deploy from history. Returns false when
 // the ID names an active deploy (which the user must wait for) or no longer
 // exists. Wails-exported.
 func (a *App) DismissDeploy(id string) bool {
-	if a.deployQueue == nil {
+	if a.activityQueue == nil {
 		return false
 	}
-	return a.deployQueue.dismiss(id)
+	return a.activityQueue.dismiss(id)
 }
 
 // FindActiveDeployForSelection returns the active entry for (tenant, env)
 // when one exists; the frontend uses this for deploy-button gating without
 // having to walk the full ListDeploys snapshot. Wails-exported.
-func (a *App) FindActiveDeployForSelection(selection uiSelection) deployQueueEntry {
-	if a.deployQueue == nil {
-		return deployQueueEntry{}
+func (a *App) FindActiveDeployForSelection(selection uiSelection) activityQueueEntry {
+	if a.activityQueue == nil {
+		return activityQueueEntry{}
 	}
 	selection = normalizeSelection(selection)
-	if entry, ok := a.deployQueue.findActive(selection.Tenant, selection.Environment); ok {
+	if entry, ok := a.activityQueue.findActive(selection.Tenant, selection.Environment); ok {
 		return entry
 	}
-	return deployQueueEntry{}
+	return activityQueueEntry{}
 }
 
-// startDeployTracking registers a new active deploy in the queue and spawns
-// the per-deploy goroutines (PTY tail + kubectl status poller). Returns the
-// registered entry plus a `joined` flag: when joined is true, the caller's
-// new invocation collapsed into an existing in-flight deploy and no extra
-// helm upgrade was queued.
-func (a *App) startDeployTracking(selection uiSelection, sessionID int) (deployQueueEntry, bool) {
-	if a.deployQueue == nil {
-		return deployQueueEntry{}, false
-	}
-	tenant := strings.TrimSpace(selection.Tenant)
-	environment := strings.TrimSpace(selection.Environment)
-	version := strings.TrimSpace(selection.Version)
-	release := releaseNameForTenant(tenant)
-	namespace := namespaceForTenantEnv(tenant, environment)
-	kubeContext := strings.TrimSpace(selection.KubernetesContext)
-	entry, fresh := a.deployQueue.start(deployQueueEntry{
-		Tenant:            tenant,
-		Environment:       environment,
-		Version:           version,
-		Release:           release,
-		Namespace:         namespace,
-		KubernetesContext: kubeContext,
-	})
-	if !fresh {
-		// Already-active duplicate: just signal terminal-lock for the
-		// session that triggered this invocation so the user sees the
-		// existing deploy's wait UI.
-		a.lockTerminalForDeploy(sessionID, entry)
-		return entry, true
-	}
-	a.lockTerminalsForDeploy(entry)
-	if a.deployStatusPoller != nil {
-		a.deployStatusPoller(entry)
-	}
-	return entry, false
-}
+// activityRegistrationIsAuthoritative documents that this desktop no
+// longer maintains a desktop-side "explicit deploy registration" path:
+// the on-disk RunningCommand marker every CLI deploy writes is the
+// authoritative source, picked up by runActivityMarkerWatcher within one
+// poll tick. The helper below stays for tests that exercise the lock
+// transitions; it does not start a tracking entry on its own anymore.
+func activityRegistrationIsAuthoritative() {}
 
-// finishDeployTracking moves the active deploy for this selection to a
+// finishActivityTracking moves the active deploy for this selection to a
 // terminal status. Idempotent: a no-op when no active entry exists for the
 // selection.
-func (a *App) finishDeployTracking(selection uiSelection, status deployQueueStatus, errMsg string) {
-	if a.deployQueue == nil {
+func (a *App) finishActivityTracking(selection uiSelection, status activityQueueStatus, errMsg string) {
+	if a.activityQueue == nil {
 		return
 	}
-	entry, ok := a.deployQueue.findActive(strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
+	entry, ok := a.activityQueue.findActive(strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
 	if !ok {
 		return
 	}
-	if final, ok := a.deployQueue.finish(entry.ID, status, errMsg); ok {
-		a.unlockTerminalsForDeploy(final)
+	if final, ok := a.activityQueue.finish(entry.ID, status, errMsg); ok {
+		a.unlockTerminalsForActivity(final)
 	}
 }
 
-// emitDeployState is the persist/notify hook the store uses to tell the
+// emitActivityState is the persist/notify hook the store uses to tell the
 // frontend a deploy entry changed.
-func (a *App) emitDeployState(entry deployQueueEntry) {
-	a.emitEvent(deployQueueStateEvent, entry)
+func (a *App) emitActivityState(entry activityQueueEntry) {
+	a.emitEvent(activityQueueStateEvent, entry)
 }
 
-// lockTerminalsForDeploy marks every terminal session belonging to the
+// lockTerminalsForActivity marks every terminal session belonging to the
 // deploy's selection as locked and emits a lock event the frontend renders
 // as an overlay. Sessions joined later for the same selection will be locked
-// by lockTerminalForDeploy on a per-session basis.
-func (a *App) lockTerminalsForDeploy(entry deployQueueEntry) {
+// by lockTerminalForActivity on a per-session basis.
+func (a *App) lockTerminalsForActivity(entry activityQueueEntry) {
 	if entry.ID == "" {
 		return
 	}
-	target := deployTargetForRuntime(entry)
+	target := activityTargetForRuntime(entry)
 	a.mu.Lock()
-	var events []deployLockEvent
+	var events []activityLockEvent
 	for _, managed := range a.sessions {
 		if managed == nil || managed.closed {
 			continue
 		}
-		if !sessionMatchesSelection(managed, entry) {
+		if !sessionMatchesActivity(managed, entry) {
 			continue
 		}
-		if managed.lockedByDeploy == entry.ID {
+		if managed.lockedByActivity == entry.ID {
 			continue
 		}
-		managed.lockedByDeploy = entry.ID
-		events = append(events, deployLockEvent{
+		managed.lockedByActivity = entry.ID
+		events = append(events, activityLockEvent{
 			SessionID:    managed.serial,
 			Tenant:       entry.Tenant,
 			Environment:  entry.Environment,
@@ -185,27 +156,27 @@ func (a *App) lockTerminalsForDeploy(entry deployQueueEntry) {
 	}
 	a.mu.Unlock()
 	for _, ev := range events {
-		a.emitEvent(deployQueueLockEvent, ev)
+		a.emitEvent(activityQueueLockEvent, ev)
 	}
 }
 
-// lockTerminalForDeploy locks a single session by its serial ID. Used when
+// lockTerminalForActivity locks a single session by its serial ID. Used when
 // the user joins an in-flight deploy from a session that was created after
 // the deploy started.
-func (a *App) lockTerminalForDeploy(sessionID int, entry deployQueueEntry) {
+func (a *App) lockTerminalForActivity(sessionID int, entry activityQueueEntry) {
 	if entry.ID == "" || sessionID <= 0 {
 		return
 	}
-	target := deployTargetForRuntime(entry)
+	target := activityTargetForRuntime(entry)
 	a.mu.Lock()
-	var event *deployLockEvent
+	var event *activityLockEvent
 	for _, managed := range a.sessions {
 		if managed == nil || managed.closed || managed.serial != sessionID {
 			continue
 		}
-		if managed.lockedByDeploy != entry.ID {
-			managed.lockedByDeploy = entry.ID
-			event = &deployLockEvent{
+		if managed.lockedByActivity != entry.ID {
+			managed.lockedByActivity = entry.ID
+			event = &activityLockEvent{
 				SessionID:    managed.serial,
 				Tenant:       entry.Tenant,
 				Environment:  entry.Environment,
@@ -219,27 +190,27 @@ func (a *App) lockTerminalForDeploy(sessionID int, entry deployQueueEntry) {
 	}
 	a.mu.Unlock()
 	if event != nil {
-		a.emitEvent(deployQueueLockEvent, *event)
+		a.emitEvent(activityQueueLockEvent, *event)
 	}
 }
 
-// unlockTerminalsForDeploy clears the lock on every session whose
-// lockedByDeploy matches the supplied entry. Idempotent.
-func (a *App) unlockTerminalsForDeploy(entry deployQueueEntry) {
+// unlockTerminalsForActivity clears the lock on every session whose
+// lockedByActivity matches the supplied entry. Idempotent.
+func (a *App) unlockTerminalsForActivity(entry activityQueueEntry) {
 	if entry.ID == "" {
 		return
 	}
 	a.mu.Lock()
-	var events []deployLockEvent
+	var events []activityLockEvent
 	for _, managed := range a.sessions {
 		if managed == nil {
 			continue
 		}
-		if managed.lockedByDeploy != entry.ID {
+		if managed.lockedByActivity != entry.ID {
 			continue
 		}
-		managed.lockedByDeploy = ""
-		events = append(events, deployLockEvent{
+		managed.lockedByActivity = ""
+		events = append(events, activityLockEvent{
 			SessionID:   managed.serial,
 			Tenant:      entry.Tenant,
 			Environment: entry.Environment,
@@ -249,15 +220,15 @@ func (a *App) unlockTerminalsForDeploy(entry deployQueueEntry) {
 	}
 	a.mu.Unlock()
 	for _, ev := range events {
-		a.emitEvent(deployQueueLockEvent, ev)
+		a.emitEvent(activityQueueLockEvent, ev)
 	}
 }
 
-// sessionMatchesSelection reports whether a managed terminal targets the same
+// sessionMatchesActivity reports whether a managed terminal targets the same
 // (tenant, environment) as the deploy entry. Local-tab sessions are not
 // locked because they are the place the user kicked off the deploy from and
 // need to remain interactive to read trace output / acknowledge prompts.
-func sessionMatchesSelection(managed *managedTerminal, entry deployQueueEntry) bool {
+func sessionMatchesActivity(managed *managedTerminal, entry activityQueueEntry) bool {
 	if managed == nil {
 		return false
 	}
@@ -301,94 +272,37 @@ func namespaceForTenantEnv(tenant, environment string) string {
 	}
 }
 
-// deployingLineRe matches the "==> Deploying tenant/env [version]" trace
-// emitted by RunHelmDeploy. Capture groups: tenant, environment, optional
-// trailing version. Used by the trace handler to auto-register a deploy
-// entry when the user runs `erun deploy` directly in any tab (not just via
-// the desktop's Deploy button).
-var deployingLineRe = regexp.MustCompile(`^==> Deploying ([^/\s]+)/([^/\s]+)(?:\s+(\S+))?\s*$`)
-
-// newDeployTraceLineHandler scans PTY output for the trace lines emitted by
-// erun deploy and feeds lifecycle transitions back into the deploy queue.
-// The handler operates on the source-of-truth printed text rather than on
-// any in-band signal from the desktop button, so it works regardless of
-// which tab the user kicked the deploy off in (Local from the Deploy
-// button, ERun from a manual `erun deploy`, AI from claude inside the pod).
-//
-// The selection argument is the tab's resolved tenant/env. It is used as the
-// fallback (tenant, env) when the trace itself doesn't carry one — for
-// example a `==> Deploy failed` line without a preceding `==> Deploying`
-// (which happens when the deploy aborts before the spec resolves).
-func newDeployTraceLineHandler(app *App, selection uiSelection) func(string) {
+// newActivityTraceLineHandler scans PTY output for terminal-state trace
+// lines emitted by erun deploy (==> Deployed, ==> Deploy failed,
+// ==> Skipping, Error:) and finalizes the matching active queue entry.
+// It does NOT register entries — the on-disk RunningCommand marker the
+// CLI writes is the source of truth for "started", picked up by
+// runActivityMarkerWatcher.
+func newActivityTraceLineHandler(app *App, selection uiSelection) func(string) {
 	deployedRe := regexp.MustCompile(`^==> Deployed `)
 	failedRe := regexp.MustCompile(`^==> Deploy failed`)
 	skippedRe := regexp.MustCompile(`^==> Skipping `)
 	errorRe := regexp.MustCompile(`(?i)^Error: `)
 	return func(line string) {
 		line = strings.TrimSpace(line)
-		if match := deployingLineRe.FindStringSubmatch(line); match != nil {
-			app.startDeployTrackingFromTrace(selection, match[1], match[2], match[3])
-			return
-		}
 		switch {
 		case deployedRe.MatchString(line):
-			app.finishDeployTracking(selection, deployQueueStatusSucceeded, "")
+			app.finishActivityTracking(selection, activityQueueStatusSucceeded, "")
 		case skippedRe.MatchString(line):
-			app.finishDeployTracking(selection, deployQueueStatusSkipped, line)
+			app.finishActivityTracking(selection, activityQueueStatusSkipped, line)
 		case failedRe.MatchString(line):
-			app.finishDeployTracking(selection, deployQueueStatusFailed, line)
+			app.finishActivityTracking(selection, activityQueueStatusFailed, line)
 		case errorRe.MatchString(line):
-			// Surface the most recent error line as the failure reason if
-			// the deploy is still active. We don't transition state on
-			// error alone — ==> Deploy failed is the canonical terminal
-			// signal — but capturing the error message gives the frontend
-			// a useful hint.
-			app.captureDeployErrorIfRunning(selection, line)
+			app.captureActivityErrorIfRunning(selection, line)
 		}
 	}
 }
 
-// startDeployTrackingFromTrace registers a deploy in the queue based on a
-// trace line we observed in any tab's PTY. If an active entry already
-// exists for (tenant, environment) (e.g. because the desktop's Deploy
-// button already registered it), this is a no-op. Otherwise a new entry
-// is started with the parsed fields. The selection's KubernetesContext is
-// used when available so the pod-status poller has somewhere to query.
-func (a *App) startDeployTrackingFromTrace(selection uiSelection, tenant, environment, version string) {
-	if a.deployQueue == nil {
+func (a *App) captureActivityErrorIfRunning(selection uiSelection, line string) {
+	if a.activityQueue == nil {
 		return
 	}
-	tenant = strings.TrimSpace(tenant)
-	environment = strings.TrimSpace(environment)
-	version = strings.TrimSpace(version)
-	if tenant == "" || environment == "" {
-		return
-	}
-	if _, ok := a.deployQueue.findActive(tenant, environment); ok {
-		return
-	}
-	entry, fresh := a.deployQueue.start(deployQueueEntry{
-		Tenant:            tenant,
-		Environment:       environment,
-		Version:           version,
-		Release:           releaseNameForTenant(tenant),
-		Namespace:         namespaceForTenantEnv(tenant, environment),
-		KubernetesContext: strings.TrimSpace(selection.KubernetesContext),
-	})
-	if !fresh {
-		return
-	}
-	a.lockTerminalsForDeploy(entry)
-	if a.deployStatusPoller != nil {
-		a.deployStatusPoller(entry)
-	}
-}
-
-func (a *App) captureDeployErrorIfRunning(selection uiSelection, line string) {
-	if a.deployQueue == nil {
-		return
-	}
-	entry, ok := a.deployQueue.findActive(strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
+	entry, ok := a.activityQueue.findActive(strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
 	if !ok {
 		return
 	}
@@ -400,28 +314,28 @@ func (a *App) captureDeployErrorIfRunning(selection uiSelection, line string) {
 	// update-fields method to avoid widening the API. Use a no-op
 	// container slice patch with the existing slice so the persisted entry
 	// captures the new error.
-	a.deployQueue.updateContainers(entry.ID, entry.Containers)
+	a.activityQueue.updateContainers(entry.ID, entry.Containers)
 }
 
-// pollDeployContainerStatuses runs an ad-hoc kubectl poll loop while the
+// pollActivityContainerStatuses runs an ad-hoc kubectl poll loop while the
 // supplied deploy entry is active. Each tick parses pod JSON for the helm
 // release's pods and pushes a snapshot into the queue. The loop exits when
 // the entry is no longer active in the store or ctx is cancelled.
-func (a *App) pollDeployContainerStatuses(ctx context.Context, entry deployQueueEntry) {
-	if a.deployQueue == nil {
+func (a *App) pollActivityContainerStatuses(ctx context.Context, entry activityQueueEntry) {
+	if a.activityQueue == nil {
 		return
 	}
-	ticker := time.NewTicker(deployQueuePollInterval)
+	ticker := time.NewTicker(activityQueuePollInterval)
 	defer ticker.Stop()
 	pollOnce := func() bool {
-		if _, ok := a.deployQueue.findActive(entry.Tenant, entry.Environment); !ok {
+		if _, ok := a.activityQueue.findActive(entry.Tenant, entry.Environment); !ok {
 			return false
 		}
-		statuses, err := a.fetchDeployContainerStatuses(ctx, entry)
+		statuses, err := a.fetchActivityContainerStatuses(ctx, entry)
 		if err != nil {
 			return true
 		}
-		a.deployQueue.updateContainers(entry.ID, statuses)
+		a.activityQueue.updateContainers(entry.ID, statuses)
 		return true
 	}
 	if !pollOnce() {
@@ -439,12 +353,12 @@ func (a *App) pollDeployContainerStatuses(ctx context.Context, entry deployQueue
 	}
 }
 
-// fetchDeployContainerStatuses runs `kubectl get pods -l app=<release> -o json`
+// fetchActivityContainerStatuses runs `kubectl get pods -l app=<release> -o json`
 // and parses the result into the queue's container shape. Errors are
 // returned to the caller so transient kubectl outages don't blank the
 // previous snapshot — the frontend keeps showing the last-known state until
 // the next successful poll.
-func (a *App) fetchDeployContainerStatuses(ctx context.Context, entry deployQueueEntry) ([]deployQueueContainerStatus, error) {
+func (a *App) fetchActivityContainerStatuses(ctx context.Context, entry activityQueueEntry) ([]activityQueueContainerStatus, error) {
 	args := []string{"get", "pods", "-l", "app=" + entry.Release, "-o", "json"}
 	if strings.TrimSpace(entry.KubernetesContext) != "" {
 		args = append([]string{"--context", entry.KubernetesContext}, args...)
@@ -457,10 +371,10 @@ func (a *App) fetchDeployContainerStatuses(ctx context.Context, entry deployQueu
 	if err != nil {
 		return nil, err
 	}
-	return parseDeployContainerStatuses(out)
+	return parseActivityContainerStatuses(out)
 }
 
-func parseDeployContainerStatuses(raw []byte) ([]deployQueueContainerStatus, error) {
+func parseActivityContainerStatuses(raw []byte) ([]activityQueueContainerStatus, error) {
 	var parsed struct {
 		Items []struct {
 			Spec struct {
@@ -496,7 +410,7 @@ func parseDeployContainerStatuses(raw []byte) ([]deployQueueContainerStatus, err
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil, err
 	}
-	out := make([]deployQueueContainerStatus, 0)
+	out := make([]activityQueueContainerStatus, 0)
 	seen := make(map[string]bool)
 	for _, item := range parsed.Items {
 		// Spec containers give us images even when Status hasn't reported
@@ -515,7 +429,7 @@ func parseDeployContainerStatuses(raw []byte) ([]deployQueueContainerStatus, err
 			if image == "" {
 				image = imageByName[cs.Name]
 			}
-			status := deployQueueContainerStatus{
+			status := activityQueueContainerStatus{
 				Name:     cs.Name,
 				Image:    image,
 				Ready:    cs.Ready,
@@ -544,9 +458,9 @@ func parseDeployContainerStatuses(raw []byte) ([]deployQueueContainerStatus, err
 	return out, nil
 }
 
-// deployTargetForRuntime returns the human-readable "tenant/env [version]"
+// activityTargetForRuntime returns the human-readable "tenant/env [version]"
 // string used in info lines and lock-overlay messages.
-func deployTargetForRuntime(entry deployQueueEntry) string {
+func activityTargetForRuntime(entry activityQueueEntry) string {
 	target := strings.TrimSpace(entry.Tenant) + "/" + strings.TrimSpace(entry.Environment)
 	if version := strings.TrimSpace(entry.Version); version != "" {
 		target += " " + version
@@ -554,15 +468,15 @@ func deployTargetForRuntime(entry deployQueueEntry) string {
 	return target
 }
 
-// feedDeployTraceFromTerminal accumulates PTY output for any tab that hosts
+// feedActivityTraceFromTerminal accumulates PTY output for any tab that hosts
 // a running erun process (Local from the Deploy button, ERun from a manual
 // `erun deploy`, AI from claude calling deploy inside the pod), splits on
 // newlines, and dispatches each complete line through the deploy trace
 // handler. The trace handler is the source-of-truth for deploy lifecycle:
 // it auto-registers an entry on `==> Deploying` and finishes it on
 // Deployed/failed/Skipping. Selections without a tenant/env are ignored.
-func (a *App) feedDeployTraceFromTerminal(managed *managedTerminal, chunk []byte) {
-	if managed == nil || a.deployQueue == nil {
+func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []byte) {
+	if managed == nil || a.activityQueue == nil {
 		return
 	}
 	if managed.selection.Tenant == "" || managed.selection.Environment == "" {
@@ -574,35 +488,35 @@ func (a *App) feedDeployTraceFromTerminal(managed *managedTerminal, chunk []byte
 		return
 	}
 	a.mu.Lock()
-	managed.deployTraceBuffer += stripDeployTraceANSI(string(chunk))
+	managed.activityTraceBuffer += stripActivityTraceANSI(string(chunk))
 	lines := []string{}
 	for {
-		idx := strings.IndexByte(managed.deployTraceBuffer, '\n')
+		idx := strings.IndexByte(managed.activityTraceBuffer, '\n')
 		if idx < 0 {
 			break
 		}
-		line := managed.deployTraceBuffer[:idx]
+		line := managed.activityTraceBuffer[:idx]
 		if r := strings.IndexByte(line, '\r'); r >= 0 {
 			line = line[r+1:]
 		}
 		lines = append(lines, line)
-		managed.deployTraceBuffer = managed.deployTraceBuffer[idx+1:]
+		managed.activityTraceBuffer = managed.activityTraceBuffer[idx+1:]
 	}
 	a.mu.Unlock()
 	if len(lines) == 0 {
 		return
 	}
-	handler := newDeployTraceLineHandler(a, managed.selection)
+	handler := newActivityTraceLineHandler(a, managed.selection)
 	for _, line := range lines {
 		handler(line)
 	}
 }
 
-// stripDeployTraceANSI removes the most common ANSI control sequences erun
+// stripActivityTraceANSI removes the most common ANSI control sequences erun
 // emits via spinner/colors so trace-line matching survives terminal noise.
 // The patterns are intentionally narrow (CSI-style escape sequences) to
 // avoid clobbering meaningful output.
-func stripDeployTraceANSI(s string) string {
+func stripActivityTraceANSI(s string) string {
 	if !strings.Contains(s, "\x1b") {
 		return s
 	}

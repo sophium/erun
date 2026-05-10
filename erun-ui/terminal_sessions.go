@@ -255,12 +255,10 @@ func (a *App) StartInitSession(selection uiSelection, cols, rows int) (startSess
 }
 
 func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
-	result, err := a.runErunCommandInLocal(selection, cols, rows, buildDeployArgs(selection))
-	if err != nil {
-		return result, err
-	}
-	a.startDeployTracking(normalizeSelection(selection), result.SessionID)
-	return result, nil
+	// The activity-marker watcher picks up the deploy as soon as the CLI
+	// writes its RunningCommand marker (within ~1.5s). The desktop button
+	// no longer maintains a parallel registration path.
+	return a.runErunCommandInLocal(selection, cols, rows, buildDeployArgs(selection))
 }
 
 func (a *App) StartSSHDInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
@@ -785,7 +783,7 @@ func (a *App) streamSession(managed *managedTerminal) {
 				Data:      base64.StdEncoding.EncodeToString(buffer[:count]),
 			}
 			a.emitEvent(terminalOutputEvent, payload)
-			a.feedDeployTraceFromTerminal(managed, buffer[:count])
+			a.feedActivityTraceFromTerminal(managed, buffer[:count])
 			if managed.clearIdleBlockOnOutput {
 				a.mu.Lock()
 				a.releaseIdleBlockLocked(managed)
@@ -995,8 +993,8 @@ type managedTerminal struct {
 	clearIdleBlockOnOutput bool
 	respawn                func() (terminalSession, error)
 	loggedCommands         map[string]struct{}
-	lockedByDeploy         string
-	deployTraceBuffer      string
+	lockedByActivity         string
+	activityTraceBuffer      string
 }
 
 type sessionKind string

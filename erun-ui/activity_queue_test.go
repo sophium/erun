@@ -6,14 +6,14 @@ import (
 	"time"
 )
 
-func newTestDeployQueueStore(t *testing.T) *deployQueueStore {
+func newTestActivityQueueStore(t *testing.T) *activityQueueStore {
 	t.Helper()
-	return newDeployQueueStore(nil, nil, func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) })
+	return newActivityQueueStore(nil, nil, func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) })
 }
 
 func TestDeployQueueStartTracksEntry(t *testing.T) {
-	store := newTestDeployQueueStore(t)
-	seed := deployQueueEntry{
+	store := newTestActivityQueueStore(t)
+	seed := activityQueueEntry{
 		Tenant:      "team",
 		Environment: "dev",
 		Version:     "1.0.0",
@@ -23,7 +23,7 @@ func TestDeployQueueStartTracksEntry(t *testing.T) {
 	if !fresh {
 		t.Fatalf("expected fresh entry, got join")
 	}
-	if entry.Status != deployQueueStatusRunning {
+	if entry.Status != activityQueueStatusRunning {
 		t.Fatalf("status = %q, want running", entry.Status)
 	}
 	if entry.ID == "" {
@@ -36,8 +36,8 @@ func TestDeployQueueStartTracksEntry(t *testing.T) {
 }
 
 func TestDeployQueueDuplicateStartsReturnExisting(t *testing.T) {
-	store := newTestDeployQueueStore(t)
-	seed := deployQueueEntry{Tenant: "team", Environment: "dev", Version: "1.0.0", Release: "team-devops"}
+	store := newTestActivityQueueStore(t)
+	seed := activityQueueEntry{Tenant: "team", Environment: "dev", Version: "1.0.0", Release: "team-devops"}
 	first, fresh := store.start(seed)
 	if !fresh {
 		t.Fatal("first call should be fresh")
@@ -52,11 +52,11 @@ func TestDeployQueueDuplicateStartsReturnExisting(t *testing.T) {
 }
 
 func TestDeployQueueFinishMovesToHistory(t *testing.T) {
-	store := newTestDeployQueueStore(t)
-	entry, _ := store.start(deployQueueEntry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
-	if final, ok := store.finish(entry.ID, deployQueueStatusSucceeded, ""); !ok {
+	store := newTestActivityQueueStore(t)
+	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
+	if final, ok := store.finish(entry.ID, activityQueueStatusSucceeded, ""); !ok {
 		t.Fatal("finish returned ok=false")
-	} else if final.Status != deployQueueStatusSucceeded {
+	} else if final.Status != activityQueueStatusSucceeded {
 		t.Fatalf("status = %q, want succeeded", final.Status)
 	}
 	if _, ok := store.findActive("t", "e"); ok {
@@ -72,20 +72,20 @@ func TestDeployQueueFinishMovesToHistory(t *testing.T) {
 }
 
 func TestDeployQueueFinishIsIdempotent(t *testing.T) {
-	store := newTestDeployQueueStore(t)
-	entry, _ := store.start(deployQueueEntry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
-	if _, ok := store.finish(entry.ID, deployQueueStatusFailed, "x"); !ok {
+	store := newTestActivityQueueStore(t)
+	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
+	if _, ok := store.finish(entry.ID, activityQueueStatusFailed, "x"); !ok {
 		t.Fatal("first finish failed")
 	}
-	if _, ok := store.finish(entry.ID, deployQueueStatusSucceeded, ""); ok {
+	if _, ok := store.finish(entry.ID, activityQueueStatusSucceeded, ""); ok {
 		t.Fatal("second finish should be a no-op (return false)")
 	}
 }
 
 func TestDeployQueueDismissRemovesFromHistory(t *testing.T) {
-	store := newTestDeployQueueStore(t)
-	entry, _ := store.start(deployQueueEntry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
-	if _, ok := store.finish(entry.ID, deployQueueStatusSucceeded, ""); !ok {
+	store := newTestActivityQueueStore(t)
+	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
+	if _, ok := store.finish(entry.ID, activityQueueStatusSucceeded, ""); !ok {
 		t.Fatal("finish failed")
 	}
 	if !store.dismiss(entry.ID) {
@@ -97,22 +97,22 @@ func TestDeployQueueDismissRemovesFromHistory(t *testing.T) {
 }
 
 func TestDeployQueueDismissDoesNotRemoveActive(t *testing.T) {
-	store := newTestDeployQueueStore(t)
-	entry, _ := store.start(deployQueueEntry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
+	store := newTestActivityQueueStore(t)
+	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
 	if store.dismiss(entry.ID) {
 		t.Fatal("dismiss should refuse active entry")
 	}
 }
 
 func TestDeployQueueLoadReconcilesStaleRunning(t *testing.T) {
-	store := newDeployQueueStore(nil, nil, func() time.Time { return time.Date(2026, 5, 10, 13, 0, 0, 0, time.UTC) })
+	store := newActivityQueueStore(nil, nil, func() time.Time { return time.Date(2026, 5, 10, 13, 0, 0, 0, time.UTC) })
 	stale := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
-	store.load([]*deployQueueEntry{{
+	store.load([]*activityQueueEntry{{
 		ID:          "stale",
 		Tenant:      "t",
 		Environment: "e",
 		Version:     "1",
-		Status:      deployQueueStatusRunning,
+		Status:      activityQueueStatusRunning,
 		StartedAt:   stale,
 		LastUpdated: stale,
 	}})
@@ -120,7 +120,7 @@ func TestDeployQueueLoadReconcilesStaleRunning(t *testing.T) {
 	if len(all) != 1 {
 		t.Fatalf("list len = %d, want 1", len(all))
 	}
-	if all[0].Status != deployQueueStatusFailed {
+	if all[0].Status != activityQueueStatusFailed {
 		t.Fatalf("stale running status = %q, want failed", all[0].Status)
 	}
 	if all[0].Error == "" {
@@ -131,20 +131,20 @@ func TestDeployQueueLoadReconcilesStaleRunning(t *testing.T) {
 func TestDeployQueuePersistenceRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "deploy_queue.json")
-	store := newDeployQueueStore(
-		func(entries []*deployQueueEntry) error {
-			return writeDeployQueueStateAtomic(path, entries)
+	store := newActivityQueueStore(
+		func(entries []*activityQueueEntry) error {
+			return writeActivityQueueStateAtomic(path, entries)
 		},
 		nil,
 		func() time.Time { return time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC) },
 	)
-	entry, _ := store.start(deployQueueEntry{Tenant: "team", Environment: "dev", Version: "1.0.0", Release: "team-devops"})
-	store.updateContainers(entry.ID, []deployQueueContainerStatus{{Name: "erun-devops", Image: "img:1", Ready: true, Phase: "Running"}})
-	if _, ok := store.finish(entry.ID, deployQueueStatusSucceeded, ""); !ok {
+	entry, _ := store.start(activityQueueEntry{Tenant: "team", Environment: "dev", Version: "1.0.0", Release: "team-devops"})
+	store.updateContainers(entry.ID, []activityQueueContainerStatus{{Name: "erun-devops", Image: "img:1", Ready: true, Phase: "Running"}})
+	if _, ok := store.finish(entry.ID, activityQueueStatusSucceeded, ""); !ok {
 		t.Fatal("finish failed")
 	}
 
-	loaded, err := loadDeployQueueStateFromDisk(path)
+	loaded, err := loadActivityQueueStateFromDisk(path)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestDeployQueuePersistenceRoundTrip(t *testing.T) {
 	if loaded[0].ID != entry.ID {
 		t.Fatalf("ID drift across persistence: in=%s out=%s", entry.ID, loaded[0].ID)
 	}
-	if loaded[0].Status != deployQueueStatusSucceeded {
+	if loaded[0].Status != activityQueueStatusSucceeded {
 		t.Fatalf("status = %q, want succeeded", loaded[0].Status)
 	}
 	if len(loaded[0].Containers) != 1 || loaded[0].Containers[0].Name != "erun-devops" {
@@ -183,7 +183,7 @@ func TestParseDeployContainerStatusesExtractsRunningWaitingTerminated(t *testing
     }
   ]
 }`)
-	statuses, err := parseDeployContainerStatuses(raw)
+	statuses, err := parseActivityContainerStatuses(raw)
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -199,10 +199,10 @@ func TestParseDeployContainerStatusesExtractsRunningWaitingTerminated(t *testing
 }
 
 func TestStripDeployTraceANSI(t *testing.T) {
-	if got := stripDeployTraceANSI("\x1b[31m==> Deployed team/dev\x1b[0m"); got != "==> Deployed team/dev" {
+	if got := stripActivityTraceANSI("\x1b[31m==> Deployed team/dev\x1b[0m"); got != "==> Deployed team/dev" {
 		t.Fatalf("unexpected: %q", got)
 	}
-	if got := stripDeployTraceANSI("plain text"); got != "plain text" {
+	if got := stripActivityTraceANSI("plain text"); got != "plain text" {
 		t.Fatalf("unexpected: %q", got)
 	}
 }
