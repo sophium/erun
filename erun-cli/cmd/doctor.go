@@ -275,10 +275,16 @@ func runDoctorInRuntime(ctx common.Context, promptRunner PromptRunner, options d
 		}
 		return doctorRemoteRepositoryURLPrompt(promptRunner, label)
 	}
+	confirm := func(label string) (bool, error) {
+		if promptRunner == nil {
+			return false, errors.New("interactive prompt is unavailable; import the SSH public key, then re-run `erun doctor --finish-remote-init`")
+		}
+		return confirmPrompt(promptRunner, label)
+	}
 	updated, err := common.RunRemoteInitFinish(ctx, inspection, common.RemoteInitFinishParams{
 		HomeDir:       homeDir,
 		RepositoryURL: options.remoteRepositoryURL,
-	}, prompt)
+	}, prompt, confirm)
 	if err != nil {
 		return err
 	}

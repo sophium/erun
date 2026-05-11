@@ -193,11 +193,16 @@ type RemoteInitFinishParams struct {
 // implements this with a promptui prompt; tests pass a stub.
 type RemoteInitFinishPrompt func(label string) (string, error)
 
+// RemoteInitFinishConfirm asks the caller a yes/no question. doctor
+// uses it to pause after generating an SSH key so the user can import
+// the public key on their git host before doctor attempts the clone.
+type RemoteInitFinishConfirm func(label string) (bool, error)
+
 // RunRemoteInitFinish executes whichever recovery steps the inspection
 // flagged as missing. In dry-run mode it traces the steps it would run
 // without performing them. Returns the updated inspection so callers
 // can render a final report.
-func RunRemoteInitFinish(ctx Context, inspection RemoteInitInspection, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt) (RemoteInitInspection, error) {
+func RunRemoteInitFinish(ctx Context, inspection RemoteInitInspection, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt, confirm RemoteInitFinishConfirm) (RemoteInitInspection, error) {
 	if inspection.HomeDir == "" {
 		return inspection, errors.New("home directory is required to finish remote init")
 	}
@@ -232,6 +237,8 @@ func RunRemoteInitFinish(ctx Context, inspection RemoteInitInspection, params Re
 		}
 	}
 
+	sshKeyPath := ""
+	sshKeyJustGenerated := false
 	for _, item := range missing {
 		switch item.Label {
 		case "project root":
@@ -242,8 +249,16 @@ func RunRemoteInitFinish(ctx Context, inspection RemoteInitInspection, params Re
 			if err := finishRemoteInitSSHKey(ctx, item.Path); err != nil {
 				return inspection, err
 			}
+			sshKeyPath = item.Path
+			sshKeyJustGenerated = true
 		case "git checkout":
-			if err := finishRemoteInitGitCheckout(ctx, inspection.ProjectRoot, repositoryURL); err != nil {
+			if sshKeyPath == "" {
+				sshKeyPath = defaultRemoteInitSSHKeyPath(inspection.HomeDir)
+			}
+			if err := finishRemoteInitGitAccess(ctx, sshKeyPath, repositoryURL, sshKeyJustGenerated, confirm); err != nil {
+				return inspection, err
+			}
+			if err := finishRemoteInitGitCheckout(ctx, inspection.ProjectRoot, sshKeyPath, repositoryURL); err != nil {
 				return inspection, err
 			}
 		}
@@ -319,7 +334,7 @@ func finishRemoteInitSSHKey(ctx Context, path string) error {
 	return capture.Apply(cmd.Run())
 }
 
-func finishRemoteInitGitCheckout(ctx Context, projectRoot, repositoryURL string) error {
+func finishRemoteInitGitCheckout(ctx Context, projectRoot, sshKeyPath, repositoryURL string) error {
 	if repositoryURL == "" {
 		return errors.New("repository URL is required to finish git checkout")
 	}
@@ -331,11 +346,81 @@ func finishRemoteInitGitCheckout(ctx Context, projectRoot, repositoryURL string)
 		return nil
 	}
 	capture := ctx.ToolCapture()
-	cmd := Command("git", "clone", repositoryURL, ".")
+	cmd := Command("git", "-c", "core.sshCommand="+doctorRemoteInitGitSSHCommand(sshKeyPath), "clone", repositoryURL, ".")
 	cmd.Dir = projectRoot
 	cmd.Stdout = capture.Stdout()
 	cmd.Stderr = capture.Stderr()
 	return capture.Apply(cmd.Run())
+}
+
+// finishRemoteInitGitAccess displays the SSH public key when it was
+// just generated, optionally pauses for the user to import it, and
+// verifies access via `git ls-remote` before doctor attempts the
+// clone. Doing the verify here keeps the clone failure path narrow:
+// any "Permission denied (publickey)" the user might otherwise see is
+// turned into a clear, actionable message that names the key file and
+// the URL.
+func finishRemoteInitGitAccess(ctx Context, sshKeyPath, repositoryURL string, justGenerated bool, confirm RemoteInitFinishConfirm) error {
+	if ctx.DryRun {
+		ctx.TraceCommand("", "git", "-c", "core.sshCommand="+doctorRemoteInitGitSSHCommand(sshKeyPath), "ls-remote", repositoryURL, "HEAD")
+		return nil
+	}
+	if justGenerated {
+		publicKey, err := readRemoteInitPublicKey(sshKeyPath)
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(ctx.Stdout, "Generated SSH keypair. Add the following public key to the git host that owns "+repositoryURL+" before continuing:"); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(ctx.Stdout, publicKey); err != nil {
+			return err
+		}
+		if confirm == nil {
+			return fmt.Errorf("import the SSH public key shown above on the git host, then re-run `erun doctor --finish-remote-init`")
+		}
+		ok, err := confirm("SSH public key imported on the git host")
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("import the SSH public key shown above on the git host, then re-run `erun doctor --finish-remote-init`")
+		}
+	}
+	ctx.TraceCommand("", "git", "-c", "core.sshCommand="+doctorRemoteInitGitSSHCommand(sshKeyPath), "ls-remote", repositoryURL, "HEAD")
+	capture := ctx.ToolCapture()
+	cmd := Command("git", "-c", "core.sshCommand="+doctorRemoteInitGitSSHCommand(sshKeyPath), "ls-remote", repositoryURL, "HEAD")
+	cmd.Stdout = capture.Stdout()
+	cmd.Stderr = capture.Stderr()
+	if err := capture.Apply(cmd.Run()); err != nil {
+		publicKey, readErr := readRemoteInitPublicKey(sshKeyPath)
+		if readErr == nil {
+			return fmt.Errorf("git access to %s is not active yet. Confirm the following SSH public key is imported on the git host, then re-run `erun doctor --finish-remote-init`:\n%s\n%w", repositoryURL, publicKey, err)
+		}
+		return fmt.Errorf("git access to %s is not active yet (verified with %s). Import the corresponding public key on the git host, then re-run `erun doctor --finish-remote-init`: %w", repositoryURL, sshKeyPath, err)
+	}
+	return nil
+}
+
+func readRemoteInitPublicKey(sshKeyPath string) (string, error) {
+	data, err := os.ReadFile(sshKeyPath + ".pub")
+	if err != nil {
+		return "", fmt.Errorf("read SSH public key %s.pub: %w", sshKeyPath, err)
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+func defaultRemoteInitSSHKeyPath(homeDir string) string {
+	return filepath.Join(homeDir, ".ssh", "id_ed25519")
+}
+
+// doctorRemoteInitGitSSHCommand renders the ssh command git invokes via
+// core.sshCommand / GIT_SSH_COMMAND. Pinning the identity stops ssh
+// from falling back to whatever other private keys happen to exist in
+// the user's ~/.ssh, and accept-new lets the first connection to the
+// git host succeed without prompting the user to confirm a fingerprint.
+func doctorRemoteInitGitSSHCommand(sshKeyPath string) string {
+	return "ssh -i " + shellQuote(sshKeyPath) + " -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new"
 }
 
 // WriteRemoteInitInspectionReport renders the inspection to w in the
