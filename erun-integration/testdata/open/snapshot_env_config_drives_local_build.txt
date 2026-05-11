@@ -9,17 +9,19 @@ fingerprint image not found locally: ghcr.io/sophium/team-devops:fp-<HEX16>-amd6
 docker image inspect ghcr.io/sophium/team-devops:fp-<HEX16>-arm64
 fingerprint image not found locally: ghcr.io/sophium/team-devops:fp-<HEX16>-arm64
 rebuilding ghcr.io/sophium/team-devops:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
-cd <TMP> && docker build --platform linux/amd64 --provenance=false -t ghcr.io/sophium/team-devops:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/team-devops:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker tag ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:fp-<HEX16>-amd64
-cd <TMP> && docker build --platform linux/arm64 --provenance=false -t ghcr.io/sophium/team-devops:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:<VERSION>
+cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/team-devops:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker tag ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:fp-<HEX16>-arm64
+cd <TMP> && docker tag ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:<VERSION>
 cd <TMP> && docker push ghcr.io/sophium/team-devops:<VERSION>
 cd <TMP> && docker push ghcr.io/sophium/team-devops:<VERSION>
 cd <TMP> && docker manifest create --amend ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:<VERSION>
 cd <TMP> && docker manifest push ghcr.io/sophium/team-devops:<VERSION>
 kubectl --context test-context get namespace team-local -o name
 kubectl --context test-context create namespace team-local
-cd <TMP> && helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace team-local --kube-context test-context -f <TMP> --set-string tenant=team --set-string environment=local --set-string worktreeStorage=host --set-string worktreeRepoName=cwd --set-string worktreeHostPath=<TMP> --set sshdEnabled=false --set mcpPort=17000 --set apiPort=17033 --set sshPort=17022 --set managedCloud=false --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias= --set-string cloudContext.region= --set-string cloudContext.instanceId= --set-string api.oidcAllowedIssuers= --set api.postgres.reset=true --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=8916Mi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 team-devops <TMP>
+cd <TMP> && helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace team-local --debug --kube-context test-context -f <TMP> --set-string tenant=team --set-string environment=local --set-string worktreeStorage=host --set-string worktreeRepoName=cwd --set-string worktreeHostPath=<TMP> --set sshdEnabled=false --set mcpPort=17000 --set apiPort=17033 --set sshPort=17022 --set managedCloud=false --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias= --set-string cloudContext.region= --set-string cloudContext.instanceId= --set-string api.oidcAllowedIssuers= --set api.postgres.reset=true --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=8916Mi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 team-devops <TMP>
 deploy: watching pods in team-local on context test-context for early container failure (release team-devops)
 kubectl --context test-context --namespace team-local get pods -o json
 dedup: ready (release=test-context-team-local-team-devops, hash=<HASH>)

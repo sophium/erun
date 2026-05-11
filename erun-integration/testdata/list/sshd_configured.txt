@@ -50,3 +50,4 @@ Tenants:
           ssh-public-key-path: <TMP>
           ssh-workspace-sync: off
           ssh-workspace-sync-local-path: none
+audit: erun list

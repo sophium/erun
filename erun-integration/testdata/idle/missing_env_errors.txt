@@ -1,1 +1,2 @@
+audit: erun idle missing missing
 not initialized

@@ -183,15 +183,17 @@ func TestVersion(t *testing.T) {
 	})
 
 	t.Run("verbose_flag_prints_audit", func(t *testing.T) {
-		// Exercises feedback_render.go auditCommand: with -v but without
-		// --dry-run, the audit line must appear on stderr.
+		// Exercises feedback_render.go auditCommand: at -vv (trace verbosity)
+		// without --dry-run, the audit trace line must appear on stderr.
+		// At -v (debug verbosity) the audit line is suppressed because trace
+		// output gates on >= VerbosityTrace.
 		setup := env.New(t)
-		result := erun.Run(t, []string{"version", "--no-registry", "-v"}, erun.RunOptions{
+		result := erun.Run(t, []string{"version", "--no-registry", "-vv"}, erun.RunOptions{
 			Cwd: setup.Cwd,
 			Env: setup.Env(),
 		})
 		if result.ExitCode != 0 {
-			t.Fatalf("erun version -v exited %d:\n%s", result.ExitCode, result.Combined)
+			t.Fatalf("erun version -vv exited %d:\n%s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "version/verbose_flag_prints_audit", normalize.Apply(result.Combined))
 	})

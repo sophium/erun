@@ -45,8 +45,8 @@ func newRootCommand(runRoot func(*cobra.Command, []string) error) *cobra.Command
 	cmd := &cobra.Command{
 		Use:              "erun",
 		Short:            "Environment Runner",
-		Long:             "erun helps to run and manage multiple tenants/environments.\n\nVerbosity levels:\n  -v    print trace logs for command flow and side effects\n\nDry-run:\n  --dry-run runs the same resolution flow but skips mutating operations\n\nTiming:\n  --time prints the elapsed runtime after the command finishes",
-		Example:          "  erun deploy --dry-run\n  erun -v deploy --dry-run\n  erun -vv init -y\n  alias tenant-environment='eval \"$(erun open tenant environment --no-shell)\"'",
+		Long:             "erun helps to run and manage multiple tenants/environments.\n\nVerbosity levels:\n  (none) info: only erun status output; external tool output is suppressed\n  -v     debug: stream external tool output with high verbosity (helm --debug, kubectl --v=4, docker --progress=plain)\n  -vv    trace: debug output plus erun command-trace lines for every action and decision\n\nDry-run:\n  --dry-run runs the same resolution flow but skips mutating operations and implies trace verbosity.\n\nTiming:\n  --time prints the elapsed runtime after the command finishes",
+		Example:          "  erun deploy --dry-run\n  erun -v deploy\n  erun -vv init -y\n  alias tenant-environment='eval \"$(erun open tenant environment --no-shell)\"'",
 		Args:             cobra.MaximumNArgs(2),
 		SilenceUsage:     true,
 		SilenceErrors:    true,

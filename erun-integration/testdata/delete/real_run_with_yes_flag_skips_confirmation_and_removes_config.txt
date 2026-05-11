@@ -1,1 +1,2 @@
 deleted environment: team/dev
+audit: erun delete --yes team dev

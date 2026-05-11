@@ -172,12 +172,19 @@ func firstNonEmpty(values ...string) string {
 }
 
 func runtimeCallContext(preview bool, verbosity int, stdin io.Reader, stdout, stderr io.Writer) eruncommon.Context {
+	if preview && verbosity < eruncommon.VerbosityTrace {
+		verbosity = eruncommon.VerbosityTrace
+	}
+	if verbosity > eruncommon.VerbosityTrace {
+		verbosity = eruncommon.VerbosityTrace
+	}
 	return eruncommon.Context{
-		Logger: eruncommon.NewLoggerWithWriters(eruncommon.TraceLoggerVerbosity(verbosity), stderr, stderr),
-		DryRun: preview,
-		Stdin:  stdin,
-		Stdout: stdout,
-		Stderr: stderr,
+		Logger:    eruncommon.NewLoggerWithWriters(verbosity, stderr, stderr),
+		Verbosity: verbosity,
+		DryRun:    preview,
+		Stdin:     stdin,
+		Stdout:    stdout,
+		Stderr:    stderr,
 	}
 }
 

@@ -19,4 +19,4 @@ Flags:
 
 Global Flags:
       --time            Print the elapsed runtime after the command finishes.
-  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

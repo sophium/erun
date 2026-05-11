@@ -76,3 +76,4 @@ Tenants:
           claude: none
           idle: none
           sshd: off
+audit: erun list

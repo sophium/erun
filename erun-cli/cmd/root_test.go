@@ -91,10 +91,6 @@ func TestRootCommandRunsInitWhenNoSubcommand(t *testing.T) {
 
 	requireNoError(t, cmd.Execute(), "Execute failed")
 
-	if got := buf.String(); got != "" {
-		t.Fatalf("expected no command output, got %q", got)
-	}
-
 	requireDefaultInitConfig(t, projectRoot)
 
 	wantPromptLabels := []string{

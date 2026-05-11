@@ -6,4 +6,3 @@ index 83c831f..d597f6c 100644
 -# test
 +rewritten
 audit: erun exec diff
-cd <TMP> && git diff --no-color --no-ext-diff

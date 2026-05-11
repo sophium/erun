@@ -8,7 +8,15 @@ import (
 )
 
 const (
+	VerbosityInfo  = 0
+	VerbosityDebug = 1
+	VerbosityTrace = 2
+)
+
+const (
 	colorReset = "\033[0m"
+	colorInfo  = "\033[1;34m"
+	colorDebug = "\033[1;34m"
 	colorTrace = "\033[36m"
 	colorError = "\033[31m"
 )
@@ -20,40 +28,55 @@ type Logger struct {
 }
 
 func NewLogger(verbosity int) Logger {
-	return Logger{verbosity: verbosity}
+	return Logger{verbosity: clampVerbosity(verbosity)}
 }
 
 func NewLoggerWithWriters(verbosity int, stdout, stderr io.Writer) Logger {
 	return Logger{
-		verbosity: verbosity,
+		verbosity: clampVerbosity(verbosity),
 		stdout:    stdout,
 		stderr:    stderr,
 	}
 }
 
-func TraceLoggerVerbosity(verbosity int) int {
-	if verbosity <= 0 {
-		return 0
+func (l Logger) Verbosity() int { return l.verbosity }
+
+func clampVerbosity(verbosity int) int {
+	if verbosity < 0 {
+		return verbosity
 	}
-	return verbosity + 1
+	if verbosity > VerbosityTrace {
+		return VerbosityTrace
+	}
+	return verbosity
 }
 
 func (l Logger) Info(message string) {
-	if l.verbosity >= 0 {
-		_, _ = fmt.Fprintln(l.stdoutWriter(), message)
+	if l.verbosity < VerbosityInfo {
+		return
 	}
+	out := l.stdoutWriter()
+	if l.verbosity >= VerbosityDebug {
+		_, _ = fmt.Fprintln(out, maybeColorize(out, message, colorInfo))
+		return
+	}
+	_, _ = fmt.Fprintln(out, message)
 }
 
 func (l Logger) Debug(message string) {
-	if l.verbosity >= 1 {
-		_, _ = fmt.Fprintln(l.stdoutWriter(), message)
+	if l.verbosity < VerbosityDebug {
+		return
 	}
+	out := l.stdoutWriter()
+	_, _ = fmt.Fprintln(out, maybeColorize(out, message, colorDebug))
 }
 
 func (l Logger) Trace(message string) {
-	if l.verbosity >= 2 {
-		_, _ = fmt.Fprintln(l.stdoutWriter(), maybeColorize(l.stdoutWriter(), message, colorTrace))
+	if l.verbosity < VerbosityTrace {
+		return
 	}
+	out := l.stdoutWriter()
+	_, _ = fmt.Fprintln(out, maybeColorize(out, message, colorTrace))
 }
 
 func (l Logger) Error(message string) {

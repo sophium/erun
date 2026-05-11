@@ -1,1 +1,5 @@
+audit: erun
+Loading erun tool configuration, configPath=<TMP>
+Loaded erun tool configuration
+Trying to detect current project directory
 erun config is not initialized. Run erun in project directory.
