@@ -25,7 +25,7 @@ type (
 	BuildContextResolverFunc func() (DockerBuildContext, error)
 	NowFunc                  func() time.Time
 	DockerImageBuilderFunc   func(DockerBuildSpec, io.Writer, io.Writer) error
-	DockerImagePusherFunc    func(string, io.Writer, io.Writer) error
+	DockerImagePusherFunc    func(string, int, io.Writer, io.Writer) error
 	DockerImageInspectorFunc func(string) (bool, error)
 	DockerRegistryLoginFunc  func(string, io.Reader, io.Writer, io.Writer) error
 	BuildScriptRunnerFunc    func(string, string, []string, io.Reader, io.Writer, io.Writer) error
@@ -66,6 +66,7 @@ type DockerBuildSpec struct {
 	Image          DockerImageReference
 	Platforms      []string
 	Push           bool
+	Verbosity      int
 	// Fingerprint is a content hash over the Dockerfile and every COPY source
 	// resolved against ContextDir, honoring .dockerignore. Set during incremental
 	// resolution. After a successful build, the image is locally tagged with
@@ -93,8 +94,9 @@ type DockerBuildSpec struct {
 }
 
 type DockerPushSpec struct {
-	Dir   string
-	Image DockerImageReference
+	Dir       string
+	Image     DockerImageReference
+	Verbosity int
 }
 
 type scriptSpec struct {

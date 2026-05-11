@@ -1,1 +1,2 @@
+audit: erun activity stop-ready --environment dev --tenant team
 environment is not stop eligible: environment is not cloud-managed

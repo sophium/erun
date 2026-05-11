@@ -9,6 +9,7 @@ func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBu
 	if build == nil {
 		build = DockerImageBuilder
 	}
+	buildInput.Verbosity = ctx.Verbosity
 	traceIncrementalDecision(ctx, buildInput)
 	for _, command := range buildInput.traceCommands() {
 		ctx.TraceCommand(command.Dir, command.Name, command.Args...)
@@ -229,12 +230,13 @@ func RunDockerPush(ctx Context, pushInput DockerPushSpec, push DockerImagePusher
 	if push == nil {
 		push = DockerImagePusher
 	}
+	pushInput.Verbosity = ctx.Verbosity
 	command := pushInput.command()
 	ctx.TraceCommand(command.Dir, command.Name, command.Args...)
 	if ctx.DryRun {
 		return nil
 	}
-	return push(pushInput.Image.Tag, ctx.Stdout, ctx.Stderr)
+	return push(pushInput.Image.Tag, ctx.Verbosity, ctx.Stdout, ctx.Stderr)
 }
 
 func RunDockerPushSpec(ctx Context, pushInput DockerPushSpec, buildInput *DockerBuildSpec, build DockerImageBuilderFunc, push DockerPushFunc) error {

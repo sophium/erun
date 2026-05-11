@@ -1,2 +1,3 @@
 erun dev
+audit: erun version --no-registry --time
 elapsed: <ELAPSED>

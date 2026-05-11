@@ -1,5 +1,4 @@
 audit: erun push
-cd <TMP> && docker push ghcr.io/sophium/api:<VERSION>
 denied: denied: create_package permission_denied
 
 ghcr.io rejected the push: only the namespace owner can create new packages under ghcr.io/sophium/.

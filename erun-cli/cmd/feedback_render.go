@@ -13,7 +13,7 @@ import (
 const (
 	dryRunFlagUsage  = "Resolve and trace mutating actions without executing them."
 	timeFlagUsage    = "Print the elapsed runtime after the command finishes."
-	verboseFlagUsage = "Increase trace verbosity. -v logs command flow and side effects."
+	verboseFlagUsage = "Increase verbosity: -v streams external tool output, -vv adds erun command traces."
 
 	timingWrappedAnnotation = "erun.dev/timing-wrapped"
 )
@@ -39,25 +39,29 @@ func shouldPrintElapsedTime(cmd *cobra.Command) bool {
 func commandVerbosity(cmd *cobra.Command) int {
 	verbosity, err := cmd.Flags().GetCount("verbose")
 	if err != nil {
-		return 0
+		verbosity = 0
 	}
-	if verbosity == 0 && isExecCommand(cmd) {
-		return 1
+	if isExecCommand(cmd) && verbosity < common.VerbosityDebug {
+		verbosity = common.VerbosityDebug
+	}
+	if isDryRunCommand(cmd) && verbosity < common.VerbosityTrace {
+		verbosity = common.VerbosityTrace
+	}
+	if verbosity > common.VerbosityTrace {
+		verbosity = common.VerbosityTrace
 	}
 	return verbosity
 }
 
 func commandContext(cmd *cobra.Command) common.Context {
-	loggerVerbosity := common.TraceLoggerVerbosity(commandVerbosity(cmd))
-	if isDryRunCommand(cmd) && loggerVerbosity < 2 {
-		loggerVerbosity = 2
-	}
+	verbosity := commandVerbosity(cmd)
 	return common.Context{
-		Logger: common.NewLoggerWithWriters(loggerVerbosity, cmd.ErrOrStderr(), cmd.ErrOrStderr()),
-		DryRun: isDryRunCommand(cmd),
-		Stdin:  cmd.InOrStdin(),
-		Stdout: cmd.OutOrStdout(),
-		Stderr: cmd.ErrOrStderr(),
+		Logger:    common.NewLoggerWithWriters(verbosity, cmd.ErrOrStderr(), cmd.ErrOrStderr()),
+		Verbosity: verbosity,
+		DryRun:    isDryRunCommand(cmd),
+		Stdin:     cmd.InOrStdin(),
+		Stdout:    cmd.OutOrStdout(),
+		Stderr:    cmd.ErrOrStderr(),
 	}
 }
 
