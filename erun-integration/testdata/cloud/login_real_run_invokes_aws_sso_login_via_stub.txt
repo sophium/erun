@@ -1,1 +1,2 @@
 test-user@aws: active
+audit: erun cloud login --alias test-user@aws

@@ -19,8 +19,14 @@ type Context struct {
 
 type KubernetesContextPreflightFunc func(Context, string) error
 
+// Trace is the audit-log channel for decisions made, inputs loaded, and
+// outputs produced. These lines stay visible at default Info verbosity
+// so a user can audit the plan a command would execute without passing
+// any flags. Raw shell argv is logged separately via TraceCommand and is
+// gated to the higher Trace verbosity (-vv) since at that level the user
+// is asking to see the literal commands.
 func (c Context) Trace(message string) {
-	c.Logger.Trace(message)
+	c.Logger.Info(message)
 }
 
 func (c Context) Info(message string) {
@@ -128,6 +134,10 @@ func (c Context) RequireKubernetesContext(contextName string) error {
 	return c.KubernetesContextPreflight(c, contextName)
 }
 
+// TraceBlock logs a labeled multi-line block (file content being written,
+// remote script body about to run, etc.) at Info verbosity, matching the
+// Trace/Info contract: this is an output produced or input loaded that
+// the user must be able to see without -v.
 func (c Context) TraceBlock(label, body string) {
 	label = strings.TrimSpace(label)
 	body = strings.TrimRight(body, "\n")
@@ -135,9 +145,9 @@ func (c Context) TraceBlock(label, body string) {
 		return
 	}
 
-	c.Logger.Trace(label + ":")
+	c.Logger.Info(label + ":")
 	for _, line := range strings.Split(body, "\n") {
-		c.Logger.Trace("  " + line)
+		c.Logger.Info("  " + line)
 	}
 }
 

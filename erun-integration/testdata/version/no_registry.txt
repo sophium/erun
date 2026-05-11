@@ -1,1 +1,2 @@
 erun dev
+audit: erun version --no-registry

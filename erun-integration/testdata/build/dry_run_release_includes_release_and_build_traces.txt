@@ -1,3 +1,15 @@
+release: resolving project root
+release: project root = <TMP>
+release: resolving release module root
+release: release root = <TMP>
+release: loading release config from project
+release: main branch = main, develop branch = develop
+release: resolving git branch and commit
+release: branch = develop, commit = <SHORTSHA>
+release: resolving base version from VERSION file
+release: base version = <VERSION> (from <TMP>
+release: classified mode = candidate
+release: develop branch "develop" exists = true
 audit: erun build --dry-run --release
 release: branch=develop mode=candidate version=<VERSION>
 docker image: ghcr.io/sophium/api:<VERSION>

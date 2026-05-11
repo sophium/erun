@@ -1,1 +1,29 @@
+release: resolving project root
+release: project root = <TMP>
+release: resolving release module root
+release: release root = <TMP>
+release: loading release config from project
+release: main branch = main, develop branch = develop
+release: resolving git branch and commit
+release: branch = , commit =
+release: resolving base version from VERSION file
+release: base version = <VERSION> (from <TMP>
+release: classified mode = prerelease
+release: develop branch "develop" exists = true
+audit: erun build --release
+release: branch= mode=prerelease version=<VERSION>
+docker image: ghcr.io/sophium/api:<VERSION>
+stage: release
+write <TMP>
+  apiVersion: v2
+  appVersion: <VERSION>
+  name: api
+  version: <VERSION>
+release tag already exists at HEAD; skipping <VERSION>
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/api:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
+fingerprint image not found locally: ghcr.io/sophium/base:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/base:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/base:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
 release version: <VERSION>

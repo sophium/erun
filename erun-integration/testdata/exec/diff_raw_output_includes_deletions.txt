@@ -5,3 +5,4 @@ index 83c831f..d597f6c 100644
 @@ -1 +1 @@
 -# test
 +rewritten
+audit: erun exec diff

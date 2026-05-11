@@ -26,17 +26,6 @@ func currentBuildInfo() common.BuildInfo {
 	})
 }
 
-func buildInfo() (string, string, string) {
-	info := currentBuildInfo()
-	return info.Version, info.Commit, info.Date
-}
-
-func setBuildInfo(v, c, d string) {
-	buildVersion = v
-	buildCommit = c
-	buildDate = d
-}
-
 // newVersionCmd returns a Cobra command that prints the build information.
 func newVersionCmd(resolveBuildInfo func() (common.BuildInfo, string, error), resolveRegistryVersions common.RuntimeRegistryVersionResolverFunc) *cobra.Command {
 	var noRegistry bool

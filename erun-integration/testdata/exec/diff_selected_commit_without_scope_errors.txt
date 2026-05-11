@@ -1,1 +1,2 @@
+audit: erun exec diff --selected-commit abc1234
 --selected-commit requires --scope=commit
