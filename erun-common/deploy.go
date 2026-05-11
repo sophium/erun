@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -78,6 +79,7 @@ type HelmDeployParams struct {
 	RuntimePod         RuntimePodResources
 	Version            string
 	Timeout            string
+	Verbosity          int
 	Stdout             io.Writer
 	Stderr             io.Writer
 }
@@ -112,12 +114,14 @@ type HelmDeploySpec struct {
 	RuntimePod         RuntimePodResources
 	Version            string
 	Timeout            string
+	Verbosity          int
 }
 
 type HelmReleaseRecoveryParams struct {
 	ReleaseName       string
 	Namespace         string
 	KubernetesContext string
+	Verbosity         int
 	Stdout            io.Writer
 	Stderr            io.Writer
 }
@@ -311,6 +315,7 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 	if deploy == nil {
 		return fmt.Errorf("helm deployer is required")
 	}
+	deployInput.Verbosity = ctx.Verbosity
 	if err := ctx.RequireKubernetesContext(deployInput.KubernetesContext); err != nil {
 		return fmt.Errorf("deploy %s: %w", deployInput.ReleaseName, err)
 	}
@@ -1139,6 +1144,7 @@ func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 		RuntimePod:         NormalizeRuntimePodResources(d.RuntimePod),
 		Version:            d.Version,
 		Timeout:            d.Timeout,
+		Verbosity:          d.Verbosity,
 		Stdout:             stdout,
 		Stderr:             stderr,
 	}
@@ -1152,6 +1158,9 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--wait-for-jobs",
 		"--timeout", d.Timeout,
 		"--namespace", d.Namespace,
+	}
+	if d.Verbosity >= VerbosityDebug {
+		args = append(args, "--debug")
 	}
 	if strings.TrimSpace(d.KubernetesContext) != "" {
 		args = append(args, "--kube-context", d.KubernetesContext)
@@ -1205,6 +1214,9 @@ func (d HelmDeploySpec) command() commandSpec {
 
 func (p HelmReleaseRecoveryParams) command() commandSpec {
 	args := []string{}
+	if p.Verbosity >= VerbosityDebug {
+		args = append(args, "--v=4")
+	}
 	if strings.TrimSpace(p.KubernetesContext) != "" {
 		args = append(args, "--context", p.KubernetesContext)
 	}
@@ -1247,14 +1259,15 @@ func (e *HelmReleasePendingOperationError) Unwrap() error {
 	return e.Err
 }
 
-func (e *HelmReleasePendingOperationError) RecoveryParams(stdout, stderr io.Writer) HelmReleaseRecoveryParams {
+func (e *HelmReleasePendingOperationError) RecoveryParams(verbosity int, stdout, stderr io.Writer) HelmReleaseRecoveryParams {
 	if e == nil {
-		return HelmReleaseRecoveryParams{Stdout: stdout, Stderr: stderr}
+		return HelmReleaseRecoveryParams{Verbosity: verbosity, Stdout: stdout, Stderr: stderr}
 	}
 	return HelmReleaseRecoveryParams{
 		ReleaseName:       e.ReleaseName,
 		Namespace:         e.Namespace,
 		KubernetesContext: e.KubernetesContext,
+		Verbosity:         verbosity,
 		Stdout:            stdout,
 		Stderr:            stderr,
 	}
@@ -1264,7 +1277,7 @@ func (e *HelmReleasePendingOperationError) RecoveryCommand() string {
 	if e == nil {
 		return ""
 	}
-	command := e.RecoveryParams(nil, nil).command()
+	command := e.RecoveryParams(0, nil, nil).command()
 	return formatShellCommand(command.Dir, command.Name, command.Args...)
 }
 
@@ -1675,17 +1688,27 @@ func DeployHelmChart(params HelmDeployParams) error {
 		RuntimePod:         params.RuntimePod,
 		Version:            params.Version,
 		Timeout:            params.Timeout,
+		Verbosity:          params.Verbosity,
 	}.command()
 
 	cmd := Command(command.Name, command.Args...)
 	cmd.Dir = command.Dir
-	cmd.Stdout = params.Stdout
-	stderr := new(strings.Builder)
-	if params.Stderr != nil {
-		cmd.Stderr = io.MultiWriter(params.Stderr, stderr)
+	// At VerbosityInfo helm output is captured silently so a successful run is
+	// quiet; the buffer feeds back into the returned error on failure. At
+	// VerbosityDebug or higher the output is also teed to params.Stdout/Stderr
+	// so the user sees the live --debug stream.
+	helmOutput := new(bytes.Buffer)
+	if params.Verbosity >= VerbosityDebug {
+		cmd.Stdout = teeWriter(params.Stdout, helmOutput)
 	} else {
-		cmd.Stderr = stderr
+		cmd.Stdout = helmOutput
 	}
+	stderr := new(strings.Builder)
+	stderrWriters := []io.Writer{stderr, helmOutput}
+	if params.Verbosity >= VerbosityDebug && params.Stderr != nil {
+		stderrWriters = append(stderrWriters, params.Stderr)
+	}
+	cmd.Stderr = io.MultiWriter(stderrWriters...)
 
 	if err := cmd.Start(); err != nil {
 		return err
@@ -1746,6 +1769,11 @@ func DeployHelmChart(params HelmDeployParams) error {
 			Err:               helmErr,
 		}
 	}
+	if helmErr != nil && params.Verbosity < VerbosityDebug {
+		if output := strings.TrimSpace(helmOutput.String()); output != "" {
+			return fmt.Errorf("%w\n%s", helmErr, output)
+		}
+	}
 	return helmErr
 }
 
@@ -1784,9 +1812,23 @@ func ClearHelmReleasePendingOperation(params HelmReleaseRecoveryParams) error {
 
 	command := params.command()
 	cmd := Command(command.Name, command.Args...)
-	cmd.Stdout = params.Stdout
-	cmd.Stderr = params.Stderr
-	return cmd.Run()
+	capture := new(bytes.Buffer)
+	if params.Verbosity >= VerbosityDebug {
+		cmd.Stdout = teeWriter(params.Stdout, capture)
+		cmd.Stderr = teeWriter(params.Stderr, capture)
+	} else {
+		cmd.Stdout = capture
+		cmd.Stderr = capture
+	}
+	if err := cmd.Run(); err != nil {
+		if params.Verbosity < VerbosityDebug {
+			if output := strings.TrimSpace(capture.String()); output != "" {
+				return fmt.Errorf("%w\n%s", err, output)
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 func isHelmReleasePendingOperationMessage(message string) bool {

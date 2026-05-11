@@ -1,2 +1,1 @@
-audit: erun exec raw --dry-run curl https://example --token <redacted> --password=<redacted> ok
-cd <TMP> && curl https://example --token '<redacted>' '--password=<redacted>' ok
+

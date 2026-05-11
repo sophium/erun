@@ -55,6 +55,7 @@ func (a *App) RecoverPendingHelmRelease(id string) activityRecoveryResult {
 		ReleaseName:       release,
 		Namespace:         namespace,
 		KubernetesContext: strings.TrimSpace(entry.KubernetesContext),
+		Verbosity:         eruncommon.VerbosityDebug,
 		Stdout:            &stdout,
 		Stderr:            &stderr,
 	})

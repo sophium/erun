@@ -1,7 +1,2 @@
-audit: erun push
-cd <TMP> && docker push ghcr.io/sophium/api:<VERSION>
 denied: token does not match expected scopes
-cd <TMP> && docker push ghcr.io/sophium/api:<VERSION>
 denied: token does not match expected scopes
-cd <TMP> && docker push ghcr.io/sophium/api:<VERSION>
-cd <TMP> && docker push ghcr.io/sophium/base:<VERSION>

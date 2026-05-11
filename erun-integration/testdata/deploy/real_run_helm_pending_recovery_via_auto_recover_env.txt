@@ -1,6 +1,5 @@
 ==> Deploying team/dev <VERSION>
     namespace team-dev on context test-context
     waiting for helm rollout (timeout 2m0s)...
-Error: UPGRADE FAILED: another operation (install/upgrade/rollback) is in progress
 clearing pending helm metadata: kubectl --context test-context --namespace team-dev delete 'secrets,configmaps' -l 'owner=helm,name=team-devops,status in (pending-install,pending-upgrade,pending-rollback)' --ignore-not-found
 ==> Deployed team/dev <VERSION> in <ELAPSED>

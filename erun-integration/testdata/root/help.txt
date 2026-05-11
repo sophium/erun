@@ -1,10 +1,12 @@
 erun helps to run and manage multiple tenants/environments.
 
 Verbosity levels:
-  -v    print trace logs for command flow and side effects
+  (none) info: only erun status output; external tool output is suppressed
+  -v     debug: stream external tool output with high verbosity (helm --debug, kubectl --v=4, docker --progress=plain)
+  -vv    trace: debug output plus erun command-trace lines for every action and decision
 
 Dry-run:
-  --dry-run runs the same resolution flow but skips mutating operations
+  --dry-run runs the same resolution flow but skips mutating operations and implies trace verbosity.
 
 Timing:
   --time prints the elapsed runtime after the command finishes
@@ -15,7 +17,7 @@ Usage:
 
 Examples:
   erun deploy --dry-run
-  erun -v deploy --dry-run
+  erun -v deploy
   erun -vv init -y
   alias tenant-environment='eval "$(erun open tenant environment --no-shell)"'
 
@@ -44,6 +46,6 @@ Flags:
       --dry-run         Resolve and trace mutating actions without executing them.
   -h, --help            help for erun
       --time            Print the elapsed runtime after the command finishes.
-  -v, --verbose count   Increase trace verbosity. -v logs command flow and side effects.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
 
 Use "erun [command] --help" for more information about a command.

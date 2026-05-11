@@ -1,5 +1,5 @@
 audit: erun build --dry-run --no-incremental
-cd <TMP> && docker build --platform linux/amd64 --provenance=false -t ghcr.io/sophium/api:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
-cd <TMP> && docker build --platform linux/arm64 --provenance=false -t ghcr.io/sophium/api:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
-cd <TMP> && docker build --platform linux/amd64 --provenance=false -t ghcr.io/sophium/base:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
-cd <TMP> && docker build --platform linux/arm64 --provenance=false -t ghcr.io/sophium/base:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/api:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/api:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/base:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/base:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .

@@ -40,7 +40,7 @@ func wrapHelmDeployWithReleaseRecovery(promptRunner PromptRunner, deploy common.
 		if params.Stderr != nil {
 			_, _ = fmt.Fprintf(params.Stderr, "clearing pending helm metadata: %s\n", pending.RecoveryCommand())
 		}
-		if err := recover(pending.RecoveryParams(params.Stdout, params.Stderr)); err != nil {
+		if err := recover(pending.RecoveryParams(params.Verbosity, params.Stdout, params.Stderr)); err != nil {
 			return err
 		}
 		return deploy(params)

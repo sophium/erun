@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -34,7 +35,7 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 	if !buildInput.Push {
 		return nil
 	}
-	return pushMultiPlatformImage(buildInput.Image.Tag, perPlatformTags, stdout, stderr)
+	return pushMultiPlatformImage(buildInput.Image.Tag, perPlatformTags, buildInput.Verbosity, stdout, stderr)
 }
 
 func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) error {
@@ -50,20 +51,20 @@ func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 	if !buildInput.Push {
 		return nil
 	}
-	return pushMultiPlatformImage(buildInput.Image.Tag, perPlatformTags, stdout, stderr)
+	return pushMultiPlatformImage(buildInput.Image.Tag, perPlatformTags, buildInput.Verbosity, stdout, stderr)
 }
 
-func pushMultiPlatformImage(tag string, perPlatformTags []string, stdout, stderr io.Writer) error {
+func pushMultiPlatformImage(tag string, perPlatformTags []string, verbosity int, stdout, stderr io.Writer) error {
 	for _, platformTag := range perPlatformTags {
-		if err := DockerImagePusher(platformTag, stdout, stderr); err != nil {
+		if err := DockerImagePusher(platformTag, verbosity, stdout, stderr); err != nil {
 			return err
 		}
 	}
 	createArgs := append([]string{"manifest", "create", "--amend", tag}, perPlatformTags...)
-	if err := runDockerSimpleCommand(createArgs, stdout, stderr); err != nil {
+	if err := runDockerSimpleCommandWithVerbosity(createArgs, verbosity, stdout, stderr); err != nil {
 		return err
 	}
-	return runDockerSimpleCommand([]string{"manifest", "push", tag}, stdout, stderr)
+	return runDockerSimpleCommandWithVerbosity([]string{"manifest", "push", tag}, verbosity, stdout, stderr)
 }
 
 func tagFingerprintAfterBuild(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
@@ -135,6 +136,25 @@ func runDockerSimpleCommand(args []string, stdout, stderr io.Writer) error {
 		cmd.Stderr = stderr
 	}
 	return cmd.Run()
+}
+
+// runDockerSimpleCommandWithVerbosity invokes a docker subcommand that has no
+// native `--quiet` flag (manifest create/push, tag) and applies the verbosity
+// suppression policy: at VerbosityDebug or higher the subprocess streams to
+// stdout/stderr; at VerbosityInfo the output is captured silently and only
+// replayed on error so failures stay debuggable.
+func runDockerSimpleCommandWithVerbosity(args []string, verbosity int, stdout, stderr io.Writer) error {
+	if verbosity >= VerbosityDebug {
+		return runDockerSimpleCommand(args, stdout, stderr)
+	}
+	capture := new(bytes.Buffer)
+	if err := runDockerSimpleCommand(args, capture, capture); err != nil {
+		if output := strings.TrimSpace(capture.String()); output != "" {
+			return fmt.Errorf("%w\n%s", err, output)
+		}
+		return err
+	}
+	return nil
 }
 
 func runDockerTag(source, target string, stdout, stderr io.Writer) error {
@@ -212,7 +232,9 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	// manifest-list inputs ("<tag> is a manifest list"), so provenance stays
 	// off and each per-arch tag is a plain image manifest the assembly step
 	// can consume.
-	args := []string{"build", "--platform", platform, "--provenance=false", "-t", tag}
+	args := []string{"build", "--platform", platform, "--provenance=false"}
+	args = append(args, dockerVerbosityBuildFlags(buildInput.Verbosity)...)
+	args = append(args, "-t", tag)
 	buildArgVersion := dockerImageTagVersion(strings.TrimSpace(buildInput.Image.Tag))
 	if buildInput.Image.BaseVersion != "" {
 		buildArgVersion = buildInput.Image.BaseVersion
@@ -222,6 +244,20 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	}
 	args = append(args, "-f", buildInput.DockerfilePath, ".")
 	return args
+}
+
+func dockerVerbosityBuildFlags(verbosity int) []string {
+	if verbosity >= VerbosityDebug {
+		return []string{"--progress=plain"}
+	}
+	return []string{"--quiet"}
+}
+
+func dockerPushArgs(tag string, verbosity int) []string {
+	if verbosity >= VerbosityDebug {
+		return []string{"push", tag}
+	}
+	return []string{"push", "--quiet", tag}
 }
 
 func dockerImageTagVersion(tag string) string {
@@ -246,13 +282,13 @@ func BuildScriptRunner(dir, scriptPath string, env []string, stdin io.Reader, st
 	return cmd.Run()
 }
 
-func DockerImagePusher(tag string, stdout, stderr io.Writer) error {
-	err := runDockerPushOnce(tag, stdout, stderr)
+func DockerImagePusher(tag string, verbosity int, stdout, stderr io.Writer) error {
+	err := runDockerPushOnce(tag, verbosity, stdout, stderr)
 	if err == nil {
 		return nil
 	}
 	if shouldRetryAfterGHCRNamespaceLogin(err, tag, stdout, stderr) {
-		if retryErr := runDockerPushOnce(tag, stdout, stderr); retryErr == nil {
+		if retryErr := runDockerPushOnce(tag, verbosity, stdout, stderr); retryErr == nil {
 			return nil
 		} else {
 			err = retryErr
@@ -261,8 +297,9 @@ func DockerImagePusher(tag string, stdout, stderr io.Writer) error {
 	return err
 }
 
-func runDockerPushOnce(tag string, stdout, stderr io.Writer) error {
-	pushCmd := Command("docker", "push", tag)
+func runDockerPushOnce(tag string, verbosity int, stdout, stderr io.Writer) error {
+	args := dockerPushArgs(tag, verbosity)
+	pushCmd := Command("docker", args...)
 	output := new(bytes.Buffer)
 	pushCmd.Stdout = dockerCommandOutputWriter(stdout, output)
 	pushCmd.Stderr = dockerCommandOutputWriter(stderr, output)

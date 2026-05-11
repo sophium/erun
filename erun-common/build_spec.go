@@ -276,7 +276,7 @@ func multiPlatformTraceCommands(b DockerBuildSpec) []commandSpec {
 		commands = append(commands, commandSpec{
 			Dir:  b.ContextDir,
 			Name: "docker",
-			Args: []string{"push", platformTag},
+			Args: dockerPushArgs(platformTag, b.Verbosity),
 		})
 	}
 	commands = append(commands, commandSpec{
@@ -307,7 +307,7 @@ func promoteTraceCommands(b DockerBuildSpec) []commandSpec {
 		commands = append(commands, commandSpec{
 			Dir:  b.ContextDir,
 			Name: "docker",
-			Args: []string{"push", platformTag},
+			Args: dockerPushArgs(platformTag, b.Verbosity),
 		})
 	}
 	commands = append(commands, commandSpec{
@@ -335,7 +335,7 @@ func (p DockerPushSpec) command() commandSpec {
 	return commandSpec{
 		Dir:  p.Dir,
 		Name: "docker",
-		Args: []string{"push", p.Image.Tag},
+		Args: dockerPushArgs(p.Image.Tag, p.Verbosity),
 	}
 }
 
