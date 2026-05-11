@@ -184,25 +184,35 @@ func inspectSSHKey(homeDir string, marker RemoteInitMarker, markerPresent bool) 
 // to drive a recovery in non-dry-run mode. RepositoryURL is required
 // when the marker did not record one (e.g., init was interrupted before
 // the URL was resolved) and the user has not yet been prompted.
+//
+// Sleep is the cadence the SSH-key-import polling loop uses between
+// retries. When nil the production default (2s) is used; tests inject
+// a recording stub so they can assert on retry behavior without
+// real-time waits.
 type RemoteInitFinishParams struct {
 	HomeDir       string
 	RepositoryURL string
+	Sleep         SleepFunc
 }
 
 // RemoteInitFinishPrompt requests one value from the caller. The CLI
 // implements this with a promptui prompt; tests pass a stub.
 type RemoteInitFinishPrompt func(label string) (string, error)
 
-// RemoteInitFinishConfirm asks the caller a yes/no question. doctor
-// uses it to pause after generating an SSH key so the user can import
-// the public key on their git host before doctor attempts the clone.
-type RemoteInitFinishConfirm func(label string) (bool, error)
-
 // RunRemoteInitFinish executes whichever recovery steps the inspection
 // flagged as missing. In dry-run mode it traces the steps it would run
 // without performing them. Returns the updated inspection so callers
 // can render a final report.
-func RunRemoteInitFinish(ctx Context, inspection RemoteInitInspection, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt, confirm RemoteInitFinishConfirm) (RemoteInitInspection, error) {
+//
+// The recovery mirrors `erun init --remote`: after generating the SSH
+// keypair (or when the keypair already exists but the marker is still
+// incomplete), doctor prints the public key, polls `git ls-remote` on
+// a 2s cadence until access is active, and only then clones. This is
+// the same flow init uses on the kubectl-driven side, so the user
+// sees a consistent experience whether they're recovering from inside
+// or from outside the runtime pod. The polling loop is implemented by
+// WaitForGitAccess; doctor and init both call into it.
+func RunRemoteInitFinish(ctx Context, inspection RemoteInitInspection, params RemoteInitFinishParams, prompt RemoteInitFinishPrompt) (RemoteInitInspection, error) {
 	if inspection.HomeDir == "" {
 		return inspection, errors.New("home directory is required to finish remote init")
 	}
@@ -255,7 +265,7 @@ func RunRemoteInitFinish(ctx Context, inspection RemoteInitInspection, params Re
 			if sshKeyPath == "" {
 				sshKeyPath = defaultRemoteInitSSHKeyPath(inspection.HomeDir)
 			}
-			if err := finishRemoteInitGitAccess(ctx, sshKeyPath, repositoryURL, sshKeyJustGenerated, confirm); err != nil {
+			if err := finishRemoteInitGitAccess(ctx, sshKeyPath, repositoryURL, sshKeyJustGenerated, params.Sleep); err != nil {
 				return inspection, err
 			}
 			if err := finishRemoteInitGitCheckout(ctx, inspection.ProjectRoot, sshKeyPath, repositoryURL); err != nil {
@@ -353,53 +363,33 @@ func finishRemoteInitGitCheckout(ctx Context, projectRoot, sshKeyPath, repositor
 	return capture.Apply(cmd.Run())
 }
 
-// finishRemoteInitGitAccess displays the SSH public key when it was
-// just generated, optionally pauses for the user to import it, and
-// verifies access via `git ls-remote` before doctor attempts the
-// clone. Doing the verify here keeps the clone failure path narrow:
-// any "Permission denied (publickey)" the user might otherwise see is
-// turned into a clear, actionable message that names the key file and
-// the URL.
-func finishRemoteInitGitAccess(ctx Context, sshKeyPath, repositoryURL string, justGenerated bool, confirm RemoteInitFinishConfirm) error {
+// finishRemoteInitGitAccess prints the SSH public key the user must
+// import on the git host, then polls `git ls-remote` until access is
+// active. This mirrors init's waitForRemoteKeyImport so the user sees
+// the same trace and the same poll cadence whether they're driving
+// recovery from inside the pod (doctor) or from outside (init).
+func finishRemoteInitGitAccess(ctx Context, sshKeyPath, repositoryURL string, justGenerated bool, sleep SleepFunc) error {
 	if ctx.DryRun {
 		ctx.TraceCommand("", "git", "-c", "core.sshCommand="+doctorRemoteInitGitSSHCommand(sshKeyPath), "ls-remote", repositoryURL, "HEAD")
 		return nil
 	}
+	publicKey, err := readRemoteInitPublicKey(sshKeyPath)
+	if err != nil {
+		return err
+	}
 	if justGenerated {
-		publicKey, err := readRemoteInitPublicKey(sshKeyPath)
-		if err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintln(ctx.Stdout, "Generated SSH keypair. Add the following public key to the git host that owns "+repositoryURL+" before continuing:"); err != nil {
-			return err
-		}
-		if _, err := fmt.Fprintln(ctx.Stdout, publicKey); err != nil {
-			return err
-		}
-		if confirm == nil {
-			return fmt.Errorf("import the SSH public key shown above on the git host, then re-run `erun doctor --finish-remote-init`")
-		}
-		ok, err := confirm("SSH public key imported on the git host")
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return fmt.Errorf("import the SSH public key shown above on the git host, then re-run `erun doctor --finish-remote-init`")
-		}
+		ctx.Info("Generated SSH keypair. Import this SSH public key into your git host before continuing:")
+	} else {
+		ctx.Info("Import this SSH public key into your git host before continuing:")
 	}
-	ctx.TraceCommand("", "git", "-c", "core.sshCommand="+doctorRemoteInitGitSSHCommand(sshKeyPath), "ls-remote", repositoryURL, "HEAD")
-	capture := ctx.ToolCapture()
-	cmd := Command("git", "-c", "core.sshCommand="+doctorRemoteInitGitSSHCommand(sshKeyPath), "ls-remote", repositoryURL, "HEAD")
-	cmd.Stdout = capture.Stdout()
-	cmd.Stderr = capture.Stderr()
-	if err := capture.Apply(cmd.Run()); err != nil {
-		publicKey, readErr := readRemoteInitPublicKey(sshKeyPath)
-		if readErr == nil {
-			return fmt.Errorf("git access to %s is not active yet. Confirm the following SSH public key is imported on the git host, then re-run `erun doctor --finish-remote-init`:\n%s\n%w", repositoryURL, publicKey, err)
-		}
-		return fmt.Errorf("git access to %s is not active yet (verified with %s). Import the corresponding public key on the git host, then re-run `erun doctor --finish-remote-init`: %w", repositoryURL, sshKeyPath, err)
-	}
-	return nil
+	ctx.Info(publicKey)
+	return WaitForGitAccess(ctx, sleep, func() error {
+		capture := ctx.ToolCapture()
+		cmd := Command("git", "-c", "core.sshCommand="+doctorRemoteInitGitSSHCommand(sshKeyPath), "ls-remote", repositoryURL, "HEAD")
+		cmd.Stdout = capture.Stdout()
+		cmd.Stderr = capture.Stderr()
+		return capture.Apply(cmd.Run())
+	})
 }
 
 func readRemoteInitPublicKey(sshKeyPath string) (string, error) {

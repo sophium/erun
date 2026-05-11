@@ -7,7 +7,6 @@ import (
 	"path"
 	"regexp"
 	"strings"
-	"time"
 )
 
 type remoteRepositoryState struct {
@@ -23,8 +22,6 @@ type remoteRepositorySpec struct {
 	CodeCommitSSHKeyID string
 	UseHostConfig      bool
 }
-
-const remoteRepositoryAccessRetryInterval = 2 * time.Second
 
 var codeCommitHostPattern = regexp.MustCompile(`^git-codecommit\.[a-z0-9-]+\.amazonaws\.com(?:\.cn)?$`)
 
@@ -395,20 +392,9 @@ func (s bootstrapRunner) waitForRemoteKeyImport(params BootstrapInitParams, tena
 		}}
 	}
 
-	s.Context.Info("Waiting for the SSH key to be deployed to the git host. Rechecking every 2 seconds. Press Ctrl+C to cancel.")
-	for attempts := 0; ; attempts++ {
-		if err := s.verifyRemoteRepositoryAccess(req, repository); err == nil {
-			if attempts > 0 {
-				s.Context.Info("Remote repository access confirmed.")
-			}
-			return nil
-		}
-
-		s.Context.Info("SSH key not active yet; retrying in 2 seconds...")
-		if s.Sleep != nil {
-			s.Sleep(remoteRepositoryAccessRetryInterval)
-		}
-	}
+	return WaitForGitAccess(s.Context, s.Sleep, func() error {
+		return s.verifyRemoteRepositoryAccess(req, repository)
+	})
 }
 
 func (s bootstrapRunner) remoteRepositoryState(req ShellLaunchParams, projectRoot string) (remoteRepositoryState, error) {
