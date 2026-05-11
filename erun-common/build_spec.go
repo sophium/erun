@@ -255,8 +255,9 @@ func (b DockerBuildSpec) traceCommands() []commandSpec {
 }
 
 func multiPlatformTraceCommands(b DockerBuildSpec) []commandSpec {
-	commands := make([]commandSpec, 0, len(b.Platforms)*3+2)
+	commands := make([]commandSpec, 0, len(b.Platforms)*4+2)
 	perPlatformTags := make([]string, 0, len(b.Platforms))
+	baseTag := stableBaseVersionTag(b.Image)
 	for _, platform := range b.Platforms {
 		platformTag := platformSuffixedTag(b.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
@@ -267,6 +268,9 @@ func multiPlatformTraceCommands(b DockerBuildSpec) []commandSpec {
 		})
 		if b.Fingerprint != "" {
 			commands = append(commands, dockerTagTraceCommand(b.ContextDir, platformTag, fingerprintTag(b.Image, b.Fingerprint, platform)))
+		}
+		if baseTag != "" && platformTag != baseTag {
+			commands = append(commands, dockerTagTraceCommand(b.ContextDir, platformTag, baseTag))
 		}
 	}
 	if !b.Push {
@@ -293,12 +297,16 @@ func multiPlatformTraceCommands(b DockerBuildSpec) []commandSpec {
 }
 
 func promoteTraceCommands(b DockerBuildSpec) []commandSpec {
-	commands := make([]commandSpec, 0, len(b.Platforms)*2+2)
+	commands := make([]commandSpec, 0, len(b.Platforms)*3+2)
 	perPlatformTags := make([]string, 0, len(b.Platforms))
+	baseTag := stableBaseVersionTag(b.Image)
 	for _, platform := range b.Platforms {
 		platformTag := platformSuffixedTag(b.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
 		commands = append(commands, dockerTagTraceCommand(b.ContextDir, fingerprintTag(b.Image, b.Fingerprint, platform), platformTag))
+		if baseTag != "" && platformTag != baseTag {
+			commands = append(commands, dockerTagTraceCommand(b.ContextDir, platformTag, baseTag))
+		}
 	}
 	if !b.Push {
 		return commands

@@ -11,8 +11,10 @@ fingerprint image not found locally: ghcr.io/sophium/team-devops:fp-<HEX16>-arm6
 rebuilding ghcr.io/sophium/team-devops:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
 cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/team-devops:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker tag ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:fp-<HEX16>-amd64
+cd <TMP> && docker tag ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:<VERSION>
 cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/team-devops:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker tag ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:fp-<HEX16>-arm64
+cd <TMP> && docker tag ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:<VERSION>
 cd <TMP> && docker push ghcr.io/sophium/team-devops:<VERSION>
 cd <TMP> && docker push ghcr.io/sophium/team-devops:<VERSION>
 cd <TMP> && docker manifest create --amend ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:<VERSION>

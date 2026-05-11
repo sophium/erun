@@ -31,6 +31,9 @@ func runMultiPlatformBuild(buildInput DockerBuildSpec, stdout, stderr io.Writer)
 		if err := tagFingerprintAfterBuild(buildInput, platform, stdout, stderr); err != nil {
 			return err
 		}
+		if err := tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr); err != nil {
+			return err
+		}
 	}
 	if !buildInput.Push {
 		return nil
@@ -45,6 +48,9 @@ func promoteDockerImage(buildInput DockerBuildSpec, stdout, stderr io.Writer) er
 		platformTag := platformSuffixedTag(buildInput.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
 		if err := runDockerTag(fpTag, platformTag, stdout, stderr); err != nil {
+			return err
+		}
+		if err := tagStableBaseVersionAfterBuild(buildInput, platform, stdout, stderr); err != nil {
 			return err
 		}
 	}
@@ -77,6 +83,49 @@ func tagFingerprintAfterBuild(buildInput DockerBuildSpec, platform string, stdou
 		return nil
 	}
 	return runDockerTag(sourceTag, target, stdout, stderr)
+}
+
+// tagStableBaseVersionAfterBuild re-tags the platform-suffixed snapshot
+// image as the unsuffixed BaseVersion tag so wrapper builds whose
+// Dockerfiles reference `FROM image:${ERUN_VERSION}` can resolve a base
+// image locally without hitting the registry. Each platform's iteration
+// overwrites the previous one's tag; for a multi-platform build the last
+// platform iterated wins, which is acceptable because Docker BuildKit will
+// emulate cross-platform when the local FROM target's arch does not match
+// the requested --platform. Returns nil when BaseVersion is empty (release
+// builds whose Version already equals the stable tag) or when the source
+// and target tags are identical.
+func tagStableBaseVersionAfterBuild(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
+	target := stableBaseVersionTag(buildInput.Image)
+	if target == "" {
+		return nil
+	}
+	sourceTag := platformSuffixedTag(buildInput.Image.Tag, platform)
+	if sourceTag == target {
+		return nil
+	}
+	return runDockerTag(sourceTag, target, stdout, stderr)
+}
+
+// stableBaseVersionTag returns the unsuffixed local tag wrappers reference
+// from `FROM image:${ERUN_VERSION}`. Empty when the image has no separate
+// BaseVersion (release builds where Version itself is stable) or when the
+// computed tag equals the timestamped Tag.
+func stableBaseVersionTag(image DockerImageReference) string {
+	baseVersion := strings.TrimSpace(image.BaseVersion)
+	if baseVersion == "" {
+		return ""
+	}
+	registry := strings.TrimSpace(image.Registry)
+	repo := image.ImageName
+	if registry != "" {
+		repo = strings.TrimRight(registry, "/") + "/" + image.ImageName
+	}
+	tag := repo + ":" + baseVersion
+	if tag == strings.TrimSpace(image.Tag) {
+		return ""
+	}
+	return tag
 }
 
 func fingerprintTag(image DockerImageReference, fingerprint, platform string) string {
