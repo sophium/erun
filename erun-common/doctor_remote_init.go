@@ -341,7 +341,32 @@ func finishRemoteInitSSHKey(ctx Context, path string) error {
 	cmd := Command("ssh-keygen", "-t", "ed25519", "-N", "", "-f", path)
 	cmd.Stdout = capture.Stdout()
 	cmd.Stderr = capture.Stderr()
-	return capture.Apply(cmd.Run())
+	if err := capture.Apply(cmd.Run()); err != nil {
+		return err
+	}
+	return ensureRemoteInitSSHKeyPermissions(path)
+}
+
+// ensureRemoteInitSSHKeyPermissions forces 0600 on the private key and
+// 0644 on the public key. ssh silently refuses to use a private key
+// that is group- or world-accessible ("WARNING: UNPROTECTED PRIVATE
+// KEY FILE!" → bad permissions → key ignored), and runtime pods on
+// shared PVCs often persist files with permissive group bits because
+// of fsGroup or a non-077 umask. Init's chmod is best-effort and can
+// be reset by the storage layer between runs, so doctor re-applies the
+// expected mode every time it touches the key.
+func ensureRemoteInitSSHKeyPermissions(path string) error {
+	if err := os.Chmod(path, 0o600); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("chmod 0600 %s: %w", path, err)
+	}
+	pub := path + ".pub"
+	if err := os.Chmod(pub, 0o644); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("chmod 0644 %s: %w", pub, err)
+	}
+	return nil
 }
 
 func finishRemoteInitGitCheckout(ctx Context, projectRoot, sshKeyPath, repositoryURL string) error {
@@ -372,6 +397,9 @@ func finishRemoteInitGitAccess(ctx Context, sshKeyPath, repositoryURL string, ju
 	if ctx.DryRun {
 		ctx.TraceCommand("", "git", "-c", "core.sshCommand="+doctorRemoteInitGitSSHCommand(sshKeyPath), "ls-remote", repositoryURL, "HEAD")
 		return nil
+	}
+	if err := ensureRemoteInitSSHKeyPermissions(sshKeyPath); err != nil {
+		return err
 	}
 	publicKey, err := readRemoteInitPublicKey(sshKeyPath)
 	if err != nil {
