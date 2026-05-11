@@ -65,22 +65,39 @@ func (a *App) reconcileHelmReleasesOnce() {
 	}
 }
 
-// listTenantDevopsHelmReleases runs `helm list` filtered to releases
-// whose name ends in "-devops" — the canonical tenant-devops chart name
-// the runtime uses. Restricting at the helm side keeps payload size
-// bounded even on clusters with many unrelated releases.
-func listTenantDevopsHelmReleases(ctx context.Context, kubeContext string) ([]helmReleaseSnapshot, error) {
+// helmListTenantDevopsArgs is the argv we pass to `helm list` to
+// enumerate `<tenant>-devops` releases across the cluster.
+//
+// We pass the explicit status flags (`--deployed --pending --failed
+// --uninstalling`) instead of the older `--all` umbrella flag because
+// helm v4 dropped `--all`. An erroring `helm list` would silently take
+// down the whole reconciliation channel: finalization on "deployed"
+// plus pending-state upserts both stop firing, leaving entries stuck
+// at "running" in the activity panel. The explicit flags are accepted
+// on both helm v3 and v4.
+func helmListTenantDevopsArgs(kubeContext string) []string {
 	args := []string{
 		"list",
 		"--all-namespaces",
-		"--all", // include pending / failed states
+		"--deployed",
+		"--pending",
+		"--failed",
+		"--uninstalling",
 		"--output", "json",
 		"--filter", "-devops$",
 	}
 	if strings.TrimSpace(kubeContext) != "" {
 		args = append(args, "--kube-context", kubeContext)
 	}
-	cmd := exec.CommandContext(ctx, "helm", args...)
+	return args
+}
+
+// listTenantDevopsHelmReleases runs `helm list` filtered to releases
+// whose name ends in "-devops" — the canonical tenant-devops chart name
+// the runtime uses. Restricting at the helm side keeps payload size
+// bounded even on clusters with many unrelated releases.
+func listTenantDevopsHelmReleases(ctx context.Context, kubeContext string) ([]helmReleaseSnapshot, error) {
+	cmd := exec.CommandContext(ctx, "helm", helmListTenantDevopsArgs(kubeContext)...)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err

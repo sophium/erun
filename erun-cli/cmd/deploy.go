@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
+func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	target := common.DeployTarget{}
 	var snapshot bool
 	var noSnapshot bool
@@ -42,7 +42,10 @@ func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinder
 				return err
 			}
 			ctx.Trace(fmt.Sprintf("deploy: resolved %d spec(s)", len(deploySpecs)))
-			return common.RunDeploySpecs(ctx, deploySpecs, buildDockerImage, push, deployHelmChart)
+			if err := common.RunDeploySpecs(ctx, deploySpecs, buildDockerImage, push, deployHelmChart); err != nil {
+				return err
+			}
+			return common.PersistRuntimeVersionFromDeploySpecs(ctx, deploySpecs, saveEnvConfig)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -51,7 +54,7 @@ func newDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinder
 	return cmd
 }
 
-func newK8sDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
+func newK8sDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	target := common.DeployTarget{}
 	var snapshot bool
 	var noSnapshot bool
@@ -75,7 +78,10 @@ func newK8sDeployCmd(store common.DeployStore, findProjectRoot common.ProjectFin
 			if err != nil {
 				return err
 			}
-			return common.RunDeploySpec(ctx, deploySpec, buildDockerImage, push, deployHelmChart)
+			if err := common.RunDeploySpec(ctx, deploySpec, buildDockerImage, push, deployHelmChart); err != nil {
+				return err
+			}
+			return common.PersistRuntimeVersionFromDeploySpecs(ctx, []common.DeploySpec{deploySpec}, saveEnvConfig)
 		},
 	}
 	addDryRunFlag(cmd)

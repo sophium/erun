@@ -3,6 +3,7 @@ package integration
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -45,6 +46,43 @@ func TestDelete(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "delete/dry_run_with_remote_env_traces_namespace_delete", normalize.Apply(result.Combined))
+	})
+
+	t.Run("rejects_remote_env_without_kubernetes_context", func(t *testing.T) {
+		// Regression: a remote env whose config lost its kubernetescontext
+		// field used to silently delete the namespace from whatever
+		// `kubectl config current-context` was on the host (orbstack on a
+		// developer machine), because Context.EnsureKubernetesContext is
+		// a no-op on empty input. The mutating call now goes through
+		// RequireKubernetesContext, which errors up front.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		envCfgPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		body := "name: dev\n" +
+			"repopath: " + setup.Cwd + "\n" +
+			"runtimeversion: 1.0.0\n" +
+			"remote: true\n"
+		if err := os.WriteFile(envCfgPath, []byte(body), 0o644); err != nil {
+			t.Fatalf("rewrite env config without kubernetescontext: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		// kubectl stub still emits success if invoked; the test asserts
+		// erun never gets there.
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		result := erun.Run(t, []string{"delete", "team", "dev", "--yes"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when remote env has no kubernetescontext, got 0:\n%s", result.Combined)
+		}
+		out := normalize.Apply(result.Combined)
+		if !strings.Contains(out, "kubernetes context is required") {
+			t.Fatalf("expected RequireKubernetesContext error, got:\n%s", out)
+		}
+		// The local config tree must remain on disk: erun must not delete
+		// local state when the remote-side delete cannot proceed safely.
+		if _, err := os.Stat(filepath.Join(setup.ConfigHome, "erun", "team", "dev")); err != nil {
+			t.Errorf("env config tree should remain on disk when delete aborts, stat err: %v", err)
+		}
 	})
 
 	t.Run("real_run_with_yes_flag_skips_confirmation_and_removes_config", func(t *testing.T) {

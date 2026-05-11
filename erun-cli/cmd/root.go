@@ -178,7 +178,7 @@ func (d rootDependencies) k8sCommand() *cobra.Command {
 	return newCommandGroup(
 		"k8s",
 		"Kubernetes utilities",
-		newK8sDeployCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, d.push, d.recoveringDeployHelmChart),
+		newK8sDeployCmd(d.store, d.store.SaveEnvConfig, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, d.push, d.recoveringDeployHelmChart),
 	)
 }
 
@@ -206,7 +206,7 @@ func (d rootDependencies) optionalPushCommand() *cobra.Command {
 // present so Cobra recognizes its flags; ResolveCurrentDeploySpecs surfaces a
 // clear error when invoked outside a deploy context.
 func (d rootDependencies) deployCommand() *cobra.Command {
-	return newDeployCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, d.push, d.recoveringDeployHelmChart)
+	return newDeployCmd(d.store, d.store.SaveEnvConfig, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, d.push, d.recoveringDeployHelmChart)
 }
 
 func (d rootDependencies) runRoot(cmd *cobra.Command, args []string) error {
