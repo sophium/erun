@@ -1,0 +1,7 @@
+Remote init checks for team/dev:
+  marker file                 MISSING '<TMP>'
+  project root               OK '<TMP>'
+  git checkout               MISSING '<TMP>'
+  SSH keypair                MISSING '<TMP>'
+Run `erun doctor --finish-remote-init` inside this pod to finish the missing steps.
+audit: erun doctor --dry-run

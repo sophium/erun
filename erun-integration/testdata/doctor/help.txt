@@ -4,12 +4,14 @@ Usage:
   erun doctor [tenant] [environment] [flags]
 
 Flags:
-      --dry-run                    Resolve and trace mutating actions without executing them.
-  -h, --help                       help for doctor
-      --prune-build-cache          Prune unused BuildKit cache without prompting
-      --prune-containers           Prune stopped Docker containers without prompting
-      --prune-images               Prune unused Docker images without prompting
-      --repair-jetbrains-gateway   Clear cached JetBrains Gateway backend metadata for this environment
+      --dry-run                        Resolve and trace mutating actions without executing them.
+      --finish-remote-init             Finish unfinished remote init tasks without prompting (only takes effect when run inside a runtime pod)
+  -h, --help                           help for doctor
+      --prune-build-cache              Prune unused BuildKit cache without prompting
+      --prune-containers               Prune stopped Docker containers without prompting
+      --prune-images                   Prune unused Docker images without prompting
+      --remote-repository-url string   Git remote URL to use when finishing an unfinished remote init
+      --repair-jetbrains-gateway       Clear cached JetBrains Gateway backend metadata for this environment
 
 Global Flags:
       --time            Print the elapsed runtime after the command finishes.
