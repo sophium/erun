@@ -1222,6 +1222,18 @@ remote-default-devops-bootstrap:
   fi
   if [ "$replace" = true ]; then cp "$erun_bootstrap_tmp_14" '<HOME>/git/team/team-devops/k8s/team-devops/values.dev.yaml'; chmod '644' '<HOME>/git/team/team-devops/k8s/team-devops/values.dev.yaml'; fi
   rm -f "$erun_bootstrap_tmp_14"
+kubectl --context test-context --namespace team-dev exec deployment/team-devops -- /bin/sh -lc '<remote-script>'
+remote-init-marker:
+  set -eu
+  mkdir -p '$HOME/.erun'
+  cat > '$HOME/.erun/bootstrap.yaml' <<'__ERUN_BOOTSTRAP_MARKER__'
+  tenant: team
+  environment: dev
+  project_root: <HOME>/git/team
+  no_git: true
+  bootstrap_complete: true
+  __ERUN_BOOTSTRAP_MARKER__
+  chmod 600 '$HOME/.erun/bootstrap.yaml'
 mkdir -p <TMP>
 write-yaml <TMP>
 Configuration initialized OK

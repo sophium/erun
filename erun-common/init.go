@@ -871,14 +871,23 @@ func (s *bootstrapRunState) ensureDevopsAssets() error {
 }
 
 func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
-	req, err := s.runner.ensureRemoteRepository(s.params, s.tenant, s.envName, s.envConfig.KubernetesContext, projectRoot)
+	req, repositoryURL, err := s.runner.ensureRemoteRepository(s.params, s.tenant, s.envName, s.envConfig.KubernetesContext, projectRoot)
 	if err != nil {
 		return err
 	}
-	if !s.params.Bootstrap {
-		return nil
+	if s.params.Bootstrap {
+		if err := s.runner.ensureRemoteDefaultDevopsBootstrap(req, projectRoot, s.tenant, s.envName, s.params.RuntimeVersion); err != nil {
+			return err
+		}
 	}
-	return s.runner.ensureRemoteDefaultDevopsBootstrap(req, projectRoot, s.tenant, s.envName, s.params.RuntimeVersion)
+	return s.runner.writeRemoteInitMarker(req, RemoteInitMarker{
+		Tenant:            s.tenant,
+		Environment:       s.envName,
+		ProjectRoot:       projectRoot,
+		RepositoryURL:     repositoryURL,
+		NoGit:             s.params.NoGit,
+		BootstrapComplete: true,
+	})
 }
 
 func (s *bootstrapRunState) saveEnvConfigIfChanged() error {
