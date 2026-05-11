@@ -293,6 +293,17 @@ func namespaceForTenantEnv(tenant, environment string) string {
 // environment, optional version.
 var activityDeployingLineRe = regexp.MustCompile(`^==> Deploying ([^/\s]+)/([^/\s]+)(?:\s+(\S+))?\s*$`)
 
+// activityDeployedLineRe matches the `==> Deployed tenant/env [version]
+// in <elapsed>` trace emitted at successful completion. Captures:
+// tenant, environment.
+var activityDeployedLineRe = regexp.MustCompile(`^==> Deployed ([^/\s]+)/([^/\s]+)\b`)
+
+// activitySkippingLineRe matches the `==> Skipping tenant/env [version]
+// (identical deploy already in progress)` trace emitted when the
+// dedup decides this caller is a duplicate. Captures: tenant,
+// environment.
+var activitySkippingLineRe = regexp.MustCompile(`^==> Skipping ([^/\s]+)/([^/\s]+)\b`)
+
 // newActivityTraceLineHandler scans PTY output for trace lines emitted by
 // erun deploy and updates the activity queue accordingly.
 //
@@ -313,9 +324,7 @@ var activityDeployingLineRe = regexp.MustCompile(`^==> Deploying ([^/\s]+)/([^/\
 // Terminal-state lines (==> Deployed / ==> Deploy failed / ==> Skipping /
 // Error:) finalize the matching active entry from either channel.
 func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKind) func(string) {
-	deployedRe := regexp.MustCompile(`^==> Deployed `)
 	failedRe := regexp.MustCompile(`^==> Deploy failed`)
-	skippedRe := regexp.MustCompile(`^==> Skipping `)
 	errorRe := regexp.MustCompile(`(?i)^Error: `)
 	_ = kind
 	return func(line string) {
@@ -324,16 +333,48 @@ func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKi
 			app.startDeployFromTrace(selection, match[1], match[2], match[3])
 			return
 		}
+		if match := activityDeployedLineRe.FindStringSubmatch(line); match != nil {
+			app.finishDeployByTenantEnv(selection, match[1], match[2], activityQueueStatusSucceeded, "")
+			return
+		}
+		if match := activitySkippingLineRe.FindStringSubmatch(line); match != nil {
+			app.finishDeployByTenantEnv(selection, match[1], match[2], activityQueueStatusSkipped, line)
+			return
+		}
 		switch {
-		case deployedRe.MatchString(line):
-			app.finishActivityTracking(selection, activityQueueStatusSucceeded, "")
-		case skippedRe.MatchString(line):
-			app.finishActivityTracking(selection, activityQueueStatusSkipped, line)
 		case failedRe.MatchString(line):
 			app.finishActivityTracking(selection, activityQueueStatusFailed, line)
 		case errorRe.MatchString(line):
 			app.captureActivityErrorIfRunning(selection, line)
 		}
+	}
+}
+
+// finishDeployByTenantEnv finalizes the active deploy entry for the
+// (tenant, environment) parsed from a `==> Deployed`/`==> Skipping`
+// trace line, falling back to the session's selection only when the
+// line did not name them (an older erun build, or an unexpected
+// shape). Looking up by parsed tenant/env keeps finalization
+// robust when the trace is observed in a tab whose selection differs
+// from the deploy's target — e.g. a generic Local shell where the user
+// invoked `erun open` manually and the session selection has no
+// tenant/env bound at all.
+func (a *App) finishDeployByTenantEnv(selection uiSelection, tenant, environment string, status activityQueueStatus, errMsg string) {
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		a.finishActivityTracking(selection, status, errMsg)
+		return
+	}
+	if a.activityQueue == nil {
+		return
+	}
+	entry, ok := a.activityQueue.findActiveByCommand("deploy", tenant, environment)
+	if !ok {
+		return
+	}
+	if final, finished := a.activityQueue.finish(entry.ID, status, errMsg); finished {
+		a.unlockTerminalsForActivity(final)
 	}
 }
 
@@ -354,7 +395,7 @@ func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, v
 	if _, ok := a.activityQueue.findActiveByCommand("deploy", tenant, environment); ok {
 		return
 	}
-	kubeContext := strings.TrimSpace(selection.KubernetesContext)
+	kubeContext := a.resolveActivityKubeContext(selection, tenant, environment)
 	entry, fresh := a.activityQueue.start(activityQueueEntry{
 		Command:           "deploy",
 		Tenant:            tenant,
@@ -374,6 +415,28 @@ func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, v
 	if a.activityStatusPoller != nil {
 		a.activityStatusPoller(entry)
 	}
+}
+
+// resolveActivityKubeContext picks the kube context to attach to a new
+// trace-source activity entry. Selection wins when it carries a
+// context (the session has been bound through the desktop UI). When it
+// doesn't — e.g. a generic Local tab where the user invoked `erun open`
+// manually — fall back to the env config's KubernetesContext so the
+// container-status poller and lock-on-deploy watchlist still target
+// the right cluster instead of whatever `kubectl config
+// current-context` happens to be.
+func (a *App) resolveActivityKubeContext(selection uiSelection, tenant, environment string) string {
+	if ctx := strings.TrimSpace(selection.KubernetesContext); ctx != "" {
+		return ctx
+	}
+	if a.deps.store == nil {
+		return ""
+	}
+	envConfig, _, err := a.deps.store.LoadEnvConfig(tenant, environment)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(envConfig.KubernetesContext)
 }
 
 func (a *App) captureActivityErrorIfRunning(selection uiSelection, line string) {

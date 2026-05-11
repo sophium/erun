@@ -2,6 +2,7 @@ package integration
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -215,6 +216,35 @@ func TestDeploy(t *testing.T) {
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "deploy/real_run_via_stubs", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_persists_runtime_version_to_env_config", func(t *testing.T) {
+		// Regression: `erun deploy --version X` updates helm's release
+		// appVersion but used to leave EnvConfig.RuntimeVersion at the
+		// previously persisted value, so the desktop runtime dialog and
+		// `erun list` kept showing the stale string. Real-run deploy now
+		// writes the deployed version back to the env config.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.99", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		envCfgPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		raw, err := os.ReadFile(envCfgPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		body := string(raw)
+		if !strings.Contains(body, "runtimeversion: 1.0.99") {
+			t.Fatalf("expected env config to be rewritten with runtimeversion: 1.0.99, got:\n%s", body)
+		}
 	})
 
 	t.Run("dry_run_with_managed_cloud_traces_helm_set_strings", func(t *testing.T) {
@@ -441,9 +471,15 @@ func TestDeploy(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		// PID 0 is invalid for kill(0); the helper treats it as not-alive.
+		// Use a real reaped child PID (positive, dead) instead of PID 0.
+		// PID 0 short-circuits in isProcessAlive without ever calling
+		// Signal(0); a reaped PID forces the live signal-error path that
+		// surfaces darwin's os.ErrProcessDone vs. linux's ESRCH. Without
+		// that distinction the marker stays "alive" on darwin and deploy
+		// is locked out for the full 15-minute max-age fallback.
+		deadPID := reapedChildPID(t)
 		fixture.SeedDeployInflightMarker(t, setup, "test-context", "team-dev", "team-devops", fixture.DeployInflightRecord{
-			PID:         0,
+			PID:         deadPID,
 			ParamsHash:  "0000000000000000",
 			Tenant:      "team",
 			Environment: "dev",
@@ -490,6 +526,24 @@ func extractDedupHash(t *testing.T, raw string) string {
 
 func isHex(c byte) bool {
 	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
+}
+
+// reapedChildPID spawns a short-lived child, waits for it to exit, and
+// returns its now-dead PID. Calling isProcessAlive against this PID
+// exercises the real signal(0) error path: ESRCH on linux,
+// os.ErrProcessDone on darwin. PID reuse is theoretically possible but
+// vanishingly unlikely between the wait return and the marker read.
+func reapedChildPID(t *testing.T) int {
+	t.Helper()
+	cmd := exec.Command("/bin/sh", "-c", "exit 0")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("seed reaped child: %v", err)
+	}
+	pid := cmd.ProcessState.Pid()
+	if pid <= 0 {
+		t.Fatalf("seed reaped child returned invalid pid %d", pid)
+	}
+	return pid
 }
 
 const cleanRolloutPodJSON = `{

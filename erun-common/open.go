@@ -679,7 +679,18 @@ func remoteShellGitSeedScriptLines(workdir, gitHost, gitUser, gitRepo, knownHost
 		"chmod 600 \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/keys\" \"$HOME/.ssh/config\"",
 		fmt.Sprintf("mkdir -p %s", workdir),
 		fmt.Sprintf("cd %s", workdir),
-		fmt.Sprintf("if command -v git >/dev/null 2>&1; then if [ ! -d .git ]; then git clone git@%s:%s/%s.git .; fi; git config --global --add safe.directory '*'; fi", gitHost, gitUser, gitRepo),
+		// `git config --global` writes through a `~/.gitconfig.lock`
+		// created with O_CREAT|O_EXCL. When two erun open invocations
+		// (typically the OPEN tab and the AI tab) hit `kubectl exec`
+		// against the same pod within a few hundred milliseconds, both
+		// run this script in parallel and one fails with "could not
+		// lock config file: File exists", aborting the whole setup
+		// under `set -eu`. Guard the write on the current value so the
+		// loser of the race sees the setting already present and
+		// skips entirely; tolerate a leftover lock or a tight race
+		// past the guard with `|| true` because the racing process is
+		// performing the same work. End state is the same.
+		fmt.Sprintf("if command -v git >/dev/null 2>&1; then if [ ! -d .git ]; then git clone git@%s:%s/%s.git .; fi; if ! git config --global --get-all safe.directory 2>/dev/null | grep -qFx '*'; then git config --global --add safe.directory '*' 2>/dev/null || true; fi; fi", gitHost, gitUser, gitRepo),
 	}
 }
 

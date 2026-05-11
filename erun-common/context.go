@@ -37,6 +37,28 @@ func (c Context) EnsureKubernetesContext(contextName string) error {
 	return c.KubernetesContextPreflight(c, contextName)
 }
 
+// RequireKubernetesContext is the variant of EnsureKubernetesContext for
+// callers whose next action would target a real cluster — namespace
+// create/delete, helm upgrade, anything that mutates remote state. It
+// errors when contextName is empty instead of silently letting the next
+// kubectl/helm invocation fall through to `kubectl config
+// current-context`, which on a developer machine is usually a local
+// orbstack/minikube cluster rather than the env's intended target.
+//
+// EnsureKubernetesContext stays advisory for callers (e.g. init's
+// per-step namespace seeding) that legitimately have no context yet
+// and treat it as a "preflight if you can" hint.
+func (c Context) RequireKubernetesContext(contextName string) error {
+	contextName = strings.TrimSpace(contextName)
+	if contextName == "" {
+		return fmt.Errorf("kubernetes context is required")
+	}
+	if c.KubernetesContextPreflight == nil {
+		return nil
+	}
+	return c.KubernetesContextPreflight(c, contextName)
+}
+
 func (c Context) TraceBlock(label, body string) {
 	label = strings.TrimSpace(label)
 	body = strings.TrimRight(body, "\n")

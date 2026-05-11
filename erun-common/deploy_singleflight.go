@@ -347,7 +347,10 @@ func isProcessAlive(pid int) bool {
 	if signalErr == nil {
 		return true
 	}
-	if errors.Is(signalErr, syscall.ESRCH) {
+	// On darwin (Go 1.23+) `(*os.Process).Signal` returns os.ErrProcessDone
+	// for a dead PID instead of surfacing the underlying ESRCH, so a check
+	// against ESRCH alone leaves the marker stuck until the max-age fallback.
+	if errors.Is(signalErr, syscall.ESRCH) || errors.Is(signalErr, os.ErrProcessDone) {
 		return false
 	}
 	// EPERM and other errors imply the process exists but we can't signal it.

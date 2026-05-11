@@ -104,8 +104,8 @@ func deleteEnvironmentResult(tenant, environment string, envConfig EnvConfig, co
 
 func deleteRemoteEnvironmentNamespace(ctx Context, deleteNamespace NamespaceDeleterFunc, result *DeleteEnvironmentResult) error {
 	result.Namespace = KubernetesNamespaceName(result.Tenant, result.Environment)
-	if err := ctx.EnsureKubernetesContext(result.KubernetesContext); err != nil {
-		return err
+	if err := ctx.RequireKubernetesContext(result.KubernetesContext); err != nil {
+		return fmt.Errorf("delete environment %s/%s: %w", result.Tenant, result.Environment, err)
 	}
 	TraceDeleteKubernetesNamespace(ctx, result.KubernetesContext, result.Namespace)
 	if ctx.DryRun {
