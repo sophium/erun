@@ -1,9 +1,13 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
+	"github.com/manifoldco/promptui"
 	common "github.com/sophium/erun/erun-common"
 	jetbrainsconfig "github.com/sophium/erun/internal/jetbrainsconfig"
 	"github.com/spf13/cobra"
@@ -14,6 +18,8 @@ type doctorOptions struct {
 	pruneBuildCache        bool
 	pruneContainers        bool
 	repairJetBrainsGateway bool
+	finishRemoteInit       bool
+	remoteRepositoryURL    string
 }
 
 type jetBrainsGatewayDoctorRepair struct {
@@ -40,10 +46,15 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 	cmd.Flags().BoolVar(&options.pruneBuildCache, "prune-build-cache", false, "Prune unused BuildKit cache without prompting")
 	cmd.Flags().BoolVar(&options.pruneContainers, "prune-containers", false, "Prune stopped Docker containers without prompting")
 	cmd.Flags().BoolVar(&options.repairJetBrainsGateway, "repair-jetbrains-gateway", false, "Clear cached JetBrains Gateway backend metadata for this environment")
+	cmd.Flags().BoolVar(&options.finishRemoteInit, "finish-remote-init", false, "Finish unfinished remote init tasks without prompting (only takes effect when run inside a runtime pod)")
+	cmd.Flags().StringVar(&options.remoteRepositoryURL, "remote-repository-url", "", "Git remote URL to use when finishing an unfinished remote init")
 	return cmd
 }
 
 func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), promptRunner PromptRunner, options doctorOptions, args []string) error {
+	if common.IsInRuntimeEnvironment(os.Getenv) {
+		return runDoctorInRuntime(ctx, promptRunner, options)
+	}
 	params, err := common.OpenParamsForArgs(args)
 	if err != nil {
 		return err
@@ -222,6 +233,82 @@ func selectedDoctorActions(promptRunner PromptRunner, result common.OpenResult, 
 		}
 	}
 	return selected, nil
+}
+
+func runDoctorInRuntime(ctx common.Context, promptRunner PromptRunner, options doctorOptions) error {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	inspection, err := common.InspectRemoteInit(homeDir, os.Getenv)
+	if err != nil {
+		return err
+	}
+	if err := common.WriteRemoteInitInspectionReport(ctx, inspection); err != nil {
+		return err
+	}
+	if inspection.Complete() {
+		_, err := fmt.Fprintln(ctx.Stdout, "Remote init is complete; nothing to finish.")
+		return err
+	}
+	if len(inspection.MissingItems()) == 0 {
+		_, err := fmt.Fprintln(ctx.Stdout, "No missing remote-init artifacts detected, but the bootstrap marker is incomplete. Re-run `erun init --remote` from your local machine to refresh the marker.")
+		return err
+	}
+
+	if !options.finishRemoteInit {
+		if ctx.DryRun || promptRunner == nil {
+			_, err := fmt.Fprintln(ctx.Stdout, "Run `erun doctor --finish-remote-init` inside this pod to finish the missing steps.")
+			return err
+		}
+		ok, err := confirmPrompt(promptRunner, "Finish missing remote-init steps now")
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+	}
+
+	prompt := func(label string) (string, error) {
+		if promptRunner == nil {
+			return "", errors.New("interactive prompt is unavailable; pass --remote-repository-url")
+		}
+		return doctorRemoteRepositoryURLPrompt(promptRunner, label)
+	}
+	updated, err := common.RunRemoteInitFinish(ctx, inspection, common.RemoteInitFinishParams{
+		HomeDir:       homeDir,
+		RepositoryURL: options.remoteRepositoryURL,
+		Sleep:         time.Sleep,
+	}, prompt)
+	if err != nil {
+		return err
+	}
+	if ctx.DryRun {
+		_, err := fmt.Fprintln(ctx.Stdout, "Dry-run: would finish remote init by running the steps traced above.")
+		return err
+	}
+	if _, err := fmt.Fprintln(ctx.Stdout, "Remote init finished."); err != nil {
+		return err
+	}
+	return common.WriteRemoteInitInspectionReport(ctx, updated)
+}
+
+func doctorRemoteRepositoryURLPrompt(run PromptRunner, label string) (string, error) {
+	prompt := promptui.Prompt{
+		Label: label,
+		Validate: func(input string) error {
+			if strings.TrimSpace(input) == "" {
+				return fmt.Errorf("repository remote URL is required")
+			}
+			return nil
+		},
+	}
+	result, err := run(prompt)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(result), nil
 }
 
 func writeDoctorCommandOutput(ctx common.Context, stdout, stderr string) error {

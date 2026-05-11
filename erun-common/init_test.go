@@ -1200,6 +1200,7 @@ func TestBootstrapRunRemoteInitializesTenantInPodWorktree(t *testing.T) {
 			{result: RemoteCommandResult{Stdout: "repo_missing\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n__ERUN_REMOTE_CODECOMMIT_PUBLIC_KEY__\nssh-rsa AAAACODECOMMITRSA remote\n"}},
 			{},
 			{},
+			{},
 		}),
 	}
 
@@ -1215,7 +1216,8 @@ func TestBootstrapRunRemoteInitializesTenantInPodWorktree(t *testing.T) {
 	remotePath := RemoteWorktreePathForRepoName("frs")
 	requireRemoteInitResult(t, result, remotePath)
 	requireCondition(t, waited.Dir == remotePath && waited.KubernetesContext == "cluster-remote", "unexpected wait request: %+v", waited)
-	requireEqual(t, len(scripts), 3, "remote command count")
+	requireEqual(t, len(scripts), 4, "remote command count")
+	requireRemoteInitMarkerScript(t, scripts[3])
 
 	savedEnv, _, err := LoadEnvConfig("frs", "dev")
 	requireNoError(t, err, "LoadEnvConfig failed")
@@ -1365,15 +1367,28 @@ func requireRemoteNoGitResult(t *testing.T, result BootstrapInitResult, deployed
 	t.Helper()
 	requireCondition(t, result.EnvConfig.RepoPath == remotePath && result.EnvConfig.Remote, "unexpected env config: %+v", result.EnvConfig)
 	requireCondition(t, deployed.MCPPort == 17200 && deployed.SSHPort == 17222, "expected remote init deploy to use allocated ports, got mcp=%d ssh=%d", deployed.MCPPort, deployed.SSHPort)
-	requireEqual(t, len(scripts), 1, "remote command count")
+	requireEqual(t, len(scripts), 2, "remote command count")
 	requireStringContains(t, scripts[0], "mkdir -p "+shellQuote(remotePath), "expected worktree directory creation")
 	requireRemoteNoGitScript(t, scripts[0])
+	requireRemoteInitMarkerScript(t, scripts[1])
 }
 
 func requireRemoteNoGitScript(t *testing.T, script string) {
 	t.Helper()
 	for _, unexpected := range []string{"ssh-keygen", "git clone", "git -C"} {
 		requireCondition(t, !strings.Contains(script, unexpected), "did not expect %q in no-git script:\n%s", unexpected, script)
+	}
+}
+
+func requireRemoteInitMarkerScript(t *testing.T, script string) {
+	t.Helper()
+	for _, want := range []string{
+		"mkdir -p '$HOME/.erun'",
+		"cat > '$HOME/" + RemoteInitMarkerFilename + "' <<'__ERUN_BOOTSTRAP_MARKER__'",
+		"bootstrap_complete: true",
+		"__ERUN_BOOTSTRAP_MARKER__",
+	} {
+		requireStringContains(t, script, want, "expected remote-init marker write")
 	}
 }
 
@@ -1424,8 +1439,8 @@ func TestBootstrapRunRemoteBootstrapCreatesTenantDevopsModuleAndChart(t *testing
 		t.Fatalf("Run failed: %v", err)
 	}
 
-	if len(scripts) != 2 {
-		t.Fatalf("expected worktree and bootstrap scripts, got %d: %#v", len(scripts), scripts)
+	if len(scripts) != 3 {
+		t.Fatalf("expected worktree, bootstrap, and marker scripts, got %d: %#v", len(scripts), scripts)
 	}
 	bootstrapScript := scripts[1]
 	for _, path := range []string{
@@ -1441,6 +1456,7 @@ func TestBootstrapRunRemoteBootstrapCreatesTenantDevopsModuleAndChart(t *testing
 	if !strings.Contains(bootstrapScript, "ARG ERUN_BASE_TAG=ghcr.io/sophium/erun-devops:1.2.3") {
 		t.Fatalf("expected runtime version in bootstrap Dockerfile, got:\n%s", bootstrapScript)
 	}
+	requireRemoteInitMarkerScript(t, scripts[2])
 }
 
 func TestBootstrapRunRemoteConfiguresCodeCommitSSHRepository(t *testing.T) {
@@ -1481,6 +1497,7 @@ func TestBootstrapRunRemoteConfiguresCodeCommitSSHRepository(t *testing.T) {
 			{result: RemoteCommandResult{Stdout: "repo_missing\n__ERUN_REMOTE_PUBLIC_KEY__\nssh-ed25519 AAAATEST remote\n"}},
 			{},
 			{},
+			{},
 		}),
 	}
 
@@ -1497,13 +1514,14 @@ func TestBootstrapRunRemoteConfiguresCodeCommitSSHRepository(t *testing.T) {
 
 func requireCodeCommitRemoteScripts(t *testing.T, scripts []string) {
 	t.Helper()
-	requireEqual(t, len(scripts), 3, "remote script count")
+	requireEqual(t, len(scripts), 4, "remote script count")
 	for _, want := range []string{`ssh-keygen -t ed25519`, `ssh-keygen -t rsa -b 4096`, `id_rsa_codecommit`, `__ERUN_REMOTE_CODECOMMIT_PUBLIC_KEY__`} {
 		requireStringContains(t, scripts[0], want, "expected repository state script content")
 	}
-	for _, script := range scripts[1:] {
+	for _, script := range scripts[1:3] {
 		requireCodeCommitScript(t, script)
 	}
+	requireRemoteInitMarkerScript(t, scripts[3])
 }
 
 func requireCodeCommitScript(t *testing.T, script string) {
@@ -1555,6 +1573,7 @@ func TestBootstrapRunRemoteWaitsForSSHKeyImportAndRetries(t *testing.T) {
 			{result: RemoteCommandResult{Stderr: "Permission denied (publickey)."}, err: fmt.Errorf("exit status 128")},
 			{},
 			{},
+			{},
 		}),
 		Sleep: func(duration time.Duration) {
 			sleepCalls++
@@ -1575,10 +1594,11 @@ func TestBootstrapRunRemoteWaitsForSSHKeyImportAndRetries(t *testing.T) {
 func requireRemoteRetryResult(t *testing.T, logger *testTraceLogger, sleepCalls int, scripts []string) {
 	t.Helper()
 	requireEqual(t, sleepCalls, 2, "sleep call count")
-	requireEqual(t, len(scripts), 5, "remote command count")
+	requireEqual(t, len(scripts), 6, "remote command count")
 	requireCondition(t, logger.containsTrace("Waiting for the SSH key to be deployed to the git host. Rechecking every 2 seconds. Press Ctrl+C to cancel."), "expected waiting message, got %+v", logger.traces)
 	requireCondition(t, logger.containsTrace("SSH key not active yet; retrying in 2 seconds..."), "expected retry message, got %+v", logger.traces)
 	requireCondition(t, logger.containsTrace("Remote repository access confirmed."), "expected success message, got %+v", logger.traces)
+	requireRemoteInitMarkerScript(t, scripts[5])
 }
 
 func TestBootstrapRunRemoteOffersExistingSSHHostConfigBeforeKeyImport(t *testing.T) {
@@ -1635,6 +1655,8 @@ func TestBootstrapRunRemoteOffersExistingSSHHostConfigBeforeKeyImport(t *testing
 			case 3:
 				requireExistingHostConfigScript(t, script, "clone")
 				return RemoteCommandResult{}, nil
+			case 4:
+				return RemoteCommandResult{}, nil
 			default:
 				t.Fatalf("unexpected remote command script:\n%s", script)
 				return RemoteCommandResult{}, nil
@@ -1660,9 +1682,10 @@ func requireExistingHostConfigScript(t *testing.T, script, label string) {
 func requireExistingHostConfigResult(t *testing.T, logger *testTraceLogger, promptedHostConfig bool, scripts []string) {
 	t.Helper()
 	requireCondition(t, promptedHostConfig, "expected existing SSH host config confirmation")
-	requireEqual(t, len(scripts), 3, "remote command count")
+	requireEqual(t, len(scripts), 4, "remote command count")
 	requireCondition(t, !logger.containsTrace("Import this SSH public key into your git host before continuing:"), "did not expect SSH public key import instructions, got %+v", logger.traces)
 	requireCondition(t, !logger.containsTrace("Waiting for the SSH key to be deployed to the git host."), "did not expect SSH key import wait, got %+v", logger.traces)
+	requireRemoteInitMarkerScript(t, scripts[3])
 }
 
 func TestBootstrapRunRemoteRequestsRepositoryURLWhenCheckoutMissing(t *testing.T) {

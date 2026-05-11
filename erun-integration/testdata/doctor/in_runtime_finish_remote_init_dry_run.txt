@@ -1,0 +1,11 @@
+Remote init checks for team/dev:
+  marker file                 INCOMPLETE '<TMP>'
+  project root               OK '<TMP>'
+  git checkout               MISSING '<TMP>'
+  SSH keypair                MISSING '<TMP>'
+Dry-run: would finish remote init by running the steps traced above.
+audit: erun doctor --dry-run --finish-remote-init
+ssh-keygen -t ed25519 -N '' -f <TMP>
+git -c 'core.sshCommand=ssh -i '"'"'<TMP>'"'"' -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new' ls-remote 'git@example.com:team/repo.git' HEAD
+cd <TMP> && git clone 'git@example.com:team/repo.git' .
+write-yaml <TMP>

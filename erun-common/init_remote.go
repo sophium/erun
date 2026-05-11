@@ -7,7 +7,6 @@ import (
 	"path"
 	"regexp"
 	"strings"
-	"time"
 )
 
 type remoteRepositoryState struct {
@@ -24,8 +23,6 @@ type remoteRepositorySpec struct {
 	UseHostConfig      bool
 }
 
-const remoteRepositoryAccessRetryInterval = 2 * time.Second
-
 var codeCommitHostPattern = regexp.MustCompile(`^git-codecommit\.[a-z0-9-]+\.amazonaws\.com(?:\.cn)?$`)
 
 type remoteDefaultDevopsFile struct {
@@ -35,31 +32,43 @@ type remoteDefaultDevopsFile struct {
 	Legacy  []string
 }
 
-func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, kubernetesContext, projectRoot string) (ShellLaunchParams, error) {
+func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, kubernetesContext, projectRoot string) (ShellLaunchParams, string, error) {
 	target := s.remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot)
 	target.EnvConfig.RuntimePod = NormalizeRuntimePodResources(params.RuntimePod)
 	req := ShellLaunchParamsFromResult(target)
 
 	if err := s.ensureRemoteRuntime(target, req, params.RuntimeVersion, params.RuntimeImage); err != nil {
-		return ShellLaunchParams{}, err
+		return ShellLaunchParams{}, "", err
 	}
 	if params.NoGit {
-		return req, s.ensureRemoteWorktree(req, projectRoot)
+		return req, "", s.ensureRemoteWorktree(req, projectRoot)
 	}
 
 	state, err := s.remoteRepositoryState(req, projectRoot)
 	if err != nil {
-		return ShellLaunchParams{}, err
+		return ShellLaunchParams{}, "", err
 	}
 	if state.Exists {
-		return req, s.pullRemoteRepository(req, projectRoot)
+		return req, "", s.pullRemoteRepository(req, projectRoot)
 	}
 
 	repository, err := s.remoteRepositorySpecForClone(params, tenant, envName, req, state)
 	if err != nil {
-		return ShellLaunchParams{}, err
+		return ShellLaunchParams{}, "", err
 	}
-	return req, s.cloneRemoteRepository(req, projectRoot, repository)
+	return req, repository.URL, s.cloneRemoteRepository(req, projectRoot, repository)
+}
+
+func (s bootstrapRunner) writeRemoteInitMarker(req ShellLaunchParams, marker RemoteInitMarker) error {
+	script := strings.Join([]string{
+		"set -eu",
+		remoteInitMarkerWriteScript(marker),
+	}, "\n")
+	output, err := s.runRemoteScript(req, "remote-init-marker", script)
+	if err != nil {
+		return fmt.Errorf("write remote init marker: %w%s", err, formatRemoteCommandStderr(output.Stderr))
+	}
+	return nil
 }
 
 func (s bootstrapRunner) remoteRepositorySpecForClone(params BootstrapInitParams, tenant, envName string, req ShellLaunchParams, state remoteRepositoryState) (remoteRepositorySpec, error) {
@@ -383,20 +392,9 @@ func (s bootstrapRunner) waitForRemoteKeyImport(params BootstrapInitParams, tena
 		}}
 	}
 
-	s.Context.Info("Waiting for the SSH key to be deployed to the git host. Rechecking every 2 seconds. Press Ctrl+C to cancel.")
-	for attempts := 0; ; attempts++ {
-		if err := s.verifyRemoteRepositoryAccess(req, repository); err == nil {
-			if attempts > 0 {
-				s.Context.Info("Remote repository access confirmed.")
-			}
-			return nil
-		}
-
-		s.Context.Info("SSH key not active yet; retrying in 2 seconds...")
-		if s.Sleep != nil {
-			s.Sleep(remoteRepositoryAccessRetryInterval)
-		}
-	}
+	return WaitForGitAccess(s.Context, s.Sleep, func() error {
+		return s.verifyRemoteRepositoryAccess(req, repository)
+	})
 }
 
 func (s bootstrapRunner) remoteRepositoryState(req ShellLaunchParams, projectRoot string) (remoteRepositoryState, error) {
