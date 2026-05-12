@@ -32,31 +32,31 @@ type remoteDefaultDevopsFile struct {
 	Legacy  []string
 }
 
-func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, kubernetesContext, projectRoot string) (ShellLaunchParams, string, error) {
+func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, kubernetesContext, projectRoot string) (ShellLaunchParams, remoteRepositorySpec, error) {
 	target := s.remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot)
 	target.EnvConfig.RuntimePod = NormalizeRuntimePodResources(params.RuntimePod)
 	req := ShellLaunchParamsFromResult(target)
 
 	if err := s.ensureRemoteRuntime(target, req, params.RuntimeVersion, params.RuntimeImage); err != nil {
-		return ShellLaunchParams{}, "", err
+		return ShellLaunchParams{}, remoteRepositorySpec{}, err
 	}
 	if params.NoGit {
-		return req, "", s.ensureRemoteWorktree(req, projectRoot)
+		return req, remoteRepositorySpec{}, s.ensureRemoteWorktree(req, projectRoot)
 	}
 
 	state, err := s.remoteRepositoryState(req, projectRoot)
 	if err != nil {
-		return ShellLaunchParams{}, "", err
+		return ShellLaunchParams{}, remoteRepositorySpec{}, err
 	}
 	if state.Exists {
-		return req, "", s.pullRemoteRepository(req, projectRoot)
+		return req, remoteRepositorySpec{}, s.pullRemoteRepository(req, projectRoot)
 	}
 
 	repository, err := s.remoteRepositorySpecForClone(params, tenant, envName, req, state)
 	if err != nil {
-		return ShellLaunchParams{}, "", err
+		return ShellLaunchParams{}, remoteRepositorySpec{}, err
 	}
-	return req, repository.URL, s.cloneRemoteRepository(req, projectRoot, repository)
+	return req, repository, s.cloneRemoteRepository(req, projectRoot, repository)
 }
 
 func (s bootstrapRunner) writeRemoteInitMarker(req ShellLaunchParams, marker RemoteInitMarker) error {
