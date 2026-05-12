@@ -52,7 +52,7 @@ func TestDoctor(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(setup.Home, ".ssh", "id_ed25519"), []byte("stub\n"), 0o600); err != nil {
 			t.Fatalf("write ssh key: %v", err)
 		}
-		markerDir := filepath.Join(setup.Home, ".erun")
+		markerDir := filepath.Join(setup.Home, ".erun", "team", "dev")
 		if err := os.MkdirAll(markerDir, 0o700); err != nil {
 			t.Fatalf("mkdir marker dir: %v", err)
 		}
@@ -87,7 +87,7 @@ func TestDoctor(t *testing.T) {
 		if err := os.MkdirAll(projectRoot, 0o755); err != nil {
 			t.Fatalf("mkdir project root: %v", err)
 		}
-		markerDir := filepath.Join(setup.Home, ".erun")
+		markerDir := filepath.Join(setup.Home, ".erun", "team", "dev")
 		if err := os.MkdirAll(markerDir, 0o700); err != nil {
 			t.Fatalf("mkdir marker dir: %v", err)
 		}
@@ -125,7 +125,7 @@ func TestDoctor(t *testing.T) {
 		if err := os.MkdirAll(projectRoot, 0o755); err != nil {
 			t.Fatalf("mkdir project root: %v", err)
 		}
-		markerDir := filepath.Join(setup.Home, ".erun")
+		markerDir := filepath.Join(setup.Home, ".erun", "petios", "dev")
 		if err := os.MkdirAll(markerDir, 0o700); err != nil {
 			t.Fatalf("mkdir marker dir: %v", err)
 		}
@@ -173,5 +173,103 @@ func TestDoctor(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "doctor/in_runtime_no_marker_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("in_runtime_legacy_marker_path_dry_run", func(t *testing.T) {
+		// Existing in-pod markers from a previous version live at the
+		// legacy single-marker path $HOME/.erun/bootstrap.yaml. On upgrade
+		// doctor must still consume that marker so a previously-resumed
+		// init is not stranded; the legacy fallback only kicks in when the
+		// marker's tenant/environment match the runtime env.
+		setup := env.New(t)
+		projectRoot := filepath.Join(setup.Home, "git", "team")
+		if err := os.MkdirAll(filepath.Join(projectRoot, ".git"), 0o755); err != nil {
+			t.Fatalf("mkdir .git: %v", err)
+		}
+		if err := os.MkdirAll(filepath.Join(setup.Home, ".ssh"), 0o700); err != nil {
+			t.Fatalf("mkdir .ssh: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(setup.Home, ".ssh", "id_ed25519"), []byte("stub\n"), 0o600); err != nil {
+			t.Fatalf("write ssh key: %v", err)
+		}
+		if err := os.MkdirAll(filepath.Join(setup.Home, ".erun"), 0o700); err != nil {
+			t.Fatalf("mkdir legacy marker dir: %v", err)
+		}
+		marker := "tenant: team\n" +
+			"environment: dev\n" +
+			"project_root: " + projectRoot + "\n" +
+			"repository_url: git@example.com:team/repo.git\n" +
+			"bootstrap_complete: true\n"
+		if err := os.WriteFile(filepath.Join(setup.Home, ".erun", "bootstrap.yaml"), []byte(marker), 0o600); err != nil {
+			t.Fatalf("write legacy marker: %v", err)
+		}
+		envVars := append(setup.Env(),
+			"ERUN_REPO_REMOTE=true",
+			"ERUN_TENANT=team",
+			"ERUN_ENVIRONMENT=dev",
+			"ERUN_REPO_PATH="+projectRoot,
+		)
+		result := erun.Run(t, []string{"doctor", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/in_runtime_legacy_marker_path_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("in_runtime_multi_tenant_markers_dry_run", func(t *testing.T) {
+		// Two tenants share one $HOME (developer machine or shared runtime
+		// host). Each writes its own bootstrap marker under
+		// $HOME/.erun/<tenant>/<env>/bootstrap.yaml. doctor for tenant
+		// "team" must see the team marker and ignore the other tenant's
+		// marker even though both live under the same .erun root.
+		setup := env.New(t)
+		teamRoot := filepath.Join(setup.Home, "git", "team")
+		otherRoot := filepath.Join(setup.Home, "git", "other")
+		for _, root := range []string{teamRoot, otherRoot} {
+			if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+				t.Fatalf("mkdir .git: %v", err)
+			}
+		}
+		if err := os.MkdirAll(filepath.Join(setup.Home, ".ssh"), 0o700); err != nil {
+			t.Fatalf("mkdir .ssh: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(setup.Home, ".ssh", "id_ed25519"), []byte("stub\n"), 0o600); err != nil {
+			t.Fatalf("write ssh key: %v", err)
+		}
+		teamMarkerDir := filepath.Join(setup.Home, ".erun", "team", "dev")
+		if err := os.MkdirAll(teamMarkerDir, 0o700); err != nil {
+			t.Fatalf("mkdir team marker dir: %v", err)
+		}
+		teamMarker := "tenant: team\n" +
+			"environment: dev\n" +
+			"project_root: " + teamRoot + "\n" +
+			"repository_url: git@example.com:team/repo.git\n" +
+			"bootstrap_complete: true\n"
+		if err := os.WriteFile(filepath.Join(teamMarkerDir, "bootstrap.yaml"), []byte(teamMarker), 0o600); err != nil {
+			t.Fatalf("write team marker: %v", err)
+		}
+		otherMarkerDir := filepath.Join(setup.Home, ".erun", "other", "dev")
+		if err := os.MkdirAll(otherMarkerDir, 0o700); err != nil {
+			t.Fatalf("mkdir other marker dir: %v", err)
+		}
+		otherMarker := "tenant: other\n" +
+			"environment: dev\n" +
+			"project_root: " + otherRoot + "\n" +
+			"repository_url: git@example.com:other/repo.git\n" +
+			"bootstrap_complete: false\n"
+		if err := os.WriteFile(filepath.Join(otherMarkerDir, "bootstrap.yaml"), []byte(otherMarker), 0o600); err != nil {
+			t.Fatalf("write other marker: %v", err)
+		}
+		envVars := append(setup.Env(),
+			"ERUN_REPO_REMOTE=true",
+			"ERUN_TENANT=team",
+			"ERUN_ENVIRONMENT=dev",
+			"ERUN_REPO_PATH="+teamRoot,
+		)
+		result := erun.Run(t, []string{"doctor", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/in_runtime_multi_tenant_markers_dry_run", normalize.Apply(result.Combined))
 	})
 }

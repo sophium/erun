@@ -89,7 +89,9 @@ func InspectRemoteInit(homeDir string, env func(string) string) (RemoteInitInspe
 	if env == nil {
 		env = os.Getenv
 	}
-	marker, present, err := LoadRemoteInitMarker(homeDir)
+	tenant := strings.TrimSpace(env("ERUN_TENANT"))
+	environment := strings.TrimSpace(env("ERUN_ENVIRONMENT"))
+	marker, present, err := LoadRemoteInitMarker(homeDir, tenant, environment)
 	if err != nil {
 		return RemoteInitInspection{}, err
 	}
@@ -104,10 +106,10 @@ func InspectRemoteInit(homeDir string, env func(string) string) (RemoteInitInspe
 		inspection.ProjectRoot = marker.ProjectRoot
 	}
 	if inspection.Tenant == "" {
-		inspection.Tenant = strings.TrimSpace(env("ERUN_TENANT"))
+		inspection.Tenant = tenant
 	}
 	if inspection.Environment == "" {
-		inspection.Environment = strings.TrimSpace(env("ERUN_ENVIRONMENT"))
+		inspection.Environment = environment
 	}
 	if inspection.ProjectRoot == "" {
 		inspection.ProjectRoot = strings.TrimSpace(env("ERUN_REPO_PATH"))
@@ -358,7 +360,7 @@ func RunRemoteInitFinish(ctx Context, inspection RemoteInitInspection, params Re
 			return inspection, err
 		}
 	} else {
-		ctx.TraceCommand("", "write-yaml", RemoteInitMarkerPath(inspection.HomeDir))
+		ctx.TraceCommand("", "write-yaml", RemoteInitMarkerPath(inspection.HomeDir, updated.Marker.Tenant, updated.Marker.Environment))
 	}
 	return updated, nil
 }
@@ -672,7 +674,7 @@ func WriteRemoteInitInspectionReport(ctx Context, inspection RemoteInitInspectio
 	if _, err := fmt.Fprintf(ctx.Stdout, "Remote init checks for %s/%s:\n", remoteInitOrUnknown(inspection.Tenant), remoteInitOrUnknown(inspection.Environment)); err != nil {
 		return err
 	}
-	markerPath := RemoteInitMarkerPath(inspection.HomeDir)
+	markerPath := RemoteInitMarkerPath(inspection.HomeDir, inspection.Tenant, inspection.Environment)
 	if !inspection.MarkerPresent {
 		if _, err := fmt.Fprintf(ctx.Stdout, "  marker file                 MISSING %s\n", quotedPathForReport(markerPath)); err != nil {
 			return err

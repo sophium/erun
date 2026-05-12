@@ -234,18 +234,26 @@ func ResolveStoredEnvironmentIdleStatus(store EnvironmentIdleStore, tenant, envi
 		status.StopEligible = false
 		status.StopBlockedReason = "environment is not cloud-managed"
 	}
-	status.StopError = loadEnvironmentIdleStopError()
+	status.StopError = loadEnvironmentIdleStopError(tenant, environment)
 	return status, nil
 }
 
-func loadEnvironmentIdleStopError() string {
+func loadEnvironmentIdleStopError(tenant, environment string) string {
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
 		return ""
 	}
-	data, err := os.ReadFile(filepath.Join(home, ".erun", "idle-stop.log"))
+	path := environmentIdleStopLogPath(home, tenant, environment)
+	data, err := os.ReadFile(path)
 	if err != nil {
-		return ""
+		if !os.IsNotExist(err) {
+			return ""
+		}
+		legacy := filepath.Join(home, ".erun", "idle-stop.log")
+		data, err = os.ReadFile(legacy)
+		if err != nil {
+			return ""
+		}
 	}
 	value := strings.TrimSpace(string(data))
 	const maxStopErrorLength = 4000
@@ -253,6 +261,15 @@ func loadEnvironmentIdleStopError() string {
 		return value
 	}
 	return value[len(value)-maxStopErrorLength:]
+}
+
+// environmentIdleStopLogPath returns the per-tenant/per-environment
+// idle-stop log path under homeDir. The runtime entrypoint writes the
+// shutdown attempt's stderr here so a later doctor/activity read can
+// attribute the failure to the right environment when one $HOME hosts
+// multiple tenants.
+func environmentIdleStopLogPath(homeDir, tenant, environment string) string {
+	return filepath.Join(homeDir, ".erun", tenant, environment, "idle-stop.log")
 }
 
 func managedCloudEnvironment(store CloudReadStore, env EnvConfig) (bool, error) {

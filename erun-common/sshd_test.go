@@ -292,8 +292,10 @@ func TestRuntimeEntrypointStopsCloudHostAfterIdle(t *testing.T) {
 		`runtime_cloud_instance_id()`,
 		`runtime_cloud_region()`,
 		`aws --cli-connect-timeout 5 --cli-read-timeout 20 ec2 stop-instances --region "${region}" --instance-ids "${instance_id}"`,
-		`graceful_quit_clients >>"${HOME}/.erun/idle-stop.log" 2>&1 || true`,
-		`stop_cloud_host >>"${HOME}/.erun/idle-stop.log" 2>&1 || true`,
+		`graceful_quit_clients >>"${stop_log}" 2>&1 || true`,
+		`stop_cloud_host >>"${stop_log}" 2>&1 || true`,
+		`stop_log_dir="${HOME}/.erun/${ERUN_TENANT}/${ERUN_ENVIRONMENT}"`,
+		`stop_log="${stop_log_dir}/idle-stop.log"`,
 		`http://169.254.169.254/latest/${path}`,
 		`imds_get "meta-data/instance-id"`,
 		`imds_get "dynamic/instance-identity/document"`,
@@ -307,8 +309,8 @@ func TestRuntimeEntrypointStopsCloudHostAfterIdle(t *testing.T) {
 	if strings.Contains(content, "scale \"deployment/${ERUN_RUNTIME_DEPLOYMENT") {
 		t.Fatalf("expected runtime entrypoint to no longer scale the deployment to 0 before EC2 stop, got:\n%s", content)
 	}
-	gracefulIdx := strings.Index(content, `graceful_quit_clients >>"${HOME}/.erun/idle-stop.log"`)
-	stopIdx := strings.Index(content, `stop_cloud_host >>"${HOME}/.erun/idle-stop.log"`)
+	gracefulIdx := strings.Index(content, `graceful_quit_clients >>"${stop_log}"`)
+	stopIdx := strings.Index(content, `stop_cloud_host >>"${stop_log}"`)
 	if gracefulIdx < 0 || stopIdx < 0 || gracefulIdx > stopIdx {
 		t.Fatalf("expected graceful_quit_clients to run before stop_cloud_host, got graceful=%d stop=%d", gracefulIdx, stopIdx)
 	}
