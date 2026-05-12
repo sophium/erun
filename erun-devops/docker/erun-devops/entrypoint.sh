@@ -692,9 +692,11 @@ start_environment_idle_monitor() {
         while :; do
             sleep 30
             if erun activity stop-ready --tenant "${ERUN_TENANT}" --environment "${ERUN_ENVIRONMENT}" >/dev/null 2>&1; then
-                mkdir -p "${HOME}/.erun"
-                graceful_quit_clients >>"${HOME}/.erun/idle-stop.log" 2>&1 || true
-                stop_cloud_host >>"${HOME}/.erun/idle-stop.log" 2>&1 || true
+                stop_log_dir="${HOME}/.erun/${ERUN_TENANT}/${ERUN_ENVIRONMENT}"
+                stop_log="${stop_log_dir}/idle-stop.log"
+                mkdir -p "${stop_log_dir}"
+                graceful_quit_clients >>"${stop_log}" 2>&1 || true
+                stop_cloud_host >>"${stop_log}" 2>&1 || true
                 exit 0
             fi
         done

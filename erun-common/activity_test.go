@@ -252,10 +252,11 @@ func TestResolveStoredEnvironmentIdleStatusDetectsManagedCloudWhenRepoIsLocal(t 
 func TestResolveStoredEnvironmentIdleStatusIncludesStopError(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
-	if err := os.MkdirAll(filepath.Join(home, ".erun"), 0o755); err != nil {
+	logDir := filepath.Join(home, ".erun", "tenant", "cloud")
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		t.Fatalf("MkdirAll failed: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(home, ".erun", "idle-stop.log"), []byte("failed to stop instance: access denied\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(logDir, "idle-stop.log"), []byte("failed to stop instance: access denied\n"), 0o644); err != nil {
 		t.Fatalf("WriteFile failed: %v", err)
 	}
 

@@ -609,6 +609,9 @@ func remoteShellConfigForRequest(req ShellLaunchParams) (remoteShellConfig, erro
 }
 
 func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig, workdir, title string) []string {
+	markerDir := fmt.Sprintf("$HOME/.erun/%s/%s", req.Tenant, req.Environment)
+	bashrcPath := markerDir + "/bashrc"
+	requestPath := markerDir + "/shell-request"
 	return []string{
 		"set -eu",
 		"export COLORTERM=truecolor",
@@ -621,13 +624,14 @@ func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig,
 		fmt.Sprintf("cat > \"$config_home/erun/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, config.TenantYAML),
 		fmt.Sprintf("mkdir -p \"$config_home/erun/%s/%s\"", req.Tenant, req.Environment),
 		fmt.Sprintf("cat > \"$config_home/erun/%s/%s/config.yaml\" <<'EOF'\n%s\nEOF", req.Tenant, req.Environment, config.EnvYAML),
-		fmt.Sprintf("cat > \"$HOME/.erun_bashrc\" <<'EOF'\nexport ERUN_SHELL_HOST=%s\nerun() {\n  if [ \"${1:-}\" = \"deploy\" ] && [ \"$#\" -eq 1 ] && [ -n \"${ERUN_SHELL_REQUEST_FILE:-}\" ]; then\n    : > \"$ERUN_SHELL_REQUEST_FILE\"\n    exit 0\n  fi\n  command erun \"$@\"\n}\nEOF", title),
+		fmt.Sprintf("mkdir -p \"%s\"", markerDir),
+		fmt.Sprintf("cat > \"%s\" <<'EOF'\nexport ERUN_SHELL_HOST=%s\nerun() {\n  if [ \"${1:-}\" = \"deploy\" ] && [ \"$#\" -eq 1 ] && [ -n \"${ERUN_SHELL_REQUEST_FILE:-}\" ]; then\n    : > \"$ERUN_SHELL_REQUEST_FILE\"\n    exit 0\n  fi\n  command erun \"$@\"\n}\nEOF", bashrcPath, title),
 		fmt.Sprintf("printf '\\033]0;%s\\007'", title),
-		"request_file=\"$HOME/.erun-shell-request\"",
+		fmt.Sprintf("request_file=\"%s\"", requestPath),
 		"rm -f \"$request_file\"",
 		"export ERUN_SHELL_REQUEST_FILE=\"$request_file\"",
 		"shell_status=0",
-		"/bin/bash --rcfile \"$HOME/.erun_bashrc\" -i || shell_status=$?",
+		fmt.Sprintf("/bin/bash --rcfile \"%s\" -i || shell_status=$?", bashrcPath),
 		fmt.Sprintf("if [ -e \"$request_file\" ]; then rm -f \"$request_file\"; exit %d; fi", remoteShellReattachDeployExitCode),
 		"rm -f \"$request_file\"",
 		"exit \"$shell_status\"",
