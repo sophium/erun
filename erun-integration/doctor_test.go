@@ -112,6 +112,46 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/in_runtime_finish_remote_init_dry_run", normalize.Apply(result.Combined))
 	})
 
+	t.Run("in_runtime_finish_remote_init_codecommit_dry_run", func(t *testing.T) {
+		// The marker records a CodeCommit URL and the IAM SSH public
+		// key ID, but bootstrap_complete=false and the .git checkout
+		// plus both SSH keypairs are missing. With --finish-remote-init
+		// in dry-run mode doctor must trace ssh-keygen for the ed25519
+		// key, ssh-keygen -t rsa -b 4096 for the codecommit key, the
+		// ~/.ssh/config write, and an ls-remote + clone routed through
+		// ssh -F "$HOME/.ssh/config" against the codecommit host.
+		setup := env.New(t)
+		projectRoot := filepath.Join(setup.Home, "git", "petios")
+		if err := os.MkdirAll(projectRoot, 0o755); err != nil {
+			t.Fatalf("mkdir project root: %v", err)
+		}
+		markerDir := filepath.Join(setup.Home, ".erun")
+		if err := os.MkdirAll(markerDir, 0o700); err != nil {
+			t.Fatalf("mkdir marker dir: %v", err)
+		}
+		marker := "tenant: petios\n" +
+			"environment: dev\n" +
+			"project_root: " + projectRoot + "\n" +
+			"repository_url: ssh://git-codecommit.eu-west-1.amazonaws.com/v1/repos/petios\n" +
+			"codecommit_host: git-codecommit.eu-west-1.amazonaws.com\n" +
+			"codecommit_ssh_key_id: APKATESTCODECOMMITKEY\n" +
+			"bootstrap_complete: false\n"
+		if err := os.WriteFile(filepath.Join(markerDir, "bootstrap.yaml"), []byte(marker), 0o600); err != nil {
+			t.Fatalf("write marker: %v", err)
+		}
+		envVars := append(setup.Env(),
+			"ERUN_REPO_REMOTE=true",
+			"ERUN_TENANT=petios",
+			"ERUN_ENVIRONMENT=dev",
+			"ERUN_REPO_PATH="+projectRoot,
+		)
+		result := erun.Run(t, []string{"doctor", "--dry-run", "--finish-remote-init"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/in_runtime_finish_remote_init_codecommit_dry_run", normalize.Apply(result.Combined))
+	})
+
 	t.Run("in_runtime_no_marker_dry_run", func(t *testing.T) {
 		// When ERUN_REPO_REMOTE=true but no marker exists on disk,
 		// doctor falls back to the runtime-env vars to identify the

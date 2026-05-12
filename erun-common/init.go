@@ -871,7 +871,7 @@ func (s *bootstrapRunState) ensureDevopsAssets() error {
 }
 
 func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
-	req, repositoryURL, err := s.runner.ensureRemoteRepository(s.params, s.tenant, s.envName, s.envConfig.KubernetesContext, projectRoot)
+	req, repository, err := s.runner.ensureRemoteRepository(s.params, s.tenant, s.envName, s.envConfig.KubernetesContext, projectRoot)
 	if err != nil {
 		return err
 	}
@@ -881,12 +881,14 @@ func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
 		}
 	}
 	return s.runner.writeRemoteInitMarker(req, RemoteInitMarker{
-		Tenant:            s.tenant,
-		Environment:       s.envName,
-		ProjectRoot:       projectRoot,
-		RepositoryURL:     repositoryURL,
-		NoGit:             s.params.NoGit,
-		BootstrapComplete: true,
+		Tenant:             s.tenant,
+		Environment:        s.envName,
+		ProjectRoot:        projectRoot,
+		RepositoryURL:      repository.URL,
+		CodeCommitHost:     repository.CodeCommitHost,
+		CodeCommitSSHKeyID: repository.CodeCommitSSHKeyID,
+		NoGit:              s.params.NoGit,
+		BootstrapComplete:  true,
 	})
 }
 

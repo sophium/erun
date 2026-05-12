@@ -20,6 +20,7 @@ type doctorOptions struct {
 	repairJetBrainsGateway bool
 	finishRemoteInit       bool
 	remoteRepositoryURL    string
+	codeCommitSSHKeyID     string
 }
 
 type jetBrainsGatewayDoctorRepair struct {
@@ -48,6 +49,7 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 	cmd.Flags().BoolVar(&options.repairJetBrainsGateway, "repair-jetbrains-gateway", false, "Clear cached JetBrains Gateway backend metadata for this environment")
 	cmd.Flags().BoolVar(&options.finishRemoteInit, "finish-remote-init", false, "Finish unfinished remote init tasks without prompting (only takes effect when run inside a runtime pod)")
 	cmd.Flags().StringVar(&options.remoteRepositoryURL, "remote-repository-url", "", "Git remote URL to use when finishing an unfinished remote init")
+	cmd.Flags().StringVar(&options.codeCommitSSHKeyID, "codecommit-ssh-key-id", "", "CodeCommit SSH public key ID to use when finishing an unfinished remote init for an AWS CodeCommit repository")
 	return cmd
 }
 
@@ -247,43 +249,58 @@ func runDoctorInRuntime(ctx common.Context, promptRunner PromptRunner, options d
 	if err := common.WriteRemoteInitInspectionReport(ctx, inspection); err != nil {
 		return err
 	}
-	if inspection.Complete() {
-		_, err := fmt.Fprintln(ctx.Stdout, "Remote init is complete; nothing to finish.")
+	if handled, err := writeRemoteInitShortCircuit(ctx, inspection); handled || err != nil {
 		return err
 	}
-	if len(inspection.MissingItems()) == 0 {
-		_, err := fmt.Fprintln(ctx.Stdout, "No missing remote-init artifacts detected, but the bootstrap marker is incomplete. Re-run `erun init --remote` from your local machine to refresh the marker.")
+	proceed, err := confirmRemoteInitFinish(ctx, promptRunner, options)
+	if err != nil || !proceed {
 		return err
-	}
-
-	if !options.finishRemoteInit {
-		if ctx.DryRun || promptRunner == nil {
-			_, err := fmt.Fprintln(ctx.Stdout, "Run `erun doctor --finish-remote-init` inside this pod to finish the missing steps.")
-			return err
-		}
-		ok, err := confirmPrompt(promptRunner, "Finish missing remote-init steps now")
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-	}
-
-	prompt := func(label string) (string, error) {
-		if promptRunner == nil {
-			return "", errors.New("interactive prompt is unavailable; pass --remote-repository-url")
-		}
-		return doctorRemoteRepositoryURLPrompt(promptRunner, label)
 	}
 	updated, err := common.RunRemoteInitFinish(ctx, inspection, common.RemoteInitFinishParams{
-		HomeDir:       homeDir,
-		RepositoryURL: options.remoteRepositoryURL,
-		Sleep:         time.Sleep,
-	}, prompt)
+		HomeDir:            homeDir,
+		RepositoryURL:      options.remoteRepositoryURL,
+		CodeCommitSSHKeyID: options.codeCommitSSHKeyID,
+		Sleep:              time.Sleep,
+	}, remoteInitPromptFunc(promptRunner))
 	if err != nil {
 		return err
 	}
+	return writeRemoteInitFinishReport(ctx, updated)
+}
+
+func writeRemoteInitShortCircuit(ctx common.Context, inspection common.RemoteInitInspection) (bool, error) {
+	if inspection.Complete() {
+		_, err := fmt.Fprintln(ctx.Stdout, "Remote init is complete; nothing to finish.")
+		return true, err
+	}
+	if len(inspection.MissingItems()) == 0 {
+		_, err := fmt.Fprintln(ctx.Stdout, "No missing remote-init artifacts detected, but the bootstrap marker is incomplete. Re-run `erun init --remote` from your local machine to refresh the marker.")
+		return true, err
+	}
+	return false, nil
+}
+
+func confirmRemoteInitFinish(ctx common.Context, promptRunner PromptRunner, options doctorOptions) (bool, error) {
+	if options.finishRemoteInit {
+		return true, nil
+	}
+	if ctx.DryRun || promptRunner == nil {
+		_, err := fmt.Fprintln(ctx.Stdout, "Run `erun doctor --finish-remote-init` inside this pod to finish the missing steps.")
+		return false, err
+	}
+	return confirmPrompt(promptRunner, "Finish missing remote-init steps now")
+}
+
+func remoteInitPromptFunc(promptRunner PromptRunner) common.RemoteInitFinishPrompt {
+	return func(label string) (string, error) {
+		if promptRunner == nil {
+			return "", errors.New("interactive prompt is unavailable; pass --remote-repository-url and --codecommit-ssh-key-id when applicable")
+		}
+		return doctorRemoteInitPrompt(promptRunner, label)
+	}
+}
+
+func writeRemoteInitFinishReport(ctx common.Context, updated common.RemoteInitInspection) error {
 	if ctx.DryRun {
 		_, err := fmt.Fprintln(ctx.Stdout, "Dry-run: would finish remote init by running the steps traced above.")
 		return err
@@ -294,12 +311,12 @@ func runDoctorInRuntime(ctx common.Context, promptRunner PromptRunner, options d
 	return common.WriteRemoteInitInspectionReport(ctx, updated)
 }
 
-func doctorRemoteRepositoryURLPrompt(run PromptRunner, label string) (string, error) {
+func doctorRemoteInitPrompt(run PromptRunner, label string) (string, error) {
 	prompt := promptui.Prompt{
 		Label: label,
 		Validate: func(input string) error {
 			if strings.TrimSpace(input) == "" {
-				return fmt.Errorf("repository remote URL is required")
+				return fmt.Errorf("%s is required", label)
 			}
 			return nil
 		},

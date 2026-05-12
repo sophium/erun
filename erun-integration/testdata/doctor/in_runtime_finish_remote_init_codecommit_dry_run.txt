@@ -1,0 +1,14 @@
+Remote init checks for petios/dev:
+  marker file                 INCOMPLETE '<TMP>'
+  project root               OK '<TMP>'
+  git checkout               MISSING '<TMP>'
+  SSH keypair                MISSING '<TMP>'
+  CodeCommit SSH keypair     MISSING '<TMP>'
+Dry-run: would finish remote init by running the steps traced above.
+audit: erun doctor --dry-run --finish-remote-init
+ssh-keygen -t ed25519 -N '' -f <TMP>
+ssh-keygen -t rsa -b 4096 -N '' -f <TMP>
+write-file <TMP>
+git -c 'core.sshCommand=ssh -F "$HOME/.ssh/config"' ls-remote ssh://git-codecommit.eu-west-1.amazonaws.com/v1/repos/petios HEAD
+cd <TMP> && git clone ssh://git-codecommit.eu-west-1.amazonaws.com/v1/repos/petios .
+write-yaml <TMP>

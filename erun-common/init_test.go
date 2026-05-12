@@ -1522,6 +1522,12 @@ func requireCodeCommitRemoteScripts(t *testing.T, scripts []string) {
 		requireCodeCommitScript(t, script)
 	}
 	requireRemoteInitMarkerScript(t, scripts[3])
+	for _, want := range []string{
+		"codecommit_host: git-codecommit.eu-west-1.amazonaws.com",
+		"codecommit_ssh_key_id: APKATESTCODECOMMITKEY",
+	} {
+		requireStringContains(t, scripts[3], want, "expected CodeCommit metadata in remote-init marker")
+	}
 }
 
 func requireCodeCommitScript(t *testing.T, script string) {

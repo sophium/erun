@@ -4,6 +4,7 @@ Usage:
   erun doctor [tenant] [environment] [flags]
 
 Flags:
+      --codecommit-ssh-key-id string   CodeCommit SSH public key ID to use when finishing an unfinished remote init for an AWS CodeCommit repository
       --dry-run                        Resolve and trace mutating actions without executing them.
       --finish-remote-init             Finish unfinished remote init tasks without prompting (only takes effect when run inside a runtime pod)
   -h, --help                           help for doctor
