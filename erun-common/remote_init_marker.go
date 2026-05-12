@@ -21,12 +21,14 @@ const RemoteInitMarkerFilename = ".erun/bootstrap.yaml"
 // later doctor invocation inside the same runtime pod can detect what
 // was supposed to happen and offer to finish it.
 type RemoteInitMarker struct {
-	Tenant            string `yaml:"tenant"`
-	Environment       string `yaml:"environment"`
-	ProjectRoot       string `yaml:"project_root"`
-	RepositoryURL     string `yaml:"repository_url,omitempty"`
-	NoGit             bool   `yaml:"no_git,omitempty"`
-	BootstrapComplete bool   `yaml:"bootstrap_complete"`
+	Tenant             string `yaml:"tenant"`
+	Environment        string `yaml:"environment"`
+	ProjectRoot        string `yaml:"project_root"`
+	RepositoryURL      string `yaml:"repository_url,omitempty"`
+	CodeCommitHost     string `yaml:"codecommit_host,omitempty"`
+	CodeCommitSSHKeyID string `yaml:"codecommit_ssh_key_id,omitempty"`
+	NoGit              bool   `yaml:"no_git,omitempty"`
+	BootstrapComplete  bool   `yaml:"bootstrap_complete"`
 }
 
 // RemoteInitMarkerPath joins the marker filename onto homeDir. It does
