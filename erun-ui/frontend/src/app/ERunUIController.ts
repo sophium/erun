@@ -68,10 +68,10 @@ import { isNewSessionSelection } from './sessionSelection';
 import {
   MAX_DEBUG_HEIGHT,
   MAX_FILES_WIDTH,
-  MAX_REVIEW_WIDTH,
   MIN_DEBUG_HEIGHT,
   MIN_FILES_WIDTH,
   MIN_REVIEW_WIDTH,
+  computeMaxReviewWidth,
   defaultEnvironmentDialog,
   defaultGlobalConfigDialog,
   defaultManageDialog,
@@ -2192,9 +2192,9 @@ export class ERunUIController {
   }
 
   private clampedReviewWidth(): number {
-    const paneWidth = this.terminalPane?.getBoundingClientRect().width || 0;
-    const maxReviewForPane = paneWidth > 0 ? paneWidth - 370 : MAX_REVIEW_WIDTH;
-    return clamp(this.state.reviewWidth, MIN_REVIEW_WIDTH, Math.max(MIN_REVIEW_WIDTH, Math.min(MAX_REVIEW_WIDTH, maxReviewForPane)));
+    const effectiveSidebar = this.state.sidebarHidden ? 0 : this.state.sidebarWidth;
+    const maxWidth = computeMaxReviewWidth(window.innerWidth, effectiveSidebar);
+    return clamp(this.state.reviewWidth, MIN_REVIEW_WIDTH, maxWidth);
   }
 
   private clampedFilesWidth(): number {
