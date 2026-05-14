@@ -2,6 +2,7 @@ kubectl config use-context 'test-context' >/dev/null &&
 kubectl config set-context --current --namespace='team-local' >/dev/null &&
 cd '<TMP>'
 audit: erun open --dry-run --no-alias-prompt --no-shell --no-snapshot team local
+config: would assign localportrangestart=17000 to team/local
 open: tenant=team environment=local kubernetes-context=test-context remote=false no-shell=true ide=shell
 kubectl --context test-context --namespace team-local get deployment team-devops -o name
 deploying the devops runtime before opening the shell
