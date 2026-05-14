@@ -308,7 +308,6 @@ func TestOpen(t *testing.T) {
 			RepoPath:       "/home/erun/git/team",
 			SSHDEnabled:    true,
 			MCPPort:        17000,
-			APIPort:        17033,
 			SSHPort:        17022,
 		})...)
 		fixture.StubBinary(t, stubsDir, "ssh-keyscan", "[127.0.0.1]:17022 ssh-ed25519 AAAATESTKEY=")
@@ -360,7 +359,6 @@ func TestOpen(t *testing.T) {
 			RepoPath:       "/home/erun/git/team",
 			SSHDEnabled:    true,
 			MCPPort:        17000,
-			APIPort:        17033,
 			SSHPort:        17022,
 		})...)
 		fixture.StubBinary(t, stubsDir, "ssh-keyscan", "[127.0.0.1]:17022 ssh-ed25519 AAAAINTELLIJKEY=")
@@ -562,5 +560,29 @@ func TestOpen(t *testing.T) {
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/refuses_to_bind_when_foreign_process_holds_port", normalize.Apply(result.Combined))
 	})
+
+	t.Run("deployment_match_ignores_missing_api_port", func(t *testing.T) {
+		// Regression for the --intellij short-circuit on tenant-owned
+		// devops charts. The runtime-pod identity matcher must accept a
+		// deployment whose containers expose ERUN_REPO_PATH,
+		// ERUN_SSHD_ENABLED, ERUN_MCP_PORT, and ERUN_SSHD_PORT but not
+		// ERUN_API_PORT — the erun-api service is a separate deployment
+		// with its own port-forward path, so the runtime pod legitimately
+		// omits that env var. Without the fix, every open against a
+		// tenant chart predating ERUN_API_PORT would be flagged as "not
+		// deployed" and either redeploy unnecessarily (shell flow) or
+		// hard-error (--intellij / --vscode flow).
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName: "team-devops",
+			ContainerName:  "team-devops",
+			RepoPath:       "/home/erun/git/team",
+			MCPPort:        17000,
+			SSHPort:        17022,
+		})...)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/deployment_match_ignores_missing_api_port", normalize.Apply(result.Combined))
 
 }

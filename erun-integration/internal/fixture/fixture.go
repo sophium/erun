@@ -569,7 +569,6 @@ type KubectlDeployedStubSpec struct {
 	RepoPath       string
 	SSHDEnabled    bool
 	MCPPort        int
-	APIPort        int
 	SSHPort        int
 }
 
@@ -592,8 +591,8 @@ func StubKubectlDeployed(t testing.TB, stubsDir string, spec KubectlDeployedStub
 	}
 	portsim := PortSimBinary(t)
 	pidFile := filepath.Join(stubsDir, "portsim-pids")
-	deploymentJSON := fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":%q,"env":[{"name":"ERUN_REPO_PATH","value":%q},{"name":"ERUN_SSHD_ENABLED","value":%q},{"name":"ERUN_MCP_PORT","value":"%d"},{"name":"ERUN_API_PORT","value":"%d"},{"name":"ERUN_SSHD_PORT","value":"%d"}],"resources":{"limits":{}}}]}}}}`,
-		spec.ContainerName, spec.RepoPath, formatStubBool(spec.SSHDEnabled), spec.MCPPort, spec.APIPort, spec.SSHPort)
+	deploymentJSON := fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":%q,"env":[{"name":"ERUN_REPO_PATH","value":%q},{"name":"ERUN_SSHD_ENABLED","value":%q},{"name":"ERUN_MCP_PORT","value":"%d"},{"name":"ERUN_SSHD_PORT","value":"%d"}],"resources":{"limits":{}}}]}}}}`,
+		spec.ContainerName, spec.RepoPath, formatStubBool(spec.SSHDEnabled), spec.MCPPort, spec.SSHPort)
 	script := strings.Join([]string{
 		// Find the local port in `port-forward ... LOCAL:REMOTE [...]` argv.
 		// Production passes the mapping as a single positional after the

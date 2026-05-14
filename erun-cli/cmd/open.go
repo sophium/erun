@@ -408,7 +408,6 @@ func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq common.ShellLaunchPara
 		ExpectedRepoPath:   common.RemoteShellWorktreePath(shellReq),
 		ExpectedSSHD:       sshdExpectationForDeployment(r.result),
 		ExpectedMCPPort:    common.MCPPortForResult(r.result),
-		ExpectedAPIPort:    common.APIPortForResult(r.result),
 		ExpectedSSHPort:    common.SSHLocalPortForResult(r.result),
 		ExpectedRuntimePod: r.result.EnvConfig.RuntimePod,
 	})
