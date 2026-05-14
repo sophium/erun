@@ -192,6 +192,38 @@ func ResolveOpen(store OpenStore, params OpenParams) (OpenResult, error) {
 	return resolveOpenWithFinder(store, FindProjectRoot, params)
 }
 
+// EnsureLocalPortRangePersisted freezes the resolver's choice for this env
+// into its config so future opens are stable against alphabetical reshuffles
+// of unrelated tenants/envs. It is a no-op when the env already declares a
+// LocalPortRangeStart. In dry-run mode the assignment is traced but not
+// written to disk. The persisted EnvConfig is returned via the OpenResult so
+// callers can continue using it for the rest of the open flow.
+func EnsureLocalPortRangePersisted(ctx Context, saveEnvConfig func(string, EnvConfig) error, result OpenResult) (OpenResult, error) {
+	if result.EnvConfig.LocalPortRangeStart > 0 {
+		return result, nil
+	}
+	rangeStart := result.LocalPorts.RangeStart
+	if rangeStart == 0 {
+		return result, fmt.Errorf("local port range is not resolved for %s/%s", result.Tenant, result.Environment)
+	}
+	updated := result.EnvConfig
+	updated.LocalPortRangeStart = rangeStart
+	if ctx.DryRun {
+		ctx.Trace(fmt.Sprintf("config: would assign localportrangestart=%d to %s/%s", rangeStart, result.Tenant, result.Environment))
+		result.EnvConfig = updated
+		return result, nil
+	}
+	if saveEnvConfig == nil {
+		return result, fmt.Errorf("persist local port range: env config storage is not wired")
+	}
+	if err := saveEnvConfig(result.Tenant, updated); err != nil {
+		return result, fmt.Errorf("persist local port range: %w", err)
+	}
+	ctx.Trace(fmt.Sprintf("config: assigned localportrangestart=%d to %s/%s", rangeStart, result.Tenant, result.Environment))
+	result.EnvConfig = updated
+	return result, nil
+}
+
 func resolveOpenWithFinder(store OpenStore, findProjectRoot ProjectFinderFunc, params OpenParams) (OpenResult, error) {
 	if store == nil {
 		return OpenResult{}, fmt.Errorf("store is required")

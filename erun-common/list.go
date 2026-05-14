@@ -228,10 +228,6 @@ func APIURLForListEnvironment(tenant TenantConfig, localPorts EnvironmentLocalPo
 
 func listEnvironmentLocalPorts(tenant string, env EnvConfig, portAllocations map[string]EnvironmentLocalPorts) EnvironmentLocalPorts {
 	localPorts := portAllocations[environmentPortKey(tenant, env.Name)]
-	if localPorts.RangeStart != 0 {
-		return localPorts
-	}
-	localPorts = DefaultEnvironmentLocalPorts()
 	if env.SSHD.LocalPort > 0 {
 		localPorts.SSH = env.SSHD.LocalPort
 	}

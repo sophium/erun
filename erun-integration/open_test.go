@@ -416,4 +416,61 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/remote_runtime_image_override", normalize.Apply(result.Combined))
 	})
 
+	t.Run("persisted_local_port_range_is_honoured", func(t *testing.T) {
+		// EnvConfig.LocalPortRangeStart is the durable per-env port
+		// contract. When it is already set on disk, open must derive every
+		// service port from it (MCP 17500, API 17533, SSH 17522) and must
+		// not emit the "config: would assign" trace. Locks the early-return
+		// in EnsureLocalPortRangePersisted (open.go::common helper).
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 17500)
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/persisted_local_port_range_is_honoured", normalize.Apply(result.Combined))
+	})
+
+	t.Run("walker_skips_index_claimed_by_other_tenant", func(t *testing.T) {
+		// When a second env on the host has already persisted
+		// localportrangestart=17000, the alphabetical walker must skip
+		// that index when allocating an unpersisted env. team/dev sorts
+		// before other/staging but the persisted claim wins, so team/dev
+		// resolves to 17100 and the dry-run trace records the would-be
+		// assignment. Locks the cross-tenant claim-respect branch in
+		// ResolveAllEnvironmentLocalPorts.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedSecondaryTenantEnv(t, setup, "other", "staging", 17000)
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/walker_skips_index_claimed_by_other_tenant", normalize.Apply(result.Combined))
+	})
+
+	t.Run("overlapping_persisted_ranges_fail_with_pointer", func(t *testing.T) {
+		// Two envs that persist the same localportrangestart must surface
+		// an ErrLocalPortRangeOverlap pointing at both. The CLI should
+		// fail with a non-zero exit and a message naming both envs and the
+		// range, instead of silently re-allocating one of them. Locks the
+		// overlap path in ResolveAllEnvironmentLocalPorts.
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 17000)
+		fixture.SeedSecondaryTenantEnv(t, setup, "other", "staging", 17000)
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/overlapping_persisted_ranges_fail_with_pointer", normalize.Apply(result.Combined))
+	})
+
+	t.Run("misaligned_persisted_range_fails_with_pointer", func(t *testing.T) {
+		// localportrangestart must align to EnvironmentPortRangeSize=100
+		// boundaries from LowerServicePort=17000. A value like 17050
+		// would make MCP/API/SSH offsets bleed into another env's range,
+		// so the resolver refuses with a clear alignment error instead of
+		// accepting it. Locks environmentPortIndexForRangeStart's
+		// validation branch.
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 17050)
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/misaligned_persisted_range_fails_with_pointer", normalize.Apply(result.Combined))
+	})
+
 }

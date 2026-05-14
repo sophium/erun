@@ -1,0 +1,2 @@
+audit: erun open --dry-run --no-alias-prompt --no-shell team dev
+local port range start 17000 is claimed by both other/staging and team/dev; edit localportrangestart in one of the env configs to resolve

@@ -126,14 +126,13 @@ func remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot string) E
 }
 
 func (s bootstrapRunner) remoteRepositoryLocalPorts(tenant, envName string) EnvironmentLocalPorts {
-	ports := DefaultEnvironmentLocalPorts()
 	portStore, ok := s.Store.(environmentPortStore)
 	if !ok {
-		return ports
+		return EnvironmentLocalPorts{}
 	}
 	resolved, err := ResolveEnvironmentLocalPorts(portStore, tenant, envName)
 	if err != nil {
-		return ports
+		return EnvironmentLocalPorts{}
 	}
 	return resolved
 }
