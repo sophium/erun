@@ -51,6 +51,9 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 
 	if ctx.DryRun {
 		args := kubectlMCPPortForwardArgs(result, localPort)
+		if previewed, port := previewAdoptOrConflict(ctx, "mcp", localPort, args); previewed {
+			return port, nil
+		}
 		ctx.TraceCommand("", "kubectl", args...)
 		return localPort, nil
 	}
@@ -59,14 +62,46 @@ func ensureMCPPortForward(ctx common.Context, result common.OpenResult) (int, er
 		return localPort, nil
 	}
 	stopStaleMCPPortForward(state, expectedState, localPort)
+	args := kubectlMCPPortForwardArgs(result, localPort)
 	if canConnectLocalPort(localPort) {
-		return 0, fmt.Errorf("local MCP port %d is already in use", localPort)
+		adopted, err := adoptForeignMCPPortForward(ctx, statePath, expectedState, args, localPort)
+		if err != nil {
+			return 0, err
+		}
+		if adopted {
+			return localPort, nil
+		}
 	}
 
-	args := kubectlMCPPortForwardArgs(result, localPort)
 	ctx.TraceCommand("", "kubectl", args...)
 
 	return startMCPPortForward(statePath, expectedState, args, localPort)
+}
+
+// adoptForeignMCPPortForward inspects the process currently holding
+// localPort and, if its argv matches the kubectl port-forward erun would
+// start itself, writes a fresh state file claiming that PID so subsequent
+// opens reuse it instead of fighting over the port. Returns adopted=true
+// when the PID was claimed, adopted=false when we could not identify the
+// holder (e.g. lsof missing). A non-nil error is returned only when the
+// holder is identified but is *not* a matching kubectl port-forward, so
+// the caller can surface a precise "port held by X" error.
+func adoptForeignMCPPortForward(ctx common.Context, statePath string, expected mcpPortForwardState, expectedArgs []string, localPort int) (bool, error) {
+	pid, argv, ok := findLocalPortHolder(localPort)
+	if !ok {
+		return false, fmt.Errorf("local MCP port %d is already in use", localPort)
+	}
+	if !argvMatchesExpectedKubectlPortForward(argv, expectedArgs) {
+		return false, fmt.Errorf("local MCP port %d is already in use by %s", localPort, formatHolderForError(pid, argv))
+	}
+	adopted := expected
+	adopted.ProcessID = pid
+	adopted.LogPath = mcpPortForwardLogPath(statePath)
+	if err := saveMCPPortForwardState(statePath, adopted); err != nil {
+		return false, fmt.Errorf("adopt MCP port-forward (PID %d): %w", pid, err)
+	}
+	ctx.Trace(fmt.Sprintf("mcp: adopted existing kubectl port-forward on 127.0.0.1:%d (PID %d)", localPort, pid))
+	return true, nil
 }
 
 func stopStaleMCPPortForward(state, expectedState mcpPortForwardState, localPort int) {
@@ -144,15 +179,11 @@ func kubectlMCPPortForwardArgs(result common.OpenResult, localPort int) []string
 }
 
 func mcpPortForwardStatePath(tenant, environment string) (string, error) {
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(cacheDir, "erun", "mcp", tenant, environment+".json"), nil
+	return portForwardStatePath("mcp", tenant, environment)
 }
 
 func mcpPortForwardLogPath(statePath string) string {
-	return strings.TrimSuffix(statePath, filepath.Ext(statePath)) + ".log"
+	return portForwardLogPath(statePath)
 }
 
 func loadMCPPortForwardState(path string) (mcpPortForwardState, error) {
