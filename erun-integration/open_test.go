@@ -582,7 +582,14 @@ func TestOpen(t *testing.T) {
 			MCPPort:        17000,
 			SSHPort:        17022,
 		})...)
+		// Keep the adopt-or-conflict probe silent: this scenario is about
+		// the deployment-match path, not orphan adoption, and we don't
+		// want the developer's host state to leak a "would refuse" line
+		// into the golden when port 17000 is in use locally.
+		stubLsofNoHolder(t, stubsDir)
+		envVars = append(envVars, fixture.StubEnv(stubsDir, "lsof", "ps")...)
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/deployment_match_ignores_missing_api_port", normalize.Apply(result.Combined))
+	})
 
 }
