@@ -57,7 +57,49 @@ func stubKubectlNotFound(t *testing.T, setup env.Setup) []string {
 		Stderr:   `Error from server (NotFound): deployments.apps "team-devops" not found`,
 		ExitCode: 1,
 	})
-	return append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+	stubLsofNoHolder(t, stubs)
+	return append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "lsof", "ps")...)
+}
+
+// stubAdoptHolderProbes overwrites the lsof + ps stubs that
+// stubKubectlNotFound installed with versions that present a fake port
+// holder for one specific TCP port. The lsof stub returns holderPID only
+// when the queried -iTCP:<port> matches holderPort; for every other port
+// it exits 1 (no holder), so the API/SSHD probes for sibling ports stay
+// silent. The ps stub returns the configured argv only for holderPID.
+//
+// Returns nothing — the env vars are already wired by the kubectl helper
+// because the two stubs live in the same directory.
+func stubAdoptHolderProbes(t *testing.T, setup env.Setup, holderPID, holderPort int, holderArgv string) {
+	t.Helper()
+	stubs := setup.Cwd + "/stubs"
+	lsofScript := fmt.Sprintf(`for arg in "$@"; do
+    case "$arg" in
+        -iTCP:%d) printf '%%s\n' '%d'; exit 0 ;;
+    esac
+done
+exit 1
+`, holderPort, holderPID)
+	fixture.StubBinaryWithScript(t, stubs, "lsof", lsofScript)
+	psScript := fmt.Sprintf(`pid=
+prev=
+for arg in "$@"; do
+    if [ "$prev" = "-p" ]; then
+        pid="$arg"
+    fi
+    prev="$arg"
+done
+if [ "$pid" = "%d" ]; then
+    printf '%%s\n' %s
+    exit 0
+fi
+exit 1
+`, holderPID, shellQuote(holderArgv))
+	fixture.StubBinaryWithScript(t, stubs, "ps", psScript)
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
 // stubKubectlGenericError writes a kubectl stub that exits non-zero with a
@@ -72,7 +114,24 @@ func stubKubectlGenericError(t *testing.T, setup env.Setup) []string {
 		Stderr:   `Unable to connect to the server: dial tcp 10.0.0.1:443: i/o timeout`,
 		ExitCode: 2,
 	})
-	return append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+	stubLsofNoHolder(t, stubs)
+	return append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "lsof", "ps")...)
+}
+
+// stubLsofNoHolder writes lsof + ps stubs that report no holder for any
+// queried port. Integration scenarios that don't intentionally drive the
+// adopt-or-conflict probe install these stubs to keep the probe silent and
+// the resulting golden host-independent: without them, a developer with a
+// leftover `kubectl port-forward` on one of erun's default ports causes
+// the probe to fire mid-scenario and corrupt the captured trace.
+func stubLsofNoHolder(t *testing.T, stubsDir string) {
+	t.Helper()
+	fixture.StubBinaryAdvanced(t, stubsDir, "lsof", fixture.StubBinarySpec{
+		ExitCode: 1,
+	})
+	fixture.StubBinaryAdvanced(t, stubsDir, "ps", fixture.StubBinarySpec{
+		ExitCode: 1,
+	})
 }
 
 func TestOpen(t *testing.T) {
@@ -471,6 +530,37 @@ func TestOpen(t *testing.T) {
 		envVars := stubKubectlNotFound(t, setup)
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/misaligned_persisted_range_fails_with_pointer", normalize.Apply(result.Combined))
+	})
+
+	t.Run("adopts_existing_kubectl_port_forward", func(t *testing.T) {
+		// Regression for the orphan-kubectl-can't-adopt failure: when the
+		// per-env state file is missing but a long-lived `kubectl
+		// port-forward` is already serving the env's MCP port, erun must
+		// recognise the holder as its own and reuse it instead of erroring
+		// with "already in use". The probe runs in dry-run too, so we lock
+		// the decision in the golden via the "would adopt" trace.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlNotFound(t, setup)
+		stubAdoptHolderProbes(t, setup, 99999, 17000,
+			"kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address 127.0.0.1")
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/adopts_existing_kubectl_port_forward", normalize.Apply(result.Combined))
+	})
+
+	t.Run("refuses_to_bind_when_foreign_process_holds_port", func(t *testing.T) {
+		// When the port is held by a process whose argv does not look like
+		// the kubectl port-forward erun would start, adoption is unsafe.
+		// erun must trace what is holding the port (PID + argv) so the
+		// user sees what to kill, instead of the bare "already in use"
+		// message that gave nothing actionable in the prior UI loop.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlNotFound(t, setup)
+		stubAdoptHolderProbes(t, setup, 88888, 17000,
+			"/usr/local/bin/some-foreign-process --bind 127.0.0.1:17000")
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/refuses_to_bind_when_foreign_process_holds_port", normalize.Apply(result.Combined))
 	})
 
 }

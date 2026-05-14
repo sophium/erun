@@ -45,17 +45,47 @@ func ensureSSHDPortForward(ctx common.Context, result common.OpenResult) (common
 		return info, nil
 	}
 	stopStaleSSHDPortForward(state, expectedState, info.Port)
-	if canConnectLocalPort(info.Port) {
-		return common.SSHConnectionInfo{}, fmt.Errorf("local SSH port %d is already in use", info.Port)
-	}
-
 	args := kubectlPortForwardArgs(result, info.Port)
-	ctx.TraceCommand("", "kubectl", args...)
 	if ctx.DryRun {
+		if previewed, _ := previewAdoptOrConflict(ctx, "sshd", info.Port, args); previewed {
+			return info, nil
+		}
+		ctx.TraceCommand("", "kubectl", args...)
 		return info, nil
 	}
+	if canConnectLocalPort(info.Port) {
+		adopted, err := adoptForeignSSHDPortForward(ctx, statePath, expectedState, args, info)
+		if err != nil {
+			return common.SSHConnectionInfo{}, err
+		}
+		if adopted {
+			return info, nil
+		}
+	}
+
+	ctx.TraceCommand("", "kubectl", args...)
 
 	return startSSHDPortForward(statePath, expectedState, args, info)
+}
+
+// adoptForeignSSHDPortForward mirrors adoptForeignMCPPortForward for the
+// SSHD forward. See that function for the contract.
+func adoptForeignSSHDPortForward(ctx common.Context, statePath string, expected sshdPortForwardState, expectedArgs []string, info common.SSHConnectionInfo) (bool, error) {
+	pid, argv, ok := findLocalPortHolder(info.Port)
+	if !ok {
+		return false, fmt.Errorf("local SSH port %d is already in use", info.Port)
+	}
+	if !argvMatchesExpectedKubectlPortForward(argv, expectedArgs) {
+		return false, fmt.Errorf("local SSH port %d is already in use by %s", info.Port, formatHolderForError(pid, argv))
+	}
+	adopted := expected
+	adopted.ProcessID = pid
+	adopted.LogPath = sshdPortForwardLogPath(statePath)
+	if err := saveSSHDPortForwardState(statePath, adopted); err != nil {
+		return false, fmt.Errorf("adopt SSHD port-forward (PID %d): %w", pid, err)
+	}
+	ctx.Trace(fmt.Sprintf("sshd: adopted existing kubectl port-forward on 127.0.0.1:%d (PID %d)", info.Port, pid))
+	return true, nil
 }
 
 func stopStaleSSHDPortForward(state, expectedState sshdPortForwardState, localPort int) {
@@ -133,15 +163,11 @@ func kubectlPortForwardArgs(result common.OpenResult, localPort int) []string {
 }
 
 func sshdPortForwardStatePath(tenant, environment string) (string, error) {
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(cacheDir, "erun", "sshd", tenant, environment+".json"), nil
+	return portForwardStatePath("sshd", tenant, environment)
 }
 
 func sshdPortForwardLogPath(statePath string) string {
-	return strings.TrimSuffix(statePath, filepath.Ext(statePath)) + ".log"
+	return portForwardLogPath(statePath)
 }
 
 func loadSSHDPortForwardState(path string) (sshdPortForwardState, error) {
