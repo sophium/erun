@@ -61,7 +61,7 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 			if err != nil {
 				return err
 			}
-			result, err = applyOpenSnapshotPreference(result, snapshotOverride, saveEnvConfig)
+			result, err = prepareOpenResultForRun(ctx, result, snapshotOverride, saveEnvConfig)
 			if err != nil {
 				return err
 			}
@@ -104,6 +104,14 @@ type openOptions struct {
 	RuntimeImage     string
 	AllowLocalBuilds bool
 	SaveEnvConfig    func(string, common.EnvConfig) error
+}
+
+func prepareOpenResultForRun(ctx common.Context, result common.OpenResult, snapshotOverride *bool, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
+	result, err := applyOpenSnapshotPreference(result, snapshotOverride, saveEnvConfig)
+	if err != nil {
+		return common.OpenResult{}, err
+	}
+	return common.EnsureLocalPortRangePersisted(ctx, saveEnvConfig, result)
 }
 
 func applyOpenSnapshotPreference(result common.OpenResult, enabled *bool, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
@@ -400,7 +408,6 @@ func (r *resolvedOpenRunner) shouldDeployRuntime(shellReq common.ShellLaunchPara
 		ExpectedRepoPath:   common.RemoteShellWorktreePath(shellReq),
 		ExpectedSSHD:       sshdExpectationForDeployment(r.result),
 		ExpectedMCPPort:    common.MCPPortForResult(r.result),
-		ExpectedAPIPort:    common.APIPortForResult(r.result),
 		ExpectedSSHPort:    common.SSHLocalPortForResult(r.result),
 		ExpectedRuntimePod: r.result.EnvConfig.RuntimePod,
 	})

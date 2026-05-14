@@ -141,7 +141,6 @@ type KubernetesDeploymentCheckParams struct {
 	ExpectedRepoPath   string
 	ExpectedSSHD       *bool
 	ExpectedMCPPort    int
-	ExpectedAPIPort    int
 	ExpectedSSHPort    int
 	ExpectedRuntimePod RuntimePodResources
 }
@@ -1958,7 +1957,6 @@ func hasExpectedDeploymentSettings(params KubernetesDeploymentCheckParams) bool 
 	return strings.TrimSpace(params.ExpectedRepoPath) != "" ||
 		params.ExpectedSSHD != nil ||
 		params.ExpectedMCPPort > 0 ||
-		params.ExpectedAPIPort > 0 ||
 		params.ExpectedSSHPort > 0 ||
 		params.ExpectedRuntimePod != (RuntimePodResources{})
 }
@@ -2026,17 +2024,26 @@ type deploymentExpectedMatches struct {
 	repoPath   bool
 	sshd       bool
 	mcpPort    bool
-	apiPort    bool
 	sshPort    bool
 	runtimePod bool
 }
 
+// expectedDeploymentMatches seeds the per-field match state. Each field
+// starts true when the corresponding expectation is unset (so a caller
+// that didn't ask about it doesn't gate the result), and false otherwise
+// — apply() flips it back to true on the first container env var that
+// confirms the expected value.
+//
+// ERUN_API_PORT is deliberately not part of this matcher: the erun-api
+// service is a separate Kubernetes deployment with its own port-forward
+// path and presence check. Tenant-owned <tenant>-devops charts can
+// legitimately omit ERUN_API_PORT from the runtime pod, and demanding it
+// here would force a redeploy on every open for those tenants.
 func expectedDeploymentMatches(params KubernetesDeploymentCheckParams) deploymentExpectedMatches {
 	return deploymentExpectedMatches{
 		repoPath:   strings.TrimSpace(params.ExpectedRepoPath) == "",
 		sshd:       params.ExpectedSSHD == nil,
 		mcpPort:    params.ExpectedMCPPort <= 0,
-		apiPort:    params.ExpectedAPIPort <= 0,
 		sshPort:    params.ExpectedSSHPort <= 0,
 		runtimePod: params.ExpectedRuntimePod == (RuntimePodResources{}),
 	}
@@ -2050,15 +2057,13 @@ func (m *deploymentExpectedMatches) apply(params KubernetesDeploymentCheckParams
 		m.sshd = matchesExpectedBool(value, params.ExpectedSSHD)
 	case "ERUN_MCP_PORT":
 		m.mcpPort = matchesExpectedPort(value, params.ExpectedMCPPort)
-	case "ERUN_API_PORT":
-		m.apiPort = matchesExpectedPort(value, params.ExpectedAPIPort)
 	case "ERUN_SSHD_PORT":
 		m.sshPort = matchesExpectedPort(value, params.ExpectedSSHPort)
 	}
 }
 
 func (m deploymentExpectedMatches) ok() bool {
-	return m.repoPath && m.sshd && m.mcpPort && m.apiPort && m.sshPort && m.runtimePod
+	return m.repoPath && m.sshd && m.mcpPort && m.sshPort && m.runtimePod
 }
 
 func matchesExpectedRepoPath(value, expected string) bool {

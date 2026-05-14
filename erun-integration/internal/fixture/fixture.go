@@ -56,6 +56,70 @@ func SeedTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 	)
 }
 
+// SeedTenantEnvWithLocalPortRangeStart writes the same minimal config tree
+// as SeedTenantEnv but persists a fixed localportrangestart on the env
+// config so commands that key off EnvConfig.LocalPortRangeStart (notably
+// `erun open`) exercise the persisted-range branch instead of the resolver's
+// alphabetical walker.
+func SeedTenantEnvWithLocalPortRangeStart(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+setup.Cwd+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+setup.Cwd+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"runtimeversion: 1.0.0\n"+
+			"localportrangestart: "+strconv.Itoa(rangeStart)+"\n",
+	)
+}
+
+// SeedSecondaryTenantEnv writes a second tenant/env into an already-seeded
+// XDG tree so resolver scenarios can exercise cross-tenant interactions
+// (walker skip, overlap detection) without overwriting the primary tenant.
+// Callers may set rangeStart > 0 to persist localportrangestart on the
+// secondary env; pass 0 to leave it unpersisted.
+func SeedSecondaryTenantEnv(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+setup.Cwd+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	envContents := "name: " + environment + "\n" +
+		"repopath: " + setup.Cwd + "\n" +
+		"kubernetescontext: test-context\n" +
+		"containerregistry: registry.example/test\n" +
+		"runtimeversion: 1.0.0\n"
+	if rangeStart > 0 {
+		envContents += "localportrangestart: " + strconv.Itoa(rangeStart) + "\n"
+	}
+	mustWrite(t, filepath.Join(envDir, "config.yaml"), envContents)
+}
+
 // SeedTenantEnvWithSnapshot writes the same minimal config tree as
 // SeedTenantEnv but persists snapshot=<enabled> on the env config so
 // commands that key off EnvConfig.SnapshotEnabled() (notably `erun open`)
@@ -505,7 +569,6 @@ type KubectlDeployedStubSpec struct {
 	RepoPath       string
 	SSHDEnabled    bool
 	MCPPort        int
-	APIPort        int
 	SSHPort        int
 }
 
@@ -528,8 +591,8 @@ func StubKubectlDeployed(t testing.TB, stubsDir string, spec KubectlDeployedStub
 	}
 	portsim := PortSimBinary(t)
 	pidFile := filepath.Join(stubsDir, "portsim-pids")
-	deploymentJSON := fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":%q,"env":[{"name":"ERUN_REPO_PATH","value":%q},{"name":"ERUN_SSHD_ENABLED","value":%q},{"name":"ERUN_MCP_PORT","value":"%d"},{"name":"ERUN_API_PORT","value":"%d"},{"name":"ERUN_SSHD_PORT","value":"%d"}],"resources":{"limits":{}}}]}}}}`,
-		spec.ContainerName, spec.RepoPath, formatStubBool(spec.SSHDEnabled), spec.MCPPort, spec.APIPort, spec.SSHPort)
+	deploymentJSON := fmt.Sprintf(`{"spec":{"template":{"spec":{"containers":[{"name":%q,"env":[{"name":"ERUN_REPO_PATH","value":%q},{"name":"ERUN_SSHD_ENABLED","value":%q},{"name":"ERUN_MCP_PORT","value":"%d"},{"name":"ERUN_SSHD_PORT","value":"%d"}],"resources":{"limits":{}}}]}}}}`,
+		spec.ContainerName, spec.RepoPath, formatStubBool(spec.SSHDEnabled), spec.MCPPort, spec.SSHPort)
 	script := strings.Join([]string{
 		// Find the local port in `port-forward ... LOCAL:REMOTE [...]` argv.
 		// Production passes the mapping as a single positional after the

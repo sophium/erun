@@ -81,20 +81,21 @@ type TenantConfig struct {
 }
 
 type EnvConfig struct {
-	Name               string
-	RepoPath           string
-	KubernetesContext  string
-	ContainerRegistry  string
-	CloudProviderAlias string                  `yaml:"cloudprovideralias,omitempty"`
-	ManagedCloud       bool                    `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
-	RuntimeVersion     string                  `yaml:"runtimeversion,omitempty"`
-	RuntimePod         RuntimePodResources     `yaml:"runtimepod,omitempty"`
-	SSHD               SSHDConfig              `yaml:"sshd,omitempty"`
-	Idle               EnvironmentIdleConfig   `yaml:"idle,omitempty"`
-	Claude             EnvironmentClaudeConfig `yaml:"claude,omitempty" json:"claude,omitempty"`
-	AITool             string                  `yaml:"aitool,omitempty" json:"aiTool,omitempty"`
-	Remote             bool                    `yaml:"remote,omitempty"`
-	Snapshot           *bool                   `yaml:"snapshot,omitempty"`
+	Name                string
+	RepoPath            string
+	KubernetesContext   string
+	ContainerRegistry   string
+	CloudProviderAlias  string                  `yaml:"cloudprovideralias,omitempty"`
+	ManagedCloud        bool                    `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
+	RuntimeVersion      string                  `yaml:"runtimeversion,omitempty"`
+	RuntimePod          RuntimePodResources     `yaml:"runtimepod,omitempty"`
+	SSHD                SSHDConfig              `yaml:"sshd,omitempty"`
+	Idle                EnvironmentIdleConfig   `yaml:"idle,omitempty"`
+	Claude              EnvironmentClaudeConfig `yaml:"claude,omitempty" json:"claude,omitempty"`
+	AITool              string                  `yaml:"aitool,omitempty" json:"aiTool,omitempty"`
+	Remote              bool                    `yaml:"remote,omitempty"`
+	Snapshot            *bool                   `yaml:"snapshot,omitempty"`
+	LocalPortRangeStart int                     `yaml:"localportrangestart,omitempty" json:"localPortRangeStart,omitempty"`
 }
 
 func (c TenantConfig) SnapshotEnabled() bool {
