@@ -14,11 +14,6 @@ audit: erun build --release
 release: branch= mode=prerelease version=<VERSION>
 docker image: ghcr.io/sophium/api:<VERSION>
 stage: release
-write <TMP>
-  apiVersion: v2
-  appVersion: <VERSION>
-  name: api
-  version: <VERSION>
 release tag already exists at HEAD; skipping <VERSION>
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-arm64
