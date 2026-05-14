@@ -6,7 +6,6 @@ import {
   FILES_WIDTH_STORAGE_KEY,
   MAX_DEBUG_HEIGHT,
   MAX_FILES_WIDTH,
-  MAX_REVIEW_WIDTH,
   MAX_SIDEBAR_WIDTH,
   MIN_DEBUG_HEIGHT,
   MIN_FILES_WIDTH,
@@ -14,6 +13,7 @@ import {
   MIN_SIDEBAR_WIDTH,
   REVIEW_WIDTH_STORAGE_KEY,
   SIDEBAR_WIDTH_STORAGE_KEY,
+  computeMaxReviewWidth,
   type AppState,
 } from './state';
 import { clamp, saveBoolean, saveNumber } from './storage';
@@ -68,7 +68,9 @@ export function startReviewResize(state: AppState, event: React.MouseEvent<HTMLE
     if (!paneRect) {
       return;
     }
-    state.reviewWidth = clamp(paneRect.right - moveEvent.clientX, MIN_REVIEW_WIDTH, MAX_REVIEW_WIDTH);
+    const effectiveSidebar = state.sidebarHidden ? 0 : state.sidebarWidth;
+    const maxWidth = computeMaxReviewWidth(window.innerWidth, effectiveSidebar);
+    state.reviewWidth = clamp(paneRect.right - moveEvent.clientX, MIN_REVIEW_WIDTH, maxWidth);
     callbacks.applyLayoutVars();
     callbacks.emit();
     callbacks.queueTerminalResize();

@@ -39,9 +39,7 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 	ctx.TraceCommand("", "kubectl", checkArgs...)
 
 	if ctx.DryRun {
-		args := kubectlAPIPortForwardArgs(result, localPort)
-		ctx.TraceCommand("", "kubectl", args...)
-		return localPort, nil
+		return ensureAPIPortForwardDryRun(ctx, result, localPort)
 	}
 
 	exists, err := checkAPIDeploymentPresent(checkArgs)
@@ -58,14 +56,51 @@ func ensureAPIPortForward(ctx common.Context, result common.OpenResult) (int, er
 		return localPort, nil
 	}
 	stopStaleMCPPortForward(state, expectedState, localPort)
+	args := kubectlAPIPortForwardArgs(result, localPort)
 	if canConnectLocalPort(localPort) {
-		return 0, fmt.Errorf("local API port %d is already in use", localPort)
+		adopted, err := adoptForeignAPIPortForward(ctx, statePath, expectedState, args, localPort)
+		if err != nil {
+			return 0, err
+		}
+		if adopted {
+			return localPort, nil
+		}
 	}
 
-	args := kubectlAPIPortForwardArgs(result, localPort)
 	ctx.TraceCommand("", "kubectl", args...)
 
 	return startAPIPortForward(statePath, expectedState, args, localPort)
+}
+
+func ensureAPIPortForwardDryRun(ctx common.Context, result common.OpenResult, localPort int) (int, error) {
+	args := kubectlAPIPortForwardArgs(result, localPort)
+	if previewed, port := previewAdoptOrConflict(ctx, "api", localPort, args); previewed {
+		return port, nil
+	}
+	ctx.TraceCommand("", "kubectl", args...)
+	return localPort, nil
+}
+
+// adoptForeignAPIPortForward mirrors adoptForeignMCPPortForward for the
+// erun-api service forward (target shape is service/erun-api rather than
+// deployment/<release>-devops). See adoptForeignMCPPortForward for the
+// contract.
+func adoptForeignAPIPortForward(ctx common.Context, statePath string, expected mcpPortForwardState, expectedArgs []string, localPort int) (bool, error) {
+	pid, argv, ok := findLocalPortHolder(localPort)
+	if !ok {
+		return false, fmt.Errorf("local API port %d is already in use", localPort)
+	}
+	if !argvMatchesExpectedKubectlPortForward(argv, expectedArgs) {
+		return false, fmt.Errorf("local API port %d is already in use by %s", localPort, formatHolderForError(pid, argv))
+	}
+	adopted := expected
+	adopted.ProcessID = pid
+	adopted.LogPath = mcpPortForwardLogPath(statePath)
+	if err := saveMCPPortForwardState(statePath, adopted); err != nil {
+		return false, fmt.Errorf("adopt API port-forward (PID %d): %w", pid, err)
+	}
+	ctx.Trace(fmt.Sprintf("api: adopted existing kubectl port-forward on 127.0.0.1:%d (PID %d)", localPort, pid))
+	return true, nil
 }
 
 func kubectlAPIDeploymentCheckArgs(kubernetesContext, namespace string) []string {
@@ -157,11 +192,7 @@ func kubectlAPIPortForwardArgs(result common.OpenResult, localPort int) []string
 }
 
 func apiPortForwardStatePath(tenant, environment string) (string, error) {
-	path, err := mcpPortForwardStatePath(tenant, environment)
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(filepath.Dir(filepath.Dir(path)), "api", tenant, filepath.Base(path)), nil
+	return portForwardStatePath("api", tenant, environment)
 }
 
 func canReachLocalAPIEndpoint(port int) bool {

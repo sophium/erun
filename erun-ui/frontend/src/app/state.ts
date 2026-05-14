@@ -19,8 +19,15 @@ export const MIN_SIDEBAR_WIDTH = 248;
 export const MAX_SIDEBAR_WIDTH = 520;
 export const DEFAULT_SIDEBAR_WIDTH = 338;
 export const MIN_REVIEW_WIDTH = 420;
-export const MAX_REVIEW_WIDTH = 920;
+export const MAX_REVIEW_WIDTH = 1400;
 export const DEFAULT_REVIEW_WIDTH = 620;
+const REVIEW_GRID_TERMINAL_MIN_WIDTH = 360;
+const REVIEW_GRID_DIVIDER_WIDTH = 10;
+
+export function computeMaxReviewWidth(viewportWidth: number, effectiveSidebarWidth: number): number {
+  const fittable = viewportWidth - effectiveSidebarWidth - REVIEW_GRID_TERMINAL_MIN_WIDTH - REVIEW_GRID_DIVIDER_WIDTH;
+  return Math.max(MIN_REVIEW_WIDTH, Math.min(MAX_REVIEW_WIDTH, fittable));
+}
 export const MIN_FILES_WIDTH = 220;
 export const MAX_FILES_WIDTH = 460;
 export const DEFAULT_FILES_WIDTH = 300;
