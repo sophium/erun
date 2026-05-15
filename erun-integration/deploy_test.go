@@ -280,6 +280,50 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_with_managed_cloud_traces_helm_set_strings", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_with_aws_claude_models_traces_set_strings", func(t *testing.T) {
+		// Exercises eruncommon.helmClaudeSetArgs Models + MaxOutputTokens
+		// branches and EnvironmentClaudeConfig.NormalizedModels. With
+		// claude.usebedrock=true, claude.models=[opus,sonnet,haiku] and
+		// claude.maxoutputtokens=8192 set on the env, the resolved helm
+		// command must include --set-string claude.useBedrock=1,
+		// --set-string claude.availableModels=opus,sonnet,haiku and
+		// --set-string claude.maxOutputTokens=8192.
+		setup := env.New(t)
+		seedCloudContextConfig(t, setup, "edge")
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "managed")
+		envDir := filepath.Join(tenantDir, "prod")
+		for _, dir := range []string{tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(tenantDir, "config.yaml"),
+			[]byte("name: managed\nprojectroot: "+setup.Cwd+"\ndefaultenvironment: prod\n"), 0o644); err != nil {
+			t.Fatalf("tenant cfg: %v", err)
+		}
+		envBody := "name: prod\n" +
+			"repopath: " + setup.Cwd + "\n" +
+			"kubernetescontext: edge\n" +
+			"containerregistry: registry.example/test\n" +
+			"runtimeversion: 1.0.0\n" +
+			"managedcloud: true\n" +
+			"cloudprovideralias: dev\n" +
+			"claude:\n" +
+			"  usebedrock: true\n" +
+			"  models: [opus, sonnet, haiku]\n" +
+			"  maxoutputtokens: 8192\n"
+		if err := os.WriteFile(filepath.Join(envDir, "config.yaml"), []byte(envBody), 0o644); err != nil {
+			t.Fatalf("env cfg: %v", err)
+		}
+		fixture.SeedDevopsRepo(t, setup, "managed", "prod")
+		result := erun.Run(t, []string{"deploy", "managed", "prod", "--version", "1.0.0", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_with_aws_claude_models_traces_set_strings", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_helm_pending_recovery_via_auto_recover_env", func(t *testing.T) {
 		// Exercises wrapHelmDeployWithReleaseRecovery + the production
 		// helm-recovery path: a stubbed `helm` exits with the pending
