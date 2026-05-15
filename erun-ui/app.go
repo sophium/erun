@@ -10,11 +10,13 @@ import (
 )
 
 const (
-	terminalOutputEvent   = "terminal-output"
-	terminalExitEvent     = "terminal-exit"
-	appStatusEvent        = "app-status"
-	mcpReconnectLineEvent = "mcp-reconnect-line"
-	appSessionEnvVar      = "ERUN_UI_SESSION"
+	terminalOutputEvent         = "terminal-output"
+	terminalExitEvent           = "terminal-exit"
+	appStatusEvent              = "app-status"
+	mcpReconnectLineEvent       = "mcp-reconnect-line"
+	environmentInitializedEvent = "environment-initialized"
+	environmentsChangedEvent    = "environments-changed"
+	appSessionEnvVar            = "ERUN_UI_SESSION"
 )
 
 type erunUIStore interface {
@@ -77,6 +79,7 @@ type App struct {
 	actionQueueMu             sync.Mutex
 	actionQueues              map[string]*envActionQueue
 	actionCancels             map[string]context.CancelFunc
+	configWatcher             *configWatcher
 }
 
 func NewApp(deps erunUIDeps) *App {
@@ -206,9 +209,11 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	configureAppIdentity("ERun")
 	a.startActivityPollers()
+	a.startConfigWatcher()
 }
 
 func (a *App) shutdown(context.Context) {
+	a.stopConfigWatcher()
 	a.stopActivityPollers()
 	a.stopActionRunners()
 	a.mu.Lock()

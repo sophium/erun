@@ -304,6 +304,15 @@ var activityDeployedLineRe = regexp.MustCompile(`^==> Deployed ([^/\s]+)/([^/\s]
 // environment.
 var activitySkippingLineRe = regexp.MustCompile(`^==> Skipping ([^/\s]+)/([^/\s]+)\b`)
 
+// activityInitializedLineRe matches the `==> Initialized tenant/env`
+// trace emitted by RunBootstrapInit at successful completion.
+// Captures: tenant, environment. See erun-ui/AGENTS.md § "Command
+// Completion And State-Refresh Wiring" for why this trace line is the
+// completion signal instead of PTY exit: `erun init` runs piped into
+// the shared Local shell PTY (via runErunCommandInLocal), so the PTY
+// does not exit when init finishes.
+var activityInitializedLineRe = regexp.MustCompile(`^==> Initialized ([^/\s]+)/([^/\s]+)\b`)
+
 // newActivityTraceLineHandler scans PTY output for trace lines emitted by
 // erun deploy and updates the activity queue accordingly.
 //
@@ -339,6 +348,10 @@ func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKi
 		}
 		if match := activitySkippingLineRe.FindStringSubmatch(line); match != nil {
 			app.finishDeployByTenantEnv(selection, match[1], match[2], activityQueueStatusSkipped, line)
+			return
+		}
+		if match := activityInitializedLineRe.FindStringSubmatch(line); match != nil {
+			app.emitEnvironmentInitialized(match[1], match[2])
 			return
 		}
 		switch {
@@ -683,10 +696,10 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 // matchers are intentionally broad — any of them firing means the user
 // is past the setup phase and a parallel queued action can safely run.
 var (
-	sessionReadyDeployedRe   = regexp.MustCompile(`^==> Deployed `)
-	sessionReadyFailedRe     = regexp.MustCompile(`^==> Deploy failed`)
-	sessionReadySkippedRe    = regexp.MustCompile(`^==> Skipping `)
-	sessionReadyAttachedRe   = regexp.MustCompile(`^Defaulted container "[^"]+" out of:`)
+	sessionReadyDeployedRe    = regexp.MustCompile(`^==> Deployed `)
+	sessionReadyFailedRe      = regexp.MustCompile(`^==> Deploy failed`)
+	sessionReadySkippedRe     = regexp.MustCompile(`^==> Skipping `)
+	sessionReadyAttachedRe    = regexp.MustCompile(`^Defaulted container "[^"]+" out of:`)
 	sessionReadyShellPromptRe = regexp.MustCompile(`[\w][\w.-]*@[\w][\w.-]*:[~/].*[\$#]\s*$`)
 )
 
@@ -722,7 +735,7 @@ func stripActivityTraceANSI(s string) string {
 			j := i + 2
 			for j < len(runes) {
 				r := runes[j]
-				if (r >= '@' && r <= '~') {
+				if r >= '@' && r <= '~' {
 					j++
 					break
 				}

@@ -1236,6 +1236,7 @@ remote-init-marker:
   chmod 600 '$HOME/.erun/team/dev/bootstrap.yaml'
 mkdir -p <TMP>
 write-yaml <TMP>
+==> Initialized team/dev
 Configuration initialized OK
 ensure-agent-instructions
 ensure-claude-settings

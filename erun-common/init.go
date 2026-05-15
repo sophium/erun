@@ -918,6 +918,9 @@ func (s *bootstrapRunState) finish() {
 	s.result.ERunConfig = s.toolConfig
 	s.result.TenantConfig = s.tenantConfig
 	s.result.EnvConfig = s.envConfig
+	if s.tenant != "" && s.envName != "" {
+		s.runner.Context.Info("==> Initialized " + s.tenant + "/" + s.envName)
+	}
 	s.runner.Context.Trace("Configuration initialized OK")
 }
 
