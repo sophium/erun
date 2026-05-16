@@ -1,12 +1,20 @@
 import * as React from 'react';
 import { AlertCircle, CheckCircle2, Cloud, Copy, Folder, FolderOpen, LoaderCircle, LogIn, LogOut, MoreHorizontal, Plus, Settings, UserCircle2 } from 'lucide-react';
 
-import { useController } from '@/app/ControllerContext';
 import { readError } from '@/app/errors';
+import {
+  getPrimaryCloudProviderBearerToken,
+  loginPrimaryCloudProvider,
+  logoutPrimaryCloudProvider,
+} from '@/app/cloudProviderThunks';
+import { openInitializeDialog } from '@/app/environmentDialogThunks';
 import { openGlobalConfigDialog } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { openManageDialog } from '@/app/manageEnvironmentThunks';
+import { showTerminalMessage } from '@/app/notificationThunks';
+import { openSelection } from '@/app/sessionThunks';
 import { toggleTenantCollapsed } from '@/app/slices/sidebarSlice';
+import { openTenantDashboard, openTenantDialog } from '@/app/tenantDialogThunks';
 import type { AppState } from '@/app/state';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -17,7 +25,6 @@ import { IconTooltip } from './IconTooltip';
 import { cloudProviderStatusTone } from './StatusBadge';
 
 export function Sidebar(): React.ReactElement {
-  const controller = useController();
   const dispatch = useAppDispatch();
   const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
   const tenants = useAppSelector((state) => state.tenants.tenants);
@@ -51,7 +58,7 @@ export function Sidebar(): React.ReactElement {
               variant="ghost"
               size="icon-xs"
               aria-label="Initialize new remote environment"
-              onClick={() => controller.openInitializeDialog()}
+              onClick={() => dispatch(openInitializeDialog())}
             >
               <Plus />
             </Button>
@@ -66,7 +73,7 @@ export function Sidebar(): React.ReactElement {
               heading="No environments yet"
               body="Initialize a remote environment to start working. You can also import an existing one from your kubeconfig."
               action={
-                <Button type="button" size="sm" onClick={() => controller.openInitializeDialog()}>
+                <Button type="button" size="sm" onClick={() => dispatch(openInitializeDialog())}>
                   <Plus aria-hidden="true" />
                   Initialize environment
                 </Button>
@@ -112,7 +119,7 @@ function pendingForTenant(tenants: AppState['tenants'], selected: AppState['sele
 }
 
 function PrimaryCloudAliasControl(): React.ReactElement | null {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   const tenants = useAppSelector((s) => s.tenants.tenants);
   const cloudProviders = useAppSelector((s) => s.tenants.cloudProviders);
   const selected = useAppSelector((s) => s.selection.selected);
@@ -152,17 +159,17 @@ function PrimaryCloudAliasControl(): React.ReactElement | null {
           <CloudAliasStatus provider={view.provider} />
           {view.active ? (
             <>
-              <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={view.busy} onClick={() => void controller.getPrimaryCloudProviderBearerToken(view.provider.alias)}>
+              <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={view.busy} onClick={() => void dispatch(getPrimaryCloudProviderBearerToken(view.provider.alias))}>
                 {view.bearerBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Copy aria-hidden="true" />}
                 {view.bearerBusy ? 'Copying token...' : 'Get bearer token'}
               </Button>
-              <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={view.busy} onClick={() => void controller.logoutPrimaryCloudProvider(view.provider.alias)}>
+              <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={view.busy} onClick={() => void dispatch(logoutPrimaryCloudProvider(view.provider.alias))}>
                 {view.logoutBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <LogOut aria-hidden="true" />}
                 {view.logoutBusy ? 'Logging out...' : 'Log out'}
               </Button>
             </>
           ) : (
-            <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={view.busy} onClick={() => void controller.loginPrimaryCloudProvider(view.provider.alias)}>
+            <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={view.busy} onClick={() => void dispatch(loginPrimaryCloudProvider(view.provider.alias))}>
               {view.loginBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <LogIn aria-hidden="true" />}
               {view.loginBusy ? 'Logging in...' : 'Log in'}
             </Button>
@@ -342,7 +349,7 @@ function TenantToggleButton({ tenantName, collapsed, active }: { tenantName: str
 }
 
 function TenantSelectButton({ tenantName, active, related }: { tenantName: string; active: boolean; related: boolean }): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   return (
     <button
       className={cn(
@@ -352,7 +359,7 @@ function TenantSelectButton({ tenantName, active, related }: { tenantName: strin
       type="button"
       title={tenantName}
       aria-current={active ? 'page' : undefined}
-      onClick={() => controller.openTenantDashboard(tenantName)}
+      onClick={() => dispatch(openTenantDashboard(tenantName))}
     >
       <span className="truncate">{tenantName}</span>
     </button>
@@ -360,7 +367,7 @@ function TenantSelectButton({ tenantName, active, related }: { tenantName: strin
 }
 
 function TenantManageButton({ tenantName, active }: { tenantName: string; active: boolean }): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   return (
     <IconTooltip label="Edit tenant settings">
       <Button
@@ -375,7 +382,7 @@ function TenantManageButton({ tenantName, active }: { tenantName: string; active
         aria-label={`Edit ${tenantName} settings`}
         onClick={(event) => {
           event.stopPropagation();
-          controller.openTenantDialog(tenantName);
+          dispatch(openTenantDialog(tenantName));
         }}
       >
         <MoreHorizontal />
@@ -391,7 +398,6 @@ function EnvironmentRow({
   tenantName: string;
   environmentName: string;
 }): React.ReactElement {
-  const controller = useController();
   const dispatch = useAppDispatch();
   const selectedSelection = useAppSelector((state) => state.selection.selected);
   const tenants = useAppSelector((state) => state.tenants.tenants);
@@ -420,8 +426,8 @@ function EnvironmentRow({
         title={`${tenantName} / ${environmentName}${isLocal ? ' (local)' : ''}`}
         aria-current={selected ? 'page' : undefined}
         onClick={() => {
-          void controller.openSelection(selection).catch((error: unknown) => {
-            controller.showTerminalMessage(readError(error));
+          void dispatch(openSelection(selection)).catch((error: unknown) => {
+            dispatch(showTerminalMessage(readError(error)));
           });
         }}
       >

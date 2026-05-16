@@ -5,7 +5,14 @@ import { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
 import { useActivityQueue, useTerminalActivityLockState } from '@/app/activityQueueState';
 import { ControllerProvider, useController } from '@/app/ControllerContext';
-import { useAppSelector } from '@/app/hooks';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import {
+  clearDebugOutput,
+  setDebugOpen,
+  startDebugResize,
+  startReviewResize,
+  startSidebarResize,
+} from '@/app/layoutThunks';
 import { ActivityLockOverlay } from '@/components/app/ActivityLockOverlay';
 import { ActivityQueueDrawer } from '@/components/app/ActivityQueueDrawer';
 import { TerminalTabStrip } from '@/components/app/TerminalTabStrip';
@@ -35,6 +42,7 @@ const debugSplitterClassName =
 
 export function App(): React.ReactElement {
   const controller = React.useMemo(() => new ERunUIController(), []);
+  const dispatch = useAppDispatch();
   const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
   const terminalRootRef = React.useRef<HTMLDivElement>(null);
   const terminalPaneRef = React.useRef<HTMLElement>(null);
@@ -73,7 +81,7 @@ export function App(): React.ReactElement {
               role="separator"
               aria-orientation="vertical"
               aria-label="Resize sidebar"
-              onMouseDown={(event) => controller.startSidebarResize(event)}
+              onMouseDown={(event) => dispatch(startSidebarResize(event))}
             />
             <MainPane
               terminalPaneRef={terminalPaneRef}
@@ -182,7 +190,7 @@ function TerminalPane({
   diffListRef: React.RefObject<HTMLDivElement | null>;
   onOpenActivityQueue: () => void;
 }): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   const sessionId = useAppSelector((state) => state.terminal.sessionId);
   const reviewOpen = useAppSelector((state) => state.layout.reviewOpen);
   const terminalBusy = useAppSelector((state) => state.terminalStatus.terminalBusy);
@@ -230,7 +238,7 @@ function TerminalPane({
           {activeLock && <ActivityLockOverlay lock={activeLock} onOpenQueue={onOpenActivityQueue} onProceedAnyway={hideActiveLock} />}
         </div>
       </div>
-      <div className={cn(reviewSplitterClassName, !reviewOpen && 'hidden')} role="separator" aria-orientation="vertical" aria-label="Resize diff panel" onMouseDown={(event) => controller.startReviewResize(event)} />
+      <div className={cn(reviewSplitterClassName, !reviewOpen && 'hidden')} role="separator" aria-orientation="vertical" aria-label="Resize diff panel" onMouseDown={(event) => dispatch(startReviewResize(event))} />
       <ReviewPanel reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} />
     </div>
   );
@@ -252,7 +260,7 @@ function TerminalBusyOverlay({ message }: { message: string }): React.ReactEleme
 }
 
 function DebugPanel({ open, output, sessionId, verbose }: { open: boolean; output: string; sessionId: number; verbose: boolean }): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   const outputRef = React.useRef<HTMLDivElement>(null);
   const stuckToBottomRef = React.useRef(true);
   const [copyStatus, setCopyStatus] = React.useState('');
@@ -313,14 +321,14 @@ function DebugPanel({ open, output, sessionId, verbose }: { open: boolean; outpu
           role="separator"
           aria-orientation="horizontal"
           aria-label="Resize debug panel"
-          onMouseDown={(event) => controller.startDebugResize(event)}
+          onMouseDown={(event) => dispatch(startDebugResize(event))}
         />
       )}
       <div className="flex h-[34px] items-center justify-between gap-2 border-b border-[oklch(0.18_0_0)] px-3">
         <button
           type="button"
           className="flex min-w-0 items-center gap-2 border-0 bg-transparent p-0 text-xs font-medium tracking-normal text-[oklch(0.76_0_0)]"
-          onClick={() => controller.setDebugOpen(!open)}
+          onClick={() => dispatch(setDebugOpen(!open))}
         >
           {open ? <ChevronDown className="size-4" aria-hidden="true" /> : <ChevronUp className="size-4" aria-hidden="true" />}
           <span>Debug</span>
@@ -332,7 +340,7 @@ function DebugPanel({ open, output, sessionId, verbose }: { open: boolean; outpu
               {copyStatus === 'Copied' ? <CheckCircle2 aria-hidden="true" /> : <Copy aria-hidden="true" />}
               {copyStatus || 'Copy'}
             </Button>
-            <Button className="h-6 px-2 text-[11px] [&_svg]:size-3.5" type="button" variant="ghost" size="sm" onClick={() => controller.clearDebugOutput()}>
+            <Button className="h-6 px-2 text-[11px] [&_svg]:size-3.5" type="button" variant="ghost" size="sm" onClick={() => dispatch(clearDebugOutput())}>
               <Trash2 aria-hidden="true" />
               Clear
             </Button>

@@ -1,16 +1,16 @@
 import * as React from 'react';
 import { AlertCircle, PlugZap, RefreshCw } from 'lucide-react';
 
-import { useController } from '@/app/ControllerContext';
 import { compactDiffError, diffLineMark } from '@/app/diffUtils';
-import { useAppSelector } from '@/app/hooks';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { reconnectCopy } from '@/app/reconnectCopy';
+import { loadReviewDiff, requestReconnect } from '@/app/reviewThunks';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { DiffFile, DiffHunk } from '@/types';
 
 export function DiffList(): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   const review = useAppSelector((state) => state.review);
   if (review.diffLoading) {
     return <ReviewStatus>Loading diff...</ReviewStatus>;
@@ -21,8 +21,8 @@ export function DiffList(): React.ReactElement {
         message={compactDiffError(review.diffError)}
         loading={review.diffLoading}
         reconnectable={review.diffErrorReconnectable}
-        onRetry={() => { void controller.loadReviewDiff(); }}
-        onReconnect={() => controller.requestReconnect()}
+        onRetry={() => { void dispatch(loadReviewDiff()); }}
+        onReconnect={() => dispatch(requestReconnect())}
       />
     );
   }

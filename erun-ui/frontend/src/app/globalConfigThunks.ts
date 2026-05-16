@@ -8,6 +8,11 @@ import {
   replaceCloudProvider,
 } from './cloudContextState';
 import { readError } from './errors';
+import {
+  hideTerminalMessage,
+  showNotification,
+  showTerminalMessage,
+} from './notificationThunks';
 import type { AppState, GlobalConfigDialogState } from './state';
 import { defaultCloudContextInitInput, defaultGlobalConfigDialog } from './state';
 import type { AppThunk } from './store';
@@ -143,11 +148,11 @@ export const refreshCloudProviders = (): AppThunk<Promise<void>> => async (dispa
       config: { ...controller.state.globalConfigDialog.config, cloudProviders },
       error: '',
     };
-    controller.showNotification('success', 'Cloud aliases refreshed.');
+    dispatch(showNotification('success', 'Cloud aliases refreshed.'));
   } catch (error) {
     const message = readError(error);
     controller.state.globalConfigDialog = { ...controller.state.globalConfigDialog, error: message };
-    controller.showTerminalMessage(message);
+    dispatch(showTerminalMessage(message));
   }
 };
 
@@ -166,11 +171,11 @@ export const refreshCloudContexts = (): AppThunk<Promise<void>> => async (dispat
       config: { ...controller.state.globalConfigDialog.config, cloudContexts },
       error: '',
     };
-    controller.showNotification('success', 'Cloud contexts refreshed.');
+    dispatch(showNotification('success', 'Cloud contexts refreshed.'));
   } catch (error) {
     const message = readError(error);
     controller.state.globalConfigDialog = { ...controller.state.globalConfigDialog, error: message };
-    controller.showTerminalMessage(message);
+    dispatch(showTerminalMessage(message));
   }
 };
 
@@ -199,7 +204,7 @@ export const initGlobalCloudContext = (): AppThunk<Promise<void>> => async (disp
       busyTarget: '',
       error: '',
     };
-    controller.showTerminalMessage(`Initialized cloud context ${context.kubernetesContext}.`);
+    dispatch(showTerminalMessage(`Initialized cloud context ${context.kubernetesContext}.`));
     void controller.refreshKubernetesContexts();
   } catch (error) {
     const message = readError(error);
@@ -210,7 +215,7 @@ export const initGlobalCloudContext = (): AppThunk<Promise<void>> => async (disp
       busyTarget: '',
       error: message,
     };
-    controller.showTerminalMessage(message);
+    dispatch(showTerminalMessage(message));
   }
 };
 
@@ -236,7 +241,7 @@ export const startGlobalCloudContext = (name: string): AppThunk<Promise<void>> =
   void requireController(extra).refreshKubernetesContexts();
 };
 
-export const toggleIdleCloudContext = (): AppThunk<Promise<void>> => async (_dispatch, _getState, extra) => {
+export const toggleIdleCloudContext = (): AppThunk<Promise<void>> => async (dispatch, _getState, extra) => {
   const controller = requireController(extra);
   const action = idleCloudContextAction(controller.state.idleStatus, controller.state.idleCloudContextBusy);
   if (!action) {
@@ -248,7 +253,7 @@ export const toggleIdleCloudContext = (): AppThunk<Promise<void>> => async (_dis
     const context = (await action.run(action.name)) as UICloudContextStatus;
     applyIdleCloudContextResult(controller, action.idleStatus, context);
     controller.state.idleCloudContextBusy = false;
-    controller.showNotification('success', `${action.label} cloud environment ${context.kubernetesContext || context.name}.`);
+    dispatch(showNotification('success', `${action.label} cloud environment ${context.kubernetesContext || context.name}.`));
     if (action.refreshKubernetesContexts) {
       void controller.refreshKubernetesContexts();
     }
@@ -259,12 +264,12 @@ export const toggleIdleCloudContext = (): AppThunk<Promise<void>> => async (_dis
   } catch (error) {
     const message = readError(error);
     controller.state.idleCloudContextBusy = false;
-    controller.showNotification('error', message);
-    controller.showTerminalMessage(message);
+    dispatch(showNotification('error', message));
+    dispatch(showTerminalMessage(message));
   }
 };
 
-export const startAWSCloudInit = (): AppThunk<Promise<void>> => async (_dispatch, _getState, extra) => {
+export const startAWSCloudInit = (): AppThunk<Promise<void>> => async (dispatch, _getState, extra) => {
   const controller = requireController(extra);
   const dialog = controller.state.globalConfigDialog;
   if (dialog.busy || dialog.configLoading) {
@@ -281,7 +286,7 @@ export const startAWSCloudInit = (): AppThunk<Promise<void>> => async (_dispatch
     controller.state.terminalCopyOutput = '';
     controller.state.terminalCopyStatus = '';
     controller.resetTerminal();
-    controller.hideTerminalMessage();
+    dispatch(hideTerminalMessage());
     controller.focusTerminalSoon();
     controller.queueTerminalResize();
   } catch (error) {
@@ -293,7 +298,7 @@ export const startAWSCloudInit = (): AppThunk<Promise<void>> => async (_dispatch
       busyTarget: '',
       error: message,
     };
-    controller.showTerminalMessage(message);
+    dispatch(showTerminalMessage(message));
   }
 };
 
@@ -317,7 +322,7 @@ export const loginGlobalCloudProvider = (alias: string): AppThunk<Promise<void>>
       busyTarget: '',
       error: '',
     };
-    controller.showTerminalMessage(`${provider.alias}: ${provider.status}`);
+    dispatch(showTerminalMessage(`${provider.alias}: ${provider.status}`));
   } catch (error) {
     const message = readError(error);
     controller.state.globalConfigDialog = {
@@ -327,7 +332,7 @@ export const loginGlobalCloudProvider = (alias: string): AppThunk<Promise<void>>
       busyTarget: '',
       error: message,
     };
-    controller.showTerminalMessage(message);
+    dispatch(showTerminalMessage(message));
   }
 };
 
@@ -348,7 +353,7 @@ export const submitGlobalConfig = (): AppThunk<Promise<void>> => async (dispatch
       busyTarget: '',
       error: '',
     };
-    controller.showNotification('success', 'Saved ERun config.');
+    dispatch(showNotification('success', 'Saved ERun config.'));
     dispatch(closeGlobalConfigDialog());
   } catch (error) {
     const message = readError(error);
@@ -359,7 +364,7 @@ export const submitGlobalConfig = (): AppThunk<Promise<void>> => async (dispatch
       busyTarget: '',
       error: message,
     };
-    controller.showTerminalMessage(message);
+    dispatch(showTerminalMessage(message));
   }
 };
 
@@ -390,7 +395,7 @@ const updateCloudContextPower = (
   name: string,
   action: (name: string) => Promise<unknown>,
   label: string,
-): AppThunk<Promise<void>> => async (_dispatch, _getState, extra) => {
+): AppThunk<Promise<void>> => async (dispatch, _getState, extra) => {
   const controller = requireController(extra);
   const dialog = controller.state.globalConfigDialog;
   if (dialog.busy || dialog.configLoading) {
@@ -410,7 +415,7 @@ const updateCloudContextPower = (
       busyTarget: '',
       error: '',
     };
-    controller.showTerminalMessage(`${label} cloud context ${context.kubernetesContext}.`);
+    dispatch(showTerminalMessage(`${label} cloud context ${context.kubernetesContext}.`));
   } catch (error) {
     const message = readError(error);
     controller.state.globalConfigDialog = {
@@ -420,6 +425,6 @@ const updateCloudContextPower = (
       busyTarget: '',
       error: message,
     };
-    controller.showTerminalMessage(message);
+    dispatch(showTerminalMessage(message));
   }
 };

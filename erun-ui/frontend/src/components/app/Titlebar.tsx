@@ -1,11 +1,23 @@
 import * as React from 'react';
 import { AlertCircle, Blocks, CheckCircle2, Code2, Copy, Info, ListTree, LoaderCircle, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Play, Power, X } from 'lucide-react';
 
-import type { ERunUIController } from '@/app/ERunUIController';
-import { useController } from '@/app/ControllerContext';
 import { toggleIdleCloudContext } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { displayableIdleStatus } from '@/app/idleStatusEligibility';
+import {
+  setFilesOpen,
+  titlebarDoubleClick,
+  toggleReview,
+  toggleSidebar,
+} from '@/app/layoutThunks';
+import {
+  copyTerminalOutput,
+  dismissNotification,
+  dismissTerminalStatus,
+  waitLongerForTerminalStatus,
+} from '@/app/notificationThunks';
+import { openIDE } from '@/app/sessionThunks';
+import type { AppDispatch } from '@/app/store';
 import type { AppState } from '@/app/state';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -18,12 +30,12 @@ const titlebarButtonClassName =
 const activeTitlebarButtonClassName = 'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground';
 
 export function Titlebar(): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   return (
     <header
       className="relative box-border select-none border-b bg-[color-mix(in_oklch,var(--background)_94%,transparent)] [--wails-draggable:drag]"
       data-wails-drag
-      onDoubleClick={(event) => controller.titlebarDoubleClick(event)}
+      onDoubleClick={(event) => dispatch(titlebarDoubleClick(event))}
     >
       <TitlebarControls />
       <IdleStatusWidget />
@@ -34,7 +46,7 @@ export function Titlebar(): React.ReactElement {
 }
 
 function TitlebarControls(): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
   const reviewOpen = useAppSelector((state) => state.layout.reviewOpen);
   const filesOpen = useAppSelector((state) => state.layout.filesOpen);
@@ -57,7 +69,7 @@ function TitlebarControls(): React.ReactElement {
           size="icon"
           aria-label="Toggle sidebar"
           aria-pressed={!sidebarHidden}
-          onClick={() => controller.toggleSidebar()}
+          onClick={() => dispatch(toggleSidebar())}
         >
           <SidebarIcon />
         </Button>
@@ -74,7 +86,7 @@ function TitlebarControls(): React.ReactElement {
           size="icon"
           aria-label="Toggle diff panel"
           aria-pressed={reviewOpen}
-          onClick={() => controller.toggleReview()}
+          onClick={() => dispatch(toggleReview())}
         >
           <ReviewIcon />
         </Button>
@@ -89,7 +101,7 @@ function TitlebarControls(): React.ReactElement {
             aria-label={vscodeTooltip}
             disabled={ideDisabled}
             onClick={() => {
-              void controller.openIDE(selected ?? null, 'vscode');
+              void dispatch(openIDE(selected ?? null, 'vscode'));
             }}
           >
             <Code2 />
@@ -106,7 +118,7 @@ function TitlebarControls(): React.ReactElement {
             aria-label={intellijTooltip}
             disabled={ideDisabled}
             onClick={() => {
-              void controller.openIDE(selected ?? null, 'intellij');
+              void dispatch(openIDE(selected ?? null, 'intellij'));
             }}
           >
             <Blocks />
@@ -126,7 +138,7 @@ function TitlebarControls(): React.ReactElement {
           size="icon"
           aria-label="Toggle changed files list"
           aria-pressed={filesOpen}
-          onClick={() => controller.setFilesOpen(!filesOpen)}
+          onClick={() => dispatch(setFilesOpen(!filesOpen))}
         >
           <ListTree />
         </Button>
@@ -320,19 +332,19 @@ function StatusMessage({ status }: { status: TitlebarStatusValue }): React.React
 }
 
 function StatusWaitAction(): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   return (
-    <Button className="h-6 flex-none rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground" type="button" variant="ghost" size="xs" onClick={() => { void controller.waitLongerForTerminalStatus(); }}>
+    <Button className="h-6 flex-none rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground" type="button" variant="ghost" size="xs" onClick={() => { void dispatch(waitLongerForTerminalStatus()); }}>
       Wait longer
     </Button>
   );
 }
 
 function StatusCopyAction({ status }: { status: TitlebarStatusValue }): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   return (
     <IconTooltip label="Copy terminal output">
-      <Button className="h-6 flex-none gap-1 rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground [&_svg]:size-3.5" type="button" variant="ghost" size="xs" onClick={() => { void controller.copyTerminalOutput(); }}>
+      <Button className="h-6 flex-none gap-1 rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground [&_svg]:size-3.5" type="button" variant="ghost" size="xs" onClick={() => { void dispatch(copyTerminalOutput()); }}>
         {status.copyStatus === 'Copied' ? <CheckCircle2 aria-hidden="true" /> : <Copy aria-hidden="true" />}
         {status.copyStatus || 'Copy output'}
       </Button>
@@ -341,22 +353,22 @@ function StatusCopyAction({ status }: { status: TitlebarStatusValue }): React.Re
 }
 
 function StatusDismissAction({ status }: { status: TitlebarStatusValue }): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   return (
     <IconTooltip label="Dismiss status">
-      <Button className="-mr-1 size-6 flex-none text-muted-foreground hover:bg-accent hover:text-accent-foreground [&_svg]:size-3.5" type="button" variant="ghost" size="icon-xs" aria-label="Dismiss status" onClick={() => dismissTitlebarStatus(controller, status)}>
+      <Button className="-mr-1 size-6 flex-none text-muted-foreground hover:bg-accent hover:text-accent-foreground [&_svg]:size-3.5" type="button" variant="ghost" size="icon-xs" aria-label="Dismiss status" onClick={() => dismissTitlebarStatus(dispatch, status)}>
         <X />
       </Button>
     </IconTooltip>
   );
 }
 
-function dismissTitlebarStatus(controller: ERunUIController, status: TitlebarStatusValue): void {
+function dismissTitlebarStatus(dispatch: AppDispatch, status: TitlebarStatusValue): void {
   if (status.source === 'notification') {
-    controller.dismissNotification();
+    dispatch(dismissNotification());
     return;
   }
-  controller.dismissTerminalStatus();
+  dispatch(dismissTerminalStatus());
 }
 
 function ideTooltipLabel(ide: string, selected: AppState['selected'], disabled: boolean): string {

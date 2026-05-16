@@ -3,6 +3,7 @@ import { cloudApi } from './api/cloudApi';
 import { environmentApi } from './api/environmentApi';
 import { readError } from './errors';
 import type { HiddenSessionMode } from './model';
+import { showTerminalMessage } from './notificationThunks';
 import { runtimePodConfigToDisplay, runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
 import {
   defaultEnvironmentConfig,
@@ -311,7 +312,7 @@ export const submitManageConfig = (): AppThunk<Promise<void>> => async (dispatch
       busyTarget: '',
       error: message,
     };
-    controller.showTerminalMessage(message);
+    dispatch(showTerminalMessage(message));
   }
 };
 
@@ -386,7 +387,7 @@ export const submitManageDelete = (): AppThunk<Promise<void>> => async (dispatch
   controller.state.manageDialog = { ...dialog, busy: true, busyAction: 'delete', busyTarget: '', error: '' };
   controller.state.terminalCopyOutput = '';
   controller.state.terminalCopyStatus = '';
-  controller.showTerminalMessage(`Deleting ${selection.tenant} / ${selection.environment}...`);
+  dispatch(showTerminalMessage(`Deleting ${selection.tenant} / ${selection.environment}...`));
 
   try {
     const result = (await dispatch(
@@ -408,7 +409,7 @@ export const submitManageDelete = (): AppThunk<Promise<void>> => async (dispatch
       result.cloudContextStopError ? `Cloud context stop failed: ${result.cloudContextStopError}` : '',
     ].filter(Boolean).join(' ');
     const warning = warnings ? ` ${warnings}` : '';
-    controller.showTerminalMessage(`Deleted ${result.tenant} / ${result.environment}.${warning}`);
+    dispatch(showTerminalMessage(`Deleted ${result.tenant} / ${result.environment}.${warning}`));
   } catch (error) {
     const message = readError(error);
     controller.state.manageDialog = {
@@ -420,7 +421,7 @@ export const submitManageDelete = (): AppThunk<Promise<void>> => async (dispatch
     };
     controller.state.terminalCopyOutput = `Failed to delete ${selection.tenant} / ${selection.environment}: ${message}`;
     controller.state.terminalCopyStatus = '';
-    controller.showTerminalMessage(message);
+    dispatch(showTerminalMessage(message));
   }
 };
 
@@ -449,7 +450,7 @@ const refreshManageVersionSuggestions = (selectDefault: boolean): AppThunk<Promi
 const startHiddenSession = (
   mode: HiddenSessionMode,
   starter: (selection: UISelection, cols: number, rows: number) => Promise<unknown>,
-): AppThunk<Promise<void>> => async (_dispatch, _getState, extra) => {
+): AppThunk<Promise<void>> => async (dispatch, _getState, extra) => {
   const controller = requireController(extra);
   const dialog = controller.state.manageDialog;
   const selection = dialog.selection;
@@ -457,7 +458,14 @@ const startHiddenSession = (
     return;
   }
   const runSelection = { ...selection, debug: controller.state.debugOpen || undefined };
-  prepareHiddenSession(controller, selection, runSelection, mode);
+  controller.state.selected = selection;
+  controller.state.manageDialog = defaultManageDialog();
+  if (controller.state.debugOpen) {
+    controller.setPendingDebugHeader(`$ ${formatDebugCommand(runSelection, mode)}\n`);
+  }
+  controller.state.terminalCopyOutput = '';
+  controller.state.terminalCopyStatus = '';
+  dispatch(showTerminalMessage(hiddenSessionBusyMessage(selection, mode), true));
   controller.fitTerminal();
   const size = controller.terminalSize();
   const result = (await starter(runSelection, size.cols, size.rows)) as StartSessionResult;
@@ -474,22 +482,6 @@ const startHiddenSession = (
   controller.focusTerminalSoon();
   controller.queueTerminalResize();
 };
-
-function prepareHiddenSession(
-  controller: NonNullable<ReturnType<typeof requireController>>,
-  selection: UISelection,
-  runSelection: UISelection,
-  mode: HiddenSessionMode,
-): void {
-  controller.state.selected = selection;
-  controller.state.manageDialog = defaultManageDialog();
-  if (controller.state.debugOpen) {
-    controller.setPendingDebugHeader(`$ ${formatDebugCommand(runSelection, mode)}\n`);
-  }
-  controller.state.terminalCopyOutput = '';
-  controller.state.terminalCopyStatus = '';
-  controller.showTerminalMessage(hiddenSessionBusyMessage(selection, mode), true);
-}
 
 function trackHiddenSession(
   controller: NonNullable<ReturnType<typeof requireController>>,
@@ -508,7 +500,7 @@ const updateManageCloudContextPower = (
   name: string,
   action: (name: string) => Promise<unknown>,
   label: string,
-): AppThunk<Promise<void>> => async (_dispatch, _getState, extra) => {
+): AppThunk<Promise<void>> => async (dispatch, _getState, extra) => {
   const controller = requireController(extra);
   const contextName = normalizeDialogValue(name);
   const dialog = controller.state.manageDialog;
@@ -526,7 +518,7 @@ const updateManageCloudContextPower = (
       busyTarget: '',
       error: '',
     };
-    controller.showTerminalMessage(`${label} cloud context ${context.kubernetesContext || context.name}.`);
+    dispatch(showTerminalMessage(`${label} cloud context ${context.kubernetesContext || context.name}.`));
   } catch (error) {
     const message = readError(error);
     controller.state.manageDialog = {
@@ -536,7 +528,7 @@ const updateManageCloudContextPower = (
       busyTarget: '',
       error: message,
     };
-    controller.showTerminalMessage(message);
+    dispatch(showTerminalMessage(message));
   }
 };
 

@@ -1,8 +1,11 @@
 import * as React from 'react';
 import { RefreshCw, LoaderCircle } from 'lucide-react';
 
-import { useController } from '@/app/ControllerContext';
-import { useAppSelector } from '@/app/hooks';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import {
+  refreshTenantDashboard,
+  setTenantDashboardTab,
+} from '@/app/tenantDialogThunks';
 import type { AppState } from '@/app/state';
 import type { UITenant, UITenantDashboardBuild, UITenantDashboardReview, UITenantDashboardUser } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -11,7 +14,7 @@ import { EmptyState } from './EmptyState';
 import { StatusBadge } from './StatusBadge';
 
 export function TenantDashboardView(): React.ReactElement | null {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   const dashboard = useAppSelector((state) => state.tenantDashboard);
   const tenants = useAppSelector((state) => state.tenants.tenants);
   if (!dashboard.tenant) {
@@ -27,12 +30,12 @@ export function TenantDashboardView(): React.ReactElement | null {
             <h1 className="truncate text-[20px] font-semibold leading-tight tracking-normal">{dashboard.tenant}</h1>
             <p className="truncate text-sm text-muted-foreground">{tenantDashboardSubtitle(tenant, environmentName)}</p>
           </div>
-          <Button type="button" variant="outline" size="sm" disabled={dashboard.loading} onClick={() => { void controller.refreshTenantDashboard(); }}>
+          <Button type="button" variant="outline" size="sm" disabled={dashboard.loading} onClick={() => { void dispatch(refreshTenantDashboard()); }}>
             {dashboard.loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
             Refresh
           </Button>
         </header>
-        <Tabs value={dashboard.tab} onValueChange={(value) => controller.setTenantDashboardTab(value as AppState['tenantDashboard']['tab'])} className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] px-5 py-4">
+        <Tabs value={dashboard.tab} onValueChange={(value) => dispatch(setTenantDashboardTab(value as AppState['tenantDashboard']['tab']))} className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)] px-5 py-4">
           <TabsList className="w-fit">
             <TabsTrigger value="users">Users</TabsTrigger>
             <TabsTrigger value="queue">Merge queue</TabsTrigger>

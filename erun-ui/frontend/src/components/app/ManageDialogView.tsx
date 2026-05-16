@@ -4,6 +4,7 @@ import { AlertTriangle, Check, ChevronsUpDown, FolderOpen, LoaderCircle, Play, P
 import { useController } from '@/app/ControllerContext';
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { showTerminalMessage } from '@/app/notificationThunks';
 import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
 import type { AppState } from '@/app/state';
 import { loadSavedPastContainerRegistries } from '@/app/storage';
@@ -178,13 +179,12 @@ function GeneralTab(): React.ReactElement {
 }
 
 function RuntimeTab(): React.ReactElement {
-  const controller = useController();
   const dispatch = useAppDispatch();
   const dialog = useAppSelector((state) => state.manageDialog);
   const versionSuggestions = useAppSelector((state) => state.tenants.versionSuggestions);
   return (
     <>
-      <RuntimeDeployField configuredVersion={dialog.config.runtimeVersion} overrideVersion={dialog.version} suggestions={versionSuggestions} choicesOpen={dialog.choicesOpen} disabled={dialog.busy || dialog.configLoading} onValueChange={(version) => dispatch(updateManageDialog({ version }))} onChoicesOpenChange={(open) => dispatch(setManageVersionChoicesOpen(open))} onSelect={(suggestion) => dispatch(selectManageVersionSuggestion(suggestion))} onDeploy={() => void dispatch(submitManageDeploy()).catch((error: unknown) => controller.showTerminalMessage(readError(error)))} />
+      <RuntimeDeployField configuredVersion={dialog.config.runtimeVersion} overrideVersion={dialog.version} suggestions={versionSuggestions} choicesOpen={dialog.choicesOpen} disabled={dialog.busy || dialog.configLoading} onValueChange={(version) => dispatch(updateManageDialog({ version }))} onChoicesOpenChange={(open) => dispatch(setManageVersionChoicesOpen(open))} onSelect={(suggestion) => dispatch(selectManageVersionSuggestion(suggestion))} onDeploy={() => void dispatch(submitManageDeploy()).catch((error: unknown) => dispatch(showTerminalMessage(readError(error))))} />
       <RuntimePodFields dialog={dialog} />
       <IdleStopFields dialog={dialog} />
     </>
@@ -202,7 +202,6 @@ function PortsTab({ dialog }: { dialog: ManageDialog }): React.ReactElement {
 }
 
 function RedeployBanner({ dialog }: { dialog: ManageDialog }): React.ReactElement {
-  const controller = useController();
   const dispatch = useAppDispatch();
   const deploying = dialog.busyAction === 'save' || dialog.busy;
   return (
@@ -224,7 +223,7 @@ function RedeployBanner({ dialog }: { dialog: ManageDialog }): React.ReactElemen
           type="button"
           size="sm"
           disabled={deploying}
-          onClick={() => void dispatch(submitManageDeploy()).catch((error: unknown) => controller.showTerminalMessage(readError(error)))}
+          onClick={() => void dispatch(submitManageDeploy()).catch((error: unknown) => dispatch(showTerminalMessage(readError(error))))}
         >
           <Rocket aria-hidden="true" />
           Redeploy now
@@ -288,7 +287,6 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
 }
 
 function DiagnosticsSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
-  const controller = useController();
   const dispatch = useAppDispatch();
   const lastDoctorBySelection = useAppSelector((state) => state.doctor.lastDoctorBySelection);
   const lastDoctor = dialog.selection ? lastDoctorBySelection[selectionKey(dialog.selection)] : undefined;
@@ -296,7 +294,7 @@ function DiagnosticsSection({ dialog }: { dialog: ManageDialog }): React.ReactEl
     <div className="grid gap-2 rounded-[var(--radius)] border border-border p-3">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0"><div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Diagnostics</div></div>
-        <Button type="button" variant="outline" size="sm" disabled={dialog.busy || dialog.configLoading} onClick={() => void dispatch(startManageDoctor()).catch((error: unknown) => controller.showTerminalMessage(readError(error)))}>
+        <Button type="button" variant="outline" size="sm" disabled={dialog.busy || dialog.configLoading} onClick={() => void dispatch(startManageDoctor()).catch((error: unknown) => dispatch(showTerminalMessage(readError(error))))}>
           <Stethoscope aria-hidden="true" />
           Run Doctor
         </Button>
@@ -347,7 +345,6 @@ function relativeTimeFromNow(timestamp: number): string {
 }
 
 function SSHAccessSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
-  const controller = useController();
   const dispatch = useAppDispatch();
   const config = dialog.config;
   const syncPathRequired = config.sshd.workspaceSyncEnabled && !String(config.sshd.workspaceSyncLocalPath || '').trim();
@@ -355,7 +352,7 @@ function SSHAccessSection({ dialog }: { dialog: ManageDialog }): React.ReactElem
     <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
       <div className="flex items-center justify-between gap-3">
         <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">SSH access</div>
-        {!config.sshd.enabled && <Button type="button" variant="outline" size="sm" disabled={dialog.busy || dialog.configLoading || !config.remote} onClick={() => void dispatch(enableManageSSHD()).catch((error: unknown) => controller.showTerminalMessage(readError(error)))}><Server aria-hidden="true" />Enable SSHD</Button>}
+        {!config.sshd.enabled && <Button type="button" variant="outline" size="sm" disabled={dialog.busy || dialog.configLoading || !config.remote} onClick={() => void dispatch(enableManageSSHD()).catch((error: unknown) => dispatch(showTerminalMessage(readError(error))))}><Server aria-hidden="true" />Enable SSHD</Button>}
       </div>
       <ReadonlyField id="environment-config-sshd-enabled" label="SSHD" value={config.sshd.enabled ? 'Enabled' : 'Disabled'} />
       <CheckboxField id="environment-config-sshd-sync-enabled" label="Enable workspace sync" checked={config.sshd.workspaceSyncEnabled} disabled={dialog.busy || dialog.configLoading || !config.sshd.enabled} onChange={(workspaceSyncEnabled) => dispatch(updateManageSSHDConfig({ workspaceSyncEnabled }))} />
@@ -372,7 +369,6 @@ function SSHAccessSection({ dialog }: { dialog: ManageDialog }): React.ReactElem
 }
 
 function LocalSyncFolderField({ dialog, error }: { dialog: ManageDialog; error: string }): React.ReactElement {
-  const controller = useController();
   const dispatch = useAppDispatch();
   const disabled = dialog.busy || dialog.configLoading;
   const describedBy = error ? 'environment-config-sshd-sync-localpath-error' : undefined;
@@ -392,7 +388,7 @@ function LocalSyncFolderField({ dialog, error }: { dialog: ManageDialog; error: 
           aria-describedby={describedBy}
           onChange={(event) => dispatch(updateManageSSHDConfig({ workspaceSyncLocalPath: event.target.value }))}
         />
-        <Button type="button" variant="outline" size="icon" aria-label="Select local sync folder" disabled={disabled} onClick={() => void dispatch(chooseWorkspaceSyncLocalFolder()).catch((error: unknown) => controller.showTerminalMessage(readError(error)))}>
+        <Button type="button" variant="outline" size="icon" aria-label="Select local sync folder" disabled={disabled} onClick={() => void dispatch(chooseWorkspaceSyncLocalFolder()).catch((error: unknown) => dispatch(showTerminalMessage(readError(error))))}>
           <FolderOpen aria-hidden="true" />
         </Button>
       </div>
@@ -441,7 +437,6 @@ function DialogError({ error }: { error: string }): React.ReactElement | null {
 }
 
 function ManageDialogFooter({ dialog, confirmingDelete, deleteEnabled }: { dialog: ManageDialog; confirmingDelete: boolean; deleteEnabled: boolean }): React.ReactElement {
-  const controller = useController();
   const dispatch = useAppDispatch();
   const resourceError = runtimeResourceLimitMessage(dialog.config.runtimePod, dialog.resourceStatus);
   const saving = dialog.busyAction === 'save';
@@ -466,7 +461,7 @@ function ManageDialogFooter({ dialog, confirmingDelete, deleteEnabled }: { dialo
               <Trash2 aria-hidden="true" />
               Delete
             </Button>
-            <Button type="button" size="sm" disabled={dialog.busy || dialog.configLoading || Boolean(resourceError)} onClick={() => void dispatch(submitManageConfig()).catch((error: unknown) => controller.showTerminalMessage(readError(error)))}>
+            <Button type="button" size="sm" disabled={dialog.busy || dialog.configLoading || Boolean(resourceError)} onClick={() => void dispatch(submitManageConfig()).catch((error: unknown) => dispatch(showTerminalMessage(readError(error))))}>
               {saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
               {saving ? 'Saving...' : 'Save'}
             </Button>

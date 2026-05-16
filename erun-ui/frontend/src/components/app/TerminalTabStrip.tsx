@@ -1,14 +1,18 @@
 import * as React from 'react';
 import { Plus, X } from 'lucide-react';
 
-import { useController } from '@/app/ControllerContext';
-import { useAppSelector } from '@/app/hooks';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import {
+  addTerminalTab,
+  closeTerminalTab,
+  selectTerminalTab,
+} from '@/app/sessionThunks';
 import { selectionKey } from '@/app/versionSuggestions';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { cn } from '@/lib/utils';
 
 export function TerminalTabStrip(): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   const selection = useAppSelector((state) => state.selection.selected);
   const tabsByEnv = useAppSelector((state) => state.terminal.tabsByEnv);
   const activeId = useAppSelector((state) => state.terminal.sessionId);
@@ -32,27 +36,27 @@ export function TerminalTabStrip(): React.ReactElement {
       case 'ArrowRight': {
         event.preventDefault();
         const next = (index + 1) % tabs.length;
-        controller.selectTerminalTab(tabs[next].sessionId);
+        dispatch(selectTerminalTab(tabs[next].sessionId));
         focusTab(next);
         break;
       }
       case 'ArrowLeft': {
         event.preventDefault();
         const next = (index - 1 + tabs.length) % tabs.length;
-        controller.selectTerminalTab(tabs[next].sessionId);
+        dispatch(selectTerminalTab(tabs[next].sessionId));
         focusTab(next);
         break;
       }
       case 'Home': {
         event.preventDefault();
-        controller.selectTerminalTab(tabs[0].sessionId);
+        dispatch(selectTerminalTab(tabs[0].sessionId));
         focusTab(0);
         break;
       }
       case 'End': {
         event.preventDefault();
         const last = tabs.length - 1;
-        controller.selectTerminalTab(tabs[last].sessionId);
+        dispatch(selectTerminalTab(tabs[last].sessionId));
         focusTab(last);
         break;
       }
@@ -60,7 +64,7 @@ export function TerminalTabStrip(): React.ReactElement {
       case 'Backspace': {
         if (event.metaKey || event.ctrlKey) {
           event.preventDefault();
-          void controller.closeTerminalTab(sessionId);
+          void dispatch(closeTerminalTab(sessionId));
         }
         break;
       }
@@ -80,8 +84,8 @@ export function TerminalTabStrip(): React.ReactElement {
           ref={(node) => {
             tabRefs.current[index] = node;
           }}
-          onSelect={() => controller.selectTerminalTab(tab.sessionId)}
-          onClose={() => controller.closeTerminalTab(tab.sessionId)}
+          onSelect={() => dispatch(selectTerminalTab(tab.sessionId))}
+          onClose={() => dispatch(closeTerminalTab(tab.sessionId))}
           onKeyDown={(event) => handleKeyDown(event, index, tab.sessionId)}
         />
       ))}
@@ -90,7 +94,7 @@ export function TerminalTabStrip(): React.ReactElement {
           type="button"
           className="ml-1 mb-[-1px] flex h-7 items-center justify-center rounded-md px-2 text-[oklch(0.66_0_0)] transition-colors hover:bg-[oklch(0.13_0_0)] hover:text-[oklch(0.96_0_0)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.62_0_0)]"
           aria-label="Open a new terminal"
-          onClick={() => { void controller.addTerminalTab(); }}
+          onClick={() => { void dispatch(addTerminalTab()); }}
         >
           <Plus className="size-4" aria-hidden="true" />
         </button>

@@ -1,22 +1,16 @@
-import type * as React from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal, type IDisposable } from '@xterm/xterm';
 
-import { cloudApi } from './api/cloudApi';
 import { environmentApi } from './api/environmentApi';
 import { idleApi } from './api/idleApi';
 import { kubernetesApi } from './api/kubernetesApi';
-import { reviewApi } from './api/reviewApi';
 import { sessionApi } from './api/sessionApi';
 import { stateApi } from './api/stateApi';
-import { tenantApi } from './api/tenantApi';
 import { createControllerStateProxy } from './controllerStateProxy';
-import { toggleDiffDirCollapsed } from './slices/reviewSlice';
 import { store } from './store';
 import { thunkExtra } from './thunkExtra';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import {
-  CloseSession,
   ResizeSession,
   SendSessionInput,
   StartAISession,
@@ -25,35 +19,23 @@ import {
   StartLocalSession,
   StartSession,
 } from '../../wailsjs/go/main/App';
-import { ClipboardSetText, EventsOn, WindowToggleMaximise } from '../../wailsjs/runtime/runtime';
+import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { fileToBase64, decodeBase64Bytes, isTerminalPasteTarget, pastedImageFiles } from './clipboard';
-import { replaceCloudProvider } from './cloudContextState';
-import { chooseSelectedDiffPath } from './diffUtils';
-import { isMcpUnreachableMessage, stripMcpUnreachableMarker } from './reconnectCopy';
-import {
-  normalizedEnvironmentDialogValues,
-  rememberEnvironmentDialogSelection,
-  validEnvironmentDialogValues,
-} from './environmentDialogState';
-import {
-  setDebugOpen as applyDebugOpen,
-  setFilesOpen as applyFilesOpen,
-  startDebugResize as startDebugPanelResize,
-  startFilesResize as startFilesPanelResize,
-  startReviewResize as startReviewPanelResize,
-  startSidebarResize as startSidebarPanelResize,
-  toggleReview as toggleReviewPanel,
-  toggleSidebar as toggleSidebarPanel,
-} from './layoutActions';
 import { readError } from './errors';
-import { runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
-import { scrollSelectedDiffIntoView, visibleDiffPath } from './reviewDiffNavigation';
+import {
+  hideTerminalMessage,
+  showNotification,
+  showTerminalFailure,
+  showTerminalMessage,
+} from './notificationThunks';
+import { selectTerminalTab as selectTerminalTabThunk } from './sessionThunks';
+import { loadReviewDiff } from './reviewThunks';
+import { visibleDiffPath } from './reviewDiffNavigation';
 import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses';
 import type {
   AppStatusPayload,
   DebugSessionMode,
   EnvironmentInitializedPayload,
-  IDEKind,
   MountElements,
   TerminalDataDisposable,
   TerminalExitSelections,
@@ -67,14 +49,7 @@ import {
   MIN_FILES_WIDTH,
   MIN_REVIEW_WIDTH,
   computeMaxReviewWidth,
-  defaultEnvironmentDialog,
-  defaultTenantDashboard,
-  defaultTenantDialog,
   type AppState,
-  type EnvironmentDialogState,
-  type TenantDashboardTab,
-  type TenantDialogState,
-  type TerminalStatusAction,
   type TerminalTab,
   type TerminalTabKind,
 } from './state';
@@ -90,19 +65,12 @@ function compareTabs(a: TerminalTab, b: TerminalTab): number {
   return TAB_KIND_ORDER[a.kind] - TAB_KIND_ORDER[b.kind] || a.slot - b.slot;
 }
 
-import {
-  clamp,
-  loadSavedPastContainerRegistries,
-} from './storage';
+import { clamp } from './storage';
 import {
   classifiedTerminalFailure,
-  debugOutputBlock,
   decodeDebugOutput,
   failedTerminalExitReason,
   formatDebugCommand,
-  formatIDECommand,
-  ideLabel,
-  ideOpenFailure,
   statusForTerminalOutput,
   successfulTerminalExitReason,
   terminalExitHasTrackedSelection,
@@ -114,12 +82,7 @@ import type {
   StartSessionResult,
   TerminalExitPayload,
   TerminalOutputPayload,
-  UICloudProviderStatus,
   UISelection,
-  UITenant,
-  UITenantDashboardInput,
-  UITenantConfig,
-  UIVersionSuggestion,
 } from '@/types';
 
 const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
@@ -132,22 +95,16 @@ export class ERunUIController {
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
   private terminalRoot: HTMLDivElement | null = null;
-  private terminalPane: HTMLElement | null = null;
-  private reviewView: HTMLElement | null = null;
+  private _terminalPane: HTMLElement | null = null;
+  private _reviewView: HTMLElement | null = null;
   private reviewMain: HTMLDivElement | null = null;
-  private diffList: HTMLDivElement | null = null;
+  private _diffList: HTMLDivElement | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private resizeTimer = 0;
   private reviewScrollFrame = 0;
-  private versionSuggestionTimer = 0;
-  private notificationTimer = 0;
-  private terminalCopyStatusTimer = 0;
   private idleStatusTimer = 0;
   private reviewDiffRefreshTimer = 0;
-  private reviewDiffRequest = 0;
   private idleStatusRequest = 0;
-  private versionSuggestionRequest = 0;
-  private environmentResourceStatusRequest = 0;
   private bootStarted = false;
   private terminalDataDisposable: TerminalDataDisposable | null = null;
   private terminalQueryResponseDisposables: IDisposable[] = [];
@@ -159,10 +116,24 @@ export class ERunUIController {
   private environmentInitFailedOff: (() => void) | null = null;
   private environmentsChangedOff: (() => void) | null = null;
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
-  private terminalStatusRetrySelection: UISelection | null = null;
 
   constructor() {
     thunkExtra.controller = this;
+  }
+
+  // Public ref accessors used by layoutThunks/reviewThunks. These point to the
+  // live DOM elements registered in mount(); their nullability matches the
+  // pre-mount state.
+  get terminalPane(): HTMLElement | null {
+    return this._terminalPane;
+  }
+
+  get reviewView(): HTMLElement | null {
+    return this._reviewView;
+  }
+
+  get diffList(): HTMLDivElement | null {
+    return this._diffList;
   }
 
   terminalSize(): { cols: number; rows: number } {
@@ -175,10 +146,10 @@ export class ERunUIController {
 
   mount(elements: MountElements): () => void {
     this.terminalRoot = elements.terminalRoot;
-    this.terminalPane = elements.terminalPane;
-    this.reviewView = elements.reviewView;
+    this._terminalPane = elements.terminalPane;
+    this._reviewView = elements.reviewView;
     this.reviewMain = elements.reviewMain;
-    this.diffList = elements.diffList;
+    this._diffList = elements.diffList;
     this.applyLayoutVars();
 
     if (this.terminal) {
@@ -204,17 +175,17 @@ export class ERunUIController {
     this.terminalQueryResponseDisposables = registerTerminalQueryResponseHandlers(
       this.terminal,
       (data) => SendSessionInput(this.state.sessionId, data),
-      (error) => this.showTerminalMessage(readError(error)),
+      (error) => store.dispatch(showTerminalMessage(readError(error))),
     );
     this.terminalDataDisposable = this.terminal.onData((data) => {
       SendSessionInput(this.state.sessionId, data).catch((error: unknown) => {
-        this.showTerminalMessage(readError(error));
+        store.dispatch(showTerminalMessage(readError(error)));
       });
     });
 
     this.pasteHandler = (event: ClipboardEvent) => {
       void this.handleTerminalPaste(event).catch((error: unknown) => {
-        this.showTerminalMessage(readError(error));
+        store.dispatch(showTerminalMessage(readError(error)));
       });
     };
     elements.terminalRoot.addEventListener('paste', this.pasteHandler, true);
@@ -270,8 +241,6 @@ export class ERunUIController {
     this.environmentInitializedOff?.();
     this.environmentInitFailedOff?.();
     this.environmentsChangedOff?.();
-    window.clearTimeout(this.notificationTimer);
-    window.clearTimeout(this.terminalCopyStatusTimer);
     window.clearTimeout(this.idleStatusTimer);
     this.stopReviewDiffRefresh();
     if (this.pasteHandler && this.terminalRoot) {
@@ -288,46 +257,6 @@ export class ERunUIController {
     this.terminal?.dispose();
     this.terminal = null;
     this.fitAddon = null;
-  }
-
-  toggleSidebar(): void {
-    toggleSidebarPanel(this.state, this.layoutCallbacks());
-  }
-
-  startSidebarResize(event: React.MouseEvent<HTMLElement>): void {
-    startSidebarPanelResize(this.state, event, () => this.applyLayoutVars());
-  }
-
-  startReviewResize(event: React.MouseEvent<HTMLElement>): void {
-    startReviewPanelResize(this.state, event, this.terminalPane, this.layoutCallbacks());
-  }
-
-  startFilesResize(event: React.MouseEvent<HTMLElement>): void {
-    startFilesPanelResize(this.state, event, this.reviewView, () => this.applyLayoutVars());
-  }
-
-  startDebugResize(event: React.MouseEvent<HTMLElement>): void {
-    startDebugPanelResize(this.state, event, this.terminalPane, this.layoutCallbacks());
-  }
-
-  toggleReview(): void {
-    toggleReviewPanel(this.state, { ...this.layoutCallbacks(), loadReviewDiff: () => { void this.loadReviewDiff(); } });
-    if (!this.state.reviewOpen) {
-      this.stopReviewDiffRefresh();
-    }
-  }
-
-  setFilesOpen(open: boolean, persist = true): void {
-    applyFilesOpen(this.state, open, persist, () => this.applyLayoutVars());
-  }
-
-  setDebugOpen(open: boolean): void {
-    applyDebugOpen(this.state, open, this.queueTerminalResize);
-  }
-
-  clearDebugOutput(): void {
-    this.state.debugOutput = '';
-    this.sessions.clearSessionDebug(this.state.sessionId);
   }
 
   setPendingDebugHeader(header: string): void {
@@ -359,76 +288,8 @@ export class ERunUIController {
     this.state.debugOutput = this.sessions.sessionDebug(this.state.sessionId);
   }
 
-  openTenantDashboard(tenant: string): void {
-    tenant = tenant.trim();
-    if (!tenant) {
-      return;
-    }
-    this.state.selected = null;
-    this.state.idleStatus = null;
-    this.state.tenantDashboard = {
-      tenant,
-      tab: this.state.tenantDashboard.tenant === tenant ? this.state.tenantDashboard.tab : 'users',
-      loading: true,
-      error: '',
-      data: null,
-    };
-    this.state.reviewOpen = false;
-    this.showTerminalMessage('');
-    void this.loadTenantDashboard(tenant);
-  }
-
-  setTenantDashboardTab(tab: TenantDashboardTab): void {
-    this.state.tenantDashboard = {
-      ...this.state.tenantDashboard,
-      tab,
-    };
-  }
-
-  async loadTenantDashboard(tenant = this.state.tenantDashboard.tenant): Promise<void> {
-    tenant = tenant.trim();
-    if (!tenant || this.state.tenantDashboard.tenant !== tenant) {
-      return;
-    }
-    const tenantState = this.state.tenants.find((candidate) => candidate.name === tenant);
-    const input = tenantDashboardInput(tenantState);
-    if (!input) {
-      this.state.tenantDashboard = {
-        ...this.state.tenantDashboard,
-        loading: false,
-        error: 'Tenant dashboard requires an API URL and a primary cloud alias.',
-        data: null,
-      };
-      return;
-    }
-    this.state.tenantDashboard = { ...this.state.tenantDashboard, loading: true, error: '' };
-    try {
-      const loadedData = await store
-        .dispatch(tenantApi.endpoints.getTenantDashboard.initiate(input))
-        .unwrap();
-      if (this.state.tenantDashboard.tenant !== tenant) {
-        return;
-      }
-      const data = { ...loadedData, environment: loadedData.environment || input.environment };
-      this.state.tenantDashboard = { ...this.state.tenantDashboard, loading: false, error: '', data };
-    } catch (error) {
-      if (this.state.tenantDashboard.tenant !== tenant) {
-        return;
-      }
-      this.state.tenantDashboard = { ...this.state.tenantDashboard, loading: false, error: readError(error), data: null };
-    }
-  }
-
-  async refreshTenantDashboard(): Promise<void> {
-    const tenant = this.state.tenantDashboard.tenant;
-    await this.loadTenantDashboard(tenant);
-    if (this.state.tenantDashboard.tenant === tenant && !this.state.tenantDashboard.error) {
-      this.showNotification('success', 'Dashboard refreshed.');
-    }
-  }
-
   async openSelection(selection: UISelection): Promise<void> {
-    this.state.tenantDashboard = defaultTenantDashboard();
+    this.state.tenantDashboard = { tenant: '', tab: 'users', loading: false, error: '', data: null };
     const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     const key = selectionKey(runSelection);
     const previousSessionId = this.state.sessionId;
@@ -454,13 +315,13 @@ export class ERunUIController {
     this.restoreSelectedTabForEnv(key);
 
     if (this.state.reviewOpen) {
-      await this.loadReviewDiff();
+      await store.dispatch(loadReviewDiff());
     }
     this.focusTerminalSoon();
     this.queueTerminalResize();
   }
 
-  private async ensureDefaultEnvTabs(runSelection: UISelection, key: string): Promise<void> {
+  async ensureDefaultEnvTabs(runSelection: UISelection, key: string): Promise<void> {
     const tabs = this.state.tabsByEnv[key] || [];
     const cols = this.terminal?.cols || 80;
     const rows = this.terminal?.rows || 24;
@@ -503,7 +364,7 @@ export class ERunUIController {
     }
   }
 
-  private rememberSelectedTabForCurrentEnv(sessionId: number): void {
+  rememberSelectedTabForCurrentEnv(sessionId: number): void {
     const selection = this.state.selected;
     if (!selection) {
       return;
@@ -521,7 +382,7 @@ export class ERunUIController {
     if (remembered === this.state.sessionId) {
       return;
     }
-    this.selectTerminalTab(remembered);
+    store.dispatch(selectTerminalTabThunk(remembered));
   }
 
   private prepareOpenSelection(selection: UISelection, runSelection: UISelection, previousSessionId: number, previousKnownSessionId: number): void {
@@ -540,10 +401,10 @@ export class ERunUIController {
     }
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
-    this.showTerminalMessage(`Opening ${selection.tenant} / ${selection.environment}...`, true);
+    store.dispatch(showTerminalMessage(`Opening ${selection.tenant} / ${selection.environment}...`, true));
   }
 
-  private registerOpenSessionResult(key: string, result: StartSessionResult, runSelection: UISelection, previousSessionId: number): void {
+  registerOpenSessionResult(key: string, result: StartSessionResult, runSelection: UISelection, previousSessionId: number): void {
     this.sessions.trackOpenSession(key, result.sessionId, runSelection);
     this.registerDebugSession(result.sessionId, runSelection, 'open');
     this.applyPendingDebugHeader(result.sessionId);
@@ -581,7 +442,7 @@ export class ERunUIController {
     return (active ?? tabs[0]).slot;
   }
 
-  private recordTab(key: string, sessionId: number, slot: number, kind: TerminalTabKind, label: string): void {
+  recordTab(key: string, sessionId: number, slot: number, kind: TerminalTabKind, label: string): void {
     const tabs = this.state.tabsByEnv[key] ? [...this.state.tabsByEnv[key]] : [];
     const existingIndex = tabs.findIndex((tab) => tab.kind === kind && tab.slot === slot);
     if (existingIndex >= 0) {
@@ -593,7 +454,7 @@ export class ERunUIController {
     this.state.tabsByEnv = { ...this.state.tabsByEnv, [key]: tabs };
   }
 
-  private removeTab(key: string, sessionId: number): TerminalTab[] {
+  removeTab(key: string, sessionId: number): TerminalTab[] {
     const tabs = this.state.tabsByEnv[key];
     if (!tabs || tabs.length === 0) {
       return [];
@@ -614,796 +475,32 @@ export class ERunUIController {
     return remaining;
   }
 
-  async addTerminalTab(): Promise<void> {
-    const selection = this.state.selected;
-    if (!selection) {
-      return;
-    }
-    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
-    const key = selectionKey(runSelection);
-    const tabs = this.state.tabsByEnv[key] || [];
-    const nextSlot = tabs.reduce((max, tab) => (tab.slot >= max ? tab.slot + 1 : max), 0);
-    const previousSessionId = this.state.sessionId;
-    try {
-      const result = (await StartSession(runSelection, nextSlot, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
-      this.registerOpenSessionResult(key, result, runSelection, previousSessionId);
-      this.focusTerminalSoon();
-      this.queueTerminalResize();
-    } catch (error: unknown) {
-      this.showTerminalMessage(readError(error));
-    }
-  }
-
-  selectTerminalTab(sessionId: number): void {
-    if (sessionId <= 0 || sessionId === this.state.sessionId) {
-      return;
-    }
-    this.state.sessionId = sessionId;
-    this.rememberSelectedTabForCurrentEnv(sessionId);
-    this.syncDebugDisplay();
-    rebuildTerminalDisplayBuffer(this.sessions, sessionId);
-    this.resetTerminal();
-    this.writeTerminalBuffer(this.sessions.displayBuffer(sessionId));
-    const exitReason = this.sessions.exitReason(sessionId);
-    if (exitReason) {
-      this.state.terminalCopyOutput = this.sessions.exitOutput(sessionId);
-      this.state.terminalCopyStatus = '';
-      this.showTerminalMessage(exitReason);
-    } else {
-      this.hideTerminalMessage();
-    }
-    this.focusTerminalSoon();
-    this.queueTerminalResize();
-  }
-
-  async closeTerminalTab(sessionId: number): Promise<void> {
-    if (sessionId <= 0) {
-      return;
-    }
-    const selection = this.state.selected;
-    if (!selection) {
-      return;
-    }
-    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
-    const key = selectionKey(runSelection);
-    const tabs = this.state.tabsByEnv[key] || [];
-    const target = tabs.find((tab) => tab.sessionId === sessionId);
-    if (target && target.kind !== 'extra') {
-      return;
-    }
-    try {
-      await CloseSession(sessionId);
-    } catch (error: unknown) {
-      this.showTerminalMessage(readError(error));
-      return;
-    }
-    const remaining = this.removeTab(key, sessionId);
-    this.sessions.clearSessionDebug(sessionId);
-    if (this.state.sessionId === sessionId) {
-      const next = remaining[remaining.length - 1];
-      if (next) {
-        this.selectTerminalTab(next.sessionId);
-      } else {
-        this.state.sessionId = 0;
-        this.state.debugOutput = '';
-        this.resetTerminal();
-      }
-      return;
-    }
-  }
-
   private showOpenSelectionStatus(sessionId: number, selection: UISelection): void {
     const exitReason = this.sessions.exitReason(sessionId);
     if (exitReason) {
       this.state.terminalCopyOutput = this.sessions.exitOutput(sessionId);
       this.state.terminalCopyStatus = '';
-      this.showTerminalMessage(exitReason);
+      store.dispatch(showTerminalMessage(exitReason));
       return;
     }
     const buffer = this.sessions.displayBuffer(sessionId);
     if (buffer.length > 0) {
-      this.hideTerminalMessage();
+      store.dispatch(hideTerminalMessage());
       return;
     }
-    this.showTerminalMessage(`Opening ${selection.tenant} / ${selection.environment}...`, true);
+    store.dispatch(showTerminalMessage(`Opening ${selection.tenant} / ${selection.environment}...`, true));
   }
 
-  async openIDE(selection: UISelection | null, ide: IDEKind): Promise<void> {
-    if (!selection) {
-      this.showTerminalMessage('Choose an environment from the left pane.');
+  appendDebugOutput(text: string, fromSessionId?: number): void {
+    if (!this.state.debugOpen || !text) {
       return;
     }
-    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
-    const label = ideLabel(ide);
-    this.state.selected = selection;
-    if (this.state.debugOpen) {
-      const header = `$ ${formatIDECommand(runSelection, ide)}\n`;
-      this.sessions.setSessionDebug(this.state.sessionId, header);
-      this.syncDebugDisplay();
+    const target = fromSessionId !== undefined ? fromSessionId : this.state.sessionId;
+    const next = trimDebugOutput(this.sessions.sessionDebug(target) + text);
+    this.sessions.setSessionDebug(target, next);
+    if (target === this.state.sessionId) {
+      this.state.debugOutput = next;
     }
-    this.state.terminalCopyOutput = '';
-    this.state.terminalCopyStatus = '';
-    this.showTerminalMessage(`Opening ${label} for ${selection.tenant} / ${selection.environment}...`);
-
-    try {
-      await store.dispatch(sessionApi.endpoints.openIDE.initiate({ selection: runSelection, ide })).unwrap();
-    } catch (error: unknown) {
-      const failure = ideOpenFailure(selection, label, readError(error));
-      this.appendDebugOutput(debugOutputBlock(failure.copyOutput));
-      this.dismissNotification();
-      this.showTerminalFailure(failure.message, failure.detail, failure.copyOutput, '', null);
-      return;
-    }
-    this.dismissTerminalStatus();
-    this.showNotification('success', `Opened ${label} for ${selection.tenant} / ${selection.environment}.`);
-  }
-
-  openInitializeDialog(): void {
-    const tenantDefault = this.state.selected?.tenant || this.state.tenants[0]?.name || '';
-    const containerRegistryDefault = loadSavedPastContainerRegistries()[0] || '';
-    this.state.environmentDialog = {
-      open: true,
-      actionMode: 'init',
-      tenant: tenantDefault,
-      environment: '',
-      version: this.state.versionSuggestions[0]?.version || '',
-      kubernetesContext: '',
-      kubernetesContexts: [],
-      kubernetesContextsLoading: true,
-      resourceStatus: null,
-      resourceStatusLoading: false,
-      runtimePod: defaultEnvironmentDialog().runtimePod,
-      containerRegistry: containerRegistryDefault,
-      noGit: false,
-      bootstrap: false,
-      setDefaultTenant: true,
-      versionImage: this.state.versionSuggestions[0]?.image || '',
-      choicesOpen: false,
-      busy: false,
-      error: '',
-    };
-    void this.refreshKubernetesContexts();
-    void this.refreshDialogVersionSuggestions(true);
-  }
-
-  closeEnvironmentDialog(): void {
-    if (this.state.environmentDialog.busy) {
-      return;
-    }
-    this.state.environmentDialog = defaultEnvironmentDialog();
-    this.focusTerminalSoon();
-  }
-
-  updateEnvironmentDialog(values: Partial<EnvironmentDialogState>): void {
-    if (this.state.environmentDialog.busy) {
-      return;
-    }
-    const versionReset = values.version !== undefined;
-    this.state.environmentDialog = {
-      ...this.state.environmentDialog,
-      ...values,
-      error: values.error ?? '',
-      ...(versionReset ? { versionImage: '', choicesOpen: false } : {}),
-    };
-    if (values.tenant !== undefined) {
-      this.scheduleDialogVersionSuggestionRefresh(true);
-    }
-    if (values.kubernetesContext !== undefined) {
-      void this.refreshEnvironmentRuntimeResources(values.kubernetesContext);
-    }
-  }
-
-  toggleEnvironmentVersionChoices(): void {
-    this.setEnvironmentVersionChoicesOpen(!this.state.environmentDialog.choicesOpen);
-  }
-
-  setEnvironmentVersionChoicesOpen(open: boolean): void {
-    if (this.state.environmentDialog.busy) {
-      return;
-    }
-    this.state.environmentDialog = {
-      ...this.state.environmentDialog,
-      choicesOpen: open && this.state.versionSuggestions.length > 0,
-    };
-  }
-
-  selectEnvironmentVersionSuggestion(suggestion: UIVersionSuggestion | undefined): void {
-    if (this.state.environmentDialog.busy) {
-      return;
-    }
-    this.state.environmentDialog = {
-      ...this.state.environmentDialog,
-      version: suggestion?.version || '',
-      versionImage: suggestion?.image || '',
-      choicesOpen: false,
-    };
-  }
-
-  async submitEnvironmentDialog(form: HTMLFormElement): Promise<void> {
-    const dialog = this.state.environmentDialog;
-    if (dialog.busy) {
-      return;
-    }
-    const selection = this.environmentDialogSelection(dialog);
-    if (!selection) {
-      this.state.environmentDialog = { ...dialog, error: '' };
-      form.reportValidity();
-      return;
-    }
-    const resourceError = dialog.actionMode === 'init' ? runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus) : '';
-    if (resourceError) {
-      this.state.environmentDialog = { ...dialog, error: resourceError };
-      return;
-    }
-
-    rememberEnvironmentDialogSelection(selection, dialog.actionMode);
-    this.beginEnvironmentDialogSubmit(dialog, selection);
-    const previousSelected = this.state.selected;
-    try {
-      await this.startEnvironmentDialogSelection(selection, dialog.actionMode);
-      this.state.environmentDialog = defaultEnvironmentDialog();
-      this.focusTerminalSoon();
-    } catch (error) {
-      const message = readError(error);
-      this.state.selected = previousSelected;
-      this.state.environmentDialog = {
-        ...this.state.environmentDialog,
-        busy: false,
-        error: message,
-      };
-      this.showTerminalMessage(message);
-    }
-  }
-
-  private environmentDialogSelection(dialog: EnvironmentDialogState): UISelection | null {
-    const values = normalizedEnvironmentDialogValues(dialog);
-    if (!validEnvironmentDialogValues(values, dialog.actionMode)) {
-      return null;
-    }
-    const isInit = dialog.actionMode === 'init';
-    const runtimePod = runtimePodConfigToKubernetes(dialog.runtimePod);
-    return {
-      tenant: values.tenant,
-      environment: values.environment,
-      version: values.version,
-      runtimeImage: this.resolveEnvironmentRuntimeImage(values.version),
-      runtimeCpu: isInit ? runtimePod.cpu : undefined,
-      runtimeMemory: isInit ? runtimePod.memory : undefined,
-      kubernetesContext: isInit ? values.kubernetesContext : undefined,
-      containerRegistry: isInit ? values.containerRegistry : undefined,
-      noGit: dialog.noGit,
-      bootstrap: isInit ? dialog.bootstrap : undefined,
-      setDefaultTenant: isInit ? dialog.setDefaultTenant : undefined,
-    };
-  }
-
-  private beginEnvironmentDialogSubmit(dialog: EnvironmentDialogState, selection: UISelection): void {
-    this.state.environmentDialog = {
-      ...dialog,
-      tenant: selection.tenant,
-      environment: selection.environment,
-      version: selection.version || '',
-      kubernetesContext: selection.kubernetesContext || '',
-      runtimePod: dialog.runtimePod,
-      containerRegistry: selection.containerRegistry || '',
-      busy: true,
-      error: '',
-      choicesOpen: false,
-    };
-  }
-
-  private async startEnvironmentDialogSelection(selection: UISelection, actionMode: EnvironmentDialogState['actionMode']): Promise<void> {
-    if (actionMode === 'deploy') {
-      await this.startDeploySelection(selection);
-      return;
-    }
-    await this.startInitSelection(selection);
-  }
-
-  async loginPrimaryCloudProvider(alias: string): Promise<void> {
-    await this.updatePrimaryCloudProvider(alias, 'login', (target) =>
-      store.dispatch(cloudApi.endpoints.loginCloudProvider.initiate(target)).unwrap(),
-    );
-  }
-
-  async logoutPrimaryCloudProvider(alias: string): Promise<void> {
-    await this.updatePrimaryCloudProvider(alias, 'logout', (target) =>
-      store.dispatch(cloudApi.endpoints.logoutCloudProvider.initiate(target)).unwrap(),
-    );
-  }
-
-  async getPrimaryCloudProviderBearerToken(alias: string): Promise<void> {
-    alias = alias.trim();
-    if (!alias || this.state.sidebarCloudAliasBusy) {
-      return;
-    }
-    this.state.sidebarCloudAliasBusy = true;
-    this.state.sidebarCloudAliasAction = 'bearer';
-    try {
-      const result = await store
-        .dispatch(cloudApi.endpoints.getCloudProviderBearerToken.initiate(alias))
-        .unwrap();
-      await ClipboardSetText(result.token);
-      this.state.cloudProviders = replaceCloudProvider(this.state.cloudProviders, result.provider);
-      this.state.sidebarCloudAliasBusy = false;
-      this.state.sidebarCloudAliasAction = '';
-      const issuer = result.issuer?.trim();
-      this.showTerminalMessage(issuer ? `Copied bearer token for ${result.alias}. Issuer: ${issuer}` : `Copied bearer token for ${result.alias}.`);
-      this.showNotification('success', `Copied bearer token for ${result.alias}.`);
-    } catch (error) {
-      const message = readError(error);
-      this.state.sidebarCloudAliasBusy = false;
-      this.state.sidebarCloudAliasAction = '';
-      this.showTerminalMessage(message);
-      this.showNotification('error', message);
-    }
-  }
-
-  openTenantDialog(tenant: string): void {
-    this.state.tenantDialog = {
-      open: true,
-      tenant,
-      config: {
-        name: tenant,
-        defaultEnvironment: '',
-        apiUrl: '',
-        cloudProviderAliases: [],
-        primaryCloudProviderAlias: '',
-        cloudProviders: [],
-      },
-      configLoading: true,
-      busy: false,
-      busyAction: '',
-      busyTarget: '',
-      error: '',
-    };
-    void this.loadTenantConfig();
-  }
-
-  closeTenantDialog(): void {
-    if (this.state.tenantDialog.busy) {
-      return;
-    }
-    this.state.tenantDialog = defaultTenantDialog();
-    this.focusTerminalSoon();
-  }
-
-  updateTenantDialog(values: Partial<TenantDialogState>): void {
-    if (this.state.tenantDialog.busy) {
-      return;
-    }
-    this.state.tenantDialog = {
-      ...this.state.tenantDialog,
-      ...values,
-      error: values.error ?? '',
-    };
-  }
-
-  updateTenantConfig(values: Partial<UITenantConfig>): void {
-    if (this.state.tenantDialog.busy || this.state.tenantDialog.configLoading) {
-      return;
-    }
-    this.updateTenantDialog({
-      config: {
-        ...this.state.tenantDialog.config,
-        ...values,
-      },
-    });
-  }
-
-  async loadTenantConfig(): Promise<void> {
-    const dialog = this.state.tenantDialog;
-    if (!dialog.open || !dialog.tenant) {
-      return;
-    }
-    this.state.tenantDialog = {
-      ...dialog,
-      configLoading: true,
-      error: '',
-    };
-    try {
-      const result = await store
-        .dispatch(tenantApi.endpoints.getTenantConfig.initiate(dialog.tenant))
-        .unwrap();
-      if (result.cloudProviders) {
-        this.state.cloudProviders = result.cloudProviders;
-      }
-      this.state.tenantDialog = {
-        ...this.state.tenantDialog,
-        config: result,
-        configLoading: false,
-        error: '',
-      };
-    } catch (error) {
-      this.state.tenantDialog = {
-        ...this.state.tenantDialog,
-        configLoading: false,
-        error: readError(error),
-      };
-    }
-  }
-
-  async submitTenantConfig(): Promise<void> {
-    const dialog = this.state.tenantDialog;
-    if (dialog.busy || dialog.configLoading) {
-      return;
-    }
-    if (!dialog.tenant) {
-      this.closeTenantDialog();
-      return;
-    }
-    this.state.tenantDialog = { ...dialog, busy: true, busyAction: 'save', busyTarget: '', error: '' };
-    try {
-      const result = await store
-        .dispatch(tenantApi.endpoints.saveTenantConfig.initiate(dialog.config))
-        .unwrap();
-      this.applySavedTenantConfig(result);
-      this.state.tenantDialog = {
-        ...this.state.tenantDialog,
-        config: result,
-        busy: false,
-        busyAction: '',
-        busyTarget: '',
-        error: '',
-      };
-      this.showNotification('success', `Saved config for ${result.name}.`);
-      this.closeTenantDialog();
-    } catch (error) {
-      const message = readError(error);
-      this.state.tenantDialog = {
-        ...this.state.tenantDialog,
-        busy: false,
-        busyAction: '',
-        busyTarget: '',
-        error: message,
-      };
-      this.showTerminalMessage(message);
-    }
-  }
-
-  async setupTenantCloudProviderOIDC(alias: string): Promise<void> {
-    alias = alias.trim();
-    const dialog = this.state.tenantDialog;
-    if (!alias || dialog.busy || dialog.configLoading) {
-      return;
-    }
-    this.state.tenantDialog = { ...dialog, busy: true, busyAction: 'cloud-oidc', busyTarget: alias, error: '' };
-    try {
-      const provider = await store
-        .dispatch(cloudApi.endpoints.setupCloudProviderOIDC.initiate(alias))
-        .unwrap();
-      this.state.cloudProviders = replaceCloudProvider(this.state.cloudProviders, provider);
-      const currentProviders = this.state.tenantDialog.config.cloudProviders || [];
-      this.state.tenantDialog = {
-        ...this.state.tenantDialog,
-        config: {
-          ...this.state.tenantDialog.config,
-          cloudProviders: replaceCloudProvider(currentProviders, provider),
-        },
-        busy: false,
-        busyAction: '',
-        busyTarget: '',
-        error: '',
-      };
-      this.showNotification('success', `Updated OIDC issuer for ${provider.alias}.`);
-    } catch (error) {
-      const message = readError(error);
-      this.state.tenantDialog = {
-        ...this.state.tenantDialog,
-        busy: false,
-        busyAction: '',
-        busyTarget: '',
-        error: message,
-      };
-      this.showTerminalMessage(message);
-      this.showNotification('error', message);
-    }
-  }
-
-  private async updatePrimaryCloudProvider(alias: string, action: 'login' | 'logout', run: (alias: string) => Promise<unknown>): Promise<void> {
-    alias = alias.trim();
-    if (!alias || this.state.sidebarCloudAliasBusy) {
-      return;
-    }
-    this.state.sidebarCloudAliasBusy = true;
-    this.state.sidebarCloudAliasAction = action;
-    try {
-      const provider = (await run(alias)) as UICloudProviderStatus;
-      this.state.cloudProviders = replaceCloudProvider(this.state.cloudProviders, provider);
-      this.state.sidebarCloudAliasBusy = false;
-      this.state.sidebarCloudAliasAction = '';
-      this.showTerminalMessage(`${provider.alias}: ${provider.status}`);
-    } catch (error) {
-      const message = readError(error);
-      this.state.sidebarCloudAliasBusy = false;
-      this.state.sidebarCloudAliasAction = '';
-      this.showTerminalMessage(message);
-      this.showNotification('error', message);
-    }
-  }
-
-  private applySavedTenantConfig(config: UITenantConfig): void {
-    const tenantName = config.name.trim();
-    if (!tenantName) {
-      return;
-    }
-    this.state.tenants = this.state.tenants.map((tenant) => {
-      if (tenant.name !== tenantName) {
-        return tenant;
-      }
-      return {
-        ...tenant,
-        cloudProviderAliases: config.cloudProviderAliases || [],
-        primaryCloudProviderAlias: config.primaryCloudProviderAlias || '',
-      };
-    });
-    if (config.cloudProviders) {
-      this.state.cloudProviders = config.cloudProviders;
-    }
-  }
-
-  setDiffFilter(value: string): void {
-    this.state.diffFilter = value.trim().toLowerCase();
-  }
-
-  toggleChangedFiles(): void {
-    this.state.changedFilesOpen = !this.state.changedFilesOpen;
-  }
-
-  selectReviewRange(scope: AppState['selectedReviewScope'], hash = ''): void {
-    const selected = hash.trim();
-    if ((scope === this.state.selectedReviewScope && selected === this.state.selectedReviewCommit) || this.state.diffLoading) {
-      return;
-    }
-    this.state.selectedReviewScope = scope;
-    this.state.selectedReviewCommit = selected;
-    void this.loadReviewDiff();
-  }
-
-  async loadReviewDiff(options: { silent?: boolean } = {}): Promise<void> {
-    const selection = this.state.selected;
-    if (!selection) {
-      return;
-    }
-    const request = ++this.reviewDiffRequest;
-    const selectedKey = selectionKey(selection);
-    const scope = this.state.selectedReviewScope;
-    const selectedCommit = this.state.selectedReviewCommit;
-    if (!options.silent) {
-      this.state.diffLoading = true;
-      this.state.diffError = '';
-    }
-    try {
-      const diff = await store
-        .dispatch(
-          reviewApi.endpoints.getDiff.initiate(
-            { selection, options: { scope, selectedCommit } },
-            { forceRefetch: true },
-          ),
-        )
-        .unwrap();
-      if (!this.isCurrentReviewDiffRequest(request, selectedKey)) {
-        return;
-      }
-      this.state.diff = diff;
-      this.state.diffError = '';
-      this.state.diffErrorReconnectable = false;
-      this.state.selectedReviewScope = diff.scope || 'current';
-      this.state.selectedReviewCommit = diff.selectedCommit || '';
-      this.state.selectedDiffPath = chooseSelectedDiffPath(diff, this.state.selectedDiffPath);
-    } catch (error: unknown) {
-      if (!this.isCurrentReviewDiffRequest(request, selectedKey)) {
-        return;
-      }
-      if (options.silent && this.state.diff) {
-        return;
-      }
-      if (!options.silent || !this.state.diff) {
-        this.state.diff = null;
-      }
-      const message = readError(error);
-      if (isMcpUnreachableMessage(message)) {
-        this.state.diffError = stripMcpUnreachableMarker(message);
-        this.state.diffErrorReconnectable = true;
-      } else {
-        this.state.diffError = message;
-        this.state.diffErrorReconnectable = false;
-      }
-    } finally {
-      if (request === this.reviewDiffRequest) {
-        if (!options.silent) {
-          this.state.diffLoading = false;
-        }
-        this.scheduleReviewDiffRefresh();
-      }
-    }
-  }
-
-  async refreshReviewDiff(): Promise<void> {
-    if (!this.state.selected) {
-      return;
-    }
-    await this.loadReviewDiff();
-    if (!this.state.diffError) {
-      this.showNotification('success', 'Diff refreshed.');
-    }
-  }
-
-  private isCurrentReviewDiffRequest(request: number, selectedKey: string): boolean {
-    return request === this.reviewDiffRequest && selectedKey === selectionKey(this.state.selected || { tenant: '', environment: '' });
-  }
-
-  private scheduleReviewDiffRefresh(delay = REVIEW_DIFF_REFRESH_INTERVAL_MS): void {
-    window.clearTimeout(this.reviewDiffRefreshTimer);
-    if (!this.state.reviewOpen || !this.state.selected) {
-      this.reviewDiffRefreshTimer = 0;
-      return;
-    }
-    this.reviewDiffRefreshTimer = window.setTimeout(() => {
-      if (!this.state.reviewOpen || !this.state.selected) {
-        this.stopReviewDiffRefresh();
-        return;
-      }
-      if (this.state.diffLoading) {
-        this.scheduleReviewDiffRefresh();
-        return;
-      }
-      void this.loadReviewDiff({ silent: true });
-    }, delay);
-  }
-
-  private stopReviewDiffRefresh(): void {
-    window.clearTimeout(this.reviewDiffRefreshTimer);
-    this.reviewDiffRefreshTimer = 0;
-  }
-
-  // requestReconnect opens the explicit-confirmation dialog for the
-  // unreachable-MCP recovery flow. The dialog runs `erun open`, which can
-  // redeploy the runtime, so the action is gated on a deliberate user click.
-  requestReconnect(): void {
-    if (!this.state.selected) {
-      return;
-    }
-    this.state.reconnect = { status: 'confirm', lastLine: '', error: '' };
-  }
-
-  cancelReconnect(): void {
-    if (this.state.reconnect.status === 'running') {
-      return;
-    }
-    this.state.reconnect = { status: 'idle', lastLine: '', error: '' };
-  }
-
-  async confirmReconnect(): Promise<void> {
-    const selection = this.state.selected;
-    if (!selection || this.state.reconnect.status === 'running') {
-      return;
-    }
-    this.state.reconnect = { status: 'running', lastLine: '', error: '' };
-    try {
-      await store.dispatch(sessionApi.endpoints.reconnectMCP.initiate(selection)).unwrap();
-      this.state.reconnect = { status: 'idle', lastLine: '', error: '' };
-      await this.loadReviewDiff();
-    } catch (error: unknown) {
-      this.state.reconnect = {
-        status: 'error',
-        lastLine: this.state.reconnect.lastLine,
-        error: readError(error),
-      };
-    }
-  }
-
-  private handleReconnectLine(line: string): void {
-    const trimmed = (line || '').trim();
-    if (!trimmed) {
-      return;
-    }
-    if (this.state.reconnect.status !== 'running') {
-      return;
-    }
-    this.state.reconnect = { ...this.state.reconnect, lastLine: trimmed };
-  }
-
-  toggleDiffDirectory(path: string): void {
-    store.dispatch(toggleDiffDirCollapsed(path));
-  }
-
-  selectDiffPath(path: string): void {
-    this.state.selectedDiffPath = path;
-    window.setTimeout(() => this.scrollSelectedDiffIntoView(), 0);
-  }
-
-  queueVisibleDiffSelectionUpdate(): void {
-    if (this.reviewScrollFrame > 0) {
-      return;
-    }
-    this.reviewScrollFrame = window.requestAnimationFrame(() => {
-      this.reviewScrollFrame = 0;
-      this.updateSelectedDiffPathFromScroll();
-    });
-  }
-
-  titlebarDoubleClick(event: React.MouseEvent<HTMLElement>): void {
-    const target = event.target;
-    if (target instanceof HTMLElement && target.closest('button')) {
-      return;
-    }
-    WindowToggleMaximise();
-  }
-
-  showTerminalMessage(message: string, busy = false): void {
-    this.state.terminalMessage = message;
-    this.state.terminalStatusKind = 'info';
-    this.state.terminalStatusDetail = '';
-    this.state.terminalStatusAction = '';
-    this.state.terminalBusy = busy;
-    if (busy) {
-      this.state.terminalCopyOutput = '';
-      this.state.terminalCopyStatus = '';
-    }
-    this.terminalStatusRetrySelection = null;
-  }
-
-  showTerminalFailure(message: string, detail: string, copyOutput: string, action: TerminalStatusAction, retrySelection: UISelection | null): void {
-    this.state.terminalMessage = message;
-    this.state.terminalStatusKind = action === 'wait-longer' ? 'warning' : 'error';
-    this.state.terminalStatusDetail = detail;
-    this.state.terminalStatusAction = action;
-    this.state.terminalBusy = false;
-    this.state.terminalCopyOutput = copyOutput;
-    this.state.terminalCopyStatus = '';
-    this.terminalStatusRetrySelection = action === 'wait-longer' ? retrySelection : null;
-  }
-
-  showNotification(kind: NonNullable<AppState['notification']>['kind'], message: string): void {
-    const trimmed = message.trim();
-    if (!trimmed) {
-      return;
-    }
-    window.clearTimeout(this.notificationTimer);
-    this.state.notification = {
-      kind,
-      message: trimmed,
-    };
-    if (kind === 'success' || kind === 'info') {
-      this.notificationTimer = window.setTimeout(() => {
-        this.dismissNotification();
-      }, 3200);
-    }
-  }
-
-  dismissNotification(): void {
-    window.clearTimeout(this.notificationTimer);
-    if (!this.state.notification) {
-      return;
-    }
-    this.state.notification = null;
-  }
-
-  dismissTerminalStatus(): void {
-    if (!this.state.terminalMessage && !this.state.terminalStatusDetail && !this.state.terminalCopyOutput && !this.state.terminalCopyStatus) {
-      return;
-    }
-    this.state.terminalMessage = '';
-    this.state.terminalStatusKind = 'info';
-    this.state.terminalStatusDetail = '';
-    this.state.terminalStatusAction = '';
-    this.state.terminalBusy = false;
-    this.state.terminalCopyOutput = '';
-    this.state.terminalCopyStatus = '';
-    this.terminalStatusRetrySelection = null;
-  }
-
-  async waitLongerForTerminalStatus(): Promise<void> {
-    const selection = this.terminalStatusRetrySelection;
-    if (!selection) {
-      return;
-    }
-    this.state.terminalStatusAction = '';
-    this.state.terminalCopyOutput = '';
-    this.state.terminalCopyStatus = '';
-    this.showTerminalMessage(`Waiting longer for ${selection.tenant} / ${selection.environment}...`, true);
-    await this.openSelection(selection);
   }
 
   focusTerminalSoon(): void {
@@ -1413,23 +510,6 @@ export class ERunUIController {
       window.setTimeout(() => this.terminal?.focus(), 80);
     }, 0);
   }
-
-  async copyTerminalOutput(): Promise<void> {
-    if (!this.state.terminalCopyOutput) {
-      return;
-    }
-    try {
-      await ClipboardSetText(this.state.terminalCopyOutput);
-      this.state.terminalCopyStatus = 'Copied';
-    } catch (error) {
-      this.state.terminalCopyStatus = readError(error);
-    }
-    window.clearTimeout(this.terminalCopyStatusTimer);
-    this.terminalCopyStatusTimer = window.setTimeout(() => {
-      this.state.terminalCopyStatus = '';
-    }, 1400);
-  }
-
 
   private scheduleIdleStatusPoll(delay = 1000): void {
     window.clearTimeout(this.idleStatusTimer);
@@ -1482,7 +562,7 @@ export class ERunUIController {
 
   private async boot(): Promise<void> {
     try {
-      this.showTerminalMessage('Loading environments...', true);
+      store.dispatch(showTerminalMessage('Loading environments...', true));
       const loaded = await store
         .dispatch(stateApi.endpoints.getInitialState.initiate(undefined, { forceRefetch: true }))
         .unwrap();
@@ -1492,7 +572,7 @@ export class ERunUIController {
       this.state.versionSuggestions = normalizeVersionSuggestions(loaded.versionSuggestions || []);
       this.selectLoadedKubernetesContexts(loaded.kubernetesContexts || []);
       if (loaded.message) {
-        this.showTerminalMessage(loaded.message);
+        store.dispatch(showTerminalMessage(loaded.message));
         return;
       }
 
@@ -1501,13 +581,13 @@ export class ERunUIController {
         return;
       }
 
-      this.showTerminalMessage('Choose an environment from the left pane.');
+      store.dispatch(showTerminalMessage('Choose an environment from the left pane.'));
     } catch (error: unknown) {
-      this.showTerminalMessage(readError(error));
+      store.dispatch(showTerminalMessage(readError(error)));
     }
   }
 
-  private async startInitSelection(selection: UISelection): Promise<void> {
+  async startInitSelection(selection: UISelection): Promise<void> {
     // Visibility of system status (Nielsen #1) is provided by three
     // surfaces that persist for the full init duration: the sidebar
     // placeholder row (Sidebar.tsx EnvironmentRow placeholder branch),
@@ -1532,7 +612,7 @@ export class ERunUIController {
     this.state.selected = selection;
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
-    this.showTerminalMessage(`Deploying runtime for ${selection.tenant} / ${selection.environment}...`, true);
+    store.dispatch(showTerminalMessage(`Deploying runtime for ${selection.tenant} / ${selection.environment}...`, true));
 
     this.fitAddon?.fit();
     const result = (await StartDeploySession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
@@ -1558,7 +638,7 @@ export class ERunUIController {
     rebuildTerminalDisplayBuffer(this.sessions, result.sessionId);
     this.resetTerminal();
     this.writeTerminalBuffer(this.sessions.displayBuffer(result.sessionId));
-    this.hideTerminalMessage();
+    store.dispatch(hideTerminalMessage());
     this.focusTerminalSoon();
     this.queueTerminalResize();
   }
@@ -1636,8 +716,12 @@ export class ERunUIController {
     void this.refreshEnvironmentRuntimeResources(this.state.environmentDialog.kubernetesContext);
   }
 
+  // refreshEnvironmentRuntimeResources is a private helper invoked when the
+  // dialog's kubernetesContext changes or when the context list resolves.
+  // The environmentDialogThunks own the analogous user-driven refresh
+  // (kubernetesContext field changes), but this internal flow stays on the
+  // controller because boot() + refreshKubernetesContexts() drive it.
   private async refreshEnvironmentRuntimeResources(kubernetesContext: string): Promise<void> {
-    const request = ++this.environmentResourceStatusRequest;
     const context = normalizeDialogValue(kubernetesContext);
     if (!this.state.environmentDialog.open || this.state.environmentDialog.actionMode !== 'init' || !context) {
       return;
@@ -1660,7 +744,7 @@ export class ERunUIController {
           ),
         )
         .unwrap();
-      if (request !== this.environmentResourceStatusRequest || !this.state.environmentDialog.open) {
+      if (!this.state.environmentDialog.open) {
         return;
       }
       this.state.environmentDialog = {
@@ -1669,7 +753,7 @@ export class ERunUIController {
         resourceStatusLoading: false,
       };
     } catch (error) {
-      if (request !== this.environmentResourceStatusRequest || !this.state.environmentDialog.open) {
+      if (!this.state.environmentDialog.open) {
         return;
       }
       this.state.environmentDialog = {
@@ -1686,49 +770,6 @@ export class ERunUIController {
     }
   }
 
-  private scheduleDialogVersionSuggestionRefresh(selectDefault: boolean): void {
-    if (this.versionSuggestionTimer) {
-      window.clearTimeout(this.versionSuggestionTimer);
-    }
-    this.versionSuggestionTimer = window.setTimeout(() => {
-      void this.refreshDialogVersionSuggestions(selectDefault);
-    }, 250);
-  }
-
-  private async refreshDialogVersionSuggestions(selectDefault: boolean): Promise<void> {
-    const request = ++this.versionSuggestionRequest;
-    const dialog = this.state.environmentDialog;
-    const selection = {
-      tenant: normalizeDialogValue(dialog.tenant),
-      environment: normalizeDialogValue(dialog.environment),
-      action: dialog.actionMode,
-    };
-    const raw = await store
-      .dispatch(
-        environmentApi.endpoints.getVersionSuggestions.initiate(selection, { forceRefetch: true }),
-      )
-      .unwrap();
-    const suggestions = normalizeVersionSuggestions(raw);
-    if (request !== this.versionSuggestionRequest || !this.state.environmentDialog.open) {
-      return;
-    }
-
-    this.state.versionSuggestions = suggestions;
-    const currentVersion = normalizeDialogValue(this.state.environmentDialog.version);
-    if (selectDefault || !suggestions.some((suggestion) => suggestion.version === currentVersion)) {
-      this.selectEnvironmentVersionSuggestion(suggestions[0]);
-    } else {
-    }
-  }
-
-  private resolveEnvironmentRuntimeImage(version: string): string {
-    if (this.state.environmentDialog.versionImage) {
-      return this.state.environmentDialog.versionImage;
-    }
-    const suggestion = this.state.versionSuggestions.find((value) => value.version === version);
-    return suggestion?.image || '';
-  }
-
   resolveManageRuntimeImage(version: string): string {
     if (this.state.manageDialog.versionImage) {
       return this.state.manageDialog.versionImage;
@@ -1742,24 +783,13 @@ export class ERunUIController {
     this.terminal?.clear();
   }
 
-  hideTerminalMessage(): void {
-    this.state.terminalMessage = '';
-    this.state.terminalStatusKind = 'info';
-    this.state.terminalStatusDetail = '';
-    this.state.terminalStatusAction = '';
-    this.state.terminalBusy = false;
-    this.state.terminalCopyOutput = '';
-    this.state.terminalCopyStatus = '';
-    this.terminalStatusRetrySelection = null;
-  }
-
   private handleAppStatus(payload: AppStatusPayload): void {
     const message = String(payload?.message || '').trim();
     if (!message) {
       return;
     }
     this.appendDebugOutput(`[status] ${message}\n`);
-    this.showTerminalMessage(message, payload.busy === true);
+    store.dispatch(showTerminalMessage(message, payload.busy === true));
   }
 
   // Fires when the backend's PTY trace handler observes
@@ -1780,11 +810,11 @@ export class ERunUIController {
     if (!this.environmentExists(tenant, environment)) {
       return;
     }
-    this.showNotification('success', `Created ${tenant} / ${environment}.`);
+    store.dispatch(showNotification('success', `Created ${tenant} / ${environment}.`));
     try {
       await this.openSelection({ tenant, environment });
     } catch (error) {
-      this.showTerminalMessage(readError(error));
+      store.dispatch(showTerminalMessage(readError(error)));
     }
   }
 
@@ -1798,7 +828,7 @@ export class ERunUIController {
     if (!tenant || !environment) {
       return;
     }
-    this.showNotification('error', `Failed to create ${tenant} / ${environment}. See the Local tab and the activity drawer for details.`);
+    store.dispatch(showNotification('error', `Failed to create ${tenant} / ${environment}. See the Local tab and the activity drawer for details.`));
     if (this.selectedIsPendingFor(tenant, environment)) {
       this.state.selected = null;
     }
@@ -1810,18 +840,6 @@ export class ERunUIController {
       return false;
     }
     return !this.environmentExists(tenant, environment);
-  }
-
-  private appendDebugOutput(text: string, fromSessionId?: number): void {
-    if (!this.state.debugOpen || !text) {
-      return;
-    }
-    const target = fromSessionId !== undefined ? fromSessionId : this.state.sessionId;
-    const next = trimDebugOutput(this.sessions.sessionDebug(target) + text);
-    this.sessions.setSessionDebug(target, next);
-    if (target === this.state.sessionId) {
-      this.state.debugOutput = next;
-    }
   }
 
   private handleTerminalOutput(payload: TerminalOutputPayload): void {
@@ -1844,7 +862,7 @@ export class ERunUIController {
       return;
     }
     if (this.state.terminalMessage && !this.state.terminalCopyOutput) {
-      this.hideTerminalMessage();
+      store.dispatch(hideTerminalMessage());
     }
     this.terminal?.write(displayData);
   }
@@ -1870,10 +888,10 @@ export class ERunUIController {
     }
     if (payload.reason && terminalExitHasTrackedSelection(selections)) {
       const failure = classifiedTerminalFailure(payload.reason, reason, failedOutput, selections.openSelection);
-      this.showTerminalFailure(failure.message, failure.detail, failedOutput, failure.action, failure.retrySelection);
+      store.dispatch(showTerminalFailure(failure.message, failure.detail, failedOutput, failure.action, failure.retrySelection));
       return;
     }
-    this.showTerminalMessage(reason);
+    store.dispatch(showTerminalMessage(reason));
   }
 
   private recordDoctorOutcome(payload: TerminalExitPayload, selections: TerminalExitSelections): void {
@@ -1908,7 +926,7 @@ export class ERunUIController {
     }
     const next = remaining[remaining.length - 1];
     if (next) {
-      this.selectTerminalTab(next.sessionId);
+      store.dispatch(selectTerminalTabThunk(next.sessionId));
     }
   }
 
@@ -1929,7 +947,7 @@ export class ERunUIController {
       return false;
     }
     if (selections.sshdInitSelection) {
-      this.showTerminalMessage(reason);
+      store.dispatch(showTerminalMessage(reason));
       return true;
     }
     return false;
@@ -1950,10 +968,24 @@ export class ERunUIController {
     if (!status) {
       return;
     }
-    this.showTerminalMessage(status, true);
+    store.dispatch(showTerminalMessage(status, true));
   }
 
-  private layoutCallbacks(): {
+  // handleReconnectLine appends a status line from the reconnect PTY into the
+  // reconnect dialog while it is running. Kept on the controller because it
+  // wires the EventsOn('mcp-reconnect-line') subscription.
+  private handleReconnectLine(line: string): void {
+    const trimmed = (line || '').trim();
+    if (!trimmed) {
+      return;
+    }
+    if (this.state.reconnect.status !== 'running') {
+      return;
+    }
+    this.state.reconnect = { ...this.state.reconnect, lastLine: trimmed };
+  }
+
+  layoutCallbacks(): {
     applyLayoutVars: () => void;
     focusTerminalSoon: () => void;
     queueTerminalResize: () => void;
@@ -1965,7 +997,7 @@ export class ERunUIController {
     };
   }
 
-  private applyLayoutVars(): void {
+  applyLayoutVars(): void {
     const root = document.documentElement;
     root.style.setProperty('--sidebar-width', `${this.state.sidebarHidden ? 0 : this.state.sidebarWidth}px`);
     root.style.setProperty('--review-width', `${this.clampedReviewWidth()}px`);
@@ -1980,13 +1012,13 @@ export class ERunUIController {
   }
 
   private clampedFilesWidth(): number {
-    const reviewWidth = this.reviewView?.getBoundingClientRect().width || this.state.reviewWidth;
+    const reviewWidth = this._reviewView?.getBoundingClientRect().width || this.state.reviewWidth;
     const maxFilesForReview = reviewWidth > 0 ? reviewWidth - 260 : MAX_FILES_WIDTH;
     return clamp(this.state.filesWidth, MIN_FILES_WIDTH, Math.max(MIN_FILES_WIDTH, Math.min(MAX_FILES_WIDTH, maxFilesForReview)));
   }
 
   private clampedDebugHeight(): number {
-    const paneHeight = this.terminalPane?.getBoundingClientRect().height || 0;
+    const paneHeight = this._terminalPane?.getBoundingClientRect().height || 0;
     const maxDebugForPane = paneHeight > 0 ? paneHeight - 120 : MAX_DEBUG_HEIGHT;
     return clamp(this.state.debugHeight, MIN_DEBUG_HEIGHT, Math.max(MIN_DEBUG_HEIGHT, Math.min(MAX_DEBUG_HEIGHT, maxDebugForPane)));
   }
@@ -2003,16 +1035,39 @@ export class ERunUIController {
     }, 40);
   };
 
-  private scrollSelectedDiffIntoView(): void {
-    scrollSelectedDiffIntoView(this.diffList, this.state.selectedDiffPath);
+  queueVisibleDiffSelectionUpdate(): void {
+    if (this.reviewScrollFrame > 0) {
+      return;
+    }
+    this.reviewScrollFrame = window.requestAnimationFrame(() => {
+      this.reviewScrollFrame = 0;
+      this.updateSelectedDiffPathFromScroll();
+    });
   }
 
   private updateSelectedDiffPathFromScroll(): void {
-    const path = visibleDiffPath(this.diffList, this.reviewMain);
+    const path = visibleDiffPath(this._diffList, this.reviewMain);
     if (!path || path === this.state.selectedDiffPath) {
       return;
     }
     this.state.selectedDiffPath = path;
+  }
+
+  // Review-diff refresh timer accessors. reviewThunks owns the polling logic
+  // but the timer field stays here so unmountTerminal() can clear it.
+  stopReviewDiffRefresh(): void {
+    window.clearTimeout(this.reviewDiffRefreshTimer);
+    this.reviewDiffRefreshTimer = 0;
+  }
+
+  cancelReviewDiffRefresh(): void {
+    window.clearTimeout(this.reviewDiffRefreshTimer);
+    this.reviewDiffRefreshTimer = 0;
+  }
+
+  scheduleReviewDiffRefreshTimer(callback: () => void, delay: number = REVIEW_DIFF_REFRESH_INTERVAL_MS): void {
+    window.clearTimeout(this.reviewDiffRefreshTimer);
+    this.reviewDiffRefreshTimer = window.setTimeout(callback, delay);
   }
 
   private async handleTerminalPaste(event: ClipboardEvent): Promise<void> {
@@ -2059,39 +1114,10 @@ export class ERunUIController {
     this.sessions.registerDebugSession(sessionId, selection, mode);
   }
 
-  private writeTerminalBuffer(chunks: TerminalWriteData[]): void {
+  writeTerminalBuffer(chunks: TerminalWriteData[]): void {
     for (const chunk of chunks) {
       this.terminal?.write(chunk);
     }
   }
-}
 
-function tenantDashboardInput(tenant: UITenant | undefined): UITenantDashboardInput | null {
-  if (!tenant) {
-    return null;
-  }
-  const environment = tenantDashboardEnvironment(tenant);
-  const apiUrl = trimOptional(environment?.apiUrl);
-  const cloudProviderAlias = trimOptional(tenant.primaryCloudProviderAlias);
-  if (!apiUrl || !cloudProviderAlias) {
-    return null;
-  }
-  return {
-    tenant: tenant.name,
-    environment: trimOptional(environment?.name),
-    apiUrl,
-    mcpUrl: trimOptional(environment?.mcpUrl),
-    kubernetesContext: trimOptional(environment?.kubernetesContext),
-    cloudProviderAlias,
-  };
-}
-
-function tenantDashboardEnvironment(tenant: UITenant): UITenant['environments'][number] | undefined {
-  const defaultEnvironment = tenant.defaultEnvironment?.trim();
-  return tenant.environments.find((candidate) => candidate.name === defaultEnvironment && candidate.apiUrl) ||
-    tenant.environments.find((candidate) => candidate.apiUrl);
-}
-
-function trimOptional(value: string | undefined): string {
-  return value?.trim() || '';
 }

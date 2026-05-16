@@ -3,7 +3,18 @@ import { ChevronDown, ChevronRight, FileDiff, GitBranch, GitCommitHorizontal, Re
 
 import { useController } from '@/app/ControllerContext';
 import { compactDiffError, filterDiffTree, visibleDiffTreeNodes } from '@/app/diffUtils';
-import { useAppSelector } from '@/app/hooks';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { startFilesResize } from '@/app/layoutThunks';
+import {
+  loadReviewDiff,
+  refreshReviewDiff,
+  requestReconnect,
+  selectDiffPath,
+  selectReviewRange,
+  setDiffFilter,
+  toggleChangedFiles,
+  toggleDiffDirectory,
+} from '@/app/reviewThunks';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -26,6 +37,7 @@ export function ReviewPanel({
   diffListRef: React.RefObject<HTMLDivElement | null>;
 }): React.ReactElement {
   const controller = useController();
+  const dispatch = useAppDispatch();
   const filesOpen = useAppSelector((state) => state.layout.filesOpen);
   const reviewOpen = useAppSelector((state) => state.layout.reviewOpen);
   const filesVisible = filesOpen && reviewOpen;
@@ -43,7 +55,7 @@ export function ReviewPanel({
           <DiffList />
         </div>
       </div>
-      <ChangedFilesSplitter visible={filesVisible} onMouseDown={(event) => controller.startFilesResize(event)} />
+      <ChangedFilesSplitter visible={filesVisible} onMouseDown={(event) => dispatch(startFilesResize(event))} />
       <ChangedFilesAside visible={filesVisible} />
     </section>
   );
@@ -69,7 +81,7 @@ function ChangedFilesSplitter({ visible, onMouseDown }: { visible: boolean; onMo
 }
 
 function ChangedFilesAside({ visible }: { visible: boolean }): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   const changedFilesOpen = useAppSelector((state) => state.layout.changedFilesOpen);
   const diffFilter = useAppSelector((state) => state.review.diffFilter);
   return (
@@ -92,7 +104,7 @@ function ChangedFilesAside({ visible }: { visible: boolean }): React.ReactElemen
               type="search"
               placeholder="Filter files..."
               autoComplete="off"
-              onChange={(event) => controller.setDiffFilter(event.target.value)}
+              onChange={(event) => dispatch(setDiffFilter(event.target.value))}
             />
           </Label>
           <div className="min-h-0 flex-1 overflow-auto overscroll-contain pt-3.5">
@@ -105,7 +117,7 @@ function ChangedFilesAside({ visible }: { visible: boolean }): React.ReactElemen
 }
 
 function ReviewRangeControl(): React.ReactElement | null {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   const diff = useAppSelector((state) => state.review.diff);
   const selectedReviewScope = useAppSelector((state) => state.review.selectedReviewScope);
   const diffLoading = useAppSelector((state) => state.review.diffLoading);
@@ -133,7 +145,7 @@ function ReviewRangeControl(): React.ReactElement | null {
           detail="local only"
           selected={selectedReviewScope === 'current'}
           disabled={diffLoading}
-          onClick={() => controller.selectReviewRange('current')}
+          onClick={() => dispatch(selectReviewRange('current'))}
         />
         {commits.length > 0 ? (
           <div className="flex max-h-[220px] min-h-0 flex-col gap-1 overflow-auto pr-1">
@@ -147,7 +159,7 @@ function ReviewRangeControl(): React.ReactElement | null {
           detail="base..current"
           selected={selectedReviewScope === 'all'}
           disabled={diffLoading}
-          onClick={() => controller.selectReviewRange('all')}
+          onClick={() => dispatch(selectReviewRange('all'))}
         />
       </div>
     </div>
@@ -155,7 +167,7 @@ function ReviewRangeControl(): React.ReactElement | null {
 }
 
 function ReviewCommitButton({ commit }: { commit: DiffCommit }): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   const selectedReviewScope = useAppSelector((state) => state.review.selectedReviewScope);
   const selectedReviewCommit = useAppSelector((state) => state.review.selectedReviewCommit);
   const diffLoading = useAppSelector((state) => state.review.diffLoading);
@@ -165,7 +177,7 @@ function ReviewCommitButton({ commit }: { commit: DiffCommit }): React.ReactElem
       detail={`from ${commit.shortHash}`}
       selected={selectedReviewScope === 'commit' && selectedReviewCommit === commit.hash}
       disabled={diffLoading}
-      onClick={() => controller.selectReviewRange('commit', commit.hash)}
+      onClick={() => dispatch(selectReviewRange('commit', commit.hash))}
     />
   );
 }
@@ -202,7 +214,7 @@ function ReviewBoundaryButton({
 }
 
 function ChangedFilesHeader(): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   const changedFilesOpen = useAppSelector((state) => state.layout.changedFilesOpen);
   const diff = useAppSelector((state) => state.review.diff);
   const diffLoading = useAppSelector((state) => state.review.diffLoading);
@@ -212,7 +224,7 @@ function ChangedFilesHeader(): React.ReactElement {
         className="inline-flex min-w-0 flex-1 cursor-pointer items-center gap-1 overflow-hidden border-0 bg-transparent p-0 text-sm font-semibold whitespace-nowrap text-foreground [&_svg]:size-4 [&_svg]:flex-none [&_svg]:text-muted-foreground"
         type="button"
         aria-expanded={changedFilesOpen}
-        onClick={() => controller.toggleChangedFiles()}
+        onClick={() => dispatch(toggleChangedFiles())}
       >
         <FileDiff aria-hidden="true" />
         Changed files <span className="flex-none text-muted-foreground">{diff?.summary?.fileCount || 0}</span>
@@ -228,7 +240,7 @@ function ChangedFilesHeader(): React.ReactElement {
             aria-label="Refresh diff"
             disabled={diffLoading}
             onClick={() => {
-              void controller.refreshReviewDiff();
+              void dispatch(refreshReviewDiff());
             }}
           >
             <RefreshCw />
@@ -244,7 +256,7 @@ function ChangedFilesHeader(): React.ReactElement {
 }
 
 function ChangedFileTree(): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   const review = useAppSelector((state) => state.review);
   if (review.diffLoading) {
     return <ReviewStatus>Loading...</ReviewStatus>;
@@ -255,8 +267,8 @@ function ChangedFileTree(): React.ReactElement {
         message={compactDiffError(review.diffError)}
         loading={review.diffLoading}
         reconnectable={review.diffErrorReconnectable}
-        onRetry={() => { void controller.loadReviewDiff(); }}
-        onReconnect={() => controller.requestReconnect()}
+        onRetry={() => { void dispatch(loadReviewDiff()); }}
+        onReconnect={() => dispatch(requestReconnect())}
       />
     );
   }
@@ -280,7 +292,7 @@ function ChangedFileNode({
 }: {
   node: DiffTreeNode;
 }): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   const collapsedDiffDirs = useAppSelector((state) => state.review.collapsedDiffDirs);
   const selectedDiffPath = useAppSelector((state) => state.review.selectedDiffPath);
   const style = { '--depth': String(node.depth) } as React.CSSProperties;
@@ -295,7 +307,7 @@ function ChangedFileNode({
           style={style}
           aria-expanded={!collapsed}
           aria-label={`${node.name} directory`}
-          onClick={() => controller.toggleDiffDirectory(node.path)}
+          onClick={() => dispatch(toggleDiffDirectory(node.path))}
         >
           <ChevronRight className={cn('size-4 flex-none text-current', !collapsed && 'rotate-90')} aria-hidden="true" />
           <span className="min-w-0 truncate">{node.name}</span>
@@ -316,7 +328,7 @@ function ChangedFileNode({
         style={style}
         data-path={node.path}
         aria-current={selected ? 'true' : undefined}
-        onClick={() => controller.selectDiffPath(node.path)}
+        onClick={() => dispatch(selectDiffPath(node.path))}
       >
         <FileIcon filePath={node.path} />
         <span className="min-w-0 truncate">{node.name}</span>

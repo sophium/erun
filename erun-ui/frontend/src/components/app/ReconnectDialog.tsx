@@ -1,9 +1,9 @@
 import * as React from 'react';
 import { AlertCircle, LoaderCircle, RefreshCw } from 'lucide-react';
 
-import { useController } from '@/app/ControllerContext';
-import { useAppSelector } from '@/app/hooks';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { reconnectCopy } from '@/app/reconnectCopy';
+import { cancelReconnect, confirmReconnect } from '@/app/reviewThunks';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 // useAppSelector keeps re-renders scoped to that slice instead of the full
 // AppState shape.
 export function ReconnectDialog(): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   const reconnect = useAppSelector((state) => state.review.reconnect);
   const open = reconnect.status !== 'idle';
   const running = reconnect.status === 'running';
@@ -21,7 +21,7 @@ export function ReconnectDialog(): React.ReactElement {
       open={open}
       onOpenChange={(next) => {
         if (!next) {
-          controller.cancelReconnect();
+          dispatch(cancelReconnect());
         }
       }}
     >
@@ -55,14 +55,14 @@ export function ReconnectDialog(): React.ReactElement {
           </div>
         )}
         <DialogFooter>
-          <Button type="button" variant="outline" disabled={running} onClick={() => controller.cancelReconnect()}>
+          <Button type="button" variant="outline" disabled={running} onClick={() => dispatch(cancelReconnect())}>
             {reconnectCopy.dialogCancel}
           </Button>
           <Button
             type="button"
             disabled={running}
             onClick={() => {
-              void controller.confirmReconnect();
+              void dispatch(confirmReconnect());
             }}
           >
             {running ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}

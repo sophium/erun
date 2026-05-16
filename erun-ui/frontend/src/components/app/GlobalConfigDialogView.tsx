@@ -17,6 +17,7 @@ import {
   updateGlobalConfig,
 } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { showTerminalMessage } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -50,7 +51,7 @@ export function GlobalConfigDialogView(): React.ReactElement {
           onSubmit={(event) => {
             event.preventDefault();
             void dispatch(submitGlobalConfig()).catch((error: unknown) => {
-              controller.showTerminalMessage(readError(error));
+              dispatch(showTerminalMessage(readError(error)));
             });
           }}
         >
