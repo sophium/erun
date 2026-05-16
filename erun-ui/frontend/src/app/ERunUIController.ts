@@ -135,10 +135,6 @@ const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 export class ERunUIController {
   readonly state: AppState = createControllerStateProxy(store);
 
-  // Components subscribe to Redux directly via useAppSelector. The
-  // controller's subscribe stays as a no-op stub only to satisfy any
-  // legacy caller; the body is empty because react-redux owns
-  // notification now.
   private readonly sessions = new TerminalSessionRegistry();
   private pendingDebugHeader = '';
   private terminal: Terminal | null = null;
@@ -206,12 +202,6 @@ export class ERunUIController {
     applyPendingDebugHeader: (sessionId) => this.applyPendingDebugHeader(sessionId),
     syncDebugDisplay: () => this.syncDebugDisplay(),
   });
-
-  subscribe = (_subscriber: () => void): (() => void) => {
-    return () => {
-      /* no-op: components subscribe to Redux directly via useAppSelector. */
-    };
-  };
 
   mount(elements: MountElements): () => void {
     this.terminalRoot = elements.terminalRoot;
