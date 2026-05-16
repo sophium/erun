@@ -85,9 +85,9 @@ export function App(): React.ReactElement {
           />
         </div>
       </div>
-      <EnvironmentDialogView controller={controller} state={state} />
-      <GlobalConfigDialogView controller={controller} state={state} />
-      <ManageDialogView controller={controller} state={state} />
+      <EnvironmentDialogView controller={controller} />
+      <GlobalConfigDialogView controller={controller} />
+      <ManageDialogView controller={controller} />
       <ReconnectDialog controller={controller} />
       <TenantDialogView controller={controller} />
       <ActivityQueueLauncher open={activityQueueOpen} onOpen={() => setActivityQueueOpen(true)} onClose={() => setActivityQueueOpen(false)} />

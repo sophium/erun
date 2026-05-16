@@ -4,6 +4,7 @@ import { FolderPlus, LoaderCircle, Rocket } from 'lucide-react';
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
 import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
+import { useAppSelector } from '@/app/hooks';
 import type { AppState } from '@/app/state';
 import { loadSavedPastContainerRegistries, loadSavedPastEnvironments, loadSavedPastTenants } from '@/app/storage';
 import { findVersionSuggestion, selectedVersionSourceText } from '@/app/versionSuggestions';
@@ -22,8 +23,8 @@ const dialogErrorClassName =
 
 type EnvironmentDialog = AppState['environmentDialog'];
 
-export function EnvironmentDialogView({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
-  const dialog = state.environmentDialog;
+export function EnvironmentDialogView({ controller }: { controller: ERunUIController }): React.ReactElement {
+  const dialog = useAppSelector((state) => state.environmentDialog);
   const tenantRef = React.useRef<HTMLInputElement>(null);
   const environmentRef = React.useRef<HTMLInputElement>(null);
 
@@ -58,7 +59,7 @@ export function EnvironmentDialogView({ controller, state }: { controller: ERunU
           }}
         >
           <EnvironmentDialogHeader dialog={dialog} />
-          <EnvironmentDialogFields controller={controller} state={state} tenantRef={tenantRef} environmentRef={environmentRef} />
+          <EnvironmentDialogFields controller={controller} tenantRef={tenantRef} environmentRef={environmentRef} />
           <DialogError error={dialog.error} />
           <EnvironmentDialogFooter controller={controller} dialog={dialog} />
         </form>
@@ -81,25 +82,24 @@ function EnvironmentDialogHeader({ dialog }: { dialog: EnvironmentDialog }): Rea
 
 function EnvironmentDialogFields({
   controller,
-  state,
   tenantRef,
   environmentRef,
 }: {
   controller: ERunUIController;
-  state: AppState;
   tenantRef: React.Ref<HTMLInputElement>;
   environmentRef: React.Ref<HTMLInputElement>;
 }): React.ReactElement {
-  const dialog = state.environmentDialog;
+  const dialog = useAppSelector((state) => state.environmentDialog);
+  const versionSuggestions = useAppSelector((state) => state.tenants.versionSuggestions);
   const isDeploy = dialog.actionMode === 'deploy';
   return (
     <>
-      <EnvironmentNameFields controller={controller} state={state} tenantRef={tenantRef} environmentRef={environmentRef} />
+      <EnvironmentNameFields controller={controller} tenantRef={tenantRef} environmentRef={environmentRef} />
       <VersionField
         id="environment-version"
         value={dialog.version}
-        sourceText={selectedVersionSourceText(findVersionSuggestion(state.versionSuggestions, dialog.version, dialog.versionImage))}
-        suggestions={state.versionSuggestions}
+        sourceText={selectedVersionSourceText(findVersionSuggestion(versionSuggestions, dialog.version, dialog.versionImage))}
+        suggestions={versionSuggestions}
         choicesOpen={dialog.choicesOpen}
         required={isDeploy}
         disabled={dialog.busy}
@@ -114,22 +114,24 @@ function EnvironmentDialogFields({
 
 function EnvironmentNameFields({
   controller,
-  state,
   tenantRef,
   environmentRef,
 }: {
   controller: ERunUIController;
-  state: AppState;
   tenantRef: React.Ref<HTMLInputElement>;
   environmentRef: React.Ref<HTMLInputElement>;
 }): React.ReactElement {
-  const dialog = state.environmentDialog;
+  const dialog = useAppSelector((state) => state.environmentDialog);
+  const tenants = useAppSelector((state) => state.tenants.tenants);
   const isDeploy = dialog.actionMode === 'deploy';
   const tenantSuggestions = React.useMemo(
-    () => uniqueSuggestions([dialog.tenant, ...state.tenants.map((tenant) => tenant.name), ...loadSavedPastTenants()]),
-    [dialog.tenant, state.tenants],
+    () => uniqueSuggestions([dialog.tenant, ...tenants.map((tenant) => tenant.name), ...loadSavedPastTenants()]),
+    [dialog.tenant, tenants],
   );
-  const environmentSuggestions = React.useMemo(() => environmentNameSuggestions(state, dialog), [dialog, state]);
+  const environmentSuggestions = React.useMemo(
+    () => environmentNameSuggestions(tenants, dialog),
+    [dialog, tenants],
+  );
 
   return (
     <>
@@ -257,10 +259,10 @@ function EnvironmentSubmitIcon({ dialog }: { dialog: EnvironmentDialog }): React
   return dialog.actionMode === 'deploy' ? <Rocket aria-hidden="true" /> : <FolderPlus aria-hidden="true" />;
 }
 
-function environmentNameSuggestions(state: AppState, dialog: EnvironmentDialog): string[] {
-  const selectedTenant = state.tenants.find((tenant) => tenant.name.toLowerCase() === dialog.tenant.trim().toLowerCase());
+function environmentNameSuggestions(tenants: AppState['tenants'], dialog: EnvironmentDialog): string[] {
+  const selectedTenant = tenants.find((tenant) => tenant.name.toLowerCase() === dialog.tenant.trim().toLowerCase());
   const selectedTenantEnvironments = selectedTenant?.environments.map((environment) => environment.name) || [];
-  const allEnvironments = state.tenants.flatMap((tenant) => tenant.environments.map((environment) => environment.name));
+  const allEnvironments = tenants.flatMap((tenant) => tenant.environments.map((environment) => environment.name));
   return uniqueSuggestions([dialog.environment, ...selectedTenantEnvironments, ...loadSavedPastEnvironments(), ...allEnvironments]);
 }
 

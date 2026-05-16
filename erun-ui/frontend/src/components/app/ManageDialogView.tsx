@@ -3,6 +3,7 @@ import { AlertTriangle, Check, ChevronsUpDown, FolderOpen, LoaderCircle, Play, P
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
+import { useAppSelector } from '@/app/hooks';
 import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
 import type { AppState } from '@/app/state';
 import { loadSavedPastContainerRegistries } from '@/app/storage';
@@ -27,8 +28,8 @@ const dialogErrorClassName =
 
 type ManageDialog = AppState['manageDialog'];
 
-export function ManageDialogView({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
-  const dialog = state.manageDialog;
+export function ManageDialogView({ controller }: { controller: ERunUIController }): React.ReactElement {
+  const dialog = useAppSelector((state) => state.manageDialog);
   const confirmationRef = React.useRef<HTMLInputElement>(null);
   const selection = dialog.selection;
   const confirmingDelete = dialog.tab === 'delete';
@@ -66,7 +67,7 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
             <DialogTitle>{selection ? `${selection.tenant}-${selection.environment}` : 'Environment'}</DialogTitle>
             <DialogDescription>Edit environment configuration, deploy a different runtime version, run diagnostics, or delete the environment.</DialogDescription>
           </DialogHeader>
-          <ManageDialogContent controller={controller} state={state} confirmationRef={confirmationRef} expected={expected} confirmingDelete={confirmingDelete} />
+          <ManageDialogContent controller={controller} confirmationRef={confirmationRef} expected={expected} confirmingDelete={confirmingDelete} />
           <DialogError error={dialog.error} />
           <ManageDialogFooter controller={controller} dialog={dialog} confirmingDelete={confirmingDelete} deleteEnabled={deleteEnabled} />
         </form>
@@ -75,8 +76,8 @@ export function ManageDialogView({ controller, state }: { controller: ERunUICont
   );
 }
 
-function ManageDialogContent({ controller, state, confirmationRef, expected, confirmingDelete }: { controller: ERunUIController; state: AppState; confirmationRef: React.Ref<HTMLInputElement>; expected: string; confirmingDelete: boolean }): React.ReactElement {
-  const dialog = state.manageDialog;
+function ManageDialogContent({ controller, confirmationRef, expected, confirmingDelete }: { controller: ERunUIController; confirmationRef: React.Ref<HTMLInputElement>; expected: string; confirmingDelete: boolean }): React.ReactElement {
+  const dialog = useAppSelector((state) => state.manageDialog);
   if (dialog.configLoading) {
     return <div className="flex flex-1 min-h-0 flex-col"><div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">Loading config...</div></div>;
   }
@@ -101,10 +102,10 @@ function ManageDialogContent({ controller, state, confirmationRef, expected, con
         </TabsList>
         <div className="-mx-1 min-h-0 flex-1 overflow-auto px-1 pb-1">
           <TabsContent value="general" className="grid gap-3">
-            <GeneralTab controller={controller} state={state} />
+            <GeneralTab controller={controller} />
           </TabsContent>
           <TabsContent value="runtime" className="grid gap-3">
-            <RuntimeTab controller={controller} state={state} />
+            <RuntimeTab controller={controller} />
           </TabsContent>
           <TabsContent value="ai" className="grid gap-3">
             <ClaudeSettingsSection controller={controller} dialog={dialog} />
@@ -114,7 +115,7 @@ function ManageDialogContent({ controller, state, confirmationRef, expected, con
           </TabsContent>
           <TabsContent value="ssh" className="grid gap-3">
             <SSHAccessSection controller={controller} dialog={dialog} />
-            <DiagnosticsSection controller={controller} dialog={dialog} state={state} />
+            <DiagnosticsSection controller={controller} dialog={dialog} />
           </TabsContent>
         </div>
       </Tabs>
@@ -134,8 +135,8 @@ function DirtyAwareTabsTrigger({ value, label, dialog }: { value: ManageEditTab;
   );
 }
 
-function GeneralTab({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
-  const dialog = state.manageDialog;
+function GeneralTab({ controller }: { controller: ERunUIController }): React.ReactElement {
+  const dialog = useAppSelector((state) => state.manageDialog);
   const config = dialog.config;
   const containerRegistrySuggestions = React.useMemo(
     () => uniqueSuggestions([config.containerRegistry, ...loadSavedPastContainerRegistries()]),
@@ -154,11 +155,12 @@ function GeneralTab({ controller, state }: { controller: ERunUIController; state
   );
 }
 
-function RuntimeTab({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
-  const dialog = state.manageDialog;
+function RuntimeTab({ controller }: { controller: ERunUIController }): React.ReactElement {
+  const dialog = useAppSelector((state) => state.manageDialog);
+  const versionSuggestions = useAppSelector((state) => state.tenants.versionSuggestions);
   return (
     <>
-      <RuntimeDeployField configuredVersion={dialog.config.runtimeVersion} overrideVersion={dialog.version} suggestions={state.versionSuggestions} choicesOpen={dialog.choicesOpen} disabled={dialog.busy || dialog.configLoading} onValueChange={(version) => controller.updateManageDialog({ version })} onChoicesOpenChange={(open) => controller.setManageVersionChoicesOpen(open)} onSelect={(suggestion) => controller.selectManageVersionSuggestion(suggestion)} onDeploy={() => void controller.submitManageDeploy().catch((error: unknown) => controller.showTerminalMessage(readError(error)))} />
+      <RuntimeDeployField configuredVersion={dialog.config.runtimeVersion} overrideVersion={dialog.version} suggestions={versionSuggestions} choicesOpen={dialog.choicesOpen} disabled={dialog.busy || dialog.configLoading} onValueChange={(version) => controller.updateManageDialog({ version })} onChoicesOpenChange={(open) => controller.setManageVersionChoicesOpen(open)} onSelect={(suggestion) => controller.selectManageVersionSuggestion(suggestion)} onDeploy={() => void controller.submitManageDeploy().catch((error: unknown) => controller.showTerminalMessage(readError(error)))} />
       <RuntimePodFields controller={controller} dialog={dialog} />
       <IdleStopFields controller={controller} dialog={dialog} />
     </>
@@ -257,8 +259,9 @@ function IdleStopFields({ controller, dialog }: { controller: ERunUIController; 
   );
 }
 
-function DiagnosticsSection({ controller, dialog, state }: { controller: ERunUIController; dialog: ManageDialog; state: AppState }): React.ReactElement {
-  const lastDoctor = dialog.selection ? state.lastDoctorBySelection[selectionKey(dialog.selection)] : undefined;
+function DiagnosticsSection({ controller, dialog }: { controller: ERunUIController; dialog: ManageDialog }): React.ReactElement {
+  const lastDoctorBySelection = useAppSelector((state) => state.doctor.lastDoctorBySelection);
+  const lastDoctor = dialog.selection ? lastDoctorBySelection[selectionKey(dialog.selection)] : undefined;
   return (
     <div className="grid gap-2 rounded-[var(--radius)] border border-border p-3">
       <div className="flex items-center justify-between gap-3">

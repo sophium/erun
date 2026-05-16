@@ -3,6 +3,7 @@ import { CheckCircle2, Cloud, LoaderCircle, LogIn, Play, Plus, Power, RefreshCw,
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
+import { useAppSelector } from '@/app/hooks';
 import type { AppState } from '@/app/state';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -17,8 +18,8 @@ const dialogErrorClassName =
 
 type GlobalConfigDialog = AppState['globalConfigDialog'];
 
-export function GlobalConfigDialogView({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
-  const dialog = state.globalConfigDialog;
+export function GlobalConfigDialogView({ controller }: { controller: ERunUIController }): React.ReactElement {
+  const dialog = useAppSelector((state) => state.globalConfigDialog);
 
   return (
     <Dialog open={dialog.open} onOpenChange={(open) => !open && controller.closeGlobalConfigDialog()}>
@@ -42,7 +43,7 @@ export function GlobalConfigDialogView({ controller, state }: { controller: ERun
             <DialogTitle>ERun settings</DialogTitle>
             <DialogDescription>Default tenant, cloud aliases, and cloud contexts shared across the app.</DialogDescription>
           </DialogHeader>
-          <GlobalConfigBody controller={controller} state={state} />
+          <GlobalConfigBody controller={controller} />
           <DialogError error={dialog.error} />
           <GlobalConfigFooter controller={controller} dialog={dialog} />
         </form>
@@ -53,12 +54,13 @@ export function GlobalConfigDialogView({ controller, state }: { controller: ERun
 
 const NOT_CONFIGURED_VALUE = '__none__';
 
-function GlobalConfigBody({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
-  const dialog = state.globalConfigDialog;
+function GlobalConfigBody({ controller }: { controller: ERunUIController }): React.ReactElement {
+  const dialog = useAppSelector((state) => state.globalConfigDialog);
+  const tenants = useAppSelector((state) => state.tenants.tenants);
   if (dialog.configLoading) {
     return <div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">Loading config...</div>;
   }
-  const tenantNames = optionValues(state.tenants.map((tenant) => tenant.name), dialog.config.defaultTenant);
+  const tenantNames = optionValues(tenants.map((tenant) => tenant.name), dialog.config.defaultTenant);
   const tenantOptions: SelectFieldOption[] = tenantNames.length === 0
     ? []
     : [{ value: NOT_CONFIGURED_VALUE, label: 'Not configured' }, ...tenantNames.map((name) => ({ value: name, label: name }))];
