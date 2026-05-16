@@ -2,27 +2,26 @@ import * as React from 'react';
 import { Plus, X } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
+import { useAppSelector } from '@/app/hooks';
 import { selectionKey } from '@/app/versionSuggestions';
-import type { AppState } from '@/app/state';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { cn } from '@/lib/utils';
 
 export function TerminalTabStrip({
   controller,
-  state,
 }: {
   controller: ERunUIController;
-  state: AppState;
 }): React.ReactElement {
-  const selection = state.selected;
+  const selection = useAppSelector((state) => state.selection.selected);
+  const tabsByEnv = useAppSelector((state) => state.terminal.tabsByEnv);
+  const activeId = useAppSelector((state) => state.terminal.sessionId);
   const stripBaseClass = 'flex h-8 items-end border-b border-[oklch(0.18_0_0)] bg-[oklch(0.05_0_0)] pl-2 pr-1';
 
   if (!selection) {
     return <div className={stripBaseClass} aria-hidden="true" />;
   }
 
-  const tabs = state.tabsByEnv[selectionKey(selection)] || [];
-  const activeId = state.sessionId;
+  const tabs = tabsByEnv[selectionKey(selection)] || [];
   const tabRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
   tabRefs.current.length = tabs.length;
 
