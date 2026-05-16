@@ -3,6 +3,7 @@ import { Cloud, Link, LoaderCircle, RefreshCw, Save } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
+import { useAppSelector } from '@/app/hooks';
 import type { AppState } from '@/app/state';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -15,10 +16,11 @@ import { SelectField, type SelectFieldOption } from './SelectField';
 const dialogErrorClassName =
   'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
 
-export function TenantDialogView({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
-  const dialog = state.tenantDialog;
+export function TenantDialogView({ controller }: { controller: ERunUIController }): React.ReactElement {
+  const dialog = useAppSelector((state) => state.tenantDialog);
+  const tenants = useAppSelector((state) => state.tenants.tenants);
   const config = dialog.config;
-  const tenant = state.tenants.find((candidate) => candidate.name === dialog.tenant);
+  const tenant = tenants.find((candidate) => candidate.name === dialog.tenant);
   const environmentOptions = optionValues((tenant?.environments || []).map((environment) => environment.name), config.defaultEnvironment);
 
   return (
@@ -43,7 +45,7 @@ export function TenantDialogView({ controller, state }: { controller: ERunUICont
             <DialogTitle>Manage tenant</DialogTitle>
             <DialogDescription>{dialog.tenant}</DialogDescription>
           </DialogHeader>
-          <TenantDialogFields controller={controller} state={state} environmentOptions={environmentOptions} apiPlaceholder={tenantDefaultAPIURL(tenant)} />
+          <TenantDialogFields controller={controller} environmentOptions={environmentOptions} apiPlaceholder={tenantDefaultAPIURL(tenant)} />
           {dialog.error && (
             <div className={dialogErrorClassName} role="alert">
               {dialog.error}
@@ -64,8 +66,8 @@ export function TenantDialogView({ controller, state }: { controller: ERunUICont
   );
 }
 
-function TenantDialogFields({ controller, state, environmentOptions, apiPlaceholder }: { controller: ERunUIController; state: AppState; environmentOptions: string[]; apiPlaceholder: string }): React.ReactElement {
-  const dialog = state.tenantDialog;
+function TenantDialogFields({ controller, environmentOptions, apiPlaceholder }: { controller: ERunUIController; environmentOptions: string[]; apiPlaceholder: string }): React.ReactElement {
+  const dialog = useAppSelector((state) => state.tenantDialog);
   const config = dialog.config;
   if (dialog.configLoading) {
     return <div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">Loading config...</div>;
@@ -75,13 +77,13 @@ function TenantDialogFields({ controller, state, environmentOptions, apiPlacehol
       <ReadonlyField id="tenant-config-name" label="Tenant name" value={config.name} />
       <DefaultEnvironmentSelect id="tenant-config-defaultenvironment" label="Default environment" value={config.defaultEnvironment} options={environmentOptions} disabled={dialog.busy} onChange={(defaultEnvironment) => controller.updateTenantConfig({ defaultEnvironment })} />
       <TextField id="tenant-config-apiurl" label="API URL" value={config.apiUrl} disabled={dialog.busy} placeholder={apiPlaceholder} onChange={(apiUrl) => controller.updateTenantConfig({ apiUrl })} />
-      <CloudAliasesField controller={controller} state={state} />
+      <CloudAliasesField controller={controller} />
     </div>
   );
 }
 
-function CloudAliasesField({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
-  const dialog = state.tenantDialog;
+function CloudAliasesField({ controller }: { controller: ERunUIController }): React.ReactElement {
+  const dialog = useAppSelector((state) => state.tenantDialog);
   const config = dialog.config;
   const providers = config.cloudProviders || [];
   const linked = new Set((config.cloudProviderAliases || []).map((alias) => alias.trim()).filter(Boolean));

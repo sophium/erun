@@ -2,6 +2,7 @@ import * as React from 'react';
 import { RefreshCw, LoaderCircle } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
+import { useAppSelector } from '@/app/hooks';
 import type { AppState } from '@/app/state';
 import type { UITenant, UITenantDashboardBuild, UITenantDashboardReview, UITenantDashboardUser } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -9,12 +10,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EmptyState } from './EmptyState';
 import { StatusBadge } from './StatusBadge';
 
-export function TenantDashboardView({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement | null {
-  const dashboard = state.tenantDashboard;
+export function TenantDashboardView({ controller }: { controller: ERunUIController }): React.ReactElement | null {
+  const dashboard = useAppSelector((state) => state.tenantDashboard);
+  const tenants = useAppSelector((state) => state.tenants.tenants);
   if (!dashboard.tenant) {
     return null;
   }
-  const tenant = state.tenants.find((candidate) => candidate.name === dashboard.tenant);
+  const tenant = tenants.find((candidate) => candidate.name === dashboard.tenant);
   const environmentName = tenantDashboardEnvironmentName(tenant, dashboard.data?.environment);
   return (
     <section className="grid h-full min-h-0 bg-background text-foreground">

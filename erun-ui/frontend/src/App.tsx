@@ -88,8 +88,8 @@ export function App(): React.ReactElement {
       <EnvironmentDialogView controller={controller} state={state} />
       <GlobalConfigDialogView controller={controller} state={state} />
       <ManageDialogView controller={controller} state={state} />
-      <ReconnectDialog controller={controller} state={state} />
-      <TenantDialogView controller={controller} state={state} />
+      <ReconnectDialog controller={controller} />
+      <TenantDialogView controller={controller} />
       <ActivityQueueLauncher open={activityQueueOpen} onOpen={() => setActivityQueueOpen(true)} onClose={() => setActivityQueueOpen(false)} />
     </TooltipProvider>
   );
@@ -158,7 +158,7 @@ function MainPane({
         dashboardOpen ? 'grid-rows-[minmax(0,1fr)] bg-background' : state.debugOpen ? 'grid-rows-[minmax(0,1fr)_var(--debug-height)]' : 'grid-rows-[minmax(0,1fr)_34px]',
       )}
     >
-      {dashboardOpen && <TenantDashboardView controller={controller} state={state} />}
+      {dashboardOpen && <TenantDashboardView controller={controller} />}
       <TerminalPane controller={controller} state={state} hidden={dashboardOpen} terminalRootRef={terminalRootRef} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} onOpenActivityQueue={onOpenActivityQueue} />
       {!dashboardOpen && <DebugPanel controller={controller} open={state.debugOpen} output={state.debugOutput} sessionId={state.sessionId} verbose={controller.activeSessionDebug(state.sessionId)} />}
     </main>
