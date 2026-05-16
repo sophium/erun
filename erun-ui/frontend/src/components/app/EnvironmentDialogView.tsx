@@ -164,7 +164,7 @@ function KubernetesContextSelect({ controller, dialog }: { controller: ERunUICon
         <Label htmlFor="environment-kubernetes-context">Kubernetes context</Label>
         <EmptyState
           heading="No Kubernetes contexts found"
-          body="ERun reads contexts from your kubeconfig (~/.kube/config). Add a context with kubectl, then close and reopen this dialog to refresh the list."
+          body="ERun runs `kubectl config get-contexts` using the PATH and KUBECONFIG it inherits from your login shell at startup. If your terminal sees contexts that don't appear here, set KUBECONFIG in ~/.zshenv (or ~/.bash_profile) so it applies to GUI launches too, then restart ERun. If kubectl is not yet installed, install it with `brew install kubectl`."
         />
       </div>
     );

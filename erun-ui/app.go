@@ -208,6 +208,13 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	// macOS GUI launches (Finder/Dock) start with launchd's minimal env
+	// — no Homebrew PATH, no KUBECONFIG, no AWS_*. Inherit a short
+	// allowlist from the user's login shell so subprocess calls like
+	// kubectl config get-contexts read the same state the user sees in
+	// their terminal. No-op on other platforms. Runs before any other
+	// startup task that shells out so the first call is already correct.
+	importLoginShellEnv()
 	configureAppIdentity("ERun")
 	a.startActivityPollers()
 	a.startConfigWatcher()

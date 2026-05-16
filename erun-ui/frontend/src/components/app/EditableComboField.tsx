@@ -27,7 +27,12 @@ export function EditableComboField({
   onValueChange: (value: string) => void;
 }): React.ReactElement {
   const [open, setOpen] = React.useState(false);
-  const visibleSuggestions = React.useMemo(() => filterSuggestions(suggestions, value), [suggestions, value]);
+  // dirty=true once the user types; before that, the popover shows
+  // ALL suggestions instead of filtering by the prefilled value
+  // (Nielsen #6 recognition-over-recall). Resets when popover opens.
+  const [dirty, setDirty] = React.useState(false);
+  const visibleSuggestions = dirty ? filterSuggestions(suggestions, value) : suggestions;
+  const openPopover = (next: boolean) => { setOpen(next); if (next) setDirty(false); };
 
   return (
     <div className="grid gap-2">
@@ -46,14 +51,17 @@ export function EditableComboField({
           role="combobox"
           aria-expanded={open}
           aria-controls={`${id}-choices`}
-          onChange={(event) => onValueChange(event.target.value)}
+          onChange={(event) => {
+            setDirty(true);
+            onValueChange(event.target.value);
+          }}
           onFocus={() => {
             if (!disabled && suggestions.length > 0) {
-              setOpen(true);
+              openPopover(true);
             }
           }}
         />
-        <Popover open={open} onOpenChange={setOpen}>
+        <Popover open={open} onOpenChange={openPopover}>
           <PopoverTrigger asChild>
             <Button
               className="absolute top-1 right-1 size-7 text-muted-foreground"
