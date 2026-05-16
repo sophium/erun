@@ -228,7 +228,7 @@ function TerminalPane({
         </div>
       </div>
       <div className={cn(reviewSplitterClassName, !state.reviewOpen && 'hidden')} role="separator" aria-orientation="vertical" aria-label="Resize diff panel" onMouseDown={(event) => controller.startReviewResize(event)} />
-      <ReviewPanel controller={controller} state={state} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} />
+      <ReviewPanel controller={controller} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} />
     </div>
   );
 }

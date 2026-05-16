@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, FileDiff, GitBranch, GitCommitHorizontal, Re
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { compactDiffError, filterDiffTree, visibleDiffTreeNodes } from '@/app/diffUtils';
-import type { AppState } from '@/app/state';
+import { useAppSelector } from '@/app/hooks';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -18,22 +18,22 @@ const filesSplitterClassName =
 
 export function ReviewPanel({
   controller,
-  state,
   reviewViewRef,
   reviewMainRef,
   diffListRef,
 }: {
   controller: ERunUIController;
-  state: AppState;
   reviewViewRef: React.RefObject<HTMLElement | null>;
   reviewMainRef: React.RefObject<HTMLDivElement | null>;
   diffListRef: React.RefObject<HTMLDivElement | null>;
 }): React.ReactElement {
-  const filesVisible = state.filesOpen && state.reviewOpen;
+  const filesOpen = useAppSelector((state) => state.layout.filesOpen);
+  const reviewOpen = useAppSelector((state) => state.layout.reviewOpen);
+  const filesVisible = filesOpen && reviewOpen;
   return (
     <section
       ref={reviewViewRef}
-      className={reviewPanelClassName(state.reviewOpen, state.filesOpen)}
+      className={reviewPanelClassName(reviewOpen, filesOpen)}
     >
       <div
         ref={reviewMainRef}
@@ -41,11 +41,11 @@ export function ReviewPanel({
         onScroll={() => controller.queueVisibleDiffSelectionUpdate()}
       >
         <div ref={diffListRef} className="flex flex-col gap-3.5 px-[18px] pt-5 pb-[34px]">
-          <DiffList controller={controller} state={state} />
+          <DiffList controller={controller} />
         </div>
       </div>
       <ChangedFilesSplitter visible={filesVisible} onMouseDown={(event) => controller.startFilesResize(event)} />
-      <ChangedFilesAside controller={controller} state={state} visible={filesVisible} />
+      <ChangedFilesAside controller={controller} visible={filesVisible} />
     </section>
   );
 }
@@ -69,7 +69,9 @@ function ChangedFilesSplitter({ visible, onMouseDown }: { visible: boolean; onMo
   );
 }
 
-function ChangedFilesAside({ controller, state, visible }: { controller: ERunUIController; state: AppState; visible: boolean }): React.ReactElement {
+function ChangedFilesAside({ controller, visible }: { controller: ERunUIController; visible: boolean }): React.ReactElement {
+  const changedFilesOpen = useAppSelector((state) => state.layout.changedFilesOpen);
+  const diffFilter = useAppSelector((state) => state.review.diffFilter);
   return (
     <aside
       className={cn(
@@ -78,15 +80,15 @@ function ChangedFilesAside({ controller, state, visible }: { controller: ERunUIC
         'max-[980px]:hidden',
       )}
     >
-      <ChangedFilesHeader controller={controller} state={state} />
-      <ReviewRangeControl controller={controller} state={state} />
-      {state.changedFilesOpen ? (
+      <ChangedFilesHeader controller={controller} />
+      <ReviewRangeControl controller={controller} />
+      {changedFilesOpen ? (
         <>
           <Label className="box-border flex h-[38px] items-center gap-2 rounded-[var(--radius)] border border-input bg-background px-3 text-muted-foreground [&_svg]:size-[18px] [&_svg]:flex-none">
             <Search aria-hidden="true" />
             <Input
               className="h-auto min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-foreground shadow-none outline-none placeholder:text-muted-foreground focus-visible:border-0 focus-visible:ring-0"
-              value={state.diffFilter}
+              value={diffFilter}
               type="search"
               placeholder="Filter files..."
               autoComplete="off"
@@ -94,7 +96,7 @@ function ChangedFilesAside({ controller, state, visible }: { controller: ERunUIC
             />
           </Label>
           <div className="min-h-0 flex-1 overflow-auto overscroll-contain pt-3.5">
-            <ChangedFileTree controller={controller} state={state} />
+            <ChangedFileTree controller={controller} />
           </div>
         </>
       ) : null}
@@ -102,9 +104,12 @@ function ChangedFilesAside({ controller, state, visible }: { controller: ERunUIC
   );
 }
 
-function ReviewRangeControl({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement | null {
-  const commits = [...(state.diff?.reviewCommits || [])].reverse();
-  const base = state.diff?.reviewBase;
+function ReviewRangeControl({ controller }: { controller: ERunUIController }): React.ReactElement | null {
+  const diff = useAppSelector((state) => state.review.diff);
+  const selectedReviewScope = useAppSelector((state) => state.review.selectedReviewScope);
+  const diffLoading = useAppSelector((state) => state.review.diffLoading);
+  const commits = [...(diff?.reviewCommits || [])].reverse();
+  const base = diff?.reviewBase;
   if (!base?.commit && commits.length === 0) {
     return null;
   }
@@ -125,22 +130,22 @@ function ReviewRangeControl({ controller, state }: { controller: ERunUIControlle
         <ReviewBoundaryButton
           label="Current local changes"
           detail="local only"
-          selected={state.selectedReviewScope === 'current'}
-          disabled={state.diffLoading}
+          selected={selectedReviewScope === 'current'}
+          disabled={diffLoading}
           onClick={() => controller.selectReviewRange('current')}
         />
         {commits.length > 0 ? (
           <div className="flex max-h-[220px] min-h-0 flex-col gap-1 overflow-auto pr-1">
             {commits.map((commit) => (
-              <ReviewCommitButton key={commit.hash} controller={controller} state={state} commit={commit} />
+              <ReviewCommitButton key={commit.hash} controller={controller} commit={commit} />
             ))}
           </div>
         ) : null}
         <ReviewBoundaryButton
           label="All branch changes"
           detail="base..current"
-          selected={state.selectedReviewScope === 'all'}
-          disabled={state.diffLoading}
+          selected={selectedReviewScope === 'all'}
+          disabled={diffLoading}
           onClick={() => controller.selectReviewRange('all')}
         />
       </div>
@@ -148,13 +153,16 @@ function ReviewRangeControl({ controller, state }: { controller: ERunUIControlle
   );
 }
 
-function ReviewCommitButton({ controller, state, commit }: { controller: ERunUIController; state: AppState; commit: DiffCommit }): React.ReactElement {
+function ReviewCommitButton({ controller, commit }: { controller: ERunUIController; commit: DiffCommit }): React.ReactElement {
+  const selectedReviewScope = useAppSelector((state) => state.review.selectedReviewScope);
+  const selectedReviewCommit = useAppSelector((state) => state.review.selectedReviewCommit);
+  const diffLoading = useAppSelector((state) => state.review.diffLoading);
   return (
     <ReviewBoundaryButton
       label={commit.subject || commit.shortHash}
       detail={`from ${commit.shortHash}`}
-      selected={state.selectedReviewScope === 'commit' && state.selectedReviewCommit === commit.hash}
-      disabled={state.diffLoading}
+      selected={selectedReviewScope === 'commit' && selectedReviewCommit === commit.hash}
+      disabled={diffLoading}
       onClick={() => controller.selectReviewRange('commit', commit.hash)}
     />
   );
@@ -191,18 +199,21 @@ function ReviewBoundaryButton({
   );
 }
 
-function ChangedFilesHeader({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
+function ChangedFilesHeader({ controller }: { controller: ERunUIController }): React.ReactElement {
+  const changedFilesOpen = useAppSelector((state) => state.layout.changedFilesOpen);
+  const diff = useAppSelector((state) => state.review.diff);
+  const diffLoading = useAppSelector((state) => state.review.diffLoading);
   return (
     <div className="mb-3.5 flex min-w-0 items-center justify-between gap-3">
       <button
         className="inline-flex min-w-0 flex-1 cursor-pointer items-center gap-1 overflow-hidden border-0 bg-transparent p-0 text-sm font-semibold whitespace-nowrap text-foreground [&_svg]:size-4 [&_svg]:flex-none [&_svg]:text-muted-foreground"
         type="button"
-        aria-expanded={state.changedFilesOpen}
+        aria-expanded={changedFilesOpen}
         onClick={() => controller.toggleChangedFiles()}
       >
         <FileDiff aria-hidden="true" />
-        Changed files <span className="flex-none text-muted-foreground">{state.diff?.summary?.fileCount || 0}</span>
-        <ChevronDown className={cn('transition-transform', !state.changedFilesOpen && '-rotate-90')} aria-hidden="true" />
+        Changed files <span className="flex-none text-muted-foreground">{diff?.summary?.fileCount || 0}</span>
+        <ChevronDown className={cn('transition-transform', !changedFilesOpen && '-rotate-90')} aria-hidden="true" />
       </button>
       <div className="flex min-w-0 flex-none items-center gap-2">
         <IconTooltip label="Refresh diff">
@@ -212,7 +223,7 @@ function ChangedFilesHeader({ controller, state }: { controller: ERunUIControlle
             variant="ghost"
             size="icon"
             aria-label="Refresh diff"
-            disabled={state.diffLoading}
+            disabled={diffLoading}
             onClick={() => {
               void controller.refreshReviewDiff();
             }}
@@ -221,39 +232,40 @@ function ChangedFilesHeader({ controller, state }: { controller: ERunUIControlle
           </Button>
         </IconTooltip>
         <div className="flex gap-1.5 text-sm font-semibold whitespace-nowrap">
-          <span className="text-diff-add-foreground">+{state.diff?.summary?.additions || 0}</span>
-          <span className="text-diff-delete-foreground">-{state.diff?.summary?.deletions || 0}</span>
+          <span className="text-diff-add-foreground">+{diff?.summary?.additions || 0}</span>
+          <span className="text-diff-delete-foreground">-{diff?.summary?.deletions || 0}</span>
         </div>
       </div>
     </div>
   );
 }
 
-function ChangedFileTree({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
-  if (state.diffLoading) {
+function ChangedFileTree({ controller }: { controller: ERunUIController }): React.ReactElement {
+  const review = useAppSelector((state) => state.review);
+  if (review.diffLoading) {
     return <ReviewStatus>Loading...</ReviewStatus>;
   }
-  if (state.diffError) {
+  if (review.diffError) {
     return (
       <DiffErrorAlert
-        message={compactDiffError(state.diffError)}
-        loading={state.diffLoading}
-        reconnectable={state.diffErrorReconnectable}
+        message={compactDiffError(review.diffError)}
+        loading={review.diffLoading}
+        reconnectable={review.diffErrorReconnectable}
         onRetry={() => { void controller.loadReviewDiff(); }}
         onReconnect={() => controller.requestReconnect()}
       />
     );
   }
 
-  const tree = visibleDiffTreeNodes(filterDiffTree(state.diff?.tree || [], state.diffFilter), state.collapsedDiffDirs);
+  const tree = visibleDiffTreeNodes(filterDiffTree(review.diff?.tree || [], review.diffFilter), new Set(review.collapsedDiffDirs));
   if (tree.length === 0) {
-    return <ReviewStatus>{state.diff ? 'No matching files' : 'No changes'}</ReviewStatus>;
+    return <ReviewStatus>{review.diff ? 'No matching files' : 'No changes'}</ReviewStatus>;
   }
 
   return (
     <>
       {tree.map((node) => (
-        <ChangedFileNode key={node.path} controller={controller} state={state} node={node} />
+        <ChangedFileNode key={node.path} controller={controller} node={node} />
       ))}
     </>
   );
@@ -261,17 +273,17 @@ function ChangedFileTree({ controller, state }: { controller: ERunUIController; 
 
 function ChangedFileNode({
   controller,
-  state,
   node,
 }: {
   controller: ERunUIController;
-  state: AppState;
   node: DiffTreeNode;
 }): React.ReactElement {
+  const collapsedDiffDirs = useAppSelector((state) => state.review.collapsedDiffDirs);
+  const selectedDiffPath = useAppSelector((state) => state.review.selectedDiffPath);
   const style = { '--depth': String(node.depth) } as React.CSSProperties;
 
   if (node.type === 'directory') {
-    const collapsed = state.collapsedDiffDirs.has(node.path);
+    const collapsed = collapsedDiffDirs.includes(node.path);
     return (
       <div className="flex flex-col">
         <button
@@ -289,7 +301,7 @@ function ChangedFileNode({
     );
   }
 
-  const selected = node.path === state.selectedDiffPath;
+  const selected = node.path === selectedDiffPath;
   return (
     <div className="flex flex-col">
       <button

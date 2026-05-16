@@ -3,37 +3,38 @@ import { AlertCircle, PlugZap, RefreshCw } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { compactDiffError, diffLineMark } from '@/app/diffUtils';
+import { useAppSelector } from '@/app/hooks';
 import { reconnectCopy } from '@/app/reconnectCopy';
-import type { AppState } from '@/app/state';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { DiffFile, DiffHunk } from '@/types';
 
-export function DiffList({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
-  if (state.diffLoading) {
+export function DiffList({ controller }: { controller: ERunUIController }): React.ReactElement {
+  const review = useAppSelector((state) => state.review);
+  if (review.diffLoading) {
     return <ReviewStatus>Loading diff...</ReviewStatus>;
   }
-  if (state.diffError) {
+  if (review.diffError) {
     return (
       <DiffErrorAlert
-        message={compactDiffError(state.diffError)}
-        loading={state.diffLoading}
-        reconnectable={state.diffErrorReconnectable}
+        message={compactDiffError(review.diffError)}
+        loading={review.diffLoading}
+        reconnectable={review.diffErrorReconnectable}
         onRetry={() => { void controller.loadReviewDiff(); }}
         onReconnect={() => controller.requestReconnect()}
       />
     );
   }
-  const files = state.diff?.files || [];
+  const files = review.diff?.files || [];
   if (files.length === 0) {
     return <ReviewStatus>No changes</ReviewStatus>;
   }
   return (
     <>
       {files.map((file) => (
-        <DiffFileView key={file.path} file={file} selected={file.path === state.selectedDiffPath} />
+        <DiffFileView key={file.path} file={file} selected={file.path === review.selectedDiffPath} />
       ))}
-      <span className="sr-only">{state.selectedDiffPath}</span>
+      <span className="sr-only">{review.selectedDiffPath}</span>
     </>
   );
 }
