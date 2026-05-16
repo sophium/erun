@@ -2,6 +2,8 @@ import type * as React from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal, type IDisposable } from '@xterm/xterm';
 
+import { mirrorAppStateToRedux } from './mirrorAppState';
+import { store } from './store';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import {
   CloseSession,
@@ -1729,6 +1731,7 @@ export class ERunUIController {
   }
 
   private emit(): void {
+    mirrorAppStateToRedux(store.dispatch, store.getState(), this.state);
     this.subscribers.forEach((subscriber) => subscriber());
   }
 

@@ -22,8 +22,15 @@ export const idleSlice = createSlice({
     setIdleCloudContextBusy(state, action: PayloadAction<boolean>) {
       state.idleCloudContextBusy = action.payload;
     },
+    setAll(_state, action: PayloadAction<IdleState>) {
+      return action.payload;
+    },
   },
 });
 
-export const { setIdleStatus, setIdleCloudContextBusy } = idleSlice.actions;
+export const {
+  setIdleStatus,
+  setIdleCloudContextBusy,
+  setAll: setIdleAll,
+} = idleSlice.actions;
 export default idleSlice.reducer;

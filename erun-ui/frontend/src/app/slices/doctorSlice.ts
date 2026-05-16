@@ -17,8 +17,11 @@ export const doctorSlice = createSlice({
     recordDoctorOutcome(state, action: PayloadAction<{ key: string; outcome: DoctorOutcome }>) {
       state.lastDoctorBySelection[action.payload.key] = action.payload.outcome;
     },
+    setAll(_state, action: PayloadAction<DoctorState>) {
+      return action.payload;
+    },
   },
 });
 
-export const { recordDoctorOutcome } = doctorSlice.actions;
+export const { recordDoctorOutcome, setAll: setDoctorAll } = doctorSlice.actions;
 export default doctorSlice.reducer;

@@ -44,6 +44,9 @@ export const terminalSlice = createSlice({
     setDebugOutput(state, action: PayloadAction<string>) {
       state.debugOutput = action.payload;
     },
+    setAll(_state, action: PayloadAction<TerminalState>) {
+      return action.payload;
+    },
   },
 });
 
@@ -54,5 +57,6 @@ export const {
   setSelectedSessionForEnv,
   clearSelectedSessionForEnv,
   setDebugOutput,
+  setAll: setTerminalAll,
 } = terminalSlice.actions;
 export default terminalSlice.reducer;

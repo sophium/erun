@@ -20,8 +20,15 @@ export const notificationSlice = createSlice({
     dismissNotification(state) {
       state.notification = null;
     },
+    setAll(_state, action: PayloadAction<NotificationState>) {
+      return action.payload;
+    },
   },
 });
 
-export const { showNotification, dismissNotification } = notificationSlice.actions;
+export const {
+  showNotification,
+  dismissNotification,
+  setAll: setNotificationAll,
+} = notificationSlice.actions;
 export default notificationSlice.reducer;

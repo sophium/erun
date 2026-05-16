@@ -34,8 +34,15 @@ export const sidebarSlice = createSlice({
       state.sidebarCloudAliasBusy = action.payload.busy;
       state.sidebarCloudAliasAction = action.payload.action;
     },
+    setAll(_state, action: PayloadAction<SidebarState>) {
+      return action.payload;
+    },
   },
 });
 
-export const { toggleTenantCollapsed, setSidebarCloudAliasBusy } = sidebarSlice.actions;
+export const {
+  toggleTenantCollapsed,
+  setSidebarCloudAliasBusy,
+  setAll: setSidebarAll,
+} = sidebarSlice.actions;
 export default sidebarSlice.reducer;

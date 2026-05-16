@@ -69,6 +69,9 @@ export const reviewSlice = createSlice({
     clearDiffDirsCollapsed(state) {
       state.collapsedDiffDirs = [];
     },
+    setAll(_state, action: PayloadAction<ReviewState>) {
+      return action.payload;
+    },
   },
 });
 
@@ -83,5 +86,6 @@ export const {
   setDiffFilter,
   toggleDiffDirCollapsed,
   clearDiffDirsCollapsed,
+  setAll: setReviewAll,
 } = reviewSlice.actions;
 export default reviewSlice.reducer;
