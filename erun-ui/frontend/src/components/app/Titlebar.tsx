@@ -3,7 +3,8 @@ import { AlertCircle, Blocks, CheckCircle2, Code2, Copy, Info, ListTree, LoaderC
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { useController } from '@/app/ControllerContext';
-import { useAppSelector } from '@/app/hooks';
+import { toggleIdleCloudContext } from '@/app/globalConfigThunks';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { displayableIdleStatus } from '@/app/idleStatusEligibility';
 import type { AppState } from '@/app/state';
 import { Button } from '@/components/ui/button';
@@ -170,11 +171,11 @@ function IdleStatusBadge({ idleStatus, idleBadge, hasAction }: { idleStatus: Idl
 }
 
 function IdleStatusAction({ idleAction, hasBadge }: { idleAction: { action: 'start' | 'stop'; label: string; busy: boolean }; hasBadge: boolean }): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   const IdleActionIcon = idleAction.busy ? LoaderCircle : idleAction.action === 'start' ? Play : Power;
   return (
     <IconTooltip label={idleAction.label}>
-      <Button className={cn('h-full w-7 border-0 bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-60 [&_svg]:size-3.5', hasBadge ? 'rounded-l-none rounded-r-md' : 'rounded-md')} type="button" variant="ghost" size="icon" aria-label={idleAction.label} disabled={idleAction.busy} onClick={() => { void controller.toggleIdleCloudContext(); }}>
+      <Button className={cn('h-full w-7 border-0 bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-60 [&_svg]:size-3.5', hasBadge ? 'rounded-l-none rounded-r-md' : 'rounded-md')} type="button" variant="ghost" size="icon" aria-label={idleAction.label} disabled={idleAction.busy} onClick={() => { void dispatch(toggleIdleCloudContext()); }}>
         <IdleActionIcon className={cn(idleAction.busy && 'animate-spin')} aria-hidden="true" />
       </Button>
     </IconTooltip>

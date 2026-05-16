@@ -11,7 +11,6 @@ import { sessionApi } from './api/sessionApi';
 import { stateApi } from './api/stateApi';
 import { tenantApi } from './api/tenantApi';
 import { createControllerStateProxy } from './controllerStateProxy';
-import { toggleTenantCollapsed } from './slices/sidebarSlice';
 import { toggleDiffDirCollapsed } from './slices/reviewSlice';
 import { store } from './store';
 import { thunkExtra } from './thunkExtra';
@@ -36,44 +35,6 @@ import {
   rememberEnvironmentDialogSelection,
   validEnvironmentDialogValues,
 } from './environmentDialogState';
-import {
-  closeGlobalConfigDialog as closeGlobalConfigDialogThunk,
-  initGlobalCloudContext as initGlobalCloudContextThunk,
-  loadGlobalConfig as loadGlobalConfigThunk,
-  loginGlobalCloudProvider as loginGlobalCloudProviderThunk,
-  openGlobalConfigDialog as openGlobalConfigDialogThunk,
-  refreshCloudContexts as refreshCloudContextsThunk,
-  refreshCloudProviders as refreshCloudProvidersThunk,
-  startAWSCloudInit as startAWSCloudInitThunk,
-  startGlobalCloudContext as startGlobalCloudContextThunk,
-  stopGlobalCloudContext as stopGlobalCloudContextThunk,
-  submitGlobalConfig as submitGlobalConfigThunk,
-  toggleIdleCloudContext as toggleIdleCloudContextThunk,
-  updateCloudContextDraft as updateCloudContextDraftThunk,
-  updateGlobalConfig as updateGlobalConfigThunk,
-  updateGlobalConfigDialog as updateGlobalConfigDialogThunk,
-} from './globalConfigThunks';
-import {
-  chooseWorkspaceSyncLocalFolder as chooseWorkspaceSyncLocalFolderThunk,
-  closeManageDialog as closeManageDialogThunk,
-  enableManageSSHD as enableManageSSHDThunk,
-  loadManageConfig as loadManageConfigThunk,
-  openManageDialog as openManageDialogThunk,
-  selectManageVersionSuggestion as selectManageVersionSuggestionThunk,
-  setManageTab as setManageTabThunk,
-  setManageVersionChoicesOpen as setManageVersionChoicesOpenThunk,
-  startManageCloudContext as startManageCloudContextThunk,
-  startManageDoctor as startManageDoctorThunk,
-  stopManageCloudContext as stopManageCloudContextThunk,
-  submitManageConfig as submitManageConfigThunk,
-  submitManageDelete as submitManageDeleteThunk,
-  submitManageDeploy as submitManageDeployThunk,
-  toggleManageVersionChoices as toggleManageVersionChoicesThunk,
-  updateManageClaudeConfig as updateManageClaudeConfigThunk,
-  updateManageConfig as updateManageConfigThunk,
-  updateManageDialog as updateManageDialogThunk,
-  updateManageSSHDConfig as updateManageSSHDConfigThunk,
-} from './manageEnvironmentThunks';
 import {
   setDebugOpen as applyDebugOpen,
   setFilesOpen as applyFilesOpen,
@@ -111,8 +72,6 @@ import {
   defaultTenantDialog,
   type AppState,
   type EnvironmentDialogState,
-  type GlobalConfigDialogState,
-  type ManageDialogState,
   type TenantDashboardTab,
   type TenantDialogState,
   type TerminalStatusAction,
@@ -152,14 +111,10 @@ import {
 import { failedTerminalOutput, filterTerminalDisplayData, rebuildTerminalDisplayBuffer } from './terminalBuffers';
 import { normalizeDialogValue, normalizeVersionSuggestions, selectionKey } from './versionSuggestions';
 import type {
-  ManageTab,
   StartSessionResult,
   TerminalExitPayload,
   TerminalOutputPayload,
-  UICloudContextInitInput,
   UICloudProviderStatus,
-  UIERunConfig,
-  UIEnvironmentConfig,
   UISelection,
   UITenant,
   UITenantDashboardInput,
@@ -402,10 +357,6 @@ export class ERunUIController {
       return;
     }
     this.state.debugOutput = this.sessions.sessionDebug(this.state.sessionId);
-  }
-
-  toggleTenant(tenant: string): void {
-    store.dispatch(toggleTenantCollapsed(tenant));
   }
 
   openTenantDashboard(tenant: string): void {
@@ -949,130 +900,6 @@ export class ERunUIController {
     await this.startInitSelection(selection);
   }
 
-  openManageDialog(selection: UISelection): void {
-    store.dispatch(openManageDialogThunk(selection));
-  }
-
-  closeManageDialog(): void {
-    store.dispatch(closeManageDialogThunk());
-  }
-
-  setManageTab(tab: ManageTab): void {
-    store.dispatch(setManageTabThunk(tab));
-  }
-
-  updateManageDialog(values: Partial<ManageDialogState>): void {
-    store.dispatch(updateManageDialogThunk(values));
-  }
-
-  toggleManageVersionChoices(): void {
-    store.dispatch(toggleManageVersionChoicesThunk());
-  }
-
-  setManageVersionChoicesOpen(open: boolean): void {
-    store.dispatch(setManageVersionChoicesOpenThunk(open));
-  }
-
-  selectManageVersionSuggestion(suggestion: UIVersionSuggestion | undefined): void {
-    store.dispatch(selectManageVersionSuggestionThunk(suggestion));
-  }
-
-  updateManageConfig(values: Partial<UIEnvironmentConfig>): void {
-    store.dispatch(updateManageConfigThunk(values));
-  }
-
-  updateManageSSHDConfig(values: Partial<UIEnvironmentConfig['sshd']>): void {
-    store.dispatch(updateManageSSHDConfigThunk(values));
-  }
-
-  updateManageClaudeConfig(values: Partial<UIEnvironmentConfig['claude']>): void {
-    store.dispatch(updateManageClaudeConfigThunk(values));
-  }
-
-  async chooseWorkspaceSyncLocalFolder(): Promise<void> {
-    await store.dispatch(chooseWorkspaceSyncLocalFolderThunk());
-  }
-
-  async loadManageConfig(): Promise<void> {
-    await store.dispatch(loadManageConfigThunk());
-  }
-
-  async submitManageConfig(): Promise<void> {
-    await store.dispatch(submitManageConfigThunk());
-  }
-
-  async startManageCloudContext(name: string): Promise<void> {
-    await store.dispatch(startManageCloudContextThunk(name));
-  }
-
-  async enableManageSSHD(): Promise<void> {
-    await store.dispatch(enableManageSSHDThunk());
-  }
-
-  async startManageDoctor(): Promise<void> {
-    await store.dispatch(startManageDoctorThunk());
-  }
-
-  async stopManageCloudContext(name: string): Promise<void> {
-    await store.dispatch(stopManageCloudContextThunk(name));
-  }
-
-  openGlobalConfigDialog(): void {
-    store.dispatch(openGlobalConfigDialogThunk());
-  }
-
-  closeGlobalConfigDialog(): void {
-    store.dispatch(closeGlobalConfigDialogThunk());
-  }
-
-  updateGlobalConfigDialog(values: Partial<GlobalConfigDialogState>): void {
-    store.dispatch(updateGlobalConfigDialogThunk(values));
-  }
-
-  updateGlobalConfig(values: Partial<UIERunConfig>): void {
-    store.dispatch(updateGlobalConfigThunk(values));
-  }
-
-  updateCloudContextDraft(values: Partial<UICloudContextInitInput>): void {
-    store.dispatch(updateCloudContextDraftThunk(values));
-  }
-
-  async loadGlobalConfig(): Promise<void> {
-    await store.dispatch(loadGlobalConfigThunk());
-  }
-
-  async refreshCloudProviders(): Promise<void> {
-    await store.dispatch(refreshCloudProvidersThunk());
-  }
-
-  async refreshCloudContexts(): Promise<void> {
-    await store.dispatch(refreshCloudContextsThunk());
-  }
-
-  async initCloudContext(): Promise<void> {
-    await store.dispatch(initGlobalCloudContextThunk());
-  }
-
-  async stopCloudContext(name: string): Promise<void> {
-    await store.dispatch(stopGlobalCloudContextThunk(name));
-  }
-
-  async startCloudContext(name: string): Promise<void> {
-    await store.dispatch(startGlobalCloudContextThunk(name));
-  }
-
-  async toggleIdleCloudContext(): Promise<void> {
-    await store.dispatch(toggleIdleCloudContextThunk());
-  }
-
-  async startAWSCloudInit(): Promise<void> {
-    await store.dispatch(startAWSCloudInitThunk());
-  }
-
-  async loginCloudProvider(alias: string): Promise<void> {
-    await store.dispatch(loginGlobalCloudProviderThunk(alias));
-  }
-
   async loginPrimaryCloudProvider(alias: string): Promise<void> {
     await this.updatePrimaryCloudProvider(alias, 'login', (target) =>
       store.dispatch(cloudApi.endpoints.loginCloudProvider.initiate(target)).unwrap(),
@@ -1110,10 +937,6 @@ export class ERunUIController {
       this.showTerminalMessage(message);
       this.showNotification('error', message);
     }
-  }
-
-  async submitGlobalConfig(): Promise<void> {
-    await store.dispatch(submitGlobalConfigThunk());
   }
 
   openTenantDialog(tenant: string): void {
@@ -1317,14 +1140,6 @@ export class ERunUIController {
     if (config.cloudProviders) {
       this.state.cloudProviders = config.cloudProviders;
     }
-  }
-
-  async submitManageDeploy(): Promise<void> {
-    await store.dispatch(submitManageDeployThunk());
-  }
-
-  async submitManageDelete(): Promise<void> {
-    await store.dispatch(submitManageDeleteThunk());
   }
 
   setDiffFilter(value: string): void {

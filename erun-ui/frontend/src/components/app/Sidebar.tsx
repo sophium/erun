@@ -3,7 +3,10 @@ import { AlertCircle, CheckCircle2, Cloud, Copy, Folder, FolderOpen, LoaderCircl
 
 import { useController } from '@/app/ControllerContext';
 import { readError } from '@/app/errors';
-import { useAppSelector } from '@/app/hooks';
+import { openGlobalConfigDialog } from '@/app/globalConfigThunks';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { openManageDialog } from '@/app/manageEnvironmentThunks';
+import { toggleTenantCollapsed } from '@/app/slices/sidebarSlice';
 import type { AppState } from '@/app/state';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -15,6 +18,7 @@ import { cloudProviderStatusTone } from './StatusBadge';
 
 export function Sidebar(): React.ReactElement {
   const controller = useController();
+  const dispatch = useAppDispatch();
   const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
   const tenants = useAppSelector((state) => state.tenants.tenants);
   const selected = useAppSelector((state) => state.selection.selected);
@@ -35,7 +39,7 @@ export function Sidebar(): React.ReactElement {
               variant="ghost"
               size="icon-xs"
               aria-label="Open ERun settings"
-              onClick={() => controller.openGlobalConfigDialog()}
+              onClick={() => dispatch(openGlobalConfigDialog())}
             >
               <Settings />
             </Button>
@@ -316,7 +320,7 @@ function TenantGroup({
 }
 
 function TenantToggleButton({ tenantName, collapsed, active }: { tenantName: string; collapsed: boolean; active: boolean }): React.ReactElement {
-  const controller = useController();
+  const dispatch = useAppDispatch();
   return (
     <IconTooltip label={collapsed ? 'Expand tenant' : 'Collapse tenant'}>
       <Button
@@ -329,7 +333,7 @@ function TenantToggleButton({ tenantName, collapsed, active }: { tenantName: str
         size="icon"
         aria-label={collapsed ? `Expand ${tenantName}` : `Collapse ${tenantName}`}
         aria-expanded={!collapsed}
-        onClick={() => controller.toggleTenant(tenantName)}
+        onClick={() => dispatch(toggleTenantCollapsed(tenantName))}
       >
         {collapsed ? <Folder aria-hidden="true" /> : <FolderOpen aria-hidden="true" />}
       </Button>
@@ -388,6 +392,7 @@ function EnvironmentRow({
   environmentName: string;
 }): React.ReactElement {
   const controller = useController();
+  const dispatch = useAppDispatch();
   const selectedSelection = useAppSelector((state) => state.selection.selected);
   const tenants = useAppSelector((state) => state.tenants.tenants);
   const terminalBusy = useAppSelector((state) => state.terminalStatus.terminalBusy);
@@ -448,7 +453,7 @@ function EnvironmentRow({
           aria-label={`Edit ${tenantName} / ${environmentName} settings`}
           onClick={(event) => {
             event.stopPropagation();
-            controller.openManageDialog(selection);
+            dispatch(openManageDialog(selection));
           }}
         >
           <MoreHorizontal />
