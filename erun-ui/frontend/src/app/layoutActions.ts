@@ -20,7 +20,6 @@ import { clamp, saveBoolean, saveNumber } from './storage';
 
 type LayoutCallbacks = {
   applyLayoutVars: () => void;
-  emit: () => void;
   focusTerminalSoon: () => void;
   queueTerminalResize: () => void;
 };
@@ -28,12 +27,11 @@ type LayoutCallbacks = {
 export function toggleSidebar(state: AppState, callbacks: LayoutCallbacks): void {
   state.sidebarHidden = !state.sidebarHidden;
   callbacks.applyLayoutVars();
-  callbacks.emit();
   callbacks.queueTerminalResize();
   callbacks.focusTerminalSoon();
 }
 
-export function startSidebarResize(state: AppState, event: React.MouseEvent<HTMLElement>, applyLayoutVars: () => void, emit: () => void): void {
+export function startSidebarResize(state: AppState, event: React.MouseEvent<HTMLElement>, applyLayoutVars: () => void): void {
   if (state.sidebarHidden) {
     return;
   }
@@ -43,7 +41,6 @@ export function startSidebarResize(state: AppState, event: React.MouseEvent<HTML
   const move = (moveEvent: MouseEvent) => {
     state.sidebarWidth = clamp(moveEvent.clientX, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH);
     applyLayoutVars();
-    emit();
   };
   const stop = () => {
     document.body.classList.remove('is-resizing');
@@ -56,7 +53,7 @@ export function startSidebarResize(state: AppState, event: React.MouseEvent<HTML
   window.addEventListener('mouseup', stop);
 }
 
-export function startReviewResize(state: AppState, event: React.MouseEvent<HTMLElement>, terminalPane: HTMLElement | null, callbacks: Pick<LayoutCallbacks, 'applyLayoutVars' | 'emit' | 'queueTerminalResize'>): void {
+export function startReviewResize(state: AppState, event: React.MouseEvent<HTMLElement>, terminalPane: HTMLElement | null, callbacks: Pick<LayoutCallbacks, 'applyLayoutVars' | 'queueTerminalResize'>): void {
   if (!state.reviewOpen) {
     return;
   }
@@ -72,7 +69,6 @@ export function startReviewResize(state: AppState, event: React.MouseEvent<HTMLE
     const maxWidth = computeMaxReviewWidth(window.innerWidth, effectiveSidebar);
     state.reviewWidth = clamp(paneRect.right - moveEvent.clientX, MIN_REVIEW_WIDTH, maxWidth);
     callbacks.applyLayoutVars();
-    callbacks.emit();
     callbacks.queueTerminalResize();
   };
   const stop = () => {
@@ -86,7 +82,7 @@ export function startReviewResize(state: AppState, event: React.MouseEvent<HTMLE
   window.addEventListener('mouseup', stop);
 }
 
-export function startFilesResize(state: AppState, event: React.MouseEvent<HTMLElement>, reviewView: HTMLElement | null, applyLayoutVars: () => void, emit: () => void): void {
+export function startFilesResize(state: AppState, event: React.MouseEvent<HTMLElement>, reviewView: HTMLElement | null, applyLayoutVars: () => void): void {
   if (!state.reviewOpen) {
     return;
   }
@@ -100,7 +96,6 @@ export function startFilesResize(state: AppState, event: React.MouseEvent<HTMLEl
     }
     state.filesWidth = clamp(reviewRect.right - moveEvent.clientX, MIN_FILES_WIDTH, MAX_FILES_WIDTH);
     applyLayoutVars();
-    emit();
   };
   const stop = () => {
     document.body.classList.remove('is-resizing-files');
@@ -113,7 +108,7 @@ export function startFilesResize(state: AppState, event: React.MouseEvent<HTMLEl
   window.addEventListener('mouseup', stop);
 }
 
-export function startDebugResize(state: AppState, event: React.MouseEvent<HTMLElement>, terminalPane: HTMLElement | null, callbacks: Pick<LayoutCallbacks, 'applyLayoutVars' | 'emit' | 'queueTerminalResize'>): void {
+export function startDebugResize(state: AppState, event: React.MouseEvent<HTMLElement>, terminalPane: HTMLElement | null, callbacks: Pick<LayoutCallbacks, 'applyLayoutVars' | 'queueTerminalResize'>): void {
   if (!state.debugOpen) {
     return;
   }
@@ -128,7 +123,6 @@ export function startDebugResize(state: AppState, event: React.MouseEvent<HTMLEl
     const maxForPane = Math.max(MIN_DEBUG_HEIGHT, Math.min(MAX_DEBUG_HEIGHT, paneRect.height - 120));
     state.debugHeight = clamp(paneRect.bottom - moveEvent.clientY, MIN_DEBUG_HEIGHT, maxForPane);
     callbacks.applyLayoutVars();
-    callbacks.emit();
     callbacks.queueTerminalResize();
   };
   const stop = () => {
@@ -145,8 +139,7 @@ export function startDebugResize(state: AppState, event: React.MouseEvent<HTMLEl
 export function toggleReview(state: AppState, callbacks: LayoutCallbacks & { loadReviewDiff: () => void }): void {
   state.reviewOpen = !state.reviewOpen;
   callbacks.applyLayoutVars();
-  setFilesOpen(state, state.filesOpen, false, callbacks.applyLayoutVars, callbacks.emit);
-  callbacks.emit();
+  setFilesOpen(state, state.filesOpen, false, callbacks.applyLayoutVars);
   callbacks.queueTerminalResize();
   if (state.reviewOpen) {
     callbacks.loadReviewDiff();
@@ -154,21 +147,19 @@ export function toggleReview(state: AppState, callbacks: LayoutCallbacks & { loa
   callbacks.focusTerminalSoon();
 }
 
-export function setFilesOpen(state: AppState, open: boolean, persist: boolean, applyLayoutVars: () => void, emit: () => void): void {
+export function setFilesOpen(state: AppState, open: boolean, persist: boolean, applyLayoutVars: () => void): void {
   state.filesOpen = open;
   applyLayoutVars();
   if (persist) {
     saveBoolean(FILES_OPEN_STORAGE_KEY, open);
   }
-  emit();
 }
 
-export function setDebugOpen(state: AppState, open: boolean, emit: () => void, queueTerminalResize: () => void): void {
+export function setDebugOpen(state: AppState, open: boolean, queueTerminalResize: () => void): void {
   state.debugOpen = open;
   saveBoolean(DEBUG_OPEN_STORAGE_KEY, open);
   if (open && !state.debugOutput) {
     state.debugOutput = 'Debug output will appear here for new erun sessions started while this panel is open.\n';
   }
-  emit();
   queueTerminalResize();
 }

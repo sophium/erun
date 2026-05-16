@@ -31,7 +31,6 @@ interface GlobalConfigWorkflowDeps {
   terminalSize: () => TerminalSize;
   fitTerminal: () => void;
   resetTerminal: () => void;
-  emit: () => void;
   focusTerminalSoon: () => void;
   queueTerminalResize: () => void;
   openSelection: (selection: UISelection) => Promise<void>;
@@ -60,7 +59,6 @@ export class GlobalConfigWorkflow {
       busyTarget: '',
       error: '',
     };
-    this.deps.emit();
     void this.loadConfig();
   }
 
@@ -69,7 +67,6 @@ export class GlobalConfigWorkflow {
       return;
     }
     this.state.globalConfigDialog = defaultGlobalConfigDialog();
-    this.deps.emit();
     this.deps.focusTerminalSoon();
   }
 
@@ -82,7 +79,6 @@ export class GlobalConfigWorkflow {
       ...values,
       error: values.error ?? '',
     };
-    this.deps.emit();
   }
 
   updateConfig(values: Partial<UIERunConfig>): void {
@@ -119,7 +115,6 @@ export class GlobalConfigWorkflow {
       configLoading: true,
       error: '',
     };
-    this.deps.emit();
     try {
       const result = await store
         .dispatch(globalConfigApi.endpoints.getERunConfig.initiate(undefined, { forceRefetch: true }))
@@ -131,14 +126,12 @@ export class GlobalConfigWorkflow {
         configLoading: false,
         error: '',
       };
-      this.deps.emit();
     } catch (error) {
       this.state.globalConfigDialog = {
         ...this.state.globalConfigDialog,
         configLoading: false,
         error: readError(error),
       };
-      this.deps.emit();
     }
   }
 
@@ -159,7 +152,6 @@ export class GlobalConfigWorkflow {
         },
         error: '',
       };
-      this.deps.emit();
       this.deps.showNotification('success', 'Cloud aliases refreshed.');
     } catch (error) {
       const message = readError(error);
@@ -168,7 +160,6 @@ export class GlobalConfigWorkflow {
         error: message,
       };
       this.deps.showTerminalMessage(message);
-      this.deps.emit();
     }
   }
 
@@ -189,7 +180,6 @@ export class GlobalConfigWorkflow {
         },
         error: '',
       };
-      this.deps.emit();
       this.deps.showNotification('success', 'Cloud contexts refreshed.');
     } catch (error) {
       const message = readError(error);
@@ -198,7 +188,6 @@ export class GlobalConfigWorkflow {
         error: message,
       };
       this.deps.showTerminalMessage(message);
-      this.deps.emit();
     }
   }
 
@@ -208,7 +197,6 @@ export class GlobalConfigWorkflow {
       return;
     }
     this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-context-init', busyTarget: '', error: '' };
-    this.deps.emit();
     try {
       const context = await store
         .dispatch(cloudApi.endpoints.initCloudContext.initiate(dialog.cloudContextDraft))
@@ -231,7 +219,6 @@ export class GlobalConfigWorkflow {
       };
       this.deps.showTerminalMessage(`Initialized cloud context ${context.kubernetesContext}.`);
       this.deps.refreshKubernetesContexts();
-      this.deps.emit();
     } catch (error) {
       const message = readError(error);
       this.state.globalConfigDialog = {
@@ -242,7 +229,6 @@ export class GlobalConfigWorkflow {
         error: message,
       };
       this.deps.showTerminalMessage(message);
-      this.deps.emit();
     }
   }
 
@@ -270,13 +256,11 @@ export class GlobalConfigWorkflow {
     }
     const selection = this.state.selected ? { ...this.state.selected } : null;
     this.state.idleCloudContextBusy = true;
-    this.deps.emit();
     try {
       const context = (await action.run(action.name)) as UICloudContextStatus;
       this.applyIdleCloudContextResult(action.idleStatus, context);
       this.state.idleCloudContextBusy = false;
       this.deps.showNotification('success', `${action.label} cloud environment ${context.kubernetesContext || context.name}.`);
-      this.deps.emit();
       if (action.refreshKubernetesContexts) {
         this.deps.refreshKubernetesContexts();
       }
@@ -289,7 +273,6 @@ export class GlobalConfigWorkflow {
       this.state.idleCloudContextBusy = false;
       this.deps.showNotification('error', message);
       this.deps.showTerminalMessage(message);
-      this.deps.emit();
     }
   }
 
@@ -299,7 +282,6 @@ export class GlobalConfigWorkflow {
       return;
     }
     this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-provider-init', busyTarget: '', error: '' };
-    this.deps.emit();
     try {
       this.deps.fitTerminal();
       const terminalSize = this.deps.terminalSize();
@@ -313,7 +295,6 @@ export class GlobalConfigWorkflow {
       this.deps.hideTerminalMessage();
       this.deps.focusTerminalSoon();
       this.deps.queueTerminalResize();
-      this.deps.emit();
     } catch (error) {
       const message = readError(error);
       this.state.globalConfigDialog = {
@@ -324,7 +305,6 @@ export class GlobalConfigWorkflow {
         error: message,
       };
       this.deps.showTerminalMessage(message);
-      this.deps.emit();
     }
   }
 
@@ -334,7 +314,6 @@ export class GlobalConfigWorkflow {
       return;
     }
     this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-provider-login', busyTarget: alias, error: '' };
-    this.deps.emit();
     try {
       const provider = await store
         .dispatch(cloudApi.endpoints.loginCloudProvider.initiate(alias))
@@ -351,7 +330,6 @@ export class GlobalConfigWorkflow {
         error: '',
       };
       this.deps.showTerminalMessage(`${provider.alias}: ${provider.status}`);
-      this.deps.emit();
     } catch (error) {
       const message = readError(error);
       this.state.globalConfigDialog = {
@@ -362,7 +340,6 @@ export class GlobalConfigWorkflow {
         error: message,
       };
       this.deps.showTerminalMessage(message);
-      this.deps.emit();
     }
   }
 
@@ -372,7 +349,6 @@ export class GlobalConfigWorkflow {
       return;
     }
     this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'save', busyTarget: '', error: '' };
-    this.deps.emit();
     try {
       const result = await store
         .dispatch(globalConfigApi.endpoints.saveERunConfig.initiate(dialog.config))
@@ -397,7 +373,6 @@ export class GlobalConfigWorkflow {
         error: message,
       };
       this.deps.showTerminalMessage(message);
-      this.deps.emit();
     }
   }
 
@@ -430,7 +405,6 @@ export class GlobalConfigWorkflow {
       return;
     }
     this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-context-power', busyTarget: name, error: '' };
-    this.deps.emit();
     try {
       const context = (await action(name)) as UICloudContextStatus;
       this.state.globalConfigDialog = {
@@ -445,7 +419,6 @@ export class GlobalConfigWorkflow {
         error: '',
       };
       this.deps.showTerminalMessage(`${label} cloud context ${context.kubernetesContext}.`);
-      this.deps.emit();
     } catch (error) {
       const message = readError(error);
       this.state.globalConfigDialog = {
@@ -456,7 +429,6 @@ export class GlobalConfigWorkflow {
         error: message,
       };
       this.deps.showTerminalMessage(message);
-      this.deps.emit();
     }
   }
 }

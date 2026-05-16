@@ -36,7 +36,6 @@ interface ManageEnvironmentWorkflowDeps {
   terminalSize: () => TerminalSize;
   fitTerminal: () => void;
   resetTerminal: () => void;
-  emit: () => void;
   focusTerminalSoon: () => void;
   queueTerminalResize: () => void;
   refreshKubernetesContexts: () => void;
@@ -79,7 +78,6 @@ export class ManageEnvironmentWorkflow {
       error: '',
       pendingRedeploy: false,
     };
-    this.deps.emit();
     void this.refreshVersionSuggestions(false);
     void this.loadConfig();
   }
@@ -89,7 +87,6 @@ export class ManageEnvironmentWorkflow {
       return;
     }
     this.state.manageDialog = defaultManageDialog();
-    this.deps.emit();
     this.deps.focusTerminalSoon();
   }
 
@@ -103,7 +100,6 @@ export class ManageEnvironmentWorkflow {
       choicesOpen: false,
       error: '',
     };
-    this.deps.emit();
   }
 
   updateDialog(values: Partial<ManageDialogState>): void {
@@ -117,7 +113,6 @@ export class ManageEnvironmentWorkflow {
       error: values.error ?? '',
       ...(versionReset ? { versionImage: '', choicesOpen: false } : {}),
     };
-    this.deps.emit();
   }
 
   toggleVersionChoices(): void {
@@ -132,7 +127,6 @@ export class ManageEnvironmentWorkflow {
       ...this.state.manageDialog,
       choicesOpen: open && this.state.versionSuggestions.length > 0,
     };
-    this.deps.emit();
   }
 
   selectVersionSuggestion(suggestion: UIVersionSuggestion | undefined): void {
@@ -145,7 +139,6 @@ export class ManageEnvironmentWorkflow {
       versionImage: suggestion?.image || '',
       choicesOpen: false,
     };
-    this.deps.emit();
   }
 
   updateConfig(values: Partial<UIEnvironmentConfig>): void {
@@ -164,7 +157,6 @@ export class ManageEnvironmentWorkflow {
       config,
       error: '',
     };
-    this.deps.emit();
   }
 
   updateClaudeConfig(values: Partial<UIEnvironmentConfig['claude']>): void {
@@ -185,7 +177,6 @@ export class ManageEnvironmentWorkflow {
       },
       error: '',
     };
-    this.deps.emit();
   }
 
   updateSSHDConfig(values: Partial<UIEnvironmentConfig['sshd']>): void {
@@ -203,7 +194,6 @@ export class ManageEnvironmentWorkflow {
       },
       error: '',
     };
-    this.deps.emit();
   }
 
   async chooseWorkspaceSyncLocalFolder(): Promise<void> {
@@ -238,7 +228,6 @@ export class ManageEnvironmentWorkflow {
       configLoading: true,
       error: '',
     };
-    this.deps.emit();
     try {
       const result = await store
         .dispatch(
@@ -257,7 +246,6 @@ export class ManageEnvironmentWorkflow {
         resourceStatusLoading: true,
         error: '',
       };
-      this.deps.emit();
       void this.loadResourceStatus(result.kubernetesContext, selection);
     } catch (error) {
       this.state.manageDialog = {
@@ -265,7 +253,6 @@ export class ManageEnvironmentWorkflow {
         configLoading: false,
         error: readError(error),
       };
-      this.deps.emit();
     }
   }
 
@@ -294,7 +281,6 @@ export class ManageEnvironmentWorkflow {
         resourceStatus: status,
         resourceStatusLoading: false,
       };
-      this.deps.emit();
     } catch (error) {
       if (!this.state.manageDialog.open) {
         return;
@@ -310,7 +296,6 @@ export class ManageEnvironmentWorkflow {
         },
         resourceStatusLoading: false,
       };
-      this.deps.emit();
     }
   }
 
@@ -327,12 +312,10 @@ export class ManageEnvironmentWorkflow {
     const resourceError = runtimeResourceLimitMessage(dialog.config.runtimePod, dialog.resourceStatus);
     if (resourceError) {
       this.state.manageDialog = { ...dialog, error: resourceError };
-      this.deps.emit();
       return;
     }
 
     this.state.manageDialog = { ...dialog, busy: true, busyAction: 'save', busyTarget: '', error: '' };
-    this.deps.emit();
     try {
       const saveConfig = {
         ...dialog.config,
@@ -358,7 +341,6 @@ export class ManageEnvironmentWorkflow {
         error: '',
         pendingRedeploy: true,
       };
-      this.deps.emit();
     } catch (error) {
       const message = readError(error);
       this.state.manageDialog = {
@@ -369,7 +351,6 @@ export class ManageEnvironmentWorkflow {
         error: message,
       };
       this.deps.showTerminalMessage(message);
-      this.deps.emit();
     }
   }
 
@@ -463,7 +444,6 @@ export class ManageEnvironmentWorkflow {
       this.state.terminalCopyOutput = `Failed to delete ${selection.tenant} / ${selection.environment}: ${message}`;
       this.state.terminalCopyStatus = '';
       this.deps.showTerminalMessage(message);
-      this.deps.emit();
     }
   }
 
@@ -486,11 +466,9 @@ export class ManageEnvironmentWorkflow {
     this.state.versionSuggestions = suggestions;
     const currentVersion = normalizeDialogValue(this.state.manageDialog.version);
     if (!currentVersion && !selectDefault) {
-      this.deps.emit();
     } else if (selectDefault || !suggestions.some((suggestion) => suggestion.version === currentVersion)) {
       this.selectVersionSuggestion(suggestions[0]);
     } else {
-      this.deps.emit();
     }
   }
 
@@ -518,7 +496,6 @@ export class ManageEnvironmentWorkflow {
     this.deps.resetTerminal();
     this.deps.focusTerminalSoon();
     this.deps.queueTerminalResize();
-    this.deps.emit();
   }
 
   private prepareHiddenSession(selection: UISelection, runSelection: UISelection, mode: HiddenSessionMode): void {
@@ -527,7 +504,6 @@ export class ManageEnvironmentWorkflow {
     if (this.state.debugOpen) {
       this.deps.setPendingDebugHeader(`$ ${formatDebugCommand(runSelection, mode)}\n`);
     }
-    this.deps.emit();
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
     this.deps.showTerminalMessage(hiddenSessionBusyMessage(selection, mode), true);
@@ -548,7 +524,6 @@ export class ManageEnvironmentWorkflow {
       return;
     }
     this.state.manageDialog = { ...dialog, busy: true, busyAction: 'cloud-context-power', busyTarget: contextName, error: '' };
-    this.deps.emit();
     try {
       const context = (await action(contextName)) as UICloudContextStatus;
       this.state.manageDialog = {
@@ -563,7 +538,6 @@ export class ManageEnvironmentWorkflow {
         error: '',
       };
       this.deps.showTerminalMessage(`${label} cloud context ${context.kubernetesContext || context.name}.`);
-      this.deps.emit();
     } catch (error) {
       const message = readError(error);
       this.state.manageDialog = {
@@ -574,7 +548,6 @@ export class ManageEnvironmentWorkflow {
         error: message,
       };
       this.deps.showTerminalMessage(message);
-      this.deps.emit();
     }
   }
 

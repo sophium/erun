@@ -135,11 +135,10 @@ const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 export class ERunUIController {
   readonly state: AppState = createControllerStateProxy(store);
 
-  // Redux's store.subscribe (via react-redux's useSyncExternalStore) drives
-  // component re-renders now. The controller's own subscribe / emit are kept
-  // as no-ops to avoid churning every call site in this PR; future work
-  // should delete the emit() invocations entirely. Components no longer
-  // call controller.subscribe; they read via useAppSelector instead.
+  // Components subscribe to Redux directly via useAppSelector. The
+  // controller's subscribe stays as a no-op stub only to satisfy any
+  // legacy caller; the body is empty because react-redux owns
+  // notification now.
   private readonly sessions = new TerminalSessionRegistry();
   private pendingDebugHeader = '';
   private terminal: Terminal | null = null;
@@ -179,7 +178,6 @@ export class ERunUIController {
     terminalSize: () => ({ cols: this.terminal?.cols || 80, rows: this.terminal?.rows || 24 }),
     fitTerminal: () => this.fitAddon?.fit(),
     resetTerminal: () => this.resetTerminal(),
-    emit: () => this.emit(),
     focusTerminalSoon: () => this.focusTerminalSoon(),
     queueTerminalResize: () => this.queueTerminalResize(),
     openSelection: (selection) => this.openSelection(selection),
@@ -195,7 +193,6 @@ export class ERunUIController {
     terminalSize: () => ({ cols: this.terminal?.cols || 80, rows: this.terminal?.rows || 24 }),
     fitTerminal: () => this.fitAddon?.fit(),
     resetTerminal: () => this.resetTerminal(),
-    emit: () => this.emit(),
     focusTerminalSoon: () => this.focusTerminalSoon(),
     queueTerminalResize: () => this.queueTerminalResize(),
     refreshKubernetesContexts: () => { void this.refreshKubernetesContexts(); },
@@ -338,7 +335,7 @@ export class ERunUIController {
   }
 
   startSidebarResize(event: React.MouseEvent<HTMLElement>): void {
-    startSidebarPanelResize(this.state, event, () => this.applyLayoutVars(), () => this.emit());
+    startSidebarPanelResize(this.state, event, () => this.applyLayoutVars());
   }
 
   startReviewResize(event: React.MouseEvent<HTMLElement>): void {
@@ -346,7 +343,7 @@ export class ERunUIController {
   }
 
   startFilesResize(event: React.MouseEvent<HTMLElement>): void {
-    startFilesPanelResize(this.state, event, this.reviewView, () => this.applyLayoutVars(), () => this.emit());
+    startFilesPanelResize(this.state, event, this.reviewView, () => this.applyLayoutVars());
   }
 
   startDebugResize(event: React.MouseEvent<HTMLElement>): void {
@@ -361,17 +358,16 @@ export class ERunUIController {
   }
 
   setFilesOpen(open: boolean, persist = true): void {
-    applyFilesOpen(this.state, open, persist, () => this.applyLayoutVars(), () => this.emit());
+    applyFilesOpen(this.state, open, persist, () => this.applyLayoutVars());
   }
 
   setDebugOpen(open: boolean): void {
-    applyDebugOpen(this.state, open, () => this.emit(), this.queueTerminalResize);
+    applyDebugOpen(this.state, open, this.queueTerminalResize);
   }
 
   clearDebugOutput(): void {
     this.state.debugOutput = '';
     this.sessions.clearSessionDebug(this.state.sessionId);
-    this.emit();
   }
 
   setPendingDebugHeader(header: string): void {
@@ -405,7 +401,6 @@ export class ERunUIController {
 
   toggleTenant(tenant: string): void {
     store.dispatch(toggleTenantCollapsed(tenant));
-    this.emit();
   }
 
   openTenantDashboard(tenant: string): void {
@@ -424,7 +419,6 @@ export class ERunUIController {
     };
     this.state.reviewOpen = false;
     this.showTerminalMessage('');
-    this.emit();
     void this.loadTenantDashboard(tenant);
   }
 
@@ -433,7 +427,6 @@ export class ERunUIController {
       ...this.state.tenantDashboard,
       tab,
     };
-    this.emit();
   }
 
   async loadTenantDashboard(tenant = this.state.tenantDashboard.tenant): Promise<void> {
@@ -450,11 +443,9 @@ export class ERunUIController {
         error: 'Tenant dashboard requires an API URL and a primary cloud alias.',
         data: null,
       };
-      this.emit();
       return;
     }
     this.state.tenantDashboard = { ...this.state.tenantDashboard, loading: true, error: '' };
-    this.emit();
     try {
       const loadedData = await store
         .dispatch(tenantApi.endpoints.getTenantDashboard.initiate(input))
@@ -464,13 +455,11 @@ export class ERunUIController {
       }
       const data = { ...loadedData, environment: loadedData.environment || input.environment };
       this.state.tenantDashboard = { ...this.state.tenantDashboard, loading: false, error: '', data };
-      this.emit();
     } catch (error) {
       if (this.state.tenantDashboard.tenant !== tenant) {
         return;
       }
       this.state.tenantDashboard = { ...this.state.tenantDashboard, loading: false, error: readError(error), data: null };
-      this.emit();
     }
   }
 
@@ -513,7 +502,6 @@ export class ERunUIController {
     }
     this.focusTerminalSoon();
     this.queueTerminalResize();
-    this.emit();
   }
 
   private async ensureDefaultEnvTabs(runSelection: UISelection, key: string): Promise<void> {
@@ -589,7 +577,6 @@ export class ERunUIController {
     this.state.selected = selection;
     this.state.idleStatus = null;
     if (!isNewSessionSelection(previousSessionId, previousKnownSessionId)) {
-      this.emit();
       return;
     }
     if (this.state.debugOpen) {
@@ -598,7 +585,6 @@ export class ERunUIController {
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
     this.showTerminalMessage(`Opening ${selection.tenant} / ${selection.environment}...`, true);
-    this.emit();
   }
 
   private registerOpenSessionResult(key: string, result: StartSessionResult, runSelection: UISelection, previousSessionId: number): void {
@@ -687,7 +673,6 @@ export class ERunUIController {
       this.registerOpenSessionResult(key, result, runSelection, previousSessionId);
       this.focusTerminalSoon();
       this.queueTerminalResize();
-      this.emit();
     } catch (error: unknown) {
       this.showTerminalMessage(readError(error));
     }
@@ -713,7 +698,6 @@ export class ERunUIController {
     }
     this.focusTerminalSoon();
     this.queueTerminalResize();
-    this.emit();
   }
 
   async closeTerminalTab(sessionId: number): Promise<void> {
@@ -747,11 +731,9 @@ export class ERunUIController {
         this.state.sessionId = 0;
         this.state.debugOutput = '';
         this.resetTerminal();
-        this.emit();
       }
       return;
     }
-    this.emit();
   }
 
   private showOpenSelectionStatus(sessionId: number, selection: UISelection): void {
@@ -783,7 +765,6 @@ export class ERunUIController {
       this.sessions.setSessionDebug(this.state.sessionId, header);
       this.syncDebugDisplay();
     }
-    this.emit();
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
     this.showTerminalMessage(`Opening ${label} for ${selection.tenant} / ${selection.environment}...`);
@@ -825,7 +806,6 @@ export class ERunUIController {
       busy: false,
       error: '',
     };
-    this.emit();
     void this.refreshKubernetesContexts();
     void this.refreshDialogVersionSuggestions(true);
   }
@@ -835,7 +815,6 @@ export class ERunUIController {
       return;
     }
     this.state.environmentDialog = defaultEnvironmentDialog();
-    this.emit();
     this.focusTerminalSoon();
   }
 
@@ -850,7 +829,6 @@ export class ERunUIController {
       error: values.error ?? '',
       ...(versionReset ? { versionImage: '', choicesOpen: false } : {}),
     };
-    this.emit();
     if (values.tenant !== undefined) {
       this.scheduleDialogVersionSuggestionRefresh(true);
     }
@@ -871,7 +849,6 @@ export class ERunUIController {
       ...this.state.environmentDialog,
       choicesOpen: open && this.state.versionSuggestions.length > 0,
     };
-    this.emit();
   }
 
   selectEnvironmentVersionSuggestion(suggestion: UIVersionSuggestion | undefined): void {
@@ -884,7 +861,6 @@ export class ERunUIController {
       versionImage: suggestion?.image || '',
       choicesOpen: false,
     };
-    this.emit();
   }
 
   async submitEnvironmentDialog(form: HTMLFormElement): Promise<void> {
@@ -895,14 +871,12 @@ export class ERunUIController {
     const selection = this.environmentDialogSelection(dialog);
     if (!selection) {
       this.state.environmentDialog = { ...dialog, error: '' };
-      this.emit();
       form.reportValidity();
       return;
     }
     const resourceError = dialog.actionMode === 'init' ? runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus) : '';
     if (resourceError) {
       this.state.environmentDialog = { ...dialog, error: resourceError };
-      this.emit();
       return;
     }
 
@@ -912,7 +886,6 @@ export class ERunUIController {
     try {
       await this.startEnvironmentDialogSelection(selection, dialog.actionMode);
       this.state.environmentDialog = defaultEnvironmentDialog();
-      this.emit();
       this.focusTerminalSoon();
     } catch (error) {
       const message = readError(error);
@@ -961,7 +934,6 @@ export class ERunUIController {
       error: '',
       choicesOpen: false,
     };
-    this.emit();
   }
 
   private async startEnvironmentDialogSelection(selection: UISelection, actionMode: EnvironmentDialogState['actionMode']): Promise<void> {
@@ -1115,7 +1087,6 @@ export class ERunUIController {
     }
     this.state.sidebarCloudAliasBusy = true;
     this.state.sidebarCloudAliasAction = 'bearer';
-    this.emit();
     try {
       const result = await store
         .dispatch(cloudApi.endpoints.getCloudProviderBearerToken.initiate(alias))
@@ -1127,14 +1098,12 @@ export class ERunUIController {
       const issuer = result.issuer?.trim();
       this.showTerminalMessage(issuer ? `Copied bearer token for ${result.alias}. Issuer: ${issuer}` : `Copied bearer token for ${result.alias}.`);
       this.showNotification('success', `Copied bearer token for ${result.alias}.`);
-      this.emit();
     } catch (error) {
       const message = readError(error);
       this.state.sidebarCloudAliasBusy = false;
       this.state.sidebarCloudAliasAction = '';
       this.showTerminalMessage(message);
       this.showNotification('error', message);
-      this.emit();
     }
   }
 
@@ -1160,7 +1129,6 @@ export class ERunUIController {
       busyTarget: '',
       error: '',
     };
-    this.emit();
     void this.loadTenantConfig();
   }
 
@@ -1169,7 +1137,6 @@ export class ERunUIController {
       return;
     }
     this.state.tenantDialog = defaultTenantDialog();
-    this.emit();
     this.focusTerminalSoon();
   }
 
@@ -1182,7 +1149,6 @@ export class ERunUIController {
       ...values,
       error: values.error ?? '',
     };
-    this.emit();
   }
 
   updateTenantConfig(values: Partial<UITenantConfig>): void {
@@ -1207,7 +1173,6 @@ export class ERunUIController {
       configLoading: true,
       error: '',
     };
-    this.emit();
     try {
       const result = await store
         .dispatch(tenantApi.endpoints.getTenantConfig.initiate(dialog.tenant))
@@ -1221,14 +1186,12 @@ export class ERunUIController {
         configLoading: false,
         error: '',
       };
-      this.emit();
     } catch (error) {
       this.state.tenantDialog = {
         ...this.state.tenantDialog,
         configLoading: false,
         error: readError(error),
       };
-      this.emit();
     }
   }
 
@@ -1242,7 +1205,6 @@ export class ERunUIController {
       return;
     }
     this.state.tenantDialog = { ...dialog, busy: true, busyAction: 'save', busyTarget: '', error: '' };
-    this.emit();
     try {
       const result = await store
         .dispatch(tenantApi.endpoints.saveTenantConfig.initiate(dialog.config))
@@ -1268,7 +1230,6 @@ export class ERunUIController {
         error: message,
       };
       this.showTerminalMessage(message);
-      this.emit();
     }
   }
 
@@ -1279,7 +1240,6 @@ export class ERunUIController {
       return;
     }
     this.state.tenantDialog = { ...dialog, busy: true, busyAction: 'cloud-oidc', busyTarget: alias, error: '' };
-    this.emit();
     try {
       const provider = await store
         .dispatch(cloudApi.endpoints.setupCloudProviderOIDC.initiate(alias))
@@ -1298,7 +1258,6 @@ export class ERunUIController {
         error: '',
       };
       this.showNotification('success', `Updated OIDC issuer for ${provider.alias}.`);
-      this.emit();
     } catch (error) {
       const message = readError(error);
       this.state.tenantDialog = {
@@ -1310,7 +1269,6 @@ export class ERunUIController {
       };
       this.showTerminalMessage(message);
       this.showNotification('error', message);
-      this.emit();
     }
   }
 
@@ -1321,21 +1279,18 @@ export class ERunUIController {
     }
     this.state.sidebarCloudAliasBusy = true;
     this.state.sidebarCloudAliasAction = action;
-    this.emit();
     try {
       const provider = (await run(alias)) as UICloudProviderStatus;
       this.state.cloudProviders = replaceCloudProvider(this.state.cloudProviders, provider);
       this.state.sidebarCloudAliasBusy = false;
       this.state.sidebarCloudAliasAction = '';
       this.showTerminalMessage(`${provider.alias}: ${provider.status}`);
-      this.emit();
     } catch (error) {
       const message = readError(error);
       this.state.sidebarCloudAliasBusy = false;
       this.state.sidebarCloudAliasAction = '';
       this.showTerminalMessage(message);
       this.showNotification('error', message);
-      this.emit();
     }
   }
 
@@ -1369,12 +1324,10 @@ export class ERunUIController {
 
   setDiffFilter(value: string): void {
     this.state.diffFilter = value.trim().toLowerCase();
-    this.emit();
   }
 
   toggleChangedFiles(): void {
     this.state.changedFilesOpen = !this.state.changedFilesOpen;
-    this.emit();
   }
 
   selectReviewRange(scope: AppState['selectedReviewScope'], hash = ''): void {
@@ -1399,7 +1352,6 @@ export class ERunUIController {
     if (!options.silent) {
       this.state.diffLoading = true;
       this.state.diffError = '';
-      this.emit();
     }
     try {
       const diff = await store
@@ -1442,7 +1394,6 @@ export class ERunUIController {
         if (!options.silent) {
           this.state.diffLoading = false;
         }
-        this.emit();
         this.scheduleReviewDiffRefresh();
       }
     }
@@ -1494,7 +1445,6 @@ export class ERunUIController {
       return;
     }
     this.state.reconnect = { status: 'confirm', lastLine: '', error: '' };
-    this.emit();
   }
 
   cancelReconnect(): void {
@@ -1502,7 +1452,6 @@ export class ERunUIController {
       return;
     }
     this.state.reconnect = { status: 'idle', lastLine: '', error: '' };
-    this.emit();
   }
 
   async confirmReconnect(): Promise<void> {
@@ -1511,11 +1460,9 @@ export class ERunUIController {
       return;
     }
     this.state.reconnect = { status: 'running', lastLine: '', error: '' };
-    this.emit();
     try {
       await store.dispatch(sessionApi.endpoints.reconnectMCP.initiate(selection)).unwrap();
       this.state.reconnect = { status: 'idle', lastLine: '', error: '' };
-      this.emit();
       await this.loadReviewDiff();
     } catch (error: unknown) {
       this.state.reconnect = {
@@ -1523,7 +1470,6 @@ export class ERunUIController {
         lastLine: this.state.reconnect.lastLine,
         error: readError(error),
       };
-      this.emit();
     }
   }
 
@@ -1536,17 +1482,14 @@ export class ERunUIController {
       return;
     }
     this.state.reconnect = { ...this.state.reconnect, lastLine: trimmed };
-    this.emit();
   }
 
   toggleDiffDirectory(path: string): void {
     store.dispatch(toggleDiffDirCollapsed(path));
-    this.emit();
   }
 
   selectDiffPath(path: string): void {
     this.state.selectedDiffPath = path;
-    this.emit();
     window.setTimeout(() => this.scrollSelectedDiffIntoView(), 0);
   }
 
@@ -1579,7 +1522,6 @@ export class ERunUIController {
       this.state.terminalCopyStatus = '';
     }
     this.terminalStatusRetrySelection = null;
-    this.emit();
   }
 
   showTerminalFailure(message: string, detail: string, copyOutput: string, action: TerminalStatusAction, retrySelection: UISelection | null): void {
@@ -1591,7 +1533,6 @@ export class ERunUIController {
     this.state.terminalCopyOutput = copyOutput;
     this.state.terminalCopyStatus = '';
     this.terminalStatusRetrySelection = action === 'wait-longer' ? retrySelection : null;
-    this.emit();
   }
 
   showNotification(kind: NonNullable<AppState['notification']>['kind'], message: string): void {
@@ -1604,8 +1545,6 @@ export class ERunUIController {
       kind,
       message: trimmed,
     };
-    this.emit();
-
     if (kind === 'success' || kind === 'info') {
       this.notificationTimer = window.setTimeout(() => {
         this.dismissNotification();
@@ -1619,7 +1558,6 @@ export class ERunUIController {
       return;
     }
     this.state.notification = null;
-    this.emit();
   }
 
   dismissTerminalStatus(): void {
@@ -1634,7 +1572,6 @@ export class ERunUIController {
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
     this.terminalStatusRetrySelection = null;
-    this.emit();
   }
 
   async waitLongerForTerminalStatus(): Promise<void> {
@@ -1667,19 +1604,12 @@ export class ERunUIController {
     } catch (error) {
       this.state.terminalCopyStatus = readError(error);
     }
-    this.emit();
     window.clearTimeout(this.terminalCopyStatusTimer);
     this.terminalCopyStatusTimer = window.setTimeout(() => {
       this.state.terminalCopyStatus = '';
-      this.emit();
     }, 1400);
   }
 
-  private emit(): void {
-    // No-op: writes to this.state go through createControllerStateProxy,
-    // which dispatches the matching slice action. React-redux then schedules
-    // a re-render of any component reading the affected slice.
-  }
 
   private scheduleIdleStatusPoll(delay = 1000): void {
     window.clearTimeout(this.idleStatusTimer);
@@ -1703,7 +1633,6 @@ export class ERunUIController {
         .unwrap();
       if (this.isCurrentIdleStatusRequest(request, selection)) {
         this.state.idleStatus = status;
-        this.emit();
       }
     } catch {
       this.clearCurrentIdleStatusRequest(request);
@@ -1719,7 +1648,6 @@ export class ERunUIController {
       return;
     }
     this.state.idleStatus = null;
-    this.emit();
   }
 
   private clearCurrentIdleStatusRequest(request: number): void {
@@ -1743,8 +1671,6 @@ export class ERunUIController {
       this.state.selected = loaded.selected || null;
       this.state.versionSuggestions = normalizeVersionSuggestions(loaded.versionSuggestions || []);
       this.selectLoadedKubernetesContexts(loaded.kubernetesContexts || []);
-      this.emit();
-
       if (loaded.message) {
         this.showTerminalMessage(loaded.message);
         return;
@@ -1776,8 +1702,6 @@ export class ERunUIController {
     this.state.selected = selection;
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
-    this.emit();
-
     this.fitAddon?.fit();
     const result = (await StartInitSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
     await this.activateLocalAfterCommand(selection, result);
@@ -1786,7 +1710,6 @@ export class ERunUIController {
   private async startDeploySelection(selection: UISelection): Promise<void> {
     const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     this.state.selected = selection;
-    this.emit();
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
     this.showTerminalMessage(`Deploying runtime for ${selection.tenant} / ${selection.environment}...`, true);
@@ -1818,7 +1741,6 @@ export class ERunUIController {
     this.hideTerminalMessage();
     this.focusTerminalSoon();
     this.queueTerminalResize();
-    this.emit();
   }
 
   private async reloadStateAfterEnvironmentChange(): Promise<void> {
@@ -1830,7 +1752,6 @@ export class ERunUIController {
       this.state.cloudProviders = loaded.cloudProviders || this.state.cloudProviders;
       this.state.versionSuggestions = normalizeVersionSuggestions(loaded.versionSuggestions || this.state.versionSuggestions);
       this.selectLoadedKubernetesContexts(loaded.kubernetesContexts || []);
-      this.emit();
     } catch {
     }
   }
@@ -1858,7 +1779,6 @@ export class ERunUIController {
         kubernetesContext: this.resolveDialogKubernetesContext(contexts),
         kubernetesContextsLoading: false,
       };
-      this.emit();
       void this.refreshEnvironmentRuntimeResources(this.state.environmentDialog.kubernetesContext);
     } catch (error) {
       if (!this.state.environmentDialog.open || this.state.environmentDialog.actionMode !== 'init') {
@@ -1871,7 +1791,6 @@ export class ERunUIController {
         kubernetesContextsLoading: false,
         error: readError(error),
       };
-      this.emit();
     }
   }
 
@@ -1908,7 +1827,6 @@ export class ERunUIController {
       resourceStatusLoading: true,
       resourceStatus: null,
     };
-    this.emit();
     try {
       const status = await store
         .dispatch(
@@ -1930,7 +1848,6 @@ export class ERunUIController {
         resourceStatus: status,
         resourceStatusLoading: false,
       };
-      this.emit();
     } catch (error) {
       if (request !== this.environmentResourceStatusRequest || !this.state.environmentDialog.open) {
         return;
@@ -1946,7 +1863,6 @@ export class ERunUIController {
         },
         resourceStatusLoading: false,
       };
-      this.emit();
     }
   }
 
@@ -1982,7 +1898,6 @@ export class ERunUIController {
     if (selectDefault || !suggestions.some((suggestion) => suggestion.version === currentVersion)) {
       this.selectEnvironmentVersionSuggestion(suggestions[0]);
     } else {
-      this.emit();
     }
   }
 
@@ -2016,7 +1931,6 @@ export class ERunUIController {
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
     this.terminalStatusRetrySelection = null;
-    this.emit();
   }
 
   private handleAppStatus(payload: AppStatusPayload): void {
@@ -2067,7 +1981,6 @@ export class ERunUIController {
     this.showNotification('error', `Failed to create ${tenant} / ${environment}. See the Local tab and the activity drawer for details.`);
     if (this.selectedIsPendingFor(tenant, environment)) {
       this.state.selected = null;
-      this.emit();
     }
   }
 
@@ -2088,7 +2001,6 @@ export class ERunUIController {
     this.sessions.setSessionDebug(target, next);
     if (target === this.state.sessionId) {
       this.state.debugOutput = next;
-      this.emit();
     }
   }
 
@@ -2159,7 +2071,6 @@ export class ERunUIController {
         message: reason,
       },
     };
-    this.emit();
   }
 
   private takeTerminalExitSelections(sessionId: number): TerminalExitSelections {
@@ -2224,13 +2135,11 @@ export class ERunUIController {
 
   private layoutCallbacks(): {
     applyLayoutVars: () => void;
-    emit: () => void;
     focusTerminalSoon: () => void;
     queueTerminalResize: () => void;
   } {
     return {
       applyLayoutVars: () => this.applyLayoutVars(),
-      emit: () => this.emit(),
       focusTerminalSoon: () => this.focusTerminalSoon(),
       queueTerminalResize: this.queueTerminalResize,
     };
@@ -2284,7 +2193,6 @@ export class ERunUIController {
       return;
     }
     this.state.selectedDiffPath = path;
-    this.emit();
   }
 
   private async handleTerminalPaste(event: ClipboardEvent): Promise<void> {
