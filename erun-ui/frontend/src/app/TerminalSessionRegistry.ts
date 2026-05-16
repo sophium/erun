@@ -3,8 +3,6 @@ import { selectionKey } from './versionSuggestions';
 import type { UISelection } from '@/types';
 
 export class TerminalSessionRegistry {
-  private readonly initSessionSelections = new Map<number, UISelection>();
-  private readonly deploySessionSelections = new Map<number, UISelection>();
   private readonly sshdInitSessionSelections = new Map<number, UISelection>();
   private readonly doctorSessionSelections = new Map<number, UISelection>();
   private readonly openSessionSelections = new Map<number, UISelection>();
@@ -41,14 +39,6 @@ export class TerminalSessionRegistry {
 
   trackCloudInitSession(sessionId: number): void {
     this.cloudInitSessions.add(sessionId);
-  }
-
-  trackInitSession(sessionId: number, selection: UISelection): void {
-    this.initSessionSelections.set(sessionId, selection);
-  }
-
-  trackDeploySession(sessionId: number, selection: UISelection): void {
-    this.deploySessionSelections.set(sessionId, selection);
   }
 
   appendSessionBuffer(sessionId: number, data: Uint8Array): void {
@@ -97,15 +87,11 @@ export class TerminalSessionRegistry {
 
   takeExitSelections(sessionId: number): TerminalExitSelections {
     const selections = {
-      initSelection: this.initSessionSelections.get(sessionId),
-      deploySelection: this.deploySessionSelections.get(sessionId),
       sshdInitSelection: this.sshdInitSessionSelections.get(sessionId),
       doctorSelection: this.doctorSessionSelections.get(sessionId),
       openSelection: this.openSessionSelections.get(sessionId),
       cloudInit: this.cloudInitSessions.has(sessionId),
     };
-    this.initSessionSelections.delete(sessionId);
-    this.deploySessionSelections.delete(sessionId);
     this.sshdInitSessionSelections.delete(sessionId);
     this.doctorSessionSelections.delete(sessionId);
     this.openSessionSelections.delete(sessionId);

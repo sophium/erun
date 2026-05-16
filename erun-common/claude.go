@@ -9,7 +9,7 @@ const (
 	DefaultClaudeUseMantle       = false
 	DefaultClaudeUseBedrock      = false
 	DefaultClaudeMaxOutputTokens = 4096
-	defaultClaudeAvailableModels = "sonnet,haiku"
+	defaultClaudeAvailableModels = "opus,sonnet,haiku"
 	claudeMaxOutputTokensCeiling = 200000
 	claudeMaxOutputTokensFloor   = 1
 )

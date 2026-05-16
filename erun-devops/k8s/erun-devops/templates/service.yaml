@@ -29,7 +29,7 @@
 {{- $claudeUseBedrock := default "0" $claude.useBedrock -}}
 {{- $claudeUseMantle := default "0" $claude.useMantle -}}
 {{- $claudeSmallFastRegion := default $cloudRegion $claude.smallFastModelAWSRegion -}}
-{{- $claudeAvailableModels := default "sonnet,haiku" $claude.availableModels -}}
+{{- $claudeAvailableModels := default "opus,sonnet,haiku" $claude.availableModels -}}
 {{- $claudeModel := default "" $claude.model -}}
 {{- $claudeDefaultOpusModel := default "" $claude.defaultOpusModel -}}
 {{- $claudeDefaultSonnetModel := default "" $claude.defaultSonnetModel -}}

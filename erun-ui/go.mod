@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/ActiveState/termtest/conpty v0.5.0
 	github.com/creack/pty v1.1.21
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/modelcontextprotocol/go-sdk v1.4.1
 	github.com/sophium/erun/erun-common v0.0.0
 	github.com/wailsapp/wails/v2 v2.12.0

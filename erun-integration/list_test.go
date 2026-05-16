@@ -86,6 +86,33 @@ func TestList(t *testing.T) {
 		}
 		golden.Equal(t, "list/sshd_configured", normalize.Apply(result.Combined))
 	})
+
+	t.Run("with_claude_config", func(t *testing.T) {
+		// Exercises cmd/list.go claudeLabel + optionalBoolLabel and
+		// erun-common claude helpers (EnvironmentClaudeConfig.IsZero,
+		// NormalizedModels) via an env config with a populated claude:
+		// block.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envCfg := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		mustWrite(t, envCfg,
+			"name: dev\n"+
+				"repopath: "+setup.Cwd+"\n"+
+				"kubernetescontext: test-context\n"+
+				"containerregistry: registry.example/test\n"+
+				"runtimeversion: 1.0.0\n"+
+				"claude:\n"+
+				"  usemantle: true\n"+
+				"  usebedrock: true\n"+
+				"  models: [opus, sonnet, haiku]\n"+
+				"  maxoutputtokens: 16384\n",
+		)
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/with_claude_config", normalize.Apply(result.Combined))
+	})
 }
 
 func seedListMultiTenant(t testing.TB, setup env.Setup) {

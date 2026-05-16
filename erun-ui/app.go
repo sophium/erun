@@ -10,11 +10,14 @@ import (
 )
 
 const (
-	terminalOutputEvent   = "terminal-output"
-	terminalExitEvent     = "terminal-exit"
-	appStatusEvent        = "app-status"
-	mcpReconnectLineEvent = "mcp-reconnect-line"
-	appSessionEnvVar      = "ERUN_UI_SESSION"
+	terminalOutputEvent         = "terminal-output"
+	terminalExitEvent           = "terminal-exit"
+	appStatusEvent              = "app-status"
+	mcpReconnectLineEvent       = "mcp-reconnect-line"
+	environmentInitializedEvent = "environment-initialized"
+	environmentInitFailedEvent  = "environment-init-failed"
+	environmentsChangedEvent    = "environments-changed"
+	appSessionEnvVar            = "ERUN_UI_SESSION"
 )
 
 type erunUIStore interface {
@@ -77,6 +80,7 @@ type App struct {
 	actionQueueMu             sync.Mutex
 	actionQueues              map[string]*envActionQueue
 	actionCancels             map[string]context.CancelFunc
+	configWatcher             *configWatcher
 }
 
 func NewApp(deps erunUIDeps) *App {
@@ -204,11 +208,20 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	// macOS GUI launches (Finder/Dock) start with launchd's minimal env
+	// — no Homebrew PATH, no KUBECONFIG, no AWS_*. Inherit a short
+	// allowlist from the user's login shell so subprocess calls like
+	// kubectl config get-contexts read the same state the user sees in
+	// their terminal. No-op on other platforms. Runs before any other
+	// startup task that shells out so the first call is already correct.
+	importLoginShellEnv()
 	configureAppIdentity("ERun")
 	a.startActivityPollers()
+	a.startConfigWatcher()
 }
 
 func (a *App) shutdown(context.Context) {
+	a.stopConfigWatcher()
 	a.stopActivityPollers()
 	a.stopActionRunners()
 	a.mu.Lock()

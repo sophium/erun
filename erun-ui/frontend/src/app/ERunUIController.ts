@@ -58,6 +58,7 @@ import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses'
 import type {
   AppStatusPayload,
   DebugSessionMode,
+  EnvironmentInitializedPayload,
   IDEKind,
   MountElements,
   TerminalDataDisposable,
@@ -229,6 +230,9 @@ export class ERunUIController {
   private terminalExitOff: (() => void) | null = null;
   private appStatusOff: (() => void) | null = null;
   private reconnectLineOff: (() => void) | null = null;
+  private environmentInitializedOff: (() => void) | null = null;
+  private environmentInitFailedOff: (() => void) | null = null;
+  private environmentsChangedOff: (() => void) | null = null;
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
   private terminalStatusRetrySelection: UISelection | null = null;
   private readonly globalConfig = new GlobalConfigWorkflow({
@@ -337,6 +341,15 @@ export class ERunUIController {
     this.reconnectLineOff = EventsOn('mcp-reconnect-line', (line: string) => {
       this.handleReconnectLine(line);
     });
+    this.environmentInitializedOff = EventsOn('environment-initialized', (payload: EnvironmentInitializedPayload) => {
+      void this.handleEnvironmentInitialized(payload);
+    });
+    this.environmentInitFailedOff = EventsOn('environment-init-failed', (payload: EnvironmentInitializedPayload) => {
+      this.handleEnvironmentInitFailed(payload);
+    });
+    this.environmentsChangedOff = EventsOn('environments-changed', () => {
+      void this.reloadStateAfterEnvironmentChange();
+    });
 
     if (!this.bootStarted) {
       this.bootStarted = true;
@@ -358,6 +371,9 @@ export class ERunUIController {
     this.terminalExitOff?.();
     this.appStatusOff?.();
     this.reconnectLineOff?.();
+    this.environmentInitializedOff?.();
+    this.environmentInitFailedOff?.();
+    this.environmentsChangedOff?.();
     window.clearTimeout(this.notificationTimer);
     window.clearTimeout(this.terminalCopyStatusTimer);
     window.clearTimeout(this.idleStatusTimer);
@@ -369,6 +385,9 @@ export class ERunUIController {
     this.terminalExitOff = null;
     this.appStatusOff = null;
     this.reconnectLineOff = null;
+    this.environmentInitializedOff = null;
+    this.environmentInitFailedOff = null;
+    this.environmentsChangedOff = null;
     this.terminalQueryResponseDisposables = [];
     this.terminal?.dispose();
     this.terminal = null;
@@ -1790,12 +1809,21 @@ export class ERunUIController {
   }
 
   private async startInitSelection(selection: UISelection): Promise<void> {
+    // Visibility of system status (Nielsen #1) is provided by three
+    // surfaces that persist for the full init duration: the sidebar
+    // placeholder row (Sidebar.tsx EnvironmentRow placeholder branch),
+    // the activity-drawer init entry registered when the backend's
+    // trace handler observes `==> Initializing`, and the live `erun
+    // init` output in the Local tab. Setting state.terminalMessage
+    // would flash a busy overlay for ~150 ms inside the still-open
+    // modal and is then cleared by activateLocalAfterCommand before
+    // the user can register it — see erun-ui/AGENTS.md § "UX Impact
+    // Review Checklist" item 3 (state-without-affordance).
     const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     this.state.selected = selection;
-    this.emit();
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
-    this.showTerminalMessage(`Creating remote environment ${selection.tenant} / ${selection.environment}...`, true);
+    this.emit();
 
     this.fitAddon?.fit();
     const result = (await StartInitSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
@@ -1819,7 +1847,16 @@ export class ERunUIController {
     const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     const key = selectionKey(runSelection);
     this.recordTab(key, result.sessionId, result.slot ?? 0, 'local', 'Local');
-    await this.ensureDefaultEnvTabs(runSelection, key);
+    // Only spawn dependent ERun/AI tabs when the env config already
+    // exists. For `erun init` the env is created mid-command, so the
+    // tabs would fail to spawn against missing config; the
+    // environment-initialized event fires a second openSelection after
+    // success, which spawns the tabs against the now-existing config.
+    // See erun-ui/AGENTS.md § "Command Completion And State-Refresh
+    // Wiring".
+    if (this.environmentExists(selection.tenant, selection.environment)) {
+      await this.ensureDefaultEnvTabs(runSelection, key);
+    }
     this.state.sessionId = result.sessionId;
     this.state.selectedSessionByEnv = { ...this.state.selectedSessionByEnv, [key]: result.sessionId };
     rebuildTerminalDisplayBuffer(this.sessions, result.sessionId);
@@ -1841,6 +1878,14 @@ export class ERunUIController {
       this.emit();
     } catch {
     }
+  }
+
+  private environmentExists(tenant: string, environment: string): boolean {
+    return Boolean(
+      this.state.tenants
+        .find((entry) => entry.name === tenant)
+        ?.environments.some((env) => env.name === environment),
+    );
   }
 
   private async refreshKubernetesContexts(): Promise<void> {
@@ -2013,6 +2058,57 @@ export class ERunUIController {
     this.showTerminalMessage(message, payload.busy === true);
   }
 
+  // Fires when the backend's PTY trace handler observes
+  // `==> Initialized <tenant>/<env>` from a piped `erun init` command,
+  // or when the config-file watcher detects a new env. Reload state so
+  // the new env appears in the sidebar, surface a success toast
+  // (Nielsen #1 visibility of system status), then open the selection
+  // so the ERun and AI tabs spawn against the now-existing config.
+  // See erun-ui/AGENTS.md § "Command Completion And State-Refresh
+  // Wiring".
+  private async handleEnvironmentInitialized(payload: EnvironmentInitializedPayload): Promise<void> {
+    const tenant = String(payload?.tenant || '').trim();
+    const environment = String(payload?.environment || '').trim();
+    if (!tenant || !environment) {
+      return;
+    }
+    await this.reloadStateAfterEnvironmentChange();
+    if (!this.environmentExists(tenant, environment)) {
+      return;
+    }
+    this.showNotification('success', `Created ${tenant} / ${environment}.`);
+    try {
+      await this.openSelection({ tenant, environment });
+    } catch (error) {
+      this.showTerminalMessage(readError(error));
+    }
+  }
+
+  // Fires when the backend's PTY trace handler observes
+  // `==> Initialization failed <tenant>/<env>`. Surfaces an error toast
+  // (Nielsen #1 + #9) and reverts the optimistic state.selected so the
+  // sidebar's "creating ..." placeholder row disappears.
+  private handleEnvironmentInitFailed(payload: EnvironmentInitializedPayload): void {
+    const tenant = String(payload?.tenant || '').trim();
+    const environment = String(payload?.environment || '').trim();
+    if (!tenant || !environment) {
+      return;
+    }
+    this.showNotification('error', `Failed to create ${tenant} / ${environment}. See the Local tab and the activity drawer for details.`);
+    if (this.selectedIsPendingFor(tenant, environment)) {
+      this.state.selected = null;
+      this.emit();
+    }
+  }
+
+  private selectedIsPendingFor(tenant: string, environment: string): boolean {
+    const selected = this.state.selected;
+    if (!selected || selected.tenant !== tenant || selected.environment !== environment) {
+      return false;
+    }
+    return !this.environmentExists(tenant, environment);
+  }
+
   private appendDebugOutput(text: string, fromSessionId?: number): void {
     if (!this.state.debugOpen || !text) {
       return;
@@ -2061,7 +2157,7 @@ export class ERunUIController {
     this.dropExitedSessionFromTabs(payload.sessionId, selections.openSelection);
     this.recordDoctorOutcome(payload, selections);
 
-    if (selections.initSelection || selections.deploySelection || selections.sshdInitSelection) {
+    if (selections.sshdInitSelection) {
       await this.reloadStateAfterEnvironmentChange();
     }
     if (payload.sessionId !== this.state.sessionId) {
@@ -2135,20 +2231,7 @@ export class ERunUIController {
       this.showTerminalMessage(reason);
       return true;
     }
-    const completedSelection = selections.initSelection || selections.deploySelection;
-    if (!completedSelection) {
-      return false;
-    }
-    await this.openCompletedSelection(completedSelection);
-    return true;
-  }
-
-  private async openCompletedSelection(selection: UISelection): Promise<void> {
-    try {
-      await this.openSelection(selection);
-    } catch (error) {
-      this.showTerminalMessage(readError(error));
-    }
+    return false;
   }
 
   private terminalExitReason(payload: TerminalExitPayload, selections: TerminalExitSelections): string {

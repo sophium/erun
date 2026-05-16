@@ -9,7 +9,7 @@ export function hiddenSessionBusyMessage(selection: UISelection, mode: HiddenSes
 }
 
 export function terminalExitHasTrackedSelection(selections: TerminalExitSelections): boolean {
-  return Boolean(selections.initSelection || selections.deploySelection || selections.sshdInitSelection || selections.doctorSelection || selections.openSelection || selections.cloudInit);
+  return Boolean(selections.sshdInitSelection || selections.doctorSelection || selections.openSelection || selections.cloudInit);
 }
 
 export function failedTerminalExitReason(reason: string, selections: TerminalExitSelections): string {
@@ -156,12 +156,6 @@ export function ideLabel(ide: IDEKind): string {
 }
 
 function failedSelectionExitReason(reason: string, selections: TerminalExitSelections): string {
-  if (selections.initSelection) {
-    return `Failed to create ${selectionLabel(selections.initSelection)}: ${reason}`;
-  }
-  if (selections.deploySelection) {
-    return `Failed to deploy ${selectionLabel(selections.deploySelection)}: ${reason}`;
-  }
   if (selections.sshdInitSelection) {
     return `Failed to enable SSHD for ${selectionLabel(selections.sshdInitSelection)}: ${reason}`;
   }
@@ -175,12 +169,6 @@ function failedSelectionExitReason(reason: string, selections: TerminalExitSelec
 }
 
 function successfulSelectionExitReason(selections: TerminalExitSelections): string {
-  if (selections.initSelection) {
-    return `Created ${selectionLabel(selections.initSelection)}.`;
-  }
-  if (selections.deploySelection) {
-    return `Deployed ${selectionLabel(selections.deploySelection)}.`;
-  }
   if (selections.sshdInitSelection) {
     return `Enabled SSHD for ${selectionLabel(selections.sshdInitSelection)}.`;
   }
