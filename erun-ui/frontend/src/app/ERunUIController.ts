@@ -135,7 +135,10 @@ const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 export class ERunUIController {
   readonly state: AppState = createControllerStateProxy(store);
 
-  private readonly subscribers = new Set<() => void>();
+  // Redux's store.subscribe (via react-redux's useSyncExternalStore) drives
+  // component re-renders now. The controller's own subscribe / emit are kept
+  // as no-ops to avoid churning every call site in this PR; future work
+  // should delete the emit() invocations entirely.
   private readonly sessions = new TerminalSessionRegistry();
   private pendingDebugHeader = '';
   private terminal: Terminal | null = null;
@@ -206,9 +209,10 @@ export class ERunUIController {
     syncDebugDisplay: () => this.syncDebugDisplay(),
   });
 
-  subscribe = (subscriber: () => void): (() => void) => {
-    this.subscribers.add(subscriber);
-    return () => this.subscribers.delete(subscriber);
+  subscribe = (_subscriber: () => void): (() => void) => {
+    return () => {
+      /* no-op: useControllerState reads from Redux, which has its own subscription. */
+    };
   };
 
   mount(elements: MountElements): () => void {
@@ -1671,7 +1675,9 @@ export class ERunUIController {
   }
 
   private emit(): void {
-    this.subscribers.forEach((subscriber) => subscriber());
+    // No-op: writes to this.state go through createControllerStateProxy,
+    // which dispatches the matching slice action. React-redux then schedules
+    // a re-render of any component reading the affected slice.
   }
 
   private scheduleIdleStatusPoll(delay = 1000): void {

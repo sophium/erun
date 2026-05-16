@@ -33,7 +33,7 @@ export function DiffList({ controller, state }: { controller: ERunUIController; 
       {files.map((file) => (
         <DiffFileView key={file.path} file={file} selected={file.path === state.selectedDiffPath} />
       ))}
-      <span className="sr-only">{controller.state.selectedDiffPath}</span>
+      <span className="sr-only">{state.selectedDiffPath}</span>
     </>
   );
 }
