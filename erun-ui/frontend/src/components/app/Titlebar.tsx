@@ -2,6 +2,7 @@ import * as React from 'react';
 import { AlertCircle, Blocks, CheckCircle2, Code2, Copy, Info, ListTree, LoaderCircle, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Play, Power, X } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
+import { useAppSelector } from '@/app/hooks';
 import { displayableIdleStatus } from '@/app/idleStatusEligibility';
 import type { AppState } from '@/app/state';
 import { Button } from '@/components/ui/button';
@@ -14,26 +15,30 @@ const titlebarButtonClassName =
 
 const activeTitlebarButtonClassName = 'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground';
 
-export function Titlebar({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
+export function Titlebar({ controller }: { controller: ERunUIController }): React.ReactElement {
   return (
     <header
       className="relative box-border select-none border-b bg-[color-mix(in_oklch,var(--background)_94%,transparent)] [--wails-draggable:drag]"
       data-wails-drag
       onDoubleClick={(event) => controller.titlebarDoubleClick(event)}
     >
-      <TitlebarControls controller={controller} state={state} />
-      <IdleStatusWidget controller={controller} state={state} />
-      <TitlebarStatus controller={controller} state={state} />
+      <TitlebarControls controller={controller} />
+      <IdleStatusWidget controller={controller} />
+      <TitlebarStatus controller={controller} />
       <div className="absolute inset-0" data-wails-drag />
     </header>
   );
 }
 
-function TitlebarControls({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
-  const SidebarIcon = state.sidebarHidden ? PanelLeftOpen : PanelLeftClose;
-  const ReviewIcon = state.reviewOpen ? PanelRightClose : PanelRightOpen;
-  const selected = state.selected;
-  const selectedEnvironment = selected ? state.tenants.find((tenant) => tenant.name === selected.tenant)?.environments.find((environment) => environment.name === selected.environment) : undefined;
+function TitlebarControls({ controller }: { controller: ERunUIController }): React.ReactElement {
+  const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
+  const reviewOpen = useAppSelector((state) => state.layout.reviewOpen);
+  const filesOpen = useAppSelector((state) => state.layout.filesOpen);
+  const selected = useAppSelector((state) => state.selection.selected);
+  const tenants = useAppSelector((state) => state.tenants.tenants);
+  const SidebarIcon = sidebarHidden ? PanelLeftOpen : PanelLeftClose;
+  const ReviewIcon = reviewOpen ? PanelRightClose : PanelRightOpen;
+  const selectedEnvironment = selected ? tenants.find((tenant) => tenant.name === selected.tenant)?.environments.find((environment) => environment.name === selected.environment) : undefined;
   const ideDisabled = !selected || (selectedEnvironment?.remote !== false && selectedEnvironment?.sshdEnabled !== true);
   const vscodeTooltip = ideTooltipLabel('VS Code', selected, ideDisabled);
   const intellijTooltip = ideTooltipLabel('IntelliJ IDEA', selected, ideDisabled);
@@ -47,7 +52,7 @@ function TitlebarControls({ controller, state }: { controller: ERunUIController;
           variant="ghost"
           size="icon"
           aria-label="Toggle sidebar"
-          aria-pressed={!state.sidebarHidden}
+          aria-pressed={!sidebarHidden}
           onClick={() => controller.toggleSidebar()}
         >
           <SidebarIcon />
@@ -58,13 +63,13 @@ function TitlebarControls({ controller, state }: { controller: ERunUIController;
           className={cn(
             titlebarButtonClassName,
             'left-auto right-[58px] max-[980px]:left-auto max-[980px]:right-12',
-            state.reviewOpen && activeTitlebarButtonClassName,
+            reviewOpen && activeTitlebarButtonClassName,
           )}
           type="button"
           variant="ghost"
           size="icon"
           aria-label="Toggle diff panel"
-          aria-pressed={state.reviewOpen}
+          aria-pressed={reviewOpen}
           onClick={() => controller.toggleReview()}
         >
           <ReviewIcon />
@@ -109,15 +114,15 @@ function TitlebarControls({ controller, state }: { controller: ERunUIController;
           className={cn(
             titlebarButtonClassName,
             'left-auto right-6 max-[980px]:left-auto max-[980px]:right-3.5',
-            !state.reviewOpen && 'hidden',
-            state.filesOpen && activeTitlebarButtonClassName,
+            !reviewOpen && 'hidden',
+            filesOpen && activeTitlebarButtonClassName,
           )}
           type="button"
           variant="ghost"
           size="icon"
           aria-label="Toggle changed files list"
-          aria-pressed={state.filesOpen}
-          onClick={() => controller.setFilesOpen(!state.filesOpen)}
+          aria-pressed={filesOpen}
+          onClick={() => controller.setFilesOpen(!filesOpen)}
         >
           <ListTree />
         </Button>
@@ -126,10 +131,11 @@ function TitlebarControls({ controller, state }: { controller: ERunUIController;
   );
 }
 
-function IdleStatusWidget({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement | null {
-  const rawIdleStatus = state.idleStatus;
+function IdleStatusWidget({ controller }: { controller: ERunUIController }): React.ReactElement | null {
+  const rawIdleStatus = useAppSelector((state) => state.idle.idleStatus);
+  const idleCloudContextBusy = useAppSelector((state) => state.idle.idleCloudContextBusy);
   const idleStatus = displayableIdleStatus(rawIdleStatus);
-  const idleAction = rawIdleStatus ? idleCloudAction(rawIdleStatus, state.idleCloudContextBusy) : null;
+  const idleAction = rawIdleStatus ? idleCloudAction(rawIdleStatus, idleCloudContextBusy) : null;
   if (!idleStatus && !idleAction) {
     return null;
   }
@@ -198,13 +204,17 @@ const statusIconClassNames: Record<TitlebarStatusKind, string> = {
   info: 'text-muted-foreground',
 };
 
-function TitlebarStatus({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement | null {
-  const status = titlebarStatus(state);
+function TitlebarStatus({ controller }: { controller: ERunUIController }): React.ReactElement | null {
+  const notification = useAppSelector((state) => state.notification.notification);
+  const terminalStatus = useAppSelector((state) => state.terminalStatus);
+  const rawIdleStatus = useAppSelector((state) => state.idle.idleStatus);
+  const idleCloudContextBusy = useAppSelector((state) => state.idle.idleCloudContextBusy);
+  const status = computeTitlebarStatus(notification, terminalStatus);
   if (!status) {
     return null;
   }
-  const idleStatus = displayableIdleStatus(state.idleStatus);
-  const idleAction = state.idleStatus ? idleCloudAction(state.idleStatus, state.idleCloudContextBusy) : null;
+  const idleStatus = displayableIdleStatus(rawIdleStatus);
+  const idleAction = rawIdleStatus ? idleCloudAction(rawIdleStatus, idleCloudContextBusy) : null;
 
   return (
     <div className={statusPositionClassName(idleStatus, Boolean(idleAction))} role={status.kind === 'error' ? 'alert' : 'status'} aria-live={status.kind === 'error' ? 'assertive' : 'polite'}>
@@ -219,25 +229,36 @@ function TitlebarStatus({ controller, state }: { controller: ERunUIController; s
   );
 }
 
-function titlebarStatus(state: AppState): TitlebarStatusValue | null {
-  if (state.notification) {
-    return { ...state.notification, source: 'notification', detail: '', busy: false, copyOutput: '', copyStatus: '', action: '' };
+function computeTitlebarStatus(
+  notification: AppState['notification'],
+  terminal: {
+    terminalMessage: string;
+    terminalStatusKind: AppState['terminalStatusKind'];
+    terminalStatusDetail: string;
+    terminalStatusAction: AppState['terminalStatusAction'];
+    terminalBusy: boolean;
+    terminalCopyOutput: string;
+    terminalCopyStatus: string;
+  },
+): TitlebarStatusValue | null {
+  if (notification) {
+    return { ...notification, source: 'notification', detail: '', busy: false, copyOutput: '', copyStatus: '', action: '' };
   }
-  if (state.terminalBusy && state.terminalMessage) {
+  if (terminal.terminalBusy && terminal.terminalMessage) {
     return null;
   }
-  if (!state.terminalMessage) {
+  if (!terminal.terminalMessage) {
     return null;
   }
   return {
     source: 'terminal',
-    kind: state.terminalStatusKind,
-    message: state.terminalMessage,
-    detail: state.terminalStatusDetail,
-    busy: state.terminalBusy,
-    copyOutput: state.terminalCopyOutput,
-    copyStatus: state.terminalCopyStatus,
-    action: state.terminalStatusAction,
+    kind: terminal.terminalStatusKind,
+    message: terminal.terminalMessage,
+    detail: terminal.terminalStatusDetail,
+    busy: terminal.terminalBusy,
+    copyOutput: terminal.terminalCopyOutput,
+    copyStatus: terminal.terminalCopyStatus,
+    action: terminal.terminalStatusAction,
   };
 }
 

@@ -58,7 +58,7 @@ export function App(): React.ReactElement {
   return (
     <TooltipProvider>
       <div className="grid h-full w-full grid-rows-[52px_minmax(0,1fr)] bg-background">
-        <Titlebar controller={controller} state={state} />
+        <Titlebar controller={controller} />
         <div
           className={cn(
             'grid h-full min-h-0 overflow-hidden',
