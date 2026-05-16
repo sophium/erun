@@ -1,0 +1,97 @@
+import {
+  ChooseWorkspaceSyncLocalFolder,
+  DeleteEnvironment,
+  LoadEnvironmentConfig,
+  LoadRuntimeResourceStatus,
+  LoadVersionSuggestions,
+  SaveEnvironmentConfig,
+} from '../../../wailsjs/go/main/App';
+import { wailsApi } from './wailsApi';
+import { wailsQueryFn } from './wailsBaseQuery';
+import type {
+  UIEnvironmentConfig,
+  UIRuntimeResourceStatus,
+  UISelection,
+  UIVersionSuggestion,
+} from '@/types';
+
+interface SaveEnvArgs {
+  selection: UISelection;
+  config: UIEnvironmentConfig;
+}
+
+interface DeleteEnvArgs {
+  selection: UISelection;
+  confirmation: string;
+}
+
+interface WorkspaceSyncArgs {
+  selection: UISelection;
+  current: string;
+}
+
+interface RuntimeResourceArgs {
+  kubernetesContext: string;
+  tenant?: string;
+  environment?: string;
+}
+
+export const environmentApi = wailsApi.injectEndpoints({
+  endpoints: (builder) => ({
+    getEnvironmentConfig: builder.query<UIEnvironmentConfig, UISelection>({
+      queryFn: wailsQueryFn<UISelection, UIEnvironmentConfig>(
+        (selection) => LoadEnvironmentConfig(selection) as Promise<UIEnvironmentConfig>,
+      ),
+      providesTags: (_result, _error, selection) => [
+        { type: 'EnvironmentConfig', id: `${selection.tenant}/${selection.environment}` },
+      ],
+    }),
+    saveEnvironmentConfig: builder.mutation<UIEnvironmentConfig, SaveEnvArgs>({
+      queryFn: wailsQueryFn<SaveEnvArgs, UIEnvironmentConfig>(
+        ({ selection, config }) =>
+          SaveEnvironmentConfig(selection, config as never) as Promise<UIEnvironmentConfig>,
+      ),
+      invalidatesTags: (_result, _error, { selection }) => [
+        { type: 'EnvironmentConfig', id: `${selection.tenant}/${selection.environment}` },
+        'AppState',
+      ],
+    }),
+    deleteEnvironment: builder.mutation<unknown, DeleteEnvArgs>({
+      queryFn: wailsQueryFn<DeleteEnvArgs, unknown>(({ selection, confirmation }) =>
+        DeleteEnvironment(selection, confirmation),
+      ),
+      invalidatesTags: ['AppState'],
+    }),
+    chooseWorkspaceSyncLocalFolder: builder.mutation<string, WorkspaceSyncArgs>({
+      queryFn: wailsQueryFn<WorkspaceSyncArgs, string>(({ selection, current }) =>
+        ChooseWorkspaceSyncLocalFolder(selection, current),
+      ),
+    }),
+    getVersionSuggestions: builder.query<UIVersionSuggestion[], UISelection>({
+      queryFn: wailsQueryFn<UISelection, UIVersionSuggestion[]>(
+        (selection) =>
+          LoadVersionSuggestions(selection) as Promise<UIVersionSuggestion[]>,
+      ),
+      providesTags: ['VersionSuggestions'],
+    }),
+    getRuntimeResourceStatus: builder.query<UIRuntimeResourceStatus, RuntimeResourceArgs>({
+      queryFn: wailsQueryFn<RuntimeResourceArgs, UIRuntimeResourceStatus>(
+        (args) =>
+          LoadRuntimeResourceStatus(args) as Promise<UIRuntimeResourceStatus>,
+      ),
+      providesTags: ['RuntimeResourceStatus'],
+    }),
+  }),
+});
+
+export const {
+  useGetEnvironmentConfigQuery,
+  useLazyGetEnvironmentConfigQuery,
+  useSaveEnvironmentConfigMutation,
+  useDeleteEnvironmentMutation,
+  useChooseWorkspaceSyncLocalFolderMutation,
+  useGetVersionSuggestionsQuery,
+  useLazyGetVersionSuggestionsQuery,
+  useGetRuntimeResourceStatusQuery,
+  useLazyGetRuntimeResourceStatusQuery,
+} = environmentApi;

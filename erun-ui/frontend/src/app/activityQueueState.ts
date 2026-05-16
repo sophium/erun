@@ -1,14 +1,21 @@
 import * as React from 'react';
+import { createSelector } from '@reduxjs/toolkit';
 
 import {
-  CancelWaitingAction,
-  DismissDeploy,
-  ForceDismissActivity,
-  KillSession,
-  ListDeploys,
-  RecoverPendingHelmRelease,
-} from '../../wailsjs/go/main/App';
-import { EventsOn } from '../../wailsjs/runtime/runtime';
+  useCancelWaitingActionMutation,
+  useDismissDeployMutation,
+  useForceDismissActivityMutation,
+  useKillSessionMutationMutation,
+  useListDeploysQuery,
+  useRecoverPendingHelmReleaseMutation,
+} from './api/deployApi';
+import { useAppDispatch, useAppSelector } from './hooks';
+import {
+  removeActivityEntriesForSession,
+  removeActivityEntry,
+  setActivityEntries,
+} from './slices/activitySlice';
+import type { RootState } from './store';
 
 export type ActivityQueueStatus = 'waiting' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'cancelled';
 
@@ -65,20 +72,23 @@ export type ActivityLockEvent = {
   deployTarget?: string;
 };
 
-const activityStateEventName = 'activity:state';
-const activityLockEventName = 'activity:lock';
+const selectActivityEntries = (state: RootState) => state.activity.entries;
+const selectLocksBySession = (state: RootState) => state.activity.locksBySession;
 
-// useActivityQueue subscribes to the backend activity:state stream and
-// exposes a stable, sorted snapshot to React. Initial state is fetched
-// once via ListDeploys; subsequent updates are merged in place from
-// event payloads so the queue reflects backend transitions without
-// polling.
-//
-// dismiss removes a finished entry; forceDismiss removes ANY entry
-// (including an active one). recoverPendingHelm clears a stuck helm
-// pending-* lock and removes the entry; killSession terminates a stale
-// PTY session and removes its activity entry. All four are bound to
-// the activity drawer's recovery affordances.
+// Locks live in Redux as a Record keyed by sessionId so reducers stay
+// serializable. Consumers expect a Map for the existing call sites, so we
+// memoize the Map adaptation.
+const selectLocksMap = createSelector([selectLocksBySession], (locks) => {
+  const map = new Map<number, ActivityLockEvent>();
+  for (const [key, value] of Object.entries(locks)) {
+    const numeric = Number(key);
+    if (Number.isFinite(numeric)) {
+      map.set(numeric, value);
+    }
+  }
+  return map;
+});
+
 export function useActivityQueue(): {
   entries: ActivityQueueEntry[];
   dismiss: (id: string) => Promise<void>;
@@ -87,155 +97,77 @@ export function useActivityQueue(): {
   killSession: (sessionId: number) => Promise<boolean>;
   cancelWaiting: (id: string) => Promise<boolean>;
 } {
-  const [entries, setEntries] = React.useState<ActivityQueueEntry[]>([]);
+  const dispatch = useAppDispatch();
+  const entries = useAppSelector(selectActivityEntries);
+  const { data: initial } = useListDeploysQuery();
+  const [dismissDeploy] = useDismissDeployMutation();
+  const [forceDismissActivity] = useForceDismissActivityMutation();
+  const [recoverPendingHelmRelease] = useRecoverPendingHelmReleaseMutation();
+  const [killSessionMutate] = useKillSessionMutationMutation();
+  const [cancelWaitingActionMutate] = useCancelWaitingActionMutation();
 
   React.useEffect(() => {
-    let cancelled = false;
-    void ListDeploys().then((initial) => {
-      if (cancelled) return;
-      setEntries(sortActivityEntries((initial as ActivityQueueEntry[]) ?? []));
-    });
-    const off = EventsOn(activityStateEventName, (entry: ActivityQueueEntry) => {
-      setEntries((prev) => mergeActivityEntry(prev, entry));
-    });
-    return () => {
-      cancelled = true;
-      off?.();
-    };
-  }, []);
-
-  const dismiss = React.useCallback(async (id: string): Promise<void> => {
-    const ok = await DismissDeploy(id);
-    if (ok) {
-      setEntries((prev) => prev.filter((entry) => entry.id !== id));
+    if (initial) {
+      dispatch(setActivityEntries(initial));
     }
-  }, []);
+  }, [dispatch, initial]);
 
-  const forceDismiss = React.useCallback(async (id: string): Promise<void> => {
-    const ok = await ForceDismissActivity(id);
-    if (ok) {
-      setEntries((prev) => prev.filter((entry) => entry.id !== id));
-    }
-  }, []);
+  const dismiss = React.useCallback(
+    async (id: string): Promise<void> => {
+      const ok = await dismissDeploy(id).unwrap();
+      if (ok) {
+        dispatch(removeActivityEntry(id));
+      }
+    },
+    [dispatch, dismissDeploy],
+  );
 
-  const recoverPendingHelm = React.useCallback(async (id: string): Promise<ActivityRecoveryResult> => {
-    const result = (await RecoverPendingHelmRelease(id)) as ActivityRecoveryResult;
-    if (result.ok) {
-      setEntries((prev) => prev.filter((entry) => entry.id !== id));
-    }
-    return result;
-  }, []);
+  const forceDismiss = React.useCallback(
+    async (id: string): Promise<void> => {
+      const ok = await forceDismissActivity(id).unwrap();
+      if (ok) {
+        dispatch(removeActivityEntry(id));
+      }
+    },
+    [dispatch, forceDismissActivity],
+  );
 
-  const killSession = React.useCallback(async (sessionId: number): Promise<boolean> => {
-    if (!Number.isFinite(sessionId) || sessionId <= 0) return false;
-    const ok = await KillSession(sessionId);
-    if (ok) {
-      setEntries((prev) => prev.filter((entry) => entry.sessionId !== String(sessionId)));
-    }
-    return ok;
-  }, []);
+  const recoverPendingHelm = React.useCallback(
+    async (id: string): Promise<ActivityRecoveryResult> => {
+      const result = await recoverPendingHelmRelease(id).unwrap();
+      if (result.ok) {
+        dispatch(removeActivityEntry(id));
+      }
+      return result;
+    },
+    [dispatch, recoverPendingHelmRelease],
+  );
 
-  const cancelWaiting = React.useCallback(async (id: string): Promise<boolean> => {
-    const ok = await CancelWaitingAction(id);
-    // No optimistic removal — the entry transitions to status=cancelled
-    // via the activity:state event from the backend, and we want it to
-    // appear in Recent rather than vanish.
-    return ok;
-  }, []);
+  const killSession = React.useCallback(
+    async (sessionId: number): Promise<boolean> => {
+      if (!Number.isFinite(sessionId) || sessionId <= 0) return false;
+      const ok = await killSessionMutate(sessionId).unwrap();
+      if (ok) {
+        dispatch(removeActivityEntriesForSession(sessionId));
+      }
+      return ok;
+    },
+    [dispatch, killSessionMutate],
+  );
+
+  const cancelWaiting = React.useCallback(
+    async (id: string): Promise<boolean> => {
+      const ok = await cancelWaitingActionMutate(id).unwrap();
+      return ok;
+    },
+    [cancelWaitingActionMutate],
+  );
 
   return { entries, dismiss, forceDismiss, recoverPendingHelm, killSession, cancelWaiting };
 }
 
-// useTerminalActivityLockState exposes the live map of session lock
-// states keyed by terminal sessionId. Frontend renders a lock overlay
-// on any terminal whose id is present in the map.
 export function useTerminalActivityLockState(): Map<number, ActivityLockEvent> {
-  const [locks, setLocks] = React.useState<Map<number, ActivityLockEvent>>(() => new Map());
-
-  React.useEffect(() => {
-    const off = EventsOn(activityLockEventName, (event: ActivityLockEvent) => {
-      setLocks((prev) => {
-        const next = new Map(prev);
-        if (event.locked) {
-          next.set(event.sessionId, event);
-        } else {
-          next.delete(event.sessionId);
-        }
-        return next;
-      });
-    });
-    return () => off?.();
-  }, []);
-
-  return locks;
-}
-
-function mergeActivityEntry(prev: ActivityQueueEntry[], entry: ActivityQueueEntry): ActivityQueueEntry[] {
-  const idx = prev.findIndex((existing) => existing.id === entry.id);
-  if (idx === -1) {
-    return sortActivityEntries([entry, ...prev]);
-  }
-  if (activityEntriesShallowEqual(prev[idx], entry)) {
-    return prev;
-  }
-  const next = prev.slice();
-  next[idx] = entry;
-  return sortActivityEntries(next);
-}
-
-// activityEntriesShallowEqual returns true when the rendered representation
-// of two entries is identical. Used to short-circuit React state updates
-// when the watcher emits redundant events (which happens often: the pod
-// poller emits container snapshots even when nothing changed). Cheap and
-// stable comparison reduces re-renders that caused visible flicker.
-function activityEntriesShallowEqual(a: ActivityQueueEntry, b: ActivityQueueEntry): boolean {
-  if (a === b) return true;
-  if (
-    a.id !== b.id ||
-    a.command !== b.command ||
-    a.status !== b.status ||
-    a.startedAt !== b.startedAt ||
-    a.endedAt !== b.endedAt ||
-    a.error !== b.error ||
-    a.lastUpdated !== b.lastUpdated
-  ) {
-    return false;
-  }
-  return containersEqual(a.containers, b.containers);
-}
-
-function containersEqual(a: ActivityQueueContainerStatus[] | undefined, b: ActivityQueueContainerStatus[] | undefined): boolean {
-  if (a === b) return true;
-  if (!a || !b) return !a && !b;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i += 1) {
-    const x = a[i];
-    const y = b[i];
-    if (
-      x.name !== y.name ||
-      x.image !== y.image ||
-      x.phase !== y.phase ||
-      x.ready !== y.ready ||
-      x.restarts !== y.restarts ||
-      x.reason !== y.reason ||
-      x.message !== y.message
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function sortActivityEntries(entries: ActivityQueueEntry[]): ActivityQueueEntry[] {
-  const copy = entries.slice();
-  copy.sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt));
-  return copy;
-}
-
-// activeActivityForSelection finds the first active entry that targets
-// the given (tenant, environment). Used by the deploy button gate.
-export function activeActivityForSelection(entries: ActivityQueueEntry[], tenant: string, environment: string): ActivityQueueEntry | null {
-  return entries.find((entry) => entry.status === 'running' && entry.tenant === tenant && entry.environment === environment) ?? null;
+  return useAppSelector(selectLocksMap);
 }
 
 // formatElapsed renders an ISO start timestamp as a humanized "1m12s"
@@ -264,4 +196,16 @@ export function formatElapsed(startedAt: string, now: number = Date.now()): stri
     }
   }
   return raw.padStart(6, ' ');
+}
+
+export function activeActivityForSelection(
+  entries: ActivityQueueEntry[],
+  tenant: string,
+  environment: string,
+): ActivityQueueEntry | null {
+  return (
+    entries.find(
+      (entry) => entry.status === 'running' && entry.tenant === tenant && entry.environment === environment,
+    ) ?? null
+  );
 }
