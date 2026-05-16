@@ -1,16 +1,8 @@
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
-import {
-  ChooseWorkspaceSyncLocalFolder,
-  DeleteEnvironment,
-  LoadEnvironmentConfig,
-  LoadRuntimeResourceStatus,
-  LoadVersionSuggestions,
-  SaveEnvironmentConfig,
-  StartCloudContext,
-  StartDoctorSession,
-  StartSSHDInitSession,
-  StopCloudContext,
-} from '../../wailsjs/go/main/App';
+import { StartDoctorSession, StartSSHDInitSession } from '../../wailsjs/go/main/App';
+import { cloudApi } from './api/cloudApi';
+import { environmentApi } from './api/environmentApi';
+import { store } from './store';
 import { readError } from './errors';
 import { runtimePodConfigToDisplay, runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
 import type { HiddenSessionMode } from './model';
@@ -29,7 +21,6 @@ import type {
   StartSessionResult,
   UICloudContextStatus,
   UIEnvironmentConfig,
-  UIRuntimeResourceStatus,
   UISelection,
   UIVersionSuggestion,
 } from '@/types';
@@ -223,7 +214,15 @@ export class ManageEnvironmentWorkflow {
     if (dialog.busy || dialog.configLoading || !selection || !dialog.config.sshd.workspaceSyncEnabled) {
       return;
     }
-    const selected = String(await ChooseWorkspaceSyncLocalFolder(selection, dialog.config.sshd.workspaceSyncLocalPath || '') || '').trim();
+    const folder = await store
+      .dispatch(
+        environmentApi.endpoints.chooseWorkspaceSyncLocalFolder.initiate({
+          selection,
+          current: dialog.config.sshd.workspaceSyncLocalPath || '',
+        }),
+      )
+      .unwrap();
+    const selected = String(folder || '').trim();
     if (!selected) {
       return;
     }
@@ -243,7 +242,11 @@ export class ManageEnvironmentWorkflow {
     };
     this.deps.emit();
     try {
-      const result = (await LoadEnvironmentConfig(selection)) as UIEnvironmentConfig;
+      const result = await store
+        .dispatch(
+          environmentApi.endpoints.getEnvironmentConfig.initiate(selection, { forceRefetch: true }),
+        )
+        .unwrap();
       const displayConfig = {
         ...result,
         runtimePod: runtimePodConfigToDisplay(result.runtimePod),
@@ -273,11 +276,18 @@ export class ManageEnvironmentWorkflow {
       return;
     }
     try {
-      const status = (await LoadRuntimeResourceStatus({
-        kubernetesContext,
-        tenant: selection.tenant,
-        environment: selection.environment,
-      })) as UIRuntimeResourceStatus;
+      const status = await store
+        .dispatch(
+          environmentApi.endpoints.getRuntimeResourceStatus.initiate(
+            {
+              kubernetesContext,
+              tenant: selection.tenant,
+              environment: selection.environment,
+            },
+            { forceRefetch: true },
+          ),
+        )
+        .unwrap();
       if (!this.state.manageDialog.open) {
         return;
       }
@@ -330,7 +340,11 @@ export class ManageEnvironmentWorkflow {
         ...dialog.config,
         runtimePod: runtimePodConfigToKubernetes(dialog.config.runtimePod),
       };
-      const result = (await SaveEnvironmentConfig(selection, saveConfig as Parameters<typeof SaveEnvironmentConfig>[1])) as UIEnvironmentConfig;
+      const result = await store
+        .dispatch(
+          environmentApi.endpoints.saveEnvironmentConfig.initiate({ selection, config: saveConfig }),
+        )
+        .unwrap();
       rememberPastContainerRegistry(result.containerRegistry || saveConfig.containerRegistry);
       const displayConfig = {
         ...result,
@@ -362,7 +376,11 @@ export class ManageEnvironmentWorkflow {
   }
 
   async startCloudContext(name: string): Promise<void> {
-    await this.updateCloudContextPower(name, StartCloudContext, 'Started');
+    await this.updateCloudContextPower(
+      name,
+      (target) => store.dispatch(cloudApi.endpoints.startCloudContext.initiate(target)).unwrap(),
+      'Started',
+    );
     this.deps.refreshKubernetesContexts();
   }
 
@@ -375,7 +393,11 @@ export class ManageEnvironmentWorkflow {
   }
 
   async stopCloudContext(name: string): Promise<void> {
-    await this.updateCloudContextPower(name, StopCloudContext, 'Stopped');
+    await this.updateCloudContextPower(
+      name,
+      (target) => store.dispatch(cloudApi.endpoints.stopCloudContext.initiate(target)).unwrap(),
+      'Stopped',
+    );
   }
 
   async submitDeploy(): Promise<void> {
@@ -415,7 +437,11 @@ export class ManageEnvironmentWorkflow {
     this.deps.showTerminalMessage(`Deleting ${selection.tenant} / ${selection.environment}...`);
 
     try {
-      const result = (await DeleteEnvironment(selection, confirmation)) as DeleteEnvironmentResult;
+      const result = (await store
+        .dispatch(
+          environmentApi.endpoints.deleteEnvironment.initiate({ selection, confirmation }),
+        )
+        .unwrap()) as DeleteEnvironmentResult;
       const deletedSelected = this.state.selected ? selectionKey(this.state.selected) === selectionKey(selection) : false;
       if (deletedSelected) {
         this.state.selected = null;
@@ -449,7 +475,12 @@ export class ManageEnvironmentWorkflow {
       return;
     }
     const request = ++this.versionSuggestionRequest;
-    const suggestions = normalizeVersionSuggestions((await LoadVersionSuggestions(selection)) as UIVersionSuggestion[]);
+    const raw = await store
+      .dispatch(
+        environmentApi.endpoints.getVersionSuggestions.initiate(selection, { forceRefetch: true }),
+      )
+      .unwrap();
+    const suggestions = normalizeVersionSuggestions(raw);
     if (request !== this.versionSuggestionRequest || !this.state.manageDialog.open) {
       return;
     }

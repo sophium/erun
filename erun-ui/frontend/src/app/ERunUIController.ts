@@ -2,29 +2,21 @@ import type * as React from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal, type IDisposable } from '@xterm/xterm';
 
+import { cloudApi } from './api/cloudApi';
+import { environmentApi } from './api/environmentApi';
+import { idleApi } from './api/idleApi';
+import { kubernetesApi } from './api/kubernetesApi';
+import { reviewApi } from './api/reviewApi';
+import { sessionApi } from './api/sessionApi';
+import { tenantApi } from './api/tenantApi';
 import { mirrorAppStateToRedux } from './mirrorAppState';
 import { store } from './store';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import {
   CloseSession,
-  LoadDiff,
-  LoadIdleStatus,
-  LoadKubernetesContexts,
-  LoadRuntimeResourceStatus,
   LoadState,
-  LoadTenantDashboard,
-  LoadTenantConfig,
-  LoadVersionSuggestions,
-  GetCloudProviderBearerToken,
-  LoginCloudProvider,
-  LogoutCloudProvider,
-  OpenIDE,
-  ReconnectMCP,
   ResizeSession,
-  SavePastedImage,
-  SaveTenantConfig,
   SendSessionInput,
-  SetupCloudProviderOIDC,
   StartAISession,
   StartDeploySession,
   StartInitSession,
@@ -129,24 +121,18 @@ import {
 import { failedTerminalOutput, filterTerminalDisplayData, rebuildTerminalDisplayBuffer } from './terminalBuffers';
 import { normalizeDialogValue, normalizeVersionSuggestions, selectionKey } from './versionSuggestions';
 import type {
-  DiffResult,
   ManageTab,
-  PastedImageResult,
   StartSessionResult,
   TerminalExitPayload,
   TerminalOutputPayload,
   UICloudContextInitInput,
-  UICloudProviderBearerToken,
   UICloudProviderStatus,
   UIERunConfig,
   UIEnvironmentConfig,
-  UIIdleStatus,
-  UIRuntimeResourceStatus,
   UISelection,
   UIState,
   UITenant,
   UITenantDashboardInput,
-  UITenantDashboard,
   UITenantConfig,
   UIVersionSuggestion,
 } from '@/types';
@@ -523,7 +509,9 @@ export class ERunUIController {
     this.state.tenantDashboard = { ...this.state.tenantDashboard, loading: true, error: '' };
     this.emit();
     try {
-      const loadedData = (await LoadTenantDashboard(input)) as UITenantDashboard;
+      const loadedData = await store
+        .dispatch(tenantApi.endpoints.getTenantDashboard.initiate(input))
+        .unwrap();
       if (this.state.tenantDashboard.tenant !== tenant) {
         return;
       }
@@ -854,7 +842,7 @@ export class ERunUIController {
     this.showTerminalMessage(`Opening ${label} for ${selection.tenant} / ${selection.environment}...`);
 
     try {
-      await OpenIDE(runSelection, ide);
+      await store.dispatch(sessionApi.endpoints.openIDE.initiate({ selection: runSelection, ide })).unwrap();
     } catch (error: unknown) {
       const failure = ideOpenFailure(selection, label, readError(error));
       this.appendDebugOutput(debugOutputBlock(failure.copyOutput));
@@ -1164,11 +1152,15 @@ export class ERunUIController {
   }
 
   async loginPrimaryCloudProvider(alias: string): Promise<void> {
-    await this.updatePrimaryCloudProvider(alias, 'login', LoginCloudProvider);
+    await this.updatePrimaryCloudProvider(alias, 'login', (target) =>
+      store.dispatch(cloudApi.endpoints.loginCloudProvider.initiate(target)).unwrap(),
+    );
   }
 
   async logoutPrimaryCloudProvider(alias: string): Promise<void> {
-    await this.updatePrimaryCloudProvider(alias, 'logout', LogoutCloudProvider);
+    await this.updatePrimaryCloudProvider(alias, 'logout', (target) =>
+      store.dispatch(cloudApi.endpoints.logoutCloudProvider.initiate(target)).unwrap(),
+    );
   }
 
   async getPrimaryCloudProviderBearerToken(alias: string): Promise<void> {
@@ -1180,7 +1172,9 @@ export class ERunUIController {
     this.state.sidebarCloudAliasAction = 'bearer';
     this.emit();
     try {
-      const result = (await GetCloudProviderBearerToken(alias)) as UICloudProviderBearerToken;
+      const result = await store
+        .dispatch(cloudApi.endpoints.getCloudProviderBearerToken.initiate(alias))
+        .unwrap();
       await ClipboardSetText(result.token);
       this.state.cloudProviders = replaceCloudProvider(this.state.cloudProviders, result.provider);
       this.state.sidebarCloudAliasBusy = false;
@@ -1270,7 +1264,9 @@ export class ERunUIController {
     };
     this.emit();
     try {
-      const result = (await LoadTenantConfig(dialog.tenant)) as UITenantConfig;
+      const result = await store
+        .dispatch(tenantApi.endpoints.getTenantConfig.initiate(dialog.tenant))
+        .unwrap();
       if (result.cloudProviders) {
         this.state.cloudProviders = result.cloudProviders;
       }
@@ -1303,7 +1299,9 @@ export class ERunUIController {
     this.state.tenantDialog = { ...dialog, busy: true, busyAction: 'save', busyTarget: '', error: '' };
     this.emit();
     try {
-      const result = (await SaveTenantConfig(dialog.config as Parameters<typeof SaveTenantConfig>[0])) as UITenantConfig;
+      const result = await store
+        .dispatch(tenantApi.endpoints.saveTenantConfig.initiate(dialog.config))
+        .unwrap();
       this.applySavedTenantConfig(result);
       this.state.tenantDialog = {
         ...this.state.tenantDialog,
@@ -1338,7 +1336,9 @@ export class ERunUIController {
     this.state.tenantDialog = { ...dialog, busy: true, busyAction: 'cloud-oidc', busyTarget: alias, error: '' };
     this.emit();
     try {
-      const provider = (await SetupCloudProviderOIDC(alias)) as UICloudProviderStatus;
+      const provider = await store
+        .dispatch(cloudApi.endpoints.setupCloudProviderOIDC.initiate(alias))
+        .unwrap();
       this.state.cloudProviders = replaceCloudProvider(this.state.cloudProviders, provider);
       const currentProviders = this.state.tenantDialog.config.cloudProviders || [];
       this.state.tenantDialog = {
@@ -1457,10 +1457,14 @@ export class ERunUIController {
       this.emit();
     }
     try {
-      const diff = (await LoadDiff(selection, {
-        scope,
-        selectedCommit,
-      })) as DiffResult;
+      const diff = await store
+        .dispatch(
+          reviewApi.endpoints.getDiff.initiate(
+            { selection, options: { scope, selectedCommit } },
+            { forceRefetch: true },
+          ),
+        )
+        .unwrap();
       if (!this.isCurrentReviewDiffRequest(request, selectedKey)) {
         return;
       }
@@ -1564,7 +1568,7 @@ export class ERunUIController {
     this.state.reconnect = { status: 'running', lastLine: '', error: '' };
     this.emit();
     try {
-      await ReconnectMCP(selection);
+      await store.dispatch(sessionApi.endpoints.reconnectMCP.initiate(selection)).unwrap();
       this.state.reconnect = { status: 'idle', lastLine: '', error: '' };
       this.emit();
       await this.loadReviewDiff();
@@ -1752,7 +1756,9 @@ export class ERunUIController {
     }
 
     try {
-      const status = (await LoadIdleStatus(selection)) as UIIdleStatus;
+      const status = await store
+        .dispatch(idleApi.endpoints.getIdleStatus.initiate(selection, { forceRefetch: true }))
+        .unwrap();
       if (this.isCurrentIdleStatusRequest(request, selection)) {
         this.state.idleStatus = status;
         this.emit();
@@ -1893,7 +1899,10 @@ export class ERunUIController {
 
   private async refreshKubernetesContexts(): Promise<void> {
     try {
-      const contexts = ((await LoadKubernetesContexts()) as string[]).map((context) => context.trim()).filter(Boolean);
+      const result = await store
+        .dispatch(kubernetesApi.endpoints.getKubernetesContexts.initiate())
+        .unwrap();
+      const contexts = result.map((context) => context.trim()).filter(Boolean);
       if (!this.state.environmentDialog.open || this.state.environmentDialog.actionMode !== 'init') {
         return;
       }
@@ -1955,11 +1964,18 @@ export class ERunUIController {
     };
     this.emit();
     try {
-      const status = (await LoadRuntimeResourceStatus({
-        kubernetesContext: context,
-        tenant: normalizeDialogValue(this.state.environmentDialog.tenant),
-        environment: normalizeDialogValue(this.state.environmentDialog.environment),
-      })) as UIRuntimeResourceStatus;
+      const status = await store
+        .dispatch(
+          environmentApi.endpoints.getRuntimeResourceStatus.initiate(
+            {
+              kubernetesContext: context,
+              tenant: normalizeDialogValue(this.state.environmentDialog.tenant),
+              environment: normalizeDialogValue(this.state.environmentDialog.environment),
+            },
+            { forceRefetch: true },
+          ),
+        )
+        .unwrap();
       if (request !== this.environmentResourceStatusRequest || !this.state.environmentDialog.open) {
         return;
       }
@@ -2005,7 +2021,12 @@ export class ERunUIController {
       environment: normalizeDialogValue(dialog.environment),
       action: dialog.actionMode,
     };
-    const suggestions = normalizeVersionSuggestions((await LoadVersionSuggestions(selection)) as UIVersionSuggestion[]);
+    const raw = await store
+      .dispatch(
+        environmentApi.endpoints.getVersionSuggestions.initiate(selection, { forceRefetch: true }),
+      )
+      .unwrap();
+    const suggestions = normalizeVersionSuggestions(raw);
     if (request !== this.versionSuggestionRequest || !this.state.environmentDialog.open) {
       return;
     }
@@ -2337,11 +2358,18 @@ export class ERunUIController {
     }
     const paths: string[] = [];
     for (const image of images) {
-      const result = (await SavePastedImage(sessionId, {
-        data: await fileToBase64(image),
-        mimeType: image.type,
-        name: image.name,
-      })) as PastedImageResult;
+      const result = await store
+        .dispatch(
+          sessionApi.endpoints.savePastedImage.initiate({
+            sessionId,
+            payload: {
+              data: await fileToBase64(image),
+              mimeType: image.type,
+              name: image.name,
+            },
+          }),
+        )
+        .unwrap();
       if (result.path) {
         paths.push(result.path);
       }

@@ -1,15 +1,8 @@
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
-import {
-  InitCloudContext,
-  LoadCloudContextStatuses,
-  LoadCloudProviderStatuses,
-  LoadERunConfig,
-  LoginCloudProvider,
-  SaveERunConfig,
-  StartCloudContext,
-  StartCloudInitAWSSession,
-  StopCloudContext,
-} from '../../wailsjs/go/main/App';
+import { StartCloudInitAWSSession } from '../../wailsjs/go/main/App';
+import { cloudApi } from './api/cloudApi';
+import { globalConfigApi } from './api/globalConfigApi';
+import { store } from './store';
 import {
   cloudContextDraftForConfig,
   idleCloudContextAction,
@@ -128,7 +121,9 @@ export class GlobalConfigWorkflow {
     };
     this.deps.emit();
     try {
-      const result = (await LoadERunConfig()) as UIERunConfig;
+      const result = await store
+        .dispatch(globalConfigApi.endpoints.getERunConfig.initiate(undefined, { forceRefetch: true }))
+        .unwrap();
       this.state.globalConfigDialog = {
         ...this.state.globalConfigDialog,
         config: result,
@@ -153,7 +148,9 @@ export class GlobalConfigWorkflow {
       return;
     }
     try {
-      const cloudProviders = await LoadCloudProviderStatuses();
+      const cloudProviders = await store
+        .dispatch(cloudApi.endpoints.getCloudProviderStatuses.initiate(undefined, { forceRefetch: true }))
+        .unwrap();
       this.state.globalConfigDialog = {
         ...this.state.globalConfigDialog,
         config: {
@@ -181,7 +178,9 @@ export class GlobalConfigWorkflow {
       return;
     }
     try {
-      const cloudContexts = await LoadCloudContextStatuses();
+      const cloudContexts = await store
+        .dispatch(cloudApi.endpoints.getCloudContextStatuses.initiate(undefined, { forceRefetch: true }))
+        .unwrap();
       this.state.globalConfigDialog = {
         ...this.state.globalConfigDialog,
         config: {
@@ -211,7 +210,9 @@ export class GlobalConfigWorkflow {
     this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-context-init', busyTarget: '', error: '' };
     this.deps.emit();
     try {
-      const context = (await InitCloudContext(dialog.cloudContextDraft)) as UICloudContextStatus;
+      const context = await store
+        .dispatch(cloudApi.endpoints.initCloudContext.initiate(dialog.cloudContextDraft))
+        .unwrap();
       this.state.globalConfigDialog = {
         ...this.state.globalConfigDialog,
         config: {
@@ -246,11 +247,19 @@ export class GlobalConfigWorkflow {
   }
 
   async stopCloudContext(name: string): Promise<void> {
-    await this.updateCloudContextPower(name, StopCloudContext, 'Stopped');
+    await this.updateCloudContextPower(
+      name,
+      (target) => store.dispatch(cloudApi.endpoints.stopCloudContext.initiate(target)).unwrap(),
+      'Stopped',
+    );
   }
 
   async startCloudContext(name: string): Promise<void> {
-    await this.updateCloudContextPower(name, StartCloudContext, 'Started');
+    await this.updateCloudContextPower(
+      name,
+      (target) => store.dispatch(cloudApi.endpoints.startCloudContext.initiate(target)).unwrap(),
+      'Started',
+    );
     this.deps.refreshKubernetesContexts();
   }
 
@@ -327,7 +336,9 @@ export class GlobalConfigWorkflow {
     this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-provider-login', busyTarget: alias, error: '' };
     this.deps.emit();
     try {
-      const provider = await LoginCloudProvider(alias);
+      const provider = await store
+        .dispatch(cloudApi.endpoints.loginCloudProvider.initiate(alias))
+        .unwrap();
       this.state.globalConfigDialog = {
         ...this.state.globalConfigDialog,
         config: {
@@ -363,7 +374,9 @@ export class GlobalConfigWorkflow {
     this.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'save', busyTarget: '', error: '' };
     this.deps.emit();
     try {
-      const result = (await SaveERunConfig(dialog.config as Parameters<typeof SaveERunConfig>[0])) as UIERunConfig;
+      const result = await store
+        .dispatch(globalConfigApi.endpoints.saveERunConfig.initiate(dialog.config))
+        .unwrap();
       this.state.globalConfigDialog = {
         ...this.state.globalConfigDialog,
         config: result,
