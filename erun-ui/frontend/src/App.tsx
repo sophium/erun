@@ -4,6 +4,7 @@ import { CheckCircle2, ChevronDown, ChevronUp, Copy, LoaderCircle, Trash2 } from
 import { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
 import { useActivityQueue, useTerminalActivityLockState } from '@/app/activityQueueState';
+import { ControllerProvider, useController } from '@/app/ControllerContext';
 import { useAppSelector } from '@/app/hooks';
 import { ActivityLockOverlay } from '@/components/app/ActivityLockOverlay';
 import { ActivityQueueDrawer } from '@/components/app/ActivityQueueDrawer';
@@ -56,41 +57,42 @@ export function App(): React.ReactElement {
   }, [controller]);
 
   return (
-    <TooltipProvider>
-      <div className="grid h-full w-full grid-rows-[52px_minmax(0,1fr)] bg-background">
-        <Titlebar controller={controller} />
-        <div
-          className={cn(
-            'grid h-full min-h-0 overflow-hidden',
-            sidebarHidden ? 'grid-cols-[0_0_minmax(0,1fr)]' : 'grid-cols-[var(--sidebar-width)_10px_minmax(0,1fr)]',
-          )}
-        >
-          <Sidebar controller={controller} />
+    <ControllerProvider controller={controller}>
+      <TooltipProvider>
+        <div className="grid h-full w-full grid-rows-[52px_minmax(0,1fr)] bg-background">
+          <Titlebar />
           <div
-            className={cn(splitterClassName, sidebarHidden && 'pointer-events-none')}
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize sidebar"
-            onMouseDown={(event) => controller.startSidebarResize(event)}
-          />
-          <MainPane
-            controller={controller}
-            terminalPaneRef={terminalPaneRef}
-            terminalRootRef={terminalRootRef}
-            reviewViewRef={reviewViewRef}
-            reviewMainRef={reviewMainRef}
-            diffListRef={diffListRef}
-            onOpenActivityQueue={() => setActivityQueueOpen(true)}
-          />
+            className={cn(
+              'grid h-full min-h-0 overflow-hidden',
+              sidebarHidden ? 'grid-cols-[0_0_minmax(0,1fr)]' : 'grid-cols-[var(--sidebar-width)_10px_minmax(0,1fr)]',
+            )}
+          >
+            <Sidebar />
+            <div
+              className={cn(splitterClassName, sidebarHidden && 'pointer-events-none')}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize sidebar"
+              onMouseDown={(event) => controller.startSidebarResize(event)}
+            />
+            <MainPane
+              terminalPaneRef={terminalPaneRef}
+              terminalRootRef={terminalRootRef}
+              reviewViewRef={reviewViewRef}
+              reviewMainRef={reviewMainRef}
+              diffListRef={diffListRef}
+              onOpenActivityQueue={() => setActivityQueueOpen(true)}
+            />
+          </div>
         </div>
-      </div>
-      <EnvironmentDialogView controller={controller} />
-      <GlobalConfigDialogView controller={controller} />
-      <ManageDialogView controller={controller} />
-      <ReconnectDialog controller={controller} />
-      <TenantDialogView controller={controller} />
-      <ActivityQueueLauncher open={activityQueueOpen} onOpen={() => setActivityQueueOpen(true)} onClose={() => setActivityQueueOpen(false)} />
-    </TooltipProvider>
+        <EnvironmentDialogView />
+        <GlobalConfigDialogView />
+        <ManageDialogView />
+        <ReconnectDialog />
+        <TenantDialogView />
+        <ActivityQueueLauncher open={activityQueueOpen} onOpen={() => setActivityQueueOpen(true)} onClose={() => setActivityQueueOpen(false)} />
+      </TooltipProvider>
+    </ControllerProvider>
   );
 }
 
@@ -130,7 +132,6 @@ function ActivityQueueLauncher({ open, onOpen, onClose }: { open: boolean; onOpe
 }
 
 function MainPane({
-  controller,
   terminalPaneRef,
   terminalRootRef,
   reviewViewRef,
@@ -138,7 +139,6 @@ function MainPane({
   diffListRef,
   onOpenActivityQueue,
 }: {
-  controller: ERunUIController;
   terminalPaneRef: React.RefObject<HTMLElement | null>;
   terminalRootRef: React.RefObject<HTMLDivElement | null>;
   reviewViewRef: React.RefObject<HTMLElement | null>;
@@ -146,6 +146,7 @@ function MainPane({
   diffListRef: React.RefObject<HTMLDivElement | null>;
   onOpenActivityQueue: () => void;
 }): React.ReactElement {
+  const controller = useController();
   const dashboardTenant = useAppSelector((state) => state.tenantDashboard.tenant);
   const debugOpen = useAppSelector((state) => state.layout.debugOpen);
   const debugOutput = useAppSelector((state) => state.terminal.debugOutput);
@@ -159,15 +160,14 @@ function MainPane({
         dashboardOpen ? 'grid-rows-[minmax(0,1fr)] bg-background' : debugOpen ? 'grid-rows-[minmax(0,1fr)_var(--debug-height)]' : 'grid-rows-[minmax(0,1fr)_34px]',
       )}
     >
-      {dashboardOpen && <TenantDashboardView controller={controller} />}
-      <TerminalPane controller={controller} hidden={dashboardOpen} terminalRootRef={terminalRootRef} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} onOpenActivityQueue={onOpenActivityQueue} />
-      {!dashboardOpen && <DebugPanel controller={controller} open={debugOpen} output={debugOutput} sessionId={sessionId} verbose={controller.activeSessionDebug(sessionId)} />}
+      {dashboardOpen && <TenantDashboardView />}
+      <TerminalPane hidden={dashboardOpen} terminalRootRef={terminalRootRef} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} onOpenActivityQueue={onOpenActivityQueue} />
+      {!dashboardOpen && <DebugPanel open={debugOpen} output={debugOutput} sessionId={sessionId} verbose={controller.activeSessionDebug(sessionId)} />}
     </main>
   );
 }
 
 function TerminalPane({
-  controller,
   hidden,
   terminalRootRef,
   reviewViewRef,
@@ -175,7 +175,6 @@ function TerminalPane({
   diffListRef,
   onOpenActivityQueue,
 }: {
-  controller: ERunUIController;
   hidden: boolean;
   terminalRootRef: React.RefObject<HTMLDivElement | null>;
   reviewViewRef: React.RefObject<HTMLElement | null>;
@@ -183,6 +182,7 @@ function TerminalPane({
   diffListRef: React.RefObject<HTMLDivElement | null>;
   onOpenActivityQueue: () => void;
 }): React.ReactElement {
+  const controller = useController();
   const sessionId = useAppSelector((state) => state.terminal.sessionId);
   const reviewOpen = useAppSelector((state) => state.layout.reviewOpen);
   const terminalBusy = useAppSelector((state) => state.terminalStatus.terminalBusy);
@@ -222,7 +222,7 @@ function TerminalPane({
       )}
     >
       <div className="grid h-full min-h-0 min-w-0 grid-rows-[32px_minmax(0,1fr)] overflow-hidden">
-        <TerminalTabStrip controller={controller} />
+        <TerminalTabStrip />
         {/* Padding lives on the wrapper, not on the FitAddon parent: xterm's FitAddon reads the parent's computed height but does not subtract its padding, so any padding on terminalRoot would over-count rows and clip the bottom line. */}
         <div id="erun-terminal-pane" className="relative h-full min-h-0 min-w-0 overflow-hidden box-border px-4 pt-3.5">
           <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full" />
@@ -231,7 +231,7 @@ function TerminalPane({
         </div>
       </div>
       <div className={cn(reviewSplitterClassName, !reviewOpen && 'hidden')} role="separator" aria-orientation="vertical" aria-label="Resize diff panel" onMouseDown={(event) => controller.startReviewResize(event)} />
-      <ReviewPanel controller={controller} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} />
+      <ReviewPanel reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} />
     </div>
   );
 }
@@ -251,7 +251,8 @@ function TerminalBusyOverlay({ message }: { message: string }): React.ReactEleme
   );
 }
 
-function DebugPanel({ controller, open, output, sessionId, verbose }: { controller: ERunUIController; open: boolean; output: string; sessionId: number; verbose: boolean }): React.ReactElement {
+function DebugPanel({ open, output, sessionId, verbose }: { open: boolean; output: string; sessionId: number; verbose: boolean }): React.ReactElement {
+  const controller = useController();
   const outputRef = React.useRef<HTMLDivElement>(null);
   const stuckToBottomRef = React.useRef(true);
   const [copyStatus, setCopyStatus] = React.useState('');

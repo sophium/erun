@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { FolderPlus, LoaderCircle, Rocket } from 'lucide-react';
 
-import type { ERunUIController } from '@/app/ERunUIController';
+import { useController } from '@/app/ControllerContext';
 import { readError } from '@/app/errors';
 import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
 import { useAppSelector } from '@/app/hooks';
@@ -23,7 +23,8 @@ const dialogErrorClassName =
 
 type EnvironmentDialog = AppState['environmentDialog'];
 
-export function EnvironmentDialogView({ controller }: { controller: ERunUIController }): React.ReactElement {
+export function EnvironmentDialogView(): React.ReactElement {
+  const controller = useController();
   const dialog = useAppSelector((state) => state.environmentDialog);
   const tenantRef = React.useRef<HTMLInputElement>(null);
   const environmentRef = React.useRef<HTMLInputElement>(null);
@@ -59,9 +60,9 @@ export function EnvironmentDialogView({ controller }: { controller: ERunUIContro
           }}
         >
           <EnvironmentDialogHeader dialog={dialog} />
-          <EnvironmentDialogFields controller={controller} tenantRef={tenantRef} environmentRef={environmentRef} />
+          <EnvironmentDialogFields tenantRef={tenantRef} environmentRef={environmentRef} />
           <DialogError error={dialog.error} />
-          <EnvironmentDialogFooter controller={controller} dialog={dialog} />
+          <EnvironmentDialogFooter dialog={dialog} />
         </form>
       </DialogContent>
     </Dialog>
@@ -81,20 +82,19 @@ function EnvironmentDialogHeader({ dialog }: { dialog: EnvironmentDialog }): Rea
 }
 
 function EnvironmentDialogFields({
-  controller,
   tenantRef,
   environmentRef,
 }: {
-  controller: ERunUIController;
   tenantRef: React.Ref<HTMLInputElement>;
   environmentRef: React.Ref<HTMLInputElement>;
 }): React.ReactElement {
+  const controller = useController();
   const dialog = useAppSelector((state) => state.environmentDialog);
   const versionSuggestions = useAppSelector((state) => state.tenants.versionSuggestions);
   const isDeploy = dialog.actionMode === 'deploy';
   return (
     <>
-      <EnvironmentNameFields controller={controller} tenantRef={tenantRef} environmentRef={environmentRef} />
+      <EnvironmentNameFields tenantRef={tenantRef} environmentRef={environmentRef} />
       <VersionField
         id="environment-version"
         value={dialog.version}
@@ -107,20 +107,19 @@ function EnvironmentDialogFields({
         onChoicesOpenChange={(open) => controller.setEnvironmentVersionChoicesOpen(open)}
         onSelect={(suggestion) => controller.selectEnvironmentVersionSuggestion(suggestion)}
       />
-      {!isDeploy && <EnvironmentCreateFields controller={controller} dialog={dialog} />}
+      {!isDeploy && <EnvironmentCreateFields dialog={dialog} />}
     </>
   );
 }
 
 function EnvironmentNameFields({
-  controller,
   tenantRef,
   environmentRef,
 }: {
-  controller: ERunUIController;
   tenantRef: React.Ref<HTMLInputElement>;
   environmentRef: React.Ref<HTMLInputElement>;
 }): React.ReactElement {
+  const controller = useController();
   const dialog = useAppSelector((state) => state.environmentDialog);
   const tenants = useAppSelector((state) => state.tenants.tenants);
   const isDeploy = dialog.actionMode === 'deploy';
@@ -141,7 +140,8 @@ function EnvironmentNameFields({
   );
 }
 
-function EnvironmentCreateFields({ controller, dialog }: { controller: ERunUIController; dialog: EnvironmentDialog }): React.ReactElement {
+function EnvironmentCreateFields({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
+  const controller = useController();
   const containerRegistrySuggestions = React.useMemo(
     () => uniqueSuggestions([dialog.containerRegistry, ...loadSavedPastContainerRegistries(), 'erunpaas']),
     [dialog.containerRegistry],
@@ -149,15 +149,16 @@ function EnvironmentCreateFields({ controller, dialog }: { controller: ERunUICon
 
   return (
     <>
-      <KubernetesContextSelect controller={controller} dialog={dialog} />
-      <RuntimePodFields controller={controller} dialog={dialog} />
+      <KubernetesContextSelect dialog={dialog} />
+      <RuntimePodFields dialog={dialog} />
       <EditableComboField id="environment-container-registry" label="Container registry" value={dialog.containerRegistry} suggestions={containerRegistrySuggestions} required disabled={dialog.busy} onValueChange={(containerRegistry) => controller.updateEnvironmentDialog({ containerRegistry })} />
-      <EnvironmentCreateChecks controller={controller} dialog={dialog} />
+      <EnvironmentCreateChecks dialog={dialog} />
     </>
   );
 }
 
-function KubernetesContextSelect({ controller, dialog }: { controller: ERunUIController; dialog: EnvironmentDialog }): React.ReactElement {
+function KubernetesContextSelect({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
+  const controller = useController();
   const items = dialog.kubernetesContexts.map((context) => ({ value: context, label: context }));
   const placeholder = dialog.kubernetesContextsLoading ? 'Loading contexts...' : 'Select Kubernetes context';
   if (!dialog.kubernetesContextsLoading && dialog.kubernetesContexts.length === 0) {
@@ -186,7 +187,8 @@ function KubernetesContextSelect({ controller, dialog }: { controller: ERunUICon
   );
 }
 
-function RuntimePodFields({ controller, dialog }: { controller: ERunUIController; dialog: EnvironmentDialog }): React.ReactElement {
+function RuntimePodFields({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
+  const controller = useController();
   return (
     <RuntimeResourceControls
       idPrefix="environment-runtime"
@@ -199,7 +201,8 @@ function RuntimePodFields({ controller, dialog }: { controller: ERunUIController
   );
 }
 
-function EnvironmentCreateChecks({ controller, dialog }: { controller: ERunUIController; dialog: EnvironmentDialog }): React.ReactElement {
+function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
+  const controller = useController();
   return (
     <div className="grid gap-3">
       <CheckboxField id="environment-default-tenant" label="Set as default tenant" checked={dialog.setDefaultTenant} disabled={dialog.busy} onCheckedChange={(setDefaultTenant) => controller.updateEnvironmentDialog({ setDefaultTenant })} />
@@ -237,7 +240,8 @@ function DialogError({ error }: { error: string }): React.ReactElement | null {
   return error ? <div className={dialogErrorClassName} role="alert">{error}</div> : null;
 }
 
-function EnvironmentDialogFooter({ controller, dialog }: { controller: ERunUIController; dialog: EnvironmentDialog }): React.ReactElement {
+function EnvironmentDialogFooter({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
+  const controller = useController();
   const isDeploy = dialog.actionMode === 'deploy';
   const resourceBlocked = dialog.resourceStatusLoading || !dialog.resourceStatus?.available || Boolean(runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus));
   const disabled = dialog.busy || (!isDeploy && (dialog.kubernetesContextsLoading || dialog.kubernetesContexts.length === 0 || resourceBlocked));

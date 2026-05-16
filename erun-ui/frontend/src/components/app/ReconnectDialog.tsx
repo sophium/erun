@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { AlertCircle, LoaderCircle, RefreshCw } from 'lucide-react';
 
-import type { ERunUIController } from '@/app/ERunUIController';
+import { useController } from '@/app/ControllerContext';
 import { useAppSelector } from '@/app/hooks';
 import { reconnectCopy } from '@/app/reconnectCopy';
 import { Button } from '@/components/ui/button';
@@ -10,7 +10,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 // ReconnectDialog reads only the review.reconnect slice; subscribing through
 // useAppSelector keeps re-renders scoped to that slice instead of the full
 // AppState shape.
-export function ReconnectDialog({ controller }: { controller: ERunUIController }): React.ReactElement {
+export function ReconnectDialog(): React.ReactElement {
+  const controller = useController();
   const reconnect = useAppSelector((state) => state.review.reconnect);
   const open = reconnect.status !== 'idle';
   const running = reconnect.status === 'running';

@@ -1,6 +1,7 @@
 import * as React from 'react';
 import { Cloud, Link, LoaderCircle, RefreshCw, Save } from 'lucide-react';
 
+import { useController } from '@/app/ControllerContext';
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
 import { useAppSelector } from '@/app/hooks';
@@ -16,7 +17,8 @@ import { SelectField, type SelectFieldOption } from './SelectField';
 const dialogErrorClassName =
   'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
 
-export function TenantDialogView({ controller }: { controller: ERunUIController }): React.ReactElement {
+export function TenantDialogView(): React.ReactElement {
+  const controller = useController();
   const dialog = useAppSelector((state) => state.tenantDialog);
   const tenants = useAppSelector((state) => state.tenants.tenants);
   const config = dialog.config;
@@ -45,7 +47,7 @@ export function TenantDialogView({ controller }: { controller: ERunUIController 
             <DialogTitle>Manage tenant</DialogTitle>
             <DialogDescription>{dialog.tenant}</DialogDescription>
           </DialogHeader>
-          <TenantDialogFields controller={controller} environmentOptions={environmentOptions} apiPlaceholder={tenantDefaultAPIURL(tenant)} />
+          <TenantDialogFields environmentOptions={environmentOptions} apiPlaceholder={tenantDefaultAPIURL(tenant)} />
           {dialog.error && (
             <div className={dialogErrorClassName} role="alert">
               {dialog.error}
@@ -66,7 +68,8 @@ export function TenantDialogView({ controller }: { controller: ERunUIController 
   );
 }
 
-function TenantDialogFields({ controller, environmentOptions, apiPlaceholder }: { controller: ERunUIController; environmentOptions: string[]; apiPlaceholder: string }): React.ReactElement {
+function TenantDialogFields({ environmentOptions, apiPlaceholder }: { environmentOptions: string[]; apiPlaceholder: string }): React.ReactElement {
+  const controller = useController();
   const dialog = useAppSelector((state) => state.tenantDialog);
   const config = dialog.config;
   if (dialog.configLoading) {
@@ -77,12 +80,12 @@ function TenantDialogFields({ controller, environmentOptions, apiPlaceholder }: 
       <ReadonlyField id="tenant-config-name" label="Tenant name" value={config.name} />
       <DefaultEnvironmentSelect id="tenant-config-defaultenvironment" label="Default environment" value={config.defaultEnvironment} options={environmentOptions} disabled={dialog.busy} onChange={(defaultEnvironment) => controller.updateTenantConfig({ defaultEnvironment })} />
       <TextField id="tenant-config-apiurl" label="API URL" value={config.apiUrl} disabled={dialog.busy} placeholder={apiPlaceholder} onChange={(apiUrl) => controller.updateTenantConfig({ apiUrl })} />
-      <CloudAliasesField controller={controller} />
+      <CloudAliasesField />
     </div>
   );
 }
 
-function CloudAliasesField({ controller }: { controller: ERunUIController }): React.ReactElement {
+function CloudAliasesField(): React.ReactElement {
   const dialog = useAppSelector((state) => state.tenantDialog);
   const config = dialog.config;
   const providers = config.cloudProviders || [];
@@ -103,14 +106,15 @@ function CloudAliasesField({ controller }: { controller: ERunUIController }): Re
       <Label>Cloud aliases</Label>
       <div className="overflow-hidden rounded-[var(--radius)] border border-border">
         {providers.map((provider, index) => (
-          <CloudAliasRow key={provider.alias} controller={controller} dialog={dialog} config={config} provider={provider} checked={linked.has(provider.alias.trim())} primary={primary} withBorder={index > 0} />
+          <CloudAliasRow key={provider.alias} dialog={dialog} config={config} provider={provider} checked={linked.has(provider.alias.trim())} primary={primary} withBorder={index > 0} />
         ))}
       </div>
     </div>
   );
 }
 
-function CloudAliasRow({ controller, dialog, config, provider, checked, primary, withBorder }: { controller: ERunUIController; dialog: AppState['tenantDialog']; config: AppState['tenantDialog']['config']; provider: NonNullable<AppState['tenantDialog']['config']['cloudProviders']>[number]; checked: boolean; primary: string; withBorder: boolean }): React.ReactElement {
+function CloudAliasRow({ dialog, config, provider, checked, primary, withBorder }: { dialog: AppState['tenantDialog']; config: AppState['tenantDialog']['config']; provider: NonNullable<AppState['tenantDialog']['config']['cloudProviders']>[number]; checked: boolean; primary: string; withBorder: boolean }): React.ReactElement {
+  const controller = useController();
   const alias = provider.alias.trim();
   const hasIssuer = Boolean(provider.oidcIssuerUrl?.trim());
   const oidcBusy = dialog.busy && dialog.busyAction === 'cloud-oidc' && dialog.busyTarget === alias;
@@ -118,8 +122,8 @@ function CloudAliasRow({ controller, dialog, config, provider, checked, primary,
     <div className="grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-center gap-3 border-border px-3 py-2.5 data-[border=true]:border-t" data-border={withBorder}>
       <Checkbox aria-label={`Trust ${alias}`} checked={checked} disabled={dialog.busy || (!checked && !hasIssuer)} onCheckedChange={(value) => updateLinkedCloudAlias(controller, config, alias, Boolean(value))} />
       <CloudAliasIdentity alias={alias} issuer={provider.oidcIssuerUrl || ''} />
-      <CloudAliasOIDCButton controller={controller} alias={alias} hasIssuer={hasIssuer} busy={dialog.busy} oidcBusy={oidcBusy} />
-      <CloudAliasPrimaryControl controller={controller} alias={alias} checked={checked} primary={primary} busy={dialog.busy} />
+      <CloudAliasOIDCButton alias={alias} hasIssuer={hasIssuer} busy={dialog.busy} oidcBusy={oidcBusy} />
+      <CloudAliasPrimaryControl alias={alias} checked={checked} primary={primary} busy={dialog.busy} />
     </div>
   );
 }
@@ -137,7 +141,8 @@ function CloudAliasIdentity({ alias, issuer }: { alias: string; issuer: string }
   );
 }
 
-function CloudAliasOIDCButton({ controller, alias, hasIssuer, busy, oidcBusy }: { controller: ERunUIController; alias: string; hasIssuer: boolean; busy: boolean; oidcBusy: boolean }): React.ReactElement {
+function CloudAliasOIDCButton({ alias, hasIssuer, busy, oidcBusy }: { alias: string; hasIssuer: boolean; busy: boolean; oidcBusy: boolean }): React.ReactElement {
+  const controller = useController();
   const label = hasIssuer ? `Refresh OIDC issuer for ${alias}` : `Set up OIDC issuer for ${alias}`;
   return (
     <IconTooltip label={label}>
@@ -160,7 +165,8 @@ function CloudAliasOIDCButton({ controller, alias, hasIssuer, busy, oidcBusy }: 
   );
 }
 
-function CloudAliasPrimaryControl({ controller, alias, checked, primary, busy }: { controller: ERunUIController; alias: string; checked: boolean; primary: string; busy: boolean }): React.ReactElement {
+function CloudAliasPrimaryControl({ alias, checked, primary, busy }: { alias: string; checked: boolean; primary: string; busy: boolean }): React.ReactElement {
+  const controller = useController();
   return (
     <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
       <input type="radio" className="size-3.5" name="tenant-primary-cloud-alias" checked={checked && primary === alias} disabled={busy || !checked} onChange={() => controller.updateTenantConfig({ primaryCloudProviderAlias: alias })} />

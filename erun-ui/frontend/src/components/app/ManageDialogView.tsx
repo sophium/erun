@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { AlertTriangle, Check, ChevronsUpDown, FolderOpen, LoaderCircle, Play, Power, Rocket, Save, Server, Stethoscope, Trash2 } from 'lucide-react';
 
-import type { ERunUIController } from '@/app/ERunUIController';
+import { useController } from '@/app/ControllerContext';
 import { readError } from '@/app/errors';
 import { useAppSelector } from '@/app/hooks';
 import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
@@ -28,7 +28,8 @@ const dialogErrorClassName =
 
 type ManageDialog = AppState['manageDialog'];
 
-export function ManageDialogView({ controller }: { controller: ERunUIController }): React.ReactElement {
+export function ManageDialogView(): React.ReactElement {
+  const controller = useController();
   const dialog = useAppSelector((state) => state.manageDialog);
   const confirmationRef = React.useRef<HTMLInputElement>(null);
   const selection = dialog.selection;
@@ -67,16 +68,17 @@ export function ManageDialogView({ controller }: { controller: ERunUIController 
             <DialogTitle>{selection ? `${selection.tenant}-${selection.environment}` : 'Environment'}</DialogTitle>
             <DialogDescription>Edit environment configuration, deploy a different runtime version, run diagnostics, or delete the environment.</DialogDescription>
           </DialogHeader>
-          <ManageDialogContent controller={controller} confirmationRef={confirmationRef} expected={expected} confirmingDelete={confirmingDelete} />
+          <ManageDialogContent confirmationRef={confirmationRef} expected={expected} confirmingDelete={confirmingDelete} />
           <DialogError error={dialog.error} />
-          <ManageDialogFooter controller={controller} dialog={dialog} confirmingDelete={confirmingDelete} deleteEnabled={deleteEnabled} />
+          <ManageDialogFooter dialog={dialog} confirmingDelete={confirmingDelete} deleteEnabled={deleteEnabled} />
         </form>
       </DialogContent>
     </Dialog>
   );
 }
 
-function ManageDialogContent({ controller, confirmationRef, expected, confirmingDelete }: { controller: ERunUIController; confirmationRef: React.Ref<HTMLInputElement>; expected: string; confirmingDelete: boolean }): React.ReactElement {
+function ManageDialogContent({ confirmationRef, expected, confirmingDelete }: { confirmationRef: React.Ref<HTMLInputElement>; expected: string; confirmingDelete: boolean }): React.ReactElement {
+  const controller = useController();
   const dialog = useAppSelector((state) => state.manageDialog);
   if (dialog.configLoading) {
     return <div className="flex flex-1 min-h-0 flex-col"><div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">Loading config...</div></div>;
@@ -84,14 +86,14 @@ function ManageDialogContent({ controller, confirmationRef, expected, confirming
   if (confirmingDelete) {
     return (
       <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-auto pb-1">
-        <DeleteConfirmationFields controller={controller} dialog={dialog} confirmationRef={confirmationRef} expected={expected} />
+        <DeleteConfirmationFields dialog={dialog} confirmationRef={confirmationRef} expected={expected} />
       </div>
     );
   }
   const editTab: ManageEditTab = dialog.tab === 'delete' ? 'general' : dialog.tab;
   return (
     <div className="flex flex-1 min-h-0 flex-col gap-3">
-      {dialog.pendingRedeploy && <RedeployBanner controller={controller} dialog={dialog} />}
+      {dialog.pendingRedeploy && <RedeployBanner dialog={dialog} />}
       <Tabs value={editTab} onValueChange={(value) => controller.setManageTab(value as ManageTab)} className="flex-1 min-h-0">
         <TabsList className="w-full">
           <DirtyAwareTabsTrigger value="general" label="General" dialog={dialog} />
@@ -102,20 +104,20 @@ function ManageDialogContent({ controller, confirmationRef, expected, confirming
         </TabsList>
         <div className="-mx-1 min-h-0 flex-1 overflow-auto px-1 pb-1">
           <TabsContent value="general" className="grid gap-3">
-            <GeneralTab controller={controller} />
+            <GeneralTab />
           </TabsContent>
           <TabsContent value="runtime" className="grid gap-3">
-            <RuntimeTab controller={controller} />
+            <RuntimeTab />
           </TabsContent>
           <TabsContent value="ai" className="grid gap-3">
-            <ClaudeSettingsSection controller={controller} dialog={dialog} />
+            <ClaudeSettingsSection dialog={dialog} />
           </TabsContent>
           <TabsContent value="ports" className="grid gap-3">
             <PortsTab dialog={dialog} />
           </TabsContent>
           <TabsContent value="ssh" className="grid gap-3">
-            <SSHAccessSection controller={controller} dialog={dialog} />
-            <DiagnosticsSection controller={controller} dialog={dialog} />
+            <SSHAccessSection dialog={dialog} />
+            <DiagnosticsSection dialog={dialog} />
           </TabsContent>
         </div>
       </Tabs>
@@ -135,7 +137,8 @@ function DirtyAwareTabsTrigger({ value, label, dialog }: { value: ManageEditTab;
   );
 }
 
-function GeneralTab({ controller }: { controller: ERunUIController }): React.ReactElement {
+function GeneralTab(): React.ReactElement {
+  const controller = useController();
   const dialog = useAppSelector((state) => state.manageDialog);
   const config = dialog.config;
   const containerRegistrySuggestions = React.useMemo(
@@ -155,14 +158,15 @@ function GeneralTab({ controller }: { controller: ERunUIController }): React.Rea
   );
 }
 
-function RuntimeTab({ controller }: { controller: ERunUIController }): React.ReactElement {
+function RuntimeTab(): React.ReactElement {
+  const controller = useController();
   const dialog = useAppSelector((state) => state.manageDialog);
   const versionSuggestions = useAppSelector((state) => state.tenants.versionSuggestions);
   return (
     <>
       <RuntimeDeployField configuredVersion={dialog.config.runtimeVersion} overrideVersion={dialog.version} suggestions={versionSuggestions} choicesOpen={dialog.choicesOpen} disabled={dialog.busy || dialog.configLoading} onValueChange={(version) => controller.updateManageDialog({ version })} onChoicesOpenChange={(open) => controller.setManageVersionChoicesOpen(open)} onSelect={(suggestion) => controller.selectManageVersionSuggestion(suggestion)} onDeploy={() => void controller.submitManageDeploy().catch((error: unknown) => controller.showTerminalMessage(readError(error)))} />
-      <RuntimePodFields controller={controller} dialog={dialog} />
-      <IdleStopFields controller={controller} dialog={dialog} />
+      <RuntimePodFields dialog={dialog} />
+      <IdleStopFields dialog={dialog} />
     </>
   );
 }
@@ -177,7 +181,8 @@ function PortsTab({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   );
 }
 
-function RedeployBanner({ controller, dialog }: { controller: ERunUIController; dialog: ManageDialog }): React.ReactElement {
+function RedeployBanner({ dialog }: { dialog: ManageDialog }): React.ReactElement {
+  const controller = useController();
   const deploying = dialog.busyAction === 'save' || dialog.busy;
   return (
     <div
@@ -208,7 +213,8 @@ function RedeployBanner({ controller, dialog }: { controller: ERunUIController; 
   );
 }
 
-function RuntimePodFields({ controller, dialog }: { controller: ERunUIController; dialog: ManageDialog }): React.ReactElement {
+function RuntimePodFields({ dialog }: { dialog: ManageDialog }): React.ReactElement {
+  const controller = useController();
   const config = dialog.config;
   return (
     <RuntimeResourceControls
@@ -222,7 +228,8 @@ function RuntimePodFields({ controller, dialog }: { controller: ERunUIController
   );
 }
 
-function IdleStopFields({ controller, dialog }: { controller: ERunUIController; dialog: ManageDialog }): React.ReactElement {
+function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElement {
+  const controller = useController();
   const config = dialog.config;
   return (
     <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
@@ -259,7 +266,8 @@ function IdleStopFields({ controller, dialog }: { controller: ERunUIController; 
   );
 }
 
-function DiagnosticsSection({ controller, dialog }: { controller: ERunUIController; dialog: ManageDialog }): React.ReactElement {
+function DiagnosticsSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
+  const controller = useController();
   const lastDoctorBySelection = useAppSelector((state) => state.doctor.lastDoctorBySelection);
   const lastDoctor = dialog.selection ? lastDoctorBySelection[selectionKey(dialog.selection)] : undefined;
   return (
@@ -316,7 +324,8 @@ function relativeTimeFromNow(timestamp: number): string {
   return `${days} d ago`;
 }
 
-function SSHAccessSection({ controller, dialog }: { controller: ERunUIController; dialog: ManageDialog }): React.ReactElement {
+function SSHAccessSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
+  const controller = useController();
   const config = dialog.config;
   const syncPathRequired = config.sshd.workspaceSyncEnabled && !String(config.sshd.workspaceSyncLocalPath || '').trim();
   return (
@@ -330,7 +339,7 @@ function SSHAccessSection({ controller, dialog }: { controller: ERunUIController
       {config.sshd.workspaceSyncEnabled && (
         <>
           <WorkspaceSyncStatus sshd={config.sshd} />
-          <LocalSyncFolderField controller={controller} dialog={dialog} error={syncPathRequired ? 'Choose a local Git folder before saving.' : ''} />
+          <LocalSyncFolderField dialog={dialog} error={syncPathRequired ? 'Choose a local Git folder before saving.' : ''} />
         </>
       )}
       <ReadonlyField id="environment-config-sshd-localport" label="Local port" value={config.sshd.localPort > 0 ? String(config.sshd.localPort) : ''} />
@@ -339,7 +348,8 @@ function SSHAccessSection({ controller, dialog }: { controller: ERunUIController
   );
 }
 
-function LocalSyncFolderField({ controller, dialog, error }: { controller: ERunUIController; dialog: ManageDialog; error: string }): React.ReactElement {
+function LocalSyncFolderField({ dialog, error }: { dialog: ManageDialog; error: string }): React.ReactElement {
+  const controller = useController();
   const disabled = dialog.busy || dialog.configLoading;
   const describedBy = error ? 'environment-config-sshd-sync-localpath-error' : undefined;
   return (
@@ -383,7 +393,8 @@ function WorkspaceSyncStatus({ sshd }: { sshd: ManageDialog['config']['sshd'] })
   );
 }
 
-function DeleteConfirmationFields({ controller, dialog, confirmationRef, expected }: { controller: ERunUIController; dialog: ManageDialog; confirmationRef: React.Ref<HTMLInputElement>; expected: string }): React.ReactElement {
+function DeleteConfirmationFields({ dialog, confirmationRef, expected }: { dialog: ManageDialog; confirmationRef: React.Ref<HTMLInputElement>; expected: string }): React.ReactElement {
+  const controller = useController();
   return (
     <div className="grid gap-3">
       <DeleteWarning expected={expected} />
@@ -405,7 +416,8 @@ function DialogError({ error }: { error: string }): React.ReactElement | null {
   return error ? <div className={dialogErrorClassName} role="alert">{error}</div> : null;
 }
 
-function ManageDialogFooter({ controller, dialog, confirmingDelete, deleteEnabled }: { controller: ERunUIController; dialog: ManageDialog; confirmingDelete: boolean; deleteEnabled: boolean }): React.ReactElement {
+function ManageDialogFooter({ dialog, confirmingDelete, deleteEnabled }: { dialog: ManageDialog; confirmingDelete: boolean; deleteEnabled: boolean }): React.ReactElement {
+  const controller = useController();
   const resourceError = runtimeResourceLimitMessage(dialog.config.runtimePod, dialog.resourceStatus);
   const saving = dialog.busyAction === 'save';
   const deleting = dialog.busyAction === 'delete';
@@ -648,7 +660,8 @@ function TextField({
   );
 }
 
-function ClaudeSettingsSection({ controller, dialog }: { controller: ERunUIController; dialog: ManageDialog }): React.ReactElement {
+function ClaudeSettingsSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
+  const controller = useController();
   const config = dialog.config;
   const claude = config.claude;
   const defaults = config.claudeDefaults;

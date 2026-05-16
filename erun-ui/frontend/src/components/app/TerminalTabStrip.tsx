@@ -1,17 +1,14 @@
 import * as React from 'react';
 import { Plus, X } from 'lucide-react';
 
-import type { ERunUIController } from '@/app/ERunUIController';
+import { useController } from '@/app/ControllerContext';
 import { useAppSelector } from '@/app/hooks';
 import { selectionKey } from '@/app/versionSuggestions';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { cn } from '@/lib/utils';
 
-export function TerminalTabStrip({
-  controller,
-}: {
-  controller: ERunUIController;
-}): React.ReactElement {
+export function TerminalTabStrip(): React.ReactElement {
+  const controller = useController();
   const selection = useAppSelector((state) => state.selection.selected);
   const tabsByEnv = useAppSelector((state) => state.terminal.tabsByEnv);
   const activeId = useAppSelector((state) => state.terminal.sessionId);

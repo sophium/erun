@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { CheckCircle2, Cloud, LoaderCircle, LogIn, Play, Plus, Power, RefreshCw, Save, Server } from 'lucide-react';
 
-import type { ERunUIController } from '@/app/ERunUIController';
+import { useController } from '@/app/ControllerContext';
 import { readError } from '@/app/errors';
 import { useAppSelector } from '@/app/hooks';
 import type { AppState } from '@/app/state';
@@ -18,7 +18,8 @@ const dialogErrorClassName =
 
 type GlobalConfigDialog = AppState['globalConfigDialog'];
 
-export function GlobalConfigDialogView({ controller }: { controller: ERunUIController }): React.ReactElement {
+export function GlobalConfigDialogView(): React.ReactElement {
+  const controller = useController();
   const dialog = useAppSelector((state) => state.globalConfigDialog);
 
   return (
@@ -43,9 +44,9 @@ export function GlobalConfigDialogView({ controller }: { controller: ERunUIContr
             <DialogTitle>ERun settings</DialogTitle>
             <DialogDescription>Default tenant, cloud aliases, and cloud contexts shared across the app.</DialogDescription>
           </DialogHeader>
-          <GlobalConfigBody controller={controller} />
+          <GlobalConfigBody />
           <DialogError error={dialog.error} />
-          <GlobalConfigFooter controller={controller} dialog={dialog} />
+          <GlobalConfigFooter dialog={dialog} />
         </form>
       </DialogContent>
     </Dialog>
@@ -54,7 +55,8 @@ export function GlobalConfigDialogView({ controller }: { controller: ERunUIContr
 
 const NOT_CONFIGURED_VALUE = '__none__';
 
-function GlobalConfigBody({ controller }: { controller: ERunUIController }): React.ReactElement {
+function GlobalConfigBody(): React.ReactElement {
+  const controller = useController();
   const dialog = useAppSelector((state) => state.globalConfigDialog);
   const tenants = useAppSelector((state) => state.tenants.tenants);
   if (dialog.configLoading) {
@@ -75,13 +77,14 @@ function GlobalConfigBody({ controller }: { controller: ERunUIController }): Rea
         disabled={dialog.busy}
         onChange={(value) => controller.updateGlobalConfig({ defaultTenant: value === NOT_CONFIGURED_VALUE ? '' : value })}
       />
-      <CloudAliasesSection controller={controller} dialog={dialog} />
-      <CloudContextsSection controller={controller} dialog={dialog} />
+      <CloudAliasesSection dialog={dialog} />
+      <CloudContextsSection dialog={dialog} />
     </div>
   );
 }
 
-function CloudAliasesSection({ controller, dialog }: { controller: ERunUIController; dialog: GlobalConfigDialog }): React.ReactElement {
+function CloudAliasesSection({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
+  const controller = useController();
   const providers = dialog.config.cloudProviders || [];
   return (
     <div className="grid gap-2">
@@ -110,13 +113,14 @@ function CloudAliasesSection({ controller, dialog }: { controller: ERunUIControl
           }
         />
       ) : (
-        <CloudAliasList controller={controller} dialog={dialog} />
+        <CloudAliasList dialog={dialog} />
       )}
     </div>
   );
 }
 
-function CloudAliasList({ controller, dialog }: { controller: ERunUIController; dialog: GlobalConfigDialog }): React.ReactElement {
+function CloudAliasList({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
+  const controller = useController();
   return (
     <div className="overflow-hidden rounded-[var(--radius)] border border-border">
       {(dialog.config.cloudProviders || []).map((provider, index) => (
@@ -145,7 +149,8 @@ function CloudAliasSummary({ provider }: { provider: NonNullable<GlobalConfigDia
   );
 }
 
-function CloudContextsSection({ controller, dialog }: { controller: ERunUIController; dialog: GlobalConfigDialog }): React.ReactElement {
+function CloudContextsSection({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
+  const controller = useController();
   const contexts = dialog.config.cloudContexts || [];
   return (
     <div className="grid gap-2">
@@ -155,7 +160,7 @@ function CloudContextsSection({ controller, dialog }: { controller: ERunUIContro
           <RefreshCw aria-hidden="true" />
         </Button>
       </div>
-      <CloudContextDraftForm controller={controller} dialog={dialog} />
+      <CloudContextDraftForm dialog={dialog} />
       {contexts.length === 0 ? (
         <EmptyState
           icon={<Server />}
@@ -163,13 +168,14 @@ function CloudContextsSection({ controller, dialog }: { controller: ERunUIContro
           body="Pick a cloud alias and region above, then click Init to provision a new context. Contexts are reusable across environments."
         />
       ) : (
-        <CloudContextList controller={controller} dialog={dialog} />
+        <CloudContextList dialog={dialog} />
       )}
     </div>
   );
 }
 
-function CloudContextDraftForm({ controller, dialog }: { controller: ERunUIController; dialog: GlobalConfigDialog }): React.ReactElement {
+function CloudContextDraftForm({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
+  const controller = useController();
   const config = dialog.config;
   const generated = generatedContextName((config.cloudProviders || []).find((provider) => provider.alias === dialog.cloudContextDraft.cloudProviderAlias), dialog.cloudContextDraft.region, config.cloudContexts || []);
   return (
@@ -220,12 +226,13 @@ function CloudContextDraftForm({ controller, dialog }: { controller: ERunUIContr
         />
       </div>
       <p className="text-[12px] leading-[1.4] text-muted-foreground">Region, instance type, and disk size are common choices vetted for ERun. Contact an admin to expand the list.</p>
-      <CloudContextNameField controller={controller} dialog={dialog} generatedName={generated} />
+      <CloudContextNameField dialog={dialog} generatedName={generated} />
     </div>
   );
 }
 
-function CloudContextNameField({ controller, dialog, generatedName }: { controller: ERunUIController; dialog: GlobalConfigDialog; generatedName: string }): React.ReactElement {
+function CloudContextNameField({ dialog, generatedName }: { dialog: GlobalConfigDialog; generatedName: string }): React.ReactElement {
+  const controller = useController();
   return (
     <div className="grid gap-2">
       <Label htmlFor="global-config-cloudcontext-name">Context name</Label>
@@ -241,7 +248,8 @@ function CloudContextNameField({ controller, dialog, generatedName }: { controll
   );
 }
 
-function CloudContextList({ controller, dialog }: { controller: ERunUIController; dialog: GlobalConfigDialog }): React.ReactElement {
+function CloudContextList({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
+  const controller = useController();
   return (
     <div className="overflow-hidden rounded-[var(--radius)] border border-border">
       {(dialog.config.cloudContexts || []).map((context, index) => (
@@ -274,7 +282,8 @@ function DialogError({ error }: { error: string }): React.ReactElement | null {
   return error ? <div className={dialogErrorClassName} role="alert">{error}</div> : null;
 }
 
-function GlobalConfigFooter({ controller, dialog }: { controller: ERunUIController; dialog: GlobalConfigDialog }): React.ReactElement {
+function GlobalConfigFooter({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
+  const controller = useController();
   const saving = dialog.busyAction === 'save';
   return (
     <DialogFooter>

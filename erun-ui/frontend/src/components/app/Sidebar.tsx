@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { AlertCircle, CheckCircle2, Cloud, Copy, Folder, FolderOpen, LoaderCircle, LogIn, LogOut, MoreHorizontal, Plus, Settings, UserCircle2 } from 'lucide-react';
 
-import type { ERunUIController } from '@/app/ERunUIController';
+import { useController } from '@/app/ControllerContext';
 import { readError } from '@/app/errors';
 import { useAppSelector } from '@/app/hooks';
 import type { AppState } from '@/app/state';
@@ -13,7 +13,8 @@ import { EmptyState } from './EmptyState';
 import { IconTooltip } from './IconTooltip';
 import { cloudProviderStatusTone } from './StatusBadge';
 
-export function Sidebar({ controller }: { controller: ERunUIController }): React.ReactElement {
+export function Sidebar(): React.ReactElement {
+  const controller = useController();
   const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
   const tenants = useAppSelector((state) => state.tenants.tenants);
   const selected = useAppSelector((state) => state.selection.selected);
@@ -72,7 +73,7 @@ export function Sidebar({ controller }: { controller: ERunUIController }): React
           tenants.map((tenant, index) => (
             <TenantGroup
               key={tenant.name}
-              controller={controller}
+             
               tenant={tenant}
               spaced={index > 0}
               pending={pendingForTenant(tenants, selected, tenant.name)}
@@ -80,7 +81,7 @@ export function Sidebar({ controller }: { controller: ERunUIController }): React
           ))
         )}
       </div>
-      <PrimaryCloudAliasControl controller={controller} />
+      <PrimaryCloudAliasControl />
     </aside>
   );
 }
@@ -106,7 +107,8 @@ function pendingForTenant(tenants: AppState['tenants'], selected: AppState['sele
   return selected;
 }
 
-function PrimaryCloudAliasControl({ controller }: { controller: ERunUIController }): React.ReactElement | null {
+function PrimaryCloudAliasControl(): React.ReactElement | null {
+  const controller = useController();
   const tenants = useAppSelector((s) => s.tenants.tenants);
   const cloudProviders = useAppSelector((s) => s.tenants.cloudProviders);
   const selected = useAppSelector((s) => s.selection.selected);
@@ -264,12 +266,10 @@ function statusLabel(status: string): string {
 }
 
 function TenantGroup({
-  controller,
   tenant,
   spaced,
   pending,
 }: {
-  controller: ERunUIController;
   tenant: UITenant;
   spaced: boolean;
   pending: UISelection | null;
@@ -289,16 +289,16 @@ function TenantGroup({
           active && 'bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground',
         )}
       >
-        <TenantToggleButton controller={controller} tenantName={tenant.name} collapsed={collapsed} active={active} />
-        <TenantSelectButton controller={controller} tenantName={tenant.name} active={active} related={related} />
-        <TenantManageButton controller={controller} tenantName={tenant.name} active={active} />
+        <TenantToggleButton tenantName={tenant.name} collapsed={collapsed} active={active} />
+        <TenantSelectButton tenantName={tenant.name} active={active} related={related} />
+        <TenantManageButton tenantName={tenant.name} active={active} />
       </div>
       {!collapsed && (
         <div className="flex flex-col gap-0 pt-0">
           {tenant.environments.map((environment) => (
             <EnvironmentRow
               key={environment.name}
-              controller={controller}
+             
               tenantName={tenant.name}
               environmentName={environment.name}
             />
@@ -315,7 +315,8 @@ function TenantGroup({
   );
 }
 
-function TenantToggleButton({ controller, tenantName, collapsed, active }: { controller: ERunUIController; tenantName: string; collapsed: boolean; active: boolean }): React.ReactElement {
+function TenantToggleButton({ tenantName, collapsed, active }: { tenantName: string; collapsed: boolean; active: boolean }): React.ReactElement {
+  const controller = useController();
   return (
     <IconTooltip label={collapsed ? 'Expand tenant' : 'Collapse tenant'}>
       <Button
@@ -336,7 +337,8 @@ function TenantToggleButton({ controller, tenantName, collapsed, active }: { con
   );
 }
 
-function TenantSelectButton({ controller, tenantName, active, related }: { controller: ERunUIController; tenantName: string; active: boolean; related: boolean }): React.ReactElement {
+function TenantSelectButton({ tenantName, active, related }: { tenantName: string; active: boolean; related: boolean }): React.ReactElement {
+  const controller = useController();
   return (
     <button
       className={cn(
@@ -353,7 +355,8 @@ function TenantSelectButton({ controller, tenantName, active, related }: { contr
   );
 }
 
-function TenantManageButton({ controller, tenantName, active }: { controller: ERunUIController; tenantName: string; active: boolean }): React.ReactElement {
+function TenantManageButton({ tenantName, active }: { tenantName: string; active: boolean }): React.ReactElement {
+  const controller = useController();
   return (
     <IconTooltip label="Edit tenant settings">
       <Button
@@ -378,14 +381,13 @@ function TenantManageButton({ controller, tenantName, active }: { controller: ER
 }
 
 function EnvironmentRow({
-  controller,
   tenantName,
   environmentName,
 }: {
-  controller: ERunUIController;
   tenantName: string;
   environmentName: string;
 }): React.ReactElement {
+  const controller = useController();
   const selectedSelection = useAppSelector((state) => state.selection.selected);
   const tenants = useAppSelector((state) => state.tenants.tenants);
   const terminalBusy = useAppSelector((state) => state.terminalStatus.terminalBusy);

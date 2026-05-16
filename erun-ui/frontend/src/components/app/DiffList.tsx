@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { AlertCircle, PlugZap, RefreshCw } from 'lucide-react';
 
-import type { ERunUIController } from '@/app/ERunUIController';
+import { useController } from '@/app/ControllerContext';
 import { compactDiffError, diffLineMark } from '@/app/diffUtils';
 import { useAppSelector } from '@/app/hooks';
 import { reconnectCopy } from '@/app/reconnectCopy';
@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { DiffFile, DiffHunk } from '@/types';
 
-export function DiffList({ controller }: { controller: ERunUIController }): React.ReactElement {
+export function DiffList(): React.ReactElement {
+  const controller = useController();
   const review = useAppSelector((state) => state.review);
   if (review.diffLoading) {
     return <ReviewStatus>Loading diff...</ReviewStatus>;

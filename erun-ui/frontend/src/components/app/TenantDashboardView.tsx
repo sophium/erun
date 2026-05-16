@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { RefreshCw, LoaderCircle } from 'lucide-react';
 
-import type { ERunUIController } from '@/app/ERunUIController';
+import { useController } from '@/app/ControllerContext';
 import { useAppSelector } from '@/app/hooks';
 import type { AppState } from '@/app/state';
 import type { UITenant, UITenantDashboardBuild, UITenantDashboardReview, UITenantDashboardUser } from '@/types';
@@ -10,7 +10,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EmptyState } from './EmptyState';
 import { StatusBadge } from './StatusBadge';
 
-export function TenantDashboardView({ controller }: { controller: ERunUIController }): React.ReactElement | null {
+export function TenantDashboardView(): React.ReactElement | null {
+  const controller = useController();
   const dashboard = useAppSelector((state) => state.tenantDashboard);
   const tenants = useAppSelector((state) => state.tenants.tenants);
   if (!dashboard.tenant) {

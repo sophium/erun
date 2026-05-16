@@ -2,6 +2,7 @@ import * as React from 'react';
 import { AlertCircle, Blocks, CheckCircle2, Code2, Copy, Info, ListTree, LoaderCircle, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Play, Power, X } from 'lucide-react';
 
 import type { ERunUIController } from '@/app/ERunUIController';
+import { useController } from '@/app/ControllerContext';
 import { useAppSelector } from '@/app/hooks';
 import { displayableIdleStatus } from '@/app/idleStatusEligibility';
 import type { AppState } from '@/app/state';
@@ -15,22 +16,24 @@ const titlebarButtonClassName =
 
 const activeTitlebarButtonClassName = 'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground';
 
-export function Titlebar({ controller }: { controller: ERunUIController }): React.ReactElement {
+export function Titlebar(): React.ReactElement {
+  const controller = useController();
   return (
     <header
       className="relative box-border select-none border-b bg-[color-mix(in_oklch,var(--background)_94%,transparent)] [--wails-draggable:drag]"
       data-wails-drag
       onDoubleClick={(event) => controller.titlebarDoubleClick(event)}
     >
-      <TitlebarControls controller={controller} />
-      <IdleStatusWidget controller={controller} />
-      <TitlebarStatus controller={controller} />
+      <TitlebarControls />
+      <IdleStatusWidget />
+      <TitlebarStatus />
       <div className="absolute inset-0" data-wails-drag />
     </header>
   );
 }
 
-function TitlebarControls({ controller }: { controller: ERunUIController }): React.ReactElement {
+function TitlebarControls(): React.ReactElement {
+  const controller = useController();
   const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
   const reviewOpen = useAppSelector((state) => state.layout.reviewOpen);
   const filesOpen = useAppSelector((state) => state.layout.filesOpen);
@@ -131,7 +134,7 @@ function TitlebarControls({ controller }: { controller: ERunUIController }): Rea
   );
 }
 
-function IdleStatusWidget({ controller }: { controller: ERunUIController }): React.ReactElement | null {
+function IdleStatusWidget(): React.ReactElement | null {
   const rawIdleStatus = useAppSelector((state) => state.idle.idleStatus);
   const idleCloudContextBusy = useAppSelector((state) => state.idle.idleCloudContextBusy);
   const idleStatus = displayableIdleStatus(rawIdleStatus);
@@ -144,7 +147,7 @@ function IdleStatusWidget({ controller }: { controller: ERunUIController }): Rea
   return (
     <div className={cn('absolute top-3 right-[168px] z-[1] flex h-7 items-center rounded-md border bg-background [--wails-draggable:no-drag] max-[980px]:right-[146px]', idleBadge?.className)}>
       {idleStatus && idleBadge && <IdleStatusBadge idleStatus={idleStatus} idleBadge={idleBadge} hasAction={Boolean(idleAction)} />}
-      {idleAction && <IdleStatusAction controller={controller} idleAction={idleAction} hasBadge={Boolean(idleStatus)} />}
+      {idleAction && <IdleStatusAction idleAction={idleAction} hasBadge={Boolean(idleStatus)} />}
     </div>
   );
 }
@@ -166,7 +169,8 @@ function IdleStatusBadge({ idleStatus, idleBadge, hasAction }: { idleStatus: Idl
   );
 }
 
-function IdleStatusAction({ controller, idleAction, hasBadge }: { controller: ERunUIController; idleAction: { action: 'start' | 'stop'; label: string; busy: boolean }; hasBadge: boolean }): React.ReactElement {
+function IdleStatusAction({ idleAction, hasBadge }: { idleAction: { action: 'start' | 'stop'; label: string; busy: boolean }; hasBadge: boolean }): React.ReactElement {
+  const controller = useController();
   const IdleActionIcon = idleAction.busy ? LoaderCircle : idleAction.action === 'start' ? Play : Power;
   return (
     <IconTooltip label={idleAction.label}>
@@ -204,7 +208,7 @@ const statusIconClassNames: Record<TitlebarStatusKind, string> = {
   info: 'text-muted-foreground',
 };
 
-function TitlebarStatus({ controller }: { controller: ERunUIController }): React.ReactElement | null {
+function TitlebarStatus(): React.ReactElement | null {
   const notification = useAppSelector((state) => state.notification.notification);
   const terminalStatus = useAppSelector((state) => state.terminalStatus);
   const rawIdleStatus = useAppSelector((state) => state.idle.idleStatus);
@@ -221,9 +225,9 @@ function TitlebarStatus({ controller }: { controller: ERunUIController }): React
       <div className={cn('pointer-events-auto flex h-8 max-w-full items-center gap-2 rounded-md border bg-background px-2.5 text-[13px] leading-none shadow-sm', statusBorderClassNames[status.kind])}>
         <StatusIcon status={status} />
         <StatusMessage status={status} />
-        {status.action === 'wait-longer' && <StatusWaitAction controller={controller} />}
-        {status.copyOutput && <StatusCopyAction controller={controller} status={status} />}
-        <StatusDismissAction controller={controller} status={status} />
+        {status.action === 'wait-longer' && <StatusWaitAction />}
+        {status.copyOutput && <StatusCopyAction status={status} />}
+        <StatusDismissAction status={status} />
       </div>
     </div>
   );
@@ -314,7 +318,8 @@ function StatusMessage({ status }: { status: TitlebarStatusValue }): React.React
   );
 }
 
-function StatusWaitAction({ controller }: { controller: ERunUIController }): React.ReactElement {
+function StatusWaitAction(): React.ReactElement {
+  const controller = useController();
   return (
     <Button className="h-6 flex-none rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground" type="button" variant="ghost" size="xs" onClick={() => { void controller.waitLongerForTerminalStatus(); }}>
       Wait longer
@@ -322,7 +327,8 @@ function StatusWaitAction({ controller }: { controller: ERunUIController }): Rea
   );
 }
 
-function StatusCopyAction({ controller, status }: { controller: ERunUIController; status: TitlebarStatusValue }): React.ReactElement {
+function StatusCopyAction({ status }: { status: TitlebarStatusValue }): React.ReactElement {
+  const controller = useController();
   return (
     <IconTooltip label="Copy terminal output">
       <Button className="h-6 flex-none gap-1 rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground [&_svg]:size-3.5" type="button" variant="ghost" size="xs" onClick={() => { void controller.copyTerminalOutput(); }}>
@@ -333,7 +339,8 @@ function StatusCopyAction({ controller, status }: { controller: ERunUIController
   );
 }
 
-function StatusDismissAction({ controller, status }: { controller: ERunUIController; status: TitlebarStatusValue }): React.ReactElement {
+function StatusDismissAction({ status }: { status: TitlebarStatusValue }): React.ReactElement {
+  const controller = useController();
   return (
     <IconTooltip label="Dismiss status">
       <Button className="-mr-1 size-6 flex-none text-muted-foreground hover:bg-accent hover:text-accent-foreground [&_svg]:size-3.5" type="button" variant="ghost" size="icon-xs" aria-label="Dismiss status" onClick={() => dismissTitlebarStatus(controller, status)}>
