@@ -27,9 +27,6 @@ export const tenantsSlice = createSlice({
     setVersionSuggestions(state, action: PayloadAction<UIVersionSuggestion[]>) {
       state.versionSuggestions = action.payload;
     },
-    setAll(_state, action: PayloadAction<TenantsState>) {
-      return action.payload;
-    },
   },
 });
 
@@ -37,6 +34,5 @@ export const {
   setTenants,
   setCloudProviders,
   setVersionSuggestions,
-  setAll: setTenantsAll,
 } = tenantsSlice.actions;
 export default tenantsSlice.reducer;

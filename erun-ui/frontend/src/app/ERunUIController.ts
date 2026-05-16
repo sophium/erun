@@ -10,7 +10,9 @@ import { reviewApi } from './api/reviewApi';
 import { sessionApi } from './api/sessionApi';
 import { stateApi } from './api/stateApi';
 import { tenantApi } from './api/tenantApi';
-import { mirrorAppStateToRedux } from './mirrorAppState';
+import { createControllerStateProxy } from './controllerStateProxy';
+import { toggleTenantCollapsed } from './slices/sidebarSlice';
+import { toggleDiffDirCollapsed } from './slices/reviewSlice';
 import { store } from './store';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import {
@@ -68,8 +70,6 @@ import {
   MIN_REVIEW_WIDTH,
   computeMaxReviewWidth,
   defaultEnvironmentDialog,
-  defaultGlobalConfigDialog,
-  defaultManageDialog,
   defaultTenantDashboard,
   defaultTenantDialog,
   type AppState,
@@ -96,13 +96,7 @@ function compareTabs(a: TerminalTab, b: TerminalTab): number {
 
 import {
   clamp,
-  loadSavedDebugHeight,
-  loadSavedDebugOpen,
-  loadSavedFilesOpen,
-  loadSavedFilesWidth,
   loadSavedPastContainerRegistries,
-  loadSavedReviewWidth,
-  loadSavedSidebarWidth,
 } from './storage';
 import {
   classifiedTerminalFailure,
@@ -139,54 +133,7 @@ import type {
 const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 
 export class ERunUIController {
-  readonly state: AppState = {
-    tenants: [],
-    cloudProviders: [],
-    selected: null,
-    versionSuggestions: [],
-    environmentDialog: defaultEnvironmentDialog(),
-    manageDialog: defaultManageDialog(),
-    tenantDialog: defaultTenantDialog(),
-    tenantDashboard: defaultTenantDashboard(),
-    globalConfigDialog: defaultGlobalConfigDialog(),
-    collapsedTenants: new Set<string>(),
-    sessionId: 0,
-    tabsByEnv: {},
-    selectedSessionByEnv: {},
-    sidebarWidth: loadSavedSidebarWidth(),
-    reviewWidth: loadSavedReviewWidth(),
-    filesWidth: loadSavedFilesWidth(),
-    filesOpen: loadSavedFilesOpen(),
-    sidebarHidden: false,
-    reviewOpen: false,
-    changedFilesOpen: true,
-    diff: null,
-    diffLoading: false,
-    diffError: '',
-    diffErrorReconnectable: false,
-    reconnect: { status: 'idle', lastLine: '', error: '' },
-    selectedDiffPath: '',
-    selectedReviewScope: 'current',
-    selectedReviewCommit: '',
-    diffFilter: '',
-    collapsedDiffDirs: new Set<string>(),
-    notification: null,
-    terminalMessage: '',
-    terminalStatusKind: 'info',
-    terminalStatusDetail: '',
-    terminalStatusAction: '',
-    terminalBusy: false,
-    terminalCopyOutput: '',
-    terminalCopyStatus: '',
-    idleStatus: null,
-    idleCloudContextBusy: false,
-    sidebarCloudAliasBusy: false,
-    sidebarCloudAliasAction: '',
-    debugOpen: loadSavedDebugOpen(),
-    debugHeight: loadSavedDebugHeight(),
-    debugOutput: '',
-    lastDoctorBySelection: {},
-  };
+  readonly state: AppState = createControllerStateProxy(store);
 
   private readonly subscribers = new Set<() => void>();
   private readonly sessions = new TerminalSessionRegistry();
@@ -452,11 +399,7 @@ export class ERunUIController {
   }
 
   toggleTenant(tenant: string): void {
-    if (this.state.collapsedTenants.has(tenant)) {
-      this.state.collapsedTenants.delete(tenant);
-    } else {
-      this.state.collapsedTenants.add(tenant);
-    }
+    store.dispatch(toggleTenantCollapsed(tenant));
     this.emit();
   }
 
@@ -895,15 +838,13 @@ export class ERunUIController {
     if (this.state.environmentDialog.busy) {
       return;
     }
+    const versionReset = values.version !== undefined;
     this.state.environmentDialog = {
       ...this.state.environmentDialog,
       ...values,
       error: values.error ?? '',
+      ...(versionReset ? { versionImage: '', choicesOpen: false } : {}),
     };
-    if (values.version !== undefined) {
-      this.state.environmentDialog.versionImage = '';
-      this.state.environmentDialog.choicesOpen = false;
-    }
     this.emit();
     if (values.tenant !== undefined) {
       this.scheduleDialogVersionSuggestionRefresh(true);
@@ -1594,11 +1535,7 @@ export class ERunUIController {
   }
 
   toggleDiffDirectory(path: string): void {
-    if (this.state.collapsedDiffDirs.has(path)) {
-      this.state.collapsedDiffDirs.delete(path);
-    } else {
-      this.state.collapsedDiffDirs.add(path);
-    }
+    store.dispatch(toggleDiffDirCollapsed(path));
     this.emit();
   }
 
@@ -1734,7 +1671,6 @@ export class ERunUIController {
   }
 
   private emit(): void {
-    mirrorAppStateToRedux(store.dispatch, store.getState(), this.state);
     this.subscribers.forEach((subscriber) => subscriber());
   }
 

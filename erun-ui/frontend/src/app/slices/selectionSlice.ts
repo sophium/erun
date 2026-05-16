@@ -17,11 +17,8 @@ export const selectionSlice = createSlice({
     setSelected(state, action: PayloadAction<UISelection | null>) {
       state.selected = action.payload;
     },
-    setAll(_state, action: PayloadAction<SelectionState>) {
-      return action.payload;
-    },
   },
 });
 
-export const { setSelected, setAll: setSelectionAll } = selectionSlice.actions;
+export const { setSelected } = selectionSlice.actions;
 export default selectionSlice.reducer;

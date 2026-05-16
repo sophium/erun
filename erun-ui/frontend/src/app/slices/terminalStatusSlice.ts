@@ -59,9 +59,6 @@ export const terminalStatusSlice = createSlice({
     setTerminalCopyOutput(state, action: PayloadAction<string>) {
       state.terminalCopyOutput = action.payload;
     },
-    setAll(_state, action: PayloadAction<TerminalStatusState>) {
-      return action.payload;
-    },
   },
 });
 
@@ -71,6 +68,5 @@ export const {
   setTerminalCopy,
   setTerminalCopyStatus,
   setTerminalCopyOutput,
-  setAll: setTerminalStatusAll,
 } = terminalStatusSlice.actions;
 export default terminalStatusSlice.reducer;

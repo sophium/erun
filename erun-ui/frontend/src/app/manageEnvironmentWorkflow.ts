@@ -110,15 +110,13 @@ export class ManageEnvironmentWorkflow {
     if (this.state.manageDialog.busy) {
       return;
     }
+    const versionReset = values.version !== undefined;
     this.state.manageDialog = {
       ...this.state.manageDialog,
       ...values,
       error: values.error ?? '',
+      ...(versionReset ? { versionImage: '', choicesOpen: false } : {}),
     };
-    if (values.version !== undefined) {
-      this.state.manageDialog.versionImage = '';
-      this.state.manageDialog.choicesOpen = false;
-    }
     this.deps.emit();
   }
 

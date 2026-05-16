@@ -70,9 +70,6 @@ export const layoutSlice = createSlice({
     setDebugOpen(state, action: PayloadAction<boolean>) {
       state.debugOpen = action.payload;
     },
-    setAll(_state, action: PayloadAction<LayoutState>) {
-      return action.payload;
-    },
   },
 });
 
@@ -86,7 +83,6 @@ export const {
   setFilesOpen,
   setChangedFilesOpen,
   setDebugOpen,
-  setAll: setLayoutAll,
 } = layoutSlice.actions;
 
 export default layoutSlice.reducer;
