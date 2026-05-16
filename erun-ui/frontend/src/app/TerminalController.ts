@@ -108,7 +108,7 @@ import type {
 
 const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 
-export class ERunUIController {
+export class TerminalController {
   readonly sessions = new TerminalSessionRegistry();
   private pendingDebugHeader = '';
   private terminal: Terminal | null = null;

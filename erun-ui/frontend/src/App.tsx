@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { CheckCircle2, ChevronDown, ChevronUp, Copy, LoaderCircle, Trash2 } from 'lucide-react';
 
-import { ERunUIController } from '@/app/ERunUIController';
+import { TerminalController } from '@/app/TerminalController';
 import { readError } from '@/app/errors';
 import { useActivityQueue, useTerminalActivityLockState } from '@/app/activityQueueState';
 import { ControllerProvider, useController } from '@/app/ControllerContext';
@@ -41,7 +41,7 @@ const debugSplitterClassName =
   'relative cursor-row-resize bg-[oklch(0.06_0_0)] before:absolute before:left-0 before:right-0 before:top-1 before:h-px before:bg-transparent before:transition-colors hover:before:bg-[oklch(0.36_0_0)] [.is-resizing-debug_&]:before:bg-[oklch(0.46_0_0)]';
 
 export function App(): React.ReactElement {
-  const controller = React.useMemo(() => new ERunUIController(), []);
+  const controller = React.useMemo(() => new TerminalController(), []);
   const dispatch = useAppDispatch();
   const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
   const terminalRootRef = React.useRef<HTMLDivElement>(null);

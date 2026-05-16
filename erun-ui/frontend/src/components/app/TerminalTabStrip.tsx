@@ -16,6 +16,7 @@ export function TerminalTabStrip(): React.ReactElement {
   const selection = useAppSelector((state) => state.selection.selected);
   const tabsByEnv = useAppSelector((state) => state.terminal.tabsByEnv);
   const activeId = useAppSelector((state) => state.terminal.sessionId);
+  const tabRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
   const stripBaseClass = 'flex h-8 items-end border-b border-[oklch(0.18_0_0)] bg-[oklch(0.05_0_0)] pl-2 pr-1';
 
   if (!selection) {
@@ -23,7 +24,6 @@ export function TerminalTabStrip(): React.ReactElement {
   }
 
   const tabs = tabsByEnv[selectionKey(selection)] || [];
-  const tabRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
   tabRefs.current.length = tabs.length;
 
   const focusTab = (index: number) => {

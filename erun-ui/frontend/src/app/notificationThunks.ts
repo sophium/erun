@@ -17,8 +17,8 @@ import type { UISelection } from '@/types';
 
 // notificationThunks own the titlebar terminal-status message lifecycle and
 // the toast-style notification slot. The timers and the wait-longer retry
-// target previously lived on ERunUIController fields; module-level state
-// is sufficient for the singleton-controller case.
+// target previously lived on the controller; module-level state is sufficient
+// for the singleton-controller case.
 
 let notificationTimer = 0;
 let terminalCopyStatusTimer = 0;
