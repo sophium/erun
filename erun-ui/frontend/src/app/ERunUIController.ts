@@ -138,7 +138,8 @@ export class ERunUIController {
   // Redux's store.subscribe (via react-redux's useSyncExternalStore) drives
   // component re-renders now. The controller's own subscribe / emit are kept
   // as no-ops to avoid churning every call site in this PR; future work
-  // should delete the emit() invocations entirely.
+  // should delete the emit() invocations entirely. Components no longer
+  // call controller.subscribe; they read via useAppSelector instead.
   private readonly sessions = new TerminalSessionRegistry();
   private pendingDebugHeader = '';
   private terminal: Terminal | null = null;
@@ -211,7 +212,7 @@ export class ERunUIController {
 
   subscribe = (_subscriber: () => void): (() => void) => {
     return () => {
-      /* no-op: useControllerState reads from Redux, which has its own subscription. */
+      /* no-op: components subscribe to Redux directly via useAppSelector. */
     };
   };
 

@@ -5,10 +5,11 @@ import type { RootState } from './store';
 
 export const selectActivityLocks = (state: RootState) => state.activity.locksBySession;
 
-// Components read the legacy AppState shape via useControllerState. The shape
-// is reassembled from the discrete slices so consumers do not have to change
-// while ERunUIController moves toward dispatch-only writes. createSelector
-// memoizes the result so React re-renders only when an input slice changes.
+// controllerStateProxy uses selectAppState to give ERunUIController and the
+// workflow classes a single read-through view of the Redux slices. The shape
+// matches the legacy AppState type, including Set<string> for collapsedTenants
+// and collapsedDiffDirs. createSelector memoizes so reads only allocate a new
+// object when an input slice changes.
 export const selectAppState = createSelector(
   [
     (state: RootState) => state.selection.selected,

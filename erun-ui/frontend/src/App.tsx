@@ -4,7 +4,7 @@ import { CheckCircle2, ChevronDown, ChevronUp, Copy, LoaderCircle, Trash2 } from
 import { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
 import { useActivityQueue, useTerminalActivityLockState } from '@/app/activityQueueState';
-import { useControllerState } from '@/app/useControllerState';
+import { useAppSelector } from '@/app/hooks';
 import { ActivityLockOverlay } from '@/components/app/ActivityLockOverlay';
 import { ActivityQueueDrawer } from '@/components/app/ActivityQueueDrawer';
 import { TerminalTabStrip } from '@/components/app/TerminalTabStrip';
@@ -34,7 +34,7 @@ const debugSplitterClassName =
 
 export function App(): React.ReactElement {
   const controller = React.useMemo(() => new ERunUIController(), []);
-  const state = useControllerState(controller);
+  const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
   const terminalRootRef = React.useRef<HTMLDivElement>(null);
   const terminalPaneRef = React.useRef<HTMLElement>(null);
   const reviewViewRef = React.useRef<HTMLElement>(null);
@@ -62,12 +62,12 @@ export function App(): React.ReactElement {
         <div
           className={cn(
             'grid h-full min-h-0 overflow-hidden',
-            state.sidebarHidden ? 'grid-cols-[0_0_minmax(0,1fr)]' : 'grid-cols-[var(--sidebar-width)_10px_minmax(0,1fr)]',
+            sidebarHidden ? 'grid-cols-[0_0_minmax(0,1fr)]' : 'grid-cols-[var(--sidebar-width)_10px_minmax(0,1fr)]',
           )}
         >
           <Sidebar controller={controller} />
           <div
-            className={cn(splitterClassName, state.sidebarHidden && 'pointer-events-none')}
+            className={cn(splitterClassName, sidebarHidden && 'pointer-events-none')}
             role="separator"
             aria-orientation="vertical"
             aria-label="Resize sidebar"
@@ -75,7 +75,6 @@ export function App(): React.ReactElement {
           />
           <MainPane
             controller={controller}
-            state={state}
             terminalPaneRef={terminalPaneRef}
             terminalRootRef={terminalRootRef}
             reviewViewRef={reviewViewRef}
@@ -132,7 +131,6 @@ function ActivityQueueLauncher({ open, onOpen, onClose }: { open: boolean; onOpe
 
 function MainPane({
   controller,
-  state,
   terminalPaneRef,
   terminalRootRef,
   reviewViewRef,
@@ -141,7 +139,6 @@ function MainPane({
   onOpenActivityQueue,
 }: {
   controller: ERunUIController;
-  state: ReturnType<typeof useControllerState>;
   terminalPaneRef: React.RefObject<HTMLElement | null>;
   terminalRootRef: React.RefObject<HTMLDivElement | null>;
   reviewViewRef: React.RefObject<HTMLElement | null>;
@@ -149,25 +146,28 @@ function MainPane({
   diffListRef: React.RefObject<HTMLDivElement | null>;
   onOpenActivityQueue: () => void;
 }): React.ReactElement {
-  const dashboardOpen = Boolean(state.tenantDashboard.tenant);
+  const dashboardTenant = useAppSelector((state) => state.tenantDashboard.tenant);
+  const debugOpen = useAppSelector((state) => state.layout.debugOpen);
+  const debugOutput = useAppSelector((state) => state.terminal.debugOutput);
+  const sessionId = useAppSelector((state) => state.terminal.sessionId);
+  const dashboardOpen = Boolean(dashboardTenant);
   return (
     <main
       ref={terminalPaneRef}
       className={cn(
         'grid h-full min-h-0 min-w-0 overflow-hidden bg-terminal',
-        dashboardOpen ? 'grid-rows-[minmax(0,1fr)] bg-background' : state.debugOpen ? 'grid-rows-[minmax(0,1fr)_var(--debug-height)]' : 'grid-rows-[minmax(0,1fr)_34px]',
+        dashboardOpen ? 'grid-rows-[minmax(0,1fr)] bg-background' : debugOpen ? 'grid-rows-[minmax(0,1fr)_var(--debug-height)]' : 'grid-rows-[minmax(0,1fr)_34px]',
       )}
     >
       {dashboardOpen && <TenantDashboardView controller={controller} />}
-      <TerminalPane controller={controller} state={state} hidden={dashboardOpen} terminalRootRef={terminalRootRef} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} onOpenActivityQueue={onOpenActivityQueue} />
-      {!dashboardOpen && <DebugPanel controller={controller} open={state.debugOpen} output={state.debugOutput} sessionId={state.sessionId} verbose={controller.activeSessionDebug(state.sessionId)} />}
+      <TerminalPane controller={controller} hidden={dashboardOpen} terminalRootRef={terminalRootRef} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} onOpenActivityQueue={onOpenActivityQueue} />
+      {!dashboardOpen && <DebugPanel controller={controller} open={debugOpen} output={debugOutput} sessionId={sessionId} verbose={controller.activeSessionDebug(sessionId)} />}
     </main>
   );
 }
 
 function TerminalPane({
   controller,
-  state,
   hidden,
   terminalRootRef,
   reviewViewRef,
@@ -176,7 +176,6 @@ function TerminalPane({
   onOpenActivityQueue,
 }: {
   controller: ERunUIController;
-  state: ReturnType<typeof useControllerState>;
   hidden: boolean;
   terminalRootRef: React.RefObject<HTMLDivElement | null>;
   reviewViewRef: React.RefObject<HTMLElement | null>;
@@ -184,9 +183,13 @@ function TerminalPane({
   diffListRef: React.RefObject<HTMLDivElement | null>;
   onOpenActivityQueue: () => void;
 }): React.ReactElement {
+  const sessionId = useAppSelector((state) => state.terminal.sessionId);
+  const reviewOpen = useAppSelector((state) => state.layout.reviewOpen);
+  const terminalBusy = useAppSelector((state) => state.terminalStatus.terminalBusy);
+  const terminalMessage = useAppSelector((state) => state.terminalStatus.terminalMessage);
   const locks = useTerminalActivityLockState();
   const [hiddenLockSessions, setHiddenLockSessions] = React.useState<Set<number>>(() => new Set());
-  const liveLock = locks.get(state.sessionId) ?? null;
+  const liveLock = locks.get(sessionId) ?? null;
   // The user can dismiss the overlay locally for a session if it's
   // covering output they need to read or input they need to provide
   // (e.g. the in-pod CLI's helm-recovery prompt). Backend keeps the
@@ -196,25 +199,25 @@ function TerminalPane({
       setHiddenLockSessions((prev) => {
         if (prev.size === 0) return prev;
         const next = new Set(prev);
-        next.delete(state.sessionId);
+        next.delete(sessionId);
         return next;
       });
     }
-  }, [liveLock, state.sessionId]);
-  const activeLock = liveLock && !hiddenLockSessions.has(state.sessionId) ? liveLock : null;
+  }, [liveLock, sessionId]);
+  const activeLock = liveLock && !hiddenLockSessions.has(sessionId) ? liveLock : null;
   const hideActiveLock = React.useCallback(() => {
     setHiddenLockSessions((prev) => {
       const next = new Set(prev);
-      next.add(state.sessionId);
+      next.add(sessionId);
       return next;
     });
-  }, [state.sessionId]);
+  }, [sessionId]);
   return (
     <div
       className={cn(
         'grid min-h-0 min-w-0 grid-cols-[minmax(360px,1fr)] overflow-hidden',
         hidden && 'hidden',
-        state.reviewOpen &&
+        reviewOpen &&
           'grid-cols-[minmax(360px,1fr)_10px_minmax(420px,var(--review-width))] max-[980px]:grid-cols-[minmax(260px,1fr)_10px_minmax(360px,min(var(--review-width),58vw))]',
       )}
     >
@@ -223,11 +226,11 @@ function TerminalPane({
         {/* Padding lives on the wrapper, not on the FitAddon parent: xterm's FitAddon reads the parent's computed height but does not subtract its padding, so any padding on terminalRoot would over-count rows and clip the bottom line. */}
         <div id="erun-terminal-pane" className="relative h-full min-h-0 min-w-0 overflow-hidden box-border px-4 pt-3.5">
           <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full" />
-          <TerminalBusyOverlay message={state.terminalBusy ? state.terminalMessage : ''} />
+          <TerminalBusyOverlay message={terminalBusy ? terminalMessage : ''} />
           {activeLock && <ActivityLockOverlay lock={activeLock} onOpenQueue={onOpenActivityQueue} onProceedAnyway={hideActiveLock} />}
         </div>
       </div>
-      <div className={cn(reviewSplitterClassName, !state.reviewOpen && 'hidden')} role="separator" aria-orientation="vertical" aria-label="Resize diff panel" onMouseDown={(event) => controller.startReviewResize(event)} />
+      <div className={cn(reviewSplitterClassName, !reviewOpen && 'hidden')} role="separator" aria-orientation="vertical" aria-label="Resize diff panel" onMouseDown={(event) => controller.startReviewResize(event)} />
       <ReviewPanel controller={controller} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} />
     </div>
   );
