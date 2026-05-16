@@ -8,13 +8,13 @@ import { idleApi } from './api/idleApi';
 import { kubernetesApi } from './api/kubernetesApi';
 import { reviewApi } from './api/reviewApi';
 import { sessionApi } from './api/sessionApi';
+import { stateApi } from './api/stateApi';
 import { tenantApi } from './api/tenantApi';
 import { mirrorAppStateToRedux } from './mirrorAppState';
 import { store } from './store';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import {
   CloseSession,
-  LoadState,
   ResizeSession,
   SendSessionInput,
   StartAISession,
@@ -130,7 +130,6 @@ import type {
   UIERunConfig,
   UIEnvironmentConfig,
   UISelection,
-  UIState,
   UITenant,
   UITenantDashboardInput,
   UITenantConfig,
@@ -1793,7 +1792,9 @@ export class ERunUIController {
   private async boot(): Promise<void> {
     try {
       this.showTerminalMessage('Loading environments...', true);
-      const loaded = (await LoadState()) as UIState;
+      const loaded = await store
+        .dispatch(stateApi.endpoints.getInitialState.initiate(undefined, { forceRefetch: true }))
+        .unwrap();
       this.state.tenants = loaded.tenants || [];
       this.state.cloudProviders = loaded.cloudProviders || [];
       this.state.selected = loaded.selected || null;
@@ -1879,7 +1880,9 @@ export class ERunUIController {
 
   private async reloadStateAfterEnvironmentChange(): Promise<void> {
     try {
-      const loaded = (await LoadState()) as UIState;
+      const loaded = await store
+        .dispatch(stateApi.endpoints.getInitialState.initiate(undefined, { forceRefetch: true }))
+        .unwrap();
       this.state.tenants = loaded.tenants || [];
       this.state.cloudProviders = loaded.cloudProviders || this.state.cloudProviders;
       this.state.versionSuggestions = normalizeVersionSuggestions(loaded.versionSuggestions || this.state.versionSuggestions);
