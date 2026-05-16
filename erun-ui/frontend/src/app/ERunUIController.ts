@@ -14,6 +14,7 @@ import { createControllerStateProxy } from './controllerStateProxy';
 import { toggleTenantCollapsed } from './slices/sidebarSlice';
 import { toggleDiffDirCollapsed } from './slices/reviewSlice';
 import { store } from './store';
+import { thunkExtra } from './thunkExtra';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import {
   CloseSession,
@@ -35,8 +36,44 @@ import {
   rememberEnvironmentDialogSelection,
   validEnvironmentDialogValues,
 } from './environmentDialogState';
-import { GlobalConfigWorkflow } from './globalConfigWorkflow';
-import { ManageEnvironmentWorkflow } from './manageEnvironmentWorkflow';
+import {
+  closeGlobalConfigDialog as closeGlobalConfigDialogThunk,
+  initGlobalCloudContext as initGlobalCloudContextThunk,
+  loadGlobalConfig as loadGlobalConfigThunk,
+  loginGlobalCloudProvider as loginGlobalCloudProviderThunk,
+  openGlobalConfigDialog as openGlobalConfigDialogThunk,
+  refreshCloudContexts as refreshCloudContextsThunk,
+  refreshCloudProviders as refreshCloudProvidersThunk,
+  startAWSCloudInit as startAWSCloudInitThunk,
+  startGlobalCloudContext as startGlobalCloudContextThunk,
+  stopGlobalCloudContext as stopGlobalCloudContextThunk,
+  submitGlobalConfig as submitGlobalConfigThunk,
+  toggleIdleCloudContext as toggleIdleCloudContextThunk,
+  updateCloudContextDraft as updateCloudContextDraftThunk,
+  updateGlobalConfig as updateGlobalConfigThunk,
+  updateGlobalConfigDialog as updateGlobalConfigDialogThunk,
+} from './globalConfigThunks';
+import {
+  chooseWorkspaceSyncLocalFolder as chooseWorkspaceSyncLocalFolderThunk,
+  closeManageDialog as closeManageDialogThunk,
+  enableManageSSHD as enableManageSSHDThunk,
+  loadManageConfig as loadManageConfigThunk,
+  openManageDialog as openManageDialogThunk,
+  selectManageVersionSuggestion as selectManageVersionSuggestionThunk,
+  setManageTab as setManageTabThunk,
+  setManageVersionChoicesOpen as setManageVersionChoicesOpenThunk,
+  startManageCloudContext as startManageCloudContextThunk,
+  startManageDoctor as startManageDoctorThunk,
+  stopManageCloudContext as stopManageCloudContextThunk,
+  submitManageConfig as submitManageConfigThunk,
+  submitManageDelete as submitManageDeleteThunk,
+  submitManageDeploy as submitManageDeployThunk,
+  toggleManageVersionChoices as toggleManageVersionChoicesThunk,
+  updateManageClaudeConfig as updateManageClaudeConfigThunk,
+  updateManageConfig as updateManageConfigThunk,
+  updateManageDialog as updateManageDialogThunk,
+  updateManageSSHDConfig as updateManageSSHDConfigThunk,
+} from './manageEnvironmentThunks';
 import {
   setDebugOpen as applyDebugOpen,
   setFilesOpen as applyFilesOpen,
@@ -135,7 +172,7 @@ const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 export class ERunUIController {
   readonly state: AppState = createControllerStateProxy(store);
 
-  private readonly sessions = new TerminalSessionRegistry();
+  readonly sessions = new TerminalSessionRegistry();
   private pendingDebugHeader = '';
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
@@ -168,40 +205,18 @@ export class ERunUIController {
   private environmentsChangedOff: (() => void) | null = null;
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
   private terminalStatusRetrySelection: UISelection | null = null;
-  private readonly globalConfig = new GlobalConfigWorkflow({
-    state: this.state,
-    sessions: this.sessions,
-    terminalSize: () => ({ cols: this.terminal?.cols || 80, rows: this.terminal?.rows || 24 }),
-    fitTerminal: () => this.fitAddon?.fit(),
-    resetTerminal: () => this.resetTerminal(),
-    focusTerminalSoon: () => this.focusTerminalSoon(),
-    queueTerminalResize: () => this.queueTerminalResize(),
-    openSelection: (selection) => this.openSelection(selection),
-    refreshIdleStatus: () => { void this.refreshIdleStatus(); },
-    refreshKubernetesContexts: () => { void this.refreshKubernetesContexts(); },
-    hideTerminalMessage: () => this.hideTerminalMessage(),
-    showNotification: (kind, message) => this.showNotification(kind, message),
-    showTerminalMessage: (message, busy) => this.showTerminalMessage(message, busy),
-  });
-  private readonly manageEnvironment = new ManageEnvironmentWorkflow({
-    state: this.state,
-    sessions: this.sessions,
-    terminalSize: () => ({ cols: this.terminal?.cols || 80, rows: this.terminal?.rows || 24 }),
-    fitTerminal: () => this.fitAddon?.fit(),
-    resetTerminal: () => this.resetTerminal(),
-    focusTerminalSoon: () => this.focusTerminalSoon(),
-    queueTerminalResize: () => this.queueTerminalResize(),
-    refreshKubernetesContexts: () => { void this.refreshKubernetesContexts(); },
-    reloadStateAfterEnvironmentChange: () => this.reloadStateAfterEnvironmentChange(),
-    resolveRuntimeImage: (version) => this.resolveManageRuntimeImage(version),
-    startDeploySelection: (selection) => this.startDeploySelection(selection),
-    activateLocalAfterCommand: (selection, result) => this.activateLocalAfterCommand(selection, result),
-    showNotification: (kind, message) => this.showNotification(kind, message),
-    showTerminalMessage: (message, busy) => this.showTerminalMessage(message, busy),
-    setPendingDebugHeader: (header) => this.setPendingDebugHeader(header),
-    applyPendingDebugHeader: (sessionId) => this.applyPendingDebugHeader(sessionId),
-    syncDebugDisplay: () => this.syncDebugDisplay(),
-  });
+
+  constructor() {
+    thunkExtra.controller = this;
+  }
+
+  terminalSize(): { cols: number; rows: number } {
+    return { cols: this.terminal?.cols || 80, rows: this.terminal?.rows || 24 };
+  }
+
+  fitTerminal(): void {
+    this.fitAddon?.fit();
+  }
 
   mount(elements: MountElements): () => void {
     this.terminalRoot = elements.terminalRoot;
@@ -935,127 +950,127 @@ export class ERunUIController {
   }
 
   openManageDialog(selection: UISelection): void {
-    this.manageEnvironment.openDialog(selection);
+    store.dispatch(openManageDialogThunk(selection));
   }
 
   closeManageDialog(): void {
-    this.manageEnvironment.closeDialog();
+    store.dispatch(closeManageDialogThunk());
   }
 
   setManageTab(tab: ManageTab): void {
-    this.manageEnvironment.setTab(tab);
+    store.dispatch(setManageTabThunk(tab));
   }
 
   updateManageDialog(values: Partial<ManageDialogState>): void {
-    this.manageEnvironment.updateDialog(values);
+    store.dispatch(updateManageDialogThunk(values));
   }
 
   toggleManageVersionChoices(): void {
-    this.manageEnvironment.toggleVersionChoices();
+    store.dispatch(toggleManageVersionChoicesThunk());
   }
 
   setManageVersionChoicesOpen(open: boolean): void {
-    this.manageEnvironment.setVersionChoicesOpen(open);
+    store.dispatch(setManageVersionChoicesOpenThunk(open));
   }
 
   selectManageVersionSuggestion(suggestion: UIVersionSuggestion | undefined): void {
-    this.manageEnvironment.selectVersionSuggestion(suggestion);
+    store.dispatch(selectManageVersionSuggestionThunk(suggestion));
   }
 
   updateManageConfig(values: Partial<UIEnvironmentConfig>): void {
-    this.manageEnvironment.updateConfig(values);
+    store.dispatch(updateManageConfigThunk(values));
   }
 
   updateManageSSHDConfig(values: Partial<UIEnvironmentConfig['sshd']>): void {
-    this.manageEnvironment.updateSSHDConfig(values);
+    store.dispatch(updateManageSSHDConfigThunk(values));
   }
 
   updateManageClaudeConfig(values: Partial<UIEnvironmentConfig['claude']>): void {
-    this.manageEnvironment.updateClaudeConfig(values);
+    store.dispatch(updateManageClaudeConfigThunk(values));
   }
 
   async chooseWorkspaceSyncLocalFolder(): Promise<void> {
-    await this.manageEnvironment.chooseWorkspaceSyncLocalFolder();
+    await store.dispatch(chooseWorkspaceSyncLocalFolderThunk());
   }
 
   async loadManageConfig(): Promise<void> {
-    await this.manageEnvironment.loadConfig();
+    await store.dispatch(loadManageConfigThunk());
   }
 
   async submitManageConfig(): Promise<void> {
-    await this.manageEnvironment.submitConfig();
+    await store.dispatch(submitManageConfigThunk());
   }
 
   async startManageCloudContext(name: string): Promise<void> {
-    await this.manageEnvironment.startCloudContext(name);
+    await store.dispatch(startManageCloudContextThunk(name));
   }
 
   async enableManageSSHD(): Promise<void> {
-    await this.manageEnvironment.enableSSHD();
+    await store.dispatch(enableManageSSHDThunk());
   }
 
   async startManageDoctor(): Promise<void> {
-    await this.manageEnvironment.startDoctor();
+    await store.dispatch(startManageDoctorThunk());
   }
 
   async stopManageCloudContext(name: string): Promise<void> {
-    await this.manageEnvironment.stopCloudContext(name);
+    await store.dispatch(stopManageCloudContextThunk(name));
   }
 
   openGlobalConfigDialog(): void {
-    this.globalConfig.openDialog();
+    store.dispatch(openGlobalConfigDialogThunk());
   }
 
   closeGlobalConfigDialog(): void {
-    this.globalConfig.closeDialog();
+    store.dispatch(closeGlobalConfigDialogThunk());
   }
 
   updateGlobalConfigDialog(values: Partial<GlobalConfigDialogState>): void {
-    this.globalConfig.updateDialog(values);
+    store.dispatch(updateGlobalConfigDialogThunk(values));
   }
 
   updateGlobalConfig(values: Partial<UIERunConfig>): void {
-    this.globalConfig.updateConfig(values);
+    store.dispatch(updateGlobalConfigThunk(values));
   }
 
   updateCloudContextDraft(values: Partial<UICloudContextInitInput>): void {
-    this.globalConfig.updateCloudContextDraft(values);
+    store.dispatch(updateCloudContextDraftThunk(values));
   }
 
   async loadGlobalConfig(): Promise<void> {
-    await this.globalConfig.loadConfig();
+    await store.dispatch(loadGlobalConfigThunk());
   }
 
   async refreshCloudProviders(): Promise<void> {
-    await this.globalConfig.refreshCloudProviders();
+    await store.dispatch(refreshCloudProvidersThunk());
   }
 
   async refreshCloudContexts(): Promise<void> {
-    await this.globalConfig.refreshCloudContexts();
+    await store.dispatch(refreshCloudContextsThunk());
   }
 
   async initCloudContext(): Promise<void> {
-    await this.globalConfig.initCloudContext();
+    await store.dispatch(initGlobalCloudContextThunk());
   }
 
   async stopCloudContext(name: string): Promise<void> {
-    await this.globalConfig.stopCloudContext(name);
+    await store.dispatch(stopGlobalCloudContextThunk(name));
   }
 
   async startCloudContext(name: string): Promise<void> {
-    await this.globalConfig.startCloudContext(name);
+    await store.dispatch(startGlobalCloudContextThunk(name));
   }
 
   async toggleIdleCloudContext(): Promise<void> {
-    await this.globalConfig.toggleIdleCloudContext();
+    await store.dispatch(toggleIdleCloudContextThunk());
   }
 
   async startAWSCloudInit(): Promise<void> {
-    await this.globalConfig.startAWSCloudInit();
+    await store.dispatch(startAWSCloudInitThunk());
   }
 
   async loginCloudProvider(alias: string): Promise<void> {
-    await this.globalConfig.loginCloudProvider(alias);
+    await store.dispatch(loginGlobalCloudProviderThunk(alias));
   }
 
   async loginPrimaryCloudProvider(alias: string): Promise<void> {
@@ -1098,7 +1113,7 @@ export class ERunUIController {
   }
 
   async submitGlobalConfig(): Promise<void> {
-    await this.globalConfig.submitConfig();
+    await store.dispatch(submitGlobalConfigThunk());
   }
 
   openTenantDialog(tenant: string): void {
@@ -1305,11 +1320,11 @@ export class ERunUIController {
   }
 
   async submitManageDeploy(): Promise<void> {
-    await this.manageEnvironment.submitDeploy();
+    await store.dispatch(submitManageDeployThunk());
   }
 
   async submitManageDelete(): Promise<void> {
-    await this.manageEnvironment.submitDelete();
+    await store.dispatch(submitManageDeleteThunk());
   }
 
   setDiffFilter(value: string): void {
@@ -1608,7 +1623,7 @@ export class ERunUIController {
     }, delay);
   }
 
-  private async refreshIdleStatus(): Promise<void> {
+  async refreshIdleStatus(): Promise<void> {
     const selection = this.state.selected;
     const request = ++this.idleStatusRequest;
     if (!selection) {
@@ -1697,7 +1712,7 @@ export class ERunUIController {
     await this.activateLocalAfterCommand(selection, result);
   }
 
-  private async startDeploySelection(selection: UISelection): Promise<void> {
+  async startDeploySelection(selection: UISelection): Promise<void> {
     const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     this.state.selected = selection;
     this.state.terminalCopyOutput = '';
@@ -1733,7 +1748,7 @@ export class ERunUIController {
     this.queueTerminalResize();
   }
 
-  private async reloadStateAfterEnvironmentChange(): Promise<void> {
+  async reloadStateAfterEnvironmentChange(): Promise<void> {
     try {
       const loaded = await store
         .dispatch(stateApi.endpoints.getInitialState.initiate(undefined, { forceRefetch: true }))
@@ -1754,7 +1769,7 @@ export class ERunUIController {
     );
   }
 
-  private async refreshKubernetesContexts(): Promise<void> {
+  async refreshKubernetesContexts(): Promise<void> {
     try {
       const result = await store
         .dispatch(kubernetesApi.endpoints.getKubernetesContexts.initiate())
@@ -1899,7 +1914,7 @@ export class ERunUIController {
     return suggestion?.image || '';
   }
 
-  private resolveManageRuntimeImage(version: string): string {
+  resolveManageRuntimeImage(version: string): string {
     if (this.state.manageDialog.versionImage) {
       return this.state.manageDialog.versionImage;
     }
@@ -1907,12 +1922,12 @@ export class ERunUIController {
     return suggestion?.image || '';
   }
 
-  private resetTerminal(): void {
+  resetTerminal(): void {
     this.terminal?.reset();
     this.terminal?.clear();
   }
 
-  private hideTerminalMessage(): void {
+  hideTerminalMessage(): void {
     this.state.terminalMessage = '';
     this.state.terminalStatusKind = 'info';
     this.state.terminalStatusDetail = '';
@@ -2161,7 +2176,7 @@ export class ERunUIController {
     return clamp(this.state.debugHeight, MIN_DEBUG_HEIGHT, Math.max(MIN_DEBUG_HEIGHT, Math.min(MAX_DEBUG_HEIGHT, maxDebugForPane)));
   }
 
-  private queueTerminalResize = (): void => {
+  queueTerminalResize = (): void => {
     window.clearTimeout(this.resizeTimer);
     this.resizeTimer = window.setTimeout(() => {
       this.applyLayoutVars();
@@ -2225,7 +2240,7 @@ export class ERunUIController {
     this.focusTerminalSoon();
   }
 
-  private registerDebugSession(sessionId: number, selection: UISelection, mode: DebugSessionMode): void {
+  registerDebugSession(sessionId: number, selection: UISelection, mode: DebugSessionMode): void {
     this.sessions.registerDebugSession(sessionId, selection, mode);
   }
 

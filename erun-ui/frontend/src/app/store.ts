@@ -1,9 +1,10 @@
-import { configureStore } from '@reduxjs/toolkit';
+import { configureStore, type ThunkAction, type UnknownAction } from '@reduxjs/toolkit';
 import { setupListeners } from '@reduxjs/toolkit/query';
 
 import { wailsApi } from './api/wailsApi';
 import { persistenceMiddleware } from './middleware/persistenceMiddleware';
 import { wailsEventsMiddleware } from './middleware/wailsEventsMiddleware';
+import { thunkExtra, type ThunkExtra } from './thunkExtra';
 import activityReducer from './slices/activitySlice';
 import doctorReducer from './slices/doctorSlice';
 import environmentDialogReducer from './slices/environmentDialogSlice';
@@ -55,6 +56,7 @@ export const store = configureStore({
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({
+      thunk: { extraArgument: thunkExtra },
       // Slices intentionally store serializable shapes; the legacy AppState
       // selector reassembles Set instances at the consumer boundary, so we
       // do not need redux-toolkit's serializable check to whitelist Set.
@@ -68,3 +70,4 @@ setupListeners(store.dispatch);
 
 export type RootState = ReturnType<typeof store.getState>;
 export type AppDispatch = typeof store.dispatch;
+export type AppThunk<R = void> = ThunkAction<R, RootState, ThunkExtra, UnknownAction>;
