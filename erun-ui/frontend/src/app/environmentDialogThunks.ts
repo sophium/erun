@@ -8,6 +8,12 @@ import {
 import { showTerminalMessage } from './notificationThunks';
 import { runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
 import {
+  patchEnvironmentDialog,
+  setEnvironmentDialog,
+} from './slices/environmentDialogSlice';
+import { setSelected } from './slices/selectionSlice';
+import { setVersionSuggestions } from './slices/tenantsSlice';
+import {
   defaultEnvironmentDialog,
   type EnvironmentDialogState,
 } from './state';
@@ -26,16 +32,17 @@ let versionSuggestionTimer = 0;
 let versionSuggestionRequest = 0;
 let environmentResourceStatusRequest = 0;
 
-export const openInitializeDialog = (): AppThunk => (dispatch, _getState, extra) => {
+export const openInitializeDialog = (): AppThunk => (dispatch, getState, extra) => {
   const controller = requireController(extra);
-  const tenantDefault = controller.state.selected?.tenant || controller.state.tenants[0]?.name || '';
+  const state = getState();
+  const tenantDefault = state.selection.selected?.tenant || state.tenants.tenants[0]?.name || '';
   const containerRegistryDefault = loadSavedPastContainerRegistries()[0] || '';
-  controller.state.environmentDialog = {
+  dispatch(setEnvironmentDialog({
     open: true,
     actionMode: 'init',
     tenant: tenantDefault,
     environment: '',
-    version: controller.state.versionSuggestions[0]?.version || '',
+    version: state.tenants.versionSuggestions[0]?.version || '',
     kubernetesContext: '',
     kubernetesContexts: [],
     kubernetesContextsLoading: true,
@@ -46,38 +53,36 @@ export const openInitializeDialog = (): AppThunk => (dispatch, _getState, extra)
     noGit: false,
     bootstrap: false,
     setDefaultTenant: true,
-    versionImage: controller.state.versionSuggestions[0]?.image || '',
+    versionImage: state.tenants.versionSuggestions[0]?.image || '',
     choicesOpen: false,
     busy: false,
     error: '',
-  };
+  }));
   void controller.refreshKubernetesContexts();
   void dispatch(refreshDialogVersionSuggestions(true));
 };
 
-export const closeEnvironmentDialog = (): AppThunk => (_dispatch, _getState, extra) => {
+export const closeEnvironmentDialog = (): AppThunk => (dispatch, getState, extra) => {
   const controller = requireController(extra);
-  if (controller.state.environmentDialog.busy) {
+  if (getState().environmentDialog.busy) {
     return;
   }
-  controller.state.environmentDialog = defaultEnvironmentDialog();
+  dispatch(setEnvironmentDialog(defaultEnvironmentDialog()));
   controller.focusTerminalSoon();
 };
 
 export const updateEnvironmentDialog = (
   values: Partial<EnvironmentDialogState>,
-): AppThunk => (dispatch, _getState, extra) => {
-  const controller = requireController(extra);
-  if (controller.state.environmentDialog.busy) {
+): AppThunk => (dispatch, getState) => {
+  if (getState().environmentDialog.busy) {
     return;
   }
   const versionReset = values.version !== undefined;
-  controller.state.environmentDialog = {
-    ...controller.state.environmentDialog,
+  dispatch(patchEnvironmentDialog({
     ...values,
     error: values.error ?? '',
     ...(versionReset ? { versionImage: '', choicesOpen: false } : {}),
-  };
+  }));
   if (values.tenant !== undefined) {
     scheduleDialogVersionSuggestionRefresh(true, dispatch);
   }
@@ -86,76 +91,72 @@ export const updateEnvironmentDialog = (
   }
 };
 
-export const toggleEnvironmentVersionChoices = (): AppThunk => (dispatch, _getState, extra) => {
-  const controller = requireController(extra);
-  dispatch(setEnvironmentVersionChoicesOpen(!controller.state.environmentDialog.choicesOpen));
+export const toggleEnvironmentVersionChoices = (): AppThunk => (dispatch, getState) => {
+  dispatch(setEnvironmentVersionChoicesOpen(!getState().environmentDialog.choicesOpen));
 };
 
 export const setEnvironmentVersionChoicesOpen = (open: boolean): AppThunk =>
-  (_dispatch, _getState, extra) => {
-    const controller = requireController(extra);
-    if (controller.state.environmentDialog.busy) {
+  (dispatch, getState) => {
+    const state = getState();
+    if (state.environmentDialog.busy) {
       return;
     }
-    controller.state.environmentDialog = {
-      ...controller.state.environmentDialog,
-      choicesOpen: open && controller.state.versionSuggestions.length > 0,
-    };
+    dispatch(patchEnvironmentDialog({
+      choicesOpen: open && state.tenants.versionSuggestions.length > 0,
+    }));
   };
 
 export const selectEnvironmentVersionSuggestion = (
   suggestion: UIVersionSuggestion | undefined,
-): AppThunk => (_dispatch, _getState, extra) => {
-  const controller = requireController(extra);
-  if (controller.state.environmentDialog.busy) {
+): AppThunk => (dispatch, getState) => {
+  if (getState().environmentDialog.busy) {
     return;
   }
-  controller.state.environmentDialog = {
-    ...controller.state.environmentDialog,
+  dispatch(patchEnvironmentDialog({
     version: suggestion?.version || '',
     versionImage: suggestion?.image || '',
     choicesOpen: false,
-  };
+  }));
 };
 
 export const submitEnvironmentDialog = (form: HTMLFormElement): AppThunk<Promise<void>> =>
-  async (dispatch, _getState, extra) => {
+  async (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    const dialog = controller.state.environmentDialog;
+    const state = getState();
+    const dialog = state.environmentDialog;
     if (dialog.busy) {
       return;
     }
-    const selection = environmentDialogSelection(dialog, controller.state.versionSuggestions);
+    const selection = environmentDialogSelection(dialog, state.tenants.versionSuggestions);
     if (!selection) {
-      controller.state.environmentDialog = { ...dialog, error: '' };
+      dispatch(patchEnvironmentDialog({ error: '' }));
       form.reportValidity();
       return;
     }
     const resourceError = dialog.actionMode === 'init' ? runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus) : '';
     if (resourceError) {
-      controller.state.environmentDialog = { ...dialog, error: resourceError };
+      dispatch(patchEnvironmentDialog({ error: resourceError }));
       return;
     }
 
     rememberEnvironmentDialogSelection(selection, dialog.actionMode);
-    beginEnvironmentDialogSubmit(controller, dialog, selection);
-    const previousSelected = controller.state.selected;
+    beginEnvironmentDialogSubmit(dispatch, dialog, selection);
+    const previousSelected = state.selection.selected;
     try {
       if (dialog.actionMode === 'deploy') {
         await controller.startDeploySelection(selection);
       } else {
         await controller.startInitSelection(selection);
       }
-      controller.state.environmentDialog = defaultEnvironmentDialog();
+      dispatch(setEnvironmentDialog(defaultEnvironmentDialog()));
       controller.focusTerminalSoon();
     } catch (error) {
       const message = readError(error);
-      controller.state.selected = previousSelected;
-      controller.state.environmentDialog = {
-        ...controller.state.environmentDialog,
+      dispatch(setSelected(previousSelected));
+      dispatch(patchEnvironmentDialog({
         busy: false,
         error: message,
-      };
+      }));
       dispatch(showTerminalMessage(message));
     }
   };
@@ -198,12 +199,11 @@ function resolveEnvironmentRuntimeImage(
 }
 
 function beginEnvironmentDialogSubmit(
-  controller: NonNullable<ReturnType<typeof requireController>>,
+  dispatch: (action: ReturnType<typeof patchEnvironmentDialog>) => unknown,
   dialog: EnvironmentDialogState,
   selection: UISelection,
 ): void {
-  controller.state.environmentDialog = {
-    ...dialog,
+  dispatch(patchEnvironmentDialog({
     tenant: selection.tenant,
     environment: selection.environment,
     version: selection.version || '',
@@ -213,7 +213,7 @@ function beginEnvironmentDialogSubmit(
     busy: true,
     error: '',
     choicesOpen: false,
-  };
+  }));
 }
 
 function scheduleDialogVersionSuggestionRefresh(
@@ -229,10 +229,9 @@ function scheduleDialogVersionSuggestionRefresh(
 }
 
 export const refreshDialogVersionSuggestions = (selectDefault: boolean): AppThunk<Promise<void>> =>
-  async (dispatch, _getState, extra) => {
-    const controller = requireController(extra);
+  async (dispatch, getState) => {
     const request = ++versionSuggestionRequest;
-    const dialog = controller.state.environmentDialog;
+    const dialog = getState().environmentDialog;
     const selection = {
       tenant: normalizeDialogValue(dialog.tenant),
       environment: normalizeDialogValue(dialog.environment),
@@ -242,58 +241,56 @@ export const refreshDialogVersionSuggestions = (selectDefault: boolean): AppThun
       environmentApi.endpoints.getVersionSuggestions.initiate(selection, { forceRefetch: true }),
     ).unwrap();
     const suggestions = normalizeVersionSuggestions(raw);
-    if (request !== versionSuggestionRequest || !controller.state.environmentDialog.open) {
+    if (request !== versionSuggestionRequest || !getState().environmentDialog.open) {
       return;
     }
-    controller.state.versionSuggestions = suggestions;
-    const currentVersion = normalizeDialogValue(controller.state.environmentDialog.version);
+    dispatch(setVersionSuggestions(suggestions));
+    const currentVersion = normalizeDialogValue(getState().environmentDialog.version);
     if (selectDefault || !suggestions.some((suggestion) => suggestion.version === currentVersion)) {
       dispatch(selectEnvironmentVersionSuggestion(suggestions[0]));
     }
   };
 
 const refreshEnvironmentRuntimeResources = (kubernetesContext: string): AppThunk<Promise<void>> =>
-  async (dispatch, _getState, extra) => {
-    const controller = requireController(extra);
+  async (dispatch, getState) => {
     const request = ++environmentResourceStatusRequest;
     const context = normalizeDialogValue(kubernetesContext);
+    const dialog = getState().environmentDialog;
     if (
-      !controller.state.environmentDialog.open ||
-      controller.state.environmentDialog.actionMode !== 'init' ||
+      !dialog.open ||
+      dialog.actionMode !== 'init' ||
       !context
     ) {
       return;
     }
-    controller.state.environmentDialog = {
-      ...controller.state.environmentDialog,
+    dispatch(patchEnvironmentDialog({
       resourceStatusLoading: true,
       resourceStatus: null,
-    };
+    }));
     try {
+      const current = getState().environmentDialog;
       const status = await dispatch(
         environmentApi.endpoints.getRuntimeResourceStatus.initiate(
           {
             kubernetesContext: context,
-            tenant: normalizeDialogValue(controller.state.environmentDialog.tenant),
-            environment: normalizeDialogValue(controller.state.environmentDialog.environment),
+            tenant: normalizeDialogValue(current.tenant),
+            environment: normalizeDialogValue(current.environment),
           },
           { forceRefetch: true },
         ),
       ).unwrap();
-      if (request !== environmentResourceStatusRequest || !controller.state.environmentDialog.open) {
+      if (request !== environmentResourceStatusRequest || !getState().environmentDialog.open) {
         return;
       }
-      controller.state.environmentDialog = {
-        ...controller.state.environmentDialog,
+      dispatch(patchEnvironmentDialog({
         resourceStatus: status,
         resourceStatusLoading: false,
-      };
+      }));
     } catch (error) {
-      if (request !== environmentResourceStatusRequest || !controller.state.environmentDialog.open) {
+      if (request !== environmentResourceStatusRequest || !getState().environmentDialog.open) {
         return;
       }
-      controller.state.environmentDialog = {
-        ...controller.state.environmentDialog,
+      dispatch(patchEnvironmentDialog({
         resourceStatus: {
           kubernetesContext: context,
           available: false,
@@ -302,6 +299,6 @@ const refreshEnvironmentRuntimeResources = (kubernetesContext: string): AppThunk
           memory: { total: 0, used: 0, free: 0, unit: 'GiB', formatted: '' },
         },
         resourceStatusLoading: false,
-      };
+      }));
     }
   };

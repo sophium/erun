@@ -5,8 +5,19 @@ import { readError } from './errors';
 import { showNotification } from './notificationThunks';
 import { isMcpUnreachableMessage, stripMcpUnreachableMarker } from './reconnectCopy';
 import { scrollSelectedDiffIntoView } from './reviewDiffNavigation';
-import { toggleDiffDirCollapsed } from './slices/reviewSlice';
-import type { AppState } from './state';
+import { setChangedFilesOpen } from './slices/layoutSlice';
+import {
+  setDiff,
+  setDiffError,
+  setDiffFilter as setDiffFilterAction,
+  setDiffLoading,
+  setReconnect,
+  setSelectedDiffPath,
+  setSelectedReviewCommit,
+  setSelectedReviewScope,
+  toggleDiffDirCollapsed,
+} from './slices/reviewSlice';
+import type { ReviewState } from './slices/reviewSlice';
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
 import { selectionKey } from './versionSuggestions';
@@ -19,15 +30,13 @@ const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 let reviewDiffRequest = 0;
 
 export const setDiffFilter = (value: string): AppThunk =>
-  (_dispatch, _getState, extra) => {
-    const controller = requireController(extra);
-    controller.state.diffFilter = value.trim().toLowerCase();
+  (dispatch) => {
+    dispatch(setDiffFilterAction(value.trim().toLowerCase()));
   };
 
 export const toggleChangedFiles = (): AppThunk =>
-  (_dispatch, _getState, extra) => {
-    const controller = requireController(extra);
-    controller.state.changedFilesOpen = !controller.state.changedFilesOpen;
+  (dispatch, getState) => {
+    dispatch(setChangedFilesOpen(!getState().layout.changedFilesOpen));
   };
 
 export const toggleDiffDirectory = (path: string): AppThunk =>
@@ -36,43 +45,44 @@ export const toggleDiffDirectory = (path: string): AppThunk =>
   };
 
 export const selectDiffPath = (path: string): AppThunk =>
-  (_dispatch, _getState, extra) => {
+  (dispatch, _getState, extra) => {
     const controller = requireController(extra);
-    controller.state.selectedDiffPath = path;
+    dispatch(setSelectedDiffPath(path));
     window.setTimeout(() => {
-      scrollSelectedDiffIntoView(controller.diffList, controller.state.selectedDiffPath);
+      scrollSelectedDiffIntoView(controller.diffList, path);
     }, 0);
   };
 
-export const selectReviewRange = (scope: AppState['selectedReviewScope'], hash = ''): AppThunk =>
-  (dispatch, _getState, extra) => {
-    const controller = requireController(extra);
+export const selectReviewRange = (scope: ReviewState['selectedReviewScope'], hash = ''): AppThunk =>
+  (dispatch, getState) => {
+    const review = getState().review;
     const selected = hash.trim();
     if (
-      (scope === controller.state.selectedReviewScope && selected === controller.state.selectedReviewCommit) ||
-      controller.state.diffLoading
+      (scope === review.selectedReviewScope && selected === review.selectedReviewCommit) ||
+      review.diffLoading
     ) {
       return;
     }
-    controller.state.selectedReviewScope = scope;
-    controller.state.selectedReviewCommit = selected;
+    dispatch(setSelectedReviewScope(scope));
+    dispatch(setSelectedReviewCommit(selected));
     void dispatch(loadReviewDiff());
   };
 
 export const loadReviewDiff = (options: { silent?: boolean } = {}): AppThunk<Promise<void>> =>
-  async (dispatch, _getState, extra) => {
+  async (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    const selection = controller.state.selected;
+    const state = getState();
+    const selection = state.selection.selected;
     if (!selection) {
       return;
     }
     const request = ++reviewDiffRequest;
     const selectedKey = selectionKey(selection);
-    const scope = controller.state.selectedReviewScope;
-    const selectedCommit = controller.state.selectedReviewCommit;
+    const scope = state.review.selectedReviewScope;
+    const selectedCommit = state.review.selectedReviewCommit;
     if (!options.silent) {
-      controller.state.diffLoading = true;
-      controller.state.diffError = '';
+      dispatch(setDiffLoading(true));
+      dispatch(setDiffError({ error: '', reconnectable: getState().review.diffErrorReconnectable }));
     }
     try {
       const diff = await dispatch(
@@ -81,80 +91,81 @@ export const loadReviewDiff = (options: { silent?: boolean } = {}): AppThunk<Pro
           { forceRefetch: true },
         ),
       ).unwrap();
-      if (!isCurrentReviewDiffRequest(controller, request, selectedKey)) {
+      if (!isCurrentReviewDiffRequest(getState, request, selectedKey)) {
         return;
       }
-      controller.state.diff = diff;
-      controller.state.diffError = '';
-      controller.state.diffErrorReconnectable = false;
-      controller.state.selectedReviewScope = diff.scope || 'current';
-      controller.state.selectedReviewCommit = diff.selectedCommit || '';
-      controller.state.selectedDiffPath = chooseSelectedDiffPath(diff, controller.state.selectedDiffPath);
+      dispatch(setDiff(diff));
+      dispatch(setDiffError({ error: '', reconnectable: false }));
+      dispatch(setSelectedReviewScope(diff.scope || 'current'));
+      dispatch(setSelectedReviewCommit(diff.selectedCommit || ''));
+      dispatch(setSelectedDiffPath(chooseSelectedDiffPath(diff, getState().review.selectedDiffPath)));
     } catch (error: unknown) {
-      if (!isCurrentReviewDiffRequest(controller, request, selectedKey)) {
+      if (!isCurrentReviewDiffRequest(getState, request, selectedKey)) {
         return;
       }
-      if (options.silent && controller.state.diff) {
+      const currentDiff = getState().review.diff;
+      if (options.silent && currentDiff) {
         return;
       }
-      if (!options.silent || !controller.state.diff) {
-        controller.state.diff = null;
+      if (!options.silent || !currentDiff) {
+        dispatch(setDiff(null));
       }
       const message = readError(error);
       if (isMcpUnreachableMessage(message)) {
-        controller.state.diffError = stripMcpUnreachableMarker(message);
-        controller.state.diffErrorReconnectable = true;
+        dispatch(setDiffError({ error: stripMcpUnreachableMarker(message), reconnectable: true }));
       } else {
-        controller.state.diffError = message;
-        controller.state.diffErrorReconnectable = false;
+        dispatch(setDiffError({ error: message, reconnectable: false }));
       }
     } finally {
       if (request === reviewDiffRequest) {
         if (!options.silent) {
-          controller.state.diffLoading = false;
+          dispatch(setDiffLoading(false));
         }
-        scheduleReviewDiffRefresh(dispatch, controller);
+        scheduleReviewDiffRefresh(dispatch, getState, controller);
       }
     }
   };
 
 export const refreshReviewDiff = (): AppThunk<Promise<void>> =>
-  async (dispatch, _getState, extra) => {
-    const controller = requireController(extra);
-    if (!controller.state.selected) {
+  async (dispatch, getState) => {
+    if (!getState().selection.selected) {
       return;
     }
     await dispatch(loadReviewDiff());
-    if (!controller.state.diffError) {
+    if (!getState().review.diffError) {
       dispatch(showNotification('success', 'Diff refreshed.'));
     }
   };
 
 function isCurrentReviewDiffRequest(
-  controller: NonNullable<ReturnType<typeof requireController>>,
+  getState: () => ReturnType<typeof import('./store').store.getState>,
   request: number,
   selectedKey: string,
 ): boolean {
+  const selected = getState().selection.selected;
   return request === reviewDiffRequest &&
-    selectedKey === selectionKey(controller.state.selected || { tenant: '', environment: '' });
+    selectedKey === selectionKey(selected || { tenant: '', environment: '' });
 }
 
 function scheduleReviewDiffRefresh(
   dispatch: (thunk: AppThunk<Promise<void>>) => Promise<void>,
+  getState: () => ReturnType<typeof import('./store').store.getState>,
   controller: NonNullable<ReturnType<typeof requireController>>,
   delay = REVIEW_DIFF_REFRESH_INTERVAL_MS,
 ): void {
   controller.cancelReviewDiffRefresh();
-  if (!controller.state.reviewOpen || !controller.state.selected) {
+  const state = getState();
+  if (!state.layout.reviewOpen || !state.selection.selected) {
     return;
   }
   controller.scheduleReviewDiffRefreshTimer(() => {
-    if (!controller.state.reviewOpen || !controller.state.selected) {
+    const next = getState();
+    if (!next.layout.reviewOpen || !next.selection.selected) {
       controller.stopReviewDiffRefresh();
       return;
     }
-    if (controller.state.diffLoading) {
-      scheduleReviewDiffRefresh(dispatch, controller);
+    if (next.review.diffLoading) {
+      scheduleReviewDiffRefresh(dispatch, getState, controller);
       return;
     }
     void dispatch(loadReviewDiff({ silent: true }));
@@ -164,40 +175,39 @@ function scheduleReviewDiffRefresh(
 // Reconnect dialog ============================================================
 
 export const requestReconnect = (): AppThunk =>
-  (_dispatch, _getState, extra) => {
-    const controller = requireController(extra);
-    if (!controller.state.selected) {
+  (dispatch, getState) => {
+    if (!getState().selection.selected) {
       return;
     }
-    controller.state.reconnect = { status: 'confirm', lastLine: '', error: '' };
+    dispatch(setReconnect({ status: 'confirm', lastLine: '', error: '' }));
   };
 
 export const cancelReconnect = (): AppThunk =>
-  (_dispatch, _getState, extra) => {
-    const controller = requireController(extra);
-    if (controller.state.reconnect.status === 'running') {
+  (dispatch, getState) => {
+    if (getState().review.reconnect.status === 'running') {
       return;
     }
-    controller.state.reconnect = { status: 'idle', lastLine: '', error: '' };
+    dispatch(setReconnect({ status: 'idle', lastLine: '', error: '' }));
   };
 
 export const confirmReconnect = (): AppThunk<Promise<void>> =>
-  async (dispatch, _getState, extra) => {
-    const controller = requireController(extra);
-    const selection = controller.state.selected;
-    if (!selection || controller.state.reconnect.status === 'running') {
+  async (dispatch, getState) => {
+    const state = getState();
+    const selection = state.selection.selected;
+    if (!selection || state.review.reconnect.status === 'running') {
       return;
     }
-    controller.state.reconnect = { status: 'running', lastLine: '', error: '' };
+    dispatch(setReconnect({ status: 'running', lastLine: '', error: '' }));
     try {
       await dispatch(sessionApi.endpoints.reconnectMCP.initiate(selection)).unwrap();
-      controller.state.reconnect = { status: 'idle', lastLine: '', error: '' };
+      dispatch(setReconnect({ status: 'idle', lastLine: '', error: '' }));
       await dispatch(loadReviewDiff());
     } catch (error: unknown) {
-      controller.state.reconnect = {
+      const lastLine = getState().review.reconnect.lastLine;
+      dispatch(setReconnect({
         status: 'error',
-        lastLine: controller.state.reconnect.lastLine,
+        lastLine,
         error: readError(error),
-      };
+      }));
     }
   };

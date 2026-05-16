@@ -12,6 +12,12 @@ import {
   showTerminalFailure,
   showTerminalMessage,
 } from './notificationThunks';
+import { setSelected } from './slices/selectionSlice';
+import { setDebugOutput, setSessionId } from './slices/terminalSlice';
+import {
+  setTerminalCopyOutput,
+  setTerminalCopyStatus,
+} from './slices/terminalStatusSlice';
 import type { AppThunk } from './store';
 import { rebuildTerminalDisplayBuffer } from './terminalBuffers';
 import {
@@ -41,17 +47,18 @@ export const openSelection = (selection: UISelection): AppThunk<Promise<void>> =
   };
 
 export const addTerminalTab = (): AppThunk<Promise<void>> =>
-  async (dispatch, _getState, extra) => {
+  async (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    const selection = controller.state.selected;
+    const state = getState();
+    const selection = state.selection.selected;
     if (!selection) {
       return;
     }
-    const runSelection = { ...selection, debug: controller.state.debugOpen || undefined };
+    const runSelection = { ...selection, debug: state.layout.debugOpen || undefined };
     const key = selectionKey(runSelection);
-    const tabs = controller.state.tabsByEnv[key] || [];
+    const tabs = state.terminal.tabsByEnv[key] || [];
     const nextSlot = tabs.reduce((max, tab) => (tab.slot >= max ? tab.slot + 1 : max), 0);
-    const previousSessionId = controller.state.sessionId;
+    const previousSessionId = state.terminal.sessionId;
     try {
       const size = controller.terminalSize();
       const result = (await StartSession(runSelection, nextSlot, size.cols, size.rows)) as StartSessionResult;
@@ -64,12 +71,12 @@ export const addTerminalTab = (): AppThunk<Promise<void>> =>
   };
 
 export const selectTerminalTab = (sessionId: number): AppThunk =>
-  (dispatch, _getState, extra) => {
+  (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    if (sessionId <= 0 || sessionId === controller.state.sessionId) {
+    if (sessionId <= 0 || sessionId === getState().terminal.sessionId) {
       return;
     }
-    controller.state.sessionId = sessionId;
+    dispatch(setSessionId(sessionId));
     controller.rememberSelectedTabForCurrentEnv(sessionId);
     controller.syncDebugDisplay();
     rebuildTerminalDisplayBuffer(controller.sessions, sessionId);
@@ -77,8 +84,8 @@ export const selectTerminalTab = (sessionId: number): AppThunk =>
     controller.writeTerminalBuffer(controller.sessions.displayBuffer(sessionId));
     const exitReason = controller.sessions.exitReason(sessionId);
     if (exitReason) {
-      controller.state.terminalCopyOutput = controller.sessions.exitOutput(sessionId);
-      controller.state.terminalCopyStatus = '';
+      dispatch(setTerminalCopyOutput(controller.sessions.exitOutput(sessionId)));
+      dispatch(setTerminalCopyStatus(''));
       dispatch(showTerminalMessage(exitReason));
     } else {
       dispatch(hideTerminalMessage());
@@ -88,18 +95,19 @@ export const selectTerminalTab = (sessionId: number): AppThunk =>
   };
 
 export const closeTerminalTab = (sessionId: number): AppThunk<Promise<void>> =>
-  async (dispatch, _getState, extra) => {
+  async (dispatch, getState, extra) => {
     const controller = requireController(extra);
     if (sessionId <= 0) {
       return;
     }
-    const selection = controller.state.selected;
+    const state = getState();
+    const selection = state.selection.selected;
     if (!selection) {
       return;
     }
-    const runSelection = { ...selection, debug: controller.state.debugOpen || undefined };
+    const runSelection = { ...selection, debug: state.layout.debugOpen || undefined };
     const key = selectionKey(runSelection);
-    const tabs = controller.state.tabsByEnv[key] || [];
+    const tabs = state.terminal.tabsByEnv[key] || [];
     const target = tabs.find((tab) => tab.sessionId === sessionId);
     if (target && target.kind !== 'extra') {
       return;
@@ -112,35 +120,36 @@ export const closeTerminalTab = (sessionId: number): AppThunk<Promise<void>> =>
     }
     const remaining = controller.removeTab(key, sessionId);
     controller.sessions.clearSessionDebug(sessionId);
-    if (controller.state.sessionId === sessionId) {
+    if (getState().terminal.sessionId === sessionId) {
       const next = remaining[remaining.length - 1];
       if (next) {
         dispatch(selectTerminalTab(next.sessionId));
       } else {
-        controller.state.sessionId = 0;
-        controller.state.debugOutput = '';
+        dispatch(setSessionId(0));
+        dispatch(setDebugOutput(''));
         controller.resetTerminal();
       }
     }
   };
 
 export const openIDE = (selection: UISelection | null, ide: IDEKind): AppThunk<Promise<void>> =>
-  async (dispatch, _getState, extra) => {
+  async (dispatch, getState, extra) => {
     const controller = requireController(extra);
     if (!selection) {
       dispatch(showTerminalMessage('Choose an environment from the left pane.'));
       return;
     }
-    const runSelection = { ...selection, debug: controller.state.debugOpen || undefined };
+    const state = getState();
+    const runSelection = { ...selection, debug: state.layout.debugOpen || undefined };
     const label = ideLabel(ide);
-    controller.state.selected = selection;
-    if (controller.state.debugOpen) {
+    dispatch(setSelected(selection));
+    if (state.layout.debugOpen) {
       const header = `$ ${formatIDECommand(runSelection, ide)}\n`;
-      controller.sessions.setSessionDebug(controller.state.sessionId, header);
+      controller.sessions.setSessionDebug(getState().terminal.sessionId, header);
       controller.syncDebugDisplay();
     }
-    controller.state.terminalCopyOutput = '';
-    controller.state.terminalCopyStatus = '';
+    dispatch(setTerminalCopyOutput(''));
+    dispatch(setTerminalCopyStatus(''));
     dispatch(showTerminalMessage(`Opening ${label} for ${selection.tenant} / ${selection.environment}...`));
 
     try {

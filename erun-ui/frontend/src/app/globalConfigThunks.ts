@@ -13,26 +13,34 @@ import {
   showNotification,
   showTerminalMessage,
 } from './notificationThunks';
-import type { AppState, GlobalConfigDialogState } from './state';
+import {
+  patchGlobalConfigDialog,
+  setGlobalConfigDialog,
+} from './slices/globalConfigDialogSlice';
+import { setIdleCloudContextBusy, setIdleStatus } from './slices/idleSlice';
+import { setSessionId } from './slices/terminalSlice';
+import {
+  setTerminalCopyOutput,
+  setTerminalCopyStatus,
+} from './slices/terminalStatusSlice';
+import type { GlobalConfigDialogState } from './state';
 import { defaultCloudContextInitInput, defaultGlobalConfigDialog } from './state';
-import type { AppThunk } from './store';
+import type { AppDispatch, AppThunk, RootState } from './store';
 import { requireController } from './thunkExtra';
 import type {
   StartSessionResult,
   UICloudContextInitInput,
   UICloudContextStatus,
   UIERunConfig,
+  UIIdleStatus,
 } from '@/types';
 
-// Each thunk takes the same imperative dependencies the GlobalConfigWorkflow
-// class held in deps; it reaches them through requireController(extra), which
-// returns the ERunUIController set in its constructor. State reads and writes
-// still go through controller.state, the Proxy that dispatches matching
-// slice actions on write.
+// Each thunk reads from the Redux store via getState() and writes via
+// dispatch(); the controller is only used for imperative xterm/PTY work
+// (refreshKubernetesContexts, fitTerminal, sessions, etc.).
 
-export const openGlobalConfigDialog = (): AppThunk => (dispatch, _getState, extra) => {
-  const controller = requireController(extra);
-  controller.state.globalConfigDialog = {
+export const openGlobalConfigDialog = (): AppThunk => (dispatch) => {
+  dispatch(setGlobalConfigDialog({
     open: true,
     config: {
       defaultTenant: '',
@@ -45,44 +53,39 @@ export const openGlobalConfigDialog = (): AppThunk => (dispatch, _getState, extr
     busyAction: '',
     busyTarget: '',
     error: '',
-  };
+  }));
   void dispatch(loadGlobalConfig());
 };
 
-export const closeGlobalConfigDialog = (): AppThunk => (_dispatch, _getState, extra) => {
+export const closeGlobalConfigDialog = (): AppThunk => (dispatch, getState, extra) => {
   const controller = requireController(extra);
-  if (controller.state.globalConfigDialog.busy) {
+  if (getState().globalConfigDialog.busy) {
     return;
   }
-  controller.state.globalConfigDialog = defaultGlobalConfigDialog();
+  dispatch(setGlobalConfigDialog(defaultGlobalConfigDialog()));
   controller.focusTerminalSoon();
 };
 
 export const updateGlobalConfigDialog = (
   values: Partial<GlobalConfigDialogState>,
-): AppThunk => (_dispatch, _getState, extra) => {
-  const controller = requireController(extra);
-  if (controller.state.globalConfigDialog.busy) {
+): AppThunk => (dispatch, getState) => {
+  if (getState().globalConfigDialog.busy) {
     return;
   }
-  controller.state.globalConfigDialog = {
-    ...controller.state.globalConfigDialog,
-    ...values,
-    error: values.error ?? '',
-  };
+  dispatch(patchGlobalConfigDialog({ ...values, error: values.error ?? '' }));
 };
 
 export const updateGlobalConfig = (
   values: Partial<UIERunConfig>,
-): AppThunk => (dispatch, _getState, extra) => {
-  const controller = requireController(extra);
-  if (controller.state.globalConfigDialog.busy || controller.state.globalConfigDialog.configLoading) {
+): AppThunk => (dispatch, getState) => {
+  const dialog = getState().globalConfigDialog;
+  if (dialog.busy || dialog.configLoading) {
     return;
   }
   dispatch(
     updateGlobalConfigDialog({
       config: {
-        ...controller.state.globalConfigDialog.config,
+        ...dialog.config,
         ...values,
       },
     }),
@@ -91,51 +94,48 @@ export const updateGlobalConfig = (
 
 export const updateCloudContextDraft = (
   values: Partial<UICloudContextInitInput>,
-): AppThunk => (dispatch, _getState, extra) => {
-  const controller = requireController(extra);
-  if (controller.state.globalConfigDialog.busy || controller.state.globalConfigDialog.configLoading) {
+): AppThunk => (dispatch, getState) => {
+  const dialog = getState().globalConfigDialog;
+  if (dialog.busy || dialog.configLoading) {
     return;
   }
   dispatch(
     updateGlobalConfigDialog({
       cloudContextDraft: {
-        ...controller.state.globalConfigDialog.cloudContextDraft,
+        ...dialog.cloudContextDraft,
         ...values,
       },
     }),
   );
 };
 
-export const loadGlobalConfig = (): AppThunk<Promise<void>> => async (dispatch, _getState, extra) => {
-  const controller = requireController(extra);
-  const dialog = controller.state.globalConfigDialog;
+export const loadGlobalConfig = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  const dialog = getState().globalConfigDialog;
   if (!dialog.open) {
     return;
   }
-  controller.state.globalConfigDialog = { ...dialog, configLoading: true, error: '' };
+  dispatch(patchGlobalConfigDialog({ configLoading: true, error: '' }));
   try {
     const result = await dispatch(
       globalConfigApi.endpoints.getERunConfig.initiate(undefined, { forceRefetch: true }),
     ).unwrap();
-    controller.state.globalConfigDialog = {
-      ...controller.state.globalConfigDialog,
+    const currentDraft = getState().globalConfigDialog.cloudContextDraft;
+    dispatch(patchGlobalConfigDialog({
       config: result,
-      cloudContextDraft: cloudContextDraftForConfig(result, controller.state.globalConfigDialog.cloudContextDraft),
+      cloudContextDraft: cloudContextDraftForConfig(result, currentDraft),
       configLoading: false,
       error: '',
-    };
+    }));
   } catch (error) {
-    controller.state.globalConfigDialog = {
-      ...controller.state.globalConfigDialog,
+    dispatch(patchGlobalConfigDialog({
       configLoading: false,
       error: readError(error),
-    };
+    }));
   }
 };
 
-export const refreshCloudProviders = (): AppThunk<Promise<void>> => async (dispatch, _getState, extra) => {
-  const controller = requireController(extra);
-  const dialog = controller.state.globalConfigDialog;
+export const refreshCloudProviders = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  const dialog = getState().globalConfigDialog;
   if (!dialog.open || dialog.busy) {
     return;
   }
@@ -143,22 +143,21 @@ export const refreshCloudProviders = (): AppThunk<Promise<void>> => async (dispa
     const cloudProviders = await dispatch(
       cloudApi.endpoints.getCloudProviderStatuses.initiate(undefined, { forceRefetch: true }),
     ).unwrap();
-    controller.state.globalConfigDialog = {
-      ...controller.state.globalConfigDialog,
-      config: { ...controller.state.globalConfigDialog.config, cloudProviders },
+    const currentConfig = getState().globalConfigDialog.config;
+    dispatch(patchGlobalConfigDialog({
+      config: { ...currentConfig, cloudProviders },
       error: '',
-    };
+    }));
     dispatch(showNotification('success', 'Cloud aliases refreshed.'));
   } catch (error) {
     const message = readError(error);
-    controller.state.globalConfigDialog = { ...controller.state.globalConfigDialog, error: message };
+    dispatch(patchGlobalConfigDialog({ error: message }));
     dispatch(showTerminalMessage(message));
   }
 };
 
-export const refreshCloudContexts = (): AppThunk<Promise<void>> => async (dispatch, _getState, extra) => {
-  const controller = requireController(extra);
-  const dialog = controller.state.globalConfigDialog;
+export const refreshCloudContexts = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  const dialog = getState().globalConfigDialog;
   if (!dialog.open || dialog.busy) {
     return;
   }
@@ -166,35 +165,35 @@ export const refreshCloudContexts = (): AppThunk<Promise<void>> => async (dispat
     const cloudContexts = await dispatch(
       cloudApi.endpoints.getCloudContextStatuses.initiate(undefined, { forceRefetch: true }),
     ).unwrap();
-    controller.state.globalConfigDialog = {
-      ...controller.state.globalConfigDialog,
-      config: { ...controller.state.globalConfigDialog.config, cloudContexts },
+    const currentConfig = getState().globalConfigDialog.config;
+    dispatch(patchGlobalConfigDialog({
+      config: { ...currentConfig, cloudContexts },
       error: '',
-    };
+    }));
     dispatch(showNotification('success', 'Cloud contexts refreshed.'));
   } catch (error) {
     const message = readError(error);
-    controller.state.globalConfigDialog = { ...controller.state.globalConfigDialog, error: message };
+    dispatch(patchGlobalConfigDialog({ error: message }));
     dispatch(showTerminalMessage(message));
   }
 };
 
-export const initGlobalCloudContext = (): AppThunk<Promise<void>> => async (dispatch, _getState, extra) => {
+export const initGlobalCloudContext = (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
   const controller = requireController(extra);
-  const dialog = controller.state.globalConfigDialog;
+  const dialog = getState().globalConfigDialog;
   if (dialog.busy || dialog.configLoading) {
     return;
   }
-  controller.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-context-init', busyTarget: '', error: '' };
+  dispatch(patchGlobalConfigDialog({ busy: true, busyAction: 'cloud-context-init', busyTarget: '', error: '' }));
   try {
     const context = await dispatch(cloudApi.endpoints.initCloudContext.initiate(dialog.cloudContextDraft)).unwrap();
-    controller.state.globalConfigDialog = {
-      ...controller.state.globalConfigDialog,
+    const currentConfig = getState().globalConfigDialog.config;
+    dispatch(patchGlobalConfigDialog({
       config: {
-        ...controller.state.globalConfigDialog.config,
-        cloudContexts: replaceCloudContext(controller.state.globalConfigDialog.config.cloudContexts || [], context),
+        ...currentConfig,
+        cloudContexts: replaceCloudContext(currentConfig.cloudContexts || [], context),
       },
-      cloudContextDraft: cloudContextDraftForConfig(controller.state.globalConfigDialog.config, {
+      cloudContextDraft: cloudContextDraftForConfig(currentConfig, {
         ...defaultCloudContextInitInput(),
         cloudProviderAlias: dialog.cloudContextDraft.cloudProviderAlias,
         region: dialog.cloudContextDraft.region,
@@ -203,23 +202,22 @@ export const initGlobalCloudContext = (): AppThunk<Promise<void>> => async (disp
       busyAction: '',
       busyTarget: '',
       error: '',
-    };
+    }));
     dispatch(showTerminalMessage(`Initialized cloud context ${context.kubernetesContext}.`));
     void controller.refreshKubernetesContexts();
   } catch (error) {
     const message = readError(error);
-    controller.state.globalConfigDialog = {
-      ...controller.state.globalConfigDialog,
+    dispatch(patchGlobalConfigDialog({
       busy: false,
       busyAction: '',
       busyTarget: '',
       error: message,
-    };
+    }));
     dispatch(showTerminalMessage(message));
   }
 };
 
-export const stopGlobalCloudContext = (name: string): AppThunk<Promise<void>> => async (dispatch, _getState, extra) => {
+export const stopGlobalCloudContext = (name: string): AppThunk<Promise<void>> => async (dispatch) => {
   await dispatch(
     updateCloudContextPower(
       name,
@@ -227,7 +225,6 @@ export const stopGlobalCloudContext = (name: string): AppThunk<Promise<void>> =>
       'Stopped',
     ),
   );
-  void requireController(extra);
 };
 
 export const startGlobalCloudContext = (name: string): AppThunk<Promise<void>> => async (dispatch, _getState, extra) => {
@@ -241,18 +238,19 @@ export const startGlobalCloudContext = (name: string): AppThunk<Promise<void>> =
   void requireController(extra).refreshKubernetesContexts();
 };
 
-export const toggleIdleCloudContext = (): AppThunk<Promise<void>> => async (dispatch, _getState, extra) => {
+export const toggleIdleCloudContext = (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
   const controller = requireController(extra);
-  const action = idleCloudContextAction(controller.state.idleStatus, controller.state.idleCloudContextBusy);
+  const state = getState();
+  const action = idleCloudContextAction(state.idle.idleStatus, state.idle.idleCloudContextBusy);
   if (!action) {
     return;
   }
-  const selection = controller.state.selected ? { ...controller.state.selected } : null;
-  controller.state.idleCloudContextBusy = true;
+  const selection = state.selection.selected ? { ...state.selection.selected } : null;
+  dispatch(setIdleCloudContextBusy(true));
   try {
     const context = (await action.run(action.name)) as UICloudContextStatus;
-    applyIdleCloudContextResult(controller, action.idleStatus, context);
-    controller.state.idleCloudContextBusy = false;
+    applyIdleCloudContextResult(dispatch, getState, action.idleStatus, context);
+    dispatch(setIdleCloudContextBusy(false));
     dispatch(showNotification('success', `${action.label} cloud environment ${context.kubernetesContext || context.name}.`));
     if (action.refreshKubernetesContexts) {
       void controller.refreshKubernetesContexts();
@@ -263,168 +261,162 @@ export const toggleIdleCloudContext = (): AppThunk<Promise<void>> => async (disp
     void controller.refreshIdleStatus();
   } catch (error) {
     const message = readError(error);
-    controller.state.idleCloudContextBusy = false;
+    dispatch(setIdleCloudContextBusy(false));
     dispatch(showNotification('error', message));
     dispatch(showTerminalMessage(message));
   }
 };
 
-export const startAWSCloudInit = (): AppThunk<Promise<void>> => async (dispatch, _getState, extra) => {
+export const startAWSCloudInit = (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
   const controller = requireController(extra);
-  const dialog = controller.state.globalConfigDialog;
+  const dialog = getState().globalConfigDialog;
   if (dialog.busy || dialog.configLoading) {
     return;
   }
-  controller.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-provider-init', busyTarget: '', error: '' };
+  dispatch(patchGlobalConfigDialog({ busy: true, busyAction: 'cloud-provider-init', busyTarget: '', error: '' }));
   try {
     controller.fitTerminal();
     const size = controller.terminalSize();
     const result = (await StartCloudInitAWSSession(size.cols, size.rows)) as StartSessionResult;
     controller.sessions.trackCloudInitSession(result.sessionId);
-    controller.state.globalConfigDialog = defaultGlobalConfigDialog();
-    controller.state.sessionId = result.sessionId;
-    controller.state.terminalCopyOutput = '';
-    controller.state.terminalCopyStatus = '';
+    dispatch(setGlobalConfigDialog(defaultGlobalConfigDialog()));
+    dispatch(setSessionId(result.sessionId));
+    dispatch(setTerminalCopyOutput(''));
+    dispatch(setTerminalCopyStatus(''));
     controller.resetTerminal();
     dispatch(hideTerminalMessage());
     controller.focusTerminalSoon();
     controller.queueTerminalResize();
   } catch (error) {
     const message = readError(error);
-    controller.state.globalConfigDialog = {
-      ...controller.state.globalConfigDialog,
+    dispatch(patchGlobalConfigDialog({
       busy: false,
       busyAction: '',
       busyTarget: '',
       error: message,
-    };
+    }));
     dispatch(showTerminalMessage(message));
   }
 };
 
-export const loginGlobalCloudProvider = (alias: string): AppThunk<Promise<void>> => async (dispatch, _getState, extra) => {
-  const controller = requireController(extra);
-  const dialog = controller.state.globalConfigDialog;
+export const loginGlobalCloudProvider = (alias: string): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  const dialog = getState().globalConfigDialog;
   if (dialog.busy || dialog.configLoading) {
     return;
   }
-  controller.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-provider-login', busyTarget: alias, error: '' };
+  dispatch(patchGlobalConfigDialog({ busy: true, busyAction: 'cloud-provider-login', busyTarget: alias, error: '' }));
   try {
     const provider = await dispatch(cloudApi.endpoints.loginCloudProvider.initiate(alias)).unwrap();
-    controller.state.globalConfigDialog = {
-      ...controller.state.globalConfigDialog,
+    const currentConfig = getState().globalConfigDialog.config;
+    dispatch(patchGlobalConfigDialog({
       config: {
-        ...controller.state.globalConfigDialog.config,
-        cloudProviders: replaceCloudProvider(controller.state.globalConfigDialog.config.cloudProviders || [], provider),
+        ...currentConfig,
+        cloudProviders: replaceCloudProvider(currentConfig.cloudProviders || [], provider),
       },
       busy: false,
       busyAction: '',
       busyTarget: '',
       error: '',
-    };
+    }));
     dispatch(showTerminalMessage(`${provider.alias}: ${provider.status}`));
   } catch (error) {
     const message = readError(error);
-    controller.state.globalConfigDialog = {
-      ...controller.state.globalConfigDialog,
+    dispatch(patchGlobalConfigDialog({
       busy: false,
       busyAction: '',
       busyTarget: '',
       error: message,
-    };
+    }));
     dispatch(showTerminalMessage(message));
   }
 };
 
-export const submitGlobalConfig = (): AppThunk<Promise<void>> => async (dispatch, _getState, extra) => {
-  const controller = requireController(extra);
-  const dialog = controller.state.globalConfigDialog;
+export const submitGlobalConfig = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  const dialog = getState().globalConfigDialog;
   if (dialog.busy || dialog.configLoading) {
     return;
   }
-  controller.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'save', busyTarget: '', error: '' };
+  dispatch(patchGlobalConfigDialog({ busy: true, busyAction: 'save', busyTarget: '', error: '' }));
   try {
     const result = await dispatch(globalConfigApi.endpoints.saveERunConfig.initiate(dialog.config)).unwrap();
-    controller.state.globalConfigDialog = {
-      ...controller.state.globalConfigDialog,
+    dispatch(patchGlobalConfigDialog({
       config: result,
       busy: false,
       busyAction: '',
       busyTarget: '',
       error: '',
-    };
+    }));
     dispatch(showNotification('success', 'Saved ERun config.'));
     dispatch(closeGlobalConfigDialog());
   } catch (error) {
     const message = readError(error);
-    controller.state.globalConfigDialog = {
-      ...controller.state.globalConfigDialog,
+    dispatch(patchGlobalConfigDialog({
       busy: false,
       busyAction: '',
       busyTarget: '',
       error: message,
-    };
+    }));
     dispatch(showTerminalMessage(message));
   }
 };
 
 function applyIdleCloudContextResult(
-  controller: NonNullable<ReturnType<typeof requireController>>,
-  idleStatus: NonNullable<AppState['idleStatus']>,
+  dispatch: AppDispatch,
+  getState: () => RootState,
+  idleStatusFallback: UIIdleStatus,
   context: UICloudContextStatus,
 ): void {
-  controller.state.idleStatus = {
-    ...(controller.state.idleStatus ?? idleStatus),
+  const current = getState().idle.idleStatus;
+  dispatch(setIdleStatus({
+    ...(current ?? idleStatusFallback),
     cloudContextName: context.name,
     cloudContextStatus: context.status,
     cloudContextLabel: context.kubernetesContext || context.name,
-  };
-  if (!controller.state.globalConfigDialog.open) {
+  }));
+  const globalDialog = getState().globalConfigDialog;
+  if (!globalDialog.open) {
     return;
   }
-  controller.state.globalConfigDialog = {
-    ...controller.state.globalConfigDialog,
+  dispatch(patchGlobalConfigDialog({
     config: {
-      ...controller.state.globalConfigDialog.config,
-      cloudContexts: replaceCloudContext(controller.state.globalConfigDialog.config.cloudContexts || [], context),
+      ...globalDialog.config,
+      cloudContexts: replaceCloudContext(globalDialog.config.cloudContexts || [], context),
     },
-  };
+  }));
 }
 
 const updateCloudContextPower = (
   name: string,
   action: (name: string) => Promise<unknown>,
   label: string,
-): AppThunk<Promise<void>> => async (dispatch, _getState, extra) => {
-  const controller = requireController(extra);
-  const dialog = controller.state.globalConfigDialog;
+): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  const dialog = getState().globalConfigDialog;
   if (dialog.busy || dialog.configLoading) {
     return;
   }
-  controller.state.globalConfigDialog = { ...dialog, busy: true, busyAction: 'cloud-context-power', busyTarget: name, error: '' };
+  dispatch(patchGlobalConfigDialog({ busy: true, busyAction: 'cloud-context-power', busyTarget: name, error: '' }));
   try {
     const context = (await action(name)) as UICloudContextStatus;
-    controller.state.globalConfigDialog = {
-      ...controller.state.globalConfigDialog,
+    const currentConfig = getState().globalConfigDialog.config;
+    dispatch(patchGlobalConfigDialog({
       config: {
-        ...controller.state.globalConfigDialog.config,
-        cloudContexts: replaceCloudContext(controller.state.globalConfigDialog.config.cloudContexts || [], context),
+        ...currentConfig,
+        cloudContexts: replaceCloudContext(currentConfig.cloudContexts || [], context),
       },
       busy: false,
       busyAction: '',
       busyTarget: '',
       error: '',
-    };
+    }));
     dispatch(showTerminalMessage(`${label} cloud context ${context.kubernetesContext}.`));
   } catch (error) {
     const message = readError(error);
-    controller.state.globalConfigDialog = {
-      ...controller.state.globalConfigDialog,
+    dispatch(patchGlobalConfigDialog({
       busy: false,
       busyAction: '',
       busyTarget: '',
       error: message,
-    };
+    }));
     dispatch(showTerminalMessage(message));
   }
 };

@@ -1,8 +1,18 @@
 import { ClipboardSetText } from '../../wailsjs/runtime/runtime';
 import { readError } from './errors';
+import {
+  dismissNotification as dismissNotificationAction,
+  showNotification as showNotificationAction,
+} from './slices/notificationSlice';
+import {
+  clearTerminalStatus,
+  setTerminalCopyOutput,
+  setTerminalCopyStatus,
+  setTerminalMessage,
+} from './slices/terminalStatusSlice';
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
-import type { AppState, TerminalStatusAction } from './state';
+import type { AppNotification, TerminalStatusAction } from './state';
 import type { UISelection } from '@/types';
 
 // notificationThunks own the titlebar terminal-status message lifecycle and
@@ -21,16 +31,11 @@ export function getTerminalStatusRetrySelection(): UISelection | null {
 export const showTerminalMessage = (
   message: string,
   busy = false,
-): AppThunk => (_dispatch, _getState, extra) => {
-  const controller = requireController(extra);
-  controller.state.terminalMessage = message;
-  controller.state.terminalStatusKind = 'info';
-  controller.state.terminalStatusDetail = '';
-  controller.state.terminalStatusAction = '';
-  controller.state.terminalBusy = busy;
+): AppThunk => (dispatch) => {
+  dispatch(setTerminalMessage({ message, busy, kind: 'info', detail: '', actionKind: '' }));
   if (busy) {
-    controller.state.terminalCopyOutput = '';
-    controller.state.terminalCopyStatus = '';
+    dispatch(setTerminalCopyOutput(''));
+    dispatch(setTerminalCopyStatus(''));
   }
   terminalStatusRetrySelection = null;
 };
@@ -41,64 +46,54 @@ export const showTerminalFailure = (
   copyOutput: string,
   action: TerminalStatusAction,
   retrySelection: UISelection | null,
-): AppThunk => (_dispatch, _getState, extra) => {
-  const controller = requireController(extra);
-  controller.state.terminalMessage = message;
-  controller.state.terminalStatusKind = action === 'wait-longer' ? 'warning' : 'error';
-  controller.state.terminalStatusDetail = detail;
-  controller.state.terminalStatusAction = action;
-  controller.state.terminalBusy = false;
-  controller.state.terminalCopyOutput = copyOutput;
-  controller.state.terminalCopyStatus = '';
+): AppThunk => (dispatch) => {
+  dispatch(
+    setTerminalMessage({
+      message,
+      busy: false,
+      kind: action === 'wait-longer' ? 'warning' : 'error',
+      detail,
+      actionKind: action,
+    }),
+  );
+  dispatch(setTerminalCopyOutput(copyOutput));
+  dispatch(setTerminalCopyStatus(''));
   terminalStatusRetrySelection = action === 'wait-longer' ? retrySelection : null;
 };
 
-export const hideTerminalMessage = (): AppThunk => (_dispatch, _getState, extra) => {
-  const controller = requireController(extra);
-  controller.state.terminalMessage = '';
-  controller.state.terminalStatusKind = 'info';
-  controller.state.terminalStatusDetail = '';
-  controller.state.terminalStatusAction = '';
-  controller.state.terminalBusy = false;
-  controller.state.terminalCopyOutput = '';
-  controller.state.terminalCopyStatus = '';
+export const hideTerminalMessage = (): AppThunk => (dispatch) => {
+  dispatch(clearTerminalStatus());
+  dispatch(setTerminalCopyOutput(''));
+  dispatch(setTerminalCopyStatus(''));
   terminalStatusRetrySelection = null;
 };
 
-export const dismissTerminalStatus = (): AppThunk => (_dispatch, _getState, extra) => {
-  const controller = requireController(extra);
+export const dismissTerminalStatus = (): AppThunk => (dispatch, getState) => {
+  const status = getState().terminalStatus;
   if (
-    !controller.state.terminalMessage &&
-    !controller.state.terminalStatusDetail &&
-    !controller.state.terminalCopyOutput &&
-    !controller.state.terminalCopyStatus
+    !status.terminalMessage &&
+    !status.terminalStatusDetail &&
+    !status.terminalCopyOutput &&
+    !status.terminalCopyStatus
   ) {
     return;
   }
-  controller.state.terminalMessage = '';
-  controller.state.terminalStatusKind = 'info';
-  controller.state.terminalStatusDetail = '';
-  controller.state.terminalStatusAction = '';
-  controller.state.terminalBusy = false;
-  controller.state.terminalCopyOutput = '';
-  controller.state.terminalCopyStatus = '';
+  dispatch(clearTerminalStatus());
+  dispatch(setTerminalCopyOutput(''));
+  dispatch(setTerminalCopyStatus(''));
   terminalStatusRetrySelection = null;
 };
 
 export const showNotification = (
-  kind: NonNullable<AppState['notification']>['kind'],
+  kind: AppNotification['kind'],
   message: string,
-): AppThunk => (dispatch, _getState, extra) => {
-  const controller = requireController(extra);
+): AppThunk => (dispatch) => {
   const trimmed = message.trim();
   if (!trimmed) {
     return;
   }
   window.clearTimeout(notificationTimer);
-  controller.state.notification = {
-    kind,
-    message: trimmed,
-  };
+  dispatch(showNotificationAction({ kind, message: trimmed }));
   if (kind === 'success' || kind === 'info') {
     notificationTimer = window.setTimeout(() => {
       dispatch(dismissNotification());
@@ -106,13 +101,12 @@ export const showNotification = (
   }
 };
 
-export const dismissNotification = (): AppThunk => (_dispatch, _getState, extra) => {
-  const controller = requireController(extra);
+export const dismissNotification = (): AppThunk => (dispatch, getState) => {
   window.clearTimeout(notificationTimer);
-  if (!controller.state.notification) {
+  if (!getState().notification.notification) {
     return;
   }
-  controller.state.notification = null;
+  dispatch(dismissNotificationAction());
 };
 
 export const waitLongerForTerminalStatus = (): AppThunk<Promise<void>> =>
@@ -122,27 +116,26 @@ export const waitLongerForTerminalStatus = (): AppThunk<Promise<void>> =>
     if (!selection) {
       return;
     }
-    controller.state.terminalStatusAction = '';
-    controller.state.terminalCopyOutput = '';
-    controller.state.terminalCopyStatus = '';
+    dispatch(setTerminalCopyOutput(''));
+    dispatch(setTerminalCopyStatus(''));
     dispatch(showTerminalMessage(`Waiting longer for ${selection.tenant} / ${selection.environment}...`, true));
     await controller.openSelection(selection);
   };
 
 export const copyTerminalOutput = (): AppThunk<Promise<void>> =>
-  async (_dispatch, _getState, extra) => {
-    const controller = requireController(extra);
-    if (!controller.state.terminalCopyOutput) {
+  async (dispatch, getState) => {
+    const copyOutput = getState().terminalStatus.terminalCopyOutput;
+    if (!copyOutput) {
       return;
     }
     try {
-      await ClipboardSetText(controller.state.terminalCopyOutput);
-      controller.state.terminalCopyStatus = 'Copied';
+      await ClipboardSetText(copyOutput);
+      dispatch(setTerminalCopyStatus('Copied'));
     } catch (error) {
-      controller.state.terminalCopyStatus = readError(error);
+      dispatch(setTerminalCopyStatus(readError(error)));
     }
     window.clearTimeout(terminalCopyStatusTimer);
     terminalCopyStatusTimer = window.setTimeout(() => {
-      controller.state.terminalCopyStatus = '';
+      dispatch(setTerminalCopyStatus(''));
     }, 1400);
   };

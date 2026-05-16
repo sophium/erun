@@ -6,6 +6,21 @@ import {
   showNotification,
   showTerminalMessage,
 } from './notificationThunks';
+import { setIdleStatus } from './slices/idleSlice';
+import { setReviewOpen } from './slices/layoutSlice';
+import { setSelected } from './slices/selectionSlice';
+import {
+  patchTenantDashboard,
+  setTenantDashboard,
+} from './slices/tenantDashboardSlice';
+import {
+  patchTenantDialog,
+  setTenantDialog,
+} from './slices/tenantDialogSlice';
+import {
+  setCloudProviders,
+  setTenants,
+} from './slices/tenantsSlice';
 import {
   defaultTenantDialog,
   type TenantDashboardTab,
@@ -20,12 +35,11 @@ import type {
 } from '@/types';
 
 // tenantDialogThunks own the tenant settings modal and the tenant dashboard
-// view (users, queue, builds, audit-log tabs). State mutations route through
-// the controller proxy, which dispatches the matching slice actions.
+// view (users, queue, builds, audit-log tabs). State mutations dispatch slice
+// actions directly.
 
-export const openTenantDialog = (tenant: string): AppThunk => (dispatch, _getState, extra) => {
-  const controller = requireController(extra);
-  controller.state.tenantDialog = {
+export const openTenantDialog = (tenant: string): AppThunk => (dispatch) => {
+  dispatch(setTenantDialog({
     open: true,
     tenant,
     config: {
@@ -41,84 +55,77 @@ export const openTenantDialog = (tenant: string): AppThunk => (dispatch, _getSta
     busyAction: '',
     busyTarget: '',
     error: '',
-  };
+  }));
   void dispatch(loadTenantConfig());
 };
 
-export const closeTenantDialog = (): AppThunk => (_dispatch, _getState, extra) => {
+export const closeTenantDialog = (): AppThunk => (dispatch, getState, extra) => {
   const controller = requireController(extra);
-  if (controller.state.tenantDialog.busy) {
+  if (getState().tenantDialog.busy) {
     return;
   }
-  controller.state.tenantDialog = defaultTenantDialog();
+  dispatch(setTenantDialog(defaultTenantDialog()));
   controller.focusTerminalSoon();
 };
 
 export const updateTenantDialog = (values: Partial<TenantDialogState>): AppThunk =>
-  (_dispatch, _getState, extra) => {
-    const controller = requireController(extra);
-    if (controller.state.tenantDialog.busy) {
+  (dispatch, getState) => {
+    if (getState().tenantDialog.busy) {
       return;
     }
-    controller.state.tenantDialog = {
-      ...controller.state.tenantDialog,
+    dispatch(patchTenantDialog({
       ...values,
       error: values.error ?? '',
-    };
+    }));
   };
 
 export const updateTenantConfig = (values: Partial<UITenantConfig>): AppThunk =>
-  (dispatch, _getState, extra) => {
-    const controller = requireController(extra);
-    if (controller.state.tenantDialog.busy || controller.state.tenantDialog.configLoading) {
+  (dispatch, getState) => {
+    const dialog = getState().tenantDialog;
+    if (dialog.busy || dialog.configLoading) {
       return;
     }
     dispatch(updateTenantDialog({
       config: {
-        ...controller.state.tenantDialog.config,
+        ...dialog.config,
         ...values,
       },
     }));
   };
 
 export const loadTenantConfig = (): AppThunk<Promise<void>> =>
-  async (dispatch, _getState, extra) => {
-    const controller = requireController(extra);
-    const dialog = controller.state.tenantDialog;
+  async (dispatch, getState) => {
+    const dialog = getState().tenantDialog;
     if (!dialog.open || !dialog.tenant) {
       return;
     }
-    controller.state.tenantDialog = {
-      ...dialog,
+    dispatch(patchTenantDialog({
       configLoading: true,
       error: '',
-    };
+    }));
     try {
       const result = await dispatch(
         tenantApi.endpoints.getTenantConfig.initiate(dialog.tenant),
       ).unwrap();
       if (result.cloudProviders) {
-        controller.state.cloudProviders = result.cloudProviders;
+        dispatch(setCloudProviders(result.cloudProviders));
       }
-      controller.state.tenantDialog = {
-        ...controller.state.tenantDialog,
+      dispatch(patchTenantDialog({
         config: result,
         configLoading: false,
         error: '',
-      };
+      }));
     } catch (error) {
-      controller.state.tenantDialog = {
-        ...controller.state.tenantDialog,
+      dispatch(patchTenantDialog({
         configLoading: false,
         error: readError(error),
-      };
+      }));
     }
   };
 
 export const submitTenantConfig = (): AppThunk<Promise<void>> =>
-  async (dispatch, _getState, extra) => {
-    const controller = requireController(extra);
-    const dialog = controller.state.tenantDialog;
+  async (dispatch, getState) => {
+    const dialog = getState().tenantDialog;
     if (dialog.busy || dialog.configLoading) {
       return;
     }
@@ -126,85 +133,83 @@ export const submitTenantConfig = (): AppThunk<Promise<void>> =>
       dispatch(closeTenantDialog());
       return;
     }
-    controller.state.tenantDialog = { ...dialog, busy: true, busyAction: 'save', busyTarget: '', error: '' };
+    dispatch(patchTenantDialog({ busy: true, busyAction: 'save', busyTarget: '', error: '' }));
     try {
       const result = await dispatch(
         tenantApi.endpoints.saveTenantConfig.initiate(dialog.config),
       ).unwrap();
-      applySavedTenantConfig(controller, result);
-      controller.state.tenantDialog = {
-        ...controller.state.tenantDialog,
+      applySavedTenantConfig(dispatch, getState, result);
+      dispatch(patchTenantDialog({
         config: result,
         busy: false,
         busyAction: '',
         busyTarget: '',
         error: '',
-      };
+      }));
       dispatch(showNotification('success', `Saved config for ${result.name}.`));
       dispatch(closeTenantDialog());
     } catch (error) {
       const message = readError(error);
-      controller.state.tenantDialog = {
-        ...controller.state.tenantDialog,
+      dispatch(patchTenantDialog({
         busy: false,
         busyAction: '',
         busyTarget: '',
         error: message,
-      };
+      }));
       dispatch(showTerminalMessage(message));
     }
   };
 
 export const setupTenantCloudProviderOIDC = (alias: string): AppThunk<Promise<void>> =>
-  async (dispatch, _getState, extra) => {
-    const controller = requireController(extra);
+  async (dispatch, getState) => {
     alias = alias.trim();
-    const dialog = controller.state.tenantDialog;
+    const dialog = getState().tenantDialog;
     if (!alias || dialog.busy || dialog.configLoading) {
       return;
     }
-    controller.state.tenantDialog = { ...dialog, busy: true, busyAction: 'cloud-oidc', busyTarget: alias, error: '' };
+    dispatch(patchTenantDialog({ busy: true, busyAction: 'cloud-oidc', busyTarget: alias, error: '' }));
     try {
       const provider = await dispatch(
         cloudApi.endpoints.setupCloudProviderOIDC.initiate(alias),
       ).unwrap();
-      controller.state.cloudProviders = replaceCloudProvider(controller.state.cloudProviders, provider);
-      const currentProviders = controller.state.tenantDialog.config.cloudProviders || [];
-      controller.state.tenantDialog = {
-        ...controller.state.tenantDialog,
+      dispatch(setCloudProviders(replaceCloudProvider(getState().tenants.cloudProviders, provider)));
+      const currentDialog = getState().tenantDialog;
+      const currentProviders = currentDialog.config.cloudProviders || [];
+      dispatch(patchTenantDialog({
         config: {
-          ...controller.state.tenantDialog.config,
+          ...currentDialog.config,
           cloudProviders: replaceCloudProvider(currentProviders, provider),
         },
         busy: false,
         busyAction: '',
         busyTarget: '',
         error: '',
-      };
+      }));
       dispatch(showNotification('success', `Updated OIDC issuer for ${provider.alias}.`));
     } catch (error) {
       const message = readError(error);
-      controller.state.tenantDialog = {
-        ...controller.state.tenantDialog,
+      dispatch(patchTenantDialog({
         busy: false,
         busyAction: '',
         busyTarget: '',
         error: message,
-      };
+      }));
       dispatch(showTerminalMessage(message));
       dispatch(showNotification('error', message));
     }
   };
 
 function applySavedTenantConfig(
-  controller: NonNullable<ReturnType<typeof requireController>>,
+  dispatch: (action: ReturnType<typeof setTenants> | ReturnType<typeof setCloudProviders>) => unknown,
+  getState: () => ReturnType<typeof import('./store').store.getState>,
   config: UITenantConfig,
 ): void {
   const tenantName = config.name.trim();
   if (!tenantName) {
     return;
   }
-  controller.state.tenants = controller.state.tenants.map((tenant) => {
+  const currentTenants = getState().tenants.tenants;
+  dispatch(setTenants(currentTenants.map((tenant) => {
     if (tenant.name !== tenantName) {
       return tenant;
     }
@@ -213,96 +218,89 @@ function applySavedTenantConfig(
       cloudProviderAliases: config.cloudProviderAliases || [],
       primaryCloudProviderAlias: config.primaryCloudProviderAlias || '',
     };
-  });
+  })));
   if (config.cloudProviders) {
-    controller.state.cloudProviders = config.cloudProviders;
+    dispatch(setCloudProviders(config.cloudProviders));
   }
 }
 
 // Tenant dashboard ============================================================
 
 export const openTenantDashboard = (tenant: string): AppThunk =>
-  (dispatch, _getState, extra) => {
-    const controller = requireController(extra);
+  (dispatch, getState) => {
     tenant = tenant.trim();
     if (!tenant) {
       return;
     }
-    controller.state.selected = null;
-    controller.state.idleStatus = null;
-    controller.state.tenantDashboard = {
+    const currentDashboard = getState().tenantDashboard;
+    dispatch(setSelected(null));
+    dispatch(setIdleStatus(null));
+    dispatch(setTenantDashboard({
       tenant,
-      tab: controller.state.tenantDashboard.tenant === tenant ? controller.state.tenantDashboard.tab : 'users',
+      tab: currentDashboard.tenant === tenant ? currentDashboard.tab : 'users',
       loading: true,
       error: '',
       data: null,
-    };
-    controller.state.reviewOpen = false;
+    }));
+    dispatch(setReviewOpen(false));
     dispatch(showTerminalMessage(''));
     void dispatch(loadTenantDashboard(tenant));
   };
 
 export const setTenantDashboardTab = (tab: TenantDashboardTab): AppThunk =>
-  (_dispatch, _getState, extra) => {
-    const controller = requireController(extra);
-    controller.state.tenantDashboard = {
-      ...controller.state.tenantDashboard,
-      tab,
-    };
+  (dispatch) => {
+    dispatch(patchTenantDashboard({ tab }));
   };
 
 export const loadTenantDashboard = (tenant?: string): AppThunk<Promise<void>> =>
-  async (dispatch, _getState, extra) => {
-    const controller = requireController(extra);
-    const target = (tenant ?? controller.state.tenantDashboard.tenant).trim();
-    if (!target || controller.state.tenantDashboard.tenant !== target) {
+  async (dispatch, getState) => {
+    const state = getState();
+    const target = (tenant ?? state.tenantDashboard.tenant).trim();
+    if (!target || state.tenantDashboard.tenant !== target) {
       return;
     }
-    const tenantState = controller.state.tenants.find((candidate) => candidate.name === target);
+    const tenantState = state.tenants.tenants.find((candidate) => candidate.name === target);
     const input = tenantDashboardInput(tenantState);
     if (!input) {
-      controller.state.tenantDashboard = {
-        ...controller.state.tenantDashboard,
+      dispatch(patchTenantDashboard({
         loading: false,
         error: 'Tenant dashboard requires an API URL and a primary cloud alias.',
         data: null,
-      };
+      }));
       return;
     }
-    controller.state.tenantDashboard = { ...controller.state.tenantDashboard, loading: true, error: '' };
+    dispatch(patchTenantDashboard({ loading: true, error: '' }));
     try {
       const loadedData = await dispatch(
         tenantApi.endpoints.getTenantDashboard.initiate(input),
       ).unwrap();
-      if (controller.state.tenantDashboard.tenant !== target) {
+      if (getState().tenantDashboard.tenant !== target) {
         return;
       }
       const data = { ...loadedData, environment: loadedData.environment || input.environment };
-      controller.state.tenantDashboard = {
-        ...controller.state.tenantDashboard,
+      dispatch(patchTenantDashboard({
         loading: false,
         error: '',
         data,
-      };
+      }));
     } catch (error) {
-      if (controller.state.tenantDashboard.tenant !== target) {
+      if (getState().tenantDashboard.tenant !== target) {
         return;
       }
-      controller.state.tenantDashboard = {
-        ...controller.state.tenantDashboard,
+      dispatch(patchTenantDashboard({
         loading: false,
         error: readError(error),
         data: null,
-      };
+      }));
     }
   };
 
 export const refreshTenantDashboard = (): AppThunk<Promise<void>> =>
-  async (dispatch, _getState, extra) => {
-    const controller = requireController(extra);
-    const tenant = controller.state.tenantDashboard.tenant;
+  async (dispatch, getState) => {
+    const tenant = getState().tenantDashboard.tenant;
     await dispatch(loadTenantDashboard(tenant));
-    if (controller.state.tenantDashboard.tenant === tenant && !controller.state.tenantDashboard.error) {
+    const after = getState().tenantDashboard;
+    if (after.tenant === tenant && !after.error) {
       dispatch(showNotification('success', 'Dashboard refreshed.'));
     }
   };

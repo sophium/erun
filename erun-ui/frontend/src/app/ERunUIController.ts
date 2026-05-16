@@ -6,7 +6,29 @@ import { idleApi } from './api/idleApi';
 import { kubernetesApi } from './api/kubernetesApi';
 import { sessionApi } from './api/sessionApi';
 import { stateApi } from './api/stateApi';
-import { createControllerStateProxy } from './controllerStateProxy';
+import { setDoctorAll } from './slices/doctorSlice';
+import { patchEnvironmentDialog } from './slices/environmentDialogSlice';
+import { setIdleStatus } from './slices/idleSlice';
+import { setReconnect, setSelectedDiffPath, setSelectedReviewCommit, setSelectedReviewScope } from './slices/reviewSlice';
+import { setSelected } from './slices/selectionSlice';
+import { setTenantDashboard } from './slices/tenantDashboardSlice';
+import {
+  setDebugOutput,
+  setSelectedSessionForEnv,
+  clearSelectedSessionForEnv,
+  setSessionId,
+  setTabsForEnv,
+  clearTabsForEnv,
+} from './slices/terminalSlice';
+import {
+  setCloudProviders,
+  setTenants,
+  setVersionSuggestions,
+} from './slices/tenantsSlice';
+import {
+  setTerminalCopyOutput,
+  setTerminalCopyStatus,
+} from './slices/terminalStatusSlice';
 import { store } from './store';
 import { thunkExtra } from './thunkExtra';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
@@ -49,7 +71,6 @@ import {
   MIN_FILES_WIDTH,
   MIN_REVIEW_WIDTH,
   computeMaxReviewWidth,
-  type AppState,
   type TerminalTab,
   type TerminalTabKind,
 } from './state';
@@ -88,8 +109,6 @@ import type {
 const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 
 export class ERunUIController {
-  readonly state: AppState = createControllerStateProxy(store);
-
   readonly sessions = new TerminalSessionRegistry();
   private pendingDebugHeader = '';
   private terminal: Terminal | null = null;
@@ -174,11 +193,11 @@ export class ERunUIController {
 
     this.terminalQueryResponseDisposables = registerTerminalQueryResponseHandlers(
       this.terminal,
-      (data) => SendSessionInput(this.state.sessionId, data),
+      (data) => SendSessionInput(store.getState().terminal.sessionId, data),
       (error) => store.dispatch(showTerminalMessage(readError(error))),
     );
     this.terminalDataDisposable = this.terminal.onData((data) => {
-      SendSessionInput(this.state.sessionId, data).catch((error: unknown) => {
+      SendSessionInput(store.getState().terminal.sessionId, data).catch((error: unknown) => {
         store.dispatch(showTerminalMessage(readError(error)));
       });
     });
@@ -261,8 +280,8 @@ export class ERunUIController {
 
   setPendingDebugHeader(header: string): void {
     this.pendingDebugHeader = header;
-    if (this.state.debugOpen) {
-      this.state.debugOutput = header;
+    if (store.getState().layout.debugOpen) {
+      store.dispatch(setDebugOutput(header));
     }
   }
 
@@ -271,7 +290,7 @@ export class ERunUIController {
       this.pendingDebugHeader = '';
       return;
     }
-    if (this.state.debugOpen) {
+    if (store.getState().layout.debugOpen) {
       this.sessions.setSessionDebug(sessionId, this.pendingDebugHeader);
     }
     this.pendingDebugHeader = '';
@@ -282,17 +301,18 @@ export class ERunUIController {
   }
 
   syncDebugDisplay(): void {
-    if (!this.state.debugOpen) {
+    if (!store.getState().layout.debugOpen) {
       return;
     }
-    this.state.debugOutput = this.sessions.sessionDebug(this.state.sessionId);
+    store.dispatch(setDebugOutput(this.sessions.sessionDebug(store.getState().terminal.sessionId)));
   }
 
   async openSelection(selection: UISelection): Promise<void> {
-    this.state.tenantDashboard = { tenant: '', tab: 'users', loading: false, error: '', data: null };
-    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
+    store.dispatch(setTenantDashboard({ tenant: '', tab: 'users', loading: false, error: '', data: null }));
+    const debugOpen = store.getState().layout.debugOpen;
+    const runSelection = { ...selection, debug: debugOpen || undefined };
     const key = selectionKey(runSelection);
-    const previousSessionId = this.state.sessionId;
+    const previousSessionId = store.getState().terminal.sessionId;
     const previousKnownSessionId = this.sessions.knownSelectionSession(key);
 
     this.prepareOpenSelection(selection, runSelection, previousSessionId, previousKnownSessionId);
@@ -301,7 +321,7 @@ export class ERunUIController {
     const rows = this.terminal?.rows || 24;
 
     // Spawn Local first so subsequent ERun/AI spawns can log into it.
-    const tabs = this.state.tabsByEnv[key] || [];
+    const tabs = store.getState().terminal.tabsByEnv[key] || [];
     if (!tabs.some((tab) => tab.kind === 'local')) {
       await this.spawnDefaultTab(key, runSelection, 'local', 'Local', cols, rows);
     }
@@ -314,7 +334,7 @@ export class ERunUIController {
     await this.ensureDefaultEnvTabs(runSelection, key);
     this.restoreSelectedTabForEnv(key);
 
-    if (this.state.reviewOpen) {
+    if (store.getState().layout.reviewOpen) {
       await store.dispatch(loadReviewDiff());
     }
     this.focusTerminalSoon();
@@ -322,7 +342,7 @@ export class ERunUIController {
   }
 
   async ensureDefaultEnvTabs(runSelection: UISelection, key: string): Promise<void> {
-    const tabs = this.state.tabsByEnv[key] || [];
+    const tabs = store.getState().terminal.tabsByEnv[key] || [];
     const cols = this.terminal?.cols || 80;
     const rows = this.terminal?.rows || 24;
     if (!tabs.some((tab) => tab.kind === 'erun')) {
@@ -365,42 +385,45 @@ export class ERunUIController {
   }
 
   rememberSelectedTabForCurrentEnv(sessionId: number): void {
-    const selection = this.state.selected;
+    const state = store.getState();
+    const selection = state.selection.selected;
     if (!selection) {
       return;
     }
-    const key = selectionKey({ ...selection, debug: this.state.debugOpen || undefined });
-    this.state.selectedSessionByEnv = { ...this.state.selectedSessionByEnv, [key]: sessionId };
+    const key = selectionKey({ ...selection, debug: state.layout.debugOpen || undefined });
+    store.dispatch(setSelectedSessionForEnv({ key, sessionId }));
   }
 
   private restoreSelectedTabForEnv(key: string): void {
-    const tabs = this.state.tabsByEnv[key] || [];
-    const remembered = this.state.selectedSessionByEnv[key];
+    const state = store.getState();
+    const tabs = state.terminal.tabsByEnv[key] || [];
+    const remembered = state.terminal.selectedSessionByEnv[key];
     if (!remembered || !tabs.some((tab) => tab.sessionId === remembered)) {
       return;
     }
-    if (remembered === this.state.sessionId) {
+    if (remembered === state.terminal.sessionId) {
       return;
     }
     store.dispatch(selectTerminalTabThunk(remembered));
   }
 
   private prepareOpenSelection(selection: UISelection, runSelection: UISelection, previousSessionId: number, previousKnownSessionId: number): void {
-    if (selectionKey(selection) !== selectionKey(this.state.selected || { tenant: '', environment: '' })) {
-      this.state.selectedReviewScope = 'current';
-      this.state.selectedReviewCommit = '';
-      this.state.selectedDiffPath = '';
+    const state = store.getState();
+    if (selectionKey(selection) !== selectionKey(state.selection.selected || { tenant: '', environment: '' })) {
+      store.dispatch(setSelectedReviewScope('current'));
+      store.dispatch(setSelectedReviewCommit(''));
+      store.dispatch(setSelectedDiffPath(''));
     }
-    this.state.selected = selection;
-    this.state.idleStatus = null;
+    store.dispatch(setSelected(selection));
+    store.dispatch(setIdleStatus(null));
     if (!isNewSessionSelection(previousSessionId, previousKnownSessionId)) {
       return;
     }
-    if (this.state.debugOpen) {
+    if (state.layout.debugOpen) {
       this.setPendingDebugHeader(`$ ${formatDebugCommand(runSelection)}\n`);
     }
-    this.state.terminalCopyOutput = '';
-    this.state.terminalCopyStatus = '';
+    store.dispatch(setTerminalCopyOutput(''));
+    store.dispatch(setTerminalCopyStatus(''));
     store.dispatch(showTerminalMessage(`Opening ${selection.tenant} / ${selection.environment}...`, true));
   }
 
@@ -409,18 +432,19 @@ export class ERunUIController {
     this.registerDebugSession(result.sessionId, runSelection, 'open');
     this.applyPendingDebugHeader(result.sessionId);
     rebuildTerminalDisplayBuffer(this.sessions, result.sessionId);
-    this.state.sessionId = result.sessionId;
+    store.dispatch(setSessionId(result.sessionId));
     // Preserve the user's prior tab choice for this env across re-opens
     // (Nielsen heuristic #4: consistency / user control). Only seed
     // selectedSessionByEnv when nothing is remembered, or when the
     // remembered session no longer exists in the live tabs for this env.
     // restoreSelectedTabForEnv below switches the terminal back to the
     // remembered tab when one exists.
-    const remembered = this.state.selectedSessionByEnv[key];
-    const liveTabs = this.state.tabsByEnv[key] || [];
+    const state = store.getState();
+    const remembered = state.terminal.selectedSessionByEnv[key];
+    const liveTabs = state.terminal.tabsByEnv[key] || [];
     const rememberedIsLive = remembered && liveTabs.some((tab) => tab.sessionId === remembered);
     if (!rememberedIsLive) {
-      this.state.selectedSessionByEnv = { ...this.state.selectedSessionByEnv, [key]: result.sessionId };
+      store.dispatch(setSelectedSessionForEnv({ key, sessionId: result.sessionId }));
     }
     this.syncDebugDisplay();
     const slot = result.slot ?? 0;
@@ -434,16 +458,18 @@ export class ERunUIController {
   }
 
   private activeSlotForSelection(selection: UISelection): number {
-    const tabs = this.state.tabsByEnv[selectionKey(selection)] || [];
+    const state = store.getState();
+    const tabs = state.terminal.tabsByEnv[selectionKey(selection)] || [];
     if (tabs.length === 0) {
       return 0;
     }
-    const active = tabs.find((tab) => tab.sessionId === this.state.sessionId);
+    const active = tabs.find((tab) => tab.sessionId === state.terminal.sessionId);
     return (active ?? tabs[0]).slot;
   }
 
   recordTab(key: string, sessionId: number, slot: number, kind: TerminalTabKind, label: string): void {
-    const tabs = this.state.tabsByEnv[key] ? [...this.state.tabsByEnv[key]] : [];
+    const current = store.getState().terminal.tabsByEnv[key];
+    const tabs = current ? [...current] : [];
     const existingIndex = tabs.findIndex((tab) => tab.kind === kind && tab.slot === slot);
     if (existingIndex >= 0) {
       tabs[existingIndex] = { sessionId, slot, kind, label };
@@ -451,26 +477,23 @@ export class ERunUIController {
       tabs.push({ sessionId, slot, kind, label });
       tabs.sort(compareTabs);
     }
-    this.state.tabsByEnv = { ...this.state.tabsByEnv, [key]: tabs };
+    store.dispatch(setTabsForEnv({ key, tabs }));
   }
 
   removeTab(key: string, sessionId: number): TerminalTab[] {
-    const tabs = this.state.tabsByEnv[key];
+    const state = store.getState();
+    const tabs = state.terminal.tabsByEnv[key];
     if (!tabs || tabs.length === 0) {
       return [];
     }
     const remaining = tabs.filter((tab) => tab.sessionId !== sessionId);
-    const next = { ...this.state.tabsByEnv };
     if (remaining.length === 0) {
-      delete next[key];
+      store.dispatch(clearTabsForEnv(key));
     } else {
-      next[key] = remaining;
+      store.dispatch(setTabsForEnv({ key, tabs: remaining }));
     }
-    this.state.tabsByEnv = next;
-    if (this.state.selectedSessionByEnv[key] === sessionId) {
-      const updated = { ...this.state.selectedSessionByEnv };
-      delete updated[key];
-      this.state.selectedSessionByEnv = updated;
+    if (state.terminal.selectedSessionByEnv[key] === sessionId) {
+      store.dispatch(clearSelectedSessionForEnv(key));
     }
     return remaining;
   }
@@ -478,8 +501,8 @@ export class ERunUIController {
   private showOpenSelectionStatus(sessionId: number, selection: UISelection): void {
     const exitReason = this.sessions.exitReason(sessionId);
     if (exitReason) {
-      this.state.terminalCopyOutput = this.sessions.exitOutput(sessionId);
-      this.state.terminalCopyStatus = '';
+      store.dispatch(setTerminalCopyOutput(this.sessions.exitOutput(sessionId)));
+      store.dispatch(setTerminalCopyStatus(''));
       store.dispatch(showTerminalMessage(exitReason));
       return;
     }
@@ -492,14 +515,15 @@ export class ERunUIController {
   }
 
   appendDebugOutput(text: string, fromSessionId?: number): void {
-    if (!this.state.debugOpen || !text) {
+    const state = store.getState();
+    if (!state.layout.debugOpen || !text) {
       return;
     }
-    const target = fromSessionId !== undefined ? fromSessionId : this.state.sessionId;
+    const target = fromSessionId !== undefined ? fromSessionId : state.terminal.sessionId;
     const next = trimDebugOutput(this.sessions.sessionDebug(target) + text);
     this.sessions.setSessionDebug(target, next);
-    if (target === this.state.sessionId) {
-      this.state.debugOutput = next;
+    if (target === state.terminal.sessionId) {
+      store.dispatch(setDebugOutput(next));
     }
   }
 
@@ -519,7 +543,7 @@ export class ERunUIController {
   }
 
   async refreshIdleStatus(): Promise<void> {
-    const selection = this.state.selected;
+    const selection = store.getState().selection.selected;
     const request = ++this.idleStatusRequest;
     if (!selection) {
       this.clearIdleStatus();
@@ -532,7 +556,7 @@ export class ERunUIController {
         .dispatch(idleApi.endpoints.getIdleStatus.initiate(selection, { forceRefetch: true }))
         .unwrap();
       if (this.isCurrentIdleStatusRequest(request, selection)) {
-        this.state.idleStatus = status;
+        store.dispatch(setIdleStatus(status));
       }
     } catch {
       this.clearCurrentIdleStatusRequest(request);
@@ -544,10 +568,10 @@ export class ERunUIController {
   }
 
   private clearIdleStatus(): void {
-    if (!this.state.idleStatus) {
+    if (!store.getState().idle.idleStatus) {
       return;
     }
-    this.state.idleStatus = null;
+    store.dispatch(setIdleStatus(null));
   }
 
   private clearCurrentIdleStatusRequest(request: number): void {
@@ -557,7 +581,8 @@ export class ERunUIController {
   }
 
   private isCurrentIdleStatusRequest(request: number, selection: UISelection): boolean {
-    return request === this.idleStatusRequest && this.state.selected?.tenant === selection.tenant && this.state.selected.environment === selection.environment;
+    const selected = store.getState().selection.selected;
+    return request === this.idleStatusRequest && selected?.tenant === selection.tenant && selected.environment === selection.environment;
   }
 
   private async boot(): Promise<void> {
@@ -566,18 +591,19 @@ export class ERunUIController {
       const loaded = await store
         .dispatch(stateApi.endpoints.getInitialState.initiate(undefined, { forceRefetch: true }))
         .unwrap();
-      this.state.tenants = loaded.tenants || [];
-      this.state.cloudProviders = loaded.cloudProviders || [];
-      this.state.selected = loaded.selected || null;
-      this.state.versionSuggestions = normalizeVersionSuggestions(loaded.versionSuggestions || []);
+      store.dispatch(setTenants(loaded.tenants || []));
+      store.dispatch(setCloudProviders(loaded.cloudProviders || []));
+      store.dispatch(setSelected(loaded.selected || null));
+      store.dispatch(setVersionSuggestions(normalizeVersionSuggestions(loaded.versionSuggestions || [])));
       this.selectLoadedKubernetesContexts(loaded.kubernetesContexts || []);
       if (loaded.message) {
         store.dispatch(showTerminalMessage(loaded.message));
         return;
       }
 
-      if (this.state.selected) {
-        await this.openSelection(this.state.selected);
+      const selected = store.getState().selection.selected;
+      if (selected) {
+        await this.openSelection(selected);
         return;
       }
 
@@ -598,20 +624,22 @@ export class ERunUIController {
     // modal and is then cleared by activateLocalAfterCommand before
     // the user can register it — see erun-ui/AGENTS.md § "UX Impact
     // Review Checklist" item 3 (state-without-affordance).
-    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
-    this.state.selected = selection;
-    this.state.terminalCopyOutput = '';
-    this.state.terminalCopyStatus = '';
+    const debugOpen = store.getState().layout.debugOpen;
+    const runSelection = { ...selection, debug: debugOpen || undefined };
+    store.dispatch(setSelected(selection));
+    store.dispatch(setTerminalCopyOutput(''));
+    store.dispatch(setTerminalCopyStatus(''));
     this.fitAddon?.fit();
     const result = (await StartInitSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
     await this.activateLocalAfterCommand(selection, result);
   }
 
   async startDeploySelection(selection: UISelection): Promise<void> {
-    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
-    this.state.selected = selection;
-    this.state.terminalCopyOutput = '';
-    this.state.terminalCopyStatus = '';
+    const debugOpen = store.getState().layout.debugOpen;
+    const runSelection = { ...selection, debug: debugOpen || undefined };
+    store.dispatch(setSelected(selection));
+    store.dispatch(setTerminalCopyOutput(''));
+    store.dispatch(setTerminalCopyStatus(''));
     store.dispatch(showTerminalMessage(`Deploying runtime for ${selection.tenant} / ${selection.environment}...`, true));
 
     this.fitAddon?.fit();
@@ -620,7 +648,8 @@ export class ERunUIController {
   }
 
   async activateLocalAfterCommand(selection: UISelection, result: StartSessionResult): Promise<void> {
-    const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
+    const debugOpen = store.getState().layout.debugOpen;
+    const runSelection = { ...selection, debug: debugOpen || undefined };
     const key = selectionKey(runSelection);
     this.recordTab(key, result.sessionId, result.slot ?? 0, 'local', 'Local');
     // Only spawn dependent ERun/AI tabs when the env config already
@@ -633,8 +662,8 @@ export class ERunUIController {
     if (this.environmentExists(selection.tenant, selection.environment)) {
       await this.ensureDefaultEnvTabs(runSelection, key);
     }
-    this.state.sessionId = result.sessionId;
-    this.state.selectedSessionByEnv = { ...this.state.selectedSessionByEnv, [key]: result.sessionId };
+    store.dispatch(setSessionId(result.sessionId));
+    store.dispatch(setSelectedSessionForEnv({ key, sessionId: result.sessionId }));
     rebuildTerminalDisplayBuffer(this.sessions, result.sessionId);
     this.resetTerminal();
     this.writeTerminalBuffer(this.sessions.displayBuffer(result.sessionId));
@@ -648,9 +677,10 @@ export class ERunUIController {
       const loaded = await store
         .dispatch(stateApi.endpoints.getInitialState.initiate(undefined, { forceRefetch: true }))
         .unwrap();
-      this.state.tenants = loaded.tenants || [];
-      this.state.cloudProviders = loaded.cloudProviders || this.state.cloudProviders;
-      this.state.versionSuggestions = normalizeVersionSuggestions(loaded.versionSuggestions || this.state.versionSuggestions);
+      const current = store.getState().tenants;
+      store.dispatch(setTenants(loaded.tenants || []));
+      store.dispatch(setCloudProviders(loaded.cloudProviders || current.cloudProviders));
+      store.dispatch(setVersionSuggestions(normalizeVersionSuggestions(loaded.versionSuggestions || current.versionSuggestions)));
       this.selectLoadedKubernetesContexts(loaded.kubernetesContexts || []);
     } catch {
     }
@@ -658,7 +688,7 @@ export class ERunUIController {
 
   private environmentExists(tenant: string, environment: string): boolean {
     return Boolean(
-      this.state.tenants
+      store.getState().tenants.tenants
         .find((entry) => entry.name === tenant)
         ?.environments.some((env) => env.name === environment),
     );
@@ -670,32 +700,33 @@ export class ERunUIController {
         .dispatch(kubernetesApi.endpoints.getKubernetesContexts.initiate())
         .unwrap();
       const contexts = result.map((context) => context.trim()).filter(Boolean);
-      if (!this.state.environmentDialog.open || this.state.environmentDialog.actionMode !== 'init') {
+      const dialog = store.getState().environmentDialog;
+      if (!dialog.open || dialog.actionMode !== 'init') {
         return;
       }
-      this.state.environmentDialog = {
-        ...this.state.environmentDialog,
+      const resolved = this.resolveDialogKubernetesContext(contexts);
+      store.dispatch(patchEnvironmentDialog({
         kubernetesContexts: contexts,
-        kubernetesContext: this.resolveDialogKubernetesContext(contexts),
+        kubernetesContext: resolved,
         kubernetesContextsLoading: false,
-      };
-      void this.refreshEnvironmentRuntimeResources(this.state.environmentDialog.kubernetesContext);
+      }));
+      void this.refreshEnvironmentRuntimeResources(resolved);
     } catch (error) {
-      if (!this.state.environmentDialog.open || this.state.environmentDialog.actionMode !== 'init') {
+      const dialog = store.getState().environmentDialog;
+      if (!dialog.open || dialog.actionMode !== 'init') {
         return;
       }
-      this.state.environmentDialog = {
-        ...this.state.environmentDialog,
+      store.dispatch(patchEnvironmentDialog({
         kubernetesContexts: [],
         kubernetesContext: '',
         kubernetesContextsLoading: false,
         error: readError(error),
-      };
+      }));
     }
   }
 
   private resolveDialogKubernetesContext(contexts: string[]): string {
-    const current = normalizeDialogValue(this.state.environmentDialog.kubernetesContext);
+    const current = normalizeDialogValue(store.getState().environmentDialog.kubernetesContext);
     if (current && contexts.includes(current)) {
       return current;
     }
@@ -703,17 +734,18 @@ export class ERunUIController {
   }
 
   private selectLoadedKubernetesContexts(contexts: string[]): void {
-    if (!this.state.environmentDialog.open || this.state.environmentDialog.actionMode !== 'init') {
+    const dialog = store.getState().environmentDialog;
+    if (!dialog.open || dialog.actionMode !== 'init') {
       return;
     }
     const normalized = contexts.map((context) => context.trim()).filter(Boolean);
-    this.state.environmentDialog = {
-      ...this.state.environmentDialog,
+    const resolved = this.resolveDialogKubernetesContext(normalized);
+    store.dispatch(patchEnvironmentDialog({
       kubernetesContexts: normalized,
-      kubernetesContext: this.resolveDialogKubernetesContext(normalized),
+      kubernetesContext: resolved,
       kubernetesContextsLoading: false,
-    };
-    void this.refreshEnvironmentRuntimeResources(this.state.environmentDialog.kubernetesContext);
+    }));
+    void this.refreshEnvironmentRuntimeResources(resolved);
   }
 
   // refreshEnvironmentRuntimeResources is a private helper invoked when the
@@ -723,41 +755,40 @@ export class ERunUIController {
   // controller because boot() + refreshKubernetesContexts() drive it.
   private async refreshEnvironmentRuntimeResources(kubernetesContext: string): Promise<void> {
     const context = normalizeDialogValue(kubernetesContext);
-    if (!this.state.environmentDialog.open || this.state.environmentDialog.actionMode !== 'init' || !context) {
+    let dialog = store.getState().environmentDialog;
+    if (!dialog.open || dialog.actionMode !== 'init' || !context) {
       return;
     }
-    this.state.environmentDialog = {
-      ...this.state.environmentDialog,
+    store.dispatch(patchEnvironmentDialog({
       resourceStatusLoading: true,
       resourceStatus: null,
-    };
+    }));
     try {
+      dialog = store.getState().environmentDialog;
       const status = await store
         .dispatch(
           environmentApi.endpoints.getRuntimeResourceStatus.initiate(
             {
               kubernetesContext: context,
-              tenant: normalizeDialogValue(this.state.environmentDialog.tenant),
-              environment: normalizeDialogValue(this.state.environmentDialog.environment),
+              tenant: normalizeDialogValue(dialog.tenant),
+              environment: normalizeDialogValue(dialog.environment),
             },
             { forceRefetch: true },
           ),
         )
         .unwrap();
-      if (!this.state.environmentDialog.open) {
+      if (!store.getState().environmentDialog.open) {
         return;
       }
-      this.state.environmentDialog = {
-        ...this.state.environmentDialog,
+      store.dispatch(patchEnvironmentDialog({
         resourceStatus: status,
         resourceStatusLoading: false,
-      };
+      }));
     } catch (error) {
-      if (!this.state.environmentDialog.open) {
+      if (!store.getState().environmentDialog.open) {
         return;
       }
-      this.state.environmentDialog = {
-        ...this.state.environmentDialog,
+      store.dispatch(patchEnvironmentDialog({
         resourceStatus: {
           kubernetesContext: context,
           available: false,
@@ -766,15 +797,16 @@ export class ERunUIController {
           memory: { total: 0, used: 0, free: 0, unit: 'GiB', formatted: '' },
         },
         resourceStatusLoading: false,
-      };
+      }));
     }
   }
 
   resolveManageRuntimeImage(version: string): string {
-    if (this.state.manageDialog.versionImage) {
-      return this.state.manageDialog.versionImage;
+    const state = store.getState();
+    if (state.manageDialog.versionImage) {
+      return state.manageDialog.versionImage;
     }
-    const suggestion = this.state.versionSuggestions.find((value) => value.version === version);
+    const suggestion = state.tenants.versionSuggestions.find((value) => value.version === version);
     return suggestion?.image || '';
   }
 
@@ -830,12 +862,12 @@ export class ERunUIController {
     }
     store.dispatch(showNotification('error', `Failed to create ${tenant} / ${environment}. See the Local tab and the activity drawer for details.`));
     if (this.selectedIsPendingFor(tenant, environment)) {
-      this.state.selected = null;
+      store.dispatch(setSelected(null));
     }
   }
 
   private selectedIsPendingFor(tenant: string, environment: string): boolean {
-    const selected = this.state.selected;
+    const selected = store.getState().selection.selected;
     if (!selected || selected.tenant !== tenant || selected.environment !== environment) {
       return false;
     }
@@ -855,13 +887,14 @@ export class ERunUIController {
     if (displayData) {
       this.sessions.appendDisplayBuffer(payload.sessionId, displayData);
     }
-    if (payload.sessionId !== this.state.sessionId) {
+    const state = store.getState();
+    if (payload.sessionId !== state.terminal.sessionId) {
       return;
     }
     if (!displayData) {
       return;
     }
-    if (this.state.terminalMessage && !this.state.terminalCopyOutput) {
+    if (state.terminalStatus.terminalMessage && !state.terminalStatus.terminalCopyOutput) {
       store.dispatch(hideTerminalMessage());
     }
     this.terminal?.write(displayData);
@@ -880,7 +913,7 @@ export class ERunUIController {
     if (selections.sshdInitSelection) {
       await this.reloadStateAfterEnvironmentChange();
     }
-    if (payload.sessionId !== this.state.sessionId) {
+    if (payload.sessionId !== store.getState().terminal.sessionId) {
       return;
     }
     if (await this.handleSuccessfulTerminalExit(payload, reason, selections)) {
@@ -901,14 +934,17 @@ export class ERunUIController {
     }
     const key = selectionKey(selection);
     const reason = (payload.reason || '').trim();
-    this.state.lastDoctorBySelection = {
-      ...this.state.lastDoctorBySelection,
-      [key]: {
-        ranAt: Date.now(),
-        success: !reason,
-        message: reason,
+    const lastDoctorBySelection = store.getState().doctor.lastDoctorBySelection;
+    store.dispatch(setDoctorAll({
+      lastDoctorBySelection: {
+        ...lastDoctorBySelection,
+        [key]: {
+          ranAt: Date.now(),
+          success: !reason,
+          message: reason,
+        },
       },
-    };
+    }));
   }
 
   private takeTerminalExitSelections(sessionId: number): TerminalExitSelections {
@@ -921,7 +957,7 @@ export class ERunUIController {
     }
     const key = selectionKey(openSelection);
     const remaining = this.removeTab(key, sessionId);
-    if (this.state.sessionId !== sessionId) {
+    if (store.getState().terminal.sessionId !== sessionId) {
       return;
     }
     const next = remaining[remaining.length - 1];
@@ -961,7 +997,7 @@ export class ERunUIController {
   }
 
   private updateOpenStatusFromOutput(sessionId: number, output: string): void {
-    if (!output || !this.sessions.isOpenSession(sessionId) || this.state.terminalCopyOutput) {
+    if (!output || !this.sessions.isOpenSession(sessionId) || store.getState().terminalStatus.terminalCopyOutput) {
       return;
     }
     const status = statusForTerminalOutput(output);
@@ -979,10 +1015,11 @@ export class ERunUIController {
     if (!trimmed) {
       return;
     }
-    if (this.state.reconnect.status !== 'running') {
+    const reconnect = store.getState().review.reconnect;
+    if (reconnect.status !== 'running') {
       return;
     }
-    this.state.reconnect = { ...this.state.reconnect, lastLine: trimmed };
+    store.dispatch(setReconnect({ ...reconnect, lastLine: trimmed }));
   }
 
   layoutCallbacks(): {
@@ -999,28 +1036,31 @@ export class ERunUIController {
 
   applyLayoutVars(): void {
     const root = document.documentElement;
-    root.style.setProperty('--sidebar-width', `${this.state.sidebarHidden ? 0 : this.state.sidebarWidth}px`);
+    const layout = store.getState().layout;
+    root.style.setProperty('--sidebar-width', `${layout.sidebarHidden ? 0 : layout.sidebarWidth}px`);
     root.style.setProperty('--review-width', `${this.clampedReviewWidth()}px`);
     root.style.setProperty('--files-width', `${this.clampedFilesWidth()}px`);
     root.style.setProperty('--debug-height', `${this.clampedDebugHeight()}px`);
   }
 
   private clampedReviewWidth(): number {
-    const effectiveSidebar = this.state.sidebarHidden ? 0 : this.state.sidebarWidth;
+    const layout = store.getState().layout;
+    const effectiveSidebar = layout.sidebarHidden ? 0 : layout.sidebarWidth;
     const maxWidth = computeMaxReviewWidth(window.innerWidth, effectiveSidebar);
-    return clamp(this.state.reviewWidth, MIN_REVIEW_WIDTH, maxWidth);
+    return clamp(layout.reviewWidth, MIN_REVIEW_WIDTH, maxWidth);
   }
 
   private clampedFilesWidth(): number {
-    const reviewWidth = this._reviewView?.getBoundingClientRect().width || this.state.reviewWidth;
+    const layout = store.getState().layout;
+    const reviewWidth = this._reviewView?.getBoundingClientRect().width || layout.reviewWidth;
     const maxFilesForReview = reviewWidth > 0 ? reviewWidth - 260 : MAX_FILES_WIDTH;
-    return clamp(this.state.filesWidth, MIN_FILES_WIDTH, Math.max(MIN_FILES_WIDTH, Math.min(MAX_FILES_WIDTH, maxFilesForReview)));
+    return clamp(layout.filesWidth, MIN_FILES_WIDTH, Math.max(MIN_FILES_WIDTH, Math.min(MAX_FILES_WIDTH, maxFilesForReview)));
   }
 
   private clampedDebugHeight(): number {
     const paneHeight = this._terminalPane?.getBoundingClientRect().height || 0;
     const maxDebugForPane = paneHeight > 0 ? paneHeight - 120 : MAX_DEBUG_HEIGHT;
-    return clamp(this.state.debugHeight, MIN_DEBUG_HEIGHT, Math.max(MIN_DEBUG_HEIGHT, Math.min(MAX_DEBUG_HEIGHT, maxDebugForPane)));
+    return clamp(store.getState().layout.debugHeight, MIN_DEBUG_HEIGHT, Math.max(MIN_DEBUG_HEIGHT, Math.min(MAX_DEBUG_HEIGHT, maxDebugForPane)));
   }
 
   queueTerminalResize = (): void => {
@@ -1028,8 +1068,9 @@ export class ERunUIController {
     this.resizeTimer = window.setTimeout(() => {
       this.applyLayoutVars();
       this.fitAddon?.fit();
-      if (this.state.sessionId > 0 && this.terminal) {
-        ResizeSession(this.state.sessionId, this.terminal.cols, this.terminal.rows).catch(() => {
+      const sessionId = store.getState().terminal.sessionId;
+      if (sessionId > 0 && this.terminal) {
+        ResizeSession(sessionId, this.terminal.cols, this.terminal.rows).catch(() => {
         });
       }
     }, 40);
@@ -1047,10 +1088,10 @@ export class ERunUIController {
 
   private updateSelectedDiffPathFromScroll(): void {
     const path = visibleDiffPath(this._diffList, this.reviewMain);
-    if (!path || path === this.state.selectedDiffPath) {
+    if (!path || path === store.getState().review.selectedDiffPath) {
       return;
     }
-    this.state.selectedDiffPath = path;
+    store.dispatch(setSelectedDiffPath(path));
   }
 
   // Review-diff refresh timer accessors. reviewThunks owns the polling logic
@@ -1081,7 +1122,7 @@ export class ERunUIController {
     }
 
     event.preventDefault();
-    const sessionId = this.state.sessionId;
+    const sessionId = store.getState().terminal.sessionId;
     if (sessionId <= 0) {
       return;
     }

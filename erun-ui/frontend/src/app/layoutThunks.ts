@@ -12,6 +12,7 @@ import {
   toggleSidebar as toggleSidebarPanel,
 } from './layoutActions';
 import { loadReviewDiff } from './reviewThunks';
+import { setDebugOutput } from './slices/terminalSlice';
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
 
@@ -21,63 +22,63 @@ import { requireController } from './thunkExtra';
 // (terminalPane, reviewView) that the controller exposes and because every
 // resize must re-fit the xterm viewport.
 
-export const toggleSidebar = (): AppThunk => (_dispatch, _getState, extra) => {
+export const toggleSidebar = (): AppThunk => (dispatch, getState, extra) => {
   const controller = requireController(extra);
-  toggleSidebarPanel(controller.state, controller.layoutCallbacks());
+  toggleSidebarPanel(dispatch, getState, controller.layoutCallbacks());
 };
 
-export const toggleReview = (): AppThunk => (dispatch, _getState, extra) => {
+export const toggleReview = (): AppThunk => (dispatch, getState, extra) => {
   const controller = requireController(extra);
-  toggleReviewPanel(controller.state, {
+  toggleReviewPanel(dispatch, getState, {
     ...controller.layoutCallbacks(),
     loadReviewDiff: () => { void dispatch(loadReviewDiff()); },
   });
-  if (!controller.state.reviewOpen) {
+  if (!getState().layout.reviewOpen) {
     controller.stopReviewDiffRefresh();
   }
 };
 
 export const setFilesOpen = (open: boolean, persist = true): AppThunk =>
-  (_dispatch, _getState, extra) => {
+  (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    applyFilesOpen(controller.state, open, persist, () => controller.applyLayoutVars());
+    applyFilesOpen(dispatch, getState, open, persist, () => controller.applyLayoutVars());
   };
 
 export const setDebugOpen = (open: boolean): AppThunk =>
-  (_dispatch, _getState, extra) => {
+  (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    applyDebugOpen(controller.state, open, controller.queueTerminalResize);
+    applyDebugOpen(dispatch, getState, open, controller.queueTerminalResize);
   };
 
 export const clearDebugOutput = (): AppThunk =>
-  (_dispatch, _getState, extra) => {
+  (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    controller.state.debugOutput = '';
-    controller.sessions.clearSessionDebug(controller.state.sessionId);
+    dispatch(setDebugOutput(''));
+    controller.sessions.clearSessionDebug(getState().terminal.sessionId);
   };
 
 export const startSidebarResize = (event: React.MouseEvent<HTMLElement>): AppThunk =>
-  (_dispatch, _getState, extra) => {
+  (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    startSidebarPanelResize(controller.state, event, () => controller.applyLayoutVars());
+    startSidebarPanelResize(dispatch, getState, event, () => controller.applyLayoutVars());
   };
 
 export const startReviewResize = (event: React.MouseEvent<HTMLElement>): AppThunk =>
-  (_dispatch, _getState, extra) => {
+  (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    startReviewPanelResize(controller.state, event, controller.terminalPane, controller.layoutCallbacks());
+    startReviewPanelResize(dispatch, getState, event, controller.terminalPane, controller.layoutCallbacks());
   };
 
 export const startFilesResize = (event: React.MouseEvent<HTMLElement>): AppThunk =>
-  (_dispatch, _getState, extra) => {
+  (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    startFilesPanelResize(controller.state, event, controller.reviewView, () => controller.applyLayoutVars());
+    startFilesPanelResize(dispatch, getState, event, controller.reviewView, () => controller.applyLayoutVars());
   };
 
 export const startDebugResize = (event: React.MouseEvent<HTMLElement>): AppThunk =>
-  (_dispatch, _getState, extra) => {
+  (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    startDebugPanelResize(controller.state, event, controller.terminalPane, controller.layoutCallbacks());
+    startDebugPanelResize(dispatch, getState, event, controller.terminalPane, controller.layoutCallbacks());
   };
 
 export const titlebarDoubleClick = (event: React.MouseEvent<HTMLElement>): AppThunk =>
