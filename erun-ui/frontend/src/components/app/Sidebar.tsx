@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle2, Cloud, Copy, Folder, FolderOpen, LoaderCircl
 
 import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
+import { useAppSelector } from '@/app/hooks';
 import type { AppState } from '@/app/state';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -12,12 +13,15 @@ import { EmptyState } from './EmptyState';
 import { IconTooltip } from './IconTooltip';
 import { cloudProviderStatusTone } from './StatusBadge';
 
-export function Sidebar({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
+export function Sidebar({ controller }: { controller: ERunUIController }): React.ReactElement {
+  const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
+  const tenants = useAppSelector((state) => state.tenants.tenants);
+  const selected = useAppSelector((state) => state.selection.selected);
   return (
     <aside
       className={cn(
         'box-border flex min-h-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar',
-        state.sidebarHidden ? 'px-0 py-6 pb-4' : 'py-6 pr-2 pb-4 pl-3 max-[980px]:pl-2.5',
+        sidebarHidden ? 'px-0 py-6 pb-4' : 'py-6 pr-2 pb-4 pl-3 max-[980px]:pl-2.5',
       )}
     >
       <div className="flex items-center justify-between gap-2 pr-1.5 pb-2.5 pl-3.5">
@@ -50,7 +54,7 @@ export function Sidebar({ controller, state }: { controller: ERunUIController; s
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto pr-1">
-        {state.tenants.length === 0 ? (
+        {tenants.length === 0 ? (
           <div className="px-2 py-2">
             <EmptyState
               icon={<Plus />}
@@ -65,19 +69,18 @@ export function Sidebar({ controller, state }: { controller: ERunUIController; s
             />
           </div>
         ) : (
-          state.tenants.map((tenant, index) => (
+          tenants.map((tenant, index) => (
             <TenantGroup
               key={tenant.name}
               controller={controller}
-              state={state}
               tenant={tenant}
               spaced={index > 0}
-              pending={pendingForTenant(state, tenant.name)}
+              pending={pendingForTenant(tenants, selected, tenant.name)}
             />
           ))
         )}
       </div>
-      <PrimaryCloudAliasControl controller={controller} state={state} />
+      <PrimaryCloudAliasControl controller={controller} />
     </aside>
   );
 }
@@ -89,12 +92,11 @@ export function Sidebar({ controller, state }: { controller: ERunUIController; s
 // ~1–2 min init runs. The placeholder disappears once
 // reloadStateAfterEnvironmentChange picks up the new env, or when
 // `environment-init-failed` reverts state.selected.
-function pendingForTenant(state: AppState, tenantName: string): UISelection | null {
-  const selected = state.selected;
+function pendingForTenant(tenants: AppState['tenants'], selected: AppState['selected'], tenantName: string): UISelection | null {
   if (!selected || selected.tenant !== tenantName) {
     return null;
   }
-  const tenant = state.tenants.find((entry) => entry.name === selected.tenant);
+  const tenant = tenants.find((entry) => entry.name === selected.tenant);
   if (!tenant) {
     return null;
   }
@@ -104,8 +106,21 @@ function pendingForTenant(state: AppState, tenantName: string): UISelection | nu
   return selected;
 }
 
-function PrimaryCloudAliasControl({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement | null {
-  const view = primaryCloudAliasView(state);
+function PrimaryCloudAliasControl({ controller }: { controller: ERunUIController }): React.ReactElement | null {
+  const tenants = useAppSelector((s) => s.tenants.tenants);
+  const cloudProviders = useAppSelector((s) => s.tenants.cloudProviders);
+  const selected = useAppSelector((s) => s.selection.selected);
+  const dashboardTenant = useAppSelector((s) => s.tenantDashboard.tenant);
+  const sidebarBusy = useAppSelector((s) => s.sidebar.sidebarCloudAliasBusy);
+  const sidebarAction = useAppSelector((s) => s.sidebar.sidebarCloudAliasAction);
+  const view = primaryCloudAliasView({
+    tenants,
+    cloudProviders,
+    selected,
+    dashboardTenant,
+    sidebarBusy,
+    sidebarAction,
+  });
   if (!view) {
     return null;
   }
@@ -161,30 +176,35 @@ interface PrimaryCloudAliasView {
   bearerBusy: boolean;
 }
 
-function primaryCloudAliasView(state: AppState): PrimaryCloudAliasView | null {
-  const tenant = state.tenants.find((candidate) => candidate.name === primaryCloudTenantName(state));
-  const alias = tenant?.primaryCloudProviderAlias?.trim();
+interface PrimaryCloudAliasInputs {
+  tenants: AppState['tenants'];
+  cloudProviders: AppState['cloudProviders'];
+  selected: AppState['selected'];
+  dashboardTenant: string;
+  sidebarBusy: boolean;
+  sidebarAction: AppState['sidebarCloudAliasAction'];
+}
+
+function primaryCloudAliasView(input: PrimaryCloudAliasInputs): PrimaryCloudAliasView | null {
+  const alias = primaryCloudAliasFor(input);
   if (!alias) {
     return null;
   }
-  const provider = primaryCloudProviderStatus(state, alias);
-  const busy = state.sidebarCloudAliasBusy;
+  const provider = input.cloudProviders.find((candidate) => candidate.alias === alias) || { alias, provider: '', status: 'unknown' };
+  const busy = input.sidebarBusy;
   return {
     provider,
     active: provider.status.trim() === 'active',
     busy,
-    loginBusy: busy && state.sidebarCloudAliasAction === 'login',
-    logoutBusy: busy && state.sidebarCloudAliasAction === 'logout',
-    bearerBusy: busy && state.sidebarCloudAliasAction === 'bearer',
+    loginBusy: busy && input.sidebarAction === 'login',
+    logoutBusy: busy && input.sidebarAction === 'logout',
+    bearerBusy: busy && input.sidebarAction === 'bearer',
   };
 }
 
-function primaryCloudTenantName(state: AppState): string {
-  return state.tenantDashboard.tenant || state.selected?.tenant || '';
-}
-
-function primaryCloudProviderStatus(state: AppState, alias: string): UICloudProviderStatus {
-  return state.cloudProviders.find((candidate) => candidate.alias === alias) || { alias, provider: '', status: 'unknown' };
+function primaryCloudAliasFor(input: PrimaryCloudAliasInputs): string | undefined {
+  const tenantName = input.dashboardTenant || input.selected?.tenant || '';
+  return input.tenants.find((candidate) => candidate.name === tenantName)?.primaryCloudProviderAlias?.trim();
 }
 
 function CloudAliasPopoverRow({ icon, label, muted }: { icon: React.ReactElement<{ className?: string; 'aria-hidden'?: boolean }>; label: string; muted?: boolean }): React.ReactElement {
@@ -245,20 +265,21 @@ function statusLabel(status: string): string {
 
 function TenantGroup({
   controller,
-  state,
   tenant,
   spaced,
   pending,
 }: {
   controller: ERunUIController;
-  state: AppState;
   tenant: UITenant;
   spaced: boolean;
   pending: UISelection | null;
 }): React.ReactElement {
-  const collapsed = state.collapsedTenants.has(tenant.name);
-  const active = state.tenantDashboard.tenant === tenant.name;
-  const related = active || state.selected?.tenant === tenant.name;
+  const collapsedTenants = useAppSelector((state) => state.sidebar.collapsedTenants);
+  const dashboardTenant = useAppSelector((state) => state.tenantDashboard.tenant);
+  const selected = useAppSelector((state) => state.selection.selected);
+  const collapsed = collapsedTenants.includes(tenant.name);
+  const active = dashboardTenant === tenant.name;
+  const related = active || selected?.tenant === tenant.name;
 
   return (
     <div className={cn('flex flex-col', spaced && 'mt-2.5')}>
@@ -278,7 +299,6 @@ function TenantGroup({
             <EnvironmentRow
               key={environment.name}
               controller={controller}
-              state={state}
               tenantName={tenant.name}
               environmentName={environment.name}
             />
@@ -359,19 +379,20 @@ function TenantManageButton({ controller, tenantName, active }: { controller: ER
 
 function EnvironmentRow({
   controller,
-  state,
   tenantName,
   environmentName,
 }: {
   controller: ERunUIController;
-  state: AppState;
   tenantName: string;
   environmentName: string;
 }): React.ReactElement {
-  const selected = state.selected?.tenant === tenantName && state.selected?.environment === environmentName;
+  const selectedSelection = useAppSelector((state) => state.selection.selected);
+  const tenants = useAppSelector((state) => state.tenants.tenants);
+  const terminalBusy = useAppSelector((state) => state.terminalStatus.terminalBusy);
+  const selected = selectedSelection?.tenant === tenantName && selectedSelection?.environment === environmentName;
   const selection = { tenant: tenantName, environment: environmentName };
-  const busy = environmentIsBusy(state, tenantName, environmentName);
-  const environment = state.tenants
+  const busy = terminalBusy === true && selectedSelection?.tenant === tenantName && selectedSelection.environment === environmentName;
+  const environment = tenants
     .find((tenant) => tenant.name === tenantName)
     ?.environments.find((env) => env.name === environmentName);
   const isLocal = environment?.remote === false;
@@ -433,10 +454,6 @@ function EnvironmentRow({
       </IconTooltip>
     </div>
   );
-}
-
-function environmentIsBusy(state: AppState, tenant: string, environment: string): boolean {
-  return state.terminalBusy === true && state.selected?.tenant === tenant && state.selected.environment === environment;
 }
 
 // PendingEnvironmentRow renders an optimistic, non-interactive

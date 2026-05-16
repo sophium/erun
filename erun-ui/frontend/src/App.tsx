@@ -65,7 +65,7 @@ export function App(): React.ReactElement {
             state.sidebarHidden ? 'grid-cols-[0_0_minmax(0,1fr)]' : 'grid-cols-[var(--sidebar-width)_10px_minmax(0,1fr)]',
           )}
         >
-          <Sidebar controller={controller} state={state} />
+          <Sidebar controller={controller} />
           <div
             className={cn(splitterClassName, state.sidebarHidden && 'pointer-events-none')}
             role="separator"
