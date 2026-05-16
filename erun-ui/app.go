@@ -15,6 +15,7 @@ const (
 	appStatusEvent              = "app-status"
 	mcpReconnectLineEvent       = "mcp-reconnect-line"
 	environmentInitializedEvent = "environment-initialized"
+	environmentInitFailedEvent  = "environment-init-failed"
 	environmentsChangedEvent    = "environments-changed"
 	appSessionEnvVar            = "ERUN_UI_SESSION"
 )

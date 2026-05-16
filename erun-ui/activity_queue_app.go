@@ -304,6 +304,14 @@ var activityDeployedLineRe = regexp.MustCompile(`^==> Deployed ([^/\s]+)/([^/\s]
 // environment.
 var activitySkippingLineRe = regexp.MustCompile(`^==> Skipping ([^/\s]+)/([^/\s]+)\b`)
 
+// activityInitializingLineRe matches the umbrella `==> Initializing
+// tenant/env` trace emitted by RunBootstrapInit once tenant + env are
+// resolved and config writes are about to start. Captures: tenant,
+// environment. The matched entry parallels deploy: the user sees an
+// init activity in the drawer while bootstrap runs (which itself
+// fires a separate deploy entry from `==> Deploying`).
+var activityInitializingLineRe = regexp.MustCompile(`^==> Initializing ([^/\s]+)/([^/\s]+)\b`)
+
 // activityInitializedLineRe matches the `==> Initialized tenant/env`
 // trace emitted by RunBootstrapInit at successful completion.
 // Captures: tenant, environment. See erun-ui/AGENTS.md § "Command
@@ -312,6 +320,11 @@ var activitySkippingLineRe = regexp.MustCompile(`^==> Skipping ([^/\s]+)/([^/\s]
 // the shared Local shell PTY (via runErunCommandInLocal), so the PTY
 // does not exit when init finishes.
 var activityInitializedLineRe = regexp.MustCompile(`^==> Initialized ([^/\s]+)/([^/\s]+)\b`)
+
+// activityInitFailedLineRe matches the umbrella `==> Initialization
+// failed tenant/env` trace emitted by RunBootstrapInit when a step
+// after Initializing returns an error. Captures: tenant, environment.
+var activityInitFailedLineRe = regexp.MustCompile(`^==> Initialization failed ([^/\s]+)/([^/\s]+)\b`)
 
 // newActivityTraceLineHandler scans PTY output for trace lines emitted by
 // erun deploy and updates the activity queue accordingly.
@@ -350,8 +363,18 @@ func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKi
 			app.finishDeployByTenantEnv(selection, match[1], match[2], activityQueueStatusSkipped, line)
 			return
 		}
+		if match := activityInitializingLineRe.FindStringSubmatch(line); match != nil {
+			app.startInitFromTrace(selection, match[1], match[2])
+			return
+		}
 		if match := activityInitializedLineRe.FindStringSubmatch(line); match != nil {
+			app.finishInitByTenantEnv(match[1], match[2], activityQueueStatusSucceeded, "")
 			app.emitEnvironmentInitialized(match[1], match[2])
+			return
+		}
+		if match := activityInitFailedLineRe.FindStringSubmatch(line); match != nil {
+			app.finishInitByTenantEnv(match[1], match[2], activityQueueStatusFailed, line)
+			app.emitEnvironmentInitFailed(match[1], match[2])
 			return
 		}
 		switch {
@@ -383,6 +406,63 @@ func (a *App) finishDeployByTenantEnv(selection uiSelection, tenant, environment
 		return
 	}
 	entry, ok := a.activityQueue.findActiveByCommand("deploy", tenant, environment)
+	if !ok {
+		return
+	}
+	if final, finished := a.activityQueue.finish(entry.ID, status, errMsg); finished {
+		a.unlockTerminalsForActivity(final)
+	}
+}
+
+// startInitFromTrace registers an umbrella init entry from a
+// `==> Initializing tenant/env` trace observed in any session's PTY.
+// Parallels startDeployFromTrace: the init entry covers the whole
+// bootstrap (config writes + devops assets + embedded deploy); the
+// `==> Deploying` line still registers a separate deploy entry for
+// the helm step within init, which is finalized independently by
+// `==> Deployed`.
+func (a *App) startInitFromTrace(selection uiSelection, tenant, environment string) {
+	if a.activityQueue == nil {
+		return
+	}
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		return
+	}
+	if _, ok := a.activityQueue.findActiveByCommand("init", tenant, environment); ok {
+		return
+	}
+	kubeContext := a.resolveActivityKubeContext(selection, tenant, environment)
+	entry, fresh := a.activityQueue.start(activityQueueEntry{
+		Command:           "init",
+		Tenant:            tenant,
+		Environment:       environment,
+		KubernetesContext: kubeContext,
+		Source:            "trace",
+		Summary:           "init " + tenant + "/" + environment,
+	})
+	if !fresh {
+		return
+	}
+	a.rememberKubeContextForActivity(kubeContext)
+	a.lockTerminalsForActivity(entry)
+}
+
+// finishInitByTenantEnv finalizes the umbrella init entry on
+// `==> Initialized` (succeeded) or `==> Initialization failed`
+// (failed). Looks up the entry by parsed tenant/env so the trace
+// observed in any session's PTY converges on the same record.
+func (a *App) finishInitByTenantEnv(tenant, environment string, status activityQueueStatus, errMsg string) {
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		return
+	}
+	if a.activityQueue == nil {
+		return
+	}
+	entry, ok := a.activityQueue.findActiveByCommand("init", tenant, environment)
 	if !ok {
 		return
 	}

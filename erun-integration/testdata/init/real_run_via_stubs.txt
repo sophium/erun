@@ -7,6 +7,7 @@ Adding new tenant
 Loaded tenant configuration
 Loading environment configuration
 Adding new environment
+==> Initializing team/dev
 deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
 dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
 ==> Deploying team/dev <VERSION>

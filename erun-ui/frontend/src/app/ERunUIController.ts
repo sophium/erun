@@ -231,6 +231,7 @@ export class ERunUIController {
   private appStatusOff: (() => void) | null = null;
   private reconnectLineOff: (() => void) | null = null;
   private environmentInitializedOff: (() => void) | null = null;
+  private environmentInitFailedOff: (() => void) | null = null;
   private environmentsChangedOff: (() => void) | null = null;
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
   private terminalStatusRetrySelection: UISelection | null = null;
@@ -343,6 +344,9 @@ export class ERunUIController {
     this.environmentInitializedOff = EventsOn('environment-initialized', (payload: EnvironmentInitializedPayload) => {
       void this.handleEnvironmentInitialized(payload);
     });
+    this.environmentInitFailedOff = EventsOn('environment-init-failed', (payload: EnvironmentInitializedPayload) => {
+      this.handleEnvironmentInitFailed(payload);
+    });
     this.environmentsChangedOff = EventsOn('environments-changed', () => {
       void this.reloadStateAfterEnvironmentChange();
     });
@@ -368,6 +372,7 @@ export class ERunUIController {
     this.appStatusOff?.();
     this.reconnectLineOff?.();
     this.environmentInitializedOff?.();
+    this.environmentInitFailedOff?.();
     this.environmentsChangedOff?.();
     window.clearTimeout(this.notificationTimer);
     window.clearTimeout(this.terminalCopyStatusTimer);
@@ -381,6 +386,7 @@ export class ERunUIController {
     this.appStatusOff = null;
     this.reconnectLineOff = null;
     this.environmentInitializedOff = null;
+    this.environmentInitFailedOff = null;
     this.environmentsChangedOff = null;
     this.terminalQueryResponseDisposables = [];
     this.terminal?.dispose();
@@ -1803,12 +1809,21 @@ export class ERunUIController {
   }
 
   private async startInitSelection(selection: UISelection): Promise<void> {
+    // Visibility of system status (Nielsen #1) is provided by three
+    // surfaces that persist for the full init duration: the sidebar
+    // placeholder row (Sidebar.tsx EnvironmentRow placeholder branch),
+    // the activity-drawer init entry registered when the backend's
+    // trace handler observes `==> Initializing`, and the live `erun
+    // init` output in the Local tab. Setting state.terminalMessage
+    // would flash a busy overlay for ~150 ms inside the still-open
+    // modal and is then cleared by activateLocalAfterCommand before
+    // the user can register it — see erun-ui/AGENTS.md § "UX Impact
+    // Review Checklist" item 3 (state-without-affordance).
     const runSelection = { ...selection, debug: this.state.debugOpen || undefined };
     this.state.selected = selection;
-    this.emit();
     this.state.terminalCopyOutput = '';
     this.state.terminalCopyStatus = '';
-    this.showTerminalMessage(`Creating remote environment ${selection.tenant} / ${selection.environment}...`, true);
+    this.emit();
 
     this.fitAddon?.fit();
     const result = (await StartInitSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
@@ -2046,9 +2061,11 @@ export class ERunUIController {
   // Fires when the backend's PTY trace handler observes
   // `==> Initialized <tenant>/<env>` from a piped `erun init` command,
   // or when the config-file watcher detects a new env. Reload state so
-  // the new env appears in the sidebar, then open the selection so the
-  // ERun and AI tabs spawn against the now-existing config. See
-  // erun-ui/AGENTS.md § "Command Completion And State-Refresh Wiring".
+  // the new env appears in the sidebar, surface a success toast
+  // (Nielsen #1 visibility of system status), then open the selection
+  // so the ERun and AI tabs spawn against the now-existing config.
+  // See erun-ui/AGENTS.md § "Command Completion And State-Refresh
+  // Wiring".
   private async handleEnvironmentInitialized(payload: EnvironmentInitializedPayload): Promise<void> {
     const tenant = String(payload?.tenant || '').trim();
     const environment = String(payload?.environment || '').trim();
@@ -2056,17 +2073,40 @@ export class ERunUIController {
       return;
     }
     await this.reloadStateAfterEnvironmentChange();
-    const exists = this.state.tenants
-      .find((entry) => entry.name === tenant)
-      ?.environments.some((env) => env.name === environment);
-    if (!exists) {
+    if (!this.environmentExists(tenant, environment)) {
       return;
     }
+    this.showNotification('success', `Created ${tenant} / ${environment}.`);
     try {
       await this.openSelection({ tenant, environment });
     } catch (error) {
       this.showTerminalMessage(readError(error));
     }
+  }
+
+  // Fires when the backend's PTY trace handler observes
+  // `==> Initialization failed <tenant>/<env>`. Surfaces an error toast
+  // (Nielsen #1 + #9) and reverts the optimistic state.selected so the
+  // sidebar's "creating ..." placeholder row disappears.
+  private handleEnvironmentInitFailed(payload: EnvironmentInitializedPayload): void {
+    const tenant = String(payload?.tenant || '').trim();
+    const environment = String(payload?.environment || '').trim();
+    if (!tenant || !environment) {
+      return;
+    }
+    this.showNotification('error', `Failed to create ${tenant} / ${environment}. See the Local tab and the activity drawer for details.`);
+    if (this.selectedIsPendingFor(tenant, environment)) {
+      this.state.selected = null;
+      this.emit();
+    }
+  }
+
+  private selectedIsPendingFor(tenant: string, environment: string): boolean {
+    const selected = this.state.selected;
+    if (!selected || selected.tenant !== tenant || selected.environment !== environment) {
+      return false;
+    }
+    return !this.environmentExists(tenant, environment);
   }
 
   private appendDebugOutput(text: string, fromSessionId?: number): void {

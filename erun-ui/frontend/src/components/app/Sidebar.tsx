@@ -7,7 +7,7 @@ import type { AppState } from '@/app/state';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
-import type { UICloudProviderStatus, UITenant } from '@/types';
+import type { UICloudProviderStatus, UISelection, UITenant } from '@/types';
 import { EmptyState } from './EmptyState';
 import { IconTooltip } from './IconTooltip';
 import { cloudProviderStatusTone } from './StatusBadge';
@@ -72,6 +72,7 @@ export function Sidebar({ controller, state }: { controller: ERunUIController; s
               state={state}
               tenant={tenant}
               spaced={index > 0}
+              pending={pendingForTenant(state, tenant.name)}
             />
           ))
         )}
@@ -79,6 +80,28 @@ export function Sidebar({ controller, state }: { controller: ERunUIController; s
       <PrimaryCloudAliasControl controller={controller} state={state} />
     </aside>
   );
+}
+
+// pendingForTenant returns the optimistic selection that is being
+// created right now, when the matching env is not yet in
+// state.tenants. The sidebar renders a placeholder row for it so
+// Nielsen #1 (visibility of system status) holds during the
+// ~1–2 min init runs. The placeholder disappears once
+// reloadStateAfterEnvironmentChange picks up the new env, or when
+// `environment-init-failed` reverts state.selected.
+function pendingForTenant(state: AppState, tenantName: string): UISelection | null {
+  const selected = state.selected;
+  if (!selected || selected.tenant !== tenantName) {
+    return null;
+  }
+  const tenant = state.tenants.find((entry) => entry.name === selected.tenant);
+  if (!tenant) {
+    return null;
+  }
+  if (tenant.environments.some((env) => env.name === selected.environment)) {
+    return null;
+  }
+  return selected;
 }
 
 function PrimaryCloudAliasControl({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement | null {
@@ -225,11 +248,13 @@ function TenantGroup({
   state,
   tenant,
   spaced,
+  pending,
 }: {
   controller: ERunUIController;
   state: AppState;
   tenant: UITenant;
   spaced: boolean;
+  pending: UISelection | null;
 }): React.ReactElement {
   const collapsed = state.collapsedTenants.has(tenant.name);
   const active = state.tenantDashboard.tenant === tenant.name;
@@ -258,6 +283,12 @@ function TenantGroup({
               environmentName={environment.name}
             />
           ))}
+          {pending && (
+            <PendingEnvironmentRow
+              tenantName={pending.tenant}
+              environmentName={pending.environment}
+            />
+          )}
         </div>
       )}
     </div>
@@ -406,4 +437,34 @@ function EnvironmentRow({
 
 function environmentIsBusy(state: AppState, tenant: string, environment: string): boolean {
   return state.terminalBusy === true && state.selected?.tenant === tenant && state.selected.environment === environment;
+}
+
+// PendingEnvironmentRow renders an optimistic, non-interactive
+// placeholder row for an environment that is currently being created
+// by `erun init`. It exists to satisfy Nielsen #1 (visibility of
+// system status) for the ~1–2 min init runs: without it,
+// state.selected is set but produces no visible affordance because
+// the env is not in state.tenants yet. Italic name + "Creating"
+// badge + spinner + aria-busy communicate the in-flight state
+// without inviting interaction.
+function PendingEnvironmentRow({ tenantName, environmentName }: { tenantName: string; environmentName: string }): React.ReactElement {
+  return (
+    <div
+      className="group relative mr-1 ml-1 flex h-8 items-center rounded-md pr-1.5 text-muted-foreground"
+      aria-busy="true"
+      aria-live="polite"
+      aria-label={`Creating ${tenantName} / ${environmentName}`}
+    >
+      <div className="flex h-8 min-w-0 flex-1 items-center gap-1.5 py-0 pr-2 pl-10 text-left text-sm leading-[1.2]">
+        <span className="min-w-0 truncate italic">{environmentName}</span>
+        <span
+          className="flex-none rounded-[calc(var(--radius)-4px)] border border-border px-1 py-px text-[10px] font-medium uppercase leading-none tracking-wide text-muted-foreground"
+          aria-hidden="true"
+        >
+          Creating
+        </span>
+        <LoaderCircle className="size-3.5 flex-none animate-spin text-current opacity-75" aria-hidden="true" />
+      </div>
+    </div>
+  );
 }

@@ -118,6 +118,25 @@ References:
 - Material Design, "Empty states": https://m1.material.io/patterns/empty-states.html
 - Material Design, "Dialogs": https://m1.material.io/components/dialogs.html
 
+## UX Impact Review Checklist
+
+Apply this checklist to every change that touches a user-triggered code path, regardless of which directory the diff lands in (backend wiring, lifecycle refactor, event-handler edit, persistence work, frontend logic that does not directly edit a component). The checklist is short by design — if the change has no UX surface, the answers are quick and explicit. Record the answers in the PR description (or commit body for smaller changes); a reviewer who cannot find them should reject the change.
+
+1. **Affected paths.** Name the user-triggered code paths this change passes through (e.g. "Initialize dialog → `erun init` pipeline", "Sidebar row click", "fsnotify config-changed event"). If none, write "no user-triggered path affected" and stop.
+2. **User-visible sequence.** Walk the affected paths in user-facing terms — dialog opens, spinner appears in button, dialog closes, terminal switches to Local, new env appears in sidebar, ERun tab focuses — annotating which step renders each piece of state.
+3. **State-without-affordance.** Every mutation of `state.selected`, `state.terminalMessage`, `state.terminalBusy`, `state.tenants`, `state.tabsByEnv`, or other `AppState` fields must map to a visible affordance the user can register. A mutation with no rendering consequence is a gap — either render its consequence or remove the mutation. A status overlay set then cleared by the next lifecycle step before the user can see it is the same gap.
+4. **Visibility of system status (Nielsen #1).** Persistent in-flight operations need persistent indicators, not transient overlays. The indicator must be visible from where the user expects feedback — usually outside any modal that closes mid-operation.
+5. **Success and failure feedback (Nielsen #1, #9).** After the operation completes, the user must be able to tell whether their action succeeded or failed without inspecting raw terminal output or recalling earlier state. Failure surfaces need an actionable next step.
+6. **Consistency with comparable flows (Nielsen #4).** If a comparable operation already has an activity-queue entry, a sidebar badge, a toast, or any other feedback affordance, the new operation should match it unless there is a specific reason it should differ. List the comparable flow you checked against.
+7. **One-line heuristic pass.** Walk the 10 Nielsen heuristics for the affected surface, naming each one and noting whether it applies and whether the change passes. If a heuristic does not apply, say so explicitly rather than skipping silently.
+
+Common gaps this checklist catches:
+
+- Setting `state.selected = newEnv` for an env that does not yet exist in `state.tenants`. The sidebar has no row to highlight, so the mutation is invisible.
+- Calling `showTerminalMessage(busy=true)` and then `hideTerminalMessage()` from the next lifecycle step. The overlay flashes for milliseconds.
+- Refactoring a PTY lifecycle without re-wiring the post-completion UX signal. "Did it work?" must still have a visible answer in the new model.
+- Adding a new operation that mutates env state without giving it an activity-queue entry, when comparable operations already have one.
+
 ## Build And Packaging
 
 - Keep the module build script as the canonical local and release-facing desktop build entrypoint.
