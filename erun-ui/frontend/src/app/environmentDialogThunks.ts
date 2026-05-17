@@ -7,6 +7,7 @@ import {
 } from './environmentDialogState';
 import { showTerminalMessage } from './notificationThunks';
 import { runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
+import { refreshKubernetesContexts } from './dialogContextsThunks';
 import { startDeploySelection, startInitSelection } from './sessionThunks';
 import {
   patchEnvironmentDialog,
@@ -36,8 +37,7 @@ import type { UISelection, UIVersionSuggestion } from '@/types';
 
 let versionSuggestionTimer = 0;
 
-export const openInitializeDialog = (): AppThunk => (dispatch, getState, extra) => {
-  const controller = requireController(extra);
+export const openInitializeDialog = (): AppThunk => (dispatch, getState) => {
   const state = getState();
   const tenantDefault = state.selection.selected?.tenant || state.tenants.tenants[0]?.name || '';
   const containerRegistryDefault = loadSavedPastContainerRegistries()[0] || '';
@@ -62,7 +62,7 @@ export const openInitializeDialog = (): AppThunk => (dispatch, getState, extra) 
     busy: false,
     error: '',
   }));
-  void controller.refreshKubernetesContexts();
+  void dispatch(refreshKubernetesContexts());
   void dispatch(refreshDialogVersionSuggestions(true));
 };
 

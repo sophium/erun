@@ -23,6 +23,7 @@ import {
   setTerminalCopyOutput,
   setTerminalCopyStatus,
 } from './slices/terminalStatusSlice';
+import { refreshKubernetesContexts } from './dialogContextsThunks';
 import { openSelection } from './sessionThunks';
 import type { GlobalConfigDialogState } from './state';
 import { defaultCloudContextInitInput, defaultGlobalConfigDialog } from './state';
@@ -179,8 +180,7 @@ export const refreshCloudContexts = (): AppThunk<Promise<void>> => async (dispat
   }
 };
 
-export const initGlobalCloudContext = (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
-  const controller = requireController(extra);
+export const initGlobalCloudContext = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const dialog = getState().globalConfigDialog;
   if (dialog.busy || dialog.configLoading) {
     return;
@@ -205,7 +205,7 @@ export const initGlobalCloudContext = (): AppThunk<Promise<void>> => async (disp
       error: '',
     }));
     dispatch(showTerminalMessage(`Initialized cloud context ${context.kubernetesContext}.`));
-    void controller.refreshKubernetesContexts();
+    void dispatch(refreshKubernetesContexts());
   } catch (error) {
     const message = readError(error);
     dispatch(patchGlobalConfigDialog({
@@ -228,7 +228,7 @@ export const stopGlobalCloudContext = (name: string): AppThunk<Promise<void>> =>
   );
 };
 
-export const startGlobalCloudContext = (name: string): AppThunk<Promise<void>> => async (dispatch, _getState, extra) => {
+export const startGlobalCloudContext = (name: string): AppThunk<Promise<void>> => async (dispatch) => {
   await dispatch(
     updateCloudContextPower(
       name,
@@ -236,7 +236,7 @@ export const startGlobalCloudContext = (name: string): AppThunk<Promise<void>> =
       'Started',
     ),
   );
-  void requireController(extra).refreshKubernetesContexts();
+  void dispatch(refreshKubernetesContexts());
 };
 
 export const toggleIdleCloudContext = (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
@@ -254,7 +254,7 @@ export const toggleIdleCloudContext = (): AppThunk<Promise<void>> => async (disp
     dispatch(setIdleCloudContextBusy(false));
     dispatch(showNotification('success', `${action.label} cloud environment ${context.kubernetesContext || context.name}.`));
     if (action.refreshKubernetesContexts) {
-      void controller.refreshKubernetesContexts();
+      void dispatch(refreshKubernetesContexts());
     }
     if (action.operation === 'start' && selection) {
       await dispatch(openSelection(selection));

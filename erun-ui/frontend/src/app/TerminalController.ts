@@ -1,24 +1,16 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal, type IDisposable } from '@xterm/xterm';
 
-import { environmentApi } from './api/environmentApi';
 import { idleApi } from './api/idleApi';
-import { kubernetesApi } from './api/kubernetesApi';
 import { sessionApi } from './api/sessionApi';
-import { stateApi } from './api/stateApi';
+import { boot, reloadStateAfterEnvironmentChange } from './bootThunks';
 import { appendDebugOutput as appendDebugOutputThunk } from './debugThunks';
 import { removeTab as removeTabThunk } from './tabsThunks';
 import { selectEnvironmentExists, selectSelectedIsPendingFor } from './selectors';
 import { setDoctorAll } from './slices/doctorSlice';
-import { patchEnvironmentDialog } from './slices/environmentDialogSlice';
 import { setIdleStatus } from './slices/idleSlice';
 import { setReconnect, setSelectedDiffPath } from './slices/reviewSlice';
 import { setSelected } from './slices/selectionSlice';
-import {
-  setCloudProviders,
-  setTenants,
-  setVersionSuggestions,
-} from './slices/tenantsSlice';
 import { store } from './store';
 import { thunkExtra } from './thunkExtra';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
@@ -62,7 +54,7 @@ import {
   terminalExitHasTrackedSelection,
 } from './terminalStatus';
 import { failedTerminalOutput, filterTerminalDisplayData } from './terminalBuffers';
-import { normalizeDialogValue, normalizeVersionSuggestions, selectionKey } from './versionSuggestions';
+import { selectionKey } from './versionSuggestions';
 import type {
   TerminalExitPayload,
   TerminalOutputPayload,
@@ -196,12 +188,12 @@ export class TerminalController {
       this.handleEnvironmentInitFailed(payload);
     });
     this.environmentsChangedOff = EventsOn('environments-changed', () => {
-      void this.reloadStateAfterEnvironmentChange();
+      void store.dispatch(reloadStateAfterEnvironmentChange());
     });
 
     if (!this.bootStarted) {
       this.bootStarted = true;
-      void this.boot();
+      void store.dispatch(boot());
     }
     this.scheduleIdleStatusPoll(0);
 
@@ -298,155 +290,6 @@ export class TerminalController {
     return request === this.idleStatusRequest && selected?.tenant === selection.tenant && selected.environment === selection.environment;
   }
 
-  private async boot(): Promise<void> {
-    try {
-      store.dispatch(showTerminalMessage('Loading environments...', true));
-      const loaded = await store
-        .dispatch(stateApi.endpoints.getInitialState.initiate(undefined, { forceRefetch: true }))
-        .unwrap();
-      store.dispatch(setTenants(loaded.tenants || []));
-      store.dispatch(setCloudProviders(loaded.cloudProviders || []));
-      store.dispatch(setSelected(loaded.selected || null));
-      store.dispatch(setVersionSuggestions(normalizeVersionSuggestions(loaded.versionSuggestions || [])));
-      this.selectLoadedKubernetesContexts(loaded.kubernetesContexts || []);
-      if (loaded.message) {
-        store.dispatch(showTerminalMessage(loaded.message));
-        return;
-      }
-
-      const selected = store.getState().selection.selected;
-      if (selected) {
-        await store.dispatch(openSelection(selected));
-        return;
-      }
-
-      store.dispatch(showTerminalMessage('Choose an environment from the left pane.'));
-    } catch (error: unknown) {
-      store.dispatch(showTerminalMessage(readError(error)));
-    }
-  }
-
-  async reloadStateAfterEnvironmentChange(): Promise<void> {
-    try {
-      const loaded = await store
-        .dispatch(stateApi.endpoints.getInitialState.initiate(undefined, { forceRefetch: true }))
-        .unwrap();
-      const current = store.getState().tenants;
-      store.dispatch(setTenants(loaded.tenants || []));
-      store.dispatch(setCloudProviders(loaded.cloudProviders || current.cloudProviders));
-      store.dispatch(setVersionSuggestions(normalizeVersionSuggestions(loaded.versionSuggestions || current.versionSuggestions)));
-      this.selectLoadedKubernetesContexts(loaded.kubernetesContexts || []);
-    } catch {
-    }
-  }
-
-  async refreshKubernetesContexts(): Promise<void> {
-    try {
-      const result = await store
-        .dispatch(kubernetesApi.endpoints.getKubernetesContexts.initiate())
-        .unwrap();
-      const contexts = result.map((context) => context.trim()).filter(Boolean);
-      const dialog = store.getState().environmentDialog;
-      if (!dialog.open || dialog.actionMode !== 'init') {
-        return;
-      }
-      const resolved = this.resolveDialogKubernetesContext(contexts);
-      store.dispatch(patchEnvironmentDialog({
-        kubernetesContexts: contexts,
-        kubernetesContext: resolved,
-        kubernetesContextsLoading: false,
-      }));
-      void this.refreshEnvironmentRuntimeResources(resolved);
-    } catch (error) {
-      const dialog = store.getState().environmentDialog;
-      if (!dialog.open || dialog.actionMode !== 'init') {
-        return;
-      }
-      store.dispatch(patchEnvironmentDialog({
-        kubernetesContexts: [],
-        kubernetesContext: '',
-        kubernetesContextsLoading: false,
-        error: readError(error),
-      }));
-    }
-  }
-
-  private resolveDialogKubernetesContext(contexts: string[]): string {
-    const current = normalizeDialogValue(store.getState().environmentDialog.kubernetesContext);
-    if (current && contexts.includes(current)) {
-      return current;
-    }
-    return contexts[0] || '';
-  }
-
-  private selectLoadedKubernetesContexts(contexts: string[]): void {
-    const dialog = store.getState().environmentDialog;
-    if (!dialog.open || dialog.actionMode !== 'init') {
-      return;
-    }
-    const normalized = contexts.map((context) => context.trim()).filter(Boolean);
-    const resolved = this.resolveDialogKubernetesContext(normalized);
-    store.dispatch(patchEnvironmentDialog({
-      kubernetesContexts: normalized,
-      kubernetesContext: resolved,
-      kubernetesContextsLoading: false,
-    }));
-    void this.refreshEnvironmentRuntimeResources(resolved);
-  }
-
-  // refreshEnvironmentRuntimeResources is a private helper invoked when the
-  // dialog's kubernetesContext changes or when the context list resolves.
-  // The environmentDialogThunks own the analogous user-driven refresh
-  // (kubernetesContext field changes), but this internal flow stays on the
-  // controller because boot() + refreshKubernetesContexts() drive it.
-  private async refreshEnvironmentRuntimeResources(kubernetesContext: string): Promise<void> {
-    const context = normalizeDialogValue(kubernetesContext);
-    let dialog = store.getState().environmentDialog;
-    if (!dialog.open || dialog.actionMode !== 'init' || !context) {
-      return;
-    }
-    store.dispatch(patchEnvironmentDialog({
-      resourceStatusLoading: true,
-      resourceStatus: null,
-    }));
-    try {
-      dialog = store.getState().environmentDialog;
-      const status = await store
-        .dispatch(
-          environmentApi.endpoints.getRuntimeResourceStatus.initiate(
-            {
-              kubernetesContext: context,
-              tenant: normalizeDialogValue(dialog.tenant),
-              environment: normalizeDialogValue(dialog.environment),
-            },
-            { forceRefetch: true },
-          ),
-        )
-        .unwrap();
-      if (!store.getState().environmentDialog.open) {
-        return;
-      }
-      store.dispatch(patchEnvironmentDialog({
-        resourceStatus: status,
-        resourceStatusLoading: false,
-      }));
-    } catch (error) {
-      if (!store.getState().environmentDialog.open) {
-        return;
-      }
-      store.dispatch(patchEnvironmentDialog({
-        resourceStatus: {
-          kubernetesContext: context,
-          available: false,
-          message: readError(error),
-          cpu: { total: 0, used: 0, free: 0, unit: 'cores', formatted: '' },
-          memory: { total: 0, used: 0, free: 0, unit: 'GiB', formatted: '' },
-        },
-        resourceStatusLoading: false,
-      }));
-    }
-  }
-
   resetTerminal(): void {
     this.terminal?.reset();
     this.terminal?.clear();
@@ -475,7 +318,7 @@ export class TerminalController {
     if (!tenant || !environment) {
       return;
     }
-    await this.reloadStateAfterEnvironmentChange();
+    await store.dispatch(reloadStateAfterEnvironmentChange());
     if (!selectEnvironmentExists(store.getState(), tenant, environment)) {
       return;
     }
@@ -540,7 +383,7 @@ export class TerminalController {
     this.recordDoctorOutcome(payload, selections);
 
     if (selections.sshdInitSelection) {
-      await this.reloadStateAfterEnvironmentChange();
+      await store.dispatch(reloadStateAfterEnvironmentChange());
     }
     if (payload.sessionId !== store.getState().terminal.sessionId) {
       return;

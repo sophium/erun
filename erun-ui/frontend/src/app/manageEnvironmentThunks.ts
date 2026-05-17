@@ -7,6 +7,8 @@ import type { HiddenSessionMode } from './model';
 import { showTerminalMessage } from './notificationThunks';
 import { runtimePodConfigToDisplay, runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
 import { selectManageRuntimeImage } from './selectors';
+import { reloadStateAfterEnvironmentChange } from './bootThunks';
+import { refreshKubernetesContexts } from './dialogContextsThunks';
 import { activateLocalAfterCommand, startDeploySelection } from './sessionThunks';
 import {
   patchManageDialog,
@@ -310,7 +312,7 @@ export const submitManageConfig = (): AppThunk<Promise<void>> => async (dispatch
 };
 
 export const startManageCloudContext = (name: string): AppThunk<Promise<void>> =>
-  async (dispatch, _getState, extra) => {
+  async (dispatch) => {
     await dispatch(
       updateManageCloudContextPower(
         name,
@@ -318,7 +320,7 @@ export const startManageCloudContext = (name: string): AppThunk<Promise<void>> =
         'Started',
       ),
     );
-    void requireController(extra).refreshKubernetesContexts();
+    void dispatch(refreshKubernetesContexts());
   };
 
 export const stopManageCloudContext = (name: string): AppThunk<Promise<void>> =>
@@ -393,7 +395,7 @@ export const submitManageDelete = (): AppThunk<Promise<void>> => async (dispatch
       dispatch(setDebugOutput(''));
       controller.resetTerminal();
     }
-    await controller.reloadStateAfterEnvironmentChange();
+    await dispatch(reloadStateAfterEnvironmentChange());
     dispatch(setManageDialog(defaultManageDialog()));
     dispatch(setTerminalCopyOutput(''));
     dispatch(setTerminalCopyStatus(''));
