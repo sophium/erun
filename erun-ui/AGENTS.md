@@ -149,3 +149,7 @@ Common gaps this checklist catches:
 - Run `go test ./...` for Go/backend changes.
 - Run `yarn build` and `go test ./...` for frontend changes.
 - Run `./build.sh <target>` when changing desktop packaging, Wails wiring, CGO settings, or generated asset embedding.
+
+## End-to-end UI tests
+
+- `playwright/` is a separate Yarn project that runs end-to-end UI tests against `erun-app --headless` over the HTTP+SSE bridge. Use it for cross-component flows that depend on rendered DOM (sidebar toggles, dialog interactions, layout panels, status banners), or for catching regressions that unit-level Go tests cannot observe because they exercise only the backend. It does not replace `go test ./...`: Go tests cover backend logic, while Playwright covers the React frontend behaviour after a real boot sequence. Make sure the desktop binary at `bin/erun-app` is rebuilt with `./build.sh` before running the suite, then `cd playwright && yarn install && yarn install-browsers && yarn test` runs everything headless. See `playwright/README.md` for the full command surface.
