@@ -5,11 +5,7 @@ import { sessionApi } from './api/sessionApi';
 import { boot, reloadStateAfterEnvironmentChange } from './bootThunks';
 import { refreshIdleStatus } from './idleThunks';
 import { appendDebugOutput as appendDebugOutputThunk } from './debugThunks';
-import { removeTab as removeTabThunk } from './tabsThunks';
-import { selectEnvironmentExists, selectSelectedIsPendingFor } from './selectors';
-import { setDoctorAll } from './slices/doctorSlice';
-import { setReconnect, setSelectedDiffPath } from './slices/reviewSlice';
-import { setSelected } from './slices/selectionSlice';
+import { setSelectedDiffPath } from './slices/reviewSlice';
 import { store } from './store';
 import { thunkExtra } from './thunkExtra';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
@@ -17,13 +13,16 @@ import { ResizeSession, SendSessionInput } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { fileToBase64, decodeBase64Bytes, isTerminalPasteTarget, pastedImageFiles } from './clipboard';
 import { readError } from './errors';
+import { showTerminalMessage } from './notificationThunks';
 import {
-  hideTerminalMessage,
-  showNotification,
-  showTerminalFailure,
-  showTerminalMessage,
-} from './notificationThunks';
-import { openSelection, selectTerminalTab as selectTerminalTabThunk } from './sessionThunks';
+  handleAppStatus,
+  handleEnvironmentInitFailed,
+  handleEnvironmentInitialized,
+  handleReconnectLine,
+  handleTerminalExit,
+  hideTerminalMessageIfActive,
+  updateOpenStatusFromOutput,
+} from './wailsEventThunks';
 import { visibleDiffPath } from './reviewDiffNavigation';
 import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses';
 import type {
@@ -31,7 +30,6 @@ import type {
   EnvironmentInitializedPayload,
   MountElements,
   TerminalDataDisposable,
-  TerminalExitSelections,
   TerminalWriteData,
 } from './model';
 import {
@@ -44,20 +42,11 @@ import {
 } from './state';
 
 import { clamp } from './storage';
-import {
-  classifiedTerminalFailure,
-  decodeDebugOutput,
-  failedTerminalExitReason,
-  statusForTerminalOutput,
-  successfulTerminalExitReason,
-  terminalExitHasTrackedSelection,
-} from './terminalStatus';
-import { failedTerminalOutput, filterTerminalDisplayData } from './terminalBuffers';
-import { selectionKey } from './versionSuggestions';
+import { decodeDebugOutput } from './terminalStatus';
+import { filterTerminalDisplayData } from './terminalBuffers';
 import type {
   TerminalExitPayload,
   TerminalOutputPayload,
-  UISelection,
 } from '@/types';
 
 const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
@@ -171,19 +160,19 @@ export class TerminalController {
       this.handleTerminalOutput(payload);
     });
     this.terminalExitOff = EventsOn('terminal-exit', (payload: TerminalExitPayload) => {
-      void this.handleTerminalExit(payload);
+      void store.dispatch(handleTerminalExit(payload));
     });
     this.appStatusOff = EventsOn('app-status', (payload: AppStatusPayload) => {
-      this.handleAppStatus(payload);
+      store.dispatch(handleAppStatus(payload));
     });
     this.reconnectLineOff = EventsOn('mcp-reconnect-line', (line: string) => {
-      this.handleReconnectLine(line);
+      store.dispatch(handleReconnectLine(line));
     });
     this.environmentInitializedOff = EventsOn('environment-initialized', (payload: EnvironmentInitializedPayload) => {
-      void this.handleEnvironmentInitialized(payload);
+      void store.dispatch(handleEnvironmentInitialized(payload));
     });
     this.environmentInitFailedOff = EventsOn('environment-init-failed', (payload: EnvironmentInitializedPayload) => {
-      this.handleEnvironmentInitFailed(payload);
+      store.dispatch(handleEnvironmentInitFailed(payload));
     });
     this.environmentsChangedOff = EventsOn('environments-changed', () => {
       void store.dispatch(reloadStateAfterEnvironmentChange());
@@ -253,57 +242,10 @@ export class TerminalController {
     this.terminal?.clear();
   }
 
-  private handleAppStatus(payload: AppStatusPayload): void {
-    const message = String(payload?.message || '').trim();
-    if (!message) {
-      return;
-    }
-    store.dispatch(appendDebugOutputThunk(`[status] ${message}\n`));
-    store.dispatch(showTerminalMessage(message, payload.busy === true));
-  }
-
-  // Fires when the backend's PTY trace handler observes
-  // `==> Initialized <tenant>/<env>` from a piped `erun init` command,
-  // or when the config-file watcher detects a new env. Reload state so
-  // the new env appears in the sidebar, surface a success toast
-  // (Nielsen #1 visibility of system status), then open the selection
-  // so the ERun and AI tabs spawn against the now-existing config.
-  // See erun-ui/AGENTS.md § "Command Completion And State-Refresh
-  // Wiring".
-  private async handleEnvironmentInitialized(payload: EnvironmentInitializedPayload): Promise<void> {
-    const tenant = String(payload?.tenant || '').trim();
-    const environment = String(payload?.environment || '').trim();
-    if (!tenant || !environment) {
-      return;
-    }
-    await store.dispatch(reloadStateAfterEnvironmentChange());
-    if (!selectEnvironmentExists(store.getState(), tenant, environment)) {
-      return;
-    }
-    store.dispatch(showNotification('success', `Created ${tenant} / ${environment}.`));
-    try {
-      await store.dispatch(openSelection({ tenant, environment }));
-    } catch (error) {
-      store.dispatch(showTerminalMessage(readError(error)));
-    }
-  }
-
-  // Fires when the backend's PTY trace handler observes
-  // `==> Initialization failed <tenant>/<env>`. Surfaces an error toast
-  // (Nielsen #1 + #9) and reverts the optimistic state.selected so the
-  // sidebar's "creating ..." placeholder row disappears.
-  private handleEnvironmentInitFailed(payload: EnvironmentInitializedPayload): void {
-    const tenant = String(payload?.tenant || '').trim();
-    const environment = String(payload?.environment || '').trim();
-    if (!tenant || !environment) {
-      return;
-    }
-    store.dispatch(showNotification('error', `Failed to create ${tenant} / ${environment}. See the Local tab and the activity drawer for details.`));
-    if (selectSelectedIsPendingFor(store.getState(), tenant, environment)) {
-      store.dispatch(setSelected(null));
-    }
-  }
-
+  // handleTerminalOutput stays on the controller because it does the
+  // imperative xterm write and appends to the registry's per-session
+  // buffer Maps (which are the perf-carveout that justifies the registry
+  // existing at all). State-side effects are dispatched as thunks.
   private handleTerminalOutput(payload: TerminalOutputPayload): void {
     if (!payload) {
       return;
@@ -312,144 +254,16 @@ export class TerminalController {
     this.sessions.appendSessionBuffer(payload.sessionId, data);
     const debugOutput = decodeDebugOutput(data);
     store.dispatch(appendDebugOutputThunk(debugOutput, payload.sessionId));
-    this.updateOpenStatusFromOutput(payload.sessionId, debugOutput);
+    store.dispatch(updateOpenStatusFromOutput(payload.sessionId, debugOutput));
     const displayData = filterTerminalDisplayData(this.sessions, payload.sessionId, data);
     if (displayData) {
       this.sessions.appendDisplayBuffer(payload.sessionId, displayData);
     }
-    const state = store.getState();
-    if (payload.sessionId !== state.terminal.sessionId) {
+    if (payload.sessionId !== store.getState().terminal.sessionId || !displayData) {
       return;
     }
-    if (!displayData) {
-      return;
-    }
-    if (state.terminalStatus.terminalMessage && !state.terminalStatus.terminalCopyOutput) {
-      store.dispatch(hideTerminalMessage());
-    }
+    store.dispatch(hideTerminalMessageIfActive(payload.sessionId));
     this.terminal?.write(displayData);
-  }
-
-  private async handleTerminalExit(payload: TerminalExitPayload): Promise<void> {
-    if (!payload) {
-      return;
-    }
-    const selections = this.takeTerminalExitSelections(payload.sessionId);
-    const reason = this.terminalExitReason(payload, selections);
-    const failedOutput = this.recordTerminalExit(payload, reason, selections);
-    this.dropExitedSessionFromTabs(payload.sessionId, selections.openSelection);
-    this.recordDoctorOutcome(payload, selections);
-
-    if (selections.sshdInitSelection) {
-      await store.dispatch(reloadStateAfterEnvironmentChange());
-    }
-    if (payload.sessionId !== store.getState().terminal.sessionId) {
-      return;
-    }
-    if (await this.handleSuccessfulTerminalExit(payload, reason, selections)) {
-      return;
-    }
-    if (payload.reason && terminalExitHasTrackedSelection(selections)) {
-      const failure = classifiedTerminalFailure(payload.reason, reason, failedOutput, selections.openSelection);
-      store.dispatch(showTerminalFailure(failure.message, failure.detail, failedOutput, failure.action, failure.retrySelection));
-      return;
-    }
-    store.dispatch(showTerminalMessage(reason));
-  }
-
-  private recordDoctorOutcome(payload: TerminalExitPayload, selections: TerminalExitSelections): void {
-    const selection = selections.doctorSelection;
-    if (!selection) {
-      return;
-    }
-    const key = selectionKey(selection);
-    const reason = (payload.reason || '').trim();
-    const lastDoctorBySelection = store.getState().doctor.lastDoctorBySelection;
-    store.dispatch(setDoctorAll({
-      lastDoctorBySelection: {
-        ...lastDoctorBySelection,
-        [key]: {
-          ranAt: Date.now(),
-          success: !reason,
-          message: reason,
-        },
-      },
-    }));
-  }
-
-  private takeTerminalExitSelections(sessionId: number): TerminalExitSelections {
-    return this.sessions.takeExitSelections(sessionId);
-  }
-
-  private dropExitedSessionFromTabs(sessionId: number, openSelection: UISelection | undefined): void {
-    if (!openSelection) {
-      return;
-    }
-    const key = selectionKey(openSelection);
-    const remaining = store.dispatch(removeTabThunk(key, sessionId));
-    if (store.getState().terminal.sessionId !== sessionId) {
-      return;
-    }
-    const next = remaining[remaining.length - 1];
-    if (next) {
-      store.dispatch(selectTerminalTabThunk(next.sessionId));
-    }
-  }
-
-  private recordTerminalExit(payload: TerminalExitPayload, reason: string, selections: TerminalExitSelections): string {
-    this.sessions.recordExitReason(payload.sessionId, reason);
-    if (!payload.reason || !terminalExitHasTrackedSelection(selections)) {
-      return '';
-    }
-    const failedOutput = failedTerminalOutput(this.sessions, payload.sessionId, reason);
-    if (failedOutput) {
-      this.sessions.recordExitOutput(payload.sessionId, failedOutput);
-    }
-    return failedOutput;
-  }
-
-  private async handleSuccessfulTerminalExit(payload: TerminalExitPayload, reason: string, selections: TerminalExitSelections): Promise<boolean> {
-    if (payload.reason) {
-      return false;
-    }
-    if (selections.sshdInitSelection) {
-      store.dispatch(showTerminalMessage(reason));
-      return true;
-    }
-    return false;
-  }
-
-  private terminalExitReason(payload: TerminalExitPayload, selections: TerminalExitSelections): string {
-    if (payload.reason) {
-      return failedTerminalExitReason(payload.reason, selections);
-    }
-    return successfulTerminalExitReason(selections);
-  }
-
-  private updateOpenStatusFromOutput(sessionId: number, output: string): void {
-    if (!output || !this.sessions.isOpenSession(sessionId) || store.getState().terminalStatus.terminalCopyOutput) {
-      return;
-    }
-    const status = statusForTerminalOutput(output);
-    if (!status) {
-      return;
-    }
-    store.dispatch(showTerminalMessage(status, true));
-  }
-
-  // handleReconnectLine appends a status line from the reconnect PTY into the
-  // reconnect dialog while it is running. Kept on the controller because it
-  // wires the EventsOn('mcp-reconnect-line') subscription.
-  private handleReconnectLine(line: string): void {
-    const trimmed = (line || '').trim();
-    if (!trimmed) {
-      return;
-    }
-    const reconnect = store.getState().review.reconnect;
-    if (reconnect.status !== 'running') {
-      return;
-    }
-    store.dispatch(setReconnect({ ...reconnect, lastLine: trimmed }));
   }
 
   layoutCallbacks(): {
