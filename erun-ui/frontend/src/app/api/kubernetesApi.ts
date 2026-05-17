@@ -1,11 +1,11 @@
 import { LoadKubernetesContexts } from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
-import { wailsQueryFn } from './wailsBaseQuery';
+import { type NoValue, wailsQueryFn } from './wailsBaseQuery';
 
 export const kubernetesApi = wailsApi.injectEndpoints({
   endpoints: (builder) => ({
-    getKubernetesContexts: builder.query<string[], void>({
-      queryFn: wailsQueryFn<void, string[]>(() => LoadKubernetesContexts()),
+    getKubernetesContexts: builder.query<string[], NoValue>({
+      queryFn: wailsQueryFn<NoValue, string[]>(() => LoadKubernetesContexts()),
       providesTags: ['KubernetesContexts'],
     }),
   }),

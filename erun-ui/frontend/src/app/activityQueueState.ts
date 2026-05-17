@@ -189,16 +189,16 @@ export function formatElapsed(startedAt: string, now: number = Date.now()): stri
   const seconds = Math.max(0, Math.floor((now - start) / 1000));
   let raw: string;
   if (seconds < 60) {
-    raw = `${seconds}s`;
+    raw = `${String(seconds)}s`;
   } else {
     const minutes = Math.floor(seconds / 60);
     const remSeconds = seconds % 60;
     if (minutes < 60) {
-      raw = `${minutes}m${remSeconds}s`;
+      raw = `${String(minutes)}m${String(remSeconds)}s`;
     } else {
       const hours = Math.floor(minutes / 60);
       const remMinutes = minutes % 60;
-      raw = `${hours}h${remMinutes}m`;
+      raw = `${String(hours)}h${String(remMinutes)}m`;
     }
   }
   return raw.padStart(6, ' ');

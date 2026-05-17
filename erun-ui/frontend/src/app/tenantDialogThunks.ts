@@ -178,7 +178,7 @@ export const setupTenantCloudProviderOIDC =
         setCloudProviders(replaceCloudProvider(getState().tenants.cloudProviders, provider)),
       );
       const currentDialog = getState().tenantDialog;
-      const currentProviders = currentDialog.config.cloudProviders || [];
+      const currentProviders = currentDialog.config.cloudProviders ?? [];
       dispatch(
         patchTenantDialog({
           config: {
@@ -227,8 +227,8 @@ function applySavedTenantConfig(
         }
         return {
           ...tenant,
-          cloudProviderAliases: config.cloudProviderAliases || [],
-          primaryCloudProviderAlias: config.primaryCloudProviderAlias || '',
+          cloudProviderAliases: config.cloudProviderAliases ?? [],
+          primaryCloudProviderAlias: config.primaryCloudProviderAlias ?? '',
         };
       }),
     ),
@@ -298,7 +298,7 @@ export const loadTenantDashboard =
       if (getState().tenantDashboard.tenant !== target) {
         return;
       }
-      const data = { ...loadedData, environment: loadedData.environment || input.environment };
+      const data = { ...loadedData, environment: loadedData.environment ?? input.environment };
       dispatch(
         patchTenantDashboard({
           loading: false,
@@ -356,10 +356,10 @@ function tenantDashboardEnvironment(
   return (
     tenant.environments.find(
       (candidate) => candidate.name === defaultEnvironment && candidate.apiUrl,
-    ) || tenant.environments.find((candidate) => candidate.apiUrl)
+    ) ?? tenant.environments.find((candidate) => candidate.apiUrl)
   );
 }
 
 function trimOptional(value: string | undefined): string {
-  return value?.trim() || '';
+  return value?.trim() ?? '';
 }

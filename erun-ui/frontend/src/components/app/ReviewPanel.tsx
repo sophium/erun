@@ -9,7 +9,6 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 
-import { useController } from '@/app/ControllerContext';
 import { compactDiffError, filterDiffTree, visibleDiffTreeNodes } from '@/app/diffUtils';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { startFilesResize } from '@/app/layoutThunks';
@@ -23,6 +22,7 @@ import {
   toggleChangedFiles,
   toggleDiffDirectory,
 } from '@/app/reviewThunks';
+import { useController } from '@/app/useController';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -32,6 +32,7 @@ import type { DiffCommit, DiffTreeNode } from '@/types';
 import { DiffErrorAlert, DiffList, ReviewStatus } from './DiffList';
 import { FileIcon } from './FileIcon';
 import { IconTooltip } from './IconTooltip';
+import { ResizeHandle } from './ResizeHandle';
 
 const filesSplitterClassName =
   'relative cursor-col-resize border-l bg-background before:absolute before:top-0 before:bottom-0 before:left-1 before:w-px before:bg-transparent before:transition-colors hover:before:bg-border [.is-resizing-files_&]:before:bg-border';
@@ -90,16 +91,14 @@ function ChangedFilesSplitter({
   onMouseDown,
 }: {
   visible: boolean;
-  onMouseDown: React.MouseEventHandler<HTMLDivElement>;
+  onMouseDown: React.MouseEventHandler<HTMLButtonElement>;
 }): React.ReactElement {
   return (
-    /* role=separator resize handle; keyboard support is a separate follow-up. */
-    /* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */
-    <div
-      className={cn(filesSplitterClassName, !visible && 'hidden', 'max-[980px]:hidden')}
-      role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize changed files list"
+    <ResizeHandle
+      className={cn(filesSplitterClassName, 'max-[980px]:hidden')}
+      orientation="vertical"
+      label="Resize changed files list"
+      hidden={!visible}
       onMouseDown={onMouseDown}
     />
   );
@@ -143,12 +142,71 @@ function ChangedFilesAside({ visible }: { visible: boolean }): React.ReactElemen
   );
 }
 
+function ReviewMergeTargetRow({
+  base,
+}: {
+  base: import('@/types').DiffReviewBase | undefined;
+}): React.ReactElement {
+  return (
+    <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+      <GitBranch className="size-3.5 flex-none" aria-hidden="true" />
+      <span className="flex-none">Merge target</span>
+      <span className="min-w-0 truncate font-medium text-foreground">
+        {base?.branch?.trim() ? base.branch : 'branch base'}
+      </span>
+      {base?.shortCommit ? <span className="flex-none font-mono">{base.shortCommit}</span> : null}
+    </div>
+  );
+}
+
+function ReviewBoundaryTrack({
+  commits,
+  selectedReviewScope,
+  diffLoading,
+  dispatch,
+}: {
+  commits: DiffCommit[];
+  selectedReviewScope: 'current' | 'commit' | 'all';
+  diffLoading: boolean;
+  dispatch: ReturnType<typeof useAppDispatch>;
+}): React.ReactElement {
+  return (
+    <div className="relative flex min-h-0 flex-col gap-1 before:absolute before:top-4 before:bottom-4 before:left-[15px] before:w-px before:bg-border">
+      <ReviewBoundaryButton
+        label="Current local changes"
+        detail="local only"
+        selected={selectedReviewScope === 'current'}
+        disabled={diffLoading}
+        onClick={() => {
+          dispatch(selectReviewRange('current'));
+        }}
+      />
+      {commits.length > 0 ? (
+        <div className="flex max-h-[220px] min-h-0 flex-col gap-1 overflow-auto pr-1">
+          {commits.map((commit) => (
+            <ReviewCommitButton key={commit.hash} commit={commit} />
+          ))}
+        </div>
+      ) : null}
+      <ReviewBoundaryButton
+        label="All branch changes"
+        detail="base..current"
+        selected={selectedReviewScope === 'all'}
+        disabled={diffLoading}
+        onClick={() => {
+          dispatch(selectReviewRange('all'));
+        }}
+      />
+    </div>
+  );
+}
+
 function ReviewRangeControl(): React.ReactElement | null {
   const dispatch = useAppDispatch();
   const diff = useAppSelector((state) => state.review.diff);
   const selectedReviewScope = useAppSelector((state) => state.review.selectedReviewScope);
   const diffLoading = useAppSelector((state) => state.review.diffLoading);
-  const commits = [...(diff?.reviewCommits || [])].reverse();
+  const commits = [...(diff?.reviewCommits ?? [])].reverse();
   const base = diff?.reviewBase;
   if (!base?.commit && commits.length === 0) {
     return null;
@@ -162,41 +220,13 @@ function ReviewRangeControl(): React.ReactElement | null {
           Newest changes first. Each lower layer includes more history.
         </div>
       </div>
-      <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
-        <GitBranch className="size-3.5 flex-none" aria-hidden="true" />
-        <span className="flex-none">Merge target</span>
-        <span className="min-w-0 truncate font-medium text-foreground">
-          {base?.branch || 'branch base'}
-        </span>
-        {base?.shortCommit ? <span className="flex-none font-mono">{base.shortCommit}</span> : null}
-      </div>
-      <div className="relative flex min-h-0 flex-col gap-1 before:absolute before:top-4 before:bottom-4 before:left-[15px] before:w-px before:bg-border">
-        <ReviewBoundaryButton
-          label="Current local changes"
-          detail="local only"
-          selected={selectedReviewScope === 'current'}
-          disabled={diffLoading}
-          onClick={() => {
-            dispatch(selectReviewRange('current'));
-          }}
-        />
-        {commits.length > 0 ? (
-          <div className="flex max-h-[220px] min-h-0 flex-col gap-1 overflow-auto pr-1">
-            {commits.map((commit) => (
-              <ReviewCommitButton key={commit.hash} commit={commit} />
-            ))}
-          </div>
-        ) : null}
-        <ReviewBoundaryButton
-          label="All branch changes"
-          detail="base..current"
-          selected={selectedReviewScope === 'all'}
-          disabled={diffLoading}
-          onClick={() => {
-            dispatch(selectReviewRange('all'));
-          }}
-        />
-      </div>
+      <ReviewMergeTargetRow base={base} />
+      <ReviewBoundaryTrack
+        commits={commits}
+        selectedReviewScope={selectedReviewScope}
+        diffLoading={diffLoading}
+        dispatch={dispatch}
+      />
     </div>
   );
 }
@@ -274,7 +304,7 @@ function ChangedFilesHeader(): React.ReactElement {
       >
         <FileDiff aria-hidden="true" />
         Changed files{' '}
-        <span className="flex-none text-muted-foreground">{diff?.summary?.fileCount || 0}</span>
+        <span className="flex-none text-muted-foreground">{diff?.summary.fileCount ?? 0}</span>
         <ChevronDown
           className={cn('transition-transform', !changedFilesOpen && '-rotate-90')}
           aria-hidden="true"
@@ -297,8 +327,8 @@ function ChangedFilesHeader(): React.ReactElement {
           </Button>
         </IconTooltip>
         <div className="flex gap-1.5 text-sm font-semibold whitespace-nowrap">
-          <span className="text-diff-add-foreground">+{diff?.summary?.additions || 0}</span>
-          <span className="text-diff-delete-foreground">-{diff?.summary?.deletions || 0}</span>
+          <span className="text-diff-add-foreground">+{diff?.summary.additions ?? 0}</span>
+          <span className="text-diff-delete-foreground">-{diff?.summary.deletions ?? 0}</span>
         </div>
       </div>
     </div>
@@ -328,7 +358,7 @@ function ChangedFileTree(): React.ReactElement {
   }
 
   const tree = visibleDiffTreeNodes(
-    filterDiffTree(review.diff?.tree || [], review.diffFilter),
+    filterDiffTree(review.diff?.tree ?? [], review.diffFilter),
     new Set(review.collapsedDiffDirs),
   );
   if (tree.length === 0) {

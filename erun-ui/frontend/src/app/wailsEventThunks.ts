@@ -20,7 +20,7 @@ import { setDoctorAll } from './slices/doctorSlice';
 import { setReconnect } from './slices/reviewSlice';
 import { setSelected } from './slices/selectionSlice';
 import { recordExitOutput, recordExitReason } from './slices/sessionsSlice';
-import type { AppThunk } from './store';
+import type { AppDispatch, AppThunk } from './store';
 import { removeTab } from './tabsThunks';
 import { failedTerminalOutput } from './terminalBuffers';
 import {
@@ -45,7 +45,7 @@ import { selectionKey } from './versionSuggestions';
 export const handleAppStatus =
   (payload: AppStatusPayload): AppThunk =>
   (dispatch) => {
-    const message = String(payload?.message || '').trim();
+    const message = (payload.message ?? '').trim();
     if (!message) {
       return;
     }
@@ -63,8 +63,8 @@ export const handleAppStatus =
 export const handleEnvironmentInitialized =
   (payload: EnvironmentInitializedPayload): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
-    const tenant = String(payload?.tenant || '').trim();
-    const environment = String(payload?.environment || '').trim();
+    const tenant = payload.tenant.trim();
+    const environment = payload.environment.trim();
     if (!tenant || !environment) {
       return;
     }
@@ -87,8 +87,8 @@ export const handleEnvironmentInitialized =
 export const handleEnvironmentInitFailed =
   (payload: EnvironmentInitializedPayload): AppThunk =>
   (dispatch, getState) => {
-    const tenant = String(payload?.tenant || '').trim();
-    const environment = String(payload?.environment || '').trim();
+    const tenant = payload.tenant.trim();
+    const environment = payload.environment.trim();
     if (!tenant || !environment) {
       return;
     }
@@ -109,7 +109,7 @@ export const handleEnvironmentInitFailed =
 export const handleReconnectLine =
   (line: string): AppThunk =>
   (dispatch, getState) => {
-    const trimmed = (line || '').trim();
+    const trimmed = line.trim();
     if (!trimmed) {
       return;
     }
@@ -165,7 +165,7 @@ const recordDoctorOutcome =
       return;
     }
     const key = selectionKey(selection);
-    const reason = (payload.reason || '').trim();
+    const reason = (payload.reason ?? '').trim();
     const lastDoctorBySelection = getState().doctor.lastDoctorBySelection;
     dispatch(
       setDoctorAll({
@@ -211,25 +211,12 @@ const computeTerminalExitReason = (
 export const handleTerminalExit =
   (payload: TerminalExitPayload): AppThunk<Promise<void>> =>
   async (dispatch, getState, extra) => {
-    if (!payload) {
-      return;
-    }
     const controller = requireController(extra);
     // takeExitSelections both reads the per-session metadata AND clears it
     // in one atomic dispatch — pull the values out first.
     const selections = controller.sessions.takeExitSelections(payload.sessionId);
     const reason = computeTerminalExitReason(payload, selections);
-
-    // Record the exit reason and (for failures with a tracked selection)
-    // capture the tail of the session output as a copy target.
-    dispatch(recordExitReason({ sessionId: payload.sessionId, reason }));
-    let failedOutput = '';
-    if (payload.reason && terminalExitHasTrackedSelection(selections)) {
-      failedOutput = failedTerminalOutput(controller.sessions, payload.sessionId, reason);
-      if (failedOutput) {
-        dispatch(recordExitOutput({ sessionId: payload.sessionId, output: failedOutput }));
-      }
-    }
+    const failedOutput = recordTerminalExit(dispatch, controller, payload, selections, reason);
 
     dispatch(dropExitedSessionFromTabs(payload.sessionId, selections.openSelection));
     dispatch(recordDoctorOutcome(payload, selections));
@@ -240,27 +227,55 @@ export const handleTerminalExit =
     if (payload.sessionId !== getState().terminal.sessionId) {
       return;
     }
-    if (!payload.reason && selections.sshdInitSelection) {
-      dispatch(showTerminalMessage(reason));
-      return;
-    }
-    if (payload.reason && terminalExitHasTrackedSelection(selections)) {
-      const failure = classifiedTerminalFailure(
-        payload.reason,
-        reason,
-        failedOutput,
-        selections.openSelection,
-      );
-      dispatch(
-        showTerminalFailure(
-          failure.message,
-          failure.detail,
-          failedOutput,
-          failure.action,
-          failure.retrySelection,
-        ),
-      );
-      return;
-    }
-    dispatch(showTerminalMessage(reason));
+    dispatchTerminalExitFeedback(dispatch, payload, selections, reason, failedOutput);
   };
+
+function recordTerminalExit(
+  dispatch: AppDispatch,
+  controller: NonNullable<ReturnType<typeof requireController>>,
+  payload: TerminalExitPayload,
+  selections: TerminalExitSelections,
+  reason: string,
+): string {
+  dispatch(recordExitReason({ sessionId: payload.sessionId, reason }));
+  if (!payload.reason || !terminalExitHasTrackedSelection(selections)) {
+    return '';
+  }
+  const failedOutput = failedTerminalOutput(controller.sessions, payload.sessionId, reason);
+  if (failedOutput) {
+    dispatch(recordExitOutput({ sessionId: payload.sessionId, output: failedOutput }));
+  }
+  return failedOutput;
+}
+
+function dispatchTerminalExitFeedback(
+  dispatch: AppDispatch,
+  payload: TerminalExitPayload,
+  selections: TerminalExitSelections,
+  reason: string,
+  failedOutput: string,
+): void {
+  if (!payload.reason && selections.sshdInitSelection) {
+    dispatch(showTerminalMessage(reason));
+    return;
+  }
+  if (payload.reason && terminalExitHasTrackedSelection(selections)) {
+    const failure = classifiedTerminalFailure(
+      payload.reason,
+      reason,
+      failedOutput,
+      selections.openSelection,
+    );
+    dispatch(
+      showTerminalFailure(
+        failure.message,
+        failure.detail,
+        failedOutput,
+        failure.action,
+        failure.retrySelection,
+      ),
+    );
+    return;
+  }
+  dispatch(showTerminalMessage(reason));
+}

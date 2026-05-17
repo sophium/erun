@@ -2,12 +2,12 @@ import type { UIState } from '@/types';
 
 import { LoadState } from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
-import { wailsQueryFn } from './wailsBaseQuery';
+import { type NoValue, wailsQueryFn } from './wailsBaseQuery';
 
 export const stateApi = wailsApi.injectEndpoints({
   endpoints: (builder) => ({
-    getInitialState: builder.query<UIState, void>({
-      queryFn: wailsQueryFn<void, UIState>(() => LoadState() as Promise<UIState>),
+    getInitialState: builder.query<UIState, NoValue>({
+      queryFn: wailsQueryFn<NoValue, UIState>(() => LoadState() as Promise<UIState>),
       providesTags: ['AppState'],
     }),
   }),

@@ -79,7 +79,7 @@ export const terminalStatusSlice = createSlice({
       state.hiddenLockSessions[action.payload] = true;
     },
     clearHiddenLockOverlay(state, action: PayloadAction<number>) {
-      delete state.hiddenLockSessions[action.payload];
+      Reflect.deleteProperty(state.hiddenLockSessions, action.payload);
     },
     setDebugCopyStatus(state, action: PayloadAction<string>) {
       state.debugCopyStatus = action.payload;

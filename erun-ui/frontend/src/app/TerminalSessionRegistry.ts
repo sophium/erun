@@ -35,7 +35,7 @@ export class TerminalSessionRegistry {
   private readonly sessionDisplayBuffers = new Map<number, TerminalWriteData[]>();
 
   knownSelectionSession(key: string): number {
-    return store.getState().sessions.selectionToSessionId[key] || 0;
+    return store.getState().sessions.selectionToSessionId[key] ?? 0;
   }
 
   trackOpenSession(key: string, sessionId: number, selection: UISelection): void {
@@ -59,23 +59,23 @@ export class TerminalSessionRegistry {
   }
 
   appendSessionBuffer(sessionId: number, data: Uint8Array): void {
-    const existing = this.sessionBuffers.get(sessionId) || [];
+    const existing = this.sessionBuffers.get(sessionId) ?? [];
     existing.push(data);
     this.sessionBuffers.set(sessionId, existing);
   }
 
   sessionBuffer(sessionId: number): Uint8Array[] {
-    return this.sessionBuffers.get(sessionId) || [];
+    return this.sessionBuffers.get(sessionId) ?? [];
   }
 
   appendDisplayBuffer(sessionId: number, data: TerminalWriteData): void {
-    const displayBuffer = this.sessionDisplayBuffers.get(sessionId) || [];
+    const displayBuffer = this.sessionDisplayBuffers.get(sessionId) ?? [];
     displayBuffer.push(data);
     this.sessionDisplayBuffers.set(sessionId, displayBuffer);
   }
 
   displayBuffer(sessionId: number): TerminalWriteData[] {
-    return this.sessionDisplayBuffers.get(sessionId) || [];
+    return this.sessionDisplayBuffers.get(sessionId) ?? [];
   }
 
   replaceDisplayBuffer(sessionId: number, chunks: TerminalWriteData[]): void {
@@ -87,11 +87,11 @@ export class TerminalSessionRegistry {
   }
 
   exitReason(sessionId: number): string {
-    return store.getState().sessions.exitReasons[sessionId] || '';
+    return store.getState().sessions.exitReasons[sessionId] ?? '';
   }
 
   exitOutput(sessionId: number): string {
-    return store.getState().sessions.exitOutputs[sessionId] || '';
+    return store.getState().sessions.exitOutputs[sessionId] ?? '';
   }
 
   recordExitReason(sessionId: number, reason: string): void {
@@ -129,7 +129,7 @@ export class TerminalSessionRegistry {
   }
 
   debugFilter(sessionId: number): DebugOpenFilter {
-    return store.getState().sessions.debugFilters[sessionId] || { released: false, pending: '' };
+    return store.getState().sessions.debugFilters[sessionId] ?? { released: false, pending: '' };
   }
 
   setDebugFilter(sessionId: number, filter: DebugOpenFilter): void {
@@ -141,7 +141,7 @@ export class TerminalSessionRegistry {
   }
 
   sessionDebug(sessionId: number): string {
-    return store.getState().sessions.debugBuffers[sessionId] || '';
+    return store.getState().sessions.debugBuffers[sessionId] ?? '';
   }
 
   setSessionDebug(sessionId: number, value: string): void {

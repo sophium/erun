@@ -40,7 +40,7 @@ export const syncDebugDisplay = (): AppThunk => (dispatch, getState) => {
     return;
   }
   const sessionId = state.terminal.sessionId;
-  dispatch(setDebugOutput(state.sessions.debugBuffers[sessionId] || ''));
+  dispatch(setDebugOutput(state.sessions.debugBuffers[sessionId] ?? ''));
 };
 
 // appendDebugOutput trims and appends to the per-session debug buffer.
@@ -54,8 +54,8 @@ export const appendDebugOutput =
     if (!state.layout.debugOpen || !text) {
       return;
     }
-    const target = fromSessionId !== undefined ? fromSessionId : state.terminal.sessionId;
-    const previous = state.sessions.debugBuffers[target] || '';
+    const target = fromSessionId ?? state.terminal.sessionId;
+    const previous = state.sessions.debugBuffers[target] ?? '';
     const next = trimDebugOutput(previous + text);
     dispatch(setSessionDebug({ sessionId: target, value: next }));
     if (target === state.terminal.sessionId) {

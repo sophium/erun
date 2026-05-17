@@ -16,9 +16,9 @@ export function hiddenSessionBusyMessage(selection: UISelection, mode: HiddenSes
 
 export function terminalExitHasTrackedSelection(selections: TerminalExitSelections): boolean {
   return Boolean(
-    selections.sshdInitSelection ||
-    selections.doctorSelection ||
-    selections.openSelection ||
+    selections.sshdInitSelection ??
+    selections.doctorSelection ??
+    selections.openSelection ??
     selections.cloudInit,
   );
 }
@@ -62,7 +62,9 @@ export function ideOpenFailure(
   label: string,
   rawError: string,
 ): ClassifiedTerminalFailure & { copyOutput: string } {
-  const output = cleanTerminalOutput(rawError) || rawError.trim() || 'Unexpected error';
+  const cleaned = cleanTerminalOutput(rawError);
+  const trimmed = rawError.trim();
+  const output = cleaned !== '' ? cleaned : trimmed !== '' ? trimmed : 'Unexpected error';
   return {
     message: `Failed to open ${label} for ${selection.tenant} / ${selection.environment}`,
     detail: shortIDEOpenFailureDetail(output),
@@ -87,21 +89,9 @@ export function classifiedTerminalFailure(
   openSelection?: UISelection,
 ): ClassifiedTerminalFailure {
   const combined = `${rawReason}\n${output}`.toLowerCase();
-  if (
-    combined.includes('timed out waiting for mcp port-forward') ||
-    combined.includes('timed out waiting for api port-forward')
-  ) {
-    const kind = combined.includes('api port-forward') ? 'API' : 'MCP';
-    const port =
-      /127\.0\.0\.1:(\d+)/.exec(rawReason)?.[1] || /127\.0\.0\.1:(\d+)/.exec(output)?.[1] || '';
-    return {
-      message: port
-        ? `${kind} port-forward on 127.0.0.1:${port} is still not ready`
-        : `${kind} port-forward is still not ready`,
-      detail: portForwardDetail(combined, kind),
-      action: openSelection ? 'wait-longer' : '',
-      retrySelection: openSelection || null,
-    };
+  const portForward = classifiedPortForwardFailure(combined, rawReason, output, openSelection);
+  if (portForward) {
+    return portForward;
   }
   return {
     message: displayReason,
@@ -111,10 +101,47 @@ export function classifiedTerminalFailure(
   };
 }
 
+function isPortForwardTimeoutCombined(combined: string): boolean {
+  return (
+    combined.includes('timed out waiting for mcp port-forward') ||
+    combined.includes('timed out waiting for api port-forward')
+  );
+}
+
+function extractPortForwardPort(rawReason: string, output: string): string {
+  const fromReason = /127\.0\.0\.1:(\d+)/.exec(rawReason);
+  if (fromReason) {
+    return fromReason[1] ?? '';
+  }
+  const fromOutput = /127\.0\.0\.1:(\d+)/.exec(output);
+  return fromOutput?.[1] ?? '';
+}
+
+function classifiedPortForwardFailure(
+  combined: string,
+  rawReason: string,
+  output: string,
+  openSelection: UISelection | undefined,
+): ClassifiedTerminalFailure | null {
+  if (!isPortForwardTimeoutCombined(combined)) {
+    return null;
+  }
+  const kind = combined.includes('api port-forward') ? 'API' : 'MCP';
+  const port = extractPortForwardPort(rawReason, output);
+  return {
+    message: port
+      ? `${kind} port-forward on 127.0.0.1:${port} is still not ready`
+      : `${kind} port-forward is still not ready`,
+    detail: portForwardDetail(combined, kind),
+    action: openSelection ? 'wait-longer' : '',
+    retrySelection: openSelection ?? null,
+  };
+}
+
 export function statusForTerminalOutput(output: string): string {
   const lower = output.toLowerCase();
   const rule = terminalOutputStatusRules.find((candidate) => candidate.matches(lower));
-  return rule?.message(output) || '';
+  return rule?.message(output) ?? '';
 }
 
 export function decodeDebugOutput(data: Uint8Array): string {
@@ -224,7 +251,7 @@ function shortIDEOpenFailureDetail(output: string): string {
     output
       .split('\n')
       .map((line) => line.trim())
-      .find(Boolean) || '';
+      .find(Boolean) ?? '';
   const exitStatus = /exit status \d+/.exec(firstLine)?.[0];
   if (exitStatus) {
     return exitStatus;
@@ -292,7 +319,7 @@ const terminalOutputStatusRules: {
 ];
 
 function mcpForwardingStatusMessage(output: string): string {
-  const port = /Forwarding from 127\.0\.0\.1:(\d+)/.exec(output)?.[1] || '';
+  const port = /Forwarding from 127\.0\.0\.1:(\d+)/.exec(output)?.[1] ?? '';
   return port ? `Waiting for MCP endpoint on 127.0.0.1:${port}...` : 'Waiting for MCP endpoint...';
 }
 

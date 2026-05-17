@@ -20,16 +20,16 @@ import {
   StopCloudContext,
 } from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
-import { wailsQueryFn } from './wailsBaseQuery';
+import { type NoValue, wailsQueryFn } from './wailsBaseQuery';
 
 export const cloudApi = wailsApi.injectEndpoints({
   endpoints: (builder) => ({
-    getCloudContextStatuses: builder.query<UICloudContextStatus[], void>({
-      queryFn: wailsQueryFn<void, UICloudContextStatus[]>(() => LoadCloudContextStatuses()),
+    getCloudContextStatuses: builder.query<UICloudContextStatus[], NoValue>({
+      queryFn: wailsQueryFn<NoValue, UICloudContextStatus[]>(() => LoadCloudContextStatuses()),
       providesTags: ['CloudContexts'],
     }),
-    getCloudProviderStatuses: builder.query<UICloudProviderStatus[], void>({
-      queryFn: wailsQueryFn<void, UICloudProviderStatus[]>(() => LoadCloudProviderStatuses()),
+    getCloudProviderStatuses: builder.query<UICloudProviderStatus[], NoValue>({
+      queryFn: wailsQueryFn<NoValue, UICloudProviderStatus[]>(() => LoadCloudProviderStatuses()),
       providesTags: ['CloudProviders'],
     }),
     initCloudContext: builder.mutation<UICloudContextStatus, UICloudContextInitInput>({

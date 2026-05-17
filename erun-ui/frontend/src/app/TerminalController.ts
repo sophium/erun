@@ -1,6 +1,7 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { type IDisposable, Terminal } from '@xterm/xterm';
 
+import { noop } from '@/lib/utils';
 import type { TerminalExitPayload, TerminalOutputPayload } from '@/types';
 
 import { ResizeSession, SendSessionInput } from '../../wailsjs/go/main/App';
@@ -99,7 +100,7 @@ export class TerminalController {
   }
 
   terminalSize(): { cols: number; rows: number } {
-    return { cols: this.terminal?.cols || 80, rows: this.terminal?.rows || 24 };
+    return { cols: this.terminal?.cols ?? 80, rows: this.terminal?.rows ?? 24 };
   }
 
   fitTerminal(): void {
@@ -116,7 +117,7 @@ export class TerminalController {
 
     if (this.terminal) {
       this.queueTerminalResize();
-      return () => {};
+      return noop;
     }
 
     this.terminal = new Terminal({
@@ -207,6 +208,19 @@ export class TerminalController {
     for (const disposable of this.terminalQueryResponseDisposables) {
       disposable.dispose();
     }
+    this.detachWailsEventListeners();
+    window.clearTimeout(this.idleStatusTimer);
+    this.stopReviewDiffRefresh();
+    if (this.pasteHandler && this.terminalRoot) {
+      this.terminalRoot.removeEventListener('paste', this.pasteHandler, true);
+    }
+    this.terminalQueryResponseDisposables = [];
+    this.terminal?.dispose();
+    this.terminal = null;
+    this.fitAddon = null;
+  }
+
+  private detachWailsEventListeners(): void {
     this.terminalOutputOff?.();
     this.terminalExitOff?.();
     this.appStatusOff?.();
@@ -214,11 +228,6 @@ export class TerminalController {
     this.environmentInitializedOff?.();
     this.environmentInitFailedOff?.();
     this.environmentsChangedOff?.();
-    window.clearTimeout(this.idleStatusTimer);
-    this.stopReviewDiffRefresh();
-    if (this.pasteHandler && this.terminalRoot) {
-      this.terminalRoot.removeEventListener('paste', this.pasteHandler, true);
-    }
     this.terminalOutputOff = null;
     this.terminalExitOff = null;
     this.appStatusOff = null;
@@ -226,10 +235,6 @@ export class TerminalController {
     this.environmentInitializedOff = null;
     this.environmentInitFailedOff = null;
     this.environmentsChangedOff = null;
-    this.terminalQueryResponseDisposables = [];
-    this.terminal?.dispose();
-    this.terminal = null;
-    this.fitAddon = null;
   }
 
   focusTerminalSoon(): void {
@@ -260,9 +265,6 @@ export class TerminalController {
   // buffer Maps (which are the perf-carveout that justifies the registry
   // existing at all). State-side effects are dispatched as thunks.
   private handleTerminalOutput(payload: TerminalOutputPayload): void {
-    if (!payload) {
-      return;
-    }
     const data = decodeBase64Bytes(payload.data);
     this.sessions.appendSessionBuffer(payload.sessionId, data);
     const debugOutput = decodeDebugOutput(data);
@@ -298,13 +300,11 @@ export class TerminalController {
   applyLayoutVars(): void {
     const root = document.documentElement;
     const layout = store.getState().layout;
-    root.style.setProperty(
-      '--sidebar-width',
-      `${layout.sidebarHidden ? 0 : layout.sidebarWidth}px`,
-    );
-    root.style.setProperty('--review-width', `${this.clampedReviewWidth()}px`);
-    root.style.setProperty('--files-width', `${this.clampedFilesWidth()}px`);
-    root.style.setProperty('--debug-height', `${this.clampedDebugHeight()}px`);
+    const sidebarPx = layout.sidebarHidden ? 0 : layout.sidebarWidth;
+    root.style.setProperty('--sidebar-width', `${String(sidebarPx)}px`);
+    root.style.setProperty('--review-width', `${String(this.clampedReviewWidth())}px`);
+    root.style.setProperty('--files-width', `${String(this.clampedFilesWidth())}px`);
+    root.style.setProperty('--debug-height', `${String(this.clampedDebugHeight())}px`);
   }
 
   private clampedReviewWidth(): number {
@@ -316,7 +316,7 @@ export class TerminalController {
 
   private clampedFilesWidth(): number {
     const layout = store.getState().layout;
-    const reviewWidth = this._reviewView?.getBoundingClientRect().width || layout.reviewWidth;
+    const reviewWidth = this._reviewView?.getBoundingClientRect().width ?? layout.reviewWidth;
     const maxFilesForReview = reviewWidth > 0 ? reviewWidth - 260 : MAX_FILES_WIDTH;
     return clamp(
       layout.filesWidth,
@@ -326,7 +326,7 @@ export class TerminalController {
   }
 
   private clampedDebugHeight(): number {
-    const paneHeight = this._terminalPane?.getBoundingClientRect().height || 0;
+    const paneHeight = this._terminalPane?.getBoundingClientRect().height ?? 0;
     const maxDebugForPane = paneHeight > 0 ? paneHeight - 120 : MAX_DEBUG_HEIGHT;
     return clamp(
       store.getState().layout.debugHeight,
@@ -342,7 +342,7 @@ export class TerminalController {
       this.fitAddon?.fit();
       const sessionId = store.getState().terminal.sessionId;
       if (sessionId > 0 && this.terminal) {
-        ResizeSession(sessionId, this.terminal.cols, this.terminal.rows).catch(() => {});
+        ResizeSession(sessionId, this.terminal.cols, this.terminal.rows).catch(noop);
       }
     }, 40);
   };

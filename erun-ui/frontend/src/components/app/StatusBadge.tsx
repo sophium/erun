@@ -2,7 +2,7 @@ import * as React from 'react';
 
 import { cn } from '@/lib/utils';
 
-export type StatusBadgeTone = 'success' | 'destructive' | 'muted';
+import type { StatusBadgeTone } from './StatusBadge.helpers';
 
 const toneClassName: Record<StatusBadgeTone, string> = {
   success: 'border-green-600/35 bg-green-600/10 text-green-700 dark:text-green-400',
@@ -31,15 +31,4 @@ export function StatusBadge({
       {label}
     </span>
   );
-}
-
-export function cloudProviderStatusTone(status: string): StatusBadgeTone {
-  const normalized = status.trim();
-  if (normalized === 'active' || normalized === 'running') {
-    return 'success';
-  }
-  if (normalized === 'expired' || normalized === 'not_configured') {
-    return 'destructive';
-  }
-  return 'muted';
 }

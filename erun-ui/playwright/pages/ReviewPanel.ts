@@ -13,7 +13,7 @@ export class ReviewPanel {
   }
 
   async isOpen(): Promise<boolean> {
-    const splitter = this.page.locator('[role="separator"][aria-label="Resize diff panel"]');
+    const splitter = this.page.getByRole('button', { name: 'Resize diff panel' });
     if (!(await splitter.count())) return false;
     return splitter.first().isVisible();
   }

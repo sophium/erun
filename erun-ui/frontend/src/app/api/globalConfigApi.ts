@@ -2,12 +2,12 @@ import type { UIERunConfig } from '@/types';
 
 import { LoadERunConfig, SaveERunConfig } from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
-import { wailsQueryFn } from './wailsBaseQuery';
+import { type NoValue, wailsQueryFn } from './wailsBaseQuery';
 
 export const globalConfigApi = wailsApi.injectEndpoints({
   endpoints: (builder) => ({
-    getERunConfig: builder.query<UIERunConfig, void>({
-      queryFn: wailsQueryFn<void, UIERunConfig>(() => LoadERunConfig()),
+    getERunConfig: builder.query<UIERunConfig, NoValue>({
+      queryFn: wailsQueryFn<NoValue, UIERunConfig>(() => LoadERunConfig()),
       providesTags: ['GlobalConfig'],
     }),
     saveERunConfig: builder.mutation<UIERunConfig, UIERunConfig>({

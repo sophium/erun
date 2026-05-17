@@ -186,7 +186,7 @@ function UsersTable({
   return (
     <DataTable headers={['Username', 'Roles']}>
       {users.map((user) => (
-        <tr key={user.userId || user.username || user.subject}>
+        <tr key={user.userId || (user.username ?? '') || (user.subject ?? '')}>
           <DataCell strong>{displayUsername(user)}</DataCell>
           <DataCell>{formatRoles(user.roles)}</DataCell>
         </tr>
@@ -242,7 +242,7 @@ function BuildsTable({
       {builds.map((build) => (
         <tr key={build.buildId}>
           <DataCell strong>{build.buildId}</DataCell>
-          <DataCell>{build.reviewName || build.reviewId}</DataCell>
+          <DataCell>{build.reviewName?.trim() ? build.reviewName : build.reviewId}</DataCell>
           <DataCell>
             <StatusBadge
               tone={build.successful ? 'success' : 'destructive'}
@@ -318,9 +318,11 @@ function DataCell({
   children: React.ReactNode;
   strong?: boolean;
 }): React.ReactElement {
+  const isEmpty =
+    children === null || children === undefined || children === false || children === '';
   return (
     <td className={`truncate px-2 py-2.5 ${strong ? 'font-medium' : 'text-muted-foreground'}`}>
-      {children || '-'}
+      {isEmpty ? '-' : children}
     </td>
   );
 }
@@ -345,7 +347,14 @@ function DashboardMessage({
 }
 
 function displayUsername(user: UITenantDashboardUser): string {
-  return user.username?.trim() || user.subject?.trim() || user.userId?.trim() || 'Unknown user';
+  const candidates = [user.username, user.subject, user.userId];
+  for (const candidate of candidates) {
+    const trimmed = candidate?.trim() ?? '';
+    if (trimmed !== '') {
+      return trimmed;
+    }
+  }
+  return 'Unknown user';
 }
 
 function formatRoles(roles: string[] | undefined): string {
@@ -361,7 +370,7 @@ function tenantDashboardSubtitle(tenant: UITenant | undefined, environmentName: 
   const alias = tenant.primaryCloudProviderAlias?.trim();
   const parts = [
     environmentName,
-    `${environmentCount} environment${environmentCount === 1 ? '' : 's'}`,
+    `${String(environmentCount)} environment${environmentCount === 1 ? '' : 's'}`,
     alias ? `Primary cloud: ${alias}` : '',
   ].filter(Boolean);
   return parts.join(', ');
@@ -382,8 +391,8 @@ function tenantDashboardEnvironmentName(
   const environment =
     tenant.environments.find(
       (candidate) => candidate.name === defaultEnvironment && candidate.apiUrl,
-    ) || tenant.environments.find((candidate) => candidate.apiUrl);
-  return environment?.name?.trim() || '';
+    ) ?? tenant.environments.find((candidate) => candidate.apiUrl);
+  return environment?.name.trim() ?? '';
 }
 
 function formatDate(value: string | undefined): string {

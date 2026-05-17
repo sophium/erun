@@ -37,7 +37,7 @@ import type { UICloudProviderStatus, UISelection, UITenant } from '@/types';
 
 import { EmptyState } from './EmptyState';
 import { IconTooltip } from './IconTooltip';
-import { cloudProviderStatusTone } from './StatusBadge';
+import { cloudProviderStatusTone } from './StatusBadge.helpers';
 
 export function Sidebar(): React.ReactElement {
   const dispatch = useAppDispatch();
@@ -148,6 +148,101 @@ function pendingForTenant(
   return selected;
 }
 
+function PrimaryCloudAliasActiveActions({
+  view,
+  dispatch,
+}: {
+  view: PrimaryCloudAliasView;
+  dispatch: ReturnType<typeof useAppDispatch>;
+}): React.ReactElement {
+  return (
+    <>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="justify-start"
+        disabled={view.busy}
+        onClick={() => void dispatch(getPrimaryCloudProviderBearerToken(view.provider.alias))}
+      >
+        {view.bearerBusy ? (
+          <LoaderCircle className="animate-spin" aria-hidden="true" />
+        ) : (
+          <Copy aria-hidden="true" />
+        )}
+        {view.bearerBusy ? 'Copying token...' : 'Get bearer token'}
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="justify-start"
+        disabled={view.busy}
+        onClick={() => void dispatch(logoutPrimaryCloudProvider(view.provider.alias))}
+      >
+        {view.logoutBusy ? (
+          <LoaderCircle className="animate-spin" aria-hidden="true" />
+        ) : (
+          <LogOut aria-hidden="true" />
+        )}
+        {view.logoutBusy ? 'Logging out...' : 'Log out'}
+      </Button>
+    </>
+  );
+}
+
+function PrimaryCloudAliasLoginAction({
+  view,
+  dispatch,
+}: {
+  view: PrimaryCloudAliasView;
+  dispatch: ReturnType<typeof useAppDispatch>;
+}): React.ReactElement {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      className="justify-start"
+      disabled={view.busy}
+      onClick={() => void dispatch(loginPrimaryCloudProvider(view.provider.alias))}
+    >
+      {view.loginBusy ? (
+        <LoaderCircle className="animate-spin" aria-hidden="true" />
+      ) : (
+        <LogIn aria-hidden="true" />
+      )}
+      {view.loginBusy ? 'Logging in...' : 'Log in'}
+    </Button>
+  );
+}
+
+function PrimaryCloudAliasPopoverBody({
+  view,
+  dispatch,
+}: {
+  view: PrimaryCloudAliasView;
+  dispatch: ReturnType<typeof useAppDispatch>;
+}): React.ReactElement {
+  return (
+    <div className="grid gap-1">
+      <CloudAliasPopoverRow
+        icon={<UserCircle2 />}
+        label={cloudProviderIdentity(view.provider)}
+        muted
+      />
+      <CloudAliasPopoverRow icon={<Cloud />} label={view.provider.alias} muted />
+      <div className="my-1 border-t border-border" />
+      <CloudAliasStatus provider={view.provider} />
+      {view.active ? (
+        <PrimaryCloudAliasActiveActions view={view} dispatch={dispatch} />
+      ) : (
+        <PrimaryCloudAliasLoginAction view={view} dispatch={dispatch} />
+      )}
+    </div>
+  );
+}
+
 function PrimaryCloudAliasControl(): React.ReactElement | null {
   const dispatch = useAppDispatch();
   const tenants = useAppSelector((s) => s.tenants.tenants);
@@ -186,68 +281,7 @@ function PrimaryCloudAliasControl(): React.ReactElement | null {
         side="top"
         align="start"
       >
-        <div className="grid gap-1">
-          <CloudAliasPopoverRow
-            icon={<UserCircle2 />}
-            label={cloudProviderIdentity(view.provider)}
-            muted
-          />
-          <CloudAliasPopoverRow icon={<Cloud />} label={view.provider.alias} muted />
-          <div className="my-1 border-t border-border" />
-          <CloudAliasStatus provider={view.provider} />
-          {view.active ? (
-            <>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="justify-start"
-                disabled={view.busy}
-                onClick={() =>
-                  void dispatch(getPrimaryCloudProviderBearerToken(view.provider.alias))
-                }
-              >
-                {view.bearerBusy ? (
-                  <LoaderCircle className="animate-spin" aria-hidden="true" />
-                ) : (
-                  <Copy aria-hidden="true" />
-                )}
-                {view.bearerBusy ? 'Copying token...' : 'Get bearer token'}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="justify-start"
-                disabled={view.busy}
-                onClick={() => void dispatch(logoutPrimaryCloudProvider(view.provider.alias))}
-              >
-                {view.logoutBusy ? (
-                  <LoaderCircle className="animate-spin" aria-hidden="true" />
-                ) : (
-                  <LogOut aria-hidden="true" />
-                )}
-                {view.logoutBusy ? 'Logging out...' : 'Log out'}
-              </Button>
-            </>
-          ) : (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="justify-start"
-              disabled={view.busy}
-              onClick={() => void dispatch(loginPrimaryCloudProvider(view.provider.alias))}
-            >
-              {view.loginBusy ? (
-                <LoaderCircle className="animate-spin" aria-hidden="true" />
-              ) : (
-                <LogIn aria-hidden="true" />
-              )}
-              {view.loginBusy ? 'Logging in...' : 'Log in'}
-            </Button>
-          )}
-        </div>
+        <PrimaryCloudAliasPopoverBody view={view} dispatch={dispatch} />
       </PopoverContent>
     </Popover>
   );
@@ -276,7 +310,7 @@ function primaryCloudAliasView(input: PrimaryCloudAliasInputs): PrimaryCloudAlia
   if (!alias) {
     return null;
   }
-  const provider = input.cloudProviders.find((candidate) => candidate.alias === alias) || {
+  const provider = input.cloudProviders.find((candidate) => candidate.alias === alias) ?? {
     alias,
     provider: '',
     status: 'unknown',
@@ -293,7 +327,7 @@ function primaryCloudAliasView(input: PrimaryCloudAliasInputs): PrimaryCloudAlia
 }
 
 function primaryCloudAliasFor(input: PrimaryCloudAliasInputs): string | undefined {
-  const tenantName = input.dashboardTenant || input.selected?.tenant || '';
+  const tenantName = input.dashboardTenant || (input.selected?.tenant ?? '');
   return input.tenants
     .find((candidate) => candidate.name === tenantName)
     ?.primaryCloudProviderAlias?.trim();
@@ -370,7 +404,8 @@ function CloudAliasStatusIcon({
 }
 
 function cloudProviderIdentity(provider: UICloudProviderStatus): string {
-  return provider.username?.trim() || provider.alias;
+  const username = provider.username?.trim() ?? '';
+  return username !== '' ? username : provider.alias;
 }
 
 function statusLabel(status: string): string {
@@ -586,6 +621,35 @@ function BusyRowSpinner(): React.ReactElement {
   );
 }
 
+interface EnvironmentRowDerived {
+  selected: boolean;
+  busy: boolean;
+  isLocal: boolean;
+  selection: UISelection;
+}
+
+function deriveEnvironmentRow(
+  tenantName: string,
+  environmentName: string,
+  selectedSelection: UISelection | null,
+  tenants: AppState['tenants'],
+  terminalBusy: boolean,
+): EnvironmentRowDerived {
+  const selected =
+    selectedSelection?.tenant === tenantName && selectedSelection.environment === environmentName;
+  const busy = terminalBusy && selected;
+  const environment = tenants
+    .find((tenant) => tenant.name === tenantName)
+    ?.environments.find((env) => env.name === environmentName);
+  const isLocal = environment?.remote === false;
+  return {
+    selected,
+    busy,
+    isLocal,
+    selection: { tenant: tenantName, environment: environmentName },
+  };
+}
+
 function EnvironmentRow({
   tenantName,
   environmentName,
@@ -597,17 +661,13 @@ function EnvironmentRow({
   const selectedSelection = useAppSelector((state) => state.selection.selected);
   const tenants = useAppSelector((state) => state.tenants.tenants);
   const terminalBusy = useAppSelector((state) => state.terminalStatus.terminalBusy);
-  const selected =
-    selectedSelection?.tenant === tenantName && selectedSelection?.environment === environmentName;
-  const selection = { tenant: tenantName, environment: environmentName };
-  const busy =
-    terminalBusy &&
-    selectedSelection?.tenant === tenantName &&
-    selectedSelection.environment === environmentName;
-  const environment = tenants
-    .find((tenant) => tenant.name === tenantName)
-    ?.environments.find((env) => env.name === environmentName);
-  const isLocal = environment?.remote === false;
+  const { selected, busy, isLocal, selection } = deriveEnvironmentRow(
+    tenantName,
+    environmentName,
+    selectedSelection,
+    tenants,
+    terminalBusy,
+  );
 
   return (
     <div

@@ -34,7 +34,7 @@ export function ActivityLockOverlay({
       <div className="pointer-events-auto flex w-full flex-col gap-2 rounded-md border bg-card/95 p-3 text-xs shadow-lg backdrop-blur-[2px]">
         <div className="flex items-center gap-2 text-sm font-medium">
           <LoaderCircle aria-hidden="true" className="size-4 animate-spin text-blue-500" />
-          <span>{lock.reason || 'Waiting for activity to complete'}</span>
+          <span>{lock.reason?.trim() ? lock.reason : 'Waiting for activity to complete'}</span>
         </div>
         <p className="text-[11px] leading-5 text-muted-foreground">
           {lock.deployTarget ? (

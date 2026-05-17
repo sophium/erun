@@ -48,7 +48,7 @@ export const selectManageRuntimeImage = (state: RootState, version: string): str
     return state.manageDialog.versionImage;
   }
   const suggestion = state.tenants.versionSuggestions.find((value) => value.version === version);
-  return suggestion?.image || '';
+  return suggestion?.image ?? '';
 };
 
 // selectDialogKubernetesContext picks the env-dialog k8s context to display.
@@ -58,5 +58,5 @@ export const selectDialogKubernetesContext = (state: RootState, contexts: string
   if (current && contexts.includes(current)) {
     return current;
   }
-  return contexts[0] || '';
+  return contexts[0] ?? '';
 };

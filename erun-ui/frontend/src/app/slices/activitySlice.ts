@@ -47,7 +47,7 @@ export const activitySlice = createSlice({
       if (event.locked) {
         state.locksBySession[event.sessionId] = event;
       } else {
-        delete state.locksBySession[event.sessionId];
+        Reflect.deleteProperty(state.locksBySession, event.sessionId);
       }
     },
   },

@@ -39,7 +39,7 @@ export function SelectField({
   onChange: (value: string) => void;
 }): React.ReactElement {
   const noOptions = options.length === 0;
-  const triggerDisabled = disabled || noOptions;
+  const triggerDisabled = disabled === true || noOptions;
   const helperId = helper ? `${id}-helper` : undefined;
   return (
     <div className="grid gap-2">

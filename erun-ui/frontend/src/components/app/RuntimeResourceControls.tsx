@@ -34,22 +34,33 @@ export function RuntimeResourceControls({
 }: RuntimeResourceControlsProps): React.ReactElement {
   const bounds = runtimeResourceBounds(status, loading);
   const resourceError = runtimeResourceLimitMessage(value, status);
-  const controlsDisabled = disabled || loading || !bounds.available;
+  const controlsDisabled = disabled === true || loading || !bounds.available;
   const boundedValue = bounds.available ? clampRuntimePodConfig(value, bounds) : value;
 
+  // Stash the latest onChange, value, and bounds in refs so the clamp effect
+  // can fire on actual primitive changes without listing the parent objects
+  // (which the parent re-creates each render) as deps.
+  const onChangeRef = React.useRef(onChange);
+  const valueRef = React.useRef(value);
+  const boundsRef = React.useRef(bounds);
   React.useEffect(() => {
-    if (!bounds.available) {
+    onChangeRef.current = onChange;
+    valueRef.current = value;
+    boundsRef.current = bounds;
+  });
+
+  const { available: boundsAvailable, cpuMax, memoryMax } = bounds;
+  const { cpu: currentCpu, memory: currentMemory } = value;
+  React.useEffect(() => {
+    if (!boundsAvailable) {
       return;
     }
-    const clamped = clampRuntimePodConfig(value, bounds);
-    if (clamped.cpu !== value.cpu || clamped.memory !== value.memory) {
-      onChange(clamped);
+    const latest = valueRef.current;
+    const clamped = clampRuntimePodConfig(latest, boundsRef.current);
+    if (clamped.cpu !== latest.cpu || clamped.memory !== latest.memory) {
+      onChangeRef.current(clamped);
     }
-    // Explicit primitive deps so the effect skips re-runs when sibling
-    // bounds/value fields change. Adding the parent objects would re-run
-    // on every parent re-render even when cpu/memory stayed put.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bounds.available, bounds.cpuMax, bounds.memoryMax, value.cpu, value.memory]);
+  }, [boundsAvailable, cpuMax, memoryMax, currentCpu, currentMemory]);
 
   return (
     <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">

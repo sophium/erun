@@ -14,7 +14,6 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 
-import { useController } from '@/app/ControllerContext';
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
@@ -40,6 +39,7 @@ import { showTerminalMessage } from '@/app/notificationThunks';
 import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
 import type { AppState } from '@/app/state';
 import { loadSavedPastContainerRegistries } from '@/app/storage';
+import { useController } from '@/app/useController';
 import {
   deleteConfirmationValue,
   normalizeDialogValue,
@@ -80,7 +80,8 @@ import type {
   UIVersionSuggestion,
 } from '@/types';
 
-import { EditableComboField, uniqueSuggestions } from './EditableComboField';
+import { EditableComboField } from './EditableComboField';
+import { uniqueSuggestions } from './EditableComboField.helpers';
 import { RuntimeResourceControls } from './RuntimeResourceControls';
 import { SelectField } from './SelectField';
 
@@ -109,7 +110,12 @@ export function ManageDialogView(): React.ReactElement {
   }, [dialog.open, confirmingDelete]);
 
   return (
-    <Dialog open={dialog.open} onOpenChange={(open) => !open && dispatch(closeManageDialog())}>
+    <Dialog
+      open={dialog.open}
+      onOpenChange={(open) => {
+        if (!open) dispatch(closeManageDialog());
+      }}
+    >
       <DialogContent
         className="h-[min(85vh,800px)] sm:max-w-2xl"
         onCloseAutoFocus={(event) => {
@@ -277,7 +283,7 @@ function GeneralTab(): React.ReactElement {
       <CloudAliasSelect
         id="environment-config-cloudprovideralias"
         value={config.cloudProviderAlias}
-        options={config.cloudProviderAliases || []}
+        options={config.cloudProviderAliases ?? []}
         disabled={dialog.busy}
         onChange={(cloudProviderAlias) => {
           dispatch(updateManageConfig({ cloudProviderAlias }));
@@ -555,44 +561,52 @@ function relativeTimeFromNow(timestamp: number): string {
   }
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) {
-    return `${minutes} min ago`;
+    return `${String(minutes)} min ago`;
   }
   const hours = Math.floor(minutes / 60);
   if (hours < 24) {
-    return `${hours} h ago`;
+    return `${String(hours)} h ago`;
   }
   const days = Math.floor(hours / 24);
-  return `${days} d ago`;
+  return `${String(days)} d ago`;
+}
+
+function SSHAccessHeader({ dialog }: { dialog: ManageDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const config = dialog.config;
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
+        SSH access
+      </div>
+      {!config.sshd.enabled && (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={dialog.busy || dialog.configLoading || !config.remote}
+          onClick={() =>
+            void dispatch(enableManageSSHD()).catch((error: unknown) => {
+              dispatch(showTerminalMessage(readError(error)));
+            })
+          }
+        >
+          <Server aria-hidden="true" />
+          Enable SSHD
+        </Button>
+      )}
+    </div>
+  );
 }
 
 function SSHAccessSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   const config = dialog.config;
   const syncPathRequired =
-    config.sshd.workspaceSyncEnabled && !String(config.sshd.workspaceSyncLocalPath || '').trim();
+    config.sshd.workspaceSyncEnabled && !(config.sshd.workspaceSyncLocalPath ?? '').trim();
   return (
     <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
-          SSH access
-        </div>
-        {!config.sshd.enabled && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={dialog.busy || dialog.configLoading || !config.remote}
-            onClick={() =>
-              void dispatch(enableManageSSHD()).catch((error: unknown) => {
-                dispatch(showTerminalMessage(readError(error)));
-              })
-            }
-          >
-            <Server aria-hidden="true" />
-            Enable SSHD
-          </Button>
-        )}
-      </div>
+      <SSHAccessHeader dialog={dialog} />
       <ReadonlyField
         id="environment-config-sshd-enabled"
         label="SSHD"
@@ -647,7 +661,7 @@ function LocalSyncFolderField({
         <Input
           id="environment-config-sshd-sync-localpath"
           className="min-w-0 flex-1"
-          value={dialog.config.sshd.workspaceSyncLocalPath || ''}
+          value={dialog.config.sshd.workspaceSyncLocalPath ?? ''}
           type="text"
           autoComplete="off"
           spellCheck={false}
@@ -691,8 +705,8 @@ function WorkspaceSyncStatus({
 }: {
   sshd: ManageDialog['config']['sshd'];
 }): React.ReactElement | null {
-  const status = String(sshd.workspaceSyncStatus || '').trim();
-  const message = String(sshd.workspaceSyncStatusMessage || '').trim();
+  const status = (sshd.workspaceSyncStatus ?? '').trim();
+  const message = (sshd.workspaceSyncStatusMessage ?? '').trim();
   if (!status) {
     return null;
   }
@@ -943,6 +957,104 @@ function CloudContextField({
   );
 }
 
+function RuntimeDeployVersionPicker({
+  overrideVersion,
+  suggestions,
+  choicesOpen,
+  disabled,
+  onValueChange,
+  onChoicesOpenChange,
+  onSelect,
+}: {
+  overrideVersion: string;
+  suggestions: UIVersionSuggestion[];
+  choicesOpen: boolean;
+  disabled?: boolean;
+  onValueChange: (version: string) => void;
+  onChoicesOpenChange: (open: boolean) => void;
+  onSelect: (suggestion: UIVersionSuggestion | undefined) => void;
+}): React.ReactElement {
+  return (
+    <div className="relative min-w-0">
+      <Input
+        id="manage-version"
+        className="pr-10"
+        value={overrideVersion}
+        type="text"
+        autoComplete="off"
+        spellCheck={false}
+        placeholder="Version to deploy"
+        disabled={disabled}
+        onChange={(event) => {
+          onValueChange(event.target.value);
+        }}
+      />
+      <Popover open={choicesOpen} onOpenChange={onChoicesOpenChange}>
+        <PopoverTrigger asChild>
+          <Button
+            className="absolute right-1 top-1 size-7 text-muted-foreground"
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Show version choices"
+            disabled={disabled}
+          >
+            <ChevronsUpDown />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-80 p-0" align="start">
+          <Command>
+            <CommandInput placeholder="Search versions..." />
+            <CommandList>
+              <CommandEmpty>No version found.</CommandEmpty>
+              <CommandGroup>
+                {suggestions.map((suggestion) => (
+                  <RuntimeDeploySuggestionItem
+                    key={`${suggestion.version}:${suggestion.image ?? ''}:${suggestion.source ?? ''}:${suggestion.label}`}
+                    suggestion={suggestion}
+                    selected={suggestion.version === overrideVersion}
+                    onSelect={onSelect}
+                  />
+                ))}
+              </CommandGroup>
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
+
+function RuntimeDeploySuggestionItem({
+  suggestion,
+  selected,
+  onSelect,
+}: {
+  suggestion: UIVersionSuggestion;
+  selected: boolean;
+  onSelect: (suggestion: UIVersionSuggestion | undefined) => void;
+}): React.ReactElement {
+  return (
+    <CommandItem
+      className="min-w-0"
+      value={versionChoiceLabel(suggestion)}
+      onSelect={() => {
+        onSelect(suggestion);
+      }}
+    >
+      <Check className={cn('size-4 shrink-0 opacity-0', selected && 'opacity-100')} />
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="truncate text-sm font-medium leading-tight">{suggestion.version}</span>
+        <span className="truncate text-xs leading-tight text-muted-foreground">
+          {[versionChoiceImage(suggestion), versionChoiceKind(suggestion)]
+            .filter(Boolean)
+            .join(' | ')}
+        </span>
+      </span>
+    </CommandItem>
+  );
+}
+
 function RuntimeDeployField({
   configuredVersion,
   overrideVersion,
@@ -974,72 +1086,15 @@ function RuntimeDeployField({
         >
           {configuredVersion || 'Not configured'}
         </div>
-        <div className="relative min-w-0">
-          <Input
-            id="manage-version"
-            className="pr-10"
-            value={overrideVersion}
-            type="text"
-            autoComplete="off"
-            spellCheck={false}
-            placeholder="Version to deploy"
-            disabled={disabled}
-            onChange={(event) => {
-              onValueChange(event.target.value);
-            }}
-          />
-          <Popover open={choicesOpen} onOpenChange={onChoicesOpenChange}>
-            <PopoverTrigger asChild>
-              <Button
-                className="absolute right-1 top-1 size-7 text-muted-foreground"
-                type="button"
-                variant="ghost"
-                size="icon"
-                aria-label="Show version choices"
-                disabled={disabled}
-              >
-                <ChevronsUpDown />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-80 p-0" align="start">
-              <Command>
-                <CommandInput placeholder="Search versions..." />
-                <CommandList>
-                  <CommandEmpty>No version found.</CommandEmpty>
-                  <CommandGroup>
-                    {suggestions.map((suggestion) => {
-                      const selected = suggestion.version === overrideVersion;
-                      return (
-                        <CommandItem
-                          className="min-w-0"
-                          key={`${suggestion.version}:${suggestion.image || ''}:${suggestion.source || ''}:${suggestion.label || ''}`}
-                          value={versionChoiceLabel(suggestion)}
-                          onSelect={() => {
-                            onSelect(suggestion);
-                          }}
-                        >
-                          <Check
-                            className={cn('size-4 shrink-0 opacity-0', selected && 'opacity-100')}
-                          />
-                          <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                            <span className="truncate text-sm font-medium leading-tight">
-                              {suggestion.version}
-                            </span>
-                            <span className="truncate text-xs leading-tight text-muted-foreground">
-                              {[versionChoiceImage(suggestion), versionChoiceKind(suggestion)]
-                                .filter(Boolean)
-                                .join(' | ')}
-                            </span>
-                          </span>
-                        </CommandItem>
-                      );
-                    })}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-        </div>
+        <RuntimeDeployVersionPicker
+          overrideVersion={overrideVersion}
+          suggestions={suggestions}
+          choicesOpen={choicesOpen}
+          disabled={disabled}
+          onValueChange={onValueChange}
+          onChoicesOpenChange={onChoicesOpenChange}
+          onSelect={onSelect}
+        />
         <Button type="button" size="sm" disabled={disabled} onClick={onDeploy}>
           <Rocket aria-hidden="true" />
           Deploy
@@ -1173,7 +1228,7 @@ function ClaudeSettingsSection({ dialog }: { dialog: ManageDialog }): React.Reac
       />
       <ClaudeModelsField
         defaults={defaults}
-        value={claude.models || []}
+        value={claude.models ?? []}
         disabled={disabled}
         onChange={(models) => {
           dispatch(updateManageClaudeConfig({ models }));
@@ -1368,7 +1423,7 @@ function ClaudeMaxTokensField({
         step={1}
         autoComplete="off"
         value={text}
-        placeholder={`Default: ${defaults.maxOutputTokens}`}
+        placeholder={`Default: ${String(defaults.maxOutputTokens)}`}
         disabled={disabled}
         aria-describedby={helpId}
         aria-invalid={invalid}
@@ -1393,10 +1448,10 @@ function ClaudeMaxTokensField({
         )}
       >
         {invalid
-          ? `Enter an integer between ${defaults.minTokens} and ${defaults.maxTokens}.`
+          ? `Enter an integer between ${String(defaults.minTokens)} and ${String(defaults.maxTokens)}.`
           : overridden
-            ? `Overridden. Default: ${defaults.maxOutputTokens}.`
-            : `Using default (${defaults.maxOutputTokens}).`}
+            ? `Overridden. Default: ${String(defaults.maxOutputTokens)}.`
+            : `Using default (${String(defaults.maxOutputTokens)}).`}
       </div>
     </div>
   );
@@ -1534,7 +1589,7 @@ function portRangeValue(rangeStart: number, rangeEnd: number): string {
   if (rangeStart <= 0 || rangeEnd <= 0) {
     return '';
   }
-  return `${rangeStart}-${rangeEnd}`;
+  return `${String(rangeStart)}-${String(rangeEnd)}`;
 }
 
 function parseIdleTrafficBytes(value: string): number {

@@ -24,8 +24,8 @@ export function normalizeVersionSuggestions(values: UIVersionSuggestion[]): UIVe
   const suggestions: UIVersionSuggestion[] = [];
   for (const value of values) {
     const version = normalizeDialogValue(value.version);
-    const image = normalizeDialogValue(value.image || '');
-    const source = normalizeDialogValue(value.source || '');
+    const image = normalizeDialogValue(value.image ?? '');
+    const source = normalizeDialogValue(value.source ?? '');
     const label = normalizeDialogValue(value.label);
     if (
       version &&
@@ -75,11 +75,11 @@ export function versionChoiceKind(suggestion: UIVersionSuggestion): string {
 }
 
 export function versionChoiceSource(suggestion: UIVersionSuggestion): string {
-  const source = normalizeDialogValue(suggestion.source || '');
+  const source = normalizeDialogValue(suggestion.source ?? '');
   if (source) {
     return source;
   }
-  const image = normalizeDialogValue(suggestion.image || '');
+  const image = normalizeDialogValue(suggestion.image ?? '');
   if (image === 'erun-devops') {
     return 'ERun';
   }
@@ -90,7 +90,7 @@ export function versionChoiceSource(suggestion: UIVersionSuggestion): string {
 }
 
 export function versionChoiceImage(suggestion: UIVersionSuggestion): string {
-  const image = normalizeDialogValue(suggestion.image || '');
+  const image = normalizeDialogValue(suggestion.image ?? '');
   if (image) {
     return image;
   }

@@ -12,12 +12,12 @@ import {
 } from '../../../wailsjs/go/main/App';
 import type { ActivityQueueEntry, ActivityRecoveryResult } from '../activityQueueState';
 import { wailsApi } from './wailsApi';
-import { wailsQueryFn } from './wailsBaseQuery';
+import { type NoValue, wailsQueryFn } from './wailsBaseQuery';
 
 export const deployApi = wailsApi.injectEndpoints({
   endpoints: (builder) => ({
-    listDeploys: builder.query<ActivityQueueEntry[], void>({
-      queryFn: wailsQueryFn<void, ActivityQueueEntry[]>(
+    listDeploys: builder.query<ActivityQueueEntry[], NoValue>({
+      queryFn: wailsQueryFn<NoValue, ActivityQueueEntry[]>(
         () => ListDeploys() as Promise<ActivityQueueEntry[]>,
       ),
       providesTags: ['Deploys'],

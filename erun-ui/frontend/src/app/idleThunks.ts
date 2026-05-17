@@ -4,6 +4,21 @@ import { bumpIdleStatus } from './slices/requestCountersSlice';
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
 
+function isRequestStillCurrent(
+  request: number,
+  getState: Parameters<AppThunk>[1],
+  selection?: { tenant: string; environment: string },
+): boolean {
+  if (request !== getState().requestCounters.idleStatus) {
+    return false;
+  }
+  if (!selection) {
+    return true;
+  }
+  const current = getState().selection.selected;
+  return current?.tenant === selection.tenant && current.environment === selection.environment;
+}
+
 // refreshIdleStatus polls the backend for the currently-selected env's
 // idle status and re-arms the polling timer on the controller. The
 // recursive schedule keeps polling alive across selection changes (a
@@ -31,20 +46,15 @@ export const refreshIdleStatus =
       const status = await dispatch(
         idleApi.endpoints.getIdleStatus.initiate(selection, { forceRefetch: true }),
       ).unwrap();
-      const current = getState().selection.selected;
-      if (
-        request === getState().requestCounters.idleStatus &&
-        current?.tenant === selection.tenant &&
-        current.environment === selection.environment
-      ) {
+      if (isRequestStillCurrent(request, getState, selection)) {
         dispatch(setIdleStatus(status));
       }
     } catch {
-      if (request === getState().requestCounters.idleStatus && getState().idle.idleStatus) {
+      if (isRequestStillCurrent(request, getState) && getState().idle.idleStatus) {
         dispatch(setIdleStatus(null));
       }
     } finally {
-      if (request === getState().requestCounters.idleStatus) {
+      if (isRequestStillCurrent(request, getState)) {
         controller.scheduleIdleStatusPoll();
       }
     }

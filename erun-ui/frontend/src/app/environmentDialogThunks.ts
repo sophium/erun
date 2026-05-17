@@ -34,15 +34,15 @@ let versionSuggestionTimer = 0;
 
 export const openInitializeDialog = (): AppThunk => (dispatch, getState) => {
   const state = getState();
-  const tenantDefault = state.selection.selected?.tenant || state.tenants.tenants[0]?.name || '';
-  const containerRegistryDefault = loadSavedPastContainerRegistries()[0] || '';
+  const tenantDefault = state.selection.selected?.tenant ?? state.tenants.tenants[0]?.name ?? '';
+  const containerRegistryDefault = loadSavedPastContainerRegistries()[0] ?? '';
   dispatch(
     setEnvironmentDialog({
       open: true,
       actionMode: 'init',
       tenant: tenantDefault,
       environment: '',
-      version: state.tenants.versionSuggestions[0]?.version || '',
+      version: state.tenants.versionSuggestions[0]?.version ?? '',
       kubernetesContext: '',
       kubernetesContexts: [],
       kubernetesContextsLoading: true,
@@ -53,7 +53,7 @@ export const openInitializeDialog = (): AppThunk => (dispatch, getState) => {
       noGit: false,
       bootstrap: false,
       setDefaultTenant: true,
-      versionImage: state.tenants.versionSuggestions[0]?.image || '',
+      versionImage: state.tenants.versionSuggestions[0]?.image ?? '',
       choicesOpen: false,
       busy: false,
       error: '',
@@ -120,8 +120,8 @@ export const selectEnvironmentVersionSuggestion =
     }
     dispatch(
       patchEnvironmentDialog({
-        version: suggestion?.version || '',
-        versionImage: suggestion?.image || '',
+        version: suggestion?.version ?? '',
+        versionImage: suggestion?.image ?? '',
         choicesOpen: false,
       }),
     );
@@ -209,7 +209,7 @@ function resolveEnvironmentRuntimeImage(
     return dialog.versionImage;
   }
   const suggestion = versionSuggestions.find((value) => value.version === version);
-  return suggestion?.image || '';
+  return suggestion?.image ?? '';
 }
 
 function beginEnvironmentDialogSubmit(
@@ -221,10 +221,10 @@ function beginEnvironmentDialogSubmit(
     patchEnvironmentDialog({
       tenant: selection.tenant,
       environment: selection.environment,
-      version: selection.version || '',
-      kubernetesContext: selection.kubernetesContext || '',
+      version: selection.version ?? '',
+      kubernetesContext: selection.kubernetesContext ?? '',
       runtimePod: dialog.runtimePod,
-      containerRegistry: selection.containerRegistry || '',
+      containerRegistry: selection.containerRegistry ?? '',
       busy: true,
       error: '',
       choicesOpen: false,

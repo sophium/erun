@@ -32,7 +32,7 @@ export function visibleDiffPath(
 
   for (const section of sections) {
     const rect = section.getBoundingClientRect();
-    const path = section.dataset.path || '';
+    const path = section.dataset.path ?? '';
     if (!path) {
       continue;
     }

@@ -15,12 +15,12 @@ export function idleCloudContextAction(
   idleStatus: UIIdleStatus | null,
   busy: boolean,
 ): IdleCloudContextAction | null {
-  const name = normalizeDialogValue(idleStatus?.cloudContextName || '');
+  const name = normalizeDialogValue(idleStatus?.cloudContextName ?? '');
   if (!idleStatus?.managedCloud || !name || busy) {
     return null;
   }
   const running =
-    normalizeDialogValue(idleStatus.cloudContextStatus || '').toLowerCase() === 'running';
+    normalizeDialogValue(idleStatus.cloudContextStatus ?? '').toLowerCase() === 'running';
   if (running) {
     return {
       idleStatus,
@@ -69,12 +69,12 @@ export function cloudContextDraftForConfig(
     ...defaultCloudContextInitInput(),
     ...current,
   };
-  const providers = config.cloudProviders || [];
+  const providers = config.cloudProviders ?? [];
   if (
     !draft.cloudProviderAlias ||
     !providers.some((provider) => provider.alias === draft.cloudProviderAlias)
   ) {
-    draft.cloudProviderAlias = providers[0]?.alias || '';
+    draft.cloudProviderAlias = providers[0]?.alias ?? '';
   }
   return draft;
 }

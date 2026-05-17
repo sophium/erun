@@ -18,7 +18,7 @@ import {
   StartSSHDInitSession,
 } from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
-import { wailsQueryFn } from './wailsBaseQuery';
+import { type NoValue, wailsQueryFn } from './wailsBaseQuery';
 
 export interface PastedImagePayload {
   data: string;
@@ -120,24 +120,24 @@ export const sessionApi = wailsApi.injectEndpoints({
         ({ cols, rows }) => StartCloudInitAWSSession(cols, rows) as Promise<StartSessionResult>,
       ),
     }),
-    resizeSession: builder.mutation<void, ResizeArgs>({
-      queryFn: wailsQueryFn<ResizeArgs, void>(({ sessionId, cols, rows }) =>
+    resizeSession: builder.mutation<NoValue, ResizeArgs>({
+      queryFn: wailsQueryFn<ResizeArgs, NoValue>(({ sessionId, cols, rows }) =>
         ResizeSession(sessionId, cols, rows),
       ),
     }),
-    sendSessionInput: builder.mutation<void, InputArgs>({
-      queryFn: wailsQueryFn<InputArgs, void>(({ sessionId, data }) =>
+    sendSessionInput: builder.mutation<NoValue, InputArgs>({
+      queryFn: wailsQueryFn<InputArgs, NoValue>(({ sessionId, data }) =>
         SendSessionInput(sessionId, data),
       ),
     }),
-    closeSession: builder.mutation<void, number>({
-      queryFn: wailsQueryFn<number, void>((sessionId) => CloseSession(sessionId)),
+    closeSession: builder.mutation<NoValue, number>({
+      queryFn: wailsQueryFn<number, NoValue>((sessionId) => CloseSession(sessionId)),
     }),
-    openIDE: builder.mutation<void, OpenIDEArgs>({
-      queryFn: wailsQueryFn<OpenIDEArgs, void>(({ selection, ide }) => OpenIDE(selection, ide)),
+    openIDE: builder.mutation<NoValue, OpenIDEArgs>({
+      queryFn: wailsQueryFn<OpenIDEArgs, NoValue>(({ selection, ide }) => OpenIDE(selection, ide)),
     }),
-    reconnectMCP: builder.mutation<void, UISelection>({
-      queryFn: wailsQueryFn<UISelection, void>((selection) => ReconnectMCP(selection)),
+    reconnectMCP: builder.mutation<NoValue, UISelection>({
+      queryFn: wailsQueryFn<UISelection, NoValue>((selection) => ReconnectMCP(selection)),
     }),
     savePastedImage: builder.mutation<PastedImageResult, SavePastedImageArgs>({
       queryFn: wailsQueryFn<SavePastedImageArgs, PastedImageResult>(({ sessionId, payload }) =>

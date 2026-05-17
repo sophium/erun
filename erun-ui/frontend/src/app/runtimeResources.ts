@@ -55,7 +55,7 @@ export function runtimeResourceBounds(
       memoryMax: 0,
       loading: false,
       available: false,
-      message: status.message || 'Capacity is unavailable.',
+      message: status.message ?? 'Capacity is unavailable.',
     };
   }
   return {
@@ -64,7 +64,7 @@ export function runtimeResourceBounds(
     loading: false,
     available: true,
     message:
-      status.message ||
+      status.message ??
       `Available on best node: ${formatNumber(status.cpu.free)} CPU, ${formatNumber(status.memory.free)} GiB memory.`,
   };
 }
@@ -98,7 +98,7 @@ export function runtimeResourceLimitMessage(
   if (!status?.available) {
     return '';
   }
-  const matchingNode = (status.nodes || []).find(
+  const matchingNode = (status.nodes ?? []).find(
     (node) => parsed.cpuCores <= node.cpu.free && parsed.memoryGiB <= node.memory.free,
   );
   if (status.nodes && status.nodes.length > 0 && !matchingNode) {
@@ -187,7 +187,7 @@ function formatMemoryQuantity(gib: number): string {
   if (!Number.isFinite(gib) || gib <= 0) {
     return '';
   }
-  return `${Math.round(gib * 1024)}Mi`;
+  return `${String(Math.round(gib * 1024))}Mi`;
 }
 
 function roundToStep(value: number, step: number): number {

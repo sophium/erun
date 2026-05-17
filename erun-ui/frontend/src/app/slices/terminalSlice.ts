@@ -28,20 +28,20 @@ export const terminalSlice = createSlice({
     setTabsForEnv(state, action: PayloadAction<{ key: string; tabs: TerminalTab[] }>) {
       const { key, tabs } = action.payload;
       if (tabs.length === 0) {
-        delete state.tabsByEnv[key];
+        Reflect.deleteProperty(state.tabsByEnv, key);
       } else {
         state.tabsByEnv[key] = tabs;
       }
     },
     clearTabsForEnv(state, action: PayloadAction<string>) {
-      delete state.tabsByEnv[action.payload];
+      Reflect.deleteProperty(state.tabsByEnv, action.payload);
     },
     setSelectedSessionForEnv(state, action: PayloadAction<{ key: string; sessionId: number }>) {
       const { key, sessionId } = action.payload;
       state.selectedSessionByEnv[key] = sessionId;
     },
     clearSelectedSessionForEnv(state, action: PayloadAction<string>) {
-      delete state.selectedSessionByEnv[action.payload];
+      Reflect.deleteProperty(state.selectedSessionByEnv, action.payload);
     },
     setDebugOutput(state, action: PayloadAction<string>) {
       state.debugOutput = action.payload;

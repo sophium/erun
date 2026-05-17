@@ -1,3 +1,5 @@
+import type { DiffResult } from '@/types';
+
 import { reviewApi } from './api/reviewApi';
 import { sessionApi } from './api/sessionApi';
 import { chooseSelectedDiffPath } from './diffUtils';
@@ -70,6 +72,39 @@ export const selectReviewRange =
     void dispatch(loadReviewDiff());
   };
 
+function applyReviewDiffSuccess(
+  dispatch: Parameters<AppThunk>[0],
+  getState: () => ReturnType<typeof import('./store').store.getState>,
+  diff: DiffResult,
+): void {
+  dispatch(setDiff(diff));
+  dispatch(setDiffError({ error: '', reconnectable: false }));
+  dispatch(setSelectedReviewScope(diff.scope ?? 'current'));
+  dispatch(setSelectedReviewCommit(diff.selectedCommit ?? ''));
+  dispatch(setSelectedDiffPath(chooseSelectedDiffPath(diff, getState().review.selectedDiffPath)));
+}
+
+function applyReviewDiffFailure(
+  dispatch: Parameters<AppThunk>[0],
+  getState: () => ReturnType<typeof import('./store').store.getState>,
+  error: unknown,
+  silent: boolean,
+): void {
+  const currentDiff = getState().review.diff;
+  if (silent && currentDiff) {
+    return;
+  }
+  if (!silent || !currentDiff) {
+    dispatch(setDiff(null));
+  }
+  const message = readError(error);
+  if (isMcpUnreachableMessage(message)) {
+    dispatch(setDiffError({ error: stripMcpUnreachableMarker(message), reconnectable: true }));
+  } else {
+    dispatch(setDiffError({ error: message, reconnectable: false }));
+  }
+}
+
 export const loadReviewDiff =
   (options: { silent?: boolean } = {}): AppThunk<Promise<void>> =>
   async (dispatch, getState, extra) => {
@@ -100,30 +135,12 @@ export const loadReviewDiff =
       if (!isCurrentReviewDiffRequest(getState, request, selectedKey)) {
         return;
       }
-      dispatch(setDiff(diff));
-      dispatch(setDiffError({ error: '', reconnectable: false }));
-      dispatch(setSelectedReviewScope(diff.scope || 'current'));
-      dispatch(setSelectedReviewCommit(diff.selectedCommit || ''));
-      dispatch(
-        setSelectedDiffPath(chooseSelectedDiffPath(diff, getState().review.selectedDiffPath)),
-      );
+      applyReviewDiffSuccess(dispatch, getState, diff);
     } catch (error: unknown) {
       if (!isCurrentReviewDiffRequest(getState, request, selectedKey)) {
         return;
       }
-      const currentDiff = getState().review.diff;
-      if (options.silent && currentDiff) {
-        return;
-      }
-      if (!options.silent || !currentDiff) {
-        dispatch(setDiff(null));
-      }
-      const message = readError(error);
-      if (isMcpUnreachableMessage(message)) {
-        dispatch(setDiffError({ error: stripMcpUnreachableMarker(message), reconnectable: true }));
-      } else {
-        dispatch(setDiffError({ error: message, reconnectable: false }));
-      }
+      applyReviewDiffFailure(dispatch, getState, error, Boolean(options.silent));
     } finally {
       if (request === getState().requestCounters.reviewDiff) {
         if (!options.silent) {
@@ -152,7 +169,7 @@ function isCurrentReviewDiffRequest(
   const state = getState();
   return (
     request === state.requestCounters.reviewDiff &&
-    selectedKey === selectionKey(state.selection.selected || { tenant: '', environment: '' })
+    selectedKey === selectionKey(state.selection.selected ?? { tenant: '', environment: '' })
   );
 }
 

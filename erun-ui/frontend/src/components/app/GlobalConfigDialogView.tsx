@@ -12,7 +12,6 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 
-import { useController } from '@/app/ControllerContext';
 import { readError } from '@/app/errors';
 import {
   closeGlobalConfigDialog,
@@ -30,6 +29,7 @@ import {
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { showTerminalMessage } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
+import { useController } from '@/app/useController';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -44,7 +44,8 @@ import { Label } from '@/components/ui/label';
 
 import { EmptyState } from './EmptyState';
 import { SelectField, type SelectFieldOption } from './SelectField';
-import { cloudProviderStatusTone, StatusBadge } from './StatusBadge';
+import { StatusBadge } from './StatusBadge';
+import { cloudProviderStatusTone } from './StatusBadge.helpers';
 
 const dialogErrorClassName =
   'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
@@ -59,7 +60,9 @@ export function GlobalConfigDialogView(): React.ReactElement {
   return (
     <Dialog
       open={dialog.open}
-      onOpenChange={(open) => !open && dispatch(closeGlobalConfigDialog())}
+      onOpenChange={(open) => {
+        if (!open) dispatch(closeGlobalConfigDialog());
+      }}
     >
       <DialogContent
         className="sm:max-w-xl"
@@ -139,7 +142,7 @@ function GlobalConfigBody(): React.ReactElement {
 
 function CloudAliasesSection({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
-  const providers = dialog.config.cloudProviders || [];
+  const providers = dialog.config.cloudProviders ?? [];
   return (
     <div className="grid gap-2">
       <div className="flex items-center justify-between gap-2">
@@ -204,7 +207,7 @@ function CloudAliasList({ dialog }: { dialog: GlobalConfigDialog }): React.React
   const dispatch = useAppDispatch();
   return (
     <div className="overflow-hidden rounded-[var(--radius)] border border-border">
-      {(dialog.config.cloudProviders || []).map((provider, index) => (
+      {(dialog.config.cloudProviders ?? []).map((provider, index) => (
         <div
           key={provider.alias}
           className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-border px-3 py-2.5 data-[border=true]:border-t"
@@ -249,7 +252,7 @@ function CloudAliasSummary({
 
 function CloudContextsSection({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
-  const contexts = dialog.config.cloudContexts || [];
+  const contexts = dialog.config.cloudContexts ?? [];
   return (
     <div className="grid gap-2">
       <div className="flex items-center justify-between gap-2">
@@ -283,11 +286,11 @@ function CloudContextDraftForm({ dialog }: { dialog: GlobalConfigDialog }): Reac
   const dispatch = useAppDispatch();
   const config = dialog.config;
   const generated = generatedContextName(
-    (config.cloudProviders || []).find(
+    (config.cloudProviders ?? []).find(
       (provider) => provider.alias === dialog.cloudContextDraft.cloudProviderAlias,
     ),
     dialog.cloudContextDraft.region,
-    config.cloudContexts || [],
+    config.cloudContexts ?? [],
   );
   return (
     <div className="grid gap-2 rounded-[var(--radius)] border border-border p-3">
@@ -296,7 +299,7 @@ function CloudContextDraftForm({ dialog }: { dialog: GlobalConfigDialog }): Reac
           id="global-config-cloudcontext-provider"
           label="Cloud provider"
           value={dialog.cloudContextDraft.cloudProviderAlias}
-          options={(config.cloudProviders || []).map((provider) => ({
+          options={(config.cloudProviders ?? []).map((provider) => ({
             value: provider.alias,
             label: provider.alias,
           }))}
@@ -409,7 +412,7 @@ function CloudContextList({ dialog }: { dialog: GlobalConfigDialog }): React.Rea
   const dispatch = useAppDispatch();
   return (
     <div className="overflow-hidden rounded-[var(--radius)] border border-border">
-      {(dialog.config.cloudContexts || []).map((context, index) => (
+      {(dialog.config.cloudContexts ?? []).map((context, index) => (
         <div
           key={context.name}
           className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-border px-3 py-2.5 data-[border=true]:border-t"
@@ -592,7 +595,7 @@ function cloudContextSummary(context: {
     context.cloudProviderAlias,
     cloudRegionLabel(context.region),
     context.instanceType,
-    `${context.diskSizeGb} GB ${context.diskType}`,
+    `${String(context.diskSizeGb)} GB ${context.diskType}`,
   ].filter(Boolean);
   if (context.instanceId) {
     parts.push(context.instanceId);
@@ -631,7 +634,10 @@ function generatedContextName(
   if (!provider) {
     return '';
   }
-  const identity = provider.accountId || provider.username || provider.alias;
+  const identity =
+    (provider.accountId?.trim() ? provider.accountId : '') ||
+    (provider.username?.trim() ? provider.username : '') ||
+    provider.alias;
   const tail = sanitizeContextName([identity, region || 'eu-west-2'].filter(Boolean).join('-'));
   return nextGeneratedContextName(tail, contexts);
 }

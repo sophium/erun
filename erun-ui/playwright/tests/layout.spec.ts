@@ -20,7 +20,7 @@ test.describe('layout panels', () => {
   });
 
   test('review panel toggle reveals the diff section', async ({ app, page }) => {
-    const splitter = page.locator('[role="separator"][aria-label="Resize diff panel"]');
+    const splitter = page.getByRole('button', { name: 'Resize diff panel' });
     const initiallyVisible = await splitter.isVisible().catch(() => false);
 
     await app.titlebar.toggleReviewPanel();
@@ -31,16 +31,11 @@ test.describe('layout panels', () => {
   });
 
   test('debug panel toggle reveals the resize handle', async ({ app, page }) => {
-    const handle = page.locator('[role="separator"][aria-label="Resize debug panel"]');
-    const initiallyOpen = (await handle.count()) > 0 && (await handle.isVisible());
+    const handle = page.getByRole('button', { name: 'Resize debug panel' });
+    const initiallyOpen = await handle.isVisible().catch(() => false);
 
     await app.debugPanel.toggle();
-    await expect
-      .poll(async () => {
-        if ((await handle.count()) === 0) return false;
-        return handle.isVisible();
-      })
-      .toBe(!initiallyOpen);
+    await expect.poll(async () => handle.isVisible().catch(() => false)).toBe(!initiallyOpen);
 
     // Restore prior state.
     await app.debugPanel.toggle();

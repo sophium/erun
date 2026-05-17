@@ -77,14 +77,14 @@ export function registerTerminalQueryResponseHandlers(
 function firstParam(params: (number | number[])[]): number {
   const value = params[0];
   if (Array.isArray(value)) {
-    return value[0] || 0;
+    return value[0] ?? 0;
   }
-  return value || 0;
+  return value ?? 0;
 }
 
 function cursorPositionReport(terminal: Terminal, prefix: string): string {
   const buffer = terminal.buffer.active;
-  return `${ESC}[${prefix}${buffer.cursorY + 1};${buffer.cursorX + 1}R`;
+  return `${ESC}[${prefix}${String(buffer.cursorY + 1)};${String(buffer.cursorX + 1)}R`;
 }
 
 function statusStringReport(terminal: Terminal, data: string): string {
@@ -94,11 +94,11 @@ function statusStringReport(terminal: Terminal, data: string): string {
     case '"p':
       return `${ESC}P1$r61;1"p${ST}`;
     case 'r':
-      return `${ESC}P1$r1;${terminal.rows}r${ST}`;
+      return `${ESC}P1$r1;${String(terminal.rows)}r${ST}`;
     case 'm':
       return `${ESC}P1$r0m${ST}`;
     case ' q':
-      return `${ESC}P1$r${cursorStyleReport(terminal)} q${ST}`;
+      return `${ESC}P1$r${String(cursorStyleReport(terminal))} q${ST}`;
     default:
       return `${ESC}P0$r${ST}`;
   }
@@ -133,7 +133,7 @@ function colorReports(start: number, data: string): string[] {
     const colorIndex = start + index;
     const color = specialColor(colorIndex);
     if (color) {
-      reports.push(`${ESC}]${colorIndex};${color}${ST}`);
+      reports.push(`${ESC}]${String(colorIndex)};${color}${ST}`);
     }
   }
   return reports;

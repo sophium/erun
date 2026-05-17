@@ -88,7 +88,7 @@ export function VersionField({
                     return (
                       <CommandItem
                         className="min-w-0"
-                        key={`${suggestion.version}:${suggestion.image || ''}:${suggestion.source || ''}:${suggestion.label || ''}`}
+                        key={`${suggestion.version}:${suggestion.image ?? ''}:${suggestion.source ?? ''}:${suggestion.label}`}
                         value={versionChoiceLabel(suggestion)}
                         onSelect={() => {
                           onSelect(suggestion);

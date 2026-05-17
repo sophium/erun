@@ -205,7 +205,7 @@ export const initGlobalCloudContext = (): AppThunk<Promise<void>> => async (disp
       patchGlobalConfigDialog({
         config: {
           ...currentConfig,
-          cloudContexts: replaceCloudContext(currentConfig.cloudContexts || [], context),
+          cloudContexts: replaceCloudContext(currentConfig.cloudContexts ?? [], context),
         },
         cloudContextDraft: cloudContextDraftForConfig(currentConfig, {
           ...defaultCloudContextInitInput(),
@@ -358,7 +358,7 @@ export const loginGlobalCloudProvider =
         patchGlobalConfigDialog({
           config: {
             ...currentConfig,
-            cloudProviders: replaceCloudProvider(currentConfig.cloudProviders || [], provider),
+            cloudProviders: replaceCloudProvider(currentConfig.cloudProviders ?? [], provider),
           },
           busy: false,
           busyAction: '',
@@ -439,7 +439,7 @@ function applyIdleCloudContextResult(
     patchGlobalConfigDialog({
       config: {
         ...globalDialog.config,
-        cloudContexts: replaceCloudContext(globalDialog.config.cloudContexts || [], context),
+        cloudContexts: replaceCloudContext(globalDialog.config.cloudContexts ?? [], context),
       },
     }),
   );
@@ -471,7 +471,7 @@ const updateCloudContextPower =
         patchGlobalConfigDialog({
           config: {
             ...currentConfig,
-            cloudContexts: replaceCloudContext(currentConfig.cloudContexts || [], context),
+            cloudContexts: replaceCloudContext(currentConfig.cloudContexts ?? [], context),
           },
           busy: false,
           busyAction: '',

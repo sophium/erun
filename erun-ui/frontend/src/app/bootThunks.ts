@@ -18,12 +18,12 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
     const loaded = await dispatch(
       stateApi.endpoints.getInitialState.initiate(undefined, { forceRefetch: true }),
     ).unwrap();
-    dispatch(setTenants(loaded.tenants || []));
-    dispatch(setCloudProviders(loaded.cloudProviders || []));
-    dispatch(setSelected(loaded.selected || null));
-    dispatch(setVersionSuggestions(normalizeVersionSuggestions(loaded.versionSuggestions || [])));
-    await dispatch(selectLoadedKubernetesContexts(loaded.kubernetesContexts || []));
-    if (loaded.message) {
+    dispatch(setTenants(loaded.tenants));
+    dispatch(setCloudProviders(loaded.cloudProviders ?? []));
+    dispatch(setSelected(loaded.selected ?? null));
+    dispatch(setVersionSuggestions(normalizeVersionSuggestions(loaded.versionSuggestions ?? [])));
+    await dispatch(selectLoadedKubernetesContexts(loaded.kubernetesContexts ?? []));
+    if (loaded.message !== undefined && loaded.message !== '') {
       dispatch(showTerminalMessage(loaded.message));
       return;
     }
@@ -52,14 +52,14 @@ export const reloadStateAfterEnvironmentChange =
         stateApi.endpoints.getInitialState.initiate(undefined, { forceRefetch: true }),
       ).unwrap();
       const current = getState().tenants;
-      dispatch(setTenants(loaded.tenants || []));
-      dispatch(setCloudProviders(loaded.cloudProviders || current.cloudProviders));
+      dispatch(setTenants(loaded.tenants));
+      dispatch(setCloudProviders(loaded.cloudProviders ?? current.cloudProviders));
       dispatch(
         setVersionSuggestions(
-          normalizeVersionSuggestions(loaded.versionSuggestions || current.versionSuggestions),
+          normalizeVersionSuggestions(loaded.versionSuggestions ?? current.versionSuggestions),
         ),
       );
-      await dispatch(selectLoadedKubernetesContexts(loaded.kubernetesContexts || []));
+      await dispatch(selectLoadedKubernetesContexts(loaded.kubernetesContexts ?? []));
     } catch {
       // Silent failure: env-change reloads are best-effort.
     }

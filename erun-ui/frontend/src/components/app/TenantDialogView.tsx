@@ -1,7 +1,6 @@
 import { Cloud, Link, LoaderCircle, RefreshCw, Save } from 'lucide-react';
 import * as React from 'react';
 
-import { useController } from '@/app/ControllerContext';
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { showTerminalMessage } from '@/app/notificationThunks';
@@ -13,6 +12,7 @@ import {
   submitTenantConfig,
   updateTenantConfig,
 } from '@/app/tenantDialogThunks';
+import { useController } from '@/app/useController';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -40,12 +40,17 @@ export function TenantDialogView(): React.ReactElement {
   const config = dialog.config;
   const tenant = tenants.find((candidate) => candidate.name === dialog.tenant);
   const environmentOptions = optionValues(
-    (tenant?.environments || []).map((environment) => environment.name),
+    (tenant?.environments ?? []).map((environment) => environment.name),
     config.defaultEnvironment,
   );
 
   return (
-    <Dialog open={dialog.open} onOpenChange={(open) => !open && dispatch(closeTenantDialog())}>
+    <Dialog
+      open={dialog.open}
+      onOpenChange={(open) => {
+        if (!open) dispatch(closeTenantDialog());
+      }}
+    >
       <DialogContent
         className="sm:max-w-xl"
         onCloseAutoFocus={(event) => {
@@ -150,11 +155,11 @@ function TenantDialogFields({
 function CloudAliasesField(): React.ReactElement {
   const dialog = useAppSelector((state) => state.tenantDialog);
   const config = dialog.config;
-  const providers = config.cloudProviders || [];
+  const providers = config.cloudProviders ?? [];
   const linked = new Set(
-    (config.cloudProviderAliases || []).map((alias) => alias.trim()).filter(Boolean),
+    (config.cloudProviderAliases ?? []).map((alias) => alias.trim()).filter(Boolean),
   );
-  const primary = (config.primaryCloudProviderAlias || '').trim();
+  const primary = (config.primaryCloudProviderAlias ?? '').trim();
 
   if (providers.length === 0) {
     return (
@@ -219,7 +224,7 @@ function CloudAliasRow({
           updateLinkedCloudAlias(dispatch, config, alias, Boolean(value));
         }}
       />
-      <CloudAliasIdentity alias={alias} issuer={provider.oidcIssuerUrl || ''} />
+      <CloudAliasIdentity alias={alias} issuer={provider.oidcIssuerUrl ?? ''} />
       <CloudAliasOIDCButton
         alias={alias}
         hasIssuer={hasIssuer}
@@ -332,11 +337,11 @@ function updateLinkedCloudAlias(
   alias: string,
   checked: boolean,
 ): void {
-  const aliases = (config.cloudProviderAliases || []).map((value) => value.trim()).filter(Boolean);
+  const aliases = (config.cloudProviderAliases ?? []).map((value) => value.trim()).filter(Boolean);
   const next = checked
     ? uniqueSorted([...aliases, alias])
     : aliases.filter((value) => value !== alias);
-  let primary = (config.primaryCloudProviderAlias || '').trim();
+  let primary = (config.primaryCloudProviderAlias ?? '').trim();
   if (!next.length) {
     primary = '';
   } else if (!primary || !next.includes(primary)) {
@@ -423,7 +428,7 @@ function DefaultEnvironmentSelect({
 
 function tenantDefaultAPIURL(tenant: AppState['tenants'][number] | undefined): string {
   const environment = tenant?.environments.find((candidate) => candidate.apiUrl);
-  return environment?.apiUrl || 'Environment API URL';
+  return environment?.apiUrl?.trim() ? environment.apiUrl : 'Environment API URL';
 }
 
 function ReadonlyField({

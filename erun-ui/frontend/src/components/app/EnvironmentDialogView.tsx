@@ -1,7 +1,6 @@
 import { FolderPlus, LoaderCircle, Rocket } from 'lucide-react';
 import * as React from 'react';
 
-import { useController } from '@/app/ControllerContext';
 import {
   closeEnvironmentDialog,
   selectEnvironmentVersionSuggestion,
@@ -19,6 +18,7 @@ import {
   loadSavedPastEnvironments,
   loadSavedPastTenants,
 } from '@/app/storage';
+import { useController } from '@/app/useController';
 import { findVersionSuggestion, selectedVersionSourceText } from '@/app/versionSuggestions';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -32,7 +32,8 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 
-import { EditableComboField, uniqueSuggestions } from './EditableComboField';
+import { EditableComboField } from './EditableComboField';
+import { uniqueSuggestions } from './EditableComboField.helpers';
 import { EmptyState } from './EmptyState';
 import { RuntimeResourceControls } from './RuntimeResourceControls';
 import { SelectField } from './SelectField';
@@ -50,25 +51,35 @@ export function EnvironmentDialogView(): React.ReactElement {
   const tenantRef = React.useRef<HTMLInputElement>(null);
   const environmentRef = React.useRef<HTMLInputElement>(null);
 
+  // tenantRefValue mirrors dialog.tenant via a separate effect so the
+  // focus-on-open effect below stays scoped to dialog.open. Re-running on
+  // every dialog.tenant change would yank focus while the user is typing.
+  const tenantValueRef = React.useRef(dialog.tenant);
+  React.useEffect(() => {
+    tenantValueRef.current = dialog.tenant;
+  }, [dialog.tenant]);
+
   React.useEffect(() => {
     if (!dialog.open) {
       return undefined;
     }
     const timeout = window.setTimeout(() => {
-      const target = dialog.tenant ? environmentRef.current : tenantRef.current;
+      const target = tenantValueRef.current ? environmentRef.current : tenantRef.current;
       target?.focus();
       target?.select();
     }, 0);
     return () => {
       window.clearTimeout(timeout);
     };
-    // Intentionally re-runs only on dialog open. Re-running on every
-    // dialog.tenant change would yank focus while the user is typing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dialog.open]);
 
   return (
-    <Dialog open={dialog.open} onOpenChange={(open) => !open && dispatch(closeEnvironmentDialog())}>
+    <Dialog
+      open={dialog.open}
+      onOpenChange={(open) => {
+        if (!open) dispatch(closeEnvironmentDialog());
+      }}
+    >
       <DialogContent
         className="sm:max-w-md"
         onCloseAutoFocus={(event) => {
@@ -370,19 +381,27 @@ function DialogError({ error }: { error: string }): React.ReactElement | null {
   ) : null;
 }
 
-function EnvironmentDialogFooter({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
-  const dispatch = useAppDispatch();
-  const isDeploy = dialog.actionMode === 'deploy';
+function environmentDialogSubmitDisabled(dialog: EnvironmentDialog, isDeploy: boolean): boolean {
+  if (dialog.busy) {
+    return true;
+  }
+  if (isDeploy) {
+    return false;
+  }
+  if (dialog.kubernetesContextsLoading || dialog.kubernetesContexts.length === 0) {
+    return true;
+  }
   const resourceBlocked =
     dialog.resourceStatusLoading ||
     !dialog.resourceStatus?.available ||
     Boolean(runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus));
-  const disabled =
-    dialog.busy ||
-    (!isDeploy &&
-      (dialog.kubernetesContextsLoading ||
-        dialog.kubernetesContexts.length === 0 ||
-        resourceBlocked));
+  return resourceBlocked;
+}
+
+function EnvironmentDialogFooter({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const isDeploy = dialog.actionMode === 'deploy';
+  const disabled = environmentDialogSubmitDisabled(dialog, isDeploy);
   return (
     <DialogFooter>
       <Button
@@ -423,7 +442,7 @@ function environmentNameSuggestions(
     (tenant) => tenant.name.toLowerCase() === dialog.tenant.trim().toLowerCase(),
   );
   const selectedTenantEnvironments =
-    selectedTenant?.environments.map((environment) => environment.name) || [];
+    selectedTenant?.environments.map((environment) => environment.name) ?? [];
   const allEnvironments = tenants.flatMap((tenant) =>
     tenant.environments.map((environment) => environment.name),
   );

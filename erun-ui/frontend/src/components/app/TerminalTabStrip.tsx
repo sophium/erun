@@ -7,6 +7,65 @@ import { selectionKey } from '@/app/versionSuggestions';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { cn } from '@/lib/utils';
 
+interface TerminalTab {
+  sessionId: number;
+  label: string;
+  kind: string;
+}
+
+function activateTab(
+  index: number,
+  tabs: TerminalTab[],
+  dispatch: ReturnType<typeof useAppDispatch>,
+  focusTab: (index: number) => void,
+): void {
+  const id = tabs[index]?.sessionId;
+  if (id !== undefined) {
+    dispatch(selectTerminalTab(id));
+  }
+  focusTab(index);
+}
+
+function tabStripKeyDownHandler(
+  tabs: TerminalTab[],
+  dispatch: ReturnType<typeof useAppDispatch>,
+  focusTab: (index: number) => void,
+) {
+  return (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    index: number,
+    sessionId: number,
+  ): void => {
+    switch (event.key) {
+      case 'ArrowRight':
+        event.preventDefault();
+        activateTab((index + 1) % tabs.length, tabs, dispatch, focusTab);
+        return;
+      case 'ArrowLeft':
+        event.preventDefault();
+        activateTab((index - 1 + tabs.length) % tabs.length, tabs, dispatch, focusTab);
+        return;
+      case 'Home':
+        event.preventDefault();
+        activateTab(0, tabs, dispatch, focusTab);
+        return;
+      case 'End':
+        event.preventDefault();
+        activateTab(tabs.length - 1, tabs, dispatch, focusTab);
+        return;
+      case 'Delete':
+      case 'Backspace':
+        if (event.metaKey || event.ctrlKey) {
+          event.preventDefault();
+          void dispatch(closeTerminalTab(sessionId));
+        }
+        return;
+      default:
+        return;
+    }
+  };
+}
+
 export function TerminalTabStrip(): React.ReactElement {
   const dispatch = useAppDispatch();
   const selection = useAppSelector((state) => state.selection.selected);
@@ -20,79 +79,22 @@ export function TerminalTabStrip(): React.ReactElement {
     return <div className={stripBaseClass} aria-hidden="true" />;
   }
 
-  const tabs = tabsByEnv[selectionKey(selection)] || [];
+  const tabs = tabsByEnv[selectionKey(selection)] ?? [];
   tabRefs.current.length = tabs.length;
 
-  const focusTab = (index: number) => {
+  const focusTab = (index: number): void => {
     const node = tabRefs.current[index];
     node?.focus();
   };
 
-  const handleKeyDown = (
-    event: React.KeyboardEvent<HTMLButtonElement>,
-    index: number,
-    sessionId: number,
-  ) => {
-    const tabAt = (i: number) => tabs[i]?.sessionId;
-    switch (event.key) {
-      case 'ArrowRight': {
-        event.preventDefault();
-        const next = (index + 1) % tabs.length;
-        const id = tabAt(next);
-        if (id !== undefined) {
-          dispatch(selectTerminalTab(id));
-        }
-        focusTab(next);
-        break;
-      }
-      case 'ArrowLeft': {
-        event.preventDefault();
-        const next = (index - 1 + tabs.length) % tabs.length;
-        const id = tabAt(next);
-        if (id !== undefined) {
-          dispatch(selectTerminalTab(id));
-        }
-        focusTab(next);
-        break;
-      }
-      case 'Home': {
-        event.preventDefault();
-        const id = tabAt(0);
-        if (id !== undefined) {
-          dispatch(selectTerminalTab(id));
-        }
-        focusTab(0);
-        break;
-      }
-      case 'End': {
-        event.preventDefault();
-        const last = tabs.length - 1;
-        const id = tabAt(last);
-        if (id !== undefined) {
-          dispatch(selectTerminalTab(id));
-        }
-        focusTab(last);
-        break;
-      }
-      case 'Delete':
-      case 'Backspace': {
-        if (event.metaKey || event.ctrlKey) {
-          event.preventDefault();
-          void dispatch(closeTerminalTab(sessionId));
-        }
-        break;
-      }
-      default:
-        break;
-    }
-  };
+  const handleKeyDown = tabStripKeyDownHandler(tabs, dispatch, focusTab);
 
   return (
     <div className={stripBaseClass} role="tablist" aria-label="Open terminals">
       {tabs.map((tab, index) => (
         <Tab
           key={tab.sessionId}
-          label={tab.label || `Terminal ${index + 1}`}
+          label={tab.label || `Terminal ${String(index + 1)}`}
           closeable={tab.kind === 'extra'}
           active={tab.sessionId === activeId}
           ref={(node) => {

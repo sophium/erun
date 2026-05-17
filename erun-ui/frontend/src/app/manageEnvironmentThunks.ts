@@ -141,8 +141,8 @@ export const selectManageVersionSuggestion =
     }
     dispatch(
       patchManageDialog({
-        version: suggestion?.version || '',
-        versionImage: suggestion?.image || '',
+        version: suggestion?.version ?? '',
+        versionImage: suggestion?.image ?? '',
         choicesOpen: false,
       }),
     );
@@ -216,10 +216,10 @@ export const chooseWorkspaceSyncLocalFolder =
     const folder = await dispatch(
       environmentApi.endpoints.chooseWorkspaceSyncLocalFolder.initiate({
         selection,
-        current: dialog.config.sshd.workspaceSyncLocalPath || '',
+        current: dialog.config.sshd.workspaceSyncLocalPath ?? '',
       }),
     ).unwrap();
-    const selected = String(folder || '').trim();
+    const selected = folder.trim();
     if (!selected) {
       return;
     }
@@ -639,10 +639,10 @@ export function manageDialogTabHasUnsavedChanges(
       return false;
     case 'ssh':
       return (
-        JSON.stringify(config.sshd?.workspaceSyncEnabled) !==
-          JSON.stringify(initial.sshd?.workspaceSyncEnabled) ||
-        JSON.stringify(config.sshd?.workspaceSyncLocalPath) !==
-          JSON.stringify(initial.sshd?.workspaceSyncLocalPath)
+        JSON.stringify(config.sshd.workspaceSyncEnabled) !==
+          JSON.stringify(initial.sshd.workspaceSyncEnabled) ||
+        JSON.stringify(config.sshd.workspaceSyncLocalPath) !==
+          JSON.stringify(initial.sshd.workspaceSyncLocalPath)
       );
     case 'delete':
       return false;

@@ -5,21 +5,19 @@ import simpleImportSort from 'eslint-plugin-simple-import-sort';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
-// Frontend lint config. Mirrors the Go side's golangci.yml rigor:
-//   complexity:10 + max-lines:100  ≈ cyclop + funlen
-//   strict-type-checked            ≈ staticcheck + govet
-//   no-floating-promises           ≈ errcheck
-//   no-unused-vars                 ≈ unused + ineffassign
-// Plus the React-specific rules Go does not need: rules-of-hooks (the
-// kind of bug that bit TerminalTabStrip), exhaustive-deps, react-refresh,
-// jsx-a11y for the Playwright queries that rely on accessible roles, and
-// tailwindcss for Tailwind class hygiene.
+// Frontend lint config. Mirrors the Go side's golangci.yml rigor and goes
+// further: cyclop:10 + funlen:100/50 on the Go side ⇒ complexity:10 +
+// max-lines-per-function:100 here; staticcheck + govet + errcheck ⇒
+// strictTypeChecked + stylisticTypeChecked. Every rule here is `error`;
+// inline disables and rule downgrades are not allowed (see
+// ~/.claude/projects/<this-repo>/memory/feedback_lint_no_disable.md).
 
 export default tseslint.config(
   {
     ignores: ['dist', 'node_modules', 'wailsjs', 'src/components/ui/**', '*.config.{js,mjs,ts}'],
   },
-  ...tseslint.configs.recommendedTypeChecked,
+  ...tseslint.configs.strictTypeChecked,
+  ...tseslint.configs.stylisticTypeChecked,
   jsxA11y.flatConfigs.recommended,
   {
     files: ['**/*.{ts,tsx}'],
@@ -43,14 +41,11 @@ export default tseslint.config(
       'simple-import-sort': simpleImportSort,
     },
     rules: {
-      // 15 matches golangci's gocyclo error floor on the Go side; the
-      // Go cyclop:10 setting is aspirational. JSX-heavy render functions
-      // need a little more headroom than control-flow-heavy Go funcs.
-      complexity: ['error', { max: 15 }],
+      complexity: ['error', { max: 10 }],
       'max-lines-per-function': [
         'error',
         {
-          max: 150,
+          max: 100,
           skipBlankLines: true,
           skipComments: true,
           IIFEs: true,
@@ -66,13 +61,9 @@ export default tseslint.config(
       ],
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'error',
-      'react-refresh/only-export-components': ['warn', { allowConstantExport: true }],
+      'react-refresh/only-export-components': ['error', { allowConstantExport: true }],
       'simple-import-sort/imports': 'error',
       'simple-import-sort/exports': 'error',
-      // The shadcn-generated UI primitives use empty interfaces for
-      // future-extensibility; the project's intentional plain-React
-      // style does not benefit from these stricter forms.
-      '@typescript-eslint/no-empty-object-type': 'off',
     },
   },
   {

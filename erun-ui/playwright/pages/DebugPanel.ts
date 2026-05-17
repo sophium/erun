@@ -2,12 +2,12 @@ import type { Locator, Page } from '@playwright/test';
 
 // DebugPanel POM. The debug panel sits at the bottom of the terminal area
 // and toggles open/closed; when open it renders a "Resize debug panel"
-// separator and Copy/Clear actions.
+// handle button and Copy/Clear actions.
 export class DebugPanel {
   constructor(public readonly page: Page) {}
 
   resizeHandle(): Locator {
-    return this.page.locator('[role="separator"][aria-label="Resize debug panel"]');
+    return this.page.getByRole('button', { name: 'Resize debug panel' });
   }
 
   toggleButton(): Locator {

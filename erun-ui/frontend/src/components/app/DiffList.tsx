@@ -30,7 +30,7 @@ export function DiffList(): React.ReactElement {
       />
     );
   }
-  const files = review.diff?.files || [];
+  const files = review.diff?.files ?? [];
   if (files.length === 0) {
     return <ReviewStatus>No changes</ReviewStatus>;
   }
@@ -121,15 +121,15 @@ function DiffFileView({
       {file.binary ? (
         <ReviewStatus>Binary file changed</ReviewStatus>
       ) : (
-        (file.hunks || []).map((hunk) => <DiffHunkView key={hunk.header} hunk={hunk} />)
+        (file.hunks ?? []).map((hunk) => <DiffHunkView key={hunk.header} hunk={hunk} />)
       )}
     </section>
   );
 }
 
 function DiffHunkView({ hunk }: { hunk: DiffHunk }): React.ReactElement {
-  const contentWidth = Math.max(1, ...(hunk.lines || []).map((line) => line.content?.length || 0));
-  const style = { '--diff-content-width': `${contentWidth + 2}ch` } as React.CSSProperties;
+  const contentWidth = Math.max(1, ...(hunk.lines ?? []).map((line) => line.content.length));
+  const style = { '--diff-content-width': `${String(contentWidth + 2)}ch` } as React.CSSProperties;
 
   return (
     <div className="overflow-hidden rounded-[var(--radius)] border bg-background not-first:mt-2.5">
@@ -137,9 +137,9 @@ function DiffHunkView({ hunk }: { hunk: DiffHunk }): React.ReactElement {
         {hunk.header}
       </div>
       <div className="relative max-w-full overflow-x-auto overflow-y-hidden" style={style}>
-        {(hunk.lines || []).map((line, index) => (
+        {(hunk.lines ?? []).map((line, index) => (
           <div
-            key={`${line.oldLine || ''}:${line.newLine || ''}:${index}`}
+            key={`${String(line.oldLine ?? '')}:${String(line.newLine ?? '')}:${String(index)}`}
             className={cn(
               'grid min-h-5 w-max min-w-full grid-cols-[48px_48px_22px_minmax(var(--diff-content-width),1fr)] bg-background font-mono text-[11px] leading-5',
               line.kind === 'add' && 'bg-diff-add',
@@ -148,10 +148,10 @@ function DiffHunkView({ hunk }: { hunk: DiffHunk }): React.ReactElement {
             )}
           >
             <span className="select-none border-r border-[oklch(0_0_0/0.05)] bg-inherit px-2 text-right text-muted-foreground">
-              {line.oldLine || ''}
+              {line.oldLine ?? ''}
             </span>
             <span className="select-none border-r border-[oklch(0_0_0/0.05)] bg-inherit px-2 text-right text-muted-foreground">
-              {line.newLine || ''}
+              {line.newLine ?? ''}
             </span>
             <span className="select-none border-r border-[oklch(0_0_0/0.05)] bg-inherit text-center text-foreground">
               {diffLineMark(line.kind)}

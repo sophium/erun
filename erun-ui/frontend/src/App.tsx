@@ -27,6 +27,7 @@ import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
 import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
 import { ManageDialogView } from '@/components/app/ManageDialogView';
 import { ReconnectDialog } from '@/components/app/ReconnectDialog';
+import { ResizeHandle } from '@/components/app/ResizeHandle';
 import { ReviewPanel } from '@/components/app/ReviewPanel';
 import { Sidebar } from '@/components/app/Sidebar';
 import { TenantDashboardView } from '@/components/app/TenantDashboardView';
@@ -92,14 +93,11 @@ export function App(): React.ReactElement {
             )}
           >
             <Sidebar />
-            {/* role=separator is the WAI-ARIA pattern for a resize handle;
-                keyboard support is a separate follow-up. */}
-            {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
-            <div
-              className={cn(splitterClassName, sidebarHidden && 'pointer-events-none')}
-              role="separator"
-              aria-orientation="vertical"
-              aria-label="Resize sidebar"
+            <ResizeHandle
+              className={splitterClassName}
+              orientation="vertical"
+              label="Resize sidebar"
+              hidden={sidebarHidden}
               onMouseDown={(event) => {
                 dispatch(startSidebarResize(event));
               }}
@@ -155,7 +153,9 @@ function ActivityQueueLauncher({
             size="icon"
             className="fixed bottom-5 right-5 z-20 size-10 rounded-full shadow-lg"
             aria-label={
-              activeCount > 0 ? `Open deploy queue (${activeCount} active)` : 'Open deploy queue'
+              activeCount > 0
+                ? `Open deploy queue (${String(activeCount)} active)`
+                : 'Open deploy queue'
             }
             onClick={onOpen}
           >
@@ -169,7 +169,7 @@ function ActivityQueueLauncher({
         </TooltipTrigger>
         <TooltipContent side="left">
           {activeCount > 0
-            ? `${activeCount} deploy${activeCount > 1 ? 's' : ''} in progress`
+            ? `${String(activeCount)} deploy${activeCount > 1 ? 's' : ''} in progress`
             : 'Deploys'}
         </TooltipContent>
       </Tooltip>
@@ -297,13 +297,11 @@ function TerminalPane({
           )}
         </div>
       </div>
-      {/* role=separator resize handle; see note above. */}
-      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
-      <div
-        className={cn(reviewSplitterClassName, !reviewOpen && 'hidden')}
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize diff panel"
+      <ResizeHandle
+        className={reviewSplitterClassName}
+        orientation="vertical"
+        label="Resize diff panel"
+        hidden={!reviewOpen}
         onMouseDown={(event) => {
           dispatch(startReviewResize(event));
         }}
@@ -337,22 +335,16 @@ function TerminalBusyOverlay({ message }: { message: string }): React.ReactEleme
   );
 }
 
-function DebugPanel({
-  open,
-  output,
-  sessionId,
-  verbose,
-}: {
-  open: boolean;
-  output: string;
-  sessionId: number;
-  verbose: boolean;
-}): React.ReactElement {
-  const dispatch = useAppDispatch();
+function useDebugPanelScrollBinding(
+  open: boolean,
+  sessionId: number,
+  output: string,
+): {
+  outputRef: React.RefObject<HTMLDivElement | null>;
+  handleScroll: React.UIEventHandler<HTMLDivElement>;
+} {
   const outputRef = React.useRef<HTMLDivElement>(null);
   const stuckToBottomRef = React.useRef(true);
-  const copyStatus = useAppSelector((state) => state.terminalStatus.debugCopyStatus);
-  const canCopy = output.trim().length > 0;
 
   const handleScroll = React.useCallback(() => {
     const el = outputRef.current;
@@ -385,6 +377,16 @@ function DebugPanel({
     }
   }, [open, output]);
 
+  return { outputRef, handleScroll };
+}
+
+function useDebugCopyAction(
+  output: string,
+  canCopy: boolean,
+): { copyStatus: string; copyDebugOutput: () => void } {
+  const dispatch = useAppDispatch();
+  const copyStatus = useAppSelector((state) => state.terminalStatus.debugCopyStatus);
+
   React.useEffect(() => {
     dispatch(setDebugCopyStatus(''));
   }, [dispatch, output]);
@@ -401,6 +403,25 @@ function DebugPanel({
       .catch((error: unknown) => dispatch(setDebugCopyStatus(readError(error))));
   }, [canCopy, dispatch, output]);
 
+  return { copyStatus, copyDebugOutput };
+}
+
+function DebugPanel({
+  open,
+  output,
+  sessionId,
+  verbose,
+}: {
+  open: boolean;
+  output: string;
+  sessionId: number;
+  verbose: boolean;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const canCopy = output.trim().length > 0;
+  const { outputRef, handleScroll } = useDebugPanelScrollBinding(open, sessionId, output);
+  const { copyStatus, copyDebugOutput } = useDebugCopyAction(output, canCopy);
+
   return (
     <section
       className={cn(
@@ -409,87 +430,130 @@ function DebugPanel({
       )}
     >
       {open && (
-        /* role=separator resize handle; see note above. */
-        /* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */
-        <div
+        <ResizeHandle
           className={debugSplitterClassName}
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label="Resize debug panel"
+          orientation="horizontal"
+          label="Resize debug panel"
           onMouseDown={(event) => {
             dispatch(startDebugResize(event));
           }}
         />
       )}
-      <div className="flex h-[34px] items-center justify-between gap-2 border-b border-[oklch(0.18_0_0)] px-3">
-        <button
-          type="button"
-          className="flex min-w-0 items-center gap-2 border-0 bg-transparent p-0 text-xs font-medium tracking-normal text-[oklch(0.76_0_0)]"
-          onClick={() => {
-            dispatch(setDebugOpen(!open));
-          }}
-        >
-          {open ? (
-            <ChevronDown className="size-4" aria-hidden="true" />
-          ) : (
-            <ChevronUp className="size-4" aria-hidden="true" />
-          )}
-          <span>Debug</span>
-          <span className="text-[11px] font-normal text-[oklch(0.56_0_0)]">
-            {open ? 'erun -vv output' : 'collapsed'}
-          </span>
-        </button>
-        {open && (
-          <div className="flex items-center gap-1">
-            <Button
-              className="h-6 px-2 text-[11px] [&_svg]:size-3.5"
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={!canCopy}
-              onClick={copyDebugOutput}
-            >
-              {copyStatus === 'Copied' ? (
-                <CheckCircle2 aria-hidden="true" />
-              ) : (
-                <Copy aria-hidden="true" />
-              )}
-              {copyStatus || 'Copy'}
-            </Button>
-            <Button
-              className="h-6 px-2 text-[11px] [&_svg]:size-3.5"
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                dispatch(clearDebugOutput());
-              }}
-            >
-              <Trash2 aria-hidden="true" />
-              Clear
-            </Button>
-          </div>
-        )}
-      </div>
+      <DebugPanelHeader
+        open={open}
+        canCopy={canCopy}
+        copyStatus={copyStatus}
+        copyDebugOutput={copyDebugOutput}
+      />
       {open && (
-        <div
-          ref={outputRef}
-          onScroll={handleScroll}
-          className="min-h-0 overflow-auto px-3 py-2 font-mono text-[11px] leading-[1.35] text-[oklch(0.82_0_0)]"
-        >
-          {!verbose && sessionId > 0 && (
-            <div className="mb-2 rounded border border-[oklch(0.32_0_0)] bg-[oklch(0.10_0_0)] px-3 py-2 text-[11px] leading-[1.4] text-[oklch(0.74_0_0)]">
-              Active session was not started with <code>-vv</code>, so trace lines won't appear
-              here. To capture verbose output: run <code>erun -vv &lt;command&gt;</code> in this
-              shell, or open this Debug panel before launching commands from the UI.
-            </div>
-          )}
-          <pre className="m-0 whitespace-pre-wrap break-words font-mono text-[11px] leading-[1.35]">
-            {output ||
-              'Run an environment command while Debug is expanded to stream erun -vv output here.'}
-          </pre>
-        </div>
+        <DebugPanelOutput
+          outputRef={outputRef}
+          handleScroll={handleScroll}
+          output={output}
+          sessionId={sessionId}
+          verbose={verbose}
+        />
       )}
     </section>
+  );
+}
+
+function DebugPanelHeader({
+  open,
+  canCopy,
+  copyStatus,
+  copyDebugOutput,
+}: {
+  open: boolean;
+  canCopy: boolean;
+  copyStatus: string;
+  copyDebugOutput: () => void;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <div className="flex h-[34px] items-center justify-between gap-2 border-b border-[oklch(0.18_0_0)] px-3">
+      <button
+        type="button"
+        className="flex min-w-0 items-center gap-2 border-0 bg-transparent p-0 text-xs font-medium tracking-normal text-[oklch(0.76_0_0)]"
+        onClick={() => {
+          dispatch(setDebugOpen(!open));
+        }}
+      >
+        {open ? (
+          <ChevronDown className="size-4" aria-hidden="true" />
+        ) : (
+          <ChevronUp className="size-4" aria-hidden="true" />
+        )}
+        <span>Debug</span>
+        <span className="text-[11px] font-normal text-[oklch(0.56_0_0)]">
+          {open ? 'erun -vv output' : 'collapsed'}
+        </span>
+      </button>
+      {open && (
+        <div className="flex items-center gap-1">
+          <Button
+            className="h-6 px-2 text-[11px] [&_svg]:size-3.5"
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={!canCopy}
+            onClick={copyDebugOutput}
+          >
+            {copyStatus === 'Copied' ? (
+              <CheckCircle2 aria-hidden="true" />
+            ) : (
+              <Copy aria-hidden="true" />
+            )}
+            {copyStatus || 'Copy'}
+          </Button>
+          <Button
+            className="h-6 px-2 text-[11px] [&_svg]:size-3.5"
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              dispatch(clearDebugOutput());
+            }}
+          >
+            <Trash2 aria-hidden="true" />
+            Clear
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DebugPanelOutput({
+  outputRef,
+  handleScroll,
+  output,
+  sessionId,
+  verbose,
+}: {
+  outputRef: React.RefObject<HTMLDivElement | null>;
+  handleScroll: React.UIEventHandler<HTMLDivElement>;
+  output: string;
+  sessionId: number;
+  verbose: boolean;
+}): React.ReactElement {
+  return (
+    <div
+      ref={outputRef}
+      onScroll={handleScroll}
+      className="min-h-0 overflow-auto px-3 py-2 font-mono text-[11px] leading-[1.35] text-[oklch(0.82_0_0)]"
+    >
+      {!verbose && sessionId > 0 && (
+        <div className="mb-2 rounded border border-[oklch(0.32_0_0)] bg-[oklch(0.10_0_0)] px-3 py-2 text-[11px] leading-[1.4] text-[oklch(0.74_0_0)]">
+          Active session was not started with <code>-vv</code>, so trace lines won't appear here. To
+          capture verbose output: run <code>erun -vv &lt;command&gt;</code> in this shell, or open
+          this Debug panel before launching commands from the UI.
+        </div>
+      )}
+      <pre className="m-0 whitespace-pre-wrap break-words font-mono text-[11px] leading-[1.35]">
+        {output ||
+          'Run an environment command while Debug is expanded to stream erun -vv output here.'}
+      </pre>
+    </div>
   );
 }

@@ -33,6 +33,7 @@ import type { AppDispatch } from '@/app/store';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import type { UISelection } from '@/types';
 
 import { IconTooltip } from './IconTooltip';
 
@@ -60,6 +61,54 @@ export function Titlebar(): React.ReactElement {
   );
 }
 
+interface IDETitlebarButtonProps {
+  selected: UISelection | null;
+  disabled: boolean;
+  tooltip: string;
+  className: string;
+  icon: React.ReactElement;
+  variant: 'vscode' | 'intellij';
+  dispatch: ReturnType<typeof useAppDispatch>;
+}
+
+function IDETitlebarButton({
+  selected,
+  disabled,
+  tooltip,
+  className,
+  icon,
+  variant,
+  dispatch,
+}: IDETitlebarButtonProps): React.ReactElement {
+  return (
+    <IconTooltip label={tooltip}>
+      <span className={className}>
+        <Button
+          className="size-full border-0 bg-transparent text-inherit hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-[18px]"
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={tooltip}
+          disabled={disabled}
+          onClick={() => {
+            void dispatch(openIDE(selected ?? null, variant));
+          }}
+        >
+          {icon}
+        </Button>
+      </span>
+    </IconTooltip>
+  );
+}
+
+function isIdeDisabled(selected: UISelection | null, tenants: AppState['tenants']): boolean {
+  if (!selected) return true;
+  const env = tenants
+    .find((tenant) => tenant.name === selected.tenant)
+    ?.environments.find((environment) => environment.name === selected.environment);
+  return env?.remote !== false && env?.sshdEnabled !== true;
+}
+
 function TitlebarControls(): React.ReactElement {
   const dispatch = useAppDispatch();
   const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
@@ -69,14 +118,7 @@ function TitlebarControls(): React.ReactElement {
   const tenants = useAppSelector((state) => state.tenants.tenants);
   const SidebarIcon = sidebarHidden ? PanelLeftOpen : PanelLeftClose;
   const ReviewIcon = reviewOpen ? PanelRightClose : PanelRightOpen;
-  const selectedEnvironment = selected
-    ? tenants
-        .find((tenant) => tenant.name === selected.tenant)
-        ?.environments.find((environment) => environment.name === selected.environment)
-    : undefined;
-  const ideDisabled =
-    !selected ||
-    (selectedEnvironment?.remote !== false && selectedEnvironment?.sshdEnabled !== true);
+  const ideDisabled = isIdeDisabled(selected, tenants);
   const vscodeTooltip = ideTooltipLabel('VS Code', selected, ideDisabled);
   const intellijTooltip = ideTooltipLabel('IntelliJ IDEA', selected, ideDisabled);
 
@@ -116,50 +158,30 @@ function TitlebarControls(): React.ReactElement {
           <ReviewIcon />
         </Button>
       </IconTooltip>
-      <IconTooltip label={ideTooltipLabel('VS Code', selected, ideDisabled)}>
-        <span
-          className={cn(
-            titlebarButtonClassName,
-            'left-auto right-[122px] max-[980px]:left-auto max-[980px]:right-[108px]',
-          )}
-        >
-          <Button
-            className="size-full border-0 bg-transparent text-inherit hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-[18px]"
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={vscodeTooltip}
-            disabled={ideDisabled}
-            onClick={() => {
-              void dispatch(openIDE(selected ?? null, 'vscode'));
-            }}
-          >
-            <Code2 />
-          </Button>
-        </span>
-      </IconTooltip>
-      <IconTooltip label={ideTooltipLabel('IntelliJ IDEA', selected, ideDisabled)}>
-        <span
-          className={cn(
-            titlebarButtonClassName,
-            'left-auto right-[90px] max-[980px]:left-auto max-[980px]:right-[78px]',
-          )}
-        >
-          <Button
-            className="size-full border-0 bg-transparent text-inherit hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-[18px]"
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={intellijTooltip}
-            disabled={ideDisabled}
-            onClick={() => {
-              void dispatch(openIDE(selected ?? null, 'intellij'));
-            }}
-          >
-            <Blocks />
-          </Button>
-        </span>
-      </IconTooltip>
+      <IDETitlebarButton
+        selected={selected}
+        disabled={ideDisabled}
+        tooltip={vscodeTooltip}
+        className={cn(
+          titlebarButtonClassName,
+          'left-auto right-[122px] max-[980px]:left-auto max-[980px]:right-[108px]',
+        )}
+        icon={<Code2 />}
+        variant="vscode"
+        dispatch={dispatch}
+      />
+      <IDETitlebarButton
+        selected={selected}
+        disabled={ideDisabled}
+        tooltip={intellijTooltip}
+        className={cn(
+          titlebarButtonClassName,
+          'left-auto right-[90px] max-[980px]:left-auto max-[980px]:right-[78px]',
+        )}
+        icon={<Blocks />}
+        variant="intellij"
+        dispatch={dispatch}
+      />
       <IconTooltip label="Toggle changed files list">
         <Button
           className={cn(
@@ -225,20 +247,17 @@ function IdleStatusBadge({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div
+        <button
+          type="button"
           className={cn(
-            'flex h-full min-w-[64px] items-center justify-center rounded-l-md px-2 font-mono text-[12px] leading-none outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
+            'flex h-full min-w-[64px] cursor-default items-center justify-center rounded-l-md border-0 bg-transparent px-2 font-mono text-[12px] leading-none outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
             hasAction && 'border-r',
             idleBadge.className,
           )}
-          // Focusable read-only badge: tabIndex={0} is what triggers the
-          // tooltip via keyboard. Element has no click handler by design.
-          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-          tabIndex={0}
           aria-label={idleStatusAccessibleLabel(idleStatus)}
         >
           {idleBadge.label}
-        </div>
+        </button>
       </TooltipTrigger>
       <TooltipContent
         side="bottom"
@@ -247,7 +266,10 @@ function IdleStatusBadge({
       >
         <div className="space-y-1">
           {idleStatusTooltipLines(idleStatus).map((line, index) => (
-            <div key={`${index}-${line}`} className={line.startsWith('- ') ? 'pl-2' : undefined}>
+            <div
+              key={`${String(index)}-${line}`}
+              className={line.startsWith('- ') ? 'pl-2' : undefined}
+            >
               {line}
             </div>
           ))}
@@ -444,17 +466,14 @@ function StatusMessage({ status }: { status: TitlebarStatusValue }): React.React
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span
-          className="min-w-0 truncate outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
-          // Focusable status text so the keyboard user can read the tooltip
-          // with the full message. Element has no click handler.
-          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
-          tabIndex={0}
+        <button
+          type="button"
+          className="min-w-0 cursor-default truncate rounded-sm border-0 bg-transparent p-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label={fullText}
         >
           {status.message}
           {status.detail && <span className="text-muted-foreground"> - {status.detail}</span>}
-        </span>
+        </button>
       </TooltipTrigger>
       <TooltipContent side="bottom" className="max-w-[360px] whitespace-normal text-left leading-5">
         {fullText}
@@ -544,6 +563,11 @@ function ideTooltipLabel(ide: string, selected: AppState['selected'], disabled: 
 
 type IdleStatus = NonNullable<AppState['idleStatus']>;
 
+function idleCloudDisplayName(idleStatus: IdleStatus, fallback: string): string {
+  const trimmedLabel = idleStatus.cloudContextLabel?.trim() ?? '';
+  return trimmedLabel !== '' ? trimmedLabel : fallback;
+}
+
 function idleCloudAction(
   idleStatus: IdleStatus,
   busy: boolean,
@@ -552,18 +576,13 @@ function idleCloudAction(
   if (!idleStatus.managedCloud || !name) {
     return null;
   }
-  const displayName = idleStatus.cloudContextLabel?.trim() || name;
+  const displayName = idleCloudDisplayName(idleStatus, name);
   const running = idleStatus.cloudContextStatus?.trim().toLowerCase() === 'running';
-  if (running) {
-    return {
-      action: 'stop',
-      label: busy ? `Stopping ${displayName}` : `Stop ${displayName}`,
-      busy,
-    };
-  }
+  const verbActive = running ? 'Stopping' : 'Starting';
+  const verbIdle = running ? 'Stop' : 'Start';
   return {
-    action: 'start',
-    label: busy ? `Starting ${displayName}` : `Start ${displayName}`,
+    action: running ? 'stop' : 'start',
+    label: busy ? `${verbActive} ${displayName}` : `${verbIdle} ${displayName}`,
     busy,
   };
 }
@@ -597,7 +616,7 @@ function idleStatusBadge(idleStatus: IdleStatus): { label: string; className: st
     };
   }
   return {
-    label: `idle ${idleStatus.secondsUntilStop}s`,
+    label: `idle ${String(idleStatus.secondsUntilStop)}s`,
     className: 'border-border text-muted-foreground',
   };
 }
@@ -617,8 +636,8 @@ function idleStatusTooltipLines(idleStatus: IdleStatus): string[] {
 
 function idleStatusSummaryLines(idleStatus: IdleStatus): string[] {
   return [
-    `Idle timeout: ${idleStatus.timeoutSeconds}s`,
-    `Seconds until stop: ${idleStatus.secondsUntilStop}s`,
+    `Idle timeout: ${String(idleStatus.timeoutSeconds)}s`,
+    `Seconds until stop: ${String(idleStatus.secondsUntilStop)}s`,
     `Stop eligible: ${idleStatus.stopEligible ? 'yes' : 'no'}`,
     `Working hours: ${idleStatus.outsideWorkingHours ? 'outside; autostop overrides activity' : 'inside; idle timeout applies'}`,
   ];
@@ -634,7 +653,9 @@ function appendIdleBlockerLine(lines: string[], idleStatus: IdleStatus): void {
 
 function appendIdleCloudContextLine(lines: string[], idleStatus: IdleStatus): void {
   if (idleStatus.cloudContextName) {
-    const label = idleStatus.cloudContextLabel || idleStatus.cloudContextName;
+    const label = idleStatus.cloudContextLabel?.trim()
+      ? idleStatus.cloudContextLabel
+      : idleStatus.cloudContextName;
     lines.push(
       `Cloud environment: ${label}${idleStatus.cloudContextStatus ? ` (${idleStatus.cloudContextStatus})` : ''}`,
     );
@@ -642,7 +663,7 @@ function appendIdleCloudContextLine(lines: string[], idleStatus: IdleStatus): vo
 }
 
 function idleStatusActiveMarkerLines(idleStatus: IdleStatus): string[] {
-  const activeMarkers = (idleStatus.markers || []).filter(
+  const activeMarkers = (idleStatus.markers ?? []).filter(
     (marker) => marker.name !== 'working-hours' && !marker.idle,
   );
   if (activeMarkers.length === 0) {
@@ -654,7 +675,7 @@ function idleStatusActiveMarkerLines(idleStatus: IdleStatus): string[] {
 function idleStatusActiveMarkerLine(marker: NonNullable<IdleStatus['markers']>[number]): string {
   const remaining =
     marker.secondsRemaining && marker.secondsRemaining > 0
-      ? `, ${marker.secondsRemaining}s remaining`
+      ? `, ${String(marker.secondsRemaining)}s remaining`
       : '';
   return `- ${marker.name}${marker.reason ? `: ${marker.reason}` : ''}${remaining}`;
 }
@@ -670,8 +691,8 @@ function appendIdleStopOutcomeLines(lines: string[], idleStatus: IdleStatus): vo
 
 function idleStatusAccessibleLabel(idleStatus: IdleStatus): string {
   const parts = [
-    `Idle timeout ${idleStatus.timeoutSeconds} seconds`,
-    `seconds until stop ${idleStatus.secondsUntilStop}`,
+    `Idle timeout ${String(idleStatus.timeoutSeconds)} seconds`,
+    `seconds until stop ${String(idleStatus.secondsUntilStop)}`,
     `stop eligible ${idleStatus.stopEligible ? 'yes' : 'no'}`,
     idleStatus.outsideWorkingHours ? 'outside working hours' : 'inside working hours',
   ];
@@ -683,7 +704,7 @@ function idleStatusAccessibleLabel(idleStatus: IdleStatus): string {
   }
   if (idleStatus.cloudContextName) {
     parts.push(
-      `cloud environment ${idleStatus.cloudContextLabel || idleStatus.cloudContextName}${idleStatus.cloudContextStatus ? ` ${idleStatus.cloudContextStatus}` : ''}`,
+      `cloud environment ${idleStatus.cloudContextLabel?.trim() ? idleStatus.cloudContextLabel : (idleStatus.cloudContextName ?? '')}${idleStatus.cloudContextStatus ? ` ${idleStatus.cloudContextStatus}` : ''}`,
     );
   }
   return parts.join(', ');

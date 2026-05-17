@@ -76,7 +76,7 @@ export const sessionsSlice = createSlice({
       state.debugFilters[action.payload.sessionId] = action.payload.filter;
     },
     clearDebugFilter(state, action: PayloadAction<number>) {
-      delete state.debugFilters[action.payload];
+      Reflect.deleteProperty(state.debugFilters, action.payload);
     },
     registerDebugSession(
       state,
@@ -89,13 +89,13 @@ export const sessionsSlice = createSlice({
     },
     setSessionDebug(state, action: PayloadAction<{ sessionId: number; value: string }>) {
       if (!action.payload.value) {
-        delete state.debugBuffers[action.payload.sessionId];
+        Reflect.deleteProperty(state.debugBuffers, action.payload.sessionId);
         return;
       }
       state.debugBuffers[action.payload.sessionId] = action.payload.value;
     },
     clearSessionDebug(state, action: PayloadAction<number>) {
-      delete state.debugBuffers[action.payload];
+      Reflect.deleteProperty(state.debugBuffers, action.payload);
     },
     // takeExitSelections clears all selection-tracking entries for the
     // session in one atomic action. The caller reads the values out of
@@ -105,14 +105,14 @@ export const sessionsSlice = createSlice({
       action: PayloadAction<{ sessionId: number; selectionKey: string | null }>,
     ) {
       const { sessionId, selectionKey } = action.payload;
-      delete state.sshdInitSelections[sessionId];
-      delete state.doctorSelections[sessionId];
-      delete state.openSelections[sessionId];
-      delete state.cloudInitSessions[sessionId];
-      delete state.debugModes[sessionId];
-      delete state.debugBuffers[sessionId];
+      Reflect.deleteProperty(state.sshdInitSelections, sessionId);
+      Reflect.deleteProperty(state.doctorSelections, sessionId);
+      Reflect.deleteProperty(state.openSelections, sessionId);
+      Reflect.deleteProperty(state.cloudInitSessions, sessionId);
+      Reflect.deleteProperty(state.debugModes, sessionId);
+      Reflect.deleteProperty(state.debugBuffers, sessionId);
       if (selectionKey !== null) {
-        delete state.selectionToSessionId[selectionKey];
+        Reflect.deleteProperty(state.selectionToSessionId, selectionKey);
       }
     },
   },

@@ -51,6 +51,104 @@ const drawerVisibleClassName = 'translate-x-0';
 // entries, and Wails-exported actions register through the action
 // runner. There is no cross-restart persistence, so failed activities
 // from previous sessions don't reappear.
+function ActivityQueueHeader({
+  nowCount,
+  nextCount,
+  onClose,
+}: {
+  nowCount: number;
+  nextCount: number;
+  onClose: () => void;
+}): React.ReactElement {
+  return (
+    <header className="flex items-center justify-between border-b px-4 py-3">
+      <div className="flex items-center gap-2">
+        <h2 className="text-sm font-semibold">Activities</h2>
+        <span
+          className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+          aria-live="polite"
+        >
+          {nowCount} now · {nextCount} next
+        </span>
+      </div>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label="Close activity queue"
+        onClick={onClose}
+      >
+        <X aria-hidden="true" className="size-4" />
+      </Button>
+    </header>
+  );
+}
+
+interface ActivityQueueSectionsProps {
+  nowEntries: ActivityQueueEntry[];
+  nextEntries: ActivityQueueEntry[];
+  historyEntries: ActivityQueueEntry[];
+  recoveryFeedback: ActivityRecoveryResult | null;
+  setRecoveryFeedback: (value: ActivityRecoveryResult | null) => void;
+  dismiss: (id: string) => Promise<void>;
+  forceDismiss: (id: string) => Promise<void>;
+  cancelWaiting: (id: string) => Promise<boolean>;
+  killSession: (sessionId: number) => Promise<boolean>;
+  onRecoverPendingHelm: (id: string) => Promise<void>;
+  dismissAllNow: () => Promise<void>;
+  cancelAllNext: () => Promise<void>;
+  dismissAllHistory: () => Promise<void>;
+}
+
+function ActivityQueueSections(props: ActivityQueueSectionsProps): React.ReactElement {
+  return (
+    <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-3" aria-live="polite">
+      {props.recoveryFeedback && (
+        <RecoveryFeedback
+          result={props.recoveryFeedback}
+          onDismiss={() => {
+            props.setRecoveryFeedback(null);
+          }}
+        />
+      )}
+      <ActivitySection
+        title="Now"
+        entries={props.nowEntries}
+        emptyText="Nothing running."
+        onForceDismiss={props.forceDismiss}
+        onRecoverPendingHelm={props.onRecoverPendingHelm}
+        onKillSession={props.killSession}
+        onClearAll={props.nowEntries.length > 1 ? props.dismissAllNow : undefined}
+        clearAllLabel="Force dismiss all"
+        clearAllHint="Removes every running entry from the queue. Underlying processes are not killed unless you also use Kill on a shell entry."
+      />
+      <ActivitySection
+        title="Next"
+        entries={props.nextEntries}
+        emptyText="Queue is empty."
+        onCancelWaiting={props.cancelWaiting}
+        onClearAll={props.nextEntries.length > 1 ? props.cancelAllNext : undefined}
+        clearAllLabel="Cancel all"
+        clearAllHint="Cancels every queued action that hasn't started yet."
+      />
+      <ActivitySection
+        title="Recent"
+        entries={props.historyEntries}
+        emptyText="No recent activities."
+        onDismiss={props.dismiss}
+        onClearAll={props.historyEntries.length > 1 ? props.dismissAllHistory : undefined}
+        clearAllLabel="Clear history"
+      />
+    </div>
+  );
+}
+
+function isHistoryStatus(status: ActivityQueueEntry['status']): boolean {
+  return (
+    status === 'succeeded' || status === 'failed' || status === 'skipped' || status === 'cancelled'
+  );
+}
+
 export function ActivityQueueDrawer({
   open,
   onClose,
@@ -59,13 +157,7 @@ export function ActivityQueueDrawer({
     useActivityQueue();
   const nowEntries = entries.filter((entry) => entry.status === 'running');
   const nextEntries = entries.filter((entry) => entry.status === 'waiting');
-  const historyEntries = entries.filter(
-    (entry) =>
-      entry.status === 'succeeded' ||
-      entry.status === 'failed' ||
-      entry.status === 'skipped' ||
-      entry.status === 'cancelled',
-  );
+  const historyEntries = entries.filter((entry) => isHistoryStatus(entry.status));
   const [recoveryFeedback, setRecoveryFeedback] = React.useState<ActivityRecoveryResult | null>(
     null,
   );
@@ -105,64 +197,26 @@ export function ActivityQueueDrawer({
         aria-label="Activity queue"
         aria-hidden={!open}
       >
-        <header className="flex items-center justify-between border-b px-4 py-3">
-          <div className="flex items-center gap-2">
-            <h2 className="text-sm font-semibold">Activities</h2>
-            <span
-              className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-              aria-live="polite"
-            >
-              {nowEntries.length} now · {nextEntries.length} next
-            </span>
-          </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label="Close activity queue"
-            onClick={onClose}
-          >
-            <X aria-hidden="true" className="size-4" />
-          </Button>
-        </header>
-        <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-3" aria-live="polite">
-          {recoveryFeedback && (
-            <RecoveryFeedback
-              result={recoveryFeedback}
-              onDismiss={() => {
-                setRecoveryFeedback(null);
-              }}
-            />
-          )}
-          <ActivitySection
-            title="Now"
-            entries={nowEntries}
-            emptyText="Nothing running."
-            onForceDismiss={forceDismiss}
-            onRecoverPendingHelm={onRecoverPendingHelm}
-            onKillSession={killSession}
-            onClearAll={nowEntries.length > 1 ? dismissAllNow : undefined}
-            clearAllLabel="Force dismiss all"
-            clearAllHint="Removes every running entry from the queue. Underlying processes are not killed unless you also use Kill on a shell entry."
-          />
-          <ActivitySection
-            title="Next"
-            entries={nextEntries}
-            emptyText="Queue is empty."
-            onCancelWaiting={cancelWaiting}
-            onClearAll={nextEntries.length > 1 ? cancelAllNext : undefined}
-            clearAllLabel="Cancel all"
-            clearAllHint="Cancels every queued action that hasn't started yet."
-          />
-          <ActivitySection
-            title="Recent"
-            entries={historyEntries}
-            emptyText="No recent activities."
-            onDismiss={dismiss}
-            onClearAll={historyEntries.length > 1 ? dismissAllHistory : undefined}
-            clearAllLabel="Clear history"
-          />
-        </div>
+        <ActivityQueueHeader
+          nowCount={nowEntries.length}
+          nextCount={nextEntries.length}
+          onClose={onClose}
+        />
+        <ActivityQueueSections
+          nowEntries={nowEntries}
+          nextEntries={nextEntries}
+          historyEntries={historyEntries}
+          recoveryFeedback={recoveryFeedback}
+          setRecoveryFeedback={setRecoveryFeedback}
+          dismiss={dismiss}
+          forceDismiss={forceDismiss}
+          cancelWaiting={cancelWaiting}
+          killSession={killSession}
+          onRecoverPendingHelm={onRecoverPendingHelm}
+          dismissAllNow={dismissAllNow}
+          cancelAllNext={cancelAllNext}
+          dismissAllHistory={dismissAllHistory}
+        />
       </aside>
     </>
   );
@@ -310,6 +364,40 @@ function useTickingNow(active: boolean): number {
   return now;
 }
 
+function activityElapsedLabel(entry: ActivityQueueEntry, now: number): string {
+  const isRunning = entry.status === 'running';
+  const isWaiting = entry.status === 'waiting';
+  if (isRunning || isWaiting) {
+    const elapsedAnchor = isWaiting && entry.enqueuedAt ? entry.enqueuedAt : entry.startedAt;
+    return formatElapsed(elapsedAnchor, now);
+  }
+  if (entry.endedAt) {
+    return formatElapsed(entry.startedAt, Date.parse(entry.endedAt));
+  }
+  return formatElapsed(entry.startedAt, Date.parse(entry.lastUpdated));
+}
+
+function dismissAffordance(
+  status: ActivityQueueEntry['status'],
+  onDismiss: ((id: string) => Promise<void>) | undefined,
+  onForceDismiss: ((id: string) => Promise<void>) | undefined,
+  onCancelWaiting: ((id: string) => Promise<boolean>) | undefined,
+): { available: boolean; label: string } {
+  if (status === 'waiting') {
+    return {
+      available: Boolean(onCancelWaiting),
+      label: 'Cancel — removes this entry from the queue before it starts.',
+    };
+  }
+  if (status === 'running') {
+    return {
+      available: Boolean(onForceDismiss),
+      label: 'Force dismiss (entry only — does not stop the underlying process)',
+    };
+  }
+  return { available: Boolean(onDismiss), label: 'Dismiss' };
+}
+
 const ActivityCard = React.memo(function ActivityCard({
   entry,
   onDismiss,
@@ -320,14 +408,8 @@ const ActivityCard = React.memo(function ActivityCard({
 }: ActivityCardProps): React.ReactElement {
   const isRunning = entry.status === 'running';
   const isWaiting = entry.status === 'waiting';
-  const tickingActive = isRunning || isWaiting;
-  const now = useTickingNow(tickingActive);
-  const elapsedAnchor = isWaiting && entry.enqueuedAt ? entry.enqueuedAt : entry.startedAt;
-  const elapsed = tickingActive
-    ? formatElapsed(elapsedAnchor, now)
-    : entry.endedAt
-      ? formatElapsed(entry.startedAt, Date.parse(entry.endedAt))
-      : formatElapsed(entry.startedAt, Date.parse(entry.lastUpdated));
+  const now = useTickingNow(isRunning || isWaiting);
+  const elapsed = activityElapsedLabel(entry, now);
   const handleDismiss = React.useCallback(() => {
     if (isWaiting && onCancelWaiting) {
       void onCancelWaiting(entry.id);
@@ -341,18 +423,12 @@ const ActivityCard = React.memo(function ActivityCard({
       void onDismiss(entry.id);
     }
   }, [entry.id, isRunning, isWaiting, onCancelWaiting, onDismiss, onForceDismiss]);
-  let dismissAvailable: boolean;
-  let dismissLabel: string;
-  if (isWaiting) {
-    dismissAvailable = Boolean(onCancelWaiting);
-    dismissLabel = 'Cancel — removes this entry from the queue before it starts.';
-  } else if (isRunning) {
-    dismissAvailable = Boolean(onForceDismiss);
-    dismissLabel = 'Force dismiss (entry only — does not stop the underlying process)';
-  } else {
-    dismissAvailable = Boolean(onDismiss);
-    dismissLabel = 'Dismiss';
-  }
+  const { available: dismissAvailable, label: dismissLabel } = dismissAffordance(
+    entry.status,
+    onDismiss,
+    onForceDismiss,
+    onCancelWaiting,
+  );
   return (
     <article
       className={cn('rounded-md border bg-card p-3 shadow-sm', cardBorderClassName(entry.status))}
@@ -503,22 +579,37 @@ function commandBadgeClassName(command: string): string {
   }
 }
 
-function commandSubtitle(entry: ActivityQueueEntry): string {
-  const parts: string[] = [];
-  if (entry.command === 'deploy') {
-    if (entry.release) parts.push(entry.release);
-    if (entry.namespace) parts.push(entry.namespace);
-    if (entry.kubernetesContext) parts.push(entry.kubernetesContext);
-  } else if (entry.command === 'build') {
-    if (entry.component) parts.push(entry.component);
-    if (entry.image) parts.push(entry.image);
-    if (entry.summary) parts.push(entry.summary);
-  } else if (entry.command === 'release') {
-    if (entry.version) parts.push(entry.version);
-    if (entry.summary) parts.push(entry.summary);
-  } else if (entry.summary) {
-    parts.push(entry.summary);
+function deploySubtitleParts(entry: ActivityQueueEntry): string[] {
+  return [entry.release, entry.namespace, entry.kubernetesContext].filter(
+    (value): value is string => Boolean(value),
+  );
+}
+
+function buildSubtitleParts(entry: ActivityQueueEntry): string[] {
+  return [entry.component, entry.image, entry.summary].filter((value): value is string =>
+    Boolean(value),
+  );
+}
+
+function releaseSubtitleParts(entry: ActivityQueueEntry): string[] {
+  return [entry.version, entry.summary].filter((value): value is string => Boolean(value));
+}
+
+function commandSubtitleParts(entry: ActivityQueueEntry): string[] {
+  switch (entry.command) {
+    case 'deploy':
+      return deploySubtitleParts(entry);
+    case 'build':
+      return buildSubtitleParts(entry);
+    case 'release':
+      return releaseSubtitleParts(entry);
+    default:
+      return entry.summary ? [entry.summary] : [];
   }
+}
+
+function commandSubtitle(entry: ActivityQueueEntry): string {
+  const parts = commandSubtitleParts(entry);
   return parts.length > 0 ? parts.join(' · ') : '—';
 }
 
@@ -540,6 +631,32 @@ function ContainerStatusList({
   );
 }
 
+function ContainerPhaseIndicator({
+  container,
+}: {
+  container: ActivityQueueContainerStatus;
+}): React.ReactElement {
+  return (
+    <span
+      className={cn(
+        'flex flex-none items-center gap-1 text-[10px] uppercase tracking-wider',
+        containerPhaseClassName(container),
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn('inline-block size-1.5 rounded-full', containerPhaseDotClassName(container))}
+      />
+      {containerPhaseLabel(container)}
+      {container.restarts > 0 && (
+        <span className="text-muted-foreground">
+          · {container.restarts} restart{container.restarts > 1 ? 's' : ''}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function ContainerStatusRow({
   container,
   deploy,
@@ -555,7 +672,8 @@ function ContainerStatusRow({
     setExpanded(failing);
   }, [failing]);
 
-  const hasDetails = Boolean(container.image || container.message || container.reason);
+  const hasDetails =
+    container.image !== '' || (container.message ?? '') !== '' || (container.reason ?? '') !== '';
   return (
     <div
       className={cn(
@@ -585,26 +703,7 @@ function ContainerStatusRow({
           )}
           <span className="truncate">{container.name}</span>
         </span>
-        <span
-          className={cn(
-            'flex flex-none items-center gap-1 text-[10px] uppercase tracking-wider',
-            containerPhaseClassName(container),
-          )}
-        >
-          <span
-            aria-hidden="true"
-            className={cn(
-              'inline-block size-1.5 rounded-full',
-              containerPhaseDotClassName(container),
-            )}
-          />
-          {containerPhaseLabel(container)}
-          {container.restarts > 0 && (
-            <span className="text-muted-foreground">
-              · {container.restarts} restart{container.restarts > 1 ? 's' : ''}
-            </span>
-          )}
-        </span>
+        <ContainerPhaseIndicator container={container} />
       </button>
       {expanded && hasDetails && (
         <ContainerStatusDetail
@@ -708,19 +807,23 @@ interface recoveryAction {
 // chart bumped the tag without publishing it. `erun deploy --force`
 // rebuilds every image bypassing the fingerprint cache and pushes them
 // to the registry, so the missing tag becomes available.
+function isMissingImageContainer(container: ActivityQueueContainerStatus): boolean {
+  const message = (container.message ?? '').toLowerCase();
+  const reason = (container.reason ?? '').toLowerCase();
+  return (
+    reason === 'imagepullbackoff' ||
+    reason === 'errimagepull' ||
+    message.includes('not found') ||
+    message.includes('manifest unknown')
+  );
+}
+
 function recoveryActionForContainer(
   container: ActivityQueueContainerStatus,
   deploy: ActivityQueueEntry,
 ): recoveryAction | null {
   if (!containerIsFailing(container)) return null;
-  const message = (container.message ?? '').toLowerCase();
-  const reason = (container.reason ?? '').toLowerCase();
-  const looksLikeMissingImage =
-    reason === 'imagepullbackoff' ||
-    reason === 'errimagepull' ||
-    message.includes('not found') ||
-    message.includes('manifest unknown');
-  if (!looksLikeMissingImage) return null;
+  if (!isMissingImageContainer(container)) return null;
   const selection: wailsMain.uiSelection = {
     tenant: deploy.tenant,
     environment: deploy.environment,
@@ -770,7 +873,12 @@ function kubectlDescribeCommand(
 
 async function copyToClipboard(text: string): Promise<void> {
   try {
-    await navigator.clipboard?.writeText(text);
+    // The Clipboard API may not be wired in some Wails embeddings; the cast
+    // makes the property optional so the runtime guard below stays honest.
+    const nav = navigator as Omit<Navigator, 'clipboard'> & { clipboard?: Clipboard };
+    if (nav.clipboard !== undefined) {
+      await nav.clipboard.writeText(text);
+    }
   } catch {
     /* clipboard API may not be available in some Wails wraps; ignore */
   }
@@ -822,12 +930,21 @@ function activityTargetLabel(entry: ActivityQueueEntry): string {
   return target;
 }
 
+function reasonOrFallback(reason: string | undefined, fallback: string): string {
+  return reason?.trim() ? reason : fallback;
+}
+
 function containerPhaseLabel(container: ActivityQueueContainerStatus): string {
-  if (container.phase === 'Running' && container.ready) return 'Ready';
-  if (container.phase === 'Running' && !container.ready) return 'Running';
-  if (container.phase === 'Waiting') return container.reason || 'Waiting';
-  if (container.phase === 'Terminated') return container.reason || 'Terminated';
-  return container.phase || 'Pending';
+  switch (container.phase) {
+    case 'Running':
+      return container.ready ? 'Ready' : 'Running';
+    case 'Waiting':
+      return reasonOrFallback(container.reason, 'Waiting');
+    case 'Terminated':
+      return reasonOrFallback(container.reason, 'Terminated');
+    default:
+      return container.phase || 'Pending';
+  }
 }
 
 // failingContainerReasons are kubelet-reported reasons that mean the
@@ -864,39 +981,4 @@ function containerPhaseDotClassName(container: ActivityQueueContainerStatus): st
   if (container.phase === 'Running' && container.ready) return 'bg-emerald-500';
   if (container.phase === 'Waiting') return 'bg-amber-500';
   return 'bg-muted-foreground';
-}
-
-// useDeployButtonGate evaluates whether the deploy button should be enabled
-// for the given selection and returns a tooltip explaining any block. The
-// gate looks at active deploy activities only — a build or release running
-// for the same selection does not block a deploy.
-export function useDeployButtonGate(
-  tenant: string,
-  environment: string,
-  version: string,
-): { disabled: boolean; tooltip: string; activeEntry: ActivityQueueEntry | null } {
-  const { entries } = useActivityQueue();
-  const active =
-    entries.find(
-      (entry) =>
-        entry.status === 'running' &&
-        entry.command === 'deploy' &&
-        entry.tenant === tenant &&
-        entry.environment === environment,
-    ) ?? null;
-  if (!active) {
-    return { disabled: false, tooltip: '', activeEntry: null };
-  }
-  if (active.version === version) {
-    return {
-      disabled: true,
-      tooltip: `Already deploying ${activityTargetLabel(active)}`,
-      activeEntry: active,
-    };
-  }
-  return {
-    disabled: true,
-    tooltip: `${activityTargetLabel(active)} is rolling out — wait for it to finish before deploying ${version || 'a different version'}`,
-    activeEntry: active,
-  };
 }
