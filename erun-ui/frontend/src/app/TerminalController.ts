@@ -97,7 +97,7 @@ import {
   terminalExitHasTrackedSelection,
   trimDebugOutput,
 } from './terminalStatus';
-import { failedTerminalOutput, filterTerminalDisplayData, rebuildTerminalDisplayBuffer } from './terminalBuffers';
+import { failedTerminalOutput, filterTerminalDisplayData } from './terminalBuffers';
 import { normalizeDialogValue, normalizeVersionSuggestions, selectionKey } from './versionSuggestions';
 import type {
   StartSessionResult,
@@ -314,31 +314,43 @@ export class TerminalController {
     const key = selectionKey(runSelection);
     const previousSessionId = store.getState().terminal.sessionId;
     const previousKnownSessionId = this.sessions.knownSelectionSession(key);
+    // Capture the previous sidebar selection so a failed StartSession can
+    // roll it back. prepareOpenSelection has already dispatched setSelected,
+    // so the sidebar visually moved to the new env; without rollback the
+    // sidebar would point at one env while the terminal still shows the
+    // previous one.
+    const previousSelected = store.getState().selection.selected;
 
     this.prepareOpenSelection(selection, runSelection, previousSessionId, previousKnownSessionId);
     this.fitAddon?.fit();
     const cols = this.terminal?.cols || 80;
     const rows = this.terminal?.rows || 24;
 
-    // Spawn Local first so subsequent ERun/AI spawns can log into it.
-    const tabs = store.getState().terminal.tabsByEnv[key] || [];
-    if (!tabs.some((tab) => tab.kind === 'local')) {
-      await this.spawnDefaultTab(key, runSelection, 'local', 'Local', cols, rows);
+    try {
+      // Spawn Local first so subsequent ERun/AI spawns can log into it.
+      const tabs = store.getState().terminal.tabsByEnv[key] || [];
+      if (!tabs.some((tab) => tab.kind === 'local')) {
+        await this.spawnDefaultTab(key, runSelection, 'local', 'Local', cols, rows);
+      }
+
+      const slot = this.activeSlotForSelection(runSelection);
+      const result = (await StartSession(runSelection, slot, cols, rows)) as StartSessionResult;
+      this.registerOpenSessionResult(key, result, runSelection);
+      this.showOpenSelectionStatus(result.sessionId, selection);
+
+      await this.ensureDefaultEnvTabs(runSelection, key);
+      this.restoreSelectedTabForEnv(key);
+
+      if (store.getState().layout.reviewOpen) {
+        await store.dispatch(loadReviewDiff());
+      }
+      this.focusTerminalSoon();
+      this.queueTerminalResize();
+    } catch (error: unknown) {
+      store.dispatch(setSelected(previousSelected));
+      store.dispatch(showTerminalMessage(readError(error)));
+      throw error;
     }
-
-    const slot = this.activeSlotForSelection(runSelection);
-    const result = (await StartSession(runSelection, slot, cols, rows)) as StartSessionResult;
-    this.registerOpenSessionResult(key, result, runSelection, previousSessionId);
-    this.showOpenSelectionStatus(result.sessionId, selection);
-
-    await this.ensureDefaultEnvTabs(runSelection, key);
-    this.restoreSelectedTabForEnv(key);
-
-    if (store.getState().layout.reviewOpen) {
-      await store.dispatch(loadReviewDiff());
-    }
-    this.focusTerminalSoon();
-    this.queueTerminalResize();
   }
 
   async ensureDefaultEnvTabs(runSelection: UISelection, key: string): Promise<void> {
@@ -427,11 +439,10 @@ export class TerminalController {
     store.dispatch(showTerminalMessage(`Opening ${selection.tenant} / ${selection.environment}...`, true));
   }
 
-  registerOpenSessionResult(key: string, result: StartSessionResult, runSelection: UISelection, previousSessionId: number): void {
+  registerOpenSessionResult(key: string, result: StartSessionResult, runSelection: UISelection): void {
     this.sessions.trackOpenSession(key, result.sessionId, runSelection);
     this.registerDebugSession(result.sessionId, runSelection, 'open');
     this.applyPendingDebugHeader(result.sessionId);
-    rebuildTerminalDisplayBuffer(this.sessions, result.sessionId);
     store.dispatch(setSessionId(result.sessionId));
     // Preserve the user's prior tab choice for this env across re-opens
     // (Nielsen heuristic #4: consistency / user control). Only seed
@@ -451,10 +462,6 @@ export class TerminalController {
     const kind: TerminalTabKind = slot === 0 ? 'erun' : 'extra';
     const label = kind === 'erun' ? 'ERun' : `Terminal ${slot}`;
     this.recordTab(key, result.sessionId, slot, kind, label);
-    if (result.sessionId !== previousSessionId) {
-      this.resetTerminal();
-      this.writeTerminalBuffer(this.sessions.displayBuffer(result.sessionId));
-    }
   }
 
   private activeSlotForSelection(selection: UISelection): number {
@@ -664,9 +671,6 @@ export class TerminalController {
     }
     store.dispatch(setSessionId(result.sessionId));
     store.dispatch(setSelectedSessionForEnv({ key, sessionId: result.sessionId }));
-    rebuildTerminalDisplayBuffer(this.sessions, result.sessionId);
-    this.resetTerminal();
-    this.writeTerminalBuffer(this.sessions.displayBuffer(result.sessionId));
     store.dispatch(hideTerminalMessage());
     this.focusTerminalSoon();
     this.queueTerminalResize();

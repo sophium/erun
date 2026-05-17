@@ -19,7 +19,6 @@ import {
   setTerminalCopyStatus,
 } from './slices/terminalStatusSlice';
 import type { AppThunk } from './store';
-import { rebuildTerminalDisplayBuffer } from './terminalBuffers';
 import {
   debugOutputBlock,
   formatIDECommand,
@@ -58,11 +57,10 @@ export const addTerminalTab = (): AppThunk<Promise<void>> =>
     const key = selectionKey(runSelection);
     const tabs = state.terminal.tabsByEnv[key] || [];
     const nextSlot = tabs.reduce((max, tab) => (tab.slot >= max ? tab.slot + 1 : max), 0);
-    const previousSessionId = state.terminal.sessionId;
     try {
       const size = controller.terminalSize();
       const result = (await StartSession(runSelection, nextSlot, size.cols, size.rows)) as StartSessionResult;
-      controller.registerOpenSessionResult(key, result, runSelection, previousSessionId);
+      controller.registerOpenSessionResult(key, result, runSelection);
       controller.focusTerminalSoon();
       controller.queueTerminalResize();
     } catch (error: unknown) {
@@ -79,9 +77,6 @@ export const selectTerminalTab = (sessionId: number): AppThunk =>
     dispatch(setSessionId(sessionId));
     controller.rememberSelectedTabForCurrentEnv(sessionId);
     controller.syncDebugDisplay();
-    rebuildTerminalDisplayBuffer(controller.sessions, sessionId);
-    controller.resetTerminal();
-    controller.writeTerminalBuffer(controller.sessions.displayBuffer(sessionId));
     const exitReason = controller.sessions.exitReason(sessionId);
     if (exitReason) {
       dispatch(setTerminalCopyOutput(controller.sessions.exitOutput(sessionId)));
@@ -127,7 +122,6 @@ export const closeTerminalTab = (sessionId: number): AppThunk<Promise<void>> =>
       } else {
         dispatch(setSessionId(0));
         dispatch(setDebugOutput(''));
-        controller.resetTerminal();
       }
     }
   };

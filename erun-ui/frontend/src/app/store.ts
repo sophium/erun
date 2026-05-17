@@ -3,6 +3,7 @@ import { setupListeners } from '@reduxjs/toolkit/query';
 
 import { wailsApi } from './api/wailsApi';
 import { persistenceMiddleware } from './middleware/persistenceMiddleware';
+import { terminalDisplayMiddleware } from './middleware/terminalDisplayMiddleware';
 import { wailsEventsMiddleware } from './middleware/wailsEventsMiddleware';
 import { thunkExtra, type ThunkExtra } from './thunkExtra';
 import activityReducer from './slices/activitySlice';
@@ -63,7 +64,8 @@ export const store = configureStore({
     })
       .concat(wailsApi.middleware)
       .concat(persistenceMiddleware.middleware)
-      .concat(wailsEventsMiddleware.middleware),
+      .concat(wailsEventsMiddleware.middleware)
+      .concat(terminalDisplayMiddleware.middleware),
 });
 
 setupListeners(store.dispatch);
