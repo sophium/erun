@@ -12,8 +12,8 @@ import {
   setSidebarWidth,
 } from './slices/layoutSlice';
 import { setDebugOutput } from './slices/terminalSlice';
-import type { AppDispatch, RootState } from './store';
 import {
+  computeMaxReviewWidth,
   DEBUG_HEIGHT_STORAGE_KEY,
   DEBUG_OPEN_STORAGE_KEY,
   FILES_OPEN_STORAGE_KEY,
@@ -27,15 +27,15 @@ import {
   MIN_SIDEBAR_WIDTH,
   REVIEW_WIDTH_STORAGE_KEY,
   SIDEBAR_WIDTH_STORAGE_KEY,
-  computeMaxReviewWidth,
 } from './state';
 import { clamp, saveBoolean, saveNumber } from './storage';
+import type { AppDispatch, RootState } from './store';
 
-type LayoutCallbacks = {
+interface LayoutCallbacks {
   applyLayoutVars: () => void;
   focusTerminalSoon: () => void;
   queueTerminalResize: () => void;
-};
+}
 
 export function toggleSidebar(
   dispatch: AppDispatch,
@@ -129,7 +129,9 @@ export function startFilesResize(
     if (!reviewRect) {
       return;
     }
-    dispatch(setFilesWidth(clamp(reviewRect.right - moveEvent.clientX, MIN_FILES_WIDTH, MAX_FILES_WIDTH)));
+    dispatch(
+      setFilesWidth(clamp(reviewRect.right - moveEvent.clientX, MIN_FILES_WIDTH, MAX_FILES_WIDTH)),
+    );
     applyLayoutVars();
   };
   const stop = () => {
@@ -161,8 +163,13 @@ export function startDebugResize(
     if (!paneRect) {
       return;
     }
-    const maxForPane = Math.max(MIN_DEBUG_HEIGHT, Math.min(MAX_DEBUG_HEIGHT, paneRect.height - 120));
-    dispatch(setDebugHeight(clamp(paneRect.bottom - moveEvent.clientY, MIN_DEBUG_HEIGHT, maxForPane)));
+    const maxForPane = Math.max(
+      MIN_DEBUG_HEIGHT,
+      Math.min(MAX_DEBUG_HEIGHT, paneRect.height - 120),
+    );
+    dispatch(
+      setDebugHeight(clamp(paneRect.bottom - moveEvent.clientY, MIN_DEBUG_HEIGHT, maxForPane)),
+    );
     callbacks.applyLayoutVars();
     callbacks.queueTerminalResize();
   };
@@ -216,7 +223,11 @@ export function setDebugOpen(
   dispatch(setDebugOpenAction(open));
   saveBoolean(DEBUG_OPEN_STORAGE_KEY, open);
   if (open && !getState().terminal.debugOutput) {
-    dispatch(setDebugOutput('Debug output will appear here for new erun sessions started while this panel is open.\n'));
+    dispatch(
+      setDebugOutput(
+        'Debug output will appear here for new erun sessions started while this panel is open.\n',
+      ),
+    );
   }
   queueTerminalResize();
 }

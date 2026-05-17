@@ -1,5 +1,5 @@
-import * as React from 'react';
 import { AlertCircle, PlugZap, RefreshCw } from 'lucide-react';
+import * as React from 'react';
 
 import { compactDiffError, diffLineMark } from '@/app/diffUtils';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
@@ -21,8 +21,12 @@ export function DiffList(): React.ReactElement {
         message={compactDiffError(review.diffError)}
         loading={review.diffLoading}
         reconnectable={review.diffErrorReconnectable}
-        onRetry={() => { void dispatch(loadReviewDiff()); }}
-        onReconnect={() => dispatch(requestReconnect())}
+        onRetry={() => {
+          void dispatch(loadReviewDiff());
+        }}
+        onReconnect={() => {
+          dispatch(requestReconnect());
+        }}
       />
     );
   }
@@ -33,7 +37,11 @@ export function DiffList(): React.ReactElement {
   return (
     <>
       {files.map((file) => (
-        <DiffFileView key={file.path} file={file} selected={file.path === review.selectedDiffPath} />
+        <DiffFileView
+          key={file.path}
+          file={file}
+          selected={file.path === review.selectedDiffPath}
+        />
       ))}
       <span className="sr-only">{review.selectedDiffPath}</span>
     </>
@@ -74,7 +82,13 @@ export function DiffErrorAlert({
           {reconnectCopy.retryAction}
         </Button>
         {reconnectable && onReconnect && (
-          <Button type="button" variant="outline" size="sm" disabled={loading} onClick={onReconnect}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={loading}
+            onClick={onReconnect}
+          >
             <PlugZap aria-hidden="true" />
             {reconnectCopy.reconnectAction}
           </Button>
@@ -84,13 +98,24 @@ export function DiffErrorAlert({
   );
 }
 
-function DiffFileView({ file, selected }: { file: DiffFile; selected: boolean }): React.ReactElement {
+function DiffFileView({
+  file,
+  selected,
+}: {
+  file: DiffFile;
+  selected: boolean;
+}): React.ReactElement {
   return (
-    <section className="diff-file scroll-mt-4" data-path={file.path} data-selected={selected || undefined}>
+    <section
+      className="diff-file scroll-mt-4"
+      data-path={file.path}
+      data-selected={selected || undefined}
+    >
       <header className="flex items-center justify-between gap-4 px-1.5 pb-2.5 text-[13px] font-semibold text-foreground">
         <span className="min-w-0 truncate">{file.path}</span>
         <span className="flex-none font-semibold text-diff-add-foreground">
-          <span>+{file.additions}</span> <span className="text-diff-delete-foreground">-{file.deletions}</span>
+          <span>+{file.additions}</span>{' '}
+          <span className="text-diff-delete-foreground">-{file.deletions}</span>
         </span>
       </header>
       {file.binary ? (

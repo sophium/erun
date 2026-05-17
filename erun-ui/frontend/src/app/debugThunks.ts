@@ -11,7 +11,8 @@ import { trimDebugOutput } from './terminalStatus';
 // session opens, applyPendingDebugHeader copies the staged header into the
 // session's debug buffer so the user sees what command they ran.
 
-export const setPendingDebugHeader = (header: string): AppThunk =>
+export const setPendingDebugHeader =
+  (header: string): AppThunk =>
   (dispatch, getState) => {
     dispatch(setPendingDebugHeaderAction(header));
     if (getState().layout.debugOpen) {
@@ -19,7 +20,8 @@ export const setPendingDebugHeader = (header: string): AppThunk =>
     }
   };
 
-export const applyPendingDebugHeader = (sessionId: number): AppThunk =>
+export const applyPendingDebugHeader =
+  (sessionId: number): AppThunk =>
   (dispatch, getState) => {
     const pending = getState().terminal.pendingDebugHeader;
     if (!pending || sessionId <= 0) {
@@ -32,21 +34,21 @@ export const applyPendingDebugHeader = (sessionId: number): AppThunk =>
     dispatch(setPendingDebugHeaderAction(''));
   };
 
-export const syncDebugDisplay = (): AppThunk =>
-  (dispatch, getState) => {
-    const state = getState();
-    if (!state.layout.debugOpen) {
-      return;
-    }
-    const sessionId = state.terminal.sessionId;
-    dispatch(setDebugOutput(state.sessions.debugBuffers[sessionId] || ''));
-  };
+export const syncDebugDisplay = (): AppThunk => (dispatch, getState) => {
+  const state = getState();
+  if (!state.layout.debugOpen) {
+    return;
+  }
+  const sessionId = state.terminal.sessionId;
+  dispatch(setDebugOutput(state.sessions.debugBuffers[sessionId] || ''));
+};
 
 // appendDebugOutput trims and appends to the per-session debug buffer.
 // fromSessionId defaults to the active session — the source is explicit so
 // background sessions (e.g. spawning ERun) can also log without flipping
 // the visible buffer.
-export const appendDebugOutput = (text: string, fromSessionId?: number): AppThunk =>
+export const appendDebugOutput =
+  (text: string, fromSessionId?: number): AppThunk =>
   (dispatch, getState) => {
     const state = getState();
     if (!state.layout.debugOpen || !text) {

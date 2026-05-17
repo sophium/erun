@@ -20,9 +20,6 @@ export const globalConfigDialogSlice = createSlice({
   },
 });
 
-export const {
-  setGlobalConfigDialog,
-  patchGlobalConfigDialog,
-  resetGlobalConfigDialog,
-} = globalConfigDialogSlice.actions;
+export const { setGlobalConfigDialog, patchGlobalConfigDialog, resetGlobalConfigDialog } =
+  globalConfigDialogSlice.actions;
 export default globalConfigDialogSlice.reducer;

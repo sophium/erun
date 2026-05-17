@@ -17,9 +17,12 @@ const startListening = wailsEventsMiddleware.startListening.withTypes<RootState,
 // unsubscribe function which we hold on the listener's cancellation token.
 startListening({
   actionCreator: startWailsEventsListening,
+  // The createListenerMiddleware effect signature is async; we never
+  // await inside this one-shot subscription setup.
+  // eslint-disable-next-line @typescript-eslint/require-await
   effect: async (_action, api) => {
     const dispatch = api.dispatch;
-    const subscriptions: Array<() => void> = [];
+    const subscriptions: (() => void)[] = [];
 
     subscriptions.push(
       EventsOn('activity:state', (entry: ActivityQueueEntry) => {

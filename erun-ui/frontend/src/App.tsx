@@ -1,12 +1,11 @@
-import * as React from 'react';
 import { CheckCircle2, ChevronDown, ChevronUp, Copy, LoaderCircle, Trash2 } from 'lucide-react';
+import { Rocket } from 'lucide-react';
+import * as React from 'react';
 
-import { TerminalController } from '@/app/TerminalController';
-import { readError } from '@/app/errors';
 import { useActivityQueue, useTerminalActivityLockState } from '@/app/activityQueueState';
 import { ControllerProvider } from '@/app/ControllerContext';
+import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { selectActiveSessionDebug } from '@/app/selectors';
 import {
   clearDebugOutput,
   setDebugOpen,
@@ -14,15 +13,16 @@ import {
   startReviewResize,
   startSidebarResize,
 } from '@/app/layoutThunks';
+import { selectActiveSessionDebug } from '@/app/selectors';
 import { setActivityQueueOpen } from '@/app/slices/layoutSlice';
 import {
   clearHiddenLockOverlay,
   hideLockOverlay,
   setDebugCopyStatus,
 } from '@/app/slices/terminalStatusSlice';
+import { TerminalController } from '@/app/TerminalController';
 import { ActivityLockOverlay } from '@/components/app/ActivityLockOverlay';
 import { ActivityQueueDrawer } from '@/components/app/ActivityQueueDrawer';
-import { TerminalTabStrip } from '@/components/app/TerminalTabStrip';
 import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
 import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
 import { ManageDialogView } from '@/components/app/ManageDialogView';
@@ -31,12 +31,13 @@ import { ReviewPanel } from '@/components/app/ReviewPanel';
 import { Sidebar } from '@/components/app/Sidebar';
 import { TenantDashboardView } from '@/components/app/TenantDashboardView';
 import { TenantDialogView } from '@/components/app/TenantDialogView';
+import { TerminalTabStrip } from '@/components/app/TerminalTabStrip';
 import { Titlebar } from '@/components/app/Titlebar';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+
 import { ClipboardSetText } from '../wailsjs/runtime/runtime';
-import { Rocket } from 'lucide-react';
 
 const splitterClassName =
   'relative cursor-col-resize bg-transparent before:absolute before:top-0 before:bottom-0 before:left-1 before:w-px before:bg-transparent before:transition-colors hover:before:bg-border [.is-resizing_&]:before:bg-border';
@@ -59,7 +60,13 @@ export function App(): React.ReactElement {
   const diffListRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
-    if (!terminalRootRef.current || !terminalPaneRef.current || !reviewViewRef.current || !reviewMainRef.current || !diffListRef.current) {
+    if (
+      !terminalRootRef.current ||
+      !terminalPaneRef.current ||
+      !reviewViewRef.current ||
+      !reviewMainRef.current ||
+      !diffListRef.current
+    ) {
       return undefined;
     }
     return controller.mount({
@@ -79,16 +86,23 @@ export function App(): React.ReactElement {
           <div
             className={cn(
               'grid h-full min-h-0 overflow-hidden',
-              sidebarHidden ? 'grid-cols-[0_0_minmax(0,1fr)]' : 'grid-cols-[var(--sidebar-width)_10px_minmax(0,1fr)]',
+              sidebarHidden
+                ? 'grid-cols-[0_0_minmax(0,1fr)]'
+                : 'grid-cols-[var(--sidebar-width)_10px_minmax(0,1fr)]',
             )}
           >
             <Sidebar />
+            {/* role=separator is the WAI-ARIA pattern for a resize handle;
+                keyboard support is a separate follow-up. */}
+            {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
             <div
               className={cn(splitterClassName, sidebarHidden && 'pointer-events-none')}
               role="separator"
               aria-orientation="vertical"
               aria-label="Resize sidebar"
-              onMouseDown={(event) => dispatch(startSidebarResize(event))}
+              onMouseDown={(event) => {
+                dispatch(startSidebarResize(event));
+              }}
             />
             <MainPane
               terminalPaneRef={terminalPaneRef}
@@ -120,7 +134,15 @@ export function App(): React.ReactElement {
 // to deploy:state events is always live — even when the drawer is closed —
 // so the badge count reflects active deploys without the user having opened
 // the drawer first.
-function ActivityQueueLauncher({ open, onOpen, onClose }: { open: boolean; onOpen: () => void; onClose: () => void }): React.ReactElement {
+function ActivityQueueLauncher({
+  open,
+  onOpen,
+  onClose,
+}: {
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+}): React.ReactElement {
   const { entries } = useActivityQueue();
   const activeCount = entries.filter((entry) => entry.status === 'running').length;
   return (
@@ -132,7 +154,9 @@ function ActivityQueueLauncher({ open, onOpen, onClose }: { open: boolean; onOpe
             variant="outline"
             size="icon"
             className="fixed bottom-5 right-5 z-20 size-10 rounded-full shadow-lg"
-            aria-label={activeCount > 0 ? `Open deploy queue (${activeCount} active)` : 'Open deploy queue'}
+            aria-label={
+              activeCount > 0 ? `Open deploy queue (${activeCount} active)` : 'Open deploy queue'
+            }
             onClick={onOpen}
           >
             <Rocket aria-hidden="true" className="size-4" />
@@ -143,7 +167,11 @@ function ActivityQueueLauncher({ open, onOpen, onClose }: { open: boolean; onOpe
             )}
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="left">{activeCount > 0 ? `${activeCount} deploy${activeCount > 1 ? 's' : ''} in progress` : 'Deploys'}</TooltipContent>
+        <TooltipContent side="left">
+          {activeCount > 0
+            ? `${activeCount} deploy${activeCount > 1 ? 's' : ''} in progress`
+            : 'Deploys'}
+        </TooltipContent>
       </Tooltip>
       <ActivityQueueDrawer open={open} onClose={onClose} />
     </>
@@ -176,12 +204,30 @@ function MainPane({
       ref={terminalPaneRef}
       className={cn(
         'grid h-full min-h-0 min-w-0 overflow-hidden bg-terminal',
-        dashboardOpen ? 'grid-rows-[minmax(0,1fr)] bg-background' : debugOpen ? 'grid-rows-[minmax(0,1fr)_var(--debug-height)]' : 'grid-rows-[minmax(0,1fr)_34px]',
+        dashboardOpen
+          ? 'grid-rows-[minmax(0,1fr)] bg-background'
+          : debugOpen
+            ? 'grid-rows-[minmax(0,1fr)_var(--debug-height)]'
+            : 'grid-rows-[minmax(0,1fr)_34px]',
       )}
     >
       {dashboardOpen && <TenantDashboardView />}
-      <TerminalPane hidden={dashboardOpen} terminalRootRef={terminalRootRef} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} onOpenActivityQueue={onOpenActivityQueue} />
-      {!dashboardOpen && <DebugPanel open={debugOpen} output={debugOutput} sessionId={sessionId} verbose={verboseDebug} />}
+      <TerminalPane
+        hidden={dashboardOpen}
+        terminalRootRef={terminalRootRef}
+        reviewViewRef={reviewViewRef}
+        reviewMainRef={reviewMainRef}
+        diffListRef={diffListRef}
+        onOpenActivityQueue={onOpenActivityQueue}
+      />
+      {!dashboardOpen && (
+        <DebugPanel
+          open={debugOpen}
+          output={debugOutput}
+          sessionId={sessionId}
+          verbose={verboseDebug}
+        />
+      )}
     </main>
   );
 }
@@ -208,7 +254,7 @@ function TerminalPane({
   const terminalMessage = useAppSelector((state) => state.terminalStatus.terminalMessage);
   const locks = useTerminalActivityLockState();
   const hiddenForSession = useAppSelector(
-    (state) => state.terminalStatus.hiddenLockSessions[sessionId] === true,
+    (state) => state.terminalStatus.hiddenLockSessions[sessionId],
   );
   const liveLock = locks.get(sessionId) ?? null;
   // The user can dismiss the overlay locally for a session if it's
@@ -236,14 +282,37 @@ function TerminalPane({
       <div className="grid h-full min-h-0 min-w-0 grid-rows-[32px_minmax(0,1fr)] overflow-hidden">
         <TerminalTabStrip />
         {/* Padding lives on the wrapper, not on the FitAddon parent: xterm's FitAddon reads the parent's computed height but does not subtract its padding, so any padding on terminalRoot would over-count rows and clip the bottom line. */}
-        <div id="erun-terminal-pane" className="relative h-full min-h-0 min-w-0 overflow-hidden box-border px-4 pt-3.5">
+        <div
+          id="erun-terminal-pane"
+          className="relative h-full min-h-0 min-w-0 overflow-hidden box-border px-4 pt-3.5"
+        >
           <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full" />
           <TerminalBusyOverlay message={terminalBusy ? terminalMessage : ''} />
-          {activeLock && <ActivityLockOverlay lock={activeLock} onOpenQueue={onOpenActivityQueue} onProceedAnyway={hideActiveLock} />}
+          {activeLock && (
+            <ActivityLockOverlay
+              lock={activeLock}
+              onOpenQueue={onOpenActivityQueue}
+              onProceedAnyway={hideActiveLock}
+            />
+          )}
         </div>
       </div>
-      <div className={cn(reviewSplitterClassName, !reviewOpen && 'hidden')} role="separator" aria-orientation="vertical" aria-label="Resize diff panel" onMouseDown={(event) => dispatch(startReviewResize(event))} />
-      <ReviewPanel reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} />
+      {/* role=separator resize handle; see note above. */}
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */}
+      <div
+        className={cn(reviewSplitterClassName, !reviewOpen && 'hidden')}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize diff panel"
+        onMouseDown={(event) => {
+          dispatch(startReviewResize(event));
+        }}
+      />
+      <ReviewPanel
+        reviewViewRef={reviewViewRef}
+        reviewMainRef={reviewMainRef}
+        diffListRef={diffListRef}
+      />
     </div>
   );
 }
@@ -256,14 +325,29 @@ function TerminalBusyOverlay({ message }: { message: string }): React.ReactEleme
   return (
     <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-terminal/45">
       <div className="flex max-w-[min(520px,calc(100%-48px))] items-center gap-3 rounded-md border border-[oklch(0.28_0_0)] bg-[oklch(0.08_0_0)] px-4 py-3 text-[13px] leading-[1.35] text-[oklch(0.86_0_0)] shadow-lg">
-        <LoaderCircle className="size-4 flex-none animate-spin text-[oklch(0.72_0_0)]" aria-hidden="true" />
-        <span className="min-w-0 truncate" title={message}>{message}</span>
+        <LoaderCircle
+          className="size-4 flex-none animate-spin text-[oklch(0.72_0_0)]"
+          aria-hidden="true"
+        />
+        <span className="min-w-0 truncate" title={message}>
+          {message}
+        </span>
       </div>
     </div>
   );
 }
 
-function DebugPanel({ open, output, sessionId, verbose }: { open: boolean; output: string; sessionId: number; verbose: boolean }): React.ReactElement {
+function DebugPanel({
+  open,
+  output,
+  sessionId,
+  verbose,
+}: {
+  open: boolean;
+  output: string;
+  sessionId: number;
+  verbose: boolean;
+}): React.ReactElement {
   const dispatch = useAppDispatch();
   const outputRef = React.useRef<HTMLDivElement>(null);
   const stuckToBottomRef = React.useRef(true);
@@ -318,33 +402,69 @@ function DebugPanel({ open, output, sessionId, verbose }: { open: boolean; outpu
   }, [canCopy, dispatch, output]);
 
   return (
-    <section className={cn('grid min-h-0 border-t border-[oklch(0.26_0_0)] bg-[oklch(0.06_0_0)] text-[oklch(0.86_0_0)]', open ? 'grid-rows-[6px_34px_minmax(0,1fr)]' : 'grid-rows-[34px]')}>
+    <section
+      className={cn(
+        'grid min-h-0 border-t border-[oklch(0.26_0_0)] bg-[oklch(0.06_0_0)] text-[oklch(0.86_0_0)]',
+        open ? 'grid-rows-[6px_34px_minmax(0,1fr)]' : 'grid-rows-[34px]',
+      )}
+    >
       {open && (
+        /* role=separator resize handle; see note above. */
+        /* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions */
         <div
           className={debugSplitterClassName}
           role="separator"
           aria-orientation="horizontal"
           aria-label="Resize debug panel"
-          onMouseDown={(event) => dispatch(startDebugResize(event))}
+          onMouseDown={(event) => {
+            dispatch(startDebugResize(event));
+          }}
         />
       )}
       <div className="flex h-[34px] items-center justify-between gap-2 border-b border-[oklch(0.18_0_0)] px-3">
         <button
           type="button"
           className="flex min-w-0 items-center gap-2 border-0 bg-transparent p-0 text-xs font-medium tracking-normal text-[oklch(0.76_0_0)]"
-          onClick={() => dispatch(setDebugOpen(!open))}
+          onClick={() => {
+            dispatch(setDebugOpen(!open));
+          }}
         >
-          {open ? <ChevronDown className="size-4" aria-hidden="true" /> : <ChevronUp className="size-4" aria-hidden="true" />}
+          {open ? (
+            <ChevronDown className="size-4" aria-hidden="true" />
+          ) : (
+            <ChevronUp className="size-4" aria-hidden="true" />
+          )}
           <span>Debug</span>
-          <span className="text-[11px] font-normal text-[oklch(0.56_0_0)]">{open ? 'erun -vv output' : 'collapsed'}</span>
+          <span className="text-[11px] font-normal text-[oklch(0.56_0_0)]">
+            {open ? 'erun -vv output' : 'collapsed'}
+          </span>
         </button>
         {open && (
           <div className="flex items-center gap-1">
-            <Button className="h-6 px-2 text-[11px] [&_svg]:size-3.5" type="button" variant="ghost" size="sm" disabled={!canCopy} onClick={copyDebugOutput}>
-              {copyStatus === 'Copied' ? <CheckCircle2 aria-hidden="true" /> : <Copy aria-hidden="true" />}
+            <Button
+              className="h-6 px-2 text-[11px] [&_svg]:size-3.5"
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={!canCopy}
+              onClick={copyDebugOutput}
+            >
+              {copyStatus === 'Copied' ? (
+                <CheckCircle2 aria-hidden="true" />
+              ) : (
+                <Copy aria-hidden="true" />
+              )}
               {copyStatus || 'Copy'}
             </Button>
-            <Button className="h-6 px-2 text-[11px] [&_svg]:size-3.5" type="button" variant="ghost" size="sm" onClick={() => dispatch(clearDebugOutput())}>
+            <Button
+              className="h-6 px-2 text-[11px] [&_svg]:size-3.5"
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                dispatch(clearDebugOutput());
+              }}
+            >
               <Trash2 aria-hidden="true" />
               Clear
             </Button>
@@ -359,11 +479,14 @@ function DebugPanel({ open, output, sessionId, verbose }: { open: boolean; outpu
         >
           {!verbose && sessionId > 0 && (
             <div className="mb-2 rounded border border-[oklch(0.32_0_0)] bg-[oklch(0.10_0_0)] px-3 py-2 text-[11px] leading-[1.4] text-[oklch(0.74_0_0)]">
-              Active session was not started with <code>-vv</code>, so trace lines won't appear here. To capture verbose output: run <code>erun -vv &lt;command&gt;</code> in this shell, or open this Debug panel before launching commands from the UI.
+              Active session was not started with <code>-vv</code>, so trace lines won't appear
+              here. To capture verbose output: run <code>erun -vv &lt;command&gt;</code> in this
+              shell, or open this Debug panel before launching commands from the UI.
             </div>
           )}
           <pre className="m-0 whitespace-pre-wrap break-words font-mono text-[11px] leading-[1.35]">
-            {output || 'Run an environment command while Debug is expanded to stream erun -vv output here.'}
+            {output ||
+              'Run an environment command while Debug is expanded to stream erun -vv output here.'}
           </pre>
         </div>
       )}

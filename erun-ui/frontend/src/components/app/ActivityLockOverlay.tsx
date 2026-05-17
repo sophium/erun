@@ -1,14 +1,14 @@
-import * as React from 'react';
 import { LoaderCircle } from 'lucide-react';
+import * as React from 'react';
 
 import type { ActivityLockEvent } from '@/app/activityQueueState';
 import { Button } from '@/components/ui/button';
 
-type ActivityLockOverlayProps = {
+interface ActivityLockOverlayProps {
   lock: ActivityLockEvent;
   onOpenQueue: () => void;
   onProceedAnyway?: () => void;
-};
+}
 
 // ActivityLockOverlay renders a small badge over a terminal whose session
 // is currently waiting on an activity (deploy/build/release) that touches
@@ -20,7 +20,11 @@ type ActivityLockOverlayProps = {
 //
 // "Open anyway" hides the overlay locally for this session without
 // affecting the activity record on the backend.
-export function ActivityLockOverlay({ lock, onOpenQueue, onProceedAnyway }: ActivityLockOverlayProps): React.ReactElement {
+export function ActivityLockOverlay({
+  lock,
+  onOpenQueue,
+  onProceedAnyway,
+}: ActivityLockOverlayProps): React.ReactElement {
   return (
     <div
       className="pointer-events-none absolute top-3 right-3 z-10 flex max-w-[360px] flex-col items-end gap-1"
@@ -33,16 +37,34 @@ export function ActivityLockOverlay({ lock, onOpenQueue, onProceedAnyway }: Acti
           <span>{lock.reason || 'Waiting for activity to complete'}</span>
         </div>
         <p className="text-[11px] leading-5 text-muted-foreground">
-          {lock.deployTarget ? <><span className="font-medium text-foreground">{lock.deployTarget}</span> is in flight. </> : null}
-          The terminal stays interactive — answer any CLI prompts as usual; this notice will hide automatically when the activity finishes.
+          {lock.deployTarget ? (
+            <>
+              <span className="font-medium text-foreground">{lock.deployTarget}</span> is in
+              flight.{' '}
+            </>
+          ) : null}
+          The terminal stays interactive — answer any CLI prompts as usual; this notice will hide
+          automatically when the activity finishes.
         </p>
         <div className="flex justify-end gap-2 pt-1">
           {onProceedAnyway && (
-            <Button type="button" variant="ghost" size="xs" className="text-[11px]" onClick={onProceedAnyway}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              className="text-[11px]"
+              onClick={onProceedAnyway}
+            >
               Hide
             </Button>
           )}
-          <Button type="button" variant="default" size="xs" className="text-[11px]" onClick={onOpenQueue}>
+          <Button
+            type="button"
+            variant="default"
+            size="xs"
+            className="text-[11px]"
+            onClick={onOpenQueue}
+          >
             View activity
           </Button>
         </div>

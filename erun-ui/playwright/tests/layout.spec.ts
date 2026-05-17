@@ -1,8 +1,8 @@
 import { test, expect } from '../fixtures/erunApp.js';
 
 async function readSidebarWidth(page: import('@playwright/test').Page): Promise<string> {
-  return await page.evaluate(
-    () => getComputedStyle(document.documentElement).getPropertyValue('--sidebar-width').trim(),
+  return await page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue('--sidebar-width').trim(),
   );
 }
 

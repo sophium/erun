@@ -1,5 +1,5 @@
-import * as React from 'react';
 import { File, FileCode2, FileCog, FileJson, FileText, Gem } from 'lucide-react';
+import * as React from 'react';
 
 const extensionIcons = new Map([
   ['css', FileCode2],

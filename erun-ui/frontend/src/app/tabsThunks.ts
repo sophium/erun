@@ -4,9 +4,9 @@ import {
   setSelectedSessionForEnv,
   setTabsForEnv,
 } from './slices/terminalSlice';
+import type { TerminalTab, TerminalTabKind } from './state';
 import type { AppThunk } from './store';
 import { selectionKey } from './versionSuggestions';
-import type { TerminalTab, TerminalTabKind } from './state';
 
 const TAB_KIND_ORDER: Record<TerminalTabKind, number> = {
   local: 0,
@@ -22,13 +22,8 @@ function compareTabs(a: TerminalTab, b: TerminalTab): number {
 // recordTab inserts (or replaces) a tab for an env. The list stays sorted by
 // kind then slot so the strip layout matches user expectations across
 // re-renders.
-export const recordTab = (
-  key: string,
-  sessionId: number,
-  slot: number,
-  kind: TerminalTabKind,
-  label: string,
-): AppThunk =>
+export const recordTab =
+  (key: string, sessionId: number, slot: number, kind: TerminalTabKind, label: string): AppThunk =>
   (dispatch, getState) => {
     const current = getState().terminal.tabsByEnv[key];
     const tabs = current ? [...current] : [];
@@ -45,7 +40,8 @@ export const recordTab = (
 // removeTab drops a session from the strip and clears its remembered-slot
 // pointer if needed. Returns the remaining tabs so callers can pick a new
 // active session.
-export const removeTab = (key: string, sessionId: number): AppThunk<TerminalTab[]> =>
+export const removeTab =
+  (key: string, sessionId: number): AppThunk<TerminalTab[]> =>
   (dispatch, getState) => {
     const state = getState();
     const tabs = state.terminal.tabsByEnv[key];
@@ -66,7 +62,8 @@ export const removeTab = (key: string, sessionId: number): AppThunk<TerminalTab[
 
 // rememberSelectedTab pins the active session for the currently-selected env
 // so re-opening it later switches back to the tab the user last viewed.
-export const rememberSelectedTab = (sessionId: number): AppThunk =>
+export const rememberSelectedTab =
+  (sessionId: number): AppThunk =>
   (dispatch, getState) => {
     const state = getState();
     const selection = state.selection.selected;

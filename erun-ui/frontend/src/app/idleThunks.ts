@@ -13,8 +13,8 @@ import { requireController } from './thunkExtra';
 // The poll-timer handle stays on the controller because it is a
 // setTimeout cancellation token tied to the mount lifecycle; thunks
 // reach it through `extra.controller`.
-export const refreshIdleStatus = (): AppThunk<Promise<void>> =>
-  async (dispatch, getState, extra) => {
+export const refreshIdleStatus =
+  (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
     const controller = requireController(extra);
     dispatch(bumpIdleStatus());
     const request = getState().requestCounters.idleStatus;

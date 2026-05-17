@@ -1,12 +1,8 @@
-import * as React from 'react';
 import { Plus, X } from 'lucide-react';
+import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import {
-  addTerminalTab,
-  closeTerminalTab,
-  selectTerminalTab,
-} from '@/app/sessionThunks';
+import { addTerminalTab, closeTerminalTab, selectTerminalTab } from '@/app/sessionThunks';
 import { selectionKey } from '@/app/versionSuggestions';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { cn } from '@/lib/utils';
@@ -16,8 +12,9 @@ export function TerminalTabStrip(): React.ReactElement {
   const selection = useAppSelector((state) => state.selection.selected);
   const tabsByEnv = useAppSelector((state) => state.terminal.tabsByEnv);
   const activeId = useAppSelector((state) => state.terminal.sessionId);
-  const tabRefs = React.useRef<Array<HTMLButtonElement | null>>([]);
-  const stripBaseClass = 'flex h-8 items-end border-b border-[oklch(0.18_0_0)] bg-[oklch(0.05_0_0)] pl-2 pr-1';
+  const tabRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
+  const stripBaseClass =
+    'flex h-8 items-end border-b border-[oklch(0.18_0_0)] bg-[oklch(0.05_0_0)] pl-2 pr-1';
 
   if (!selection) {
     return <div className={stripBaseClass} aria-hidden="true" />;
@@ -31,32 +28,49 @@ export function TerminalTabStrip(): React.ReactElement {
     node?.focus();
   };
 
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>, index: number, sessionId: number) => {
+  const handleKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    index: number,
+    sessionId: number,
+  ) => {
+    const tabAt = (i: number) => tabs[i]?.sessionId;
     switch (event.key) {
       case 'ArrowRight': {
         event.preventDefault();
         const next = (index + 1) % tabs.length;
-        dispatch(selectTerminalTab(tabs[next].sessionId));
+        const id = tabAt(next);
+        if (id !== undefined) {
+          dispatch(selectTerminalTab(id));
+        }
         focusTab(next);
         break;
       }
       case 'ArrowLeft': {
         event.preventDefault();
         const next = (index - 1 + tabs.length) % tabs.length;
-        dispatch(selectTerminalTab(tabs[next].sessionId));
+        const id = tabAt(next);
+        if (id !== undefined) {
+          dispatch(selectTerminalTab(id));
+        }
         focusTab(next);
         break;
       }
       case 'Home': {
         event.preventDefault();
-        dispatch(selectTerminalTab(tabs[0].sessionId));
+        const id = tabAt(0);
+        if (id !== undefined) {
+          dispatch(selectTerminalTab(id));
+        }
         focusTab(0);
         break;
       }
       case 'End': {
         event.preventDefault();
         const last = tabs.length - 1;
-        dispatch(selectTerminalTab(tabs[last].sessionId));
+        const id = tabAt(last);
+        if (id !== undefined) {
+          dispatch(selectTerminalTab(id));
+        }
         focusTab(last);
         break;
       }
@@ -84,9 +98,15 @@ export function TerminalTabStrip(): React.ReactElement {
           ref={(node) => {
             tabRefs.current[index] = node;
           }}
-          onSelect={() => dispatch(selectTerminalTab(tab.sessionId))}
-          onClose={() => dispatch(closeTerminalTab(tab.sessionId))}
-          onKeyDown={(event) => handleKeyDown(event, index, tab.sessionId)}
+          onSelect={() => {
+            dispatch(selectTerminalTab(tab.sessionId));
+          }}
+          onClose={() => {
+            void dispatch(closeTerminalTab(tab.sessionId));
+          }}
+          onKeyDown={(event) => {
+            handleKeyDown(event, index, tab.sessionId);
+          }}
         />
       ))}
       <IconTooltip label="New terminal">
@@ -94,7 +114,9 @@ export function TerminalTabStrip(): React.ReactElement {
           type="button"
           className="ml-1 mb-[-1px] flex h-7 items-center justify-center rounded-md px-2 text-[oklch(0.66_0_0)] transition-colors hover:bg-[oklch(0.13_0_0)] hover:text-[oklch(0.96_0_0)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.62_0_0)]"
           aria-label="Open a new terminal"
-          onClick={() => { void dispatch(addTerminalTab()); }}
+          onClick={() => {
+            void dispatch(addTerminalTab());
+          }}
         >
           <Plus className="size-4" aria-hidden="true" />
         </button>
@@ -148,7 +170,9 @@ const Tab = React.forwardRef<HTMLButtonElement, TabProps>(function Tab(
             tabIndex={-1}
             className={cn(
               'mr-1 flex size-5 items-center justify-center rounded text-[oklch(0.56_0_0)] transition-opacity transition-colors hover:bg-[oklch(0.18_0_0)] hover:text-[oklch(0.96_0_0)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[oklch(0.62_0_0)]',
-              active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
+              active
+                ? 'opacity-100'
+                : 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100',
             )}
             aria-label={`Close ${label}`}
             onClick={(event) => {

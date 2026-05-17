@@ -44,7 +44,9 @@ export class EnvironmentInitDialog {
   }
 
   async submit(): Promise<void> {
-    const button = this.locator().getByRole('button', { name: /^(Create|Deploy|Creating|Deploying)/ });
+    const button = this.locator().getByRole('button', {
+      name: /^(Create|Deploy|Creating|Deploying)/,
+    });
     await button.scrollIntoViewIfNeeded();
     await button.click();
   }

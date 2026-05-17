@@ -20,6 +20,5 @@ export const manageDialogSlice = createSlice({
   },
 });
 
-export const { setManageDialog, patchManageDialog, resetManageDialog } =
-  manageDialogSlice.actions;
+export const { setManageDialog, patchManageDialog, resetManageDialog } = manageDialogSlice.actions;
 export default manageDialogSlice.reducer;

@@ -1,13 +1,13 @@
 import * as React from 'react';
 
 import {
-  MIN_RUNTIME_CPU_CORES,
-  MIN_RUNTIME_MEMORY_GIB,
-  RUNTIME_CPU_STEP,
-  RUNTIME_MEMORY_STEP,
   clampRuntimePodConfig,
   formatNumber,
+  MIN_RUNTIME_CPU_CORES,
+  MIN_RUNTIME_MEMORY_GIB,
   parseDisplayNumber,
+  RUNTIME_CPU_STEP,
+  RUNTIME_MEMORY_STEP,
   runtimeResourceBounds,
   runtimeResourceLimitMessage,
 } from '@/app/runtimeResources';
@@ -24,7 +24,14 @@ interface RuntimeResourceControlsProps {
   onChange: (value: UIRuntimePodConfig) => void;
 }
 
-export function RuntimeResourceControls({ idPrefix, value, status, loading, disabled, onChange }: RuntimeResourceControlsProps): React.ReactElement {
+export function RuntimeResourceControls({
+  idPrefix,
+  value,
+  status,
+  loading,
+  disabled,
+  onChange,
+}: RuntimeResourceControlsProps): React.ReactElement {
   const bounds = runtimeResourceBounds(status, loading);
   const resourceError = runtimeResourceLimitMessage(value, status);
   const controlsDisabled = disabled || loading || !bounds.available;
@@ -38,13 +45,29 @@ export function RuntimeResourceControls({ idPrefix, value, status, loading, disa
     if (clamped.cpu !== value.cpu || clamped.memory !== value.memory) {
       onChange(clamped);
     }
+    // Explicit primitive deps so the effect skips re-runs when sibling
+    // bounds/value fields change. Adding the parent objects would re-run
+    // on every parent re-render even when cpu/memory stayed put.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bounds.available, bounds.cpuMax, bounds.memoryMax, value.cpu, value.memory]);
 
   return (
     <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
       <div className="grid gap-1">
-        <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Runtime resources</div>
-        {bounds.message && <div className={!bounds.available && !bounds.loading ? 'text-xs leading-[1.35] text-destructive' : 'text-xs leading-[1.35] text-muted-foreground'}>{bounds.message}</div>}
+        <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
+          Runtime resources
+        </div>
+        {bounds.message && (
+          <div
+            className={
+              !bounds.available && !bounds.loading
+                ? 'text-xs leading-[1.35] text-destructive'
+                : 'text-xs leading-[1.35] text-muted-foreground'
+            }
+          >
+            {bounds.message}
+          </div>
+        )}
       </div>
       <ResourceControl
         id={`${idPrefix}-cpu`}
@@ -55,7 +78,9 @@ export function RuntimeResourceControls({ idPrefix, value, status, loading, disa
         step={RUNTIME_CPU_STEP}
         value={boundedValue.cpu}
         disabled={controlsDisabled}
-        onChange={(cpu) => onChange({ ...value, cpu })}
+        onChange={(cpu) => {
+          onChange({ ...value, cpu });
+        }}
       />
       <ResourceControl
         id={`${idPrefix}-memory`}
@@ -66,9 +91,15 @@ export function RuntimeResourceControls({ idPrefix, value, status, loading, disa
         step={RUNTIME_MEMORY_STEP}
         value={boundedValue.memory}
         disabled={controlsDisabled}
-        onChange={(memory) => onChange({ ...value, memory })}
+        onChange={(memory) => {
+          onChange({ ...value, memory });
+        }}
       />
-      {resourceError && <div className="text-xs leading-[1.35] text-destructive" role="alert">{resourceError}</div>}
+      {resourceError && (
+        <div className="text-xs leading-[1.35] text-destructive" role="alert">
+          {resourceError}
+        </div>
+      )}
     </div>
   );
 }
@@ -113,8 +144,14 @@ function ResourceControl({
             value={value}
             disabled={inputDisabled}
             aria-describedby={`${id}-range`}
-            onChange={(event) => onChange(event.target.value)}
-            onBlur={(event) => onChange(formatNumber(clampToRange(parseDisplayNumber(event.target.value), min, max)))}
+            onChange={(event) => {
+              onChange(event.target.value);
+            }}
+            onBlur={(event) => {
+              onChange(
+                formatNumber(clampToRange(parseDisplayNumber(event.target.value), min, max)),
+              );
+            }}
           />
           <span className="w-10 text-xs text-muted-foreground">{unit}</span>
         </div>
@@ -130,7 +167,9 @@ function ResourceControl({
         disabled={inputDisabled}
         aria-label={`${label} ${unit}`}
         aria-describedby={`${id}-range`}
-        onChange={(event) => onChange(formatNumber(Number(event.target.value)))}
+        onChange={(event) => {
+          onChange(formatNumber(Number(event.target.value)));
+        }}
       />
       <div id={`${id}-range`} className="flex justify-between text-xs text-muted-foreground">
         <span>Min {formatNumber(min)}</span>

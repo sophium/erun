@@ -1,14 +1,17 @@
-import type {
-  UISelection,
-  UIVersionSuggestion,
-} from '@/types';
+import type { UISelection, UIVersionSuggestion } from '@/types';
 
-export function findVersionSuggestion(suggestions: UIVersionSuggestion[], version: string, image: string): UIVersionSuggestion | undefined {
+export function findVersionSuggestion(
+  suggestions: UIVersionSuggestion[],
+  version: string,
+  image: string,
+): UIVersionSuggestion | undefined {
   if (!version) {
     return undefined;
   }
   if (image) {
-    return suggestions.find((suggestion) => suggestion.version === version && suggestion.image === image);
+    return suggestions.find(
+      (suggestion) => suggestion.version === version && suggestion.image === image,
+    );
   }
   return suggestions.find((suggestion) => suggestion.version === version);
 }
@@ -24,7 +27,16 @@ export function normalizeVersionSuggestions(values: UIVersionSuggestion[]): UIVe
     const image = normalizeDialogValue(value.image || '');
     const source = normalizeDialogValue(value.source || '');
     const label = normalizeDialogValue(value.label);
-    if (version && !suggestions.some((suggestion) => suggestion.version === version && suggestion.image === image && suggestion.source === source && suggestion.label === label)) {
+    if (
+      version &&
+      !suggestions.some(
+        (suggestion) =>
+          suggestion.version === version &&
+          suggestion.image === image &&
+          suggestion.source === source &&
+          suggestion.label === label,
+      )
+    ) {
       suggestions.push({
         label,
         version,

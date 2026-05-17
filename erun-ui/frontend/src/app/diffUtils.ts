@@ -1,8 +1,4 @@
-import type {
-  DiffLine,
-  DiffResult,
-  DiffTreeNode,
-} from '@/types';
+import type { DiffLine, DiffResult, DiffTreeNode } from '@/types';
 
 export function filterDiffTree(nodes: DiffTreeNode[], filter: string): DiffTreeNode[] {
   if (!filter) {
@@ -24,7 +20,10 @@ export function filterDiffTree(nodes: DiffTreeNode[], filter: string): DiffTreeN
   return nodes.filter((node) => matchingPaths.has(node.path));
 }
 
-export function visibleDiffTreeNodes(nodes: DiffTreeNode[], collapsedDiffDirs: Set<string>): DiffTreeNode[] {
+export function visibleDiffTreeNodes(
+  nodes: DiffTreeNode[],
+  collapsedDiffDirs: Set<string>,
+): DiffTreeNode[] {
   const nodesByPath = new Map(nodes.map((node) => [node.path, node]));
   return nodes.filter((node) => {
     let parentPath = node.parentPath || '';

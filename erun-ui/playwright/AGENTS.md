@@ -32,6 +32,7 @@ There is only one supported way to run the suite. The shell script `run.sh` in t
   ```
 
 `run.sh` flags:
+
 - `--build` force a desktop-binary rebuild even when `../bin/erun-app` exists. Use this after editing Go code.
 - `--skip-build` deprecated no-op kept for older callers; the default behaviour already avoids building when the binary is present.
 - `--port N` override the backend port. Defaults to `34123` to avoid clashing with `wails dev`'s `34115`. Exported as `ERUN_PLAYWRIGHT_PORT` so `playwright.config.ts` stays in sync.

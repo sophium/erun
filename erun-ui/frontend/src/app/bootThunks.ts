@@ -45,8 +45,8 @@ export const boot = (): AppThunk<Promise<void>> => async (dispatch, getState) =>
 // completion). Preserves the user's existing tenants / cloudProviders /
 // versionSuggestions if the new payload omits them, since this is a delta
 // refresh — boot() is the authoritative initial load.
-export const reloadStateAfterEnvironmentChange = (): AppThunk<Promise<void>> =>
-  async (dispatch, getState) => {
+export const reloadStateAfterEnvironmentChange =
+  (): AppThunk<Promise<void>> => async (dispatch, getState) => {
     try {
       const loaded = await dispatch(
         stateApi.endpoints.getInitialState.initiate(undefined, { forceRefetch: true }),
@@ -54,7 +54,11 @@ export const reloadStateAfterEnvironmentChange = (): AppThunk<Promise<void>> =>
       const current = getState().tenants;
       dispatch(setTenants(loaded.tenants || []));
       dispatch(setCloudProviders(loaded.cloudProviders || current.cloudProviders));
-      dispatch(setVersionSuggestions(normalizeVersionSuggestions(loaded.versionSuggestions || current.versionSuggestions)));
+      dispatch(
+        setVersionSuggestions(
+          normalizeVersionSuggestions(loaded.versionSuggestions || current.versionSuggestions),
+        ),
+      );
       await dispatch(selectLoadedKubernetesContexts(loaded.kubernetesContexts || []));
     } catch {
       // Silent failure: env-change reloads are best-effort.

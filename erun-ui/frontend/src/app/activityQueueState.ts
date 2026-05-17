@@ -1,5 +1,5 @@
-import * as React from 'react';
 import { createSelector } from '@reduxjs/toolkit';
+import * as React from 'react';
 
 import {
   useCancelWaitingActionMutation,
@@ -17,11 +17,17 @@ import {
 } from './slices/activitySlice';
 import type { RootState } from './store';
 
-export type ActivityQueueStatus = 'waiting' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'cancelled';
+export type ActivityQueueStatus =
+  | 'waiting'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'skipped'
+  | 'cancelled';
 
 export type ActivityQueueSource = 'helm' | 'shell' | 'trace' | 'action' | '';
 
-export type ActivityQueueContainerStatus = {
+export interface ActivityQueueContainerStatus {
   name: string;
   image: string;
   phase: string;
@@ -29,15 +35,15 @@ export type ActivityQueueContainerStatus = {
   restarts: number;
   reason?: string;
   message?: string;
-};
+}
 
-export type ActivityRecoveryResult = {
+export interface ActivityRecoveryResult {
   ok: boolean;
   output: string;
   error?: string;
-};
+}
 
-export type ActivityQueueEntry = {
+export interface ActivityQueueEntry {
   id: string;
   command: string;
   tenant: string;
@@ -60,9 +66,9 @@ export type ActivityQueueEntry = {
   actionKind?: string;
   enqueuedAt?: string;
   startedRunningAt?: string;
-};
+}
 
-export type ActivityLockEvent = {
+export interface ActivityLockEvent {
   sessionId: number;
   tenant: string;
   environment: string;
@@ -70,7 +76,7 @@ export type ActivityLockEvent = {
   deployId?: string;
   reason?: string;
   deployTarget?: string;
-};
+}
 
 const selectActivityEntries = (state: RootState) => state.activity.entries;
 const selectLocksBySession = (state: RootState) => state.activity.locksBySession;
@@ -205,7 +211,8 @@ export function activeActivityForSelection(
 ): ActivityQueueEntry | null {
   return (
     entries.find(
-      (entry) => entry.status === 'running' && entry.tenant === tenant && entry.environment === environment,
+      (entry) =>
+        entry.status === 'running' && entry.tenant === tenant && entry.environment === environment,
     ) ?? null
   );
 }

@@ -1,9 +1,6 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
-import type {
-  ActivityLockEvent,
-  ActivityQueueEntry,
-} from '../activityQueueState';
+import type { ActivityLockEvent, ActivityQueueEntry } from '../activityQueueState';
 
 export interface ActivityState {
   entries: ActivityQueueEntry[];

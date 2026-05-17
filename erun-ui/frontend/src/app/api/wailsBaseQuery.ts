@@ -2,7 +2,9 @@ import type { BaseQueryFn } from '@reduxjs/toolkit/query';
 
 import { readError } from '../errors';
 
-export type WailsQueryError = { message: string };
+export interface WailsQueryError {
+  message: string;
+}
 
 export type WailsQueryFn<Arg, Result> = (arg: Arg) => Promise<Result>;
 
@@ -18,7 +20,10 @@ export function wailsQueryFn<Arg, Result>(call: WailsQueryFn<Arg, Result>) {
 }
 
 // fakeBaseQuery is used because every endpoint provides its own queryFn that
-// wraps a Wails Go binding. There is no shared HTTP transport.
+// wraps a Wails Go binding. There is no shared HTTP transport. The async
+// signature is mandated by RTK Query's BaseQueryFn type even though this
+// stub body never awaits.
+// eslint-disable-next-line @typescript-eslint/require-await
 export const wailsBaseQuery: BaseQueryFn<void, unknown, WailsQueryError> = async () => ({
   error: { message: 'wailsBaseQuery must not be invoked directly; endpoints must define queryFn.' },
 });

@@ -1,18 +1,18 @@
 import {
-  DEFAULT_FILES_WIDTH,
-  DEFAULT_DEBUG_HEIGHT,
-  DEFAULT_REVIEW_WIDTH,
-  DEFAULT_SIDEBAR_WIDTH,
   DEBUG_HEIGHT_STORAGE_KEY,
   DEBUG_OPEN_STORAGE_KEY,
+  DEFAULT_DEBUG_HEIGHT,
+  DEFAULT_FILES_WIDTH,
+  DEFAULT_REVIEW_WIDTH,
+  DEFAULT_SIDEBAR_WIDTH,
   FILES_OPEN_STORAGE_KEY,
   FILES_WIDTH_STORAGE_KEY,
-  MAX_FILES_WIDTH,
   MAX_DEBUG_HEIGHT,
+  MAX_FILES_WIDTH,
   MAX_REVIEW_WIDTH,
   MAX_SIDEBAR_WIDTH,
-  MIN_FILES_WIDTH,
   MIN_DEBUG_HEIGHT,
+  MIN_FILES_WIDTH,
   MIN_REVIEW_WIDTH,
   MIN_SIDEBAR_WIDTH,
   PAST_CONTAINER_REGISTRIES_STORAGE_KEY,
@@ -25,19 +25,39 @@ import {
 const MAX_SAVED_STRING_LIST_ITEMS = 20;
 
 export function loadSavedSidebarWidth(): number {
-  return loadSavedNumber(SIDEBAR_WIDTH_STORAGE_KEY, DEFAULT_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH);
+  return loadSavedNumber(
+    SIDEBAR_WIDTH_STORAGE_KEY,
+    DEFAULT_SIDEBAR_WIDTH,
+    MIN_SIDEBAR_WIDTH,
+    MAX_SIDEBAR_WIDTH,
+  );
 }
 
 export function loadSavedReviewWidth(): number {
-  return loadSavedNumber(REVIEW_WIDTH_STORAGE_KEY, DEFAULT_REVIEW_WIDTH, MIN_REVIEW_WIDTH, MAX_REVIEW_WIDTH);
+  return loadSavedNumber(
+    REVIEW_WIDTH_STORAGE_KEY,
+    DEFAULT_REVIEW_WIDTH,
+    MIN_REVIEW_WIDTH,
+    MAX_REVIEW_WIDTH,
+  );
 }
 
 export function loadSavedFilesWidth(): number {
-  return loadSavedNumber(FILES_WIDTH_STORAGE_KEY, DEFAULT_FILES_WIDTH, MIN_FILES_WIDTH, MAX_FILES_WIDTH);
+  return loadSavedNumber(
+    FILES_WIDTH_STORAGE_KEY,
+    DEFAULT_FILES_WIDTH,
+    MIN_FILES_WIDTH,
+    MAX_FILES_WIDTH,
+  );
 }
 
 export function loadSavedDebugHeight(): number {
-  return loadSavedNumber(DEBUG_HEIGHT_STORAGE_KEY, DEFAULT_DEBUG_HEIGHT, MIN_DEBUG_HEIGHT, MAX_DEBUG_HEIGHT);
+  return loadSavedNumber(
+    DEBUG_HEIGHT_STORAGE_KEY,
+    DEFAULT_DEBUG_HEIGHT,
+    MIN_DEBUG_HEIGHT,
+    MAX_DEBUG_HEIGHT,
+  );
 }
 
 export function loadSavedFilesOpen(): boolean {
@@ -59,15 +79,13 @@ export function loadSavedDebugOpen(): boolean {
 export function saveNumber(key: string, value: number): void {
   try {
     window.localStorage.setItem(key, String(value));
-  } catch {
-  }
+  } catch {}
 }
 
 export function saveBoolean(key: string, value: boolean): void {
   try {
     window.localStorage.setItem(key, String(value));
-  } catch {
-  }
+  } catch {}
 }
 
 export function loadSavedPastTenants(): string[] {
@@ -124,7 +142,9 @@ function loadSavedStringList(key: string): string[] {
     if (!Array.isArray(parsed)) {
       return [];
     }
-    return uniqueStrings(parsed.filter((value): value is string => typeof value === 'string')).slice(0, MAX_SAVED_STRING_LIST_ITEMS);
+    return uniqueStrings(
+      parsed.filter((value): value is string => typeof value === 'string'),
+    ).slice(0, MAX_SAVED_STRING_LIST_ITEMS);
   } catch {
     return [];
   }
@@ -135,11 +155,13 @@ function rememberStringListValue(key: string, value: string): void {
   if (!normalized) {
     return;
   }
-  const values = uniqueStrings([normalized, ...loadSavedStringList(key)]).slice(0, MAX_SAVED_STRING_LIST_ITEMS);
+  const values = uniqueStrings([normalized, ...loadSavedStringList(key)]).slice(
+    0,
+    MAX_SAVED_STRING_LIST_ITEMS,
+  );
   try {
     window.localStorage.setItem(key, JSON.stringify(values));
-  } catch {
-  }
+  } catch {}
 }
 
 function uniqueStrings(values: string[]): string[] {

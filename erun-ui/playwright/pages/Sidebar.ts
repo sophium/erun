@@ -57,10 +57,7 @@ export class Sidebar {
     // an exact match would miss local envs. Match by title attribute,
     // which the component sets to "<tenant> / <env>" (with a "(local)"
     // suffix for local envs).
-    await this.page
-      .locator(`button[title^="${tenant} / ${env}"]`)
-      .first()
-      .click();
+    await this.page.locator(`button[title^="${tenant} / ${env}"]`).first().click();
   }
 
   async openManageDialogFor(tenant: string, env: string): Promise<void> {
@@ -96,7 +93,9 @@ export class Sidebar {
     if (!(await this.isTenantExpanded(tenant))) {
       await this.toggleTenant(tenant);
     }
-    const buttons = this.page.locator(`button[aria-label^="Edit ${tenant} / "][aria-label$=" settings"]`);
+    const buttons = this.page.locator(
+      `button[aria-label^="Edit ${tenant} / "][aria-label$=" settings"]`,
+    );
     const count = await buttons.count();
     const envs: string[] = [];
     const prefix = `Edit ${tenant} / `;

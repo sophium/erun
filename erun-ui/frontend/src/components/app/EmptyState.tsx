@@ -24,7 +24,10 @@ export function EmptyState({
       role="status"
     >
       {icon && (
-        <div className="flex justify-center text-muted-foreground [&_svg]:size-5" aria-hidden="true">
+        <div
+          className="flex justify-center text-muted-foreground [&_svg]:size-5"
+          aria-hidden="true"
+        >
           {icon}
         </div>
       )}

@@ -1,5 +1,14 @@
+import {
+  AlertOctagon,
+  Ban,
+  CheckCircle2,
+  ChevronRight,
+  Clock,
+  LoaderCircle,
+  Trash2,
+  X,
+} from 'lucide-react';
 import * as React from 'react';
-import { AlertOctagon, Ban, CheckCircle2, ChevronRight, Clock, LoaderCircle, Trash2, X } from 'lucide-react';
 
 import {
   type ActivityQueueContainerStatus,
@@ -10,13 +19,14 @@ import {
 } from '@/app/activityQueueState';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+
 import { StartForceDeploySession } from '../../../wailsjs/go/main/App';
 import type { main as wailsMain } from '../../../wailsjs/go/models';
 
-type ActivityQueueDrawerProps = {
+interface ActivityQueueDrawerProps {
   open: boolean;
   onClose: () => void;
-};
+}
 
 const drawerSurfaceClassName =
   'fixed top-[52px] right-0 bottom-0 z-30 flex w-[420px] flex-col border-l bg-background shadow-2xl transition-transform duration-150 ease-out';
@@ -41,17 +51,24 @@ const drawerVisibleClassName = 'translate-x-0';
 // entries, and Wails-exported actions register through the action
 // runner. There is no cross-restart persistence, so failed activities
 // from previous sessions don't reappear.
-export function ActivityQueueDrawer({ open, onClose }: ActivityQueueDrawerProps): React.ReactElement {
-  const { entries, dismiss, forceDismiss, recoverPendingHelm, killSession, cancelWaiting } = useActivityQueue();
+export function ActivityQueueDrawer({
+  open,
+  onClose,
+}: ActivityQueueDrawerProps): React.ReactElement {
+  const { entries, dismiss, forceDismiss, recoverPendingHelm, killSession, cancelWaiting } =
+    useActivityQueue();
   const nowEntries = entries.filter((entry) => entry.status === 'running');
   const nextEntries = entries.filter((entry) => entry.status === 'waiting');
-  const historyEntries = entries.filter((entry) =>
-    entry.status === 'succeeded' ||
-    entry.status === 'failed' ||
-    entry.status === 'skipped' ||
-    entry.status === 'cancelled',
+  const historyEntries = entries.filter(
+    (entry) =>
+      entry.status === 'succeeded' ||
+      entry.status === 'failed' ||
+      entry.status === 'skipped' ||
+      entry.status === 'cancelled',
   );
-  const [recoveryFeedback, setRecoveryFeedback] = React.useState<ActivityRecoveryResult | null>(null);
+  const [recoveryFeedback, setRecoveryFeedback] = React.useState<ActivityRecoveryResult | null>(
+    null,
+  );
 
   const dismissAllNow = React.useCallback(async () => {
     await Promise.all(nowEntries.map((entry) => forceDismiss(entry.id)));
@@ -62,16 +79,28 @@ export function ActivityQueueDrawer({ open, onClose }: ActivityQueueDrawerProps)
   const dismissAllHistory = React.useCallback(async () => {
     await Promise.all(historyEntries.map((entry) => dismiss(entry.id)));
   }, [historyEntries, dismiss]);
-  const onRecoverPendingHelm = React.useCallback(async (id: string) => {
-    const result = await recoverPendingHelm(id);
-    setRecoveryFeedback(result);
-  }, [recoverPendingHelm]);
+  const onRecoverPendingHelm = React.useCallback(
+    async (id: string) => {
+      const result = await recoverPendingHelm(id);
+      setRecoveryFeedback(result);
+    },
+    [recoverPendingHelm],
+  );
 
   return (
     <>
-      {open && <div role="presentation" className="fixed inset-0 top-[52px] z-20 bg-foreground/10" onClick={onClose} />}
+      {open && (
+        <div
+          role="presentation"
+          className="fixed inset-0 top-[52px] z-20 bg-foreground/10"
+          onClick={onClose}
+        />
+      )}
       <aside
-        className={cn(drawerSurfaceClassName, open ? drawerVisibleClassName : drawerHiddenClassName)}
+        className={cn(
+          drawerSurfaceClassName,
+          open ? drawerVisibleClassName : drawerHiddenClassName,
+        )}
         role="dialog"
         aria-label="Activity queue"
         aria-hidden={!open}
@@ -79,16 +108,32 @@ export function ActivityQueueDrawer({ open, onClose }: ActivityQueueDrawerProps)
         <header className="flex items-center justify-between border-b px-4 py-3">
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-semibold">Activities</h2>
-            <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground" aria-live="polite">
+            <span
+              className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+              aria-live="polite"
+            >
               {nowEntries.length} now · {nextEntries.length} next
             </span>
           </div>
-          <Button type="button" variant="ghost" size="icon" aria-label="Close activity queue" onClick={onClose}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Close activity queue"
+            onClick={onClose}
+          >
             <X aria-hidden="true" className="size-4" />
           </Button>
         </header>
         <div className="flex flex-1 flex-col gap-4 overflow-y-auto p-3" aria-live="polite">
-          {recoveryFeedback && <RecoveryFeedback result={recoveryFeedback} onDismiss={() => setRecoveryFeedback(null)} />}
+          {recoveryFeedback && (
+            <RecoveryFeedback
+              result={recoveryFeedback}
+              onDismiss={() => {
+                setRecoveryFeedback(null);
+              }}
+            />
+          )}
           <ActivitySection
             title="Now"
             entries={nowEntries}
@@ -123,18 +168,32 @@ export function ActivityQueueDrawer({ open, onClose }: ActivityQueueDrawerProps)
   );
 }
 
-function RecoveryFeedback({ result, onDismiss }: { result: ActivityRecoveryResult; onDismiss: () => void }): React.ReactElement {
+function RecoveryFeedback({
+  result,
+  onDismiss,
+}: {
+  result: ActivityRecoveryResult;
+  onDismiss: () => void;
+}): React.ReactElement {
   return (
     <section
       role="status"
       className={cn(
         'rounded-md border px-3 py-2 text-xs',
-        result.ok ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-900' : 'border-destructive/40 bg-destructive/10 text-destructive',
+        result.ok
+          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-900'
+          : 'border-destructive/40 bg-destructive/10 text-destructive',
       )}
     >
       <div className="flex items-start justify-between gap-2">
         <p className="font-medium">{result.ok ? 'Recovery succeeded' : 'Recovery failed'}</p>
-        <Button type="button" variant="ghost" size="icon" aria-label="Dismiss recovery message" onClick={onDismiss}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label="Dismiss recovery message"
+          onClick={onDismiss}
+        >
           <X aria-hidden="true" className="size-3.5" />
         </Button>
       </div>
@@ -148,7 +207,7 @@ function RecoveryFeedback({ result, onDismiss }: { result: ActivityRecoveryResul
   );
 }
 
-type ActivitySectionProps = {
+interface ActivitySectionProps {
   title: string;
   entries: ActivityQueueEntry[];
   emptyText: string;
@@ -160,7 +219,7 @@ type ActivitySectionProps = {
   onClearAll?: () => Promise<void>;
   clearAllLabel?: string;
   clearAllHint?: string;
-};
+}
 
 function ActivitySection({
   title,
@@ -178,7 +237,10 @@ function ActivitySection({
   return (
     <section aria-labelledby={`activity-section-${title.toLowerCase()}`}>
       <div className="flex items-center justify-between px-1 pb-1.5">
-        <h3 id={`activity-section-${title.toLowerCase()}`} className="text-[11px] uppercase tracking-wider text-muted-foreground">
+        <h3
+          id={`activity-section-${title.toLowerCase()}`}
+          className="text-[11px] uppercase tracking-wider text-muted-foreground"
+        >
           {title}
         </h3>
         {onClearAll && (
@@ -197,7 +259,9 @@ function ActivitySection({
         )}
       </div>
       {entries.length === 0 ? (
-        <p className="rounded-md border border-dashed bg-muted/40 px-3 py-2 text-xs text-muted-foreground">{emptyText}</p>
+        <p className="rounded-md border border-dashed bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+          {emptyText}
+        </p>
       ) : (
         <ul className="space-y-2">
           {entries.map((entry) => (
@@ -218,14 +282,14 @@ function ActivitySection({
   );
 }
 
-type ActivityCardProps = {
+interface ActivityCardProps {
   entry: ActivityQueueEntry;
   onDismiss?: (id: string) => Promise<void>;
   onForceDismiss?: (id: string) => Promise<void>;
   onCancelWaiting?: (id: string) => Promise<boolean>;
   onRecoverPendingHelm?: (id: string) => Promise<void>;
   onKillSession?: (sessionId: number) => Promise<boolean>;
-};
+}
 
 // useTickingNow provides a per-component ticking timestamp without
 // surfacing it as a prop. Parent re-renders no longer cascade into every
@@ -236,8 +300,12 @@ function useTickingNow(active: boolean): number {
   const [now, setNow] = React.useState(() => Date.now());
   React.useEffect(() => {
     if (!active) return undefined;
-    const id = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(id);
+    const id = window.setInterval(() => {
+      setNow(Date.now());
+    }, 1_000);
+    return () => {
+      window.clearInterval(id);
+    };
   }, [active]);
   return now;
 }
@@ -286,7 +354,9 @@ const ActivityCard = React.memo(function ActivityCard({
     dismissLabel = 'Dismiss';
   }
   return (
-    <article className={cn('rounded-md border bg-card p-3 shadow-sm', cardBorderClassName(entry.status))}>
+    <article
+      className={cn('rounded-md border bg-card p-3 shadow-sm', cardBorderClassName(entry.status))}
+    >
       <header className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-sm font-medium">
@@ -294,9 +364,7 @@ const ActivityCard = React.memo(function ActivityCard({
             <CommandBadge command={entry.command} />
             <span className="truncate">{activityTargetLabel(entry)}</span>
           </div>
-          <div className="text-xs text-muted-foreground truncate">
-            {commandSubtitle(entry)}
-          </div>
+          <div className="text-xs text-muted-foreground truncate">{commandSubtitle(entry)}</div>
         </div>
         <div className="flex flex-none items-center gap-2 text-xs text-muted-foreground">
           <span className="font-mono tabular-nums">{elapsed}</span>
@@ -319,7 +387,11 @@ const ActivityCard = React.memo(function ActivityCard({
           {entry.error}
         </p>
       )}
-      <RecoveryActionRow entry={entry} onRecoverPendingHelm={onRecoverPendingHelm} onKillSession={onKillSession} />
+      <RecoveryActionRow
+        entry={entry}
+        onRecoverPendingHelm={onRecoverPendingHelm}
+        onKillSession={onKillSession}
+      />
       {entry.command === 'deploy' && entry.containers && entry.containers.length > 0 && (
         <ContainerStatusList containers={entry.containers} deploy={entry} />
       )}
@@ -327,7 +399,10 @@ const ActivityCard = React.memo(function ActivityCard({
   );
 });
 
-function shouldShowHelmRecovery(entry: ActivityQueueEntry, onRecover?: (id: string) => Promise<void>): boolean {
+function shouldShowHelmRecovery(
+  entry: ActivityQueueEntry,
+  onRecover?: (id: string) => Promise<void>,
+): boolean {
   if (!onRecover) return false;
   if (entry.source !== 'helm') return false;
   return Boolean(entry.release && entry.namespace);
@@ -391,7 +466,12 @@ function RecoveryActionRow({
 function CommandBadge({ command }: { command: string }): React.ReactElement | null {
   if (!command) return null;
   return (
-    <span className={cn('rounded-sm px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider', commandBadgeClassName(command))}>
+    <span
+      className={cn(
+        'rounded-sm px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider',
+        commandBadgeClassName(command),
+      )}
+    >
       {command}
     </span>
   );
@@ -442,7 +522,13 @@ function commandSubtitle(entry: ActivityQueueEntry): string {
   return parts.length > 0 ? parts.join(' · ') : '—';
 }
 
-function ContainerStatusList({ containers, deploy }: { containers: ActivityQueueContainerStatus[]; deploy: ActivityQueueEntry }): React.ReactElement {
+function ContainerStatusList({
+  containers,
+  deploy,
+}: {
+  containers: ActivityQueueContainerStatus[];
+  deploy: ActivityQueueEntry;
+}): React.ReactElement {
   return (
     <ul className="mt-2 space-y-1">
       {containers.map((container) => (
@@ -454,7 +540,13 @@ function ContainerStatusList({ containers, deploy }: { containers: ActivityQueue
   );
 }
 
-function ContainerStatusRow({ container, deploy }: { container: ActivityQueueContainerStatus; deploy: ActivityQueueEntry }): React.ReactElement {
+function ContainerStatusRow({
+  container,
+  deploy,
+}: {
+  container: ActivityQueueContainerStatus;
+  deploy: ActivityQueueEntry;
+}): React.ReactElement {
   const failing = containerIsFailing(container);
   const [expanded, setExpanded] = React.useState<boolean>(failing);
   // Failing containers default to expanded so the user sees the cause
@@ -465,38 +557,81 @@ function ContainerStatusRow({ container, deploy }: { container: ActivityQueueCon
 
   const hasDetails = Boolean(container.image || container.message || container.reason);
   return (
-    <div className={cn('rounded-sm border border-transparent bg-muted/40 px-2 py-1', failing && 'border-destructive/30')}>
+    <div
+      className={cn(
+        'rounded-sm border border-transparent bg-muted/40 px-2 py-1',
+        failing && 'border-destructive/30',
+      )}
+    >
       <button
         type="button"
         className="flex w-full items-center justify-between gap-2 text-left text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
         aria-expanded={expanded}
         aria-controls={`container-detail-${container.name}`}
         disabled={!hasDetails}
-        onClick={() => setExpanded((value) => !value)}
+        onClick={() => {
+          setExpanded((value) => !value);
+        }}
       >
         <span className="flex items-center gap-1 truncate font-medium">
           {hasDetails && (
-            <ChevronRight aria-hidden="true" className={cn('size-3 transition-transform text-muted-foreground', expanded && 'rotate-90')} />
+            <ChevronRight
+              aria-hidden="true"
+              className={cn(
+                'size-3 transition-transform text-muted-foreground',
+                expanded && 'rotate-90',
+              )}
+            />
           )}
           <span className="truncate">{container.name}</span>
         </span>
-        <span className={cn('flex flex-none items-center gap-1 text-[10px] uppercase tracking-wider', containerPhaseClassName(container))}>
-          <span aria-hidden="true" className={cn('inline-block size-1.5 rounded-full', containerPhaseDotClassName(container))} />
+        <span
+          className={cn(
+            'flex flex-none items-center gap-1 text-[10px] uppercase tracking-wider',
+            containerPhaseClassName(container),
+          )}
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              'inline-block size-1.5 rounded-full',
+              containerPhaseDotClassName(container),
+            )}
+          />
           {containerPhaseLabel(container)}
-          {container.restarts > 0 && <span className="text-muted-foreground">· {container.restarts} restart{container.restarts > 1 ? 's' : ''}</span>}
+          {container.restarts > 0 && (
+            <span className="text-muted-foreground">
+              · {container.restarts} restart{container.restarts > 1 ? 's' : ''}
+            </span>
+          )}
         </span>
       </button>
       {expanded && hasDetails && (
-        <ContainerStatusDetail id={`container-detail-${container.name}`} container={container} deploy={deploy} />
+        <ContainerStatusDetail
+          id={`container-detail-${container.name}`}
+          container={container}
+          deploy={deploy}
+        />
       )}
     </div>
   );
 }
 
-function ContainerStatusDetail({ id, container, deploy }: { id: string; container: ActivityQueueContainerStatus; deploy: ActivityQueueEntry }): React.ReactElement {
+function ContainerStatusDetail({
+  id,
+  container,
+  deploy,
+}: {
+  id: string;
+  container: ActivityQueueContainerStatus;
+  deploy: ActivityQueueEntry;
+}): React.ReactElement {
   const recovery = recoveryActionForContainer(container, deploy);
   return (
-    <dl id={id} className="mt-1 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+    <dl
+      id={id}
+      className="mt-1 grid grid-cols-[max-content_1fr] gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground"
+    >
       {container.image && (
         <>
           <dt className="font-medium text-foreground">Image</dt>
@@ -506,7 +641,14 @@ function ContainerStatusDetail({ id, container, deploy }: { id: string; containe
       {container.reason && (
         <>
           <dt className="font-medium text-foreground">Reason</dt>
-          <dd className={cn('font-mono text-[10.5px]', containerIsFailing(container) && 'text-destructive')}>{container.reason}</dd>
+          <dd
+            className={cn(
+              'font-mono text-[10.5px]',
+              containerIsFailing(container) && 'text-destructive',
+            )}
+          >
+            {container.reason}
+          </dd>
         </>
       )}
       {container.message && (
@@ -553,11 +695,11 @@ function ContainerStatusDetail({ id, container, deploy }: { id: string; containe
   );
 }
 
-type recoveryAction = {
+interface recoveryAction {
   hint: string;
   label: string;
   action: () => Promise<void>;
-};
+}
 
 // recoveryActionForContainer returns a one-click recovery affordance when
 // the container's failure mode has a known mitigation. The most common
@@ -566,7 +708,10 @@ type recoveryAction = {
 // chart bumped the tag without publishing it. `erun deploy --force`
 // rebuilds every image bypassing the fingerprint cache and pushes them
 // to the registry, so the missing tag becomes available.
-function recoveryActionForContainer(container: ActivityQueueContainerStatus, deploy: ActivityQueueEntry): recoveryAction | null {
+function recoveryActionForContainer(
+  container: ActivityQueueContainerStatus,
+  deploy: ActivityQueueEntry,
+): recoveryAction | null {
   if (!containerIsFailing(container)) return null;
   const message = (container.message ?? '').toLowerCase();
   const reason = (container.reason ?? '').toLowerCase();
@@ -600,7 +745,10 @@ function recoveryActionForContainer(container: ActivityQueueContainerStatus, dep
   };
 }
 
-function kubectlDescribeCommand(container: ActivityQueueContainerStatus, deploy: ActivityQueueEntry): string {
+function kubectlDescribeCommand(
+  container: ActivityQueueContainerStatus,
+  deploy: ActivityQueueEntry,
+): string {
   const parts = ['kubectl'];
   const ctx = deploy.kubernetesContext?.trim();
   if (ctx) {
@@ -628,7 +776,11 @@ async function copyToClipboard(text: string): Promise<void> {
   }
 }
 
-function ActivityStatusIcon({ status }: { status: ActivityQueueEntry['status'] }): React.ReactElement {
+function ActivityStatusIcon({
+  status,
+}: {
+  status: ActivityQueueEntry['status'];
+}): React.ReactElement {
   switch (status) {
     case 'waiting':
       return <Clock aria-hidden="true" className="size-3.5 text-muted-foreground" />;
@@ -718,9 +870,20 @@ function containerPhaseDotClassName(container: ActivityQueueContainerStatus): st
 // for the given selection and returns a tooltip explaining any block. The
 // gate looks at active deploy activities only — a build or release running
 // for the same selection does not block a deploy.
-export function useDeployButtonGate(tenant: string, environment: string, version: string): { disabled: boolean; tooltip: string; activeEntry: ActivityQueueEntry | null } {
+export function useDeployButtonGate(
+  tenant: string,
+  environment: string,
+  version: string,
+): { disabled: boolean; tooltip: string; activeEntry: ActivityQueueEntry | null } {
   const { entries } = useActivityQueue();
-  const active = entries.find((entry) => entry.status === 'running' && entry.command === 'deploy' && entry.tenant === tenant && entry.environment === environment) ?? null;
+  const active =
+    entries.find(
+      (entry) =>
+        entry.status === 'running' &&
+        entry.command === 'deploy' &&
+        entry.tenant === tenant &&
+        entry.environment === environment,
+    ) ?? null;
   if (!active) {
     return { disabled: false, tooltip: '', activeEntry: null };
   }

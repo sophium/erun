@@ -1,3 +1,15 @@
+// Endpoints must be imported to inject themselves into wailsApi.
+import './api/stateApi';
+import './api/environmentApi';
+import './api/tenantApi';
+import './api/kubernetesApi';
+import './api/cloudApi';
+import './api/reviewApi';
+import './api/idleApi';
+import './api/sessionApi';
+import './api/deployApi';
+import './api/globalConfigApi';
+
 import { configureStore, type ThunkAction, type UnknownAction } from '@reduxjs/toolkit';
 import { setupListeners } from '@reduxjs/toolkit/query';
 
@@ -5,7 +17,6 @@ import { wailsApi } from './api/wailsApi';
 import { persistenceMiddleware } from './middleware/persistenceMiddleware';
 import { terminalDisplayMiddleware } from './middleware/terminalDisplayMiddleware';
 import { wailsEventsMiddleware } from './middleware/wailsEventsMiddleware';
-import { thunkExtra, type ThunkExtra } from './thunkExtra';
 import activityReducer from './slices/activitySlice';
 import doctorReducer from './slices/doctorSlice';
 import environmentDialogReducer from './slices/environmentDialogSlice';
@@ -24,18 +35,7 @@ import tenantDialogReducer from './slices/tenantDialogSlice';
 import tenantsReducer from './slices/tenantsSlice';
 import terminalReducer from './slices/terminalSlice';
 import terminalStatusReducer from './slices/terminalStatusSlice';
-
-// Endpoints must be imported to inject themselves into wailsApi.
-import './api/stateApi';
-import './api/environmentApi';
-import './api/tenantApi';
-import './api/kubernetesApi';
-import './api/cloudApi';
-import './api/reviewApi';
-import './api/idleApi';
-import './api/sessionApi';
-import './api/deployApi';
-import './api/globalConfigApi';
+import { type ThunkExtra, thunkExtra } from './thunkExtra';
 
 export const store = configureStore({
   reducer: {

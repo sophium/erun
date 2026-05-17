@@ -17,17 +17,20 @@ import { normalizeDialogValue } from './versionSuggestions';
 // the resulting CPU/memory totals. Internal helper; not exported because
 // callers should drive it via refreshKubernetesContexts or
 // selectLoadedKubernetesContexts.
-const refreshDialogRuntimeResources = (kubernetesContext: string): AppThunk<Promise<void>> =>
+const refreshDialogRuntimeResources =
+  (kubernetesContext: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
     const context = normalizeDialogValue(kubernetesContext);
     let dialog = getState().environmentDialog;
     if (!dialog.open || dialog.actionMode !== 'init' || !context) {
       return;
     }
-    dispatch(patchEnvironmentDialog({
-      resourceStatusLoading: true,
-      resourceStatus: null,
-    }));
+    dispatch(
+      patchEnvironmentDialog({
+        resourceStatusLoading: true,
+        resourceStatus: null,
+      }),
+    );
     try {
       dialog = getState().environmentDialog;
       const status = await dispatch(
@@ -43,31 +46,36 @@ const refreshDialogRuntimeResources = (kubernetesContext: string): AppThunk<Prom
       if (!getState().environmentDialog.open) {
         return;
       }
-      dispatch(patchEnvironmentDialog({
-        resourceStatus: status,
-        resourceStatusLoading: false,
-      }));
+      dispatch(
+        patchEnvironmentDialog({
+          resourceStatus: status,
+          resourceStatusLoading: false,
+        }),
+      );
     } catch (error) {
       if (!getState().environmentDialog.open) {
         return;
       }
-      dispatch(patchEnvironmentDialog({
-        resourceStatus: {
-          kubernetesContext: context,
-          available: false,
-          message: readError(error),
-          cpu: { total: 0, used: 0, free: 0, unit: 'cores', formatted: '' },
-          memory: { total: 0, used: 0, free: 0, unit: 'GiB', formatted: '' },
-        },
-        resourceStatusLoading: false,
-      }));
+      dispatch(
+        patchEnvironmentDialog({
+          resourceStatus: {
+            kubernetesContext: context,
+            available: false,
+            message: readError(error),
+            cpu: { total: 0, used: 0, free: 0, unit: 'cores', formatted: '' },
+            memory: { total: 0, used: 0, free: 0, unit: 'GiB', formatted: '' },
+          },
+          resourceStatusLoading: false,
+        }),
+      );
     }
   };
 
 // selectLoadedKubernetesContexts seeds the dialog from a freshly-loaded
 // initial-state response. boot() and reloadStateAfterEnvironmentChange()
 // dispatch this after the contexts are returned from the backend.
-export const selectLoadedKubernetesContexts = (contexts: string[]): AppThunk<Promise<void>> =>
+export const selectLoadedKubernetesContexts =
+  (contexts: string[]): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
     const dialog = getState().environmentDialog;
     if (!dialog.open || dialog.actionMode !== 'init') {
@@ -75,19 +83,21 @@ export const selectLoadedKubernetesContexts = (contexts: string[]): AppThunk<Pro
     }
     const normalized = contexts.map((context) => context.trim()).filter(Boolean);
     const resolved = selectDialogKubernetesContext(getState(), normalized);
-    dispatch(patchEnvironmentDialog({
-      kubernetesContexts: normalized,
-      kubernetesContext: resolved,
-      kubernetesContextsLoading: false,
-    }));
+    dispatch(
+      patchEnvironmentDialog({
+        kubernetesContexts: normalized,
+        kubernetesContext: resolved,
+        kubernetesContextsLoading: false,
+      }),
+    );
     await dispatch(refreshDialogRuntimeResources(resolved));
   };
 
 // refreshKubernetesContexts re-scans kubeconfig for available contexts and
 // patches the dialog. Triggered by the "rescan k8s contexts" button and
 // after cloud-context power changes that may have rewritten kubeconfig.
-export const refreshKubernetesContexts = (): AppThunk<Promise<void>> =>
-  async (dispatch, getState) => {
+export const refreshKubernetesContexts =
+  (): AppThunk<Promise<void>> => async (dispatch, getState) => {
     try {
       const result = await dispatch(
         kubernetesApi.endpoints.getKubernetesContexts.initiate(),
@@ -98,22 +108,26 @@ export const refreshKubernetesContexts = (): AppThunk<Promise<void>> =>
         return;
       }
       const resolved = selectDialogKubernetesContext(getState(), contexts);
-      dispatch(patchEnvironmentDialog({
-        kubernetesContexts: contexts,
-        kubernetesContext: resolved,
-        kubernetesContextsLoading: false,
-      }));
+      dispatch(
+        patchEnvironmentDialog({
+          kubernetesContexts: contexts,
+          kubernetesContext: resolved,
+          kubernetesContextsLoading: false,
+        }),
+      );
       await dispatch(refreshDialogRuntimeResources(resolved));
     } catch (error) {
       const dialog = getState().environmentDialog;
       if (!dialog.open || dialog.actionMode !== 'init') {
         return;
       }
-      dispatch(patchEnvironmentDialog({
-        kubernetesContexts: [],
-        kubernetesContext: '',
-        kubernetesContextsLoading: false,
-        error: readError(error),
-      }));
+      dispatch(
+        patchEnvironmentDialog({
+          kubernetesContexts: [],
+          kubernetesContext: '',
+          kubernetesContextsLoading: false,
+          error: readError(error),
+        }),
+      );
     }
   };

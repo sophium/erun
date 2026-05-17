@@ -1,25 +1,40 @@
+import {
+  AlertCircle,
+  CheckCircle2,
+  Cloud,
+  Copy,
+  Folder,
+  FolderOpen,
+  LoaderCircle,
+  LogIn,
+  LogOut,
+  MoreHorizontal,
+  Plus,
+  Settings,
+  UserCircle2,
+} from 'lucide-react';
 import * as React from 'react';
-import { AlertCircle, CheckCircle2, Cloud, Copy, Folder, FolderOpen, LoaderCircle, LogIn, LogOut, MoreHorizontal, Plus, Settings, UserCircle2 } from 'lucide-react';
 
-import { readError } from '@/app/errors';
 import {
   getPrimaryCloudProviderBearerToken,
   loginPrimaryCloudProvider,
   logoutPrimaryCloudProvider,
 } from '@/app/cloudProviderThunks';
 import { openInitializeDialog } from '@/app/environmentDialogThunks';
+import { readError } from '@/app/errors';
 import { openGlobalConfigDialog } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { openManageDialog } from '@/app/manageEnvironmentThunks';
 import { showTerminalMessage } from '@/app/notificationThunks';
 import { openSelection } from '@/app/sessionThunks';
 import { toggleTenantCollapsed } from '@/app/slices/sidebarSlice';
-import { openTenantDashboard, openTenantDialog } from '@/app/tenantDialogThunks';
 import type { AppState } from '@/app/state';
+import { openTenantDashboard, openTenantDialog } from '@/app/tenantDialogThunks';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn } from '@/lib/utils';
 import type { UICloudProviderStatus, UISelection, UITenant } from '@/types';
+
 import { EmptyState } from './EmptyState';
 import { IconTooltip } from './IconTooltip';
 import { cloudProviderStatusTone } from './StatusBadge';
@@ -37,7 +52,9 @@ export function Sidebar(): React.ReactElement {
       )}
     >
       <div className="flex items-center justify-between gap-2 pr-1.5 pb-2.5 pl-3.5">
-        <span className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Environments</span>
+        <span className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
+          Environments
+        </span>
         <div className="flex items-center gap-1">
           <IconTooltip label="Open ERun settings">
             <Button
@@ -46,7 +63,9 @@ export function Sidebar(): React.ReactElement {
               variant="ghost"
               size="icon-xs"
               aria-label="Open ERun settings"
-              onClick={() => dispatch(openGlobalConfigDialog())}
+              onClick={() => {
+                dispatch(openGlobalConfigDialog());
+              }}
             >
               <Settings />
             </Button>
@@ -58,7 +77,9 @@ export function Sidebar(): React.ReactElement {
               variant="ghost"
               size="icon-xs"
               aria-label="Initialize new remote environment"
-              onClick={() => dispatch(openInitializeDialog())}
+              onClick={() => {
+                dispatch(openInitializeDialog());
+              }}
             >
               <Plus />
             </Button>
@@ -73,7 +94,13 @@ export function Sidebar(): React.ReactElement {
               heading="No environments yet"
               body="Initialize a remote environment to start working. You can also import an existing one from your kubeconfig."
               action={
-                <Button type="button" size="sm" onClick={() => dispatch(openInitializeDialog())}>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    dispatch(openInitializeDialog());
+                  }}
+                >
                   <Plus aria-hidden="true" />
                   Initialize environment
                 </Button>
@@ -84,7 +111,6 @@ export function Sidebar(): React.ReactElement {
           tenants.map((tenant, index) => (
             <TenantGroup
               key={tenant.name}
-             
               tenant={tenant}
               spaced={index > 0}
               pending={pendingForTenant(tenants, selected, tenant.name)}
@@ -104,8 +130,12 @@ export function Sidebar(): React.ReactElement {
 // ~1–2 min init runs. The placeholder disappears once
 // reloadStateAfterEnvironmentChange picks up the new env, or when
 // `environment-init-failed` reverts state.selected.
-function pendingForTenant(tenants: AppState['tenants'], selected: AppState['selected'], tenantName: string): UISelection | null {
-  if (!selected || selected.tenant !== tenantName) {
+function pendingForTenant(
+  tenants: AppState['tenants'],
+  selected: AppState['selected'],
+  tenantName: string,
+): UISelection | null {
+  if (selected?.tenant !== tenantName) {
     return null;
   }
   const tenant = tenants.find((entry) => entry.name === selected.tenant);
@@ -151,26 +181,69 @@ function PrimaryCloudAliasControl(): React.ReactElement | null {
           <span className="min-w-0 flex-1 truncate">{cloudProviderIdentity(view.provider)}</span>
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-[min(360px,calc(var(--sidebar-width)-24px))] p-2" side="top" align="start">
+      <PopoverContent
+        className="w-[min(360px,calc(var(--sidebar-width)-24px))] p-2"
+        side="top"
+        align="start"
+      >
         <div className="grid gap-1">
-          <CloudAliasPopoverRow icon={<UserCircle2 />} label={cloudProviderIdentity(view.provider)} muted />
+          <CloudAliasPopoverRow
+            icon={<UserCircle2 />}
+            label={cloudProviderIdentity(view.provider)}
+            muted
+          />
           <CloudAliasPopoverRow icon={<Cloud />} label={view.provider.alias} muted />
           <div className="my-1 border-t border-border" />
           <CloudAliasStatus provider={view.provider} />
           {view.active ? (
             <>
-              <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={view.busy} onClick={() => void dispatch(getPrimaryCloudProviderBearerToken(view.provider.alias))}>
-                {view.bearerBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Copy aria-hidden="true" />}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="justify-start"
+                disabled={view.busy}
+                onClick={() =>
+                  void dispatch(getPrimaryCloudProviderBearerToken(view.provider.alias))
+                }
+              >
+                {view.bearerBusy ? (
+                  <LoaderCircle className="animate-spin" aria-hidden="true" />
+                ) : (
+                  <Copy aria-hidden="true" />
+                )}
                 {view.bearerBusy ? 'Copying token...' : 'Get bearer token'}
               </Button>
-              <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={view.busy} onClick={() => void dispatch(logoutPrimaryCloudProvider(view.provider.alias))}>
-                {view.logoutBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <LogOut aria-hidden="true" />}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="justify-start"
+                disabled={view.busy}
+                onClick={() => void dispatch(logoutPrimaryCloudProvider(view.provider.alias))}
+              >
+                {view.logoutBusy ? (
+                  <LoaderCircle className="animate-spin" aria-hidden="true" />
+                ) : (
+                  <LogOut aria-hidden="true" />
+                )}
                 {view.logoutBusy ? 'Logging out...' : 'Log out'}
               </Button>
             </>
           ) : (
-            <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={view.busy} onClick={() => void dispatch(loginPrimaryCloudProvider(view.provider.alias))}>
-              {view.loginBusy ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <LogIn aria-hidden="true" />}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="justify-start"
+              disabled={view.busy}
+              onClick={() => void dispatch(loginPrimaryCloudProvider(view.provider.alias))}
+            >
+              {view.loginBusy ? (
+                <LoaderCircle className="animate-spin" aria-hidden="true" />
+              ) : (
+                <LogIn aria-hidden="true" />
+              )}
               {view.loginBusy ? 'Logging in...' : 'Log in'}
             </Button>
           )}
@@ -203,7 +276,11 @@ function primaryCloudAliasView(input: PrimaryCloudAliasInputs): PrimaryCloudAlia
   if (!alias) {
     return null;
   }
-  const provider = input.cloudProviders.find((candidate) => candidate.alias === alias) || { alias, provider: '', status: 'unknown' };
+  const provider = input.cloudProviders.find((candidate) => candidate.alias === alias) || {
+    alias,
+    provider: '',
+    status: 'unknown',
+  };
   const busy = input.sidebarBusy;
   return {
     provider,
@@ -217,12 +294,27 @@ function primaryCloudAliasView(input: PrimaryCloudAliasInputs): PrimaryCloudAlia
 
 function primaryCloudAliasFor(input: PrimaryCloudAliasInputs): string | undefined {
   const tenantName = input.dashboardTenant || input.selected?.tenant || '';
-  return input.tenants.find((candidate) => candidate.name === tenantName)?.primaryCloudProviderAlias?.trim();
+  return input.tenants
+    .find((candidate) => candidate.name === tenantName)
+    ?.primaryCloudProviderAlias?.trim();
 }
 
-function CloudAliasPopoverRow({ icon, label, muted }: { icon: React.ReactElement<{ className?: string; 'aria-hidden'?: boolean }>; label: string; muted?: boolean }): React.ReactElement {
+function CloudAliasPopoverRow({
+  icon,
+  label,
+  muted,
+}: {
+  icon: React.ReactElement<{ className?: string; 'aria-hidden'?: boolean }>;
+  label: string;
+  muted?: boolean;
+}): React.ReactElement {
   return (
-    <div className={cn('flex min-w-0 items-center gap-2 rounded-sm px-2 py-1.5 text-sm', muted && 'text-muted-foreground')}>
+    <div
+      className={cn(
+        'flex min-w-0 items-center gap-2 rounded-sm px-2 py-1.5 text-sm',
+        muted && 'text-muted-foreground',
+      )}
+    >
       {React.cloneElement(icon, { className: 'size-4 shrink-0', 'aria-hidden': true })}
       <span className="truncate">{label}</span>
     </div>
@@ -239,9 +331,18 @@ function CloudAliasStatus({ provider }: { provider: UICloudProviderStatus }): Re
   );
 }
 
-function CloudAliasTriggerIcon({ tone }: { tone: ReturnType<typeof cloudProviderStatusTone> }): React.ReactElement {
+function CloudAliasTriggerIcon({
+  tone,
+}: {
+  tone: ReturnType<typeof cloudProviderStatusTone>;
+}): React.ReactElement {
   if (tone === 'success') {
-    return <CheckCircle2 className="size-4 shrink-0 text-green-700 dark:text-green-400" aria-hidden="true" />;
+    return (
+      <CheckCircle2
+        className="size-4 shrink-0 text-green-700 dark:text-green-400"
+        aria-hidden="true"
+      />
+    );
   }
   if (tone === 'destructive') {
     return <AlertCircle className="size-4 shrink-0 text-destructive" aria-hidden="true" />;
@@ -249,9 +350,18 @@ function CloudAliasTriggerIcon({ tone }: { tone: ReturnType<typeof cloudProvider
   return <UserCircle2 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />;
 }
 
-function CloudAliasStatusIcon({ tone }: { tone: ReturnType<typeof cloudProviderStatusTone> }): React.ReactElement {
+function CloudAliasStatusIcon({
+  tone,
+}: {
+  tone: ReturnType<typeof cloudProviderStatusTone>;
+}): React.ReactElement {
   if (tone === 'success') {
-    return <CheckCircle2 className="size-4 shrink-0 text-green-700 dark:text-green-400" aria-hidden="true" />;
+    return (
+      <CheckCircle2
+        className="size-4 shrink-0 text-green-700 dark:text-green-400"
+        aria-hidden="true"
+      />
+    );
   }
   if (tone === 'destructive') {
     return <AlertCircle className="size-4 shrink-0 text-destructive" aria-hidden="true" />;
@@ -297,7 +407,8 @@ function TenantGroup({
       <div
         className={cn(
           'group/tenant mr-1 ml-1 flex h-8 items-center rounded-md pr-1 text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-          active && 'bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground',
+          active &&
+            'bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground',
         )}
       >
         <TenantToggleButton tenantName={tenant.name} collapsed={collapsed} active={active} />
@@ -309,7 +420,6 @@ function TenantGroup({
           {tenant.environments.map((environment) => (
             <EnvironmentRow
               key={environment.name}
-             
               tenantName={tenant.name}
               environmentName={environment.name}
             />
@@ -326,7 +436,15 @@ function TenantGroup({
   );
 }
 
-function TenantToggleButton({ tenantName, collapsed, active }: { tenantName: string; collapsed: boolean; active: boolean }): React.ReactElement {
+function TenantToggleButton({
+  tenantName,
+  collapsed,
+  active,
+}: {
+  tenantName: string;
+  collapsed: boolean;
+  active: boolean;
+}): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
     <IconTooltip label={collapsed ? 'Expand tenant' : 'Collapse tenant'}>
@@ -334,7 +452,8 @@ function TenantToggleButton({ tenantName, collapsed, active }: { tenantName: str
         type="button"
         className={cn(
           'size-[26px] flex-none text-current hover:bg-[color-mix(in_oklch,currentColor_12%,transparent)] hover:text-current [&_svg]:size-[18px]',
-          !active && 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+          !active &&
+            'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
         )}
         variant="ghost"
         size="icon"
@@ -348,7 +467,15 @@ function TenantToggleButton({ tenantName, collapsed, active }: { tenantName: str
   );
 }
 
-function TenantSelectButton({ tenantName, active, related }: { tenantName: string; active: boolean; related: boolean }): React.ReactElement {
+function TenantSelectButton({
+  tenantName,
+  active,
+  related,
+}: {
+  tenantName: string;
+  active: boolean;
+  related: boolean;
+}): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
     <button
@@ -359,14 +486,22 @@ function TenantSelectButton({ tenantName, active, related }: { tenantName: strin
       type="button"
       title={tenantName}
       aria-current={active ? 'page' : undefined}
-      onClick={() => dispatch(openTenantDashboard(tenantName))}
+      onClick={() => {
+        dispatch(openTenantDashboard(tenantName));
+      }}
     >
       <span className="truncate">{tenantName}</span>
     </button>
   );
 }
 
-function TenantManageButton({ tenantName, active }: { tenantName: string; active: boolean }): React.ReactElement {
+function TenantManageButton({
+  tenantName,
+  active,
+}: {
+  tenantName: string;
+  active: boolean;
+}): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
     <IconTooltip label="Edit tenant settings">
@@ -374,7 +509,8 @@ function TenantManageButton({ tenantName, active }: { tenantName: string; active
         type="button"
         className={cn(
           'pointer-events-none size-[26px] flex-none cursor-pointer text-current opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-[color-mix(in_oklch,currentColor_12%,transparent)] hover:text-current group-hover/tenant:pointer-events-auto group-hover/tenant:opacity-100 group-focus-within/tenant:pointer-events-auto group-focus-within/tenant:opacity-100 [&_svg]:size-4',
-          !active && 'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+          !active &&
+            'text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
           active && 'pointer-events-auto opacity-100',
         )}
         variant="ghost"
@@ -391,6 +527,65 @@ function TenantManageButton({ tenantName, active }: { tenantName: string; active
   );
 }
 
+function LocalEnvBadge({ selected }: { selected: boolean }): React.ReactElement {
+  return (
+    <span
+      className={cn(
+        'flex-none rounded-[calc(var(--radius)-4px)] border px-1 py-px text-[10px] font-medium uppercase leading-none tracking-wide',
+        selected
+          ? 'border-primary-foreground/40 text-primary-foreground/85'
+          : 'border-border text-muted-foreground',
+      )}
+      aria-label="Local environment"
+    >
+      Local
+    </span>
+  );
+}
+
+function EnvironmentRowEditButton({
+  tenantName,
+  environmentName,
+  selected,
+  selection,
+}: {
+  tenantName: string;
+  environmentName: string;
+  selected: boolean;
+  selection: UISelection;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <IconTooltip label="Edit environment settings">
+      <Button
+        type="button"
+        className={cn(
+          'pointer-events-none size-[26px] flex-none cursor-pointer border-0 bg-transparent text-current opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-[color-mix(in_oklch,currentColor_12%,transparent)] hover:text-current group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 [&_svg]:size-4',
+          selected && 'pointer-events-auto opacity-100',
+        )}
+        variant="ghost"
+        size="icon"
+        aria-label={`Edit ${tenantName} / ${environmentName} settings`}
+        onClick={(event) => {
+          event.stopPropagation();
+          dispatch(openManageDialog(selection));
+        }}
+      >
+        <MoreHorizontal />
+      </Button>
+    </IconTooltip>
+  );
+}
+
+function BusyRowSpinner(): React.ReactElement {
+  return (
+    <LoaderCircle
+      className="size-3.5 flex-none animate-spin text-current opacity-75"
+      aria-hidden="true"
+    />
+  );
+}
+
 function EnvironmentRow({
   tenantName,
   environmentName,
@@ -402,9 +597,13 @@ function EnvironmentRow({
   const selectedSelection = useAppSelector((state) => state.selection.selected);
   const tenants = useAppSelector((state) => state.tenants.tenants);
   const terminalBusy = useAppSelector((state) => state.terminalStatus.terminalBusy);
-  const selected = selectedSelection?.tenant === tenantName && selectedSelection?.environment === environmentName;
+  const selected =
+    selectedSelection?.tenant === tenantName && selectedSelection?.environment === environmentName;
   const selection = { tenant: tenantName, environment: environmentName };
-  const busy = terminalBusy === true && selectedSelection?.tenant === tenantName && selectedSelection.environment === environmentName;
+  const busy =
+    terminalBusy &&
+    selectedSelection?.tenant === tenantName &&
+    selectedSelection.environment === environmentName;
   const environment = tenants
     .find((tenant) => tenant.name === tenantName)
     ?.environments.find((env) => env.name === environmentName);
@@ -414,7 +613,8 @@ function EnvironmentRow({
     <div
       className={cn(
         'group relative mr-1 ml-1 flex h-8 items-center rounded-md pr-1.5 text-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-        selected && 'bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground',
+        selected &&
+          'bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground',
       )}
     >
       <button
@@ -432,39 +632,15 @@ function EnvironmentRow({
         }}
       >
         <span className="min-w-0 truncate">{environmentName}</span>
-        {isLocal && (
-          <span
-            className={cn(
-              'flex-none rounded-[calc(var(--radius)-4px)] border px-1 py-px text-[10px] font-medium uppercase leading-none tracking-wide',
-              selected
-                ? 'border-primary-foreground/40 text-primary-foreground/85'
-                : 'border-border text-muted-foreground',
-            )}
-            aria-label="Local environment"
-          >
-            Local
-          </span>
-        )}
-        {busy && <LoaderCircle className="size-3.5 flex-none animate-spin text-current opacity-75" aria-hidden="true" />}
+        {isLocal && <LocalEnvBadge selected={selected} />}
+        {busy && <BusyRowSpinner />}
       </button>
-      <IconTooltip label="Edit environment settings">
-        <Button
-          type="button"
-          className={cn(
-            'pointer-events-none size-[26px] flex-none cursor-pointer border-0 bg-transparent text-current opacity-0 transition-[opacity,background-color,color] duration-150 hover:bg-[color-mix(in_oklch,currentColor_12%,transparent)] hover:text-current group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 [&_svg]:size-4',
-            selected && 'pointer-events-auto opacity-100',
-          )}
-          variant="ghost"
-          size="icon"
-          aria-label={`Edit ${tenantName} / ${environmentName} settings`}
-          onClick={(event) => {
-            event.stopPropagation();
-            dispatch(openManageDialog(selection));
-          }}
-        >
-          <MoreHorizontal />
-        </Button>
-      </IconTooltip>
+      <EnvironmentRowEditButton
+        tenantName={tenantName}
+        environmentName={environmentName}
+        selected={selected}
+        selection={selection}
+      />
     </div>
   );
 }
@@ -477,7 +653,13 @@ function EnvironmentRow({
 // the env is not in state.tenants yet. Italic name + "Creating"
 // badge + spinner + aria-busy communicate the in-flight state
 // without inviting interaction.
-function PendingEnvironmentRow({ tenantName, environmentName }: { tenantName: string; environmentName: string }): React.ReactElement {
+function PendingEnvironmentRow({
+  tenantName,
+  environmentName,
+}: {
+  tenantName: string;
+  environmentName: string;
+}): React.ReactElement {
   return (
     <div
       className="group relative mr-1 ml-1 flex h-8 items-center rounded-md pr-1.5 text-muted-foreground"
@@ -493,7 +675,10 @@ function PendingEnvironmentRow({ tenantName, environmentName }: { tenantName: st
         >
           Creating
         </span>
-        <LoaderCircle className="size-3.5 flex-none animate-spin text-current opacity-75" aria-hidden="true" />
+        <LoaderCircle
+          className="size-3.5 flex-none animate-spin text-current opacity-75"
+          aria-hidden="true"
+        />
       </div>
     </div>
   );

@@ -1,3 +1,11 @@
+import type {
+  UIAWSCloudAliasInput,
+  UICloudContextInitInput,
+  UICloudContextStatus,
+  UICloudProviderBearerToken,
+  UICloudProviderStatus,
+} from '@/types';
+
 import {
   GetCloudProviderBearerToken,
   InitAWSCloudProvider,
@@ -13,78 +21,59 @@ import {
 } from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
 import { wailsQueryFn } from './wailsBaseQuery';
-import type {
-  UIAWSCloudAliasInput,
-  UICloudContextInitInput,
-  UICloudContextStatus,
-  UICloudProviderBearerToken,
-  UICloudProviderStatus,
-} from '@/types';
 
 export const cloudApi = wailsApi.injectEndpoints({
   endpoints: (builder) => ({
     getCloudContextStatuses: builder.query<UICloudContextStatus[], void>({
-      queryFn: wailsQueryFn<void, UICloudContextStatus[]>(
-        () => LoadCloudContextStatuses() as Promise<UICloudContextStatus[]>,
-      ),
+      queryFn: wailsQueryFn<void, UICloudContextStatus[]>(() => LoadCloudContextStatuses()),
       providesTags: ['CloudContexts'],
     }),
     getCloudProviderStatuses: builder.query<UICloudProviderStatus[], void>({
-      queryFn: wailsQueryFn<void, UICloudProviderStatus[]>(
-        () => LoadCloudProviderStatuses() as Promise<UICloudProviderStatus[]>,
-      ),
+      queryFn: wailsQueryFn<void, UICloudProviderStatus[]>(() => LoadCloudProviderStatuses()),
       providesTags: ['CloudProviders'],
     }),
     initCloudContext: builder.mutation<UICloudContextStatus, UICloudContextInitInput>({
-      queryFn: wailsQueryFn<UICloudContextInitInput, UICloudContextStatus>(
-        (input) => InitCloudContext(input) as Promise<UICloudContextStatus>,
+      queryFn: wailsQueryFn<UICloudContextInitInput, UICloudContextStatus>((input) =>
+        InitCloudContext(input),
       ),
       invalidatesTags: ['CloudContexts', 'AppState'],
     }),
     startCloudContext: builder.mutation<UICloudContextStatus, string>({
-      queryFn: wailsQueryFn<string, UICloudContextStatus>(
-        (name) => StartCloudContext(name) as Promise<UICloudContextStatus>,
-      ),
+      queryFn: wailsQueryFn<string, UICloudContextStatus>((name) => StartCloudContext(name)),
       invalidatesTags: ['CloudContexts'],
     }),
     stopCloudContext: builder.mutation<UICloudContextStatus, string>({
-      queryFn: wailsQueryFn<string, UICloudContextStatus>(
-        (name) => StopCloudContext(name) as Promise<UICloudContextStatus>,
-      ),
+      queryFn: wailsQueryFn<string, UICloudContextStatus>((name) => StopCloudContext(name)),
       invalidatesTags: ['CloudContexts'],
     }),
     loginCloudProvider: builder.mutation<UICloudProviderStatus, string>({
-      queryFn: wailsQueryFn<string, UICloudProviderStatus>(
-        (alias) => LoginCloudProvider(alias) as Promise<UICloudProviderStatus>,
-      ),
+      queryFn: wailsQueryFn<string, UICloudProviderStatus>((alias) => LoginCloudProvider(alias)),
       invalidatesTags: ['CloudProviders'],
     }),
     logoutCloudProvider: builder.mutation<UICloudProviderStatus, string>({
-      queryFn: wailsQueryFn<string, UICloudProviderStatus>(
-        (alias) => LogoutCloudProvider(alias) as Promise<UICloudProviderStatus>,
-      ),
+      queryFn: wailsQueryFn<string, UICloudProviderStatus>((alias) => LogoutCloudProvider(alias)),
       invalidatesTags: ['CloudProviders'],
     }),
     getCloudProviderBearerToken: builder.mutation<UICloudProviderBearerToken, string>({
-      queryFn: wailsQueryFn<string, UICloudProviderBearerToken>(
-        (alias) => GetCloudProviderBearerToken(alias) as Promise<UICloudProviderBearerToken>,
+      queryFn: wailsQueryFn<string, UICloudProviderBearerToken>((alias) =>
+        GetCloudProviderBearerToken(alias),
       ),
     }),
     setupCloudProviderOIDC: builder.mutation<UICloudProviderStatus, string>({
-      queryFn: wailsQueryFn<string, UICloudProviderStatus>(
-        (alias) => SetupCloudProviderOIDC(alias) as Promise<UICloudProviderStatus>,
+      queryFn: wailsQueryFn<string, UICloudProviderStatus>((alias) =>
+        SetupCloudProviderOIDC(alias),
       ),
       invalidatesTags: ['CloudProviders'],
     }),
     initAWSCloudProvider: builder.mutation<UICloudProviderStatus, UIAWSCloudAliasInput>({
-      queryFn: wailsQueryFn<UIAWSCloudAliasInput, UICloudProviderStatus>(
-        (input) => InitAWSCloudProvider(input) as Promise<UICloudProviderStatus>,
+      queryFn: wailsQueryFn<UIAWSCloudAliasInput, UICloudProviderStatus>((input) =>
+        InitAWSCloudProvider(input),
       ),
       invalidatesTags: ['CloudProviders'],
     }),
     saveAWSCloudProviderAlias: builder.mutation<UICloudProviderStatus, UIAWSCloudAliasInput>({
-      queryFn: wailsQueryFn<UIAWSCloudAliasInput, UICloudProviderStatus>(
-        (input) => SaveAWSCloudProviderAlias(input) as Promise<UICloudProviderStatus>,
+      queryFn: wailsQueryFn<UIAWSCloudAliasInput, UICloudProviderStatus>((input) =>
+        SaveAWSCloudProviderAlias(input),
       ),
       invalidatesTags: ['CloudProviders'],
     }),

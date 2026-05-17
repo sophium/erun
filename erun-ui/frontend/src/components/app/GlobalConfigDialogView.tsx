@@ -1,5 +1,16 @@
+import {
+  CheckCircle2,
+  Cloud,
+  LoaderCircle,
+  LogIn,
+  Play,
+  Plus,
+  Power,
+  RefreshCw,
+  Save,
+  Server,
+} from 'lucide-react';
 import * as React from 'react';
-import { CheckCircle2, Cloud, LoaderCircle, LogIn, Play, Plus, Power, RefreshCw, Save, Server } from 'lucide-react';
 
 import { useController } from '@/app/ControllerContext';
 import { readError } from '@/app/errors';
@@ -20,12 +31,20 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { showTerminalMessage } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+
 import { EmptyState } from './EmptyState';
 import { SelectField, type SelectFieldOption } from './SelectField';
-import { StatusBadge, cloudProviderStatusTone } from './StatusBadge';
+import { cloudProviderStatusTone, StatusBadge } from './StatusBadge';
 
 const dialogErrorClassName =
   'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
@@ -38,7 +57,10 @@ export function GlobalConfigDialogView(): React.ReactElement {
   const dialog = useAppSelector((state) => state.globalConfigDialog);
 
   return (
-    <Dialog open={dialog.open} onOpenChange={(open) => !open && dispatch(closeGlobalConfigDialog())}>
+    <Dialog
+      open={dialog.open}
+      onOpenChange={(open) => !open && dispatch(closeGlobalConfigDialog())}
+    >
       <DialogContent
         className="sm:max-w-xl"
         onCloseAutoFocus={(event) => {
@@ -57,7 +79,9 @@ export function GlobalConfigDialogView(): React.ReactElement {
         >
           <DialogHeader>
             <DialogTitle>ERun settings</DialogTitle>
-            <DialogDescription>Default tenant, cloud aliases, and cloud contexts shared across the app.</DialogDescription>
+            <DialogDescription>
+              Default tenant, cloud aliases, and cloud contexts shared across the app.
+            </DialogDescription>
           </DialogHeader>
           <GlobalConfigBody />
           <DialogError error={dialog.error} />
@@ -75,12 +99,23 @@ function GlobalConfigBody(): React.ReactElement {
   const dialog = useAppSelector((state) => state.globalConfigDialog);
   const tenants = useAppSelector((state) => state.tenants.tenants);
   if (dialog.configLoading) {
-    return <div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">Loading config...</div>;
+    return (
+      <div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">
+        Loading config...
+      </div>
+    );
   }
-  const tenantNames = optionValues(tenants.map((tenant) => tenant.name), dialog.config.defaultTenant);
-  const tenantOptions: SelectFieldOption[] = tenantNames.length === 0
-    ? []
-    : [{ value: NOT_CONFIGURED_VALUE, label: 'Not configured' }, ...tenantNames.map((name) => ({ value: name, label: name }))];
+  const tenantNames = optionValues(
+    tenants.map((tenant) => tenant.name),
+    dialog.config.defaultTenant,
+  );
+  const tenantOptions: SelectFieldOption[] =
+    tenantNames.length === 0
+      ? []
+      : [
+          { value: NOT_CONFIGURED_VALUE, label: 'Not configured' },
+          ...tenantNames.map((name) => ({ value: name, label: name })),
+        ];
   return (
     <div className="grid gap-3">
       <SelectField
@@ -90,7 +125,11 @@ function GlobalConfigBody(): React.ReactElement {
         options={tenantOptions}
         emptyLabel="No tenants"
         disabled={dialog.busy}
-        onChange={(value) => dispatch(updateGlobalConfig({ defaultTenant: value === NOT_CONFIGURED_VALUE ? '' : value }))}
+        onChange={(value) => {
+          dispatch(
+            updateGlobalConfig({ defaultTenant: value === NOT_CONFIGURED_VALUE ? '' : value }),
+          );
+        }}
       />
       <CloudAliasesSection dialog={dialog} />
       <CloudContextsSection dialog={dialog} />
@@ -106,11 +145,28 @@ function CloudAliasesSection({ dialog }: { dialog: GlobalConfigDialog }): React.
       <div className="flex items-center justify-between gap-2">
         <Label>Cloud aliases</Label>
         <div className="flex gap-1.5">
-          <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => void dispatch(startAWSCloudInit())}>
-            {dialog.busyAction === 'cloud-provider-init' ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Plus aria-hidden="true" />}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={dialog.busy}
+            onClick={() => void dispatch(startAWSCloudInit())}
+          >
+            {dialog.busyAction === 'cloud-provider-init' ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Plus aria-hidden="true" />
+            )}
             AWS
           </Button>
-          <Button type="button" variant="ghost" size="icon" disabled={dialog.busy} aria-label="Refresh cloud aliases" onClick={() => void dispatch(refreshCloudProviders())}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            disabled={dialog.busy}
+            aria-label="Refresh cloud aliases"
+            onClick={() => void dispatch(refreshCloudProviders())}
+          >
             <RefreshCw aria-hidden="true" />
           </Button>
         </div>
@@ -121,8 +177,18 @@ function CloudAliasesSection({ dialog }: { dialog: GlobalConfigDialog }): React.
           heading="No cloud aliases yet"
           body="Add a cloud account so ERun can deploy environments to it. AWS is the only provider supported today."
           action={
-            <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => void dispatch(startAWSCloudInit())}>
-              {dialog.busyAction === 'cloud-provider-init' ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Plus aria-hidden="true" />}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={dialog.busy}
+              onClick={() => void dispatch(startAWSCloudInit())}
+            >
+              {dialog.busyAction === 'cloud-provider-init' ? (
+                <LoaderCircle className="animate-spin" aria-hidden="true" />
+              ) : (
+                <Plus aria-hidden="true" />
+              )}
               Add AWS account
             </Button>
           }
@@ -139,16 +205,33 @@ function CloudAliasList({ dialog }: { dialog: GlobalConfigDialog }): React.React
   return (
     <div className="overflow-hidden rounded-[var(--radius)] border border-border">
       {(dialog.config.cloudProviders || []).map((provider, index) => (
-        <div key={provider.alias} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-border px-3 py-2.5 data-[border=true]:border-t" data-border={index > 0} data-cloud-alias={provider.alias} data-cloud-status={provider.status}>
+        <div
+          key={provider.alias}
+          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-border px-3 py-2.5 data-[border=true]:border-t"
+          data-border={index > 0}
+          data-cloud-alias={provider.alias}
+          data-cloud-status={provider.status}
+        >
           <CloudAliasSummary provider={provider} />
-          <CloudAliasAction status={provider.status} busy={dialog.busy} loading={dialog.busyAction === 'cloud-provider-login' && dialog.busyTarget === provider.alias} onLogin={() => void dispatch(loginGlobalCloudProvider(provider.alias))} />
+          <CloudAliasAction
+            status={provider.status}
+            busy={dialog.busy}
+            loading={
+              dialog.busyAction === 'cloud-provider-login' && dialog.busyTarget === provider.alias
+            }
+            onLogin={() => void dispatch(loginGlobalCloudProvider(provider.alias))}
+          />
         </div>
       ))}
     </div>
   );
 }
 
-function CloudAliasSummary({ provider }: { provider: NonNullable<GlobalConfigDialog['config']['cloudProviders']>[number] }): React.ReactElement {
+function CloudAliasSummary({
+  provider,
+}: {
+  provider: NonNullable<GlobalConfigDialog['config']['cloudProviders']>[number];
+}): React.ReactElement {
   return (
     <div className="grid min-w-0 gap-1">
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
@@ -171,7 +254,14 @@ function CloudContextsSection({ dialog }: { dialog: GlobalConfigDialog }): React
     <div className="grid gap-2">
       <div className="flex items-center justify-between gap-2">
         <Label>Cloud contexts</Label>
-        <Button type="button" variant="ghost" size="icon" disabled={dialog.busy} aria-label="Refresh cloud contexts" onClick={() => void dispatch(refreshCloudContexts())}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          disabled={dialog.busy}
+          aria-label="Refresh cloud contexts"
+          onClick={() => void dispatch(refreshCloudContexts())}
+        >
           <RefreshCw aria-hidden="true" />
         </Button>
       </div>
@@ -192,7 +282,13 @@ function CloudContextsSection({ dialog }: { dialog: GlobalConfigDialog }): React
 function CloudContextDraftForm({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   const config = dialog.config;
-  const generated = generatedContextName((config.cloudProviders || []).find((provider) => provider.alias === dialog.cloudContextDraft.cloudProviderAlias), dialog.cloudContextDraft.region, config.cloudContexts || []);
+  const generated = generatedContextName(
+    (config.cloudProviders || []).find(
+      (provider) => provider.alias === dialog.cloudContextDraft.cloudProviderAlias,
+    ),
+    dialog.cloudContextDraft.region,
+    config.cloudContexts || [],
+  );
   return (
     <div className="grid gap-2 rounded-[var(--radius)] border border-border p-3">
       <div className="grid gap-2 sm:grid-cols-2">
@@ -200,11 +296,16 @@ function CloudContextDraftForm({ dialog }: { dialog: GlobalConfigDialog }): Reac
           id="global-config-cloudcontext-provider"
           label="Cloud provider"
           value={dialog.cloudContextDraft.cloudProviderAlias}
-          options={(config.cloudProviders || []).map((provider) => ({ value: provider.alias, label: provider.alias }))}
+          options={(config.cloudProviders || []).map((provider) => ({
+            value: provider.alias,
+            label: provider.alias,
+          }))}
           emptyLabel="No cloud aliases"
           placeholder="Select cloud alias"
           disabled={dialog.busy}
-          onChange={(cloudProviderAlias) => dispatch(updateCloudContextDraft({ cloudProviderAlias }))}
+          onChange={(cloudProviderAlias) => {
+            dispatch(updateCloudContextDraft({ cloudProviderAlias }));
+          }}
         />
         <SelectField
           id="global-config-cloudcontext-region"
@@ -215,7 +316,9 @@ function CloudContextDraftForm({ dialog }: { dialog: GlobalConfigDialog }): Reac
             { value: 'eu-west-1', label: cloudRegionLabel('eu-west-1') },
           ]}
           disabled={dialog.busy}
-          onChange={(region) => dispatch(updateCloudContextDraft({ region }))}
+          onChange={(region) => {
+            dispatch(updateCloudContextDraft({ region }));
+          }}
         />
         <SelectField
           id="global-config-cloudcontext-instancetype"
@@ -226,7 +329,9 @@ function CloudContextDraftForm({ dialog }: { dialog: GlobalConfigDialog }): Reac
             { value: 't4g.xlarge', label: 't4g.xlarge' },
           ]}
           disabled={dialog.busy}
-          onChange={(instanceType) => dispatch(updateCloudContextDraft({ instanceType }))}
+          onChange={(instanceType) => {
+            dispatch(updateCloudContextDraft({ instanceType }));
+          }}
         />
         <SelectField
           id="global-config-cloudcontext-disksize"
@@ -237,28 +342,65 @@ function CloudContextDraftForm({ dialog }: { dialog: GlobalConfigDialog }): Reac
             { value: '200', label: '200' },
           ]}
           disabled={dialog.busy}
-          onChange={(diskSizeGb) => dispatch(updateCloudContextDraft({ diskSizeGb: Number(diskSizeGb) }))}
+          onChange={(diskSizeGb) => {
+            dispatch(updateCloudContextDraft({ diskSizeGb: Number(diskSizeGb) }));
+          }}
         />
       </div>
-      <p className="text-[12px] leading-[1.4] text-muted-foreground">Region, instance type, and disk size are common choices vetted for ERun. Contact an admin to expand the list.</p>
+      <p className="text-[12px] leading-[1.4] text-muted-foreground">
+        Region, instance type, and disk size are common choices vetted for ERun. Contact an admin to
+        expand the list.
+      </p>
       <CloudContextNameField dialog={dialog} generatedName={generated} />
     </div>
   );
 }
 
-function CloudContextNameField({ dialog, generatedName }: { dialog: GlobalConfigDialog; generatedName: string }): React.ReactElement {
+function CloudContextNameField({
+  dialog,
+  generatedName,
+}: {
+  dialog: GlobalConfigDialog;
+  generatedName: string;
+}): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
     <div className="grid gap-2">
       <Label htmlFor="global-config-cloudcontext-name">Context name</Label>
       <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-        <Input id="global-config-cloudcontext-name" value={dialog.cloudContextDraft.name} disabled={dialog.busy} placeholder="Generated when empty" onChange={(event) => dispatch(updateCloudContextDraft({ name: event.target.value }))} />
-        <Button type="button" size="sm" disabled={dialog.busy || dialog.configLoading || !dialog.cloudContextDraft.cloudProviderAlias || !dialog.cloudContextDraft.region} onClick={() => void dispatch(initGlobalCloudContext())}>
-          {dialog.busyAction === 'cloud-context-init' ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Plus aria-hidden="true" />}
+        <Input
+          id="global-config-cloudcontext-name"
+          value={dialog.cloudContextDraft.name}
+          disabled={dialog.busy}
+          placeholder="Generated when empty"
+          onChange={(event) => {
+            dispatch(updateCloudContextDraft({ name: event.target.value }));
+          }}
+        />
+        <Button
+          type="button"
+          size="sm"
+          disabled={
+            dialog.busy ||
+            dialog.configLoading ||
+            !dialog.cloudContextDraft.cloudProviderAlias ||
+            !dialog.cloudContextDraft.region
+          }
+          onClick={() => void dispatch(initGlobalCloudContext())}
+        >
+          {dialog.busyAction === 'cloud-context-init' ? (
+            <LoaderCircle className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Plus aria-hidden="true" />
+          )}
           Init
         </Button>
       </div>
-      {generatedName && !dialog.cloudContextDraft.name && <div className="px-0.5 text-xs leading-[1.35] text-muted-foreground [overflow-wrap:anywhere]">Generated: {generatedName}</div>}
+      {generatedName && !dialog.cloudContextDraft.name && (
+        <div className="px-0.5 text-xs leading-[1.35] text-muted-foreground [overflow-wrap:anywhere]">
+          Generated: {generatedName}
+        </div>
+      )}
     </div>
   );
 }
@@ -268,16 +410,34 @@ function CloudContextList({ dialog }: { dialog: GlobalConfigDialog }): React.Rea
   return (
     <div className="overflow-hidden rounded-[var(--radius)] border border-border">
       {(dialog.config.cloudContexts || []).map((context, index) => (
-        <div key={context.name} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-border px-3 py-2.5 data-[border=true]:border-t" data-border={index > 0} data-cloud-context={context.name} data-cloud-context-status={context.status}>
+        <div
+          key={context.name}
+          className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-border px-3 py-2.5 data-[border=true]:border-t"
+          data-border={index > 0}
+          data-cloud-context={context.name}
+          data-cloud-context-status={context.status}
+        >
           <CloudContextSummary context={context} />
-          <CloudContextAction status={context.status} busy={dialog.busy} loading={dialog.busyAction === 'cloud-context-power' && dialog.busyTarget === context.name} onStart={() => void dispatch(startGlobalCloudContext(context.name))} onStop={() => void dispatch(stopGlobalCloudContext(context.name))} />
+          <CloudContextAction
+            status={context.status}
+            busy={dialog.busy}
+            loading={
+              dialog.busyAction === 'cloud-context-power' && dialog.busyTarget === context.name
+            }
+            onStart={() => void dispatch(startGlobalCloudContext(context.name))}
+            onStop={() => void dispatch(stopGlobalCloudContext(context.name))}
+          />
         </div>
       ))}
     </div>
   );
 }
 
-function CloudContextSummary({ context }: { context: NonNullable<GlobalConfigDialog['config']['cloudContexts']>[number] }): React.ReactElement {
+function CloudContextSummary({
+  context,
+}: {
+  context: NonNullable<GlobalConfigDialog['config']['cloudContexts']>[number];
+}): React.ReactElement {
   return (
     <div className="grid min-w-0 gap-1">
       <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
@@ -294,7 +454,11 @@ function CloudContextSummary({ context }: { context: NonNullable<GlobalConfigDia
 }
 
 function DialogError({ error }: { error: string }): React.ReactElement | null {
-  return error ? <div className={dialogErrorClassName} role="alert">{error}</div> : null;
+  return error ? (
+    <div className={dialogErrorClassName} role="alert">
+      {error}
+    </div>
+  ) : null;
 }
 
 function GlobalConfigFooter({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
@@ -302,9 +466,23 @@ function GlobalConfigFooter({ dialog }: { dialog: GlobalConfigDialog }): React.R
   const saving = dialog.busyAction === 'save';
   return (
     <DialogFooter>
-      <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => dispatch(closeGlobalConfigDialog())}>Cancel</Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={dialog.busy}
+        onClick={() => {
+          dispatch(closeGlobalConfigDialog());
+        }}
+      >
+        Cancel
+      </Button>
       <Button type="submit" size="sm" disabled={dialog.busy || dialog.configLoading}>
-        {saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
+        {saving ? (
+          <LoaderCircle className="animate-spin" aria-hidden="true" />
+        ) : (
+          <Save aria-hidden="true" />
+        )}
         {saving ? 'Saving...' : 'Save settings'}
       </Button>
     </DialogFooter>
@@ -316,10 +494,23 @@ function CloudStatusBadge({ status }: { status: string }): React.ReactElement {
   return <StatusBadge tone={cloudProviderStatusTone(normalized)} label={statusLabel(normalized)} />;
 }
 
-function CloudAliasAction({ status, busy, loading, onLogin }: { status: string; busy: boolean; loading: boolean; onLogin: () => void }): React.ReactElement {
+function CloudAliasAction({
+  status,
+  busy,
+  loading,
+  onLogin,
+}: {
+  status: string;
+  busy: boolean;
+  loading: boolean;
+  onLogin: () => void;
+}): React.ReactElement {
   if (status.trim() === 'active') {
     return (
-      <div className="inline-flex items-center gap-1.5 px-1 text-xs font-medium text-green-700 dark:text-green-400" aria-label="Connected">
+      <div
+        className="inline-flex items-center gap-1.5 px-1 text-xs font-medium text-green-700 dark:text-green-400"
+        aria-label="Connected"
+      >
         <CheckCircle2 className="size-4" aria-hidden="true" />
         Connected
       </div>
@@ -327,30 +518,58 @@ function CloudAliasAction({ status, busy, loading, onLogin }: { status: string; 
   }
   return (
     <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onLogin}>
-      {loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <LogIn aria-hidden="true" />}
+      {loading ? (
+        <LoaderCircle className="animate-spin" aria-hidden="true" />
+      ) : (
+        <LogIn aria-hidden="true" />
+      )}
       {loading ? 'Logging in...' : 'Login'}
     </Button>
   );
 }
 
-function CloudContextAction({ status, busy, loading, onStart, onStop }: { status: string; busy: boolean; loading: boolean; onStart: () => void; onStop: () => void }): React.ReactElement {
+function CloudContextAction({
+  status,
+  busy,
+  loading,
+  onStart,
+  onStop,
+}: {
+  status: string;
+  busy: boolean;
+  loading: boolean;
+  onStart: () => void;
+  onStop: () => void;
+}): React.ReactElement {
   if (status.trim() === 'running') {
     return (
       <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onStop}>
-        {loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Power aria-hidden="true" />}
+        {loading ? (
+          <LoaderCircle className="animate-spin" aria-hidden="true" />
+        ) : (
+          <Power aria-hidden="true" />
+        )}
         {loading ? 'Stopping...' : 'Stop'}
       </Button>
     );
   }
   return (
     <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onStart}>
-      {loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Play aria-hidden="true" />}
+      {loading ? (
+        <LoaderCircle className="animate-spin" aria-hidden="true" />
+      ) : (
+        <Play aria-hidden="true" />
+      )}
       {loading ? 'Starting...' : 'Start'}
     </Button>
   );
 }
 
-function cloudProviderSummary(provider: { provider: string; username?: string; accountId?: string }): string {
+function cloudProviderSummary(provider: {
+  provider: string;
+  username?: string;
+  accountId?: string;
+}): string {
   const providerName = provider.provider.toUpperCase();
   if (provider.accountId && provider.username) {
     return `${providerName} account ${provider.accountId} - ${provider.username}`;
@@ -361,7 +580,14 @@ function cloudProviderSummary(provider: { provider: string; username?: string; a
   return providerName;
 }
 
-function cloudContextSummary(context: { cloudProviderAlias: string; region: string; instanceType: string; diskSizeGb: number; diskType: string; instanceId?: string }): string {
+function cloudContextSummary(context: {
+  cloudProviderAlias: string;
+  region: string;
+  instanceType: string;
+  diskSizeGb: number;
+  diskType: string;
+  instanceId?: string;
+}): string {
   const parts = [
     context.cloudProviderAlias,
     cloudRegionLabel(context.region),
@@ -397,7 +623,11 @@ function cloudRegionLabel(region: string): string {
   return name ? `${region} (${name})` : region;
 }
 
-function generatedContextName(provider: { alias: string; username?: string; accountId?: string } | undefined, region: string, contexts: Array<{ name: string; kubernetesContext: string }>): string {
+function generatedContextName(
+  provider: { alias: string; username?: string; accountId?: string } | undefined,
+  region: string,
+  contexts: { name: string; kubernetesContext: string }[],
+): string {
   if (!provider) {
     return '';
   }
@@ -406,7 +636,10 @@ function generatedContextName(provider: { alias: string; username?: string; acco
   return nextGeneratedContextName(tail, contexts);
 }
 
-function nextGeneratedContextName(tail: string, contexts: Array<{ name: string; kubernetesContext: string }>): string {
+function nextGeneratedContextName(
+  tail: string,
+  contexts: { name: string; kubernetesContext: string }[],
+): string {
   const normalizedTail = sanitizeContextName(tail) || 'context';
   const suffix = `-${normalizedTail}`;
   let next = 1;

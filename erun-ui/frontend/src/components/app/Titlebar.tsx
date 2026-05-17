@@ -1,15 +1,26 @@
+import {
+  AlertCircle,
+  Blocks,
+  CheckCircle2,
+  Code2,
+  Copy,
+  Info,
+  ListTree,
+  LoaderCircle,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  Play,
+  Power,
+  X,
+} from 'lucide-react';
 import * as React from 'react';
-import { AlertCircle, Blocks, CheckCircle2, Code2, Copy, Info, ListTree, LoaderCircle, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Play, Power, X } from 'lucide-react';
 
 import { toggleIdleCloudContext } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { displayableIdleStatus } from '@/app/idleStatusEligibility';
-import {
-  setFilesOpen,
-  titlebarDoubleClick,
-  toggleReview,
-  toggleSidebar,
-} from '@/app/layoutThunks';
+import { setFilesOpen, titlebarDoubleClick, toggleReview, toggleSidebar } from '@/app/layoutThunks';
 import {
   copyTerminalOutput,
   dismissNotification,
@@ -17,17 +28,19 @@ import {
   waitLongerForTerminalStatus,
 } from '@/app/notificationThunks';
 import { openIDE } from '@/app/sessionThunks';
-import type { AppDispatch } from '@/app/store';
 import type { AppState } from '@/app/state';
+import type { AppDispatch } from '@/app/store';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+
 import { IconTooltip } from './IconTooltip';
 
 const titlebarButtonClassName =
   'absolute top-3 left-[88px] z-[1] size-7 flex-none cursor-pointer rounded-[var(--radius)] border-0 bg-transparent text-muted-foreground [--wails-draggable:no-drag] hover:bg-accent hover:text-accent-foreground [&_svg]:size-[18px] max-[980px]:left-[76px]';
 
-const activeTitlebarButtonClassName = 'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground';
+const activeTitlebarButtonClassName =
+  'bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground';
 
 export function Titlebar(): React.ReactElement {
   const dispatch = useAppDispatch();
@@ -35,7 +48,9 @@ export function Titlebar(): React.ReactElement {
     <header
       className="relative box-border select-none border-b bg-[color-mix(in_oklch,var(--background)_94%,transparent)] [--wails-draggable:drag]"
       data-wails-drag
-      onDoubleClick={(event) => dispatch(titlebarDoubleClick(event))}
+      onDoubleClick={(event) => {
+        dispatch(titlebarDoubleClick(event));
+      }}
     >
       <TitlebarControls />
       <IdleStatusWidget />
@@ -54,8 +69,14 @@ function TitlebarControls(): React.ReactElement {
   const tenants = useAppSelector((state) => state.tenants.tenants);
   const SidebarIcon = sidebarHidden ? PanelLeftOpen : PanelLeftClose;
   const ReviewIcon = reviewOpen ? PanelRightClose : PanelRightOpen;
-  const selectedEnvironment = selected ? tenants.find((tenant) => tenant.name === selected.tenant)?.environments.find((environment) => environment.name === selected.environment) : undefined;
-  const ideDisabled = !selected || (selectedEnvironment?.remote !== false && selectedEnvironment?.sshdEnabled !== true);
+  const selectedEnvironment = selected
+    ? tenants
+        .find((tenant) => tenant.name === selected.tenant)
+        ?.environments.find((environment) => environment.name === selected.environment)
+    : undefined;
+  const ideDisabled =
+    !selected ||
+    (selectedEnvironment?.remote !== false && selectedEnvironment?.sshdEnabled !== true);
   const vscodeTooltip = ideTooltipLabel('VS Code', selected, ideDisabled);
   const intellijTooltip = ideTooltipLabel('IntelliJ IDEA', selected, ideDisabled);
 
@@ -69,7 +90,9 @@ function TitlebarControls(): React.ReactElement {
           size="icon"
           aria-label="Toggle sidebar"
           aria-pressed={!sidebarHidden}
-          onClick={() => dispatch(toggleSidebar())}
+          onClick={() => {
+            dispatch(toggleSidebar());
+          }}
         >
           <SidebarIcon />
         </Button>
@@ -86,13 +109,20 @@ function TitlebarControls(): React.ReactElement {
           size="icon"
           aria-label="Toggle diff panel"
           aria-pressed={reviewOpen}
-          onClick={() => dispatch(toggleReview())}
+          onClick={() => {
+            dispatch(toggleReview());
+          }}
         >
           <ReviewIcon />
         </Button>
       </IconTooltip>
       <IconTooltip label={ideTooltipLabel('VS Code', selected, ideDisabled)}>
-        <span className={cn(titlebarButtonClassName, 'left-auto right-[122px] max-[980px]:left-auto max-[980px]:right-[108px]')}>
+        <span
+          className={cn(
+            titlebarButtonClassName,
+            'left-auto right-[122px] max-[980px]:left-auto max-[980px]:right-[108px]',
+          )}
+        >
           <Button
             className="size-full border-0 bg-transparent text-inherit hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-[18px]"
             type="button"
@@ -109,7 +139,12 @@ function TitlebarControls(): React.ReactElement {
         </span>
       </IconTooltip>
       <IconTooltip label={ideTooltipLabel('IntelliJ IDEA', selected, ideDisabled)}>
-        <span className={cn(titlebarButtonClassName, 'left-auto right-[90px] max-[980px]:left-auto max-[980px]:right-[78px]')}>
+        <span
+          className={cn(
+            titlebarButtonClassName,
+            'left-auto right-[90px] max-[980px]:left-auto max-[980px]:right-[78px]',
+          )}
+        >
           <Button
             className="size-full border-0 bg-transparent text-inherit hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-[18px]"
             type="button"
@@ -138,7 +173,9 @@ function TitlebarControls(): React.ReactElement {
           size="icon"
           aria-label="Toggle changed files list"
           aria-pressed={filesOpen}
-          onClick={() => dispatch(setFilesOpen(!filesOpen))}
+          onClick={() => {
+            dispatch(setFilesOpen(!filesOpen));
+          }}
         >
           <ListTree />
         </Button>
@@ -158,45 +195,108 @@ function IdleStatusWidget(): React.ReactElement | null {
   const idleBadge = idleStatus ? idleStatusBadge(idleStatus) : null;
 
   return (
-    <div className={cn('absolute top-3 right-[168px] z-[1] flex h-7 items-center rounded-md border bg-background [--wails-draggable:no-drag] max-[980px]:right-[146px]', idleBadge?.className)}>
-      {idleStatus && idleBadge && <IdleStatusBadge idleStatus={idleStatus} idleBadge={idleBadge} hasAction={Boolean(idleAction)} />}
+    <div
+      className={cn(
+        'absolute top-3 right-[168px] z-[1] flex h-7 items-center rounded-md border bg-background [--wails-draggable:no-drag] max-[980px]:right-[146px]',
+        idleBadge?.className,
+      )}
+    >
+      {idleStatus && idleBadge && (
+        <IdleStatusBadge
+          idleStatus={idleStatus}
+          idleBadge={idleBadge}
+          hasAction={Boolean(idleAction)}
+        />
+      )}
       {idleAction && <IdleStatusAction idleAction={idleAction} hasBadge={Boolean(idleStatus)} />}
     </div>
   );
 }
 
-function IdleStatusBadge({ idleStatus, idleBadge, hasAction }: { idleStatus: IdleStatus; idleBadge: { label: string; className: string }; hasAction: boolean }): React.ReactElement {
+function IdleStatusBadge({
+  idleStatus,
+  idleBadge,
+  hasAction,
+}: {
+  idleStatus: IdleStatus;
+  idleBadge: { label: string; className: string };
+  hasAction: boolean;
+}): React.ReactElement {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className={cn('flex h-full min-w-[64px] items-center justify-center rounded-l-md px-2 font-mono text-[12px] leading-none outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring', hasAction && 'border-r', idleBadge.className)} tabIndex={0} aria-label={idleStatusAccessibleLabel(idleStatus)}>
+        <div
+          className={cn(
+            'flex h-full min-w-[64px] items-center justify-center rounded-l-md px-2 font-mono text-[12px] leading-none outline-none hover:bg-accent hover:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring',
+            hasAction && 'border-r',
+            idleBadge.className,
+          )}
+          // Focusable read-only badge: tabIndex={0} is what triggers the
+          // tooltip via keyboard. Element has no click handler by design.
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+          tabIndex={0}
+          aria-label={idleStatusAccessibleLabel(idleStatus)}
+        >
           {idleBadge.label}
         </div>
       </TooltipTrigger>
-      <TooltipContent side="bottom" align="end" className="max-w-[360px] whitespace-normal text-left leading-5">
+      <TooltipContent
+        side="bottom"
+        align="end"
+        className="max-w-[360px] whitespace-normal text-left leading-5"
+      >
         <div className="space-y-1">
-          {idleStatusTooltipLines(idleStatus).map((line, index) => <div key={`${index}-${line}`} className={line.startsWith('- ') ? 'pl-2' : undefined}>{line}</div>)}
+          {idleStatusTooltipLines(idleStatus).map((line, index) => (
+            <div key={`${index}-${line}`} className={line.startsWith('- ') ? 'pl-2' : undefined}>
+              {line}
+            </div>
+          ))}
         </div>
       </TooltipContent>
     </Tooltip>
   );
 }
 
-function IdleStatusAction({ idleAction, hasBadge }: { idleAction: { action: 'start' | 'stop'; label: string; busy: boolean }; hasBadge: boolean }): React.ReactElement {
+function IdleStatusAction({
+  idleAction,
+  hasBadge,
+}: {
+  idleAction: { action: 'start' | 'stop'; label: string; busy: boolean };
+  hasBadge: boolean;
+}): React.ReactElement {
   const dispatch = useAppDispatch();
-  const IdleActionIcon = idleAction.busy ? LoaderCircle : idleAction.action === 'start' ? Play : Power;
+  const IdleActionIcon = idleAction.busy
+    ? LoaderCircle
+    : idleAction.action === 'start'
+      ? Play
+      : Power;
   return (
     <IconTooltip label={idleAction.label}>
-      <Button className={cn('h-full w-7 border-0 bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-60 [&_svg]:size-3.5', hasBadge ? 'rounded-l-none rounded-r-md' : 'rounded-md')} type="button" variant="ghost" size="icon" aria-label={idleAction.label} disabled={idleAction.busy} onClick={() => { void dispatch(toggleIdleCloudContext()); }}>
+      <Button
+        className={cn(
+          'h-full w-7 border-0 bg-transparent text-muted-foreground hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-60 [&_svg]:size-3.5',
+          hasBadge ? 'rounded-l-none rounded-r-md' : 'rounded-md',
+        )}
+        type="button"
+        variant="ghost"
+        size="icon"
+        aria-label={idleAction.label}
+        disabled={idleAction.busy}
+        onClick={() => {
+          void dispatch(toggleIdleCloudContext());
+        }}
+      >
         <IdleActionIcon className={cn(idleAction.busy && 'animate-spin')} aria-hidden="true" />
       </Button>
     </IconTooltip>
   );
 }
 
-type TitlebarStatusKind = NonNullable<AppState['notification']>['kind'] | AppState['terminalStatusKind'];
+type TitlebarStatusKind =
+  | NonNullable<AppState['notification']>['kind']
+  | AppState['terminalStatusKind'];
 
-type TitlebarStatusValue = {
+interface TitlebarStatusValue {
   source: 'notification' | 'terminal';
   kind: TitlebarStatusKind;
   message: string;
@@ -205,7 +305,7 @@ type TitlebarStatusValue = {
   copyOutput: string;
   copyStatus: string;
   action: AppState['terminalStatusAction'];
-};
+}
 
 const statusBorderClassNames: Record<TitlebarStatusKind, string> = {
   success: 'border-[oklch(0.72_0.12_150)] text-foreground',
@@ -234,8 +334,17 @@ function TitlebarStatus(): React.ReactElement | null {
   const idleAction = rawIdleStatus ? idleCloudAction(rawIdleStatus, idleCloudContextBusy) : null;
 
   return (
-    <div className={statusPositionClassName(idleStatus, Boolean(idleAction))} role={status.kind === 'error' ? 'alert' : 'status'} aria-live={status.kind === 'error' ? 'assertive' : 'polite'}>
-      <div className={cn('pointer-events-auto flex h-8 max-w-full items-center gap-2 rounded-md border bg-background px-2.5 text-[13px] leading-none shadow-sm', statusBorderClassNames[status.kind])}>
+    <div
+      className={statusPositionClassName(idleStatus, Boolean(idleAction))}
+      role={status.kind === 'error' ? 'alert' : 'status'}
+      aria-live={status.kind === 'error' ? 'assertive' : 'polite'}
+    >
+      <div
+        className={cn(
+          'pointer-events-auto flex h-8 max-w-full items-center gap-2 rounded-md border bg-background px-2.5 text-[13px] leading-none shadow-sm',
+          statusBorderClassNames[status.kind],
+        )}
+      >
         <StatusIcon status={status} />
         <StatusMessage status={status} />
         {status.action === 'wait-longer' && <StatusWaitAction />}
@@ -259,7 +368,15 @@ function computeTitlebarStatus(
   },
 ): TitlebarStatusValue | null {
   if (notification) {
-    return { ...notification, source: 'notification', detail: '', busy: false, copyOutput: '', copyStatus: '', action: '' };
+    return {
+      ...notification,
+      source: 'notification',
+      detail: '',
+      busy: false,
+      copyOutput: '',
+      copyStatus: '',
+      action: '',
+    };
   }
   if (terminal.terminalBusy && terminal.terminalMessage) {
     return null;
@@ -279,7 +396,10 @@ function computeTitlebarStatus(
   };
 }
 
-function statusPositionClassName(idleStatus: AppState['idleStatus'], hasIdleAction: boolean): string {
+function statusPositionClassName(
+  idleStatus: AppState['idleStatus'],
+  hasIdleAction: boolean,
+): string {
   if (!idleStatus) {
     if (hasIdleAction) {
       return 'pointer-events-none absolute top-2.5 left-32 right-[204px] z-20 flex justify-center [--wails-draggable:no-drag] max-[980px]:left-[112px] max-[980px]:right-[182px]';
@@ -294,7 +414,16 @@ function statusPositionClassName(idleStatus: AppState['idleStatus'], hasIdleActi
 
 function StatusIcon({ status }: { status: TitlebarStatusValue }): React.ReactElement {
   const NotificationIcon = statusIcon(status);
-  return <NotificationIcon className={cn('size-4 flex-none', status.busy && 'animate-spin text-muted-foreground', statusIconClassNames[status.kind])} aria-hidden="true" />;
+  return (
+    <NotificationIcon
+      className={cn(
+        'size-4 flex-none',
+        status.busy && 'animate-spin text-muted-foreground',
+        statusIconClassNames[status.kind],
+      )}
+      aria-hidden="true"
+    />
+  );
 }
 
 function statusIcon(status: TitlebarStatusValue): typeof LoaderCircle {
@@ -317,6 +446,9 @@ function StatusMessage({ status }: { status: TitlebarStatusValue }): React.React
       <TooltipTrigger asChild>
         <span
           className="min-w-0 truncate outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+          // Focusable status text so the keyboard user can read the tooltip
+          // with the full message. Element has no click handler.
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
           tabIndex={0}
           aria-label={fullText}
         >
@@ -334,7 +466,15 @@ function StatusMessage({ status }: { status: TitlebarStatusValue }): React.React
 function StatusWaitAction(): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
-    <Button className="h-6 flex-none rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground" type="button" variant="ghost" size="xs" onClick={() => { void dispatch(waitLongerForTerminalStatus()); }}>
+    <Button
+      className="h-6 flex-none rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground"
+      type="button"
+      variant="ghost"
+      size="xs"
+      onClick={() => {
+        void dispatch(waitLongerForTerminalStatus());
+      }}
+    >
       Wait longer
     </Button>
   );
@@ -344,8 +484,20 @@ function StatusCopyAction({ status }: { status: TitlebarStatusValue }): React.Re
   const dispatch = useAppDispatch();
   return (
     <IconTooltip label="Copy terminal output">
-      <Button className="h-6 flex-none gap-1 rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground [&_svg]:size-3.5" type="button" variant="ghost" size="xs" onClick={() => { void dispatch(copyTerminalOutput()); }}>
-        {status.copyStatus === 'Copied' ? <CheckCircle2 aria-hidden="true" /> : <Copy aria-hidden="true" />}
+      <Button
+        className="h-6 flex-none gap-1 rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground [&_svg]:size-3.5"
+        type="button"
+        variant="ghost"
+        size="xs"
+        onClick={() => {
+          void dispatch(copyTerminalOutput());
+        }}
+      >
+        {status.copyStatus === 'Copied' ? (
+          <CheckCircle2 aria-hidden="true" />
+        ) : (
+          <Copy aria-hidden="true" />
+        )}
         {status.copyStatus || 'Copy output'}
       </Button>
     </IconTooltip>
@@ -356,7 +508,16 @@ function StatusDismissAction({ status }: { status: TitlebarStatusValue }): React
   const dispatch = useAppDispatch();
   return (
     <IconTooltip label="Dismiss status">
-      <Button className="-mr-1 size-6 flex-none text-muted-foreground hover:bg-accent hover:text-accent-foreground [&_svg]:size-3.5" type="button" variant="ghost" size="icon-xs" aria-label="Dismiss status" onClick={() => dismissTitlebarStatus(dispatch, status)}>
+      <Button
+        className="-mr-1 size-6 flex-none text-muted-foreground hover:bg-accent hover:text-accent-foreground [&_svg]:size-3.5"
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        aria-label="Dismiss status"
+        onClick={() => {
+          dismissTitlebarStatus(dispatch, status);
+        }}
+      >
         <X />
       </Button>
     </IconTooltip>
@@ -383,7 +544,10 @@ function ideTooltipLabel(ide: string, selected: AppState['selected'], disabled: 
 
 type IdleStatus = NonNullable<AppState['idleStatus']>;
 
-function idleCloudAction(idleStatus: IdleStatus, busy: boolean): { action: 'start' | 'stop'; label: string; busy: boolean } | null {
+function idleCloudAction(
+  idleStatus: IdleStatus,
+  busy: boolean,
+): { action: 'start' | 'stop'; label: string; busy: boolean } | null {
   const name = idleStatus.cloudContextName?.trim();
   if (!idleStatus.managedCloud || !name) {
     return null;
@@ -423,7 +587,10 @@ function idleStatusBadge(idleStatus: IdleStatus): { label: string; className: st
       className: 'border-[oklch(0.72_0.12_150)] text-[oklch(0.42_0.13_150)]',
     };
   }
-  if (idleStatus.stopBlockedReason && (idleStatus.secondsUntilStop <= 0 || isPersistentIdleBlocker(idleStatus.stopBlockedReason))) {
+  if (
+    idleStatus.stopBlockedReason &&
+    (idleStatus.secondsUntilStop <= 0 || isPersistentIdleBlocker(idleStatus.stopBlockedReason))
+  ) {
     return {
       label: 'idle blocked',
       className: 'border-[oklch(0.76_0.16_65)] text-[oklch(0.48_0.13_65)]',
@@ -468,12 +635,16 @@ function appendIdleBlockerLine(lines: string[], idleStatus: IdleStatus): void {
 function appendIdleCloudContextLine(lines: string[], idleStatus: IdleStatus): void {
   if (idleStatus.cloudContextName) {
     const label = idleStatus.cloudContextLabel || idleStatus.cloudContextName;
-    lines.push(`Cloud environment: ${label}${idleStatus.cloudContextStatus ? ` (${idleStatus.cloudContextStatus})` : ''}`);
+    lines.push(
+      `Cloud environment: ${label}${idleStatus.cloudContextStatus ? ` (${idleStatus.cloudContextStatus})` : ''}`,
+    );
   }
 }
 
 function idleStatusActiveMarkerLines(idleStatus: IdleStatus): string[] {
-  const activeMarkers = (idleStatus.markers || []).filter((marker) => marker.name !== 'working-hours' && !marker.idle);
+  const activeMarkers = (idleStatus.markers || []).filter(
+    (marker) => marker.name !== 'working-hours' && !marker.idle,
+  );
   if (activeMarkers.length === 0) {
     return [];
   }
@@ -481,7 +652,10 @@ function idleStatusActiveMarkerLines(idleStatus: IdleStatus): string[] {
 }
 
 function idleStatusActiveMarkerLine(marker: NonNullable<IdleStatus['markers']>[number]): string {
-  const remaining = marker.secondsRemaining && marker.secondsRemaining > 0 ? `, ${marker.secondsRemaining}s remaining` : '';
+  const remaining =
+    marker.secondsRemaining && marker.secondsRemaining > 0
+      ? `, ${marker.secondsRemaining}s remaining`
+      : '';
   return `- ${marker.name}${marker.reason ? `: ${marker.reason}` : ''}${remaining}`;
 }
 
@@ -508,7 +682,9 @@ function idleStatusAccessibleLabel(idleStatus: IdleStatus): string {
     parts.push(`stop error: ${idleStatus.stopError}`);
   }
   if (idleStatus.cloudContextName) {
-    parts.push(`cloud environment ${idleStatus.cloudContextLabel || idleStatus.cloudContextName}${idleStatus.cloudContextStatus ? ` ${idleStatus.cloudContextStatus}` : ''}`);
+    parts.push(
+      `cloud environment ${idleStatus.cloudContextLabel || idleStatus.cloudContextName}${idleStatus.cloudContextStatus ? ` ${idleStatus.cloudContextStatus}` : ''}`,
+    );
   }
   return parts.join(', ');
 }

@@ -1,7 +1,8 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
-import type { DebugOpenFilter, DebugSessionMode } from '../model';
 import type { UISelection } from '@/types';
+
+import type { DebugOpenFilter, DebugSessionMode } from '../model';
 
 // sessionsSlice owns per-session metadata: which sessions are open / sshd /
 // doctor / cloud-init, which exit reasons/outputs have been recorded, the
@@ -99,7 +100,10 @@ export const sessionsSlice = createSlice({
     // takeExitSelections clears all selection-tracking entries for the
     // session in one atomic action. The caller reads the values out of
     // state before dispatching this.
-    takeExitSelections(state, action: PayloadAction<{ sessionId: number; selectionKey: string | null }>) {
+    takeExitSelections(
+      state,
+      action: PayloadAction<{ sessionId: number; selectionKey: string | null }>,
+    ) {
       const { sessionId, selectionKey } = action.payload;
       delete state.sshdInitSelections[sessionId];
       delete state.doctorSelections[sessionId];

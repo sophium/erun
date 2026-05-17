@@ -49,6 +49,13 @@ if [ -d frontend ]; then
 	else
 		"$YARN_BIN" install
 	fi
+	# Gate the bundle on the same checks CI would run. `ERUN_SKIP_LINT=1`
+	# escapes the gates locally when iterating; CI never sets it.
+	if [ "${ERUN_SKIP_LINT:-0}" != "1" ]; then
+		"$YARN_BIN" typecheck
+		"$YARN_BIN" lint
+		"$YARN_BIN" format:check
+	fi
 	"$YARN_BIN" build
 	cd "$SCRIPT_DIR"
 fi

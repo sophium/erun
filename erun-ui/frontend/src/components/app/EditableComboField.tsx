@@ -1,5 +1,5 @@
-import * as React from 'react';
 import { Check, ChevronsUpDown } from 'lucide-react';
+import * as React from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -32,7 +32,10 @@ export function EditableComboField({
   // (Nielsen #6 recognition-over-recall). Resets when popover opens.
   const [dirty, setDirty] = React.useState(false);
   const visibleSuggestions = dirty ? filterSuggestions(suggestions, value) : suggestions;
-  const openPopover = (next: boolean) => { setOpen(next); if (next) setDirty(false); };
+  const openPopover = (next: boolean) => {
+    setOpen(next);
+    if (next) setDirty(false);
+  };
 
   return (
     <div className="grid gap-2">
@@ -74,9 +77,15 @@ export function EditableComboField({
               <ChevronsUpDown />
             </Button>
           </PopoverTrigger>
-          <PopoverContent id={`${id}-choices`} className="w-96 max-w-[calc(100vw-4rem)] p-1" align="start">
+          <PopoverContent
+            id={`${id}-choices`}
+            className="w-96 max-w-[calc(100vw-4rem)] p-1"
+            align="start"
+          >
             {visibleSuggestions.length === 0 ? (
-              <div className="px-2 py-6 text-center text-sm text-muted-foreground">No matching values.</div>
+              <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+                No matching values.
+              </div>
             ) : (
               <div className="max-h-56 overflow-y-auto">
                 {visibleSuggestions.map((suggestion) => {
@@ -91,7 +100,9 @@ export function EditableComboField({
                         setOpen(false);
                       }}
                     >
-                      <Check className={cn('size-4 shrink-0 opacity-0', selected && 'opacity-100')} />
+                      <Check
+                        className={cn('size-4 shrink-0 opacity-0', selected && 'opacity-100')}
+                      />
                       <span className="truncate">{suggestion}</span>
                     </button>
                   );

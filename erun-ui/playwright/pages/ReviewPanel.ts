@@ -9,10 +9,7 @@ export class ReviewPanel {
     // The review panel uses the "Filter files..." placeholder when its
     // changed-files section is open; that input is the most reliable
     // entry-point to find the surface.
-    return this.page
-      .locator('aside')
-      .filter({ hasText: 'Filter files' })
-      .first();
+    return this.page.locator('aside').filter({ hasText: 'Filter files' }).first();
   }
 
   async isOpen(): Promise<boolean> {

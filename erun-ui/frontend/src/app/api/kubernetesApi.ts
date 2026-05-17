@@ -5,9 +5,7 @@ import { wailsQueryFn } from './wailsBaseQuery';
 export const kubernetesApi = wailsApi.injectEndpoints({
   endpoints: (builder) => ({
     getKubernetesContexts: builder.query<string[], void>({
-      queryFn: wailsQueryFn<void, string[]>(
-        () => LoadKubernetesContexts() as Promise<string[]>,
-      ),
+      queryFn: wailsQueryFn<void, string[]>(() => LoadKubernetesContexts()),
       providesTags: ['KubernetesContexts'],
     }),
   }),

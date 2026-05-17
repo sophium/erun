@@ -20,6 +20,5 @@ export const tenantDialogSlice = createSlice({
   },
 });
 
-export const { setTenantDialog, patchTenantDialog, resetTenantDialog } =
-  tenantDialogSlice.actions;
+export const { setTenantDialog, patchTenantDialog, resetTenantDialog } = tenantDialogSlice.actions;
 export default tenantDialogSlice.reducer;

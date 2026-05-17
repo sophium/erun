@@ -1,14 +1,6 @@
 import { createListenerMiddleware, isAnyOf } from '@reduxjs/toolkit';
 
 import {
-  DEBUG_HEIGHT_STORAGE_KEY,
-  DEBUG_OPEN_STORAGE_KEY,
-  FILES_OPEN_STORAGE_KEY,
-  FILES_WIDTH_STORAGE_KEY,
-  REVIEW_WIDTH_STORAGE_KEY,
-  SIDEBAR_WIDTH_STORAGE_KEY,
-} from '../state';
-import {
   setDebugHeight,
   setDebugOpen,
   setFilesOpen,
@@ -16,6 +8,14 @@ import {
   setReviewWidth,
   setSidebarWidth,
 } from '../slices/layoutSlice';
+import {
+  DEBUG_HEIGHT_STORAGE_KEY,
+  DEBUG_OPEN_STORAGE_KEY,
+  FILES_OPEN_STORAGE_KEY,
+  FILES_WIDTH_STORAGE_KEY,
+  REVIEW_WIDTH_STORAGE_KEY,
+  SIDEBAR_WIDTH_STORAGE_KEY,
+} from '../state';
 import { saveBoolean, saveNumber } from '../storage';
 import type { AppDispatch, RootState } from '../store';
 

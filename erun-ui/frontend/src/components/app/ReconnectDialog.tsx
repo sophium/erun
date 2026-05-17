@@ -1,11 +1,18 @@
-import * as React from 'react';
 import { AlertCircle, LoaderCircle, RefreshCw } from 'lucide-react';
+import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { reconnectCopy } from '@/app/reconnectCopy';
 import { cancelReconnect, confirmReconnect } from '@/app/reviewThunks';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 // ReconnectDialog reads only the review.reconnect slice; subscribing through
 // useAppSelector keeps re-renders scoped to that slice instead of the full
@@ -34,7 +41,10 @@ export function ReconnectDialog(): React.ReactElement {
           <div className="rounded-[var(--radius)] border bg-muted/40 px-3 py-2.5 text-[13px] leading-[1.4]">
             {running && (
               <div className="flex items-start gap-2 text-muted-foreground">
-                <LoaderCircle className="mt-px size-[14px] flex-none animate-spin" aria-hidden="true" />
+                <LoaderCircle
+                  className="mt-px size-[14px] flex-none animate-spin"
+                  aria-hidden="true"
+                />
                 <div className="min-w-0 [overflow-wrap:anywhere]">
                   <div className="font-medium text-foreground">{reconnectCopy.runningStatus}</div>
                   <div className="mt-0.5 truncate font-mono text-[12px] text-muted-foreground">
@@ -45,9 +55,14 @@ export function ReconnectDialog(): React.ReactElement {
             )}
             {failed && (
               <div className="flex items-start gap-2">
-                <AlertCircle className="mt-px size-[14px] flex-none text-destructive" aria-hidden="true" />
+                <AlertCircle
+                  className="mt-px size-[14px] flex-none text-destructive"
+                  aria-hidden="true"
+                />
                 <div className="min-w-0 [overflow-wrap:anywhere]">
-                  <div className="font-medium text-destructive">{reconnectCopy.errorStatusTitle}</div>
+                  <div className="font-medium text-destructive">
+                    {reconnectCopy.errorStatusTitle}
+                  </div>
                   <div className="mt-0.5 text-muted-foreground">{reconnect.error}</div>
                 </div>
               </div>
@@ -55,7 +70,14 @@ export function ReconnectDialog(): React.ReactElement {
           </div>
         )}
         <DialogFooter>
-          <Button type="button" variant="outline" disabled={running} onClick={() => dispatch(cancelReconnect())}>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={running}
+            onClick={() => {
+              dispatch(cancelReconnect());
+            }}
+          >
             {reconnectCopy.dialogCancel}
           </Button>
           <Button
@@ -65,7 +87,11 @@ export function ReconnectDialog(): React.ReactElement {
               void dispatch(confirmReconnect());
             }}
           >
-            {running ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
+            {running ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : (
+              <RefreshCw aria-hidden="true" />
+            )}
             {reconnectCopy.dialogConfirm}
           </Button>
         </DialogFooter>

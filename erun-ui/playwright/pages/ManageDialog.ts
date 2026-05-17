@@ -6,7 +6,10 @@ export type ManageTab = 'General' | 'Runtime' | 'AI' | 'Ports' | 'SSH';
 // caller may pass the expected title for a strict match; otherwise the POM
 // finds any open dialog under that pattern.
 export class ManageDialog {
-  constructor(public readonly page: Page, private readonly expectedTitle?: string) {}
+  constructor(
+    public readonly page: Page,
+    private readonly expectedTitle?: string,
+  ) {}
 
   locator(): Locator {
     if (this.expectedTitle) {
@@ -69,6 +72,8 @@ export class ManageDialog {
 
   async confirmDelete(expected: string): Promise<void> {
     await this.page.locator('#manage-confirmation').fill(expected);
-    await this.locator().getByRole('button', { name: /^Delete/ }).click();
+    await this.locator()
+      .getByRole('button', { name: /^Delete/ })
+      .click();
   }
 }

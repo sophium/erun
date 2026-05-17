@@ -1,3 +1,5 @@
+import type { UISelection } from '@/types';
+
 import {
   CancelWaitingAction,
   DismissDeploy,
@@ -8,10 +10,9 @@ import {
   ListDeploys,
   RecoverPendingHelmRelease,
 } from '../../../wailsjs/go/main/App';
+import type { ActivityQueueEntry, ActivityRecoveryResult } from '../activityQueueState';
 import { wailsApi } from './wailsApi';
 import { wailsQueryFn } from './wailsBaseQuery';
-import type { ActivityQueueEntry, ActivityRecoveryResult } from '../activityQueueState';
-import type { UISelection } from '@/types';
 
 export const deployApi = wailsApi.injectEndpoints({
   endpoints: (builder) => ({
@@ -29,8 +30,7 @@ export const deployApi = wailsApi.injectEndpoints({
     }),
     findActiveDeployForSelection: builder.query<ActivityQueueEntry, UISelection>({
       queryFn: wailsQueryFn<UISelection, ActivityQueueEntry>(
-        (selection) =>
-          FindActiveDeployForSelection(selection) as Promise<ActivityQueueEntry>,
+        (selection) => FindActiveDeployForSelection(selection) as Promise<ActivityQueueEntry>,
       ),
       providesTags: ['Deploys'],
     }),
@@ -43,9 +43,7 @@ export const deployApi = wailsApi.injectEndpoints({
       invalidatesTags: ['Deploys'],
     }),
     recoverPendingHelmRelease: builder.mutation<ActivityRecoveryResult, string>({
-      queryFn: wailsQueryFn<string, ActivityRecoveryResult>(
-        (id) => RecoverPendingHelmRelease(id) as Promise<ActivityRecoveryResult>,
-      ),
+      queryFn: wailsQueryFn<string, ActivityRecoveryResult>((id) => RecoverPendingHelmRelease(id)),
       invalidatesTags: ['Deploys'],
     }),
     killSessionMutation: builder.mutation<boolean, number>({

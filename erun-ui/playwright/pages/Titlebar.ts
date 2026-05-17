@@ -24,11 +24,17 @@ export class Titlebar {
   async openVSCode(): Promise<void> {
     // The aria-label is computed from the active selection so we match by
     // role + name-startsWith via a regex.
-    await this.page.getByRole('button', { name: /VS Code/i }).first().click();
+    await this.page
+      .getByRole('button', { name: /VS Code/i })
+      .first()
+      .click();
   }
 
   async openIntelliJ(): Promise<void> {
-    await this.page.getByRole('button', { name: /IntelliJ|IDEA/i }).first().click();
+    await this.page
+      .getByRole('button', { name: /IntelliJ|IDEA/i })
+      .first()
+      .click();
   }
 
   async dismissStatus(): Promise<void> {

@@ -7,6 +7,7 @@ import { isMcpUnreachableMessage, stripMcpUnreachableMarker } from './reconnectC
 import { scrollSelectedDiffIntoView } from './reviewDiffNavigation';
 import { setChangedFilesOpen } from './slices/layoutSlice';
 import { bumpReviewDiff } from './slices/requestCountersSlice';
+import type { ReviewState } from './slices/reviewSlice';
 import {
   setDiff,
   setDiffError,
@@ -18,7 +19,6 @@ import {
   setSelectedReviewScope,
   toggleDiffDirCollapsed,
 } from './slices/reviewSlice';
-import type { ReviewState } from './slices/reviewSlice';
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
 import { selectionKey } from './versionSuggestions';
@@ -28,22 +28,24 @@ import { selectionKey } from './versionSuggestions';
 
 const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 
-export const setDiffFilter = (value: string): AppThunk =>
+export const setDiffFilter =
+  (value: string): AppThunk =>
   (dispatch) => {
     dispatch(setDiffFilterAction(value.trim().toLowerCase()));
   };
 
-export const toggleChangedFiles = (): AppThunk =>
-  (dispatch, getState) => {
-    dispatch(setChangedFilesOpen(!getState().layout.changedFilesOpen));
-  };
+export const toggleChangedFiles = (): AppThunk => (dispatch, getState) => {
+  dispatch(setChangedFilesOpen(!getState().layout.changedFilesOpen));
+};
 
-export const toggleDiffDirectory = (path: string): AppThunk =>
+export const toggleDiffDirectory =
+  (path: string): AppThunk =>
   (dispatch) => {
     dispatch(toggleDiffDirCollapsed(path));
   };
 
-export const selectDiffPath = (path: string): AppThunk =>
+export const selectDiffPath =
+  (path: string): AppThunk =>
   (dispatch, _getState, extra) => {
     const controller = requireController(extra);
     dispatch(setSelectedDiffPath(path));
@@ -52,7 +54,8 @@ export const selectDiffPath = (path: string): AppThunk =>
     }, 0);
   };
 
-export const selectReviewRange = (scope: ReviewState['selectedReviewScope'], hash = ''): AppThunk =>
+export const selectReviewRange =
+  (scope: ReviewState['selectedReviewScope'], hash = ''): AppThunk =>
   (dispatch, getState) => {
     const review = getState().review;
     const selected = hash.trim();
@@ -67,7 +70,8 @@ export const selectReviewRange = (scope: ReviewState['selectedReviewScope'], has
     void dispatch(loadReviewDiff());
   };
 
-export const loadReviewDiff = (options: { silent?: boolean } = {}): AppThunk<Promise<void>> =>
+export const loadReviewDiff =
+  (options: { silent?: boolean } = {}): AppThunk<Promise<void>> =>
   async (dispatch, getState, extra) => {
     const controller = requireController(extra);
     const state = getState();
@@ -82,7 +86,9 @@ export const loadReviewDiff = (options: { silent?: boolean } = {}): AppThunk<Pro
     const selectedCommit = state.review.selectedReviewCommit;
     if (!options.silent) {
       dispatch(setDiffLoading(true));
-      dispatch(setDiffError({ error: '', reconnectable: getState().review.diffErrorReconnectable }));
+      dispatch(
+        setDiffError({ error: '', reconnectable: getState().review.diffErrorReconnectable }),
+      );
     }
     try {
       const diff = await dispatch(
@@ -98,7 +104,9 @@ export const loadReviewDiff = (options: { silent?: boolean } = {}): AppThunk<Pro
       dispatch(setDiffError({ error: '', reconnectable: false }));
       dispatch(setSelectedReviewScope(diff.scope || 'current'));
       dispatch(setSelectedReviewCommit(diff.selectedCommit || ''));
-      dispatch(setSelectedDiffPath(chooseSelectedDiffPath(diff, getState().review.selectedDiffPath)));
+      dispatch(
+        setSelectedDiffPath(chooseSelectedDiffPath(diff, getState().review.selectedDiffPath)),
+      );
     } catch (error: unknown) {
       if (!isCurrentReviewDiffRequest(getState, request, selectedKey)) {
         return;
@@ -126,16 +134,15 @@ export const loadReviewDiff = (options: { silent?: boolean } = {}): AppThunk<Pro
     }
   };
 
-export const refreshReviewDiff = (): AppThunk<Promise<void>> =>
-  async (dispatch, getState) => {
-    if (!getState().selection.selected) {
-      return;
-    }
-    await dispatch(loadReviewDiff());
-    if (!getState().review.diffError) {
-      dispatch(showNotification('success', 'Diff refreshed.'));
-    }
-  };
+export const refreshReviewDiff = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  if (!getState().selection.selected) {
+    return;
+  }
+  await dispatch(loadReviewDiff());
+  if (!getState().review.diffError) {
+    dispatch(showNotification('success', 'Diff refreshed.'));
+  }
+};
 
 function isCurrentReviewDiffRequest(
   getState: () => ReturnType<typeof import('./store').store.getState>,
@@ -143,8 +150,10 @@ function isCurrentReviewDiffRequest(
   selectedKey: string,
 ): boolean {
   const state = getState();
-  return request === state.requestCounters.reviewDiff &&
-    selectedKey === selectionKey(state.selection.selected || { tenant: '', environment: '' });
+  return (
+    request === state.requestCounters.reviewDiff &&
+    selectedKey === selectionKey(state.selection.selected || { tenant: '', environment: '' })
+  );
 }
 
 function scheduleReviewDiffRefresh(
@@ -174,40 +183,39 @@ function scheduleReviewDiffRefresh(
 
 // Reconnect dialog ============================================================
 
-export const requestReconnect = (): AppThunk =>
-  (dispatch, getState) => {
-    if (!getState().selection.selected) {
-      return;
-    }
-    dispatch(setReconnect({ status: 'confirm', lastLine: '', error: '' }));
-  };
+export const requestReconnect = (): AppThunk => (dispatch, getState) => {
+  if (!getState().selection.selected) {
+    return;
+  }
+  dispatch(setReconnect({ status: 'confirm', lastLine: '', error: '' }));
+};
 
-export const cancelReconnect = (): AppThunk =>
-  (dispatch, getState) => {
-    if (getState().review.reconnect.status === 'running') {
-      return;
-    }
+export const cancelReconnect = (): AppThunk => (dispatch, getState) => {
+  if (getState().review.reconnect.status === 'running') {
+    return;
+  }
+  dispatch(setReconnect({ status: 'idle', lastLine: '', error: '' }));
+};
+
+export const confirmReconnect = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
+  const state = getState();
+  const selection = state.selection.selected;
+  if (!selection || state.review.reconnect.status === 'running') {
+    return;
+  }
+  dispatch(setReconnect({ status: 'running', lastLine: '', error: '' }));
+  try {
+    await dispatch(sessionApi.endpoints.reconnectMCP.initiate(selection)).unwrap();
     dispatch(setReconnect({ status: 'idle', lastLine: '', error: '' }));
-  };
-
-export const confirmReconnect = (): AppThunk<Promise<void>> =>
-  async (dispatch, getState) => {
-    const state = getState();
-    const selection = state.selection.selected;
-    if (!selection || state.review.reconnect.status === 'running') {
-      return;
-    }
-    dispatch(setReconnect({ status: 'running', lastLine: '', error: '' }));
-    try {
-      await dispatch(sessionApi.endpoints.reconnectMCP.initiate(selection)).unwrap();
-      dispatch(setReconnect({ status: 'idle', lastLine: '', error: '' }));
-      await dispatch(loadReviewDiff());
-    } catch (error: unknown) {
-      const lastLine = getState().review.reconnect.lastLine;
-      dispatch(setReconnect({
+    await dispatch(loadReviewDiff());
+  } catch (error: unknown) {
+    const lastLine = getState().review.reconnect.lastLine;
+    dispatch(
+      setReconnect({
         status: 'error',
         lastLine,
         error: readError(error),
-      }));
-    }
-  };
+      }),
+    );
+  }
+};

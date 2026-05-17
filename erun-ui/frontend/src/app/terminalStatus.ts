@@ -1,5 +1,11 @@
-import type { ClassifiedTerminalFailure, HiddenSessionMode, IDEKind, TerminalExitSelections } from './model';
 import type { UISelection } from '@/types';
+
+import type {
+  ClassifiedTerminalFailure,
+  HiddenSessionMode,
+  IDEKind,
+  TerminalExitSelections,
+} from './model';
 
 export function hiddenSessionBusyMessage(selection: UISelection, mode: HiddenSessionMode): string {
   if (mode === 'sshd-init') {
@@ -9,10 +15,18 @@ export function hiddenSessionBusyMessage(selection: UISelection, mode: HiddenSes
 }
 
 export function terminalExitHasTrackedSelection(selections: TerminalExitSelections): boolean {
-  return Boolean(selections.sshdInitSelection || selections.doctorSelection || selections.openSelection || selections.cloudInit);
+  return Boolean(
+    selections.sshdInitSelection ||
+    selections.doctorSelection ||
+    selections.openSelection ||
+    selections.cloudInit,
+  );
 }
 
-export function failedTerminalExitReason(reason: string, selections: TerminalExitSelections): string {
+export function failedTerminalExitReason(
+  reason: string,
+  selections: TerminalExitSelections,
+): string {
   const selectionReason = failedSelectionExitReason(reason, selections);
   if (selectionReason) {
     return selectionReason;
@@ -43,7 +57,11 @@ export function cleanTerminalOutput(value: string): string {
     .trim();
 }
 
-export function ideOpenFailure(selection: UISelection, label: string, rawError: string): ClassifiedTerminalFailure & { copyOutput: string } {
+export function ideOpenFailure(
+  selection: UISelection,
+  label: string,
+  rawError: string,
+): ClassifiedTerminalFailure & { copyOutput: string } {
   const output = cleanTerminalOutput(rawError) || rawError.trim() || 'Unexpected error';
   return {
     message: `Failed to open ${label} for ${selection.tenant} / ${selection.environment}`,
@@ -62,13 +80,24 @@ export function debugOutputBlock(output: string): string {
   return `${trimmed}\n`;
 }
 
-export function classifiedTerminalFailure(rawReason: string, displayReason: string, output: string, openSelection?: UISelection): ClassifiedTerminalFailure {
+export function classifiedTerminalFailure(
+  rawReason: string,
+  displayReason: string,
+  output: string,
+  openSelection?: UISelection,
+): ClassifiedTerminalFailure {
   const combined = `${rawReason}\n${output}`.toLowerCase();
-  if (combined.includes('timed out waiting for mcp port-forward') || combined.includes('timed out waiting for api port-forward')) {
+  if (
+    combined.includes('timed out waiting for mcp port-forward') ||
+    combined.includes('timed out waiting for api port-forward')
+  ) {
     const kind = combined.includes('api port-forward') ? 'API' : 'MCP';
-    const port = rawReason.match(/127\.0\.0\.1:(\d+)/)?.[1] || output.match(/127\.0\.0\.1:(\d+)/)?.[1] || '';
+    const port =
+      /127\.0\.0\.1:(\d+)/.exec(rawReason)?.[1] || /127\.0\.0\.1:(\d+)/.exec(output)?.[1] || '';
     return {
-      message: port ? `${kind} port-forward on 127.0.0.1:${port} is still not ready` : `${kind} port-forward is still not ready`,
+      message: port
+        ? `${kind} port-forward on 127.0.0.1:${port} is still not ready`
+        : `${kind} port-forward is still not ready`,
       detail: portForwardDetail(combined, kind),
       action: openSelection ? 'wait-longer' : '',
       retrySelection: openSelection || null,
@@ -133,7 +162,10 @@ export function trimDebugOutput(value: string): string {
   return value.slice(value.length - maxLength);
 }
 
-export function formatDebugCommand(selection: UISelection, mode: 'open' | 'init' | 'deploy' | 'sshd-init' | 'doctor' = 'open'): string {
+export function formatDebugCommand(
+  selection: UISelection,
+  mode: 'open' | 'init' | 'deploy' | 'sshd-init' | 'doctor' = 'open',
+): string {
   const args = ['erun'];
   if (selection.debug) {
     args.push('-vv');
@@ -147,7 +179,12 @@ export function formatIDECommand(selection: UISelection, ide: IDEKind): string {
   if (selection.debug) {
     args.push('-vv');
   }
-  args.push('open', selection.tenant, selection.environment, ide === 'vscode' ? '--vscode' : '--intellij');
+  args.push(
+    'open',
+    selection.tenant,
+    selection.environment,
+    ide === 'vscode' ? '--vscode' : '--intellij',
+  );
   return args.map(shellDebugArg).join(' ');
 }
 
@@ -183,8 +220,12 @@ function selectionLabel(selection: UISelection): string {
 }
 
 function shortIDEOpenFailureDetail(output: string): string {
-  const firstLine = output.split('\n').map((line) => line.trim()).find(Boolean) || '';
-  const exitStatus = firstLine.match(/exit status \d+/)?.[0];
+  const firstLine =
+    output
+      .split('\n')
+      .map((line) => line.trim())
+      .find(Boolean) || '';
+  const exitStatus = /exit status \d+/.exec(firstLine)?.[0];
   if (exitStatus) {
     return exitStatus;
   }
@@ -202,7 +243,11 @@ function portForwardDetail(value: string, kind: 'API' | 'MCP'): string {
   if (value.includes('pod not found')) {
     return 'The runtime pod was replaced while the app was connecting.';
   }
-  if (value.includes('lost connection to pod') || value.includes('network namespace') || value.includes('sandbox')) {
+  if (
+    value.includes('lost connection to pod') ||
+    value.includes('network namespace') ||
+    value.includes('sandbox')
+  ) {
     return 'The runtime pod connection was lost, likely because the pod restarted.';
   }
   if (value.includes('connection refused') || value.includes('not accepting')) {
@@ -211,22 +256,51 @@ function portForwardDetail(value: string, kind: 'API' | 'MCP'): string {
   return `kubectl has not exposed a reachable ${kind} endpoint yet.`;
 }
 
-const terminalOutputStatusRules: Array<{ matches: (lower: string) => boolean; message: (output: string) => string }> = [
-  { matches: (lower) => lower.includes('forwarding from 127.0.0.1:'), message: mcpForwardingStatusMessage },
-  { matches: (lower) => lower.includes('handling connection for'), message: () => 'Checking MCP endpoint readiness...' },
-  { matches: (lower) => lower.includes('connection refused'), message: () => 'Runtime pod is not accepting MCP connections yet...' },
-  { matches: (lower) => lower.includes('lost connection to pod') || lower.includes('network namespace'), message: () => 'Runtime pod connection changed. Reconnecting MCP port-forward...' },
-  { matches: (lower) => lower.includes('pod not found'), message: () => 'Runtime pod was replaced. Waiting for the new pod...' },
-  { matches: (lower) => lower.includes('context "') && lower.includes('modified'), message: () => 'Configuring Kubernetes context...' },
-  { matches: (lower) => lower.includes('cluster "') && lower.includes('set.'), message: () => 'Configuring Kubernetes cluster access...' },
+const terminalOutputStatusRules: {
+  matches: (lower: string) => boolean;
+  message: (output: string) => string;
+}[] = [
+  {
+    matches: (lower) => lower.includes('forwarding from 127.0.0.1:'),
+    message: mcpForwardingStatusMessage,
+  },
+  {
+    matches: (lower) => lower.includes('handling connection for'),
+    message: () => 'Checking MCP endpoint readiness...',
+  },
+  {
+    matches: (lower) => lower.includes('connection refused'),
+    message: () => 'Runtime pod is not accepting MCP connections yet...',
+  },
+  {
+    matches: (lower) =>
+      lower.includes('lost connection to pod') || lower.includes('network namespace'),
+    message: () => 'Runtime pod connection changed. Reconnecting MCP port-forward...',
+  },
+  {
+    matches: (lower) => lower.includes('pod not found'),
+    message: () => 'Runtime pod was replaced. Waiting for the new pod...',
+  },
+  {
+    matches: (lower) => lower.includes('context "') && lower.includes('modified'),
+    message: () => 'Configuring Kubernetes context...',
+  },
+  {
+    matches: (lower) => lower.includes('cluster "') && lower.includes('set.'),
+    message: () => 'Configuring Kubernetes cluster access...',
+  },
 ];
 
 function mcpForwardingStatusMessage(output: string): string {
-  const port = output.match(/Forwarding from 127\.0\.0\.1:(\d+)/)?.[1] || '';
+  const port = /Forwarding from 127\.0\.0\.1:(\d+)/.exec(output)?.[1] || '';
   return port ? `Waiting for MCP endpoint on 127.0.0.1:${port}...` : 'Waiting for MCP endpoint...';
 }
 
-function appendDebugCommandArgs(args: string[], selection: UISelection, mode: 'open' | 'init' | 'deploy' | 'sshd-init' | 'doctor'): void {
+function appendDebugCommandArgs(
+  args: string[],
+  selection: UISelection,
+  mode: 'open' | 'init' | 'deploy' | 'sshd-init' | 'doctor',
+): void {
   if (mode === 'init') {
     appendInitDebugArgs(args, selection);
     return;
@@ -254,7 +328,10 @@ function appendInitDebugArgs(args: string[], selection: UISelection): void {
   appendOptionalDebugArg(args, '--runtime-memory', selection.runtimeMemory);
   appendOptionalDebugArg(args, '--kubernetes-context', selection.kubernetesContext);
   appendOptionalDebugArg(args, '--container-registry', selection.containerRegistry);
-  args.push(`--set-default-tenant=${selection.setDefaultTenant ? 'true' : 'false'}`, '--confirm-environment=true');
+  args.push(
+    `--set-default-tenant=${selection.setDefaultTenant ? 'true' : 'false'}`,
+    '--confirm-environment=true',
+  );
   appendDebugFlag(args, '--no-git', selection.noGit);
   appendDebugFlag(args, '--bootstrap', selection.bootstrap);
 }

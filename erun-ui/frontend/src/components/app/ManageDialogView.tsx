@@ -1,22 +1,22 @@
+import {
+  AlertTriangle,
+  Check,
+  ChevronsUpDown,
+  FolderOpen,
+  LoaderCircle,
+  Play,
+  Power,
+  Rocket,
+  Save,
+  Server,
+  Stethoscope,
+  Trash2,
+} from 'lucide-react';
 import * as React from 'react';
-import { AlertTriangle, Check, ChevronsUpDown, FolderOpen, LoaderCircle, Play, Power, Rocket, Save, Server, Stethoscope, Trash2 } from 'lucide-react';
 
 import { useController } from '@/app/ControllerContext';
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { showTerminalMessage } from '@/app/notificationThunks';
-import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
-import type { AppState } from '@/app/state';
-import { loadSavedPastContainerRegistries } from '@/app/storage';
-import { deleteConfirmationValue, normalizeDialogValue, selectionKey, versionChoiceImage, versionChoiceKind, versionChoiceLabel } from '@/app/versionSuggestions';
-import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   chooseWorkspaceSyncLocalFolder,
   closeManageDialog,
@@ -36,8 +36,50 @@ import {
   updateManageDialog,
   updateManageSSHDConfig,
 } from '@/app/manageEnvironmentThunks';
-import type { ManageEditTab, ManageTab, UICloudContextStatus, UIEnvironmentConfig, UIPortStatus, UIVersionSuggestion } from '@/types';
+import { showTerminalMessage } from '@/app/notificationThunks';
+import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
+import type { AppState } from '@/app/state';
+import { loadSavedPastContainerRegistries } from '@/app/storage';
+import {
+  deleteConfirmationValue,
+  normalizeDialogValue,
+  selectionKey,
+  versionChoiceImage,
+  versionChoiceKind,
+  versionChoiceLabel,
+} from '@/app/versionSuggestions';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
+import type {
+  ManageEditTab,
+  ManageTab,
+  UICloudContextStatus,
+  UIEnvironmentConfig,
+  UIPortStatus,
+  UIVersionSuggestion,
+} from '@/types';
+
 import { EditableComboField, uniqueSuggestions } from './EditableComboField';
 import { RuntimeResourceControls } from './RuntimeResourceControls';
 import { SelectField } from './SelectField';
@@ -85,28 +127,59 @@ export function ManageDialogView(): React.ReactElement {
           }}
         >
           <DialogHeader>
-            <DialogTitle>{selection ? `${selection.tenant}-${selection.environment}` : 'Environment'}</DialogTitle>
-            <DialogDescription>Edit environment configuration, deploy a different runtime version, run diagnostics, or delete the environment.</DialogDescription>
+            <DialogTitle>
+              {selection ? `${selection.tenant}-${selection.environment}` : 'Environment'}
+            </DialogTitle>
+            <DialogDescription>
+              Edit environment configuration, deploy a different runtime version, run diagnostics,
+              or delete the environment.
+            </DialogDescription>
           </DialogHeader>
-          <ManageDialogContent confirmationRef={confirmationRef} expected={expected} confirmingDelete={confirmingDelete} />
+          <ManageDialogContent
+            confirmationRef={confirmationRef}
+            expected={expected}
+            confirmingDelete={confirmingDelete}
+          />
           <DialogError error={dialog.error} />
-          <ManageDialogFooter dialog={dialog} confirmingDelete={confirmingDelete} deleteEnabled={deleteEnabled} />
+          <ManageDialogFooter
+            dialog={dialog}
+            confirmingDelete={confirmingDelete}
+            deleteEnabled={deleteEnabled}
+          />
         </form>
       </DialogContent>
     </Dialog>
   );
 }
 
-function ManageDialogContent({ confirmationRef, expected, confirmingDelete }: { confirmationRef: React.Ref<HTMLInputElement>; expected: string; confirmingDelete: boolean }): React.ReactElement {
+function ManageDialogContent({
+  confirmationRef,
+  expected,
+  confirmingDelete,
+}: {
+  confirmationRef: React.Ref<HTMLInputElement>;
+  expected: string;
+  confirmingDelete: boolean;
+}): React.ReactElement {
   const dispatch = useAppDispatch();
   const dialog = useAppSelector((state) => state.manageDialog);
   if (dialog.configLoading) {
-    return <div className="flex flex-1 min-h-0 flex-col"><div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">Loading config...</div></div>;
+    return (
+      <div className="flex flex-1 min-h-0 flex-col">
+        <div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">
+          Loading config...
+        </div>
+      </div>
+    );
   }
   if (confirmingDelete) {
     return (
       <div className="flex flex-1 min-h-0 flex-col gap-3 overflow-auto pb-1">
-        <DeleteConfirmationFields dialog={dialog} confirmationRef={confirmationRef} expected={expected} />
+        <DeleteConfirmationFields
+          dialog={dialog}
+          confirmationRef={confirmationRef}
+          expected={expected}
+        />
       </div>
     );
   }
@@ -114,7 +187,13 @@ function ManageDialogContent({ confirmationRef, expected, confirmingDelete }: { 
   return (
     <div className="flex flex-1 min-h-0 flex-col gap-3">
       {dialog.pendingRedeploy && <RedeployBanner dialog={dialog} />}
-      <Tabs value={editTab} onValueChange={(value) => dispatch(setManageTab(value as ManageTab))} className="flex-1 min-h-0">
+      <Tabs
+        value={editTab}
+        onValueChange={(value) => {
+          dispatch(setManageTab(value as ManageTab));
+        }}
+        className="flex-1 min-h-0"
+      >
         <TabsList className="w-full">
           <DirtyAwareTabsTrigger value="general" label="General" dialog={dialog} />
           <DirtyAwareTabsTrigger value="runtime" label="Runtime" dialog={dialog} />
@@ -145,7 +224,15 @@ function ManageDialogContent({ confirmationRef, expected, confirmingDelete }: { 
   );
 }
 
-function DirtyAwareTabsTrigger({ value, label, dialog }: { value: ManageEditTab; label: string; dialog: ManageDialog }): React.ReactElement {
+function DirtyAwareTabsTrigger({
+  value,
+  label,
+  dialog,
+}: {
+  value: ManageEditTab;
+  label: string;
+  dialog: ManageDialog;
+}): React.ReactElement {
   const dirty = manageDialogTabHasUnsavedChanges(value, dialog.config, dialog.initialConfig);
   return (
     <TabsTrigger value={value} aria-label={dirty ? `${label}, has unsaved changes` : label}>
@@ -167,13 +254,60 @@ function GeneralTab(): React.ReactElement {
   );
   return (
     <>
-      <ReadonlyField id="environment-config-repopath" label="Repository path" value={config.repoPath} />
-      <ReadonlyField id="environment-config-kubernetescontext" label="Kubernetes context" value={config.kubernetesContext} />
-      <EditableComboField id="environment-config-containerregistry" label="Container registry" value={config.containerRegistry} suggestions={containerRegistrySuggestions} disabled={dialog.busy || dialog.configLoading} onValueChange={(containerRegistry) => dispatch(updateManageConfig({ containerRegistry }))} />
-      <CloudAliasSelect id="environment-config-cloudprovideralias" value={config.cloudProviderAlias} options={config.cloudProviderAliases || []} disabled={dialog.busy} onChange={(cloudProviderAlias) => dispatch(updateManageConfig({ cloudProviderAlias }))} />
-      <CloudContextField context={config.cloudContext} cloudProviderAlias={config.cloudProviderAlias} disabled={dialog.busy || dialog.configLoading} loading={dialog.busyAction === 'cloud-context-power' && dialog.busyTarget === config.cloudContext?.name} onStart={(name) => void dispatch(startManageCloudContext(name))} onStop={(name) => void dispatch(stopManageCloudContext(name))} />
-      <ReadonlyField id="environment-config-remote" label="Remote environment" value={config.remote ? 'Yes' : 'No'} />
-      <CheckboxField id="environment-config-snapshot" label="Snapshot deploy" checked={config.snapshot} disabled={dialog.busy} onChange={(snapshot) => dispatch(updateManageConfig({ snapshot }))} />
+      <ReadonlyField
+        id="environment-config-repopath"
+        label="Repository path"
+        value={config.repoPath}
+      />
+      <ReadonlyField
+        id="environment-config-kubernetescontext"
+        label="Kubernetes context"
+        value={config.kubernetesContext}
+      />
+      <EditableComboField
+        id="environment-config-containerregistry"
+        label="Container registry"
+        value={config.containerRegistry}
+        suggestions={containerRegistrySuggestions}
+        disabled={dialog.busy || dialog.configLoading}
+        onValueChange={(containerRegistry) => {
+          dispatch(updateManageConfig({ containerRegistry }));
+        }}
+      />
+      <CloudAliasSelect
+        id="environment-config-cloudprovideralias"
+        value={config.cloudProviderAlias}
+        options={config.cloudProviderAliases || []}
+        disabled={dialog.busy}
+        onChange={(cloudProviderAlias) => {
+          dispatch(updateManageConfig({ cloudProviderAlias }));
+        }}
+      />
+      <CloudContextField
+        context={config.cloudContext}
+        cloudProviderAlias={config.cloudProviderAlias}
+        disabled={dialog.busy || dialog.configLoading}
+        loading={
+          dialog.busyAction === 'cloud-context-power' &&
+          dialog.busyTarget === config.cloudContext?.name
+        }
+        onStart={(name) => void dispatch(startManageCloudContext(name))}
+        onStop={(name) => void dispatch(stopManageCloudContext(name))}
+      />
+      <ReadonlyField
+        id="environment-config-remote"
+        label="Remote environment"
+        value={config.remote ? 'Yes' : 'No'}
+      />
+      <CheckboxField
+        id="environment-config-snapshot"
+        label="Snapshot deploy"
+        checked={config.snapshot}
+        disabled={dialog.busy}
+        onChange={(snapshot) => {
+          dispatch(updateManageConfig({ snapshot }));
+        }}
+      />
     </>
   );
 }
@@ -184,7 +318,27 @@ function RuntimeTab(): React.ReactElement {
   const versionSuggestions = useAppSelector((state) => state.tenants.versionSuggestions);
   return (
     <>
-      <RuntimeDeployField configuredVersion={dialog.config.runtimeVersion} overrideVersion={dialog.version} suggestions={versionSuggestions} choicesOpen={dialog.choicesOpen} disabled={dialog.busy || dialog.configLoading} onValueChange={(version) => dispatch(updateManageDialog({ version }))} onChoicesOpenChange={(open) => dispatch(setManageVersionChoicesOpen(open))} onSelect={(suggestion) => dispatch(selectManageVersionSuggestion(suggestion))} onDeploy={() => void dispatch(submitManageDeploy()).catch((error: unknown) => dispatch(showTerminalMessage(readError(error))))} />
+      <RuntimeDeployField
+        configuredVersion={dialog.config.runtimeVersion}
+        overrideVersion={dialog.version}
+        suggestions={versionSuggestions}
+        choicesOpen={dialog.choicesOpen}
+        disabled={dialog.busy || dialog.configLoading}
+        onValueChange={(version) => {
+          dispatch(updateManageDialog({ version }));
+        }}
+        onChoicesOpenChange={(open) => {
+          dispatch(setManageVersionChoicesOpen(open));
+        }}
+        onSelect={(suggestion) => {
+          dispatch(selectManageVersionSuggestion(suggestion));
+        }}
+        onDeploy={() =>
+          void dispatch(submitManageDeploy()).catch((error: unknown) => {
+            dispatch(showTerminalMessage(readError(error)));
+          })
+        }
+      />
       <RuntimePodFields dialog={dialog} />
       <IdleStopFields dialog={dialog} />
     </>
@@ -195,8 +349,18 @@ function PortsTab({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const config = dialog.config;
   return (
     <>
-      <ReadonlyField id="environment-config-localportrange" label="Assigned local port range" value={portRangeValue(config.localPorts.rangeStart, config.localPorts.rangeEnd)} />
-      <PortStatusTable rows={[{ service: 'mcp', port: config.localPorts.mcp, status: config.localPorts.mcpStatus }, { service: 'api', port: config.localPorts.api, status: config.localPorts.apiStatus }, { service: 'ssh', port: config.localPorts.ssh, status: config.localPorts.sshStatus }]} />
+      <ReadonlyField
+        id="environment-config-localportrange"
+        label="Assigned local port range"
+        value={portRangeValue(config.localPorts.rangeStart, config.localPorts.rangeEnd)}
+      />
+      <PortStatusTable
+        rows={[
+          { service: 'mcp', port: config.localPorts.mcp, status: config.localPorts.mcpStatus },
+          { service: 'api', port: config.localPorts.api, status: config.localPorts.apiStatus },
+          { service: 'ssh', port: config.localPorts.ssh, status: config.localPorts.sshStatus },
+        ]}
+      />
     </>
   );
 }
@@ -210,20 +374,37 @@ function RedeployBanner({ dialog }: { dialog: ManageDialog }): React.ReactElemen
       aria-live="polite"
       className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[var(--radius)] border-l-[3px] border-l-amber-500 border border-amber-500/40 bg-amber-500/10 px-3 py-2.5 text-[13px] leading-[1.35]"
     >
-      <AlertTriangle className="size-[18px] text-amber-600 dark:text-amber-400" aria-hidden="true" />
+      <AlertTriangle
+        className="size-[18px] text-amber-600 dark:text-amber-400"
+        aria-hidden="true"
+      />
       <div className="min-w-0">
         <div className="font-semibold text-foreground">Pending redeploy</div>
-        <div className="text-muted-foreground">Saved values are not yet applied to the running pod.</div>
+        <div className="text-muted-foreground">
+          Saved values are not yet applied to the running pod.
+        </div>
       </div>
       <div className="flex items-center gap-2">
-        <Button type="button" variant="ghost" size="sm" disabled={deploying} onClick={() => dispatch(closeManageDialog())}>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          disabled={deploying}
+          onClick={() => {
+            dispatch(closeManageDialog());
+          }}
+        >
           Later
         </Button>
         <Button
           type="button"
           size="sm"
           disabled={deploying}
-          onClick={() => void dispatch(submitManageDeploy()).catch((error: unknown) => dispatch(showTerminalMessage(readError(error))))}
+          onClick={() =>
+            void dispatch(submitManageDeploy()).catch((error: unknown) => {
+              dispatch(showTerminalMessage(readError(error)));
+            })
+          }
         >
           <Rocket aria-hidden="true" />
           Redeploy now
@@ -243,7 +424,9 @@ function RuntimePodFields({ dialog }: { dialog: ManageDialog }): React.ReactElem
       status={dialog.resourceStatus}
       loading={dialog.resourceStatusLoading}
       disabled={dialog.busy || dialog.configLoading}
-      onChange={(runtimePod) => dispatch(updateManageConfig({ runtimePod }))}
+      onChange={(runtimePod) => {
+        dispatch(updateManageConfig({ runtimePod }));
+      }}
     />
   );
 }
@@ -253,7 +436,9 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
   const config = dialog.config;
   return (
     <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
-      <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Idle stop</div>
+      <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
+        Idle stop
+      </div>
       <TextField
         id="environment-config-idle-timeout"
         label="Timeout"
@@ -261,7 +446,9 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
         disabled={dialog.busy}
         placeholder="e.g. 5m, 1h30m"
         helper="Go duration (s, m, h). Default 5m."
-        onChange={(timeout) => dispatch(updateManageConfig({ idle: { ...config.idle, timeout } }))}
+        onChange={(timeout) => {
+          dispatch(updateManageConfig({ idle: { ...config.idle, timeout } }));
+        }}
       />
       <TextField
         id="environment-config-idle-workinghours"
@@ -270,7 +457,9 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
         disabled={dialog.busy}
         placeholder="e.g. 08:00-20:00"
         helper="Format HH:MM-HH:MM. Default 08:00-20:00."
-        onChange={(workingHours) => dispatch(updateManageConfig({ idle: { ...config.idle, workingHours } }))}
+        onChange={(workingHours) => {
+          dispatch(updateManageConfig({ idle: { ...config.idle, workingHours } }));
+        }}
       />
       <TextField
         id="environment-config-idle-traffic"
@@ -280,7 +469,13 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
         disabled={dialog.busy}
         placeholder="e.g. 0"
         helper="SSH bytes per check below which the connection counts as idle. 0 disables the check."
-        onChange={(idleTrafficBytes) => dispatch(updateManageConfig({ idle: { ...config.idle, idleTrafficBytes: parseIdleTrafficBytes(idleTrafficBytes) } }))}
+        onChange={(idleTrafficBytes) => {
+          dispatch(
+            updateManageConfig({
+              idle: { ...config.idle, idleTrafficBytes: parseIdleTrafficBytes(idleTrafficBytes) },
+            }),
+          );
+        }}
       />
     </div>
   );
@@ -289,12 +484,28 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
 function DiagnosticsSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   const lastDoctorBySelection = useAppSelector((state) => state.doctor.lastDoctorBySelection);
-  const lastDoctor = dialog.selection ? lastDoctorBySelection[selectionKey(dialog.selection)] : undefined;
+  const lastDoctor = dialog.selection
+    ? lastDoctorBySelection[selectionKey(dialog.selection)]
+    : undefined;
   return (
     <div className="grid gap-2 rounded-[var(--radius)] border border-border p-3">
       <div className="flex items-center justify-between gap-3">
-        <div className="min-w-0"><div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Diagnostics</div></div>
-        <Button type="button" variant="outline" size="sm" disabled={dialog.busy || dialog.configLoading} onClick={() => void dispatch(startManageDoctor()).catch((error: unknown) => dispatch(showTerminalMessage(readError(error))))}>
+        <div className="min-w-0">
+          <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
+            Diagnostics
+          </div>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={dialog.busy || dialog.configLoading}
+          onClick={() =>
+            void dispatch(startManageDoctor()).catch((error: unknown) => {
+              dispatch(showTerminalMessage(readError(error)));
+            })
+          }
+        >
           <Stethoscope aria-hidden="true" />
           Run Doctor
         </Button>
@@ -304,10 +515,14 @@ function DiagnosticsSection({ dialog }: { dialog: ManageDialog }): React.ReactEl
   );
 }
 
-function DoctorLastRun({ outcome }: { outcome: AppState['lastDoctorBySelection'][string] }): React.ReactElement {
+function DoctorLastRun({
+  outcome,
+}: {
+  outcome: AppState['lastDoctorBySelection'][string];
+}): React.ReactElement {
   const ago = relativeTimeFromNow(outcome.ranAt);
   const tone: 'success' | 'destructive' = outcome.success ? 'success' : 'destructive';
-  const summary = outcome.success ? 'all checks passed' : (outcome.message || 'doctor failed');
+  const summary = outcome.success ? 'all checks passed' : outcome.message || 'doctor failed';
   return (
     <div
       role={outcome.success ? 'status' : 'alert'}
@@ -318,7 +533,13 @@ function DoctorLastRun({ outcome }: { outcome: AppState['lastDoctorBySelection']
           : 'border-destructive/40 bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] text-foreground',
       )}
     >
-      <span className={cn('mt-px size-1.5 rounded-full', tone === 'success' ? 'bg-green-600' : 'bg-destructive')} aria-hidden="true" />
+      <span
+        className={cn(
+          'mt-px size-1.5 rounded-full',
+          tone === 'success' ? 'bg-green-600' : 'bg-destructive',
+        )}
+        aria-hidden="true"
+      />
       <span className="min-w-0 [overflow-wrap:anywhere]">
         <span className="font-medium">Last run {ago}</span>
         <span className="text-muted-foreground"> — {summary}</span>
@@ -347,28 +568,75 @@ function relativeTimeFromNow(timestamp: number): string {
 function SSHAccessSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   const config = dialog.config;
-  const syncPathRequired = config.sshd.workspaceSyncEnabled && !String(config.sshd.workspaceSyncLocalPath || '').trim();
+  const syncPathRequired =
+    config.sshd.workspaceSyncEnabled && !String(config.sshd.workspaceSyncLocalPath || '').trim();
   return (
     <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">SSH access</div>
-        {!config.sshd.enabled && <Button type="button" variant="outline" size="sm" disabled={dialog.busy || dialog.configLoading || !config.remote} onClick={() => void dispatch(enableManageSSHD()).catch((error: unknown) => dispatch(showTerminalMessage(readError(error))))}><Server aria-hidden="true" />Enable SSHD</Button>}
+        <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
+          SSH access
+        </div>
+        {!config.sshd.enabled && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={dialog.busy || dialog.configLoading || !config.remote}
+            onClick={() =>
+              void dispatch(enableManageSSHD()).catch((error: unknown) => {
+                dispatch(showTerminalMessage(readError(error)));
+              })
+            }
+          >
+            <Server aria-hidden="true" />
+            Enable SSHD
+          </Button>
+        )}
       </div>
-      <ReadonlyField id="environment-config-sshd-enabled" label="SSHD" value={config.sshd.enabled ? 'Enabled' : 'Disabled'} />
-      <CheckboxField id="environment-config-sshd-sync-enabled" label="Enable workspace sync" checked={config.sshd.workspaceSyncEnabled} disabled={dialog.busy || dialog.configLoading || !config.sshd.enabled} onChange={(workspaceSyncEnabled) => dispatch(updateManageSSHDConfig({ workspaceSyncEnabled }))} />
+      <ReadonlyField
+        id="environment-config-sshd-enabled"
+        label="SSHD"
+        value={config.sshd.enabled ? 'Enabled' : 'Disabled'}
+      />
+      <CheckboxField
+        id="environment-config-sshd-sync-enabled"
+        label="Enable workspace sync"
+        checked={config.sshd.workspaceSyncEnabled}
+        disabled={dialog.busy || dialog.configLoading || !config.sshd.enabled}
+        onChange={(workspaceSyncEnabled) => {
+          dispatch(updateManageSSHDConfig({ workspaceSyncEnabled }));
+        }}
+      />
       {config.sshd.workspaceSyncEnabled && (
         <>
           <WorkspaceSyncStatus sshd={config.sshd} />
-          <LocalSyncFolderField dialog={dialog} error={syncPathRequired ? 'Choose a local Git folder before saving.' : ''} />
+          <LocalSyncFolderField
+            dialog={dialog}
+            error={syncPathRequired ? 'Choose a local Git folder before saving.' : ''}
+          />
         </>
       )}
-      <ReadonlyField id="environment-config-sshd-localport" label="Local port" value={config.sshd.localPort > 0 ? String(config.sshd.localPort) : ''} />
-      <ReadonlyField id="environment-config-sshd-publickeypath" label="Public key" value={config.sshd.publicKeyPath} />
+      <ReadonlyField
+        id="environment-config-sshd-localport"
+        label="Local port"
+        value={config.sshd.localPort > 0 ? String(config.sshd.localPort) : ''}
+      />
+      <ReadonlyField
+        id="environment-config-sshd-publickeypath"
+        label="Public key"
+        value={config.sshd.publicKeyPath}
+      />
     </div>
   );
 }
 
-function LocalSyncFolderField({ dialog, error }: { dialog: ManageDialog; error: string }): React.ReactElement {
+function LocalSyncFolderField({
+  dialog,
+  error,
+}: {
+  dialog: ManageDialog;
+  error: string;
+}): React.ReactElement {
   const dispatch = useAppDispatch();
   const disabled = dialog.busy || dialog.configLoading;
   const describedBy = error ? 'environment-config-sshd-sync-localpath-error' : undefined;
@@ -386,39 +654,89 @@ function LocalSyncFolderField({ dialog, error }: { dialog: ManageDialog; error: 
           disabled={disabled}
           aria-invalid={Boolean(error)}
           aria-describedby={describedBy}
-          onChange={(event) => dispatch(updateManageSSHDConfig({ workspaceSyncLocalPath: event.target.value }))}
+          onChange={(event) => {
+            dispatch(updateManageSSHDConfig({ workspaceSyncLocalPath: event.target.value }));
+          }}
         />
-        <Button type="button" variant="outline" size="icon" aria-label="Select local sync folder" disabled={disabled} onClick={() => void dispatch(chooseWorkspaceSyncLocalFolder()).catch((error: unknown) => dispatch(showTerminalMessage(readError(error))))}>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          aria-label="Select local sync folder"
+          disabled={disabled}
+          onClick={() =>
+            void dispatch(chooseWorkspaceSyncLocalFolder()).catch((error: unknown) => {
+              dispatch(showTerminalMessage(readError(error)));
+            })
+          }
+        >
           <FolderOpen aria-hidden="true" />
         </Button>
       </div>
-      {error && <div id="environment-config-sshd-sync-localpath-error" className="text-[13px] leading-[1.35] text-destructive" role="alert">{error}</div>}
+      {error && (
+        <div
+          id="environment-config-sshd-sync-localpath-error"
+          className="text-[13px] leading-[1.35] text-destructive"
+          role="alert"
+        >
+          {error}
+        </div>
+      )}
     </div>
   );
 }
 
-function WorkspaceSyncStatus({ sshd }: { sshd: ManageDialog['config']['sshd'] }): React.ReactElement | null {
+function WorkspaceSyncStatus({
+  sshd,
+}: {
+  sshd: ManageDialog['config']['sshd'];
+}): React.ReactElement | null {
   const status = String(sshd.workspaceSyncStatus || '').trim();
   const message = String(sshd.workspaceSyncStatusMessage || '').trim();
   if (!status) {
     return null;
   }
   return (
-    <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-[var(--radius)] border border-border bg-muted/35 px-3 py-2 text-[13px] leading-[1.35]" role={status === 'error' ? 'alert' : 'status'}>
+    <div
+      className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 rounded-[var(--radius)] border border-border bg-muted/35 px-3 py-2 text-[13px] leading-[1.35]"
+      role={status === 'error' ? 'alert' : 'status'}
+    >
       <StatusBadge status={status} />
-      <span className={cn('min-w-0 [overflow-wrap:anywhere]', message ? 'text-muted-foreground' : 'text-foreground')}>
+      <span
+        className={cn(
+          'min-w-0 [overflow-wrap:anywhere]',
+          message ? 'text-muted-foreground' : 'text-foreground',
+        )}
+      >
         {message || status.replace(/_/g, ' ')}
       </span>
     </div>
   );
 }
 
-function DeleteConfirmationFields({ dialog, confirmationRef, expected }: { dialog: ManageDialog; confirmationRef: React.Ref<HTMLInputElement>; expected: string }): React.ReactElement {
+function DeleteConfirmationFields({
+  dialog,
+  confirmationRef,
+  expected,
+}: {
+  dialog: ManageDialog;
+  confirmationRef: React.Ref<HTMLInputElement>;
+  expected: string;
+}): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
     <div className="grid gap-3">
       <DeleteWarning expected={expected} />
-      <TextField id="manage-confirmation" label="Confirmation" value={dialog.confirmation} disabled={dialog.busy} inputRef={confirmationRef} onChange={(confirmation) => dispatch(updateManageDialog({ confirmation }))} />
+      <TextField
+        id="manage-confirmation"
+        label="Confirmation"
+        value={dialog.confirmation}
+        disabled={dialog.busy}
+        inputRef={confirmationRef}
+        onChange={(confirmation) => {
+          dispatch(updateManageDialog({ confirmation }));
+        }}
+      />
     </div>
   );
 }
@@ -427,42 +745,112 @@ function DeleteWarning({ expected }: { expected: string }): React.ReactElement {
   return (
     <div className="grid grid-cols-[18px_minmax(0,1fr)] items-start gap-[9px] rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_30%,var(--border))] bg-[color-mix(in_oklch,var(--destructive)_7%,transparent)] px-[11px] py-2.5 text-[13px] leading-[1.35] text-foreground">
       <AlertTriangle className="mt-px size-[17px] text-destructive" aria-hidden="true" />
-      <span>Type <code className="rounded-[calc(var(--radius)-4px)] bg-[color-mix(in_oklch,var(--destructive)_12%,transparent)] px-1 py-px font-mono text-xs text-destructive">{expected}</code> to confirm.</span>
+      <span>
+        Type{' '}
+        <code className="rounded-[calc(var(--radius)-4px)] bg-[color-mix(in_oklch,var(--destructive)_12%,transparent)] px-1 py-px font-mono text-xs text-destructive">
+          {expected}
+        </code>{' '}
+        to confirm.
+      </span>
     </div>
   );
 }
 
 function DialogError({ error }: { error: string }): React.ReactElement | null {
-  return error ? <div className={dialogErrorClassName} role="alert">{error}</div> : null;
+  return error ? (
+    <div className={dialogErrorClassName} role="alert">
+      {error}
+    </div>
+  ) : null;
 }
 
-function ManageDialogFooter({ dialog, confirmingDelete, deleteEnabled }: { dialog: ManageDialog; confirmingDelete: boolean; deleteEnabled: boolean }): React.ReactElement {
+function ManageDialogFooter({
+  dialog,
+  confirmingDelete,
+  deleteEnabled,
+}: {
+  dialog: ManageDialog;
+  confirmingDelete: boolean;
+  deleteEnabled: boolean;
+}): React.ReactElement {
   const dispatch = useAppDispatch();
-  const resourceError = runtimeResourceLimitMessage(dialog.config.runtimePod, dialog.resourceStatus);
+  const resourceError = runtimeResourceLimitMessage(
+    dialog.config.runtimePod,
+    dialog.resourceStatus,
+  );
   const saving = dialog.busyAction === 'save';
   const deleting = dialog.busyAction === 'delete';
   return (
     <DialogFooter className="sm:justify-between">
-      <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => dispatch(closeManageDialog())}>Cancel</Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={dialog.busy}
+        onClick={() => {
+          dispatch(closeManageDialog());
+        }}
+      >
+        Cancel
+      </Button>
       <div className="flex items-center gap-2">
         {confirmingDelete ? (
           <>
-            <Button type="button" variant="ghost" size="sm" disabled={dialog.busy} onClick={() => dispatch(setManageTab('general'))}>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              disabled={dialog.busy}
+              onClick={() => {
+                dispatch(setManageTab('general'));
+              }}
+            >
               Back to edit
             </Button>
-            <Button type="button" variant="destructive" size="sm" disabled={dialog.busy || !deleteEnabled} onClick={() => void dispatch(submitManageDelete())}>
-              {deleting ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Trash2 aria-hidden="true" />}
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={dialog.busy || !deleteEnabled}
+              onClick={() => void dispatch(submitManageDelete())}
+            >
+              {deleting ? (
+                <LoaderCircle className="animate-spin" aria-hidden="true" />
+              ) : (
+                <Trash2 aria-hidden="true" />
+              )}
               {deleting ? 'Deleting...' : 'Confirm delete'}
             </Button>
           </>
         ) : (
           <>
-            <Button type="button" variant="outline" size="sm" disabled={dialog.busy || dialog.configLoading} onClick={() => dispatch(setManageTab('delete'))}>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={dialog.busy || dialog.configLoading}
+              onClick={() => {
+                dispatch(setManageTab('delete'));
+              }}
+            >
               <Trash2 aria-hidden="true" />
               Delete
             </Button>
-            <Button type="button" size="sm" disabled={dialog.busy || dialog.configLoading || Boolean(resourceError)} onClick={() => void dispatch(submitManageConfig()).catch((error: unknown) => dispatch(showTerminalMessage(readError(error))))}>
-              {saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
+            <Button
+              type="button"
+              size="sm"
+              disabled={dialog.busy || dialog.configLoading || Boolean(resourceError)}
+              onClick={() =>
+                void dispatch(submitManageConfig()).catch((error: unknown) => {
+                  dispatch(showTerminalMessage(readError(error)));
+                })
+              }
+            >
+              {saving ? (
+                <LoaderCircle className="animate-spin" aria-hidden="true" />
+              ) : (
+                <Save aria-hidden="true" />
+              )}
               {saving ? 'Saving...' : 'Save'}
             </Button>
           </>
@@ -509,18 +897,44 @@ function CloudContextField({
             <StatusBadge status={context.status} />
           </div>
           <div className="truncate text-xs text-muted-foreground">
-            {[context.cloudProviderAlias, context.region, context.instanceType, context.instanceId].filter(Boolean).join(' | ')}
+            {[context.cloudProviderAlias, context.region, context.instanceType, context.instanceId]
+              .filter(Boolean)
+              .join(' | ')}
             {context.message ? ` - ${context.message}` : ''}
           </div>
         </div>
         {running ? (
-          <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => onStop(context.name)}>
-            {loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Power aria-hidden="true" />}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={disabled}
+            onClick={() => {
+              onStop(context.name);
+            }}
+          >
+            {loading ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Power aria-hidden="true" />
+            )}
             {loading ? 'Stopping...' : 'Stop'}
           </Button>
         ) : (
-          <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => onStart(context.name)}>
-            {loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Play aria-hidden="true" />}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={disabled}
+            onClick={() => {
+              onStart(context.name);
+            }}
+          >
+            {loading ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : (
+              <Play aria-hidden="true" />
+            )}
             {loading ? 'Starting...' : 'Start'}
           </Button>
         )}
@@ -570,11 +984,20 @@ function RuntimeDeployField({
             spellCheck={false}
             placeholder="Version to deploy"
             disabled={disabled}
-            onChange={(event) => onValueChange(event.target.value)}
+            onChange={(event) => {
+              onValueChange(event.target.value);
+            }}
           />
           <Popover open={choicesOpen} onOpenChange={onChoicesOpenChange}>
             <PopoverTrigger asChild>
-              <Button className="absolute right-1 top-1 size-7 text-muted-foreground" type="button" variant="ghost" size="icon" aria-label="Show version choices" disabled={disabled}>
+              <Button
+                className="absolute right-1 top-1 size-7 text-muted-foreground"
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label="Show version choices"
+                disabled={disabled}
+              >
                 <ChevronsUpDown />
               </Button>
             </PopoverTrigger>
@@ -591,13 +1014,21 @@ function RuntimeDeployField({
                           className="min-w-0"
                           key={`${suggestion.version}:${suggestion.image || ''}:${suggestion.source || ''}:${suggestion.label || ''}`}
                           value={versionChoiceLabel(suggestion)}
-                          onSelect={() => onSelect(suggestion)}
+                          onSelect={() => {
+                            onSelect(suggestion);
+                          }}
                         >
-                          <Check className={cn('size-4 shrink-0 opacity-0', selected && 'opacity-100')} />
+                          <Check
+                            className={cn('size-4 shrink-0 opacity-0', selected && 'opacity-100')}
+                          />
                           <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                            <span className="truncate text-sm font-medium leading-tight">{suggestion.version}</span>
+                            <span className="truncate text-sm font-medium leading-tight">
+                              {suggestion.version}
+                            </span>
                             <span className="truncate text-xs leading-tight text-muted-foreground">
-                              {[versionChoiceImage(suggestion), versionChoiceKind(suggestion)].filter(Boolean).join(' | ')}
+                              {[versionChoiceImage(suggestion), versionChoiceKind(suggestion)]
+                                .filter(Boolean)
+                                .join(' | ')}
                             </span>
                           </span>
                         </CommandItem>
@@ -627,7 +1058,9 @@ function StatusBadge({ status }: { status: string }): React.ReactElement {
         ? 'border-border bg-muted/40 text-muted-foreground'
         : 'border-[color-mix(in_oklch,var(--destructive)_35%,var(--border))] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] text-destructive';
   return (
-    <span className={`shrink-0 rounded-[calc(var(--radius)-2px)] border px-1.5 py-0.5 text-[11px] leading-none font-medium ${className}`}>
+    <span
+      className={`shrink-0 rounded-[calc(var(--radius)-2px)] border px-1.5 py-0.5 text-[11px] leading-none font-medium ${className}`}
+    >
       {normalized.replace(/_/g, ' ')}
     </span>
   );
@@ -669,7 +1102,9 @@ function TextField({
         disabled={disabled}
         placeholder={placeholder}
         aria-describedby={helperId}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => {
+          onChange(event.target.value);
+        }}
       />
       {helper && (
         <div id={helperId} className="text-[12px] leading-[1.4] text-muted-foreground">
@@ -690,14 +1125,25 @@ function ClaudeSettingsSection({ dialog }: { dialog: ManageDialog }): React.Reac
   return (
     <div className="grid gap-3 rounded-[var(--radius)] border border-border p-3">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">Claude</div>
+        <div className="text-xs leading-[1.2] font-semibold tracking-normal text-muted-foreground uppercase">
+          Claude
+        </div>
         {overridden && (
           <Button
             type="button"
             variant="ghost"
             size="sm"
             disabled={disabled}
-            onClick={() => dispatch(updateManageClaudeConfig({ useMantle: undefined, useBedrock: undefined, models: [], maxOutputTokens: undefined }))}
+            onClick={() => {
+              dispatch(
+                updateManageClaudeConfig({
+                  useMantle: undefined,
+                  useBedrock: undefined,
+                  models: [],
+                  maxOutputTokens: undefined,
+                }),
+              );
+            }}
           >
             Reset all to defaults
           </Button>
@@ -710,7 +1156,9 @@ function ClaudeSettingsSection({ dialog }: { dialog: ManageDialog }): React.Reac
         defaultValue={defaults.useMantle}
         value={claude.useMantle}
         disabled={disabled}
-        onChange={(useMantle) => dispatch(updateManageClaudeConfig({ useMantle }))}
+        onChange={(useMantle) => {
+          dispatch(updateManageClaudeConfig({ useMantle }));
+        }}
       />
       <ClaudeBoolField
         id="environment-config-claude-bedrock"
@@ -719,25 +1167,47 @@ function ClaudeSettingsSection({ dialog }: { dialog: ManageDialog }): React.Reac
         defaultValue={defaults.useBedrock}
         value={claude.useBedrock}
         disabled={disabled}
-        onChange={(useBedrock) => dispatch(updateManageClaudeConfig({ useBedrock }))}
+        onChange={(useBedrock) => {
+          dispatch(updateManageClaudeConfig({ useBedrock }));
+        }}
       />
       <ClaudeModelsField
         defaults={defaults}
         value={claude.models || []}
         disabled={disabled}
-        onChange={(models) => dispatch(updateManageClaudeConfig({ models }))}
+        onChange={(models) => {
+          dispatch(updateManageClaudeConfig({ models }));
+        }}
       />
       <ClaudeMaxTokensField
         defaults={defaults}
         value={claude.maxOutputTokens}
         disabled={disabled}
-        onChange={(maxOutputTokens) => dispatch(updateManageClaudeConfig({ maxOutputTokens }))}
+        onChange={(maxOutputTokens) => {
+          dispatch(updateManageClaudeConfig({ maxOutputTokens }));
+        }}
       />
     </div>
   );
 }
 
-function ClaudeBoolField({ id, label, defaultValue, value, helper, disabled, onChange }: { id: string; label: string; defaultValue: boolean; value: boolean | undefined; helper?: string; disabled?: boolean; onChange: (value: boolean | undefined) => void }): React.ReactElement {
+function ClaudeBoolField({
+  id,
+  label,
+  defaultValue,
+  value,
+  helper,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  defaultValue: boolean;
+  value: boolean | undefined;
+  helper?: string;
+  disabled?: boolean;
+  onChange: (value: boolean | undefined) => void;
+}): React.ReactElement {
   const selectValue = value === undefined ? 'default' : value ? 'on' : 'off';
   const defaultLabel = defaultValue ? 'Default (enabled)' : 'Default (disabled)';
   return (
@@ -763,7 +1233,17 @@ function ClaudeBoolField({ id, label, defaultValue, value, helper, disabled, onC
   );
 }
 
-function ClaudeModelsField({ defaults, value, disabled, onChange }: { defaults: UIEnvironmentConfig['claudeDefaults']; value: string[]; disabled?: boolean; onChange: (value: string[]) => void }): React.ReactElement {
+function ClaudeModelsField({
+  defaults,
+  value,
+  disabled,
+  onChange,
+}: {
+  defaults: UIEnvironmentConfig['claudeDefaults'];
+  value: string[];
+  disabled?: boolean;
+  onChange: (value: string[]) => void;
+}): React.ReactElement {
   const overridden = value.length > 0;
   const known = defaults.knownModels.length > 0 ? defaults.knownModels : defaults.models;
   const displayValue = new Set(overridden ? value : defaults.models);
@@ -774,17 +1254,38 @@ function ClaudeModelsField({ defaults, value, disabled, onChange }: { defaults: 
       <div className="flex items-center justify-between gap-2">
         <Label htmlFor={baseId}>Available models</Label>
         {overridden && (
-          <Button type="button" variant="link" size="sm" className="h-auto px-0 text-[12px]" disabled={disabled} onClick={() => onChange([])}>
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto px-0 text-[12px]"
+            disabled={disabled}
+            onClick={() => {
+              onChange([]);
+            }}
+          >
             Reset to default
           </Button>
         )}
       </div>
-      <div id={baseId} role="group" aria-describedby={helpId} className="flex flex-wrap gap-x-4 gap-y-2">
+      <div
+        id={baseId}
+        role="group"
+        aria-describedby={helpId}
+        className="flex flex-wrap gap-x-4 gap-y-2"
+      >
         {known.map((model) => {
           const checkboxId = `${baseId}-${model}`;
           const checked = displayValue.has(model);
           return (
-            <label key={model} htmlFor={checkboxId} className={cn('flex items-center gap-2 text-sm', overridden ? 'text-foreground' : 'text-muted-foreground')}>
+            <label
+              key={model}
+              htmlFor={checkboxId}
+              className={cn(
+                'flex items-center gap-2 text-sm',
+                overridden ? 'text-foreground' : 'text-muted-foreground',
+              )}
+            >
               <Checkbox
                 id={checkboxId}
                 checked={checked}
@@ -812,13 +1313,25 @@ function ClaudeModelsField({ defaults, value, disabled, onChange }: { defaults: 
         })}
       </div>
       <div id={helpId} className="text-[12px] leading-[1.4] text-muted-foreground">
-        {overridden ? `Overridden. Default: ${defaults.models.join(', ') || 'none'}.` : `Using default (${defaults.models.join(', ') || 'none'}).`}
+        {overridden
+          ? `Overridden. Default: ${defaults.models.join(', ') || 'none'}.`
+          : `Using default (${defaults.models.join(', ') || 'none'}).`}
       </div>
     </div>
   );
 }
 
-function ClaudeMaxTokensField({ defaults, value, disabled, onChange }: { defaults: UIEnvironmentConfig['claudeDefaults']; value: number | undefined; disabled?: boolean; onChange: (value: number | undefined) => void }): React.ReactElement {
+function ClaudeMaxTokensField({
+  defaults,
+  value,
+  disabled,
+  onChange,
+}: {
+  defaults: UIEnvironmentConfig['claudeDefaults'];
+  value: number | undefined;
+  disabled?: boolean;
+  onChange: (value: number | undefined) => void;
+}): React.ReactElement {
   const id = 'environment-config-claude-maxtokens';
   const helpId = `${id}-help`;
   const overridden = value !== undefined;
@@ -832,7 +1345,16 @@ function ClaudeMaxTokensField({ defaults, value, disabled, onChange }: { default
       <div className="flex items-center justify-between gap-2">
         <Label htmlFor={id}>Max output tokens</Label>
         {overridden && (
-          <Button type="button" variant="link" size="sm" className="h-auto px-0 text-[12px]" disabled={disabled} onClick={() => onChange(undefined)}>
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto px-0 text-[12px]"
+            disabled={disabled}
+            onClick={() => {
+              onChange(undefined);
+            }}
+          >
             Reset to default
           </Button>
         )}
@@ -863,22 +1385,36 @@ function ClaudeMaxTokensField({ defaults, value, disabled, onChange }: { default
           onChange(Math.trunc(Number(next)));
         }}
       />
-      <div id={helpId} className={cn('text-[12px] leading-[1.4]', invalid ? 'text-destructive' : 'text-muted-foreground')}>
+      <div
+        id={helpId}
+        className={cn(
+          'text-[12px] leading-[1.4]',
+          invalid ? 'text-destructive' : 'text-muted-foreground',
+        )}
+      >
         {invalid
           ? `Enter an integer between ${defaults.minTokens} and ${defaults.maxTokens}.`
           : overridden
-          ? `Overridden. Default: ${defaults.maxOutputTokens}.`
-          : `Using default (${defaults.maxOutputTokens}).`}
+            ? `Overridden. Default: ${defaults.maxOutputTokens}.`
+            : `Using default (${defaults.maxOutputTokens}).`}
       </div>
     </div>
   );
 }
 
 function isClaudeOverridden(claude: UIEnvironmentConfig['claude']): boolean {
-  return claude.useMantle !== undefined || claude.useBedrock !== undefined || (claude.models?.length ?? 0) > 0 || claude.maxOutputTokens !== undefined;
+  return (
+    claude.useMantle !== undefined ||
+    claude.useBedrock !== undefined ||
+    (claude.models?.length ?? 0) > 0 ||
+    claude.maxOutputTokens !== undefined
+  );
 }
 
-function isValidClaudeTokens(text: string, defaults: UIEnvironmentConfig['claudeDefaults']): boolean {
+function isValidClaudeTokens(
+  text: string,
+  defaults: UIEnvironmentConfig['claudeDefaults'],
+): boolean {
   const trimmed = text.trim();
   if (!/^\d+$/.test(trimmed)) {
     return false;
@@ -887,12 +1423,25 @@ function isValidClaudeTokens(text: string, defaults: UIEnvironmentConfig['claude
   return Number.isFinite(value) && value >= defaults.minTokens && value <= defaults.maxTokens;
 }
 
-function CloudAliasSelect({ id, value, options, disabled, onChange }: { id: string; value: string; options: string[]; disabled?: boolean; onChange: (value: string) => void }): React.ReactElement {
+function CloudAliasSelect({
+  id,
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  options: string[];
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}): React.ReactElement {
   const normalizedValue = value.trim();
   const normalizedOptions = options.map((option) => option.trim()).filter(Boolean);
-  const selectOptions = normalizedValue && !normalizedOptions.includes(normalizedValue)
-    ? [normalizedValue, ...normalizedOptions]
-    : normalizedOptions;
+  const selectOptions =
+    normalizedValue && !normalizedOptions.includes(normalizedValue)
+      ? [normalizedValue, ...normalizedOptions]
+      : normalizedOptions;
   return (
     <SelectField
       id={id}
@@ -907,7 +1456,15 @@ function CloudAliasSelect({ id, value, options, disabled, onChange }: { id: stri
   );
 }
 
-function ReadonlyField({ id, label, value }: { id: string; label: string; value: string }): React.ReactElement {
+function ReadonlyField({
+  id,
+  label,
+  value,
+}: {
+  id: string;
+  label: string;
+  value: string;
+}): React.ReactElement {
   return (
     <div className="grid gap-2">
       <div id={id} className="text-sm font-medium leading-none">
@@ -923,7 +1480,11 @@ function ReadonlyField({ id, label, value }: { id: string; label: string; value:
   );
 }
 
-function PortStatusTable({ rows }: { rows: { service: string; port: number; status: UIPortStatus }[] }): React.ReactElement {
+function PortStatusTable({
+  rows,
+}: {
+  rows: { service: string; port: number; status: UIPortStatus }[];
+}): React.ReactElement {
   return (
     <div className="grid gap-2">
       <div className="text-sm font-medium leading-none">Local ports</div>
@@ -934,8 +1495,13 @@ function PortStatusTable({ rows }: { rows: { service: string; port: number; stat
           <div>Status</div>
         </div>
         {rows.map((row) => (
-          <div key={row.service} className="grid min-h-8 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-3 py-1 last:border-b-0">
-            <div className="font-mono text-xs text-foreground">{row.port > 0 ? row.port : 'Not configured'}</div>
+          <div
+            key={row.service}
+            className="grid min-h-8 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-3 py-1 last:border-b-0"
+          >
+            <div className="font-mono text-xs text-foreground">
+              {row.port > 0 ? row.port : 'Not configured'}
+            </div>
             <div className="text-foreground">{row.service}</div>
             <PortAvailability status={row.status} />
           </div>
@@ -955,7 +1521,10 @@ function PortAvailability({ status }: { status: UIPortStatus }): React.ReactElem
         available ? 'text-green-700 dark:text-green-400' : 'text-destructive',
       )}
     >
-      <span className={cn('size-2 rounded-full', available ? 'bg-green-600' : 'bg-destructive')} aria-hidden="true" />
+      <span
+        className={cn('size-2 rounded-full', available ? 'bg-green-600' : 'bg-destructive')}
+        aria-hidden="true"
+      />
       {label}
     </span>
   );
@@ -973,10 +1542,29 @@ function parseIdleTrafficBytes(value: string): number {
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 0;
 }
 
-function CheckboxField({ id, label, checked, disabled, onChange }: { id: string; label: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }): React.ReactElement {
+function CheckboxField({
+  id,
+  label,
+  checked,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}): React.ReactElement {
   return (
     <div className="flex items-center gap-2">
-      <Checkbox id={id} checked={checked} disabled={disabled} onCheckedChange={(value) => onChange(value === true)} />
+      <Checkbox
+        id={id}
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={(value) => {
+          onChange(value === true);
+        }}
+      />
       <Label htmlFor={id} className="text-sm font-normal">
         {label}
       </Label>

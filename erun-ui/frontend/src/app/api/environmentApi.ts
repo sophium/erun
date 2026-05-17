@@ -1,3 +1,10 @@
+import type {
+  UIEnvironmentConfig,
+  UIRuntimeResourceStatus,
+  UISelection,
+  UIVersionSuggestion,
+} from '@/types';
+
 import {
   ChooseWorkspaceSyncLocalFolder,
   DeleteEnvironment,
@@ -8,12 +15,6 @@ import {
 } from '../../../wailsjs/go/main/App';
 import { wailsApi } from './wailsApi';
 import { wailsQueryFn } from './wailsBaseQuery';
-import type {
-  UIEnvironmentConfig,
-  UIRuntimeResourceStatus,
-  UISelection,
-  UIVersionSuggestion,
-} from '@/types';
 
 interface SaveEnvArgs {
   selection: UISelection;
@@ -39,17 +40,16 @@ interface RuntimeResourceArgs {
 export const environmentApi = wailsApi.injectEndpoints({
   endpoints: (builder) => ({
     getEnvironmentConfig: builder.query<UIEnvironmentConfig, UISelection>({
-      queryFn: wailsQueryFn<UISelection, UIEnvironmentConfig>(
-        (selection) => LoadEnvironmentConfig(selection) as Promise<UIEnvironmentConfig>,
+      queryFn: wailsQueryFn<UISelection, UIEnvironmentConfig>((selection) =>
+        LoadEnvironmentConfig(selection),
       ),
       providesTags: (_result, _error, selection) => [
         { type: 'EnvironmentConfig', id: `${selection.tenant}/${selection.environment}` },
       ],
     }),
     saveEnvironmentConfig: builder.mutation<UIEnvironmentConfig, SaveEnvArgs>({
-      queryFn: wailsQueryFn<SaveEnvArgs, UIEnvironmentConfig>(
-        ({ selection, config }) =>
-          SaveEnvironmentConfig(selection, config as never) as Promise<UIEnvironmentConfig>,
+      queryFn: wailsQueryFn<SaveEnvArgs, UIEnvironmentConfig>(({ selection, config }) =>
+        SaveEnvironmentConfig(selection, config as never),
       ),
       invalidatesTags: (_result, _error, { selection }) => [
         { type: 'EnvironmentConfig', id: `${selection.tenant}/${selection.environment}` },
@@ -68,16 +68,14 @@ export const environmentApi = wailsApi.injectEndpoints({
       ),
     }),
     getVersionSuggestions: builder.query<UIVersionSuggestion[], UISelection>({
-      queryFn: wailsQueryFn<UISelection, UIVersionSuggestion[]>(
-        (selection) =>
-          LoadVersionSuggestions(selection) as Promise<UIVersionSuggestion[]>,
+      queryFn: wailsQueryFn<UISelection, UIVersionSuggestion[]>((selection) =>
+        LoadVersionSuggestions(selection),
       ),
       providesTags: ['VersionSuggestions'],
     }),
     getRuntimeResourceStatus: builder.query<UIRuntimeResourceStatus, RuntimeResourceArgs>({
-      queryFn: wailsQueryFn<RuntimeResourceArgs, UIRuntimeResourceStatus>(
-        (args) =>
-          LoadRuntimeResourceStatus(args) as Promise<UIRuntimeResourceStatus>,
+      queryFn: wailsQueryFn<RuntimeResourceArgs, UIRuntimeResourceStatus>((args) =>
+        LoadRuntimeResourceStatus(args),
       ),
       providesTags: ['RuntimeResourceStatus'],
     }),

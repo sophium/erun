@@ -1,3 +1,11 @@
+import type { UISelection } from '@/types';
+
+import type {
+  DebugOpenFilter,
+  DebugSessionMode,
+  TerminalExitSelections,
+  TerminalWriteData,
+} from './model';
 import {
   clearDebugFilter as clearDebugFilterAction,
   clearSessionDebug as clearSessionDebugAction,
@@ -13,9 +21,7 @@ import {
   trackSSHDInitSession as trackSSHDInitSessionAction,
 } from './slices/sessionsSlice';
 import { store } from './store';
-import type { DebugOpenFilter, DebugSessionMode, TerminalExitSelections, TerminalWriteData } from './model';
 import { selectionKey } from './versionSuggestions';
-import type { UISelection } from '@/types';
 
 // TerminalSessionRegistry is a thin facade. Per-session *metadata* (which
 // sessions are open/sshd/doctor/cloud-init, exit reasons/outputs, debug

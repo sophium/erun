@@ -1,7 +1,8 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
-import type { ReconnectState } from '../state';
 import type { DiffResult } from '@/types';
+
+import type { ReconnectState } from '../state';
 
 export interface ReviewState {
   diff: DiffResult | null;

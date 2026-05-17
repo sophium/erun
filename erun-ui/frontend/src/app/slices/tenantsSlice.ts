@@ -30,9 +30,5 @@ export const tenantsSlice = createSlice({
   },
 });
 
-export const {
-  setTenants,
-  setCloudProviders,
-  setVersionSuggestions,
-} = tenantsSlice.actions;
+export const { setTenants, setCloudProviders, setVersionSuggestions } = tenantsSlice.actions;
 export default tenantsSlice.reducer;

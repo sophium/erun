@@ -134,6 +134,15 @@ if [ ! -x "$PLAYWRIGHT_BIN" ]; then
 	exit 1
 fi
 
+# Gate the suite on the same checks CI would run. Skip with
+# ERUN_SKIP_LINT=1 when iterating locally.
+if [ "${ERUN_SKIP_LINT:-0}" != "1" ]; then
+	printf '>> playwright: typecheck + lint + format:check\n' >&2
+	"$YARN_BIN" typecheck
+	"$YARN_BIN" lint
+	"$YARN_BIN" format:check
+fi
+
 # `playwright install chromium` is idempotent — it checks whether the
 # expected revision is already on disk and skips the download when it is.
 printf '>> playwright: ensuring chromium\n' >&2

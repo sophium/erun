@@ -1,19 +1,46 @@
 import { FitAddon } from '@xterm/addon-fit';
-import { Terminal, type IDisposable } from '@xterm/xterm';
+import { type IDisposable, Terminal } from '@xterm/xterm';
 
-import { sessionApi } from './api/sessionApi';
-import { boot, reloadStateAfterEnvironmentChange } from './bootThunks';
-import { refreshIdleStatus } from './idleThunks';
-import { appendDebugOutput as appendDebugOutputThunk } from './debugThunks';
-import { setSelectedDiffPath } from './slices/reviewSlice';
-import { store } from './store';
-import { thunkExtra } from './thunkExtra';
-import { TerminalSessionRegistry } from './TerminalSessionRegistry';
+import type { TerminalExitPayload, TerminalOutputPayload } from '@/types';
+
 import { ResizeSession, SendSessionInput } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
-import { fileToBase64, decodeBase64Bytes, isTerminalPasteTarget, pastedImageFiles } from './clipboard';
+import { sessionApi } from './api/sessionApi';
+import { boot, reloadStateAfterEnvironmentChange } from './bootThunks';
+import {
+  decodeBase64Bytes,
+  fileToBase64,
+  isTerminalPasteTarget,
+  pastedImageFiles,
+} from './clipboard';
+import { appendDebugOutput as appendDebugOutputThunk } from './debugThunks';
 import { readError } from './errors';
+import { refreshIdleStatus } from './idleThunks';
+import type {
+  AppStatusPayload,
+  EnvironmentInitializedPayload,
+  MountElements,
+  TerminalDataDisposable,
+  TerminalWriteData,
+} from './model';
 import { showTerminalMessage } from './notificationThunks';
+import { visibleDiffPath } from './reviewDiffNavigation';
+import { setSelectedDiffPath } from './slices/reviewSlice';
+import {
+  computeMaxReviewWidth,
+  MAX_DEBUG_HEIGHT,
+  MAX_FILES_WIDTH,
+  MIN_DEBUG_HEIGHT,
+  MIN_FILES_WIDTH,
+  MIN_REVIEW_WIDTH,
+} from './state';
+import { clamp } from './storage';
+import { store } from './store';
+import { filterTerminalDisplayData } from './terminalBuffers';
+import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses';
+import { TerminalSessionRegistry } from './TerminalSessionRegistry';
+import { decodeDebugOutput } from './terminalStatus';
+import { thunkExtra } from './thunkExtra';
 import {
   handleAppStatus,
   handleEnvironmentInitFailed,
@@ -23,31 +50,6 @@ import {
   hideTerminalMessageIfActive,
   updateOpenStatusFromOutput,
 } from './wailsEventThunks';
-import { visibleDiffPath } from './reviewDiffNavigation';
-import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses';
-import type {
-  AppStatusPayload,
-  EnvironmentInitializedPayload,
-  MountElements,
-  TerminalDataDisposable,
-  TerminalWriteData,
-} from './model';
-import {
-  MAX_DEBUG_HEIGHT,
-  MAX_FILES_WIDTH,
-  MIN_DEBUG_HEIGHT,
-  MIN_FILES_WIDTH,
-  MIN_REVIEW_WIDTH,
-  computeMaxReviewWidth,
-} from './state';
-
-import { clamp } from './storage';
-import { decodeDebugOutput } from './terminalStatus';
-import { filterTerminalDisplayData } from './terminalBuffers';
-import type {
-  TerminalExitPayload,
-  TerminalOutputPayload,
-} from '@/types';
 
 const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 
@@ -120,7 +122,8 @@ export class TerminalController {
     this.terminal = new Terminal({
       allowProposedApi: false,
       cursorBlink: true,
-      fontFamily: 'ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
+      fontFamily:
+        'ui-monospace, SFMono-Regular, SF Mono, Menlo, Monaco, Consolas, Liberation Mono, monospace',
       fontSize: 13,
       lineHeight: 1.18,
       theme: {
@@ -135,7 +138,9 @@ export class TerminalController {
     this.terminalQueryResponseDisposables = registerTerminalQueryResponseHandlers(
       this.terminal,
       (data) => SendSessionInput(store.getState().terminal.sessionId, data),
-      (error) => store.dispatch(showTerminalMessage(readError(error))),
+      (error) => {
+        store.dispatch(showTerminalMessage(readError(error)));
+      },
     );
     this.terminalDataDisposable = this.terminal.onData((data) => {
       SendSessionInput(store.getState().terminal.sessionId, data).catch((error: unknown) => {
@@ -168,12 +173,18 @@ export class TerminalController {
     this.reconnectLineOff = EventsOn('mcp-reconnect-line', (line: string) => {
       store.dispatch(handleReconnectLine(line));
     });
-    this.environmentInitializedOff = EventsOn('environment-initialized', (payload: EnvironmentInitializedPayload) => {
-      void store.dispatch(handleEnvironmentInitialized(payload));
-    });
-    this.environmentInitFailedOff = EventsOn('environment-init-failed', (payload: EnvironmentInitializedPayload) => {
-      store.dispatch(handleEnvironmentInitFailed(payload));
-    });
+    this.environmentInitializedOff = EventsOn(
+      'environment-initialized',
+      (payload: EnvironmentInitializedPayload) => {
+        void store.dispatch(handleEnvironmentInitialized(payload));
+      },
+    );
+    this.environmentInitFailedOff = EventsOn(
+      'environment-init-failed',
+      (payload: EnvironmentInitializedPayload) => {
+        store.dispatch(handleEnvironmentInitFailed(payload));
+      },
+    );
     this.environmentsChangedOff = EventsOn('environments-changed', () => {
       void store.dispatch(reloadStateAfterEnvironmentChange());
     });
@@ -184,7 +195,9 @@ export class TerminalController {
     }
     this.scheduleIdleStatusPoll(0);
 
-    return () => this.unmountTerminal();
+    return () => {
+      this.unmountTerminal();
+    };
   }
 
   private unmountTerminal(): void {
@@ -272,8 +285,12 @@ export class TerminalController {
     queueTerminalResize: () => void;
   } {
     return {
-      applyLayoutVars: () => this.applyLayoutVars(),
-      focusTerminalSoon: () => this.focusTerminalSoon(),
+      applyLayoutVars: () => {
+        this.applyLayoutVars();
+      },
+      focusTerminalSoon: () => {
+        this.focusTerminalSoon();
+      },
       queueTerminalResize: this.queueTerminalResize,
     };
   }
@@ -281,7 +298,10 @@ export class TerminalController {
   applyLayoutVars(): void {
     const root = document.documentElement;
     const layout = store.getState().layout;
-    root.style.setProperty('--sidebar-width', `${layout.sidebarHidden ? 0 : layout.sidebarWidth}px`);
+    root.style.setProperty(
+      '--sidebar-width',
+      `${layout.sidebarHidden ? 0 : layout.sidebarWidth}px`,
+    );
     root.style.setProperty('--review-width', `${this.clampedReviewWidth()}px`);
     root.style.setProperty('--files-width', `${this.clampedFilesWidth()}px`);
     root.style.setProperty('--debug-height', `${this.clampedDebugHeight()}px`);
@@ -298,13 +318,21 @@ export class TerminalController {
     const layout = store.getState().layout;
     const reviewWidth = this._reviewView?.getBoundingClientRect().width || layout.reviewWidth;
     const maxFilesForReview = reviewWidth > 0 ? reviewWidth - 260 : MAX_FILES_WIDTH;
-    return clamp(layout.filesWidth, MIN_FILES_WIDTH, Math.max(MIN_FILES_WIDTH, Math.min(MAX_FILES_WIDTH, maxFilesForReview)));
+    return clamp(
+      layout.filesWidth,
+      MIN_FILES_WIDTH,
+      Math.max(MIN_FILES_WIDTH, Math.min(MAX_FILES_WIDTH, maxFilesForReview)),
+    );
   }
 
   private clampedDebugHeight(): number {
     const paneHeight = this._terminalPane?.getBoundingClientRect().height || 0;
     const maxDebugForPane = paneHeight > 0 ? paneHeight - 120 : MAX_DEBUG_HEIGHT;
-    return clamp(store.getState().layout.debugHeight, MIN_DEBUG_HEIGHT, Math.max(MIN_DEBUG_HEIGHT, Math.min(MAX_DEBUG_HEIGHT, maxDebugForPane)));
+    return clamp(
+      store.getState().layout.debugHeight,
+      MIN_DEBUG_HEIGHT,
+      Math.max(MIN_DEBUG_HEIGHT, Math.min(MAX_DEBUG_HEIGHT, maxDebugForPane)),
+    );
   }
 
   queueTerminalResize = (): void => {
@@ -314,8 +342,7 @@ export class TerminalController {
       this.fitAddon?.fit();
       const sessionId = store.getState().terminal.sessionId;
       if (sessionId > 0 && this.terminal) {
-        ResizeSession(sessionId, this.terminal.cols, this.terminal.rows).catch(() => {
-        });
+        ResizeSession(sessionId, this.terminal.cols, this.terminal.rows).catch(() => {});
       }
     }, 40);
   };
@@ -350,7 +377,10 @@ export class TerminalController {
     this.reviewDiffRefreshTimer = 0;
   }
 
-  scheduleReviewDiffRefreshTimer(callback: () => void, delay: number = REVIEW_DIFF_REFRESH_INTERVAL_MS): void {
+  scheduleReviewDiffRefreshTimer(
+    callback: () => void,
+    delay: number = REVIEW_DIFF_REFRESH_INTERVAL_MS,
+  ): void {
     window.clearTimeout(this.reviewDiffRefreshTimer);
     this.reviewDiffRefreshTimer = window.setTimeout(callback, delay);
   }
@@ -400,5 +430,4 @@ export class TerminalController {
       this.terminal?.write(chunk);
     }
   }
-
 }

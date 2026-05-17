@@ -1,33 +1,28 @@
+import type { UISelection, UIVersionSuggestion } from '@/types';
+
 import { environmentApi } from './api/environmentApi';
-import { readError } from './errors';
+import { refreshKubernetesContexts } from './dialogContextsThunks';
 import {
   normalizedEnvironmentDialogValues,
   rememberEnvironmentDialogSelection,
   validEnvironmentDialogValues,
 } from './environmentDialogState';
+import { readError } from './errors';
 import { showTerminalMessage } from './notificationThunks';
 import { runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
-import { refreshKubernetesContexts } from './dialogContextsThunks';
 import { startDeploySelection, startInitSelection } from './sessionThunks';
-import {
-  patchEnvironmentDialog,
-  setEnvironmentDialog,
-} from './slices/environmentDialogSlice';
+import { patchEnvironmentDialog, setEnvironmentDialog } from './slices/environmentDialogSlice';
 import {
   bumpEnvironmentDialogResourceStatus,
   bumpEnvironmentDialogVersion,
 } from './slices/requestCountersSlice';
 import { setSelected } from './slices/selectionSlice';
 import { setVersionSuggestions } from './slices/tenantsSlice';
-import {
-  defaultEnvironmentDialog,
-  type EnvironmentDialogState,
-} from './state';
+import { defaultEnvironmentDialog, type EnvironmentDialogState } from './state';
 import { loadSavedPastContainerRegistries } from './storage';
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
 import { normalizeDialogValue, normalizeVersionSuggestions } from './versionSuggestions';
-import type { UISelection, UIVersionSuggestion } from '@/types';
 
 // environmentDialogThunks own the open/edit/submit lifecycle for the
 // "create or deploy environment" modal. The version-suggestion debounce
@@ -41,27 +36,29 @@ export const openInitializeDialog = (): AppThunk => (dispatch, getState) => {
   const state = getState();
   const tenantDefault = state.selection.selected?.tenant || state.tenants.tenants[0]?.name || '';
   const containerRegistryDefault = loadSavedPastContainerRegistries()[0] || '';
-  dispatch(setEnvironmentDialog({
-    open: true,
-    actionMode: 'init',
-    tenant: tenantDefault,
-    environment: '',
-    version: state.tenants.versionSuggestions[0]?.version || '',
-    kubernetesContext: '',
-    kubernetesContexts: [],
-    kubernetesContextsLoading: true,
-    resourceStatus: null,
-    resourceStatusLoading: false,
-    runtimePod: defaultEnvironmentDialog().runtimePod,
-    containerRegistry: containerRegistryDefault,
-    noGit: false,
-    bootstrap: false,
-    setDefaultTenant: true,
-    versionImage: state.tenants.versionSuggestions[0]?.image || '',
-    choicesOpen: false,
-    busy: false,
-    error: '',
-  }));
+  dispatch(
+    setEnvironmentDialog({
+      open: true,
+      actionMode: 'init',
+      tenant: tenantDefault,
+      environment: '',
+      version: state.tenants.versionSuggestions[0]?.version || '',
+      kubernetesContext: '',
+      kubernetesContexts: [],
+      kubernetesContextsLoading: true,
+      resourceStatus: null,
+      resourceStatusLoading: false,
+      runtimePod: defaultEnvironmentDialog().runtimePod,
+      containerRegistry: containerRegistryDefault,
+      noGit: false,
+      bootstrap: false,
+      setDefaultTenant: true,
+      versionImage: state.tenants.versionSuggestions[0]?.image || '',
+      choicesOpen: false,
+      busy: false,
+      error: '',
+    }),
+  );
   void dispatch(refreshKubernetesContexts());
   void dispatch(refreshDialogVersionSuggestions(true));
 };
@@ -75,55 +72,63 @@ export const closeEnvironmentDialog = (): AppThunk => (dispatch, getState, extra
   controller.focusTerminalSoon();
 };
 
-export const updateEnvironmentDialog = (
-  values: Partial<EnvironmentDialogState>,
-): AppThunk => (dispatch, getState) => {
-  if (getState().environmentDialog.busy) {
-    return;
-  }
-  const versionReset = values.version !== undefined;
-  dispatch(patchEnvironmentDialog({
-    ...values,
-    error: values.error ?? '',
-    ...(versionReset ? { versionImage: '', choicesOpen: false } : {}),
-  }));
-  if (values.tenant !== undefined) {
-    scheduleDialogVersionSuggestionRefresh(true, dispatch);
-  }
-  if (values.kubernetesContext !== undefined) {
-    void dispatch(refreshEnvironmentRuntimeResources(values.kubernetesContext));
-  }
-};
+export const updateEnvironmentDialog =
+  (values: Partial<EnvironmentDialogState>): AppThunk =>
+  (dispatch, getState) => {
+    if (getState().environmentDialog.busy) {
+      return;
+    }
+    const versionReset = values.version !== undefined;
+    dispatch(
+      patchEnvironmentDialog({
+        ...values,
+        error: values.error ?? '',
+        ...(versionReset ? { versionImage: '', choicesOpen: false } : {}),
+      }),
+    );
+    if (values.tenant !== undefined) {
+      scheduleDialogVersionSuggestionRefresh(true, dispatch);
+    }
+    if (values.kubernetesContext !== undefined) {
+      void dispatch(refreshEnvironmentRuntimeResources(values.kubernetesContext));
+    }
+  };
 
 export const toggleEnvironmentVersionChoices = (): AppThunk => (dispatch, getState) => {
   dispatch(setEnvironmentVersionChoicesOpen(!getState().environmentDialog.choicesOpen));
 };
 
-export const setEnvironmentVersionChoicesOpen = (open: boolean): AppThunk =>
+export const setEnvironmentVersionChoicesOpen =
+  (open: boolean): AppThunk =>
   (dispatch, getState) => {
     const state = getState();
     if (state.environmentDialog.busy) {
       return;
     }
-    dispatch(patchEnvironmentDialog({
-      choicesOpen: open && state.tenants.versionSuggestions.length > 0,
-    }));
+    dispatch(
+      patchEnvironmentDialog({
+        choicesOpen: open && state.tenants.versionSuggestions.length > 0,
+      }),
+    );
   };
 
-export const selectEnvironmentVersionSuggestion = (
-  suggestion: UIVersionSuggestion | undefined,
-): AppThunk => (dispatch, getState) => {
-  if (getState().environmentDialog.busy) {
-    return;
-  }
-  dispatch(patchEnvironmentDialog({
-    version: suggestion?.version || '',
-    versionImage: suggestion?.image || '',
-    choicesOpen: false,
-  }));
-};
+export const selectEnvironmentVersionSuggestion =
+  (suggestion: UIVersionSuggestion | undefined): AppThunk =>
+  (dispatch, getState) => {
+    if (getState().environmentDialog.busy) {
+      return;
+    }
+    dispatch(
+      patchEnvironmentDialog({
+        version: suggestion?.version || '',
+        versionImage: suggestion?.image || '',
+        choicesOpen: false,
+      }),
+    );
+  };
 
-export const submitEnvironmentDialog = (form: HTMLFormElement): AppThunk<Promise<void>> =>
+export const submitEnvironmentDialog =
+  (form: HTMLFormElement): AppThunk<Promise<void>> =>
   async (dispatch, getState, extra) => {
     const controller = requireController(extra);
     const state = getState();
@@ -137,7 +142,10 @@ export const submitEnvironmentDialog = (form: HTMLFormElement): AppThunk<Promise
       form.reportValidity();
       return;
     }
-    const resourceError = dialog.actionMode === 'init' ? runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus) : '';
+    const resourceError =
+      dialog.actionMode === 'init'
+        ? runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus)
+        : '';
     if (resourceError) {
       dispatch(patchEnvironmentDialog({ error: resourceError }));
       return;
@@ -157,10 +165,12 @@ export const submitEnvironmentDialog = (form: HTMLFormElement): AppThunk<Promise
     } catch (error) {
       const message = readError(error);
       dispatch(setSelected(previousSelected));
-      dispatch(patchEnvironmentDialog({
-        busy: false,
-        error: message,
-      }));
+      dispatch(
+        patchEnvironmentDialog({
+          busy: false,
+          error: message,
+        }),
+      );
       dispatch(showTerminalMessage(message));
     }
   };
@@ -207,17 +217,19 @@ function beginEnvironmentDialogSubmit(
   dialog: EnvironmentDialogState,
   selection: UISelection,
 ): void {
-  dispatch(patchEnvironmentDialog({
-    tenant: selection.tenant,
-    environment: selection.environment,
-    version: selection.version || '',
-    kubernetesContext: selection.kubernetesContext || '',
-    runtimePod: dialog.runtimePod,
-    containerRegistry: selection.containerRegistry || '',
-    busy: true,
-    error: '',
-    choicesOpen: false,
-  }));
+  dispatch(
+    patchEnvironmentDialog({
+      tenant: selection.tenant,
+      environment: selection.environment,
+      version: selection.version || '',
+      kubernetesContext: selection.kubernetesContext || '',
+      runtimePod: dialog.runtimePod,
+      containerRegistry: selection.containerRegistry || '',
+      busy: true,
+      error: '',
+      choicesOpen: false,
+    }),
+  );
 }
 
 function scheduleDialogVersionSuggestionRefresh(
@@ -232,7 +244,8 @@ function scheduleDialogVersionSuggestionRefresh(
   }, 250);
 }
 
-export const refreshDialogVersionSuggestions = (selectDefault: boolean): AppThunk<Promise<void>> =>
+export const refreshDialogVersionSuggestions =
+  (selectDefault: boolean): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
     dispatch(bumpEnvironmentDialogVersion());
     const request = getState().requestCounters.environmentDialogVersion;
@@ -246,7 +259,10 @@ export const refreshDialogVersionSuggestions = (selectDefault: boolean): AppThun
       environmentApi.endpoints.getVersionSuggestions.initiate(selection, { forceRefetch: true }),
     ).unwrap();
     const suggestions = normalizeVersionSuggestions(raw);
-    if (request !== getState().requestCounters.environmentDialogVersion || !getState().environmentDialog.open) {
+    if (
+      request !== getState().requestCounters.environmentDialogVersion ||
+      !getState().environmentDialog.open
+    ) {
       return;
     }
     dispatch(setVersionSuggestions(suggestions));
@@ -256,23 +272,22 @@ export const refreshDialogVersionSuggestions = (selectDefault: boolean): AppThun
     }
   };
 
-const refreshEnvironmentRuntimeResources = (kubernetesContext: string): AppThunk<Promise<void>> =>
+const refreshEnvironmentRuntimeResources =
+  (kubernetesContext: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
     dispatch(bumpEnvironmentDialogResourceStatus());
     const request = getState().requestCounters.environmentDialogResourceStatus;
     const context = normalizeDialogValue(kubernetesContext);
     const dialog = getState().environmentDialog;
-    if (
-      !dialog.open ||
-      dialog.actionMode !== 'init' ||
-      !context
-    ) {
+    if (!dialog.open || dialog.actionMode !== 'init' || !context) {
       return;
     }
-    dispatch(patchEnvironmentDialog({
-      resourceStatusLoading: true,
-      resourceStatus: null,
-    }));
+    dispatch(
+      patchEnvironmentDialog({
+        resourceStatusLoading: true,
+        resourceStatus: null,
+      }),
+    );
     try {
       const current = getState().environmentDialog;
       const status = await dispatch(
@@ -285,26 +300,36 @@ const refreshEnvironmentRuntimeResources = (kubernetesContext: string): AppThunk
           { forceRefetch: true },
         ),
       ).unwrap();
-      if (request !== getState().requestCounters.environmentDialogResourceStatus || !getState().environmentDialog.open) {
+      if (
+        request !== getState().requestCounters.environmentDialogResourceStatus ||
+        !getState().environmentDialog.open
+      ) {
         return;
       }
-      dispatch(patchEnvironmentDialog({
-        resourceStatus: status,
-        resourceStatusLoading: false,
-      }));
+      dispatch(
+        patchEnvironmentDialog({
+          resourceStatus: status,
+          resourceStatusLoading: false,
+        }),
+      );
     } catch (error) {
-      if (request !== getState().requestCounters.environmentDialogResourceStatus || !getState().environmentDialog.open) {
+      if (
+        request !== getState().requestCounters.environmentDialogResourceStatus ||
+        !getState().environmentDialog.open
+      ) {
         return;
       }
-      dispatch(patchEnvironmentDialog({
-        resourceStatus: {
-          kubernetesContext: context,
-          available: false,
-          message: readError(error),
-          cpu: { total: 0, used: 0, free: 0, unit: 'cores', formatted: '' },
-          memory: { total: 0, used: 0, free: 0, unit: 'GiB', formatted: '' },
-        },
-        resourceStatusLoading: false,
-      }));
+      dispatch(
+        patchEnvironmentDialog({
+          resourceStatus: {
+            kubernetesContext: context,
+            available: false,
+            message: readError(error),
+            cpu: { total: 0, used: 0, free: 0, unit: 'cores', formatted: '' },
+            memory: { total: 0, used: 0, free: 0, unit: 'GiB', formatted: '' },
+          },
+          resourceStatusLoading: false,
+        }),
+      );
     }
   };

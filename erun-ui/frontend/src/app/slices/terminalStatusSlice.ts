@@ -1,7 +1,8 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
-import type { TerminalStatusAction, TerminalStatusKind } from '../state';
 import type { UISelection } from '@/types';
+
+import type { TerminalStatusAction, TerminalStatusKind } from '../state';
 
 export interface TerminalStatusState {
   terminalMessage: string;
