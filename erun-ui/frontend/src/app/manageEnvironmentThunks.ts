@@ -1,16 +1,23 @@
 import { StartDoctorSession, StartSSHDInitSession } from '../../wailsjs/go/main/App';
 import { cloudApi } from './api/cloudApi';
 import { environmentApi } from './api/environmentApi';
+import { applyPendingDebugHeader, setPendingDebugHeader, syncDebugDisplay } from './debugThunks';
 import { readError } from './errors';
 import type { HiddenSessionMode } from './model';
 import { showTerminalMessage } from './notificationThunks';
 import { runtimePodConfigToDisplay, runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
+import { selectManageRuntimeImage } from './selectors';
 import {
   patchManageDialog,
   setManageDialog,
 } from './slices/manageDialogSlice';
 import { bumpManageDialogVersion } from './slices/requestCountersSlice';
 import { setSelected } from './slices/selectionSlice';
+import {
+  registerDebugSession,
+  trackDoctorSession,
+  trackSSHDInitSession,
+} from './slices/sessionsSlice';
 import { setSessionId, setDebugOutput } from './slices/terminalSlice';
 import { setVersionSuggestions } from './slices/tenantsSlice';
 import {
@@ -348,7 +355,7 @@ export const submitManageDeploy = (): AppThunk<Promise<void>> => async (dispatch
   await controller.startDeploySelection({
     ...selection,
     version,
-    runtimeImage: version ? controller.resolveManageRuntimeImage(version) : '',
+    runtimeImage: version ? selectManageRuntimeImage(getState(), version) : '',
   });
 };
 
@@ -448,7 +455,7 @@ const startHiddenSession = (
   dispatch(setSelected(selection));
   dispatch(setManageDialog(defaultManageDialog()));
   if (debugOpen) {
-    controller.setPendingDebugHeader(`$ ${formatDebugCommand(runSelection, mode)}\n`);
+    dispatch(setPendingDebugHeader(`$ ${formatDebugCommand(runSelection, mode)}\n`));
   }
   dispatch(setTerminalCopyOutput(''));
   dispatch(setTerminalCopyStatus(''));
@@ -460,28 +467,27 @@ const startHiddenSession = (
     await controller.activateLocalAfterCommand(selection, result);
     return;
   }
-  trackHiddenSession(controller, mode, result.sessionId, runSelection);
-  controller.sessions.registerDebugSession(result.sessionId, runSelection, 'hidden');
-  controller.applyPendingDebugHeader(result.sessionId);
+  dispatch(trackHiddenSession(mode, result.sessionId, runSelection));
+  dispatch(registerDebugSession({ sessionId: result.sessionId, selection: runSelection, mode: 'hidden' }));
+  dispatch(applyPendingDebugHeader(result.sessionId));
   dispatch(setSessionId(result.sessionId));
-  controller.syncDebugDisplay();
+  dispatch(syncDebugDisplay());
   controller.resetTerminal();
   controller.focusTerminalSoon();
   controller.queueTerminalResize();
 };
 
-function trackHiddenSession(
-  controller: NonNullable<ReturnType<typeof requireController>>,
+const trackHiddenSession = (
   mode: HiddenSessionMode,
   sessionId: number,
   selection: UISelection,
-): void {
+): AppThunk => (dispatch) => {
   if (mode === 'sshd-init') {
-    controller.sessions.trackSSHDInitSession(sessionId, selection);
+    dispatch(trackSSHDInitSession({ sessionId, selection }));
     return;
   }
-  controller.sessions.trackDoctorSession(sessionId, selection);
-}
+  dispatch(trackDoctorSession({ sessionId, selection }));
+};
 
 const updateManageCloudContextPower = (
   name: string,

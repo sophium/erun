@@ -3,6 +3,7 @@ import {
   StartSession,
 } from '../../wailsjs/go/main/App';
 import { sessionApi } from './api/sessionApi';
+import { appendDebugOutput, syncDebugDisplay } from './debugThunks';
 import { readError } from './errors';
 import {
   dismissNotification,
@@ -12,6 +13,7 @@ import {
   showTerminalFailure,
   showTerminalMessage,
 } from './notificationThunks';
+import { clearSessionDebug, setSessionDebug } from './slices/sessionsSlice';
 import { setSelected } from './slices/selectionSlice';
 import { setDebugOutput, setSessionId } from './slices/terminalSlice';
 import {
@@ -19,6 +21,7 @@ import {
   setTerminalCopyStatus,
 } from './slices/terminalStatusSlice';
 import type { AppThunk } from './store';
+import { rememberSelectedTab, removeTab } from './tabsThunks';
 import {
   debugOutputBlock,
   formatIDECommand,
@@ -75,11 +78,12 @@ export const selectTerminalTab = (sessionId: number): AppThunk =>
       return;
     }
     dispatch(setSessionId(sessionId));
-    controller.rememberSelectedTabForCurrentEnv(sessionId);
-    controller.syncDebugDisplay();
-    const exitReason = controller.sessions.exitReason(sessionId);
+    dispatch(rememberSelectedTab(sessionId));
+    dispatch(syncDebugDisplay());
+    const state = getState();
+    const exitReason = state.sessions.exitReasons[sessionId] || '';
     if (exitReason) {
-      dispatch(setTerminalCopyOutput(controller.sessions.exitOutput(sessionId)));
+      dispatch(setTerminalCopyOutput(state.sessions.exitOutputs[sessionId] || ''));
       dispatch(setTerminalCopyStatus(''));
       dispatch(showTerminalMessage(exitReason));
     } else {
@@ -90,8 +94,7 @@ export const selectTerminalTab = (sessionId: number): AppThunk =>
   };
 
 export const closeTerminalTab = (sessionId: number): AppThunk<Promise<void>> =>
-  async (dispatch, getState, extra) => {
-    const controller = requireController(extra);
+  async (dispatch, getState) => {
     if (sessionId <= 0) {
       return;
     }
@@ -113,8 +116,8 @@ export const closeTerminalTab = (sessionId: number): AppThunk<Promise<void>> =>
       dispatch(showTerminalMessage(readError(error)));
       return;
     }
-    const remaining = controller.removeTab(key, sessionId);
-    controller.sessions.clearSessionDebug(sessionId);
+    const remaining = dispatch(removeTab(key, sessionId));
+    dispatch(clearSessionDebug(sessionId));
     if (getState().terminal.sessionId === sessionId) {
       const next = remaining[remaining.length - 1];
       if (next) {
@@ -127,8 +130,7 @@ export const closeTerminalTab = (sessionId: number): AppThunk<Promise<void>> =>
   };
 
 export const openIDE = (selection: UISelection | null, ide: IDEKind): AppThunk<Promise<void>> =>
-  async (dispatch, getState, extra) => {
-    const controller = requireController(extra);
+  async (dispatch, getState) => {
     if (!selection) {
       dispatch(showTerminalMessage('Choose an environment from the left pane.'));
       return;
@@ -139,8 +141,8 @@ export const openIDE = (selection: UISelection | null, ide: IDEKind): AppThunk<P
     dispatch(setSelected(selection));
     if (state.layout.debugOpen) {
       const header = `$ ${formatIDECommand(runSelection, ide)}\n`;
-      controller.sessions.setSessionDebug(getState().terminal.sessionId, header);
-      controller.syncDebugDisplay();
+      dispatch(setSessionDebug({ sessionId: getState().terminal.sessionId, value: header }));
+      dispatch(syncDebugDisplay());
     }
     dispatch(setTerminalCopyOutput(''));
     dispatch(setTerminalCopyStatus(''));
@@ -150,7 +152,7 @@ export const openIDE = (selection: UISelection | null, ide: IDEKind): AppThunk<P
       await dispatch(sessionApi.endpoints.openIDE.initiate({ selection: runSelection, ide })).unwrap();
     } catch (error: unknown) {
       const failure = ideOpenFailure(selection, label, readError(error));
-      controller.appendDebugOutput(debugOutputBlock(failure.copyOutput));
+      dispatch(appendDebugOutput(debugOutputBlock(failure.copyOutput)));
       dispatch(dismissNotification());
       dispatch(showTerminalFailure(failure.message, failure.detail, failure.copyOutput, '', null));
       return;

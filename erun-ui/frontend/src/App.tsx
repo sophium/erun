@@ -4,8 +4,9 @@ import { CheckCircle2, ChevronDown, ChevronUp, Copy, LoaderCircle, Trash2 } from
 import { TerminalController } from '@/app/TerminalController';
 import { readError } from '@/app/errors';
 import { useActivityQueue, useTerminalActivityLockState } from '@/app/activityQueueState';
-import { ControllerProvider, useController } from '@/app/ControllerContext';
+import { ControllerProvider } from '@/app/ControllerContext';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { selectActiveSessionDebug } from '@/app/selectors';
 import {
   clearDebugOutput,
   setDebugOpen,
@@ -164,11 +165,11 @@ function MainPane({
   diffListRef: React.RefObject<HTMLDivElement | null>;
   onOpenActivityQueue: () => void;
 }): React.ReactElement {
-  const controller = useController();
   const dashboardTenant = useAppSelector((state) => state.tenantDashboard.tenant);
   const debugOpen = useAppSelector((state) => state.layout.debugOpen);
   const debugOutput = useAppSelector((state) => state.terminal.debugOutput);
   const sessionId = useAppSelector((state) => state.terminal.sessionId);
+  const verboseDebug = useAppSelector((state) => selectActiveSessionDebug(state, sessionId));
   const dashboardOpen = Boolean(dashboardTenant);
   return (
     <main
@@ -180,7 +181,7 @@ function MainPane({
     >
       {dashboardOpen && <TenantDashboardView />}
       <TerminalPane hidden={dashboardOpen} terminalRootRef={terminalRootRef} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} onOpenActivityQueue={onOpenActivityQueue} />
-      {!dashboardOpen && <DebugPanel open={debugOpen} output={debugOutput} sessionId={sessionId} verbose={controller.activeSessionDebug(sessionId)} />}
+      {!dashboardOpen && <DebugPanel open={debugOpen} output={debugOutput} sessionId={sessionId} verbose={verboseDebug} />}
     </main>
   );
 }
