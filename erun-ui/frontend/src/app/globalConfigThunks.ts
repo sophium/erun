@@ -18,6 +18,7 @@ import {
   setGlobalConfigDialog,
 } from './slices/globalConfigDialogSlice';
 import { setIdleCloudContextBusy, setIdleStatus } from './slices/idleSlice';
+import { trackCloudInitSession } from './slices/sessionsSlice';
 import { setSessionId } from './slices/terminalSlice';
 import {
   setTerminalCopyOutput,
@@ -279,7 +280,7 @@ export const startAWSCloudInit = (): AppThunk<Promise<void>> => async (dispatch,
     controller.fitTerminal();
     const size = controller.terminalSize();
     const result = (await StartCloudInitAWSSession(size.cols, size.rows)) as StartSessionResult;
-    controller.sessions.trackCloudInitSession(result.sessionId);
+    dispatch(trackCloudInitSession(result.sessionId));
     dispatch(setGlobalConfigDialog(defaultGlobalConfigDialog()));
     dispatch(setSessionId(result.sessionId));
     dispatch(setTerminalCopyOutput(''));
