@@ -1,14 +1,13 @@
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal, type IDisposable } from '@xterm/xterm';
 
-import { idleApi } from './api/idleApi';
 import { sessionApi } from './api/sessionApi';
 import { boot, reloadStateAfterEnvironmentChange } from './bootThunks';
+import { refreshIdleStatus } from './idleThunks';
 import { appendDebugOutput as appendDebugOutputThunk } from './debugThunks';
 import { removeTab as removeTabThunk } from './tabsThunks';
 import { selectEnvironmentExists, selectSelectedIsPendingFor } from './selectors';
 import { setDoctorAll } from './slices/doctorSlice';
-import { setIdleStatus } from './slices/idleSlice';
 import { setReconnect, setSelectedDiffPath } from './slices/reviewSlice';
 import { setSelected } from './slices/selectionSlice';
 import { store } from './store';
@@ -77,7 +76,6 @@ export class TerminalController {
   private reviewScrollFrame = 0;
   private idleStatusTimer = 0;
   private reviewDiffRefreshTimer = 0;
-  private idleStatusRequest = 0;
   private bootStarted = false;
   private terminalDataDisposable: TerminalDataDisposable | null = null;
   private terminalQueryResponseDisposables: IDisposable[] = [];
@@ -240,54 +238,14 @@ export class TerminalController {
     }, 0);
   }
 
-  private scheduleIdleStatusPoll(delay = 1000): void {
+  // scheduleIdleStatusPoll holds the setTimeout cancellation handle for
+  // the recursive idle-status poll. The state-touching part lives in the
+  // refreshIdleStatus thunk; this method just arms the timer.
+  scheduleIdleStatusPoll(delay = 1000): void {
     window.clearTimeout(this.idleStatusTimer);
     this.idleStatusTimer = window.setTimeout(() => {
-      void this.refreshIdleStatus();
+      void store.dispatch(refreshIdleStatus());
     }, delay);
-  }
-
-  async refreshIdleStatus(): Promise<void> {
-    const selection = store.getState().selection.selected;
-    const request = ++this.idleStatusRequest;
-    if (!selection) {
-      this.clearIdleStatus();
-      this.scheduleIdleStatusPoll();
-      return;
-    }
-
-    try {
-      const status = await store
-        .dispatch(idleApi.endpoints.getIdleStatus.initiate(selection, { forceRefetch: true }))
-        .unwrap();
-      if (this.isCurrentIdleStatusRequest(request, selection)) {
-        store.dispatch(setIdleStatus(status));
-      }
-    } catch {
-      this.clearCurrentIdleStatusRequest(request);
-    } finally {
-      if (request === this.idleStatusRequest) {
-        this.scheduleIdleStatusPoll();
-      }
-    }
-  }
-
-  private clearIdleStatus(): void {
-    if (!store.getState().idle.idleStatus) {
-      return;
-    }
-    store.dispatch(setIdleStatus(null));
-  }
-
-  private clearCurrentIdleStatusRequest(request: number): void {
-    if (request === this.idleStatusRequest) {
-      this.clearIdleStatus();
-    }
-  }
-
-  private isCurrentIdleStatusRequest(request: number, selection: UISelection): boolean {
-    const selected = store.getState().selection.selected;
-    return request === this.idleStatusRequest && selected?.tenant === selection.tenant && selected.environment === selection.environment;
   }
 
   resetTerminal(): void {

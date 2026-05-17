@@ -11,6 +11,7 @@ export interface RequestCountersState {
   environmentDialogVersion: number;
   environmentDialogResourceStatus: number;
   manageDialogVersion: number;
+  idleStatus: number;
 }
 
 const initialState: RequestCountersState = {
@@ -18,6 +19,7 @@ const initialState: RequestCountersState = {
   environmentDialogVersion: 0,
   environmentDialogResourceStatus: 0,
   manageDialogVersion: 0,
+  idleStatus: 0,
 };
 
 export const requestCountersSlice = createSlice({
@@ -36,6 +38,9 @@ export const requestCountersSlice = createSlice({
     bumpManageDialogVersion(state) {
       state.manageDialogVersion += 1;
     },
+    bumpIdleStatus(state) {
+      state.idleStatus += 1;
+    },
   },
 });
 
@@ -44,5 +49,6 @@ export const {
   bumpEnvironmentDialogVersion,
   bumpEnvironmentDialogResourceStatus,
   bumpManageDialogVersion,
+  bumpIdleStatus,
 } = requestCountersSlice.actions;
 export default requestCountersSlice.reducer;
