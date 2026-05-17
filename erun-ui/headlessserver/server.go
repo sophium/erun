@@ -1,0 +1,399 @@
+// Package headlessserver hosts the ERun desktop frontend over plain HTTP so
+// headless clients (Playwright, scripts, CI) can drive the same React bundle
+// without a Wails window.
+//
+// The package is deliberately decoupled from the Wails runtime: it accepts a
+// concrete fs.FS for the frontend bundle and a target object whose exported
+// methods become the Wails-style RPC surface. The HTTP transport mirrors what
+// Wails injects into the WebView:
+//
+//   - /                  serves index.html with a shim <script> prepended so
+//     window.runtime and window.go.main.App resolve before
+//     the main bundle loads.
+//   - /__erun_invoke     reflective JSON-RPC over POST, one method per call.
+//   - /__erun_events     Server-Sent Events stream of EventsEmit fan-out.
+//   - /__erun_emit       fire-and-forget EventsEmit triggered from JS.
+//   - /__erun_clipboard  in-memory clipboard store for tests.
+//
+// Everything else under / is served straight from the embedded bundle.
+package headlessserver
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"log"
+	"net/http"
+	"reflect"
+	"strings"
+	"sync"
+	"sync/atomic"
+)
+
+// Server is the HTTP transport for headless mode. Construct with New, register
+// it on a net/http server, and call Close on shutdown to drain SSE
+// subscribers. The zero value is not usable.
+type Server struct {
+	target reflect.Value
+	bundle fs.FS
+
+	methods    map[string]reflect.Value
+	methodList []string
+	shimJS     string
+
+	subsMu sync.Mutex
+	subs   map[int64]chan event
+	nextID atomic.Int64
+
+	clipMu sync.Mutex
+	clip   string
+}
+
+type event struct {
+	Name string `json:"name"`
+	Args []any  `json:"args"`
+}
+
+// New builds a Server that exposes the exported methods of target as
+// /__erun_invoke handlers and serves bundle at the document root. The target
+// is typically *main.App; methods are matched by exact name in
+// window.go.main.App.<Name> the same way Wails would bind them.
+func New(target any, bundle fs.FS) *Server {
+	s := &Server{
+		target: reflect.ValueOf(target),
+		bundle: bundle,
+		subs:   make(map[int64]chan event),
+	}
+	s.methods, s.methodList = collectExportedMethods(s.target)
+	s.shimJS = buildShimJS(s.methodList)
+	return s
+}
+
+// Emit fans the named event with the given args out to every active SSE
+// subscriber. The headless main wires this up as the App's emitter so
+// runtime.EventsEmit-style calls reach the browser without involving Wails.
+func (s *Server) Emit(name string, args ...any) {
+	ev := event{Name: name, Args: args}
+	s.subsMu.Lock()
+	defer s.subsMu.Unlock()
+	for _, ch := range s.subs {
+		// Non-blocking send: a subscriber that can't keep up just drops
+		// events. The buffer is sized for a reasonable burst; if it
+		// fills the client is likely disconnected and will be cleaned
+		// up on the next write.
+		select {
+		case ch <- ev:
+		default:
+		}
+	}
+}
+
+// Close drains every SSE subscriber so net/http can shut the listener down
+// without leaking goroutines. Safe to call multiple times.
+func (s *Server) Close() {
+	s.subsMu.Lock()
+	defer s.subsMu.Unlock()
+	for id, ch := range s.subs {
+		close(ch)
+		delete(s.subs, id)
+	}
+}
+
+// Handler returns the mux that wires every HTTP route this transport owns.
+// Mount it on the root of an http.Server in main.go.
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/__erun_invoke", s.handleInvoke)
+	mux.HandleFunc("/__erun_events", s.handleEvents)
+	mux.HandleFunc("/__erun_emit", s.handleEmit)
+	mux.HandleFunc("/__erun_clipboard", s.handleClipboard)
+	mux.HandleFunc("/", s.handleStatic)
+	return mux
+}
+
+func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/")
+	if path == "" || path == "index.html" {
+		s.serveIndex(w, r)
+		return
+	}
+	// Resolve files inside the bundle. Anything missing falls back to
+	// index.html so SPA-style deep links still load — the React router
+	// can then decide what to render.
+	if data, err := fs.ReadFile(s.bundle, path); err == nil {
+		writeStatic(w, path, data)
+		return
+	}
+	s.serveIndex(w, r)
+}
+
+func (s *Server) serveIndex(w http.ResponseWriter, _ *http.Request) {
+	raw, err := fs.ReadFile(s.bundle, "index.html")
+	if err != nil {
+		http.Error(w, "index.html missing from bundle", http.StatusInternalServerError)
+		return
+	}
+	html := injectShim(string(raw), s.shimJS)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = io.WriteString(w, html)
+}
+
+func writeStatic(w http.ResponseWriter, path string, data []byte) {
+	if ct := contentTypeForPath(path); ct != "" {
+		w.Header().Set("Content-Type", ct)
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
+}
+
+func contentTypeForPath(path string) string {
+	switch {
+	case strings.HasSuffix(path, ".js"):
+		return "application/javascript; charset=utf-8"
+	case strings.HasSuffix(path, ".css"):
+		return "text/css; charset=utf-8"
+	case strings.HasSuffix(path, ".html"):
+		return "text/html; charset=utf-8"
+	case strings.HasSuffix(path, ".json"):
+		return "application/json; charset=utf-8"
+	case strings.HasSuffix(path, ".svg"):
+		return "image/svg+xml"
+	case strings.HasSuffix(path, ".png"):
+		return "image/png"
+	case strings.HasSuffix(path, ".woff2"):
+		return "font/woff2"
+	case strings.HasSuffix(path, ".woff"):
+		return "font/woff"
+	case strings.HasSuffix(path, ".map"):
+		return "application/json; charset=utf-8"
+	default:
+		return ""
+	}
+}
+
+// invokeRequest is the wire payload for /__erun_invoke. args is held as raw
+// JSON so we can reflectively unmarshal each element into the exact Go type
+// the target method expects.
+type invokeRequest struct {
+	Method string            `json:"method"`
+	Args   []json.RawMessage `json:"args"`
+}
+
+type invokeEnvelope struct {
+	Data  any    `json:"data,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+func (s *Server) handleInvoke(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req invokeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, invokeEnvelope{Error: fmt.Sprintf("invalid request: %v", err)})
+		return
+	}
+	method, ok := s.methods[req.Method]
+	if !ok {
+		writeJSON(w, http.StatusNotFound, invokeEnvelope{Error: fmt.Sprintf("unknown method %q", req.Method)})
+		return
+	}
+	out, err := callMethod(method, req.Args)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, invokeEnvelope{Error: err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, invokeEnvelope{Data: out})
+}
+
+func callMethod(method reflect.Value, rawArgs []json.RawMessage) (any, error) {
+	mt := method.Type()
+	wantArgs := mt.NumIn()
+	if len(rawArgs) != wantArgs {
+		return nil, fmt.Errorf("expected %d args, got %d", wantArgs, len(rawArgs))
+	}
+	in := make([]reflect.Value, wantArgs)
+	for i := 0; i < wantArgs; i++ {
+		paramType := mt.In(i)
+		slot := reflect.New(paramType)
+		if len(rawArgs[i]) > 0 && string(rawArgs[i]) != "null" {
+			if err := json.Unmarshal(rawArgs[i], slot.Interface()); err != nil {
+				return nil, fmt.Errorf("arg %d: %v", i, err)
+			}
+		}
+		in[i] = slot.Elem()
+	}
+	results := method.Call(in)
+	// Wails methods return one of: (), (T), (error), or (T, error). Map
+	// the common shapes back to a {data, error?} envelope.
+	var (
+		data any
+		err  error
+	)
+	for _, r := range results {
+		if r.Type().Implements(errorType) {
+			if !r.IsNil() {
+				err = r.Interface().(error)
+			}
+			continue
+		}
+		if data == nil {
+			data = r.Interface()
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+var errorType = reflect.TypeOf((*error)(nil)).Elem()
+
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Connection", "keep-alive")
+
+	ch := make(chan event, 64)
+	id := s.nextID.Add(1)
+	s.subsMu.Lock()
+	s.subs[id] = ch
+	s.subsMu.Unlock()
+
+	defer func() {
+		s.subsMu.Lock()
+		delete(s.subs, id)
+		s.subsMu.Unlock()
+	}()
+
+	flusher.Flush()
+	ctx := r.Context()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			payload, err := json.Marshal(ev)
+			if err != nil {
+				continue
+			}
+			if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+type emitRequest struct {
+	Name string `json:"name"`
+	Args []any  `json:"args"`
+}
+
+func (s *Server) handleEmit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req emitRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.Emit(req.Name, req.Args...)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type clipboardRequest struct {
+	Action string `json:"action"`
+	Text   string `json:"text,omitempty"`
+}
+
+type clipboardResponse struct {
+	Text string `json:"text"`
+}
+
+func (s *Server) handleClipboard(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req clipboardRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.clipMu.Lock()
+	defer s.clipMu.Unlock()
+	switch req.Action {
+	case "set":
+		s.clip = req.Text
+		w.WriteHeader(http.StatusNoContent)
+	case "get":
+		writeJSON(w, http.StatusOK, clipboardResponse{Text: s.clip})
+	default:
+		http.Error(w, "unknown action", http.StatusBadRequest)
+	}
+}
+
+func writeJSON(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		log.Printf("headlessserver: write json: %v", err)
+	}
+}
+
+// Listen wires the Server's handler onto a context-bound HTTP listener and
+// blocks until the context is cancelled. Returns any non-graceful shutdown
+// error.
+func (s *Server) Listen(ctx context.Context, addr string) error {
+	server := &http.Server{Addr: addr, Handler: s.Handler()}
+	errCh := make(chan error, 1)
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- err
+			return
+		}
+		errCh <- nil
+	}()
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		_ = server.Shutdown(shutdownCtx)
+		s.Close()
+		return nil
+	case err := <-errCh:
+		s.Close()
+		return err
+	}
+}
+
+func collectExportedMethods(target reflect.Value) (map[string]reflect.Value, []string) {
+	methods := make(map[string]reflect.Value)
+	t := target.Type()
+	names := make([]string, 0, t.NumMethod())
+	for i := 0; i < t.NumMethod(); i++ {
+		m := t.Method(i)
+		if !m.IsExported() {
+			continue
+		}
+		methods[m.Name] = target.Method(i)
+		names = append(names, m.Name)
+	}
+	return methods, names
+}
