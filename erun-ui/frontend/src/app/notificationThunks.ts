@@ -6,6 +6,7 @@ import {
 } from './slices/notificationSlice';
 import {
   clearTerminalStatus,
+  setRetrySelection,
   setTerminalCopyOutput,
   setTerminalCopyStatus,
   setTerminalMessage,
@@ -16,17 +17,12 @@ import type { AppNotification, TerminalStatusAction } from './state';
 import type { UISelection } from '@/types';
 
 // notificationThunks own the titlebar terminal-status message lifecycle and
-// the toast-style notification slot. The timers and the wait-longer retry
-// target previously lived on the controller; module-level state is sufficient
-// for the singleton-controller case.
+// the toast-style notification slot. Timer handles for clearing the toast
+// stay module-local — they are setTimeout cancellation tokens, not state
+// the UI renders.
 
 let notificationTimer = 0;
 let terminalCopyStatusTimer = 0;
-let terminalStatusRetrySelection: UISelection | null = null;
-
-export function getTerminalStatusRetrySelection(): UISelection | null {
-  return terminalStatusRetrySelection;
-}
 
 export const showTerminalMessage = (
   message: string,
@@ -37,7 +33,7 @@ export const showTerminalMessage = (
     dispatch(setTerminalCopyOutput(''));
     dispatch(setTerminalCopyStatus(''));
   }
-  terminalStatusRetrySelection = null;
+  dispatch(setRetrySelection(null));
 };
 
 export const showTerminalFailure = (
@@ -58,14 +54,14 @@ export const showTerminalFailure = (
   );
   dispatch(setTerminalCopyOutput(copyOutput));
   dispatch(setTerminalCopyStatus(''));
-  terminalStatusRetrySelection = action === 'wait-longer' ? retrySelection : null;
+  dispatch(setRetrySelection(action === 'wait-longer' ? retrySelection : null));
 };
 
 export const hideTerminalMessage = (): AppThunk => (dispatch) => {
   dispatch(clearTerminalStatus());
   dispatch(setTerminalCopyOutput(''));
   dispatch(setTerminalCopyStatus(''));
-  terminalStatusRetrySelection = null;
+  dispatch(setRetrySelection(null));
 };
 
 export const dismissTerminalStatus = (): AppThunk => (dispatch, getState) => {
@@ -81,7 +77,7 @@ export const dismissTerminalStatus = (): AppThunk => (dispatch, getState) => {
   dispatch(clearTerminalStatus());
   dispatch(setTerminalCopyOutput(''));
   dispatch(setTerminalCopyStatus(''));
-  terminalStatusRetrySelection = null;
+  dispatch(setRetrySelection(null));
 };
 
 export const showNotification = (
@@ -110,9 +106,9 @@ export const dismissNotification = (): AppThunk => (dispatch, getState) => {
 };
 
 export const waitLongerForTerminalStatus = (): AppThunk<Promise<void>> =>
-  async (dispatch, _getState, extra) => {
+  async (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    const selection = terminalStatusRetrySelection;
+    const selection = getState().terminalStatus.retrySelection;
     if (!selection) {
       return;
     }

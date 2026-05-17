@@ -11,6 +11,10 @@ import {
   patchEnvironmentDialog,
   setEnvironmentDialog,
 } from './slices/environmentDialogSlice';
+import {
+  bumpEnvironmentDialogResourceStatus,
+  bumpEnvironmentDialogVersion,
+} from './slices/requestCountersSlice';
 import { setSelected } from './slices/selectionSlice';
 import { setVersionSuggestions } from './slices/tenantsSlice';
 import {
@@ -24,13 +28,12 @@ import { normalizeDialogValue, normalizeVersionSuggestions } from './versionSugg
 import type { UISelection, UIVersionSuggestion } from '@/types';
 
 // environmentDialogThunks own the open/edit/submit lifecycle for the
-// "create or deploy environment" modal. Version-suggestion polling and
-// kubernetes-context refresh state live here as module-level counters
-// because the controller no longer owns them.
+// "create or deploy environment" modal. The version-suggestion debounce
+// handle stays module-local — it is a setTimeout cancellation token, not
+// state. The request counters used to ignore stale responses now live in
+// the requestCounters slice.
 
 let versionSuggestionTimer = 0;
-let versionSuggestionRequest = 0;
-let environmentResourceStatusRequest = 0;
 
 export const openInitializeDialog = (): AppThunk => (dispatch, getState, extra) => {
   const controller = requireController(extra);
@@ -230,7 +233,8 @@ function scheduleDialogVersionSuggestionRefresh(
 
 export const refreshDialogVersionSuggestions = (selectDefault: boolean): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
-    const request = ++versionSuggestionRequest;
+    dispatch(bumpEnvironmentDialogVersion());
+    const request = getState().requestCounters.environmentDialogVersion;
     const dialog = getState().environmentDialog;
     const selection = {
       tenant: normalizeDialogValue(dialog.tenant),
@@ -241,7 +245,7 @@ export const refreshDialogVersionSuggestions = (selectDefault: boolean): AppThun
       environmentApi.endpoints.getVersionSuggestions.initiate(selection, { forceRefetch: true }),
     ).unwrap();
     const suggestions = normalizeVersionSuggestions(raw);
-    if (request !== versionSuggestionRequest || !getState().environmentDialog.open) {
+    if (request !== getState().requestCounters.environmentDialogVersion || !getState().environmentDialog.open) {
       return;
     }
     dispatch(setVersionSuggestions(suggestions));
@@ -253,7 +257,8 @@ export const refreshDialogVersionSuggestions = (selectDefault: boolean): AppThun
 
 const refreshEnvironmentRuntimeResources = (kubernetesContext: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
-    const request = ++environmentResourceStatusRequest;
+    dispatch(bumpEnvironmentDialogResourceStatus());
+    const request = getState().requestCounters.environmentDialogResourceStatus;
     const context = normalizeDialogValue(kubernetesContext);
     const dialog = getState().environmentDialog;
     if (
@@ -279,7 +284,7 @@ const refreshEnvironmentRuntimeResources = (kubernetesContext: string): AppThunk
           { forceRefetch: true },
         ),
       ).unwrap();
-      if (request !== environmentResourceStatusRequest || !getState().environmentDialog.open) {
+      if (request !== getState().requestCounters.environmentDialogResourceStatus || !getState().environmentDialog.open) {
         return;
       }
       dispatch(patchEnvironmentDialog({
@@ -287,7 +292,7 @@ const refreshEnvironmentRuntimeResources = (kubernetesContext: string): AppThunk
         resourceStatusLoading: false,
       }));
     } catch (error) {
-      if (request !== environmentResourceStatusRequest || !getState().environmentDialog.open) {
+      if (request !== getState().requestCounters.environmentDialogResourceStatus || !getState().environmentDialog.open) {
         return;
       }
       dispatch(patchEnvironmentDialog({

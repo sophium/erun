@@ -6,6 +6,7 @@ import { showNotification } from './notificationThunks';
 import { isMcpUnreachableMessage, stripMcpUnreachableMarker } from './reconnectCopy';
 import { scrollSelectedDiffIntoView } from './reviewDiffNavigation';
 import { setChangedFilesOpen } from './slices/layoutSlice';
+import { bumpReviewDiff } from './slices/requestCountersSlice';
 import {
   setDiff,
   setDiffError,
@@ -26,8 +27,6 @@ import { selectionKey } from './versionSuggestions';
 // directory expansion, refresh polling, and the MCP-reconnect dialog flow.
 
 const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
-
-let reviewDiffRequest = 0;
 
 export const setDiffFilter = (value: string): AppThunk =>
   (dispatch) => {
@@ -76,7 +75,8 @@ export const loadReviewDiff = (options: { silent?: boolean } = {}): AppThunk<Pro
     if (!selection) {
       return;
     }
-    const request = ++reviewDiffRequest;
+    dispatch(bumpReviewDiff());
+    const request = getState().requestCounters.reviewDiff;
     const selectedKey = selectionKey(selection);
     const scope = state.review.selectedReviewScope;
     const selectedCommit = state.review.selectedReviewCommit;
@@ -117,7 +117,7 @@ export const loadReviewDiff = (options: { silent?: boolean } = {}): AppThunk<Pro
         dispatch(setDiffError({ error: message, reconnectable: false }));
       }
     } finally {
-      if (request === reviewDiffRequest) {
+      if (request === getState().requestCounters.reviewDiff) {
         if (!options.silent) {
           dispatch(setDiffLoading(false));
         }
@@ -142,9 +142,9 @@ function isCurrentReviewDiffRequest(
   request: number,
   selectedKey: string,
 ): boolean {
-  const selected = getState().selection.selected;
-  return request === reviewDiffRequest &&
-    selectedKey === selectionKey(selected || { tenant: '', environment: '' });
+  const state = getState();
+  return request === state.requestCounters.reviewDiff &&
+    selectedKey === selectionKey(state.selection.selected || { tenant: '', environment: '' });
 }
 
 function scheduleReviewDiffRefresh(

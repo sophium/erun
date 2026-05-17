@@ -13,6 +13,12 @@ import {
   startReviewResize,
   startSidebarResize,
 } from '@/app/layoutThunks';
+import { setActivityQueueOpen } from '@/app/slices/layoutSlice';
+import {
+  clearHiddenLockOverlay,
+  hideLockOverlay,
+  setDebugCopyStatus,
+} from '@/app/slices/terminalStatusSlice';
 import { ActivityLockOverlay } from '@/components/app/ActivityLockOverlay';
 import { ActivityQueueDrawer } from '@/components/app/ActivityQueueDrawer';
 import { TerminalTabStrip } from '@/components/app/TerminalTabStrip';
@@ -44,12 +50,12 @@ export function App(): React.ReactElement {
   const controller = React.useMemo(() => new TerminalController(), []);
   const dispatch = useAppDispatch();
   const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
+  const activityQueueOpen = useAppSelector((state) => state.layout.activityQueueOpen);
   const terminalRootRef = React.useRef<HTMLDivElement>(null);
   const terminalPaneRef = React.useRef<HTMLElement>(null);
   const reviewViewRef = React.useRef<HTMLElement>(null);
   const reviewMainRef = React.useRef<HTMLDivElement>(null);
   const diffListRef = React.useRef<HTMLDivElement>(null);
-  const [activityQueueOpen, setActivityQueueOpen] = React.useState(false);
 
   React.useEffect(() => {
     if (!terminalRootRef.current || !terminalPaneRef.current || !reviewViewRef.current || !reviewMainRef.current || !diffListRef.current) {
@@ -89,7 +95,7 @@ export function App(): React.ReactElement {
               reviewViewRef={reviewViewRef}
               reviewMainRef={reviewMainRef}
               diffListRef={diffListRef}
-              onOpenActivityQueue={() => setActivityQueueOpen(true)}
+              onOpenActivityQueue={() => dispatch(setActivityQueueOpen(true))}
             />
           </div>
         </div>
@@ -98,7 +104,11 @@ export function App(): React.ReactElement {
         <ManageDialogView />
         <ReconnectDialog />
         <TenantDialogView />
-        <ActivityQueueLauncher open={activityQueueOpen} onOpen={() => setActivityQueueOpen(true)} onClose={() => setActivityQueueOpen(false)} />
+        <ActivityQueueLauncher
+          open={activityQueueOpen}
+          onOpen={() => dispatch(setActivityQueueOpen(true))}
+          onClose={() => dispatch(setActivityQueueOpen(false))}
+        />
       </TooltipProvider>
     </ControllerProvider>
   );
@@ -196,30 +206,23 @@ function TerminalPane({
   const terminalBusy = useAppSelector((state) => state.terminalStatus.terminalBusy);
   const terminalMessage = useAppSelector((state) => state.terminalStatus.terminalMessage);
   const locks = useTerminalActivityLockState();
-  const [hiddenLockSessions, setHiddenLockSessions] = React.useState<Set<number>>(() => new Set());
+  const hiddenForSession = useAppSelector(
+    (state) => state.terminalStatus.hiddenLockSessions[sessionId] === true,
+  );
   const liveLock = locks.get(sessionId) ?? null;
   // The user can dismiss the overlay locally for a session if it's
   // covering output they need to read or input they need to provide
   // (e.g. the in-pod CLI's helm-recovery prompt). Backend keeps the
   // lock state intact; only this desktop's view of it is hidden.
   React.useEffect(() => {
-    if (!liveLock) {
-      setHiddenLockSessions((prev) => {
-        if (prev.size === 0) return prev;
-        const next = new Set(prev);
-        next.delete(sessionId);
-        return next;
-      });
+    if (!liveLock && hiddenForSession) {
+      dispatch(clearHiddenLockOverlay(sessionId));
     }
-  }, [liveLock, sessionId]);
-  const activeLock = liveLock && !hiddenLockSessions.has(sessionId) ? liveLock : null;
+  }, [dispatch, liveLock, hiddenForSession, sessionId]);
+  const activeLock = liveLock && !hiddenForSession ? liveLock : null;
   const hideActiveLock = React.useCallback(() => {
-    setHiddenLockSessions((prev) => {
-      const next = new Set(prev);
-      next.add(sessionId);
-      return next;
-    });
-  }, [sessionId]);
+    dispatch(hideLockOverlay(sessionId));
+  }, [dispatch, sessionId]);
   return (
     <div
       className={cn(
@@ -263,7 +266,7 @@ function DebugPanel({ open, output, sessionId, verbose }: { open: boolean; outpu
   const dispatch = useAppDispatch();
   const outputRef = React.useRef<HTMLDivElement>(null);
   const stuckToBottomRef = React.useRef(true);
-  const [copyStatus, setCopyStatus] = React.useState('');
+  const copyStatus = useAppSelector((state) => state.terminalStatus.debugCopyStatus);
   const canCopy = output.trim().length > 0;
 
   const handleScroll = React.useCallback(() => {
@@ -298,8 +301,8 @@ function DebugPanel({ open, output, sessionId, verbose }: { open: boolean; outpu
   }, [open, output]);
 
   React.useEffect(() => {
-    setCopyStatus('');
-  }, [output]);
+    dispatch(setDebugCopyStatus(''));
+  }, [dispatch, output]);
 
   const copyDebugOutput = React.useCallback(() => {
     if (!canCopy) {
@@ -307,11 +310,11 @@ function DebugPanel({ open, output, sessionId, verbose }: { open: boolean; outpu
     }
     void ClipboardSetText(output)
       .then(() => {
-        setCopyStatus('Copied');
-        window.setTimeout(() => setCopyStatus(''), 1400);
+        dispatch(setDebugCopyStatus('Copied'));
+        window.setTimeout(() => dispatch(setDebugCopyStatus('')), 1400);
       })
-      .catch((error: unknown) => setCopyStatus(readError(error)));
-  }, [canCopy, output]);
+      .catch((error: unknown) => dispatch(setDebugCopyStatus(readError(error))));
+  }, [canCopy, dispatch, output]);
 
   return (
     <section className={cn('grid min-h-0 border-t border-[oklch(0.26_0_0)] bg-[oklch(0.06_0_0)] text-[oklch(0.86_0_0)]', open ? 'grid-rows-[6px_34px_minmax(0,1fr)]' : 'grid-rows-[34px]')}>

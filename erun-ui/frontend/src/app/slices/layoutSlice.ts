@@ -25,6 +25,7 @@ export interface LayoutState {
   changedFilesOpen: boolean;
   debugOpen: boolean;
   debugHeight: number;
+  activityQueueOpen: boolean;
 }
 
 const initialState: LayoutState = {
@@ -37,6 +38,7 @@ const initialState: LayoutState = {
   changedFilesOpen: true,
   debugOpen: typeof window !== 'undefined' ? loadSavedDebugOpen() : false,
   debugHeight: typeof window !== 'undefined' ? loadSavedDebugHeight() : DEFAULT_DEBUG_HEIGHT,
+  activityQueueOpen: false,
 };
 
 export const layoutSlice = createSlice({
@@ -70,6 +72,9 @@ export const layoutSlice = createSlice({
     setDebugOpen(state, action: PayloadAction<boolean>) {
       state.debugOpen = action.payload;
     },
+    setActivityQueueOpen(state, action: PayloadAction<boolean>) {
+      state.activityQueueOpen = action.payload;
+    },
   },
 });
 
@@ -83,6 +88,7 @@ export const {
   setFilesOpen,
   setChangedFilesOpen,
   setDebugOpen,
+  setActivityQueueOpen,
 } = layoutSlice.actions;
 
 export default layoutSlice.reducer;

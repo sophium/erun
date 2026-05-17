@@ -14,8 +14,10 @@ import idleReducer from './slices/idleSlice';
 import layoutReducer from './slices/layoutSlice';
 import manageDialogReducer from './slices/manageDialogSlice';
 import notificationReducer from './slices/notificationSlice';
+import requestCountersReducer from './slices/requestCountersSlice';
 import reviewReducer from './slices/reviewSlice';
 import selectionReducer from './slices/selectionSlice';
+import sessionsReducer from './slices/sessionsSlice';
 import sidebarReducer from './slices/sidebarSlice';
 import tenantDashboardReducer from './slices/tenantDashboardSlice';
 import tenantDialogReducer from './slices/tenantDialogSlice';
@@ -44,6 +46,8 @@ export const store = configureStore({
     terminalStatus: terminalStatusReducer,
     review: reviewReducer,
     notification: notificationReducer,
+    requestCounters: requestCountersReducer,
+    sessions: sessionsReducer,
     doctor: doctorReducer,
     idle: idleReducer,
     activity: activityReducer,

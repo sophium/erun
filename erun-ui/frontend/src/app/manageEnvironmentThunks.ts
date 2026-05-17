@@ -9,6 +9,7 @@ import {
   patchManageDialog,
   setManageDialog,
 } from './slices/manageDialogSlice';
+import { bumpManageDialogVersion } from './slices/requestCountersSlice';
 import { setSelected } from './slices/selectionSlice';
 import { setSessionId, setDebugOutput } from './slices/terminalSlice';
 import { setVersionSuggestions } from './slices/tenantsSlice';
@@ -40,12 +41,6 @@ import type {
   UISelection,
   UIVersionSuggestion,
 } from '@/types';
-
-// versionSuggestionRequest tracks the most recent in-flight refresh so a
-// stale response cannot clobber the dialog after the user moved on; the
-// class version lived as an instance field, so a module-level counter
-// is sufficient for the singleton case.
-let versionSuggestionRequest = 0;
 
 export const openManageDialog = (selection: UISelection): AppThunk => (dispatch) => {
   dispatch(setManageDialog({
@@ -421,12 +416,13 @@ const refreshManageVersionSuggestions = (selectDefault: boolean): AppThunk<Promi
     if (!selection) {
       return;
     }
-    const request = ++versionSuggestionRequest;
+    dispatch(bumpManageDialogVersion());
+    const request = getState().requestCounters.manageDialogVersion;
     const raw = await dispatch(
       environmentApi.endpoints.getVersionSuggestions.initiate(selection, { forceRefetch: true }),
     ).unwrap();
     const suggestions = normalizeVersionSuggestions(raw);
-    if (request !== versionSuggestionRequest || !getState().manageDialog.open) {
+    if (request !== getState().requestCounters.manageDialogVersion || !getState().manageDialog.open) {
       return;
     }
     dispatch(setVersionSuggestions(suggestions));

@@ -1,6 +1,7 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
 import type { TerminalStatusAction, TerminalStatusKind } from '../state';
+import type { UISelection } from '@/types';
 
 export interface TerminalStatusState {
   terminalMessage: string;
@@ -10,6 +11,14 @@ export interface TerminalStatusState {
   terminalBusy: boolean;
   terminalCopyOutput: string;
   terminalCopyStatus: string;
+  retrySelection: UISelection | null;
+  // Per-session dismissals of the activity-lock overlay. Stored as a
+  // Record<number, true> so the state stays serializable; the original
+  // useState held a Set<number>.
+  hiddenLockSessions: Record<number, true>;
+  // Debug-panel "Copied"/error transient. The terminal copy status above
+  // is for the main terminal output copy button; this is the debug panel.
+  debugCopyStatus: string;
 }
 
 const initialState: TerminalStatusState = {
@@ -20,6 +29,9 @@ const initialState: TerminalStatusState = {
   terminalBusy: false,
   terminalCopyOutput: '',
   terminalCopyStatus: '',
+  retrySelection: null,
+  hiddenLockSessions: {},
+  debugCopyStatus: '',
 };
 
 export const terminalStatusSlice = createSlice({
@@ -59,6 +71,18 @@ export const terminalStatusSlice = createSlice({
     setTerminalCopyOutput(state, action: PayloadAction<string>) {
       state.terminalCopyOutput = action.payload;
     },
+    setRetrySelection(state, action: PayloadAction<UISelection | null>) {
+      state.retrySelection = action.payload;
+    },
+    hideLockOverlay(state, action: PayloadAction<number>) {
+      state.hiddenLockSessions[action.payload] = true;
+    },
+    clearHiddenLockOverlay(state, action: PayloadAction<number>) {
+      delete state.hiddenLockSessions[action.payload];
+    },
+    setDebugCopyStatus(state, action: PayloadAction<string>) {
+      state.debugCopyStatus = action.payload;
+    },
   },
 });
 
@@ -68,5 +92,9 @@ export const {
   setTerminalCopy,
   setTerminalCopyStatus,
   setTerminalCopyOutput,
+  setRetrySelection,
+  hideLockOverlay,
+  clearHiddenLockOverlay,
+  setDebugCopyStatus,
 } = terminalStatusSlice.actions;
 export default terminalStatusSlice.reducer;

@@ -14,6 +14,7 @@ import { setSelected } from './slices/selectionSlice';
 import { setTenantDashboard } from './slices/tenantDashboardSlice';
 import {
   setDebugOutput,
+  setPendingDebugHeader,
   setSelectedSessionForEnv,
   clearSelectedSessionForEnv,
   setSessionId,
@@ -110,7 +111,6 @@ const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 
 export class TerminalController {
   readonly sessions = new TerminalSessionRegistry();
-  private pendingDebugHeader = '';
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
   private terminalRoot: HTMLDivElement | null = null;
@@ -279,21 +279,22 @@ export class TerminalController {
   }
 
   setPendingDebugHeader(header: string): void {
-    this.pendingDebugHeader = header;
+    store.dispatch(setPendingDebugHeader(header));
     if (store.getState().layout.debugOpen) {
       store.dispatch(setDebugOutput(header));
     }
   }
 
   applyPendingDebugHeader(sessionId: number): void {
-    if (!this.pendingDebugHeader || sessionId <= 0) {
-      this.pendingDebugHeader = '';
+    const pending = store.getState().terminal.pendingDebugHeader;
+    if (!pending || sessionId <= 0) {
+      store.dispatch(setPendingDebugHeader(''));
       return;
     }
     if (store.getState().layout.debugOpen) {
-      this.sessions.setSessionDebug(sessionId, this.pendingDebugHeader);
+      this.sessions.setSessionDebug(sessionId, pending);
     }
-    this.pendingDebugHeader = '';
+    store.dispatch(setPendingDebugHeader(''));
   }
 
   activeSessionDebug(sessionId: number): boolean {
