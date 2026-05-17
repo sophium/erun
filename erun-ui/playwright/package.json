@@ -3,11 +3,12 @@
   "private": true,
   "version": "0.0.0",
   "scripts": {
-    "test": "playwright test",
-    "test:headed": "playwright test --headed",
-    "test:ui": "playwright test --ui",
-    "test:debug": "playwright test --debug",
-    "test:headless": "playwright test",
+    "test": "./run.sh",
+    "test:headless": "./run.sh",
+    "test:headed": "./run.sh --headed",
+    "test:ui": "./run.sh --ui",
+    "test:debug": "./run.sh --debug",
+    "test:rebuild": "./run.sh --build",
     "install-browsers": "playwright install chromium",
     "report": "playwright show-report"
   },

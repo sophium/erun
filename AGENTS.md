@@ -8,6 +8,7 @@ Repository guidance for humans and coding agents working in this repo.
 - Current `AGENTS.md` files in this repo:
   - `AGENTS.md` (this file) — repository-wide rules.
   - `erun-ui/AGENTS.md` — desktop-module guidance, including macOS + Windows targets and Wails frontend rules.
+  - `erun-ui/playwright/AGENTS.md` — Playwright end-to-end UI test suite that drives `erun-app --headless`.
   - `erun-devops/AGENTS.md` — runtime-image, chart, build-cache, and release-workflow guidance.
   - `erun-integration/AGENTS.md` — integration-test harness layout, scenario shape, and the coverage gate.
   - `erun-backend/AGENTS.md` plus `erun-backend/erun-backend-api/AGENTS.md` and `erun-backend/erun-backend-db/AGENTS.md` — hosted-backend, API, and Atlas-migration guidance.

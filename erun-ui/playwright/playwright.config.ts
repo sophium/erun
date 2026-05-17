@@ -5,7 +5,11 @@ import { defineConfig, devices } from '@playwright/test';
 // must serialise — fullyParallel is off and workers is pinned to 1. CI reuses
 // the same constraints; locally we reuse an already-running server so
 // `yarn test` is fast on re-runs.
-const HEADLESS_PORT = 34123;
+//
+// run.sh exports ERUN_PLAYWRIGHT_PORT so the wrapper script and this config
+// stay in sync when callers override the port. Falls back to 34123 (clear
+// of wails dev's 34115) when invoked directly.
+const HEADLESS_PORT = Number(process.env.ERUN_PLAYWRIGHT_PORT) || 34123;
 
 export default defineConfig({
   testDir: './tests',
