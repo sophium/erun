@@ -6,50 +6,23 @@ import { idleApi } from './api/idleApi';
 import { kubernetesApi } from './api/kubernetesApi';
 import { sessionApi } from './api/sessionApi';
 import { stateApi } from './api/stateApi';
-import {
-  appendDebugOutput as appendDebugOutputThunk,
-  applyPendingDebugHeader as applyPendingDebugHeaderThunk,
-  setPendingDebugHeader as setPendingDebugHeaderThunk,
-  syncDebugDisplay as syncDebugDisplayThunk,
-} from './debugThunks';
-import { recordTab as recordTabThunk, removeTab as removeTabThunk } from './tabsThunks';
-import {
-  selectActiveSlotForSelection,
-  selectEnvironmentExists,
-  selectSelectedIsPendingFor,
-} from './selectors';
-import { registerDebugSession as registerDebugSessionAction } from './slices/sessionsSlice';
+import { appendDebugOutput as appendDebugOutputThunk } from './debugThunks';
+import { removeTab as removeTabThunk } from './tabsThunks';
+import { selectEnvironmentExists, selectSelectedIsPendingFor } from './selectors';
 import { setDoctorAll } from './slices/doctorSlice';
 import { patchEnvironmentDialog } from './slices/environmentDialogSlice';
 import { setIdleStatus } from './slices/idleSlice';
-import { setReconnect, setSelectedDiffPath, setSelectedReviewCommit, setSelectedReviewScope } from './slices/reviewSlice';
+import { setReconnect, setSelectedDiffPath } from './slices/reviewSlice';
 import { setSelected } from './slices/selectionSlice';
-import { setTenantDashboard } from './slices/tenantDashboardSlice';
-import {
-  setSelectedSessionForEnv,
-  setSessionId,
-} from './slices/terminalSlice';
 import {
   setCloudProviders,
   setTenants,
   setVersionSuggestions,
 } from './slices/tenantsSlice';
-import {
-  setTerminalCopyOutput,
-  setTerminalCopyStatus,
-} from './slices/terminalStatusSlice';
 import { store } from './store';
 import { thunkExtra } from './thunkExtra';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
-import {
-  ResizeSession,
-  SendSessionInput,
-  StartAISession,
-  StartDeploySession,
-  StartInitSession,
-  StartLocalSession,
-  StartSession,
-} from '../../wailsjs/go/main/App';
+import { ResizeSession, SendSessionInput } from '../../wailsjs/go/main/App';
 import { EventsOn } from '../../wailsjs/runtime/runtime';
 import { fileToBase64, decodeBase64Bytes, isTerminalPasteTarget, pastedImageFiles } from './clipboard';
 import { readError } from './errors';
@@ -59,8 +32,7 @@ import {
   showTerminalFailure,
   showTerminalMessage,
 } from './notificationThunks';
-import { selectTerminalTab as selectTerminalTabThunk } from './sessionThunks';
-import { loadReviewDiff } from './reviewThunks';
+import { openSelection, selectTerminalTab as selectTerminalTabThunk } from './sessionThunks';
 import { visibleDiffPath } from './reviewDiffNavigation';
 import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses';
 import type {
@@ -71,7 +43,6 @@ import type {
   TerminalExitSelections,
   TerminalWriteData,
 } from './model';
-import { isNewSessionSelection } from './sessionSelection';
 import {
   MAX_DEBUG_HEIGHT,
   MAX_FILES_WIDTH,
@@ -79,7 +50,6 @@ import {
   MIN_FILES_WIDTH,
   MIN_REVIEW_WIDTH,
   computeMaxReviewWidth,
-  type TerminalTabKind,
 } from './state';
 
 import { clamp } from './storage';
@@ -87,7 +57,6 @@ import {
   classifiedTerminalFailure,
   decodeDebugOutput,
   failedTerminalExitReason,
-  formatDebugCommand,
   statusForTerminalOutput,
   successfulTerminalExitReason,
   terminalExitHasTrackedSelection,
@@ -95,7 +64,6 @@ import {
 import { failedTerminalOutput, filterTerminalDisplayData } from './terminalBuffers';
 import { normalizeDialogValue, normalizeVersionSuggestions, selectionKey } from './versionSuggestions';
 import type {
-  StartSessionResult,
   TerminalExitPayload,
   TerminalOutputPayload,
   UISelection,
@@ -272,169 +240,6 @@ export class TerminalController {
     this.fitAddon = null;
   }
 
-  async openSelection(selection: UISelection): Promise<void> {
-    store.dispatch(setTenantDashboard({ tenant: '', tab: 'users', loading: false, error: '', data: null }));
-    const debugOpen = store.getState().layout.debugOpen;
-    const runSelection = { ...selection, debug: debugOpen || undefined };
-    const key = selectionKey(runSelection);
-    const previousSessionId = store.getState().terminal.sessionId;
-    const previousKnownSessionId = this.sessions.knownSelectionSession(key);
-    // Capture the previous sidebar selection so a failed StartSession can
-    // roll it back. prepareOpenSelection has already dispatched setSelected,
-    // so the sidebar visually moved to the new env; without rollback the
-    // sidebar would point at one env while the terminal still shows the
-    // previous one.
-    const previousSelected = store.getState().selection.selected;
-
-    this.prepareOpenSelection(selection, runSelection, previousSessionId, previousKnownSessionId);
-    this.fitAddon?.fit();
-    const cols = this.terminal?.cols || 80;
-    const rows = this.terminal?.rows || 24;
-
-    try {
-      // Spawn Local first so subsequent ERun/AI spawns can log into it.
-      const tabs = store.getState().terminal.tabsByEnv[key] || [];
-      if (!tabs.some((tab) => tab.kind === 'local')) {
-        await this.spawnDefaultTab(key, runSelection, 'local', 'Local', cols, rows);
-      }
-
-      const slot = selectActiveSlotForSelection(store.getState(), runSelection);
-      const result = (await StartSession(runSelection, slot, cols, rows)) as StartSessionResult;
-      this.registerOpenSessionResult(key, result, runSelection);
-      this.showOpenSelectionStatus(result.sessionId, selection);
-
-      await this.ensureDefaultEnvTabs(runSelection, key);
-      this.restoreSelectedTabForEnv(key);
-
-      if (store.getState().layout.reviewOpen) {
-        await store.dispatch(loadReviewDiff());
-      }
-      this.focusTerminalSoon();
-      this.queueTerminalResize();
-    } catch (error: unknown) {
-      store.dispatch(setSelected(previousSelected));
-      store.dispatch(showTerminalMessage(readError(error)));
-      throw error;
-    }
-  }
-
-  async ensureDefaultEnvTabs(runSelection: UISelection, key: string): Promise<void> {
-    const tabs = store.getState().terminal.tabsByEnv[key] || [];
-    const cols = this.terminal?.cols || 80;
-    const rows = this.terminal?.rows || 24;
-    if (!tabs.some((tab) => tab.kind === 'erun')) {
-      await this.spawnERunTabPassive(key, runSelection, cols, rows);
-    }
-    if (!tabs.some((tab) => tab.kind === 'local')) {
-      await this.spawnDefaultTab(key, runSelection, 'local', 'Local', cols, rows);
-    }
-    if (!tabs.some((tab) => tab.kind === 'ai')) {
-      await this.spawnDefaultTab(key, runSelection, 'ai', 'AI', cols, rows);
-    }
-  }
-
-  private async spawnERunTabPassive(key: string, runSelection: UISelection, cols: number, rows: number): Promise<void> {
-    try {
-      const result = (await StartSession(runSelection, 0, cols, rows)) as StartSessionResult;
-      this.sessions.trackOpenSession(key, result.sessionId, runSelection);
-      store.dispatch(registerDebugSessionAction({ sessionId: result.sessionId, selection: runSelection, mode: 'open' }));
-      store.dispatch(recordTabThunk(key, result.sessionId, result.slot ?? 0, 'erun', 'ERun'));
-    } catch {
-      // ERun failed to spawn; future env opens will retry.
-    }
-  }
-
-  private async spawnDefaultTab(
-    key: string,
-    runSelection: UISelection,
-    kind: 'local' | 'ai',
-    label: string,
-    cols: number,
-    rows: number,
-  ): Promise<void> {
-    const start = kind === 'local' ? StartLocalSession : StartAISession;
-    try {
-      const result = (await start(runSelection, 0, cols, rows)) as StartSessionResult;
-      store.dispatch(recordTabThunk(key, result.sessionId, result.slot ?? 0, kind, label));
-    } catch {
-      // Tool unavailable; future env opens will retry.
-    }
-  }
-
-  private restoreSelectedTabForEnv(key: string): void {
-    const state = store.getState();
-    const tabs = state.terminal.tabsByEnv[key] || [];
-    const remembered = state.terminal.selectedSessionByEnv[key];
-    if (!remembered || !tabs.some((tab) => tab.sessionId === remembered)) {
-      return;
-    }
-    if (remembered === state.terminal.sessionId) {
-      return;
-    }
-    store.dispatch(selectTerminalTabThunk(remembered));
-  }
-
-  private prepareOpenSelection(selection: UISelection, runSelection: UISelection, previousSessionId: number, previousKnownSessionId: number): void {
-    const state = store.getState();
-    if (selectionKey(selection) !== selectionKey(state.selection.selected || { tenant: '', environment: '' })) {
-      store.dispatch(setSelectedReviewScope('current'));
-      store.dispatch(setSelectedReviewCommit(''));
-      store.dispatch(setSelectedDiffPath(''));
-    }
-    store.dispatch(setSelected(selection));
-    store.dispatch(setIdleStatus(null));
-    if (!isNewSessionSelection(previousSessionId, previousKnownSessionId)) {
-      return;
-    }
-    if (state.layout.debugOpen) {
-      store.dispatch(setPendingDebugHeaderThunk(`$ ${formatDebugCommand(runSelection)}\n`));
-    }
-    store.dispatch(setTerminalCopyOutput(''));
-    store.dispatch(setTerminalCopyStatus(''));
-    store.dispatch(showTerminalMessage(`Opening ${selection.tenant} / ${selection.environment}...`, true));
-  }
-
-  registerOpenSessionResult(key: string, result: StartSessionResult, runSelection: UISelection): void {
-    this.sessions.trackOpenSession(key, result.sessionId, runSelection);
-    store.dispatch(registerDebugSessionAction({ sessionId: result.sessionId, selection: runSelection, mode: 'open' }));
-    store.dispatch(applyPendingDebugHeaderThunk(result.sessionId));
-    store.dispatch(setSessionId(result.sessionId));
-    // Preserve the user's prior tab choice for this env across re-opens
-    // (Nielsen heuristic #4: consistency / user control). Only seed
-    // selectedSessionByEnv when nothing is remembered, or when the
-    // remembered session no longer exists in the live tabs for this env.
-    // restoreSelectedTabForEnv below switches the terminal back to the
-    // remembered tab when one exists.
-    const state = store.getState();
-    const remembered = state.terminal.selectedSessionByEnv[key];
-    const liveTabs = state.terminal.tabsByEnv[key] || [];
-    const rememberedIsLive = remembered && liveTabs.some((tab) => tab.sessionId === remembered);
-    if (!rememberedIsLive) {
-      store.dispatch(setSelectedSessionForEnv({ key, sessionId: result.sessionId }));
-    }
-    store.dispatch(syncDebugDisplayThunk());
-    const slot = result.slot ?? 0;
-    const kind: TerminalTabKind = slot === 0 ? 'erun' : 'extra';
-    const label = kind === 'erun' ? 'ERun' : `Terminal ${slot}`;
-    store.dispatch(recordTabThunk(key, result.sessionId, slot, kind, label));
-  }
-
-  private showOpenSelectionStatus(sessionId: number, selection: UISelection): void {
-    const exitReason = this.sessions.exitReason(sessionId);
-    if (exitReason) {
-      store.dispatch(setTerminalCopyOutput(this.sessions.exitOutput(sessionId)));
-      store.dispatch(setTerminalCopyStatus(''));
-      store.dispatch(showTerminalMessage(exitReason));
-      return;
-    }
-    const buffer = this.sessions.displayBuffer(sessionId);
-    if (buffer.length > 0) {
-      store.dispatch(hideTerminalMessage());
-      return;
-    }
-    store.dispatch(showTerminalMessage(`Opening ${selection.tenant} / ${selection.environment}...`, true));
-  }
-
   focusTerminalSoon(): void {
     window.setTimeout(() => {
       this.terminal?.focus();
@@ -511,7 +316,7 @@ export class TerminalController {
 
       const selected = store.getState().selection.selected;
       if (selected) {
-        await this.openSelection(selected);
+        await store.dispatch(openSelection(selected));
         return;
       }
 
@@ -519,62 +324,6 @@ export class TerminalController {
     } catch (error: unknown) {
       store.dispatch(showTerminalMessage(readError(error)));
     }
-  }
-
-  async startInitSelection(selection: UISelection): Promise<void> {
-    // Visibility of system status (Nielsen #1) is provided by three
-    // surfaces that persist for the full init duration: the sidebar
-    // placeholder row (Sidebar.tsx EnvironmentRow placeholder branch),
-    // the activity-drawer init entry registered when the backend's
-    // trace handler observes `==> Initializing`, and the live `erun
-    // init` output in the Local tab. Setting state.terminalMessage
-    // would flash a busy overlay for ~150 ms inside the still-open
-    // modal and is then cleared by activateLocalAfterCommand before
-    // the user can register it — see erun-ui/AGENTS.md § "UX Impact
-    // Review Checklist" item 3 (state-without-affordance).
-    const debugOpen = store.getState().layout.debugOpen;
-    const runSelection = { ...selection, debug: debugOpen || undefined };
-    store.dispatch(setSelected(selection));
-    store.dispatch(setTerminalCopyOutput(''));
-    store.dispatch(setTerminalCopyStatus(''));
-    this.fitAddon?.fit();
-    const result = (await StartInitSession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
-    await this.activateLocalAfterCommand(selection, result);
-  }
-
-  async startDeploySelection(selection: UISelection): Promise<void> {
-    const debugOpen = store.getState().layout.debugOpen;
-    const runSelection = { ...selection, debug: debugOpen || undefined };
-    store.dispatch(setSelected(selection));
-    store.dispatch(setTerminalCopyOutput(''));
-    store.dispatch(setTerminalCopyStatus(''));
-    store.dispatch(showTerminalMessage(`Deploying runtime for ${selection.tenant} / ${selection.environment}...`, true));
-
-    this.fitAddon?.fit();
-    const result = (await StartDeploySession(runSelection, this.terminal?.cols || 80, this.terminal?.rows || 24)) as StartSessionResult;
-    await this.activateLocalAfterCommand(selection, result);
-  }
-
-  async activateLocalAfterCommand(selection: UISelection, result: StartSessionResult): Promise<void> {
-    const debugOpen = store.getState().layout.debugOpen;
-    const runSelection = { ...selection, debug: debugOpen || undefined };
-    const key = selectionKey(runSelection);
-    store.dispatch(recordTabThunk(key, result.sessionId, result.slot ?? 0, 'local', 'Local'));
-    // Only spawn dependent ERun/AI tabs when the env config already
-    // exists. For `erun init` the env is created mid-command, so the
-    // tabs would fail to spawn against missing config; the
-    // environment-initialized event fires a second openSelection after
-    // success, which spawns the tabs against the now-existing config.
-    // See erun-ui/AGENTS.md § "Command Completion And State-Refresh
-    // Wiring".
-    if (selectEnvironmentExists(store.getState(), selection.tenant, selection.environment)) {
-      await this.ensureDefaultEnvTabs(runSelection, key);
-    }
-    store.dispatch(setSessionId(result.sessionId));
-    store.dispatch(setSelectedSessionForEnv({ key, sessionId: result.sessionId }));
-    store.dispatch(hideTerminalMessage());
-    this.focusTerminalSoon();
-    this.queueTerminalResize();
   }
 
   async reloadStateAfterEnvironmentChange(): Promise<void> {
@@ -732,7 +481,7 @@ export class TerminalController {
     }
     store.dispatch(showNotification('success', `Created ${tenant} / ${environment}.`));
     try {
-      await this.openSelection({ tenant, environment });
+      await store.dispatch(openSelection({ tenant, environment }));
     } catch (error) {
       store.dispatch(showTerminalMessage(readError(error)));
     }

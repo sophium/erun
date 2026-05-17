@@ -7,6 +7,7 @@ import type { HiddenSessionMode } from './model';
 import { showTerminalMessage } from './notificationThunks';
 import { runtimePodConfigToDisplay, runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
 import { selectManageRuntimeImage } from './selectors';
+import { activateLocalAfterCommand, startDeploySelection } from './sessionThunks';
 import {
   patchManageDialog,
   setManageDialog,
@@ -339,8 +340,7 @@ export const startManageDoctor = (): AppThunk<Promise<void>> => async (dispatch)
   await dispatch(startHiddenSession('doctor', StartDoctorSession));
 };
 
-export const submitManageDeploy = (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
-  const controller = requireController(extra);
+export const submitManageDeploy = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
   const dialog = getState().manageDialog;
   if (dialog.busy) {
     return;
@@ -352,11 +352,11 @@ export const submitManageDeploy = (): AppThunk<Promise<void>> => async (dispatch
   }
   const version = normalizeDialogValue(dialog.version);
   dispatch(closeManageDialog());
-  await controller.startDeploySelection({
+  await dispatch(startDeploySelection({
     ...selection,
     version,
     runtimeImage: version ? selectManageRuntimeImage(getState(), version) : '',
-  });
+  }));
 };
 
 export const submitManageDelete = (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
@@ -464,7 +464,7 @@ const startHiddenSession = (
   const size = controller.terminalSize();
   const result = (await starter(runSelection, size.cols, size.rows)) as StartSessionResult;
   if (result.kind === 'local') {
-    await controller.activateLocalAfterCommand(selection, result);
+    await dispatch(activateLocalAfterCommand(selection, result));
     return;
   }
   dispatch(trackHiddenSession(mode, result.sessionId, runSelection));

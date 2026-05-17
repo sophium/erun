@@ -23,6 +23,7 @@ import {
   setTerminalCopyOutput,
   setTerminalCopyStatus,
 } from './slices/terminalStatusSlice';
+import { openSelection } from './sessionThunks';
 import type { GlobalConfigDialogState } from './state';
 import { defaultCloudContextInitInput, defaultGlobalConfigDialog } from './state';
 import type { AppDispatch, AppThunk, RootState } from './store';
@@ -256,7 +257,7 @@ export const toggleIdleCloudContext = (): AppThunk<Promise<void>> => async (disp
       void controller.refreshKubernetesContexts();
     }
     if (action.operation === 'start' && selection) {
-      await controller.openSelection(selection);
+      await dispatch(openSelection(selection));
     }
     void controller.refreshIdleStatus();
   } catch (error) {

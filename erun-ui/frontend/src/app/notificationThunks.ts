@@ -11,8 +11,8 @@ import {
   setTerminalCopyStatus,
   setTerminalMessage,
 } from './slices/terminalStatusSlice';
+import { openSelection } from './sessionThunks';
 import type { AppThunk } from './store';
-import { requireController } from './thunkExtra';
 import type { AppNotification, TerminalStatusAction } from './state';
 import type { UISelection } from '@/types';
 
@@ -106,8 +106,7 @@ export const dismissNotification = (): AppThunk => (dispatch, getState) => {
 };
 
 export const waitLongerForTerminalStatus = (): AppThunk<Promise<void>> =>
-  async (dispatch, getState, extra) => {
-    const controller = requireController(extra);
+  async (dispatch, getState) => {
     const selection = getState().terminalStatus.retrySelection;
     if (!selection) {
       return;
@@ -115,7 +114,7 @@ export const waitLongerForTerminalStatus = (): AppThunk<Promise<void>> =>
     dispatch(setTerminalCopyOutput(''));
     dispatch(setTerminalCopyStatus(''));
     dispatch(showTerminalMessage(`Waiting longer for ${selection.tenant} / ${selection.environment}...`, true));
-    await controller.openSelection(selection);
+    await dispatch(openSelection(selection));
   };
 
 export const copyTerminalOutput = (): AppThunk<Promise<void>> =>

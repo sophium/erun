@@ -7,6 +7,7 @@ import {
 } from './environmentDialogState';
 import { showTerminalMessage } from './notificationThunks';
 import { runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
+import { startDeploySelection, startInitSelection } from './sessionThunks';
 import {
   patchEnvironmentDialog,
   setEnvironmentDialog,
@@ -147,9 +148,9 @@ export const submitEnvironmentDialog = (form: HTMLFormElement): AppThunk<Promise
     const previousSelected = state.selection.selected;
     try {
       if (dialog.actionMode === 'deploy') {
-        await controller.startDeploySelection(selection);
+        await dispatch(startDeploySelection(selection));
       } else {
-        await controller.startInitSelection(selection);
+        await dispatch(startInitSelection(selection));
       }
       dispatch(setEnvironmentDialog(defaultEnvironmentDialog()));
       controller.focusTerminalSoon();
