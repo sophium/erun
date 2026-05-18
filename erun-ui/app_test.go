@@ -3258,6 +3258,136 @@ func TestStartSessionAutoReconnectsOnExit(t *testing.T) {
 	}
 }
 
+func TestStartSessionDoesNotReconnectIntoStoppedCloudContext(t *testing.T) {
+	// The respawn loop used to re-launch `erun open` on every PTY exit,
+	// even when the env's cloud context had just been auto-stopped. Each
+	// respawn re-ran CloudContextPreflight, which immediately undid the
+	// stop. Gate the respawn on cloud-context state so the auto-stop is
+	// not fought by the desktop's own reconnect machinery; the user
+	// recovers via the titlebar start button.
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		config: &eruncommon.ERunConfig{
+			CloudContexts: []eruncommon.CloudContextConfig{{
+				Name:              "managed-cloud",
+				KubernetesContext: "cluster-cloud",
+				Status:            eruncommon.CloudContextStatusStopped,
+			}},
+		},
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {
+				Name:              "remote",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-cloud",
+				Remote:            true,
+			},
+		},
+	}
+
+	var sessions []*stubTerminalSession
+	var mu sync.Mutex
+	app := NewApp(erunUIDeps{
+		store:           store,
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			session := newStubTerminalSession()
+			mu.Lock()
+			sessions = append(sessions, session)
+			mu.Unlock()
+			return session, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+		t.Fatalf("StartSession failed: %v", err)
+	}
+
+	mu.Lock()
+	first := sessions[0]
+	mu.Unlock()
+	_ = first.Close()
+
+	// Wait long enough that a respawn would have shown up if the gate
+	// were broken; the existing reconnect test races for ~2s, so the
+	// same window here would surface a regression.
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		count := len(sessions)
+		mu.Unlock()
+		if count > 1 {
+			t.Fatalf("expected no respawn against stopped cloud context, got %d sessions", count)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T) {
+	// idleStops latches on the first successful stop so the desktop
+	// does not re-fire a stop while one is in flight. When the context
+	// gets restarted externally (CLI preflight, manual titlebar Play,
+	// `erun context start`), the desktop's flag turns stale and a
+	// second auto-stop can never fire. maybeStopIdleCloudEnvironment
+	// reconciles by clearing the flag whenever it observes a running
+	// context. This test exercises the reconcile via the public
+	// LoadIdleStatus path so the merge + recompute chain stays honest.
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		config: &eruncommon.ERunConfig{
+			CloudContexts: []eruncommon.CloudContextConfig{{
+				Name:              "managed-cloud",
+				KubernetesContext: "cluster-cloud",
+				Status:            eruncommon.CloudContextStatusRunning,
+			}},
+		},
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {
+				Name:              "remote",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-cloud",
+				Remote:            true,
+				ManagedCloud:      true,
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{
+		store:               store,
+		canConnectLocalPort: func(int) bool { return false },
+		loadIdleStatus: func(context.Context, string) (eruncommon.EnvironmentIdleStatus, error) {
+			return eruncommon.EnvironmentIdleStatus{}, fmt.Errorf("mcp unreachable")
+		},
+		stopCloudContext: func(context.Context, string) (eruncommon.CloudContextStatus, error) {
+			t.Fatal("stop should not fire while context is running")
+			return eruncommon.CloudContextStatus{}, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	key := selectionKey(uiSelection{Tenant: "erun", Environment: "remote"})
+	app.mu.Lock()
+	app.idleStops[key] = struct{}{}
+	app.mu.Unlock()
+
+	if _, err := app.LoadIdleStatus(uiSelection{Tenant: "erun", Environment: "remote"}); err != nil {
+		t.Fatalf("LoadIdleStatus returned an error: %v", err)
+	}
+
+	app.mu.Lock()
+	_, present := app.idleStops[key]
+	app.mu.Unlock()
+	if present {
+		t.Fatal("expected stale idle-stop flag to be cleared while context is running")
+	}
+}
+
 func TestStartSessionLogsOpenCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
