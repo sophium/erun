@@ -1,8 +1,7 @@
-import type { StartSessionResult, UIEnvironmentConfig, UISelection } from '@/types';
+import type { StartSessionResult, UISelection } from '@/types';
 
 import {
   CloseSession,
-  LoadEnvironmentConfig,
   StartAISession,
   StartDeploySession,
   StartInitSession,
@@ -10,6 +9,7 @@ import {
   StartSession,
 } from '../../wailsjs/go/main/App';
 import { sessionApi } from './api/sessionApi';
+import { resolveAutoStartGate } from './autoStartGate';
 import {
   appendDebugOutput,
   applyPendingDebugHeader,
@@ -42,6 +42,7 @@ import {
   clearSessionDebug,
   markEnvOpening,
   registerDebugSession,
+  resetEnvOpening,
   setSessionDebug,
   trackOpenSession,
 } from './slices/sessionsSlice';
@@ -129,13 +130,30 @@ const ensureDefaultEnvTabs =
     }
   };
 
-export const registerOpenSessionResult =
+// trackOpenSessionMetadata records the session bookkeeping that should
+// fire whether or not the user is still on this env: the session
+// existence (so a later sidebar click can reuse instead of double-spawning)
+// and the tab entry. registerOpenSessionResult composes this with the
+// "promote to current view" half; the stale-selection path in openSelection
+// calls only this helper so an abandoned long-running open does not steal
+// the terminal away from the env the user has navigated to.
+const trackOpenSessionMetadata =
   (key: string, result: StartSessionResult, runSelection: UISelection): AppThunk =>
-  (dispatch, getState) => {
+  (dispatch) => {
     dispatch(trackOpenSession({ key, sessionId: result.sessionId, selection: runSelection }));
     dispatch(
       registerDebugSession({ sessionId: result.sessionId, selection: runSelection, mode: 'open' }),
     );
+    const slot = result.slot ?? 0;
+    const kind: TerminalTabKind = slot === 0 ? 'erun' : 'extra';
+    const label = kind === 'erun' ? 'ERun' : `Terminal ${String(slot)}`;
+    dispatch(recordTab(key, result.sessionId, slot, kind, label));
+  };
+
+export const registerOpenSessionResult =
+  (key: string, result: StartSessionResult, runSelection: UISelection): AppThunk =>
+  (dispatch, getState) => {
+    dispatch(trackOpenSessionMetadata(key, result, runSelection));
     dispatch(applyPendingDebugHeader(result.sessionId));
     dispatch(setSessionId(result.sessionId));
     // Preserve the user's prior tab choice for this env across re-opens
@@ -152,10 +170,6 @@ export const registerOpenSessionResult =
       dispatch(setSelectedSessionForEnv({ key, sessionId: result.sessionId }));
     }
     dispatch(syncDebugDisplay());
-    const slot = result.slot ?? 0;
-    const kind: TerminalTabKind = slot === 0 ? 'erun' : 'extra';
-    const label = kind === 'erun' ? 'ERun' : `Terminal ${String(slot)}`;
-    dispatch(recordTab(key, result.sessionId, slot, kind, label));
   };
 
 const prepareOpenSelection =
@@ -259,6 +273,15 @@ export const openSelection =
     }
     const shouldSpawnERun = verdict !== 'skip-erun';
 
+    const isCurrentSelection = createIsCurrentSelection(getState, selection);
+
+    // Reset openingByEnv before the new selection paints its own spinner.
+    // The previous click's openSelection is still in flight in the
+    // background; isCurrentSelection keeps that flow from stomping on
+    // the new selection's status banner or terminal id, and this reset
+    // keeps the sidebar spinner from lingering on the env the user has
+    // navigated away from.
+    dispatch(resetEnvOpening());
     dispatch(
       prepareOpenSelection(selection, runSelection, previousSessionId, previousKnownSessionId),
     );
@@ -271,6 +294,9 @@ export const openSelection =
       const tabs = getState().terminal.tabsByEnv[key] ?? [];
       if (!tabs.some((tab) => tab.kind === 'local')) {
         await dispatch(spawnDefaultTab(key, runSelection, 'local', 'Local', cols, rows));
+      }
+      if (!isCurrentSelection()) {
+        return;
       }
 
       if (!shouldSpawnERun) {
@@ -287,80 +313,80 @@ export const openSelection =
 
       const slot = selectActiveSlotForSelection(getState(), runSelection);
       const result = (await StartSession(runSelection, slot, cols, rows)) as StartSessionResult;
-      dispatch(registerOpenSessionResult(key, result, runSelection));
-      dispatch(showOpenSelectionStatus(result.sessionId, selection));
-
-      await dispatch(ensureDefaultEnvTabs(runSelection, key, cols, rows));
-      dispatch(restoreSelectedTabForEnv(key));
-
-      if (getState().layout.reviewOpen) {
-        await dispatch(loadReviewDiff());
-      }
-      controller.focusTerminalSoon();
-      controller.queueTerminalResize();
+      await dispatch(
+        finishOpenSession(key, result, runSelection, selection, cols, rows, isCurrentSelection),
+      );
     } catch (error: unknown) {
-      dispatch(setSelected(previousSelected));
-      dispatch(showTerminalMessage(readError(error)));
+      if (isCurrentSelection()) {
+        dispatch(setSelected(previousSelected));
+        dispatch(showTerminalMessage(readError(error)));
+      }
       throw error;
     } finally {
       dispatch(clearEnvOpening({ tenant: selection.tenant, environment: selection.environment }));
     }
   };
 
-// wouldAutoStartCloudContext returns true when the linked cloud context is
-// in a state that would cause erun open's CloudContextPreflight to issue an
-// EC2 start. "running" and "starting" already imply a hot or starting host,
-// so the desktop has nothing to prompt about; everything else (stopped,
-// stopping, unknown) is treated as "starting will happen, ask the user".
-function wouldAutoStartCloudContext(status: string): boolean {
-  const normalized = status.trim().toLowerCase();
-  return normalized !== 'running' && normalized !== 'starting';
-}
-
-type AutoStartGateVerdict = 'proceed' | 'skip-erun' | 'prompt';
-
-// resolveAutoStartGate decides whether openSelection should let the ERun
-// tab spawn (and therefore let erun open's preflight start EC2). It only
-// triggers a Wails round-trip in the cases where the answer is not already
-// known from state.tenants, so the common autoStart=true path stays
-// click-to-spawn with no extra latency.
-async function resolveAutoStartGate(
-  selection: UISelection,
+// createIsCurrentSelection captures the click's target selection and
+// returns a predicate that any post-await dispatch can poll to decide
+// whether to keep painting for `selection` or drop work because the user
+// has navigated to a different env. The check reads getState() afresh
+// each call so it tracks setSelected dispatches that fire between awaits.
+function createIsCurrentSelection(
   getState: () => import('./store').RootState,
-): Promise<AutoStartGateVerdict> {
-  const env = findTenantEnvironment(getState(), selection);
-  const autoStartPolicy = env?.autoStart;
-  if (!env?.remote || autoStartPolicy === true) {
-    return 'proceed';
-  }
-  const wouldStart = await wouldClickStartCloudContext(selection);
-  if (!wouldStart) {
-    return 'proceed';
-  }
-  return autoStartPolicy === false ? 'skip-erun' : 'prompt';
-}
-
-function findTenantEnvironment(
-  state: import('./store').RootState,
   selection: UISelection,
-): import('@/types').UIEnvironment | undefined {
-  const tenant = state.tenants.tenants.find((item) => item.name === selection.tenant);
-  return tenant?.environments.find((item) => item.name === selection.environment);
+): () => boolean {
+  return () => {
+    const current = getState().selection.selected;
+    if (current === null) {
+      return false;
+    }
+    return current.tenant === selection.tenant && current.environment === selection.environment;
+  };
 }
 
-async function wouldClickStartCloudContext(selection: UISelection): Promise<boolean> {
-  try {
-    const config = (await LoadEnvironmentConfig(selection)) as UIEnvironmentConfig;
-    const status = config.cloudContext?.status ?? '';
-    return status !== '' && wouldAutoStartCloudContext(status);
-  } catch {
-    // Best-effort: if the env config read fails the gate cannot tell
-    // whether opening would start EC2. Treat as "not starting" so the
-    // normal open path runs and the underlying error surfaces in the
-    // terminal area instead of being swallowed by a silent skip.
-    return false;
-  }
-}
+// finishOpenSession owns the post-StartSession work: tab promotion, status
+// banner, default-tab ensure, review diff refresh. Splitting it out keeps
+// openSelection's branching budget under the linter's ceiling, and gives
+// the stale-selection bail-outs a single home. When the user has navigated
+// away (isCurrentSelection() === false), the spawned session is recorded
+// for later reuse but not promoted to the visible terminal — so a long-
+// running cold EC2 open in env A no longer paints "Opening A..." over env
+// B that the user has since clicked into.
+const finishOpenSession =
+  (
+    key: string,
+    result: StartSessionResult,
+    runSelection: UISelection,
+    selection: UISelection,
+    cols: number,
+    rows: number,
+    isCurrentSelection: () => boolean,
+  ): AppThunk<Promise<void>> =>
+  async (dispatch, getState, extra) => {
+    const controller = requireController(extra);
+    if (!isCurrentSelection()) {
+      dispatch(trackOpenSessionMetadata(key, result, runSelection));
+      return;
+    }
+    dispatch(registerOpenSessionResult(key, result, runSelection));
+    dispatch(showOpenSelectionStatus(result.sessionId, selection));
+
+    await dispatch(ensureDefaultEnvTabs(runSelection, key, cols, rows));
+    if (!isCurrentSelection()) {
+      return;
+    }
+    dispatch(restoreSelectedTabForEnv(key));
+
+    if (getState().layout.reviewOpen) {
+      await dispatch(loadReviewDiff());
+    }
+    if (!isCurrentSelection()) {
+      return;
+    }
+    controller.focusTerminalSoon();
+    controller.queueTerminalResize();
+  };
 
 // activateLocalAfterCommand promotes the freshly-spawned Local session as
 // the active tab once an init/deploy command finishes. Init does not
