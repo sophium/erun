@@ -130,6 +130,24 @@ const ensureDefaultEnvTabs =
     }
   };
 
+// surfaceEnvSession repoints the visible terminal at the new env's
+// preferred session: the remembered tab if it still exists, else a
+// Local tab for the env, else 0. The terminal renderer drops PTY
+// writes that do not match the current sessionId, so this prevents
+// the previous env's content from continuing to paint while the new
+// env's slower StartSession is in flight.
+const surfaceEnvSession =
+  (key: string): AppThunk =>
+  (dispatch, getState) => {
+    const state = getState();
+    const tabs = state.terminal.tabsByEnv[key] ?? [];
+    const remembered = state.terminal.selectedSessionByEnv[key] ?? 0;
+    const next = tabs.some((tab) => tab.sessionId === remembered)
+      ? remembered
+      : (tabs.find((tab) => tab.kind === 'local')?.sessionId ?? 0);
+    dispatch(setSessionId(next));
+  };
+
 // trackOpenSessionMetadata records the session bookkeeping that should
 // fire whether or not the user is still on this env: the session
 // existence (so a later sidebar click can reuse instead of double-spawning)
@@ -181,13 +199,21 @@ const prepareOpenSelection =
   ): AppThunk =>
   (dispatch, getState) => {
     const state = getState();
-    if (
-      selectionKey(selection) !==
-      selectionKey(state.selection.selected ?? { tenant: '', environment: '' })
-    ) {
+    const previousKey = state.selection.selected ? selectionKey(state.selection.selected) : '';
+    const newKey = selectionKey(selection);
+    if (newKey !== previousKey) {
       dispatch(setSelectedReviewScope('current'));
       dispatch(setSelectedReviewCommit(''));
       dispatch(setSelectedDiffPath(''));
+      // Detach the terminal from the previous env's PTY immediately.
+      // Without this the visible terminal keeps painting the old env's
+      // output (and accepting input on the wrong session) until the new
+      // env's slower StartSession returns and registerOpenSessionResult
+      // calls setSessionId. surfaceEnvSession below tries to repoint at
+      // whatever the new env already has (remembered tab or a live
+      // Local), and falls back to 0 so the terminal goes quiet for the
+      // gap rather than lying.
+      dispatch(surfaceEnvSession(newKey));
     }
     dispatch(setSelected(selection));
     dispatch(setIdleStatus(null));
@@ -298,6 +324,12 @@ export const openSelection =
       if (!isCurrentSelection()) {
         return;
       }
+      // Now that Local is guaranteed to exist for this env, repoint the
+      // visible terminal at it. prepareOpenSelection has already
+      // cleared sessionId to 0 if the env changed; this fills it back
+      // in with the just-spawned (or already-existing) Local so the
+      // user sees their new env's terminal while ERun cold-starts.
+      dispatch(surfaceEnvSession(key));
 
       if (!shouldSpawnERun) {
         // autoStart=never path: navigation completes with Local only. The
