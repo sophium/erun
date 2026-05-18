@@ -205,16 +205,13 @@ const prepareOpenSelection =
       dispatch(setSelectedReviewScope('current'));
       dispatch(setSelectedReviewCommit(''));
       dispatch(setSelectedDiffPath(''));
-      // Detach the terminal from the previous env's PTY immediately.
-      // Without this the visible terminal keeps painting the old env's
-      // output (and accepting input on the wrong session) until the new
-      // env's slower StartSession returns and registerOpenSessionResult
-      // calls setSessionId. surfaceEnvSession below tries to repoint at
-      // whatever the new env already has (remembered tab or a live
-      // Local), and falls back to 0 so the terminal goes quiet for the
-      // gap rather than lying.
-      dispatch(surfaceEnvSession(newKey));
     }
+    // setSelected is observed by selectionSyncMiddleware, which reconciles
+    // state.terminal.sessionId with the new env's tabs in the same tick.
+    // Every setSelected dispatch — including re-clicks where newKey ===
+    // previousKey but the terminal happens to point at a stale session
+    // from another env — flows through the listener, so no caller has to
+    // remember to pair setSelected with a manual surface.
     dispatch(setSelected(selection));
     dispatch(setIdleStatus(null));
     if (!isNewSessionSelection(previousSessionId, previousKnownSessionId)) {

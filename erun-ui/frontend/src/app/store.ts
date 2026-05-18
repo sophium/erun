@@ -15,6 +15,7 @@ import { setupListeners } from '@reduxjs/toolkit/query';
 
 import { wailsApi } from './api/wailsApi';
 import { persistenceMiddleware } from './middleware/persistenceMiddleware';
+import { selectionSyncMiddleware } from './middleware/selectionSyncMiddleware';
 import { terminalDisplayMiddleware } from './middleware/terminalDisplayMiddleware';
 import activityReducer from './slices/activitySlice';
 import autoStartPromptReducer from './slices/autoStartPromptSlice';
@@ -69,6 +70,7 @@ export const store = configureStore({
     })
       .concat(wailsApi.middleware)
       .concat(persistenceMiddleware.middleware)
+      .concat(selectionSyncMiddleware.middleware)
       .concat(terminalDisplayMiddleware.middleware),
 });
 
