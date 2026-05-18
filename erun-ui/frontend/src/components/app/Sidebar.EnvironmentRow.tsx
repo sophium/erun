@@ -6,6 +6,7 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { openManageDialog } from '@/app/manageEnvironmentThunks';
 import { showTerminalMessage } from '@/app/notificationThunks';
 import { openSelection } from '@/app/sessionThunks';
+import { envKey } from '@/app/slices/sessionsSlice';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { deriveEnvironmentRow } from '@/components/app/Sidebar.helpers';
 import { Button } from '@/components/ui/button';
@@ -81,13 +82,15 @@ export function EnvironmentRow({
   const dispatch = useAppDispatch();
   const selectedSelection = useAppSelector((state) => state.selection.selected);
   const tenants = useAppSelector((state) => state.tenants.tenants);
-  const terminalBusy = useAppSelector((state) => state.terminalStatus.terminalBusy);
+  const isOpening = useAppSelector(
+    (state) => state.sessions.openingByEnv[envKey(tenantName, environmentName)] === true,
+  );
   const { selected, busy, isLocal, selection } = deriveEnvironmentRow(
     tenantName,
     environmentName,
     selectedSelection,
     tenants,
-    terminalBusy,
+    isOpening,
   );
 
   return (

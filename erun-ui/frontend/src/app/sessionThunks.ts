@@ -36,7 +36,9 @@ import {
 } from './slices/reviewSlice';
 import { setSelected } from './slices/selectionSlice';
 import {
+  clearEnvOpening,
   clearSessionDebug,
+  markEnvOpening,
   registerDebugSession,
   setSessionDebug,
   trackOpenSession,
@@ -247,6 +249,7 @@ export const openSelection =
     controller.fitTerminal();
     const { cols, rows } = controller.terminalSize();
 
+    dispatch(markEnvOpening({ tenant: selection.tenant, environment: selection.environment }));
     try {
       // Spawn Local first so subsequent ERun/AI spawns can log into it.
       const tabs = getState().terminal.tabsByEnv[key] ?? [];
@@ -271,6 +274,8 @@ export const openSelection =
       dispatch(setSelected(previousSelected));
       dispatch(showTerminalMessage(readError(error)));
       throw error;
+    } finally {
+      dispatch(clearEnvOpening({ tenant: selection.tenant, environment: selection.environment }));
     }
   };
 

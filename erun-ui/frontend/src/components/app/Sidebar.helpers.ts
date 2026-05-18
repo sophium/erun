@@ -38,11 +38,14 @@ export function deriveEnvironmentRow(
   environmentName: string,
   selectedSelection: UISelection | null,
   tenants: AppState['tenants'],
-  terminalBusy: boolean,
+  isOpening: boolean,
 ): EnvironmentRowDerived {
   const selected =
     selectedSelection?.tenant === tenantName && selectedSelection.environment === environmentName;
-  const busy = terminalBusy && selected;
+  // busy reflects the per-env opening lifecycle — independent of which
+  // env is currently selected, so concurrent opens / mid-open re-clicks
+  // still surface a spinner on the env that's actually being spawned.
+  const busy = isOpening;
   const environment = tenants
     .find((tenant) => tenant.name === tenantName)
     ?.environments.find((env) => env.name === environmentName);
