@@ -8,6 +8,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 	"github.com/spf13/cobra"
@@ -16,6 +18,10 @@ import (
 type AppLauncher func(io.Writer, io.Writer, []string) error
 
 func newAppCmd(launchApp AppLauncher) *cobra.Command {
+	var (
+		headless bool
+		port     int
+	)
 	cmd := &cobra.Command{
 		Use:           "app",
 		Short:         "Launch the ERun desktop app",
@@ -24,18 +30,39 @@ func newAppCmd(launchApp AppLauncher) *cobra.Command {
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := commandContext(cmd)
-			ctx.TraceCommand("", resolveAppExecutable())
+			executable := resolveAppExecutable()
+			appArgs := buildAppLaunchArgs(headless, port)
+			traceArgs := executable
+			if len(appArgs) > 0 {
+				traceArgs = executable + " " + strings.Join(appArgs, " ")
+			}
+			ctx.TraceCommand("", traceArgs)
 			if ctx.DryRun {
 				return nil
 			}
 			if launchApp == nil {
 				launchApp = launchAppProcess
 			}
-			return launchApp(ctx.Stdout, ctx.Stderr, nil)
+			return launchApp(ctx.Stdout, ctx.Stderr, appArgs)
 		},
 	}
+	cmd.Flags().BoolVar(&headless, "headless", false, "Run the desktop backend without a Wails window and serve the frontend over HTTP")
+	cmd.Flags().IntVar(&port, "port", 0, "HTTP listen port for --headless mode (defaults to the desktop binary's default)")
 	addDryRunFlag(cmd)
 	return cmd
+}
+
+// buildAppLaunchArgs returns the argv tail passed to erun-app. Only the
+// headless flags are forwarded today; everything else stays on the CLI side.
+func buildAppLaunchArgs(headless bool, port int) []string {
+	if !headless {
+		return nil
+	}
+	args := []string{"--headless"}
+	if port > 0 {
+		args = append(args, "--port", strconv.Itoa(port))
+	}
+	return args
 }
 
 func launchAppProcess(stdout, stderr io.Writer, args []string) error {

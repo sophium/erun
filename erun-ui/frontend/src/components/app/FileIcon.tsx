@@ -1,5 +1,5 @@
-import * as React from 'react';
 import { File, FileCode2, FileCog, FileJson, FileText, Gem } from 'lucide-react';
+import * as React from 'react';
 
 const extensionIcons = new Map([
   ['css', FileCode2],
@@ -41,7 +41,7 @@ export function FileIcon({ filePath }: { filePath: string }): React.ReactElement
 }
 
 function fileIconForPath(filePath: string): typeof File {
-  const name = filePath.split('/').pop()?.toLowerCase() || '';
-  const extension = filePath.split('.').pop()?.toLowerCase() || '';
+  const name = filePath.split('/').pop()?.toLowerCase() ?? '';
+  const extension = filePath.split('.').pop()?.toLowerCase() ?? '';
   return filenameIcons.get(name) ?? extensionIcons.get(extension) ?? File;
 }

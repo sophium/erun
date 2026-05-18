@@ -147,5 +147,17 @@ Common gaps this checklist catches:
 ## Validation
 
 - Run `go test ./...` for Go/backend changes.
-- Run `yarn build` and `go test ./...` for frontend changes.
+- Run `yarn typecheck && yarn lint && yarn format:check && yarn build` inside `frontend/` for frontend changes. `build.sh` runs the first three gates before invoking `yarn build` — set `ERUN_SKIP_LINT=1` only when iterating locally on a feature, never in CI.
 - Run `./build.sh <target>` when changing desktop packaging, Wails wiring, CGO settings, or generated asset embedding.
+
+## Lint, Format, Typecheck
+
+- ESLint config: `frontend/eslint.config.mjs` (flat config). It mirrors the Go side's `golangci.yml`: type-aware typescript-eslint (`recommendedTypeChecked`) ≈ `staticcheck`+`govet`+`errcheck`, `complexity:15` ≈ `gocyclo`, `max-lines-per-function:150` ≈ `funlen`, plus React-specific rules (`react-hooks/rules-of-hooks`, `react-hooks/exhaustive-deps`, `react-refresh/only-export-components`) and `jsx-a11y` for accessible-query compatibility with the Playwright suite. Auto-fix: `yarn lint:fix`.
+- Prettier is the formatter (separate process; not piped through ESLint). Config: `frontend/.prettierrc.json`. Auto-fix: `yarn format`.
+- TypeScript strict mode plus `noUnusedLocals`, `noUnusedParameters`, `noImplicitOverride`, `noFallthroughCasesInSwitch`, `noUncheckedIndexedAccess` are all on. `yarn typecheck` runs `tsc --noEmit`.
+- The `playwright/` sub-project mirrors the same config (with `eslint-plugin-playwright` added). Its `run.sh` runs the same gates before invoking the test suite.
+
+## End-to-end UI tests
+
+- `playwright/` is a separate Yarn project that runs end-to-end UI tests against `erun-app --headless` over the HTTP+SSE bridge. Use it for cross-component flows that depend on rendered DOM (sidebar toggles, dialog interactions, layout panels, status banners), or for catching regressions that unit-level Go tests cannot observe because they exercise only the backend. It does not replace `go test ./...`: Go tests cover backend logic, while Playwright covers the React frontend behaviour after a real boot sequence.
+- The canonical way to run the suite is `./playwright/run.sh` — it (re)builds `bin/erun-app`, installs Yarn deps and bundled Chromium if needed, then runs `playwright test` against the headless backend on port 34123. Desktop build and packaging flows should invoke `playwright/run.sh` rather than chaining yarn + playwright calls by hand. See `playwright/AGENTS.md` for the flag surface (`--skip-build`, `--port`, `--headed`, `-- ...`) and the page-object-model rules every spec must follow.

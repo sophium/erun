@@ -27,7 +27,10 @@ export function runtimePodConfigToKubernetes(config: UIRuntimePodConfig): UIRunt
   };
 }
 
-export function runtimeResourceBounds(status: UIRuntimeResourceStatus | null, loading: boolean): RuntimeResourceBounds {
+export function runtimeResourceBounds(
+  status: UIRuntimeResourceStatus | null,
+  loading: boolean,
+): RuntimeResourceBounds {
   if (loading) {
     return {
       cpuMax: 0,
@@ -52,7 +55,7 @@ export function runtimeResourceBounds(status: UIRuntimeResourceStatus | null, lo
       memoryMax: 0,
       loading: false,
       available: false,
-      message: status.message || 'Capacity is unavailable.',
+      message: status.message ?? 'Capacity is unavailable.',
     };
   }
   return {
@@ -60,38 +63,68 @@ export function runtimeResourceBounds(status: UIRuntimeResourceStatus | null, lo
     memoryMax: roundToStep(status.memory.free, RUNTIME_MEMORY_STEP),
     loading: false,
     available: true,
-    message: status.message || `Available on best node: ${formatNumber(status.cpu.free)} CPU, ${formatNumber(status.memory.free)} GiB memory.`,
+    message:
+      status.message ??
+      `Available on best node: ${formatNumber(status.cpu.free)} CPU, ${formatNumber(status.memory.free)} GiB memory.`,
   };
 }
 
-export function runtimeResourceLimitMessage(config: UIRuntimePodConfig, status: UIRuntimeResourceStatus | null): string {
+function parsedRuntimeErrorMessage(error: string, status: UIRuntimeResourceStatus | null): string {
+  if (
+    status?.available &&
+    error.startsWith('CPU') &&
+    roundToStep(status.cpu.free, RUNTIME_CPU_STEP) < MIN_RUNTIME_CPU_CORES
+  ) {
+    return 'No CPU capacity is available for this runtime.';
+  }
+  if (
+    status?.available &&
+    error.startsWith('Memory') &&
+    roundToStep(status.memory.free, RUNTIME_MEMORY_STEP) < MIN_RUNTIME_MEMORY_GIB
+  ) {
+    return 'No memory capacity is available for this runtime.';
+  }
+  return error;
+}
+
+export function runtimeResourceLimitMessage(
+  config: UIRuntimePodConfig,
+  status: UIRuntimeResourceStatus | null,
+): string {
   const parsed = parseRuntimePodConfig(config);
   if (parsed.error) {
-    if (status?.available && parsed.error.startsWith('CPU') && roundToStep(status.cpu.free, RUNTIME_CPU_STEP) < MIN_RUNTIME_CPU_CORES) {
-      return 'No CPU capacity is available for this runtime.';
-    }
-    if (status?.available && parsed.error.startsWith('Memory') && roundToStep(status.memory.free, RUNTIME_MEMORY_STEP) < MIN_RUNTIME_MEMORY_GIB) {
-      return 'No memory capacity is available for this runtime.';
-    }
-    return parsed.error;
+    return parsedRuntimeErrorMessage(parsed.error, status);
   }
   if (!status?.available) {
     return '';
   }
-  const matchingNode = (status.nodes || []).find((node) => parsed.cpuCores <= node.cpu.free && parsed.memoryGiB <= node.memory.free);
+  const matchingNode = (status.nodes ?? []).find(
+    (node) => parsed.cpuCores <= node.cpu.free && parsed.memoryGiB <= node.memory.free,
+  );
   if (status.nodes && status.nodes.length > 0 && !matchingNode) {
     return `No node has both ${formatNumber(parsed.cpuCores)} CPU and ${formatNumber(parsed.memoryGiB)} GiB memory available.`;
   }
   return '';
 }
 
-export function clampRuntimePodConfig(config: UIRuntimePodConfig, bounds: RuntimeResourceBounds): UIRuntimePodConfig {
+export function clampRuntimePodConfig(
+  config: UIRuntimePodConfig,
+  bounds: RuntimeResourceBounds,
+): UIRuntimePodConfig {
   if (!bounds.available) {
     return config;
   }
   return {
-    cpu: bounds.cpuMax >= MIN_RUNTIME_CPU_CORES ? formatNumber(clamp(parseDisplayNumber(config.cpu), MIN_RUNTIME_CPU_CORES, bounds.cpuMax)) : config.cpu,
-    memory: bounds.memoryMax >= MIN_RUNTIME_MEMORY_GIB ? formatNumber(clamp(parseDisplayNumber(config.memory), MIN_RUNTIME_MEMORY_GIB, bounds.memoryMax)) : config.memory,
+    cpu:
+      bounds.cpuMax >= MIN_RUNTIME_CPU_CORES
+        ? formatNumber(clamp(parseDisplayNumber(config.cpu), MIN_RUNTIME_CPU_CORES, bounds.cpuMax))
+        : config.cpu,
+    memory:
+      bounds.memoryMax >= MIN_RUNTIME_MEMORY_GIB
+        ? formatNumber(
+            clamp(parseDisplayNumber(config.memory), MIN_RUNTIME_MEMORY_GIB, bounds.memoryMax),
+          )
+        : config.memory,
   };
 }
 
@@ -99,7 +132,11 @@ export function parseDisplayNumber(value: string): number {
   return Number(value.trim().replace(',', '.'));
 }
 
-function parseRuntimePodConfig(config: UIRuntimePodConfig): { cpuCores: number; memoryGiB: number; error: string } {
+function parseRuntimePodConfig(config: UIRuntimePodConfig): {
+  cpuCores: number;
+  memoryGiB: number;
+  error: string;
+} {
   const cpuCores = parseDisplayNumber(config.cpu);
   if (!Number.isFinite(cpuCores) || cpuCores <= 0) {
     return { cpuCores: 0, memoryGiB: 0, error: 'CPU must be a positive number of cores.' };
@@ -121,15 +158,15 @@ function parseCPUToCores(value: string): number {
 
 function parseMemoryToGiB(value: string): number {
   const trimmed = value.trim();
-  const units: Array<[string, number]> = [
+  const units: [string, number][] = [
     ['Ki', 1 / 1024 / 1024],
     ['Mi', 1 / 1024],
     ['Gi', 1],
     ['Ti', 1024],
     ['K', 1000 / 1024 / 1024 / 1024],
-    ['M', 1000 * 1000 / 1024 / 1024 / 1024],
-    ['G', 1000 * 1000 * 1000 / 1024 / 1024 / 1024],
-    ['T', 1000 * 1000 * 1000 * 1000 / 1024 / 1024 / 1024],
+    ['M', (1000 * 1000) / 1024 / 1024 / 1024],
+    ['G', (1000 * 1000 * 1000) / 1024 / 1024 / 1024],
+    ['T', (1000 * 1000 * 1000 * 1000) / 1024 / 1024 / 1024],
   ];
   for (const [suffix, multiplier] of units) {
     if (trimmed.endsWith(suffix)) {
@@ -150,7 +187,7 @@ function formatMemoryQuantity(gib: number): string {
   if (!Number.isFinite(gib) || gib <= 0) {
     return '';
   }
-  return `${Math.round(gib * 1024)}Mi`;
+  return `${String(Math.round(gib * 1024))}Mi`;
 }
 
 function roundToStep(value: number, step: number): number {

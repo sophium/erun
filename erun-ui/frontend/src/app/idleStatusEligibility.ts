@@ -8,5 +8,5 @@ export function isIdleStatusDisplayEligible(status: UIIdleStatus | null): status
   if (!status?.managedCloud) {
     return false;
   }
-  return (status.cloudContextStatus || '').trim().toLowerCase() === 'running';
+  return (status.cloudContextStatus ?? '').trim().toLowerCase() === 'running';
 }

@@ -1,14 +1,17 @@
-import type {
-  UISelection,
-  UIVersionSuggestion,
-} from '@/types';
+import type { UISelection, UIVersionSuggestion } from '@/types';
 
-export function findVersionSuggestion(suggestions: UIVersionSuggestion[], version: string, image: string): UIVersionSuggestion | undefined {
+export function findVersionSuggestion(
+  suggestions: UIVersionSuggestion[],
+  version: string,
+  image: string,
+): UIVersionSuggestion | undefined {
   if (!version) {
     return undefined;
   }
   if (image) {
-    return suggestions.find((suggestion) => suggestion.version === version && suggestion.image === image);
+    return suggestions.find(
+      (suggestion) => suggestion.version === version && suggestion.image === image,
+    );
   }
   return suggestions.find((suggestion) => suggestion.version === version);
 }
@@ -21,10 +24,19 @@ export function normalizeVersionSuggestions(values: UIVersionSuggestion[]): UIVe
   const suggestions: UIVersionSuggestion[] = [];
   for (const value of values) {
     const version = normalizeDialogValue(value.version);
-    const image = normalizeDialogValue(value.image || '');
-    const source = normalizeDialogValue(value.source || '');
+    const image = normalizeDialogValue(value.image ?? '');
+    const source = normalizeDialogValue(value.source ?? '');
     const label = normalizeDialogValue(value.label);
-    if (version && !suggestions.some((suggestion) => suggestion.version === version && suggestion.image === image && suggestion.source === source && suggestion.label === label)) {
+    if (
+      version &&
+      !suggestions.some(
+        (suggestion) =>
+          suggestion.version === version &&
+          suggestion.image === image &&
+          suggestion.source === source &&
+          suggestion.label === label,
+      )
+    ) {
       suggestions.push({
         label,
         version,
@@ -63,11 +75,11 @@ export function versionChoiceKind(suggestion: UIVersionSuggestion): string {
 }
 
 export function versionChoiceSource(suggestion: UIVersionSuggestion): string {
-  const source = normalizeDialogValue(suggestion.source || '');
+  const source = normalizeDialogValue(suggestion.source ?? '');
   if (source) {
     return source;
   }
-  const image = normalizeDialogValue(suggestion.image || '');
+  const image = normalizeDialogValue(suggestion.image ?? '');
   if (image === 'erun-devops') {
     return 'ERun';
   }
@@ -78,7 +90,7 @@ export function versionChoiceSource(suggestion: UIVersionSuggestion): string {
 }
 
 export function versionChoiceImage(suggestion: UIVersionSuggestion): string {
-  const image = normalizeDialogValue(suggestion.image || '');
+  const image = normalizeDialogValue(suggestion.image ?? '');
   if (image) {
     return image;
   }

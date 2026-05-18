@@ -1,0 +1,255 @@
+import { AlertCircle, CheckCircle2, Copy, Info, LoaderCircle, X } from 'lucide-react';
+import * as React from 'react';
+
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { displayableIdleStatus } from '@/app/idleStatusEligibility';
+import {
+  copyTerminalOutput,
+  dismissNotification,
+  dismissTerminalStatus,
+  waitLongerForTerminalStatus,
+} from '@/app/notificationThunks';
+import type { AppState } from '@/app/state';
+import type { AppDispatch } from '@/app/store';
+import { IconTooltip } from '@/components/app/IconTooltip';
+import { idleCloudAction } from '@/components/app/Titlebar.helpers';
+import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { cn } from '@/lib/utils';
+
+type TitlebarStatusKind =
+  | NonNullable<AppState['notification']>['kind']
+  | AppState['terminalStatusKind'];
+
+interface TitlebarStatusValue {
+  source: 'notification' | 'terminal';
+  kind: TitlebarStatusKind;
+  message: string;
+  detail: string;
+  busy: boolean;
+  copyOutput: string;
+  copyStatus: string;
+  action: AppState['terminalStatusAction'];
+}
+
+const statusBorderClassNames: Record<TitlebarStatusKind, string> = {
+  success: 'border-[oklch(0.72_0.12_150)] text-foreground',
+  warning: 'border-[oklch(0.76_0.16_65)] text-foreground',
+  error: 'border-destructive/60 text-foreground',
+  info: 'border-border text-foreground',
+};
+
+const statusIconClassNames: Record<TitlebarStatusKind, string> = {
+  success: 'text-[oklch(0.52_0.15_150)]',
+  warning: 'text-[oklch(0.58_0.15_65)]',
+  error: 'text-destructive',
+  info: 'text-muted-foreground',
+};
+
+export function TitlebarStatus(): React.ReactElement | null {
+  const notification = useAppSelector((state) => state.notification.notification);
+  const terminalStatus = useAppSelector((state) => state.terminalStatus);
+  const rawIdleStatus = useAppSelector((state) => state.idle.idleStatus);
+  const idleCloudContextBusy = useAppSelector((state) => state.idle.idleCloudContextBusy);
+  const status = computeTitlebarStatus(notification, terminalStatus);
+  if (!status) {
+    return null;
+  }
+  const idleStatus = displayableIdleStatus(rawIdleStatus);
+  const idleAction = rawIdleStatus ? idleCloudAction(rawIdleStatus, idleCloudContextBusy) : null;
+
+  return (
+    <div
+      className={statusPositionClassName(idleStatus, Boolean(idleAction))}
+      role={status.kind === 'error' ? 'alert' : 'status'}
+      aria-live={status.kind === 'error' ? 'assertive' : 'polite'}
+    >
+      <div
+        className={cn(
+          'pointer-events-auto flex h-8 max-w-full items-center gap-2 rounded-md border bg-background px-2.5 text-[13px] leading-none shadow-sm',
+          statusBorderClassNames[status.kind],
+        )}
+      >
+        <StatusIcon status={status} />
+        <StatusMessage status={status} />
+        {status.action === 'wait-longer' && <StatusWaitAction />}
+        {status.copyOutput && <StatusCopyAction status={status} />}
+        <StatusDismissAction status={status} />
+      </div>
+    </div>
+  );
+}
+
+function computeTitlebarStatus(
+  notification: AppState['notification'],
+  terminal: {
+    terminalMessage: string;
+    terminalStatusKind: AppState['terminalStatusKind'];
+    terminalStatusDetail: string;
+    terminalStatusAction: AppState['terminalStatusAction'];
+    terminalBusy: boolean;
+    terminalCopyOutput: string;
+    terminalCopyStatus: string;
+  },
+): TitlebarStatusValue | null {
+  if (notification) {
+    return {
+      ...notification,
+      source: 'notification',
+      detail: '',
+      busy: false,
+      copyOutput: '',
+      copyStatus: '',
+      action: '',
+    };
+  }
+  if (terminal.terminalBusy && terminal.terminalMessage) {
+    return null;
+  }
+  if (!terminal.terminalMessage) {
+    return null;
+  }
+  return {
+    source: 'terminal',
+    kind: terminal.terminalStatusKind,
+    message: terminal.terminalMessage,
+    detail: terminal.terminalStatusDetail,
+    busy: terminal.terminalBusy,
+    copyOutput: terminal.terminalCopyOutput,
+    copyStatus: terminal.terminalCopyStatus,
+    action: terminal.terminalStatusAction,
+  };
+}
+
+function statusPositionClassName(
+  idleStatus: AppState['idleStatus'],
+  hasIdleAction: boolean,
+): string {
+  if (!idleStatus) {
+    if (hasIdleAction) {
+      return 'pointer-events-none absolute top-2.5 left-32 right-[204px] z-20 flex justify-center [--wails-draggable:no-drag] max-[980px]:left-[112px] max-[980px]:right-[182px]';
+    }
+    return 'pointer-events-none absolute top-2.5 left-32 right-[168px] z-20 flex justify-center [--wails-draggable:no-drag] max-[980px]:left-[112px] max-[980px]:right-[146px]';
+  }
+  if (hasIdleAction) {
+    return 'pointer-events-none absolute top-2.5 left-32 right-[268px] z-20 flex justify-center [--wails-draggable:no-drag] max-[980px]:left-[112px] max-[980px]:right-[246px]';
+  }
+  return 'pointer-events-none absolute top-2.5 left-32 right-[236px] z-20 flex justify-center [--wails-draggable:no-drag] max-[980px]:left-[112px] max-[980px]:right-[214px]';
+}
+
+function StatusIcon({ status }: { status: TitlebarStatusValue }): React.ReactElement {
+  const NotificationIcon = statusIcon(status);
+  return (
+    <NotificationIcon
+      className={cn(
+        'size-4 flex-none',
+        status.busy && 'animate-spin text-muted-foreground',
+        statusIconClassNames[status.kind],
+      )}
+      aria-hidden="true"
+    />
+  );
+}
+
+function statusIcon(status: TitlebarStatusValue): typeof LoaderCircle {
+  if (status.busy) {
+    return LoaderCircle;
+  }
+  if (status.kind === 'success') {
+    return CheckCircle2;
+  }
+  if (status.kind === 'warning' || status.kind === 'error') {
+    return AlertCircle;
+  }
+  return Info;
+}
+
+function StatusMessage({ status }: { status: TitlebarStatusValue }): React.ReactElement {
+  const fullText = status.detail ? `${status.message}. ${status.detail}` : status.message;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          className="min-w-0 cursor-default truncate rounded-sm border-0 bg-transparent p-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={fullText}
+        >
+          {status.message}
+          {status.detail && <span className="text-muted-foreground"> - {status.detail}</span>}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="max-w-[360px] whitespace-normal text-left leading-5">
+        {fullText}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function StatusWaitAction(): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <Button
+      className="h-6 flex-none rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground"
+      type="button"
+      variant="ghost"
+      size="xs"
+      onClick={() => {
+        void dispatch(waitLongerForTerminalStatus());
+      }}
+    >
+      Wait longer
+    </Button>
+  );
+}
+
+function StatusCopyAction({ status }: { status: TitlebarStatusValue }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <IconTooltip label="Copy terminal output">
+      <Button
+        className="h-6 flex-none gap-1 rounded-md px-2 text-[12px] text-foreground hover:bg-accent hover:text-accent-foreground [&_svg]:size-3.5"
+        type="button"
+        variant="ghost"
+        size="xs"
+        onClick={() => {
+          void dispatch(copyTerminalOutput());
+        }}
+      >
+        {status.copyStatus === 'Copied' ? (
+          <CheckCircle2 aria-hidden="true" />
+        ) : (
+          <Copy aria-hidden="true" />
+        )}
+        {status.copyStatus || 'Copy output'}
+      </Button>
+    </IconTooltip>
+  );
+}
+
+function StatusDismissAction({ status }: { status: TitlebarStatusValue }): React.ReactElement {
+  const dispatch = useAppDispatch();
+  return (
+    <IconTooltip label="Dismiss status">
+      <Button
+        className="-mr-1 size-6 flex-none text-muted-foreground hover:bg-accent hover:text-accent-foreground [&_svg]:size-3.5"
+        type="button"
+        variant="ghost"
+        size="icon-xs"
+        aria-label="Dismiss status"
+        onClick={() => {
+          dismissTitlebarStatus(dispatch, status);
+        }}
+      >
+        <X />
+      </Button>
+    </IconTooltip>
+  );
+}
+
+function dismissTitlebarStatus(dispatch: AppDispatch, status: TitlebarStatusValue): void {
+  if (status.source === 'notification') {
+    dispatch(dismissNotification());
+    return;
+  }
+  dispatch(dismissTerminalStatus());
+}

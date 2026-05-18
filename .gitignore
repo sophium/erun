@@ -37,3 +37,7 @@ __debug_bin*
 /packaging/apt/dist/
 /erun-devops/linux/**/dist/
 /erun-cli/bin/erun-app
+
+# Playwright MCP debugging artifacts (console logs, page snapshots) written
+# at the repo root by the local dev tooling, never by tests
+/.playwright-mcp/

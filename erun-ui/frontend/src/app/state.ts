@@ -2,16 +2,16 @@ import type {
   DiffResult,
   EnvironmentActionMode,
   ManageTab,
-  UIERunConfig,
-  UIEnvironmentConfig,
-  UICloudProviderStatus,
-  UIIdleStatus,
   UICloudContextInitInput,
-  UITenantDashboard,
+  UICloudProviderStatus,
+  UIEnvironmentConfig,
+  UIERunConfig,
+  UIIdleStatus,
   UIRuntimeResourceStatus,
   UISelection,
-  UITenantConfig,
   UITenant,
+  UITenantConfig,
+  UITenantDashboard,
   UIVersionSuggestion,
 } from '@/types';
 
@@ -24,8 +24,15 @@ export const DEFAULT_REVIEW_WIDTH = 620;
 const REVIEW_GRID_TERMINAL_MIN_WIDTH = 360;
 const REVIEW_GRID_DIVIDER_WIDTH = 10;
 
-export function computeMaxReviewWidth(viewportWidth: number, effectiveSidebarWidth: number): number {
-  const fittable = viewportWidth - effectiveSidebarWidth - REVIEW_GRID_TERMINAL_MIN_WIDTH - REVIEW_GRID_DIVIDER_WIDTH;
+export function computeMaxReviewWidth(
+  viewportWidth: number,
+  effectiveSidebarWidth: number,
+): number {
+  const fittable =
+    viewportWidth -
+    effectiveSidebarWidth -
+    REVIEW_GRID_TERMINAL_MIN_WIDTH -
+    REVIEW_GRID_DIVIDER_WIDTH;
   return Math.max(MIN_REVIEW_WIDTH, Math.min(MAX_REVIEW_WIDTH, fittable));
 }
 export const MIN_FILES_WIDTH = 220;
@@ -116,7 +123,13 @@ export interface GlobalConfigDialogState {
   cloudContextDraft: UICloudContextInitInput;
   configLoading: boolean;
   busy: boolean;
-  busyAction: '' | 'save' | 'cloud-context-init' | 'cloud-context-power' | 'cloud-provider-init' | 'cloud-provider-login';
+  busyAction:
+    | ''
+    | 'save'
+    | 'cloud-context-init'
+    | 'cloud-context-power'
+    | 'cloud-provider-init'
+    | 'cloud-provider-login';
   busyTarget: string;
   error: string;
 }

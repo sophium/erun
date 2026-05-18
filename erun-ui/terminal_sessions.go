@@ -12,7 +12,6 @@ import (
 	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // StartSession spawns the ERun tab's `erun open` PTY for (selection,
@@ -743,10 +742,7 @@ func (a *App) ReconnectMCP(selection uiSelection) error {
 		return fmt.Errorf("reconnect is not configured")
 	}
 	emit := func(line string) {
-		if a.ctx == nil {
-			return
-		}
-		runtime.EventsEmit(a.ctx, mcpReconnectLineEvent, line)
+		a.emit(mcpReconnectLineEvent, line)
 	}
 	return a.deps.reconnectMCP(ctx, result, emit)
 }
@@ -985,10 +981,7 @@ func terminalSessionExitReason(session terminalSession, readErr error) string {
 }
 
 func (a *App) emitEvent(name string, payload any) {
-	if a.ctx == nil {
-		return
-	}
-	runtime.EventsEmit(a.ctx, name, payload)
+	a.emit(name, payload)
 }
 
 func (a *App) closeAllSessionsLocked() {

@@ -1,15 +1,23 @@
-import type { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import type { TerminalWriteData } from './model';
+import type { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import { cleanTerminalOutput, interactivePromptIndex } from './terminalStatus';
 
-export function failedTerminalOutput(sessions: TerminalSessionRegistry, sessionId: number, fallback: string): string {
+export function failedTerminalOutput(
+  sessions: TerminalSessionRegistry,
+  sessionId: number,
+  fallback: string,
+): string {
   const chunks = sessions.sessionBuffer(sessionId);
   const decoder = new TextDecoder();
-  const output = chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join('') + decoder.decode();
+  const output =
+    chunks.map((chunk) => decoder.decode(chunk, { stream: true })).join('') + decoder.decode();
   return cleanTerminalOutput(output) || fallback;
 }
 
-export function rebuildTerminalDisplayBuffer(sessions: TerminalSessionRegistry, sessionId: number): void {
+export function rebuildTerminalDisplayBuffer(
+  sessions: TerminalSessionRegistry,
+  sessionId: number,
+): void {
   sessions.clearDebugFilter(sessionId);
   const chunks = sessions.sessionBuffer(sessionId);
   const displayBuffer: TerminalWriteData[] = [];

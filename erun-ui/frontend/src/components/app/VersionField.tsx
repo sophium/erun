@@ -1,9 +1,20 @@
-import * as React from 'react';
 import { Check, ChevronsUpDown } from 'lucide-react';
+import * as React from 'react';
 
-import { versionChoiceImage, versionChoiceKind, versionChoiceLabel } from '@/app/versionSuggestions';
+import {
+  versionChoiceImage,
+  versionChoiceKind,
+  versionChoiceLabel,
+} from '@/app/versionSuggestions';
 import { Button } from '@/components/ui/button';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -49,7 +60,9 @@ export function VersionField({
           spellCheck={false}
           required={required}
           disabled={disabled}
-          onChange={(event) => onValueChange(event.target.value)}
+          onChange={(event) => {
+            onValueChange(event.target.value);
+          }}
         />
         <Popover open={choicesOpen} onOpenChange={onChoicesOpenChange}>
           <PopoverTrigger asChild>
@@ -75,15 +88,23 @@ export function VersionField({
                     return (
                       <CommandItem
                         className="min-w-0"
-                        key={`${suggestion.version}:${suggestion.image || ''}:${suggestion.source || ''}:${suggestion.label || ''}`}
+                        key={`${suggestion.version}:${suggestion.image ?? ''}:${suggestion.source ?? ''}:${suggestion.label}`}
                         value={versionChoiceLabel(suggestion)}
-                        onSelect={() => onSelect(suggestion)}
+                        onSelect={() => {
+                          onSelect(suggestion);
+                        }}
                       >
-                        <Check className={cn('size-4 shrink-0 opacity-0', selected && 'opacity-100')} />
+                        <Check
+                          className={cn('size-4 shrink-0 opacity-0', selected && 'opacity-100')}
+                        />
                         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                          <span className="truncate text-sm font-medium leading-tight">{suggestion.version}</span>
+                          <span className="truncate text-sm font-medium leading-tight">
+                            {suggestion.version}
+                          </span>
                           <span className="truncate text-xs leading-tight text-muted-foreground">
-                            {[versionChoiceImage(suggestion), versionChoiceKind(suggestion)].filter(Boolean).join(' | ')}
+                            {[versionChoiceImage(suggestion), versionChoiceKind(suggestion)]
+                              .filter(Boolean)
+                              .join(' | ')}
                           </span>
                         </span>
                       </CommandItem>

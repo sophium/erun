@@ -1,4 +1,7 @@
-export function isTerminalPasteTarget(terminalRoot: HTMLDivElement, target: EventTarget | null): boolean {
+export function isTerminalPasteTarget(
+  terminalRoot: HTMLDivElement,
+  target: EventTarget | null,
+): boolean {
   return target instanceof Node && terminalRoot.contains(target);
 }
 
