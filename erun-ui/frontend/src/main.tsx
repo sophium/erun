@@ -5,10 +5,10 @@ import { createRoot } from 'react-dom/client';
 import { Provider } from 'react-redux';
 
 import { App } from './App';
-import { startWailsEventsListening } from './app/middleware/wailsEventsMiddleware';
 import { store } from './app/store';
+import { attachWailsEventForwarders } from './app/wailsEventForwarders';
 
-store.dispatch(startWailsEventsListening());
+attachWailsEventForwarders(store.dispatch);
 
 const shell = document.querySelector<HTMLDivElement>('#app');
 if (!shell) {
