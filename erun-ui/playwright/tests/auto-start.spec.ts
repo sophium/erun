@@ -3,12 +3,15 @@ import { expect, test } from '../fixtures/erunApp.js';
 // auto-start covers the desktop-only auto-start gate added in
 // feature/331-idle-stop-and-autostart-gate.
 //
-// The General-tab "Auto-start when opening" select round-trips through the
-// existing LoadEnvironmentConfig / SaveEnvironmentConfig path. The spec
-// opens the manage dialog for the first env and asserts the select's
-// presence tracks the env's "Remote environment" readonly field, without
-// saving — same approach as the other manage specs, to avoid mutating the
-// developer's actual ~/.erun/ config.
+// The Runtime-tab "Auto-start when opening" select lives in the Idle-stop
+// card alongside Timeout, Working hours, and Idle SSH activity threshold,
+// because all four govern the env's start/stop lifecycle. It round-trips
+// through the existing LoadEnvironmentConfig / SaveEnvironmentConfig path.
+// The spec opens the manage dialog for the first env and asserts the
+// select's presence tracks the env's "Remote environment" readonly field
+// (visible on the General tab), without saving — same approach as the
+// other manage specs, to avoid mutating the developer's actual ~/.erun/
+// config.
 //
 // AutoStartPromptDialog itself opens only when openSelection has to decide
 // whether to start a stopped EC2 host. The headless backend reflects the
@@ -21,7 +24,7 @@ import { expect, test } from '../fixtures/erunApp.js';
 // mirrors ReconnectDialog's primitives.
 
 test.describe('auto-start gate', () => {
-  test('General-tab AutoStart select visibility tracks Remote field', async ({ app }) => {
+  test('Runtime-tab AutoStart select visibility tracks Remote field', async ({ app }) => {
     const tenants = await app.sidebar.tenants();
     expect(tenants.length).toBeGreaterThan(0);
     const tenant = tenants[0]!;
@@ -32,9 +35,14 @@ test.describe('auto-start gate', () => {
     await app.sidebar.openManageDialogFor(tenant, env);
     await app.manageDialog.waitForOpen();
 
+    // Remote field is on the General tab (default landing tab). Read it
+    // first, then hop to Runtime where the AutoStart select lives.
     const remote = (await app.manageDialog.remoteFieldValue()).trim();
     expect(remote).toMatch(/^(Yes|No)$/);
     const expectVisible = remote === 'Yes';
+
+    await app.manageDialog.selectTab('Runtime');
+    await expect.poll(() => app.manageDialog.getActiveTab()).toBe('Runtime');
     expect(await app.manageDialog.autoStartSelectVisible()).toBe(expectVisible);
 
     await app.manageDialog.cancel();

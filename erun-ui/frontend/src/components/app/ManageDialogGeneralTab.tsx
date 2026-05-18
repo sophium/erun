@@ -79,47 +79,8 @@ export function GeneralTab(): React.ReactElement {
           dispatch(updateManageConfig({ snapshot }));
         }}
       />
-      {config.remote && (
-        <SelectField
-          id="environment-config-autostart"
-          label="Auto-start when opening"
-          value={autoStartMode(config.autoStart)}
-          options={AUTO_START_OPTIONS}
-          helper="Applies on the next sidebar click. 'Ask each time' shows the auto-start prompt before starting the EC2 instance."
-          disabled={dialog.busy || dialog.configLoading}
-          onChange={(mode) => {
-            dispatch(updateManageConfig({ autoStart: parseAutoStartMode(mode) }));
-          }}
-        />
-      )}
     </>
   );
-}
-
-const AUTO_START_OPTIONS = [
-  { value: 'ask', label: 'Ask each time' },
-  { value: 'always', label: 'Always auto-start' },
-  { value: 'never', label: 'Never auto-start' },
-];
-
-function autoStartMode(value: boolean | undefined): string {
-  if (value === true) {
-    return 'always';
-  }
-  if (value === false) {
-    return 'never';
-  }
-  return 'ask';
-}
-
-function parseAutoStartMode(mode: string): boolean | undefined {
-  if (mode === 'always') {
-    return true;
-  }
-  if (mode === 'never') {
-    return false;
-  }
-  return undefined;
 }
 
 function CloudAliasSelect({
