@@ -165,6 +165,19 @@ export interface ReconnectState {
   error: string;
 }
 
+// AutoStartPromptState backs the first-time "Auto-start this environment?"
+// dialog. The dialog opens when openSelection is asked to navigate to a remote
+// env whose linked cloud context is stopped and whose env config does not yet
+// record an AutoStart override. The user's answer is persisted via
+// SetEnvironmentAutoStart so the prompt does not appear again unless the
+// setting is reset from the manage-env dialog.
+export interface AutoStartPromptState {
+  open: boolean;
+  selection: UISelection | null;
+  saving: boolean;
+  error: string;
+}
+
 export interface AppState {
   tenants: UITenant[];
   cloudProviders: UICloudProviderStatus[];
@@ -175,6 +188,7 @@ export interface AppState {
   tenantDialog: TenantDialogState;
   tenantDashboard: TenantDashboardState;
   globalConfigDialog: GlobalConfigDialogState;
+  autoStartPrompt: AutoStartPromptState;
   collapsedTenants: Set<string>;
   sessionId: number;
   tabsByEnv: Record<string, TerminalTab[]>;
@@ -283,6 +297,13 @@ export const defaultGlobalConfigDialog = (): GlobalConfigDialogState => ({
   busy: false,
   busyAction: '',
   busyTarget: '',
+  error: '',
+});
+
+export const defaultAutoStartPrompt = (): AutoStartPromptState => ({
+  open: false,
+  selection: null,
+  saving: false,
   error: '',
 });
 

@@ -7,6 +7,7 @@ export interface UIEnvironment {
   isActive?: boolean;
   sshdEnabled?: boolean;
   remote: boolean;
+  autoStart?: boolean;
 }
 
 export interface UITenant {
@@ -263,6 +264,11 @@ export interface UIEnvironmentConfig {
   localPorts: UIEnvironmentLocalPorts;
   remote: boolean;
   snapshot: boolean;
+  // AutoStart is the desktop-only auto-start policy for the linked cloud
+  // context: undefined means "ask the user once" (first-time prompt), true
+  // means "always auto-start", false means "never auto-start; render the
+  // titlebar Play button so the user can start manually".
+  autoStart?: boolean;
 }
 
 export interface UIEnvironmentClaudeConfig {

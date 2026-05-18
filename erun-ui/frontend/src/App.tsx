@@ -6,6 +6,7 @@ import { startSidebarResize } from '@/app/layoutThunks';
 import { setActivityQueueOpen } from '@/app/slices/layoutSlice';
 import { TerminalController } from '@/app/TerminalController';
 import { ActivityQueueLauncher } from '@/components/app/ActivityQueueLauncher';
+import { AutoStartPromptDialog } from '@/components/app/AutoStartPromptDialog';
 import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
 import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
 import { MainPane } from '@/components/app/MainPane';
@@ -89,6 +90,7 @@ export function App(): React.ReactElement {
         <ManageDialogView />
         <ReconnectDialog />
         <TenantDialogView />
+        <AutoStartPromptDialog />
         <ActivityQueueLauncher
           open={activityQueueOpen}
           onOpen={() => dispatch(setActivityQueueOpen(true))}

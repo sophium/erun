@@ -1,7 +1,8 @@
-import type { StartSessionResult, UISelection } from '@/types';
+import type { StartSessionResult, UIEnvironmentConfig, UISelection } from '@/types';
 
 import {
   CloseSession,
+  LoadEnvironmentConfig,
   StartAISession,
   StartDeploySession,
   StartInitSession,
@@ -28,6 +29,7 @@ import {
 import { loadReviewDiff } from './reviewThunks';
 import { selectActiveSlotForSelection, selectEnvironmentExists } from './selectors';
 import { isNewSessionSelection } from './sessionSelection';
+import { setAutoStartPrompt } from './slices/autoStartPromptSlice';
 import { setIdleStatus } from './slices/idleSlice';
 import {
   setSelectedDiffPath,
@@ -243,6 +245,20 @@ export const openSelection =
     // previous one.
     const previousSelected = getState().selection.selected;
 
+    const verdict = await resolveAutoStartGate(selection, getState);
+    if (verdict === 'prompt') {
+      dispatch(
+        setAutoStartPrompt({
+          open: true,
+          selection: { ...selection },
+          saving: false,
+          error: '',
+        }),
+      );
+      return;
+    }
+    const shouldSpawnERun = verdict !== 'skip-erun';
+
     dispatch(
       prepareOpenSelection(selection, runSelection, previousSessionId, previousKnownSessionId),
     );
@@ -255,6 +271,18 @@ export const openSelection =
       const tabs = getState().terminal.tabsByEnv[key] ?? [];
       if (!tabs.some((tab) => tab.kind === 'local')) {
         await dispatch(spawnDefaultTab(key, runSelection, 'local', 'Local', cols, rows));
+      }
+
+      if (!shouldSpawnERun) {
+        // autoStart=never path: navigation completes with Local only. The
+        // user can flip the policy from the manage-env dialog or click the
+        // titlebar Play button to start the cloud context on demand, which
+        // will surface "running" on the next idle poll and lets a follow-up
+        // sidebar click spawn the ERun tab.
+        dispatch(hideTerminalMessage());
+        controller.focusTerminalSoon();
+        controller.queueTerminalResize();
+        return;
       }
 
       const slot = selectActiveSlotForSelection(getState(), runSelection);
@@ -278,6 +306,61 @@ export const openSelection =
       dispatch(clearEnvOpening({ tenant: selection.tenant, environment: selection.environment }));
     }
   };
+
+// wouldAutoStartCloudContext returns true when the linked cloud context is
+// in a state that would cause erun open's CloudContextPreflight to issue an
+// EC2 start. "running" and "starting" already imply a hot or starting host,
+// so the desktop has nothing to prompt about; everything else (stopped,
+// stopping, unknown) is treated as "starting will happen, ask the user".
+function wouldAutoStartCloudContext(status: string): boolean {
+  const normalized = status.trim().toLowerCase();
+  return normalized !== 'running' && normalized !== 'starting';
+}
+
+type AutoStartGateVerdict = 'proceed' | 'skip-erun' | 'prompt';
+
+// resolveAutoStartGate decides whether openSelection should let the ERun
+// tab spawn (and therefore let erun open's preflight start EC2). It only
+// triggers a Wails round-trip in the cases where the answer is not already
+// known from state.tenants, so the common autoStart=true path stays
+// click-to-spawn with no extra latency.
+async function resolveAutoStartGate(
+  selection: UISelection,
+  getState: () => import('./store').RootState,
+): Promise<AutoStartGateVerdict> {
+  const env = findTenantEnvironment(getState(), selection);
+  const autoStartPolicy = env?.autoStart;
+  if (!env?.remote || autoStartPolicy === true) {
+    return 'proceed';
+  }
+  const wouldStart = await wouldClickStartCloudContext(selection);
+  if (!wouldStart) {
+    return 'proceed';
+  }
+  return autoStartPolicy === false ? 'skip-erun' : 'prompt';
+}
+
+function findTenantEnvironment(
+  state: import('./store').RootState,
+  selection: UISelection,
+): import('@/types').UIEnvironment | undefined {
+  const tenant = state.tenants.tenants.find((item) => item.name === selection.tenant);
+  return tenant?.environments.find((item) => item.name === selection.environment);
+}
+
+async function wouldClickStartCloudContext(selection: UISelection): Promise<boolean> {
+  try {
+    const config = (await LoadEnvironmentConfig(selection)) as UIEnvironmentConfig;
+    const status = config.cloudContext?.status ?? '';
+    return status !== '' && wouldAutoStartCloudContext(status);
+  } catch {
+    // Best-effort: if the env config read fails the gate cannot tell
+    // whether opening would start EC2. Treat as "not starting" so the
+    // normal open path runs and the underlying error surfaces in the
+    // terminal area instead of being swallowed by a silent skip.
+    return false;
+  }
+}
 
 // activateLocalAfterCommand promotes the freshly-spawned Local session as
 // the active tab once an init/deploy command finishes. Init does not
