@@ -28,6 +28,7 @@ type uiEnvironment struct {
 	IsActive          bool   `json:"isActive,omitempty"`
 	SSHDEnabled       bool   `json:"sshdEnabled,omitempty"`
 	Remote            bool   `json:"remote"`
+	AutoStart         *bool  `json:"autoStart,omitempty"`
 }
 
 type uiSelection struct {
@@ -186,6 +187,7 @@ type uiEnvironmentConfig struct {
 	LocalPorts           uiEnvironmentLocalPorts `json:"localPorts"`
 	Remote               bool                    `json:"remote"`
 	Snapshot             bool                    `json:"snapshot"`
+	AutoStart            *bool                   `json:"autoStart,omitempty"`
 }
 
 type uiClaudeConfig struct {

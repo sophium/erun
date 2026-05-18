@@ -1896,6 +1896,65 @@ func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 	}
 }
 
+func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
+	// AutoStart is the desktop's per-env auto-start gate. The three modes
+	// map to *bool: ask=nil (prompt on next open), always=true, never=false.
+	// SetEnvironmentAutoStart must round-trip each mode through the store
+	// without rewriting unrelated fields.
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"frs": {Name: "frs", ProjectRoot: projectRoot},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/prod": {
+				Name:              "prod",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-prod",
+				ContainerRegistry: "registry.example/keep",
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	saved, err := app.SetEnvironmentAutoStart(uiSelection{Tenant: "frs", Environment: "prod"}, "never")
+	if err != nil {
+		t.Fatalf("SetEnvironmentAutoStart(never) failed: %v", err)
+	}
+	if saved.AutoStart == nil || *saved.AutoStart != false {
+		t.Fatalf("expected returned AutoStart=false, got %+v", saved.AutoStart)
+	}
+	if got := store.envs["frs/prod"].AutoStart; got == nil || *got != false {
+		t.Fatalf("expected stored AutoStart=false, got %+v", got)
+	}
+	if store.envs["frs/prod"].ContainerRegistry != "registry.example/keep" {
+		t.Fatalf("SetEnvironmentAutoStart must not rewrite unrelated fields, got %+v", store.envs["frs/prod"])
+	}
+
+	saved, err = app.SetEnvironmentAutoStart(uiSelection{Tenant: "frs", Environment: "prod"}, "always")
+	if err != nil {
+		t.Fatalf("SetEnvironmentAutoStart(always) failed: %v", err)
+	}
+	if saved.AutoStart == nil || *saved.AutoStart != true {
+		t.Fatalf("expected returned AutoStart=true, got %+v", saved.AutoStart)
+	}
+
+	saved, err = app.SetEnvironmentAutoStart(uiSelection{Tenant: "frs", Environment: "prod"}, "ask")
+	if err != nil {
+		t.Fatalf("SetEnvironmentAutoStart(ask) failed: %v", err)
+	}
+	if saved.AutoStart != nil {
+		t.Fatalf("expected returned AutoStart=nil after ask, got %+v", saved.AutoStart)
+	}
+	if got := store.envs["frs/prod"].AutoStart; got != nil {
+		t.Fatalf("expected stored AutoStart=nil after ask, got %+v", got)
+	}
+
+	if _, err := app.SetEnvironmentAutoStart(uiSelection{Tenant: "frs", Environment: "prod"}, "bogus"); err == nil {
+		t.Fatal("expected unknown auto-start mode to be rejected")
+	}
+}
+
 func equalStringSlices(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

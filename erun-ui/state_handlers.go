@@ -130,6 +130,7 @@ func stateFromListResult(result eruncommon.ListResult, info eruncommon.BuildInfo
 				IsActive:          environment.IsActive,
 				SSHDEnabled:       environment.SSH.Enabled,
 				Remote:            environment.Remote,
+				AutoStart:         copyBoolPtr(environment.AutoStart),
 			})
 		}
 		state.Tenants = append(state.Tenants, item)
