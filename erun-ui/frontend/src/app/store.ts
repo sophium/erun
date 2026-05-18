@@ -16,7 +16,6 @@ import { setupListeners } from '@reduxjs/toolkit/query';
 import { wailsApi } from './api/wailsApi';
 import { persistenceMiddleware } from './middleware/persistenceMiddleware';
 import { terminalDisplayMiddleware } from './middleware/terminalDisplayMiddleware';
-import { wailsEventsMiddleware } from './middleware/wailsEventsMiddleware';
 import activityReducer from './slices/activitySlice';
 import doctorReducer from './slices/doctorSlice';
 import environmentDialogReducer from './slices/environmentDialogSlice';
@@ -68,7 +67,6 @@ export const store = configureStore({
     })
       .concat(wailsApi.middleware)
       .concat(persistenceMiddleware.middleware)
-      .concat(wailsEventsMiddleware.middleware)
       .concat(terminalDisplayMiddleware.middleware),
 });
 
