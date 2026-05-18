@@ -29,6 +29,7 @@ export function pendingForTenant(
 export interface EnvironmentRowDerived {
   selected: boolean;
   busy: boolean;
+  busyLabel: string;
   isLocal: boolean;
   selection: UISelection;
 }
@@ -39,13 +40,18 @@ export function deriveEnvironmentRow(
   selectedSelection: UISelection | null,
   tenants: AppState['tenants'],
   isOpening: boolean,
+  runningCommand: string,
 ): EnvironmentRowDerived {
   const selected =
     selectedSelection?.tenant === tenantName && selectedSelection.environment === environmentName;
-  // busy reflects the per-env opening lifecycle — independent of which
-  // env is currently selected, so concurrent opens / mid-open re-clicks
-  // still surface a spinner on the env that's actually being spawned.
-  const busy = isOpening;
+  // busy reflects the per-env opening lifecycle AND any running activity
+  // command (deploy, init, sshd init, doctor, ...) queued against the
+  // env. Either signal is independent of which env is currently
+  // selected, so concurrent work on multiple envs surfaces a spinner on
+  // every row that's actually doing something — not just the one in the
+  // active terminal.
+  const busy = isOpening || runningCommand !== '';
+  const busyLabel = environmentRowBusyLabel(tenantName, environmentName, isOpening, runningCommand);
   const environment = tenants
     .find((tenant) => tenant.name === tenantName)
     ?.environments.find((env) => env.name === environmentName);
@@ -53,9 +59,48 @@ export function deriveEnvironmentRow(
   return {
     selected,
     busy,
+    busyLabel,
     isLocal,
     selection: { tenant: tenantName, environment: environmentName },
   };
+}
+
+function environmentRowBusyLabel(
+  tenantName: string,
+  environmentName: string,
+  isOpening: boolean,
+  runningCommand: string,
+): string {
+  const target = `${tenantName} / ${environmentName}`;
+  if (runningCommand !== '') {
+    const verb = activityCommandLabel(runningCommand);
+    return `${verb} ${target}`;
+  }
+  if (isOpening) {
+    return `Opening ${target}`;
+  }
+  return '';
+}
+
+function activityCommandLabel(command: string): string {
+  switch (command) {
+    case 'deploy':
+      return 'Deploying';
+    case 'init':
+      return 'Initializing';
+    case 'sshd-init':
+      return 'Configuring SSH for';
+    case 'doctor':
+      return 'Running doctor on';
+    case 'build':
+      return 'Building';
+    case 'push':
+      return 'Pushing';
+    case 'release':
+      return 'Releasing';
+    default:
+      return 'Working on';
+  }
 }
 
 export interface PrimaryCloudAliasInputs {
