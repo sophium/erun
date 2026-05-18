@@ -1,13 +1,14 @@
 import type { Page } from '@playwright/test';
-import { Sidebar } from './Sidebar';
-import { Titlebar } from './Titlebar';
-import { GlobalConfigDialog } from './GlobalConfigDialog';
-import { EnvironmentInitDialog } from './EnvironmentInitDialog';
-import { ManageDialog } from './ManageDialog';
-import { TenantDialog } from './TenantDialog';
-import { DebugPanel } from './DebugPanel';
-import { ReviewPanel } from './ReviewPanel';
 import { ActivityQueueDrawer } from './ActivityQueueDrawer';
+import { AutoStartPromptDialog } from './AutoStartPromptDialog';
+import { DebugPanel } from './DebugPanel';
+import { EnvironmentInitDialog } from './EnvironmentInitDialog';
+import { GlobalConfigDialog } from './GlobalConfigDialog';
+import { ManageDialog } from './ManageDialog';
+import { ReviewPanel } from './ReviewPanel';
+import { Sidebar } from './Sidebar';
+import { TenantDialog } from './TenantDialog';
+import { Titlebar } from './Titlebar';
 
 // AppShell wraps the top-level rendered app. Tests use it as their entry
 // point; component-specific POMs are reached through the accessor properties
@@ -75,5 +76,9 @@ export class AppShell {
 
   get activityDrawer(): ActivityQueueDrawer {
     return new ActivityQueueDrawer(this.page);
+  }
+
+  get autoStartPromptDialog(): AutoStartPromptDialog {
+    return new AutoStartPromptDialog(this.page);
   }
 }
