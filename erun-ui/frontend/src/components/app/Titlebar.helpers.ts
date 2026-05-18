@@ -131,7 +131,12 @@ function idleStatusActiveMarkerLines(idleStatus: IdleStatus): string[] {
   if (activeMarkers.length === 0) {
     return [];
   }
-  return ['Active markers:', ...activeMarkers.map(idleStatusActiveMarkerLine)];
+  const lines = ['Active markers:'];
+  for (const marker of activeMarkers) {
+    lines.push(idleStatusActiveMarkerLine(marker));
+    lines.push(...idleStatusActiveMarkerClientLines(marker));
+  }
+  return lines;
 }
 
 function idleStatusActiveMarkerLine(marker: NonNullable<IdleStatus['markers']>[number]): string {
@@ -140,6 +145,55 @@ function idleStatusActiveMarkerLine(marker: NonNullable<IdleStatus['markers']>[n
       ? `, ${String(marker.secondsRemaining)}s remaining`
       : '';
   return `- ${marker.name}${marker.reason ? `: ${marker.reason}` : ''}${remaining}`;
+}
+
+// idleStatusActiveMarkerClientLines emits "  - <address> — <bytes>, <ago>"
+// for each per-peer entry attached to the marker. The leading two spaces
+// keep these visually nested under their parent "- <name>: ..." line; the
+// Titlebar tooltip JSX leaves the prefix alone but already applies the
+// `pl-2` indent class to any line beginning with "- ".
+function idleStatusActiveMarkerClientLines(
+  marker: NonNullable<IdleStatus['markers']>[number],
+): string[] {
+  if (!marker.clients || marker.clients.length === 0) {
+    return [];
+  }
+  return marker.clients.map((client) => {
+    const bytes = client.bytes && client.bytes > 0 ? `, ${formatBytes(client.bytes)}` : '';
+    const ago = formatSecondsAgo(client.secondsAgo);
+    return `  - ${client.address}${bytes}${ago}`;
+  });
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${String(bytes)} B`;
+  }
+  const kib = bytes / 1024;
+  if (kib < 1024) {
+    return `${kib.toFixed(kib < 10 ? 1 : 0)} KiB`;
+  }
+  const mib = kib / 1024;
+  if (mib < 1024) {
+    return `${mib.toFixed(mib < 10 ? 1 : 0)} MiB`;
+  }
+  const gib = mib / 1024;
+  return `${gib.toFixed(gib < 10 ? 1 : 0)} GiB`;
+}
+
+function formatSecondsAgo(seconds: number | undefined): string {
+  if (seconds === undefined || seconds < 0) {
+    return '';
+  }
+  if (seconds < 60) {
+    return `, ${String(seconds)}s ago`;
+  }
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) {
+    return `, ${String(minutes)}m ago`;
+  }
+  const hours = Math.floor(minutes / 60);
+  return `, ${String(hours)}h ago`;
 }
 
 function appendIdleStopOutcomeLines(lines: string[], idleStatus: IdleStatus): void {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -41,12 +42,23 @@ type EnvironmentIdlePolicy struct {
 }
 
 type EnvironmentActivityParams struct {
-	Tenant      string
-	Environment string
-	Kind        string
-	Seen        bool
-	Bytes       int64
-	Now         time.Time
+	Tenant        string
+	Environment   string
+	Kind          string
+	Seen          bool
+	Bytes         int64
+	ClientUpdates []EnvironmentActivityClientUpdate
+	Now           time.Time
+}
+
+// EnvironmentActivityClientUpdate carries a per-remote-address delta to be
+// merged into the kind's snapshot. The SSH-activity proxy emits one entry
+// per client IP that contributed bytes since the last save, so the desktop
+// tooltip can show which peer is keeping the marker active rather than
+// just a total.
+type EnvironmentActivityClientUpdate struct {
+	Address string
+	Bytes   int64
 }
 
 type EnvironmentIdleStore interface {
@@ -54,20 +66,45 @@ type EnvironmentIdleStore interface {
 	LoadEnvConfig(tenant, environment string) (EnvConfig, string, error)
 }
 
+// EnvironmentActivitySnapshot is the on-disk record for one activity kind.
+// Clients is bounded by environmentActivityClientCap; entries are evicted
+// LRU-by-LastActivity when the cap is reached so a long-lived runtime
+// cannot grow the file without bound under churn (e.g., per-connection
+// ephemeral source ports on a NAT'd peer).
 type EnvironmentActivitySnapshot struct {
-	LastActivity time.Time `json:"lastActivity,omitempty"`
-	LastSeen     time.Time `json:"lastSeen,omitempty"`
+	LastActivity time.Time                            `json:"lastActivity,omitempty"`
+	LastSeen     time.Time                            `json:"lastSeen,omitempty"`
+	Bytes        int64                                `json:"bytes,omitempty"`
+	Clients      map[string]EnvironmentActivityClient `json:"clients,omitempty"`
+}
+
+type EnvironmentActivityClient struct {
 	Bytes        int64     `json:"bytes,omitempty"`
+	LastActivity time.Time `json:"lastActivity,omitempty"`
 }
 
 type EnvironmentIdleMarker struct {
-	Name             string    `json:"name"`
-	Idle             bool      `json:"idle"`
-	Reason           string    `json:"reason,omitempty"`
-	SecondsRemaining int64     `json:"secondsRemaining,omitempty"`
-	LastActivity     time.Time `json:"lastActivity,omitempty"`
-	LastSeen         time.Time `json:"lastSeen,omitempty"`
+	Name             string                        `json:"name"`
+	Idle             bool                          `json:"idle"`
+	Reason           string                        `json:"reason,omitempty"`
+	SecondsRemaining int64                         `json:"secondsRemaining,omitempty"`
+	LastActivity     time.Time                     `json:"lastActivity,omitempty"`
+	LastSeen         time.Time                     `json:"lastSeen,omitempty"`
+	Clients          []EnvironmentIdleMarkerClient `json:"clients,omitempty"`
 }
+
+// EnvironmentIdleMarkerClient is the view that the marker exposes to the
+// desktop tooltip and the CLI --json output. SecondsAgo is a pre-computed
+// convenience so renderers do not need to recompute "N seconds ago" off
+// LastActivity per frame.
+type EnvironmentIdleMarkerClient struct {
+	Address      string    `json:"address"`
+	Bytes        int64     `json:"bytes,omitempty"`
+	LastActivity time.Time `json:"lastActivity,omitempty"`
+	SecondsAgo   int64     `json:"secondsAgo,omitempty"`
+}
+
+const environmentActivityClientCap = 8
 
 type EnvironmentIdleStatus struct {
 	Policy              EnvironmentIdlePolicy                  `json:"policy"`
@@ -322,6 +359,7 @@ func RecordEnvironmentActivity(params EnvironmentActivityParams) error {
 	if params.Bytes > 0 {
 		snapshot.Bytes += params.Bytes
 	}
+	mergeEnvironmentActivityClients(&snapshot, params.ClientUpdates, now)
 
 	data, err := json.MarshalIndent(snapshot, "", "  ")
 	if err != nil {
@@ -329,6 +367,54 @@ func RecordEnvironmentActivity(params EnvironmentActivityParams) error {
 	}
 	data = append(data, '\n')
 	return os.WriteFile(path, data, 0o644)
+}
+
+func mergeEnvironmentActivityClients(snapshot *EnvironmentActivitySnapshot, updates []EnvironmentActivityClientUpdate, now time.Time) {
+	if len(updates) == 0 {
+		return
+	}
+	if snapshot.Clients == nil {
+		snapshot.Clients = make(map[string]EnvironmentActivityClient, len(updates))
+	}
+	for _, update := range updates {
+		address := strings.TrimSpace(update.Address)
+		if address == "" {
+			continue
+		}
+		client := snapshot.Clients[address]
+		if update.Bytes > 0 {
+			client.Bytes += update.Bytes
+			client.LastActivity = now
+		}
+		snapshot.Clients[address] = client
+	}
+	evictOldestEnvironmentActivityClients(snapshot.Clients, environmentActivityClientCap)
+}
+
+// evictOldestEnvironmentActivityClients keeps the snapshot bounded by
+// dropping entries with the oldest LastActivity until at most cap remain.
+// A zero LastActivity sorts oldest by definition, so entries that never
+// recorded bytes are evicted first.
+func evictOldestEnvironmentActivityClients(clients map[string]EnvironmentActivityClient, cap int) {
+	if cap <= 0 || len(clients) <= cap {
+		return
+	}
+	for len(clients) > cap {
+		oldestKey := ""
+		var oldestActivity time.Time
+		first := true
+		for key, client := range clients {
+			if first || client.LastActivity.Before(oldestActivity) {
+				oldestKey = key
+				oldestActivity = client.LastActivity
+				first = false
+			}
+		}
+		if oldestKey == "" {
+			return
+		}
+		delete(clients, oldestKey)
+	}
 }
 
 func LoadEnvironmentActivity(tenant, environment string) (map[string]EnvironmentActivitySnapshot, error) {
@@ -368,6 +454,7 @@ func activityIdleMarker(kind string, snapshot EnvironmentActivitySnapshot, polic
 		Name:         kind,
 		LastActivity: snapshot.LastActivity,
 		LastSeen:     snapshot.LastSeen,
+		Clients:      environmentIdleMarkerClients(snapshot.Clients, now),
 	}
 
 	if snapshot.LastActivity.IsZero() {
@@ -389,6 +476,36 @@ func activityIdleMarker(kind string, snapshot EnvironmentActivitySnapshot, polic
 	marker.Reason = "recent activity"
 	marker.SecondsRemaining = secondsRemaining(policy.Timeout - now.Sub(snapshot.LastActivity))
 	return marker
+}
+
+// environmentIdleMarkerClients projects the snapshot's per-client map into
+// the marker's slice form, sorted by most-recent activity. The slice is
+// nil (not empty) when no clients have been recorded so JSON omitempty
+// keeps the marker payload terse for kinds that never populate it.
+func environmentIdleMarkerClients(clients map[string]EnvironmentActivityClient, now time.Time) []EnvironmentIdleMarkerClient {
+	if len(clients) == 0 {
+		return nil
+	}
+	out := make([]EnvironmentIdleMarkerClient, 0, len(clients))
+	for address, client := range clients {
+		entry := EnvironmentIdleMarkerClient{
+			Address:      address,
+			Bytes:        client.Bytes,
+			LastActivity: client.LastActivity,
+		}
+		if !client.LastActivity.IsZero() {
+			delta := now.Sub(client.LastActivity)
+			if delta < 0 {
+				delta = 0
+			}
+			entry.SecondsAgo = int64(delta / time.Second)
+		}
+		out = append(out, entry)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].LastActivity.After(out[j].LastActivity)
+	})
+	return out
 }
 
 func environmentStopBlockedReason(markers []EnvironmentIdleMarker) string {

@@ -63,11 +63,13 @@ function EnvironmentRowEditButton({
   );
 }
 
-function BusyRowSpinner(): React.ReactElement {
+function BusyRowSpinner({ label }: { label: string }): React.ReactElement {
   return (
     <LoaderCircle
       className="size-3.5 flex-none animate-spin text-current opacity-75"
-      aria-hidden="true"
+      aria-label={label || undefined}
+      aria-hidden={label ? undefined : true}
+      role={label ? 'status' : undefined}
     />
   );
 }
@@ -85,12 +87,32 @@ export function EnvironmentRow({
   const isOpening = useAppSelector(
     (state) => state.sessions.openingByEnv[envKey(tenantName, environmentName)] === true,
   );
-  const { selected, busy, isLocal, selection } = deriveEnvironmentRow(
+  // runningCommand is the first 'running' activity command attached to
+  // this env (deploy / init / sshd-init / doctor / build / push /
+  // release). Picking the first entry keeps the selector primitive-
+  // returning so React-Redux's default equality short-circuits row
+  // re-renders when unrelated activity churns. The activity slice is
+  // additive, so once one entry transitions to running the row stays
+  // busy until its status flips.
+  const runningCommand = useAppSelector((state) => {
+    for (const entry of state.activity.entries) {
+      if (
+        entry.tenant === tenantName &&
+        entry.environment === environmentName &&
+        entry.status === 'running'
+      ) {
+        return entry.command;
+      }
+    }
+    return '';
+  });
+  const { selected, busy, busyLabel, isLocal, selection } = deriveEnvironmentRow(
     tenantName,
     environmentName,
     selectedSelection,
     tenants,
     isOpening,
+    runningCommand,
   );
 
   return (
@@ -117,7 +139,7 @@ export function EnvironmentRow({
       >
         <span className="min-w-0 truncate">{environmentName}</span>
         {isLocal && <LocalEnvBadge selected={selected} />}
-        {busy && <BusyRowSpinner />}
+        {busy && <BusyRowSpinner label={busyLabel} />}
       </button>
       <EnvironmentRowEditButton
         tenantName={tenantName}

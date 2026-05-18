@@ -9,6 +9,7 @@ import {
   StartSession,
 } from '../../wailsjs/go/main/App';
 import { sessionApi } from './api/sessionApi';
+import { resolveAutoStartGate } from './autoStartGate';
 import {
   appendDebugOutput,
   applyPendingDebugHeader,
@@ -28,6 +29,7 @@ import {
 import { loadReviewDiff } from './reviewThunks';
 import { selectActiveSlotForSelection, selectEnvironmentExists } from './selectors';
 import { isNewSessionSelection } from './sessionSelection';
+import { setAutoStartPrompt } from './slices/autoStartPromptSlice';
 import { setIdleStatus } from './slices/idleSlice';
 import {
   setSelectedDiffPath,
@@ -40,6 +42,7 @@ import {
   clearSessionDebug,
   markEnvOpening,
   registerDebugSession,
+  resetEnvOpening,
   setSessionDebug,
   trackOpenSession,
 } from './slices/sessionsSlice';
@@ -127,13 +130,48 @@ const ensureDefaultEnvTabs =
     }
   };
 
-export const registerOpenSessionResult =
-  (key: string, result: StartSessionResult, runSelection: UISelection): AppThunk =>
+// surfaceEnvSession repoints the visible terminal at the new env's
+// preferred session: the remembered tab if it still exists, else a
+// Local tab for the env, else 0. The terminal renderer drops PTY
+// writes that do not match the current sessionId, so this prevents
+// the previous env's content from continuing to paint while the new
+// env's slower StartSession is in flight.
+const surfaceEnvSession =
+  (key: string): AppThunk =>
   (dispatch, getState) => {
+    const state = getState();
+    const tabs = state.terminal.tabsByEnv[key] ?? [];
+    const remembered = state.terminal.selectedSessionByEnv[key] ?? 0;
+    const next = tabs.some((tab) => tab.sessionId === remembered)
+      ? remembered
+      : (tabs.find((tab) => tab.kind === 'local')?.sessionId ?? 0);
+    dispatch(setSessionId(next));
+  };
+
+// trackOpenSessionMetadata records the session bookkeeping that should
+// fire whether or not the user is still on this env: the session
+// existence (so a later sidebar click can reuse instead of double-spawning)
+// and the tab entry. registerOpenSessionResult composes this with the
+// "promote to current view" half; the stale-selection path in openSelection
+// calls only this helper so an abandoned long-running open does not steal
+// the terminal away from the env the user has navigated to.
+const trackOpenSessionMetadata =
+  (key: string, result: StartSessionResult, runSelection: UISelection): AppThunk =>
+  (dispatch) => {
     dispatch(trackOpenSession({ key, sessionId: result.sessionId, selection: runSelection }));
     dispatch(
       registerDebugSession({ sessionId: result.sessionId, selection: runSelection, mode: 'open' }),
     );
+    const slot = result.slot ?? 0;
+    const kind: TerminalTabKind = slot === 0 ? 'erun' : 'extra';
+    const label = kind === 'erun' ? 'ERun' : `Terminal ${String(slot)}`;
+    dispatch(recordTab(key, result.sessionId, slot, kind, label));
+  };
+
+export const registerOpenSessionResult =
+  (key: string, result: StartSessionResult, runSelection: UISelection): AppThunk =>
+  (dispatch, getState) => {
+    dispatch(trackOpenSessionMetadata(key, result, runSelection));
     dispatch(applyPendingDebugHeader(result.sessionId));
     dispatch(setSessionId(result.sessionId));
     // Preserve the user's prior tab choice for this env across re-opens
@@ -150,10 +188,6 @@ export const registerOpenSessionResult =
       dispatch(setSelectedSessionForEnv({ key, sessionId: result.sessionId }));
     }
     dispatch(syncDebugDisplay());
-    const slot = result.slot ?? 0;
-    const kind: TerminalTabKind = slot === 0 ? 'erun' : 'extra';
-    const label = kind === 'erun' ? 'ERun' : `Terminal ${String(slot)}`;
-    dispatch(recordTab(key, result.sessionId, slot, kind, label));
   };
 
 const prepareOpenSelection =
@@ -165,13 +199,21 @@ const prepareOpenSelection =
   ): AppThunk =>
   (dispatch, getState) => {
     const state = getState();
-    if (
-      selectionKey(selection) !==
-      selectionKey(state.selection.selected ?? { tenant: '', environment: '' })
-    ) {
+    const previousKey = state.selection.selected ? selectionKey(state.selection.selected) : '';
+    const newKey = selectionKey(selection);
+    if (newKey !== previousKey) {
       dispatch(setSelectedReviewScope('current'));
       dispatch(setSelectedReviewCommit(''));
       dispatch(setSelectedDiffPath(''));
+      // Detach the terminal from the previous env's PTY immediately.
+      // Without this the visible terminal keeps painting the old env's
+      // output (and accepting input on the wrong session) until the new
+      // env's slower StartSession returns and registerOpenSessionResult
+      // calls setSessionId. surfaceEnvSession below tries to repoint at
+      // whatever the new env already has (remembered tab or a live
+      // Local), and falls back to 0 so the terminal goes quiet for the
+      // gap rather than lying.
+      dispatch(surfaceEnvSession(newKey));
     }
     dispatch(setSelected(selection));
     dispatch(setIdleStatus(null));
@@ -243,6 +285,29 @@ export const openSelection =
     // previous one.
     const previousSelected = getState().selection.selected;
 
+    const verdict = await resolveAutoStartGate(selection, getState);
+    if (verdict === 'prompt') {
+      dispatch(
+        setAutoStartPrompt({
+          open: true,
+          selection: { ...selection },
+          saving: false,
+          error: '',
+        }),
+      );
+      return;
+    }
+    const shouldSpawnERun = verdict !== 'skip-erun';
+
+    const isCurrentSelection = createIsCurrentSelection(getState, selection);
+
+    // Reset openingByEnv before the new selection paints its own spinner.
+    // The previous click's openSelection is still in flight in the
+    // background; isCurrentSelection keeps that flow from stomping on
+    // the new selection's status banner or terminal id, and this reset
+    // keeps the sidebar spinner from lingering on the env the user has
+    // navigated away from.
+    dispatch(resetEnvOpening());
     dispatch(
       prepareOpenSelection(selection, runSelection, previousSessionId, previousKnownSessionId),
     );
@@ -256,27 +321,103 @@ export const openSelection =
       if (!tabs.some((tab) => tab.kind === 'local')) {
         await dispatch(spawnDefaultTab(key, runSelection, 'local', 'Local', cols, rows));
       }
+      if (!isCurrentSelection()) {
+        return;
+      }
+      // Now that Local is guaranteed to exist for this env, repoint the
+      // visible terminal at it. prepareOpenSelection has already
+      // cleared sessionId to 0 if the env changed; this fills it back
+      // in with the just-spawned (or already-existing) Local so the
+      // user sees their new env's terminal while ERun cold-starts.
+      dispatch(surfaceEnvSession(key));
+
+      if (!shouldSpawnERun) {
+        // autoStart=never path: navigation completes with Local only. The
+        // user can flip the policy from the manage-env dialog or click the
+        // titlebar Play button to start the cloud context on demand, which
+        // will surface "running" on the next idle poll and lets a follow-up
+        // sidebar click spawn the ERun tab.
+        dispatch(hideTerminalMessage());
+        controller.focusTerminalSoon();
+        controller.queueTerminalResize();
+        return;
+      }
 
       const slot = selectActiveSlotForSelection(getState(), runSelection);
       const result = (await StartSession(runSelection, slot, cols, rows)) as StartSessionResult;
-      dispatch(registerOpenSessionResult(key, result, runSelection));
-      dispatch(showOpenSelectionStatus(result.sessionId, selection));
-
-      await dispatch(ensureDefaultEnvTabs(runSelection, key, cols, rows));
-      dispatch(restoreSelectedTabForEnv(key));
-
-      if (getState().layout.reviewOpen) {
-        await dispatch(loadReviewDiff());
-      }
-      controller.focusTerminalSoon();
-      controller.queueTerminalResize();
+      await dispatch(
+        finishOpenSession(key, result, runSelection, selection, cols, rows, isCurrentSelection),
+      );
     } catch (error: unknown) {
-      dispatch(setSelected(previousSelected));
-      dispatch(showTerminalMessage(readError(error)));
+      if (isCurrentSelection()) {
+        dispatch(setSelected(previousSelected));
+        dispatch(showTerminalMessage(readError(error)));
+      }
       throw error;
     } finally {
       dispatch(clearEnvOpening({ tenant: selection.tenant, environment: selection.environment }));
     }
+  };
+
+// createIsCurrentSelection captures the click's target selection and
+// returns a predicate that any post-await dispatch can poll to decide
+// whether to keep painting for `selection` or drop work because the user
+// has navigated to a different env. The check reads getState() afresh
+// each call so it tracks setSelected dispatches that fire between awaits.
+function createIsCurrentSelection(
+  getState: () => import('./store').RootState,
+  selection: UISelection,
+): () => boolean {
+  return () => {
+    const current = getState().selection.selected;
+    if (current === null) {
+      return false;
+    }
+    return current.tenant === selection.tenant && current.environment === selection.environment;
+  };
+}
+
+// finishOpenSession owns the post-StartSession work: tab promotion, status
+// banner, default-tab ensure, review diff refresh. Splitting it out keeps
+// openSelection's branching budget under the linter's ceiling, and gives
+// the stale-selection bail-outs a single home. When the user has navigated
+// away (isCurrentSelection() === false), the spawned session is recorded
+// for later reuse but not promoted to the visible terminal — so a long-
+// running cold EC2 open in env A no longer paints "Opening A..." over env
+// B that the user has since clicked into.
+const finishOpenSession =
+  (
+    key: string,
+    result: StartSessionResult,
+    runSelection: UISelection,
+    selection: UISelection,
+    cols: number,
+    rows: number,
+    isCurrentSelection: () => boolean,
+  ): AppThunk<Promise<void>> =>
+  async (dispatch, getState, extra) => {
+    const controller = requireController(extra);
+    if (!isCurrentSelection()) {
+      dispatch(trackOpenSessionMetadata(key, result, runSelection));
+      return;
+    }
+    dispatch(registerOpenSessionResult(key, result, runSelection));
+    dispatch(showOpenSelectionStatus(result.sessionId, selection));
+
+    await dispatch(ensureDefaultEnvTabs(runSelection, key, cols, rows));
+    if (!isCurrentSelection()) {
+      return;
+    }
+    dispatch(restoreSelectedTabForEnv(key));
+
+    if (getState().layout.reviewOpen) {
+      await dispatch(loadReviewDiff());
+    }
+    if (!isCurrentSelection()) {
+      return;
+    }
+    controller.focusTerminalSoon();
+    controller.queueTerminalResize();
   };
 
 // activateLocalAfterCommand promotes the freshly-spawned Local session as

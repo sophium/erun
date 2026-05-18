@@ -76,11 +76,8 @@ function IdleStatusBadge({
       >
         <div className="space-y-1">
           {idleStatusTooltipLines(idleStatus).map((line, index) => (
-            <div
-              key={`${String(index)}-${line}`}
-              className={line.startsWith('- ') ? 'pl-2' : undefined}
-            >
-              {line}
+            <div key={`${String(index)}-${line}`} className={tooltipLineClassName(line)}>
+              {line.replace(/^ +/, '')}
             </div>
           ))}
         </div>
@@ -122,4 +119,19 @@ function IdleStatusAction({
       </Button>
     </IconTooltip>
   );
+}
+
+// tooltipLineClassName mirrors the leading-space convention used by
+// idleStatusTooltipLines: "- " is a top-level entry (Active markers, etc.),
+// "  - " is a nested per-client detail line under its marker. HTML collapses
+// the leading spaces in the rendered output, so we encode the nesting as a
+// Tailwind padding class instead.
+function tooltipLineClassName(line: string): string | undefined {
+  if (line.startsWith('  - ')) {
+    return 'pl-6';
+  }
+  if (line.startsWith('- ')) {
+    return 'pl-2';
+  }
+  return undefined;
 }

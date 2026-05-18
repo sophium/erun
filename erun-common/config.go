@@ -96,6 +96,7 @@ type EnvConfig struct {
 	Remote              bool                    `yaml:"remote,omitempty"`
 	Snapshot            *bool                   `yaml:"snapshot,omitempty"`
 	LocalPortRangeStart int                     `yaml:"localportrangestart,omitempty" json:"localPortRangeStart,omitempty"`
+	AutoStart           *bool                   `yaml:"autostart,omitempty" json:"autoStart,omitempty"`
 }
 
 func (c TenantConfig) SnapshotEnabled() bool {

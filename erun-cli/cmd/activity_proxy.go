@@ -96,6 +96,14 @@ func proxySSHActivityConnection(client net.Conn, targetAddress string, recorder 
 		_ = target.Close()
 	}()
 
+	// extractRemoteHost pulls just the IP portion of the client's
+	// RemoteAddr so the per-IP map key is stable across the many
+	// short-lived source ports a single peer opens (kube port-forward
+	// uses a fresh ephemeral port per stream). If the address cannot
+	// be split, fall back to the raw string so we still capture
+	// *something* identifiable in the activity snapshot.
+	clientAddress := extractRemoteHost(client.RemoteAddr())
+
 	var wg sync.WaitGroup
 	closeBoth := func() {
 		_ = client.Close()
@@ -105,26 +113,42 @@ func proxySSHActivityConnection(client net.Conn, targetAddress string, recorder 
 	go func() {
 		defer wg.Done()
 		defer closeBoth()
-		_, _ = io.Copy(&activityRecordingWriter{writer: target, recorder: recorder}, client)
+		_, _ = io.Copy(&activityRecordingWriter{writer: target, recorder: recorder, address: clientAddress}, client)
 	}()
 	go func() {
 		defer wg.Done()
 		defer closeBoth()
-		_, _ = io.Copy(&activityRecordingWriter{writer: client, recorder: recorder}, target)
+		_, _ = io.Copy(&activityRecordingWriter{writer: client, recorder: recorder, address: clientAddress}, target)
 	}()
 	wg.Wait()
 	recorder.Flush()
 }
 
+func extractRemoteHost(addr net.Addr) string {
+	if addr == nil {
+		return ""
+	}
+	raw := strings.TrimSpace(addr.String())
+	if raw == "" {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(raw)
+	if err == nil {
+		return strings.TrimSpace(host)
+	}
+	return raw
+}
+
 type activityRecordingWriter struct {
 	writer   io.Writer
 	recorder *sshActivityRecorder
+	address  string
 }
 
 func (w *activityRecordingWriter) Write(data []byte) (int, error) {
 	n, err := w.writer.Write(data)
 	if n > 0 {
-		w.recorder.Record(int64(n))
+		w.recorder.Record(w.address, int64(n))
 	}
 	return n, err
 }
@@ -134,47 +158,73 @@ type sshActivityRecorder struct {
 	environment      string
 	idleTrafficBytes int64
 
-	mu       sync.Mutex
-	pending  int64
-	lastSave time.Time
+	mu              sync.Mutex
+	pending         int64
+	pendingByClient map[string]int64
+	lastSave        time.Time
 }
 
-func (r *sshActivityRecorder) Record(bytes int64) {
+func (r *sshActivityRecorder) Record(address string, bytes int64) {
 	if bytes <= 0 {
 		return
 	}
 	r.mu.Lock()
 	r.pending += bytes
+	if address != "" {
+		if r.pendingByClient == nil {
+			r.pendingByClient = make(map[string]int64)
+		}
+		r.pendingByClient[address] += bytes
+	}
 	if !r.lastSave.IsZero() && time.Since(r.lastSave) < time.Second {
 		r.mu.Unlock()
 		return
 	}
 	pending := r.pending
+	pendingByClient := r.pendingByClient
 	r.pending = 0
+	r.pendingByClient = nil
 	r.lastSave = time.Now()
 	r.mu.Unlock()
-	r.save(pending)
+	r.save(pending, pendingByClient)
 }
 
 func (r *sshActivityRecorder) Flush() {
 	r.mu.Lock()
 	pending := r.pending
+	pendingByClient := r.pendingByClient
 	r.pending = 0
+	r.pendingByClient = nil
 	if pending > 0 {
 		r.lastSave = time.Now()
 	}
 	r.mu.Unlock()
-	r.save(pending)
+	r.save(pending, pendingByClient)
 }
 
-func (r *sshActivityRecorder) save(bytes int64) {
+func (r *sshActivityRecorder) save(bytes int64, byClient map[string]int64) {
 	if bytes <= r.idleTrafficBytes {
 		return
 	}
 	_ = common.RecordEnvironmentActivity(common.EnvironmentActivityParams{
-		Tenant:      r.tenant,
-		Environment: r.environment,
-		Kind:        common.ActivityKindSSH,
-		Bytes:       bytes,
+		Tenant:        r.tenant,
+		Environment:   r.environment,
+		Kind:          common.ActivityKindSSH,
+		Bytes:         bytes,
+		ClientUpdates: clientUpdatesFromMap(byClient),
 	})
+}
+
+func clientUpdatesFromMap(byClient map[string]int64) []common.EnvironmentActivityClientUpdate {
+	if len(byClient) == 0 {
+		return nil
+	}
+	updates := make([]common.EnvironmentActivityClientUpdate, 0, len(byClient))
+	for address, bytes := range byClient {
+		if bytes <= 0 {
+			continue
+		}
+		updates = append(updates, common.EnvironmentActivityClientUpdate{Address: address, Bytes: bytes})
+	}
+	return updates
 }

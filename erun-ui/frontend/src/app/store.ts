@@ -16,8 +16,8 @@ import { setupListeners } from '@reduxjs/toolkit/query';
 import { wailsApi } from './api/wailsApi';
 import { persistenceMiddleware } from './middleware/persistenceMiddleware';
 import { terminalDisplayMiddleware } from './middleware/terminalDisplayMiddleware';
-import { wailsEventsMiddleware } from './middleware/wailsEventsMiddleware';
 import activityReducer from './slices/activitySlice';
+import autoStartPromptReducer from './slices/autoStartPromptSlice';
 import doctorReducer from './slices/doctorSlice';
 import environmentDialogReducer from './slices/environmentDialogSlice';
 import globalConfigDialogReducer from './slices/globalConfigDialogSlice';
@@ -57,6 +57,7 @@ export const store = configureStore({
     tenantDialog: tenantDialogReducer,
     tenantDashboard: tenantDashboardReducer,
     globalConfigDialog: globalConfigDialogReducer,
+    autoStartPrompt: autoStartPromptReducer,
     [wailsApi.reducerPath]: wailsApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>
@@ -68,7 +69,6 @@ export const store = configureStore({
     })
       .concat(wailsApi.middleware)
       .concat(persistenceMiddleware.middleware)
-      .concat(wailsEventsMiddleware.middleware)
       .concat(terminalDisplayMiddleware.middleware),
 });
 

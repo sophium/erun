@@ -322,6 +322,54 @@ func TestEnvConfigRoundTrip(t *testing.T) {
 	}
 }
 
+func TestEnvConfigAutoStartRoundTrip(t *testing.T) {
+	// AutoStart is *bool tri-state: nil = prompt on next desktop open,
+	// false = never auto-start, true = always auto-start. Persistence must
+	// keep the three states distinguishable so the prompt only fires for
+	// freshly imported envs.
+	for _, tt := range []struct {
+		name      string
+		autoStart *bool
+	}{
+		{"unset", nil},
+		{"never", boolPtr(false)},
+		{"always", boolPtr(true)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			setupConfigTestXDGConfigHome(t)
+			cfg := EnvConfig{
+				Name:              "dev",
+				RepoPath:          "/tmp/project-dev",
+				KubernetesContext: "cluster-dev",
+				AutoStart:         tt.autoStart,
+			}
+			if err := SaveEnvConfig("tenant-a", cfg); err != nil {
+				t.Fatalf("SaveEnvConfig failed: %v", err)
+			}
+			loaded, _, err := LoadEnvConfig("tenant-a", cfg.Name)
+			if err != nil {
+				t.Fatalf("LoadEnvConfig failed: %v", err)
+			}
+			if tt.autoStart == nil {
+				if loaded.AutoStart != nil {
+					t.Fatalf("expected nil AutoStart, got %v", *loaded.AutoStart)
+				}
+				return
+			}
+			if loaded.AutoStart == nil {
+				t.Fatalf("expected AutoStart=%v, got nil", *tt.autoStart)
+			}
+			if *loaded.AutoStart != *tt.autoStart {
+				t.Fatalf("expected AutoStart=%v, got %v", *tt.autoStart, *loaded.AutoStart)
+			}
+		})
+	}
+}
+
+func boolPtr(v bool) *bool {
+	return &v
+}
+
 func TestListEnvConfigs(t *testing.T) {
 	setupConfigTestXDGConfigHome(t)
 

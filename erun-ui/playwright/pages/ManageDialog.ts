@@ -76,4 +76,44 @@ export class ManageDialog {
       .getByRole('button', { name: /^Delete/ })
       .click();
   }
+
+  // remoteFieldValue reads the "Remote environment" readonly field on the
+  // General tab so specs can pick a remote env without a backend round-trip.
+  // ReadonlyField puts the human label on the element with the field id and
+  // labels the value sibling with aria-labelledby, so the value lives on
+  // [aria-labelledby="<id>"], not on the id'd node itself.
+  async remoteFieldValue(): Promise<string> {
+    const field = this.locator().locator('[aria-labelledby="environment-config-remote"]');
+    if (!(await field.isVisible().catch(() => false))) {
+      return '';
+    }
+    return (await field.textContent())?.trim() ?? '';
+  }
+
+  // autoStartSelect targets the "Auto-start when opening" SelectField on the
+  // General tab. The select only renders for remote envs (autoStart is
+  // desktop-only and meaningless for local shells), so specs should check
+  // visibility before driving it.
+  autoStartSelect(): Locator {
+    return this.locator().locator('#environment-config-autostart');
+  }
+
+  async autoStartSelectVisible(): Promise<boolean> {
+    return this.autoStartSelect()
+      .isVisible()
+      .catch(() => false);
+  }
+
+  async autoStartSelectedValue(): Promise<string> {
+    return (await this.autoStartSelect().textContent())?.trim() ?? '';
+  }
+
+  async chooseAutoStart(
+    mode: 'Ask each time' | 'Always auto-start' | 'Never auto-start',
+  ): Promise<void> {
+    await this.autoStartSelect().click();
+    // SelectField renders a Radix Select; the listbox is portal'd to body
+    // so it is queried at the document root rather than inside the dialog.
+    await this.page.getByRole('option', { name: mode }).click();
+  }
 }
