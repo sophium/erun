@@ -82,4 +82,24 @@ func TestActivity(t *testing.T) {
 		result := erun.Run(t, []string{"activity", "stop-ready", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "activity/stop_ready_blocks_when_active", normalize.Apply(result.Combined))
 	})
+
+	t.Run("stop_ready_json_emits_structured_decision", func(t *testing.T) {
+		// Exercises the --json flag wired for the runtime entrypoint's
+		// idle-monitor heartbeat log. JSON must land on stdout regardless of
+		// the stop-eligible exit code so the bash loop can record a tick
+		// even when the env stays active.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		erun.Run(t, []string{"activity", "touch", "--tenant", "team", "--environment", "dev", "--kind", "cli"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"activity", "stop-ready", "--json", "--tenant", "team", "--environment", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if !strings.Contains(result.Stdout, `"stopEligible":false`) {
+			t.Errorf("expected stopEligible:false in stdout, got:\n%s", result.Stdout)
+		}
+		if !strings.Contains(result.Stdout, `"blockedReason":"environment is not cloud-managed"`) {
+			t.Errorf("expected blockedReason in stdout, got:\n%s", result.Stdout)
+		}
+		if result.ExitCode == 0 {
+			t.Errorf("expected non-zero exit for blocked env, got 0:\n%s", result.Combined)
+		}
+	})
 }

@@ -76,6 +76,7 @@ func newActivityStatusCmd(store common.OpenStore) *cobra.Command {
 func newActivityStopReadyCmd(store common.OpenStore) *cobra.Command {
 	var tenant string
 	var environment string
+	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:  "stop-ready",
 		Args: cobra.NoArgs,
@@ -83,6 +84,16 @@ func newActivityStopReadyCmd(store common.OpenStore) *cobra.Command {
 			status, err := resolveActivityStatus(store, tenant, environment)
 			if err != nil {
 				return err
+			}
+			if jsonOutput {
+				payload := stopReadyJSON{
+					StopEligible:  status.StopEligible,
+					BlockedReason: strings.TrimSpace(status.StopBlockedReason),
+				}
+				encoder := json.NewEncoder(commandContext(cmd).Stdout)
+				if err := encoder.Encode(payload); err != nil {
+					return err
+				}
 			}
 			if !status.StopEligible {
 				if strings.TrimSpace(status.StopBlockedReason) != "" {
@@ -94,7 +105,13 @@ func newActivityStopReadyCmd(store common.OpenStore) *cobra.Command {
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write a JSON summary of the stop decision to stdout regardless of exit code")
 	return cmd
+}
+
+type stopReadyJSON struct {
+	StopEligible  bool   `json:"stopEligible"`
+	BlockedReason string `json:"blockedReason,omitempty"`
 }
 
 func addActivityTargetFlags(cmd *cobra.Command, tenant, environment *string) {
