@@ -25,6 +25,16 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 - Keep pasted-image handling near terminal/session ownership when it depends on the active terminal selection.
 - Keep desktop backend moves package-local unless a real shared abstraction is being introduced. Organizational splits inside `erun-ui` should stay in package `main`.
 
+## Command Completion And State-Refresh Wiring
+
+- The desktop runs CLI work through two distinct PTY lifecycles, and they have different completion semantics. Dedicated PTYs spawned by `StartSession`/`StartAISession` exit when the underlying process ends, so `handleTerminalExit` and `streamSession` hooks fire normally. Commands piped into the shared Local shell via `runErunCommandInLocal` (`StartInitSession`, `StartDeploySession`, `StartSSHDInitSession`, `StartDoctorSession`) do NOT produce a PTY exit when the underlying `erun <cmd>` finishes — the shell stays at a prompt for the next command.
+- Do not gate state-refresh logic (sidebar reload, env open, dependent tab spawn, activity finalization) on `handleTerminalExit` for piped-into-shell commands. The exit branch is unreachable under the shared-shell model and the user sees stale UI when the command succeeds. This has already caused a real regression where `erun init` completed successfully but the new environment never appeared in the sidebar.
+- For state-change signals from piped CLI commands, use the trace-line contract that `feedActivityTraceFromTerminal` and `newActivityTraceLineHandler` already parse for the activity queue (`==> Deploying ...`, `==> Deployed ...`, `==> Skipping ...`, etc.). Treat the structured lines as a public API: the CLI must emit them on every code path that should signal state change, integration goldens must lock them in, and the desktop must parse them deterministically.
+- When adding a new desktop-observed signal (e.g. init success), emit a stable structured trace line from the CLI command in `erun-common`/`erun-cli`, add the matcher in `activity_queue_app.go`, fire an explicit Wails event for the frontend to listen to, and regenerate integration goldens with `UPDATE_GOLDEN=1`. Put the reactive frontend logic in the controller wired through that event, not in `handleTerminalExit`.
+- Remove `TerminalSessionRegistry.trackXSession` methods, the matching field in `TerminalExitSelections`, and the corresponding branch in `handleTerminalExit` when their last caller disappears. A registry tracking method with no callers means the exit handler branch is unreachable, which masks a missing state-refresh path under the new execution model.
+- `ensureDefaultEnvTabs`, `spawnERunTabPassive`, `StartSession`, and `StartAISession` require the env config to exist on disk. Do not invoke them eagerly from `activateLocalAfterCommand` for flows that create the env from inside the PTY (`erun init`, first-time `erun deploy`, unconfigured `erun sshd init`). Spawn dependent tabs only after the success signal arrives. Do not wrap these spawns in empty `catch {}` blocks — silent swallowing of "env not found yet" errors hides this ordering bug.
+- When refactoring command execution to switch between dedicated-PTY and shared-shell models, manually validate the full happy path in the desktop app: the command runs to completion in the new model, the sidebar reflects the new state, all expected tabs appear, and the terminal returns to a usable post-command state. Integration goldens cover the CLI's dry-run output, not desktop UI reactions to real-run completion.
+
 ## Frontend Workflow
 
 - Use Yarn for dependency management and frontend builds. Do not introduce `npm` or `pnpm` lockfiles unless the user explicitly asks for a toolchain change.
@@ -108,6 +118,25 @@ References:
 - Material Design, "Empty states": https://m1.material.io/patterns/empty-states.html
 - Material Design, "Dialogs": https://m1.material.io/components/dialogs.html
 
+## UX Impact Review Checklist
+
+Apply this checklist to every change that touches a user-triggered code path, regardless of which directory the diff lands in (backend wiring, lifecycle refactor, event-handler edit, persistence work, frontend logic that does not directly edit a component). The checklist is short by design — if the change has no UX surface, the answers are quick and explicit. Record the answers in the PR description (or commit body for smaller changes); a reviewer who cannot find them should reject the change.
+
+1. **Affected paths.** Name the user-triggered code paths this change passes through (e.g. "Initialize dialog → `erun init` pipeline", "Sidebar row click", "fsnotify config-changed event"). If none, write "no user-triggered path affected" and stop.
+2. **User-visible sequence.** Walk the affected paths in user-facing terms — dialog opens, spinner appears in button, dialog closes, terminal switches to Local, new env appears in sidebar, ERun tab focuses — annotating which step renders each piece of state.
+3. **State-without-affordance.** Every mutation of `state.selected`, `state.terminalMessage`, `state.terminalBusy`, `state.tenants`, `state.tabsByEnv`, or other `AppState` fields must map to a visible affordance the user can register. A mutation with no rendering consequence is a gap — either render its consequence or remove the mutation. A status overlay set then cleared by the next lifecycle step before the user can see it is the same gap.
+4. **Visibility of system status (Nielsen #1).** Persistent in-flight operations need persistent indicators, not transient overlays. The indicator must be visible from where the user expects feedback — usually outside any modal that closes mid-operation.
+5. **Success and failure feedback (Nielsen #1, #9).** After the operation completes, the user must be able to tell whether their action succeeded or failed without inspecting raw terminal output or recalling earlier state. Failure surfaces need an actionable next step.
+6. **Consistency with comparable flows (Nielsen #4).** If a comparable operation already has an activity-queue entry, a sidebar badge, a toast, or any other feedback affordance, the new operation should match it unless there is a specific reason it should differ. List the comparable flow you checked against.
+7. **One-line heuristic pass.** Walk the 10 Nielsen heuristics for the affected surface, naming each one and noting whether it applies and whether the change passes. If a heuristic does not apply, say so explicitly rather than skipping silently.
+
+Common gaps this checklist catches:
+
+- Setting `state.selected = newEnv` for an env that does not yet exist in `state.tenants`. The sidebar has no row to highlight, so the mutation is invisible.
+- Calling `showTerminalMessage(busy=true)` and then `hideTerminalMessage()` from the next lifecycle step. The overlay flashes for milliseconds.
+- Refactoring a PTY lifecycle without re-wiring the post-completion UX signal. "Did it work?" must still have a visible answer in the new model.
+- Adding a new operation that mutates env state without giving it an activity-queue entry, when comparable operations already have one.
+
 ## Build And Packaging
 
 - Keep the module build script as the canonical local and release-facing desktop build entrypoint.
@@ -118,5 +147,17 @@ References:
 ## Validation
 
 - Run `go test ./...` for Go/backend changes.
-- Run `yarn build` and `go test ./...` for frontend changes.
+- Run `yarn typecheck && yarn lint && yarn format:check && yarn build` inside `frontend/` for frontend changes. `build.sh` runs the first three gates before invoking `yarn build` — set `ERUN_SKIP_LINT=1` only when iterating locally on a feature, never in CI.
 - Run `./build.sh <target>` when changing desktop packaging, Wails wiring, CGO settings, or generated asset embedding.
+
+## Lint, Format, Typecheck
+
+- ESLint config: `frontend/eslint.config.mjs` (flat config). It mirrors the Go side's `golangci.yml`: type-aware typescript-eslint (`recommendedTypeChecked`) ≈ `staticcheck`+`govet`+`errcheck`, `complexity:15` ≈ `gocyclo`, `max-lines-per-function:150` ≈ `funlen`, plus React-specific rules (`react-hooks/rules-of-hooks`, `react-hooks/exhaustive-deps`, `react-refresh/only-export-components`) and `jsx-a11y` for accessible-query compatibility with the Playwright suite. Auto-fix: `yarn lint:fix`.
+- Prettier is the formatter (separate process; not piped through ESLint). Config: `frontend/.prettierrc.json`. Auto-fix: `yarn format`.
+- TypeScript strict mode plus `noUnusedLocals`, `noUnusedParameters`, `noImplicitOverride`, `noFallthroughCasesInSwitch`, `noUncheckedIndexedAccess` are all on. `yarn typecheck` runs `tsc --noEmit`.
+- The `playwright/` sub-project mirrors the same config (with `eslint-plugin-playwright` added). Its `run.sh` runs the same gates before invoking the test suite.
+
+## End-to-end UI tests
+
+- `playwright/` is a separate Yarn project that runs end-to-end UI tests against `erun-app --headless` over the HTTP+SSE bridge. Use it for cross-component flows that depend on rendered DOM (sidebar toggles, dialog interactions, layout panels, status banners), or for catching regressions that unit-level Go tests cannot observe because they exercise only the backend. It does not replace `go test ./...`: Go tests cover backend logic, while Playwright covers the React frontend behaviour after a real boot sequence.
+- The canonical way to run the suite is `./playwright/run.sh` — it (re)builds `bin/erun-app`, installs Yarn deps and bundled Chromium if needed, then runs `playwright test` against the headless backend on port 34123. Desktop build and packaging flows should invoke `playwright/run.sh` rather than chaining yarn + playwright calls by hand. See `playwright/AGENTS.md` for the flag surface (`--skip-build`, `--port`, `--headed`, `-- ...`) and the page-object-model rules every spec must follow.

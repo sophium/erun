@@ -8,6 +8,7 @@ Repository guidance for humans and coding agents working in this repo.
 - Current `AGENTS.md` files in this repo:
   - `AGENTS.md` (this file) — repository-wide rules.
   - `erun-ui/AGENTS.md` — desktop-module guidance, including macOS + Windows targets and Wails frontend rules.
+  - `erun-ui/playwright/AGENTS.md` — Playwright end-to-end UI test suite that drives `erun-app --headless`.
   - `erun-devops/AGENTS.md` — runtime-image, chart, build-cache, and release-workflow guidance.
   - `erun-integration/AGENTS.md` — integration-test harness layout, scenario shape, and the coverage gate.
   - `erun-backend/AGENTS.md` plus `erun-backend/erun-backend-api/AGENTS.md` and `erun-backend/erun-backend-db/AGENTS.md` — hosted-backend, API, and Atlas-migration guidance.
@@ -143,6 +144,7 @@ Repository guidance for humans and coding agents working in this repo.
 - Make high-impact behavior explicit before executing it. Favor plans, previews, confirmations, and reversible steps when work can delete data, mutate remote systems, publish artifacts, or affect shared environments.
 - Preserve momentum by choosing the simplest defensible design that fits the repository. Add structure only when it clarifies ownership, reduces repeated logic, or prevents a real class of mistakes.
 - Treat repeated user corrections as signal that the interaction model is wrong, not just the implementation detail. Revisit the flow and simplify it around what the user is trying to accomplish.
+- Treat every change that affects a user-triggered code path as a UX-affecting change, including backend wiring, lifecycle refactors, event-handler edits, persistence work, and frontend logic that does not directly edit a component. Before considering such a change complete, walk through the user-facing sequence it produces and verify the user can see what is happening, recover from what fails, and confirm what succeeded. Setting state without a corresponding visible affordance, or surfacing a status that is cleared by the next lifecycle step before the user can register it, both count as gaps that block the change. For desktop work, follow the impact-review checklist in `erun-ui/AGENTS.md` § "UX Impact Review Checklist".
 - Avoid duplicating investigation. Once a cause is established, update the relevant shared guidance, tests, or abstractions so future work can start from that knowledge.
 - Treat execution state as scoped to one CLI run or one MCP request, not shared process state.
 - Avoid adding new package-level mutable variables.

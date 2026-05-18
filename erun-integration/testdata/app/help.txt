@@ -4,8 +4,10 @@ Usage:
   erun app [flags]
 
 Flags:
-      --dry-run   Resolve and trace mutating actions without executing them.
-  -h, --help      help for app
+      --dry-run    Resolve and trace mutating actions without executing them.
+      --headless   Run the desktop backend without a Wails window and serve the frontend over HTTP
+  -h, --help       help for app
+      --port int   HTTP listen port for --headless mode (defaults to the desktop binary's default)
 
 Global Flags:
       --time            Print the elapsed runtime after the command finishes.

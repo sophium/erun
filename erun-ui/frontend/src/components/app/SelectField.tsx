@@ -1,7 +1,13 @@
 import * as React from 'react';
 
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 export interface SelectFieldOption {
   value: string;
@@ -33,14 +39,21 @@ export function SelectField({
   onChange: (value: string) => void;
 }): React.ReactElement {
   const noOptions = options.length === 0;
-  const triggerDisabled = disabled || noOptions;
+  const triggerDisabled = disabled === true || noOptions;
   const helperId = helper ? `${id}-helper` : undefined;
   return (
     <div className="grid gap-2">
       <Label htmlFor={id}>{label}</Label>
-      <Select value={value || undefined} required={required} disabled={triggerDisabled} onValueChange={onChange}>
+      <Select
+        value={value || undefined}
+        required={required}
+        disabled={triggerDisabled}
+        onValueChange={onChange}
+      >
         <SelectTrigger id={id} className="w-full" aria-describedby={helperId}>
-          <SelectValue placeholder={noOptions ? (emptyLabel ?? 'No options') : (placeholder ?? '')} />
+          <SelectValue
+            placeholder={noOptions ? (emptyLabel ?? 'No options') : (placeholder ?? '')}
+          />
         </SelectTrigger>
         {!noOptions && (
           <SelectContent>

@@ -10,11 +10,14 @@ import (
 )
 
 const (
-	terminalOutputEvent   = "terminal-output"
-	terminalExitEvent     = "terminal-exit"
-	appStatusEvent        = "app-status"
-	mcpReconnectLineEvent = "mcp-reconnect-line"
-	appSessionEnvVar      = "ERUN_UI_SESSION"
+	terminalOutputEvent         = "terminal-output"
+	terminalExitEvent           = "terminal-exit"
+	appStatusEvent              = "app-status"
+	mcpReconnectLineEvent       = "mcp-reconnect-line"
+	environmentInitializedEvent = "environment-initialized"
+	environmentInitFailedEvent  = "environment-init-failed"
+	environmentsChangedEvent    = "environments-changed"
+	appSessionEnvVar            = "ERUN_UI_SESSION"
 )
 
 type erunUIStore interface {
@@ -77,6 +80,37 @@ type App struct {
 	actionQueueMu             sync.Mutex
 	actionQueues              map[string]*envActionQueue
 	actionCancels             map[string]context.CancelFunc
+	configWatcher             *configWatcher
+
+	// emitFn dispatches Wails-style events to the frontend. In normal Wails
+	// mode this calls runtime.EventsEmit; in headless mode it fans out to
+	// the SSE subscribers in headlessserver. When unset it defaults to the
+	// Wails runtime path during startup.
+	emitFn func(name string, args ...any)
+}
+
+// SetEmitter overrides how the App emits frontend events. The headless server
+// uses this to redirect EventsEmit calls to SSE subscribers instead of the
+// Wails runtime.
+func (a *App) SetEmitter(emit func(name string, args ...any)) {
+	a.emitFn = emit
+}
+
+// emit dispatches the named event with optional payload args to whatever
+// transport is currently wired up. Safe to call before startup; events emitted
+// without a context or emitter configured are dropped silently, matching the
+// pre-refactor behavior of runtime.EventsEmit with a nil context.
+func (a *App) emit(name string, args ...any) {
+	if a.emitFn != nil {
+		a.emitFn(name, args...)
+		return
+	}
+	if a.ctx == nil {
+		return
+	}
+	wailsArgs := make([]interface{}, 0, len(args))
+	wailsArgs = append(wailsArgs, args...)
+	runtime.EventsEmit(a.ctx, name, wailsArgs...)
 }
 
 func NewApp(deps erunUIDeps) *App {
@@ -204,11 +238,20 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	// macOS GUI launches (Finder/Dock) start with launchd's minimal env
+	// — no Homebrew PATH, no KUBECONFIG, no AWS_*. Inherit a short
+	// allowlist from the user's login shell so subprocess calls like
+	// kubectl config get-contexts read the same state the user sees in
+	// their terminal. No-op on other platforms. Runs before any other
+	// startup task that shells out so the first call is already correct.
+	importLoginShellEnv()
 	configureAppIdentity("ERun")
 	a.startActivityPollers()
+	a.startConfigWatcher()
 }
 
 func (a *App) shutdown(context.Context) {
+	a.stopConfigWatcher()
 	a.stopActivityPollers()
 	a.stopActionRunners()
 	a.mu.Lock()

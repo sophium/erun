@@ -1,14 +1,22 @@
 import { cssEscape } from './diffUtils';
 
-export function scrollSelectedDiffIntoView(diffList: HTMLDivElement | null, selectedDiffPath: string): void {
+export function scrollSelectedDiffIntoView(
+  diffList: HTMLDivElement | null,
+  selectedDiffPath: string,
+): void {
   if (!selectedDiffPath || !diffList) {
     return;
   }
   const selector = `[data-path="${cssEscape(selectedDiffPath)}"]`;
-  diffList.querySelector<HTMLElement>(selector)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  diffList
+    .querySelector<HTMLElement>(selector)
+    ?.scrollIntoView({ block: 'start', behavior: 'smooth' });
 }
 
-export function visibleDiffPath(diffList: HTMLDivElement | null, reviewMain: HTMLDivElement | null): string {
+export function visibleDiffPath(
+  diffList: HTMLDivElement | null,
+  reviewMain: HTMLDivElement | null,
+): string {
   if (!diffList || !reviewMain) {
     return '';
   }
@@ -24,7 +32,7 @@ export function visibleDiffPath(diffList: HTMLDivElement | null, reviewMain: HTM
 
   for (const section of sections) {
     const rect = section.getBoundingClientRect();
-    const path = section.dataset.path || '';
+    const path = section.dataset.path ?? '';
     if (!path) {
       continue;
     }

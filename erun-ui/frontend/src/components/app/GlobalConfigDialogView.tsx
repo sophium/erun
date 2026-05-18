@@ -1,27 +1,45 @@
+import { LoaderCircle, Save } from 'lucide-react';
 import * as React from 'react';
-import { CheckCircle2, Cloud, LoaderCircle, LogIn, Play, Plus, Power, RefreshCw, Save, Server } from 'lucide-react';
 
-import type { ERunUIController } from '@/app/ERunUIController';
 import { readError } from '@/app/errors';
+import {
+  closeGlobalConfigDialog,
+  submitGlobalConfig,
+  updateGlobalConfig,
+} from '@/app/globalConfigThunks';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { showTerminalMessage } from '@/app/notificationThunks';
 import type { AppState } from '@/app/state';
+import { useController } from '@/app/useController';
+import { CloudAliasesSection } from '@/components/app/GlobalConfigDialog.CloudAliases';
+import { CloudContextsSection } from '@/components/app/GlobalConfigDialog.CloudContexts';
+import { NOT_CONFIGURED_VALUE, optionValues } from '@/components/app/GlobalConfigDialog.helpers';
+import { DialogError } from '@/components/app/GlobalConfigDialog.shared';
+import { SelectField, type SelectFieldOption } from '@/components/app/SelectField';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { EmptyState } from './EmptyState';
-import { SelectField, type SelectFieldOption } from './SelectField';
-import { StatusBadge, cloudProviderStatusTone } from './StatusBadge';
-
-const dialogErrorClassName =
-  'rounded-[var(--radius)] border border-[color-mix(in_oklch,var(--destructive)_36%,transparent)] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] px-[11px] py-[9px] text-[13px] leading-[1.35] text-destructive [overflow-wrap:anywhere]';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 type GlobalConfigDialog = AppState['globalConfigDialog'];
 
-export function GlobalConfigDialogView({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
-  const dialog = state.globalConfigDialog;
+export function GlobalConfigDialogView(): React.ReactElement {
+  const controller = useController();
+  const dispatch = useAppDispatch();
+  const dialog = useAppSelector((state) => state.globalConfigDialog);
 
   return (
-    <Dialog open={dialog.open} onOpenChange={(open) => !open && controller.closeGlobalConfigDialog()}>
+    <Dialog
+      open={dialog.open}
+      onOpenChange={(open) => {
+        if (!open) dispatch(closeGlobalConfigDialog());
+      }}
+    >
       <DialogContent
         className="sm:max-w-xl"
         onCloseAutoFocus={(event) => {
@@ -33,35 +51,48 @@ export function GlobalConfigDialogView({ controller, state }: { controller: ERun
           className="grid gap-4"
           onSubmit={(event) => {
             event.preventDefault();
-            void controller.submitGlobalConfig().catch((error: unknown) => {
-              controller.showTerminalMessage(readError(error));
+            void dispatch(submitGlobalConfig()).catch((error: unknown) => {
+              dispatch(showTerminalMessage(readError(error)));
             });
           }}
         >
           <DialogHeader>
             <DialogTitle>ERun settings</DialogTitle>
-            <DialogDescription>Default tenant, cloud aliases, and cloud contexts shared across the app.</DialogDescription>
+            <DialogDescription>
+              Default tenant, cloud aliases, and cloud contexts shared across the app.
+            </DialogDescription>
           </DialogHeader>
-          <GlobalConfigBody controller={controller} state={state} />
+          <GlobalConfigBody />
           <DialogError error={dialog.error} />
-          <GlobalConfigFooter controller={controller} dialog={dialog} />
+          <GlobalConfigFooter dialog={dialog} />
         </form>
       </DialogContent>
     </Dialog>
   );
 }
 
-const NOT_CONFIGURED_VALUE = '__none__';
-
-function GlobalConfigBody({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
-  const dialog = state.globalConfigDialog;
+function GlobalConfigBody(): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const dialog = useAppSelector((state) => state.globalConfigDialog);
+  const tenants = useAppSelector((state) => state.tenants.tenants);
   if (dialog.configLoading) {
-    return <div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">Loading config...</div>;
+    return (
+      <div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">
+        Loading config...
+      </div>
+    );
   }
-  const tenantNames = optionValues(state.tenants.map((tenant) => tenant.name), dialog.config.defaultTenant);
-  const tenantOptions: SelectFieldOption[] = tenantNames.length === 0
-    ? []
-    : [{ value: NOT_CONFIGURED_VALUE, label: 'Not configured' }, ...tenantNames.map((name) => ({ value: name, label: name }))];
+  const tenantNames = optionValues(
+    tenants.map((tenant) => tenant.name),
+    dialog.config.defaultTenant,
+  );
+  const tenantOptions: SelectFieldOption[] =
+    tenantNames.length === 0
+      ? []
+      : [
+          { value: NOT_CONFIGURED_VALUE, label: 'Not configured' },
+          ...tenantNames.map((name) => ({ value: name, label: name })),
+        ];
   return (
     <div className="grid gap-3">
       <SelectField
@@ -71,382 +102,42 @@ function GlobalConfigBody({ controller, state }: { controller: ERunUIController;
         options={tenantOptions}
         emptyLabel="No tenants"
         disabled={dialog.busy}
-        onChange={(value) => controller.updateGlobalConfig({ defaultTenant: value === NOT_CONFIGURED_VALUE ? '' : value })}
+        onChange={(value) => {
+          dispatch(
+            updateGlobalConfig({ defaultTenant: value === NOT_CONFIGURED_VALUE ? '' : value }),
+          );
+        }}
       />
-      <CloudAliasesSection controller={controller} dialog={dialog} />
-      <CloudContextsSection controller={controller} dialog={dialog} />
+      <CloudAliasesSection dialog={dialog} />
+      <CloudContextsSection dialog={dialog} />
     </div>
   );
 }
 
-function CloudAliasesSection({ controller, dialog }: { controller: ERunUIController; dialog: GlobalConfigDialog }): React.ReactElement {
-  const providers = dialog.config.cloudProviders || [];
-  return (
-    <div className="grid gap-2">
-      <div className="flex items-center justify-between gap-2">
-        <Label>Cloud aliases</Label>
-        <div className="flex gap-1.5">
-          <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => void controller.startAWSCloudInit()}>
-            {dialog.busyAction === 'cloud-provider-init' ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Plus aria-hidden="true" />}
-            AWS
-          </Button>
-          <Button type="button" variant="ghost" size="icon" disabled={dialog.busy} aria-label="Refresh cloud aliases" onClick={() => void controller.refreshCloudProviders()}>
-            <RefreshCw aria-hidden="true" />
-          </Button>
-        </div>
-      </div>
-      {providers.length === 0 ? (
-        <EmptyState
-          icon={<Cloud />}
-          heading="No cloud aliases yet"
-          body="Add a cloud account so ERun can deploy environments to it. AWS is the only provider supported today."
-          action={
-            <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => void controller.startAWSCloudInit()}>
-              {dialog.busyAction === 'cloud-provider-init' ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Plus aria-hidden="true" />}
-              Add AWS account
-            </Button>
-          }
-        />
-      ) : (
-        <CloudAliasList controller={controller} dialog={dialog} />
-      )}
-    </div>
-  );
-}
-
-function CloudAliasList({ controller, dialog }: { controller: ERunUIController; dialog: GlobalConfigDialog }): React.ReactElement {
-  return (
-    <div className="overflow-hidden rounded-[var(--radius)] border border-border">
-      {(dialog.config.cloudProviders || []).map((provider, index) => (
-        <div key={provider.alias} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-border px-3 py-2.5 data-[border=true]:border-t" data-border={index > 0} data-cloud-alias={provider.alias} data-cloud-status={provider.status}>
-          <CloudAliasSummary provider={provider} />
-          <CloudAliasAction status={provider.status} busy={dialog.busy} loading={dialog.busyAction === 'cloud-provider-login' && dialog.busyTarget === provider.alias} onLogin={() => void controller.loginCloudProvider(provider.alias)} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function CloudAliasSummary({ provider }: { provider: NonNullable<GlobalConfigDialog['config']['cloudProviders']>[number] }): React.ReactElement {
-  return (
-    <div className="grid min-w-0 gap-1">
-      <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
-        <Cloud className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span className="truncate">{provider.alias}</span>
-        <CloudStatusBadge status={provider.status} />
-      </div>
-      <div className="truncate text-xs text-muted-foreground">
-        {cloudProviderSummary(provider)}
-        {provider.message ? ` - ${provider.message}` : ''}
-      </div>
-    </div>
-  );
-}
-
-function CloudContextsSection({ controller, dialog }: { controller: ERunUIController; dialog: GlobalConfigDialog }): React.ReactElement {
-  const contexts = dialog.config.cloudContexts || [];
-  return (
-    <div className="grid gap-2">
-      <div className="flex items-center justify-between gap-2">
-        <Label>Cloud contexts</Label>
-        <Button type="button" variant="ghost" size="icon" disabled={dialog.busy} aria-label="Refresh cloud contexts" onClick={() => void controller.refreshCloudContexts()}>
-          <RefreshCw aria-hidden="true" />
-        </Button>
-      </div>
-      <CloudContextDraftForm controller={controller} dialog={dialog} />
-      {contexts.length === 0 ? (
-        <EmptyState
-          icon={<Server />}
-          heading="No cloud contexts yet"
-          body="Pick a cloud alias and region above, then click Init to provision a new context. Contexts are reusable across environments."
-        />
-      ) : (
-        <CloudContextList controller={controller} dialog={dialog} />
-      )}
-    </div>
-  );
-}
-
-function CloudContextDraftForm({ controller, dialog }: { controller: ERunUIController; dialog: GlobalConfigDialog }): React.ReactElement {
-  const config = dialog.config;
-  const generated = generatedContextName((config.cloudProviders || []).find((provider) => provider.alias === dialog.cloudContextDraft.cloudProviderAlias), dialog.cloudContextDraft.region, config.cloudContexts || []);
-  return (
-    <div className="grid gap-2 rounded-[var(--radius)] border border-border p-3">
-      <div className="grid gap-2 sm:grid-cols-2">
-        <SelectField
-          id="global-config-cloudcontext-provider"
-          label="Cloud provider"
-          value={dialog.cloudContextDraft.cloudProviderAlias}
-          options={(config.cloudProviders || []).map((provider) => ({ value: provider.alias, label: provider.alias }))}
-          emptyLabel="No cloud aliases"
-          placeholder="Select cloud alias"
-          disabled={dialog.busy}
-          onChange={(cloudProviderAlias) => controller.updateCloudContextDraft({ cloudProviderAlias })}
-        />
-        <SelectField
-          id="global-config-cloudcontext-region"
-          label="Region"
-          value={dialog.cloudContextDraft.region || 'eu-west-2'}
-          options={[
-            { value: 'eu-west-2', label: cloudRegionLabel('eu-west-2') },
-            { value: 'eu-west-1', label: cloudRegionLabel('eu-west-1') },
-          ]}
-          disabled={dialog.busy}
-          onChange={(region) => controller.updateCloudContextDraft({ region })}
-        />
-        <SelectField
-          id="global-config-cloudcontext-instancetype"
-          label="Instance type"
-          value={dialog.cloudContextDraft.instanceType}
-          options={[
-            { value: 'c8gd.2xlarge', label: 'c8gd.2xlarge' },
-            { value: 't4g.xlarge', label: 't4g.xlarge' },
-          ]}
-          disabled={dialog.busy}
-          onChange={(instanceType) => controller.updateCloudContextDraft({ instanceType })}
-        />
-        <SelectField
-          id="global-config-cloudcontext-disksize"
-          label="Disk size"
-          value={String(dialog.cloudContextDraft.diskSizeGb)}
-          options={[
-            { value: '100', label: '100' },
-            { value: '200', label: '200' },
-          ]}
-          disabled={dialog.busy}
-          onChange={(diskSizeGb) => controller.updateCloudContextDraft({ diskSizeGb: Number(diskSizeGb) })}
-        />
-      </div>
-      <p className="text-[12px] leading-[1.4] text-muted-foreground">Region, instance type, and disk size are common choices vetted for ERun. Contact an admin to expand the list.</p>
-      <CloudContextNameField controller={controller} dialog={dialog} generatedName={generated} />
-    </div>
-  );
-}
-
-function CloudContextNameField({ controller, dialog, generatedName }: { controller: ERunUIController; dialog: GlobalConfigDialog; generatedName: string }): React.ReactElement {
-  return (
-    <div className="grid gap-2">
-      <Label htmlFor="global-config-cloudcontext-name">Context name</Label>
-      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-        <Input id="global-config-cloudcontext-name" value={dialog.cloudContextDraft.name} disabled={dialog.busy} placeholder="Generated when empty" onChange={(event) => controller.updateCloudContextDraft({ name: event.target.value })} />
-        <Button type="button" size="sm" disabled={dialog.busy || dialog.configLoading || !dialog.cloudContextDraft.cloudProviderAlias || !dialog.cloudContextDraft.region} onClick={() => void controller.initCloudContext()}>
-          {dialog.busyAction === 'cloud-context-init' ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Plus aria-hidden="true" />}
-          Init
-        </Button>
-      </div>
-      {generatedName && !dialog.cloudContextDraft.name && <div className="px-0.5 text-xs leading-[1.35] text-muted-foreground [overflow-wrap:anywhere]">Generated: {generatedName}</div>}
-    </div>
-  );
-}
-
-function CloudContextList({ controller, dialog }: { controller: ERunUIController; dialog: GlobalConfigDialog }): React.ReactElement {
-  return (
-    <div className="overflow-hidden rounded-[var(--radius)] border border-border">
-      {(dialog.config.cloudContexts || []).map((context, index) => (
-        <div key={context.name} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 border-border px-3 py-2.5 data-[border=true]:border-t" data-border={index > 0} data-cloud-context={context.name} data-cloud-context-status={context.status}>
-          <CloudContextSummary context={context} />
-          <CloudContextAction status={context.status} busy={dialog.busy} loading={dialog.busyAction === 'cloud-context-power' && dialog.busyTarget === context.name} onStart={() => void controller.startCloudContext(context.name)} onStop={() => void controller.stopCloudContext(context.name)} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function CloudContextSummary({ context }: { context: NonNullable<GlobalConfigDialog['config']['cloudContexts']>[number] }): React.ReactElement {
-  return (
-    <div className="grid min-w-0 gap-1">
-      <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
-        <Server className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span className="truncate">{context.kubernetesContext || context.name}</span>
-        <CloudStatusBadge status={context.status} />
-      </div>
-      <div className="truncate text-xs text-muted-foreground">
-        {cloudContextSummary(context)}
-        {context.message ? ` - ${context.message}` : ''}
-      </div>
-    </div>
-  );
-}
-
-function DialogError({ error }: { error: string }): React.ReactElement | null {
-  return error ? <div className={dialogErrorClassName} role="alert">{error}</div> : null;
-}
-
-function GlobalConfigFooter({ controller, dialog }: { controller: ERunUIController; dialog: GlobalConfigDialog }): React.ReactElement {
+function GlobalConfigFooter({ dialog }: { dialog: GlobalConfigDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
   const saving = dialog.busyAction === 'save';
   return (
     <DialogFooter>
-      <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => controller.closeGlobalConfigDialog()}>Cancel</Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={dialog.busy}
+        onClick={() => {
+          dispatch(closeGlobalConfigDialog());
+        }}
+      >
+        Cancel
+      </Button>
       <Button type="submit" size="sm" disabled={dialog.busy || dialog.configLoading}>
-        {saving ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Save aria-hidden="true" />}
+        {saving ? (
+          <LoaderCircle className="animate-spin" aria-hidden="true" />
+        ) : (
+          <Save aria-hidden="true" />
+        )}
         {saving ? 'Saving...' : 'Save settings'}
       </Button>
     </DialogFooter>
   );
-}
-
-function CloudStatusBadge({ status }: { status: string }): React.ReactElement {
-  const normalized = status.trim() || 'unknown';
-  return <StatusBadge tone={cloudProviderStatusTone(normalized)} label={statusLabel(normalized)} />;
-}
-
-function CloudAliasAction({ status, busy, loading, onLogin }: { status: string; busy: boolean; loading: boolean; onLogin: () => void }): React.ReactElement {
-  if (status.trim() === 'active') {
-    return (
-      <div className="inline-flex items-center gap-1.5 px-1 text-xs font-medium text-green-700 dark:text-green-400" aria-label="Connected">
-        <CheckCircle2 className="size-4" aria-hidden="true" />
-        Connected
-      </div>
-    );
-  }
-  return (
-    <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onLogin}>
-      {loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <LogIn aria-hidden="true" />}
-      {loading ? 'Logging in...' : 'Login'}
-    </Button>
-  );
-}
-
-function CloudContextAction({ status, busy, loading, onStart, onStop }: { status: string; busy: boolean; loading: boolean; onStart: () => void; onStop: () => void }): React.ReactElement {
-  if (status.trim() === 'running') {
-    return (
-      <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onStop}>
-        {loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Power aria-hidden="true" />}
-        {loading ? 'Stopping...' : 'Stop'}
-      </Button>
-    );
-  }
-  return (
-    <Button type="button" variant="outline" size="sm" disabled={busy} onClick={onStart}>
-      {loading ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <Play aria-hidden="true" />}
-      {loading ? 'Starting...' : 'Start'}
-    </Button>
-  );
-}
-
-function cloudProviderSummary(provider: { provider: string; username?: string; accountId?: string }): string {
-  const providerName = provider.provider.toUpperCase();
-  if (provider.accountId && provider.username) {
-    return `${providerName} account ${provider.accountId} - ${provider.username}`;
-  }
-  if (provider.accountId) {
-    return `${providerName} account ${provider.accountId}`;
-  }
-  return providerName;
-}
-
-function cloudContextSummary(context: { cloudProviderAlias: string; region: string; instanceType: string; diskSizeGb: number; diskType: string; instanceId?: string }): string {
-  const parts = [
-    context.cloudProviderAlias,
-    cloudRegionLabel(context.region),
-    context.instanceType,
-    `${context.diskSizeGb} GB ${context.diskType}`,
-  ].filter(Boolean);
-  if (context.instanceId) {
-    parts.push(context.instanceId);
-  }
-  return parts.join(' - ');
-}
-
-const AWS_REGION_NAMES: Record<string, string> = {
-  'eu-west-1': 'Ireland',
-  'eu-west-2': 'London',
-  'eu-west-3': 'Paris',
-  'eu-central-1': 'Frankfurt',
-  'eu-north-1': 'Stockholm',
-  'eu-south-1': 'Milan',
-  'us-east-1': 'N. Virginia',
-  'us-east-2': 'Ohio',
-  'us-west-1': 'N. California',
-  'us-west-2': 'Oregon',
-  'ap-northeast-1': 'Tokyo',
-  'ap-northeast-2': 'Seoul',
-  'ap-south-1': 'Mumbai',
-  'ap-southeast-1': 'Singapore',
-  'ap-southeast-2': 'Sydney',
-};
-
-function cloudRegionLabel(region: string): string {
-  const name = AWS_REGION_NAMES[region];
-  return name ? `${region} (${name})` : region;
-}
-
-function generatedContextName(provider: { alias: string; username?: string; accountId?: string } | undefined, region: string, contexts: Array<{ name: string; kubernetesContext: string }>): string {
-  if (!provider) {
-    return '';
-  }
-  const identity = provider.accountId || provider.username || provider.alias;
-  const tail = sanitizeContextName([identity, region || 'eu-west-2'].filter(Boolean).join('-'));
-  return nextGeneratedContextName(tail, contexts);
-}
-
-function nextGeneratedContextName(tail: string, contexts: Array<{ name: string; kubernetesContext: string }>): string {
-  const normalizedTail = sanitizeContextName(tail) || 'context';
-  const suffix = `-${normalizedTail}`;
-  let next = 1;
-  for (const context of contexts) {
-    for (const name of [context.name, context.kubernetesContext]) {
-      if (!name.startsWith('erun-') || !name.endsWith(suffix)) {
-        continue;
-      }
-      const counter = name.slice('erun-'.length, name.length - suffix.length);
-      if (!/^\d{3}$/.test(counter)) {
-        continue;
-      }
-      const value = Number(counter);
-      if (value >= next) {
-        next = value + 1;
-      }
-    }
-  }
-  return `erun-${String(next).padStart(3, '0')}-${normalizedTail}`;
-}
-
-function sanitizeContextName(value: string): string {
-  let result = '';
-  let lastDash = false;
-  for (const char of value.trim().toLowerCase()) {
-    if ((char >= 'a' && char <= 'z') || (char >= '0' && char <= '9')) {
-      result += char;
-      lastDash = false;
-      continue;
-    }
-    if (!lastDash) {
-      result += '-';
-      lastDash = true;
-    }
-  }
-  return result.replace(/^-+|-+$/g, '');
-}
-
-function statusLabel(status: string): string {
-  switch (status) {
-    case 'active':
-      return 'Active';
-    case 'running':
-      return 'Running';
-    case 'stopped':
-      return 'Stopped';
-    case 'pending':
-      return 'Pending';
-    case 'expired':
-      return 'Expired';
-    case 'not_configured':
-      return 'Not configured';
-    default:
-      return 'Unknown';
-  }
-}
-
-function optionValues(values: string[], current: string): string[] {
-  const seen = new Set<string>();
-  return [current, ...values]
-    .map((value) => value.trim())
-    .filter((value) => {
-      if (!value || seen.has(value)) {
-        return false;
-      }
-      seen.add(value);
-      return true;
-    });
 }

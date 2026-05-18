@@ -1,39 +1,49 @@
-import * as React from 'react';
 import { AlertCircle, PlugZap, RefreshCw } from 'lucide-react';
+import * as React from 'react';
 
-import type { ERunUIController } from '@/app/ERunUIController';
 import { compactDiffError, diffLineMark } from '@/app/diffUtils';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { reconnectCopy } from '@/app/reconnectCopy';
-import type { AppState } from '@/app/state';
+import { loadReviewDiff, requestReconnect } from '@/app/reviewThunks';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { DiffFile, DiffHunk } from '@/types';
 
-export function DiffList({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
-  if (state.diffLoading) {
+export function DiffList(): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const review = useAppSelector((state) => state.review);
+  if (review.diffLoading) {
     return <ReviewStatus>Loading diff...</ReviewStatus>;
   }
-  if (state.diffError) {
+  if (review.diffError) {
     return (
       <DiffErrorAlert
-        message={compactDiffError(state.diffError)}
-        loading={state.diffLoading}
-        reconnectable={state.diffErrorReconnectable}
-        onRetry={() => { void controller.loadReviewDiff(); }}
-        onReconnect={() => controller.requestReconnect()}
+        message={compactDiffError(review.diffError)}
+        loading={review.diffLoading}
+        reconnectable={review.diffErrorReconnectable}
+        onRetry={() => {
+          void dispatch(loadReviewDiff());
+        }}
+        onReconnect={() => {
+          dispatch(requestReconnect());
+        }}
       />
     );
   }
-  const files = state.diff?.files || [];
+  const files = review.diff?.files ?? [];
   if (files.length === 0) {
     return <ReviewStatus>No changes</ReviewStatus>;
   }
   return (
     <>
       {files.map((file) => (
-        <DiffFileView key={file.path} file={file} selected={file.path === state.selectedDiffPath} />
+        <DiffFileView
+          key={file.path}
+          file={file}
+          selected={file.path === review.selectedDiffPath}
+        />
       ))}
-      <span className="sr-only">{controller.state.selectedDiffPath}</span>
+      <span className="sr-only">{review.selectedDiffPath}</span>
     </>
   );
 }
@@ -72,7 +82,13 @@ export function DiffErrorAlert({
           {reconnectCopy.retryAction}
         </Button>
         {reconnectable && onReconnect && (
-          <Button type="button" variant="outline" size="sm" disabled={loading} onClick={onReconnect}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={loading}
+            onClick={onReconnect}
+          >
             <PlugZap aria-hidden="true" />
             {reconnectCopy.reconnectAction}
           </Button>
@@ -82,27 +98,38 @@ export function DiffErrorAlert({
   );
 }
 
-function DiffFileView({ file, selected }: { file: DiffFile; selected: boolean }): React.ReactElement {
+function DiffFileView({
+  file,
+  selected,
+}: {
+  file: DiffFile;
+  selected: boolean;
+}): React.ReactElement {
   return (
-    <section className="diff-file scroll-mt-4" data-path={file.path} data-selected={selected || undefined}>
+    <section
+      className="diff-file scroll-mt-4"
+      data-path={file.path}
+      data-selected={selected || undefined}
+    >
       <header className="flex items-center justify-between gap-4 px-1.5 pb-2.5 text-[13px] font-semibold text-foreground">
         <span className="min-w-0 truncate">{file.path}</span>
         <span className="flex-none font-semibold text-diff-add-foreground">
-          <span>+{file.additions}</span> <span className="text-diff-delete-foreground">-{file.deletions}</span>
+          <span>+{file.additions}</span>{' '}
+          <span className="text-diff-delete-foreground">-{file.deletions}</span>
         </span>
       </header>
       {file.binary ? (
         <ReviewStatus>Binary file changed</ReviewStatus>
       ) : (
-        (file.hunks || []).map((hunk) => <DiffHunkView key={hunk.header} hunk={hunk} />)
+        (file.hunks ?? []).map((hunk) => <DiffHunkView key={hunk.header} hunk={hunk} />)
       )}
     </section>
   );
 }
 
 function DiffHunkView({ hunk }: { hunk: DiffHunk }): React.ReactElement {
-  const contentWidth = Math.max(1, ...(hunk.lines || []).map((line) => line.content?.length || 0));
-  const style = { '--diff-content-width': `${contentWidth + 2}ch` } as React.CSSProperties;
+  const contentWidth = Math.max(1, ...(hunk.lines ?? []).map((line) => line.content.length));
+  const style = { '--diff-content-width': `${String(contentWidth + 2)}ch` } as React.CSSProperties;
 
   return (
     <div className="overflow-hidden rounded-[var(--radius)] border bg-background not-first:mt-2.5">
@@ -110,9 +137,9 @@ function DiffHunkView({ hunk }: { hunk: DiffHunk }): React.ReactElement {
         {hunk.header}
       </div>
       <div className="relative max-w-full overflow-x-auto overflow-y-hidden" style={style}>
-        {(hunk.lines || []).map((line, index) => (
+        {(hunk.lines ?? []).map((line, index) => (
           <div
-            key={`${line.oldLine || ''}:${line.newLine || ''}:${index}`}
+            key={`${String(line.oldLine ?? '')}:${String(line.newLine ?? '')}:${String(index)}`}
             className={cn(
               'grid min-h-5 w-max min-w-full grid-cols-[48px_48px_22px_minmax(var(--diff-content-width),1fr)] bg-background font-mono text-[11px] leading-5',
               line.kind === 'add' && 'bg-diff-add',
@@ -121,10 +148,10 @@ function DiffHunkView({ hunk }: { hunk: DiffHunk }): React.ReactElement {
             )}
           >
             <span className="select-none border-r border-[oklch(0_0_0/0.05)] bg-inherit px-2 text-right text-muted-foreground">
-              {line.oldLine || ''}
+              {line.oldLine ?? ''}
             </span>
             <span className="select-none border-r border-[oklch(0_0_0/0.05)] bg-inherit px-2 text-right text-muted-foreground">
-              {line.newLine || ''}
+              {line.newLine ?? ''}
             </span>
             <span className="select-none border-r border-[oklch(0_0_0/0.05)] bg-inherit text-center text-foreground">
               {diffLineMark(line.kind)}

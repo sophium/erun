@@ -1,74 +1,81 @@
-import type { DebugOpenFilter, DebugSessionMode, TerminalExitSelections, TerminalWriteData } from './model';
-import { selectionKey } from './versionSuggestions';
 import type { UISelection } from '@/types';
 
+import type {
+  DebugOpenFilter,
+  DebugSessionMode,
+  TerminalExitSelections,
+  TerminalWriteData,
+} from './model';
+import {
+  clearDebugFilter as clearDebugFilterAction,
+  clearSessionDebug as clearSessionDebugAction,
+  recordExitOutput as recordExitOutputAction,
+  recordExitReason as recordExitReasonAction,
+  registerDebugSession as registerDebugSessionAction,
+  setDebugFilter as setDebugFilterAction,
+  setSessionDebug as setSessionDebugAction,
+  takeExitSelections as takeExitSelectionsAction,
+  trackCloudInitSession as trackCloudInitSessionAction,
+  trackDoctorSession as trackDoctorSessionAction,
+  trackOpenSession as trackOpenSessionAction,
+  trackSSHDInitSession as trackSSHDInitSessionAction,
+} from './slices/sessionsSlice';
+import { store } from './store';
+import { selectionKey } from './versionSuggestions';
+
+// TerminalSessionRegistry is a thin facade. Per-session *metadata* (which
+// sessions are open/sshd/doctor/cloud-init, exit reasons/outputs, debug
+// modes/filters, debug-header buffer) lives in the sessions slice — the
+// methods below read/write through the store. Only the raw output buffers
+// (Uint8Array[]) and the display-filtered TerminalWriteData[] arrays still
+// live on this instance, as Maps: they are large, churn frequently, and
+// were excluded from Redux deliberately for perf.
 export class TerminalSessionRegistry {
-  private readonly initSessionSelections = new Map<number, UISelection>();
-  private readonly deploySessionSelections = new Map<number, UISelection>();
-  private readonly sshdInitSessionSelections = new Map<number, UISelection>();
-  private readonly doctorSessionSelections = new Map<number, UISelection>();
-  private readonly openSessionSelections = new Map<number, UISelection>();
-  private readonly cloudInitSessions = new Set<number>();
-  private readonly selectionSessions = new Map<string, number>();
   private readonly sessionBuffers = new Map<number, Uint8Array[]>();
   private readonly sessionDisplayBuffers = new Map<number, TerminalWriteData[]>();
-  private readonly sessionExitReasons = new Map<number, string>();
-  private readonly sessionExitOutputs = new Map<number, string>();
-  private readonly debugOpenFilters = new Map<number, DebugOpenFilter>();
-  private readonly debugSessionModes = new Map<number, DebugSessionMode>();
-  private readonly sessionDebugBuffers = new Map<number, string>();
 
   knownSelectionSession(key: string): number {
-    return this.selectionSessions.get(key) || 0;
+    return store.getState().sessions.selectionToSessionId[key] ?? 0;
   }
 
   trackOpenSession(key: string, sessionId: number, selection: UISelection): void {
-    this.selectionSessions.set(key, sessionId);
-    this.openSessionSelections.set(sessionId, selection);
+    store.dispatch(trackOpenSessionAction({ key, sessionId, selection }));
   }
 
   isOpenSession(sessionId: number): boolean {
-    return this.openSessionSelections.has(sessionId);
+    return store.getState().sessions.openSelections[sessionId] !== undefined;
   }
 
   trackSSHDInitSession(sessionId: number, selection: UISelection): void {
-    this.sshdInitSessionSelections.set(sessionId, selection);
+    store.dispatch(trackSSHDInitSessionAction({ sessionId, selection }));
   }
 
   trackDoctorSession(sessionId: number, selection: UISelection): void {
-    this.doctorSessionSelections.set(sessionId, selection);
+    store.dispatch(trackDoctorSessionAction({ sessionId, selection }));
   }
 
   trackCloudInitSession(sessionId: number): void {
-    this.cloudInitSessions.add(sessionId);
-  }
-
-  trackInitSession(sessionId: number, selection: UISelection): void {
-    this.initSessionSelections.set(sessionId, selection);
-  }
-
-  trackDeploySession(sessionId: number, selection: UISelection): void {
-    this.deploySessionSelections.set(sessionId, selection);
+    store.dispatch(trackCloudInitSessionAction(sessionId));
   }
 
   appendSessionBuffer(sessionId: number, data: Uint8Array): void {
-    const existing = this.sessionBuffers.get(sessionId) || [];
+    const existing = this.sessionBuffers.get(sessionId) ?? [];
     existing.push(data);
     this.sessionBuffers.set(sessionId, existing);
   }
 
   sessionBuffer(sessionId: number): Uint8Array[] {
-    return this.sessionBuffers.get(sessionId) || [];
+    return this.sessionBuffers.get(sessionId) ?? [];
   }
 
   appendDisplayBuffer(sessionId: number, data: TerminalWriteData): void {
-    const displayBuffer = this.sessionDisplayBuffers.get(sessionId) || [];
+    const displayBuffer = this.sessionDisplayBuffers.get(sessionId) ?? [];
     displayBuffer.push(data);
     this.sessionDisplayBuffers.set(sessionId, displayBuffer);
   }
 
   displayBuffer(sessionId: number): TerminalWriteData[] {
-    return this.sessionDisplayBuffers.get(sessionId) || [];
+    return this.sessionDisplayBuffers.get(sessionId) ?? [];
   }
 
   replaceDisplayBuffer(sessionId: number, chunks: TerminalWriteData[]): void {
@@ -80,80 +87,68 @@ export class TerminalSessionRegistry {
   }
 
   exitReason(sessionId: number): string {
-    return this.sessionExitReasons.get(sessionId) || '';
+    return store.getState().sessions.exitReasons[sessionId] ?? '';
   }
 
   exitOutput(sessionId: number): string {
-    return this.sessionExitOutputs.get(sessionId) || '';
+    return store.getState().sessions.exitOutputs[sessionId] ?? '';
   }
 
   recordExitReason(sessionId: number, reason: string): void {
-    this.sessionExitReasons.set(sessionId, reason);
+    store.dispatch(recordExitReasonAction({ sessionId, reason }));
   }
 
   recordExitOutput(sessionId: number, output: string): void {
-    this.sessionExitOutputs.set(sessionId, output);
+    store.dispatch(recordExitOutputAction({ sessionId, output }));
   }
 
   takeExitSelections(sessionId: number): TerminalExitSelections {
-    const selections = {
-      initSelection: this.initSessionSelections.get(sessionId),
-      deploySelection: this.deploySessionSelections.get(sessionId),
-      sshdInitSelection: this.sshdInitSessionSelections.get(sessionId),
-      doctorSelection: this.doctorSessionSelections.get(sessionId),
-      openSelection: this.openSessionSelections.get(sessionId),
-      cloudInit: this.cloudInitSessions.has(sessionId),
+    const state = store.getState().sessions;
+    const openSelection = state.openSelections[sessionId];
+    const selections: TerminalExitSelections = {
+      sshdInitSelection: state.sshdInitSelections[sessionId],
+      doctorSelection: state.doctorSelections[sessionId],
+      openSelection,
+      cloudInit: !!state.cloudInitSessions[sessionId],
     };
-    this.initSessionSelections.delete(sessionId);
-    this.deploySessionSelections.delete(sessionId);
-    this.sshdInitSessionSelections.delete(sessionId);
-    this.doctorSessionSelections.delete(sessionId);
-    this.openSessionSelections.delete(sessionId);
-    this.cloudInitSessions.delete(sessionId);
-    this.debugSessionModes.delete(sessionId);
-    this.sessionDebugBuffers.delete(sessionId);
-    if (selections.openSelection) {
-      this.selectionSessions.delete(selectionKey(selections.openSelection));
-    }
+    store.dispatch(
+      takeExitSelectionsAction({
+        sessionId,
+        selectionKey: openSelection ? selectionKey(openSelection) : null,
+      }),
+    );
     return selections;
   }
 
   clearDebugFilter(sessionId: number): void {
-    this.debugOpenFilters.delete(sessionId);
+    store.dispatch(clearDebugFilterAction(sessionId));
   }
 
   debugMode(sessionId: number): DebugSessionMode | undefined {
-    return this.debugSessionModes.get(sessionId);
+    return store.getState().sessions.debugModes[sessionId];
   }
 
   debugFilter(sessionId: number): DebugOpenFilter {
-    return this.debugOpenFilters.get(sessionId) || { released: false, pending: '' };
+    return store.getState().sessions.debugFilters[sessionId] ?? { released: false, pending: '' };
   }
 
   setDebugFilter(sessionId: number, filter: DebugOpenFilter): void {
-    this.debugOpenFilters.set(sessionId, filter);
+    store.dispatch(setDebugFilterAction({ sessionId, filter }));
   }
 
   registerDebugSession(sessionId: number, selection: UISelection, mode: DebugSessionMode): void {
-    if (!selection.debug) {
-      return;
-    }
-    this.debugSessionModes.set(sessionId, mode);
+    store.dispatch(registerDebugSessionAction({ sessionId, selection, mode }));
   }
 
   sessionDebug(sessionId: number): string {
-    return this.sessionDebugBuffers.get(sessionId) || '';
+    return store.getState().sessions.debugBuffers[sessionId] ?? '';
   }
 
   setSessionDebug(sessionId: number, value: string): void {
-    if (!value) {
-      this.sessionDebugBuffers.delete(sessionId);
-      return;
-    }
-    this.sessionDebugBuffers.set(sessionId, value);
+    store.dispatch(setSessionDebugAction({ sessionId, value }));
   }
 
   clearSessionDebug(sessionId: number): void {
-    this.sessionDebugBuffers.delete(sessionId);
+    store.dispatch(clearSessionDebugAction(sessionId));
   }
 }

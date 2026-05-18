@@ -1,0 +1,7 @@
+dist
+node_modules
+wailsjs
+src/components/ui
+package.json
+yarn.lock
+*.tsbuildinfo

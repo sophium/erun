@@ -1,0 +1,22 @@
+import { LoaderCircle } from 'lucide-react';
+import * as React from 'react';
+
+export function TerminalBusyOverlay({ message }: { message: string }): React.ReactElement | null {
+  if (!message) {
+    return null;
+  }
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-terminal/45">
+      <div className="flex max-w-[min(520px,calc(100%-48px))] items-center gap-3 rounded-md border border-[oklch(0.28_0_0)] bg-[oklch(0.08_0_0)] px-4 py-3 text-[13px] leading-[1.35] text-[oklch(0.86_0_0)] shadow-lg">
+        <LoaderCircle
+          className="size-4 flex-none animate-spin text-[oklch(0.72_0_0)]"
+          aria-hidden="true"
+        />
+        <span className="min-w-0 truncate" title={message}>
+          {message}
+        </span>
+      </div>
+    </div>
+  );
+}

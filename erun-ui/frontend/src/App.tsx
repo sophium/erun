@@ -1,49 +1,45 @@
 import * as React from 'react';
-import { CheckCircle2, ChevronDown, ChevronUp, Copy, LoaderCircle, Trash2 } from 'lucide-react';
 
-import { ERunUIController } from '@/app/ERunUIController';
-import { readError } from '@/app/errors';
-import { useActivityQueue, useTerminalActivityLockState } from '@/app/activityQueueState';
-import { useControllerState } from '@/app/useControllerState';
-import { ActivityLockOverlay } from '@/components/app/ActivityLockOverlay';
-import { ActivityQueueDrawer } from '@/components/app/ActivityQueueDrawer';
-import { TerminalTabStrip } from '@/components/app/TerminalTabStrip';
+import { ControllerProvider } from '@/app/ControllerContext';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { startSidebarResize } from '@/app/layoutThunks';
+import { setActivityQueueOpen } from '@/app/slices/layoutSlice';
+import { TerminalController } from '@/app/TerminalController';
+import { ActivityQueueLauncher } from '@/components/app/ActivityQueueLauncher';
 import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
 import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
+import { MainPane } from '@/components/app/MainPane';
 import { ManageDialogView } from '@/components/app/ManageDialogView';
 import { ReconnectDialog } from '@/components/app/ReconnectDialog';
-import { ReviewPanel } from '@/components/app/ReviewPanel';
+import { ResizeHandle } from '@/components/app/ResizeHandle';
 import { Sidebar } from '@/components/app/Sidebar';
-import { TenantDashboardView } from '@/components/app/TenantDashboardView';
 import { TenantDialogView } from '@/components/app/TenantDialogView';
 import { Titlebar } from '@/components/app/Titlebar';
-import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
+import { TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
-import { ClipboardSetText } from '../wailsjs/runtime/runtime';
-import { Rocket } from 'lucide-react';
 
 const splitterClassName =
   'relative cursor-col-resize bg-transparent before:absolute before:top-0 before:bottom-0 before:left-1 before:w-px before:bg-transparent before:transition-colors hover:before:bg-border [.is-resizing_&]:before:bg-border';
 
-const reviewSplitterClassName =
-  'relative cursor-col-resize border-l bg-background before:absolute before:top-0 before:bottom-0 before:left-1 before:w-px before:bg-transparent before:transition-colors hover:before:bg-border [.is-resizing-review_&]:before:bg-border';
-
-const debugSplitterClassName =
-  'relative cursor-row-resize bg-[oklch(0.06_0_0)] before:absolute before:left-0 before:right-0 before:top-1 before:h-px before:bg-transparent before:transition-colors hover:before:bg-[oklch(0.36_0_0)] [.is-resizing-debug_&]:before:bg-[oklch(0.46_0_0)]';
-
 export function App(): React.ReactElement {
-  const controller = React.useMemo(() => new ERunUIController(), []);
-  const state = useControllerState(controller);
+  const controller = React.useMemo(() => new TerminalController(), []);
+  const dispatch = useAppDispatch();
+  const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
+  const activityQueueOpen = useAppSelector((state) => state.layout.activityQueueOpen);
   const terminalRootRef = React.useRef<HTMLDivElement>(null);
   const terminalPaneRef = React.useRef<HTMLElement>(null);
   const reviewViewRef = React.useRef<HTMLElement>(null);
   const reviewMainRef = React.useRef<HTMLDivElement>(null);
   const diffListRef = React.useRef<HTMLDivElement>(null);
-  const [activityQueueOpen, setActivityQueueOpen] = React.useState(false);
 
   React.useEffect(() => {
-    if (!terminalRootRef.current || !terminalPaneRef.current || !reviewViewRef.current || !reviewMainRef.current || !diffListRef.current) {
+    if (
+      !terminalRootRef.current ||
+      !terminalPaneRef.current ||
+      !reviewViewRef.current ||
+      !reviewMainRef.current ||
+      !diffListRef.current
+    ) {
       return undefined;
     }
     return controller.mount({
@@ -56,301 +52,49 @@ export function App(): React.ReactElement {
   }, [controller]);
 
   return (
-    <TooltipProvider>
-      <div className="grid h-full w-full grid-rows-[52px_minmax(0,1fr)] bg-background">
-        <Titlebar controller={controller} state={state} />
-        <div
-          className={cn(
-            'grid h-full min-h-0 overflow-hidden',
-            state.sidebarHidden ? 'grid-cols-[0_0_minmax(0,1fr)]' : 'grid-cols-[var(--sidebar-width)_10px_minmax(0,1fr)]',
-          )}
-        >
-          <Sidebar controller={controller} state={state} />
+    <ControllerProvider controller={controller}>
+      <TooltipProvider>
+        <div className="grid h-full w-full grid-rows-[52px_minmax(0,1fr)] bg-background">
+          <Titlebar />
           <div
-            className={cn(splitterClassName, state.sidebarHidden && 'pointer-events-none')}
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize sidebar"
-            onMouseDown={(event) => controller.startSidebarResize(event)}
-          />
-          <MainPane
-            controller={controller}
-            state={state}
-            terminalPaneRef={terminalPaneRef}
-            terminalRootRef={terminalRootRef}
-            reviewViewRef={reviewViewRef}
-            reviewMainRef={reviewMainRef}
-            diffListRef={diffListRef}
-            onOpenActivityQueue={() => setActivityQueueOpen(true)}
-          />
-        </div>
-      </div>
-      <EnvironmentDialogView controller={controller} state={state} />
-      <GlobalConfigDialogView controller={controller} state={state} />
-      <ManageDialogView controller={controller} state={state} />
-      <ReconnectDialog controller={controller} state={state} />
-      <TenantDialogView controller={controller} state={state} />
-      <ActivityQueueLauncher open={activityQueueOpen} onOpen={() => setActivityQueueOpen(true)} onClose={() => setActivityQueueOpen(false)} />
-    </TooltipProvider>
-  );
-}
-
-// ActivityQueueLauncher renders a floating action button that opens the
-// deploy-queue drawer. It deliberately mounts the drawer so its subscription
-// to deploy:state events is always live — even when the drawer is closed —
-// so the badge count reflects active deploys without the user having opened
-// the drawer first.
-function ActivityQueueLauncher({ open, onOpen, onClose }: { open: boolean; onOpen: () => void; onClose: () => void }): React.ReactElement {
-  const { entries } = useActivityQueue();
-  const activeCount = entries.filter((entry) => entry.status === 'running').length;
-  return (
-    <>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            className="fixed bottom-5 right-5 z-20 size-10 rounded-full shadow-lg"
-            aria-label={activeCount > 0 ? `Open deploy queue (${activeCount} active)` : 'Open deploy queue'}
-            onClick={onOpen}
-          >
-            <Rocket aria-hidden="true" className="size-4" />
-            {activeCount > 0 && (
-              <span className="absolute -top-1 -right-1 inline-flex size-4 items-center justify-center rounded-full bg-blue-500 text-[10px] font-medium text-white">
-                {activeCount}
-              </span>
+            className={cn(
+              'grid h-full min-h-0 overflow-hidden',
+              sidebarHidden
+                ? 'grid-cols-[0_0_minmax(0,1fr)]'
+                : 'grid-cols-[var(--sidebar-width)_10px_minmax(0,1fr)]',
             )}
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="left">{activeCount > 0 ? `${activeCount} deploy${activeCount > 1 ? 's' : ''} in progress` : 'Deploys'}</TooltipContent>
-      </Tooltip>
-      <ActivityQueueDrawer open={open} onClose={onClose} />
-    </>
-  );
-}
-
-function MainPane({
-  controller,
-  state,
-  terminalPaneRef,
-  terminalRootRef,
-  reviewViewRef,
-  reviewMainRef,
-  diffListRef,
-  onOpenActivityQueue,
-}: {
-  controller: ERunUIController;
-  state: ReturnType<typeof useControllerState>;
-  terminalPaneRef: React.RefObject<HTMLElement | null>;
-  terminalRootRef: React.RefObject<HTMLDivElement | null>;
-  reviewViewRef: React.RefObject<HTMLElement | null>;
-  reviewMainRef: React.RefObject<HTMLDivElement | null>;
-  diffListRef: React.RefObject<HTMLDivElement | null>;
-  onOpenActivityQueue: () => void;
-}): React.ReactElement {
-  const dashboardOpen = Boolean(state.tenantDashboard.tenant);
-  return (
-    <main
-      ref={terminalPaneRef}
-      className={cn(
-        'grid h-full min-h-0 min-w-0 overflow-hidden bg-terminal',
-        dashboardOpen ? 'grid-rows-[minmax(0,1fr)] bg-background' : state.debugOpen ? 'grid-rows-[minmax(0,1fr)_var(--debug-height)]' : 'grid-rows-[minmax(0,1fr)_34px]',
-      )}
-    >
-      {dashboardOpen && <TenantDashboardView controller={controller} state={state} />}
-      <TerminalPane controller={controller} state={state} hidden={dashboardOpen} terminalRootRef={terminalRootRef} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} onOpenActivityQueue={onOpenActivityQueue} />
-      {!dashboardOpen && <DebugPanel controller={controller} open={state.debugOpen} output={state.debugOutput} sessionId={state.sessionId} verbose={controller.activeSessionDebug(state.sessionId)} />}
-    </main>
-  );
-}
-
-function TerminalPane({
-  controller,
-  state,
-  hidden,
-  terminalRootRef,
-  reviewViewRef,
-  reviewMainRef,
-  diffListRef,
-  onOpenActivityQueue,
-}: {
-  controller: ERunUIController;
-  state: ReturnType<typeof useControllerState>;
-  hidden: boolean;
-  terminalRootRef: React.RefObject<HTMLDivElement | null>;
-  reviewViewRef: React.RefObject<HTMLElement | null>;
-  reviewMainRef: React.RefObject<HTMLDivElement | null>;
-  diffListRef: React.RefObject<HTMLDivElement | null>;
-  onOpenActivityQueue: () => void;
-}): React.ReactElement {
-  const locks = useTerminalActivityLockState();
-  const [hiddenLockSessions, setHiddenLockSessions] = React.useState<Set<number>>(() => new Set());
-  const liveLock = locks.get(state.sessionId) ?? null;
-  // The user can dismiss the overlay locally for a session if it's
-  // covering output they need to read or input they need to provide
-  // (e.g. the in-pod CLI's helm-recovery prompt). Backend keeps the
-  // lock state intact; only this desktop's view of it is hidden.
-  React.useEffect(() => {
-    if (!liveLock) {
-      setHiddenLockSessions((prev) => {
-        if (prev.size === 0) return prev;
-        const next = new Set(prev);
-        next.delete(state.sessionId);
-        return next;
-      });
-    }
-  }, [liveLock, state.sessionId]);
-  const activeLock = liveLock && !hiddenLockSessions.has(state.sessionId) ? liveLock : null;
-  const hideActiveLock = React.useCallback(() => {
-    setHiddenLockSessions((prev) => {
-      const next = new Set(prev);
-      next.add(state.sessionId);
-      return next;
-    });
-  }, [state.sessionId]);
-  return (
-    <div
-      className={cn(
-        'grid min-h-0 min-w-0 grid-cols-[minmax(360px,1fr)] overflow-hidden',
-        hidden && 'hidden',
-        state.reviewOpen &&
-          'grid-cols-[minmax(360px,1fr)_10px_minmax(420px,var(--review-width))] max-[980px]:grid-cols-[minmax(260px,1fr)_10px_minmax(360px,min(var(--review-width),58vw))]',
-      )}
-    >
-      <div className="grid h-full min-h-0 min-w-0 grid-rows-[32px_minmax(0,1fr)] overflow-hidden">
-        <TerminalTabStrip controller={controller} state={state} />
-        {/* Padding lives on the wrapper, not on the FitAddon parent: xterm's FitAddon reads the parent's computed height but does not subtract its padding, so any padding on terminalRoot would over-count rows and clip the bottom line. */}
-        <div id="erun-terminal-pane" className="relative h-full min-h-0 min-w-0 overflow-hidden box-border px-4 pt-3.5">
-          <div ref={terminalRootRef} className="terminal h-full min-h-0 min-w-0 w-full" />
-          <TerminalBusyOverlay message={state.terminalBusy ? state.terminalMessage : ''} />
-          {activeLock && <ActivityLockOverlay lock={activeLock} onOpenQueue={onOpenActivityQueue} onProceedAnyway={hideActiveLock} />}
-        </div>
-      </div>
-      <div className={cn(reviewSplitterClassName, !state.reviewOpen && 'hidden')} role="separator" aria-orientation="vertical" aria-label="Resize diff panel" onMouseDown={(event) => controller.startReviewResize(event)} />
-      <ReviewPanel controller={controller} state={state} reviewViewRef={reviewViewRef} reviewMainRef={reviewMainRef} diffListRef={diffListRef} />
-    </div>
-  );
-}
-
-function TerminalBusyOverlay({ message }: { message: string }): React.ReactElement | null {
-  if (!message) {
-    return null;
-  }
-
-  return (
-    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-terminal/45">
-      <div className="flex max-w-[min(520px,calc(100%-48px))] items-center gap-3 rounded-md border border-[oklch(0.28_0_0)] bg-[oklch(0.08_0_0)] px-4 py-3 text-[13px] leading-[1.35] text-[oklch(0.86_0_0)] shadow-lg">
-        <LoaderCircle className="size-4 flex-none animate-spin text-[oklch(0.72_0_0)]" aria-hidden="true" />
-        <span className="min-w-0 truncate" title={message}>{message}</span>
-      </div>
-    </div>
-  );
-}
-
-function DebugPanel({ controller, open, output, sessionId, verbose }: { controller: ERunUIController; open: boolean; output: string; sessionId: number; verbose: boolean }): React.ReactElement {
-  const outputRef = React.useRef<HTMLDivElement>(null);
-  const stuckToBottomRef = React.useRef(true);
-  const [copyStatus, setCopyStatus] = React.useState('');
-  const canCopy = output.trim().length > 0;
-
-  const handleScroll = React.useCallback(() => {
-    const el = outputRef.current;
-    if (!el) {
-      return;
-    }
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    stuckToBottomRef.current = distanceFromBottom <= 4;
-  }, []);
-
-  // When the active session changes, reset stick-to-bottom and snap to the
-  // bottom of the new buffer so users see the latest debug output for that tab.
-  React.useEffect(() => {
-    stuckToBottomRef.current = true;
-    if (open && outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight;
-    }
-  }, [open, sessionId]);
-
-  React.useEffect(() => {
-    if (!open) {
-      return;
-    }
-    const el = outputRef.current;
-    if (!el) {
-      return;
-    }
-    if (stuckToBottomRef.current) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [open, output]);
-
-  React.useEffect(() => {
-    setCopyStatus('');
-  }, [output]);
-
-  const copyDebugOutput = React.useCallback(() => {
-    if (!canCopy) {
-      return;
-    }
-    void ClipboardSetText(output)
-      .then(() => {
-        setCopyStatus('Copied');
-        window.setTimeout(() => setCopyStatus(''), 1400);
-      })
-      .catch((error: unknown) => setCopyStatus(readError(error)));
-  }, [canCopy, output]);
-
-  return (
-    <section className={cn('grid min-h-0 border-t border-[oklch(0.26_0_0)] bg-[oklch(0.06_0_0)] text-[oklch(0.86_0_0)]', open ? 'grid-rows-[6px_34px_minmax(0,1fr)]' : 'grid-rows-[34px]')}>
-      {open && (
-        <div
-          className={debugSplitterClassName}
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label="Resize debug panel"
-          onMouseDown={(event) => controller.startDebugResize(event)}
-        />
-      )}
-      <div className="flex h-[34px] items-center justify-between gap-2 border-b border-[oklch(0.18_0_0)] px-3">
-        <button
-          type="button"
-          className="flex min-w-0 items-center gap-2 border-0 bg-transparent p-0 text-xs font-medium tracking-normal text-[oklch(0.76_0_0)]"
-          onClick={() => controller.setDebugOpen(!open)}
-        >
-          {open ? <ChevronDown className="size-4" aria-hidden="true" /> : <ChevronUp className="size-4" aria-hidden="true" />}
-          <span>Debug</span>
-          <span className="text-[11px] font-normal text-[oklch(0.56_0_0)]">{open ? 'erun -vv output' : 'collapsed'}</span>
-        </button>
-        {open && (
-          <div className="flex items-center gap-1">
-            <Button className="h-6 px-2 text-[11px] [&_svg]:size-3.5" type="button" variant="ghost" size="sm" disabled={!canCopy} onClick={copyDebugOutput}>
-              {copyStatus === 'Copied' ? <CheckCircle2 aria-hidden="true" /> : <Copy aria-hidden="true" />}
-              {copyStatus || 'Copy'}
-            </Button>
-            <Button className="h-6 px-2 text-[11px] [&_svg]:size-3.5" type="button" variant="ghost" size="sm" onClick={() => controller.clearDebugOutput()}>
-              <Trash2 aria-hidden="true" />
-              Clear
-            </Button>
+          >
+            <Sidebar />
+            <ResizeHandle
+              className={splitterClassName}
+              orientation="vertical"
+              label="Resize sidebar"
+              hidden={sidebarHidden}
+              onMouseDown={(event) => {
+                dispatch(startSidebarResize(event));
+              }}
+            />
+            <MainPane
+              terminalPaneRef={terminalPaneRef}
+              terminalRootRef={terminalRootRef}
+              reviewViewRef={reviewViewRef}
+              reviewMainRef={reviewMainRef}
+              diffListRef={diffListRef}
+              onOpenActivityQueue={() => dispatch(setActivityQueueOpen(true))}
+            />
           </div>
-        )}
-      </div>
-      {open && (
-        <div
-          ref={outputRef}
-          onScroll={handleScroll}
-          className="min-h-0 overflow-auto px-3 py-2 font-mono text-[11px] leading-[1.35] text-[oklch(0.82_0_0)]"
-        >
-          {!verbose && sessionId > 0 && (
-            <div className="mb-2 rounded border border-[oklch(0.32_0_0)] bg-[oklch(0.10_0_0)] px-3 py-2 text-[11px] leading-[1.4] text-[oklch(0.74_0_0)]">
-              Active session was not started with <code>-vv</code>, so trace lines won't appear here. To capture verbose output: run <code>erun -vv &lt;command&gt;</code> in this shell, or open this Debug panel before launching commands from the UI.
-            </div>
-          )}
-          <pre className="m-0 whitespace-pre-wrap break-words font-mono text-[11px] leading-[1.35]">
-            {output || 'Run an environment command while Debug is expanded to stream erun -vv output here.'}
-          </pre>
         </div>
-      )}
-    </section>
+        <EnvironmentDialogView />
+        <GlobalConfigDialogView />
+        <ManageDialogView />
+        <ReconnectDialog />
+        <TenantDialogView />
+        <ActivityQueueLauncher
+          open={activityQueueOpen}
+          onOpen={() => dispatch(setActivityQueueOpen(true))}
+          onClose={() => dispatch(setActivityQueueOpen(false))}
+        />
+      </TooltipProvider>
+    </ControllerProvider>
   );
 }

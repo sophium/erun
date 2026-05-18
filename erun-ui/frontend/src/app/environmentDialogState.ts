@@ -1,10 +1,17 @@
-import type { EnvironmentDialogState } from './state';
-import { rememberPastContainerRegistry, rememberPastEnvironment, rememberPastTenant } from './storage';
-import { normalizeDialogValue } from './versionSuggestions';
-import type { NormalizedEnvironmentDialogValues } from './model';
 import type { UISelection } from '@/types';
 
-export function normalizedEnvironmentDialogValues(dialog: EnvironmentDialogState): NormalizedEnvironmentDialogValues {
+import type { NormalizedEnvironmentDialogValues } from './model';
+import type { EnvironmentDialogState } from './state';
+import {
+  rememberPastContainerRegistry,
+  rememberPastEnvironment,
+  rememberPastTenant,
+} from './storage';
+import { normalizeDialogValue } from './versionSuggestions';
+
+export function normalizedEnvironmentDialogValues(
+  dialog: EnvironmentDialogState,
+): NormalizedEnvironmentDialogValues {
   return {
     tenant: normalizeDialogValue(dialog.tenant),
     environment: normalizeDialogValue(dialog.environment),
@@ -14,7 +21,10 @@ export function normalizedEnvironmentDialogValues(dialog: EnvironmentDialogState
   };
 }
 
-export function validEnvironmentDialogValues(values: NormalizedEnvironmentDialogValues, actionMode: EnvironmentDialogState['actionMode']): boolean {
+export function validEnvironmentDialogValues(
+  values: NormalizedEnvironmentDialogValues,
+  actionMode: EnvironmentDialogState['actionMode'],
+): boolean {
   if (!values.tenant || !values.environment) {
     return false;
   }
@@ -24,7 +34,10 @@ export function validEnvironmentDialogValues(values: NormalizedEnvironmentDialog
   return Boolean(values.kubernetesContext && values.containerRegistry);
 }
 
-export function rememberEnvironmentDialogSelection(selection: UISelection, actionMode: EnvironmentDialogState['actionMode']): void {
+export function rememberEnvironmentDialogSelection(
+  selection: UISelection,
+  actionMode: EnvironmentDialogState['actionMode'],
+): void {
   rememberPastTenant(selection.tenant);
   rememberPastEnvironment(selection.environment);
   if (actionMode === 'init' && selection.containerRegistry) {

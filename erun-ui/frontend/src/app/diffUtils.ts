@@ -1,8 +1,4 @@
-import type {
-  DiffLine,
-  DiffResult,
-  DiffTreeNode,
-} from '@/types';
+import type { DiffLine, DiffResult, DiffTreeNode } from '@/types';
 
 export function filterDiffTree(nodes: DiffTreeNode[], filter: string): DiffTreeNode[] {
   if (!filter) {
@@ -15,35 +11,38 @@ export function filterDiffTree(nodes: DiffTreeNode[], filter: string): DiffTreeN
       continue;
     }
     matchingPaths.add(node.path);
-    let parentPath = node.parentPath || '';
+    let parentPath = node.parentPath ?? '';
     while (parentPath) {
       matchingPaths.add(parentPath);
-      parentPath = nodesByPath.get(parentPath)?.parentPath || '';
+      parentPath = nodesByPath.get(parentPath)?.parentPath ?? '';
     }
   }
   return nodes.filter((node) => matchingPaths.has(node.path));
 }
 
-export function visibleDiffTreeNodes(nodes: DiffTreeNode[], collapsedDiffDirs: Set<string>): DiffTreeNode[] {
+export function visibleDiffTreeNodes(
+  nodes: DiffTreeNode[],
+  collapsedDiffDirs: Set<string>,
+): DiffTreeNode[] {
   const nodesByPath = new Map(nodes.map((node) => [node.path, node]));
   return nodes.filter((node) => {
-    let parentPath = node.parentPath || '';
+    let parentPath = node.parentPath ?? '';
     while (parentPath) {
       if (collapsedDiffDirs.has(parentPath)) {
         return false;
       }
-      parentPath = nodesByPath.get(parentPath)?.parentPath || '';
+      parentPath = nodesByPath.get(parentPath)?.parentPath ?? '';
     }
     return true;
   });
 }
 
 export function chooseSelectedDiffPath(diff: DiffResult | null, currentPath: string): string {
-  const files = diff?.files || [];
+  const files = diff?.files ?? [];
   if (files.some((file) => file.path === currentPath)) {
     return currentPath;
   }
-  return files[0]?.path || '';
+  return files[0]?.path ?? '';
 }
 
 export function compactDiffError(message: string): string {

@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	eruncommon "github.com/sophium/erun/erun-common"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 func (a *App) LoadERunConfig() (uiERunConfig, error) {
@@ -301,10 +300,10 @@ func cloudContextStatusToUI(status eruncommon.CloudContextStatus) uiCloudContext
 }
 
 func (a *App) emitAppStatus(message string, busy bool) {
-	if a.ctx == nil || strings.TrimSpace(message) == "" {
+	if strings.TrimSpace(message) == "" {
 		return
 	}
-	runtime.EventsEmit(a.ctx, appStatusEvent, appStatusPayload{Message: message, Busy: busy})
+	a.emit(appStatusEvent, appStatusPayload{Message: message, Busy: busy})
 }
 
 func cloudContextDisplayName(status eruncommon.CloudContextStatus) string {

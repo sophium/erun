@@ -1,14 +1,25 @@
-import * as React from 'react';
 import { AlertCircle, LoaderCircle, RefreshCw } from 'lucide-react';
+import * as React from 'react';
 
-import type { ERunUIController } from '@/app/ERunUIController';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { reconnectCopy } from '@/app/reconnectCopy';
-import type { AppState } from '@/app/state';
+import { cancelReconnect, confirmReconnect } from '@/app/reviewThunks';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
-export function ReconnectDialog({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
-  const reconnect = state.reconnect;
+// ReconnectDialog reads only the review.reconnect slice; subscribing through
+// useAppSelector keeps re-renders scoped to that slice instead of the full
+// AppState shape.
+export function ReconnectDialog(): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const reconnect = useAppSelector((state) => state.review.reconnect);
   const open = reconnect.status !== 'idle';
   const running = reconnect.status === 'running';
   const failed = reconnect.status === 'error';
@@ -17,7 +28,7 @@ export function ReconnectDialog({ controller, state }: { controller: ERunUIContr
       open={open}
       onOpenChange={(next) => {
         if (!next) {
-          controller.cancelReconnect();
+          dispatch(cancelReconnect());
         }
       }}
     >
@@ -30,7 +41,10 @@ export function ReconnectDialog({ controller, state }: { controller: ERunUIContr
           <div className="rounded-[var(--radius)] border bg-muted/40 px-3 py-2.5 text-[13px] leading-[1.4]">
             {running && (
               <div className="flex items-start gap-2 text-muted-foreground">
-                <LoaderCircle className="mt-px size-[14px] flex-none animate-spin" aria-hidden="true" />
+                <LoaderCircle
+                  className="mt-px size-[14px] flex-none animate-spin"
+                  aria-hidden="true"
+                />
                 <div className="min-w-0 [overflow-wrap:anywhere]">
                   <div className="font-medium text-foreground">{reconnectCopy.runningStatus}</div>
                   <div className="mt-0.5 truncate font-mono text-[12px] text-muted-foreground">
@@ -41,9 +55,14 @@ export function ReconnectDialog({ controller, state }: { controller: ERunUIContr
             )}
             {failed && (
               <div className="flex items-start gap-2">
-                <AlertCircle className="mt-px size-[14px] flex-none text-destructive" aria-hidden="true" />
+                <AlertCircle
+                  className="mt-px size-[14px] flex-none text-destructive"
+                  aria-hidden="true"
+                />
                 <div className="min-w-0 [overflow-wrap:anywhere]">
-                  <div className="font-medium text-destructive">{reconnectCopy.errorStatusTitle}</div>
+                  <div className="font-medium text-destructive">
+                    {reconnectCopy.errorStatusTitle}
+                  </div>
                   <div className="mt-0.5 text-muted-foreground">{reconnect.error}</div>
                 </div>
               </div>
@@ -51,17 +70,28 @@ export function ReconnectDialog({ controller, state }: { controller: ERunUIContr
           </div>
         )}
         <DialogFooter>
-          <Button type="button" variant="outline" disabled={running} onClick={() => controller.cancelReconnect()}>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={running}
+            onClick={() => {
+              dispatch(cancelReconnect());
+            }}
+          >
             {reconnectCopy.dialogCancel}
           </Button>
           <Button
             type="button"
             disabled={running}
             onClick={() => {
-              void controller.confirmReconnect();
+              void dispatch(confirmReconnect());
             }}
           >
-            {running ? <LoaderCircle className="animate-spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
+            {running ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : (
+              <RefreshCw aria-hidden="true" />
+            )}
             {reconnectCopy.dialogConfirm}
           </Button>
         </DialogFooter>

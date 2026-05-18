@@ -330,11 +330,35 @@ func (s *bootstrapRunState) run() error {
 	if err := s.loadBootstrapConfigs(); err != nil {
 		return err
 	}
+	s.emitInitializingTrace()
 	if err := s.applyBootstrapConfigChanges(); err != nil {
+		s.emitInitializationFailedTrace()
 		return err
 	}
 	s.finish()
 	return nil
+}
+
+// emitInitializingTrace emits the umbrella `==> Initializing <tenant>/<env>`
+// line that the desktop's activity-queue trace handler registers as an
+// in-flight init activity. Mirrors RunHelmDeploy's `==> Deploying` line.
+// No-op when tenant/env have not been resolved yet (early validation
+// failure) — there is nothing meaningful to register.
+func (s *bootstrapRunState) emitInitializingTrace() {
+	if s.tenant == "" || s.envName == "" {
+		return
+	}
+	s.runner.Context.Info("==> Initializing " + s.tenant + "/" + s.envName)
+}
+
+// emitInitializationFailedTrace finalizes the umbrella activity entry on
+// post-Initializing failure (config-write failure, devops asset failure,
+// embedded deploy failure). No-op when no Initializing line was emitted.
+func (s *bootstrapRunState) emitInitializationFailedTrace() {
+	if s.tenant == "" || s.envName == "" {
+		return
+	}
+	s.runner.Context.Info("==> Initialization failed " + s.tenant + "/" + s.envName)
 }
 
 func (s *bootstrapRunState) loadBootstrapConfigs() error {
@@ -918,6 +942,9 @@ func (s *bootstrapRunState) finish() {
 	s.result.ERunConfig = s.toolConfig
 	s.result.TenantConfig = s.tenantConfig
 	s.result.EnvConfig = s.envConfig
+	if s.tenant != "" && s.envName != "" {
+		s.runner.Context.Info("==> Initialized " + s.tenant + "/" + s.envName)
+	}
 	s.runner.Context.Trace("Configuration initialized OK")
 }
 

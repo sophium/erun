@@ -1,17 +1,39 @@
-import * as React from 'react';
 import { FolderPlus, LoaderCircle, Rocket } from 'lucide-react';
+import * as React from 'react';
 
-import type { ERunUIController } from '@/app/ERunUIController';
+import {
+  closeEnvironmentDialog,
+  selectEnvironmentVersionSuggestion,
+  setEnvironmentVersionChoicesOpen,
+  submitEnvironmentDialog,
+  updateEnvironmentDialog,
+} from '@/app/environmentDialogThunks';
 import { readError } from '@/app/errors';
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { showTerminalMessage } from '@/app/notificationThunks';
 import { runtimeResourceLimitMessage } from '@/app/runtimeResources';
 import type { AppState } from '@/app/state';
-import { loadSavedPastContainerRegistries, loadSavedPastEnvironments, loadSavedPastTenants } from '@/app/storage';
+import {
+  loadSavedPastContainerRegistries,
+  loadSavedPastEnvironments,
+  loadSavedPastTenants,
+} from '@/app/storage';
+import { useController } from '@/app/useController';
 import { findVersionSuggestion, selectedVersionSourceText } from '@/app/versionSuggestions';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { EditableComboField, uniqueSuggestions } from './EditableComboField';
+
+import { EditableComboField } from './EditableComboField';
+import { uniqueSuggestions } from './EditableComboField.helpers';
 import { EmptyState } from './EmptyState';
 import { RuntimeResourceControls } from './RuntimeResourceControls';
 import { SelectField } from './SelectField';
@@ -22,25 +44,42 @@ const dialogErrorClassName =
 
 type EnvironmentDialog = AppState['environmentDialog'];
 
-export function EnvironmentDialogView({ controller, state }: { controller: ERunUIController; state: AppState }): React.ReactElement {
-  const dialog = state.environmentDialog;
+export function EnvironmentDialogView(): React.ReactElement {
+  const controller = useController();
+  const dispatch = useAppDispatch();
+  const dialog = useAppSelector((state) => state.environmentDialog);
   const tenantRef = React.useRef<HTMLInputElement>(null);
   const environmentRef = React.useRef<HTMLInputElement>(null);
+
+  // tenantRefValue mirrors dialog.tenant via a separate effect so the
+  // focus-on-open effect below stays scoped to dialog.open. Re-running on
+  // every dialog.tenant change would yank focus while the user is typing.
+  const tenantValueRef = React.useRef(dialog.tenant);
+  React.useEffect(() => {
+    tenantValueRef.current = dialog.tenant;
+  }, [dialog.tenant]);
 
   React.useEffect(() => {
     if (!dialog.open) {
       return undefined;
     }
     const timeout = window.setTimeout(() => {
-      const target = dialog.tenant ? environmentRef.current : tenantRef.current;
+      const target = tenantValueRef.current ? environmentRef.current : tenantRef.current;
       target?.focus();
       target?.select();
     }, 0);
-    return () => window.clearTimeout(timeout);
+    return () => {
+      window.clearTimeout(timeout);
+    };
   }, [dialog.open]);
 
   return (
-    <Dialog open={dialog.open} onOpenChange={(open) => !open && controller.closeEnvironmentDialog()}>
+    <Dialog
+      open={dialog.open}
+      onOpenChange={(open) => {
+        if (!open) dispatch(closeEnvironmentDialog());
+      }}
+    >
       <DialogContent
         className="sm:max-w-md"
         onCloseAutoFocus={(event) => {
@@ -52,15 +91,15 @@ export function EnvironmentDialogView({ controller, state }: { controller: ERunU
           className="grid gap-4"
           onSubmit={(event) => {
             event.preventDefault();
-            void controller.submitEnvironmentDialog(event.currentTarget).catch((error: unknown) => {
-              controller.showTerminalMessage(readError(error));
+            void dispatch(submitEnvironmentDialog(event.currentTarget)).catch((error: unknown) => {
+              dispatch(showTerminalMessage(readError(error)));
             });
           }}
         >
           <EnvironmentDialogHeader dialog={dialog} />
-          <EnvironmentDialogFields controller={controller} state={state} tenantRef={tenantRef} environmentRef={environmentRef} />
+          <EnvironmentDialogFields tenantRef={tenantRef} environmentRef={environmentRef} />
           <DialogError error={dialog.error} />
-          <EnvironmentDialogFooter controller={controller} dialog={dialog} />
+          <EnvironmentDialogFooter dialog={dialog} />
         </form>
       </DialogContent>
     </Dialog>
@@ -73,98 +112,153 @@ function EnvironmentDialogHeader({ dialog }: { dialog: EnvironmentDialog }): Rea
     <DialogHeader>
       <DialogTitle>{isDeploy ? 'Deploy environment' : 'New environment'}</DialogTitle>
       <DialogDescription>
-        {dialog.tenant && dialog.environment ? `${dialog.tenant} / ${dialog.environment}` : 'Enter the tenant and environment name.'}
+        {dialog.tenant && dialog.environment
+          ? `${dialog.tenant} / ${dialog.environment}`
+          : 'Enter the tenant and environment name.'}
       </DialogDescription>
     </DialogHeader>
   );
 }
 
 function EnvironmentDialogFields({
-  controller,
-  state,
   tenantRef,
   environmentRef,
 }: {
-  controller: ERunUIController;
-  state: AppState;
   tenantRef: React.Ref<HTMLInputElement>;
   environmentRef: React.Ref<HTMLInputElement>;
 }): React.ReactElement {
-  const dialog = state.environmentDialog;
+  const dispatch = useAppDispatch();
+  const dialog = useAppSelector((state) => state.environmentDialog);
+  const versionSuggestions = useAppSelector((state) => state.tenants.versionSuggestions);
   const isDeploy = dialog.actionMode === 'deploy';
   return (
     <>
-      <EnvironmentNameFields controller={controller} state={state} tenantRef={tenantRef} environmentRef={environmentRef} />
+      <EnvironmentNameFields tenantRef={tenantRef} environmentRef={environmentRef} />
       <VersionField
         id="environment-version"
         value={dialog.version}
-        sourceText={selectedVersionSourceText(findVersionSuggestion(state.versionSuggestions, dialog.version, dialog.versionImage))}
-        suggestions={state.versionSuggestions}
+        sourceText={selectedVersionSourceText(
+          findVersionSuggestion(versionSuggestions, dialog.version, dialog.versionImage),
+        )}
+        suggestions={versionSuggestions}
         choicesOpen={dialog.choicesOpen}
         required={isDeploy}
         disabled={dialog.busy}
-        onValueChange={(version) => controller.updateEnvironmentDialog({ version })}
-        onChoicesOpenChange={(open) => controller.setEnvironmentVersionChoicesOpen(open)}
-        onSelect={(suggestion) => controller.selectEnvironmentVersionSuggestion(suggestion)}
+        onValueChange={(version) => {
+          dispatch(updateEnvironmentDialog({ version }));
+        }}
+        onChoicesOpenChange={(open) => {
+          dispatch(setEnvironmentVersionChoicesOpen(open));
+        }}
+        onSelect={(suggestion) => {
+          dispatch(selectEnvironmentVersionSuggestion(suggestion));
+        }}
       />
-      {!isDeploy && <EnvironmentCreateFields controller={controller} dialog={dialog} />}
+      {!isDeploy && <EnvironmentCreateFields dialog={dialog} />}
     </>
   );
 }
 
 function EnvironmentNameFields({
-  controller,
-  state,
   tenantRef,
   environmentRef,
 }: {
-  controller: ERunUIController;
-  state: AppState;
   tenantRef: React.Ref<HTMLInputElement>;
   environmentRef: React.Ref<HTMLInputElement>;
 }): React.ReactElement {
-  const dialog = state.environmentDialog;
+  const dispatch = useAppDispatch();
+  const dialog = useAppSelector((state) => state.environmentDialog);
+  const tenants = useAppSelector((state) => state.tenants.tenants);
   const isDeploy = dialog.actionMode === 'deploy';
   const tenantSuggestions = React.useMemo(
-    () => uniqueSuggestions([dialog.tenant, ...state.tenants.map((tenant) => tenant.name), ...loadSavedPastTenants()]),
-    [dialog.tenant, state.tenants],
+    () =>
+      uniqueSuggestions([
+        dialog.tenant,
+        ...tenants.map((tenant) => tenant.name),
+        ...loadSavedPastTenants(),
+      ]),
+    [dialog.tenant, tenants],
   );
-  const environmentSuggestions = React.useMemo(() => environmentNameSuggestions(state, dialog), [dialog, state]);
+  const environmentSuggestions = React.useMemo(
+    () => environmentNameSuggestions(tenants, dialog),
+    [dialog, tenants],
+  );
 
   return (
     <>
-      <EditableComboField id="environment-tenant" inputRef={tenantRef} label="Tenant" value={dialog.tenant} suggestions={tenantSuggestions} required disabled={dialog.busy || isDeploy} onValueChange={(tenant) => controller.updateEnvironmentDialog({ tenant })} />
-      <EditableComboField id="environment-name" inputRef={environmentRef} label="Environment" value={dialog.environment} suggestions={environmentSuggestions} required disabled={dialog.busy || isDeploy} onValueChange={(environment) => controller.updateEnvironmentDialog({ environment })} />
+      <EditableComboField
+        id="environment-tenant"
+        inputRef={tenantRef}
+        label="Tenant"
+        value={dialog.tenant}
+        suggestions={tenantSuggestions}
+        required
+        disabled={dialog.busy || isDeploy}
+        onValueChange={(tenant) => {
+          dispatch(updateEnvironmentDialog({ tenant }));
+        }}
+      />
+      <EditableComboField
+        id="environment-name"
+        inputRef={environmentRef}
+        label="Environment"
+        value={dialog.environment}
+        suggestions={environmentSuggestions}
+        required
+        disabled={dialog.busy || isDeploy}
+        onValueChange={(environment) => {
+          dispatch(updateEnvironmentDialog({ environment }));
+        }}
+      />
     </>
   );
 }
 
-function EnvironmentCreateFields({ controller, dialog }: { controller: ERunUIController; dialog: EnvironmentDialog }): React.ReactElement {
+function EnvironmentCreateFields({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
   const containerRegistrySuggestions = React.useMemo(
-    () => uniqueSuggestions([dialog.containerRegistry, ...loadSavedPastContainerRegistries(), 'erunpaas']),
+    () =>
+      uniqueSuggestions([
+        dialog.containerRegistry,
+        ...loadSavedPastContainerRegistries(),
+        'erunpaas',
+      ]),
     [dialog.containerRegistry],
   );
 
   return (
     <>
-      <KubernetesContextSelect controller={controller} dialog={dialog} />
-      <RuntimePodFields controller={controller} dialog={dialog} />
-      <EditableComboField id="environment-container-registry" label="Container registry" value={dialog.containerRegistry} suggestions={containerRegistrySuggestions} required disabled={dialog.busy} onValueChange={(containerRegistry) => controller.updateEnvironmentDialog({ containerRegistry })} />
-      <EnvironmentCreateChecks controller={controller} dialog={dialog} />
+      <KubernetesContextSelect dialog={dialog} />
+      <RuntimePodFields dialog={dialog} />
+      <EditableComboField
+        id="environment-container-registry"
+        label="Container registry"
+        value={dialog.containerRegistry}
+        suggestions={containerRegistrySuggestions}
+        required
+        disabled={dialog.busy}
+        onValueChange={(containerRegistry) => {
+          dispatch(updateEnvironmentDialog({ containerRegistry }));
+        }}
+      />
+      <EnvironmentCreateChecks dialog={dialog} />
     </>
   );
 }
 
-function KubernetesContextSelect({ controller, dialog }: { controller: ERunUIController; dialog: EnvironmentDialog }): React.ReactElement {
+function KubernetesContextSelect({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
   const items = dialog.kubernetesContexts.map((context) => ({ value: context, label: context }));
-  const placeholder = dialog.kubernetesContextsLoading ? 'Loading contexts...' : 'Select Kubernetes context';
+  const placeholder = dialog.kubernetesContextsLoading
+    ? 'Loading contexts...'
+    : 'Select Kubernetes context';
   if (!dialog.kubernetesContextsLoading && dialog.kubernetesContexts.length === 0) {
     return (
       <div className="grid gap-2">
         <Label htmlFor="environment-kubernetes-context">Kubernetes context</Label>
         <EmptyState
           heading="No Kubernetes contexts found"
-          body="ERun reads contexts from your kubeconfig (~/.kube/config). Add a context with kubectl, then close and reopen this dialog to refresh the list."
+          body="ERun runs `kubectl config get-contexts` using the PATH and KUBECONFIG it inherits from your login shell at startup. If your terminal sees contexts that don't appear here, set KUBECONFIG in ~/.zshenv (or ~/.bash_profile) so it applies to GUI launches too, then restart ERun. If kubectl is not yet installed, install it with `brew install kubectl`."
         />
       </div>
     );
@@ -179,12 +273,15 @@ function KubernetesContextSelect({ controller, dialog }: { controller: ERunUICon
       emptyLabel="No Kubernetes contexts"
       disabled={dialog.busy || dialog.kubernetesContextsLoading}
       required
-      onChange={(kubernetesContext) => controller.updateEnvironmentDialog({ kubernetesContext })}
+      onChange={(kubernetesContext) => {
+        dispatch(updateEnvironmentDialog({ kubernetesContext }));
+      }}
     />
   );
 }
 
-function RuntimePodFields({ controller, dialog }: { controller: ERunUIController; dialog: EnvironmentDialog }): React.ReactElement {
+function RuntimePodFields({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
   return (
     <RuntimeResourceControls
       idPrefix="environment-runtime"
@@ -192,35 +289,80 @@ function RuntimePodFields({ controller, dialog }: { controller: ERunUIController
       status={dialog.resourceStatus}
       loading={dialog.resourceStatusLoading}
       disabled={dialog.busy}
-      onChange={(runtimePod) => controller.updateEnvironmentDialog({ runtimePod })}
+      onChange={(runtimePod) => {
+        dispatch(updateEnvironmentDialog({ runtimePod }));
+      }}
     />
   );
 }
 
-function EnvironmentCreateChecks({ controller, dialog }: { controller: ERunUIController; dialog: EnvironmentDialog }): React.ReactElement {
+function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
   return (
     <div className="grid gap-3">
-      <CheckboxField id="environment-default-tenant" label="Set as default tenant" checked={dialog.setDefaultTenant} disabled={dialog.busy} onCheckedChange={(setDefaultTenant) => controller.updateEnvironmentDialog({ setDefaultTenant })} />
-      <CheckboxField id="environment-no-git" label="Initialize without Git checkout" checked={dialog.noGit} disabled={dialog.busy} onCheckedChange={(noGit) => controller.updateEnvironmentDialog({ noGit })} />
+      <CheckboxField
+        id="environment-default-tenant"
+        label="Set as default tenant"
+        checked={dialog.setDefaultTenant}
+        disabled={dialog.busy}
+        onCheckedChange={(setDefaultTenant) => {
+          dispatch(updateEnvironmentDialog({ setDefaultTenant }));
+        }}
+      />
+      <CheckboxField
+        id="environment-no-git"
+        label="Initialize without Git checkout"
+        checked={dialog.noGit}
+        disabled={dialog.busy}
+        onCheckedChange={(noGit) => {
+          dispatch(updateEnvironmentDialog({ noGit }));
+        }}
+      />
       <CheckboxField
         id="environment-bootstrap"
         label="Create tenant DevOps repository"
         helper="Generates the tenant's shared DevOps module — Helm values and deployment templates reused by every environment in this tenant."
         checked={dialog.bootstrap}
         disabled={dialog.busy}
-        onCheckedChange={(bootstrap) => controller.updateEnvironmentDialog({ bootstrap })}
+        onCheckedChange={(bootstrap) => {
+          dispatch(updateEnvironmentDialog({ bootstrap }));
+        }}
       />
     </div>
   );
 }
 
-function CheckboxField({ id, label, helper, checked, disabled, onCheckedChange }: { id: string; label: string; helper?: string; checked: boolean; disabled: boolean; onCheckedChange: (checked: boolean) => void }): React.ReactElement {
+function CheckboxField({
+  id,
+  label,
+  helper,
+  checked,
+  disabled,
+  onCheckedChange,
+}: {
+  id: string;
+  label: string;
+  helper?: string;
+  checked: boolean;
+  disabled: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}): React.ReactElement {
   const helperId = helper ? `${id}-helper` : undefined;
   return (
     <div className="grid gap-1">
       <div className="flex items-center gap-2">
-        <Checkbox id={id} checked={checked} disabled={disabled} onCheckedChange={(value) => onCheckedChange(value === true)} aria-describedby={helperId} />
-        <Label htmlFor={id} className="text-sm font-normal">{label}</Label>
+        <Checkbox
+          id={id}
+          checked={checked}
+          disabled={disabled}
+          onCheckedChange={(value) => {
+            onCheckedChange(value === true);
+          }}
+          aria-describedby={helperId}
+        />
+        <Label htmlFor={id} className="text-sm font-normal">
+          {label}
+        </Label>
       </div>
       {helper && (
         <p id={helperId} className="text-[12px] leading-[1.4] text-muted-foreground pl-6">
@@ -232,16 +374,47 @@ function CheckboxField({ id, label, helper, checked, disabled, onCheckedChange }
 }
 
 function DialogError({ error }: { error: string }): React.ReactElement | null {
-  return error ? <div className={dialogErrorClassName} role="alert">{error}</div> : null;
+  return error ? (
+    <div className={dialogErrorClassName} role="alert">
+      {error}
+    </div>
+  ) : null;
 }
 
-function EnvironmentDialogFooter({ controller, dialog }: { controller: ERunUIController; dialog: EnvironmentDialog }): React.ReactElement {
+function environmentDialogSubmitDisabled(dialog: EnvironmentDialog, isDeploy: boolean): boolean {
+  if (dialog.busy) {
+    return true;
+  }
+  if (isDeploy) {
+    return false;
+  }
+  if (dialog.kubernetesContextsLoading || dialog.kubernetesContexts.length === 0) {
+    return true;
+  }
+  const resourceBlocked =
+    dialog.resourceStatusLoading ||
+    !dialog.resourceStatus?.available ||
+    Boolean(runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus));
+  return resourceBlocked;
+}
+
+function EnvironmentDialogFooter({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
+  const dispatch = useAppDispatch();
   const isDeploy = dialog.actionMode === 'deploy';
-  const resourceBlocked = dialog.resourceStatusLoading || !dialog.resourceStatus?.available || Boolean(runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus));
-  const disabled = dialog.busy || (!isDeploy && (dialog.kubernetesContextsLoading || dialog.kubernetesContexts.length === 0 || resourceBlocked));
+  const disabled = environmentDialogSubmitDisabled(dialog, isDeploy);
   return (
     <DialogFooter>
-      <Button type="button" variant="outline" size="sm" disabled={dialog.busy} onClick={() => controller.closeEnvironmentDialog()}>Cancel</Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={dialog.busy}
+        onClick={() => {
+          dispatch(closeEnvironmentDialog());
+        }}
+      >
+        Cancel
+      </Button>
       <Button type="submit" size="sm" disabled={disabled}>
         <EnvironmentSubmitIcon dialog={dialog} />
         {dialog.busy ? (isDeploy ? 'Deploying...' : 'Creating...') : isDeploy ? 'Deploy' : 'Create'}
@@ -254,13 +427,29 @@ function EnvironmentSubmitIcon({ dialog }: { dialog: EnvironmentDialog }): React
   if (dialog.busy) {
     return <LoaderCircle className="animate-spin" aria-hidden="true" />;
   }
-  return dialog.actionMode === 'deploy' ? <Rocket aria-hidden="true" /> : <FolderPlus aria-hidden="true" />;
+  return dialog.actionMode === 'deploy' ? (
+    <Rocket aria-hidden="true" />
+  ) : (
+    <FolderPlus aria-hidden="true" />
+  );
 }
 
-function environmentNameSuggestions(state: AppState, dialog: EnvironmentDialog): string[] {
-  const selectedTenant = state.tenants.find((tenant) => tenant.name.toLowerCase() === dialog.tenant.trim().toLowerCase());
-  const selectedTenantEnvironments = selectedTenant?.environments.map((environment) => environment.name) || [];
-  const allEnvironments = state.tenants.flatMap((tenant) => tenant.environments.map((environment) => environment.name));
-  return uniqueSuggestions([dialog.environment, ...selectedTenantEnvironments, ...loadSavedPastEnvironments(), ...allEnvironments]);
+function environmentNameSuggestions(
+  tenants: AppState['tenants'],
+  dialog: EnvironmentDialog,
+): string[] {
+  const selectedTenant = tenants.find(
+    (tenant) => tenant.name.toLowerCase() === dialog.tenant.trim().toLowerCase(),
+  );
+  const selectedTenantEnvironments =
+    selectedTenant?.environments.map((environment) => environment.name) ?? [];
+  const allEnvironments = tenants.flatMap((tenant) =>
+    tenant.environments.map((environment) => environment.name),
+  );
+  return uniqueSuggestions([
+    dialog.environment,
+    ...selectedTenantEnvironments,
+    ...loadSavedPastEnvironments(),
+    ...allEnvironments,
+  ]);
 }
-

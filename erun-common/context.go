@@ -135,10 +135,15 @@ func (c Context) RequireKubernetesContext(contextName string) error {
 }
 
 // TraceBlock logs a labeled multi-line block (file content being written,
-// remote script body about to run, etc.) at Info verbosity, matching the
-// Trace/Info contract: this is an output produced or input loaded that
-// the user must be able to see without -v.
+// remote script body about to run, etc.). It is the "stdin" companion to
+// TraceCommand's argv: shown when the user is auditing (`--dry-run`) or
+// asked for max verbosity (`-vv`), and silent otherwise so real runs do
+// not spam full script bodies. Single-line Trace/TraceCommand contracts
+// are unchanged.
 func (c Context) TraceBlock(label, body string) {
+	if !c.DryRun && c.Verbosity < VerbosityTrace {
+		return
+	}
 	label = strings.TrimSpace(label)
 	body = strings.TrimRight(body, "\n")
 	if label == "" || body == "" {

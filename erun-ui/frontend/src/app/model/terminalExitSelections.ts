@@ -1,10 +1,8 @@
 import type { UISelection } from '@/types';
 
-export type TerminalExitSelections = {
-  initSelection?: UISelection;
-  deploySelection?: UISelection;
+export interface TerminalExitSelections {
   sshdInitSelection?: UISelection;
   doctorSelection?: UISelection;
   openSelection?: UISelection;
   cloudInit: boolean;
-};
+}
