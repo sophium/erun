@@ -51,6 +51,16 @@ export default tseslint.config(
           IIFEs: true,
         },
       ],
+      // Per-file size complements the per-function budget: a file of
+      // many small functions is fine; a 1500-line module is not.
+      'max-lines': [
+        'error',
+        {
+          max: 500,
+          skipBlankLines: true,
+          skipComments: true,
+        },
+      ],
       '@typescript-eslint/no-unused-vars': [
         'error',
         {
@@ -73,6 +83,7 @@ export default tseslint.config(
     rules: {
       complexity: 'off',
       'max-lines-per-function': 'off',
+      'max-lines': 'off',
     },
   },
 );
