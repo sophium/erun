@@ -2720,6 +2720,46 @@ func assertIdleStatusMarkers(t *testing.T, markers []uiIdleMarker) {
 	}
 }
 
+func TestIdleStatusToUIProjectsMarkerClients(t *testing.T) {
+	// Locks the bridge between the per-IP marker data resolved by
+	// erun-common and the JSON shape the desktop tooltip consumes. The
+	// SSH proxy is the only kind that populates Clients today, but the
+	// projection is generic so any future per-client surface gets the
+	// same treatment without re-plumbing.
+	status := idleStatusToUI(eruncommon.EnvironmentIdleStatus{
+		Policy: eruncommon.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
+		Markers: []eruncommon.EnvironmentIdleMarker{
+			{
+				Name:             eruncommon.ActivityKindSSH,
+				Idle:             false,
+				Reason:           "recent activity",
+				SecondsRemaining: 50,
+				Clients: []eruncommon.EnvironmentIdleMarkerClient{
+					{Address: "10.0.4.7", Bytes: 1500, SecondsAgo: 2},
+					{Address: "127.0.0.1", Bytes: 548, SecondsAgo: 9},
+				},
+			},
+			{Name: eruncommon.ActivityKindCLI, Idle: true, Reason: "no activity recorded"},
+		},
+	})
+	if len(status.Markers) != 2 {
+		t.Fatalf("expected 2 markers, got %+v", status.Markers)
+	}
+	ssh := status.Markers[0]
+	if len(ssh.Clients) != 2 {
+		t.Fatalf("expected SSH marker to carry 2 clients, got %+v", ssh.Clients)
+	}
+	if ssh.Clients[0].Address != "10.0.4.7" || ssh.Clients[0].Bytes != 1500 || ssh.Clients[0].SecondsAgo != 2 {
+		t.Fatalf("unexpected first client: %+v", ssh.Clients[0])
+	}
+	if ssh.Clients[1].Address != "127.0.0.1" || ssh.Clients[1].Bytes != 548 || ssh.Clients[1].SecondsAgo != 9 {
+		t.Fatalf("unexpected second client: %+v", ssh.Clients[1])
+	}
+	if status.Markers[1].Clients != nil {
+		t.Fatalf("CLI marker should have no clients, got %+v", status.Markers[1].Clients)
+	}
+}
+
 func TestSavePastedImageCopiesIntoCurrentRuntime(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{

@@ -141,6 +141,17 @@ export interface UIIdleMarker {
   idle: boolean;
   reason?: string;
   secondsRemaining?: number;
+  clients?: UIIdleMarkerClient[];
+}
+
+// UIIdleMarkerClient is the per-IP detail row attached to a marker
+// (currently only SSH). The desktop tooltip renders one of these
+// under the marker line; CLI consumers of `activity status --json`
+// see the same shape.
+export interface UIIdleMarkerClient {
+  address: string;
+  bytes?: number;
+  secondsAgo?: number;
 }
 
 export interface UIVersionSuggestion {

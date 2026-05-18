@@ -79,6 +79,7 @@ func idleStatusToUI(status eruncommon.EnvironmentIdleStatus) uiIdleStatus {
 			Idle:             marker.Idle,
 			Reason:           strings.TrimSpace(marker.Reason),
 			SecondsRemaining: marker.SecondsRemaining,
+			Clients:          idleMarkerClientsToUI(marker.Clients),
 		})
 	}
 	return uiIdleStatus{
@@ -91,6 +92,21 @@ func idleStatusToUI(status eruncommon.EnvironmentIdleStatus) uiIdleStatus {
 		StopError:           strings.TrimSpace(status.StopError),
 		Markers:             markers,
 	}
+}
+
+func idleMarkerClientsToUI(clients []eruncommon.EnvironmentIdleMarkerClient) []uiIdleMarkerClient {
+	if len(clients) == 0 {
+		return nil
+	}
+	out := make([]uiIdleMarkerClient, 0, len(clients))
+	for _, client := range clients {
+		out = append(out, uiIdleMarkerClient{
+			Address:    strings.TrimSpace(client.Address),
+			Bytes:      client.Bytes,
+			SecondsAgo: client.SecondsAgo,
+		})
+	}
+	return out
 }
 
 func (a *App) mergeLocalIdleActivity(result eruncommon.OpenResult, status eruncommon.EnvironmentIdleStatus) eruncommon.EnvironmentIdleStatus {

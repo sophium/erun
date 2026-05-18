@@ -83,6 +83,43 @@ func TestActivity(t *testing.T) {
 		golden.Equal(t, "activity/stop_ready_blocks_when_active", normalize.Apply(result.Combined))
 	})
 
+	t.Run("status_json_includes_per_client_breakdown", func(t *testing.T) {
+		// Exercises the SSH-proxy contract that ships per-IP byte
+		// deltas via EnvironmentActivityParams.ClientUpdates. The
+		// desktop tooltip and external `activity status --json`
+		// consumers both read the resulting `clients` slice off the
+		// marker, so the JSON contract is locked here.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		erun.Run(t, []string{
+			"activity", "touch",
+			"--tenant", "team",
+			"--environment", "dev",
+			"--kind", "ssh",
+			"--bytes", "2048",
+			"--client-address", "10.0.4.7",
+			"--client-bytes", "2048",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{
+			"activity", "status",
+			"--tenant", "team",
+			"--environment", "dev",
+			"--json",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		if !strings.Contains(result.Stdout, `"clients"`) {
+			t.Errorf("expected per-client breakdown in JSON output, got:\n%s", result.Stdout)
+		}
+		if !strings.Contains(result.Stdout, `"address": "10.0.4.7"`) {
+			t.Errorf("expected client address in JSON output, got:\n%s", result.Stdout)
+		}
+		if !strings.Contains(result.Stdout, `"bytes": 2048`) {
+			t.Errorf("expected client bytes in JSON output, got:\n%s", result.Stdout)
+		}
+	})
+
 	t.Run("stop_ready_json_emits_structured_decision", func(t *testing.T) {
 		// Exercises the --json flag wired for the runtime entrypoint's
 		// idle-monitor heartbeat log. JSON must land on stdout regardless of
