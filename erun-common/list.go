@@ -77,6 +77,7 @@ type ListEnvironmentResult struct {
 	IsDefault          bool                    `json:"isDefault,omitempty"`
 	IsEffective        bool                    `json:"isEffective,omitempty"`
 	SSH                ListSSHResult           `json:"ssh,omitempty"`
+	AutoStart          *bool                   `json:"autoStart,omitempty"`
 }
 
 type ListSSHResult struct {
@@ -212,7 +213,16 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 		IsDefault:          env.Name == tenant.DefaultEnvironment,
 		IsEffective:        effectiveErr == nil && tenant.Name == effective.Tenant && env.Name == effective.Environment,
 		SSH:                listSSHResult(listEnvironmentOpenResult(tenant, env, localPorts)),
+		AutoStart:          copyAutoStartPtr(env.AutoStart),
 	}
+}
+
+func copyAutoStartPtr(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	v := *value
+	return &v
 }
 
 func APIURLForListEnvironment(tenant TenantConfig, localPorts EnvironmentLocalPorts) string {

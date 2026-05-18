@@ -28,6 +28,7 @@ type uiEnvironment struct {
 	IsActive          bool   `json:"isActive,omitempty"`
 	SSHDEnabled       bool   `json:"sshdEnabled,omitempty"`
 	Remote            bool   `json:"remote"`
+	AutoStart         *bool  `json:"autoStart,omitempty"`
 }
 
 type uiSelection struct {
@@ -186,6 +187,7 @@ type uiEnvironmentConfig struct {
 	LocalPorts           uiEnvironmentLocalPorts `json:"localPorts"`
 	Remote               bool                    `json:"remote"`
 	Snapshot             bool                    `json:"snapshot"`
+	AutoStart            *bool                   `json:"autoStart,omitempty"`
 }
 
 type uiClaudeConfig struct {
@@ -353,8 +355,19 @@ type uiIdleStatus struct {
 }
 
 type uiIdleMarker struct {
-	Name             string `json:"name"`
-	Idle             bool   `json:"idle"`
-	Reason           string `json:"reason,omitempty"`
-	SecondsRemaining int64  `json:"secondsRemaining,omitempty"`
+	Name             string               `json:"name"`
+	Idle             bool                 `json:"idle"`
+	Reason           string               `json:"reason,omitempty"`
+	SecondsRemaining int64                `json:"secondsRemaining,omitempty"`
+	Clients          []uiIdleMarkerClient `json:"clients,omitempty"`
+}
+
+// uiIdleMarkerClient is the desktop's per-IP detail row for a marker.
+// The SSH-proxy populates the underlying snapshot; other activity kinds
+// leave Clients nil. Bytes and SecondsAgo are pre-formatted at the
+// boundary so the React tooltip can render without computing them.
+type uiIdleMarkerClient struct {
+	Address      string `json:"address"`
+	Bytes        int64  `json:"bytes,omitempty"`
+	SecondsAgo   int64  `json:"secondsAgo,omitempty"`
 }

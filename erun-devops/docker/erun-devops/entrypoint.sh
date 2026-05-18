@@ -689,12 +689,17 @@ start_environment_idle_monitor() {
     fi
 
     (
+        stop_log_dir="${HOME}/.erun/${ERUN_TENANT}/${ERUN_ENVIRONMENT}"
+        monitor_log="${stop_log_dir}/idle-monitor.log"
+        mkdir -p "${stop_log_dir}"
         while :; do
             sleep 30
-            if erun activity stop-ready --tenant "${ERUN_TENANT}" --environment "${ERUN_ENVIRONMENT}" >/dev/null 2>&1; then
-                stop_log_dir="${HOME}/.erun/${ERUN_TENANT}/${ERUN_ENVIRONMENT}"
+            tick_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            check_json=$(erun activity stop-ready --json --tenant "${ERUN_TENANT}" --environment "${ERUN_ENVIRONMENT}" 2>/dev/null)
+            exit_code=$?
+            printf '{"ts":"%s","exit":%d,"check":%s}\n' "${tick_ts}" "${exit_code}" "${check_json:-null}" >>"${monitor_log}"
+            if [ "${exit_code}" -eq 0 ]; then
                 stop_log="${stop_log_dir}/idle-stop.log"
-                mkdir -p "${stop_log_dir}"
                 graceful_quit_clients >>"${stop_log}" 2>&1 || true
                 stop_cloud_host >>"${stop_log}" 2>&1 || true
                 exit 0

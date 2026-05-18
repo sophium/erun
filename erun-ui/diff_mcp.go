@@ -27,7 +27,10 @@ func (t idleProbeRoundTripper) RoundTrip(req *http.Request) (*http.Response, err
 func loadDiffFromMCP(ctx context.Context, endpoint string, options uiDiffOptions) (eruncommon.DiffResult, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
-		Endpoint:             endpoint,
+		Endpoint: endpoint,
+		HTTPClient: &http.Client{
+			Transport: idleProbeRoundTripper{},
+		},
 		DisableStandaloneSSE: true,
 	}, nil)
 	if err != nil {

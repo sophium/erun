@@ -79,6 +79,7 @@ func idleStatusToUI(status eruncommon.EnvironmentIdleStatus) uiIdleStatus {
 			Idle:             marker.Idle,
 			Reason:           strings.TrimSpace(marker.Reason),
 			SecondsRemaining: marker.SecondsRemaining,
+			Clients:          idleMarkerClientsToUI(marker.Clients),
 		})
 	}
 	return uiIdleStatus{
@@ -91,6 +92,21 @@ func idleStatusToUI(status eruncommon.EnvironmentIdleStatus) uiIdleStatus {
 		StopError:           strings.TrimSpace(status.StopError),
 		Markers:             markers,
 	}
+}
+
+func idleMarkerClientsToUI(clients []eruncommon.EnvironmentIdleMarkerClient) []uiIdleMarkerClient {
+	if len(clients) == 0 {
+		return nil
+	}
+	out := make([]uiIdleMarkerClient, 0, len(clients))
+	for _, client := range clients {
+		out = append(out, uiIdleMarkerClient{
+			Address:    strings.TrimSpace(client.Address),
+			Bytes:      client.Bytes,
+			SecondsAgo: client.SecondsAgo,
+		})
+	}
+	return out
 }
 
 func (a *App) mergeLocalIdleActivity(result eruncommon.OpenResult, status eruncommon.EnvironmentIdleStatus) eruncommon.EnvironmentIdleStatus {
@@ -182,11 +198,22 @@ func uiStopBlockedReason(markers []eruncommon.EnvironmentIdleMarker) string {
 }
 
 func (a *App) maybeStopIdleCloudEnvironment(result eruncommon.OpenResult, status eruncommon.EnvironmentIdleStatus) {
-	if !status.ManagedCloud || !status.StopEligible {
-		return
-	}
 	cloudContext, ok, err := a.linkedCloudContext(result.EnvConfig)
 	if err != nil || !ok {
+		return
+	}
+	// Reconcile stale idleStops markers with the current cloud context.
+	// If the context is running again — manually restarted via the
+	// titlebar Play button, restarted by `erun open` preflight in a
+	// terminal we don't track, or restarted by anything outside the
+	// desktop — our prior auto-stop has been undone and a fresh stop
+	// should be allowed to fire when markers next expire. Without this
+	// reconcile, the idleStops flag latches forever after the first stop
+	// and the env can never auto-stop a second time.
+	if strings.TrimSpace(cloudContext.Status) == eruncommon.CloudContextStatusRunning {
+		a.clearIdleStopsForCloudContext(cloudContext.Name)
+	}
+	if !status.ManagedCloud || !status.StopEligible {
 		return
 	}
 	key := selectionKey(uiSelection{Tenant: result.Tenant, Environment: result.Environment})

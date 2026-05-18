@@ -51,4 +51,12 @@ export class Titlebar {
       .locator('[role="status"][aria-live="polite"], [role="alert"][aria-live="assertive"]')
       .first();
   }
+
+  // idleStatusBadge targets the idle-status pill in the titlebar. The
+  // component only mounts when state.idle.idleStatus is non-null, which
+  // happens after the first idle-status poll completes for the selected
+  // env, so callers should wait for visibility before driving it.
+  idleStatusBadge(): Locator {
+    return this.page.getByRole('button', { name: /^Idle timeout/ });
+  }
 }

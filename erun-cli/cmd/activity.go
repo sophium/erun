@@ -28,23 +28,33 @@ func newActivityTouchCmd() *cobra.Command {
 	var kind string
 	var seen bool
 	var bytes int64
+	var clientAddress string
+	var clientBytes int64
 	cmd := &cobra.Command{
 		Use:  "touch",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return common.RecordEnvironmentActivity(common.EnvironmentActivityParams{
+			params := common.EnvironmentActivityParams{
 				Tenant:      tenant,
 				Environment: environment,
 				Kind:        kind,
 				Seen:        seen,
 				Bytes:       bytes,
-			})
+			}
+			if strings.TrimSpace(clientAddress) != "" {
+				params.ClientUpdates = []common.EnvironmentActivityClientUpdate{
+					{Address: clientAddress, Bytes: clientBytes},
+				}
+			}
+			return common.RecordEnvironmentActivity(params)
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&kind, "kind", "", "Activity kind")
 	cmd.Flags().BoolVar(&seen, "seen", false, "Record process heartbeat without user activity")
 	cmd.Flags().Int64Var(&bytes, "bytes", 0, "Traffic bytes observed since the previous sample")
+	cmd.Flags().StringVar(&clientAddress, "client-address", "", "Remote address whose bytes to attribute (SSH proxy testing)")
+	cmd.Flags().Int64Var(&clientBytes, "client-bytes", 0, "Bytes attributed to --client-address since the previous sample")
 	return cmd
 }
 
@@ -76,6 +86,7 @@ func newActivityStatusCmd(store common.OpenStore) *cobra.Command {
 func newActivityStopReadyCmd(store common.OpenStore) *cobra.Command {
 	var tenant string
 	var environment string
+	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:  "stop-ready",
 		Args: cobra.NoArgs,
@@ -83,6 +94,16 @@ func newActivityStopReadyCmd(store common.OpenStore) *cobra.Command {
 			status, err := resolveActivityStatus(store, tenant, environment)
 			if err != nil {
 				return err
+			}
+			if jsonOutput {
+				payload := stopReadyJSON{
+					StopEligible:  status.StopEligible,
+					BlockedReason: strings.TrimSpace(status.StopBlockedReason),
+				}
+				encoder := json.NewEncoder(commandContext(cmd).Stdout)
+				if err := encoder.Encode(payload); err != nil {
+					return err
+				}
 			}
 			if !status.StopEligible {
 				if strings.TrimSpace(status.StopBlockedReason) != "" {
@@ -94,7 +115,13 @@ func newActivityStopReadyCmd(store common.OpenStore) *cobra.Command {
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Write a JSON summary of the stop decision to stdout regardless of exit code")
 	return cmd
+}
+
+type stopReadyJSON struct {
+	StopEligible  bool   `json:"stopEligible"`
+	BlockedReason string `json:"blockedReason,omitempty"`
 }
 
 func addActivityTargetFlags(cmd *cobra.Command, tenant, environment *string) {

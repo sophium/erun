@@ -7,6 +7,7 @@ export interface UIEnvironment {
   isActive?: boolean;
   sshdEnabled?: boolean;
   remote: boolean;
+  autoStart?: boolean;
 }
 
 export interface UITenant {
@@ -140,6 +141,17 @@ export interface UIIdleMarker {
   idle: boolean;
   reason?: string;
   secondsRemaining?: number;
+  clients?: UIIdleMarkerClient[];
+}
+
+// UIIdleMarkerClient is the per-IP detail row attached to a marker
+// (currently only SSH). The desktop tooltip renders one of these
+// under the marker line; CLI consumers of `activity status --json`
+// see the same shape.
+export interface UIIdleMarkerClient {
+  address: string;
+  bytes?: number;
+  secondsAgo?: number;
 }
 
 export interface UIVersionSuggestion {
@@ -263,6 +275,11 @@ export interface UIEnvironmentConfig {
   localPorts: UIEnvironmentLocalPorts;
   remote: boolean;
   snapshot: boolean;
+  // AutoStart is the desktop-only auto-start policy for the linked cloud
+  // context: undefined means "ask the user once" (first-time prompt), true
+  // means "always auto-start", false means "never auto-start; render the
+  // titlebar Play button so the user can start manually".
+  autoStart?: boolean;
 }
 
 export interface UIEnvironmentClaudeConfig {

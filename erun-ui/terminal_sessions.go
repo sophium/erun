@@ -893,6 +893,20 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	respawn := managed.respawn
 	a.mu.Unlock()
 
+	// Refuse to respawn while the env's linked cloud context is not
+	// running. Each respawn re-runs `erun open`, whose preflight calls
+	// StartCloudContext and immediately undoes any auto-stop that has
+	// just fired. Without this gate the desktop and the runtime-pod
+	// monitor stop and start the EC2 instance in a tight loop, which
+	// surfaces in the terminal as repeated IncorrectInstanceState
+	// errors. End the loop cleanly here; the titlebar Play button is
+	// the recovery affordance (same shape as the autoStart=never
+	// empty state from #331).
+	if !a.shouldRespawnForCloudContext(managed) {
+		a.emitStoppedContextMarker(managed.serial)
+		return false
+	}
+
 	a.emitReconnectMarker(managed.serial, exitReason)
 	next, err := respawn()
 	if err != nil {
@@ -909,6 +923,37 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	managed.session = next
 	a.mu.Unlock()
 	return true
+}
+
+// shouldRespawnForCloudContext returns true when the managed PTY can be
+// safely relaunched. A managed terminal whose env has no linked cloud
+// context (local envs) always reconnects; a managed cloud env reconnects
+// only when the last-known context status is "running" or "pending"
+// (start in flight). Anything else means the context is stopped or
+// transitioning toward stopped, and an immediate respawn would fight
+// the desktop's auto-stop. Best-effort: any error reading the store is
+// treated as "allow respawn" so a transient store failure does not
+// permanently break reconnect.
+func (a *App) shouldRespawnForCloudContext(managed *managedTerminal) bool {
+	if managed == nil || a.deps.store == nil {
+		return true
+	}
+	config, _, err := a.deps.store.LoadEnvConfig(managed.selection.Tenant, managed.selection.Environment)
+	if err != nil {
+		return true
+	}
+	cloudContext, ok, err := a.linkedCloudContext(config)
+	if err != nil || !ok {
+		return true
+	}
+	switch strings.TrimSpace(cloudContext.Status) {
+	case eruncommon.CloudContextStatusRunning, eruncommon.CloudContextStatusPending:
+		return true
+	case "":
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *App) logSpawnedCommandToLocal(selection uiSelection, dedupKey, line string) {
@@ -950,6 +995,20 @@ func (a *App) emitReconnectMarker(sessionID int, exitReason string) {
 		suffix = " " + reason
 	}
 	marker := "\r\n\x1b[2;33m── reconnecting" + suffix + " ──\x1b[0m\r\n"
+	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+		SessionID: sessionID,
+		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),
+	})
+}
+
+// emitStoppedContextMarker writes a single diagnostic line when
+// tryReconnect refuses to respawn because the env's cloud context is
+// not running. The dim-yellow style matches the reconnecting marker so
+// the user reads them as the same status channel; the recovery path
+// (titlebar Play button) is named in the line so no separate UI
+// element is needed.
+func (a *App) emitStoppedContextMarker(sessionID int) {
+	marker := "\r\n\x1b[2;33m── environment stopped — click the start button in the titlebar to resume ──\x1b[0m\r\n"
 	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),

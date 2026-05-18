@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
+	"github.com/adrg/xdg"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	eruncommon "github.com/sophium/erun/erun-common"
 )
@@ -175,6 +177,104 @@ func TestHTTPHandlerExposesVersionTool(t *testing.T) {
 	version := decodeStructuredVersion(t, result.StructuredContent)
 	if got := version["version"]; got != "1.2.3" {
 		t.Fatalf("unexpected structured content: %+v", version)
+	}
+}
+
+func TestActivityHTTPMiddlewareSkipsRecordingForIdleProbe(t *testing.T) {
+	cacheDir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheDir)
+	xdg.Reload()
+
+	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	handler := activityHTTPMiddleware(runtime, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest failed: %v", err)
+	}
+	req.Header.Set("X-Erun-Idle-Probe", "true")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	dir, err := eruncommon.EnvironmentActivityDir("tenant-a", "dev")
+	if err != nil {
+		t.Fatalf("EnvironmentActivityDir failed: %v", err)
+	}
+	for _, name := range []string{"mcp.json", "codex.json"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Fatalf("expected %s to be absent under probe header, stat err=%v", name, err)
+		}
+	}
+}
+
+func TestActivityHTTPMiddlewareRecordsWithoutIdleProbe(t *testing.T) {
+	cacheDir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheDir)
+	xdg.Reload()
+
+	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	handler := activityHTTPMiddleware(runtime, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	resp, err := http.Get(server.URL)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	dir, err := eruncommon.EnvironmentActivityDir("tenant-a", "dev")
+	if err != nil {
+		t.Fatalf("EnvironmentActivityDir failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "mcp.json")); err != nil {
+		t.Fatalf("expected mcp.json to exist without probe header: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "codex.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected codex.json to be absent for non-codex user agent, stat err=%v", err)
+	}
+}
+
+func TestActivityHTTPMiddlewareRecordsCodexWhenUserAgentMatches(t *testing.T) {
+	cacheDir := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cacheDir)
+	xdg.Reload()
+
+	runtime := RuntimeConfig{Context: RuntimeContext{Tenant: "tenant-a", Environment: "dev"}}
+	handler := activityHTTPMiddleware(runtime, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodGet, server.URL, nil)
+	if err != nil {
+		t.Fatalf("NewRequest failed: %v", err)
+	}
+	req.Header.Set("User-Agent", "codex-cli/0.1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	_ = resp.Body.Close()
+
+	dir, err := eruncommon.EnvironmentActivityDir("tenant-a", "dev")
+	if err != nil {
+		t.Fatalf("EnvironmentActivityDir failed: %v", err)
+	}
+	for _, name := range []string{"mcp.json", "codex.json"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Fatalf("expected %s to exist for codex client: %v", name, err)
+		}
 	}
 }
 

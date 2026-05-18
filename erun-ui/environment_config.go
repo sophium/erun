@@ -59,6 +59,51 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 	return a.environmentConfigToUI(selection.Tenant, updated, selection.Environment, registry, ports)
 }
 
+// SetEnvironmentAutoStart persists the desktop's auto-start preference for one
+// environment. mode is "ask" (clear the override and prompt again on next
+// open), "always" (start the linked cloud context without prompting), or
+// "never" (skip auto-start and render the "Start environment" empty state).
+// The setting only affects the desktop's openSelection branch; CLI users keep
+// the unconditional preflight start.
+func (a *App) SetEnvironmentAutoStart(selection uiSelection, mode string) (uiEnvironmentConfig, error) {
+	selection = normalizeSelection(selection)
+	if selection.Tenant == "" || selection.Environment == "" {
+		return uiEnvironmentConfig{}, fmt.Errorf("tenant and environment are required")
+	}
+	value, err := parseAutoStartMode(mode)
+	if err != nil {
+		return uiEnvironmentConfig{}, err
+	}
+	existing, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
+	if err != nil {
+		return uiEnvironmentConfig{}, err
+	}
+	existing.AutoStart = value
+	if err := a.deps.store.SaveEnvConfig(selection.Tenant, existing); err != nil {
+		return uiEnvironmentConfig{}, err
+	}
+	ports, err := eruncommon.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
+	if err != nil {
+		return uiEnvironmentConfig{}, err
+	}
+	registry := a.effectiveEnvironmentContainerRegistry(selection.Tenant, selection.Environment, existing)
+	return a.environmentConfigToUI(selection.Tenant, existing, selection.Environment, registry, ports)
+}
+
+func parseAutoStartMode(mode string) (*bool, error) {
+	switch strings.TrimSpace(mode) {
+	case "", "ask":
+		return nil, nil
+	case "always":
+		v := true
+		return &v, nil
+	case "never":
+		v := false
+		return &v, nil
+	}
+	return nil, fmt.Errorf("invalid auto-start mode %q (expected ask, always, or never)", mode)
+}
+
 func (a *App) ChooseWorkspaceSyncLocalFolder(selection uiSelection, current string) (string, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -206,8 +251,9 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 			APIStatus:  localPortStatus(ports.API),
 			SSHStatus:  localPortStatus(ports.SSH),
 		},
-		Remote:   config.Remote,
-		Snapshot: config.SnapshotEnabled(),
+		Remote:    config.Remote,
+		Snapshot:  config.SnapshotEnabled(),
+		AutoStart: copyBoolPtr(config.AutoStart),
 	}
 	if cloudContext, ok, err := a.linkedCloudContext(config); err != nil {
 		return uiEnvironmentConfig{}, err
@@ -318,6 +364,7 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	existing.Claude = claudeConfigFromUI(config.Claude)
 	existing.AITool = strings.TrimSpace(config.AITool)
 	existing.SetSnapshot(config.Snapshot)
+	existing.AutoStart = copyBoolPtr(config.AutoStart)
 	return existing
 }
 
