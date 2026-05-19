@@ -280,6 +280,12 @@ export interface UIEnvironmentConfig {
   // means "always auto-start", false means "never auto-start; render the
   // titlebar Play button so the user can start manually".
   autoStart?: boolean;
+  // RemoteHostCredentials toggles the per-env credential refresher: when on,
+  // the desktop exports temporary AWS credentials from the cloud alias's host
+  // profile and pushes them into the runtime pod's ~/.aws/credentials under
+  // the erun-host profile, so SDK calls inside the pod act as the host
+  // identity. Only meaningful for remote AWS-backed envs.
+  remoteHostCredentials: boolean;
 }
 
 export interface UIEnvironmentClaudeConfig {

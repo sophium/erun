@@ -184,10 +184,11 @@ type uiEnvironmentConfig struct {
 	Claude               uiClaudeConfig          `json:"claude"`
 	ClaudeDefaults       uiClaudeDefaults        `json:"claudeDefaults"`
 	AITool               string                  `json:"aiTool,omitempty"`
-	LocalPorts           uiEnvironmentLocalPorts `json:"localPorts"`
-	Remote               bool                    `json:"remote"`
-	Snapshot             bool                    `json:"snapshot"`
-	AutoStart            *bool                   `json:"autoStart,omitempty"`
+	LocalPorts            uiEnvironmentLocalPorts `json:"localPorts"`
+	Remote                bool                    `json:"remote"`
+	Snapshot              bool                    `json:"snapshot"`
+	AutoStart             *bool                   `json:"autoStart,omitempty"`
+	RemoteHostCredentials bool                    `json:"remoteHostCredentials"`
 }
 
 type uiClaudeConfig struct {

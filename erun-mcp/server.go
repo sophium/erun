@@ -175,6 +175,14 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Description: "Set the cloud provider alias for a tenant environment, with preview support",
 	}, cloudSetTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cloud_inject_aws_credentials",
+		Description: "Write temporary AWS credentials into the runtime pod's ~/.aws/credentials under the erun-host profile",
+	}, cloudInjectAWSCredentialsTool())
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "cloud_clear_aws_credentials",
+		Description: "Remove the erun-host profile from the runtime pod's ~/.aws/credentials",
+	}, cloudClearAWSCredentialsTool())
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "context_list",
 		Description: "List managed ERun cloud Kubernetes contexts",
 	}, contextListTool(runtime))

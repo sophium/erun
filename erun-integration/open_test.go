@@ -247,6 +247,21 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/remote_dry_run_traces_port_forwards", normalize.Apply(result.Combined))
 	})
 
+	t.Run("remote_dry_run_propagates_host_credentials_opt_in", func(t *testing.T) {
+		// Locks the deploy plumbing that ships host AWS credentials into a
+		// remote runtime: when EnvConfig.RemoteHostCredentials is true,
+		// the helm command must include
+		// `--set cloudContext.useHostCredentials=true` so the chart sets
+		// AWS_PROFILE=erun-host on the runtime container. The desktop
+		// refresher writes the matching profile into the pod's
+		// ~/.aws/credentials at runtime — that path is tested in erun-mcp.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithHostCredentials(t, setup, "team", "dev")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/remote_dry_run_propagates_host_credentials_opt_in", normalize.Apply(result.Combined))
+	})
+
 	t.Run("vscode_dry_run", func(t *testing.T) {
 		// VSCode against an sshd-enabled remote env: dry-run must reach
 		// past validateIDEOptions and emit the redeploy / port-forward /

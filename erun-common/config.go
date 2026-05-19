@@ -93,10 +93,11 @@ type EnvConfig struct {
 	Idle                EnvironmentIdleConfig   `yaml:"idle,omitempty"`
 	Claude              EnvironmentClaudeConfig `yaml:"claude,omitempty" json:"claude,omitempty"`
 	AITool              string                  `yaml:"aitool,omitempty" json:"aiTool,omitempty"`
-	Remote              bool                    `yaml:"remote,omitempty"`
-	Snapshot            *bool                   `yaml:"snapshot,omitempty"`
-	LocalPortRangeStart int                     `yaml:"localportrangestart,omitempty" json:"localPortRangeStart,omitempty"`
-	AutoStart           *bool                   `yaml:"autostart,omitempty" json:"autoStart,omitempty"`
+	Remote                bool                    `yaml:"remote,omitempty"`
+	Snapshot              *bool                   `yaml:"snapshot,omitempty"`
+	LocalPortRangeStart   int                     `yaml:"localportrangestart,omitempty" json:"localPortRangeStart,omitempty"`
+	AutoStart             *bool                   `yaml:"autostart,omitempty" json:"autoStart,omitempty"`
+	RemoteHostCredentials bool                    `yaml:"remotehostcredentials,omitempty" json:"remoteHostCredentials,omitempty"`
 }
 
 func (c TenantConfig) SnapshotEnabled() bool {

@@ -105,6 +105,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	a.rememberKubeContextForActivity(selection.KubernetesContext)
 	go a.streamSession(managed)
 	go a.startWorkspaceSyncForSelection(selection)
+	go a.startCloudCredentialsRefresherForSelection(selection)
 
 	a.logSpawnedCommandToLocal(selection, "erun", formatLocalCommandLog(formatLaunchCommand(openParams), "ERun tab"))
 	_ = ctx
@@ -533,6 +534,7 @@ func (a *App) DeleteEnvironment(selection uiSelection, confirmation string) (del
 	if err != nil {
 		return deleteEnvironmentResult{}, err
 	}
+	a.stopCloudCredentialsRefresherForSelection(selection)
 	a.closeSessionsForSelection(selection)
 	return deleteEnvironmentResult{
 		Tenant:                result.Tenant,

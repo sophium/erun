@@ -79,6 +79,17 @@ export function GeneralTab(): React.ReactElement {
           dispatch(updateManageConfig({ snapshot }));
         }}
       />
+      {config.remote && (
+        <CheckboxField
+          id="environment-config-remotehostcredentials"
+          label="Use host AWS credentials inside this env"
+          checked={config.remoteHostCredentials}
+          disabled={dialog.busy}
+          onChange={(remoteHostCredentials) => {
+            dispatch(updateManageConfig({ remoteHostCredentials }));
+          }}
+        />
+      )}
     </>
   );
 }
