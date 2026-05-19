@@ -23,10 +23,20 @@ export function registerTerminalQueryResponseHandlers(
     return true;
   };
 
-  // OSC 10/11/12 (fg/bg/cursor color) queries are deliberately unanswered:
-  // the Wails+PTY reply path is too slow for fire-and-forget queries, so
-  // the reply leaks into the shell's stdin and gets run as a command.
+  // xterm.js ships built-in OSC 10/11/12 handlers that answer fg/bg/cursor
+  // color queries with the current theme. The reply gets routed through
+  // SendSessionInput -> PTY, which is too slow for fire-and-forget queries
+  // and leaks the response into the shell's stdin where it runs as a
+  // command. Register no-op handlers that consume the OSC and return true
+  // so xterm.js's built-in is suppressed entirely. Querying tools time
+  // out and fall back to their default, which matches what a hardcoded
+  // reply gave anyway.
+  const suppressOsc = (): boolean => true;
+
   return [
+    terminal.parser.registerOscHandler(10, suppressOsc),
+    terminal.parser.registerOscHandler(11, suppressOsc),
+    terminal.parser.registerOscHandler(12, suppressOsc),
     terminal.parser.registerCsiHandler({ final: 'c' }, (params) => {
       if (firstParam(params) > 0) {
         return true;
