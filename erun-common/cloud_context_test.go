@@ -204,7 +204,6 @@ func TestCloudContextPreflightDryRunTracesStartForStoppedContext(t *testing.T) {
 			DiskSizeGB:         DefaultCloudContextDiskSizeGB,
 			KubernetesContext:  "cluster-prod",
 			AdminToken:         "test-token",
-			Status:             CloudContextStatusStopped,
 		}},
 	}}
 	trace := new(bytes.Buffer)
@@ -212,7 +211,22 @@ func TestCloudContextPreflightDryRunTracesStartForStoppedContext(t *testing.T) {
 		DryRun: true,
 		Logger: NewLoggerWithWriters(2, trace, trace),
 	}
-	ctx.KubernetesContextPreflight = CloudContextPreflight(store, CloudContextDependencies{})
+	// Preflight refreshes from AWS to decide whether to start (Status
+	// is no longer persisted on disk). The default dry-run stub
+	// reports every described instance as "running" to keep the
+	// common-case happy path; this test wants the start trace, so it
+	// supplies a custom RunAWS that returns "stopped" for the
+	// describe call.
+	ctx.KubernetesContextPreflight = CloudContextPreflight(store, CloudContextDependencies{
+		RunAWS: func(c Context, p CloudProviderConfig, region string, args []string) (string, error) {
+			joined := strings.Join(args, " ")
+			if strings.Contains(joined, "ec2 describe-instances") && strings.Contains(joined, "[InstanceId,State.Name]") {
+				c.TraceCommand("", "aws", args...)
+				return "i-test\tstopped\n", nil
+			}
+			return defaultRunCloudContextAWS(c, p, region, args)
+		},
+	})
 
 	if err := ctx.EnsureKubernetesContext("cluster-prod"); err != nil {
 		t.Fatalf("EnsureKubernetesContext failed: %v", err)
@@ -231,8 +245,13 @@ func TestCloudContextPreflightDryRunTracesStartForStoppedContext(t *testing.T) {
 			t.Fatalf("expected dry-run trace to contain %q, got:\n%s", want, output)
 		}
 	}
-	if store.config.CloudContexts[0].Status != CloudContextStatusStopped {
-		t.Fatalf("dry-run should not persist cloud context start, got %+v", store.config.CloudContexts[0])
+	// Dry-run must leave the persisted record untouched. Status is no
+	// longer a persisted field, so we check via PublicIP: the seeded
+	// value (198.51.100.10) would be overwritten with the
+	// dry-run-described value (203.0.113.10) only if the live save
+	// branch fired by mistake.
+	if got := store.config.CloudContexts[0].PublicIP; got != "198.51.100.10" {
+		t.Fatalf("dry-run should not persist cloud context start, got PublicIP=%q in %+v", got, store.config.CloudContexts[0])
 	}
 }
 
@@ -254,7 +273,6 @@ func TestEnsureCloudContextHostStopProfileAssociationReplacesExistingProfile(t *
 			DiskType:           DefaultCloudContextDiskType,
 			DiskSizeGB:         DefaultCloudContextDiskSizeGB,
 			KubernetesContext:  "cluster-prod",
-			Status:             CloudContextStatusStopped,
 		}},
 	}}
 	var awsCommands []string
@@ -342,7 +360,6 @@ func TestEnsureCloudContextHostStopProfileAssociationSkipsMatchingProfile(t *tes
 			DiskType:           DefaultCloudContextDiskType,
 			DiskSizeGB:         DefaultCloudContextDiskSizeGB,
 			KubernetesContext:  "cluster-prod",
-			Status:             CloudContextStatusStopped,
 		}},
 	}}
 	var awsCommands []string
@@ -502,13 +519,22 @@ func TestCloudContextPreflightSkipsRunningContext(t *testing.T) {
 			InstanceID:         "i-test",
 			KubernetesContext:  "cluster-prod",
 			AdminToken:         "test-token",
-			Status:             CloudContextStatusRunning,
 		}},
 	}}
 	ctx := Context{}
+	// Preflight no longer reads Status from disk (it's not persisted)
+	// and must reach AWS for the live state. The describe-instances
+	// stub returns "running" so the preflight observes a context that
+	// is already up and exits before the start path runs.
+	var awsCalls []string
 	ctx.KubernetesContextPreflight = CloudContextPreflight(store, CloudContextDependencies{
-		RunAWS: func(Context, CloudProviderConfig, string, []string) (string, error) {
-			t.Fatal("did not expect AWS command for running cloud context")
+		RunAWS: func(_ Context, _ CloudProviderConfig, _ string, args []string) (string, error) {
+			joined := strings.Join(args, " ")
+			awsCalls = append(awsCalls, joined)
+			if strings.Contains(joined, "ec2 describe-instances") {
+				return "i-test\trunning\n", nil
+			}
+			t.Fatalf("did not expect AWS command for running cloud context: %s", joined)
 			return "", nil
 		},
 		RunKubectl: func(Context, []string) error {
@@ -519,6 +545,9 @@ func TestCloudContextPreflightSkipsRunningContext(t *testing.T) {
 
 	if err := ctx.EnsureKubernetesContext("cluster-prod"); err != nil {
 		t.Fatalf("EnsureKubernetesContext failed: %v", err)
+	}
+	if len(awsCalls) != 1 {
+		t.Fatalf("expected single describe-instances refresh, got %+v", awsCalls)
 	}
 }
 
@@ -567,7 +596,6 @@ func TestStartCloudContextRejectsStartOutsideWorkingHours(t *testing.T) {
 			CloudProviderAlias: "rihards+123456789012@aws",
 			Region:             "eu-west-2",
 			InstanceID:         "i-test",
-			Status:             CloudContextStatusStopped,
 		}}},
 		envs: map[string]EnvConfig{
 			"team/dev": {
@@ -607,7 +635,6 @@ func TestStartCloudContextForceOverridesWorkingHoursGate(t *testing.T) {
 				CloudProviderAlias: "rihards+123456789012@aws",
 				Region:             "eu-west-2",
 				InstanceID:         "i-test",
-				Status:             CloudContextStatusStopped,
 				AdminToken:         "test-token",
 			}},
 		},
@@ -644,7 +671,6 @@ func TestStartCloudContextAllowsStartWhenAnyAttachedEnvIsInWorkingHours(t *testi
 				CloudProviderAlias: "rihards+123456789012@aws",
 				Region:             "eu-west-2",
 				InstanceID:         "i-test",
-				Status:             CloudContextStatusStopped,
 				AdminToken:         "test-token",
 			}},
 		},
@@ -686,7 +712,6 @@ func TestStartCloudContextSkipsGateWhenNoEnvsReferenceContext(t *testing.T) {
 				CloudProviderAlias: "rihards+123456789012@aws",
 				Region:             "eu-west-2",
 				InstanceID:         "i-test",
-				Status:             CloudContextStatusStopped,
 				AdminToken:         "test-token",
 			}},
 		},
@@ -715,14 +740,12 @@ func TestRefreshCloudContextStatusesReplacesStaleCacheWithLiveAWSState(t *testin
 				CloudProviderAlias: "rihards+123456789012@aws",
 				Region:             "eu-west-2",
 				InstanceID:         "i-001",
-				Status:             CloudContextStatusRunning,
 			},
 			{
 				Name:               "erun-002-123456789012-eu-west-2",
 				CloudProviderAlias: "rihards+123456789012@aws",
 				Region:             "eu-west-2",
 				InstanceID:         "i-002",
-				Status:             CloudContextStatusRunning,
 			},
 		},
 	}}
@@ -770,7 +793,6 @@ func TestRefreshCloudContextStatusesMarksUnknownWhenAWSCallFails(t *testing.T) {
 			CloudProviderAlias: "rihards+123456789012@aws",
 			Region:             "eu-west-2",
 			InstanceID:         "i-001",
-			Status:             CloudContextStatusRunning,
 		}},
 	}}
 	statuses, err := RefreshCloudContextStatuses(Context{}, store, CloudContextDependencies{
@@ -798,7 +820,6 @@ func TestRefreshCloudContextStatusesMarksMissingInstancesUnknown(t *testing.T) {
 			CloudProviderAlias: "rihards+123456789012@aws",
 			Region:             "eu-west-2",
 			InstanceID:         "i-001",
-			Status:             CloudContextStatusRunning,
 		}},
 	}}
 	statuses, err := RefreshCloudContextStatuses(Context{}, store, CloudContextDependencies{

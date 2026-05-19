@@ -34,6 +34,10 @@ type CloudContextStore interface {
 	CloudStore
 }
 
+// CloudContextConfig is the on-disk shape for a managed cloud context.
+// It must contain only configuration the user actually authors —
+// runtime/operational fields (current power state, AWS-observed status)
+// belong on CloudContextStatus and are never persisted.
 type CloudContextConfig struct {
 	Name                string `json:"name" yaml:"name"`
 	Provider            string `json:"provider" yaml:"provider"`
@@ -50,13 +54,19 @@ type CloudContextConfig struct {
 	InstanceProfileARN  string `json:"instanceProfileArn,omitempty" yaml:"instanceprofilearn,omitempty"`
 	InstanceRoleName    string `json:"instanceRoleName,omitempty" yaml:"instancerolename,omitempty"`
 	AdminToken          string `json:"-" yaml:"admintoken,omitempty"`
-	Status              string `json:"status" yaml:"status"`
 	CreatedAt           string `json:"createdAt,omitempty" yaml:"createdat,omitempty"`
 	UpdatedAt           string `json:"updatedAt,omitempty" yaml:"updatedat,omitempty"`
 }
 
+// CloudContextStatus pairs the persisted config with the live AWS-
+// observed Status. The Status field is in-memory only: it is never
+// written back to disk by any of the helpers in this package. Producers
+// fill it from a Refresh* call or from the result of Init/Start/Stop;
+// consumers that need a current value must ask AWS or read a cache that
+// does.
 type CloudContextStatus struct {
 	CloudContextConfig `json:",inline" yaml:",inline"`
+	Status             string `json:"status,omitempty" yaml:"status,omitempty"`
 	Message            string `json:"message,omitempty" yaml:"message,omitempty"`
 }
 
@@ -123,7 +133,6 @@ func NormalizeCloudContextConfig(config CloudContextConfig) CloudContextConfig {
 	config.InstanceProfileARN = strings.TrimSpace(config.InstanceProfileARN)
 	config.InstanceRoleName = strings.TrimSpace(config.InstanceRoleName)
 	config.AdminToken = strings.TrimSpace(config.AdminToken)
-	config.Status = strings.TrimSpace(config.Status)
 	config.CreatedAt = strings.TrimSpace(config.CreatedAt)
 	config.UpdatedAt = strings.TrimSpace(config.UpdatedAt)
 	if config.InstanceType == "" {
@@ -137,9 +146,6 @@ func NormalizeCloudContextConfig(config CloudContextConfig) CloudContextConfig {
 	}
 	if config.KubernetesContext == "" {
 		config.KubernetesContext = config.Name
-	}
-	if config.Status == "" {
-		config.Status = CloudContextStatusUnknown
 	}
 	return config
 }
@@ -325,18 +331,23 @@ func InitCloudContext(ctx Context, store CloudContextStore, params InitCloudCont
 	if config.InstanceID == "" {
 		config.InstanceID = "i-<new-instance>"
 	}
-	config.Status = CloudContextStatusPending
 
 	if err := finalizeInitCloudContext(ctx, deps, provider, &config); err != nil {
 		return CloudContextStatus{}, err
 	}
+	// finalizeInitCloudContext invokes `aws ec2 wait instance-running`
+	// before returning, so a successful return means the instance is
+	// running. In dry-run mode the wait is stubbed but the intent of
+	// the command is the same — report the resolved end-state to the
+	// caller.
+	status := CloudContextStatusRunning
 	if ctx.DryRun {
-		return CloudContextStatus{CloudContextConfig: NormalizeCloudContextConfig(config)}, nil
+		return CloudContextStatus{CloudContextConfig: NormalizeCloudContextConfig(config), Status: status}, nil
 	}
 	if err := saveCloudContextConfig(store, config); err != nil {
 		return CloudContextStatus{}, err
 	}
-	return CloudContextStatus{CloudContextConfig: NormalizeCloudContextConfig(config)}, nil
+	return CloudContextStatus{CloudContextConfig: NormalizeCloudContextConfig(config), Status: status}, nil
 }
 
 func initCloudContextConfig(store CloudContextStore, params InitCloudContextParams, deps CloudContextDependencies) (CloudProviderConfig, CloudContextConfig, error) {
@@ -513,7 +524,6 @@ func finalizeInitCloudContext(ctx Context, deps CloudContextDependencies, provid
 	if err := configureCloudKubeContext(ctx, deps, *config); err != nil {
 		return err
 	}
-	config.Status = CloudContextStatusRunning
 	config.UpdatedAt = deps.Now().UTC().Format(time.RFC3339)
 	return nil
 }
@@ -734,6 +744,25 @@ func replaceCloudContextInstanceProfileAssociation(ctx Context, deps CloudContex
 	return err
 }
 
+// refreshSingleCloudContextStatus runs RefreshCloudContextStatuses and
+// returns the entry matching the supplied seed's name. Used by paths
+// that need a current AWS-observed Status for a known context — the
+// persisted config does not carry Status, so callers cannot fall back
+// to a cached value on disk.
+func refreshSingleCloudContextStatus(ctx Context, store CloudReadStore, deps CloudContextDependencies, seed CloudContextStatus) (CloudContextStatus, error) {
+	statuses, err := RefreshCloudContextStatuses(ctx, store, deps)
+	if err != nil {
+		return CloudContextStatus{}, err
+	}
+	name := strings.TrimSpace(seed.Name)
+	for _, status := range statuses {
+		if strings.TrimSpace(status.Name) == name {
+			return status, nil
+		}
+	}
+	return seed, nil
+}
+
 func CloudContextPreflight(store CloudContextStore, deps CloudContextDependencies) KubernetesContextPreflightFunc {
 	var mu sync.Mutex
 	started := make(map[string]struct{})
@@ -754,7 +783,17 @@ func CloudContextPreflight(store CloudContextStore, deps CloudContextDependencie
 		if err != nil || !ok {
 			return err
 		}
-		if strings.TrimSpace(status.Status) == CloudContextStatusRunning {
+		// Persisted config no longer carries Status, so reach AWS for
+		// the authoritative current state before deciding whether to
+		// start. CloudContextPreflight is invoked at most once per
+		// context per CLI run (see the in-closure `started` cache), so
+		// one describe-instances call here is the right cost-quality
+		// trade.
+		live, err := refreshSingleCloudContextStatus(ctx, store, deps, status)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(live.Status) == CloudContextStatusRunning {
 			return nil
 		}
 
@@ -852,6 +891,12 @@ func findCloudContextForKubernetesContext(store CloudReadStore, kubernetesContex
 	return CloudContextStatus{}, false, nil
 }
 
+// changeCloudContextPowerState runs the AWS power-state mutation and
+// returns a CloudContextStatus whose Status field reflects the intended
+// new state. It does not persist the config: the persisted shape no
+// longer carries Status, so a Stop has nothing to write. Start performs
+// its own follow-up save (PublicIP refresh + UpdatedAt) after this
+// helper returns.
 func changeCloudContextPowerState(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies, awsAction, status string) (CloudContextStatus, error) {
 	if store == nil {
 		return CloudContextStatus{}, fmt.Errorf("store is required")
@@ -874,15 +919,7 @@ func changeCloudContextPowerState(ctx Context, store CloudContextStore, params C
 	if _, err := deps.RunAWS(ctx, provider, config.Region, []string{"ec2", awsAction, "--instance-ids", config.InstanceID}); err != nil {
 		return CloudContextStatus{}, err
 	}
-	config.Status = status
-	config.UpdatedAt = deps.Now().UTC().Format(time.RFC3339)
-	if ctx.DryRun {
-		return CloudContextStatus{CloudContextConfig: NormalizeCloudContextConfig(config)}, nil
-	}
-	if err := saveCloudContextConfig(store, config); err != nil {
-		return CloudContextStatus{}, err
-	}
-	return CloudContextStatus{CloudContextConfig: NormalizeCloudContextConfig(config)}, nil
+	return CloudContextStatus{CloudContextConfig: NormalizeCloudContextConfig(config), Status: status}, nil
 }
 
 func resolveInitCloudContextConfig(provider CloudProviderConfig, params InitCloudContextParams, now time.Time, existingContexts []CloudContextConfig) (CloudContextConfig, error) {
@@ -894,7 +931,6 @@ func resolveInitCloudContextConfig(provider CloudProviderConfig, params InitClou
 		InstanceType:       strings.TrimSpace(params.InstanceType),
 		DiskType:           strings.TrimSpace(params.DiskType),
 		DiskSizeGB:         params.DiskSizeGB,
-		Status:             CloudContextStatusPending,
 		CreatedAt:          now.UTC().Format(time.RFC3339),
 		UpdatedAt:          now.UTC().Format(time.RFC3339),
 	}
@@ -1627,10 +1663,51 @@ func dryRunAWSOutput(args []string) string {
 	case strings.Contains(joined, "ec2 run-instances"):
 		return "i-<new-instance>\n"
 	case strings.Contains(joined, "ec2 describe-instances"):
+		// Two describe-instances callers in the cloud-context code:
+		// one queries [InstanceId,State.Name] (status refresh, parsed
+		// as two-column text), the other queries PublicIpAddress.
+		// Default the status-refresh output to "running" so dry-run
+		// callers see the common-case end-state; tests that want to
+		// trace the stopped path should supply a custom RunAWS.
+		if strings.Contains(joined, "[InstanceId,State.Name]") {
+			return dryRunDescribeInstanceStateOutput(joined)
+		}
 		return "203.0.113.10\n"
 	default:
 		return ""
 	}
+}
+
+// dryRunDescribeInstanceStateOutput renders a `--query
+// [InstanceId,State.Name]` response for each --filters Values=...
+// argument the caller supplied. Defaulting every instance to "running"
+// keeps the dry-run preflight from spuriously starting a context that
+// in real life would already be up. Tests that need to exercise the
+// start path should supply a custom RunAWS that returns "stopped".
+func dryRunDescribeInstanceStateOutput(joined string) string {
+	const marker = "Values="
+	idx := strings.Index(joined, marker)
+	if idx < 0 {
+		return ""
+	}
+	rest := joined[idx+len(marker):]
+	if cut := strings.Index(rest, " "); cut >= 0 {
+		rest = rest[:cut]
+	}
+	rest = strings.Trim(rest, "'\"")
+	if rest == "" {
+		return ""
+	}
+	var buf strings.Builder
+	for _, id := range strings.Split(rest, ",") {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		buf.WriteString(id)
+		buf.WriteString("\trunning\n")
+	}
+	return buf.String()
 }
 
 func newCloudContextToken() string {
