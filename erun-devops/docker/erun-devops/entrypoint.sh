@@ -579,6 +579,11 @@ install_shell_profile_hook() {
     bashrc_file="${1}"
     hook_file="${HOME}/.erun-shell-hook.bashrc"
     cat >"${hook_file}" <<'EOF'
+# Signal a dark terminal so libraries that respect COLORFGBG skip OSC 11
+# (background-color) queries, which would otherwise leak their reply into
+# the shell's stdin via the Wails+PTY reply path.
+export COLORFGBG='15;0'
+
 if [ -x "${HOME}/.erun/configure-codex-mcp.sh" ]; then
     "${HOME}/.erun/configure-codex-mcp.sh" >/dev/null 2>&1 || true
 fi

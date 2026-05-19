@@ -656,6 +656,7 @@ func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig,
 	return []string{
 		"set -eu",
 		"export COLORTERM=truecolor",
+		"export COLORFGBG='15;0'",
 		fmt.Sprintf("mkdir -p %s", workdir),
 		fmt.Sprintf("cd %s", workdir),
 		"config_home=\"${XDG_CONFIG_HOME:-$HOME/.config}\"",
