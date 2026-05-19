@@ -1,10 +1,11 @@
-import { AlertCircle, PlugZap, RefreshCw } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Copy, PlugZap, RefreshCw } from 'lucide-react';
 import * as React from 'react';
 
 import { compactDiffError, diffLineMark } from '@/app/diffUtils';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { reconnectCopy } from '@/app/reconnectCopy';
 import { loadReviewDiff, requestReconnect } from '@/app/reviewThunks';
+import { copyToClipboard } from '@/components/app/ActivityQueueDrawer.helpers';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { DiffFile, DiffHunk } from '@/types';
@@ -63,6 +64,8 @@ export function DiffErrorAlert({
 }): React.ReactElement {
   const title = reconnectable ? reconnectCopy.errorTitle : 'Could not load diff';
   const body = reconnectable ? reconnectCopy.errorBody : message;
+  const technicalMessage = reconnectable && message && message !== body ? message : '';
+  const clipboardText = [title, body, technicalMessage].filter(Boolean).join('\n');
   return (
     <div
       role="alert"
@@ -72,8 +75,10 @@ export function DiffErrorAlert({
       <div className="min-w-0 [overflow-wrap:anywhere] text-foreground">
         <div className="font-semibold text-destructive">{title}</div>
         <div className="text-muted-foreground">{body}</div>
-        {reconnectable && message && message !== body && (
-          <div className="mt-1 truncate font-mono text-[12px] text-muted-foreground">{message}</div>
+        {technicalMessage && (
+          <div className="mt-1 font-mono text-[12px] break-words whitespace-pre-wrap text-muted-foreground select-text">
+            {technicalMessage}
+          </div>
         )}
       </div>
       <div className="flex flex-col items-end gap-1.5">
@@ -93,8 +98,40 @@ export function DiffErrorAlert({
             {reconnectCopy.reconnectAction}
           </Button>
         )}
+        <CopyErrorButton text={clipboardText} />
       </div>
     </div>
+  );
+}
+
+function CopyErrorButton({ text }: { text: string }): React.ReactElement {
+  const [copied, setCopied] = React.useState(false);
+  React.useEffect(() => {
+    if (!copied) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setCopied(false);
+    }, 1500);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [copied]);
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      aria-label="Copy error message"
+      onClick={() => {
+        void copyToClipboard(text).then(() => {
+          setCopied(true);
+        });
+      }}
+    >
+      {copied ? <CheckCircle2 aria-hidden="true" /> : <Copy aria-hidden="true" />}
+      {copied ? 'Copied' : 'Copy'}
+    </Button>
   );
 }
 

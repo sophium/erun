@@ -66,13 +66,16 @@ func (r OpenResult) RemoteRepo() bool {
 }
 
 type ShellLaunchParams struct {
-	Dir               string
-	Tenant            string
-	Environment       string
-	Title             string
-	Namespace         string
-	KubernetesContext string
-	RemoteRepo        bool
+	Dir                string
+	Tenant             string
+	Environment        string
+	Title              string
+	Namespace          string
+	KubernetesContext  string
+	RemoteRepo         bool
+	ManagedCloud       bool
+	CloudProviderAlias string
+	Idle               EnvironmentIdleConfig
 }
 
 type ShellLaunchPreview struct {
@@ -469,13 +472,16 @@ func containsTrimmedString(values []string, target string) bool {
 
 func ShellLaunchParamsFromResult(result OpenResult) ShellLaunchParams {
 	return ShellLaunchParams{
-		Dir:               result.RepoPath,
-		Tenant:            result.Tenant,
-		Environment:       result.Environment,
-		Title:             result.Title,
-		Namespace:         KubernetesNamespaceName(result.Tenant, result.Environment),
-		KubernetesContext: strings.TrimSpace(result.EnvConfig.KubernetesContext),
-		RemoteRepo:        result.RemoteRepo(),
+		Dir:                result.RepoPath,
+		Tenant:             result.Tenant,
+		Environment:        result.Environment,
+		Title:              result.Title,
+		Namespace:          KubernetesNamespaceName(result.Tenant, result.Environment),
+		KubernetesContext:  strings.TrimSpace(result.EnvConfig.KubernetesContext),
+		RemoteRepo:         result.RemoteRepo(),
+		ManagedCloud:       result.EnvConfig.ManagedCloud,
+		CloudProviderAlias: strings.TrimSpace(result.EnvConfig.CloudProviderAlias),
+		Idle:               result.EnvConfig.Idle,
 	}
 }
 
@@ -623,10 +629,13 @@ func remoteShellConfigForRequest(req ShellLaunchParams) (remoteShellConfig, erro
 		return remoteShellConfig{}, err
 	}
 	envConfig, err := yaml.Marshal(EnvConfig{
-		Name:              req.Environment,
-		RepoPath:          remoteWorkdir,
-		KubernetesContext: req.KubernetesContext,
-		Remote:            req.RemoteRepo,
+		Name:               req.Environment,
+		RepoPath:           remoteWorkdir,
+		KubernetesContext:  req.KubernetesContext,
+		Remote:             req.RemoteRepo,
+		ManagedCloud:       req.ManagedCloud,
+		CloudProviderAlias: req.CloudProviderAlias,
+		Idle:               req.Idle,
 	})
 	if err != nil {
 		return remoteShellConfig{}, err

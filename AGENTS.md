@@ -164,6 +164,17 @@ Repository guidance for humans and coding agents working in this repo.
 - Keep `AGENTS.md` focused on repository workflow and engineering guidance; do not document app behavior, command semantics, or end-user functionality in it.
 - Do not modify `README.md` unless the user explicitly asks for a README change.
 
+## Diagnosing A Deployed Runtime Via MCP
+
+When investigating what is happening inside a deployed runtime pod (in-pod config files, log files, env vars, process state), prefer the per-environment `erun-mcp` endpoint over asking the user to SSH in. The desktop keeps a local port-forward open to each remote env's `erun-mcp` container for as long as that env is open; talking JSON-RPC to that port is the fastest way to gather on-pod evidence without a context switch.
+
+- Find the local port at `<UserConfigDir>/erun/portforward/mcp/<tenant>/<environment>.json` — `localPort` is the port to call. `UserConfigDir` follows Go's `os.UserConfigDir`: `~/Library/Application Support` on macOS, `$XDG_CONFIG_HOME` or `~/.config` on Linux, `%AppData%` on Windows. If the JSON file is missing, the env is not open in the desktop and there is no endpoint to query; ask the user to open it first.
+- Speak JSON-RPC 2.0 over `POST http://127.0.0.1:<port>/mcp` with `Accept: application/json, text/event-stream`. Send `initialize` first, capture the `Mcp-Session-Id` response header, send a `notifications/initialized` POST carrying that header, then call `tools/list` (for discovery) or `tools/call`. The session id must be on every subsequent request.
+- Prefer the structured tools when they cover the question: `idle` returns the resolved `policy`, `managedCloud`, `stopEligible`, `blockedReason`, `markers`, and `activity` snapshot without recording activity; `doctor`, `list`, and `version` are similarly structured. Use `raw` only for state these tools do not expose.
+- `raw` runs an arbitrary `argv` from the runtime repo root and returns `{stdout, stderr, executed, workingDirectory, trace}`. Pass `command` as an `argv` array, not a shell string; reach for `["sh","-c","…"]` only when you need shell features. Typical inspections: `cat ~/.config/erun/<tenant>/<env>/config.yaml`, `env | grep ^ERUN_`, `tail ~/.erun/<tenant>/<env>/idle-monitor.log`, `ls -al`, `ps auxf`.
+- Scope: `raw` executes inside the `erun-mcp` container, which receives only the env vars the chart wires for that container — the `ERUN_CLOUD_*` set lives on the sibling `erun-devops` container. To inspect devops-container state, call `kubectl exec -n <namespace> <pod> -c erun-devops -- …` through `raw` (the MCP container has in-cluster RBAC to its own namespace). Both containers share the `/home/erun` PVC, so files under `~/`, `~/.config/erun`, and `~/.erun` are visible from either side.
+- Treat this endpoint as a diagnostic shortcut, not a substitute for tests. If a code path is reachable from a `--dry-run` trace or a `go test` subprocess, the test belongs there. Use MCP when the question is "what does the running pod actually have on disk or in memory right now?".
+
 ## Integration Test Gate (Mandatory)
 
 - `make integration-test` must be green on `main` at all times. Do not merge a PR that leaves any scenario red, including scenarios that were already failing before your branch — if you discover a preexisting red, either fix it in the same PR or open a tracking issue and a follow-up PR before merging anything else that touches the suite. "Some tests were already broken" is not a license to add more.

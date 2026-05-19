@@ -695,8 +695,15 @@ start_environment_idle_monitor() {
         while :; do
             sleep 30
             tick_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-            check_json=$(erun activity stop-ready --json --tenant "${ERUN_TENANT}" --environment "${ERUN_ENVIRONMENT}" 2>/dev/null)
-            exit_code=$?
+            # The stop-ready command exits non-zero on every active env. Capture
+            # the substitution in an `if` so dash's `set -e` (active script-wide)
+            # does not kill this subshell on the first tick before we ever write
+            # the heartbeat line.
+            if check_json=$(erun activity stop-ready --json --tenant "${ERUN_TENANT}" --environment "${ERUN_ENVIRONMENT}" 2>/dev/null); then
+                exit_code=0
+            else
+                exit_code=$?
+            fi
             printf '{"ts":"%s","exit":%d,"check":%s}\n' "${tick_ts}" "${exit_code}" "${check_json:-null}" >>"${monitor_log}"
             if [ "${exit_code}" -eq 0 ]; then
                 stop_log="${stop_log_dir}/idle-stop.log"
