@@ -458,6 +458,12 @@ func idleConfigValue(value, fallback string) string {
 	return value
 }
 
+// linkedCloudContext returns the cloud context backing the supplied
+// env, with its Status field populated from the in-memory cache the
+// background poller maintains. The persisted config no longer carries
+// Status, so callers that need a current value must consult the cache;
+// a missing cache entry surfaces as Status="" and callers must treat
+// that as "not yet observed."
 func (a *App) linkedCloudContext(config eruncommon.EnvConfig) (eruncommon.CloudContextStatus, bool, error) {
 	cloudProviderAlias := strings.TrimSpace(config.CloudProviderAlias)
 	kubernetesContext := strings.TrimSpace(config.KubernetesContext)
@@ -475,6 +481,7 @@ func (a *App) linkedCloudContext(config eruncommon.EnvConfig) (eruncommon.CloudC
 		}
 		if strings.TrimSpace(context.KubernetesContext) == kubernetesContext || strings.TrimSpace(context.Name) == kubernetesContext {
 			status.CloudContextConfig = context
+			status.Status = a.cloudContextStatus(context.Name)
 			return status, true, nil
 		}
 	}
@@ -496,6 +503,7 @@ func (a *App) ensureLinkedCloudContextRunning(config eruncommon.EnvConfig) (erun
 		return eruncommon.CloudContextStatus{}, true, err
 	}
 	a.clearIdleStopsForCloudContext(status.Name)
+	a.setCloudContextStatusInCache(status.Name, status.Status)
 	a.emitAppStatus(fmt.Sprintf("Cloud context %s is running. Opening environment...", cloudContextDisplayName(status)), true)
 	return status, true, nil
 }
@@ -505,5 +513,10 @@ func (a *App) stopCloudContext(name string) (eruncommon.CloudContextStatus, erro
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return a.deps.stopCloudContext(ctx, name)
+	status, err := a.deps.stopCloudContext(ctx, name)
+	if err != nil {
+		return status, err
+	}
+	a.setCloudContextStatusInCache(status.Name, status.Status)
+	return status, nil
 }

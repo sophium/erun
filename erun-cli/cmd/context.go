@@ -14,27 +14,31 @@ func newContextCmd(store common.CloudContextStore, promptRunner PromptRunner, se
 	return newCommandGroup(
 		"context",
 		"Manage ERun cloud Kubernetes contexts",
-		newContextListCmd(store),
+		newContextListCmd(store, deps),
 		newContextInitCmd(store, promptRunner, selectRunner, deps),
 		newContextStopCmd(store, deps),
 		newContextStartCmd(store, deps),
 	)
 }
 
-func newContextListCmd(store common.CloudContextStore) *cobra.Command {
+func newContextListCmd(store common.CloudContextStore, deps common.CloudContextDependencies) *cobra.Command {
 	return &cobra.Command{
 		Use:          "list",
 		Short:        "List managed ERun cloud contexts",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runContextListCommand(commandContext(cmd), store)
+			return runContextListCommand(commandContext(cmd), store, deps)
 		},
 	}
 }
 
-func runContextListCommand(ctx common.Context, store common.CloudContextStore) error {
-	contexts, err := common.ListCloudContextStatuses(store)
+func runContextListCommand(ctx common.Context, store common.CloudContextStore, deps common.CloudContextDependencies) error {
+	// Refresh from AWS so the displayed Status is the authoritative
+	// observation, not whatever the last ERun start/stop happened to
+	// record. CloudContextConfig no longer persists Status, so the
+	// non-refresh path would always return empty.
+	contexts, err := common.RefreshCloudContextStatuses(ctx, store, deps)
 	if err != nil {
 		return err
 	}
@@ -192,7 +196,7 @@ func writeCloudContext(ctx common.Context, status common.CloudContextStatus) err
 	line += " type=" + quotedValueOrNone(context.InstanceType)
 	line += " disk=" + fmt.Sprintf("%dGB/%s", context.DiskSizeGB, context.DiskType)
 	line += " kube-context=" + quotedValueOrNone(context.KubernetesContext)
-	line += " status=" + quotedValueOrNone(context.Status)
+	line += " status=" + quotedValueOrNone(status.Status)
 	if strings.TrimSpace(context.PublicIP) != "" {
 		line += " public-ip=" + quotedValueOrNone(context.PublicIP)
 	}

@@ -1559,7 +1559,6 @@ func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
 				Region:             eruncommon.DefaultCloudContextRegion,
 				InstanceID:         "i-test",
 				KubernetesContext:  "cluster-prod",
-				Status:             eruncommon.CloudContextStatusRunning,
 			},
 		},
 	}
@@ -1584,6 +1583,66 @@ func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
 	if len(awsCalls) != 1 || !strings.Contains(awsCalls[0], "ec2 describe-instances") {
 		t.Fatalf("expected one describe-instances call, got %+v", awsCalls)
 	}
+	// The settings refresh must populate the in-memory cache that the
+	// idle widget and respawn gate now read from — otherwise the
+	// titlebar would only converge to truth on the next 10s poll.
+	if got := app.cloudContextStatus("team-context"); got != eruncommon.CloudContextStatusStopped {
+		t.Fatalf("expected settings refresh to seed cloud-context cache with stopped, got %q", got)
+	}
+}
+
+func TestApplyCloudContextStatusesToCachePreservesKnownStatusOnTransientUnknown(t *testing.T) {
+	// AWS describe-instances failing for one region drives the
+	// returned slice to Status=Unknown for the affected contexts.
+	// Without this preservation, the next poll tick would blank a
+	// "running" cache entry, hiding the idle widget for one cycle on
+	// every transient SSO/network blip. Authoritative observations
+	// must overwrite; Unknown must only land on previously-empty
+	// slots.
+	app := NewApp(erunUIDeps{store: stubUIStore{}})
+	defer app.shutdown(context.Background())
+
+	app.applyCloudContextStatusesToCache([]eruncommon.CloudContextStatus{
+		{
+			CloudContextConfig: eruncommon.CloudContextConfig{Name: "ctx-a"},
+			Status:             eruncommon.CloudContextStatusRunning,
+		},
+		{
+			CloudContextConfig: eruncommon.CloudContextConfig{Name: "ctx-b"},
+			Status:             eruncommon.CloudContextStatusStopped,
+		},
+	})
+	if got := app.cloudContextStatus("ctx-a"); got != eruncommon.CloudContextStatusRunning {
+		t.Fatalf("seed running, got %q", got)
+	}
+	if got := app.cloudContextStatus("ctx-b"); got != eruncommon.CloudContextStatusStopped {
+		t.Fatalf("seed stopped, got %q", got)
+	}
+
+	app.applyCloudContextStatusesToCache([]eruncommon.CloudContextStatus{
+		{
+			CloudContextConfig: eruncommon.CloudContextConfig{Name: "ctx-a"},
+			Status:             eruncommon.CloudContextStatusUnknown,
+			Message:            "status refresh failed: token expired",
+		},
+		{
+			CloudContextConfig: eruncommon.CloudContextConfig{Name: "ctx-b"},
+			Status:             eruncommon.CloudContextStatusRunning,
+		},
+		{
+			CloudContextConfig: eruncommon.CloudContextConfig{Name: "ctx-c"},
+			Status:             eruncommon.CloudContextStatusUnknown,
+		},
+	})
+	if got := app.cloudContextStatus("ctx-a"); got != eruncommon.CloudContextStatusRunning {
+		t.Fatalf("transient unknown should not overwrite running, got %q", got)
+	}
+	if got := app.cloudContextStatus("ctx-b"); got != eruncommon.CloudContextStatusRunning {
+		t.Fatalf("authoritative transition stopped->running should overwrite, got %q", got)
+	}
+	if got := app.cloudContextStatus("ctx-c"); got != eruncommon.CloudContextStatusUnknown {
+		t.Fatalf("first-observation unknown should populate empty slot, got %q", got)
+	}
 }
 
 func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
@@ -1604,7 +1663,6 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 				DiskType:           eruncommon.DefaultCloudContextDiskType,
 				DiskSizeGB:         eruncommon.DefaultCloudContextDiskSizeGB,
 				KubernetesContext:  "cluster-old",
-				Status:             eruncommon.CloudContextStatusStopped,
 			},
 		},
 	}
@@ -1642,6 +1700,9 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 		},
 	}
 	app := NewApp(erunUIDeps{store: store})
+	// Cloud-context Status is no longer persisted; seed the in-memory
+	// cache that production code consults via linkedCloudContext.
+	app.setCloudContextStatusInCache("team-context", eruncommon.CloudContextStatusStopped)
 
 	loaded, err := app.LoadEnvironmentConfig(uiSelection{Tenant: " frs ", Environment: " prod "})
 	if err != nil {
@@ -2084,7 +2145,6 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 				DiskSizeGB:         eruncommon.DefaultCloudContextDiskSizeGB,
 				KubernetesContext:  "cluster-prod",
 				AdminToken:         "test-token",
-				Status:             eruncommon.CloudContextStatusStopped,
 			},
 		},
 	}
@@ -2121,9 +2181,9 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	if got != "terminal open frs prod" {
 		t.Fatalf("expected only terminal start action, got:\n%s", got)
 	}
-	if rootConfig.CloudContexts[0].Status != eruncommon.CloudContextStatusStopped {
-		t.Fatalf("expected cloud context startup to be left to erun, got %+v", rootConfig.CloudContexts[0])
-	}
+	// Cloud-context Status is no longer persisted, so we rely on the
+	// action log above to prove the desktop ran no AWS start
+	// commands — startup is `erun open`'s job.
 }
 
 func TestDeleteEnvironmentStartsLinkedContextThenStopsIt(t *testing.T) {
@@ -2145,7 +2205,6 @@ func TestDeleteEnvironmentStartsLinkedContextThenStopsIt(t *testing.T) {
 				DiskSizeGB:         eruncommon.DefaultCloudContextDiskSizeGB,
 				KubernetesContext:  "cluster-prod",
 				AdminToken:         "test-token",
-				Status:             eruncommon.CloudContextStatusStopped,
 			},
 		},
 	}
@@ -2196,9 +2255,10 @@ func TestDeleteEnvironmentStartsLinkedContextThenStopsIt(t *testing.T) {
 	if _, _, err := store.LoadEnvConfig("frs", "prod"); !errors.Is(err, eruncommon.ErrNotInitialized) {
 		t.Fatalf("expected environment config to be deleted, got %v", err)
 	}
-	if rootConfig.CloudContexts[0].Status != eruncommon.CloudContextStatusStopped {
-		t.Fatalf("expected cloud context to be stopped, got %+v", rootConfig.CloudContexts[0])
-	}
+	// Cloud-context Status is no longer persisted; the action log
+	// above already proves `aws ec2 stop-instances` was issued, which
+	// is the authoritative signal that the desktop stopped the linked
+	// context after the namespace was deleted.
 }
 
 func TestLocalPortStatusReportsAvailability(t *testing.T) {
@@ -2431,6 +2491,56 @@ func TestSendSessionInputRecordsCLIActivityForCurrentEnvironment(t *testing.T) {
 	}
 }
 
+func TestSendSessionInputClearsAwaitingPostRespawnInputFlag(t *testing.T) {
+	// After a respawn, streamSession suppresses the 2s output-activity
+	// ticker (reconnect noise must not count as user activity).
+	// SendSessionInput is the signal that the user actually re-engaged
+	// with the session, and it must clear the flag so subsequent
+	// output once again refreshes the idle marker.
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "local"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/local": {Name: "local", RepoPath: projectRoot, KubernetesContext: "rancher-desktop"},
+		},
+	}
+	app := NewApp(erunUIDeps{
+		store:          store,
+		resolveCLIPath: func() string { return "/tmp/erun" },
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			return newStubTerminalSession(), nil
+		},
+		recordActivity: func(eruncommon.EnvironmentActivityParams) error { return nil },
+	})
+	defer app.shutdown(context.Background())
+
+	started, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "local"}, 0, 80, 24)
+	if err != nil {
+		t.Fatalf("StartSession failed: %v", err)
+	}
+
+	app.mu.Lock()
+	managed := app.sessionBySerialLocked(started.SessionID)
+	if managed == nil {
+		app.mu.Unlock()
+		t.Fatalf("expected managed terminal for session %d", started.SessionID)
+	}
+	managed.awaitingPostRespawnInput = true
+	app.mu.Unlock()
+
+	if !app.isAwaitingPostRespawnInput(managed) {
+		t.Fatal("expected flag to read true after manual set")
+	}
+	if err := app.SendSessionInput(started.SessionID, "ls\r"); err != nil {
+		t.Fatalf("SendSessionInput failed: %v", err)
+	}
+	if app.isAwaitingPostRespawnInput(managed) {
+		t.Fatal("expected SendSessionInput to clear awaitingPostRespawnInput flag")
+	}
+}
+
 func TestMergeNewerActivityMarkersPrefersLocalTerminalActivity(t *testing.T) {
 	now := time.Now()
 	remote := eruncommon.EnvironmentIdleStatus{
@@ -2540,7 +2650,6 @@ func TestLoadIdleStatusStopsLinkedCloudContextWhenStopEligible(t *testing.T) {
 				Name:               "cloud-ctx",
 				CloudProviderAlias: "team-cloud",
 				KubernetesContext:  "cluster-cloud",
-				Status:             eruncommon.CloudContextStatusRunning,
 			}},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
@@ -2583,10 +2692,14 @@ func TestLoadIdleStatusStopsLinkedCloudContextWhenStopEligible(t *testing.T) {
 		},
 		stopCloudContext: func(_ context.Context, name string) (eruncommon.CloudContextStatus, error) {
 			stopped <- name
-			return eruncommon.CloudContextStatus{}, nil
+			return eruncommon.CloudContextStatus{
+				CloudContextConfig: eruncommon.CloudContextConfig{Name: name},
+				Status:             eruncommon.CloudContextStatusStopped,
+			}, nil
 		},
 	})
 	defer app.shutdown(context.Background())
+	app.setCloudContextStatusInCache("cloud-ctx", eruncommon.CloudContextStatusRunning)
 
 	status, err := app.LoadIdleStatus(uiSelection{Tenant: "team-stop", Environment: "dev-stop"})
 	if err != nil {
@@ -2613,7 +2726,6 @@ func TestStartCloudContextClearsPreviousIdleStop(t *testing.T) {
 				Name:               "cloud-ctx",
 				CloudProviderAlias: "team-cloud",
 				KubernetesContext:  "cluster-cloud",
-				Status:             eruncommon.CloudContextStatusRunning,
 			}},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
@@ -2652,7 +2764,6 @@ func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
 				Name:               "cloud-ctx",
 				CloudProviderAlias: "team-cloud",
 				KubernetesContext:  "cluster-cloud",
-				Status:             eruncommon.CloudContextStatusRunning,
 			}},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
@@ -3311,7 +3422,6 @@ func TestStartSessionDoesNotReconnectIntoStoppedCloudContext(t *testing.T) {
 			CloudContexts: []eruncommon.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
-				Status:            eruncommon.CloudContextStatusStopped,
 			}},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
@@ -3342,6 +3452,7 @@ func TestStartSessionDoesNotReconnectIntoStoppedCloudContext(t *testing.T) {
 		},
 	})
 	defer app.shutdown(context.Background())
+	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusStopped)
 
 	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
 		t.Fatalf("StartSession failed: %v", err)
@@ -3382,7 +3493,6 @@ func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T)
 			CloudContexts: []eruncommon.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
-				Status:            eruncommon.CloudContextStatusRunning,
 			}},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
@@ -3410,6 +3520,7 @@ func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T)
 		},
 	})
 	defer app.shutdown(context.Background())
+	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusRunning)
 
 	key := selectionKey(uiSelection{Tenant: "erun", Environment: "remote"})
 	app.mu.Lock()

@@ -19,6 +19,7 @@ func (a *App) LoadERunConfig() (uiERunConfig, error) {
 	if err != nil {
 		return uiERunConfig{}, err
 	}
+	a.applyCloudContextStatusesToCache(statuses)
 	ui.CloudContexts = cloudContextStatusesToUI(statuses)
 	return ui, nil
 }
@@ -54,6 +55,7 @@ func (a *App) LoadCloudContextStatuses() ([]uiCloudContextStatus, error) {
 	if err != nil {
 		return nil, err
 	}
+	a.applyCloudContextStatusesToCache(statuses)
 	return cloudContextStatusesToUI(statuses), nil
 }
 
@@ -69,6 +71,7 @@ func (a *App) InitCloudContext(input uiCloudContextInitInput) (uiCloudContextSta
 	if err != nil {
 		return uiCloudContextStatus{}, err
 	}
+	a.setCloudContextStatusInCache(status.Name, status.Status)
 	return cloudContextStatusToUI(status), nil
 }
 
@@ -81,6 +84,7 @@ func (a *App) StopCloudContext(name string) (uiCloudContextStatus, error) {
 	if err != nil {
 		return uiCloudContextStatus{}, err
 	}
+	a.setCloudContextStatusInCache(status.Name, status.Status)
 	return cloudContextStatusToUI(status), nil
 }
 
@@ -90,6 +94,7 @@ func (a *App) StartCloudContext(name string) (uiCloudContextStatus, error) {
 		return uiCloudContextStatus{}, err
 	}
 	a.clearIdleStopsForCloudContext(status.Name)
+	a.setCloudContextStatusInCache(status.Name, status.Status)
 	return cloudContextStatusToUI(status), nil
 }
 
@@ -300,7 +305,7 @@ func cloudContextStatusToUI(status eruncommon.CloudContextStatus) uiCloudContext
 		DiskType:           strings.TrimSpace(context.DiskType),
 		DiskSizeGB:         context.DiskSizeGB,
 		KubernetesContext:  strings.TrimSpace(context.KubernetesContext),
-		Status:             strings.TrimSpace(context.Status),
+		Status:             strings.TrimSpace(status.Status),
 		Message:            strings.TrimSpace(status.Message),
 	}
 }
