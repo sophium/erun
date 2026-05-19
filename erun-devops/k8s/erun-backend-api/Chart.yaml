@@ -1,6 +1,6 @@
 apiVersion: v2
-appVersion: 1.0.65
+appVersion: 1.0.66
 description: ERun backend API
 name: erun-backend-api
 type: application
-version: 1.0.65
+version: 1.0.66
