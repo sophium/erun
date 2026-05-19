@@ -1546,6 +1546,46 @@ func testUIJWT(issuer string) string {
 	return header + "." + payload + ".signature"
 }
 
+func TestLoadCloudContextStatusesRefreshesFromAWS(t *testing.T) {
+	rootConfig := &eruncommon.ERunConfig{
+		CloudProviders: []eruncommon.CloudProviderConfig{
+			{Alias: "team-cloud", Provider: eruncommon.CloudProviderAWS},
+		},
+		CloudContexts: []eruncommon.CloudContextConfig{
+			{
+				Name:               "team-context",
+				Provider:           eruncommon.CloudProviderAWS,
+				CloudProviderAlias: "team-cloud",
+				Region:             eruncommon.DefaultCloudContextRegion,
+				InstanceID:         "i-test",
+				KubernetesContext:  "cluster-prod",
+				Status:             eruncommon.CloudContextStatusRunning,
+			},
+		},
+	}
+	var awsCalls []string
+	app := NewApp(erunUIDeps{
+		store: stubUIStore{config: rootConfig},
+		cloudContextDeps: eruncommon.CloudContextDependencies{
+			RunAWS: func(_ eruncommon.Context, _ eruncommon.CloudProviderConfig, _ string, args []string) (string, error) {
+				awsCalls = append(awsCalls, strings.Join(args, " "))
+				return "i-test\tstopped\n", nil
+			},
+		},
+	})
+
+	statuses, err := app.LoadCloudContextStatuses()
+	if err != nil {
+		t.Fatalf("LoadCloudContextStatuses failed: %v", err)
+	}
+	if len(statuses) != 1 || statuses[0].Status != eruncommon.CloudContextStatusStopped {
+		t.Fatalf("expected stale running status to be replaced with live stopped, got %+v", statuses)
+	}
+	if len(awsCalls) != 1 || !strings.Contains(awsCalls[0], "ec2 describe-instances") {
+		t.Fatalf("expected one describe-instances call, got %+v", awsCalls)
+	}
+}
+
 func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	projectRoot := t.TempDir()
 	snapshot := true

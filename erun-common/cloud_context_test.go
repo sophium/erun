@@ -703,6 +703,118 @@ func TestStartCloudContextSkipsGateWhenNoEnvsReferenceContext(t *testing.T) {
 	}
 }
 
+func TestRefreshCloudContextStatusesReplacesStaleCacheWithLiveAWSState(t *testing.T) {
+	store := &memoryCloudStore{config: ERunConfig{
+		CloudProviders: []CloudProviderConfig{{
+			Alias:    "rihards+123456789012@aws",
+			Provider: CloudProviderAWS,
+		}},
+		CloudContexts: []CloudContextConfig{
+			{
+				Name:               "erun-001-123456789012-eu-west-2",
+				CloudProviderAlias: "rihards+123456789012@aws",
+				Region:             "eu-west-2",
+				InstanceID:         "i-001",
+				Status:             CloudContextStatusRunning,
+			},
+			{
+				Name:               "erun-002-123456789012-eu-west-2",
+				CloudProviderAlias: "rihards+123456789012@aws",
+				Region:             "eu-west-2",
+				InstanceID:         "i-002",
+				Status:             CloudContextStatusRunning,
+			},
+		},
+	}}
+	var awsCalls []string
+	statuses, err := RefreshCloudContextStatuses(Context{}, store, CloudContextDependencies{
+		RunAWS: func(_ Context, _ CloudProviderConfig, region string, args []string) (string, error) {
+			awsCalls = append(awsCalls, region+" "+strings.Join(args, " "))
+			return "i-001\trunning\ni-002\tstopped\n", nil
+		},
+	})
+	requireNoError(t, err, "RefreshCloudContextStatuses failed")
+	if len(statuses) != 2 {
+		t.Fatalf("expected 2 statuses, got %+v", statuses)
+	}
+	if statuses[0].Status != CloudContextStatusRunning {
+		t.Fatalf("expected i-001 to remain running, got %+v", statuses[0])
+	}
+	if statuses[1].Status != CloudContextStatusStopped {
+		t.Fatalf("expected i-002 to be reported as stopped, got %+v", statuses[1])
+	}
+	if len(awsCalls) != 1 {
+		t.Fatalf("expected one batched describe-instances call, got %+v", awsCalls)
+	}
+	joined := awsCalls[0]
+	for _, want := range []string{
+		"eu-west-2 ec2 describe-instances",
+		"--filters Name=instance-id,Values=i-001,i-002",
+		"--query Reservations[*].Instances[*].[InstanceId,State.Name]",
+		"--output text",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected describe-instances call to contain %q, got %q", want, joined)
+		}
+	}
+}
+
+func TestRefreshCloudContextStatusesKeepsCacheWhenAWSCallFails(t *testing.T) {
+	store := &memoryCloudStore{config: ERunConfig{
+		CloudProviders: []CloudProviderConfig{{
+			Alias:    "rihards+123456789012@aws",
+			Provider: CloudProviderAWS,
+		}},
+		CloudContexts: []CloudContextConfig{{
+			Name:               "erun-001-123456789012-eu-west-2",
+			CloudProviderAlias: "rihards+123456789012@aws",
+			Region:             "eu-west-2",
+			InstanceID:         "i-001",
+			Status:             CloudContextStatusRunning,
+		}},
+	}}
+	statuses, err := RefreshCloudContextStatuses(Context{}, store, CloudContextDependencies{
+		RunAWS: func(Context, CloudProviderConfig, string, []string) (string, error) {
+			return "", errors.New("token expired")
+		},
+	})
+	requireNoError(t, err, "RefreshCloudContextStatuses failed")
+	if len(statuses) != 1 || statuses[0].Status != CloudContextStatusRunning {
+		t.Fatalf("expected cached running status to be preserved, got %+v", statuses)
+	}
+	if !strings.Contains(statuses[0].Message, "status refresh failed") {
+		t.Fatalf("expected refresh-failed message, got %+v", statuses[0])
+	}
+}
+
+func TestRefreshCloudContextStatusesMarksMissingInstancesUnknown(t *testing.T) {
+	store := &memoryCloudStore{config: ERunConfig{
+		CloudProviders: []CloudProviderConfig{{
+			Alias:    "rihards+123456789012@aws",
+			Provider: CloudProviderAWS,
+		}},
+		CloudContexts: []CloudContextConfig{{
+			Name:               "erun-001-123456789012-eu-west-2",
+			CloudProviderAlias: "rihards+123456789012@aws",
+			Region:             "eu-west-2",
+			InstanceID:         "i-001",
+			Status:             CloudContextStatusRunning,
+		}},
+	}}
+	statuses, err := RefreshCloudContextStatuses(Context{}, store, CloudContextDependencies{
+		RunAWS: func(Context, CloudProviderConfig, string, []string) (string, error) {
+			return "", nil
+		},
+	})
+	requireNoError(t, err, "RefreshCloudContextStatuses failed")
+	if len(statuses) != 1 || statuses[0].Status != CloudContextStatusUnknown {
+		t.Fatalf("expected missing instance to map to unknown, got %+v", statuses)
+	}
+	if statuses[0].Message != "instance not found in AWS" {
+		t.Fatalf("expected explanatory message, got %+v", statuses[0])
+	}
+}
+
 func TestInitCloudContextGeneratedNameIncrementsForExistingContexts(t *testing.T) {
 	store := &memoryCloudStore{config: ERunConfig{
 		CloudProviders: []CloudProviderConfig{{

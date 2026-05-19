@@ -14,7 +14,13 @@ func (a *App) LoadERunConfig() (uiERunConfig, error) {
 	if err != nil {
 		return uiERunConfig{}, err
 	}
-	return erunConfigToUI(config), nil
+	ui := erunConfigToUI(config)
+	statuses, err := eruncommon.RefreshCloudContextStatuses(eruncommon.Context{}, a.deps.store, a.deps.cloudContextDeps)
+	if err != nil {
+		return uiERunConfig{}, err
+	}
+	ui.CloudContexts = cloudContextStatusesToUI(statuses)
+	return ui, nil
 }
 
 func (a *App) SaveERunConfig(config uiERunConfig) (uiERunConfig, error) {
@@ -44,7 +50,7 @@ func (a *App) LoadCloudProviderStatuses() ([]uiCloudProviderStatus, error) {
 }
 
 func (a *App) LoadCloudContextStatuses() ([]uiCloudContextStatus, error) {
-	statuses, err := eruncommon.ListCloudContextStatuses(a.deps.store)
+	statuses, err := eruncommon.RefreshCloudContextStatuses(eruncommon.Context{}, a.deps.store, a.deps.cloudContextDeps)
 	if err != nil {
 		return nil, err
 	}

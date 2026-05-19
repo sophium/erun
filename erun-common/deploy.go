@@ -70,6 +70,7 @@ type HelmDeployParams struct {
 	CloudProviderAlias string
 	CloudRegion        string
 	CloudInstanceID    string
+	UseHostCredentials bool
 	OIDCAllowedIssuers string
 	ContainerRegistry  string
 	ImageOverrides     map[string]string
@@ -105,6 +106,7 @@ type HelmDeploySpec struct {
 	CloudProviderAlias string
 	CloudRegion        string
 	CloudInstanceID    string
+	UseHostCredentials bool
 	OIDCAllowedIssuers string
 	ContainerRegistry  string
 	ImageOverrides     map[string]string
@@ -535,6 +537,7 @@ func configureDeployInputMetadata(store DeployStore, target OpenResult, deployIn
 		return err
 	}
 	deployInput.ManagedCloud = managedCloud
+	deployInput.UseHostCredentials = target.EnvConfig.RemoteHostCredentials
 	applyCloudProviderDeployMetadata(store, target.EnvConfig, deployInput)
 	if managedCloud {
 		applyCloudContextStopMetadata(store, target.EnvConfig, deployInput)
@@ -1134,6 +1137,7 @@ func (d HelmDeploySpec) Params(stdout, stderr io.Writer) HelmDeployParams {
 		CloudProviderAlias: d.CloudProviderAlias,
 		CloudRegion:        d.CloudRegion,
 		CloudInstanceID:    d.CloudInstanceID,
+		UseHostCredentials: d.UseHostCredentials,
 		OIDCAllowedIssuers: d.OIDCAllowedIssuers,
 		ContainerRegistry:  d.ContainerRegistry,
 		ImageOverrides:     cloneStringMap(d.ImageOverrides),
@@ -1181,6 +1185,7 @@ func (d HelmDeploySpec) command() commandSpec {
 		"--set-string", "cloudContext.providerAlias="+d.CloudProviderAlias,
 		"--set-string", "cloudContext.region="+d.CloudRegion,
 		"--set-string", "cloudContext.instanceId="+d.CloudInstanceID,
+		"--set", "cloudContext.useHostCredentials="+formatHelmBool(d.UseHostCredentials),
 		"--set-string", "api.oidcAllowedIssuers="+escapeHelmSetValue(d.OIDCAllowedIssuers),
 		"--set", "api.postgres.reset="+formatHelmBool(d.ResetDatabase),
 	)
@@ -1678,6 +1683,7 @@ func DeployHelmChart(params HelmDeployParams) error {
 		CloudProviderAlias: params.CloudProviderAlias,
 		CloudRegion:        params.CloudRegion,
 		CloudInstanceID:    params.CloudInstanceID,
+		UseHostCredentials: params.UseHostCredentials,
 		OIDCAllowedIssuers: params.OIDCAllowedIssuers,
 		ContainerRegistry:  params.ContainerRegistry,
 		ImageOverrides:     cloneStringMap(params.ImageOverrides),

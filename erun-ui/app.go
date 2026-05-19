@@ -72,6 +72,7 @@ type App struct {
 	idleStops                 map[string]struct{}
 	busyEnvs                  map[string]int
 	workspaceSyncs            map[string]*workspaceSyncWorker
+	credentialRefreshers      map[string]*cloudCredentialsRefresher
 	activityQueue             *activityQueueStore
 	activityStatusPoller      func(activityQueueEntry)
 	activityPollersStop       chan struct{}
@@ -118,11 +119,12 @@ func NewApp(deps erunUIDeps) *App {
 	deps = withDefaultRuntimeDeps(deps)
 	deps = withDefaultUIDeps(deps)
 	app := &App{
-		deps:           deps,
-		sessions:       make(map[string]*managedTerminal),
-		idleStops:      make(map[string]struct{}),
-		busyEnvs:       make(map[string]int),
-		workspaceSyncs: make(map[string]*workspaceSyncWorker),
+		deps:                 deps,
+		sessions:             make(map[string]*managedTerminal),
+		idleStops:            make(map[string]struct{}),
+		busyEnvs:             make(map[string]int),
+		workspaceSyncs:       make(map[string]*workspaceSyncWorker),
+		credentialRefreshers: make(map[string]*cloudCredentialsRefresher),
 	}
 	app.activityQueue = newActivityQueueStore(
 		func(entry activityQueueEntry) {
@@ -257,6 +259,7 @@ func (a *App) shutdown(context.Context) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.stopAllWorkspaceSyncsLocked()
+	a.stopAllCloudCredentialsRefreshersLocked()
 	a.closeAllSessionsLocked()
 }
 

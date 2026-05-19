@@ -51,6 +51,7 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 		return uiEnvironmentConfig{}, err
 	}
 	a.reconcileWorkspaceSyncForSelection(selection, updated.SSHD.WorkspaceSync.Enabled)
+	a.reconcileCloudCredentialsRefresherForSelection(selection, updated.RemoteHostCredentials && updated.Remote)
 	ports, err := eruncommon.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
 	if err != nil {
 		return uiEnvironmentConfig{}, err
@@ -251,9 +252,10 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 			APIStatus:  localPortStatus(ports.API),
 			SSHStatus:  localPortStatus(ports.SSH),
 		},
-		Remote:    config.Remote,
-		Snapshot:  config.SnapshotEnabled(),
-		AutoStart: copyBoolPtr(config.AutoStart),
+		Remote:                config.Remote,
+		Snapshot:              config.SnapshotEnabled(),
+		AutoStart:             copyBoolPtr(config.AutoStart),
+		RemoteHostCredentials: config.RemoteHostCredentials,
 	}
 	if cloudContext, ok, err := a.linkedCloudContext(config); err != nil {
 		return uiEnvironmentConfig{}, err
@@ -365,6 +367,7 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	existing.AITool = strings.TrimSpace(config.AITool)
 	existing.SetSnapshot(config.Snapshot)
 	existing.AutoStart = copyBoolPtr(config.AutoStart)
+	existing.RemoteHostCredentials = config.RemoteHostCredentials
 	return existing
 }
 

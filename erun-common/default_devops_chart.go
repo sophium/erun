@@ -195,6 +195,7 @@ func resolveDefaultDevopsDeploySpecWithImage(target OpenResult, imageName string
 		return DeploySpec{}, err
 	}
 	deployInput.ReleaseName = moduleName
+	deployInput.UseHostCredentials = target.EnvConfig.RemoteHostCredentials
 	if runtimeVersion := strings.TrimSpace(target.EnvConfig.RuntimeVersion); runtimeVersion != "" {
 		deployInput.Version = runtimeVersion
 	}
