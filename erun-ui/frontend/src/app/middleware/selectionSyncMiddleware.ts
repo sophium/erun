@@ -1,8 +1,10 @@
 import { createListenerMiddleware } from '@reduxjs/toolkit';
 
+import { refreshIdleStatus } from '../idleThunks';
 import { setSelected } from '../slices/selectionSlice';
 import { setSessionId } from '../slices/terminalSlice';
 import type { AppDispatch, RootState } from '../store';
+import { thunkExtra } from '../thunkExtra';
 import { selectionKey } from '../versionSuggestions';
 
 // selectionSyncMiddleware reconciles state.terminal.sessionId with the
@@ -31,10 +33,17 @@ startListening({
   effect: (_action, listenerApi) => {
     const state = listenerApi.getState();
     const next = reconcileSessionForSelection(state);
-    if (next === state.terminal.sessionId) {
-      return;
+    if (next !== state.terminal.sessionId) {
+      listenerApi.dispatch(setSessionId(next));
     }
-    listenerApi.dispatch(setSessionId(next));
+    // Fire an immediate idle-status refresh so the titlebar Play button
+    // (and any other UI gated on idleStatus) reflects the new env within
+    // ~50 ms instead of waiting up to the next 1 s polling tick. Without
+    // this, clicking a stopped remote env left the user with no visible
+    // Start affordance for almost a full second.
+    if (thunkExtra.controller) {
+      void listenerApi.dispatch(refreshIdleStatus());
+    }
   },
 });
 
