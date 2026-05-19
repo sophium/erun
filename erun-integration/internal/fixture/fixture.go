@@ -231,6 +231,25 @@ func SeedRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment stri
 	)
 }
 
+// SeedRemoteTenantEnvWithHostCredentials writes the same tree as
+// SeedRemoteTenantEnv but flips the remotehostcredentials toggle on, so
+// scenarios can exercise the deploy plumbing that injects AWS_PROFILE into
+// the remote runtime when the env opts in to host-credential push.
+func SeedRemoteTenantEnvWithHostCredentials(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	SeedRemoteTenantEnv(t, setup, tenant, environment)
+	envDir := filepath.Join(setup.ConfigHome, "erun", tenant, environment)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+filepath.Join(setup.Home, "git", tenant)+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"runtimeversion: 1.0.0\n"+
+			"remote: true\n"+
+			"remotehostcredentials: true\n",
+	)
+}
+
 // SeedRemoteRepoPathTenantEnv writes a tenant/env tree where the env's
 // repopath points to a path that does not exist locally and the env is
 // flagged remote: true. The tenant projectroot still points at setup.Cwd so

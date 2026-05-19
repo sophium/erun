@@ -611,6 +611,81 @@ func TestRemoteShellScriptUsesRepoBasenameForRemoteWorkdir(t *testing.T) {
 	}
 }
 
+func TestRemoteShellScriptPropagatesCloudAndIdleFields(t *testing.T) {
+	// The in-pod idle monitor reads the env config we upload here to decide
+	// stop-eligibility. If we drop ManagedCloud / CloudProviderAlias / Idle
+	// on the way to the pod, the monitor falls through to a cloud-context
+	// lookup that has no matching entry inside the runtime and the env never
+	// auto-stops. Lock the shape of the uploaded YAML in.
+	script, err := buildRemoteShellScript(ShellLaunchParams{
+		Dir:                "/Users/test/git/erun",
+		Tenant:             "tenant-a",
+		Environment:        "remote",
+		Title:              "tenant-a-remote",
+		KubernetesContext:  "in-cluster",
+		RemoteRepo:         true,
+		ManagedCloud:       true,
+		CloudProviderAlias: "team+1234567890@aws",
+		Idle: EnvironmentIdleConfig{
+			Timeout:          "10m0s",
+			WorkingHours:     "06:00-23:00",
+			Timezone:         "Europe/Riga",
+			IdleTrafficBytes: 4096,
+		},
+	}, true)
+	if err != nil {
+		t.Fatalf("buildRemoteShellScript failed: %v", err)
+	}
+
+	envConfigBody := extractHeredoc(t, script, `cat > "$config_home/erun/tenant-a/remote/config.yaml" <<'EOF'`)
+	var envConfig EnvConfig
+	if err := yaml.Unmarshal([]byte(envConfigBody), &envConfig); err != nil {
+		t.Fatalf("expected env config heredoc to be valid yaml, got %v\n%s", err, envConfigBody)
+	}
+	if !envConfig.ManagedCloud {
+		t.Fatalf("expected uploaded env config to carry managedcloud: true, got %+v\nyaml:\n%s", envConfig, envConfigBody)
+	}
+	if envConfig.CloudProviderAlias != "team+1234567890@aws" {
+		t.Fatalf("expected uploaded env config to carry cloudprovideralias, got %+v", envConfig)
+	}
+	if envConfig.Idle.Timeout != "10m0s" || envConfig.Idle.WorkingHours != "06:00-23:00" || envConfig.Idle.Timezone != "Europe/Riga" || envConfig.Idle.IdleTrafficBytes != 4096 {
+		t.Fatalf("expected uploaded env config to carry idle block, got %+v", envConfig.Idle)
+	}
+}
+
+func TestShellLaunchParamsFromResultCopiesCloudAndIdleFields(t *testing.T) {
+	// ShellLaunchParamsFromResult is the only producer of the params that
+	// drive buildRemoteShellScript in real flows; if it drops the cloud or
+	// idle fields, every open-shell upload silently strips them again.
+	result := OpenResult{
+		Tenant:      "tenant-a",
+		Environment: "remote",
+		Title:       "tenant-a-remote",
+		RepoPath:    "/Users/test/git/erun",
+		EnvConfig: EnvConfig{
+			Name:               "remote",
+			KubernetesContext:  "in-cluster",
+			ManagedCloud:       true,
+			CloudProviderAlias: "team+1234567890@aws",
+			Remote:             true,
+			Idle: EnvironmentIdleConfig{
+				Timeout:      "10m0s",
+				WorkingHours: "06:00-23:00",
+			},
+		},
+	}
+	params := ShellLaunchParamsFromResult(result)
+	if !params.ManagedCloud {
+		t.Fatalf("expected ManagedCloud=true, got %+v", params)
+	}
+	if params.CloudProviderAlias != "team+1234567890@aws" {
+		t.Fatalf("expected CloudProviderAlias propagated, got %+v", params)
+	}
+	if params.Idle.Timeout != "10m0s" || params.Idle.WorkingHours != "06:00-23:00" {
+		t.Fatalf("expected Idle propagated, got %+v", params.Idle)
+	}
+}
+
 func TestRemoteShellScriptMarksRemoteConfigsAndSkipsHostGitBootstrap(t *testing.T) {
 	script, err := buildRemoteShellScript(ShellLaunchParams{
 		Dir:               "/home/erun/git/erun",

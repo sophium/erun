@@ -389,6 +389,72 @@ func requireStoredCloudAliasConfig(t *testing.T, stored EnvConfig) {
 	requireCondition(t, stored.Remote && stored.ManagedCloud && stored.Snapshot != nil && *stored.Snapshot, "unexpected stored flags: %+v", stored)
 }
 
+func TestExportCloudProviderCredentialsReturnsCredsFromConfiguredProfile(t *testing.T) {
+	store := &memoryCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{{
+		Alias:    "rihards+123456789012@aws",
+		Provider: CloudProviderAWS,
+		Profile:  "erun-sso",
+	}}}}
+	var captured string
+	expected := CloudProviderCredentials{
+		AccessKeyID:     "ASIA123",
+		SecretAccessKey: "secret",
+		SessionToken:    "token",
+	}
+	creds, err := ExportCloudProviderCredentials(Context{}, store, "rihards+123456789012@aws", CloudDependencies{
+		RunAWSExportCredentials: func(_ Context, profile string) (CloudProviderCredentials, error) {
+			captured = profile
+			return expected, nil
+		},
+	})
+	requireNoError(t, err, "ExportCloudProviderCredentials failed")
+	requireEqual(t, captured, "erun-sso", "profile passed to exporter")
+	if creds.AccessKeyID != expected.AccessKeyID || creds.SecretAccessKey != expected.SecretAccessKey || creds.SessionToken != expected.SessionToken {
+		t.Fatalf("unexpected credentials: %+v", creds)
+	}
+	requireEqual(t, creds.Alias, "rihards+123456789012@aws", "alias attached to credentials")
+}
+
+func TestExportCloudProviderCredentialsSurfacesAWSError(t *testing.T) {
+	store := &memoryCloudStore{config: ERunConfig{CloudProviders: []CloudProviderConfig{{
+		Alias:    "rihards+123456789012@aws",
+		Provider: CloudProviderAWS,
+		Profile:  "erun-sso",
+	}}}}
+	_, err := ExportCloudProviderCredentials(Context{}, store, "rihards+123456789012@aws", CloudDependencies{
+		RunAWSExportCredentials: func(Context, string) (CloudProviderCredentials, error) {
+			return CloudProviderCredentials{}, errors.New("SSO session has expired")
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "SSO session has expired") {
+		t.Fatalf("expected SSO expiry error to bubble up, got %v", err)
+	}
+}
+
+func TestParseAWSExportCredentialsHappyPath(t *testing.T) {
+	raw := []byte(`{
+  "Version": 1,
+  "AccessKeyId": "ASIA123",
+  "SecretAccessKey": "secret",
+  "SessionToken": "token",
+  "Expiration": "2026-05-19T18:30:00Z"
+}`)
+	creds, err := parseAWSExportCredentials(raw)
+	requireNoError(t, err, "parseAWSExportCredentials failed")
+	requireEqual(t, creds.AccessKeyID, "ASIA123", "access key id")
+	requireEqual(t, creds.SecretAccessKey, "secret", "secret key")
+	requireEqual(t, creds.SessionToken, "token", "session token")
+	if creds.Expiration.IsZero() || creds.Expiration.Year() != 2026 {
+		t.Fatalf("unexpected expiration: %+v", creds.Expiration)
+	}
+}
+
+func TestParseAWSExportCredentialsRequiresAccessKey(t *testing.T) {
+	if _, err := parseAWSExportCredentials([]byte(`{"Version":1,"SessionToken":"x"}`)); err == nil {
+		t.Fatal("expected missing access key error")
+	}
+}
+
 func testJWTWithIssuer(t *testing.T, issuer string) string {
 	t.Helper()
 	header, err := json.Marshal(map[string]string{"alg": "RS256", "typ": "JWT"})

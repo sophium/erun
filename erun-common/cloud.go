@@ -97,13 +97,26 @@ type SetEnvironmentCloudAliasParams struct {
 }
 
 type CloudDependencies struct {
-	RunAWSConfigureSSO func(Context, AWSProfileConfig) error
-	RunAWSLogin        func(Context, string) error
-	RunAWSLogout       func(Context, string) error
-	RunAWSBearerToken  func(Context, string, string) (string, error)
-	RunAWSEnableOIDC   func(Context, string) (string, error)
-	ResolveAWSIdentity func(Context, string) (AWSIdentity, error)
-	CheckAWSStatus     func(Context, CloudProviderConfig) CloudProviderStatus
+	RunAWSConfigureSSO     func(Context, AWSProfileConfig) error
+	RunAWSLogin            func(Context, string) error
+	RunAWSLogout           func(Context, string) error
+	RunAWSBearerToken      func(Context, string, string) (string, error)
+	RunAWSEnableOIDC       func(Context, string) (string, error)
+	RunAWSExportCredentials func(Context, string) (CloudProviderCredentials, error)
+	ResolveAWSIdentity     func(Context, string) (AWSIdentity, error)
+	CheckAWSStatus         func(Context, CloudProviderConfig) CloudProviderStatus
+}
+
+// CloudProviderCredentials is a snapshot of temporary AWS credentials derived
+// from a configured host profile, suitable for injecting into a remote
+// runtime so it acts as the host's IAM identity. Expiration tells callers
+// when to refresh; AWS hands out roughly 1h windows by default.
+type CloudProviderCredentials struct {
+	Alias           string    `json:"alias"`
+	AccessKeyID     string    `json:"accessKeyId"`
+	SecretAccessKey string    `json:"secretAccessKey"`
+	SessionToken    string    `json:"sessionToken"`
+	Expiration      time.Time `json:"expiration"`
 }
 
 type AWSProfileConfig struct {
@@ -377,6 +390,31 @@ func CloudProviderBearerToken(ctx Context, store CloudReadStore, params CloudBea
 		}, nil
 	default:
 		return CloudBearerToken{}, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
+	}
+}
+
+// ExportCloudProviderCredentials returns short-lived AWS credentials derived
+// from the host profile registered under alias. The desktop uses these to
+// keep a remote runtime's `~/.aws/credentials` refreshed so it acts as the
+// host identity. Returns an error when the alias is not configured, the
+// provider is unsupported, or the local AWS CLI cannot export credentials
+// (typically because the SSO session expired and needs `erun cloud login`).
+func ExportCloudProviderCredentials(ctx Context, store CloudReadStore, alias string, deps CloudDependencies) (CloudProviderCredentials, error) {
+	provider, err := ResolveCloudProvider(store, alias)
+	if err != nil {
+		return CloudProviderCredentials{}, err
+	}
+	deps = normalizeCloudDependencies(deps)
+	switch provider.Provider {
+	case CloudProviderAWS:
+		creds, err := deps.RunAWSExportCredentials(ctx, provider.Profile)
+		if err != nil {
+			return CloudProviderCredentials{}, err
+		}
+		creds.Alias = provider.Alias
+		return creds, nil
+	default:
+		return CloudProviderCredentials{}, fmt.Errorf("unsupported cloud provider %q", provider.Provider)
 	}
 }
 
@@ -682,6 +720,9 @@ func normalizeCloudDependencies(deps CloudDependencies) CloudDependencies {
 	if deps.RunAWSEnableOIDC == nil {
 		deps.RunAWSEnableOIDC = defaultRunAWSEnableOIDC
 	}
+	if deps.RunAWSExportCredentials == nil {
+		deps.RunAWSExportCredentials = defaultRunAWSExportCredentials
+	}
 	if deps.ResolveAWSIdentity == nil {
 		deps.ResolveAWSIdentity = defaultResolveAWSIdentity
 	}
@@ -819,6 +860,55 @@ func defaultRunAWSBearerToken(ctx Context, profile, audience string) (string, er
 		return "", fmt.Errorf("get AWS web identity token: empty token")
 	}
 	return token, nil
+}
+
+func defaultRunAWSExportCredentials(ctx Context, profile string) (CloudProviderCredentials, error) {
+	args := []string{"configure", "export-credentials", "--format", "process"}
+	if strings.TrimSpace(profile) != "" {
+		args = append(args, "--profile", strings.TrimSpace(profile))
+	}
+	ctx.TraceCommand("", "aws", args...)
+	if ctx.DryRun {
+		return CloudProviderCredentials{}, nil
+	}
+	var stdout, stderr bytes.Buffer
+	if err := RawCommandRunner("", "aws", args, nil, &stdout, &stderr); err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message == "" {
+			message = err.Error()
+		}
+		return CloudProviderCredentials{}, fmt.Errorf("export AWS credentials: %s", message)
+	}
+	return parseAWSExportCredentials(stdout.Bytes())
+}
+
+func parseAWSExportCredentials(raw []byte) (CloudProviderCredentials, error) {
+	var payload struct {
+		Version         int    `json:"Version"`
+		AccessKeyID     string `json:"AccessKeyId"`
+		SecretAccessKey string `json:"SecretAccessKey"`
+		SessionToken    string `json:"SessionToken"`
+		Expiration      string `json:"Expiration"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &payload); err != nil {
+		return CloudProviderCredentials{}, fmt.Errorf("parse AWS exported credentials: %w", err)
+	}
+	if payload.AccessKeyID == "" || payload.SecretAccessKey == "" {
+		return CloudProviderCredentials{}, fmt.Errorf("AWS exported credentials are missing access key id or secret")
+	}
+	creds := CloudProviderCredentials{
+		AccessKeyID:     payload.AccessKeyID,
+		SecretAccessKey: payload.SecretAccessKey,
+		SessionToken:    payload.SessionToken,
+	}
+	if expiration := strings.TrimSpace(payload.Expiration); expiration != "" {
+		parsed, err := time.Parse(time.RFC3339, expiration)
+		if err != nil {
+			return CloudProviderCredentials{}, fmt.Errorf("parse AWS credential expiration %q: %w", expiration, err)
+		}
+		creds.Expiration = parsed
+	}
+	return creds, nil
 }
 
 func defaultRunAWSEnableOIDC(ctx Context, profile string) (string, error) {

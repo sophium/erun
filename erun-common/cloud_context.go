@@ -170,6 +170,126 @@ func ListCloudContextStatuses(store CloudReadStore) ([]CloudContextStatus, error
 	return statuses, nil
 }
 
+// RefreshCloudContextStatuses returns the locally configured cloud contexts
+// with their Status field overwritten by the live AWS instance state. If the
+// AWS describe-instances call fails for a given provider+region group, the
+// affected contexts keep their cached Status and receive a Message that
+// explains why the refresh did not happen.
+func RefreshCloudContextStatuses(ctx Context, store CloudReadStore, deps CloudContextDependencies) ([]CloudContextStatus, error) {
+	statuses, err := ListCloudContextStatuses(store)
+	if err != nil {
+		return nil, err
+	}
+	if len(statuses) == 0 {
+		return statuses, nil
+	}
+	deps = normalizeCloudContextDependencies(deps)
+	refreshCloudContextStatusesFromAWS(ctx, store, deps, statuses)
+	return statuses, nil
+}
+
+type cloudContextRefreshKey struct {
+	alias  string
+	region string
+}
+
+func refreshCloudContextStatusesFromAWS(ctx Context, store CloudReadStore, deps CloudContextDependencies, statuses []CloudContextStatus) {
+	groups := make(map[cloudContextRefreshKey][]int)
+	for i, status := range statuses {
+		if strings.TrimSpace(status.InstanceID) == "" {
+			continue
+		}
+		alias := strings.TrimSpace(status.CloudProviderAlias)
+		region := strings.TrimSpace(status.Region)
+		if alias == "" || region == "" {
+			continue
+		}
+		key := cloudContextRefreshKey{alias: alias, region: region}
+		groups[key] = append(groups[key], i)
+	}
+	for key, indices := range groups {
+		provider, err := ResolveCloudProvider(store, key.alias)
+		if err != nil {
+			applyCloudContextRefreshError(statuses, indices, err)
+			continue
+		}
+		instanceIDs := make([]string, 0, len(indices))
+		for _, i := range indices {
+			instanceIDs = append(instanceIDs, statuses[i].InstanceID)
+		}
+		states, err := describeCloudContextInstanceStates(ctx, deps, provider, key.region, instanceIDs)
+		if err != nil {
+			applyCloudContextRefreshError(statuses, indices, err)
+			continue
+		}
+		for _, i := range indices {
+			awsState, ok := states[statuses[i].InstanceID]
+			if !ok {
+				statuses[i].Status = CloudContextStatusUnknown
+				statuses[i].Message = "instance not found in AWS"
+				continue
+			}
+			statuses[i].Status = cloudContextStatusFromAWSInstanceState(awsState)
+			if statuses[i].Status == CloudContextStatusUnknown {
+				statuses[i].Message = "AWS instance state: " + awsState
+			} else {
+				statuses[i].Message = ""
+			}
+		}
+	}
+}
+
+func applyCloudContextRefreshError(statuses []CloudContextStatus, indices []int, err error) {
+	message := "status refresh failed: " + err.Error()
+	for _, i := range indices {
+		statuses[i].Message = message
+	}
+}
+
+func describeCloudContextInstanceStates(ctx Context, deps CloudContextDependencies, provider CloudProviderConfig, region string, instanceIDs []string) (map[string]string, error) {
+	args := []string{
+		"ec2", "describe-instances",
+		"--filters", "Name=instance-id,Values=" + strings.Join(instanceIDs, ","),
+		"--query", "Reservations[*].Instances[*].[InstanceId,State.Name]",
+		"--output", "text",
+	}
+	out, err := deps.RunAWS(ctx, provider, region, args)
+	if err != nil {
+		return nil, err
+	}
+	return parseCloudContextInstanceStates(out), nil
+}
+
+func parseCloudContextInstanceStates(out string) map[string]string {
+	states := make(map[string]string)
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		instanceID := strings.TrimSpace(fields[0])
+		state := strings.ToLower(strings.TrimSpace(fields[1]))
+		if instanceID == "" || state == "" {
+			continue
+		}
+		states[instanceID] = state
+	}
+	return states
+}
+
+func cloudContextStatusFromAWSInstanceState(awsState string) string {
+	switch strings.ToLower(strings.TrimSpace(awsState)) {
+	case "running":
+		return CloudContextStatusRunning
+	case "pending":
+		return CloudContextStatusPending
+	case "stopping", "stopped":
+		return CloudContextStatusStopped
+	default:
+		return CloudContextStatusUnknown
+	}
+}
+
 func InitCloudContext(ctx Context, store CloudContextStore, params InitCloudContextParams, deps CloudContextDependencies) (CloudContextStatus, error) {
 	if store == nil {
 		return CloudContextStatus{}, fmt.Errorf("store is required")

@@ -27,6 +27,7 @@
 {{- $cloudProviderAlias := default "" $cloudContext.providerAlias -}}
 {{- $cloudRegion := default "" $cloudContext.region -}}
 {{- $cloudInstanceID := default "" $cloudContext.instanceId -}}
+{{- $useHostCredentials := default false $cloudContext.useHostCredentials -}}
 {{- $claude := default dict .Values.claude -}}
 {{- $claudeUseBedrock := default "0" $claude.useBedrock -}}
 {{- $claudeUseMantle := default "0" $claude.useMantle -}}
@@ -200,6 +201,10 @@ spec:
             - name: ERUN_CLOUD_INSTANCE_ID
               value: {{ $cloudInstanceID | quote }}
             {{ if eq $cloudProvider "aws" }}
+            {{ if $useHostCredentials }}
+            - name: AWS_PROFILE
+              value: "erun-host"
+            {{ end }}
             - name: CLAUDE_CODE_USE_BEDROCK
               value: {{ $claudeUseBedrock | quote }}
             - name: CLAUDE_CODE_USE_MANTLE
