@@ -6,10 +6,6 @@ type TerminalInputErrorHandler = (error: unknown) => void;
 const ESC = '\x1B';
 const ST = `${ESC}\\`;
 
-const foregroundColor = 'rgb:ffff/ffff/ffff';
-const backgroundColor = 'rgb:0000/0000/0000';
-const cursorColor = foregroundColor;
-
 export function registerTerminalQueryResponseHandlers(
   terminal: Terminal,
   sendInput: TerminalInputSender,
@@ -27,7 +23,20 @@ export function registerTerminalQueryResponseHandlers(
     return true;
   };
 
+  // xterm.js ships built-in OSC 10/11/12 handlers that answer fg/bg/cursor
+  // color queries with the current theme. The reply gets routed through
+  // SendSessionInput -> PTY, which is too slow for fire-and-forget queries
+  // and leaks the response into the shell's stdin where it runs as a
+  // command. Register no-op handlers that consume the OSC and return true
+  // so xterm.js's built-in is suppressed entirely. Querying tools time
+  // out and fall back to their default, which matches what a hardcoded
+  // reply gave anyway.
+  const suppressOsc = (): boolean => true;
+
   return [
+    terminal.parser.registerOscHandler(10, suppressOsc),
+    terminal.parser.registerOscHandler(11, suppressOsc),
+    terminal.parser.registerOscHandler(12, suppressOsc),
     terminal.parser.registerCsiHandler({ final: 'c' }, (params) => {
       if (firstParam(params) > 0) {
         return true;
@@ -58,18 +67,6 @@ export function registerTerminalQueryResponseHandlers(
     }),
     terminal.parser.registerDcsHandler({ intermediates: '$', final: 'q' }, (data) => {
       return sendResponse(statusStringReport(terminal, data));
-    }),
-    terminal.parser.registerOscHandler(10, (data) => {
-      const response = colorReportData(10, data);
-      return response === null ? false : sendResponse(response);
-    }),
-    terminal.parser.registerOscHandler(11, (data) => {
-      const response = colorReportData(11, data);
-      return response === null ? false : sendResponse(response);
-    }),
-    terminal.parser.registerOscHandler(12, (data) => {
-      const response = colorReportData(12, data);
-      return response === null ? false : sendResponse(response);
     }),
   ];
 }
@@ -114,40 +111,4 @@ function cursorStyleReport(terminal: Terminal): number {
     return blink ? 5 : 6;
   }
   return blink ? 1 : 2;
-}
-
-function colorReportData(start: number, data: string): string | null {
-  if (data.split(';').some((slot) => slot !== '?')) {
-    return null;
-  }
-  return colorReports(start, data).join('');
-}
-
-function colorReports(start: number, data: string): string[] {
-  const reports: string[] = [];
-  const slots = data.split(';');
-  for (let index = 0; index < slots.length; index++) {
-    if (slots[index] !== '?') {
-      continue;
-    }
-    const colorIndex = start + index;
-    const color = specialColor(colorIndex);
-    if (color) {
-      reports.push(`${ESC}]${String(colorIndex)};${color}${ST}`);
-    }
-  }
-  return reports;
-}
-
-function specialColor(index: number): string {
-  switch (index) {
-    case 10:
-      return foregroundColor;
-    case 11:
-      return backgroundColor;
-    case 12:
-      return cursorColor;
-    default:
-      return '';
-  }
 }
