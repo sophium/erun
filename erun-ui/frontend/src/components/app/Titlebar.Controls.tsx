@@ -10,8 +10,8 @@ import {
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { openIDE } from '@/app/ideOpenThunks';
 import { setFilesOpen, toggleReview, toggleSidebar } from '@/app/layoutThunks';
-import { openIDE } from '@/app/sessionThunks';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { ideTooltipLabel, isIdeDisabled } from '@/components/app/Titlebar.helpers';
 import { Button } from '@/components/ui/button';
