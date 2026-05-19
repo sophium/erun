@@ -616,6 +616,21 @@ EOF
     mv "${tmp_bashrc}" "${bashrc_file}"
 }
 
+normalize_ssh_key_permissions() {
+    ssh_dir="${HOME}/.ssh"
+    [ -d "${ssh_dir}" ] || return 0
+    # Kubernetes' fsGroup recursively ORs g+rw into every PVC file on each
+    # pod start, so a private key that init left at 0600 comes back as 0660
+    # (and any file that ever picked up the user-x bit becomes 0760). ssh
+    # refuses to use a private key file whose perms are looser than 0600,
+    # so re-apply the canonical modes before anything tries to read them.
+    # *.pub files stay world-readable; everything else in ~/.ssh is treated
+    # as private — private keys, config, known_hosts, authorized_keys.
+    chmod 700 "${ssh_dir}" 2>/dev/null || true
+    find "${ssh_dir}" -mindepth 1 -maxdepth 1 -type f -name '*.pub' -exec chmod 644 {} + 2>/dev/null || true
+    find "${ssh_dir}" -mindepth 1 -maxdepth 1 -type f ! -name '*.pub' -exec chmod 600 {} + 2>/dev/null || true
+}
+
 start_sshd() {
     if ! runtime_sshd_enabled; then
         return
@@ -730,6 +745,7 @@ run_shell() {
 }
 
 write_kubeconfig
+normalize_ssh_key_permissions
 start_sshd
 start_environment_idle_monitor
 

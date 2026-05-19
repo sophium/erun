@@ -544,10 +544,16 @@ func finishRemoteInitCodeCommitSSHConfig(ctx Context, homeDir string, repository
 // 0644 on the public key. ssh silently refuses to use a private key
 // that is group- or world-accessible ("WARNING: UNPROTECTED PRIVATE
 // KEY FILE!" → bad permissions → key ignored), and runtime pods on
-// shared PVCs often persist files with permissive group bits because
-// of fsGroup or a non-077 umask. Init's chmod is best-effort and can
-// be reset by the storage layer between runs, so doctor re-applies the
-// expected mode every time it touches the key.
+// shared PVCs persist files with permissive group bits because the
+// chart's fsGroup makes kubelet re-OR g+rw into every PVC file on
+// each pod start. Init's chmod is therefore best-effort and gets
+// reset between runs, so doctor re-applies the expected mode every
+// time it touches the key. The runtime image's entrypoint also walks
+// ~/.ssh on container start (normalize_ssh_key_permissions in
+// erun-devops/docker/erun-devops/entrypoint.sh), so a freshly
+// restarted pod heals its own permissions before any tool tries to
+// read the key — this function stays as a belt-and-braces guarantee
+// for the doctor recovery path.
 func ensureRemoteInitSSHKeyPermissions(path string) error {
 	if err := os.Chmod(path, 0o600); err != nil {
 		if os.IsNotExist(err) {
