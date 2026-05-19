@@ -210,8 +210,17 @@ func (a *App) maybeStopIdleCloudEnvironment(result eruncommon.OpenResult, status
 	// should be allowed to fire when markers next expire. Without this
 	// reconcile, the idleStops flag latches forever after the first stop
 	// and the env can never auto-stop a second time.
+	//
+	// When clearing actually removes a stale flag, return early: the
+	// idle markers loaded for this call were computed before the
+	// restart was observed and may indicate "everything has been idle
+	// for hours," which would otherwise refire a stop on a context the
+	// user just brought back up. The next idle poll re-runs in ~1s
+	// with fresh markers; let that one decide whether to stop.
 	if strings.TrimSpace(cloudContext.Status) == eruncommon.CloudContextStatusRunning {
-		a.clearIdleStopsForCloudContext(cloudContext.Name)
+		if a.clearIdleStopsForCloudContext(cloudContext.Name) {
+			return
+		}
 	}
 	if !status.ManagedCloud || !status.StopEligible {
 		return
@@ -236,25 +245,32 @@ func (a *App) maybeStopIdleCloudEnvironment(result eruncommon.OpenResult, status
 		if ctx == nil {
 			ctx = context.Background()
 		}
-		if _, err := a.deps.stopCloudContext(ctx, cloudContext.Name); err != nil {
+		stopped, err := a.deps.stopCloudContext(ctx, cloudContext.Name)
+		if err != nil {
 			a.mu.Lock()
 			delete(a.idleStops, key)
 			a.mu.Unlock()
 			a.emitAppStatus(fmt.Sprintf("Failed to stop idle cloud context %s: %s", cloudContextDisplayName(cloudContext), err.Error()), false)
 			return
 		}
+		a.setCloudContextStatusInCache(stopped.Name, stopped.Status)
 		a.emitAppStatus(fmt.Sprintf("Stopped idle cloud context %s.", cloudContextDisplayName(cloudContext)), false)
 	}()
 }
 
-func (a *App) clearIdleStopsForCloudContext(name string) {
+// clearIdleStopsForCloudContext removes any latched auto-stop flag
+// for environments linked to the supplied cloud context name. Returns
+// true when at least one flag was actually removed, so callers can
+// distinguish "we just observed an externally-restarted context" from
+// "nothing to clear, already in sync."
+func (a *App) clearIdleStopsForCloudContext(name string) bool {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return
+		return false
 	}
 	tenants, err := a.deps.store.ListTenantConfigs()
 	if err != nil {
-		return
+		return false
 	}
 	cleared := make([]string, 0)
 	for _, tenant := range tenants {
@@ -271,13 +287,18 @@ func (a *App) clearIdleStopsForCloudContext(name string) {
 		}
 	}
 	if len(cleared) == 0 {
-		return
+		return false
 	}
+	removed := false
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	for _, key := range cleared {
-		delete(a.idleStops, key)
+		if _, ok := a.idleStops[key]; ok {
+			delete(a.idleStops, key)
+			removed = true
+		}
 	}
+	a.mu.Unlock()
+	return removed
 }
 
 func activitySecondsUntilIdle(status eruncommon.EnvironmentIdleStatus) int64 {

@@ -83,6 +83,17 @@ type App struct {
 	actionCancels             map[string]context.CancelFunc
 	configWatcher             *configWatcher
 
+	// cloudContextStatuses caches the live AWS-observed power state for
+	// each cloud context, keyed by context name. Populated by the
+	// background poller and by handlers that already call Refresh
+	// (settings dialog, Init/Start/Stop). The persisted config no longer
+	// carries Status (it is operational state, not configuration), so
+	// any code path that needs "is this context running right now?" must
+	// consult this map.
+	cloudContextStatusesMu sync.RWMutex
+	cloudContextStatuses   map[string]string
+	cloudContextPollerStop chan struct{}
+
 	// emitFn dispatches Wails-style events to the frontend. In normal Wails
 	// mode this calls runtime.EventsEmit; in headless mode it fans out to
 	// the SSE subscribers in headlessserver. When unset it defaults to the
@@ -249,12 +260,14 @@ func (a *App) startup(ctx context.Context) {
 	importLoginShellEnv()
 	configureAppIdentity("ERun")
 	a.startActivityPollers()
+	a.startCloudContextStatusPoller()
 	a.startConfigWatcher()
 }
 
 func (a *App) shutdown(context.Context) {
 	a.stopConfigWatcher()
 	a.stopActivityPollers()
+	a.stopCloudContextStatusPoller()
 	a.stopActionRunners()
 	a.mu.Lock()
 	defer a.mu.Unlock()

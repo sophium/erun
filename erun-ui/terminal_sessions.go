@@ -625,8 +625,32 @@ func (a *App) SendSessionInput(sessionID int, data string) error {
 	if _, err := io.WriteString(managed.session, data); err != nil {
 		return err
 	}
+	a.clearAwaitingPostRespawnInput(managed)
 	a.recordTerminalActivity(managed.selection)
 	return nil
+}
+
+// clearAwaitingPostRespawnInput marks the managed session as having
+// received real user input, so subsequent output once again counts as
+// activity in streamSession's 2s ticker.
+func (a *App) clearAwaitingPostRespawnInput(managed *managedTerminal) {
+	if managed == nil {
+		return
+	}
+	a.mu.Lock()
+	managed.awaitingPostRespawnInput = false
+	a.mu.Unlock()
+}
+
+// isAwaitingPostRespawnInput reports whether the managed session was
+// just respawned and has not yet received user input.
+func (a *App) isAwaitingPostRespawnInput(managed *managedTerminal) bool {
+	if managed == nil {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return managed.awaitingPostRespawnInput
 }
 
 func (a *App) recordTerminalActivity(selection uiSelection) {
@@ -839,8 +863,17 @@ func (a *App) streamSession(managed *managedTerminal) {
 				a.mu.Unlock()
 			}
 			if time.Since(lastOutputActivity) >= 2*time.Second {
-				a.recordTerminalActivity(managed.selection)
-				lastOutputActivity = time.Now()
+				// While the session is waiting for the first user
+				// input after a respawn, ignore the output ticker.
+				// Reconnect noise (audit lines, "── reconnecting ──"
+				// banners, the output of a respawned `erun open`
+				// that fails again) must not refresh the idle
+				// marker — only real interaction does. A real
+				// keystroke clears the flag in SendSessionInput.
+				if !a.isAwaitingPostRespawnInput(managed) {
+					a.recordTerminalActivity(managed.selection)
+					lastOutputActivity = time.Now()
+				}
 			}
 		}
 		if err == nil {
@@ -923,6 +956,7 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 		return false
 	}
 	managed.session = next
+	managed.awaitingPostRespawnInput = true
 	a.mu.Unlock()
 	return true
 }
@@ -1110,6 +1144,15 @@ type managedTerminal struct {
 	lockedByActivity       string
 	activityTraceBuffer    string
 	startedAt              time.Time
+
+	// awaitingPostRespawnInput, when true, tells streamSession to skip
+	// the 2s output-activity ticker. Set on each successful respawn so
+	// reconnect noise (audit lines, "── reconnecting ──" banners, the
+	// failure output of a respawned `erun open` that immediately fails
+	// again) cannot count as user activity and refresh the idle marker.
+	// Cleared on real user input — once the user types into the
+	// reattached session, subsequent output is treated as work again.
+	awaitingPostRespawnInput bool
 
 	// readyMu / readyCh / readyErr / readyClosed track the
 	// "session is past its setup phase" signal. The desktop action
