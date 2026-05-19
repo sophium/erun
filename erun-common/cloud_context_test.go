@@ -759,7 +759,7 @@ func TestRefreshCloudContextStatusesReplacesStaleCacheWithLiveAWSState(t *testin
 	}
 }
 
-func TestRefreshCloudContextStatusesKeepsCacheWhenAWSCallFails(t *testing.T) {
+func TestRefreshCloudContextStatusesMarksUnknownWhenAWSCallFails(t *testing.T) {
 	store := &memoryCloudStore{config: ERunConfig{
 		CloudProviders: []CloudProviderConfig{{
 			Alias:    "rihards+123456789012@aws",
@@ -779,8 +779,8 @@ func TestRefreshCloudContextStatusesKeepsCacheWhenAWSCallFails(t *testing.T) {
 		},
 	})
 	requireNoError(t, err, "RefreshCloudContextStatuses failed")
-	if len(statuses) != 1 || statuses[0].Status != CloudContextStatusRunning {
-		t.Fatalf("expected cached running status to be preserved, got %+v", statuses)
+	if len(statuses) != 1 || statuses[0].Status != CloudContextStatusUnknown {
+		t.Fatalf("expected status to downgrade to unknown when AWS is unreachable, got %+v", statuses)
 	}
 	if !strings.Contains(statuses[0].Message, "status refresh failed") {
 		t.Fatalf("expected refresh-failed message, got %+v", statuses[0])

@@ -240,8 +240,14 @@ func refreshCloudContextStatusesFromAWS(ctx Context, store CloudReadStore, deps 
 }
 
 func applyCloudContextRefreshError(statuses []CloudContextStatus, indices []int, err error) {
+	// The cached Status on disk reflects the last write at create / start /
+	// stop time and is not invalidated when the underlying instance is
+	// changed out-of-band (AWS console, expired SSO blocking refresh, etc).
+	// Downgrading to Unknown when AWS cannot be reached keeps the UI from
+	// surfacing a stale "running" as authoritative.
 	message := "status refresh failed: " + err.Error()
 	for _, i := range indices {
+		statuses[i].Status = CloudContextStatusUnknown
 		statuses[i].Message = message
 	}
 }
