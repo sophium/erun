@@ -27,6 +27,10 @@ export function rebuildTerminalDisplayBuffer(
       displayBuffer.push(displayData);
     }
   }
+  const finalState = bufferCursorVisibility(displayBuffer);
+  if (!finalState.altScreen && finalState.cursorHidden) {
+    displayBuffer.push(SHOW_CURSOR_SEQUENCE);
+  }
   sessions.replaceDisplayBuffer(sessionId, displayBuffer);
 }
 
@@ -60,6 +64,64 @@ function stripTerminalResponses(input: Uint8Array): Uint8Array {
     return input;
   }
   return new TextEncoder().encode(cleaned);
+}
+
+// Track DECTCEM (cursor visibility, `?25`) and alternate-screen
+// (`?47` / `?1047` / `?1049`) state across written bytes. The desktop
+// terminal is meant for shell interaction; a stuck `?25l` outside the
+// alt-screen (e.g. an unmatched hide leaked by a spinner inside
+// `erun open`, helm, kubectl, git over SSH, or the deploy pipeline)
+// surfaces as a missing cursor at the bash prompt. The replay path
+// uses scanCursorVisibility to detect that state and append a
+// well-formed `?25h` so the user sees a cursor again; live TUIs are
+// untouched because they sit inside the alternate screen.
+export interface CursorVisibilityState {
+  altScreen: boolean;
+  cursorHidden: boolean;
+}
+
+export const SHOW_CURSOR_SEQUENCE = '\x1B[?25h';
+
+const initialCursorVisibility: CursorVisibilityState = {
+  altScreen: false,
+  cursorHidden: false,
+};
+
+const DEC_PRIVATE_MODE = /\x1B\[\?([\d;]+)([lh])/g;
+const ALT_SCREEN_MODES = new Set(['47', '1047', '1049']);
+
+export function scanCursorVisibility(
+  prev: CursorVisibilityState,
+  data: TerminalWriteData,
+): CursorVisibilityState {
+  const text = typeof data === 'string' ? data : new TextDecoder().decode(data);
+  if (!text.includes('\x1B[?')) {
+    return prev;
+  }
+  let { altScreen, cursorHidden } = prev;
+  for (const match of text.matchAll(DEC_PRIVATE_MODE)) {
+    const set = match[2] === 'h';
+    const params = match[1] ?? '';
+    for (const param of params.split(';')) {
+      if (param === '25') {
+        cursorHidden = !set;
+      } else if (ALT_SCREEN_MODES.has(param)) {
+        altScreen = set;
+      }
+    }
+  }
+  if (altScreen === prev.altScreen && cursorHidden === prev.cursorHidden) {
+    return prev;
+  }
+  return { altScreen, cursorHidden };
+}
+
+export function bufferCursorVisibility(buffer: TerminalWriteData[]): CursorVisibilityState {
+  let state = initialCursorVisibility;
+  for (const chunk of buffer) {
+    state = scanCursorVisibility(state, chunk);
+  }
+  return state;
 }
 
 export function filterTerminalDisplayData(

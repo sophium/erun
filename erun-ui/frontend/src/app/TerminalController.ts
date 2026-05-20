@@ -38,7 +38,13 @@ import {
 } from './state';
 import { clamp } from './storage';
 import { store } from './store';
-import { filterTerminalDisplayData } from './terminalBuffers';
+import {
+  bufferCursorVisibility,
+  type CursorVisibilityState,
+  filterTerminalDisplayData,
+  scanCursorVisibility,
+  SHOW_CURSOR_SEQUENCE,
+} from './terminalBuffers';
 import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import { decodeDebugOutput } from './terminalStatus';
@@ -82,6 +88,15 @@ export class TerminalController {
   private environmentsChangedOff: (() => void) | null = null;
   private aiActivityOff: (() => void) | null = null;
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
+  // Track DECTCEM (`?25`) and alt-screen state across the bytes
+  // written to xterm for the active session. When the active session
+  // ends in "main screen + cursor hidden" with no further output, we
+  // restore `?25h` so an unmatched hide leaked by `erun open`, helm,
+  // kubectl, or a remote-side spinner doesn't strand the prompt with
+  // no visible cursor. Alt-screen TUIs are exempt by design.
+  private liveCursorState: CursorVisibilityState = { altScreen: false, cursorHidden: false };
+  private cursorRestoreTimer = 0;
+  private static readonly CURSOR_RESTORE_DELAY_MS = 250;
 
   constructor() {
     thunkExtra.controller = this;
@@ -266,6 +281,30 @@ export class TerminalController {
   resetTerminal(): void {
     this.terminal?.reset();
     this.terminal?.clear();
+    this.cancelCursorRestoreTimer();
+    this.liveCursorState = { altScreen: false, cursorHidden: false };
+  }
+
+  private cancelCursorRestoreTimer(): void {
+    if (this.cursorRestoreTimer !== 0) {
+      window.clearTimeout(this.cursorRestoreTimer);
+      this.cursorRestoreTimer = 0;
+    }
+  }
+
+  private scheduleCursorRestoreIfStuck(): void {
+    this.cancelCursorRestoreTimer();
+    if (this.liveCursorState.altScreen || !this.liveCursorState.cursorHidden) {
+      return;
+    }
+    this.cursorRestoreTimer = window.setTimeout(() => {
+      this.cursorRestoreTimer = 0;
+      if (this.liveCursorState.altScreen || !this.liveCursorState.cursorHidden) {
+        return;
+      }
+      this.terminal?.write(SHOW_CURSOR_SEQUENCE);
+      this.liveCursorState = { ...this.liveCursorState, cursorHidden: false };
+    }, TerminalController.CURSOR_RESTORE_DELAY_MS);
   }
 
   // handleTerminalOutput stays on the controller because it does the
@@ -287,6 +326,8 @@ export class TerminalController {
     }
     store.dispatch(hideTerminalMessageIfActive(payload.sessionId));
     this.terminal?.write(displayData);
+    this.liveCursorState = scanCursorVisibility(this.liveCursorState, displayData);
+    this.scheduleCursorRestoreIfStuck();
   }
 
   layoutCallbacks(): {
@@ -437,5 +478,13 @@ export class TerminalController {
     for (const chunk of chunks) {
       this.terminal?.write(chunk);
     }
+    // Rehydrate live cursor state from the replayed buffer.
+    // rebuildTerminalDisplayBuffer already appended `?25h` if the live
+    // state would have been "main + hidden", so under normal flow this
+    // ends at { altScreen: false, cursorHidden: false }. Scanning keeps
+    // the live tracking accurate when a TUI in alt-screen left the
+    // buffer in its own intentional state.
+    this.liveCursorState = bufferCursorVisibility(chunks);
+    this.cancelCursorRestoreTimer();
   }
 }
