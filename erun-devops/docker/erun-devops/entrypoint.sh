@@ -148,7 +148,8 @@ stop_cloud_host() {
         return 1
     fi
 
-    aws --cli-connect-timeout 5 --cli-read-timeout 20 ec2 stop-instances --region "${region}" --instance-ids "${instance_id}" >/dev/null
+    AWS_MAX_ATTEMPTS=5 AWS_RETRY_MODE=standard \
+        aws --cli-connect-timeout 5 --cli-read-timeout 20 ec2 stop-instances --region "${region}" --instance-ids "${instance_id}" >/dev/null
 }
 
 graceful_quit_clients() {
@@ -711,7 +712,12 @@ start_environment_idle_monitor() {
     (
         stop_log_dir="${HOME}/.erun/${ERUN_TENANT}/${ERUN_ENVIRONMENT}"
         monitor_log="${stop_log_dir}/idle-monitor.log"
+        stop_log="${stop_log_dir}/idle-stop.log"
         mkdir -p "${stop_log_dir}"
+        # idle-stop.log lives on the shared home PVC and survives pod and
+        # host restarts. Clear it on monitor start so the desktop never
+        # surfaces a stop error attributable to a previous pod lifetime.
+        : >"${stop_log}"
         while :; do
             sleep 30
             tick_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -726,10 +732,17 @@ start_environment_idle_monitor() {
             fi
             printf '{"ts":"%s","exit":%d,"check":%s}\n' "${tick_ts}" "${exit_code}" "${check_json:-null}" >>"${monitor_log}"
             if [ "${exit_code}" -eq 0 ]; then
-                stop_log="${stop_log_dir}/idle-stop.log"
+                # Reset the log each attempt so it reflects only the latest
+                # one — empty on success, the most recent error on failure.
+                : >"${stop_log}"
                 graceful_quit_clients >>"${stop_log}" 2>&1 || true
-                stop_cloud_host >>"${stop_log}" 2>&1 || true
-                exit 0
+                if stop_cloud_host >>"${stop_log}" 2>&1; then
+                    exit 0
+                fi
+                # A transient AWS failure (e.g. RequestExpired) leaves the
+                # loop running; the next tick re-checks stop-ready and
+                # retries. The error stays in idle-stop.log for the desktop
+                # to surface until the next attempt overwrites it.
             fi
         done
     ) &
