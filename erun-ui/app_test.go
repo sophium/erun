@@ -3539,6 +3539,104 @@ func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T)
 	}
 }
 
+func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
+	// idle-stop.log lives on the pod's home PVC and survives pod and host
+	// restarts. The runtime entrypoint truncates it on monitor start, but a
+	// freshly-restarted env can still surface a poll-window racing the
+	// truncate. The desktop guards against the stale error by suppressing
+	// StopError whenever the linked cloud context is observably running —
+	// a "stop failed" badge next to a healthy env is always wrong.
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		config: &eruncommon.ERunConfig{
+			CloudContexts: []eruncommon.CloudContextConfig{{
+				Name:              "managed-cloud",
+				KubernetesContext: "cluster-cloud",
+			}},
+		},
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {
+				Name:              "remote",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-cloud",
+				Remote:            true,
+				ManagedCloud:      true,
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+	defer app.shutdown(context.Background())
+	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusRunning)
+
+	result, err := eruncommon.ResolveOpen(store, eruncommon.OpenParams{Tenant: "erun", Environment: "remote"})
+	if err != nil {
+		t.Fatalf("ResolveOpen failed: %v", err)
+	}
+	ui := app.idleStatusToUI(result, eruncommon.EnvironmentIdleStatus{
+		ManagedCloud: true,
+		Policy:       eruncommon.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
+		StopError:    "An error occurred (RequestExpired) when calling the StopInstances operation: Request has expired.",
+	})
+
+	if ui.CloudContextStatus != eruncommon.CloudContextStatusRunning {
+		t.Fatalf("expected CloudContextStatus=%q, got %q", eruncommon.CloudContextStatusRunning, ui.CloudContextStatus)
+	}
+	if ui.StopError != "" {
+		t.Fatalf("expected StopError to be cleared when context is running, got %q", ui.StopError)
+	}
+}
+
+func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
+	// Counterpart to the running-context test: when the linked cloud
+	// context is not running, the stop error is still the desktop's only
+	// surface for telling the user "the last auto-stop failed", so the
+	// projection must pass it through unchanged.
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		config: &eruncommon.ERunConfig{
+			CloudContexts: []eruncommon.CloudContextConfig{{
+				Name:              "managed-cloud",
+				KubernetesContext: "cluster-cloud",
+			}},
+		},
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {
+				Name:              "remote",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-cloud",
+				Remote:            true,
+				ManagedCloud:      true,
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+	defer app.shutdown(context.Background())
+	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusStopped)
+
+	result, err := eruncommon.ResolveOpen(store, eruncommon.OpenParams{Tenant: "erun", Environment: "remote"})
+	if err != nil {
+		t.Fatalf("ResolveOpen failed: %v", err)
+	}
+	ui := app.idleStatusToUI(result, eruncommon.EnvironmentIdleStatus{
+		ManagedCloud: true,
+		Policy:       eruncommon.EnvironmentIdlePolicy{Timeout: 5 * time.Minute},
+		StopError:    "An error occurred (RequestExpired) when calling the StopInstances operation: Request has expired.",
+	})
+
+	if ui.CloudContextStatus != eruncommon.CloudContextStatusStopped {
+		t.Fatalf("expected CloudContextStatus=%q, got %q", eruncommon.CloudContextStatusStopped, ui.CloudContextStatus)
+	}
+	if ui.StopError == "" {
+		t.Fatal("expected StopError to be preserved when context is stopped")
+	}
+}
+
 func TestStartSessionLogsOpenCommandToLocal(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{

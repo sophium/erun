@@ -291,9 +291,10 @@ func TestRuntimeEntrypointStopsCloudHostAfterIdle(t *testing.T) {
 		"stop_cloud_host()",
 		`runtime_cloud_instance_id()`,
 		`runtime_cloud_region()`,
+		`AWS_MAX_ATTEMPTS=5 AWS_RETRY_MODE=standard`,
 		`aws --cli-connect-timeout 5 --cli-read-timeout 20 ec2 stop-instances --region "${region}" --instance-ids "${instance_id}"`,
 		`graceful_quit_clients >>"${stop_log}" 2>&1 || true`,
-		`stop_cloud_host >>"${stop_log}" 2>&1 || true`,
+		`if stop_cloud_host >>"${stop_log}" 2>&1; then`,
 		`stop_log_dir="${HOME}/.erun/${ERUN_TENANT}/${ERUN_ENVIRONMENT}"`,
 		`stop_log="${stop_log_dir}/idle-stop.log"`,
 		`monitor_log="${stop_log_dir}/idle-monitor.log"`,
@@ -314,9 +315,31 @@ func TestRuntimeEntrypointStopsCloudHostAfterIdle(t *testing.T) {
 		t.Fatalf("expected runtime entrypoint to no longer scale the deployment to 0 before EC2 stop, got:\n%s", content)
 	}
 	gracefulIdx := strings.Index(content, `graceful_quit_clients >>"${stop_log}"`)
-	stopIdx := strings.Index(content, `stop_cloud_host >>"${stop_log}"`)
+	stopIdx := strings.Index(content, `if stop_cloud_host >>"${stop_log}"`)
 	if gracefulIdx < 0 || stopIdx < 0 || gracefulIdx > stopIdx {
 		t.Fatalf("expected graceful_quit_clients to run before stop_cloud_host, got graceful=%d stop=%d", gracefulIdx, stopIdx)
+	}
+	// Pre-fix shape (one stop attempt then exit 0 regardless of outcome)
+	// must be gone, or a transient AWS failure would permanently kill the
+	// monitor and leave the env unable to auto-stop until pod restart.
+	if strings.Contains(content, `stop_cloud_host >>"${stop_log}" 2>&1 || true`) {
+		t.Fatalf("expected stop_cloud_host failure to keep the idle monitor loop alive instead of being swallowed with || true, got:\n%s", content)
+	}
+}
+
+func TestRuntimeEntrypointIdleStopLogIsTruncatedNotAppended(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "erun-devops", "docker", "erun-devops", "entrypoint.sh"))
+	if err != nil {
+		t.Fatalf("read runtime entrypoint: %v", err)
+	}
+	content := string(data)
+	// The log lives on the shared home PVC and would otherwise survive pod
+	// and host restarts, so the monitor must truncate it on start and
+	// before each stop attempt. Without this, the desktop surfaces stale
+	// errors from previous pod lifetimes as a current "stop failed" badge.
+	truncationCount := strings.Count(content, `: >"${stop_log}"`)
+	if truncationCount < 2 {
+		t.Fatalf("expected idle-stop.log to be truncated on monitor start and before each attempt (at least 2 `: >\"${stop_log}\"` lines), got %d:\n%s", truncationCount, content)
 	}
 }
 
