@@ -857,6 +857,7 @@ func (a *App) streamSession(managed *managedTerminal) {
 			}
 			a.emitEvent(terminalOutputEvent, payload)
 			a.feedActivityTraceFromTerminal(managed, buffer[:count])
+			a.recordAIActivity(managed)
 			if managed.clearIdleBlockOnOutput {
 				a.mu.Lock()
 				a.releaseIdleBlockLocked(managed)
@@ -883,6 +884,7 @@ func (a *App) streamSession(managed *managedTerminal) {
 		if a.tryReconnect(managed, reason) {
 			continue
 		}
+		a.finalizeAIActivity(managed)
 		a.mu.Lock()
 		managed.closed = true
 		if existing := a.sessions[managed.key]; existing == managed {
@@ -1062,6 +1064,124 @@ func (a *App) emitReconnectFailureMarker(sessionID int, err error) {
 	})
 }
 
+// aiActivitySustainedThreshold is how long the AI session must keep
+// producing output before we flip the sidebar busy badge on. Chosen
+// large enough to suppress single-line Codex responses (~1 s of output)
+// while still catching real multi-second Claude generations.
+const aiActivitySustainedThreshold = 5 * time.Second
+
+// aiActivityIdleThreshold is how long the AI session must be silent
+// before we flip the busy badge back off. Codex's "thinking..." spinner
+// updates in bursts; this window swallows the gaps between bursts so
+// the sidebar does not flicker mid-generation.
+const aiActivityIdleThreshold = 3 * time.Second
+
+// recordAIActivity is called from streamSession on every output read for
+// every managed terminal; it only does work for sessionKindAI sessions.
+// It implements the debounced "AI tab is working" signal described in
+// erun-ui/AGENTS.md: Nielsen #1 (visibility of system status) requires
+// the sidebar to show, at a glance, which env's AI tab is producing
+// output — even when the user has navigated to a different env.
+//
+// Policy:
+//   - busy=true fires after aiActivitySustainedThreshold of sustained
+//     output (5 s), where "sustained" means continued output with gaps
+//     no longer than aiActivityIdleThreshold (3 s). Short single-burst
+//     responses do not toggle the badge.
+//   - busy=false fires after aiActivityIdleThreshold (3 s) of silence.
+//   - Session close emits busy=false via finalizeAIActivity.
+func (a *App) recordAIActivity(managed *managedTerminal) {
+	if managed == nil || managed.kind != sessionKindAI {
+		return
+	}
+	now := time.Now()
+	a.mu.Lock()
+	if managed.closed {
+		a.mu.Unlock()
+		return
+	}
+	if managed.aiActiveSince.IsZero() || now.Sub(managed.aiLastOutput) > aiActivityIdleThreshold {
+		managed.aiActiveSince = now
+	}
+	managed.aiLastOutput = now
+	shouldFireBusy := !managed.aiBusyEmitted && now.Sub(managed.aiActiveSince) >= aiActivitySustainedThreshold
+	if shouldFireBusy {
+		managed.aiBusyEmitted = true
+	}
+	if managed.aiInactivityTimer != nil {
+		managed.aiInactivityTimer.Stop()
+	}
+	managed.aiInactivityTimer = time.AfterFunc(aiActivityIdleThreshold, func() {
+		a.clearAIActivityIfQuiet(managed)
+	})
+	selection := managed.selection
+	serial := managed.serial
+	a.mu.Unlock()
+	if shouldFireBusy {
+		a.emitAIActivity(serial, selection, true)
+	}
+}
+
+// clearAIActivityIfQuiet fires from the AfterFunc scheduled by
+// recordAIActivity. If no new output has arrived in the meantime it
+// clears the busy latch and emits ai-activity busy=false. If new output
+// did arrive, the more recent recordAIActivity call already reset the
+// timer; this firing is stale and a no-op.
+func (a *App) clearAIActivityIfQuiet(managed *managedTerminal) {
+	if managed == nil {
+		return
+	}
+	a.mu.Lock()
+	if managed.closed || !managed.aiBusyEmitted {
+		a.mu.Unlock()
+		return
+	}
+	if time.Since(managed.aiLastOutput) < aiActivityIdleThreshold {
+		a.mu.Unlock()
+		return
+	}
+	managed.aiBusyEmitted = false
+	managed.aiActiveSince = time.Time{}
+	selection := managed.selection
+	serial := managed.serial
+	a.mu.Unlock()
+	a.emitAIActivity(serial, selection, false)
+}
+
+// finalizeAIActivity ensures the sidebar busy latch is released when an
+// AI session exits while busy=true is in flight (e.g. user closes the
+// tab mid-generation, or the underlying PTY drops). Caller must not
+// hold a.mu.
+func (a *App) finalizeAIActivity(managed *managedTerminal) {
+	if managed == nil || managed.kind != sessionKindAI {
+		return
+	}
+	a.mu.Lock()
+	if managed.aiInactivityTimer != nil {
+		managed.aiInactivityTimer.Stop()
+		managed.aiInactivityTimer = nil
+	}
+	if !managed.aiBusyEmitted {
+		a.mu.Unlock()
+		return
+	}
+	managed.aiBusyEmitted = false
+	managed.aiActiveSince = time.Time{}
+	selection := managed.selection
+	serial := managed.serial
+	a.mu.Unlock()
+	a.emitAIActivity(serial, selection, false)
+}
+
+func (a *App) emitAIActivity(sessionID int, selection uiSelection, busy bool) {
+	a.emitEvent(aiActivityEvent, aiActivityPayload{
+		SessionID:   sessionID,
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+		Busy:        busy,
+	})
+}
+
 func terminalSessionExitReason(session terminalSession, readErr error) string {
 	if session != nil {
 		if waitErr := session.Wait(); waitErr != nil {
@@ -1153,6 +1273,16 @@ type managedTerminal struct {
 	// Cleared on real user input — once the user types into the
 	// reattached session, subsequent output is treated as work again.
 	awaitingPostRespawnInput bool
+
+	// aiActiveSince / aiLastOutput / aiBusyEmitted / aiInactivityTimer
+	// drive the debounced AI activity signal that powers the sidebar
+	// "Claude is working" spinner. Only populated for sessionKindAI
+	// managed terminals. See recordAIActivity for the debounce policy
+	// (5 s sustained output to flip on, 3 s silence to flip off).
+	aiActiveSince     time.Time
+	aiLastOutput      time.Time
+	aiBusyEmitted     bool
+	aiInactivityTimer *time.Timer
 
 	// readyMu / readyCh / readyErr / readyClosed track the
 	// "session is past its setup phase" signal. The desktop action

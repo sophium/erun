@@ -115,7 +115,7 @@ const spawnERunTabPassive =
     }
   };
 
-const ensureDefaultEnvTabs =
+export const ensureDefaultEnvTabs =
   (runSelection: UISelection, key: string, cols: number, rows: number): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
     const tabs = getState().terminal.tabsByEnv[key] ?? [];
