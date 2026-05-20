@@ -1,3 +1,4 @@
+export type { AIActivityPayload } from './aiActivityPayload';
 export type { AppStatusPayload } from './appStatusPayload';
 export type { ClassifiedTerminalFailure } from './classifiedTerminalFailure';
 export type { DebugOpenFilter } from './debugOpenFilter';

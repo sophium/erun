@@ -326,6 +326,17 @@ type terminalExitPayload struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
+// aiActivityPayload mirrors the debounced AI-session "busy" signal that
+// the desktop sidebar uses to render a spinner on env rows whose AI tab
+// is actively producing output. Busy flips true after ~5 s of sustained
+// output and back to false after ~3 s of silence; see recordAIActivity.
+type aiActivityPayload struct {
+	SessionID   int    `json:"sessionId"`
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment"`
+	Busy        bool   `json:"busy"`
+}
+
 type appStatusPayload struct {
 	Message string `json:"message"`
 	Busy    bool   `json:"busy"`

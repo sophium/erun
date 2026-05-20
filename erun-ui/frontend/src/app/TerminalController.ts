@@ -18,6 +18,7 @@ import { appendDebugOutput as appendDebugOutputThunk } from './debugThunks';
 import { readError } from './errors';
 import { refreshIdleStatus } from './idleThunks';
 import type {
+  AIActivityPayload,
   AppStatusPayload,
   EnvironmentInitializedPayload,
   MountElements,
@@ -43,6 +44,7 @@ import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import { decodeDebugOutput } from './terminalStatus';
 import { thunkExtra } from './thunkExtra';
 import {
+  handleAIActivity,
   handleAppStatus,
   handleEnvironmentInitFailed,
   handleEnvironmentInitialized,
@@ -78,6 +80,7 @@ export class TerminalController {
   private environmentInitializedOff: (() => void) | null = null;
   private environmentInitFailedOff: (() => void) | null = null;
   private environmentsChangedOff: (() => void) | null = null;
+  private aiActivityOff: (() => void) | null = null;
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
 
   constructor() {
@@ -189,6 +192,9 @@ export class TerminalController {
     this.environmentsChangedOff = EventsOn('environments-changed', () => {
       void store.dispatch(reloadStateAfterEnvironmentChange());
     });
+    this.aiActivityOff = EventsOn('ai-activity', (payload: AIActivityPayload) => {
+      store.dispatch(handleAIActivity(payload));
+    });
 
     if (!this.bootStarted) {
       this.bootStarted = true;
@@ -228,6 +234,7 @@ export class TerminalController {
     this.environmentInitializedOff?.();
     this.environmentInitFailedOff?.();
     this.environmentsChangedOff?.();
+    this.aiActivityOff?.();
     this.terminalOutputOff = null;
     this.terminalExitOff = null;
     this.appStatusOff = null;
@@ -235,6 +242,7 @@ export class TerminalController {
     this.environmentInitializedOff = null;
     this.environmentInitFailedOff = null;
     this.environmentsChangedOff = null;
+    this.aiActivityOff = null;
   }
 
   focusTerminalSoon(): void {

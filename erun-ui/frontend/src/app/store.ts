@@ -18,6 +18,7 @@ import { persistenceMiddleware } from './middleware/persistenceMiddleware';
 import { selectionSyncMiddleware } from './middleware/selectionSyncMiddleware';
 import { terminalDisplayMiddleware } from './middleware/terminalDisplayMiddleware';
 import activityReducer from './slices/activitySlice';
+import aiActivityReducer from './slices/aiActivitySlice';
 import autoStartPromptReducer from './slices/autoStartPromptSlice';
 import doctorReducer from './slices/doctorSlice';
 import environmentDialogReducer from './slices/environmentDialogSlice';
@@ -52,6 +53,7 @@ export const store = configureStore({
     doctor: doctorReducer,
     idle: idleReducer,
     activity: activityReducer,
+    aiActivity: aiActivityReducer,
     tenants: tenantsReducer,
     environmentDialog: environmentDialogReducer,
     manageDialog: manageDialogReducer,
