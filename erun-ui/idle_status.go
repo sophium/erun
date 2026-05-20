@@ -68,6 +68,12 @@ func (a *App) idleStatusToUI(result eruncommon.OpenResult, status eruncommon.Env
 	ui.CloudContextName = strings.TrimSpace(cloudContext.Name)
 	ui.CloudContextStatus = strings.TrimSpace(cloudContext.Status)
 	ui.CloudContextLabel = cloudContextDisplayName(cloudContext)
+	// idle-stop.log on the pod persists across pod and host restarts. If the
+	// context is observably running again, the recorded error is from a
+	// previous lifetime and should not be advertised next to a healthy env.
+	if ui.CloudContextStatus == eruncommon.CloudContextStatusRunning {
+		ui.StopError = ""
+	}
 	return ui
 }
 
