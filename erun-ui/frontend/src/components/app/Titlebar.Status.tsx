@@ -14,8 +14,16 @@ import type { AppDispatch } from '@/app/store';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { idleCloudAction } from '@/components/app/Titlebar.helpers';
 import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+
+// Long error text (AWS/IAM/Helm/etc. messages) routinely runs over the
+// titlebar pill width. Anything past this threshold escalates the trigger
+// from a hover tooltip to a click-to-open popover with selectable content
+// — that's the only path that lets the user copy/select the error to
+// paste into a bug report (Nielsen #9: recovery from errors).
+const LONG_STATUS_THRESHOLD = 160;
 
 type TitlebarStatusKind =
   | NonNullable<AppState['notification']>['kind']
@@ -166,6 +174,9 @@ function statusIcon(status: TitlebarStatusValue): typeof LoaderCircle {
 
 function StatusMessage({ status }: { status: TitlebarStatusValue }): React.ReactElement {
   const fullText = status.detail ? `${status.message}. ${status.detail}` : status.message;
+  if (fullText.length > LONG_STATUS_THRESHOLD) {
+    return <StatusMessagePopover status={status} fullText={fullText} />;
+  }
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -182,6 +193,42 @@ function StatusMessage({ status }: { status: TitlebarStatusValue }): React.React
         {fullText}
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+function StatusMessagePopover({
+  status,
+  fullText,
+}: {
+  status: TitlebarStatusValue;
+  fullText: string;
+}): React.ReactElement {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="min-w-0 truncate rounded-sm border-0 bg-transparent p-0 text-left outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={`${fullText} (click to read full message)`}
+          data-testid="titlebar-status-message"
+        >
+          {status.message}
+          {status.detail && <span className="text-muted-foreground"> - {status.detail}</span>}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="bottom"
+        align="start"
+        className="w-[480px] max-w-[calc(100vw-2rem)] space-y-2 p-3"
+      >
+        <p
+          className="max-h-[40vh] overflow-auto select-text text-left text-[13px] leading-5 whitespace-pre-wrap"
+          data-testid="titlebar-status-full-text"
+        >
+          {fullText}
+        </p>
+      </PopoverContent>
+    </Popover>
   );
 }
 

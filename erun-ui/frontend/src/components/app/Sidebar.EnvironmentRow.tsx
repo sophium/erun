@@ -7,6 +7,7 @@ import { openManageDialog } from '@/app/manageEnvironmentThunks';
 import { showTerminalMessage } from '@/app/notificationThunks';
 import { openSelection } from '@/app/sessionThunks';
 import { envKey } from '@/app/slices/sessionsSlice';
+import { selectionKey } from '@/app/versionSuggestions';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { deriveEnvironmentRow } from '@/components/app/Sidebar.helpers';
 import { Button } from '@/components/ui/button';
@@ -106,6 +107,12 @@ export function EnvironmentRow({
     }
     return '';
   });
+  const aiBusy = useAppSelector(
+    (state) =>
+      state.aiActivity.aiBusyByEnv[
+        selectionKey({ tenant: tenantName, environment: environmentName })
+      ] === true,
+  );
   const { selected, busy, busyLabel, isLocal, selection } = deriveEnvironmentRow(
     tenantName,
     environmentName,
@@ -113,6 +120,7 @@ export function EnvironmentRow({
     tenants,
     isOpening,
     runningCommand,
+    aiBusy,
   );
 
   return (

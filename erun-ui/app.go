@@ -17,6 +17,7 @@ const (
 	environmentInitializedEvent = "environment-initialized"
 	environmentInitFailedEvent  = "environment-init-failed"
 	environmentsChangedEvent    = "environments-changed"
+	aiActivityEvent             = "ai-activity"
 	appSessionEnvVar            = "ERUN_UI_SESSION"
 )
 

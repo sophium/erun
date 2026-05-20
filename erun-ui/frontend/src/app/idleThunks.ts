@@ -1,8 +1,38 @@
+import type { UIIdleStatus, UISelection } from '@/types';
+
 import { idleApi } from './api/idleApi';
+import { restoreEnvTabsAfterContextRunning } from './envRestoreThunks';
 import { setIdleStatus } from './slices/idleSlice';
 import { bumpIdleStatus } from './slices/requestCountersSlice';
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
+
+// cloudContextStatusOf reads the lowercased cloud-context status from an
+// idle-status payload; "" means no managed cloud or no idle status.
+function cloudContextStatusOf(status: UIIdleStatus | null): string {
+  return (status?.cloudContextStatus ?? '').trim().toLowerCase();
+}
+
+// reactToCloudContextTransition fires the env-restore thunk when the
+// poll observes a non-running → running flip for the selected env.
+// tryReconnect refuses respawn while the context is stopped and drops
+// the AI/ERun tabs (see erun-ui/terminal_sessions.go:973); without an
+// explicit re-spawn on this transition, the env returns to Running but
+// its tabs stay gone. The titlebar Play button's success path already
+// re-opens; this catches the recovery-after-transient-error path where
+// the start command errored but the instance landed in Running anyway.
+function reactToCloudContextTransition(
+  previousStatus: string,
+  nextStatus: string,
+  selection: UISelection,
+): AppThunk {
+  return (dispatch) => {
+    if (nextStatus !== 'running' || previousStatus === '' || previousStatus === 'running') {
+      return;
+    }
+    void dispatch(restoreEnvTabsAfterContextRunning(selection));
+  };
+}
 
 function isRequestStillCurrent(
   request: number,
@@ -47,7 +77,10 @@ export const refreshIdleStatus =
         idleApi.endpoints.getIdleStatus.initiate(selection, { forceRefetch: true }),
       ).unwrap();
       if (isRequestStillCurrent(request, getState, selection)) {
+        const previousStatus = cloudContextStatusOf(getState().idle.idleStatus);
+        const nextStatus = cloudContextStatusOf(status);
         dispatch(setIdleStatus(status));
+        dispatch(reactToCloudContextTransition(previousStatus, nextStatus, selection));
       }
     } catch {
       if (isRequestStillCurrent(request, getState) && getState().idle.idleStatus) {

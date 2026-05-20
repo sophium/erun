@@ -41,17 +41,26 @@ export function deriveEnvironmentRow(
   tenants: AppState['tenants'],
   isOpening: boolean,
   runningCommand: string,
+  aiBusy: boolean,
 ): EnvironmentRowDerived {
   const selected =
     selectedSelection?.tenant === tenantName && selectedSelection.environment === environmentName;
   // busy reflects the per-env opening lifecycle AND any running activity
   // command (deploy, init, sshd init, doctor, ...) queued against the
-  // env. Either signal is independent of which env is currently
-  // selected, so concurrent work on multiple envs surfaces a spinner on
-  // every row that's actually doing something — not just the one in the
-  // active terminal.
-  const busy = isOpening || runningCommand !== '';
-  const busyLabel = environmentRowBusyLabel(tenantName, environmentName, isOpening, runningCommand);
+  // env, AND the debounced "AI tab is producing output" signal from
+  // recordAIActivity in the Go terminal layer. Every source is
+  // independent of which env is currently selected, so concurrent work
+  // on multiple envs (a deploy here + a Claude generation there)
+  // surfaces a spinner on every row that's actually doing something —
+  // not just the one in the active terminal.
+  const busy = isOpening || runningCommand !== '' || aiBusy;
+  const busyLabel = environmentRowBusyLabel(
+    tenantName,
+    environmentName,
+    isOpening,
+    runningCommand,
+    aiBusy,
+  );
   const environment = tenants
     .find((tenant) => tenant.name === tenantName)
     ?.environments.find((env) => env.name === environmentName);
@@ -70,6 +79,7 @@ function environmentRowBusyLabel(
   environmentName: string,
   isOpening: boolean,
   runningCommand: string,
+  aiBusy: boolean,
 ): string {
   const target = `${tenantName} / ${environmentName}`;
   if (runningCommand !== '') {
@@ -78,6 +88,9 @@ function environmentRowBusyLabel(
   }
   if (isOpening) {
     return `Opening ${target}`;
+  }
+  if (aiBusy) {
+    return `AI tab working on ${target}`;
   }
   return '';
 }

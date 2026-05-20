@@ -4,6 +4,7 @@ import { reloadStateAfterEnvironmentChange } from './bootThunks';
 import { appendDebugOutput } from './debugThunks';
 import { readError } from './errors';
 import type {
+  AIActivityPayload,
   AppStatusPayload,
   EnvironmentInitializedPayload,
   TerminalExitSelections,
@@ -16,6 +17,7 @@ import {
 } from './notificationThunks';
 import { selectEnvironmentExists, selectSelectedIsPendingFor } from './selectors';
 import { openSelection, selectTerminalTab } from './sessionThunks';
+import { setAIBusyForEnv } from './slices/aiActivitySlice';
 import { setDoctorAll } from './slices/doctorSlice';
 import { setReconnect } from './slices/reviewSlice';
 import { setSelected } from './slices/selectionSlice';
@@ -39,6 +41,24 @@ import { selectionKey } from './versionSuggestions';
 // exception is terminal-output, which still does its imperative xterm
 // write on the controller because the registry buffers + the live xterm
 // instance both live there.
+
+// handleAIActivity flips the per-env "AI tab is working" latch driven by
+// the Go-side debounced ai-activity event. The sidebar's env row picks
+// it up via deriveEnvironmentRow so a Claude/Codex generation in env A
+// is visible while the user is looking at env B. Nielsen #1 (visibility
+// of system status). See erun-ui/terminal_sessions.go: recordAIActivity
+// for the debounce policy.
+export const handleAIActivity =
+  (payload: AIActivityPayload): AppThunk =>
+  (dispatch) => {
+    const tenant = payload.tenant.trim();
+    const environment = payload.environment.trim();
+    if (!tenant || !environment) {
+      return;
+    }
+    const key = selectionKey({ tenant, environment });
+    dispatch(setAIBusyForEnv({ key, busy: payload.busy }));
+  };
 
 // handleAppStatus surfaces backend status lines as a busy-state terminal
 // message and mirrors them into the debug pane for forensics.
