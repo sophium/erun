@@ -32,7 +32,7 @@ type jetBrainsGatewayDoctorRepair struct {
 	idePath     string
 }
 
-func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), configStore common.ConfigStore, cloudDeps common.CloudDependencies, promptRunner PromptRunner) *cobra.Command {
+func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), configStore common.ConfigStore, cloudDeps common.CloudDependencies, cloudContextDeps common.CloudContextDependencies, promptRunner PromptRunner) *cobra.Command {
 	options := doctorOptions{}
 	cmd := &cobra.Command{
 		Use:           "doctor [tenant] [environment]",
@@ -41,7 +41,7 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDoctorCommand(commandContext(cmd), resolveOpen, configStore, cloudDeps, promptRunner, options, args)
+			return runDoctorCommand(commandContext(cmd), resolveOpen, configStore, cloudDeps, cloudContextDeps, promptRunner, options, args)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -57,7 +57,7 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 	return cmd
 }
 
-func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), configStore common.ConfigStore, cloudDeps common.CloudDependencies, promptRunner PromptRunner, options doctorOptions, args []string) error {
+func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), configStore common.ConfigStore, cloudDeps common.CloudDependencies, cloudContextDeps common.CloudContextDependencies, promptRunner PromptRunner, options doctorOptions, args []string) error {
 	// In-runtime invocations target a different surface entirely
 	// (remote-init recovery), and the root config they would inspect
 	// lives on the user's host, not in the pod. Short-circuit before
@@ -72,7 +72,7 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 	// recovery. The repair path here writes via SaveERunConfig +
 	// InitAWSCloudProvider; resolveOpen below picks up the healed
 	// state.
-	if _, err := runRootConfigDoctor(ctx, configStore, cloudDeps, promptRunner, options); err != nil {
+	if _, err := runRootConfigDoctor(ctx, configStore, cloudDeps, cloudContextDeps, promptRunner, options); err != nil {
 		return err
 	}
 	if doctorOnlyRepairConfig(options) {

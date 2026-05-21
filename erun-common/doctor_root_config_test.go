@@ -58,6 +58,8 @@ type inspectStore struct {
 	loadErr    error
 	tenants    []TenantConfig
 	tenantsErr error
+	envs       map[string][]EnvConfig
+	envsErr    error
 }
 
 func (s *inspectStore) LoadERunConfig() (ERunConfig, string, error) {
@@ -66,6 +68,13 @@ func (s *inspectStore) LoadERunConfig() (ERunConfig, string, error) {
 
 func (s *inspectStore) ListTenantConfigs() ([]TenantConfig, error) {
 	return s.tenants, s.tenantsErr
+}
+
+func (s *inspectStore) ListEnvConfigs(tenant string) ([]EnvConfig, error) {
+	if s.envsErr != nil {
+		return nil, s.envsErr
+	}
+	return s.envs[tenant], nil
 }
 
 // TestInspectRootConfigClean covers the happy path: every alias the
@@ -208,5 +217,155 @@ func TestInspectRootConfigMalformedAliasParsedFalse(t *testing.T) {
 	}
 	if result.OrphanedAliases[0].Parsed {
 		t.Fatalf("Parsed=true for malformed alias")
+	}
+}
+
+// TestInspectRootConfigSurfacesOrphanedCloudContext covers the case
+// the screenshot reproduced in real life: an env config names a
+// cloud-managed kubernetes context that the root config no longer
+// lists. The walk must aggregate references across multiple
+// tenants/envs into one OrphanedCloudContext entry and decode the
+// account/region from the erun naming convention.
+func TestInspectRootConfigSurfacesOrphanedCloudContext(t *testing.T) {
+	alias := CloudProviderAlias("alice", "020362606330", "aws")
+	store := &inspectStore{
+		config: ERunConfig{
+			CloudProviders: []CloudProviderConfig{{Alias: alias, Provider: CloudProviderAWS}},
+			// Note: NO matching CloudContextConfig — the env's
+			// KubernetesContext is an orphaned reference.
+		},
+		configPath: "/tmp/erun-config.yaml",
+		tenants: []TenantConfig{
+			{Name: "petios", CloudProviderAliases: []string{alias}, PrimaryCloudProviderAlias: alias},
+		},
+		envs: map[string][]EnvConfig{
+			"petios": {
+				{
+					Name:               "rihards-review",
+					KubernetesContext:  "erun-001-020362606330-eu-west-2",
+					CloudProviderAlias: alias,
+				},
+				{
+					Name:               "rihards-hotfix",
+					KubernetesContext:  "erun-001-020362606330-eu-west-2",
+					CloudProviderAlias: alias,
+				},
+			},
+		},
+	}
+	result, err := InspectRootConfig(store)
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	if len(result.OrphanedAliases) != 0 {
+		t.Fatalf("unexpected orphaned aliases: %v", result.OrphanedAliases)
+	}
+	if len(result.OrphanedContexts) != 1 {
+		t.Fatalf("orphan contexts: %d", len(result.OrphanedContexts))
+	}
+	orphan := result.OrphanedContexts[0]
+	if orphan.KubernetesContext != "erun-001-020362606330-eu-west-2" {
+		t.Fatalf("name: %q", orphan.KubernetesContext)
+	}
+	if orphan.AccountID != "020362606330" {
+		t.Fatalf("account: %q", orphan.AccountID)
+	}
+	if orphan.Region != "eu-west-2" {
+		t.Fatalf("region: %q", orphan.Region)
+	}
+	if orphan.CloudProviderAlias != alias {
+		t.Fatalf("alias: %q", orphan.CloudProviderAlias)
+	}
+	if len(orphan.ReferencedByEnvs) != 2 {
+		t.Fatalf("env refs: %v", orphan.ReferencedByEnvs)
+	}
+	if result.Complete() {
+		t.Fatalf("Complete() must be false when cloud-context orphans exist")
+	}
+}
+
+// TestInspectRootConfigSkipsLocalKubeContexts: a non-cloud env (no
+// CloudProviderAlias, ManagedCloud=false) must NOT register its
+// KubernetesContext as an orphan even when that name isn't in the
+// root config's CloudContexts. Otherwise every local orbstack/kind
+// env would show up as a doctor finding.
+func TestInspectRootConfigSkipsLocalKubeContexts(t *testing.T) {
+	store := &inspectStore{
+		config:     ERunConfig{},
+		configPath: "/tmp/erun-config.yaml",
+		tenants:    []TenantConfig{{Name: "team"}},
+		envs: map[string][]EnvConfig{
+			"team": {
+				{Name: "local", KubernetesContext: "orbstack"},
+			},
+		},
+	}
+	result, err := InspectRootConfig(store)
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	if len(result.OrphanedContexts) != 0 {
+		t.Fatalf("local env should not produce an orphan, got %v", result.OrphanedContexts)
+	}
+}
+
+// TestInspectRootConfigMatchesExistingCloudContext locks the
+// negative path: when the root config DOES carry a matching
+// CloudContextConfig (matched on either Name or KubernetesContext),
+// the env reference is healthy and does not register as an orphan.
+func TestInspectRootConfigMatchesExistingCloudContext(t *testing.T) {
+	alias := CloudProviderAlias("alice", "020362606330", "aws")
+	store := &inspectStore{
+		config: ERunConfig{
+			CloudProviders: []CloudProviderConfig{{Alias: alias, Provider: CloudProviderAWS}},
+			CloudContexts: []CloudContextConfig{{
+				Name:               "erun-001-020362606330-eu-west-2",
+				KubernetesContext:  "erun-001-020362606330-eu-west-2",
+				CloudProviderAlias: alias,
+				Region:             "eu-west-2",
+			}},
+		},
+		configPath: "/tmp/erun-config.yaml",
+		tenants:    []TenantConfig{{Name: "petios", CloudProviderAliases: []string{alias}, PrimaryCloudProviderAlias: alias}},
+		envs: map[string][]EnvConfig{
+			"petios": {
+				{Name: "review", KubernetesContext: "erun-001-020362606330-eu-west-2", CloudProviderAlias: alias},
+			},
+		},
+	}
+	result, err := InspectRootConfig(store)
+	if err != nil {
+		t.Fatalf("inspect: %v", err)
+	}
+	if len(result.OrphanedContexts) != 0 {
+		t.Fatalf("expected no orphans, got %v", result.OrphanedContexts)
+	}
+	if !result.Complete() {
+		t.Fatalf("Complete() must be true when all references resolve")
+	}
+}
+
+// TestParseErunCloudContextNameDecodesAccountAndRegion is a focused
+// test on the naming convention parser — region names contain
+// hyphens which the SplitN call has to handle correctly.
+func TestParseErunCloudContextNameDecodesAccountAndRegion(t *testing.T) {
+	cases := []struct {
+		name    string
+		account string
+		region  string
+	}{
+		{"erun-001-020362606330-eu-west-2", "020362606330", "eu-west-2"},
+		{"erun-99-123456789012-us-east-1", "123456789012", "us-east-1"},
+		{"orbstack", "", ""},
+		{"erun-1-tooshort-eu-west-1", "", ""},
+		{"erun-1-12345678901a-eu-west-1", "", ""},
+		{"erun-001", "", ""},
+		{"", "", ""},
+	}
+	for _, tc := range cases {
+		account, region := parseErunCloudContextName(tc.name)
+		if account != tc.account || region != tc.region {
+			t.Fatalf("%q -> (%q, %q), want (%q, %q)", tc.name, account, region, tc.account, tc.region)
+		}
 	}
 }

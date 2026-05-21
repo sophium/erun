@@ -331,6 +331,51 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/inspect_corrupted_root_config", normalize.Apply(result.Combined))
 	})
 
+	t.Run("inspect_orphaned_cloud_context", func(t *testing.T) {
+		// Reproduce the screenshot scenario: an env config names a
+		// cloud-managed kubernetes context that the root config no
+		// longer lists, and the env still carries the cloud provider
+		// alias. Doctor must surface the orphan with decoded account
+		// + region and the back-reference to the env.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "petios", "rihards-review")
+		tenantPath := filepath.Join(setup.ConfigHome, "erun", "petios", "config.yaml")
+		alias := "alice+020362606330@aws"
+		if err := os.WriteFile(tenantPath, []byte("projectroot: "+setup.Cwd+"\n"+
+			"name: petios\n"+
+			"defaultenvironment: rihards-review\n"+
+			"cloudprovideraliases:\n"+
+			"    - "+alias+"\n"+
+			"primarycloudprovideralias: "+alias+"\n"), 0o644); err != nil {
+			t.Fatalf("tenant: %v", err)
+		}
+		envPath := filepath.Join(setup.ConfigHome, "erun", "petios", "rihards-review", "config.yaml")
+		if err := os.WriteFile(envPath, []byte("name: rihards-review\n"+
+			"repopath: "+setup.Cwd+"\n"+
+			"kubernetescontext: erun-001-020362606330-eu-west-2\n"+
+			"cloudprovideralias: "+alias+"\n"+
+			"managedcloud: true\n"), 0o644); err != nil {
+			t.Fatalf("env: %v", err)
+		}
+		// Seed the root config with the provider so the alias side
+		// of the inspection stays clean — we only want the context
+		// orphan to surface here.
+		rootPath := filepath.Join(setup.ConfigHome, "erun", "config.yaml")
+		if err := os.WriteFile(rootPath, []byte("defaulttenant: petios\n"+
+			"cloudproviders:\n"+
+			"    - alias: "+alias+"\n"+
+			"      provider: aws\n"+
+			"      username: alice\n"+
+			"      accountid: \"020362606330\"\n"), 0o644); err != nil {
+			t.Fatalf("root: %v", err)
+		}
+		result := erun.Run(t, []string{"doctor", "--repair-config", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/inspect_orphaned_cloud_context", normalize.Apply(result.Combined))
+	})
+
 	t.Run("restore_config_from_backup_dry_run", func(t *testing.T) {
 		// Seed a 0-byte root config plus a healthy backup for
 		// 2026-05-19. Doctor with --restore-config-from-backup

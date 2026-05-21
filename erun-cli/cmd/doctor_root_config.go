@@ -30,7 +30,7 @@ func rootConfigSkipsInspection(inspection common.RootConfigInspection, options d
 // today the caller short-circuits on doctorOnlyRepairConfig(options)
 // regardless of outcome — that matches the user's mental model of
 // "I asked for config repair, do not also run tenant/env cleanup."
-func runRootConfigDoctor(ctx common.Context, configStore common.ConfigStore, cloudDeps common.CloudDependencies, promptRunner PromptRunner, options doctorOptions) (bool, error) {
+func runRootConfigDoctor(ctx common.Context, configStore common.ConfigStore, cloudDeps common.CloudDependencies, cloudContextDeps common.CloudContextDependencies, promptRunner PromptRunner, options doctorOptions) (bool, error) {
 	inspection, err := common.InspectRootConfig(configStore)
 	if err != nil {
 		return false, err
@@ -55,7 +55,7 @@ func runRootConfigDoctor(ctx common.Context, configStore common.ConfigStore, clo
 	if !shouldRepair {
 		return handled, nil
 	}
-	repaired, err := runRootConfigRepair(ctx, configStore, cloudDeps, promptRunner, inspection)
+	repaired, err := runRootConfigRepair(ctx, configStore, cloudDeps, cloudContextDeps, promptRunner, inspection)
 	return handled || repaired, err
 }
 
@@ -111,15 +111,36 @@ func writeRootConfigInspectionCounts(w *lineWriter, inspection common.RootConfig
 }
 
 func writeRootConfigInspectionOrphans(w *lineWriter, inspection common.RootConfigInspection) {
-	if len(inspection.OrphanedAliases) == 0 {
-		if inspection.ConfigStatus == common.RootConfigStatusOK {
-			w.Linef("  no orphaned cloud-provider aliases.")
+	switch {
+	case len(inspection.OrphanedAliases) > 0:
+		w.Linef("  orphaned aliases: %d", len(inspection.OrphanedAliases))
+		for _, orphan := range inspection.OrphanedAliases {
+			writeOrphanedAliasReport(w, orphan)
 		}
-		return
+	case inspection.ConfigStatus == common.RootConfigStatusOK && len(inspection.OrphanedContexts) == 0:
+		w.Linef("  no orphaned cloud-provider aliases.")
 	}
-	w.Linef("  orphaned aliases: %d", len(inspection.OrphanedAliases))
-	for _, orphan := range inspection.OrphanedAliases {
-		writeOrphanedAliasReport(w, orphan)
+	if len(inspection.OrphanedContexts) > 0 {
+		w.Linef("  orphaned cloud contexts: %d", len(inspection.OrphanedContexts))
+		for _, orphan := range inspection.OrphanedContexts {
+			writeOrphanedCloudContextReport(w, orphan)
+		}
+	}
+}
+
+func writeOrphanedCloudContextReport(w *lineWriter, orphan common.OrphanedCloudContext) {
+	w.Linef("    - %s", orphan.KubernetesContext)
+	if orphan.AccountID != "" && orphan.Region != "" {
+		w.Linef("        account=%s region=%s alias=%s", orphan.AccountID, orphan.Region, orphan.CloudProviderAlias)
+	} else {
+		w.Linef("        cannot decode account/region from name; AWS auto-recovery unavailable")
+	}
+	if len(orphan.ReferencedByEnvs) > 0 {
+		names := make([]string, 0, len(orphan.ReferencedByEnvs))
+		for _, ref := range orphan.ReferencedByEnvs {
+			names = append(names, ref.Tenant+"/"+ref.Environment)
+		}
+		w.Linef("        envs: %s", strings.Join(names, ", "))
 	}
 }
 
@@ -187,9 +208,10 @@ func shouldOfferRootConfigRepair(ctx common.Context, promptRunner PromptRunner, 
 }
 
 // runRootConfigRepair walks the user through restoring from a backup
-// (when one is available) and/or re-initializing every orphaned
-// cloud-provider alias.
-func runRootConfigRepair(ctx common.Context, configStore common.ConfigStore, cloudDeps common.CloudDependencies, promptRunner PromptRunner, inspection common.RootConfigInspection) (bool, error) {
+// (when one is available), re-initializing every orphaned cloud
+// provider alias, and recovering every orphaned cloud-context
+// reference from AWS.
+func runRootConfigRepair(ctx common.Context, configStore common.ConfigStore, cloudDeps common.CloudDependencies, cloudContextDeps common.CloudContextDependencies, promptRunner PromptRunner, inspection common.RootConfigInspection) (bool, error) {
 	inspection, restored, err := runRootConfigRepairRestore(ctx, configStore, promptRunner, inspection)
 	if err != nil {
 		return restored, err
@@ -201,8 +223,20 @@ func runRootConfigRepair(ctx common.Context, configStore common.ConfigStore, clo
 		_, err := fmt.Fprintln(ctx.Stdout, "Root config is not loadable and no backup was restored; resolve the file manually (or supply --restore-config-from-backup <date>) and re-run.")
 		return restored, err
 	}
+	return runRootConfigRepairOrphans(ctx, configStore, cloudDeps, cloudContextDeps, promptRunner, inspection, restored)
+}
+
+func runRootConfigRepairOrphans(ctx common.Context, configStore common.ConfigStore, cloudDeps common.CloudDependencies, cloudContextDeps common.CloudContextDependencies, promptRunner PromptRunner, inspection common.RootConfigInspection, restored bool) (bool, error) {
 	repaired, err := runRootConfigRepairAliases(ctx, configStore, cloudDeps, promptRunner, inspection)
-	return restored || repaired, err
+	if err != nil {
+		return restored || repaired, err
+	}
+	refreshed, refreshErr := common.InspectRootConfig(configStore)
+	if refreshErr != nil {
+		return restored || repaired, refreshErr
+	}
+	recoveredContexts, err := runRootConfigRepairContexts(ctx, configStore, cloudContextDeps, promptRunner, refreshed)
+	return restored || repaired || recoveredContexts, err
 }
 
 func runRootConfigRepairRestore(ctx common.Context, configStore common.ConfigStore, promptRunner PromptRunner, inspection common.RootConfigInspection) (common.RootConfigInspection, bool, error) {
@@ -235,6 +269,89 @@ func runRootConfigRepairAliases(ctx common.Context, configStore common.ConfigSto
 		}
 	}
 	return handled, nil
+}
+
+func runRootConfigRepairContexts(ctx common.Context, configStore common.ConfigStore, cloudContextDeps common.CloudContextDependencies, promptRunner PromptRunner, inspection common.RootConfigInspection) (bool, error) {
+	handled := false
+	for _, orphan := range inspection.OrphanedContexts {
+		recovered, err := offerOrphanedCloudContextRecovery(ctx, configStore, cloudContextDeps, promptRunner, orphan)
+		if err != nil {
+			return handled, err
+		}
+		if recovered {
+			handled = true
+		}
+	}
+	return handled, nil
+}
+
+// offerOrphanedCloudContextRecovery walks one orphaned cloud-context
+// reference through the recovery decision tree. The recovery itself
+// (AWS describe-instances + reconstruction + save) runs inside
+// common.RecoverCloudContextFromAWS; this function only handles the
+// CLI-side prompts and dry-run trace.
+func offerOrphanedCloudContextRecovery(ctx common.Context, configStore common.ConfigStore, cloudContextDeps common.CloudContextDependencies, promptRunner PromptRunner, orphan common.OrphanedCloudContext) (bool, error) {
+	if reason, blocked := contextRecoveryBlockedReason(orphan); blocked {
+		_, err := fmt.Fprintln(ctx.Stdout, reason)
+		return false, err
+	}
+	if !ctx.DryRun && promptRunner == nil {
+		_, err := fmt.Fprintf(ctx.Stdout, "Cannot recover cloud context %q non-interactively; re-run with a TTY or use --restore-config-from-backup <date>\n", orphan.KubernetesContext)
+		return false, err
+	}
+	if !ctx.DryRun {
+		label := fmt.Sprintf("Recover cloud context %s from AWS (account %s, region %s)?", orphan.KubernetesContext, orphan.AccountID, orphan.Region)
+		ok, err := confirmPrompt(promptRunner, label)
+		if err != nil || !ok {
+			return false, err
+		}
+	}
+	params := common.RecoverCloudContextParams{
+		KubernetesContext:  orphan.KubernetesContext,
+		CloudProviderAlias: orphan.CloudProviderAlias,
+		Region:             orphan.Region,
+	}
+	if _, err := fmt.Fprintf(ctx.Stdout, "Recovering cloud context %s...\n", orphan.KubernetesContext); err != nil {
+		return false, err
+	}
+	result, err := common.RecoverCloudContextFromAWS(ctx, configStore, params, cloudContextDeps)
+	if err != nil {
+		_, _ = fmt.Fprintf(ctx.Stdout, "Recovery failed for %s: %v\n", orphan.KubernetesContext, err)
+		return false, nil
+	}
+	writeCloudContextRecoverySummary(ctx, result)
+	return true, nil
+}
+
+func contextRecoveryBlockedReason(orphan common.OrphanedCloudContext) (string, bool) {
+	if strings.TrimSpace(orphan.AccountID) == "" || strings.TrimSpace(orphan.Region) == "" {
+		return fmt.Sprintf("Skipping context %q: name does not match the erun-<seq>-<account>-<region> shape, so AWS recovery cannot be auto-seeded", orphan.KubernetesContext), true
+	}
+	if strings.TrimSpace(orphan.CloudProviderAlias) == "" {
+		return fmt.Sprintf("Skipping context %q: env references it without a cloud provider alias, so AWS recovery cannot be authenticated", orphan.KubernetesContext), true
+	}
+	return "", false
+}
+
+func writeCloudContextRecoverySummary(ctx common.Context, result common.RecoverCloudContextResult) {
+	w := newLineWriter(ctx.Stdout)
+	w.Linef("Recovered cloud context %s from %s.", result.Saved.KubernetesContext, result.Source)
+	w.Linef("  instance: %s (%s)", result.Saved.InstanceID, result.Saved.InstanceType)
+	if result.Saved.PublicIP != "" {
+		w.Linef("  public ip: %s", result.Saved.PublicIP)
+	}
+	if result.Saved.DiskType != "" || result.Saved.DiskSizeGB != 0 {
+		w.Linef("  disk: %s %dG", result.Saved.DiskType, result.Saved.DiskSizeGB)
+	}
+	switch result.TokenFrom {
+	case "kubeconfig":
+		w.Linef("  admin token: restored from ~/.kube/config")
+	case "input":
+		w.Linef("  admin token: from --admin-token input")
+	case "none":
+		w.Linef("  admin token: NOT recovered — kubectl access will fail until you run `erun context init` for a fresh token or manually paste the existing one.")
+	}
+	_ = w.Err()
 }
 
 func offerRootConfigBackupRestore(ctx common.Context, promptRunner PromptRunner, inspection common.RootConfigInspection) (bool, error) {

@@ -449,7 +449,7 @@ func assembleTestRootCmd(parts testRootCmdParts) *cobra.Command {
 		newExecCmd(parts.findProjectRoot, parts.runGit, parts.deps.RunRawCommand),
 		newCloudCmd(testCloudStoreOrDefault(parts.store), parts.promptRunner, parts.selectRunner, common.CloudDependencies{}),
 		newListCmd(parts.listDataStore, parts.findProjectRoot),
-		newDoctorCmd(parts.resolveOpen, testConfigStoreOrDefault(parts.store), common.CloudDependencies{}, parts.promptRunner),
+		newDoctorCmd(parts.resolveOpen, testConfigStoreOrDefault(parts.store), common.CloudDependencies{}, common.CloudContextDependencies{}, parts.promptRunner),
 		newDeleteCmd(testDeleteStoreOrDefault(parts.store), parts.promptRunner, testNamespaceDeleterOrDefault(parts.deps.DeleteKubernetesNamespace)),
 		newReleaseCmd(parts.findProjectRoot, parts.runGit),
 		versionCmd,

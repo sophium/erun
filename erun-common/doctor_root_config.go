@@ -48,14 +48,39 @@ type OrphanedAlias struct {
 // state used by both the CLI doctor and the MCP doctor tool. It is
 // purely descriptive: nothing in this file performs side effects.
 type RootConfigInspection struct {
-	ConfigPath       string             `json:"configPath"`
-	ConfigStatus     RootConfigStatus   `json:"configStatus"`
-	ConfigError      string             `json:"configError,omitempty"`
-	OrphanedAliases  []OrphanedAlias    `json:"orphanedAliases,omitempty"`
-	Backups          []RootConfigBackup `json:"backups,omitempty"`
-	ConfiguredCount  int                `json:"configuredProviderCount"`
-	CloudContextHits int                `json:"cloudContextCount"`
-	TenantHits       int                `json:"tenantCount"`
+	ConfigPath       string                 `json:"configPath"`
+	ConfigStatus     RootConfigStatus       `json:"configStatus"`
+	ConfigError      string                 `json:"configError,omitempty"`
+	OrphanedAliases  []OrphanedAlias        `json:"orphanedAliases,omitempty"`
+	OrphanedContexts []OrphanedCloudContext `json:"orphanedCloudContexts,omitempty"`
+	Backups          []RootConfigBackup     `json:"backups,omitempty"`
+	ConfiguredCount  int                    `json:"configuredProviderCount"`
+	CloudContextHits int                    `json:"cloudContextCount"`
+	TenantHits       int                    `json:"tenantCount"`
+}
+
+// OrphanedCloudContextEnvRef records one (tenant, env) pair whose
+// EnvConfig.KubernetesContext names a cloud context that is missing
+// from the root config's CloudContexts list. The pair is what
+// doctor renders in its report so users can map "broken context"
+// back to "which env am I supposed to open?".
+type OrphanedCloudContextEnvRef struct {
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment"`
+}
+
+// OrphanedCloudContext aggregates every env reference for a single
+// missing cloud-context name and the cloud coordinates parseable
+// from the name itself (erun's naming convention encodes account ID
+// and region). The decoded fields exist so a future recovery flow
+// can describe the missing instance to AWS without making the user
+// retype anything.
+type OrphanedCloudContext struct {
+	KubernetesContext  string                       `json:"kubernetesContext"`
+	AccountID          string                       `json:"accountId,omitempty"`
+	Region             string                       `json:"region,omitempty"`
+	CloudProviderAlias string                       `json:"cloudProviderAlias,omitempty"`
+	ReferencedByEnvs   []OrphanedCloudContextEnvRef `json:"referencedByEnvs,omitempty"`
 }
 
 // Complete reports whether the root config is in a state the rest of
@@ -65,17 +90,21 @@ func (r RootConfigInspection) Complete() bool {
 	if r.ConfigStatus != RootConfigStatusOK {
 		return false
 	}
-	return len(r.OrphanedAliases) == 0
+	if len(r.OrphanedAliases) != 0 {
+		return false
+	}
+	return len(r.OrphanedContexts) == 0
 }
 
 // RootConfigInspectionStore is the read-only surface InspectRootConfig
 // needs. Kept narrow on purpose: the inspection must work even when
-// the root config is unloadable, so it leans on ListTenantConfigs
-// (which reads tenant-level files independently) and a direct
-// LoadERunConfig probe for the central file.
+// the root config is unloadable, so it leans on ListTenantConfigs +
+// ListEnvConfigs (which read tenant/env-level files independently)
+// and a direct LoadERunConfig probe for the central file.
 type RootConfigInspectionStore interface {
 	LoadERunConfig() (ERunConfig, string, error)
 	ListTenantConfigs() ([]TenantConfig, error)
+	ListEnvConfigs(tenant string) ([]EnvConfig, error)
 }
 
 // InspectRootConfig walks the root config and every tenant config to
@@ -200,23 +229,162 @@ func InspectRootConfig(store RootConfigInspectionStore) (RootConfigInspection, e
 		addOrphanContext(alias, cloudContext.Name, cloudContext.Region)
 	}
 
-	if len(orphans) == 0 {
-		return inspection, nil
+	if len(orphans) > 0 {
+		aliases := make([]string, 0, len(orphans))
+		for alias := range orphans {
+			aliases = append(aliases, alias)
+		}
+		sort.Strings(aliases)
+		for _, alias := range aliases {
+			entry := orphans[alias]
+			sort.Strings(entry.ReferencedByTenants)
+			sort.Slice(entry.ReferencedByCloudContexts, func(i, j int) bool {
+				return entry.ReferencedByCloudContexts[i].Name < entry.ReferencedByCloudContexts[j].Name
+			})
+			inspection.OrphanedAliases = append(inspection.OrphanedAliases, *entry)
+		}
 	}
-	aliases := make([]string, 0, len(orphans))
-	for alias := range orphans {
-		aliases = append(aliases, alias)
+
+	contextOrphans, err := collectOrphanedCloudContexts(store, config.CloudContexts, tenants)
+	if err != nil {
+		return RootConfigInspection{}, err
 	}
-	sort.Strings(aliases)
-	for _, alias := range aliases {
-		entry := orphans[alias]
-		sort.Strings(entry.ReferencedByTenants)
-		sort.Slice(entry.ReferencedByCloudContexts, func(i, j int) bool {
-			return entry.ReferencedByCloudContexts[i].Name < entry.ReferencedByCloudContexts[j].Name
-		})
-		inspection.OrphanedAliases = append(inspection.OrphanedAliases, *entry)
-	}
+	inspection.OrphanedContexts = contextOrphans
+
 	return inspection, nil
+}
+
+// collectOrphanedCloudContexts walks every env config and reports
+// kubernetescontext references that name a cloud-managed context
+// (the env carries a CloudProviderAlias) but no matching
+// CloudContextConfig exists in the root config. Local Kubernetes
+// targets (orbstack, docker-desktop, kind, ...) are skipped because
+// they are not erun-managed cloud contexts; the heuristic for
+// "cloud-managed" is "env has a non-empty CloudProviderAlias OR the
+// env is flagged ManagedCloud". Aggregates duplicate references so
+// a context shared by N envs becomes a single entry with N back-refs.
+func collectOrphanedCloudContexts(store RootConfigInspectionStore, existing []CloudContextConfig, tenants []TenantConfig) ([]OrphanedCloudContext, error) {
+	known := indexCloudContextsByKubernetesName(existing)
+	orphans := make(map[string]*OrphanedCloudContext)
+	for _, tenant := range tenants {
+		envs, err := store.ListEnvConfigs(tenant.Name)
+		if err != nil {
+			return nil, err
+		}
+		for _, env := range envs {
+			recordOrphanedCloudContext(orphans, known, tenant.Name, env)
+		}
+	}
+	if len(orphans) == 0 {
+		return nil, nil
+	}
+	names := make([]string, 0, len(orphans))
+	for name := range orphans {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	result := make([]OrphanedCloudContext, 0, len(names))
+	for _, name := range names {
+		entry := orphans[name]
+		sort.Slice(entry.ReferencedByEnvs, func(i, j int) bool {
+			if entry.ReferencedByEnvs[i].Tenant != entry.ReferencedByEnvs[j].Tenant {
+				return entry.ReferencedByEnvs[i].Tenant < entry.ReferencedByEnvs[j].Tenant
+			}
+			return entry.ReferencedByEnvs[i].Environment < entry.ReferencedByEnvs[j].Environment
+		})
+		result = append(result, *entry)
+	}
+	return result, nil
+}
+
+func indexCloudContextsByKubernetesName(contexts []CloudContextConfig) map[string]struct{} {
+	known := make(map[string]struct{}, 2*len(contexts))
+	for _, c := range contexts {
+		if name := strings.TrimSpace(c.Name); name != "" {
+			known[name] = struct{}{}
+		}
+		if k := strings.TrimSpace(c.KubernetesContext); k != "" {
+			known[k] = struct{}{}
+		}
+	}
+	return known
+}
+
+func recordOrphanedCloudContext(orphans map[string]*OrphanedCloudContext, known map[string]struct{}, tenantName string, env EnvConfig) {
+	if !envExpectsCloudContext(env) {
+		return
+	}
+	kubeContext := strings.TrimSpace(env.KubernetesContext)
+	if kubeContext == "" {
+		return
+	}
+	if _, ok := known[kubeContext]; ok {
+		return
+	}
+	entry := orphans[kubeContext]
+	if entry == nil {
+		account, region := parseErunCloudContextName(kubeContext)
+		entry = &OrphanedCloudContext{
+			KubernetesContext:  kubeContext,
+			AccountID:          account,
+			Region:             region,
+			CloudProviderAlias: strings.TrimSpace(env.CloudProviderAlias),
+		}
+		orphans[kubeContext] = entry
+	}
+	ref := OrphanedCloudContextEnvRef{
+		Tenant:      strings.TrimSpace(tenantName),
+		Environment: strings.TrimSpace(env.Name),
+	}
+	for _, existing := range entry.ReferencedByEnvs {
+		if existing == ref {
+			return
+		}
+	}
+	entry.ReferencedByEnvs = append(entry.ReferencedByEnvs, ref)
+}
+
+// envExpectsCloudContext is the heuristic that separates local
+// kubernetes targets (orbstack, kind, ...) from erun-managed cloud
+// contexts: a non-empty CloudProviderAlias or ManagedCloud=true is
+// the signal that the env is supposed to be backed by a managed
+// CloudContextConfig. Without this gate every env on the box would
+// look like an orphan reference whenever a local kube context name
+// did not appear in CloudContexts.
+func envExpectsCloudContext(env EnvConfig) bool {
+	if strings.TrimSpace(env.CloudProviderAlias) != "" {
+		return true
+	}
+	return env.ManagedCloud
+}
+
+// parseErunCloudContextName recognises erun's own naming convention
+// for managed cloud contexts: "erun-<seq>-<accountid>-<region>" where
+// <region> may itself contain hyphens (e.g. "eu-west-2"). The
+// account ID is a 12-digit AWS identifier. Returns ("", "") for any
+// name that does not match — the caller still records the orphan,
+// just without decoded coordinates the recovery flow could lean on.
+func parseErunCloudContextName(name string) (string, string) {
+	name = strings.TrimSpace(name)
+	if !strings.HasPrefix(name, "erun-") {
+		return "", ""
+	}
+	rest := strings.TrimPrefix(name, "erun-")
+	parts := strings.SplitN(rest, "-", 3)
+	if len(parts) < 3 {
+		return "", ""
+	}
+	accountID := strings.TrimSpace(parts[1])
+	region := strings.TrimSpace(parts[2])
+	if len(accountID) != 12 {
+		return "", ""
+	}
+	for _, c := range accountID {
+		if c < '0' || c > '9' {
+			return "", ""
+		}
+	}
+	return accountID, region
 }
 
 func newOrphanedAlias(alias string) *OrphanedAlias {
