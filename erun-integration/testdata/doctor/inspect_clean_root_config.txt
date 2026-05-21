@@ -1,0 +1,5 @@
+Root config: <TMP> (status=ok)
+  cloud providers configured: 0
+  cloud contexts: 0, tenants: 1
+  no orphaned cloud-provider aliases.
+audit: erun doctor --dry-run --repair-config

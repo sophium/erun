@@ -153,6 +153,39 @@ func CloudProviderAlias(username, accountID, provider string) string {
 	return username + "+" + accountID + "@" + provider
 }
 
+// ParseCloudProviderAlias is the inverse of CloudProviderAlias. It
+// splits a "username+accountid@provider" string into its three
+// components. Used by the doctor's root-config repair flow to seed
+// a fresh InitAWSCloudProviderParams from a dangling alias reference
+// when the underlying CloudProviderConfig has been lost from
+// erun-config but the tenant or cloud-context still names it.
+//
+// Returns ok=false when the alias does not match the documented
+// shape — callers should treat that as "cannot auto-repair, prompt
+// the user to recreate from scratch."
+func ParseCloudProviderAlias(alias string) (username, accountID, provider string, ok bool) {
+	alias = strings.TrimSpace(alias)
+	if alias == "" {
+		return "", "", "", false
+	}
+	at := strings.LastIndex(alias, "@")
+	if at <= 0 || at == len(alias)-1 {
+		return "", "", "", false
+	}
+	left := alias[:at]
+	provider = strings.ToLower(strings.TrimSpace(alias[at+1:]))
+	plus := strings.LastIndex(left, "+")
+	if plus <= 0 || plus == len(left)-1 {
+		return "", "", "", false
+	}
+	username = strings.TrimSpace(left[:plus])
+	accountID = strings.TrimSpace(left[plus+1:])
+	if username == "" || accountID == "" || provider == "" {
+		return "", "", "", false
+	}
+	return username, accountID, provider, true
+}
+
 func ListCloudProviders(store CloudReadStore) ([]CloudProviderConfig, error) {
 	if store == nil {
 		return nil, fmt.Errorf("store is required")

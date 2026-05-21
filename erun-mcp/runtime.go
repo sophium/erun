@@ -40,11 +40,12 @@ type RuntimeConfig struct {
 }
 
 type CommandOutput struct {
-	Executed         bool     `json:"executed"`
-	WorkingDirectory string   `json:"workingDirectory,omitempty"`
-	Trace            []string `json:"trace,omitempty"`
-	Stdout           string   `json:"stdout,omitempty"`
-	Stderr           string   `json:"stderr,omitempty"`
+	Executed         bool                    `json:"executed"`
+	WorkingDirectory string                  `json:"workingDirectory,omitempty"`
+	Trace            []string                `json:"trace,omitempty"`
+	Stdout           string                  `json:"stdout,omitempty"`
+	Stderr           string                  `json:"stderr,omitempty"`
+	RootConfig       *DoctorRootConfigReport `json:"rootConfig,omitempty"`
 }
 
 var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*m`)
