@@ -90,6 +90,16 @@ func testCloudStoreOrDefault(store rootStore) cloudCommandStoreInterface {
 	return cloudStore
 }
 
+// testConfigStoreOrDefault feeds the doctor command a concrete
+// ConfigStore in tests. The doctor's root-config inspection path only
+// needs LoadERunConfig + ListTenantConfigs, both of which the real
+// ConfigStore satisfies against the test home directory set up by
+// env.New. Most cmd-level tests do not exercise the inspection path,
+// but the fall-through still requires a non-nil store.
+func testConfigStoreOrDefault(store rootStore) common.ConfigStore {
+	return common.ConfigStore{}
+}
+
 func testDeleteStoreOrDefault(store rootStore) common.DeleteStore {
 	deleteStore, ok := any(store).(common.DeleteStore)
 	if !ok {
@@ -439,7 +449,7 @@ func assembleTestRootCmd(parts testRootCmdParts) *cobra.Command {
 		newExecCmd(parts.findProjectRoot, parts.runGit, parts.deps.RunRawCommand),
 		newCloudCmd(testCloudStoreOrDefault(parts.store), parts.promptRunner, parts.selectRunner, common.CloudDependencies{}),
 		newListCmd(parts.listDataStore, parts.findProjectRoot),
-		newDoctorCmd(parts.resolveOpen, parts.promptRunner),
+		newDoctorCmd(parts.resolveOpen, testConfigStoreOrDefault(parts.store), common.CloudDependencies{}, parts.promptRunner),
 		newDeleteCmd(testDeleteStoreOrDefault(parts.store), parts.promptRunner, testNamespaceDeleterOrDefault(parts.deps.DeleteKubernetesNamespace)),
 		newReleaseCmd(parts.findProjectRoot, parts.runGit),
 		versionCmd,

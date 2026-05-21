@@ -14,13 +14,15 @@ import (
 )
 
 type doctorOptions struct {
-	pruneImages            bool
-	pruneBuildCache        bool
-	pruneContainers        bool
-	repairJetBrainsGateway bool
-	finishRemoteInit       bool
-	remoteRepositoryURL    string
-	codeCommitSSHKeyID     string
+	pruneImages             bool
+	pruneBuildCache         bool
+	pruneContainers         bool
+	repairJetBrainsGateway  bool
+	repairConfig            bool
+	restoreConfigFromBackup string
+	finishRemoteInit        bool
+	remoteRepositoryURL     string
+	codeCommitSSHKeyID      string
 }
 
 type jetBrainsGatewayDoctorRepair struct {
@@ -30,7 +32,7 @@ type jetBrainsGatewayDoctorRepair struct {
 	idePath     string
 }
 
-func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), promptRunner PromptRunner) *cobra.Command {
+func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), configStore common.ConfigStore, cloudDeps common.CloudDependencies, promptRunner PromptRunner) *cobra.Command {
 	options := doctorOptions{}
 	cmd := &cobra.Command{
 		Use:           "doctor [tenant] [environment]",
@@ -39,7 +41,7 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runDoctorCommand(commandContext(cmd), resolveOpen, promptRunner, options, args)
+			return runDoctorCommand(commandContext(cmd), resolveOpen, configStore, cloudDeps, promptRunner, options, args)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -47,16 +49,36 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 	cmd.Flags().BoolVar(&options.pruneBuildCache, "prune-build-cache", false, "Prune unused BuildKit cache without prompting")
 	cmd.Flags().BoolVar(&options.pruneContainers, "prune-containers", false, "Prune stopped Docker containers without prompting")
 	cmd.Flags().BoolVar(&options.repairJetBrainsGateway, "repair-jetbrains-gateway", false, "Clear cached JetBrains Gateway backend metadata for this environment")
+	cmd.Flags().BoolVar(&options.repairConfig, "repair-config", false, "Inspect the root erun config and offer to restore from backup or re-init orphaned cloud provider aliases; stops before running tenant/env cleanup actions")
+	cmd.Flags().StringVar(&options.restoreConfigFromBackup, "restore-config-from-backup", "", "Restore the root erun config from a dated backup non-interactively (YYYY-MM-DD or absolute path)")
 	cmd.Flags().BoolVar(&options.finishRemoteInit, "finish-remote-init", false, "Finish unfinished remote init tasks without prompting (only takes effect when run inside a runtime pod)")
 	cmd.Flags().StringVar(&options.remoteRepositoryURL, "remote-repository-url", "", "Git remote URL to use when finishing an unfinished remote init")
 	cmd.Flags().StringVar(&options.codeCommitSSHKeyID, "codecommit-ssh-key-id", "", "CodeCommit SSH public key ID to use when finishing an unfinished remote init for an AWS CodeCommit repository")
 	return cmd
 }
 
-func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), promptRunner PromptRunner, options doctorOptions, args []string) error {
+func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (common.OpenResult, error), configStore common.ConfigStore, cloudDeps common.CloudDependencies, promptRunner PromptRunner, options doctorOptions, args []string) error {
+	// In-runtime invocations target a different surface entirely
+	// (remote-init recovery), and the root config they would inspect
+	// lives on the user's host, not in the pod. Short-circuit before
+	// the host-side checks fire.
 	if common.IsInRuntimeEnvironment(os.Getenv) {
 		return runDoctorInRuntime(ctx, promptRunner, options)
 	}
+
+	// Run the root-config inspection before any tenant/env work so a
+	// broken root config (the failure mode that motivated this flow:
+	// missing CloudProviders blocking resolveOpen) does not prevent
+	// recovery. The repair path here writes via SaveERunConfig +
+	// InitAWSCloudProvider; resolveOpen below picks up the healed
+	// state.
+	if _, err := runRootConfigDoctor(ctx, configStore, cloudDeps, promptRunner, options); err != nil {
+		return err
+	}
+	if doctorOnlyRepairConfig(options) {
+		return nil
+	}
+
 	params, err := common.OpenParamsForArgs(args)
 	if err != nil {
 		return err
@@ -77,6 +99,20 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 		return nil
 	}
 	return runDoctorCleanupActions(ctx, promptRunner, result, options)
+}
+
+// doctorOnlyRepairConfig mirrors doctorOnlySelectedJetBrainsGatewayRepair:
+// when the only repair-style flag set is --repair-config (or
+// --restore-config-from-backup), the doctor flow should stop after
+// the root-config work instead of also attempting tenant/env cleanup.
+func doctorOnlyRepairConfig(options doctorOptions) bool {
+	repairOnly := options.repairConfig || strings.TrimSpace(options.restoreConfigFromBackup) != ""
+	return repairOnly &&
+		!options.pruneImages &&
+		!options.pruneBuildCache &&
+		!options.pruneContainers &&
+		!options.repairJetBrainsGateway &&
+		!options.finishRemoteInit
 }
 
 func runDoctorCleanupActions(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, options doctorOptions) error {

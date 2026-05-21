@@ -1,0 +1,10 @@
+Root config: <TMP> (status=ok)
+  cloud providers configured: 0
+  cloud contexts: 0, tenants: 1
+  orphaned aliases: 1
+    - alice+1234567890@aws
+        provider=aws account=1234567890 user=alice
+        tenants: team
+Dry-run: would re-initialize AWS provider for alias alice+1234567890@aws (account 1234567890, user alice)
+audit: erun doctor --dry-run --repair-config
+doctor repair-config: would re-init aws cloud provider alias=alice+1234567890@aws account=1234567890 user=alice region=
