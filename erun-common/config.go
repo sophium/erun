@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -419,7 +420,15 @@ func SaveERunConfig(config ERunConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
-	if err := os.WriteFile(configFilePath, data, 0o644); err != nil {
+	// Capture today's snapshot of the previous live file before we
+	// overwrite it. Best-effort: a backup failure must not block the
+	// save (the bug we are guarding against is data loss, and refusing
+	// to save when the backup directory is full would itself cause
+	// data loss). The implementation is idempotent on repeated saves
+	// within one local day.
+	_ = writeRootConfigBackupIfDue(configFilePath, timeNow)
+
+	if err := writeFileAtomic(configFilePath, data, 0o644); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -436,6 +445,16 @@ func LoadERunConfig() (ERunConfig, string, error) {
 	data, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return config, configFilePath, ErrNotInitialized
+	}
+
+	// A zero-length file is the residue of an interrupted non-atomic
+	// write. Treating it as "successfully loaded empty config" lets
+	// the next writer rebuild a fresh ERunConfig{} with only the
+	// field it cares about, silently dropping every other section.
+	// Surface it as corruption so callers route into the doctor
+	// recovery path instead.
+	if len(bytes.TrimSpace(data)) == 0 {
+		return config, configFilePath, ErrConfigCorrupted
 	}
 
 	if err := yaml.Unmarshal(data, &config); err != nil {
@@ -461,7 +480,7 @@ func SaveTenantConfig(config TenantConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
-	if err := os.WriteFile(configFilePath, data, 0o644); err != nil {
+	if err := writeFileAtomic(configFilePath, data, 0o644); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -498,6 +517,10 @@ func LoadTenantConfig(tenant string) (TenantConfig, string, error) {
 	data, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return config, configFilePath, ErrNotInitialized
+	}
+
+	if len(bytes.TrimSpace(data)) == 0 {
+		return config, configFilePath, ErrConfigCorrupted
 	}
 
 	if err := yaml.Unmarshal(data, &config); err != nil {
@@ -562,7 +585,7 @@ func SaveEnvConfig(tenant string, config EnvConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
-	if err := os.WriteFile(configFilePath, data, 0o644); err != nil {
+	if err := writeFileAtomic(configFilePath, data, 0o644); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -591,6 +614,10 @@ func LoadEnvConfig(tenant, envName string) (EnvConfig, string, error) {
 	data, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return config, configFilePath, ErrNotInitialized
+	}
+
+	if len(bytes.TrimSpace(data)) == 0 {
+		return config, configFilePath, ErrConfigCorrupted
 	}
 
 	if err := yaml.Unmarshal(data, &config); err != nil {
@@ -655,7 +682,7 @@ func SaveProjectConfig(projectRoot string, config ProjectConfig) error {
 		return ErrFailedToSaveConfig
 	}
 
-	if err := os.WriteFile(configFilePath, data, 0o644); err != nil {
+	if err := writeFileAtomic(configFilePath, data, 0o644); err != nil {
 		return ErrFailedToSaveConfig
 	}
 
@@ -672,6 +699,10 @@ func LoadProjectConfig(projectRoot string) (ProjectConfig, string, error) {
 	data, err := os.ReadFile(configFilePath)
 	if err != nil {
 		return config, configFilePath, ErrNotInitialized
+	}
+
+	if len(bytes.TrimSpace(data)) == 0 {
+		return config, configFilePath, ErrConfigCorrupted
 	}
 
 	if err := yaml.Unmarshal(data, &config); err != nil {
@@ -711,4 +742,47 @@ func projectConfigPath(projectRoot string) (string, error) {
 		return "", ErrNotInGitRepository
 	}
 	return filepath.Join(filepath.Clean(projectRoot), projectConfigDir, configFile), nil
+}
+
+// writeFileAtomic writes data to a sibling temp file in the same
+// directory as path, fsyncs the contents, then renames it over the
+// destination. The rename is atomic on POSIX filesystems when source
+// and destination share a filesystem, which is guaranteed here because
+// the temp file is created in filepath.Dir(path). A crash or process
+// kill between the create and the rename leaves either the previous
+// contents intact or no change at all — never a 0-byte or partially
+// written file. Replaces the previous os.WriteFile (O_TRUNC|O_WRONLY)
+// path which produced exactly that hazard on interruption.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpName, perm); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }

@@ -1,0 +1,12 @@
+Root config: <TMP> (status=corrupted)
+  load error: config file cannot be unmarshaled
+  available backups (newest first):
+    - 2026-05-19 path=<TMP>
+Dry-run: would restore root config from <TMP>
+Root config: <TMP> (status=corrupted)
+  load error: config file cannot be unmarshaled
+  available backups (newest first):
+    - 2026-05-19 path=<TMP>
+Run `erun doctor --repair-config` to walk through restoring the root config or re-initializing orphaned cloud provider aliases.
+audit: erun doctor --dry-run --restore-config-from-backup 2026-05-19
+cp <TMP> <TMP>

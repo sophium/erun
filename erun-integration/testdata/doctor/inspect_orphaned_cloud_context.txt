@@ -1,0 +1,15 @@
+Root config: <TMP> (status=ok)
+  cloud providers configured: 1
+  cloud contexts: 0, tenants: 1
+  orphaned cloud contexts: 1
+    - erun-001-020362606330-eu-west-2
+        account=020362606330 region=eu-west-2 alias=alice+020362606330@aws
+        envs: petios/rihards-review
+Recovering cloud context erun-001-020362606330-eu-west-2...
+Recovered cloud context erun-001-020362606330-eu-west-2 from aws-describe-instances.
+  instance: i-<recovered> (c8gd.2xlarge)
+  public ip: <VERSION>.10
+  admin token: NOT recovered — kubectl access will fail until you run `erun context init` for a fresh token or manually paste the existing one.
+audit: erun doctor --dry-run --repair-config
+aws ec2 describe-instances --filters 'Name=tag:Name,Values=erun-001-020362606330-eu-west-2' 'Name=instance-state-name,Values=pending,running,stopping,stopped' --output json --region eu-west-2
+write-yaml 'erun-config:cloudcontext erun-001-020362606330-eu-west-2'
