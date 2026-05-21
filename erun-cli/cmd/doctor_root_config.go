@@ -48,7 +48,7 @@ func runRootConfigDoctor(ctx common.Context, configStore common.ConfigStore, clo
 	if handled && inspection.Complete() {
 		return true, nil
 	}
-	shouldRepair, err := shouldOfferRootConfigRepair(ctx, inspection, options)
+	shouldRepair, err := shouldOfferRootConfigRepair(ctx, promptRunner, inspection, options)
 	if err != nil {
 		return handled, err
 	}
@@ -165,23 +165,25 @@ func formatOrphanedContexts(refs []common.OrphanedAliasContextRef) string {
 }
 
 // shouldOfferRootConfigRepair gates whether to enter the repair flow.
-// Auto-detect only surfaces the inspection report and a suggestion;
-// the actual repair (which prompts per orphan and may launch the
-// interactive cloud-init SSO flow) only runs when the user opted in
-// explicitly via --repair-config. Removing the "Repair root erun
-// config now?" general prompt was a deliberate UX choice: with one
-// orphan the per-alias prompt would have asked the same question
-// twice in a row, and even with many orphans the per-alias prompt
-// is the actionable confirmation.
-func shouldOfferRootConfigRepair(ctx common.Context, inspection common.RootConfigInspection, options doctorOptions) (bool, error) {
+// On an interactive terminal we enter the repair flow whenever there
+// is something to fix, even without --repair-config — the per-alias
+// prompt below is the only confirmation the user has to answer, so
+// the experience is "inspect, see the problem, confirm the fix" in
+// a single step. Dry-run and non-interactive runs cannot prompt, so
+// they print the suggestion line and exit the root-config flow; the
+// explicit --repair-config flag is what the suggestion points at.
+func shouldOfferRootConfigRepair(ctx common.Context, promptRunner PromptRunner, inspection common.RootConfigInspection, options doctorOptions) (bool, error) {
 	if inspection.Complete() {
 		return false, nil
 	}
 	if options.repairConfig {
 		return true, nil
 	}
-	_, err := fmt.Fprintln(ctx.Stdout, "Run `erun doctor --repair-config` to walk through restoring the root config or re-initializing orphaned cloud provider aliases.")
-	return false, err
+	if ctx.DryRun || promptRunner == nil {
+		_, err := fmt.Fprintln(ctx.Stdout, "Run `erun doctor --repair-config` to walk through restoring the root config or re-initializing orphaned cloud provider aliases.")
+		return false, err
+	}
+	return true, nil
 }
 
 // runRootConfigRepair walks the user through restoring from a backup
