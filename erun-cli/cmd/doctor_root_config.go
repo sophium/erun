@@ -339,10 +339,9 @@ func runOrphanRepairDryRun(ctx common.Context, orphan common.OrphanedAlias) (boo
 }
 
 func runOrphanRepair(ctx common.Context, configStore common.ConfigStore, cloudDeps common.CloudDependencies, promptRunner PromptRunner, orphan common.OrphanedAlias) (bool, error) {
-	params := common.InitAWSCloudProviderParams{
-		Username:  orphan.Username,
-		AccountID: orphan.AccountID,
-		Region:    preferredRegionForOrphan(orphan),
+	params, err := buildOrphanRepairParams(ctx, orphan)
+	if err != nil {
+		return false, err
 	}
 	if _, err := fmt.Fprintf(ctx.Stdout, "Re-initializing AWS provider for alias %s...\n", orphan.Alias); err != nil {
 		return false, err
@@ -351,6 +350,79 @@ func runOrphanRepair(ctx common.Context, configStore common.ConfigStore, cloudDe
 		return false, err
 	}
 	return true, nil
+}
+
+// buildOrphanRepairParams seeds InitAWSCloudProviderParams from the
+// orphan plus whatever ~/.aws/config already knows about the same
+// account. The discovery is a UX optimization: the user usually has
+// an SSO profile registered for the orphaned account already (the
+// previous erun-sso-* profile that wrote the now-missing root
+// config), and that profile carries the SSO start URL + SSO region
+// erun cannot derive from the alias string alone.
+//
+// On a miss the user is pointed at the canonical lookup steps so
+// they can find the SSO start URL without leaving the prompt — the
+// help text is the value-add even when discovery itself produces
+// nothing.
+func buildOrphanRepairParams(ctx common.Context, orphan common.OrphanedAlias) (common.InitAWSCloudProviderParams, error) {
+	w := newLineWriter(ctx.Stdout)
+	params := common.InitAWSCloudProviderParams{
+		Username:  orphan.Username,
+		AccountID: orphan.AccountID,
+		Region:    preferredRegionForOrphan(orphan),
+	}
+	profile, ok, err := common.LookupAWSSSOProfileByAccountID(orphan.AccountID)
+	if err != nil {
+		w.Linef("Note: could not scan ~/.aws/config for SSO defaults: %v", err)
+		writeSSOLookupHelp(w, orphan)
+		return params, w.Err()
+	}
+	if !ok {
+		w.Linef("No SSO profile found in ~/.aws/config for account %s.", orphan.AccountID)
+		writeSSOLookupHelp(w, orphan)
+		return params, w.Err()
+	}
+	applyOrphanRepairProfile(w, &params, profile)
+	if params.SSOStartURL == "" {
+		writeSSOLookupHelp(w, orphan)
+	}
+	return params, w.Err()
+}
+
+func applyOrphanRepairProfile(w *lineWriter, params *common.InitAWSCloudProviderParams, profile common.AWSSSOProfile) {
+	w.Linef("Found existing AWS SSO profile %q in ~/.aws/config; pre-filling defaults you can edit or accept with Enter.", profile.Profile)
+	if profile.SSOStartURL != "" {
+		params.SSOStartURL = profile.SSOStartURL
+		w.Linef("  sso_start_url = %s", profile.SSOStartURL)
+	}
+	if profile.SSORegion != "" {
+		params.SSORegion = profile.SSORegion
+		w.Linef("  sso_region    = %s", profile.SSORegion)
+	}
+	if profile.RoleName != "" {
+		params.RoleName = profile.RoleName
+		w.Linef("  sso_role_name = %s", profile.RoleName)
+	}
+	if params.Region == "" && profile.Region != "" {
+		params.Region = profile.Region
+		w.Linef("  region        = %s", profile.Region)
+	}
+}
+
+// writeSSOLookupHelp prints a short, copy-pasteable cheat sheet so a
+// user who does not know their SSO portal URL can recover without
+// abandoning the prompt. The block is deliberately terse — three
+// pointers, one example shape — to stay readable beside the prompt
+// itself.
+func writeSSOLookupHelp(w *lineWriter, orphan common.OrphanedAlias) {
+	w.Linef("Where to find your AWS SSO start URL:")
+	w.Linef("  1. `grep -E 'sso_start_url|sso_region' ~/.aws/config` — fastest if you have ever run `aws sso login`.")
+	w.Linef("  2. AWS Console → IAM Identity Center → Settings → AWS access portal URL.")
+	w.Linef("  3. The IAM Identity Center invitation email your admin sent when this account was provisioned.")
+	w.Linef("  Format: https://<id>.awsapps.com/start (or your org's custom domain).")
+	if orphan.AccountID != "" {
+		w.Linef("  Target account: %s", orphan.AccountID)
+	}
 }
 
 func preferredRegionForOrphan(orphan common.OrphanedAlias) string {
