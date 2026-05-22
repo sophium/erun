@@ -944,6 +944,20 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 		return false
 	}
 
+	// Cap consecutive fast-exit respawns. Without this, an env whose
+	// underlying cluster keeps tearing down the freshly-spawned pod
+	// (helm rollout timeouts, MCP port-forward races against a
+	// terminating instance, etc.) loops indefinitely — each respawn
+	// re-runs `erun open`, which deploys, fails again in seconds, and
+	// exits. The user sees N stacked "Deploy failed after Ns" entries
+	// in the activity drawer and a wall of "── reconnecting ──"
+	// markers in the terminal. Stop after the cap and surface a
+	// single explicit retry affordance. See issue #361.
+	if a.trackExitForLoopGuard(managed) {
+		a.emitReconnectLoopMarker(managed.serial)
+		return false
+	}
+
 	a.emitReconnectMarker(managed.serial, exitReason)
 	next, err := respawn()
 	if err != nil {
@@ -1036,6 +1050,57 @@ func (a *App) emitReconnectMarker(sessionID int, exitReason string) {
 	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(marker)),
+	})
+}
+
+// reconnectLoopWindow and reconnectLoopMaxExits define the fast-exit
+// loop guard: once the managed PTY has logged more than
+// reconnectLoopMaxExits exits inside reconnectLoopWindow,
+// tryReconnect stops respawning and surfaces the retry marker
+// instead. The numbers are picked to absorb a couple of legitimate
+// transient blips (an `erun open` retrying past a momentary AWS
+// describe-instances error, for example) without leaving the user
+// staring at a terminal of stacked reconnect noise. See issue #361.
+const (
+	reconnectLoopWindow    = 30 * time.Second
+	reconnectLoopMaxExits  = 2
+	reconnectLoopMarkerANSI = "\r\n\x1b[2;33m── stopped reconnecting after repeated failures — click the environment in the sidebar to retry ──\x1b[0m\r\n"
+)
+
+// trackExitForLoopGuard records the moment the managed PTY exited
+// and reports whether the recent-exit count has crossed the cap.
+// Returns true when the caller (tryReconnect) should refuse respawn.
+// Entries older than reconnectLoopWindow are pruned on each call so
+// a single exit after a long-running session does not trip the cap.
+func (a *App) trackExitForLoopGuard(managed *managedTerminal) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if managed == nil {
+		return false
+	}
+	now := time.Now()
+	cutoff := now.Add(-reconnectLoopWindow)
+	kept := managed.recentExits[:0]
+	for _, t := range managed.recentExits {
+		if t.After(cutoff) {
+			kept = append(kept, t)
+		}
+	}
+	kept = append(kept, now)
+	managed.recentExits = kept
+	return len(kept) > reconnectLoopMaxExits
+}
+
+// emitReconnectLoopMarker writes a single diagnostic line when
+// tryReconnect refuses to respawn because the managed PTY has been
+// failing repeatedly in a short window. The dim-yellow style matches
+// the reconnecting and stopped-context markers so the user reads them
+// as the same status channel. The recovery action is named in the
+// line — re-click the env in the sidebar to retry.
+func (a *App) emitReconnectLoopMarker(sessionID int) {
+	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+		SessionID: sessionID,
+		Data:      base64.StdEncoding.EncodeToString([]byte(reconnectLoopMarkerANSI)),
 	})
 }
 
@@ -1273,6 +1338,16 @@ type managedTerminal struct {
 	// Cleared on real user input — once the user types into the
 	// reattached session, subsequent output is treated as work again.
 	awaitingPostRespawnInput bool
+
+	// recentExits records the wall-clock timestamps of recent PTY
+	// exits for this managed terminal. tryReconnect uses it to break
+	// out of fast-exit loops where the underlying `erun open`
+	// (re)spawn keeps failing within seconds — a transitional EC2,
+	// an unhealthy cluster, or a helm rollout that times out. Entries
+	// older than reconnectLoopWindow are pruned on each tryReconnect
+	// call, so a long-running successful session followed by a single
+	// exit never trips the cap. See issue #361.
+	recentExits []time.Time
 
 	// aiActiveSince / aiLastOutput / aiBusyEmitted / aiInactivityTimer
 	// drive the debounced AI activity signal that powers the sidebar
