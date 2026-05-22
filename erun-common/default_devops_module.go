@@ -144,10 +144,55 @@ func defaultDevopsLegacyContents(path string, content []byte) []string {
 			"ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.0.0\n\nFROM ${ERUN_BASE_TAG}\n",
 			"ARG ERUN_BASE_TAG=erunpaas/erun-devops:1.0.0\n\nFROM ${ERUN_BASE_TAG}\n\nENTRYPOINT [\"/bin/sh\", \"-lc\", \"if [ \\\"${1:-}\\\" = shell ]; then shift; repo_dir=\\\"${ERUN_REPO_PATH:-${HOME}/git/erun}\\\"; [ -d \\\"$repo_dir\\\" ] && cd \\\"$repo_dir\\\"; exec /bin/bash -i; fi; exec erun-devops-entrypoint \\\"$@\\\"\", \"erun-devops-wrapper\"]\n",
 		}
+	case "Chart.yaml":
+		return legacyDevopsChartYAMLCandidates(content)
 	case "service.yaml":
 		return []string{legacyDefaultDevopsServiceTemplate(content)}
 	}
 	return nil
+}
+
+// legacyDevopsChartYAMLCandidates returns the pre-#361 shapes of a
+// tenant devops chart's Chart.yaml so an existing tenant chart still
+// pinned to the literal placeholder `appVersion: "1.0.0"` gets
+// auto-rewritten on the next EnsureDefaultDevopsChart call. Only the
+// devops chart is in scope — `description: ERun DevOps` is what
+// disambiguates from the backend-* charts that share the base name.
+//
+// The candidates are the *new* content with the version + appVersion
+// lines forced back to "1.0.0", so byte-exact comparison in
+// shouldReplaceDefaultDevopsFile picks up the upgrade target without
+// needing structural YAML diffing.
+func legacyDevopsChartYAMLCandidates(content []byte) []string {
+	if !bytes.Contains(content, []byte("description: ERun DevOps")) {
+		return nil
+	}
+	pinned := chartYAMLPinnedToLegacyVersion(string(content))
+	if pinned == "" {
+		return nil
+	}
+	return []string{pinned}
+}
+
+func chartYAMLPinnedToLegacyVersion(content string) string {
+	lines := strings.Split(content, "\n")
+	changed := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "version:") || strings.HasPrefix(trimmed, "appVersion:") {
+			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+			key := strings.SplitN(trimmed, ":", 2)[0]
+			next := indent + key + `: "1.0.0"`
+			if next != line {
+				lines[i] = next
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return ""
+	}
+	return strings.Join(lines, "\n")
 }
 
 func legacyDefaultDevopsServiceTemplate(content []byte) string {

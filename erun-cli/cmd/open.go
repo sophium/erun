@@ -598,7 +598,16 @@ func maybeCreateMissingRuntimeChart(ctx common.Context, result common.OpenResult
 		return execution, nil
 	}
 
-	if err := common.EnsureDefaultDevopsChart(ctx, result.RepoPath, result.Tenant, result.Environment); err != nil {
+	// Pass the resolved runtime version (falls back to the binary's
+	// build version) so the generated Chart.yaml pins appVersion to
+	// the real release. Before #361 this defaulted to the asset's
+	// literal "1.0.0", which baked stale erun-mcp / <tenant>-devops
+	// image tags into every tenant chart.
+	appVersion := strings.TrimSpace(result.EnvConfig.RuntimeVersion)
+	if appVersion == "" {
+		appVersion = currentBuildInfo().Version
+	}
+	if err := common.EnsureDefaultDevopsChartWithVersion(ctx, result.RepoPath, result.Tenant, result.Environment, appVersion); err != nil {
 		return common.DeploySpec{}, err
 	}
 
