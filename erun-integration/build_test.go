@@ -3,6 +3,7 @@ package integration
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -12,6 +13,8 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/golden"
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
+
+var apiFingerprintRE = regexp.MustCompile(`ghcr\.io/sophium/api:fp-([0-9a-f]{16})-amd64`)
 
 func TestBuild(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
@@ -245,6 +248,60 @@ func TestBuild(t *testing.T) {
 		// Build should still trace docker build for both images, even
 		// though the dockerignore parser fires during fingerprint walk.
 		golden.Equal(t, "build/dry_run_with_dockerignore_drives_ignore_pattern_parser", normalize.Apply(result.Combined))
+	})
+
+	t.Run("nested_gitignore_excludes_files_from_fingerprint", func(t *testing.T) {
+		// Exercises loadNestedGitignores in erun-common/build_incremental.go:
+		// a .gitignore at the root of a COPY'd directory must scope its
+		// patterns to that subtree so files matching the nested patterns
+		// drop out of the fingerprint hash. This guards the local-vs-CI
+		// drift seen on #359 where locally-built erun-cli/bin artifacts
+		// were rolling the devops fingerprint despite being .gitignore'd
+		// by a nested file. Verified by comparing fingerprints across
+		// three runs:
+		//   1. baseline with ignored "secret.txt" content X
+		//   2. ignored content rewritten to Y → fingerprint must stay equal
+		//   3. tracked "tracked.txt" content rewritten → fingerprint must move
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		// Replace the default no-COPY api Dockerfile with one that COPYs a
+		// subdirectory so the fingerprint walker actually descends.
+		dockerfile := filepath.Join(setup.Cwd, "erun-devops", "docker", "api", "Dockerfile")
+		mustWriteFile(t, dockerfile, "FROM alpine:3.22\nCOPY app/ /app/\n")
+		appDir := filepath.Join(setup.Cwd, "app")
+		if err := os.MkdirAll(appDir, 0o755); err != nil {
+			t.Fatalf("mkdir app: %v", err)
+		}
+		mustWriteFile(t, filepath.Join(appDir, ".gitignore"), "secret.txt\n")
+		mustWriteFile(t, filepath.Join(appDir, "tracked.txt"), "tracked v1\n")
+		mustWriteFile(t, filepath.Join(appDir, "secret.txt"), "secret v1\n")
+		fixture.RunGit(t, setup.Cwd, "add", "app/.gitignore", "app/tracked.txt", "erun-devops/docker/api/Dockerfile")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add app dir with nested gitignore")
+
+		fp := func(label string) string {
+			t.Helper()
+			result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+			if result.ExitCode != 0 {
+				t.Fatalf("%s: exit %d: %s", label, result.ExitCode, result.Combined)
+			}
+			match := apiFingerprintRE.FindStringSubmatch(result.Combined)
+			if match == nil {
+				t.Fatalf("%s: api fingerprint not found in trace:\n%s", label, result.Combined)
+			}
+			return match[1]
+		}
+
+		baseline := fp("baseline")
+		mustWriteFile(t, filepath.Join(appDir, "secret.txt"), "secret v2\n")
+		afterIgnoredChange := fp("after ignored change")
+		if afterIgnoredChange != baseline {
+			t.Fatalf("nested .gitignore not honored: fp moved from %s to %s after editing an ignored file", baseline, afterIgnoredChange)
+		}
+		mustWriteFile(t, filepath.Join(appDir, "tracked.txt"), "tracked v2\n")
+		afterTrackedChange := fp("after tracked change")
+		if afterTrackedChange == baseline {
+			t.Fatalf("fingerprint did not move when a tracked file changed; got %s for both runs", baseline)
+		}
 	})
 
 	t.Run("real_run_with_existing_fingerprint_promotes_via_tag", func(t *testing.T) {

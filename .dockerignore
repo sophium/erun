@@ -30,7 +30,7 @@ __debug_bin*
 # Local packaging / release artifacts
 /packaging/apt/dist
 /erun-devops/linux/*/dist
-/erun-cli/bin/erun-app
+/erun-cli/bin
 
 # Desktop UI build outputs (not consumed by service Dockerfiles)
 /erun-ui/bin

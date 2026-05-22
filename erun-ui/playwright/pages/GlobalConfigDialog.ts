@@ -34,6 +34,18 @@ export class GlobalConfigDialog {
     await this.page.getByRole('option', { name }).click();
   }
 
+  cloudContextProviderTrigger(): Locator {
+    return this.page.locator('#global-config-cloudcontext-provider');
+  }
+
+  cloudContextRegionTrigger(): Locator {
+    return this.page.locator('#global-config-cloudcontext-region');
+  }
+
+  cloudContextProviderValue(): Locator {
+    return this.cloudContextProviderTrigger().locator('[data-slot="select-value"]');
+  }
+
   cloudAliasRow(alias: string): Locator {
     return this.locator().locator(`text=${alias}`).first();
   }
