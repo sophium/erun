@@ -260,7 +260,12 @@ func (a *App) maybeStopIdleCloudEnvironment(result eruncommon.OpenResult, status
 			return
 		}
 		a.setCloudContextStatusInCache(stopped.Name, stopped.Status)
-		a.emitAppStatus(fmt.Sprintf("Stopped idle cloud context %s.", cloudContextDisplayName(cloudContext)), false)
+		// The auto-stop succeeded — a one-shot info event with no follow-up
+		// action. Route through the toast channel so it auto-dismisses
+		// instead of latching as a titlebar pill that would later
+		// contradict the real state when the user reopens the env and
+		// the cloud context is restarted. See issue #361.
+		a.emitAppNotification("info", fmt.Sprintf("Stopped idle cloud context %s.", cloudContextDisplayName(cloudContext)))
 	}()
 }
 

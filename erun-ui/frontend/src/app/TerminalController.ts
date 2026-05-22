@@ -19,6 +19,7 @@ import { readError } from './errors';
 import { refreshIdleStatus } from './idleThunks';
 import type {
   AIActivityPayload,
+  AppNotificationPayload,
   AppStatusPayload,
   EnvironmentInitializedPayload,
   MountElements,
@@ -51,6 +52,7 @@ import { decodeDebugOutput } from './terminalStatus';
 import { thunkExtra } from './thunkExtra';
 import {
   handleAIActivity,
+  handleAppNotification,
   handleAppStatus,
   handleEnvironmentInitFailed,
   handleEnvironmentInitialized,
@@ -82,6 +84,7 @@ export class TerminalController {
   private terminalOutputOff: (() => void) | null = null;
   private terminalExitOff: (() => void) | null = null;
   private appStatusOff: (() => void) | null = null;
+  private appNotificationOff: (() => void) | null = null;
   private reconnectLineOff: (() => void) | null = null;
   private environmentInitializedOff: (() => void) | null = null;
   private environmentInitFailedOff: (() => void) | null = null;
@@ -189,6 +192,9 @@ export class TerminalController {
     this.appStatusOff = EventsOn('app-status', (payload: AppStatusPayload) => {
       store.dispatch(handleAppStatus(payload));
     });
+    this.appNotificationOff = EventsOn('app-notification', (payload: AppNotificationPayload) => {
+      store.dispatch(handleAppNotification(payload));
+    });
     this.reconnectLineOff = EventsOn('mcp-reconnect-line', (line: string) => {
       store.dispatch(handleReconnectLine(line));
     });
@@ -245,6 +251,7 @@ export class TerminalController {
     this.terminalOutputOff?.();
     this.terminalExitOff?.();
     this.appStatusOff?.();
+    this.appNotificationOff?.();
     this.reconnectLineOff?.();
     this.environmentInitializedOff?.();
     this.environmentInitFailedOff?.();
@@ -253,6 +260,7 @@ export class TerminalController {
     this.terminalOutputOff = null;
     this.terminalExitOff = null;
     this.appStatusOff = null;
+    this.appNotificationOff = null;
     this.reconnectLineOff = null;
     this.environmentInitializedOff = null;
     this.environmentInitFailedOff = null;
