@@ -379,6 +379,22 @@ func (r *resolvedOpenRunner) maybeDeployRuntime(shellReq common.ShellLaunchParam
 }
 
 func (r *resolvedOpenRunner) resolveRuntimeExecution() (common.DeploySpec, error) {
+	// Migrate any pre-#361 tenant Chart.yaml still pinned to the
+	// literal "1.0.0" placeholder before resolving the deploy spec.
+	// The migration is a no-op for tenants whose chart does not
+	// exist (the materialized default path handles that) or whose
+	// Chart.yaml has been hand-customised; only the exact legacy
+	// shape is rewritten. Without this, an env created by an older
+	// binary keeps asking helm for erun-mcp:1.0.0 from the tenant's
+	// container registry — an image that may never have been
+	// published — so every rollout fails at pod startup.
+	appVersion := strings.TrimSpace(r.result.EnvConfig.RuntimeVersion)
+	if appVersion == "" {
+		appVersion = currentBuildInfo().Version
+	}
+	if err := common.MigrateDefaultDevopsChartAppVersion(r.ctx, r.result.RepoPath, r.result.Tenant, appVersion); err != nil {
+		return common.DeploySpec{}, err
+	}
 	execution, err := r.resolveRuntimeDeploySpec(r.ctx, r.result, r.options.AllowLocalBuilds)
 	if err != nil {
 		return common.DeploySpec{}, err

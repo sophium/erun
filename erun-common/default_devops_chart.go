@@ -132,6 +132,49 @@ func EnsureDefaultDevopsChartWithVersion(ctx Context, projectRoot, tenant, envir
 	return nil
 }
 
+// MigrateDefaultDevopsChartAppVersion rewrites an existing tenant
+// `<tenant>-devops/k8s/<tenant>-devops/Chart.yaml` whose appVersion
+// still carries the pre-#361 literal placeholder. It is the narrow
+// `erun open` counterpart to EnsureDefaultDevopsChartWithVersion:
+// no backend chart scaffolding, no values files, no `Chart.yaml`
+// creation when the file does not exist. The legacy detection
+// already used by ensureDefaultDevopsFile (description-scoped to
+// "ERun DevOps", version + appVersion lines forced to "1.0.0")
+// keeps the rewrite from clobbering hand-customised tenant charts.
+//
+// The trace lines emitted by ensureDefaultDevopsFile remain the
+// only side effect in dry-run mode, so adding this call into the
+// open path keeps the --dry-run contract intact.
+func MigrateDefaultDevopsChartAppVersion(ctx Context, projectRoot, tenant, appVersion string) error {
+	projectRoot = strings.TrimSpace(projectRoot)
+	tenant = strings.TrimSpace(tenant)
+	if projectRoot == "" || tenant == "" {
+		return nil
+	}
+	projectRoot = filepath.Clean(projectRoot)
+
+	moduleName := RuntimeReleaseName(tenant)
+	chartPath := filepath.Join(projectRoot, moduleName, "k8s", moduleName, "Chart.yaml")
+	if _, err := os.Stat(chartPath); err != nil {
+		if os.IsNotExist(err) {
+			// Nothing to migrate. The open flow will fall back to the
+			// materialized default chart elsewhere, which is already
+			// generated with the right appVersion via
+			// resolveDefaultDevopsDeploySpecWithImage.
+			return nil
+		}
+		return err
+	}
+
+	resolvedAppVersion := defaultDevopsChartAppVersion(appVersion)
+	data, err := defaultDevopsChartFiles.ReadFile("assets/default-devops-chart/Chart.yaml")
+	if err != nil {
+		return err
+	}
+	content := renderDefaultDevopsChartTemplate("assets/default-devops-chart/Chart.yaml", moduleName, moduleName, resolvedAppVersion, data)
+	return ensureDefaultDevopsFile(ctx, chartPath, 0o644, content)
+}
+
 func defaultDevopsChartAppVersion(appVersion string) string {
 	appVersion = strings.TrimSpace(appVersion)
 	if appVersion == "" {
