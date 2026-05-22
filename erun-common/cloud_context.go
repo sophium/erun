@@ -529,8 +529,76 @@ func finalizeInitCloudContext(ctx Context, deps CloudContextDependencies, provid
 }
 
 func StopCloudContext(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies) (CloudContextStatus, error) {
+	deps = normalizeCloudContextDependencies(deps)
 	ctx.Trace("cloud-context stop: " + strings.TrimSpace(params.Name))
-	return changeCloudContextPowerState(ctx, store, params, deps, "stop-instances", CloudContextStatusStopped)
+	status, err := changeCloudContextPowerState(ctx, store, params, deps, "stop-instances", CloudContextStatusStopped)
+	switch {
+	case err == nil:
+	case isAWSIncorrectInstanceStateError(err):
+		// AWS rejects stop-instances when the instance is already not
+		// running (already-stopping, already-stopped, terminating, …).
+		// For our purposes that's the intended end state — fall through
+		// to the wait below so the function only returns once AWS
+		// observes the instance fully stopped.
+		ctx.Trace("cloud-context stop: instance is already in a non-running state — waiting for stopped")
+		status, err = resolveCloudContextStatusForName(store, params.Name)
+		if err != nil {
+			return CloudContextStatus{}, err
+		}
+	default:
+		return CloudContextStatus{}, err
+	}
+	provider, err := ResolveCloudProvider(store, status.CloudProviderAlias)
+	if err != nil {
+		return CloudContextStatus{}, err
+	}
+	// stop-instances accepts the action but the EC2 then transitions
+	// running → stopping → stopped over ~30-60 s. Until #361, this
+	// helper returned the instant AWS acknowledged stop-instances,
+	// which lied about the live state: a follow-up `cloud-context
+	// start` issued in the next few seconds would race the
+	// transition and AWS would reply IncorrectInstanceState. Wait
+	// for the observed end state before reporting success so callers
+	// (the desktop's idle stopper notification, `erun open` preflight,
+	// delete-env teardown) only see "stopped" once the instance has
+	// actually got there.
+	if _, err := deps.RunAWS(ctx, provider, status.Region, []string{"ec2", "wait", "instance-stopped", "--instance-ids", status.InstanceID}); err != nil {
+		return CloudContextStatus{}, err
+	}
+	return status, nil
+}
+
+// resolveCloudContextStatusForName re-reads the persisted config so
+// StopCloudContext can recover the InstanceID/Region/Alias needed to
+// run `aws ec2 wait instance-stopped` when the initial stop-instances
+// call short-circuited with IncorrectInstanceState.
+func resolveCloudContextStatusForName(store CloudContextStore, name string) (CloudContextStatus, error) {
+	config, ok, err := findCloudContext(store, name)
+	if err != nil {
+		return CloudContextStatus{}, err
+	}
+	if !ok {
+		return CloudContextStatus{}, fmt.Errorf("cloud context %q is not configured", strings.TrimSpace(name))
+	}
+	return CloudContextStatus{
+		CloudContextConfig: NormalizeCloudContextConfig(config),
+		Status:             CloudContextStatusStopped,
+	}, nil
+}
+
+// isAWSIncorrectInstanceStateError reports whether err is the AWS
+// IncorrectInstanceState response that stop-instances and
+// start-instances return when the target instance is in a state the
+// requested transition cannot apply to (e.g. starting a stopping
+// instance, stopping an already-stopped instance). The default
+// RunAWS wraps the underlying CLI error in a "aws ec2 ...: ..."
+// string, so a substring check on the raw stderr is the most stable
+// signal across AWS CLI versions.
+func isAWSIncorrectInstanceStateError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), "IncorrectInstanceState")
 }
 
 func StartCloudContext(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies) (CloudContextStatus, error) {
@@ -557,7 +625,33 @@ func StartCloudContext(ctx Context, store CloudContextStore, params CloudContext
 	}
 	status, err := changeCloudContextPowerState(ctx, store, params, deps, "start-instances", CloudContextStatusRunning)
 	if err != nil {
-		return CloudContextStatus{}, err
+		if !isAWSIncorrectInstanceStateError(err) {
+			return CloudContextStatus{}, err
+		}
+		// IncorrectInstanceState means the instance is in a
+		// transitional state — almost always `stopping`, sometimes
+		// `pending` or `shutting-down`. start-instances only accepts
+		// fully-stopped instances. Wait for the transition to settle
+		// and retry once. Without this recovery the user's click on
+		// an env whose linked context just auto-stopped fails with a
+		// confusing AWS error and the desktop's reconnect loop spins
+		// pointlessly. See issue #361.
+		ctx.Trace("cloud-context start: instance is in a transitional state — waiting for stopped before retrying start-instances")
+		recovered, recoverErr := resolveCloudContextStatusForName(store, params.Name)
+		if recoverErr != nil {
+			return CloudContextStatus{}, recoverErr
+		}
+		provider, perr := ResolveCloudProvider(store, recovered.CloudProviderAlias)
+		if perr != nil {
+			return CloudContextStatus{}, perr
+		}
+		if _, werr := deps.RunAWS(ctx, provider, recovered.Region, []string{"ec2", "wait", "instance-stopped", "--instance-ids", recovered.InstanceID}); werr != nil {
+			return CloudContextStatus{}, werr
+		}
+		status, err = changeCloudContextPowerState(ctx, store, params, deps, "start-instances", CloudContextStatusRunning)
+		if err != nil {
+			return CloudContextStatus{}, err
+		}
 	}
 	deps = normalizeCloudContextDependencies(deps)
 	provider, err := ResolveCloudProvider(store, status.CloudProviderAlias)
