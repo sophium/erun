@@ -18,12 +18,17 @@ test.describe('app-notification toast', () => {
   test('info notification renders in the titlebar then auto-dismisses', async ({ app, page }) => {
     const message = 'Stopped idle cloud context cluster-cloud.';
 
-    await page.evaluate((payload) => {
-      const runtime = (window as unknown as {
-        runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
-      }).runtime;
-      runtime.EventsEmit('app-notification', payload);
-    }, { kind: 'info', message });
+    await page.evaluate(
+      (payload) => {
+        const runtime = (
+          window as unknown as {
+            runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+          }
+        ).runtime;
+        runtime.EventsEmit('app-notification', payload);
+      },
+      { kind: 'info', message },
+    );
 
     const pill = page.getByRole('status').filter({ hasText: message });
     await expect(pill).toBeVisible({ timeout: 5_000 });
@@ -36,12 +41,17 @@ test.describe('app-notification toast', () => {
 
   test('error notification persists (no auto-dismiss)', async ({ app, page }) => {
     const message = 'Backend pinned a problem you should read.';
-    await page.evaluate((payload) => {
-      const runtime = (window as unknown as {
-        runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
-      }).runtime;
-      runtime.EventsEmit('app-notification', payload);
-    }, { kind: 'error', message });
+    await page.evaluate(
+      (payload) => {
+        const runtime = (
+          window as unknown as {
+            runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+          }
+        ).runtime;
+        runtime.EventsEmit('app-notification', payload);
+      },
+      { kind: 'error', message },
+    );
 
     const pill = page.getByRole('alert').filter({ hasText: message });
     await expect(pill).toBeVisible({ timeout: 5_000 });
@@ -55,9 +65,11 @@ test.describe('app-notification toast', () => {
 
   test('payload with empty message is ignored', async ({ app, page }) => {
     await page.evaluate(() => {
-      const runtime = (window as unknown as {
-        runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
-      }).runtime;
+      const runtime = (
+        window as unknown as {
+          runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+        }
+      ).runtime;
       runtime.EventsEmit('app-notification', { kind: 'info', message: '   ' });
     });
     // No toast should appear; assert by counting role=status that

@@ -44,9 +44,11 @@ test.describe('titlebar status overflow', () => {
     expect(LONG_MESSAGE.length).toBeGreaterThan(160);
 
     await page.evaluate((message) => {
-      const runtime = (window as unknown as {
-        runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
-      }).runtime;
+      const runtime = (
+        window as unknown as {
+          runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+        }
+      ).runtime;
       runtime.EventsEmit('app-status', { message, busy: false });
     }, LONG_MESSAGE);
 
@@ -65,9 +67,7 @@ test.describe('titlebar status overflow', () => {
     const fullText = page.getByTestId('titlebar-status-full-text');
     await expect(fullText).toBeVisible();
     await expect(fullText).toContainText('IncorrectInstanceState');
-    await expect(fullText).toContainText(
-      'is not in a state from which it can be started',
-    );
+    await expect(fullText).toContainText('is not in a state from which it can be started');
 
     // The displayed text must include the entire message — not a
     // truncated suffix. Compare exact length to catch a regression
@@ -83,9 +83,11 @@ test.describe('titlebar status overflow', () => {
   test('short status message keeps tooltip behaviour', async ({ app, page }) => {
     const SHORT = 'Started cloud environment foo-bar.';
     await page.evaluate((message) => {
-      const runtime = (window as unknown as {
-        runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
-      }).runtime;
+      const runtime = (
+        window as unknown as {
+          runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+        }
+      ).runtime;
       runtime.EventsEmit('app-status', { message, busy: false });
     }, SHORT);
     await expect(page.getByText(SHORT, { exact: false })).toBeVisible({ timeout: 5_000 });

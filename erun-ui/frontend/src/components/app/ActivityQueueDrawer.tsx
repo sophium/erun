@@ -9,6 +9,7 @@ import {
 import { ActivityCard } from '@/components/app/ActivityCard';
 import { isHistoryStatus } from '@/components/app/ActivityQueueDrawer.helpers';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 interface ActivityQueueDrawerProps {
@@ -217,8 +218,8 @@ function RecoveryFeedback({
       className={cn(
         'rounded-md border px-3 py-2 text-xs',
         result.ok
-          ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-900'
-          : 'border-destructive/40 bg-destructive/10 text-destructive',
+          ? 'border-green-600/35 bg-green-600/10 text-foreground'
+          : 'border-[color-mix(in_oklch,var(--destructive)_35%,var(--border))] bg-[color-mix(in_oklch,var(--destructive)_8%,transparent)] text-destructive',
       )}
     >
       <div className="flex items-start justify-between gap-2">
@@ -280,22 +281,18 @@ function ActivitySection({
           {title}
         </h3>
         {onClearAll && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="xs"
-            className="h-5 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
-            title={clearAllHint}
-            onClick={() => {
-              void onClearAll();
-            }}
-          >
-            {clearAllLabel ?? 'Clear'}
-          </Button>
+          <ClearAllButton
+            label={clearAllLabel ?? 'Clear'}
+            hint={clearAllHint}
+            onClick={onClearAll}
+          />
         )}
       </div>
       {entries.length === 0 ? (
-        <p className="rounded-md border border-dashed bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+        <p
+          role="note"
+          className="rounded-md border border-dashed bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+        >
           {emptyText}
         </p>
       ) : (
@@ -315,5 +312,45 @@ function ActivitySection({
         </ul>
       )}
     </section>
+  );
+}
+
+// ClearAllButton wraps the bulk-clear control in the app tooltip primitive
+// so the explanatory hint stays keyboard-reachable and is not delivered via
+// the native title attribute (rejected by AGENTS.md UX rules for meaningful
+// product info). The hint can wrap; the popover content widens to fit.
+function ClearAllButton({
+  label,
+  hint,
+  onClick,
+}: {
+  label: string;
+  hint?: string;
+  onClick: () => Promise<void>;
+}): React.ReactElement {
+  const button = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="xs"
+      className="h-5 text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+      aria-label={hint ? `${label}: ${hint}` : label}
+      onClick={() => {
+        void onClick();
+      }}
+    >
+      {label}
+    </Button>
+  );
+  if (!hint) {
+    return button;
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipContent side="bottom" align="end" className="max-w-[280px] whitespace-normal">
+        {hint}
+      </TooltipContent>
+    </Tooltip>
   );
 }
