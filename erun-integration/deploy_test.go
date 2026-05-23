@@ -218,15 +218,21 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/real_run_via_stubs", normalize.Apply(result.Combined))
 	})
 
-	t.Run("real_run_persists_runtime_version_to_env_config", func(t *testing.T) {
+	t.Run("real_run_persists_runtime_version_and_registry_to_env_config", func(t *testing.T) {
 		// Regression: `erun deploy --version X` updates helm's release
 		// appVersion but used to leave EnvConfig.RuntimeVersion at the
 		// previously persisted value, so the desktop runtime dialog and
 		// `erun list` kept showing the stale string. Real-run deploy now
 		// writes the deployed version back to the env config.
+		//
+		// Issue #363 extends this: the source registry is persisted
+		// alongside the version as RuntimeRegistry, so a subsequent
+		// reopen can address the same image even if the user edits the
+		// project's container registry afterwards.
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "containerregistry: registry.example/published\n")
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubBinary(t, stubs, "kubectl", "")
 		fixture.StubBinary(t, stubs, "helm", "")
@@ -245,6 +251,97 @@ func TestDeploy(t *testing.T) {
 		if !strings.Contains(body, "runtimeversion: 1.0.99") {
 			t.Fatalf("expected env config to be rewritten with runtimeversion: 1.0.99, got:\n%s", body)
 		}
+		if !strings.Contains(body, "runtimeregistry: registry.example/published") {
+			t.Fatalf("expected env config to record runtimeregistry: registry.example/published, got:\n%s", body)
+		}
+	})
+
+	t.Run("dry_run_persisted_version_reopen_uses_runtime_registry_provenance", func(t *testing.T) {
+		// Issue #363: when the env has a persisted (RuntimeVersion,
+		// RuntimeRegistry) pair and the user reopens without --version,
+		// helm renders the runtime chart against RuntimeRegistry — not
+		// the project's currently-configured containerregistry. This
+		// protects users who edit the project registry after a deploy:
+		// the previously-deployed image stays reachable on reopen.
+		setup := env.New(t)
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "team")
+		envDir := filepath.Join(tenantDir, "dev")
+		for _, dir := range []string{root, tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("defaulttenant: team\n"), 0o644); err != nil {
+			t.Fatalf("root cfg: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(tenantDir, "config.yaml"),
+			[]byte("projectroot: "+setup.Cwd+"\nname: team\ndefaultenvironment: dev\n"), 0o644); err != nil {
+			t.Fatalf("tenant cfg: %v", err)
+		}
+		envBody := "name: dev\nrepopath: " + setup.Cwd + "\nkubernetescontext: test-context\nruntimeversion: 1.0.0\nruntimeregistry: registry.example/legacy\n"
+		if err := os.WriteFile(filepath.Join(envDir, "config.yaml"), []byte(envBody), 0o644); err != nil {
+			t.Fatalf("env cfg: %v", err)
+		}
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "containerregistry: registry.example/current\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_persisted_version_reopen_uses_runtime_registry_provenance", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_explicit_version_uses_project_registry_not_provenance", func(t *testing.T) {
+		// Issue #363: an explicit --version is a fresh deploy intent.
+		// Even with RuntimeRegistry pinned in env config, helm renders
+		// against the project's current containerregistry — and the
+		// post-deploy persist step will rewrite RuntimeRegistry to that
+		// value. The provenance pin only protects no-override reopens.
+		setup := env.New(t)
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "team")
+		envDir := filepath.Join(tenantDir, "dev")
+		for _, dir := range []string{root, tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("defaulttenant: team\n"), 0o644); err != nil {
+			t.Fatalf("root cfg: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(tenantDir, "config.yaml"),
+			[]byte("projectroot: "+setup.Cwd+"\nname: team\ndefaultenvironment: dev\n"), 0o644); err != nil {
+			t.Fatalf("tenant cfg: %v", err)
+		}
+		envBody := "name: dev\nrepopath: " + setup.Cwd + "\nkubernetescontext: test-context\nruntimeversion: 1.0.0\nruntimeregistry: registry.example/legacy\n"
+		if err := os.WriteFile(filepath.Join(envDir, "config.yaml"), []byte(envBody), 0o644); err != nil {
+			t.Fatalf("env cfg: %v", err)
+		}
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "containerregistry: registry.example/current\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.5", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_explicit_version_uses_project_registry_not_provenance", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_persisted_version_without_provenance_uses_project_registry", func(t *testing.T) {
+		// Issue #363: legacy envs persisted by older binaries have
+		// runtimeversion but no runtimeregistry. On reopen we must NOT
+		// invent a provenance — fall back to the project's current
+		// containerregistry, the same behaviour callers had before the
+		// field existed. The next successful deploy backfills the pair.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "containerregistry: registry.example/current\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_persisted_version_without_provenance_uses_project_registry", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_with_managed_cloud_traces_helm_set_strings", func(t *testing.T) {
