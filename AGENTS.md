@@ -14,6 +14,7 @@ Repository guidance for humans and coding agents working in this repo.
   - `erun-backend/AGENTS.md` plus `erun-backend/erun-backend-api/AGENTS.md` and `erun-backend/erun-backend-db/AGENTS.md` — hosted-backend, API, and Atlas-migration guidance.
 - A child `AGENTS.md` is additional, not a replacement: parent rules still apply unless the child explicitly overrides them.
 - If you add a new `AGENTS.md` anywhere in the tree, also list it in the bullet above so future readers find it without searching.
+- Each `AGENTS.md` has a sibling `CLAUDE.md` symlink so Claude Code's `CLAUDE.md` convention resolves to the same file. `AGENTS.md` is the only source of truth — edit it, not the symlink. When you add a new `AGENTS.md`, create the matching `CLAUDE.md` symlink in the same directory (`ln -s AGENTS.md CLAUDE.md`).
 
 ## Contributing
 
