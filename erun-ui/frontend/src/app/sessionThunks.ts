@@ -34,7 +34,7 @@ import {
 import { setTenantDashboard } from './slices/tenantDashboardSlice';
 import { setDebugOutput, setSelectedSessionForEnv, setSessionId } from './slices/terminalSlice';
 import { setTerminalCopyOutput, setTerminalCopyStatus } from './slices/terminalStatusSlice';
-import type { TerminalTabKind } from './state';
+import type { TerminalTab, TerminalTabKind } from './state';
 import type { AppThunk } from './store';
 import { maybeRespawnDeadDefaultTab } from './tabRespawnThunks';
 import { recordTab, rememberSelectedTab, removeTab } from './tabsThunks';
@@ -95,19 +95,76 @@ const spawnERunTabPassive =
     }
   };
 
+const spawnDefaultKind =
+  (
+    key: string,
+    runSelection: UISelection,
+    kind: TerminalTabKind,
+    label: string,
+    cols: number,
+    rows: number,
+  ): AppThunk<Promise<void>> =>
+  async (dispatch) => {
+    if (kind === 'erun') {
+      await dispatch(spawnERunTabPassive(key, runSelection, cols, rows));
+    } else if (kind === 'local' || kind === 'ai') {
+      await dispatch(spawnDefaultTab(key, runSelection, kind, label, cols, rows));
+    }
+  };
+
+// repointRememberedAfterRespawn moves selectedSessionByEnv from the dead
+// session id to the freshly-spawned tab's id, so restoreSelectedTabForEnv
+// can surface the live PTY. Without this, restoreSelectedTabForEnv would
+// see a remembered id that no longer matches any tab and bail.
+const repointRememberedAfterRespawn =
+  (key: string, previous: TerminalTab, kind: TerminalTabKind): AppThunk =>
+  (dispatch, getState) => {
+    const replacement = (getState().terminal.tabsByEnv[key] ?? []).find(
+      (tab) => tab.kind === kind && tab.slot === previous.slot,
+    );
+    if (replacement && replacement.sessionId !== previous.sessionId) {
+      dispatch(setSelectedSessionForEnv({ key, sessionId: replacement.sessionId }));
+    }
+  };
+
+// ensureLiveDefaultTab spawns the kind's tab if missing, or respawns it
+// in place if the existing tab points at an exited session. Without the
+// dead-tab branch the env's "stopped reconnecting … click the environment
+// in the sidebar to retry" marker is a false promise for kinds that
+// linger in tabsByEnv after exit (AI/Local don't register an
+// openSelection, so dropExitedSessionFromTabs leaves their zombie tab in
+// place).
+const ensureLiveDefaultTab =
+  (
+    key: string,
+    runSelection: UISelection,
+    kind: TerminalTabKind,
+    label: string,
+    cols: number,
+    rows: number,
+  ): AppThunk<Promise<void>> =>
+  async (dispatch, getState) => {
+    const existing = (getState().terminal.tabsByEnv[key] ?? []).find((tab) => tab.kind === kind);
+    const dead = existing ? !!getState().sessions.exitReasons[existing.sessionId] : false;
+    if (existing && !dead) {
+      return;
+    }
+    const remembered =
+      existing && getState().terminal.selectedSessionByEnv[key] === existing.sessionId
+        ? existing
+        : null;
+    await dispatch(spawnDefaultKind(key, runSelection, kind, label, cols, rows));
+    if (remembered) {
+      dispatch(repointRememberedAfterRespawn(key, remembered, kind));
+    }
+  };
+
 export const ensureDefaultEnvTabs =
   (runSelection: UISelection, key: string, cols: number, rows: number): AppThunk<Promise<void>> =>
-  async (dispatch, getState) => {
-    const tabs = getState().terminal.tabsByEnv[key] ?? [];
-    if (!tabs.some((tab) => tab.kind === 'erun')) {
-      await dispatch(spawnERunTabPassive(key, runSelection, cols, rows));
-    }
-    if (!tabs.some((tab) => tab.kind === 'local')) {
-      await dispatch(spawnDefaultTab(key, runSelection, 'local', 'Local', cols, rows));
-    }
-    if (!tabs.some((tab) => tab.kind === 'ai')) {
-      await dispatch(spawnDefaultTab(key, runSelection, 'ai', 'AI', cols, rows));
-    }
+  async (dispatch) => {
+    await dispatch(ensureLiveDefaultTab(key, runSelection, 'erun', 'ERun', cols, rows));
+    await dispatch(ensureLiveDefaultTab(key, runSelection, 'local', 'Local', cols, rows));
+    await dispatch(ensureLiveDefaultTab(key, runSelection, 'ai', 'AI', cols, rows));
   };
 
 // surfaceEnvSession repoints the visible terminal at the new env's
@@ -293,11 +350,10 @@ export const openSelection =
 
     dispatch(markEnvOpening({ tenant: selection.tenant, environment: selection.environment }));
     try {
-      // Spawn Local first so subsequent ERun/AI spawns can log into it.
-      const tabs = getState().terminal.tabsByEnv[key] ?? [];
-      if (!tabs.some((tab) => tab.kind === 'local')) {
-        await dispatch(spawnDefaultTab(key, runSelection, 'local', 'Local', cols, rows));
-      }
+      // Spawn (or respawn if dead) Local first so subsequent ERun/AI
+      // spawns can log into it, and so the marker-promised sidebar-click
+      // recovery actually swaps a zombie Local for a live PTY.
+      await dispatch(ensureLiveDefaultTab(key, runSelection, 'local', 'Local', cols, rows));
       if (!isCurrentSelection()) {
         return;
       }
