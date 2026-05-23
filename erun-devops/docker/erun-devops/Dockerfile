@@ -15,6 +15,7 @@ ARG TARGETARCH
 ARG ERUN_VERSION
 ARG ERUN_COMMIT=""
 ARG ERUN_DATE=""
+ARG GOLANGCI_LINT_VERSION=v2.2.2
 
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
@@ -32,6 +33,18 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags "-X github.com/sophium/erun/erun-mcp.buildVersion=${ERUN_VERSION} -X github.com/sophium/erun/erun-mcp.buildCommit=${ERUN_COMMIT} -X github.com/sophium/erun/erun-mcp.buildDate=${ERUN_DATE}" -o /out/emcp ../erun-mcp/cmd/emcp
 
+# Build golangci-lint from source against this stage's Go toolchain so
+# the lint binary's embedded analyzer libraries (go/ast, go/types,
+# go/parser) always match the Go version targeted by go.mod. The
+# upstream prebuilt tarball is compiled with whatever Go the
+# golangci-lint maintainers used at release time, which drifts behind
+# erun's go.mod bumps and aborts pre-commit with "go language version
+# used to build golangci-lint is lower than the targeted Go version".
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    GOBIN=/out go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+
 FROM ghcr.io/sophium/erun-ubuntu:noble-20260217
 
 ARG TARGETARCH
@@ -43,7 +56,6 @@ ARG DOCKER_VERSION=28.1.1
 ARG BUILDX_VERSION=v0.18.0
 ARG DIFFT_VERSION=0.68.0
 ARG GH_VERSION=2.74.2
-ARG GOLANGCI_LINT_VERSION=v2.2.2
 ARG NODE_VERSION=24.14.0
 ARG CODEX_VERSION=0.125.0
 ARG CLAUDE_CODE_VERSION=2.1.132
@@ -78,9 +90,6 @@ RUN apt-get update && \
     curl -fsSL -o /tmp/gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${arch}.tar.gz" && \
     tar -xzf /tmp/gh.tar.gz -C /tmp && \
     install -m 0755 "/tmp/gh_${GH_VERSION}_linux_${arch}/bin/gh" /usr/local/bin/gh && \
-    curl -fsSL -o /tmp/golangci-lint.tar.gz "https://github.com/golangci/golangci-lint/releases/download/${GOLANGCI_LINT_VERSION}/golangci-lint-${GOLANGCI_LINT_VERSION#v}-linux-${arch}.tar.gz" && \
-    tar -xzf /tmp/golangci-lint.tar.gz -C /tmp && \
-    install -m 0755 "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION#v}-linux-${arch}/golangci-lint" /usr/local/bin/golangci-lint && \
     curl -fsSL -o /tmp/docker.tgz "https://download.docker.com/linux/static/stable/${docker_arch}/docker-${DOCKER_VERSION}.tgz" && \
     tar -xzf /tmp/docker.tgz -C /tmp && \
     install -m 0755 /tmp/docker/docker /usr/local/bin/docker && \
@@ -95,7 +104,7 @@ RUN apt-get update && \
     mv /usr/local/bin/codex /usr/local/bin/codex-real && \
     mv /usr/local/bin/claude /usr/local/bin/claude-real && \
     npm cache clean --force && \
-    rm -rf /tmp/helm.tar.gz /tmp/terraform.zip /tmp/k9s.tar.gz /tmp/difft.tar.gz /tmp/gh.tar.gz /tmp/golangci-lint.tar.gz /tmp/docker.tgz /tmp/docker-buildx /tmp/node.tar.gz /tmp/awscliv2.zip "/tmp/linux-${arch}" "/tmp/gh_${GH_VERSION}_linux_${arch}" "/tmp/golangci-lint-${GOLANGCI_LINT_VERSION#v}-linux-${arch}" /tmp/terraform /tmp/k9s /tmp/difft /tmp/docker /tmp/aws && \
+    rm -rf /tmp/helm.tar.gz /tmp/terraform.zip /tmp/k9s.tar.gz /tmp/difft.tar.gz /tmp/gh.tar.gz /tmp/docker.tgz /tmp/docker-buildx /tmp/node.tar.gz /tmp/awscliv2.zip "/tmp/linux-${arch}" "/tmp/gh_${GH_VERSION}_linux_${arch}" /tmp/terraform /tmp/k9s /tmp/difft /tmp/docker /tmp/aws && \
     groupmod -n erun ubuntu && \
     usermod -l erun -d /home/erun -m -g erun ubuntu && \
     passwd -d erun && \
@@ -107,6 +116,7 @@ RUN apt-get update && \
 COPY --from=builder /usr/local/go /usr/local/go
 COPY --from=builder --chmod=0755 /out/erun /usr/local/bin/erun
 COPY --from=builder --chmod=0755 /out/emcp /usr/local/bin/emcp
+COPY --from=builder --chmod=0755 /out/golangci-lint /usr/local/bin/golangci-lint
 COPY --chmod=0755 erun-devops/docker/erun-devops/entrypoint.sh /usr/local/bin/erun-devops-entrypoint
 COPY --chmod=0755 erun-devops/docker/erun-devops/codex-wrapper.sh /usr/local/bin/codex
 COPY --chmod=0755 erun-devops/docker/erun-devops/claude-wrapper.sh /usr/local/bin/claude
