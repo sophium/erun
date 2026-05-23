@@ -17,6 +17,7 @@ export const wailsApi = createApi({
     'RuntimeResourceStatus',
     'VersionSuggestions',
     'CloudContexts',
+    'CloudContextApiStop',
     'CloudProviders',
     'Diff',
     'IdleStatus',

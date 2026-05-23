@@ -18,6 +18,8 @@ func newContextCmd(store common.CloudContextStore, promptRunner PromptRunner, se
 		newContextInitCmd(store, promptRunner, selectRunner, deps),
 		newContextStopCmd(store, deps),
 		newContextStartCmd(store, deps),
+		newContextDisableAPIStopCmd(store, deps),
+		newContextEnableAPIStopCmd(store, deps),
 	)
 }
 
@@ -112,6 +114,52 @@ func newContextStartCmd(store common.CloudContextStore, deps common.CloudContext
 	return newContextPowerCmd("start", "Start a managed ERun cloud context", true, store, deps, common.StartCloudContext)
 }
 
+func newContextDisableAPIStopCmd(store common.CloudContextStore, deps common.CloudContextDependencies) *cobra.Command {
+	return newContextStopProtectionCmd(
+		"disable-api-stop",
+		"Lock a cloud context against stop calls (sets AWS DisableApiStop=true)",
+		true,
+		store, deps,
+	)
+}
+
+func newContextEnableAPIStopCmd(store common.CloudContextStore, deps common.CloudContextDependencies) *cobra.Command {
+	return newContextStopProtectionCmd(
+		"enable-api-stop",
+		"Restore normal stop behaviour for a cloud context (sets AWS DisableApiStop=false)",
+		false,
+		store, deps,
+	)
+}
+
+// newContextStopProtectionCmd builds the disable-api-stop / enable-api-stop
+// pair. The flip is intentionally global at the AWS layer: while locked,
+// the in-pod idle monitor, the desktop Stop button, and any external
+// kubectl/aws caller all hit OperationNotPermitted, so this is the lever
+// to keep an unhealthy env up for the duration of a repair. Unlocking
+// restores the normal auto-stop / manual-stop behaviour.
+func newContextStopProtectionCmd(use, short string, enabled bool, store common.CloudContextStore, deps common.CloudContextDependencies) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:          use + " CONTEXT",
+		Short:        short,
+		Args:         cobra.ExactArgs(1),
+		SilenceUsage: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := commandContext(cmd)
+			status, err := common.SetCloudContextStopProtection(ctx, store, common.CloudContextStopProtectionParams{
+				Name:    args[0],
+				Enabled: enabled,
+			}, deps)
+			if err != nil {
+				return err
+			}
+			return writeCloudContext(ctx, status)
+		},
+	}
+	addDryRunFlag(cmd)
+	return cmd
+}
+
 func newContextPowerCmd(use, short string, supportsForce bool, store common.CloudContextStore, deps common.CloudContextDependencies, run func(common.Context, common.CloudContextStore, common.CloudContextParams, common.CloudContextDependencies) (common.CloudContextStatus, error)) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
@@ -199,6 +247,9 @@ func writeCloudContext(ctx common.Context, status common.CloudContextStatus) err
 	line += " status=" + quotedValueOrNone(status.Status)
 	if strings.TrimSpace(context.PublicIP) != "" {
 		line += " public-ip=" + quotedValueOrNone(context.PublicIP)
+	}
+	if status.StopProtectionKnown {
+		line += " stop-protection=" + strconv.FormatBool(status.StopProtection)
 	}
 	if strings.TrimSpace(status.Message) != "" {
 		line += " message=" + quotedValueOrNone(status.Message)

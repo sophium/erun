@@ -208,6 +208,8 @@ export interface UICloudContextStatus {
   kubernetesContext: string;
   status: string;
   message?: string;
+  stopProtection?: boolean;
+  stopProtectionKnown?: boolean;
 }
 
 export interface UICloudContextInitInput {

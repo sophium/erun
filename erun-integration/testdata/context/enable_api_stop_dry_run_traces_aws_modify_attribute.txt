@@ -1,0 +1,4 @@
+  - edge provider=aws alias=dev region=us-east-1 instance=i-0123456789abcdef0 type=t3.medium disk=50GB/gp3 kube-context=edge status=none stop-protection=false
+audit: erun context enable-api-stop --dry-run edge
+cloud-context stop-protection enable: edge
+aws ec2 modify-instance-attribute --instance-id i-0123456789abcdef0 --no-disable-api-stop --region us-east-1 --profile dev

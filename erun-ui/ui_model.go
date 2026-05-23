@@ -267,18 +267,20 @@ type uiCloudProviderBearerToken struct {
 }
 
 type uiCloudContextStatus struct {
-	Name               string `json:"name"`
-	Provider           string `json:"provider"`
-	CloudProviderAlias string `json:"cloudProviderAlias"`
-	Region             string `json:"region"`
-	InstanceID         string `json:"instanceId,omitempty"`
-	PublicIP           string `json:"publicIp,omitempty"`
-	InstanceType       string `json:"instanceType"`
-	DiskType           string `json:"diskType"`
-	DiskSizeGB         int    `json:"diskSizeGb"`
-	KubernetesContext  string `json:"kubernetesContext"`
-	Status             string `json:"status"`
-	Message            string `json:"message,omitempty"`
+	Name                string `json:"name"`
+	Provider            string `json:"provider"`
+	CloudProviderAlias  string `json:"cloudProviderAlias"`
+	Region              string `json:"region"`
+	InstanceID          string `json:"instanceId,omitempty"`
+	PublicIP            string `json:"publicIp,omitempty"`
+	InstanceType        string `json:"instanceType"`
+	DiskType            string `json:"diskType"`
+	DiskSizeGB          int    `json:"diskSizeGb"`
+	KubernetesContext   string `json:"kubernetesContext"`
+	Status              string `json:"status"`
+	Message             string `json:"message,omitempty"`
+	StopProtection      bool   `json:"stopProtection,omitempty"`
+	StopProtectionKnown bool   `json:"stopProtectionKnown,omitempty"`
 }
 
 type uiAWSCloudAliasInput struct {
