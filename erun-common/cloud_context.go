@@ -64,10 +64,19 @@ type CloudContextConfig struct {
 // fill it from a Refresh* call or from the result of Init/Start/Stop;
 // consumers that need a current value must ask AWS or read a cache that
 // does.
+//
+// StopProtectionKnown / StopProtection are filled only on the
+// dedicated stop-protection read/write paths
+// (DescribeCloudContextStopProtection,
+// SetCloudContextStopProtection) — the bulk RefreshCloudContextStatuses
+// path deliberately does not fetch them so it stays one AWS call per
+// (alias,region) group.
 type CloudContextStatus struct {
 	CloudContextConfig `json:",inline" yaml:",inline"`
 	Status             string `json:"status,omitempty" yaml:"status,omitempty"`
 	Message            string `json:"message,omitempty" yaml:"message,omitempty"`
+	StopProtection     bool   `json:"stopProtection,omitempty" yaml:"stopprotection,omitempty"`
+	StopProtectionKnown bool  `json:"stopProtectionKnown,omitempty" yaml:"stopprotectionknown,omitempty"`
 }
 
 type InitCloudContextParams struct {
@@ -677,6 +686,126 @@ func StartCloudContext(ctx Context, store CloudContextStore, params CloudContext
 		return CloudContextStatus{}, err
 	}
 	return status, nil
+}
+
+// CloudContextStopProtectionParams identifies the cloud context whose
+// AWS DisableApiStop attribute should be flipped. Enabled=true sets
+// DisableApiStop=true (the instance cannot be stopped by any caller
+// until the attribute is cleared), Enabled=false reverses it.
+type CloudContextStopProtectionParams struct {
+	Name    string
+	Enabled bool
+}
+
+// SetCloudContextStopProtection toggles the EC2 DisableApiStop attribute
+// for the named cloud context. When Enabled=true, every subsequent
+// ec2:StopInstances call (the in-pod idle monitor, the desktop Stop
+// button, any external script) returns OperationNotPermitted until the
+// attribute is cleared. This is the recovery lever used when an env's
+// in-pod components are unhealthy and the user needs to keep the
+// underlying EC2 up long enough to repair them.
+//
+// The function does not gate on the instance's current power state —
+// DisableApiStop is settable on running and stopped instances. The
+// returned status carries StopProtectionKnown=true and StopProtection
+// reflects the new value so callers can render the result without an
+// extra describe round-trip.
+func SetCloudContextStopProtection(ctx Context, store CloudContextStore, params CloudContextStopProtectionParams, deps CloudContextDependencies) (CloudContextStatus, error) {
+	if store == nil {
+		return CloudContextStatus{}, fmt.Errorf("store is required")
+	}
+	deps = normalizeCloudContextDependencies(deps)
+	verb := "disable"
+	if !params.Enabled {
+		verb = "enable"
+	}
+	ctx.Trace(fmt.Sprintf("cloud-context stop-protection %s: %s", verb, strings.TrimSpace(params.Name)))
+	config, ok, err := findCloudContext(store, params.Name)
+	if err != nil {
+		return CloudContextStatus{}, err
+	}
+	if !ok {
+		return CloudContextStatus{}, fmt.Errorf("cloud context %q is not configured", strings.TrimSpace(params.Name))
+	}
+	if config.InstanceID == "" {
+		return CloudContextStatus{}, fmt.Errorf("cloud context %q has no instance ID", config.Name)
+	}
+	provider, err := ResolveCloudProvider(store, config.CloudProviderAlias)
+	if err != nil {
+		return CloudContextStatus{}, err
+	}
+	flag := "--disable-api-stop"
+	if !params.Enabled {
+		flag = "--no-disable-api-stop"
+	}
+	if _, err := deps.RunAWS(ctx, provider, config.Region, []string{"ec2", "modify-instance-attribute", "--instance-id", config.InstanceID, flag}); err != nil {
+		return CloudContextStatus{}, err
+	}
+	return CloudContextStatus{
+		CloudContextConfig:  NormalizeCloudContextConfig(config),
+		StopProtection:      params.Enabled,
+		StopProtectionKnown: true,
+	}, nil
+}
+
+// DescribeCloudContextStopProtection reads the live DisableApiStop
+// attribute for the named cloud context. It is a separate call from
+// the bulk RefreshCloudContextStatuses path because the AWS attribute
+// is read via describe-instance-attribute (one call per instance),
+// not describe-instances; calling it for every context on every
+// refresh would multiply the AWS round-trip count by the number of
+// configured envs. The desktop calls it lazily for the env whose
+// detail view is open.
+func DescribeCloudContextStopProtection(ctx Context, store CloudContextStore, name string, deps CloudContextDependencies) (CloudContextStatus, error) {
+	if store == nil {
+		return CloudContextStatus{}, fmt.Errorf("store is required")
+	}
+	deps = normalizeCloudContextDependencies(deps)
+	config, ok, err := findCloudContext(store, name)
+	if err != nil {
+		return CloudContextStatus{}, err
+	}
+	if !ok {
+		return CloudContextStatus{}, fmt.Errorf("cloud context %q is not configured", strings.TrimSpace(name))
+	}
+	if config.InstanceID == "" {
+		return CloudContextStatus{}, fmt.Errorf("cloud context %q has no instance ID", config.Name)
+	}
+	provider, err := ResolveCloudProvider(store, config.CloudProviderAlias)
+	if err != nil {
+		return CloudContextStatus{}, err
+	}
+	out, err := deps.RunAWS(ctx, provider, config.Region, []string{
+		"ec2", "describe-instance-attribute",
+		"--instance-id", config.InstanceID,
+		"--attribute", "disableApiStop",
+		"--query", "DisableApiStop.Value",
+		"--output", "text",
+	})
+	if err != nil {
+		return CloudContextStatus{}, err
+	}
+	enabled := parseCloudContextStopProtectionOutput(out)
+	return CloudContextStatus{
+		CloudContextConfig:  NormalizeCloudContextConfig(config),
+		StopProtection:      enabled,
+		StopProtectionKnown: true,
+	}, nil
+}
+
+// parseCloudContextStopProtectionOutput reads the `aws ec2
+// describe-instance-attribute --query DisableApiStop.Value --output text`
+// response. AWS returns "True" / "False" (capitalized) for the boolean
+// attribute, or an empty string when --dry-run short-circuits the call.
+// Anything other than a recognized "true" reads as disabled so the
+// failure mode of an unknown response is the safer of the two.
+func parseCloudContextStopProtectionOutput(out string) bool {
+	switch strings.ToLower(strings.TrimSpace(out)) {
+	case "true":
+		return true
+	default:
+		return false
+	}
 }
 
 func ensureCloudContextHostStopProfileAssociation(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies) error {

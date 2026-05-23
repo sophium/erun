@@ -184,4 +184,52 @@ func TestContext(t *testing.T) {
 		}
 		golden.Equal(t, "context/list_help", normalize.Apply(result.Combined))
 	})
+
+	t.Run("disable_api_stop_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"context", "disable-api-stop", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "context/disable_api_stop_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("enable_api_stop_help", func(t *testing.T) {
+		setup := env.New(t)
+		result := erun.Run(t, []string{"context", "enable-api-stop", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "context/enable_api_stop_help", normalize.Apply(result.Combined))
+	})
+
+	t.Run("disable_api_stop_dry_run_traces_aws_modify_attribute", func(t *testing.T) {
+		// Exercises eruncommon.SetCloudContextStopProtection's lock
+		// path. The dry-run trace must show the
+		// `aws ec2 modify-instance-attribute --disable-api-stop` call
+		// without --no-disable-api-stop appearing — that pair makes
+		// the integration golden the public contract for the "AWS
+		// rejects every stop until I unlock it" recovery lever.
+		setup := env.New(t)
+		seedCloudContextConfig(t, setup, "edge")
+		result := erun.Run(t, []string{"context", "disable-api-stop", "edge", "--dry-run", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "context/disable_api_stop_dry_run_traces_aws_modify_attribute", normalize.Apply(result.Combined))
+	})
+
+	t.Run("enable_api_stop_dry_run_traces_aws_modify_attribute", func(t *testing.T) {
+		// Exercises eruncommon.SetCloudContextStopProtection's unlock
+		// path. The dry-run trace must show
+		// `--no-disable-api-stop`, not `--disable-api-stop`, so the
+		// reverse operation is unambiguous in audit output.
+		setup := env.New(t)
+		seedCloudContextConfig(t, setup, "edge")
+		result := erun.Run(t, []string{"context", "enable-api-stop", "edge", "--dry-run", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "context/enable_api_stop_dry_run_traces_aws_modify_attribute", normalize.Apply(result.Combined))
+	})
 }
