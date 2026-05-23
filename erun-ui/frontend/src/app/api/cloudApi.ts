@@ -7,6 +7,9 @@ import type {
 } from '@/types';
 
 import {
+  DescribeCloudContextApiStop,
+  DisableCloudContextApiStop,
+  EnableCloudContextApiStop,
   GetCloudProviderBearerToken,
   InitAWSCloudProvider,
   InitCloudContext,
@@ -45,6 +48,24 @@ export const cloudApi = wailsApi.injectEndpoints({
     stopCloudContext: builder.mutation<UICloudContextStatus, string>({
       queryFn: wailsQueryFn<string, UICloudContextStatus>((name) => StopCloudContext(name)),
       invalidatesTags: ['CloudContexts'],
+    }),
+    getCloudContextApiStop: builder.query<UICloudContextStatus, string>({
+      queryFn: wailsQueryFn<string, UICloudContextStatus>((name) =>
+        DescribeCloudContextApiStop(name),
+      ),
+      providesTags: (_result, _error, name) => [{ type: 'CloudContextApiStop', id: name }],
+    }),
+    disableCloudContextApiStop: builder.mutation<UICloudContextStatus, string>({
+      queryFn: wailsQueryFn<string, UICloudContextStatus>((name) =>
+        DisableCloudContextApiStop(name),
+      ),
+      invalidatesTags: (_result, _error, name) => [{ type: 'CloudContextApiStop', id: name }],
+    }),
+    enableCloudContextApiStop: builder.mutation<UICloudContextStatus, string>({
+      queryFn: wailsQueryFn<string, UICloudContextStatus>((name) =>
+        EnableCloudContextApiStop(name),
+      ),
+      invalidatesTags: (_result, _error, name) => [{ type: 'CloudContextApiStop', id: name }],
     }),
     loginCloudProvider: builder.mutation<UICloudProviderStatus, string>({
       queryFn: wailsQueryFn<string, UICloudProviderStatus>((alias) => LoginCloudProvider(alias)),
@@ -86,6 +107,9 @@ export const {
   useInitCloudContextMutation,
   useStartCloudContextMutation,
   useStopCloudContextMutation,
+  useGetCloudContextApiStopQuery,
+  useDisableCloudContextApiStopMutation,
+  useEnableCloudContextApiStopMutation,
   useLoginCloudProviderMutation,
   useLogoutCloudProviderMutation,
   useGetCloudProviderBearerTokenMutation,

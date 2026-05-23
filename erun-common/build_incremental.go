@@ -122,7 +122,7 @@ func computeBuildFingerprint(buildInput DockerBuildSpec) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	ignored, err := loadContextIgnoreSet(contextDir)
+	ignored, err := loadContextIgnoreSet(contextDir, sources)
 	if err != nil {
 		return "", err
 	}
@@ -228,30 +228,98 @@ type ignorePattern struct {
 	anchored bool
 	dirOnly  bool
 	negate   bool
+	// base is the directory containing the .gitignore the pattern came
+	// from, relative to contextDir and slash-normalized (empty for the
+	// root .dockerignore / .gitignore). The matcher uses it to scope a
+	// pattern to its own subtree, matching git's own behaviour where a
+	// nested .gitignore only governs files beneath it.
+	base string
 }
 
 type ignoreSet struct {
 	patterns []ignorePattern
 }
 
-// loadContextIgnoreSet reads .dockerignore and .gitignore from contextDir and
-// returns a single matcher combining the two. A missing file is not an error;
-// callers receive whatever set could be parsed. .dockerignore patterns are
-// applied first, .gitignore second, so a later negation can override an
-// earlier exclusion.
-func loadContextIgnoreSet(contextDir string) (*ignoreSet, error) {
+// loadContextIgnoreSet builds the ignore matcher applied during fingerprint
+// computation. The root .dockerignore and .gitignore apply to every file in
+// the context. .gitignore files nested under the COPY sources are also
+// honoured, with each nested file's patterns scoped to its own directory
+// subtree — mirroring how git itself reads .gitignore files. Missing files
+// are not an error: callers receive whatever set could be parsed. Patterns
+// are appended in load order so a later negation can override an earlier
+// exclusion.
+func loadContextIgnoreSet(contextDir string, sources []string) (*ignoreSet, error) {
 	combined := &ignoreSet{}
 	for _, name := range []string{".dockerignore", ".gitignore"} {
-		set, err := loadIgnoreFile(filepath.Join(contextDir, name))
+		set, err := loadIgnoreFile(filepath.Join(contextDir, name), "")
 		if err != nil {
 			return nil, err
 		}
 		combined.patterns = append(combined.patterns, set.patterns...)
 	}
+	if err := loadNestedGitignores(contextDir, sources, combined); err != nil {
+		return nil, err
+	}
 	return combined, nil
 }
 
-func loadIgnoreFile(path string) (*ignoreSet, error) {
+// loadNestedGitignores walks under each directory source and appends the
+// patterns from every .gitignore it finds. Nested .dockerignore files are
+// intentionally not honoured because Docker itself only reads the root
+// one — keeping the fingerprint algorithm consistent with the actual build
+// context.
+func loadNestedGitignores(contextDir string, sources []string, combined *ignoreSet) error {
+	visited := make(map[string]struct{}, len(sources))
+	for _, src := range sources {
+		full := filepath.Join(contextDir, src)
+		info, err := os.Lstat(full)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+		if !info.IsDir() {
+			continue
+		}
+		walkErr := filepath.WalkDir(full, func(path string, d os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			rel, err := filepath.Rel(contextDir, path)
+			if err != nil {
+				return err
+			}
+			rel = filepath.ToSlash(rel)
+			if d.IsDir() {
+				if _, seen := visited[rel]; seen {
+					return filepath.SkipDir
+				}
+				visited[rel] = struct{}{}
+				return nil
+			}
+			if d.Name() != ".gitignore" {
+				return nil
+			}
+			base := filepath.ToSlash(filepath.Dir(rel))
+			if base == "." || base == "" {
+				return nil // root, already loaded
+			}
+			set, err := loadIgnoreFile(path, base)
+			if err != nil {
+				return err
+			}
+			combined.patterns = append(combined.patterns, set.patterns...)
+			return nil
+		})
+		if walkErr != nil {
+			return walkErr
+		}
+	}
+	return nil
+}
+
+func loadIgnoreFile(path, base string) (*ignoreSet, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -259,10 +327,10 @@ func loadIgnoreFile(path string) (*ignoreSet, error) {
 		}
 		return nil, err
 	}
-	return parseIgnoreData(data), nil
+	return parseIgnoreData(data, base), nil
 }
 
-func parseIgnoreData(data []byte) *ignoreSet {
+func parseIgnoreData(data []byte, base string) *ignoreSet {
 	set := &ignoreSet{}
 	for _, raw := range strings.Split(string(data), "\n") {
 		line := strings.TrimRight(raw, "\r")
@@ -303,6 +371,7 @@ func parseIgnoreData(data []byte) *ignoreSet {
 			anchored: anchored,
 			dirOnly:  dirOnly,
 			negate:   negate,
+			base:     base,
 		})
 	}
 	return set
@@ -328,6 +397,16 @@ func (s *ignoreSet) matches(rel string, isDir bool) bool {
 func patternMatchesPath(p ignorePattern, rel string) bool {
 	if p.raw == "" || p.raw == "." {
 		return false
+	}
+	// Patterns loaded from a nested .gitignore only govern files under
+	// that .gitignore's own directory. Strip the base prefix so the rest
+	// of the matcher (anchoring, globbing, dir-only handling) works on a
+	// path relative to where the pattern was declared.
+	if p.base != "" {
+		if rel == p.base || !strings.HasPrefix(rel, p.base+"/") {
+			return false
+		}
+		rel = strings.TrimPrefix(rel, p.base+"/")
 	}
 	if p.anchored {
 		if globMatch(p.raw, rel) {

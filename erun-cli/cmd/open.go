@@ -129,17 +129,19 @@ func applyOpenSnapshotPreference(result common.OpenResult, enabled *bool, saveEn
 	return result, nil
 }
 
-func persistOpenRuntimeVersion(result common.OpenResult, version string, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
+func persistOpenRuntimeVersion(result common.OpenResult, version, registry string, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
 	version = strings.TrimSpace(version)
+	registry = strings.TrimSpace(registry)
 	if version == "" || saveEnvConfig == nil {
 		return result, nil
 	}
 
 	updated := result.EnvConfig
-	if strings.TrimSpace(updated.RuntimeVersion) == version {
+	if strings.TrimSpace(updated.RuntimeVersion) == version && strings.TrimSpace(updated.RuntimeRegistry) == registry {
 		return result, nil
 	}
 	updated.RuntimeVersion = version
+	updated.RuntimeRegistry = registry
 
 	result.EnvConfig = updated
 	if err := saveEnvConfig(result.Tenant, updated); err != nil {
@@ -379,6 +381,22 @@ func (r *resolvedOpenRunner) maybeDeployRuntime(shellReq common.ShellLaunchParam
 }
 
 func (r *resolvedOpenRunner) resolveRuntimeExecution() (common.DeploySpec, error) {
+	// Migrate any pre-#361 tenant Chart.yaml still pinned to the
+	// literal "1.0.0" placeholder before resolving the deploy spec.
+	// The migration is a no-op for tenants whose chart does not
+	// exist (the materialized default path handles that) or whose
+	// Chart.yaml has been hand-customised; only the exact legacy
+	// shape is rewritten. Without this, an env created by an older
+	// binary keeps asking helm for erun-mcp:1.0.0 from the tenant's
+	// container registry — an image that may never have been
+	// published — so every rollout fails at pod startup.
+	appVersion := strings.TrimSpace(r.result.EnvConfig.RuntimeVersion)
+	if appVersion == "" {
+		appVersion = currentBuildInfo().Version
+	}
+	if err := common.MigrateDefaultDevopsChartAppVersion(r.ctx, r.result.RepoPath, r.result.Tenant, appVersion); err != nil {
+		return common.DeploySpec{}, err
+	}
 	execution, err := r.resolveRuntimeDeploySpec(r.ctx, r.result, r.options.AllowLocalBuilds)
 	if err != nil {
 		return common.DeploySpec{}, err
@@ -436,7 +454,7 @@ func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
 	if err := common.RunDeploySpec(r.ctx, execution, common.DockerImageBuilder, runOpenDockerPush, r.openHelmDeployer(execution)); err != nil {
 		return err
 	}
-	return r.persistRuntimeVersion(execution.Deploy.Version)
+	return r.persistRuntimeVersion(execution.Deploy.Version, execution.Deploy.ContainerRegistry)
 }
 
 func runOpenDockerPush(ctx common.Context, pushInput common.DockerPushSpec) error {
@@ -451,11 +469,11 @@ func (r *resolvedOpenRunner) openHelmDeployer(execution common.DeploySpec) commo
 	)
 }
 
-func (r *resolvedOpenRunner) persistRuntimeVersion(version string) error {
+func (r *resolvedOpenRunner) persistRuntimeVersion(version, registry string) error {
 	if r.ctx.DryRun {
 		return nil
 	}
-	result, err := persistOpenRuntimeVersion(r.result, version, r.options.SaveEnvConfig)
+	result, err := persistOpenRuntimeVersion(r.result, version, registry, r.options.SaveEnvConfig)
 	if err != nil {
 		return err
 	}
@@ -598,7 +616,16 @@ func maybeCreateMissingRuntimeChart(ctx common.Context, result common.OpenResult
 		return execution, nil
 	}
 
-	if err := common.EnsureDefaultDevopsChart(ctx, result.RepoPath, result.Tenant, result.Environment); err != nil {
+	// Pass the resolved runtime version (falls back to the binary's
+	// build version) so the generated Chart.yaml pins appVersion to
+	// the real release. Before #361 this defaulted to the asset's
+	// literal "1.0.0", which baked stale erun-mcp / <tenant>-devops
+	// image tags into every tenant chart.
+	appVersion := strings.TrimSpace(result.EnvConfig.RuntimeVersion)
+	if appVersion == "" {
+		appVersion = currentBuildInfo().Version
+	}
+	if err := common.EnsureDefaultDevopsChartWithVersion(ctx, result.RepoPath, result.Tenant, result.Environment, appVersion); err != nil {
 		return common.DeploySpec{}, err
 	}
 

@@ -5,6 +5,7 @@ import { appendDebugOutput } from './debugThunks';
 import { readError } from './errors';
 import type {
   AIActivityPayload,
+  AppNotificationPayload,
   AppStatusPayload,
   EnvironmentInitializedPayload,
   TerminalExitSelections,
@@ -71,6 +72,24 @@ export const handleAppStatus =
     }
     dispatch(appendDebugOutput(`[status] ${message}\n`));
     dispatch(showTerminalMessage(message, payload.busy === true));
+  };
+
+// handleAppNotification routes a transient toast emitted from the Go
+// side through the auto-dismissing notification slot. Used for one-shot
+// info/success events (e.g. "Stopped idle cloud context X.") that
+// would go stale if left on the persistent titlebar pill — see
+// erun-ui/AGENTS.md § "UX Impact Review Checklist" item 3 and issue
+// #361.
+export const handleAppNotification =
+  (payload: AppNotificationPayload): AppThunk =>
+  (dispatch) => {
+    const message = (payload.message ?? '').trim();
+    if (!message) {
+      return;
+    }
+    const kind = payload.kind ?? 'info';
+    dispatch(appendDebugOutput(`[notification:${kind}] ${message}\n`));
+    dispatch(showNotification(kind, message));
   };
 
 // Fires when the backend's PTY trace handler observes

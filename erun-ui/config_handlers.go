@@ -98,6 +98,50 @@ func (a *App) StartCloudContext(name string) (uiCloudContextStatus, error) {
 	return cloudContextStatusToUI(status), nil
 }
 
+// DisableCloudContextApiStop sets AWS DisableApiStop=true for the named
+// cloud context so the in-pod idle monitor, the desktop Stop button,
+// and any external caller all hit OperationNotPermitted on subsequent
+// stop calls. This is the recovery lever the user reaches for when
+// auto-stop is racing against an unhealthy env.
+func (a *App) DisableCloudContextApiStop(name string) (uiCloudContextStatus, error) {
+	status, err := eruncommon.SetCloudContextStopProtection(eruncommon.Context{}, a.deps.store, eruncommon.CloudContextStopProtectionParams{
+		Name:    name,
+		Enabled: true,
+	}, a.deps.cloudContextDeps)
+	if err != nil {
+		return uiCloudContextStatus{}, err
+	}
+	return cloudContextStatusToUI(status), nil
+}
+
+// EnableCloudContextApiStop clears the AWS DisableApiStop attribute so
+// the normal auto-stop / manual-stop behaviour resumes. Mirrors
+// DisableCloudContextApiStop to keep the two transitions symmetrical
+// on the desktop's lock toggle.
+func (a *App) EnableCloudContextApiStop(name string) (uiCloudContextStatus, error) {
+	status, err := eruncommon.SetCloudContextStopProtection(eruncommon.Context{}, a.deps.store, eruncommon.CloudContextStopProtectionParams{
+		Name:    name,
+		Enabled: false,
+	}, a.deps.cloudContextDeps)
+	if err != nil {
+		return uiCloudContextStatus{}, err
+	}
+	return cloudContextStatusToUI(status), nil
+}
+
+// DescribeCloudContextApiStop reads the live DisableApiStop attribute
+// without mutating it. Called lazily by the titlebar lock toggle so
+// the icon reflects the AWS state rather than a stale local cache —
+// the bulk RefreshCloudContextStatuses path deliberately skips this
+// to avoid an extra AWS round-trip per configured env on every poll.
+func (a *App) DescribeCloudContextApiStop(name string) (uiCloudContextStatus, error) {
+	status, err := eruncommon.DescribeCloudContextStopProtection(eruncommon.Context{}, a.deps.store, name, a.deps.cloudContextDeps)
+	if err != nil {
+		return uiCloudContextStatus{}, err
+	}
+	return cloudContextStatusToUI(status), nil
+}
+
 func (a *App) SaveAWSCloudProviderAlias(input uiAWSCloudAliasInput) (uiCloudProviderStatus, error) {
 	provider, err := eruncommon.SaveCloudProviderConfig(a.deps.store, eruncommon.CloudProviderConfig{
 		Alias:         strings.TrimSpace(input.Alias),
@@ -295,18 +339,20 @@ func cloudContextStatusesToUI(statuses []eruncommon.CloudContextStatus) []uiClou
 func cloudContextStatusToUI(status eruncommon.CloudContextStatus) uiCloudContextStatus {
 	context := eruncommon.NormalizeCloudContextConfig(status.CloudContextConfig)
 	return uiCloudContextStatus{
-		Name:               strings.TrimSpace(context.Name),
-		Provider:           strings.TrimSpace(context.Provider),
-		CloudProviderAlias: strings.TrimSpace(context.CloudProviderAlias),
-		Region:             strings.TrimSpace(context.Region),
-		InstanceID:         strings.TrimSpace(context.InstanceID),
-		PublicIP:           strings.TrimSpace(context.PublicIP),
-		InstanceType:       strings.TrimSpace(context.InstanceType),
-		DiskType:           strings.TrimSpace(context.DiskType),
-		DiskSizeGB:         context.DiskSizeGB,
-		KubernetesContext:  strings.TrimSpace(context.KubernetesContext),
-		Status:             strings.TrimSpace(status.Status),
-		Message:            strings.TrimSpace(status.Message),
+		Name:                strings.TrimSpace(context.Name),
+		Provider:            strings.TrimSpace(context.Provider),
+		CloudProviderAlias:  strings.TrimSpace(context.CloudProviderAlias),
+		Region:              strings.TrimSpace(context.Region),
+		InstanceID:          strings.TrimSpace(context.InstanceID),
+		PublicIP:            strings.TrimSpace(context.PublicIP),
+		InstanceType:        strings.TrimSpace(context.InstanceType),
+		DiskType:            strings.TrimSpace(context.DiskType),
+		DiskSizeGB:          context.DiskSizeGB,
+		KubernetesContext:   strings.TrimSpace(context.KubernetesContext),
+		Status:              strings.TrimSpace(status.Status),
+		Message:             strings.TrimSpace(status.Message),
+		StopProtection:      status.StopProtection,
+		StopProtectionKnown: status.StopProtectionKnown,
 	}
 }
 
@@ -315,6 +361,19 @@ func (a *App) emitAppStatus(message string, busy bool) {
 		return
 	}
 	a.emit(appStatusEvent, appStatusPayload{Message: message, Busy: busy})
+}
+
+// emitAppNotification pushes a transient toast-style notification.
+// Use this for one-shot info/success events that should not linger in
+// the titlebar after the state they describe has moved on (e.g. the
+// idle-stop success line). Errors and long-running busy indicators
+// still belong on emitAppStatus so their pill stays readable until the
+// user dismisses or replaces it.
+func (a *App) emitAppNotification(kind, message string) {
+	if strings.TrimSpace(message) == "" {
+		return
+	}
+	a.emit(appNotificationEvent, appNotificationPayload{Kind: kind, Message: message})
 }
 
 func cloudContextDisplayName(status eruncommon.CloudContextStatus) string {

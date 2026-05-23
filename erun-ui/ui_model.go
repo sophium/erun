@@ -267,18 +267,20 @@ type uiCloudProviderBearerToken struct {
 }
 
 type uiCloudContextStatus struct {
-	Name               string `json:"name"`
-	Provider           string `json:"provider"`
-	CloudProviderAlias string `json:"cloudProviderAlias"`
-	Region             string `json:"region"`
-	InstanceID         string `json:"instanceId,omitempty"`
-	PublicIP           string `json:"publicIp,omitempty"`
-	InstanceType       string `json:"instanceType"`
-	DiskType           string `json:"diskType"`
-	DiskSizeGB         int    `json:"diskSizeGb"`
-	KubernetesContext  string `json:"kubernetesContext"`
-	Status             string `json:"status"`
-	Message            string `json:"message,omitempty"`
+	Name                string `json:"name"`
+	Provider            string `json:"provider"`
+	CloudProviderAlias  string `json:"cloudProviderAlias"`
+	Region              string `json:"region"`
+	InstanceID          string `json:"instanceId,omitempty"`
+	PublicIP            string `json:"publicIp,omitempty"`
+	InstanceType        string `json:"instanceType"`
+	DiskType            string `json:"diskType"`
+	DiskSizeGB          int    `json:"diskSizeGb"`
+	KubernetesContext   string `json:"kubernetesContext"`
+	Status              string `json:"status"`
+	Message             string `json:"message,omitempty"`
+	StopProtection      bool   `json:"stopProtection,omitempty"`
+	StopProtectionKnown bool   `json:"stopProtectionKnown,omitempty"`
 }
 
 type uiAWSCloudAliasInput struct {
@@ -340,6 +342,16 @@ type aiActivityPayload struct {
 type appStatusPayload struct {
 	Message string `json:"message"`
 	Busy    bool   `json:"busy"`
+}
+
+// appNotificationPayload carries a transient toast-style notification.
+// Unlike appStatusPayload, the frontend routes this through the auto-
+// dismissing notification slot, so one-shot info/success events cannot
+// go stale and outlive the state they describe. Kind matches the
+// frontend's AppNotification kinds: success | warning | error | info.
+type appNotificationPayload struct {
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
 }
 
 type pastedImagePayload struct {

@@ -13,6 +13,7 @@ const (
 	terminalOutputEvent         = "terminal-output"
 	terminalExitEvent           = "terminal-exit"
 	appStatusEvent              = "app-status"
+	appNotificationEvent        = "app-notification"
 	mcpReconnectLineEvent       = "mcp-reconnect-line"
 	environmentInitializedEvent = "environment-initialized"
 	environmentInitFailedEvent  = "environment-init-failed"

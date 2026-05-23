@@ -8,24 +8,10 @@ import {
   StartLocalSession,
   StartSession,
 } from '../../wailsjs/go/main/App';
-import { sessionApi } from './api/sessionApi';
 import { resolveAutoStartGate } from './autoStartGate';
-import {
-  appendDebugOutput,
-  applyPendingDebugHeader,
-  setPendingDebugHeader,
-  syncDebugDisplay,
-} from './debugThunks';
+import { applyPendingDebugHeader, setPendingDebugHeader, syncDebugDisplay } from './debugThunks';
 import { readError } from './errors';
-import type { IDEKind } from './model';
-import {
-  dismissNotification,
-  dismissTerminalStatus,
-  hideTerminalMessage,
-  showNotification,
-  showTerminalFailure,
-  showTerminalMessage,
-} from './notificationThunks';
+import { hideTerminalMessage, showTerminalMessage } from './notificationThunks';
 import { loadReviewDiff } from './reviewThunks';
 import { selectActiveSlotForSelection, selectEnvironmentExists } from './selectors';
 import { isNewSessionSelection } from './sessionSelection';
@@ -43,7 +29,6 @@ import {
   markEnvOpening,
   registerDebugSession,
   resetEnvOpening,
-  setSessionDebug,
   trackOpenSession,
 } from './slices/sessionsSlice';
 import { setTenantDashboard } from './slices/tenantDashboardSlice';
@@ -51,14 +36,9 @@ import { setDebugOutput, setSelectedSessionForEnv, setSessionId } from './slices
 import { setTerminalCopyOutput, setTerminalCopyStatus } from './slices/terminalStatusSlice';
 import type { TerminalTabKind } from './state';
 import type { AppThunk } from './store';
+import { maybeRespawnDeadDefaultTab } from './tabRespawnThunks';
 import { recordTab, rememberSelectedTab, removeTab } from './tabsThunks';
-import {
-  debugOutputBlock,
-  formatDebugCommand,
-  formatIDECommand,
-  ideLabel,
-  ideOpenFailure,
-} from './terminalStatus';
+import { formatDebugCommand } from './terminalStatus';
 import { requireController } from './thunkExtra';
 import { selectionKey } from './versionSuggestions';
 
@@ -515,7 +495,13 @@ export const selectTerminalTab =
   (sessionId: number): AppThunk =>
   (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    if (sessionId <= 0 || sessionId === getState().terminal.sessionId) {
+    if (sessionId <= 0) {
+      return;
+    }
+    if (dispatch(maybeRespawnDeadDefaultTab(sessionId))) {
+      return;
+    }
+    if (sessionId === getState().terminal.sessionId) {
       return;
     }
     dispatch(setSessionId(sessionId));
@@ -569,46 +555,4 @@ export const closeTerminalTab =
         dispatch(setDebugOutput(''));
       }
     }
-  };
-
-export const openIDE =
-  (selection: UISelection | null, ide: IDEKind): AppThunk<Promise<void>> =>
-  async (dispatch, getState) => {
-    if (!selection) {
-      dispatch(showTerminalMessage('Choose an environment from the left pane.'));
-      return;
-    }
-    const state = getState();
-    const runSelection = { ...selection, debug: state.layout.debugOpen || undefined };
-    const label = ideLabel(ide);
-    dispatch(setSelected(selection));
-    if (state.layout.debugOpen) {
-      const header = `$ ${formatIDECommand(runSelection, ide)}\n`;
-      dispatch(setSessionDebug({ sessionId: getState().terminal.sessionId, value: header }));
-      dispatch(syncDebugDisplay());
-    }
-    dispatch(setTerminalCopyOutput(''));
-    dispatch(setTerminalCopyStatus(''));
-    dispatch(
-      showTerminalMessage(`Opening ${label} for ${selection.tenant} / ${selection.environment}...`),
-    );
-
-    try {
-      await dispatch(
-        sessionApi.endpoints.openIDE.initiate({ selection: runSelection, ide }),
-      ).unwrap();
-    } catch (error: unknown) {
-      const failure = ideOpenFailure(selection, label, readError(error));
-      dispatch(appendDebugOutput(debugOutputBlock(failure.copyOutput)));
-      dispatch(dismissNotification());
-      dispatch(showTerminalFailure(failure.message, failure.detail, failure.copyOutput, '', null));
-      return;
-    }
-    dispatch(dismissTerminalStatus());
-    dispatch(
-      showNotification(
-        'success',
-        `Opened ${label} for ${selection.tenant} / ${selection.environment}.`,
-      ),
-    );
   };

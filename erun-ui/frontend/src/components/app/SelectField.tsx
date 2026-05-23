@@ -42,7 +42,7 @@ export function SelectField({
   const triggerDisabled = disabled === true || noOptions;
   const helperId = helper ? `${id}-helper` : undefined;
   return (
-    <div className="grid gap-2">
+    <div className="grid min-w-0 gap-2">
       <Label htmlFor={id}>{label}</Label>
       <Select
         value={value || undefined}
@@ -50,7 +50,11 @@ export function SelectField({
         disabled={triggerDisabled}
         onValueChange={onChange}
       >
-        <SelectTrigger id={id} className="w-full" aria-describedby={helperId}>
+        <SelectTrigger
+          id={id}
+          className="w-full min-w-0 *:data-[slot=select-value]:min-w-0 *:data-[slot=select-value]:overflow-hidden *:data-[slot=select-value]:text-ellipsis"
+          aria-describedby={helperId}
+        >
           <SelectValue
             placeholder={noOptions ? (emptyLabel ?? 'No options') : (placeholder ?? '')}
           />

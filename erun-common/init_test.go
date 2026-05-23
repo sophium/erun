@@ -390,7 +390,7 @@ func TestEnsureDefaultDevopsChartMigratesLegacyGeneratedServiceTemplate(t *testi
 	if err != nil {
 		t.Fatalf("read embedded service template: %v", err)
 	}
-	rendered := renderDefaultDevopsChartTemplate("assets/default-devops-chart/templates/service.yaml", moduleName, moduleName, current)
+	rendered := renderDefaultDevopsChartTemplate("assets/default-devops-chart/templates/service.yaml", moduleName, moduleName, "dev", current)
 	if err := os.MkdirAll(templatesDir, 0o755); err != nil {
 		t.Fatalf("mkdir service template dir: %v", err)
 	}
@@ -469,7 +469,7 @@ func TestEnsureDefaultDevopsChartPreservesModifiedServiceTemplate(t *testing.T) 
 	if err != nil {
 		t.Fatalf("read embedded service template: %v", err)
 	}
-	rendered := renderDefaultDevopsChartTemplate("assets/default-devops-chart/templates/service.yaml", moduleName, moduleName, current)
+	rendered := renderDefaultDevopsChartTemplate("assets/default-devops-chart/templates/service.yaml", moduleName, moduleName, "dev", current)
 	modified := legacyDefaultDevopsServiceTemplate(rendered) + "\n# tenant customization\n"
 	if err := os.MkdirAll(filepath.Dir(serviceTemplatePath), 0o755); err != nil {
 		t.Fatalf("mkdir service template dir: %v", err)

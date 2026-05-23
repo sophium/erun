@@ -218,6 +218,7 @@ func remoteDefaultDevopsBootstrapFiles(projectRoot, tenant, envName, runtimeVers
 	}
 
 	replacer := strings.NewReplacer("__MODULE_NAME__", moduleName)
+	resolvedAppVersion := defaultDevopsChartAppVersion(runtimeVersion)
 	for _, templateFile := range defaultDevopsChartTemplates {
 		data, err := defaultDevopsChartFiles.ReadFile(templateFile.AssetPath)
 		if err != nil {
@@ -225,7 +226,7 @@ func remoteDefaultDevopsBootstrapFiles(projectRoot, tenant, envName, runtimeVers
 		}
 		targetPath := replacer.Replace(templateFile.TargetPath)
 		resolvedPath := path.Join(projectRoot, targetPath)
-		content := renderDefaultDevopsChartTemplate(templateFile.AssetPath, moduleName, moduleName, data)
+		content := renderDefaultDevopsChartTemplate(templateFile.AssetPath, moduleName, moduleName, resolvedAppVersion, data)
 		files = append(files, remoteDefaultDevopsFile{
 			Path:    resolvedPath,
 			Mode:    fmt.Sprintf("%o", templateFile.Mode.Perm()),
