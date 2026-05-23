@@ -3478,6 +3478,102 @@ func TestStartSessionDoesNotReconnectIntoStoppedCloudContext(t *testing.T) {
 	}
 }
 
+func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
+	// When the linked cloud context auto-stops while a Claude/codex AI
+	// session is attached, `tryReconnect` refuses to fight the stop and
+	// `streamSession` cleans up the managed session (closed=true, removed
+	// from a.sessions). The desktop's tab-respawn flow then calls
+	// StartAISession again from the user's click on the dead AI tab; the
+	// backend must respond with a brand new session instead of returning
+	// the stale serial. This pins that contract so the click-driven
+	// recovery in tabRespawnThunks does not regress into a no-op.
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		config: &eruncommon.ERunConfig{
+			CloudContexts: []eruncommon.CloudContextConfig{{
+				Name:              "managed-cloud",
+				KubernetesContext: "cluster-cloud",
+				Status:            eruncommon.CloudContextStatusStopped,
+			}},
+		},
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {
+				Name:              "remote",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-cloud",
+				Remote:            true,
+			},
+		},
+	}
+
+	var sessions []*stubTerminalSession
+	var mu sync.Mutex
+	app := NewApp(erunUIDeps{
+		store:           store,
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			session := newStubTerminalSession()
+			mu.Lock()
+			sessions = append(sessions, session)
+			mu.Unlock()
+			return session, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+
+	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	first, err := app.StartAISession(selection, 0, 80, 24)
+	if err != nil {
+		t.Fatalf("first StartAISession failed: %v", err)
+	}
+
+	mu.Lock()
+	deadSession := sessions[0]
+	mu.Unlock()
+	_ = deadSession.Close()
+
+	// Wait until streamSession finishes cleaning up the dead managed
+	// terminal. The shouldRespawnForCloudContext gate is what makes this
+	// observable: it sees the stopped context, refuses to respawn, and
+	// drops the entry from a.sessions.
+	key := aiSessionKey(selection, 0)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		app.mu.Lock()
+		_, present := app.sessions[key]
+		app.mu.Unlock()
+		if !present {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	app.mu.Lock()
+	_, stillPresent := app.sessions[key]
+	app.mu.Unlock()
+	if stillPresent {
+		t.Fatalf("expected streamSession to drop the dead AI session from a.sessions after the cloud-context gate refused respawn")
+	}
+
+	second, err := app.StartAISession(selection, 0, 80, 24)
+	if err != nil {
+		t.Fatalf("second StartAISession failed: %v", err)
+	}
+	if second.SessionID == first.SessionID {
+		t.Fatalf("expected a fresh session id after restart, got the same serial %d", second.SessionID)
+	}
+	mu.Lock()
+	count := len(sessions)
+	mu.Unlock()
+	if count < 2 {
+		t.Fatalf("expected a second PTY spawn after click-driven respawn, got %d", count)
+	}
+}
+
 func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T) {
 	// idleStops latches on the first successful stop so the desktop
 	// does not re-fire a stop while one is in flight. When the context
