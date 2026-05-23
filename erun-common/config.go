@@ -89,6 +89,7 @@ type EnvConfig struct {
 	CloudProviderAlias  string                  `yaml:"cloudprovideralias,omitempty"`
 	ManagedCloud        bool                    `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
 	RuntimeVersion      string                  `yaml:"runtimeversion,omitempty"`
+	RuntimeRegistry     string                  `yaml:"runtimeregistry,omitempty" json:"runtimeRegistry,omitempty"`
 	RuntimePod          RuntimePodResources     `yaml:"runtimepod,omitempty"`
 	SSHD                SSHDConfig              `yaml:"sshd,omitempty"`
 	Idle                EnvironmentIdleConfig   `yaml:"idle,omitempty"`

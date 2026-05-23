@@ -129,17 +129,19 @@ func applyOpenSnapshotPreference(result common.OpenResult, enabled *bool, saveEn
 	return result, nil
 }
 
-func persistOpenRuntimeVersion(result common.OpenResult, version string, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
+func persistOpenRuntimeVersion(result common.OpenResult, version, registry string, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
 	version = strings.TrimSpace(version)
+	registry = strings.TrimSpace(registry)
 	if version == "" || saveEnvConfig == nil {
 		return result, nil
 	}
 
 	updated := result.EnvConfig
-	if strings.TrimSpace(updated.RuntimeVersion) == version {
+	if strings.TrimSpace(updated.RuntimeVersion) == version && strings.TrimSpace(updated.RuntimeRegistry) == registry {
 		return result, nil
 	}
 	updated.RuntimeVersion = version
+	updated.RuntimeRegistry = registry
 
 	result.EnvConfig = updated
 	if err := saveEnvConfig(result.Tenant, updated); err != nil {
@@ -452,7 +454,7 @@ func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
 	if err := common.RunDeploySpec(r.ctx, execution, common.DockerImageBuilder, runOpenDockerPush, r.openHelmDeployer(execution)); err != nil {
 		return err
 	}
-	return r.persistRuntimeVersion(execution.Deploy.Version)
+	return r.persistRuntimeVersion(execution.Deploy.Version, execution.Deploy.ContainerRegistry)
 }
 
 func runOpenDockerPush(ctx common.Context, pushInput common.DockerPushSpec) error {
@@ -467,11 +469,11 @@ func (r *resolvedOpenRunner) openHelmDeployer(execution common.DeploySpec) commo
 	)
 }
 
-func (r *resolvedOpenRunner) persistRuntimeVersion(version string) error {
+func (r *resolvedOpenRunner) persistRuntimeVersion(version, registry string) error {
 	if r.ctx.DryRun {
 		return nil
 	}
-	result, err := persistOpenRuntimeVersion(r.result, version, r.options.SaveEnvConfig)
+	result, err := persistOpenRuntimeVersion(r.result, version, registry, r.options.SaveEnvConfig)
 	if err != nil {
 		return err
 	}

@@ -182,19 +182,23 @@ type DeploySpec struct {
 // state without depending on the full ConfigStore.
 type EnvConfigSaver func(tenant string, config EnvConfig) error
 
-// PersistRuntimeVersionFromDeploySpecs writes the version of the
-// runtime chart that was just deployed back into the env config so
-// downstream readers (the desktop runtime dialog, `erun list`, and any
-// `erun open` invocation that doesn't pass --version) reflect the
-// deployed state. Without this, `erun deploy --version 1.0.54` left
-// env config's runtimeversion at the previously persisted value and
-// the dialog kept rendering the stale string.
+// PersistRuntimeVersionFromDeploySpecs writes the version and source
+// registry of the runtime chart that was just deployed back into the
+// env config so downstream readers (the desktop runtime dialog, `erun
+// list`, and any `erun open` invocation that doesn't pass --version)
+// reflect the deployed state. Without this, `erun deploy --version
+// 1.0.54` left env config's runtimeversion at the previously persisted
+// value and the dialog kept rendering the stale string.
+//
+// The registry is recorded alongside the version as provenance so a
+// subsequent reopen can address the same image even if the user later
+// edits the project's container registry. See issue #363.
 //
 // Looks for the spec whose ReleaseName equals <tenant>-devops; if
-// found and its Deploy.Version differs from the env config's
-// RuntimeVersion, the env config is rewritten with the deployed
-// version. Component-only deploys (no runtime chart in the spec list)
-// are no-ops, as are dry-runs and calls with a nil saver.
+// found and its Deploy.Version or Deploy.ContainerRegistry differ from
+// the env config, the env config is rewritten with the deployed pair.
+// Component-only deploys (no runtime chart in the spec list) are
+// no-ops, as are dry-runs and calls with a nil saver.
 func PersistRuntimeVersionFromDeploySpecs(ctx Context, specs []DeploySpec, save EnvConfigSaver) error {
 	if save == nil || ctx.DryRun || len(specs) == 0 {
 		return nil
@@ -207,11 +211,13 @@ func PersistRuntimeVersionFromDeploySpecs(ctx Context, specs []DeploySpec, save 
 		if version == "" {
 			continue
 		}
+		registry := strings.TrimSpace(spec.Deploy.ContainerRegistry)
 		envConfig := spec.Target.EnvConfig
-		if strings.TrimSpace(envConfig.RuntimeVersion) == version {
+		if strings.TrimSpace(envConfig.RuntimeVersion) == version && strings.TrimSpace(envConfig.RuntimeRegistry) == registry {
 			return nil
 		}
 		envConfig.RuntimeVersion = version
+		envConfig.RuntimeRegistry = registry
 		if err := save(spec.Target.Tenant, envConfig); err != nil {
 			return fmt.Errorf("persist runtime version after deploy: %w", err)
 		}
@@ -491,13 +497,26 @@ func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot
 		}
 	}
 
+	versionFromPersist := false
 	if strings.TrimSpace(versionOverride) == "" {
 		versionOverride = strings.TrimSpace(target.EnvConfig.RuntimeVersion)
+		if versionOverride != "" {
+			versionFromPersist = true
+		}
 	}
 
 	deployInput, err := newHelmDeploySpec(target, deployContext, versionOverride)
 	if err != nil {
 		return DeploySpec{}, err
+	}
+	// Pull-path provenance: when re-rendering with the persisted
+	// version and no local build in flight, address the same image
+	// the previous deploy used. Protects reopens after the user
+	// edits the project's container registry. See issue #363.
+	if versionFromPersist && len(builds) == 0 && deployContextOwnsRuntimeChart(deployContext, target.Tenant) {
+		if registry := strings.TrimSpace(target.EnvConfig.RuntimeRegistry); registry != "" {
+			deployInput.ContainerRegistry = registry
+		}
 	}
 	deployInput.ResetDatabase = deployResetsDatabase(allowLocalBuilds, deployInput.Version)
 	if err := configureDeployInputMetadata(store, target, &deployInput); err != nil {
@@ -591,6 +610,14 @@ func resolveCurrentDockerComponentBuildForDeploy(store DockerStore, findProjectR
 		return nil, err
 	}
 	return &build, nil
+}
+
+func deployContextOwnsRuntimeChart(deployContext KubernetesDeployContext, tenant string) bool {
+	tenant = strings.TrimSpace(tenant)
+	if tenant == "" {
+		return false
+	}
+	return strings.TrimSpace(deployContext.ComponentName) == RuntimeReleaseName(tenant)
 }
 
 func deployContextOwnsDockerBuild(deployContext KubernetesDeployContext, build DockerBuildSpec) bool {
