@@ -317,6 +317,19 @@ func (a *App) emitAppStatus(message string, busy bool) {
 	a.emit(appStatusEvent, appStatusPayload{Message: message, Busy: busy})
 }
 
+// emitAppNotification pushes a transient toast-style notification.
+// Use this for one-shot info/success events that should not linger in
+// the titlebar after the state they describe has moved on (e.g. the
+// idle-stop success line). Errors and long-running busy indicators
+// still belong on emitAppStatus so their pill stays readable until the
+// user dismisses or replaces it.
+func (a *App) emitAppNotification(kind, message string) {
+	if strings.TrimSpace(message) == "" {
+		return
+	}
+	a.emit(appNotificationEvent, appNotificationPayload{Kind: kind, Message: message})
+}
+
 func cloudContextDisplayName(status eruncommon.CloudContextStatus) string {
 	if name := strings.TrimSpace(status.KubernetesContext); name != "" {
 		return name

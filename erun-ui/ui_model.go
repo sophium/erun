@@ -342,6 +342,16 @@ type appStatusPayload struct {
 	Busy    bool   `json:"busy"`
 }
 
+// appNotificationPayload carries a transient toast-style notification.
+// Unlike appStatusPayload, the frontend routes this through the auto-
+// dismissing notification slot, so one-shot info/success events cannot
+// go stale and outlive the state they describe. Kind matches the
+// frontend's AppNotification kinds: success | warning | error | info.
+type appNotificationPayload struct {
+	Kind    string `json:"kind"`
+	Message string `json:"message"`
+}
+
 type pastedImagePayload struct {
 	Data     string `json:"data"`
 	MIMEType string `json:"mimeType,omitempty"`

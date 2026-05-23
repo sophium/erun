@@ -891,7 +891,7 @@ func (s *bootstrapRunState) ensureDevopsAssets() error {
 	if err := EnsureDefaultDevopsModuleWithVersion(s.runner.Context, projectRoot, s.tenant, s.params.RuntimeVersion); err != nil {
 		return err
 	}
-	return EnsureDefaultDevopsChart(s.runner.Context, projectRoot, s.tenant, s.envName)
+	return EnsureDefaultDevopsChartWithVersion(s.runner.Context, projectRoot, s.tenant, s.envName, s.params.RuntimeVersion)
 }
 
 func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
