@@ -10,6 +10,7 @@ Repository guidance for humans and coding agents working in this repo.
   - `erun-ui/AGENTS.md` — desktop-module guidance, including macOS + Windows targets and Wails frontend rules.
   - `erun-ui/playwright/AGENTS.md` — Playwright end-to-end UI test suite that drives `erun-app --headless`.
   - `erun-devops/AGENTS.md` — runtime-image, chart, build-cache, and release-workflow guidance.
+  - `erun-docs/AGENTS.md` — product documentation site (Docusaurus) and the Cloudflare Pages deploy contract.
   - `erun-integration/AGENTS.md` — integration-test harness layout, scenario shape, and the coverage gate.
   - `erun-backend/AGENTS.md` plus `erun-backend/erun-backend-api/AGENTS.md` and `erun-backend/erun-backend-db/AGENTS.md` — hosted-backend, API, and Atlas-migration guidance.
 - A child `AGENTS.md` is additional, not a replacement: parent rules still apply unless the child explicitly overrides them.
@@ -38,6 +39,7 @@ Repository guidance for humans and coding agents working in this repo.
 - `erun-backend` - backend service area containing the API and database migration modules
 - `erun-devops` - runtime Docker images, Linux packaging, and Kubernetes chart assets used by build, open, deploy, and release flows
 - `erun-ui` - desktop app module built with Wails, using a Go backend and a TypeScript/Yarn frontend
+- `erun-docs` - public product documentation site (Docusaurus 3.x), published to Cloudflare Pages via a k8s Job under `erun-devops/k8s/erun-docs/`
 - `erun-integration` - cross-module integration test harness; runs the compiled `erun` binary with `--dry-run` against per-command goldens and gates merged coverage
 
 ## Module Boundaries

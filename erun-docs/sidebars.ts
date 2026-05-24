@@ -1,0 +1,56 @@
+import type { SidebarsConfig } from '@docusaurus/plugin-content-docs';
+
+const sidebars: SidebarsConfig = {
+  docsSidebar: [
+    'intro',
+    {
+      type: 'category',
+      label: 'Getting started',
+      link: { type: 'generated-index' },
+      items: ['getting-started/install', 'getting-started/first-environment'],
+    },
+    {
+      type: 'category',
+      label: 'Concepts',
+      link: { type: 'generated-index' },
+      items: [
+        'concepts/tenants-and-environments',
+        'concepts/runtime-pods',
+        'concepts/local-vs-non-local',
+        'concepts/cloud-contexts',
+      ],
+    },
+    {
+      type: 'category',
+      label: 'CLI reference',
+      link: { type: 'generated-index' },
+      items: ['cli/overview'],
+    },
+    {
+      type: 'category',
+      label: 'Desktop app',
+      link: { type: 'generated-index' },
+      items: ['desktop/overview'],
+    },
+    {
+      type: 'category',
+      label: 'MCP',
+      link: { type: 'generated-index' },
+      items: ['mcp/overview'],
+    },
+    {
+      type: 'category',
+      label: 'Deployment',
+      link: { type: 'generated-index' },
+      items: ['deployment/registries', 'deployment/release-flow'],
+    },
+    {
+      type: 'category',
+      label: 'Reference',
+      link: { type: 'generated-index' },
+      items: ['reference/config-locations', 'reference/env-vars'],
+    },
+  ],
+};
+
+export default sidebars;
