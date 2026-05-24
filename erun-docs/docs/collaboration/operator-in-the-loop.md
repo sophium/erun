@@ -31,9 +31,21 @@ Three layers of audit, all readable by the operator:
 
 For a security-sensitive action — a release tag push, a merge-queue advance, a status transition — the operator can reconstruct *who* did *what*, *when*, in *which environment*, and *with which build*.
 
+## The desktop as control panel
+
+The ERun desktop app is the operator's primary control panel. From its sidebar you can:
+
+- See every tenant and environment at a glance, with live status (running, stopping, idle, errored).
+- Start, stop, and restart environments without typing commands.
+- Edit per-environment configuration — runtime image and resources, AI tooling, port mapping, SSH key, cloud context — through a single modal.
+- Manage cloud contexts: start and stop the managed Kubernetes clusters that back remote environments.
+- Watch live terminal sessions and switch between many open environments without losing scrollback.
+
+The CLI and the desktop expose the same capabilities. The desktop is for orchestration at a glance; the CLI is for scripting and for what you do once you're inside an environment.
+
 ## Working in the environment
 
-`erun open` is the single entry point for every operator workflow. Three attach modes cover the common cases — all use the same underlying environment, the same audit trail, the same MCP endpoint.
+`erun open` is the single entry point for every operator workflow. Three explicit attach modes plus a universal SSH endpoint cover every editor.
 
 ### Shell
 
@@ -41,7 +53,7 @@ For a security-sensitive action — a release tag push, a merge-queue advance, a
 erun open my-tenant feature-a
 ```
 
-Attaches a terminal to the runtime pod. Use it for `git diff`, `git log`, running tests, ad-hoc commands, watching an agent's session in real time.
+Attaches a terminal to the runtime pod. Use it for `git diff`, `git log`, running tests, ad-hoc commands, watching an agent's session in real time. The desktop app keeps these sessions persistent — switching tabs doesn't kill your shell.
 
 ### VS Code
 
@@ -59,18 +71,28 @@ erun open my-tenant feature-a --intellij
 
 Launches IntelliJ IDEA Gateway against the same SSH server. Same model as VS Code.
 
+### Any other Remote-SSH-capable IDE
+
+The chart exposes a Kubernetes SSH endpoint that the desktop port-forwards to a local port. Any modern editor that can attach over SSH — Cursor, Zed, JetBrains products (GoLand, PyCharm, WebStorm, …), Neovim with remote plugins, anything else — can connect to that endpoint with no further configuration. The `--vscode` and `--intellij` flags are explicit conveniences; the SSH surface is open.
+
 ### What's shared regardless of attach mode
 
-All three modes — shell, VS Code, IntelliJ — operate on the same runtime pod:
+Every attach mode — shell, VS Code, IntelliJ, Cursor, anything else — operates on the same runtime pod:
 
 - Same `/home/erun/git/<repo>` workspace.
 - Same docker daemon image cache.
 - Same MCP endpoint (so an in-IDE agent and a shell-side agent see the same `idle`/`doctor`/`list` results).
 - Same audit trail.
 
-This means: an agent working in `feature-a` and an operator who opens that same environment in VS Code are not in parallel universes. They are looking at the exact same workspace, in real time. A commit one makes is immediately visible to the other.
+An operator working in VS Code and an agent calling MCP from another tool are looking at the exact same workspace, in real time. A commit one makes is immediately visible to the other.
 
-### With or without an agent
+## Agents share the same environment over MCP
+
+The same environment the operator sees in an IDE is reachable by AI agents — **Claude, Codex, and any MCP-compatible tool** — through the environment's MCP server. The desktop maintains a per-environment local port-forward; the agent's MCP client reads `<UserConfigDir>/erun/portforward/mcp/<tenant>/<environment>.json` to discover the port, and from there it has the same `idle`, `doctor`, `list`, `version`, and `raw` tools the operator has.
+
+This is what "humans and agents share one environment" means in practice: not two parallel worlds, but one environment with two interfaces. The operator's IDE shows file edits; the agent's MCP calls show structured state and command traces. Both see what the other is doing because the underlying pod is the same pod.
+
+## With or without an agent
 
 These attach modes are not specific to supervising agents. The operator can use them for entirely human-driven work:
 
