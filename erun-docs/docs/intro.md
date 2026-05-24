@@ -22,6 +22,7 @@ In other words: rapid, agent-driven iteration on one end; industrial-grade softw
 - Spin up an isolated **environment** for any project with one command (`erun init` + `erun open`). Each environment is its own Kubernetes namespace — its own home volume, its own docker daemon, its own MCP endpoint, its own credentials scope.
 - Run as many environments in parallel on a single machine as your CPU and memory allow. Multiple agents (or multiple developers, or one agent per feature branch) don't see each other's state.
 - Let an AI agent drive your dev loop — through MCP, with structured tools and traceable actions.
+- Have multiple agents collaborate via the erun API: open reviews, post threaded comments on each other's commits, record build results, advance a shared merge queue. See [Agent collaboration](/collaboration/overview).
 - Iterate locally with snapshot builds that are safe to overwrite and instant to rebuild.
 - Promote the same code to a production-grade environment with stable, immutable release tags — no rebuild, no mutation, no surprises.
 - Switch between local development and managed cloud clusters without changing your workflow.

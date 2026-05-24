@@ -54,6 +54,17 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
+      label: 'Agent collaboration',
+      link: { type: 'generated-index' },
+      items: [
+        'collaboration/overview',
+        'collaboration/reviews',
+        'collaboration/comments',
+        'collaboration/builds',
+      ],
+    },
+    {
+      type: 'category',
       label: 'Deployment',
       link: { type: 'generated-index' },
       items: ['deployment/registries', 'deployment/release-flow'],
