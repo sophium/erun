@@ -5,54 +5,58 @@ slug: /intro
 
 # ERun
 
-> **Agentic coding from idea to production — with the operator in control.**
+**Agentic coding from idea to production — with the operator in control.**
+
+ERun is the platform layer beneath agentic coding. It gives every agent an isolated environment, gives every operator a full audit trail and a one-command take-over, and ships production-grade Kubernetes deploys without compromising on compliance or industry best practices.
+
+---
+
+## How work flows
 
 ```mermaid
 flowchart LR
-    I([💡 Idea]) --> A
-    A[🤖 Agent<br/>in environment]
-    A --> R[💬 Review<br/>operator + agents]
-    R --> P([🚀 Production])
-    R -. assist / take over .-> A
-    classDef hero fill:#0e7c66,color:#fff,stroke:#0a5d4d,stroke-width:2px;
-    classDef step fill:#e6f4f0,color:#0e7c66,stroke:#0e7c66,stroke-width:2px;
-    class I,P hero
-    class A,R step
+    Idea([Idea]) --> Agent
+    Agent[Agent<br/>in environment] --> Review[Review<br/>operator + agents]
+    Review --> Production([Production])
+    Review -. assist · take over .-> Agent
+
+    classDef terminal fill:#0e7c66,stroke:#0a5d4d,color:#ffffff,stroke-width:1px;
+    classDef step fill:#f4f8f7,stroke:#0e7c66,color:#0e7c66,stroke-width:1px;
+    class Idea,Production terminal
+    class Agent,Review step
 ```
 
-ERun is the platform layer beneath agentic coding. It gives every agent an isolated environment, gives every operator a full audit trail and a one-command take-over, and ships production-grade Kubernetes deploys — without compromising on compliance or industry best practices.
+---
 
 ## The four commitments
 
-```mermaid
-quadrantChart
-    title What ERun gives you
-    x-axis Operator-driven --> Agent-driven
-    y-axis Compliance --> Speed
-    quadrant-1 Iteration speed
-    quadrant-2 Operator in the loop
-    quadrant-3 Compliance by default
-    quadrant-4 Agent-first surface
-```
+**Agent-first surface.** Every environment exposes a structured MCP server. `--dry-run` returns trace lines identical to a real run. `AGENTS.md` files in each module encode the rules — read by humans and agents alike.
 
-- 🤖 **Agent-first** — structured MCP in every env, `--dry-run` as contract, `AGENTS.md` everywhere.
-- 👤 **[Operator in the loop](/collaboration/operator-in-the-loop)** — join any env, full audit, easy take-over.
-- ⚡ **Iteration speed** — snapshot vs release tags, fingerprint cache, idle-stop.
-- 🛡 **Compliance by default** — immutable releases, per-env isolation, multi-arch as a release gate.
+**Operator in the loop.** The operator can `erun open` any agent's environment, see live activity, replay the full audit trail, take over, or hand back. Agent autonomy expands as the audit accumulates evidence — never by removing the operator. → [Operator in the loop](/collaboration/operator-in-the-loop).
 
-## Two commands to get started
+**Iteration speed.** Snapshot tags for local iteration; immutable release tags for promotion. Fingerprint cache means fresh clones promote pinned bases without rebuilding. Idle-stop means you don't pay for cloud compute while you sleep.
+
+**Compliance by default.** Multi-architecture builds verified at developer-machine time. Per-environment Kubernetes isolation. Cloud contexts bound to specific accounts, regions, and IAM roles. Every action — CLI or API — is audited.
+
+---
+
+## Get started
+
+Two commands give you a working environment.
 
 ```bash
 erun init my-tenant local
 erun open my-tenant local
 ```
 
-You now have an isolated Kubernetes environment with your repo checked out, Docker-in-Docker, Helm, kubectl, an MCP endpoint for AI tooling, and a shell. Run as many in parallel as your machine can host — one per agent, per feature branch, per teammate.
+You now have an isolated Kubernetes namespace with your repo checked out, Docker-in-Docker, Helm, kubectl, an MCP endpoint for AI tooling, and a shell. Run as many environments in parallel as your machine can host — one per agent, per feature branch, per teammate.
+
+---
 
 ## Where next
 
-→ **[Why ERun](/why)** — the design principles in depth.
-→ **[First environment](/getting-started/first-environment)** — try it now.
-→ **[Agent collaboration](/collaboration/overview)** — how multiple agents (and operators) work together via the erun API.
+- **[Why ERun](/why)** — design principles in detail.
+- **[Create your first environment](/getting-started/first-environment)** — a five-minute walkthrough.
+- **[Agent collaboration](/collaboration/overview)** — multi-agent workflows via the erun API.
 
-[github.com/sophium/erun](https://github.com/sophium/erun)
+ERun is open source under [github.com/sophium/erun](https://github.com/sophium/erun).

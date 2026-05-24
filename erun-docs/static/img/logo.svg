@@ -1,4 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="ERun">
-  <rect width="64" height="64" rx="12" fill="#0e7c66"/>
-  <path d="M14 18h36M14 32h24M14 46h36" stroke="#ffffff" stroke-width="6" stroke-linecap="round"/>
+  <defs>
+    <linearGradient id="erunGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0e7c66"/>
+      <stop offset="100%" stop-color="#0a5d4d"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#erunGrad)"/>
+  <g fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M18 22 H40"/>
+    <path d="M18 32 H34"/>
+    <path d="M18 42 H40"/>
+    <circle cx="46" cy="42" r="3" fill="#ffffff" stroke="none"/>
+  </g>
 </svg>

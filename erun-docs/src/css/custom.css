@@ -20,3 +20,31 @@
   --ifm-color-primary-lightest: #91e3cd;
   --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
 }
+
+/* Restrained typographic treatment for the lead paragraph of a doc page.
+   Pairs with the "**Bold sentence.**" pattern used at the top of intro.md
+   and the section overviews. */
+.markdown > h1 + p strong:first-child {
+  font-size: 1.15rem;
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+  color: var(--ifm-color-emphasis-900);
+}
+
+/* Tighter mermaid diagram defaults: keep proportions sane in narrow viewports
+   and remove the default chrome that makes diagrams feel boxed-in. */
+.docusaurus-mermaid-container {
+  margin: 1.75rem auto;
+  text-align: center;
+}
+.docusaurus-mermaid-container svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Section dividers (`---` in markdown) are subtle but visible. */
+.markdown hr {
+  border: 0;
+  border-top: 1px solid var(--ifm-color-emphasis-200);
+  margin: 2.25rem 0;
+}
