@@ -16,7 +16,7 @@ When agents are involved, the operator-control and audit infrastructure is what 
 |---|---|
 | Join an agent's environment | `erun open <tenant> <env>` attaches a real shell to the same runtime pod the agent is using. The operator and the agent share `/home/erun`, the docker daemon, and the workspace. |
 | See live activity | The desktop app's terminal sessions show what's happening in real time. The MCP server's `idle` and `list` tools return current state. |
-| Audit every agent action | Every CLI command runs through `auditCommand` and emits a trace line. `--dry-run` returns the same trace lines as a real run. Every API write (review status change, comment, build) is persisted with the actor's identity. |
+| Audit every agent action | Every CLI command runs through `auditCommand` and emits a trace line. `--dry-run` shows the operator the same plan ahead of time — preview, then approve. Every API write (review status change, comment, build) is persisted with the actor's identity. |
 | Review and revert | All changes flow through git. Comments and reviews in the erun API are append-only with status transitions. Build outcomes are recorded, not transient. |
 | Take over an in-flight task | The operator opens the agent's environment, suspends the agent (or lets it finish its current step), continues in the shell, then hands back. |
 | Delegate selectively | The operator can scope what the agent is allowed to do via tenant-level permissions and OIDC issuer trust — the same controls a human collaborator would have. |
@@ -25,7 +25,7 @@ When agents are involved, the operator-control and audit infrastructure is what 
 
 Three layers of audit, all readable by the operator:
 
-1. **In-environment trace** — every `erun` invocation emits a `audit: erun <cmd> <args>` line and per-action trace lines (e.g. the exact `docker build`, `helm upgrade`, `git push` commands it ran). The trace is the same whether the command ran for real or with `--dry-run`.
+1. **In-environment trace** — every `erun` invocation emits a `audit: erun <cmd> <args>` line and per-action trace lines (e.g. the exact `docker build`, `helm upgrade`, `git push` commands it ran). The same lines appear in `--dry-run` mode so the operator can preview a command before running it; the dry-run trace and the real-run trace match.
 2. **Per-environment MCP** — `idle.activity` records terminal activity and network traffic windows. `doctor` records inspection outcomes. `raw` records the exact `argv` run and the working directory.
 3. **Hosted erun API** — every review, comment, status transition, and recorded build is persisted with `creator_user_id` and timestamps. An audit-events table captures security-relevant events. Nothing an agent does via the API is anonymous; nothing is unrecoverable.
 
@@ -92,7 +92,7 @@ The operator decides what work to hand off. Common patterns:
 
 The structure ERun puts in place — operator-in-the-loop today, with full audit and the ability to join any agent's environment — is what makes eventual autonomy safe. Trust is built on three observations:
 
-1. **Past behavior is replayable.** The dry-run contract plus persistent action logs mean an operator can ask "what would this agent do?" or "what did this agent do?" with the same fidelity.
+1. **Past and future behavior are both visible.** `--dry-run` answers "what would this agent do?"; the persistent action log answers "what did this agent do?" — at the same fidelity. The operator never has to take an agent's word for either.
 2. **Scope is enforceable.** OIDC, tenant scoping, and the per-environment isolation model put real walls around what an agent can touch.
 3. **Take-over is cheap.** If an agent goes off-course, the operator joins the environment in one command. There's no "agent runaway" because there's no place an agent can run where an operator can't follow.
 
