@@ -4,7 +4,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'ERun',
-  tagline: 'From idea to production — without the DevOps tax.',
+  tagline: 'Agentic coding from idea to production — at speed, without compromising compliance.',
   favicon: 'img/favicon.svg',
 
   url: 'https://docs.erunpaas.com',

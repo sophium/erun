@@ -5,7 +5,7 @@ slug: /why
 
 # Why ERun
 
-ERun exists because the path from "a developer with an idea" to "that idea running on production-grade infrastructure" is too long, too lossy, and almost entirely accidental complexity.
+ERun exists because the path from "a developer with an idea" — or an AI agent acting on a developer's behalf — to "that idea running on production-grade infrastructure" is too long, too lossy, and almost entirely accidental complexity.
 
 The accidental complexity looks like this:
 
@@ -15,59 +15,44 @@ The accidental complexity looks like this:
 - Decide your release tagging scheme. Hope nobody overwrites a stable tag with a debug build.
 - Set up CI to push tags. Set up CD to deploy them. Pray they're consistent.
 - Spin up a Kubernetes cluster for development. Pay for it 24/7 even when nobody is using it.
-- When something breaks, SSH into a pod, hope the right tools are installed, and start grepping.
+- When something breaks, SSH into a pod, hope the right tools are installed, start grepping — and hope an AI agent can do the same.
 
-None of that is what developers want to spend their day on. ERun's premise is that all of it is solvable once and shipped to everyone — with sane defaults that *are* industry best practices, not weakened approximations of them.
+None of that is what developers want to spend their day on, and none of it is something an agent can do reliably without exhaustive prompting. ERun's premise is that all of it is solvable once and shipped to everyone — with sane defaults that *are* industry best practices, and with a surface that's equally legible to humans and to agents.
 
-## The four principles
+## The primary aim: agentic coding
 
-### 1. Developer-first
+ERun is designed around the assumption that **AI agents are first-class users of the platform** — not just developers using AI as an editor, but agents that initialize environments, build images, deploy charts, diagnose pods, and iterate.
 
-The primary interface is a single CLI binary and an optional desktop app. The minimum viable interaction is two commands:
+Concretely, that means:
 
-```bash
-erun init <tenant> <env>
-erun open <tenant> <env>
-```
+- **Structured MCP server in every runtime pod.** The `erun-mcp` container exposes typed tools — `idle`, `doctor`, `list`, `version`, `raw` — over JSON-RPC 2.0. Most questions an agent needs to ask ("what's the current state of this environment?", "is the runtime healthy?", "what would `erun deploy` do right now?") are answered without an interactive shell and without parsing free-form text.
+- **`--dry-run` as a binding contract.** Every action-oriented command can produce its plan as trace lines. The trace lines are the same lines a real run emits — `cd /home/erun/git/my-repo && docker build ...`, `helm upgrade --install ...` — so an agent that previews a command before running it gets a faithful preview, not a summary.
+- **`AGENTS.md` everywhere.** Each module declares its engineering rules in an `AGENTS.md` file. These rules apply to humans and to agents alike: which patterns to use, which to avoid, which preflight checks to run before commands that touch shared systems. Agents are expected to read them; the rules are versioned with the code, so the constraints stay enforced as the codebase evolves.
+- **Deterministic commands.** Commands are designed to be safe to run repeatedly and in parallel — no hidden global state, no required interactive prompts on MCP-exposed paths, no surprises on retry.
+- **Local port-forwards to in-pod MCP.** The desktop app keeps a port-forward open to each open environment's MCP container. The forward port is published in a small JSON file at `<UserConfigDir>/erun/portforward/mcp/<tenant>/<environment>.json` so an agent on the same machine can discover and call the right endpoint without orchestration.
 
-That's it. You get an isolated runtime pod with your repo checked out, Docker-in-Docker, Helm, kubectl, an MCP server for AI tooling, and a shell ready to go.
+The net effect: an agent can pick up an idea, scaffold an environment, iterate on code, deploy, and audit the result — without escaping into ad-hoc shell commands or proprietary glue.
 
-There are no required YAML files to author. No kubeconfig to merge. No `helm install` invocations to memorize. The tool resolves defaults from your project, your tenant config, and the current cluster state, and shows you what it's about to do.
+## Iteration speed
 
-### 2. Industry-strength by default
+Speed isn't just about latency — it's about how many friction points there are between "I want to try a change" and "the change is running in a real environment."
 
-The "good enough for prod" defaults are the *only* defaults:
+- **Snapshot vs release tags.** In the `local` environment, `erun build` produces unique snapshot tags (`X.Y.Z-snapshot-<UTC-timestamp>`) that are safe to overwrite on every iteration. In non-local environments, the tag is the bare semver from `VERSION` — stable and immutable. The split lets you iterate as fast as your build pipeline allows without ever risking a release artifact.
+- **Fingerprint cache promotion.** Every Docker build computes a content fingerprint over the Dockerfile and its `COPY` sources. The next build pulls the published image tagged with that fingerprint and *promotes* it locally instead of rebuilding. A fresh clone of the repo gets a pinned base image without a 10-minute compile.
+- **One-command workflows.** `erun init` → `erun open` is the entire on-ramp. `erun deploy` is the entire shipping path. No `kubectl create namespace`, no `helm upgrade --install --create-namespace --values ...`, no `aws ecr get-login-password ...`. Defaults are real defaults.
+- **Idle-stop on cloud environments.** Managed cloud contexts shut down the underlying compute after a configurable inactivity timeout. The next `erun open` brings them back. You don't pay for what you're not using; you don't have to remember to stop anything.
+- **Same workflow, laptop to cluster.** Switching between `local` and a managed cloud environment is changing one environment name. The CLI, the MCP surface, the tooling inside the pod — all identical.
 
-- **Multi-architecture builds are unconditional.** Every `erun build`, `erun deploy`, and `erun build --release` produces both `linux/amd64` and `linux/arm64`. There is no single-arch code path — so an arch-specific Dockerfile bug fails at developer-machine build time, not at remote deploy time.
-- **Release tags are immutable.** Non-local environments use bare semver tags. `erun push` from a non-local env refuses to rebuild and overwrite — promotion is an explicit, reviewable step.
-- **Builds are content-fingerprinted.** Every Docker build computes a content hash over the Dockerfile and its `COPY` sources. The next build pulls the published image tagged with that fingerprint and promotes it instead of rebuilding. Fresh clones get pinned bases without a 10-minute compile.
-- **Every action supports `--dry-run`.** Dry-run prints the real commands ERun would run, with secrets redacted. The trace lines are the same lines a real run emits. There's no "but does it actually do that?" — `--dry-run` is the contract.
+## Compliance preserved by default
 
-### 3. Close the build-to-ship gap
+The hard part of building "fast" platforms is that "fast" usually means "skips checks." ERun's defaults are written so the fast path is also the compliant path.
 
-The same workflow scales from your laptop to a managed cloud cluster. Specifically:
-
-| | Local | Non-local |
-|---|---|---|
-| Where it runs | Your Docker Desktop / kind / k3d | A real Kubernetes cluster on AWS, GCP, on-prem |
-| Build behavior | Snapshot tags, auto-rebuild on `push` | Stable release tags, explicit `build` + `push` |
-| Deploy command | `erun deploy` | `erun deploy` |
-| Tooling inside the pod | identical | identical |
-| MCP / SSH / IDE attach | identical | identical |
-
-Moving from "works on my machine" to "works on prod" is changing one environment name, not learning a new tool.
-
-### 4. Best practices encoded, not lectured
-
-ERun doesn't have a chapter in its docs titled "you should use immutable release tags". It just *uses* immutable release tags. The way the tool works *is* the practice.
-
-A non-exhaustive list of practices ERun bakes in:
-
-- **Reproducible builds.** Fingerprint cache + pinned base images via `docker.fingerprints` in `.erun/config.yaml`.
-- **Per-environment isolation.** Each environment is its own Kubernetes namespace, its own PVCs, its own RBAC scope.
-- **Cost control by default.** Managed cloud environments idle-stop the underlying compute after configurable inactivity. The next `erun open` brings them back.
-- **Diagnostics over SSH.** The in-pod MCP server exposes structured tools (`doctor`, `idle`, `list`, `raw`) over JSON-RPC. Most "what's happening inside the pod?" questions are answered without an interactive shell.
-- **Engineering rules encoded.** `AGENTS.md` files in each module capture the rules that apply when changing that subtree — read by humans and by AI agents alike, so the rules stay enforced over time.
+- **Immutable release tags.** `erun push` from a non-local environment refuses to rebuild and overwrite. Promotion to a stable tag is an explicit, reviewable step. A release artifact is what it says it is, not what your laptop happened to have in its Docker cache.
+- **Multi-architecture as a release gate.** Every release-tagged image is multi-arch (`linux/amd64` + `linux/arm64`). The build flow refuses to publish a single-arch artifact. Arch-specific Dockerfile bugs fail at developer-machine build time, not at remote deploy time.
+- **Per-environment isolation.** Each environment lives in its own Kubernetes namespace with its own PVCs, its own ServiceAccount, its own RBAC scope. Tenants cannot see each other's data, and environments within a tenant cannot see each other's docker daemon, home volume, or secrets.
+- **Cloud contexts bind to specific accounts.** A managed cloud environment is bound to a specific cloud provider alias, account, region, and instance. The chart records these as labels on the deployment, so an audit of a running environment can trace back to the exact cloud identity that owns it.
+- **Auditable dry-run traces.** Every command can produce its full action plan ahead of time. The plan is the source of truth for change control — review the trace, then run for real.
+- **Engineering rules versioned with the code.** `AGENTS.md` files are part of the repo, reviewed in PRs, enforced by the team. Rule drift is visible in `git log`, not in a Confluence page nobody reads.
 
 ## What ERun is not
 
@@ -75,10 +60,10 @@ To be specific about scope:
 
 - ERun is not a CI/CD replacement. It pairs with GitHub Actions, GitLab CI, etc. — but it gives you a much smaller surface to wire into them.
 - ERun is not a serverless platform or a function runtime. It runs container images on Kubernetes.
-- ERun does not abstract away Kubernetes. You still have a real cluster; you can still `kubectl exec` if you want to. ERun just removes the daily friction of using one.
+- ERun does not abstract away Kubernetes. You still have a real cluster; you can still `kubectl exec` if you want to. ERun just removes the daily friction of using one, and gives agents a structured surface that doesn't require shell parsing.
 
 ## Where this leads
 
-The endpoint is straightforward: a developer can clone a project, run `erun init` and `erun open`, and within minutes be iterating on code that runs the same way locally as it does in production — on industry-strength infrastructure, with industry best practices applied by default, without having authored a single YAML manifest.
+The endpoint is straightforward. A person, an organization, or an AI agent acting on their behalf can clone a project, run `erun init` and `erun open`, and within minutes be iterating on code that runs the same way locally as it does in production — on industry-strength infrastructure, with industry best practices applied by default, with full audit traceability, and at the pace agentic coding actually demands.
 
 That's the gap ERun closes.

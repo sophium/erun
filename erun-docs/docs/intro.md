@@ -5,29 +5,30 @@ slug: /intro
 
 # ERun
 
-**ERun closes the gap between a developer who wants to build something and that thing running on production-grade infrastructure.**
+**ERun is built so a person — or a whole organization — with an idea can ship it at agentic-coding pace, on production-grade infrastructure, without compromising on compliance or industry best practices.**
 
-The hard problems between "I have an idea" and "real users are using it" — reproducible multi-architecture builds, Kubernetes deployments, container registries, release tagging, environment isolation, cost-controlled cloud compute, AI tooling integration — are not what most developers signed up to spend their week on. ERun takes care of them by default, and exposes the result as a tiny CLI and desktop app that gets out of your way.
+The primary aim is to enable **agentic coding**: AI agents that don't just write code but actually build, deploy, diagnose, and iterate. The constraint is that the result still has to pass a real audit — immutable release tags, reproducible builds, per-environment isolation, auditable command traces.
 
-The goals, in order:
+In other words: rapid, agent-driven iteration on one end; industrial-grade software shipped at the other end; nothing weakened in between.
 
-1. **Developer-first.** The interface is one CLI command at a time. No YAML to write, no helm values to author, no kubeconfig juggling — unless you want to. Defaults are real defaults, not "minimal" placeholders.
-2. **Industry-strength by default.** Every build is multi-arch. Every release tag is immutable. Every deploy is reproducible from a content fingerprint. Every action supports `--dry-run`. None of these are opt-in.
-3. **Close the build-to-ship gap.** From `erun init` to a pod running your code in a real Kubernetes cluster is one workflow, not seven. The same workflow scales from your laptop to a managed cloud cluster.
-4. **Best practices encoded, not lectured.** ERun's defaults *are* the best practices: stable release versions vs. snapshot iteration tags, content-derived build caches, explicit Helm hooks, idle-driven cost control. You learn the practices by using the tool.
+## The three commitments
+
+1. **Agent-first surface.** Every environment exposes a structured MCP server. Every action supports `--dry-run` whose trace lines match the real run. Every module ships an `AGENTS.md` capturing the rules that apply to it. Agents and humans read the same contracts.
+2. **Iteration speed.** Snapshot tags for local iteration. Stable release tags for promotion. Fingerprint cache so fresh clones promote pinned bases without rebuilding. Idle-stop so cloud compute doesn't bill you while you sleep. One-command workflows from `init` to `deploy`.
+3. **Compliance preserved by default.** Immutable release tags. Per-environment Kubernetes isolation. Auditable dry-run traces for every action. Cloud contexts that bind to specific accounts, regions, and IAM roles. Multi-architecture builds verified at developer-machine time, not at remote deploy time. None of these are opt-in.
 
 ## What you can do with ERun
 
 - Spin up an isolated runtime pod for any project with one command (`erun init` + `erun open`).
+- Let an AI agent drive your dev loop — through MCP, with structured tools and traceable actions.
 - Iterate locally with snapshot builds that are safe to overwrite and instant to rebuild.
-- Promote the same code to a non-local environment with stable, immutable release tags — no rebuild, no mutation, no surprises.
-- Switch between local development and remote managed cloud clusters without changing your workflow.
-- Talk to a remote pod's tooling over MCP for AI-assisted development.
+- Promote the same code to a production-grade environment with stable, immutable release tags — no rebuild, no mutation, no surprises.
+- Switch between local development and managed cloud clusters without changing your workflow.
 - Stop paying for idle cloud compute automatically when you walk away.
 
 ## Where to start
 
-- [Why ERun](/why) — the design principles in detail.
+- [Why ERun](/why) — the design principles in detail, including the agentic-coding affordances and the compliance contract.
 - [Install ERun](/getting-started/install).
 - [Create your first environment](/getting-started/first-environment).
 - [Concepts: tenants and environments](/concepts/tenants-and-environments).
