@@ -4,7 +4,7 @@ title: erun open
 
 # `erun open`
 
-Open a shell in the tenant environment's runtime pod. If the pod is not running, `open` deploys the runtime chart and waits until the pod is ready before attaching a terminal.
+Open a shell in the tenant environment. If the environment is not running, `open` deploys the runtime chart (a pod into the environment's namespace) and waits until it is ready before attaching a terminal.
 
 ## Synopsis
 

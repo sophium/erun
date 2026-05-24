@@ -27,7 +27,9 @@ ERun writes its configuration to `~/.config/erun/` and a small project file at `
 erun open my-tenant local
 ```
 
-This deploys the runtime pod into your Kubernetes cluster and opens a shell inside it. From inside the pod you can run `erun build`, `erun push`, `erun deploy`, etc. against your project.
+This brings the environment up in your Kubernetes cluster (deploying a runtime pod into the environment's namespace) and opens a shell inside it. From inside the environment you can run `erun build`, `erun push`, `erun deploy`, etc. against your project.
+
+You can open as many environments at once as your machine can host. Each environment is its own Kubernetes namespace with its own home volume, docker daemon, and MCP endpoint — so a second `erun open my-tenant another-env` runs alongside the first without interference.
 
 ## 3. List environments
 

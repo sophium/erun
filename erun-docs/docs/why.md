@@ -15,21 +15,21 @@ The accidental complexity looks like this:
 - Decide your release tagging scheme. Hope nobody overwrites a stable tag with a debug build.
 - Set up CI to push tags. Set up CD to deploy them. Pray they're consistent.
 - Spin up a Kubernetes cluster for development. Pay for it 24/7 even when nobody is using it.
-- When something breaks, SSH into a pod, hope the right tools are installed, start grepping — and hope an AI agent can do the same.
+- When something breaks, SSH into a container, hope the right tools are installed, start grepping — and hope an AI agent can do the same.
 
 None of that is what developers want to spend their day on, and none of it is something an agent can do reliably without exhaustive prompting. ERun's premise is that all of it is solvable once and shipped to everyone — with sane defaults that *are* industry best practices, and with a surface that's equally legible to humans and to agents.
 
 ## The primary aim: agentic coding
 
-ERun is designed around the assumption that **AI agents are first-class users of the platform** — not just developers using AI as an editor, but agents that initialize environments, build images, deploy charts, diagnose pods, and iterate.
+ERun is designed around the assumption that **AI agents are first-class users of the platform** — not just developers using AI as an editor, but agents that initialize environments, build images, deploy charts, diagnose running environments, and iterate. And not one at a time: a single laptop can host many isolated environments in parallel, so an organization can run multiple agents — one per task, one per feature branch, one per developer — without them stepping on each other.
 
 Concretely, that means:
 
-- **Structured MCP server in every runtime pod.** The `erun-mcp` container exposes typed tools — `idle`, `doctor`, `list`, `version`, `raw` — over JSON-RPC 2.0. Most questions an agent needs to ask ("what's the current state of this environment?", "is the runtime healthy?", "what would `erun deploy` do right now?") are answered without an interactive shell and without parsing free-form text.
+- **Structured MCP server in every environment.** Each environment runs an `erun-mcp` container that exposes typed tools — `idle`, `doctor`, `list`, `version`, `raw` — over JSON-RPC 2.0. Most questions an agent needs to ask ("what's the current state of this environment?", "is the runtime healthy?", "what would `erun deploy` do right now?") are answered without an interactive shell and without parsing free-form text.
 - **`--dry-run` as a binding contract.** Every action-oriented command can produce its plan as trace lines. The trace lines are the same lines a real run emits — `cd /home/erun/git/my-repo && docker build ...`, `helm upgrade --install ...` — so an agent that previews a command before running it gets a faithful preview, not a summary.
 - **`AGENTS.md` everywhere.** Each module declares its engineering rules in an `AGENTS.md` file. These rules apply to humans and to agents alike: which patterns to use, which to avoid, which preflight checks to run before commands that touch shared systems. Agents are expected to read them; the rules are versioned with the code, so the constraints stay enforced as the codebase evolves.
 - **Deterministic commands.** Commands are designed to be safe to run repeatedly and in parallel — no hidden global state, no required interactive prompts on MCP-exposed paths, no surprises on retry.
-- **Local port-forwards to in-pod MCP.** The desktop app keeps a port-forward open to each open environment's MCP container. The forward port is published in a small JSON file at `<UserConfigDir>/erun/portforward/mcp/<tenant>/<environment>.json` so an agent on the same machine can discover and call the right endpoint without orchestration.
+- **Per-environment MCP port-forwards.** The desktop app keeps a port-forward open to each open environment's MCP container. The forward port is published in a small JSON file at `<UserConfigDir>/erun/portforward/mcp/<tenant>/<environment>.json` so an agent on the same machine can discover and call the right endpoint without orchestration. With many environments open at once, each gets its own port — agents talking to environment A never accidentally reach into environment B.
 
 The net effect: an agent can pick up an idea, scaffold an environment, iterate on code, deploy, and audit the result — without escaping into ad-hoc shell commands or proprietary glue.
 
@@ -41,7 +41,7 @@ Speed isn't just about latency — it's about how many friction points there are
 - **Fingerprint cache promotion.** Every Docker build computes a content fingerprint over the Dockerfile and its `COPY` sources. The next build pulls the published image tagged with that fingerprint and *promotes* it locally instead of rebuilding. A fresh clone of the repo gets a pinned base image without a 10-minute compile.
 - **One-command workflows.** `erun init` → `erun open` is the entire on-ramp. `erun deploy` is the entire shipping path. No `kubectl create namespace`, no `helm upgrade --install --create-namespace --values ...`, no `aws ecr get-login-password ...`. Defaults are real defaults.
 - **Idle-stop on cloud environments.** Managed cloud contexts shut down the underlying compute after a configurable inactivity timeout. The next `erun open` brings them back. You don't pay for what you're not using; you don't have to remember to stop anything.
-- **Same workflow, laptop to cluster.** Switching between `local` and a managed cloud environment is changing one environment name. The CLI, the MCP surface, the tooling inside the pod — all identical.
+- **Same workflow, laptop to cluster.** Switching between `local` and a managed cloud environment is changing one environment name. The CLI, the MCP surface, the tooling inside the environment — all identical.
 
 ## Compliance preserved by default
 

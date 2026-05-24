@@ -7,7 +7,9 @@ title: Tenants and environments
 ERun's configuration is organized around two ideas:
 
 - A **tenant** is a project or workstream. It maps to a git repository and owns one or more environments.
-- An **environment** is a named runtime target within a tenant: `local`, `dev`, `staging`, `<your-feature-branch>`, and so on. Each environment has its own Kubernetes context, container registry, and runtime pod.
+- An **environment** is a named runtime target within a tenant: `local`, `dev`, `staging`, `<your-feature-branch>`, and so on. Each environment lives in its own Kubernetes namespace with its own container registry, runtime configuration, home volume, docker daemon, and MCP endpoint.
+
+Environments are independent. A single machine can host many of them in parallel — one per feature branch, one per agent, one per teammate sharing the same cluster — and they don't see each other's state. The limit is your CPU and memory, not anything ERun imposes.
 
 ## Configuration layout
 
