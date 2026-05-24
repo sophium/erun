@@ -9,22 +9,10 @@ slug: /intro
 
 ERun is the platform layer beneath agentic coding. It gives every agent an isolated environment, gives every operator a full audit trail and a one-command take-over, and ships production-grade Kubernetes deploys without compromising on compliance or industry best practices.
 
----
-
-## How work flows
-
-```mermaid
-flowchart LR
-    Idea([Idea]) --> Agent
-    Agent[Agent<br/>in environment] --> Review[Review<br/>operator + agents]
-    Review --> Production([Production])
-    Review -. assist · take over .-> Agent
-
-    classDef terminal fill:#0e7c66,stroke:#0a5d4d,color:#ffffff,stroke-width:1px;
-    classDef step fill:#f4f8f7,stroke:#0e7c66,color:#0e7c66,stroke-width:1px;
-    class Idea,Production terminal
-    class Agent,Review step
-```
+<figure className="erun-hero-figure">
+  <img src="/img/hero-flow.svg" alt="The operator sits above an idea-to-production flow. Solid arrows take an idea through an agent's isolated environment, into review with operators and other agents, and out to production. Dashed arrows from the operator into the Agent and Review steps are labeled 'join · take over' and 'review · approve'." />
+  <figcaption>The operator is in the loop at every step. Solid arrows are the work; dashed arrows are the operator stepping in.</figcaption>
+</figure>
 
 ---
 

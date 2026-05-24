@@ -48,3 +48,23 @@
   border-top: 1px solid var(--ifm-color-emphasis-200);
   margin: 2.25rem 0;
 }
+
+/* Hero flow figure on the welcome page. Centers the SVG, gives it breathing
+   room, and styles the caption as understated supporting text. */
+.erun-hero-figure {
+  margin: 2rem auto;
+  max-width: 920px;
+  text-align: center;
+}
+.erun-hero-figure img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.erun-hero-figure figcaption {
+  margin-top: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--ifm-color-emphasis-700);
+  line-height: 1.5;
+  letter-spacing: 0.005em;
+}

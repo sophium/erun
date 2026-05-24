@@ -1,0 +1,63 @@
+<svg viewBox="0 0 1000 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="heroFlowTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="heroFlowTitle">From idea to production, with the operator in the loop</title>
+  <defs>
+    <marker id="arrowSolid" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0e7c66"/>
+    </marker>
+    <marker id="arrowDashed" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0e7c66"/>
+    </marker>
+  </defs>
+
+  <!-- Operator -->
+  <g>
+    <rect x="430" y="20" width="140" height="44" rx="22" fill="#0e7c66"/>
+    <text x="500" y="48" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" letter-spacing="0.01em">Operator</text>
+  </g>
+
+  <!-- Operator → Agent (dashed) -->
+  <path d="M470 64 C 400 110, 300 150, 300 200" fill="none" stroke="#0e7c66" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#arrowDashed)"/>
+  <!-- Operator → Review (dashed) -->
+  <path d="M530 64 C 600 110, 650 150, 650 200" fill="none" stroke="#0e7c66" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#arrowDashed)"/>
+
+  <!-- Edge labels (with background pill so they punch through the dashed line in both themes) -->
+  <g>
+    <rect x="278" y="118" width="124" height="22" rx="11" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="340" y="133" text-anchor="middle" fill="#0e7c66" font-size="12" font-weight="500" letter-spacing="0.02em">join · take over</text>
+  </g>
+  <g>
+    <rect x="598" y="118" width="134" height="22" rx="11" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="665" y="133" text-anchor="middle" fill="#0e7c66" font-size="12" font-weight="500" letter-spacing="0.02em">review · approve</text>
+  </g>
+
+  <!-- Idea (left endpoint) -->
+  <g>
+    <rect x="24" y="218" width="76" height="44" rx="22" fill="#0e7c66"/>
+    <text x="62" y="245" text-anchor="middle" fill="#ffffff" font-size="15" font-weight="600">Idea</text>
+  </g>
+
+  <!-- Agent in environment -->
+  <g>
+    <rect x="200" y="200" width="200" height="80" rx="10" fill="none" stroke="#0e7c66" stroke-width="1.5"/>
+    <text x="300" y="234" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Agent</text>
+    <text x="300" y="256" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">in isolated environment</text>
+  </g>
+
+  <!-- Review -->
+  <g>
+    <rect x="550" y="200" width="200" height="80" rx="10" fill="none" stroke="#0e7c66" stroke-width="1.5"/>
+    <text x="650" y="234" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Review</text>
+    <text x="650" y="256" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">operator + agents</text>
+  </g>
+
+  <!-- Production (right endpoint) -->
+  <g>
+    <rect x="876" y="218" width="100" height="44" rx="22" fill="#0e7c66"/>
+    <text x="926" y="245" text-anchor="middle" fill="#ffffff" font-size="15" font-weight="600">Production</text>
+  </g>
+
+  <!-- Horizontal flow arrows (solid) -->
+  <line x1="100" y1="240" x2="195" y2="240" stroke="#0e7c66" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
+  <line x1="400" y1="240" x2="545" y2="240" stroke="#0e7c66" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
+  <line x1="750" y1="240" x2="871" y2="240" stroke="#0e7c66" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
+</svg>
