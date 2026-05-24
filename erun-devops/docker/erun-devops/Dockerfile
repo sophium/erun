@@ -121,6 +121,7 @@ COPY --chmod=0755 erun-devops/docker/erun-devops/entrypoint.sh /usr/local/bin/er
 COPY --chmod=0755 erun-devops/docker/erun-devops/codex-wrapper.sh /usr/local/bin/codex
 COPY --chmod=0755 erun-devops/docker/erun-devops/claude-wrapper.sh /usr/local/bin/claude
 COPY --chmod=0644 erun-devops/docker/erun-devops/bash_prompt.sh /etc/erun/bash_prompt.sh
+COPY --chmod=0644 erun-devops/docker/erun-devops/skills/erun/SKILL.md /etc/erun/skills/erun/SKILL.md
 
 RUN /usr/local/bin/erun completion bash > /etc/bash_completion.d/erun && \
     chmod 0644 /etc/bash_completion.d/erun

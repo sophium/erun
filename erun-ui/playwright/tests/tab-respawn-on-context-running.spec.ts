@@ -36,10 +36,7 @@ import { expect, test } from '../fixtures/erunApp.js';
 // erun-integration/.
 
 test.describe('tab respawn after cloud context returns to running', () => {
-  test('non-managed env does not lose tabs across an idle poll cycle', async ({
-    app,
-    page,
-  }) => {
+  test('non-managed env does not lose tabs across an idle poll cycle', async ({ app, page }) => {
     const tenants = await app.sidebar.tenants();
     expect(tenants.length).toBeGreaterThan(0);
     const tenant = tenants[0]!;

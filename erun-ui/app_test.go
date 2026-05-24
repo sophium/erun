@@ -3493,7 +3493,6 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 			CloudContexts: []eruncommon.CloudContextConfig{{
 				Name:              "managed-cloud",
 				KubernetesContext: "cluster-cloud",
-				Status:            eruncommon.CloudContextStatusStopped,
 			}},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
@@ -3524,6 +3523,7 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 		},
 	})
 	defer app.shutdown(context.Background())
+	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusStopped)
 
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
 	first, err := app.StartAISession(selection, 0, 80, 24)
