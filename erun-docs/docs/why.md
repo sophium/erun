@@ -34,6 +34,19 @@ Concretely, that means:
 
 The net effect: an agent can pick up an idea, scaffold an environment, iterate on code, deploy, review a peer's work, and audit the result — without escaping into ad-hoc shell commands or proprietary glue, and without operating in isolation from the other agents on the team.
 
+## Operator in the loop, by default
+
+The operator — the human responsible for the work — is a first-class citizen of the platform. Agents are powerful, but the operator retains control, sees what they're doing, and can take over at any time. This is not an obstacle to agentic coding; it is the prerequisite for it.
+
+- **The operator can join any agent's environment.** `erun open <tenant> <env>` attaches the operator's shell to the same runtime pod the agent is using. They share the workspace, the docker daemon, the MCP endpoint. The operator can `git diff`, run a test, make a commit, or simply watch.
+- **Every action the agent took is replayable.** The CLI's `audit:` trace line records each command. `--dry-run` returns the same trace as a real run. Every write to the erun API (review, comment, build, status transition) is persisted with the actor's identity. There is no anonymous agent action and no unrecoverable change.
+- **Take-over is cheap.** If an agent goes off-course, the operator joins in one command. There is no place an agent can run where the operator cannot follow — and once joined, the operator can suspend, correct, or continue the work.
+- **Delegation scope is explicit.** OIDC + tenant scoping define what an agent may touch. Per-environment isolation defines where it may touch it. The operator can pre-approve a class of changes (dependency bumps, code regeneration, snapshot deploys) without pre-approving every individual action.
+
+Crucially, this is the path to **eventual agent autonomy**. Operators don't earn agent trust by removing themselves from the loop; they earn it by extending the scope of pre-approved delegation as the audit trail accumulates evidence that the agent behaves as expected. ERun's job is to make sure the audit and control infrastructure scales ahead of the autonomy, not behind it.
+
+See [Operator in the loop](/collaboration/operator-in-the-loop) for the full model.
+
 ## Iteration speed
 
 Speed isn't just about latency — it's about how many friction points there are between "I want to try a change" and "the change is running in a real environment."

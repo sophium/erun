@@ -7,15 +7,16 @@ slug: /intro
 
 **ERun is built so a person — or a whole organization — with an idea can ship it at agentic-coding pace, on production-grade infrastructure, without compromising on compliance or industry best practices.**
 
-The primary aim is to enable **agentic coding**: AI agents that don't just write code but actually build, deploy, diagnose, and iterate. The constraint is that the result still has to pass a real audit — immutable release tags, reproducible builds, per-environment isolation, auditable command traces.
+The primary aim is to enable **agentic coding**: AI agents that don't just write code but actually build, deploy, diagnose, and iterate. The constraint is that the **operator** — the human responsible for the work — stays in control. Every agent action is fully audited; the operator can join the agent's environment at any time, review what it did, take over, assist, or delegate. That operator-in-control workflow is what makes it safe to extend agent autonomy over time.
 
-In other words: rapid, agent-driven iteration on one end; industrial-grade software shipped at the other end; nothing weakened in between.
+In other words: rapid, agent-driven iteration on one end; industrial-grade software shipped at the other end; the operator and the audit trail are unbroken from end to end.
 
-## The three commitments
+## The four commitments
 
 1. **Agent-first surface.** Every environment exposes a structured MCP server. Every action supports `--dry-run` whose trace lines match the real run. Every module ships an `AGENTS.md` capturing the rules that apply to it. Agents and humans read the same contracts.
-2. **Iteration speed.** Snapshot tags for local iteration. Stable release tags for promotion. Fingerprint cache so fresh clones promote pinned bases without rebuilding. Idle-stop so cloud compute doesn't bill you while you sleep. One-command workflows from `init` to `deploy`.
-3. **Compliance preserved by default.** Immutable release tags. Per-environment Kubernetes isolation. Auditable dry-run traces for every action. Cloud contexts that bind to specific accounts, regions, and IAM roles. Multi-architecture builds verified at developer-machine time, not at remote deploy time. None of these are opt-in.
+2. **Operator in the loop, by default.** The operator can `erun open` any agent's environment, see live activity, replay the full audit trail, take over the work, or hand back. Agent autonomy expands as the operator's trust does — not by removing the operator from the loop, but by extending the scope of pre-approved delegation. See [Operator in the loop](/collaboration/operator-in-the-loop).
+3. **Iteration speed.** Snapshot tags for local iteration. Stable release tags for promotion. Fingerprint cache so fresh clones promote pinned bases without rebuilding. Idle-stop so cloud compute doesn't bill you while you sleep. One-command workflows from `init` to `deploy`.
+4. **Compliance preserved by default.** Immutable release tags. Per-environment Kubernetes isolation. Auditable dry-run traces for every action. Cloud contexts that bind to specific accounts, regions, and IAM roles. Multi-architecture builds verified at developer-machine time, not at remote deploy time. None of these are opt-in.
 
 ## What you can do with ERun
 

@@ -58,6 +58,7 @@ const sidebars: SidebarsConfig = {
       link: { type: 'generated-index' },
       items: [
         'collaboration/overview',
+        'collaboration/operator-in-the-loop',
         'collaboration/reviews',
         'collaboration/comments',
         'collaboration/builds',
