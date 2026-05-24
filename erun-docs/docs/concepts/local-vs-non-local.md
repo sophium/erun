@@ -1,32 +1,32 @@
 ---
-title: Development vs promotion environments
+title: Local vs non-local environments
 ---
 
-# Development vs promotion environments
+# Local vs non-local environments
 
-ERun environments come in two kinds, distinguished by what they're for:
+ERun environments split into two behaviors:
 
-- A **development environment** — where iteration happens. Snapshot tags, automatic rebuilds, easy overwrites. Optimized for the rapid build / test / break / fix loop.
-- A **promotion environment** — everything that isn't a development environment. Stable release tags, explicit promotion steps, no silent rebuilds. Optimized for "this artifact is what we said it is."
+- **Local** — the iteration sandbox. Snapshot image tags, automatic rebuild on push, easy overwrite. Optimized for the rapid build / test / break / fix loop.
+- **Non-local** — everything else. Stable release tags from the `VERSION` file, no silent rebuild, explicit promotion. Optimized for "this artifact is what we said it is."
 
-"Development" describes the **workflow**, not the location. A development environment can run on your laptop (Docker Desktop, kind, k3d), on a managed cloud cluster, or anywhere ERun can talk to. What makes it a development environment is that you iterate in it.
+The terms describe **workflow**, not location. A local-mode environment can run on your laptop (Docker Desktop, kind, k3d), on a managed cloud cluster, or anywhere ERun can talk to. What makes it "local" is that you iterate in it.
 
-## How an environment is designated
+## How an environment becomes "local"
 
-Today, an environment becomes a development environment by being named `local`. The name `local` is the current marker: when ERun's build, push, deploy, and version-tagging code sees that name, it switches into the development-workflow mode. Every other name is treated as a promotion environment.
+Today, an environment gets the local-mode behavior by being named `local` (case-insensitive). The name is the marker the code checks. Every other name is treated as non-local.
 
-This means each tenant has at most one development environment (one per tenant can be named `local`), but an organization can have many — one per tenant.
-
-```yaml
-# Inside ~/.config/erun/<tenant>/<env>/config.yaml
-# An env named "local" is treated as the development environment.
+```
+~/.config/erun/<tenant>/local/config.yaml          ← this env runs in local mode
+~/.config/erun/<tenant>/anything-else/config.yaml  ← non-local
 ```
 
-The name is a convention, not a constraint on what the environment can do. A `local` environment is just an environment; the name flips the development-workflow behaviors on.
+Each tenant has at most one `local` environment (one per tenant), but an organization can have many — one per tenant. Common organizational naming like `dev`, `integration`, `staging`, `prod` is unaffected: those are non-local, and they behave like non-local should.
+
+The conceptual model is broader than the name check: a local environment is whichever environment you're iterating in. The implementation just uses the name as the marker. Some teams may want a different env name to trigger local-mode behavior; today, the way to do that is to name that env `local`.
 
 ## Behavioral split
 
-| | Development env (`local`) | Promotion env (any other name) |
+| | Local (env named `local`) | Non-local (any other name) |
 |---|---|---|
 | Image version tag | `X.Y.Z-snapshot-<UTC-timestamp>` (unique per build) | bare `X.Y.Z` from `VERSION` file |
 | `erun push` rebuilds first? | yes | no — push only |
@@ -38,13 +38,13 @@ The name is a convention, not a constraint on what the environment can do. A `lo
 
 ## Why the split exists
 
-Promotion environments use **stable release tags**. The contract is that `<image>:1.0.42` means a specific built artifact — if `erun push` to a promotion env silently rebuilt that tag from whatever happens to be in your local Docker cache, you'd be mutating a release.
+Non-local environments use **stable release tags**. The contract is that `<image>:1.0.42` means a specific built artifact — if `erun push` to a non-local env silently rebuilt that tag from whatever happens to be in your local Docker cache, you'd be mutating a release.
 
-Development environments exist precisely so you can iterate with safe, unique snapshot tags. The tag includes a UTC timestamp, so no two builds collide; overwriting is the expected behavior.
+Local environments exist precisely so you can iterate with safe, unique snapshot tags. The tag includes a UTC timestamp, so no two builds collide; overwriting is the expected behavior.
 
-## The designation in code
+## The check in code
 
-The current check is a string compare on the environment name (case-insensitive, whitespace-trimmed):
+The current implementation is a string compare on the environment name (case-insensitive, whitespace-trimmed):
 
 ```go
 const DefaultEnvironment = "local"
@@ -54,13 +54,11 @@ func isLocalEnvironment(environment string) bool {
 }
 ```
 
-Nothing else is consulted — not whether the env is marked `Remote`, what its Kubernetes context is, or where it deploys to. So today, any environment named `Local`, `local`, or `LOCAL` is the development environment; everything else is a promotion environment.
-
-The conceptual model is broader than the current implementation: a development environment is whichever environment you're iterating in. The implementation just uses the name as the marker.
+Nothing else is consulted — not whether the env is marked `Remote`, what its Kubernetes context is, or where it deploys to. So the name `local` is what flips the iteration-mode behaviors on; everything else is non-local.
 
 ## Practical workflow
 
-For iteration in your development environment:
+In your local environment:
 
 ```bash
 erun open my-tenant local
@@ -69,7 +67,7 @@ erun push       # rebuilds + pushes the snapshot
 erun deploy     # promotes the snapshot into the cluster
 ```
 
-For promotion environments (where you've usually SSH'd into a remote runtime pod):
+In a non-local environment (often SSH'd into the runtime pod):
 
 ```bash
 erun build      # runs ./build.sh — produces images with the stable VERSION tag

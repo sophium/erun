@@ -25,14 +25,14 @@ Environments are independent. A single machine can host many of them in parallel
 └── config.yaml                  # project-level config (committed; per-env registries, deploy plans)
 ```
 
-## Development environments
+## "Local" is the iteration mode
 
-One environment per tenant can be designated as the **development environment** — the place where iteration happens. Conceptually, "development" is a workflow, not a location: a development environment can run locally on Docker Desktop, or on a managed cloud cluster, or anywhere ERun can talk to.
-
-Today the marker for this designation is the environment name `local` (case-insensitive). An environment named `local` gets:
+One environment per tenant can be named `local` (case-insensitive). The name `local` flips on the iteration-mode behaviors:
 
 - **Snapshot tags** (`X.Y.Z-snapshot-<UTC-timestamp>`) safe to overwrite on every iteration.
 - **Auto-rebuild on `erun push`** so iteration is one command.
 - **Auto-context-pick** — `kubectl current-context` is used when no Kubernetes context is configured.
 
-Every other environment is a **promotion environment**: stable semver tags from `VERSION`, no auto-rebuild on push, explicit context. See [Development vs promotion environments](/concepts/local-vs-non-local) for the full split.
+Every other environment is **non-local**: stable semver tags from `VERSION`, no auto-rebuild on push, explicit context. The name doesn't matter beyond that — `dev`, `integration`, `staging`, `prod`, `<feature-branch>` are all non-local, and they all behave like non-local environments should.
+
+See [Local vs non-local](/concepts/local-vs-non-local) for the full behavioral split.
