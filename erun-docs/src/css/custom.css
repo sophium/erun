@@ -1,29 +1,38 @@
+/* Brand palette derived from the ERun Mac app icon:
+   charcoal squircle ground, glowing cyan accent, white contrast. */
+
 :root {
-  --ifm-color-primary: #0e7c66;
-  --ifm-color-primary-dark: #0c6f5b;
-  --ifm-color-primary-darker: #0b6856;
-  --ifm-color-primary-darkest: #095647;
-  --ifm-color-primary-light: #108971;
-  --ifm-color-primary-lighter: #119076;
-  --ifm-color-primary-lightest: #14a285;
+  --erun-charcoal: #0f1320;
+  --erun-charcoal-soft: #1a2030;
+  --erun-cyan: #0891b2;
+  --erun-cyan-bright: #22d3ee;
+
+  --ifm-color-primary: #0891b2;
+  --ifm-color-primary-dark: #07758f;
+  --ifm-color-primary-darker: #066d84;
+  --ifm-color-primary-darkest: #055c70;
+  --ifm-color-primary-light: #0aa4cd;
+  --ifm-color-primary-lighter: #0bafd9;
+  --ifm-color-primary-lightest: #22d3ee;
+
   --ifm-code-font-size: 95%;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+  --docusaurus-highlighted-code-line-bg: rgba(8, 145, 178, 0.1);
 }
 
 [data-theme='dark'] {
-  --ifm-color-primary: #4ad1b1;
-  --ifm-color-primary-dark: #34cba8;
-  --ifm-color-primary-darker: #28c8a3;
-  --ifm-color-primary-darkest: #21a386;
-  --ifm-color-primary-light: #60d7ba;
-  --ifm-color-primary-lighter: #6cdabf;
-  --ifm-color-primary-lightest: #91e3cd;
-  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+  --ifm-color-primary: #22d3ee;
+  --ifm-color-primary-dark: #15bfdb;
+  --ifm-color-primary-darker: #14b5d0;
+  --ifm-color-primary-darkest: #1095ab;
+  --ifm-color-primary-light: #4ddbef;
+  --ifm-color-primary-lighter: #5ee0f2;
+  --ifm-color-primary-lightest: #95ecf7;
+  --ifm-background-color: #0f1320;
+  --ifm-background-surface-color: #131829;
+  --docusaurus-highlighted-code-line-bg: rgba(34, 211, 238, 0.12);
 }
 
-/* Restrained typographic treatment for the lead paragraph of a doc page.
-   Pairs with the "**Bold sentence.**" pattern used at the top of intro.md
-   and the section overviews. */
+/* Lead paragraph after H1 reads as a tagline. */
 .markdown > h1 + p strong:first-child {
   font-size: 1.15rem;
   line-height: 1.55;
@@ -31,8 +40,7 @@
   color: var(--ifm-color-emphasis-900);
 }
 
-/* Tighter mermaid diagram defaults: keep proportions sane in narrow viewports
-   and remove the default chrome that makes diagrams feel boxed-in. */
+/* Mermaid diagrams: clean centering + responsive width. */
 .docusaurus-mermaid-container {
   margin: 1.75rem auto;
   text-align: center;
@@ -42,15 +50,14 @@
   height: auto;
 }
 
-/* Section dividers (`---` in markdown) are subtle but visible. */
+/* Section dividers (`---`) — subtle but visible. */
 .markdown hr {
   border: 0;
   border-top: 1px solid var(--ifm-color-emphasis-200);
   margin: 2.25rem 0;
 }
 
-/* Hero flow figure on the welcome page. Centers the SVG, gives it breathing
-   room, and styles the caption as understated supporting text. */
+/* Hero figure on the welcome page. */
 .erun-hero-figure {
   margin: 2rem auto;
   max-width: 920px;
@@ -67,4 +74,27 @@
   color: var(--ifm-color-emphasis-700);
   line-height: 1.5;
   letter-spacing: 0.005em;
+}
+
+/* Navbar gets a darker baseline to harmonize with the charcoal app-icon
+   mark in light mode (matches dark mode default). Subtle enough to keep
+   text readable. */
+.navbar {
+  background-color: #0f1320;
+  --ifm-navbar-link-color: rgba(255, 255, 255, 0.85);
+  --ifm-navbar-link-hover-color: var(--erun-cyan-bright);
+}
+.navbar__title {
+  color: #ffffff;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.navbar__brand:hover .navbar__title {
+  color: var(--erun-cyan-bright);
+}
+.navbar__items--right .navbar__link {
+  color: rgba(255, 255, 255, 0.85);
+}
+.navbar__items--right .navbar__link:hover {
+  color: var(--erun-cyan-bright);
 }

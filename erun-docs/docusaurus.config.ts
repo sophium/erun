@@ -62,8 +62,8 @@ const config: Config = {
     navbar: {
       title: 'ERun',
       logo: {
-        alt: 'ERun logo',
-        src: 'img/logo.svg',
+        alt: 'ERun',
+        src: 'img/erun-icon.png',
       },
       items: [
         {
