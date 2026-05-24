@@ -59,14 +59,28 @@ Speed isn't just about latency — it's about how many friction points there are
 
 ## Compliance preserved by default
 
-The hard part of building "fast" platforms is that "fast" usually means "skips checks." ERun's defaults are written so the fast path is also the compliant path.
+Compliance in ERun isn't a checklist of separate practices bolted onto a development workflow. It **is** the development workflow. Every environment is a controlled, isolated, audited substrate, and the same controls apply whether an agent or an operator is working in it. That control surface is what makes results repeatable — and what makes the platform fast at the same time, because the controlled path is also the default path.
 
-- **Immutable release tags.** `erun push` from a non-local environment refuses to rebuild and overwrite. Promotion to a stable tag is an explicit, reviewable step. A release artifact is what it says it is, not what your laptop happened to have in its Docker cache.
-- **Multi-architecture as a release gate.** Every release-tagged image is multi-arch (`linux/amd64` + `linux/arm64`). The build flow refuses to publish a single-arch artifact. Arch-specific Dockerfile bugs fail at developer-machine build time, not at remote deploy time.
-- **Per-environment isolation.** Each environment lives in its own Kubernetes namespace with its own PVCs, its own ServiceAccount, its own RBAC scope. Tenants cannot see each other's data, and environments within a tenant cannot see each other's docker daemon, home volume, or secrets.
-- **Cloud contexts bind to specific accounts.** A managed cloud environment is bound to a specific cloud provider alias, account, region, and instance. The chart records these as labels on the deployment, so an audit of a running environment can trace back to the exact cloud identity that owns it.
-- **Auditable dry-run traces.** Every command can produce its full action plan ahead of time. The plan is the source of truth for change control — review the trace, then run for real.
-- **Engineering rules versioned with the code.** `AGENTS.md` files are part of the repo, reviewed in PRs, enforced by the team. Rule drift is visible in `git log`, not in a Confluence page nobody reads.
+The controls:
+
+- **Isolated environment per task.** Each environment is its own Kubernetes namespace with its own PVCs, ServiceAccount, RBAC scope. An agent or operator working in one cannot reach into another's state.
+- **Same controls for agents and operators.** OIDC authenticates both. Tenant scoping applies to both. Audit logs record both. There is no "agent escape hatch" that bypasses what a human has to go through, and no "operator override" that bypasses the audit.
+- **Auditable trace for every action.** Every CLI command emits an `audit:` line plus per-action trace lines. `--dry-run` returns the same trace as a real run. Every write to the erun API (review, comment, build, status transition) is persisted with the actor's identity. The trace is the source of truth for change control.
+- **Cloud contexts bound to specific identities.** A managed cloud environment is bound to a specific cloud provider alias, account, region, and instance. The chart records these as labels on the deployment, so an audit of a running environment can trace back to the exact cloud identity that owns it.
+- **Immutable release tags.** Non-local environments use bare semver tags from the `VERSION` file; `erun push` from a non-local env refuses to rebuild and overwrite. Promotion to a stable tag is an explicit, reviewable step — a release artifact is what it says it is, not what someone's laptop happened to have in its Docker cache.
+- **Engineering rules versioned with the code.** `AGENTS.md` files in each module are part of the repo, reviewed in PRs, enforced by the team. Rule drift is visible in `git log`, not in a Confluence page nobody reads.
+
+Reproducibility is the natural consequence: when the environment is controlled, the same inputs produce the same outputs. Multi-architecture build verification, fingerprint cache promotion, and pinned base images live inside this envelope as quality-and-speed tactics — they make the controlled environment work efficiently in practice — not as separate compliance items.
+
+### Why this means more speed, not less
+
+Compliance frameworks usually slow teams down because they live alongside the development workflow as a parallel set of obligations. ERun's framing inverts that:
+
+- **Repeatable results** mean you don't lose time chasing "works on my machine" bugs.
+- **A shared compliance baseline** means an operator doesn't have to bespoke-audit every agent action — the audit already exists.
+- **A controlled environment scales.** Opening environment number fifty costs the same as opening environment number one, because the controls are the platform, not artisanal per-environment work.
+
+The compliance surface is also the speed surface. That's the point.
 
 ## What ERun is not
 

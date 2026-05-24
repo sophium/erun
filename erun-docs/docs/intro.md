@@ -24,7 +24,7 @@ ERun is the platform layer beneath agentic coding. It gives every agent an isola
 
 **Iteration speed.** Snapshot tags for local iteration; immutable release tags for promotion. Fingerprint cache means fresh clones promote pinned bases without rebuilding. Idle-stop means you don't pay for cloud compute while you sleep.
 
-**Compliance by default.** Multi-architecture builds verified at developer-machine time. Per-environment Kubernetes isolation. Cloud contexts bound to specific accounts, regions, and IAM roles. Every action — CLI or API — is audited.
+**Compliance by default.** Compliance isn't a checklist bolted onto the workflow — it's the workflow. Every environment is a controlled, isolated, audited substrate, and the same controls apply whether an agent or an operator is working in it. The result is repeatable, which is what makes the platform fast as well: speed and compliance reinforce each other instead of trading off.
 
 ---
 
