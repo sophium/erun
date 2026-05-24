@@ -10,6 +10,7 @@ The `erun` CLI is the primary interface to ERun. Every command supports `--help`
 
 | Command | What it does |
 |---|---|
+| `erun` | Universal entry point. In a fresh project, runs `init`. In a configured one, runs `open`. |
 | [`erun init`](/cli/init) | Create or update a tenant + environment, bring the environment up. |
 | [`erun open`](/cli/open) | Open a shell into the environment (brings it up if missing). |
 | [`erun list`](/cli/list) | List tenants, environments, status, and effective target. |

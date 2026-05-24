@@ -33,12 +33,12 @@ ERun is the platform layer beneath agentic coding. It gives every agent an isola
 Inside your project's git repository:
 
 ```bash
-erun init
+erun
 ```
 
-That's it. ERun picks your repo as a new tenant, scaffolds a `local` environment, and brings the isolated Kubernetes runtime up. `erun open` attaches a shell — or `erun open --vscode` opens the environment in VS Code. No flags, no YAML, no kubeconfig.
+That's it. The bare `erun` command is the universal entry point: the first run picks your repo as a new tenant and scaffolds a `local` environment; the next run brings the isolated Kubernetes runtime up and attaches your shell. To open in an IDE instead, use `erun open --vscode` or `erun open --intellij`.
 
-You can run as many environments in parallel as your machine can host — one per agent, per feature branch, per teammate.
+No flags, no YAML, no kubeconfig. Run as many environments in parallel as your machine can host — one per agent, per feature branch, per teammate.
 
 ---
 

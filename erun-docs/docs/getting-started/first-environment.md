@@ -6,14 +6,14 @@ title: First environment
 
 The fastest way to see ERun work is to run it against your local Kubernetes (Docker Desktop, kind, k3d, or minikube).
 
-## 1. Initialize a tenant and environment
+## 1. Run `erun` in your project
 
 ```bash
 cd path/to/your/project
-erun init my-tenant local
+erun
 ```
 
-This walks you through:
+The bare `erun` command is the universal entry point. On a fresh project it runs the init flow, walking you through:
 
 - Picking a tenant name and project root.
 - Choosing the Kubernetes context for the `local` environment.
@@ -24,12 +24,19 @@ ERun writes its configuration to `~/.config/erun/` and a small project file at `
 ## 2. Open the environment
 
 ```bash
-erun open my-tenant local
+erun
 ```
 
-This brings the environment up in your Kubernetes cluster (deploying a runtime pod into the environment's namespace) and opens a shell inside it. From inside the environment you can run `erun build`, `erun push`, `erun deploy`, etc. against your project.
+A second `erun` in the same project opens the environment — bringing the runtime up in your Kubernetes cluster (deploying a runtime pod into the environment's namespace) and attaching a shell inside it. From inside the environment you can run `erun build`, `erun push`, `erun deploy`, etc. against your project.
 
-You can open as many environments at once as your machine can host. Each environment is its own Kubernetes namespace with its own home volume, docker daemon, and MCP endpoint — so a second `erun open my-tenant another-env` runs alongside the first without interference.
+To open in an IDE instead of a shell, use the explicit subcommand:
+
+```bash
+erun open --vscode      # VS Code Remote-SSH
+erun open --intellij    # IntelliJ Gateway
+```
+
+You can open as many environments at once as your machine can host. Each environment is its own Kubernetes namespace with its own home volume, docker daemon, and MCP endpoint — so a second project's `erun` runs alongside the first without interference.
 
 ## 3. List environments
 
