@@ -5,37 +5,54 @@ slug: /intro
 
 # ERun
 
-**ERun is built so a person — or a whole organization — with an idea can ship it at agentic-coding pace, on production-grade infrastructure, without compromising on compliance or industry best practices.**
+> **Agentic coding from idea to production — with the operator in control.**
 
-The primary aim is to enable **agentic coding**: AI agents that don't just write code but actually build, deploy, diagnose, and iterate. The constraint is that the **operator** — the human responsible for the work — stays in control. Every agent action is fully audited; the operator can join the agent's environment at any time, review what it did, take over, assist, or delegate. That operator-in-control workflow is what makes it safe to extend agent autonomy over time.
+```mermaid
+flowchart LR
+    I([💡 Idea]) --> A
+    A[🤖 Agent<br/>in environment]
+    A --> R[💬 Review<br/>operator + agents]
+    R --> P([🚀 Production])
+    R -. assist / take over .-> A
+    classDef hero fill:#0e7c66,color:#fff,stroke:#0a5d4d,stroke-width:2px;
+    classDef step fill:#e6f4f0,color:#0e7c66,stroke:#0e7c66,stroke-width:2px;
+    class I,P hero
+    class A,R step
+```
 
-In other words: rapid, agent-driven iteration on one end; industrial-grade software shipped at the other end; the operator and the audit trail are unbroken from end to end.
+ERun is the platform layer beneath agentic coding. It gives every agent an isolated environment, gives every operator a full audit trail and a one-command take-over, and ships production-grade Kubernetes deploys — without compromising on compliance or industry best practices.
 
 ## The four commitments
 
-1. **Agent-first surface.** Every environment exposes a structured MCP server. Every action supports `--dry-run` whose trace lines match the real run. Every module ships an `AGENTS.md` capturing the rules that apply to it. Agents and humans read the same contracts.
-2. **Operator in the loop, by default.** The operator can `erun open` any agent's environment, see live activity, replay the full audit trail, take over the work, or hand back. Agent autonomy expands as the operator's trust does — not by removing the operator from the loop, but by extending the scope of pre-approved delegation. See [Operator in the loop](/collaboration/operator-in-the-loop).
-3. **Iteration speed.** Snapshot tags for local iteration. Stable release tags for promotion. Fingerprint cache so fresh clones promote pinned bases without rebuilding. Idle-stop so cloud compute doesn't bill you while you sleep. One-command workflows from `init` to `deploy`.
-4. **Compliance preserved by default.** Immutable release tags. Per-environment Kubernetes isolation. Auditable dry-run traces for every action. Cloud contexts that bind to specific accounts, regions, and IAM roles. Multi-architecture builds verified at developer-machine time, not at remote deploy time. None of these are opt-in.
+```mermaid
+quadrantChart
+    title What ERun gives you
+    x-axis Operator-driven --> Agent-driven
+    y-axis Compliance --> Speed
+    quadrant-1 Iteration speed
+    quadrant-2 Operator in the loop
+    quadrant-3 Compliance by default
+    quadrant-4 Agent-first surface
+```
 
-## What you can do with ERun
+- 🤖 **Agent-first** — structured MCP in every env, `--dry-run` as contract, `AGENTS.md` everywhere.
+- 👤 **[Operator in the loop](/collaboration/operator-in-the-loop)** — join any env, full audit, easy take-over.
+- ⚡ **Iteration speed** — snapshot vs release tags, fingerprint cache, idle-stop.
+- 🛡 **Compliance by default** — immutable releases, per-env isolation, multi-arch as a release gate.
 
-- Spin up an isolated **environment** for any project with one command (`erun init` + `erun open`). Each environment is its own Kubernetes namespace — its own home volume, its own docker daemon, its own MCP endpoint, its own credentials scope.
-- Run as many environments in parallel on a single machine as your CPU and memory allow. Multiple agents (or multiple developers, or one agent per feature branch) don't see each other's state.
-- Let an AI agent drive your dev loop — through MCP, with structured tools and traceable actions.
-- Have multiple agents collaborate via the erun API: open reviews, post threaded comments on each other's commits, record build results, advance a shared merge queue. See [Agent collaboration](/collaboration/overview).
-- Iterate locally with snapshot builds that are safe to overwrite and instant to rebuild.
-- Promote the same code to a production-grade environment with stable, immutable release tags — no rebuild, no mutation, no surprises.
-- Switch between local development and managed cloud clusters without changing your workflow.
-- Stop paying for idle cloud compute automatically when you walk away.
+## Two commands to get started
 
-## Where to start
+```bash
+erun init my-tenant local
+erun open my-tenant local
+```
 
-- [Why ERun](/why) — the design principles in detail, including the agentic-coding affordances and the compliance contract.
-- [Install ERun](/getting-started/install).
-- [Create your first environment](/getting-started/first-environment).
-- [Concepts: tenants and environments](/concepts/tenants-and-environments).
+You now have an isolated Kubernetes environment with your repo checked out, Docker-in-Docker, Helm, kubectl, an MCP endpoint for AI tooling, and a shell. Run as many in parallel as your machine can host — one per agent, per feature branch, per teammate.
 
-## Project
+## Where next
 
-ERun is open source under [github.com/sophium/erun](https://github.com/sophium/erun).
+→ **[Why ERun](/why)** — the design principles in depth.
+→ **[First environment](/getting-started/first-environment)** — try it now.
+→ **[Agent collaboration](/collaboration/overview)** — how multiple agents (and operators) work together via the erun API.
+
+[github.com/sophium/erun](https://github.com/sophium/erun)
