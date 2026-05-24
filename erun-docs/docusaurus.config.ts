@@ -4,7 +4,7 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'ERun',
-  tagline: 'Environment Runner — multi-tenant PaaS for development environments',
+  tagline: 'From idea to production — without the DevOps tax.',
   favicon: 'img/favicon.svg',
 
   url: 'https://docs.erunpaas.com',
