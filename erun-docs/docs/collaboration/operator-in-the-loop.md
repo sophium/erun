@@ -4,9 +4,11 @@ title: Operator in the loop
 
 # Operator in the loop
 
-In ERun, the **operator** — the human responsible for the work — is a first-class citizen of the platform. Agents are powerful tools, but the operator retains control: they can join any agent's environment, watch what it's doing, review every action it took, take over, hand back, or steer. Every agent action is captured in an audit trail that the operator can replay.
+In ERun, the **operator** — the human responsible for the work — is a first-class citizen of the platform. Agents are powerful tools, but the operator retains control: they can open any environment in a shell or an IDE, develop directly, watch what an agent is doing, review every action it took, take over, hand back, or steer. Every agent action is captured in an audit trail that the operator can replay.
 
-This isn't a brake on agentic coding. It's the foundation for it: the operator-control and audit infrastructure is what makes it safe to extend an agent's autonomy over time. You can't trust an agent with more responsibility than you can observe.
+The operator is not just a supervisor. They can also be the **primary developer** in an environment — opening it in VS Code or IntelliJ and writing code themselves, with no agent in the loop at all. ERun is a great agentic platform; it is equally a great clean dev environment for humans alone. Both modes are first-class, and the operator decides which one applies on any given task.
+
+When agents are involved, the operator-control and audit infrastructure is what makes it safe to extend their autonomy over time. You can't trust an agent with more responsibility than you can observe.
 
 ## What "first-class operator" means in practice
 
@@ -29,23 +31,54 @@ Three layers of audit, all readable by the operator:
 
 For a security-sensitive action — a release tag push, a merge-queue advance, a status transition — the operator can reconstruct *who* did *what*, *when*, in *which environment*, and *with which build*.
 
-## Joining the agent's environment
+## Working in the environment
 
-When an agent is working in `my-tenant/feature-a`, the operator can join in seconds:
+`erun open` is the single entry point for every operator workflow. Three attach modes cover the common cases — all use the same underlying environment, the same audit trail, the same MCP endpoint.
+
+### Shell
 
 ```bash
 erun open my-tenant feature-a
 ```
 
-That attaches the operator's shell to the same runtime pod. Both the agent and the operator see `/home/erun/git/<repo>` at the same state, share the docker daemon's image cache, and see the same MCP endpoint. The operator can:
+Attaches a terminal to the runtime pod. Use it for `git diff`, `git log`, running tests, ad-hoc commands, watching an agent's session in real time.
 
-- `git log` to see what the agent has committed.
-- `git diff` to see uncommitted work.
-- Run `erun list` to see the resolved environment state.
-- Use `kubectl exec` or the desktop terminal sessions UI to watch in real time.
-- Make a commit themselves, run a test, fix a bug — then leave the environment for the agent to pick up again.
+### VS Code
 
-There's no special "operator mode." It's the same `erun open` an agent uses. The operator just brings human judgement.
+```bash
+erun open my-tenant feature-a --vscode
+```
+
+Launches VS Code's Remote-SSH against the in-pod SSH server. The full editor — extensions, language servers, debugger, integrated terminal — runs against the environment's filesystem. From the operator's perspective it is a local IDE; everything beneath is the same isolated environment an agent would use.
+
+### IntelliJ IDEA
+
+```bash
+erun open my-tenant feature-a --intellij
+```
+
+Launches IntelliJ IDEA Gateway against the same SSH server. Same model as VS Code.
+
+### What's shared regardless of attach mode
+
+All three modes — shell, VS Code, IntelliJ — operate on the same runtime pod:
+
+- Same `/home/erun/git/<repo>` workspace.
+- Same docker daemon image cache.
+- Same MCP endpoint (so an in-IDE agent and a shell-side agent see the same `idle`/`doctor`/`list` results).
+- Same audit trail.
+
+This means: an agent working in `feature-a` and an operator who opens that same environment in VS Code are not in parallel universes. They are looking at the exact same workspace, in real time. A commit one makes is immediately visible to the other.
+
+### With or without an agent
+
+These attach modes are not specific to supervising agents. The operator can use them for entirely human-driven work:
+
+- Spin up `erun open my-tenant scratch --vscode` to explore a problem.
+- Use `erun open my-tenant feature-b` as a clean, isolated dev environment for code you're writing yourself.
+- Run many environments in parallel — one for each task — without agents anywhere in the picture.
+
+The platform doesn't care whether an agent is present. The same isolation, audit, and tooling apply.
 
 ## Delegating to the agent
 

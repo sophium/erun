@@ -20,7 +20,7 @@ ERun is the platform layer beneath agentic coding. It gives every agent an isola
 
 **Agent-first surface.** Every environment exposes a structured MCP server. `--dry-run` returns trace lines identical to a real run. `AGENTS.md` files in each module encode the rules — read by humans and agents alike.
 
-**Operator in the loop.** The operator can `erun open` any agent's environment, see live activity, replay the full audit trail, take over, or hand back. Agent autonomy expands as the audit accumulates evidence — never by removing the operator. → [Operator in the loop](/collaboration/operator-in-the-loop).
+**Operator in the loop.** The operator can `erun open` any environment — in a shell, in VS Code (`--vscode`), or in IntelliJ (`--intellij`) — to develop directly, review what an agent did, take over, or hand back. Works with or without an agent in the picture: ERun is equally a great clean dev environment for humans alone. → [Operator in the loop](/collaboration/operator-in-the-loop).
 
 **Iteration speed.** Snapshot tags for local iteration; immutable release tags for promotion. Fingerprint cache means fresh clones promote pinned bases without rebuilding. Idle-stop means you don't pay for cloud compute while you sleep.
 
