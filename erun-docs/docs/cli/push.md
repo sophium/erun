@@ -14,15 +14,15 @@ erun push [flags]
 
 ## Behavior by environment type
 
-### Local environment
+### Development environment (named `local`)
 
-`erun push` resolves the current build context, **rebuilds** the image with a fresh snapshot tag (`<semver>-snapshot-<UTC-timestamp>`), then pushes per-arch tags and assembles a multi-arch manifest list. This matches `erun build --release`'s push path — `push` for local is build+push.
+`erun push` resolves the current build context, **rebuilds** the image with a fresh snapshot tag (`<semver>-snapshot-<UTC-timestamp>`), then pushes per-arch tags and assembles a multi-arch manifest list. This matches `erun build --release`'s push path — `push` for a development env is build+push.
 
-### Non-local environment
+### Promotion environment (any other name)
 
 `erun push` **skips the build step** and runs `docker push` directly against the tag `<registry>/<image>:<VERSION>`. It assumes the image already exists in the local docker daemon (typically produced by a prior `erun build`, which delegates to your project's `build.sh`).
 
-This split exists because non-local environments use stable release tags from the `VERSION` file. Silently rebuilding and overwriting those tags would mutate release artifacts — `push` is the explicit "promote what was built" step.
+This split exists because promotion environments use stable release tags from the `VERSION` file. Silently rebuilding and overwriting those tags would mutate release artifacts — `push` is the explicit "promote what was built" step.
 
 ## Flags
 

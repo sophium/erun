@@ -14,13 +14,13 @@ erun build [flags]
 
 ## Behavior by environment type
 
-### Local environment
+### Development environment (named `local`)
 
 `erun build` resolves the current Docker build context (from the current working directory), produces both `linux/amd64` and `linux/arm64` images via the local Docker daemon plus binfmt, and applies content-derived fingerprint tags (`<image>:fp-<hash>-<arch>`) so subsequent builds promote from cache instead of rebuilding.
 
 The image tag is a **snapshot**: `<semver>-snapshot-<UTC-timestamp>`. The semver comes from the nearest `VERSION` file walking up from the build directory.
 
-### Non-local environment
+### Promotion environment (any other name)
 
 `erun build` looks for `<projectRoot>/build.sh` (or a nested `*/build.sh` under the project root) and runs it. ERun does not produce images directly in this mode — the project's script does, with whatever tags it chooses.
 

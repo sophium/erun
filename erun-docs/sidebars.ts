@@ -16,8 +16,8 @@ const sidebars: SidebarsConfig = {
       link: { type: 'generated-index' },
       items: [
         'concepts/tenants-and-environments',
-        'concepts/runtime-pods',
         'concepts/local-vs-non-local',
+        'concepts/runtime-pods',
         'concepts/cloud-contexts',
       ],
     },

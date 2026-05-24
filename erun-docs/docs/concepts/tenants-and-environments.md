@@ -25,12 +25,14 @@ Environments are independent. A single machine can host many of them in parallel
 └── config.yaml                  # project-level config (committed; per-env registries, deploy plans)
 ```
 
-## The `local` environment is special
+## Development environments
 
-The environment named `local` (case-insensitive) is treated as your development sandbox. It is the only environment where:
+One environment per tenant can be designated as the **development environment** — the place where iteration happens. Conceptually, "development" is a workflow, not a location: a development environment can run locally on Docker Desktop, or on a managed cloud cluster, or anywhere ERun can talk to.
 
-- `erun build` and `erun push` produce **snapshot** image tags (`X.Y.Z-snapshot-<UTC-timestamp>`) that are safe to overwrite.
-- `erun push` automatically rebuilds the image before pushing.
-- ERun auto-fills the Kubernetes context from `kubectl config current-context` when none is configured.
+Today the marker for this designation is the environment name `local` (case-insensitive). An environment named `local` gets:
 
-Every other environment is **non-local**: it uses stable semver tags from the `VERSION` file, and `erun build` delegates to the project's `build.sh` script. See [Local vs non-local](/concepts/local-vs-non-local) for the full split.
+- **Snapshot tags** (`X.Y.Z-snapshot-<UTC-timestamp>`) safe to overwrite on every iteration.
+- **Auto-rebuild on `erun push`** so iteration is one command.
+- **Auto-context-pick** — `kubectl current-context` is used when no Kubernetes context is configured.
+
+Every other environment is a **promotion environment**: stable semver tags from `VERSION`, no auto-rebuild on push, explicit context. See [Development vs promotion environments](/concepts/local-vs-non-local) for the full split.
