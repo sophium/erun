@@ -50,20 +50,291 @@ Requires Node 20+. The repo pins `yarn@1.22.22` via `packageManager`.
 - **Headings.** Sentence case (`Tenants and environments`, not `Tenants And Environments`).
 - **Examples.** Every CLI snippet must be a command that actually works against the current ERun release. Out-of-date commands are worse than no commands — prefer a TODO marker if a command is unstable.
 - **Links.** Use Docusaurus relative routes (`/concepts/tenants-and-environments`), not raw file paths.
-- **Mermaid.** Enabled. Use it for state machines and architecture sketches; don't draw what a screenshot would show better.
+- **Diagrams.** Two formats; pick the right one for the job. See [Diagram conventions](#diagram-conventions) below for the full vocabulary.
+  - **Hand-coded SVG** (`static/img/*.svg`) for concept / hero diagrams that need pixel-perfect uniformity. Wrapped in a `<figure className="erun-hero-figure">`.
+  - **Mermaid** for state diagrams, lifecycles, and any auto-laid-out flow where some box-size variance is acceptable. Branded globally via `themeVariables` in `docusaurus.config.ts`; per-diagram styling via `classDef` (see template below).
 - **Frontmatter.** Every doc page declares at least `title:`. Use `slug:` only when the file path doesn't match the desired URL.
+
+## Audience: Operator vs Agent
+
+The docs serve two audiences. Every page belongs to one of them. The split is binding — it determines what content the page is allowed to contain.
+
+### The split
+
+| Audience | What the docs deliver | What they don't see (by design) |
+|---|---|---|
+| **Operator** — the human running ERun | Conceptual model, hands-on walkthroughs, day-to-day commands, troubleshooting recipes, the "what" and "why" | Field tables, JSON schemas, regex resolution rules, error-code catalogues, audit-event taxonomies, OIDC details, build-path algorithms |
+| **Agent** — Claude Code / Codex / any MCP client | Everything in the previous column **plus** the spec layer: exact MCP tool schemas, every API error code, every config field's semantics, every resolution algorithm step-by-step | n/a — Agents read the lot |
+
+The directional rule: **details that would let an Operator do something the Agent should be doing → Agent reference.** If an Operator finds themselves looking up a field's exact YAML key, that's usually a sign the Agent should be handling it via [`scaffold`](/mcp/overview#scaffold--generate-conventional-artefacts), [`add`](/cli/add), or one of the [action tools](/mcp/overview#action--typed-wrappers-around-the-cli).
+
+### Where pages live
+
+| Sidebar section | Audience |
+|---|---|
+| `intro`, `Getting started`, `CLI`, `Desktop app` | Operator |
+| `Operator + Agent` (collaboration concepts) | Operator |
+| `Operator reference` (cheatsheet, FAQ, troubleshooting) | Operator |
+| **`Agent reference`** — Concepts sub-section, MCP, Agent patterns, erun API, Platform spec, Configuration spec | Agent (Operators can dip in when curious, but it's not where they navigate) |
+| `Admin` | Cluster admin (separate, infrastructure-side) |
+
+When you add a page, ask which sidebar section it belongs in *first* — the answer determines the content rules below.
+
+### Operator-page rules
+
+- One value-prop sentence at the top, then a diagram (where useful), then the workflow.
+- Show commands, not options. `erun open` is enough; `erun open --vscode --runtime-cpu 4 --runtime-memory 8916Mi` belongs in CLI reference.
+- Don't enumerate fields. Replace `EnvConfig.sshd.workspacesync.enabled: true` with "enable workspace sync in the desktop's env settings".
+- Don't show JSON-RPC envelopes, error tables, or HTTP status codes. Link to the Agent reference for those.
+- Use the [canonical terminology](#canonical-terminology) — Operators read other Operator pages and the words have to match.
+- End with **Where next** linking to: the next hands-on page, one concept page (if relevant), and at most one Operator-reference page.
+
+### Agent-reference rules
+
+- Spec the full input + output schema of every tool, endpoint, or resolution algorithm. No "see source code" pointers.
+- Every state machine has a labelled transition; every error has a status code + machine-readable `code`; every algorithm has numbered steps.
+- Cross-link to the Operator-facing companion page at the top ("for the Operator view, see X") so a curious Operator can navigate back.
+- When two Agent-reference pages cover related material, one is the source of truth and the other links to it — never duplicate.
+
+### Companion pages
+
+A non-trivial concept gets a *pair* of pages: an Operator-facing summary and an Agent-reference spec. Examples already in the docs:
+
+| Concept | Operator page | Agent-reference spec |
+|---|---|---|
+| The audit trail | `collaboration/operator-in-the-loop` (purpose + retention summary) | `agent-reference/audit-log` (event shape, security events) |
+| OIDC sign-in | `collaboration/overview` (one-paragraph summary + diagram) | `agent-reference/api-protocol` (tenant-issuer schema, errors, rate limits) |
+| Idle stop | `concepts/cloud-contexts` (one paragraph) | `agent-reference/idle-policy` (predicate, working-hours semantics) |
+| Conventions | `concepts/conventions` (the layout + diagrams) | `agent-reference/conventions-spec` (resolution algorithms) |
+
+The Operator page is short and links out; the Agent reference is comprehensive. Don't merge them.
+
+## Canonical terminology
+
+Pick the right term once and use it consistently. Drift between pages breaks search and confuses both audiences. The glossary at `concepts/glossary` is the source of truth — every doc-writing pass should grep for the don't-say list before committing.
+
+| Concept | Canonical | Don't say |
+|---|---|---|
+| Human user | **Operator** (capitalised when used as a role; lowercase OK in flowing prose) | user, human, developer |
+| AI assistant | **Agent** (capitalised) | AI assistant, bot, copilot, the AI |
+| Isolated workspace | **environment** (env for short) | sandbox |
+| K8s primitive backing an env | **namespace** (only when discussing K8s internals) | sandbox, env (for the K8s side) |
+| Development-mode env | **agent env** (compound, lowercase) | dev env, snapshot env |
+| Serving-mode env | **runtime env** (compound, lowercase) | non-local env, prod env, snapshot=false env |
+| Cluster ERun manages | **cluster** (or **cloud context** for managed clusters) | "ERun cluster" |
+
+Compound terms (`agent env`, `runtime env`, `agent-driven`, `multi-arch`) stay lowercase even when the constituent role would be capitalised standalone.
+
+JSON literal values (e.g., `"kind": "operator"` in audit events) keep their casing as documented in the spec; that's data, not prose.
+
+## Spec discipline
+
+The docs are the spec. Behaviour that isn't documented isn't part of the contract.
+
+### Treat vagueness as a bug
+
+When you find a page saying "ERun handles X" without specifying *how*, write the spec. Examples that have come up:
+
+- "MCP tools" → 4 categories, 18+ tools each with schemas.
+- "audit trail" → 3 layers, event shape, retention windows, security-event catalogue.
+- "fingerprint cache" → 4-step algorithm, registry-pull + local-tag rules.
+- "OIDC sign-in" → tenant-issuer schema, error codes, service-account flow.
+- "dry-run redacts secrets" → exact regex list, what's redacted, what's not, when redaction happens.
+
+If you can't spec the behaviour confidently, mark it `(Planned.)` and link to the issue.
+
+### Error tables on every action
+
+Every CLI command, every MCP action tool, every API endpoint has an **Error behaviour** section listing:
+
+- The failure mode in user terms.
+- What happens (exit code, HTTP status, partial-state behaviour).
+- How to recover.
+
+Vague "errors if not in a git repo" is not enough. Write "aborts with `not in a git repository`; exit code 1; suggests `git init` or `--project-root`".
+
+### Single source of truth
+
+Each piece of detail lives in exactly one page. Other pages reference it.
+
+- Fingerprint cache: in `agent-reference/conventions-spec`. Referenced from `release-flow`, `cli/build`.
+- Idle-stop predicate: in `agent-reference/idle-policy`. Referenced from `cloud-contexts`, `concepts/cloud-contexts`.
+- OIDC error codes: in `agent-reference/api-protocol`. Referenced from `collaboration/overview`.
+
+When you find duplication, pick the canonical home and turn the others into pointers.
 
 ## Adding a page
 
 1. Drop a markdown file under `docs/<section>/<page>.md` with a `title:` frontmatter.
-2. Add the page id to `sidebars.ts` under the right category (file id is the path relative to `docs/` without `.md`).
+2. Add the page id to `sidebars.ts` under the right category (file id is the path relative to `docs/` without `.md`). Pick the section based on **[audience](#audience-operator-vs-agent)**, not topic.
 3. Run `yarn start` and verify the page renders + the navbar entry shows up.
 4. Run `yarn build` to catch broken links — `onBrokenLinks: 'throw'` will fail the build on any.
+5. If the page introduces or specs a behaviour, check the [Spec discipline](#spec-discipline) checklist: schemas defined? errors enumerated? canonical terminology? single source of truth?
 
 ## Versioning
 
 - Versioning is **off** initially. Turn it on when ERun ships its first GA release.
 - When turned on, use Docusaurus's `docusaurus docs:version <X.Y>` command to snapshot the current `docs/` into `versioned_docs/version-X.Y/`.
+
+## Diagram conventions
+
+All diagrams use one shared visual vocabulary. Two shapes, two colors. Same vocabulary across Mermaid and SVG so the site looks like one product.
+
+### Visual vocabulary
+
+| Element | Role | Style |
+|---|---|---|
+| **Endpoint pill** | A boundary node: an external actor, a source, a sink, a terminal state. (Operator, Production, Idea, your machine, git, registry, Start, Done, Rejected, …) | Charcoal fill `#0f1320` (gradient to `#1a2030`), white text, `rx: 14`. No stroke or very dark stroke. |
+| **Step / workload box** | An active state or service inside the flow. (Sandbox, Runtime pod, Review, IN_PROGRESS, Backend, …) | White fill, charcoal text (`currentColor` in SVG so it adapts to theme), cyan stroke `#0891b2` at 1.5px, `rx: 14`. |
+| **Namespace / cluster card** | A grouping or boundary that contains other nodes. (k8s namespace boxes in env-types.) | Very light grey fill `#fbfcfd`, light grey stroke `#cbd5e0`, `rx: 18`. |
+| **Solid arrow** | The main flow / work moving forward. | Cyan stroke `#0891b2` at 1.5px, arrowhead filled cyan. |
+| **Dashed arrow** | An operator stepping in, a callback, an out-of-band signal. | Brighter cyan `#22d3ee` at 1.5px, `stroke-dasharray: 5 5`, arrowhead filled `#22d3ee`. |
+| **Edge label** | A label sitting on an arrow line. | Background pill with `fill="var(--ifm-background-color, #ffffff)"` so the line is punched through. Text in `#0891b2` (cyan), font-size 11–12, font-weight 500. |
+
+### When to use SVG vs Mermaid
+
+| Pick SVG when… | Pick Mermaid when… |
+|---|---|
+| The diagram is concept-level / "hero" and box uniformity matters visually. | The diagram is a state machine or lifecycle that benefits from auto-layout. |
+| You need precise dimensions (e.g. three sandboxes that must look identical). | Box-size variance per content is acceptable. |
+| The number of elements is small (≤ ~10 shapes). | The graph is complex enough that hand-placing would be tedious. |
+| Polish > editability. | Editability > polish. |
+
+If unsure, prefer Mermaid first — and only escalate to SVG if the result looks visibly off.
+
+### SVG template
+
+Use `<symbol>` + `<use>` to keep shapes reusable. A new diagram should copy this skeleton and only edit positions:
+
+```xml
+<svg viewBox="0 0 W H" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="diagTitle"
+     font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="diagTitle">What the diagram conveys (used by screen readers).</title>
+
+  <defs>
+    <linearGradient id="charcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+
+    <marker id="arrowSolid" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+    <marker id="arrowDashed" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#22d3ee"/>
+    </marker>
+
+    <!-- Reusable shapes. Edit width/height here once to resize every instance.
+         overflow="visible" is REQUIRED on any symbol whose inner shape has a
+         stroke — without it the symbol's viewBox clips the outer half of the
+         stroke, which makes rounded corners visibly tighter than the same
+         shape inlined as a bare <rect>. See "Stroked shapes" note below. -->
+    <symbol id="endpointBox" viewBox="0 0 200 50">
+      <rect width="200" height="50" rx="14" fill="url(#charcoal)"/>
+    </symbol>
+    <symbol id="stepBox" viewBox="0 0 240 100" overflow="visible">
+      <rect width="240" height="100" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    </symbol>
+    <symbol id="cardBox" viewBox="0 0 320 460" overflow="visible">
+      <rect width="320" height="460" rx="18" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
+    </symbol>
+  </defs>
+
+  <!-- Per-instance positioning. Every <use> MUST include width + height matching
+       the symbol's viewBox, or the symbol renders at 100% of the SVG canvas. -->
+  <use href="#endpointBox" x="100" y="120" width="200" height="50"/>
+  <text x="200" y="152" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">your machine</text>
+
+  <use href="#stepBox" x="80" y="310" width="240" height="100"/>
+  <text x="200" y="352" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">runtime pod</text>
+  <text x="200" y="378" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.85">+ worktree</text>
+
+  <line x1="200" y1="180" x2="200" y2="305" stroke="#0891b2" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
+  <g>
+    <rect x="166" y="222" width="68" height="22" rx="11" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="200" y="237" text-anchor="middle" fill="#0891b2" font-size="12" font-weight="500">hostPath</text>
+  </g>
+</svg>
+```
+
+Conventions:
+
+- **Place SVGs under `static/img/`** with a filename matching the topic (e.g. `env-types.svg`, `hero-flow.svg`).
+- **Reference from markdown** via a figure wrapper so the site's CSS handles centering and width:
+  ```mdx
+  <figure className="erun-hero-figure">
+    <img src="/img/env-types.svg" alt="…descriptive alt text…" />
+  </figure>
+  ```
+- **Alt text matters.** Describe the relationships, not the geometry. Screen readers and search index both read it.
+- **Text adapts to theme** by using `fill="currentColor"` on body labels so dark mode flips them. Charcoal endpoint text stays `#ffffff` (it's on a dark fill regardless of theme).
+- **Edge labels punch through arrows** by sitting in a background-colored pill: `<rect fill="var(--ifm-background-color, #ffffff)">` then the text on top.
+- **No `width`/`height` attribute on the root `<svg>`** — use only `viewBox` so the responsive `.erun-hero-figure img { width: 100%; height: auto; }` rule can size it.
+- **Only XML predefined entities — no HTML entities.** SVGs loaded via `<img src="...">` are parsed strictly as XML, which knows just five entities: `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`. Common HTML entities like `&middot;`, `&mdash;`, `&ndash;`, `&hellip;`, `&nbsp;` are *undefined* in XML and cause the entire SVG to fail parsing — the browser shows a broken-image icon and falls back to alt text. For typographic characters, paste the literal Unicode glyph (`·`, `—`, `–`, `…`, ` `) directly into the file (it's UTF-8) or use a numeric reference (`&#xB7;`, `&#x2014;`). Same applies to any inline SVG generated by tooling that isn't told to emit XML-safe entities.
+- **Stroked shapes inside `<symbol>` need `overflow="visible"`.** A `<symbol>` clips its contents to its `viewBox` by default. If the inner rect has a `stroke`, the stroke extends `strokeWidth/2` outside the rect bounds — and that half gets clipped at every edge. The corner radius is unaffected mathematically, but visually the corner looks *tighter* because only the inner half of the stroke arc remains. The fix is one of:
+  1. Add `overflow="visible"` to the symbol (shown above) — keeps the symbol reusable.
+  2. Expand the symbol's `viewBox` to leave room for the stroke (e.g. `viewBox="-1 -1 242 112"` for a `1.5` stroke on a `240×110` rect).
+  3. Inline the `<rect>` directly without a symbol (what `hero-flow.svg` does) — the cleanest option for a shape used only once or twice.
+  If a stroked shape in one diagram looks subtly different from the same shape in another, this is almost always the cause.
+
+### Mermaid template
+
+For state/flow diagrams, define `endpoint` / `step` / `namespace` classes once and use them via `:::endpoint` / `:::step` / `class X namespace`. Same names everywhere — this is the shared vocabulary.
+
+```mermaid
+flowchart LR
+    A("step label"):::step --> B("another step"):::step
+    Z("endpoint"):::endpoint --> A
+
+    classDef endpoint fill:#0f1320,color:#ffffff,stroke:#0a1019,stroke-width:1px,rx:14,ry:14;
+    classDef step     fill:#ffffff,color:#0f1320,stroke:#0891b2,stroke-width:1.5px,rx:14,ry:14;
+    classDef namespace fill:#fbfcfd,stroke:#cbd5e0,stroke-width:1px,rx:18,ry:18;
+```
+
+Node shapes:
+
+- Rounded rectangle `(...)` for both endpoints and steps — they're distinguished by `classDef`, not by shape.
+- Stadium `([...])` and ellipse `((...))` look distorted on short labels — avoid.
+
+For state diagrams, use the same `classDef`s but apply via `class STATE_NAME endpoint` syntax:
+
+```mermaid
+stateDiagram-v2
+    classDef endpoint fill:#0f1320,color:#fff,stroke:#0a1019,stroke-width:1px
+    classDef step     fill:#fff,color:#0f1320,stroke:#0891b2,stroke-width:1.5px
+
+    [*] --> OPEN: create
+    OPEN --> DONE: finish
+    OPEN --> CLOSED: abandon
+
+    class OPEN step
+    class DONE,CLOSED endpoint
+```
+
+Global theme variables (font, line color, edge label background, spacing) are set in `docusaurus.config.ts` under `themeConfig.mermaid.options`. Per-diagram `classDef` lines override only what's local.
+
+### Self-check before shipping a diagram
+
+**Verify the diagram renders correctly before presenting it for review.** Do not declare a diagram done after only writing it. Run through this checklist every time:
+
+1. **`yarn build` clean** — broken markdown links and parse errors surface here. A red build means the diagram is wrong, period.
+2. **SVG-specific checks:**
+   - Every `<use>` referencing a `<symbol>` has explicit `width` and `height` matching the symbol's `viewBox`. Without them, `<use>` renders the symbol at 100% of the SVG canvas — produces a giant colored bar covering the diagram. This is the single most common SVG bug. Grep for `<use ` in the file and confirm each line has both `width=` and `height=`.
+   - Every `<symbol>` whose inner shape has a `stroke` declares `overflow="visible"` (or its `viewBox` is expanded to leave stroke room). Otherwise the stroke is clipped at the viewBox edge and the rounded corners look tighter than the same shape inlined — a subtle drift that breaks visual parity between diagrams.
+   - No HTML entities (`&middot;`, `&mdash;`, `&ndash;`, `&hellip;`, `&nbsp;`, …). They are undefined in XML and break the whole SVG when it's loaded via `<img>`. Grep for `&[a-z]\+;` and replace anything beyond the five XML predefined entities with literal Unicode glyphs.
+   - Every shape and text element fits inside the `viewBox`. Stray elements (e.g. y > viewBox height) silently disappear at small zoom levels and only show up when the viewport is large.
+   - Arrow endpoints land at the edge of their target shape, not inside it (otherwise the arrowhead is hidden by the shape).
+   - Edge labels with background pills are positioned so the pill fully covers the arrow line passing under it.
+3. **Mermaid-specific checks:**
+   - All `classDef` declarations are at the bottom (mermaid sometimes drops them if interleaved).
+   - Every node referenced with `:::className` or via `class node className` has the matching `classDef` defined.
+   - Sub-graphs in `flowchart LR` lay out in declaration order — if not, add invisible `~~~` links between them.
+4. **Render the page locally** at `yarn start` (`http://localhost:3000`) and *look at the diagram in the browser*. Compare against the visual vocabulary table above:
+   - Are endpoint pills charcoal? Are step boxes cyan-stroked? Are corners rounded?
+   - Are the three subgraphs (or whatever the layout is) sized consistently and aligned?
+   - Is the arrow flow clear? Are labels readable, not overlapping?
+5. **Spot-check at a few viewport widths.** The figure container has `max-width: 920px`; the diagram has to look OK at that width and also at smaller (mobile) widths. Resize the browser to ~640px and check the diagram doesn't get clipped or stretched awkwardly.
+6. **Only after all five pass** is the diagram ready to show. If something looks off, fix it before presenting — humans aren't the QA, the diagram should be correct on first viewing.
 
 ## What not to do
 

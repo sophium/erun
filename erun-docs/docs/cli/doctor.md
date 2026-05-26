@@ -14,23 +14,11 @@ erun doctor [TENANT] [ENVIRONMENT] [flags]
 
 ## What it checks
 
-**On the local host**, `erun doctor` validates:
+`erun doctor` runs a different check set depending on context. From your laptop, it validates the per-user tenant + env config, the kubeconfig context, the runtime pod's reachability, and the project root. Inside the runtime pod (detected via `ERUN_REPO_REMOTE=true`) it inspects the bootstrap marker, the in-pod project root, the git checkout, the SSH keypair, and the CodeCommit RSA key when applicable.
 
-- The tenant config (`~/.config/erun/<tenant>/tenant.yaml`) exists and parses.
-- The environment config (`~/.config/erun/<tenant>/<env>/config.yaml`) exists and parses.
-- The configured Kubernetes context exists in `~/.kube/config`.
-- The runtime pod can be reached (best-effort connectivity probe).
-- The project root for the tenant exists and is a git repository.
+For the full per-check id catalogue and the offered recovery actions, see [Agent reference · CLI flag spec · `erun doctor`](/agent-reference/cli-flags#erun-doctor).
 
-**Inside a runtime pod** (when run via SSH into the pod, detected via `ERUN_REPO_REMOTE=true`), `erun doctor` instead inspects:
-
-- The bootstrap marker (`~/.erun/<tenant>/<env>/bootstrap.yaml`) — what init recorded.
-- The project root inside the pod.
-- The git checkout.
-- The SSH keypair (`~/.ssh/id_ed25519`).
-- The CodeCommit RSA key (when the marker recorded a CodeCommit host).
-
-When any item is `missing`, `erun doctor` offers to run the corresponding recovery step (clone the repo, generate the SSH key, set up the CodeCommit RSA key, etc.).
+When any item is `missing`, `doctor` offers to run the corresponding recovery step.
 
 ## Flags
 
@@ -54,7 +42,42 @@ erun doctor                # see what's missing
 erun doctor --dry-run      # preview what doctor would do to fix it
 ```
 
-## Exit codes
+Exit codes and the meaning of each are spec'd in [Agent reference · CLI flag spec · `erun doctor` exit codes](/agent-reference/cli-flags#erun-doctor).
 
-- `0` — everything is healthy (or recovery was completed successfully).
-- non-zero — at least one item is missing and either recovery failed or `--dry-run` was requested.
+## Sample output
+
+A healthy local-side run against an env named `local` on Docker Desktop:
+
+```
+erun doctor — my-tenant / local
+  config:
+    tenant config         ok  ~/.config/erun/my-tenant/tenant.yaml
+    environment config    ok  ~/.config/erun/my-tenant/local/config.yaml
+    project config        ok  /Users/you/code/my-project/.erun/config.yaml
+  cluster:
+    kubernetes context    ok  docker-desktop
+    runtime pod           ok  my-tenant-local/erun-devops-7c8b6d (running)
+  workspace:
+    project root          ok  /Users/you/code/my-project (git repo)
+
+all checks passed
+```
+
+An unhealthy run after an interrupted init:
+
+```
+erun doctor — my-tenant / rihards-dev
+  config:
+    tenant config         ok  ~/.config/erun/my-tenant/tenant.yaml
+    environment config    ok  ~/.config/erun/my-tenant/rihards-dev/config.yaml
+  cluster:
+    kubernetes context    ok  erun-004-020362606330-eu-west-2
+    runtime pod      missing  no pod found in namespace my-tenant-rihards-dev
+
+  recovery actions:
+    [1] deploy runtime chart (erun open my-tenant rihards-dev)
+
+  run `erun doctor --dry-run` to preview the recovery, or `erun doctor` again with `-y` to apply.
+```
+
+The check format is fixed (`<category>: <name> <status> <detail>`); machine-readable consumers should prefer the [MCP `doctor` tool](/mcp/overview#doctor) which returns the same data as typed JSON.

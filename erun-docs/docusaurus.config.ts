@@ -59,6 +59,37 @@ const config: Config = {
 
   themeConfig: {
     image: 'img/erun-social-card.png',
+    mermaid: {
+      theme: { light: 'neutral', dark: 'dark' },
+      options: {
+        flowchart: {
+          padding: 12,
+          nodeSpacing: 36,
+          rankSpacing: 36,
+          curve: 'basis',
+          htmlLabels: true,
+        },
+        themeVariables: {
+          // Brand palette: charcoal text / cyan strokes / tinted fills.
+          primaryColor: '#f4f8f7',
+          primaryTextColor: '#0f1320',
+          primaryBorderColor: '#0891b2',
+          secondaryColor: '#e6f1f5',
+          tertiaryColor: '#ffffff',
+          lineColor: '#0891b2',
+          mainBkg: '#f4f8f7',
+          edgeLabelBackground: '#ffffff',
+          labelColor: '#0f1320',
+          // State diagram specifics
+          transitionColor: '#0891b2',
+          transitionLabelColor: '#0f1320',
+          altBackground: '#ffffff',
+          // Typography matches the rest of the site
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif',
+          fontSize: '14px',
+        },
+      },
+    },
     navbar: {
       title: 'ERun',
       logo: {

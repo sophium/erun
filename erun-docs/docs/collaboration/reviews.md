@@ -39,20 +39,26 @@ A **review** is the unit of work-to-be-merged. It binds a source branch to a tar
 
 ```mermaid
 stateDiagram-v2
+    classDef endpoint fill:#0f1320,color:#ffffff,stroke:#0a1019,stroke-width:1px
+    classDef step fill:#ffffff,color:#0f1320,stroke:#0891b2,stroke-width:1.5px
+
     [*] --> OPEN: POST /reviews
-    OPEN --> FAILED: PATCH status=FAILED (after failed build)
-    OPEN --> READY: PATCH status=READY (after successful build)
-    FAILED --> READY: PATCH status=READY (after fix + successful build)
-    READY --> MERGE: PATCH status=MERGE (queued)
-    MERGE --> MERGED: POST /merge-queue/advance
-    OPEN --> CLOSED: PATCH status=CLOSED (abandoned)
+    OPEN --> FAILED: failed build
+    OPEN --> READY: successful build
+    FAILED --> READY: fix + build
+    READY --> MERGE: queue
+    MERGE --> MERGED: advance queue
+    OPEN --> CLOSED: abandon
     READY --> CLOSED
     FAILED --> CLOSED
     MERGED --> [*]
     CLOSED --> [*]
+
+    class OPEN,FAILED,READY,MERGE step
+    class MERGED,CLOSED endpoint
 ```
 
-The status transitions are enforced server-side: an agent cannot directly mark a review `MERGED`. The only path to `MERGED` is via the merge queue, which `POST /v1/reviews/merge-queue/advance` controls.
+The status transitions are enforced server-side: an Agent cannot directly mark a review `MERGED`. The only path to `MERGED` is via the merge queue, which `POST /v1/reviews/merge-queue/advance` controls.
 
 ## Status meanings
 
@@ -79,3 +85,41 @@ Content-Type: application/json
 The server picks the head of the queue for that target branch and transitions it to `MERGED`. The response is the promoted review. If the queue is empty, the API returns an error.
 
 This mechanism gives an organization a single, fair, audit-trail-friendly merge order even when many agents are submitting in parallel.
+
+## Errors
+
+All endpoints return JSON error bodies:
+
+```jsonc
+{
+  "code": "INVALID_TRANSITION",
+  "message": "Cannot transition review from OPEN directly to MERGED",
+  "details": { "from": "OPEN", "to": "MERGED", "validTargets": ["FAILED", "READY", "CLOSED"] }
+}
+```
+
+| Status | When | Example |
+|---|---|---|
+| `400 Bad Request` | Malformed JSON, missing required fields, type mismatches. | `POST /v1/reviews` without `sourceBranch`. |
+| `401 Unauthorized` | No `Authorization` header, or token validation failed. | Bearer token expired. |
+| `403 Forbidden` | Token valid; caller not allowed in this tenant. | Agent of tenant A calling on tenant B. |
+| `404 Not Found` | The review or build id doesn't exist or isn't visible to the caller. | `GET /v1/reviews/rev_unknown`. |
+| `409 Conflict` | Invalid state transition or queue-state mismatch. | `PATCH .../status` to `MERGED` directly. |
+| `422 Unprocessable Entity` | Structurally valid but semantically invalid. | `PATCH status` to `READY` without a successful build. |
+| `429 Too Many Requests` | Rate limit exceeded. | Burst of `POST /comments`. |
+| `500 Internal Server Error` | Server error. Retry. | Database unavailable. |
+
+### Machine error codes
+
+| `code` | When | HTTP status |
+|---|---|---|
+| `INVALID_TRANSITION` | `PATCH /status` with a transition not allowed by the [Status lifecycle](#status-lifecycle). `details.validTargets` lists the allowed next statuses. | `409` |
+| `EMPTY_QUEUE` | `POST /merge-queue/advance` against a target branch whose queue has no `MERGE`-status reviews. | `409` |
+| `UNKNOWN_COMMIT` | `PATCH /status` (or `POST /builds`) referencing a `buildId` whose `commitId` doesn't exist on the review's `sourceBranch`. | `422` |
+| `INVALID_BODY` | Request body missing required field or fails type validation. `details.field` names the offender. | `400` |
+| `INVALID_TARGET_BRANCH` | `targetBranch` is not a valid branch name. | `400` |
+| `EXPIRED_PAGE_TOKEN` | `pageToken` is stale or malformed. | `400` |
+
+### Pagination + rate limits
+
+List endpoints page at 100 items max; see [API protocol · Pagination](/agent-reference/api-protocol#pagination). Rate-limit buckets per token: read 600 req/min, write 60 req/min, merge-queue-advance 10 req/min. Full table: [API protocol · Rate limits](/agent-reference/api-protocol#rate-limits).

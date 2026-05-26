@@ -31,11 +31,10 @@ Most callers don't run `erun release` directly — it's invoked by CI when a rel
 
 ## Stable vs candidate releases
 
-- **Stable releases** use bare semver tags (`1.0.76`) and follow the full chart/metadata sync flow.
-- **Candidate releases** use suffixed tags (`1.0.76-rc.1`) and skip the package-manager updates.
+The version string itself decides — no separate flag. Plain semver (`1.0.76`, `2.4.0`) is **stable** and triggers the full flow including package-manager metadata. Semver with a hyphen suffix (`1.0.76-rc.1`, `1.0.76-beta.2`, `2.5.0-canary`) is a **candidate**: images and chart published, package-manager metadata untouched. Anything that fails the version grammar is rejected before any side effect.
 
-The behavior is selected by the release version string, not by a flag.
+For the exact regex, the per-class behaviour, and the multi-arch contract, see [Agent reference · Release version policy](/agent-reference/release-policy).
 
-## Multi-arch contract
+## Error behaviour
 
-Every release-tagged image is multi-architecture. The release flow refuses to publish a single-arch artifact — the architecture coverage is a release-gate invariant. See [Release flow](/deployment/release-flow) for the full architecture and fingerprint-cache reasoning.
+`erun release` is atomic-ish: each failure aborts the release and tries hard to leave git, the registry, and package-manager files unchanged. Common abort causes: dirty working tree, tag conflict, single-arch image, registry auth, git-push failure mid-flow. Use `--dry-run` first when you're unsure of state. Full failure-code + recovery table: [Agent reference · Release version policy · Error codes](/agent-reference/release-policy#error-codes).

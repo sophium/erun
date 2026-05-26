@@ -21,13 +21,7 @@ config directory: /Users/you/Library/Application Support/erun
 default tenant: my-tenant
 
 current directory:
-  path: /Users/you/code/my-project
-  repo: my-project
-  configured tenant: my-tenant
   effective target: my-tenant / local
-    kubernetes context: docker-desktop
-    repo path: /Users/you/code/my-project
-    api url: http://127.0.0.1:17033
 
 tenants:
   - my-tenant [default, effective]
@@ -37,12 +31,12 @@ tenants:
         kubernetes context: docker-desktop
         container-registry: ghcr.io/sophium
         runtime version: 1.0.76
-        local ports: mcp=17000 api=17033 ssh=17022
       - rihards-dev
         kubernetes context: erun-004-020362606330-eu-west-2
-        container-registry: 020362606330.dkr.ecr.eu-west-2.amazonaws.com
         ...
 ```
+
+The full per-env field set (local port allocations, API URL, repo path, …) is listed; the example above abbreviates. See [Configuration](/reference/configuration) for what each per-env value means.
 
 ## Common usages
 
@@ -59,3 +53,26 @@ erun list | grep container-registry  # see configured registries per env
 | Subcommand | Description |
 |---|---|
 | `erun list cloud` | List managed ERun cloud contexts only. |
+
+### `erun list cloud` output
+
+A flat list of every cloud context configured on the current user — alias, provider, cluster id, region, instance type, and the current [lifecycle status](/concepts/cloud-contexts#lifecycle):
+
+```
+cloud contexts:
+  - MyOrg+020362606330@aws [running]
+    provider: aws (alias: MyOrg)
+    cluster:  erun-004-020362606330-eu-west-2
+    region:   eu-west-2
+    instance: t3.large
+    bound envs: my-tenant / rihards-dev, my-tenant / claude-review
+
+  - MyOrg+020362606330@aws-staging [stopped]
+    provider: aws (alias: MyOrg)
+    cluster:  erun-005-020362606330-eu-west-2
+    region:   eu-west-2
+    instance: t3.medium
+    bound envs: (none)
+```
+
+Useful for spotting cloud contexts that are running idle, or for figuring out which env(s) a context backs before stopping it.

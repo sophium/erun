@@ -1,0 +1,98 @@
+<svg viewBox="0 0 1000 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="insideEnvTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="insideEnvTitle">Inside a single environment. Operator and Agent pills at the top attach to two endpoints — SSH and MCP — on a single runtime pod inside one Kubernetes namespace. The runtime pod contains three containers: erun-devops, erun-mcp, erun-dind. Below the runtime pod, the same namespace also holds the application services for the project: frontend, api, db, queue. The whole composition shows that operator+agent peers share one pod, which sits alongside the deployed services in one isolated namespace.</title>
+
+  <defs>
+    <linearGradient id="ieCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="ieArrowDashed" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#22d3ee"/>
+    </marker>
+  </defs>
+
+  <!-- Title + subtitle -->
+  <text x="500" y="44" text-anchor="middle" fill="currentColor" font-size="18" font-weight="600" letter-spacing="0.01em">Inside an environment</text>
+  <text x="500" y="68" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.65">one Kubernetes namespace · two kinds of workload · Operator and Agent share one pod</text>
+
+  <!-- Operator + Agent at top -->
+  <g>
+    <rect x="140" y="95" width="160" height="44" rx="22" fill="url(#ieCharcoal)"/>
+    <text x="220" y="122" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">Operator</text>
+  </g>
+  <g>
+    <rect x="700" y="95" width="160" height="44" rx="22" fill="url(#ieCharcoal)"/>
+    <text x="780" y="122" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">Agent</text>
+  </g>
+
+  <!-- Dashed arrows from Operator/Agent down to the runtime pod (the shared surface) -->
+  <path d="M220 139 C 220 175, 260 215, 285 235" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#ieArrowDashed)"/>
+  <path d="M780 139 C 780 175, 740 215, 715 235" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#ieArrowDashed)"/>
+
+  <!-- Edge labels: SSH / MCP -->
+  <g>
+    <rect x="218" y="170" width="44" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="240" y="184" text-anchor="middle" fill="#0891b2" font-size="12" font-weight="600">SSH</text>
+  </g>
+  <g>
+    <rect x="740" y="170" width="44" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="762" y="184" text-anchor="middle" fill="#0891b2" font-size="12" font-weight="600">MCP</text>
+  </g>
+
+  <!-- Namespace card -->
+  <g>
+    <rect x="60" y="200" width="880" height="290" rx="18" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
+    <text x="80" y="225" text-anchor="start" fill="currentColor" font-size="12" font-weight="600" opacity="0.55" letter-spacing="0.08em">KUBERNETES NAMESPACE</text>
+  </g>
+
+  <!-- Runtime pod inside namespace -->
+  <g>
+    <rect x="100" y="240" width="800" height="110" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="500" y="265" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">Runtime pod — shared by Operator + Agent</text>
+
+    <!-- 3 container mini-boxes -->
+    <g>
+      <rect x="140" y="285" width="220" height="50" rx="10" fill="url(#ieCharcoal)"/>
+      <text x="250" y="307" text-anchor="middle" fill="#ffffff" font-size="12.5" font-weight="600">erun-devops</text>
+      <text x="250" y="324" text-anchor="middle" fill="#ffffff" font-size="10.5" opacity="0.7">shell + erun + docker</text>
+    </g>
+    <g>
+      <rect x="390" y="285" width="220" height="50" rx="10" fill="url(#ieCharcoal)"/>
+      <text x="500" y="307" text-anchor="middle" fill="#ffffff" font-size="12.5" font-weight="600">erun-mcp</text>
+      <text x="500" y="324" text-anchor="middle" fill="#ffffff" font-size="10.5" opacity="0.7">MCP server for agents</text>
+    </g>
+    <g>
+      <rect x="640" y="285" width="220" height="50" rx="10" fill="url(#ieCharcoal)"/>
+      <text x="750" y="307" text-anchor="middle" fill="#ffffff" font-size="12.5" font-weight="600">erun-dind</text>
+      <text x="750" y="324" text-anchor="middle" fill="#ffffff" font-size="10.5" opacity="0.7">docker daemon sidecar</text>
+    </g>
+  </g>
+
+  <!-- Application services -->
+  <text x="100" y="385" text-anchor="start" fill="currentColor" font-size="12" font-weight="600" opacity="0.55" letter-spacing="0.08em">APPLICATION SERVICES</text>
+
+  <g>
+    <rect x="100" y="400" width="170" height="60" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="185" y="425" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600">frontend</text>
+    <text x="185" y="445" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">deployment</text>
+  </g>
+  <g>
+    <rect x="290" y="400" width="170" height="60" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="375" y="425" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600">api</text>
+    <text x="375" y="445" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">deployment</text>
+  </g>
+  <g>
+    <rect x="480" y="400" width="170" height="60" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="565" y="425" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600">db</text>
+    <text x="565" y="445" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">statefulset</text>
+  </g>
+  <g>
+    <rect x="670" y="400" width="170" height="60" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="755" y="425" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600">queue</text>
+    <text x="755" y="445" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">deployment</text>
+  </g>
+  <text x="870" y="437" text-anchor="start" fill="currentColor" font-size="12" font-weight="500" opacity="0.4">+ more</text>
+
+  <!-- BOTTOM ANNOTATION -->
+  <text x="500" y="500" text-anchor="middle" fill="currentColor" font-size="13" font-weight="500" opacity="0.7">One namespace = one full functioning copy of the project. Drop the namespace, everything goes with it.</text>
+</svg>

@@ -10,7 +10,7 @@ ERun's release flow is repository-wide: a release moves all modules together (`e
 
 - `erun-devops/VERSION` is the canonical product version.
 - Chart `version` and `appVersion` are kept in sync with this file at release time.
-- Snapshot builds in the `local` environment append `-snapshot-<UTC-timestamp>` to the version. Non-local environments use the bare semver.
+- Builds in an **agent env** append `-snapshot-<UTC-timestamp>` to the version. **Runtime envs** use the bare semver.
 
 ## Release-tagged images
 
@@ -18,8 +18,33 @@ ERun's release flow is repository-wide: a release moves all modules together (`e
 
 Base images (`erun-ubuntu`, `erun-dind`, `erun-ubuntu`-derived) publish first; dependent images publish only after their bases are available in the registry.
 
-## Fingerprint cache
+## Build caching
 
-Every Docker build computes a content fingerprint over the Dockerfile and its COPY sources. The fingerprint is stored under `docker.fingerprints.<image>` in `.erun/config.yaml`. On the next build, ERun pulls `<image>:<VERSION>` from the registry and tags it locally with the fingerprint — if the local fingerprint matches, the image is promoted instead of rebuilt.
+Release-tagged builds participate in the same content-fingerprint cache as snapshot builds. Fresh clones promote pinned bases without rebuilding; local Dockerfile edits trigger a rebuild because the recomputed fingerprint diverges.
 
-The result: fresh clones promote pinned bases without rebuilding, but local Dockerfile edits still trigger a rebuild because the recomputed fingerprint diverges.
+See [Conventions · Fingerprint cache](/agent-reference/conventions-spec#fingerprint-cache) for the full mechanism.
+
+## Branch model
+
+`erun release` operates against two project-configured branches:
+
+| Field | Default | Role |
+|---|---|---|
+| `release.mainbranch` (`.erun/config.yaml`) | `main` | The branch that holds released versions. Release tags are created here. |
+| `release.developbranch` (`.erun/config.yaml`) | `develop` | The branch where the next development cycle continues. The post-release "bump to next patch version" lands here. |
+
+Override either in `.erun/config.yaml`:
+
+```yaml
+release:
+  mainbranch: production
+  developbranch: trunk
+```
+
+The conventional flow on a release:
+
+1. CI sees a release-tagged commit land on `release.mainbranch`.
+2. `erun release` reads `<projectroot>/<tenant>-devops/VERSION`, syncs the chart `version` / `appVersion`, creates the release commit + tag, builds and pushes the multi-arch images, then advances the next patch on `release.developbranch`.
+3. A subsequent `erun deploy` against a runtime env pulls the now-published version from the registry.
+
+For projects that use a single-branch trunk model, set both fields to the same branch.

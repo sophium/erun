@@ -1,0 +1,90 @@
+<svg viewBox="0 0 1000 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="cliLifecycleTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="cliLifecycleTitle">CLI lifecycle. Five main commands in a horizontal flow: erun init (set up tenant + env) → erun open (attach to env) → erun build (in agent env) → erun deploy (roll out) → erun delete (tear down). Below, a row of inspection and automation commands: erun list, erun doctor, erun mcp, erun release, erun version. A strapline notes that all commands support --dry-run for preview.</title>
+
+  <defs>
+    <linearGradient id="clCharcoal2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="clArrowSolid" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="500" y="44" text-anchor="middle" fill="currentColor" font-size="18" font-weight="600" letter-spacing="0.01em">CLI lifecycle</text>
+  <text x="500" y="68" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.65">one straight path · inspection and automation on the side</text>
+
+  <!-- MAIN LIFECYCLE — 5 boxes -->
+  <g>
+    <rect x="40" y="120" width="160" height="84" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="120" y="151" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">erun init</text>
+    <text x="120" y="175" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">create tenant + env</text>
+    <text x="120" y="192" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">first time</text>
+  </g>
+  <g>
+    <rect x="230" y="120" width="160" height="84" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="310" y="151" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">erun open</text>
+    <text x="310" y="175" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">attach to env</text>
+    <text x="310" y="192" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">SSH + MCP ready</text>
+  </g>
+  <g>
+    <rect x="420" y="120" width="160" height="84" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="500" y="151" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">erun build</text>
+    <text x="500" y="175" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">in an agent env</text>
+    <text x="500" y="192" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">snapshot or release</text>
+  </g>
+  <g>
+    <rect x="610" y="120" width="160" height="84" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="690" y="151" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">erun deploy</text>
+    <text x="690" y="175" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">build · push · roll out</text>
+    <text x="690" y="192" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">helm upgrade</text>
+  </g>
+  <g>
+    <rect x="800" y="120" width="160" height="84" rx="14" fill="url(#clCharcoal2)"/>
+    <text x="880" y="151" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">erun delete</text>
+    <text x="880" y="175" text-anchor="middle" fill="#ffffff" font-size="11.5" opacity="0.75">tear down env</text>
+    <text x="880" y="192" text-anchor="middle" fill="#ffffff" font-size="11" opacity="0.6">namespace + config</text>
+  </g>
+
+  <!-- Arrows between main lifecycle boxes -->
+  <line x1="200" y1="162" x2="230" y2="162" stroke="#0891b2" stroke-width="1.5" marker-end="url(#clArrowSolid)"/>
+  <line x1="390" y1="162" x2="420" y2="162" stroke="#0891b2" stroke-width="1.5" marker-end="url(#clArrowSolid)"/>
+  <line x1="580" y1="162" x2="610" y2="162" stroke="#0891b2" stroke-width="1.5" marker-end="url(#clArrowSolid)"/>
+  <line x1="770" y1="162" x2="800" y2="162" stroke="#0891b2" stroke-width="1.5" marker-end="url(#clArrowSolid)"/>
+
+  <!-- Section divider -->
+  <line x1="40" y1="248" x2="960" y2="248" stroke="currentColor" stroke-width="1" opacity="0.15"/>
+
+  <!-- INSPECTION + AUTOMATION strip -->
+  <text x="40" y="276" text-anchor="start" fill="currentColor" font-size="11" font-weight="600" letter-spacing="0.08em" opacity="0.55">INSPECTION & AUTOMATION</text>
+
+  <g>
+    <rect x="40" y="294" width="170" height="44" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="125" y="316" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">erun list</text>
+    <text x="125" y="332" text-anchor="middle" fill="currentColor" font-size="10.5" opacity="0.6">tenants · envs · target</text>
+  </g>
+  <g>
+    <rect x="225" y="294" width="170" height="44" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="310" y="316" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">erun doctor</text>
+    <text x="310" y="332" text-anchor="middle" fill="currentColor" font-size="10.5" opacity="0.6">diagnose env</text>
+  </g>
+  <g>
+    <rect x="410" y="294" width="170" height="44" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="495" y="316" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">erun mcp</text>
+    <text x="495" y="332" text-anchor="middle" fill="currentColor" font-size="10.5" opacity="0.6">server for agents</text>
+  </g>
+  <g>
+    <rect x="595" y="294" width="170" height="44" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="680" y="316" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">erun release</text>
+    <text x="680" y="332" text-anchor="middle" fill="currentColor" font-size="10.5" opacity="0.6">CI publishes</text>
+  </g>
+  <g>
+    <rect x="780" y="294" width="170" height="44" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="865" y="316" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">erun version</text>
+    <text x="865" y="332" text-anchor="middle" fill="currentColor" font-size="10.5" opacity="0.6">build info</text>
+  </g>
+
+  <!-- Bottom annotation -->
+  <text x="500" y="380" text-anchor="middle" fill="currentColor" font-size="13" font-weight="500" opacity="0.7">All commands support `--dry-run` — preview before any side effect.</text>
+</svg>

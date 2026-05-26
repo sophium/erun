@@ -14,50 +14,45 @@ erun push [flags]
 
 ## Behavior by environment type
 
-### Local environment (env named `local`)
+### Agent env (development)
 
-`erun push` resolves the current build context, **rebuilds** the image with a fresh snapshot tag (`<semver>-snapshot-<UTC-timestamp>`), then pushes per-arch tags and assembles a multi-arch manifest list. This matches `erun build --release`'s push path — `push` for a local env is build+push.
+`erun push` resolves the current build context, **rebuilds** the image with a fresh snapshot tag (`<semver>-snapshot-<UTC-timestamp>`), then pushes per-arch tags and assembles a multi-arch manifest list. `push` in an agent env is build+push.
 
-### Non-local environment (any other name)
+### Runtime env (release)
 
-`erun push` **skips the build step** and runs `docker push` directly against the tag `<registry>/<image>:<VERSION>`. It assumes the image already exists in the local docker daemon (typically produced by a prior `erun build`, which delegates to your project's `build.sh`).
+`erun push` **skips the build step** and runs `docker push` directly against the tag `<registry>/<image>:<VERSION>`. It assumes the image already exists in the local docker daemon (typically produced by a prior `erun build` in an agent env).
 
-This split exists because non-local environments use stable release tags from the `VERSION` file. Silently rebuilding and overwriting those tags would mutate release artifacts — `push` is the explicit "promote what was built" step.
+This split exists because runtime envs use stable release tags from the `VERSION` file. Silently rebuilding and overwriting those tags would mutate release artifacts — `push` here is the explicit "promote what was built" step.
+
+See [Environment types](/concepts/environment-types) for the full split between agent and runtime envs.
 
 ## Flags
 
 | Flag | Description |
 |---|---|
-| `--force` | Rebuild and re-push every image, bypassing the fingerprint cache. Only meaningful for the local environment. |
+| `--force` | Rebuild and re-push every image, bypassing the fingerprint cache. Only meaningful in an agent env. |
 | `--dry-run` | Resolve and print every `docker push` command without executing. |
 
 ## Registry resolution
 
-The registry used in the push tag comes from (in priority order):
-
-1. The environment's `EnvConfig.ContainerRegistry`.
-2. The project's `.erun/config.yaml` `environments.<env>.containerregistry`.
-3. The project's top-level `containerregistry` in `.erun/config.yaml`.
-4. The default `ghcr.io/sophium`.
-
-See [Container registries](/deployment/registries) for more detail.
+The registry is resolved per-env then per-project, falling back to the built-in default. See [Configuration · Container registry resolution](/reference/configuration#container-registry-for-the-image-tag) for the precise precedence, and [Container registries](/deployment/registries) for setup notes per registry vendor.
 
 ## Examples
 
-Push from a local environment (rebuilds + pushes):
+Push from an agent env (rebuilds + pushes):
 
 ```bash
 erun push --dry-run
 erun push
 ```
 
-Push from a non-local environment (after `erun build` has run):
+Push from a runtime env (after `erun build` has run):
 
 ```bash
-erun build       # runs ./build.sh — produces tagged images
+erun build       # produces tagged images (native multi-arch or ./build.sh)
 erun push        # docker push the tagged images
 ```
 
 ## Authentication
 
-If the registry rejects the push with `unauthorized`/`denied`/`insufficient_scope`, `erun push` retries with an interactive `docker login` prompt. For GHCR specifically, when the failure looks like a token-scope mismatch (`does not match expected scopes`, `permission_denied`), `erun push` attempts a namespace-owner re-login via `gh auth` automatically.
+If the registry rejects the push as unauthorised, `erun push` retries automatically with an interactive `docker login` prompt; for GHCR, a scope-mismatch additionally triggers `gh auth refresh -s write:packages,read:packages`. Both retries require a TTY. Full retry-trigger pattern table: [Agent reference · CLI flag spec · `erun push` authentication](/agent-reference/cli-flags#erun-push).

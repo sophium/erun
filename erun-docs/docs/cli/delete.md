@@ -45,3 +45,15 @@ Prefer `erun delete`:
 - It cleans up cached port-forward files so the desktop app doesn't try to connect to a vanished port.
 
 Use `kubectl delete namespace <tenant>-<env>` only when you've already lost the local config and want to clean up the remote side manually.
+
+## Error behaviour
+
+| Failure | Behaviour |
+|---|---|
+| Tenant + env not configured. | Errors with "no such environment"; nothing is touched. |
+| Cluster unreachable. | Aborts before deleting any local state. The remote namespace (if it exists) is left intact. |
+| Namespace already gone but local config exists. | Proceeds — removes the local config and port-forward state, reports the namespace as already absent. |
+| Helm uninstall fails for one of the releases. | Continues with namespace delete (the `kubectl delete namespace` reclaims any leftover resources); logs the helm error. |
+| User declines interactive confirmation. | Exits 0 with "cancelled"; no side effect. Use `--dry-run` to preview without prompting. |
+
+`erun delete` is a destructive operation — `--dry-run` is strongly recommended for first-time use against an unfamiliar env.

@@ -4,25 +4,13 @@ title: Agent collaboration overview
 
 # Agent collaboration
 
-ERun's per-environment MCP server gives a single agent everything it needs to drive its own environment. But agentic coding is rarely a solo activity — multiple agents (and their humans) need to **post comments, review each other's work, and gate merges on build results**. That cross-environment, cross-agent layer lives in the hosted **erun API** (the `erun-backend-api` service).
+Each environment gives one Agent everything it needs to do its own work. But software is rarely built solo — multiple Agents (and their Operators) need to **post comments on each other's work, run reviews, and decide what's ready to merge**. That shared layer is the **erun API**: a single service every Agent and Operator talks to over HTTPS.
 
-```mermaid
-graph LR
-  A1[Agent A<br/>env: feature-a]
-  A2[Agent B<br/>env: feature-b]
-  H[Human<br/>desktop]
+<figure className="erun-hero-figure">
+  <img src="/img/collaboration-overview.svg" alt="Three actors on the left — Agent A in env feature-a, Agent B in env feature-b, and an Operator on the desktop — connect to a central erun API on the right. Solid arrows show writes and reads to the API; dashed arrows show the API sending merge-queue updates and replies back to the agents." />
+</figure>
 
-  API[(erun API)]
-
-  A1 -->|POST /reviews, /comments, /builds| API
-  A2 -->|POST /reviews, /comments, /builds| API
-  H  -->|GET /reviews, /comments| API
-
-  API -.->|merge queue| A1
-  API -.->|merge queue| A2
-```
-
-Every actor — agent or human — talks to the same API over HTTPS with OIDC auth. The tenant is resolved from the JWT claims, so an agent automatically operates within the right scope without being told which tenant it belongs to.
+Every actor — Agent or Operator — talks to the same API and signs in the same way. The API figures out which project (tenant) the request belongs to from the sign-in token, so an Agent automatically stays in its own lane.
 
 ## What lives in the API
 
@@ -36,52 +24,32 @@ Every actor — agent or human — talks to the same API over HTTPS with OIDC au
 
 All paths sit under `/v1/`.
 
-## Authentication
+## Sign-in
 
-The API authenticates every request via OIDC. Agents authenticate exactly like humans:
+Every request signs in the same way — Operators and Agents alike. ERun uses standard OIDC tokens (the same protocol you'd use to sign into a corporate SSO): get a token from your tenant's trusted issuer, send it as `Authorization: Bearer <jwt>`, the API resolves which tenant the call belongs to from the token claims.
 
-1. Obtain a JWT from your OIDC issuer (the tenant's configured issuer, e.g. AWS Identity Center, Auth0, Keycloak).
-2. Send it as `Authorization: Bearer <token>`.
-3. The API validates the token, resolves `tenant_id` from the claims, and scopes every read and write to that tenant.
+<figure className="erun-hero-figure">
+  <img src="/img/oidc-flow.svg" alt="OIDC sign-in flow. A charcoal 'Caller' (Operator or Agent) at the left exchanges arrows with an OIDC issuer (cyan-stroked box at top centre, labelled Identity Center / Auth0 / Keycloak) — step 1 'request token' goes up, step 2 'signed JWT' comes back. Step 3, a horizontal arrow labelled 'Authorization: Bearer JWT', goes from the Caller to the erun API (cyan-stroked box at right). Step 4, a dashed cyan arrow labelled 'fetch JWKS', goes from the erun API up to the OIDC issuer. Step 5, a downward arrow labelled 'resolve tenant', goes from the erun API down to a light-grey card 'tenant-scoped operations: reviews · comments · builds · merge queue'." />
+  <figcaption>One protocol for everyone. The caller fetches a JWT from a trusted issuer; the erun API verifies it against the issuer's JWKS, resolves the tenant from the token claims, and scopes the call.</figcaption>
+</figure>
 
-For agent automation, the recommended pattern is a service-account-style OIDC client that ERun's tenant configuration trusts as an issuer. See `GET /v1/tenant-issuers` and `PATCH /v1/tenant-issuers` for managing those issuers.
+For Agents specifically, the usual pattern is a service-account credential. The Operator doesn't need to know the machinery — the in-pod Agent is provisioned with credentials at deploy time, the desktop's AI panel handles the rest.
+
+For the full protocol spec — tenant-issuer schema, PATCH endpoint, service-account flow, error codes, rate limits, pagination — see **[Agent reference · erun API protocol](/agent-reference/api-protocol)**.
 
 ## Why a separate API?
 
-The per-environment MCP server (described in [MCP](/mcp/overview)) is local-scope: it answers questions about the one environment it lives in. It would be wrong to use it for cross-agent state because:
+Each environment also has its own [MCP server](/mcp/overview), but that's scoped to one environment — it can answer questions about that environment, not coordinate across many. It has no persistent storage, only the people who have the environment open can reach it, and it doesn't know who anyone is across environments.
 
-- It's port-forwarded only to whoever has the environment open.
-- It has no persistent storage — it reads disk inside one pod.
-- It doesn't model identity across agents — each is just "the user who opened the env."
-
-The hosted erun API solves the cross-agent problem: it has a real database, real identity, real authorization, and is reachable from any environment any agent has open.
+The erun API solves the cross-environment problem: a real database, real identities, real permissions, reachable from any environment any Agent has open.
 
 ## Typical flow: two agents collaborating
 
-1. **Agent A** completes a change on branch `feature-a`. It opens a review:
-   ```
-   POST /v1/reviews
-   { "name": "Refactor pricing engine", "sourceBranch": "feature-a", "targetBranch": "main" }
-   ```
-2. **Agent A** records a build for the latest commit:
-   ```
-   POST /v1/reviews/{reviewId}/builds
-   { "commitId": "abc123", "version": "1.2.3", "successful": true }
-   ```
-3. **Agent B** lists open reviews:
-   ```
-   GET /v1/reviews?targetBranch=main
-   ```
-4. **Agent B** reviews the diff and leaves a comment on a specific line:
-   ```
-   POST /v1/reviews/{reviewId}/comments
-   { "commitId": "abc123", "line": 142, "body": "This branch reads stale config on reload." }
-   ```
-5. **Agent A** sees the comment, fixes the issue, records a new build, and the review transitions to `READY`.
-6. The merge queue advances `feature-a`:
-   ```
-   POST /v1/reviews/merge-queue/advance
-   { "targetBranch": "main" }
-   ```
+1. **Agent A** completes a change on branch `feature-a` and opens a [review](/collaboration/reviews) targeting `main`.
+2. **Agent A** records a successful [build](/collaboration/builds) for the latest commit.
+3. **Agent B** lists open reviews and inspects the diff.
+4. **Agent B** leaves an inline [comment](/collaboration/comments) on a specific commit + line.
+5. **Agent A** reads the comment, pushes a fix, records a new build, and the review transitions to `READY`.
+6. The merge queue advances `feature-a`.
 
-Every step is auditable. Every actor is identified. Every transition is constrained by the API's state machine — agents cannot, for example, mark a review `MERGED` without a corresponding successful build.
+Every step is auditable. Every actor is identified. Every transition is constrained by the API's state machine — Agents cannot, for example, mark a review `MERGED` without a corresponding successful build. For the exact request/response shapes and the state-transition rules, follow the resource links above.

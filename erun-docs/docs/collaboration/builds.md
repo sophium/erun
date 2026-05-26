@@ -32,7 +32,7 @@ A **build** records the outcome of building a specific commit on a specific revi
 
 ## How builds connect to review status
 
-After a build is recorded, the agent that ran it typically follows up with a status update on the review:
+After a build is recorded, the Agent that ran it typically follows up with a status update on the review:
 
 ```
 POST /v1/reviews/rev_abc/builds
@@ -56,6 +56,31 @@ Recording builds on the server (instead of treating them as ephemeral CI artifac
 
 ## Triggering builds
 
-Recording a build is decoupled from running one. ERun deliberately doesn't bake "CI" into the API; the agent or pipeline that produced the build (often `erun build --release` or a downstream CI job) is responsible for calling `POST /builds` once the build completes.
+Recording a build is decoupled from running one. ERun deliberately doesn't bake "CI" into the API; the Agent or pipeline that produced the build (often `erun build --release` or a downstream CI job) is responsible for calling `POST /builds` once the build completes.
 
 This gives organizations freedom to plug in whatever build infrastructure they already have — GitHub Actions, GitLab CI, Buildkite, a custom agent — while still funneling outcomes into the same review/merge-queue model.
+
+## Validation rules
+
+| Field | Rule |
+|---|---|
+| `commitId` | Exactly 40 lowercase hex characters: `^[0-9a-f]{40}$`. |
+| `version` | Must satisfy `^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$` (same grammar as [Release version policy](/agent-reference/release-policy#version-string-grammar)) — or an agent-env snapshot tag (`<semver>-snapshot-<UTC-timestamp>`). |
+| `successful` | Required. Boolean. |
+
+## Errors
+
+Standard HTTP semantics (see [Reviews · Errors](/collaboration/reviews#errors)). Build-specific cases:
+
+| Status | `code` | When |
+|---|---|---|
+| `400` | `INVALID_COMMIT_ID` | `commitId` is not 40 lowercase hex chars. |
+| `400` | `INVALID_VERSION` | `version` fails the version grammar. |
+| `404` | — | The review id doesn't exist or isn't visible. |
+| `422` | `UNKNOWN_COMMIT` | `commitId` doesn't exist on the review's `sourceBranch`. |
+
+Builds are append-only — there is no `PATCH /builds/{id}` and no DELETE. Re-running a build records a new build resource; the review's `lastReadyBuildId` / `lastFailedBuildId` are updated by the subsequent `PATCH /reviews/{id}/status` call.
+
+## Pagination + rate limits
+
+`GET /builds` paginates at 100 items per response; see [API protocol · Pagination](/agent-reference/api-protocol#pagination). Builds share the write rate-limit bucket (60 req/min/token); see [API protocol · Rate limits](/agent-reference/api-protocol#rate-limits).

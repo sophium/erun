@@ -8,12 +8,10 @@ Each environment has a **container registry** — the host/namespace that `erun 
 
 ## Where the value comes from
 
-The registry is resolved in priority order:
-
-1. The environment's own `EnvConfig.ContainerRegistry` (stored under `~/.config/erun/<tenant>/<env>/config.yaml`).
-2. The project's `.erun/config.yaml` `environments.<env>.containerregistry`.
-3. The project's top-level `containerregistry` in `.erun/config.yaml`.
-4. The built-in default: `ghcr.io/sophium`.
+<figure className="erun-hero-figure">
+  <img src="/img/registry-resolution.svg" alt="Four cyan-stroked boxes in a row showing the four priority levels of container registry resolution. P1 Per-env override (EnvConfig.containerregistry, per-user config). P2 Project per-env (environments.&lt;env&gt;.containerregistry in .erun/config.yaml). P3 Project default (containerregistry top-level in .erun/config.yaml). P4 Built-in default (ghcr.io/sophium, charcoal box, always available). Arrows between each pair labelled 'if unset'. A strapline reads: 'Override at the highest level you need — usually per-env for ECR, project-wide for ghcr.'" />
+  <figcaption>Highest priority wins. ERun falls through to the next level until a value is set.</figcaption>
+</figure>
 
 You can set or change the registry from the desktop app's environment edit modal, or by passing `--container-registry <host>` to `erun init`.
 

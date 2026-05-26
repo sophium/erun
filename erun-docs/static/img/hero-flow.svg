@@ -1,5 +1,5 @@
-<svg viewBox="0 0 1000 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="heroFlowTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
-  <title id="heroFlowTitle">From idea to production, with the operator in the loop</title>
+<svg viewBox="0 0 1000 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="heroFlowTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="heroFlowTitle">One operator orchestrates many parallel sandboxes; each sandbox is an AI assistant working on its own piece of the project.</title>
   <defs>
     <linearGradient id="endpointGrad" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#1a2030"/>
@@ -13,55 +13,48 @@
     </marker>
   </defs>
 
-  <!-- Operator -->
+  <!-- Operator (top center) -->
   <g>
-    <rect x="430" y="20" width="140" height="44" rx="22" fill="url(#endpointGrad)"/>
-    <text x="500" y="48" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" letter-spacing="0.01em">Operator</text>
+    <rect x="420" y="20" width="160" height="46" rx="23" fill="url(#endpointGrad)"/>
+    <text x="500" y="49" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" letter-spacing="0.01em">Operator</text>
   </g>
 
-  <!-- Operator → Agent (dashed cyan) -->
-  <path d="M470 64 C 400 110, 300 150, 300 200" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#arrowDashed)"/>
-  <!-- Operator → Review (dashed cyan) -->
-  <path d="M530 64 C 600 110, 650 150, 650 200" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#arrowDashed)"/>
+  <!-- Dashed arrows: Operator → each sandbox (join / review / take over) -->
+  <path d="M460 66 C 400 110, 220 150, 190 200" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#arrowDashed)"/>
+  <path d="M500 66 C 500 110, 500 150, 500 200" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#arrowDashed)"/>
+  <path d="M540 66 C 600 110, 780 150, 810 200" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#arrowDashed)"/>
 
-  <!-- Edge labels with theme-aware background pill. -->
+  <!-- Three parallel sandboxes -->
   <g>
-    <rect x="278" y="118" width="124" height="22" rx="11" fill="var(--ifm-background-color, #ffffff)"/>
-    <text x="340" y="133" text-anchor="middle" fill="#0891b2" font-size="12" font-weight="500" letter-spacing="0.02em">join · take over</text>
+    <rect x="70" y="200" width="240" height="110" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="190" y="237" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Sandbox</text>
+    <text x="190" y="259" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">AI assistant working</text>
+    <text x="190" y="281" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">on Feature A</text>
   </g>
   <g>
-    <rect x="598" y="118" width="134" height="22" rx="11" fill="var(--ifm-background-color, #ffffff)"/>
-    <text x="665" y="133" text-anchor="middle" fill="#0891b2" font-size="12" font-weight="500" letter-spacing="0.02em">review · approve</text>
+    <rect x="380" y="200" width="240" height="110" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="500" y="237" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Sandbox</text>
+    <text x="500" y="259" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">AI assistant working</text>
+    <text x="500" y="281" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">on Feature B</text>
   </g>
-
-  <!-- Idea (left endpoint, charcoal) -->
   <g>
-    <rect x="24" y="218" width="76" height="44" rx="22" fill="url(#endpointGrad)"/>
-    <text x="62" y="245" text-anchor="middle" fill="#ffffff" font-size="15" font-weight="600">Idea</text>
+    <rect x="690" y="200" width="240" height="110" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="810" y="237" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Sandbox</text>
+    <text x="810" y="259" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">AI assistant working</text>
+    <text x="810" y="281" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">on Feature C</text>
   </g>
 
-  <!-- Agent in environment (transparent box, cyan stroke) -->
+  <!-- "…and more" annotation to the right -->
+  <text x="955" y="259" text-anchor="middle" fill="currentColor" font-size="14" font-weight="500" opacity="0.55">…</text>
+
+  <!-- Solid arrows: each sandbox → Production -->
+  <path d="M190 310 C 190 350, 380 380, 460 400" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
+  <path d="M500 310 C 500 350, 500 380, 500 400" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
+  <path d="M810 310 C 810 350, 620 380, 540 400" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
+
+  <!-- Production (bottom center) -->
   <g>
-    <rect x="200" y="200" width="200" height="80" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
-    <text x="300" y="234" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Agent</text>
-    <text x="300" y="256" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">in isolated environment</text>
+    <rect x="420" y="400" width="160" height="46" rx="23" fill="url(#endpointGrad)"/>
+    <text x="500" y="429" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" letter-spacing="0.01em">Production</text>
   </g>
-
-  <!-- Review (transparent box, cyan stroke) -->
-  <g>
-    <rect x="550" y="200" width="200" height="80" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
-    <text x="650" y="234" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Review</text>
-    <text x="650" y="256" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">operator + agents</text>
-  </g>
-
-  <!-- Production (right endpoint, charcoal) -->
-  <g>
-    <rect x="876" y="218" width="100" height="44" rx="22" fill="url(#endpointGrad)"/>
-    <text x="926" y="245" text-anchor="middle" fill="#ffffff" font-size="15" font-weight="600">Production</text>
-  </g>
-
-  <!-- Horizontal flow arrows (solid cyan) -->
-  <line x1="100" y1="240" x2="195" y2="240" stroke="#0891b2" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
-  <line x1="400" y1="240" x2="545" y2="240" stroke="#0891b2" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
-  <line x1="750" y1="240" x2="871" y2="240" stroke="#0891b2" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
 </svg>

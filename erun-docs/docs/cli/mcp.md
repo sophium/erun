@@ -4,7 +4,7 @@ title: erun mcp
 
 # `erun mcp`
 
-Run ERun as a Model Context Protocol (MCP) server over HTTP. This is the entry point used by IDEs, AI assistants, and the desktop app's port-forward to the in-pod MCP container.
+Run ERun as a Model Context Protocol (MCP) server over HTTP. This is the entry point used by IDEs, Agents, and the desktop app's port-forward to the in-pod MCP container.
 
 ## Synopsis
 
@@ -16,27 +16,18 @@ The `mcp` command is a launcher for the `emcp` executable that ships in the `eru
 
 ## What it exposes
 
-The MCP server speaks JSON-RPC 2.0 over `POST /mcp` with `Accept: application/json, text/event-stream`. After the standard `initialize` + `notifications/initialized` handshake, callers can use:
+A typed tool surface — inspection (`idle`, `doctor`, `list`, …), action wrappers around the CLI (`build`, `deploy`, …), opinionated skills (`scaffold` and friends), and an escape hatch (`raw`). Operators don't usually call MCP directly; it's the integration point for Agents (Claude Code, Codex) and IDEs.
 
-| Tool | Purpose |
-|---|---|
-| `idle` | Resolved idle policy, managed-cloud flag, stop eligibility, activity snapshot. |
-| `doctor` | In-pod health checks (config, git, SSH keys). |
-| `list` | Same data as `erun list`, structured. |
-| `version` | Build version and commit. |
-| `raw` | Run an arbitrary `argv` in the runtime repo root. Last-resort escape hatch. |
-
-See [MCP overview](/mcp/overview) for the full protocol details and example calls.
+For the protocol, the full tool list with schemas, the handshake, and worked examples, see [MCP overview](/mcp/overview).
 
 ## Usage modes
 
-Most users don't run `erun mcp` directly. The two normal entry points are:
+Most users don't run `erun mcp` directly. Three normal entry points:
 
-1. **Inside the runtime pod**: the chart starts an `erun-mcp` container that exposes the server on `ERUN_MCP_PORT` (default `17000`). The desktop app port-forwards to it.
-2. **From an IDE / AI agent on your laptop**: configure your tool to call the local port the desktop app maintains at `<UserConfigDir>/erun/portforward/mcp/<tenant>/<environment>.json`.
+1. **The default — in the runtime pod.** The chart starts an `erun-mcp` container that exposes the server on `ERUN_MCP_PORT` (default `17000`). The in-pod Agent (`claude`, `codex`) reaches it at loopback; the desktop app port-forwards it for any laptop-side client.
+2. **Laptop-side client (troubleshooting).** Point an MCP-aware tool at the local port the desktop app maintains at `<UserConfigDir>/erun/portforward/mcp/<tenant>/<environment>.json`. See [Troubleshooting · Connecting a laptop-side Agent client](/reference/troubleshooting#connecting-a-laptop-side-agent-client) for when this is the right call.
+3. **Direct launch (for local development of MCP itself).**
 
-For local development or testing the server, you can invoke it directly:
-
-```bash
-erun mcp my-tenant local --port 17000
-```
+   ```bash
+   erun mcp my-tenant local --port 17000
+   ```

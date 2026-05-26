@@ -1,0 +1,45 @@
+<svg viewBox="0 0 1000 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="firstRunTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="firstRunTitle">First run. Three steps left to right: '$ erun' typed in the project folder, then ERun sets up your env (a minute or so on first run), then the env is ready and the Agent is there. Subsequent runs skip the setup.</title>
+
+  <defs>
+    <linearGradient id="frCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="frArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="500" y="44" text-anchor="middle" fill="currentColor" font-size="18" font-weight="600" letter-spacing="0.01em">First run</text>
+  <text x="500" y="68" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.65">one command, env ready</text>
+
+  <!-- Step 1 — you type erun -->
+  <g>
+    <rect x="60" y="120" width="260" height="90" rx="14" fill="url(#frCharcoal)"/>
+    <text x="190" y="156" text-anchor="middle" fill="#ffffff" font-size="17" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">$ erun</text>
+    <text x="190" y="180" text-anchor="middle" fill="#ffffff" font-size="11.5" opacity="0.75">in your project folder</text>
+  </g>
+
+  <!-- Step 2 — ERun handles the rest -->
+  <g>
+    <rect x="370" y="120" width="260" height="90" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="500" y="156" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">ERun sets up the env</text>
+    <text x="500" y="180" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">walks you through it on the first run</text>
+  </g>
+
+  <!-- Step 3 — ready -->
+  <g>
+    <rect x="680" y="120" width="260" height="90" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="810" y="156" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">Ready to work</text>
+    <text x="810" y="180" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">open in your IDE · the Agent is there</text>
+  </g>
+
+  <!-- Arrows -->
+  <line x1="320" y1="165" x2="370" y2="165" stroke="#0891b2" stroke-width="1.5" marker-end="url(#frArrow)"/>
+  <line x1="630" y1="165" x2="680" y2="165" stroke="#0891b2" stroke-width="1.5" marker-end="url(#frArrow)"/>
+
+  <!-- Bottom annotation -->
+  <text x="500" y="252" text-anchor="middle" fill="currentColor" font-size="13" font-weight="500" opacity="0.7">Subsequent runs skip the setup.</text>
+</svg>

@@ -4,31 +4,34 @@ title: Install
 
 # Install ERun
 
-ERun ships as a single CLI binary (`erun`) and an optional desktop application. Both share the same configuration on disk.
+Install ERun through your platform's package manager. One command gives you both the **CLI** and the **desktop app**.
 
-## CLI
+## Prerequisites
 
-### macOS / Linux (Homebrew)
+On your machine:
+
+- **`git`** — ERun resolves the project root by walking up to find a `.git` directory; every tenant maps to one git repository.
+- **A Kubernetes cluster.** You pick where it lives:
+  - **Local.** Enable Kubernetes in your favourite Docker tool — Docker Desktop, OrbStack, Rancher Desktop. That's it; ERun takes it from there.
+  - **Cloud.** No prerequisites — ERun provisions a minimal, secure Kubernetes cluster for you on demand.
+
+You don't have to pick local vs cloud upfront. The same workflow targets both — local while your machine has capacity, cloud when you need more.
+
+## macOS — Homebrew
 
 ```bash
-brew tap sophium/erun
+brew tap sophium/erun https://github.com/sophium/erun
 brew install erun
 ```
 
-### Linux (.deb / .rpm)
+## Windows — Scoop
 
-Download the package for your distribution from the [latest GitHub release](https://github.com/sophium/erun/releases/latest) and install it with your package manager.
-
-### Verify
-
-```bash
-erun --help
-erun version
+```powershell
+scoop bucket add erun https://github.com/sophium/erun
+scoop install erun
 ```
 
-## Desktop app
-
-The desktop app is available for macOS and Windows. Download the latest installer from the [GitHub releases](https://github.com/sophium/erun/releases/latest) page.
+Either install puts the `erun` CLI on your `PATH` and installs the desktop application alongside it.
 
 ## Next
 
