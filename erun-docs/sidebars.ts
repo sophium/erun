@@ -44,10 +44,9 @@ const sidebars: SidebarsConfig = {
       label: 'Operator + Agent',
       link: { type: 'generated-index' },
       items: [
+        'collaboration/workflow',
         'collaboration/overview',
         'collaboration/operator-in-the-loop',
-        'collaboration/operator-maturity',
-        'collaboration/workflow',
       ],
     },
     {

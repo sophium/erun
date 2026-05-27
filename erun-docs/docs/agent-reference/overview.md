@@ -48,6 +48,6 @@ Per the Operator/Agent split, an Agent is responsible for the following classes 
 - Approving and merging — every transition to `MERGE` and the merge-queue advance is an Operator action.
 - Reviewing [audit-trail events](/collaboration/operator-in-the-loop#the-audit-trail) and security events.
 - Tenant-issuer trust changes ([planned](/agent-reference/api-protocol#tenant-issuers) admin-only endpoint).
-- Granting Agent autonomy progressions ([Operator maturity](/collaboration/operator-maturity)).
+- Granting Agent autonomy progressions ([Workflow · Agent maturity stages](/collaboration/workflow#agent-maturity-stages-per-class-of-work)).
 
 The Operator should not need to memorise the field tables. The Agent should be able to look any of them up without bothering the Operator.
