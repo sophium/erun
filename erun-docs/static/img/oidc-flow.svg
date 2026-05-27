@@ -1,0 +1,84 @@
+<svg viewBox="0 0 1000 380" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="oidcFlowTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="oidcFlowTitle">OIDC sign-in flow. A caller (Operator or Agent) requests a token from a trusted OIDC issuer (AWS Identity Center, Auth0, Keycloak, …); the issuer returns a signed JWT; the caller presents it as a Bearer token to the erun API; the API verifies the signature against the issuer's JWKS, resolves the tenant from the token's claims, and scopes all subsequent operations to that tenant.</title>
+
+  <defs>
+    <linearGradient id="ofCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="ofArrowSolid" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+    <marker id="ofArrowDashed" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#22d3ee"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="500" y="44" text-anchor="middle" fill="currentColor" font-size="18" font-weight="600" letter-spacing="0.01em">OIDC sign-in</text>
+  <text x="500" y="68" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.65">any actor — Operator or Agent — gets a token from a trusted issuer; the API resolves the tenant</text>
+
+  <!-- Caller (left) -->
+  <g>
+    <rect x="60" y="170" width="180" height="80" rx="14" fill="url(#ofCharcoal)"/>
+    <text x="150" y="201" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">Caller</text>
+    <text x="150" y="222" text-anchor="middle" fill="#ffffff" font-size="11" opacity="0.7">Operator or Agent</text>
+  </g>
+
+  <!-- OIDC issuer (top center) -->
+  <g>
+    <rect x="380" y="110" width="240" height="80" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="500" y="141" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">OIDC issuer</text>
+    <text x="500" y="162" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">Identity Center · Auth0 · Keycloak · …</text>
+    <text x="500" y="180" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">your tenant trusts this issuer</text>
+  </g>
+
+  <!-- erun API (right) -->
+  <g>
+    <rect x="760" y="170" width="180" height="80" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="850" y="201" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">erun API</text>
+    <text x="850" y="222" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">verifies + resolves</text>
+  </g>
+
+  <!-- Tenant resolution result (below API) -->
+  <g>
+    <rect x="650" y="295" width="320" height="50" rx="14" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
+    <text x="810" y="316" text-anchor="middle" fill="currentColor" font-size="12.5" font-weight="600">tenant-scoped operations</text>
+    <text x="810" y="333" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">reviews · comments · builds · merge queue</text>
+  </g>
+
+  <!-- Step 1: Caller → Issuer (curve up) -->
+  <path d="M180 170 C 250 140, 350 130, 380 130" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#ofArrowSolid)"/>
+  <g>
+    <rect x="232" y="100" width="116" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="290" y="114" text-anchor="middle" fill="#0891b2" font-size="11.5" font-weight="600">1. request token</text>
+  </g>
+
+  <!-- Step 2: Issuer → Caller (curve down) -->
+  <path d="M380 170 C 350 200, 250 220, 200 222" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#ofArrowSolid)"/>
+  <g>
+    <rect x="252" y="223" width="120" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="312" y="237" text-anchor="middle" fill="#0891b2" font-size="11.5" font-weight="600">2. signed JWT</text>
+  </g>
+
+  <!-- Step 3: Caller → erun API -->
+  <line x1="240" y1="210" x2="760" y2="210" stroke="#0891b2" stroke-width="1.5" marker-end="url(#ofArrowSolid)"/>
+  <g>
+    <rect x="412" y="200" width="176" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="500" y="214" text-anchor="middle" fill="#0891b2" font-size="11.5" font-weight="600">3. Authorization: Bearer JWT</text>
+  </g>
+
+  <!-- Step 4: erun API → Issuer JWKS (verify) — dashed -->
+  <path d="M820 170 C 820 145, 720 135, 620 130" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#ofArrowDashed)"/>
+  <g>
+    <rect x="660" y="142" width="124" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="722" y="156" text-anchor="middle" fill="#22d3ee" font-size="11" font-weight="600">4. fetch JWKS</text>
+  </g>
+
+  <!-- Step 5: erun API → tenant scope (down) -->
+  <line x1="850" y1="250" x2="850" y2="295" stroke="#0891b2" stroke-width="1.5" marker-end="url(#ofArrowSolid)"/>
+  <g>
+    <rect x="780" y="262" width="140" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="850" y="276" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="600">5. resolve tenant</text>
+  </g>
+</svg>

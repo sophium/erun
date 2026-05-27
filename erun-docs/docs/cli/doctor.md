@@ -1,0 +1,83 @@
+---
+title: erun doctor
+---
+
+# `erun doctor`
+
+Inspect the local ERun configuration or the runtime pod state and offer recovery actions for any problems it finds.
+
+## Synopsis
+
+```
+erun doctor [TENANT] [ENVIRONMENT] [flags]
+```
+
+## What it checks
+
+`erun doctor` runs a different check set depending on context. From your laptop, it validates the per-user tenant + env config, the kubeconfig context, the runtime pod's reachability, and the project root. Inside the runtime pod (detected via `ERUN_REPO_REMOTE=true`) it inspects the bootstrap marker, the in-pod project root, the git checkout, the SSH keypair, and the CodeCommit RSA key when applicable.
+
+For the full per-check id catalogue and the offered recovery actions, see [Agent reference · CLI flag spec · `erun doctor`](/agent-reference/cli-flags#erun-doctor).
+
+When any item is `missing`, `doctor` offers to run the corresponding recovery step.
+
+## Flags
+
+| Flag | Description |
+|---|---|
+| `--dry-run` | Run the inspection and print the recovery plan without performing any recovery actions. |
+
+## Examples
+
+Run from your laptop against the effective env:
+
+```bash
+erun doctor
+```
+
+Run inside a runtime pod after an interrupted init:
+
+```bash
+# (SSH'd into the pod)
+erun doctor                # see what's missing
+erun doctor --dry-run      # preview what doctor would do to fix it
+```
+
+Exit codes and the meaning of each are spec'd in [Agent reference · CLI flag spec · `erun doctor` exit codes](/agent-reference/cli-flags#erun-doctor).
+
+## Sample output
+
+A healthy local-side run against an env named `local` on Docker Desktop:
+
+```
+erun doctor — my-tenant / local
+  config:
+    tenant config         ok  ~/.config/erun/my-tenant/tenant.yaml
+    environment config    ok  ~/.config/erun/my-tenant/local/config.yaml
+    project config        ok  /Users/you/code/my-project/.erun/config.yaml
+  cluster:
+    kubernetes context    ok  docker-desktop
+    runtime pod           ok  my-tenant-local/erun-devops-7c8b6d (running)
+  workspace:
+    project root          ok  /Users/you/code/my-project (git repo)
+
+all checks passed
+```
+
+An unhealthy run after an interrupted init:
+
+```
+erun doctor — my-tenant / rihards-dev
+  config:
+    tenant config         ok  ~/.config/erun/my-tenant/tenant.yaml
+    environment config    ok  ~/.config/erun/my-tenant/rihards-dev/config.yaml
+  cluster:
+    kubernetes context    ok  erun-004-020362606330-eu-west-2
+    runtime pod      missing  no pod found in namespace my-tenant-rihards-dev
+
+  recovery actions:
+    [1] deploy runtime chart (erun open my-tenant rihards-dev)
+
+  run `erun doctor --dry-run` to preview the recovery, or `erun doctor` again with `-y` to apply.
+```
+
+The check format is fixed (`<category>: <name> <status> <detail>`); machine-readable consumers should prefer the [MCP `doctor` tool](/mcp/overview#doctor) which returns the same data as typed JSON.

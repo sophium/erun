@@ -1,0 +1,81 @@
+<svg viewBox="0 0 1000 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="differentiatorsTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="differentiatorsTitle">Four cards explaining what makes ERun different. Side by side — your editor and your Agent see the same project, no parallel worlds. In control — preview every action before it runs, every action recorded, join, take over, hand off any time. Industry standards — traceable, reproducible, audit-ready, compliance is how the platform works, not a bolt-on. Your scale — LAMP stack on a VM through autoscaling enterprise with DR and immutable backups, same defaults at every scale.</title>
+
+  <defs>
+    <linearGradient id="dfCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Card 1 — Side by side -->
+  <g>
+    <rect x="20" y="20" width="220" height="280" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <!-- icon: overlapping editor + agent badges -->
+    <g>
+      <rect x="65" y="50" width="56" height="36" rx="6" fill="url(#dfCharcoal)"/>
+      <text x="93" y="73" text-anchor="middle" fill="#ffffff" font-size="10" font-weight="600" letter-spacing="0.05em">EDITOR</text>
+      <rect x="119" y="68" width="56" height="36" rx="6" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+      <text x="147" y="91" text-anchor="middle" fill="currentColor" font-size="10" font-weight="600" letter-spacing="0.05em">AGENT</text>
+    </g>
+    <!-- title -->
+    <text x="130" y="155" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600">Side by side</text>
+    <!-- body -->
+    <text x="130" y="190" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">Your editor and your</text>
+    <text x="130" y="210" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">Agent see the same</text>
+    <text x="130" y="230" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">project at the same</text>
+    <text x="130" y="250" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">time. No parallel worlds.</text>
+  </g>
+
+  <!-- Card 2 — In control -->
+  <g>
+    <rect x="260" y="20" width="220" height="280" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <!-- icon: eye / preview -->
+    <g>
+      <ellipse cx="370" cy="80" rx="44" ry="26" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+      <circle cx="370" cy="80" r="11" fill="url(#dfCharcoal)"/>
+      <circle cx="373" cy="76" r="3" fill="#ffffff"/>
+    </g>
+    <text x="370" y="155" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600">In control</text>
+    <text x="370" y="190" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">Preview every action</text>
+    <text x="370" y="210" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">before it runs. Every</text>
+    <text x="370" y="230" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">action recorded. Join,</text>
+    <text x="370" y="250" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">take over, hand off — any</text>
+    <text x="370" y="270" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">time.</text>
+  </g>
+
+  <!-- Card 3 — Industry standards -->
+  <g>
+    <rect x="500" y="20" width="220" height="280" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <!-- icon: shield with checkmark -->
+    <g>
+      <path d="M 610 50 L 638 62 L 638 90 Q 638 108 610 118 Q 582 108 582 90 L 582 62 Z" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+      <path d="M 596 84 L 607 95 L 624 76" stroke="#0891b2" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+    <text x="610" y="155" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600">Industry standards</text>
+    <text x="610" y="190" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">Traceable, reproducible,</text>
+    <text x="610" y="210" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">audit-ready. Compliance</text>
+    <text x="610" y="230" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">is how the platform</text>
+    <text x="610" y="250" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">works, not a layer added</text>
+    <text x="610" y="270" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">at the end.</text>
+  </g>
+
+  <!-- Card 4 — Your scale -->
+  <g>
+    <rect x="740" y="20" width="220" height="280" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <!-- icon: spectrum (left small node, right large node) -->
+    <g>
+      <rect x="772" y="74" width="22" height="16" rx="4" fill="url(#dfCharcoal)"/>
+      <line x1="800" y1="82" x2="908" y2="82" stroke="#0891b2" stroke-width="1.5"/>
+      <rect x="906" y="60" width="42" height="44" rx="6" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+      <text x="783" y="108" text-anchor="middle" fill="currentColor" font-size="9.5" opacity="0.6">single VM</text>
+      <text x="927" y="118" text-anchor="middle" fill="currentColor" font-size="9.5" opacity="0.6">enterprise</text>
+    </g>
+    <text x="850" y="155" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600">Your scale</text>
+    <text x="850" y="190" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">A classic LAMP stack on</text>
+    <text x="850" y="210" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">one VM through auto-</text>
+    <text x="850" y="230" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">scaling enterprise with</text>
+    <text x="850" y="250" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">DR + immutable backups.</text>
+    <text x="850" y="270" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.75">Same defaults, your scale.</text>
+  </g>
+</svg>

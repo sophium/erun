@@ -29,6 +29,7 @@ Additional guidance for `erun-devops` and its subtree.
   - `erun-backend-postgres` — opt-in. Owns the postgres Deployment + Service + PVC and the postgres password Secret (`erun-backend-postgres`). Created on first deploy and reused via `lookup` on subsequent deploys.
   - `erun-backend-db` — opt-in. Owns the migration Job. The Job is wired as a Helm `post-install,post-upgrade` hook with `helm.sh/hook-delete-policy: before-hook-creation` so each release run replaces the prior Job and migrations only run when this release is applied.
   - `erun-backend-api` — opt-in. Owns the API Deployment + Service. Consumes the postgres Secret via `secretKeyRef`; expects `erun-backend-db` to have run before the API rolls.
+  - `erun-docs` — opt-in. Owns a single Job that runs `wrangler pages deploy /site/` to publish the prebuilt Docusaurus static site to Cloudflare Pages. No Service, no Ingress, no in-cluster traffic. Gated by `docs.enabled` so accidental local deploys don't push to the live project. Consumes a `cf-creds` Secret (configurable) for `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`. See `erun-docs/AGENTS.md` for the full hosting contract and the one-time external setup (Cloudflare Pages project, custom domain, DNS).
 - The runtime pod contract is intentional:
   - the main `erun-devops` container uses `DOCKER_HOST=unix:///var/run/docker.sock`
   - the `erun-dind` sidecar provides the daemon

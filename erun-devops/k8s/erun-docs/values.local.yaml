@@ -1,0 +1,8 @@
+# Local-environment defaults: skip publishing by default. Setting
+# `docs.enabled=false` keeps `erun deploy` in the local env from accidentally
+# pushing to a live Cloudflare Pages project. Override per-developer if needed.
+docs:
+  enabled: false
+  project: erun-docs
+  branch: preview
+  credentialsSecretName: cf-creds

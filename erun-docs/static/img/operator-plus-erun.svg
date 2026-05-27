@@ -1,0 +1,105 @@
+<svg viewBox="0 0 1000 510" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="opErunTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="opErunTitle">A diagram of what ERun is. Three interfaces at the top — Desktop app, Terminal, AI agents via MCP — all feed into a single ERun control plane in the middle. ERun spawns three isolated environments below: env feature, env review, env hotfix. Inside each environment, an Operator pill and an Agent pill sit side by side, showing them working together in the same environment. The strapline emphasises that as many environments can run as the machine can host, with overflow into the cloud.</title>
+
+  <defs>
+    <linearGradient id="opCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="opArrowSolid" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+  </defs>
+
+  <!-- Title + subtitle -->
+  <text x="500" y="46" text-anchor="middle" fill="currentColor" font-size="18" font-weight="600" letter-spacing="0.01em">What ERun is</text>
+  <text x="500" y="72" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.65">open the app, type a command, or let an agent drive — they all reach the same engine</text>
+
+  <!-- ROW 1 — Interfaces (cyan-stroked step boxes) -->
+  <g>
+    <rect x="120" y="110" width="200" height="72" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="220" y="142" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">Desktop app</text>
+    <text x="220" y="164" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">click, browse, take over</text>
+  </g>
+  <g>
+    <rect x="400" y="110" width="200" height="72" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="500" y="142" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">Terminal</text>
+    <text x="500" y="164" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">type `erun` in any folder</text>
+  </g>
+  <g>
+    <rect x="680" y="110" width="200" height="72" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="780" y="142" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">AI agents</text>
+    <text x="780" y="164" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">via MCP tools</text>
+  </g>
+
+  <!-- Arrows converging from interfaces to ERun box -->
+  <line x1="220" y1="182" x2="350" y2="220" stroke="#0891b2" stroke-width="1.5" marker-end="url(#opArrowSolid)"/>
+  <line x1="500" y1="182" x2="500" y2="220" stroke="#0891b2" stroke-width="1.5" marker-end="url(#opArrowSolid)"/>
+  <line x1="780" y1="182" x2="650" y2="220" stroke="#0891b2" stroke-width="1.5" marker-end="url(#opArrowSolid)"/>
+
+  <!-- ROW 2 — ERun (the brand / control plane) -->
+  <g>
+    <rect x="250" y="225" width="500" height="68" rx="14" fill="url(#opCharcoal)"/>
+    <text x="500" y="258" text-anchor="middle" fill="#ffffff" font-size="22" font-weight="700" letter-spacing="0.02em">ERun</text>
+    <text x="500" y="278" text-anchor="middle" fill="#ffffff" font-size="11.5" opacity="0.75">spawns, manages, tears down isolated environments</text>
+  </g>
+
+  <!-- Arrows fanning from ERun box to environments below -->
+  <line x1="380" y1="293" x2="270" y2="335" stroke="#0891b2" stroke-width="1.5" marker-end="url(#opArrowSolid)"/>
+  <line x1="500" y1="293" x2="500" y2="335" stroke="#0891b2" stroke-width="1.5" marker-end="url(#opArrowSolid)"/>
+  <line x1="620" y1="293" x2="730" y2="335" stroke="#0891b2" stroke-width="1.5" marker-end="url(#opArrowSolid)"/>
+
+  <!-- ROW 3 — Environments, each holding an Operator + Agent side by side -->
+  <g>
+    <rect x="170" y="335" width="200" height="125" rx="14" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
+    <text x="270" y="362" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">env: feature</text>
+    <g>
+      <rect x="185" y="380" width="80" height="28" rx="14" fill="url(#opCharcoal)"/>
+      <text x="225" y="399" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">Operator</text>
+    </g>
+    <g>
+      <rect x="275" y="380" width="80" height="28" rx="14" fill="url(#opCharcoal)"/>
+      <text x="315" y="399" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">Agent</text>
+    </g>
+    <text x="270" y="431" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.6">side by side, full stack inside</text>
+    <text x="270" y="449" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.45">api · db · queue · ui</text>
+  </g>
+
+  <g>
+    <rect x="400" y="335" width="200" height="125" rx="14" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
+    <text x="500" y="362" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">env: review</text>
+    <g>
+      <rect x="415" y="380" width="80" height="28" rx="14" fill="url(#opCharcoal)"/>
+      <text x="455" y="399" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">Operator</text>
+    </g>
+    <g>
+      <rect x="505" y="380" width="80" height="28" rx="14" fill="url(#opCharcoal)"/>
+      <text x="545" y="399" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">Agent</text>
+    </g>
+    <text x="500" y="431" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.6">side by side, full stack inside</text>
+    <text x="500" y="449" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.45">api · db · queue · ui</text>
+  </g>
+
+  <g>
+    <rect x="630" y="335" width="200" height="125" rx="14" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
+    <text x="730" y="362" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">env: hotfix</text>
+    <g>
+      <rect x="645" y="380" width="80" height="28" rx="14" fill="url(#opCharcoal)"/>
+      <text x="685" y="399" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">Operator</text>
+    </g>
+    <g>
+      <rect x="735" y="380" width="80" height="28" rx="14" fill="url(#opCharcoal)"/>
+      <text x="775" y="399" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">Agent</text>
+    </g>
+    <text x="730" y="431" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.6">side by side, full stack inside</text>
+    <text x="730" y="449" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.45">api · db · queue · ui</text>
+  </g>
+
+  <!-- "+ more" indicator -->
+  <text x="870" y="395" text-anchor="start" fill="currentColor" font-size="13" font-weight="500" opacity="0.5">+ more</text>
+  <text x="870" y="412" text-anchor="start" fill="currentColor" font-size="11" opacity="0.45">as many as you</text>
+  <text x="870" y="428" text-anchor="start" fill="currentColor" font-size="11" opacity="0.45">need</text>
+
+  <!-- BOTTOM ANNOTATION -->
+  <text x="500" y="490" text-anchor="middle" fill="currentColor" font-size="13" font-weight="500" opacity="0.7">Operator and Agent work side by side in every environment — your machine, the cloud, or both.</text>
+</svg>

@@ -1,0 +1,111 @@
+<svg viewBox="0 0 1000 900" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="operatorMaturityTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="operatorMaturityTitle">Three operator maturity levels stacked top-to-bottom. Level 1: Operator prompts a chat in a browser and manually copies code into the solution. Level 2: Operator directs an Agent that runs inside their env, which commits directly to the solution. Level 3: Operator orchestrates many Agents, each in its own isolated env, all converging on the solution.</title>
+
+  <defs>
+    <linearGradient id="omEndpointGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="omArrowSolid" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+    <marker id="omArrowDashed" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#22d3ee"/>
+    </marker>
+  </defs>
+
+  <!-- ============== LEVEL 1 — Copy-paste from chat ============== -->
+  <text x="40" y="32" fill="currentColor" font-size="15" font-weight="600" letter-spacing="0.01em">Level 1 — Copy-paste from chat</text>
+  <text x="40" y="52" fill="currentColor" font-size="12" opacity="0.7">Ask in a browser, copy code into the editor by hand.</text>
+
+  <g>
+    <rect x="40" y="112" width="160" height="46" rx="23" fill="url(#omEndpointGrad)"/>
+    <text x="120" y="141" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" letter-spacing="0.01em">Operator</text>
+  </g>
+
+  <g>
+    <rect x="380" y="80" width="240" height="110" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="500" y="120" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Chat (browser)</text>
+    <text x="500" y="143" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">ChatGPT, Claude, Gemini</text>
+    <text x="500" y="165" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">Manual prompt &amp; paste</text>
+  </g>
+
+  <g>
+    <rect x="800" y="112" width="160" height="46" rx="23" fill="url(#omEndpointGrad)"/>
+    <text x="880" y="141" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" letter-spacing="0.01em">Solution</text>
+  </g>
+
+  <path d="M200 135 L 380 135" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#omArrowDashed)"/>
+  <path d="M620 135 L 800 135" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#omArrowSolid)"/>
+
+  <line x1="40" y1="220" x2="960" y2="220" stroke="currentColor" stroke-width="1" opacity="0.15"/>
+
+  <!-- ============== LEVEL 2 — Agent in your env ============== -->
+  <text x="40" y="252" fill="currentColor" font-size="15" font-weight="600" letter-spacing="0.01em">Level 2 — Agent in your env</text>
+  <text x="40" y="272" fill="currentColor" font-size="12" opacity="0.7">Claude Code or Codex runs in the same env. The agent edits, runs, commits.</text>
+
+  <g>
+    <rect x="40" y="332" width="160" height="46" rx="23" fill="url(#omEndpointGrad)"/>
+    <text x="120" y="361" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" letter-spacing="0.01em">Operator</text>
+  </g>
+
+  <g>
+    <rect x="380" y="300" width="240" height="110" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="500" y="340" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Claude Code</text>
+    <text x="500" y="363" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">In your env</text>
+    <text x="500" y="385" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">One env, one Agent</text>
+  </g>
+
+  <g>
+    <rect x="800" y="332" width="160" height="46" rx="23" fill="url(#omEndpointGrad)"/>
+    <text x="880" y="361" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" letter-spacing="0.01em">Solution</text>
+  </g>
+
+  <path d="M200 355 L 380 355" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#omArrowDashed)"/>
+  <path d="M620 355 L 800 355" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#omArrowSolid)"/>
+
+  <line x1="40" y1="440" x2="960" y2="440" stroke="currentColor" stroke-width="1" opacity="0.15"/>
+
+  <!-- ============== LEVEL 3 — Many Agents in many envs ============== -->
+  <text x="40" y="472" fill="currentColor" font-size="15" font-weight="600" letter-spacing="0.01em">Level 3 — Many Agents in many envs</text>
+  <text x="40" y="492" fill="currentColor" font-size="12" opacity="0.7">One Operator, many envs, many Agents — parallel work converging on one solution.</text>
+
+  <g>
+    <rect x="420" y="520" width="160" height="46" rx="23" fill="url(#omEndpointGrad)"/>
+    <text x="500" y="549" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" letter-spacing="0.01em">Operator</text>
+  </g>
+
+  <g>
+    <rect x="60" y="640" width="240" height="110" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="180" y="677" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Env</text>
+    <text x="180" y="699" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">Agent A — feature-a</text>
+    <text x="180" y="721" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">full env, isolated</text>
+  </g>
+
+  <g>
+    <rect x="380" y="640" width="240" height="110" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="500" y="677" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Env</text>
+    <text x="500" y="699" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">Agent B — feature-b</text>
+    <text x="500" y="721" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">full env, isolated</text>
+  </g>
+
+  <g>
+    <rect x="700" y="640" width="240" height="110" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="820" y="677" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Env</text>
+    <text x="820" y="699" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">Agent C — feature-c</text>
+    <text x="820" y="721" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">full env, isolated</text>
+  </g>
+
+  <g>
+    <rect x="420" y="820" width="160" height="46" rx="23" fill="url(#omEndpointGrad)"/>
+    <text x="500" y="849" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" letter-spacing="0.01em">Solution</text>
+  </g>
+
+  <path d="M460 566 C 400 590, 220 615, 180 640" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#omArrowDashed)"/>
+  <path d="M500 566 C 500 590, 500 615, 500 640" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#omArrowDashed)"/>
+  <path d="M540 566 C 600 590, 780 615, 820 640" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#omArrowDashed)"/>
+
+  <path d="M180 750 C 180 775, 380 800, 460 820" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#omArrowSolid)"/>
+  <path d="M500 750 C 500 775, 500 800, 500 820" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#omArrowSolid)"/>
+  <path d="M820 750 C 820 775, 620 800, 540 820" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#omArrowSolid)"/>
+</svg>

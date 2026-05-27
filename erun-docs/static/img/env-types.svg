@@ -1,0 +1,87 @@
+<svg viewBox="0 0 1200 540" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="envTypesTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="envTypesTitle">Three environment types side by side. local-agent has its worktree mounted from your machine via hostPath. remote-agent has its worktree cloned into a PVC inside the namespace. runtime has no worktree — services are pulled from the image registry.</title>
+
+  <defs>
+    <linearGradient id="etCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="etArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+  </defs>
+
+  <!-- ========== Column 1: local-agent ========== -->
+  <g>
+    <!-- Namespace card -->
+    <rect x="40" y="40" width="320" height="460" rx="18" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
+    <text x="60" y="68" text-anchor="start" fill="#0891b2" font-size="11" font-weight="600" letter-spacing="0.08em">LOCAL-AGENT</text>
+    <text x="200" y="93" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.6">k8s namespace</text>
+
+    <!-- Endpoint pill: your machine -->
+    <rect x="100" y="120" width="200" height="50" rx="14" fill="url(#etCharcoal)"/>
+    <text x="200" y="152" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">your machine</text>
+
+    <!-- Arrow + label -->
+    <line x1="200" y1="180" x2="200" y2="305" stroke="#0891b2" stroke-width="1.5" marker-end="url(#etArrow)"/>
+    <g>
+      <rect x="166" y="222" width="68" height="22" rx="11" fill="var(--ifm-background-color, #ffffff)"/>
+      <text x="200" y="237" text-anchor="middle" fill="#0891b2" font-size="12" font-weight="600">hostPath</text>
+    </g>
+
+    <!-- Step box: runtime pod + worktree -->
+    <rect x="80" y="310" width="240" height="100" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="200" y="352" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">runtime pod</text>
+    <text x="200" y="378" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.65">+ worktree</text>
+
+    <!-- Bottom strapline -->
+    <text x="200" y="460" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">cluster on your laptop</text>
+    <text x="200" y="478" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">Docker Desktop · OrbStack · k3d</text>
+  </g>
+
+  <!-- ========== Column 2: remote-agent ========== -->
+  <g>
+    <rect x="440" y="40" width="320" height="460" rx="18" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
+    <text x="460" y="68" text-anchor="start" fill="#0891b2" font-size="11" font-weight="600" letter-spacing="0.08em">REMOTE-AGENT</text>
+    <text x="600" y="93" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.6">k8s namespace</text>
+
+    <rect x="500" y="120" width="200" height="50" rx="14" fill="url(#etCharcoal)"/>
+    <text x="600" y="152" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">git</text>
+
+    <line x1="600" y1="180" x2="600" y2="305" stroke="#0891b2" stroke-width="1.5" marker-end="url(#etArrow)"/>
+    <g>
+      <rect x="574" y="222" width="52" height="22" rx="11" fill="var(--ifm-background-color, #ffffff)"/>
+      <text x="600" y="237" text-anchor="middle" fill="#0891b2" font-size="12" font-weight="600">clone</text>
+    </g>
+
+    <rect x="480" y="310" width="240" height="100" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="600" y="352" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">runtime pod</text>
+    <text x="600" y="378" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.65">+ worktree (PVC)</text>
+
+    <text x="600" y="460" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">cluster doesn't share your filesystem</text>
+    <text x="600" y="478" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">EKS · GKE · AKS</text>
+  </g>
+
+  <!-- ========== Column 3: runtime ========== -->
+  <g>
+    <rect x="840" y="40" width="320" height="460" rx="18" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
+    <text x="860" y="68" text-anchor="start" fill="#0891b2" font-size="11" font-weight="600" letter-spacing="0.08em">RUNTIME</text>
+    <text x="1000" y="93" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.6">k8s namespace</text>
+
+    <rect x="900" y="120" width="200" height="50" rx="14" fill="url(#etCharcoal)"/>
+    <text x="1000" y="152" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">registry</text>
+
+    <line x1="1000" y1="180" x2="1000" y2="305" stroke="#0891b2" stroke-width="1.5" marker-end="url(#etArrow)"/>
+    <g>
+      <rect x="966" y="222" width="68" height="22" rx="11" fill="var(--ifm-background-color, #ffffff)"/>
+      <text x="1000" y="237" text-anchor="middle" fill="#0891b2" font-size="12" font-weight="600">pull image</text>
+    </g>
+
+    <rect x="880" y="310" width="240" height="100" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="1000" y="352" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">deployed services</text>
+    <text x="1000" y="378" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.65">(no worktree)</text>
+
+    <text x="1000" y="460" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">no development happens here</text>
+    <text x="1000" y="478" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">dev · test · dr · prod</text>
+  </g>
+</svg>
