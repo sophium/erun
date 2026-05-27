@@ -9,14 +9,14 @@ How Operators and Agents work together evolves through three levels of maturity,
 ## Three levels of Operator-Agent collaboration
 
 <figure className="erun-hero-figure">
-  <img src="/img/operator-maturity.svg" alt="Three operator maturity levels stacked vertically. Level 1: Operator prompts a Chat (browser) and copies code into the Solution. Level 2: Operator directs Claude Code inside the dev environment which commits straight to the Solution. Level 3: Operator orchestrates three Agents in three isolated environments, all converging on the Solution." />
+  <img src="/img/operator-maturity.svg" alt="Three operator maturity levels stacked vertically. Level 1: Operator prompts a Chat (browser) and copies code into the Solution. Level 2: Operator directs Claude Code inside their env, which commits straight to the Solution. Level 3: Operator orchestrates three Agents in three isolated envs, all converging on the Solution." />
 </figure>
 
 ### Level 1 — Copy-paste from chat
 
 The starting point. The Operator opens a chat tool in a browser, describes a task, gets code back, copies it into their editor. Low setup; anyone can do it on day one. The Agent has no view into the project beyond what the Operator pasted in; every iteration is a manual round-trip; nothing runs against a real system.
 
-### Level 2 — Agent in your dev environment
+### Level 2 — Agent in your env
 
 The Agent (Claude Code, Codex, …) runs **inside the same environment as the Operator** — same files, same shell, same build tools. Diffs land in the workspace directly; the Agent can `ls`, `cat`, `git diff` actual project state. Limitation: one env per Agent. Two Agents step on each other's files. Integration tests still mean tearing down what you were doing.
 

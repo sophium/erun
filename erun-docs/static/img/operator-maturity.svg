@@ -1,5 +1,5 @@
 <svg viewBox="0 0 1000 900" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="operatorMaturityTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
-  <title id="operatorMaturityTitle">Three operator maturity levels stacked top-to-bottom. Level 1: operator prompts a chat in a browser and manually copies code into the solution. Level 2: operator directs an agent that runs inside the dev environment, which commits directly to the solution. Level 3: operator orchestrates many agents, each in its own sandbox environment, all converging on the solution.</title>
+  <title id="operatorMaturityTitle">Three operator maturity levels stacked top-to-bottom. Level 1: Operator prompts a chat in a browser and manually copies code into the solution. Level 2: Operator directs an Agent that runs inside their env, which commits directly to the solution. Level 3: Operator orchestrates many Agents, each in its own isolated env, all converging on the solution.</title>
 
   <defs>
     <linearGradient id="omEndpointGrad" x1="0" y1="0" x2="0" y2="1">
@@ -40,8 +40,8 @@
 
   <line x1="40" y1="220" x2="960" y2="220" stroke="currentColor" stroke-width="1" opacity="0.15"/>
 
-  <!-- ============== LEVEL 2 — Agent in your dev environment ============== -->
-  <text x="40" y="252" fill="currentColor" font-size="15" font-weight="600" letter-spacing="0.01em">Level 2 — Agent in your dev environment</text>
+  <!-- ============== LEVEL 2 — Agent in your env ============== -->
+  <text x="40" y="252" fill="currentColor" font-size="15" font-weight="600" letter-spacing="0.01em">Level 2 — Agent in your env</text>
   <text x="40" y="272" fill="currentColor" font-size="12" opacity="0.7">Claude Code or Codex runs in the same env. The agent edits, runs, commits.</text>
 
   <g>
@@ -52,8 +52,8 @@
   <g>
     <rect x="380" y="300" width="240" height="110" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
     <text x="500" y="340" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Claude Code</text>
-    <text x="500" y="363" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">In your dev environment</text>
-    <text x="500" y="385" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">One sandbox, one agent</text>
+    <text x="500" y="363" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">In your env</text>
+    <text x="500" y="385" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">One env, one Agent</text>
   </g>
 
   <g>
@@ -66,9 +66,9 @@
 
   <line x1="40" y1="440" x2="960" y2="440" stroke="currentColor" stroke-width="1" opacity="0.15"/>
 
-  <!-- ============== LEVEL 3 — Many agents in many environments ============== -->
-  <text x="40" y="472" fill="currentColor" font-size="15" font-weight="600" letter-spacing="0.01em">Level 3 — Many agents in many environments</text>
-  <text x="40" y="492" fill="currentColor" font-size="12" opacity="0.7">One operator, many sandboxes, many agents — parallel work converging on one solution.</text>
+  <!-- ============== LEVEL 3 — Many Agents in many envs ============== -->
+  <text x="40" y="472" fill="currentColor" font-size="15" font-weight="600" letter-spacing="0.01em">Level 3 — Many Agents in many envs</text>
+  <text x="40" y="492" fill="currentColor" font-size="12" opacity="0.7">One Operator, many envs, many Agents — parallel work converging on one solution.</text>
 
   <g>
     <rect x="420" y="520" width="160" height="46" rx="23" fill="url(#omEndpointGrad)"/>
@@ -77,21 +77,21 @@
 
   <g>
     <rect x="60" y="640" width="240" height="110" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
-    <text x="180" y="677" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Sandbox</text>
+    <text x="180" y="677" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Env</text>
     <text x="180" y="699" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">Agent A — feature-a</text>
     <text x="180" y="721" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">full env, isolated</text>
   </g>
 
   <g>
     <rect x="380" y="640" width="240" height="110" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
-    <text x="500" y="677" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Sandbox</text>
+    <text x="500" y="677" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Env</text>
     <text x="500" y="699" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">Agent B — feature-b</text>
     <text x="500" y="721" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">full env, isolated</text>
   </g>
 
   <g>
     <rect x="700" y="640" width="240" height="110" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
-    <text x="820" y="677" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Sandbox</text>
+    <text x="820" y="677" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Env</text>
     <text x="820" y="699" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">Agent C — feature-c</text>
     <text x="820" y="721" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">full env, isolated</text>
   </g>

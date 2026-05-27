@@ -1,5 +1,5 @@
 <svg viewBox="0 0 1000 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="heroFlowTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
-  <title id="heroFlowTitle">One operator orchestrates many parallel sandboxes; each sandbox is an AI assistant working on its own piece of the project.</title>
+  <title id="heroFlowTitle">One Operator orchestrates many parallel environments; each environment is an Agent working on its own piece of the project.</title>
   <defs>
     <linearGradient id="endpointGrad" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0%" stop-color="#1a2030"/>
@@ -19,35 +19,35 @@
     <text x="500" y="49" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="600" letter-spacing="0.01em">Operator</text>
   </g>
 
-  <!-- Dashed arrows: Operator → each sandbox (join / review / take over) -->
+  <!-- Dashed arrows: Operator → each environment (join / review / take over) -->
   <path d="M460 66 C 400 110, 220 150, 190 200" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#arrowDashed)"/>
   <path d="M500 66 C 500 110, 500 150, 500 200" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#arrowDashed)"/>
   <path d="M540 66 C 600 110, 780 150, 810 200" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#arrowDashed)"/>
 
-  <!-- Three parallel sandboxes -->
+  <!-- Three parallel environments -->
   <g>
     <rect x="70" y="200" width="240" height="110" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
-    <text x="190" y="237" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Sandbox</text>
-    <text x="190" y="259" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">AI assistant working</text>
+    <text x="190" y="237" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Environment</text>
+    <text x="190" y="259" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">Agent working</text>
     <text x="190" y="281" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">on Feature A</text>
   </g>
   <g>
     <rect x="380" y="200" width="240" height="110" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
-    <text x="500" y="237" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Sandbox</text>
-    <text x="500" y="259" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">AI assistant working</text>
+    <text x="500" y="237" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Environment</text>
+    <text x="500" y="259" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">Agent working</text>
     <text x="500" y="281" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">on Feature B</text>
   </g>
   <g>
     <rect x="690" y="200" width="240" height="110" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
-    <text x="810" y="237" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Sandbox</text>
-    <text x="810" y="259" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">AI assistant working</text>
+    <text x="810" y="237" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600" letter-spacing="0.01em">Environment</text>
+    <text x="810" y="259" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">Agent working</text>
     <text x="810" y="281" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7">on Feature C</text>
   </g>
 
   <!-- "…and more" annotation to the right -->
   <text x="955" y="259" text-anchor="middle" fill="currentColor" font-size="14" font-weight="500" opacity="0.55">…</text>
 
-  <!-- Solid arrows: each sandbox → Production -->
+  <!-- Solid arrows: each environment → Production -->
   <path d="M190 310 C 190 350, 380 380, 460 400" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
   <path d="M500 310 C 500 350, 500 380, 500 400" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
   <path d="M810 310 C 810 350, 620 380, 540 400" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#arrowSolid)"/>
