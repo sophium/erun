@@ -31,11 +31,11 @@ Even before AI agents, operators struggled to run more than one copy of their de
 
 ## Under the hood
 
-Kubernetes is the right primitive for production, but exposed raw it's overwhelming. ERun hides the cluster behind [MCP tools](/mcp/overview) — typed actions the Agent calls on your behalf. **The Agent drives Kubernetes; you drive the Agent.**
+Kubernetes is the right primitive for production, but exposed raw it's overwhelming. The Agent and the Operator's IDE reach an env through two channels on the runtime pod: **SSH** for file authoring and shell — the same channel your editor attaches to — and [**MCP**](/mcp/overview) for typed ERun operations the Agent calls instead of hand-running `kubectl` / `helm`. ERun also deploys [**skills**](/concepts/skills) into the env so the Agent picks up your project's conventions automatically. **The Agent drives Kubernetes; you drive the Agent.**
 
 <figure className="erun-hero-figure">
-  <img src="/img/abstraction-stack.svg" alt="Four-layer abstraction stack from top to bottom. Operator pill at the top, with a 'directs' arrow down to the AI Agent box (Claude Code, Codex). A 'calls' arrow down to the MCP tools layer holding six typed actions: init, deploy, doctor, list, idle, raw. A 'drives' arrow down to the Kubernetes cluster, which contains three namespace cards labelled ns: feature-a, ns: feature-b, ns: feature-c — each marked as a full stack inside (api · db · queue · ui)." />
-  <figcaption>Each layer hides the one below — you talk to the Agent; the Agent calls MCP; ERun runs Kubernetes.</figcaption>
+  <img src="/img/abstraction-stack.svg" alt="Abstraction stack from top to bottom. Operator pill at the top, with a 'directs' arrow down to the Agent box (Claude Code, Codex). A dashed 'loads' arrow enters the Agent box from a side panel labelled 'skills · deployed into the env'. A 'calls' arrow goes down from the Agent to the MCP tools layer holding six typed actions: init, deploy, doctor, list, build, raw. A 'drives' arrow down to the Kubernetes cluster, which contains three namespace cards labelled ns: feature-a, ns: feature-b, ns: feature-c — each marked as a full stack inside (api · db · queue · ui)." />
+  <figcaption>The MCP layer is what abstracts Kubernetes — file authoring rides a parallel SSH channel into the same runtime pod (the channel your IDE attaches to, and the one the Agent uses for edits and shell).</figcaption>
 </figure>
 
 ---
