@@ -76,7 +76,7 @@ Every series is labelled with the env's tenant + environment, derived from `ERUN
 |---|---|
 | Type | `counter` |
 | Labels | `tenant`, `environment`, `tool`, `result` |
-| `tool` values | The string passed as `tools/call.name` — one of `idle`, `doctor`, `list`, `version`, `logs`, `build`, `push`, `deploy`, `release`, `open`, `init`, `delete`, `scaffold`, `regenerate-chart`, `migrate-deps`, `extract-component`, `add-ingress`, `raw`. |
+| `tool` values | The string passed as `tools/call.name` — one of `idle`, `doctor`, `list`, `version`, `logs`, `build`, `push`, `deploy`, `release`, `open`, `init`, `delete`, `raw`. |
 | `result` values | `success`, `error`, `dry_run`. |
 | Reset on | Process restart. (Counters are monotonic within a process.) |
 

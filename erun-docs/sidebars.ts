@@ -22,7 +22,6 @@ const sidebars: SidebarsConfig = {
         'cli/overview',
         'cli/init',
         'cli/open',
-        'cli/add',
         'cli/list',
         'cli/build',
         'cli/push',
@@ -80,6 +79,7 @@ const sidebars: SidebarsConfig = {
             'concepts/observability',
             'concepts/security',
             'concepts/conventions',
+            'concepts/skills',
             'concepts/cloud-contexts',
           ],
         },
@@ -118,6 +118,7 @@ const sidebars: SidebarsConfig = {
             'agent-reference/networking-spec',
             'agent-reference/metrics-spec',
             'agent-reference/workspace-sync-spec',
+            'agent-reference/skills-spec',
           ],
         },
         {

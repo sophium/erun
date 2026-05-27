@@ -9,7 +9,7 @@ ERun environments are **shared infrastructure**. The remoting surface that lets 
 - **SSH clients** — VS Code (Remote-SSH), IntelliJ IDEA Gateway, Cursor, Zed, JetBrains products (GoLand, PyCharm, WebStorm, …), Neovim with remote plugins. **The Claude Code and Codex desktop apps also attach over SSH** — they open the env as a remote workspace exactly like an IDE.
 - **MCP clients** — Codex, Claude Code, custom agents — anything that speaks JSON-RPC 2.0 against the env's MCP endpoint.
 
-The same Agent often uses both: SSH for file edits and shell commands, MCP for structured ERun operations (`idle`, `list`, `scaffold`, …).
+The same Agent often uses both: SSH for file edits and shell commands, MCP for structured ERun operations (`idle`, `list`, `doctor`, `build`, …).
 
 Together they form one client surface: an IDE talking to the SSH endpoint and an Agent talking to the MCP endpoint see the same `/home/erun/git/<repo>`, the same docker daemon, and the same audit trail. There is no second-class client. An Operator in VS Code and Claude Code in the same env are not in parallel universes — they are looking at the exact same workspace in real time.
 

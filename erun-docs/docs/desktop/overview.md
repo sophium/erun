@@ -32,7 +32,7 @@ By default, **the Agent runs inside the env** — the runtime pod ships the conf
 When you do want a laptop-side Agent in addition, the env has two endpoints on the runtime pod — SSH and [MCP](/mcp/overview) — and both accept any client.
 
 - IDEs (VS Code, IntelliJ, Cursor, Zed, …) attach over SSH.
-- **The Claude Code desktop app and Codex desktop app attach the same way** — they open the env as a remote workspace, edit files, run commands. They also use MCP for structured ERun operations (`idle`, `list`, `scaffold`, …).
+- **The Claude Code desktop app and Codex desktop app attach the same way** — they open the env as a remote workspace, edit files, run commands. They also use MCP for structured ERun operations (`idle`, `list`, `doctor`, `build`, …).
 - Custom agents (any MCP client) typically stick to MCP for structured calls and reach for SSH only when they need shell access.
 
 A commit you make in VS Code is immediately visible to the Agent's next file read. An action the Agent takes shows up in your terminal scrollback and in the [audit trail](/collaboration/operator-in-the-loop). No parallel worlds.

@@ -4,14 +4,16 @@ title: MCP overview
 
 # Model Context Protocol (MCP)
 
-MCP is **the typed-tool surface for an environment.** Where shell-level work happens over SSH, MCP carries typed actions — inspection (`idle`, `doctor`, `list`, `version`), operational wrappers around the CLI (`build`, `push`, `deploy`, `release`, `logs`, `open`, `init`, `delete`), opinionated skills (`scaffold`, `regenerate-chart`, …), and an escape hatch (`raw`). Agents (and any other code that wants structured, auditable access) talk to ERun over MCP; every call lands in the same audit trail the Operator reads.
+MCP is **the typed-tool surface for an environment.** Where shell-level work happens over SSH, MCP carries typed actions — inspection (`idle`, `doctor`, `list`, `version`), operational wrappers around the CLI (`build`, `push`, `deploy`, `release`, `logs`, `open`, `init`, `delete`), and an escape hatch (`raw`). Agents (and any other code that wants structured, auditable access) talk to ERun over MCP; every call lands in the same audit trail the Operator reads.
+
+ERun's conventions reach the Agent through a separate mechanism — [skill bundles](/concepts/skills) deployed into the env, loaded by the Agent's own skill loader. Skills are not MCP tools; they're content the Agent reads to know how to write conformant code. The MCP surface stays focused on inspection + action + escape; "how to scaffold a Go service" lives in the Agent's loaded skill, not behind a tool call.
 
 Every open environment exposes an MCP server in its runtime pod. The desktop app port-forwards it to localhost so any MCP-compatible client — the Claude Code desktop app, the Codex desktop app, custom agents, any other JSON-RPC client — can connect directly.
 
 **Both endpoints accept any client.** SSH and MCP live in the same pod and see the same workspace. The Claude Code and Codex desktop apps typically use both — SSH for shell + filesystem, MCP for structured ERun operations. See [Desktop app](/desktop/overview).
 
 <figure className="erun-hero-figure">
-  <img src="/img/mcp-flow.svg" alt="How MCP works. An AI Agent box on the left exchanges typed JSON-RPC calls with the MCP server in the env's runtime pod. The MCP server box is divided into four labelled category rows. INSPECTION row holds five chips: idle, doctor, list, version, logs. ACTION row holds seven chips: build, push, deploy, release, open, init, delete. SKILLS row holds scaffold (solid) plus dashed planned chips regenerate-chart, migrate-deps, extract-component, add-ingress. ESCAPE row holds raw with a note that it's arbitrary argv, last-resort, every call audited. Below the MCP server, an audit-trail strip captures every call from every category. An Operator pill below the strip is connected by a dashed cyan arrow indicating the Operator can replay any session." />
+  <img src="/img/mcp-flow.svg" alt="How MCP works. An Agent box on the left exchanges typed JSON-RPC calls with the MCP server in the env's runtime pod. The MCP server box is divided into three labelled category rows. INSPECTION row holds five chips: idle, doctor, list, version, logs. ACTION row holds seven chips: build, push, deploy, release, open, init, delete. ESCAPE row holds raw with a note that it's arbitrary argv, last-resort, every call audited. Below the MCP server, an audit-trail strip captures every call from every category. An Operator pill below the strip is connected by a dashed cyan arrow indicating the Operator can replay any session." />
   <figcaption>Agent calls typed tools over JSON-RPC. Every call is recorded in the audit trail; the Operator can replay any session. That's how Agents earn autonomy without losing the loop.</figcaption>
 </figure>
 
@@ -94,7 +96,7 @@ The response payload is the typed shape from [Structured tool schemas](#structur
 
 ## Built-in tools
 
-Four categories. The protocol treats them all as MCP tools; the categorisation is about *what they do*.
+Three categories. The protocol treats them all as MCP tools; the categorisation is about *what they do*. (A fourth category — opinionated code-generation skills — used to live here and has moved off the MCP surface entirely. See [Skills](/concepts/skills) for how Agents pick up project conventions now.)
 
 ### Inspection — read-only
 
@@ -120,20 +122,6 @@ These map 1:1 to the CLI commands of the same name. The MCP wrapper exists so Ag
 | `init` | `erun init` | Created files, deployed namespace. |
 | `delete` | `erun delete` | Namespace deleted, local config removed. |
 
-### Skills — opinionated, template-driven {#built-in-skills}
-
-Skills apply [conventions](/concepts/conventions) to remove boilerplate the Operator and Agent shouldn't have to write by hand.
-
-| Skill | Purpose |
-|---|---|
-| `scaffold` | Generate a conventional component (source module + Dockerfile + helm chart + deploy-plan entry) from one of ERun's built-in templates. See [scaffold spec below](#scaffold--generate-conventional-artefacts). |
-| `regenerate-chart` | Regenerate a component's helm chart from its current template, preserving local-edited keys. *(Planned.)* |
-| `migrate-deps` | Bump dependencies in a component's source manifest (`go.mod`, `package.json`, `requirements.txt`, `pom.xml`) and re-run `erun build` to verify. *(Planned.)* |
-| `extract-component` | Carve a service out of a monorepo into its own `<name>/` + matching docker/k8s scaffolding. *(Planned.)* |
-| `add-ingress` | Add an Ingress + TLS to an existing component's chart, picking the right hostname pattern based on env type. *(Planned.)* |
-
-Skills always produce a diff the Operator can review and commit. They never edit state outside the project root.
-
 ### Escape hatch
 
 | Tool | Purpose |
@@ -142,12 +130,13 @@ Skills always produce a diff the Operator can review and commit. They never edit
 
 ### Tool selection rule
 
-In order of preference: **inspection > action > skill > raw.**
+In order of preference: **inspection > action > raw.**
 
 - If a question is "what's the state of X" — reach for an inspection tool.
 - If you're invoking a known CLI command — reach for the action wrapper, not `raw`.
-- If you're scaffolding a conventional thing — reach for a skill, not hand-built files.
 - If none of the above apply — use `raw`.
+
+Generating conventional code (a new service, a migration job, an Ingress, …) isn't a tool-call decision — load the relevant [skill](/concepts/skills) and write the files by hand. The skill teaches the convention; the MCP surface stays out of the generation path.
 
 Every call lands in the audit trail with its tool name, so `raw` invocations are immediately distinguishable from typed ones.
 
@@ -414,70 +403,8 @@ When a `tools/call` fails, the MCP response wraps a typed error. The envelope:
 - ❌ Anything an existing tool covers — `list`, `doctor`, `idle` give typed output that's much easier for the Operator to scan.
 - ❌ Long-running daemons — `raw` is request/response; it returns when the process exits.
 
-## `scaffold` — generate conventional artefacts
+## Skills are not MCP tools
 
-The skill the Agent uses when the Operator says "add a service called X" / "add a migration job" / "regenerate the chart for Y". Produces the conventional layout described in [Conventions](/concepts/conventions) from a built-in template.
+The Agent's path to "add a Go service" / "add a migration job" / "add an Ingress" does not go through MCP. ERun ships those as [skill bundles](/concepts/skills) deployed into the env's runtime image; the Agent's own skill loader picks them up. The Agent reads the relevant SKILL.md, then writes the source + Dockerfile + chart by hand — no `scaffold` tool call, no template generator, no MCP round-trip for code generation.
 
-**Input:**
-
-| Field | Type | Description |
-|---|---|---|
-| `kind` | string | What to scaffold. Today: `component`. Planned: `tenant`, `env-template`. |
-| `name` | string | Component identifier. Used as the source-module name, Docker context name, and helm chart name. Must match `^[a-z][a-z0-9-]*$`. |
-| `template` | string | One of the built-in templates: `go-service`, `node-service`, `python-service`, `java-service`, `static-site`, `migration-job`, `cron-job`. |
-| `description` | string (optional) | Free-text hint. The skill uses it to seed comments and pick reasonable defaults (port number, route name, …). |
-| `rewrite` | bool (optional) | When `true`, overwrite existing files. Default `false` — the skill aborts if any target file already exists. |
-| `dry_run` | bool (optional) | When `true`, report what would be created without writing anything. |
-
-**Output:**
-
-| Field | Type | Description |
-|---|---|---|
-| `created_files` | array of `{path, status}` | Each path the skill produced. `status` is `created`, `overwritten`, or `skipped` (existed, no `--rewrite`). |
-| `deploy_plan_updated` | bool | Whether the component was appended to `environments.<env>.k8s.deployments`. Idempotent — if the name is already present, no change. |
-| `next_steps` | string[] | Suggested follow-up actions (e.g., `"run erun build --deploy"`, `"add an Ingress under templates/"`). |
-
-**Constraints:**
-
-- Never overwrites unless `rewrite: true`.
-- Output paths are always under `<projectRoot>/<name>/`, `<projectRoot>/<tenant>-devops/docker/<name>/`, and `<projectRoot>/<tenant>-devops/k8s/<name>/` — the skill won't write outside the project root.
-- The generated Dockerfile follows the [multi-stage builder pattern](/concepts/conventions#multi-stage-builder-pattern).
-- The generated chart binds image references via `{{ .Values.image.repository }}:{{ .Values.image.tag }}` so `erun build` / `erun deploy` can wire them up unchanged.
-- Every call is recorded in the audit trail with `kind`, `name`, `template`, and the resulting `created_files`.
-
-**Example call:**
-
-```jsonc
-// Agent → MCP
-{
-  "method": "tools/call",
-  "params": {
-    "name": "scaffold",
-    "arguments": {
-      "kind": "component",
-      "name": "api",
-      "template": "go-service",
-      "description": "tiny HTTP service that returns hello on GET /"
-    }
-  }
-}
-
-// → Result:
-{
-  "created_files": [
-    { "path": "api/go.mod",                              "status": "created" },
-    { "path": "api/cmd/api/main.go",                     "status": "created" },
-    { "path": "hello-erun-devops/docker/api/Dockerfile", "status": "created" },
-    { "path": "hello-erun-devops/k8s/api/Chart.yaml",    "status": "created" },
-    { "path": "hello-erun-devops/k8s/api/templates/deployment.yaml", "status": "created" },
-    { "path": "hello-erun-devops/k8s/api/templates/service.yaml",    "status": "created" }
-  ],
-  "deploy_plan_updated": true,
-  "next_steps": [
-    "review the generated source under api/",
-    "run `erun build --deploy` to ship it"
-  ]
-}
-```
-
-The same skill is exposed as the CLI subcommand [`erun add component`](/cli/add) for non-Agent workflows.
+For the on-disk format, deployment mechanism, and built-in skill catalogue, see [Agent reference · Skills spec](/agent-reference/skills-spec).

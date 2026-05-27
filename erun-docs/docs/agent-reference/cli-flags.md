@@ -269,32 +269,6 @@ Each check returns one of `ok`, `missing`, `error` (parse failure, permission de
 
 ---
 
-## `erun add`
-
-### Flags
-
-| Flag | Type | Required | Validation | Notes |
-|---|---|---|---|---|
-| `--template <name>` | enum | yes | One of `go-service`, `node-service`, `python-service`, `java-service`, `static-site`, `migration-job`, `cron-job`. | Authoritative list lives in [MCP overview · `scaffold`](/mcp/overview#scaffold--generate-conventional-artefacts). |
-| `--description "<text>"` | string | no | Free text; passed as the `description` argument to the underlying skill. | — |
-| `--rewrite` | bool | no | — | Overwrites existing files. Default: abort on any file conflict. |
-
-### Component-name validation
-
-`<name>` (the second positional argument) must match `^[a-z][a-z0-9-]*$` — lowercase ASCII letters, digits, and hyphens; must start with a letter. The rule is enforced before any filesystem write. Aborts with code `INVALID_COMPONENT_NAME` on a violation.
-
-### Error codes
-
-| Code | Cause | Exit code |
-|---|---|---|
-| `INVALID_COMPONENT_NAME` | Name fails the regex above. | `1` |
-| `FILE_CONFLICT` | At least one target file exists and `--rewrite` not set. | `1` |
-| `NO_DEVOPS_MODULE` | `<projectroot>/<tenant>-devops/` is missing (no `--bootstrap` run). | `1` |
-| `UNKNOWN_TEMPLATE` | `--template` value not in the enum. | `1` |
-| `DEPLOY_PLAN_UPDATE_FAILED` | `.erun/config.yaml` deploy-plan append failed (YAML parse error). Files were still written; the append is reported as a warning. | `0` (with warning) |
-
----
-
 ## `erun release`
 
 See [Release version policy](/agent-reference/release-policy) for the version-pattern rules and the release-tag publishing contract; the `erun release` flag set is just `--dry-run` and is documented on the [Operator page](/cli/release).
@@ -343,3 +317,4 @@ See [MCP overview](/mcp/overview) for the protocol and the tool list. The launch
 - [Configuration](/reference/configuration) — where each persisted flag value lands.
 - [Build path resolution](/reference/configuration-build-paths) — the algorithm `erun build`, `push`, `deploy` use to resolve scope and version.
 - [Dry-run redaction](/agent-reference/dry-run-redaction) — what `--dry-run` rewrites in the trace.
+- [Skills](/concepts/skills) — how Agents pick up project conventions for code generation (replaces the removed `erun add` command).

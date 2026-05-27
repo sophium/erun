@@ -24,7 +24,7 @@ One pod with three containers:
 | Container | Role |
 |---|---|
 | `erun-devops` | Main shell + tools (`erun`, `docker`, `kubectl`, `helm`, `gh`, …). **Also ships the Agent CLI** — `claude`, `codex`, or whichever tool the env is configured for — pre-wired against the in-pod MCP loopback. The default Agent in the env runs inside this container. |
-| `erun-mcp` | MCP server for Agents. Exposes structured tools (`idle`, `doctor`, `list`, `version`, `raw`, `scaffold`, …). Reached at loopback by the in-pod Agent and via port-forward from laptop-side clients. |
+| `erun-mcp` | MCP server for Agents. Exposes structured tools (`idle`, `doctor`, `list`, `version`, `build`, `deploy`, `raw`, …). Reached at loopback by the in-pod Agent and via port-forward from laptop-side clients. |
 | `erun-dind` | Docker daemon sidecar. Backs `/var/run/docker.sock` for the shell container's `docker` invocations. |
 
 The three share two persistent volume claims: `/home/erun` (workspace + config) and `/var/lib/docker` (the daemon's image store, so builds stay cache-warm across pod restarts).
@@ -32,7 +32,7 @@ The three share two persistent volume claims: `/home/erun` (workspace + config) 
 This pod is the **shared surface** for Operator and Agent. Two endpoints on the same pod, both accepting any client:
 
 - **SSH** — a remote shell + filesystem surface. Operators attach via VS Code Remote-SSH, IntelliJ Gateway, Cursor, terminal, anything else that speaks SSH. **Claude Code and Codex desktop apps also attach here** — they open the env as a remote workspace like any other SSH-aware tool.
-- **MCP** — a typed-tool surface (`idle`, `doctor`, `list`, `version`, `raw`, `scaffold`, …). Used by Agents for structured calls and audit-friendly operations. Same MCP clients (Claude Code, Codex, custom Agents) typically use SSH and MCP together — SSH for file edits, MCP for ERun operations.
+- **MCP** — a typed-tool surface (`idle`, `doctor`, `list`, `version`, `build`, `deploy`, `raw`, …). Used by Agents for structured calls and audit-friendly operations. Same MCP clients (Claude Code, Codex, custom Agents) typically use SSH and MCP together — SSH for file edits, MCP for ERun operations.
 
 Both endpoints see the same `/home/erun` workspace, the same docker daemon, the same audit trail. **No parallel worlds — Operator and Agent are in the same environment.**
 

@@ -80,7 +80,7 @@ The **project root** is the directory containing `.git`. ERun finds it by walkin
 
 ERun expects Dockerfiles to use a multi-stage builder pattern — a **builder** stage that provisions the toolchain and produces an artefact, then a **runtime** stage that ships only the artefact. Single-stage Dockerfiles aren't rejected, but the cache, image-size, and security benefits don't apply.
 
-The [`scaffold` skill](/mcp/overview#scaffold--generate-conventional-artefacts) generates conformant Dockerfiles per language. For the spec (full skeleton, why the pattern, behaviour around `COPY` paths), see [Agent reference · Conventions spec](/agent-reference/conventions-spec#multi-stage-dockerfile-expectation).
+The language-specific [skills](/concepts/skills) the runtime image ships (`go-service`, `node-service`, `python-service`, `java-service`, …) teach the Agent the conformant Dockerfile shape for each language. For the pattern's spec (full skeleton, why the pattern, behaviour around `COPY` paths), see [Agent reference · Conventions spec](/agent-reference/conventions-spec#multi-stage-dockerfile-expectation).
 
 ## Docker build contexts
 

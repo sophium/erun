@@ -16,7 +16,7 @@ The rest of the docs is for **Operators**. Operators get the concepts and the wo
   - **[Environment types](/concepts/environment-types)** — local-agent / remote-agent / runtime.
   - **[Inside an environment](/concepts/runtime-pods)** — what lives in the namespace.
   - **[Networking](/concepts/networking)**, **[Observability](/concepts/observability)**, **[Security](/concepts/security)**, **[Conventions](/concepts/conventions)**, **[Cloud contexts](/concepts/cloud-contexts)**.
-- **[MCP protocol + tools](/mcp/overview)** — the typed-tool surface for an environment. Categories (inspection / action / skills / escape), all 18+ tool schemas, the `scaffold` skill specification.
+- **[MCP protocol + tools](/mcp/overview)** — the typed-tool surface for an environment. Three categories (inspection / action / escape) and the full tool schemas.
 - **[Agent patterns](/collaboration/agent-patterns)** — ten patterns Agents converge on: orient first, doctor before raw, skill before hand-writing, build-verify-deploy, etc.
 - **erun API**
   - **[API protocol](/agent-reference/api-protocol)** — OIDC sign-in, tenant-issuers, rate limits, pagination.
@@ -39,7 +39,7 @@ Per the Operator/Agent split, an Agent is responsible for the following classes 
 - Reading [error responses](/collaboration/reviews#errors) from the erun API and choosing the right retry or correction.
 - Looking up [configuration field semantics](/reference/configuration) when scaffolding or editing config.
 - Following the [build-path resolution algorithm](/reference/configuration-build-paths) when explaining why a build resolved to a particular image tag.
-- Producing conventional artefacts via the [`scaffold` skill](/mcp/overview#scaffold--generate-conventional-artefacts) rather than hand-writing Dockerfiles or helm charts.
+- Loading the [right skill](/concepts/skills) before writing a service, migration, or ingress — and writing conformant code by hand from the skill's guidance.
 - Recording [structured audit events](/agent-reference/audit-log#event-shape) so the Operator can replay the session.
 - Respecting the [rate limits](/agent-reference/api-protocol#rate-limits) — backing off when hit, not hammering the API.
 

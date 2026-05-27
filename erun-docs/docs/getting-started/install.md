@@ -12,10 +12,10 @@ On your machine:
 
 - **`git`** — ERun resolves the project root by walking up to find a `.git` directory; every tenant maps to one git repository.
 - **A Kubernetes cluster.** You pick where it lives:
-  - **Local.** Enable Kubernetes in your favourite Docker tool — Docker Desktop, OrbStack, Rancher Desktop. That's it; ERun takes it from there.
-  - **Cloud.** No prerequisites — ERun provisions a minimal, secure Kubernetes cluster for you on demand.
+  - **Local.** Enable Kubernetes in your favourite Docker tool — Docker Desktop, OrbStack, Rancher Desktop. ERun takes it from there. **Recommended on macOS and Linux.**
+  - **Cloud.** No prerequisites — ERun provisions a minimal, secure Kubernetes cluster for you on demand. **Recommended on Windows** (local Kubernetes on Windows runs through WSL2 / Hyper-V and Docker Desktop bind mounts, all of which add friction the cloud path skips).
 
-You don't have to pick local vs cloud upfront. The same workflow targets both — local while your machine has capacity, cloud when you need more.
+You don't have to commit upfront. The same workflow targets both — switch a project from a local cluster to a cloud one (or back) without rebuilding anything.
 
 ## macOS — Homebrew
 

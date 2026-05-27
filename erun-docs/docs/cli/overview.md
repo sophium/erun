@@ -22,7 +22,6 @@ Every command supports `--help` and `--dry-run`.
 | `erun` | Universal entry point. In a fresh project, runs `init`. In a configured one, runs `open`. |
 | [`erun init`](/cli/init) | Create or update a tenant + environment, bring the environment up. |
 | [`erun open`](/cli/open) | Open a shell into the environment (brings it up if missing). |
-| [`erun add`](/cli/add) | Scaffold a conventional component (source + Dockerfile + chart + deploy-plan entry) from a built-in template. |
 | [`erun list`](/cli/list) | List tenants, environments, status, and effective target. |
 | [`erun build`](/cli/build) | Build the project's Docker images (agent envs only — runtime envs receive deploys, they don't build). |
 | [`erun push`](/cli/push) | Push built images to the configured container registry. |

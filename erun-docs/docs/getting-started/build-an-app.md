@@ -6,7 +6,7 @@ title: Build a small app
 
 End-to-end walkthrough — from an empty directory to a running service in your env, in roughly ten minutes.
 
-The whole point of ERun's conventions is that you don't hand-write Dockerfiles, helm charts, or deploy plans for routine components. **ERun ships scaffolding skills**, and the Agent uses them on your behalf. You describe the component; ERun generates the conventional pieces.
+The whole point of ERun's conventions is that you don't hand-write Dockerfiles, helm charts, or deploy plans by trial and error. **ERun ships [skills](/concepts/skills)** — guidance bundles that teach the Agent how to lay out a service, write a conformant Dockerfile, structure the helm chart, and wire the deploy plan. You describe the component; the Agent reads the matching skill and writes the pieces idiomatic for your project.
 
 ## Prerequisites
 
@@ -37,7 +37,7 @@ Ask the Agent:
 
 > Add a Go HTTP service called `api` that returns "hello from erun" on `GET /`.
 
-The Agent calls ERun's `scaffold` skill (an MCP tool exposed by every env's runtime pod — see [Skills](/mcp/overview#built-in-skills)). It picks the `go-service` template, infers the component name (`api`), and generates the conventional pieces:
+The Agent loads the `go-service` [skill](/concepts/skills) (deployed automatically when you opened the env) and reads its SKILL.md — the layout, the multi-stage Dockerfile pattern, the helm chart structure, the deploy-plan rule. It then writes the source + Dockerfile + chart by hand, adapted to what you described (HTTP, the route, the stub return value):
 
 ```
 hello-erun/
@@ -46,7 +46,7 @@ hello-erun/
 │   └── cmd/api/main.go               ← stub returns "hello from erun"
 └── hello-erun-devops/
     ├── docker/api/                   ← new Docker context
-    │   └── Dockerfile                ← multi-stage Go template
+    │   └── Dockerfile                ← multi-stage Go pattern from the skill
     └── k8s/api/                      ← new helm chart
         ├── Chart.yaml
         └── templates/
@@ -54,15 +54,9 @@ hello-erun/
             └── service.yaml
 ```
 
-It also appends `api` to the deploy plan in `.erun/config.yaml`. None of these files were hand-written — the skill generated each from a template the platform ships.
+It also appends `api` to the deploy plan in `.erun/config.yaml`. Everything's hand-written by the Agent following the skill's guidance — no code generator. You see the diff in your editor and approve before it lands.
 
-### Or, from the CLI
-
-If you don't have an Agent in the loop, the same scaffolding runs as a CLI subcommand:
-
-```bash
-erun add component api --template go-service
-```
+If your project has its own preferences (a specific HTTP framework, a house style, a custom audit annotation), drop a project skill under `<repo>/.erun/skills/go-service/` to layer your guidance on top of the built-in — the Agent picks up both on the next env open. See [Skills spec](/agent-reference/skills-spec) for the format.
 
 ## 4. Build + deploy
 
@@ -105,18 +99,18 @@ Change the message. One command rolls the new build out:
 erun build --deploy
 ```
 
-The conventional pieces don't need to change — only the source. Subsequent changes to the Dockerfile or chart are rare; when you do need them, edit by hand or ask the Agent to call the `scaffold` skill with `--rewrite` to regenerate from the template.
+The conventional pieces don't need to change — only the source. Subsequent edits to the Dockerfile or chart are rare; when you do need them, edit them by hand. The skill stays available; ask the Agent to re-read it when you're unsure about the convention.
 
-## Built-in scaffolding templates
+## Built-in skills
 
-ERun ships templates for `go-service`, `node-service`, `python-service`, `java-service`, `static-site`, `migration-job`, and `cron-job`. The Agent picks based on what you describe; the CLI picks via `--template`. Each template follows [Conventions](/concepts/conventions). For the per-template input/output spec (exact files generated, validation rules), see the canonical [`scaffold` skill spec](/mcp/overview#scaffold--generate-conventional-artefacts) or [`erun add`](/cli/add).
+ERun ships skills for the common patterns: `go-service`, `node-service`, `python-service`, `java-service`, `static-site`, `migration-job`, `cron-job`, `add-ingress`. Each is deployed automatically into the env and discoverable by the Agent's skill loader. Each one follows [Conventions](/concepts/conventions). The full catalogue + the SKILL.md format + the project-layering rules live on [Skills spec](/agent-reference/skills-spec).
 
 ## What you just did
 
 In ten minutes you:
 
 - Bootstrapped an ERun-aware project from a blank directory.
-- Asked the Agent to scaffold a service. ERun's skill generated source, Dockerfile, helm chart, and deploy plan from a template.
+- Asked the Agent to add a service. ERun's `go-service` skill taught the Agent the layout, the Dockerfile pattern, and the chart structure; the Agent wrote the source + Dockerfile + chart + deploy-plan entry by hand from that guidance.
 - Built and deployed the service into a real Kubernetes namespace.
 - Iterated end-to-end with one command.
 

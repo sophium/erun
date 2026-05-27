@@ -6,23 +6,22 @@ title: Agent patterns
 
 Common patterns for Agent authors. None are required — ERun's primitives are flexible enough that an Agent can implement any of these on top of the [MCP tools](/mcp/overview) and the [erun API](/collaboration/overview). What follows is the set most teams converge on.
 
-## 0. Skill before hand-writing
+## 0. Skill before guessing
 
-If a [built-in skill](/mcp/overview#built-in-skills) covers the operation, call it. Don't hand-write what `scaffold` produces from a template.
+If ERun ships a [skill](/concepts/skills) for what the Operator is asking, load it before writing code. Don't guess at the convention; let the skill teach you the layout, the Dockerfile pattern, the chart structure, the deploy-plan rule.
 
-```jsonc
+```
 // Operator says: "Add a Go service called 'api'."
-// Wrong: write the Dockerfile, chart, source by hand.
+// Wrong: write the Dockerfile, chart, source by hand from your training data.
 // Right:
-tools/call name="scaffold" arguments={
-  "kind": "component",
-  "name": "api",
-  "template": "go-service",
-  "description": "tiny HTTP service that returns hello on GET /"
-}
+//   1. Discover the matching skill — `ls ~/.claude/skills/` (or your loader's equivalent).
+//   2. Read SKILL.md for `go-service`.
+//   3. Write the source + Dockerfile + chart by hand, conformant to the skill's guidance.
+//   4. Append the component to the deploy plan in .erun/config.yaml.
+//   5. Show the Operator the diff.
 ```
 
-The skill follows the [conventions](/concepts/conventions) the platform expects; the generated files audit cleanly as a single `scaffold` event rather than ten ad-hoc `raw` invocations. Edit the generated files afterwards if you need to — the template is the starting point, not a contract.
+A skill is guidance, not a template. You can adapt the shape to fit the Operator's description — gRPC vs. HTTP, library choice, dependency pinning — while still honouring the project's conventions. See [Skills spec](/agent-reference/skills-spec) for the bundled set.
 
 ## 1. Orient first
 

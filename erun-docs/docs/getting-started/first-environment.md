@@ -4,13 +4,17 @@ title: First environment
 
 # Create your first environment
 
+The recommended path depends on your OS.
+
+## macOS — `erun` from your project folder
+
 In your project folder:
 
 ```bash
 erun
 ```
 
-That's it. The first time, ERun walks you through a short setup. After that, the same command picks up where you left off.
+That's it. The first time, ERun walks you through a short setup. After that, the same command picks up where you left off. The default env runs against the Kubernetes you've enabled in Docker Desktop / OrbStack / Rancher Desktop — locally on your laptop.
 
 <figure className="erun-hero-figure">
   <img src="/img/first-run.svg" alt="First run flow. Three steps left to right: '$ erun' typed in your project folder (charcoal box), 'ERun sets up the env' (cyan, with note 'walks you through it on the first run'), 'Ready to work' (cyan, with note 'open in your IDE · the Agent is there'). A strapline reads: 'Subsequent runs skip the setup.'" />
@@ -18,6 +22,12 @@ That's it. The first time, ERun walks you through a short setup. After that, the
 </figure>
 
 The desktop app does the same thing through its UI — add the project, fill in the same fields, save.
+
+## Windows — desktop app + a remote env
+
+On Windows, **open the ERun desktop app** and create a **remote env**. The desktop walks you through picking the project repo and the cloud context; ERun provisions a managed Kubernetes cluster and brings the runtime pod up on it. Your IDE and the in-pod Agent attach over the desktop's port-forwards.
+
+We don't recommend local Kubernetes on Windows for day-to-day work — `hostPath` mounts, the WSL2 / Hyper-V layering, and Docker Desktop's bind semantics all add friction the remote-env path skips entirely. The same Agent + IDE + tooling experience works either way; the remote env just sidesteps the local-cluster headaches.
 
 ## Work in it
 

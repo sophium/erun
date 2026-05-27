@@ -117,7 +117,7 @@ For the public form, each segment must match:
 
 | Segment | Regex |
 |---|---|
-| `<service>` | `[a-z][a-z0-9-]*` (component-name rule, see [`erun add`](/cli/add)) |
+| `<service>` | `[a-z][a-z0-9-]*` (the component-name rule the language skills teach; see [Skills](/concepts/skills)) |
 | `<tenant>-<env>` | `[a-z][a-z0-9-]*-[a-z][a-z0-9-]*` (the namespace label) |
 | `<environment>` | `[a-z][a-z0-9-]*` (the cluster's environment alias, e.g. `dev` / `staging` / `prod`) |
 | `<domain>` | RFC-1035 domain, set by the cluster admin. |

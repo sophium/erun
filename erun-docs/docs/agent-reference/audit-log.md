@@ -62,7 +62,7 @@ Verbs are dotted, lowercase, and stable. The complete enumeration:
 | Source | Verb pattern | Specific values |
 |---|---|---|
 | CLI | `erun.<command>` | `erun.init`, `erun.open`, `erun.add`, `erun.list`, `erun.build`, `erun.push`, `erun.deploy`, `erun.doctor`, `erun.mcp`, `erun.release`, `erun.delete`, `erun.version` |
-| MCP | `mcp.<tool>` | `mcp.idle`, `mcp.doctor`, `mcp.list`, `mcp.version`, `mcp.logs`, `mcp.build`, `mcp.push`, `mcp.deploy`, `mcp.release`, `mcp.open`, `mcp.init`, `mcp.delete`, `mcp.scaffold`, `mcp.regenerate-chart`, `mcp.migrate-deps`, `mcp.extract-component`, `mcp.add-ingress`, `mcp.raw` |
+| MCP | `mcp.<tool>` | `mcp.idle`, `mcp.doctor`, `mcp.list`, `mcp.version`, `mcp.logs`, `mcp.build`, `mcp.push`, `mcp.deploy`, `mcp.release`, `mcp.open`, `mcp.init`, `mcp.delete`, `mcp.raw` |
 | API | `api.<resource>.<verb>` | `api.reviews.create`, `api.reviews.list`, `api.reviews.get`, `api.reviews.status.update`, `api.comments.create`, `api.comments.list`, `api.comments.status.update`, `api.builds.create`, `api.builds.list`, `api.builds.get`, `api.merge-queue.list`, `api.merge-queue.advance`, `api.whoami`, `api.tenant-issuers.list`, `api.tenant-issuers.update`, `api.audit-events.list` |
 
 New verbs require an entry in this enumeration; clients can rely on the closed set.
