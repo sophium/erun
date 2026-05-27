@@ -62,7 +62,7 @@
     <text x="740" y="320" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">no worktree · receives deploys</text>
   </g>
 
-  <!-- Arrow from local-agent to runtime, with 'erun deploy --version 1.0.77' label -->
+  <!-- Arrow from local-agent to runtime, labelled with the erun deploy command -->
   <line x1="440" y1="240" x2="560" y2="240" stroke="#0891b2" stroke-width="1.5" marker-end="url(#hpArrowSolid)"/>
   <g>
     <rect x="430" y="220" width="140" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
