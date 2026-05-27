@@ -6,6 +6,10 @@ title: Build a small app
 
 End-to-end walkthrough — from an empty directory to a running service in your env, in roughly ten minutes.
 
+<figure className="erun-hero-figure">
+  <img src="/img/build-app-flow.svg" alt="Six-step overview of building a small app with ERun. Step 1: create the project (mkdir, git init, VERSION). Step 2: bootstrap ERun (erun init --bootstrap). Step 3: ask the Agent to add a service via a skill — the Agent loads the matching skill and writes the source, Dockerfile, and chart by hand. Step 4: build and deploy (erun build --deploy). Step 5: see it running (kubectl port-forward and curl). Step 6: iterate." />
+</figure>
+
 The whole point of ERun's conventions is that you don't hand-write Dockerfiles, helm charts, or deploy plans by trial and error. **ERun ships [skills](/concepts/skills)** — guidance bundles that teach the Agent how to lay out a service, write a conformant Dockerfile, structure the helm chart, and wire the deploy plan. You describe the component; the Agent reads the matching skill and writes the pieces idiomatic for your project.
 
 ## Prerequisites

@@ -41,13 +41,9 @@ Kubernetes is the right primitive for production, but exposed raw it's overwhelm
 
 ## What makes ERun different
 
-**Side by side with your tools.** Your usual editor (VS Code, IntelliJ, Cursor) and your usual Agent (Claude Code, Codex) see the same project at the same time. No parallel worlds.
-
-**In control.** Preview every action before it runs. Every action recorded. Join any environment, take over, or hand off — any time.
-
-**Built to industry standards.** Traceable, reproducible, audit-ready. Compliance is how the platform works, not a layer added at the end.
-
-**Meets you where you are.** From a classic LAMP stack on a single VM to autoscaling enterprise with DR and immutable backups — same defaults, scaled to whatever you bring.
+<figure className="erun-hero-figure">
+  <img src="/img/differentiators.svg" alt="Four cards explaining what makes ERun different. Side by side — your editor and your Agent see the same project, no parallel worlds. In control — preview every action before it runs, every action recorded, join, take over, hand off any time. Industry standards — traceable, reproducible, audit-ready, compliance is how the platform works, not a bolt-on. Your scale — LAMP stack on a VM through autoscaling enterprise with DR and immutable backups, same defaults at every scale." />
+</figure>
 
 ---
 
