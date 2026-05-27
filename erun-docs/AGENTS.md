@@ -44,6 +44,15 @@ yarn typecheck      # tsc against docusaurus.config.ts and sidebars.ts
 
 Requires Node 20+. The repo pins `yarn@1.22.22` via `packageManager`.
 
+**Static assets do not reliably hot-reload through `yarn start`.** Webpack-dev-server caches files under `static/` (most commonly the SVGs in `static/img/`) in memory at startup. When you edit an SVG, the prose around it hot-reloads (markdown is watched) but the SVG keeps its pre-edit version, and the browser also tends to cache static-asset responses aggressively. A full restart picks it up:
+
+1. `Ctrl+C` the `yarn start` process.
+2. Optionally `rm -rf .docusaurus` if the cache feels stuck.
+3. Re-run `yarn start`.
+4. Hard-refresh the browser (Cmd+Shift+R / Ctrl+Shift+R) or open the page in a private window.
+
+If "the SVG looks wrong" persists after a restart, run `xmllint --noout static/img/<file>.svg` to confirm the file is XML-valid — a malformed SVG (see [Diagram conventions](#diagram-conventions)) renders as the broken-image icon plus alt text and won't ever look right no matter how many times you reload.
+
 ## Content rules
 
 - **Voice.** User-facing voice (someone using the product). Engineering-internal rules belong in the other `AGENTS.md` files, not in published docs.
@@ -54,6 +63,26 @@ Requires Node 20+. The repo pins `yarn@1.22.22` via `packageManager`.
   - **Hand-coded SVG** (`static/img/*.svg`) for concept / hero diagrams that need pixel-perfect uniformity. Wrapped in a `<figure className="erun-hero-figure">`.
   - **Mermaid** for state diagrams, lifecycles, and any auto-laid-out flow where some box-size variance is acceptable. Branded globally via `themeVariables` in `docusaurus.config.ts`; per-diagram styling via `classDef` (see template below).
 - **Frontmatter.** Every doc page declares at least `title:`. Use `slug:` only when the file path doesn't match the desired URL.
+- **Chapter structure.** A section can't be a diagram alone. The minimal shape is `## heading` → **one lead sentence** framing what's about to be shown → `<figure>` with the diagram → optional **closer** sentence drawing out the implication. A chapter that opens with a heading and jumps straight into a figure reads hollow: the reader doesn't know what they're looking at until they've decoded it. Lead the diagram, don't dump it. If you find yourself wanting the diagram to do all the work, the prose framing is the missing piece, not the diagram.
+- **Concrete > abstract.** When introducing a structure (a Story format, an event shape, an agent-collaboration model), show a concrete example with real-looking values, not just an abstract template. The reader matches against examples; abstract field-name lists make them guess.
+
+## When to convert prose to a diagram
+
+Convert when:
+
+- The prose has **three or more parallel items being compared** — bullet lists of side-by-side claims usually read better as cards (e.g. the four-pillar "What makes ERun different" diagram).
+- The prose describes a **sequence of steps** — `step 1 → step 2 → ...` becomes a horizontal flow with arrows (the 6-step "Build a small app" overview).
+- The prose describes a **hierarchy** — outer-contains-inner reads naturally as nested cards (Epic → Story → Task; Cluster → Namespace → Pod).
+- The prose describes **two paths converging at the same outcome** — a Y-merge with both paths labelled (the macOS / Windows getting-started split).
+- The prose describes **layers** where each hides the one below — a vertical abstraction stack (Operator → Agent → MCP → Kubernetes).
+- The reader needs to hold ≥ ~150 words of structure in their head before the next paragraph makes sense.
+
+Don't convert when:
+
+- The content is a single command or one short fact — a diagram is overkill.
+- The content is free-form narrative where the sequence isn't the point.
+- The content is a code block — code is already structured.
+- The diagram would be ≤ 3 boxes with no arrows — a sentence works at least as well.
 
 ## Audience: Operator vs Agent
 
@@ -171,6 +200,14 @@ When you find duplication, pick the canonical home and turn the others into poin
 4. Run `yarn build` to catch broken links — `onBrokenLinks: 'throw'` will fail the build on any.
 5. If the page introduces or specs a behaviour, check the [Spec discipline](#spec-discipline) checklist: schemas defined? errors enumerated? canonical terminology? single source of truth?
 
+## Page maintenance
+
+- **Sidebar order: foundational pages first.** A reader landing in a section should hit the intro / model-explaining page first, not the deepest reference. When a page becomes the foundational one for its section (often after a merge), move it to position 0 of that section's `items[]`.
+- **Merge overlapping pages instead of cross-linking forever.** When two pages cover the same ground from different angles (e.g. "Operator maturity" and "Workflow" both explaining Operator–Agent collaboration), prefer one merged page. Keep the URL of whichever page has more inbound links / is more commonly referenced; delete the other file; grep inbound links and repoint them to anchors on the merged page.
+- **Explicit anchor IDs for non-trivial headings.** Docusaurus auto-slugs headings; the algorithm normalises em-dashes, parentheses, and trailing punctuation in ways that aren't always intuitive. When the implied slug is fragile, add an explicit anchor: `### Skills — opinionated, template-driven {#built-in-skills}`. Inbound links then reference `#built-in-skills` instead of guessing.
+- **Audit inbound anchors before moving content.** Moving a section to another page breaks anchors silently — Docusaurus warns about broken anchors at build time but only at warning severity, easy to miss. Grep before moving: `grep -rn '#old-anchor' docs/`. Re-grep after the move to confirm nothing dangles. Same applies when you slim an Operator page and the detail moves to an Agent-reference page.
+- **Don't create new files unless the user asks.** Root `AGENTS.md` rule. Add content to an existing page (or this `AGENTS.md`) instead.
+
 ## Versioning
 
 - Versioning is **off** initially. Turn it on when ERun ships its first GA release.
@@ -271,11 +308,27 @@ Conventions:
 - **Edge labels punch through arrows** by sitting in a background-colored pill: `<rect fill="var(--ifm-background-color, #ffffff)">` then the text on top.
 - **No `width`/`height` attribute on the root `<svg>`** — use only `viewBox` so the responsive `.erun-hero-figure img { width: 100%; height: auto; }` rule can size it.
 - **Only XML predefined entities — no HTML entities.** SVGs loaded via `<img src="...">` are parsed strictly as XML, which knows just five entities: `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`. Common HTML entities like `&middot;`, `&mdash;`, `&ndash;`, `&hellip;`, `&nbsp;` are *undefined* in XML and cause the entire SVG to fail parsing — the browser shows a broken-image icon and falls back to alt text. For typographic characters, paste the literal Unicode glyph (`·`, `—`, `–`, `…`, ` `) directly into the file (it's UTF-8) or use a numeric reference (`&#xB7;`, `&#x2014;`). Same applies to any inline SVG generated by tooling that isn't told to emit XML-safe entities.
+- **A bare `&` in text content is also invalid XML.** Distinct from the HTML-entity gotcha above: writing `INSPECTION & AUTOMATION` (literal `&`) makes the file unparseable just as surely as `INSPECTION &middot; AUTOMATION`. Always escape to `&amp;` (`INSPECTION &amp; AUTOMATION`). The parser stops at the first bare `&`; everything below renders as broken.
+- **Double hyphens are not allowed inside XML comments.** `<!-- documents the --version flag -->` is invalid because XML reserves `--` for the comment terminator. Common offender: documenting a CLI flag inside an SVG comment. Reword the comment to remove the `--`, or split into two comments around the offending phrase.
+- **Run `xmllint --noout static/img/<file>.svg` before committing.** It catches every class of issue above in one command. Docusaurus's build pipeline doesn't validate static-asset XML — a malformed SVG happily ships and only manifests as a broken-image icon in the browser. Treat `xmllint` as a pre-commit check for any SVG edit.
 - **Stroked shapes inside `<symbol>` need `overflow="visible"`.** A `<symbol>` clips its contents to its `viewBox` by default. If the inner rect has a `stroke`, the stroke extends `strokeWidth/2` outside the rect bounds — and that half gets clipped at every edge. The corner radius is unaffected mathematically, but visually the corner looks *tighter* because only the inner half of the stroke arc remains. The fix is one of:
   1. Add `overflow="visible"` to the symbol (shown above) — keeps the symbol reusable.
   2. Expand the symbol's `viewBox` to leave room for the stroke (e.g. `viewBox="-1 -1 242 112"` for a `1.5` stroke on a `240×110` rect).
   3. Inline the `<rect>` directly without a symbol (what `hero-flow.svg` does) — the cleanest option for a shape used only once or twice.
   If a stroked shape in one diagram looks subtly different from the same shape in another, this is almost always the cause.
+
+### Common layout patterns
+
+Four layouts recur across the existing diagrams; reach for one of these before inventing a new shape:
+
+| Pattern | When to use | Example in the docs |
+|---|---|---|
+| **Vertical abstraction stack** | Each layer hides the one below it. Top-down dependency chain. | `abstraction-stack.svg` (Operator → Agent → MCP / SSH → runtime pod → K8s namespaces). |
+| **Y-merge / convergence** | Two starting paths joining at a single outcome. Each path is a short chain of steps; both end at the same "ready" or "done" state via a horizontal line that funnels into a single arrow. | `os-paths.svg` (macOS path + Windows path → "Ready to work"). |
+| **Parallel channels** | One actor reaching one destination via more than one labelled channel. Two arrows leaving the same origin, both arriving at the same target. | `abstraction-stack.svg`'s `ssh:` + `mcp:` arrows from the Agent into the runtime pod. |
+| **Nested containers** | A hierarchy where each level groups the level inside it. Outer namespace-style card, inner cyan-stroked step boxes, innermost text-list items. | `epic-story-tasks.svg` (Epic → Stories → Tasks); `inside-environment.svg` (namespace → runtime pod + services). |
+
+If you find yourself drawing one of these and it doesn't match the existing example's vocabulary, look at the existing file before improvising — convergence labels, arrow stroke widths, header pill shapes are all set and should not drift between diagrams.
 
 ### Mermaid template
 
