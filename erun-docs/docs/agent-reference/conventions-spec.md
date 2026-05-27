@@ -21,6 +21,74 @@ Failure mode:
 | Not in a git repo. | `NOT_IN_GIT_REPO` | Run `git init`, or pass `--project-root` to point at an existing repo. |
 | `--project-root` supplied but the path doesn't exist or contains no `.git`. | `PROJECT_ROOT_INVALID` | Correct the path. |
 
+## Component naming
+
+A component is the unit of build + deploy. Every appearance of a component in the project tree, the deploy plan, the registry, and the env's Kubernetes namespace shares the same string. A skill writing a new component, or a build process resolving an existing one, derives all of the locations below from a single source name.
+
+### Validation
+
+The component name must match:
+
+```
+^[a-z][a-z0-9-]*$
+```
+
+That is: ASCII lowercase letters, digits, and hyphens; first character must be a letter. The constraint matches Kubernetes' DNS-1123 label rules (Deployment names, Service names, label values), which the component name lands in.
+
+| `code` | Cause |
+|---|---|
+| `INVALID_COMPONENT_NAME` | Name fails the regex. |
+| `COMPONENT_NAME_COLLISION` | A directory with this name already exists under `<tenant>-devops/docker/` or `<tenant>-devops/k8s/`. The skill writing the component aborts unless it was invoked with an explicit overwrite hint. |
+| `RESERVED_NAME` | The name `<tenant>-devops` is reserved for the runtime-pod chart (see below). |
+
+### Usage sites
+
+The component name appears identically in every location below:
+
+| Site | Path / value |
+|---|---|
+| Source module | `<projectRoot>/<component>/` (top-level) or `<projectRoot>/<module>/<component>/` (nested) |
+| Docker build context | `<projectRoot>/<tenant>-devops/docker/<component>/Dockerfile` |
+| VERSION file (optional per-component override) | `<projectRoot>/<tenant>-devops/docker/<component>/VERSION` |
+| Helm chart | `<projectRoot>/<tenant>-devops/k8s/<component>/Chart.yaml` |
+| Per-env values overlay | `<projectRoot>/<tenant>-devops/k8s/<component>/values.<env>.yaml` |
+| Deploy plan | An entry in `ProjectConfig.environments.<env>.k8s.deployments[]` |
+| Image reference | `<registry>/<component>:<version>` |
+| Kubernetes resources | `Deployment.metadata.name = <component>`, `Service.metadata.name = <component>`, pod label `app: <component>` |
+
+### Tenant prefix
+
+Convention (not enforced): prefix every component with the tenant name.
+
+```
+erun-cli, erun-mcp, erun-backend-api, erun-backend-postgres, erun-devops
+petios-frontend, petios-api, petios-devops
+```
+
+The convention buys:
+
+1. **Registry-level uniqueness.** Multiple tenants pushing to one registry don't collide on image names.
+2. **Self-describing identity in shared listings.** `kubectl get pods --all-namespaces`, deploy plans, audit trails — `petios-api` is unambiguously the api of petios.
+3. **Coexistence with the runtime-pod chart.** That chart's component name is `<tenant>-devops` (see Reserved names below). Tenant-prefixed application components sit next to it in `k8s/` without ambiguity.
+
+The language skills (`go-service`, `node-service`, `python-service`, `java-service`) apply the prefix automatically when generating a component from a short role name the Operator gave. An Operator who says "add a Go service called `api`" against tenant `hello-erun` ends up with `hello-erun-api`, not bare `api`. Skills can be overridden via project skills (see [Skills spec](/agent-reference/skills-spec)) if a project prefers a different convention.
+
+### Reserved names
+
+| Name | Reservation |
+|---|---|
+| `<tenant>-devops` | The runtime-pod chart at `<tenant>-devops/k8s/<tenant>-devops/`. Always present once `erun init --bootstrap` has run. Bears the runtime image and the env's `erun-devops` / `erun-mcp` / `erun-dind` containers. Application components must not collide with this name. |
+
+### `Service` DNS implications
+
+The Kubernetes Service named `<component>` is reachable in-cluster as:
+
+```
+<component>.<tenant>-<env>.svc.cluster.local
+```
+
+— see [Networking spec · DNS resolution](/agent-reference/networking-spec#dns-resolution). The component-naming regex above is what guarantees that hostname is a valid DNS-1123 label sequence.
+
 ## Multi-stage Dockerfile expectation
 
 ERun expects Dockerfiles to use the multi-stage builder pattern — a builder stage that provisions toolchain and produces an artefact, then a runtime stage that ships only the artefact.

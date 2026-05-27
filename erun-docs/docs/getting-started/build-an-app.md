@@ -41,26 +41,26 @@ Ask the Agent:
 
 > Add a Go HTTP service called `api` that returns "hello from erun" on `GET /`.
 
-The Agent loads the `go-service` [skill](/concepts/skills) (deployed automatically when you opened the env) and reads its SKILL.md — the layout, the multi-stage Dockerfile pattern, the helm chart structure, the deploy-plan rule. It then writes the source + Dockerfile + chart by hand, adapted to what you described (HTTP, the route, the stub return value):
+The Agent loads the `go-service` [skill](/concepts/skills) (deployed automatically when you opened the env) and reads its SKILL.md — the layout, the multi-stage Dockerfile pattern, the helm chart structure, the deploy-plan rule, and the [component-naming convention](/concepts/conventions#component-naming). It picks the full component name (`hello-erun-api` — tenant prefix + the role you described) and writes the source + Dockerfile + chart by hand, adapted to what you described (HTTP, the route, the stub return value):
 
 ```
 hello-erun/
-├── api/                              ← new source module
+├── hello-erun-api/                          ← new source module
 │   ├── go.mod
-│   └── cmd/api/main.go               ← stub returns "hello from erun"
+│   └── cmd/hello-erun-api/main.go           ← stub returns "hello from erun"
 └── hello-erun-devops/
-    ├── docker/api/                   ← new Docker context
-    │   └── Dockerfile                ← multi-stage Go pattern from the skill
-    └── k8s/api/                      ← new helm chart
+    ├── docker/hello-erun-api/               ← new Docker context
+    │   └── Dockerfile                        ← multi-stage Go pattern from the skill
+    └── k8s/hello-erun-api/                   ← new helm chart
         ├── Chart.yaml
         └── templates/
             ├── deployment.yaml
             └── service.yaml
 ```
 
-It also appends `api` to the deploy plan in `.erun/config.yaml`. Everything's hand-written by the Agent following the skill's guidance — no code generator. You see the diff in your editor and approve before it lands.
+The same name (`hello-erun-api`) is used in all three places — that's the [component-matching rule](/concepts/conventions#component-naming), enforced by the skill. The Agent also appends `hello-erun-api` to the deploy plan in `.erun/config.yaml`. Everything's hand-written by the Agent following the skill's guidance — no code generator. You see the diff in your editor and approve before it lands.
 
-If your project has its own preferences (a specific HTTP framework, a house style, a custom audit annotation), drop a project skill under `<repo>/.erun/skills/go-service/` to layer your guidance on top of the built-in — the Agent picks up both on the next env open. See [Skills spec](/agent-reference/skills-spec) for the format.
+If your project has its own preferences (a specific HTTP framework, a house style, a custom audit annotation, an exception to the tenant-prefix rule), drop a project skill under `<repo>/.erun/skills/go-service/` to layer your guidance on top of the built-in — the Agent picks up both on the next env open. See [Skills spec](/agent-reference/skills-spec) for the format.
 
 ## 4. Build + deploy
 
@@ -73,9 +73,9 @@ ERun builds `api` per the generated Dockerfile, tags it with a snapshot version,
 ```
 audit: erun build --deploy
 trace:   resolved env type = local-agent (snapshot tags)
-trace:   building <registry>/api:1.0.0-snapshot-<timestamp>
+trace:   building <registry>/hello-erun-api:1.0.0-snapshot-<timestamp>
 trace:   pushing per-arch tags
-trace:   helm upgrade --install api <tenant>-devops/k8s/api/
+trace:   helm upgrade --install hello-erun-api hello-erun-devops/k8s/hello-erun-api/
 result: ok
 ```
 
@@ -83,11 +83,11 @@ result: ok
 
 ```bash
 kubectl get pods -n hello-erun-local
-# NAME             READY   STATUS    RESTARTS   AGE
-# api-79f5b9c64    1/1     Running   0          15s
-# erun-devops-7c8  3/3     Running   0          2m
+# NAME                          READY   STATUS    RESTARTS   AGE
+# hello-erun-api-79f5b9c64      1/1     Running   0          15s
+# hello-erun-devops-7c8b6d8     3/3     Running   0          2m
 
-kubectl port-forward -n hello-erun-local svc/api 8080:8080
+kubectl port-forward -n hello-erun-local svc/hello-erun-api 8080:8080
 # Another shell:
 curl http://localhost:8080
 # → hello from erun

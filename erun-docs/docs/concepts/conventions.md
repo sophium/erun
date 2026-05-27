@@ -54,23 +54,59 @@ erun/                                    # Git repo root. .git lives here.
 └── erun-ui/
 ```
 
-### Naming convention (recommended defaults)
+### Project naming convention
 
 - **Tenant name** = your project name (the directory holding `.git`). For `erun` it's `erun`; for `petios` it would be `petios`.
 - **DevOps module** = `<tenant>-devops/`. For `erun` that's `erun-devops/`.
-- **Component name** is shared across the source module, the Docker context, and the helm chart:
-  - Source: `<component>/` (or a nested path inside another module).
-  - Build context: `<tenant>-devops/docker/<component>/`.
-  - Helm chart: `<tenant>-devops/k8s/<component>/`.
+
+`erun init --bootstrap` scaffolds the `<tenant>-devops/` module for you; subsequent edits are yours.
+
+### Component naming
+
+A **component** is a deployable unit — typically a service, a migration job, a cron job. Each component has a single name that's used identically everywhere ERun looks for it.
+
+| Where the component name appears | Path / value |
+|---|---|
+| Source module | `<projectRoot>/<component>/` (top-level) or nested inside another module |
+| Docker build context | `<projectRoot>/<tenant>-devops/docker/<component>/` |
+| Helm chart | `<projectRoot>/<tenant>-devops/k8s/<component>/` |
+| Deploy plan entry | `environments.<env>.k8s.deployments[]` in `.erun/config.yaml` |
+| Image tag | `<registry>/<component>:<version>` |
+| Kubernetes resources | Deployment / Service named `<component>`, pod label `app: <component>` |
+
+#### Rules
+
+1. **Validation.** Names must match `^[a-z][a-z0-9-]*$` — lowercase ASCII letters, digits, and hyphens; must start with a letter. No underscores, no uppercase. (Same constraint as Kubernetes DNS-1123 labels, which the name lands in.)
+2. **kebab-case.** Hyphens between words. `backend-api`, not `backend_api` or `backendApi`.
+3. **Descriptive nouns over abbreviations.** `migration-job` over `migr`.
+
+#### Tenant prefix (recommended)
+
+Prefix every component with the tenant name. The erun repo itself follows this:
+
+| Tenant | Short role | Full component name |
+|---|---|---|
+| `erun` | `cli` | `erun-cli` |
+| `erun` | `mcp` | `erun-mcp` |
+| `erun` | `backend-api` | `erun-backend-api` |
+| `petios` | `frontend` | `petios-frontend` |
+
+Why prefix:
+
+- **No collisions** when several tenants publish to the same registry.
+- **Self-describing** in deploy plans, `kubectl get pods`, and image tags — `petios-api` reads as "the api of petios" at a glance.
+- **Coexists with the runtime-pod chart**, whose component name is the literal `<tenant>-devops` (`erun-devops`, `petios-devops`).
+
+The prefix isn't enforced — bare names work — but the convention is strong enough that the language [skills](/concepts/skills) (`go-service`, `node-service`, …) default to applying it when generating a component from an Operator's short role description. For tiny one-service tutorials the prefix is sometimes elided for brevity; once a project has three or more components, prefix consistently.
 
 <figure className="erun-hero-figure">
   <img src="/img/component-matching.svg" alt="A central charcoal pill labelled COMPONENT NAME 'erun-backend-api' fans out via arrows to three paths: SOURCE at erun-backend/erun-backend-api/ (nested module with go.mod, cmd/, pkg/ — could also be top-level like erun-cli/), DOCKER CONTEXT at erun-devops/docker/erun-backend-api/ (Dockerfile + optional VERSION), and HELM CHART at erun-devops/k8s/erun-backend-api/ (Chart.yaml + templates/). A fourth arrow points right to a DEPLOYED card showing the result: 'erun-backend-api' deployment + service, image registry/erun-backend-api:1.0.0, in namespace erun-&lt;env&gt;. Strapline: 'Pick the (tenant-prefixed) name once. ERun finds the source, the Dockerfile, the chart, and ships the right image.'" />
-  <figcaption>Component names are tenant-prefixed (e.g. <code>erun-cli</code>, <code>erun-mcp</code>, <code>erun-backend-api</code>). Source can be top-level or nested under another module. ERun matches by name.</figcaption>
+  <figcaption>Pick the name once. ERun matches it across source, Dockerfile, chart, deploy plan, image tag, and Kubernetes resources.</figcaption>
 </figure>
 
 Example: the `erun-backend-api` component has source at `erun-backend/erun-backend-api/`, a Dockerfile at `erun-devops/docker/erun-backend-api/Dockerfile`, and a helm chart at `erun-devops/k8s/erun-backend-api/Chart.yaml`. ERun matches them up by name.
 
-`erun init --bootstrap` scaffolds the `<tenant>-devops/` module for you; subsequent edits are yours.
+For the validation regex, the reserved `<tenant>-devops` name, and the full failure-mode catalogue, see [Agent reference · Component naming](/agent-reference/conventions-spec#component-naming).
 
 ## Project root
 
