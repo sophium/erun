@@ -156,6 +156,8 @@ Compound terms (`agent env`, `runtime env`, `agent-driven`, `multi-arch`) stay l
 
 JSON literal values (e.g., `"kind": "operator"` in audit events) keep their casing as documented in the spec; that's data, not prose.
 
+**When you do a terminology sweep, grep `static/img/*.svg` as well as `docs/`.** SVG text content (the `<title>` element, every `<text>` element, every `alt="..."` attribute in the markdown that references an SVG) gets missed by `grep -rn '<bad-term>' docs/` and then ships invisibly — the markdown reads correct but the rendered diagram still uses the old vocabulary. Same goes for the `<!-- comments -->` inside SVGs: comments aren't user-visible but they're a fast indicator of how stale the file is, so include them in the sweep. Always pair `grep -rn '<bad-term>' docs/` with `grep -rn '<bad-term>' static/img/`.
+
 ## Spec discipline
 
 The docs are the spec. Behaviour that isn't documented isn't part of the contract.
