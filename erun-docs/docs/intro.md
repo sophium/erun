@@ -31,11 +31,10 @@ Even before AI agents, operators struggled to run more than one copy of their de
 
 ## Under the hood
 
-Kubernetes is the right primitive for production, but exposed raw it's overwhelming. The Agent and the Operator's IDE reach an env through two channels on the runtime pod: **SSH** for file authoring and shell — the same channel your editor attaches to — and [**MCP**](/mcp/overview) for typed ERun operations the Agent calls instead of hand-running `kubectl` / `helm`. ERun also deploys [**skills**](/concepts/skills) into the env so the Agent picks up your project's conventions automatically. **The Agent drives Kubernetes; you drive the Agent.**
+Kubernetes is the right primitive for production, but exposed raw it's overwhelming. ERun gives the Agent and your IDE everything they need to work in an env without dealing with the cluster directly. **The Agent drives Kubernetes; you drive the Agent.**
 
 <figure className="erun-hero-figure">
-  <img src="/img/abstraction-stack.svg" alt="Abstraction stack from top to bottom. Operator pill at the top, with a 'directs' arrow down to the Agent box (Claude Code, Codex). A dashed 'loads' arrow enters the Agent box from a side panel labelled 'skills · deployed into the env'. A 'calls' arrow goes down from the Agent to the MCP tools layer holding six typed actions: init, deploy, doctor, list, build, raw. A 'drives' arrow down to the Kubernetes cluster, which contains three namespace cards labelled ns: feature-a, ns: feature-b, ns: feature-c — each marked as a full stack inside (api · db · queue · ui)." />
-  <figcaption>The MCP layer is what abstracts Kubernetes — file authoring rides a parallel SSH channel into the same runtime pod (the channel your IDE attaches to, and the one the Agent uses for edits and shell).</figcaption>
+  <img src="/img/abstraction-stack.svg" alt="The ERun abstraction stack. Operator directs an Agent (Claude Code, Codex). A dashed 'loads' arrow brings skill bundles deployed into the env into the Agent's context. The Agent uses two channels into the env's runtime pod: ssh for file authoring and shell, mcp for typed ERun operations. The Operator's IDE (VS Code, IntelliJ, Cursor, Zed, …) attaches over the same ssh channel — Agent and IDE see the same files. The runtime pod lives in a Kubernetes namespace alongside the env's application services (api, db, queue, ui); other envs live in their own namespaces in the same cluster." />
 </figure>
 
 ---
