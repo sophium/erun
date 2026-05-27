@@ -41,9 +41,13 @@ Kubernetes is the right primitive for production, but exposed raw it's overwhelm
 
 ## What makes ERun different
 
+Four properties that don't usually come together, and the reason ERun feels different from everything else.
+
 <figure className="erun-hero-figure">
   <img src="/img/differentiators.svg" alt="Four cards explaining what makes ERun different. Side by side — your editor and your Agent see the same project, no parallel worlds. In control — preview every action before it runs, every action recorded, join, take over, hand off any time. Industry standards — traceable, reproducible, audit-ready, compliance is how the platform works, not a bolt-on. Your scale — LAMP stack on a VM through autoscaling enterprise with DR and immutable backups, same defaults at every scale." />
 </figure>
+
+Each one is a chapter elsewhere in these docs. The point of putting them on one page is that they reinforce each other — none of them works as a bolt-on to a platform built without the others.
 
 ---
 
