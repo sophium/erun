@@ -18,6 +18,8 @@ export function normalizedEnvironmentDialogValues(
     version: normalizeDialogValue(dialog.version),
     kubernetesContext: normalizeDialogValue(dialog.kubernetesContext),
     containerRegistry: normalizeDialogValue(dialog.containerRegistry),
+    envType: dialog.envType,
+    localRepoPath: normalizeDialogValue(dialog.localRepoPath),
   };
 }
 
@@ -30,6 +32,11 @@ export function validEnvironmentDialogValues(
   }
   if (actionMode === 'deploy') {
     return Boolean(values.version);
+  }
+  // local-agent envs mount a host directory into the agent pod; the path
+  // is required and free-text (the user picks where their project lives).
+  if (values.envType === 'local-agent' && !values.localRepoPath) {
+    return false;
   }
   return Boolean(values.kubernetesContext && values.containerRegistry);
 }

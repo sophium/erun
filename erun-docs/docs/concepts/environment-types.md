@@ -101,3 +101,5 @@ erun init team prod --type runtime --no-git
 ```
 
 `--remote` is preserved as a deprecated alias for `--type=remote-agent`; passing both flags with conflicting values is an error.
+
+The desktop app's **New environment** dialog exposes the same choice as an **Environment type** field. Picking `Local agent` also reveals a **Local repo path** input (with a native folder picker) — that's the host directory mounted into the agent pod as the worktree, equivalent to the CLI's `--project-root`.

@@ -34,6 +34,7 @@ import { Label } from '@/components/ui/label';
 
 import { EditableComboField } from './EditableComboField';
 import { uniqueSuggestions } from './EditableComboField.helpers';
+import { EnvironmentTypeSelect, LocalRepoPathField } from './EnvironmentTypeFields';
 import { KubernetesContextSelect } from './KubernetesContextSelect';
 import { ReadonlyField } from './ManageDialog.fields';
 import { RuntimeResourceControls } from './RuntimeResourceControls';
@@ -250,6 +251,8 @@ function EnvironmentCreateFields({ dialog }: { dialog: EnvironmentDialog }): Rea
 
   return (
     <>
+      <EnvironmentTypeSelect dialog={dialog} />
+      {dialog.envType === 'local-agent' && <LocalRepoPathField dialog={dialog} />}
       <KubernetesContextSelect dialog={dialog} />
       <RuntimePodFields dialog={dialog} />
       <EditableComboField
@@ -292,6 +295,11 @@ function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): Rea
   // the tenant is new, since that's the only case where the remote
   // devops module isn't already in place. Removed to stop asking an
   // unanswerable question.
+  //
+  // "Initialize without Git checkout" only changes behavior on the
+  // remote-worktree init path (ensureRemoteRepository in
+  // erun-common/init.go); it's a no-op for local-agent. Hide it then.
+  const isLocalAgent = dialog.envType === 'local-agent';
   return (
     <div className="grid gap-3">
       <CheckboxField
@@ -303,15 +311,17 @@ function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): Rea
           dispatch(updateEnvironmentDialog({ setDefaultTenant }));
         }}
       />
-      <CheckboxField
-        id="environment-no-git"
-        label="Initialize without Git checkout"
-        checked={dialog.noGit}
-        disabled={dialog.busy}
-        onCheckedChange={(noGit) => {
-          dispatch(updateEnvironmentDialog({ noGit }));
-        }}
-      />
+      {!isLocalAgent && (
+        <CheckboxField
+          id="environment-no-git"
+          label="Initialize without Git checkout"
+          checked={dialog.noGit}
+          disabled={dialog.busy}
+          onCheckedChange={(noGit) => {
+            dispatch(updateEnvironmentDialog({ noGit }));
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -390,8 +400,21 @@ function environmentDialogSubmitGate(
 // blocked instead of guessing. Preconditions are checked in order and
 // the first match wins.
 function environmentCreateSubmitGate(dialog: EnvironmentDialog): EnvironmentSubmitGate {
-  const blocker = kubernetesContextBlocker(dialog) ?? runtimeCapacityBlocker(dialog);
+  const blocker =
+    localRepoPathBlocker(dialog) ??
+    kubernetesContextBlocker(dialog) ??
+    runtimeCapacityBlocker(dialog);
   return blocker ? { disabled: true, reason: blocker } : { disabled: false, reason: '' };
+}
+
+function localRepoPathBlocker(dialog: EnvironmentDialog): string | null {
+  if (dialog.envType !== 'local-agent') {
+    return null;
+  }
+  if (dialog.localRepoPath.trim() === '') {
+    return 'Local repo path is required for local-agent envs.';
+  }
+  return null;
 }
 
 function kubernetesContextBlocker(dialog: EnvironmentDialog): string | null {

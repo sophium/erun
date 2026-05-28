@@ -139,6 +139,30 @@ func resolveWorkspaceSyncDialogDefaultDirectory(findProjectRoot eruncommon.Proje
 	return strings.TrimSpace(projectRoot)
 }
 
+// ChooseLocalRepoPath opens a native directory picker for the env-init
+// dialog's "Local repo path" field. local-agent envs mount this path into
+// the agent pod as the worktree, so the user has to pick a real directory
+// on this machine — typing absolute paths by hand is error-prone. Returns
+// the empty string if the user cancels the dialog.
+func (a *App) ChooseLocalRepoPath(current string) (string, error) {
+	if a.ctx == nil {
+		return "", fmt.Errorf("application context is not ready")
+	}
+	defaultDirectory := strings.TrimSpace(current)
+	if defaultDirectory != "" {
+		if info, err := os.Stat(defaultDirectory); err != nil || !info.IsDir() {
+			defaultDirectory = ""
+		}
+	}
+	if defaultDirectory == "" {
+		defaultDirectory = resolveWorkspaceSyncDialogDefaultDirectory(a.deps.findProjectRoot)
+	}
+	return runtime.OpenDirectoryDialog(a.ctx, runtime.OpenDialogOptions{
+		Title:            "Select local repo path",
+		DefaultDirectory: defaultDirectory,
+	})
+}
+
 func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing eruncommon.EnvConfig) (eruncommon.EnvConfig, error) {
 	updated := environmentConfigFromUI(config, existing)
 	if _, err := updated.Idle.Resolve(); err != nil {

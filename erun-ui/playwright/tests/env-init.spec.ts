@@ -64,6 +64,45 @@ test.describe('environment init dialog', () => {
     await app.envInitDialog.waitForClosed();
   });
 
+  test('local-agent type reveals the Local repo path field and hides the no-Git toggle', async ({
+    app,
+    page,
+  }) => {
+    await app.sidebar.openInitDialog();
+    await app.envInitDialog.waitForOpen();
+
+    const typeSelect = page.getByLabel('Environment type', { exact: true });
+    const localRepoPathInput = page.locator('#environment-local-repo-path');
+    const browseButton = page.getByRole('button', { name: /Browse/ });
+    const noGitCheckbox = page.locator('#environment-no-git');
+
+    // Default is remote-agent — the no-Git toggle is visible and
+    // LocalRepoPath / Browse are absent from the DOM.
+    await expect(typeSelect).toBeVisible();
+    await expect(localRepoPathInput).toHaveCount(0);
+    await expect(browseButton).toHaveCount(0);
+    await expect(noGitCheckbox).toBeVisible();
+
+    // Switch to local-agent: LocalRepoPath + Browse appear, the no-Git
+    // toggle drops out (it doesn't influence the local-agent init path
+    // — see EnvironmentCreateChecks for the rationale).
+    await typeSelect.click();
+    await page.getByRole('option', { name: 'Local agent' }).click();
+    await expect(localRepoPathInput).toBeVisible();
+    await expect(browseButton).toBeVisible();
+    await expect(noGitCheckbox).toHaveCount(0);
+
+    // Switch to runtime: LocalRepoPath disappears, no-Git returns.
+    await typeSelect.click();
+    await page.getByRole('option', { name: 'Runtime' }).click();
+    await expect(localRepoPathInput).toHaveCount(0);
+    await expect(browseButton).toHaveCount(0);
+    await expect(noGitCheckbox).toBeVisible();
+
+    await app.envInitDialog.cancel();
+    await app.envInitDialog.waitForClosed();
+  });
+
   test('kube-context dropdown survives an environments-changed Wails event', async ({
     app,
     page,

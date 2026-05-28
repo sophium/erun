@@ -50,6 +50,8 @@ export const openInitializeDialog = (): AppThunk => (dispatch, getState) => {
       resourceStatusLoading: false,
       runtimePod: defaultEnvironmentDialog().runtimePod,
       containerRegistry: containerRegistryDefault,
+      envType: 'remote-agent',
+      localRepoPath: '',
       noGit: false,
       setDefaultTenant: true,
       versionImage: state.tenants.versionSuggestions[0]?.image ?? '',
@@ -191,26 +193,47 @@ function environmentDialogSelection(
     return null;
   }
   const isInit = dialog.actionMode === 'init';
-  const runtimePod = runtimePodConfigToKubernetes(dialog.runtimePod);
+  const initFields = isInit ? environmentDialogInitFields(dialog, values, tenantExists) : {};
+  // noGit only changes behavior on the remote-worktree init path
+  // (ensureRemoteRepository in erun-common/init.go). For local-agent
+  // init there is no remote repo, so suppress NoGit regardless of any
+  // stale dialog state from a previous type selection.
+  const noGit = isInit && dialog.envType === 'local-agent' ? false : dialog.noGit;
   return {
     tenant: values.tenant,
     environment: values.environment,
     version: values.version,
     runtimeImage: resolveEnvironmentRuntimeImage(values.version, dialog, versionSuggestions),
-    runtimeCpu: isInit ? runtimePod.cpu : undefined,
-    runtimeMemory: isInit ? runtimePod.memory : undefined,
-    kubernetesContext: isInit ? values.kubernetesContext : undefined,
-    containerRegistry: isInit ? values.containerRegistry : undefined,
-    noGit: dialog.noGit,
-    // Bootstrap is derived, not asked. The desktop init flow always
-    // passes --remote (see erun-ui/session.go:buildInitArgs), so we're
-    // always on the remote-worktree path where --bootstrap matters. For
-    // a brand-new tenant (no envs in state.tenants) the remote devops
-    // module doesn't exist yet and the first deploy has nothing to
-    // render without it; for an existing tenant the module is already
-    // there and --bootstrap would be wasted SSH work.
-    bootstrap: isInit ? !tenantExists : undefined,
-    setDefaultTenant: isInit ? dialog.setDefaultTenant : undefined,
+    noGit,
+    ...initFields,
+  };
+}
+
+function environmentDialogInitFields(
+  dialog: EnvironmentDialogState,
+  values: ReturnType<typeof normalizedEnvironmentDialogValues>,
+  tenantExists: boolean,
+): Partial<UISelection> {
+  const runtimePod = runtimePodConfigToKubernetes(dialog.runtimePod);
+  const isLocalAgent = dialog.envType === 'local-agent';
+  return {
+    runtimeCpu: runtimePod.cpu,
+    runtimeMemory: runtimePod.memory,
+    kubernetesContext: values.kubernetesContext,
+    containerRegistry: values.containerRegistry,
+    type: dialog.envType,
+    localRepoPath: isLocalAgent ? values.localRepoPath : undefined,
+    // Bootstrap is derived from env type and tenant state, not a user
+    // choice. local-agent never passes --bootstrap because the local
+    // code path (EnsureDefaultDevopsModuleWithVersion in
+    // erun-common/init.go) creates the devops module unconditionally
+    // and idempotently. For remote-agent / runtime we pass --bootstrap
+    // only when the tenant is new — no envs yet in state — so the
+    // first init scaffolds the remote devops module; for an existing
+    // tenant the module is already there and re-running the bootstrap
+    // step would be wasted SSH work.
+    bootstrap: !isLocalAgent && !tenantExists,
+    setDefaultTenant: dialog.setDefaultTenant,
   };
 }
 

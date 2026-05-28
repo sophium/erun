@@ -278,7 +278,15 @@ func ensureSSHDViaOpenCommand(ctx context.Context, cliPath string, result erunco
 }
 
 func buildInitArgs(selection uiSelection) []string {
-	args := erunArgs(selection.Debug, "init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment), "--remote")
+	envType := strings.TrimSpace(selection.Type)
+	if envType == "" {
+		// Older frontends that don't yet send Type still expect the
+		// pre-Type behavior — pinned to remote-agent. The CLI itself
+		// defaults to local-agent when --type is unset, which would be
+		// a silent behavior change for the desktop flow.
+		envType = "remote-agent"
+	}
+	args := erunArgs(selection.Debug, "init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment), "--type="+envType)
 	if version := strings.TrimSpace(selection.Version); version != "" {
 		args = append(args, "--version", version)
 	}
@@ -296,6 +304,11 @@ func buildInitArgs(selection uiSelection) []string {
 	}
 	if containerRegistry := strings.TrimSpace(selection.ContainerRegistry); containerRegistry != "" {
 		args = append(args, "--container-registry", containerRegistry)
+	}
+	if envType == "local-agent" {
+		if localRepoPath := strings.TrimSpace(selection.LocalRepoPath); localRepoPath != "" {
+			args = append(args, "--project-root", localRepoPath)
+		}
 	}
 	args = append(
 		args,

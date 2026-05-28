@@ -1,6 +1,7 @@
 import type {
   DiffResult,
   EnvironmentActionMode,
+  EnvironmentType,
   ManageTab,
   UICloudContextInitInput,
   UICloudProviderStatus,
@@ -67,6 +68,8 @@ export interface EnvironmentDialogState {
     memory: string;
   };
   containerRegistry: string;
+  envType: EnvironmentType;
+  localRepoPath: string;
   noGit: boolean;
   setDefaultTenant: boolean;
   versionImage: string;
@@ -240,6 +243,8 @@ export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
   resourceStatusLoading: false,
   runtimePod: defaultRuntimePodConfig(),
   containerRegistry: '',
+  envType: 'remote-agent',
+  localRepoPath: '',
   noGit: false,
   setDefaultTenant: true,
   versionImage: '',
