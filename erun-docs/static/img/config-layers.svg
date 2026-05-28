@@ -1,0 +1,50 @@
+<svg viewBox="0 0 1000 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="configLayersTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="configLayersTitle">Three configuration layers. From left to right: per-user defaults at ~/.config/erun/ (edited by you or erun init, read every command, holds ERunConfig, TenantConfig, EnvConfig); per-project facts at &lt;repo&gt;/.erun/config.yaml (edited by the team in PRs, read every build/push/deploy, holds ProjectConfig); per-pod environment variables set by helm at deploy time (derived automatically from the other two, read by erun inside the runtime pod, examples ERUN_TENANT, ERUN_NAMESPACE, ERUN_REPO_PATH). The strapline reads: 'At deploy time the helm chart derives the per-pod vars from the other two layers.'</title>
+
+  <defs>
+    <linearGradient id="clCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Title + subtitle -->
+  <text x="500" y="44" text-anchor="middle" fill="currentColor" font-size="18" font-weight="600" letter-spacing="0.01em">Three configuration layers</text>
+  <text x="500" y="68" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.65">per-user defaults · per-project facts · per-pod runtime vars</text>
+
+  <!-- Card 1: Per-user -->
+  <g>
+    <rect x="40" y="100" width="290" height="200" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="60" y="124" text-anchor="start" fill="#0891b2" font-size="11" font-weight="600" letter-spacing="0.08em">PER-USER</text>
+    <text x="185" y="156" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.65" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">~/.config/erun/</text>
+    <text x="60" y="195" text-anchor="start" fill="currentColor" font-size="11.5" opacity="0.55">Edits:</text>
+    <text x="60" y="213" text-anchor="start" fill="currentColor" font-size="12.5">you · `erun init` · desktop</text>
+    <text x="60" y="241" text-anchor="start" fill="currentColor" font-size="11.5" opacity="0.55">Read:</text>
+    <text x="60" y="259" text-anchor="start" fill="currentColor" font-size="12.5">every command</text>
+    <text x="60" y="287" text-anchor="start" fill="currentColor" font-size="11" opacity="0.55">ERunConfig · TenantConfig · EnvConfig</text>
+  </g>
+
+  <!-- Card 2: Per-project -->
+  <g>
+    <rect x="355" y="100" width="290" height="200" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="375" y="124" text-anchor="start" fill="#0891b2" font-size="11" font-weight="600" letter-spacing="0.08em">PER-PROJECT</text>
+    <text x="500" y="156" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.65" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">&lt;repo&gt;/.erun/config.yaml</text>
+    <text x="375" y="195" text-anchor="start" fill="currentColor" font-size="11.5" opacity="0.55">Edits:</text>
+    <text x="375" y="213" text-anchor="start" fill="currentColor" font-size="12.5">team, in PRs</text>
+    <text x="375" y="241" text-anchor="start" fill="currentColor" font-size="11.5" opacity="0.55">Read:</text>
+    <text x="375" y="259" text-anchor="start" fill="currentColor" font-size="12.5">every build · push · deploy</text>
+    <text x="375" y="287" text-anchor="start" fill="currentColor" font-size="11" opacity="0.55">ProjectConfig</text>
+  </g>
+
+  <!-- Card 3: Per-pod env vars (charcoal to show it's derived/automatic) -->
+  <g>
+    <rect x="670" y="100" width="290" height="200" rx="14" fill="url(#clCharcoal)"/>
+    <text x="690" y="124" text-anchor="start" fill="#22d3ee" font-size="11" font-weight="600" letter-spacing="0.08em">PER-POD ENV VARS</text>
+    <text x="815" y="156" text-anchor="middle" fill="#ffffff" font-size="11" opacity="0.75">set by helm at deploy</text>
+    <text x="690" y="195" text-anchor="start" fill="#ffffff" font-size="11.5" opacity="0.55">Edits:</text>
+    <text x="690" y="213" text-anchor="start" fill="#ffffff" font-size="12.5">derived automatically</text>
+    <text x="690" y="241" text-anchor="start" fill="#ffffff" font-size="11.5" opacity="0.55">Read:</text>
+    <text x="690" y="259" text-anchor="start" fill="#ffffff" font-size="12.5">by `erun` in the runtime pod</text>
+    <text x="690" y="287" text-anchor="start" fill="#ffffff" font-size="10.5" opacity="0.6" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">ERUN_TENANT · ERUN_NAMESPACE …</text>
+  </g>
+</svg>

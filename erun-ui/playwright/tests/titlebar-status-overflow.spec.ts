@@ -38,7 +38,7 @@ const LONG_MESSAGE =
 
 test.describe('titlebar status overflow', () => {
   test('long status message renders inside a popover with selectable text', async ({
-    app,
+    app: _app,
     page,
   }) => {
     expect(LONG_MESSAGE.length).toBeGreaterThan(160);
@@ -80,7 +80,7 @@ test.describe('titlebar status overflow', () => {
   // keep the existing tooltip path so we have not regressed the short-
   // message UI. Visibility of system status (Nielsen #1) for short
   // notifications already worked before this change.
-  test('short status message keeps tooltip behaviour', async ({ app, page }) => {
+  test('short status message keeps tooltip behaviour', async ({ app: _app, page }) => {
     const SHORT = 'Started cloud environment foo-bar.';
     await page.evaluate((message) => {
       const runtime = (

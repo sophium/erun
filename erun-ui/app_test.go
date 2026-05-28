@@ -3523,18 +3523,7 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 		},
 	})
 	defer app.shutdown(context.Background())
-	// The Status field moved off CloudContextConfig (it is in-memory only,
-	// never persisted) onto CloudContextStatus. Seed the stopped status
-	// into the in-memory cache so shouldRespawnForCloudContext sees the
-	// stopped context and refuses to respawn — that's the gate this test
-	// exercises.
-	app.applyCloudContextStatusesToCache([]eruncommon.CloudContextStatus{{
-		CloudContextConfig: eruncommon.CloudContextConfig{
-			Name:              "managed-cloud",
-			KubernetesContext: "cluster-cloud",
-		},
-		Status: eruncommon.CloudContextStatusStopped,
-	}})
+	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusStopped)
 
 	selection := uiSelection{Tenant: "erun", Environment: "remote"}
 	first, err := app.StartAISession(selection, 0, 80, 24)

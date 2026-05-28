@@ -1,0 +1,103 @@
+<svg viewBox="0 0 1100 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="interactionLifecycleTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="interactionLifecycleTitle">The review-state lifecycle with actor-annotated transitions. Top row left-to-right: OPEN → READY → MERGE → MERGED. The OPEN-to-READY arrow is labelled 'Agent: successful build'. READY-to-MERGE is labelled 'Operator: approve'. MERGE-to-MERGED is labelled 'advance queue'. Below OPEN, a FAILED state. An arrow OPEN-to-FAILED is labelled 'Agent: failed build'. A curve FAILED-to-READY is labelled 'Agent: fix + build'. Bottom-right, a CLOSED terminal state reachable from OPEN, FAILED, or READY via dashed arrows labelled 'Operator: close (abandon)'. A strapline reads: 'Comments thread independently — OPEN to CLOSED — without blocking the review state.'</title>
+
+  <defs>
+    <linearGradient id="ilCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="ilArrowSolid" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+    <marker id="ilArrowDashed" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="550" y="44" text-anchor="middle" fill="currentColor" font-size="18" font-weight="600" letter-spacing="0.01em">Interaction lifecycle</text>
+  <text x="550" y="68" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.65">review state machine — who drives each transition</text>
+
+  <!-- Top row — happy path: OPEN → READY → MERGE → MERGED -->
+  <g>
+    <rect x="80" y="130" width="160" height="70" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="160" y="160" text-anchor="middle" fill="currentColor" font-size="14" font-weight="700">OPEN</text>
+    <text x="160" y="180" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">review created</text>
+  </g>
+  <g>
+    <rect x="340" y="130" width="160" height="70" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="420" y="160" text-anchor="middle" fill="currentColor" font-size="14" font-weight="700">READY</text>
+    <text x="420" y="180" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">mergeable</text>
+  </g>
+  <g>
+    <rect x="600" y="130" width="160" height="70" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="680" y="160" text-anchor="middle" fill="currentColor" font-size="14" font-weight="700">MERGE</text>
+    <text x="680" y="180" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">queued</text>
+  </g>
+  <g>
+    <rect x="860" y="130" width="160" height="70" rx="14" fill="url(#ilCharcoal)"/>
+    <text x="940" y="160" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="700">MERGED</text>
+    <text x="940" y="180" text-anchor="middle" fill="#ffffff" font-size="11" opacity="0.7">terminal</text>
+  </g>
+
+  <!-- Horizontal arrows -->
+  <line x1="240" y1="165" x2="340" y2="165" stroke="#0891b2" stroke-width="1.5" marker-end="url(#ilArrowSolid)"/>
+  <line x1="500" y1="165" x2="600" y2="165" stroke="#0891b2" stroke-width="1.5" marker-end="url(#ilArrowSolid)"/>
+  <line x1="760" y1="165" x2="860" y2="165" stroke="#0891b2" stroke-width="1.5" marker-end="url(#ilArrowSolid)"/>
+
+  <!-- Transition labels -->
+  <g>
+    <rect x="247" y="108" width="138" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="316" y="122" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="600">Agent: build success</text>
+  </g>
+  <g>
+    <rect x="508" y="108" width="124" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="570" y="122" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="600">Operator: approve</text>
+  </g>
+  <g>
+    <rect x="768" y="108" width="124" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="830" y="122" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="600">advance queue</text>
+  </g>
+
+  <!-- FAILED side state -->
+  <g>
+    <rect x="80" y="280" width="160" height="70" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="160" y="310" text-anchor="middle" fill="currentColor" font-size="14" font-weight="700">FAILED</text>
+    <text x="160" y="330" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">last build failed</text>
+  </g>
+
+  <!-- OPEN ↓ FAILED -->
+  <line x1="160" y1="200" x2="160" y2="280" stroke="#0891b2" stroke-width="1.5" marker-end="url(#ilArrowSolid)"/>
+  <g>
+    <rect x="100" y="232" width="120" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="160" y="246" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="600">Agent: build fail</text>
+  </g>
+
+  <!-- FAILED → READY (curved up) -->
+  <path d="M240 315 C 320 315, 380 235, 420 200" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#ilArrowSolid)"/>
+  <g>
+    <rect x="262" y="260" width="118" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="321" y="274" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="600">Agent: fix + build</text>
+  </g>
+
+  <!-- CLOSED terminal state -->
+  <g>
+    <rect x="860" y="280" width="160" height="70" rx="14" fill="url(#ilCharcoal)"/>
+    <text x="940" y="310" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="700">CLOSED</text>
+    <text x="940" y="330" text-anchor="middle" fill="#ffffff" font-size="11" opacity="0.7">abandoned · terminal</text>
+  </g>
+
+  <!-- Dashed arrows to CLOSED from OPEN, READY, FAILED -->
+  <path d="M240 200 C 600 240, 800 285, 860 305" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#ilArrowDashed)"/>
+  <path d="M500 200 C 700 240, 800 280, 860 305" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#ilArrowDashed)"/>
+  <path d="M240 315 L 860 315" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#ilArrowDashed)"/>
+
+  <g>
+    <rect x="638" y="278" width="160" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="718" y="292" text-anchor="middle" fill="#94a3b8" font-size="11" font-weight="600">Operator: close (abandon)</text>
+  </g>
+
+  <!-- Bottom annotation -->
+  <text x="550" y="425" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.65">Comments thread independently — OPEN ↔ CLOSED — without blocking the review state.</text>
+  <text x="550" y="445" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.5">Builds (POST /v1/reviews/{id}/builds) drive the OPEN → READY / FAILED transitions automatically.</text>
+</svg>

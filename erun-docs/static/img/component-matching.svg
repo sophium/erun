@@ -1,0 +1,70 @@
+<svg viewBox="0 0 1000 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="componentMatchingTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="componentMatchingTitle">Three columns showing how a tenant-prefixed component name matches across source, docker, and k8s paths in the erun repo. Source module at erun-backend/erun-backend-api/ (nested, with go.mod, cmd/, pkg/). Docker build context at erun-devops/docker/erun-backend-api/ holds the Dockerfile. Helm chart at erun-devops/k8s/erun-backend-api/ holds Chart.yaml. The single identifier 'erun-backend-api' in the centre shows the shared name that ERun uses to match them. ERun's components are always tenant-prefixed (erun-cli, erun-mcp, erun-backend-api) and the source can be either top-level or nested under another module.</title>
+
+  <defs>
+    <linearGradient id="cmCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="cmArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="500" y="44" text-anchor="middle" fill="currentColor" font-size="18" font-weight="600" letter-spacing="0.01em">Components match by name</text>
+  <text x="500" y="68" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.65">one identifier (tenant-prefixed) · three paths · ERun wires them up</text>
+
+  <!-- Central component-name pill -->
+  <g>
+    <rect x="370" y="180" width="260" height="56" rx="14" fill="url(#cmCharcoal)"/>
+    <text x="500" y="207" text-anchor="middle" fill="#ffffff" font-size="11.5" opacity="0.75" letter-spacing="0.08em">COMPONENT NAME</text>
+    <text x="500" y="227" text-anchor="middle" fill="#ffffff" font-size="15" font-weight="700" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">erun-backend-api</text>
+  </g>
+
+  <!-- LEFT: source -->
+  <g>
+    <rect x="40" y="120" width="280" height="180" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="60" y="146" text-anchor="start" fill="#0891b2" font-size="11" font-weight="600" letter-spacing="0.08em">SOURCE</text>
+    <text x="180" y="178" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">erun-backend/erun-backend-api/</text>
+    <text x="180" y="208" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.6">code lives here · may nest</text>
+    <text x="180" y="234" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">go.mod · cmd/ · pkg/</text>
+    <text x="180" y="270" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">(or top-level `erun-cli/`)</text>
+  </g>
+
+  <!-- MIDDLE-TOP: docker context -->
+  <g>
+    <rect x="360" y="80" width="280" height="84" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="380" y="105" text-anchor="start" fill="#0891b2" font-size="11" font-weight="600" letter-spacing="0.08em">DOCKER CONTEXT</text>
+    <text x="500" y="135" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">erun-devops/docker/erun-backend-api/</text>
+    <text x="500" y="153" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">Dockerfile + optional VERSION</text>
+  </g>
+
+  <!-- MIDDLE-BOTTOM: helm chart -->
+  <g>
+    <rect x="360" y="252" width="280" height="84" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="380" y="277" text-anchor="start" fill="#0891b2" font-size="11" font-weight="600" letter-spacing="0.08em">HELM CHART</text>
+    <text x="500" y="307" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">erun-devops/k8s/erun-backend-api/</text>
+    <text x="500" y="325" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">Chart.yaml + templates/</text>
+  </g>
+
+  <!-- RIGHT: deployed result -->
+  <g>
+    <rect x="680" y="120" width="280" height="180" rx="14" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
+    <text x="700" y="146" text-anchor="start" fill="currentColor" font-size="11" font-weight="600" letter-spacing="0.08em" opacity="0.55">DEPLOYED</text>
+    <text x="820" y="178" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600">erun-backend-api</text>
+    <text x="820" y="200" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">deployment + service</text>
+    <text x="820" y="232" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.5">image:</text>
+    <text x="820" y="248" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">&lt;registry&gt;/erun-backend-api:1.0.0</text>
+    <text x="820" y="278" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">in namespace erun-&lt;env&gt;</text>
+  </g>
+
+  <!-- Arrows from central name to each side, and to the deployed box -->
+  <line x1="370" y1="208" x2="320" y2="208" stroke="#0891b2" stroke-width="1.5" marker-end="url(#cmArrow)"/>
+  <line x1="500" y1="180" x2="500" y2="164" stroke="#0891b2" stroke-width="1.5" marker-end="url(#cmArrow)"/>
+  <line x1="500" y1="236" x2="500" y2="252" stroke="#0891b2" stroke-width="1.5" marker-end="url(#cmArrow)"/>
+  <line x1="630" y1="208" x2="680" y2="208" stroke="#0891b2" stroke-width="1.5" marker-end="url(#cmArrow)"/>
+
+  <!-- Bottom annotation -->
+  <text x="500" y="365" text-anchor="middle" fill="currentColor" font-size="13" font-weight="500" opacity="0.7">Pick the (tenant-prefixed) name once. ERun finds the source, the Dockerfile, the chart, and ships the right image.</text>
+</svg>

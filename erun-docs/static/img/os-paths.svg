@@ -1,0 +1,68 @@
+<svg viewBox="0 0 1000 410" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="osPathsTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="osPathsTitle">Two getting-started paths side by side. macOS path on the left: type 'erun' in your project folder; ERun sets up a local Kubernetes env on Docker Desktop, OrbStack, or Rancher Desktop. Windows path on the right: open the ERun desktop app; create a remote env; ERun provisions a managed cloud Kubernetes cluster. Both paths converge at 'Ready to work — IDE + Agent attached, same workflow either way.'</title>
+
+  <defs>
+    <linearGradient id="opCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="opArrowSolid" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+  </defs>
+
+  <!-- macOS header -->
+  <g>
+    <rect x="40" y="20" width="440" height="40" rx="14" fill="url(#opCharcoal)"/>
+    <text x="260" y="46" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" letter-spacing="0.04em">macOS · LOCAL KUBERNETES</text>
+  </g>
+
+  <!-- macOS Step 1: type erun -->
+  <g>
+    <rect x="60" y="90" width="400" height="60" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="260" y="114" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.6">in your project folder</text>
+    <text x="260" y="137" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">$ erun</text>
+  </g>
+  <line x1="260" y1="150" x2="260" y2="178" stroke="#0891b2" stroke-width="1.5" marker-end="url(#opArrowSolid)"/>
+
+  <!-- macOS Step 2: setup env -->
+  <g>
+    <rect x="60" y="180" width="400" height="70" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="260" y="208" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">ERun sets up your env</text>
+    <text x="260" y="230" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.65">on Docker Desktop / OrbStack / Rancher Desktop</text>
+  </g>
+
+  <!-- Windows header -->
+  <g>
+    <rect x="520" y="20" width="440" height="40" rx="14" fill="url(#opCharcoal)"/>
+    <text x="740" y="46" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" letter-spacing="0.04em">Windows · REMOTE / CLOUD</text>
+  </g>
+
+  <!-- Windows Step 1: open desktop app -->
+  <g>
+    <rect x="540" y="90" width="400" height="60" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="740" y="114" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.6">on your laptop</text>
+    <text x="740" y="137" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">Open ERun desktop app</text>
+  </g>
+  <line x1="740" y1="150" x2="740" y2="178" stroke="#0891b2" stroke-width="1.5" marker-end="url(#opArrowSolid)"/>
+
+  <!-- Windows Step 2: create remote env -->
+  <g>
+    <rect x="540" y="180" width="400" height="70" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="740" y="208" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">Create a remote env</text>
+    <text x="740" y="230" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.65">ERun provisions a managed cloud Kubernetes cluster</text>
+  </g>
+
+  <!-- Y-merge convergence: down from each Step 2, then horizontal, then one arrow down to Ready -->
+  <line x1="260" y1="250" x2="260" y2="290" stroke="#0891b2" stroke-width="1.5"/>
+  <line x1="740" y1="250" x2="740" y2="290" stroke="#0891b2" stroke-width="1.5"/>
+  <line x1="260" y1="290" x2="740" y2="290" stroke="#0891b2" stroke-width="1.5"/>
+  <line x1="500" y1="290" x2="500" y2="322" stroke="#0891b2" stroke-width="1.5" marker-end="url(#opArrowSolid)"/>
+
+  <!-- Ready card -->
+  <g>
+    <rect x="280" y="324" width="440" height="66" rx="10" fill="none" stroke="#0891b2" stroke-width="2"/>
+    <text x="500" y="352" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600">Ready to work</text>
+    <text x="500" y="373" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.65">IDE + Agent attached · same workflow either way</text>
+  </g>
+</svg>

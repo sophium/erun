@@ -15,7 +15,10 @@ import { expect, test } from '../fixtures/erunApp.js';
 // 3.2 s timer in notificationThunks.ts.
 
 test.describe('app-notification toast', () => {
-  test('info notification renders in the titlebar then auto-dismisses', async ({ app, page }) => {
+  test('info notification renders in the titlebar then auto-dismisses', async ({
+    app: _app,
+    page,
+  }) => {
     const message = 'Stopped idle cloud context cluster-cloud.';
 
     await page.evaluate(
@@ -39,7 +42,7 @@ test.describe('app-notification toast', () => {
     await expect(pill).toHaveCount(0, { timeout: 5_000 });
   });
 
-  test('error notification persists (no auto-dismiss)', async ({ app, page }) => {
+  test('error notification persists (no auto-dismiss)', async ({ app: _app, page }) => {
     const message = 'Backend pinned a problem you should read.';
     await page.evaluate(
       (payload) => {
@@ -63,7 +66,7 @@ test.describe('app-notification toast', () => {
     await expect(pill).toBeVisible();
   });
 
-  test('payload with empty message is ignored', async ({ app, page }) => {
+  test('payload with empty message is ignored', async ({ app: _app, page }) => {
     await page.evaluate(() => {
       const runtime = (
         window as unknown as {

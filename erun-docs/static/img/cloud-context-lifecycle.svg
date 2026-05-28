@@ -1,0 +1,64 @@
+<svg viewBox="0 0 1000 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="cloudCtxLifecycleTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="cloudCtxLifecycleTitle">Cloud context lifecycle. Four state boxes in a row — stopped, starting, running, stopping — connected by arrows labelled with the events that trigger the transitions: 'erun open' takes stopped to starting; 'cluster ready' takes starting to running; 'idle policy fires' takes running to stopping; 'shutdown complete' takes stopping back to stopped via a return curve below. ERun watches each cloud context in the background and reports the current state in 'erun list' and in the desktop sidebar.</title>
+
+  <defs>
+    <marker id="ccArrowSolid" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+  </defs>
+
+  <!-- Title + subtitle -->
+  <text x="500" y="46" text-anchor="middle" fill="currentColor" font-size="18" font-weight="600" letter-spacing="0.01em">Cloud context lifecycle</text>
+  <text x="500" y="70" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.65">ERun starts the cluster on demand, stops it when idle</text>
+
+  <!-- 4 state boxes in a row -->
+  <g>
+    <rect x="80" y="140" width="180" height="64" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="170" y="170" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">stopped</text>
+    <text x="170" y="190" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">cluster is off</text>
+  </g>
+  <g>
+    <rect x="300" y="140" width="180" height="64" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="390" y="170" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">starting</text>
+    <text x="390" y="190" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">waking up</text>
+  </g>
+  <g>
+    <rect x="520" y="140" width="180" height="64" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="610" y="170" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">running</text>
+    <text x="610" y="190" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">ready to use</text>
+  </g>
+  <g>
+    <rect x="740" y="140" width="180" height="64" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="830" y="170" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">stopping</text>
+    <text x="830" y="190" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">winding down</text>
+  </g>
+
+  <!-- Forward arrows between adjacent states -->
+  <line x1="260" y1="172" x2="300" y2="172" stroke="#0891b2" stroke-width="1.5" marker-end="url(#ccArrowSolid)"/>
+  <line x1="480" y1="172" x2="520" y2="172" stroke="#0891b2" stroke-width="1.5" marker-end="url(#ccArrowSolid)"/>
+  <line x1="700" y1="172" x2="740" y2="172" stroke="#0891b2" stroke-width="1.5" marker-end="url(#ccArrowSolid)"/>
+
+  <!-- Forward arrow labels -->
+  <g>
+    <rect x="232" y="125" width="96" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="280" y="139" text-anchor="middle" fill="#0891b2" font-size="11.5" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">erun open</text>
+  </g>
+  <g>
+    <rect x="452" y="125" width="96" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="500" y="139" text-anchor="middle" fill="#0891b2" font-size="11.5" font-weight="600">cluster ready</text>
+  </g>
+  <g>
+    <rect x="660" y="125" width="120" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="720" y="139" text-anchor="middle" fill="#0891b2" font-size="11.5" font-weight="600">idle policy fires</text>
+  </g>
+
+  <!-- Return curve from stopping back to stopped, below -->
+  <path d="M830 204 C 830 260, 170 260, 170 204" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#ccArrowSolid)"/>
+  <g>
+    <rect x="438" y="252" width="124" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="500" y="266" text-anchor="middle" fill="#0891b2" font-size="11.5" font-weight="600">shutdown complete</text>
+  </g>
+
+  <!-- Bottom annotation -->
+  <text x="500" y="316" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.65">Idle timeout and traffic thresholds are configurable per environment.</text>
+</svg>

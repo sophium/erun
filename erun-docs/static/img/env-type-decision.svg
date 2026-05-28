@@ -1,0 +1,74 @@
+<svg viewBox="0 0 1000 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="envTypeDecisionTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="envTypeDecisionTitle">Decision diagram for picking an environment type. One question at the top — 'What's this env for?' — branches into three outcomes: LOCAL-AGENT (develop on your machine, cluster on your laptop, worktree mounted via hostPath); REMOTE-AGENT (develop in the cloud, cluster doesn't share your filesystem, worktree cloned to PVC); RUNTIME (serve deployed services only, receives erun deploy artefacts). The arrows are labelled 'iterate · machine', 'iterate · cloud', and 'serve only'.</title>
+
+  <defs>
+    <linearGradient id="etCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="etArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="500" y="44" text-anchor="middle" fill="currentColor" font-size="18" font-weight="600" letter-spacing="0.01em">Choosing an environment type</text>
+  <text x="500" y="68" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.65">one question, three outcomes</text>
+
+  <!-- Top question box -->
+  <g>
+    <rect x="350" y="100" width="300" height="64" rx="14" fill="url(#etCharcoal)"/>
+    <text x="500" y="129" text-anchor="middle" fill="#ffffff" font-size="15" font-weight="600">What is this env for?</text>
+    <text x="500" y="150" text-anchor="middle" fill="#ffffff" font-size="11.5" opacity="0.7">iterate · serve · or both</text>
+  </g>
+
+  <!-- 3 leaf boxes -->
+  <g>
+    <rect x="40" y="240" width="280" height="160" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="60" y="265" text-anchor="start" fill="#0891b2" font-size="11" font-weight="600" letter-spacing="0.08em">LOCAL-AGENT</text>
+    <text x="180" y="296" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">Develop on your machine</text>
+    <text x="180" y="320" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">cluster lives on your laptop</text>
+    <text x="180" y="340" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">(Docker Desktop, OrbStack, k3d)</text>
+    <text x="180" y="367" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.55">worktree mounted from host</text>
+    <text x="180" y="384" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.55">snapshot-tagged builds</text>
+  </g>
+
+  <g>
+    <rect x="360" y="240" width="280" height="160" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="380" y="265" text-anchor="start" fill="#0891b2" font-size="11" font-weight="600" letter-spacing="0.08em">REMOTE-AGENT</text>
+    <text x="500" y="296" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">Develop in the cloud</text>
+    <text x="500" y="320" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">cluster doesn't share your filesystem</text>
+    <text x="500" y="340" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">(EKS, GKE, AKS)</text>
+    <text x="500" y="367" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.55">worktree cloned to PVC</text>
+    <text x="500" y="384" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.55">snapshot-tagged builds</text>
+  </g>
+
+  <g>
+    <rect x="680" y="240" width="280" height="160" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="700" y="265" text-anchor="start" fill="#0891b2" font-size="11" font-weight="600" letter-spacing="0.08em">RUNTIME</text>
+    <text x="820" y="296" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">Serve deployed services</text>
+    <text x="820" y="320" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">no development here</text>
+    <text x="820" y="340" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">(dev · test · dr · prod)</text>
+    <text x="820" y="367" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.55">no worktree, no builds</text>
+    <text x="820" y="384" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.55">receives `erun deploy` artefacts</text>
+  </g>
+
+  <!-- 3 arrows from question down to leaves -->
+  <path d="M420 164 C 380 190, 240 215, 180 240" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#etArrow)"/>
+  <line x1="500" y1="164" x2="500" y2="240" stroke="#0891b2" stroke-width="1.5" marker-end="url(#etArrow)"/>
+  <path d="M580 164 C 620 190, 760 215, 820 240" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#etArrow)"/>
+
+  <!-- Arrow labels -->
+  <g>
+    <rect x="200" y="194" width="118" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="259" y="208" text-anchor="middle" fill="#0891b2" font-size="11.5" font-weight="600">iterate · machine</text>
+  </g>
+  <g>
+    <rect x="440" y="194" width="120" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="500" y="208" text-anchor="middle" fill="#0891b2" font-size="11.5" font-weight="600">iterate · cloud</text>
+  </g>
+  <g>
+    <rect x="680" y="194" width="120" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="740" y="208" text-anchor="middle" fill="#0891b2" font-size="11.5" font-weight="600">serve only</text>
+  </g>
+</svg>

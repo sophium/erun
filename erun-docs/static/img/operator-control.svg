@@ -1,0 +1,70 @@
+<svg viewBox="0 0 1000 420" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="operatorControlTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="operatorControlTitle">Operator control surface. Four control cards across the top — Preview (--dry-run shows the plan before any side effect), Audit (every action recorded and replayable), Join (erun open steps into the env), Take over / hand back (drive directly, then yield) — each connected by an arrow down into a single environment card. Inside the environment, Operator and Agent pills sit side by side, with 'side by side, full stack inside' underneath. A strapline reads: 'Same control surface whether the Operator is supervising, hands-on, or absent.'</title>
+
+  <defs>
+    <linearGradient id="ocCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="ocArrowSolid" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="500" y="44" text-anchor="middle" fill="currentColor" font-size="18" font-weight="600" letter-spacing="0.01em">Operator control surface</text>
+  <text x="500" y="68" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.65">four points of control over every environment</text>
+
+  <!-- 4 control cards at top -->
+  <g>
+    <rect x="40" y="100" width="210" height="100" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="145" y="129" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">Preview</text>
+    <text x="145" y="152" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.65" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">--dry-run</text>
+    <text x="145" y="174" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">see plan before run</text>
+  </g>
+  <g>
+    <rect x="270" y="100" width="210" height="100" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="375" y="129" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">Audit</text>
+    <text x="375" y="152" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.65">every call · every transition</text>
+    <text x="375" y="174" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">recorded · replayable</text>
+  </g>
+  <g>
+    <rect x="500" y="100" width="210" height="100" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="605" y="129" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">Join</text>
+    <text x="605" y="152" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.65" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">erun open</text>
+    <text x="605" y="174" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">step into the env</text>
+  </g>
+  <g>
+    <rect x="730" y="100" width="210" height="100" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="835" y="129" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">Take over / hand back</text>
+    <text x="835" y="152" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.65">drive directly</text>
+    <text x="835" y="174" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">yield when ready</text>
+  </g>
+
+  <!-- Arrows down from each control card converging into the env card -->
+  <line x1="145" y1="200" x2="370" y2="265" stroke="#0891b2" stroke-width="1.5" marker-end="url(#ocArrowSolid)"/>
+  <line x1="375" y1="200" x2="450" y2="265" stroke="#0891b2" stroke-width="1.5" marker-end="url(#ocArrowSolid)"/>
+  <line x1="605" y1="200" x2="550" y2="265" stroke="#0891b2" stroke-width="1.5" marker-end="url(#ocArrowSolid)"/>
+  <line x1="835" y1="200" x2="630" y2="265" stroke="#0891b2" stroke-width="1.5" marker-end="url(#ocArrowSolid)"/>
+
+  <!-- Env card at bottom — single env where Operator + Agent are -->
+  <g>
+    <rect x="300" y="270" width="400" height="110" rx="14" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
+    <text x="320" y="295" text-anchor="start" fill="currentColor" font-size="12" font-weight="600" opacity="0.55" letter-spacing="0.08em">ANY ENVIRONMENT</text>
+
+    <!-- Operator + Agent pills inside env -->
+    <g>
+      <rect x="370" y="310" width="110" height="32" rx="16" fill="url(#ocCharcoal)"/>
+      <text x="425" y="331" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600">Operator</text>
+    </g>
+    <g>
+      <rect x="520" y="310" width="110" height="32" rx="16" fill="url(#ocCharcoal)"/>
+      <text x="575" y="331" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600">Agent</text>
+    </g>
+
+    <text x="500" y="367" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">side by side, full stack, one audit trail</text>
+  </g>
+
+  <!-- BOTTOM ANNOTATION -->
+  <text x="500" y="408" text-anchor="middle" fill="currentColor" font-size="13" font-weight="500" opacity="0.7">Same control surface whether the Operator is supervising, hands-on, or absent.</text>
+</svg>

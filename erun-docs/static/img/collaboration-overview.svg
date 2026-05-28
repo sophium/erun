@@ -1,0 +1,70 @@
+<svg viewBox="0 0 920 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="collabTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="collabTitle">Multiple actors (Agent A, Agent B, Operator) write to a shared erun API. The API sends merge-queue notifications back to the agents.</title>
+  <defs>
+    <linearGradient id="collabEndpointGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="collabArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+    <marker id="collabArrowDashed" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#22d3ee"/>
+    </marker>
+  </defs>
+
+  <!-- Agent A (top left) -->
+  <g>
+    <rect x="20" y="40" width="220" height="60" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="130" y="68" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">Agent A</text>
+    <text x="130" y="88" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.7">env: feature-a</text>
+  </g>
+
+  <!-- Agent B (middle left) -->
+  <g>
+    <rect x="20" y="140" width="220" height="60" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="130" y="168" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">Agent B</text>
+    <text x="130" y="188" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.7">env: feature-b</text>
+  </g>
+
+  <!-- Operator (bottom left) -->
+  <g>
+    <rect x="20" y="240" width="220" height="60" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="130" y="268" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">Operator</text>
+    <text x="130" y="288" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.7">desktop</text>
+  </g>
+
+  <!-- erun API (right, charcoal pill) -->
+  <g>
+    <rect x="600" y="120" width="300" height="100" rx="22" fill="url(#collabEndpointGrad)"/>
+    <text x="750" y="156" text-anchor="middle" fill="#ffffff" font-size="18" font-weight="600" letter-spacing="0.01em">erun API</text>
+    <text x="750" y="180" text-anchor="middle" fill="#ffffff" font-size="11" opacity="0.7">reviews · comments · builds</text>
+    <text x="750" y="196" text-anchor="middle" fill="#ffffff" font-size="11" opacity="0.7">merge queue</text>
+  </g>
+
+  <!-- Solid arrows: actors → API -->
+  <path d="M240 70 C 400 70, 460 130, 595 145" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#collabArrow)"/>
+  <path d="M240 170 L 595 170" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#collabArrow)"/>
+  <path d="M240 270 C 400 270, 460 210, 595 195" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#collabArrow)"/>
+
+  <!-- "writes" label on the upper arrow -->
+  <g>
+    <rect x="370" y="92" width="78" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="409" y="106" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="500" letter-spacing="0.02em">writes</text>
+  </g>
+  <!-- "reads" label on the lower arrow -->
+  <g>
+    <rect x="370" y="228" width="78" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="409" y="242" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="500" letter-spacing="0.02em">reads</text>
+  </g>
+
+  <!-- Dashed return arrows: API → agents (merge queue / replies) -->
+  <path d="M600 135 C 440 80, 380 50, 240 55" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#collabArrowDashed)"/>
+  <path d="M600 195 C 440 220, 380 230, 240 195" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#collabArrowDashed)"/>
+
+  <!-- "merge queue · replies" label centered between the dashed arrows -->
+  <g>
+    <rect x="328" y="155" width="180" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="418" y="169" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="500" letter-spacing="0.02em">merge queue · replies</text>
+  </g>
+</svg>

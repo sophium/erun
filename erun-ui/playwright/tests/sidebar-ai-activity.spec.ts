@@ -81,7 +81,7 @@ test.describe('sidebar AI activity spinner', () => {
   });
 
   test('ai-activity payloads with empty tenant or environment are ignored', async ({
-    app,
+    app: _app,
     page,
   }) => {
     const sidebar = page.locator('aside').first();
