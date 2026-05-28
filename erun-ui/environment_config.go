@@ -218,6 +218,8 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 	workspaceSyncEnabled := config.SSHD.WorkspaceSync.Enabled && workspaceSyncLocalPath != ""
 	result := uiEnvironmentConfig{
 		Name:                 name,
+		Type:                 config.ResolvedType(),
+		LocalRepoPath:        strings.TrimSpace(config.LocalRepoPath),
 		RepoPath:             strings.TrimSpace(config.RepoPath),
 		KubernetesContext:    strings.TrimSpace(config.KubernetesContext),
 		ContainerRegistry:    containerRegistry,
@@ -365,6 +367,12 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	}
 	existing.Claude = claudeConfigFromUI(config.Claude)
 	existing.AITool = strings.TrimSpace(config.AITool)
+	if config.Type.IsValid() {
+		existing.Type = config.Type
+	}
+	if localRepo := strings.TrimSpace(config.LocalRepoPath); localRepo != "" {
+		existing.LocalRepoPath = localRepo
+	}
 	existing.SetSnapshot(config.Snapshot)
 	existing.AutoStart = copyBoolPtr(config.AutoStart)
 	existing.RemoteHostCredentials = config.RemoteHostCredentials

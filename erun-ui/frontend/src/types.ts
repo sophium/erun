@@ -1,5 +1,8 @@
+export type EnvironmentType = 'local-agent' | 'remote-agent' | 'runtime' | '';
+
 export interface UIEnvironment {
   name: string;
+  type?: EnvironmentType;
   mcpUrl?: string;
   apiUrl?: string;
   runtimeVersion?: string;
@@ -275,6 +278,8 @@ export interface UIEnvironmentConfig {
   claude: UIEnvironmentClaudeConfig;
   claudeDefaults: UIEnvironmentClaudeDefaults;
   localPorts: UIEnvironmentLocalPorts;
+  type?: EnvironmentType;
+  localRepoPath?: string;
   remote: boolean;
   snapshot: boolean;
   // AutoStart is the desktop-only auto-start policy for the linked cloud
