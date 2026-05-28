@@ -64,7 +64,6 @@ export interface UIState {
   message?: string;
   build?: UIBuildDetails;
   versionSuggestions?: UIVersionSuggestion[];
-  kubernetesContexts?: string[];
   cloudProviders?: UICloudProviderStatus[];
 }
 

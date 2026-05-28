@@ -286,6 +286,12 @@ function RuntimePodFields({ dialog }: { dialog: EnvironmentDialog }): React.Reac
 
 function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
+  // The "Create tenant DevOps repository" toggle used to live here but
+  // its value is fully derived from state the dialog already has: the
+  // submit pipeline (environmentDialogSelection) passes --bootstrap iff
+  // the tenant is new, since that's the only case where the remote
+  // devops module isn't already in place. Removed to stop asking an
+  // unanswerable question.
   return (
     <div className="grid gap-3">
       <CheckboxField
@@ -304,16 +310,6 @@ function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): Rea
         disabled={dialog.busy}
         onCheckedChange={(noGit) => {
           dispatch(updateEnvironmentDialog({ noGit }));
-        }}
-      />
-      <CheckboxField
-        id="environment-bootstrap"
-        label="Create tenant DevOps repository"
-        helper="Generates the tenant's shared DevOps module — Helm values and deployment templates reused by every environment in this tenant."
-        checked={dialog.bootstrap}
-        disabled={dialog.busy}
-        onCheckedChange={(bootstrap) => {
-          dispatch(updateEnvironmentDialog({ bootstrap }));
         }}
       />
     </div>

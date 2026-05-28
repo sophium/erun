@@ -9,14 +9,13 @@ import { normalizeDialogValue } from './versionSuggestions';
 // dialogContextsThunks own the env-init dialog's "available kubernetes
 // contexts" + "selected context runtime resources" flows. The user-driven
 // refresh (kubernetesContext field changes) lives in
-// environmentDialogThunks; this module covers boot/env-change-triggered
-// refresh and the user-triggered "rescan k8s contexts" button.
+// environmentDialogThunks; this module covers dialog-open seeding and the
+// user-triggered "rescan k8s contexts" button.
 
 // refreshDialogRuntimeResources hits the runtime-resources endpoint for
 // the dialog's currently-selected k8s context and patches the dialog with
 // the resulting CPU/memory totals. Internal helper; not exported because
-// callers should drive it via refreshKubernetesContexts or
-// selectLoadedKubernetesContexts.
+// callers should drive it via refreshKubernetesContexts.
 const refreshDialogRuntimeResources =
   (kubernetesContext: string): AppThunk<Promise<void>> =>
   async (dispatch, getState) => {
@@ -71,36 +70,20 @@ const refreshDialogRuntimeResources =
     }
   };
 
-// selectLoadedKubernetesContexts seeds the dialog from a freshly-loaded
-// initial-state response. boot() and reloadStateAfterEnvironmentChange()
-// dispatch this after the contexts are returned from the backend.
-export const selectLoadedKubernetesContexts =
-  (contexts: string[]): AppThunk<Promise<void>> =>
-  async (dispatch, getState) => {
-    const dialog = getState().environmentDialog;
-    if (!dialog.open || dialog.actionMode !== 'init') {
-      return;
-    }
-    const normalized = contexts.map((context) => context.trim()).filter(Boolean);
-    const resolved = selectDialogKubernetesContext(getState(), normalized);
-    dispatch(
-      patchEnvironmentDialog({
-        kubernetesContexts: normalized,
-        kubernetesContext: resolved,
-        kubernetesContextsLoading: false,
-      }),
-    );
-    await dispatch(refreshDialogRuntimeResources(resolved));
-  };
-
 // refreshKubernetesContexts re-scans kubeconfig for available contexts and
 // patches the dialog. Triggered by the "rescan k8s contexts" button and
 // after cloud-context power changes that may have rewritten kubeconfig.
+// forceRefetch is required: without it RTK Query returns the cached
+// result of the previous LoadKubernetesContexts call, so a transient
+// empty result (or simply a need to re-scan after a kubeconfig edit) gets
+// pinned to the dialog and Rescan can never recover.
 export const refreshKubernetesContexts =
   (): AppThunk<Promise<void>> => async (dispatch, getState) => {
     try {
       const result = await dispatch(
-        kubernetesApi.endpoints.getKubernetesContexts.initiate(),
+        kubernetesApi.endpoints.getKubernetesContexts.initiate(undefined, {
+          forceRefetch: true,
+        }),
       ).unwrap();
       const contexts = result.map((context) => context.trim()).filter(Boolean);
       const dialog = getState().environmentDialog;

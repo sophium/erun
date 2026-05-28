@@ -68,7 +68,6 @@ export interface EnvironmentDialogState {
   };
   containerRegistry: string;
   noGit: boolean;
-  bootstrap: boolean;
   setDefaultTenant: boolean;
   versionImage: string;
   choicesOpen: boolean;
@@ -242,7 +241,6 @@ export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
   runtimePod: defaultRuntimePodConfig(),
   containerRegistry: '',
   noGit: false,
-  bootstrap: false,
   setDefaultTenant: true,
   versionImage: '',
   choicesOpen: false,

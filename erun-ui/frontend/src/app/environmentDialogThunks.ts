@@ -51,7 +51,6 @@ export const openInitializeDialog = (): AppThunk => (dispatch, getState) => {
       runtimePod: defaultEnvironmentDialog().runtimePod,
       containerRegistry: containerRegistryDefault,
       noGit: false,
-      bootstrap: false,
       setDefaultTenant: true,
       versionImage: state.tenants.versionSuggestions[0]?.image ?? '',
       choicesOpen: false,
@@ -136,7 +135,14 @@ export const submitEnvironmentDialog =
     if (dialog.busy) {
       return;
     }
-    const selection = environmentDialogSelection(dialog, state.tenants.versionSuggestions);
+    const tenantExists = state.tenants.tenants.some(
+      (tenant) => tenant.name === dialog.tenant.trim(),
+    );
+    const selection = environmentDialogSelection(
+      dialog,
+      state.tenants.versionSuggestions,
+      tenantExists,
+    );
     if (!selection) {
       dispatch(patchEnvironmentDialog({ error: '' }));
       form.reportValidity();
@@ -178,6 +184,7 @@ export const submitEnvironmentDialog =
 function environmentDialogSelection(
   dialog: EnvironmentDialogState,
   versionSuggestions: UIVersionSuggestion[],
+  tenantExists: boolean,
 ): UISelection | null {
   const values = normalizedEnvironmentDialogValues(dialog);
   if (!validEnvironmentDialogValues(values, dialog.actionMode)) {
@@ -195,7 +202,14 @@ function environmentDialogSelection(
     kubernetesContext: isInit ? values.kubernetesContext : undefined,
     containerRegistry: isInit ? values.containerRegistry : undefined,
     noGit: dialog.noGit,
-    bootstrap: isInit ? dialog.bootstrap : undefined,
+    // Bootstrap is derived, not asked. The desktop init flow always
+    // passes --remote (see erun-ui/session.go:buildInitArgs), so we're
+    // always on the remote-worktree path where --bootstrap matters. For
+    // a brand-new tenant (no envs in state.tenants) the remote devops
+    // module doesn't exist yet and the first deploy has nothing to
+    // render without it; for an existing tenant the module is already
+    // there and --bootstrap would be wasted SSH work.
+    bootstrap: isInit ? !tenantExists : undefined,
     setDefaultTenant: isInit ? dialog.setDefaultTenant : undefined,
   };
 }
