@@ -59,6 +59,27 @@ type SSHDWorkspaceSyncConfig struct {
 	LocalPath string `yaml:"localpath,omitempty"`
 }
 
+// EnvironmentType classifies an environment by where its worktree lives and
+// whether builds happen inside it. See docs at /concepts/environment-types.
+type EnvironmentType string
+
+const (
+	EnvironmentTypeLocalAgent  EnvironmentType = "local-agent"
+	EnvironmentTypeRemoteAgent EnvironmentType = "remote-agent"
+	EnvironmentTypeRuntime     EnvironmentType = "runtime"
+)
+
+// IsValid reports whether the value is one of the three canonical types.
+// Empty is not valid; callers wanting "unset" should test against the zero
+// value separately and then resolve via EnvConfig.ResolvedType.
+func (t EnvironmentType) IsValid() bool {
+	switch t {
+	case EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent, EnvironmentTypeRuntime:
+		return true
+	}
+	return false
+}
+
 func (c SSHDWorkspaceSyncConfig) IsZero() bool {
 	return !c.Enabled && strings.TrimSpace(c.LocalPath) == ""
 }
@@ -82,9 +103,11 @@ type TenantConfig struct {
 }
 
 type EnvConfig struct {
-	Name                string
-	RepoPath            string
-	KubernetesContext   string
+	Name              string
+	Type              EnvironmentType `yaml:"type,omitempty" json:"type,omitempty"`
+	LocalRepoPath     string          `yaml:"localrepopath,omitempty" json:"localRepoPath,omitempty"`
+	RepoPath          string          `yaml:"repopath,omitempty"`
+	KubernetesContext string
 	ContainerRegistry   string
 	CloudProviderAlias  string                  `yaml:"cloudprovideralias,omitempty"`
 	ManagedCloud        bool                    `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
@@ -130,6 +153,51 @@ func (c *EnvConfig) SetSnapshot(enabled bool) {
 	}
 	value := enabled
 	c.Snapshot = &value
+}
+
+// ResolvedType returns the env's type, deriving it from legacy Remote and
+// Snapshot fields when the explicit Type is unset. The truth table matches
+// the documented migration at /reference/configuration#planned-changes:
+//
+//	type unset, remote=false               → local-agent (covers name=="local")
+//	type unset, remote=true,  snapshot=true → remote-agent
+//	type unset, remote=true,  snapshot=false→ runtime
+//	type set                                → the set value (preferred)
+func (c EnvConfig) ResolvedType() EnvironmentType {
+	if c.Type.IsValid() {
+		return c.Type
+	}
+	if !c.Remote {
+		return EnvironmentTypeLocalAgent
+	}
+	if c.SnapshotEnabled() {
+		return EnvironmentTypeRemoteAgent
+	}
+	return EnvironmentTypeRuntime
+}
+
+// BuildsHere reports whether builds happen inside this env (local-agent and
+// remote-agent build here; runtime envs only receive deploys).
+func (c EnvConfig) BuildsHere() bool {
+	return c.ResolvedType() != EnvironmentTypeRuntime
+}
+
+// RemoteWorktree reports whether the worktree lives outside the local
+// machine (PVC for remote-agent, none for runtime). Local-agent mounts the
+// worktree from the local filesystem via hostPath.
+func (c EnvConfig) RemoteWorktree() bool {
+	return c.ResolvedType() != EnvironmentTypeLocalAgent
+}
+
+// EffectiveLocalRepoPath returns the new-shape LocalRepoPath when set,
+// falling back to the legacy RepoPath. Callers that need the path on the
+// host machine (chart worktreeHostPath, cwd→tenant matcher) should use this
+// helper instead of reading either field directly.
+func (c EnvConfig) EffectiveLocalRepoPath() string {
+	if path := strings.TrimSpace(c.LocalRepoPath); path != "" {
+		return path
+	}
+	return strings.TrimSpace(c.RepoPath)
 }
 
 type ProjectEnvironmentConfig struct {
