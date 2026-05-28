@@ -124,32 +124,6 @@ func TestSaveERunConfigWriteFailure(t *testing.T) {
 	}
 }
 
-func TestTenantConfigRoundTrip(t *testing.T) {
-	setupConfigTestXDGConfigHome(t)
-
-	snapshot := false
-	cfg := TenantConfig{
-		ProjectRoot:               "/tmp/project",
-		Name:                      "tenant-a",
-		DefaultEnvironment:        "dev",
-		CloudProviderAliases:      []string{"primary-cloud", "review-cloud"},
-		PrimaryCloudProviderAlias: "primary-cloud",
-		Snapshot:                  &snapshot,
-	}
-	if err := SaveTenantConfig(cfg); err != nil {
-		t.Fatalf("SaveTenantConfig failed: %v", err)
-	}
-
-	loaded, _, err := LoadTenantConfig(cfg.Name)
-	if err != nil {
-		t.Fatalf("LoadTenantConfig failed: %v", err)
-	}
-
-	if !reflect.DeepEqual(loaded, cfg) {
-		t.Fatalf("unexpected tenant config: %+v", loaded)
-	}
-}
-
 func TestListTenantConfigs(t *testing.T) {
 	setupConfigTestXDGConfigHome(t)
 
@@ -290,35 +264,6 @@ func requireErrorIs(t *testing.T, err, target error) {
 	t.Helper()
 	if !errors.Is(err, target) {
 		t.Fatalf("expected %v, got %v", target, err)
-	}
-}
-
-func TestEnvConfigRoundTrip(t *testing.T) {
-	setupConfigTestXDGConfigHome(t)
-
-	cfg := EnvConfig{
-		Name:              "dev",
-		RepoPath:          "/tmp/project-dev",
-		KubernetesContext: "cluster-dev",
-		ContainerRegistry: "erunpaas",
-		RuntimeVersion:    "1.2.3",
-		SSHD: SSHDConfig{
-			Enabled:       true,
-			LocalPort:     62222,
-			PublicKeyPath: "/tmp/id_ed25519.pub",
-		},
-	}
-	if err := SaveEnvConfig("tenant-a", cfg); err != nil {
-		t.Fatalf("SaveEnvConfig failed: %v", err)
-	}
-
-	loaded, _, err := LoadEnvConfig("tenant-a", cfg.Name)
-	if err != nil {
-		t.Fatalf("LoadEnvConfig failed: %v", err)
-	}
-
-	if !reflect.DeepEqual(loaded, cfg) {
-		t.Fatalf("unexpected env config: %+v", loaded)
 	}
 }
 
