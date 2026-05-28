@@ -2,7 +2,6 @@ import { AlertCircle, CheckCircle2, Copy, Info, LoaderCircle, X } from 'lucide-r
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { displayableIdleStatus } from '@/app/idleStatusEligibility';
 import {
   copyTerminalOutput,
   dismissNotification,
@@ -12,7 +11,6 @@ import {
 import type { AppState } from '@/app/state';
 import type { AppDispatch } from '@/app/store';
 import { IconTooltip } from '@/components/app/IconTooltip';
-import { idleCloudAction } from '@/components/app/Titlebar.helpers';
 import { Button } from '@/components/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -57,24 +55,23 @@ const statusIconClassNames: Record<TitlebarStatusKind, string> = {
 export function TitlebarStatus(): React.ReactElement | null {
   const notification = useAppSelector((state) => state.notification.notification);
   const terminalStatus = useAppSelector((state) => state.terminalStatus);
-  const rawIdleStatus = useAppSelector((state) => state.idle.idleStatus);
-  const idleCloudContextBusy = useAppSelector((state) => state.idle.idleCloudContextBusy);
   const status = computeTitlebarStatus(notification, terminalStatus);
   if (!status) {
     return null;
   }
-  const idleStatus = displayableIdleStatus(rawIdleStatus);
-  const idleAction = rawIdleStatus ? idleCloudAction(rawIdleStatus, idleCloudContextBusy) : null;
 
+  // Width: cap so the status pill never crowds the right-cluster buttons
+  // even on narrow viewports. Long messages still escalate to a popover
+  // via StatusMessagePopover when they exceed LONG_STATUS_THRESHOLD.
   return (
     <div
-      className={statusPositionClassName(idleStatus, Boolean(idleAction))}
+      className="pointer-events-none flex min-w-0 max-w-full [--wails-draggable:no-drag]"
       role={status.kind === 'error' ? 'alert' : 'status'}
       aria-live={status.kind === 'error' ? 'assertive' : 'polite'}
     >
       <div
         className={cn(
-          'pointer-events-auto flex h-8 max-w-full items-center gap-2 rounded-md border bg-background px-2.5 text-[13px] leading-none shadow-sm',
+          'pointer-events-auto flex h-8 min-w-0 max-w-full items-center gap-2 rounded-md border bg-background px-2.5 text-[13px] leading-none shadow-sm',
           statusBorderClassNames[status.kind],
         )}
       >
@@ -127,22 +124,6 @@ function computeTitlebarStatus(
     copyStatus: terminal.terminalCopyStatus,
     action: terminal.terminalStatusAction,
   };
-}
-
-function statusPositionClassName(
-  idleStatus: AppState['idleStatus'],
-  hasIdleAction: boolean,
-): string {
-  if (!idleStatus) {
-    if (hasIdleAction) {
-      return 'pointer-events-none absolute top-2.5 left-32 right-[204px] z-20 flex justify-center [--wails-draggable:no-drag] max-[980px]:left-[112px] max-[980px]:right-[182px]';
-    }
-    return 'pointer-events-none absolute top-2.5 left-32 right-[168px] z-20 flex justify-center [--wails-draggable:no-drag] max-[980px]:left-[112px] max-[980px]:right-[146px]';
-  }
-  if (hasIdleAction) {
-    return 'pointer-events-none absolute top-2.5 left-32 right-[268px] z-20 flex justify-center [--wails-draggable:no-drag] max-[980px]:left-[112px] max-[980px]:right-[246px]';
-  }
-  return 'pointer-events-none absolute top-2.5 left-32 right-[236px] z-20 flex justify-center [--wails-draggable:no-drag] max-[980px]:left-[112px] max-[980px]:right-[214px]';
 }
 
 function StatusIcon({ status }: { status: TitlebarStatusValue }): React.ReactElement {

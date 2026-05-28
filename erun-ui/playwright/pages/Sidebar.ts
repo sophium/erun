@@ -52,12 +52,10 @@ export class Sidebar {
   }
 
   async openEnvironment(tenant: string, env: string): Promise<void> {
-    // The env-row button is unlabelled; its accessible name is computed
-    // from inner span text (env name plus the optional "Local" badge), so
-    // an exact match would miss local envs. Match by title attribute,
-    // which the component sets to "<tenant> / <env>" (with a "(local)"
-    // suffix for local envs).
-    await this.page.locator(`button[title^="${tenant} / ${env}"]`).first().click();
+    // The env-row button is labelled with "<tenant> / <env>" (plus a
+    // "(local)" suffix for local envs). Match the aria-label prefix so
+    // either the plain or local-suffixed variant resolves.
+    await this.page.locator(`button[aria-label^="${tenant} / ${env}"]`).first().click();
   }
 
   async openManageDialogFor(tenant: string, env: string): Promise<void> {

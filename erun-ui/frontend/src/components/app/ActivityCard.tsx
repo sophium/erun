@@ -21,6 +21,7 @@ import {
   shellSessionIdFromEntry,
   shouldShowHelmRecovery,
 } from '@/components/app/ActivityQueueDrawer.helpers';
+import { IconTooltip } from '@/components/app/IconTooltip';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -99,16 +100,17 @@ export const ActivityCard = React.memo(function ActivityCard({
         <div className="flex flex-none items-center gap-2 text-xs text-muted-foreground">
           <span className="font-mono tabular-nums">{elapsed}</span>
           {dismissAvailable && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={dismissLabel}
-              title={dismissLabel}
-              onClick={handleDismiss}
-            >
-              <Trash2 aria-hidden="true" className="size-3.5" />
-            </Button>
+            <IconTooltip label={dismissLabel}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                aria-label={dismissLabel}
+                onClick={handleDismiss}
+              >
+                <Trash2 aria-hidden="true" className="size-3.5" />
+              </Button>
+            </IconTooltip>
           )}
         </div>
       </header>

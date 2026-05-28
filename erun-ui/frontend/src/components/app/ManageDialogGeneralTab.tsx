@@ -1,8 +1,10 @@
-import { LoaderCircle, Play, Power, Server } from 'lucide-react';
+import { Cog, LoaderCircle, Play, Power, Server } from 'lucide-react';
 import * as React from 'react';
 
+import { openGlobalConfigDialog } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
+  closeManageDialog,
   startManageCloudContext,
   stopManageCloudContext,
   updateManageConfig,
@@ -10,9 +12,11 @@ import {
 import { loadSavedPastContainerRegistries } from '@/app/storage';
 import { EditableComboField } from '@/components/app/EditableComboField';
 import { uniqueSuggestions } from '@/components/app/EditableComboField.helpers';
+import { EmptyState } from '@/components/app/EmptyState';
 import { CheckboxField, ReadonlyField, StatusBadge } from '@/components/app/ManageDialog.fields';
 import { SelectField } from '@/components/app/SelectField';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
 import type { UICloudContextStatus } from '@/types';
 
 export function GeneralTab(): React.ReactElement {
@@ -107,12 +111,40 @@ function CloudAliasSelect({
   disabled?: boolean;
   onChange: (value: string) => void;
 }): React.ReactElement {
+  const dispatch = useAppDispatch();
   const normalizedValue = value.trim();
   const normalizedOptions = options.map((option) => option.trim()).filter(Boolean);
   const selectOptions =
     normalizedValue && !normalizedOptions.includes(normalizedValue)
       ? [normalizedValue, ...normalizedOptions]
       : normalizedOptions;
+  if (selectOptions.length === 0) {
+    return (
+      <div className="grid gap-2">
+        <Label htmlFor={id}>Cloud alias</Label>
+        <EmptyState
+          icon={<Server />}
+          heading="No cloud aliases configured"
+          body="Cloud aliases are how ERun connects to your AWS account. Add one in ERun settings to link this environment to a cloud context."
+          action={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={disabled}
+              onClick={() => {
+                dispatch(closeManageDialog());
+                dispatch(openGlobalConfigDialog());
+              }}
+            >
+              <Cog aria-hidden="true" />
+              Configure cloud aliases…
+            </Button>
+          }
+        />
+      </div>
+    );
+  }
   return (
     <SelectField
       id={id}
@@ -143,20 +175,18 @@ function CloudContextField({
   onStop: (name: string) => void;
 }): React.ReactElement {
   if (!context) {
-    return (
-      <div className="grid gap-2">
-        <div className="text-sm font-medium leading-none">Cloud context</div>
-        <div className="rounded-[var(--radius)] border border-dashed border-border px-3 py-2.5 text-[13px] leading-[1.35] text-muted-foreground">
-          {cloudProviderAlias.trim() ? 'No linked cloud context' : 'Not linked'}
-        </div>
-      </div>
-    );
+    return <UnlinkedCloudContext cloudProviderAlias={cloudProviderAlias} />;
   }
   const running = context.status.trim() === 'running';
   return (
     <div className="grid gap-2">
-      <div className="text-sm font-medium leading-none">Cloud context</div>
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-[var(--radius)] border border-border px-3 py-2.5">
+      <div id="environment-config-cloudcontext" className="text-sm font-medium leading-none">
+        Cloud context
+      </div>
+      <div
+        className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 rounded-[var(--radius)] border border-border px-3 py-2.5"
+        aria-labelledby="environment-config-cloudcontext"
+      >
         <div className="grid min-w-0 gap-1">
           <div className="flex min-w-0 items-center gap-2 text-sm font-medium">
             <Server className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -206,6 +236,48 @@ function CloudContextField({
           </Button>
         )}
       </div>
+    </div>
+  );
+}
+
+// UnlinkedCloudContext renders an empty-state surface that explains why
+// no context is currently linked AND offers the matching recovery action.
+// Per AGENTS.md, the dashed-card with raw "Not linked" text was a gap:
+// users saw the missing state but had no path to recover. Now the path is
+// either "pick an alias above" or "open ERun settings to init a context".
+function UnlinkedCloudContext({
+  cloudProviderAlias,
+}: {
+  cloudProviderAlias: string;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const hasAlias = cloudProviderAlias.trim().length > 0;
+  return (
+    <div className="grid gap-2">
+      <div className="text-sm font-medium leading-none">Cloud context</div>
+      <EmptyState
+        icon={<Server />}
+        heading={hasAlias ? 'No linked cloud context' : 'Not linked'}
+        body={
+          hasAlias
+            ? 'This environment has a cloud alias but no cloud context. Init a context in ERun settings, then return here to link it.'
+            : 'Select a cloud alias above first. Cloud contexts are then created and managed from ERun settings.'
+        }
+        action={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              dispatch(closeManageDialog());
+              dispatch(openGlobalConfigDialog());
+            }}
+          >
+            <Cog aria-hidden="true" />
+            Open ERun settings…
+          </Button>
+        }
+      />
     </div>
   );
 }

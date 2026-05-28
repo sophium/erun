@@ -55,6 +55,63 @@ func TestLockTerminalsForActivityLocksMatchingSessions(t *testing.T) {
 	}
 }
 
+// TestLockTerminalEventsAlwaysCarryReason pins the contract documented in
+// erun-ui/AGENTS.md "Professional UX": the ActivityLockOverlay relies on
+// the backend always populating Reason on Locked=true events. The
+// frontend no longer carries a generic fallback string, so a missing
+// reason would render a blank overlay header. This test guards both
+// emit paths (lockTerminalsForActivity bulk + lockTerminalForActivity
+// per-session).
+func TestLockTerminalEventsAlwaysCarryReason(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
+	envSession := &managedTerminal{selection: selection, key: "env\x00team\x00dev", serial: 1, kind: sessionKindOpen}
+	app.sessions[envSession.key] = envSession
+
+	var emitted []activityLockEvent
+	app.SetEmitter(func(name string, data ...any) {
+		if name != activityQueueLockEvent || len(data) == 0 {
+			return
+		}
+		if ev, ok := data[0].(activityLockEvent); ok {
+			emitted = append(emitted, ev)
+		}
+	})
+
+	entry, _ := app.activityQueue.start(activityQueueEntry{
+		Command:     "deploy",
+		Tenant:      "team",
+		Environment: "dev",
+		Version:     "1.0.0",
+		Release:     "team-devops",
+	})
+
+	app.lockTerminalsForActivity(entry)
+
+	joinSession := &managedTerminal{selection: selection, key: "ai\x00team\x00dev", serial: 2, kind: sessionKindAI}
+	app.mu.Lock()
+	app.sessions[joinSession.key] = joinSession
+	app.mu.Unlock()
+	app.lockTerminalForActivity(joinSession.serial, entry)
+
+	if len(emitted) == 0 {
+		t.Fatal("expected lock events to be emitted")
+	}
+	lockedCount := 0
+	for _, ev := range emitted {
+		if !ev.Locked {
+			continue
+		}
+		lockedCount++
+		if strings.TrimSpace(ev.Reason) == "" {
+			t.Fatalf("Locked=true event has empty Reason: %+v", ev)
+		}
+	}
+	if lockedCount < 2 {
+		t.Fatalf("expected at least 2 locked events (bulk + per-session join), got %d in %+v", lockedCount, emitted)
+	}
+}
+
 func TestUnlockTerminalsForActivityClearsMatchingLocks(t *testing.T) {
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
