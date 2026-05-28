@@ -1,5 +1,30 @@
 {{- $mcpPort := default 17000 .Values.mcpPort -}}
 {{- $sshPort := default 17022 .Values.sshPort -}}
+{{- /*
+worktreeStorage selects how the runtime pod sources its worktree.
+  - "host":  hostPath mount of .Values.worktreeHostPath (default for local-agent envs).
+  - "pvc":   PVC-backed checkout cloned at first boot (remote-agent envs).
+  - "none":  no worktree mount (runtime envs that only receive deploys).
+For backward compatibility: when unset and worktreeHostPath is provided,
+behave as "host" so older deploys keep working. See
+docs/concepts/environment-types for the type→storage mapping.
+*/ -}}
+{{- $worktreeStorage := default "" .Values.worktreeStorage -}}
+{{- if eq $worktreeStorage "" -}}
+  {{- if .Values.worktreeHostPath -}}
+    {{- $worktreeStorage = "host" -}}
+  {{- else -}}
+    {{- $worktreeStorage = "none" -}}
+  {{- end -}}
+{{- end -}}
+{{- $worktreeRepoName := default "" .Values.worktreeRepoName -}}
+{{- if and (eq $worktreeStorage "host") (eq $worktreeRepoName "") -}}
+  {{- $worktreeRepoName = base (required "worktreeHostPath is required when worktreeStorage is host" .Values.worktreeHostPath) -}}
+{{- end -}}
+{{- $worktreePath := "" -}}
+{{- if ne $worktreeStorage "none" -}}
+  {{- $worktreePath = printf "/home/erun/git/%s" (required "worktreeRepoName is required when worktreeStorage is set" $worktreeRepoName) -}}
+{{- end -}}
 {{- $idle := default dict .Values.idle -}}
 {{- $idleTimeout := default "5m0s" $idle.timeout -}}
 {{- $idleWorkingHours := default "08:00-20:00" $idle.workingHours -}}
@@ -67,6 +92,21 @@ spec:
   resources:
     requests:
       storage: 50Gi
+{{- if eq $worktreeStorage "pvc" }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: erun-devops-worktree
+  labels:
+    app: erun-devops
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+{{- end }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -182,9 +222,9 @@ spec:
             - name: DOCKER_BUILDKIT
               value: "1"
             - name: ERUN_REPO_PATH
-              value: {{ printf "/home/erun/git/%s" (base (required "worktreeHostPath is required" .Values.worktreeHostPath)) | quote }}
+              value: {{ $worktreePath | quote }}
             - name: ERUN_REPO_REMOTE
-              value: "false"
+              value: {{ if eq $worktreeStorage "pvc" }}"true"{{ else }}"false"{{ end }}
             - name: ERUN_CLOUD_ENVIRONMENT
               value: {{ if $managedCloud }}"true"{{ else }}"false"{{ end }}
             - name: ERUN_CLOUD_CONTEXT_NAME
@@ -293,8 +333,10 @@ spec:
           volumeMounts:
             - name: erun-home
               mountPath: /home/erun
+            {{- if ne $worktreeStorage "none" }}
             - name: repo-worktree
-              mountPath: {{ printf "/home/erun/git/%s" (base (required "worktreeHostPath is required" .Values.worktreeHostPath)) | quote }}
+              mountPath: {{ $worktreePath | quote }}
+            {{- end }}
             - name: docker-socket
               mountPath: /var/run
         - image: {{ $mcpImage }}
@@ -310,9 +352,9 @@ spec:
             - name: DOCKER_BUILDKIT
               value: "1"
             - name: ERUN_REPO_PATH
-              value: {{ printf "/home/erun/git/%s" (base (required "worktreeHostPath is required" .Values.worktreeHostPath)) | quote }}
+              value: {{ $worktreePath | quote }}
             - name: ERUN_REPO_REMOTE
-              value: "false"
+              value: {{ if eq $worktreeStorage "pvc" }}"true"{{ else }}"false"{{ end }}
             - name: ERUN_KUBERNETES_CONTEXT
               value: in-cluster
             - name: ERUN_TENANT
@@ -331,8 +373,10 @@ spec:
           volumeMounts:
             - name: erun-home
               mountPath: /home/erun
+            {{- if ne $worktreeStorage "none" }}
             - name: repo-worktree
-              mountPath: {{ printf "/home/erun/git/%s" (base (required "worktreeHostPath is required" .Values.worktreeHostPath)) | quote }}
+              mountPath: {{ $worktreePath | quote }}
+            {{- end }}
             - name: docker-socket
               mountPath: /var/run
         - image: {{ $dindImage }}
@@ -368,10 +412,16 @@ spec:
         - name: erun-home
           persistentVolumeClaim:
             claimName: erun-devops-home
+        {{- if eq $worktreeStorage "host" }}
         - name: repo-worktree
           hostPath:
-            path: {{ required "worktreeHostPath is required" .Values.worktreeHostPath | quote }}
+            path: {{ required "worktreeHostPath is required when worktreeStorage is host" .Values.worktreeHostPath | quote }}
             type: DirectoryOrCreate
+        {{- else if eq $worktreeStorage "pvc" }}
+        - name: repo-worktree
+          persistentVolumeClaim:
+            claimName: erun-devops-worktree
+        {{- end }}
         - name: docker-socket
           emptyDir: {}
         - name: docker-state

@@ -25,6 +25,10 @@ const DevopsComponentName = "erun-devops"
 const (
 	WorktreeStorageHost = "host"
 	WorktreeStoragePVC  = "pvc"
+	// WorktreeStorageNone is reported for runtime envs that have no worktree.
+	// The erun-devops chart is not deployed for runtime envs, so this value
+	// is informational; chart-side compat treats it as "skip worktree mount".
+	WorktreeStorageNone = "none"
 )
 
 type DeployStore interface {
@@ -1113,6 +1117,14 @@ func cloudContextRegionFromName(name string) string {
 }
 
 func resolveWorktreeStorage(target OpenResult) string {
+	switch target.EnvConfig.ResolvedType() {
+	case EnvironmentTypeRuntime:
+		return WorktreeStorageNone
+	case EnvironmentTypeRemoteAgent:
+		return WorktreeStoragePVC
+	case EnvironmentTypeLocalAgent:
+		return WorktreeStorageHost
+	}
 	if target.RemoteRepo() {
 		return WorktreeStoragePVC
 	}
