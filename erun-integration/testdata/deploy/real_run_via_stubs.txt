@@ -1,5 +1,5 @@
 audit: erun deploy --no-snapshot --version <VERSION> team dev
-deploy: tenant=team environment=dev version-override=<VERSION> snapshot=false components=[] force=false
+deploy: tenant=team environment=dev version-override=<VERSION> snapshot=false components=[] force=false publish=false
 deploy: resolved 1 spec(s)
 deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
 dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)

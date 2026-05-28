@@ -49,6 +49,64 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("publish_traces_helm_package_and_push_before_upgrade", func(t *testing.T) {
+		// --publish runs `helm package` then `helm push oci://<registry>` in
+		// the chart's parent directory before the helm upgrade. The trace
+		// must show the real commands so dry-run is auditable; both must
+		// appear in the resolved spec ahead of the helm upgrade line.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "containerregistry: registry.example/test\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--publish", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/publish_traces_helm_package_and_push_before_upgrade", normalize.Apply(result.Combined))
+	})
+
+	t.Run("publish_real_run_invokes_helm_package_and_push_via_stubs", func(t *testing.T) {
+		// Real-run path: --publish without --dry-run exercises the
+		// runHelmCommand exec branch in helm_chart_publish.go. The helm
+		// stub exits 0 for any argv so package + push both succeed, and
+		// the deploy still drives helm upgrade after the publish step.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup, "containerregistry: registry.example/test\n")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--publish", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		out := normalize.Apply(result.Combined)
+		if !strings.Contains(out, "==> Publishing team-devops <VERSION> to oci://registry.example/test") {
+			t.Fatalf("expected ==> Publishing info line in output:\n%s", out)
+		}
+		if !strings.Contains(out, "==> Deployed team/dev <VERSION>") {
+			t.Fatalf("expected clean deploy completion after publish, got:\n%s", out)
+		}
+	})
+
+	t.Run("publish_without_container_registry_errors", func(t *testing.T) {
+		// --publish requires a container registry to derive the OCI repo.
+		// When the project has none configured, resolution must fail with a
+		// clear, actionable error rather than tracing a half-built command
+		// or pushing to an empty target.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--publish", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when --publish has no container registry, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/publish_without_container_registry_errors", normalize.Apply(result.Combined))
+	})
+
 	t.Run("force_flag_appears_in_trace", func(t *testing.T) {
 		// --force surfaces in the deploy trace so dry-run callers can see
 		// the cache-bypass decision, and it propagates to the resolved

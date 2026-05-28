@@ -14,6 +14,7 @@ type DeployInput struct {
 	Version    string   `json:"version,omitempty" jsonschema:"optional explicit version override for the deployed chart"`
 	Snapshot   *bool    `json:"snapshot,omitempty" jsonschema:"optional local snapshot override; when false, skips local snapshot builds in the local environment"`
 	Force      bool     `json:"force,omitempty" jsonschema:"when true, bypass the fingerprint cache and re-run helm upgrade even when no source change is detected"`
+	Publish    bool     `json:"publish,omitempty" jsonschema:"when true, package and push each resolved chart to the environment's container registry as an OCI Helm artifact before helm upgrade"`
 	Preview    bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity  int      `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 }
@@ -39,6 +40,7 @@ func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 				Snapshot:        input.Snapshot,
 				Components:      input.Components,
 				Force:           input.Force,
+				Publish:         input.Publish,
 			}
 
 			component := strings.TrimSpace(input.Component)
