@@ -37,7 +37,7 @@ export function TitlebarLeftControls(): React.ReactElement {
   const sidebarHidden = useAppSelector((state) => state.layout.sidebarHidden);
   const SidebarIcon = sidebarHidden ? PanelLeftOpen : PanelLeftClose;
   return (
-    <div className="relative z-[1] flex items-center gap-2 pl-[60px] [--wails-draggable:no-drag] max-[980px]:pl-[52px]">
+    <div className="relative z-[1] flex items-center gap-2 pl-[88px] [--wails-draggable:no-drag] max-[980px]:pl-[80px]">
       <IconTooltip label="Toggle sidebar">
         <Button
           className={titlebarButtonClassName}
