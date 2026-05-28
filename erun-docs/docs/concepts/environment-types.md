@@ -85,4 +85,19 @@ To hotfix `erun-backend-api` in `erun-prod`:
 
 ## Mapping to configuration
 
-Today the type is inferred from a combination of legacy fields. A planned consolidation collapses these into a single explicit `EnvConfig.type` value (`local-agent` / `remote-agent` / `runtime`) — see [Configuration · Planned changes](/reference/configuration#planned-changes) for the migration spec.
+Set `EnvConfig.type` to one of `local-agent`, `remote-agent`, or `runtime`. When `type` is set it is the source of truth and downstream commands (`erun build`, `erun open`, `erun deploy`) branch on it.
+
+For backward compatibility, envs that have no `type` set fall back to deriving it from the legacy `EnvConfig.remote` and `EnvConfig.snapshot` fields per the truth table at [Configuration · Planned changes](/reference/configuration#planned-changes). A future release will drop the legacy fields; new envs created by `erun init --type` set `type` directly and avoid the legacy pair entirely.
+
+```bash
+# Local-agent env (default if neither flag is given):
+erun init team local --type local-agent
+
+# Remote-agent env (replaces the older --remote flag):
+erun init team dev --type remote-agent --no-git
+
+# Runtime env (worktree-less; serves deployed artifacts):
+erun init team prod --type runtime --no-git
+```
+
+`--remote` is preserved as a deprecated alias for `--type=remote-agent`; passing both flags with conflicting values is an error.
