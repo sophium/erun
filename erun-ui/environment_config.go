@@ -51,7 +51,7 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 		return uiEnvironmentConfig{}, err
 	}
 	a.reconcileWorkspaceSyncForSelection(selection, updated.SSHD.WorkspaceSync.Enabled)
-	a.reconcileCloudCredentialsRefresherForSelection(selection, updated.RemoteHostCredentials && updated.Remote)
+	a.reconcileCloudCredentialsRefresherForSelection(selection, updated.RemoteHostCredentials && updated.RemoteWorktree())
 	ports, err := eruncommon.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
 	if err != nil {
 		return uiEnvironmentConfig{}, err
@@ -150,7 +150,7 @@ func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing erun
 	if err := a.validateWorkspaceSyncConfig(updated); err != nil {
 		return eruncommon.EnvConfig{}, err
 	}
-	if updated.Remote && strings.TrimSpace(updated.CloudProviderAlias) != "" {
+	if updated.RemoteWorktree() && strings.TrimSpace(updated.CloudProviderAlias) != "" {
 		if _, ok, err := a.linkedCloudContext(updated); err != nil {
 			return eruncommon.EnvConfig{}, err
 		} else if ok {
@@ -179,7 +179,7 @@ func (a *App) validateWorkspaceSyncConfig(config eruncommon.EnvConfig) error {
 }
 
 func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated eruncommon.EnvConfig) error {
-	if !existing.Remote || strings.TrimSpace(updated.CloudProviderAlias) == strings.TrimSpace(existing.CloudProviderAlias) {
+	if !existing.RemoteWorktree() || strings.TrimSpace(updated.CloudProviderAlias) == strings.TrimSpace(existing.CloudProviderAlias) {
 		return nil
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
