@@ -34,6 +34,7 @@ const (
 type DeployStore interface {
 	OpenStore
 	ListTenantConfigs() ([]TenantConfig, error)
+	ListEnvConfigs(string) ([]EnvConfig, error)
 }
 
 type (
