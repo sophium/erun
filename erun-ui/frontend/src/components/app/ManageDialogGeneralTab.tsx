@@ -74,11 +74,6 @@ export function GeneralTab(): React.ReactElement {
         label="Environment type"
         value={environmentTypeLabel(config.type)}
       />
-      <ReadonlyField
-        id="environment-config-remote"
-        label="Remote environment"
-        value={config.remote ? 'Yes' : 'No'}
-      />
       {config.remote && (
         <CheckboxField
           id="environment-config-remotehostcredentials"
