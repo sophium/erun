@@ -161,6 +161,12 @@ type DeployTarget struct {
 	// rebuilds from scratch, which also clears SkipHelm and re-runs the
 	// helm upgrade even when no source change is detected.
 	Force bool
+	// Publish, when true, packages each resolved chart and pushes the
+	// resulting tgz to the environment's container registry as an OCI
+	// Helm artifact (oci://<containerRegistry>/<chart-name>:<version>)
+	// before the helm upgrade runs. A missing container registry fails
+	// resolution so the user never sees a half-finished publish.
+	Publish bool
 }
 
 type DeploySpec struct {
@@ -174,6 +180,10 @@ type DeploySpec struct {
 	// pods are not rolled. Charts with no locally-built images keep
 	// SkipHelm=false so chart-only changes still ship.
 	SkipHelm bool
+	// PublishChart toggles the chart-publish step performed before
+	// helm upgrade. Publish carries the package/push parameters.
+	PublishChart bool
+	Publish      HelmChartPublishSpec
 }
 
 // EnvConfigSaver writes an updated env config to disk. The contract
@@ -371,7 +381,7 @@ func RunHelmDeploy(ctx Context, deployInput HelmDeploySpec, deploy HelmChartDepl
 }
 
 func RunDeploySpec(ctx Context, execution DeploySpec, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
-	if execution.SkipHelm {
+	if execution.SkipHelm && !execution.PublishChart {
 		ctx.Trace("deploy: skipping " + execution.DeployContext.ComponentName + " (all images cached, no rebuild)")
 		return nil
 	}
@@ -393,6 +403,15 @@ func RunDeploySpec(ctx Context, execution DeploySpec, build DockerImageBuilderFu
 			return err
 		}
 	}
+	if execution.PublishChart {
+		if err := RunHelmChartPublish(ctx, execution.Publish); err != nil {
+			return err
+		}
+	}
+	if execution.SkipHelm {
+		ctx.Trace("deploy: skipping helm upgrade for " + execution.DeployContext.ComponentName + " (all images cached, no rebuild)")
+		return nil
+	}
 	return RunHelmDeploy(ctx, execution.Deploy, deploy)
 }
 
@@ -404,7 +423,14 @@ func ResolveDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFi
 	if err != nil {
 		return DeploySpec{}, err
 	}
-	return resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, componentName, versionOverride, deployTargetSnapshotEnabled(resolvedTarget, target.Snapshot), target.Force)
+	spec, err := resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, componentName, versionOverride, deployTargetSnapshotEnabled(resolvedTarget, target.Snapshot), target.Force)
+	if err != nil {
+		return DeploySpec{}, err
+	}
+	if err := applyDeploySpecPublish(&spec, target.Publish); err != nil {
+		return DeploySpec{}, err
+	}
+	return spec, nil
 }
 
 func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) ([]DeploySpec, error) {
@@ -424,6 +450,9 @@ func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 			spec.Deploy.Version = versionOverride
 		}
 		if err := configureDeployInputMetadata(store, resolvedTarget, &spec.Deploy); err != nil {
+			return nil, err
+		}
+		if err := applyDeploySpecPublish(&spec, target.Publish); err != nil {
 			return nil, err
 		}
 		return []DeploySpec{spec}, nil
@@ -456,10 +485,30 @@ func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 		if err != nil {
 			return nil, err
 		}
+		if err := applyDeploySpecPublish(&spec, target.Publish); err != nil {
+			return nil, err
+		}
 		specs = append(specs, spec)
 	}
 
 	return specs, nil
+}
+
+// applyDeploySpecPublish sets the publish parameters on the spec when the
+// caller requested --publish. The OCI repo is derived from the spec's
+// resolved container registry; resolveHelmChartPublishSpec fails when the
+// registry is empty so we never reach the package step without one.
+func applyDeploySpecPublish(spec *DeploySpec, publish bool) error {
+	if !publish || spec == nil {
+		return nil
+	}
+	publishSpec, err := resolveHelmChartPublishSpec(spec.DeployContext.ChartPath, spec.Deploy.Version, spec.Deploy.ContainerRegistry)
+	if err != nil {
+		return err
+	}
+	spec.PublishChart = true
+	spec.Publish = publishSpec
+	return nil
 }
 
 func ResolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, componentName, versionOverride string) (DeploySpec, error) {

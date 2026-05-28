@@ -1,4 +1,4 @@
 audit: erun deploy --dry-run --version <VERSION> missing missing
-deploy: tenant=missing environment=missing version-override=<VERSION> snapshot=true components=[] force=false
+deploy: tenant=missing environment=missing version-override=<VERSION> snapshot=true components=[] force=false publish=false
 deploy: spec resolution failed: no such tenant exists: missing
 no such tenant exists: missing
