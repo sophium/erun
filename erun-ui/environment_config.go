@@ -51,7 +51,7 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 		return uiEnvironmentConfig{}, err
 	}
 	a.reconcileWorkspaceSyncForSelection(selection, updated.SSHD.WorkspaceSync.Enabled)
-	a.reconcileCloudCredentialsRefresherForSelection(selection, updated.RemoteHostCredentials && updated.Remote)
+	a.reconcileCloudCredentialsRefresherForSelection(selection, updated.RemoteHostCredentials && updated.RemoteWorktree())
 	ports, err := eruncommon.ResolveEnvironmentLocalPorts(a.deps.store, selection.Tenant, selection.Environment)
 	if err != nil {
 		return uiEnvironmentConfig{}, err
@@ -150,7 +150,7 @@ func (a *App) updatedEnvironmentConfig(config uiEnvironmentConfig, existing erun
 	if err := a.validateWorkspaceSyncConfig(updated); err != nil {
 		return eruncommon.EnvConfig{}, err
 	}
-	if updated.Remote && strings.TrimSpace(updated.CloudProviderAlias) != "" {
+	if updated.RemoteWorktree() && strings.TrimSpace(updated.CloudProviderAlias) != "" {
 		if _, ok, err := a.linkedCloudContext(updated); err != nil {
 			return eruncommon.EnvConfig{}, err
 		} else if ok {
@@ -179,7 +179,7 @@ func (a *App) validateWorkspaceSyncConfig(config eruncommon.EnvConfig) error {
 }
 
 func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated eruncommon.EnvConfig) error {
-	if !existing.Remote || strings.TrimSpace(updated.CloudProviderAlias) == strings.TrimSpace(existing.CloudProviderAlias) {
+	if !existing.RemoteWorktree() || strings.TrimSpace(updated.CloudProviderAlias) == strings.TrimSpace(existing.CloudProviderAlias) {
 		return nil
 	}
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
@@ -218,6 +218,8 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 	workspaceSyncEnabled := config.SSHD.WorkspaceSync.Enabled && workspaceSyncLocalPath != ""
 	result := uiEnvironmentConfig{
 		Name:                 name,
+		Type:                 config.ResolvedType(),
+		LocalRepoPath:        strings.TrimSpace(config.LocalRepoPath),
 		RepoPath:             strings.TrimSpace(config.RepoPath),
 		KubernetesContext:    strings.TrimSpace(config.KubernetesContext),
 		ContainerRegistry:    containerRegistry,
@@ -365,6 +367,12 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	}
 	existing.Claude = claudeConfigFromUI(config.Claude)
 	existing.AITool = strings.TrimSpace(config.AITool)
+	if config.Type.IsValid() {
+		existing.Type = config.Type
+	}
+	if localRepo := strings.TrimSpace(config.LocalRepoPath); localRepo != "" {
+		existing.LocalRepoPath = localRepo
+	}
 	existing.SetSnapshot(config.Snapshot)
 	existing.AutoStart = copyBoolPtr(config.AutoStart)
 	existing.RemoteHostCredentials = config.RemoteHostCredentials

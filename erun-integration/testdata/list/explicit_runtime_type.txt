@@ -1,55 +1,44 @@
 Configuration:
   directory: <TMP>
 Defaults:
-  tenant: tenant-a
-  environment: dev
+  tenant: team
+  environment: prod
 Current Directory:
   path: none
   repo: none
   configured tenant: none
-  effective target: tenant-a/dev
-  kubernetes context: cluster-dev
-  type: none
+  effective target: team/prod
+  kubernetes context: test-context
+  type: runtime
   snapshot: off
   assigned local port range: 17000-17099
   assigned mcp local port: 17000 (when MCP is running or forwarded)
   assigned api local port: 17033 (when API is running or forwarded)
   api url: http://<LOOPBACK>:17033
   assigned ssh local port: 17022 (when SSH port-forward is active)
-  sshd: on
-  ssh host: erun-tenant-a-dev
-  ssh user: erun
-  ssh workspace: <HOME>/git/tenant-a
   repo path: <TMP>
 Cloud Providers:
   none
 Tenants:
-  tenant-a [default, effective]
-    default environment: dev
+  team [default, effective]
+    default environment: prod
     environments:
-      - dev [default, effective] context=cluster-dev
-          type: none
-          remote: on
+      - prod [default, effective] context=test-context
+          type: runtime
+          remote: off
           snapshot: off
-          repo: <TMP>
+          repo: none
           ports: 17000-17099
           mcp-port: 17000
           api-port: 17033
           api-url: http://<LOOPBACK>:17033
           ssh-port: 17022
-          container-registry: none
-          runtime-version: none
+          container-registry: registry.example/test
+          runtime-version: <VERSION>
           runtime-pod: none
           managed-cloud: off
           ai-tool: none
           claude: none
           idle: none
-          sshd: on
-          ssh-host: erun-tenant-a-dev
-          ssh-user: erun
-          ssh-local-port: 17022
-          ssh-workspace: <HOME>/git/tenant-a
-          ssh-public-key-path: <TMP>
-          ssh-workspace-sync: off
-          ssh-workspace-sync-local-path: none
+          sshd: off
 audit: erun list

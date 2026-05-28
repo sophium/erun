@@ -170,9 +170,11 @@ type uiPortStatus struct {
 }
 
 type uiEnvironmentConfig struct {
-	Name                 string                  `json:"name"`
-	RepoPath             string                  `json:"repoPath"`
-	KubernetesContext    string                  `json:"kubernetesContext"`
+	Name                 string                       `json:"name"`
+	Type                 eruncommon.EnvironmentType   `json:"type,omitempty"`
+	LocalRepoPath        string                       `json:"localRepoPath,omitempty"`
+	RepoPath             string                       `json:"repoPath"`
+	KubernetesContext    string                       `json:"kubernetesContext"`
 	ContainerRegistry    string                  `json:"containerRegistry"`
 	CloudProviderAlias   string                  `json:"cloudProviderAlias"`
 	CloudProviderAliases []string                `json:"cloudProviderAliases,omitempty"`

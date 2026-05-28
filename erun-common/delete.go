@@ -61,7 +61,7 @@ func RunDeleteEnvironment(ctx Context, params DeleteEnvironmentParams, store Del
 	}
 	result := deleteEnvironmentResult(tenant, environment, envConfig, configPath)
 
-	if envConfig.Remote {
+	if envConfig.RemoteWorktree() {
 		if err := deleteRemoteEnvironmentNamespace(ctx, deleteNamespace, &result); err != nil {
 			return result, err
 		}
@@ -96,7 +96,7 @@ func deleteEnvironmentResult(tenant, environment string, envConfig EnvConfig, co
 	return DeleteEnvironmentResult{
 		Tenant:            tenant,
 		Environment:       environment,
-		Remote:            envConfig.Remote,
+		Remote:            envConfig.RemoteWorktree(),
 		KubernetesContext: strings.TrimSpace(envConfig.KubernetesContext),
 		ConfigDir:         filepath.Dir(configPath),
 	}

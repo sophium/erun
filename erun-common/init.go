@@ -74,16 +74,41 @@ type BootstrapInitParams struct {
 	NoGit                    bool
 	KubernetesContext        string
 	ContainerRegistry        string
-	Remote                   bool
-	RemoteRepositoryURL      string
-	CodeCommitSSHKeyID       string
-	Bootstrap                bool
-	ConfirmTenant            *bool
-	ConfirmEnvironment       *bool
-	ConfirmRemoteHostConfig  *bool
-	ConfirmRemoteKeyImport   *bool
-	AutoApprove              bool
-	ResolveTenant            bool
+	// Type, when set, is the canonical environment type for the new env.
+	// Takes precedence over the legacy Remote bool. When unset, the bootstrap
+	// derives the type from Remote (true→remote-agent, false→local-agent) for
+	// backward compatibility with --remote flag callers.
+	Type                    EnvironmentType
+	Remote                  bool
+	RemoteRepositoryURL     string
+	CodeCommitSSHKeyID      string
+	Bootstrap               bool
+	ConfirmTenant           *bool
+	ConfirmEnvironment      *bool
+	ConfirmRemoteHostConfig *bool
+	ConfirmRemoteKeyImport  *bool
+	AutoApprove             bool
+	ResolveTenant           bool
+}
+
+// ResolvedType returns the new env's type. When Type is explicitly set it is
+// the source of truth; otherwise Remote selects between local-agent and
+// remote-agent, matching the pre-type behavior of `erun init [--remote]`.
+func (p BootstrapInitParams) ResolvedType() EnvironmentType {
+	if p.Type.IsValid() {
+		return p.Type
+	}
+	if p.Remote {
+		return EnvironmentTypeRemoteAgent
+	}
+	return EnvironmentTypeLocalAgent
+}
+
+// RemoteWorktree reports whether the new env's worktree will live outside
+// the local machine. Derived from ResolvedType so callers can ignore which
+// shape (--type or --remote) was used to specify the env.
+func (p BootstrapInitParams) RemoteWorktree() bool {
+	return p.ResolvedType() != EnvironmentTypeLocalAgent
 }
 
 type BootstrapInitInteractionType string
@@ -391,7 +416,7 @@ func (s *bootstrapRunState) applyBootstrapConfigChanges() error {
 }
 
 func (s *bootstrapRunState) validateRemoteParams() error {
-	if !s.params.Remote {
+	if !s.params.RemoteWorktree() {
 		return nil
 	}
 	if s.params.InitializeCurrentProject || s.params.ResolveTenant {
@@ -505,7 +530,7 @@ func (s *bootstrapRunState) initializeMissingToolConfig() error {
 func (s *bootstrapRunState) defaultTenantCandidate() (string, string, error) {
 	tenant := s.params.Tenant
 	projectRoot := s.params.ProjectRoot
-	if s.params.Remote {
+	if s.params.RemoteWorktree() {
 		return tenant, RemoteWorktreePathForRepoName(tenant), nil
 	}
 	if tenant != "" && projectRoot != "" {
@@ -532,27 +557,27 @@ func (s *bootstrapRunState) resolveTenant() error {
 	if err := s.resolveTenantFromDirectory(); err != nil {
 		return err
 	}
-	if s.tenant == "" && !s.params.Remote {
+	if s.tenant == "" && !s.params.RemoteWorktree() {
 		s.tenant = s.toolConfig.DefaultTenant
 	}
 	if err := s.resolveTenantFromSelection(); err != nil {
 		return err
 	}
-	if s.tenant == "" && !s.params.Remote {
+	if s.tenant == "" && !s.params.RemoteWorktree() {
 		project, err := s.detectProject()
 		if err != nil {
 			return err
 		}
 		s.tenant = project.tenant
 	}
-	if s.params.Remote {
+	if s.params.RemoteWorktree() {
 		s.params.ProjectRoot = RemoteWorktreePathForRepoName(s.tenant)
 	}
 	return nil
 }
 
 func (s *bootstrapRunState) resolveTenantFromProject() error {
-	if s.tenant != "" || s.params.Remote {
+	if s.tenant != "" || s.params.RemoteWorktree() {
 		return nil
 	}
 	project, err := s.findProject()
@@ -649,7 +674,7 @@ func (s *bootstrapRunState) createTenantConfig() error {
 
 func (s *bootstrapRunState) tenantProjectRoot() (string, error) {
 	projectRoot := s.params.ProjectRoot
-	if projectRoot != "" || s.params.Remote {
+	if projectRoot != "" || s.params.RemoteWorktree() {
 		return projectRoot, nil
 	}
 	project, err := s.detectProject()
@@ -671,7 +696,7 @@ func (s *bootstrapRunState) normalizeTenantConfig() {
 		s.tenantConfig.Name = s.tenant
 		s.tenantConfigChanged = true
 	}
-	if s.params.Remote && s.tenantConfig.ProjectRoot != s.params.ProjectRoot {
+	if s.params.RemoteWorktree() && s.tenantConfig.ProjectRoot != s.params.ProjectRoot {
 		s.tenantConfig.ProjectRoot = s.params.ProjectRoot
 		s.tenantConfigChanged = true
 	}
@@ -728,6 +753,8 @@ func (s *bootstrapRunState) createEnvConfig() error {
 	s.runner.Context.Trace("Adding new environment")
 	s.envConfig = EnvConfig{
 		Name:               s.envName,
+		Type:               s.params.ResolvedType(),
+		LocalRepoPath:      envProjectRootForType(s.params.ResolvedType(), envProjectRoot),
 		RepoPath:           envProjectRoot,
 		KubernetesContext:  kubernetesContext,
 		CloudProviderAlias: cloudProviderAlias,
@@ -745,12 +772,23 @@ func (s *bootstrapRunState) createEnvConfig() error {
 	return nil
 }
 
+// envProjectRootForType returns the path that should populate the new env's
+// LocalRepoPath field. Only local-agent envs mount a host path; remote-agent
+// and runtime envs leave LocalRepoPath empty so consumers know to use the
+// in-pod convention path instead.
+func envProjectRootForType(envType EnvironmentType, envProjectRoot string) string {
+	if envType == EnvironmentTypeLocalAgent {
+		return envProjectRoot
+	}
+	return ""
+}
+
 func (s *bootstrapRunState) envProjectRoot() (string, error) {
 	envProjectRoot := s.params.ProjectRoot
 	if envProjectRoot == "" {
 		envProjectRoot = s.tenantConfig.ProjectRoot
 	}
-	if envProjectRoot != "" || s.params.Remote {
+	if envProjectRoot != "" || s.params.RemoteWorktree() {
 		return envProjectRoot, nil
 	}
 	project, err := s.findProject()
@@ -799,7 +837,7 @@ func (s *bootstrapRunState) updateEnvConfig() error {
 }
 
 func (s *bootstrapRunState) updateRemoteEnvConfig() {
-	if !s.params.Remote {
+	if !s.params.RemoteWorktree() {
 		return
 	}
 	if s.envConfig.RepoPath != s.params.ProjectRoot {
@@ -885,7 +923,7 @@ func (s *bootstrapRunState) projectRoot() string {
 
 func (s *bootstrapRunState) ensureDevopsAssets() error {
 	projectRoot := s.projectRoot()
-	if s.params.Remote {
+	if s.params.RemoteWorktree() {
 		return s.ensureRemoteDevopsAssets(projectRoot)
 	}
 	if err := EnsureDefaultDevopsModuleWithVersion(s.runner.Context, projectRoot, s.tenant, s.params.RuntimeVersion); err != nil {

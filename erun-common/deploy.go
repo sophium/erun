@@ -25,11 +25,16 @@ const DevopsComponentName = "erun-devops"
 const (
 	WorktreeStorageHost = "host"
 	WorktreeStoragePVC  = "pvc"
+	// WorktreeStorageNone is reported for runtime envs that have no worktree.
+	// The erun-devops chart is not deployed for runtime envs, so this value
+	// is informational; chart-side compat treats it as "skip worktree mount".
+	WorktreeStorageNone = "none"
 )
 
 type DeployStore interface {
 	OpenStore
 	ListTenantConfigs() ([]TenantConfig, error)
+	ListEnvConfigs(string) ([]EnvConfig, error)
 }
 
 type (
@@ -838,7 +843,7 @@ func deployTargetSnapshotEnabled(target OpenResult, override *bool) bool {
 	if override != nil {
 		return *override
 	}
-	return target.EnvConfig.SnapshotEnabled()
+	return target.EnvConfig.BuildsHere()
 }
 
 func deployResetsDatabase(snapshotEnabled bool, version string) bool {
@@ -1162,6 +1167,15 @@ func cloudContextRegionFromName(name string) string {
 }
 
 func resolveWorktreeStorage(target OpenResult) string {
+	if target.EnvConfig.Type.IsValid() {
+		switch target.EnvConfig.Type {
+		case EnvironmentTypeRuntime:
+			return WorktreeStorageNone
+		case EnvironmentTypeRemoteAgent:
+			return WorktreeStoragePVC
+		}
+		return WorktreeStorageHost
+	}
 	if target.RemoteRepo() {
 		return WorktreeStoragePVC
 	}

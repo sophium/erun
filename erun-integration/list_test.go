@@ -38,6 +38,33 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/with_seeded_tenant_env", normalize.Apply(result.Combined))
 	})
 
+	t.Run("explicit_runtime_type", func(t *testing.T) {
+		// Seed an env whose YAML carries `type: runtime` directly. Verifies
+		// that list output surfaces the new field and that the resolver
+		// honors the explicit value over any legacy fallback.
+		setup := env.New(t)
+		seedExplicitTypeEnv(t, setup, "team", "prod", "runtime")
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/explicit_runtime_type", normalize.Apply(result.Combined))
+	})
+
+	t.Run("legacy_yaml_keeps_unresolved_type", func(t *testing.T) {
+		// Seed an env with the legacy remote=true shape but no snapshot
+		// field. NormalizeEnvConfig must leave Type unresolved so the env
+		// behaves per legacy semantics — list shows "type: none" and the
+		// downstream chart wiring uses the legacy fallback.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/legacy_yaml_keeps_unresolved_type", normalize.Apply(result.Combined))
+	})
+
 	t.Run("multi_tenant_with_multiple_envs", func(t *testing.T) {
 		// Exercises cmd/list.go and erun-common/list.go: with two tenants
 		// (each with multiple envs), the listing must show every tenant,
@@ -113,6 +140,38 @@ func TestList(t *testing.T) {
 		}
 		golden.Equal(t, "list/with_claude_config", normalize.Apply(result.Combined))
 	})
+}
+
+// seedExplicitTypeEnv writes a tenant/env tree whose env.yaml carries an
+// explicit `type:` value plus a populated localRepoPath. Used by list and
+// delete scenarios that assert the resolver honors Type when set.
+func seedExplicitTypeEnv(t testing.TB, setup env.Setup, tenant, environment, envType string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+	repoPath := filepath.Join(setup.Home, "git", tenant)
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo %s: %v", repoPath, err)
+	}
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+repoPath+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"type: "+envType+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"runtimeversion: 1.0.0\n",
+	)
 }
 
 func seedListMultiTenant(t testing.TB, setup env.Setup) {

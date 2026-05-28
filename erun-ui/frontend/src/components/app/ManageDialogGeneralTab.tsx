@@ -70,6 +70,11 @@ export function GeneralTab(): React.ReactElement {
         onStop={(name) => void dispatch(stopManageCloudContext(name))}
       />
       <ReadonlyField
+        id="environment-config-type"
+        label="Environment type"
+        value={environmentTypeLabel(config.type)}
+      />
+      <ReadonlyField
         id="environment-config-remote"
         label="Remote environment"
         value={config.remote ? 'Yes' : 'No'}
@@ -96,6 +101,19 @@ export function GeneralTab(): React.ReactElement {
       )}
     </>
   );
+}
+
+function environmentTypeLabel(type: string | undefined): string {
+  switch (type) {
+    case 'local-agent':
+      return 'Local agent (worktree mounted from your machine)';
+    case 'remote-agent':
+      return 'Remote agent (worktree cloned to PVC)';
+    case 'runtime':
+      return 'Runtime (no worktree; receives deploys)';
+    default:
+      return 'Legacy (derived from remote + snapshot)';
+  }
 }
 
 function CloudAliasSelect({

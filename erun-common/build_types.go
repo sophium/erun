@@ -35,6 +35,7 @@ type (
 type DockerStore interface {
 	ListTenantConfigs() ([]TenantConfig, error)
 	LoadTenantConfig(string) (TenantConfig, string, error)
+	ListEnvConfigs(string) ([]EnvConfig, error)
 }
 
 type DockerBuildContext struct {

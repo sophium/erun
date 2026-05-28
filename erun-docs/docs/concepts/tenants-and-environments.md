@@ -63,6 +63,6 @@ An agent env can source its repository two ways:
 - **Host mount.** The pod sees your laptop's working directory live (via Kubernetes `hostPath`). Edits on your laptop are immediately visible in the pod. Best for agent envs running on a local cluster.
 - **Pod-side checkout.** The pod clones the repo onto its own persistent volume. Best for agent envs running on a managed cloud cluster, where the cluster node can't see your laptop's filesystem.
 
-`erun init` picks a sensible default. A planned `--host-repo` / `--no-host-repo` flag will let you override independently of where the env runs.
+`erun init --type local-agent` selects the host-mount form; `--type remote-agent` selects the pod-side checkout. The default is `local-agent` when neither `--type` nor `--remote` is passed.
 
 See [Environment types](/concepts/environment-types) for the full split.

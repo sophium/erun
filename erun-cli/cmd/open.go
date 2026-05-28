@@ -65,7 +65,7 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 			if err != nil {
 				return err
 			}
-			allowLocalBuilds := result.EnvConfig.SnapshotEnabled()
+			allowLocalBuilds := result.EnvConfig.BuildsHere()
 			if snapshotOverride != nil {
 				allowLocalBuilds = *snapshotOverride
 			}

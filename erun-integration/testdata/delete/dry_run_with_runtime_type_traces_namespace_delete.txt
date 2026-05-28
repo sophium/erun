@@ -1,0 +1,3 @@
+audit: erun delete --dry-run team prod
+kubectl --context test-context delete namespace team-prod --ignore-not-found
+rm -rf <TMP>
