@@ -33,7 +33,7 @@ type remoteDefaultDevopsFile struct {
 }
 
 func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, kubernetesContext, projectRoot string) (ShellLaunchParams, remoteRepositorySpec, error) {
-	target := s.remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot)
+	target := s.remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot, params.ResolvedType())
 	target.EnvConfig.RuntimePod = NormalizeRuntimePodResources(params.RuntimePod)
 	req := ShellLaunchParamsFromResult(target)
 
@@ -105,12 +105,12 @@ func (s bootstrapRunner) remoteRepositorySpecWithCredentials(params BootstrapIni
 	return repository, nil
 }
 
-func (s bootstrapRunner) remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot string) OpenResult {
+func (s bootstrapRunner) remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot string, envType EnvironmentType) OpenResult {
 	return OpenResult{
 		Tenant:       tenant,
 		Environment:  envName,
 		TenantConfig: remoteRepositoryTenantConfig(tenant, envName, projectRoot),
-		EnvConfig:    remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot),
+		EnvConfig:    remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot, envType),
 		LocalPorts:   s.remoteRepositoryLocalPorts(tenant, envName),
 		RepoPath:     projectRoot,
 		Title:        tenant + "-" + envName,
@@ -121,8 +121,15 @@ func remoteRepositoryTenantConfig(tenant, envName, projectRoot string) TenantCon
 	return TenantConfig{Name: tenant, ProjectRoot: projectRoot, DefaultEnvironment: envName}
 }
 
-func remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot string) EnvConfig {
-	return EnvConfig{Name: envName, RepoPath: projectRoot, KubernetesContext: kubernetesContext, Remote: true}
+func remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot string, envType EnvironmentType) EnvConfig {
+	cfg := EnvConfig{Name: envName, RepoPath: projectRoot, KubernetesContext: kubernetesContext, Remote: true}
+	if envType.IsValid() {
+		cfg.Type = envType
+		if envType == EnvironmentTypeLocalAgent {
+			cfg.LocalRepoPath = projectRoot
+		}
+	}
+	return cfg
 }
 
 func (s bootstrapRunner) remoteRepositoryLocalPorts(tenant, envName string) EnvironmentLocalPorts {
