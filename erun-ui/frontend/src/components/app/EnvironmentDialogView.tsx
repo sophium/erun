@@ -1,6 +1,7 @@
 import { FolderPlus, LoaderCircle, Rocket } from 'lucide-react';
 import * as React from 'react';
 
+import { refreshKubernetesContexts } from '@/app/dialogContextsThunks';
 import {
   closeEnvironmentDialog,
   selectEnvironmentVersionSuggestion,
@@ -276,12 +277,27 @@ function KubernetesContextSelect({ dialog }: { dialog: EnvironmentDialog }): Rea
     ? 'Loading contexts...'
     : 'Select Kubernetes context';
   if (!dialog.kubernetesContextsLoading && dialog.kubernetesContexts.length === 0) {
+    const body =
+      "ERun runs `kubectl config get-contexts` using the PATH and KUBECONFIG it inherits from your login shell at startup. If your terminal sees contexts that don't appear here, set KUBECONFIG in ~/.zshenv (or ~/.bash_profile) so it applies to GUI launches too, then restart ERun. If kubectl is not yet installed, install it with `brew install kubectl`.";
+    const errorDetail = dialog.error?.trim() ?? '';
     return (
       <div className="grid gap-2">
         <Label htmlFor="environment-kubernetes-context">Kubernetes context</Label>
         <EmptyState
           heading="No Kubernetes contexts found"
-          body="ERun runs `kubectl config get-contexts` using the PATH and KUBECONFIG it inherits from your login shell at startup. If your terminal sees contexts that don't appear here, set KUBECONFIG in ~/.zshenv (or ~/.bash_profile) so it applies to GUI launches too, then restart ERun. If kubectl is not yet installed, install it with `brew install kubectl`."
+          body={errorDetail !== '' ? `${body}\n\nLast error from kubectl:\n${errorDetail}` : body}
+          action={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                void dispatch(refreshKubernetesContexts());
+              }}
+            >
+              Rescan
+            </Button>
+          }
         />
       </div>
     );
