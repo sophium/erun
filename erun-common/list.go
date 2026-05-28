@@ -259,7 +259,7 @@ func listEnvironmentOpenResult(tenant TenantConfig, env EnvConfig, localPorts En
 }
 
 func listEnvironmentIsActive(store CloudReadStore, env EnvConfig) bool {
-	if !env.Remote {
+	if !env.RemoteWorktree() {
 		return false
 	}
 	status, ok, err := findCloudContextForKubernetesContext(store, env.KubernetesContext)

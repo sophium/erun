@@ -177,16 +177,26 @@ func (c EnvConfig) ResolvedType() EnvironmentType {
 }
 
 // BuildsHere reports whether builds happen inside this env (local-agent and
-// remote-agent build here; runtime envs only receive deploys).
+// remote-agent build here; runtime envs only receive deploys). When Type is
+// explicitly set it is the source of truth; otherwise the result matches the
+// legacy SnapshotEnabled() value so callers preserve today's behavior.
 func (c EnvConfig) BuildsHere() bool {
-	return c.ResolvedType() != EnvironmentTypeRuntime
+	if c.Type.IsValid() {
+		return c.Type != EnvironmentTypeRuntime
+	}
+	return c.SnapshotEnabled()
 }
 
 // RemoteWorktree reports whether the worktree lives outside the local
 // machine (PVC for remote-agent, none for runtime). Local-agent mounts the
-// worktree from the local filesystem via hostPath.
+// worktree from the local filesystem via hostPath. When Type is explicitly
+// set it is the source of truth; otherwise the result matches the legacy
+// Remote bool so callers preserve today's behavior.
 func (c EnvConfig) RemoteWorktree() bool {
-	return c.ResolvedType() != EnvironmentTypeLocalAgent
+	if c.Type.IsValid() {
+		return c.Type != EnvironmentTypeLocalAgent
+	}
+	return c.Remote
 }
 
 // EffectiveLocalRepoPath returns the new-shape LocalRepoPath when set,

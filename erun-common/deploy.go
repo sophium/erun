@@ -789,7 +789,7 @@ func deployTargetSnapshotEnabled(target OpenResult, override *bool) bool {
 	if override != nil {
 		return *override
 	}
-	return target.EnvConfig.SnapshotEnabled()
+	return target.EnvConfig.BuildsHere()
 }
 
 func deployResetsDatabase(snapshotEnabled bool, version string) bool {
