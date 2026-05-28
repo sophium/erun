@@ -34,6 +34,19 @@ func TestDelete(t *testing.T) {
 		golden.Equal(t, "delete/dry_run_with_seeded_env", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_with_runtime_type_traces_namespace_delete", func(t *testing.T) {
+		// Exercises delete.go on a runtime-type env (explicit type=runtime
+		// in YAML). RemoteWorktree() returns true via Type, so delete must
+		// trace the kubectl namespace delete the same as a remote=true env.
+		setup := env.New(t)
+		seedExplicitTypeEnv(t, setup, "team", "prod", "runtime")
+		result := erun.Run(t, []string{"delete", "team", "prod", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "delete/dry_run_with_runtime_type_traces_namespace_delete", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_with_remote_env_traces_namespace_delete", func(t *testing.T) {
 		// Exercises delete.go on a remote environment: --dry-run must
 		// trace the kubectl namespace delete command (with --ignore-not-found)
