@@ -37,7 +37,7 @@ test.describe('auto-start gate', () => {
 
     // Environment type field is on the General tab (default landing tab).
     // Read it first, then hop to Runtime where the AutoStart select lives.
-    const expectVisible = await app.manageDialog.isRemoteEnv();
+    const expectVisible = await app.manageDialog.hasRemoteWorktree();
 
     await app.manageDialog.selectTab('Runtime');
     await expect.poll(() => app.manageDialog.getActiveTab()).toBe('Runtime');

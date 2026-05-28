@@ -90,11 +90,12 @@ export class ManageDialog {
     return (await field.textContent())?.trim() ?? '';
   }
 
-  // isRemoteEnv returns true when the env type is anything other than the
-  // local-agent variant. Mirrors the semantic the old remoteFieldValue
-  // helper provided, but reads from the new Environment type field which is
-  // the canonical control after #375 dropped the editable Remote toggle.
-  async isRemoteEnv(): Promise<boolean> {
+  // hasRemoteWorktree returns true when the env type is anything other than
+  // the local-agent variant. Mirrors the Go-side EnvConfig.RemoteWorktree()
+  // predicate by reading the Environment type label rendered on the
+  // General tab — the canonical control after #375 collapsed the legacy
+  // remote/snapshot pair into Type.
+  async hasRemoteWorktree(): Promise<boolean> {
     const label = await this.envTypeFieldValue();
     return label !== '' && !/local agent/i.test(label);
   }
