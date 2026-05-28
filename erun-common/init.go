@@ -416,7 +416,7 @@ func (s *bootstrapRunState) applyBootstrapConfigChanges() error {
 }
 
 func (s *bootstrapRunState) validateRemoteParams() error {
-	if !s.params.Remote {
+	if !s.params.RemoteWorktree() {
 		return nil
 	}
 	if s.params.InitializeCurrentProject || s.params.ResolveTenant {
@@ -530,7 +530,7 @@ func (s *bootstrapRunState) initializeMissingToolConfig() error {
 func (s *bootstrapRunState) defaultTenantCandidate() (string, string, error) {
 	tenant := s.params.Tenant
 	projectRoot := s.params.ProjectRoot
-	if s.params.Remote {
+	if s.params.RemoteWorktree() {
 		return tenant, RemoteWorktreePathForRepoName(tenant), nil
 	}
 	if tenant != "" && projectRoot != "" {
@@ -557,27 +557,27 @@ func (s *bootstrapRunState) resolveTenant() error {
 	if err := s.resolveTenantFromDirectory(); err != nil {
 		return err
 	}
-	if s.tenant == "" && !s.params.Remote {
+	if s.tenant == "" && !s.params.RemoteWorktree() {
 		s.tenant = s.toolConfig.DefaultTenant
 	}
 	if err := s.resolveTenantFromSelection(); err != nil {
 		return err
 	}
-	if s.tenant == "" && !s.params.Remote {
+	if s.tenant == "" && !s.params.RemoteWorktree() {
 		project, err := s.detectProject()
 		if err != nil {
 			return err
 		}
 		s.tenant = project.tenant
 	}
-	if s.params.Remote {
+	if s.params.RemoteWorktree() {
 		s.params.ProjectRoot = RemoteWorktreePathForRepoName(s.tenant)
 	}
 	return nil
 }
 
 func (s *bootstrapRunState) resolveTenantFromProject() error {
-	if s.tenant != "" || s.params.Remote {
+	if s.tenant != "" || s.params.RemoteWorktree() {
 		return nil
 	}
 	project, err := s.findProject()
@@ -674,7 +674,7 @@ func (s *bootstrapRunState) createTenantConfig() error {
 
 func (s *bootstrapRunState) tenantProjectRoot() (string, error) {
 	projectRoot := s.params.ProjectRoot
-	if projectRoot != "" || s.params.Remote {
+	if projectRoot != "" || s.params.RemoteWorktree() {
 		return projectRoot, nil
 	}
 	project, err := s.detectProject()
@@ -696,7 +696,7 @@ func (s *bootstrapRunState) normalizeTenantConfig() {
 		s.tenantConfig.Name = s.tenant
 		s.tenantConfigChanged = true
 	}
-	if s.params.Remote && s.tenantConfig.ProjectRoot != s.params.ProjectRoot {
+	if s.params.RemoteWorktree() && s.tenantConfig.ProjectRoot != s.params.ProjectRoot {
 		s.tenantConfig.ProjectRoot = s.params.ProjectRoot
 		s.tenantConfigChanged = true
 	}
@@ -788,7 +788,7 @@ func (s *bootstrapRunState) envProjectRoot() (string, error) {
 	if envProjectRoot == "" {
 		envProjectRoot = s.tenantConfig.ProjectRoot
 	}
-	if envProjectRoot != "" || s.params.Remote {
+	if envProjectRoot != "" || s.params.RemoteWorktree() {
 		return envProjectRoot, nil
 	}
 	project, err := s.findProject()
@@ -837,7 +837,7 @@ func (s *bootstrapRunState) updateEnvConfig() error {
 }
 
 func (s *bootstrapRunState) updateRemoteEnvConfig() {
-	if !s.params.Remote {
+	if !s.params.RemoteWorktree() {
 		return
 	}
 	if s.envConfig.RepoPath != s.params.ProjectRoot {
@@ -923,7 +923,7 @@ func (s *bootstrapRunState) projectRoot() string {
 
 func (s *bootstrapRunState) ensureDevopsAssets() error {
 	projectRoot := s.projectRoot()
-	if s.params.Remote {
+	if s.params.RemoteWorktree() {
 		return s.ensureRemoteDevopsAssets(projectRoot)
 	}
 	if err := EnsureDefaultDevopsModuleWithVersion(s.runner.Context, projectRoot, s.tenant, s.params.RuntimeVersion); err != nil {
