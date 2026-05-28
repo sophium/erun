@@ -1,8 +1,19 @@
 export type EnvironmentType = 'local-agent' | 'remote-agent' | 'runtime' | '';
 
+// EnvironmentTypeValues lists the dropdown options. The model type for the
+// `type` field below is widened to `string` because the Wails-generated
+// binding (frontend/wailsjs/go/models.ts) widens the Go EnvironmentType
+// alias to a bare `string` at the boundary — narrowing the field here would
+// fail the LoadEnvironmentConfig/SaveEnvironmentConfig assignability check.
+export const EnvironmentTypeValues: readonly EnvironmentType[] = [
+  'local-agent',
+  'remote-agent',
+  'runtime',
+] as const;
+
 export interface UIEnvironment {
   name: string;
-  type?: EnvironmentType;
+  type?: string;
   mcpUrl?: string;
   apiUrl?: string;
   runtimeVersion?: string;
@@ -278,7 +289,7 @@ export interface UIEnvironmentConfig {
   claude: UIEnvironmentClaudeConfig;
   claudeDefaults: UIEnvironmentClaudeDefaults;
   localPorts: UIEnvironmentLocalPorts;
-  type?: EnvironmentType;
+  type?: string;
   localRepoPath?: string;
   remote: boolean;
   snapshot: boolean;
