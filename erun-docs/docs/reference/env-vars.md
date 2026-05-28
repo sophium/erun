@@ -12,12 +12,12 @@ ERun reads a small number of `ERUN_*` variables, mostly when running inside a ru
 |---|---|---|---|---|
 | `ERUN_REPO_PATH` | absolute path | `/home/erun/git/<repo>` | Project checkout inside the pod. | Helm chart (`worktreeHostPath` template). |
 | `ERUN_REPO_REMOTE` | bool literal `true`/`false` | unset on host; `true` in pod | Marks the pod as a runtime pod. Used by `IsInRuntimeEnvironment`. | Helm chart, only when env type is `remote-agent` or `runtime`. |
-| `ERUN_TENANT` | string | (required) | Tenant name. | `EnvConfig.tenant`. |
+| `ERUN_TENANT` | string | (required) | Tenant name. | Deploy plan (the tenant under which the chart runs); not a field on `EnvConfig`. |
 | `ERUN_ENVIRONMENT` | string | (required) | Environment name. | `EnvConfig.name`. |
 | `ERUN_KUBERNETES_CONTEXT` | string | `in-cluster` | Always `in-cluster` inside the pod. | Helm chart literal. |
 | `ERUN_NAMESPACE` | string | `<tenant>-<env>` | Pod's Kubernetes namespace. | Downward API (`metadata.namespace`). |
-| `ERUN_MCP_PORT` | int (1024–65535) | `17000` | MCP server listener. | `EnvConfig.mcpport`. |
-| `ERUN_SSHD_PORT` | int (1024–65535) | `22` | In-pod SSH server. | `EnvConfig.sshd.port`. |
+| `ERUN_MCP_PORT` | int (1024–65535) | `17000` | MCP server listener. | Allocated by the deploy plan from `EnvConfig.localportrangestart`; passed to the chart via `--set mcpPort`. |
+| `ERUN_SSHD_PORT` | int (1024–65535) | `22` | In-pod SSH server. | Hardcoded by the chart at 22 inside the pod. `EnvConfig.sshd.localport` controls the host-side forward port, not the in-pod port. |
 | `ERUN_IDLE_TIMEOUT` | duration (Go `time.ParseDuration` grammar) | `5m` | See [`EnvConfig.idle.timeout`](/reference/configuration#envconfig). | `EnvConfig.idle.timeout`. |
 | `ERUN_IDLE_WORKING_HOURS` | string `HH:MM-HH:MM` | unset | Window during which idle-stop may fire. | `EnvConfig.idle.workinghours`. |
 | `ERUN_IDLE_TIMEZONE` | IANA TZ | host TZ | TZ for `WORKING_HOURS`. | `EnvConfig.idle.timezone`. |
