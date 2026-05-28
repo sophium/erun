@@ -155,22 +155,34 @@ func (c *EnvConfig) SetSnapshot(enabled bool) {
 	c.Snapshot = &value
 }
 
-// ResolvedType returns the env's type, deriving it from legacy Remote and
-// Snapshot fields when the explicit Type is unset. The truth table matches
-// the documented migration at /reference/configuration#planned-changes:
+// ResolvedType returns the env's type. When Type is set it is the source of
+// truth. When unset, derives the type from the legacy Remote+Snapshot pair
+// only when both signals are present per the documented truth table at
+// /reference/configuration#planned-changes — otherwise returns "" so callers
+// fall back to the legacy predicates (BuildsHere, RemoteWorktree) without
+// silently reclassifying ambiguous envs:
 //
-//	type unset, remote=false               → local-agent (covers name=="local")
-//	type unset, remote=true,  snapshot=true → remote-agent
-//	type unset, remote=true,  snapshot=false→ runtime
-//	type set                                → the set value (preferred)
+//	type set                                  → the set value
+//	type unset, snapshot==nil                 → "" (unresolved; legacy fallback)
+//	type unset, remote=false, snapshot=true   → local-agent
+//	type unset, remote=true,  snapshot=true   → remote-agent
+//	type unset, remote=true,  snapshot=false  → runtime
+//	type unset, remote=false, snapshot=false  → "" (ambiguous local env)
 func (c EnvConfig) ResolvedType() EnvironmentType {
 	if c.Type.IsValid() {
 		return c.Type
 	}
-	if !c.Remote {
-		return EnvironmentTypeLocalAgent
+	if c.Snapshot == nil {
+		return ""
 	}
-	if c.SnapshotEnabled() {
+	snapshot := *c.Snapshot
+	if !c.Remote {
+		if snapshot {
+			return EnvironmentTypeLocalAgent
+		}
+		return ""
+	}
+	if snapshot {
 		return EnvironmentTypeRemoteAgent
 	}
 	return EnvironmentTypeRuntime
@@ -566,6 +578,22 @@ func SaveTenantConfig(config TenantConfig) error {
 	return nil
 }
 
+// NormalizeEnvConfig populates the new-shape fields (Type, LocalRepoPath)
+// from legacy fields when the new shape is unset. Idempotent: re-running it
+// on an already-normalized config is a no-op. Called by LoadEnvConfig so
+// loaded envs always expose a populated Type, and so subsequent saves write
+// both old and new shapes — letting old binaries read the file while the
+// migration window is open.
+func NormalizeEnvConfig(config EnvConfig) EnvConfig {
+	if !config.Type.IsValid() {
+		config.Type = config.ResolvedType()
+	}
+	if strings.TrimSpace(config.LocalRepoPath) == "" && config.Type == EnvironmentTypeLocalAgent {
+		config.LocalRepoPath = strings.TrimSpace(config.RepoPath)
+	}
+	return config
+}
+
 func NormalizeTenantConfig(config TenantConfig) TenantConfig {
 	config.Name = strings.TrimSpace(config.Name)
 	config.DefaultEnvironment = strings.TrimSpace(config.DefaultEnvironment)
@@ -703,7 +731,7 @@ func LoadEnvConfig(tenant, envName string) (EnvConfig, string, error) {
 		return config, configFilePath, ErrConfigCorrupted
 	}
 
-	return config, configFilePath, nil
+	return NormalizeEnvConfig(config), configFilePath, nil
 }
 
 func ListEnvConfigs(tenant string) ([]EnvConfig, error) {

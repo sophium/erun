@@ -9,6 +9,7 @@ Current Directory:
   configured tenant: tenant-b
   effective target: tenant-b/dev
   kubernetes context: cluster-b
+  type: none
   snapshot: off
   assigned local port range: 17200-17299
   assigned mcp local port: 17200 (when MCP is running or forwarded)
@@ -23,6 +24,7 @@ Tenants:
     default environment: local
     environments:
       - local [default] context=cluster-local
+          type: none
           remote: off
           snapshot: off
           repo: <TMP>
@@ -40,6 +42,7 @@ Tenants:
           idle: none
           sshd: off
       - prod context=cluster-prod
+          type: none
           remote: off
           snapshot: off
           repo: <TMP>
@@ -60,6 +63,7 @@ Tenants:
     default environment: dev
     environments:
       - dev [default, effective] context=cluster-b
+          type: none
           remote: off
           snapshot: off
           repo: <TMP>
