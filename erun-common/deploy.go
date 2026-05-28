@@ -1117,12 +1117,13 @@ func cloudContextRegionFromName(name string) string {
 }
 
 func resolveWorktreeStorage(target OpenResult) string {
-	switch target.EnvConfig.ResolvedType() {
-	case EnvironmentTypeRuntime:
-		return WorktreeStorageNone
-	case EnvironmentTypeRemoteAgent:
-		return WorktreeStoragePVC
-	case EnvironmentTypeLocalAgent:
+	if target.EnvConfig.Type.IsValid() {
+		switch target.EnvConfig.Type {
+		case EnvironmentTypeRuntime:
+			return WorktreeStorageNone
+		case EnvironmentTypeRemoteAgent:
+			return WorktreeStoragePVC
+		}
 		return WorktreeStorageHost
 	}
 	if target.RemoteRepo() {

@@ -19,6 +19,7 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	params := common.BootstrapInitParams{}
 	setDefaultTenant := false
 	confirmEnvironment := false
+	var envType string
 
 	cmd := &cobra.Command{
 		Use:          "init [TENANT] [ENVIRONMENT]",
@@ -26,7 +27,7 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			runParams, err := initRunParams(cmd, args, params, setDefaultTenant, confirmEnvironment)
+			runParams, err := initRunParams(cmd, args, params, setDefaultTenant, confirmEnvironment, envType)
 			if err != nil {
 				return err
 			}
@@ -45,8 +46,9 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	cmd.Flags().StringVar(&params.ContainerRegistry, "container-registry", "", "Container registry to associate with the environment")
 	cmd.Flags().StringVar(&params.CodeCommitSSHKeyID, "codecommit-ssh-key-id", "", "CodeCommit SSH public key ID to use for remote repository access")
 	cmd.Flags().BoolVar(&params.Bootstrap, "bootstrap", false, "Create the tenant devops module and chart during initialization")
-	cmd.Flags().BoolVar(&params.Remote, "remote", false, "Initialize the tenant repository inside the runtime pod instead of the local host")
-	cmd.Flags().BoolVar(&params.NoGit, "no-git", false, "Skip remote Git checkout setup when used with --remote")
+	cmd.Flags().StringVar(&envType, "type", "", "Environment type: local-agent, remote-agent, or runtime (takes precedence over --remote)")
+	cmd.Flags().BoolVar(&params.Remote, "remote", false, "Deprecated alias for --type=remote-agent")
+	cmd.Flags().BoolVar(&params.NoGit, "no-git", false, "Skip remote Git checkout setup when used with --remote or --type=remote-agent")
 	cmd.Flags().BoolVar(&setDefaultTenant, "set-default-tenant", false, "Set the initialized tenant as the default tenant")
 	cmd.Flags().BoolVar(&confirmEnvironment, "confirm-environment", false, "Confirm environment initialization without prompting")
 	cmd.Flags().BoolVarP(&params.AutoApprove, "yes", "y", false, "Automatically approve initialization prompts")
@@ -54,13 +56,16 @@ func newInitCmd(runInit func(common.Context, common.BootstrapInitParams) error) 
 	return cmd
 }
 
-func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapInitParams, setDefaultTenant, confirmEnvironment bool) (common.BootstrapInitParams, error) {
+func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapInitParams, setDefaultTenant, confirmEnvironment bool, envType string) (common.BootstrapInitParams, error) {
 	runParams := params
 	if runParams.Tenant == "" && len(args) > 0 {
 		runParams.Tenant = args[0]
 	}
 	if runParams.Environment == "" && len(args) > 1 {
 		runParams.Environment = args[1]
+	}
+	if err := applyInitTypeFlag(cmd, &runParams, envType); err != nil {
+		return common.BootstrapInitParams{}, err
 	}
 	if err := validateInitRunParams(runParams); err != nil {
 		return common.BootstrapInitParams{}, err
@@ -74,12 +79,35 @@ func initRunParams(cmd *cobra.Command, args []string, params common.BootstrapIni
 	return runParams, nil
 }
 
-func validateInitRunParams(params common.BootstrapInitParams) error {
-	if params.Remote && params.Tenant == "" {
-		return fmt.Errorf("tenant is required with --remote")
+// applyInitTypeFlag resolves the --type flag (if set), validates that it does
+// not conflict with --remote, and updates runParams.Type plus the legacy
+// Remote bool so downstream bootstrap logic sees a consistent shape.
+func applyInitTypeFlag(cmd *cobra.Command, runParams *common.BootstrapInitParams, envType string) error {
+	envType = strings.TrimSpace(envType)
+	if envType == "" {
+		return nil
 	}
-	if params.Remote && strings.TrimSpace(params.Environment) == "" {
-		return fmt.Errorf("environment is required with --remote")
+	parsed := common.EnvironmentType(envType)
+	if !parsed.IsValid() {
+		return fmt.Errorf("invalid --type %q: must be local-agent, remote-agent, or runtime", envType)
+	}
+	remoteFlag := cmd.Flags().Lookup("remote")
+	remoteChanged := remoteFlag != nil && remoteFlag.Changed
+	expectedRemote := parsed != common.EnvironmentTypeLocalAgent
+	if remoteChanged && runParams.Remote != expectedRemote {
+		return fmt.Errorf("--type=%s conflicts with --remote=%t", envType, runParams.Remote)
+	}
+	runParams.Type = parsed
+	runParams.Remote = expectedRemote
+	return nil
+}
+
+func validateInitRunParams(params common.BootstrapInitParams) error {
+	if params.RemoteWorktree() && params.Tenant == "" {
+		return fmt.Errorf("tenant is required for non-local-agent envs")
+	}
+	if params.RemoteWorktree() && strings.TrimSpace(params.Environment) == "" {
+		return fmt.Errorf("environment is required for non-local-agent envs")
 	}
 	return nil
 }

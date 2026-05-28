@@ -20,7 +20,8 @@ type InitInput struct {
 	RuntimeMemory            string `json:"runtimeMemory,omitempty" jsonschema:"optional runtime pod memory limit"`
 	KubernetesContext        string `json:"kubernetesContext,omitempty" jsonschema:"optional kubernetes context to associate with the environment"`
 	ContainerRegistry        string `json:"containerRegistry,omitempty" jsonschema:"optional container registry to associate with the environment"`
-	Remote                   bool   `json:"remote,omitempty" jsonschema:"when true, initialize the repository inside the runtime pod"`
+	Type                     string `json:"type,omitempty" jsonschema:"optional environment type (local-agent, remote-agent, runtime); takes precedence over remote"`
+	Remote                   bool   `json:"remote,omitempty" jsonschema:"deprecated alias for type=remote-agent; prefer type instead"`
 	NoGit                    bool   `json:"noGit,omitempty" jsonschema:"when true with remote initialization, create the remote worktree directory without configuring a Git checkout"`
 	RemoteRepositoryURL      string `json:"remoteRepositoryURL,omitempty" jsonschema:"optional SSH repository URL used when creating the remote checkout"`
 	CodeCommitSSHKeyID       string `json:"codeCommitSSHKeyID,omitempty" jsonschema:"optional AWS CodeCommit SSH public key ID used when the remote repository URL is a CodeCommit SSH URL"`
@@ -71,7 +72,12 @@ func initTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest,
 			AutoApprove:             input.AutoApprove,
 		}
 
-		params.Remote = input.Remote
+		if envType := eruncommon.EnvironmentType(strings.TrimSpace(input.Type)); envType.IsValid() {
+			params.Type = envType
+			params.Remote = envType != eruncommon.EnvironmentTypeLocalAgent
+		} else {
+			params.Remote = input.Remote
+		}
 		params.RemoteRepositoryURL = strings.TrimSpace(input.RemoteRepositoryURL)
 		params.CodeCommitSSHKeyID = strings.TrimSpace(input.CodeCommitSSHKeyID)
 		params.ConfirmRemoteKeyImport = input.ConfirmRemoteKeyImport

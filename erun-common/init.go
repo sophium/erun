@@ -74,16 +74,41 @@ type BootstrapInitParams struct {
 	NoGit                    bool
 	KubernetesContext        string
 	ContainerRegistry        string
-	Remote                   bool
-	RemoteRepositoryURL      string
-	CodeCommitSSHKeyID       string
-	Bootstrap                bool
-	ConfirmTenant            *bool
-	ConfirmEnvironment       *bool
-	ConfirmRemoteHostConfig  *bool
-	ConfirmRemoteKeyImport   *bool
-	AutoApprove              bool
-	ResolveTenant            bool
+	// Type, when set, is the canonical environment type for the new env.
+	// Takes precedence over the legacy Remote bool. When unset, the bootstrap
+	// derives the type from Remote (true→remote-agent, false→local-agent) for
+	// backward compatibility with --remote flag callers.
+	Type                    EnvironmentType
+	Remote                  bool
+	RemoteRepositoryURL     string
+	CodeCommitSSHKeyID      string
+	Bootstrap               bool
+	ConfirmTenant           *bool
+	ConfirmEnvironment      *bool
+	ConfirmRemoteHostConfig *bool
+	ConfirmRemoteKeyImport  *bool
+	AutoApprove             bool
+	ResolveTenant           bool
+}
+
+// ResolvedType returns the new env's type. When Type is explicitly set it is
+// the source of truth; otherwise Remote selects between local-agent and
+// remote-agent, matching the pre-type behavior of `erun init [--remote]`.
+func (p BootstrapInitParams) ResolvedType() EnvironmentType {
+	if p.Type.IsValid() {
+		return p.Type
+	}
+	if p.Remote {
+		return EnvironmentTypeRemoteAgent
+	}
+	return EnvironmentTypeLocalAgent
+}
+
+// RemoteWorktree reports whether the new env's worktree will live outside
+// the local machine. Derived from ResolvedType so callers can ignore which
+// shape (--type or --remote) was used to specify the env.
+func (p BootstrapInitParams) RemoteWorktree() bool {
+	return p.ResolvedType() != EnvironmentTypeLocalAgent
 }
 
 type BootstrapInitInteractionType string
@@ -728,6 +753,8 @@ func (s *bootstrapRunState) createEnvConfig() error {
 	s.runner.Context.Trace("Adding new environment")
 	s.envConfig = EnvConfig{
 		Name:               s.envName,
+		Type:               s.params.ResolvedType(),
+		LocalRepoPath:      envProjectRootForType(s.params.ResolvedType(), envProjectRoot),
 		RepoPath:           envProjectRoot,
 		KubernetesContext:  kubernetesContext,
 		CloudProviderAlias: cloudProviderAlias,
@@ -743,6 +770,17 @@ func (s *bootstrapRunState) createEnvConfig() error {
 	s.envConfigChanged = s.params.Remote && containerRegistry != ""
 	s.result.CreatedEnvConfig = true
 	return nil
+}
+
+// envProjectRootForType returns the path that should populate the new env's
+// LocalRepoPath field. Only local-agent envs mount a host path; remote-agent
+// and runtime envs leave LocalRepoPath empty so consumers know to use the
+// in-pod convention path instead.
+func envProjectRootForType(envType EnvironmentType, envProjectRoot string) string {
+	if envType == EnvironmentTypeLocalAgent {
+		return envProjectRoot
+	}
+	return ""
 }
 
 func (s *bootstrapRunState) envProjectRoot() (string, error) {
