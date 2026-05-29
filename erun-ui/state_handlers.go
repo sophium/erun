@@ -123,6 +123,7 @@ func stateFromListResult(result eruncommon.ListResult, info eruncommon.BuildInfo
 		for _, environment := range tenant.Environments {
 			item.Environments = append(item.Environments, uiEnvironment{
 				Name:              strings.TrimSpace(environment.Name),
+				Type:              strings.TrimSpace(string(environment.Type)),
 				MCPURL:            mcpEndpointForListEnvironment(environment),
 				APIURL:            strings.TrimSpace(environment.APIURL),
 				RuntimeVersion:    strings.TrimSpace(environment.RuntimeVersion),

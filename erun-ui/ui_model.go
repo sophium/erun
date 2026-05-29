@@ -21,6 +21,7 @@ type uiTenant struct {
 
 type uiEnvironment struct {
 	Name              string `json:"name"`
+	Type              string `json:"type,omitempty"`
 	MCPURL            string `json:"mcpUrl,omitempty"`
 	APIURL            string `json:"apiUrl,omitempty"`
 	RuntimeVersion    string `json:"runtimeVersion,omitempty"`
