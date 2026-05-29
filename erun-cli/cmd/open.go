@@ -682,7 +682,6 @@ func maybeConfigureOpenNoShellAlias(result common.OpenResult, promptRunner Promp
 	aliasName := openNoShellAliasName(result)
 	startupFile, aliasConfigured := detectOpenNoShellAliasStartupFile(result, shellPath)
 	if aliasConfigured {
-		writeOpenNoShellHintLines(stderr, result, shellPath)
 		return nil
 	}
 	if startupFile == "" || promptRunner == nil || dialect == openNoShellDialectPowerShell {
@@ -715,23 +714,9 @@ func writeOpenNoShellHintLines(stderr io.Writer, result common.OpenResult, shell
 
 func openNoShellHintLines(result common.OpenResult, shellPath string) []string {
 	dialect := openNoShellDialectForShell(shellPath)
-	aliasName := openNoShellAliasName(result)
-	aliasCommand := openNoShellAliasCommand(result, shellPath)
-	startupFile, aliasConfigured := detectOpenNoShellAliasStartupFile(result, shellPath)
-	if aliasConfigured {
-		return []string{
-			fmt.Sprintf("configured in your shell startup file: open a new shell to use %s", aliasName),
-		}
-	}
-	if startupFile == "" || dialect == openNoShellDialectPowerShell {
-		return []string{
-			openNoShellHintPrefix(dialect),
-			aliasCommand,
-		}
-	}
 	return []string{
 		openNoShellHintPrefix(dialect),
-		aliasCommand,
+		openNoShellAliasCommand(result, shellPath),
 	}
 }
 
