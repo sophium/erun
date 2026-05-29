@@ -83,6 +83,41 @@ type DiffCommit struct {
 type DiffOptions struct {
 	Scope          string `json:"scope,omitempty"`
 	SelectedCommit string `json:"selectedCommit,omitempty"`
+	// Target selects which repository to diff. "" or "env" diffs the
+	// environment's runtime working directory (the default behaviour).
+	// "erun" diffs the contribute-mode clone at $HOME/git/erun inside
+	// the environment.
+	Target string `json:"target,omitempty"`
+}
+
+const (
+	DiffTargetEnv  = "env"
+	DiffTargetERun = "erun"
+)
+
+// NormalizeDiffTarget canonicalizes the diff target string. Empty input
+// resolves to "env" (the historical default) so callers that omit the
+// field keep their existing behavior.
+func NormalizeDiffTarget(target string) string {
+	switch strings.TrimSpace(target) {
+	case DiffTargetERun:
+		return DiffTargetERun
+	default:
+		return DiffTargetEnv
+	}
+}
+
+// ResolveDiffTargetRoot returns the working directory the diff tool
+// should operate on for a given target. envRoot is the env's runtime
+// repo path; homeDir is the env's $HOME (used to locate the contribute
+// clone).
+func ResolveDiffTargetRoot(target, envRoot, homeDir string) (string, error) {
+	switch NormalizeDiffTarget(target) {
+	case DiffTargetERun:
+		return ContributeClonePath(homeDir)
+	default:
+		return strings.TrimSpace(envRoot), nil
+	}
 }
 
 type diffTreeBuildNode struct {

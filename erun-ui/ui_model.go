@@ -52,6 +52,11 @@ type uiSelection struct {
 type uiDiffOptions struct {
 	Scope          string `json:"scope,omitempty"`
 	SelectedCommit string `json:"selectedCommit,omitempty"`
+	// Target selects which repository to diff. "" or "env" diffs the
+	// environment's runtime working directory (the historical default).
+	// "erun" diffs the contribute-mode clone at $HOME/git/erun inside
+	// the environment.
+	Target string `json:"target,omitempty"`
 }
 
 type uiBuildDetails struct {

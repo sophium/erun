@@ -119,6 +119,8 @@ export const loadReviewDiff =
     const selectedKey = selectionKey(selection);
     const scope = state.review.selectedReviewScope;
     const selectedCommit = state.review.selectedReviewCommit;
+    const contributeKey = `${selection.tenant}/${selection.environment}`;
+    const target = state.contribute.diffSourceByEnv[contributeKey] ?? 'env';
     if (!options.silent) {
       dispatch(setDiffLoading(true));
       dispatch(
@@ -128,7 +130,7 @@ export const loadReviewDiff =
     try {
       const diff = await dispatch(
         reviewApi.endpoints.getDiff.initiate(
-          { selection, options: { scope, selectedCommit } },
+          { selection, options: { scope, selectedCommit, target } },
           { forceRefetch: true },
         ),
       ).unwrap();

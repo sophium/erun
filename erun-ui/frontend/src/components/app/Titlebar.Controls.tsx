@@ -13,6 +13,7 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { openIDE } from '@/app/ideOpenThunks';
 import { setFilesOpen, toggleReview, toggleSidebar } from '@/app/layoutThunks';
 import { IconTooltip } from '@/components/app/IconTooltip';
+import { ContributeToggle } from '@/components/app/Titlebar.ContributeToggle';
 import { ideTooltipLabel, isIdeDisabled } from '@/components/app/Titlebar.helpers';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -91,6 +92,7 @@ export function TitlebarRightControls(): React.ReactElement {
         variant="intellij"
         dispatch={dispatch}
       />
+      <ContributeToggle />
       <IconTooltip label="Toggle diff panel">
         <Button
           className={cn(titlebarButtonClassName, reviewOpen && activeTitlebarButtonClassName)}

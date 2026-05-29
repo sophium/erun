@@ -1,0 +1,263 @@
+package eruncommon
+
+import (
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+const (
+	ContributeRepoHTTPS = "https://github.com/sophium/erun.git"
+	ContributeRepoSSH   = "git@github.com:sophium/erun.git"
+)
+
+// ContributeClonePath returns the canonical clone target for ERun
+// contribute mode inside the current environment: $HOME/git/erun.
+//
+// The path is resolved inside the env (host for local-agent, pod for
+// remote-agent). When homeDir is empty the caller's $HOME is read.
+func ContributeClonePath(homeDir string) (string, error) {
+	resolved, err := resolveContributeHomeDir(homeDir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(resolved, "git", "erun"), nil
+}
+
+// ContributeShimPath returns the path to the `erun` shim that contribute
+// tabs prepend to PATH so child processes (claude, codex, etc.) resolve
+// the local ERun build script instead of the system-wide binary.
+func ContributeShimPath(homeDir string) (string, error) {
+	resolved, err := resolveContributeHomeDir(homeDir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(resolved, ".erun", "contribute", "bin", "erun"), nil
+}
+
+// ContributeShimDir returns the directory holding the `erun` shim that
+// contribute tabs prepend to PATH.
+func ContributeShimDir(homeDir string) (string, error) {
+	shim, err := ContributeShimPath(homeDir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(shim), nil
+}
+
+// ContributeRunScriptPath returns the path to erun-cli/run.sh inside the
+// contribute clone, which the shim forwards to.
+func ContributeRunScriptPath(homeDir string) (string, error) {
+	clone, err := ContributeClonePath(homeDir)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(clone, "erun-cli", "run.sh"), nil
+}
+
+func resolveContributeHomeDir(homeDir string) (string, error) {
+	homeDir = strings.TrimSpace(homeDir)
+	if homeDir != "" {
+		return homeDir, nil
+	}
+	resolved, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir: %w", err)
+	}
+	return resolved, nil
+}
+
+// ContributeCloneStatus reports the resolved clone state on disk
+// without mutating it.
+type ContributeCloneStatus struct {
+	Target         string
+	ParentDir      string
+	AlreadyCloned  bool
+	ExistingRemote string
+}
+
+// StatFunc is the test seam for stat-style filesystem inspection.
+type StatFunc func(path string) (os.FileInfo, error)
+
+// MkdirAllFunc is the test seam for directory creation.
+type MkdirAllFunc func(path string, perm os.FileMode) error
+
+// SymlinkFunc is the test seam for symlink creation.
+type SymlinkFunc func(target, link string) error
+
+// RemoveFunc is the test seam for file removal.
+type RemoveFunc func(path string) error
+
+// ResolveContributeCloneStatus inspects the filesystem for the contribute
+// clone target and reports whether it already exists. Pure inspection;
+// no side effects.
+func ResolveContributeCloneStatus(homeDir string, runGit GitCommandRunnerFunc, statFn StatFunc) (ContributeCloneStatus, error) {
+	target, err := ContributeClonePath(homeDir)
+	if err != nil {
+		return ContributeCloneStatus{}, err
+	}
+	status := ContributeCloneStatus{Target: target, ParentDir: filepath.Dir(target)}
+	if statFn == nil {
+		statFn = os.Stat
+	}
+	if _, err := statFn(filepath.Join(target, ".git")); err != nil {
+		if os.IsNotExist(err) {
+			return status, nil
+		}
+		return status, fmt.Errorf("stat %s: %w", filepath.Join(target, ".git"), err)
+	}
+	if runGit == nil {
+		runGit = GitCommandRunner
+	}
+	stdout := new(strings.Builder)
+	stderr := new(strings.Builder)
+	if err := runGit(target, asWriter(stdout), asWriter(stderr), "remote", "get-url", "origin"); err != nil {
+		return status, fmt.Errorf("git remote get-url origin (in %s): %w%s", target, err, formatGitCommandStderr(stderr.String()))
+	}
+	status.AlreadyCloned = true
+	status.ExistingRemote = strings.TrimSpace(stdout.String())
+	return status, nil
+}
+
+// IsERunRemote reports whether remote (the output of `git remote get-url
+// origin`) refers to the ERun repository, accepting both HTTPS and SSH
+// URLs with or without the .git suffix.
+func IsERunRemote(remote string) bool {
+	remote = normalizeContributeRemote(remote)
+	return remote == "https://github.com/sophium/erun" ||
+		remote == "git@github.com:sophium/erun"
+}
+
+func normalizeContributeRemote(remote string) string {
+	remote = strings.TrimSpace(remote)
+	remote = strings.TrimSuffix(remote, ".git")
+	return strings.TrimSuffix(remote, "/")
+}
+
+// ContributeCloneIO bundles the filesystem seams used by
+// RunContributeCloneWithIO so tests can swap them out without touching
+// the real filesystem.
+type ContributeCloneIO struct {
+	Stat     StatFunc
+	MkdirAll MkdirAllFunc
+	Symlink  SymlinkFunc
+	Remove   RemoveFunc
+}
+
+// RunContributeClone resolves the target, traces the planned actions,
+// and (when not in dry-run) clones the ERun repository into the env's
+// $HOME/git/erun. It also installs a small `erun` shim at
+// $HOME/.erun/contribute/bin/erun pointing at the clone's erun-cli/run.sh
+// so contribute tabs can prepend that directory to PATH and have every
+// `erun` invocation in the contribute shell — including those spawned
+// by an AI agent as child processes — run the local build script.
+//
+// Trace contract (lines locked in integration goldens):
+//   - audit:   "==> Cloning ERun for contribute mode"
+//   - cmd:     "mkdir -p <clone-parent>"                 (clone needed)
+//   - cmd:     "git clone <url> <target>"                (clone needed)
+//   - audit:   "==> Cloned ERun for contribute mode at <target>" OR
+//   - audit:   "==> ERun contribute clone already present at <target>"
+//   - cmd:     "mkdir -p <shim-dir>"                     (always)
+//   - cmd:     "ln -sf <run.sh> <shim>"                  (always)
+//   - audit:   "==> Installed contribute shim at <shim>"
+func RunContributeClone(ctx Context, homeDir string, runGit GitCommandRunnerFunc) error {
+	return RunContributeCloneWithIO(ctx, homeDir, runGit, ContributeCloneIO{})
+}
+
+// RunContributeCloneWithIO is the test-friendly variant of
+// RunContributeClone with injectable filesystem helpers.
+func RunContributeCloneWithIO(ctx Context, homeDir string, runGit GitCommandRunnerFunc, io ContributeCloneIO) error {
+	io = defaultContributeCloneIO(io)
+	ctx.Info("==> Cloning ERun for contribute mode")
+	status, err := ResolveContributeCloneStatus(homeDir, runGit, io.Stat)
+	if err != nil {
+		return err
+	}
+	if status.AlreadyCloned {
+		if !IsERunRemote(status.ExistingRemote) {
+			return fmt.Errorf("%s exists but origin remote %q does not point at the ERun repository", status.Target, status.ExistingRemote)
+		}
+		ctx.Info(fmt.Sprintf("==> ERun contribute clone already present at %s", status.Target))
+	} else {
+		ctx.TraceCommand("", "mkdir", "-p", status.ParentDir)
+		if !ctx.DryRun {
+			if err := io.MkdirAll(status.ParentDir, 0o755); err != nil {
+				return fmt.Errorf("create %s: %w", status.ParentDir, err)
+			}
+		}
+		ctx.TraceCommand("", "git", "clone", ContributeRepoHTTPS, status.Target)
+		if !ctx.DryRun {
+			if runGit == nil {
+				runGit = GitCommandRunner
+			}
+			stdout := new(strings.Builder)
+			stderr := new(strings.Builder)
+			if err := runGit(status.ParentDir, asWriter(stdout), asWriter(stderr), "clone", ContributeRepoHTTPS, status.Target); err != nil {
+				return fmt.Errorf("git clone: %w%s", err, formatGitCommandStderr(stderr.String()))
+			}
+			ctx.Info(fmt.Sprintf("==> Cloned ERun for contribute mode at %s", status.Target))
+		} else {
+			ctx.Info(fmt.Sprintf("==> Would clone ERun to %s", status.Target))
+		}
+	}
+
+	if err := installContributeShim(ctx, homeDir, io); err != nil {
+		return err
+	}
+	return nil
+}
+
+func installContributeShim(ctx Context, homeDir string, io ContributeCloneIO) error {
+	shimPath, err := ContributeShimPath(homeDir)
+	if err != nil {
+		return err
+	}
+	shimDir := filepath.Dir(shimPath)
+	target, err := ContributeRunScriptPath(homeDir)
+	if err != nil {
+		return err
+	}
+	ctx.TraceCommand("", "mkdir", "-p", shimDir)
+	if !ctx.DryRun {
+		if err := io.MkdirAll(shimDir, 0o755); err != nil {
+			return fmt.Errorf("create %s: %w", shimDir, err)
+		}
+	}
+	ctx.TraceCommand("", "ln", "-sf", target, shimPath)
+	if !ctx.DryRun {
+		// ln -sf semantics: remove any existing link/file at the
+		// destination before creating the symlink. ignored errors when
+		// the file simply doesn't exist match `ln -sf`'s behaviour.
+		_ = io.Remove(shimPath)
+		if err := io.Symlink(target, shimPath); err != nil {
+			return fmt.Errorf("symlink %s -> %s: %w", shimPath, target, err)
+		}
+	}
+	ctx.Info(fmt.Sprintf("==> Installed contribute shim at %s", shimPath))
+	return nil
+}
+
+func defaultContributeCloneIO(io ContributeCloneIO) ContributeCloneIO {
+	if io.Stat == nil {
+		io.Stat = os.Stat
+	}
+	if io.MkdirAll == nil {
+		io.MkdirAll = os.MkdirAll
+	}
+	if io.Symlink == nil {
+		io.Symlink = os.Symlink
+	}
+	if io.Remove == nil {
+		io.Remove = os.Remove
+	}
+	return io
+}
+
+// asWriter bridges *strings.Builder to io.Writer for callers that read
+// the captured text afterwards.
+func asWriter(b *strings.Builder) io.Writer {
+	return b
+}

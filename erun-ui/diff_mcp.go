@@ -45,6 +45,7 @@ func loadDiffFromMCP(ctx context.Context, endpoint string, options uiDiffOptions
 		Arguments: map[string]any{
 			"scope":          strings.TrimSpace(options.Scope),
 			"selectedCommit": strings.TrimSpace(options.SelectedCommit),
+			"target":         strings.TrimSpace(options.Target),
 		},
 	})
 	if err != nil {

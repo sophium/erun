@@ -144,7 +144,13 @@ export interface AppNotification {
 export type TerminalStatusKind = 'info' | 'warning' | 'error';
 export type TerminalStatusAction = '' | 'wait-longer';
 
-export type TerminalTabKind = 'local' | 'erun' | 'ai' | 'extra';
+export type TerminalTabKind =
+  | 'local'
+  | 'erun'
+  | 'ai'
+  | 'extra'
+  | 'contribute-erun'
+  | 'contribute-ai';
 
 export interface TerminalTab {
   sessionId: number;
