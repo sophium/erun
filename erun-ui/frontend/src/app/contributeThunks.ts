@@ -7,6 +7,7 @@ import {
   StartContributeAISession,
   StartContributeSession,
 } from '../../wailsjs/go/main/App';
+import { showNotification } from './notificationThunks';
 import {
   contributeEnvKey,
   type DiffSource,
@@ -45,12 +46,16 @@ export const toggleContribute =
       const tabsKey = selectionKey(selection);
       if (nextOn) {
         await spawnContributeTabs(dispatch, tabsKey, selection);
+        dispatch(showNotification('success', 'Contribute mode enabled for this environment.'));
       } else {
         removeContributeTabsFromState(dispatch, getState, tabsKey);
+        dispatch(showNotification('info', 'Contribute mode disabled.'));
       }
       return { enabled: nextOn };
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
+      const action = nextOn ? 'enable' : 'disable';
+      dispatch(showNotification('error', `Failed to ${action} contribute mode: ${message}`));
       return { enabled: currentlyOn, error: message };
     }
   };
