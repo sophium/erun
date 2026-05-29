@@ -30,6 +30,8 @@ Repository guidance for humans and coding agents working in this repo.
 - If the user asks for `push, accept`, treat that as completing the full publish flow rather than stopping after the branch push.
 - If the user asks to `close`, always treat that as the repository publish flow in this repo: push the branch, open the PR, merge it with squash unless they asked otherwise, close the PR via merge, and close the linked issue.
 - Do not interpret `close` as a request to end or archive the conversation in this repository.
+- Stay within the current PR for the whole body of related work. When additional bugs, gaps, or improvements surface while working on a branch, add them to the same PR rather than filing a separate issue or opening a new branch. Do not propose splitting work into multiple PRs, and do not ask whether to split — assume the answer is "no" unless the user explicitly says otherwise. Update the PR title and body to reflect the broader scope when the diff grows.
+- One body of work, one PR. The PR may link to multiple issues (`Closes #A` / `Closes #B`), but the unit of review is the PR, not the issue.
 
 ## Project Structure
 
@@ -165,6 +167,8 @@ Repository guidance for humans and coding agents working in this repo.
 - Do not add new documentation files unless the user explicitly asks for them; add repository instructions to `AGENTS.md` instead.
 - Keep `AGENTS.md` focused on repository workflow and engineering guidance; do not document app behavior, command semantics, or end-user functionality in it.
 - Do not modify `README.md` unless the user explicitly asks for a README change.
+- **"Documentation" in agent-facing instructions means `AGENTS.md`** (this file plus every applicable subtree `AGENTS.md`). When the user says "read documentation", re-read the relevant `AGENTS.md` files end-to-end; do not substitute `erun-docs/` for that step. When the user says "update documentation", edit the nearest applicable `AGENTS.md`. `erun-docs/` is the public product documentation site — a separate concern with its own update workflow, owned by the `erun-docs/AGENTS.md` rules. Read it only when its content is the load-bearing reference for an investigation; do not treat it as the source of repo workflow or engineering guidance.
+- Each `AGENTS.md` directory ships a `CLAUDE.md` symlink pointing to its `AGENTS.md` so Claude Code auto-loads the local guidance when launched from any subtree. Treat both names as the same file; only edit `AGENTS.md` directly.
 
 ## Diagnosing A Deployed Runtime Via MCP
 

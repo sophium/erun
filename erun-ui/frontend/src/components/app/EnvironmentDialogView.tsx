@@ -1,7 +1,6 @@
 import { FolderPlus, LoaderCircle, Rocket } from 'lucide-react';
 import * as React from 'react';
 
-import { refreshKubernetesContexts } from '@/app/dialogContextsThunks';
 import {
   closeEnvironmentDialog,
   selectEnvironmentVersionSuggestion,
@@ -35,10 +34,10 @@ import { Label } from '@/components/ui/label';
 
 import { EditableComboField } from './EditableComboField';
 import { uniqueSuggestions } from './EditableComboField.helpers';
-import { EmptyState } from './EmptyState';
+import { EnvironmentTypeSelect, LocalRepoPathField } from './EnvironmentTypeFields';
+import { KubernetesContextSelect } from './KubernetesContextSelect';
 import { ReadonlyField } from './ManageDialog.fields';
 import { RuntimeResourceControls } from './RuntimeResourceControls';
-import { SelectField } from './SelectField';
 import { VersionField } from './VersionField';
 
 const dialogErrorClassName =
@@ -252,6 +251,8 @@ function EnvironmentCreateFields({ dialog }: { dialog: EnvironmentDialog }): Rea
 
   return (
     <>
+      <EnvironmentTypeSelect dialog={dialog} />
+      {dialog.envType === 'local-agent' && <LocalRepoPathField dialog={dialog} />}
       <KubernetesContextSelect dialog={dialog} />
       <RuntimePodFields dialog={dialog} />
       <EditableComboField
@@ -267,55 +268,6 @@ function EnvironmentCreateFields({ dialog }: { dialog: EnvironmentDialog }): Rea
       />
       <EnvironmentCreateChecks dialog={dialog} />
     </>
-  );
-}
-
-function KubernetesContextSelect({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
-  const dispatch = useAppDispatch();
-  const items = dialog.kubernetesContexts.map((context) => ({ value: context, label: context }));
-  const placeholder = dialog.kubernetesContextsLoading
-    ? 'Loading contexts...'
-    : 'Select Kubernetes context';
-  if (!dialog.kubernetesContextsLoading && dialog.kubernetesContexts.length === 0) {
-    const body =
-      "ERun runs `kubectl config get-contexts` using the PATH and KUBECONFIG it inherits from your login shell at startup. If your terminal sees contexts that don't appear here, set KUBECONFIG in ~/.zshenv (or ~/.bash_profile) so it applies to GUI launches too, then restart ERun. If kubectl is not yet installed, install it with `brew install kubectl`.";
-    const errorDetail = dialog.error?.trim() ?? '';
-    return (
-      <div className="grid gap-2">
-        <Label htmlFor="environment-kubernetes-context">Kubernetes context</Label>
-        <EmptyState
-          heading="No Kubernetes contexts found"
-          body={errorDetail !== '' ? `${body}\n\nLast error from kubectl:\n${errorDetail}` : body}
-          action={
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                void dispatch(refreshKubernetesContexts());
-              }}
-            >
-              Rescan
-            </Button>
-          }
-        />
-      </div>
-    );
-  }
-  return (
-    <SelectField
-      id="environment-kubernetes-context"
-      label="Kubernetes context"
-      value={dialog.kubernetesContext}
-      options={items}
-      placeholder={placeholder}
-      emptyLabel="No Kubernetes contexts"
-      disabled={dialog.busy || dialog.kubernetesContextsLoading}
-      required
-      onChange={(kubernetesContext) => {
-        dispatch(updateEnvironmentDialog({ kubernetesContext }));
-      }}
-    />
   );
 }
 
@@ -337,6 +289,17 @@ function RuntimePodFields({ dialog }: { dialog: EnvironmentDialog }): React.Reac
 
 function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
+  // The "Create tenant DevOps repository" toggle used to live here but
+  // its value is fully derived from state the dialog already has: the
+  // submit pipeline (environmentDialogSelection) passes --bootstrap iff
+  // the tenant is new, since that's the only case where the remote
+  // devops module isn't already in place. Removed to stop asking an
+  // unanswerable question.
+  //
+  // "Initialize without Git checkout" only changes behavior on the
+  // remote-worktree init path (ensureRemoteRepository in
+  // erun-common/init.go); it's a no-op for local-agent. Hide it then.
+  const isLocalAgent = dialog.envType === 'local-agent';
   return (
     <div className="grid gap-3">
       <CheckboxField
@@ -348,25 +311,17 @@ function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): Rea
           dispatch(updateEnvironmentDialog({ setDefaultTenant }));
         }}
       />
-      <CheckboxField
-        id="environment-no-git"
-        label="Initialize without Git checkout"
-        checked={dialog.noGit}
-        disabled={dialog.busy}
-        onCheckedChange={(noGit) => {
-          dispatch(updateEnvironmentDialog({ noGit }));
-        }}
-      />
-      <CheckboxField
-        id="environment-bootstrap"
-        label="Create tenant DevOps repository"
-        helper="Generates the tenant's shared DevOps module — Helm values and deployment templates reused by every environment in this tenant."
-        checked={dialog.bootstrap}
-        disabled={dialog.busy}
-        onCheckedChange={(bootstrap) => {
-          dispatch(updateEnvironmentDialog({ bootstrap }));
-        }}
-      />
+      {!isLocalAgent && (
+        <CheckboxField
+          id="environment-no-git"
+          label="Initialize without Git checkout"
+          checked={dialog.noGit}
+          disabled={dialog.busy}
+          onCheckedChange={(noGit) => {
+            dispatch(updateEnvironmentDialog({ noGit }));
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -445,8 +400,21 @@ function environmentDialogSubmitGate(
 // blocked instead of guessing. Preconditions are checked in order and
 // the first match wins.
 function environmentCreateSubmitGate(dialog: EnvironmentDialog): EnvironmentSubmitGate {
-  const blocker = kubernetesContextBlocker(dialog) ?? runtimeCapacityBlocker(dialog);
+  const blocker =
+    localRepoPathBlocker(dialog) ??
+    kubernetesContextBlocker(dialog) ??
+    runtimeCapacityBlocker(dialog);
   return blocker ? { disabled: true, reason: blocker } : { disabled: false, reason: '' };
+}
+
+function localRepoPathBlocker(dialog: EnvironmentDialog): string | null {
+  if (dialog.envType !== 'local-agent') {
+    return null;
+  }
+  if (dialog.localRepoPath.trim() === '') {
+    return 'Local repo path is required for local-agent envs.';
+  }
+  return null;
 }
 
 function kubernetesContextBlocker(dialog: EnvironmentDialog): string | null {

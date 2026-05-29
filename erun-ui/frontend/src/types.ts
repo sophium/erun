@@ -45,6 +45,11 @@ export interface UISelection {
   runtimeMemory?: string;
   kubernetesContext?: string;
   containerRegistry?: string;
+  // type stays as bare string to match the Wails binding, which widens
+  // the Go EnvironmentType alias at the boundary. Use the
+  // EnvironmentType union for narrowed dropdown values.
+  type?: string;
+  localRepoPath?: string;
   noGit?: boolean;
   bootstrap?: boolean;
   setDefaultTenant?: boolean;
@@ -64,7 +69,6 @@ export interface UIState {
   message?: string;
   build?: UIBuildDetails;
   versionSuggestions?: UIVersionSuggestion[];
-  kubernetesContexts?: string[];
   cloudProviders?: UICloudProviderStatus[];
 }
 

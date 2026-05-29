@@ -40,6 +40,8 @@ type uiSelection struct {
 	RuntimeMemory     string `json:"runtimeMemory,omitempty"`
 	KubernetesContext string `json:"kubernetesContext,omitempty"`
 	ContainerRegistry string `json:"containerRegistry,omitempty"`
+	Type              string `json:"type,omitempty"`
+	LocalRepoPath     string `json:"localRepoPath,omitempty"`
 	NoGit             bool   `json:"noGit,omitempty"`
 	Bootstrap         bool   `json:"bootstrap,omitempty"`
 	SetDefaultTenant  bool   `json:"setDefaultTenant,omitempty"`

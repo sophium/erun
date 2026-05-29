@@ -587,7 +587,7 @@ func TestBuildOpenNoShellArgsTrimsTenantAndEnvironment(t *testing.T) {
 
 func TestBuildInitArgsTrimsTenantAndEnvironment(t *testing.T) {
 	got := buildInitArgs(uiSelection{Tenant: " erun ", Environment: " remote "})
-	want := []string{"init", "erun", "remote", "--remote", "--set-default-tenant=false", "--confirm-environment=true"}
+	want := []string{"init", "erun", "remote", "--type=remote-agent", "--set-default-tenant=false", "--confirm-environment=true"}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected args length: got %+v want %+v", got, want)
 	}
@@ -612,7 +612,43 @@ func TestBuildInitArgsIncludesRuntimeVersion(t *testing.T) {
 		Bootstrap:         true,
 		SetDefaultTenant:  true,
 	})
-	want := []string{"init", "erun", "remote", "--remote", "--version", "1.0.19", "--runtime-image", "erun-devops", "--runtime-cpu", "6", "--runtime-memory", "12Gi", "--kubernetes-context", "orbstack", "--container-registry", "erunpaas", "--set-default-tenant=true", "--confirm-environment=true", "--no-git", "--bootstrap"}
+	want := []string{"init", "erun", "remote", "--type=remote-agent", "--version", "1.0.19", "--runtime-image", "erun-devops", "--runtime-cpu", "6", "--runtime-memory", "12Gi", "--kubernetes-context", "orbstack", "--container-registry", "erunpaas", "--set-default-tenant=true", "--confirm-environment=true", "--no-git", "--bootstrap"}
+	if len(got) != len(want) {
+		t.Fatalf("unexpected args length: got %+v want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected arg[%d]: got %q want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestBuildInitArgsRespectsExplicitType(t *testing.T) {
+	got := buildInitArgs(uiSelection{
+		Tenant:        "erun",
+		Environment:   "local",
+		Type:          "local-agent",
+		LocalRepoPath: "/Users/me/code/project",
+	})
+	want := []string{"init", "erun", "local", "--type=local-agent", "--project-root", "/Users/me/code/project", "--set-default-tenant=false", "--confirm-environment=true"}
+	if len(got) != len(want) {
+		t.Fatalf("unexpected args length: got %+v want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("unexpected arg[%d]: got %q want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestBuildInitArgsRuntimeTypeOmitsProjectRoot(t *testing.T) {
+	got := buildInitArgs(uiSelection{
+		Tenant:        "erun",
+		Environment:   "prod",
+		Type:          "runtime",
+		LocalRepoPath: "/should/be/ignored",
+	})
+	want := []string{"init", "erun", "prod", "--type=runtime", "--set-default-tenant=false", "--confirm-environment=true"}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected args length: got %+v want %+v", got, want)
 	}
@@ -745,7 +781,7 @@ func TestStartInitSessionPipesCommandToLocal(t *testing.T) {
 		t.Fatalf("expected 1 spawned session (Local), got %d", len(sessions))
 	}
 	written := sessions[0].WrittenString()
-	wantSubstr := "/tmp/erun init erun remote --remote --version 1.0.19 --kubernetes-context orbstack --container-registry erunpaas --set-default-tenant=true --confirm-environment=true --no-git\n"
+	wantSubstr := "/tmp/erun init erun remote --type=remote-agent --version 1.0.19 --kubernetes-context orbstack --container-registry erunpaas --set-default-tenant=true --confirm-environment=true --no-git\n"
 	if !strings.Contains(written, wantSubstr) {
 		t.Fatalf("expected Local pty to receive %q, got %q", wantSubstr, written)
 	}
@@ -828,10 +864,10 @@ func TestStartInitSessionReusesLocalAcrossInvocations(t *testing.T) {
 		t.Fatalf("expected Local to be reused (1 spawn), got %d", startCalls)
 	}
 	written := lastSession.WrittenString()
-	if !strings.Contains(written, "init erun remote --remote --version 1.0.18") {
+	if !strings.Contains(written, "init erun remote --type=remote-agent --version 1.0.18") {
 		t.Fatalf("expected first init command in Local, got %q", written)
 	}
-	if !strings.Contains(written, "init erun remote --remote --version 1.0.19") {
+	if !strings.Contains(written, "init erun remote --type=remote-agent --version 1.0.19") {
 		t.Fatalf("expected second init command in Local, got %q", written)
 	}
 }

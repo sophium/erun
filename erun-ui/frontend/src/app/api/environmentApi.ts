@@ -6,6 +6,7 @@ import type {
 } from '@/types';
 
 import {
+  ChooseLocalRepoPath,
   ChooseWorkspaceSyncLocalFolder,
   DeleteEnvironment,
   LoadEnvironmentConfig,
@@ -67,6 +68,9 @@ export const environmentApi = wailsApi.injectEndpoints({
         ChooseWorkspaceSyncLocalFolder(selection, current),
       ),
     }),
+    chooseLocalRepoPath: builder.mutation<string, string>({
+      queryFn: wailsQueryFn<string, string>((current) => ChooseLocalRepoPath(current)),
+    }),
     getVersionSuggestions: builder.query<UIVersionSuggestion[], UISelection>({
       queryFn: wailsQueryFn<UISelection, UIVersionSuggestion[]>((selection) =>
         LoadVersionSuggestions(selection),
@@ -88,6 +92,7 @@ export const {
   useSaveEnvironmentConfigMutation,
   useDeleteEnvironmentMutation,
   useChooseWorkspaceSyncLocalFolderMutation,
+  useChooseLocalRepoPathMutation,
   useGetVersionSuggestionsQuery,
   useLazyGetVersionSuggestionsQuery,
   useGetRuntimeResourceStatusQuery,
