@@ -74,20 +74,6 @@ export function GeneralTab(): React.ReactElement {
         label="Environment type"
         value={environmentTypeLabel(config.type)}
       />
-      <ReadonlyField
-        id="environment-config-remote"
-        label="Remote environment"
-        value={config.remote ? 'Yes' : 'No'}
-      />
-      <CheckboxField
-        id="environment-config-snapshot"
-        label="Snapshot deploy"
-        checked={config.snapshot}
-        disabled={dialog.busy}
-        onChange={(snapshot) => {
-          dispatch(updateManageConfig({ snapshot }));
-        }}
-      />
       {config.remote && (
         <CheckboxField
           id="environment-config-remotehostcredentials"
