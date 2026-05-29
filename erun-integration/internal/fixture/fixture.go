@@ -324,6 +324,35 @@ func SeedReleaseRepo(t testing.TB, dir, branch string) string {
 	return dir
 }
 
+// SeedMarketplaceJSON writes a placeholder .claude-plugin/marketplace.json
+// inside dir so release scenarios can exercise the marketplace.json
+// source.sha bump path. The placeholder pins one plugin at a known SHA;
+// the release flow's syncMarketplaceReleaseSHA rewrites that SHA to the
+// resolved release tag commit during the sync-packaging-checksums stage.
+func SeedMarketplaceJSON(t testing.TB, dir string) {
+	t.Helper()
+	dst := filepath.Join(dir, ".claude-plugin")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dst, err)
+	}
+	mustWrite(t, filepath.Join(dst, "marketplace.json"), `{
+  "name": "sophium/erun",
+  "plugins": [
+    {
+      "name": "erun-tools",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/sophium/erun.git",
+        "path": "erun-skills",
+        "ref": "main",
+        "sha": "0000000000000000000000000000000000000000"
+      }
+    }
+  ]
+}
+`)
+}
+
 // RunGit runs `git <args...>` inside dir. Useful for scenarios that need
 // to set up branches, tags, or remotes after SeedReleaseRepo.
 func RunGit(t testing.TB, dir string, args ...string) {

@@ -104,6 +104,25 @@ func TestRelease(t *testing.T) {
 		golden.Equal(t, "release/dry_run_includes_linux_release_scripts", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_main_with_marketplace_emits_sha_sync", func(t *testing.T) {
+		// Exercises release.go marketplace.json bump path: when the project
+		// contains a .claude-plugin/marketplace.json, the sync-packaging-checksums
+		// stage must trace `git rev-parse v<VERSION>^{}` (to resolve the release
+		// commit) and include the marketplace.json path in the git-add list.
+		// The bump itself is gated on !DryRun so the trace alone proves the path
+		// is wired correctly.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		fixture.SeedMarketplaceJSON(t, setup.Cwd)
+		fixture.RunGit(t, setup.Cwd, "add", ".claude-plugin")
+		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add marketplace.json")
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "release/dry_run_main_with_marketplace_emits_sha_sync", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_force_includes_tag_deletion_for_stale_release_tag", func(t *testing.T) {
 		// Exercises release.go --force path: when the release tag already
 		// exists remotely on a commit other than HEAD, --dry-run must

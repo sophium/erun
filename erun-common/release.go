@@ -80,9 +80,11 @@ type ReleaseStage struct {
 }
 
 type ReleasePackagingSyncSpec struct {
-	Version     string `json:"version"`
-	FormulaPath string `json:"formulaPath,omitempty"`
-	ScoopPath   string `json:"scoopPath,omitempty"`
+	ProjectRoot     string `json:"projectRoot,omitempty"`
+	Version         string `json:"version"`
+	FormulaPath     string `json:"formulaPath,omitempty"`
+	ScoopPath       string `json:"scoopPath,omitempty"`
+	MarketplacePath string `json:"marketplacePath,omitempty"`
 }
 
 type ReleaseSpec struct {
@@ -885,7 +887,7 @@ func discoverReleaseLinuxScripts(releaseRoot, version string) ([]scriptSpec, err
 
 func discoverStableReleasePackaging(projectRoot, version string) ([]ReleaseFileUpdate, *ReleasePackagingSyncSpec, error) {
 	updates := make([]ReleaseFileUpdate, 0, 2)
-	syncSpec := &ReleasePackagingSyncSpec{Version: version}
+	syncSpec := &ReleasePackagingSyncSpec{ProjectRoot: projectRoot, Version: version}
 
 	formulaPath := filepath.Join(projectRoot, "Formula", "erun.rb")
 	formulaContent, formulaChanged, err := updateHomebrewFormulaReleaseVersion(formulaPath, version)
@@ -916,7 +918,13 @@ func discoverStableReleasePackaging(projectRoot, version string) ([]ReleaseFileU
 	if fileExists(scoopPath) {
 		syncSpec.ScoopPath = scoopPath
 	}
-	if syncSpec.FormulaPath == "" && syncSpec.ScoopPath == "" {
+
+	marketplacePath := filepath.Join(projectRoot, ".claude-plugin", "marketplace.json")
+	if fileExists(marketplacePath) {
+		syncSpec.MarketplacePath = marketplacePath
+	}
+
+	if syncSpec.FormulaPath == "" && syncSpec.ScoopPath == "" && syncSpec.MarketplacePath == "" {
 		return updates, nil, nil
 	}
 
@@ -1082,11 +1090,11 @@ func updateScoopManifestReleaseChecksum(manifestPath, checksum string) (string, 
 }
 
 func syncReleasePackagingChecksums(ctx Context, spec ReleasePackagingSyncSpec) ([]ReleaseFileUpdate, error) {
-	if spec.FormulaPath == "" && spec.ScoopPath == "" {
+	if spec.FormulaPath == "" && spec.ScoopPath == "" && spec.MarketplacePath == "" {
 		return nil, nil
 	}
 
-	updates := make([]ReleaseFileUpdate, 0, 2)
+	updates := make([]ReleaseFileUpdate, 0, 3)
 	formulaUpdate, ok, err := syncHomebrewReleaseChecksum(ctx, spec)
 	if err != nil {
 		return nil, err
@@ -1100,6 +1108,13 @@ func syncReleasePackagingChecksums(ctx Context, spec ReleasePackagingSyncSpec) (
 	}
 	if ok {
 		updates = append(updates, scoopUpdate)
+	}
+	marketplaceUpdate, ok, err := syncMarketplaceReleaseSHA(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		updates = append(updates, marketplaceUpdate)
 	}
 	return updates, nil
 }
@@ -1144,6 +1159,58 @@ func syncScoopReleaseChecksum(ctx Context, spec ReleasePackagingSyncSpec) (Relea
 		return ReleaseFileUpdate{}, false, err
 	}
 	return ReleaseFileUpdate{Path: spec.ScoopPath, Content: content}, true, nil
+}
+
+// syncMarketplaceReleaseSHA bumps .claude-plugin/marketplace.json plugins[*].source.sha
+// to the commit the release tag points at, so the marketplace catalogue pins
+// the plugin to the release commit. Runs in the same stage as Homebrew/Scoop
+// because both require the release tag to exist first.
+func syncMarketplaceReleaseSHA(ctx Context, spec ReleasePackagingSyncSpec) (ReleaseFileUpdate, bool, error) {
+	if spec.MarketplacePath == "" {
+		return ReleaseFileUpdate{}, false, nil
+	}
+	if spec.ProjectRoot == "" {
+		return ReleaseFileUpdate{}, false, fmt.Errorf("release: marketplace sync requires ProjectRoot in sync spec")
+	}
+	ref := "v" + spec.Version + "^{}"
+	ctx.TraceCommand("", "git", "-C", spec.ProjectRoot, "rev-parse", ref)
+	if ctx.DryRun {
+		return ReleaseFileUpdate{}, false, nil
+	}
+	output, err := Command("git", "-C", spec.ProjectRoot, "rev-parse", ref).CombinedOutput()
+	if err != nil {
+		return ReleaseFileUpdate{}, false, fmt.Errorf("resolve release tag %q: %w", ref, err)
+	}
+	sha := strings.TrimSpace(string(output))
+	if sha == "" {
+		return ReleaseFileUpdate{}, false, fmt.Errorf("resolve release tag %q: empty result", ref)
+	}
+	content, changed, err := updateMarketplaceReleaseSHA(spec.MarketplacePath, sha)
+	if err != nil || !changed {
+		return ReleaseFileUpdate{}, false, err
+	}
+	return ReleaseFileUpdate{Path: spec.MarketplacePath, Content: content}, true, nil
+}
+
+// updateMarketplaceReleaseSHA swaps every "sha": "<hex>" field inside
+// .claude-plugin/marketplace.json with the given sha. Uses targeted text
+// replacement (not JSON marshal) to preserve the file's formatting and
+// key ordering.
+func updateMarketplaceReleaseSHA(marketplacePath, sha string) (string, bool, error) {
+	data, err := os.ReadFile(marketplacePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	content := string(data)
+	pattern := regexp.MustCompile(`("sha":\s*")[0-9a-f]{7,40}(")`)
+	updated := pattern.ReplaceAllString(content, `${1}`+sha+`${2}`)
+	if updated == content {
+		return "", false, nil
+	}
+	return updated, true, nil
 }
 
 func releaseArchiveSHA256(url string) (string, error) {
@@ -1227,16 +1294,19 @@ func newPushReleaseTagStage(projectRoot, version string) ReleaseStage {
 }
 
 func newSyncPackagingStage(projectRoot string, spec ReleasePackagingSyncSpec) ReleaseStage {
-	if spec.FormulaPath == "" && spec.ScoopPath == "" {
+	if spec.FormulaPath == "" && spec.ScoopPath == "" && spec.MarketplacePath == "" {
 		return ReleaseStage{}
 	}
 
-	updates := make([]ReleaseFileUpdate, 0, 2)
+	updates := make([]ReleaseFileUpdate, 0, 3)
 	if spec.FormulaPath != "" {
 		updates = append(updates, ReleaseFileUpdate{Path: spec.FormulaPath})
 	}
 	if spec.ScoopPath != "" {
 		updates = append(updates, ReleaseFileUpdate{Path: spec.ScoopPath})
+	}
+	if spec.MarketplacePath != "" {
+		updates = append(updates, ReleaseFileUpdate{Path: spec.MarketplacePath})
 	}
 
 	addArgs := append([]string{"add"}, releaseUpdatedPaths(projectRoot, updates)...)
