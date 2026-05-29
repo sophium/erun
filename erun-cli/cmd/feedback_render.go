@@ -41,6 +41,7 @@ func commandVerbosity(cmd *cobra.Command) int {
 	if err != nil {
 		verbosity = 0
 	}
+	userAskedForVerbose := err == nil && verbosity > 0
 	if isExecCommand(cmd) && verbosity < common.VerbosityDebug {
 		verbosity = common.VerbosityDebug
 	}
@@ -50,7 +51,25 @@ func commandVerbosity(cmd *cobra.Command) int {
 	if verbosity > common.VerbosityTrace {
 		verbosity = common.VerbosityTrace
 	}
+	if shouldSilenceNoShellOutput(cmd, userAskedForVerbose) {
+		return common.VerbosityInfo - 1
+	}
 	return verbosity
+}
+
+// shouldSilenceNoShellOutput keeps an `eval "$(erun open ... --no-shell)"`
+// alias quiet on stderr. The audit and trace lines are useful when the user
+// is actively auditing (-v / -vv) or previewing (--dry-run), but they surface
+// in the wrapping terminal on every alias invocation, which the docs already
+// promise is silent. Returns true only when the user has opted into none of
+// the verbose paths.
+func shouldSilenceNoShellOutput(cmd *cobra.Command, userAskedForVerbose bool) bool {
+	return !userAskedForVerbose && !isDryRunCommand(cmd) && isNoShellCommand(cmd)
+}
+
+func isNoShellCommand(cmd *cobra.Command) bool {
+	noShell, err := cmd.Flags().GetBool("no-shell")
+	return err == nil && noShell
 }
 
 func commandContext(cmd *cobra.Command) common.Context {
