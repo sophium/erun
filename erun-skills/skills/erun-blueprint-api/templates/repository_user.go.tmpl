@@ -1,0 +1,39 @@
+package repository
+
+import (
+	"context"
+
+	"github.com/google/uuid"
+
+	"__MODULE_PATH__/internal/model"
+	"__MODULE_PATH__/internal/routes"
+)
+
+type UserRepository struct {
+	tx *TxManager
+}
+
+func NewUserRepository(tx *TxManager) *UserRepository {
+	return &UserRepository{tx: tx}
+}
+
+// GetByID returns the User with the given user_id. RLS enforces tenant
+// scope — a request from a tenant that does not own this user will
+// return sql.ErrNoRows.
+func (r *UserRepository) GetByID(ctx context.Context, userID uuid.UUID) (routes.WhoamiUser, error) {
+	var user model.User
+	err := r.tx.WithTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		return tx.NewSelect().
+			Model(&user).
+			Where("user_id = ?", userID).
+			Scan(ctx)
+	})
+	if err != nil {
+		return routes.WhoamiUser{}, err
+	}
+	return routes.WhoamiUser{
+		UserID:   user.UserID,
+		TenantID: user.TenantID,
+		Username: user.Username,
+	}, nil
+}

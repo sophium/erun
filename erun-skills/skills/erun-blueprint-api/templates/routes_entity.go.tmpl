@@ -1,0 +1,95 @@
+package routes
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+
+	"github.com/google/uuid"
+
+	"__MODULE_PATH__/internal/model"
+)
+
+// __ENTITY__Repository is the route-layer view of the persistence
+// surface for __ENTITY_TABLE__. The concrete implementation lives in
+// internal/repository.__ENTITY__Repository.
+type __ENTITY__Repository interface {
+	Create(ctx context.Context, e model.__ENTITY__) (model.__ENTITY__, error)
+	Get(ctx context.Context, id uuid.UUID) (model.__ENTITY__, error)
+	List(ctx context.Context, filter __ENTITY__ListFilter) ([]model.__ENTITY__, error)
+	Update(ctx context.Context, e model.__ENTITY__) (model.__ENTITY__, error)
+}
+
+type __ENTITY__ListFilter struct {
+	NamePrefix string
+}
+
+// Register__ENTITY__Routes wires the entity through the protected
+// route registrar so the canonical API path is bound into context for
+// authorization and audit middleware.
+//
+// Canonical paths (used as audit_events.api_path and role_permissions.api_path):
+//   GET    /v1/__ENTITY_TABLE__
+//   POST   /v1/__ENTITY_TABLE__
+//   GET    /v1/__ENTITY_TABLE__/{__ENTITY_KEY__}
+//   PATCH  /v1/__ENTITY_TABLE__/{__ENTITY_KEY__}
+func Register__ENTITY__Routes(register ProtectedRouteRegistrar, repo __ENTITY__Repository) {
+	register("GET", "/v1/__ENTITY_TABLE__", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		filter := __ENTITY__ListFilter{NamePrefix: r.URL.Query().Get("name_prefix")}
+		rows, err := repo.List(r.Context(), filter)
+		if err != nil {
+			http.Error(w, "list failed", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, rows)
+	}))
+
+	register("POST", "/v1/__ENTITY_TABLE__", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var in model.__ENTITY__
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		created, err := repo.Create(r.Context(), in)
+		if err != nil {
+			http.Error(w, "create failed", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		writeJSON(w, created)
+	}))
+
+	register("GET", "/v1/__ENTITY_TABLE__/{__ENTITY_KEY__}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, err := uuid.Parse(r.PathValue("__ENTITY_KEY__"))
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		row, err := repo.Get(r.Context(), id)
+		if err != nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, row)
+	}))
+
+	register("PATCH", "/v1/__ENTITY_TABLE__/{__ENTITY_KEY__}", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		id, err := uuid.Parse(r.PathValue("__ENTITY_KEY__"))
+		if err != nil {
+			http.Error(w, "invalid id", http.StatusBadRequest)
+			return
+		}
+		var in model.__ENTITY__
+		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+			http.Error(w, "invalid body", http.StatusBadRequest)
+			return
+		}
+		in.__ENTITY__ID = id
+		updated, err := repo.Update(r.Context(), in)
+		if err != nil {
+			http.Error(w, "update failed", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, updated)
+	}))
+}

@@ -13,6 +13,7 @@ Repository guidance for humans and coding agents working in this repo.
   - `erun-docs/AGENTS.md` — product documentation site (Docusaurus) and the Cloudflare Pages deploy contract.
   - `erun-integration/AGENTS.md` — integration-test harness layout, scenario shape, and the coverage gate.
   - `erun-backend/AGENTS.md` plus `erun-backend/erun-backend-api/AGENTS.md` and `erun-backend/erun-backend-db/AGENTS.md` — hosted-backend, API, and Atlas-migration guidance.
+  - `erun-skills/AGENTS.md` — canonical skill source for the Claude Code / Codex SKILL.md files plus the plugin manifest. Consumed by both the runtime image (vendored into `/etc/erun/skills/`) and the Claude Code marketplace at the repo root.
 - A child `AGENTS.md` is additional, not a replacement: parent rules still apply unless the child explicitly overrides them.
 - If you add a new `AGENTS.md` anywhere in the tree, also list it in the bullet above so future readers find it without searching.
 
@@ -43,6 +44,7 @@ Repository guidance for humans and coding agents working in this repo.
 - `erun-ui` - desktop app module built with Wails, using a Go backend and a TypeScript/Yarn frontend
 - `erun-docs` - public product documentation site (Docusaurus 3.x), published to Cloudflare Pages via a k8s Job under `erun-devops/k8s/erun-docs/`
 - `erun-integration` - cross-module integration test harness; runs the compiled `erun` binary with `--dry-run` against per-command goldens and gates merged coverage
+- `erun-skills` - canonical source for Claude Code / Codex SKILL.md files and the Claude Code plugin manifest; consumed by both the runtime image (in-pod install) and the marketplace at the repo root (laptop install)
 
 ## Module Boundaries
 
@@ -149,6 +151,7 @@ Repository guidance for humans and coding agents working in this repo.
 - Preserve momentum by choosing the simplest defensible design that fits the repository. Add structure only when it clarifies ownership, reduces repeated logic, or prevents a real class of mistakes.
 - Treat repeated user corrections as signal that the interaction model is wrong, not just the implementation detail. Revisit the flow and simplify it around what the user is trying to accomplish.
 - Treat every change that affects a user-triggered code path as a UX-affecting change, including backend wiring, lifecycle refactors, event-handler edits, persistence work, and frontend logic that does not directly edit a component. Before considering such a change complete, walk through the user-facing sequence it produces and verify the user can see what is happening, recover from what fails, and confirm what succeeded. Setting state without a corresponding visible affordance, or surfacing a status that is cleared by the next lifecycle step before the user can register it, both count as gaps that block the change. For desktop work, follow the impact-review checklist in `erun-ui/AGENTS.md` § "UX Impact Review Checklist".
+- Treat every feature addition or feature-changing PR as a docs-affecting change, and include the `erun-docs` plan in the same approval step as the rest of the change. The plan must name each affected page, identify its audience (Operator-facing vs Agent reference — see `erun-docs/AGENTS.md` § "Audience: Operator vs Agent" and § "Companion pages") and the validation (`cd erun-docs && yarn build` clean, anchor and canonical-terminology sweeps). If no docs update is needed, the plan must say so with a one-line reason. Undocumented behaviour is not part of the contract (see `erun-docs/AGENTS.md` § "Spec discipline"), so missing docs are a defect, not optional follow-up — they land in the same PR as the feature, never as a separate "docs PR." Pure bug fixes that preserve behaviour, refactors with no public-surface change, and internal cleanup are exempt; when unsure whether a change qualifies as exempt, treat it as feature work and include the doc plan.
 - Avoid duplicating investigation. Once a cause is established, update the relevant shared guidance, tests, or abstractions so future work can start from that knowledge.
 - Treat execution state as scoped to one CLI run or one MCP request, not shared process state.
 - Avoid adding new package-level mutable variables.

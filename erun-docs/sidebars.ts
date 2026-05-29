@@ -46,6 +46,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'collaboration/workflow',
         'collaboration/overview',
+        'collaboration/skills',
         'collaboration/operator-in-the-loop',
       ],
     },

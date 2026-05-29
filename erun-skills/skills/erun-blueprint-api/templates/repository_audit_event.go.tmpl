@@ -1,0 +1,44 @@
+package repository
+
+import (
+	"context"
+	"errors"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// AuditEventRepository writes API/MCP/CLI audit rows. Each row carries
+// tenant ID, ERun user ID, external issuer/user, type, and the canonical
+// API method + path (never the concrete URL).
+type AuditEventRepository struct {
+	tx *TxManager
+}
+
+func NewAuditEventRepository(tx *TxManager) *AuditEventRepository {
+	return &AuditEventRepository{tx: tx}
+}
+
+type APIAuditEvent struct {
+	TenantID         uuid.UUID
+	ERunUserID       uuid.UUID
+	ExternalUserID   string
+	ExternalIssuerID string
+	APIMethod        string
+	APIPath          string // canonical route template
+	CreatedAt        time.Time
+}
+
+func (r *AuditEventRepository) WriteAPIEvent(ctx context.Context, e APIAuditEvent) error {
+	if e.APIPath == "" {
+		return errors.New("audit: api_path is required (canonical route template, not concrete URL)")
+	}
+	// TODO: implement
+	//   INSERT INTO audit_events
+	//     (tenant_id, erun_user_id, external_user_id, external_issuer_id,
+	//      type, api_method, api_path, created_at)
+	//   VALUES (...)
+	// Use TxManager.WithTx so the row is written under the request's
+	// security context (erun_tenant / erun_operations role + erun.tenant_id).
+	return nil
+}

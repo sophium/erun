@@ -1,0 +1,12 @@
+{
+  "name": "erun-tools",
+  "version": "1.0.0",
+  "description": "ERun skills for Claude Code: Blueprint skills that build multi-tenant RLS database + API modules following ERun's accumulated best practices, and Workflow skills that file issues + drive the contribution flow that lets users share improvements back.",
+  "author": {
+    "name": "Sophium",
+    "email": "maintainers@sophium.com"
+  },
+  "homepage": "https://github.com/sophium/erun/tree/main/erun-skills",
+  "repository": "https://github.com/sophium/erun",
+  "license": "MIT"
+}

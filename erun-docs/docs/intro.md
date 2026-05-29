@@ -51,15 +51,35 @@ Each one is a chapter elsewhere in these docs. The point of putting them on one 
 
 ---
 
-## Get started
+## AI native
 
-In your project folder, type:
+Inside any env, you ask ERun to add a feature and it happens — the Agent matches your intent against a skill and writes conformant code by hand.
 
-```bash
-erun
+```mermaid
+flowchart LR
+    O("Operator describes intent"):::endpoint --> A("Agent matches a skill"):::step
+
+    subgraph BL [Blueprint · build a conformant solution]
+        B1("Loads ERun's best practice"):::step --> B2("Writes the code by hand"):::step
+    end
+
+    subgraph WF [Workflow · share an improvement back]
+        W1("Drives the contribution flow"):::step --> W2("Files issue, opens PR"):::step
+    end
+
+    A --> B1
+    A --> W1
+    B2 --> R1("Feature in your project"):::endpoint
+    W2 --> R2("ERun grows for everyone"):::endpoint
+
+    class BL,WF namespace
+
+    classDef endpoint fill:#0f1320,color:#ffffff,stroke:#0a1019,stroke-width:1px,rx:14,ry:14;
+    classDef step     fill:#ffffff,color:#0f1320,stroke:#0891b2,stroke-width:1.5px,rx:14,ry:14;
+    classDef namespace fill:#fbfcfd,stroke:#cbd5e0,stroke-width:1px,rx:18,ry:18;
 ```
 
-That's all. The first time, ERun sets things up. After that, the same command picks up where you left off.
+Two kinds of skills ship today: **Blueprint** skills package ERun's accumulated best practices for building specific solutions; **Workflow** skills let you share an improvement back so the next env-open includes it for every user. See [Skills](/collaboration/skills) for the catalogue.
 
 ---
 

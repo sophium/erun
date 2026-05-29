@@ -1,0 +1,66 @@
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+
+	"github.com/google/uuid"
+)
+
+// IdentityRepository owns the bootstrap path: given an authenticated
+// (issuer, subject), it either resolves an existing tenant + user or,
+// on a completely empty database, creates the initial OPERATIONS tenant,
+// maps the issuer, creates the first user, and assigns ReadAll + WriteAll.
+//
+// Once any tenant row exists, unknown identities are unauthorized. Do not
+// implicitly create users.
+//
+// Keep this repository scoped to bootstrap and resolution. General user
+// CRUD lives in UserRepository.
+type IdentityRepository struct {
+	db      *sql.DB
+	dialect Dialect
+}
+
+func NewIdentityRepository(db *sql.DB, dialect Dialect) *IdentityRepository {
+	return &IdentityRepository{db: db, dialect: dialect}
+}
+
+type ResolvedIdentity struct {
+	TenantID        uuid.UUID
+	UserID          uuid.UUID
+	IsOperations    bool
+	ExternalIssuer  string
+	ExternalSubject string
+}
+
+// Resolve returns the resolved identity for a verified (issuer, subject).
+// Behaviour:
+//   - If the database has any tenant row, look up tenant by issuer, then
+//     user by (tenant_id, issuer, external_id). Return error if any miss.
+//   - If the database has no tenant rows, create the initial OPERATIONS
+//     tenant, map the issuer to it, create the first user, assign
+//     ReadAll + WriteAll, return the resolved identity.
+//
+// Implementation note: the bootstrap branch must run inside a single
+// transaction so partial bootstrap state cannot persist on failure.
+func (r *IdentityRepository) Resolve(ctx context.Context, issuer, subject, email string) (ResolvedIdentity, error) {
+	// TODO: implement
+	//   1. SELECT EXISTS (SELECT 1 FROM tenants).
+	//   2a. If exists: SELECT tenant by tenant_issuers.issuer; SELECT user by user_external_ids
+	//       (tenant_id, issuer, external_id). Return error on miss.
+	//   2b. If empty: BEGIN; INSERT INTO tenants (name, type) VALUES (..., 'OPERATIONS');
+	//       INSERT INTO tenant_issuers (issuer, name); INSERT INTO users (username);
+	//       INSERT INTO user_external_ids (...); INSERT predefined roles; assign them; COMMIT.
+	//   3. Once tenant exists, do NOT bootstrap again — the existence check guards this.
+	return ResolvedIdentity{}, errors.New("identity: not implemented")
+}
+
+// Verify the implementation against:
+//   - Empty database, first request → bootstraps OPERATIONS tenant.
+//   - Empty database, two concurrent first requests → only one bootstraps;
+//     the other resolves the existing identity or fails cleanly.
+//   - Non-empty database, unknown issuer → error.
+//   - Non-empty database, known issuer, unknown subject → error.
+//   - Non-empty database, known issuer + subject → returns existing user.

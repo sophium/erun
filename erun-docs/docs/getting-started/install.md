@@ -33,6 +33,19 @@ scoop install erun
 
 Either install puts the `erun` CLI on your `PATH` and installs the desktop application alongside it.
 
+## Optional: install the ERun plugin in your Claude Code
+
+Once `erun` is installed, you can add the ERun plugin to your laptop Claude Code so the same issue-filing and contribution skills your env already has are available locally:
+
+```bash
+/plugin marketplace add sophium/erun
+/plugin install erun-tools@sophium/erun
+```
+
+The plugin gives Claude Code four skills: `erun-file-issue`, `erun-contribute`, `erun-blueprint-rls-db`, and `erun-blueprint-api`. See [Skills](/collaboration/skills) for what each one does and when to use it.
+
+Codex doesn't have an analogous marketplace yet; inside a deployed env you get the skills automatically.
+
 ## Next
 
 [Create your first environment →](/getting-started/first-environment)
