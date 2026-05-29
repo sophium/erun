@@ -1,0 +1,66 @@
+package routes
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+
+	"github.com/google/uuid"
+)
+
+// WhoamiUserRepository is the minimal user-lookup surface that the
+// /v1/whoami route needs. The concrete implementation lives in
+// internal/repository.UserRepository.
+type WhoamiUserRepository interface {
+	GetByID(ctx context.Context, userID uuid.UUID) (WhoamiUser, error)
+}
+
+type WhoamiUser struct {
+	UserID   uuid.UUID `json:"user_id"`
+	TenantID uuid.UUID `json:"tenant_id"`
+	Username string    `json:"username"`
+}
+
+func RegisterWhoamiRoute(register ProtectedRouteRegistrar, users WhoamiUserRepository) {
+	register("GET", "/v1/whoami", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Auth middleware guarantees security context exists on
+		// protected routes. If it is missing here, that is an internal
+		// wiring error — surface it as 500, not 401.
+		sec, ok := r.Context().Value(securityContextKey{}).(SecurityContext)
+		if !ok {
+			http.Error(w, "internal wiring error", http.StatusInternalServerError)
+			return
+		}
+		if users == nil {
+			// Fall back to the resolved context if no user repository is
+			// wired (e.g. minimal scaffold without the user table).
+			writeJSON(w, WhoamiUser{UserID: sec.UserID, TenantID: sec.TenantID})
+			return
+		}
+		user, err := users.GetByID(r.Context(), sec.UserID)
+		if err != nil {
+			http.Error(w, "user lookup failed", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, user)
+	}))
+}
+
+// securityContextKey mirrors the repository-layer key so this package
+// can read the same value without an import cycle. The auth middleware
+// in the parent package sets this on outbound requests via WithSecurity.
+type securityContextKey struct{}
+
+// SecurityContext mirrors repository.SecurityContext for the same reason.
+type SecurityContext struct {
+	TenantID     uuid.UUID
+	UserID       uuid.UUID
+	IsOperations bool
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		http.Error(w, "encode failed", http.StatusInternalServerError)
+	}
+}

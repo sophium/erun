@@ -1,0 +1,81 @@
+package repository
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+
+	"github.com/google/uuid"
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+)
+
+type Dialect int
+
+const (
+	DialectPostgres Dialect = iota
+)
+
+// SecurityContext is the subset of __MODULE__.Security that the
+// repository layer needs. It is populated by the API layer before
+// calling into repositories and read here without an import cycle.
+type SecurityContext struct {
+	TenantID     uuid.UUID
+	UserID       uuid.UUID
+	IsOperations bool
+}
+
+type securityContextKey struct{}
+
+func WithSecurityContext(ctx context.Context, sec SecurityContext) context.Context {
+	return context.WithValue(ctx, securityContextKey{}, sec)
+}
+
+func securityFromContext(ctx context.Context) (SecurityContext, error) {
+	v, ok := ctx.Value(securityContextKey{}).(SecurityContext)
+	if !ok {
+		return SecurityContext{}, errors.New("repository: missing security context (internal wiring error)")
+	}
+	return v, nil
+}
+
+type TxManager struct {
+	db *bun.DB
+}
+
+func NewTxManager(db *sql.DB, dialect Dialect) *TxManager {
+	_ = dialect
+	return &TxManager{db: bun.NewDB(db, pgdialect.New())}
+}
+
+// WithTx opens a transaction, sets the PostgreSQL security context from
+// the authenticated SecurityContext, and runs fn. The role and
+// erun.tenant_id are set transaction-locally via SELECT set_config(...)
+// so values do not leak through pooled connections.
+func (tm *TxManager) WithTx(ctx context.Context, fn func(context.Context, bun.Tx) error) error {
+	sec, err := securityFromContext(ctx)
+	if err != nil {
+		return err
+	}
+	return tm.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+		role := "erun_tenant"
+		if sec.IsOperations {
+			role = "erun_operations"
+		}
+		// SET LOCAL ROLE does not accept parameters; the role name comes
+		// from a fixed allow-list above, so direct interpolation is safe.
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("SET LOCAL ROLE %s", role)); err != nil {
+			return fmt.Errorf("repository: set role: %w", err)
+		}
+		if _, err := tx.NewRaw("SELECT set_config('erun.tenant_id', ?, true)", sec.TenantID.String()).Exec(ctx); err != nil {
+			return fmt.Errorf("repository: set tenant_id: %w", err)
+		}
+		if sec.UserID != uuid.Nil {
+			if _, err := tx.NewRaw("SELECT set_config('erun.user_id', ?, true)", sec.UserID.String()).Exec(ctx); err != nil {
+				return fmt.Errorf("repository: set user_id: %w", err)
+			}
+		}
+		return fn(ctx, tx)
+	})
+}

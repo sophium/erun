@@ -1,0 +1,10 @@
+package routes
+
+import "net/http"
+
+// ProtectedRouteRegistrar registers a route behind the API's
+// authentication, authorization, and audit middleware chain. The
+// canonical apiPath (e.g. "/v1/invoices/{invoice_id}") is bound into
+// request context at registration time so permission matching and audit
+// logging use the route template, not the concrete request URL.
+type ProtectedRouteRegistrar func(method string, apiPath string, handler http.Handler)

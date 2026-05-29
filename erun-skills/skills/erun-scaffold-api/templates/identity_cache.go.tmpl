@@ -1,0 +1,112 @@
+package __MODULE__
+
+import (
+	"container/list"
+	"sync"
+	"time"
+)
+
+type IdentityCacheOptions struct {
+	PositiveTTL time.Duration
+	NegativeTTL time.Duration
+	MaxEntries  int
+}
+
+type identityCacheEntry struct {
+	key      identityCacheKey
+	sec      Security
+	err      error
+	expires  time.Time
+	negative bool
+}
+
+type identityCacheKey struct {
+	issuer  string
+	subject string
+}
+
+// IdentityResolutionCache caches (issuer, subject) → resolved Security
+// (positive) or resolution error (negative). Bounded LRU. Key by
+// (issuer, subject) — subjects are issuer-scoped and must not be cached
+// alone. Cache decisions never bypass token verification; the verifier
+// runs first, then claims feed this lookup.
+type IdentityResolutionCache struct {
+	options IdentityCacheOptions
+
+	mu      sync.Mutex
+	entries map[identityCacheKey]*list.Element
+	order   *list.List
+}
+
+func NewIdentityResolutionCache(options IdentityCacheOptions) *IdentityResolutionCache {
+	if options.PositiveTTL <= 0 {
+		options.PositiveTTL = 5 * time.Minute
+	}
+	if options.NegativeTTL <= 0 {
+		options.NegativeTTL = 30 * time.Second
+	}
+	if options.MaxEntries <= 0 {
+		options.MaxEntries = 10000
+	}
+	return &IdentityResolutionCache{
+		options: options,
+		entries: make(map[identityCacheKey]*list.Element, options.MaxEntries),
+		order:   list.New(),
+	}
+}
+
+func (c *IdentityResolutionCache) Lookup(issuer, subject string) (Security, bool, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := identityCacheKey{issuer: issuer, subject: subject}
+	elem, ok := c.entries[key]
+	if !ok {
+		return Security{}, false, nil
+	}
+	entry := elem.Value.(*identityCacheEntry)
+	if time.Now().After(entry.expires) {
+		c.removeLocked(elem)
+		return Security{}, false, nil
+	}
+	c.order.MoveToFront(elem)
+	if entry.negative {
+		return Security{}, true, entry.err
+	}
+	return entry.sec, true, nil
+}
+
+func (c *IdentityResolutionCache) Store(issuer, subject string, sec Security, resolveErr error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := identityCacheKey{issuer: issuer, subject: subject}
+	if existing, ok := c.entries[key]; ok {
+		c.removeLocked(existing)
+	}
+	ttl := c.options.PositiveTTL
+	negative := false
+	if resolveErr != nil {
+		ttl = c.options.NegativeTTL
+		negative = true
+	}
+	entry := &identityCacheEntry{
+		key:      key,
+		sec:      sec,
+		err:      resolveErr,
+		expires:  time.Now().Add(ttl),
+		negative: negative,
+	}
+	elem := c.order.PushFront(entry)
+	c.entries[key] = elem
+	for c.order.Len() > c.options.MaxEntries {
+		c.removeLocked(c.order.Back())
+	}
+}
+
+func (c *IdentityResolutionCache) removeLocked(elem *list.Element) {
+	if elem == nil {
+		return
+	}
+	entry := elem.Value.(*identityCacheEntry)
+	delete(c.entries, entry.key)
+	c.order.Remove(elem)
+}

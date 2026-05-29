@@ -1,0 +1,24 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "sophium/erun",
+  "description": "ERun skills for Claude Code — file issues against sophium/erun, drive the clone-to-PR contribution flow, and scaffold multi-tenant RLS databases and APIs from the erun-backend blueprint.",
+  "owner": {
+    "name": "Sophium",
+    "email": "maintainers@sophium.com"
+  },
+  "plugins": [
+    {
+      "name": "erun-tools",
+      "description": "ERun issue filing, contribution workflow, and multi-tenant scaffolding skills.",
+      "category": "development",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/sophium/erun.git",
+        "path": "erun-skills",
+        "ref": "main",
+        "sha": "171cba26a584eac446ce370452d7de3b6a62a1f1"
+      },
+      "homepage": "https://github.com/sophium/erun/tree/main/erun-skills"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "erun-tools",
+  "version": "1.0.0",
+  "description": "ERun skills for Claude Code: file issues against sophium/erun, drive the clone-to-PR contribution flow, and scaffold multi-tenant RLS database and API modules from the erun-backend blueprint.",
+  "author": {
+    "name": "Sophium",
+    "email": "maintainers@sophium.com"
+  },
+  "homepage": "https://github.com/sophium/erun/tree/main/erun-skills",
+  "repository": "https://github.com/sophium/erun",
+  "license": "MIT"
+}

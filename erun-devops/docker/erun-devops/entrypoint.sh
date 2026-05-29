@@ -328,11 +328,17 @@ if [ ! -f "${codex_instructions}" ] || ! grep -qF "${agents_marker}" "${codex_in
         "${agents_marker}" "${agents_marker}" >> "${codex_instructions}"
 fi
 
-erun_skill_src=/etc/erun/skills/erun/SKILL.md
-erun_skill_dst="${codex_dir}/skills/erun/SKILL.md"
-if [ -f "${erun_skill_src}" ] && [ ! -e "${erun_skill_dst}" ]; then
-    mkdir -p "$(dirname "${erun_skill_dst}")"
-    install -m 0644 "${erun_skill_src}" "${erun_skill_dst}"
+if [ -d /etc/erun/skills ]; then
+    for src_dir in /etc/erun/skills/*/; do
+        [ -d "${src_dir}" ] || continue
+        skill_name=$(basename "${src_dir}")
+        dst_dir="${codex_dir}/skills/${skill_name}"
+        if [ ! -e "${dst_dir}/SKILL.md" ]; then
+            mkdir -p "${dst_dir}"
+            cp -R "${src_dir}." "${dst_dir}/"
+            find "${dst_dir}" -type f -exec chmod 0644 {} +
+        fi
+    done
 fi
 
 touch "${codex_config}"
@@ -437,11 +443,17 @@ if [ ! -f "${claude_md}" ] || ! grep -qF "${agents_marker}" "${claude_md}" 2>/de
         "${agents_marker}" "${agents_marker}" >> "${claude_md}"
 fi
 
-erun_skill_src=/etc/erun/skills/erun/SKILL.md
-erun_skill_dst="${claude_dir}/skills/erun/SKILL.md"
-if [ -f "${erun_skill_src}" ] && [ ! -e "${erun_skill_dst}" ]; then
-    mkdir -p "$(dirname "${erun_skill_dst}")"
-    install -m 0644 "${erun_skill_src}" "${erun_skill_dst}"
+if [ -d /etc/erun/skills ]; then
+    for src_dir in /etc/erun/skills/*/; do
+        [ -d "${src_dir}" ] || continue
+        skill_name=$(basename "${src_dir}")
+        dst_dir="${claude_dir}/skills/${skill_name}"
+        if [ ! -e "${dst_dir}/SKILL.md" ]; then
+            mkdir -p "${dst_dir}"
+            cp -R "${src_dir}." "${dst_dir}/"
+            find "${dst_dir}" -type f -exec chmod 0644 {} +
+        fi
+    done
 fi
 
 CLAUDE_SETTINGS_PATH="${claude_settings}" \

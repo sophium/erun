@@ -1,0 +1,74 @@
+package __MODULE__
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/coreos/go-oidc/v3/oidc"
+)
+
+// MultiIssuerVerifier verifies OIDC bearer tokens issued by any of the
+// configured issuers. Each issuer is verified against its own JWKS
+// endpoint (discovered via /.well-known/openid-configuration).
+type MultiIssuerVerifier struct {
+	verifiers map[string]*oidc.IDTokenVerifier
+}
+
+func NewMultiIssuerVerifier(ctx context.Context, issuers []string) (*MultiIssuerVerifier, error) {
+	if len(issuers) == 0 {
+		return nil, errors.New("backend: at least one issuer is required")
+	}
+	v := &MultiIssuerVerifier{verifiers: make(map[string]*oidc.IDTokenVerifier, len(issuers))}
+	for _, issuer := range issuers {
+		if issuer == "" {
+			continue
+		}
+		provider, err := oidc.NewProvider(ctx, issuer)
+		if err != nil {
+			return nil, fmt.Errorf("oidc: provider setup failed for %q: %w", issuer, err)
+		}
+		// SkipClientIDCheck because this is a resource server, not a
+		// relying party. Set ClientID and remove SkipClientIDCheck if the
+		// API must validate audience.
+		v.verifiers[issuer] = provider.Verifier(&oidc.Config{SkipClientIDCheck: true})
+	}
+	if len(v.verifiers) == 0 {
+		return nil, errors.New("backend: no usable issuers configured")
+	}
+	return v, nil
+}
+
+func (v *MultiIssuerVerifier) Verify(ctx context.Context, rawToken string) (Claims, error) {
+	// Peek at the issuer claim without verifying so we know which JWKS
+	// to trust. The actual verification call below re-validates the
+	// signature against that JWKS.
+	unverified, err := oidc.NewVerifier("", nil, &oidc.Config{
+		InsecureSkipSignatureCheck: true,
+		SkipClientIDCheck:          true,
+		SkipIssuerCheck:            true,
+		SkipExpiryCheck:            true,
+	}).Verify(ctx, rawToken)
+	if err != nil {
+		return Claims{}, fmt.Errorf("oidc: peek failed: %w", err)
+	}
+	verifier, ok := v.verifiers[unverified.Issuer]
+	if !ok {
+		return Claims{}, fmt.Errorf("oidc: unknown issuer %q", unverified.Issuer)
+	}
+	token, err := verifier.Verify(ctx, rawToken)
+	if err != nil {
+		return Claims{}, fmt.Errorf("oidc: verify failed: %w", err)
+	}
+	var payload struct {
+		Email string `json:"email"`
+	}
+	if err := token.Claims(&payload); err != nil {
+		return Claims{}, fmt.Errorf("oidc: claims decode failed: %w", err)
+	}
+	return Claims{
+		Issuer:  token.Issuer,
+		Subject: token.Subject,
+		Email:   payload.Email,
+	}, nil
+}

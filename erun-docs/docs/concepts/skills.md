@@ -21,13 +21,33 @@ The conventions are unchanged — see [Conventions](/concepts/conventions). What
 
 ## Where skills come from
 
-ERun's runtime image ships a built-in skill set. The chart mounts them into the env so the Agent (whichever Agent the env is configured for — Claude Code, Codex, …) discovers them automatically when it starts up. The Operator doesn't install or wire anything; opening an env makes the skills available to whatever's running inside.
+ERun ships skills through two paths, both vendored from the same canonical source in the ERun repository (`erun-skills/skills/`) so they stay in sync.
 
-The built-in set covers the common patterns: HTTP services per language, static-site builds, migration jobs, cron jobs, ingresses. Each is one skill.
+### Inside a deployed env
 
-Projects can layer their own skills under `<repo>/.erun/skills/`. On `erun open`, those layer on top of the built-ins — same conventions, same shape, just project-specific guidance (your house style, your team's preferred library versions, your auditing rules). A project-side skill with the same name as a built-in wins.
+The runtime image bakes the skill set, and the env's entrypoint installs each one into the Agent's discovery directory (`~/.claude/skills/<name>/` for Claude Code, `~/.codex/skills/<name>/` for Codex). The Operator doesn't install or wire anything — opening an env makes the skills available to whatever's running inside. Edits made to a skill file inside a running env survive pod restarts; only a fresh home (or a new skill name) re-pulls the baked copy.
 
-For the SKILL.md contract, the in-pod deployment paths, and the layering rules, see [Agent reference · Skills spec](/agent-reference/skills-spec).
+### On your laptop
+
+The same skills are published as a Claude Code plugin via the ERun marketplace at `sophium/erun`. Add the marketplace once, install the plugin, and the skills are loaded into your local Claude Code alongside whatever else you have:
+
+```bash
+/plugin marketplace add sophium/erun
+/plugin install erun-tools@sophium/erun
+```
+
+Codex doesn't have an analogous plugin marketplace yet (Planned.); for now, Codex users either work inside a deployed env or copy the SKILL.md files from `erun-skills/skills/` into `~/.codex/skills/<name>/` manually.
+
+### What's in the set today
+
+| Skill | What it does |
+|---|---|
+| `erun-file-issue` | File a bug or feature against ERun on GitHub (`sophium/erun`). |
+| `erun-contribute` | Clone ERun, follow its `AGENTS.md` rules, implement a change, open a PR back. |
+| `erun-scaffold-rls-db` | Generate a multi-tenant PostgreSQL schema with row-level security, modelled on `erun-backend-db`. |
+| `erun-scaffold-api` | Generate a multi-tenant Go HTTP API service modelled on `erun-backend-api`. |
+
+For the SKILL.md contract, the deployment mechanism, the marketplace manifest format, and the per-skill spec, see [Agent reference · Skills spec](/agent-reference/skills-spec).
 
 ## What the Agent does with a skill
 
