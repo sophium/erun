@@ -1,7 +1,7 @@
 {
   "name": "erun-tools",
   "version": "1.0.0",
-  "description": "ERun skills for Claude Code: file issues against sophium/erun, drive the clone-to-PR contribution flow that lets users share improvements back to the platform, and build multi-tenant RLS database + API modules following ERun's accumulated best-practice blueprints.",
+  "description": "ERun skills for Claude Code: Blueprint skills that build multi-tenant RLS database + API modules following ERun's accumulated best practices, and Workflow skills that file issues + drive the contribution flow that lets users share improvements back.",
   "author": {
     "name": "Sophium",
     "email": "maintainers@sophium.com"

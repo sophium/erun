@@ -210,17 +210,16 @@ Codex CLI does not have an analogous plugin marketplace yet. Inside a deployed e
 
 ## Built-in skill catalogue
 
-The current v1 set, shipped both in the runtime image (`/etc/erun/skills/`) and via the plugin marketplace. Skills group into three semantic categories:
+The current v1 set, shipped both in the runtime image (`/etc/erun/skills/`) and via the plugin marketplace. Skills come in two semantic kinds:
 
-- **Platform skills** — interact with the ERun platform itself.
-- **Shared workflows** — let ERun users share their best practices and workflows back to the platform so other users benefit.
 - **Blueprint skills** — package ERun's accumulated best practices for building complex industry-strength solutions.
+- **Workflow skills** — let users participate in ERun's processes (report problems, share improvements back so other users benefit).
 
 ### `erun-file-issue`
 
 | Field | Value |
 |---|---|
-| Category | Platform — interact with the ERun platform itself. |
+| Kind | Workflow — participate in ERun's issue-reporting process. |
 | Source | `erun-skills/skills/erun-file-issue/SKILL.md` |
 | Description | "Register or file a bug or feature request for the ERun project itself on GitHub." |
 | Triggers | "file an erun bug", "file an erun feature", "register erun bug", "register erun feature", "open an erun issue" |
@@ -232,7 +231,7 @@ The current v1 set, shipped both in the runtime image (`/etc/erun/skills/`) and 
 
 | Field | Value |
 |---|---|
-| Category | Shared workflow — lets ERun users share improvements back to the platform so other users benefit. |
+| Kind | Workflow — lets users share improvements back to the platform so other users benefit. |
 | Source | `erun-skills/skills/erun-contribute/SKILL.md` |
 | Description | "Contribute a change to the ERun platform itself — create a new GitHub issue against sophium/erun that captures the work, clone the repo, implement the change following its AGENTS.md rules, and submit a pull request back." |
 | Triggers | "contribute to erun", "make a change to erun", "work on erun", "land a fix in erun", "submit a PR to erun", "propose an improvement to erun" |
@@ -248,7 +247,7 @@ Key contract: the skill **explicitly reads** the cloned repo's `AGENTS.md` and e
 
 | Field | Value |
 |---|---|
-| Category | Blueprint — packages ERun's accumulated best practices for multi-tenant PostgreSQL. |
+| Kind | Blueprint — packages ERun's accumulated best practices for multi-tenant PostgreSQL. |
 | Source | `erun-skills/skills/erun-blueprint-rls-db/SKILL.md` + `templates/` |
 | Description | "Build a multi-tenant PostgreSQL database module following ERun's blueprint — row-level security, Atlas migrations, UUIDv7 surrogate keys, shared timestamp trigger, separate erun_tenant / erun_operations PostgreSQL roles, and the canonical tenant/issuer/user bootstrap that erun-backend-db captures." |
 | Triggers | "build a multi-tenant postgres database", "create a tenant-scoped postgres schema with row-level security", "set up multi-tenant postgres migrations", "I need an erun-backend-db-shaped module", "build a multi-tenant rls db" |
@@ -260,7 +259,7 @@ Key contract: the skill **explicitly reads** the cloned repo's `AGENTS.md` and e
 
 | Field | Value |
 |---|---|
-| Category | Blueprint — packages ERun's accumulated best practices for multi-tenant HTTP APIs. |
+| Kind | Blueprint — packages ERun's accumulated best practices for multi-tenant HTTP APIs. |
 | Source | `erun-skills/skills/erun-blueprint-api/SKILL.md` + `templates/` |
 | Description | "Build a multi-tenant Go HTTP API service following ERun's blueprint — OIDC bearer authentication, tenant resolution from the token issuer, layered model / repository / service / routes structure, transaction-scoped PostgreSQL security context, identity resolution cache, and audit logging. Captures the patterns that erun-backend-api packages." |
 | Triggers | "build a multi-tenant http api", "build a multi-tenant backend api", "create an erun-backend-api-shaped service", "I need a multi-tenant Go api with oidc auth and tenant rls" |

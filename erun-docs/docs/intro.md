@@ -53,23 +53,33 @@ Each one is a chapter elsewhere in these docs. The point of putting them on one 
 
 ## AI native
 
-Inside any env, you ask ERun to add a feature and it happens. You describe what you want in plain language; the Agent reads ERun's guidance for that kind of work, writes conformant code by hand, and the diff lands in your editor. No template picker, no scaffolding wizard, no menu of generators — just intent → result, with conventions baked in.
+Inside any env, you ask ERun to add a feature and it happens — the Agent matches your intent against a skill and writes conformant code by hand.
 
 ```mermaid
 flowchart LR
-    O("Operator describes a feature"):::endpoint --> A("Agent loads ERun's guidance"):::step
-    A --> C("Agent writes conformant code"):::step
-    C --> R("Feature in your project"):::endpoint
+    O("Operator describes intent"):::endpoint --> A("Agent matches a skill"):::step
+
+    subgraph BL [Blueprint · build a conformant solution]
+        B1("Loads ERun's best practice"):::step --> B2("Writes the code by hand"):::step
+    end
+
+    subgraph WF [Workflow · share an improvement back]
+        W1("Drives the contribution flow"):::step --> W2("Files issue, opens PR"):::step
+    end
+
+    A --> B1
+    A --> W1
+    B2 --> R1("Feature in your project"):::endpoint
+    W2 --> R2("ERun grows for everyone"):::endpoint
+
+    class BL,WF namespace
 
     classDef endpoint fill:#0f1320,color:#ffffff,stroke:#0a1019,stroke-width:1px,rx:14,ry:14;
     classDef step     fill:#ffffff,color:#0f1320,stroke:#0891b2,stroke-width:1.5px,rx:14,ry:14;
+    classDef namespace fill:#fbfcfd,stroke:#cbd5e0,stroke-width:1px,rx:18,ry:18;
 ```
 
-The guidance the Agent reads is called a **skill** — a small bundle shipped with ERun that captures one way of building something well. You never pick from a catalogue; the Agent matches against your description and loads the right one.
-
-ERun grows by contribution. When you find a way to use ERun more efficiently — a sharper deploy plan, a cleaner pattern for tenant-scoped queries, a new convention worth packaging — share it back as an ERun feature. Once it lands, every ERun user gets it on the next env they open. The platform compounds with use.
-
-For the catalogue shipped today and the install commands, see [Skills](/collaboration/skills). For the conceptual model, see [Concepts · Skills](/concepts/skills). For the SKILL.md format and the marketplace contract, see [Skills spec](/agent-reference/skills-spec).
+Two kinds of skills ship today: **Blueprint** skills package ERun's accumulated best practices for building specific solutions; **Workflow** skills let you share an improvement back so the next env-open includes it for every user. See [Skills](/collaboration/skills) for the catalogue.
 
 ---
 

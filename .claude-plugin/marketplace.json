@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "sophium/erun",
-  "description": "ERun skills for Claude Code — Platform skills for filing issues against sophium/erun, Shared-workflow skills that let users contribute improvements back to the platform, and Blueprint skills packaging ERun's accumulated best practices for building industry-strength multi-tenant solutions.",
+  "description": "ERun skills for Claude Code — Blueprint skills packaging ERun's accumulated best practices for building industry-strength multi-tenant solutions, and Workflow skills letting users report problems and share improvements back to the platform.",
   "owner": {
     "name": "Sophium",
     "email": "maintainers@sophium.com"
@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "erun-tools",
-      "description": "Platform skills (issue filing), Shared-workflow skills (contribute improvements back to ERun), and Blueprint skills (multi-tenant RLS DB and API following ERun's best practices).",
+      "description": "Blueprint skills (multi-tenant RLS DB and API following ERun's best practices) and Workflow skills (issue filing, contribution flow back to ERun).",
       "category": "development",
       "source": {
         "source": "git-subdir",

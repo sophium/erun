@@ -29,23 +29,7 @@ Codex doesn't have an analogous plugin marketplace yet. Inside a deployed env Co
 
 ## What's in the set
 
-Skills group into three categories.
-
-### Platform skills
-
-Interact with the ERun platform itself.
-
-| Skill | What it does | Trigger by saying |
-|---|---|---|
-| `erun-file-issue` | File a bug or feature against ERun on GitHub. | "file an erun bug", "register erun feature", "open an erun issue" |
-
-### Shared workflows
-
-Let ERun users share their best practices and workflows back to the platform so other users benefit.
-
-| Skill | What it does | Trigger by saying |
-|---|---|---|
-| `erun-contribute` | Create a new issue against `sophium/erun`, then drive the full clone → branch → implement → PR motion to share your improvement back. | "contribute to erun", "submit a PR to erun", "propose an improvement to erun" |
+Skills come in two kinds.
 
 ### Blueprint skills
 
@@ -55,6 +39,15 @@ Package ERun's accumulated best practices for building complex industry-strength
 |---|---|---|
 | `erun-blueprint-rls-db` | Build a multi-tenant PostgreSQL schema with row-level security, Atlas migrations, UUIDv7 keys, and the canonical tenant/issuer/user bootstrap. | "build a multi-tenant postgres database", "create a tenant-scoped postgres schema with row-level security" |
 | `erun-blueprint-api` | Build a multi-tenant Go HTTP API with OIDC bearer auth, tenant-from-issuer resolution, layered model / repository / routes, transaction-scoped RLS context, and audit logging. | "build a multi-tenant http api", "create an erun-backend-api-shaped service" |
+
+### Workflow skills
+
+Let you participate in ERun's processes — report problems, share improvements back so other users benefit.
+
+| Skill | What it does | Trigger by saying |
+|---|---|---|
+| `erun-file-issue` | File a bug or feature against ERun on GitHub. | "file an erun bug", "register erun feature", "open an erun issue" |
+| `erun-contribute` | Create a new issue against `sophium/erun`, then drive the full clone → branch → implement → PR motion to share your improvement back. | "contribute to erun", "submit a PR to erun", "propose an improvement to erun" |
 
 You don't need to memorise the trigger phrases — the Agent matches against the skill's `description` field, which lists several variants. If you describe the work in plain language ("I want to add a Postgres database that's tenant-scoped"), the right skill usually fires on its own.
 
