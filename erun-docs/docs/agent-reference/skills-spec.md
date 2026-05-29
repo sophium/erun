@@ -210,12 +210,17 @@ Codex CLI does not have an analogous plugin marketplace yet. Inside a deployed e
 
 ## Built-in skill catalogue
 
-The current v1 set, shipped both in the runtime image (`/etc/erun/skills/`) and via the plugin marketplace:
+The current v1 set, shipped both in the runtime image (`/etc/erun/skills/`) and via the plugin marketplace. Skills group into three semantic categories:
+
+- **Platform skills** — interact with the ERun platform itself.
+- **Shared workflows** — let ERun users share their best practices and workflows back to the platform so other users benefit.
+- **Blueprint skills** — package ERun's accumulated best practices for building complex industry-strength solutions.
 
 ### `erun-file-issue`
 
 | Field | Value |
 |---|---|
+| Category | Platform — interact with the ERun platform itself. |
 | Source | `erun-skills/skills/erun-file-issue/SKILL.md` |
 | Description | "Register or file a bug or feature request for the ERun project itself on GitHub." |
 | Triggers | "file an erun bug", "file an erun feature", "register erun bug", "register erun feature", "open an erun issue" |
@@ -227,6 +232,7 @@ The current v1 set, shipped both in the runtime image (`/etc/erun/skills/`) and 
 
 | Field | Value |
 |---|---|
+| Category | Shared workflow — lets ERun users share improvements back to the platform so other users benefit. |
 | Source | `erun-skills/skills/erun-contribute/SKILL.md` |
 | Description | "Contribute a change to the ERun platform itself — create a new GitHub issue against sophium/erun that captures the work, clone the repo, implement the change following its AGENTS.md rules, and submit a pull request back." |
 | Triggers | "contribute to erun", "make a change to erun", "work on erun", "land a fix in erun", "submit a PR to erun", "propose an improvement to erun" |
@@ -238,27 +244,29 @@ Semantic: `erun-contribute` is **initiator-driven** — the same person who runs
 
 Key contract: the skill **explicitly reads** the cloned repo's `AGENTS.md` and every applicable subtree `AGENTS.md` each time it fires. Claude Code does not auto-reload `CLAUDE.md` after a `cd` mid-session, so this read step is binding.
 
-### `erun-scaffold-rls-db`
+### `erun-blueprint-rls-db`
 
 | Field | Value |
 |---|---|
-| Source | `erun-skills/skills/erun-scaffold-rls-db/SKILL.md` + `templates/` |
-| Description | "Scaffold a multi-tenant PostgreSQL database module with row-level security, Atlas migrations, UUIDv7 surrogate keys, and the canonical ERun tenant/issuer/user bootstrap." |
-| Triggers | "scaffold rls db", "scaffold multi-tenant postgres", "create multi-tenant database", "set up rls migrations", "generate an erun-backend-db-shaped module" |
+| Category | Blueprint — packages ERun's accumulated best practices for multi-tenant PostgreSQL. |
+| Source | `erun-skills/skills/erun-blueprint-rls-db/SKILL.md` + `templates/` |
+| Description | "Build a multi-tenant PostgreSQL database module following ERun's blueprint — row-level security, Atlas migrations, UUIDv7 surrogate keys, shared timestamp trigger, separate erun_tenant / erun_operations PostgreSQL roles, and the canonical tenant/issuer/user bootstrap that erun-backend-db captures." |
+| Triggers | "build a multi-tenant postgres database", "create a tenant-scoped postgres schema with row-level security", "set up multi-tenant postgres migrations", "I need an erun-backend-db-shaped module", "build a multi-tenant rls db" |
 | Inputs | Module name; target directory; list of tenant-owned tables; PostgreSQL major version (default 18) |
 | Outputs | `<module>/atlas.hcl`, `<module>/schema/{tables,indexes,triggers,rls,fks}/*.sql`, `<module>/schema/roles.sql`, `<module>/migrations/default/`, `<module>/AGENTS.md`. Bootstrap tables (`tenants`, `tenant_issuers`, `users`, `user_external_ids`) plus one tables/indexes/triggers/rls set per user-supplied table. |
 | Error behaviour | Target dir already has `atlas.hcl` → stop, offer `--force` or new path. PostgreSQL \< 18 detected → stop (native `uuidv7()` unavailable). `atlas` not installed → skip validate, surface install hint, continue. User-supplied table name collides with bootstrap names → stop and ask user to rename. |
 
-### `erun-scaffold-api`
+### `erun-blueprint-api`
 
 | Field | Value |
 |---|---|
-| Source | `erun-skills/skills/erun-scaffold-api/SKILL.md` + `templates/` |
-| Description | "Scaffold a multi-tenant Go HTTP API service modelled on erun-backend-api, with OIDC bearer authentication, tenant resolution from the token issuer, layered model/repository/service/routes structure, transaction-scoped PostgreSQL security context, identity resolution cache, and audit logging." |
-| Triggers | "scaffold multi-tenant api", "scaffold backend api", "create an erun-backend-api-shaped service", "generate a Go api with oidc auth and tenant rls" |
+| Category | Blueprint — packages ERun's accumulated best practices for multi-tenant HTTP APIs. |
+| Source | `erun-skills/skills/erun-blueprint-api/SKILL.md` + `templates/` |
+| Description | "Build a multi-tenant Go HTTP API service following ERun's blueprint — OIDC bearer authentication, tenant resolution from the token issuer, layered model / repository / service / routes structure, transaction-scoped PostgreSQL security context, identity resolution cache, and audit logging. Captures the patterns that erun-backend-api packages." |
+| Triggers | "build a multi-tenant http api", "build a multi-tenant backend api", "create an erun-backend-api-shaped service", "I need a multi-tenant Go api with oidc auth and tenant rls" |
 | Inputs | Module name; Go module path; target directory; OIDC issuers; initial entities (optional) |
-| Outputs | `<module>/go.mod`, `<module>/cmd/<module>/main.go`, `<module>/server.go`, `<module>/auth.go`, `<module>/oidc.go`, `<module>/identity_cache.go`, `<module>/api_path.go`, `<module>/audit.go`, `<module>/internal/{model,repository,routes}/...`, `<module>/AGENTS.md`. Includes a working `GET /v1/whoami` endpoint; entity routes are scaffolded per user-supplied entity. |
-| Error behaviour | Target dir already has `go.mod` → stop. Empty OIDC issuer list → stop. Database side (matching `erun-backend-db`-shaped schema) missing → surface and offer to run `erun-scaffold-rls-db` first. `go build` fails after generation → surface compiler output; most common cause is module path mismatch. |
+| Outputs | `<module>/go.mod`, `<module>/cmd/<module>/main.go`, `<module>/server.go`, `<module>/auth.go`, `<module>/oidc.go`, `<module>/identity_cache.go`, `<module>/api_path.go`, `<module>/audit.go`, `<module>/internal/{model,repository,routes}/...`, `<module>/AGENTS.md`. Includes a working `GET /v1/whoami` endpoint; entity routes are produced per user-supplied entity. |
+| Error behaviour | Target dir already has `go.mod` → stop. Empty OIDC issuer list → stop. Database side (matching `erun-backend-db`-shaped schema) missing → surface and offer to run `erun-blueprint-rls-db` first. `go build` fails after generation → surface compiler output; most common cause is module path mismatch. |
 
 The catalogue is open — new skills land in `erun-skills/skills/` and ship through both distribution paths automatically. Each skill's `description` is what the Agent matches on, so additions don't require coordinated client changes.
 

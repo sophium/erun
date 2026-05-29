@@ -42,12 +42,14 @@ Codex doesn't have an analogous plugin marketplace yet (Planned.); for now, Code
 
 ### What's in the set today
 
-| Skill | What it does |
-|---|---|
-| `erun-file-issue` | File a bug or feature against ERun on GitHub (`sophium/erun`). |
-| `erun-contribute` | Clone ERun, follow its `AGENTS.md` rules, implement a change, open a PR back. |
-| `erun-scaffold-rls-db` | Generate a multi-tenant PostgreSQL schema with row-level security, modelled on `erun-backend-db`. |
-| `erun-scaffold-api` | Generate a multi-tenant Go HTTP API service modelled on `erun-backend-api`. |
+Skills group into three categories: *Platform* (interact with the ERun platform), *Shared workflows* (users share their best practices and workflows back to other ERun users), and *Blueprint* (ERun's accumulated best practices for industry-strength solutions).
+
+| Skill | Category | What it does |
+|---|---|---|
+| `erun-file-issue` | Platform | File a bug or feature against ERun on GitHub (`sophium/erun`). |
+| `erun-contribute` | Shared workflows | Create a new issue against `sophium/erun`, then drive the full clone → branch → implement → PR motion to share your improvement back. |
+| `erun-blueprint-rls-db` | Blueprint | Build a multi-tenant PostgreSQL schema with row-level security, modelled on `erun-backend-db`. |
+| `erun-blueprint-api` | Blueprint | Build a multi-tenant Go HTTP API service modelled on `erun-backend-api`. |
 
 For the SKILL.md contract, the deployment mechanism, the marketplace manifest format, and the per-skill spec, see [Agent reference · Skills spec](/agent-reference/skills-spec).
 

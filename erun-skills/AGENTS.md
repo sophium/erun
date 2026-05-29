@@ -30,7 +30,7 @@ erun-skills/
 
 ## Naming
 
-- Skill names use `erun-<concern>` in kebab-case. Examples: `erun-file-issue`, `erun-contribute`, `erun-scaffold-rls-db`.
+- Skill names use `erun-<concern>` in kebab-case. Examples: `erun-file-issue`, `erun-contribute`, `erun-blueprint-rls-db`.
 - The skill directory name, the `name:` in the `SKILL.md` frontmatter, and the namespaced invocation (`/erun-tools:<name>`) must all match.
 - Do not prefix with the plugin name; the plugin namespace is applied automatically at install time.
 

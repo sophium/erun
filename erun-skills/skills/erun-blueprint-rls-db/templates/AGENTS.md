@@ -1,12 +1,13 @@
 # AGENTS.md
 
-Module-specific guidance for the scaffolded multi-tenant database. Follow
-your repository root `AGENTS.md` first, then apply this file.
+Module-specific guidance for this multi-tenant database. Follow your
+repository root `AGENTS.md` first, then apply this file.
 
 ## Module role
 
-- This is an Atlas-managed PostgreSQL database module scaffolded from the
-  ERun `erun-backend-db` blueprint via the `erun-scaffold-rls-db` skill.
+- This is an Atlas-managed PostgreSQL database module built from the
+  ERun `erun-backend-db` blueprint via the `erun-blueprint-rls-db`
+  skill.
 - The default OLTP database is PostgreSQL 18 or newer (native `uuidv7()`).
 - Schema changes flow: edit declarative files under `schema/` →
   `atlas migrate diff --env default` → commit the generated SQL in
@@ -26,8 +27,8 @@ your repository root `AGENTS.md` first, then apply this file.
 
 ## Adding a tenant-owned table
 
-1. Copy the templates from your scaffold source if you still have them,
-   otherwise follow the shape of `schema/tables/users.sql` and its sibling
+1. Copy the reference files from the blueprint skill if you still have
+   them, otherwise follow the shape of `schema/tables/users.sql` and its sibling
    RLS / trigger / index files.
 2. Create:
    - `schema/tables/<table>.sql` — definition with `tenant_id`, FK,

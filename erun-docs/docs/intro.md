@@ -51,25 +51,27 @@ Each one is a chapter elsewhere in these docs. The point of putting them on one 
 
 ---
 
-## AI first
+## AI native
 
 ERun is built for an Operator working with an Agent, not for an Operator working alone. Every env ships **skills** — guidance bundles the Agent loads when you describe intent, then the Agent writes the code by hand, idiomatic for your project. You don't run a code generator and you don't pick a template; you describe what you want, the matching skill teaches the Agent the layout and conventions, and the diff lands in your editor for review.
 
 ```mermaid
 flowchart LR
     O("Operator describes intent"):::endpoint --> A("Agent picks matching skill"):::step
-    A --> P("Platform skills · erun-file-issue · erun-contribute"):::step
-    A --> S("Scaffolding skills · erun-scaffold-rls-db · erun-scaffold-api"):::step
+    A --> P("Platform · erun-file-issue"):::step
+    A --> W("Shared workflows · erun-contribute"):::step
+    A --> B("Blueprint · erun-blueprint-rls-db · erun-blueprint-api"):::step
     P --> R("Agent writes code, idiomatic for your project"):::endpoint
-    S --> R
+    W --> R
+    B --> R
 
     classDef endpoint fill:#0f1320,color:#ffffff,stroke:#0a1019,stroke-width:1px,rx:14,ry:14;
     classDef step     fill:#ffffff,color:#0f1320,stroke:#0891b2,stroke-width:1.5px,rx:14,ry:14;
 ```
 
-**Two categories ship today.** *Platform* skills help you interact with the ERun platform itself — `erun-file-issue` files a bug or feature against `sophium/erun` on GitHub; `erun-contribute` drives the full create-issue → clone → branch → implement → PR motion for a change you want to land in ERun. *Scaffolding* skills generate new project modules from ERun's own blueprints — `erun-scaffold-rls-db` produces a multi-tenant PostgreSQL schema with row-level security, Atlas migrations, UUIDv7 keys, and the canonical tenant/issuer/user bootstrap; `erun-scaffold-api` produces a multi-tenant Go HTTP API with OIDC bearer auth, tenant-from-issuer resolution, layered model/repository/routes, and transaction-scoped RLS context.
+**Three categories ship today.** *Platform* skills interact with the ERun platform itself — `erun-file-issue` files a bug or feature against `sophium/erun` on GitHub. *Shared workflow* skills let ERun users share their best practices and workflows back to the platform so other users benefit — `erun-contribute` drives the full create-issue → clone → branch → implement → PR motion for an improvement you want to land in ERun. *Blueprint* skills package ERun's accumulated best practices for building complex industry-strength solutions — `erun-blueprint-rls-db` produces a multi-tenant PostgreSQL schema with row-level security, Atlas migrations, UUIDv7 keys, and the canonical tenant/issuer/user bootstrap; `erun-blueprint-api` produces a multi-tenant Go HTTP API with OIDC bearer auth, tenant-from-issuer resolution, layered model/repository/routes, and transaction-scoped RLS context.
 
-The same skills load in two places: inside any env you open (automatic — `erun open` bakes them in), and on your laptop Claude Code via the ERun plugin (`/plugin marketplace add sophium/erun`). Project-layered skills — your house style, your framework preferences, your audit rules — are (Planned.).
+The same skills load in two places: inside any env you open (automatic — `erun open` bakes them in), and on your laptop Claude Code via the ERun plugin (`/plugin marketplace add sophium/erun`). User-authored skills layered on top — your house style, your framework preferences, your audit rules — are (Planned.).
 
 For the full catalogue, the trigger phrases, and the install commands see [Skills](/collaboration/skills); for the conceptual model see [Concepts · Skills](/concepts/skills); for the SKILL.md format and the marketplace manifest schemas see [Skills spec](/agent-reference/skills-spec).
 

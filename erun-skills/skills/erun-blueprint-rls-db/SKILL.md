@@ -1,44 +1,51 @@
 ---
-name: erun-scaffold-rls-db
-description: Scaffold a multi-tenant PostgreSQL database module with row-level security, Atlas migrations, UUIDv7 surrogate keys, and the canonical ERun tenant/issuer/user bootstrap. Use when the user says "scaffold rls db", "scaffold multi-tenant postgres", "create multi-tenant database", "set up rls migrations", "generate an erun-backend-db-shaped module", or any similar request for a new tenant-scoped PostgreSQL schema project.
+name: erun-blueprint-rls-db
+description: Build a multi-tenant PostgreSQL database module following ERun's blueprint — row-level security, Atlas migrations, UUIDv7 surrogate keys, shared timestamp trigger, separate erun_tenant / erun_operations PostgreSQL roles, and the canonical tenant/issuer/user bootstrap that erun-backend-db captures. Use when the user says "build a multi-tenant postgres database", "create a tenant-scoped postgres schema with row-level security", "set up multi-tenant postgres migrations", "I need an erun-backend-db-shaped module", "build a multi-tenant rls db", or any similar request for a new tenant-scoped PostgreSQL project.
 ---
 
-# Scaffold a multi-tenant RLS database module
+# Build a multi-tenant RLS database module
 
-Generate a PostgreSQL database module structured like ERun's `erun-backend-db`:
-Atlas-managed declarative schema, mandatory row-level security on every
-tenant-owned table, UUIDv7 surrogate primary keys, shared timestamp trigger,
-separate `erun_tenant` / `erun_operations` PostgreSQL roles, and the bootstrap
-tables (`tenants`, `tenant_issuers`, `users`, `user_external_ids`) every
+Produce a PostgreSQL database module following ERun's blueprint — the
+same shape `erun-backend-db` captures: Atlas-managed declarative schema,
+mandatory row-level security on every tenant-owned table, UUIDv7
+surrogate primary keys, shared timestamp trigger, separate `erun_tenant`
+/ `erun_operations` PostgreSQL roles, and the bootstrap tables
+(`tenants`, `tenant_issuers`, `users`, `user_external_ids`) every
 multi-tenant ERun-shaped database needs.
+
+This skill packages ERun's accumulated best practices for multi-tenant
+Postgres. Do not freelance the patterns; the conventions encoded here
+are the contract.
 
 ## When to use
 
 Trigger on user phrasings such as:
 
-- "scaffold rls db" / "scaffold multi-tenant postgres"
-- "create multi-tenant database" / "set up rls migrations"
-- "generate an erun-backend-db-shaped module"
-- "I need a multi-tenant schema with row-level security"
+- "build a multi-tenant postgres database"
+- "create a tenant-scoped postgres schema with row-level security"
+- "set up multi-tenant postgres migrations"
+- "I need an erun-backend-db-shaped module"
+- "build a multi-tenant rls db"
 
 ## Inputs to collect
 
-Before generating files, gather:
+Before producing files, gather:
 
 1. **Module name** (e.g. `acme-db`, `billing-db`). Used as the directory
    name. Default to `<tenant>-db` if a tenant identifier is in scope.
 2. **Target directory** (default: current working directory).
-3. **Tenant-owned tables to scaffold** beyond the bootstrap set. For each:
+3. **Tenant-owned tables to build** beyond the bootstrap set. For each:
    table name (plural, snake_case), columns, and natural-key uniqueness
    scope. The user can start with an empty list and add tables later.
-4. **PostgreSQL major version** (default: 18). The skill assumes ≥ 18 for
-   native `uuidv7()`. If the user is on PostgreSQL ≤ 17, surface that and
-   stop — `uuidv7()` is only native in PG 18+; back-porting via an
-   extension is a separate decision the user must make.
+4. **PostgreSQL major version** (default: 18). The blueprint assumes
+   ≥ 18 for native `uuidv7()`. If the user is on PostgreSQL ≤ 17,
+   surface that and stop — `uuidv7()` is only native in PG 18+;
+   back-porting via an extension is a separate decision the user must
+   make.
 
 Do not invent these. Ask the user once, then proceed.
 
-## What gets generated
+## What gets produced
 
 ```
 <module-name>/
@@ -73,20 +80,21 @@ Do not invent these. Ask the user once, then proceed.
         └── (Atlas generates here on first `atlas migrate diff`)
 ```
 
-Templates for the canonical files ship alongside this `SKILL.md` under
-`templates/`. Use them as the source of truth; do not freelance the
-boilerplate.
+Reference files for the canonical blueprint ship alongside this
+`SKILL.md` under `templates/`. Use them as the source of truth; do not
+freelance the boilerplate.
 
 ## Conventions (binding)
 
-These come from `erun-backend/erun-backend-db/AGENTS.md`. Apply every one
-when generating files; do not relax them for convenience.
+These come from `erun-backend/erun-backend-db/AGENTS.md`. Apply every
+one when producing files; do not relax them for convenience.
 
 ### Identifiers
 
 - Externally visible IDs are `UUID` columns with `DEFAULT uuidv7()`.
-- Root primary keys are named `<entity>_id` (e.g. `tenants.tenant_id`), not
-  generic `id`. Generic `id` is reserved for small private join tables.
+- Root primary keys are named `<entity>_id` (e.g. `tenants.tenant_id`),
+  not generic `id`. Generic `id` is reserved for small private join
+  tables.
 - Foreign keys reuse the same column name where practical.
 
 ### Tenant scoping
@@ -100,25 +108,27 @@ when generating files; do not relax them for convenience.
 
 ### Timestamps
 
-- `created_at TIMESTAMPTZ` and `updated_at TIMESTAMPTZ` on mutable domain
-  tables.
+- `created_at TIMESTAMPTZ` and `updated_at TIMESTAMPTZ` on mutable
+  domain tables.
 - Populated by `BEFORE INSERT OR UPDATE` triggers calling the shared
-  `erun_set_timestamps()` function. Trigger name: `<table>_set_timestamps`.
+  `erun_set_timestamps()` function. Trigger name:
+  `<table>_set_timestamps`.
 - Application inserts omit timestamp columns; trigger populates them.
   Updates preserve `created_at` and refresh `updated_at`.
 
 ### Row-level security
 
-- Mandatory on every tenant-owned table. `ENABLE ROW LEVEL SECURITY` and
-  `FORCE ROW LEVEL SECURITY` (forced, so even the table owner is bound).
+- Mandatory on every tenant-owned table. `ENABLE ROW LEVEL SECURITY`
+  and `FORCE ROW LEVEL SECURITY` (forced, so even the table owner is
+  bound).
 - Policies scope by `tenant_id = erun_current_tenant_id()`.
   `erun_current_tenant_id()` returns the value of session setting
   `erun.tenant_id`, or denies access when unset.
 - Two separate policies per table — one for `erun_tenant` (the normal
   tenant-scoped role) and one for `erun_operations` (cross-tenant ops
   access). Do not put an `OR` branch in the tenant policy.
-- Both `USING` and `WITH CHECK` clauses, so reads, updates, deletes, and
-  inserts all enforce tenant boundary.
+- Both `USING` and `WITH CHECK` clauses, so reads, updates, deletes,
+  and inserts all enforce tenant boundary.
 
 ### Roles
 
@@ -127,8 +137,8 @@ when generating files; do not relax them for convenience.
 - `erun_operations` — used by ops tooling for cross-tenant access. RLS
   policies named `<table>_operations_policy`.
 - The application login role is `GRANT`ed both, and switches via
-  `SET LOCAL ROLE erun_tenant` (or `erun_operations`) before tenant-owned
-  queries.
+  `SET LOCAL ROLE erun_tenant` (or `erun_operations`) before
+  tenant-owned queries.
 - Transaction must also `SET LOCAL erun.tenant_id = '<uuid>'` after
   `SET ROLE` so `erun_current_tenant_id()` resolves.
 
@@ -136,18 +146,18 @@ when generating files; do not relax them for convenience.
 
 - `atlas.hcl` lists schema source files in dependency order:
   `roles.sql` → `tables/` → `indexes/` → `triggers/` → `rls/` → `fks/`.
-- Migrations live in `migrations/default/`. Do not organize migrations per
-  table — one chronological stream per dialect.
-- Generate migrations via `atlas migrate diff --env default` after editing
-  the declarative schema; do not hand-write SQL into `migrations/default/`
-  unless fixing a generator gap.
+- Migrations live in `migrations/default/`. Do not organize migrations
+  per table — one chronological stream per dialect.
+- Generate migrations via `atlas migrate diff --env default` after
+  editing the declarative schema; do not hand-write SQL into
+  `migrations/default/` unless fixing a generator gap.
 
 ## Step-by-step
 
 ### Step 1 — confirm inputs
 
-Read back to the user: module name, target dir, tenant-owned table list,
-PG version. If anything is unclear, ask before generating.
+Read back to the user: module name, target dir, tenant-owned table
+list, PG version. If anything is unclear, ask before producing.
 
 ### Step 2 — create directory tree
 
@@ -158,7 +168,7 @@ mkdir -p "${target_dir}/${module}/migrations/default"
 
 ### Step 3 — write the bootstrap files
 
-Copy the templates verbatim, substituting placeholders:
+Copy the reference files verbatim, substituting placeholders:
 
 - `templates/atlas.hcl` → `${module}/atlas.hcl`
 - `templates/roles.sql` → `${module}/schema/roles.sql`
@@ -176,25 +186,27 @@ Copy the templates verbatim, substituting placeholders:
 - `templates/rls/user_external_ids.sql` → `${module}/schema/rls/user_external_ids.sql`
 - `templates/AGENTS.md` → `${module}/AGENTS.md`
 
-### Step 4 — generate user-supplied tables
+### Step 4 — produce user-supplied tables
 
 For each table name `T` the user supplied:
 
 - `${module}/schema/tables/T.sql` — table definition. Use
-  `templates/tables/_tenant_table.sql.tmpl` as the starting shape; replace
-  `__TABLE__` with `T`, add the user's domain columns, set natural-key
-  uniqueness as `UNIQUE (tenant_id, …)`.
-- `${module}/schema/indexes/T.sql` — secondary indexes (start empty if the
-  table only needs the implicit indexes from the unique constraint).
+  `templates/tables/_tenant_table.sql.tmpl` as the starting shape;
+  replace `__TABLE__` with `T`, add the user's domain columns, set
+  natural-key uniqueness as `UNIQUE (tenant_id, …)`.
+- `${module}/schema/indexes/T.sql` — secondary indexes (start empty if
+  the table only needs the implicit indexes from the unique
+  constraint).
 - `${module}/schema/triggers/T_set_timestamps.sql` — copy
-  `templates/triggers/_table_set_timestamps.sql.tmpl`, replace `__TABLE__`.
+  `templates/triggers/_table_set_timestamps.sql.tmpl`, replace
+  `__TABLE__`.
 - `${module}/schema/rls/T.sql` — copy
   `templates/rls/_tenant_table.sql.tmpl`, replace `__TABLE__`.
 
 ### Step 5 — add the user tables to `atlas.hcl`
 
-Edit `${module}/atlas.hcl` `src = […]` list to include the new files in
-the canonical order: table → indexes → triggers → rls.
+Edit `${module}/atlas.hcl` `src = […]` list to include the new files
+in the canonical order: table → indexes → triggers → rls.
 
 ### Step 6 — validate
 
@@ -221,12 +233,13 @@ incremental migration files.
 ### Step 7 — bootstrap data (one-time, post-deploy)
 
 After the first deploy, the database has no tenants. The first
-authenticated identity bootstraps the system by creating an `OPERATIONS`
-tenant, mapping the token issuer to that tenant, creating the first
-user, and assigning `ReadAll` + `WriteAll` roles. See
-`erun-backend-db/AGENTS.md` § "Multi-Tenant Database Plan" for the rule
-that this only happens once — after the first tenant exists, unknown
-issuers and subjects must remain unauthorized until explicitly configured.
+authenticated identity bootstraps the system by creating an
+`OPERATIONS` tenant, mapping the token issuer to that tenant, creating
+the first user, and assigning `ReadAll` + `WriteAll` roles. See
+`erun-backend-db/AGENTS.md` § "Multi-Tenant Database Plan" for the
+rule that this only happens once — after the first tenant exists,
+unknown issuers and subjects must remain unauthorized until explicitly
+configured.
 
 ## Error behaviour
 
@@ -234,19 +247,25 @@ issuers and subjects must remain unauthorized until explicitly configured.
 |---|---|
 | Target dir already contains an `atlas.hcl` | Stop. Offer `--force` (rewrite) or a new module name. Do not silently overwrite. |
 | PostgreSQL < 18 detected | Stop. Explain `uuidv7()` requires PG 18+ natively; do not silently emit a custom UUIDv7 implementation. |
-| `atlas` binary not on PATH at validate time | Skip validate, surface install hint, continue. The generated files are valid even without local Atlas. |
+| `atlas` binary not on PATH at validate time | Skip validate, surface install hint, continue. The produced files are valid even without local Atlas. |
 | User-supplied table name collides with a bootstrap table (`tenants`, `tenant_issuers`, `users`, `user_external_ids`) | Stop. The bootstrap names are reserved; ask the user to rename. |
 | User-supplied table name is singular or PascalCase | Surface the convention (`plural snake_case`) and ask the user to confirm or rename. |
 
 ## Important
 
-- Do not skip the role separation. Do not emit a single RLS policy with an
-  `OR` branch for ops access. That pattern is explicitly forbidden in
-  `erun-backend-db/AGENTS.md` § "Row-Level Security".
-- Do not put `tenants` or `tenant_issuers` behind tenant-scoped RLS. They
-  are the tenant resolution root and need a different access model — see
-  the AGENTS.md note about security-definer functions for issuer lookup.
+- Do not skip the role separation. Do not emit a single RLS policy
+  with an `OR` branch for ops access. That pattern is explicitly
+  forbidden in `erun-backend-db/AGENTS.md` § "Row-Level Security".
+- Do not put `tenants` or `tenant_issuers` behind tenant-scoped RLS.
+  They are the tenant resolution root and need a different access
+  model — see the AGENTS.md note about security-definer functions for
+  issuer lookup.
 - Do not emit application-side timestamp fallback as the primary path.
   Database triggers own the default lifecycle.
 - Do not use generic `id` for domain primary keys. Use explicit
   `<entity>_id` names.
+- This skill encodes ERun's accumulated best practices for
+  multi-tenant Postgres; do not negotiate them away to match a user's
+  existing preferences. If the user's existing project conflicts with
+  the blueprint, surface the conflict; do not silently relax the
+  convention.

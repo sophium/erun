@@ -33,7 +33,7 @@ func RegisterWhoamiRoute(register ProtectedRouteRegistrar, users WhoamiUserRepos
 		}
 		if users == nil {
 			// Fall back to the resolved context if no user repository is
-			// wired (e.g. minimal scaffold without the user table).
+			// wired (e.g. a minimal build without the user table).
 			writeJSON(w, WhoamiUser{UserID: sec.UserID, TenantID: sec.TenantID})
 			return
 		}

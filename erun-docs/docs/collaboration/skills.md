@@ -6,7 +6,7 @@ title: Skills
 
 ERun ships a small set of **skills** — guidance bundles the Agent loads on demand to do project-shaped work well. You don't install them piece by piece; opening an env gives you the in-pod set, and a single command gives you the same set on your laptop. Then you just describe what you want — the Agent picks the matching skill and writes the code by hand, idiomatic for your project.
 
-For the conceptual model (why skills, not scaffolding) see [Concepts · Skills](/concepts/skills). For the SKILL.md format and the plugin manifest schemas see [Skills spec](/agent-reference/skills-spec).
+For the conceptual model see [Concepts · Skills](/concepts/skills). For the SKILL.md format and the plugin manifest schemas see [Skills spec](/agent-reference/skills-spec).
 
 ## Inside a deployed env
 
@@ -29,16 +29,36 @@ Codex doesn't have an analogous plugin marketplace yet. Inside a deployed env Co
 
 ## What's in the set
 
+Skills group into three categories.
+
+### Platform skills
+
+Interact with the ERun platform itself.
+
 | Skill | What it does | Trigger by saying |
 |---|---|---|
 | `erun-file-issue` | File a bug or feature against ERun on GitHub. | "file an erun bug", "register erun feature", "open an erun issue" |
-| `erun-contribute` | Create a new issue against `sophium/erun`, then drive the full clone → branch → implement → PR motion. | "contribute to erun", "submit a PR to erun", "propose an improvement to erun" |
-| `erun-scaffold-rls-db` | Generate a multi-tenant PostgreSQL schema with row-level security, Atlas migrations, UUIDv7 keys, and the canonical tenant/issuer/user bootstrap. | "scaffold rls db", "create a multi-tenant postgres schema" |
-| `erun-scaffold-api` | Generate a multi-tenant Go HTTP API with OIDC bearer auth, tenant-from-issuer resolution, layered model / repository / routes, transaction-scoped RLS context, and audit logging. | "scaffold multi-tenant api", "create an erun-backend-api-shaped service" |
+
+### Shared workflows
+
+Let ERun users share their best practices and workflows back to the platform so other users benefit.
+
+| Skill | What it does | Trigger by saying |
+|---|---|---|
+| `erun-contribute` | Create a new issue against `sophium/erun`, then drive the full clone → branch → implement → PR motion to share your improvement back. | "contribute to erun", "submit a PR to erun", "propose an improvement to erun" |
+
+### Blueprint skills
+
+Package ERun's accumulated best practices for building complex industry-strength solutions.
+
+| Skill | What it does | Trigger by saying |
+|---|---|---|
+| `erun-blueprint-rls-db` | Build a multi-tenant PostgreSQL schema with row-level security, Atlas migrations, UUIDv7 keys, and the canonical tenant/issuer/user bootstrap. | "build a multi-tenant postgres database", "create a tenant-scoped postgres schema with row-level security" |
+| `erun-blueprint-api` | Build a multi-tenant Go HTTP API with OIDC bearer auth, tenant-from-issuer resolution, layered model / repository / routes, transaction-scoped RLS context, and audit logging. | "build a multi-tenant http api", "create an erun-backend-api-shaped service" |
 
 You don't need to memorise the trigger phrases — the Agent matches against the skill's `description` field, which lists several variants. If you describe the work in plain language ("I want to add a Postgres database that's tenant-scoped"), the right skill usually fires on its own.
 
-## Custom skills
+## User-authored skills
 
 You can layer your own guidance on top — house style, framework preferences, audit rules — by adding a SKILL.md under `<repo>/.erun/skills/<name>/`. (Planned: built-in support; today the runtime image only loads the baked set.) For the format and the layering precedence rules see [Skills spec](/agent-reference/skills-spec).
 
