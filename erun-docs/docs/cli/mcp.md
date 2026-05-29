@@ -16,7 +16,7 @@ The `mcp` command is a launcher for the `emcp` executable that ships in the `eru
 
 ## What it exposes
 
-A typed tool surface — inspection (`idle`, `doctor`, `list`, …), action wrappers around the CLI (`build`, `deploy`, …), and an escape hatch (`raw`). Operators don't usually call MCP directly; it's the integration point for Agents (Claude Code, Codex) and IDEs. (Code-generation guidance — how to write a service, a migration, an ingress — lives in [skill bundles](/concepts/skills) deployed to the env, not on the MCP surface.)
+A typed tool surface — inspection (`idle`, `doctor`, `list`, …), action wrappers around the CLI (`build`, `deploy`, …), and an escape hatch (`raw`). Operators don't usually call MCP directly; it's the integration point for Agents (Claude Code, Codex) and IDEs. (Code-generation guidance — how to write a service, a migration, an ingress — lives in [skills](/collaboration/skills) deployed to the env, not on the MCP surface.)
 
 For the protocol, the full tool list with schemas, the handshake, and worked examples, see [MCP overview](/mcp/overview).
 

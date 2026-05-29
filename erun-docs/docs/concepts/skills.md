@@ -4,6 +4,8 @@ title: Skills
 
 # Skills
 
+> For the Operator workflow — install commands, the v1 catalogue, when to use each one — see [Skills](/collaboration/skills). This page is the conceptual model: why skills instead of scaffolding.
+
 A **skill** is a bundle of guidance the Agent loads into its context when it needs to do something well — write a Go service, set up a migration job, add an Ingress. Skills replace what other platforms call "scaffolding": instead of generating files from a fixed template, ERun teaches the Agent *how* to do the work, and the Agent writes the code itself, idiomatic for your project.
 
 This fits the way agentic coding actually works. The Agent already knows the language. It already knows Kubernetes. It just needs to know **your project's conventions** — where modules live, what the Dockerfile pattern is, how the deploy plan is wired. A skill is that piece of knowledge, delivered into the Agent's context, on demand.

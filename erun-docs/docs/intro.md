@@ -51,15 +51,27 @@ Each one is a chapter elsewhere in these docs. The point of putting them on one 
 
 ---
 
-## Get started
+## AI first
 
-In your project folder, type:
+ERun is built for an Operator working with an Agent, not for an Operator working alone. Every env ships **skills** — guidance bundles the Agent loads when you describe intent, then the Agent writes the code by hand, idiomatic for your project. You don't run a code generator and you don't pick a template; you describe what you want, the matching skill teaches the Agent the layout and conventions, and the diff lands in your editor for review.
 
-```bash
-erun
+```mermaid
+flowchart LR
+    O("Operator describes intent"):::endpoint --> A("Agent picks matching skill"):::step
+    A --> P("Platform skills · erun-file-issue · erun-contribute"):::step
+    A --> S("Scaffolding skills · erun-scaffold-rls-db · erun-scaffold-api"):::step
+    P --> R("Agent writes code, idiomatic for your project"):::endpoint
+    S --> R
+
+    classDef endpoint fill:#0f1320,color:#ffffff,stroke:#0a1019,stroke-width:1px,rx:14,ry:14;
+    classDef step     fill:#ffffff,color:#0f1320,stroke:#0891b2,stroke-width:1.5px,rx:14,ry:14;
 ```
 
-That's all. The first time, ERun sets things up. After that, the same command picks up where you left off.
+**Two categories ship today.** *Platform* skills help you interact with the ERun platform itself — `erun-file-issue` files a bug or feature against `sophium/erun` on GitHub; `erun-contribute` drives the full create-issue → clone → branch → implement → PR motion for a change you want to land in ERun. *Scaffolding* skills generate new project modules from ERun's own blueprints — `erun-scaffold-rls-db` produces a multi-tenant PostgreSQL schema with row-level security, Atlas migrations, UUIDv7 keys, and the canonical tenant/issuer/user bootstrap; `erun-scaffold-api` produces a multi-tenant Go HTTP API with OIDC bearer auth, tenant-from-issuer resolution, layered model/repository/routes, and transaction-scoped RLS context.
+
+The same skills load in two places: inside any env you open (automatic — `erun open` bakes them in), and on your laptop Claude Code via the ERun plugin (`/plugin marketplace add sophium/erun`). Project-layered skills — your house style, your framework preferences, your audit rules — are (Planned.).
+
+For the full catalogue, the trigger phrases, and the install commands see [Skills](/collaboration/skills); for the conceptual model see [Concepts · Skills](/concepts/skills); for the SKILL.md format and the marketplace manifest schemas see [Skills spec](/agent-reference/skills-spec).
 
 ---
 
