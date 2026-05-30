@@ -162,14 +162,16 @@ type uiSSHDConfig struct {
 }
 
 type uiEnvironmentLocalPorts struct {
-	RangeStart int          `json:"rangeStart"`
-	RangeEnd   int          `json:"rangeEnd"`
-	MCP        int          `json:"mcp"`
-	API        int          `json:"api"`
-	SSH        int          `json:"ssh"`
-	MCPStatus  uiPortStatus `json:"mcpStatus"`
-	APIStatus  uiPortStatus `json:"apiStatus"`
-	SSHStatus  uiPortStatus `json:"sshStatus"`
+	RangeStart          int          `json:"rangeStart"`
+	RangeEnd            int          `json:"rangeEnd"`
+	MCP                 int          `json:"mcp"`
+	API                 int          `json:"api"`
+	SSH                 int          `json:"ssh"`
+	ContributeApp       int          `json:"contributeApp"`
+	MCPStatus           uiPortStatus `json:"mcpStatus"`
+	APIStatus           uiPortStatus `json:"apiStatus"`
+	SSHStatus           uiPortStatus `json:"sshStatus"`
+	ContributeAppStatus uiPortStatus `json:"contributeAppStatus"`
 }
 
 type uiPortStatus struct {

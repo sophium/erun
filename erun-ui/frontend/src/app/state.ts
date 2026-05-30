@@ -370,6 +370,7 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
     mcp: 0,
     api: 0,
     ssh: 0,
+    contributeApp: 0,
     mcpStatus: {
       available: false,
       status: '',
@@ -379,6 +380,10 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
       status: '',
     },
     sshStatus: {
+      available: false,
+      status: '',
+    },
+    contributeAppStatus: {
       available: false,
       status: '',
     },

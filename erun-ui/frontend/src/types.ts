@@ -264,9 +264,11 @@ export interface UIEnvironmentLocalPorts {
   mcp: number;
   api: number;
   ssh: number;
+  contributeApp: number;
   mcpStatus: UIPortStatus;
   apiStatus: UIPortStatus;
   sshStatus: UIPortStatus;
+  contributeAppStatus: UIPortStatus;
 }
 
 export interface UIPortStatus {
