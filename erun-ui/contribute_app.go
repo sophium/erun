@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os/exec"
 	"strings"
 	"sync"
@@ -67,20 +68,45 @@ func (f *contributeAppForward) stop() {
 }
 
 // waitForContributeAppReachable polls the local port until the headless
-// ERun app is accepting connections or the timeout expires. The
-// headless boot includes a Wails frontend build on first run, which can
-// take a while, so the timeout is generous.
+// ERun app is actually serving HTTP, or the timeout expires. Using HTTP
+// (instead of plain TCP dial) is essential because kubectl port-forward
+// happily accepts TCP connections on the host even when nothing inside
+// the pod is listening — the proxied connection then drops. The
+// headless boot includes a Wails frontend build on first run, which
+// can take a while, so the timeout is generous.
 func waitForContributeAppReachable(port int) error {
 	deadline := time.Now().Add(contributeAppPortReachableTimeout)
 	for time.Now().Before(deadline) {
-		if canConnectLocalContributeAppPort(port) {
+		if canReachLocalContributeAppEndpoint(port) {
 			return nil
 		}
-		time.Sleep(250 * time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
 	}
 	return fmt.Errorf("contribute-app on 127.0.0.1:%d did not become reachable within %s", port, contributeAppPortReachableTimeout)
 }
 
+// canReachLocalContributeAppEndpoint reports whether the host-side
+// port-forward is wired up AND something inside the pod is actually
+// answering HTTP. A 2xx/3xx/4xx response (including "404 not found")
+// proves an HTTP server is alive; a refused connection or transport
+// error means we're still booting / nothing is listening.
+func canReachLocalContributeAppEndpoint(port int) bool {
+	if port <= 0 {
+		return false
+	}
+	client := http.Client{Timeout: 750 * time.Millisecond}
+	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/", port))
+	if err != nil {
+		return false
+	}
+	_ = resp.Body.Close()
+	return true
+}
+
+// canConnectLocalContributeAppPort is the TCP-only check used to
+// detect whether a kubectl port-forward is already alive (regardless
+// of whether the pod-side server is serving). Reused by reach-checks
+// where we only care about the forward, not the HTTP endpoint.
 func canConnectLocalContributeAppPort(port int) bool {
 	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 200*time.Millisecond)
 	if err != nil {

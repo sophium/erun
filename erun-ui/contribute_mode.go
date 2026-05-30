@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	eruncommon "github.com/sophium/erun/erun-common"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // uiContributeState is the JSON-facing read model the frontend uses to
@@ -194,8 +195,16 @@ func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, 
 		a.stopContributeAppForward(selection)
 		return uiContributeAppLaunch{}, err
 	}
+	url := fmt.Sprintf("http://127.0.0.1:%d/", localPort)
+	// Open the URL in the user's *default* browser via the Wails runtime.
+	// window.open from the React side runs inside the WKWebView and
+	// does not escape to an external browser, so the launcher button
+	// felt broken until the user manually copy-pasted the URL.
+	if a.ctx != nil {
+		runtime.BrowserOpenURL(a.ctx, url)
+	}
 	return uiContributeAppLaunch{
-		URL:  fmt.Sprintf("http://127.0.0.1:%d/", localPort),
+		URL:  url,
 		Port: localPort,
 	}, nil
 }

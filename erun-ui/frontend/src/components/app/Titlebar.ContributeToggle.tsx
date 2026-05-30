@@ -101,10 +101,14 @@ function ContributeAppLauncher({ selected }: { selected: UISelection }): React.R
         onClick={() => {
           if (busy) return;
           setBusy(true);
+          // The Go side opens the URL in the user's default browser
+          // via Wails BrowserOpenURL after the headless server is
+          // actually serving HTTP; the frontend only needs to surface
+          // the URL in the notification so the user can copy/paste if
+          // their default browser handler is misconfigured.
           StartContributeApp(selected)
             .then((launch) => {
               if (launch.url) {
-                window.open(launch.url, '_blank');
                 dispatch(showNotification('success', `Contribute app ready at ${launch.url}`));
               }
             })
