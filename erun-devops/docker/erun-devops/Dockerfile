@@ -77,7 +77,7 @@ USER root
 # changes without leaving the env.
 RUN apt-get update && \
     apt-get install -y git bash-completion bubblewrap dpkg-dev procps \
-        build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev && \
+        build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev && \
     rm -rf /var/lib/apt/lists/* && \
     case "${TARGETARCH}" in \
         amd64) arch=amd64; docker_arch=x86_64; node_arch=x64; aws_arch=x86_64 ;; \

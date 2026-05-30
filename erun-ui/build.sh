@@ -88,8 +88,14 @@ fi
 
 printf '>> rebuilding erun desktop binary (%s)... ' "$BUILD_VERSION" >&2
 build_started_at=$(date +%s)
+# `webkit2_41` opts Wails into webkit2gtk-4.1 + libsoup-3.0 via pkg-config
+# instead of the legacy 4.0 / libsoup-2.4 defaults. Ubuntu Noble (and the
+# runtime image built on top of it) ships 4.1; without this tag the in-pod
+# CGO build aborts with "Package 'webkit2gtk-4.0', required by
+# 'virtual:world', not found". Harmless on macOS / Windows because the
+# matching build-constraints only fire on Linux.
 go build \
-	-tags "desktop,production" \
+	-tags "desktop,production,webkit2_41" \
 	-ldflags "$LDFLAGS" \
 	-o "$TARGET" \
 	./
