@@ -4,5 +4,5 @@ mkdir -p <TMP>
 git clone https://github.com/sophium/erun.git <TMP>
 ==> Would clone ERun to <TMP>
 mkdir -p <TMP>
-ln -sf <TMP> <TMP>
+write-script <TMP>
 ==> Installed contribute shim at <TMP>

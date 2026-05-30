@@ -2,5 +2,5 @@ audit: erun contribute clone --dry-run
 ==> Cloning ERun for contribute mode
 ==> ERun contribute clone already present at <TMP>
 mkdir -p <TMP>
-ln -sf <TMP> <TMP>
+write-script <TMP>
 ==> Installed contribute shim at <TMP>
