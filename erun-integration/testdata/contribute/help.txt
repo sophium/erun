@@ -1,0 +1,16 @@
+Run contribute-mode workflows that target the ERun source repository
+
+Usage:
+  erun contribute [command]
+
+Available Commands:
+  clone       Clone the ERun repository into $HOME/git/erun for contribute mode if it is not already present
+
+Flags:
+  -h, --help   help for contribute
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
+
+Use "erun contribute [command] --help" for more information about a command.

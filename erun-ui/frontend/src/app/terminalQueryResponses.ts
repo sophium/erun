@@ -24,31 +24,29 @@ export function registerTerminalQueryResponseHandlers(
   };
 
   // xterm.js ships built-in OSC 10/11/12 handlers that answer fg/bg/cursor
-  // color queries with the current theme. The reply gets routed through
-  // SendSessionInput -> PTY, which is too slow for fire-and-forget queries
-  // and leaks the response into the shell's stdin where it runs as a
-  // command. Register no-op handlers that consume the OSC and return true
-  // so xterm.js's built-in is suppressed entirely. Querying tools time
-  // out and fall back to their default, which matches what a hardcoded
-  // reply gave anyway.
-  const suppressOsc = (): boolean => true;
+  // color queries with the current theme, and built-in CSI DA1/DA2
+  // handlers that answer terminal device-attribute probes. All of these
+  // replies travel through SendSessionInput -> PTY, which is async — so
+  // when the asking process (claude, codex, an interactive ssh, …)
+  // exits between query and reply, the reply lands on the shell's
+  // stdin and bash interprets it as user input. Most visible
+  // manifestation: a bare `1;2c1;2c…` sitting at the next bash prompt
+  // after claude exits, which bash then tries to run as a command.
+  //
+  // Suppress every reply by registering no-op handlers that consume the
+  // query and return true so the built-in handler does not run.
+  // Querying tools time out (typical timeout ~100ms) and fall back to
+  // xterm defaults — the same defaults a hardcoded reply hard-coded
+  // anyway. The display strip in terminalBuffers.ts catches any
+  // partially-consumed tails as a backstop.
+  const suppressQuery = (): boolean => true;
 
   return [
-    terminal.parser.registerOscHandler(10, suppressOsc),
-    terminal.parser.registerOscHandler(11, suppressOsc),
-    terminal.parser.registerOscHandler(12, suppressOsc),
-    terminal.parser.registerCsiHandler({ final: 'c' }, (params) => {
-      if (firstParam(params) > 0) {
-        return true;
-      }
-      return sendResponse(`${ESC}[?1;2c`);
-    }),
-    terminal.parser.registerCsiHandler({ prefix: '>', final: 'c' }, (params) => {
-      if (firstParam(params) > 0) {
-        return true;
-      }
-      return sendResponse(`${ESC}[>0;276;0c`);
-    }),
+    terminal.parser.registerOscHandler(10, suppressQuery),
+    terminal.parser.registerOscHandler(11, suppressQuery),
+    terminal.parser.registerOscHandler(12, suppressQuery),
+    terminal.parser.registerCsiHandler({ final: 'c' }, suppressQuery),
+    terminal.parser.registerCsiHandler({ prefix: '>', final: 'c' }, suppressQuery),
     terminal.parser.registerCsiHandler({ final: 'n' }, (params) => {
       switch (firstParam(params)) {
         case 5:

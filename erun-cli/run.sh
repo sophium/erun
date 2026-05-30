@@ -66,10 +66,19 @@ for arg in "$@"; do
 done
 
 if [ "$COMMAND_NAME" = "app" ]; then
-	(
+	# The desktop build needs Wails CLI + yarn + node; in environments
+	# missing that toolchain (e.g. a runtime pod) build.sh exits non-zero
+	# under `set -eu`. Don't take down `erun` itself when that happens —
+	# the CLI's own `app` subcommand will still surface a clear "erun-app
+	# executable not found" message and exit cleanly. The warning here
+	# tells the user *why* the rebuild was skipped so the failure is not
+	# a silent one.
+	if ! (
 		cd "$UI_DIR"
 		./build.sh "$APP_TARGET"
-	)
+	); then
+		printf '>> skipping desktop rebuild: build.sh exited non-zero (missing wails/yarn/node toolchain?)\n' >&2
+	fi
 fi
 
 cd "$ORIGINAL_DIR"

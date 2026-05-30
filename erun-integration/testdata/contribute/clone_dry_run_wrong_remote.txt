@@ -1,0 +1,3 @@
+audit: erun contribute clone --dry-run
+==> Cloning ERun for contribute mode
+<TMP> exists but origin remote "git@github.com:other/repo.git" does not point at the ERun repository

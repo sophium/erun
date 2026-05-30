@@ -207,7 +207,63 @@ func runDockerSimpleCommandWithVerbosity(args []string, verbosity int, stdout, s
 }
 
 func runDockerTag(source, target string, stdout, stderr io.Writer) error {
-	return runDockerSimpleCommand([]string{"tag", source, target}, stdout, stderr)
+	if err := tryDockerTag(source, target, stdout, stderr); err == nil {
+		return nil
+	} else if !dockerTagAlreadyExistsRace(err) {
+		return err
+	}
+	// Workaround for the daemon-side race where the target tag is
+	// claimed by a stale manifest list (from a previous push, or the
+	// previous platform's tag in this same multi-arch run). The
+	// daemon reports it as "AlreadyExists: image ... already exists
+	// after deleting the existing one". `docker image rm -f` and
+	// `docker manifest rm` clear both possible holders; we ignore
+	// their errors because the target may legitimately not exist as
+	// either kind. Then the retry of `docker tag` succeeds.
+	_ = runDockerSimpleCommand([]string{"manifest", "rm", target}, io.Discard, io.Discard)
+	_ = runDockerSimpleCommand([]string{"image", "rm", "-f", target}, io.Discard, io.Discard)
+	return tryDockerTag(source, target, stdout, stderr)
+}
+
+// tryDockerTag runs `docker tag` and captures stderr so the caller can
+// pattern-match the daemon error without re-reading the pipe.
+func tryDockerTag(source, target string, stdout, stderr io.Writer) error {
+	capture := new(bytes.Buffer)
+	cmd := Command("docker", "tag", source, target)
+	if stdout != nil {
+		cmd.Stdout = stdout
+	}
+	cmd.Stderr = dockerCommandOutputWriter(stderr, capture)
+	if err := cmd.Run(); err != nil {
+		return dockerTagError{err: err, message: capture.String()}
+	}
+	return nil
+}
+
+type dockerTagError struct {
+	err     error
+	message string
+}
+
+func (e dockerTagError) Error() string {
+	msg := strings.TrimSpace(e.message)
+	if msg == "" {
+		return e.err.Error()
+	}
+	return fmt.Sprintf("%s: %s", e.err.Error(), msg)
+}
+
+func (e dockerTagError) Unwrap() error {
+	return e.err
+}
+
+func dockerTagAlreadyExistsRace(err error) bool {
+	var tagErr dockerTagError
+	if !errors.As(err, &tagErr) {
+		return false
+	}
+	return strings.Contains(tagErr.message, "AlreadyExists") ||
+		strings.Contains(tagErr.message, "already exists")
 }
 
 func shouldRetryAfterGHCRNamespaceLogin(err error, tag string, stdout, stderr io.Writer) bool {

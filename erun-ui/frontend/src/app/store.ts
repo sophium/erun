@@ -20,6 +20,7 @@ import { terminalDisplayMiddleware } from './middleware/terminalDisplayMiddlewar
 import activityReducer from './slices/activitySlice';
 import aiActivityReducer from './slices/aiActivitySlice';
 import autoStartPromptReducer from './slices/autoStartPromptSlice';
+import contributeReducer from './slices/contributeSlice';
 import doctorReducer from './slices/doctorSlice';
 import environmentDialogReducer from './slices/environmentDialogSlice';
 import globalConfigDialogReducer from './slices/globalConfigDialogSlice';
@@ -61,6 +62,7 @@ export const store = configureStore({
     tenantDashboard: tenantDashboardReducer,
     globalConfigDialog: globalConfigDialogReducer,
     autoStartPrompt: autoStartPromptReducer,
+    contribute: contributeReducer,
     [wailsApi.reducerPath]: wailsApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>

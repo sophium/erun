@@ -21,6 +21,7 @@ type uiTenant struct {
 
 type uiEnvironment struct {
 	Name              string `json:"name"`
+	Type              string `json:"type,omitempty"`
 	MCPURL            string `json:"mcpUrl,omitempty"`
 	APIURL            string `json:"apiUrl,omitempty"`
 	RuntimeVersion    string `json:"runtimeVersion,omitempty"`
@@ -52,6 +53,11 @@ type uiSelection struct {
 type uiDiffOptions struct {
 	Scope          string `json:"scope,omitempty"`
 	SelectedCommit string `json:"selectedCommit,omitempty"`
+	// Target selects which repository to diff. "" or "env" diffs the
+	// environment's runtime working directory (the historical default).
+	// "erun" diffs the contribute-mode clone at $HOME/git/erun inside
+	// the environment.
+	Target string `json:"target,omitempty"`
 }
 
 type uiBuildDetails struct {
@@ -156,14 +162,16 @@ type uiSSHDConfig struct {
 }
 
 type uiEnvironmentLocalPorts struct {
-	RangeStart int          `json:"rangeStart"`
-	RangeEnd   int          `json:"rangeEnd"`
-	MCP        int          `json:"mcp"`
-	API        int          `json:"api"`
-	SSH        int          `json:"ssh"`
-	MCPStatus  uiPortStatus `json:"mcpStatus"`
-	APIStatus  uiPortStatus `json:"apiStatus"`
-	SSHStatus  uiPortStatus `json:"sshStatus"`
+	RangeStart          int          `json:"rangeStart"`
+	RangeEnd            int          `json:"rangeEnd"`
+	MCP                 int          `json:"mcp"`
+	API                 int          `json:"api"`
+	SSH                 int          `json:"ssh"`
+	ContributeApp       int          `json:"contributeApp"`
+	MCPStatus           uiPortStatus `json:"mcpStatus"`
+	APIStatus           uiPortStatus `json:"apiStatus"`
+	SSHStatus           uiPortStatus `json:"sshStatus"`
+	ContributeAppStatus uiPortStatus `json:"contributeAppStatus"`
 }
 
 type uiPortStatus struct {

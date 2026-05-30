@@ -12,7 +12,9 @@ const TAB_KIND_ORDER: Record<TerminalTabKind, number> = {
   local: 0,
   erun: 1,
   ai: 2,
-  extra: 3,
+  'contribute-erun': 3,
+  'contribute-ai': 4,
+  extra: 5,
 };
 
 function compareTabs(a: TerminalTab, b: TerminalTab): number {

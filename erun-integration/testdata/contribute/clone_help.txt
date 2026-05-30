@@ -1,0 +1,12 @@
+Clone the ERun repository into $HOME/git/erun for contribute mode if it is not already present
+
+Usage:
+  erun contribute clone [flags]
+
+Flags:
+      --dry-run   Resolve and trace mutating actions without executing them.
+  -h, --help      help for clone
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

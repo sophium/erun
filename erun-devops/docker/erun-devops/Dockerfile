@@ -57,6 +57,7 @@ ARG BUILDX_VERSION=v0.18.0
 ARG DIFFT_VERSION=0.68.0
 ARG GH_VERSION=2.74.2
 ARG NODE_VERSION=24.14.0
+ARG YARN_VERSION=1.22.22
 ARG CODEX_VERSION=0.125.0
 ARG CLAUDE_CODE_VERSION=2.1.156
 ARG AWS_CLI_VERSION=2.32.16
@@ -65,8 +66,18 @@ ARG ATLAS_VERSION=v1.2.0
 USER root
 
 # Keep external tooling installs pinned and centralized in one layer for traceability.
+#
+# build-essential + pkg-config + libgtk-3-dev + libwebkit2gtk-4.1-dev exist
+# so the in-pod contribute-mode workflow can rebuild erun-ui (the Wails
+# desktop binary) and run it in headless mode against a port-forward.
+# Wails' Go bindings link against webkit2gtk on Linux via CGO; without
+# the dev headers `go build -tags desktop,production` fails at compile.
+# Cost: roughly +400 MB on the final image. Worth it because the
+# contribute-app browser bridge is the only way to test desktop-side
+# changes without leaving the env.
 RUN apt-get update && \
-    apt-get install -y git bash-completion bubblewrap dpkg-dev procps && \
+    apt-get install -y git bash-completion bubblewrap dpkg-dev procps \
+        build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev && \
     rm -rf /var/lib/apt/lists/* && \
     case "${TARGETARCH}" in \
         amd64) arch=amd64; docker_arch=x86_64; node_arch=x64; aws_arch=x86_64 ;; \
@@ -100,7 +111,7 @@ RUN apt-get update && \
     curl -fsSL -o /tmp/awscliv2.zip "https://awscli.amazonaws.com/awscli-exe-linux-${aws_arch}-${AWS_CLI_VERSION}.zip" && \
     unzip -q /tmp/awscliv2.zip -d /tmp && \
     /tmp/aws/install --bin-dir /usr/local/bin --install-dir /usr/local/aws-cli && \
-    npm install -g "@openai/codex@${CODEX_VERSION}" "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" && \
+    npm install -g "@openai/codex@${CODEX_VERSION}" "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "yarn@${YARN_VERSION}" && \
     mv /usr/local/bin/codex /usr/local/bin/codex-real && \
     mv /usr/local/bin/claude /usr/local/bin/claude-real && \
     npm cache clean --force && \

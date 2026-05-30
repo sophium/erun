@@ -10,21 +10,24 @@ const (
 	LowerServicePort         = 17000
 	EnvironmentPortRangeSize = 100
 
-	MCPServicePortOffset = 0
-	SSHServicePortOffset = 22
-	APIServicePortOffset = 33
+	MCPServicePortOffset           = 0
+	SSHServicePortOffset           = 22
+	APIServicePortOffset           = 33
+	ContributeAppServicePortOffset = 50
 
-	MCPServicePort      = LowerServicePort + MCPServicePortOffset
-	APIServicePort      = LowerServicePort + APIServicePortOffset
-	DefaultSSHLocalPort = LowerServicePort + SSHServicePortOffset
+	MCPServicePort           = LowerServicePort + MCPServicePortOffset
+	APIServicePort           = LowerServicePort + APIServicePortOffset
+	DefaultSSHLocalPort      = LowerServicePort + SSHServicePortOffset
+	ContributeAppServicePort = LowerServicePort + ContributeAppServicePortOffset
 )
 
 type EnvironmentLocalPorts struct {
-	RangeStart int `json:"rangeStart,omitempty"`
-	RangeEnd   int `json:"rangeEnd,omitempty"`
-	MCP        int `json:"mcp,omitempty"`
-	API        int `json:"api,omitempty"`
-	SSH        int `json:"ssh,omitempty"`
+	RangeStart    int `json:"rangeStart,omitempty"`
+	RangeEnd      int `json:"rangeEnd,omitempty"`
+	MCP           int `json:"mcp,omitempty"`
+	API           int `json:"api,omitempty"`
+	SSH           int `json:"ssh,omitempty"`
+	ContributeApp int `json:"contributeApp,omitempty"`
 }
 
 type environmentPortStore interface {
@@ -58,11 +61,12 @@ func EnvironmentLocalPortsFromRangeStart(rangeStart int) EnvironmentLocalPorts {
 		return EnvironmentLocalPorts{}
 	}
 	return EnvironmentLocalPorts{
-		RangeStart: rangeStart,
-		RangeEnd:   rangeStart + EnvironmentPortRangeSize - 1,
-		MCP:        rangeStart + MCPServicePortOffset,
-		API:        rangeStart + APIServicePortOffset,
-		SSH:        rangeStart + SSHServicePortOffset,
+		RangeStart:    rangeStart,
+		RangeEnd:      rangeStart + EnvironmentPortRangeSize - 1,
+		MCP:           rangeStart + MCPServicePortOffset,
+		API:           rangeStart + APIServicePortOffset,
+		SSH:           rangeStart + SSHServicePortOffset,
+		ContributeApp: rangeStart + ContributeAppServicePortOffset,
 	}
 }
 
@@ -90,6 +94,9 @@ func LocalPortsForResult(result OpenResult) EnvironmentLocalPorts {
 		if ports.SSH == 0 {
 			ports.SSH = ports.RangeStart + SSHServicePortOffset
 		}
+		if ports.ContributeApp == 0 {
+			ports.ContributeApp = ports.RangeStart + ContributeAppServicePortOffset
+		}
 	}
 	if result.EnvConfig.SSHD.LocalPort > 0 {
 		ports.SSH = result.EnvConfig.SSHD.LocalPort
@@ -107,6 +114,14 @@ func APIPortForResult(result OpenResult) int {
 
 func SSHLocalPortForResult(result OpenResult) int {
 	return LocalPortsForResult(result).SSH
+}
+
+// ContributeAppPortForResult returns the contribute-app port for the
+// env. The port is always allocated within the env's local port range;
+// it is only bound when contribute mode is active and `erun app
+// --headless` is running inside the env.
+func ContributeAppPortForResult(result OpenResult) int {
+	return LocalPortsForResult(result).ContributeApp
 }
 
 // ResolveAllEnvironmentLocalPorts returns a per-env port allocation in two
@@ -235,7 +250,10 @@ func environmentLocalPortsForIndex(index int, env EnvConfig) (EnvironmentLocalPo
 	if index < 0 {
 		return EnvironmentLocalPorts{}, fmt.Errorf("environment index must be non-negative")
 	}
-	if MCPServicePortOffset >= EnvironmentPortRangeSize || APIServicePortOffset >= EnvironmentPortRangeSize || SSHServicePortOffset >= EnvironmentPortRangeSize {
+	if MCPServicePortOffset >= EnvironmentPortRangeSize ||
+		APIServicePortOffset >= EnvironmentPortRangeSize ||
+		SSHServicePortOffset >= EnvironmentPortRangeSize ||
+		ContributeAppServicePortOffset >= EnvironmentPortRangeSize {
 		return EnvironmentLocalPorts{}, fmt.Errorf("service port offsets exceed environment local port range size")
 	}
 
@@ -246,11 +264,12 @@ func environmentLocalPortsForIndex(index int, env EnvConfig) (EnvironmentLocalPo
 	}
 
 	ports := EnvironmentLocalPorts{
-		RangeStart: rangeStart,
-		RangeEnd:   rangeEnd,
-		MCP:        rangeStart + MCPServicePortOffset,
-		API:        rangeStart + APIServicePortOffset,
-		SSH:        rangeStart + SSHServicePortOffset,
+		RangeStart:    rangeStart,
+		RangeEnd:      rangeEnd,
+		MCP:           rangeStart + MCPServicePortOffset,
+		API:           rangeStart + APIServicePortOffset,
+		SSH:           rangeStart + SSHServicePortOffset,
+		ContributeApp: rangeStart + ContributeAppServicePortOffset,
 	}
 	if env.SSHD.LocalPort > 0 {
 		ports.SSH = env.SSHD.LocalPort
