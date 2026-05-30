@@ -87,6 +87,7 @@ type App struct {
 	actionCancels             map[string]context.CancelFunc
 	configWatcher             *configWatcher
 	contribute                *contributeStore
+	contributeApps            *contributeAppForwards
 
 	// cloudContextStatuses caches the live AWS-observed power state for
 	// each cloud context, keyed by context name. Populated by the

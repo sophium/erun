@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -14,6 +15,13 @@ type uiContributeState struct {
 	Tenant      string `json:"tenant"`
 	Environment string `json:"environment"`
 	Enabled     bool   `json:"enabled"`
+}
+
+// uiContributeAppLaunch carries the URL the frontend should open in a
+// browser tab so the user can use their locally-built ERun desktop app.
+type uiContributeAppLaunch struct {
+	URL  string `json:"url"`
+	Port int    `json:"port"`
 }
 
 const contributeChangedEvent = "contribute:changed"
@@ -78,6 +86,7 @@ func (a *App) SetContributeMode(selection uiSelection, on bool) (uiContributeSta
 		}
 	} else {
 		a.closeContributeSessionsForSelection(selection)
+		a.stopContributeAppForward(selection)
 	}
 	if a.contribute != nil {
 		a.contribute.set(selection, on)
@@ -130,4 +139,105 @@ func (a *App) uiContributeSnapshot() map[string]bool {
 		return map[string]bool{}
 	}
 	return a.contribute.snapshot()
+}
+
+// StartContributeApp is the Wails-exposed entrypoint for the "Open
+// contribute app" affordance. It boots `erun app --headless --port N`
+// inside the env's ERun (contribute) tab, brings up a kubectl
+// port-forward for the contribute-app port, waits for the headless
+// server to accept connections, and returns the http URL the frontend
+// should open in the user's browser.
+func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, error) {
+	selection = normalizeSelection(selection)
+	if selection.Tenant == "" || selection.Environment == "" {
+		return uiContributeAppLaunch{}, fmt.Errorf("tenant and environment are required")
+	}
+	if !a.GetContributeMode(selection) {
+		return uiContributeAppLaunch{}, fmt.Errorf("contribute mode is not enabled for %s/%s", selection.Tenant, selection.Environment)
+	}
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+	})
+	if err != nil {
+		return uiContributeAppLaunch{}, fmt.Errorf("resolve environment: %w", err)
+	}
+	port := eruncommon.ContributeAppPortForResult(result)
+	if port <= 0 {
+		return uiContributeAppLaunch{}, fmt.Errorf("contribute-app port is not allocated for %s/%s", selection.Tenant, selection.Environment)
+	}
+
+	// Send the headless start command into the contribute ERun tab so
+	// the user can see the build progress and so the running process
+	// is visible (and Ctrl-Cable) in the contribute terminal they
+	// already have open. Best-effort: if the tab is missing we still
+	// try the port-forward so a manually-launched headless on the same
+	// port still becomes reachable from host.
+	a.sendCommandToContributeERunSession(selection, fmt.Sprintf("erun app --headless --port %d\n", port))
+
+	if a.contributeApps == nil {
+		a.contributeApps = newContributeAppForwards()
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	forward, localPort, err := a.startContributeAppForward(ctx, selection)
+	if err != nil {
+		return uiContributeAppLaunch{}, err
+	}
+	if forward != nil {
+		a.contributeApps.put(selection, forward)
+	}
+	_ = result
+	if err := waitForContributeAppReachable(localPort); err != nil {
+		a.stopContributeAppForward(selection)
+		return uiContributeAppLaunch{}, err
+	}
+	return uiContributeAppLaunch{
+		URL:  fmt.Sprintf("http://127.0.0.1:%d/", localPort),
+		Port: localPort,
+	}, nil
+}
+
+// stopContributeAppForward tears down the kubectl port-forward and
+// best-effort sends Ctrl-C to the contribute ERun tab so the headless
+// process exits too. Safe to call when nothing is running.
+func (a *App) stopContributeAppForward(selection uiSelection) {
+	selection = normalizeSelection(selection)
+	if a.contributeApps != nil {
+		if forward := a.contributeApps.take(selection); forward != nil {
+			forward.stop()
+		}
+	}
+	// 0x03 = Ctrl-C. The contribute ERun tab is a normal interactive
+	// shell, so writing the ETX byte interrupts the foreground
+	// process (the headless erun app, if it's still running) without
+	// killing the shell. If the tab is gone or the shell is at a
+	// prompt this is a no-op.
+	a.sendCommandToContributeERunSession(selection, "\x03")
+}
+
+// sendCommandToContributeERunSession looks up the contribute ERun PTY
+// for the env and writes the given bytes to its stdin. Best-effort: if
+// the tab does not exist (toggle was off, session was closed, etc.) the
+// call returns without error.
+func (a *App) sendCommandToContributeERunSession(selection uiSelection, command string) {
+	prefix := "contribute-erun\x00" + selectionKey(selection) + "\x00"
+	a.mu.Lock()
+	var target *managedTerminal
+	for key, managed := range a.sessions {
+		if managed == nil || managed.closed || managed.session == nil {
+			continue
+		}
+		if strings.HasPrefix(key, prefix) {
+			target = managed
+			break
+		}
+	}
+	a.mu.Unlock()
+	if target == nil {
+		return
+	}
+	_, _ = io.WriteString(target.session, command)
 }

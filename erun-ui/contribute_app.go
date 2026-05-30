@@ -1,0 +1,146 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net"
+	"os/exec"
+	"strings"
+	"sync"
+	"time"
+
+	eruncommon "github.com/sophium/erun/erun-common"
+)
+
+// contributeAppForward is the per-env desktop-owned kubectl port-forward
+// process that bridges the contribute clone's headless `erun app` HTTP
+// server (running inside the env's pod on port = LocalPorts.ContributeApp)
+// out to the developer's host, so the user can open the locally-built
+// ERun desktop app in their browser without leaving the env.
+//
+// Lifecycle:
+//   - started by App.StartContributeApp (the "Open contribute app" button).
+//   - stopped by App.stopContributeAppForward on contribute-mode-off,
+//     env switch, or app shutdown.
+type contributeAppForward struct {
+	cmd       *exec.Cmd
+	localPort int
+}
+
+const contributeAppPortReachableTimeout = 30 * time.Second
+
+func (a *App) startContributeAppForward(ctx context.Context, selection uiSelection) (*contributeAppForward, int, error) {
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("resolve environment: %w", err)
+	}
+	port := eruncommon.ContributeAppPortForResult(result)
+	if port <= 0 {
+		return nil, 0, fmt.Errorf("contribute-app port is not allocated for %s/%s", selection.Tenant, selection.Environment)
+	}
+	// If something is already listening locally, reuse it. The most
+	// common case is a still-running forward from a previous click.
+	if canConnectLocalContributeAppPort(port) {
+		return nil, port, nil
+	}
+	args := kubectlContributeAppPortForwardArgs(result, port)
+	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		return nil, 0, fmt.Errorf("start kubectl port-forward: %w", err)
+	}
+	forward := &contributeAppForward{cmd: cmd, localPort: port}
+	return forward, port, nil
+}
+
+func (f *contributeAppForward) stop() {
+	if f == nil || f.cmd == nil || f.cmd.Process == nil {
+		return
+	}
+	_ = f.cmd.Process.Kill()
+	_ = f.cmd.Wait()
+}
+
+// waitForContributeAppReachable polls the local port until the headless
+// ERun app is accepting connections or the timeout expires. The
+// headless boot includes a Wails frontend build on first run, which can
+// take a while, so the timeout is generous.
+func waitForContributeAppReachable(port int) error {
+	deadline := time.Now().Add(contributeAppPortReachableTimeout)
+	for time.Now().Before(deadline) {
+		if canConnectLocalContributeAppPort(port) {
+			return nil
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	return fmt.Errorf("contribute-app on 127.0.0.1:%d did not become reachable within %s", port, contributeAppPortReachableTimeout)
+}
+
+func canConnectLocalContributeAppPort(port int) bool {
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 200*time.Millisecond)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+func kubectlContributeAppPortForwardArgs(result eruncommon.OpenResult, localPort int) []string {
+	args := make([]string, 0, 8)
+	if c := strings.TrimSpace(result.EnvConfig.KubernetesContext); c != "" {
+		args = append(args, "--context", c)
+	}
+	if ns := eruncommon.KubernetesNamespaceName(result.Tenant, result.Environment); ns != "" {
+		args = append(args, "--namespace", ns)
+	}
+	args = append(args,
+		"port-forward",
+		"deployment/"+eruncommon.RuntimeReleaseName(result.Tenant),
+		fmt.Sprintf("%d:%d", localPort, localPort),
+		"--address", "127.0.0.1",
+	)
+	return args
+}
+
+// contributeAppForwards tracks the active port-forward process per env
+// (keyed by tenant/env). The map is owned by App; mutations go through
+// the helpers below to keep locking centralised.
+type contributeAppForwards struct {
+	mu       sync.Mutex
+	forwards map[string]*contributeAppForward
+}
+
+func newContributeAppForwards() *contributeAppForwards {
+	return &contributeAppForwards{forwards: map[string]*contributeAppForward{}}
+}
+
+func (c *contributeAppForwards) put(selection uiSelection, forward *contributeAppForward) {
+	if c == nil || forward == nil {
+		return
+	}
+	c.mu.Lock()
+	c.forwards[contributeAppForwardKey(selection)] = forward
+	c.mu.Unlock()
+}
+
+func (c *contributeAppForwards) take(selection uiSelection) *contributeAppForward {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	key := contributeAppForwardKey(selection)
+	forward := c.forwards[key]
+	delete(c.forwards, key)
+	return forward
+}
+
+func contributeAppForwardKey(selection uiSelection) string {
+	selection = normalizeSelection(selection)
+	return selection.Tenant + "/" + selection.Environment
+}
