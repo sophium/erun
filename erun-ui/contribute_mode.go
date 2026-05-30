@@ -183,7 +183,7 @@ func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	forward, localPort, err := a.startContributeAppForward(ctx, selection)
+	forward, args, localPort, err := a.startContributeAppForward(ctx, selection)
 	if err != nil {
 		return uiContributeAppLaunch{}, err
 	}
@@ -191,7 +191,7 @@ func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, 
 		a.contributeApps.put(selection, forward)
 	}
 	_ = result
-	if err := waitForContributeAppReachable(localPort, forward); err != nil {
+	if err := waitForContributeAppReachable(ctx, localPort, forward, args); err != nil {
 		a.stopContributeAppForward(selection)
 		return uiContributeAppLaunch{}, err
 	}
