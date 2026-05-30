@@ -191,7 +191,7 @@ func (a *App) StartContributeApp(selection uiSelection) (uiContributeAppLaunch, 
 		a.contributeApps.put(selection, forward)
 	}
 	_ = result
-	if err := waitForContributeAppReachable(localPort); err != nil {
+	if err := waitForContributeAppReachable(localPort, forward); err != nil {
 		a.stopContributeAppForward(selection)
 		return uiContributeAppLaunch{}, err
 	}

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -27,6 +28,22 @@ import (
 type contributeAppForward struct {
 	cmd       *exec.Cmd
 	localPort int
+	stderr    *bytes.Buffer
+}
+
+// exitedWithError reports whether the kubectl process has already
+// terminated and, if so, returns the captured stderr. Used by
+// waitForContributeAppReachable to fail fast instead of polling the
+// HTTP port for 5 minutes when kubectl is already dead.
+func (f *contributeAppForward) exitedWithError() (bool, string) {
+	if f == nil || f.cmd == nil || f.cmd.Process == nil {
+		return false, ""
+	}
+	if f.cmd.ProcessState == nil {
+		return false, ""
+	}
+	msg := strings.TrimSpace(f.stderr.String())
+	return true, msg
 }
 
 // contributeAppPortReachableTimeout is generous on purpose. The first
@@ -57,12 +74,23 @@ func (a *App) startContributeAppForward(ctx context.Context, selection uiSelecti
 	}
 	args := kubectlContributeAppPortForwardArgs(result, port)
 	cmd := exec.CommandContext(ctx, "kubectl", args...)
+	stderr := new(bytes.Buffer)
 	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
+	// Capture kubectl's stderr so we can surface a real error message
+	// when it exits early (no such deployment, context not in kubeconfig,
+	// port already in use on host, etc.) instead of staring at the
+	// 5-minute reachability timeout.
+	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		return nil, 0, fmt.Errorf("start kubectl port-forward: %w", err)
 	}
-	forward := &contributeAppForward{cmd: cmd, localPort: port}
+	forward := &contributeAppForward{cmd: cmd, localPort: port, stderr: stderr}
+	// Reap the process in a background goroutine so cmd.ProcessState is
+	// populated when (if) kubectl exits. exitedWithError() can then
+	// detect a dead forward without blocking the caller.
+	go func() {
+		_ = cmd.Wait()
+	}()
 	return forward, port, nil
 }
 
@@ -71,7 +99,8 @@ func (f *contributeAppForward) stop() {
 		return
 	}
 	_ = f.cmd.Process.Kill()
-	_ = f.cmd.Wait()
+	// Wait is already reaped by the goroutine spawned in
+	// startContributeAppForward; calling it again here is a no-op.
 }
 
 // waitForContributeAppReachable polls the local port until the headless
@@ -81,11 +110,21 @@ func (f *contributeAppForward) stop() {
 // the pod is listening — the proxied connection then drops. The
 // headless boot includes a Wails frontend build on first run, which
 // can take a while, so the timeout is generous.
-func waitForContributeAppReachable(port int) error {
+//
+// If forward.exitedWithError() reports kubectl is already dead the
+// wait fails immediately with kubectl's stderr so the user sees the
+// real cause instead of a generic 5-minute timeout.
+func waitForContributeAppReachable(port int, forward *contributeAppForward) error {
 	deadline := time.Now().Add(contributeAppPortReachableTimeout)
 	for time.Now().Before(deadline) {
 		if canReachLocalContributeAppEndpoint(port) {
 			return nil
+		}
+		if exited, msg := forward.exitedWithError(); exited {
+			if msg == "" {
+				msg = "(no stderr captured)"
+			}
+			return fmt.Errorf("kubectl port-forward for 127.0.0.1:%d exited before the headless app was reachable: %s", port, msg)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
