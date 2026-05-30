@@ -12,14 +12,15 @@ Flags:
       --environment string             Environment name
   -h, --help                           help for init
       --kubernetes-context string      Kubernetes context to associate with the environment
-      --no-git                         Skip remote Git checkout setup when used with --remote
+      --no-git                         Skip remote Git checkout setup when used with --remote or --type=remote-agent
       --project-root string            Project root to bind to the tenant
-      --remote                         Initialize the tenant repository inside the runtime pod instead of the local host
+      --remote                         Deprecated alias for --type=remote-agent
       --runtime-cpu string             Runtime pod CPU limit
       --runtime-image string           Runtime image repository to initialize and deploy
       --runtime-memory string          Runtime pod memory limit
       --set-default-tenant             Set the initialized tenant as the default tenant
       --tenant string                  Tenant name to initialize
+      --type string                    Environment type: local-agent, remote-agent, or runtime (takes precedence over --remote)
       --version string                 Runtime image version to initialize and deploy
   -y, --yes                            Automatically approve initialization prompts
 

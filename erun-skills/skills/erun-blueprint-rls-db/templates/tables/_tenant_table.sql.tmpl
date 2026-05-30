@@ -1,0 +1,26 @@
+-- Tenant-owned table template. Substitute __TABLE__ with the plural
+-- snake_case table name (e.g. invoices, customers, orders).
+--
+-- Required for every tenant-owned table:
+--   - tenant_id column with DEFAULT erun_current_tenant_id() and FK to tenants.
+--   - Surrogate UUIDv7 primary key named <table_singular>_id when the row
+--     has externally visible identity, OR a composite PRIMARY KEY of
+--     (tenant_id, …) for natural-key mapping tables.
+--   - tenant-scoped uniqueness constraints (UNIQUE (tenant_id, …)).
+--   - created_at and updated_at columns (populated by trigger).
+--
+-- Add domain columns in the marked section. Replace the example natural-key
+-- uniqueness constraint with the real one for this table.
+CREATE TABLE __TABLE__ (
+  __TABLE_SINGULAR___id UUID PRIMARY KEY DEFAULT uuidv7(),
+  tenant_id UUID NOT NULL DEFAULT erun_current_tenant_id(),
+
+  -- BEGIN domain columns
+  name TEXT NOT NULL,
+  -- END domain columns
+
+  created_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ,
+  FOREIGN KEY (tenant_id) REFERENCES tenants (tenant_id),
+  CONSTRAINT __TABLE___tenant_name_key UNIQUE (tenant_id, name)
+);

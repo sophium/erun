@@ -1,0 +1,80 @@
+<svg viewBox="0 0 1000 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="epicStoryTasksTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="epicStoryTasksTitle">Epic, Story, and Task hierarchy. An Epic — 'Inline code review' — contains multiple Stories. The first Story 'Add inline comments at commit + line' contains a list of Tasks: add acceptance criteria (done), add implementation plan (done), implement backend (open), implement frontend (open), add integration test (open). A second Story 'Threaded replies on comments' is the same shape with its own Tasks. Stories move through the workflow states; Tasks track per-Story granular progress so the main state machine stays simple.</title>
+
+  <defs>
+    <linearGradient id="esCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Epic outer card (namespace-style) -->
+  <rect x="20" y="20" width="960" height="420" rx="18" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
+
+  <!-- Epic header -->
+  <g>
+    <rect x="40" y="38" width="68" height="24" rx="12" fill="url(#esCharcoal)"/>
+    <text x="74" y="55" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600" letter-spacing="0.05em">EPIC</text>
+    <text x="120" y="56" text-anchor="start" fill="currentColor" font-size="15" font-weight="600">Inline code review</text>
+    <text x="40" y="82" text-anchor="start" fill="currentColor" font-size="11.5" opacity="0.6">a longer-term goal; contains multiple Stories</text>
+  </g>
+
+  <!-- Story A -->
+  <g>
+    <rect x="60" y="110" width="440" height="285" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+
+    <rect x="80" y="128" width="72" height="22" rx="11" fill="url(#esCharcoal)"/>
+    <text x="116" y="143" text-anchor="middle" fill="#ffffff" font-size="10.5" font-weight="600" letter-spacing="0.05em">STORY</text>
+    <text x="162" y="143" text-anchor="start" fill="currentColor" font-size="13" font-weight="600">Add inline comments at commit + line</text>
+    <text x="80" y="166" text-anchor="start" fill="currentColor" font-size="11" opacity="0.6">moves through workflow states · TRIAGE → DONE</text>
+
+    <text x="80" y="195" text-anchor="start" fill="currentColor" font-size="11" font-weight="600" letter-spacing="0.05em" opacity="0.7">TASKS</text>
+
+    <g font-size="12">
+      <text x="80" y="218" fill="#0891b2" font-weight="700">✓</text>
+      <text x="100" y="218" fill="currentColor" opacity="0.85">Add acceptance criteria to Story</text>
+
+      <text x="80" y="240" fill="#0891b2" font-weight="700">✓</text>
+      <text x="100" y="240" fill="currentColor" opacity="0.85">Add implementation plan</text>
+
+      <text x="80" y="262" fill="currentColor" opacity="0.5">·</text>
+      <text x="100" y="262" fill="currentColor" opacity="0.7">Implement backend</text>
+
+      <text x="80" y="284" fill="currentColor" opacity="0.5">·</text>
+      <text x="100" y="284" fill="currentColor" opacity="0.7">Implement frontend</text>
+
+      <text x="80" y="306" fill="currentColor" opacity="0.5">·</text>
+      <text x="100" y="306" fill="currentColor" opacity="0.7">Add integration test</text>
+    </g>
+
+    <text x="80" y="378" text-anchor="start" fill="currentColor" font-size="10.5" opacity="0.55" font-style="italic">Specialised Agents own different Tasks (see below).</text>
+  </g>
+
+  <!-- Story B -->
+  <g>
+    <rect x="520" y="110" width="440" height="285" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+
+    <rect x="540" y="128" width="72" height="22" rx="11" fill="url(#esCharcoal)"/>
+    <text x="576" y="143" text-anchor="middle" fill="#ffffff" font-size="10.5" font-weight="600" letter-spacing="0.05em">STORY</text>
+    <text x="622" y="143" text-anchor="start" fill="currentColor" font-size="13" font-weight="600">Threaded replies on comments</text>
+    <text x="540" y="166" text-anchor="start" fill="currentColor" font-size="11" opacity="0.6">a sibling Story in the same Epic</text>
+
+    <text x="540" y="195" text-anchor="start" fill="currentColor" font-size="11" font-weight="600" letter-spacing="0.05em" opacity="0.7">TASKS</text>
+
+    <g font-size="12">
+      <text x="540" y="218" fill="currentColor" opacity="0.5">·</text>
+      <text x="560" y="218" fill="currentColor" opacity="0.7">Add acceptance criteria to Story</text>
+
+      <text x="540" y="240" fill="currentColor" opacity="0.5">·</text>
+      <text x="560" y="240" fill="currentColor" opacity="0.7">Add implementation plan</text>
+
+      <text x="540" y="262" fill="currentColor" opacity="0.5">·</text>
+      <text x="560" y="262" fill="currentColor" opacity="0.7">Implement comment threading</text>
+    </g>
+
+    <text x="540" y="378" text-anchor="start" fill="currentColor" font-size="10.5" opacity="0.55" font-style="italic">Tasks track granular progress without inflating workflow states.</text>
+  </g>
+
+  <!-- Bottom annotation -->
+  <text x="500" y="425" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.6">Epic contains Stories · each Story contains Tasks. Stories move; Tasks track per-Story progress.</text>
+</svg>

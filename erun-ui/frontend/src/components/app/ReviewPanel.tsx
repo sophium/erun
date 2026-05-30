@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import * as React from 'react';
 
+import { switchDiffSource } from '@/app/contributeThunks';
 import { compactDiffError, filterDiffTree, visibleDiffTreeNodes } from '@/app/diffUtils';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { startFilesResize } from '@/app/layoutThunks';
@@ -22,6 +23,7 @@ import {
   toggleChangedFiles,
   toggleDiffDirectory,
 } from '@/app/reviewThunks';
+import { contributeEnvKey, type DiffSource } from '@/app/slices/contributeSlice';
 import { useController } from '@/app/useController';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -117,6 +119,7 @@ function ChangedFilesAside({ visible }: { visible: boolean }): React.ReactElemen
       )}
     >
       <ChangedFilesHeader />
+      <DiffSourceControl />
       <ReviewRangeControl />
       {changedFilesOpen ? (
         <>
@@ -139,6 +142,78 @@ function ChangedFilesAside({ visible }: { visible: boolean }): React.ReactElemen
         </>
       ) : null}
     </aside>
+  );
+}
+
+// DiffSourceControl is the segmented toggle that appears in the changed-
+// files aside when the selected env is in contribute mode. It flips the
+// review panel between the env's diff and the ERun contribute-clone
+// diff so the contributor can audit the same work in both repos without
+// leaving the panel.
+function DiffSourceControl(): React.ReactElement | null {
+  const dispatch = useAppDispatch();
+  const selected = useAppSelector((state) => state.selection.selected);
+  const flagOn = useAppSelector((state) => {
+    if (!selected) return false;
+    return Boolean(
+      state.contribute.flagsByEnv[contributeEnvKey(selected.tenant, selected.environment)],
+    );
+  });
+  const source = useAppSelector((state) => {
+    if (!selected) return 'env';
+    return (
+      state.contribute.diffSourceByEnv[contributeEnvKey(selected.tenant, selected.environment)] ??
+      'env'
+    );
+  });
+  if (!selected || !flagOn) return null;
+  const setSource = (next: DiffSource) => {
+    dispatch(switchDiffSource(selected, next));
+    void dispatch(loadReviewDiff());
+  };
+  return (
+    <div className="mt-2 mb-3 flex w-full items-center gap-1 rounded-[var(--radius)] border border-input bg-background p-1 text-xs">
+      <DiffSourceButton
+        label="Env"
+        active={source === 'env'}
+        onClick={() => {
+          setSource('env');
+        }}
+      />
+      <DiffSourceButton
+        label="ERun"
+        active={source === 'erun'}
+        onClick={() => {
+          setSource('erun');
+        }}
+      />
+    </div>
+  );
+}
+
+function DiffSourceButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}): React.ReactElement {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      onClick={onClick}
+      className={cn(
+        'flex-1 cursor-pointer rounded-[calc(var(--radius)-2px)] px-2 py-1 text-center transition-colors',
+        active
+          ? 'bg-primary text-primary-foreground'
+          : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+      )}
+    >
+      {label}
+    </button>
   );
 }
 

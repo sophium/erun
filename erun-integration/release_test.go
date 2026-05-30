@@ -104,6 +104,25 @@ func TestRelease(t *testing.T) {
 		golden.Equal(t, "release/dry_run_includes_linux_release_scripts", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_main_with_marketplace_emits_sha_sync", func(t *testing.T) {
+		// Exercises release.go marketplace.json bump path: when the project
+		// contains a .claude-plugin/marketplace.json, the sync-packaging-checksums
+		// stage must trace `git rev-parse v<VERSION>^{}` (to resolve the release
+		// commit) and include the marketplace.json path in the git-add list.
+		// The bump itself is gated on !DryRun so the trace alone proves the path
+		// is wired correctly.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		fixture.SeedMarketplaceJSON(t, setup.Cwd)
+		fixture.RunGit(t, setup.Cwd, "add", ".claude-plugin")
+		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add marketplace.json")
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "release/dry_run_main_with_marketplace_emits_sha_sync", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_force_includes_tag_deletion_for_stale_release_tag", func(t *testing.T) {
 		// Exercises release.go --force path: when the release tag already
 		// exists remotely on a commit other than HEAD, --dry-run must
@@ -125,5 +144,55 @@ func TestRelease(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "release/dry_run_force_includes_tag_deletion_for_stale_release_tag", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_skips_release_roots_in_gitignored_trees", func(t *testing.T) {
+		// Regression for #398. The release-root walker used to descend
+		// into third-party trees and treat every VERSION file as a
+		// candidate. In a contribute clone where `yarn install` ran in
+		// `erun-docs/`, `erun-docs/node_modules/lunr/VERSION` was
+		// picked up alongside `erun-devops/VERSION`, and resolution
+		// failed with "multiple release roots found under project
+		// root". The walker now honors .gitignore (root + nested), so
+		// any VERSION file in an ignored tree drops out of discovery.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		docsDir := filepath.Join(setup.Cwd, "erun-docs")
+		if err := os.MkdirAll(filepath.Join(docsDir, "node_modules", "lunr"), 0o755); err != nil {
+			t.Fatalf("mkdir node_modules/lunr: %v", err)
+		}
+		mustWriteFile(t, filepath.Join(docsDir, ".gitignore"), "node_modules\n")
+		mustWriteFile(t, filepath.Join(docsDir, "node_modules", "lunr", "VERSION"), "2.3.9\n")
+		fixture.RunGit(t, setup.Cwd, "add", "erun-docs/.gitignore")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "ignore node_modules in docs")
+
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "release/dry_run_skips_release_roots_in_gitignored_trees", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_with_untracked_file_reports_worktree_clean", func(t *testing.T) {
+		// Regression for #400. release used to call
+		// `git status --porcelain` with no flags and treat any output as
+		// dirty, so an untracked .idea/ (or any other unignored
+		// IDE/generator droppings) blocked release in a real run.
+		// release publishes HEAD, not the worktree, so untracked files
+		// must not gate the flow. The dry-run trace now exposes the
+		// precondition outcome ("release: worktree clean = true") so
+		// the integration suite can lock the behavior.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		if err := os.MkdirAll(filepath.Join(setup.Cwd, ".idea"), 0o755); err != nil {
+			t.Fatalf("mkdir .idea: %v", err)
+		}
+		mustWriteFile(t, filepath.Join(setup.Cwd, ".idea", "workspace.xml"), "<project/>\n")
+
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "release/dry_run_with_untracked_file_reports_worktree_clean", normalize.Apply(result.Combined))
 	})
 }

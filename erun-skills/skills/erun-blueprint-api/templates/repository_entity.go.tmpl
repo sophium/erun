@@ -1,0 +1,77 @@
+package repository
+
+import (
+	"context"
+
+	"github.com/google/uuid"
+	"github.com/uptrace/bun"
+
+	"__MODULE_PATH__/internal/model"
+)
+
+// __ENTITY__Repository owns SQL for the __ENTITY_TABLE__ table. Methods
+// run through TxManager.WithTx so every query has the right security
+// context (SET LOCAL ROLE + erun.tenant_id).
+type __ENTITY__Repository struct {
+	tx *TxManager
+}
+
+func New__ENTITY__Repository(tx *TxManager) *__ENTITY__Repository {
+	return &__ENTITY__Repository{tx: tx}
+}
+
+// Create inserts a new __ENTITY__. The DB defaults populate __ENTITY_KEY__,
+// tenant_id, created_at, and updated_at — the explicit Column(...) list
+// excludes them so caller-provided values are ignored.
+func (r *__ENTITY__Repository) Create(ctx context.Context, e model.__ENTITY__) (model.__ENTITY__, error) {
+	err := r.tx.WithTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		_, err := tx.NewInsert().
+			Model(&e).
+			Column("name"). // add the rest of the writable domain columns here
+			Returning("*").
+			Exec(ctx)
+		return err
+	})
+	return e, err
+}
+
+func (r *__ENTITY__Repository) Get(ctx context.Context, id uuid.UUID) (model.__ENTITY__, error) {
+	var e model.__ENTITY__
+	err := r.tx.WithTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		return tx.NewSelect().
+			Model(&e).
+			Where("__ENTITY_KEY__ = ?", id).
+			Scan(ctx)
+	})
+	return e, err
+}
+
+type __ENTITY__ListFilter struct {
+	// Add narrow filters here as needed; do not add ListBy... methods.
+	NamePrefix string
+}
+
+func (r *__ENTITY__Repository) List(ctx context.Context, filter __ENTITY__ListFilter) ([]model.__ENTITY__, error) {
+	var rows []model.__ENTITY__
+	err := r.tx.WithTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		q := tx.NewSelect().Model(&rows).Order("created_at DESC")
+		if filter.NamePrefix != "" {
+			q = q.Where("name LIKE ?", filter.NamePrefix+"%")
+		}
+		return q.Scan(ctx)
+	})
+	return rows, err
+}
+
+func (r *__ENTITY__Repository) Update(ctx context.Context, e model.__ENTITY__) (model.__ENTITY__, error) {
+	err := r.tx.WithTx(ctx, func(ctx context.Context, tx bun.Tx) error {
+		_, err := tx.NewUpdate().
+			Model(&e).
+			Column("name"). // domain columns that are caller-mutable
+			Where("__ENTITY_KEY__ = ?", e.__ENTITY__ID).
+			Returning("*").
+			Exec(ctx)
+		return err
+	})
+	return e, err
+}

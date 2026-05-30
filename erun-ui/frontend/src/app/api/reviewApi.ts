@@ -7,6 +7,7 @@ import { wailsQueryFn } from './wailsBaseQuery';
 export interface UIDiffOptions {
   scope?: string;
   selectedCommit?: string;
+  target?: string;
 }
 
 interface DiffArgs {

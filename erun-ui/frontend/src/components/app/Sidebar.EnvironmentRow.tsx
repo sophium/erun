@@ -11,6 +11,7 @@ import { selectionKey } from '@/app/versionSuggestions';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { deriveEnvironmentRow } from '@/components/app/Sidebar.helpers';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { UISelection } from '@/types';
 
@@ -123,6 +124,7 @@ export function EnvironmentRow({
     aiBusy,
   );
 
+  const rowLabel = `${tenantName} / ${environmentName}${isLocal ? ' (local)' : ''}`;
   return (
     <div
       className={cn(
@@ -131,24 +133,29 @@ export function EnvironmentRow({
           'bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground',
       )}
     >
-      <button
-        type="button"
-        className={cn(
-          'flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent py-0 pr-2 pl-10 text-left text-sm leading-[1.2] tracking-normal text-inherit',
-          selected ? 'font-medium' : 'font-normal',
-        )}
-        title={`${tenantName} / ${environmentName}${isLocal ? ' (local)' : ''}`}
-        aria-current={selected ? 'page' : undefined}
-        onClick={() => {
-          void dispatch(openSelection(selection)).catch((error: unknown) => {
-            dispatch(showTerminalMessage(readError(error)));
-          });
-        }}
-      >
-        <span className="min-w-0 truncate">{environmentName}</span>
-        {isLocal && <LocalEnvBadge selected={selected} />}
-        {busy && <BusyRowSpinner label={busyLabel} />}
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              'flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent py-0 pr-2 pl-10 text-left text-sm leading-[1.2] tracking-normal text-inherit',
+              selected ? 'font-medium' : 'font-normal',
+            )}
+            aria-label={rowLabel}
+            aria-current={selected ? 'page' : undefined}
+            onClick={() => {
+              void dispatch(openSelection(selection)).catch((error: unknown) => {
+                dispatch(showTerminalMessage(readError(error)));
+              });
+            }}
+          >
+            <span className="min-w-0 truncate">{environmentName}</span>
+            {isLocal && <LocalEnvBadge selected={selected} />}
+            {busy && <BusyRowSpinner label={busyLabel} />}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="right">{rowLabel}</TooltipContent>
+      </Tooltip>
       <EnvironmentRowEditButton
         tenantName={tenantName}
         environmentName={environmentName}

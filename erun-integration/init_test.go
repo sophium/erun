@@ -120,6 +120,100 @@ func TestInit(t *testing.T) {
 		golden.Equal(t, "init/remote_requires_environment", normalize.Apply(result.Combined))
 	})
 
+	t.Run("type_local_agent_dry_run", func(t *testing.T) {
+		// --type local-agent is the explicit form of today's no-flag default.
+		// Validates that an explicit type flag is accepted and the dry-run
+		// trace shows the env being created without --remote-style remote
+		// init work.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "local",
+			"--type", "local-agent",
+			"--project-root", setup.Cwd,
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/test",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "init/type_local_agent_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("type_remote_agent_dry_run", func(t *testing.T) {
+		// --type remote-agent is the canonical replacement for --remote.
+		// The expected trace mirrors remote_dry_run but is driven by the
+		// new flag rather than the legacy bool.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "dev",
+			"--type", "remote-agent",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/test",
+			"--no-git",
+			"--bootstrap",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "init/type_remote_agent_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("type_runtime_dry_run", func(t *testing.T) {
+		// --type runtime persists Type=runtime so downstream chart wiring
+		// can request worktreeStorage=none. Init still walks the remote
+		// namespace setup path because runtime envs live in-cluster.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "prod",
+			"--type", "runtime",
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/test",
+			"--no-git",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "init/type_runtime_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("type_conflicts_with_remote", func(t *testing.T) {
+		// --type and --remote that disagree must error before any side
+		// effect, so a user catching themselves mid-migration sees the
+		// conflict immediately instead of getting a half-configured env.
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "local",
+			"--type", "local-agent",
+			"--remote",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "init/type_conflicts_with_remote", normalize.Apply(result.Combined))
+	})
+
+	t.Run("type_rejects_invalid_value", func(t *testing.T) {
+		setup := env.New(t)
+		args := []string{
+			"init", "team", "dev",
+			"--type", "invalid",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "init/type_rejects_invalid_value", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_via_stubs", func(t *testing.T) {
 		// Run init for real (without --dry-run) but route every external
 		// call through stubs. Covers the kubectl namespace check/create

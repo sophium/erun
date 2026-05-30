@@ -37,9 +37,11 @@ type ListCurrentDirectoryResult struct {
 type ListEffectiveTargetResult struct {
 	Tenant             string                `json:"tenant"`
 	Environment        string                `json:"environment"`
+	Type               EnvironmentType       `json:"type,omitempty"`
 	KubernetesContext  string                `json:"kubernetesContext"`
 	CloudProviderAlias string                `json:"cloudProviderAlias,omitempty"`
 	RepoPath           string                `json:"repoPath"`
+	LocalRepoPath      string                `json:"localRepoPath,omitempty"`
 	APIURL             string                `json:"apiUrl,omitempty"`
 	Snapshot           bool                  `json:"snapshot"`
 	LocalPorts         EnvironmentLocalPorts `json:"localPorts,omitempty"`
@@ -59,10 +61,12 @@ type ListTenantResult struct {
 
 type ListEnvironmentResult struct {
 	Name               string                  `json:"name"`
+	Type               EnvironmentType         `json:"type,omitempty"`
 	APIURL             string                  `json:"apiUrl,omitempty"`
 	KubernetesContext  string                  `json:"kubernetesContext,omitempty"`
 	CloudProviderAlias string                  `json:"cloudProviderAlias,omitempty"`
 	RepoPath           string                  `json:"repoPath,omitempty"`
+	LocalRepoPath      string                  `json:"localRepoPath,omitempty"`
 	ContainerRegistry  string                  `json:"containerRegistry,omitempty"`
 	RuntimeVersion     string                  `json:"runtimeVersion,omitempty"`
 	RuntimePod         RuntimePodResources     `json:"runtimePod,omitempty"`
@@ -159,9 +163,11 @@ func listCurrentDirectoryResult(current ListCurrentDirectoryResult, effective Op
 	current.Effective = &ListEffectiveTargetResult{
 		Tenant:             effective.Tenant,
 		Environment:        effective.Environment,
+		Type:               effective.EnvConfig.ResolvedType(),
 		KubernetesContext:  strings.TrimSpace(effective.EnvConfig.KubernetesContext),
 		CloudProviderAlias: strings.TrimSpace(effective.EnvConfig.CloudProviderAlias),
 		RepoPath:           effective.RepoPath,
+		LocalRepoPath:      strings.TrimSpace(effective.EnvConfig.LocalRepoPath),
 		APIURL:             APIURLForListEnvironment(effective.TenantConfig, LocalPortsForResult(effective)),
 		Snapshot:           deployTargetSnapshotEnabled(effective, nil),
 		LocalPorts:         LocalPortsForResult(effective),
@@ -195,10 +201,12 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 	localPorts := listEnvironmentLocalPorts(tenant.Name, env, portAllocations)
 	return ListEnvironmentResult{
 		Name:               env.Name,
+		Type:               env.ResolvedType(),
 		APIURL:             APIURLForListEnvironment(tenant, localPorts),
 		KubernetesContext:  strings.TrimSpace(env.KubernetesContext),
 		CloudProviderAlias: strings.TrimSpace(env.CloudProviderAlias),
 		RepoPath:           strings.TrimSpace(env.RepoPath),
+		LocalRepoPath:      strings.TrimSpace(env.LocalRepoPath),
 		ContainerRegistry:  strings.TrimSpace(env.ContainerRegistry),
 		RuntimeVersion:     strings.TrimSpace(env.RuntimeVersion),
 		RuntimePod:         env.RuntimePod,
@@ -259,7 +267,7 @@ func listEnvironmentOpenResult(tenant TenantConfig, env EnvConfig, localPorts En
 }
 
 func listEnvironmentIsActive(store CloudReadStore, env EnvConfig) bool {
-	if !env.Remote {
+	if !env.RemoteWorktree() {
 		return false
 	}
 	status, ok, err := findCloudContextForKubernetesContext(store, env.KubernetesContext)

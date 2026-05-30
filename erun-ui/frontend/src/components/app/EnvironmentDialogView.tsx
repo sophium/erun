@@ -34,9 +34,10 @@ import { Label } from '@/components/ui/label';
 
 import { EditableComboField } from './EditableComboField';
 import { uniqueSuggestions } from './EditableComboField.helpers';
-import { EmptyState } from './EmptyState';
+import { EnvironmentTypeSelect, LocalRepoPathField } from './EnvironmentTypeFields';
+import { KubernetesContextSelect } from './KubernetesContextSelect';
+import { ReadonlyField } from './ManageDialog.fields';
 import { RuntimeResourceControls } from './RuntimeResourceControls';
-import { SelectField } from './SelectField';
 import { VersionField } from './VersionField';
 
 const dialogErrorClassName =
@@ -111,13 +112,22 @@ function EnvironmentDialogHeader({ dialog }: { dialog: EnvironmentDialog }): Rea
   return (
     <DialogHeader>
       <DialogTitle>{isDeploy ? 'Deploy environment' : 'New environment'}</DialogTitle>
-      <DialogDescription>
-        {dialog.tenant && dialog.environment
-          ? `${dialog.tenant} / ${dialog.environment}`
-          : 'Enter the tenant and environment name.'}
-      </DialogDescription>
+      <DialogDescription>{environmentDialogDescription(dialog, isDeploy)}</DialogDescription>
     </DialogHeader>
   );
+}
+
+function environmentDialogDescription(dialog: EnvironmentDialog, isDeploy: boolean): string {
+  if (isDeploy) {
+    if (dialog.tenant && dialog.environment) {
+      return `Roll out a new version to ${dialog.tenant} / ${dialog.environment}.`;
+    }
+    return 'Roll out a new version to the selected environment.';
+  }
+  if (dialog.tenant && dialog.environment) {
+    return `Create ${dialog.tenant} / ${dialog.environment}.`;
+  }
+  return 'Enter the tenant and environment name to create.';
 }
 
 function EnvironmentDialogFields({
@@ -184,6 +194,19 @@ function EnvironmentNameFields({
     [dialog, tenants],
   );
 
+  // In deploy mode the tenant + environment are already selected and the
+  // user cannot change them, so render them as ReadonlyField (matching the
+  // ManageDialog General tab) instead of disabled editable inputs that
+  // imply editability. AGENTS.md "empty states must not look like disabled
+  // inputs" — same anti-pattern for fixed values.
+  if (isDeploy) {
+    return (
+      <>
+        <ReadonlyField id="environment-tenant" label="Tenant" value={dialog.tenant} />
+        <ReadonlyField id="environment-name" label="Environment" value={dialog.environment} />
+      </>
+    );
+  }
   return (
     <>
       <EditableComboField
@@ -193,7 +216,7 @@ function EnvironmentNameFields({
         value={dialog.tenant}
         suggestions={tenantSuggestions}
         required
-        disabled={dialog.busy || isDeploy}
+        disabled={dialog.busy}
         onValueChange={(tenant) => {
           dispatch(updateEnvironmentDialog({ tenant }));
         }}
@@ -205,7 +228,7 @@ function EnvironmentNameFields({
         value={dialog.environment}
         suggestions={environmentSuggestions}
         required
-        disabled={dialog.busy || isDeploy}
+        disabled={dialog.busy}
         onValueChange={(environment) => {
           dispatch(updateEnvironmentDialog({ environment }));
         }}
@@ -228,6 +251,8 @@ function EnvironmentCreateFields({ dialog }: { dialog: EnvironmentDialog }): Rea
 
   return (
     <>
+      <EnvironmentTypeSelect dialog={dialog} />
+      {dialog.envType === 'local-agent' && <LocalRepoPathField dialog={dialog} />}
       <KubernetesContextSelect dialog={dialog} />
       <RuntimePodFields dialog={dialog} />
       <EditableComboField
@@ -243,40 +268,6 @@ function EnvironmentCreateFields({ dialog }: { dialog: EnvironmentDialog }): Rea
       />
       <EnvironmentCreateChecks dialog={dialog} />
     </>
-  );
-}
-
-function KubernetesContextSelect({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
-  const dispatch = useAppDispatch();
-  const items = dialog.kubernetesContexts.map((context) => ({ value: context, label: context }));
-  const placeholder = dialog.kubernetesContextsLoading
-    ? 'Loading contexts...'
-    : 'Select Kubernetes context';
-  if (!dialog.kubernetesContextsLoading && dialog.kubernetesContexts.length === 0) {
-    return (
-      <div className="grid gap-2">
-        <Label htmlFor="environment-kubernetes-context">Kubernetes context</Label>
-        <EmptyState
-          heading="No Kubernetes contexts found"
-          body="ERun runs `kubectl config get-contexts` using the PATH and KUBECONFIG it inherits from your login shell at startup. If your terminal sees contexts that don't appear here, set KUBECONFIG in ~/.zshenv (or ~/.bash_profile) so it applies to GUI launches too, then restart ERun. If kubectl is not yet installed, install it with `brew install kubectl`."
-        />
-      </div>
-    );
-  }
-  return (
-    <SelectField
-      id="environment-kubernetes-context"
-      label="Kubernetes context"
-      value={dialog.kubernetesContext}
-      options={items}
-      placeholder={placeholder}
-      emptyLabel="No Kubernetes contexts"
-      disabled={dialog.busy || dialog.kubernetesContextsLoading}
-      required
-      onChange={(kubernetesContext) => {
-        dispatch(updateEnvironmentDialog({ kubernetesContext }));
-      }}
-    />
   );
 }
 
@@ -298,6 +289,17 @@ function RuntimePodFields({ dialog }: { dialog: EnvironmentDialog }): React.Reac
 
 function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
+  // The "Create tenant DevOps repository" toggle used to live here but
+  // its value is fully derived from state the dialog already has: the
+  // submit pipeline (environmentDialogSelection) passes --bootstrap iff
+  // the tenant is new, since that's the only case where the remote
+  // devops module isn't already in place. Removed to stop asking an
+  // unanswerable question.
+  //
+  // "Initialize without Git checkout" only changes behavior on the
+  // remote-worktree init path (ensureRemoteRepository in
+  // erun-common/init.go); it's a no-op for local-agent. Hide it then.
+  const isLocalAgent = dialog.envType === 'local-agent';
   return (
     <div className="grid gap-3">
       <CheckboxField
@@ -309,25 +311,17 @@ function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): Rea
           dispatch(updateEnvironmentDialog({ setDefaultTenant }));
         }}
       />
-      <CheckboxField
-        id="environment-no-git"
-        label="Initialize without Git checkout"
-        checked={dialog.noGit}
-        disabled={dialog.busy}
-        onCheckedChange={(noGit) => {
-          dispatch(updateEnvironmentDialog({ noGit }));
-        }}
-      />
-      <CheckboxField
-        id="environment-bootstrap"
-        label="Create tenant DevOps repository"
-        helper="Generates the tenant's shared DevOps module — Helm values and deployment templates reused by every environment in this tenant."
-        checked={dialog.bootstrap}
-        disabled={dialog.busy}
-        onCheckedChange={(bootstrap) => {
-          dispatch(updateEnvironmentDialog({ bootstrap }));
-        }}
-      />
+      {!isLocalAgent && (
+        <CheckboxField
+          id="environment-no-git"
+          label="Initialize without Git checkout"
+          checked={dialog.noGit}
+          disabled={dialog.busy}
+          onCheckedChange={(noGit) => {
+            dispatch(updateEnvironmentDialog({ noGit }));
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -381,44 +375,112 @@ function DialogError({ error }: { error: string }): React.ReactElement | null {
   ) : null;
 }
 
-function environmentDialogSubmitDisabled(dialog: EnvironmentDialog, isDeploy: boolean): boolean {
+interface EnvironmentSubmitGate {
+  disabled: boolean;
+  reason: string;
+}
+
+function environmentDialogSubmitGate(
+  dialog: EnvironmentDialog,
+  isDeploy: boolean,
+): EnvironmentSubmitGate {
   if (dialog.busy) {
-    return true;
+    return { disabled: true, reason: '' };
   }
   if (isDeploy) {
-    return false;
+    return { disabled: false, reason: '' };
   }
-  if (dialog.kubernetesContextsLoading || dialog.kubernetesContexts.length === 0) {
-    return true;
+  return environmentCreateSubmitGate(dialog);
+}
+
+// environmentCreateSubmitGate isolates the create-mode preconditions so
+// the outer gate stays within the eslint complexity ceiling. The
+// returned reason is rendered next to the disabled submit button to
+// satisfy Nielsen #5 (error prevention) — users see why submit is
+// blocked instead of guessing. Preconditions are checked in order and
+// the first match wins.
+function environmentCreateSubmitGate(dialog: EnvironmentDialog): EnvironmentSubmitGate {
+  const blocker =
+    localRepoPathBlocker(dialog) ??
+    kubernetesContextBlocker(dialog) ??
+    runtimeCapacityBlocker(dialog);
+  return blocker ? { disabled: true, reason: blocker } : { disabled: false, reason: '' };
+}
+
+function localRepoPathBlocker(dialog: EnvironmentDialog): string | null {
+  if (dialog.envType !== 'local-agent') {
+    return null;
   }
-  const resourceBlocked =
-    dialog.resourceStatusLoading ||
-    !dialog.resourceStatus?.available ||
-    Boolean(runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus));
-  return resourceBlocked;
+  if (dialog.localRepoPath.trim() === '') {
+    return 'Local repo path is required for local-agent envs.';
+  }
+  return null;
+}
+
+function kubernetesContextBlocker(dialog: EnvironmentDialog): string | null {
+  if (dialog.kubernetesContextsLoading) {
+    return 'Loading Kubernetes contexts…';
+  }
+  if (dialog.kubernetesContexts.length === 0) {
+    return 'No Kubernetes contexts available.';
+  }
+  return null;
+}
+
+function runtimeCapacityBlocker(dialog: EnvironmentDialog): string | null {
+  if (dialog.resourceStatusLoading) {
+    return 'Checking runtime capacity…';
+  }
+  if (!dialog.resourceStatus?.available) {
+    const fallback = dialog.resourceStatus?.message?.trim() ?? '';
+    return fallback || 'Runtime capacity is unavailable.';
+  }
+  const limitMessage = runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus);
+  return limitMessage || null;
 }
 
 function EnvironmentDialogFooter({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
   const isDeploy = dialog.actionMode === 'deploy';
-  const disabled = environmentDialogSubmitDisabled(dialog, isDeploy);
+  const gate = environmentDialogSubmitGate(dialog, isDeploy);
   return (
-    <DialogFooter>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled={dialog.busy}
-        onClick={() => {
-          dispatch(closeEnvironmentDialog());
-        }}
+    <DialogFooter className="items-center sm:justify-between">
+      <p
+        id="environment-dialog-submit-reason"
+        className="text-left text-[12px] leading-[1.35] text-muted-foreground [overflow-wrap:anywhere] sm:max-w-[60%]"
+        role="status"
+        aria-live="polite"
       >
-        Cancel
-      </Button>
-      <Button type="submit" size="sm" disabled={disabled}>
-        <EnvironmentSubmitIcon dialog={dialog} />
-        {dialog.busy ? (isDeploy ? 'Deploying...' : 'Creating...') : isDeploy ? 'Deploy' : 'Create'}
-      </Button>
+        {gate.reason}
+      </p>
+      <div className="flex justify-end gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={dialog.busy}
+          onClick={() => {
+            dispatch(closeEnvironmentDialog());
+          }}
+        >
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          size="sm"
+          disabled={gate.disabled}
+          aria-describedby={gate.reason ? 'environment-dialog-submit-reason' : undefined}
+        >
+          <EnvironmentSubmitIcon dialog={dialog} />
+          {dialog.busy
+            ? isDeploy
+              ? 'Deploying...'
+              : 'Creating...'
+            : isDeploy
+              ? 'Deploy'
+              : 'Create'}
+        </Button>
+      </div>
     </DialogFooter>
   );
 }

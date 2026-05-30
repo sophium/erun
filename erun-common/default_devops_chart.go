@@ -362,7 +362,7 @@ func defaultDevopsChartHash() (string, error) {
 
 func ensureDefaultDevopsValuesFile(chartPath, environment string) error {
 	environment = strings.ToLower(strings.TrimSpace(environment))
-	if environment == "" || environment == "local" {
+	if environment == "" {
 		return nil
 	}
 

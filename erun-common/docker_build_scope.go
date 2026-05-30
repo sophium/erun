@@ -188,10 +188,39 @@ func dockerBuildEnvironmentFromTenantConfigs(store DockerStore, cleanProjectRoot
 	}
 
 	for _, tenantConfig := range tenants {
-		if filepath.Clean(tenantConfig.ProjectRoot) != cleanProjectRoot {
+		// New-shape match: walk each tenant's envs and pick the first whose
+		// LocalRepoPath (preferred) or legacy RepoPath equals the cwd.
+		if envName, err := dockerBuildEnvironmentFromTenantEnvs(store, tenantConfig.Name, cleanProjectRoot); err != nil {
+			return "", err
+		} else if envName != "" {
+			return envName, nil
+		}
+		// Legacy fallback: tenant-level ProjectRoot match. Removed in a
+		// follow-up release once all envs have been re-saved with the new
+		// localRepoPath field.
+		if filepath.Clean(tenantConfig.ProjectRoot) == cleanProjectRoot {
+			return strings.TrimSpace(tenantConfig.DefaultEnvironment), nil
+		}
+	}
+	return "", nil
+}
+
+func dockerBuildEnvironmentFromTenantEnvs(store DockerStore, tenant, cleanProjectRoot string) (string, error) {
+	envs, err := store.ListEnvConfigs(tenant)
+	if err != nil {
+		if errors.Is(err, ErrNotInitialized) {
+			return "", nil
+		}
+		return "", err
+	}
+	for _, env := range envs {
+		path := env.EffectiveLocalRepoPath()
+		if path == "" {
 			continue
 		}
-		return strings.TrimSpace(tenantConfig.DefaultEnvironment), nil
+		if filepath.Clean(path) == cleanProjectRoot {
+			return strings.TrimSpace(env.Name), nil
+		}
 	}
 	return "", nil
 }

@@ -1,0 +1,30 @@
+package model
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/uptrace/bun"
+)
+
+// __ENTITY__ template. Substitute:
+//   __ENTITY__       PascalCase singular (Invoice)
+//   __ENTITY_TABLE__ plural snake_case   (invoices)
+//   __ENTITY_KEY__   <singular>_id       (invoice_id)
+//
+// Read-only fields (__ENTITY__ID, TenantID, CreatedAt, UpdatedAt) are
+// populated by DB defaults / triggers. Repository write column lists
+// must exclude them.
+type __ENTITY__ struct {
+	bun.BaseModel `bun:"table:__ENTITY_TABLE__,alias:e"`
+
+	__ENTITY__ID uuid.UUID `bun:"__ENTITY_KEY__,pk" json:"__ENTITY_KEY__"` // read-only; DB default uuidv7()
+	TenantID     uuid.UUID `bun:"tenant_id,notnull" json:"tenant_id"`      // read-only; DB default erun_current_tenant_id()
+
+	// BEGIN domain columns
+	Name string `bun:"name,notnull" json:"name"`
+	// END domain columns
+
+	CreatedAt time.Time `bun:"created_at,nullzero" json:"created_at"` // read-only; trigger-populated
+	UpdatedAt time.Time `bun:"updated_at,nullzero" json:"updated_at"` // read-only; trigger-populated
+}

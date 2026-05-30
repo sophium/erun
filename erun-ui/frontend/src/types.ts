@@ -1,5 +1,19 @@
+export type EnvironmentType = 'local-agent' | 'remote-agent' | 'runtime' | '';
+
+// EnvironmentTypeValues lists the dropdown options. The model type for the
+// `type` field below is widened to `string` because the Wails-generated
+// binding (frontend/wailsjs/go/models.ts) widens the Go EnvironmentType
+// alias to a bare `string` at the boundary — narrowing the field here would
+// fail the LoadEnvironmentConfig/SaveEnvironmentConfig assignability check.
+export const EnvironmentTypeValues: readonly EnvironmentType[] = [
+  'local-agent',
+  'remote-agent',
+  'runtime',
+] as const;
+
 export interface UIEnvironment {
   name: string;
+  type?: string;
   mcpUrl?: string;
   apiUrl?: string;
   runtimeVersion?: string;
@@ -31,6 +45,11 @@ export interface UISelection {
   runtimeMemory?: string;
   kubernetesContext?: string;
   containerRegistry?: string;
+  // type stays as bare string to match the Wails binding, which widens
+  // the Go EnvironmentType alias at the boundary. Use the
+  // EnvironmentType union for narrowed dropdown values.
+  type?: string;
+  localRepoPath?: string;
   noGit?: boolean;
   bootstrap?: boolean;
   setDefaultTenant?: boolean;
@@ -50,7 +69,6 @@ export interface UIState {
   message?: string;
   build?: UIBuildDetails;
   versionSuggestions?: UIVersionSuggestion[];
-  kubernetesContexts?: string[];
   cloudProviders?: UICloudProviderStatus[];
 }
 
@@ -246,9 +264,11 @@ export interface UIEnvironmentLocalPorts {
   mcp: number;
   api: number;
   ssh: number;
+  contributeApp: number;
   mcpStatus: UIPortStatus;
   apiStatus: UIPortStatus;
   sshStatus: UIPortStatus;
+  contributeAppStatus: UIPortStatus;
 }
 
 export interface UIPortStatus {
@@ -275,6 +295,8 @@ export interface UIEnvironmentConfig {
   claude: UIEnvironmentClaudeConfig;
   claudeDefaults: UIEnvironmentClaudeDefaults;
   localPorts: UIEnvironmentLocalPorts;
+  type?: string;
+  localRepoPath?: string;
   remote: boolean;
   snapshot: boolean;
   // AutoStart is the desktop-only auto-start policy for the linked cloud

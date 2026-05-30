@@ -59,6 +59,27 @@ type SSHDWorkspaceSyncConfig struct {
 	LocalPath string `yaml:"localpath,omitempty"`
 }
 
+// EnvironmentType classifies an environment by where its worktree lives and
+// whether builds happen inside it. See docs at /concepts/environment-types.
+type EnvironmentType string
+
+const (
+	EnvironmentTypeLocalAgent  EnvironmentType = "local-agent"
+	EnvironmentTypeRemoteAgent EnvironmentType = "remote-agent"
+	EnvironmentTypeRuntime     EnvironmentType = "runtime"
+)
+
+// IsValid reports whether the value is one of the three canonical types.
+// Empty is not valid; callers wanting "unset" should test against the zero
+// value separately and then resolve via EnvConfig.ResolvedType.
+func (t EnvironmentType) IsValid() bool {
+	switch t {
+	case EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent, EnvironmentTypeRuntime:
+		return true
+	}
+	return false
+}
+
 func (c SSHDWorkspaceSyncConfig) IsZero() bool {
 	return !c.Enabled && strings.TrimSpace(c.LocalPath) == ""
 }
@@ -82,9 +103,11 @@ type TenantConfig struct {
 }
 
 type EnvConfig struct {
-	Name                string
-	RepoPath            string
-	KubernetesContext   string
+	Name              string
+	Type              EnvironmentType `yaml:"type,omitempty" json:"type,omitempty"`
+	LocalRepoPath     string          `yaml:"localrepopath,omitempty" json:"localRepoPath,omitempty"`
+	RepoPath          string          `yaml:"repopath,omitempty"`
+	KubernetesContext string
 	ContainerRegistry   string
 	CloudProviderAlias  string                  `yaml:"cloudprovideralias,omitempty"`
 	ManagedCloud        bool                    `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
@@ -130,6 +153,73 @@ func (c *EnvConfig) SetSnapshot(enabled bool) {
 	}
 	value := enabled
 	c.Snapshot = &value
+}
+
+// ResolvedType returns the env's type. When Type is set it is the source of
+// truth. When unset, derives the type from the legacy Remote+Snapshot pair
+// only when both signals are present per the documented truth table at
+// /reference/configuration#planned-changes — otherwise returns "" so callers
+// fall back to the legacy predicates (BuildsHere, RemoteWorktree) without
+// silently reclassifying ambiguous envs:
+//
+//	type set                                  → the set value
+//	type unset, snapshot==nil                 → "" (unresolved; legacy fallback)
+//	type unset, remote=false, snapshot=true   → local-agent
+//	type unset, remote=true,  snapshot=true   → remote-agent
+//	type unset, remote=true,  snapshot=false  → runtime
+//	type unset, remote=false, snapshot=false  → "" (ambiguous local env)
+func (c EnvConfig) ResolvedType() EnvironmentType {
+	if c.Type.IsValid() {
+		return c.Type
+	}
+	if c.Snapshot == nil {
+		return ""
+	}
+	snapshot := *c.Snapshot
+	if !c.Remote {
+		if snapshot {
+			return EnvironmentTypeLocalAgent
+		}
+		return ""
+	}
+	if snapshot {
+		return EnvironmentTypeRemoteAgent
+	}
+	return EnvironmentTypeRuntime
+}
+
+// BuildsHere reports whether builds happen inside this env (local-agent and
+// remote-agent build here; runtime envs only receive deploys). When Type is
+// explicitly set it is the source of truth; otherwise the result matches the
+// legacy SnapshotEnabled() value so callers preserve today's behavior.
+func (c EnvConfig) BuildsHere() bool {
+	if c.Type.IsValid() {
+		return c.Type != EnvironmentTypeRuntime
+	}
+	return c.SnapshotEnabled()
+}
+
+// RemoteWorktree reports whether the worktree lives outside the local
+// machine (PVC for remote-agent, none for runtime). Local-agent mounts the
+// worktree from the local filesystem via hostPath. When Type is explicitly
+// set it is the source of truth; otherwise the result matches the legacy
+// Remote bool so callers preserve today's behavior.
+func (c EnvConfig) RemoteWorktree() bool {
+	if c.Type.IsValid() {
+		return c.Type != EnvironmentTypeLocalAgent
+	}
+	return c.Remote
+}
+
+// EffectiveLocalRepoPath returns the new-shape LocalRepoPath when set,
+// falling back to the legacy RepoPath. Callers that need the path on the
+// host machine (chart worktreeHostPath, cwd→tenant matcher) should use this
+// helper instead of reading either field directly.
+func (c EnvConfig) EffectiveLocalRepoPath() string {
+	if path := strings.TrimSpace(c.LocalRepoPath); path != "" {
+		return path
+	}
+	return strings.TrimSpace(c.RepoPath)
 }
 
 type ProjectEnvironmentConfig struct {
@@ -488,6 +578,22 @@ func SaveTenantConfig(config TenantConfig) error {
 	return nil
 }
 
+// NormalizeEnvConfig populates the new-shape fields (Type, LocalRepoPath)
+// from legacy fields when the new shape is unset. Idempotent: re-running it
+// on an already-normalized config is a no-op. Called by LoadEnvConfig so
+// loaded envs always expose a populated Type, and so subsequent saves write
+// both old and new shapes — letting old binaries read the file while the
+// migration window is open.
+func NormalizeEnvConfig(config EnvConfig) EnvConfig {
+	if !config.Type.IsValid() {
+		config.Type = config.ResolvedType()
+	}
+	if strings.TrimSpace(config.LocalRepoPath) == "" && config.Type == EnvironmentTypeLocalAgent {
+		config.LocalRepoPath = strings.TrimSpace(config.RepoPath)
+	}
+	return config
+}
+
 func NormalizeTenantConfig(config TenantConfig) TenantConfig {
 	config.Name = strings.TrimSpace(config.Name)
 	config.DefaultEnvironment = strings.TrimSpace(config.DefaultEnvironment)
@@ -625,7 +731,7 @@ func LoadEnvConfig(tenant, envName string) (EnvConfig, string, error) {
 		return config, configFilePath, ErrConfigCorrupted
 	}
 
-	return config, configFilePath, nil
+	return NormalizeEnvConfig(config), configFilePath, nil
 }
 
 func ListEnvConfigs(tenant string) ([]EnvConfig, error) {

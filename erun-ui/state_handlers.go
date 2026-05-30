@@ -123,6 +123,7 @@ func stateFromListResult(result eruncommon.ListResult, info eruncommon.BuildInfo
 		for _, environment := range tenant.Environments {
 			item.Environments = append(item.Environments, uiEnvironment{
 				Name:              strings.TrimSpace(environment.Name),
+				Type:              strings.TrimSpace(string(environment.Type)),
 				MCPURL:            mcpEndpointForListEnvironment(environment),
 				APIURL:            strings.TrimSpace(environment.APIURL),
 				RuntimeVersion:    strings.TrimSpace(environment.RuntimeVersion),
@@ -167,7 +168,7 @@ func buildDetailsFrom(info eruncommon.BuildInfo) uiBuildDetails {
 func listKubernetesContexts() ([]string, error) {
 	output, err := exec.Command("kubectl", "config", "get-contexts", "-o=name").Output()
 	if err != nil {
-		return nil, err
+		return nil, wrapKubectlError(err)
 	}
 	contexts := strings.Split(string(output), "\n")
 
@@ -177,6 +178,21 @@ func listKubernetesContexts() ([]string, error) {
 	}
 
 	return contexts, nil
+}
+
+// wrapKubectlError returns an error whose message includes kubectl's stderr
+// (when available) so the dialog can show the actual reason for the
+// failure — e.g. "stat /Users/x/.kube/config: no such file or directory"
+// or "executable file not found in $PATH" — instead of the bare exit-code
+// message that exec.Cmd.Output() yields by default.
+func wrapKubectlError(err error) error {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		if stderr := strings.TrimSpace(string(exitErr.Stderr)); stderr != "" {
+			return fmt.Errorf("%w: %s", err, stderr)
+		}
+	}
+	return err
 }
 
 func normalizeKubernetesContexts(contexts []string) []string {
@@ -223,6 +239,8 @@ func normalizeSelection(selection uiSelection) uiSelection {
 		RuntimeMemory:     strings.TrimSpace(selection.RuntimeMemory),
 		KubernetesContext: strings.TrimSpace(selection.KubernetesContext),
 		ContainerRegistry: strings.TrimSpace(selection.ContainerRegistry),
+		Type:              strings.TrimSpace(selection.Type),
+		LocalRepoPath:     strings.TrimSpace(selection.LocalRepoPath),
 		NoGit:             selection.NoGit,
 		Bootstrap:         selection.Bootstrap,
 		SetDefaultTenant:  selection.SetDefaultTenant,

@@ -1,0 +1,10 @@
+package __MODULE__
+
+// AuditLogger is implemented by internal/repository.AuditEventRepository
+// in the default wiring. Authentication middleware calls WriteAPIEvent
+// after token verification, tenant resolution, user resolution, and
+// authorization all succeed.
+//
+// Audit failure policy: by default, audit failures are logged and the
+// request continues. Switch to fail-closed only for endpoints that
+// require audit durability.

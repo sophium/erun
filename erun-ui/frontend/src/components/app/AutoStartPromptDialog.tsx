@@ -35,6 +35,25 @@ export function AutoStartPromptDialog(): React.ReactElement {
   const environmentName = prompt.selection?.environment ?? '';
   const saving = prompt.saving;
   const open = prompt.open;
+  // pendingChoice tracks which button the user clicked so the spinner
+  // renders on the right one. Without this, both buttons just go disabled
+  // when saving=true and the user can't tell which choice is in flight
+  // (Nielsen #1: visibility of system status).
+  const [pendingChoice, setPendingChoice] = React.useState<'always' | 'never' | null>(null);
+  React.useEffect(() => {
+    if (!saving) {
+      setPendingChoice(null);
+    }
+  }, [saving]);
+  React.useEffect(() => {
+    if (!open) {
+      setPendingChoice(null);
+    }
+  }, [open]);
+  const pickChoice = (mode: 'always' | 'never') => {
+    setPendingChoice(mode);
+    void dispatch(confirmAutoStartPrompt(mode));
+  };
   return (
     <Dialog
       open={open}
@@ -56,7 +75,10 @@ export function AutoStartPromptDialog(): React.ReactElement {
           </DialogDescription>
         </DialogHeader>
         {prompt.error && (
-          <div className="rounded-[var(--radius)] border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-[13px] leading-[1.4] text-destructive">
+          <div
+            role="alert"
+            className="rounded-[var(--radius)] border border-destructive/40 bg-destructive/10 px-3 py-2.5 text-[13px] leading-[1.4] text-destructive"
+          >
             {prompt.error}
           </div>
         )}
@@ -76,20 +98,24 @@ export function AutoStartPromptDialog(): React.ReactElement {
             variant="secondary"
             disabled={saving}
             onClick={() => {
-              void dispatch(confirmAutoStartPrompt('never'));
+              pickChoice('never');
             }}
           >
-            <ShieldOff aria-hidden="true" />
+            {pendingChoice === 'never' ? (
+              <LoaderCircle className="animate-spin" aria-hidden="true" />
+            ) : (
+              <ShieldOff aria-hidden="true" />
+            )}
             Don&apos;t auto-start
           </Button>
           <Button
             type="button"
             disabled={saving}
             onClick={() => {
-              void dispatch(confirmAutoStartPrompt('always'));
+              pickChoice('always');
             }}
           >
-            {saving ? (
+            {pendingChoice === 'always' ? (
               <LoaderCircle className="animate-spin" aria-hidden="true" />
             ) : (
               <Play aria-hidden="true" />

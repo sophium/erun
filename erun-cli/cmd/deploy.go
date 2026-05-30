@@ -33,9 +33,9 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 			}
 			deployTarget.Snapshot = snapshotOverride
 			deployTarget.Components = components
-			ctx.Trace(fmt.Sprintf("deploy: tenant=%s environment=%s version-override=%s snapshot=%v components=%v force=%v",
+			ctx.Trace(fmt.Sprintf("deploy: tenant=%s environment=%s version-override=%s snapshot=%v components=%v force=%v publish=%v",
 				deployTarget.Tenant, deployTarget.Environment, deployTarget.VersionOverride,
-				snapshotOverride != nil && *snapshotOverride, components, deployTarget.Force))
+				snapshotOverride != nil && *snapshotOverride, components, deployTarget.Force, deployTarget.Publish))
 			deploySpecs, err := common.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 			if err != nil {
 				ctx.Trace("deploy: spec resolution failed: " + err.Error())
@@ -95,6 +95,7 @@ func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Deploy for a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Deploy for a specific environment; requires --tenant")
 	cmd.Flags().BoolVar(&target.Force, "force", false, "Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected")
+	cmd.Flags().BoolVar(&target.Publish, "publish", false, "Package and push each resolved chart to the environment's container registry (oci://<containerRegistry>/<chart>:<version>) before helm upgrade")
 	cmd.Flags().StringVar(&target.RepoPath, "repo-path", "", "Repo path override for internal tooling")
 	_ = cmd.Flags().MarkHidden("repo-path")
 }

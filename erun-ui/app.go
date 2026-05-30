@@ -62,6 +62,8 @@ type erunUIDeps struct {
 	stopCloudContext      func(context.Context, string) (eruncommon.CloudContextStatus, error)
 	windowStatePath       string
 	windowMaximised       func(context.Context) bool
+	cloneERun             func(context.Context, string) error
+	contributeStatePath   string
 }
 
 type App struct {
@@ -84,6 +86,8 @@ type App struct {
 	actionQueues              map[string]*envActionQueue
 	actionCancels             map[string]context.CancelFunc
 	configWatcher             *configWatcher
+	contribute                *contributeStore
+	contributeApps            *contributeAppForwards
 
 	// cloudContextStatuses caches the live AWS-observed power state for
 	// each cloud context, keyed by context name. Populated by the
@@ -148,6 +152,7 @@ func NewApp(deps erunUIDeps) *App {
 	app.activityStatusPoller = func(entry activityQueueEntry) {
 		go app.pollActivityContainerStatuses(context.Background(), entry)
 	}
+	app.contribute = newContributeStore(deps.contributeStatePath)
 	return app
 }
 
@@ -247,6 +252,12 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.windowMaximised == nil {
 		deps.windowMaximised = runtime.WindowIsMaximised
+	}
+	if deps.cloneERun == nil {
+		deps.cloneERun = cloneERunViaMCP
+	}
+	if deps.contributeStatePath == "" {
+		deps.contributeStatePath = defaultContributeStatePath()
 	}
 	return deps
 }

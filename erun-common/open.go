@@ -62,7 +62,7 @@ type OpenResult struct {
 }
 
 func (r OpenResult) RemoteRepo() bool {
-	return r.EnvConfig.Remote
+	return r.EnvConfig.RemoteWorktree()
 }
 
 type ShellLaunchParams struct {
@@ -337,7 +337,7 @@ func loadOpenEnvConfig(store OpenStore, tenant, environment string) (EnvConfig, 
 }
 
 func resolveOpenRepoPath(tenantConfig TenantConfig, envConfig EnvConfig) (string, error) {
-	repoPath := envConfig.RepoPath
+	repoPath := envConfig.EffectiveLocalRepoPath()
 	if repoPath == "" {
 		repoPath = tenantConfig.ProjectRoot
 	}
@@ -348,7 +348,7 @@ func resolveOpenRepoPath(tenantConfig TenantConfig, envConfig EnvConfig) (string
 }
 
 func validateOpenTarget(tenant, environment, repoPath string, envConfig EnvConfig) error {
-	if !envConfig.Remote {
+	if !envConfig.RemoteWorktree() {
 		info, err := os.Stat(repoPath)
 		if err != nil {
 			return err

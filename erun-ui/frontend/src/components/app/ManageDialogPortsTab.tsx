@@ -22,6 +22,11 @@ export function PortsTab({ dialog }: { dialog: ManageDialog }): React.ReactEleme
           { service: 'mcp', port: config.localPorts.mcp, status: config.localPorts.mcpStatus },
           { service: 'api', port: config.localPorts.api, status: config.localPorts.apiStatus },
           { service: 'ssh', port: config.localPorts.ssh, status: config.localPorts.sshStatus },
+          {
+            service: 'contribute-app',
+            port: config.localPorts.contributeApp,
+            status: config.localPorts.contributeAppStatus,
+          },
         ]}
       />
     </>

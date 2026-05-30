@@ -1,6 +1,7 @@
 import type {
   DiffResult,
   EnvironmentActionMode,
+  EnvironmentType,
   ManageTab,
   UICloudContextInitInput,
   UICloudProviderStatus,
@@ -67,8 +68,9 @@ export interface EnvironmentDialogState {
     memory: string;
   };
   containerRegistry: string;
+  envType: EnvironmentType;
+  localRepoPath: string;
   noGit: boolean;
-  bootstrap: boolean;
   setDefaultTenant: boolean;
   versionImage: string;
   choicesOpen: boolean;
@@ -142,7 +144,13 @@ export interface AppNotification {
 export type TerminalStatusKind = 'info' | 'warning' | 'error';
 export type TerminalStatusAction = '' | 'wait-longer';
 
-export type TerminalTabKind = 'local' | 'erun' | 'ai' | 'extra';
+export type TerminalTabKind =
+  | 'local'
+  | 'erun'
+  | 'ai'
+  | 'extra'
+  | 'contribute-erun'
+  | 'contribute-ai';
 
 export interface TerminalTab {
   sessionId: number;
@@ -241,8 +249,9 @@ export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
   resourceStatusLoading: false,
   runtimePod: defaultRuntimePodConfig(),
   containerRegistry: '',
+  envType: 'remote-agent',
+  localRepoPath: '',
   noGit: false,
-  bootstrap: false,
   setDefaultTenant: true,
   versionImage: '',
   choicesOpen: false,
@@ -361,6 +370,7 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
     mcp: 0,
     api: 0,
     ssh: 0,
+    contributeApp: 0,
     mcpStatus: {
       available: false,
       status: '',
@@ -370,6 +380,10 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
       status: '',
     },
     sshStatus: {
+      available: false,
+      status: '',
+    },
+    contributeAppStatus: {
       available: false,
       status: '',
     },

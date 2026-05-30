@@ -64,10 +64,7 @@ export function IdleStatusWidget(): React.ReactElement | null {
   const hasFollowOn = Boolean(cloudContextName);
   return (
     <div
-      className={cn(
-        'absolute top-3 right-[168px] z-[1] flex h-7 items-center rounded-md border bg-background [--wails-draggable:no-drag] max-[980px]:right-[146px]',
-        idleBadge?.className,
-      )}
+      className={cn('flex h-7 items-center rounded-md border bg-background', idleBadge?.className)}
     >
       {idleStatus && idleBadge ? (
         <IdleStatusBadge idleStatus={idleStatus} idleBadge={idleBadge} hasAction={hasAction} />

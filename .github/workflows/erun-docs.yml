@@ -1,0 +1,58 @@
+name: erun-docs
+
+# Build-time validation for the Docusaurus documentation module. On every PR
+# that touches the docs source, the Dockerfile, or the helm chart, this
+# workflow runs `yarn build` to catch broken links, type errors, and missing
+# sidebar entries before review. Publishing is handled by `erun deploy`
+# against the docs target environment — not by this workflow.
+
+on:
+  pull_request:
+    paths:
+      - "erun-docs/**"
+      - "erun-devops/docker/erun-docs/**"
+      - "erun-devops/k8s/erun-docs/**"
+      - ".github/workflows/erun-docs.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "erun-docs/**"
+      - "erun-devops/docker/erun-docs/**"
+      - "erun-devops/k8s/erun-docs/**"
+      - ".github/workflows/erun-docs.yml"
+
+jobs:
+  build:
+    name: Build static site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.18.1"
+          cache: yarn
+          cache-dependency-path: erun-docs/yarn.lock
+
+      - name: Install dependencies
+        working-directory: erun-docs
+        run: yarn install --frozen-lockfile --non-interactive
+
+      - name: Type-check
+        working-directory: erun-docs
+        run: yarn typecheck
+
+      - name: Build
+        working-directory: erun-docs
+        run: yarn build
+
+      - name: Upload build artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: erun-docs-build
+          path: erun-docs/build
+          retention-days: 7

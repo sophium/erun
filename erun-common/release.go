@@ -80,9 +80,11 @@ type ReleaseStage struct {
 }
 
 type ReleasePackagingSyncSpec struct {
-	Version     string `json:"version"`
-	FormulaPath string `json:"formulaPath,omitempty"`
-	ScoopPath   string `json:"scoopPath,omitempty"`
+	ProjectRoot     string `json:"projectRoot,omitempty"`
+	Version         string `json:"version"`
+	FormulaPath     string `json:"formulaPath,omitempty"`
+	ScoopPath       string `json:"scoopPath,omitempty"`
+	MarketplacePath string `json:"marketplacePath,omitempty"`
 }
 
 type ReleaseSpec struct {
@@ -206,17 +208,15 @@ func traceReleaseSpec(ctx Context, spec ReleaseSpec) {
 }
 
 func ensureReleaseWorktreeClean(ctx Context, projectRoot string) error {
-	if ctx.DryRun {
-		return nil
-	}
 	clean, err := gitWorktreeClean(ctx, projectRoot)
 	if err != nil {
 		return err
 	}
-	if !clean {
-		return fmt.Errorf("release requires a clean git worktree; commit or stash changes first")
+	ctx.Trace(fmt.Sprintf("release: worktree clean = %v", clean))
+	if clean || ctx.DryRun {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("release requires a clean git worktree; commit or stash changes first")
 }
 
 func runReleaseStage(ctx Context, spec ReleaseSpec, stage ReleaseStage, runGit GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
@@ -447,8 +447,12 @@ func GitCommandRunner(dir string, stdout, stderr io.Writer, args ...string) erro
 }
 
 func gitWorktreeClean(ctx Context, projectRoot string) (bool, error) {
-	ctx.TraceCommand("", "git", "-C", projectRoot, "status", "--porcelain")
-	output, err := Command("git", "-C", projectRoot, "status", "--porcelain").CombinedOutput()
+	// Only tracked-file changes gate the release: release publishes HEAD,
+	// not the working tree, so untracked files (e.g. IDE state under
+	// .idea/, generator output) cannot affect what would be released and
+	// must not block the flow.
+	ctx.TraceCommand("", "git", "-C", projectRoot, "status", "--porcelain", "--untracked-files=no")
+	output, err := Command("git", "-C", projectRoot, "status", "--porcelain", "--untracked-files=no").CombinedOutput()
 	if err != nil {
 		return false, err
 	}
@@ -885,7 +889,7 @@ func discoverReleaseLinuxScripts(releaseRoot, version string) ([]scriptSpec, err
 
 func discoverStableReleasePackaging(projectRoot, version string) ([]ReleaseFileUpdate, *ReleasePackagingSyncSpec, error) {
 	updates := make([]ReleaseFileUpdate, 0, 2)
-	syncSpec := &ReleasePackagingSyncSpec{Version: version}
+	syncSpec := &ReleasePackagingSyncSpec{ProjectRoot: projectRoot, Version: version}
 
 	formulaPath := filepath.Join(projectRoot, "Formula", "erun.rb")
 	formulaContent, formulaChanged, err := updateHomebrewFormulaReleaseVersion(formulaPath, version)
@@ -916,7 +920,13 @@ func discoverStableReleasePackaging(projectRoot, version string) ([]ReleaseFileU
 	if fileExists(scoopPath) {
 		syncSpec.ScoopPath = scoopPath
 	}
-	if syncSpec.FormulaPath == "" && syncSpec.ScoopPath == "" {
+
+	marketplacePath := filepath.Join(projectRoot, ".claude-plugin", "marketplace.json")
+	if fileExists(marketplacePath) {
+		syncSpec.MarketplacePath = marketplacePath
+	}
+
+	if syncSpec.FormulaPath == "" && syncSpec.ScoopPath == "" && syncSpec.MarketplacePath == "" {
 		return updates, nil, nil
 	}
 
@@ -1082,11 +1092,11 @@ func updateScoopManifestReleaseChecksum(manifestPath, checksum string) (string, 
 }
 
 func syncReleasePackagingChecksums(ctx Context, spec ReleasePackagingSyncSpec) ([]ReleaseFileUpdate, error) {
-	if spec.FormulaPath == "" && spec.ScoopPath == "" {
+	if spec.FormulaPath == "" && spec.ScoopPath == "" && spec.MarketplacePath == "" {
 		return nil, nil
 	}
 
-	updates := make([]ReleaseFileUpdate, 0, 2)
+	updates := make([]ReleaseFileUpdate, 0, 3)
 	formulaUpdate, ok, err := syncHomebrewReleaseChecksum(ctx, spec)
 	if err != nil {
 		return nil, err
@@ -1100,6 +1110,13 @@ func syncReleasePackagingChecksums(ctx Context, spec ReleasePackagingSyncSpec) (
 	}
 	if ok {
 		updates = append(updates, scoopUpdate)
+	}
+	marketplaceUpdate, ok, err := syncMarketplaceReleaseSHA(ctx, spec)
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		updates = append(updates, marketplaceUpdate)
 	}
 	return updates, nil
 }
@@ -1144,6 +1161,58 @@ func syncScoopReleaseChecksum(ctx Context, spec ReleasePackagingSyncSpec) (Relea
 		return ReleaseFileUpdate{}, false, err
 	}
 	return ReleaseFileUpdate{Path: spec.ScoopPath, Content: content}, true, nil
+}
+
+// syncMarketplaceReleaseSHA bumps .claude-plugin/marketplace.json plugins[*].source.sha
+// to the commit the release tag points at, so the marketplace catalogue pins
+// the plugin to the release commit. Runs in the same stage as Homebrew/Scoop
+// because both require the release tag to exist first.
+func syncMarketplaceReleaseSHA(ctx Context, spec ReleasePackagingSyncSpec) (ReleaseFileUpdate, bool, error) {
+	if spec.MarketplacePath == "" {
+		return ReleaseFileUpdate{}, false, nil
+	}
+	if spec.ProjectRoot == "" {
+		return ReleaseFileUpdate{}, false, fmt.Errorf("release: marketplace sync requires ProjectRoot in sync spec")
+	}
+	ref := "v" + spec.Version + "^{}"
+	ctx.TraceCommand("", "git", "-C", spec.ProjectRoot, "rev-parse", ref)
+	if ctx.DryRun {
+		return ReleaseFileUpdate{}, false, nil
+	}
+	output, err := Command("git", "-C", spec.ProjectRoot, "rev-parse", ref).CombinedOutput()
+	if err != nil {
+		return ReleaseFileUpdate{}, false, fmt.Errorf("resolve release tag %q: %w", ref, err)
+	}
+	sha := strings.TrimSpace(string(output))
+	if sha == "" {
+		return ReleaseFileUpdate{}, false, fmt.Errorf("resolve release tag %q: empty result", ref)
+	}
+	content, changed, err := updateMarketplaceReleaseSHA(spec.MarketplacePath, sha)
+	if err != nil || !changed {
+		return ReleaseFileUpdate{}, false, err
+	}
+	return ReleaseFileUpdate{Path: spec.MarketplacePath, Content: content}, true, nil
+}
+
+// updateMarketplaceReleaseSHA swaps every "sha": "<hex>" field inside
+// .claude-plugin/marketplace.json with the given sha. Uses targeted text
+// replacement (not JSON marshal) to preserve the file's formatting and
+// key ordering.
+func updateMarketplaceReleaseSHA(marketplacePath, sha string) (string, bool, error) {
+	data, err := os.ReadFile(marketplacePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	content := string(data)
+	pattern := regexp.MustCompile(`("sha":\s*")[0-9a-f]{7,40}(")`)
+	updated := pattern.ReplaceAllString(content, `${1}`+sha+`${2}`)
+	if updated == content {
+		return "", false, nil
+	}
+	return updated, true, nil
 }
 
 func releaseArchiveSHA256(url string) (string, error) {
@@ -1227,16 +1296,19 @@ func newPushReleaseTagStage(projectRoot, version string) ReleaseStage {
 }
 
 func newSyncPackagingStage(projectRoot string, spec ReleasePackagingSyncSpec) ReleaseStage {
-	if spec.FormulaPath == "" && spec.ScoopPath == "" {
+	if spec.FormulaPath == "" && spec.ScoopPath == "" && spec.MarketplacePath == "" {
 		return ReleaseStage{}
 	}
 
-	updates := make([]ReleaseFileUpdate, 0, 2)
+	updates := make([]ReleaseFileUpdate, 0, 3)
 	if spec.FormulaPath != "" {
 		updates = append(updates, ReleaseFileUpdate{Path: spec.FormulaPath})
 	}
 	if spec.ScoopPath != "" {
 		updates = append(updates, ReleaseFileUpdate{Path: spec.ScoopPath})
+	}
+	if spec.MarketplacePath != "" {
+		updates = append(updates, ReleaseFileUpdate{Path: spec.MarketplacePath})
 	}
 
 	addArgs := append([]string{"add"}, releaseUpdatedPaths(projectRoot, updates)...)
@@ -1371,13 +1443,17 @@ func fileExists(path string) bool {
 }
 
 func findReleaseChartPaths(projectRoot string) ([]string, error) {
+	ignored, err := loadReleaseDiscoveryIgnoreSet(projectRoot)
+	if err != nil {
+		return nil, err
+	}
 	matches := make([]string, 0, 4)
-	err := filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
-			if d.Name() == ".git" {
+			if skip := releaseDiscoverySkipDir(projectRoot, path, d, ignored); skip {
 				return filepath.SkipDir
 			}
 			return nil
@@ -1419,9 +1495,13 @@ func resolveReleaseModuleRoot(projectRoot string) (string, error) {
 }
 
 func findNestedReleaseRoots(projectRoot string) ([]string, error) {
+	ignored, err := loadReleaseDiscoveryIgnoreSet(projectRoot)
+	if err != nil {
+		return nil, err
+	}
 	matches := make([]string, 0, 2)
-	err := filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
-		dir, ok, walkErr := nestedReleaseRootCandidate(projectRoot, path, d, err)
+	err = filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
+		dir, ok, walkErr := nestedReleaseRootCandidate(projectRoot, path, d, err, ignored)
 		if ok {
 			matches = append(matches, dir)
 		}
@@ -1434,12 +1514,12 @@ func findNestedReleaseRoots(projectRoot string) ([]string, error) {
 	return matches, nil
 }
 
-func nestedReleaseRootCandidate(projectRoot, path string, d os.DirEntry, err error) (string, bool, error) {
+func nestedReleaseRootCandidate(projectRoot, path string, d os.DirEntry, err error, ignored *ignoreSet) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
 	if d.IsDir() {
-		if d.Name() == ".git" {
+		if skip := releaseDiscoverySkipDir(projectRoot, path, d, ignored); skip {
 			return "", false, filepath.SkipDir
 		}
 		return "", false, nil
@@ -1456,6 +1536,44 @@ func nestedReleaseRootCandidate(projectRoot, path string, d os.DirEntry, err err
 		return "", false, err
 	}
 	return dir, true, nil
+}
+
+// releaseDiscoverySkipDir reports whether the release walker should skip
+// descending into d. .git is excluded unconditionally (it is the VCS
+// store, not source). Anything ignored by the repo's .gitignore (root or
+// nested) is excluded too — third-party trees like node_modules/ or
+// vendor/ ship their own VERSION/Chart.yaml files that must not be
+// counted as release-root candidates.
+func releaseDiscoverySkipDir(projectRoot, path string, d os.DirEntry, ignored *ignoreSet) bool {
+	if d.Name() == ".git" {
+		return true
+	}
+	if path == projectRoot {
+		return false
+	}
+	rel, err := filepath.Rel(projectRoot, path)
+	if err != nil {
+		return false
+	}
+	return ignored.matches(filepath.ToSlash(rel), true)
+}
+
+// loadReleaseDiscoveryIgnoreSet builds the gitignore-only matcher used to
+// keep third-party trees out of release-root discovery. It deliberately
+// omits .dockerignore — that is the build-context contract, not the
+// source-tree contract — and relies on .gitignore alone to mark "not
+// part of this repo's source".
+func loadReleaseDiscoveryIgnoreSet(projectRoot string) (*ignoreSet, error) {
+	combined := &ignoreSet{}
+	root, err := loadIgnoreFile(filepath.Join(projectRoot, ".gitignore"), "")
+	if err != nil {
+		return nil, err
+	}
+	combined.patterns = append(combined.patterns, root.patterns...)
+	if err := loadNestedGitignores(projectRoot, []string{"."}, combined); err != nil {
+		return nil, err
+	}
+	return combined, nil
 }
 
 func releaseRootRelativeParts(projectRoot, dir string) ([]string, error) {

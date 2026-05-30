@@ -1,0 +1,74 @@
+<svg viewBox="0 0 1000 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="hotfixPatternTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="hotfixPatternTitle">Hotfix pattern. Inside a single Kubernetes cluster, two environments sit side by side. On the left, a local-agent environment called erun-prod-local with worktree ~/code/erun-prod, branch hotfix/urgent, and Operator + Agent pills inside. On the right, a runtime environment called erun-prod that serves backend-api version 1.0.76 alongside a database. An arrow from the local-agent env to the runtime env, labelled 'erun deploy --version 1.0.77', shows the hotfix being deployed across.</title>
+
+  <defs>
+    <linearGradient id="hpCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="hpArrowSolid" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="500" y="44" text-anchor="middle" fill="currentColor" font-size="18" font-weight="600" letter-spacing="0.01em">Hotfix pattern</text>
+  <text x="500" y="68" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.65">a local-agent env beside the runtime env, on the same cluster</text>
+
+  <!-- Outer cluster card -->
+  <g>
+    <rect x="40" y="100" width="920" height="260" rx="18" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
+    <text x="60" y="125" text-anchor="start" fill="currentColor" font-size="12" font-weight="600" opacity="0.55" letter-spacing="0.08em">SAME K8S CLUSTER</text>
+  </g>
+
+  <!-- LEFT — local-agent env: erun-prod-local -->
+  <g>
+    <rect x="80" y="145" width="360" height="190" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="100" y="170" text-anchor="start" fill="#0891b2" font-size="11" font-weight="600" letter-spacing="0.08em">LOCAL-AGENT ENV</text>
+    <text x="260" y="200" text-anchor="middle" fill="currentColor" font-size="16" font-weight="700">erun-prod-local</text>
+    <text x="260" y="223" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">~/code/erun-prod</text>
+    <text x="260" y="241" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.55">branch: hotfix/urgent</text>
+
+    <!-- Operator + Agent pills inside -->
+    <g>
+      <rect x="160" y="260" width="90" height="28" rx="14" fill="url(#hpCharcoal)"/>
+      <text x="205" y="278" text-anchor="middle" fill="#ffffff" font-size="11.5" font-weight="600">Operator</text>
+    </g>
+    <g>
+      <rect x="262" y="260" width="90" height="28" rx="14" fill="url(#hpCharcoal)"/>
+      <text x="307" y="278" text-anchor="middle" fill="#ffffff" font-size="11.5" font-weight="600">Agent</text>
+    </g>
+    <text x="260" y="313" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">edit · build · push</text>
+  </g>
+
+  <!-- RIGHT — runtime env: erun-prod -->
+  <g>
+    <rect x="560" y="145" width="360" height="190" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="580" y="170" text-anchor="start" fill="#0891b2" font-size="11" font-weight="600" letter-spacing="0.08em">RUNTIME ENV</text>
+    <text x="740" y="200" text-anchor="middle" fill="currentColor" font-size="16" font-weight="700">erun-prod</text>
+    <text x="740" y="223" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.6">serves the deployed version</text>
+
+    <!-- Mini service boxes inside -->
+    <g>
+      <rect x="600" y="248" width="120" height="50" rx="10" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
+      <text x="660" y="270" text-anchor="middle" fill="currentColor" font-size="12" font-weight="600">backend-api</text>
+      <text x="660" y="287" text-anchor="middle" fill="currentColor" font-size="10.5" opacity="0.65" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">:1.0.76</text>
+    </g>
+    <g>
+      <rect x="760" y="248" width="120" height="50" rx="10" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
+      <text x="820" y="270" text-anchor="middle" fill="currentColor" font-size="12" font-weight="600">postgres</text>
+      <text x="820" y="287" text-anchor="middle" fill="currentColor" font-size="10.5" opacity="0.65">stateful</text>
+    </g>
+    <text x="740" y="320" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.55">no worktree · receives deploys</text>
+  </g>
+
+  <!-- Arrow from local-agent to runtime, labelled with the erun deploy command -->
+  <line x1="440" y1="240" x2="560" y2="240" stroke="#0891b2" stroke-width="1.5" marker-end="url(#hpArrowSolid)"/>
+  <g>
+    <rect x="430" y="220" width="140" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="500" y="234" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">erun deploy v1.0.77</text>
+  </g>
+
+  <!-- BOTTOM ANNOTATION -->
+  <text x="500" y="388" text-anchor="middle" fill="currentColor" font-size="13" font-weight="500" opacity="0.7">Same cluster, two envs, two roles — `erun-prod-local` develops; `erun-prod` serves.</text>
+</svg>

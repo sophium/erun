@@ -234,6 +234,10 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Name:        "release",
 		Description: "Plan and execute a project release from the runtime repo root using .erun/config.yaml branch policy",
 	}, releaseTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "contribute_clone",
+		Description: "Clone the ERun source repository into $HOME/git/erun inside the environment so contribute-mode tabs can build and run a local ERun checkout",
+	}, contributeCloneTool(runtime))
 
 	return server
 }

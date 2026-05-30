@@ -328,6 +328,19 @@ if [ ! -f "${codex_instructions}" ] || ! grep -qF "${agents_marker}" "${codex_in
         "${agents_marker}" "${agents_marker}" >> "${codex_instructions}"
 fi
 
+if [ -d /etc/erun/skills ]; then
+    for src_dir in /etc/erun/skills/*/; do
+        [ -d "${src_dir}" ] || continue
+        skill_name=$(basename "${src_dir}")
+        dst_dir="${codex_dir}/skills/${skill_name}"
+        if [ ! -e "${dst_dir}/SKILL.md" ]; then
+            mkdir -p "${dst_dir}"
+            cp -R "${src_dir}." "${dst_dir}/"
+            find "${dst_dir}" -type f -exec chmod 0644 {} +
+        fi
+    done
+fi
+
 touch "${codex_config}"
 
 tmp_config="${codex_config}.tmp"
@@ -428,6 +441,19 @@ agents_marker="erun-agents-md-hook"
 if [ ! -f "${claude_md}" ] || ! grep -qF "${agents_marker}" "${claude_md}" 2>/dev/null; then
     printf '\n<!-- %s -->\n# Agent Instructions\n\nIMPORTANT: Before doing anything else, read `AGENTS.md` in the project root. This is mandatory — do not skip it.\nAlso read `AGENTS.md` in any subdirectory relevant to the task at hand,\nas subdirectories may contain more specific guidance.\n<!-- /%s -->\n' \
         "${agents_marker}" "${agents_marker}" >> "${claude_md}"
+fi
+
+if [ -d /etc/erun/skills ]; then
+    for src_dir in /etc/erun/skills/*/; do
+        [ -d "${src_dir}" ] || continue
+        skill_name=$(basename "${src_dir}")
+        dst_dir="${claude_dir}/skills/${skill_name}"
+        if [ ! -e "${dst_dir}/SKILL.md" ]; then
+            mkdir -p "${dst_dir}"
+            cp -R "${src_dir}." "${dst_dir}/"
+            find "${dst_dir}" -type f -exec chmod 0644 {} +
+        fi
+    done
 fi
 
 CLAUDE_SETTINGS_PATH="${claude_settings}" \

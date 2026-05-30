@@ -1,0 +1,7 @@
+-- Per-table timestamp trigger template. Substitute __TABLE__ with the
+-- plural snake_case table name. Add the file to atlas.hcl src list under
+-- the triggers/ section.
+CREATE TRIGGER __TABLE___set_timestamps
+  BEFORE INSERT OR UPDATE ON __TABLE__
+  FOR EACH ROW
+  EXECUTE FUNCTION erun_set_timestamps();

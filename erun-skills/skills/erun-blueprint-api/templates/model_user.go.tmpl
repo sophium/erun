@@ -1,0 +1,23 @@
+package model
+
+import (
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/uptrace/bun"
+)
+
+// User mirrors the users table. Read-only fields (UserID, TenantID,
+// CreatedAt, UpdatedAt) are populated by database defaults / triggers.
+// Repository write column lists must exclude them; routes may decode
+// caller JSON into User but persistence must ignore caller-provided
+// values for those fields.
+type User struct {
+	bun.BaseModel `bun:"table:users,alias:u"`
+
+	UserID    uuid.UUID `bun:"user_id,pk" json:"user_id"`            // read-only; DB default uuidv7()
+	TenantID  uuid.UUID `bun:"tenant_id,notnull" json:"tenant_id"`   // read-only; DB default erun_current_tenant_id()
+	Username  string    `bun:"username,notnull" json:"username"`
+	CreatedAt time.Time `bun:"created_at,nullzero" json:"created_at"` // read-only; trigger-populated
+	UpdatedAt time.Time `bun:"updated_at,nullzero" json:"updated_at"` // read-only; trigger-populated
+}

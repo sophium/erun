@@ -1,0 +1,135 @@
+<svg viewBox="0 0 1100 510" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="mcpFlowTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="mcpFlowTitle">How MCP works. An Agent box on the left exchanges typed JSON-RPC calls with the MCP server in the env's runtime pod. The MCP server box is divided into three category rows — INSPECTION (idle, doctor, list, version, logs), ACTION (build, push, deploy, release, open, init, delete), and ESCAPE (raw). Below the MCP server, an audit-trail strip captures every call. An Operator pill below the strip is connected by a dashed cyan arrow showing the Operator can replay any session.</title>
+
+  <defs>
+    <linearGradient id="mcCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="mcArrowFwd" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+    <marker id="mcArrowRev" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+    <marker id="mcArrowDashed" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#22d3ee"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="550" y="44" text-anchor="middle" fill="currentColor" font-size="18" font-weight="600" letter-spacing="0.01em">How MCP works</text>
+  <text x="550" y="68" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.65">three categories of typed tool · every call recorded for the Operator</text>
+
+  <!-- Agent box (left) -->
+  <g>
+    <rect x="40" y="180" width="180" height="120" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="130" y="218" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">Agent</text>
+    <text x="130" y="240" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">in the env</text>
+    <text x="130" y="258" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">or laptop-side</text>
+    <text x="130" y="284" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.5">Claude Code · Codex · …</text>
+  </g>
+
+  <!-- Forward + return arrows between Agent and MCP server -->
+  <line x1="220" y1="220" x2="280" y2="220" stroke="#0891b2" stroke-width="1.5" marker-end="url(#mcArrowFwd)"/>
+  <line x1="280" y1="260" x2="220" y2="260" stroke="#0891b2" stroke-width="1.5" marker-end="url(#mcArrowRev)"/>
+
+  <g>
+    <rect x="226" y="198" width="68" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="260" y="212" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">tools/call</text>
+  </g>
+  <g>
+    <rect x="226" y="262" width="68" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="260" y="276" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="600">JSON</text>
+  </g>
+
+  <!-- MCP server BIG box (height reduced after removing the SKILLS row) -->
+  <g>
+    <rect x="280" y="110" width="780" height="240" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="670" y="140" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600">MCP server</text>
+    <text x="670" y="160" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">in the runtime pod · `erun-mcp` container</text>
+
+    <!-- Row 1: INSPECTION (5 chips) -->
+    <text x="300" y="190" text-anchor="start" fill="#0891b2" font-size="10.5" font-weight="600" letter-spacing="0.08em">INSPECTION</text>
+    <g>
+      <rect x="300" y="198" width="86" height="24" rx="12" fill="url(#mcCharcoal)"/>
+      <text x="343" y="214" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">idle</text>
+    </g>
+    <g>
+      <rect x="394" y="198" width="86" height="24" rx="12" fill="url(#mcCharcoal)"/>
+      <text x="437" y="214" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">doctor</text>
+    </g>
+    <g>
+      <rect x="488" y="198" width="86" height="24" rx="12" fill="url(#mcCharcoal)"/>
+      <text x="531" y="214" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">list</text>
+    </g>
+    <g>
+      <rect x="582" y="198" width="86" height="24" rx="12" fill="url(#mcCharcoal)"/>
+      <text x="625" y="214" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">version</text>
+    </g>
+    <g>
+      <rect x="676" y="198" width="86" height="24" rx="12" fill="url(#mcCharcoal)"/>
+      <text x="719" y="214" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">logs</text>
+    </g>
+
+    <!-- Row 2: ACTION (7 chips) -->
+    <text x="300" y="246" text-anchor="start" fill="#0891b2" font-size="10.5" font-weight="600" letter-spacing="0.08em">ACTION</text>
+    <g>
+      <rect x="300" y="254" width="80" height="24" rx="12" fill="url(#mcCharcoal)"/>
+      <text x="340" y="270" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">build</text>
+    </g>
+    <g>
+      <rect x="388" y="254" width="80" height="24" rx="12" fill="url(#mcCharcoal)"/>
+      <text x="428" y="270" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">push</text>
+    </g>
+    <g>
+      <rect x="476" y="254" width="80" height="24" rx="12" fill="url(#mcCharcoal)"/>
+      <text x="516" y="270" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">deploy</text>
+    </g>
+    <g>
+      <rect x="564" y="254" width="80" height="24" rx="12" fill="url(#mcCharcoal)"/>
+      <text x="604" y="270" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">release</text>
+    </g>
+    <g>
+      <rect x="652" y="254" width="80" height="24" rx="12" fill="url(#mcCharcoal)"/>
+      <text x="692" y="270" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">open</text>
+    </g>
+    <g>
+      <rect x="740" y="254" width="80" height="24" rx="12" fill="url(#mcCharcoal)"/>
+      <text x="780" y="270" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">init</text>
+    </g>
+    <g>
+      <rect x="828" y="254" width="80" height="24" rx="12" fill="url(#mcCharcoal)"/>
+      <text x="868" y="270" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">delete</text>
+    </g>
+
+    <!-- Row 3: ESCAPE (shifted up from former row 4) -->
+    <text x="300" y="302" text-anchor="start" fill="#0891b2" font-size="10.5" font-weight="600" letter-spacing="0.08em">ESCAPE</text>
+    <g>
+      <rect x="300" y="310" width="80" height="24" rx="12" fill="url(#mcCharcoal)"/>
+      <text x="340" y="326" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600">raw</text>
+    </g>
+    <text x="392" y="326" text-anchor="start" fill="currentColor" font-size="11" opacity="0.55">arbitrary argv — last-resort, every call audited</text>
+  </g>
+
+  <!-- Audit trail strip (shifted up) -->
+  <g>
+    <rect x="280" y="380" width="780" height="46" rx="14" fill="#fbfcfd" stroke="#cbd5e0" stroke-width="1"/>
+    <text x="670" y="401" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600">Audit trail</text>
+    <text x="670" y="417" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.6">every call from every category recorded · session replayable</text>
+  </g>
+
+  <!-- Arrow from MCP server bottom down to audit trail -->
+  <line x1="670" y1="350" x2="670" y2="380" stroke="#0891b2" stroke-width="1.5" marker-end="url(#mcArrowFwd)"/>
+
+  <!-- Operator pill below, dashed arrow up to audit trail -->
+  <g>
+    <rect x="590" y="460" width="160" height="40" rx="20" fill="url(#mcCharcoal)"/>
+    <text x="670" y="485" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="600">Operator</text>
+  </g>
+  <path d="M670 460 L 670 426" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#mcArrowDashed)"/>
+  <g>
+    <rect x="688" y="434" width="78" height="18" rx="9" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="727" y="447" text-anchor="middle" fill="#22d3ee" font-size="10.5" font-weight="600">sees / replays</text>
+  </g>
+</svg>

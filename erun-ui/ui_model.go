@@ -21,6 +21,7 @@ type uiTenant struct {
 
 type uiEnvironment struct {
 	Name              string `json:"name"`
+	Type              string `json:"type,omitempty"`
 	MCPURL            string `json:"mcpUrl,omitempty"`
 	APIURL            string `json:"apiUrl,omitempty"`
 	RuntimeVersion    string `json:"runtimeVersion,omitempty"`
@@ -40,6 +41,8 @@ type uiSelection struct {
 	RuntimeMemory     string `json:"runtimeMemory,omitempty"`
 	KubernetesContext string `json:"kubernetesContext,omitempty"`
 	ContainerRegistry string `json:"containerRegistry,omitempty"`
+	Type              string `json:"type,omitempty"`
+	LocalRepoPath     string `json:"localRepoPath,omitempty"`
 	NoGit             bool   `json:"noGit,omitempty"`
 	Bootstrap         bool   `json:"bootstrap,omitempty"`
 	SetDefaultTenant  bool   `json:"setDefaultTenant,omitempty"`
@@ -50,6 +53,11 @@ type uiSelection struct {
 type uiDiffOptions struct {
 	Scope          string `json:"scope,omitempty"`
 	SelectedCommit string `json:"selectedCommit,omitempty"`
+	// Target selects which repository to diff. "" or "env" diffs the
+	// environment's runtime working directory (the historical default).
+	// "erun" diffs the contribute-mode clone at $HOME/git/erun inside
+	// the environment.
+	Target string `json:"target,omitempty"`
 }
 
 type uiBuildDetails struct {
@@ -154,14 +162,16 @@ type uiSSHDConfig struct {
 }
 
 type uiEnvironmentLocalPorts struct {
-	RangeStart int          `json:"rangeStart"`
-	RangeEnd   int          `json:"rangeEnd"`
-	MCP        int          `json:"mcp"`
-	API        int          `json:"api"`
-	SSH        int          `json:"ssh"`
-	MCPStatus  uiPortStatus `json:"mcpStatus"`
-	APIStatus  uiPortStatus `json:"apiStatus"`
-	SSHStatus  uiPortStatus `json:"sshStatus"`
+	RangeStart          int          `json:"rangeStart"`
+	RangeEnd            int          `json:"rangeEnd"`
+	MCP                 int          `json:"mcp"`
+	API                 int          `json:"api"`
+	SSH                 int          `json:"ssh"`
+	ContributeApp       int          `json:"contributeApp"`
+	MCPStatus           uiPortStatus `json:"mcpStatus"`
+	APIStatus           uiPortStatus `json:"apiStatus"`
+	SSHStatus           uiPortStatus `json:"sshStatus"`
+	ContributeAppStatus uiPortStatus `json:"contributeAppStatus"`
 }
 
 type uiPortStatus struct {
@@ -170,9 +180,11 @@ type uiPortStatus struct {
 }
 
 type uiEnvironmentConfig struct {
-	Name                 string                  `json:"name"`
-	RepoPath             string                  `json:"repoPath"`
-	KubernetesContext    string                  `json:"kubernetesContext"`
+	Name                 string                       `json:"name"`
+	Type                 eruncommon.EnvironmentType   `json:"type,omitempty"`
+	LocalRepoPath        string                       `json:"localRepoPath,omitempty"`
+	RepoPath             string                       `json:"repoPath"`
+	KubernetesContext    string                       `json:"kubernetesContext"`
 	ContainerRegistry    string                  `json:"containerRegistry"`
 	CloudProviderAlias   string                  `json:"cloudProviderAlias"`
 	CloudProviderAliases []string                `json:"cloudProviderAliases,omitempty"`

@@ -122,6 +122,16 @@ func writeEffectiveOpen(ctx common.Context, current common.ListCurrentDirectoryR
 }
 
 func writeEffectiveOpenBase(ctx common.Context, effective common.ListEffectiveTargetResult) error {
+	if err := writeEffectiveTargetIdentity(ctx, effective); err != nil {
+		return err
+	}
+	if err := writeEffectiveTargetType(ctx, effective); err != nil {
+		return err
+	}
+	return writeEffectiveTargetPorts(ctx, effective)
+}
+
+func writeEffectiveTargetIdentity(ctx common.Context, effective common.ListEffectiveTargetResult) error {
 	if err := writeLabeledValue(ctx, "effective target", effective.Tenant+"/"+effective.Environment); err != nil {
 		return err
 	}
@@ -133,9 +143,17 @@ func writeEffectiveOpenBase(ctx common.Context, effective common.ListEffectiveTa
 			return err
 		}
 	}
-	if err := writeLabeledValue(ctx, "snapshot", enabledDisabledLabel(effective.Snapshot)); err != nil {
+	return nil
+}
+
+func writeEffectiveTargetType(ctx common.Context, effective common.ListEffectiveTargetResult) error {
+	if err := writeLabeledValue(ctx, "type", valueOrNone(string(effective.Type))); err != nil {
 		return err
 	}
+	return writeLabeledValue(ctx, "snapshot", enabledDisabledLabel(effective.Snapshot))
+}
+
+func writeEffectiveTargetPorts(ctx common.Context, effective common.ListEffectiveTargetResult) error {
 	if err := writeLabeledValue(ctx, "assigned local port range", portRangeLabel(effective.LocalPorts)); err != nil {
 		return err
 	}
@@ -148,7 +166,10 @@ func writeEffectiveOpenBase(ctx common.Context, effective common.ListEffectiveTa
 	if err := writeLabeledValue(ctx, "api url", effective.APIURL); err != nil {
 		return err
 	}
-	return writeLabeledValue(ctx, "assigned ssh local port", fmt.Sprintf("%d (when SSH port-forward is active)", effective.LocalPorts.SSH))
+	if err := writeLabeledValue(ctx, "assigned ssh local port", fmt.Sprintf("%d (when SSH port-forward is active)", effective.LocalPorts.SSH)); err != nil {
+		return err
+	}
+	return writeLabeledValue(ctx, "assigned contribute-app local port", fmt.Sprintf("%d (when contribute mode is active and `erun app --headless` is running)", effective.LocalPorts.ContributeApp))
 }
 
 func writeEffectiveOpenSSH(ctx common.Context, ssh common.ListSSHResult) error {
@@ -227,6 +248,7 @@ func environmentHeaderLine(env common.ListEnvironmentResult) string {
 func environmentDetailLines(env common.ListEnvironmentResult) []string {
 	const indent = "          "
 	lines := []string{
+		indent + "type: " + valueOrNone(string(env.Type)),
 		indent + "remote: " + enabledDisabledLabel(env.Remote),
 		indent + "snapshot: " + enabledDisabledLabel(env.Snapshot),
 		indent + "repo: " + valueOrNone(env.RepoPath),
@@ -235,6 +257,7 @@ func environmentDetailLines(env common.ListEnvironmentResult) []string {
 		indent + "api-port: " + fmt.Sprintf("%d", env.LocalPorts.API),
 		indent + "api-url: " + valueOrNone(env.APIURL),
 		indent + "ssh-port: " + fmt.Sprintf("%d", env.LocalPorts.SSH),
+		indent + "contribute-app-port: " + fmt.Sprintf("%d", env.LocalPorts.ContributeApp),
 		indent + "container-registry: " + valueOrNone(env.ContainerRegistry),
 		indent + "runtime-version: " + valueOrNone(env.RuntimeVersion),
 		indent + "runtime-pod: " + runtimePodLabel(env.RuntimePod),

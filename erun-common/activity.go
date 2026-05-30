@@ -313,7 +313,7 @@ func managedCloudEnvironment(store CloudReadStore, env EnvConfig) (bool, error) 
 	if env.ManagedCloud {
 		return true, nil
 	}
-	if !env.Remote {
+	if !env.RemoteWorktree() {
 		return false, nil
 	}
 	status, ok, err := findCloudContextForKubernetesContext(store, env.KubernetesContext)

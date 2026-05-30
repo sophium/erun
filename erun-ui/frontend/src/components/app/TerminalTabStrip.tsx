@@ -1,4 +1,4 @@
-import { Plus, X } from 'lucide-react';
+import { GitFork, Plus, X } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
@@ -95,6 +95,11 @@ export function TerminalTabStrip(): React.ReactElement {
         <Tab
           key={tab.sessionId}
           label={tab.label || `Terminal ${String(index + 1)}`}
+          icon={
+            tab.kind === 'contribute-erun' || tab.kind === 'contribute-ai'
+              ? 'contribute'
+              : undefined
+          }
           closeable={tab.kind === 'extra'}
           active={tab.sessionId === activeId}
           ref={(node) => {
@@ -129,6 +134,7 @@ export function TerminalTabStrip(): React.ReactElement {
 
 interface TabProps {
   label: string;
+  icon?: 'contribute';
   closeable: boolean;
   active: boolean;
   onSelect: () => void;
@@ -137,7 +143,7 @@ interface TabProps {
 }
 
 const Tab = React.forwardRef<HTMLButtonElement, TabProps>(function Tab(
-  { label, closeable, active, onSelect, onClose, onKeyDown },
+  { label, icon, closeable, active, onSelect, onClose, onKeyDown },
   ref,
 ) {
   return (
@@ -163,6 +169,9 @@ const Tab = React.forwardRef<HTMLButtonElement, TabProps>(function Tab(
         onClick={onSelect}
         onKeyDown={onKeyDown}
       >
+        {icon === 'contribute' && (
+          <GitFork className="mr-1 size-3.5 text-[oklch(0.7_0.18_180)]" aria-hidden="true" />
+        )}
         {label}
       </button>
       {closeable && (

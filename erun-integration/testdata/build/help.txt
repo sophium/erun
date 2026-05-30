@@ -27,6 +27,7 @@ Available Commands:
   cloud       Cloud provider utilities
   completion  Generate the autocompletion script for the specified shell
   context     Manage ERun cloud Kubernetes contexts
+  contribute  Run contribute-mode workflows that target the ERun source repository
   delete      Delete an environment from ERun configuration and remove its remote runtime namespace
   deploy      Deploy the current Helm chart or all charts in the current devops k8s scope
   devops      DevOps utilities

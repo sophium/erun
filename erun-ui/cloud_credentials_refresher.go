@@ -56,7 +56,7 @@ func (a *App) startCloudCredentialsRefresherForSelection(selection uiSelection) 
 	if err != nil {
 		return
 	}
-	if !envConfig.RemoteHostCredentials || !envConfig.Remote {
+	if !envConfig.RemoteHostCredentials || !envConfig.RemoteWorktree() {
 		return
 	}
 	if strings.TrimSpace(envConfig.CloudProviderAlias) == "" {

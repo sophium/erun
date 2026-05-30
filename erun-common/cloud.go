@@ -474,7 +474,7 @@ func SetEnvironmentCloudProviderAlias(ctx Context, store EnvironmentCloudAliasSt
 		return saveManagedCloudAliasIfNeeded(ctx, store, tenant, config)
 	}
 	config.CloudProviderAlias = alias
-	if config.Remote {
+	if config.RemoteWorktree() {
 		config.ManagedCloud = true
 	}
 	if ctx.DryRun {
@@ -504,7 +504,7 @@ func normalizeEnvironmentCloudProviderAliasParams(params SetEnvironmentCloudAlia
 }
 
 func saveManagedCloudAliasIfNeeded(ctx Context, store EnvironmentCloudAliasStore, tenant string, config EnvConfig) (EnvConfig, error) {
-	if !config.Remote || config.ManagedCloud {
+	if !config.RemoteWorktree() || config.ManagedCloud {
 		return config, nil
 	}
 	config.ManagedCloud = true

@@ -7,6 +7,7 @@ import { openTenantDashboard, openTenantDialog } from '@/app/tenantDialogThunks'
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { EnvironmentRow, PendingEnvironmentRow } from '@/components/app/Sidebar.EnvironmentRow';
 import { Button } from '@/components/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { UISelection, UITenant } from '@/types';
 
@@ -102,20 +103,25 @@ function TenantSelectButton({
 }): React.ReactElement {
   const dispatch = useAppDispatch();
   return (
-    <button
-      className={cn(
-        'flex min-w-0 flex-1 cursor-pointer items-center border-0 bg-transparent py-[4px] pr-3 pl-2 pb-1.5 text-left text-[15px] leading-[1.25] tracking-normal text-inherit disabled:cursor-default disabled:opacity-50',
-        related ? 'font-medium' : 'font-normal',
-      )}
-      type="button"
-      title={tenantName}
-      aria-current={active ? 'page' : undefined}
-      onClick={() => {
-        dispatch(openTenantDashboard(tenantName));
-      }}
-    >
-      <span className="truncate">{tenantName}</span>
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          className={cn(
+            'flex min-w-0 flex-1 cursor-pointer items-center border-0 bg-transparent py-[4px] pr-3 pl-2 pb-1.5 text-left text-[15px] leading-[1.25] tracking-normal text-inherit disabled:cursor-default disabled:opacity-50',
+            related ? 'font-medium' : 'font-normal',
+          )}
+          type="button"
+          aria-label={`Open ${tenantName} dashboard`}
+          aria-current={active ? 'page' : undefined}
+          onClick={() => {
+            dispatch(openTenantDashboard(tenantName));
+          }}
+        >
+          <span className="truncate">{tenantName}</span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right">{tenantName}</TooltipContent>
+    </Tooltip>
   );
 }
 

@@ -41,9 +41,11 @@ test.describe('sidebar AI activity spinner', () => {
     // and the env-row selector matches the same key.
     await page.evaluate(
       ({ tenant, env }) => {
-        const runtime = (window as unknown as {
-          runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
-        }).runtime;
+        const runtime = (
+          window as unknown as {
+            runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+          }
+        ).runtime;
         runtime.EventsEmit('ai-activity', {
           sessionId: 99,
           tenant,
@@ -61,9 +63,11 @@ test.describe('sidebar AI activity spinner', () => {
     // Emit busy=false; the spinner must disappear.
     await page.evaluate(
       ({ tenant, env }) => {
-        const runtime = (window as unknown as {
-          runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
-        }).runtime;
+        const runtime = (
+          window as unknown as {
+            runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+          }
+        ).runtime;
         runtime.EventsEmit('ai-activity', {
           sessionId: 99,
           tenant,
@@ -77,14 +81,16 @@ test.describe('sidebar AI activity spinner', () => {
   });
 
   test('ai-activity payloads with empty tenant or environment are ignored', async ({
-    app,
+    app: _app,
     page,
   }) => {
     const sidebar = page.locator('aside').first();
     await page.evaluate(() => {
-      const runtime = (window as unknown as {
-        runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
-      }).runtime;
+      const runtime = (
+        window as unknown as {
+          runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+        }
+      ).runtime;
       runtime.EventsEmit('ai-activity', {
         sessionId: 99,
         tenant: '',

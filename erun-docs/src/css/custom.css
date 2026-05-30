@@ -1,0 +1,100 @@
+/* Brand palette derived from the ERun Mac app icon:
+   charcoal squircle ground, glowing cyan accent, white contrast. */
+
+:root {
+  --erun-charcoal: #0f1320;
+  --erun-charcoal-soft: #1a2030;
+  --erun-cyan: #0891b2;
+  --erun-cyan-bright: #22d3ee;
+
+  --ifm-color-primary: #0891b2;
+  --ifm-color-primary-dark: #07758f;
+  --ifm-color-primary-darker: #066d84;
+  --ifm-color-primary-darkest: #055c70;
+  --ifm-color-primary-light: #0aa4cd;
+  --ifm-color-primary-lighter: #0bafd9;
+  --ifm-color-primary-lightest: #22d3ee;
+
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(8, 145, 178, 0.1);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #22d3ee;
+  --ifm-color-primary-dark: #15bfdb;
+  --ifm-color-primary-darker: #14b5d0;
+  --ifm-color-primary-darkest: #1095ab;
+  --ifm-color-primary-light: #4ddbef;
+  --ifm-color-primary-lighter: #5ee0f2;
+  --ifm-color-primary-lightest: #95ecf7;
+  --ifm-background-color: #0f1320;
+  --ifm-background-surface-color: #131829;
+  --docusaurus-highlighted-code-line-bg: rgba(34, 211, 238, 0.12);
+}
+
+/* Lead paragraph after H1 reads as a tagline. */
+.markdown > h1 + p strong:first-child {
+  font-size: 1.15rem;
+  line-height: 1.55;
+  letter-spacing: -0.005em;
+  color: var(--ifm-color-emphasis-900);
+}
+
+/* Mermaid diagrams: clean centering + responsive width. */
+.docusaurus-mermaid-container {
+  margin: 1.75rem auto;
+  text-align: center;
+}
+.docusaurus-mermaid-container svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Section dividers (`---`) — subtle but visible. */
+.markdown hr {
+  border: 0;
+  border-top: 1px solid var(--ifm-color-emphasis-200);
+  margin: 2.25rem 0;
+}
+
+/* Hero figure on the welcome page. */
+.erun-hero-figure {
+  margin: 2rem auto;
+  max-width: 920px;
+  text-align: center;
+}
+.erun-hero-figure img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+.erun-hero-figure figcaption {
+  margin-top: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--ifm-color-emphasis-700);
+  line-height: 1.5;
+  letter-spacing: 0.005em;
+}
+
+/* Navbar gets a darker baseline to harmonize with the charcoal app-icon
+   mark in light mode (matches dark mode default). Subtle enough to keep
+   text readable. */
+.navbar {
+  background-color: #0f1320;
+  --ifm-navbar-link-color: rgba(255, 255, 255, 0.85);
+  --ifm-navbar-link-hover-color: var(--erun-cyan-bright);
+}
+.navbar__title {
+  color: #ffffff;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.navbar__brand:hover .navbar__title {
+  color: var(--erun-cyan-bright);
+}
+.navbar__items--right .navbar__link {
+  color: rgba(255, 255, 255, 0.85);
+}
+.navbar__items--right .navbar__link:hover {
+  color: var(--erun-cyan-bright);
+}

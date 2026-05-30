@@ -1,0 +1,81 @@
+<svg viewBox="0 0 1000 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="buildAppFlowTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="buildAppFlowTitle">Six-step overview of building a small app with ERun. Step 1: create the project (mkdir, git init, VERSION). Step 2: bootstrap ERun (erun init --bootstrap). Step 3: ask the Agent to add a service — the Agent loads the matching skill and writes the source, Dockerfile, and chart by hand. Step 4: build and deploy (erun build --deploy). Step 5: see it running (kubectl port-forward and curl). Step 6: iterate. Each step takes one command; the Agent does the heavy lifting in step 3.</title>
+
+  <defs>
+    <linearGradient id="bfCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="bfArrowSolid" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+  </defs>
+
+  <!-- 6 step boxes -->
+  <!-- Step 1 -->
+  <g>
+    <rect x="20" y="60" width="140" height="120" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <rect x="58" y="78" width="64" height="22" rx="11" fill="url(#bfCharcoal)"/>
+    <text x="90" y="93" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600" letter-spacing="0.05em">STEP 1</text>
+    <text x="90" y="125" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600">Create</text>
+    <text x="90" y="142" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600">project</text>
+    <text x="90" y="165" text-anchor="middle" fill="currentColor" font-size="10.5" opacity="0.6">mkdir · git init</text>
+  </g>
+  <line x1="160" y1="120" x2="186" y2="120" stroke="#0891b2" stroke-width="1.5" marker-end="url(#bfArrowSolid)"/>
+
+  <!-- Step 2 -->
+  <g>
+    <rect x="190" y="60" width="140" height="120" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <rect x="228" y="78" width="64" height="22" rx="11" fill="url(#bfCharcoal)"/>
+    <text x="260" y="93" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600" letter-spacing="0.05em">STEP 2</text>
+    <text x="260" y="125" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600">Bootstrap</text>
+    <text x="260" y="142" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600">ERun</text>
+    <text x="260" y="165" text-anchor="middle" fill="currentColor" font-size="10.5" opacity="0.6">erun init --bootstrap</text>
+  </g>
+  <line x1="330" y1="120" x2="356" y2="120" stroke="#0891b2" stroke-width="1.5" marker-end="url(#bfArrowSolid)"/>
+
+  <!-- Step 3 -->
+  <g>
+    <rect x="360" y="60" width="140" height="120" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <rect x="398" y="78" width="64" height="22" rx="11" fill="url(#bfCharcoal)"/>
+    <text x="430" y="93" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600" letter-spacing="0.05em">STEP 3</text>
+    <text x="430" y="125" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600">Add a service</text>
+    <text x="430" y="143" text-anchor="middle" fill="currentColor" font-size="11" opacity="0.7" font-style="italic">via a skill</text>
+    <text x="430" y="167" text-anchor="middle" fill="currentColor" font-size="10.5" opacity="0.6">Agent writes the files</text>
+  </g>
+  <line x1="500" y1="120" x2="526" y2="120" stroke="#0891b2" stroke-width="1.5" marker-end="url(#bfArrowSolid)"/>
+
+  <!-- Step 4 -->
+  <g>
+    <rect x="530" y="60" width="140" height="120" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <rect x="568" y="78" width="64" height="22" rx="11" fill="url(#bfCharcoal)"/>
+    <text x="600" y="93" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600" letter-spacing="0.05em">STEP 4</text>
+    <text x="600" y="125" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600">Build +</text>
+    <text x="600" y="142" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600">deploy</text>
+    <text x="600" y="165" text-anchor="middle" fill="currentColor" font-size="10.5" opacity="0.6">erun build --deploy</text>
+  </g>
+  <line x1="670" y1="120" x2="696" y2="120" stroke="#0891b2" stroke-width="1.5" marker-end="url(#bfArrowSolid)"/>
+
+  <!-- Step 5 -->
+  <g>
+    <rect x="700" y="60" width="140" height="120" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <rect x="738" y="78" width="64" height="22" rx="11" fill="url(#bfCharcoal)"/>
+    <text x="770" y="93" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600" letter-spacing="0.05em">STEP 5</text>
+    <text x="770" y="125" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600">See it</text>
+    <text x="770" y="142" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600">running</text>
+    <text x="770" y="165" text-anchor="middle" fill="currentColor" font-size="10.5" opacity="0.6">curl → "hello from erun"</text>
+  </g>
+  <line x1="840" y1="120" x2="866" y2="120" stroke="#0891b2" stroke-width="1.5" marker-end="url(#bfArrowSolid)"/>
+
+  <!-- Step 6 -->
+  <g>
+    <rect x="870" y="60" width="110" height="120" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <rect x="893" y="78" width="64" height="22" rx="11" fill="url(#bfCharcoal)"/>
+    <text x="925" y="93" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="600" letter-spacing="0.05em">STEP 6</text>
+    <text x="925" y="125" text-anchor="middle" fill="currentColor" font-size="13" font-weight="600">Iterate</text>
+    <text x="925" y="165" text-anchor="middle" fill="currentColor" font-size="10.5" opacity="0.6">one command</text>
+  </g>
+
+  <!-- Strapline -->
+  <text x="500" y="220" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.55">From blank directory to running service in ten minutes. Step 3 is where the Agent does the work.</text>
+</svg>

@@ -1,0 +1,226 @@
+package __MODULE__
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strings"
+
+	"github.com/google/uuid"
+)
+
+// Claims is the minimum surface of a verified OIDC bearer token that the
+// auth pipeline consumes. The TokenVerifier implementation populates it
+// from a verified token; downstream resolvers read it.
+type Claims struct {
+	Issuer  string
+	Subject string
+	Email   string
+}
+
+type TokenVerifier interface {
+	Verify(ctx context.Context, token string) (Claims, error)
+}
+
+type TokenVerifierFunc func(ctx context.Context, token string) (Claims, error)
+
+func (f TokenVerifierFunc) Verify(ctx context.Context, token string) (Claims, error) {
+	return f(ctx, token)
+}
+
+// IdentityResolver does the empty-database bootstrap path: given an
+// authenticated (issuer, subject), it either resolves the existing
+// tenant+user or creates the initial OPERATIONS tenant + first user with
+// ReadAll + WriteAll roles. Used only when both TenantResolver and
+// UserResolver are nil; once any tenant exists, the resolver must return
+// an error for unknown identities rather than implicitly creating users.
+type IdentityResolver interface {
+	Resolve(ctx context.Context, claims Claims) (Security, error)
+}
+
+// TenantResolver maps an OIDC issuer to an ERun tenant. Unknown issuer
+// must return an error.
+type TenantResolver interface {
+	ResolveTenant(ctx context.Context, issuer string) (TenantInfo, error)
+}
+
+// UserResolver maps (tenant_id, issuer, external_id) to an ERun user.
+// Unknown identity must return an error; do not implicitly create users
+// once any tenant exists.
+type UserResolver interface {
+	ResolveUser(ctx context.Context, tenantID uuid.UUID, issuer, externalID string) (UserInfo, error)
+}
+
+type TenantInfo struct {
+	TenantID     uuid.UUID
+	IsOperations bool
+}
+
+type UserInfo struct {
+	UserID uuid.UUID
+}
+
+// Security is the request-scoped authenticated context that downstream
+// repository transaction wiring reads. Missing security context in a
+// protected route is an internal wiring error, not a 401.
+type Security struct {
+	TenantID         uuid.UUID
+	UserID           uuid.UUID
+	IsOperations     bool
+	ExternalIssuer   string
+	ExternalSubject  string
+	Claims           Claims
+}
+
+type securityContextKey struct{}
+
+func WithSecurity(ctx context.Context, sec Security) context.Context {
+	return context.WithValue(ctx, securityContextKey{}, sec)
+}
+
+func SecurityFromContext(ctx context.Context) (Security, error) {
+	v, ok := ctx.Value(securityContextKey{}).(Security)
+	if !ok {
+		return Security{}, errors.New("backend: missing security context")
+	}
+	return v, nil
+}
+
+type Authorizer interface {
+	IsAllowed(ctx context.Context, sec Security, method, apiPath string) (bool, error)
+}
+
+type AuditLogger interface {
+	WriteAPIEvent(ctx context.Context, sec Security, method, apiPath string) error
+}
+
+type AuthMiddlewareOptions struct {
+	TokenVerifier    TokenVerifier
+	IdentityResolver IdentityResolver
+	TenantResolver   TenantResolver
+	UserResolver     UserResolver
+	IdentityCache    *IdentityResolutionCache
+	AuditLogger      AuditLogger
+	Authorizer       Authorizer
+}
+
+type AuthMiddleware struct {
+	verifier  TokenVerifier
+	identity  IdentityResolver
+	tenant    TenantResolver
+	user      UserResolver
+	cache     *IdentityResolutionCache
+	audit     AuditLogger
+	authorize Authorizer
+}
+
+func NewAuthMiddleware(options AuthMiddlewareOptions) (*AuthMiddleware, error) {
+	if options.TokenVerifier == nil {
+		return nil, errors.New("backend: TokenVerifier is required")
+	}
+	if options.IdentityResolver == nil && (options.TenantResolver == nil || options.UserResolver == nil) {
+		return nil, errors.New("backend: either IdentityResolver or both TenantResolver and UserResolver are required")
+	}
+	return &AuthMiddleware{
+		verifier:  options.TokenVerifier,
+		identity:  options.IdentityResolver,
+		tenant:    options.TenantResolver,
+		user:      options.UserResolver,
+		cache:     options.IdentityCache,
+		audit:     options.AuditLogger,
+		authorize: options.Authorizer,
+	}, nil
+}
+
+// Wrap verifies the bearer token, resolves tenant + user, checks
+// permissions, writes the audit event, and only then calls the next
+// handler. Failures emit 401 (auth) or 403 (authz); successful flow
+// guarantees SecurityFromContext returns a populated Security.
+func (a *AuthMiddleware) Wrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		token := bearerToken(r)
+		if token == "" {
+			http.Error(w, "missing bearer token", http.StatusUnauthorized)
+			return
+		}
+		claims, err := a.verifier.Verify(ctx, token)
+		if err != nil {
+			http.Error(w, "invalid token", http.StatusUnauthorized)
+			return
+		}
+		sec, err := a.resolve(ctx, claims)
+		if err != nil {
+			http.Error(w, "unauthorized identity", http.StatusUnauthorized)
+			return
+		}
+		apiPath := APIPathFromContext(ctx)
+		if a.authorize != nil && apiPath != "" {
+			allowed, err := a.authorize.IsAllowed(ctx, sec, r.Method, apiPath)
+			if err != nil {
+				http.Error(w, "authorization error", http.StatusInternalServerError)
+				return
+			}
+			if !allowed {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+		}
+		if a.audit != nil && apiPath != "" {
+			if err := a.audit.WriteAPIEvent(ctx, sec, r.Method, apiPath); err != nil {
+				// Log/report, but do not surface as a route 500 unless the
+				// endpoint is audit-durability-critical. Default policy is
+				// to continue.
+				_ = err
+			}
+		}
+		next.ServeHTTP(w, r.WithContext(WithSecurity(ctx, sec)))
+	})
+}
+
+func (a *AuthMiddleware) resolve(ctx context.Context, claims Claims) (Security, error) {
+	if a.cache != nil {
+		if sec, ok, err := a.cache.Lookup(claims.Issuer, claims.Subject); ok {
+			if err != nil {
+				return Security{}, err
+			}
+			return sec, nil
+		}
+	}
+	sec, err := a.resolveUncached(ctx, claims)
+	if a.cache != nil {
+		a.cache.Store(claims.Issuer, claims.Subject, sec, err)
+	}
+	return sec, err
+}
+
+func (a *AuthMiddleware) resolveUncached(ctx context.Context, claims Claims) (Security, error) {
+	if a.tenant != nil && a.user != nil {
+		tenantInfo, err := a.tenant.ResolveTenant(ctx, claims.Issuer)
+		if err != nil {
+			return Security{}, err
+		}
+		userInfo, err := a.user.ResolveUser(ctx, tenantInfo.TenantID, claims.Issuer, claims.Subject)
+		if err != nil {
+			return Security{}, err
+		}
+		return Security{
+			TenantID:        tenantInfo.TenantID,
+			UserID:          userInfo.UserID,
+			IsOperations:    tenantInfo.IsOperations,
+			ExternalIssuer:  claims.Issuer,
+			ExternalSubject: claims.Subject,
+			Claims:          claims,
+		}, nil
+	}
+	return a.identity.Resolve(ctx, claims)
+}
+
+func bearerToken(r *http.Request) string {
+	header := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if !strings.HasPrefix(header, prefix) {
+		return ""
+	}
+	return strings.TrimSpace(header[len(prefix):])
+}

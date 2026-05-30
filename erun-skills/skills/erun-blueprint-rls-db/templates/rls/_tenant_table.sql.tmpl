@@ -1,0 +1,20 @@
+-- Tenant-owned table RLS template. Substitute __TABLE__ with the plural
+-- snake_case table name. Two policies are mandatory: one for erun_tenant
+-- (tenant-scoped) and one for erun_operations (cross-tenant). Do not
+-- collapse them into a single policy with an OR branch.
+ALTER TABLE __TABLE__ ENABLE ROW LEVEL SECURITY;
+ALTER TABLE __TABLE__ FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY __TABLE___tenant_isolation
+  ON __TABLE__
+  FOR ALL
+  TO erun_tenant
+  USING (tenant_id = erun_current_tenant_id())
+  WITH CHECK (tenant_id = erun_current_tenant_id());
+
+CREATE POLICY __TABLE___operations_access
+  ON __TABLE__
+  FOR ALL
+  TO erun_operations
+  USING (true)
+  WITH CHECK (true);

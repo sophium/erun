@@ -10,8 +10,10 @@ Repository guidance for humans and coding agents working in this repo.
   - `erun-ui/AGENTS.md` — desktop-module guidance, including macOS + Windows targets and Wails frontend rules.
   - `erun-ui/playwright/AGENTS.md` — Playwright end-to-end UI test suite that drives `erun-app --headless`.
   - `erun-devops/AGENTS.md` — runtime-image, chart, build-cache, and release-workflow guidance.
+  - `erun-docs/AGENTS.md` — product documentation site (Docusaurus) and the Cloudflare Pages deploy contract.
   - `erun-integration/AGENTS.md` — integration-test harness layout, scenario shape, and the coverage gate.
   - `erun-backend/AGENTS.md` plus `erun-backend/erun-backend-api/AGENTS.md` and `erun-backend/erun-backend-db/AGENTS.md` — hosted-backend, API, and Atlas-migration guidance.
+  - `erun-skills/AGENTS.md` — canonical skill source for the Claude Code / Codex SKILL.md files plus the plugin manifest. Consumed by both the runtime image (vendored into `/etc/erun/skills/`) and the Claude Code marketplace at the repo root.
 - A child `AGENTS.md` is additional, not a replacement: parent rules still apply unless the child explicitly overrides them.
 - If you add a new `AGENTS.md` anywhere in the tree, also list it in the bullet above so future readers find it without searching.
 
@@ -29,6 +31,8 @@ Repository guidance for humans and coding agents working in this repo.
 - If the user asks for `push, accept`, treat that as completing the full publish flow rather than stopping after the branch push.
 - If the user asks to `close`, always treat that as the repository publish flow in this repo: push the branch, open the PR, merge it with squash unless they asked otherwise, close the PR via merge, and close the linked issue.
 - Do not interpret `close` as a request to end or archive the conversation in this repository.
+- Stay within the current PR for the whole body of related work. When additional bugs, gaps, or improvements surface while working on a branch, add them to the same PR rather than filing a separate issue or opening a new branch. Do not propose splitting work into multiple PRs, and do not ask whether to split — assume the answer is "no" unless the user explicitly says otherwise. Update the PR title and body to reflect the broader scope when the diff grows.
+- One body of work, one PR. The PR may link to multiple issues (`Closes #A` / `Closes #B`), but the unit of review is the PR, not the issue.
 
 ## Project Structure
 
@@ -38,7 +42,9 @@ Repository guidance for humans and coding agents working in this repo.
 - `erun-backend` - backend service area containing the API and database migration modules
 - `erun-devops` - runtime Docker images, Linux packaging, and Kubernetes chart assets used by build, open, deploy, and release flows
 - `erun-ui` - desktop app module built with Wails, using a Go backend and a TypeScript/Yarn frontend
+- `erun-docs` - public product documentation site (Docusaurus 3.x), published to Cloudflare Pages via a k8s Job under `erun-devops/k8s/erun-docs/`
 - `erun-integration` - cross-module integration test harness; runs the compiled `erun` binary with `--dry-run` against per-command goldens and gates merged coverage
+- `erun-skills` - canonical source for Claude Code / Codex SKILL.md files and the Claude Code plugin manifest; consumed by both the runtime image (in-pod install) and the marketplace at the repo root (laptop install)
 
 ## Module Boundaries
 
@@ -145,6 +151,7 @@ Repository guidance for humans and coding agents working in this repo.
 - Preserve momentum by choosing the simplest defensible design that fits the repository. Add structure only when it clarifies ownership, reduces repeated logic, or prevents a real class of mistakes.
 - Treat repeated user corrections as signal that the interaction model is wrong, not just the implementation detail. Revisit the flow and simplify it around what the user is trying to accomplish.
 - Treat every change that affects a user-triggered code path as a UX-affecting change, including backend wiring, lifecycle refactors, event-handler edits, persistence work, and frontend logic that does not directly edit a component. Before considering such a change complete, walk through the user-facing sequence it produces and verify the user can see what is happening, recover from what fails, and confirm what succeeded. Setting state without a corresponding visible affordance, or surfacing a status that is cleared by the next lifecycle step before the user can register it, both count as gaps that block the change. For desktop work, follow the impact-review checklist in `erun-ui/AGENTS.md` § "UX Impact Review Checklist".
+- Treat every feature addition or feature-changing PR as a docs-affecting change, and include the `erun-docs` plan in the same approval step as the rest of the change. The plan must name each affected page, identify its audience (Operator-facing vs Agent reference — see `erun-docs/AGENTS.md` § "Audience: Operator vs Agent" and § "Companion pages") and the validation (`cd erun-docs && yarn build` clean, anchor and canonical-terminology sweeps). If no docs update is needed, the plan must say so with a one-line reason. Undocumented behaviour is not part of the contract (see `erun-docs/AGENTS.md` § "Spec discipline"), so missing docs are a defect, not optional follow-up — they land in the same PR as the feature, never as a separate "docs PR." Pure bug fixes that preserve behaviour, refactors with no public-surface change, and internal cleanup are exempt; when unsure whether a change qualifies as exempt, treat it as feature work and include the doc plan.
 - Avoid duplicating investigation. Once a cause is established, update the relevant shared guidance, tests, or abstractions so future work can start from that knowledge.
 - Treat execution state as scoped to one CLI run or one MCP request, not shared process state.
 - Avoid adding new package-level mutable variables.
@@ -163,6 +170,8 @@ Repository guidance for humans and coding agents working in this repo.
 - Do not add new documentation files unless the user explicitly asks for them; add repository instructions to `AGENTS.md` instead.
 - Keep `AGENTS.md` focused on repository workflow and engineering guidance; do not document app behavior, command semantics, or end-user functionality in it.
 - Do not modify `README.md` unless the user explicitly asks for a README change.
+- **"Documentation" in agent-facing instructions means `AGENTS.md`** (this file plus every applicable subtree `AGENTS.md`). When the user says "read documentation", re-read the relevant `AGENTS.md` files end-to-end; do not substitute `erun-docs/` for that step. When the user says "update documentation", edit the nearest applicable `AGENTS.md`. `erun-docs/` is the public product documentation site — a separate concern with its own update workflow, owned by the `erun-docs/AGENTS.md` rules. Read it only when its content is the load-bearing reference for an investigation; do not treat it as the source of repo workflow or engineering guidance.
+- Each `AGENTS.md` directory ships a `CLAUDE.md` symlink pointing to its `AGENTS.md` so Claude Code auto-loads the local guidance when launched from any subtree. Treat both names as the same file; only edit `AGENTS.md` directly.
 
 ## Diagnosing A Deployed Runtime Via MCP
 
@@ -174,6 +183,44 @@ When investigating what is happening inside a deployed runtime pod (in-pod confi
 - `raw` runs an arbitrary `argv` from the runtime repo root and returns `{stdout, stderr, executed, workingDirectory, trace}`. Pass `command` as an `argv` array, not a shell string; reach for `["sh","-c","…"]` only when you need shell features. Typical inspections: `cat ~/.config/erun/<tenant>/<env>/config.yaml`, `env | grep ^ERUN_`, `tail ~/.erun/<tenant>/<env>/idle-monitor.log`, `ls -al`, `ps auxf`.
 - Scope: `raw` executes inside the `erun-mcp` container, which receives only the env vars the chart wires for that container — the `ERUN_CLOUD_*` set lives on the sibling `erun-devops` container. To inspect devops-container state, call `kubectl exec -n <namespace> <pod> -c erun-devops -- …` through `raw` (the MCP container has in-cluster RBAC to its own namespace). Both containers share the `/home/erun` PVC, so files under `~/`, `~/.config/erun`, and `~/.erun` are visible from either side.
 - Treat this endpoint as a diagnostic shortcut, not a substitute for tests. If a code path is reachable from a `--dry-run` trace or a `go test` subprocess, the test belongs there. Use MCP when the question is "what does the running pod actually have on disk or in memory right now?".
+
+### Verifying in-pod fixes before re-running the user-visible flow
+
+When iterating on plumbing that lives inside the runtime pod — contribute-mode toolchain, an updated runtime image, a clone freshness fix, a new env var the chart was supposed to wire — confirm the pod state via MCP **before** asking the user to rebuild the desktop binary, click a launcher, or trigger a redeploy. The desktop-side cycle is slow (re-build erun-app, re-open env, re-click); the MCP probe is one HTTP round-trip and tells you whether the fix is even in the pod yet. Skip the round trip if the pod already has the expected state but the user-facing flow still fails — that points the investigation at the desktop or at the chart, not at the runtime image.
+
+Useful contribute-mode probes (substitute `<port>` from the JSON state file and `<session>` from `Mcp-Session-Id`):
+
+```sh
+# 1. Webkit + libsoup dev libraries the Wails build needs (webkit2_41 path).
+curl -s -X POST http://127.0.0.1:<port>/mcp \
+  -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+  -H "Mcp-Session-Id: <session>" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"raw","arguments":{"command":["sh","-c","pkg-config --modversion webkit2gtk-4.1 libsoup-3.0"]}}}'
+# Both versions print → runtime image is current. "Package not found" → rebuild + redeploy.
+
+# 2. Yarn at the pinned version.
+... "command":["yarn","--version"] ...
+# 1.22.22 → ok. Empty / not found → runtime image is stale.
+
+# 3. Contribute clone HEAD (does the pod have the latest fix the user is testing?).
+... "command":["git","-C","/home/erun/git/erun","log","-1","--pretty=%h %s"] ...
+# Compare against the branch HEAD on github.com. Behind → the in-tab fix is in the source you
+# pushed, but the pod hasn't pulled yet. Send `cd ~/git/erun && git pull` to the contribute
+# ERun tab (or via raw with sh -c).
+
+# 4. Is the headless contribute-app process actually running?
+... "command":["sh","-c","pgrep -fa 'erun-app --headless' || echo not running"] ...
+
+# 5. Is the contribute-app port bound inside the pod?
+... "command":["sh","-c","ss -tlnp | grep :17550 || echo port not bound"] ...
+```
+
+When the user reports "still broken after your fix": run these probes first, then act on the answer. Two common patterns:
+
+- Pod toolchain is missing the package my fix expected → I shipped the Dockerfile change but the user hasn't rebuilt + redeployed the runtime image yet. Action: ask the user to run the image rebuild + deploy, or build it on their behalf if authorized.
+- Clone HEAD is behind → I shipped a `build.sh` / `run.sh` fix but the pod's `~/git/erun` still has the old script. The `erun contribute clone` command always lands on the repository's default branch; while iterating on an unmerged feature branch the clone needs to be advanced manually. Action: `raw command=["sh","-c","cd /home/erun/git/erun && git fetch origin && git checkout <branch> && git pull --ff-only"]`, then ask the user to retry the click. After the PR is merged, a `git pull` on main is enough.
+
+If the probes all show the expected state but the user-visible click still fails, the bug is in the desktop layer or in how the desktop talks to the pod (port-forward, browser open, etc.), not in the in-pod fix.
 
 ## Integration Test Gate (Mandatory)
 

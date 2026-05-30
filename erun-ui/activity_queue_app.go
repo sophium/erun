@@ -729,7 +729,8 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 		return
 	}
 	switch managed.kind {
-	case sessionKindLocal, sessionKindOpen, sessionKindAI, sessionKindCommand:
+	case sessionKindLocal, sessionKindOpen, sessionKindAI, sessionKindCommand,
+		sessionKindContributeERun, sessionKindContributeAI:
 	default:
 		return
 	}

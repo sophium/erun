@@ -1,0 +1,105 @@
+<svg viewBox="0 0 920 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="workflowStatesTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="workflowStatesTitle">A task moves from TRIAGE through TODO, IN_PROGRESS, PR, QA, to DONE. From TRIAGE or PR it can also branch to REJECTED. PR and QA can loop back to IN_PROGRESS.</title>
+  <defs>
+    <linearGradient id="wsEndpointGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="wsArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+  </defs>
+
+  <!-- TRIAGE (charcoal pill, entry endpoint) -->
+  <g>
+    <rect x="20" y="170" width="110" height="40" rx="20" fill="url(#wsEndpointGrad)"/>
+    <text x="75" y="194" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" letter-spacing="0.02em">TRIAGE</text>
+  </g>
+
+  <!-- Work states (cyan-stroked rectangles) -->
+  <g>
+    <rect x="170" y="160" width="100" height="60" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="220" y="196" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600" letter-spacing="0.02em">TODO</text>
+  </g>
+  <g>
+    <rect x="320" y="160" width="140" height="60" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="390" y="196" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600" letter-spacing="0.02em">IN_PROGRESS</text>
+  </g>
+  <g>
+    <rect x="510" y="160" width="80" height="60" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="550" y="196" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600" letter-spacing="0.02em">PR</text>
+  </g>
+  <g>
+    <rect x="640" y="160" width="80" height="60" rx="10" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+    <text x="680" y="196" text-anchor="middle" fill="currentColor" font-size="14" font-weight="600" letter-spacing="0.02em">QA</text>
+  </g>
+
+  <!-- DONE (charcoal pill, success exit endpoint) -->
+  <g>
+    <rect x="770" y="170" width="110" height="40" rx="20" fill="url(#wsEndpointGrad)"/>
+    <text x="825" y="194" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" letter-spacing="0.02em">DONE</text>
+  </g>
+
+  <!-- REJECTED (charcoal pill, failure exit endpoint) -->
+  <g>
+    <rect x="320" y="340" width="140" height="40" rx="20" fill="url(#wsEndpointGrad)"/>
+    <text x="390" y="364" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" letter-spacing="0.02em">REJECTED</text>
+  </g>
+
+  <!-- Main horizontal arrows -->
+  <line x1="132" y1="190" x2="167" y2="190" stroke="#0891b2" stroke-width="1.5" marker-end="url(#wsArrow)"/>
+  <line x1="272" y1="190" x2="317" y2="190" stroke="#0891b2" stroke-width="1.5" marker-end="url(#wsArrow)"/>
+  <line x1="462" y1="190" x2="507" y2="190" stroke="#0891b2" stroke-width="1.5" marker-end="url(#wsArrow)"/>
+  <line x1="592" y1="190" x2="637" y2="190" stroke="#0891b2" stroke-width="1.5" marker-end="url(#wsArrow)"/>
+  <line x1="722" y1="190" x2="767" y2="190" stroke="#0891b2" stroke-width="1.5" marker-end="url(#wsArrow)"/>
+
+  <!-- Edge labels above main arrows -->
+  <g>
+    <rect x="120" y="120" width="60" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="150" y="134" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="500" letter-spacing="0.02em">accepted</text>
+  </g>
+  <g>
+    <rect x="263" y="120" width="62" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="294" y="134" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="500" letter-spacing="0.02em">assigned</text>
+  </g>
+  <g>
+    <rect x="457" y="120" width="56" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="485" y="134" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="500" letter-spacing="0.02em">review</text>
+  </g>
+  <g>
+    <rect x="587" y="120" width="56" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="615" y="134" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="500" letter-spacing="0.02em">passed</text>
+  </g>
+  <g>
+    <rect x="717" y="120" width="56" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="745" y="134" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="500" letter-spacing="0.02em">merged</text>
+  </g>
+
+  <!-- Back loop: PR → IN_PROGRESS (low arc above) -->
+  <path d="M550 160 C 550 70, 390 70, 390 155" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#wsArrow)"/>
+  <g>
+    <rect x="442" y="56" width="56" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="470" y="70" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="500" letter-spacing="0.02em">changes</text>
+  </g>
+
+  <!-- Back loop: QA → IN_PROGRESS (high arc above) -->
+  <path d="M680 160 C 680 16, 390 16, 390 150" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#wsArrow)"/>
+  <g>
+    <rect x="507" y="12" width="56" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="535" y="26" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="500" letter-spacing="0.02em">rework</text>
+  </g>
+
+  <!-- Branch: TRIAGE → REJECTED (curve down-right) -->
+  <path d="M75 210 C 75 290, 260 350, 318 358" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#wsArrow)"/>
+  <g>
+    <rect x="135" y="270" width="62" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="166" y="284" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="500" letter-spacing="0.02em">dropped</text>
+  </g>
+
+  <!-- Branch: PR → REJECTED (curve down-left) -->
+  <path d="M550 220 C 550 290, 500 330, 460 348" fill="none" stroke="#0891b2" stroke-width="1.5" marker-end="url(#wsArrow)"/>
+  <g>
+    <rect x="498" y="262" width="72" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+    <text x="534" y="276" text-anchor="middle" fill="#0891b2" font-size="11" font-weight="500" letter-spacing="0.02em">abandoned</text>
+  </g>
+</svg>

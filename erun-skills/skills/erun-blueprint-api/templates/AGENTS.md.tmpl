@@ -1,0 +1,83 @@
+# AGENTS.md
+
+Module-specific guidance for this API. Follow your repository root
+`AGENTS.md` first.
+
+## Module role
+
+This is a Go HTTP API module built from the ERun `erun-backend-api`
+blueprint via the `erun-blueprint-api` skill. It expects an
+`erun-backend-db`-shaped PostgreSQL database with the `erun_tenant` /
+`erun_operations` roles and the `erun_current_tenant_id()` function.
+
+## Layer layout
+
+- `internal/model/` — Bun-tagged structs mapping to database tables.
+- `internal/repository/` — SQL via Bun. CRUD only (`Create`/`Get`/`List`/`Update`).
+- `internal/service/` — workflows. **Create files here only when a workflow has real logic beyond calling one repository method.**
+- `internal/routes/` — HTTP adaptation; one file per entity.
+- `server.go` — composition boundary; constructs repos, optional services, routes, middleware.
+
+Import direction: `routes` → (`services` or `repositories`) → `model`.
+`model` must not import from API layers.
+
+## Authentication and authorization
+
+- OIDC bearer required on every protected route.
+- Token issuer maps to tenant; `(issuer, subject)` maps to ERun user.
+- Empty database: first authenticated identity bootstraps OPERATIONS
+  tenant + first user with `ReadAll` + `WriteAll`. Once any tenant
+  exists, unknown identities are 401.
+- Authorization middleware matches the canonical route template against
+  `role_permissions`. Route handlers do not check role names.
+
+## Tenant transaction wiring
+
+Every repository call goes through `TxManager.WithTx`, which opens a
+transaction and runs:
+
+```sql
+SET LOCAL ROLE erun_tenant;             -- or erun_operations
+SELECT set_config('erun.tenant_id', '<uuid>', true);
+SELECT set_config('erun.user_id', '<uuid>', true);  -- when relevant
+```
+
+RLS policies on tenant-owned tables enforce isolation from there.
+
+## Adding a domain entity
+
+1. Add `internal/model/<entity>.go` — Bun-tagged struct.
+2. Add `internal/repository/<entity>.go` — `Create`/`Get`/`List`/`Update`.
+3. Add `internal/routes/<entity>.go` — `Register<Entity>Routes`.
+4. Wire it in `server.go` `NewHandler` (construct repo, call register).
+5. `go build ./...` and `go test ./...`.
+
+Reuse `model` structs as the entity language across layers; do not
+introduce DTOs.
+
+## IDs
+
+- All externally visible IDs are UUIDv7 from database defaults
+  (`DEFAULT uuidv7()`). Application code does not generate or accept them
+  on create.
+
+## Audit logging
+
+Authentication middleware writes API audit events automatically using
+the canonical route template. Routes do not hand-write routine audit.
+
+## Validation
+
+```sh
+go mod tidy
+go build ./...
+go test ./...
+```
+
+For end-to-end checks, exercise against a local PostgreSQL with the
+matching `erun-backend-db`-shaped schema:
+
+- `GET /healthz` → 204
+- `GET /v1/whoami` (no token) → 401
+- `GET /v1/whoami` (valid token, empty DB) → bootstraps + 200
+- `GET /v1/whoami` (valid token, unknown user, non-empty DB) → 401
