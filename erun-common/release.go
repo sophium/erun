@@ -1441,13 +1441,17 @@ func fileExists(path string) bool {
 }
 
 func findReleaseChartPaths(projectRoot string) ([]string, error) {
+	ignored, err := loadReleaseDiscoveryIgnoreSet(projectRoot)
+	if err != nil {
+		return nil, err
+	}
 	matches := make([]string, 0, 4)
-	err := filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if d.IsDir() {
-			if d.Name() == ".git" {
+			if skip := releaseDiscoverySkipDir(projectRoot, path, d, ignored); skip {
 				return filepath.SkipDir
 			}
 			return nil
@@ -1489,9 +1493,13 @@ func resolveReleaseModuleRoot(projectRoot string) (string, error) {
 }
 
 func findNestedReleaseRoots(projectRoot string) ([]string, error) {
+	ignored, err := loadReleaseDiscoveryIgnoreSet(projectRoot)
+	if err != nil {
+		return nil, err
+	}
 	matches := make([]string, 0, 2)
-	err := filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
-		dir, ok, walkErr := nestedReleaseRootCandidate(projectRoot, path, d, err)
+	err = filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
+		dir, ok, walkErr := nestedReleaseRootCandidate(projectRoot, path, d, err, ignored)
 		if ok {
 			matches = append(matches, dir)
 		}
@@ -1504,12 +1512,12 @@ func findNestedReleaseRoots(projectRoot string) ([]string, error) {
 	return matches, nil
 }
 
-func nestedReleaseRootCandidate(projectRoot, path string, d os.DirEntry, err error) (string, bool, error) {
+func nestedReleaseRootCandidate(projectRoot, path string, d os.DirEntry, err error, ignored *ignoreSet) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
 	if d.IsDir() {
-		if d.Name() == ".git" {
+		if skip := releaseDiscoverySkipDir(projectRoot, path, d, ignored); skip {
 			return "", false, filepath.SkipDir
 		}
 		return "", false, nil
@@ -1526,6 +1534,44 @@ func nestedReleaseRootCandidate(projectRoot, path string, d os.DirEntry, err err
 		return "", false, err
 	}
 	return dir, true, nil
+}
+
+// releaseDiscoverySkipDir reports whether the release walker should skip
+// descending into d. .git is excluded unconditionally (it is the VCS
+// store, not source). Anything ignored by the repo's .gitignore (root or
+// nested) is excluded too — third-party trees like node_modules/ or
+// vendor/ ship their own VERSION/Chart.yaml files that must not be
+// counted as release-root candidates.
+func releaseDiscoverySkipDir(projectRoot, path string, d os.DirEntry, ignored *ignoreSet) bool {
+	if d.Name() == ".git" {
+		return true
+	}
+	if path == projectRoot {
+		return false
+	}
+	rel, err := filepath.Rel(projectRoot, path)
+	if err != nil {
+		return false
+	}
+	return ignored.matches(filepath.ToSlash(rel), true)
+}
+
+// loadReleaseDiscoveryIgnoreSet builds the gitignore-only matcher used to
+// keep third-party trees out of release-root discovery. It deliberately
+// omits .dockerignore — that is the build-context contract, not the
+// source-tree contract — and relies on .gitignore alone to mark "not
+// part of this repo's source".
+func loadReleaseDiscoveryIgnoreSet(projectRoot string) (*ignoreSet, error) {
+	combined := &ignoreSet{}
+	root, err := loadIgnoreFile(filepath.Join(projectRoot, ".gitignore"), "")
+	if err != nil {
+		return nil, err
+	}
+	combined.patterns = append(combined.patterns, root.patterns...)
+	if err := loadNestedGitignores(projectRoot, []string{"."}, combined); err != nil {
+		return nil, err
+	}
+	return combined, nil
 }
 
 func releaseRootRelativeParts(projectRoot, dir string) ([]string, error) {
