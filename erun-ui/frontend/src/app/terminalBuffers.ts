@@ -43,14 +43,29 @@ export function rebuildTerminalDisplayBuffer(
 // without changing what the tools see. OSC 10/11/12 are not in this
 // list because terminalQueryResponses no longer answers those queries
 // (see the comment in that file).
+//
+// Each DA pattern covers both the full ESC-prefixed response *and* the
+// bare `<n>;<n>c` tail that survives when bash's readline consumes the
+// leading `\x1b[` and `\x1b[?` as an unknown function-key sequence,
+// leaving just the digits + semicolons + trailing `c` echoed to screen
+// as plain text. The tail pattern is anchored on a `c` that is
+// immediately preceded by a digit so legitimate prompt content
+// containing a `c` is not mangled (a bash prompt ending in `git:(main)
+// $` is safe; a string like `2c` after a number is not).
 const TERMINAL_RESPONSE_PATTERNS: RegExp[] = [
   // CSI Cursor Position Report response: ESC [ row ; col R
   /\x1B\[\d+;\d+R/g,
   // CSI Device Status Report response: ESC [ <n> n  (e.g. 0n)
   /\x1B\[\d+n/g,
   // Primary Device Attributes / Secondary Device Attributes responses
-  // (CSI ? <params> c)
-  /\x1B\[\?[\d;]+c/g,
+  // (CSI ? <params> c, CSI > <params> c, CSI <params> c)
+  /\x1B\[[?>]?[\d;]+c/g,
+  // Bare DA tail (`1;2c`, `0;276;0c`, …) — the digit/semicolon prefix
+  // that survives readline stripping the unprintable `\x1b[?`. Required
+  // because the prefix-stripped tail no longer matches the patterns
+  // above; without this the user sees the literal text at the prompt
+  // even when terminalQueryResponses no longer answers the query.
+  /(?:^|[^A-Za-z0-9])\d+(?:;\d+)+c(?![A-Za-z0-9])/g,
 ];
 
 function stripTerminalResponses(input: Uint8Array): Uint8Array {
