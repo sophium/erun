@@ -14,6 +14,8 @@ audit: erun build --dry-run --release
 release: branch=main mode=stable version=<VERSION>
 next version: <VERSION>
 docker image: ghcr.io/sophium/api:<VERSION>
+git -C <TMP> status --porcelain --untracked-files=no
+release: worktree clean = true
 stage: sync-remote
 cd <TMP> && git fetch origin
 cd <TMP> && git rebase origin/main

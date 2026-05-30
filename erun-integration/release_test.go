@@ -172,4 +172,27 @@ func TestRelease(t *testing.T) {
 		}
 		golden.Equal(t, "release/dry_run_skips_release_roots_in_gitignored_trees", normalize.Apply(result.Combined))
 	})
+
+	t.Run("dry_run_with_untracked_file_reports_worktree_clean", func(t *testing.T) {
+		// Regression for #400. release used to call
+		// `git status --porcelain` with no flags and treat any output as
+		// dirty, so an untracked .idea/ (or any other unignored
+		// IDE/generator droppings) blocked release in a real run.
+		// release publishes HEAD, not the worktree, so untracked files
+		// must not gate the flow. The dry-run trace now exposes the
+		// precondition outcome ("release: worktree clean = true") so
+		// the integration suite can lock the behavior.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		if err := os.MkdirAll(filepath.Join(setup.Cwd, ".idea"), 0o755); err != nil {
+			t.Fatalf("mkdir .idea: %v", err)
+		}
+		mustWriteFile(t, filepath.Join(setup.Cwd, ".idea", "workspace.xml"), "<project/>\n")
+
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "release/dry_run_with_untracked_file_reports_worktree_clean", normalize.Apply(result.Combined))
+	})
 }

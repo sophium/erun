@@ -13,6 +13,7 @@ release: develop branch "develop" exists = true
 audit: erun build --release
 release: branch= mode=prerelease version=<VERSION>
 docker image: ghcr.io/sophium/api:<VERSION>
+release: worktree clean = true
 stage: release
 release tag already exists at HEAD; skipping <VERSION>
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64

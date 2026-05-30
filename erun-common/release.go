@@ -208,17 +208,15 @@ func traceReleaseSpec(ctx Context, spec ReleaseSpec) {
 }
 
 func ensureReleaseWorktreeClean(ctx Context, projectRoot string) error {
-	if ctx.DryRun {
-		return nil
-	}
 	clean, err := gitWorktreeClean(ctx, projectRoot)
 	if err != nil {
 		return err
 	}
-	if !clean {
-		return fmt.Errorf("release requires a clean git worktree; commit or stash changes first")
+	ctx.Trace(fmt.Sprintf("release: worktree clean = %v", clean))
+	if clean || ctx.DryRun {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("release requires a clean git worktree; commit or stash changes first")
 }
 
 func runReleaseStage(ctx Context, spec ReleaseSpec, stage ReleaseStage, runGit GitCommandRunnerFunc, syncPackagingChecksums ReleasePackagingSyncerFunc) error {
@@ -449,8 +447,12 @@ func GitCommandRunner(dir string, stdout, stderr io.Writer, args ...string) erro
 }
 
 func gitWorktreeClean(ctx Context, projectRoot string) (bool, error) {
-	ctx.TraceCommand("", "git", "-C", projectRoot, "status", "--porcelain")
-	output, err := Command("git", "-C", projectRoot, "status", "--porcelain").CombinedOutput()
+	// Only tracked-file changes gate the release: release publishes HEAD,
+	// not the working tree, so untracked files (e.g. IDE state under
+	// .idea/, generator output) cannot affect what would be released and
+	// must not block the flow.
+	ctx.TraceCommand("", "git", "-C", projectRoot, "status", "--porcelain", "--untracked-files=no")
+	output, err := Command("git", "-C", projectRoot, "status", "--porcelain", "--untracked-files=no").CombinedOutput()
 	if err != nil {
 		return false, err
 	}

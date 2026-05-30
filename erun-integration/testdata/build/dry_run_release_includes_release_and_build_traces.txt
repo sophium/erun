@@ -13,6 +13,8 @@ release: develop branch "develop" exists = true
 audit: erun build --dry-run --release
 release: branch=develop mode=candidate version=<VERSION>
 docker image: ghcr.io/sophium/api:<VERSION>
+git -C <TMP> status --porcelain --untracked-files=no
+release: worktree clean = true
 stage: sync-remote
 cd <TMP> && git fetch origin
 cd <TMP> && git rebase origin/develop
