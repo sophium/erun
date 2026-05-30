@@ -145,4 +145,31 @@ func TestRelease(t *testing.T) {
 		}
 		golden.Equal(t, "release/dry_run_force_includes_tag_deletion_for_stale_release_tag", normalize.Apply(result.Combined))
 	})
+
+	t.Run("dry_run_skips_release_roots_in_gitignored_trees", func(t *testing.T) {
+		// Regression for #398. The release-root walker used to descend
+		// into third-party trees and treat every VERSION file as a
+		// candidate. In a contribute clone where `yarn install` ran in
+		// `erun-docs/`, `erun-docs/node_modules/lunr/VERSION` was
+		// picked up alongside `erun-devops/VERSION`, and resolution
+		// failed with "multiple release roots found under project
+		// root". The walker now honors .gitignore (root + nested), so
+		// any VERSION file in an ignored tree drops out of discovery.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		docsDir := filepath.Join(setup.Cwd, "erun-docs")
+		if err := os.MkdirAll(filepath.Join(docsDir, "node_modules", "lunr"), 0o755); err != nil {
+			t.Fatalf("mkdir node_modules/lunr: %v", err)
+		}
+		mustWriteFile(t, filepath.Join(docsDir, ".gitignore"), "node_modules\n")
+		mustWriteFile(t, filepath.Join(docsDir, "node_modules", "lunr", "VERSION"), "2.3.9\n")
+		fixture.RunGit(t, setup.Cwd, "add", "erun-docs/.gitignore")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "ignore node_modules in docs")
+
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "release/dry_run_skips_release_roots_in_gitignored_trees", normalize.Apply(result.Combined))
+	})
 }
