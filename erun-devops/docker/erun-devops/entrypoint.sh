@@ -761,14 +761,24 @@ start_environment_idle_monitor() {
                 # Reset the log each attempt so it reflects only the latest
                 # one — empty on success, the most recent error on failure.
                 : >"${stop_log}"
-                graceful_quit_clients >>"${stop_log}" 2>&1 || true
+                # Ask AWS to stop the host first. EC2 stop-instances returns
+                # immediately with `PendingState=stopping`; the OS-level
+                # shutdown follows asynchronously, so there is plenty of
+                # window to gracefully terminate clients before power-off.
+                # Quitting clients pre-emptively would destroy the user's
+                # claude/codex state for nothing when the stop is refused
+                # (e.g. `disableApiStop=true`, missing permission), and
+                # would re-kill them on every subsequent tick.
                 if stop_cloud_host >>"${stop_log}" 2>&1; then
+                    graceful_quit_clients >>"${stop_log}" 2>&1 || true
                     exit 0
                 fi
-                # A transient AWS failure (e.g. RequestExpired) leaves the
-                # loop running; the next tick re-checks stop-ready and
-                # retries. The error stays in idle-stop.log for the desktop
-                # to surface until the next attempt overwrites it.
+                # A transient AWS failure (e.g. RequestExpired) or a
+                # permanent one (e.g. stop-protection) leaves the loop
+                # running and the user's processes untouched; the next
+                # tick re-checks stop-ready and retries. The error stays
+                # in idle-stop.log for the desktop to surface until the
+                # next attempt overwrites it.
             fi
         done
     ) &
