@@ -29,7 +29,14 @@ type contributeAppForward struct {
 	localPort int
 }
 
-const contributeAppPortReachableTimeout = 30 * time.Second
+// contributeAppPortReachableTimeout is generous on purpose. The first
+// in-pod build of erun-app does yarn install, the lint/typecheck/format
+// gates (unless ERUN_SKIP_LINT=1 is honored by the prelude), the vite
+// frontend bundle, then a CGO Go build linking against webkit2gtk. On
+// a cold pod that's 2-3 minutes; subsequent incremental builds are
+// ~30s. 5 minutes leaves headroom for both without being so long that
+// a genuine failure (no listener, port-forward dead) hides behind it.
+const contributeAppPortReachableTimeout = 5 * time.Minute
 
 func (a *App) startContributeAppForward(ctx context.Context, selection uiSelection) (*contributeAppForward, int, error) {
 	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{

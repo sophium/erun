@@ -101,11 +101,18 @@ function ContributeAppLauncher({ selected }: { selected: UISelection }): React.R
         onClick={() => {
           if (busy) return;
           setBusy(true);
-          // The Go side opens the URL in the user's default browser
-          // via Wails BrowserOpenURL after the headless server is
-          // actually serving HTTP; the frontend only needs to surface
-          // the URL in the notification so the user can copy/paste if
-          // their default browser handler is misconfigured.
+          // Show an immediate "building" notification so the user
+          // knows the long-running rebuild is in flight; without it
+          // the launcher button just disables for ~3 minutes on the
+          // first build. The Go side opens the URL in the user's
+          // default browser via Wails BrowserOpenURL after the
+          // headless server is actually serving HTTP.
+          dispatch(
+            showNotification(
+              'info',
+              'Building contribute app in env — first build can take 2–3 minutes; watch the ERun (contribute) tab for progress.',
+            ),
+          );
           StartContributeApp(selected)
             .then((launch) => {
               if (launch.url) {

@@ -142,9 +142,16 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 // contribute tab's shell so the contribute clone becomes the working
 // directory and the shim becomes the resolved `erun`. The AI variant
 // additionally invokes the env's configured AI tool.
+//
+// ERUN_SKIP_LINT=1 is set in the contribute shell because the user
+// is iterating — they want fast incremental rebuilds, not a full
+// typecheck+lint+format gate on every `erun app`. The host-side
+// `erun app` workflow leaves the gates on (no contribute prelude
+// runs there), and CI still enforces them.
 func buildContributePreludeCommand(withAI bool, aiTool string) string {
 	parts := []string{
 		`export PATH="$HOME/.erun/contribute/bin:$PATH"`,
+		`export ERUN_SKIP_LINT=1`,
 		`cd "$HOME/git/erun"`,
 		`clear`,
 	}
