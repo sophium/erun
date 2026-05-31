@@ -33,6 +33,29 @@ contexts:
       namespace: ${namespace}
       user: erun-devops
     name: in-cluster
+EOF
+        # Replicate the outer cloud-context name (e.g.
+        # `erun-001-020362606330-eu-west-2`) as a second context
+        # entry pointing at the same in-cluster cluster/user/namespace.
+        # The desktop-synced env config, the contribute clone's
+        # ~/.config/erun/<tenant>/<env>/config.yaml, and any
+        # cloud-context lookup that knows the outer name all end up
+        # invoking `kubectl --context <outer-name>` from inside the
+        # pod. Without this alias that call returns "context does
+        # not exist" and the open path fails the deployment check.
+        # The alias is harmless when ERUN_CLOUD_CONTEXT_NAME is unset
+        # or already equals in-cluster.
+        outer_context="${ERUN_CLOUD_CONTEXT_NAME:-${ERUN_KUBERNETES_CONTEXT:-}}"
+        if [ -n "${outer_context}" ] && [ "${outer_context}" != "in-cluster" ]; then
+            cat >>"${kubeconfig_path}" <<EOF
+  - context:
+      cluster: in-cluster
+      namespace: ${namespace}
+      user: erun-devops
+    name: ${outer_context}
+EOF
+        fi
+        cat >>"${kubeconfig_path}" <<EOF
 current-context: in-cluster
 users:
   - name: erun-devops
@@ -770,6 +793,18 @@ start_environment_idle_monitor() {
                 # (e.g. `disableApiStop=true`, missing permission), and
                 # would re-kill them on every subsequent tick.
                 if stop_cloud_host >>"${stop_log}" 2>&1; then
+                    # Persist the audit record before we hand off to
+                    # graceful_quit_clients. `erun activity record-stop`
+                    # reads stop-pending.json (which the same stop-ready
+                    # call just consumed) to recover the per-marker
+                    # breakdown, then writes stop-history.json + clears
+                    # the pending file. Best-effort — a failure here
+                    # does not block the EC2 stop because the AWS call
+                    # has already succeeded.
+                    erun activity record-stop \
+                        --tenant "${ERUN_TENANT}" \
+                        --environment "${ERUN_ENVIRONMENT}" \
+                        >>"${stop_log}" 2>&1 || true
                     graceful_quit_clients >>"${stop_log}" 2>&1 || true
                     exit 0
                 fi

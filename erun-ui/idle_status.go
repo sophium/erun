@@ -97,6 +97,17 @@ func idleStatusToUI(status eruncommon.EnvironmentIdleStatus) uiIdleStatus {
 		StopBlockedReason:   strings.TrimSpace(status.StopBlockedReason),
 		StopError:           strings.TrimSpace(status.StopError),
 		Markers:             markers,
+		// Pending-stop fields are owned by the shared
+		// `MaybeArmOrFireIdleStop` decision function, written into
+		// the env's stop-pending.json on the pod's shared PVC by the
+		// in-pod monitor, and surfaced through
+		// `ResolveStoredEnvironmentIdleStatus`. The desktop only
+		// observes them — no local map, no clock injection — so the
+		// pill renders the same state whether the in-pod monitor or
+		// any other client armed it.
+		StopPendingSince:       strings.TrimSpace(status.StopPendingSince),
+		SecondsUntilForcedStop: status.SecondsUntilForcedStop,
+		GracePeriodSeconds:     status.GracePeriodSeconds,
 	}
 }
 
@@ -203,70 +214,102 @@ func uiStopBlockedReason(markers []eruncommon.EnvironmentIdleMarker) string {
 	return ""
 }
 
-func (a *App) maybeStopIdleCloudEnvironment(result eruncommon.OpenResult, status eruncommon.EnvironmentIdleStatus) {
+// maybeStopIdleCloudEnvironment used to fire the auto-stop from the
+// desktop side. That responsibility now lives entirely in the in-pod
+// idle monitor (erun-devops/docker/erun-devops/entrypoint.sh ->
+// `erun activity stop-ready` -> `MaybeArmOrFireIdleStop` in
+// erun-common), so the desktop only needs to clear the post-fire
+// `idleStops` latch when an env reappears as running — that keeps
+// `StartCloudContext` callers from latching the "we already fired"
+// flag forever and matches the historical behavior the existing
+// tests pin down. All grace-period state lives on the pod's shared
+// PVC and is surfaced through the MCP `idle` tool response, so the
+// desktop is now a pure observer.
+func (a *App) maybeStopIdleCloudEnvironment(result eruncommon.OpenResult, _ eruncommon.EnvironmentIdleStatus) {
 	cloudContext, ok, err := a.linkedCloudContext(result.EnvConfig)
 	if err != nil || !ok {
 		return
 	}
-	// Reconcile stale idleStops markers with the current cloud context.
-	// If the context is running again — manually restarted via the
-	// titlebar Play button, restarted by `erun open` preflight in a
-	// terminal we don't track, or restarted by anything outside the
-	// desktop — our prior auto-stop has been undone and a fresh stop
-	// should be allowed to fire when markers next expire. Without this
-	// reconcile, the idleStops flag latches forever after the first stop
-	// and the env can never auto-stop a second time.
-	//
-	// When clearing actually removes a stale flag, return early: the
-	// idle markers loaded for this call were computed before the
-	// restart was observed and may indicate "everything has been idle
-	// for hours," which would otherwise refire a stop on a context the
-	// user just brought back up. The next idle poll re-runs in ~1s
-	// with fresh markers; let that one decide whether to stop.
 	if strings.TrimSpace(cloudContext.Status) == eruncommon.CloudContextStatusRunning {
-		if a.clearIdleStopsForCloudContext(cloudContext.Name) {
-			return
-		}
+		a.clearIdleStopsForCloudContext(cloudContext.Name)
 	}
-	if !status.ManagedCloud || !status.StopEligible {
-		return
-	}
-	key := selectionKey(uiSelection{Tenant: result.Tenant, Environment: result.Environment})
-	busyKey := environmentBusyKey(uiSelection{Tenant: result.Tenant, Environment: result.Environment})
-	a.mu.Lock()
-	if a.busyEnvs[busyKey] > 0 {
-		a.mu.Unlock()
-		return
-	}
-	if _, exists := a.idleStops[key]; exists {
-		a.mu.Unlock()
-		return
-	}
-	a.idleStops[key] = struct{}{}
-	a.mu.Unlock()
+}
 
-	a.emitAppStatus(fmt.Sprintf("Stopping idle cloud context %s...", cloudContextDisplayName(cloudContext)), true)
-	go func() {
-		ctx := a.ctx
-		if ctx == nil {
-			ctx = context.Background()
+// CancelPendingIdleStop dismisses the grace-period warning for the
+// supplied env by calling the in-pod MCP `idle_stop_cancel` tool.
+// Cleared state lives on the pod's PVC so any subsequent client
+// (the in-pod monitor's next tick, another desktop, the History
+// tab) sees the dismissal. Returns an error when MCP is unreachable
+// (e.g., the env is mid-stop or the port-forward is broken); the UI
+// surfaces the error verbatim.
+func (a *App) CancelPendingIdleStop(selection uiSelection) error {
+	selection = normalizeSelection(selection)
+	if selection.Tenant == "" || selection.Environment == "" {
+		return fmt.Errorf("tenant and environment are required")
+	}
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+	})
+	if err != nil {
+		return err
+	}
+	endpoint := mcpEndpointForOpenResult(result)
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := cancelStopPendingViaMCP(ctx, endpoint, selection.Tenant, selection.Environment); err != nil {
+		return err
+	}
+	a.emitAppNotification("info", fmt.Sprintf("Cancelled pending auto-stop for %s/%s.", selection.Tenant, selection.Environment))
+	return nil
+}
+
+// LoadStopHistory returns the env's last N auto-stop audit records,
+// newest first. Reads through the in-pod MCP `idle_stop_history`
+// tool so the canonical history (the one the in-pod monitor wrote
+// after each `stop_cloud_host` call) is what the desktop renders.
+func (a *App) LoadStopHistory(selection uiSelection) ([]uiLastStopEvent, error) {
+	selection = normalizeSelection(selection)
+	if selection.Tenant == "" || selection.Environment == "" {
+		return nil, fmt.Errorf("tenant and environment are required")
+	}
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+	})
+	if err != nil {
+		return nil, err
+	}
+	endpoint := mcpEndpointForOpenResult(result)
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	entries, err := loadStopHistoryViaMCP(ctx, endpoint, selection.Tenant, selection.Environment)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]uiLastStopEvent, 0, len(entries))
+	for _, entry := range entries {
+		ui := uiLastStopEvent{
+			StoppedAt:        entry.StoppedAt.UTC().Format(time.RFC3339),
+			GraceSeconds:     entry.GraceSeconds,
+			Reason:           strings.TrimSpace(entry.Reason),
+			CloudContextName: strings.TrimSpace(entry.CloudContextName),
 		}
-		stopped, err := a.deps.stopCloudContext(ctx, cloudContext.Name)
-		if err != nil {
-			a.mu.Lock()
-			delete(a.idleStops, key)
-			a.mu.Unlock()
-			a.emitAppStatus(fmt.Sprintf("Failed to stop idle cloud context %s: %s", cloudContextDisplayName(cloudContext), err.Error()), false)
-			return
+		for _, marker := range entry.Markers {
+			ui.Markers = append(ui.Markers, uiLastStopMarker{
+				Name:           strings.TrimSpace(marker.Name),
+				Idle:           marker.Idle,
+				Reason:         strings.TrimSpace(marker.Reason),
+				SecondsIdleFor: marker.SecondsIdleFor,
+			})
 		}
-		a.setCloudContextStatusInCache(stopped.Name, stopped.Status)
-		// The auto-stop succeeded — a one-shot info event with no follow-up
-		// action. Route through the toast channel so it auto-dismisses
-		// instead of latching as a titlebar pill that would later
-		// contradict the real state when the user reopens the env and
-		// the cloud context is restarted. See issue #361.
-		a.emitAppNotification("info", fmt.Sprintf("Stopped idle cloud context %s.", cloudContextDisplayName(cloudContext)))
-	}()
+		out = append(out, ui)
+	}
+	return out, nil
 }
 
 // clearIdleStopsForCloudContext removes any latched auto-stop flag

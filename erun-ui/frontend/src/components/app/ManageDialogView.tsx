@@ -20,6 +20,7 @@ import { dialogErrorClassName } from '@/components/app/ManageDialog.helpers';
 import { ClaudeSettingsSection } from '@/components/app/ManageDialogAITab';
 import { DeleteConfirmationFields } from '@/components/app/ManageDialogDeleteTab';
 import { GeneralTab } from '@/components/app/ManageDialogGeneralTab';
+import { HistoryTab } from '@/components/app/ManageDialogHistoryTab';
 import { PortsTab } from '@/components/app/ManageDialogPortsTab';
 import { RuntimeTab } from '@/components/app/ManageDialogRuntimeTab';
 import { DiagnosticsSection, SSHAccessSection } from '@/components/app/ManageDialogSSHTab';
@@ -153,6 +154,7 @@ function ManageDialogContent({
           <DirtyAwareTabsTrigger value="ai" label="AI" dialog={dialog} />
           <DirtyAwareTabsTrigger value="ports" label="Ports" dialog={dialog} />
           <DirtyAwareTabsTrigger value="ssh" label="SSH" dialog={dialog} />
+          <DirtyAwareTabsTrigger value="history" label="History" dialog={dialog} />
         </TabsList>
         <div className="-mx-1 min-h-0 flex-1 overflow-auto px-1 pb-1">
           <TabsContent value="general" className="grid gap-3">
@@ -170,6 +172,9 @@ function ManageDialogContent({
           <TabsContent value="ssh" className="grid gap-3">
             <SSHAccessSection dialog={dialog} />
             <DiagnosticsSection dialog={dialog} />
+          </TabsContent>
+          <TabsContent value="history" className="grid gap-3">
+            <HistoryTab selection={dialog.selection} open={dialog.open && editTab === 'history'} />
           </TabsContent>
         </div>
       </Tabs>

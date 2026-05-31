@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
-export type ManageTab = 'General' | 'Runtime' | 'AI' | 'Ports' | 'SSH';
+export type ManageTab = 'General' | 'Runtime' | 'AI' | 'Ports' | 'SSH' | 'History';
 
 // ManageDialog POM. The dialog title is "<tenant>-<environment>", so the
 // caller may pass the expected title for a strict match; otherwise the POM

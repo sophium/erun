@@ -1,7 +1,10 @@
 import type { UIIdleStatus, UISelection } from '@/types';
 
+import { CancelPendingIdleStop } from '../../wailsjs/go/main/App';
 import { idleApi } from './api/idleApi';
 import { restoreEnvTabsAfterContextRunning } from './envRestoreThunks';
+import { readError } from './errors';
+import { showNotification } from './notificationThunks';
 import { setIdleStatus } from './slices/idleSlice';
 import { bumpIdleStatus } from './slices/requestCountersSlice';
 import type { AppThunk } from './store';
@@ -90,5 +93,25 @@ export const refreshIdleStatus =
       if (isRequestStillCurrent(request, getState)) {
         controller.scheduleIdleStatusPoll();
       }
+    }
+  };
+
+// cancelPendingIdleStop dismisses the grace-period warning for the
+// supplied env. The Go side proxies through the in-pod MCP
+// `idle_stop_cancel` tool to clear the shared stop-pending.json
+// file; the next idle poll from either the desktop or the in-pod
+// monitor re-evaluates eligibility from scratch, so this is
+// effectively a one-shot snooze — if the user remains idle, the
+// warning re-arms with a fresh grace window.
+export const cancelPendingIdleStop =
+  (selection: UISelection): AppThunk<Promise<void>> =>
+  async (dispatch) => {
+    try {
+      await CancelPendingIdleStop(selection);
+      void dispatch(refreshIdleStatus());
+    } catch (error) {
+      dispatch(
+        showNotification('error', `Failed to cancel pending auto-stop: ${readError(error)}`),
+      );
     }
   };

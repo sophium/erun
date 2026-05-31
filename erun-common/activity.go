@@ -116,6 +116,15 @@ type EnvironmentIdleStatus struct {
 	SecondsUntilStop    int64                                  `json:"secondsUntilStop,omitempty"`
 	Markers             []EnvironmentIdleMarker                `json:"markers"`
 	Activity            map[string]EnvironmentActivitySnapshot `json:"activity,omitempty"`
+	// StopPendingSince is the RFC3339 time at which the auto-stop
+	// grace period was first armed (i.e. the first poll that saw
+	// StopEligible=true with no prior pending entry on disk). While
+	// set, the in-pod monitor and the desktop both treat the env as
+	// "warning, not yet ready to fire" — `MaybeArmOrFireIdleStop`
+	// only returns "fire" once `now - since >= grace`.
+	StopPendingSince       string `json:"stopPendingSince,omitempty"`
+	SecondsUntilForcedStop int64  `json:"secondsUntilForcedStop,omitempty"`
+	GracePeriodSeconds     int64  `json:"gracePeriodSeconds,omitempty"`
 }
 
 func (c EnvironmentIdleConfig) Resolve() (EnvironmentIdlePolicy, error) {
@@ -272,7 +281,44 @@ func ResolveStoredEnvironmentIdleStatus(store EnvironmentIdleStore, tenant, envi
 		status.StopBlockedReason = "environment is not cloud-managed"
 	}
 	status.StopError = loadEnvironmentIdleStopError(tenant, environment)
+	status = overlayStopPending(status, tenant, environment, now)
 	return status, nil
+}
+
+// overlayStopPending reads <home>/.erun/<tenant>/<env>/stop-pending.json
+// (when present) and fills the StopPendingSince /
+// SecondsUntilForcedStop / GracePeriodSeconds fields on the status.
+// Callers that drive `MaybeArmOrFireIdleStop` write to this same
+// file, so any consumer of the resolved status sees the grace
+// window — the in-pod monitor inside the EC2, the desktop through
+// the MCP `idle` tool, and any future external client.
+func overlayStopPending(status EnvironmentIdleStatus, tenant, environment string, now time.Time) EnvironmentIdleStatus {
+	if !status.ManagedCloud || !status.StopEligible {
+		// Eligibility lapsed — the next MaybeArmOrFireIdleStop call
+		// will clear the pending file. We avoid surfacing a stale
+		// pending entry to readers that don't drive the decision
+		// function (the MCP `idle` tool, etc.).
+		return status
+	}
+	pending, ok, err := LoadEnvironmentStopPending(tenant, environment)
+	if err != nil || !ok {
+		return status
+	}
+	if now.IsZero() {
+		now = time.Now()
+	}
+	elapsed := int64(now.Sub(pending.Since).Seconds())
+	if elapsed < 0 {
+		elapsed = 0
+	}
+	remaining := pending.GraceSeconds - elapsed
+	if remaining < 0 {
+		remaining = 0
+	}
+	status.StopPendingSince = pending.Since.UTC().Format(time.RFC3339)
+	status.GracePeriodSeconds = pending.GraceSeconds
+	status.SecondsUntilForcedStop = remaining
+	return status
 }
 
 func loadEnvironmentIdleStopError(tenant, environment string) string {

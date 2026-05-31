@@ -30,6 +30,9 @@ export function manageDialogTabHasUnsavedChanges(
         JSON.stringify(config.sshd.workspaceSyncLocalPath) !==
           JSON.stringify(initial.sshd.workspaceSyncLocalPath)
       );
+    case 'history':
+      // History is read-only — no edits, no save, never dirty.
+      return false;
     case 'delete':
       return false;
   }

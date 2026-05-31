@@ -31,6 +31,9 @@ Repository guidance for humans and coding agents working in this repo.
 - If the user asks for `push, accept`, treat that as completing the full publish flow rather than stopping after the branch push.
 - If the user asks to `close`, always treat that as the repository publish flow in this repo: push the branch, open the PR, merge it with squash unless they asked otherwise, close the PR via merge, and close the linked issue.
 - Do not interpret `close` as a request to end or archive the conversation in this repository.
+- Publishing needs an authenticated `gh`. If `gh auth status` reports no host, do not stop and hand the publish flow back to the user. Drive the GitHub OAuth device flow yourself: `POST https://github.com/login/device/code` with the GitHub CLI client id `178c6fc778ccc68e1d6a` and scope `repo read:org gist workflow`, surface the returned `user_code` together with `https://github.com/login/device`, then poll `POST https://github.com/login/oauth/access_token` (grant `urn:ietf:params:oauth:grant-type:device_code`) until it returns an `access_token`. Store it with `gh auth login --with-token`, then continue the publish flow without further user input.
+- The device-code entry in the user's browser is the only auth step that requires the user, and it requires only that — not a pasted token, and not an interactive `gh auth login` in a TTY. `gh auth login` (including `--web`) hangs in this harness because it has no controlling terminal; the curl-driven device flow does not, so prefer it.
+- Never fabricate a token, scrape application secrets for one, or report the publish flow as blocked on authentication before attempting the device flow.
 - Stay within the current PR for the whole body of related work. When additional bugs, gaps, or improvements surface while working on a branch, add them to the same PR rather than filing a separate issue or opening a new branch. Do not propose splitting work into multiple PRs, and do not ask whether to split — assume the answer is "no" unless the user explicitly says otherwise. Update the PR title and body to reflect the broader scope when the diff grows.
 - One body of work, one PR. The PR may link to multiple issues (`Closes #A` / `Closes #B`), but the unit of review is the PR, not the issue.
 
@@ -221,6 +224,22 @@ When the user reports "still broken after your fix": run these probes first, the
 - Clone HEAD is behind → I shipped a `build.sh` / `run.sh` fix but the pod's `~/git/erun` still has the old script. The `erun contribute clone` command always lands on the repository's default branch; while iterating on an unmerged feature branch the clone needs to be advanced manually. Action: `raw command=["sh","-c","cd /home/erun/git/erun && git fetch origin && git checkout <branch> && git pull --ff-only"]`, then ask the user to retry the click. After the PR is merged, a `git pull` on main is enough.
 
 If the probes all show the expected state but the user-visible click still fails, the bug is in the desktop layer or in how the desktop talks to the pod (port-forward, browser open, etc.), not in the in-pod fix.
+
+## End-to-End Verification Gate (Mandatory)
+
+When a user reports a bug they observed, or when a change touches behaviour that ships in a deployed artifact, the agent verifies the fix end-to-end in the live target — itself, not by handing steps back to the user. Test suites (unit, integration, UI-harness) give code-level confidence; they do not replace running the originally failing flow against the deployed artifact and watching it succeed.
+
+The gate has three parts:
+
+1. **Roll the change into the actual target.** Whatever the change ships through (image, chart, binary, config), drive that path until the running target carries the change. Cached/promoted artifact pipelines must be bypassed when needed so the new content really lands, not a stale equivalent. When an unrelated external precondition blocks the standard rollout, find an equivalent narrower path (direct patch, manual deploy step, etc.) so the target picks up the fix and the gate can proceed; don't stop at "rollout failed, blocked."
+
+2. **Reproduce the original failure verbatim from the same vantage point.** Run the same command, from the same place, with the same inputs the user did. If the failure was inside a sandboxed runtime, exercise it from inside that runtime. If it was a layer talking to another layer, exercise it through that same interface. Use the project's already-documented diagnostic surfaces to reach the deployed state; spin up the minimum harness needed when none exists. Watching it succeed is the gate; watching a related path succeed is not.
+
+3. **Be honest about what you didn't verify.** Some surfaces can't be driven without a human (interactive UI rendering, OS-level integration, real keystroke timing). Name those explicitly, point at the closest test-harness signal that covers them, and don't pad the verified-list with checks that did not happen against the actual deployed artifact.
+
+Exceptions are narrow: changes with no live-target surface (pure refactors that don't change observable behaviour) are validated by the existing suites alone. Anything that crosses a deployed boundary triggers the full gate.
+
+Probe artifacts the agent leaves behind during verification (injected files, manual patches that diverge from the source of truth, helper processes) are the agent's mess to clean up before declaring done, so the user's environment returns to a clean state.
 
 ## Integration Test Gate (Mandatory)
 

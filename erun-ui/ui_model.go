@@ -388,6 +388,37 @@ type uiIdleStatus struct {
 	CloudContextStatus  string         `json:"cloudContextStatus,omitempty"`
 	CloudContextLabel   string         `json:"cloudContextLabel,omitempty"`
 	Markers             []uiIdleMarker `json:"markers,omitempty"`
+	// StopPendingSince carries the RFC3339 timestamp at which this env
+	// first became StopEligible. When set, the desktop has armed the
+	// grace-period warning and the user has SecondsUntilForcedStop
+	// seconds to cancel or resume activity before the real
+	// ec2:StopInstances fires. Empty when no auto-stop is pending.
+	StopPendingSince        string `json:"stopPendingSince,omitempty"`
+	SecondsUntilForcedStop  int64  `json:"secondsUntilForcedStop,omitempty"`
+	GracePeriodSeconds      int64  `json:"gracePeriodSeconds,omitempty"`
+}
+
+// uiLastStopEvent describes the most recent automatic stop of a
+// managed cloud env. Populated from <userConfig>/erun/<tenant>/<env>/
+// last-stop.json which is written by the desktop's idle-stop fire
+// path. Surfaced in the idle tooltip so the user can answer "why did
+// my env stop?" without trawling the activity drawer.
+type uiLastStopEvent struct {
+	StoppedAt        string                `json:"stoppedAt"`
+	GraceSeconds     int64                 `json:"graceSeconds"`
+	Reason           string                `json:"reason"`
+	CloudContextName string                `json:"cloudContextName,omitempty"`
+	Markers          []uiLastStopMarker    `json:"markers,omitempty"`
+}
+
+// uiLastStopMarker records the per-marker idle/active state captured
+// at the moment the auto-stop fired so the user can see which
+// activity sources were quiet.
+type uiLastStopMarker struct {
+	Name           string `json:"name"`
+	Idle           bool   `json:"idle"`
+	Reason         string `json:"reason,omitempty"`
+	SecondsIdleFor int64  `json:"secondsIdleFor,omitempty"`
 }
 
 type uiIdleMarker struct {

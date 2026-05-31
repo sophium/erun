@@ -2678,82 +2678,16 @@ func TestMergeLocalIdleActivityUsesSavedPolicyWithRemoteActivity(t *testing.T) {
 	}
 }
 
-func TestLoadIdleStatusStopsLinkedCloudContextWhenStopEligible(t *testing.T) {
-	projectRoot := t.TempDir()
-	store := stubUIStore{
-		config: &eruncommon.ERunConfig{
-			CloudContexts: []eruncommon.CloudContextConfig{{
-				Name:               "cloud-ctx",
-				CloudProviderAlias: "team-cloud",
-				KubernetesContext:  "cluster-cloud",
-			}},
-		},
-		tenants: map[string]eruncommon.TenantConfig{
-			"team-stop": {
-				Name:               "team-stop",
-				ProjectRoot:        projectRoot,
-				DefaultEnvironment: "dev-stop",
-			},
-		},
-		envs: map[string]eruncommon.EnvConfig{
-			"team-stop/dev-stop": {
-				Name:               "dev-stop",
-				RepoPath:           projectRoot,
-				KubernetesContext:  "cluster-cloud",
-				CloudProviderAlias: "team-cloud",
-				ManagedCloud:       true,
-				Remote:             true,
-			},
-		},
-	}
-	stopped := make(chan string, 1)
-	app := NewApp(erunUIDeps{
-		store:               store,
-		canConnectLocalPort: func(int) bool { return true },
-		loadIdleStatus: func(context.Context, string) (eruncommon.EnvironmentIdleStatus, error) {
-			return eruncommon.EnvironmentIdleStatus{
-				ManagedCloud: true,
-				StopEligible: true,
-				Policy: eruncommon.EnvironmentIdlePolicy{
-					Timeout: 5 * time.Minute,
-				},
-				Markers: []eruncommon.EnvironmentIdleMarker{
-					{Name: "working-hours", Idle: true},
-					{Name: eruncommon.ActivityKindSSH, Idle: true},
-					{Name: eruncommon.ActivityKindMCP, Idle: true},
-					{Name: eruncommon.ActivityKindCLI, Idle: true},
-					{Name: eruncommon.ActivityKindCodex, Idle: true},
-				},
-			}, nil
-		},
-		stopCloudContext: func(_ context.Context, name string) (eruncommon.CloudContextStatus, error) {
-			stopped <- name
-			return eruncommon.CloudContextStatus{
-				CloudContextConfig: eruncommon.CloudContextConfig{Name: name},
-				Status:             eruncommon.CloudContextStatusStopped,
-			}, nil
-		},
-	})
-	defer app.shutdown(context.Background())
-	app.setCloudContextStatusInCache("cloud-ctx", eruncommon.CloudContextStatusRunning)
-
-	status, err := app.LoadIdleStatus(uiSelection{Tenant: "team-stop", Environment: "dev-stop"})
-	if err != nil {
-		t.Fatalf("LoadIdleStatus failed: %v", err)
-	}
-	if status.CloudContextName != "cloud-ctx" || status.CloudContextStatus != eruncommon.CloudContextStatusRunning || status.CloudContextLabel != "cluster-cloud" {
-		t.Fatalf("unexpected linked cloud context details: %+v", status)
-	}
-
-	select {
-	case got := <-stopped:
-		if got != "cloud-ctx" {
-			t.Fatalf("stopped context %q, want cloud-ctx", got)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for cloud context stop")
-	}
-}
+// Note: the previous TestLoadIdleStatusStopsLinkedCloudContextWhenStopEligible
+// test verified that LoadIdleStatus would itself fire ec2:StopInstances
+// when the env became eligible. That behavior moved out of the desktop
+// in PR #411 commit "Unify auto-stop grace period across desktop and
+// in-pod monitor" — the shared `MaybeArmOrFireIdleStop` in erun-common
+// is now the only arbiter and it is driven exclusively by the in-pod
+// monitor via `erun activity stop-ready`. The desktop is a pure
+// observer (renders the warning pill, exposes the Cancel button via
+// MCP). The arm→wait→fire transitions are covered by integration
+// scenarios under erun-integration/testdata/activity.
 
 func TestStartCloudContextClearsPreviousIdleStop(t *testing.T) {
 	store := stubUIStore{
