@@ -25,6 +25,22 @@ import {
 import { wailsApi } from './wailsApi';
 import { type NoValue, wailsQueryFn } from './wailsBaseQuery';
 
+async function pushApiStopMutationIntoCache(
+  name: string,
+  api: {
+    dispatch: (action: unknown) => unknown;
+    queryFulfilled: Promise<{ data: UICloudContextStatus }>;
+  },
+): Promise<void> {
+  try {
+    const { data } = await api.queryFulfilled;
+    api.dispatch(cloudApi.util.updateQueryData('getCloudContextApiStop', name, () => data));
+  } catch {
+    // Mutation failed; the toast surfaces the error and the next
+    // describe-on-remount reconciles the cache.
+  }
+}
+
 export const cloudApi = wailsApi.injectEndpoints({
   endpoints: (builder) => ({
     getCloudContextStatuses: builder.query<UICloudContextStatus[], NoValue>({
@@ -59,13 +75,21 @@ export const cloudApi = wailsApi.injectEndpoints({
       queryFn: wailsQueryFn<string, UICloudContextStatus>((name) =>
         DisableCloudContextApiStop(name),
       ),
-      invalidatesTags: (_result, _error, name) => [{ type: 'CloudContextApiStop', id: name }],
+      // The mutation already returns the authoritative post-modify
+      // state. An invalidatesTags refetch here would call
+      // describe-instance-attribute inside AWS's eventual-consistency
+      // window for the just-issued modify-instance-attribute and could
+      // return the pre-modify value, flipping the lock icon back to
+      // its previous state right after the success toast fired. Push
+      // the mutation result into the cache directly instead; the
+      // widget's refetchOnMountOrArgChange picks up any later drift.
+      onQueryStarted: pushApiStopMutationIntoCache,
     }),
     enableCloudContextApiStop: builder.mutation<UICloudContextStatus, string>({
       queryFn: wailsQueryFn<string, UICloudContextStatus>((name) =>
         EnableCloudContextApiStop(name),
       ),
-      invalidatesTags: (_result, _error, name) => [{ type: 'CloudContextApiStop', id: name }],
+      onQueryStarted: pushApiStopMutationIntoCache,
     }),
     loginCloudProvider: builder.mutation<UICloudProviderStatus, string>({
       queryFn: wailsQueryFn<string, UICloudProviderStatus>((alias) => LoginCloudProvider(alias)),

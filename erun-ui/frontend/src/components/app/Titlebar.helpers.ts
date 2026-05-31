@@ -7,9 +7,13 @@ export function ideTooltipLabel(
   ide: string,
   selected: AppState['selected'],
   disabled: boolean,
+  notRunning: boolean,
 ): string {
   if (!selected) {
     return `Select an environment to open in ${ide}`;
+  }
+  if (notRunning) {
+    return `Start the cloud environment before opening ${ide}`;
   }
   if (disabled) {
     return `Enable SSHD in environment settings to open ${ide}`;
@@ -25,9 +29,59 @@ export function isIdeDisabled(selected: UISelection | null, tenants: AppState['t
   return env?.remote !== false && env?.sshdEnabled !== true;
 }
 
+// isEnvOpenedAndRunning reports whether the env behind `selected` is
+// in a state that supports remote operations from the titlebar (IDE
+// launch, Contribute mode, Contribute app launcher). For local envs
+// the answer is always yes — there is no cloud context to gate on.
+// For envs with a managed cloud context, the cloud must be in the
+// `running` state; `pending`, `stopping`, `stopped`, and unset all
+// disable the affordance. Remote envs without a managed cloud context
+// stay enabled because the desktop has no signal to gate on and the
+// user is responsible for provisioning.
+export function isEnvOpenedAndRunning(
+  selected: UISelection | null,
+  idleStatus: IdleStatus | null,
+  tenants: AppState['tenants'],
+): boolean {
+  if (!selected) return false;
+  const env = tenants
+    .find((tenant) => tenant.name === selected.tenant)
+    ?.environments.find((environment) => environment.name === selected.environment);
+  if (!env) return false;
+  if (!env.remote) return true;
+  if (idleStatus?.managedCloud) {
+    return (idleStatus.cloudContextStatus ?? '').trim().toLowerCase() === 'running';
+  }
+  return true;
+}
+
 export function idleCloudDisplayName(idleStatus: IdleStatus, fallback: string): string {
   const trimmedLabel = idleStatus.cloudContextLabel?.trim() ?? '';
   return trimmedLabel !== '' ? trimmedLabel : fallback;
+}
+
+// idleStopPending reports whether an auto-stop is currently armed for
+// the env (the desktop has seen StopEligible=true and started the
+// grace-period warning). The frontend uses this to swap the idle
+// pill for the amber warning pill.
+export function idleStopPending(idleStatus: IdleStatus): boolean {
+  return Boolean((idleStatus.stopPendingSince ?? '').trim());
+}
+
+// formatGraceCountdown renders the remaining seconds in the
+// grace-period warning as a short, glanceable string. Matches the
+// style of the existing "idle Xs" pill.
+export function formatGraceCountdown(seconds: number): string {
+  const remaining = Math.max(0, Math.floor(seconds));
+  if (remaining < 60) {
+    return `in ${String(remaining)}s`;
+  }
+  const minutes = Math.floor(remaining / 60);
+  const rem = remaining % 60;
+  if (rem === 0) {
+    return `in ${String(minutes)}m`;
+  }
+  return `in ${String(minutes)}m ${String(rem)}s`;
 }
 
 export function idleCloudAction(

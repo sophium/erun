@@ -2023,9 +2023,42 @@ func overrideHelmChartVersion(chartPath, version string) error {
 }
 
 func CheckKubernetesDeployment(ctx Context, params KubernetesDeploymentCheckParams) (bool, error) {
+	deployed, output, err := checkKubernetesDeploymentWithContext(ctx, params, params.KubernetesContext)
+	if err == nil {
+		return deployed, nil
+	}
+	// `kubectl --context <name>` returns a "context does not exist"
+	// error when the requested context is missing from the local
+	// kubeconfig. The most common case is the contribute clone
+	// running inside an env's pod: the env config it reads has the
+	// *outer* desktop's context name (e.g.
+	// `erun-001-…-eu-west-2`), but the pod's kubeconfig only has
+	// `in-cluster`. Falling back to a context-less call uses
+	// kubectl's current-context, which on the pod is the in-cluster
+	// service-account context — exactly what we want. On a desktop
+	// where the configured context name *is* valid, we never enter
+	// this branch.
+	if isKubernetesContextMissingMessage(output) && strings.TrimSpace(params.KubernetesContext) != "" {
+		ctx.Trace(fmt.Sprintf("kubernetes deployment check: context %q not found in kubeconfig; retrying with current-context", params.KubernetesContext))
+		fallback, _, fallbackErr := checkKubernetesDeploymentWithContext(ctx, params, "")
+		if fallbackErr == nil {
+			return fallback, nil
+		}
+		return false, fallbackErr
+	}
+	return false, err
+}
+
+// checkKubernetesDeploymentWithContext runs the underlying kubectl
+// get + (optional) match check for the supplied context. Returns
+// the captured combined output alongside the error so the caller can
+// inspect kubectl's stderr (which carries the "context does not
+// exist" string that drives the retry-with-current-context fallback
+// in CheckKubernetesDeployment).
+func checkKubernetesDeploymentWithContext(ctx Context, params KubernetesDeploymentCheckParams, kubectlContext string) (bool, string, error) {
 	args := make([]string, 0, 8)
-	if strings.TrimSpace(params.KubernetesContext) != "" {
-		args = append(args, "--context", params.KubernetesContext)
+	if strings.TrimSpace(kubectlContext) != "" {
+		args = append(args, "--context", kubectlContext)
 	}
 	if strings.TrimSpace(params.Namespace) != "" {
 		args = append(args, "--namespace", params.Namespace)
@@ -2033,20 +2066,46 @@ func CheckKubernetesDeployment(ctx Context, params KubernetesDeploymentCheckPara
 	args = append(args, "get", "deployment", params.Name, "-o", "name")
 
 	ctx.TraceCommand("", "kubectl", args...)
-	output, err := Command("kubectl", args...).CombinedOutput()
+	rawOutput, err := Command("kubectl", args...).CombinedOutput()
+	output := string(rawOutput)
 	if err == nil {
 		if !hasExpectedDeploymentSettings(params) {
-			return true, nil
+			return true, output, nil
 		}
-		return deploymentMatchesExpectedSettings(ctx, params)
+		matchParams := params
+		matchParams.KubernetesContext = kubectlContext
+		deployed, matchErr := deploymentMatchesExpectedSettings(ctx, matchParams)
+		return deployed, output, matchErr
 	}
 
-	message := strings.ToLower(string(output))
+	message := strings.ToLower(output)
 	if strings.Contains(message, "notfound") || strings.Contains(message, "not found") || strings.Contains(message, "no resources found") {
-		return false, nil
+		return false, output, nil
 	}
 
-	return false, fmt.Errorf("failed to check deployment %q: %w", params.Name, err)
+	return false, output, fmt.Errorf("failed to check deployment %q: %w", params.Name, err)
+}
+
+// isKubernetesContextMissingMessage matches the family of kubectl
+// error messages that indicate the requested --context name is not
+// in the kubeconfig. kubectl reports this as:
+//
+//	error: context "<name>" does not exist
+//	context "<name>" does not exist
+//	no context exists with the name: "<name>"
+//
+// "does not exist" is the stable signal across kubectl versions;
+// "no context exists with the name" is the older shape that some
+// distributions still ship. Match case-insensitively.
+func isKubernetesContextMissingMessage(output string) bool {
+	msg := strings.ToLower(output)
+	if strings.Contains(msg, "does not exist") {
+		return true
+	}
+	if strings.Contains(msg, "no context exists with the name") {
+		return true
+	}
+	return false
 }
 
 func hasExpectedDeploymentSettings(params KubernetesDeploymentCheckParams) bool {
