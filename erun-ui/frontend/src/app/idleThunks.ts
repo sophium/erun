@@ -97,15 +97,17 @@ export const refreshIdleStatus =
   };
 
 // cancelPendingIdleStop dismisses the grace-period warning for the
-// named cloud context. The Go-side method only clears desktop state
-// (no AWS call); the next idle poll re-evaluates eligibility from
-// scratch, so this is effectively a one-shot snooze — if the user
-// remains idle, the warning re-arms with a fresh grace window.
+// supplied env. The Go side proxies through the in-pod MCP
+// `idle_stop_cancel` tool to clear the shared stop-pending.json
+// file; the next idle poll from either the desktop or the in-pod
+// monitor re-evaluates eligibility from scratch, so this is
+// effectively a one-shot snooze — if the user remains idle, the
+// warning re-arms with a fresh grace window.
 export const cancelPendingIdleStop =
-  (cloudContextName: string): AppThunk<Promise<void>> =>
+  (selection: UISelection): AppThunk<Promise<void>> =>
   async (dispatch) => {
     try {
-      await CancelPendingIdleStop(cloudContextName);
+      await CancelPendingIdleStop(selection);
       void dispatch(refreshIdleStatus());
     } catch (error) {
       dispatch(

@@ -113,6 +113,7 @@ function IdleStopWarningBadge({
   hasAction: boolean;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
+  const selected = useAppSelector((state) => state.selection.selected);
   const [busy, setBusy] = React.useState(false);
   const secondsRemaining = Math.max(0, idleStatus.secondsUntilForcedStop ?? 0);
   const countdown = formatGraceCountdown(secondsRemaining);
@@ -120,11 +121,11 @@ function IdleStopWarningBadge({
   const displayName = pickEnvDisplayName(idleStatus, cloudContextName);
   const cancelLabel = `Cancel pending auto-stop for ${displayName}`;
   const handleCancel = () => {
-    if (busy || !cloudContextName) {
+    if (busy || !selected) {
       return;
     }
     setBusy(true);
-    void dispatch(cancelPendingIdleStop(cloudContextName)).finally(() => {
+    void dispatch(cancelPendingIdleStop(selected)).finally(() => {
       setBusy(false);
     });
   };

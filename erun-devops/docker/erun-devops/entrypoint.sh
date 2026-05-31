@@ -770,6 +770,18 @@ start_environment_idle_monitor() {
                 # (e.g. `disableApiStop=true`, missing permission), and
                 # would re-kill them on every subsequent tick.
                 if stop_cloud_host >>"${stop_log}" 2>&1; then
+                    # Persist the audit record before we hand off to
+                    # graceful_quit_clients. `erun activity record-stop`
+                    # reads stop-pending.json (which the same stop-ready
+                    # call just consumed) to recover the per-marker
+                    # breakdown, then writes stop-history.json + clears
+                    # the pending file. Best-effort — a failure here
+                    # does not block the EC2 stop because the AWS call
+                    # has already succeeded.
+                    erun activity record-stop \
+                        --tenant "${ERUN_TENANT}" \
+                        --environment "${ERUN_ENVIRONMENT}" \
+                        >>"${stop_log}" 2>&1 || true
                     graceful_quit_clients >>"${stop_log}" 2>&1 || true
                     exit 0
                 fi

@@ -2,32 +2,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	eruncommon "github.com/sophium/erun/erun-common"
 )
-
-// idleStopPendingEntry captures the moment an env first became
-// StopEligible plus a snapshot of the markers and the linked cloud
-// context. The snapshot is the source of truth for the last-stop.json
-// audit record when the grace window expires; freezing it at
-// eligibility time keeps the record honest even if the next poll's
-// markers shift mid-grace.
-type idleStopPendingEntry struct {
-	since            time.Time
-	graceSeconds     int64
-	cloudContextName string
-	cloudContextLabel string
-	tenant           string
-	environment      string
-	markers          []eruncommon.EnvironmentIdleMarker
-	reasonSummary    string
-}
 
 func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
 	selection = normalizeSelection(selection)
@@ -47,7 +27,7 @@ func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
 		if err == nil {
 			a.maybeStopIdleCloudEnvironment(result, status.status)
 		}
-		return a.idleStatusUIWithPending(result, status.ui), err
+		return status.ui, err
 	}
 	ctx := a.ctx
 	if ctx == nil {
@@ -59,36 +39,11 @@ func (a *App) LoadIdleStatus(selection uiSelection) (uiIdleStatus, error) {
 		if err == nil {
 			a.maybeStopIdleCloudEnvironment(result, status.status)
 		}
-		return a.idleStatusUIWithPending(result, status.ui), err
+		return status.ui, err
 	}
 	merged := a.mergeLocalIdleActivity(result, status)
 	a.maybeStopIdleCloudEnvironment(result, merged)
-	return a.idleStatusUIWithPending(result, a.idleStatusToUI(result, merged)), nil
-}
-
-// idleStatusUIWithPending overlays the pending auto-stop window onto a
-// freshly-resolved uiIdleStatus. The pending state lives in
-// App.idleStopPending (set/cleared by maybeStopIdleCloudEnvironment),
-// and surfacing it on every LoadIdleStatus tick lets the frontend
-// render a persistent countdown banner instead of relying on a
-// transient toast.
-func (a *App) idleStatusUIWithPending(result eruncommon.OpenResult, ui uiIdleStatus) uiIdleStatus {
-	key := selectionKey(uiSelection{Tenant: result.Tenant, Environment: result.Environment})
-	a.mu.Lock()
-	entry, ok := a.idleStopPending[key]
-	a.mu.Unlock()
-	if !ok {
-		return ui
-	}
-	elapsed := int64(a.nowOrNow().Sub(entry.since).Seconds())
-	remaining := entry.graceSeconds - elapsed
-	if remaining < 0 {
-		remaining = 0
-	}
-	ui.StopPendingSince = entry.since.UTC().Format(time.RFC3339)
-	ui.SecondsUntilForcedStop = remaining
-	ui.GracePeriodSeconds = entry.graceSeconds
-	return ui
+	return a.idleStatusToUI(result, merged), nil
 }
 
 type resolvedUIIdleStatus struct {
@@ -142,6 +97,17 @@ func idleStatusToUI(status eruncommon.EnvironmentIdleStatus) uiIdleStatus {
 		StopBlockedReason:   strings.TrimSpace(status.StopBlockedReason),
 		StopError:           strings.TrimSpace(status.StopError),
 		Markers:             markers,
+		// Pending-stop fields are owned by the shared
+		// `MaybeArmOrFireIdleStop` decision function, written into
+		// the env's stop-pending.json on the pod's shared PVC by the
+		// in-pod monitor, and surfaced through
+		// `ResolveStoredEnvironmentIdleStatus`. The desktop only
+		// observes them — no local map, no clock injection — so the
+		// pill renders the same state whether the in-pod monitor or
+		// any other client armed it.
+		StopPendingSince:       strings.TrimSpace(status.StopPendingSince),
+		SecondsUntilForcedStop: status.SecondsUntilForcedStop,
+		GracePeriodSeconds:     status.GracePeriodSeconds,
 	}
 }
 
@@ -248,351 +214,102 @@ func uiStopBlockedReason(markers []eruncommon.EnvironmentIdleMarker) string {
 	return ""
 }
 
-func (a *App) maybeStopIdleCloudEnvironment(result eruncommon.OpenResult, status eruncommon.EnvironmentIdleStatus) {
+// maybeStopIdleCloudEnvironment used to fire the auto-stop from the
+// desktop side. That responsibility now lives entirely in the in-pod
+// idle monitor (erun-devops/docker/erun-devops/entrypoint.sh ->
+// `erun activity stop-ready` -> `MaybeArmOrFireIdleStop` in
+// erun-common), so the desktop only needs to clear the post-fire
+// `idleStops` latch when an env reappears as running — that keeps
+// `StartCloudContext` callers from latching the "we already fired"
+// flag forever and matches the historical behavior the existing
+// tests pin down. All grace-period state lives on the pod's shared
+// PVC and is surfaced through the MCP `idle` tool response, so the
+// desktop is now a pure observer.
+func (a *App) maybeStopIdleCloudEnvironment(result eruncommon.OpenResult, _ eruncommon.EnvironmentIdleStatus) {
 	cloudContext, ok, err := a.linkedCloudContext(result.EnvConfig)
 	if err != nil || !ok {
 		return
 	}
-	// Reconcile stale idleStops markers with the current cloud context.
-	// If the context is running again — manually restarted via the
-	// titlebar Play button, restarted by `erun open` preflight in a
-	// terminal we don't track, or restarted by anything outside the
-	// desktop — our prior auto-stop has been undone and a fresh stop
-	// should be allowed to fire when markers next expire. Without this
-	// reconcile, the idleStops flag latches forever after the first stop
-	// and the env can never auto-stop a second time.
-	//
-	// When clearing actually removes a stale flag, return early: the
-	// idle markers loaded for this call were computed before the
-	// restart was observed and may indicate "everything has been idle
-	// for hours," which would otherwise refire a stop on a context the
-	// user just brought back up. The next idle poll re-runs in ~1s
-	// with fresh markers; let that one decide whether to stop.
 	if strings.TrimSpace(cloudContext.Status) == eruncommon.CloudContextStatusRunning {
-		if a.clearIdleStopsForCloudContext(cloudContext.Name) {
-			return
-		}
+		a.clearIdleStopsForCloudContext(cloudContext.Name)
 	}
-	key := selectionKey(uiSelection{Tenant: result.Tenant, Environment: result.Environment})
-	if !status.ManagedCloud || !status.StopEligible {
-		// Eligibility lapsed (activity resumed, working-hours started,
-		// or the env became local) — clear any pending warning so the
-		// next eligibility re-arms the grace period from scratch.
-		a.clearIdleStopPending(key)
-		return
-	}
-	busyKey := environmentBusyKey(uiSelection{Tenant: result.Tenant, Environment: result.Environment})
-	a.mu.Lock()
-	if a.busyEnvs[busyKey] > 0 {
-		a.mu.Unlock()
-		return
-	}
-	if _, exists := a.idleStops[key]; exists {
-		a.mu.Unlock()
-		return
-	}
-	now := a.nowOrNow()
-	graceSeconds := idleStopGraceSeconds(status, result.EnvConfig)
-	pending, hasPending := a.idleStopPending[key]
-	if !hasPending {
-		pending = idleStopPendingEntry{
-			since:             now,
-			graceSeconds:      graceSeconds,
-			cloudContextName:  cloudContext.Name,
-			cloudContextLabel: cloudContextDisplayName(cloudContext),
-			tenant:            result.Tenant,
-			environment:       result.Environment,
-			markers:           cloneIdleMarkers(status.Markers),
-			reasonSummary:     idleStopReasonSummary(status),
-		}
-		a.idleStopPending[key] = pending
-		a.mu.Unlock()
-		// Persistent banner data is exposed through LoadIdleStatus; the
-		// one-shot toast names the duration so a user looking away
-		// from the titlebar still has a chance to register the warning.
-		a.emitAppNotification(
-			"warning",
-			fmt.Sprintf(
-				"Auto-stop pending: %s will stop in %s unless you act.",
-				cloudContextDisplayName(cloudContext),
-				formatGraceDuration(graceSeconds),
-			),
-		)
-		return
-	}
-	if now.Sub(pending.since) < time.Duration(pending.graceSeconds)*time.Second {
-		a.mu.Unlock()
-		return
-	}
-	delete(a.idleStopPending, key)
-	a.idleStops[key] = struct{}{}
-	snapshot := pending
-	a.mu.Unlock()
-
-	a.emitAppStatus(fmt.Sprintf("Stopping idle cloud context %s...", snapshot.cloudContextLabel), true)
-	go a.fireIdleStop(snapshot, key)
 }
 
-// fireIdleStop actually requests the cloud-context stop after the
-// grace window has elapsed, persists the audit record, and emits the
-// success/failure notification. Split out of
-// maybeStopIdleCloudEnvironment so the locked-section above stays
-// short and the goroutine body can read the pending snapshot
-// directly.
-func (a *App) fireIdleStop(entry idleStopPendingEntry, key string) {
+// CancelPendingIdleStop dismisses the grace-period warning for the
+// supplied env by calling the in-pod MCP `idle_stop_cancel` tool.
+// Cleared state lives on the pod's PVC so any subsequent client
+// (the in-pod monitor's next tick, another desktop, the History
+// tab) sees the dismissal. Returns an error when MCP is unreachable
+// (e.g., the env is mid-stop or the port-forward is broken); the UI
+// surfaces the error verbatim.
+func (a *App) CancelPendingIdleStop(selection uiSelection) error {
+	selection = normalizeSelection(selection)
+	if selection.Tenant == "" || selection.Environment == "" {
+		return fmt.Errorf("tenant and environment are required")
+	}
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+	})
+	if err != nil {
+		return err
+	}
+	endpoint := mcpEndpointForOpenResult(result)
 	ctx := a.ctx
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	stopped, err := a.deps.stopCloudContext(ctx, entry.cloudContextName)
-	if err != nil {
-		a.mu.Lock()
-		delete(a.idleStops, key)
-		a.mu.Unlock()
-		a.emitAppStatus(fmt.Sprintf("Failed to stop idle cloud context %s: %s", entry.cloudContextLabel, err.Error()), false)
-		return
+	if err := cancelStopPendingViaMCP(ctx, endpoint, selection.Tenant, selection.Environment); err != nil {
+		return err
 	}
-	a.setCloudContextStatusInCache(stopped.Name, stopped.Status)
-	if writeErr := a.writeLastStopEvent(entry); writeErr != nil {
-		// last-stop.json is best-effort audit metadata; surface the
-		// failure as a log line via the status banner but keep the
-		// success notification — the user's actionable signal is that
-		// the env did stop.
-		a.emitAppStatus(fmt.Sprintf("Stopped idle cloud context %s (audit log write failed: %s).", entry.cloudContextLabel, writeErr.Error()), false)
-	}
-	a.emitAppNotification(
-		"info",
-		fmt.Sprintf(
-			"Stopped idle cloud context %s — %s.",
-			entry.cloudContextLabel,
-			entry.reasonSummary,
-		),
-	)
-}
-
-// CancelPendingIdleStop dismisses the grace-period warning for the
-// named cloud context without changing AWS state. The next idle poll
-// re-evaluates eligibility from scratch — if the env is still
-// eligible the warning re-arms, but the user has gotten another
-// `gracePeriodSeconds` window to resume real activity.
-func (a *App) CancelPendingIdleStop(cloudContextName string) error {
-	name := strings.TrimSpace(cloudContextName)
-	if name == "" {
-		return fmt.Errorf("cloud context name is required")
-	}
-	a.mu.Lock()
-	cleared := false
-	for key, entry := range a.idleStopPending {
-		if entry.cloudContextName == name {
-			delete(a.idleStopPending, key)
-			cleared = true
-		}
-	}
-	a.mu.Unlock()
-	if !cleared {
-		return fmt.Errorf("no pending auto-stop for cloud context %q", name)
-	}
-	a.emitAppNotification("info", fmt.Sprintf("Cancelled pending auto-stop for %s.", name))
+	a.emitAppNotification("info", fmt.Sprintf("Cancelled pending auto-stop for %s/%s.", selection.Tenant, selection.Environment))
 	return nil
 }
 
-// clearIdleStopPending removes any pending warning entry for the
-// supplied env key, with the same lock semantics as the rest of the
-// idleStops accounting.
-func (a *App) clearIdleStopPending(key string) {
-	a.mu.Lock()
-	delete(a.idleStopPending, key)
-	a.mu.Unlock()
-}
-
-// idleStopGraceSeconds picks the grace-period length for an env. The
-// user spec (#410 follow-up) is "at least the idle timeout"; we use
-// the env's resolved idle timeout verbatim so a 10-minute idle
-// timeout gives a 10-minute warning window. Falls back to a 5-minute
-// floor when the env config does not configure a timeout (which
-// should not happen in practice but keeps the contract safe).
-func idleStopGraceSeconds(status eruncommon.EnvironmentIdleStatus, _ eruncommon.EnvConfig) int64 {
-	timeout := int64(status.Policy.Timeout / time.Second)
-	if timeout <= 0 {
-		return 5 * 60
-	}
-	return timeout
-}
-
-// idleStopReasonSummary builds a single-line summary of why the env
-// is being stopped, used in toasts and the last-stop record. Lists
-// the markers that were idle and how long they had been quiet.
-func idleStopReasonSummary(status eruncommon.EnvironmentIdleStatus) string {
-	var parts []string
-	for _, marker := range status.Markers {
-		if marker.Name == "working-hours" {
-			continue
-		}
-		if !marker.Idle {
-			continue
-		}
-		name := strings.TrimSpace(marker.Name)
-		if name == "" {
-			continue
-		}
-		parts = append(parts, name)
-	}
-	if len(parts) == 0 {
-		if status.OutsideWorkingHours {
-			return "outside working hours"
-		}
-		return "idle policy met"
-	}
-	return "idle: " + strings.Join(parts, ", ")
-}
-
-// formatGraceDuration renders seconds as "Nm Ss" / "Ns", matching the
-// pattern used elsewhere in the titlebar tooltip.
-func formatGraceDuration(seconds int64) string {
-	if seconds <= 0 {
-		return "0s"
-	}
-	if seconds < 60 {
-		return fmt.Sprintf("%ds", seconds)
-	}
-	minutes := seconds / 60
-	rem := seconds % 60
-	if rem == 0 {
-		return fmt.Sprintf("%dm", minutes)
-	}
-	return fmt.Sprintf("%dm %ds", minutes, rem)
-}
-
-// cloneIdleMarkers copies the marker slice so a later mutation by the
-// next idle poll cannot mutate the snapshot used for the audit
-// record.
-func cloneIdleMarkers(markers []eruncommon.EnvironmentIdleMarker) []eruncommon.EnvironmentIdleMarker {
-	if len(markers) == 0 {
-		return nil
-	}
-	out := make([]eruncommon.EnvironmentIdleMarker, len(markers))
-	copy(out, markers)
-	return out
-}
-
-// stopHistoryCap caps the rolling per-env stop log so the file stays
-// tiny while still holding enough entries to diagnose a recurring
-// auto-stop pattern. Newest-first ordering; older entries fall off
-// the tail.
-const stopHistoryCap = 10
-
-// writeLastStopEvent prepends a per-env audit record describing why
-// the auto-stop fired to <userConfig>/erun/<tenant>/<env>/stop-history.json
-// and trims the file to the most recent stopHistoryCap entries. The
-// history is read back by LoadStopHistory and surfaced in the
-// Manage Environment dialog's History tab so the user can answer
-// "why did my env stop?" — and "why has it stopped repeatedly?" —
-// without trawling logs.
-func (a *App) writeLastStopEvent(entry idleStopPendingEntry) error {
-	dir, err := lastStopDir(entry.tenant, entry.environment)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	now := a.nowOrNow().UTC()
-	record := uiLastStopEvent{
-		StoppedAt:        now.Format(time.RFC3339),
-		GraceSeconds:     entry.graceSeconds,
-		Reason:           entry.reasonSummary,
-		CloudContextName: entry.cloudContextName,
-	}
-	for _, marker := range entry.markers {
-		if marker.Name == "working-hours" {
-			continue
-		}
-		record.Markers = append(record.Markers, uiLastStopMarker{
-			Name:           strings.TrimSpace(marker.Name),
-			Idle:           marker.Idle,
-			Reason:         strings.TrimSpace(marker.Reason),
-			SecondsIdleFor: secondsIdleFor(marker, now),
-		})
-	}
-	history, err := readStopHistory(dir)
-	if err != nil {
-		return err
-	}
-	history = append([]uiLastStopEvent{record}, history...)
-	if len(history) > stopHistoryCap {
-		history = history[:stopHistoryCap]
-	}
-	body, err := json.MarshalIndent(history, "", "  ")
-	if err != nil {
-		return err
-	}
-	path := filepath.Join(dir, "stop-history.json")
-	return os.WriteFile(path, body, 0o600)
-}
-
-// LoadStopHistory returns the most recent auto-stop audit records
-// for the supplied env, newest first, capped at stopHistoryCap.
-// Returns an empty slice (not an error) when the env has no
-// recorded auto-stops yet.
+// LoadStopHistory returns the env's last N auto-stop audit records,
+// newest first. Reads through the in-pod MCP `idle_stop_history`
+// tool so the canonical history (the one the in-pod monitor wrote
+// after each `stop_cloud_host` call) is what the desktop renders.
 func (a *App) LoadStopHistory(selection uiSelection) ([]uiLastStopEvent, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
 		return nil, fmt.Errorf("tenant and environment are required")
 	}
-	dir, err := lastStopDir(selection.Tenant, selection.Environment)
+	result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+	})
 	if err != nil {
 		return nil, err
 	}
-	return readStopHistory(dir)
-}
-
-// readStopHistory loads stop-history.json from the env's audit
-// directory, returning an empty slice when the file is missing. The
-// file is always written newest-first by writeLastStopEvent, so
-// callers can render the slice as-is.
-func readStopHistory(dir string) ([]uiLastStopEvent, error) {
-	body, err := os.ReadFile(filepath.Join(dir, "stop-history.json"))
+	endpoint := mcpEndpointForOpenResult(result)
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	entries, err := loadStopHistoryViaMCP(ctx, endpoint, selection.Tenant, selection.Environment)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return []uiLastStopEvent{}, nil
+		return nil, err
+	}
+	out := make([]uiLastStopEvent, 0, len(entries))
+	for _, entry := range entries {
+		ui := uiLastStopEvent{
+			StoppedAt:        entry.StoppedAt.UTC().Format(time.RFC3339),
+			GraceSeconds:     entry.GraceSeconds,
+			Reason:           strings.TrimSpace(entry.Reason),
+			CloudContextName: strings.TrimSpace(entry.CloudContextName),
 		}
-		return nil, err
+		for _, marker := range entry.Markers {
+			ui.Markers = append(ui.Markers, uiLastStopMarker{
+				Name:           strings.TrimSpace(marker.Name),
+				Idle:           marker.Idle,
+				Reason:         strings.TrimSpace(marker.Reason),
+				SecondsIdleFor: marker.SecondsIdleFor,
+			})
+		}
+		out = append(out, ui)
 	}
-	var history []uiLastStopEvent
-	if err := json.Unmarshal(body, &history); err != nil {
-		return nil, err
-	}
-	if history == nil {
-		return []uiLastStopEvent{}, nil
-	}
-	return history, nil
-}
-
-// lastStopDir resolves the per-env directory used for the
-// stop-history.json audit record. Anchored on os.UserConfigDir so
-// the same path resolves on macOS, Linux, and Windows.
-func lastStopDir(tenant, environment string) (string, error) {
-	base, err := os.UserConfigDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(base, "erun", tenant, environment), nil
-}
-
-// secondsIdleFor reports how long a marker has been quiet by the time
-// of `now`. SecondsRemaining is the marker's countdown to eligibility;
-// once eligible (Idle=true) the countdown is at 0 and what matters is
-// how long since LastActivity. Returns 0 when LastActivity is
-// unrecorded.
-func secondsIdleFor(marker eruncommon.EnvironmentIdleMarker, now time.Time) int64 {
-	if marker.LastActivity.IsZero() {
-		return 0
-	}
-	delta := int64(now.Sub(marker.LastActivity).Seconds())
-	if delta < 0 {
-		return 0
-	}
-	return delta
+	return out, nil
 }
 
 // clearIdleStopsForCloudContext removes any latched auto-stop flag

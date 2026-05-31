@@ -155,6 +155,14 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Description: "Return environment idle stop timeout and marker status without recording activity",
 	}, idleTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "idle_stop_cancel",
+		Description: "Dismiss the pending auto-stop grace warning for the env without touching AWS state. No-op when no warning is armed.",
+	}, idleStopCancelTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "idle_stop_history",
+		Description: "Return the last N (cap 10) auto-stop audit entries for the env, newest first. Each row carries the per-marker idle/active breakdown captured when the auto-stop grace was armed.",
+	}, idleStopHistoryTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "cloud_list",
 		Description: "List configured root-level cloud provider aliases and token status",
 	}, cloudListTool(runtime))
