@@ -152,6 +152,33 @@ export interface UIIdleStatus {
   cloudContextStatus?: string;
   cloudContextLabel?: string;
   markers?: UIIdleMarker[];
+  // stopPendingSince is the RFC3339 timestamp at which the desktop
+  // first saw stopEligible=true for this env. While set, the
+  // auto-stop is "armed" — the real ec2:StopInstances will fire
+  // after secondsUntilForcedStop more seconds unless cancelled or
+  // activity resumes. Empty when no auto-stop is pending.
+  stopPendingSince?: string;
+  secondsUntilForcedStop?: number;
+  gracePeriodSeconds?: number;
+}
+
+// UILastStopEvent describes the most recent auto-stop for an env,
+// loaded from <userConfig>/erun/<tenant>/<env>/last-stop.json by the
+// Go-side LoadLastStopEvent. Surfaced in the idle-status tooltip so
+// the user can answer "why did my env stop?" without trawling logs.
+export interface UILastStopEvent {
+  stoppedAt: string;
+  graceSeconds: number;
+  reason: string;
+  cloudContextName?: string;
+  markers?: UILastStopMarker[];
+}
+
+export interface UILastStopMarker {
+  name: string;
+  idle: boolean;
+  reason?: string;
+  secondsIdleFor?: number;
 }
 
 export interface UIIdleMarker {

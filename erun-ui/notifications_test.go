@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -115,27 +116,42 @@ func TestMaybeStopIdleEmitsSuccessAsNotificationNotPill(t *testing.T) {
 	app.SetEmitter(emits.fn())
 	app.setCloudContextStatusInCache("cloud-ctx", eruncommon.CloudContextStatusRunning)
 
+	// First poll arms the grace warning; the stop must not fire yet.
+	t0 := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+	app.SetNowFunc(func() time.Time { return t0 })
 	if _, err := app.LoadIdleStatus(uiSelection{Tenant: "team-stop", Environment: "dev-stop"}); err != nil {
 		t.Fatalf("LoadIdleStatus failed: %v", err)
 	}
+	select {
+	case got := <-stopped:
+		t.Fatalf("stop fired during grace window: %s", got)
+	case <-time.After(50 * time.Millisecond):
+	}
 
+	// Advance past the grace window so the next poll fires the real
+	// stop and emits the success notification.
+	app.SetNowFunc(func() time.Time { return t0.Add(10 * time.Minute) })
+	if _, err := app.LoadIdleStatus(uiSelection{Tenant: "team-stop", Environment: "dev-stop"}); err != nil {
+		t.Fatalf("second LoadIdleStatus failed: %v", err)
+	}
 	select {
 	case <-stopped:
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for cloud context stop")
 	}
 
-	// The goroutine emits the success line after stopCloudContext
-	// returns; poll briefly so the assertion is not racy.
-	successPayload, err := waitForAppNotification(emits, time.Second)
+	// Find the success notification among any earlier warnings. The
+	// grace-arm path emits an "Auto-stop pending..." warning notification
+	// on the first eligible poll, which precedes the success info.
+	successPayload, err := waitForAppNotificationByKind(emits, "info", time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if successPayload.Kind != "info" {
 		t.Fatalf("success notification kind = %q, want info", successPayload.Kind)
 	}
-	if want := "Stopped idle cloud context cluster-cloud."; successPayload.Message != want {
-		t.Fatalf("success notification message = %q, want %q", successPayload.Message, want)
+	if got := successPayload.Message; !strings.HasPrefix(got, "Stopped idle cloud context cluster-cloud") {
+		t.Fatalf("success notification message = %q, want prefix %q", got, "Stopped idle cloud context cluster-cloud")
 	}
 
 	// The "Stopping..." busy line must still ride on app-status —
@@ -177,4 +193,26 @@ func waitForAppNotification(emits *capturedEmits, timeout time.Duration) (appNot
 		time.Sleep(10 * time.Millisecond)
 	}
 	return appNotificationPayload{}, fmt.Errorf("timed out waiting for app-notification emit")
+}
+
+// waitForAppNotificationByKind returns the first notification whose
+// Kind matches the requested string. Lets a test that arms the
+// grace-period warning (kind="warning") still find the later
+// success (kind="info") without false-matching the earlier one.
+func waitForAppNotificationByKind(emits *capturedEmits, kind string, timeout time.Duration) (appNotificationPayload, error) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		events := emits.events(appNotificationEvent)
+		for _, evt := range events {
+			payload, ok := evt.(appNotificationPayload)
+			if !ok {
+				continue
+			}
+			if payload.Kind == kind {
+				return payload, nil
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return appNotificationPayload{}, fmt.Errorf("timed out waiting for app-notification emit with kind=%q", kind)
 }

@@ -1,4 +1,4 @@
-import { LoaderCircle, Lock, Play, Power, Unlock } from 'lucide-react';
+import { LoaderCircle, Lock, Play, Power, Unlock, X } from 'lucide-react';
 import * as React from 'react';
 
 import {
@@ -10,14 +10,17 @@ import { readError } from '@/app/errors';
 import { toggleIdleCloudContext } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { displayableIdleStatus } from '@/app/idleStatusEligibility';
+import { cancelPendingIdleStop } from '@/app/idleThunks';
 import { showNotification } from '@/app/notificationThunks';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import {
+  formatGraceCountdown,
   idleCloudAction,
   type IdleStatus,
   idleStatusAccessibleLabel,
   idleStatusBadge,
   idleStatusTooltipLines,
+  idleStopPending,
 } from '@/components/app/Titlebar.helpers';
 import { Button } from '@/components/ui/button';
 import {
@@ -54,18 +57,28 @@ function useIdleWidgetState(): {
   return { idleStatus, idleBadge, idleAction, cloudContextName };
 }
 
-// renderIdleLeadingBadge picks between the busy-transition pill, the
-// idle-status pill, and rendering nothing. Extracted to keep
-// IdleStatusWidget itself under the eslint complexity ceiling — the
-// busy branch was added to surface in-flight start/stop AWS waits
-// (Nielsen #1) without losing the existing idle-time display.
+// renderIdleLeadingBadge picks between the warning pill (auto-stop
+// armed), the busy-transition pill (Wails stop/start in flight), the
+// idle-status pill (default), and rendering nothing. Extracted to
+// keep IdleStatusWidget itself under the eslint complexity ceiling
+// and to give each surface a single, named owner.
 function renderIdleLeadingBadge(
   busy: boolean,
   idleAction: ReturnType<typeof idleCloudAction>,
   idleStatus: IdleStatus | null,
   idleBadge: { label: string; className: string } | null,
   hasAction: boolean,
+  cloudContextName: string,
 ): React.ReactElement | null {
+  if (idleStatus && idleStopPending(idleStatus) && !busy) {
+    return (
+      <IdleStopWarningBadge
+        idleStatus={idleStatus}
+        cloudContextName={cloudContextName}
+        hasAction={hasAction}
+      />
+    );
+  }
   if (busy && idleAction) {
     return <IdleTransitionBadge label={idleAction.label} hasAction={hasAction} />;
   }
@@ -73,6 +86,95 @@ function renderIdleLeadingBadge(
     return <IdleStatusBadge idleStatus={idleStatus} idleBadge={idleBadge} hasAction={hasAction} />;
   }
   return null;
+}
+
+// IdleStopWarningBadge is the amber "auto-stop is armed" pill that
+// replaces the idle-time pill once `stopPendingSince` is set. It
+// surfaces the countdown to forced stop and a Cancel button that
+// dismisses the grace window without touching AWS state.
+// pickEnvDisplayName chooses the first non-empty display string for
+// the env, preferring the human-friendly kube context label over the
+// raw context name.
+function pickEnvDisplayName(idleStatus: IdleStatus, fallback: string): string {
+  const label = (idleStatus.cloudContextLabel ?? '').trim();
+  if (label) return label;
+  const name = (idleStatus.cloudContextName ?? '').trim();
+  if (name) return name;
+  return fallback;
+}
+
+function IdleStopWarningBadge({
+  idleStatus,
+  cloudContextName,
+  hasAction,
+}: {
+  idleStatus: IdleStatus;
+  cloudContextName: string;
+  hasAction: boolean;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const [busy, setBusy] = React.useState(false);
+  const secondsRemaining = Math.max(0, idleStatus.secondsUntilForcedStop ?? 0);
+  const countdown = formatGraceCountdown(secondsRemaining);
+  const grace = idleStatus.gracePeriodSeconds ?? 0;
+  const displayName = pickEnvDisplayName(idleStatus, cloudContextName);
+  const cancelLabel = `Cancel pending auto-stop for ${displayName}`;
+  const handleCancel = () => {
+    if (busy || !cloudContextName) {
+      return;
+    }
+    setBusy(true);
+    void dispatch(cancelPendingIdleStop(cloudContextName)).finally(() => {
+      setBusy(false);
+    });
+  };
+  return (
+    <>
+      <div
+        className={cn(
+          'flex h-full items-center px-2 font-mono text-[12px] leading-none text-amber-600',
+          'border-r',
+        )}
+        role="status"
+        aria-live="polite"
+        aria-label={`Auto-stop ${countdown}. Grace period ${String(grace)} seconds.`}
+        data-testid="titlebar-idle-stop-warning"
+      >
+        Auto-stop {countdown}
+      </div>
+      <IconTooltip label={cancelLabel}>
+        <Button
+          className={cn(
+            'h-full w-7 rounded-none border-0 bg-transparent text-amber-600 hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-60 [&_svg]:size-3.5',
+            !hasAction && 'rounded-r-md',
+          )}
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={cancelLabel}
+          disabled={busy}
+          onClick={handleCancel}
+          data-testid="titlebar-idle-stop-cancel"
+        >
+          <X aria-hidden="true" />
+        </Button>
+      </IconTooltip>
+    </>
+  );
+}
+
+// idleWidgetContainerClass returns the container's tailwind classes
+// for the current widget state. Extracted to keep IdleStatusWidget
+// itself under the eslint complexity ceiling — the busy/pending/idle
+// fan-out is a real branching point and worth naming.
+function idleWidgetContainerClass(
+  busy: boolean,
+  pending: boolean,
+  idleBadge: { label: string; className: string } | null,
+): string | undefined {
+  if (busy) return undefined;
+  if (pending) return 'border-amber-600/70';
+  return idleBadge?.className;
 }
 
 export function IdleStatusWidget(): React.ReactElement | null {
@@ -84,25 +186,19 @@ export function IdleStatusWidget(): React.ReactElement | null {
   const hasAction = Boolean(idleAction);
   const hasFollowOn = Boolean(cloudContextName);
   const busy = Boolean(idleAction?.busy);
-  // While a start/stop is in flight, the AWS waiter on the backend
-  // blocks the Wails call for the full transition (30-60s typical, up
-  // to 10min worst case per `aws ec2 wait` defaults). The spinner on
-  // the action button reflects that, but on its own the user can't
-  // tell a slow-but-normal wait from a hang — the idle-time pill that
-  // would otherwise carry the env name vanishes mid-transition when
-  // `cloudContextStatus` flips out of `running`. The container border
-  // colour drops the success/blocked tone during the transition so the
-  // titlebar reads as neutral in-progress.
-  const containerClassName = busy ? undefined : idleBadge?.className;
+  const pending = Boolean(idleStatus && idleStopPending(idleStatus));
   return (
     <div
-      className={cn('flex h-7 items-center rounded-md border bg-background', containerClassName)}
+      className={cn(
+        'flex h-7 items-center rounded-md border bg-background',
+        idleWidgetContainerClass(busy, pending, idleBadge),
+      )}
     >
-      {renderIdleLeadingBadge(busy, idleAction, idleStatus, idleBadge, hasAction)}
+      {renderIdleLeadingBadge(busy, idleAction, idleStatus, idleBadge, hasAction, cloudContextName)}
       {idleAction ? (
         <IdleStatusAction
           idleAction={idleAction}
-          hasBadge={busy || Boolean(idleStatus)}
+          hasBadge={busy || pending || Boolean(idleStatus)}
           hasFollowOn={hasFollowOn}
         />
       ) : null}

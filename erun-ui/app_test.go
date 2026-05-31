@@ -2737,6 +2737,10 @@ func TestLoadIdleStatusStopsLinkedCloudContextWhenStopEligible(t *testing.T) {
 	defer app.shutdown(context.Background())
 	app.setCloudContextStatusInCache("cloud-ctx", eruncommon.CloudContextStatusRunning)
 
+	// First poll arms the grace-period warning; auto-stop must not
+	// fire on this tick (the user gets a chance to react first).
+	t0 := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+	app.SetNowFunc(func() time.Time { return t0 })
 	status, err := app.LoadIdleStatus(uiSelection{Tenant: "team-stop", Environment: "dev-stop"})
 	if err != nil {
 		t.Fatalf("LoadIdleStatus failed: %v", err)
@@ -2744,14 +2748,31 @@ func TestLoadIdleStatusStopsLinkedCloudContextWhenStopEligible(t *testing.T) {
 	if status.CloudContextName != "cloud-ctx" || status.CloudContextStatus != eruncommon.CloudContextStatusRunning || status.CloudContextLabel != "cluster-cloud" {
 		t.Fatalf("unexpected linked cloud context details: %+v", status)
 	}
+	if status.StopPendingSince == "" {
+		t.Fatalf("first eligible poll should have armed the grace window, got status: %+v", status)
+	}
+	if status.SecondsUntilForcedStop <= 0 {
+		t.Fatalf("expected positive SecondsUntilForcedStop on the first poll, got %d", status.SecondsUntilForcedStop)
+	}
+	select {
+	case got := <-stopped:
+		t.Fatalf("auto-stop fired during the grace window (got %q); should only fire after grace elapses", got)
+	case <-time.After(50 * time.Millisecond):
+	}
 
+	// Advance past the grace window and poll again — the second poll
+	// finds the grace expired and fires the real stop.
+	app.SetNowFunc(func() time.Time { return t0.Add(10 * time.Minute) })
+	if _, err := app.LoadIdleStatus(uiSelection{Tenant: "team-stop", Environment: "dev-stop"}); err != nil {
+		t.Fatalf("second LoadIdleStatus failed: %v", err)
+	}
 	select {
 	case got := <-stopped:
 		if got != "cloud-ctx" {
 			t.Fatalf("stopped context %q, want cloud-ctx", got)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for cloud context stop")
+		t.Fatal("timed out waiting for cloud context stop after grace window")
 	}
 }
 

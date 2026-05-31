@@ -74,6 +74,14 @@ type App struct {
 	nextSerial                int
 	sessions                  map[string]*managedTerminal
 	idleStops                 map[string]struct{}
+	// idleStopPending tracks per-env grace-period state for auto-stops.
+	// When LoadIdleStatus first sees StopEligible=true, the env is put
+	// into pending with `since = now` and the actual ec2:StopInstances
+	// fires only after gracePeriodFor(envConfig) elapses while still
+	// eligible. Any cancellation (user-initiated or activity resumed)
+	// clears the entry, restarting the warning window if eligibility
+	// returns.
+	idleStopPending           map[string]idleStopPendingEntry
 	busyEnvs                  map[string]int
 	workspaceSyncs            map[string]*workspaceSyncWorker
 	credentialRefreshers      map[string]*cloudCredentialsRefresher
@@ -105,6 +113,29 @@ type App struct {
 	// the SSE subscribers in headlessserver. When unset it defaults to the
 	// Wails runtime path during startup.
 	emitFn func(name string, args ...any)
+
+	// nowFn returns the current time. Production startup leaves this
+	// nil; nowOrNow() falls back to time.Now. Tests override it via
+	// SetNowFunc to drive the grace-period and last-stop pipelines on
+	// a virtual clock instead of real wall time.
+	nowFn func() time.Time
+}
+
+// SetNowFunc overrides the clock the App reads through nowOrNow().
+// Tests use this to advance time without sleeping.
+func (a *App) SetNowFunc(fn func() time.Time) {
+	a.nowFn = fn
+}
+
+// nowOrNow returns the current time, preferring the injected clock
+// when one is configured. Reads to a.nowFn are unguarded — production
+// only ever sets it once during test setup before any goroutine has
+// started consuming it.
+func (a *App) nowOrNow() time.Time {
+	if a.nowFn != nil {
+		return a.nowFn()
+	}
+	return time.Now()
 }
 
 // SetEmitter overrides how the App emits frontend events. The headless server
@@ -139,6 +170,7 @@ func NewApp(deps erunUIDeps) *App {
 		deps:                 deps,
 		sessions:             make(map[string]*managedTerminal),
 		idleStops:            make(map[string]struct{}),
+		idleStopPending:      make(map[string]idleStopPendingEntry),
 		busyEnvs:             make(map[string]int),
 		workspaceSyncs:       make(map[string]*workspaceSyncWorker),
 		credentialRefreshers: make(map[string]*cloudCredentialsRefresher),

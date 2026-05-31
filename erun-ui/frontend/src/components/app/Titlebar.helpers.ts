@@ -60,6 +60,30 @@ export function idleCloudDisplayName(idleStatus: IdleStatus, fallback: string): 
   return trimmedLabel !== '' ? trimmedLabel : fallback;
 }
 
+// idleStopPending reports whether an auto-stop is currently armed for
+// the env (the desktop has seen StopEligible=true and started the
+// grace-period warning). The frontend uses this to swap the idle
+// pill for the amber warning pill.
+export function idleStopPending(idleStatus: IdleStatus): boolean {
+  return Boolean((idleStatus.stopPendingSince ?? '').trim());
+}
+
+// formatGraceCountdown renders the remaining seconds in the
+// grace-period warning as a short, glanceable string. Matches the
+// style of the existing "idle Xs" pill.
+export function formatGraceCountdown(seconds: number): string {
+  const remaining = Math.max(0, Math.floor(seconds));
+  if (remaining < 60) {
+    return `in ${String(remaining)}s`;
+  }
+  const minutes = Math.floor(remaining / 60);
+  const rem = remaining % 60;
+  if (rem === 0) {
+    return `in ${String(minutes)}m`;
+  }
+  return `in ${String(minutes)}m ${String(rem)}s`;
+}
+
 export function idleCloudAction(
   idleStatus: IdleStatus,
   busy: boolean,

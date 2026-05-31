@@ -52,6 +52,29 @@ function managedRunningIdleStatus(ctx: IdleStatusFixture): unknown {
   };
 }
 
+interface PendingStopFixture extends IdleStatusFixture {
+  stopPendingSince: string;
+  secondsUntilForcedStop: number;
+  gracePeriodSeconds: number;
+}
+
+function managedRunningIdleStatusWithPendingStop(ctx: PendingStopFixture): unknown {
+  return {
+    timeoutSeconds: 600,
+    secondsUntilStop: 0,
+    stopEligible: true,
+    outsideWorkingHours: false,
+    managedCloud: true,
+    cloudContextName: ctx.cloudContextName,
+    cloudContextStatus: ctx.cloudContextStatus,
+    cloudContextLabel: ctx.cloudContextLabel,
+    markers: [],
+    stopPendingSince: ctx.stopPendingSince,
+    secondsUntilForcedStop: ctx.secondsUntilForcedStop,
+    gracePeriodSeconds: ctx.gracePeriodSeconds,
+  };
+}
+
 function apiStopStatus(name: string, locked: boolean): unknown {
   return {
     name,
@@ -293,5 +316,67 @@ test.describe('idle widget stop protection', () => {
     await expect(diffPanelToggle).toBeEnabled();
 
     releaseStop();
+  });
+
+  test('grace-period warning banner shows countdown and Cancel calls CancelPendingIdleStop', async ({
+    app,
+    page,
+  }) => {
+    const ctxName = 'mock-ctx-pending';
+    const pending: PendingStopFixture = {
+      cloudContextName: ctxName,
+      cloudContextStatus: 'running',
+      cloudContextLabel: ctxName,
+      stopPendingSince: '2026-05-31T07:00:00Z',
+      secondsUntilForcedStop: 137,
+      gracePeriodSeconds: 600,
+    };
+    let cancelCalls = 0;
+
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as InvokeBody;
+      if (body.method === 'LoadIdleStatus') {
+        return route.fulfill(envelope(managedRunningIdleStatusWithPendingStop(pending)));
+      }
+      if (body.method === 'DescribeCloudContextApiStop') {
+        return route.fulfill(envelope(apiStopStatus(ctxName, false)));
+      }
+      if (body.method === 'CancelPendingIdleStop') {
+        cancelCalls++;
+        // After cancel, the next poll should observe no pending stop.
+        // Mutate the in-test fixture so subsequent LoadIdleStatus
+        // calls reflect the cleared state.
+        pending.stopPendingSince = '';
+        pending.secondsUntilForcedStop = 0;
+        return route.fulfill(envelope(null));
+      }
+      if (body.method === 'LoadLastStopEvent') {
+        return route.fulfill(envelope({ stoppedAt: '', graceSeconds: 0, reason: '' }));
+      }
+      await route.continue();
+    });
+
+    const tenants = await app.sidebar.tenants();
+    test.skip(tenants.length === 0, 'no tenants in this developer harness');
+    const tenant = tenants[0]!;
+    const envs = await app.sidebar.environmentsFor(tenant);
+    test.skip(envs.length === 0, `no envs under tenant ${tenant}`);
+    await app.sidebar.openEnvironment(tenant, envs[0]!);
+
+    // The warning banner replaces the idle-time pill when stopPendingSince
+    // is set in the idle status.
+    const warning = page.getByTestId('titlebar-idle-stop-warning');
+    await expect(warning).toBeVisible({ timeout: 6_000 });
+    // 137s → "in 2m 17s" per formatGraceCountdown.
+    await expect(warning).toContainText('Auto-stop in 2m 17s');
+
+    // Clicking Cancel calls CancelPendingIdleStop with the env's
+    // cloud-context name and the warning then disappears once the
+    // next poll observes the cleared pending state.
+    const cancelBtn = page.getByTestId('titlebar-idle-stop-cancel');
+    await expect(cancelBtn).toBeVisible();
+    await cancelBtn.click();
+    expect(cancelCalls).toBe(1);
+    await expect(warning).toBeHidden({ timeout: 5_000 });
   });
 });

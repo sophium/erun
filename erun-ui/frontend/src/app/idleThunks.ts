@@ -1,7 +1,10 @@
 import type { UIIdleStatus, UISelection } from '@/types';
 
+import { CancelPendingIdleStop } from '../../wailsjs/go/main/App';
 import { idleApi } from './api/idleApi';
 import { restoreEnvTabsAfterContextRunning } from './envRestoreThunks';
+import { readError } from './errors';
+import { showNotification } from './notificationThunks';
 import { setIdleStatus } from './slices/idleSlice';
 import { bumpIdleStatus } from './slices/requestCountersSlice';
 import type { AppThunk } from './store';
@@ -90,5 +93,23 @@ export const refreshIdleStatus =
       if (isRequestStillCurrent(request, getState)) {
         controller.scheduleIdleStatusPoll();
       }
+    }
+  };
+
+// cancelPendingIdleStop dismisses the grace-period warning for the
+// named cloud context. The Go-side method only clears desktop state
+// (no AWS call); the next idle poll re-evaluates eligibility from
+// scratch, so this is effectively a one-shot snooze — if the user
+// remains idle, the warning re-arms with a fresh grace window.
+export const cancelPendingIdleStop =
+  (cloudContextName: string): AppThunk<Promise<void>> =>
+  async (dispatch) => {
+    try {
+      await CancelPendingIdleStop(cloudContextName);
+      void dispatch(refreshIdleStatus());
+    } catch (error) {
+      dispatch(
+        showNotification('error', `Failed to cancel pending auto-stop: ${readError(error)}`),
+      );
     }
   };
