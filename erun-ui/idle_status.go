@@ -475,10 +475,19 @@ func cloneIdleMarkers(markers []eruncommon.EnvironmentIdleMarker) []eruncommon.E
 	return out
 }
 
-// writeLastStopEvent persists a per-env audit record describing why
-// the auto-stop fired. The record is read back by
-// LoadLastStopEvent and surfaced in the idle-status tooltip so the
-// user can answer "why did my env stop?" without trawling logs.
+// stopHistoryCap caps the rolling per-env stop log so the file stays
+// tiny while still holding enough entries to diagnose a recurring
+// auto-stop pattern. Newest-first ordering; older entries fall off
+// the tail.
+const stopHistoryCap = 10
+
+// writeLastStopEvent prepends a per-env audit record describing why
+// the auto-stop fired to <userConfig>/erun/<tenant>/<env>/stop-history.json
+// and trims the file to the most recent stopHistoryCap entries. The
+// history is read back by LoadStopHistory and surfaced in the
+// Manage Environment dialog's History tab so the user can answer
+// "why did my env stop?" — and "why has it stopped repeatedly?" —
+// without trawling logs.
 func (a *App) writeLastStopEvent(entry idleStopPendingEntry) error {
 	dir, err := lastStopDir(entry.tenant, entry.environment)
 	if err != nil {
@@ -505,43 +514,63 @@ func (a *App) writeLastStopEvent(entry idleStopPendingEntry) error {
 			SecondsIdleFor: secondsIdleFor(marker, now),
 		})
 	}
-	body, err := json.MarshalIndent(record, "", "  ")
+	history, err := readStopHistory(dir)
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(dir, "last-stop.json")
+	history = append([]uiLastStopEvent{record}, history...)
+	if len(history) > stopHistoryCap {
+		history = history[:stopHistoryCap]
+	}
+	body, err := json.MarshalIndent(history, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := filepath.Join(dir, "stop-history.json")
 	return os.WriteFile(path, body, 0o600)
 }
 
-// LoadLastStopEvent returns the most recent auto-stop audit record
-// for the supplied env, or zero value when none has been recorded.
-// Reads <userConfig>/erun/<tenant>/<env>/last-stop.json.
-func (a *App) LoadLastStopEvent(selection uiSelection) (uiLastStopEvent, error) {
+// LoadStopHistory returns the most recent auto-stop audit records
+// for the supplied env, newest first, capped at stopHistoryCap.
+// Returns an empty slice (not an error) when the env has no
+// recorded auto-stops yet.
+func (a *App) LoadStopHistory(selection uiSelection) ([]uiLastStopEvent, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
-		return uiLastStopEvent{}, fmt.Errorf("tenant and environment are required")
+		return nil, fmt.Errorf("tenant and environment are required")
 	}
 	dir, err := lastStopDir(selection.Tenant, selection.Environment)
 	if err != nil {
-		return uiLastStopEvent{}, err
+		return nil, err
 	}
-	body, err := os.ReadFile(filepath.Join(dir, "last-stop.json"))
+	return readStopHistory(dir)
+}
+
+// readStopHistory loads stop-history.json from the env's audit
+// directory, returning an empty slice when the file is missing. The
+// file is always written newest-first by writeLastStopEvent, so
+// callers can render the slice as-is.
+func readStopHistory(dir string) ([]uiLastStopEvent, error) {
+	body, err := os.ReadFile(filepath.Join(dir, "stop-history.json"))
 	if err != nil {
 		if os.IsNotExist(err) {
-			return uiLastStopEvent{}, nil
+			return []uiLastStopEvent{}, nil
 		}
-		return uiLastStopEvent{}, err
+		return nil, err
 	}
-	var record uiLastStopEvent
-	if err := json.Unmarshal(body, &record); err != nil {
-		return uiLastStopEvent{}, err
+	var history []uiLastStopEvent
+	if err := json.Unmarshal(body, &history); err != nil {
+		return nil, err
 	}
-	return record, nil
+	if history == nil {
+		return []uiLastStopEvent{}, nil
+	}
+	return history, nil
 }
 
 // lastStopDir resolves the per-env directory used for the
-// last-stop.json audit record. Anchored on os.UserConfigDir so the
-// same path resolves on macOS, Linux, and Windows.
+// stop-history.json audit record. Anchored on os.UserConfigDir so
+// the same path resolves on macOS, Linux, and Windows.
 func lastStopDir(tenant, environment string) (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {

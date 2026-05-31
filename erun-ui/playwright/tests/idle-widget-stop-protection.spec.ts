@@ -379,4 +379,85 @@ test.describe('idle widget stop protection', () => {
     expect(cancelCalls).toBe(1);
     await expect(warning).toBeHidden({ timeout: 5_000 });
   });
+
+  test('Manage dialog History tab renders the last N auto-stops, newest first', async ({
+    app,
+    page,
+  }) => {
+    // Three mocked auto-stop records simulate the rolling history a
+    // user would see in the Manage > History tab. The spec opens the
+    // first env's manage dialog, switches to History, and asserts the
+    // newest row is on top with the per-marker breakdown intact.
+    const history = [
+      {
+        stoppedAt: '2026-05-31T12:30:00Z',
+        graceSeconds: 600,
+        reason: 'idle: terminal-stdin, ai',
+        cloudContextName: 'mock-cluster',
+        markers: [
+          { name: 'terminal-stdin', idle: true, reason: 'no input', secondsIdleFor: 750 },
+          { name: 'ai', idle: true, reason: 'no Claude session activity', secondsIdleFor: 720 },
+        ],
+      },
+      {
+        stoppedAt: '2026-05-30T18:15:00Z',
+        graceSeconds: 600,
+        reason: 'idle: terminal-stdin',
+        cloudContextName: 'mock-cluster',
+        markers: [
+          { name: 'terminal-stdin', idle: true, reason: 'no input', secondsIdleFor: 660 },
+          { name: 'ai', idle: false, reason: 'Claude session active', secondsIdleFor: 0 },
+        ],
+      },
+      {
+        stoppedAt: '2026-05-29T09:00:00Z',
+        graceSeconds: 600,
+        reason: 'outside working hours',
+        cloudContextName: 'mock-cluster',
+        markers: [],
+      },
+    ];
+
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as InvokeBody;
+      if (body.method === 'LoadStopHistory') {
+        return route.fulfill(envelope(history));
+      }
+      await route.continue();
+    });
+
+    const tenants = await app.sidebar.tenants();
+    test.skip(tenants.length === 0, 'no tenants in this developer harness');
+    const tenant = tenants[0]!;
+    const envs = await app.sidebar.environmentsFor(tenant);
+    test.skip(envs.length === 0, `no envs under tenant ${tenant}`);
+    await app.sidebar.openManageDialogFor(tenant, envs[0]!);
+    await app.manageDialog.waitForOpen();
+
+    await app.manageDialog.selectTab('History');
+    const list = page.getByTestId('manage-history-list');
+    await expect(list).toBeVisible({ timeout: 6_000 });
+
+    const rows = page.getByTestId('manage-history-row');
+    await expect(rows).toHaveCount(history.length);
+
+    // Newest first: the row at index 0 corresponds to history[0].
+    const firstWhen = page.getByTestId('manage-history-row-when').first();
+    await expect(firstWhen).toContainText('2026-05-31');
+    const firstReason = page.getByTestId('manage-history-row-reason').first();
+    await expect(firstReason).toContainText('idle: terminal-stdin, ai');
+
+    // The per-marker breakdown is rendered on the active row so the
+    // user can see whether a specific marker stayed active across
+    // recurring stops. history[1] mixes an active "ai" marker with an
+    // idle "terminal-stdin" marker.
+    const secondRow = rows.nth(1);
+    await expect(secondRow).toContainText('Idle markers');
+    await expect(secondRow).toContainText('terminal-stdin');
+    await expect(secondRow).toContainText('Still-active markers');
+    await expect(secondRow).toContainText('ai');
+
+    await app.manageDialog.cancel();
+    await app.manageDialog.waitForClosed();
+  });
 });
