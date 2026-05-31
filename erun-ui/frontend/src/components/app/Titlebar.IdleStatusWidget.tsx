@@ -54,6 +54,27 @@ function useIdleWidgetState(): {
   return { idleStatus, idleBadge, idleAction, cloudContextName };
 }
 
+// renderIdleLeadingBadge picks between the busy-transition pill, the
+// idle-status pill, and rendering nothing. Extracted to keep
+// IdleStatusWidget itself under the eslint complexity ceiling — the
+// busy branch was added to surface in-flight start/stop AWS waits
+// (Nielsen #1) without losing the existing idle-time display.
+function renderIdleLeadingBadge(
+  busy: boolean,
+  idleAction: ReturnType<typeof idleCloudAction>,
+  idleStatus: IdleStatus | null,
+  idleBadge: { label: string; className: string } | null,
+  hasAction: boolean,
+): React.ReactElement | null {
+  if (busy && idleAction) {
+    return <IdleTransitionBadge label={idleAction.label} hasAction={hasAction} />;
+  }
+  if (idleStatus && idleBadge) {
+    return <IdleStatusBadge idleStatus={idleStatus} idleBadge={idleBadge} hasAction={hasAction} />;
+  }
+  return null;
+}
+
 export function IdleStatusWidget(): React.ReactElement | null {
   const state = useIdleWidgetState();
   if (!state) {
@@ -62,21 +83,52 @@ export function IdleStatusWidget(): React.ReactElement | null {
   const { idleStatus, idleBadge, idleAction, cloudContextName } = state;
   const hasAction = Boolean(idleAction);
   const hasFollowOn = Boolean(cloudContextName);
+  const busy = Boolean(idleAction?.busy);
+  // While a start/stop is in flight, the AWS waiter on the backend
+  // blocks the Wails call for the full transition (30-60s typical, up
+  // to 10min worst case per `aws ec2 wait` defaults). The spinner on
+  // the action button reflects that, but on its own the user can't
+  // tell a slow-but-normal wait from a hang — the idle-time pill that
+  // would otherwise carry the env name vanishes mid-transition when
+  // `cloudContextStatus` flips out of `running`. The container border
+  // colour drops the success/blocked tone during the transition so the
+  // titlebar reads as neutral in-progress.
+  const containerClassName = busy ? undefined : idleBadge?.className;
   return (
     <div
-      className={cn('flex h-7 items-center rounded-md border bg-background', idleBadge?.className)}
+      className={cn('flex h-7 items-center rounded-md border bg-background', containerClassName)}
     >
-      {idleStatus && idleBadge ? (
-        <IdleStatusBadge idleStatus={idleStatus} idleBadge={idleBadge} hasAction={hasAction} />
-      ) : null}
+      {renderIdleLeadingBadge(busy, idleAction, idleStatus, idleBadge, hasAction)}
       {idleAction ? (
         <IdleStatusAction
           idleAction={idleAction}
-          hasBadge={Boolean(idleStatus)}
+          hasBadge={busy || Boolean(idleStatus)}
           hasFollowOn={hasFollowOn}
         />
       ) : null}
       {cloudContextName ? <StopProtectionToggle contextName={cloudContextName} /> : null}
+    </div>
+  );
+}
+
+function IdleTransitionBadge({
+  label,
+  hasAction,
+}: {
+  label: string;
+  hasAction: boolean;
+}): React.ReactElement {
+  return (
+    <div
+      className={cn(
+        'flex h-full min-w-[64px] items-center justify-center px-2 font-mono text-[12px] leading-none text-muted-foreground',
+        hasAction && 'border-r',
+      )}
+      role="status"
+      aria-live="polite"
+      data-testid="titlebar-idle-transition"
+    >
+      {label}…
     </div>
   );
 }
