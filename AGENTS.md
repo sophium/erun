@@ -222,6 +222,22 @@ When the user reports "still broken after your fix": run these probes first, the
 
 If the probes all show the expected state but the user-visible click still fails, the bug is in the desktop layer or in how the desktop talks to the pod (port-forward, browser open, etc.), not in the in-pod fix.
 
+## End-to-End Verification Gate (Mandatory)
+
+When a user reports a bug they observed, or when a change touches behaviour that ships in a deployed artifact, the agent verifies the fix end-to-end in the live target — itself, not by handing steps back to the user. Test suites (unit, integration, UI-harness) give code-level confidence; they do not replace running the originally failing flow against the deployed artifact and watching it succeed.
+
+The gate has three parts:
+
+1. **Roll the change into the actual target.** Whatever the change ships through (image, chart, binary, config), drive that path until the running target carries the change. Cached/promoted artifact pipelines must be bypassed when needed so the new content really lands, not a stale equivalent. When an unrelated external precondition blocks the standard rollout, find an equivalent narrower path (direct patch, manual deploy step, etc.) so the target picks up the fix and the gate can proceed; don't stop at "rollout failed, blocked."
+
+2. **Reproduce the original failure verbatim from the same vantage point.** Run the same command, from the same place, with the same inputs the user did. If the failure was inside a sandboxed runtime, exercise it from inside that runtime. If it was a layer talking to another layer, exercise it through that same interface. Use the project's already-documented diagnostic surfaces to reach the deployed state; spin up the minimum harness needed when none exists. Watching it succeed is the gate; watching a related path succeed is not.
+
+3. **Be honest about what you didn't verify.** Some surfaces can't be driven without a human (interactive UI rendering, OS-level integration, real keystroke timing). Name those explicitly, point at the closest test-harness signal that covers them, and don't pad the verified-list with checks that did not happen against the actual deployed artifact.
+
+Exceptions are narrow: changes with no live-target surface (pure refactors that don't change observable behaviour) are validated by the existing suites alone. Anything that crosses a deployed boundary triggers the full gate.
+
+Probe artifacts the agent leaves behind during verification (injected files, manual patches that diverge from the source of truth, helper processes) are the agent's mess to clean up before declaring done, so the user's environment returns to a clean state.
+
 ## Integration Test Gate (Mandatory)
 
 - `make integration-test` must be green on `main` at all times. Do not merge a PR that leaves any scenario red, including scenarios that were already failing before your branch — if you discover a preexisting red, either fix it in the same PR or open a tracking issue and a follow-up PR before merging anything else that touches the suite. "Some tests were already broken" is not a license to add more.
