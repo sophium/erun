@@ -7,9 +7,13 @@ export function ideTooltipLabel(
   ide: string,
   selected: AppState['selected'],
   disabled: boolean,
+  notRunning: boolean,
 ): string {
   if (!selected) {
     return `Select an environment to open in ${ide}`;
+  }
+  if (notRunning) {
+    return `Start the cloud environment before opening ${ide}`;
   }
   if (disabled) {
     return `Enable SSHD in environment settings to open ${ide}`;
@@ -23,6 +27,32 @@ export function isIdeDisabled(selected: UISelection | null, tenants: AppState['t
     .find((tenant) => tenant.name === selected.tenant)
     ?.environments.find((environment) => environment.name === selected.environment);
   return env?.remote !== false && env?.sshdEnabled !== true;
+}
+
+// isEnvOpenedAndRunning reports whether the env behind `selected` is
+// in a state that supports remote operations from the titlebar (IDE
+// launch, Contribute mode, Contribute app launcher). For local envs
+// the answer is always yes — there is no cloud context to gate on.
+// For envs with a managed cloud context, the cloud must be in the
+// `running` state; `pending`, `stopping`, `stopped`, and unset all
+// disable the affordance. Remote envs without a managed cloud context
+// stay enabled because the desktop has no signal to gate on and the
+// user is responsible for provisioning.
+export function isEnvOpenedAndRunning(
+  selected: UISelection | null,
+  idleStatus: IdleStatus | null,
+  tenants: AppState['tenants'],
+): boolean {
+  if (!selected) return false;
+  const env = tenants
+    .find((tenant) => tenant.name === selected.tenant)
+    ?.environments.find((environment) => environment.name === selected.environment);
+  if (!env) return false;
+  if (!env.remote) return true;
+  if (idleStatus?.managedCloud) {
+    return (idleStatus.cloudContextStatus ?? '').trim().toLowerCase() === 'running';
+  }
+  return true;
 }
 
 export function idleCloudDisplayName(idleStatus: IdleStatus, fallback: string): string {

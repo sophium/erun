@@ -14,7 +14,11 @@ import { openIDE } from '@/app/ideOpenThunks';
 import { setFilesOpen, toggleReview, toggleSidebar } from '@/app/layoutThunks';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { ContributeToggle } from '@/components/app/Titlebar.ContributeToggle';
-import { ideTooltipLabel, isIdeDisabled } from '@/components/app/Titlebar.helpers';
+import {
+  ideTooltipLabel,
+  isEnvOpenedAndRunning,
+  isIdeDisabled,
+} from '@/components/app/Titlebar.helpers';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { UISelection } from '@/types';
@@ -69,10 +73,16 @@ export function TitlebarRightControls(): React.ReactElement {
   const filesOpen = useAppSelector((state) => state.layout.filesOpen);
   const selected = useAppSelector((state) => state.selection.selected);
   const tenants = useAppSelector((state) => state.tenants.tenants);
+  const idleStatus = useAppSelector((state) => state.idle.idleStatus);
   const ReviewIcon = reviewOpen ? PanelRightClose : PanelRightOpen;
-  const ideDisabled = isIdeDisabled(selected, tenants);
-  const vscodeTooltip = ideTooltipLabel('VS Code', selected, ideDisabled);
-  const intellijTooltip = ideTooltipLabel('IntelliJ IDEA', selected, ideDisabled);
+  const envRunning = isEnvOpenedAndRunning(selected, idleStatus, tenants);
+  // The IDE buttons need both a usable selection (sshd configured, env
+  // selected) and a running cloud env. The diff/files toggles are pure
+  // UI state and stay enabled — the user may want to hide a stale
+  // panel even while the env is starting back up.
+  const ideDisabled = isIdeDisabled(selected, tenants) || !envRunning;
+  const vscodeTooltip = ideTooltipLabel('VS Code', selected, ideDisabled, !envRunning);
+  const intellijTooltip = ideTooltipLabel('IntelliJ IDEA', selected, ideDisabled, !envRunning);
 
   return (
     <>
@@ -92,7 +102,7 @@ export function TitlebarRightControls(): React.ReactElement {
         variant="intellij"
         dispatch={dispatch}
       />
-      <ContributeToggle />
+      <ContributeToggle envRunning={envRunning} />
       <IconTooltip label="Toggle diff panel">
         <Button
           className={cn(titlebarButtonClassName, reviewOpen && activeTitlebarButtonClassName)}

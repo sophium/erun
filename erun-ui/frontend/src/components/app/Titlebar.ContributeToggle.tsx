@@ -26,7 +26,17 @@ const activeTitlebarButtonClassName =
 // headless `erun app` inside the contribute terminal, brings up a
 // kubectl port-forward, and opens the locally-built desktop app in
 // the user's default browser.
-export function ContributeToggle(): React.ReactElement | null {
+//
+// envRunning gates both buttons: contribute clones ERun *inside the
+// running pod*, and the launcher rebuilds + serves the headless app
+// from the same pod. Neither operation is meaningful while the cloud
+// env is starting/stopping/stopped, so the buttons stay rendered (to
+// preserve layout) but disabled.
+export function ContributeToggle({
+  envRunning,
+}: {
+  envRunning: boolean;
+}): React.ReactElement | null {
   const selected = useAppSelector((state) => state.selection.selected);
   const tenants = useAppSelector((state) => state.tenants.tenants);
   if (!selected) return null;
@@ -36,17 +46,23 @@ export function ContributeToggle(): React.ReactElement | null {
   if (!env) return null;
   const type = (env.type ?? '').toLowerCase();
   if (type !== 'local-agent' && type !== 'remote-agent') return null;
-  return <ContributeToggleControls selected={selected} />;
+  return <ContributeToggleControls selected={selected} envRunning={envRunning} />;
 }
 
-function ContributeToggleControls({ selected }: { selected: UISelection }): React.ReactElement {
+function ContributeToggleControls({
+  selected,
+  envRunning,
+}: {
+  selected: UISelection;
+  envRunning: boolean;
+}): React.ReactElement {
   const flag = useAppSelector((state) =>
     Boolean(state.contribute.flagsByEnv[contributeEnvKey(selected.tenant, selected.environment)]),
   );
   return (
     <>
-      <ContributeToggleButton selected={selected} flag={flag} />
-      {flag && <ContributeAppLauncher selected={selected} />}
+      <ContributeToggleButton selected={selected} flag={flag} envRunning={envRunning} />
+      {flag && <ContributeAppLauncher selected={selected} envRunning={envRunning} />}
     </>
   );
 }
@@ -54,13 +70,17 @@ function ContributeToggleControls({ selected }: { selected: UISelection }): Reac
 function ContributeToggleButton({
   selected,
   flag,
+  envRunning,
 }: {
   selected: UISelection;
   flag: boolean;
+  envRunning: boolean;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
   const [busy, setBusy] = React.useState(false);
-  const label = flag ? 'Disable contribute mode' : 'Contribute to ERun';
+  const baseLabel = flag ? 'Disable contribute mode' : 'Contribute to ERun';
+  const label = envRunning ? baseLabel : `${baseLabel} — start the cloud environment first`;
+  const disabled = busy || !envRunning;
   return (
     <IconTooltip label={label}>
       <Button
@@ -70,9 +90,9 @@ function ContributeToggleButton({
         size="icon"
         aria-label={label}
         aria-pressed={flag}
-        disabled={busy}
+        disabled={disabled}
         onClick={() => {
-          if (busy) return;
+          if (disabled) return;
           setBusy(true);
           void dispatch(toggleContribute(selected)).finally(() => {
             setBusy(false);
@@ -85,10 +105,18 @@ function ContributeToggleButton({
   );
 }
 
-function ContributeAppLauncher({ selected }: { selected: UISelection }): React.ReactElement {
+function ContributeAppLauncher({
+  selected,
+  envRunning,
+}: {
+  selected: UISelection;
+  envRunning: boolean;
+}): React.ReactElement {
   const dispatch = useAppDispatch();
   const [busy, setBusy] = React.useState(false);
-  const label = 'Open contribute app in browser';
+  const baseLabel = 'Open contribute app in browser';
+  const label = envRunning ? baseLabel : `${baseLabel} — start the cloud environment first`;
+  const disabled = busy || !envRunning;
   return (
     <IconTooltip label={label}>
       <Button
@@ -97,9 +125,9 @@ function ContributeAppLauncher({ selected }: { selected: UISelection }): React.R
         variant="ghost"
         size="icon"
         aria-label={label}
-        disabled={busy}
+        disabled={disabled}
         onClick={() => {
-          if (busy) return;
+          if (disabled) return;
           setBusy(true);
           // Show an immediate "building" notification so the user
           // knows the long-running rebuild is in flight; without it
