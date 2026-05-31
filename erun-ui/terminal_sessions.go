@@ -990,6 +990,15 @@ func (a *App) shouldRespawnForCloudContext(managed *managedTerminal) bool {
 	if managed == nil || a.deps.store == nil {
 		return true
 	}
+	// Honor an explicit Stop click before consulting on-disk state. The
+	// status poller writes the cloud-context status on its own cadence,
+	// so a fresh Stop leaves a wide race window where the on-disk status
+	// still reads running while the kubectl session is already gone.
+	// isIntentionalStop closes that window; the marker is cleared on
+	// successful Start so the next reconnect cycle behaves normally.
+	if a.isIntentionalStop(managed.selection) {
+		return false
+	}
 	config, _, err := a.deps.store.LoadEnvConfig(managed.selection.Tenant, managed.selection.Environment)
 	if err != nil {
 		return true

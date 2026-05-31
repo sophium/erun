@@ -380,6 +380,103 @@ test.describe('idle widget stop protection', () => {
     await expect(warning).toBeHidden({ timeout: 5_000 });
   });
 
+  test('Stop click does not trigger any frontend-driven restart RPC (issue #412)', async ({
+    app,
+    page,
+  }) => {
+    // The bug: clicking the Power button on a remote env caused the
+    // env to silently auto-reopen. The Go-side fix lives in the
+    // terminal-reconnect loop and is covered end-to-end by
+    // erun-ui/reconnect_loop_test.go's TestStopCloudContextSuppressesReconnect.
+    // The headless harness cannot drive a real PTY exit (the kubectl
+    // session dying because the cluster API server dropped) so the
+    // reconnect branch is not directly reachable here. The closest
+    // observable invariant we *can* reach is the frontend-side
+    // contract: clicking Stop must not cause the React tree to fire
+    // a StartCloudContext, StartSession, or StartAISession RPC of
+    // its own accord. If a future refactor sneaks a frontend-side
+    // restart into the stop pathway, this assertion will catch it
+    // before it ships, and the Go test will catch any regression in
+    // the in-Go reconnect-loop gate.
+    const ctxName = 'mock-ctx-no-restart';
+    const idle: IdleStatusFixture = {
+      cloudContextName: ctxName,
+      cloudContextStatus: 'running',
+      cloudContextLabel: ctxName,
+    };
+    let startCloudContextCalls = 0;
+    let startSessionCalls = 0;
+    let startAISessionCalls = 0;
+    let stopCloudContextCalls = 0;
+
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as InvokeBody;
+      if (body.method === 'LoadIdleStatus') {
+        return route.fulfill(envelope(managedRunningIdleStatus(idle)));
+      }
+      if (body.method === 'DescribeCloudContextApiStop') {
+        return route.fulfill(envelope(apiStopStatus(ctxName, false)));
+      }
+      if (body.method === 'StopCloudContext') {
+        stopCloudContextCalls++;
+        // Flip the in-test fixture so subsequent LoadIdleStatus polls
+        // report stopped — mirrors the real backend updating its
+        // cache after StopInstances returns.
+        idle.cloudContextStatus = 'stopped';
+        return route.fulfill(
+          envelope({
+            name: ctxName,
+            status: 'stopped',
+            cloudContextStatus: 'stopped',
+          }),
+        );
+      }
+      if (body.method === 'StartCloudContext') {
+        startCloudContextCalls++;
+        // Defensive: this is the call we are asserting must NOT happen
+        // in this flow. Returning a value lets the test fail with an
+        // assertion error rather than hang.
+        return route.fulfill(envelope({ name: ctxName, status: 'running' }));
+      }
+      if (body.method === 'StartSession') {
+        startSessionCalls++;
+        return route.fulfill(envelope({ sessionId: 0, kind: 'open' }));
+      }
+      if (body.method === 'StartAISession') {
+        startAISessionCalls++;
+        return route.fulfill(envelope({ sessionId: 0, kind: 'ai' }));
+      }
+      await route.continue();
+    });
+
+    const tenants = await app.sidebar.tenants();
+    test.skip(tenants.length === 0, 'no tenants in this developer harness');
+    const tenant = tenants[0]!;
+    const envs = await app.sidebar.environmentsFor(tenant);
+    test.skip(envs.length === 0, `no envs under tenant ${tenant}`);
+    await app.sidebar.openEnvironment(tenant, envs[0]!);
+
+    const stopButton = page.getByRole('button', { name: new RegExp(`^Stop ${ctxName}`) });
+    await stopButton.waitFor({ state: 'visible', timeout: 6_000 });
+
+    // Snapshot the start-call counts AFTER the env opens (the open
+    // legitimately calls StartSession once) so the post-stop assertion
+    // can compare against a baseline rather than zero.
+    const baselineStartSession = startSessionCalls;
+    const baselineStartAISession = startAISessionCalls;
+
+    await stopButton.click();
+
+    // Wait for the stop to land (StopCloudContext fired) then give the
+    // React tree a beat in case a follow-up restart RPC is on its way.
+    await expect.poll(() => stopCloudContextCalls).toBe(1);
+    await page.waitForTimeout(1_500);
+
+    expect(startCloudContextCalls).toBe(0);
+    expect(startSessionCalls).toBe(baselineStartSession);
+    expect(startAISessionCalls).toBe(baselineStartAISession);
+  });
+
   test('Manage dialog History tab renders the last N auto-stops, newest first', async ({
     app,
     page,
