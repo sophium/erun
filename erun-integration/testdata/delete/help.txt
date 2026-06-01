@@ -1,7 +1,12 @@
-Delete an environment from ERun configuration and remove its remote runtime namespace
+Delete a tenant environment and tear down its remote runtime.
+
+Removes the environment's remote namespace and its data, then removes the local config entry. The namespace data is not recoverable. Asks you to type <tenant>-<environment> to confirm; -y skips the prompt for non-interactive callers.
 
 Usage:
   erun delete TENANT ENVIRONMENT [flags]
+
+Examples:
+  erun delete team dev
 
 Flags:
       --dry-run   Resolve and trace mutating actions without executing them.

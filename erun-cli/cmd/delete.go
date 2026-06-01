@@ -13,8 +13,13 @@ import (
 func newDeleteCmd(store common.DeleteStore, promptRunner PromptRunner, deleteNamespace common.NamespaceDeleterFunc) *cobra.Command {
 	var yes bool
 	cmd := &cobra.Command{
-		Use:          "delete TENANT ENVIRONMENT",
-		Short:        "Delete an environment from ERun configuration and remove its remote runtime namespace",
+		Use:   "delete TENANT ENVIRONMENT",
+		Short: "Delete a tenant environment and tear down its remote runtime",
+		Long: "Delete a tenant environment and tear down its remote runtime.\n\n" +
+			"Removes the environment's remote namespace and its data, then removes the local " +
+			"config entry. The namespace data is not recoverable. Asks you to type " +
+			"<tenant>-<environment> to confirm; -y skips the prompt for non-interactive callers.",
+		Example:      "  erun delete team dev",
 		Args:         cobra.ExactArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {

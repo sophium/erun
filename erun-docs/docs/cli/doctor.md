@@ -20,6 +20,17 @@ For the full per-check id catalogue and the offered recovery actions, see [Agent
 
 When any item is `missing`, `doctor` offers to run the corresponding recovery step.
 
+## What it can repair
+
+Beyond reporting, `doctor` offers these fixes (each prompts first, or runs non-interactively with its flag):
+
+- **Docker cleanup** — prune the environment's unused images, build cache, or stopped containers. These run against the environment's Docker, not your laptop's.
+- **Root config repair** — restore the root erun config from a dated backup, or re-initialize orphaned cloud provider aliases.
+- **JetBrains Gateway** — clear cached backend metadata for the environment when a Gateway connection is stuck.
+- **Remote init** — inside a runtime pod, finish an interrupted init (SSH keygen, repo clone).
+
+The exact flags for running these non-interactively are on the [CLI flag spec](/agent-reference/cli-flags#erun-doctor).
+
 ## Flags
 
 | Flag | Description |
@@ -81,3 +92,12 @@ erun doctor — my-tenant / rihards-dev
 ```
 
 The check format is fixed (`<category>: <name> <status> <detail>`); machine-readable consumers should prefer the [MCP `doctor` tool](/mcp/overview#doctor) which returns the same data as typed JSON.
+
+## Error behaviour
+
+| Failure | Behaviour |
+|---|---|
+| Root config missing or corrupted. | Reports it; with `--repair-config` offers to restore from a dated backup, otherwise leaves it untouched. |
+| Prune not confirmed and no `--prune-*` flag. | No Docker state is touched — prunes run only on confirmation or with the matching flag. |
+| Run inside a runtime pod with a complete init. | Reports "nothing to finish" and exits 0. |
+| Cluster unreachable. | Reports the pod check as failed; config and workspace checks still run. |

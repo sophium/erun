@@ -36,8 +36,12 @@ func newCloudInitCmd(store common.CloudStore, promptRunner PromptRunner, deps co
 func newCloudInitAWSCmd(store common.CloudStore, promptRunner PromptRunner, deps common.CloudDependencies) *cobra.Command {
 	var params common.InitAWSCloudProviderParams
 	cmd := &cobra.Command{
-		Use:          "aws",
-		Short:        "Initialize an AWS SSO cloud provider alias",
+		Use:   "aws",
+		Short: "Set up an AWS cloud provider alias",
+		Long: "Set up an AWS cloud provider alias.\n\n" +
+			"Registers an AWS IAM Identity Center (SSO) profile and saves it as a cloud provider " +
+			"alias for use by managed contexts and environments. Opens an AWS SSO login in your " +
+			"browser.",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {

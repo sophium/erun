@@ -1,4 +1,6 @@
-Initialize an AWS SSO cloud provider alias
+Set up an AWS cloud provider alias.
+
+Registers an AWS IAM Identity Center (SSO) profile and saves it as a cloud provider alias for use by managed contexts and environments. Opens an AWS SSO login in your browser.
 
 Usage:
   erun cloud init aws [flags]

@@ -80,8 +80,15 @@ func (a *App) StopCloudContext(name string) (uiCloudContextStatus, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	// Record Stop intent before the AWS call so shouldRespawnForCloudContext
+	// already sees the marker by the time the kubectl session dies and
+	// the reconnect loop fires. If the AWS call fails the cluster is
+	// still up — clear the marker so a transient stop error does not
+	// silently disable reconnect.
+	a.markIntentionalStopForCloudContext(name)
 	status, err := a.deps.stopCloudContext(ctx, name)
 	if err != nil {
+		a.clearIntentionalStopForCloudContext(name)
 		return uiCloudContextStatus{}, err
 	}
 	a.setCloudContextStatusInCache(status.Name, status.Status)
@@ -94,6 +101,7 @@ func (a *App) StartCloudContext(name string) (uiCloudContextStatus, error) {
 		return uiCloudContextStatus{}, err
 	}
 	a.clearIdleStopsForCloudContext(status.Name)
+	a.clearIntentionalStopForCloudContext(status.Name)
 	a.setCloudContextStatusInCache(status.Name, status.Status)
 	return cloudContextStatusToUI(status), nil
 }

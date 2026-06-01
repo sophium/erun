@@ -56,6 +56,18 @@ func TestExec(t *testing.T) {
 		golden.Equal(t, "exec/raw_dry_run", normalize.Apply(result.Combined))
 	})
 
+	t.Run("raw_help", func(t *testing.T) {
+		// raw sets DisableFlagParsing, so cobra never intercepts --help on its
+		// own. rawCommandWantsHelp must catch it and render help instead of
+		// trying to execute a binary called "--help".
+		setup := env.New(t)
+		result := erun.Run(t, []string{"exec", "raw", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/raw_help", normalize.Apply(result.Combined))
+	})
+
 	t.Run("raw_dry_run_traces_inside_project", func(t *testing.T) {
 		// Exercises eruncommon.RunRawCommand: with a real project root
 		// resolved, the dry-run trace must show the resolved cwd and the

@@ -21,8 +21,14 @@ var errVersionFileNotFound = common.ErrVersionFileNotFound
 func newBuildCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, runBuildScript common.BuildScriptRunnerFunc, buildDockerImage common.DockerImageBuilderFunc, loginToDockerRegistry common.DockerRegistryLoginFunc, selectRunner SelectRunner, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	target := common.DockerCommandTarget{}
 	cmd := &cobra.Command{
-		Use:           "build",
-		Short:         "Build the container image in the current directory",
+		Use:   "build",
+		Short: "Build the project's container images",
+		Long: "Build the project's container images.\n\n" +
+			"The build step of the build → release → push → deploy flow. Builds locally " +
+			"without publishing by default; --release stamps and publishes the release version " +
+			"first, and --deploy pushes the images and rolls them out — folding the later steps " +
+			"into one command so the version flows through for you.",
+		Example:       "  erun build\n  erun build --release\n  erun build --release --deploy",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -127,8 +133,11 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 	target := common.DockerCommandTarget{}
 	var force bool
 	cmd := &cobra.Command{
-		Use:           "push",
-		Short:         "Build and push the current container image",
+		Use:   "push",
+		Short: "Build and push the current container image",
+		Long: "Build and push the project's container images to the registry.\n\n" +
+			"The push step of the build → release → push → deploy flow.",
+		Example:       "  erun push",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,

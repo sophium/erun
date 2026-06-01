@@ -1,0 +1,46 @@
+<svg viewBox="0 0 900 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="versionKindsTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="versionKindsTitle">How one base number becomes four kinds of version. A charcoal source pill on the left holds the base number from the VERSION file (1.0.81). Four arrows fan out to four outcomes, decided by where the build runs: on main it is the stable 1.0.81; on develop it is a candidate 1.0.81-rc.commit; on a feature or bug branch it is a prerelease 1.0.81-pr.commit; a plain local build produces a snapshot 1.0.81-snapshot-timestamp.</title>
+
+  <defs>
+    <linearGradient id="vkCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="vkArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+  </defs>
+
+  <text x="450" y="24" text-anchor="middle" fill="currentColor" font-size="16" font-weight="600">One base number, four kinds</text>
+
+  <!-- Source: VERSION file -->
+  <rect x="40" y="147" width="190" height="60" rx="14" fill="url(#vkCharcoal)"/>
+  <text x="135" y="173" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="600">VERSION</text>
+  <text x="135" y="194" text-anchor="middle" fill="#ffffff" font-size="14" opacity="0.85" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">1.0.81</text>
+
+  <!-- Arrows -->
+  <line x1="230" y1="177" x2="480" y2="72" stroke="#0891b2" stroke-width="1.5" marker-end="url(#vkArrow)"/>
+  <line x1="230" y1="177" x2="480" y2="142" stroke="#0891b2" stroke-width="1.5" marker-end="url(#vkArrow)"/>
+  <line x1="230" y1="177" x2="480" y2="212" stroke="#0891b2" stroke-width="1.5" marker-end="url(#vkArrow)"/>
+  <line x1="230" y1="177" x2="480" y2="282" stroke="#0891b2" stroke-width="1.5" marker-end="url(#vkArrow)"/>
+
+  <!-- stable -->
+  <rect x="480" y="44" width="380" height="56" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="500" y="69" fill="currentColor" font-size="13" font-weight="600">on main — stable</text>
+  <text x="500" y="89" fill="currentColor" font-size="12.5" opacity="0.7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">1.0.81</text>
+
+  <!-- candidate -->
+  <rect x="480" y="114" width="380" height="56" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="500" y="139" fill="currentColor" font-size="13" font-weight="600">on develop — candidate</text>
+  <text x="500" y="159" fill="currentColor" font-size="12.5" opacity="0.7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">1.0.81-rc.&lt;commit&gt;</text>
+
+  <!-- prerelease -->
+  <rect x="480" y="184" width="380" height="56" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="500" y="209" fill="currentColor" font-size="13" font-weight="600">feature / bug branch — prerelease</text>
+  <text x="500" y="229" fill="currentColor" font-size="12.5" opacity="0.7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">1.0.81-pr.&lt;commit&gt;</text>
+
+  <!-- snapshot -->
+  <rect x="480" y="254" width="380" height="56" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="500" y="279" fill="currentColor" font-size="13" font-weight="600">local build — snapshot</text>
+  <text x="500" y="299" fill="currentColor" font-size="12.5" opacity="0.7" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">1.0.81-snapshot-&lt;ts&gt;</text>
+</svg>

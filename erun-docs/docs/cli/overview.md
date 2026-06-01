@@ -6,14 +6,16 @@ title: CLI overview
 
 The `erun` CLI is ERun's **automation surface**. It's what CI/CD pipelines invoke for `build` / `push` / `deploy`, what runs inside every runtime pod, and what the desktop app shells out to when you click a button. If you're scripting, running on a build runner, or working headlessly, the CLI is your interface.
 
-For day-to-day human use on macOS or Windows, use the [desktop app](/desktop/overview) — it's the same CLI underneath, with a UI on top.
+For day-to-day work on macOS or Windows, use the [desktop app](/desktop/overview) — it's the same CLI underneath, with a UI on top.
 
 <figure className="erun-hero-figure">
   <img src="/img/cli-lifecycle.svg" alt="CLI lifecycle. Five main commands in a horizontal flow connected by arrows: erun init (create tenant + env, first time) → erun open (attach to env, SSH + MCP ready) → erun build (in an agent env, snapshot or release) → erun deploy (build · push · roll out, helm upgrade) → erun delete (tear down env, namespace + config). Below, a row of inspection and automation commands: erun list (tenants · envs · target), erun doctor (diagnose env), erun mcp (server for agents), erun release (CI publishes), erun version (build info). A strapline notes all commands support --dry-run for preview before any side effect." />
   <figcaption>One straight path from `init` to `delete`. The bottom row holds inspection and automation commands you reach for as needed.</figcaption>
 </figure>
 
-Every command supports `--help` and `--dry-run`.
+Every command supports `--help`. Action-oriented commands also support `--dry-run` (read-only commands like `list` and `idle` don't need it).
+
+The `build → release → push → deploy` commands form ERun's delivery pipeline. See the [Delivery pipeline](/pipeline) for how they fit together.
 
 ## Commands
 
@@ -21,16 +23,24 @@ Every command supports `--help` and `--dry-run`.
 |---|---|
 | `erun` | Universal entry point. In a fresh project, runs `init`. In a configured one, runs `open`. |
 | [`erun init`](/cli/init) | Create or update a tenant + environment, bring the environment up. |
-| [`erun open`](/cli/open) | Open a shell into the environment (brings it up if missing). |
-| [`erun list`](/cli/list) | List tenants, environments, status, and effective target. |
-| [`erun build`](/cli/build) | Build the project's Docker images (agent envs only — runtime envs receive deploys, they don't build). |
+| [`erun open`](/cli/open) | Open a shell into the environment (brings it up first if needed). |
+| [`erun delete`](/cli/delete) | Tear down an environment — remote namespace + local config. |
+| [`erun build`](/cli/build) | Build the project's container images (agent envs only — runtime envs receive deploys). |
+| [`erun release`](/cli/release) | Cut a release: stamp the version, tag it, push the tag. |
 | [`erun push`](/cli/push) | Push built images to the configured container registry. |
-| [`erun deploy`](/cli/deploy) | Build → push → roll out the helm chart. |
-| [`erun doctor`](/cli/doctor) | Inspect the local config or a running environment for problems. |
-| [`erun mcp`](/cli/mcp) | Launch the MCP server (used by IDEs and AI tooling). |
-| [`erun release`](/cli/release) | Plan and execute a project release. |
-| [`erun delete`](/cli/delete) | Remove an environment's namespace and local config. |
-| [`erun version`](/cli/version) | Print build version + commit. |
+| [`erun deploy`](/cli/deploy) | Roll a version out to an environment (build · push · helm upgrade). |
+| [`erun cloud`](/cli/cloud) | Set up and manage cloud provider aliases (AWS SSO). |
+| [`erun context`](/cli/context) | Create and power managed cloud contexts (an EC2 instance running k3s). |
+| [`erun sshd`](/cli/sshd) | Enable SSH (and IDE) access to a remote environment. |
+| [`erun list`](/cli/list) | List tenants, environments, and the effective target. |
+| [`erun idle`](/cli/idle) | Show an environment's idle / auto-stop status. |
+| [`erun doctor`](/cli/doctor) | Diagnose and repair an environment's runtime and config. |
+| [`erun version`](/cli/version) | Print build version + latest published versions. |
+| [`erun mcp`](/cli/mcp) | Run the MCP server for Agents (launches `emcp`). |
+| [`erun api`](/cli/api) | Run the backend API server (launches `eapi`). |
+| [`erun app`](/cli/app) | Launch the desktop app. |
+| [`erun exec`](/cli/exec) | Run repository helpers — `diff`, `raw`. |
+| [`erun contribute`](/cli/contribute) | Contribute-mode helpers — clone the ERun repo locally. |
 
 ## Dry-run and verbosity
 

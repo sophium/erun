@@ -1,0 +1,19 @@
+Run an arbitrary command from the project root.
+
+The command runs directly, not through a shell — wrap it in 'sh -c "…"' if you need shell features. --dry-run traces the command (with secret-looking arguments redacted) without running it. Use -- to pass flags through to the wrapped command.
+
+Usage:
+  erun exec raw COMMAND [ARG...] [flags]
+
+Examples:
+  erun exec raw go test ./...
+  erun exec raw --dry-run -- kubectl get pods --all-namespaces
+
+Flags:
+      --dry-run   Resolve and trace mutating actions without executing them.
+  -h, --help      help for raw
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
+audit: erun exec raw --help

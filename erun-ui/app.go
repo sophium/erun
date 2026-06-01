@@ -74,6 +74,7 @@ type App struct {
 	nextSerial                int
 	sessions                  map[string]*managedTerminal
 	idleStops                 map[string]struct{}
+	intentionalStops          map[string]struct{}
 	busyEnvs                  map[string]int
 	workspaceSyncs            map[string]*workspaceSyncWorker
 	credentialRefreshers      map[string]*cloudCredentialsRefresher
@@ -139,6 +140,7 @@ func NewApp(deps erunUIDeps) *App {
 		deps:                 deps,
 		sessions:             make(map[string]*managedTerminal),
 		idleStops:            make(map[string]struct{}),
+		intentionalStops:     make(map[string]struct{}),
 		busyEnvs:             make(map[string]int),
 		workspaceSyncs:       make(map[string]*workspaceSyncWorker),
 		credentialRefreshers: make(map[string]*cloudCredentialsRefresher),
