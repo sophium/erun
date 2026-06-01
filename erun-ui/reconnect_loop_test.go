@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -145,6 +146,214 @@ func TestTrackExitForLoopGuardPrunesOldExits(t *testing.T) {
 	}
 	if len(managed.recentExits) != 1 {
 		t.Fatalf("expected pruning to leave 1 entry, got %d", len(managed.recentExits))
+	}
+}
+
+// TestStopCloudContextSuppressesReconnect locks the intentional-stop
+// gate from issue #412. Before this gate, clicking the Power button
+// in the titlebar fired `StopCloudContext` and the kubectl session
+// died moments later as the EC2 instance entered `stopping`. The
+// reconnect loop then re-ran `erun open`, whose CloudContextPreflight
+// called StartCloudContext and immediately undid the user's stop.
+// `shouldRespawnForCloudContext` already blocked reconnect when the
+// on-disk cloud-context status was non-running, but the status poller
+// writes that field on its own cadence so a race window stayed wide
+// open. StopCloudContext now records an intent marker the moment the
+// AWS call returns; shouldRespawnForCloudContext consults it before
+// reading the on-disk status, so the marker closes the race without
+// waiting for the poller.
+func TestStopCloudContextSuppressesReconnect(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		config: &eruncommon.ERunConfig{
+			CloudContexts: []eruncommon.CloudContextConfig{{
+				Name:              "managed-cloud",
+				KubernetesContext: "cluster-cloud",
+			}},
+		},
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {
+				Name:              "remote",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-cloud",
+				Remote:            true,
+			},
+		},
+	}
+
+	var sessionsMu sync.Mutex
+	var sessions []*stubTerminalSession
+	app := NewApp(erunUIDeps{
+		store:           store,
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			session := newStubTerminalSession()
+			sessionsMu.Lock()
+			sessions = append(sessions, session)
+			sessionsMu.Unlock()
+			return session, nil
+		},
+		// Stub stop so the test does not need a real AWS client. Pretend the
+		// instance entered `stopping` but the cache stays at running so the
+		// shouldRespawnForCloudContext on-disk branch alone would NOT block
+		// the respawn — only the intent marker can.
+		stopCloudContext: func(_ context.Context, name string) (eruncommon.CloudContextStatus, error) {
+			return eruncommon.CloudContextStatus{
+				CloudContextConfig: eruncommon.CloudContextConfig{Name: name, KubernetesContext: "cluster-cloud"},
+				Status:             "stopping",
+			}, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+	// Seed the cache so shouldRespawnForCloudContext's on-disk fallback
+	// would allow respawn if the intent marker were not in place.
+	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusRunning)
+
+	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	if _, err := app.StartSession(selection, 0, 80, 24); err != nil {
+		t.Fatalf("StartSession failed: %v", err)
+	}
+	waitForSessionCount(t, &sessionsMu, &sessions, 1, 2*time.Second)
+
+	// User clicks the Power button. StopCloudContext marks intent BEFORE
+	// the AWS call, then sets the cache to stopping — but we keep the
+	// returned status's effect on the cache irrelevant by leaving the
+	// stub above with the same `Stopping` value. The poller has not run.
+	if _, err := app.StopCloudContext("managed-cloud"); err != nil {
+		t.Fatalf("StopCloudContext failed: %v", err)
+	}
+
+	// Now drop the live PTY the way the kubectl session dies when the
+	// API server goes away. Without the marker, tryReconnect respawns
+	// and a second stub appears in `sessions`.
+	sessionsMu.Lock()
+	first := sessions[0]
+	sessionsMu.Unlock()
+	_ = first.Close()
+
+	// Give tryReconnect a beat. The deadline mirrors the cloud-context
+	// gate test so a regression races for ~1s.
+	deadline := time.Now().Add(1 * time.Second)
+	for time.Now().Before(deadline) {
+		sessionsMu.Lock()
+		count := len(sessions)
+		sessionsMu.Unlock()
+		if count > 1 {
+			t.Fatalf("StopCloudContext intent marker did not block reconnect; got %d sessions", count)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestClearIntentionalStopForCloudContext documents the recovery
+// path: once the user explicitly resumes (via the titlebar Start
+// button, the sidebar re-click that runs `erun open`, or a successful
+// idle-stop clear), the intent marker must clear so a subsequent
+// kubectl-drop reconnects normally. Without this clear, the env
+// would be permanently stuck in "no reconnect" after every Stop
+// click. StartCloudContext, ensureLinkedCloudContextRunning, and the
+// idle-stop clear path all funnel through
+// clearIntentionalStopForCloudContext.
+func TestClearIntentionalStopForCloudContext(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		config: &eruncommon.ERunConfig{
+			CloudContexts: []eruncommon.CloudContextConfig{{
+				Name:              "managed-cloud",
+				KubernetesContext: "cluster-cloud",
+			}},
+		},
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {
+				Name:              "remote",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-cloud",
+				Remote:            true,
+			},
+		},
+	}
+
+	app := NewApp(erunUIDeps{
+		store: store,
+		stopCloudContext: func(_ context.Context, name string) (eruncommon.CloudContextStatus, error) {
+			return eruncommon.CloudContextStatus{
+				CloudContextConfig: eruncommon.CloudContextConfig{Name: name, KubernetesContext: "cluster-cloud"},
+				Status:             "stopping",
+			}, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusRunning)
+
+	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+
+	if _, err := app.StopCloudContext("managed-cloud"); err != nil {
+		t.Fatalf("StopCloudContext failed: %v", err)
+	}
+	if !app.isIntentionalStop(selection) {
+		t.Fatal("expected intentional-stop marker after StopCloudContext")
+	}
+
+	// The recovery callers (StartCloudContext, ensureLinkedCloudContextRunning,
+	// idle-stop's clear path) all clear the marker via the same helper. Test
+	// the helper directly so the test does not need to stand up a full AWS
+	// stub harness with valid instance IDs.
+	app.clearIntentionalStopForCloudContext("managed-cloud")
+	if app.isIntentionalStop(selection) {
+		t.Fatal("expected intentional-stop marker to clear after clearIntentionalStopForCloudContext")
+	}
+}
+
+// TestStopCloudContextErrorClearsIntentionalStop locks the failure
+// path: if the AWS Stop call returns an error, the cluster is still
+// up, so a subsequent kubectl drop must reconnect normally. Leaving
+// the marker behind would silently disable reconnect after a
+// transient stop error.
+func TestStopCloudContextErrorClearsIntentionalStop(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		config: &eruncommon.ERunConfig{
+			CloudContexts: []eruncommon.CloudContextConfig{{
+				Name:              "managed-cloud",
+				KubernetesContext: "cluster-cloud",
+			}},
+		},
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {
+				Name:              "remote",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-cloud",
+				Remote:            true,
+			},
+		},
+	}
+
+	wantErr := errors.New("aws stop failed")
+	app := NewApp(erunUIDeps{
+		store: store,
+		stopCloudContext: func(_ context.Context, _ string) (eruncommon.CloudContextStatus, error) {
+			return eruncommon.CloudContextStatus{}, wantErr
+		},
+	})
+	defer app.shutdown(context.Background())
+	app.setCloudContextStatusInCache("managed-cloud", eruncommon.CloudContextStatusRunning)
+
+	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	if _, err := app.StopCloudContext("managed-cloud"); err == nil {
+		t.Fatal("expected StopCloudContext to surface stub error")
+	}
+	if app.isIntentionalStop(selection) {
+		t.Fatal("expected intentional-stop marker to clear after StopCloudContext error")
 	}
 }
 
