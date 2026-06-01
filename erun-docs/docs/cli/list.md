@@ -4,7 +4,7 @@ title: erun list
 
 # `erun list`
 
-List all configured tenants and environments, the effective target, and managed cloud contexts. `list` is read-only and never mutates state.
+List all configured tenants and environments, the effective target for the current directory, and configured cloud providers. `list` is read-only and never mutates state. (To list managed cloud *contexts*, use [`erun context list`](/cli/context).)
 
 ## Synopsis
 
@@ -14,65 +14,46 @@ erun list [flags]
 
 ## Output
 
-The default output is a tree:
+Sections print in order — configuration location, defaults, the effective target for the current directory, configured cloud providers, then every tenant and its environments:
 
 ```
-config directory: /Users/you/Library/Application Support/erun
-default tenant: my-tenant
-
-current directory:
-  effective target: my-tenant / local
-
-tenants:
-  - my-tenant [default, effective]
-    default environment: local
-    environments:
-      - local [default, effective]
-        kubernetes context: docker-desktop
-        container-registry: ghcr.io/sophium
-        runtime version: 1.0.76
-      - rihards-dev
-        kubernetes context: erun-004-020362606330-eu-west-2
-        ...
+Configuration:
+  directory: /Users/you/Library/Application Support/erun
+Defaults:
+  tenant: my-tenant
+  environment: local
+Current Directory:
+  path: /Users/you/code/my-project
+  repo: my-project
+  configured tenant: my-tenant
+  effective target: my-tenant/local
+  kubernetes context: docker-desktop
+  type: local-agent
+  snapshot: enabled
+  repo path: /Users/you/code/my-project
+Cloud Providers:
+  none
+Tenants:
+  - my-tenant (default)
+    ...
 ```
 
-The full per-env field set (local port allocations, API URL, repo path, …) is listed; the example above abbreviates. See [Configuration](/reference/configuration) for what each per-env value means.
+The full per-env field set (local port allocations, API URL, SSH details, …) prints under each tenant; the example abbreviates. See [Configuration](/reference/configuration) for what each value means.
 
 ## Common usages
 
 ```bash
-erun list                            # full tree
-erun list | grep -E "(tenant|env)"   # quick scan of names
-erun list | grep container-registry  # see configured registries per env
+erun list                         # full listing
+erun list | grep -i "tenant"      # quick scan of names
+erun list | grep "effective"      # what ERun targets right now
 ```
 
 `erun list` is what every troubleshooting flow should start with — it tells you which environment ERun considers "effective" right now and what its resolved config looks like.
 
-## Subcommands
+## Error behaviour
 
-| Subcommand | Description |
+| Failure | Behaviour |
 |---|---|
-| `erun list cloud` | List managed ERun cloud contexts only. |
-
-### `erun list cloud` output
-
-A flat list of every cloud context configured on the current user — alias, provider, cluster id, region, instance type, and the current [lifecycle status](/concepts/cloud-contexts#lifecycle):
-
-```
-cloud contexts:
-  - MyOrg+020362606330@aws [running]
-    provider: aws (alias: MyOrg)
-    cluster:  erun-004-020362606330-eu-west-2
-    region:   eu-west-2
-    instance: t3.large
-    bound envs: my-tenant / rihards-dev, my-tenant / claude-review
-
-  - MyOrg+020362606330@aws-staging [stopped]
-    provider: aws (alias: MyOrg)
-    cluster:  erun-005-020362606330-eu-west-2
-    region:   eu-west-2
-    instance: t3.medium
-    bound envs: (none)
-```
-
-Useful for spotting cloud contexts that are running idle, or for figuring out which env(s) a context backs before stopping it.
+| No config yet. | Prints the sections with `none` placeholders; not an error. |
+| Current directory isn't a configured project. | `effective target: none` (or `unavailable (…)` with the reason); the rest still prints. |
+| Config file unreadable. | Errors with the read failure; nothing is printed. |

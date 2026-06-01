@@ -34,8 +34,13 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 	target := common.OpenParams{}
 
 	cmd := &cobra.Command{
-		Use:          "open [TENANT] [ENVIRONMENT]",
-		Short:        "Open a shell in the tenant environment worktree",
+		Use:   "open [TENANT] [ENVIRONMENT]",
+		Short: "Open a shell in the tenant environment",
+		Long: "Open a shell in the tenant environment.\n\n" +
+			"Brings the environment up first if needed — deploying or updating the runtime and " +
+			"starting port-forwards — then drops you into a shell. Use --vscode or --intellij to " +
+			"open an IDE instead, or --no-shell to print the setup commands for your current shell.",
+		Example:      "  erun open\n  erun open team dev\n  erun open team dev --vscode",
 		Args:         cobra.MaximumNArgs(2),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {

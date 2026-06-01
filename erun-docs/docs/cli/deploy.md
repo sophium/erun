@@ -4,7 +4,7 @@ title: erun deploy
 
 # `erun deploy`
 
-Build (if needed), push, and roll out the helm chart for the current devops module. `erun deploy` is the single-command workflow for moving code from your machine into a Kubernetes environment.
+Build (if needed), push, and roll out the helm chart for the current devops module. `erun deploy` is the single-command workflow for moving code from your machine into a Kubernetes environment — the deploy step of the [delivery pipeline](/pipeline).
 
 ## Synopsis
 
@@ -24,6 +24,8 @@ Each environment declares its deployment plan in `.erun/config.yaml`. Steps run 
 |---|---|
 | `--components <name,name,...>` | Opt-in components to include alongside the runtime chart. The accepted list is derived from each project's `<tenant>-devops/k8s/<component>/` charts. |
 | `--version <version>` | Override the deployed chart and image version. |
+| `--snapshot` / `--no-snapshot` | Build and deploy local snapshot images in a local environment (on by default there). A snapshot deploy also **resets the environment's Postgres database**. |
+| `--publish` | Package and push each resolved chart to the environment's container registry as an OCI Helm artifact before the upgrade. |
 | `--force` | Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected. |
 | `--dry-run` | Resolve and print every `docker`, `docker push`, and `helm upgrade --install` command without executing. |
 
@@ -38,6 +40,12 @@ Subcommand:
 When all of a chart's locally-built images were promoted from the fingerprint cache (no rebuild) and the chart itself didn't change, `erun deploy` skips both the redundant `docker push` and the `helm upgrade --install` for that chart. Pass `--force` to override.
 
 This means a no-op `erun deploy` after a clean clone is essentially free.
+
+## Snapshot mode and the database
+
+In a local environment, `deploy` builds and deploys local snapshot images by default (`--no-snapshot` opts out). A snapshot deploy also **resets the environment's Postgres database** — convenient for a throwaway local stack, surprising if you didn't expect it. Runtime environments deploy released images from the registry and don't reset data.
+
+On a successful deploy of the runtime chart, the resolved version and registry are persisted to the environment's config, so the next `open` / `deploy` reuses them.
 
 ## Examples
 

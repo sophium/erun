@@ -62,8 +62,12 @@ func runContextListCommand(ctx common.Context, store common.CloudContextStore, d
 func newContextInitCmd(store common.CloudContextStore, promptRunner PromptRunner, selectRunner SelectRunner, deps common.CloudContextDependencies) *cobra.Command {
 	var params common.InitCloudContextParams
 	cmd := &cobra.Command{
-		Use:          "init",
-		Short:        "Initialize a managed cloud k3s context",
+		Use:   "init",
+		Short: "Create a managed cloud context",
+		Long: "Create a managed cloud context.\n\n" +
+			"Launches a cloud VM and provisions k3s on it, then writes the kubeconfig context " +
+			"so environments can deploy to it. The instance bills until you stop it " +
+			"(erun context stop).",
 		Args:         cobra.NoArgs,
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {

@@ -1,7 +1,12 @@
-Build and push the current container image
+Build and push the project's container images to the registry.
+
+The push step of the build → release → push → deploy flow.
 
 Usage:
   erun push [flags]
+
+Examples:
+  erun push
 
 Flags:
       --dry-run          Resolve and trace mutating actions without executing them.

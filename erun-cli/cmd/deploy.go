@@ -13,8 +13,14 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 	var noSnapshot bool
 	var components []string
 	cmd := &cobra.Command{
-		Use:           "deploy [TENANT] [ENVIRONMENT]",
-		Short:         "Deploy the current Helm chart or all charts in the current devops k8s scope",
+		Use:   "deploy [TENANT] [ENVIRONMENT]",
+		Short: "Roll the project's charts out to an environment",
+		Long: "Roll the project's charts out to an environment.\n\n" +
+			"The deploy step of the build → release → push → deploy flow. Builds and pushes the " +
+			"images the charts need, then runs the rollout against the target environment. " +
+			"Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) " +
+			"to target another.",
+		Example:       "  erun deploy\n  erun deploy team dev\n  erun deploy team prod --version 1.2.3",
 		Args:          cobra.MaximumNArgs(2),
 		SilenceErrors: true,
 		SilenceUsage:  true,

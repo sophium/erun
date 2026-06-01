@@ -1,4 +1,6 @@
-Initialize a managed cloud k3s context
+Create a managed cloud context.
+
+Launches a cloud VM and provisions k3s on it, then writes the kubeconfig context so environments can deploy to it. The instance bills until you stop it (erun context stop).
 
 Usage:
   erun context init [flags]

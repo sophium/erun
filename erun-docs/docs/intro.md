@@ -51,6 +51,19 @@ Each one is a chapter elsewhere in these docs. The point of putting them on one 
 
 ---
 
+## One pipeline for every project
+
+Parallel environments are half the story. The other half: every environment ships code through the same flow — **build → release → push → deploy** — whatever the stack and whoever's driving.
+
+<figure className="erun-hero-figure">
+  <img src="/img/pipeline.svg" alt="The delivery pipeline: four cyan-outlined steps — build, release (stable version, tag), push, deploy — with a dashed bypass arc from build over release to push labelled 'snapshot skips release'. From deploy, arrows reach a target env (snapshot, iterate) and a runtime env (release, promote)." />
+  <figcaption>build → release → push → deploy — skip release to deploy a snapshot to a target env, or cut one to promote a release to a runtime env.</figcaption>
+</figure>
+
+ERun supplies the conventions so the pipeline resolves the same way regardless of what's in the repo. See the **[Delivery pipeline](/pipeline)** for the full story.
+
+---
+
 ## AI native
 
 Inside any env, you ask ERun to add a feature and it happens — the Agent matches your intent against a skill and writes conformant code by hand.

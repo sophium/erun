@@ -1,0 +1,64 @@
+<svg viewBox="0 0 1120 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="pipelineTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="pipelineTitle">The delivery pipeline: four steps left to right — build (images, multi-arch), release (stamp a stable version and tag it), push (to registry), deploy (helm upgrade). A dashed bypass arc runs from build over release to push, labelled snapshot skips release. From deploy, two arrows reach two environments: a target env (snapshot, to iterate) and a runtime env (release, to promote). A band notes you drive it from the CLI, the desktop app, MCP, or CI.</title>
+
+  <defs>
+    <linearGradient id="plCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="plArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+    <marker id="plArrowDash" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#22d3ee"/>
+    </marker>
+  </defs>
+
+  <text x="430" y="34" text-anchor="middle" fill="currentColor" font-size="18" font-weight="600">The delivery pipeline</text>
+
+  <!-- snapshot bypass arc (build over release to push) -->
+  <path d="M115,120 L115,82 L500,82 L500,118" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#plArrowDash)"/>
+  <text x="307" y="74" text-anchor="middle" fill="#0891b2" font-size="11.5" font-weight="500">snapshot · skips release</text>
+
+  <!-- build -->
+  <rect x="40" y="120" width="150" height="64" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="115" y="148" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">build</text>
+  <text x="115" y="169" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">images · multi-arch</text>
+
+  <!-- release -->
+  <rect x="240" y="120" width="150" height="64" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="315" y="148" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">release</text>
+  <text x="315" y="169" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">stable version · tag</text>
+
+  <!-- push -->
+  <rect x="440" y="120" width="120" height="64" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="500" y="148" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">push</text>
+  <text x="500" y="169" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">to registry</text>
+
+  <!-- deploy -->
+  <rect x="610" y="120" width="140" height="64" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="680" y="148" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">deploy</text>
+  <text x="680" y="169" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">helm upgrade</text>
+
+  <!-- spine arrows -->
+  <line x1="190" y1="152" x2="240" y2="152" stroke="#0891b2" stroke-width="1.5" marker-end="url(#plArrow)"/>
+  <line x1="390" y1="152" x2="440" y2="152" stroke="#0891b2" stroke-width="1.5" marker-end="url(#plArrow)"/>
+  <line x1="560" y1="152" x2="610" y2="152" stroke="#0891b2" stroke-width="1.5" marker-end="url(#plArrow)"/>
+
+  <!-- deploy fan to environments -->
+  <line x1="750" y1="146" x2="820" y2="106" stroke="#0891b2" stroke-width="1.5" marker-end="url(#plArrow)"/>
+  <line x1="750" y1="158" x2="820" y2="198" stroke="#0891b2" stroke-width="1.5" marker-end="url(#plArrow)"/>
+
+  <!-- target env -->
+  <rect x="820" y="78" width="260" height="56" rx="14" fill="url(#plCharcoal)"/>
+  <text x="950" y="102" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">target env</text>
+  <text x="950" y="121" text-anchor="middle" fill="#ffffff" font-size="11" opacity="0.78">snapshot · iterate</text>
+
+  <!-- runtime env -->
+  <rect x="820" y="170" width="260" height="56" rx="14" fill="url(#plCharcoal)"/>
+  <text x="950" y="194" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">runtime env</text>
+  <text x="950" y="213" text-anchor="middle" fill="#ffffff" font-size="11" opacity="0.78">release · promote</text>
+
+  <!-- bottom band -->
+  <text x="430" y="270" text-anchor="middle" fill="currentColor" font-size="12.5" opacity="0.68">Drive it from the CLI · the desktop app · MCP · CI — any stack, the same flow</text>
+</svg>

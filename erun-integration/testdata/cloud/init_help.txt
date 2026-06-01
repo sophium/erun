@@ -4,7 +4,7 @@ Usage:
   erun cloud init [command]
 
 Available Commands:
-  aws         Initialize an AWS SSO cloud provider alias
+  aws         Set up an AWS cloud provider alias
 
 Flags:
   -h, --help   help for init

@@ -6,7 +6,7 @@ Usage:
 Available Commands:
   disable-api-stop Lock a cloud context against stop calls (sets AWS DisableApiStop=true)
   enable-api-stop  Restore normal stop behaviour for a cloud context (sets AWS DisableApiStop=false)
-  init             Initialize a managed cloud k3s context
+  init             Create a managed cloud context
   list             List managed ERun cloud contexts
   start            Start a managed ERun cloud context
   stop             Stop a managed ERun cloud context

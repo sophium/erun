@@ -212,19 +212,19 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 	}, initTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "build",
-		Description: "Run Docker build operations from the runtime repo root in the resolved tenant/environment context",
+		Description: "Build the project's container images for the resolved tenant/environment. The build step of the build → release → push → deploy flow: set deploy to push and roll them out, or release to stamp and publish the release version first.",
 	}, buildTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "push",
-		Description: "Run Docker push operations from the runtime repo root in the resolved tenant/environment context",
+		Description: "Build and push the project's container images to the registry for the resolved tenant/environment. The push step of the build → release → push → deploy flow.",
 	}, pushTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "deploy",
-		Description: "Run `erun devops k8s deploy COMPONENT` from the runtime repo root in the resolved tenant/environment context",
+		Description: "Roll the project's charts out to the resolved tenant/environment: build and push the images they need, then run the rollout. The deploy step of the build → release → push → deploy flow.",
 	}, deployTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "doctor",
-		Description: "Inspect the resolved DevOps runtime Docker state and optionally prune unused images, build cache, or stopped containers",
+		Description: "Diagnose and repair the resolved environment: prune unused Docker images, build cache, or stopped containers, and optionally restore or repair the root erun config from a backup or by re-initializing orphaned cloud provider aliases",
 	}, doctorTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "delete",

@@ -1,4 +1,6 @@
-Inspect the DevOps runtime and offer Docker cleanup actions
+Diagnose and repair an environment's runtime and config.
+
+Inspects the environment and offers repairs: prune its Docker images, build cache, or stopped containers; restore or fix the root erun config; and finish an interrupted remote init. Each action prompts before running unless you pass its matching flag.
 
 Usage:
   erun doctor [tenant] [environment] [flags]

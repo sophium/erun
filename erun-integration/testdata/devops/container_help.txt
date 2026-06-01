@@ -4,7 +4,7 @@ Usage:
   erun devops container [command]
 
 Available Commands:
-  build       Build the container image in the current directory
+  build       Build the project's container images
   push        Build and push the current container image
 
 Flags:

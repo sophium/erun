@@ -211,10 +211,10 @@ func optionalBuildCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuil
 		return "Build the project"
 	}
 	if err != nil {
-		return "Build the container image in the current directory"
+		return "Build the project's container images"
 	}
 
-	return "Build the container image in the current directory"
+	return "Build the project's container images"
 }
 
 func hasLinuxPackageContexts(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc) bool {
@@ -225,7 +225,7 @@ func hasLinuxPackageContexts(findProjectRoot common.ProjectFinderFunc, resolveBu
 func dockerBuildCmdShort(findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, buildContexts []common.DockerBuildContext) string {
 	buildContext, err := resolveBuildContext()
 	if err == nil && strings.TrimSpace(buildContext.DockerfilePath) != "" && len(buildContexts) == 1 {
-		return "Build the container image in the current directory"
+		return "Build the project's container images"
 	}
 	if currentBuildContextIsProjectRoot(findProjectRoot, buildContext) {
 		return "Build and push the project"
