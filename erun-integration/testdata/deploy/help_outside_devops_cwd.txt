@@ -1,7 +1,14 @@
-Deploy the current Helm chart or all charts in the current devops k8s scope
+Roll the project's charts out to an environment.
+
+The deploy step of the build → release → push → deploy flow. Builds and pushes the images the charts need, then runs the rollout against the target environment. Defaults to the current scope; pass TENANT and ENVIRONMENT (or --tenant/--environment) to target another.
 
 Usage:
   erun deploy [TENANT] [ENVIRONMENT] [flags]
+
+Examples:
+  erun deploy
+  erun deploy team dev
+  erun deploy team prod --version <VERSION>
 
 Flags:
       --components strings   Opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api)

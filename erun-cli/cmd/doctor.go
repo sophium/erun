@@ -35,8 +35,12 @@ type jetBrainsGatewayDoctorRepair struct {
 func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error), configStore common.ConfigStore, cloudDeps common.CloudDependencies, cloudContextDeps common.CloudContextDependencies, promptRunner PromptRunner) *cobra.Command {
 	options := doctorOptions{}
 	cmd := &cobra.Command{
-		Use:           "doctor [tenant] [environment]",
-		Short:         "Inspect the DevOps runtime and offer Docker cleanup actions",
+		Use:   "doctor [tenant] [environment]",
+		Short: "Diagnose and repair an environment's runtime and config",
+		Long: "Diagnose and repair an environment's runtime and config.\n\n" +
+			"Inspects the environment and offers repairs: prune its Docker images, build cache, or " +
+			"stopped containers; restore or fix the root erun config; and finish an interrupted " +
+			"remote init. Each action prompts before running unless you pass its matching flag.",
 		Args:          cobra.MaximumNArgs(2),
 		SilenceErrors: true,
 		SilenceUsage:  true,

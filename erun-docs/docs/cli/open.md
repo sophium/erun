@@ -56,7 +56,7 @@ alias my-tenant-local='eval "$(erun open my-tenant local --no-shell)"'
 
 ## What `open` does
 
-`open` resolves the env, brings up its cloud context if linked, helm-installs (or upgrades) the runtime chart, waits for SSH readiness, port-forwards SSH + MCP, and attaches a terminal or IDE. The full numbered algorithm — including the cluster-API readiness loop, the SSH banner probe, and the port-forward state-file format — is on [Agent reference · `erun open` lifecycle](/agent-reference/cli-flags#erun-open-lifecycle-algorithm).
+`open` resolves the env, brings up its cloud context if linked, and ensures the runtime is deployed — for a build-enabled (agent) env that includes building and pushing the runtime image first. It then helm-installs (or upgrades) the chart, persists the resolved version/snapshot choice to the env config, waits for SSH readiness, port-forwards SSH + MCP, and attaches a terminal or IDE. The full numbered algorithm — including the cluster-API readiness loop, the SSH banner probe, and the port-forward state-file format — is on [Agent reference · `erun open` lifecycle](/agent-reference/cli-flags#erun-open-lifecycle-algorithm).
 
 ## Error behaviour
 

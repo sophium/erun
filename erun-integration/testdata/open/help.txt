@@ -1,7 +1,14 @@
-Open a shell in the tenant environment worktree
+Open a shell in the tenant environment.
+
+Brings the environment up first if needed — deploying or updating the runtime and starting port-forwards — then drops you into a shell. Use --vscode or --intellij to open an IDE instead, or --no-shell to print the setup commands for your current shell.
 
 Usage:
   erun open [TENANT] [ENVIRONMENT] [flags]
+
+Examples:
+  erun open
+  erun open team dev
+  erun open team dev --vscode
 
 Flags:
       --dry-run                Resolve and trace mutating actions without executing them.

@@ -1,0 +1,40 @@
+<svg viewBox="0 0 900 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="branchesTitle" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="branchesTitle">The release cycle across branches. Work integrates on the develop branch (a cyan-outlined box), flows to the main branch (cyan box) where a stable release is cut, which publishes an immutable tag v1.0.81 (a charcoal pill). A dashed arrow loops back from main to develop, labelled: bump VERSION to 1.0.82, merge back.</title>
+
+  <defs>
+    <linearGradient id="vbCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="vbArrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+    <marker id="vbArrowDash" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#22d3ee"/>
+    </marker>
+  </defs>
+
+  <!-- develop -->
+  <rect x="60" y="66" width="200" height="64" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="160" y="94" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">develop</text>
+  <text x="160" y="114" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">integration</text>
+
+  <!-- main -->
+  <rect x="360" y="66" width="200" height="64" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="460" y="94" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">main</text>
+  <text x="460" y="114" text-anchor="middle" fill="currentColor" font-size="11.5" opacity="0.65">stable release</text>
+
+  <!-- tag -->
+  <rect x="660" y="66" width="200" height="64" rx="14" fill="url(#vbCharcoal)"/>
+  <text x="760" y="94" text-anchor="middle" fill="#ffffff" font-size="15" font-weight="600" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">tag v1.0.81</text>
+  <text x="760" y="114" text-anchor="middle" fill="#ffffff" font-size="11" opacity="0.78">published · immutable</text>
+
+  <!-- forward arrows -->
+  <line x1="260" y1="98" x2="360" y2="98" stroke="#0891b2" stroke-width="1.5" marker-end="url(#vbArrow)"/>
+  <line x1="560" y1="98" x2="660" y2="98" stroke="#0891b2" stroke-width="1.5" marker-end="url(#vbArrow)"/>
+
+  <!-- dashed loop back -->
+  <path d="M460,130 L460,182 L160,182 L160,130" fill="none" stroke="#22d3ee" stroke-width="1.5" stroke-dasharray="5 5" marker-end="url(#vbArrowDash)"/>
+  <rect x="232" y="172" width="256" height="20" rx="10" fill="var(--ifm-background-color, #ffffff)"/>
+  <text x="360" y="186" text-anchor="middle" fill="#0891b2" font-size="11.5" font-weight="500">bump VERSION to 1.0.82, merge back</text>
+</svg>

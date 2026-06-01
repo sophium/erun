@@ -12,7 +12,7 @@ func newReleaseCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCo
 	var force bool
 	cmd := &cobra.Command{
 		Use:           "release",
-		Short:         "Plan and execute a project release",
+		Short:         "Cut a release: stamp the version, tag it, and push the tag",
 		Args:          cobra.NoArgs,
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -38,6 +38,6 @@ func newReleaseCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitCo
 	addDryRunFlag(cmd)
 	cmd.Flags().BoolVar(&force, "force", false, "Delete and recreate conflicting release tags before tagging")
 	cmd.Example = "  erun release --dry-run\n  erun -v release --dry-run"
-	cmd.Long = "Plan and execute a project release.\n\nRelease policy is loaded from .erun/config.yaml.\n\nDry-run:\n  --dry-run resolves the release version, file updates, and git actions without executing them."
+	cmd.Long = "Cut a release from the current branch.\n\nResolves the next version, updates the version files, commits, tags, and pushes the tag to origin. Which branch releases as a stable version vs a prerelease comes from .erun/config.yaml.\n\nThe release step of the build → release → push → deploy flow.\n\nDry-run:\n  --dry-run resolves the version, file updates, and git actions without executing them."
 	return cmd
 }

@@ -4,7 +4,7 @@ title: Cloud contexts
 
 # Cloud contexts
 
-A **cloud context** is a managed Kubernetes cluster ERun starts on demand and stops when it goes idle. Same workflow as local, just hosted somewhere else — your environments live there, your IDE and Agent connect to them exactly as if the cluster were on your laptop.
+A **cloud context** is a cloud VM running k3s that ERun provisions for you, starts on demand, and stops when it goes idle. Same workflow as local, just hosted somewhere else — your environments live there, your IDE and Agent connect to them exactly as if the cluster were on your laptop.
 
 When to reach for one:
 
@@ -30,7 +30,7 @@ ERun watches each cloud context in the background, starts it on `erun open`, and
 
 ## Idle stop
 
-For environments backed by a cloud context, ERun watches two activity sources — terminal input and network traffic. When both have been quiet for the configured `idle.timeout` window (default `5m`), and the current time is inside `idle.workinghours` if set, ERun shuts the cluster down. The next `erun open` brings it back.
+For environments backed by a cloud context, ERun watches two activity sources — terminal input and network traffic. When both have been quiet for the configured `idle.timeout` window (default `5m`, working hours default `08:00-20:00`), ERun stops the instance. The next `erun open` brings it back — though outside working hours ERun refuses to *start* a stopped context unless you pass `--force` (`erun context start --force`), so it doesn't wake overnight.
 
 Both the Agent and the Operator can read the live state via the [MCP `idle` tool](/mcp/overview#idle). The Agent watches this automatically before long-running operations — see [Agent patterns · Idle before sleeping](/collaboration/agent-patterns#3-idle-before-sleeping).
 
@@ -38,4 +38,4 @@ For the exact eligibility predicate, default thresholds, and working-hours seman
 
 ## Configuring
 
-You typically don't configure cloud contexts yourself. An administrator declares them once per cluster, and your environment references them by alias (something like `MyOrg+123456789012@aws`).
+You create a cloud context with [`erun context init`](/cli/context), which provisions the VM and installs k3s; ERun manages its lifecycle from there. The one-time AWS prerequisites (registering a provider alias, permissions) are covered in [Cloud setup](/deployment/cloud-setup). Once it exists, environments reference it by its kubeconfig context, and `erun cloud set` ties an environment to the provider alias.

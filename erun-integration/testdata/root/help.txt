@@ -28,18 +28,18 @@ Available Commands:
   completion  Generate the autocompletion script for the specified shell
   context     Manage ERun cloud Kubernetes contexts
   contribute  Run contribute-mode workflows that target the ERun source repository
-  delete      Delete an environment from ERun configuration and remove its remote runtime namespace
-  deploy      Deploy the current Helm chart or all charts in the current devops k8s scope
+  delete      Delete a tenant environment and tear down its remote runtime
+  deploy      Roll the project's charts out to an environment
   devops      DevOps utilities
-  doctor      Inspect the DevOps runtime and offer Docker cleanup actions
+  doctor      Diagnose and repair an environment's runtime and config
   exec        Repository execution utilities
   help        Help about any command
   idle        Show environment idle stop status
   init        Initialize configuration for the current project
   list        List configured tenants and environments
   mcp         Run ERun as an MCP server over HTTP
-  open        Open a shell in the tenant environment worktree
-  release     Plan and execute a project release
+  open        Open a shell in the tenant environment
+  release     Cut a release: stamp the version, tag it, and push the tag
   sshd        Remote SSH utilities
   version     Print build information
 

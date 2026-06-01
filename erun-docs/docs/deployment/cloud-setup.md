@@ -4,126 +4,75 @@ title: Cloud setup
 
 # Cloud context setup (admin)
 
-This page is for whoever runs cloud infrastructure for a team. Operators reading the rest of these docs don't need it — they reference cloud contexts by alias once a cluster admin has declared them. If you're an operator, see [Cloud contexts](/concepts/cloud-contexts) instead.
+This page is for whoever sets up shared cloud capacity for a team. For the day-to-day Operator view, see [Cloud contexts](/concepts/cloud-contexts).
 
-## What a cloud context is, concretely
+## What a managed cloud context is
 
-A cloud context = a managed Kubernetes cluster ERun can start, stop, and connect to. From ERun's point of view, two records describe it:
+A managed cloud context is a single cloud VM that ERun **provisions for you** and runs k3s on. Environments deploy into it, and ERun starts and stops it around your working day so it doesn't bill around the clock. ERun owns the VM's whole lifecycle — you don't hand it a pre-existing cluster.
 
-- A **cloud provider** (`ERunConfig.cloudproviders[]`) — the identity and account that owns the cluster.
-- A **cloud context** (`ERunConfig.cloudcontexts[]`) — the cluster itself: cluster id, region, instance shape, and the lifecycle controls ERun uses to start/stop it.
-
-Both live in the per-user `~/.config/erun/config.yaml` for every operator who wants to use the cluster. Admins typically publish the lines for the team and operators paste them in (or set them via `erun init` flags / the desktop edit modal).
+If you already have a Kubernetes cluster — EKS, GKE, an on-prem k3s — you don't need a managed cloud context at all: bind an environment straight to its kubeconfig context with `erun init --kubernetes-context <name>` (see [Bring your own cluster](#bring-your-own-cluster) below). Managed cloud contexts exist for the common case where you want ERun to own the VM and its cost.
 
 ## Prerequisites
 
-Before declaring the records:
+1. An AWS account reachable through IAM Identity Center (SSO). Managed cloud contexts are AWS-only today.
+2. Permission for your SSO role to create and manage EC2 instances, security groups, and IAM instance profiles in the target region.
+3. An OIDC issuer for ERun API callers — derived automatically from your AWS web-identity token in Step 1.
 
-1. **A Kubernetes cluster.** EKS, GKE, AKS, OpenShift, k3s — anything ERun can reach with a kubeconfig and standard RBAC.
-2. **A way to start and stop the cluster cheaply.** ERun's idle-stop assumes you can wake the cluster on demand:
-   - **AWS:** the cluster's node group sits behind an ASG that scales to zero; an `aws ec2 start-instances` (or EKS Karpenter / managed node group autoscaler) brings it back.
-   - **GCP / Azure:** equivalent autoscaler with min size zero.
-   - **On-prem / k3s:** typically left running; idle-stop is a no-op.
-3. **An OIDC identity provider for ERun callers.** The same trusted issuer your operators sign in with (Identity Center, Auth0, Keycloak, …). See [Sign-in](/agent-reference/api-protocol#sign-in-oidc).
-4. **An IAM/RBAC binding that grants ERun's caller permission to start, stop, and describe the cluster.** Minimum AWS example for EKS:
+## Step 1 — Register a cloud provider alias
 
-   ```jsonc
-   {
-     "Effect": "Allow",
-     "Action": [
-       "eks:DescribeCluster",
-       "ec2:DescribeInstances",
-       "ec2:StartInstances",
-       "ec2:StopInstances",
-       "ec2:DescribeInstanceStatus"
-     ],
-     "Resource": "*"
-   }
-   ```
-
-   Restrict `Resource` to the specific cluster + instance ARNs in production.
-
-## Step 1 — Declare the cloud provider
-
-In `~/.config/erun/config.yaml`:
-
-```yaml
-cloudproviders:
-  - alias: MyOrg                       # short, human-readable
-    provider: aws                      # aws | gcp | azure | onprem
-    account: "020362606330"             # account / project / subscription id
-    profile: default                    # AWS named profile (optional)
-    sso:
-      startUrl: https://myorg.awsapps.com/start
-      region: eu-west-2
-    oidc:
-      issuerUrl: https://issuer.example.com/oauth2/default
-      audience: erun-api
+```bash
+erun cloud init aws
 ```
 
-`alias` is what every cloud context references — pick something short and stable. Operators see this alias in their `erun list cloud` output.
+This writes an AWS SSO profile to `~/.aws/config`, opens a browser login, and saves a cloud provider alias (`<user>+<account>@aws`) plus the OIDC issuer the deployed ERun APIs trust. See [`erun cloud`](/cli/cloud).
 
-## Step 2 — Declare the cloud context
+## Step 2 — Provision the cloud context
 
-```yaml
-cloudcontexts:
-  - alias: MyOrg+020362606330@aws         # by convention: <provider-alias>+<account>@<provider>
-    providerAlias: MyOrg                   # references cloudproviders[].alias above
-    region: eu-west-2
-    clusterId: erun-004-020362606330-eu-west-2
-    instance:
-      type: t3.large                       # EC2 / GCE instance type
-      count: 1
-      ami: ami-0fedcba9876543210            # optional pinned AMI
-    idle:
-      defaultTimeout: 30m                   # cluster idle policy default
-      workingHours: "09:00-19:00"
-      timezone: Europe/London
-    autoscaling:
-      minNodes: 0                            # zero means full stop on idle
-      maxNodes: 4
+```bash
+erun context init --alias me+020362606330@aws --region eu-west-2 --dry-run   # preview the AWS plan
+erun context init --alias me+020362606330@aws --region eu-west-2
 ```
 
-`alias` here is what `EnvConfig.cloudprovideralias` (and the desktop's binding picker) references.
+`erun context init` creates a security group, an IAM role + instance profile, **launches an EC2 instance** (default `c8gd.2xlarge`, 100 GB gp3), installs k3s, and writes the kubeconfig context locally. The instance bills while running — Step 4 covers stopping it. See [`erun context`](/cli/context).
 
-## Step 3 — Bind an env to the cloud context
-
-Once the records exist, an Operator binds an env to the context with `erun init`:
+## Step 3 — Bind an environment
 
 ```bash
 erun init my-tenant rihards-dev \
-  --remote \
-  --kubernetes-context erun-004-020362606330-eu-west-2 \
+  --type=remote-agent \
+  --kubernetes-context <context-name-from-step-2> \
   --container-registry 020362606330.dkr.ecr.eu-west-2.amazonaws.com
+erun cloud set my-tenant rihards-dev --alias me+020362606330@aws
 ```
 
-Or set `EnvConfig.cloudprovideralias: "MyOrg+020362606330@aws"` in the desktop's env edit modal.
+`erun cloud set` ties the environment to the provider alias (the desktop's env edit modal does the same).
 
-## Step 4 — Verify
+## Step 4 — Start, stop, verify
 
 ```bash
-erun list cloud
+erun context list                      # contexts + live status
+erun context stop  <context>           # pause compute billing
+erun context start <context>           # bring it back (gated to working hours; --force overrides)
 ```
 
-Should report the cloud context with status `stopped` initially. `erun open` against the bound env will start it, attach, and stop it again when the idle policy fires.
+`erun open` against a bound environment brings the context up if it's stopped, and ERun stops it again when the environment goes idle (see [idle stop](/concepts/cloud-contexts#idle-stop)). To keep a context up while you debug a problem, `erun context disable-api-stop <context>` locks it against every stop path until you `enable-api-stop` it again.
 
 ## Common admin tasks
 
 | Task | How |
 |---|---|
-| Add a new cloud context | Append another entry under `cloudcontexts[]` and distribute. |
-| Rotate the OIDC issuer | Edit `cloudproviders[].oidc.issuerUrl`. Operators pick up the change next `erun open`. |
-| Change the instance type | Edit `cloudcontexts[].instance.type`. Existing pods reschedule on next start. |
-| Restrict who can use a context | Set `cloudproviders[].oidc.allowedSubjects` to a list of service-account subjects. |
-| Force-stop an idle-blind context | `aws ec2 stop-instances --instance-ids ...` (the desktop sidebar resyncs status). |
+| Provision a new context | `erun context init --alias <alias>` |
+| Stop / start a context | `erun context stop` / `erun context start <context>` |
+| Keep a context up during repair | `erun context disable-api-stop <context>`, then `enable-api-stop` after |
+| Rotate the OIDC issuer | `erun cloud oidc --alias <alias>` |
+| See status / which contexts exist | `erun context list` |
 
-## Operator-facing handoff
+## Bring your own cluster
 
-When the admin work is done, share four pieces of information with operators:
+To use an existing cluster instead of a managed context, skip `erun context init` and bind the environment to its kubeconfig context:
 
-1. The `cloudproviders[]` and `cloudcontexts[]` YAML to paste into their `~/.config/erun/config.yaml`.
-2. The OIDC sign-in URL and how to obtain a token (or the service-account credential file for unattended Agents).
-3. The container registry endpoint (e.g., the ECR URL).
-4. The exact `erun init` command for an env bound to the new context.
+```bash
+erun init my-tenant rihards-dev --type=remote-agent --kubernetes-context my-existing-eks
+```
 
-Operators paste, `erun init`, `erun open`. The cluster wakes up, the runtime pod rolls out, the env is ready.
+ERun deploys into it exactly the same way, but doesn't manage its lifecycle — there's no `erun context start` / `stop` / idle-stop for a cluster ERun didn't provision.

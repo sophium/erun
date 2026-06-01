@@ -56,3 +56,11 @@ erun push        # docker push the tagged images
 ## Authentication
 
 If the registry rejects the push as unauthorised, `erun push` retries automatically with an interactive `docker login` prompt; for GHCR, a scope-mismatch additionally triggers `gh auth refresh -s write:packages,read:packages`. Both retries require a TTY. Full retry-trigger pattern table: [Agent reference · CLI flag spec · `erun push` authentication](/agent-reference/cli-flags#erun-push).
+
+## Error behaviour
+
+| Failure | Behaviour |
+|---|---|
+| No build context / image to push. | Errors; nothing is pushed. |
+| Registry rejects the push as unauthorised. | Retries with `docker login` (and `gh auth refresh` for GHCR scope mismatches); both need a TTY. Without one, errors with the auth failure. |
+| Foreign-arch binfmt missing (agent-env rebuild). | Fails before the per-arch build with a direct error. |

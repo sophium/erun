@@ -45,12 +45,20 @@ func newExecDiffCmd(findProjectRoot common.ProjectFinderFunc, runGit common.GitC
 
 func newExecRawCmd(findProjectRoot common.ProjectFinderFunc, runRaw common.RawCommandRunnerFunc) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:                "raw COMMAND [ARG...]",
-		Short:              "Run a raw command from the project root",
+		Use:   "raw COMMAND [ARG...]",
+		Short: "Run a raw command from the project root",
+		Long: "Run an arbitrary command from the project root.\n\n" +
+			"The command runs directly, not through a shell — wrap it in 'sh -c \"…\"' if you need " +
+			"shell features. --dry-run traces the command (with secret-looking arguments redacted) " +
+			"without running it. Use -- to pass flags through to the wrapped command.",
+		Example:            "  erun exec raw go test ./...\n  erun exec raw --dry-run -- kubectl get pods --all-namespaces",
 		Args:               cobra.MinimumNArgs(1),
 		SilenceUsage:       true,
 		DisableFlagParsing: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if rawCommandWantsHelp(args) {
+				return cmd.Help()
+			}
 			rawArgs, dryRun := extractDryRunFlag(args)
 			ctx := commandContext(cmd)
 			if dryRun {
@@ -61,6 +69,24 @@ func newExecRawCmd(findProjectRoot common.ProjectFinderFunc, runRaw common.RawCo
 	}
 	addDryRunFlag(cmd)
 	return cmd
+}
+
+// rawCommandWantsHelp reports whether the user asked for help on `exec raw`
+// itself, rather than passing --help through to the wrapped command. Because
+// the command sets DisableFlagParsing, cobra never intercepts --help; without
+// this, `erun exec raw --help` is handed through verbatim and tries to execute
+// a binary called "--help". A literal `--` ends the scan so the wrapped command
+// can still receive its own --help.
+func rawCommandWantsHelp(args []string) bool {
+	for _, arg := range args {
+		if arg == "--" {
+			return false
+		}
+		if arg == "--help" || arg == "-h" {
+			return true
+		}
+	}
+	return false
 }
 
 // extractDryRunFlag pulls erun's own --dry-run out of the pass-through args
