@@ -1,2 +1,4 @@
 audit: erun push
+==> Pushing
 unauthorized: authentication required: denied: requested access to the resource is denied
+==> Pushed in <ELAPSED>

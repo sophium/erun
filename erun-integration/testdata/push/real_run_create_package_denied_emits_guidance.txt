@@ -1,4 +1,5 @@
 audit: erun push
+==> Pushing
 denied: denied: create_package permission_denied
 
 ghcr.io rejected the push: only the namespace owner can create new packages under ghcr.io/sophium/.
@@ -13,4 +14,5 @@ To bootstrap the first version of this image, get a personal access token from t
 
 After the package exists the owner can grant Write access to others (per-package settings, or via "Inherit access from source repository" on a linked repo). Future versions can then be pushed by anyone with that access — no PAT needed.
 
+==> Push failed after <ELAPSED>
 denied: denied: create_package permission_denied
