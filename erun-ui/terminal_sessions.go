@@ -798,6 +798,59 @@ func (a *App) CloseSession(sessionID int) error {
 	return managed.session.Close()
 }
 
+// CloseEnvironmentSessions tears down every managed PTY session
+// bound to the supplied (tenant, environment) pair, regardless of
+// the per-session debug flag, and returns the serial IDs that were
+// closed so the frontend can drop them from tabsByEnv and related
+// session bookkeeping in one round-trip.
+//
+// Used by the sidebar's "close env" affordance (the green dot next
+// to an env name): the user clicked the dot to tear down the env's
+// Local/ERun/AI tabs and stop the desktop from tracking the env.
+// This is a desktop-only operation — it does NOT touch the cloud
+// context's AWS state. See StopCloudContext for that.
+//
+// Collect targets under a.mu, release the lock, then call Close on
+// each — session.Close may block on I/O and can call back into
+// session bookkeeping that re-acquires a.mu, so holding the lock
+// across the close would deadlock.
+func (a *App) CloseEnvironmentSessions(selection uiSelection) ([]int, error) {
+	selection = normalizeSelection(selection)
+	if selection.Tenant == "" || selection.Environment == "" {
+		return nil, fmt.Errorf("tenant and environment are required")
+	}
+	var targets []*managedTerminal
+	a.mu.Lock()
+	for _, managed := range a.sessions {
+		if managed == nil || managed.closed {
+			continue
+		}
+		if managed.selection.Tenant != selection.Tenant {
+			continue
+		}
+		if managed.selection.Environment != selection.Environment {
+			continue
+		}
+		targets = append(targets, managed)
+	}
+	a.mu.Unlock()
+	closed := make([]int, 0, len(targets))
+	var firstErr error
+	for _, managed := range targets {
+		if managed.session == nil {
+			continue
+		}
+		if err := managed.session.Close(); err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			continue
+		}
+		closed = append(closed, managed.serial)
+	}
+	return closed, firstErr
+}
+
 func (a *App) sessionBySerialLocked(sessionID int) *managedTerminal {
 	if sessionID <= 0 {
 		return nil
