@@ -266,6 +266,45 @@ func (a *App) CancelPendingIdleStop(selection uiSelection) error {
 	return nil
 }
 
+// recordManualStopForCloudContext writes a host-manual entry to
+// stop-history.json for every env linked to the supplied cloud
+// context. Called from StopCloudContext after the AWS stop
+// succeeds, so the History tab also explains "you clicked Stop"
+// alongside the in-pod monitor's auto-stops.
+//
+// Best-effort by design: AWS stop-instances has already succeeded
+// by the time we get here, so the user's intent ("stop this env")
+// is complete. A failure to record the audit row is reported to
+// the in-app activity queue and otherwise ignored — manual stops
+// must not appear to fail because a side audit channel did. Older
+// runtime images that do not yet register `idle_stop_record`
+// surface a single "rebuild runtime image" notification per env.
+func (a *App) recordManualStopForCloudContext(ctx context.Context, cloudContextName string) {
+	selections := a.selectionsForCloudContext(cloudContextName)
+	for _, selection := range selections {
+		result, err := eruncommon.ResolveOpen(a.deps.store, eruncommon.OpenParams{
+			Tenant:      selection.Tenant,
+			Environment: selection.Environment,
+		})
+		if err != nil {
+			a.emitAppNotification("warn", fmt.Sprintf("Could not record manual stop for %s/%s: %s", selection.Tenant, selection.Environment, err.Error()))
+			continue
+		}
+		mcpPort := eruncommon.MCPPortForResult(result)
+		if !a.deps.canConnectLocalPort(mcpPort) {
+			// No live port-forward: nothing we can do from the
+			// host side. The audit row would have been welcome
+			// but is not load-bearing — the user clicked Stop
+			// and that already succeeded.
+			continue
+		}
+		endpoint := mcpEndpointForOpenResult(result)
+		if err := recordManualStopViaMCP(ctx, endpoint, selection.Tenant, selection.Environment, "Manual stop via desktop", cloudContextName); err != nil {
+			a.emitAppNotification("warn", fmt.Sprintf("Could not record manual stop for %s/%s: %s", selection.Tenant, selection.Environment, err.Error()))
+		}
+	}
+}
+
 // LoadStopHistory returns the env's last N auto-stop audit records,
 // newest first. Reads through the in-pod MCP `idle_stop_history`
 // tool so the canonical history (the one the in-pod monitor wrote
@@ -296,8 +335,20 @@ func (a *App) LoadStopHistory(selection uiSelection) ([]uiLastStopEvent, error) 
 		ui := uiLastStopEvent{
 			StoppedAt:        entry.StoppedAt.UTC().Format(time.RFC3339),
 			GraceSeconds:     entry.GraceSeconds,
+			Source:           strings.TrimSpace(entry.Source),
 			Reason:           strings.TrimSpace(entry.Reason),
 			CloudContextName: strings.TrimSpace(entry.CloudContextName),
+		}
+		if !entry.ArmedAt.IsZero() {
+			ui.ArmedAt = entry.ArmedAt.UTC().Format(time.RFC3339)
+		}
+		if !idlePolicyIsZero(entry.Policy) {
+			ui.Policy = &uiIdlePolicy{
+				TimeoutSeconds:   int64(entry.Policy.Timeout / time.Second),
+				WorkingHours:     strings.TrimSpace(entry.Policy.WorkingHours),
+				Timezone:         strings.TrimSpace(entry.Policy.Timezone),
+				IdleTrafficBytes: entry.Policy.IdleTrafficBytes,
+			}
 		}
 		for _, marker := range entry.Markers {
 			ui.Markers = append(ui.Markers, uiLastStopMarker{
@@ -310,6 +361,13 @@ func (a *App) LoadStopHistory(selection uiSelection) ([]uiLastStopEvent, error) 
 		out = append(out, ui)
 	}
 	return out, nil
+}
+
+// idlePolicyIsZero reports whether the entry's policy snapshot is
+// unset — older history rows pre-date the snapshot, so we render
+// nothing rather than a misleading "Timeout: 0s" line.
+func idlePolicyIsZero(p eruncommon.EnvironmentIdlePolicy) bool {
+	return p.Timeout == 0 && strings.TrimSpace(p.WorkingHours) == "" && strings.TrimSpace(p.Timezone) == "" && p.IdleTrafficBytes == 0
 }
 
 // clearIdleStopsForCloudContext removes any latched auto-stop flag

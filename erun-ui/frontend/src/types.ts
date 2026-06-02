@@ -162,15 +162,29 @@ export interface UIIdleStatus {
   gracePeriodSeconds?: number;
 }
 
-// UILastStopEvent describes the most recent auto-stop for an env,
-// loaded from <userConfig>/erun/<tenant>/<env>/last-stop.json by the
-// Go-side LoadLastStopEvent. Surfaced in the idle-status tooltip so
-// the user can answer "why did my env stop?" without trawling logs.
+// UILastStopEvent describes one stop in the env's audit history.
+// Loaded from the in-pod `idle_stop_history` MCP tool, which reads
+// stop-history.json off the shared home PVC so the desktop sees
+// both the in-pod monitor's auto-stops and the desktop's own
+// manual stops. Surfaced in the env-config Manage dialog's History
+// tab so the user can answer "why did my env stop?" without
+// trawling logs.
+//
+// Source distinguishes auto-stops fired by the in-pod idle monitor
+// from manual stops fired by the desktop's Stop button; the row
+// renders a badge from this field. ArmedAt is the moment the grace
+// window began — set on pod-monitor entries, empty on host-manual
+// entries without prior armed grace. Policy is the resolved idle
+// policy snapshot at fire time; older entries on disk that pre-date
+// the snapshot leave it unset.
 export interface UILastStopEvent {
   stoppedAt: string;
+  armedAt?: string;
   graceSeconds: number;
+  source?: string;
   reason: string;
   cloudContextName?: string;
+  policy?: UIIdlePolicy;
   markers?: UILastStopMarker[];
 }
 
@@ -179,6 +193,16 @@ export interface UILastStopMarker {
   idle: boolean;
   reason?: string;
   secondsIdleFor?: number;
+}
+
+// UIIdlePolicy mirrors the History-tab snapshot of the resolved
+// idle policy from the Go side. TimeoutSeconds is rendered rather
+// than a Go duration string so the frontend never parses "10m0s".
+export interface UIIdlePolicy {
+  timeoutSeconds: number;
+  workingHours?: string;
+  timezone?: string;
+  idleTrafficBytes?: number;
 }
 
 export interface UIIdleMarker {

@@ -163,6 +163,10 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Description: "Return the last N (cap 10) auto-stop audit entries for the env, newest first. Each row carries the per-marker idle/active breakdown captured when the auto-stop grace was armed.",
 	}, idleStopHistoryTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "idle_stop_record",
+		Description: "Record a host-driven stop entry in stop-history.json (source=host-manual). Called by the desktop's Stop button after the AWS stop succeeds, so the History tab can also explain 'you clicked Stop' alongside the in-pod monitor's auto-stops.",
+	}, idleStopRecordTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "cloud_list",
 		Description: "List configured root-level cloud provider aliases and token status",
 	}, cloudListTool(runtime))
