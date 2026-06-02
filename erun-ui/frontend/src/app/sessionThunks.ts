@@ -612,3 +612,8 @@ export const closeTerminalTab =
       }
     }
   };
+
+// closeEnvironment lives in ./closeEnvironmentThunks so this file
+// stays under the eslint max-lines cap; re-export it here for
+// callers that already reach for session-thunks imports.
+export { closeEnvironment } from './closeEnvironmentThunks';

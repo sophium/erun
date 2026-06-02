@@ -5,7 +5,7 @@ import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { openManageDialog } from '@/app/manageEnvironmentThunks';
 import { showTerminalMessage } from '@/app/notificationThunks';
-import { openSelection } from '@/app/sessionThunks';
+import { closeEnvironment, openSelection } from '@/app/sessionThunks';
 import { envKey } from '@/app/slices/sessionsSlice';
 import { selectionKey } from '@/app/versionSuggestions';
 import { IconTooltip } from '@/components/app/IconTooltip';
@@ -76,6 +76,52 @@ function BusyRowSpinner({ label }: { label: string }): React.ReactElement {
   );
 }
 
+// OpenEnvDot renders a small green circle next to an env name when
+// the env has live tabs registered (the user clicked the row at
+// least once and Local/ERun/AI tabs were spawned). The dot is a
+// real button so clicking it tears those tabs down via the
+// closeEnvironment thunk; stopPropagation keeps the click from
+// bubbling to the row's openSelection handler. Distinct from the
+// LOCAL pill (which marks the row as the dev-machine env) and
+// from BusyRowSpinner (which fires only while an activity-queue
+// entry is running) — open and busy are independent states and
+// can be visible together.
+function OpenEnvDot({
+  tenantName,
+  environmentName,
+  selection,
+}: {
+  tenantName: string;
+  environmentName: string;
+  selection: UISelection;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const label = `Close ${tenantName} / ${environmentName}`;
+  return (
+    <IconTooltip label={`${label} — terminals + tracking only, leaves AWS untouched`}>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-[18px] flex-none cursor-pointer rounded-full border-0 bg-transparent p-0 text-current hover:bg-[color-mix(in_oklch,currentColor_12%,transparent)]"
+        aria-label={label}
+        data-testid="env-open-dot"
+        onClick={(event) => {
+          event.stopPropagation();
+          void dispatch(closeEnvironment(selection)).catch((error: unknown) => {
+            dispatch(showTerminalMessage(readError(error)));
+          });
+        }}
+      >
+        <span
+          aria-hidden="true"
+          className="block size-2 rounded-full bg-emerald-500 shadow-[0_0_0_1px_color-mix(in_oklch,currentColor_20%,transparent)]"
+        />
+      </Button>
+    </IconTooltip>
+  );
+}
+
 export function EnvironmentRow({
   tenantName,
   environmentName,
@@ -114,6 +160,23 @@ export function EnvironmentRow({
         selectionKey({ tenant: tenantName, environment: environmentName })
       ] === true,
   );
+  // isOpen = the user has opened this env at least once and at least
+  // one of its tabs is still alive. Either debug-mode variant of the
+  // key counts — the dot is per-env, not per-debug-mode. Selector
+  // returns a primitive so React-Redux's default equality short-
+  // circuits row re-renders when unrelated tab maps churn.
+  const isOpen = useAppSelector((state) => {
+    const baseKey = selectionKey({ tenant: tenantName, environment: environmentName });
+    const debugKey = selectionKey({
+      tenant: tenantName,
+      environment: environmentName,
+      debug: true,
+    });
+    return (
+      (state.terminal.tabsByEnv[baseKey]?.length ?? 0) > 0 ||
+      (state.terminal.tabsByEnv[debugKey]?.length ?? 0) > 0
+    );
+  });
   const { selected, busy, busyLabel, isLocal, selection } = deriveEnvironmentRow(
     tenantName,
     environmentName,
@@ -156,6 +219,13 @@ export function EnvironmentRow({
         </TooltipTrigger>
         <TooltipContent side="right">{rowLabel}</TooltipContent>
       </Tooltip>
+      {isOpen && (
+        <OpenEnvDot
+          tenantName={tenantName}
+          environmentName={environmentName}
+          selection={selection}
+        />
+      )}
       <EnvironmentRowEditButton
         tenantName={tenantName}
         environmentName={environmentName}
