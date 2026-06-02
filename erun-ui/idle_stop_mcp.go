@@ -115,6 +115,54 @@ func loadStopHistoryViaMCP(ctx context.Context, endpoint, tenant, environment st
 	return payload.Entries, nil
 }
 
+// recordManualStopViaMCP calls the in-pod `idle_stop_record` tool
+// to append a host-manual entry to stop-history.json. Used by the
+// desktop's Stop button so the History tab also explains "you
+// clicked Stop", not just auto-stops fired by the in-pod monitor.
+// Reason is the free-form text rendered on the row; passing the
+// empty string defers to the tool's default ("Manual stop"). On
+// older runtime images that do not register the tool yet, the
+// caller swallows the formatted error so manual stops still
+// succeed — formatIdleStopMCPError points at the rebuild fix.
+func recordManualStopViaMCP(ctx context.Context, endpoint, tenant, environment, reason, cloudContextName string) error {
+	ctx, cancel := context.WithTimeout(ctx, idleStopMCPTimeout)
+	defer cancel()
+	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
+	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint: endpoint,
+		HTTPClient: &http.Client{
+			Transport: idleProbeRoundTripper{},
+		},
+		DisableStandaloneSSE: true,
+	}, nil)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = session.Close()
+	}()
+	args := map[string]any{}
+	if tenant != "" {
+		args["tenant"] = tenant
+	}
+	if environment != "" {
+		args["environment"] = environment
+	}
+	if strings.TrimSpace(reason) != "" {
+		args["reason"] = reason
+	}
+	if strings.TrimSpace(cloudContextName) != "" {
+		args["cloudContextName"] = cloudContextName
+	}
+	if _, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "idle_stop_record",
+		Arguments: args,
+	}); err != nil {
+		return formatIdleStopMCPError("idle_stop_record", err)
+	}
+	return nil
+}
+
 // formatIdleStopMCPError rewrites the SDK error to spell out the
 // most common failure mode plainly: the runtime image in the pod
 // predates this desktop version and does not have the new tool

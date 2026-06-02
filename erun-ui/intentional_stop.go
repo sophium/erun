@@ -75,6 +75,20 @@ func (a *App) isIntentionalStop(selection uiSelection) bool {
 // mark/clear helpers above; mirrors the env walk in
 // clearIdleStopsForCloudContext so the two latches stay in sync.
 func (a *App) selectionsLinkedToCloudContext(name string) []string {
+	selections := a.selectionsForCloudContext(name)
+	keys := make([]string, 0, len(selections))
+	for _, sel := range selections {
+		keys = append(keys, selectionKey(sel))
+	}
+	return keys
+}
+
+// selectionsForCloudContext returns the (tenant, environment) pairs
+// every env linked to `name`. Used by recordManualStopForCloudContext
+// so it can resolve a per-env MCP endpoint and record an audit row
+// against each — selection keys encode an extra Debug bool that would
+// be ambiguous to reverse-parse.
+func (a *App) selectionsForCloudContext(name string) []uiSelection {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil
@@ -83,7 +97,7 @@ func (a *App) selectionsLinkedToCloudContext(name string) []string {
 	if err != nil {
 		return nil
 	}
-	keys := make([]string, 0)
+	selections := make([]uiSelection, 0)
 	for _, tenant := range tenants {
 		envs, err := a.deps.store.ListEnvConfigs(tenant.Name)
 		if err != nil {
@@ -94,8 +108,8 @@ func (a *App) selectionsLinkedToCloudContext(name string) []string {
 			if err != nil || !ok || strings.TrimSpace(cloudContext.Name) != name {
 				continue
 			}
-			keys = append(keys, selectionKey(uiSelection{Tenant: tenant.Name, Environment: env.Name}))
+			selections = append(selections, uiSelection{Tenant: tenant.Name, Environment: env.Name})
 		}
 	}
-	return keys
+	return selections
 }

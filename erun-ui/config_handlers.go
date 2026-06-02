@@ -92,6 +92,12 @@ func (a *App) StopCloudContext(name string) (uiCloudContextStatus, error) {
 		return uiCloudContextStatus{}, err
 	}
 	a.setCloudContextStatusInCache(status.Name, status.Status)
+	// Best-effort: record one host-manual entry in each linked env's
+	// stop-history.json so the History tab shows "you clicked Stop"
+	// alongside the in-pod monitor's auto-stops. Failures are logged
+	// to the activity queue and ignored — the AWS stop has already
+	// succeeded, so the user-visible action is complete.
+	a.recordManualStopForCloudContext(ctx, status.Name)
 	return cloudContextStatusToUI(status), nil
 }
 

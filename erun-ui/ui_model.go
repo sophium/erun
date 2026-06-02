@@ -403,12 +403,34 @@ type uiIdleStatus struct {
 // last-stop.json which is written by the desktop's idle-stop fire
 // path. Surfaced in the idle tooltip so the user can answer "why did
 // my env stop?" without trawling the activity drawer.
+//
+// Source is the stable string from
+// EnvironmentStopHistoryEntry.Source ("pod-monitor" or
+// "host-manual"); the frontend turns it into a row badge. ArmedAt
+// is the moment the grace window began; empty for host-manual rows
+// without a prior armed grace. Policy is the resolved idle policy
+// at fire time so the row stays interpretable after the user later
+// edits the timeout.
 type uiLastStopEvent struct {
-	StoppedAt        string                `json:"stoppedAt"`
-	GraceSeconds     int64                 `json:"graceSeconds"`
-	Reason           string                `json:"reason"`
-	CloudContextName string                `json:"cloudContextName,omitempty"`
-	Markers          []uiLastStopMarker    `json:"markers,omitempty"`
+	StoppedAt        string             `json:"stoppedAt"`
+	ArmedAt          string             `json:"armedAt,omitempty"`
+	GraceSeconds     int64              `json:"graceSeconds"`
+	Source           string             `json:"source,omitempty"`
+	Reason           string             `json:"reason"`
+	CloudContextName string             `json:"cloudContextName,omitempty"`
+	Policy           *uiIdlePolicy      `json:"policy,omitempty"`
+	Markers          []uiLastStopMarker `json:"markers,omitempty"`
+}
+
+// uiIdlePolicy is the History-tab-facing snapshot of the resolved
+// idle policy. Mirrors common.EnvironmentIdlePolicy in shape, but
+// renders TimeoutSeconds rather than a Go duration so the
+// frontend never has to parse "10m0s".
+type uiIdlePolicy struct {
+	TimeoutSeconds   int64  `json:"timeoutSeconds"`
+	WorkingHours     string `json:"workingHours,omitempty"`
+	Timezone         string `json:"timezone,omitempty"`
+	IdleTrafficBytes int64  `json:"idleTrafficBytes,omitempty"`
 }
 
 // uiLastStopMarker records the per-marker idle/active state captured
