@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 func RunDockerBuild(ctx Context, buildInput DockerBuildSpec, build DockerImageBuilderFunc) error {
@@ -102,9 +103,28 @@ func RunBuildExecutionAndDeploy(ctx Context, execution BuildExecutionSpec, deplo
 	return runBuildExecution(ctx, execution, deploySpecs, runScript, build, push, deploy)
 }
 
-func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) error {
+func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc, deploy HelmChartDeployerFunc) (err error) {
+	// `==> Building` / `==> Built in N` / `==> Build failed after N` are
+	// the umbrella traces the desktop's activity-queue parser keys off
+	// (mirrors RunHelmDeploy's `==> Deploying` / `==> Deployed`). Real
+	// run only: dry-run performs no work so there is nothing to put a
+	// spinner on, and skipping these lines in dry-run also keeps the
+	// dry-run integration goldens stable.
+	var started time.Time
+	if !ctx.DryRun {
+		started = time.Now()
+		ctx.Info("==> Building")
+		defer func() {
+			elapsed := time.Since(started).Round(time.Second)
+			if err != nil {
+				ctx.Info("==> Build failed after " + elapsed.String())
+				return
+			}
+			ctx.Info("==> Built in " + elapsed.String())
+		}()
+	}
 	if execution.release != nil {
-		if err := RunReleaseSpec(ctx, *execution.release, nil, runScript); err != nil {
+		if err = RunReleaseSpec(ctx, *execution.release, nil, runScript); err != nil {
 			return err
 		}
 	}
@@ -117,7 +137,7 @@ func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []
 		return err
 	}
 	for _, deploySpec := range filterDeploySpecsForPushedTags(deploySpecs, pushedTags) {
-		if err := RunDeploySpec(ctx, deploySpec, build, push, deploy); err != nil {
+		if err = RunDeploySpec(ctx, deploySpec, build, push, deploy); err != nil {
 			return err
 		}
 	}
