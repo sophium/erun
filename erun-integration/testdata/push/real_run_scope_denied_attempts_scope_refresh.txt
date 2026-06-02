@@ -1,3 +1,5 @@
 audit: erun push
+==> Pushing
 denied: token does not match expected scopes
 denied: token does not match expected scopes
+==> Pushed in <ELAPSED>

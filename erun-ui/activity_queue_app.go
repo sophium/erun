@@ -343,6 +343,29 @@ var activityBuiltLineRe = regexp.MustCompile(`^==> Built\b`)
 // returns an error.
 var activityBuildFailedLineRe = regexp.MustCompile(`^==> Build failed\b`)
 
+// activityReleasing/Released/ReleaseFailed match the umbrella traces
+// RunReleaseSpec emits for a standalone `erun release` (mirrors
+// `==> Building`). Like build they carry no tenant/env, so the handler
+// keys the activity off the session selection. `erun build --release`
+// does not emit these — runBuildExecution calls the unexported
+// runReleaseSpec, keeping that flow under the single `==> Building`
+// umbrella.
+var (
+	activityReleasingLineRe     = regexp.MustCompile(`^==> Releasing\b`)
+	activityReleasedLineRe      = regexp.MustCompile(`^==> Released\b`)
+	activityReleaseFailedLineRe = regexp.MustCompile(`^==> Release failed\b`)
+)
+
+// activityPushing/Pushed/PushFailed match the umbrella traces
+// RunPushCommand emits for a standalone `erun push`. Build-internal
+// pushes stay under the `==> Building` umbrella, so these only fire for
+// the push command itself.
+var (
+	activityPushingLineRe    = regexp.MustCompile(`^==> Pushing\b`)
+	activityPushedLineRe     = regexp.MustCompile(`^==> Pushed\b`)
+	activityPushFailedLineRe = regexp.MustCompile(`^==> Push failed\b`)
+)
+
 // newActivityTraceLineHandler scans PTY output for trace lines emitted by
 // erun deploy and updates the activity queue accordingly.
 //
@@ -395,15 +418,39 @@ func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKi
 			return
 		}
 		if activityBuildingLineRe.MatchString(line) {
-			app.startBuildFromTrace(selection)
+			app.startCommandFromTrace(selection, "build")
 			return
 		}
 		if activityBuiltLineRe.MatchString(line) {
-			app.finishBuildBySelection(selection, activityQueueStatusSucceeded, "")
+			app.finishCommandBySelection(selection, "build", activityQueueStatusSucceeded, "")
 			return
 		}
 		if activityBuildFailedLineRe.MatchString(line) {
-			app.finishBuildBySelection(selection, activityQueueStatusFailed, line)
+			app.finishCommandBySelection(selection, "build", activityQueueStatusFailed, line)
+			return
+		}
+		if activityReleasingLineRe.MatchString(line) {
+			app.startCommandFromTrace(selection, "release")
+			return
+		}
+		if activityReleasedLineRe.MatchString(line) {
+			app.finishCommandBySelection(selection, "release", activityQueueStatusSucceeded, "")
+			return
+		}
+		if activityReleaseFailedLineRe.MatchString(line) {
+			app.finishCommandBySelection(selection, "release", activityQueueStatusFailed, line)
+			return
+		}
+		if activityPushingLineRe.MatchString(line) {
+			app.startCommandFromTrace(selection, "push")
+			return
+		}
+		if activityPushedLineRe.MatchString(line) {
+			app.finishCommandBySelection(selection, "push", activityQueueStatusSucceeded, "")
+			return
+		}
+		if activityPushFailedLineRe.MatchString(line) {
+			app.finishCommandBySelection(selection, "push", activityQueueStatusFailed, line)
 			return
 		}
 		switch {
@@ -539,23 +586,24 @@ func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, v
 	}
 }
 
-// startBuildFromTrace registers a build entry from a `==> Building`
-// trace observed in the session's PTY. Unlike deploy/init the trace
-// line carries no tenant/env (build has no deploy target the way
+// startCommandFromTrace registers a build/release/push entry from a
+// `==> Building` / `==> Releasing` / `==> Pushing` trace observed in
+// the session's PTY. Unlike deploy/init these umbrella lines carry no
+// tenant/env (build, release, and push have no deploy target the way
 // RunHelmDeploy does), so the activity is keyed off the session
-// selection — the user invoked the build from a specific terminal
+// selection — the user invoked the command from a specific terminal
 // tab, and that tab's env row is the natural place to render the
-// spinner. No-op when the selection has no tenant/env yet (a
-// generic Local shell at the repo level): there is no row to attach
-// the indicator to, and a stray activity entry with empty
-// tenant/env would land on every row.
+// spinner. No-op when the selection has no tenant/env yet (a generic
+// Local shell at the repo level): there is no row to attach the
+// indicator to, and a stray activity entry with empty tenant/env
+// would land on every row.
 //
 // Intentionally skips lockTerminalsForActivity: deploys lock the
 // session so a user cannot run conflicting commands while helm is
-// rolling out, but a build runs IN the user's terminal — locking it
-// would freeze the very tab the user is reading build output in.
-// The sidebar spinner is the only indicator the build needs.
-func (a *App) startBuildFromTrace(selection uiSelection) {
+// rolling out, but build/release/push run IN the user's terminal —
+// locking it would freeze the very tab the user is reading output in.
+// The sidebar spinner is the only indicator these commands need.
+func (a *App) startCommandFromTrace(selection uiSelection, command string) {
 	if a.activityQueue == nil {
 		return
 	}
@@ -564,30 +612,30 @@ func (a *App) startBuildFromTrace(selection uiSelection) {
 	if tenant == "" || environment == "" {
 		return
 	}
-	if _, ok := a.activityQueue.findActiveByCommand("build", tenant, environment); ok {
+	if _, ok := a.activityQueue.findActiveByCommand(command, tenant, environment); ok {
 		return
 	}
 	kubeContext := a.resolveActivityKubeContext(selection, tenant, environment)
 	if _, fresh := a.activityQueue.start(activityQueueEntry{
-		Command:           "build",
+		Command:           command,
 		Tenant:            tenant,
 		Environment:       environment,
 		KubernetesContext: kubeContext,
 		Source:            "trace",
-		Summary:           "build " + tenant + "/" + environment,
+		Summary:           command + " " + tenant + "/" + environment,
 	}); !fresh {
 		return
 	}
 	a.rememberKubeContextForActivity(kubeContext)
 }
 
-// finishBuildBySelection finalizes the build entry registered by
-// startBuildFromTrace. Keyed off the session selection because the
-// `==> Built` / `==> Build failed` lines carry no tenant/env — see
-// startBuildFromTrace for the identity rationale. Idempotent unlock
-// in case a previous code path latched a lock that this entry did
-// not.
-func (a *App) finishBuildBySelection(selection uiSelection, status activityQueueStatus, errMsg string) {
+// finishCommandBySelection finalizes the build/release/push entry
+// registered by startCommandFromTrace. Keyed off the session selection
+// because the `==> Built` / `==> Released` / `==> Pushed` (and failed)
+// lines carry no tenant/env — see startCommandFromTrace for the
+// identity rationale. Idempotent unlock in case a previous code path
+// latched a lock that this entry did not.
+func (a *App) finishCommandBySelection(selection uiSelection, command string, status activityQueueStatus, errMsg string) {
 	if a.activityQueue == nil {
 		return
 	}
@@ -596,7 +644,7 @@ func (a *App) finishBuildBySelection(selection uiSelection, status activityQueue
 	if tenant == "" || environment == "" {
 		return
 	}
-	entry, ok := a.activityQueue.findActiveByCommand("build", tenant, environment)
+	entry, ok := a.activityQueue.findActiveByCommand(command, tenant, environment)
 	if !ok {
 		return
 	}

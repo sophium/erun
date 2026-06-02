@@ -195,4 +195,35 @@ func TestRelease(t *testing.T) {
 		}
 		golden.Equal(t, "release/dry_run_with_untracked_file_reports_worktree_clean", normalize.Apply(result.Combined))
 	})
+
+	t.Run("real_run_emits_release_lifecycle_traces", func(t *testing.T) {
+		// Real-run (no --dry-run) candidate release. Exercises the
+		// `==> Releasing` / `==> Released ... in <ELAPSED>` umbrella
+		// traces RunReleaseSpec emits via Info — the desktop activity
+		// queue keys off them to light the sidebar spinner for a
+		// standalone `erun release`. These lines are emitted only on a
+		// real run, so dry-run goldens cannot cover them (mirrors
+		// deploy_test.go's real_run_via_stubs and the build real-run
+		// goldens). git is stubbed: resolution queries return canned
+		// branch/commit, the tag-existence probe reports "not found" so
+		// the tag is not skipped, and every mutation (fetch/rebase/
+		// commit/tag/push) is a silent no-op — keeping the captured
+		// output deterministic without a real remote or network.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "git", `case "$*" in
+  *'rev-parse --abbrev-ref HEAD'*) echo develop ;;
+  *'rev-parse --short HEAD'*) echo abc1234 ;;
+  *'^{}'*) exit 1 ;;
+  *) exit 0 ;;
+esac
+`)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "git")...)
+		result := erun.Run(t, []string{"release"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "release/real_run_emits_release_lifecycle_traces", normalize.Apply(result.Combined))
+	})
 }

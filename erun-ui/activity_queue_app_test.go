@@ -264,18 +264,105 @@ func TestActivityTraceLineHandlerSkipsBuildWithoutSelection(t *testing.T) {
 	}
 }
 
-func TestStartBuildFromTraceDoesNotLockTerminal(t *testing.T) {
-	// Build runs IN the user's terminal, so locking the session would
-	// freeze the very tab they are reading build output in. Verify the
-	// build path skips the lock that deploy uses to prevent concurrent
-	// helm runs.
+func TestStartCommandFromTraceDoesNotLockTerminal(t *testing.T) {
+	// Build/release/push run IN the user's terminal, so locking the
+	// session would freeze the very tab they are reading output in.
+	// Verify the path skips the lock that deploy uses to prevent
+	// concurrent helm runs, for every command keyed off the selection.
+	for _, command := range []string{"build", "release", "push"} {
+		app := newTestAppForActivityQueue(t)
+		selection := uiSelection{Tenant: "erun", Environment: "local"}
+		envSession := &managedTerminal{selection: selection, key: "env\x00erun\x00local", serial: 1, kind: sessionKindOpen}
+		app.sessions[envSession.key] = envSession
+		app.startCommandFromTrace(selection, command)
+		if envSession.lockedByActivity != "" {
+			t.Fatalf("expected %s to not lock terminal, got %q", command, envSession.lockedByActivity)
+		}
+	}
+}
+
+func TestActivityTraceLineHandlerStartsAndFinishesRelease(t *testing.T) {
+	// `erun release` (standalone) emits `==> Releasing`/`==> Released`
+	// with no tenant/env, so the handler keys the activity off the
+	// session selection — the same contract as build. Without this the
+	// sidebar shows no spinner while a release the user kicked off in a
+	// tenant/env-bound terminal runs.
 	app := newTestAppForActivityQueue(t)
 	selection := uiSelection{Tenant: "erun", Environment: "local"}
-	envSession := &managedTerminal{selection: selection, key: "env\x00erun\x00local", serial: 1, kind: sessionKindOpen}
-	app.sessions[envSession.key] = envSession
-	app.startBuildFromTrace(selection)
-	if envSession.lockedByActivity != "" {
-		t.Fatalf("expected build to not lock terminal, got %q", envSession.lockedByActivity)
+	handler := newActivityTraceLineHandler(app, selection, sessionKindOpen)
+
+	handler("==> Releasing 1.4.2")
+	entry, ok := app.activityQueue.findActiveByCommand("release", "erun", "local")
+	if !ok {
+		t.Fatal("expected release entry to be active after ==> Releasing")
+	}
+	if entry.Source != "trace" {
+		t.Fatalf("expected source=trace, got %q", entry.Source)
+	}
+
+	handler("==> Released 1.4.2 in 12s")
+	if _, ok := app.activityQueue.findActiveByCommand("release", "erun", "local"); ok {
+		t.Fatal("expected release entry to be finished after ==> Released")
+	}
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusSucceeded {
+		t.Fatalf("expected one succeeded entry, got %+v", all)
+	}
+}
+
+func TestActivityTraceLineHandlerFinalizesReleaseOnFailure(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> Releasing 1.4.2")
+	handler("==> Release failed after 5s")
+
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusFailed {
+		t.Fatalf("expected one failed entry, got %+v", all)
+	}
+	if !strings.Contains(all[0].Error, "Release failed") {
+		t.Fatalf("expected Release failed in error, got %q", all[0].Error)
+	}
+}
+
+func TestActivityTraceLineHandlerStartsAndFinishesPush(t *testing.T) {
+	// `erun push` (standalone) emits `==> Pushing`/`==> Pushed`, keyed
+	// off the session selection like build/release.
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindOpen)
+
+	handler("==> Pushing")
+	if _, ok := app.activityQueue.findActiveByCommand("push", "erun", "local"); !ok {
+		t.Fatal("expected push entry to be active after ==> Pushing")
+	}
+
+	handler("==> Pushed in 8s")
+	if _, ok := app.activityQueue.findActiveByCommand("push", "erun", "local"); ok {
+		t.Fatal("expected push entry to be finished after ==> Pushed")
+	}
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusSucceeded {
+		t.Fatalf("expected one succeeded entry, got %+v", all)
+	}
+}
+
+func TestActivityTraceLineHandlerFinalizesPushOnFailure(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> Pushing")
+	handler("==> Push failed after 3s")
+
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusFailed {
+		t.Fatalf("expected one failed entry, got %+v", all)
+	}
+	if !strings.Contains(all[0].Error, "Push failed") {
+		t.Fatalf("expected Push failed in error, got %q", all[0].Error)
 	}
 }
 

@@ -115,7 +115,9 @@ func newPushCmd(store common.DockerStore, findProjectRoot common.ProjectFinderFu
 				}
 				return buildErr
 			}
-			return common.RunDockerPushSpec(ctx, pushInput, buildInput, builderWithGuidance, push)
+			return common.RunPushCommand(ctx, func() error {
+				return common.RunDockerPushSpec(ctx, pushInput, buildInput, builderWithGuidance, push)
+			})
 		},
 	}
 	addDryRunFlag(cmd)
@@ -167,13 +169,17 @@ func newRootPushCmd(store common.DockerStore, findProjectRoot common.ProjectFind
 				if err != nil {
 					return err
 				}
-				return common.RunDockerPushSpec(ctx, pushInput, buildInput, builderWithGuidance, push)
+				return common.RunPushCommand(ctx, func() error {
+					return common.RunDockerPushSpec(ctx, pushInput, buildInput, builderWithGuidance, push)
+				})
 			}
 			execution, err := common.ResolveDockerPushExecution(ctx, store, findProjectRoot, resolveBuildContext, now, target)
 			if err != nil {
 				return err
 			}
-			return common.RunDockerPushExecution(ctx, execution, builderWithGuidance, push)
+			return common.RunPushCommand(ctx, func() error {
+				return common.RunDockerPushExecution(ctx, execution, builderWithGuidance, push)
+			})
 		},
 	}
 	addDryRunFlag(cmd)

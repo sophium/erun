@@ -1,1 +1,3 @@
 audit: erun devops container push --version <VERSION>
+==> Pushing
+==> Pushed in <ELAPSED>
