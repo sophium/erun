@@ -124,7 +124,12 @@ func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []
 		}()
 	}
 	if execution.release != nil {
-		if err = RunReleaseSpec(ctx, *execution.release, nil, runScript); err != nil {
+		// Call the unexported runReleaseSpec, not the exported
+		// RunReleaseSpec: the release phase here is already wrapped by
+		// the `==> Building` umbrella above, so emitting RunReleaseSpec's
+		// own `==> Releasing` markers would register a redundant second
+		// activity entry for the same `erun build --release` invocation.
+		if err = runReleaseSpec(ctx, *execution.release, nil, runScript, nil); err != nil {
 			return err
 		}
 	}
@@ -244,6 +249,36 @@ func deployedVersionForSpecs(specs []DeploySpec) string {
 		}
 	}
 	return version
+}
+
+// RunPushCommand wraps a standalone `erun push` operation with the
+// `==> Pushing` / `==> Pushed in N` / `==> Push failed after N` umbrella
+// traces the desktop's activity-queue parser keys off so the sidebar
+// spinner lights while the push runs (mirrors runBuildExecution's
+// `==> Building`). Real run only: dry-run does no work.
+//
+// Only the standalone push entrypoints (the CLI `push` command and the
+// MCP push tool) route through here. Pushes that happen inside
+// `erun build`/`erun build --deploy` are already covered by the
+// `==> Building` umbrella, and the shared push executors
+// (RunDockerPushExecution / RunDockerPushSpec) run per-image inside that
+// flow — bracketing them directly would emit a marker per image and
+// double-fire under `==> Building`.
+func RunPushCommand(ctx Context, op func() error) (err error) {
+	if ctx.DryRun {
+		return op()
+	}
+	started := time.Now()
+	ctx.Info("==> Pushing")
+	defer func() {
+		elapsed := time.Since(started).Round(time.Second)
+		if err != nil {
+			ctx.Info("==> Push failed after " + elapsed.String())
+			return
+		}
+		ctx.Info("==> Pushed in " + elapsed.String())
+	}()
+	return op()
 }
 
 func RunDockerPush(ctx Context, pushInput DockerPushSpec, push DockerImagePusherFunc) error {

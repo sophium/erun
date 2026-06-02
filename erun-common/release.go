@@ -168,7 +168,34 @@ func resolveReleaseSpec(ctx Context, findProjectRoot ProjectFinderFunc, loadProj
 
 type ReleasePackagingSyncerFunc func(Context, ReleasePackagingSyncSpec) ([]ReleaseFileUpdate, error)
 
-func RunReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc) error {
+func RunReleaseSpec(ctx Context, spec ReleaseSpec, runGit GitCommandRunnerFunc, runScript BuildScriptRunnerFunc) (err error) {
+	// `==> Releasing` / `==> Released ... in N` / `==> Release failed
+	// after N` are the umbrella traces the desktop's activity-queue
+	// parser keys off so a standalone `erun release` lights the sidebar
+	// spinner (mirrors RunHelmDeploy's `==> Deploying` and
+	// runBuildExecution's `==> Building`). Real run only: dry-run does no
+	// work, and skipping these lines keeps the dry-run release goldens
+	// stable. `erun build --release` does not pass through here —
+	// runBuildExecution calls the unexported runReleaseSpec directly so
+	// the release phase stays under the single `==> Building` umbrella
+	// instead of double-bracketing with a second activity entry.
+	if !ctx.DryRun {
+		releasing, released := "==> Releasing", "==> Released"
+		if target := strings.TrimSpace(spec.Version); target != "" {
+			releasing += " " + target
+			released += " " + target
+		}
+		started := time.Now()
+		ctx.Info(releasing)
+		defer func() {
+			elapsed := time.Since(started).Round(time.Second)
+			if err != nil {
+				ctx.Info("==> Release failed after " + elapsed.String())
+				return
+			}
+			ctx.Info(released + " in " + elapsed.String())
+		}()
+	}
 	return runReleaseSpec(ctx, spec, runGit, runScript, syncReleasePackagingChecksums)
 }
 
