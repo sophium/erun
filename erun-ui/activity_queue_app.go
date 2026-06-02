@@ -326,6 +326,23 @@ var activityInitializedLineRe = regexp.MustCompile(`^==> Initialized ([^/\s]+)/(
 // after Initializing returns an error. Captures: tenant, environment.
 var activityInitFailedLineRe = regexp.MustCompile(`^==> Initialization failed ([^/\s]+)/([^/\s]+)\b`)
 
+// activityBuildingLineRe matches the umbrella `==> Building` trace
+// emitted by RunBuildExecution at the top of the build pipeline.
+// Unlike deploy/init the line carries no tenant/env — build has no
+// deploy target the way RunHelmDeploy does, so the handler attaches
+// the activity to the session selection (the terminal tab the user
+// is looking at) instead of parsing identity out of the line.
+var activityBuildingLineRe = regexp.MustCompile(`^==> Building\b`)
+
+// activityBuiltLineRe matches the `==> Built in <elapsed>` trace
+// emitted on successful completion of the build pipeline.
+var activityBuiltLineRe = regexp.MustCompile(`^==> Built\b`)
+
+// activityBuildFailedLineRe matches the `==> Build failed after
+// <elapsed>` trace emitted when any step of runBuildExecution
+// returns an error.
+var activityBuildFailedLineRe = regexp.MustCompile(`^==> Build failed\b`)
+
 // newActivityTraceLineHandler scans PTY output for trace lines emitted by
 // erun deploy and updates the activity queue accordingly.
 //
@@ -375,6 +392,18 @@ func newActivityTraceLineHandler(app *App, selection uiSelection, kind sessionKi
 		if match := activityInitFailedLineRe.FindStringSubmatch(line); match != nil {
 			app.finishInitByTenantEnv(match[1], match[2], activityQueueStatusFailed, line)
 			app.emitEnvironmentInitFailed(match[1], match[2])
+			return
+		}
+		if activityBuildingLineRe.MatchString(line) {
+			app.startBuildFromTrace(selection)
+			return
+		}
+		if activityBuiltLineRe.MatchString(line) {
+			app.finishBuildBySelection(selection, activityQueueStatusSucceeded, "")
+			return
+		}
+		if activityBuildFailedLineRe.MatchString(line) {
+			app.finishBuildBySelection(selection, activityQueueStatusFailed, line)
 			return
 		}
 		switch {
@@ -507,6 +536,72 @@ func (a *App) startDeployFromTrace(selection uiSelection, tenant, environment, v
 	a.lockTerminalsForActivity(entry)
 	if a.activityStatusPoller != nil {
 		a.activityStatusPoller(entry)
+	}
+}
+
+// startBuildFromTrace registers a build entry from a `==> Building`
+// trace observed in the session's PTY. Unlike deploy/init the trace
+// line carries no tenant/env (build has no deploy target the way
+// RunHelmDeploy does), so the activity is keyed off the session
+// selection — the user invoked the build from a specific terminal
+// tab, and that tab's env row is the natural place to render the
+// spinner. No-op when the selection has no tenant/env yet (a
+// generic Local shell at the repo level): there is no row to attach
+// the indicator to, and a stray activity entry with empty
+// tenant/env would land on every row.
+//
+// Intentionally skips lockTerminalsForActivity: deploys lock the
+// session so a user cannot run conflicting commands while helm is
+// rolling out, but a build runs IN the user's terminal — locking it
+// would freeze the very tab the user is reading build output in.
+// The sidebar spinner is the only indicator the build needs.
+func (a *App) startBuildFromTrace(selection uiSelection) {
+	if a.activityQueue == nil {
+		return
+	}
+	tenant := strings.TrimSpace(selection.Tenant)
+	environment := strings.TrimSpace(selection.Environment)
+	if tenant == "" || environment == "" {
+		return
+	}
+	if _, ok := a.activityQueue.findActiveByCommand("build", tenant, environment); ok {
+		return
+	}
+	kubeContext := a.resolveActivityKubeContext(selection, tenant, environment)
+	if _, fresh := a.activityQueue.start(activityQueueEntry{
+		Command:           "build",
+		Tenant:            tenant,
+		Environment:       environment,
+		KubernetesContext: kubeContext,
+		Source:            "trace",
+		Summary:           "build " + tenant + "/" + environment,
+	}); !fresh {
+		return
+	}
+	a.rememberKubeContextForActivity(kubeContext)
+}
+
+// finishBuildBySelection finalizes the build entry registered by
+// startBuildFromTrace. Keyed off the session selection because the
+// `==> Built` / `==> Build failed` lines carry no tenant/env — see
+// startBuildFromTrace for the identity rationale. Idempotent unlock
+// in case a previous code path latched a lock that this entry did
+// not.
+func (a *App) finishBuildBySelection(selection uiSelection, status activityQueueStatus, errMsg string) {
+	if a.activityQueue == nil {
+		return
+	}
+	tenant := strings.TrimSpace(selection.Tenant)
+	environment := strings.TrimSpace(selection.Environment)
+	if tenant == "" || environment == "" {
+		return
+	}
+	entry, ok := a.activityQueue.findActiveByCommand("build", tenant, environment)
+	if !ok {
+		return
+	}
+	if final, finished := a.activityQueue.finish(entry.ID, status, errMsg); finished {
+		a.unlockTerminalsForActivity(final)
 	}
 }
 

@@ -205,6 +205,80 @@ func TestActivityTraceLineHandlerFinalizesSkippingFromLine(t *testing.T) {
 	}
 }
 
+func TestActivityTraceLineHandlerStartsAndFinishesBuild(t *testing.T) {
+	// `erun build` umbrella traces don't carry tenant/env (build has no
+	// deploy target), so the handler must key off the session selection.
+	// Without this wiring the sidebar shows no busy spinner during a
+	// build that the user explicitly invoked in a tenant/env-bound
+	// terminal — that gap is the regression this scenario locks down.
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> Building")
+	entry, ok := app.activityQueue.findActiveByCommand("build", "erun", "local")
+	if !ok {
+		t.Fatal("expected build entry to be active after ==> Building")
+	}
+	if entry.Source != "trace" {
+		t.Fatalf("expected source=trace, got %q", entry.Source)
+	}
+
+	handler("==> Built in 42s")
+	if _, ok := app.activityQueue.findActiveByCommand("build", "erun", "local"); ok {
+		t.Fatal("expected build entry to be finished after ==> Built")
+	}
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusSucceeded {
+		t.Fatalf("expected one succeeded entry, got %+v", all)
+	}
+}
+
+func TestActivityTraceLineHandlerFinalizesBuildOnFailure(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	handler := newActivityTraceLineHandler(app, selection, sessionKindLocal)
+
+	handler("==> Building")
+	handler("==> Build failed after 5s")
+
+	all := app.activityQueue.list()
+	if len(all) != 1 || all[0].Status != activityQueueStatusFailed {
+		t.Fatalf("expected one failed entry, got %+v", all)
+	}
+	if !strings.Contains(all[0].Error, "Build failed") {
+		t.Fatalf("expected Build failed in error, got %q", all[0].Error)
+	}
+}
+
+func TestActivityTraceLineHandlerSkipsBuildWithoutSelection(t *testing.T) {
+	// A generic Local shell at the repo root has no tenant/env bound to
+	// it. Build traces observed there must NOT register an entry — a
+	// stray (empty, empty) row would highlight every sidebar entry
+	// because the spinner selector walks all entries by tenant/env.
+	app := newTestAppForActivityQueue(t)
+	handler := newActivityTraceLineHandler(app, uiSelection{}, sessionKindLocal)
+	handler("==> Building")
+	if len(app.activityQueue.list()) != 0 {
+		t.Fatalf("expected no entries registered without a selection, got %+v", app.activityQueue.list())
+	}
+}
+
+func TestStartBuildFromTraceDoesNotLockTerminal(t *testing.T) {
+	// Build runs IN the user's terminal, so locking the session would
+	// freeze the very tab they are reading build output in. Verify the
+	// build path skips the lock that deploy uses to prevent concurrent
+	// helm runs.
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "erun", Environment: "local"}
+	envSession := &managedTerminal{selection: selection, key: "env\x00erun\x00local", serial: 1, kind: sessionKindOpen}
+	app.sessions[envSession.key] = envSession
+	app.startBuildFromTrace(selection)
+	if envSession.lockedByActivity != "" {
+		t.Fatalf("expected build to not lock terminal, got %q", envSession.lockedByActivity)
+	}
+}
+
 func TestResolveActivityKubeContextFallsBackToEnvConfig(t *testing.T) {
 	// startDeployFromTrace registers entries with a kube context drawn
 	// first from the session selection, falling back to the env config
