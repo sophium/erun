@@ -42,7 +42,20 @@ type EnvironmentStopPending struct {
 	CloudContextName string                  `json:"cloudContextName,omitempty"`
 	ReasonSummary    string                  `json:"reasonSummary,omitempty"`
 	Markers          []EnvironmentIdleMarker `json:"markers,omitempty"`
+	// Policy is the resolved idle policy at the moment the grace
+	// window was armed. Threaded into the history record on fire so
+	// History rows can answer "what was the timeout when this fired?"
+	// even after the user later edits the policy.
+	Policy EnvironmentIdlePolicy `json:"policy"`
 }
+
+// Source values for EnvironmentStopHistoryEntry.Source. Stable
+// strings — the desktop renders them as a row badge and the
+// idle_stop_record MCP tool validates against them.
+const (
+	StopHistorySourcePodMonitor = "pod-monitor"
+	StopHistorySourceHostManual = "host-manual"
+)
 
 // EnvironmentStopHistoryEntry is one row in the
 // <home>/.erun/<tenant>/<env>/stop-history.json array. Each entry
@@ -50,12 +63,23 @@ type EnvironmentStopPending struct {
 // the moment the actual stop fired, so a user reading the History
 // tab can answer "why did my env stop?" — and "why has it stopped
 // repeatedly?" — without trawling logs.
+//
+// Source distinguishes auto-stops fired by the in-pod idle monitor
+// (entrypoint.sh's stop-ready loop) from manual stops fired by the
+// desktop's Stop button. ArmedAt is the moment the grace window
+// began — only set on pod-monitor stops; host-manual entries leave
+// it zero. Policy snapshots the resolved idle policy at arm/fire
+// time so a History row stays interpretable after the user later
+// edits the timeout or working hours.
 type EnvironmentStopHistoryEntry struct {
-	StoppedAt        time.Time                       `json:"stoppedAt"`
-	GraceSeconds     int64                           `json:"graceSeconds"`
-	Reason           string                          `json:"reason"`
-	CloudContextName string                          `json:"cloudContextName,omitempty"`
-	Markers          []EnvironmentStopHistoryMarker  `json:"markers,omitempty"`
+	StoppedAt        time.Time                      `json:"stoppedAt"`
+	ArmedAt          time.Time                      `json:"armedAt,omitzero"`
+	GraceSeconds     int64                          `json:"graceSeconds"`
+	Source           string                         `json:"source,omitempty"`
+	Reason           string                         `json:"reason"`
+	CloudContextName string                         `json:"cloudContextName,omitempty"`
+	Policy           EnvironmentIdlePolicy          `json:"policy,omitzero"`
+	Markers          []EnvironmentStopHistoryMarker `json:"markers,omitempty"`
 }
 
 // EnvironmentStopHistoryMarker mirrors EnvironmentIdleMarker's
@@ -131,6 +155,7 @@ func MaybeArmOrFireIdleStop(params MaybeArmOrFireIdleStopParams) (MaybeArmOrFire
 			CloudContextName: strings.TrimSpace(params.CloudContextName),
 			ReasonSummary:    strings.TrimSpace(params.ReasonSummary),
 			Markers:          cloneIdleMarkersForPending(params.Status.Markers),
+			Policy:           params.Status.Policy,
 		}
 		if err := SaveEnvironmentStopPending(tenant, environment, armed); err != nil {
 			return MaybeArmOrFireIdleStopResult{}, err

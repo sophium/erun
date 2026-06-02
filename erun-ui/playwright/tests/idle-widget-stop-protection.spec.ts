@@ -477,20 +477,31 @@ test.describe('idle widget stop protection', () => {
     expect(startAISessionCalls).toBe(baselineStartAISession);
   });
 
-  test('Manage dialog History tab renders the last N auto-stops, newest first', async ({
+  test('Manage dialog History tab renders the last N stops, newest first', async ({
     app,
     page,
   }) => {
-    // Three mocked auto-stop records simulate the rolling history a
-    // user would see in the Manage > History tab. The spec opens the
-    // first env's manage dialog, switches to History, and asserts the
-    // newest row is on top with the per-marker breakdown intact.
+    // Three mocked stop records simulate the rolling history a user
+    // would see in the Manage > History tab: one in-pod auto-stop
+    // with the per-marker breakdown, one manual desktop stop, and
+    // one legacy auto-stop without the new source/armedAt/policy
+    // fields. The spec asserts newest-first ordering, the source
+    // labels distinguishing pod-monitor vs. host-manual vs. legacy,
+    // the dual-timestamp line, the policy snapshot, and the marker
+    // breakdown.
     const history = [
       {
         stoppedAt: '2026-05-31T12:30:00Z',
+        armedAt: '2026-05-31T12:20:00Z',
         graceSeconds: 600,
+        source: 'pod-monitor',
         reason: 'idle: terminal-stdin, ai',
         cloudContextName: 'mock-cluster',
+        policy: {
+          timeoutSeconds: 600,
+          workingHours: '09:00-18:00',
+          timezone: 'Europe/Riga',
+        },
         markers: [
           { name: 'terminal-stdin', idle: true, reason: 'no input', secondsIdleFor: 750 },
           { name: 'ai', idle: true, reason: 'no Claude session activity', secondsIdleFor: 720 },
@@ -498,13 +509,10 @@ test.describe('idle widget stop protection', () => {
       },
       {
         stoppedAt: '2026-05-30T18:15:00Z',
-        graceSeconds: 600,
-        reason: 'idle: terminal-stdin',
+        graceSeconds: 0,
+        source: 'host-manual',
+        reason: 'Manual stop via desktop',
         cloudContextName: 'mock-cluster',
-        markers: [
-          { name: 'terminal-stdin', idle: true, reason: 'no input', secondsIdleFor: 660 },
-          { name: 'ai', idle: false, reason: 'Claude session active', secondsIdleFor: 0 },
-        ],
       },
       {
         stoppedAt: '2026-05-29T09:00:00Z',
@@ -538,21 +546,55 @@ test.describe('idle widget stop protection', () => {
     const rows = page.getByTestId('manage-history-row');
     await expect(rows).toHaveCount(history.length);
 
-    // Newest first: the row at index 0 corresponds to history[0].
-    const firstWhen = page.getByTestId('manage-history-row-when').first();
-    await expect(firstWhen).toContainText('2026-05-31');
-    const firstReason = page.getByTestId('manage-history-row-reason').first();
-    await expect(firstReason).toContainText('idle: terminal-stdin, ai');
+    // Newest first: the row at index 0 corresponds to history[0],
+    // the pod-monitor auto-stop. It must carry the source label,
+    // grace marker, dual-timestamp line, and policy snapshot — so a
+    // user reading the row can answer "what triggered it?" without
+    // recalling the underlying timeout.
+    const firstRow = rows.nth(0);
+    await expect(firstRow.getByTestId('manage-history-row-when')).toContainText('2026-05-31');
+    await expect(firstRow.getByTestId('manage-history-row-source')).toContainText(
+      'In-pod idle monitor',
+    );
+    await expect(firstRow.getByTestId('manage-history-row-source')).toContainText('Grace 600s');
+    await expect(firstRow.getByTestId('manage-history-row-reason')).toContainText(
+      'idle: terminal-stdin, ai',
+    );
+    await expect(firstRow.getByTestId('manage-history-row-armed')).toContainText('Grace armed at');
+    await expect(firstRow.getByTestId('manage-history-row-policy')).toContainText('timeout 10m');
+    await expect(firstRow.getByTestId('manage-history-row-policy')).toContainText(
+      'working hours 09:00-18:00',
+    );
+    // Per-marker breakdown — the audit's central diagnostic: it
+    // lets a user see which markers actually went idle vs. which
+    // stayed active.
+    await expect(firstRow).toContainText('Idle markers');
+    await expect(firstRow).toContainText('terminal-stdin');
+    await expect(firstRow).toContainText('ai');
 
-    // The per-marker breakdown is rendered on the active row so the
-    // user can see whether a specific marker stayed active across
-    // recurring stops. history[1] mixes an active "ai" marker with an
-    // idle "terminal-stdin" marker.
+    // The middle row is a manual desktop stop — must render with
+    // the host-manual source label, no grace tag, no armed-at line,
+    // no policy line, and no marker breakdown. This is the row that
+    // answers "did I click Stop?" — keep its shape narrow.
     const secondRow = rows.nth(1);
-    await expect(secondRow).toContainText('Idle markers');
-    await expect(secondRow).toContainText('terminal-stdin');
-    await expect(secondRow).toContainText('Still-active markers');
-    await expect(secondRow).toContainText('ai');
+    await expect(secondRow.getByTestId('manage-history-row-source')).toContainText(
+      'Desktop manual stop',
+    );
+    await expect(secondRow.getByTestId('manage-history-row-source')).not.toContainText('Grace');
+    await expect(secondRow.getByTestId('manage-history-row-reason')).toContainText(
+      'Manual stop via desktop',
+    );
+    await expect(secondRow.getByTestId('manage-history-row-armed')).toHaveCount(0);
+    await expect(secondRow.getByTestId('manage-history-row-policy')).toHaveCount(0);
+
+    // The last row is a legacy entry written before source/armedAt/
+    // policy existed. It must still render with a sensible header
+    // (no crash) — falling back to a generic "Auto-stop" label.
+    const thirdRow = rows.nth(2);
+    await expect(thirdRow.getByTestId('manage-history-row-source')).toContainText('Auto-stop');
+    await expect(thirdRow.getByTestId('manage-history-row-reason')).toContainText(
+      'outside working hours',
+    );
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();

@@ -794,16 +794,20 @@ start_environment_idle_monitor() {
                 # would re-kill them on every subsequent tick.
                 if stop_cloud_host >>"${stop_log}" 2>&1; then
                     # Persist the audit record before we hand off to
-                    # graceful_quit_clients. `erun activity record-stop`
-                    # reads stop-pending.json (which the same stop-ready
-                    # call just consumed) to recover the per-marker
-                    # breakdown, then writes stop-history.json + clears
-                    # the pending file. Best-effort — a failure here
-                    # does not block the EC2 stop because the AWS call
-                    # has already succeeded.
-                    erun activity record-stop \
+                    # graceful_quit_clients. We pipe the captured
+                    # stop-ready JSON into `record-stop --state-stdin`
+                    # because the Fire branch of `stop-ready` cleared
+                    # stop-pending.json for crash-safety, so the
+                    # in-memory state in `check_json` is the only
+                    # surviving source of markers/reason/grace/policy.
+                    # Best-effort — a failure here does not block the
+                    # EC2 stop because the AWS call has already
+                    # succeeded.
+                    printf '%s\n' "${check_json}" | erun activity record-stop \
                         --tenant "${ERUN_TENANT}" \
                         --environment "${ERUN_ENVIRONMENT}" \
+                        --source pod-monitor \
+                        --state-stdin \
                         >>"${stop_log}" 2>&1 || true
                     graceful_quit_clients >>"${stop_log}" 2>&1 || true
                     exit 0

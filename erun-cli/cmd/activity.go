@@ -155,7 +155,12 @@ func runActivityStopReady(cmd *cobra.Command, store common.OpenStore, tenant, en
 
 // emitStopReadyJSON serializes the stop-ready decision to stdout in
 // the structured shape consumed by the in-pod monitor's heartbeat
-// log line.
+// log line. On Fire the payload carries the just-cleared pending
+// state under `pendingState` so the entrypoint script can pipe it
+// straight into `record-stop --state-stdin`; the on-disk pending
+// file is gone by this point (Fire clears it for crash safety) so
+// this is the only way the audit record can recover the markers,
+// reason, grace, and policy snapshot it was armed with.
 func emitStopReadyJSON(stdout io.Writer, status common.EnvironmentIdleStatus, result common.MaybeArmOrFireIdleStopResult) error {
 	payload := stopReadyJSON{
 		StopEligible:     status.StopEligible,
@@ -167,6 +172,10 @@ func emitStopReadyJSON(stdout io.Writer, status common.EnvironmentIdleStatus, re
 	}
 	if !result.State.Since.IsZero() {
 		payload.PendingSince = result.State.Since.UTC().Format(time.RFC3339)
+	}
+	if result.Action == common.IdleStopActionFire {
+		state := result.State
+		payload.PendingState = &state
 	}
 	encoder := json.NewEncoder(stdout)
 	return encoder.Encode(payload)
@@ -196,15 +205,18 @@ func stopReadyExitForAction(status common.EnvironmentIdleStatus, result common.M
 // stopReadyJSON is the structured stdout payload emitted when
 // --json is set. The desktop reads this through the MCP `idle` tool
 // (which surfaces the same fields on EnvironmentIdleStatus); the
-// CLI form is used by the in-pod entrypoint script for monitor.log.
+// CLI form is used by the in-pod entrypoint script for monitor.log
+// and (on Fire) is piped straight into `record-stop --state-stdin`
+// so the on-disk audit row preserves the per-marker breakdown.
 type stopReadyJSON struct {
-	StopEligible     bool   `json:"stopEligible"`
-	BlockedReason    string `json:"blockedReason,omitempty"`
-	Action           string `json:"action"`
-	PendingSince     string `json:"pendingSince,omitempty"`
-	SecondsRemaining int64  `json:"secondsRemaining"`
-	GraceSeconds     int64  `json:"graceSeconds"`
-	ReasonSummary    string `json:"reasonSummary,omitempty"`
+	StopEligible     bool                           `json:"stopEligible"`
+	BlockedReason    string                         `json:"blockedReason,omitempty"`
+	Action           string                         `json:"action"`
+	PendingSince     string                         `json:"pendingSince,omitempty"`
+	SecondsRemaining int64                          `json:"secondsRemaining"`
+	GraceSeconds     int64                          `json:"graceSeconds"`
+	ReasonSummary    string                         `json:"reasonSummary,omitempty"`
+	PendingState     *common.EnvironmentStopPending `json:"pendingState,omitempty"`
 }
 
 // newActivityCancelStopPendingCmd removes the stop-pending.json file
@@ -234,67 +246,143 @@ func newActivityCancelStopPendingCmd() *cobra.Command {
 
 // newActivityRecordStopCmd appends a stop entry to stop-history.json
 // for the named env. Called by the in-pod monitor's entrypoint.sh
-// after `stop_cloud_host` succeeds, and by the desktop's manual
-// Stop button after it observes the env transition to stopped.
-// Either caller passes the snapshot from stop-pending.json so the
-// per-marker breakdown survives the round-trip; if the file is
-// missing (e.g. a manual stop without prior grace), the record
-// carries an empty markers list and the reason flag value.
+// after `stop_cloud_host` succeeds (--source pod-monitor, piped
+// the stop-ready JSON via --state-stdin) and by the desktop's
+// manual Stop button via the idle_stop_record MCP tool (--source
+// host-manual). The source flag is what distinguishes the two on
+// the History tab.
+//
+// Pending-state recovery falls back in three layers so a History
+// row always has the richest data available:
+//
+//  1. --state-stdin parses a stop-ready --json blob piped on stdin.
+//     This is the in-pod monitor's path: stop-ready's Fire branch
+//     clears the on-disk pending file before record-stop runs, so
+//     stdin is the only way to recover markers/policy/grace.
+//  2. Otherwise, if stop-pending.json still exists on disk (the
+//     manual-stop-during-armed-grace case), use it.
+//  3. Otherwise (manual stop with no grace ever armed) the row
+//     carries just the reason and source.
 func newActivityRecordStopCmd() *cobra.Command {
 	var tenant string
 	var environment string
 	var reason string
 	var cloudContextName string
+	var source string
+	var stateStdin bool
 	cmd := &cobra.Command{
 		Use:  "record-stop",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tenant = strings.TrimSpace(tenant)
-			environment = strings.TrimSpace(environment)
-			if tenant == "" || environment == "" {
-				return fmt.Errorf("tenant and environment are required")
-			}
-			now := time.Now().UTC()
-			entry := common.EnvironmentStopHistoryEntry{
-				StoppedAt:        now,
-				Reason:           strings.TrimSpace(reason),
-				CloudContextName: strings.TrimSpace(cloudContextName),
-			}
-			pending, ok, err := common.LoadEnvironmentStopPending(tenant, environment)
-			if err != nil {
-				return err
-			}
-			if ok {
-				entry.GraceSeconds = pending.GraceSeconds
-				if entry.Reason == "" {
-					entry.Reason = pending.ReasonSummary
-				}
-				if entry.CloudContextName == "" {
-					entry.CloudContextName = pending.CloudContextName
-				}
-				for _, marker := range pending.Markers {
-					entry.Markers = append(entry.Markers, common.EnvironmentStopHistoryMarker{
-						Name:           marker.Name,
-						Idle:           marker.Idle,
-						Reason:         marker.Reason,
-						SecondsIdleFor: secondsIdleForMarker(marker, pending.Since),
-					})
-				}
-			}
-			if err := common.AppendStopHistoryEntry(tenant, environment, entry); err != nil {
-				return err
-			}
-			// Clear the pending file once we've persisted the
-			// audit record so a follow-up `stop-ready` call after
-			// the env restarts arms a fresh grace window from
-			// scratch rather than reusing the stale entry.
-			return common.ClearEnvironmentStopPending(tenant, environment)
+			return runActivityRecordStop(cmd, tenant, environment, reason, cloudContextName, source, stateStdin)
 		},
 	}
 	addActivityTargetFlags(cmd, &tenant, &environment)
 	cmd.Flags().StringVar(&reason, "reason", "", "Reason summary to record (defaults to the pending entry's reason)")
 	cmd.Flags().StringVar(&cloudContextName, "cloud-context", "", "Cloud context name to record (defaults to the pending entry's value)")
+	cmd.Flags().StringVar(&source, "source", "", "Where the stop originated: 'pod-monitor' (in-pod idle loop) or 'host-manual' (desktop Stop button)")
+	cmd.Flags().BoolVar(&stateStdin, "state-stdin", false, "Read a stop-ready --json blob from stdin to recover the per-marker breakdown the in-pod monitor just consumed")
 	return cmd
+}
+
+func runActivityRecordStop(cmd *cobra.Command, tenant, environment, reason, cloudContextName, source string, stateStdin bool) error {
+	tenant = strings.TrimSpace(tenant)
+	environment = strings.TrimSpace(environment)
+	if tenant == "" || environment == "" {
+		return fmt.Errorf("tenant and environment are required")
+	}
+	source = normalizeStopHistorySource(source)
+	pending, havePending, err := loadPendingForRecord(commandContext(cmd).Stdin, stateStdin, tenant, environment)
+	if err != nil {
+		return err
+	}
+	entry := buildStopHistoryEntry(time.Now().UTC(), source, reason, cloudContextName, pending, havePending)
+	if err := common.AppendStopHistoryEntry(tenant, environment, entry); err != nil {
+		return err
+	}
+	// Clear the pending file once we've persisted the
+	// audit record so a follow-up `stop-ready` call after
+	// the env restarts arms a fresh grace window from
+	// scratch rather than reusing the stale entry.
+	return common.ClearEnvironmentStopPending(tenant, environment)
+}
+
+// loadPendingForRecord recovers the pending stop entry from stdin
+// (preferred — survives the Fire branch clearing the on-disk file)
+// or from the on-disk pending file as a fallback. Returns ok=false
+// with no error when neither source is available, which is the
+// expected case for a manual stop without prior grace.
+func loadPendingForRecord(stdin io.Reader, stateStdin bool, tenant, environment string) (common.EnvironmentStopPending, bool, error) {
+	if stateStdin {
+		body, err := io.ReadAll(stdin)
+		if err != nil {
+			return common.EnvironmentStopPending{}, false, fmt.Errorf("read --state-stdin: %w", err)
+		}
+		if len(strings.TrimSpace(string(body))) == 0 {
+			return common.EnvironmentStopPending{}, false, nil
+		}
+		var payload stopReadyJSON
+		if err := json.Unmarshal(body, &payload); err != nil {
+			return common.EnvironmentStopPending{}, false, fmt.Errorf("parse --state-stdin: %w", err)
+		}
+		if payload.PendingState == nil {
+			return common.EnvironmentStopPending{}, false, nil
+		}
+		return *payload.PendingState, true, nil
+	}
+	pending, ok, err := common.LoadEnvironmentStopPending(tenant, environment)
+	if err != nil {
+		return common.EnvironmentStopPending{}, false, err
+	}
+	return pending, ok, nil
+}
+
+// buildStopHistoryEntry assembles the entry from the optional
+// pending state and the flag-supplied overrides. Kept pure so the
+// CLI command can stay a thin Cobra adapter and integration
+// goldens can lock the resulting on-disk shape.
+func buildStopHistoryEntry(now time.Time, source, reason, cloudContextName string, pending common.EnvironmentStopPending, havePending bool) common.EnvironmentStopHistoryEntry {
+	entry := common.EnvironmentStopHistoryEntry{
+		StoppedAt:        now,
+		Source:           source,
+		Reason:           strings.TrimSpace(reason),
+		CloudContextName: strings.TrimSpace(cloudContextName),
+	}
+	if !havePending {
+		return entry
+	}
+	entry.GraceSeconds = pending.GraceSeconds
+	entry.ArmedAt = pending.Since
+	entry.Policy = pending.Policy
+	if entry.Reason == "" {
+		entry.Reason = pending.ReasonSummary
+	}
+	if entry.CloudContextName == "" {
+		entry.CloudContextName = pending.CloudContextName
+	}
+	for _, marker := range pending.Markers {
+		entry.Markers = append(entry.Markers, common.EnvironmentStopHistoryMarker{
+			Name:           marker.Name,
+			Idle:           marker.Idle,
+			Reason:         marker.Reason,
+			SecondsIdleFor: secondsIdleForMarker(marker, pending.Since),
+		})
+	}
+	return entry
+}
+
+// normalizeStopHistorySource accepts the two stable string values
+// (pod-monitor / host-manual) plus the empty fallback. Any other
+// value is silently coerced to empty so old runtime images writing
+// without a source flag do not crash the audit append.
+func normalizeStopHistorySource(source string) string {
+	source = strings.TrimSpace(source)
+	switch source {
+	case common.StopHistorySourcePodMonitor, common.StopHistorySourceHostManual:
+		return source
+	default:
+		return ""
+	}
 }
 
 // secondsIdleForMarker reports how long marker has been idle as of

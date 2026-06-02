@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -80,4 +81,93 @@ func idleStopHistoryTool(runtime RuntimeConfig) func(context.Context, *mcp.CallT
 			Entries:     entries,
 		}, nil
 	}
+}
+
+// IdleStopRecordInput captures the inputs for a host-driven stop
+// audit record. The desktop calls this from StopCloudContext after
+// the AWS stop succeeds; the tool runs in the pod so the on-disk
+// write lands on the shared home PVC alongside the in-pod monitor's
+// auto-stop records. Reason is free-form (the desktop sends "Manual
+// stop via desktop"); CloudContextName helps disambiguate when one
+// env spans multiple cloud-context links over its lifetime.
+type IdleStopRecordInput struct {
+	Tenant           string `json:"tenant,omitempty" jsonschema:"tenant whose environment should have a stop entry recorded; defaults to the server tenant context"`
+	Environment      string `json:"environment,omitempty" jsonschema:"environment to record against; defaults to the server environment context"`
+	Reason           string `json:"reason,omitempty" jsonschema:"reason text rendered on the History row; empty falls back to a generic 'Manual stop'"`
+	CloudContextName string `json:"cloudContextName,omitempty" jsonschema:"cloud context name the stop targeted; informational"`
+}
+
+// IdleStopRecordResult echoes back the resolved tenant/environment
+// and the timestamp the new row carries, so the desktop can match
+// its eventual LoadStopHistory result against the row it just
+// recorded.
+type IdleStopRecordResult struct {
+	Tenant      string    `json:"tenant"`
+	Environment string    `json:"environment"`
+	StoppedAt   time.Time `json:"stoppedAt"`
+}
+
+func idleStopRecordTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolRequest, IdleStopRecordInput) (*mcp.CallToolResult, IdleStopRecordResult, error) {
+	return func(_ context.Context, _ *mcp.CallToolRequest, input IdleStopRecordInput) (*mcp.CallToolResult, IdleStopRecordResult, error) {
+		tenant := firstNonEmpty(input.Tenant, runtime.Context.Tenant)
+		environment := firstNonEmpty(input.Environment, runtime.Context.Environment)
+		if strings.TrimSpace(tenant) == "" || strings.TrimSpace(environment) == "" {
+			return nil, IdleStopRecordResult{}, fmt.Errorf("tenant and environment are required")
+		}
+		reason := strings.TrimSpace(input.Reason)
+		if reason == "" {
+			reason = "Manual stop"
+		}
+		now := time.Now().UTC()
+		entry := eruncommon.EnvironmentStopHistoryEntry{
+			StoppedAt:        now,
+			Source:           eruncommon.StopHistorySourceHostManual,
+			Reason:           reason,
+			CloudContextName: strings.TrimSpace(input.CloudContextName),
+		}
+		// Preserve the per-marker breakdown when the user clicks
+		// Stop while an idle grace window is already armed — the
+		// row then shows both "manual" and what would have fired
+		// it on its own. Missing pending file is fine; this is a
+		// manual stop without prior grace.
+		if pending, ok, err := eruncommon.LoadEnvironmentStopPending(tenant, environment); err != nil {
+			return nil, IdleStopRecordResult{}, err
+		} else if ok {
+			entry.GraceSeconds = pending.GraceSeconds
+			entry.ArmedAt = pending.Since
+			entry.Policy = pending.Policy
+			if entry.CloudContextName == "" {
+				entry.CloudContextName = pending.CloudContextName
+			}
+			for _, marker := range pending.Markers {
+				entry.Markers = append(entry.Markers, stopHistoryMarkerFromPending(marker, pending.Since))
+			}
+		}
+		if err := eruncommon.AppendStopHistoryEntry(tenant, environment, entry); err != nil {
+			return nil, IdleStopRecordResult{}, err
+		}
+		if err := eruncommon.ClearEnvironmentStopPending(tenant, environment); err != nil {
+			return nil, IdleStopRecordResult{}, err
+		}
+		return nil, IdleStopRecordResult{
+			Tenant:      tenant,
+			Environment: environment,
+			StoppedAt:   now,
+		}, nil
+	}
+}
+
+func stopHistoryMarkerFromPending(marker eruncommon.EnvironmentIdleMarker, since time.Time) eruncommon.EnvironmentStopHistoryMarker {
+	out := eruncommon.EnvironmentStopHistoryMarker{
+		Name:   marker.Name,
+		Idle:   marker.Idle,
+		Reason: marker.Reason,
+	}
+	if !marker.LastActivity.IsZero() {
+		delta := int64(since.Sub(marker.LastActivity).Seconds())
+		if delta > 0 {
+			out.SecondsIdleFor = delta
+		}
+	}
+	return out
 }
