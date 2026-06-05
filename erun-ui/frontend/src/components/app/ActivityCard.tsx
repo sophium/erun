@@ -1,8 +1,10 @@
 import {
   AlertOctagon,
   Ban,
+  Check,
   CheckCircle2,
   ChevronRight,
+  Clipboard,
   Clock,
   LoaderCircle,
   Trash2,
@@ -14,9 +16,11 @@ import { ContainerStatusList } from '@/components/app/ActivityCard.ContainerStat
 import {
   activityElapsedLabel,
   activityTargetLabel,
+  buildFailureReport,
   cardBorderClassName,
   commandBadgeClassName,
   commandSubtitle,
+  copyToClipboard,
   dismissAffordance,
   shellSessionIdFromEntry,
   shouldShowHelmRecovery,
@@ -119,6 +123,7 @@ export const ActivityCard = React.memo(function ActivityCard({
           {entry.error}
         </p>
       )}
+      {entry.status === 'failed' && <FailureDetails entry={entry} />}
       <RecoveryActionRow
         entry={entry}
         onRecoverPendingHelm={onRecoverPendingHelm}
@@ -130,6 +135,86 @@ export const ActivityCard = React.memo(function ActivityCard({
     </article>
   );
 });
+
+// FailureDetails renders the failure-evidence surface for a failed card: an
+// expandable section showing the captured command output (the real
+// helm/kubectl/docker error behind the one-line summary) and a "Copy failure
+// report" button that copies a complete, paste-ready report for handing to
+// developers/admins. The report is always available even when no output was
+// captured (a fast failure), because it includes the structured context the
+// user would otherwise have to retype. Diagnostic state belongs inline where
+// the user is looking (erun-ui/AGENTS.md "Professional UX"), not behind a
+// native tooltip; the disclosure mirrors the container-status row pattern and
+// the copy button mirrors the existing copy affordances.
+function FailureDetails({ entry }: { entry: ActivityQueueEntry }): React.ReactElement {
+  const [expanded, setExpanded] = React.useState<boolean>(false);
+  const [copied, setCopied] = React.useState<boolean>(false);
+  const copiedTimer = React.useRef<number | undefined>(undefined);
+  React.useEffect(() => {
+    return () => {
+      if (copiedTimer.current !== undefined) window.clearTimeout(copiedTimer.current);
+    };
+  }, []);
+  const handleCopy = React.useCallback(() => {
+    void copyToClipboard(buildFailureReport(entry));
+    setCopied(true);
+    if (copiedTimer.current !== undefined) window.clearTimeout(copiedTimer.current);
+    copiedTimer.current = window.setTimeout(() => {
+      setCopied(false);
+    }, 1500);
+  }, [entry]);
+  const detailId = `activity-detail-${entry.id}`;
+  const hasOutput = Boolean(entry.detail);
+  return (
+    <div className="mt-2 space-y-1">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          className="flex items-center gap-1 rounded-sm text-[11px] font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+          aria-expanded={expanded}
+          aria-controls={detailId}
+          onClick={() => {
+            setExpanded((value) => !value);
+          }}
+        >
+          <ChevronRight
+            aria-hidden="true"
+            className={cn('size-3 transition-transform', expanded && 'rotate-90')}
+          />
+          {expanded ? 'Hide output' : 'Show output'}
+        </button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          className="h-6 gap-1 text-[11px]"
+          onClick={handleCopy}
+        >
+          {copied ? (
+            <Check aria-hidden="true" className="size-3 text-emerald-600" />
+          ) : (
+            <Clipboard aria-hidden="true" className="size-3" />
+          )}
+          {copied ? 'Copied' : 'Copy failure report'}
+        </Button>
+      </div>
+      {expanded &&
+        (hasOutput ? (
+          <pre
+            id={detailId}
+            className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border bg-muted/40 px-2 py-1 font-mono text-[10.5px] text-foreground"
+          >
+            {entry.detail}
+          </pre>
+        ) : (
+          <p id={detailId} className="px-1 text-[11px] text-muted-foreground">
+            No command output was captured for this failure. Copy the report for the failure
+            context.
+          </p>
+        ))}
+    </div>
+  );
+}
 
 // RecoveryActionRow renders the per-card recovery affordances. Helm-source
 // deploys get a "Clear pending helm release" button; shell-source entries

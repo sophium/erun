@@ -709,3 +709,53 @@ func TestForceDismissActivityRemovesActiveEntry(t *testing.T) {
 		t.Fatal("second ForceDismissActivity should return false (entry already gone)")
 	}
 }
+
+// TestFeedActivityTraceCapturesFailureDetail pins the end-to-end wiring: PTY
+// output fed through feedActivityTraceFromTerminal is buffered against the
+// active entry and snapshotted into entry.Detail when the "==> Deploy failed"
+// trace line finalizes the entry. This locks the record-before-finalize
+// ordering — the failing output must already be buffered when finish() runs.
+func TestFeedActivityTraceCapturesFailureDetail(t *testing.T) {
+	app := newTestAppForActivityQueue(t)
+	selection := uiSelection{Tenant: "team", Environment: "dev", Version: "1.0.0"}
+	managed := &managedTerminal{selection: selection, kind: sessionKindLocal, key: "local\x00team\x00dev", serial: 1}
+	app.sessions[managed.key] = managed
+
+	// Seed the active entry the trace handler would otherwise create on the
+	// "==> Deploying" line; this test isolates the capture path from the
+	// trace-driven start (which needs env config on disk).
+	app.activityQueue.start(activityQueueEntry{
+		Command:     "deploy",
+		Tenant:      "team",
+		Environment: "dev",
+		Version:     "1.0.0",
+	})
+
+	feed := func(s string) { app.feedActivityTraceFromTerminal(managed, []byte(s)) }
+	feed("helm upgrade --install team-devops ./chart\r\n")
+	feed("Error: UPGRADE FAILED: timed out waiting for the condition\r\n")
+	feed("==> Deploy failed after 4s\r\n")
+
+	if _, ok := app.activityQueue.findActive("team", "dev"); ok {
+		t.Fatal("entry should be finalized out of active after the failure line")
+	}
+	var failed *activityQueueEntry
+	for _, entry := range app.activityQueue.list() {
+		if entry.Tenant == "team" && entry.Environment == "dev" {
+			e := entry
+			failed = &e
+			break
+		}
+	}
+	if failed == nil {
+		t.Fatal("expected a finalized entry for team/dev")
+	}
+	if failed.Status != activityQueueStatusFailed {
+		t.Fatalf("status = %q, want failed", failed.Status)
+	}
+	for _, want := range []string{"helm upgrade --install", "UPGRADE FAILED", "==> Deploy failed after 4s"} {
+		if !strings.Contains(failed.Detail, want) {
+			t.Fatalf("Detail missing %q, got %q", want, failed.Detail)
+		}
+	}
+}
