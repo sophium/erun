@@ -353,6 +353,19 @@ func SeedMarketplaceJSON(t testing.TB, dir string) {
 `)
 }
 
+// SeedScoopManifest writes bucket/erun.json inside dir with the given content
+// so stable `release` scenarios exercise the Scoop manifest validation and the
+// version/checksum sync paths. Pass a valid manifest to reach the happy path,
+// or a deliberately malformed one to drive the validation-failure branch.
+func SeedScoopManifest(t testing.TB, dir, content string) {
+	t.Helper()
+	dst := filepath.Join(dir, "bucket")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dst, err)
+	}
+	mustWrite(t, filepath.Join(dst, "erun.json"), content)
+}
+
 // RunGit runs `git <args...>` inside dir. Useful for scenarios that need
 // to set up branches, tags, or remotes after SeedReleaseRepo.
 func RunGit(t testing.TB, dir string, args ...string) {
