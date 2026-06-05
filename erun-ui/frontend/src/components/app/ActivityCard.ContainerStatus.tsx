@@ -8,6 +8,7 @@ import {
   containerPhaseDotClassName,
   containerPhaseLabel,
   copyToClipboard,
+  deployUiSelection,
   isRecoverableContainerFailure,
   kubectlDescribeCommand,
 } from '@/components/app/ActivityQueueDrawer.helpers';
@@ -15,7 +16,6 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 import { StartForceDeploySession } from '../../../wailsjs/go/main/App';
-import type { main as wailsMain } from '../../../wailsjs/go/models';
 
 export function ContainerStatusList({
   containers,
@@ -216,21 +216,7 @@ function recoveryActionForContainer(
   deploy: ActivityQueueEntry,
 ): RecoveryAction | null {
   if (!isRecoverableContainerFailure(container)) return null;
-  const selection: wailsMain.uiSelection = {
-    tenant: deploy.tenant,
-    environment: deploy.environment,
-    version: deploy.version ?? '',
-    runtimeImage: '',
-    runtimeCpu: '',
-    runtimeMemory: '',
-    kubernetesContext: deploy.kubernetesContext ?? '',
-    containerRegistry: '',
-    noGit: false,
-    bootstrap: false,
-    setDefaultTenant: false,
-    action: 'deploy',
-    debug: false,
-  };
+  const selection = deployUiSelection(deploy);
   return {
     hint: `${container.image || 'The image referenced by the chart'} is not in the registry. Rebuild every image bypassing the fingerprint cache and push them.`,
     label: 'Rebuild & redeploy',

@@ -1,6 +1,6 @@
 Diagnose and repair an environment's runtime and config.
 
-Inspects the environment and offers repairs: prune its Docker images, build cache, or stopped containers; restore or fix the root erun config; and finish an interrupted remote init. Each action prompts before running unless you pass its matching flag.
+Reports why a deploy may have failed (helm release status and the runtime pods), then offers repairs: prune its Docker images, build cache, or stopped containers; restore or fix the root erun config; and finish an interrupted remote init. The deploy diagnosis is read-only; each repair prompts before running unless you pass its matching flag.
 
 Usage:
   erun doctor [tenant] [environment] [flags]

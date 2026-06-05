@@ -57,7 +57,7 @@ test.describe('tab respawn after cloud context returns to running', () => {
     // The clicked env stays selected — restoreEnvTabsAfterContextRunning
     // must not fire setSelected(null) or otherwise perturb selection.
     const selectedRow = page.locator(
-      `button[title^="${tenant} / ${envs[0]!}"][aria-current="page"]`,
+      `button[aria-label^="${tenant} / ${envs[0]!}"][aria-current="page"]`,
     );
     await expect(selectedRow).toBeVisible();
   });

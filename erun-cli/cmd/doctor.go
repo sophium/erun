@@ -38,9 +38,10 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 		Use:   "doctor [tenant] [environment]",
 		Short: "Diagnose and repair an environment's runtime and config",
 		Long: "Diagnose and repair an environment's runtime and config.\n\n" +
-			"Inspects the environment and offers repairs: prune its Docker images, build cache, or " +
-			"stopped containers; restore or fix the root erun config; and finish an interrupted " +
-			"remote init. Each action prompts before running unless you pass its matching flag.",
+			"Reports why a deploy may have failed (helm release status and the runtime pods), then " +
+			"offers repairs: prune its Docker images, build cache, or stopped containers; restore or " +
+			"fix the root erun config; and finish an interrupted remote init. The deploy diagnosis is " +
+			"read-only; each repair prompts before running unless you pass its matching flag.",
 		Args:          cobra.MaximumNArgs(2),
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -121,6 +122,9 @@ func doctorOnlyRepairConfig(options doctorOptions) bool {
 
 func runDoctorCleanupActions(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, options doctorOptions) error {
 	req := common.ShellLaunchParamsFromResult(result)
+	if err := runDeployDiagnosis(ctx, req); err != nil {
+		return err
+	}
 	inspection, err := common.RunDoctorInspection(ctx, nil, req)
 	if err != nil {
 		return err
@@ -150,6 +154,40 @@ func runDoctorCleanupActions(ctx common.Context, promptRunner PromptRunner, resu
 func writeNoDoctorActionsSelected(ctx common.Context) error {
 	_, err := fmt.Fprintln(ctx.Stdout, "No cleanup actions selected.")
 	return err
+}
+
+// deployDiagnosisGuidance points the reader at the fixes for the common
+// deploy-failure modes the diagnosis surfaces. The desktop Activities panel
+// exposes these same fixes as one-click buttons on a failed deploy card.
+const deployDiagnosisGuidance = "If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release."
+
+// runDeployDiagnosis reports the helm release status and runtime pods so the
+// reader can see why a deploy failed before any cleanup. Read-only; the
+// commands are traced for --dry-run.
+func runDeployDiagnosis(ctx common.Context, req common.ShellLaunchParams) error {
+	diagnosis := common.RunDeployDiagnosis(ctx, req)
+	if ctx.DryRun {
+		return nil
+	}
+	if err := writeDeployDiagnosis(ctx, diagnosis); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintln(ctx.Stdout, deployDiagnosisGuidance)
+	return err
+}
+
+func writeDeployDiagnosis(ctx common.Context, diagnosis common.DeployDiagnosisResult) error {
+	if strings.TrimSpace(diagnosis.HelmStatus) != "" {
+		if _, err := fmt.Fprintf(ctx.Stdout, "== Helm release status ==\n%s\n\n", diagnosis.HelmStatus); err != nil {
+			return err
+		}
+	}
+	if strings.TrimSpace(diagnosis.Pods) != "" {
+		if _, err := fmt.Fprintf(ctx.Stdout, "== Pods ==\n%s\n\n", diagnosis.Pods); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func runSelectedDoctorAction(ctx common.Context, req common.ShellLaunchParams, action common.DoctorAction) error {

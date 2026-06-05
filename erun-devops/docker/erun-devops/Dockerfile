@@ -62,6 +62,10 @@ ARG CODEX_VERSION=0.125.0
 ARG CLAUDE_CODE_VERSION=2.1.156
 ARG AWS_CLI_VERSION=2.32.16
 ARG ATLAS_VERSION=v1.2.0
+# Keep in sync with the @playwright/test version resolved in
+# erun-ui/playwright/yarn.lock so the installed Chromium system libraries match
+# the browser the suite downloads at run time.
+ARG PLAYWRIGHT_VERSION=1.60.0
 
 USER root
 
@@ -123,6 +127,22 @@ RUN apt-get update && \
     printf '\n[ -r /usr/share/bash-completion/bash_completion ] && . /usr/share/bash-completion/bash_completion\n[ -r /etc/bash_completion.d/erun ] && . /etc/bash_completion.d/erun\n[ -r /etc/erun/bash_prompt.sh ] && . /etc/erun/bash_prompt.sh\n' >> /etc/bash.bashrc && \
     chown -R erun:erun /home/erun && \
     chmod 0755 /usr/local/bin/kubectl /usr/local/bin/atlas /usr/local/bin/helm /usr/local/bin/terraform /usr/local/bin/k9s /usr/local/bin/difft /usr/local/bin/docker /usr/local/bin/aws
+
+# Chromium runtime libraries for the erun-ui Playwright suite. The build deps
+# in the layer above only cover compiling erun-app (Wails links webkit2gtk via
+# CGO); the headless browser that `erun-ui/playwright/run.sh` drives needs its
+# own shared libraries (libnss3, libnspr4, and the GTK/X/ALSA runtime set).
+# Without them, in-pod contribute-mode can build erun-ui but cannot run its
+# mandatory UI tests. Use Playwright's own dependency installer, pinned to the
+# suite's version, so the package set stays correct across Ubuntu library
+# renames (the 24.04 `t64` transition) instead of hand-maintaining a fragile
+# list. The browser binary itself is installed without root by run.sh's
+# `playwright install chromium`; only these system libs need root, so they
+# belong in the image. Kept as a separate layer (not folded into the tooling
+# layer above) because install-deps runs its own apt-get update after that
+# layer has already cleared the apt lists.
+RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium && \
+    rm -rf /var/lib/apt/lists/* /root/.npm
 
 COPY --from=builder /usr/local/go /usr/local/go
 COPY --from=builder --chmod=0755 /out/erun /usr/local/bin/erun

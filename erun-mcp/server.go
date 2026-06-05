@@ -228,7 +228,7 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 	}, deployTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "doctor",
-		Description: "Diagnose and repair the resolved environment: prune unused Docker images, build cache, or stopped containers, and optionally restore or repair the root erun config from a backup or by re-initializing orphaned cloud provider aliases",
+		Description: "Diagnose and repair the resolved environment: report why a deploy may have failed (helm release status and runtime pods, read-only), prune unused Docker images, build cache, or stopped containers, and optionally restore or repair the root erun config from a backup or by re-initializing orphaned cloud provider aliases",
 	}, doctorTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "delete",

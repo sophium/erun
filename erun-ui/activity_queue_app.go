@@ -909,6 +909,11 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 	}
 	handler := newActivityTraceLineHandler(a, managed.selection, managed.kind)
 	for _, line := range lines {
+		// Buffer the line for the active entry before dispatching it, so the
+		// "==> Deploy failed" line that finalizes the entry (and the error
+		// output preceding it) is already captured when finish() snapshots
+		// the buffer into entry.Detail.
+		a.activityQueue.recordOutputLine(managed.selection.Tenant, managed.selection.Environment, line)
 		handler(line)
 		signalSessionReadyOnLine(managed, line)
 	}
