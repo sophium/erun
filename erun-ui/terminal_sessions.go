@@ -997,6 +997,20 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 		return false
 	}
 
+	// A deploy failure is terminal, not a transient drop. Respawning
+	// re-runs `erun open`, which re-deploys and fails the same way — and
+	// because every env tab (ERun + AI) reconnects independently, that
+	// turns one failing deploy into a parallel re-deploy storm across
+	// tabs. Refuse here and leave recovery to the user (the failed-deploy
+	// card's Run doctor / Rebuild & redeploy, or the titlebar Play
+	// button). A session that reached a healthy shell and then dropped has
+	// readyErr == nil and still reconnects below; its `erun open` finds the
+	// deploy already current and skips it.
+	if a.reconnectBlockedByDeployFailure(managed) {
+		a.emitDeployFailedMarker(managed.serial)
+		return false
+	}
+
 	// Cap consecutive fast-exit respawns. Without this, an env whose
 	// underlying cluster keeps tearing down the freshly-spawned pod
 	// (helm rollout timeouts, MCP port-forward races against a
@@ -1127,6 +1141,7 @@ const (
 	reconnectLoopWindow    = 30 * time.Second
 	reconnectLoopMaxExits  = 2
 	reconnectLoopMarkerANSI = "\r\n\x1b[2;33m── stopped reconnecting after repeated failures — click the environment in the sidebar to retry ──\x1b[0m\r\n"
+	deployFailedMarkerANSI  = "\r\n\x1b[2;33m── deploy failed — not retrying automatically; use Run doctor or Rebuild & redeploy on the failed deploy, or click the environment to retry ──\x1b[0m\r\n"
 )
 
 // trackExitForLoopGuard records the moment the managed PTY exited
@@ -1164,6 +1179,30 @@ func (a *App) emitReconnectLoopMarker(sessionID int) {
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(reconnectLoopMarkerANSI)),
 	})
+}
+
+// emitDeployFailedMarker writes a single diagnostic line when tryReconnect
+// refuses to respawn because the env's deploy failed (rather than a transient
+// drop). See tryReconnect.
+func (a *App) emitDeployFailedMarker(sessionID int) {
+	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+		SessionID: sessionID,
+		Data:      base64.StdEncoding.EncodeToString([]byte(deployFailedMarkerANSI)),
+	})
+}
+
+// reconnectBlockedByDeployFailure reports whether the managed PTY's open
+// ended in a deploy failure — signalReady was called with an error from the
+// `==> Deploy failed` trace line — as opposed to a healthy ready that later
+// dropped. tryReconnect uses it to avoid re-deploying a broken env (and the
+// parallel re-deploy storm that results when every tab reconnects at once).
+func (a *App) reconnectBlockedByDeployFailure(managed *managedTerminal) bool {
+	if managed == nil {
+		return false
+	}
+	managed.readyMu.Lock()
+	defer managed.readyMu.Unlock()
+	return managed.readyClosed && managed.readyErr != nil
 }
 
 // emitStoppedContextMarker writes a single diagnostic line when
