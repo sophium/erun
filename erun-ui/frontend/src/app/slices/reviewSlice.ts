@@ -2,7 +2,7 @@ import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 
 import type { DiffResult } from '@/types';
 
-import type { ReconnectState } from '../state';
+import { RECONNECT_LINE_BUFFER_LIMIT, type ReconnectState } from '../state';
 
 export interface ReviewState {
   diff: DiffResult | null;
@@ -22,7 +22,7 @@ const initialState: ReviewState = {
   diffLoading: false,
   diffError: '',
   diffErrorReconnectable: false,
-  reconnect: { status: 'idle', lastLine: '', error: '' },
+  reconnect: { status: 'idle', tenant: '', environment: '', lines: [], error: '' },
   selectedDiffPath: '',
   selectedReviewScope: 'current',
   selectedReviewCommit: '',
@@ -46,6 +46,12 @@ export const reviewSlice = createSlice({
     },
     setReconnect(state, action: PayloadAction<ReconnectState>) {
       state.reconnect = action.payload;
+    },
+    appendReconnectLine(state, action: PayloadAction<string>) {
+      state.reconnect.lines.push(action.payload);
+      if (state.reconnect.lines.length > RECONNECT_LINE_BUFFER_LIMIT) {
+        state.reconnect.lines.splice(0, state.reconnect.lines.length - RECONNECT_LINE_BUFFER_LIMIT);
+      }
     },
     setSelectedDiffPath(state, action: PayloadAction<string>) {
       state.selectedDiffPath = action.payload;
@@ -81,6 +87,7 @@ export const {
   setDiffLoading,
   setDiffError,
   setReconnect,
+  appendReconnectLine,
   setSelectedDiffPath,
   setSelectedReviewScope,
   setSelectedReviewCommit,
