@@ -78,6 +78,9 @@ func runDoctorToolCommand(runtime RuntimeConfig, input DoctorInput, runCtx erunc
 		return report, err
 	}
 	req := eruncommon.ShellLaunchParamsFromResult(target)
+	if err := writeDoctorDeployDiagnosis(runCtx, req); err != nil {
+		return report, err
+	}
 	if err := writeDoctorInspection(runCtx, target, req); err != nil {
 		return report, err
 	}
@@ -221,6 +224,27 @@ func firstNonBlank(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// writeDoctorDeployDiagnosis reports the helm release status and runtime pods
+// so an agent can see why a deploy failed before any cleanup. Read-only; the
+// commands are traced for dry-run previews.
+func writeDoctorDeployDiagnosis(runCtx eruncommon.Context, req eruncommon.ShellLaunchParams) error {
+	diagnosis := eruncommon.RunDeployDiagnosis(runCtx, req)
+	if runCtx.DryRun {
+		return nil
+	}
+	if status := strings.TrimSpace(diagnosis.HelmStatus); status != "" {
+		if _, err := fmt.Fprintf(runCtx.Stdout, "== Helm release status ==\n%s\n\n", status); err != nil {
+			return err
+		}
+	}
+	if pods := strings.TrimSpace(diagnosis.Pods); pods != "" {
+		if _, err := fmt.Fprintf(runCtx.Stdout, "== Pods ==\n%s\n\n", pods); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func writeDoctorInspection(runCtx eruncommon.Context, target eruncommon.OpenResult, req eruncommon.ShellLaunchParams) error {

@@ -4,7 +4,7 @@ title: erun doctor
 
 # `erun doctor`
 
-Inspect the local ERun configuration or the runtime pod state and offer recovery actions for any problems it finds.
+Inspect the local ERun configuration or the runtime pod state, report why a deploy may have failed, and offer recovery actions for any problems it finds.
 
 ## Synopsis
 
@@ -14,7 +14,9 @@ erun doctor [TENANT] [ENVIRONMENT] [flags]
 
 ## What it checks
 
-`erun doctor` runs a different check set depending on context. From your laptop, it validates the per-user tenant + env config, the kubeconfig context, the runtime pod's reachability, and the project root. Inside the runtime pod (detected via `ERUN_REPO_REMOTE=true`) it inspects the bootstrap marker, the in-pod project root, the git checkout, the SSH keypair, and the CodeCommit RSA key when applicable.
+`erun doctor` runs a different check set depending on context. From your laptop, it validates the per-user tenant + env config, the kubeconfig context, the runtime pod's reachability, and the project root, and reports why a deploy may have failed: the helm release status and the runtime namespace's pods (read-only — it never touches the release). Inside the runtime pod (detected via `ERUN_REPO_REMOTE=true`) it inspects the bootstrap marker, the in-pod project root, the git checkout, the SSH keypair, and the CodeCommit RSA key when applicable.
+
+When the deploy diagnosis shows a stuck pending release or a failed image pull, the fix is to re-run `erun deploy --force` (rebuild and redeploy) or clear the pending release — the desktop app offers both as one-click buttons on the failed deploy in its [Activities panel](/desktop/overview#control-panel).
 
 For the full per-check id catalogue and the offered recovery actions, see [Agent reference · CLI flag spec · `erun doctor`](/agent-reference/cli-flags#erun-doctor).
 
@@ -98,6 +100,7 @@ The check format is fixed (`<category>: <name> <status> <detail>`); machine-read
 | Failure | Behaviour |
 |---|---|
 | Root config missing or corrupted. | Reports it; with `--repair-config` offers to restore from a dated backup, otherwise leaves it untouched. |
+| Helm release missing or cluster unreachable during deploy diagnosis. | The helm/pod probe output (including the error) is shown as part of the diagnosis and `doctor` continues; the diagnosis is read-only, so nothing is changed. |
 | Prune not confirmed and no `--prune-*` flag. | No Docker state is touched — prunes run only on confirmation or with the matching flag. |
 | Run inside a runtime pod with a complete init. | Reports "nothing to finish" and exits 0. |
 | Cluster unreachable. | Reports the pod check as failed; config and workspace checks still run. |
