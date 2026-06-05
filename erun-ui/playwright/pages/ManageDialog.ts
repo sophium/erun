@@ -126,4 +126,37 @@ export class ManageDialog {
     // so it is queried at the document root rather than inside the dialog.
     await this.page.getByRole('option', { name: mode }).click();
   }
+
+  // cloudAliasSelect targets the "Cloud alias" SelectField on the General tab.
+  // It only renders when the tenant has at least one cloud alias configured;
+  // otherwise an EmptyState renders instead, so specs check visibility first.
+  cloudAliasSelect(): Locator {
+    return this.locator().locator('#environment-config-cloudprovideralias');
+  }
+
+  async cloudAliasSelectVisible(): Promise<boolean> {
+    return this.cloudAliasSelect()
+      .isVisible()
+      .catch(() => false);
+  }
+
+  async cloudAliasSelectedValue(): Promise<string> {
+    return (await this.cloudAliasSelect().textContent())?.trim() ?? '';
+  }
+
+  async openCloudAliasOptions(): Promise<void> {
+    await this.cloudAliasSelect().click();
+  }
+
+  // cloudAliasNoneOption targets the "— None —" clear entry (issue #211). The
+  // Radix listbox is portal'd to the document body, so it is queried at the
+  // page root rather than inside the dialog.
+  cloudAliasNoneOption(): Locator {
+    return this.page.getByRole('option', { name: '— None —' });
+  }
+
+  async chooseCloudAliasNone(): Promise<void> {
+    await this.openCloudAliasOptions();
+    await this.cloudAliasNoneOption().click();
+  }
 }
