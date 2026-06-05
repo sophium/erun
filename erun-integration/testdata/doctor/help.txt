@@ -1,6 +1,6 @@
 Diagnose and repair an environment's runtime and config.
 
-Reports why a deploy may have failed (helm release status and the runtime pods, read-only). When the release looks unhealthy it offers recovery: clear a stuck pending helm release, or roll back to the last successful revision. It also prunes Docker images, build cache, or stopped containers; restores or fixes the root erun config; and finishes an interrupted remote init. Recovery and rollback mutate the live release; each action prompts before running unless you pass its matching flag.
+Reports why a deploy may have failed (helm release status and the runtime pods, read-only). When the release looks unhealthy it recommends the one recovery that fits — clear a stuck pending helm release, or roll back to the last successful revision — and prompts before running it. It also prunes Docker images, build cache, or stopped containers; restores or fixes the root erun config; and finishes an interrupted remote init. The recovery actions mutate the live release; run one directly with --clear-pending-helm or --rollback (the two are alternatives — pass only one).
 
 Usage:
   erun doctor [tenant] [environment] [flags]

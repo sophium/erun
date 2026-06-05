@@ -2,6 +2,7 @@ package erunmcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -65,6 +66,9 @@ func doctorTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 }
 
 func runDoctorToolCommand(runtime RuntimeConfig, input DoctorInput, runCtx eruncommon.Context) (*DoctorRootConfigReport, error) {
+	if input.ClearPendingHelm && input.Rollback {
+		return nil, errors.New("clearPendingHelm and rollback are alternative recoveries; request only one")
+	}
 	report, fatal, err := runDoctorRootConfigToolFlow(runtime, input, runCtx)
 	if err != nil {
 		return report, err

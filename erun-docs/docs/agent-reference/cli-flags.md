@@ -263,7 +263,9 @@ Each check returns one of `ok`, `missing`, `error` (parse failure, permission de
 
 ### Deploy recovery actions {#deploy-recovery-actions}
 
-After the read-only deploy diagnosis (helm release status + runtime pods), `doctor` offers two recovery actions that **mutate the live release**. Each is gated: it runs non-interactively with its flag, or — when no flag is set — it is offered as a confirm prompt **only when the diagnosis shows the release is unhealthy** (helm status is empty, or not `status: deployed`). A healthy env is never offered a destructive rollback. Under `--dry-run` the exact command is traced and nothing runs.
+After the read-only deploy diagnosis (helm release status + runtime pods), `doctor` can run two recovery actions that **mutate the live release**. They are **alternative** fixes for different failure modes, not additive steps — clearing a pending lock leaves the release at its last deployed revision, so a rollback run straight after would step back a further revision. `--clear-pending-helm` and `--rollback` are therefore mutually exclusive; passing both aborts with `--clear-pending-helm and --rollback are alternative recoveries; pass only one` (exit 1, nothing runs).
+
+Gating: each action runs non-interactively with its flag. With **no flag**, `doctor` inspects the helm status and prompts for the **single recommended** action — `pending-install`/`pending-upgrade`/`pending-rollback` → clear pending; a present-but-unhealthy release (`failed`, `superseded`, …) → rollback; a healthy (`status: deployed`), missing (`not found`), or unreadable release → no destructive prompt at all. It never offers both at once. Under `--dry-run` the exact command is traced and nothing runs.
 
 | Action | Flag | Command run | Use when |
 |---|---|---|---|

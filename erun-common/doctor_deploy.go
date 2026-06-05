@@ -81,11 +81,34 @@ const (
 	DeployRecoveryRollback DeployRecoveryAction = "rollback"
 )
 
-// DeployRecoveryActions lists the helm-level recovery actions doctor offers.
-// Force rebuild & redeploy is driven by the CLI doctor through the deploy flow
-// (it is not a single helm command) and so is not in this list.
-func DeployRecoveryActions() []DeployRecoveryAction {
-	return []DeployRecoveryAction{DeployRecoveryClearPendingHelm, DeployRecoveryRollback}
+// RecommendedDeployRecovery picks the single recovery action that fits the
+// diagnosis so `erun doctor` recommends one fix instead of offering every
+// action at once. Clearing a stuck pending lock and rolling back are
+// alternative fixes for different failure modes, not additive steps: clearing
+// pending leaves the release at its last deployed revision, so a rollback run
+// straight after would step back a further revision. The bool is false when no
+// helm-level recovery applies — a healthy release, or no release to act on (a
+// missing release is recovered by `erun deploy --force`, not by helm).
+func RecommendedDeployRecovery(diagnosis DeployDiagnosisResult) (DeployRecoveryAction, bool) {
+	status := strings.ToLower(strings.TrimSpace(diagnosis.HelmStatus))
+	switch {
+	case status == "":
+		// No helm output at all (cluster unreachable / nothing to read).
+		return "", false
+	case strings.Contains(status, "not found"):
+		// `helm status` on a release that was never installed: deploy, not roll back.
+		return "", false
+	case strings.Contains(status, "pending-install"),
+		strings.Contains(status, "pending-upgrade"),
+		strings.Contains(status, "pending-rollback"):
+		return DeployRecoveryClearPendingHelm, true
+	case strings.Contains(status, "status: deployed"):
+		// Helm considers the release healthy; offer no destructive recovery.
+		return "", false
+	default:
+		// Release exists but is failed/superseded/unknown: roll back to the last good revision.
+		return DeployRecoveryRollback, true
+	}
 }
 
 // DeployRecoveryActionPromptLabel is the interactive confirm shown before the

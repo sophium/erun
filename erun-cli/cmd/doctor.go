@@ -41,15 +41,19 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 		Short: "Diagnose and repair an environment's runtime and config",
 		Long: "Diagnose and repair an environment's runtime and config.\n\n" +
 			"Reports why a deploy may have failed (helm release status and the runtime pods, " +
-			"read-only). When the release looks unhealthy it offers recovery: clear a stuck pending " +
-			"helm release, or roll back to the last successful revision. It also prunes Docker " +
-			"images, build cache, or stopped containers; restores or fixes the root erun config; and " +
-			"finishes an interrupted remote init. Recovery and rollback mutate the live release; each " +
-			"action prompts before running unless you pass its matching flag.",
+			"read-only). When the release looks unhealthy it recommends the one recovery that fits — " +
+			"clear a stuck pending helm release, or roll back to the last successful revision — and " +
+			"prompts before running it. It also prunes Docker images, build cache, or stopped " +
+			"containers; restores or fixes the root erun config; and finishes an interrupted remote " +
+			"init. The recovery actions mutate the live release; run one directly with --clear-pending-helm " +
+			"or --rollback (the two are alternatives — pass only one).",
 		Args:          cobra.MaximumNArgs(2),
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateDoctorRecoveryFlags(options); err != nil {
+				return err
+			}
 			return runDoctorCommand(commandContext(cmd), resolveOpen, configStore, cloudDeps, cloudContextDeps, promptRunner, options, args)
 		},
 	}
@@ -124,6 +128,16 @@ func doctorOnlyRepairConfig(options doctorOptions) bool {
 		!options.pruneContainers &&
 		!options.repairJetBrainsGateway &&
 		!options.finishRemoteInit
+}
+
+// validateDoctorRecoveryFlags rejects asking for both helm-level recoveries at
+// once: clearing a pending lock and rolling back are alternative fixes, and
+// running both in one invocation steps the release back a revision too far.
+func validateDoctorRecoveryFlags(options doctorOptions) error {
+	if options.clearPendingHelm && options.rollback {
+		return errors.New("--clear-pending-helm and --rollback are alternative recoveries; pass only one")
+	}
+	return nil
 }
 
 func runDoctorCleanupActions(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, options doctorOptions) error {
@@ -215,41 +229,34 @@ func runDeployRecoveryActions(ctx common.Context, promptRunner PromptRunner, req
 	return nil
 }
 
+// selectedDeployRecoveryActions resolves which recovery to run. Explicit flags
+// win (and are mutually exclusive — see validateDoctorRecoveryFlags). With no
+// flag, the interactive path offers a single confirm for the one recovery that
+// fits the diagnosis rather than asking about every action in turn: clearing a
+// pending lock and rolling back are alternative fixes, and running both is
+// wrong.
 func selectedDeployRecoveryActions(promptRunner PromptRunner, req common.ShellLaunchParams, options doctorOptions, diagnosis common.DeployDiagnosisResult, dryRun bool) ([]common.DeployRecoveryAction, error) {
-	selected := make([]common.DeployRecoveryAction, 0, 2)
 	if options.clearPendingHelm {
-		selected = append(selected, common.DeployRecoveryClearPendingHelm)
+		return []common.DeployRecoveryAction{common.DeployRecoveryClearPendingHelm}, nil
 	}
 	if options.rollback {
-		selected = append(selected, common.DeployRecoveryRollback)
+		return []common.DeployRecoveryAction{common.DeployRecoveryRollback}, nil
 	}
-	// Explicit flags win; otherwise only prompt when the release looks
-	// unhealthy so a healthy env is never offered a destructive rollback.
-	if len(selected) > 0 || dryRun || promptRunner == nil || !deployLooksUnhealthy(diagnosis) {
-		return selected, nil
+	if dryRun || promptRunner == nil {
+		return nil, nil
 	}
-	for _, action := range common.DeployRecoveryActions() {
-		ok, err := confirmPrompt(promptRunner, common.DeployRecoveryActionPromptLabel(action, req))
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			selected = append(selected, action)
-		}
+	action, ok := common.RecommendedDeployRecovery(diagnosis)
+	if !ok {
+		return nil, nil
 	}
-	return selected, nil
-}
-
-// deployLooksUnhealthy reports whether the diagnosis indicates the runtime
-// release is not in a healthy "deployed" state — the gate for offering the
-// destructive recovery actions interactively. An empty status (release
-// missing or cluster unreachable) counts as unhealthy.
-func deployLooksUnhealthy(diagnosis common.DeployDiagnosisResult) bool {
-	status := strings.ToLower(strings.TrimSpace(diagnosis.HelmStatus))
-	if status == "" {
-		return true
+	confirmed, err := confirmPrompt(promptRunner, common.DeployRecoveryActionPromptLabel(action, req))
+	if err != nil {
+		return nil, err
 	}
-	return !strings.Contains(status, "status: deployed")
+	if !confirmed {
+		return nil, nil
+	}
+	return []common.DeployRecoveryAction{action}, nil
 }
 
 func writeDeployDiagnosis(ctx common.Context, diagnosis common.DeployDiagnosisResult) error {

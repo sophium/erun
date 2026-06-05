@@ -1,0 +1,2 @@
+audit: erun doctor --clear-pending-helm --dry-run --rollback team dev
+--clear-pending-helm and --rollback are alternative recoveries; pass only one
