@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -138,7 +139,7 @@ func resolveReleaseSpec(ctx Context, findProjectRoot ProjectFinderFunc, loadProj
 	if err != nil {
 		return ReleaseSpec{}, err
 	}
-	artifacts, err := discoverReleaseArtifacts(inputs)
+	artifacts, err := discoverReleaseArtifacts(ctx, inputs)
 	if err != nil {
 		return ReleaseSpec{}, err
 	}
@@ -669,13 +670,13 @@ func resolveReleaseGitState(ctx Context, projectRoot string, resolveBranch, reso
 	return branch, commit, nil
 }
 
-func discoverReleaseArtifacts(inputs releaseInputs) (releaseArtifacts, error) {
+func discoverReleaseArtifacts(ctx Context, inputs releaseInputs) (releaseArtifacts, error) {
 	charts, fileUpdates, err := discoverReleaseCharts(inputs.ReleaseRoot, inputs.Version)
 	if err != nil {
 		return releaseArtifacts{}, err
 	}
 	artifacts := releaseArtifacts{Charts: charts, FileUpdates: fileUpdates}
-	if err := discoverStableReleaseArtifacts(inputs, &artifacts); err != nil {
+	if err := discoverStableReleaseArtifacts(ctx, inputs, &artifacts); err != nil {
 		return releaseArtifacts{}, err
 	}
 	images, err := discoverReleaseDockerImages(inputs.ProjectRoot, inputs.ReleaseRoot, inputs.VersionFilePath, inputs.Version)
@@ -692,9 +693,12 @@ func discoverReleaseArtifacts(inputs releaseInputs) (releaseArtifacts, error) {
 	return artifacts, nil
 }
 
-func discoverStableReleaseArtifacts(inputs releaseInputs, artifacts *releaseArtifacts) error {
+func discoverStableReleaseArtifacts(ctx Context, inputs releaseInputs, artifacts *releaseArtifacts) error {
 	if inputs.Mode != ReleaseModeStable {
 		return nil
+	}
+	if err := validateStableScoopManifest(ctx, inputs.ProjectRoot); err != nil {
+		return err
 	}
 	packagingUpdates, syncSpec, err := discoverStableReleasePackaging(inputs.ProjectRoot, inputs.Version)
 	if err != nil {
@@ -702,6 +706,72 @@ func discoverStableReleaseArtifacts(inputs releaseInputs, artifacts *releaseArti
 	}
 	artifacts.FileUpdates = append(artifacts.FileUpdates, packagingUpdates...)
 	artifacts.PackagingSync = syncSpec
+	return nil
+}
+
+// requiredScoopBinaries are the executables the Windows Scoop install must put
+// on PATH. erun-app.exe is load-bearing: `erun app`, Homebrew, and Scoop
+// launcher wiring all depend on that artifact name.
+var requiredScoopBinaries = []string{"erun.exe", "emcp.exe", "eapi.exe", "erun-app.exe"}
+
+// validateStableScoopManifest fails the stable release when the checked-in
+// Scoop manifest has drifted from the invariants the Windows install depends
+// on, so a malformed bucket/erun.json is caught before the release publishes it
+// rather than at a user's `scoop install`. No-op when the project ships no
+// manifest. Runs during release resolution so the bailout precedes any git
+// mutation; the attempt is traced so --dry-run shows the check.
+func validateStableScoopManifest(ctx Context, projectRoot string) error {
+	scoopPath := filepath.Join(projectRoot, "bucket", "erun.json")
+	if !fileExists(scoopPath) {
+		return nil
+	}
+	ctx.Trace("release: validating scoop manifest " + scoopPath)
+	return checkScoopManifestInvariants(scoopPath)
+}
+
+// checkScoopManifestInvariants asserts the structural facts the Windows build
+// relies on: the MinGW C-compiler dependency plus its CGO/Wails prerequisite
+// wording (and the absence of the stale Fyne wording), a non-empty installer
+// script, and all four shipped executables in bin. It reports every violation
+// at once so a single failed release names everything that needs fixing.
+func checkScoopManifestInvariants(scoopPath string) error {
+	data, err := os.ReadFile(scoopPath)
+	if err != nil {
+		return err
+	}
+	var manifest struct {
+		Depends   []string `json:"depends"`
+		Installer struct {
+			Script []string `json:"script"`
+		} `json:"installer"`
+		Bin []string `json:"bin"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return fmt.Errorf("scoop manifest %s: %w", scoopPath, err)
+	}
+
+	var problems []string
+	if !slices.Contains(manifest.Depends, "mingw") {
+		problems = append(problems, `depends must include "mingw" for the Wails CGO build`)
+	}
+	if len(manifest.Installer.Script) == 0 {
+		problems = append(problems, "installer.script must not be empty")
+	}
+	script := strings.Join(manifest.Installer.Script, "\n")
+	if !strings.Contains(script, "MinGW for the Wails CGO build") {
+		problems = append(problems, "installer.script must state the MinGW/Wails CGO prerequisite")
+	}
+	if strings.Contains(script, "Fyne") {
+		problems = append(problems, "installer.script must not reference the stale Fyne prerequisite")
+	}
+	for _, bin := range requiredScoopBinaries {
+		if !slices.Contains(manifest.Bin, bin) {
+			problems = append(problems, "bin must include "+bin)
+		}
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("scoop manifest %s is invalid: %s", scoopPath, strings.Join(problems, "; "))
+	}
 	return nil
 }
 
