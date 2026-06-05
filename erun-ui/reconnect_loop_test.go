@@ -375,3 +375,82 @@ func TestTrackExitForLoopGuardTripsAfterCap(t *testing.T) {
 			reconnectLoopMaxExits+1, reconnectLoopMaxExits)
 	}
 }
+
+// TestTryReconnectRefusesAfterDeployFailure pins #447: when an env's open
+// ended in a deploy failure (signalReady recorded an error from
+// `==> Deploy failed`), tryReconnect must NOT respawn. Respawning re-runs
+// `erun open`, re-deploying a broken env — and because every tab (ERun + AI)
+// reconnects independently, that becomes a parallel re-deploy storm. The user
+// recovers via the failed-deploy card actions or by reopening the env.
+func TestTryReconnectRefusesAfterDeployFailure(t *testing.T) {
+	emits := newCapturedEmits()
+	app := &App{}
+	app.SetEmitter(emits.fn())
+
+	respawned := false
+	managed := &managedTerminal{
+		serial:      7,
+		readyClosed: true,
+		readyErr:    errors.New("==> Deploy failed after 4s"),
+		respawn: func() (terminalSession, error) {
+			respawned = true
+			return newStubTerminalSession(), nil
+		},
+	}
+
+	if app.tryReconnect(managed, "exit code 1") {
+		t.Fatal("tryReconnect must refuse to respawn after a deploy failure")
+	}
+	if respawned {
+		t.Fatal("respawn must not run after a deploy failure")
+	}
+	if !sawDeployFailedMarker(emits) {
+		t.Fatal("expected the deploy-failed marker on the terminal-output channel")
+	}
+}
+
+// TestTryReconnectAfterHealthyDropRespawns is the counterpart: a session that
+// reached a healthy ready (readyErr == nil) and then dropped is a transient
+// drop and must still reconnect. Its `erun open` finds the deploy already
+// current and skips it, so no re-deploy storm.
+func TestTryReconnectAfterHealthyDropRespawns(t *testing.T) {
+	emits := newCapturedEmits()
+	app := &App{}
+	app.SetEmitter(emits.fn())
+
+	respawned := false
+	managed := &managedTerminal{
+		serial:      8,
+		readyClosed: true,
+		readyErr:    nil,
+		respawn: func() (terminalSession, error) {
+			respawned = true
+			return newStubTerminalSession(), nil
+		},
+	}
+
+	if !app.tryReconnect(managed, "transient drop") {
+		t.Fatal("a healthy session that dropped should reconnect")
+	}
+	if !respawned {
+		t.Fatal("respawn should run for a healthy dropped session")
+	}
+}
+
+func sawDeployFailedMarker(emits *capturedEmits) bool {
+	const needle = "deploy failed — not retrying"
+	for _, evt := range emits.events(terminalOutputEvent) {
+		payload, ok := evt.(terminalOutputPayload)
+		if !ok {
+			continue
+		}
+		data, err := base64.StdEncoding.DecodeString(payload.Data)
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(data), needle) {
+			return true
+		}
+	}
+	return false
+}
