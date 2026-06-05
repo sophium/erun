@@ -40,22 +40,29 @@ test('failed deploy card reveals captured output and offers a copyable report', 
 
   const drawer = app.activityDrawer.locator();
 
+  // Scope to this entry's own card. The headless backend reflects the dev's
+  // real ~/.erun history, which may already contain other failed activities
+  // (each now rendering its own "Show output"/"Copy failure report" controls),
+  // so we must not match across cards. "petios/rihards-develop 1.0.80" is
+  // unique to the synthetic entry above.
+  const card = drawer.locator('article').filter({ hasText: 'petios/rihards-develop' }).first();
+
   // The one-line summary stays first-class.
-  await expect(
-    drawer.getByText('==> Deploy failed after 4s', { exact: false }).first(),
-  ).toBeVisible({ timeout: 5000 });
+  await expect(card.getByText('==> Deploy failed after 4s', { exact: false })).toBeVisible({
+    timeout: 5000,
+  });
 
   // Captured output is collapsed by default and revealed via the disclosure.
   // "UPGRADE FAILED" lives only in the captured output, never in the summary.
-  await expect(drawer.getByText('UPGRADE FAILED', { exact: false })).toHaveCount(0);
-  await drawer.getByRole('button', { name: 'Show output' }).click();
-  await expect(drawer.getByText('UPGRADE FAILED', { exact: false })).toBeVisible();
+  await expect(card.getByText('UPGRADE FAILED', { exact: false })).toHaveCount(0);
+  await card.getByRole('button', { name: 'Show output' }).click();
+  await expect(card.getByText('UPGRADE FAILED', { exact: false })).toBeVisible();
 
   // The copy action is present and confirms the copy without depending on
   // clipboard read permissions (copyToClipboard swallows unavailable-API
   // errors, so the "Copied" flip is the reliable observable signal).
-  const copyButton = drawer.getByRole('button', { name: 'Copy failure report' });
+  const copyButton = card.getByRole('button', { name: 'Copy failure report' });
   await expect(copyButton).toBeVisible();
   await copyButton.click();
-  await expect(drawer.getByRole('button', { name: 'Copied' })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Copied' })).toBeVisible();
 });
