@@ -202,18 +202,35 @@ function scheduleReviewDiffRefresh(
 
 // Reconnect dialog ============================================================
 
+const idleReconnect = () => ({
+  status: 'idle' as const,
+  tenant: '',
+  environment: '',
+  lines: [] as string[],
+  error: '',
+});
+
 export const requestReconnect = (): AppThunk => (dispatch, getState) => {
-  if (!getState().selection.selected) {
+  const selection = getState().selection.selected;
+  if (!selection) {
     return;
   }
-  dispatch(setReconnect({ status: 'confirm', lastLine: '', error: '' }));
+  dispatch(
+    setReconnect({
+      status: 'confirm',
+      tenant: selection.tenant,
+      environment: selection.environment,
+      lines: [],
+      error: '',
+    }),
+  );
 };
 
 export const cancelReconnect = (): AppThunk => (dispatch, getState) => {
   if (getState().review.reconnect.status === 'running') {
     return;
   }
-  dispatch(setReconnect({ status: 'idle', lastLine: '', error: '' }));
+  dispatch(setReconnect(idleReconnect()));
 };
 
 export const confirmReconnect = (): AppThunk<Promise<void>> => async (dispatch, getState) => {
@@ -222,19 +239,41 @@ export const confirmReconnect = (): AppThunk<Promise<void>> => async (dispatch, 
   if (!selection || state.review.reconnect.status === 'running') {
     return;
   }
-  dispatch(setReconnect({ status: 'running', lastLine: '', error: '' }));
+  dispatch(
+    setReconnect({
+      status: 'running',
+      tenant: selection.tenant,
+      environment: selection.environment,
+      lines: [],
+      error: '',
+    }),
+  );
   try {
     await dispatch(sessionApi.endpoints.reconnectMCP.initiate(selection)).unwrap();
-    dispatch(setReconnect({ status: 'idle', lastLine: '', error: '' }));
+    dispatch(setReconnect(idleReconnect()));
     await dispatch(loadReviewDiff());
   } catch (error: unknown) {
-    const lastLine = getState().review.reconnect.lastLine;
+    // Preserve the env scope and the accumulated lines so the user can see
+    // what the redeploy was doing when it failed.
+    const reconnect = getState().review.reconnect;
     dispatch(
       setReconnect({
         status: 'error',
-        lastLine,
+        tenant: reconnect.tenant,
+        environment: reconnect.environment,
+        lines: reconnect.lines,
         error: readError(error),
       }),
     );
   }
+};
+
+// dismissReconnect closes the error surface after the user has read it. Safe to
+// call from anywhere because cancelReconnect refuses to run while status is
+// 'running'; dismissReconnect mirrors that for the terminal 'error' state.
+export const dismissReconnect = (): AppThunk => (dispatch, getState) => {
+  if (getState().review.reconnect.status !== 'error') {
+    return;
+  }
+  dispatch(setReconnect(idleReconnect()));
 };

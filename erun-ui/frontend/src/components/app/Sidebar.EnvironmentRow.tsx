@@ -122,14 +122,11 @@ function OpenEnvDot({
   );
 }
 
-export function EnvironmentRow({
-  tenantName,
-  environmentName,
-}: {
-  tenantName: string;
-  environmentName: string;
-}): React.ReactElement {
-  const dispatch = useAppDispatch();
+// useEnvironmentRowSelectors batches the per-env state reads the sidebar
+// row needs. Each selector returns a primitive (or a memoised array) so
+// React-Redux's default equality short-circuits row re-renders when
+// unrelated slice churn happens.
+function useEnvironmentRowSelectors(tenantName: string, environmentName: string) {
   const selectedSelection = useAppSelector((state) => state.selection.selected);
   const tenants = useAppSelector((state) => state.tenants.tenants);
   const isOpening = useAppSelector(
@@ -138,10 +135,8 @@ export function EnvironmentRow({
   // runningCommand is the first 'running' activity command attached to
   // this env (deploy / init / sshd-init / doctor / build / push /
   // release). Picking the first entry keeps the selector primitive-
-  // returning so React-Redux's default equality short-circuits row
-  // re-renders when unrelated activity churns. The activity slice is
-  // additive, so once one entry transitions to running the row stays
-  // busy until its status flips.
+  // returning so the activity slice's additive churn does not re-render
+  // every row.
   const runningCommand = useAppSelector((state) => {
     for (const entry of state.activity.entries) {
       if (
@@ -162,9 +157,7 @@ export function EnvironmentRow({
   );
   // isOpen = the user has opened this env at least once and at least
   // one of its tabs is still alive. Either debug-mode variant of the
-  // key counts — the dot is per-env, not per-debug-mode. Selector
-  // returns a primitive so React-Redux's default equality short-
-  // circuits row re-renders when unrelated tab maps churn.
+  // key counts — the dot is per-env, not per-debug-mode.
   const isOpen = useAppSelector((state) => {
     const baseKey = selectionKey({ tenant: tenantName, environment: environmentName });
     const debugKey = selectionKey({
@@ -177,6 +170,37 @@ export function EnvironmentRow({
       (state.terminal.tabsByEnv[debugKey]?.length ?? 0) > 0
     );
   });
+  // reconnecting flips the row's busy indicator while the review-pane
+  // reconnect/redeploy is in flight for THIS env. Other rows stay
+  // interactive and unspinning (Nielsen #1 visibility of system status
+  // without blocking Nielsen #3 user control & freedom).
+  const reconnecting = useAppSelector(
+    (state) =>
+      state.review.reconnect.status === 'running' &&
+      state.review.reconnect.tenant === tenantName &&
+      state.review.reconnect.environment === environmentName,
+  );
+  return {
+    selectedSelection,
+    tenants,
+    isOpening,
+    runningCommand,
+    aiBusy,
+    isOpen,
+    reconnecting,
+  };
+}
+
+export function EnvironmentRow({
+  tenantName,
+  environmentName,
+}: {
+  tenantName: string;
+  environmentName: string;
+}): React.ReactElement {
+  const dispatch = useAppDispatch();
+  const { selectedSelection, tenants, isOpening, runningCommand, aiBusy, isOpen, reconnecting } =
+    useEnvironmentRowSelectors(tenantName, environmentName);
   const { selected, busy, busyLabel, isLocal, selection } = deriveEnvironmentRow(
     tenantName,
     environmentName,
@@ -185,6 +209,7 @@ export function EnvironmentRow({
     isOpening,
     runningCommand,
     aiBusy,
+    reconnecting,
   );
 
   const rowLabel = `${tenantName} / ${environmentName}${isLocal ? ' (local)' : ''}`;

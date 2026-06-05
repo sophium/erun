@@ -42,24 +42,26 @@ export function deriveEnvironmentRow(
   isOpening: boolean,
   runningCommand: string,
   aiBusy: boolean,
+  reconnecting: boolean,
 ): EnvironmentRowDerived {
   const selected =
     selectedSelection?.tenant === tenantName && selectedSelection.environment === environmentName;
   // busy reflects the per-env opening lifecycle AND any running activity
   // command (deploy, init, sshd init, doctor, ...) queued against the
   // env, AND the debounced "AI tab is producing output" signal from
-  // recordAIActivity in the Go terminal layer. Every source is
-  // independent of which env is currently selected, so concurrent work
-  // on multiple envs (a deploy here + a Claude generation there)
-  // surfaces a spinner on every row that's actually doing something —
-  // not just the one in the active terminal.
-  const busy = isOpening || runningCommand !== '' || aiBusy;
+  // recordAIActivity in the Go terminal layer, AND the in-flight
+  // reconnect (review-pane redeploy) scoped to this env. Every source
+  // is independent of which env is currently selected, so concurrent
+  // work on multiple envs surfaces a spinner on every row that's
+  // actually doing something — not just the one in the active terminal.
+  const busy = isOpening || runningCommand !== '' || aiBusy || reconnecting;
   const busyLabel = environmentRowBusyLabel(
     tenantName,
     environmentName,
     isOpening,
     runningCommand,
     aiBusy,
+    reconnecting,
   );
   const environment = tenants
     .find((tenant) => tenant.name === tenantName)
@@ -80,6 +82,7 @@ function environmentRowBusyLabel(
   isOpening: boolean,
   runningCommand: string,
   aiBusy: boolean,
+  reconnecting: boolean,
 ): string {
   const target = `${tenantName} / ${environmentName}`;
   if (runningCommand !== '') {
@@ -88,6 +91,9 @@ function environmentRowBusyLabel(
   }
   if (isOpening) {
     return `Opening ${target}`;
+  }
+  if (reconnecting) {
+    return `Reconnecting ${target}`;
   }
   if (aiBusy) {
     return `AI tab working on ${target}`;

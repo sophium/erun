@@ -12,6 +12,7 @@ import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView'
 import { MainPane } from '@/components/app/MainPane';
 import { ManageDialogView } from '@/components/app/ManageDialogView';
 import { ReconnectDialog } from '@/components/app/ReconnectDialog';
+import { ReconnectStatusPanel } from '@/components/app/ReconnectStatusPanel';
 import { ResizeHandle } from '@/components/app/ResizeHandle';
 import { Sidebar } from '@/components/app/Sidebar';
 import { TenantDialogView } from '@/components/app/TenantDialogView';
@@ -89,6 +90,7 @@ export function App(): React.ReactElement {
         <GlobalConfigDialogView />
         <ManageDialogView />
         <ReconnectDialog />
+        <ReconnectStatusPanel />
         <TenantDialogView />
         <AutoStartPromptDialog />
         <ActivityQueueLauncher

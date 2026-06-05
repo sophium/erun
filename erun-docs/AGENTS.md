@@ -7,10 +7,9 @@ Module-specific guidance for `erun-docs`. Follow the repository root `AGENTS.md`
 - `erun-docs` is the public product documentation site for ERun, served at `https://docs.erunpaas.com`.
 - It is a Docusaurus 3.x app: TypeScript config, Yarn workspaces-style layout, local search plugin (no Algolia), Mermaid for diagrams.
 - This module owns the documentation **content** and the Docusaurus build configuration. It does not contain application behavior.
-- The deploy contract — image, helm chart, and CI wiring — lives outside this module:
-  - Image: `erun-devops/docker/erun-docs/`
+- The deploy contract — image and helm chart — lives outside this module:
+  - Image: `erun-devops/docker/erun-docs/` (its Docusaurus builder stage runs `yarn install` and `yarn build`, so a broken site fails `erun build`)
   - Helm chart: `erun-devops/k8s/erun-docs/`
-  - CI workflow: `.github/workflows/erun-docs.yml`
 
 ## Hosting contract
 
