@@ -563,5 +563,15 @@ export class TerminalController {
     // buffer in its own intentional state.
     this.liveCursorState = bufferCursorVisibility(chunks);
     this.cancelCursorRestoreTimer();
+    // After resetTerminal() + bulk replay, the viewport can settle
+    // mid-scrollback because xterm parses write() calls asynchronously on its
+    // own timer, so a synchronous scroll here would run before the chunks are
+    // laid out. Enqueue an empty write whose completion callback fires only
+    // after every replayed chunk has flushed (xterm runs write callbacks in
+    // order), then scroll to the live prompt — so switching sessions always
+    // lands at the bottom rather than in the middle of history (issue #438).
+    this.terminal?.write('', () => {
+      this.terminal?.scrollToBottom();
+    });
   }
 }

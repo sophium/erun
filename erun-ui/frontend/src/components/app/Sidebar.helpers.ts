@@ -1,5 +1,5 @@
 import type { AppState } from '@/app/state';
-import type { UISelection } from '@/types';
+import type { UIEnvironment, UISelection } from '@/types';
 
 // pendingForTenant returns the optimistic selection that is being
 // created right now, when the matching env is not yet in
@@ -24,6 +24,26 @@ export function pendingForTenant(
     return null;
   }
   return selected;
+}
+
+// environmentIsLocal reports whether the env's worktree is mounted from
+// this machine, i.e. a local-agent env. It keys off the resolved
+// environment type (erun-common computes `type` via EnvConfig.ResolvedType()
+// and lists it on every env), not the legacy `remote` flag — a local-agent
+// env created with the new `type` shape leaves `remote` unset, so the old
+// `remote === false` check missed it and dropped the LOCAL badge.
+//
+// The legacy `remote === false` path is kept only as a fallback for when the
+// resolved type is empty (an ambiguous legacy env where ResolvedType() itself
+// falls back to the Remote/Snapshot pair), so unresolved legacy envs keep
+// today's behavior. This drives both the LOCAL badge and the `(local)`
+// accessible-label suffix, which share the flag.
+export function environmentIsLocal(environment: UIEnvironment | undefined): boolean {
+  const resolvedType = environment?.type ?? '';
+  if (resolvedType !== '') {
+    return resolvedType === 'local-agent';
+  }
+  return environment?.remote === false;
 }
 
 export interface EnvironmentRowDerived {
@@ -66,7 +86,7 @@ export function deriveEnvironmentRow(
   const environment = tenants
     .find((tenant) => tenant.name === tenantName)
     ?.environments.find((env) => env.name === environmentName);
-  const isLocal = environment?.remote === false;
+  const isLocal = environmentIsLocal(environment);
   return {
     selected,
     busy,

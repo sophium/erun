@@ -358,7 +358,50 @@ func ParseGitDiff(raw string) DiffResult {
 		result.Summary.Deletions += file.Deletions
 	}
 	result.Tree = BuildDiffTree(result.Files)
+	result.Files = reorderFilesByTree(result.Files, result.Tree)
 	return result
+}
+
+// reorderFilesByTree returns files reordered to follow the file-leaf order of
+// the diff tree (directory-grouped, pre-order DFS). The changed-files list the
+// desktop renders is driven by Tree, while the scrollable diff panel is driven
+// by Files; parsing emits Files in raw `git diff` order (tracked changes in
+// git's order, untracked files appended last), so the two diverge whenever an
+// untracked file belongs to a directory that already appears earlier in the
+// tree. Aligning Files to the tree's leaf order makes both panels agree.
+//
+// Any file whose path is not represented in the tree (e.g. empty/odd paths
+// BuildDiffTree skips) is preserved in its original order and appended at the
+// end so no file is dropped.
+func reorderFilesByTree(files []DiffFile, tree []DiffTreeNode) []DiffFile {
+	if len(files) <= 1 {
+		return files
+	}
+	indexesByPath := make(map[string][]int, len(files))
+	for index, file := range files {
+		indexesByPath[file.Path] = append(indexesByPath[file.Path], index)
+	}
+	ordered := make([]DiffFile, 0, len(files))
+	used := make([]bool, len(files))
+	for _, node := range tree {
+		if node.Type != "file" {
+			continue
+		}
+		for _, index := range indexesByPath[node.Path] {
+			if used[index] {
+				continue
+			}
+			ordered = append(ordered, files[index])
+			used[index] = true
+			break
+		}
+	}
+	for index, file := range files {
+		if !used[index] {
+			ordered = append(ordered, file)
+		}
+	}
+	return ordered
 }
 
 func parseGitDiffFiles(raw string) []DiffFile {

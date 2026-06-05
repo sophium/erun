@@ -1,0 +1,84 @@
+import { AlertTriangle } from 'lucide-react';
+import * as React from 'react';
+
+import { Button } from '@/components/ui/button';
+
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+}
+
+interface ErrorBoundaryState {
+  error: Error | null;
+}
+
+// ErrorBoundary catches uncaught render errors in the app content and renders
+// a recoverable surface instead of an unrecoverable blank screen. A bare
+// React tree unmounts its whole root when a render throws, which left the
+// content area white with no way to recover (issue #436). Surfacing the error
+// with a retry/reload action satisfies Nielsen #1 (visibility of system
+// status) and #9 (help users recognize, diagnose, and recover from errors).
+//
+// React only invokes error-boundary lifecycle on class components, so this is
+// intentionally a class even though the rest of the tree is function
+// components. It scopes the boundary to its children (the content region) so
+// the surrounding chrome — the titlebar — stays interactive while the user
+// recovers.
+export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { error };
+  }
+
+  override componentDidCatch(error: Error, info: React.ErrorInfo): void {
+    // Keep the stack in the devtools console so the specific trigger stays
+    // diagnosable; the rendered surface only shows the user-facing message.
+    console.error('Unhandled error in app content:', error, info.componentStack);
+  }
+
+  private readonly handleRetry = (): void => {
+    this.setState({ error: null });
+  };
+
+  private readonly handleReload = (): void => {
+    window.location.reload();
+  };
+
+  override render(): React.ReactNode {
+    const { error } = this.state;
+    if (!error) {
+      return this.props.children;
+    }
+    return (
+      <div
+        role="alert"
+        className="flex h-full w-full flex-col items-center justify-center gap-4 bg-background p-8 text-center text-foreground"
+      >
+        <AlertTriangle className="size-10 text-destructive" aria-hidden="true" />
+        <div className="space-y-1">
+          <p className="text-base font-medium">Something went wrong</p>
+          <p className="max-w-md text-sm text-muted-foreground">
+            The app hit an unexpected error and couldn’t finish rendering. Try again to recover, or
+            reload the app if the problem persists.
+          </p>
+        </div>
+        {error.message ? (
+          <pre className="max-w-md overflow-x-auto rounded-md bg-muted px-3 py-2 text-left text-xs text-muted-foreground">
+            {error.message}
+          </pre>
+        ) : null}
+        <div className="flex items-center gap-2">
+          <Button variant="default" onClick={this.handleRetry}>
+            Try again
+          </Button>
+          <Button variant="outline" onClick={this.handleReload}>
+            Reload app
+          </Button>
+        </div>
+      </div>
+    );
+  }
+}

@@ -173,6 +173,54 @@ func TestExec(t *testing.T) {
 		}
 	})
 
+	t.Run("diff_files_match_tree_order", func(t *testing.T) {
+		// Exercises eruncommon.ParseGitDiff's reorderFilesByTree: the diff
+		// panel renders Files while the changed-files list renders Tree, so
+		// Files must follow the tree's directory-grouped DFS leaf order. The
+		// divergence appears when an untracked file (appended last in git
+		// order) belongs to a directory whose first file is a tracked change.
+		// Here: dir/a.txt (tracked, modified), root.txt (tracked, modified),
+		// dir/b.txt (untracked). Git order is [dir/a.txt, root.txt, dir/b.txt]
+		// but the tree groups dir/b.txt under dir/, so Files must come out as
+		// [dir/a.txt, dir/b.txt, root.txt] to match the changed-files list.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		if err := os.MkdirAll(filepath.Join(setup.Cwd, "dir"), 0o755); err != nil {
+			t.Fatalf("mkdir dir: %v", err)
+		}
+		mustWriteFile(t, filepath.Join(setup.Cwd, "dir", "a.txt"), "a\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "root.txt"), "root\n")
+		fixture.RunGit(t, setup.Cwd, "add", "dir/a.txt", "root.txt")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "seed tracked files")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "dir", "a.txt"), "a\nedit\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "root.txt"), "root\nedit\n")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "dir", "b.txt"), "b untracked\n")
+		result := erun.Run(t, []string{"exec", "diff", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var parsed common.DiffResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
+		}
+		filePaths := make([]string, 0, len(parsed.Files))
+		for _, f := range parsed.Files {
+			filePaths = append(filePaths, f.Path)
+		}
+		treeLeafPaths := make([]string, 0, len(parsed.Tree))
+		for _, node := range parsed.Tree {
+			if node.Type == "file" {
+				treeLeafPaths = append(treeLeafPaths, node.Path)
+			}
+		}
+		if strings.Join(filePaths, ",") != strings.Join(treeLeafPaths, ",") {
+			t.Errorf("Files order %v does not match tree leaf order %v", filePaths, treeLeafPaths)
+		}
+		if strings.Join(filePaths, ",") != "dir/a.txt,dir/b.txt,root.txt" {
+			t.Errorf("expected Files order [dir/a.txt dir/b.txt root.txt], got %v", filePaths)
+		}
+	})
+
 	t.Run("diff_scope_all_traces_review_base", func(t *testing.T) {
 		// Exercises eruncommon.ResolveGitDiffWithOptions + review-base
 		// resolution: with a follow-up commit and a worktree change,
