@@ -409,6 +409,43 @@ func TestTryReconnectRefusesAfterDeployFailure(t *testing.T) {
 	}
 }
 
+// TestTryReconnectRefusesWhenActivityDeployFailed covers the case the readyErr
+// guard misses: the deploy failed in a *separate* activity and this open exits
+// with an MCP port-forward timeout / pod-not-ready (no `==> Deploy failed`
+// readyErr) while trying to reach the never-ready pod. tryReconnect must still
+// refuse, consulting the activity queue, so the env stops hammering itself.
+func TestTryReconnectRefusesWhenActivityDeployFailed(t *testing.T) {
+	emits := newCapturedEmits()
+	app := &App{}
+	app.SetEmitter(emits.fn())
+	app.activityQueue = newActivityQueueStore(nil, nil)
+	failed, _ := app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "petios", Environment: "rihards-develop"})
+	if _, ok := app.activityQueue.finish(failed.ID, activityQueueStatusFailed, "helm release failed"); !ok {
+		t.Fatal("seed: finish failed deploy returned ok=false")
+	}
+
+	respawned := false
+	managed := &managedTerminal{
+		serial:      9,
+		selection:   uiSelection{Tenant: "petios", Environment: "rihards-develop"},
+		readyClosed: false, // no deploy-failed readyErr — this open timed out reaching the pod
+		respawn: func() (terminalSession, error) {
+			respawned = true
+			return newStubTerminalSession(), nil
+		},
+	}
+
+	if app.tryReconnect(managed, "timed out waiting for MCP port-forward") {
+		t.Fatal("tryReconnect must refuse when the env's latest deploy failed")
+	}
+	if respawned {
+		t.Fatal("respawn must not run when the env's latest deploy failed")
+	}
+	if !sawDeployFailedMarker(emits) {
+		t.Fatal("expected the deploy-failed marker on the terminal-output channel")
+	}
+}
+
 // TestTryReconnectAfterHealthyDropRespawns is the counterpart: a session that
 // reached a healthy ready (readyErr == nil) and then dropped is a transient
 // drop and must still reconnect. Its `erun open` finds the deploy already

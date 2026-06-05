@@ -52,6 +52,44 @@ func TestDeployQueueDuplicateStartsReturnExisting(t *testing.T) {
 	}
 }
 
+func TestLatestDeployFailed(t *testing.T) {
+	store := newTestActivityQueueStore(t)
+	base := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+
+	if store.latestDeployFailed("petios", "rihards-develop") {
+		t.Fatal("no deploy recorded: want false")
+	}
+
+	failed, _ := store.start(activityQueueEntry{ID: "d1", Command: "deploy", Tenant: "petios", Environment: "rihards-develop", StartedAt: base})
+	if _, ok := store.finish(failed.ID, activityQueueStatusFailed, "helm release failed"); !ok {
+		t.Fatal("finish failed deploy returned ok=false")
+	}
+	if !store.latestDeployFailed("petios", "rihards-develop") {
+		t.Fatal("latest deploy failed: want true")
+	}
+
+	// A newer non-deploy activity (an open retry) must not flip the verdict —
+	// the env's latest *deploy* is still the failed one.
+	store.start(activityQueueEntry{ID: "o1", Command: "open", Tenant: "petios", Environment: "rihards-develop", StartedAt: base.Add(time.Minute)})
+	if !store.latestDeployFailed("petios", "rihards-develop") {
+		t.Fatal("newer non-deploy activity must be ignored: want true")
+	}
+
+	// A different env is unaffected.
+	if store.latestDeployFailed("petios", "other") {
+		t.Fatal("different env: want false")
+	}
+
+	// A newer deploy that succeeded (recovery) clears it.
+	recovered, _ := store.start(activityQueueEntry{ID: "d2", Command: "deploy", Tenant: "petios", Environment: "rihards-develop", StartedAt: base.Add(2 * time.Minute)})
+	if _, ok := store.finish(recovered.ID, activityQueueStatusSucceeded, ""); !ok {
+		t.Fatal("finish recovered deploy returned ok=false")
+	}
+	if store.latestDeployFailed("petios", "rihards-develop") {
+		t.Fatal("newer succeeded deploy: want false")
+	}
+}
+
 func TestDeployQueueFinishMovesToHistory(t *testing.T) {
 	store := newTestActivityQueueStore(t)
 	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
