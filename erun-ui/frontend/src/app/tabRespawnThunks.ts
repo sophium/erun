@@ -4,6 +4,7 @@ import { StartAISession, StartLocalSession, StartSession } from '../../wailsjs/g
 import { syncDebugDisplay } from './debugThunks';
 import { readError } from './errors';
 import { hideTerminalMessage, showTerminalMessage } from './notificationThunks';
+import { selectEnvHasFailedDeploy } from './selectors';
 import { registerDebugSession, trackOpenSession } from './slices/sessionsSlice';
 import { setSelectedSessionForEnv, setSessionId } from './slices/terminalSlice';
 import { setTerminalCopyOutput, setTerminalCopyStatus } from './slices/terminalStatusSlice';
@@ -46,6 +47,15 @@ export const maybeRespawnDeadDefaultTab =
     const key = selectionKey(runSelection);
     const tab = state.terminal.tabsByEnv[key]?.find((t) => t.sessionId === sessionId);
     if (!tab || !respawnableDefaultKinds.has(tab.kind)) {
+      return false;
+    }
+    // Refuse the respawn when the env's deploy failed: reopening would re-run
+    // `erun open` and re-deploy the broken env, the same re-deploy storm #447
+    // stops for auto-reconnect. Returning false lets selectTerminalTab show the
+    // dead session's captured failure output and the deploy-failed marker
+    // instead, with recovery left to the failed-deploy card (Run doctor /
+    // Rebuild & redeploy).
+    if (selectEnvHasFailedDeploy(state, selection.tenant, selection.environment)) {
       return false;
     }
     if (sessionId !== state.terminal.sessionId) {

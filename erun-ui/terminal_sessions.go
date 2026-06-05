@@ -1141,7 +1141,7 @@ const (
 	reconnectLoopWindow    = 30 * time.Second
 	reconnectLoopMaxExits  = 2
 	reconnectLoopMarkerANSI = "\r\n\x1b[2;33m── stopped reconnecting after repeated failures — click the environment in the sidebar to retry ──\x1b[0m\r\n"
-	deployFailedMarkerANSI  = "\r\n\x1b[2;33m── deploy failed — not retrying automatically; use Run doctor or Rebuild & redeploy on the failed deploy, or click the environment to retry ──\x1b[0m\r\n"
+	deployFailedMarkerANSI  = "\r\n\x1b[2;33m── deploy failed — not retrying automatically; use Run doctor or Rebuild & redeploy on the failed deploy, or click the environment in the sidebar to retry ──\x1b[0m\r\n"
 )
 
 // trackExitForLoopGuard records the moment the managed PTY exited
