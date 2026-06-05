@@ -17,6 +17,8 @@ type doctorOptions struct {
 	pruneImages             bool
 	pruneBuildCache         bool
 	pruneContainers         bool
+	clearPendingHelm        bool
+	rollback                bool
 	repairJetBrainsGateway  bool
 	repairConfig            bool
 	restoreConfigFromBackup string
@@ -38,14 +40,20 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 		Use:   "doctor [tenant] [environment]",
 		Short: "Diagnose and repair an environment's runtime and config",
 		Long: "Diagnose and repair an environment's runtime and config.\n\n" +
-			"Reports why a deploy may have failed (helm release status and the runtime pods), then " +
-			"offers repairs: prune its Docker images, build cache, or stopped containers; restore or " +
-			"fix the root erun config; and finish an interrupted remote init. The deploy diagnosis is " +
-			"read-only; each repair prompts before running unless you pass its matching flag.",
+			"Reports why a deploy may have failed (helm release status and the runtime pods, " +
+			"read-only). When the release looks unhealthy it recommends the one recovery that fits — " +
+			"clear a stuck pending helm release, or roll back to the last successful revision — and " +
+			"prompts before running it. It also prunes Docker images, build cache, or stopped " +
+			"containers; restores or fixes the root erun config; and finishes an interrupted remote " +
+			"init. The recovery actions mutate the live release; run one directly with --clear-pending-helm " +
+			"or --rollback (the two are alternatives — pass only one).",
 		Args:          cobra.MaximumNArgs(2),
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateDoctorRecoveryFlags(options); err != nil {
+				return err
+			}
 			return runDoctorCommand(commandContext(cmd), resolveOpen, configStore, cloudDeps, cloudContextDeps, promptRunner, options, args)
 		},
 	}
@@ -53,6 +61,8 @@ func newDoctorCmd(resolveOpen func(common.OpenParams) (common.OpenResult, error)
 	cmd.Flags().BoolVar(&options.pruneImages, "prune-images", false, "Prune unused Docker images without prompting")
 	cmd.Flags().BoolVar(&options.pruneBuildCache, "prune-build-cache", false, "Prune unused BuildKit cache without prompting")
 	cmd.Flags().BoolVar(&options.pruneContainers, "prune-containers", false, "Prune stopped Docker containers without prompting")
+	cmd.Flags().BoolVar(&options.clearPendingHelm, "clear-pending-helm", false, "Clear a stuck helm pending-install/upgrade lock for the runtime release without prompting")
+	cmd.Flags().BoolVar(&options.rollback, "rollback", false, "Roll the runtime release back to its last successful revision without prompting")
 	cmd.Flags().BoolVar(&options.repairJetBrainsGateway, "repair-jetbrains-gateway", false, "Clear cached JetBrains Gateway backend metadata for this environment")
 	cmd.Flags().BoolVar(&options.repairConfig, "repair-config", false, "Inspect the root erun config and offer to restore from backup or re-init orphaned cloud provider aliases; stops before running tenant/env cleanup actions")
 	cmd.Flags().StringVar(&options.restoreConfigFromBackup, "restore-config-from-backup", "", "Restore the root erun config from a dated backup non-interactively (YYYY-MM-DD or absolute path)")
@@ -120,9 +130,23 @@ func doctorOnlyRepairConfig(options doctorOptions) bool {
 		!options.finishRemoteInit
 }
 
+// validateDoctorRecoveryFlags rejects asking for both helm-level recoveries at
+// once: clearing a pending lock and rolling back are alternative fixes, and
+// running both in one invocation steps the release back a revision too far.
+func validateDoctorRecoveryFlags(options doctorOptions) error {
+	if options.clearPendingHelm && options.rollback {
+		return errors.New("--clear-pending-helm and --rollback are alternative recoveries; pass only one")
+	}
+	return nil
+}
+
 func runDoctorCleanupActions(ctx common.Context, promptRunner PromptRunner, result common.OpenResult, options doctorOptions) error {
 	req := common.ShellLaunchParamsFromResult(result)
-	if err := runDeployDiagnosis(ctx, req); err != nil {
+	diagnosis, err := runDeployDiagnosis(ctx, req)
+	if err != nil {
+		return err
+	}
+	if err := runDeployRecoveryActions(ctx, promptRunner, req, options, diagnosis); err != nil {
 		return err
 	}
 	inspection, err := common.RunDoctorInspection(ctx, nil, req)
@@ -162,18 +186,77 @@ func writeNoDoctorActionsSelected(ctx common.Context) error {
 const deployDiagnosisGuidance = "If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release."
 
 // runDeployDiagnosis reports the helm release status and runtime pods so the
-// reader can see why a deploy failed before any cleanup. Read-only; the
-// commands are traced for --dry-run.
-func runDeployDiagnosis(ctx common.Context, req common.ShellLaunchParams) error {
+// reader can see why a deploy failed before any recovery. Read-only; the
+// commands are traced for --dry-run. Returns the diagnosis so the caller can
+// decide whether to offer the (destructive) recovery actions.
+func runDeployDiagnosis(ctx common.Context, req common.ShellLaunchParams) (common.DeployDiagnosisResult, error) {
 	diagnosis := common.RunDeployDiagnosis(ctx, req)
 	if ctx.DryRun {
-		return nil
+		return diagnosis, nil
 	}
 	if err := writeDeployDiagnosis(ctx, diagnosis); err != nil {
+		return diagnosis, err
+	}
+	if _, err := fmt.Fprintln(ctx.Stdout, deployDiagnosisGuidance); err != nil {
+		return diagnosis, err
+	}
+	return diagnosis, nil
+}
+
+// runDeployRecoveryActions runs the helm-level recovery actions the user
+// selected (via flag, or via prompt when the diagnosis shows the release is
+// unhealthy). The actions mutate the live release, so prompts are gated on an
+// unhealthy diagnosis — `erun doctor` never offers rollback on a healthy env.
+func runDeployRecoveryActions(ctx common.Context, promptRunner PromptRunner, req common.ShellLaunchParams, options doctorOptions, diagnosis common.DeployDiagnosisResult) error {
+	actions, err := selectedDeployRecoveryActions(promptRunner, req, options, diagnosis, ctx.DryRun)
+	if err != nil {
 		return err
 	}
-	_, err := fmt.Fprintln(ctx.Stdout, deployDiagnosisGuidance)
-	return err
+	for _, action := range actions {
+		if _, err := fmt.Fprintf(ctx.Stdout, "Running: %s\n", common.DeployRecoveryActionDescription(action)); err != nil {
+			return err
+		}
+		output, runErr := common.RunDeployRecovery(ctx, req, action)
+		if runErr != nil {
+			return runErr
+		}
+		if !ctx.DryRun {
+			if err := writeDoctorCommandOutput(ctx, output, ""); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// selectedDeployRecoveryActions resolves which recovery to run. Explicit flags
+// win (and are mutually exclusive — see validateDoctorRecoveryFlags). With no
+// flag, the interactive path offers a single confirm for the one recovery that
+// fits the diagnosis rather than asking about every action in turn: clearing a
+// pending lock and rolling back are alternative fixes, and running both is
+// wrong.
+func selectedDeployRecoveryActions(promptRunner PromptRunner, req common.ShellLaunchParams, options doctorOptions, diagnosis common.DeployDiagnosisResult, dryRun bool) ([]common.DeployRecoveryAction, error) {
+	if options.clearPendingHelm {
+		return []common.DeployRecoveryAction{common.DeployRecoveryClearPendingHelm}, nil
+	}
+	if options.rollback {
+		return []common.DeployRecoveryAction{common.DeployRecoveryRollback}, nil
+	}
+	if dryRun || promptRunner == nil {
+		return nil, nil
+	}
+	action, ok := common.RecommendedDeployRecovery(diagnosis)
+	if !ok {
+		return nil, nil
+	}
+	confirmed, err := confirmPrompt(promptRunner, common.DeployRecoveryActionPromptLabel(action, req))
+	if err != nil {
+		return nil, err
+	}
+	if !confirmed {
+		return nil, nil
+	}
+	return []common.DeployRecoveryAction{action}, nil
 }
 
 func writeDeployDiagnosis(ctx common.Context, diagnosis common.DeployDiagnosisResult) error {

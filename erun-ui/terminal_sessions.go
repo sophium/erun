@@ -1011,6 +1011,19 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 		return false
 	}
 
+	// The readyErr guard above only catches an open that emitted the
+	// `==> Deploy failed` trace. When the deploy failed in a *separate*
+	// activity and this open is just trying to reach the resulting (never
+	// ready) pod, it exits with an MCP port-forward timeout / "pod not ready
+	// while syncing SSH" instead — no deploy-failed readyErr — and would loop
+	// here forever (each respawn re-runs `erun open`, re-times-out, and stacks
+	// another queued open). Consult the activity queue: if the env's latest
+	// deploy failed, refuse for the same reason and leave recovery to the user.
+	if a.reconnectBlockedByActivityDeployFailure(managed) {
+		a.emitDeployFailedMarker(managed.serial)
+		return false
+	}
+
 	// Cap consecutive fast-exit respawns. Without this, an env whose
 	// underlying cluster keeps tearing down the freshly-spawned pod
 	// (helm rollout timeouts, MCP port-forward races against a
@@ -1141,7 +1154,7 @@ const (
 	reconnectLoopWindow    = 30 * time.Second
 	reconnectLoopMaxExits  = 2
 	reconnectLoopMarkerANSI = "\r\n\x1b[2;33m── stopped reconnecting after repeated failures — click the environment in the sidebar to retry ──\x1b[0m\r\n"
-	deployFailedMarkerANSI  = "\r\n\x1b[2;33m── deploy failed — not retrying automatically; use Run doctor or Rebuild & redeploy on the failed deploy, or click the environment to retry ──\x1b[0m\r\n"
+	deployFailedMarkerANSI  = "\r\n\x1b[2;33m── deploy failed — not retrying automatically; use Run doctor or Rebuild & redeploy on the failed deploy, or click the environment in the sidebar to retry ──\x1b[0m\r\n"
 )
 
 // trackExitForLoopGuard records the moment the managed PTY exited
@@ -1203,6 +1216,20 @@ func (a *App) reconnectBlockedByDeployFailure(managed *managedTerminal) bool {
 	managed.readyMu.Lock()
 	defer managed.readyMu.Unlock()
 	return managed.readyClosed && managed.readyErr != nil
+}
+
+// reconnectBlockedByActivityDeployFailure reports whether the managed PTY's env
+// has a failed deploy recorded in the activity queue. Unlike
+// reconnectBlockedByDeployFailure (which keys on this open's own
+// `==> Deploy failed` readyErr), this catches the case where the deploy failed
+// in a separate activity and the current open merely can't reach the resulting
+// pod — so reconnect still stops hammering the broken env. Cleared once a later
+// deploy succeeds (recovery), letting reconnect resume.
+func (a *App) reconnectBlockedByActivityDeployFailure(managed *managedTerminal) bool {
+	if managed == nil || a.activityQueue == nil {
+		return false
+	}
+	return a.activityQueue.latestDeployFailed(managed.selection.Tenant, managed.selection.Environment)
 }
 
 // emitStoppedContextMarker writes a single diagnostic line when

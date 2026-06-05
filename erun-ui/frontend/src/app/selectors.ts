@@ -33,6 +33,26 @@ export const selectSelectedIsPendingFor = (
   return !selectEnvironmentExists(state, tenant, environment);
 };
 
+// selectEnvHasFailedDeploy reports whether the env currently has a failed
+// deploy in the activity queue. Reopening a dead default tab (ai/local/erun)
+// re-runs `erun open`, which re-deploys; doing that for an env whose deploy
+// just failed re-fails the same way (and, across tabs, storms parallel
+// re-deploys). The click-driven respawn uses this to refuse — the same
+// terminal-state #447 stops for auto-reconnect (reconnectBlockedByDeployFailure)
+// — leaving recovery to the explicit failed-deploy card actions.
+export const selectEnvHasFailedDeploy = (
+  state: RootState,
+  tenant: string,
+  environment: string,
+): boolean =>
+  state.activity.entries.some(
+    (entry) =>
+      entry.command === 'deploy' &&
+      entry.status === 'failed' &&
+      entry.tenant === tenant &&
+      entry.environment === environment,
+  );
+
 export const selectActiveSlotForSelection = (state: RootState, selection: UISelection): number => {
   const tabs = state.terminal.tabsByEnv[selectionKey(selection)] ?? [];
   const first = tabs[0];

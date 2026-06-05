@@ -239,6 +239,27 @@ func (s *activityQueueStore) findRunning(tenant, environment string) (activityQu
 	return activityQueueEntry{}, false
 }
 
+// latestDeployFailed reports whether the most recent deploy for the env ended
+// in failure. It looks at the newest deploy entry across active + history (the
+// snapshot is sorted newest-first): if that entry is failed, the env's runtime
+// release is currently broken. A later succeeded/running deploy — e.g. after
+// the user recovers via doctor or Rebuild & redeploy — flips this back to
+// false. Reconnect uses it to stop hammering a broken env with `erun open`
+// retries whose pod will never come ready (MCP port-forward timeout, SSH sync
+// not-ready), independent of whether this particular open emitted the
+// `==> Deploy failed` ready-error that reconnectBlockedByDeployFailure keys on.
+func (s *activityQueueStore) latestDeployFailed(tenant, environment string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, entry := range s.snapshotLocked() {
+		if entry.Command != "deploy" || entry.Tenant != tenant || entry.Environment != environment {
+			continue
+		}
+		return entry.Status == activityQueueStatusFailed
+	}
+	return false
+}
+
 // promoteToRunning moves a waiting entry into the running state and
 // records StartedRunningAt. Returns the snapshot and true when the
 // entry existed and was waiting; false when missing or already running

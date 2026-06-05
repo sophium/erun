@@ -36,6 +36,48 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/dry_run_prune_images_traces_dind_exec", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_rollback_traces_helm_rollback", func(t *testing.T) {
+		// Exercises the deploy-recovery action: --rollback --dry-run must
+		// trace the `helm rollback <release> --namespace --kube-context
+		// --wait --timeout` command for the runtime release, without
+		// mutating the cluster.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run", "--rollback"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_rollback_traces_helm_rollback", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_clear_pending_helm_traces_kubectl_delete", func(t *testing.T) {
+		// Exercises the deploy-recovery action: --clear-pending-helm
+		// --dry-run must trace the `kubectl delete secrets,configmaps -l
+		// owner=helm,...,status in (pending-install,...)` command that
+		// clears the stuck helm pending-operation lock.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run", "--clear-pending-helm"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/dry_run_clear_pending_helm_traces_kubectl_delete", normalize.Apply(result.Combined))
+	})
+
+	t.Run("conflicting_recovery_flags_error", func(t *testing.T) {
+		// Clearing a pending lock and rolling back are alternative
+		// recoveries; passing both must fail fast with a clear error
+		// rather than running both (which would step the release back a
+		// revision too far).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"doctor", "team", "dev", "--dry-run", "--clear-pending-helm", "--rollback"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "doctor/conflicting_recovery_flags_error", normalize.Apply(result.Combined))
+	})
+
 	t.Run("in_runtime_complete_marker_dry_run", func(t *testing.T) {
 		// When the runtime env reports ERUN_REPO_REMOTE=true and the
 		// bootstrap marker shows the previous init finished, doctor
