@@ -1,0 +1,67 @@
+{{- $docs := default dict .Values.docs -}}
+{{- $enabled := default false $docs.enabled -}}
+{{- $project := default "__PROJECT__" $docs.project -}}
+{{- $branch := default "preview" $docs.branch -}}
+{{- $credentialsSecret := default "cf-creds" $docs.credentialsSecretName -}}
+{{- $imageOverrides := default dict .Values.imageOverrides -}}
+{{- $containerRegistry := default "ghcr.io/sophium" .Values.containerRegistry -}}
+{{- $docsImage := default (printf "%s/__MODULE__:%s" $containerRegistry .Chart.AppVersion) (index $imageOverrides "__MODULE__") -}}
+{{- if $enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: __MODULE__-deployer
+  labels:
+    app: __MODULE__
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: __MODULE__-deploy
+  labels:
+    app: __MODULE__
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "10"
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: __MODULE__
+    spec:
+      restartPolicy: Never
+      serviceAccountName: __MODULE__-deployer
+      containers:
+        - name: deploy
+          image: {{ $docsImage }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: CF_PAGES_PROJECT
+              value: {{ $project | quote }}
+            - name: CF_PAGES_BRANCH
+              value: {{ $branch | quote }}
+            - name: CLOUDFLARE_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $credentialsSecret }}
+                  key: CLOUDFLARE_API_TOKEN
+            - name: CLOUDFLARE_ACCOUNT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $credentialsSecret }}
+                  key: CLOUDFLARE_ACCOUNT_ID
+            - name: ERUN_TENANT
+              value: {{ required "tenant is required" .Values.tenant | quote }}
+            - name: ERUN_ENVIRONMENT
+              value: {{ required "environment is required" .Values.environment | quote }}
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+            requests:
+              cpu: "100m"
+              memory: 128Mi
+{{- end }}

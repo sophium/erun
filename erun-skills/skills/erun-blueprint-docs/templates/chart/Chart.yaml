@@ -1,0 +1,6 @@
+apiVersion: v2
+appVersion: 1.0.0
+description: Publish the __MODULE__ documentation site to Cloudflare Pages
+name: __MODULE__
+type: application
+version: 1.0.0
