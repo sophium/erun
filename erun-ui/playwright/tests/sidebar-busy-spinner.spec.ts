@@ -48,11 +48,24 @@ test.describe('sidebar busy spinner', () => {
     // to back, the sidebar must surface at most one spinner, and any
     // sidebar spinner that does linger must be on the currently
     // selected env.
+    // This test needs two envs under one tenant to click back to back.
+    // Don't assume the first tenant has them (a minimal ~/.erun may have a
+    // single-env tenant); search for the first tenant with 2+ envs and skip
+    // when the harness can't stage the precondition (AGENTS: cover what the
+    // harness can reach, skip with justification otherwise).
     const tenants = await app.sidebar.tenants();
-    expect(tenants.length).toBeGreaterThan(0);
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    expect(envs.length).toBeGreaterThan(1);
+    test.skip(tenants.length === 0, 'no tenants in this developer harness');
+    let tenant = '';
+    let envs: string[] = [];
+    for (const candidate of tenants) {
+      const candidateEnvs = await app.sidebar.environmentsFor(candidate);
+      if (candidateEnvs.length > 1) {
+        tenant = candidate;
+        envs = candidateEnvs;
+        break;
+      }
+    }
+    test.skip(envs.length < 2, 'no tenant with 2+ environments to exercise back-to-back open');
 
     await app.sidebar.openEnvironment(tenant, envs[0]!);
     await app.sidebar.openEnvironment(tenant, envs[1]!);

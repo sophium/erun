@@ -67,6 +67,14 @@ test.describe('app-notification toast', () => {
   });
 
   test('payload with empty message is ignored', async ({ app: _app, page }) => {
+    // An empty payload must add no notification toast. Compare the
+    // role=status / role=alert counts before and after rather than
+    // asserting an absolute zero: the titlebar idle-status widget also
+    // carries role=status whenever an env is active (true on a populated
+    // ~/.erun), so a global count of 0 is not a safe invariant. A no-op
+    // dispatch must leave the counts unchanged.
+    const statusBefore = await page.locator('[role="status"]').count();
+    const alertBefore = await page.locator('[role="alert"]').count();
     await page.evaluate(() => {
       const runtime = (
         window as unknown as {
@@ -75,12 +83,9 @@ test.describe('app-notification toast', () => {
       ).runtime;
       runtime.EventsEmit('app-notification', { kind: 'info', message: '   ' });
     });
-    // No toast should appear; assert by counting role=status that
-    // matches the empty payload's typical content (the only message
-    // would be a blank string, which would not render anyway). Wait a
-    // short tick to give the dispatcher a chance to no-op.
+    // Wait a short tick to give the dispatcher a chance to no-op.
     await page.waitForTimeout(200);
-    await expect(page.locator('[role="status"]')).toHaveCount(0);
-    await expect(page.locator('[role="alert"]')).toHaveCount(0);
+    await expect(page.locator('[role="status"]')).toHaveCount(statusBefore);
+    await expect(page.locator('[role="alert"]')).toHaveCount(alertBefore);
   });
 });
