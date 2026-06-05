@@ -19,6 +19,11 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import type { UICloudContextStatus } from '@/types';
 
+// Sentinel for the clear ("— None —") option in the cloud-alias dropdown.
+// Radix Select rejects an empty-string item value, so the option carries this
+// value and CloudAliasSelect maps it back to "" before persisting.
+const CLOUD_ALIAS_NONE_VALUE = '__none__';
+
 export function GeneralTab(): React.ReactElement {
   const dispatch = useAppDispatch();
   const dialog = useAppSelector((state) => state.manageDialog);
@@ -149,16 +154,27 @@ function CloudAliasSelect({
       </div>
     );
   }
+  // Radix Select forbids an empty-string item value, so the clear option uses
+  // a sentinel that maps back to "" on change. This gives the user a way out
+  // of a selected alias — without it the dropdown only ever offered aliases
+  // and a set value could never be cleared (issue #211). "" resolves to the
+  // placeholder, which renders the env as "Not linked" downstream.
+  const optionItems = [
+    { value: CLOUD_ALIAS_NONE_VALUE, label: '— None —' },
+    ...selectOptions.map((option) => ({ value: option, label: option })),
+  ];
   return (
     <SelectField
       id={id}
       label="Cloud alias"
       value={normalizedValue}
-      options={selectOptions.map((option) => ({ value: option, label: option }))}
+      options={optionItems}
       placeholder="Select cloud alias"
       emptyLabel="No cloud aliases configured"
       disabled={disabled}
-      onChange={onChange}
+      onChange={(next) => {
+        onChange(next === CLOUD_ALIAS_NONE_VALUE ? '' : next);
+      }}
     />
   );
 }

@@ -62,6 +62,16 @@ export class Sidebar {
     await this.environmentRow(tenant, env).click();
   }
 
+  // openManageDialogViaKeyboard activates the row's edit button with the
+  // keyboard instead of the mouse. The button is pointer-events-none until the
+  // row is hovered/selected/focused; focusing flips group-focus-within so it
+  // becomes interactive, and Enter fires the handler without a hover (a hover
+  // opens the row's IconTooltip, whose popper intercepts a mouse click). Works
+  // regardless of whether the env is the effective selection.
+  async openManageDialogViaKeyboard(tenant: string, env: string): Promise<void> {
+    await this.environmentRow(tenant, env).press('Enter');
+  }
+
   // envRowButton targets the clickable env-row button (the one whose
   // aria-label is "<tenant> / <env>" plus an optional "(local)" suffix).
   // Distinct from environmentRow(), which targets the row's edit button.
