@@ -49,6 +49,7 @@ import {
 import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import { decodeDebugOutput } from './terminalStatus';
+import { TerminalWriteSourceQueue } from './TerminalWriteSourceQueue';
 import { thunkExtra } from './thunkExtra';
 import {
   handleAIActivity,
@@ -66,6 +67,10 @@ const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 
 export class TerminalController {
   readonly sessions = new TerminalSessionRegistry();
+  // Tracks the source session of each in-flight xterm write so terminal query
+  // replies route back to the asking session, not the currently-selected one
+  // (issue #347). See TerminalWriteSourceQueue and writeToTerminal().
+  private readonly writeSources = new TerminalWriteSourceQueue();
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
   private terminalRoot: HTMLDivElement | null = null;
@@ -170,7 +175,12 @@ export class TerminalController {
 
     this.terminalQueryResponseDisposables = registerTerminalQueryResponseHandlers(
       this.terminal,
-      (data) => SendSessionInput(store.getState().terminal.sessionId, data),
+      // Address the reply to the session whose output xterm is parsing right
+      // now (writeSources head), falling back to the current selection when no
+      // write is in flight. Reading the live selection here would misroute the
+      // reply if the user switched sessions during a deferred parse (#347).
+      (data) =>
+        SendSessionInput(this.writeSources.current(store.getState().terminal.sessionId), data),
       (error) => {
         store.dispatch(showTerminalMessage(readError(error)));
       },
@@ -262,6 +272,9 @@ export class TerminalController {
     this.terminal?.dispose();
     this.terminal = null;
     this.fitAddon = null;
+    // xterm drops pending write-completion callbacks on dispose, so reset the
+    // source queue to avoid carrying a stale head into the next mount.
+    this.writeSources.clear();
   }
 
   private detachWailsEventListeners(): void {
@@ -327,7 +340,7 @@ export class TerminalController {
       if (this.liveCursorState.altScreen || !this.liveCursorState.cursorHidden) {
         return;
       }
-      this.terminal?.write(SHOW_CURSOR_SEQUENCE);
+      this.writeToTerminal(store.getState().terminal.sessionId, SHOW_CURSOR_SEQUENCE);
       this.liveCursorState = { ...this.liveCursorState, cursorHidden: false };
     }, TerminalController.CURSOR_RESTORE_DELAY_MS);
   }
@@ -350,9 +363,21 @@ export class TerminalController {
       return;
     }
     store.dispatch(hideTerminalMessageIfActive(payload.sessionId));
-    this.terminal?.write(displayData);
+    this.writeToTerminal(payload.sessionId, displayData);
     this.liveCursorState = scanCursorVisibility(this.liveCursorState, displayData);
     this.scheduleCursorRestoreIfStuck();
+  }
+
+  // writeToTerminal is the single seam for every xterm write. It tags the write
+  // with its source session via the write-source queue and hands xterm the
+  // matching completion callback, so terminal query replies fired while xterm
+  // parses this chunk route back to sessionId (issue #347).
+  private writeToTerminal(sessionId: number, data: TerminalWriteData): void {
+    const terminal = this.terminal;
+    if (!terminal) {
+      return;
+    }
+    terminal.write(data, this.writeSources.begin(sessionId));
   }
 
   layoutCallbacks(): {
@@ -526,9 +551,9 @@ export class TerminalController {
     this.focusTerminalSoon();
   }
 
-  writeTerminalBuffer(chunks: TerminalWriteData[]): void {
+  writeTerminalBuffer(sessionId: number, chunks: TerminalWriteData[]): void {
     for (const chunk of chunks) {
-      this.terminal?.write(chunk);
+      this.writeToTerminal(sessionId, chunk);
     }
     // Rehydrate live cursor state from the replayed buffer.
     // rebuildTerminalDisplayBuffer already appended `?25h` if the live
