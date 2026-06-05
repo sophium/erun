@@ -233,6 +233,8 @@ The skip emits `result: skipped (no change)` in the trace.
 |---|---|---|---|
 | `--dry-run` | bool | `false` | Run the inspection; print the recovery plan; do not execute it. |
 | `-y` | bool | `false` | Auto-approve every offered recovery action. |
+| `--clear-pending-helm` | bool | `false` | Run the clear-pending-helm recovery without prompting (see [Deploy recovery actions](#deploy-recovery-actions)). |
+| `--rollback` | bool | `false` | Run the rollback recovery without prompting (see [Deploy recovery actions](#deploy-recovery-actions)). |
 
 ### Check catalogue
 
@@ -258,6 +260,19 @@ Each check returns one of `ok`, `missing`, `error` (parse failure, permission de
 | `workspace.git_checkout` | The checkout's HEAD is on the marker's recorded branch. | Offers to `git checkout` the branch. |
 | `ssh.keypair` | `~/.ssh/id_ed25519` and `.pub` exist. | Offers `ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -N ''`. |
 | `ssh.codecommit_key` | When the marker recorded a CodeCommit host: `~/.ssh/id_rsa` (RSA, not ed25519) is registered with the IAM user. | Offers to generate and upload via `aws iam upload-ssh-public-key`. |
+
+### Deploy recovery actions {#deploy-recovery-actions}
+
+After the read-only deploy diagnosis (helm release status + runtime pods), `doctor` offers two recovery actions that **mutate the live release**. Each is gated: it runs non-interactively with its flag, or — when no flag is set — it is offered as a confirm prompt **only when the diagnosis shows the release is unhealthy** (helm status is empty, or not `status: deployed`). A healthy env is never offered a destructive rollback. Under `--dry-run` the exact command is traced and nothing runs.
+
+| Action | Flag | Command run | Use when |
+|---|---|---|---|
+| Clear pending helm release | `--clear-pending-helm` | `kubectl [--context <ctx>] --namespace <ns> delete secrets,configmaps -l 'owner=helm,name=<release>,status in (pending-install,pending-upgrade,pending-rollback)' --ignore-not-found` | A deploy died mid-upgrade and left the release locked in a pending state, so the next `erun deploy` refuses to start. |
+| Roll back to last successful revision | `--rollback` | `helm rollback <release> --namespace <ns> [--kube-context <ctx>] --wait --timeout <deploy-wait>` | The current revision is bad or never converged and a previous revision was healthy. |
+
+`<release>` is the runtime release name for the tenant; `<ns>` and `<ctx>` are the resolved env namespace and kube-context. To rebuild and roll out fresh images instead of recovering the existing release, re-run [`erun deploy --force`](/cli/deploy) — the desktop's failed-deploy card surfaces that as its **Force rebuild & redeploy** button.
+
+Both actions are also exposed on the [MCP `doctor` tool](/mcp/overview#doctor) via the `clearPendingHelm` and `rollback` boolean inputs.
 
 ### Exit codes
 
