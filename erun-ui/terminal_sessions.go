@@ -248,7 +248,9 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 		Env:          []string{appSessionEnvVar + "=1"},
 		Cols:         cols,
 		Rows:         rows,
-		InitialInput: []byte(tool + "\n"),
+		// The env AI tab runs in the env repo, so the cwd-guarded resume
+		// continues the env project's Claude Code session (issue #451).
+		InitialInput: []byte(aiLaunchCommand(result.EnvConfig.AITool) + "\n"),
 	}
 	session, err := a.deps.startTerminal(params)
 	if err != nil {

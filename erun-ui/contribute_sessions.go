@@ -157,8 +157,10 @@ func buildContributePreludeCommand(withAI bool, aiTool string) string {
 	}
 	prelude := strings.Join(parts, " && ") + "\n"
 	if withAI {
-		tool := resolveAIToolCommand(aiTool)
-		prelude += tool + "\n"
+		// The prelude already cd'd to $HOME/git/erun, so the cwd-guarded
+		// resume continues the contribute clone's Claude Code session rather
+		// than the env project's (issue #451).
+		prelude += aiLaunchCommand(aiTool) + "\n"
 	}
 	return prelude
 }

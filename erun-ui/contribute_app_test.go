@@ -273,3 +273,51 @@ func TestAdoptRefusesAfterStop(t *testing.T) {
 		t.Fatalf("adopt should return false after stop()")
 	}
 }
+
+// TestBuildContributePreludeCommandResumesCloneSession asserts the contribute
+// AI tab pipes the cwd-guarded Claude resume after cd'ing to the clone, so it
+// continues the $HOME/git/erun session rather than starting fresh — the
+// local-agent gap in issue #451. The non-AI variant pipes no AI launch.
+func TestBuildContributePreludeCommandResumesCloneSession(t *testing.T) {
+	withAI := buildContributePreludeCommand(true, "")
+	if !strings.Contains(withAI, `cd "$HOME/git/erun"`) {
+		t.Fatalf("prelude must cd to the clone before launching the AI tool, got %q", withAI)
+	}
+	if !strings.HasSuffix(withAI, claudeContinueGuard+"\n") {
+		t.Fatalf("contribute AI prelude must end with the cwd-guarded claude resume, got %q", withAI)
+	}
+
+	// A non-claude tool launches verbatim (no resume injection), mirroring the
+	// wrapper's bypass rules.
+	codex := buildContributePreludeCommand(true, "codex")
+	if !strings.HasSuffix(codex, "codex\n") {
+		t.Fatalf("configured non-claude tool must launch verbatim, got %q", codex)
+	}
+	if strings.Contains(codex, "--continue") {
+		t.Fatalf("non-claude tool must not carry a claude resume, got %q", codex)
+	}
+
+	noAI := buildContributePreludeCommand(false, "")
+	if strings.Contains(noAI, "claude") {
+		t.Fatalf("non-AI contribute prelude must not launch an AI tool, got %q", noAI)
+	}
+}
+
+// TestAILaunchCommandGuardsClaudeOnly documents the bypass rules the desktop
+// shares with claude-wrapper.sh: a bare claude launch is wrapped in the
+// cwd-guarded resume; an explicit-flag claude invocation or a different tool
+// launches verbatim.
+func TestAILaunchCommandGuardsClaudeOnly(t *testing.T) {
+	if got := aiLaunchCommand(""); got != claudeContinueGuard {
+		t.Fatalf("default (claude) must use the resume guard, got %q", got)
+	}
+	if got := aiLaunchCommand("claude"); got != claudeContinueGuard {
+		t.Fatalf("explicit claude must use the resume guard, got %q", got)
+	}
+	if got := aiLaunchCommand("codex"); got != "codex" {
+		t.Fatalf("codex must launch verbatim, got %q", got)
+	}
+	if got := aiLaunchCommand("claude --resume"); got != "claude --resume" {
+		t.Fatalf("claude with explicit flags must launch verbatim, got %q", got)
+	}
+}

@@ -407,6 +407,32 @@ func resolveAIToolCommand(configured string) string {
 	return defaultAITool
 }
 
+// claudeContinueGuard is the cwd-guarded Claude Code resume the desktop pipes
+// into an AI tab. It continues the session that belongs to the tab's working
+// directory — the env repo for the env AI tab, the $HOME/git/erun clone for
+// the contribute AI tab — so per-tab restore is correct on local-agent (host)
+// and remote-agent (pod) envs alike, no longer depending on the pod-only
+// claude-wrapper.sh that is absent on local-agent hosts (issue #451).
+//
+// The guard mirrors claude-wrapper.sh: resume only when Claude Code's
+// per-project session store exists for the current directory. It composes with
+// the pod wrapper because the wrapper treats --continue as a bypass flag, so it
+// forwards rather than double-injecting.
+const claudeContinueGuard = `if [ -d "$HOME/.claude/projects/$(pwd | tr / -)" ]; then claude --continue; else claude; fi`
+
+// aiLaunchCommand returns the keystrokes the desktop pipes into an AI tab's
+// shell to launch the AI tool. A bare `claude` launch is wrapped in the
+// cwd-guarded resume; any other tool, or `claude` with explicit flags/a
+// subcommand, launches verbatim — mirroring the wrapper's bypass rules so we
+// never inject a resume the user did not ask for.
+func aiLaunchCommand(configured string) string {
+	tool := resolveAIToolCommand(configured)
+	if tool != defaultAITool {
+		return tool
+	}
+	return claudeContinueGuard
+}
+
 func formatLaunchCommand(params startTerminalSessionParams) string {
 	parts := make([]string, 0, len(params.Args)+1)
 	parts = append(parts, params.Executable)

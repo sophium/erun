@@ -3289,8 +3289,12 @@ func TestStartAISessionRunsErunOpenWithClaudeInitialInput(t *testing.T) {
 	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
 		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
 	}
-	if string(started.InitialInput) != defaultAITool+"\n" {
-		t.Fatalf("expected initial input %q, got %q", defaultAITool+"\n", string(started.InitialInput))
+	// The env AI tab pipes the cwd-guarded Claude resume so it continues the
+	// env project's Claude Code session rather than starting fresh (issue
+	// #451). The guard runs in the env repo cwd inside `erun open`.
+	wantInput := claudeContinueGuard + "\n"
+	if string(started.InitialInput) != wantInput {
+		t.Fatalf("expected initial input %q, got %q", wantInput, string(started.InitialInput))
 	}
 }
 
