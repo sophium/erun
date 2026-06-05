@@ -35,6 +35,7 @@ interface LayoutCallbacks {
   applyLayoutVars: () => void;
   focusTerminalSoon: () => void;
   queueTerminalResize: () => void;
+  flushTerminalResize: () => void;
 }
 
 export function toggleSidebar(
@@ -44,7 +45,7 @@ export function toggleSidebar(
 ): void {
   dispatch(setSidebarHidden(!getState().layout.sidebarHidden));
   callbacks.applyLayoutVars();
-  callbacks.queueTerminalResize();
+  callbacks.flushTerminalResize();
   callbacks.focusTerminalSoon();
 }
 
@@ -193,7 +194,10 @@ export function toggleReview(
   dispatch(setReviewOpenAction(next));
   callbacks.applyLayoutVars();
   setFilesOpen(dispatch, getState, getState().layout.filesOpen, false, callbacks.applyLayoutVars);
-  callbacks.queueTerminalResize();
+  // Immediate (rAF) refit so the PTY learns the new cols before the shell
+  // emits its next prompt; the 40 ms debounce was wide enough for output
+  // to land at the old cols and stick in scrollback (issue #433).
+  callbacks.flushTerminalResize();
   if (next) {
     callbacks.loadReviewDiff();
   }
@@ -218,7 +222,7 @@ export function setDebugOpen(
   dispatch: AppDispatch,
   getState: () => RootState,
   open: boolean,
-  queueTerminalResize: () => void,
+  flushTerminalResize: () => void,
 ): void {
   dispatch(setDebugOpenAction(open));
   saveBoolean(DEBUG_OPEN_STORAGE_KEY, open);
@@ -229,7 +233,7 @@ export function setDebugOpen(
       ),
     );
   }
-  queueTerminalResize();
+  flushTerminalResize();
 }
 
 // Re-export setChangedFilesOpen action so callers reading from this module

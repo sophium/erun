@@ -6,6 +6,14 @@ async function readSidebarWidth(page: import('@playwright/test').Page): Promise<
   );
 }
 
+async function readTerminalCols(page: import('@playwright/test').Page): Promise<number> {
+  return await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>('.terminal');
+    const raw = el?.dataset.terminalCols ?? '';
+    return raw ? Number.parseInt(raw, 10) : 0;
+  });
+}
+
 test.describe('layout panels', () => {
   test('sidebar toggle flips --sidebar-width', async ({ app, page }) => {
     const initial = await readSidebarWidth(page);
@@ -28,6 +36,24 @@ test.describe('layout panels', () => {
 
     // Restore so subsequent tests don't observe an unexpected layout.
     await app.titlebar.toggleReviewPanel();
+  });
+
+  // Regression: issue #433 — opening the Review panel squashed the terminal,
+  // and closing it left the terminal at the narrow cols because the 40 ms
+  // debounce in queueTerminalResize was wide enough for the shell to emit a
+  // prompt at the old cols. flushTerminalResize refits on the next animation
+  // frame and resizes the PTY before that gap closes.
+  test('review panel toggle resizes terminal cols on both edges', async ({ app, page }) => {
+    await expect.poll(() => readTerminalCols(page)).toBeGreaterThan(0);
+    const wideCols = await readTerminalCols(page);
+
+    await app.titlebar.toggleReviewPanel();
+    await expect.poll(() => readTerminalCols(page)).toBeLessThan(wideCols);
+    const narrowCols = await readTerminalCols(page);
+    expect(narrowCols).toBeGreaterThan(0);
+
+    await app.titlebar.toggleReviewPanel();
+    await expect.poll(() => readTerminalCols(page)).toBe(wideCols);
   });
 
   test('debug panel toggle reveals the resize handle', async ({ app, page }) => {

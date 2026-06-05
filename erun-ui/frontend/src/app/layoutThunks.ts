@@ -54,7 +54,7 @@ export const setDebugOpen =
   (open: boolean): AppThunk =>
   (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    applyDebugOpen(dispatch, getState, open, controller.queueTerminalResize);
+    applyDebugOpen(dispatch, getState, open, controller.flushTerminalResize);
   };
 
 export const clearDebugOutput = (): AppThunk => (dispatch, getState) => {

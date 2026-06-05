@@ -75,6 +75,7 @@ export class TerminalController {
   private _diffList: HTMLDivElement | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private resizeTimer = 0;
+  private resizeFrame = 0;
   private reviewScrollFrame = 0;
   private idleStatusTimer = 0;
   private reviewDiffRefreshTimer = 0;
@@ -126,6 +127,15 @@ export class TerminalController {
 
   fitTerminal(): void {
     this.fitAddon?.fit();
+    this.publishTerminalDims();
+  }
+
+  private publishTerminalDims(): void {
+    if (!this.terminalRoot || !this.terminal) {
+      return;
+    }
+    this.terminalRoot.dataset.terminalCols = String(this.terminal.cols);
+    this.terminalRoot.dataset.terminalRows = String(this.terminal.rows);
   }
 
   mount(elements: MountElements): () => void {
@@ -156,6 +166,7 @@ export class TerminalController {
     this.terminal.loadAddon(this.fitAddon);
     this.terminal.open(elements.terminalRoot);
     this.fitAddon.fit();
+    this.publishTerminalDims();
 
     this.terminalQueryResponseDisposables = registerTerminalQueryResponseHandlers(
       this.terminal,
@@ -231,6 +242,12 @@ export class TerminalController {
   private unmountTerminal(): void {
     window.removeEventListener('resize', this.queueTerminalResize);
     this.resizeObserver?.disconnect();
+    window.clearTimeout(this.resizeTimer);
+    this.resizeTimer = 0;
+    if (this.resizeFrame !== 0) {
+      window.cancelAnimationFrame(this.resizeFrame);
+      this.resizeFrame = 0;
+    }
     this.terminalDataDisposable?.dispose();
     for (const disposable of this.terminalQueryResponseDisposables) {
       disposable.dispose();
@@ -342,6 +359,7 @@ export class TerminalController {
     applyLayoutVars: () => void;
     focusTerminalSoon: () => void;
     queueTerminalResize: () => void;
+    flushTerminalResize: () => void;
   } {
     return {
       applyLayoutVars: () => {
@@ -351,6 +369,7 @@ export class TerminalController {
         this.focusTerminalSoon();
       },
       queueTerminalResize: this.queueTerminalResize,
+      flushTerminalResize: this.flushTerminalResize,
     };
   }
 
@@ -395,14 +414,39 @@ export class TerminalController {
   queueTerminalResize = (): void => {
     window.clearTimeout(this.resizeTimer);
     this.resizeTimer = window.setTimeout(() => {
-      this.applyLayoutVars();
-      this.fitAddon?.fit();
-      const sessionId = store.getState().terminal.sessionId;
-      if (sessionId > 0 && this.terminal) {
-        ResizeSession(sessionId, this.terminal.cols, this.terminal.rows).catch(noop);
-      }
+      this.runTerminalResize();
     }, 40);
   };
+
+  // flushTerminalResize fits the terminal on the next animation frame
+  // and resizes the PTY immediately, bypassing the 40 ms debounce that
+  // queueTerminalResize uses to coalesce drag/ResizeObserver bursts.
+  // One-shot layout toggles (review/sidebar/debug) call this so the
+  // shell sees the new cols before its next prompt redraw — the gap
+  // that caused issue #433 (review-open squashes the terminal and only
+  // partially un-squashes when closed because the PTY was still on the
+  // narrow cols when the next prompt was emitted).
+  flushTerminalResize = (): void => {
+    window.clearTimeout(this.resizeTimer);
+    this.resizeTimer = 0;
+    if (this.resizeFrame !== 0) {
+      return;
+    }
+    this.resizeFrame = window.requestAnimationFrame(() => {
+      this.resizeFrame = 0;
+      this.runTerminalResize();
+    });
+  };
+
+  private runTerminalResize(): void {
+    this.applyLayoutVars();
+    this.fitAddon?.fit();
+    this.publishTerminalDims();
+    const sessionId = store.getState().terminal.sessionId;
+    if (sessionId > 0 && this.terminal) {
+      ResizeSession(sessionId, this.terminal.cols, this.terminal.rows).catch(noop);
+    }
+  }
 
   queueVisibleDiffSelectionUpdate(): void {
     if (this.reviewScrollFrame > 0) {
