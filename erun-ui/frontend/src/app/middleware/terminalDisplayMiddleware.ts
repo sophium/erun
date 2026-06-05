@@ -33,6 +33,6 @@ startListening({
     }
     rebuildTerminalDisplayBuffer(controller.sessions, sessionId);
     controller.resetTerminal();
-    controller.writeTerminalBuffer(controller.sessions.displayBuffer(sessionId));
+    controller.writeTerminalBuffer(sessionId, controller.sessions.displayBuffer(sessionId));
   },
 });
