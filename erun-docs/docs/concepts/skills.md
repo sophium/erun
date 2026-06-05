@@ -48,6 +48,7 @@ Skills come in two kinds: *Blueprint* (ERun's accumulated best practices for ind
 |---|---|---|
 | `erun-blueprint-rls-db` | Blueprint | Build a multi-tenant PostgreSQL schema with row-level security, modelled on `erun-backend-db`. |
 | `erun-blueprint-api` | Blueprint | Build a multi-tenant Go HTTP API service modelled on `erun-backend-api`. |
+| `erun-blueprint-docs` | Blueprint | Scaffold a Docusaurus docs site that publishes to Cloudflare Pages, modelled on `erun-docs`. |
 | `erun-file-issue` | Workflow | File a bug or feature against ERun on GitHub (`sophium/erun`). |
 | `erun-contribute` | Workflow | Create a new issue against `sophium/erun`, then drive the full clone → branch → implement → PR motion to share your improvement back. |
 
