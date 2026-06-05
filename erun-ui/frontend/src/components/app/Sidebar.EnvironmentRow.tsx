@@ -177,6 +177,17 @@ export function EnvironmentRow({
       (state.terminal.tabsByEnv[debugKey]?.length ?? 0) > 0
     );
   });
+  // reconnecting flips the row's busy indicator while the review-pane
+  // reconnect/redeploy is in flight for THIS env. Other rows stay
+  // interactive and unspinning, matching what the user expects when a
+  // single env is being reconnected (visibility of system status,
+  // Nielsen #1, without blocking user control & freedom, Nielsen #3).
+  const reconnecting = useAppSelector(
+    (state) =>
+      state.review.reconnect.status === 'running' &&
+      state.review.reconnect.tenant === tenantName &&
+      state.review.reconnect.environment === environmentName,
+  );
   const { selected, busy, busyLabel, isLocal, selection } = deriveEnvironmentRow(
     tenantName,
     environmentName,
@@ -185,6 +196,7 @@ export function EnvironmentRow({
     isOpening,
     runningCommand,
     aiBusy,
+    reconnecting,
   );
 
   const rowLabel = `${tenantName} / ${environmentName}${isLocal ? ' (local)' : ''}`;

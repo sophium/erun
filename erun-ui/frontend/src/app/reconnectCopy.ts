@@ -20,6 +20,8 @@ export const reconnectCopy = {
   runningStatus: 'Reconnecting…',
   runningHint: 'Latest output will appear below.',
   errorStatusTitle: 'Reconnect failed',
+  retry: 'Retry',
+  dismiss: 'Dismiss',
 } as const;
 
 // Strip the opaque marker from a wrapped backend error before surfacing it

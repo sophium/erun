@@ -20,7 +20,7 @@ import { selectEnvironmentExists, selectSelectedIsPendingFor } from './selectors
 import { openSelection, selectTerminalTab } from './sessionThunks';
 import { setAIBusyForEnv } from './slices/aiActivitySlice';
 import { setDoctorAll } from './slices/doctorSlice';
-import { setReconnect } from './slices/reviewSlice';
+import { appendReconnectLine } from './slices/reviewSlice';
 import { setSelected } from './slices/selectionSlice';
 import { recordExitOutput, recordExitReason } from './slices/sessionsSlice';
 import type { AppDispatch, AppThunk } from './store';
@@ -143,8 +143,8 @@ export const handleEnvironmentInitFailed =
   };
 
 // handleReconnectLine appends a status line from the reconnect PTY into
-// the reconnect dialog while it is running. The subscription wiring stays
-// on the controller; this thunk owns the state write.
+// the reconnect line buffer while it is running. The subscription wiring
+// stays on the controller; this thunk owns the state write.
 export const handleReconnectLine =
   (line: string): AppThunk =>
   (dispatch, getState) => {
@@ -152,11 +152,10 @@ export const handleReconnectLine =
     if (!trimmed) {
       return;
     }
-    const reconnect = getState().review.reconnect;
-    if (reconnect.status !== 'running') {
+    if (getState().review.reconnect.status !== 'running') {
       return;
     }
-    dispatch(setReconnect({ ...reconnect, lastLine: trimmed }));
+    dispatch(appendReconnectLine(trimmed));
   };
 
 // updateOpenStatusFromOutput inspects a freshly-decoded chunk of terminal

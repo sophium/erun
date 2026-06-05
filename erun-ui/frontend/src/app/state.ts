@@ -169,9 +169,20 @@ export type ReconnectStatus = 'idle' | 'confirm' | 'running' | 'error';
 
 export interface ReconnectState {
   status: ReconnectStatus;
-  lastLine: string;
+  // tenant + environment scope the in-flight reconnect so other envs can stay
+  // interactive while this one is running. Empty when status === 'idle'.
+  tenant: string;
+  environment: string;
+  // Rolling buffer of the latest reconnect output lines. Capped by the slice
+  // reducer to keep memory bounded under long deploys.
+  lines: string[];
   error: string;
 }
+
+// Maximum number of reconnect output lines retained in ReconnectState.lines.
+// The status surface shows a scrollable view; older lines beyond this cap drop
+// off the top so the buffer can't grow unbounded across a long deploy.
+export const RECONNECT_LINE_BUFFER_LIMIT = 200;
 
 // AutoStartPromptState backs the first-time "Auto-start this environment?"
 // dialog. The dialog opens when openSelection is asked to navigate to a remote
