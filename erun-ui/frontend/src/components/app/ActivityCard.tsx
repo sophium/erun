@@ -7,6 +7,7 @@ import {
   Clipboard,
   Clock,
   LoaderCircle,
+  Stethoscope,
   Trash2,
 } from 'lucide-react';
 import * as React from 'react';
@@ -21,6 +22,7 @@ import {
   commandBadgeClassName,
   commandSubtitle,
   copyToClipboard,
+  deployUiSelection,
   dismissAffordance,
   shellSessionIdFromEntry,
   shouldShowHelmRecovery,
@@ -28,6 +30,8 @@ import {
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+
+import { StartDoctorSession, StartForceDeploySession } from '../../../wailsjs/go/main/App';
 
 export interface ActivityCardProps {
   entry: ActivityQueueEntry;
@@ -124,6 +128,9 @@ export const ActivityCard = React.memo(function ActivityCard({
         </p>
       )}
       {entry.status === 'failed' && <FailureDetails entry={entry} />}
+      {entry.status === 'failed' && (
+        <FailedDeployActions entry={entry} onRecoverPendingHelm={onRecoverPendingHelm} />
+      )}
       <RecoveryActionRow
         entry={entry}
         onRecoverPendingHelm={onRecoverPendingHelm}
@@ -212,6 +219,67 @@ function FailureDetails({ entry }: { entry: ActivityQueueEntry }): React.ReactEl
             context.
           </p>
         ))}
+    </div>
+  );
+}
+
+// FailedDeployActions renders the "select a fix" recovery row on a failed
+// deploy/open card: launch the deploy-aware `erun doctor` to troubleshoot,
+// force a clean rebuild + redeploy, or clear a stuck pending helm release.
+// These mirror the recovery affordances already offered for running deploys
+// (RecoveryActionRow) and container failures (ContainerStatus) — Nielsen #4
+// consistency — surfaced where the user sees the failure (Nielsen #1,
+// recognition over recall). All three are explicit, side-effecting buttons,
+// never auto-run; "Run doctor" leads because troubleshooting is the safe
+// first step before the heavier rebuild/redeploy.
+function FailedDeployActions({
+  entry,
+  onRecoverPendingHelm,
+}: {
+  entry: ActivityQueueEntry;
+  onRecoverPendingHelm?: (id: string) => Promise<void>;
+}): React.ReactElement | null {
+  if (entry.command !== 'deploy' && entry.command !== 'open') return null;
+  const selection = deployUiSelection(entry);
+  const showClearPendingHelm = Boolean(onRecoverPendingHelm && entry.release && entry.namespace);
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      <Button
+        type="button"
+        variant="default"
+        size="xs"
+        className="h-6 gap-1 text-[11px]"
+        onClick={() => {
+          void StartDoctorSession(selection, 120, 34);
+        }}
+      >
+        <Stethoscope aria-hidden="true" className="size-3" />
+        Run doctor
+      </Button>
+      <Button
+        type="button"
+        variant="secondary"
+        size="xs"
+        className="h-6 text-[11px]"
+        onClick={() => {
+          void StartForceDeploySession(selection, 120, 34);
+        }}
+      >
+        Rebuild &amp; redeploy
+      </Button>
+      {showClearPendingHelm && onRecoverPendingHelm && (
+        <Button
+          type="button"
+          variant="secondary"
+          size="xs"
+          className="h-6 text-[11px]"
+          onClick={() => {
+            void onRecoverPendingHelm(entry.id);
+          }}
+        >
+          Clear pending helm release
+        </Button>
+      )}
     </div>
   );
 }

@@ -4,6 +4,31 @@ import {
   formatElapsed,
 } from '@/app/activityQueueState';
 
+import type { main as wailsMain } from '../../../wailsjs/go/models';
+
+// deployUiSelection builds the uiSelection a deploy-oriented recovery action
+// (force redeploy, doctor) needs from an activity entry. Only the fields those
+// flows read are populated from the entry; the rest are left empty so the
+// backend resolves them from the env config, matching how the container-status
+// recovery action constructs its selection.
+export function deployUiSelection(entry: ActivityQueueEntry): wailsMain.uiSelection {
+  return {
+    tenant: entry.tenant,
+    environment: entry.environment,
+    version: entry.version ?? '',
+    runtimeImage: '',
+    runtimeCpu: '',
+    runtimeMemory: '',
+    kubernetesContext: entry.kubernetesContext ?? '',
+    containerRegistry: '',
+    noGit: false,
+    bootstrap: false,
+    setDefaultTenant: false,
+    action: 'deploy',
+    debug: false,
+  };
+}
+
 export function isHistoryStatus(status: ActivityQueueEntry['status']): boolean {
   return (
     status === 'succeeded' || status === 'failed' || status === 'skipped' || status === 'cancelled'

@@ -65,4 +65,15 @@ test('failed deploy card reveals captured output and offers a copyable report', 
   await expect(copyButton).toBeVisible();
   await copyButton.click();
   await expect(card.getByRole('button', { name: 'Copied' })).toBeVisible();
+
+  // Failed deploy/open cards offer the "select a fix" recovery actions:
+  // troubleshoot via the deploy-aware doctor, force a clean rebuild + redeploy,
+  // or clear a stuck pending helm release (shown because the entry carries a
+  // release + namespace). We assert they render rather than click them:
+  // clicking triggers real backend deploy/helm flows the headless harness must
+  // not run, and the Wails methods (StartDoctorSession / StartForceDeploySession
+  // / recoverPendingHelm) are exercised by their own backend paths.
+  await expect(card.getByRole('button', { name: 'Run doctor' })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Rebuild & redeploy' })).toBeVisible();
+  await expect(card.getByRole('button', { name: 'Clear pending helm release' })).toBeVisible();
 });
