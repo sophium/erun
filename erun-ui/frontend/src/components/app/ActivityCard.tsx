@@ -13,6 +13,8 @@ import {
 import * as React from 'react';
 
 import type { ActivityQueueEntry } from '@/app/activityQueueState';
+import { useAppDispatch } from '@/app/hooks';
+import { startDoctorSelection, startForceDeploySelection } from '@/app/recoveryThunks';
 import { ContainerStatusList } from '@/components/app/ActivityCard.ContainerStatus';
 import {
   activityElapsedLabel,
@@ -30,8 +32,6 @@ import {
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-
-import { StartDoctorSession, StartForceDeploySession } from '../../../wailsjs/go/main/App';
 
 export interface ActivityCardProps {
   entry: ActivityQueueEntry;
@@ -239,6 +239,21 @@ function FailedDeployActions({
   entry: ActivityQueueEntry;
   onRecoverPendingHelm?: (id: string) => Promise<void>;
 }): React.ReactElement | null {
+  const dispatch = useAppDispatch();
+  const [running, setRunning] = React.useState<boolean>(false);
+  // Guard against re-fire: each action runs `erun …` in the shared Local
+  // shell, so without a guard (and with the Local tab now focused for
+  // feedback) repeated clicks could pile commands into that shell (#445).
+  const runAction = React.useCallback(
+    (action: () => Promise<unknown>) => {
+      if (running) return;
+      setRunning(true);
+      void Promise.resolve(action()).finally(() => {
+        setRunning(false);
+      });
+    },
+    [running],
+  );
   if (entry.command !== 'deploy' && entry.command !== 'open') return null;
   const selection = deployUiSelection(entry);
   const showClearPendingHelm = Boolean(onRecoverPendingHelm && entry.release && entry.namespace);
@@ -249,8 +264,9 @@ function FailedDeployActions({
         variant="default"
         size="xs"
         className="h-6 gap-1 text-[11px]"
+        disabled={running}
         onClick={() => {
-          void StartDoctorSession(selection, 120, 34);
+          runAction(() => dispatch(startDoctorSelection(selection)));
         }}
       >
         <Stethoscope aria-hidden="true" className="size-3" />
@@ -261,8 +277,9 @@ function FailedDeployActions({
         variant="secondary"
         size="xs"
         className="h-6 text-[11px]"
+        disabled={running}
         onClick={() => {
-          void StartForceDeploySession(selection, 120, 34);
+          runAction(() => dispatch(startForceDeploySelection(selection)));
         }}
       >
         Rebuild &amp; redeploy
@@ -273,8 +290,9 @@ function FailedDeployActions({
           variant="secondary"
           size="xs"
           className="h-6 text-[11px]"
+          disabled={running}
           onClick={() => {
-            void onRecoverPendingHelm(entry.id);
+            runAction(() => onRecoverPendingHelm(entry.id));
           }}
         >
           Clear pending helm release

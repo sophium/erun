@@ -3,15 +3,14 @@ import {
   type ActivityQueueEntry,
   formatElapsed,
 } from '@/app/activityQueueState';
-
-import type { main as wailsMain } from '../../../wailsjs/go/models';
+import type { UISelection } from '@/types';
 
 // deployUiSelection builds the uiSelection a deploy-oriented recovery action
 // (force redeploy, doctor) needs from an activity entry. Only the fields those
 // flows read are populated from the entry; the rest are left empty so the
 // backend resolves them from the env config, matching how the container-status
 // recovery action constructs its selection.
-export function deployUiSelection(entry: ActivityQueueEntry): wailsMain.uiSelection {
+export function deployUiSelection(entry: ActivityQueueEntry): UISelection {
   return {
     tenant: entry.tenant,
     environment: entry.environment,
