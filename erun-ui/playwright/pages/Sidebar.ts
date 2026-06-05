@@ -62,6 +62,28 @@ export class Sidebar {
     await this.environmentRow(tenant, env).click();
   }
 
+  // envRowButton targets the clickable env-row button (the one whose
+  // aria-label is "<tenant> / <env>" plus an optional "(local)" suffix).
+  // Distinct from environmentRow(), which targets the row's edit button.
+  envRowButton(tenant: string, env: string): Locator {
+    return this.page.locator(`button[aria-label^="${tenant} / ${env}"]`).first();
+  }
+
+  // hasLocalBadge reports whether the env row renders the LOCAL pill
+  // (the <span aria-label="Local environment"> inside the row button).
+  async hasLocalBadge(tenant: string, env: string): Promise<boolean> {
+    const badge = this.envRowButton(tenant, env).locator('[aria-label="Local environment"]');
+    return (await badge.count()) > 0;
+  }
+
+  // rowHasLocalSuffix reports whether the env row's accessible label carries
+  // the "(local)" suffix. Both this and the LOCAL pill are driven by the same
+  // isLocal flag, so they must always agree.
+  async rowHasLocalSuffix(tenant: string, env: string): Promise<boolean> {
+    const label = (await this.envRowButton(tenant, env).getAttribute('aria-label')) ?? '';
+    return label.endsWith('(local)');
+  }
+
   cloudAliasButton(): Locator {
     // The bottom-of-sidebar control is a popover trigger labelled with the
     // user's cloud identity; it's the last button in the aside.

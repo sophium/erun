@@ -8,6 +8,7 @@ import { TerminalController } from '@/app/TerminalController';
 import { ActivityQueueLauncher } from '@/components/app/ActivityQueueLauncher';
 import { AutoStartPromptDialog } from '@/components/app/AutoStartPromptDialog';
 import { EnvironmentDialogView } from '@/components/app/EnvironmentDialogView';
+import { ErrorBoundary } from '@/components/app/ErrorBoundary';
 import { GlobalConfigDialogView } from '@/components/app/GlobalConfigDialogView';
 import { MainPane } from '@/components/app/MainPane';
 import { ManageDialogView } from '@/components/app/ManageDialogView';
@@ -58,33 +59,46 @@ export function App(): React.ReactElement {
       <TooltipProvider>
         <div className="grid h-full w-full grid-rows-[52px_minmax(0,1fr)] bg-background">
           <Titlebar />
-          <div
-            className={cn(
-              'grid h-full min-h-0 overflow-hidden',
-              sidebarHidden
-                ? 'grid-cols-[0_0_minmax(0,1fr)]'
-                : 'grid-cols-[var(--sidebar-width)_10px_minmax(0,1fr)]',
-            )}
-          >
-            <Sidebar />
-            <ResizeHandle
-              className={splitterClassName}
-              orientation="vertical"
-              label="Resize sidebar"
-              hidden={sidebarHidden}
-              onMouseDown={(event) => {
-                dispatch(startSidebarResize(event));
-              }}
-            />
-            <MainPane
-              terminalPaneRef={terminalPaneRef}
-              terminalRootRef={terminalRootRef}
-              reviewViewRef={reviewViewRef}
-              reviewMainRef={reviewMainRef}
-              diffListRef={diffListRef}
-              onOpenActivityQueue={() => dispatch(setActivityQueueOpen(true))}
-            />
-          </div>
+          <ErrorBoundary>
+            {/*
+              The grid's track count must match the number of participating
+              children. A `display:none` grid item is removed from grid flow,
+              so when the sidebar is hidden the resize handle is dropped — keep
+              it in the template (a 3rd `0` track) and MainPane backfills into
+              the empty 0-width middle track, blanking the whole content area
+              (issue #436). Render the handle only while the sidebar is shown
+              and use a matching 2-track template when hidden, so MainPane
+              always occupies the trailing `1fr` track.
+            */}
+            <div
+              className={cn(
+                'grid h-full min-h-0 overflow-hidden',
+                sidebarHidden
+                  ? 'grid-cols-[0_minmax(0,1fr)]'
+                  : 'grid-cols-[var(--sidebar-width)_10px_minmax(0,1fr)]',
+              )}
+            >
+              <Sidebar />
+              {!sidebarHidden && (
+                <ResizeHandle
+                  className={splitterClassName}
+                  orientation="vertical"
+                  label="Resize sidebar"
+                  onMouseDown={(event) => {
+                    dispatch(startSidebarResize(event));
+                  }}
+                />
+              )}
+              <MainPane
+                terminalPaneRef={terminalPaneRef}
+                terminalRootRef={terminalRootRef}
+                reviewViewRef={reviewViewRef}
+                reviewMainRef={reviewMainRef}
+                diffListRef={diffListRef}
+                onOpenActivityQueue={() => dispatch(setActivityQueueOpen(true))}
+              />
+            </div>
+          </ErrorBoundary>
         </div>
         <EnvironmentDialogView />
         <GlobalConfigDialogView />
