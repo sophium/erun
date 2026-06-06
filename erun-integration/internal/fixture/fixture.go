@@ -5,6 +5,7 @@ package fixture
 
 import (
 	"fmt"
+	"net"
 	"os"
 	osexec "os/exec"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
 )
@@ -674,19 +676,19 @@ func StubKubectlDeployed(t testing.TB, stubsDir string, spec KubectlDeployedStub
 		`done`,
 		`if [ "$is_port_forward" = "1" ] && [ -n "$local_port" ]; then`,
 		// Production-side reachability checks differ by service:
-		//   SSH expects the first 4 bytes to be "SSH-"
-		//   MCP expects an HTTP response on POST /mcp
-		//   API expects an HTTP response on /healthz
-		// The simulator sends a per-port banner that satisfies the SSH
-		// check; MCP/API checks fall back to bare-TCP-reachable on a
-		// 200ms timeout, which a plain accept-and-close already passes.
+		//   SSH expects the server to greet with a "SSH-" prefix
+		//   MCP expects a successful HTTP response on GET /mcp
+		//   API expects a 2xx HTTP response on GET /healthz
+		// portsim writes the per-port banner to satisfy the SSH check; for
+		// the MCP/API ports it answers the probe's HTTP request with a 200.
+		// Only the SSH port needs a banner here.
 		`  banner=""`,
 		`  if [ "$local_port" = "` + strconv.Itoa(spec.SSHPort) + `" ]; then`,
 		`    banner="SSH-2.0-erun-portsim\r\n"`,
 		`  fi`,
 		`  ` + portsim + ` --port "$local_port" --banner "$banner" >/dev/null 2>&1 &`,
 		`  pid=$!`,
-		`  printf '%s\n' "$pid" >> '` + pidFile + `'`,
+		`  printf '%s %s\n' "$local_port" "$pid" >> '` + pidFile + `'`,
 		`  # Stay alive while the simulator runs so production code that`,
 		`  # treats the kubectl process as the port-forward owner sees it`,
 		`  # as live. Block until the simulator exits.`,
@@ -710,20 +712,44 @@ func StubKubectlDeployed(t testing.TB, stubsDir string, spec KubectlDeployedStub
 			return
 		}
 		for _, line := range strings.Split(string(raw), "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
+			fields := strings.Fields(line)
+			if len(fields) != 2 {
 				continue
 			}
-			pid, err := strconv.Atoi(line)
-			if err != nil || pid <= 0 {
+			port, portErr := strconv.Atoi(fields[0])
+			pid, pidErr := strconv.Atoi(fields[1])
+			if pidErr != nil || pid <= 0 {
 				continue
 			}
 			if proc, err := os.FindProcess(pid); err == nil {
 				_ = proc.Kill()
 			}
+			// SIGKILL is async: block until the simulator's listener is
+			// actually released so a sibling real-run scenario reusing the
+			// same fixed ports does not trip its port-busy guard on this
+			// scenario's teardown.
+			if portErr == nil && port > 0 {
+				waitForPortClosed(port, 3*time.Second)
+			}
 		}
 	})
 	return StubEnv(stubsDir, "kubectl")
+}
+
+// waitForPortClosed blocks until nothing accepts a TCP connection on
+// 127.0.0.1:port, or the timeout elapses. Used by StubKubectlDeployed's
+// teardown so a killed port-forward simulator's listener is fully gone before
+// the next scenario probes the same fixed port.
+func waitForPortClosed(port int, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 100*time.Millisecond)
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 

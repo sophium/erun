@@ -331,6 +331,11 @@ func TestOpen(t *testing.T) {
 		fixture.StubBinaryWithScript(t, stubsDir, "open",
 			`printf '%s\n' "$*" > '`+ideLog+`'`+"\n"+`exit 0`+"\n")
 		envVars = append(envVars, "PATH="+stubsDir+":"+os.Getenv("PATH"))
+		// Pin darwin so the IDE launcher resolves to the stubbed macOS
+		// `open` command. On a Linux host production calls xdg-open, which
+		// this scenario does not stub. (erun-integration/AGENTS.md —
+		// platform-dependent goldens.)
+		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=darwin")
 		result := erun.Run(t, []string{"open", "team", "dev", "--vscode", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -390,6 +395,11 @@ func TestOpen(t *testing.T) {
 		fixture.StubBinaryWithScript(t, stubsDir, "open",
 			`printf '%s\n' "$*" >> '`+ideLog+`'`+"\n"+`exit 0`+"\n")
 		envVars = append(envVars, "PATH="+stubsDir+":"+os.Getenv("PATH"))
+		// Pin darwin: this scenario seeds the macOS JetBrains options dir
+		// above and asserts the `open -a 'IntelliJ IDEA'` bootstrap, both
+		// macOS-shaped. Without the pin a Linux host resolves a different
+		// options dir and launcher and the writers never fire.
+		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=darwin")
 		result := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
