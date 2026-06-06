@@ -36,6 +36,18 @@ export interface UIWorkingIssue {
   reason?: string;
 }
 
+// UIUpgradePlanItem mirrors the Go UpgradePlanItem from the ResolveUpgradePlan
+// binding: one opted-in env's channel, current version, the latest version for
+// that channel, and whether it lags (will be redeployed by Upgrade all).
+export interface UIUpgradePlanItem {
+  tenant: string;
+  environment: string;
+  channel: string;
+  current: string;
+  target: string;
+  lagging: boolean;
+}
+
 export interface UITenant {
   name: string;
   defaultEnvironment?: string;
@@ -373,6 +385,12 @@ export interface UIEnvironmentConfig {
   // the erun-host profile, so SDK calls inside the pod act as the host
   // identity. Only meaningful for remote AWS-backed envs.
   remoteHostCredentials: boolean;
+  // AutoUpgrade opts this env into the "Upgrade all" set; upgradeChannel
+  // selects which release channel an upgrade targets ("stable" | "snapshot").
+  // The Go side resolves an empty channel from the env type, so the loaded
+  // value is always one of the two.
+  autoUpgrade: boolean;
+  upgradeChannel?: string;
 }
 
 export interface UIEnvironmentClaudeConfig {

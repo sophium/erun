@@ -1,9 +1,10 @@
-import { Plus, Settings } from 'lucide-react';
+import { ArrowUp, Plus, Settings } from 'lucide-react';
 import * as React from 'react';
 
 import { openInitializeDialog } from '@/app/environmentDialogThunks';
 import { openGlobalConfigDialog } from '@/app/globalConfigThunks';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { openUpgradeAll } from '@/app/upgradeThunks';
 import { EmptyState } from '@/components/app/EmptyState';
 import { IconTooltip } from '@/components/app/IconTooltip';
 import { pendingForTenant } from '@/components/app/Sidebar.helpers';
@@ -29,6 +30,20 @@ export function Sidebar(): React.ReactElement {
           Environments
         </span>
         <div className="flex items-center gap-1">
+          <IconTooltip label="Upgrade all environments">
+            <Button
+              className="size-[26px] flex-none text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&_svg]:size-4"
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label="Upgrade all environments"
+              onClick={() => {
+                void dispatch(openUpgradeAll());
+              }}
+            >
+              <ArrowUp />
+            </Button>
+          </IconTooltip>
           <IconTooltip label="Open ERun settings">
             <Button
               className="size-[26px] flex-none text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground [&_svg]:size-4"

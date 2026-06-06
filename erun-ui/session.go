@@ -332,6 +332,13 @@ func buildDeployArgs(selection uiSelection) []string {
 	return args
 }
 
+// buildUpgradeArgs builds the global `erun upgrade` invocation. Upgrade-all is
+// cross-env (it redeploys every opted-in lagging env), so it takes no
+// tenant/environment — the selection only supplies the Local shell it runs in.
+func buildUpgradeArgs(selection uiSelection) []string {
+	return erunArgs(selection.Debug, "upgrade")
+}
+
 func erunArgs(debug bool, args ...string) []string {
 	if !debug {
 		return args
@@ -464,7 +471,6 @@ func localSessionBanner(selection uiSelection) []byte {
 	banner := fmt.Sprintf("\x1b[2m# Local host shell for %s/%s — env shell in ERun tab, %s in AI tab\x1b[0m\r\n", tenant, environment, defaultAITool)
 	return []byte(banner)
 }
-
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"

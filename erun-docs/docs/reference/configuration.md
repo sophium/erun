@@ -62,6 +62,8 @@ One per environment. This is the most-edited file.
 | `managedcloud` | bool | helm chart (`ERUN_CLOUD_ENVIRONMENT`) | When true, marks the env as running on a managed cloud context (enables idle-stop, cloud-credential refresh, etc.). |
 | `runtimeversion` | string | `erun open`, `erun deploy`, chart appVersion | Pins the version of the runtime image used by this env. |
 | `runtimeregistry` | string | `erun open`, `erun deploy` | Overrides the registry the runtime image is pulled from (per-env). |
+| `autoupgrade` | bool | [`erun upgrade`](/cli/upgrade), desktop Upgrade all | When true, this env joins the Upgrade-all set: `erun upgrade` redeploys it to the latest version for its channel when `runtimeversion` lags. |
+| `upgradechannel` | string (enum) | [`erun upgrade`](/cli/upgrade) | Release channel an upgrade targets: `stable` (semver releases) or `snapshot` (latest snapshot build). Orthogonal to `type`. When unset, defaults from `type` — runtime → `stable`, agent → `snapshot`. |
 | `runtimepod.cpu` | string | helm chart (`runtime.resources.limits.cpu`) | CPU limit for the runtime pod (e.g. `4`, `500m`). |
 | `runtimepod.memory` | string | helm chart (`runtime.resources.limits.memory`) | Memory limit (e.g. `8916Mi`, `2Gi`). |
 | `sshd.enabled` | bool | `erun open`, chart (SSH port-forward setup) | Whether the in-pod SSH server is exposed via port forward. Needed for IDE attach. |

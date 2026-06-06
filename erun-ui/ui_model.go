@@ -214,6 +214,8 @@ type uiEnvironmentConfig struct {
 	Snapshot              bool                       `json:"snapshot"`
 	AutoStart             *bool                      `json:"autoStart,omitempty"`
 	RemoteHostCredentials bool                       `json:"remoteHostCredentials"`
+	AutoUpgrade           bool                       `json:"autoUpgrade"`
+	UpgradeChannel        string                     `json:"upgradeChannel,omitempty"`
 }
 
 type uiClaudeConfig struct {

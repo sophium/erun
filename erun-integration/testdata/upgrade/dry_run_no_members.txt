@@ -1,0 +1,4 @@
+audit: erun upgrade --dry-run
+upgrade: tenant= environment= version-override= force=false
+upgrade: team/dev not opted in (autoupgrade=false), skipping
+==> No environments opted into Upgrade all

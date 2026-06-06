@@ -103,26 +103,35 @@ type TenantConfig struct {
 }
 
 type EnvConfig struct {
-	Name              string
-	Type              EnvironmentType `yaml:"type,omitempty" json:"type,omitempty"`
-	LocalRepoPath     string          `yaml:"localrepopath,omitempty" json:"localRepoPath,omitempty"`
-	RepoPath          string          `yaml:"repopath,omitempty"`
-	KubernetesContext string
-	ContainerRegistry   string
-	CloudProviderAlias  string                  `yaml:"cloudprovideralias,omitempty"`
-	ManagedCloud        bool                    `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
-	RuntimeVersion      string                  `yaml:"runtimeversion,omitempty"`
-	RuntimeRegistry     string                  `yaml:"runtimeregistry,omitempty" json:"runtimeRegistry,omitempty"`
-	RuntimePod          RuntimePodResources     `yaml:"runtimepod,omitempty"`
-	SSHD                SSHDConfig              `yaml:"sshd,omitempty"`
-	Idle                EnvironmentIdleConfig   `yaml:"idle,omitempty"`
-	Claude              EnvironmentClaudeConfig `yaml:"claude,omitempty" json:"claude,omitempty"`
-	AITool              string                  `yaml:"aitool,omitempty" json:"aiTool,omitempty"`
+	Name                  string
+	Type                  EnvironmentType `yaml:"type,omitempty" json:"type,omitempty"`
+	LocalRepoPath         string          `yaml:"localrepopath,omitempty" json:"localRepoPath,omitempty"`
+	RepoPath              string          `yaml:"repopath,omitempty"`
+	KubernetesContext     string
+	ContainerRegistry     string
+	CloudProviderAlias    string                  `yaml:"cloudprovideralias,omitempty"`
+	ManagedCloud          bool                    `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
+	RuntimeVersion        string                  `yaml:"runtimeversion,omitempty"`
+	RuntimeRegistry       string                  `yaml:"runtimeregistry,omitempty" json:"runtimeRegistry,omitempty"`
+	RuntimePod            RuntimePodResources     `yaml:"runtimepod,omitempty"`
+	SSHD                  SSHDConfig              `yaml:"sshd,omitempty"`
+	Idle                  EnvironmentIdleConfig   `yaml:"idle,omitempty"`
+	Claude                EnvironmentClaudeConfig `yaml:"claude,omitempty" json:"claude,omitempty"`
+	AITool                string                  `yaml:"aitool,omitempty" json:"aiTool,omitempty"`
 	Remote                bool                    `yaml:"remote,omitempty"`
 	Snapshot              *bool                   `yaml:"snapshot,omitempty"`
 	LocalPortRangeStart   int                     `yaml:"localportrangestart,omitempty" json:"localPortRangeStart,omitempty"`
 	AutoStart             *bool                   `yaml:"autostart,omitempty" json:"autoStart,omitempty"`
 	RemoteHostCredentials bool                    `yaml:"remotehostcredentials,omitempty" json:"remoteHostCredentials,omitempty"`
+	// AutoUpgrade opts this env into the "Upgrade all" set: `erun upgrade`
+	// (and the desktop's Upgrade-all action) redeploy it to the latest
+	// version for its UpgradeChannel when the current RuntimeVersion lags.
+	AutoUpgrade bool `yaml:"autoupgrade,omitempty" json:"autoUpgrade,omitempty"`
+	// UpgradeChannel selects which release channel an upgrade targets:
+	// "stable" (semver tags) or "snapshot" (*-snapshot-<timestamp> tags).
+	// It is orthogonal to Type (build location); empty resolves via
+	// ResolvedUpgradeChannel from Type.
+	UpgradeChannel string `yaml:"upgradechannel,omitempty" json:"upgradeChannel,omitempty"`
 }
 
 func (c TenantConfig) SnapshotEnabled() bool {
@@ -209,6 +218,39 @@ func (c EnvConfig) RemoteWorktree() bool {
 		return c.Type != EnvironmentTypeLocalAgent
 	}
 	return c.Remote
+}
+
+// UpgradeChannel values for EnvConfig.UpgradeChannel / ResolvedUpgradeChannel.
+const (
+	UpgradeChannelStable   = "stable"
+	UpgradeChannelSnapshot = "snapshot"
+)
+
+// IsValidUpgradeChannel reports whether channel is one of the canonical
+// channel values.
+func IsValidUpgradeChannel(channel string) bool {
+	switch strings.TrimSpace(channel) {
+	case UpgradeChannelStable, UpgradeChannelSnapshot:
+		return true
+	}
+	return false
+}
+
+// ResolvedUpgradeChannel returns the release channel an upgrade targets for
+// this env. The explicit UpgradeChannel field is the source of truth when
+// valid; otherwise it defaults from the resolved type — runtime envs track
+// "stable", agent envs track "snapshot" (they iterate on snapshot builds) —
+// and anything unresolved falls back to "stable".
+func (c EnvConfig) ResolvedUpgradeChannel() string {
+	if IsValidUpgradeChannel(c.UpgradeChannel) {
+		return strings.TrimSpace(c.UpgradeChannel)
+	}
+	switch c.ResolvedType() {
+	case EnvironmentTypeLocalAgent, EnvironmentTypeRemoteAgent:
+		return UpgradeChannelSnapshot
+	default:
+		return UpgradeChannelStable
+	}
 }
 
 // EffectiveLocalRepoPath returns the new-shape LocalRepoPath when set,

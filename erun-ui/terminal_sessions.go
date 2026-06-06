@@ -242,12 +242,12 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 
 	tool := resolveAIToolCommand(result.EnvConfig.AITool)
 	params := startTerminalSessionParams{
-		Dir:          resolveTerminalStartDir(result.RepoPath),
-		Executable:   a.deps.resolveCLIPath(),
-		Args:         buildOpenArgs(result.Tenant, result.Environment, selection.Debug),
-		Env:          []string{appSessionEnvVar + "=1"},
-		Cols:         cols,
-		Rows:         rows,
+		Dir:        resolveTerminalStartDir(result.RepoPath),
+		Executable: a.deps.resolveCLIPath(),
+		Args:       buildOpenArgs(result.Tenant, result.Environment, selection.Debug),
+		Env:        []string{appSessionEnvVar + "=1"},
+		Cols:       cols,
+		Rows:       rows,
 		// The env AI tab runs in the env repo, so the cwd-guarded resume
 		// continues the env project's Claude Code session (issue #451).
 		InitialInput: []byte(aiLaunchCommand(result.EnvConfig.AITool) + "\n"),
@@ -308,6 +308,15 @@ func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSe
 func (a *App) StartForceDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
 	args := append(buildDeployArgs(selection), "--force")
 	return a.runErunCommandInLocal(selection, cols, rows, args)
+}
+
+// StartUpgradeAllSession runs the global `erun upgrade` in the selected env's
+// Local shell. The command redeploys every opted-in lagging env; each composed
+// deploy emits `==> Deploying tenant/env` traces that the activity-queue parser
+// turns into per-env entries, exactly like StartDeploySession. The selection
+// only provides the Local shell to run in (any open env works).
+func (a *App) StartUpgradeAllSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+	return a.runErunCommandInLocal(selection, cols, rows, buildUpgradeArgs(selection))
 }
 
 func (a *App) StartSSHDInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
@@ -1153,8 +1162,8 @@ func (a *App) emitReconnectMarker(sessionID int, exitReason string) {
 // describe-instances error, for example) without leaving the user
 // staring at a terminal of stacked reconnect noise. See issue #361.
 const (
-	reconnectLoopWindow    = 30 * time.Second
-	reconnectLoopMaxExits  = 2
+	reconnectLoopWindow     = 30 * time.Second
+	reconnectLoopMaxExits   = 2
 	reconnectLoopMarkerANSI = "\r\n\x1b[2;33m── stopped reconnecting after repeated failures — click the environment in the sidebar to retry ──\x1b[0m\r\n"
 	deployFailedMarkerANSI  = "\r\n\x1b[2;33m── deploy failed — not retrying automatically; use Run doctor or Rebuild & redeploy on the failed deploy, or click the environment in the sidebar to retry ──\x1b[0m\r\n"
 )

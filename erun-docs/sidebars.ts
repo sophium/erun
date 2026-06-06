@@ -36,6 +36,7 @@ const sidebars: SidebarsConfig = {
         'cli/release',
         'cli/push',
         'cli/deploy',
+        'cli/upgrade',
         'cli/cloud',
         'cli/context',
         'cli/sshd',
