@@ -11,7 +11,7 @@ import {
   setUpgradeAllError,
   setUpgradeAllPlan,
 } from './slices/upgradeAllSlice';
-import type { AppThunk } from './store';
+import type { AppThunk, RootState } from './store';
 import { requireController } from './thunkExtra';
 
 // openUpgradeAll opens the Upgrade-all preview dialog and resolves the plan
@@ -27,16 +27,39 @@ export const openUpgradeAll = (): AppThunk<Promise<void>> => async (dispatch) =>
   }
 };
 
-// confirmUpgradeAll runs the global `erun upgrade` in the currently selected
-// env's Local shell (the command itself redeploys every lagging opted-in env;
-// the selection only supplies the shell). Each composed deploy surfaces an
-// activity-queue entry, like a normal deploy. Requires an open/selected env.
+// resolveUpgradeHostSelection picks the environment whose Local shell hosts the
+// `erun upgrade` run. `erun upgrade` is global — it redeploys every opted-in
+// env itself — so the host only supplies a shell to run the command in. Prefer
+// the currently-open env (its shell is already warm), otherwise any configured
+// env (a tenant's default, else its first), so Upgrade all just runs instead of
+// forcing the operator to open an environment first.
+function resolveUpgradeHostSelection(state: RootState): UISelection | null {
+  const selected = state.selection.selected;
+  if (selected) {
+    return selected;
+  }
+  for (const tenant of state.tenants.tenants) {
+    const host =
+      tenant.environments.find((env) => env.name === tenant.defaultEnvironment) ??
+      tenant.environments[0];
+    if (host) {
+      return { tenant: tenant.name, environment: host.name };
+    }
+  }
+  return null;
+}
+
+// confirmUpgradeAll runs the global `erun upgrade` in a host env's Local shell
+// (the command itself redeploys every lagging opted-in env; the host env only
+// supplies the shell). Each composed deploy surfaces an activity-queue entry,
+// like a normal deploy. It resolves a host env automatically, so the operator
+// does not have to open an environment first.
 export const confirmUpgradeAll =
   (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
-    const selection: UISelection | null = getState().selection.selected;
+    const selection = resolveUpgradeHostSelection(getState());
     if (!selection) {
       dispatch(closeUpgradeAllDialog());
-      dispatch(showTerminalMessage('Open an environment first to run Upgrade all.'));
+      dispatch(showTerminalMessage('No environments are configured to upgrade yet.'));
       return;
     }
     const controller = requireController(extra);

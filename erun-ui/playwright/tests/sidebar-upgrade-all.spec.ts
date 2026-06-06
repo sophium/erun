@@ -127,4 +127,74 @@ test.describe('sidebar Upgrade all', () => {
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(dialog).toBeHidden();
   });
+
+  // Issue #459 follow-up — confirming Upgrade all must run the global
+  // `erun upgrade` against an automatically-resolved host environment instead
+  // of telling the operator to "open an environment first". `erun upgrade`
+  // redeploys every opted-in env itself; the host env only supplies the Local
+  // shell to run it in. The fixture boots with no environment selected (the
+  // exact state that previously blocked), so clicking Upgrade exercises the
+  // host-resolution fallback.
+  //
+  // Every Start* RPC is stubbed so neither the real `erun upgrade` nor any real
+  // session spawn fires; the spec asserts the command was dispatched with a
+  // resolved host and the pre-fix block message never appears.
+  test('confirming runs without requiring an open environment', async ({ app, page }) => {
+    const plan = {
+      items: [
+        {
+          tenant: 'acme',
+          environment: 'lagging-env',
+          channel: 'snapshot',
+          current: '1.0.0-snapshot-20260101000000',
+          target: '1.0.0-snapshot-20260102000000',
+          lagging: true,
+        },
+      ],
+    };
+    const upgradeHosts: Array<{ tenant?: string; environment?: string }> = [];
+
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as {
+        method: string;
+        args: Array<{ tenant?: string; environment?: string }>;
+      };
+      if (body.method === 'ResolveUpgradePlan') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ data: plan }),
+        });
+      }
+      // Defuse the real `erun upgrade` and any dependent-tab session spawns the
+      // confirm path triggers, returning a benign session result for each.
+      if (body.method.startsWith('Start')) {
+        if (body.method === 'StartUpgradeAllSession') {
+          upgradeHosts.push(body.args[0] ?? {});
+        }
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { sessionId: 1, selection: body.args[0] ?? {}, slot: 0, kind: 'local' },
+          }),
+        });
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openUpgradeAll();
+    const dialog = app.sidebar.upgradeAllDialog();
+    await expect(dialog).toBeVisible({ timeout: 6_000 });
+    await dialog.getByRole('button', { name: 'Upgrade 1' }).click();
+
+    // The command was dispatched against an auto-resolved host env (non-empty
+    // tenant + environment), proving it did not block on a missing selection.
+    await expect.poll(() => upgradeHosts.length).toBeGreaterThan(0);
+    expect(upgradeHosts[0]?.tenant, 'host tenant resolved').toBeTruthy();
+    expect(upgradeHosts[0]?.environment, 'host env resolved').toBeTruthy();
+
+    // The pre-fix block message must never appear.
+    await expect(page.getByText('No environments are configured to upgrade')).toHaveCount(0);
+    await expect(page.getByText('Open an environment first')).toHaveCount(0);
+    await expect(dialog).toBeHidden();
+  });
 });
