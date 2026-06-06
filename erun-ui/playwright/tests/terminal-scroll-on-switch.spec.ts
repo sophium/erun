@@ -24,12 +24,11 @@ import type { Page } from '@playwright/test';
 // the replay path runs without leaving the viewport scrolled up.
 test.describe('terminal scroll on session switch', () => {
   test('switching back to a tab lands the viewport at the bottom', async ({ app, page }) => {
-    const tenants = await app.sidebar.tenants();
-    expect(tenants.length).toBeGreaterThan(0);
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    expect(envs.length).toBeGreaterThan(0);
-    const env = envs[0]!;
+    // Use a normal environment, never the local default (erun/local): its
+    // local-shell tab set behaves differently and is not what this spec drives.
+    const target = await app.sidebar.firstEnvironmentExcludingLocal();
+    test.skip(target === null, 'no non-local environment in this developer harness');
+    const { tenant, env } = target!;
 
     await app.sidebar.openEnvironment(tenant, env);
 

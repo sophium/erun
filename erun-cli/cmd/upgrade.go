@@ -28,68 +28,12 @@ func newUpgradeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx := withCloudContextPreflight(commandContext(cmd), store)
-			if len(args) >= 1 {
-				tenant = args[0]
-			}
-			if len(args) >= 2 {
-				environment = args[1]
-			}
-			if strings.TrimSpace(environment) != "" && strings.TrimSpace(tenant) == "" {
-				return fmt.Errorf("environment requires a tenant: pass TENANT ENVIRONMENT or --tenant with --environment")
-			}
-			target := common.UpgradeTarget{
-				Tenant:          strings.TrimSpace(tenant),
-				Environment:     strings.TrimSpace(environment),
-				VersionOverride: strings.TrimSpace(versionOverride),
-				Force:           force,
-			}
-			ctx.Trace(fmt.Sprintf("upgrade: tenant=%s environment=%s version-override=%s force=%v",
-				target.Tenant, target.Environment, target.VersionOverride, target.Force))
-
-			plan, err := common.ResolveUpgradePlanForStore(ctx, store, target, common.DefaultRuntimeVersionsResolver)
+			target, err := upgradeTargetFromArgs(args, tenant, environment, versionOverride, force)
 			if err != nil {
-				ctx.Trace("upgrade: plan resolution failed: " + err.Error())
 				return err
 			}
-			if len(plan.Items) == 0 {
-				ctx.Info("==> No environments opted into Upgrade all" + scopeSuffix(target))
-				return nil
-			}
-			lagging := plan.Lagging()
-			ctx.Info(fmt.Sprintf("==> Upgrade plan: %d member(s), %d lagging", len(plan.Items), len(lagging)))
-			for _, item := range plan.Items {
-				ctx.Info(fmt.Sprintf("    %s/%s [%s] %s -> %s%s",
-					item.Tenant, item.Environment, item.Channel,
-					displayUpgradeVersion(item.Current), displayUpgradeVersion(item.Target),
-					laggingSuffix(item)))
-			}
-
-			deployer := func(ctx common.Context, item common.UpgradePlanItem) error {
-				deployTarget := common.DeployTarget{
-					Tenant:          item.Tenant,
-					Environment:     item.Environment,
-					VersionOverride: item.Target,
-					Force:           target.Force,
-				}
-				specs, err := common.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
-				if err != nil {
-					return err
-				}
-				if err := common.RunDeploySpecs(ctx, specs, buildDockerImage, push, deployHelmChart); err != nil {
-					return err
-				}
-				return common.PersistRuntimeVersionFromDeploySpecs(ctx, specs, saveEnvConfig)
-			}
-			result := common.RunUpgradePlan(ctx, plan, deployer)
-			if len(result.Failed) > 0 {
-				names := make([]string, 0, len(result.Failed))
-				for _, failure := range result.Failed {
-					names = append(names, failure.Item.Tenant+"/"+failure.Item.Environment)
-				}
-				return fmt.Errorf("upgrade: %d environment(s) failed: %s", len(result.Failed), strings.Join(names, ", "))
-			}
-			return nil
+			deployer := newUpgradeDeployer(store, saveEnvConfig, findProjectRoot, resolveBuildContext, resolveDeployContext, now, buildDockerImage, push, deployHelmChart, target.Force)
+			return runUpgrade(withCloudContextPreflight(commandContext(cmd), store), store, target, deployer)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -98,6 +42,84 @@ func newUpgradeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver
 	cmd.Flags().StringVar(&environment, "environment", "", "Restrict the upgrade to a specific environment; requires --tenant")
 	cmd.Flags().BoolVar(&force, "force", false, "Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected")
 	return cmd
+}
+
+// upgradeTargetFromArgs folds positional TENANT/ENVIRONMENT args over the
+// --tenant/--environment flags (positionals win) and enforces that an
+// environment scope requires a tenant.
+func upgradeTargetFromArgs(args []string, tenant, environment, versionOverride string, force bool) (common.UpgradeTarget, error) {
+	if len(args) >= 1 {
+		tenant = args[0]
+	}
+	if len(args) >= 2 {
+		environment = args[1]
+	}
+	if strings.TrimSpace(environment) != "" && strings.TrimSpace(tenant) == "" {
+		return common.UpgradeTarget{}, fmt.Errorf("environment requires a tenant: pass TENANT ENVIRONMENT or --tenant with --environment")
+	}
+	return common.UpgradeTarget{
+		Tenant:          strings.TrimSpace(tenant),
+		Environment:     strings.TrimSpace(environment),
+		VersionOverride: strings.TrimSpace(versionOverride),
+		Force:           force,
+	}, nil
+}
+
+// runUpgrade resolves the upgrade plan for target, prints it, redeploys the
+// lagging members via deploy, and reports any per-environment failures.
+func runUpgrade(ctx common.Context, store common.DeployStore, target common.UpgradeTarget, deploy common.UpgradeItemDeployer) error {
+	ctx.Trace(fmt.Sprintf("upgrade: tenant=%s environment=%s version-override=%s force=%v",
+		target.Tenant, target.Environment, target.VersionOverride, target.Force))
+
+	plan, err := common.ResolveUpgradePlanForStore(ctx, store, target, common.DefaultRuntimeVersionsResolver)
+	if err != nil {
+		ctx.Trace("upgrade: plan resolution failed: " + err.Error())
+		return err
+	}
+	if len(plan.Items) == 0 {
+		ctx.Info("==> No environments opted into Upgrade all" + scopeSuffix(target))
+		return nil
+	}
+	lagging := plan.Lagging()
+	ctx.Info(fmt.Sprintf("==> Upgrade plan: %d member(s), %d lagging", len(plan.Items), len(lagging)))
+	for _, item := range plan.Items {
+		ctx.Info(fmt.Sprintf("    %s/%s [%s] %s -> %s%s",
+			item.Tenant, item.Environment, item.Channel,
+			displayUpgradeVersion(item.Current), displayUpgradeVersion(item.Target),
+			laggingSuffix(item)))
+	}
+
+	result := common.RunUpgradePlan(ctx, plan, deploy)
+	if len(result.Failed) > 0 {
+		names := make([]string, 0, len(result.Failed))
+		for _, failure := range result.Failed {
+			names = append(names, failure.Item.Tenant+"/"+failure.Item.Environment)
+		}
+		return fmt.Errorf("upgrade: %d environment(s) failed: %s", len(result.Failed), strings.Join(names, ", "))
+	}
+	return nil
+}
+
+// newUpgradeDeployer composes the per-environment deployer used by an upgrade
+// run: it deploys each lagging member to its resolved target version and
+// persists the new version, reusing the shared deploy flow.
+func newUpgradeDeployer(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc, force bool) common.UpgradeItemDeployer {
+	return func(ctx common.Context, item common.UpgradePlanItem) error {
+		deployTarget := common.DeployTarget{
+			Tenant:          item.Tenant,
+			Environment:     item.Environment,
+			VersionOverride: item.Target,
+			Force:           force,
+		}
+		specs, err := common.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
+		if err != nil {
+			return err
+		}
+		if err := common.RunDeploySpecs(ctx, specs, buildDockerImage, push, deployHelmChart); err != nil {
+			return err
+		}
+		return common.PersistRuntimeVersionFromDeploySpecs(ctx, specs, saveEnvConfig)
+	}
 }
 
 func scopeSuffix(target common.UpgradeTarget) string {

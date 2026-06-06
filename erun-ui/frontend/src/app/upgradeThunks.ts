@@ -11,7 +11,7 @@ import {
   setUpgradeAllError,
   setUpgradeAllPlan,
 } from './slices/upgradeAllSlice';
-import type { AppThunk } from './store';
+import type { AppThunk, RootState } from './store';
 import { requireController } from './thunkExtra';
 
 // openUpgradeAll opens the Upgrade-all preview dialog and resolves the plan
@@ -27,16 +27,47 @@ export const openUpgradeAll = (): AppThunk<Promise<void>> => async (dispatch) =>
   }
 };
 
-// confirmUpgradeAll runs the global `erun upgrade` in the currently selected
-// env's Local shell (the command itself redeploys every lagging opted-in env;
-// the selection only supplies the shell). Each composed deploy surfaces an
-// activity-queue entry, like a normal deploy. Requires an open/selected env.
+// resolveUpgradeHostSelection picks the environment whose Local shell hosts the
+// `erun upgrade` run. `erun upgrade` is global — it redeploys every opted-in
+// env itself — so the host only supplies a shell to run the command in. Run it
+// from an environment that is actually being upgraded so the command and its
+// output land in that env's terminal rather than an unrelated one (e.g. the
+// local default): prefer a lagging plan member, then any plan member, then the
+// open env, then any configured env. Resolving from the plan means Upgrade all
+// runs without the operator opening an environment first.
+function resolveUpgradeHostSelection(state: RootState): UISelection | null {
+  const items = state.upgradeAll.items;
+  const member = items.find((item) => item.lagging) ?? items[0];
+  if (member) {
+    return { tenant: member.tenant, environment: member.environment };
+  }
+  const selected = state.selection.selected;
+  if (selected) {
+    return selected;
+  }
+  for (const tenant of state.tenants.tenants) {
+    const host =
+      tenant.environments.find((env) => env.name === tenant.defaultEnvironment) ??
+      tenant.environments[0];
+    if (host) {
+      return { tenant: tenant.name, environment: host.name };
+    }
+  }
+  return null;
+}
+
+// confirmUpgradeAll runs the global `erun upgrade` in the Local shell of an
+// environment that is being upgraded (the command itself redeploys every
+// lagging opted-in env; the host env supplies the shell and the terminal the
+// run is shown in). Each composed deploy surfaces an activity-queue entry, like
+// a normal deploy. It resolves the host from the plan, so the operator does not
+// have to open an environment first and the run lands in a relevant env.
 export const confirmUpgradeAll =
   (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
-    const selection: UISelection | null = getState().selection.selected;
+    const selection = resolveUpgradeHostSelection(getState());
     if (!selection) {
       dispatch(closeUpgradeAllDialog());
-      dispatch(showTerminalMessage('Open an environment first to run Upgrade all.'));
+      dispatch(showTerminalMessage('No environments are configured to upgrade yet.'));
       return;
     }
     const controller = requireController(extra);
