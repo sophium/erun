@@ -18,6 +18,7 @@ import { ResizeHandle } from '@/components/app/ResizeHandle';
 import { Sidebar } from '@/components/app/Sidebar';
 import { TenantDialogView } from '@/components/app/TenantDialogView';
 import { Titlebar } from '@/components/app/Titlebar';
+import { UpgradeAllDialog } from '@/components/app/UpgradeAllDialog';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
@@ -106,6 +107,7 @@ export function App(): React.ReactElement {
         <ReconnectDialog />
         <ReconnectStatusPanel />
         <TenantDialogView />
+        <UpgradeAllDialog />
         <AutoStartPromptDialog />
         <ActivityQueueLauncher
           open={activityQueueOpen}

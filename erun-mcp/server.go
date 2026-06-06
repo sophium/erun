@@ -227,6 +227,10 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 		Description: "Roll the project's charts out to the resolved tenant/environment: build and push the images they need, then run the rollout. The deploy step of the build → release → push → deploy flow.",
 	}, deployTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
+		Name:        "upgrade",
+		Description: "Redeploy the resolved environment to the latest version for its release channel when it is opted into Upgrade all (autoupgrade) and lags. High blast radius: rolls out a new runtime image and restarts pods. Set preview to resolve and return the plan (channel, current → target) without deploying.",
+	}, upgradeTool(runtime))
+	mcp.AddTool(server, &mcp.Tool{
 		Name:        "doctor",
 		Description: "Diagnose and repair the resolved environment: report why a deploy may have failed (helm release status and runtime pods, read-only); recover a failing runtime release by clearing a stuck pending helm lock or rolling back to the last successful revision; prune unused Docker images, build cache, or stopped containers; and optionally restore or repair the root erun config from a backup or by re-initializing orphaned cloud provider aliases",
 	}, doctorTool(runtime))

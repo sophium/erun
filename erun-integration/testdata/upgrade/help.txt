@@ -1,0 +1,24 @@
+Redeploy every environment opted into "Upgrade all" (autoupgrade) whose runtime version lags the latest for its channel (stable or snapshot).
+
+High blast radius: this rolls out new runtime images to multiple — possibly remote — environments, which restarts their pods and can spend cloud money. Run with --dry-run first to review the resolved plan (each member, its channel, and current → target) and the exact deploy actions before anything ships. Scope it with TENANT/ENVIRONMENT to upgrade a subset; --version pins one version across the set, skipping channel resolution.
+
+Usage:
+  erun upgrade [TENANT] [ENVIRONMENT] [flags]
+
+Examples:
+  erun upgrade --dry-run
+  erun upgrade
+  erun upgrade team
+  erun upgrade team prod --version <VERSION>
+
+Flags:
+      --dry-run              Resolve and trace mutating actions without executing them.
+      --environment string   Restrict the upgrade to a specific environment; requires --tenant
+      --force                Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected
+  -h, --help                 help for upgrade
+      --tenant string        Restrict the upgrade to a specific tenant
+      --version string       Deploy this exact version to every opted-in environment, skipping channel resolution
+
+Global Flags:
+      --time            Print the elapsed runtime after the command finishes.
+  -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.

@@ -284,6 +284,8 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 		Snapshot:              config.SnapshotEnabled(),
 		AutoStart:             copyBoolPtr(config.AutoStart),
 		RemoteHostCredentials: config.RemoteHostCredentials,
+		AutoUpgrade:           config.AutoUpgrade,
+		UpgradeChannel:        config.ResolvedUpgradeChannel(),
 	}
 	if cloudContext, ok, err := a.linkedCloudContext(config); err != nil {
 		return uiEnvironmentConfig{}, err
@@ -402,6 +404,10 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	existing.SetSnapshot(config.Snapshot)
 	existing.AutoStart = copyBoolPtr(config.AutoStart)
 	existing.RemoteHostCredentials = config.RemoteHostCredentials
+	existing.AutoUpgrade = config.AutoUpgrade
+	if eruncommon.IsValidUpgradeChannel(config.UpgradeChannel) {
+		existing.UpgradeChannel = config.UpgradeChannel
+	}
 	return existing
 }
 

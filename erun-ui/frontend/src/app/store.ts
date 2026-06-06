@@ -38,6 +38,7 @@ import tenantDialogReducer from './slices/tenantDialogSlice';
 import tenantsReducer from './slices/tenantsSlice';
 import terminalReducer from './slices/terminalSlice';
 import terminalStatusReducer from './slices/terminalStatusSlice';
+import upgradeAllReducer from './slices/upgradeAllSlice';
 import { type ThunkExtra, thunkExtra } from './thunkExtra';
 
 export const store = configureStore({
@@ -63,6 +64,7 @@ export const store = configureStore({
     globalConfigDialog: globalConfigDialogReducer,
     autoStartPrompt: autoStartPromptReducer,
     contribute: contributeReducer,
+    upgradeAll: upgradeAllReducer,
     [wailsApi.reducerPath]: wailsApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>

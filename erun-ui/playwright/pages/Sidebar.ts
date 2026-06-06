@@ -18,6 +18,17 @@ export class Sidebar {
     await this.page.getByRole('button', { name: 'Open ERun settings' }).click();
   }
 
+  // openUpgradeAll clicks the "Upgrade all environments" header button, which
+  // resolves the cross-env upgrade plan and opens the preview dialog.
+  async openUpgradeAll(): Promise<void> {
+    await this.page.getByRole('button', { name: 'Upgrade all environments' }).click();
+  }
+
+  // upgradeAllDialog targets the Upgrade-all preview dialog.
+  upgradeAllDialog(): Locator {
+    return this.page.getByRole('dialog', { name: 'Upgrade all environments' });
+  }
+
   async openInitDialog(): Promise<void> {
     const button = this.page.getByRole('button', { name: 'Initialize new remote environment' });
     if (await button.isVisible().catch(() => false)) {
