@@ -48,29 +48,31 @@ test.describe('sidebar Upgrade all', () => {
     app,
     page,
   }) => {
+    // Realistic long *-snapshot-<timestamp> tags (the layout has to stay
+    // readable for these without wrapping mid-token).
     const plan = {
       items: [
         {
           tenant: 'acme',
           environment: 'lagging-env',
-          channel: 'stable',
-          current: '1.0.0',
-          target: '1.2.0',
+          channel: 'snapshot',
+          current: '1.0.86-snapshot-20260606082157',
+          target: '1.0.86-snapshot-20260606090936',
           lagging: true,
         },
         {
           tenant: 'acme',
           environment: 'current-env',
           channel: 'stable',
-          current: '1.2.0',
-          target: '1.2.0',
+          current: '1.0.85',
+          target: '1.0.85',
           lagging: false,
         },
         {
           tenant: 'acme',
           environment: 'unresolved-env',
           channel: 'snapshot',
-          current: '1.0.86-snapshot-20260605185826',
+          current: '1.0.80-snapshot-20260101000000',
           target: '',
           lagging: false,
         },
@@ -93,19 +95,21 @@ test.describe('sidebar Upgrade all', () => {
     await expect(dialog).toBeVisible({ timeout: 6_000 });
     await expect(dialog.getByRole('table', { name: 'Upgrade plan' })).toBeVisible();
 
-    // Lagging env → "will upgrade".
+    // Lagging env → "will upgrade", showing current → target.
     const laggingRow = dialog.locator('tr', { hasText: 'lagging-env' });
     await expect(laggingRow).toContainText('will upgrade');
+    await expect(laggingRow).toContainText('1.0.86-snapshot-20260606090936');
 
     // Known latest, current matches → "up to date".
     const currentRow = dialog.locator('tr', { hasText: 'current-env' });
     await expect(currentRow).toContainText('up to date');
 
     // Unresolved target → "latest unknown", and NOT "up to date" (the
-    // regression this fix prevents). The target still renders "(unset)".
+    // regression this fix prevents). The current version is still shown; the
+    // unknown target lives in the Status column, not as a "(unset)" target.
     const unresolvedRow = dialog.locator('tr', { hasText: 'unresolved-env' });
     await expect(unresolvedRow).toContainText('latest unknown');
-    await expect(unresolvedRow).toContainText('(unset)');
+    await expect(unresolvedRow).toContainText('1.0.80-snapshot-20260101000000');
     await expect(unresolvedRow).not.toContainText('up to date');
 
     // Summary counts only the lagging member, and a distinct line explains why
@@ -116,6 +120,9 @@ test.describe('sidebar Upgrade all', () => {
     // Only the one lagging env is upgradable; the button names that count and
     // stays enabled.
     await expect(dialog.getByRole('button', { name: 'Upgrade 1' })).toBeEnabled();
+
+    // Capture the populated plan for visual review of the layout.
+    await dialog.screenshot({ path: 'test-results/upgrade-all-plan.png' });
 
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(dialog).toBeHidden();

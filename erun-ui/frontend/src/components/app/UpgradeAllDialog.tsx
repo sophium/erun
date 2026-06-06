@@ -1,4 +1,4 @@
-import { ArrowUp, LoaderCircle, TriangleAlert } from 'lucide-react';
+import { ArrowRight, ArrowUp, LoaderCircle, TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
@@ -32,7 +32,7 @@ export function UpgradeAllDialog(): React.ReactElement {
         }
       }}
     >
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Upgrade all environments</DialogTitle>
           <DialogDescription>
@@ -109,13 +109,22 @@ function UpgradeAllBody({
   }
   const unresolvedCount = items.filter((item) => upgradeRowState(item) === 'unresolved').length;
   return (
-    <div className="max-h-72 overflow-y-auto">
+    <div className="max-h-80 overflow-y-auto">
       <table className="w-full text-sm" aria-label="Upgrade plan">
         <thead>
-          <tr className="text-left text-[12px] text-muted-foreground">
-            <th className="py-1 pr-3 font-medium">Environment</th>
-            <th className="py-1 pr-3 font-medium">Channel</th>
-            <th className="py-1 font-medium">Current → target</th>
+          <tr className="text-left text-[11px] tracking-wide text-muted-foreground uppercase">
+            <th scope="col" className="pr-4 pb-2 font-medium">
+              Environment
+            </th>
+            <th scope="col" className="pr-4 pb-2 font-medium">
+              Channel
+            </th>
+            <th scope="col" className="pr-4 pb-2 font-medium">
+              Version
+            </th>
+            <th scope="col" className="pb-2 text-right font-medium">
+              Status
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -124,11 +133,11 @@ function UpgradeAllBody({
           ))}
         </tbody>
       </table>
-      <p className="pt-2 text-[12px] text-muted-foreground">
+      <p className="pt-3 text-[12px] text-muted-foreground">
         {laggingCount} of {items.length} will be redeployed.
       </p>
       {unresolvedCount > 0 ? (
-        <p className="flex items-start gap-1.5 pt-1 text-[12px] text-amber-600 dark:text-amber-500">
+        <p className="flex items-start gap-1.5 pt-1.5 text-[12px] text-amber-600 dark:text-amber-500">
           <TriangleAlert className="mt-0.5 size-3.5 flex-none" aria-hidden="true" />
           <span>
             {unresolvedCount === 1
@@ -146,22 +155,59 @@ function UpgradeAllBody({
 function UpgradePlanRow({ item }: { item: UIUpgradePlanItem }): React.ReactElement {
   const state = upgradeRowState(item);
   return (
-    <tr className={state === 'upToDate' ? 'text-muted-foreground' : 'text-foreground'}>
-      <td className="py-1 pr-3">
-        {item.tenant} / {item.environment}
+    <tr className="border-t border-border/60 align-top">
+      <td className="py-2.5 pr-4">
+        <div className="leading-tight font-medium break-words text-foreground">
+          {item.environment}
+        </div>
+        <div className="text-[11px] break-words text-muted-foreground">{item.tenant}</div>
       </td>
-      <td className="py-1 pr-3">{item.channel}</td>
-      <td className="py-1 font-mono text-[12px]">
-        {displayUpgradeVersion(item.current)} → {displayUpgradeVersion(item.target)}
+      <td className="py-2.5 pr-4 whitespace-nowrap text-muted-foreground">{item.channel}</td>
+      <td className="py-2.5 pr-4">
+        <UpgradeVersionCell item={item} state={state} />
+      </td>
+      <td className="py-2.5 text-right">
         <UpgradePlanRowStatus state={state} />
       </td>
     </tr>
   );
 }
 
+// UpgradeVersionCell shows the env's runtime version. Only a lagging env has a
+// transition worth showing, so it stacks current → target with the versions
+// left-aligned (an arrow gutter keeps long *-snapshot-<ts> tags lined up so the
+// changed portion is scannable); up-to-date and unresolved envs render the
+// single current version, with the Status column carrying the rest.
+function UpgradeVersionCell({
+  item,
+  state,
+}: {
+  item: UIUpgradePlanItem;
+  state: UpgradeRowState;
+}): React.ReactElement {
+  const current = displayUpgradeVersion(item.current);
+  if (state !== 'lagging') {
+    return <span className="font-mono text-[12px] whitespace-nowrap">{current}</span>;
+  }
+  return (
+    <div className="font-mono text-[12px] leading-snug">
+      <div className="flex items-center gap-1.5 whitespace-nowrap text-muted-foreground">
+        <span className="w-3 flex-none" aria-hidden="true" />
+        <span>{current}</span>
+      </div>
+      <div className="flex items-center gap-1.5 whitespace-nowrap text-foreground">
+        <ArrowRight className="size-3 flex-none text-muted-foreground" aria-hidden="true" />
+        <span>{displayUpgradeVersion(item.target)}</span>
+      </div>
+    </div>
+  );
+}
+
 function UpgradePlanRowStatus({ state }: { state: UpgradeRowState }): React.ReactElement {
   if (state === 'lagging') {
-    return <span className="ml-2 font-sans text-[11px] text-primary">will upgrade</span>;
+    return (
+      <span className="text-[11px] font-medium whitespace-nowrap text-primary">will upgrade</span>
+    );
   }
   if (state === 'unresolved') {
     // Distinct from "up to date": the channel's latest could not be resolved,
@@ -169,13 +215,13 @@ function UpgradePlanRowStatus({ state }: { state: UpgradeRowState }): React.Reac
     // success-coloured "up to date") keeps the status honest and non-color-only
     // (WCAG). Mirrors the CLI's "(target unresolved)".
     return (
-      <span className="ml-2 inline-flex items-center gap-1 align-middle font-sans text-[11px] text-amber-600 dark:text-amber-500">
-        <TriangleAlert className="size-3" aria-hidden="true" />
+      <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-medium text-amber-600 dark:text-amber-500">
+        <TriangleAlert className="size-3 flex-none" aria-hidden="true" />
         latest unknown
       </span>
     );
   }
-  return <span className="ml-2 font-sans text-[11px] text-muted-foreground">up to date</span>;
+  return <span className="text-[11px] whitespace-nowrap text-muted-foreground">up to date</span>;
 }
 
 type UpgradeRowState = 'lagging' | 'upToDate' | 'unresolved';
