@@ -1,4 +1,4 @@
-import { ArrowUp, LoaderCircle } from 'lucide-react';
+import { ArrowUp, LoaderCircle, TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
@@ -107,6 +107,7 @@ function UpgradeAllBody({
       </p>
     );
   }
+  const unresolvedCount = items.filter((item) => upgradeRowState(item) === 'unresolved').length;
   return (
     <div className="max-h-72 overflow-y-auto">
       <table className="w-full text-sm" aria-label="Upgrade plan">
@@ -119,31 +120,82 @@ function UpgradeAllBody({
         </thead>
         <tbody>
           {items.map((item) => (
-            <tr
-              key={`${item.tenant}/${item.environment}`}
-              className={item.lagging ? 'text-foreground' : 'text-muted-foreground'}
-            >
-              <td className="py-1 pr-3">
-                {item.tenant} / {item.environment}
-              </td>
-              <td className="py-1 pr-3">{item.channel}</td>
-              <td className="py-1 font-mono text-[12px]">
-                {displayUpgradeVersion(item.current)} → {displayUpgradeVersion(item.target)}
-                {item.lagging ? (
-                  <span className="ml-2 font-sans text-[11px] text-primary">will upgrade</span>
-                ) : (
-                  <span className="ml-2 font-sans text-[11px]">up to date</span>
-                )}
-              </td>
-            </tr>
+            <UpgradePlanRow key={`${item.tenant}/${item.environment}`} item={item} />
           ))}
         </tbody>
       </table>
       <p className="pt-2 text-[12px] text-muted-foreground">
         {laggingCount} of {items.length} will be redeployed.
       </p>
+      {unresolvedCount > 0 ? (
+        <p className="flex items-start gap-1.5 pt-1 text-[12px] text-amber-600 dark:text-amber-500">
+          <TriangleAlert className="mt-0.5 size-3.5 flex-none" aria-hidden="true" />
+          <span>
+            {unresolvedCount === 1
+              ? '1 environment couldn’t be checked against the latest version for its channel'
+              : `${String(unresolvedCount)} environments couldn’t be checked against the latest version for their channel`}{' '}
+            — the runtime image registry may be unreachable or have no matching tags, so there’s
+            nothing to redeploy them to.
+          </span>
+        </p>
+      ) : null}
     </div>
   );
+}
+
+function UpgradePlanRow({ item }: { item: UIUpgradePlanItem }): React.ReactElement {
+  const state = upgradeRowState(item);
+  return (
+    <tr className={state === 'upToDate' ? 'text-muted-foreground' : 'text-foreground'}>
+      <td className="py-1 pr-3">
+        {item.tenant} / {item.environment}
+      </td>
+      <td className="py-1 pr-3">{item.channel}</td>
+      <td className="py-1 font-mono text-[12px]">
+        {displayUpgradeVersion(item.current)} → {displayUpgradeVersion(item.target)}
+        <UpgradePlanRowStatus state={state} />
+      </td>
+    </tr>
+  );
+}
+
+function UpgradePlanRowStatus({ state }: { state: UpgradeRowState }): React.ReactElement {
+  if (state === 'lagging') {
+    return <span className="ml-2 font-sans text-[11px] text-primary">will upgrade</span>;
+  }
+  if (state === 'unresolved') {
+    // Distinct from "up to date": the channel's latest could not be resolved,
+    // so we can't tell whether this env lags. Amber + icon (not muted, not the
+    // success-coloured "up to date") keeps the status honest and non-color-only
+    // (WCAG). Mirrors the CLI's "(target unresolved)".
+    return (
+      <span className="ml-2 inline-flex items-center gap-1 align-middle font-sans text-[11px] text-amber-600 dark:text-amber-500">
+        <TriangleAlert className="size-3" aria-hidden="true" />
+        latest unknown
+      </span>
+    );
+  }
+  return <span className="ml-2 font-sans text-[11px] text-muted-foreground">up to date</span>;
+}
+
+type UpgradeRowState = 'lagging' | 'upToDate' | 'unresolved';
+
+// upgradeRowState mirrors the three-way outcome the CLI's `erun upgrade` already
+// renders (see laggingSuffix): an opted-in env either lags a known channel
+// latest (will be redeployed), already sits at the known latest (up to date),
+// or has no resolvable target — the registry lookup failed or returned no
+// matching tags, which the CLI reports as "(target unresolved)". The desktop
+// must not collapse that third state into "up to date": doing so mislabels a
+// failed/empty lookup as success and makes Upgrade all look like it is doing
+// nothing.
+function upgradeRowState(item: UIUpgradePlanItem): UpgradeRowState {
+  if (item.lagging) {
+    return 'lagging';
+  }
+  if (item.target.trim() === '') {
+    return 'unresolved';
+  }
+  return 'upToDate';
 }
 
 function displayUpgradeVersion(value: string): string {
