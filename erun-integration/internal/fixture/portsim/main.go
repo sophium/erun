@@ -1,10 +1,17 @@
 // Command portsim is a stand-in for `kubectl port-forward` in integration
-// tests. It listens on the requested local TCP port and accepts (then
-// immediately closes) any inbound connections so production code's
-// "is the local port reachable?" polling succeeds. It runs until killed,
-// matching the long-lived behavior of a real port-forward.
+// tests. It listens on the requested local TCP port until killed, mirroring
+// the long-lived behavior of a real port-forward, and answers production's
+// reachability probes on each accepted connection:
 //
-// Usage: portsim --port PORT
+//   - With --banner set (the sshd port), it writes the banner first so the
+//     SSH probe — which reads the server greeting and checks for a "SSH-"
+//     prefix — succeeds.
+//   - Without a banner (the MCP and API ports), it reads the probe's HTTP
+//     request and replies with a minimal "200 OK". The MCP probe (GET /mcp)
+//     and the API probe (GET /healthz, which requires a 2xx) both need a real
+//     HTTP response, so a bare accept-and-close does not satisfy them.
+//
+// Usage: portsim --port PORT [--banner "SSH-2.0-test\r\n"]
 package main
 
 import (
@@ -15,6 +22,7 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
+	"time"
 )
 
 func main() {
@@ -45,11 +53,29 @@ func main() {
 		if err != nil {
 			return
 		}
-		if len(bannerBytes) > 0 {
-			_, _ = conn.Write(bannerBytes)
-		}
-		_ = conn.Close()
+		go serve(conn, bannerBytes)
 	}
+}
+
+// serve answers a single probe connection. A real kubectl port-forward is
+// opaque TCP, but production's reachability checks are protocol-specific, and
+// the caller signals which protocol a port speaks by whether it sets a banner:
+//
+//   - banner set → SSH: the probe reads the server greeting and checks for a
+//     "SSH-" prefix, so we write the banner first (server-speaks-first).
+//   - no banner → HTTP (MCP /mcp, API /healthz): the probe issues an HTTP
+//     request and requires a successful response, so we read the request and
+//     reply with a minimal 200. We drain the request before closing so the
+//     client reads the full response without a connection-reset race.
+func serve(conn net.Conn, bannerBytes []byte) {
+	defer func() { _ = conn.Close() }()
+	if len(bannerBytes) > 0 {
+		_, _ = conn.Write(bannerBytes)
+		return
+	}
+	_ = conn.SetReadDeadline(time.Now().Add(time.Second))
+	_, _ = conn.Read(make([]byte, 4096))
+	_, _ = conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"))
 }
 
 // decodeBanner unescapes \r and \n so callers can pass "SSH-2.0-test\r\n"
