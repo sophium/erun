@@ -186,11 +186,12 @@ test.describe('sidebar Upgrade all', () => {
     await expect(dialog).toBeVisible({ timeout: 6_000 });
     await dialog.getByRole('button', { name: 'Upgrade 1' }).click();
 
-    // The command was dispatched against an auto-resolved host env (non-empty
-    // tenant + environment), proving it did not block on a missing selection.
+    // The command runs from the environment being upgraded (the lagging plan
+    // member), not an unrelated env, and it did not block on a missing
+    // selection.
     await expect.poll(() => upgradeHosts.length).toBeGreaterThan(0);
-    expect(upgradeHosts[0]?.tenant, 'host tenant resolved').toBeTruthy();
-    expect(upgradeHosts[0]?.environment, 'host env resolved').toBeTruthy();
+    expect(upgradeHosts[0]?.tenant).toBe('acme');
+    expect(upgradeHosts[0]?.environment).toBe('lagging-env');
 
     // The pre-fix block message must never appear.
     await expect(page.getByText('No environments are configured to upgrade')).toHaveCount(0);
