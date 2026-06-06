@@ -141,6 +141,23 @@ export class Sidebar {
     return names;
   }
 
+  // firstEnvironmentExcludingLocal returns the first {tenant, env} in sidebar
+  // order whose env name is not the local default ("local"). Tests that need a
+  // normal environment use this so they never operate on the special local
+  // default env (e.g. erun/local), whose legacy type and local-shell behaviour
+  // don't fit a deployed-environment contract. Returns null when none exists.
+  async firstEnvironmentExcludingLocal(): Promise<{ tenant: string; env: string } | null> {
+    const tenants = await this.tenants();
+    for (const tenant of tenants) {
+      const envs = await this.environmentsFor(tenant);
+      const env = envs.find((name) => name !== 'local');
+      if (env !== undefined) {
+        return { tenant, env };
+      }
+    }
+    return null;
+  }
+
   async environmentsFor(tenant: string): Promise<string[]> {
     // Make sure the tenant is expanded so its env rows are mounted; the
     // edit buttons only exist while the group is open.
