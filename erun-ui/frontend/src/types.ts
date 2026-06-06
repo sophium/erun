@@ -24,6 +24,18 @@ export interface UIEnvironment {
   autoStart?: boolean;
 }
 
+// UIWorkingIssue mirrors the Go uiWorkingIssue read model returned by the
+// EnvironmentWorkingIssue binding: the env worktree's current branch and, when
+// the branch names an issue, its resolved title. `available` is false for
+// remote-worktree envs whose branch can't be read from the host.
+export interface UIWorkingIssue {
+  available: boolean;
+  branch?: string;
+  issueNumber?: number;
+  issueTitle?: string;
+  reason?: string;
+}
+
 export interface UITenant {
   name: string;
   defaultEnvironment?: string;

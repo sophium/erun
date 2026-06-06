@@ -11,6 +11,7 @@ For CI/CD pipelines and headless workflows, use the [CLI](/cli/overview) instead
 ## Control panel
 
 - **Sidebar of projects and environments.** Every project and environment at a glance, with live status — running, stopping, idle, errored. Switch between them without typing commands.
+- **Environment details on hover.** Hover an environment row to see its runtime version, the issue it's working on (the current git branch and, when the branch names an issue, its title), and what it's doing right now. Branch and issue are shown for environments whose worktree is on your machine (local-agent envs).
 - **One-click lifecycle.** Start, stop, restart, and delete environments from the sidebar.
 - **Cloud status in real time.** Start, stop, and watch the cloud machines that back remote environments. The sidebar shows status as they wake up or shut down.
 - **Activities panel with failure details and fixes.** A queue of recent and in-flight operations — deploys, opens, builds. When a deploy fails, the entry keeps the captured command output (the real helm/kubectl error behind the one-line summary): expand **Show output** to read it, or use **Copy failure report** to package that output together with the environment, version, and container status so you can hand the whole picture to whoever can help. The failed entry also offers one-click recovery: **Run doctor** to troubleshoot (see [`erun doctor`](/cli/doctor)), **Rebuild & redeploy** to force a clean rebuild, and **Clear pending helm release** when a release is stuck.

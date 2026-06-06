@@ -9,9 +9,9 @@ import { closeEnvironment, openSelection } from '@/app/sessionThunks';
 import { envKey } from '@/app/slices/sessionsSlice';
 import { selectionKey } from '@/app/versionSuggestions';
 import { IconTooltip } from '@/components/app/IconTooltip';
+import { EnvHoverCard } from '@/components/app/Sidebar.EnvHoverCard';
 import { deriveEnvironmentRow } from '@/components/app/Sidebar.helpers';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import type { UISelection } from '@/types';
 
@@ -201,7 +201,7 @@ export function EnvironmentRow({
   const dispatch = useAppDispatch();
   const { selectedSelection, tenants, isOpening, runningCommand, aiBusy, isOpen, reconnecting } =
     useEnvironmentRowSelectors(tenantName, environmentName);
-  const { selected, busy, busyLabel, isLocal, selection } = deriveEnvironmentRow(
+  const { selected, busy, busyLabel, isLocal, runtimeVersion, selection } = deriveEnvironmentRow(
     tenantName,
     environmentName,
     selectedSelection,
@@ -214,36 +214,37 @@ export function EnvironmentRow({
 
   const rowLabel = `${tenantName} / ${environmentName}${isLocal ? ' (local)' : ''}`;
   return (
-    <div
+    <EnvHoverCard
       className={cn(
         'group relative mr-1 ml-1 flex h-8 items-center rounded-md pr-1.5 text-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
         selected &&
           'bg-primary text-primary-foreground shadow-sm hover:bg-primary hover:text-primary-foreground',
       )}
+      tenantName={tenantName}
+      environmentName={environmentName}
+      selection={selection}
+      isLocal={isLocal}
+      runtimeVersion={runtimeVersion}
+      activityLabel={busy ? busyLabel : ''}
     >
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            className={cn(
-              'flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent py-0 pr-2 pl-10 text-left text-sm leading-[1.2] tracking-normal text-inherit',
-              selected ? 'font-medium' : 'font-normal',
-            )}
-            aria-label={rowLabel}
-            aria-current={selected ? 'page' : undefined}
-            onClick={() => {
-              void dispatch(openSelection(selection)).catch((error: unknown) => {
-                dispatch(showTerminalMessage(readError(error)));
-              });
-            }}
-          >
-            <span className="min-w-0 truncate">{environmentName}</span>
-            {isLocal && <LocalEnvBadge selected={selected} />}
-            {busy && <BusyRowSpinner label={busyLabel} />}
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="right">{rowLabel}</TooltipContent>
-      </Tooltip>
+      <button
+        type="button"
+        className={cn(
+          'flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-1.5 border-0 bg-transparent py-0 pr-2 pl-10 text-left text-sm leading-[1.2] tracking-normal text-inherit',
+          selected ? 'font-medium' : 'font-normal',
+        )}
+        aria-label={rowLabel}
+        aria-current={selected ? 'page' : undefined}
+        onClick={() => {
+          void dispatch(openSelection(selection)).catch((error: unknown) => {
+            dispatch(showTerminalMessage(readError(error)));
+          });
+        }}
+      >
+        <span className="min-w-0 truncate">{environmentName}</span>
+        {isLocal && <LocalEnvBadge selected={selected} />}
+        {busy && <BusyRowSpinner label={busyLabel} />}
+      </button>
       {isOpen && (
         <OpenEnvDot
           tenantName={tenantName}
@@ -257,7 +258,7 @@ export function EnvironmentRow({
         selected={selected}
         selection={selection}
       />
-    </div>
+    </EnvHoverCard>
   );
 }
 
