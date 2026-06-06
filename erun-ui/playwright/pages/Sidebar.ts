@@ -79,6 +79,19 @@ export class Sidebar {
     return this.page.locator(`button[aria-label^="${tenant} / ${env}"]`).first();
   }
 
+  // hoverEnvironmentRow moves the pointer over the env row, which opens the
+  // env hover card (issue #437). Hovering the inner row button enters the row
+  // container that carries the open handler.
+  async hoverEnvironmentRow(tenant: string, env: string): Promise<void> {
+    await this.envRowButton(tenant, env).hover();
+  }
+
+  // envHoverCard targets the hover card popover for an env row. Its
+  // aria-label is "<tenant> / <env> details".
+  envHoverCard(tenant: string, env: string): Locator {
+    return this.page.getByRole('dialog', { name: `${tenant} / ${env} details` });
+  }
+
   // hasLocalBadge reports whether the env row renders the LOCAL pill
   // (the <span aria-label="Local environment"> inside the row button).
   async hasLocalBadge(tenant: string, env: string): Promise<boolean> {

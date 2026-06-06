@@ -51,6 +51,7 @@ export interface EnvironmentRowDerived {
   busy: boolean;
   busyLabel: string;
   isLocal: boolean;
+  runtimeVersion: string;
   selection: UISelection;
 }
 
@@ -92,6 +93,7 @@ export function deriveEnvironmentRow(
     busy,
     busyLabel,
     isLocal,
+    runtimeVersion: environment?.runtimeVersion?.trim() ?? '',
     selection: { tenant: tenantName, environment: environmentName },
   };
 }
