@@ -53,7 +53,14 @@ test.describe('layout panels', () => {
     expect(narrowCols).toBeGreaterThan(0);
 
     await app.titlebar.toggleReviewPanel();
-    await expect.poll(() => readTerminalCols(page)).toBe(wideCols);
+    // xterm's FitAddon floors cols from the available pixel width, so a panel
+    // open→close round-trip can settle one column shy of the original from
+    // sub-pixel rounding. The #433 guard is that the terminal returns to ~wide
+    // (not stuck near narrowCols, which is many columns off), so tolerate a
+    // 1-col delta rather than requiring exact equality.
+    await expect
+      .poll(async () => Math.abs((await readTerminalCols(page)) - wideCols))
+      .toBeLessThanOrEqual(1);
   });
 
   test('debug panel toggle reveals the resize handle', async ({ app, page }) => {
