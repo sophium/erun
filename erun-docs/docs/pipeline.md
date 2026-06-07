@@ -21,6 +21,18 @@ ERun's other half. The [environment model](/intro) gives you a namespace per tas
 
 You rarely run the steps by hand. `erun build --release` folds the release step into the build, and `erun build --deploy` carries straight through push and rollout — so one command runs the flow and the version threads through for you.
 
+## What `build` does
+
+`build` turns the source in an [agent env](/concepts/environment-types) into versioned container images. It runs **only in an agent env** — a [runtime env](/concepts/environment-types) has no worktree and no source, so it never builds; it only receives already-built artifacts through `deploy`. Each run:
+
+- compiles every component's image for both `linux/amd64` and `linux/arm64`, so an arch-specific bug surfaces on your machine instead of at remote deploy time;
+- promotes unchanged components straight from the [fingerprint cache](/agent-reference/conventions-spec#fingerprint-cache) rather than rebuilding them;
+- tags each image with the resolved version — a timestamped snapshot tag while you iterate, or a stable tag when you fold in `--release`.
+
+The builder runs whenever you iterate on a change — on demand from the CLI, the desktop app, or an Agent's MCP call, and on every commit that records a [build](/collaboration/builds) against a review. The same build logic backs all of those, so the image you push is always the one you just produced.
+
+**(Planned — [#471](https://github.com/sophium/erun/issues/471).)** Before producing the images, `build` also runs the project's unit and integration tests and fails the build if any fail — so a successful build means a *tested*, deployable artifact, which is what marks a [review](/collaboration/reviews) `READY`. See [`erun build`](/cli/build) for the full lifecycle, flags, dry-run output, and error behaviour.
+
 ## Two ways to ship
 
 `release` is for stable, promotable versions — but you don't always need one, and that's the pipeline's range:
