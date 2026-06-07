@@ -25,28 +25,9 @@ You rarely run the steps by hand. `erun build --release` folds the release step 
 
 `build` turns the source in an [agent env](/concepts/environment-types) into versioned container images. It runs **only in an agent env** — a [runtime env](/concepts/environment-types) has no source, so it never builds; it only receives already-built artefacts through `deploy`. Each discovered component is built through its Dockerfile as a multi-stage image: the builder stage runs the tests and produces the artefact, the runtime stage ships only that artefact, and a failing test stops the build before any image exists.
 
-```mermaid
-flowchart LR
-    SRC("component + Dockerfile"):::endpoint --> DEPS
-
-    subgraph BUILDER [builder stage]
-        DEPS("toolchain + deps"):::step --> TEST("run tests"):::step --> COMPILE("compile artefact"):::step
-    end
-
-    subgraph RUNTIME [runtime stage]
-        SHIP("ship artefact only"):::step
-    end
-
-    COMPILE -->|"COPY artefact"| SHIP
-    SHIP --> IMG("tagged image · amd64 + arm64"):::endpoint
-    TEST -->|"test fails"| STOP("build stops · no image"):::endpoint
-
-    class BUILDER,RUNTIME namespace
-
-    classDef endpoint fill:#0f1320,color:#ffffff,stroke:#0a1019,stroke-width:1px,rx:14,ry:14;
-    classDef step     fill:#ffffff,color:#0f1320,stroke:#0891b2,stroke-width:1.5px,rx:14,ry:14;
-    classDef namespace fill:#fbfcfd,stroke:#cbd5e0,stroke-width:1px,rx:18,ry:18;
-```
+<figure className="erun-hero-figure">
+  <img src="/img/build-stages.svg" alt="One Dockerfile with two stages: a builder stage that runs the tests then compiles the artefact, and a runtime stage that ships only that artefact, producing a tagged container image for amd64 and arm64." />
+</figure>
 
 **How it finds what to build.** ERun ships no build system — it resolves the build from the project's [conventions](/concepts/conventions). It discovers each component's Dockerfile under the tenant's devops module (`<tenant>-devops/docker/<component>/Dockerfile`), derives the build order from the `FROM …:${ERUN_VERSION}` links between components, and tags every image with the version it finds by walking up to the nearest `VERSION` file. Drop a new component into that layout and it's picked up automatically — there's nothing per-project to wire up. The exact rules are in [Build path resolution](/reference/configuration-build-paths).
 
