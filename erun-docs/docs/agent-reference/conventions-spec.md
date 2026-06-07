@@ -91,16 +91,22 @@ The Kubernetes Service named `<component>` is reachable in-cluster as:
 
 ## Multi-stage Dockerfile expectation
 
-ERun expects Dockerfiles to use the multi-stage builder pattern — a builder stage that provisions toolchain and produces an artefact, then a runtime stage that ships only the artefact.
+ERun expects Dockerfiles to use the multi-stage builder pattern — a builder stage that provisions toolchain, runs the tests, and produces an artefact, then a runtime stage that ships only the artefact.
 
 Minimal skeleton:
 
 ```dockerfile
-# Stage 1: builder — provisions toolchain, produces the artefact.
+# Stage 1: builder — provisions toolchain, runs tests, produces the artefact.
 FROM golang:1.26.0 AS builder
 WORKDIR /src
 COPY . .
+# Tests that don't depend on a deployed artefact run here. A failure fails
+# the build, so no image is produced from a red test run.
 RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go test ./...
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
     go build -trimpath -ldflags "-s -w" -o /out/app ./cmd/app
 
 # Stage 2: runtime — thin, no build tools.
@@ -116,6 +122,17 @@ Why ERun expects this:
 - **Security separation** — production images don't ship a build toolchain.
 
 Single-stage Dockerfiles are not rejected, but the multi-arch and cache benefits don't apply.
+
+### Tests run in the builder stage
+
+ERun adds no separate test phase — `erun build` is `docker build`, so tests run where the Dockerfile puts them. Run every test that **does not depend on a deployed artefact** in the builder stage, as a `RUN` step before the artefact is produced:
+
+- **Unit tests**, and
+- **integration tests that run in-process or against fixtures the build can stand up itself** (an embedded database, a stub server, a temp filesystem) — anything that needs no live cluster, no running service, and no network to a deployed dependency.
+
+Because the test step is part of `docker build`, a failing test fails the build and no image is tagged — so a successful build is always a tested build, which is what marks a [review](/collaboration/reviews) `READY`. Use the same BuildKit cache mounts for the test and build steps so dependency downloads and compiled objects are shared between them.
+
+Tests that **do** require a running deployment — end-to-end checks against live services — cannot run in the builder stage. They run against a deployed environment after [`deploy`](/cli/deploy), not during build.
 
 ## Docker build context resolution
 

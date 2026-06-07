@@ -20,7 +20,7 @@ The image tag in an agent env is a snapshot built from the nearest `VERSION` fil
 
 Runtime envs have no worktree and no source to build from — they receive already-built artifacts through [`erun deploy`](/cli/deploy). Running `erun build` where there is no Docker build context (such as a runtime env) fails because there is nothing to build, rather than producing an unexpected artifact.
 
-**(Planned — [#471](https://github.com/sophium/erun/issues/471).)** Before it produces the images, `erun build` runs the project's unit and integration tests and aborts the build if any fail — so a successful build is always a *tested* artifact. Test execution surfaces in the `--dry-run` trace like every other build action. Until this lands, `erun build` only compiles images; run your test suite as a separate step.
+`erun build` is `docker build` for each discovered component — it adds no separate test phase of its own. Run your tests in the Dockerfile's [builder stage](/agent-reference/conventions-spec#multi-stage-dockerfile-expectation): every test that doesn't depend on a deployed artefact (unit tests, and integration tests against in-build fixtures) belongs there, and a failure fails the build before any image is tagged. End-to-end tests that need a running deployment run after [`erun deploy`](/cli/deploy), not during build.
 
 ## Flags
 

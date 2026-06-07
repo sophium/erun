@@ -23,15 +23,15 @@ You rarely run the steps by hand. `erun build --release` folds the release step 
 
 ## What `build` does
 
-`build` turns the source in an [agent env](/concepts/environment-types) into versioned container images. It runs **only in an agent env** — a [runtime env](/concepts/environment-types) has no worktree and no source, so it never builds; it only receives already-built artifacts through `deploy`. Each run:
+`build` turns the source in an [agent env](/concepts/environment-types) into versioned container images. It runs **only in an agent env** — a [runtime env](/concepts/environment-types) has no source, so it never builds; it only receives already-built artifacts through `deploy`.
 
-- compiles every component's image for both `linux/amd64` and `linux/arm64`, so an arch-specific bug surfaces on your machine instead of at remote deploy time;
-- promotes unchanged components straight from the [fingerprint cache](/agent-reference/conventions-spec#fingerprint-cache) rather than rebuilding them;
-- tags each image with the resolved version — a timestamped snapshot tag while you iterate, or a stable tag when you fold in `--release`.
+**How it finds what to build.** ERun ships no build system — it resolves the build from the project's [conventions](/concepts/conventions). It discovers each component's Dockerfile under the tenant's devops module (`<tenant>-devops/docker/<component>/Dockerfile`), derives the build order from the `FROM …:${ERUN_VERSION}` links between components, and tags every image with the version it finds by walking up to the nearest `VERSION` file. Drop a new component into that layout and it's picked up automatically — there's nothing per-project to wire up. The exact rules are in [Build path resolution](/reference/configuration-build-paths).
 
-The builder runs whenever you iterate on a change — on demand from the CLI, the desktop app, or an Agent's MCP call, and on every commit that records a [build](/collaboration/builds) against a review. The same build logic backs all of those, so the image you push is always the one you just produced.
+**The steps.** For each component, in dependency order: build for both `linux/amd64` and `linux/arm64`, promoting an unchanged component straight from the [fingerprint cache](/agent-reference/conventions-spec#fingerprint-cache) instead of rebuilding; then tag it with the resolved version — a timestamped snapshot while you iterate, or a stable tag when you fold in `--release` (which also pushes and assembles the multi-arch manifest list). The full contract is the [multi-architecture build](/agent-reference/conventions-spec#multi-architecture-build-contract).
 
-**(Planned — [#471](https://github.com/sophium/erun/issues/471).)** Before producing the images, `build` also runs the project's unit and integration tests and fails the build if any fail — so a successful build means a *tested*, deployable artifact, which is what marks a [review](/collaboration/reviews) `READY`. See [`erun build`](/cli/build) for the full lifecycle, flags, dry-run output, and error behaviour.
+**How you set it up — and where tests run.** Give each component a Dockerfile in the layout above, written as a [multi-stage build](/agent-reference/conventions-spec#multi-stage-dockerfile-expectation): a builder stage that provisions the toolchain and compiles the artefact, then a thin runtime stage that ships only it. Run your tests in the builder stage — every test that doesn't depend on a deployed artefact (unit tests, and integration tests against in-build fixtures) belongs there, as a step before the artefact is produced. Because `build` is `docker build`, a failing test fails the build and no image is tagged, so a green build is a tested build — which is what marks a [review](/collaboration/reviews) `READY`. End-to-end tests that need a running deployment run after `deploy`, not during build.
+
+See [`erun build`](/cli/build) for flags, dry-run output, and error behaviour.
 
 ## Two ways to ship
 
