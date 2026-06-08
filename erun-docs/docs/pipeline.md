@@ -23,17 +23,37 @@ You rarely run the steps by hand. `erun build --release` folds the release step 
 
 ## What `build` does
 
-`build` turns the source in an [agent env](/concepts/environment-types) into versioned container images. It runs **only in an agent env** — a [runtime env](/concepts/environment-types) has no source, so it never builds; it only receives already-built artefacts through `deploy`. Each discovered component is built through its Dockerfile as a multi-stage image: the builder stage runs the tests and produces the artefact, the runtime stage ships only that artefact, and a failing test stops the build before any image exists.
+`build` turns the source in an [agent env](/concepts/environment-types) into versioned container images — it runs **only in an agent env**, since a [runtime env](/concepts/environment-types) has no source and only receives already-built artefacts through `deploy`. It resolves the whole build from the project's [conventions](/concepts/conventions); there's nothing per-project to wire up.
+
+### How it finds what to build
+
+It discovers each component's Dockerfile under the tenant's devops module — every `docker/<component>/` directory is one image — and tags each with the version from the nearest `VERSION` file.
+
+<figure className="erun-hero-figure">
+  <img src="/img/build-discovery.svg" alt="Under the project root, the tenant-devops/docker/ directory holds one directory per component — api, web, worker — each containing a Dockerfile and an optional VERSION file. Every such directory is one image." />
+</figure>
+
+Build order follows the `FROM …:${ERUN_VERSION}` links between components; the exact rules are in [Build path resolution](/reference/configuration-build-paths).
+
+### The steps
+
+Each component builds for both architectures, reuses unchanged layers from the [fingerprint cache](/agent-reference/conventions-spec#fingerprint-cache), and is tagged with the resolved version.
+
+<figure className="erun-hero-figure">
+  <img src="/img/build-steps.svg" alt="Per component, left to right: from the component plus its Dockerfile, build for amd64 and arm64 (reusing unchanged layers from the cache), then tag with the version (snapshot or release), producing the container image." />
+</figure>
+
+A snapshot tag while you iterate; `--release` stamps a stable tag and assembles the multi-arch manifest list. Full contract: [multi-architecture build](/agent-reference/conventions-spec#multi-architecture-build-contract).
+
+### How you set it up — and where tests run
+
+Each component's Dockerfile is a [multi-stage build](/agent-reference/conventions-spec#multi-stage-dockerfile-expectation): a builder stage that compiles the artefact and runs the tests, then a thin runtime stage that ships only the artefact.
 
 <figure className="erun-hero-figure">
   <img src="/img/build-stages.svg" alt="One Dockerfile with two stages: a builder stage that compiles the artefact and runs the tests, and a runtime stage that ships only that artefact, producing a tagged container image for amd64 and arm64." />
 </figure>
 
-**How it finds what to build.** ERun ships no build system — it resolves the build from the project's [conventions](/concepts/conventions). It discovers each component's Dockerfile under the tenant's devops module (`<tenant>-devops/docker/<component>/Dockerfile`), derives the build order from the `FROM …:${ERUN_VERSION}` links between components, and tags every image with the version it finds by walking up to the nearest `VERSION` file. Drop a new component into that layout and it's picked up automatically — there's nothing per-project to wire up. The exact rules are in [Build path resolution](/reference/configuration-build-paths).
-
-**The steps.** For each component, in dependency order: build for both `linux/amd64` and `linux/arm64`, promoting an unchanged component straight from the [fingerprint cache](/agent-reference/conventions-spec#fingerprint-cache) instead of rebuilding; then tag it with the resolved version — a timestamped snapshot while you iterate, or a stable tag when you fold in `--release` (which also pushes and assembles the multi-arch manifest list). The full contract is the [multi-architecture build](/agent-reference/conventions-spec#multi-architecture-build-contract).
-
-**How you set it up — and where tests run.** Give each component a Dockerfile in the layout above, written as a [multi-stage build](/agent-reference/conventions-spec#multi-stage-dockerfile-expectation): a builder stage that provisions the toolchain and compiles the artefact, then a thin runtime stage that ships only it. Run your tests in the builder stage — every test that doesn't depend on a deployed artefact (unit tests, and integration tests against in-build fixtures) belongs there, as a `RUN` step alongside the compile. Because `build` is `docker build`, a failing test fails the build and no image is tagged, so a green build is a tested build — which is what marks a [review](/collaboration/reviews) `READY`. End-to-end tests that need a running deployment run after `deploy`, not during build.
+Run every test that doesn't need a deployed artefact (unit tests, and integration tests against in-build fixtures) in the builder stage — because `build` is `docker build`, a failing test fails the build and no image is tagged, so a green build is a tested build that marks a [review](/collaboration/reviews) `READY`. End-to-end tests that need a running deployment run after `deploy`.
 
 See [`erun build`](/cli/build) for flags, dry-run output, and error behaviour.
 
