@@ -134,6 +134,8 @@ Run every test that **does not depend on a deployed artefact** there:
 
 Because the test step is part of `docker build`, a failing test fails the build and no image is tagged — so a successful build is always a tested build, which is what marks a [review](/collaboration/reviews) `READY`. Keep the test step in the builder stage (never the runtime stage) so test dependencies stay out of the shipped image, and reuse the build cache (e.g. BuildKit `--mount=type=cache`) across the test and compile steps so downloads and intermediate objects are shared.
 
+Whether the test step runs before or after the compile step is toolchain-specific, and doesn't matter to the gate. `go test` compiles and runs the tests on its own, so it can precede the `go build` that produces the shipped binary (as in the skeleton above); a toolchain that exercises a compiled artefact would build first, then test. The only requirement is that the test command is a `RUN` in the builder stage, so a non-zero exit aborts the build before the runtime stage is reached.
+
 Tests that **do** require a running deployment — end-to-end checks against live services — cannot run in the builder stage. They run against a deployed environment after [`deploy`](/cli/deploy), not during build.
 
 ## Docker build context resolution

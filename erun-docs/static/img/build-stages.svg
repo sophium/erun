@@ -1,6 +1,6 @@
 <svg viewBox="0 0 880 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="buildStagesTitle"
      font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
-  <title id="buildStagesTitle">A multi-stage Docker build inside one Dockerfile: a builder stage that runs the tests then compiles the artefact, and a runtime stage that ships only the artefact, producing a tagged multi-arch container image.</title>
+  <title id="buildStagesTitle">A multi-stage Docker build inside one Dockerfile: a builder stage that compiles the artefact and runs the tests, and a runtime stage that ships only the artefact, producing a tagged multi-arch container image.</title>
 
   <defs>
     <linearGradient id="charcoal" x1="0" y1="0" x2="0" y2="1">
@@ -19,7 +19,7 @@
   <!-- builder stage -->
   <rect x="48" y="74" width="232" height="86" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
   <text x="164" y="110" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">builder stage</text>
-  <text x="164" y="134" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.85">run tests, then compile</text>
+  <text x="164" y="134" text-anchor="middle" fill="currentColor" font-size="13" opacity="0.85">compile + run tests</text>
 
   <!-- runtime stage -->
   <rect x="340" y="74" width="232" height="86" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
