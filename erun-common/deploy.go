@@ -214,6 +214,15 @@ type EnvConfigSaver func(tenant string, config EnvConfig) error
 // the env config, the env config is rewritten with the deployed pair.
 // Component-only deploys (no runtime chart in the spec list) are
 // no-ops, as are dry-runs and calls with a nil saver.
+//
+// A runtime chart whose helm upgrade was skipped (SkipHelm: every image
+// promoted from the fingerprint cache, so nothing was rebuilt, pushed, or
+// rolled out) is also a no-op. Its Deploy.Version is a freshly minted
+// snapshot timestamp that was never pushed to the registry and is not what
+// the cluster is running, so persisting it would leave the env config — and
+// the desktop runtime dialog — pointing at a phantom version the deploy
+// picker can never offer (it gates on registry presence). Leave
+// RuntimeVersion at the last version that was actually rolled out.
 func PersistRuntimeVersionFromDeploySpecs(ctx Context, specs []DeploySpec, save EnvConfigSaver) error {
 	if save == nil || ctx.DryRun || len(specs) == 0 {
 		return nil
@@ -221,6 +230,9 @@ func PersistRuntimeVersionFromDeploySpecs(ctx Context, specs []DeploySpec, save 
 	for _, spec := range specs {
 		if !specDeploysRuntimeChart(spec) {
 			continue
+		}
+		if spec.SkipHelm {
+			return nil
 		}
 		version := strings.TrimSpace(spec.Deploy.Version)
 		if version == "" {
