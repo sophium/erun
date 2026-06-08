@@ -79,6 +79,7 @@ One per environment. This is the most-edited file.
 | `claude.usebedrock` | `*bool` | chart (`CLAUDE_CODE_USE_BEDROCK`) | Route Claude through AWS Bedrock. |
 | `claude.models[]` | list | chart (`ERUN_CLAUDE_AVAILABLE_MODELS`) | Allow-list of Claude models for in-pod tools. |
 | `claude.maxoutputtokens` | `*int` | chart (`CLAUDE_CODE_MAX_OUTPUT_TOKENS`) | Max output tokens per Claude response. |
+| `claude.effort` | `*string` | desktop AI launcher (`claude --effort`) | Effort level for the env's Claude AI tab, one of `low`, `medium`, `high`, `xhigh`, `max`. Unset or invalid → `max`. Only the default Claude launch is affected; a non-`claude` `aitool` or a Claude launch the Operator wrote with explicit flags is left untouched. |
 | `aitool` | string | desktop AI launcher, runtime entrypoint | Which Agent is the default for this env (`claude`, `codex`, …). |
 | `remote` | bool | helm chart (worktree storage selection), build path resolution | When true, the runtime pod uses a PVC-backed checkout; when false, the host project root is mounted via `hostPath`. ([Planned removal — subsumed by `type`.](#planned-changes)) |
 | `snapshot` | `*bool` | `erun build`, `erun push`, `erun deploy`, `erun open` | Marks this env as agent-mode: when `true`, builds happen here and produce snapshot-tagged artefacts; when `false`, the env only receives deploys. ([Planned removal — subsumed by `type`.](#planned-changes)) |

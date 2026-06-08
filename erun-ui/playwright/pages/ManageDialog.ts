@@ -159,4 +159,23 @@ export class ManageDialog {
     await this.openCloudAliasOptions();
     await this.cloudAliasNoneOption().click();
   }
+
+  // claudeEffortSelect targets the "Effort" SelectField in the Claude section
+  // of the AI tab (issue #469). It always renders; with no per-env override it
+  // shows "Default (max)".
+  claudeEffortSelect(): Locator {
+    return this.locator().locator('#environment-config-claude-effort');
+  }
+
+  async claudeEffortSelectedValue(): Promise<string> {
+    return (await this.claudeEffortSelect().textContent())?.trim() ?? '';
+  }
+
+  // chooseClaudeEffort opens the Effort listbox and picks an option by its
+  // visible label. The Radix listbox is portal'd to the document body, so the
+  // option is queried at the page root rather than inside the dialog.
+  async chooseClaudeEffort(label: string): Promise<void> {
+    await this.claudeEffortSelect().click();
+    await this.page.getByRole('option', { name: label, exact: true }).click();
+  }
 }

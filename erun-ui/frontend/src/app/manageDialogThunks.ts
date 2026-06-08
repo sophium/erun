@@ -146,6 +146,7 @@ export const updateManageClaudeConfig =
     if (merged.useBedrock !== undefined) next.useBedrock = merged.useBedrock;
     if (merged.models !== undefined && merged.models.length > 0) next.models = merged.models;
     if (merged.maxOutputTokens !== undefined) next.maxOutputTokens = merged.maxOutputTokens;
+    if (merged.effort !== undefined) next.effort = merged.effort;
     dispatch(
       patchManageDialog({
         config: { ...dialog.config, claude: next },

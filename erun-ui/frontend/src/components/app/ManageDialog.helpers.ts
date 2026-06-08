@@ -8,7 +8,8 @@ export function isClaudeOverridden(claude: UIEnvironmentConfig['claude']): boole
     claude.useMantle !== undefined ||
     claude.useBedrock !== undefined ||
     (claude.models?.length ?? 0) > 0 ||
-    claude.maxOutputTokens !== undefined
+    claude.maxOutputTokens !== undefined ||
+    claude.effort !== undefined
   );
 }
 

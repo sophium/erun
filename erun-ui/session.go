@@ -414,7 +414,46 @@ func resolveAIToolCommand(configured string) string {
 	return defaultAITool
 }
 
-// claudeContinueGuard is the cwd-guarded Claude Code resume the desktop pipes
+// claudeEffortLevels enumerates the valid `claude --effort` startup levels, in
+// ascending order. The set mirrors `claude --help`; max is the highest and the
+// desktop default.
+var claudeEffortLevels = []string{"low", "medium", "high", "xhigh", "max"}
+
+// defaultClaudeEffort is the effort level the desktop applies to a Claude AI
+// tab when the env has no explicit Effort configured, or has an invalid one
+// (issue #469). It is the highest level.
+const defaultClaudeEffort = "max"
+
+// claudeEffortLevelOptions returns the valid effort levels for transport to the
+// frontend selector.
+func claudeEffortLevelOptions() []string {
+	out := make([]string, len(claudeEffortLevels))
+	copy(out, claudeEffortLevels)
+	return out
+}
+
+func validClaudeEffort(level string) bool {
+	for _, l := range claudeEffortLevels {
+		if l == level {
+			return true
+		}
+	}
+	return false
+}
+
+// resolveClaudeEffort returns the env's configured Claude effort level when it
+// is a valid level, falling back to defaultClaudeEffort for an unset or invalid
+// value so the AI tab never launches with a bad --effort flag (issue #469).
+func resolveClaudeEffort(config eruncommon.EnvironmentClaudeConfig) string {
+	if config.Effort != nil {
+		if level := strings.TrimSpace(*config.Effort); validClaudeEffort(level) {
+			return level
+		}
+	}
+	return defaultClaudeEffort
+}
+
+// claudeLaunchGuard is the cwd-guarded Claude Code resume the desktop pipes
 // into an AI tab. It continues the session that belongs to the tab's working
 // directory — the env repo for the env AI tab, the $HOME/git/erun clone for
 // the contribute AI tab — so per-tab restore is correct on local-agent (host)
@@ -424,20 +463,28 @@ func resolveAIToolCommand(configured string) string {
 // The guard mirrors claude-wrapper.sh: resume only when Claude Code's
 // per-project session store exists for the current directory. It composes with
 // the pod wrapper because the wrapper treats --continue as a bypass flag, so it
-// forwards rather than double-injecting.
-const claudeContinueGuard = `if [ -d "$HOME/.claude/projects/$(pwd | tr / -)" ]; then claude --continue; else claude; fi`
+// forwards rather than double-injecting; --effort is likewise forwarded, not
+// stripped. The resolved effort level is injected into both branches so the
+// session runs at the env's configured effort (issue #469).
+func claudeLaunchGuard(effort string) string {
+	flag := ""
+	if validClaudeEffort(effort) {
+		flag = " --effort " + effort
+	}
+	return `if [ -d "$HOME/.claude/projects/$(pwd | tr / -)" ]; then claude --continue` + flag + `; else claude` + flag + `; fi`
+}
 
 // aiLaunchCommand returns the keystrokes the desktop pipes into an AI tab's
 // shell to launch the AI tool. A bare `claude` launch is wrapped in the
-// cwd-guarded resume; any other tool, or `claude` with explicit flags/a
-// subcommand, launches verbatim — mirroring the wrapper's bypass rules so we
-// never inject a resume the user did not ask for.
-func aiLaunchCommand(configured string) string {
+// cwd-guarded resume with the resolved --effort level; any other tool, or
+// `claude` with explicit flags/a subcommand, launches verbatim — mirroring the
+// wrapper's bypass rules so we never alter a launch the user authored.
+func aiLaunchCommand(configured string, effort string) string {
 	tool := resolveAIToolCommand(configured)
 	if tool != defaultAITool {
 		return tool
 	}
-	return claudeContinueGuard
+	return claudeLaunchGuard(effort)
 }
 
 func formatLaunchCommand(params startTerminalSessionParams) string {

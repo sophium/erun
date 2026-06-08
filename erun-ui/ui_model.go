@@ -223,6 +223,7 @@ type uiClaudeConfig struct {
 	UseBedrock      *bool    `json:"useBedrock,omitempty"`
 	Models          []string `json:"models,omitempty"`
 	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
+	Effort          *string  `json:"effort,omitempty"`
 }
 
 type uiClaudeDefaults struct {
@@ -233,6 +234,8 @@ type uiClaudeDefaults struct {
 	KnownModels     []string `json:"knownModels"`
 	MinTokens       int      `json:"minTokens"`
 	MaxTokens       int      `json:"maxTokens"`
+	Effort          string   `json:"effort"`
+	EffortLevels    []string `json:"effortLevels"`
 }
 
 type uiRuntimePodConfig struct {
