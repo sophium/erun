@@ -40,6 +40,7 @@ export function ClaudeSettingsSection({ dialog }: { dialog: ManageDialog }): Rea
                   useBedrock: undefined,
                   models: [],
                   maxOutputTokens: undefined,
+                  effort: undefined,
                 }),
               );
             }}
@@ -86,7 +87,47 @@ export function ClaudeSettingsSection({ dialog }: { dialog: ManageDialog }): Rea
           dispatch(updateManageClaudeConfig({ maxOutputTokens }));
         }}
       />
+      <ClaudeEffortField
+        defaults={defaults}
+        value={claude.effort}
+        disabled={disabled}
+        onChange={(effort) => {
+          dispatch(updateManageClaudeConfig({ effort }));
+        }}
+      />
     </div>
+  );
+}
+
+function ClaudeEffortField({
+  defaults,
+  value,
+  disabled,
+  onChange,
+}: {
+  defaults: UIEnvironmentConfig['claudeDefaults'];
+  value: string | undefined;
+  disabled?: boolean;
+  onChange: (value: string | undefined) => void;
+}): React.ReactElement {
+  // Effort is a fixed, known level set, so a constrained selector (recognition
+  // over recall) is the right control rather than free text. "Default (<level>)"
+  // mirrors the sibling Claude fields' override/reset pattern (Nielsen #4).
+  return (
+    <SelectField
+      id="environment-config-claude-effort"
+      label="Effort"
+      value={value ?? 'default'}
+      options={[
+        { value: 'default', label: `Default (${defaults.effort})` },
+        ...defaults.effortLevels.map((level) => ({ value: level, label: level })),
+      ]}
+      helper="Effort level Claude runs at in this environment's AI tab. Higher levels let Claude think longer before responding. Default applies the highest level (max)."
+      disabled={disabled}
+      onChange={(next) => {
+        onChange(next === 'default' ? undefined : next);
+      }}
+    />
   );
 }
 

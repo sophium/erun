@@ -398,6 +398,7 @@ export interface UIEnvironmentClaudeConfig {
   useBedrock?: boolean;
   models?: string[];
   maxOutputTokens?: number;
+  effort?: string;
 }
 
 export interface UIEnvironmentClaudeDefaults {
@@ -408,6 +409,8 @@ export interface UIEnvironmentClaudeDefaults {
   knownModels: string[];
   minTokens: number;
   maxTokens: number;
+  effort: string;
+  effortLevels: string[];
 }
 
 export interface UIRuntimePodConfig {

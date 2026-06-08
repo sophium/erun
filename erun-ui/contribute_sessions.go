@@ -159,8 +159,10 @@ func buildContributePreludeCommand(withAI bool, aiTool string) string {
 	if withAI {
 		// The prelude already cd'd to $HOME/git/erun, so the cwd-guarded
 		// resume continues the contribute clone's Claude Code session rather
-		// than the env project's (issue #451).
-		prelude += aiLaunchCommand(aiTool) + "\n"
+		// than the env project's (issue #451). The contribute tab has no
+		// per-env config, so it launches at the default effort (max), keeping
+		// it aligned with env AI tabs (issue #469).
+		prelude += aiLaunchCommand(aiTool, defaultClaudeEffort) + "\n"
 	}
 	return prelude
 }

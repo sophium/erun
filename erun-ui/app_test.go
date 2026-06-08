@@ -3291,8 +3291,10 @@ func TestStartAISessionRunsErunOpenWithClaudeInitialInput(t *testing.T) {
 	}
 	// The env AI tab pipes the cwd-guarded Claude resume so it continues the
 	// env project's Claude Code session rather than starting fresh (issue
-	// #451). The guard runs in the env repo cwd inside `erun open`.
-	wantInput := claudeContinueGuard + "\n"
+	// #451). The guard runs in the env repo cwd inside `erun open`. With no
+	// per-env Effort configured it launches at the default level (max) via
+	// --effort (issue #469).
+	wantInput := claudeLaunchGuard(defaultClaudeEffort) + "\n"
 	if string(started.InitialInput) != wantInput {
 		t.Fatalf("expected initial input %q, got %q", wantInput, string(started.InitialInput))
 	}

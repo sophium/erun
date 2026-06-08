@@ -249,8 +249,10 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 		Cols:       cols,
 		Rows:       rows,
 		// The env AI tab runs in the env repo, so the cwd-guarded resume
-		// continues the env project's Claude Code session (issue #451).
-		InitialInput: []byte(aiLaunchCommand(result.EnvConfig.AITool) + "\n"),
+		// continues the env project's Claude Code session (issue #451). The
+		// per-env Claude effort level (default max) is injected as --effort
+		// (issue #469).
+		InitialInput: []byte(aiLaunchCommand(result.EnvConfig.AITool, resolveClaudeEffort(result.EnvConfig.Claude)) + "\n"),
 	}
 	session, err := a.deps.startTerminal(params)
 	if err != nil {

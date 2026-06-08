@@ -27,10 +27,19 @@ type EnvironmentClaudeConfig struct {
 	UseBedrock      *bool    `yaml:"usebedrock,omitempty" json:"useBedrock,omitempty"`
 	Models          []string `yaml:"models,omitempty" json:"models,omitempty"`
 	MaxOutputTokens *int     `yaml:"maxoutputtokens,omitempty" json:"maxOutputTokens,omitempty"`
+	// Effort is the per-env Claude Code session effort level (one of
+	// low|medium|high|xhigh|max) applied as `claude --effort` when the desktop
+	// launches the env's AI tab. Unset means the desktop falls back to the
+	// default (max). The level only influences the desktop AI-tab launch, so
+	// its validation, default, and resolution live in erun-ui; this shared
+	// field exists so the value round-trips through the same env config the UI
+	// reads and writes.
+	Effort *string `yaml:"effort,omitempty" json:"effort,omitempty"`
 }
 
 func (c EnvironmentClaudeConfig) IsZero() bool {
-	return c.UseMantle == nil && c.UseBedrock == nil && len(c.Models) == 0 && c.MaxOutputTokens == nil
+	return c.UseMantle == nil && c.UseBedrock == nil && len(c.Models) == 0 &&
+		c.MaxOutputTokens == nil && c.Effort == nil
 }
 
 func (c EnvironmentClaudeConfig) NormalizedModels() []string {
