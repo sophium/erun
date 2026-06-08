@@ -459,6 +459,19 @@ func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
 	if err := common.RunDeploySpec(r.ctx, execution, common.DockerImageBuilder, runOpenDockerPush, r.openHelmDeployer(execution)); err != nil {
 		return err
 	}
+	if execution.SkipHelm {
+		// Every runtime image promoted from the fingerprint cache, so
+		// RunDeploySpec rebuilt, pushed, and rolled out nothing.
+		// execution.Deploy.Version is a freshly minted snapshot timestamp that
+		// was never pushed; persisting it would leave the env config — and the
+		// desktop runtime dialog — pointing at a phantom version the deploy
+		// picker can never offer (it gates on registry presence). This is the
+		// open-flow twin of the deploy-command guard in
+		// PersistRuntimeVersionFromDeploySpecs. Leave RuntimeVersion at the last
+		// version that was actually rolled out. See issue #475.
+		r.ctx.Trace("open: runtime images all cached (no rebuild); leaving persisted runtime version unchanged")
+		return nil
+	}
 	return r.persistRuntimeVersion(execution.Deploy.Version, execution.Deploy.ContainerRegistry)
 }
 
