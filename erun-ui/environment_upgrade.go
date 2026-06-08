@@ -33,7 +33,7 @@ func (a *App) ResolveUpgradePlan() (eruncommon.UpgradePlan, error) {
 // upgrade — even though the picker offers the ERun image's version for the same
 // env. Reuses resolveRuntimeRegistryVersionsForTenant for both lookups.
 func (a *App) resolveUpgradeRegistryVersionsForTenant(tenant string) eruncommon.RuntimeRegistryVersions {
-	versions := a.resolveRuntimeRegistryVersionsForTenant(tenant)
+	versions := a.resolveRuntimeRegistryVersionsForTenant(a.runtimeRegistryNamespace(tenant, ""), tenant)
 	// The ERun tenant already resolves the default image; nothing to fall back
 	// to, and an empty result is genuinely "no versions".
 	if strings.TrimSpace(tenant) == "" ||
@@ -43,7 +43,7 @@ func (a *App) resolveUpgradeRegistryVersionsForTenant(tenant string) eruncommon.
 	if strings.TrimSpace(versions.LatestStable) != "" && strings.TrimSpace(versions.LatestSnapshot) != "" {
 		return versions
 	}
-	fallback := a.resolveRuntimeRegistryVersionsForTenant("")
+	fallback := a.resolveRuntimeRegistryVersionsForTenant("", "")
 	if strings.TrimSpace(versions.LatestStable) == "" {
 		versions.LatestStable = fallback.LatestStable
 	}

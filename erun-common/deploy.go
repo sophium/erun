@@ -452,6 +452,7 @@ func ResolveDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFi
 
 func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) ([]DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+	now = freezeNow(now)
 
 	resolvedTarget, err := resolveDeployTarget(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {
@@ -534,6 +535,7 @@ func ResolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectR
 
 func resolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, componentName, versionOverride string, allowLocalBuilds, force bool) (DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+	now = freezeNow(now)
 
 	deployContext, err := resolveDeployContextForTarget(findProjectRoot, resolveKubernetesDeployContext, target, componentName)
 	if err != nil {
@@ -711,6 +713,7 @@ func applyDeployKubernetesContext(store DeployStore, target OpenResult) OpenResu
 
 func ResolveOpenRuntimeDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+	now = freezeNow(now)
 	return resolveOpenRuntimeDeploySpec(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, allowLocalBuilds)
 }
 
@@ -814,6 +817,27 @@ func normalizeBuildDeployDependencies(store BuildDeployStore, findProjectRoot Pr
 		now = time.Now
 	}
 	return store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now
+}
+
+// freezeNow pins now to a single instant so every snapshot version minted while
+// resolving one deploy (or build) shares the same timestamp. The per-chart build
+// (ResolveDockerBuildForComponent), the cwd "current build"
+// (resolveCurrentDockerComponentBuildForDeploy), and each image's version
+// (resolveDockerImageVersion) otherwise call now() independently; across a
+// multi-image / multi-spec deploy those timestamps drift apart, so the runtime
+// chart's persisted RuntimeVersion can end up differing from the tag actually
+// built and pushed — a phantom version the deploy picker can never offer because
+// it gates on registry presence. Capturing now() once at the resolution
+// entrypoint and threading the frozen clock downstream keeps build, push, helm,
+// and persist on one identical tag. freezeNow is idempotent: freezing an
+// already-frozen clock reproduces the same instant, so applying it at more than
+// one entrypoint on the same call path is safe. See issue #475.
+func freezeNow(now NowFunc) NowFunc {
+	if now == nil {
+		now = time.Now
+	}
+	frozen := now()
+	return func() time.Time { return frozen }
 }
 
 func resolveDeployTargetForDockerTarget(store BuildDeployStore, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (DeployTarget, error) {

@@ -21,7 +21,7 @@ func (a *App) LoadState() (uiState, error) {
 			return uiState{
 				Message:            "ERun is not initialized yet. Run `erun init` first.",
 				Build:              buildDetailsFrom(info),
-				VersionSuggestions: a.runtimeVersionSuggestions(info, ""),
+				VersionSuggestions: a.runtimeVersionSuggestions(info, "", ""),
 			}, nil
 		}
 		return uiState{}, err
@@ -29,53 +29,91 @@ func (a *App) LoadState() (uiState, error) {
 	info := a.deps.resolveBuildInfo()
 	state := stateFromListResult(result, info)
 	suggestionTenant := ""
+	suggestionEnv := ""
 	if state.Selected != nil {
 		suggestionTenant = state.Selected.Tenant
+		suggestionEnv = state.Selected.Environment
 	} else if len(state.Tenants) > 0 {
 		suggestionTenant = state.Tenants[0].Name
 	}
-	state.VersionSuggestions = a.runtimeVersionSuggestions(info, suggestionTenant)
+	state.VersionSuggestions = a.runtimeVersionSuggestions(info, suggestionTenant, suggestionEnv)
 	return state, nil
 }
 
-func (a *App) resolveRuntimeRegistryVersionsForTenant(tenant string) eruncommon.RuntimeRegistryVersions {
+func (a *App) resolveRuntimeRegistryVersionsForTenant(namespace, tenant string) eruncommon.RuntimeRegistryVersions {
 	ctx := a.ctx
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if namespace = strings.TrimSpace(namespace); namespace == "" {
+		namespace = eruncommon.DefaultContainerRegistry
 	}
 	repository := eruncommon.DefaultRuntimeImageName
 	if tenant = strings.TrimSpace(tenant); tenant != "" {
 		repository = eruncommon.RuntimeReleaseName(tenant)
 	}
-	versions, err := a.deps.resolveImageRegistry(ctx, eruncommon.DefaultContainerRegistry, repository)
+	versions, err := a.deps.resolveImageRegistry(ctx, namespace, repository)
 	if err != nil {
 		return eruncommon.RuntimeRegistryVersions{}
 	}
 	return versions
 }
 
-func (a *App) runtimeVersionSuggestions(info eruncommon.BuildInfo, tenant string) []uiVersion {
+// runtimeRegistryNamespace returns the container-registry namespace where the
+// given environment's runtime image was last published, so the "Version to
+// deploy" picker queries the same place `erun deploy` pushed to instead of the
+// hardcoded default. It mirrors the deploy provenance recorded by
+// PersistRuntimeVersionFromDeploySpecs (issue #363): the env's persisted
+// RuntimeRegistry. When no specific environment is given (the tenant-wide
+// initial state and the Upgrade-all plan) the first env of the tenant that
+// recorded a registry stands in for the tenant. Returns "" when nothing is
+// recorded — a never-deployed env, or one predating the provenance — so the
+// caller falls back to DefaultContainerRegistry. See issue #475.
+func (a *App) runtimeRegistryNamespace(tenant, environment string) string {
 	tenant = strings.TrimSpace(tenant)
 	if tenant == "" {
-		return labelRuntimeVersionSuggestions("ERun", eruncommon.DefaultRuntimeImageName, eruncommon.RuntimeDeployVersionSuggestions(info, a.resolveRuntimeRegistryVersionsForTenant("")))
+		return ""
+	}
+	envs, err := a.deps.store.ListEnvConfigs(tenant)
+	if err != nil {
+		return ""
+	}
+	if environment = strings.TrimSpace(environment); environment != "" {
+		for _, env := range envs {
+			if strings.EqualFold(strings.TrimSpace(env.Name), environment) {
+				return strings.TrimSpace(env.RuntimeRegistry)
+			}
+		}
+		return ""
+	}
+	for _, env := range envs {
+		if registry := strings.TrimSpace(env.RuntimeRegistry); registry != "" {
+			return registry
+		}
+	}
+	return ""
+}
+
+func (a *App) runtimeVersionSuggestions(info eruncommon.BuildInfo, tenant, environment string) []uiVersion {
+	tenant = strings.TrimSpace(tenant)
+	if tenant == "" {
+		return labelRuntimeVersionSuggestions("ERun", eruncommon.DefaultRuntimeImageName, eruncommon.RuntimeDeployVersionSuggestions(info, a.resolveRuntimeRegistryVersionsForTenant("", "")))
 	}
 
+	namespace := a.runtimeRegistryNamespace(tenant, environment)
 	suggestions := make([]uiVersion, 0, 8)
 	tenantImage := eruncommon.RuntimeReleaseName(tenant)
-	suggestions = append(suggestions, labelRuntimeVersionSuggestions(tenant, tenantImage, eruncommon.RuntimeDeployVersionSuggestions(info, a.resolveRuntimeRegistryVersionsForTenant(tenant)))...)
+	suggestions = append(suggestions, labelRuntimeVersionSuggestions(tenant, tenantImage, eruncommon.RuntimeDeployVersionSuggestions(info, a.resolveRuntimeRegistryVersionsForTenant(namespace, tenant)))...)
 	if tenantImage == eruncommon.DefaultRuntimeImageName {
 		return suggestions
 	}
-	suggestions = append(suggestions, labelRuntimeVersionSuggestions("ERun", eruncommon.DefaultRuntimeImageName, eruncommon.RuntimeDeployVersionSuggestions(info, a.resolveRuntimeRegistryVersionsForTenant("")))...)
+	suggestions = append(suggestions, labelRuntimeVersionSuggestions("ERun", eruncommon.DefaultRuntimeImageName, eruncommon.RuntimeDeployVersionSuggestions(info, a.resolveRuntimeRegistryVersionsForTenant("", "")))...)
 	return suggestions
 }
 
 func (a *App) LoadVersionSuggestions(selection uiSelection) ([]uiVersion, error) {
 	selection = normalizeSelection(selection)
-	if selection.Action == "init" {
-		return a.runtimeVersionSuggestions(a.deps.resolveBuildInfo(), selection.Tenant), nil
-	}
-	return a.runtimeVersionSuggestions(a.deps.resolveBuildInfo(), selection.Tenant), nil
+	return a.runtimeVersionSuggestions(a.deps.resolveBuildInfo(), selection.Tenant, selection.Environment), nil
 }
 
 func (a *App) LoadKubernetesContexts() ([]string, error) {

@@ -138,6 +138,7 @@ func TestLoadStateUsesTenantSpecificDeployableVersionSuggestions(t *testing.T) {
 
 func TestLoadVersionSuggestionsFiltersOutMissingTenantImageTags(t *testing.T) {
 	app := NewApp(erunUIDeps{
+		store:                stubUIStore{},
 		resolveBuildInfo:     func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
 		resolveImageRegistry: missingTenantImageRegistry(t),
 	})
@@ -153,6 +154,52 @@ func TestLoadVersionSuggestionsFiltersOutMissingTenantImageTags(t *testing.T) {
 	}
 	if suggestions[0].Label != "frs latest stable" || suggestions[0].Image != "frs-devops" || suggestions[3].Label != "ERun current" || suggestions[3].Image != eruncommon.DefaultRuntimeImageName {
 		t.Fatalf("unexpected suggestion metadata: %+v", suggestions)
+	}
+}
+
+func TestLoadVersionSuggestionsUsesEnvPersistedRuntimeRegistry(t *testing.T) {
+	// #475: the "Version to deploy" picker must query the registry the env's
+	// runtime image was actually published to (EnvConfig.RuntimeRegistry, the
+	// provenance deploy records), not the hardcoded default. Otherwise an env on
+	// a non-default registry resolves its suggestions from the wrong place and
+	// can never offer its own deployed version back. The ERun fallback image
+	// stays on the canonical default registry.
+	const customRegistry = "harbor.example/team"
+	var tenantImageNamespace string
+	app := NewApp(erunUIDeps{
+		store: stubUIStore{
+			envs: map[string]eruncommon.EnvConfig{
+				"team/prod": {Name: "prod", RuntimeRegistry: customRegistry},
+			},
+		},
+		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+			switch repository {
+			case "team-devops":
+				tenantImageNamespace = namespace
+				return eruncommon.RuntimeRegistryVersions{
+					Image:          namespace + "/" + repository,
+					Tags:           []string{"1.0.11", "1.0.12-snapshot-20260608120000"},
+					LatestStable:   "1.0.11",
+					LatestSnapshot: "1.0.12-snapshot-20260608120000",
+				}, nil
+			case eruncommon.DefaultRuntimeImageName:
+				if namespace != eruncommon.DefaultContainerRegistry {
+					t.Fatalf("ERun fallback image must use the default registry, got %s", namespace)
+				}
+				return eruncommon.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
+			default:
+				t.Fatalf("unexpected registry repository: %s", repository)
+			}
+			return eruncommon.RuntimeRegistryVersions{}, nil
+		},
+	})
+
+	if _, err := app.LoadVersionSuggestions(uiSelection{Tenant: "team", Environment: "prod"}); err != nil {
+		t.Fatalf("LoadVersionSuggestions failed: %v", err)
+	}
+	if tenantImageNamespace != customRegistry {
+		t.Fatalf("tenant runtime image queried namespace %q, want %q", tenantImageNamespace, customRegistry)
 	}
 }
 
@@ -186,6 +233,7 @@ func missingTenantImageRegistry(t *testing.T) func(context.Context, string, stri
 func TestLoadVersionSuggestionsDoesNotDuplicateDefaultRuntimeForErunTenant(t *testing.T) {
 	var repositories []string
 	app := NewApp(erunUIDeps{
+		store:            stubUIStore{},
 		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
 		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
 			if namespace != eruncommon.DefaultContainerRegistry {
@@ -220,6 +268,7 @@ func TestLoadVersionSuggestionsDoesNotDuplicateDefaultRuntimeForErunTenant(t *te
 
 func TestLoadVersionSuggestionsFallsBackToDefaultRuntimeTagsWhenTenantImageMissing(t *testing.T) {
 	app := NewApp(erunUIDeps{
+		store:            stubUIStore{},
 		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
 		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
 			if namespace != eruncommon.DefaultContainerRegistry {
@@ -255,6 +304,7 @@ func TestLoadVersionSuggestionsFallsBackToDefaultRuntimeTagsWhenTenantImageMissi
 
 func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T) {
 	app := NewApp(erunUIDeps{
+		store:            stubUIStore{},
 		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
 		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
 			if namespace != eruncommon.DefaultContainerRegistry {
