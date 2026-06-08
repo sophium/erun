@@ -8,19 +8,19 @@
 
   <!-- devops docker directory card -->
   <rect x="52" y="78" width="776" height="150" rx="14" fill="#ffffff" stroke="#cbd5e0" stroke-width="1"/>
-  <text x="76" y="102" text-anchor="start" fill="currentColor" font-size="13" font-weight="600" opacity="0.7">&lt;tenant&gt;-devops/docker/</text>
+  <text x="76" y="102" text-anchor="start" fill="currentColor" font-size="13" font-weight="600" opacity="0.7">petios-devops/docker/</text>
 
-  <!-- one component box per image -->
+  <!-- one tenant-prefixed component box per image -->
   <rect x="76" y="128" width="224" height="76" rx="12" fill="none" stroke="#0891b2" stroke-width="1.5"/>
-  <text x="188" y="162" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">api/</text>
+  <text x="188" y="162" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">petios-api/</text>
   <text x="188" y="184" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.7">Dockerfile · VERSION</text>
 
   <rect x="328" y="128" width="224" height="76" rx="12" fill="none" stroke="#0891b2" stroke-width="1.5"/>
-  <text x="440" y="162" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">web/</text>
+  <text x="440" y="162" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">petios-web/</text>
   <text x="440" y="184" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.7">Dockerfile · VERSION</text>
 
   <rect x="580" y="128" width="224" height="76" rx="12" fill="none" stroke="#0891b2" stroke-width="1.5"/>
-  <text x="692" y="162" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">worker/</text>
+  <text x="692" y="162" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">petios-worker/</text>
   <text x="692" y="184" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.7">Dockerfile · VERSION</text>
 
   <!-- closer -->

@@ -27,13 +27,13 @@ You rarely run the steps by hand. `erun build --release` folds the release step 
 
 ### How it finds what to build
 
-It discovers each component's Dockerfile under the tenant's devops module — every `docker/<component>/` directory is one image — and tags each with the version from the nearest `VERSION` file.
+It discovers each component's Dockerfile under the tenant's devops module — every `docker/<component>/` directory is one image, named with the tenant prefix (`petios-api`, not bare `api`) — and tags each with the version from the nearest `VERSION` file.
 
 <figure className="erun-hero-figure">
-  <img src="/img/build-discovery.svg" alt="Under the project root, the tenant-devops/docker/ directory holds one directory per component — api, web, worker — each containing a Dockerfile and an optional VERSION file. Every such directory is one image." />
+  <img src="/img/build-discovery.svg" alt="Under the project root, the petios-devops/docker/ directory holds one tenant-prefixed directory per component — petios-api, petios-web, petios-worker — each containing a Dockerfile and an optional VERSION file. Every such directory is one image." />
 </figure>
 
-Build order follows the `FROM …:${ERUN_VERSION}` links between components; the exact rules are in [Build path resolution](/reference/configuration-build-paths).
+Build order follows the `FROM …:${ERUN_VERSION}` links between components; component-naming rules and the rest are in [Build path resolution](/reference/configuration-build-paths) and the [conventions spec](/agent-reference/conventions-spec#component-naming).
 
 ### The steps
 
