@@ -20,7 +20,7 @@ For CI/CD pipelines and headless workflows, use the [CLI](/cli/overview) instead
 
 ## Open it in your editor
 
-- **Persistent terminal sessions.** Each environment owns its own terminals. Switching tabs doesn't kill them. Your scrollback survives.
+- **Persistent terminal sessions.** Each environment owns its own terminals, and switching tabs doesn't kill them. For an environment backed by a runtime pod, the sessions live in the pod and keep running even while the environment is closed — a long-running Agent keeps working while you're away — so reopening reconnects you to the same sessions and scrollback instead of starting fresh ones.
 - **VS Code or IntelliJ in one click.** The IDE attaches to the environment's filesystem — editor, extensions, language servers, debugger, everything sees the same files the Agent sees.
 - **Any other editor that supports SSH.** Cursor, Zed, JetBrains Gateway, Neovim with remote plugins, anything else — the desktop publishes the local SSH details, point your editor at them.
 
