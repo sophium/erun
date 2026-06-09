@@ -3,6 +3,7 @@ package eruncommon
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -217,13 +218,14 @@ type EnvConfigSaver func(tenant string, config EnvConfig) error
 //
 // A runtime chart whose helm upgrade was skipped (SkipHelm: every image
 // promoted from the fingerprint cache, so nothing was rebuilt, pushed, or
-// rolled out) is also a no-op. Its Deploy.Version is a freshly minted
-// snapshot timestamp that was never pushed to the registry and is not what
-// the cluster is running, so persisting it would leave the env config — and
-// the desktop runtime dialog — pointing at a phantom version the deploy
-// picker can never offer (it gates on registry presence). Leave
-// RuntimeVersion at the last version that was actually rolled out.
-func PersistRuntimeVersionFromDeploySpecs(ctx Context, specs []DeploySpec, save EnvConfigSaver) error {
+// rolled out) keeps a freshly minted Deploy.Version that was never pushed.
+// Persisting that would point the env config — and the desktop runtime dialog —
+// at a phantom version the deploy picker can never offer (it gates on registry
+// presence). Instead, heal RuntimeVersion to the version the release is actually
+// running (resolveDeployedVersion reads the live helm appVersion), which is
+// guaranteed pushed. When that cannot be read, leave RuntimeVersion untouched
+// rather than record a phantom. See issue #475.
+func PersistRuntimeVersionFromDeploySpecs(ctx Context, specs []DeploySpec, save EnvConfigSaver, resolveDeployedVersion HelmReleaseVersionResolverFunc) error {
 	if save == nil || ctx.DryRun || len(specs) == 0 {
 		return nil
 	}
@@ -232,25 +234,82 @@ func PersistRuntimeVersionFromDeploySpecs(ctx Context, specs []DeploySpec, save 
 			continue
 		}
 		if spec.SkipHelm {
-			return nil
+			version := resolveRunningRuntimeVersion(ctx, spec, resolveDeployedVersion)
+			if version == "" {
+				return nil
+			}
+			return persistRuntimeVersionIfChanged(spec, version, save)
 		}
 		version := strings.TrimSpace(spec.Deploy.Version)
 		if version == "" {
 			continue
 		}
-		registry := strings.TrimSpace(spec.Deploy.ContainerRegistry)
-		envConfig := spec.Target.EnvConfig
-		if strings.TrimSpace(envConfig.RuntimeVersion) == version && strings.TrimSpace(envConfig.RuntimeRegistry) == registry {
-			return nil
-		}
-		envConfig.RuntimeVersion = version
-		envConfig.RuntimeRegistry = registry
-		if err := save(spec.Target.Tenant, envConfig); err != nil {
-			return fmt.Errorf("persist runtime version after deploy: %w", err)
-		}
-		return nil
+		return persistRuntimeVersionIfChanged(spec, version, save)
 	}
 	return nil
+}
+
+// resolveRunningRuntimeVersion returns the version the runtime release is
+// actually running, used to heal RuntimeVersion after a cached (SkipHelm)
+// deploy. An empty string means "could not determine" — the caller then leaves
+// the persisted version untouched rather than recording the never-pushed mint.
+func resolveRunningRuntimeVersion(ctx Context, spec DeploySpec, resolveDeployedVersion HelmReleaseVersionResolverFunc) string {
+	if resolveDeployedVersion == nil {
+		return ""
+	}
+	version, err := resolveDeployedVersion(ctx, spec.Deploy.ReleaseName, spec.Deploy.Namespace, spec.Deploy.KubernetesContext)
+	if err != nil {
+		ctx.Trace("persist runtime version: reading deployed version for " + spec.Deploy.ReleaseName + " failed: " + err.Error())
+		return ""
+	}
+	return strings.TrimSpace(version)
+}
+
+func persistRuntimeVersionIfChanged(spec DeploySpec, version string, save EnvConfigSaver) error {
+	registry := strings.TrimSpace(spec.Deploy.ContainerRegistry)
+	envConfig := spec.Target.EnvConfig
+	if strings.TrimSpace(envConfig.RuntimeVersion) == version && strings.TrimSpace(envConfig.RuntimeRegistry) == registry {
+		return nil
+	}
+	envConfig.RuntimeVersion = version
+	envConfig.RuntimeRegistry = registry
+	if err := save(spec.Target.Tenant, envConfig); err != nil {
+		return fmt.Errorf("persist runtime version after deploy: %w", err)
+	}
+	return nil
+}
+
+// HelmReleaseVersionResolverFunc reads the appVersion of a deployed helm release
+// — the runtime version the cluster is actually running — so a cached (SkipHelm)
+// deploy can heal EnvConfig.RuntimeVersion to a real, pushed version instead of
+// leaving a stale or phantom value. See issue #475.
+type HelmReleaseVersionResolverFunc func(ctx Context, releaseName, namespace, kubernetesContext string) (string, error)
+
+// ResolveDeployedHelmReleaseVersion returns the appVersion of the named helm
+// release (the runtime version the cluster is actually running). It returns an
+// empty string with a nil error when the release is absent or helm cannot be
+// queried, so reading the version never blocks a deploy or open.
+func ResolveDeployedHelmReleaseVersion(ctx Context, releaseName, namespace, kubernetesContext string) (string, error) {
+	releaseName = strings.TrimSpace(releaseName)
+	namespace = strings.TrimSpace(namespace)
+	if releaseName == "" || namespace == "" {
+		return "", nil
+	}
+	args := []string{"get", "metadata", releaseName, "--namespace", namespace, "-o", "json"}
+	if kubernetesContext = strings.TrimSpace(kubernetesContext); kubernetesContext != "" {
+		args = append(args, "--kube-context", kubernetesContext)
+	}
+	output, err := Command("helm", args...).Output()
+	if err != nil {
+		return "", nil
+	}
+	var metadata struct {
+		AppVersion string `json:"appVersion"`
+	}
+	if err := json.Unmarshal(output, &metadata); err != nil {
+		return "", nil
+	}
+	return strings.TrimSpace(metadata.AppVersion), nil
 }
 
 func specDeploysRuntimeChart(spec DeploySpec) bool {
@@ -452,6 +511,7 @@ func ResolveDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFi
 
 func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target DeployTarget) ([]DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, _, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+	now = freezeNow(now)
 
 	resolvedTarget, err := resolveDeployTarget(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target)
 	if err != nil {
@@ -534,6 +594,7 @@ func ResolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectR
 
 func resolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, componentName, versionOverride string, allowLocalBuilds, force bool) (DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+	now = freezeNow(now)
 
 	deployContext, err := resolveDeployContextForTarget(findProjectRoot, resolveKubernetesDeployContext, target, componentName)
 	if err != nil {
@@ -711,6 +772,7 @@ func applyDeployKubernetesContext(store DeployStore, target OpenResult) OpenResu
 
 func ResolveOpenRuntimeDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
 	store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now = normalizeDeployDependencies(store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now)
+	now = freezeNow(now)
 	return resolveOpenRuntimeDeploySpec(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, target, allowLocalBuilds)
 }
 
@@ -814,6 +876,27 @@ func normalizeBuildDeployDependencies(store BuildDeployStore, findProjectRoot Pr
 		now = time.Now
 	}
 	return store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now
+}
+
+// freezeNow pins now to a single instant so every snapshot version minted while
+// resolving one deploy (or build) shares the same timestamp. The per-chart build
+// (ResolveDockerBuildForComponent), the cwd "current build"
+// (resolveCurrentDockerComponentBuildForDeploy), and each image's version
+// (resolveDockerImageVersion) otherwise call now() independently; across a
+// multi-image / multi-spec deploy those timestamps drift apart, so the runtime
+// chart's persisted RuntimeVersion can end up differing from the tag actually
+// built and pushed — a phantom version the deploy picker can never offer because
+// it gates on registry presence. Capturing now() once at the resolution
+// entrypoint and threading the frozen clock downstream keeps build, push, helm,
+// and persist on one identical tag. freezeNow is idempotent: freezing an
+// already-frozen clock reproduces the same instant, so applying it at more than
+// one entrypoint on the same call path is safe. See issue #475.
+func freezeNow(now NowFunc) NowFunc {
+	if now == nil {
+		now = time.Now
+	}
+	frozen := now()
+	return func() time.Time { return frozen }
 }
 
 func resolveDeployTargetForDockerTarget(store BuildDeployStore, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (DeployTarget, error) {

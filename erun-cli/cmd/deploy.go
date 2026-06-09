@@ -51,7 +51,7 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 			if err := common.RunDeploySpecs(ctx, deploySpecs, buildDockerImage, push, deployHelmChart); err != nil {
 				return err
 			}
-			return common.PersistRuntimeVersionFromDeploySpecs(ctx, deploySpecs, saveEnvConfig)
+			return common.PersistRuntimeVersionFromDeploySpecs(ctx, deploySpecs, saveEnvConfig, common.ResolveDeployedHelmReleaseVersion)
 		},
 	}
 	addDryRunFlag(cmd)
@@ -87,7 +87,7 @@ func newK8sDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSav
 			if err := common.RunDeploySpec(ctx, deploySpec, buildDockerImage, push, deployHelmChart); err != nil {
 				return err
 			}
-			return common.PersistRuntimeVersionFromDeploySpecs(ctx, []common.DeploySpec{deploySpec}, saveEnvConfig)
+			return common.PersistRuntimeVersionFromDeploySpecs(ctx, []common.DeploySpec{deploySpec}, saveEnvConfig, common.ResolveDeployedHelmReleaseVersion)
 		},
 	}
 	addDryRunFlag(cmd)

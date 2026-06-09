@@ -270,6 +270,7 @@ func runResolvedOpenCommandWithAPI(ctx common.Context, result common.OpenResult,
 		checkKubernetesDeployment: checkKubernetesDeployment,
 		resolveRuntimeDeploySpec:  resolveRuntimeDeploySpec,
 		deployHelmChart:           deployHelmChart,
+		resolveDeployedVersion:    common.ResolveDeployedHelmReleaseVersion,
 		activateMCP:               activateMCP,
 		activateAPI:               activateAPI,
 		activateSSHD:              activateSSHD,
@@ -289,6 +290,7 @@ type resolvedOpenRunner struct {
 	checkKubernetesDeployment common.KubernetesDeploymentCheckerFunc
 	resolveRuntimeDeploySpec  func(common.Context, common.OpenResult, bool) (common.DeploySpec, error)
 	deployHelmChart           common.HelmChartDeployerFunc
+	resolveDeployedVersion    common.HelmReleaseVersionResolverFunc
 	activateMCP               MCPForwarder
 	activateAPI               APIForwarder
 	activateSSHD              SSHDActivator
@@ -459,6 +461,24 @@ func (r *resolvedOpenRunner) deployRuntime(execution common.DeploySpec) error {
 	if err := common.RunDeploySpec(r.ctx, execution, common.DockerImageBuilder, runOpenDockerPush, r.openHelmDeployer(execution)); err != nil {
 		return err
 	}
+	if execution.SkipHelm {
+		// Every runtime image promoted from the fingerprint cache, so
+		// RunDeploySpec rebuilt, pushed, and rolled out nothing.
+		// execution.Deploy.Version is a freshly minted snapshot timestamp that
+		// was never pushed; persisting it would leave the env config — and the
+		// desktop runtime dialog — pointing at a phantom version the deploy
+		// picker can never offer (it gates on registry presence). Heal the
+		// persisted version to what the release is actually running (guaranteed
+		// pushed) instead; if it can't be read, leave it unchanged. Twin of the
+		// deploy-command guard in PersistRuntimeVersionFromDeploySpecs. See #475.
+		running := r.resolveRunningRuntimeVersion(execution)
+		if running == "" {
+			r.ctx.Trace("open: runtime images all cached (no rebuild); could not read the deployed version, leaving persisted runtime version unchanged")
+			return nil
+		}
+		r.ctx.Trace("open: runtime images all cached (no rebuild); persisting the running runtime version " + running)
+		return r.persistRuntimeVersion(running, execution.Deploy.ContainerRegistry)
+	}
 	return r.persistRuntimeVersion(execution.Deploy.Version, execution.Deploy.ContainerRegistry)
 }
 
@@ -484,6 +504,22 @@ func (r *resolvedOpenRunner) persistRuntimeVersion(version, registry string) err
 	}
 	r.result = result
 	return nil
+}
+
+// resolveRunningRuntimeVersion reads the version the runtime release is actually
+// running, used to heal the persisted version after a cached (SkipHelm) open.
+// Returns "" when it can't be read (dry-run, no resolver, helm error) so the
+// caller leaves the persisted version untouched rather than recording a phantom.
+func (r *resolvedOpenRunner) resolveRunningRuntimeVersion(execution common.DeploySpec) string {
+	if r.ctx.DryRun || r.resolveDeployedVersion == nil {
+		return ""
+	}
+	version, err := r.resolveDeployedVersion(r.ctx, execution.Deploy.ReleaseName, execution.Deploy.Namespace, execution.Deploy.KubernetesContext)
+	if err != nil {
+		r.ctx.Trace("open: reading the deployed runtime version failed: " + err.Error())
+		return ""
+	}
+	return strings.TrimSpace(version)
 }
 
 func (r *resolvedOpenRunner) activateForwarders() error {

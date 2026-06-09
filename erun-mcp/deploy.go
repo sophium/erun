@@ -52,7 +52,7 @@ func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 				if err := eruncommon.RunDeploySpec(runCtx, execution, runtime.BuildDockerImage, runtimePushFunc(runtime), runtime.DeployHelmChart); err != nil {
 					return err
 				}
-				return eruncommon.PersistRuntimeVersionFromDeploySpecs(runCtx, []eruncommon.DeploySpec{execution}, runtime.Store.SaveEnvConfig)
+				return eruncommon.PersistRuntimeVersionFromDeploySpecs(runCtx, []eruncommon.DeploySpec{execution}, runtime.Store.SaveEnvConfig, eruncommon.ResolveDeployedHelmReleaseVersion)
 			}
 
 			executions, err := eruncommon.ResolveCurrentDeploySpecs(runCtx, runtime.Store, findProjectRoot, resolveBuildContext, resolveDeployContext, nil, target)
@@ -62,7 +62,7 @@ func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 			if err := eruncommon.RunDeploySpecs(runCtx, executions, runtime.BuildDockerImage, runtimePushFunc(runtime), runtime.DeployHelmChart); err != nil {
 				return err
 			}
-			return eruncommon.PersistRuntimeVersionFromDeploySpecs(runCtx, executions, runtime.Store.SaveEnvConfig)
+			return eruncommon.PersistRuntimeVersionFromDeploySpecs(runCtx, executions, runtime.Store.SaveEnvConfig, eruncommon.ResolveDeployedHelmReleaseVersion)
 		})
 		return nil, output, err
 	}
