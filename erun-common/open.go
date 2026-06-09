@@ -76,6 +76,21 @@ type ShellLaunchParams struct {
 	ManagedCloud       bool
 	CloudProviderAlias string
 	Idle               EnvironmentIdleConfig
+	// AppSession, when non-empty, makes the remote shell a persistent,
+	// reattachable dtach session keyed by this id (distinct per desktop tab:
+	// kind + slot). Closing/reopening a tab — or a transient kubectl-exec drop —
+	// then reconnects to the still-running shell (and the AI tab's claude keeps
+	// working in the pod) instead of spawning a parallel one. Empty (the bare
+	// `erun open` CLI path) keeps the previous ephemeral behaviour. See #478.
+	AppSession string
+	// AI / Contribute select the persistent session's create-time program:
+	// Contribute cds into the contribute clone with its env; AI launches the AI
+	// tool (claude, at the env's effort) once on create. The desktop sets these
+	// instead of typing the prelude in, so a reattach never re-runs them.
+	AI         bool
+	Contribute bool
+	AITool     string
+	Claude     EnvironmentClaudeConfig
 }
 
 type ShellLaunchPreview struct {
@@ -482,6 +497,8 @@ func ShellLaunchParamsFromResult(result OpenResult) ShellLaunchParams {
 		ManagedCloud:       result.EnvConfig.ManagedCloud,
 		CloudProviderAlias: strings.TrimSpace(result.EnvConfig.CloudProviderAlias),
 		Idle:               result.EnvConfig.Idle,
+		AITool:             strings.TrimSpace(result.EnvConfig.AITool),
+		Claude:             result.EnvConfig.Claude,
 	}
 }
 
@@ -653,7 +670,7 @@ func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig,
 	markerDir := fmt.Sprintf("$HOME/.erun/%s/%s", req.Tenant, req.Environment)
 	bashrcPath := markerDir + "/bashrc"
 	requestPath := markerDir + "/shell-request"
-	return []string{
+	lines := []string{
 		"set -eu",
 		"export COLORTERM=truecolor",
 		"export COLORFGBG='15;0'",
@@ -673,11 +690,59 @@ func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig,
 		"rm -f \"$request_file\"",
 		"export ERUN_SHELL_REQUEST_FILE=\"$request_file\"",
 		"shell_status=0",
-		fmt.Sprintf("/bin/bash --rcfile \"%s\" -i || shell_status=$?", bashrcPath),
+	}
+	lines = append(lines, remoteShellLaunchLines(req, bashrcPath, markerDir)...)
+	return append(lines,
 		fmt.Sprintf("if [ -e \"$request_file\" ]; then rm -f \"$request_file\"; exit %d; fi", remoteShellReattachDeployExitCode),
 		"rm -f \"$request_file\"",
 		"exit \"$shell_status\"",
+	)
+}
+
+// remoteShellLaunchLines runs the interactive shell. Without AppSession (the
+// bare `erun open` CLI) it is the original single bash invocation, byte for
+// byte. With AppSession (a desktop tab) it runs the shell inside a persistent,
+// reattachable dtach session keyed by the id, so a disconnect detaches (the
+// session — and the AI tab's claude — keeps running in the pod) and the next
+// kubectl exec re-attaches rather than spawning a parallel chain. See #478.
+func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string) []string {
+	if strings.TrimSpace(req.AppSession) == "" {
+		return []string{fmt.Sprintf("/bin/bash --rcfile \"%s\" -i || shell_status=$?", bashrcPath)}
 	}
+	id := sanitizeForFilename(req.AppSession)
+	// dtach sockets live on the pod-ephemeral filesystem so a pod replacement
+	// (redeploy) clears them — no stale socket to reattach to, and
+	// claude --continue resumes the conversation in the fresh session.
+	socket := fmt.Sprintf("/tmp/erun-app/%s-%s-%s.dtach", sanitizeForFilename(req.Tenant), sanitizeForFilename(req.Environment), id)
+	launchScript := fmt.Sprintf("%s/launch-%s.sh", markerDir, id)
+	body := strings.Join(remoteSessionLauncherBody(req, bashrcPath), "\n")
+	return []string{
+		"mkdir -p \"/tmp/erun-app\"",
+		fmt.Sprintf("cat > \"%s\" <<'EOF'\n%s\nEOF", launchScript, body),
+		fmt.Sprintf("dtach -A \"%s\" -r winch /bin/bash \"%s\" || shell_status=$?", socket, launchScript),
+	}
+}
+
+// remoteSessionLauncherBody is the dtach session's create-time program: the
+// per-tab prelude (run once on create) followed by the interactive shell. A
+// reattach connects to whatever this program is running, so the prelude — and
+// in particular the AI tool launch — never repeats.
+func remoteSessionLauncherBody(req ShellLaunchParams, bashrcPath string) []string {
+	var body []string
+	if req.Contribute {
+		// Match the desktop's former contribute prelude (issue #469): the
+		// contribute clone's built binary on PATH, fast incremental rebuilds,
+		// and the clone as the working directory.
+		body = append(body,
+			"export PATH=\"$HOME/.erun/contribute/bin:$PATH\"",
+			"export ERUN_SKIP_LINT=1",
+			"cd \"$HOME/git/erun\"",
+		)
+	}
+	if req.AI {
+		body = append(body, AISessionLaunchCommand(req.AITool, req.Claude))
+	}
+	return append(body, fmt.Sprintf("exec /bin/bash --rcfile \"%s\" -i", bashrcPath))
 }
 
 func remoteShellGitSeedLines(req ShellLaunchParams, redactHostSecrets bool, workdir string) ([]string, error) {

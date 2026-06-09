@@ -70,7 +70,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	openParams := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),
-		Args:       buildOpenArgs(result.Tenant, result.Environment, selection.Debug),
+		Args:       withAppSession(buildOpenArgs(result.Tenant, result.Environment, selection.Debug), fmt.Sprintf("open-%d", slot), false, false),
 		Env:        []string{appSessionEnvVar + "=1"},
 		Cols:       cols,
 		Rows:       rows,
@@ -240,19 +240,18 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	}
 	a.mu.Unlock()
 
-	tool := resolveAIToolCommand(result.EnvConfig.AITool)
 	params := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),
-		Args:       buildOpenArgs(result.Tenant, result.Environment, selection.Debug),
-		Env:        []string{appSessionEnvVar + "=1"},
-		Cols:       cols,
-		Rows:       rows,
-		// The env AI tab runs in the env repo, so the cwd-guarded resume
-		// continues the env project's Claude Code session (issue #451). The
-		// per-env Claude effort level (default max) is injected as --effort
-		// (issue #469).
-		InitialInput: []byte(aiLaunchCommand(result.EnvConfig.AITool, resolveClaudeEffort(result.EnvConfig.Claude)) + "\n"),
+		// The AI tab runs `erun open --app-session ai --ai`: the persistent
+		// remote session launches the AI tool itself (the cwd-guarded claude
+		// resume at the env effort, issues #451/#469), once on create. Reopening
+		// reconnects to the running claude rather than typing it in again or
+		// spawning a parallel one (#478).
+		Args: withAppSession(buildOpenArgs(result.Tenant, result.Environment, selection.Debug), "ai", true, false),
+		Env:  []string{appSessionEnvVar + "=1"},
+		Cols: cols,
+		Rows: rows,
 	}
 	session, err := a.deps.startTerminal(params)
 	if err != nil {
@@ -280,7 +279,7 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	a.rememberKubeContextForActivity(selection.KubernetesContext)
 	go a.streamSession(managed)
 
-	a.logSpawnedCommandToLocal(selection, "ai", formatLocalCommandLog(formatLaunchCommand(params)+" && "+shellQuoteIfNeeded(tool), "AI tab"))
+	a.logSpawnedCommandToLocal(selection, "ai", formatLocalCommandLog(formatLaunchCommand(params), "AI tab"))
 	_ = ctx
 	return startSessionResult{
 		SessionID: serial,

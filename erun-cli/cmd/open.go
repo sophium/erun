@@ -31,6 +31,9 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 	var noAliasPrompt bool
 	var versionOverride string
 	var runtimeImage string
+	var appSession string
+	var aiTab bool
+	var contributeTab bool
 	target := common.OpenParams{}
 
 	cmd := &cobra.Command{
@@ -83,6 +86,9 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 				RuntimeImage:     runtimeImage,
 				AllowLocalBuilds: allowLocalBuilds,
 				SaveEnvConfig:    saveEnvConfig,
+				AppSession:       strings.TrimSpace(appSession),
+				AI:               aiTab,
+				Contribute:       contributeTab,
 			}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateAPI, activateSSHD, launchVSCode, launchIntelliJ)
 		},
 	}
@@ -97,6 +103,16 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 	cmd.Flags().StringVar(&versionOverride, "version", "", "Override the runtime chart and image version before opening")
 	cmd.Flags().StringVar(&runtimeImage, "runtime-image", "", "Override the runtime image repository before opening")
 	addSnapshotFlags(cmd, &snapshot, &noSnapshot, "Build and deploy a local snapshot when opening the local environment")
+	// Desktop-integration flags: the app runs the remote shell as a persistent,
+	// reattachable dtach session so closing/reopening a tab reconnects to the
+	// running shell (and the AI tab's claude keeps working). Hidden because they
+	// only make sense when the desktop manages the session lifecycle. See #478.
+	cmd.Flags().StringVar(&appSession, "app-session", "", "Reattach to a persistent terminal session with this id")
+	cmd.Flags().BoolVar(&aiTab, "ai", false, "Launch the configured AI tool as the persistent session's program")
+	cmd.Flags().BoolVar(&contributeTab, "contribute", false, "Start the persistent session in the contribute clone")
+	_ = cmd.Flags().MarkHidden("app-session")
+	_ = cmd.Flags().MarkHidden("ai")
+	_ = cmd.Flags().MarkHidden("contribute")
 	return cmd
 }
 
@@ -109,6 +125,9 @@ type openOptions struct {
 	RuntimeImage     string
 	AllowLocalBuilds bool
 	SaveEnvConfig    func(string, common.EnvConfig) error
+	AppSession       string
+	AI               bool
+	Contribute       bool
 }
 
 func prepareOpenResultForRun(ctx common.Context, result common.OpenResult, snapshotOverride *bool, saveEnvConfig func(string, common.EnvConfig) error) (common.OpenResult, error) {
@@ -312,6 +331,9 @@ func (r *resolvedOpenRunner) run() error {
 	}
 
 	shellReq := common.ShellLaunchParamsFromResult(r.result)
+	shellReq.AppSession = r.options.AppSession
+	shellReq.AI = r.options.AI
+	shellReq.Contribute = r.options.Contribute
 	if err := r.maybeDeployRuntime(shellReq); err != nil {
 		return err
 	}

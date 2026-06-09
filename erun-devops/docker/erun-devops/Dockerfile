@@ -80,7 +80,7 @@ USER root
 # contribute-app browser bridge is the only way to test desktop-side
 # changes without leaving the env.
 RUN apt-get update && \
-    apt-get install -y git bash-completion bubblewrap dpkg-dev procps \
+    apt-get install -y git bash-completion bubblewrap dpkg-dev dtach procps \
         build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev && \
     rm -rf /var/lib/apt/lists/* && \
     case "${TARGETARCH}" in \
