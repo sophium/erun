@@ -224,6 +224,8 @@ type uiClaudeConfig struct {
 	Models          []string `json:"models,omitempty"`
 	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
 	Effort          *string  `json:"effort,omitempty"`
+	DefaultModel    *string  `json:"defaultModel,omitempty"`
+	VerboseDebug    bool     `json:"verboseDebug,omitempty"`
 }
 
 type uiClaudeDefaults struct {

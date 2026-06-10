@@ -178,4 +178,35 @@ export class ManageDialog {
     await this.claudeEffortSelect().click();
     await this.page.getByRole('option', { name: label, exact: true }).click();
   }
+
+  // claudeModelCheckbox targets one "Available models" checkbox in the Claude
+  // section of the AI tab. The id suffix is the model token itself.
+  claudeModelCheckbox(model: string): Locator {
+    return this.locator().locator(`#environment-config-claude-models-${model}`);
+  }
+
+  // claudeDefaultModelSelect targets the "Default model" SelectField (issue
+  // #482). It always renders; with no per-env override it shows
+  // "Default (Claude decides)".
+  claudeDefaultModelSelect(): Locator {
+    return this.locator().locator('#environment-config-claude-default-model');
+  }
+
+  async claudeDefaultModelSelectedValue(): Promise<string> {
+    return (await this.claudeDefaultModelSelect().textContent())?.trim() ?? '';
+  }
+
+  // chooseClaudeDefaultModel opens the Default model listbox and picks an
+  // option by its visible label. The Radix listbox is portal'd to the
+  // document body, so the option is queried at the page root.
+  async chooseClaudeDefaultModel(label: string): Promise<void> {
+    await this.claudeDefaultModelSelect().click();
+    await this.page.getByRole('option', { name: label, exact: true }).click();
+  }
+
+  // claudeVerboseDebugCheckbox targets the "Launch Claude in verbose + debug
+  // mode" launch toggle (issue #477).
+  claudeVerboseDebugCheckbox(): Locator {
+    return this.locator().locator('#environment-config-claude-verbose-debug');
+  }
 }

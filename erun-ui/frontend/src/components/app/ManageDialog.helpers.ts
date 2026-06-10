@@ -9,7 +9,9 @@ export function isClaudeOverridden(claude: UIEnvironmentConfig['claude']): boole
     claude.useBedrock !== undefined ||
     (claude.models?.length ?? 0) > 0 ||
     claude.maxOutputTokens !== undefined ||
-    claude.effort !== undefined
+    claude.effort !== undefined ||
+    claude.defaultModel !== undefined ||
+    claude.verboseDebug === true
   );
 }
 

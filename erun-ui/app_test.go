@@ -2083,6 +2083,60 @@ func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 	}
 }
 
+// TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags pins the desktop
+// round-trip of the per-env Claude launch fields (issues #482/#477): the
+// default model and the verbose+debug toggle survive a save both in the
+// returned config and in the persisted store.
+func TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"frs": {Name: "frs", ProjectRoot: projectRoot},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/local": {
+				Name:              "local",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-local",
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	defaultModel := "fable"
+	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+		Name:              "local",
+		RepoPath:          projectRoot,
+		KubernetesContext: "cluster-local",
+		Idle: uiIdleConfig{
+			Timeout:      eruncommon.DefaultEnvironmentIdleTimeout.String(),
+			WorkingHours: eruncommon.DefaultEnvironmentWorkingHours,
+		},
+		Claude: uiClaudeConfig{
+			Models:       []string{"opus", "fable"},
+			DefaultModel: &defaultModel,
+			VerboseDebug: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
+	}
+
+	if saved.Claude.DefaultModel == nil || *saved.Claude.DefaultModel != "fable" {
+		t.Fatalf("expected saved DefaultModel=fable, got %+v", saved.Claude)
+	}
+	if !saved.Claude.VerboseDebug {
+		t.Fatalf("expected saved VerboseDebug=true, got %+v", saved.Claude)
+	}
+	stored := store.envs["frs/local"].Claude
+	if stored.DefaultModel == nil || *stored.DefaultModel != "fable" {
+		t.Fatalf("expected stored DefaultModel=fable, got %+v", stored)
+	}
+	if !stored.VerboseDebug {
+		t.Fatalf("expected stored VerboseDebug=true, got %+v", stored)
+	}
+}
+
 func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
 	// AutoStart is the desktop's per-env auto-start gate. The three modes
 	// map to *bool: ask=nil (prompt on next open), always=true, never=false.
