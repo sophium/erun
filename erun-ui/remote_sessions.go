@@ -43,3 +43,35 @@ func (a *App) ListRemoteAppSessions(selection uiSelection) []string {
 	}
 	return eruncommon.ParseRemoteAppSessionIDs(selection.Tenant, selection.Environment, output)
 }
+
+// endRemoteAppSession permanently ends one persistent desktop session in the
+// env's runtime pod: the dtach master is killed (its shell/claude follows via
+// SIGHUP) and the socket is removed, so detection will not rebuild the tab.
+// Called when the user explicitly closes a custom terminal tab — the X is
+// that tab's only removal affordance, and without this the session would
+// outlive the close and resurrect on the next env open. Closing the env or
+// quitting the app never calls this; those only detach. Fail-soft: a missing
+// pod means the session is already gone.
+func (a *App) endRemoteAppSession(selection uiSelection, sessionID string) {
+	selection = normalizeSelection(selection)
+	if selection.Tenant == "" || selection.Environment == "" || strings.TrimSpace(sessionID) == "" {
+		return
+	}
+	envConfig, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
+	if err != nil {
+		return
+	}
+	kubernetesContext := strings.TrimSpace(envConfig.KubernetesContext)
+	if kubernetesContext == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, _ = kubectlText(ctx, kubernetesContext,
+		"--namespace", eruncommon.KubernetesNamespaceName(selection.Tenant, selection.Environment),
+		"exec",
+		"deployment/"+eruncommon.RuntimeReleaseName(selection.Tenant),
+		"--",
+		"/bin/sh", "-c", eruncommon.RemoteAppSessionEndScript(selection.Tenant, selection.Environment, sessionID),
+	)
+}

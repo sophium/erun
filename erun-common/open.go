@@ -748,32 +748,25 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 		return []string{fmt.Sprintf("/bin/bash --rcfile \"%s\" -i || shell_status=$?", bashrcPath)}
 	}
 	id := sanitizeForFilename(req.AppSession)
-	// dtach sockets live on the pod-ephemeral filesystem so a pod replacement
-	// (redeploy) clears them — no stale socket to reattach to, and
-	// claude --continue resumes the conversation in the fresh session.
-	socket := fmt.Sprintf("%s/%s-%s-%s.dtach", RemoteAppSessionSocketDir, sanitizeForFilename(req.Tenant), sanitizeForFilename(req.Environment), id)
+	socket := remoteAppSessionSocketPath(req.Tenant, req.Environment, id)
 	owner := strings.TrimSuffix(socket, ".dtach") + ".owner"
 	launchScript := fmt.Sprintf("%s/launch-%s.sh", markerDir, id)
 	body := strings.Join(remoteSessionLauncherBody(req, bashrcPath), "\n")
-	return []string{
+	lines := []string{
 		fmt.Sprintf("mkdir -p \"%s\"", RemoteAppSessionSocketDir),
 		fmt.Sprintf("cat > \"%s\" <<'EOF'\n%s\nEOF", launchScript, body),
 		// Take over the session from any other ERun window (screen-style
 		// detach-elsewhere-and-reattach-here): claim ownership, then detach
-		// other viewers by killing their dtach clients. The master — ss's
-		// listener pid, which owns the running shell/claude — is never
-		// touched, and when it cannot be identified no one is kicked. Kicked
-		// wrappers find a foreign owner id below and exit 76 so their window
-		// reports the handover instead of reconnecting into a tug-of-war.
+		// other viewers by killing their dtach clients. The master — which
+		// owns the running shell/claude — is never touched, and when it
+		// cannot be identified no one is kicked. Kicked wrappers find a
+		// foreign owner id below and exit 76 so their window reports the
+		// handover instead of reconnecting into a tug-of-war.
 		"attach_id=\"$$-$(date +%s)\"",
 		fmt.Sprintf("printf '%%s' \"$attach_id\" > \"%s\"", owner),
-		// The master is the dtach process with a non-dtach child (the session
-		// program). Clients have no children, and the -A creator's only child
-		// is the master itself. /proc-based on purpose: the runtime image
-		// ships no ss/lsof, and a missing tool must fail open (no kick), not
-		// kill the session.
-		"master_pid=\"\"",
-		fmt.Sprintf("for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if grep -qF \"%s\" \"/proc/$dtach_pid/cmdline\" 2>/dev/null; then for child_pid in $(pgrep -P \"$dtach_pid\" 2>/dev/null || true); do child_comm=\"$(cat \"/proc/$child_pid/comm\" 2>/dev/null)\"; if [ -n \"$child_comm\" ] && [ \"$child_comm\" != \"dtach\" ]; then master_pid=\"$dtach_pid\"; fi; done; fi; done", socket),
+	}
+	lines = append(lines, remoteAppSessionMasterScanLines(socket)...)
+	return append(lines,
 		fmt.Sprintf("if [ -S \"%s\" ] && [ -n \"$master_pid\" ]; then for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if [ \"$dtach_pid\" != \"$master_pid\" ] && grep -qF \"%s\" \"/proc/$dtach_pid/cmdline\" 2>/dev/null; then kill \"$dtach_pid\" 2>/dev/null || true; fi; done; fi", socket, socket),
 		// ctrl_l, not winch: dtach keeps no screen buffer, so a reattach shows
 		// nothing until the program repaints. A same-size attach yields no
@@ -781,7 +774,44 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 		// the ^L dtach sends on attach makes both repaint immediately.
 		fmt.Sprintf("dtach -A \"%s\" -r ctrl_l /bin/bash \"%s\" || shell_status=$?", socket, launchScript),
 		fmt.Sprintf("if [ \"$(cat \"%s\" 2>/dev/null)\" != \"$attach_id\" ]; then exit %d; fi", owner, remoteShellTakenOverExitCode),
+	)
+}
+
+// remoteAppSessionSocketPath is the dtach socket for one persistent desktop
+// session. Pod-ephemeral on purpose: a pod replacement clears the sockets —
+// no stale socket to reattach to, and claude --continue resumes the
+// conversation in the fresh session.
+func remoteAppSessionSocketPath(tenant, environment, id string) string {
+	return fmt.Sprintf("%s/%s-%s-%s.dtach", RemoteAppSessionSocketDir, sanitizeForFilename(tenant), sanitizeForFilename(environment), sanitizeForFilename(id))
+}
+
+// remoteAppSessionMasterScanLines emits the sh lines that resolve $master_pid
+// for the session socket: the dtach process with a non-dtach child (the
+// session program). Clients have no children, and the -A creator's only child
+// is the master itself. /proc-based on purpose: the runtime image ships no
+// ss/lsof, and an unidentifiable master must leave $master_pid empty so
+// callers fail open instead of killing the session.
+func remoteAppSessionMasterScanLines(socket string) []string {
+	return []string{
+		"master_pid=\"\"",
+		fmt.Sprintf("for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if grep -qF \"%s\" \"/proc/$dtach_pid/cmdline\" 2>/dev/null; then for child_pid in $(pgrep -P \"$dtach_pid\" 2>/dev/null || true); do child_comm=\"$(cat \"/proc/$child_pid/comm\" 2>/dev/null)\"; if [ -n \"$child_comm\" ] && [ \"$child_comm\" != \"dtach\" ]; then master_pid=\"$dtach_pid\"; fi; done; fi; done", socket),
 	}
+}
+
+// RemoteAppSessionEndScript returns the sh script that permanently ends a
+// persistent desktop session: kill the dtach master (its program follows via
+// SIGHUP when the pty disappears) and remove the socket and owner file. The
+// desktop runs it when the user explicitly closes a custom terminal tab —
+// unlike closing the env or quitting the app, which only detach and leave the
+// session running for the next attach.
+func RemoteAppSessionEndScript(tenant, environment, id string) string {
+	socket := remoteAppSessionSocketPath(tenant, environment, id)
+	lines := remoteAppSessionMasterScanLines(socket)
+	lines = append(lines,
+		"if [ -n \"$master_pid\" ]; then kill \"$master_pid\" 2>/dev/null || true; fi",
+		fmt.Sprintf("rm -f \"%s\" \"%s\"", socket, strings.TrimSuffix(socket, ".dtach")+".owner"),
+	)
+	return strings.Join(lines, "\n")
 }
 
 // remoteSessionLauncherBody is the dtach session's create-time program: the

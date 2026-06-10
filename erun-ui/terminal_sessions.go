@@ -803,9 +803,25 @@ func (a *App) ResizeSession(sessionID, cols, rows int) error {
 func (a *App) CloseSession(sessionID int) error {
 	a.mu.Lock()
 	managed := a.sessionBySerialLocked(sessionID)
+	var endRemote bool
+	var endSelection uiSelection
+	var endID string
+	if managed != nil && managed.kind == sessionKindOpen && managed.slot > 0 && !managed.takenOver {
+		// An explicit close of a custom terminal tab is the user removing
+		// that terminal, not just detaching: end the pod session too, or
+		// detection rebuilds the tab on the next env open. Default tabs stay
+		// detach-only (their long-running sessions are the feature), and a
+		// taken-over tab must never kill the session another window now owns.
+		endRemote = true
+		endSelection = managed.selection
+		endID = fmt.Sprintf("open-%d", managed.slot)
+	}
 	a.mu.Unlock()
 	if managed == nil || managed.session == nil {
 		return nil
+	}
+	if endRemote {
+		go a.endRemoteAppSession(endSelection, endID)
 	}
 	return managed.session.Close()
 }

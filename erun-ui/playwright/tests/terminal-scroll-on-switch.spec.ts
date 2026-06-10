@@ -36,28 +36,37 @@ test.describe('terminal scroll on session switch', () => {
     await localTab.waitFor({ state: 'visible', timeout: 15_000 });
 
     // Spawn a deterministic second session so we can drive a real switch.
-    const allTabs = page.getByRole('tab');
-    const initialTabCount = await allTabs.count();
+    // Count only the "Terminal N" extras, not the whole strip: the env's
+    // default tabs (notably AI) land asynchronously seconds after the env
+    // opens — the per-env action runner serializes ERun → Local → AI against
+    // the real pod — so a global tab count taken now is stale by the time the
+    // cleanup below compares against it.
+    const tablist = page.getByRole('tablist', { name: 'Open terminals' });
+    const extraTabs = tablist.getByRole('tab', { name: /Terminal \d+/ });
+    const initialExtraCount = await extraTabs.count();
     await page.getByRole('button', { name: 'Open a new terminal' }).click();
-    await expect.poll(() => allTabs.count(), { timeout: 15_000 }).toBeGreaterThan(initialTabCount);
+    await expect
+      .poll(() => extraTabs.count(), { timeout: 15_000 })
+      .toBeGreaterThan(initialExtraCount);
 
     // The new "extra" tab is the last one and is now active. Switch to Local
     // and back so the display buffer is rebuilt and replayed for each session
     // — the path the fix scrolls to the bottom.
-    const extraTab = allTabs.last();
+    const extraTab = extraTabs.last();
     await localTab.click();
     await extraTab.click();
 
     await expect.poll(() => terminalAtBottom(page), { timeout: 5_000 }).toBe(true);
 
     // Close the spawned terminal so the extra session does not drift the
-    // session set the singleton headless backend hands to later specs.
-    const tablist = page.getByRole('tablist', { name: 'Open terminals' });
+    // session set the singleton headless backend hands to later specs. The
+    // explicit close also ends the pod-side session (#478), so remote-session
+    // detection cannot resurrect the tab on a later env open.
     await tablist
       .getByRole('button', { name: /^Close / })
       .last()
       .click();
-    await expect.poll(() => allTabs.count()).toBe(initialTabCount);
+    await expect.poll(() => extraTabs.count()).toBe(initialExtraCount);
   });
 });
 

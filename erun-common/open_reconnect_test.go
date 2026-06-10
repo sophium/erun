@@ -158,3 +158,25 @@ func TestParseRemoteAppSessionIDs(t *testing.T) {
 		}
 	}
 }
+
+// TestRemoteAppSessionEndScript pins the explicit-close contract: ending a
+// custom terminal kills the session master (the program follows via SIGHUP)
+// and removes the socket and owner file, so detection cannot rebuild the tab.
+// The master scan is the same /proc child scan the attach uses; an
+// unidentifiable master means nothing is killed (fail open) but the socket
+// still goes away.
+func TestRemoteAppSessionEndScript(t *testing.T) {
+	script := RemoteAppSessionEndScript("erun", "local", "open-2")
+	for _, want := range []string{
+		`[ "$child_comm" != "dtach" ]`,
+		`if [ -n "$master_pid" ]; then kill "$master_pid" 2>/dev/null || true; fi`,
+		`rm -f "/tmp/erun-app/erun-local-open-2.dtach" "/tmp/erun-app/erun-local-open-2.owner"`,
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("end script missing %q:\n%s", want, script)
+		}
+	}
+	if strings.Contains(script, "dtach -A") {
+		t.Fatalf("end script must not attach:\n%s", script)
+	}
+}
