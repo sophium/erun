@@ -3,6 +3,7 @@ import * as React from 'react';
 import { useAppDispatch } from '@/app/hooks';
 import { updateManageClaudeConfig } from '@/app/manageEnvironmentThunks';
 import type { AppState } from '@/app/state';
+import { CheckboxField } from '@/components/app/ManageDialog.fields';
 import { isClaudeOverridden, isValidClaudeTokens } from '@/components/app/ManageDialog.helpers';
 import { SelectField } from '@/components/app/SelectField';
 import { Button } from '@/components/ui/button';
@@ -13,6 +14,18 @@ import { cn } from '@/lib/utils';
 import type { UIEnvironmentConfig } from '@/types';
 
 type ManageDialog = AppState['manageDialog'];
+
+// claudeOverrideResetValues clears every per-env Claude override the AI tab
+// edits; "Reset all to defaults" must stay in sync with the rendered fields.
+const claudeOverrideResetValues: Partial<UIEnvironmentConfig['claude']> = {
+  useMantle: undefined,
+  useBedrock: undefined,
+  models: [],
+  maxOutputTokens: undefined,
+  effort: undefined,
+  defaultModel: undefined,
+  verboseDebug: undefined,
+};
 
 export function ClaudeSettingsSection({ dialog }: { dialog: ManageDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
@@ -34,15 +47,7 @@ export function ClaudeSettingsSection({ dialog }: { dialog: ManageDialog }): Rea
             size="sm"
             disabled={disabled}
             onClick={() => {
-              dispatch(
-                updateManageClaudeConfig({
-                  useMantle: undefined,
-                  useBedrock: undefined,
-                  models: [],
-                  maxOutputTokens: undefined,
-                  effort: undefined,
-                }),
-              );
+              dispatch(updateManageClaudeConfig(claudeOverrideResetValues));
             }}
           >
             Reset all to defaults
@@ -95,7 +100,91 @@ export function ClaudeSettingsSection({ dialog }: { dialog: ManageDialog }): Rea
           dispatch(updateManageClaudeConfig({ effort }));
         }}
       />
+      <ClaudeDefaultModelField
+        claude={claude}
+        defaults={defaults}
+        disabled={disabled}
+        onChange={(defaultModel) => {
+          dispatch(updateManageClaudeConfig({ defaultModel }));
+        }}
+      />
+      <ClaudeVerboseDebugField
+        claude={claude}
+        disabled={disabled}
+        onChange={(verboseDebug) => {
+          dispatch(updateManageClaudeConfig({ verboseDebug }));
+        }}
+      />
     </div>
+  );
+}
+
+function ClaudeVerboseDebugField({
+  claude,
+  disabled,
+  onChange,
+}: {
+  claude: UIEnvironmentConfig['claude'];
+  disabled?: boolean;
+  onChange: (value: true | undefined) => void;
+}): React.ReactElement {
+  // A pure on/off launch toggle with no global default to inherit, so a
+  // checkbox — not the tri-state select the *bool fields use. Off persists as
+  // absent (absent ≡ off, no information lost).
+  return (
+    <CheckboxField
+      id="environment-config-claude-verbose-debug"
+      label="Launch Claude in verbose + debug mode"
+      helper="Adds --verbose --debug when an AI tab launches Claude (env and contribute AI tabs). Saving a change reopens open AI tabs to apply it; the Claude session resumes. Does not affect the deployed runtime."
+      checked={claude.verboseDebug === true}
+      disabled={disabled}
+      onChange={(checked) => {
+        onChange(checked ? true : undefined);
+      }}
+    />
+  );
+}
+
+function ClaudeDefaultModelField({
+  claude,
+  defaults,
+  disabled,
+  onChange,
+}: {
+  claude: UIEnvironmentConfig['claude'];
+  defaults: UIEnvironmentConfig['claudeDefaults'];
+  disabled?: boolean;
+  onChange: (value: string | undefined) => void;
+}): React.ReactElement {
+  // The option set is the env's available models (recognition over recall):
+  // the per-env override when one is set, else the default available set —
+  // the same set the launch-side resolution honours, so the selector can
+  // never pick a --model the env does not expose (error prevention). A
+  // stored model that fell out of that set stays visible as a flagged
+  // option (visibility of system status) and is dropped at launch.
+  const available = (claude.models?.length ?? 0) > 0 ? (claude.models ?? []) : defaults.models;
+  const options = [
+    { value: 'default', label: 'Default (Claude decides)' },
+    ...available.map((model) => ({ value: model, label: model })),
+  ];
+  if (claude.defaultModel && !available.includes(claude.defaultModel)) {
+    options.push({
+      value: claude.defaultModel,
+      label: `${claude.defaultModel} (not in available models — ignored at launch)`,
+    });
+  }
+  return (
+    <SelectField
+      id="environment-config-claude-default-model"
+      label="Default model"
+      value={claude.defaultModel ?? 'default'}
+      options={options}
+      helper="Model the AI tab preselects (claude --model). Options are this environment's available models — tick a model above to make it selectable here. Default lets Claude pick. Saving a change reopens open AI tabs; the Claude session resumes."
+      disabled={disabled}
+      onChange={(next) => {
+        onChange(next === 'default' ? undefined : next);
+      }}
+    />
   );
 }
 

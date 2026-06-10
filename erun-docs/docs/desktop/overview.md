@@ -32,7 +32,7 @@ The desktop is equally useful as a clean development surface for human-driven wo
 
 By default, **the Agent runs inside the env** — the runtime pod ships the configured Agent's CLI (`claude`, `codex`, …) pre-wired against the in-pod MCP loopback. The desktop's AI panel surfaces it; any terminal inside the pod can launch it directly.
 
-For a Claude env, the AI tab of the env settings dialog has an **Effort** control — how hard Claude thinks per turn, from low through max. New envs default to the highest level (max); the desktop applies your choice when it opens the env's Claude session. For the exact levels and how the value resolves, see [Agent reference · Configuration](/reference/configuration).
+For a Claude env, the AI tab of the env settings dialog carries the Claude launch controls. **Effort** sets how hard Claude thinks per turn, from low through max; new envs default to the highest level (max). **Default model** picks the model the env's Claude session starts on, chosen from the environment's available models — tick `fable` under Available models to make it selectable. **Launch Claude in verbose + debug mode** streams Claude's own diagnostics into the AI tab. The desktop applies your choices when it opens the env's Claude session, and saving a changed launch setting reopens the env's open AI tabs so it takes effect immediately — the Claude conversation resumes where it left off. For the exact levels and how the values resolve, see [Agent reference · Configuration](/reference/configuration).
 
 When you do want a laptop-side Agent in addition, the env has two endpoints on the runtime pod — SSH and [MCP](/mcp/overview) — and both accept any client.
 

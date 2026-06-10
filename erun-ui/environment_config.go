@@ -417,6 +417,8 @@ func claudeConfigToUI(config eruncommon.EnvironmentClaudeConfig) uiClaudeConfig 
 		UseBedrock:      copyBoolPtr(config.UseBedrock),
 		MaxOutputTokens: copyIntPtr(config.MaxOutputTokens),
 		Effort:          copyStringPtr(config.Effort),
+		DefaultModel:    copyStringPtr(config.DefaultModel),
+		VerboseDebug:    config.VerboseDebug,
 	}
 	if models := config.NormalizedModels(); len(models) > 0 {
 		out.Models = models
@@ -435,6 +437,8 @@ func claudeConfigFromUI(config uiClaudeConfig) eruncommon.EnvironmentClaudeConfi
 		Models:          models,
 		MaxOutputTokens: copyIntPtr(config.MaxOutputTokens),
 		Effort:          copyStringPtr(config.Effort),
+		DefaultModel:    copyStringPtr(config.DefaultModel),
+		VerboseDebug:    config.VerboseDebug,
 	}
 }
 

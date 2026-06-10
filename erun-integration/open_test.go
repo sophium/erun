@@ -275,6 +275,40 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/app_session_ai_dry_run_wraps_dtach_and_launches_claude", normalize.Apply(result.Combined))
 	})
 
+	t.Run("app_session_ai_dry_run_launches_claude_with_model_and_verbose_debug", func(t *testing.T) {
+		// #482/#477: when the env config sets a default Claude model that is in
+		// the env's available models, and opts in to verbose+debug, the AI
+		// session's create-time program must carry `--model <m> --verbose
+		// --debug` after the env effort, in both branches of the cwd-guarded
+		// resume. The launch-ai.sh block in the golden is the contract the
+		// desktop AI tab relies on.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithClaude(t, setup, "team", "dev",
+			"claude:\n"+
+				"  models: [opus, fable]\n"+
+				"  defaultmodel: fable\n"+
+				"  verbosedebug: true\n"+
+				"  effort: high\n")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "ai", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/app_session_ai_dry_run_launches_claude_with_model_and_verbose_debug", normalize.Apply(result.Combined))
+	})
+
+	t.Run("app_session_ai_dry_run_drops_default_model_not_in_available", func(t *testing.T) {
+		// #482: a persisted defaultmodel that is no longer among the env's
+		// available models must not reach the launch — the guard falls back to
+		// no --model flag rather than launching Claude on a model the env does
+		// not expose.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithClaude(t, setup, "team", "dev",
+			"claude:\n"+
+				"  models: [opus]\n"+
+				"  defaultmodel: fable\n")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "ai", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/app_session_ai_dry_run_drops_default_model_not_in_available", normalize.Apply(result.Combined))
+	})
+
 	t.Run("app_session_shell_dry_run_wraps_dtach", func(t *testing.T) {
 		// The ERun and custom "Terminal N" tabs run `erun open --app-session open-N`:
 		// the same persistent dtach session but running a plain interactive shell —

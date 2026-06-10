@@ -879,6 +879,83 @@ func (a *App) CloseEnvironmentSessions(selection uiSelection) ([]int, error) {
 	return closed, firstErr
 }
 
+// EndAISessions permanently ends the env's AI sessions — the env AI tab and
+// the contribute AI tab, desktop side and pod side — so the next
+// StartAISession / StartContributeAISession launches Claude with the env's
+// current launch flags (--effort / --model / --verbose --debug, issues
+// #477/#482). A launch flag only takes effect when the persistent session's
+// create-time program runs: `dtach -A` reattaches to the running claude, so
+// without ending the pod session a changed flag could never apply. The pod
+// sessions are ended even when no desktop tab is attached — a detached claude
+// would otherwise keep its stale flags and the next open would silently
+// reattach to it. The relaunched guard resumes via --continue, so the Claude
+// conversation carries over. Local/ERun tabs are untouched: their launch
+// command does not change.
+//
+// Returns false without ending anything when the env's AI tool launches
+// verbatim (a non-claude tool, or claude invoked with explicit flags): the
+// managed Claude launch flags never participate in that launch, and ending
+// would discard a session — codex has no --continue — for a setting that
+// cannot affect it.
+func (a *App) EndAISessions(selection uiSelection) (bool, error) {
+	selection = normalizeSelection(selection)
+	if selection.Tenant == "" || selection.Environment == "" {
+		return false, fmt.Errorf("tenant and environment are required")
+	}
+	if envConfig, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment); err == nil {
+		launch := eruncommon.AISessionLaunchCommand(envConfig.AITool, envConfig.Claude)
+		if launch == strings.TrimSpace(envConfig.AITool) {
+			return false, nil
+		}
+	}
+	var targets []*managedTerminal
+	a.mu.Lock()
+	for _, managed := range a.sessions {
+		if !managedAITabFor(managed, selection) {
+			continue
+		}
+		// Mark closed under the lock so the spawn-reuse branch and
+		// tryReconnect both refuse this session while it is torn down; the
+		// frontend respawn that follows must create a fresh session, not
+		// reattach to the dying one.
+		managed.closed = true
+		a.releaseIdleBlockLocked(managed)
+		targets = append(targets, managed)
+	}
+	a.mu.Unlock()
+	for _, managed := range targets {
+		_ = managed.session.Close()
+	}
+	// End the pod-side persistent sessions only after the desktop PTYs are
+	// gone: ending first would remove the owner file under an attached
+	// client, which exits with the taken-over code and freezes the tab on
+	// the takeover marker instead of relaunching.
+	var wg sync.WaitGroup
+	for _, sessionID := range []string{"ai", "contribute-ai"} {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			a.endRemoteAppSession(selection, id)
+		}(sessionID)
+	}
+	wg.Wait()
+	return true, nil
+}
+
+// managedAITabFor reports whether the managed session is one of the env's
+// live AI tabs (env AI tab or contribute AI tab) that EndAISessions tears
+// down for a Claude launch-flag change.
+func managedAITabFor(managed *managedTerminal, selection uiSelection) bool {
+	if managed == nil || managed.closed || managed.session == nil {
+		return false
+	}
+	if managed.selection.Tenant != selection.Tenant ||
+		managed.selection.Environment != selection.Environment {
+		return false
+	}
+	return managed.kind == sessionKindAI || managed.kind == sessionKindContributeAI
+}
+
 func (a *App) sessionBySerialLocked(sessionID int) *managedTerminal {
 	if sessionID <= 0 {
 		return nil

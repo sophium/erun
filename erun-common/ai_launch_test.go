@@ -56,6 +56,64 @@ func TestAISessionLaunchCommand(t *testing.T) {
 	})
 }
 
+// TestAISessionLaunchCommandModelAndDebugFlags pins the per-env default model
+// and verbose+debug launch flags (issues #482/#477): both compose after
+// --effort in both branches of the cwd-guarded resume, and each injects
+// independently of the other.
+func TestAISessionLaunchCommandModelAndDebugFlags(t *testing.T) {
+	t.Run("default model and verbose debug inject into both guard branches", func(t *testing.T) {
+		model := "fable"
+		got := AISessionLaunchCommand("", EnvironmentClaudeConfig{
+			Models:       []string{"opus", "fable"},
+			DefaultModel: &model,
+			VerboseDebug: true,
+		})
+		if strings.Count(got, "--model fable --verbose --debug") != 2 {
+			t.Fatalf("expected --model and --verbose --debug in both guard branches, got %q", got)
+		}
+		if !strings.Contains(got, "claude --continue --effort max --model fable --verbose --debug") {
+			t.Fatalf("flags must compose after --effort in the resume branch, got %q", got)
+		}
+	})
+
+	t.Run("verbose debug alone injects without a model", func(t *testing.T) {
+		got := AISessionLaunchCommand("", EnvironmentClaudeConfig{VerboseDebug: true})
+		if strings.Contains(got, "--model") || strings.Count(got, "--verbose --debug") != 2 {
+			t.Fatalf("expected only --verbose --debug in both branches, got %q", got)
+		}
+	})
+}
+
+// TestResolveClaudeDefaultModel covers the per-env default-model resolution
+// (issue #482): the model launches only while it is one of the env's available
+// models — the explicit models list, or the default available set when the env
+// declares none — and only when it is a plain argv token. Everything else
+// resolves to "" so no stale, foreign, or unsafe --model reaches the shell.
+func TestResolveClaudeDefaultModel(t *testing.T) {
+	model := func(v string) *string { return &v }
+	cases := []struct {
+		name   string
+		config EnvironmentClaudeConfig
+		want   string
+	}{
+		{"unset", EnvironmentClaudeConfig{}, ""},
+		{"in explicit models", EnvironmentClaudeConfig{Models: []string{"opus", "fable"}, DefaultModel: model("fable")}, "fable"},
+		{"not in explicit models", EnvironmentClaudeConfig{Models: []string{"opus"}, DefaultModel: model("fable")}, ""},
+		{"in default available set when models unset", EnvironmentClaudeConfig{DefaultModel: model("sonnet")}, "sonnet"},
+		{"fable is opt-in, not in the default available set", EnvironmentClaudeConfig{DefaultModel: model("fable")}, ""},
+		{"trimmed", EnvironmentClaudeConfig{Models: []string{"opus"}, DefaultModel: model("  opus  ")}, "opus"},
+		{"blank", EnvironmentClaudeConfig{DefaultModel: model("  ")}, ""},
+		{"unsafe token never reaches the shell", EnvironmentClaudeConfig{Models: []string{"a b; rm"}, DefaultModel: model("a b; rm")}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveClaudeDefaultModel(tc.config); got != tc.want {
+				t.Fatalf("resolveClaudeDefaultModel(%+v) = %q, want %q", tc.config, got, tc.want)
+			}
+		})
+	}
+}
+
 // TestResolveClaudeEffort covers the per-env effort resolution: a valid level is
 // used; unset, blank, and invalid fall back to max so the launch never carries a
 // bad --effort flag.

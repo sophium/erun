@@ -33,28 +33,39 @@ export function CheckboxField({
   id,
   label,
   checked,
+  helper,
   disabled,
   onChange,
 }: {
   id: string;
   label: string;
   checked: boolean;
+  helper?: string;
   disabled?: boolean;
   onChange: (checked: boolean) => void;
 }): React.ReactElement {
+  const helperId = helper ? `${id}-helper` : undefined;
   return (
-    <div className="flex items-center gap-2">
-      <Checkbox
-        id={id}
-        checked={checked}
-        disabled={disabled}
-        onCheckedChange={(value) => {
-          onChange(value === true);
-        }}
-      />
-      <Label htmlFor={id} className="text-sm font-normal">
-        {label}
-      </Label>
+    <div className="grid gap-2">
+      <div className="flex items-center gap-2">
+        <Checkbox
+          id={id}
+          checked={checked}
+          disabled={disabled}
+          aria-describedby={helperId}
+          onCheckedChange={(value) => {
+            onChange(value === true);
+          }}
+        />
+        <Label htmlFor={id} className="text-sm font-normal">
+          {label}
+        </Label>
+      </div>
+      {helper && (
+        <div id={helperId} className="text-[12px] leading-[1.4] text-muted-foreground">
+          {helper}
+        </div>
+      )}
     </div>
   );
 }

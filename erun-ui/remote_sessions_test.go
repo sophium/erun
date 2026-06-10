@@ -67,6 +67,135 @@ func TestListRemoteAppSessionsFailsSoft(t *testing.T) {
 	}
 }
 
+// newEndAISessionsTestApp is a test helper for the EndAISessions contract
+// tests (issues #477/#482): an App over a stub store whose env declares the
+// given AI tool, with terminals stubbed and kubectl PATH-stubbed so every
+// invocation appends its argv to the returned capture file.
+func newEndAISessionsTestApp(t *testing.T, aiTool string) (*App, string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH-stub kubectl uses a shell script; skipping on Windows")
+	}
+	stubDir := t.TempDir()
+	captureFile := filepath.Join(stubDir, "kubectl-args")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"" + captureFile + "\"\n"
+	if err := os.WriteFile(filepath.Join(stubDir, "kubectl"), []byte(script), 0o755); err != nil {
+		t.Fatalf("write kubectl stub: %v", err)
+	}
+	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	projectRoot := t.TempDir()
+	app := NewApp(erunUIDeps{
+		store: stubUIStore{
+			tenants: map[string]eruncommon.TenantConfig{
+				"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+			},
+			envs: map[string]eruncommon.EnvConfig{
+				"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx", AITool: aiTool},
+			},
+		},
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			return newStubTerminalSession(), nil
+		},
+	})
+	t.Cleanup(func() { app.shutdown(context.Background()) })
+	app.SetEmitter(func(string, ...any) {})
+	return app, captureFile
+}
+
+// TestEndAISessionsEndsBothPodSessions pins the pod side of the relaunch
+// contract behind the Manage dialog's Claude launch-flag save (issues
+// #477/#482): both AI pod sessions ("ai" and "contribute-ai") are ended —
+// `dtach -A` would otherwise reattach to the running claude and a changed
+// launch flag could never apply. contribute-ai is ended even though no
+// contribute tab is open: a detached claude must not keep stale flags.
+func TestEndAISessionsEndsBothPodSessions(t *testing.T) {
+	app, captureFile := newEndAISessionsTestApp(t, "")
+	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	if _, err := app.StartAISession(selection, 0, 80, 24); err != nil {
+		t.Fatalf("StartAISession: %v", err)
+	}
+	ended, err := app.EndAISessions(selection)
+	if err != nil {
+		t.Fatalf("EndAISessions: %v", err)
+	}
+	if !ended {
+		t.Fatalf("expected EndAISessions to end the managed claude sessions")
+	}
+	data, _ := os.ReadFile(captureFile)
+	captured := string(data)
+	for _, socket := range []string{"erun-remote-ai.dtach", "erun-remote-contribute-ai.dtach"} {
+		if !strings.Contains(captured, socket) || !strings.Contains(captured, "rm -f") {
+			t.Fatalf("expected the end-script kubectl exec for %s, captured: %q", socket, captured)
+		}
+	}
+}
+
+// TestEndAISessionsSpawnsFreshAIAndLeavesShellAttached pins the desktop side
+// of the relaunch contract: after EndAISessions the next StartAISession must
+// spawn a fresh session (whose `erun open --ai` re-resolves the env's launch
+// flags) instead of reusing the dying one, while the ERun tab — whose launch
+// command does not change — stays attached to its live session.
+func TestEndAISessionsSpawnsFreshAIAndLeavesShellAttached(t *testing.T) {
+	app, _ := newEndAISessionsTestApp(t, "")
+	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	ai, err := app.StartAISession(selection, 0, 80, 24)
+	if err != nil {
+		t.Fatalf("StartAISession: %v", err)
+	}
+	shell, err := app.StartSession(selection, 0, 80, 24)
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if _, err := app.EndAISessions(selection); err != nil {
+		t.Fatalf("EndAISessions: %v", err)
+	}
+	aiAgain, err := app.StartAISession(selection, 0, 80, 24)
+	if err != nil {
+		t.Fatalf("StartAISession after end: %v", err)
+	}
+	if aiAgain.SessionID == ai.SessionID {
+		t.Fatalf("expected a fresh AI session after EndAISessions, got the old id %d", ai.SessionID)
+	}
+	shellAgain, err := app.StartSession(selection, 0, 80, 24)
+	if err != nil {
+		t.Fatalf("StartSession after end: %v", err)
+	}
+	if shellAgain.SessionID != shell.SessionID {
+		t.Fatalf("ERun tab must stay attached: got new id %d, want %d", shellAgain.SessionID, shell.SessionID)
+	}
+}
+
+// TestEndAISessionsSkipsVerbatimAITool pins the guard for envs whose AI tool
+// launches verbatim: the managed Claude launch flags never participate in a
+// non-claude launch, so a claude-flag save must not discard the running
+// session (codex has no --continue). EndAISessions reports false and the AI
+// tab keeps its live session.
+func TestEndAISessionsSkipsVerbatimAITool(t *testing.T) {
+	app, _ := newEndAISessionsTestApp(t, "codex")
+	selection := uiSelection{Tenant: "erun", Environment: "remote"}
+	ai, err := app.StartAISession(selection, 0, 80, 24)
+	if err != nil {
+		t.Fatalf("StartAISession: %v", err)
+	}
+	ended, err := app.EndAISessions(selection)
+	if err != nil {
+		t.Fatalf("EndAISessions: %v", err)
+	}
+	if ended {
+		t.Fatalf("a verbatim AI tool must not be ended by a claude-flag change")
+	}
+	aiAgain, err := app.StartAISession(selection, 0, 80, 24)
+	if err != nil {
+		t.Fatalf("StartAISession after no-op end: %v", err)
+	}
+	if aiAgain.SessionID != ai.SessionID {
+		t.Fatalf("AI session must stay live: got new id %d, want %d", aiAgain.SessionID, ai.SessionID)
+	}
+}
+
 // TestCloseSessionEndsRemoteCustomTerminal pins the explicit-close contract
 // end to end through the desktop: X-ing a custom terminal tab (slot > 0) must
 // run the end-script in the pod — otherwise the session outlives the close

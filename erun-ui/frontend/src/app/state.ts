@@ -416,7 +416,7 @@ export const defaultClaudeDefaults = (): UIEnvironmentConfig['claudeDefaults'] =
   useBedrock: false,
   models: ['sonnet', 'haiku'],
   maxOutputTokens: 4096,
-  knownModels: ['opus', 'sonnet', 'haiku'],
+  knownModels: ['opus', 'sonnet', 'haiku', 'fable'],
   minTokens: 1,
   maxTokens: 200000,
   effort: 'max',

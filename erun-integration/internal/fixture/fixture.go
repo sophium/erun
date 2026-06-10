@@ -233,6 +233,25 @@ func SeedRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment stri
 	)
 }
 
+// SeedRemoteTenantEnvWithClaude writes the same tree as SeedRemoteTenantEnv
+// plus the given claude: YAML block, so scenarios can exercise the per-env
+// Claude launch flags (--effort / --model / --verbose --debug) that the AI
+// tab's persistent session resolves from env config (issues #477/#482).
+func SeedRemoteTenantEnvWithClaude(t testing.TB, setup env.Setup, tenant, environment, claudeBlock string) {
+	t.Helper()
+	SeedRemoteTenantEnv(t, setup, tenant, environment)
+	envDir := filepath.Join(setup.ConfigHome, "erun", tenant, environment)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+filepath.Join(setup.Home, "git", tenant)+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"runtimeversion: 1.0.0\n"+
+			"remote: true\n"+
+			claudeBlock,
+	)
+}
+
 // SeedRemoteTenantEnvWithHostCredentials writes the same tree as
 // SeedRemoteTenantEnv but flips the remotehostcredentials toggle on, so
 // scenarios can exercise the deploy plumbing that injects AWS_PROFILE into

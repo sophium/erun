@@ -399,6 +399,8 @@ export interface UIEnvironmentClaudeConfig {
   models?: string[];
   maxOutputTokens?: number;
   effort?: string;
+  defaultModel?: string;
+  verboseDebug?: boolean;
 }
 
 export interface UIEnvironmentClaudeDefaults {
