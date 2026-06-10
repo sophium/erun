@@ -767,7 +767,13 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 		// reports the handover instead of reconnecting into a tug-of-war.
 		"attach_id=\"$$-$(date +%s)\"",
 		fmt.Sprintf("printf '%%s' \"$attach_id\" > \"%s\"", owner),
-		fmt.Sprintf("master_pid=\"$(ss -xlpH 2>/dev/null | grep -F \"%s\" | sed -n 's/.*pid=\\([0-9]*\\).*/\\1/p' | head -n1)\"", socket),
+		// The master is the dtach process with a non-dtach child (the session
+		// program). Clients have no children, and the -A creator's only child
+		// is the master itself. /proc-based on purpose: the runtime image
+		// ships no ss/lsof, and a missing tool must fail open (no kick), not
+		// kill the session.
+		"master_pid=\"\"",
+		fmt.Sprintf("for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if grep -qF \"%s\" \"/proc/$dtach_pid/cmdline\" 2>/dev/null; then for child_pid in $(pgrep -P \"$dtach_pid\" 2>/dev/null || true); do child_comm=\"$(cat \"/proc/$child_pid/comm\" 2>/dev/null)\"; if [ -n \"$child_comm\" ] && [ \"$child_comm\" != \"dtach\" ]; then master_pid=\"$dtach_pid\"; fi; done; fi; done", socket),
 		fmt.Sprintf("if [ -S \"%s\" ] && [ -n \"$master_pid\" ]; then for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if [ \"$dtach_pid\" != \"$master_pid\" ] && grep -qF \"%s\" \"/proc/$dtach_pid/cmdline\" 2>/dev/null; then kill \"$dtach_pid\" 2>/dev/null || true; fi; done; fi", socket, socket),
 		// ctrl_l, not winch: dtach keeps no screen buffer, so a reattach shows
 		// nothing until the program repaints. A same-size attach yields no

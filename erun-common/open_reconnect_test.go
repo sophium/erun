@@ -70,6 +70,9 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		if !strings.Contains(script, `if [ "$dtach_pid" != "$master_pid" ]`) {
 			t.Fatalf("kick loop must spare the session master:\n%s", script)
 		}
+		if !strings.Contains(script, `[ "$child_comm" != "dtach" ]`) {
+			t.Fatalf("master detection must be the /proc child scan (runtime image has no ss):\n%s", script)
+		}
 		if !strings.Contains(script, `[ -S "/tmp/erun-app/erun-local-open-0.dtach" ] && [ -n "$master_pid" ]`) {
 			t.Fatalf("kick must be skipped when the master cannot be identified:\n%s", script)
 		}
