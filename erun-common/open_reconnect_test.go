@@ -43,7 +43,7 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		req := base
 		req.AppSession = "open-0"
 		script := preview(t, req)
-		if !strings.Contains(script, `dtach -A "/tmp/erun-app/erun-local-open-0.dtach" -r winch /bin/bash`) {
+		if !strings.Contains(script, `dtach -A "/tmp/erun-app/erun-local-open-0.dtach" -r ctrl_l /bin/bash`) {
 			t.Fatalf("ERun tab missing dtach wrap:\n%s", script)
 		}
 		if strings.Contains(script, "claude") || strings.Contains(script, "ERUN_SKIP_LINT") {
@@ -54,12 +54,29 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		}
 	})
 
+	t.Run("each terminal slot owns its own session", func(t *testing.T) {
+		// One env can carry several live sessions at once: custom "Terminal N"
+		// tabs in one app instance get distinct slot ids, while a second app
+		// instance (or machine) passing the same id shares the same socket and
+		// so reattaches to the same running shell. The socket key is
+		// tenant+env+id only — never anything app-instance-specific.
+		req := base
+		req.AppSession = "open-1"
+		script := preview(t, req)
+		if !strings.Contains(script, `dtach -A "/tmp/erun-app/erun-local-open-1.dtach" -r ctrl_l`) {
+			t.Fatalf("slot 1 missing its own dtach socket:\n%s", script)
+		}
+		if strings.Contains(script, "open-0") {
+			t.Fatalf("slot 1 must not touch slot 0's session:\n%s", script)
+		}
+	})
+
 	t.Run("AI tab launches claude once as the session program", func(t *testing.T) {
 		req := base
 		req.AppSession = "ai"
 		req.AI = true
 		script := preview(t, req)
-		if !strings.Contains(script, `dtach -A "/tmp/erun-app/erun-local-ai.dtach"`) {
+		if !strings.Contains(script, `dtach -A "/tmp/erun-app/erun-local-ai.dtach" -r ctrl_l`) {
 			t.Fatalf("AI tab missing dtach wrap:\n%s", script)
 		}
 		if !strings.Contains(script, "claude --continue --effort max") {

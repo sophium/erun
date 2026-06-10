@@ -719,7 +719,11 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 	return []string{
 		"mkdir -p \"/tmp/erun-app\"",
 		fmt.Sprintf("cat > \"%s\" <<'EOF'\n%s\nEOF", launchScript, body),
-		fmt.Sprintf("dtach -A \"%s\" -r winch /bin/bash \"%s\" || shell_status=$?", socket, launchScript),
+		// ctrl_l, not winch: dtach keeps no screen buffer, so a reattach shows
+		// nothing until the program repaints. A same-size attach yields no
+		// effective WINCH (bash's readline and claude's TUI both stay silent);
+		// the ^L dtach sends on attach makes both repaint immediately.
+		fmt.Sprintf("dtach -A \"%s\" -r ctrl_l /bin/bash \"%s\" || shell_status=$?", socket, launchScript),
 	}
 }
 

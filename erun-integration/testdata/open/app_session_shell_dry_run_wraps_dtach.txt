@@ -62,7 +62,7 @@ bootstrap-script:
   cat > "$HOME/.erun/team/dev/launch-open-0.sh" <<'EOF'
   exec /bin/bash --rcfile "$HOME/.erun/team/dev/bashrc" -i
   EOF
-  dtach -A "<TMP>" -r winch /bin/bash "$HOME/.erun/team/dev/launch-open-0.sh" || shell_status=$?
+  dtach -A "<TMP>" -r ctrl_l /bin/bash "$HOME/.erun/team/dev/launch-open-0.sh" || shell_status=$?
   if [ -e "$request_file" ]; then rm -f "$request_file"; exit 75; fi
   rm -f "$request_file"
   exit "$shell_status"
