@@ -17,11 +17,17 @@ import { expect, test } from '../fixtures/erunApp.js';
 // /__erun_emit fan-out, exactly like the real backend stream) and observes the
 // resulting SendSessionInput call on /__erun_invoke.
 //
-// DECRQSS (`ESC P $ q " q ESC \`) is used as the trigger because it is the one
-// query that survives stripTerminalResponses() in terminalBuffers.ts — that
-// strip removes CSI `ESC[<n>n` (DSR/CPR) and `ESC[…c` (DA) response *and* query
-// tails from the displayed bytes, but not DCS sequences — so DECRQSS
-// deterministically reaches xterm's parser and produces a reply.
+// A DEC-private cursor-position request (DEC DSR, `ESC [ ? 6 n`) is the trigger:
+// post-fix it is the query that both reaches xterm's parser and produces a
+// reply. Its `?` prefix dodges stripTerminalResponses() in terminalBuffers.ts
+// (whose patterns require a digit immediately after `ESC [`), so it is not
+// stripped from the bytes written to xterm, and the `?n` handler answers it
+// with a cursor-position report. DA1/DA2, OSC 10/11/12, and DECRQSS (`ESC P $ q
+// … ST`) are now all suppressed — they consume the query and never reply —
+// because their async reply landed at the bash prompt as junk when the asking
+// tool had exited or the query arrived on reattach. Cursor position is the one
+// reply still sent (tools need it; no sane default), so it is what this spec
+// observes.
 //
 // Harness limitation: the exact cross-session race (xterm deferring a query's
 // parse across a session switch, so reply-time selection != write-time source)
@@ -32,7 +38,7 @@ import { expect, test } from '../fixtures/erunApp.js';
 // query from a non-selected session is never answered — while the write-time
 // capture that closes the race lives in TerminalWriteSourceQueue.ts.
 
-const DECRQSS = '\x1bP$q"q\x1b\\';
+const CPR_QUERY = '\x1b[?6n';
 
 interface InvokeCall {
   method: string;
@@ -66,10 +72,10 @@ function captureInvokes(page: Page): InvokeCall[] {
   return calls;
 }
 
-// isDcsReply matches the DCS-framed reply the DECRQSS handler sends back
-// (statusStringReport returns `ESC P 1 $ r 0 " q ESC \`).
-function isDcsReply(data: unknown): data is string {
-  return typeof data === 'string' && data.startsWith('\x1bP');
+// isCprReply matches the cursor-position report the DEC DSR handler sends back
+// (cursorPositionReport returns `ESC [ ? <row> ; <col> R`).
+function isCprReply(data: unknown): data is string {
+  return typeof data === 'string' && data.startsWith('\x1b[') && data.endsWith('R');
 }
 
 // emitTerminalOutput injects a `terminal-output` event for sessionId carrying
@@ -117,14 +123,14 @@ test.describe('terminal query responses (#347)', () => {
     const invokes = captureInvokes(page);
     const selectedId = await discoverSelectedSessionId(app, page);
 
-    await emitTerminalOutput(page, selectedId, DECRQSS);
+    await emitTerminalOutput(page, selectedId, CPR_QUERY);
 
     // The reply must be addressed to the session that produced the query.
     await expect
       .poll(
         () => {
           const reply = invokes.find(
-            (call) => call.method === 'SendSessionInput' && isDcsReply(call.args[1]),
+            (call) => call.method === 'SendSessionInput' && isCprReply(call.args[1]),
           );
           return reply?.args[0];
         },
@@ -143,8 +149,8 @@ test.describe('terminal query responses (#347)', () => {
     // Emit the background query first, then a foreground query. Waiting for the
     // foreground reply proves the event pipeline drained past the background
     // emit, so a missing background reply is a real negative, not just slowness.
-    await emitTerminalOutput(page, backgroundId, DECRQSS);
-    await emitTerminalOutput(page, selectedId, DECRQSS);
+    await emitTerminalOutput(page, backgroundId, CPR_QUERY);
+    await emitTerminalOutput(page, selectedId, CPR_QUERY);
 
     await expect
       .poll(
@@ -152,7 +158,7 @@ test.describe('terminal query responses (#347)', () => {
           invokes.some(
             (call) =>
               call.method === 'SendSessionInput' &&
-              isDcsReply(call.args[1]) &&
+              isCprReply(call.args[1]) &&
               call.args[0] === selectedId,
           ),
         { timeout: 5_000 },
@@ -162,7 +168,7 @@ test.describe('terminal query responses (#347)', () => {
     const answeredToBackground = invokes.filter(
       (call) =>
         call.method === 'SendSessionInput' &&
-        isDcsReply(call.args[1]) &&
+        isCprReply(call.args[1]) &&
         call.args[0] === backgroundId,
     );
     expect(answeredToBackground).toHaveLength(0);

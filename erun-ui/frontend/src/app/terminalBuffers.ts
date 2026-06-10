@@ -66,6 +66,13 @@ const TERMINAL_RESPONSE_PATTERNS: RegExp[] = [
   // above; without this the user sees the literal text at the prompt
   // even when terminalQueryResponses no longer answers the query.
   /(?:^|[^A-Za-z0-9])\d+(?:;\d+)+c(?![A-Za-z0-9])/g,
+  // DECRQSS status-string response: DCS [01] $ r <payload> ST
+  // (e.g. `\x1bP1$r0"q\x1b\\`). terminalQueryResponses no longer answers
+  // DECRQSS, so this is a backstop for a response that reaches the buffer
+  // another way (a pre-fix replayed buffer, or a tool that answers its own
+  // probe). The `(?:\x1bP)?` makes it also catch the bare `1$r0"q␛\` tail
+  // bash leaves after readline eats the leading `\x1bP`.
+  /(?:\x1BP)?[01]\$r[^\x1B]*\x1B\\/g,
 ];
 
 function stripTerminalResponses(input: Uint8Array): Uint8Array {
