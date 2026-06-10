@@ -96,6 +96,24 @@ func buildOpenArgs(tenant, environment string, debug ...bool) []string {
 	return erunArgs(debugEnabled(debug...), "open", strings.TrimSpace(tenant), strings.TrimSpace(environment))
 }
 
+// withAppSession appends the desktop persistent-session flags to an `erun open`
+// argv so the remote shell runs as a reattachable dtach session: closing or
+// reopening the tab (or a transient kubectl-exec drop) reconnects to the running
+// shell instead of spawning a parallel one, and the AI tab's claude keeps
+// working in the pod meanwhile. sessionID is stable per (tab kind, slot) so the
+// reattach lands on the same session; the AI/contribute launch now happens
+// pod-side (no typed prelude). See issue #478.
+func withAppSession(args []string, sessionID string, ai, contribute bool) []string {
+	args = append(args, "--app-session", sessionID)
+	if contribute {
+		args = append(args, "--contribute")
+	}
+	if ai {
+		args = append(args, "--ai")
+	}
+	return args
+}
+
 func buildOpenIDEArgs(selection uiSelection, ide string) []string {
 	args := erunArgs(selection.Debug, "open", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
 	switch strings.TrimSpace(ide) {
@@ -407,13 +425,6 @@ func resolveLocalShellCommand(goos string) (string, []string) {
 	}
 }
 
-func resolveAIToolCommand(configured string) string {
-	if tool := strings.TrimSpace(configured); tool != "" {
-		return tool
-	}
-	return defaultAITool
-}
-
 // claudeEffortLevels enumerates the valid `claude --effort` startup levels, in
 // ascending order. The set mirrors `claude --help`; max is the highest and the
 // desktop default.
@@ -430,61 +441,6 @@ func claudeEffortLevelOptions() []string {
 	out := make([]string, len(claudeEffortLevels))
 	copy(out, claudeEffortLevels)
 	return out
-}
-
-func validClaudeEffort(level string) bool {
-	for _, l := range claudeEffortLevels {
-		if l == level {
-			return true
-		}
-	}
-	return false
-}
-
-// resolveClaudeEffort returns the env's configured Claude effort level when it
-// is a valid level, falling back to defaultClaudeEffort for an unset or invalid
-// value so the AI tab never launches with a bad --effort flag (issue #469).
-func resolveClaudeEffort(config eruncommon.EnvironmentClaudeConfig) string {
-	if config.Effort != nil {
-		if level := strings.TrimSpace(*config.Effort); validClaudeEffort(level) {
-			return level
-		}
-	}
-	return defaultClaudeEffort
-}
-
-// claudeLaunchGuard is the cwd-guarded Claude Code resume the desktop pipes
-// into an AI tab. It continues the session that belongs to the tab's working
-// directory — the env repo for the env AI tab, the $HOME/git/erun clone for
-// the contribute AI tab — so per-tab restore is correct on local-agent (host)
-// and remote-agent (pod) envs alike, no longer depending on the pod-only
-// claude-wrapper.sh that is absent on local-agent hosts (issue #451).
-//
-// The guard mirrors claude-wrapper.sh: resume only when Claude Code's
-// per-project session store exists for the current directory. It composes with
-// the pod wrapper because the wrapper treats --continue as a bypass flag, so it
-// forwards rather than double-injecting; --effort is likewise forwarded, not
-// stripped. The resolved effort level is injected into both branches so the
-// session runs at the env's configured effort (issue #469).
-func claudeLaunchGuard(effort string) string {
-	flag := ""
-	if validClaudeEffort(effort) {
-		flag = " --effort " + effort
-	}
-	return `if [ -d "$HOME/.claude/projects/$(pwd | tr / -)" ]; then claude --continue` + flag + `; else claude` + flag + `; fi`
-}
-
-// aiLaunchCommand returns the keystrokes the desktop pipes into an AI tab's
-// shell to launch the AI tool. A bare `claude` launch is wrapped in the
-// cwd-guarded resume with the resolved --effort level; any other tool, or
-// `claude` with explicit flags/a subcommand, launches verbatim — mirroring the
-// wrapper's bypass rules so we never alter a launch the user authored.
-func aiLaunchCommand(configured string, effort string) string {
-	tool := resolveAIToolCommand(configured)
-	if tool != defaultAITool {
-		return tool
-	}
-	return claudeLaunchGuard(effort)
 }
 
 func formatLaunchCommand(params startTerminalSessionParams) string {

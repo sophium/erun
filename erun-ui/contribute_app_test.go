@@ -13,8 +13,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 // Tests in this file pin the respawn-on-early-exit contract that
@@ -273,101 +271,5 @@ func TestAdoptRefusesAfterStop(t *testing.T) {
 	forward.stop()
 	if forward.adopt(&exec.Cmd{}, &bytes.Buffer{}) {
 		t.Fatalf("adopt should return false after stop()")
-	}
-}
-
-// TestBuildContributePreludeCommandResumesCloneSession asserts the contribute
-// AI tab pipes the cwd-guarded Claude resume after cd'ing to the clone, so it
-// continues the $HOME/git/erun session rather than starting fresh — the
-// local-agent gap in issue #451. The non-AI variant pipes no AI launch.
-func TestBuildContributePreludeCommandResumesCloneSession(t *testing.T) {
-	withAI := buildContributePreludeCommand(true, "")
-	if !strings.Contains(withAI, `cd "$HOME/git/erun"`) {
-		t.Fatalf("prelude must cd to the clone before launching the AI tool, got %q", withAI)
-	}
-	// The contribute tab has no per-env config, so it launches at the default
-	// effort (max) (issue #469).
-	if !strings.HasSuffix(withAI, claudeLaunchGuard(defaultClaudeEffort)+"\n") {
-		t.Fatalf("contribute AI prelude must end with the cwd-guarded claude resume at default effort, got %q", withAI)
-	}
-	if !strings.Contains(withAI, "--effort max") {
-		t.Fatalf("contribute AI prelude must inject --effort max, got %q", withAI)
-	}
-
-	// A non-claude tool launches verbatim (no resume injection), mirroring the
-	// wrapper's bypass rules.
-	codex := buildContributePreludeCommand(true, "codex")
-	if !strings.HasSuffix(codex, "codex\n") {
-		t.Fatalf("configured non-claude tool must launch verbatim, got %q", codex)
-	}
-	if strings.Contains(codex, "--continue") {
-		t.Fatalf("non-claude tool must not carry a claude resume, got %q", codex)
-	}
-
-	noAI := buildContributePreludeCommand(false, "")
-	if strings.Contains(noAI, "claude") {
-		t.Fatalf("non-AI contribute prelude must not launch an AI tool, got %q", noAI)
-	}
-}
-
-// TestAILaunchCommandGuardsClaudeOnly documents the bypass rules the desktop
-// shares with claude-wrapper.sh: a bare claude launch is wrapped in the
-// cwd-guarded resume; an explicit-flag claude invocation or a different tool
-// launches verbatim. The default-claude path injects --effort into both guard
-// branches; non-claude and explicit-flag launches are never altered (#469).
-func TestAILaunchCommandGuardsClaudeOnly(t *testing.T) {
-	wantGuard := claudeLaunchGuard("high")
-	if got := aiLaunchCommand("", "high"); got != wantGuard {
-		t.Fatalf("default (claude) must use the resume guard, got %q", got)
-	}
-	if got := aiLaunchCommand("claude", "high"); got != wantGuard {
-		t.Fatalf("explicit claude must use the resume guard, got %q", got)
-	}
-	// --effort is injected into both branches of the cwd guard.
-	if strings.Count(wantGuard, "--effort high") != 2 {
-		t.Fatalf("guard must inject --effort high into both branches, got %q", wantGuard)
-	}
-	if !strings.Contains(wantGuard, "claude --continue --effort high") ||
-		!strings.Contains(wantGuard, "else claude --effort high") {
-		t.Fatalf("guard must inject --effort after --continue and in the bare branch, got %q", wantGuard)
-	}
-	// A configured non-claude tool and explicit-flag claude launch verbatim,
-	// with no --effort injected.
-	if got := aiLaunchCommand("codex", "max"); got != "codex" {
-		t.Fatalf("codex must launch verbatim, got %q", got)
-	}
-	if got := aiLaunchCommand("claude --resume", "max"); got != "claude --resume" {
-		t.Fatalf("claude with explicit flags must launch verbatim, got %q", got)
-	}
-}
-
-// TestResolveClaudeEffort covers the per-env effort resolution the env AI tab
-// applies: a valid configured level is used; unset, blank, and invalid values
-// fall back to the default (max) so the launch never carries a bad flag (#469).
-func TestResolveClaudeEffort(t *testing.T) {
-	level := func(v string) *string { return &v }
-	cases := []struct {
-		name   string
-		config eruncommon.EnvironmentClaudeConfig
-		want   string
-	}{
-		{"unset falls back to max", eruncommon.EnvironmentClaudeConfig{}, "max"},
-		{"valid level is used", eruncommon.EnvironmentClaudeConfig{Effort: level("low")}, "low"},
-		{"surrounding space is trimmed", eruncommon.EnvironmentClaudeConfig{Effort: level("  high  ")}, "high"},
-		{"blank falls back to max", eruncommon.EnvironmentClaudeConfig{Effort: level("  ")}, "max"},
-		{"invalid falls back to max", eruncommon.EnvironmentClaudeConfig{Effort: level("turbo")}, "max"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := resolveClaudeEffort(tc.config); got != tc.want {
-				t.Fatalf("resolveClaudeEffort(%+v) = %q, want %q", tc.config, got, tc.want)
-			}
-		})
-	}
-
-	// An invalid effort passed straight to the guard injects no flag, so a bad
-	// persisted value can never reach the shell as `--effort turbo`.
-	if guard := claudeLaunchGuard("turbo"); strings.Contains(guard, "--effort") {
-		t.Fatalf("invalid effort must not be injected, got %q", guard)
 	}
 }

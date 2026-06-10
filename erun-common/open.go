@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ var (
 	ErrRepoPathNotConfigured           = errors.New("repo path is not configured")
 	ErrShellReattachDeploy             = errors.New("remote shell requested deploy handoff and reattach")
 	ErrShellPodReplaced                = errors.New("remote shell pod was replaced; reattach")
+	ErrShellSessionTakenOver           = errors.New("remote session was re-attached in another ERun window")
 
 	openUserHomeDir = os.UserHomeDir
 )
@@ -32,7 +34,41 @@ var (
 const (
 	defaultShellLaunchWaitTimeout     = "2m0s"
 	remoteShellReattachDeployExitCode = 75
+	remoteShellTakenOverExitCode      = 76
 )
+
+// ShellSessionTakenOverNotice is the stable line `erun open` prints when its
+// persistent session is re-attached from another ERun window (screen -d -r
+// semantics: the session keeps running, this viewer is detached). The desktop
+// matches this exact line to stop its reconnect loop instead of stealing the
+// session back, so treat the wording as a public contract.
+const ShellSessionTakenOverNotice = "open: session re-attached in another ERun window"
+
+// RemoteAppSessionSocketDir is where the bootstrap keeps the dtach sockets
+// (and owner files) of persistent desktop sessions inside the runtime pod.
+// Pod-ephemeral on purpose: a pod replacement clears them.
+const RemoteAppSessionSocketDir = "/tmp/erun-app"
+
+// ParseRemoteAppSessionIDs extracts this tenant+env's persistent desktop
+// session ids from an `ls` of RemoteAppSessionSocketDir in the runtime pod.
+// Socket files are named <tenant>-<env>-<id>.dtach with the same name
+// sanitization the bootstrap applies; owner files, other envs' sockets, and
+// ls noise are ignored. The desktop uses the ids to rebuild tabs for sessions
+// another ERun window created.
+func ParseRemoteAppSessionIDs(tenant, environment, lsOutput string) []string {
+	prefix := sanitizeForFilename(tenant) + "-" + sanitizeForFilename(environment) + "-"
+	var ids []string
+	for _, raw := range strings.Split(lsOutput, "\n") {
+		name := strings.TrimSpace(raw)
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".dtach") {
+			continue
+		}
+		if id := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".dtach"); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
 
 type OpenStore interface {
 	LoadERunConfig() (ERunConfig, string, error)
@@ -76,9 +112,29 @@ type ShellLaunchParams struct {
 	ManagedCloud       bool
 	CloudProviderAlias string
 	Idle               EnvironmentIdleConfig
+	// AppSession, when non-empty, makes the remote shell a persistent,
+	// reattachable dtach session keyed by this id (distinct per desktop tab:
+	// kind + slot). Closing/reopening a tab — or a transient kubectl-exec drop —
+	// then reconnects to the still-running shell (and the AI tab's claude keeps
+	// working in the pod) instead of spawning a parallel one. Empty (the bare
+	// `erun open` CLI path) keeps the previous ephemeral behaviour. See #478.
+	AppSession string
+	// AI / Contribute select the persistent session's create-time program:
+	// Contribute cds into the contribute clone with its env; AI launches the AI
+	// tool (claude, at the env's effort) once on create. The desktop sets these
+	// instead of typing the prelude in, so a reattach never re-runs them.
+	AI         bool
+	Contribute bool
+	AITool     string
+	Claude     EnvironmentClaudeConfig
 }
 
 type ShellLaunchPreview struct {
+	// SeedArgs is the `kubectl exec -i` that streams the SSH private key to the
+	// pod on stdin (the key is never in these args). Empty when the env has no
+	// private key to seed (remote-repo env, no resolvable git remote, or no key
+	// file). Traced before the shell exec so the dry-run plan shows the action.
+	SeedArgs []string
 	WaitArgs []string
 	ExecArgs []string
 	Script   string
@@ -482,6 +538,8 @@ func ShellLaunchParamsFromResult(result OpenResult) ShellLaunchParams {
 		ManagedCloud:       result.EnvConfig.ManagedCloud,
 		CloudProviderAlias: strings.TrimSpace(result.EnvConfig.CloudProviderAlias),
 		Idle:               result.EnvConfig.Idle,
+		AITool:             strings.TrimSpace(result.EnvConfig.AITool),
+		Claude:             result.EnvConfig.Claude,
 	}
 }
 
@@ -509,7 +567,15 @@ func WaitForShellDeployment(req ShellLaunchParams) error {
 }
 
 func ExecShell(req ShellLaunchParams) error {
-	script, err := buildRemoteShellScript(req, false)
+	// Stream the SSH private key to the pod on stdin before the interactive
+	// shell, so it never appears in any kubectl exec argv (laptop `ps`, the
+	// pod's /proc/<pid>/cmdline, or cluster exec audit logs). The interactive
+	// script below seeds only the public known_hosts + ssh config inline.
+	if err := seedRemoteSSHKey(req); err != nil {
+		return err
+	}
+
+	script, err := buildRemoteShellScript(req)
 	if err != nil {
 		return err
 	}
@@ -522,6 +588,9 @@ func ExecShell(req ShellLaunchParams) error {
 		if isShellReattachDeployExit(err) {
 			return ErrShellReattachDeploy
 		}
+		if isShellTakenOverExit(err) {
+			return ErrShellSessionTakenOver
+		}
 		if isShellReplacementExit(err) && shellReplacementPodReady(req, runOpenKubectl) {
 			return ErrShellPodReplaced
 		}
@@ -531,12 +600,22 @@ func ExecShell(req ShellLaunchParams) error {
 }
 
 func PreviewShellLaunch(req ShellLaunchParams) (ShellLaunchPreview, error) {
-	script, err := buildRemoteShellScript(req, true)
+	script, err := buildRemoteShellScript(req)
 	if err != nil {
 		return ShellLaunchPreview{}, err
 	}
 
+	keyMaterial, err := remoteShellPrivateKeyMaterial(req)
+	if err != nil {
+		return ShellLaunchPreview{}, err
+	}
+	var seedArgs []string
+	if strings.TrimSpace(keyMaterial) != "" {
+		seedArgs = remoteSSHKeySeedArgs(req)
+	}
+
 	return ShellLaunchPreview{
+		SeedArgs: seedArgs,
 		WaitArgs: kubectlDeploymentWaitArgs(req),
 		ExecArgs: kubectlExecArgs(req, script),
 		Script:   script,
@@ -587,14 +666,14 @@ func kubectlTargetArgs(req ShellLaunchParams) []string {
 	return args
 }
 
-func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (string, error) {
+func buildRemoteShellScript(req ShellLaunchParams) (string, error) {
 	config, err := remoteShellConfigForRequest(req)
 	if err != nil {
 		return "", err
 	}
 	workdir := shellQuote(config.Workdir)
 	scriptLines := remoteShellBaseScriptLines(req, config, workdir, shellQuote(req.Title))
-	gitLines, err := remoteShellGitSeedLines(req, redactHostSecrets, workdir)
+	gitLines, err := remoteShellGitSeedLines(req, workdir)
 	if err != nil {
 		return "", err
 	}
@@ -653,7 +732,7 @@ func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig,
 	markerDir := fmt.Sprintf("$HOME/.erun/%s/%s", req.Tenant, req.Environment)
 	bashrcPath := markerDir + "/bashrc"
 	requestPath := markerDir + "/shell-request"
-	return []string{
+	lines := []string{
 		"set -eu",
 		"export COLORTERM=truecolor",
 		"export COLORFGBG='15;0'",
@@ -673,14 +752,115 @@ func remoteShellBaseScriptLines(req ShellLaunchParams, config remoteShellConfig,
 		"rm -f \"$request_file\"",
 		"export ERUN_SHELL_REQUEST_FILE=\"$request_file\"",
 		"shell_status=0",
-		fmt.Sprintf("/bin/bash --rcfile \"%s\" -i || shell_status=$?", bashrcPath),
+	}
+	lines = append(lines, remoteShellLaunchLines(req, bashrcPath, markerDir)...)
+	return append(lines,
 		fmt.Sprintf("if [ -e \"$request_file\" ]; then rm -f \"$request_file\"; exit %d; fi", remoteShellReattachDeployExitCode),
 		"rm -f \"$request_file\"",
 		"exit \"$shell_status\"",
+	)
+}
+
+// remoteShellLaunchLines runs the interactive shell. Without AppSession (the
+// bare `erun open` CLI) it is the original single bash invocation, byte for
+// byte. With AppSession (a desktop tab) it runs the shell inside a persistent,
+// reattachable dtach session keyed by the id, so a disconnect detaches (the
+// session — and the AI tab's claude — keeps running in the pod) and the next
+// kubectl exec re-attaches rather than spawning a parallel chain. See #478.
+func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string) []string {
+	if strings.TrimSpace(req.AppSession) == "" {
+		return []string{fmt.Sprintf("/bin/bash --rcfile \"%s\" -i || shell_status=$?", bashrcPath)}
+	}
+	id := sanitizeForFilename(req.AppSession)
+	socket := remoteAppSessionSocketPath(req.Tenant, req.Environment, id)
+	owner := strings.TrimSuffix(socket, ".dtach") + ".owner"
+	launchScript := fmt.Sprintf("%s/launch-%s.sh", markerDir, id)
+	body := strings.Join(remoteSessionLauncherBody(req, bashrcPath), "\n")
+	lines := []string{
+		fmt.Sprintf("mkdir -p \"%s\"", RemoteAppSessionSocketDir),
+		fmt.Sprintf("cat > \"%s\" <<'EOF'\n%s\nEOF", launchScript, body),
+		// Take over the session from any other ERun window (screen-style
+		// detach-elsewhere-and-reattach-here): claim ownership, then detach
+		// other viewers by killing their dtach clients. The master — which
+		// owns the running shell/claude — is never touched, and when it
+		// cannot be identified no one is kicked. Kicked wrappers find a
+		// foreign owner id below and exit 76 so their window reports the
+		// handover instead of reconnecting into a tug-of-war.
+		"attach_id=\"$$-$(date +%s)\"",
+		fmt.Sprintf("printf '%%s' \"$attach_id\" > \"%s\"", owner),
+	}
+	lines = append(lines, remoteAppSessionMasterScanLines(socket)...)
+	return append(lines,
+		fmt.Sprintf("if [ -S \"%s\" ] && [ -n \"$master_pid\" ]; then for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if [ \"$dtach_pid\" != \"$master_pid\" ] && grep -qF \"%s\" \"/proc/$dtach_pid/cmdline\" 2>/dev/null; then kill \"$dtach_pid\" 2>/dev/null || true; fi; done; fi", socket, socket),
+		// ctrl_l, not winch: dtach keeps no screen buffer, so a reattach shows
+		// nothing until the program repaints. A same-size attach yields no
+		// effective WINCH (bash's readline and claude's TUI both stay silent);
+		// the ^L dtach sends on attach makes both repaint immediately.
+		fmt.Sprintf("dtach -A \"%s\" -r ctrl_l /bin/bash \"%s\" || shell_status=$?", socket, launchScript),
+		fmt.Sprintf("if [ \"$(cat \"%s\" 2>/dev/null)\" != \"$attach_id\" ]; then exit %d; fi", owner, remoteShellTakenOverExitCode),
+	)
+}
+
+// remoteAppSessionSocketPath is the dtach socket for one persistent desktop
+// session. Pod-ephemeral on purpose: a pod replacement clears the sockets —
+// no stale socket to reattach to, and claude --continue resumes the
+// conversation in the fresh session.
+func remoteAppSessionSocketPath(tenant, environment, id string) string {
+	return fmt.Sprintf("%s/%s-%s-%s.dtach", RemoteAppSessionSocketDir, sanitizeForFilename(tenant), sanitizeForFilename(environment), sanitizeForFilename(id))
+}
+
+// remoteAppSessionMasterScanLines emits the sh lines that resolve $master_pid
+// for the session socket: the dtach process with a non-dtach child (the
+// session program). Clients have no children, and the -A creator's only child
+// is the master itself. /proc-based on purpose: the runtime image ships no
+// ss/lsof, and an unidentifiable master must leave $master_pid empty so
+// callers fail open instead of killing the session.
+func remoteAppSessionMasterScanLines(socket string) []string {
+	return []string{
+		"master_pid=\"\"",
+		fmt.Sprintf("for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if grep -qF \"%s\" \"/proc/$dtach_pid/cmdline\" 2>/dev/null; then for child_pid in $(pgrep -P \"$dtach_pid\" 2>/dev/null || true); do child_comm=\"$(cat \"/proc/$child_pid/comm\" 2>/dev/null)\"; if [ -n \"$child_comm\" ] && [ \"$child_comm\" != \"dtach\" ]; then master_pid=\"$dtach_pid\"; fi; done; fi; done", socket),
 	}
 }
 
-func remoteShellGitSeedLines(req ShellLaunchParams, redactHostSecrets bool, workdir string) ([]string, error) {
+// RemoteAppSessionEndScript returns the sh script that permanently ends a
+// persistent desktop session: kill the dtach master (its program follows via
+// SIGHUP when the pty disappears) and remove the socket and owner file. The
+// desktop runs it when the user explicitly closes a custom terminal tab —
+// unlike closing the env or quitting the app, which only detach and leave the
+// session running for the next attach.
+func RemoteAppSessionEndScript(tenant, environment, id string) string {
+	socket := remoteAppSessionSocketPath(tenant, environment, id)
+	lines := remoteAppSessionMasterScanLines(socket)
+	lines = append(lines,
+		"if [ -n \"$master_pid\" ]; then kill \"$master_pid\" 2>/dev/null || true; fi",
+		fmt.Sprintf("rm -f \"%s\" \"%s\"", socket, strings.TrimSuffix(socket, ".dtach")+".owner"),
+	)
+	return strings.Join(lines, "\n")
+}
+
+// remoteSessionLauncherBody is the dtach session's create-time program: the
+// per-tab prelude (run once on create) followed by the interactive shell. A
+// reattach connects to whatever this program is running, so the prelude — and
+// in particular the AI tool launch — never repeats.
+func remoteSessionLauncherBody(req ShellLaunchParams, bashrcPath string) []string {
+	var body []string
+	if req.Contribute {
+		// Match the desktop's former contribute prelude (issue #469): the
+		// contribute clone's built binary on PATH, fast incremental rebuilds,
+		// and the clone as the working directory.
+		body = append(body,
+			"export PATH=\"$HOME/.erun/contribute/bin:$PATH\"",
+			"export ERUN_SKIP_LINT=1",
+			"cd \"$HOME/git/erun\"",
+		)
+	}
+	if req.AI {
+		body = append(body, AISessionLaunchCommand(req.AITool, req.Claude))
+	}
+	return append(body, fmt.Sprintf("exec /bin/bash --rcfile \"%s\" -i", bashrcPath))
+}
+
+func remoteShellGitSeedLines(req ShellLaunchParams, workdir string) ([]string, error) {
 	if req.RemoteRepo {
 		return nil, nil
 	}
@@ -688,22 +868,17 @@ func remoteShellGitSeedLines(req ShellLaunchParams, redactHostSecrets bool, work
 	if err != nil {
 		return nil, nil
 	}
-	hostConfigEntries, err := resolveSSHConfigEntries(gitHost)
-	if err != nil {
-		return nil, err
-	}
 	knownHostsLines, err := loadKnownHostsLines(gitHost)
 	if err != nil {
 		return nil, err
 	}
-	keyLines, err := loadPrivateKeyMaterial(hostConfigEntries, redactHostSecrets)
-	if err != nil {
-		return nil, err
-	}
-	return remoteShellGitSeedScriptLines(workdir, gitHost, shellQuote(gitUser), shellQuote(gitRepo), strings.Join(knownHostsLines, "\n"), strings.Join(keyLines, "\n")), nil
+	// The private key is never written by this script — it streams to the pod
+	// on stdin via seedRemoteSSHKey (see ExecShell) so it stays out of the
+	// kubectl exec argv. known_hosts and the ssh config are public and inline.
+	return remoteShellGitSeedScriptLines(workdir, gitHost, shellQuote(gitUser), shellQuote(gitRepo), strings.Join(knownHostsLines, "\n")), nil
 }
 
-func remoteShellGitSeedScriptLines(workdir, gitHost, gitUser, gitRepo, knownHosts, keys string) []string {
+func remoteShellGitSeedScriptLines(workdir, gitHost, gitUser, gitRepo, knownHosts string) []string {
 	sshConfig := strings.Join([]string{
 		fmt.Sprintf("Host %s", gitHost),
 		fmt.Sprintf("  HostName %s", gitHost),
@@ -715,14 +890,14 @@ func remoteShellGitSeedScriptLines(workdir, gitHost, gitUser, gitRepo, knownHost
 		"set -eu",
 		"mkdir -p \"$HOME/.ssh\"",
 		"chmod 700 \"$HOME/.ssh\"",
-		"rm -f \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/keys\" \"$HOME/.ssh/config\"",
+		// Do not touch ~/.ssh/keys here — seedRemoteSSHKey owns it (stdin).
+		"rm -f \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/config\"",
 		"old_umask=\"$(umask)\"",
 		"umask 077",
 		fmt.Sprintf("cat > \"$HOME/.ssh/known_hosts\" <<'EOF'\n%s\nEOF", knownHosts),
-		fmt.Sprintf("cat > \"$HOME/.ssh/keys\" <<'EOF'\n%s\nEOF", keys),
 		fmt.Sprintf("cat > \"$HOME/.ssh/config\" <<'EOF'\n%s\nEOF", sshConfig),
 		"umask \"$old_umask\"",
-		"chmod 600 \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/keys\" \"$HOME/.ssh/config\"",
+		"chmod 600 \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/config\"",
 		fmt.Sprintf("mkdir -p %s", workdir),
 		fmt.Sprintf("cd %s", workdir),
 		// `git config --global` writes through a `~/.gitconfig.lock`
@@ -762,6 +937,14 @@ func isShellReattachDeployExit(err error) bool {
 		return false
 	}
 	return exitErr.ExitCode() == remoteShellReattachDeployExitCode
+}
+
+func isShellTakenOverExit(err error) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	return exitErr.ExitCode() == remoteShellTakenOverExitCode
 }
 
 func isShellReplacementExit(err error) bool {
@@ -851,7 +1034,11 @@ func loadKnownHostsLines(host string) ([]string, error) {
 	return lines, nil
 }
 
-func loadPrivateKeyMaterial(entries []sshConfigEntry, redact bool) ([]string, error) {
+// loadPrivateKeyMaterial reads the resolved private key files. The material is
+// only ever delivered to the pod on stdin (seedRemoteSSHKey) — never embedded
+// in a script or a command line — so there is no redaction mode: it is not
+// placed anywhere a dry-run trace or log would capture it.
+func loadPrivateKeyMaterial(entries []sshConfigEntry) ([]string, error) {
 	keyPaths := privateKeyPaths(entries)
 
 	lines := make([]string, 0, len(keyPaths))
@@ -863,14 +1050,69 @@ func loadPrivateKeyMaterial(entries []sshConfigEntry, redact bool) ([]string, er
 			}
 			return nil, err
 		}
-		if redact {
-			lines = append(lines, fmt.Sprintf("# %s", filepath.Base(keyPath)))
-			lines = append(lines, "<redacted>")
-			continue
-		}
 		lines = append(lines, string(data))
 	}
 	return lines, nil
+}
+
+// remoteSSHKeySeedScript writes stdin to ~/.ssh/keys at mode 600. The key bytes
+// arrive on the exec's stdin, never in its argv.
+const remoteSSHKeySeedScript = `umask 077; mkdir -p "$HOME/.ssh"; cat > "$HOME/.ssh/keys"; chmod 600 "$HOME/.ssh/keys"`
+
+// remoteShellPrivateKeyMaterial resolves the SSH private key material the env's
+// git remote needs, or "" when there is nothing to seed (remote-repo env, no
+// resolvable git remote, or no key file present).
+func remoteShellPrivateKeyMaterial(req ShellLaunchParams) (string, error) {
+	if req.RemoteRepo {
+		return "", nil
+	}
+	gitHost, _, _, err := resolveGitRemote(req.Dir)
+	if err != nil {
+		return "", nil
+	}
+	entries, err := resolveSSHConfigEntries(gitHost)
+	if err != nil {
+		return "", err
+	}
+	keyLines, err := loadPrivateKeyMaterial(entries)
+	if err != nil {
+		return "", err
+	}
+	return strings.Join(keyLines, "\n"), nil
+}
+
+// remoteSSHKeySeedArgs is the non-interactive `kubectl exec -i` that streams the
+// private key to the pod. -i (not -it) keeps stdin a pipe for the key bytes;
+// the key is never in these args.
+func remoteSSHKeySeedArgs(req ShellLaunchParams) []string {
+	args := kubectlTargetArgs(req)
+	return append(args, "exec", "-i", "deployment/"+RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-c", remoteSSHKeySeedScript)
+}
+
+// seedRemoteSSHKey writes the env's SSH private key into the pod's ~/.ssh/keys
+// by piping it on stdin, so it never touches a command line. No-op when there
+// is no key to seed. Runs after the deployment is Available (the open flow
+// waits first) and before the interactive shell exec.
+func seedRemoteSSHKey(req ShellLaunchParams) error {
+	keyMaterial, err := remoteShellPrivateKeyMaterial(req)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(keyMaterial) == "" {
+		return nil
+	}
+	cmd := Command("kubectl", remoteSSHKeySeedArgs(req)...)
+	cmd.Stdin = strings.NewReader(keyMaterial)
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	if err := cmd.Run(); err != nil {
+		if message := strings.TrimSpace(output.String()); message != "" {
+			return fmt.Errorf("seed remote ssh key: %w: %s", err, message)
+		}
+		return fmt.Errorf("seed remote ssh key: %w", err)
+	}
+	return nil
 }
 
 func privateKeyPaths(entries []sshConfigEntry) []string {

@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 const (
@@ -916,6 +918,13 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 		a.activityQueue.recordOutputLine(managed.selection.Tenant, managed.selection.Environment, line)
 		handler(line)
 		signalSessionReadyOnLine(managed, line)
+		// The CLI's taken-over notice is a public contract line (see
+		// eruncommon.ShellSessionTakenOverNotice): another ERun window
+		// re-attached this persistent session, so the upcoming PTY exit
+		// must not trigger a reconnect that would steal it back.
+		if strings.TrimSpace(line) == eruncommon.ShellSessionTakenOverNotice {
+			a.markSessionTakenOver(managed)
+		}
 	}
 }
 

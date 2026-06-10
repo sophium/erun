@@ -2264,7 +2264,9 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	}
 
 	got := strings.Join(actions, "\n")
-	if got != "terminal open frs prod" {
+	// The ERun tab runs `erun open … --app-session open-0`: a persistent,
+	// reattachable dtach session so reopening reconnects to the running shell (#478).
+	if got != "terminal open frs prod --app-session open-0" {
 		t.Fatalf("expected only terminal start action, got:\n%s", got)
 	}
 	// Cloud-context Status is no longer persisted, so we rely on the
@@ -3302,7 +3304,7 @@ func TestStartLocalSessionStartsShellAtRepoPath(t *testing.T) {
 	}
 }
 
-func TestStartAISessionRunsErunOpenWithClaudeInitialInput(t *testing.T) {
+func TestStartAISessionRunsErunOpenAsPersistentAITab(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
@@ -3335,49 +3337,17 @@ func TestStartAISessionRunsErunOpenWithClaudeInitialInput(t *testing.T) {
 	if started.Executable != "/tmp/erun" {
 		t.Fatalf("expected erun executable, got %q", started.Executable)
 	}
-	wantArgs := []string{"open", "erun", "remote"}
+	// The AI tab runs `erun open --app-session ai --ai`: the persistent remote
+	// session launches the AI tool itself (pod-side, once on create), so a reopen
+	// reconnects to the running claude. The desktop no longer types the launch
+	// in, so there is no initial input. The AI tool + effort are resolved pod-side
+	// by `erun open --ai`; AISessionLaunchCommand is covered in erun-common. #478.
+	wantArgs := []string{"open", "erun", "remote", "--app-session", "ai", "--ai"}
 	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
 		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
 	}
-	// The env AI tab pipes the cwd-guarded Claude resume so it continues the
-	// env project's Claude Code session rather than starting fresh (issue
-	// #451). The guard runs in the env repo cwd inside `erun open`. With no
-	// per-env Effort configured it launches at the default level (max) via
-	// --effort (issue #469).
-	wantInput := claudeLaunchGuard(defaultClaudeEffort) + "\n"
-	if string(started.InitialInput) != wantInput {
-		t.Fatalf("expected initial input %q, got %q", wantInput, string(started.InitialInput))
-	}
-}
-
-func TestStartAISessionUsesConfiguredAITool(t *testing.T) {
-	projectRoot := t.TempDir()
-	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
-		},
-		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx", AITool: "codex"},
-		},
-	}
-
-	var started startTerminalSessionParams
-	app := NewApp(erunUIDeps{
-		store:           store,
-		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
-		resolveCLIPath:  func() string { return "/tmp/erun" },
-		startTerminal: func(params startTerminalSessionParams) (terminalSession, error) {
-			started = params
-			return newStubTerminalSession(), nil
-		},
-	})
-	defer app.shutdown(context.Background())
-
-	if _, err := app.StartAISession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
-		t.Fatalf("StartAISession failed: %v", err)
-	}
-	if string(started.InitialInput) != "codex\n" {
-		t.Fatalf("expected configured AI initial input %q, got %q", "codex\n", string(started.InitialInput))
+	if len(started.InitialInput) != 0 {
+		t.Fatalf("AI tab must not pipe an initial input (claude launches pod-side), got %q", string(started.InitialInput))
 	}
 }
 

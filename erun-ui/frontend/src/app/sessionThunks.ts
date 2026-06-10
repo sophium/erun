@@ -12,6 +12,7 @@ import { resolveAutoStartGate } from './autoStartGate';
 import { applyPendingDebugHeader, setPendingDebugHeader, syncDebugDisplay } from './debugThunks';
 import { readError } from './errors';
 import { hideTerminalMessage, showTerminalMessage } from './notificationThunks';
+import { reattachRemoteTerminalTabs } from './remoteSessionTabsThunks';
 import { loadReviewDiff } from './reviewThunks';
 import { selectActiveSlotForSelection, selectEnvironmentExists } from './selectors';
 import { isNewSessionSelection } from './sessionSelection';
@@ -438,6 +439,10 @@ const finishOpenSession =
     dispatch(showOpenSelectionStatus(result.sessionId, selection));
 
     await dispatch(ensureDefaultEnvTabs(runSelection, key, cols, rows));
+    // Fire-and-forget: rebuilding tabs for pod sessions another window
+    // created must not block the open flow, and trackOpenSessionMetadata
+    // records them safely even if the user has navigated away meanwhile.
+    void dispatch(reattachRemoteTerminalTabs(runSelection, key, cols, rows));
     if (!isCurrentSelection()) {
       return;
     }
