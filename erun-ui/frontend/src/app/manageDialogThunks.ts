@@ -6,6 +6,7 @@ import {
   aiSessionLaunchSignature,
   cloneEnvironmentConfig,
   compactClaudeDraft,
+  nextPendingRedeploy,
 } from './manageDialogHelpers';
 import { showTerminalMessage } from './notificationThunks';
 import {
@@ -310,7 +311,10 @@ export const submitManageConfig = (): AppThunk<Promise<void>> => async (dispatch
         busyAction: '',
         busyTarget: '',
         error: '',
-        pendingRedeploy: true,
+        // The banner means "the running pod is behind the saved config", so
+        // raise it only when this save changed a pod-shaping field (issue
+        // #460: saving autoUpgrade/autoStart must not prompt a pod roll).
+        pendingRedeploy: nextPendingRedeploy(dialog.pendingRedeploy, priorConfig, displayConfig),
       }),
     );
     // A changed Claude launch flag only applies when the AI session's
