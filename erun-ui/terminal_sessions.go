@@ -995,6 +995,16 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	respawn := managed.respawn
 	a.mu.Unlock()
 
+	// Another ERun window re-attached this persistent session — a
+	// deliberate handover, not a transient drop. Respawning would run
+	// `erun open` again, whose attach takes the session straight back,
+	// and the two windows would steal it from each other in a loop.
+	// Clicking the env in the sidebar is the deliberate take-back.
+	if a.sessionTakenOver(managed) {
+		a.emitTakenOverMarker(managed.serial)
+		return false
+	}
+
 	// Refuse to respawn while the env's linked cloud context is not
 	// running. Each respawn re-runs `erun open`, whose preflight calls
 	// StartCloudContext and immediately undoes any auto-stop that has
@@ -1167,6 +1177,7 @@ const (
 	reconnectLoopMaxExits   = 2
 	reconnectLoopMarkerANSI = "\r\n\x1b[2;33m── stopped reconnecting after repeated failures — click the environment in the sidebar to retry ──\x1b[0m\r\n"
 	deployFailedMarkerANSI  = "\r\n\x1b[2;33m── deploy failed — not retrying automatically; use Run doctor or Rebuild & redeploy on the failed deploy, or click the environment in the sidebar to retry ──\x1b[0m\r\n"
+	takenOverMarkerANSI     = "\r\n\x1b[2;33m── session re-attached in another ERun window — click the environment in the sidebar to attach it here ──\x1b[0m\r\n"
 )
 
 // trackExitForLoopGuard records the moment the managed PTY exited
@@ -1214,6 +1225,38 @@ func (a *App) emitDeployFailedMarker(sessionID int) {
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(deployFailedMarkerANSI)),
 	})
+}
+
+// emitTakenOverMarker writes a single diagnostic line when tryReconnect
+// refuses to respawn because another ERun window re-attached the session.
+// The named recovery action mirrors the other markers: clicking the env in
+// the sidebar deliberately takes the session back.
+func (a *App) emitTakenOverMarker(sessionID int) {
+	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+		SessionID: sessionID,
+		Data:      base64.StdEncoding.EncodeToString([]byte(takenOverMarkerANSI)),
+	})
+}
+
+// markSessionTakenOver flags the managed PTY whose output carried the CLI's
+// taken-over notice (eruncommon.ShellSessionTakenOverNotice); see the
+// takenOver field for the semantics.
+func (a *App) markSessionTakenOver(managed *managedTerminal) {
+	if managed == nil {
+		return
+	}
+	a.mu.Lock()
+	managed.takenOver = true
+	a.mu.Unlock()
+}
+
+func (a *App) sessionTakenOver(managed *managedTerminal) bool {
+	if managed == nil {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return managed.takenOver
 }
 
 // reconnectBlockedByDeployFailure reports whether the managed PTY's open
@@ -1488,6 +1531,14 @@ type managedTerminal struct {
 	// call, so a long-running successful session followed by a single
 	// exit never trips the cap. See issue #361.
 	recentExits []time.Time
+
+	// takenOver is set when the session's output carries the CLI's
+	// taken-over notice: another ERun window re-attached this persistent
+	// pod session (screen-style detach-and-reattach). tryReconnect must
+	// then refuse to respawn — respawning would steal the session straight
+	// back and the two windows would fight. Clicking the env in the
+	// sidebar starts a fresh session, which is the deliberate take-back.
+	takenOver bool
 
 	// aiActiveSince / aiLastOutput / aiBusyEmitted / aiInactivityTimer
 	// drive the debounced AI activity signal that powers the sidebar

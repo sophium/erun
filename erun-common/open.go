@@ -25,6 +25,7 @@ var (
 	ErrRepoPathNotConfigured           = errors.New("repo path is not configured")
 	ErrShellReattachDeploy             = errors.New("remote shell requested deploy handoff and reattach")
 	ErrShellPodReplaced                = errors.New("remote shell pod was replaced; reattach")
+	ErrShellSessionTakenOver           = errors.New("remote session was re-attached in another ERun window")
 
 	openUserHomeDir = os.UserHomeDir
 )
@@ -32,7 +33,41 @@ var (
 const (
 	defaultShellLaunchWaitTimeout     = "2m0s"
 	remoteShellReattachDeployExitCode = 75
+	remoteShellTakenOverExitCode      = 76
 )
+
+// ShellSessionTakenOverNotice is the stable line `erun open` prints when its
+// persistent session is re-attached from another ERun window (screen -d -r
+// semantics: the session keeps running, this viewer is detached). The desktop
+// matches this exact line to stop its reconnect loop instead of stealing the
+// session back, so treat the wording as a public contract.
+const ShellSessionTakenOverNotice = "open: session re-attached in another ERun window"
+
+// RemoteAppSessionSocketDir is where the bootstrap keeps the dtach sockets
+// (and owner files) of persistent desktop sessions inside the runtime pod.
+// Pod-ephemeral on purpose: a pod replacement clears them.
+const RemoteAppSessionSocketDir = "/tmp/erun-app"
+
+// ParseRemoteAppSessionIDs extracts this tenant+env's persistent desktop
+// session ids from an `ls` of RemoteAppSessionSocketDir in the runtime pod.
+// Socket files are named <tenant>-<env>-<id>.dtach with the same name
+// sanitization the bootstrap applies; owner files, other envs' sockets, and
+// ls noise are ignored. The desktop uses the ids to rebuild tabs for sessions
+// another ERun window created.
+func ParseRemoteAppSessionIDs(tenant, environment, lsOutput string) []string {
+	prefix := sanitizeForFilename(tenant) + "-" + sanitizeForFilename(environment) + "-"
+	var ids []string
+	for _, raw := range strings.Split(lsOutput, "\n") {
+		name := strings.TrimSpace(raw)
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".dtach") {
+			continue
+		}
+		if id := strings.TrimSuffix(strings.TrimPrefix(name, prefix), ".dtach"); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
 
 type OpenStore interface {
 	LoadERunConfig() (ERunConfig, string, error)
@@ -539,6 +574,9 @@ func ExecShell(req ShellLaunchParams) error {
 		if isShellReattachDeployExit(err) {
 			return ErrShellReattachDeploy
 		}
+		if isShellTakenOverExit(err) {
+			return ErrShellSessionTakenOver
+		}
 		if isShellReplacementExit(err) && shellReplacementPodReady(req, runOpenKubectl) {
 			return ErrShellPodReplaced
 		}
@@ -713,17 +751,30 @@ func remoteShellLaunchLines(req ShellLaunchParams, bashrcPath, markerDir string)
 	// dtach sockets live on the pod-ephemeral filesystem so a pod replacement
 	// (redeploy) clears them — no stale socket to reattach to, and
 	// claude --continue resumes the conversation in the fresh session.
-	socket := fmt.Sprintf("/tmp/erun-app/%s-%s-%s.dtach", sanitizeForFilename(req.Tenant), sanitizeForFilename(req.Environment), id)
+	socket := fmt.Sprintf("%s/%s-%s-%s.dtach", RemoteAppSessionSocketDir, sanitizeForFilename(req.Tenant), sanitizeForFilename(req.Environment), id)
+	owner := strings.TrimSuffix(socket, ".dtach") + ".owner"
 	launchScript := fmt.Sprintf("%s/launch-%s.sh", markerDir, id)
 	body := strings.Join(remoteSessionLauncherBody(req, bashrcPath), "\n")
 	return []string{
-		"mkdir -p \"/tmp/erun-app\"",
+		fmt.Sprintf("mkdir -p \"%s\"", RemoteAppSessionSocketDir),
 		fmt.Sprintf("cat > \"%s\" <<'EOF'\n%s\nEOF", launchScript, body),
+		// Take over the session from any other ERun window (screen-style
+		// detach-elsewhere-and-reattach-here): claim ownership, then detach
+		// other viewers by killing their dtach clients. The master — ss's
+		// listener pid, which owns the running shell/claude — is never
+		// touched, and when it cannot be identified no one is kicked. Kicked
+		// wrappers find a foreign owner id below and exit 76 so their window
+		// reports the handover instead of reconnecting into a tug-of-war.
+		"attach_id=\"$$-$(date +%s)\"",
+		fmt.Sprintf("printf '%%s' \"$attach_id\" > \"%s\"", owner),
+		fmt.Sprintf("master_pid=\"$(ss -xlpH 2>/dev/null | grep -F \"%s\" | sed -n 's/.*pid=\\([0-9]*\\).*/\\1/p' | head -n1)\"", socket),
+		fmt.Sprintf("if [ -S \"%s\" ] && [ -n \"$master_pid\" ]; then for dtach_pid in $(pgrep -x dtach 2>/dev/null || true); do if [ \"$dtach_pid\" != \"$master_pid\" ] && grep -qF \"%s\" \"/proc/$dtach_pid/cmdline\" 2>/dev/null; then kill \"$dtach_pid\" 2>/dev/null || true; fi; done; fi", socket, socket),
 		// ctrl_l, not winch: dtach keeps no screen buffer, so a reattach shows
 		// nothing until the program repaints. A same-size attach yields no
 		// effective WINCH (bash's readline and claude's TUI both stay silent);
 		// the ^L dtach sends on attach makes both repaint immediately.
 		fmt.Sprintf("dtach -A \"%s\" -r ctrl_l /bin/bash \"%s\" || shell_status=$?", socket, launchScript),
+		fmt.Sprintf("if [ \"$(cat \"%s\" 2>/dev/null)\" != \"$attach_id\" ]; then exit %d; fi", owner, remoteShellTakenOverExitCode),
 	}
 }
 
@@ -831,6 +882,14 @@ func isShellReattachDeployExit(err error) bool {
 		return false
 	}
 	return exitErr.ExitCode() == remoteShellReattachDeployExitCode
+}
+
+func isShellTakenOverExit(err error) bool {
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		return false
+	}
+	return exitErr.ExitCode() == remoteShellTakenOverExitCode
 }
 
 func isShellReplacementExit(err error) bool {

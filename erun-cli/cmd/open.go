@@ -613,6 +613,15 @@ func (r *resolvedOpenRunner) runShellLoop(shellReq common.ShellLaunchParams) err
 		if errors.Is(err, common.ErrShellPodReplaced) {
 			continue
 		}
+		if errors.Is(err, common.ErrShellSessionTakenOver) {
+			// Another ERun window re-attached this persistent session
+			// (screen-style detach-and-reattach). The session keeps running
+			// there; end this viewer cleanly. The notice line is the
+			// desktop's signal to stop its reconnect loop instead of
+			// stealing the session straight back.
+			r.ctx.Info(common.ShellSessionTakenOverNotice)
+			return nil
+		}
 		if !errors.Is(err, common.ErrShellReattachDeploy) {
 			return err
 		}
