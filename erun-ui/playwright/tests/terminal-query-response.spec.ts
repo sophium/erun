@@ -27,7 +27,14 @@ import { expect, test } from '../fixtures/erunApp.js';
 // because their async reply landed at the bash prompt as junk when the asking
 // tool had exited or the query arrived on reattach. Cursor position is the one
 // reply still sent (tools need it; no sane default), so it is what this spec
-// observes.
+// observes — for live parses only: issue #484 covers the replay side. Query
+// bytes are saved verbatim in the per-session buffer, so re-rendering a tab
+// (setSessionId → terminalDisplayMiddleware → writeTerminalBuffer) re-parses
+// every query a tool ever emitted there; answering those again injects the
+// reply into the live PTY where nothing is waiting, and the shell echoes it
+// as typed junk (`1;64R1;69R…` at the prompt). The third test locks the
+// replay invariant: a query replayed from the saved buffer is never
+// re-answered, while a live query still is.
 //
 // Harness limitation: the exact cross-session race (xterm deferring a query's
 // parse across a session switch, so reply-time selection != write-time source)
@@ -76,6 +83,15 @@ function captureInvokes(page: Page): InvokeCall[] {
 // (cursorPositionReport returns `ESC [ ? <row> ; <col> R`).
 function isCprReply(data: unknown): data is string {
   return typeof data === 'string' && data.startsWith('\x1b[') && data.endsWith('R');
+}
+
+// cprRepliesTo collects the cursor-position report strings addressed to
+// sessionId, in arrival order.
+function cprRepliesTo(invokes: InvokeCall[], sessionId: number): string[] {
+  return invokes
+    .filter((call) => call.method === 'SendSessionInput' && call.args[0] === sessionId)
+    .map((call) => call.args[1])
+    .filter(isCprReply);
 }
 
 // emitTerminalOutput injects a `terminal-output` event for sessionId carrying
@@ -172,5 +188,72 @@ test.describe('terminal query responses (#347)', () => {
         call.args[0] === backgroundId,
     );
     expect(answeredToBackground).toHaveLength(0);
+  });
+
+  test('a query replayed from a saved buffer is never re-answered (#484)', async ({
+    app,
+    page,
+  }) => {
+    const target = await app.sidebar.firstEnvironmentExcludingLocal();
+    test.skip(target === null, 'no non-local environment in this developer harness');
+    const { tenant, env } = target!;
+
+    await app.sidebar.openEnvironment(tenant, env);
+    const localTab = page.getByRole('tab', { name: 'Local', exact: true });
+    await localTab.waitFor({ state: 'visible', timeout: 15_000 });
+
+    // Spawn a deterministic second session via the tab strip's "Open a new
+    // terminal" button (same pattern as terminal-scroll-on-switch.spec.ts);
+    // the new extra tab becomes the active one.
+    const tablist = page.getByRole('tablist', { name: 'Open terminals' });
+    const extraTabs = tablist.getByRole('tab', { name: /Terminal \d+/ });
+    const initialExtraCount = await extraTabs.count();
+    await page.getByRole('button', { name: 'Open a new terminal' }).click();
+    await expect
+      .poll(() => extraTabs.count(), { timeout: 15_000 })
+      .toBeGreaterThan(initialExtraCount);
+    const extraTab = extraTabs.last();
+    await extraTab.click();
+
+    const invokes = captureInvokes(page);
+    const extraId = await discoverSelectedSessionId(app, page);
+    expect(extraId).toBeGreaterThan(0);
+
+    // 1. A live DEC query is answered once — and its bytes are now part of
+    //    the session's saved buffer (the `?` prefix dodges the display strip,
+    //    exactly like production queries split across PTY chunks do).
+    await emitTerminalOutput(page, extraId, CPR_QUERY);
+    await expect.poll(() => cprRepliesTo(invokes, extraId).length, { timeout: 5_000 }).toBe(1);
+
+    // 2. Switch away and back. The middleware rebuilds and replays the extra
+    //    session's display buffer — stale query included — into xterm.
+    await localTab.click();
+    await extraTab.click();
+
+    // 3. Drain with a *plain* CSI query (`ESC [ 6 n`), split across two
+    //    output events so the per-chunk display strip cannot eat it. Its
+    //    reply carries no `?`, so it is distinguishable from any reply to the
+    //    replayed DEC query; xterm parses writes FIFO, so once the plain
+    //    reply lands every replayed chunk from step 2 has been parsed.
+    await emitTerminalOutput(page, extraId, '\x1b[');
+    await emitTerminalOutput(page, extraId, '6n');
+    await expect
+      .poll(() => cprRepliesTo(invokes, extraId).filter((r) => !r.startsWith('\x1b[?')).length, {
+        timeout: 5_000,
+      })
+      .toBe(1);
+
+    // The replay parse is provably complete and must have contributed
+    // nothing: the only DEC-shaped reply is the live one from step 1.
+    const decReplies = cprRepliesTo(invokes, extraId).filter((r) => r.startsWith('\x1b[?'));
+    expect(decReplies).toHaveLength(1);
+
+    // Close the spawned terminal so the extra session does not drift the
+    // session set the singleton headless backend hands to later specs.
+    await tablist
+      .getByRole('button', { name: /^Close / })
+      .last()
+      .click();
+    await expect.poll(() => extraTabs.count()).toBe(initialExtraCount);
   });
 });

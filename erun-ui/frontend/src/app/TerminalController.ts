@@ -184,6 +184,10 @@ export class TerminalController {
       (error) => {
         store.dispatch(showTerminalMessage(readError(error)));
       },
+      // Suppress replies to queries re-parsed from a replayed display buffer:
+      // the asking tool consumed the live reply long ago, so a second reply
+      // would land on the session's shell as typed input (#484).
+      () => this.writeSources.currentIsReplay(),
     );
     this.terminalDataDisposable = this.terminal.onData((data) => {
       SendSessionInput(store.getState().terminal.sessionId, data).catch((error: unknown) => {
@@ -371,13 +375,15 @@ export class TerminalController {
   // writeToTerminal is the single seam for every xterm write. It tags the write
   // with its source session via the write-source queue and hands xterm the
   // matching completion callback, so terminal query replies fired while xterm
-  // parses this chunk route back to sessionId (issue #347).
-  private writeToTerminal(sessionId: number, data: TerminalWriteData): void {
+  // parses this chunk route back to sessionId (issue #347). replay marks
+  // chunks re-rendered from the saved display buffer, whose stale queries must
+  // be consumed without replying (issue #484).
+  private writeToTerminal(sessionId: number, data: TerminalWriteData, replay = false): void {
     const terminal = this.terminal;
     if (!terminal) {
       return;
     }
-    terminal.write(data, this.writeSources.begin(sessionId));
+    terminal.write(data, this.writeSources.begin(sessionId, replay));
   }
 
   layoutCallbacks(): {
@@ -553,7 +559,7 @@ export class TerminalController {
 
   writeTerminalBuffer(sessionId: number, chunks: TerminalWriteData[]): void {
     for (const chunk of chunks) {
-      this.writeToTerminal(sessionId, chunk);
+      this.writeToTerminal(sessionId, chunk, true);
     }
     // Rehydrate live cursor state from the replayed buffer.
     // rebuildTerminalDisplayBuffer already appended `?25h` if the live
