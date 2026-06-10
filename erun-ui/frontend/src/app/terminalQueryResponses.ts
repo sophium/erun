@@ -9,6 +9,7 @@ export function registerTerminalQueryResponseHandlers(
   terminal: Terminal,
   sendInput: TerminalInputSender,
   onError: TerminalInputErrorHandler,
+  isReplayParse: () => boolean,
 ): IDisposable[] {
   const sendResponse = async (data: string): Promise<boolean> => {
     if (!data) {
@@ -46,6 +47,16 @@ export function registerTerminalQueryResponseHandlers(
   // we still answer: tools genuinely need the cursor location and there is
   // no sane default to time out to. Those replies still route to the
   // asking session via the writeSources queue (issue #347).
+  //
+  // …but only for live parses. Query bytes are saved verbatim in the
+  // per-session buffer, so re-rendering a tab (setSessionId →
+  // terminalDisplayMiddleware → writeTerminalBuffer) re-parses every query a
+  // tool ever emitted in that session — BuildKit's tty progress and claude
+  // both probe with `ESC[6n`. The asking tool is long gone by then, so the
+  // re-answered report lands on the shell's stdin and readline echoes its
+  // printable tail as typed junk (`1;64R1;69R…` at the prompt, issue #484).
+  // isReplayParse (backed by the writeSources queue) identifies those
+  // replayed chunks; their queries are consumed without a reply.
   const suppressQuery = (): boolean => true;
 
   return [
@@ -56,6 +67,9 @@ export function registerTerminalQueryResponseHandlers(
     terminal.parser.registerCsiHandler({ prefix: '>', final: 'c' }, suppressQuery),
     terminal.parser.registerDcsHandler({ intermediates: '$', final: 'q' }, suppressQuery),
     terminal.parser.registerCsiHandler({ final: 'n' }, (params) => {
+      if (isReplayParse()) {
+        return true;
+      }
       switch (firstParam(params)) {
         case 5:
           return sendResponse(`${ESC}[0n`);
@@ -66,7 +80,7 @@ export function registerTerminalQueryResponseHandlers(
       }
     }),
     terminal.parser.registerCsiHandler({ prefix: '?', final: 'n' }, (params) => {
-      if (firstParam(params) !== 6) {
+      if (isReplayParse() || firstParam(params) !== 6) {
         return true;
       }
       return sendResponse(cursorPositionReport(terminal, '?'));
