@@ -180,3 +180,67 @@ func TestRemoteAppSessionEndScript(t *testing.T) {
 		t.Fatalf("end script must not attach:\n%s", script)
 	}
 }
+
+// TestRemoteShellGitSeedKeepsPrivateKeyOffArgv pins the security fix: the
+// inline bootstrap script seeds only the public known_hosts + ssh config and
+// clones the repo; it never writes the private key. The key reaches the pod
+// only via the separate seed exec's stdin, so it can never land in a kubectl
+// exec argv (laptop `ps`, the pod's /proc/<pid>/cmdline, or exec audit logs).
+func TestRemoteShellGitSeedKeepsPrivateKeyOffArgv(t *testing.T) {
+	lines := remoteShellGitSeedScriptLines(
+		`"$HOME/git/erun"`, "github.com", shellQuote("sophium"), shellQuote("erun"),
+		"github.com ssh-ed25519 AAAAEXAMPLE",
+	)
+	script := strings.Join(lines, "\n")
+
+	// The script must not WRITE / rm / chmod ~/.ssh/keys ($HOME form). The ssh
+	// config still *references* the key file via `~/.ssh/keys` (tilde) — that is
+	// a pointer, not the key material — so assert on the $HOME form the
+	// write/rm/chmod used.
+	if strings.Contains(script, `"$HOME/.ssh/keys"`) {
+		t.Fatalf("inline script must not write/rm/chmod the private key file:\n%s", script)
+	}
+	if strings.Contains(script, "PRIVATE KEY") {
+		t.Fatalf("inline script must not contain private key material:\n%s", script)
+	}
+	if !strings.Contains(script, `cat > "$HOME/.ssh/known_hosts"`) ||
+		!strings.Contains(script, `cat > "$HOME/.ssh/config"`) {
+		t.Fatalf("inline script must still seed the public known_hosts + config:\n%s", script)
+	}
+	if !strings.Contains(script, "IdentityFile ~/.ssh/keys") {
+		t.Fatalf("ssh config must still point at the seeded key file:\n%s", script)
+	}
+	if !strings.Contains(script, "git clone git@github.com:'sophium'/'erun'.git") {
+		t.Fatalf("inline script must still clone the repo:\n%s", script)
+	}
+}
+
+// TestRemoteSSHKeySeedArgsStreamOnStdin pins that the key-seed exec is a
+// non-interactive `kubectl exec -i` whose program reads the key from stdin
+// (`cat > ~/.ssh/keys`) — so the key bytes never appear in the argv.
+func TestRemoteSSHKeySeedArgsStreamOnStdin(t *testing.T) {
+	args := remoteSSHKeySeedArgs(ShellLaunchParams{Tenant: "erun", KubernetesContext: "ctx", Namespace: "erun-local"})
+
+	sawI, sawIT := false, false
+	for _, a := range args {
+		if a == "-i" {
+			sawI = true
+		}
+		if a == "-it" {
+			sawIT = true
+		}
+	}
+	if !sawI || sawIT {
+		t.Fatalf("seed must use a non-interactive exec (-i, not -it): %v", args)
+	}
+	joined := strings.Join(args, "\x00")
+	if !strings.Contains(joined, `cat > "$HOME/.ssh/keys"`) {
+		t.Fatalf("seed program must write the key from stdin to ~/.ssh/keys: %v", args)
+	}
+	if !strings.Contains(joined, "umask 077") || !strings.Contains(joined, "chmod 600") {
+		t.Fatalf("seed must create the key 0600 under a tight umask: %v", args)
+	}
+	if !strings.Contains(joined, "deployment/erun-devops") {
+		t.Fatalf("seed must target the runtime deployment: %v", args)
+	}
+}

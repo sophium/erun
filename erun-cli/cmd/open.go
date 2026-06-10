@@ -595,6 +595,10 @@ func (r *resolvedOpenRunner) emitNoShellSetup() error {
 
 func (r *resolvedOpenRunner) traceShellPreview(shellReq common.ShellLaunchParams) {
 	if preview, err := common.PreviewShellLaunch(shellReq); err == nil {
+		if len(preview.SeedArgs) > 0 {
+			r.ctx.TraceCommand("", "kubectl", preview.SeedArgs...)
+			r.ctx.Trace("open: SSH private key streamed to the runtime pod on stdin (kept off the command line)")
+		}
 		r.ctx.TraceCommand("", "kubectl", preview.WaitArgs...)
 		execArgs := append([]string{}, preview.ExecArgs...)
 		if len(execArgs) > 0 {

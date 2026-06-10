@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -129,6 +130,11 @@ type ShellLaunchParams struct {
 }
 
 type ShellLaunchPreview struct {
+	// SeedArgs is the `kubectl exec -i` that streams the SSH private key to the
+	// pod on stdin (the key is never in these args). Empty when the env has no
+	// private key to seed (remote-repo env, no resolvable git remote, or no key
+	// file). Traced before the shell exec so the dry-run plan shows the action.
+	SeedArgs []string
 	WaitArgs []string
 	ExecArgs []string
 	Script   string
@@ -561,7 +567,15 @@ func WaitForShellDeployment(req ShellLaunchParams) error {
 }
 
 func ExecShell(req ShellLaunchParams) error {
-	script, err := buildRemoteShellScript(req, false)
+	// Stream the SSH private key to the pod on stdin before the interactive
+	// shell, so it never appears in any kubectl exec argv (laptop `ps`, the
+	// pod's /proc/<pid>/cmdline, or cluster exec audit logs). The interactive
+	// script below seeds only the public known_hosts + ssh config inline.
+	if err := seedRemoteSSHKey(req); err != nil {
+		return err
+	}
+
+	script, err := buildRemoteShellScript(req)
 	if err != nil {
 		return err
 	}
@@ -586,12 +600,22 @@ func ExecShell(req ShellLaunchParams) error {
 }
 
 func PreviewShellLaunch(req ShellLaunchParams) (ShellLaunchPreview, error) {
-	script, err := buildRemoteShellScript(req, true)
+	script, err := buildRemoteShellScript(req)
 	if err != nil {
 		return ShellLaunchPreview{}, err
 	}
 
+	keyMaterial, err := remoteShellPrivateKeyMaterial(req)
+	if err != nil {
+		return ShellLaunchPreview{}, err
+	}
+	var seedArgs []string
+	if strings.TrimSpace(keyMaterial) != "" {
+		seedArgs = remoteSSHKeySeedArgs(req)
+	}
+
 	return ShellLaunchPreview{
+		SeedArgs: seedArgs,
 		WaitArgs: kubectlDeploymentWaitArgs(req),
 		ExecArgs: kubectlExecArgs(req, script),
 		Script:   script,
@@ -642,14 +666,14 @@ func kubectlTargetArgs(req ShellLaunchParams) []string {
 	return args
 }
 
-func buildRemoteShellScript(req ShellLaunchParams, redactHostSecrets bool) (string, error) {
+func buildRemoteShellScript(req ShellLaunchParams) (string, error) {
 	config, err := remoteShellConfigForRequest(req)
 	if err != nil {
 		return "", err
 	}
 	workdir := shellQuote(config.Workdir)
 	scriptLines := remoteShellBaseScriptLines(req, config, workdir, shellQuote(req.Title))
-	gitLines, err := remoteShellGitSeedLines(req, redactHostSecrets, workdir)
+	gitLines, err := remoteShellGitSeedLines(req, workdir)
 	if err != nil {
 		return "", err
 	}
@@ -836,7 +860,7 @@ func remoteSessionLauncherBody(req ShellLaunchParams, bashrcPath string) []strin
 	return append(body, fmt.Sprintf("exec /bin/bash --rcfile \"%s\" -i", bashrcPath))
 }
 
-func remoteShellGitSeedLines(req ShellLaunchParams, redactHostSecrets bool, workdir string) ([]string, error) {
+func remoteShellGitSeedLines(req ShellLaunchParams, workdir string) ([]string, error) {
 	if req.RemoteRepo {
 		return nil, nil
 	}
@@ -844,22 +868,17 @@ func remoteShellGitSeedLines(req ShellLaunchParams, redactHostSecrets bool, work
 	if err != nil {
 		return nil, nil
 	}
-	hostConfigEntries, err := resolveSSHConfigEntries(gitHost)
-	if err != nil {
-		return nil, err
-	}
 	knownHostsLines, err := loadKnownHostsLines(gitHost)
 	if err != nil {
 		return nil, err
 	}
-	keyLines, err := loadPrivateKeyMaterial(hostConfigEntries, redactHostSecrets)
-	if err != nil {
-		return nil, err
-	}
-	return remoteShellGitSeedScriptLines(workdir, gitHost, shellQuote(gitUser), shellQuote(gitRepo), strings.Join(knownHostsLines, "\n"), strings.Join(keyLines, "\n")), nil
+	// The private key is never written by this script — it streams to the pod
+	// on stdin via seedRemoteSSHKey (see ExecShell) so it stays out of the
+	// kubectl exec argv. known_hosts and the ssh config are public and inline.
+	return remoteShellGitSeedScriptLines(workdir, gitHost, shellQuote(gitUser), shellQuote(gitRepo), strings.Join(knownHostsLines, "\n")), nil
 }
 
-func remoteShellGitSeedScriptLines(workdir, gitHost, gitUser, gitRepo, knownHosts, keys string) []string {
+func remoteShellGitSeedScriptLines(workdir, gitHost, gitUser, gitRepo, knownHosts string) []string {
 	sshConfig := strings.Join([]string{
 		fmt.Sprintf("Host %s", gitHost),
 		fmt.Sprintf("  HostName %s", gitHost),
@@ -871,14 +890,14 @@ func remoteShellGitSeedScriptLines(workdir, gitHost, gitUser, gitRepo, knownHost
 		"set -eu",
 		"mkdir -p \"$HOME/.ssh\"",
 		"chmod 700 \"$HOME/.ssh\"",
-		"rm -f \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/keys\" \"$HOME/.ssh/config\"",
+		// Do not touch ~/.ssh/keys here — seedRemoteSSHKey owns it (stdin).
+		"rm -f \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/config\"",
 		"old_umask=\"$(umask)\"",
 		"umask 077",
 		fmt.Sprintf("cat > \"$HOME/.ssh/known_hosts\" <<'EOF'\n%s\nEOF", knownHosts),
-		fmt.Sprintf("cat > \"$HOME/.ssh/keys\" <<'EOF'\n%s\nEOF", keys),
 		fmt.Sprintf("cat > \"$HOME/.ssh/config\" <<'EOF'\n%s\nEOF", sshConfig),
 		"umask \"$old_umask\"",
-		"chmod 600 \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/keys\" \"$HOME/.ssh/config\"",
+		"chmod 600 \"$HOME/.ssh/known_hosts\" \"$HOME/.ssh/config\"",
 		fmt.Sprintf("mkdir -p %s", workdir),
 		fmt.Sprintf("cd %s", workdir),
 		// `git config --global` writes through a `~/.gitconfig.lock`
@@ -1015,7 +1034,11 @@ func loadKnownHostsLines(host string) ([]string, error) {
 	return lines, nil
 }
 
-func loadPrivateKeyMaterial(entries []sshConfigEntry, redact bool) ([]string, error) {
+// loadPrivateKeyMaterial reads the resolved private key files. The material is
+// only ever delivered to the pod on stdin (seedRemoteSSHKey) — never embedded
+// in a script or a command line — so there is no redaction mode: it is not
+// placed anywhere a dry-run trace or log would capture it.
+func loadPrivateKeyMaterial(entries []sshConfigEntry) ([]string, error) {
 	keyPaths := privateKeyPaths(entries)
 
 	lines := make([]string, 0, len(keyPaths))
@@ -1027,14 +1050,69 @@ func loadPrivateKeyMaterial(entries []sshConfigEntry, redact bool) ([]string, er
 			}
 			return nil, err
 		}
-		if redact {
-			lines = append(lines, fmt.Sprintf("# %s", filepath.Base(keyPath)))
-			lines = append(lines, "<redacted>")
-			continue
-		}
 		lines = append(lines, string(data))
 	}
 	return lines, nil
+}
+
+// remoteSSHKeySeedScript writes stdin to ~/.ssh/keys at mode 600. The key bytes
+// arrive on the exec's stdin, never in its argv.
+const remoteSSHKeySeedScript = `umask 077; mkdir -p "$HOME/.ssh"; cat > "$HOME/.ssh/keys"; chmod 600 "$HOME/.ssh/keys"`
+
+// remoteShellPrivateKeyMaterial resolves the SSH private key material the env's
+// git remote needs, or "" when there is nothing to seed (remote-repo env, no
+// resolvable git remote, or no key file present).
+func remoteShellPrivateKeyMaterial(req ShellLaunchParams) (string, error) {
+	if req.RemoteRepo {
+		return "", nil
+	}
+	gitHost, _, _, err := resolveGitRemote(req.Dir)
+	if err != nil {
+		return "", nil
+	}
+	entries, err := resolveSSHConfigEntries(gitHost)
+	if err != nil {
+		return "", err
+	}
+	keyLines, err := loadPrivateKeyMaterial(entries)
+	if err != nil {
+		return "", err
+	}
+	return strings.Join(keyLines, "\n"), nil
+}
+
+// remoteSSHKeySeedArgs is the non-interactive `kubectl exec -i` that streams the
+// private key to the pod. -i (not -it) keeps stdin a pipe for the key bytes;
+// the key is never in these args.
+func remoteSSHKeySeedArgs(req ShellLaunchParams) []string {
+	args := kubectlTargetArgs(req)
+	return append(args, "exec", "-i", "deployment/"+RuntimeReleaseName(req.Tenant), "--", "/bin/sh", "-c", remoteSSHKeySeedScript)
+}
+
+// seedRemoteSSHKey writes the env's SSH private key into the pod's ~/.ssh/keys
+// by piping it on stdin, so it never touches a command line. No-op when there
+// is no key to seed. Runs after the deployment is Available (the open flow
+// waits first) and before the interactive shell exec.
+func seedRemoteSSHKey(req ShellLaunchParams) error {
+	keyMaterial, err := remoteShellPrivateKeyMaterial(req)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(keyMaterial) == "" {
+		return nil
+	}
+	cmd := Command("kubectl", remoteSSHKeySeedArgs(req)...)
+	cmd.Stdin = strings.NewReader(keyMaterial)
+	var output bytes.Buffer
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	if err := cmd.Run(); err != nil {
+		if message := strings.TrimSpace(output.String()); message != "" {
+			return fmt.Errorf("seed remote ssh key: %w: %s", err, message)
+		}
+		return fmt.Errorf("seed remote ssh key: %w", err)
+	}
+	return nil
 }
 
 func privateKeyPaths(entries []sshConfigEntry) []string {
