@@ -284,6 +284,8 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 		Snapshot:              config.SnapshotEnabled(),
 		AutoStart:             copyBoolPtr(config.AutoStart),
 		RemoteHostCredentials: config.RemoteHostCredentials,
+		AutoUpgrade:           config.AutoUpgrade,
+		UpgradeChannel:        config.ResolvedUpgradeChannel(),
 	}
 	if cloudContext, ok, err := a.linkedCloudContext(config); err != nil {
 		return uiEnvironmentConfig{}, err
@@ -402,6 +404,10 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	existing.SetSnapshot(config.Snapshot)
 	existing.AutoStart = copyBoolPtr(config.AutoStart)
 	existing.RemoteHostCredentials = config.RemoteHostCredentials
+	existing.AutoUpgrade = config.AutoUpgrade
+	if eruncommon.IsValidUpgradeChannel(config.UpgradeChannel) {
+		existing.UpgradeChannel = config.UpgradeChannel
+	}
 	return existing
 }
 
@@ -410,6 +416,9 @@ func claudeConfigToUI(config eruncommon.EnvironmentClaudeConfig) uiClaudeConfig 
 		UseMantle:       copyBoolPtr(config.UseMantle),
 		UseBedrock:      copyBoolPtr(config.UseBedrock),
 		MaxOutputTokens: copyIntPtr(config.MaxOutputTokens),
+		Effort:          copyStringPtr(config.Effort),
+		DefaultModel:    copyStringPtr(config.DefaultModel),
+		VerboseDebug:    config.VerboseDebug,
 	}
 	if models := config.NormalizedModels(); len(models) > 0 {
 		out.Models = models
@@ -427,6 +436,9 @@ func claudeConfigFromUI(config uiClaudeConfig) eruncommon.EnvironmentClaudeConfi
 		UseBedrock:      copyBoolPtr(config.UseBedrock),
 		Models:          models,
 		MaxOutputTokens: copyIntPtr(config.MaxOutputTokens),
+		Effort:          copyStringPtr(config.Effort),
+		DefaultModel:    copyStringPtr(config.DefaultModel),
+		VerboseDebug:    config.VerboseDebug,
 	}
 }
 
@@ -440,6 +452,8 @@ func claudeDefaultsForUI() uiClaudeDefaults {
 		KnownModels:     eruncommon.KnownClaudeModels(),
 		MinTokens:       minTokens,
 		MaxTokens:       maxTokens,
+		Effort:          defaultClaudeEffort,
+		EffortLevels:    claudeEffortLevelOptions(),
 	}
 }
 
@@ -462,6 +476,14 @@ func copyBoolPtr(value *bool) *bool {
 }
 
 func copyIntPtr(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	v := *value
+	return &v
+}
+
+func copyStringPtr(value *string) *string {
 	if value == nil {
 		return nil
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -67,6 +68,13 @@ type activityQueueEntry struct {
 	LastUpdated       time.Time                      `json:"lastUpdated"`
 	Containers        []activityQueueContainerStatus `json:"containers,omitempty"`
 	Error             string                         `json:"error,omitempty"`
+	// Detail holds the captured command output (helm/kubectl/docker, etc.)
+	// behind a failed entry, so the user can see why a deploy failed instead
+	// of only the one-line "==> Deploy failed after Ns" summary in Error, and
+	// can copy a complete failure report to hand to developers/admins.
+	// Populated by finish() from the per-entry output buffer only when the
+	// entry finishes as failed; empty for running and non-failed entries.
+	Detail string `json:"detail,omitempty"`
 	// Source identifies the real-world object that produced this entry,
 	// such as "helm" for helm-release-derived deploys, "shell" for live
 	// PTY sessions, "trace" for entries created from `==> Deploying`
@@ -110,12 +118,18 @@ type activityQueueEntry struct {
 // Serializing through one goroutine guarantees the frontend sees
 // transitions in the order the store applied them.
 type activityQueueStore struct {
-	mu              sync.Mutex
-	active          map[string]*activityQueueEntry
-	history         []*activityQueueEntry
-	now             func() time.Time
-	notify          func(activityQueueEntry)
-	notifyCh        chan activityQueueEntry
+	mu       sync.Mutex
+	active   map[string]*activityQueueEntry
+	history  []*activityQueueEntry
+	now      func() time.Time
+	notify   func(activityQueueEntry)
+	notifyCh chan activityQueueEntry
+	// outputByID buffers the most recent command output lines per active
+	// entry ID. recordOutputLine appends while the entry runs; finish()
+	// snapshots the tail into entry.Detail when the entry fails and drops the
+	// buffer. Not persisted and not part of the frontend snapshot — only the
+	// derived Detail crosses the wire.
+	outputByID      map[string][]string
 	closeNotifyOnce sync.Once
 }
 
@@ -128,15 +142,27 @@ const activityQueueHistoryCapacity = 50
 // so the producer side never has to drop snapshots in normal use.
 const activityQueueNotifyBuffer = 256
 
+// activityQueueOutputBufferLines caps how many of the most recent command
+// output lines are retained per active entry for failure detail. Older lines
+// are dropped from the front so a chatty or runaway command cannot grow the
+// buffer without bound; the tail is what holds the actual error.
+const activityQueueOutputBufferLines = 200
+
+// activityQueueOutputLineMaxChars clips an individual captured line so a
+// single pathological line (a megabyte of base64, say) cannot blow up the
+// buffer. The failure context lives in the line's shape, not its full length.
+const activityQueueOutputLineMaxChars = 2000
+
 func newActivityQueueStore(notify func(activityQueueEntry), now func() time.Time) *activityQueueStore {
 	if now == nil {
 		now = time.Now
 	}
 	s := &activityQueueStore{
-		active:   make(map[string]*activityQueueEntry),
-		now:      now,
-		notify:   notify,
-		notifyCh: make(chan activityQueueEntry, activityQueueNotifyBuffer),
+		active:     make(map[string]*activityQueueEntry),
+		outputByID: make(map[string][]string),
+		now:        now,
+		notify:     notify,
+		notifyCh:   make(chan activityQueueEntry, activityQueueNotifyBuffer),
 	}
 	go s.runNotifyLoop()
 	return s
@@ -213,6 +239,27 @@ func (s *activityQueueStore) findRunning(tenant, environment string) (activityQu
 	return activityQueueEntry{}, false
 }
 
+// latestDeployFailed reports whether the most recent deploy for the env ended
+// in failure. It looks at the newest deploy entry across active + history (the
+// snapshot is sorted newest-first): if that entry is failed, the env's runtime
+// release is currently broken. A later succeeded/running deploy — e.g. after
+// the user recovers via doctor or Rebuild & redeploy — flips this back to
+// false. Reconnect uses it to stop hammering a broken env with `erun open`
+// retries whose pod will never come ready (MCP port-forward timeout, SSH sync
+// not-ready), independent of whether this particular open emitted the
+// `==> Deploy failed` ready-error that reconnectBlockedByDeployFailure keys on.
+func (s *activityQueueStore) latestDeployFailed(tenant, environment string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, entry := range s.snapshotLocked() {
+		if entry.Command != "deploy" || entry.Tenant != tenant || entry.Environment != environment {
+			continue
+		}
+		return entry.Status == activityQueueStatusFailed
+	}
+	return false
+}
+
 // promoteToRunning moves a waiting entry into the running state and
 // records StartedRunningAt. Returns the snapshot and true when the
 // entry existed and was waiting; false when missing or already running
@@ -280,6 +327,37 @@ func (s *activityQueueStore) updateContainers(id string, containers []activityQu
 	s.notifyLocked(snapshot)
 }
 
+// recordOutputLine appends a line of command output to the buffer for the
+// active entry matching (tenant, environment). The buffer feeds entry.Detail
+// when the entry finishes as failed, giving the user the real command output
+// (the helm/kubectl/docker error) behind a one-line "==> Deploy failed"
+// summary. A no-op when no active entry matches — output produced before the
+// entry registers (e.g. before "==> Deploying") or after it finishes is not
+// failure context. Lines are clipped and the buffer is capped to the most
+// recent N lines so a runaway command cannot grow it without bound.
+func (s *activityQueueStore) recordOutputLine(tenant, environment, line string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := ""
+	for _, entry := range s.active {
+		if entry.Tenant == tenant && entry.Environment == environment {
+			id = entry.ID
+			break
+		}
+	}
+	if id == "" {
+		return
+	}
+	if len(line) > activityQueueOutputLineMaxChars {
+		line = line[:activityQueueOutputLineMaxChars]
+	}
+	buf := append(s.outputByID[id], line)
+	if len(buf) > activityQueueOutputBufferLines {
+		buf = buf[len(buf)-activityQueueOutputBufferLines:]
+	}
+	s.outputByID[id] = buf
+}
+
 // finish moves an active entry into history with the given terminal status.
 // Returns false if the entry was already finished (idempotent in the face of
 // duplicate ==> Deploy failed / ==> Deployed lines from the PTY tail).
@@ -294,6 +372,12 @@ func (s *activityQueueStore) finish(id string, status activityQueueStatus, errMs
 	if errMsg != "" {
 		entry.Error = errMsg
 	}
+	if status == activityQueueStatusFailed {
+		if lines := s.outputByID[id]; len(lines) > 0 {
+			entry.Detail = strings.Join(lines, "\n")
+		}
+	}
+	delete(s.outputByID, id)
 	now := s.now().UTC()
 	entry.EndedAt = &now
 	entry.LastUpdated = now
@@ -333,6 +417,7 @@ func (s *activityQueueStore) forceDismiss(id string) (entry activityQueueEntry, 
 	if existing, found := s.active[id]; found {
 		entry = *cloneActivityQueueEntry(existing)
 		delete(s.active, id)
+		delete(s.outputByID, id)
 		return entry, true, true
 	}
 	for i, candidate := range s.history {

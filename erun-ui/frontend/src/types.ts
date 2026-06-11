@@ -24,6 +24,33 @@ export interface UIEnvironment {
   autoStart?: boolean;
 }
 
+// UIWorkingIssue mirrors the Go uiWorkingIssue read model returned by the
+// EnvironmentWorkingIssue binding: the env worktree's current branch and, when
+// the branch names an issue, its resolved title. `available` is false for
+// remote-worktree envs whose branch can't be read from the host.
+export interface UIWorkingIssue {
+  available: boolean;
+  branch?: string;
+  issueNumber?: number;
+  issueTitle?: string;
+  reason?: string;
+}
+
+// UIUpgradePlanItem mirrors the Go UpgradePlanItem from the ResolveUpgradePlan
+// binding: one opted-in env's channel, current version, the latest version for
+// that channel, and whether it lags (will be redeployed by Upgrade all).
+export interface UIUpgradePlanItem {
+  tenant: string;
+  environment: string;
+  channel: string;
+  current: string;
+  target: string;
+  lagging: boolean;
+  // Why target is empty (registry lookup failed, no published version for
+  // the channel) — rendered under "latest unknown" (issue #497).
+  unresolvedReason?: string;
+}
+
 export interface UITenant {
   name: string;
   defaultEnvironment?: string;
@@ -361,6 +388,12 @@ export interface UIEnvironmentConfig {
   // the erun-host profile, so SDK calls inside the pod act as the host
   // identity. Only meaningful for remote AWS-backed envs.
   remoteHostCredentials: boolean;
+  // AutoUpgrade opts this env into the "Upgrade all" set; upgradeChannel
+  // selects which release channel an upgrade targets ("stable" | "snapshot").
+  // The Go side resolves an empty channel from the env type, so the loaded
+  // value is always one of the two.
+  autoUpgrade: boolean;
+  upgradeChannel?: string;
 }
 
 export interface UIEnvironmentClaudeConfig {
@@ -368,6 +401,9 @@ export interface UIEnvironmentClaudeConfig {
   useBedrock?: boolean;
   models?: string[];
   maxOutputTokens?: number;
+  effort?: string;
+  defaultModel?: string;
+  verboseDebug?: boolean;
 }
 
 export interface UIEnvironmentClaudeDefaults {
@@ -378,6 +414,8 @@ export interface UIEnvironmentClaudeDefaults {
   knownModels: string[];
   minTokens: number;
   maxTokens: number;
+  effort: string;
+  effortLevels: string[];
 }
 
 export interface UIRuntimePodConfig {

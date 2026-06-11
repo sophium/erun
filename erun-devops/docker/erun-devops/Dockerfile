@@ -56,12 +56,17 @@ ARG DOCKER_VERSION=28.1.1
 ARG BUILDX_VERSION=v0.18.0
 ARG DIFFT_VERSION=0.68.0
 ARG GH_VERSION=2.74.2
+ARG RIPGREP_VERSION=15.1.0
 ARG NODE_VERSION=24.14.0
 ARG YARN_VERSION=1.22.22
 ARG CODEX_VERSION=0.125.0
-ARG CLAUDE_CODE_VERSION=2.1.156
+ARG CLAUDE_CODE_VERSION=2.1.170
 ARG AWS_CLI_VERSION=2.32.16
 ARG ATLAS_VERSION=v1.2.0
+# Keep in sync with the @playwright/test version resolved in
+# erun-ui/playwright/yarn.lock so the installed Chromium system libraries match
+# the browser the suite downloads at run time.
+ARG PLAYWRIGHT_VERSION=1.60.0
 
 USER root
 
@@ -76,12 +81,14 @@ USER root
 # contribute-app browser bridge is the only way to test desktop-side
 # changes without leaving the env.
 RUN apt-get update && \
-    apt-get install -y git bash-completion bubblewrap dpkg-dev procps \
+    apt-get install -y git bash-completion bubblewrap dpkg-dev dtach iproute2 procps \
         build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev && \
     rm -rf /var/lib/apt/lists/* && \
+    # ripgrep ships a musl static build for amd64 but only a gnu build for
+    # arm64 — the asymmetric triples are deliberate, not a typo.
     case "${TARGETARCH}" in \
-        amd64) arch=amd64; docker_arch=x86_64; node_arch=x64; aws_arch=x86_64 ;; \
-        arm64) arch=arm64; docker_arch=aarch64; node_arch=arm64; aws_arch=aarch64 ;; \
+        amd64) arch=amd64; docker_arch=x86_64; node_arch=x64; aws_arch=x86_64; rg_triple=x86_64-unknown-linux-musl ;; \
+        arm64) arch=arm64; docker_arch=aarch64; node_arch=arm64; aws_arch=aarch64; rg_triple=aarch64-unknown-linux-gnu ;; \
         *) echo "unsupported TARGETARCH: ${TARGETARCH}" >&2; exit 1 ;; \
     esac && \
     curl -fsSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${arch}/kubectl" && \
@@ -98,6 +105,9 @@ RUN apt-get update && \
     curl -fsSL -o /tmp/difft.tar.gz "https://github.com/Wilfred/difftastic/releases/download/${DIFFT_VERSION}/difft-${docker_arch}-unknown-linux-gnu.tar.gz" && \
     tar -xzf /tmp/difft.tar.gz -C /tmp && \
     install -m 0755 /tmp/difft /usr/local/bin/difft && \
+    curl -fsSL -o /tmp/ripgrep.tar.gz "https://github.com/BurntSushi/ripgrep/releases/download/${RIPGREP_VERSION}/ripgrep-${RIPGREP_VERSION}-${rg_triple}.tar.gz" && \
+    tar -xzf /tmp/ripgrep.tar.gz -C /tmp && \
+    install -m 0755 "/tmp/ripgrep-${RIPGREP_VERSION}-${rg_triple}/rg" /usr/local/bin/rg && \
     curl -fsSL -o /tmp/gh.tar.gz "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${arch}.tar.gz" && \
     tar -xzf /tmp/gh.tar.gz -C /tmp && \
     install -m 0755 "/tmp/gh_${GH_VERSION}_linux_${arch}/bin/gh" /usr/local/bin/gh && \
@@ -115,14 +125,30 @@ RUN apt-get update && \
     mv /usr/local/bin/codex /usr/local/bin/codex-real && \
     mv /usr/local/bin/claude /usr/local/bin/claude-real && \
     npm cache clean --force && \
-    rm -rf /tmp/helm.tar.gz /tmp/terraform.zip /tmp/k9s.tar.gz /tmp/difft.tar.gz /tmp/gh.tar.gz /tmp/docker.tgz /tmp/docker-buildx /tmp/node.tar.gz /tmp/awscliv2.zip "/tmp/linux-${arch}" "/tmp/gh_${GH_VERSION}_linux_${arch}" /tmp/terraform /tmp/k9s /tmp/difft /tmp/docker /tmp/aws && \
+    rm -rf /tmp/helm.tar.gz /tmp/terraform.zip /tmp/k9s.tar.gz /tmp/difft.tar.gz /tmp/ripgrep.tar.gz /tmp/gh.tar.gz /tmp/docker.tgz /tmp/docker-buildx /tmp/node.tar.gz /tmp/awscliv2.zip "/tmp/linux-${arch}" "/tmp/gh_${GH_VERSION}_linux_${arch}" "/tmp/ripgrep-${RIPGREP_VERSION}-${rg_triple}" /tmp/terraform /tmp/k9s /tmp/difft /tmp/docker /tmp/aws && \
     groupmod -n erun ubuntu && \
     usermod -l erun -d /home/erun -m -g erun ubuntu && \
     passwd -d erun && \
     mkdir -p /home/erun/git /home/erun/.kube /home/erun/.config/k9s /etc/erun /etc/bash_completion.d && \
     printf '\n[ -r /usr/share/bash-completion/bash_completion ] && . /usr/share/bash-completion/bash_completion\n[ -r /etc/bash_completion.d/erun ] && . /etc/bash_completion.d/erun\n[ -r /etc/erun/bash_prompt.sh ] && . /etc/erun/bash_prompt.sh\n' >> /etc/bash.bashrc && \
     chown -R erun:erun /home/erun && \
-    chmod 0755 /usr/local/bin/kubectl /usr/local/bin/atlas /usr/local/bin/helm /usr/local/bin/terraform /usr/local/bin/k9s /usr/local/bin/difft /usr/local/bin/docker /usr/local/bin/aws
+    chmod 0755 /usr/local/bin/kubectl /usr/local/bin/atlas /usr/local/bin/helm /usr/local/bin/terraform /usr/local/bin/k9s /usr/local/bin/difft /usr/local/bin/rg /usr/local/bin/docker /usr/local/bin/aws
+
+# Chromium runtime libraries for the erun-ui Playwright suite. The build deps
+# in the layer above only cover compiling erun-app (Wails links webkit2gtk via
+# CGO); the headless browser that `erun-ui/playwright/run.sh` drives needs its
+# own shared libraries (libnss3, libnspr4, and the GTK/X/ALSA runtime set).
+# Without them, in-pod contribute-mode can build erun-ui but cannot run its
+# mandatory UI tests. Use Playwright's own dependency installer, pinned to the
+# suite's version, so the package set stays correct across Ubuntu library
+# renames (the 24.04 `t64` transition) instead of hand-maintaining a fragile
+# list. The browser binary itself is installed without root by run.sh's
+# `playwright install chromium`; only these system libs need root, so they
+# belong in the image. Kept as a separate layer (not folded into the tooling
+# layer above) because install-deps runs its own apt-get update after that
+# layer has already cleared the apt lists.
+RUN npx --yes "playwright@${PLAYWRIGHT_VERSION}" install-deps chromium && \
+    rm -rf /var/lib/apt/lists/* /root/.npm
 
 COPY --from=builder /usr/local/go /usr/local/go
 COPY --from=builder --chmod=0755 /out/erun /usr/local/bin/erun

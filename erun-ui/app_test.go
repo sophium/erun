@@ -138,6 +138,7 @@ func TestLoadStateUsesTenantSpecificDeployableVersionSuggestions(t *testing.T) {
 
 func TestLoadVersionSuggestionsFiltersOutMissingTenantImageTags(t *testing.T) {
 	app := NewApp(erunUIDeps{
+		store:                stubUIStore{},
 		resolveBuildInfo:     func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
 		resolveImageRegistry: missingTenantImageRegistry(t),
 	})
@@ -153,6 +154,52 @@ func TestLoadVersionSuggestionsFiltersOutMissingTenantImageTags(t *testing.T) {
 	}
 	if suggestions[0].Label != "frs latest stable" || suggestions[0].Image != "frs-devops" || suggestions[3].Label != "ERun current" || suggestions[3].Image != eruncommon.DefaultRuntimeImageName {
 		t.Fatalf("unexpected suggestion metadata: %+v", suggestions)
+	}
+}
+
+func TestLoadVersionSuggestionsUsesEnvPersistedRuntimeRegistry(t *testing.T) {
+	// #475: the "Version to deploy" picker must query the registry the env's
+	// runtime image was actually published to (EnvConfig.RuntimeRegistry, the
+	// provenance deploy records), not the hardcoded default. Otherwise an env on
+	// a non-default registry resolves its suggestions from the wrong place and
+	// can never offer its own deployed version back. The ERun fallback image
+	// stays on the canonical default registry.
+	const customRegistry = "harbor.example/team"
+	var tenantImageNamespace string
+	app := NewApp(erunUIDeps{
+		store: stubUIStore{
+			envs: map[string]eruncommon.EnvConfig{
+				"team/prod": {Name: "prod", RuntimeRegistry: customRegistry},
+			},
+		},
+		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+			switch repository {
+			case "team-devops":
+				tenantImageNamespace = namespace
+				return eruncommon.RuntimeRegistryVersions{
+					Image:          namespace + "/" + repository,
+					Tags:           []string{"1.0.11", "1.0.12-snapshot-20260608120000"},
+					LatestStable:   "1.0.11",
+					LatestSnapshot: "1.0.12-snapshot-20260608120000",
+				}, nil
+			case eruncommon.DefaultRuntimeImageName:
+				if namespace != eruncommon.DefaultContainerRegistry {
+					t.Fatalf("ERun fallback image must use the default registry, got %s", namespace)
+				}
+				return eruncommon.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
+			default:
+				t.Fatalf("unexpected registry repository: %s", repository)
+			}
+			return eruncommon.RuntimeRegistryVersions{}, nil
+		},
+	})
+
+	if _, err := app.LoadVersionSuggestions(uiSelection{Tenant: "team", Environment: "prod"}); err != nil {
+		t.Fatalf("LoadVersionSuggestions failed: %v", err)
+	}
+	if tenantImageNamespace != customRegistry {
+		t.Fatalf("tenant runtime image queried namespace %q, want %q", tenantImageNamespace, customRegistry)
 	}
 }
 
@@ -186,6 +233,7 @@ func missingTenantImageRegistry(t *testing.T) func(context.Context, string, stri
 func TestLoadVersionSuggestionsDoesNotDuplicateDefaultRuntimeForErunTenant(t *testing.T) {
 	var repositories []string
 	app := NewApp(erunUIDeps{
+		store:            stubUIStore{},
 		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
 		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
 			if namespace != eruncommon.DefaultContainerRegistry {
@@ -220,6 +268,7 @@ func TestLoadVersionSuggestionsDoesNotDuplicateDefaultRuntimeForErunTenant(t *te
 
 func TestLoadVersionSuggestionsFallsBackToDefaultRuntimeTagsWhenTenantImageMissing(t *testing.T) {
 	app := NewApp(erunUIDeps{
+		store:            stubUIStore{},
 		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
 		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
 			if namespace != eruncommon.DefaultContainerRegistry {
@@ -255,6 +304,7 @@ func TestLoadVersionSuggestionsFallsBackToDefaultRuntimeTagsWhenTenantImageMissi
 
 func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T) {
 	app := NewApp(erunUIDeps{
+		store:            stubUIStore{},
 		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
 		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
 			if namespace != eruncommon.DefaultContainerRegistry {
@@ -2033,6 +2083,60 @@ func TestSaveEnvironmentConfigRoundTripsClaudeOverrides(t *testing.T) {
 	}
 }
 
+// TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags pins the desktop
+// round-trip of the per-env Claude launch fields (issues #482/#477): the
+// default model and the verbose+debug toggle survive a save both in the
+// returned config and in the persisted store.
+func TestSaveEnvironmentConfigRoundTripsClaudeLaunchFlags(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"frs": {Name: "frs", ProjectRoot: projectRoot},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/local": {
+				Name:              "local",
+				RepoPath:          projectRoot,
+				KubernetesContext: "cluster-local",
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	defaultModel := "fable"
+	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+		Name:              "local",
+		RepoPath:          projectRoot,
+		KubernetesContext: "cluster-local",
+		Idle: uiIdleConfig{
+			Timeout:      eruncommon.DefaultEnvironmentIdleTimeout.String(),
+			WorkingHours: eruncommon.DefaultEnvironmentWorkingHours,
+		},
+		Claude: uiClaudeConfig{
+			Models:       []string{"opus", "fable"},
+			DefaultModel: &defaultModel,
+			VerboseDebug: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
+	}
+
+	if saved.Claude.DefaultModel == nil || *saved.Claude.DefaultModel != "fable" {
+		t.Fatalf("expected saved DefaultModel=fable, got %+v", saved.Claude)
+	}
+	if !saved.Claude.VerboseDebug {
+		t.Fatalf("expected saved VerboseDebug=true, got %+v", saved.Claude)
+	}
+	stored := store.envs["frs/local"].Claude
+	if stored.DefaultModel == nil || *stored.DefaultModel != "fable" {
+		t.Fatalf("expected stored DefaultModel=fable, got %+v", stored)
+	}
+	if !stored.VerboseDebug {
+		t.Fatalf("expected stored VerboseDebug=true, got %+v", stored)
+	}
+}
+
 func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
 	// AutoStart is the desktop's per-env auto-start gate. The three modes
 	// map to *bool: ask=nil (prompt on next open), always=true, never=false.
@@ -2214,7 +2318,9 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	}
 
 	got := strings.Join(actions, "\n")
-	if got != "terminal open frs prod" {
+	// The ERun tab runs `erun open … --app-session open-0`: a persistent,
+	// reattachable dtach session so reopening reconnects to the running shell (#478).
+	if got != "terminal open frs prod --app-session open-0" {
 		t.Fatalf("expected only terminal start action, got:\n%s", got)
 	}
 	// Cloud-context Status is no longer persisted, so we rely on the
@@ -3252,7 +3358,7 @@ func TestStartLocalSessionStartsShellAtRepoPath(t *testing.T) {
 	}
 }
 
-func TestStartAISessionRunsErunOpenWithClaudeInitialInput(t *testing.T) {
+func TestStartAISessionRunsErunOpenAsPersistentAITab(t *testing.T) {
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		tenants: map[string]eruncommon.TenantConfig{
@@ -3285,43 +3391,17 @@ func TestStartAISessionRunsErunOpenWithClaudeInitialInput(t *testing.T) {
 	if started.Executable != "/tmp/erun" {
 		t.Fatalf("expected erun executable, got %q", started.Executable)
 	}
-	wantArgs := []string{"open", "erun", "remote"}
+	// The AI tab runs `erun open --app-session ai --ai`: the persistent remote
+	// session launches the AI tool itself (pod-side, once on create), so a reopen
+	// reconnects to the running claude. The desktop no longer types the launch
+	// in, so there is no initial input. The AI tool + effort are resolved pod-side
+	// by `erun open --ai`; AISessionLaunchCommand is covered in erun-common. #478.
+	wantArgs := []string{"open", "erun", "remote", "--app-session", "ai", "--ai"}
 	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
 		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
 	}
-	if string(started.InitialInput) != defaultAITool+"\n" {
-		t.Fatalf("expected initial input %q, got %q", defaultAITool+"\n", string(started.InitialInput))
-	}
-}
-
-func TestStartAISessionUsesConfiguredAITool(t *testing.T) {
-	projectRoot := t.TempDir()
-	store := stubUIStore{
-		tenants: map[string]eruncommon.TenantConfig{
-			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
-		},
-		envs: map[string]eruncommon.EnvConfig{
-			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx", AITool: "codex"},
-		},
-	}
-
-	var started startTerminalSessionParams
-	app := NewApp(erunUIDeps{
-		store:           store,
-		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
-		resolveCLIPath:  func() string { return "/tmp/erun" },
-		startTerminal: func(params startTerminalSessionParams) (terminalSession, error) {
-			started = params
-			return newStubTerminalSession(), nil
-		},
-	})
-	defer app.shutdown(context.Background())
-
-	if _, err := app.StartAISession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
-		t.Fatalf("StartAISession failed: %v", err)
-	}
-	if string(started.InitialInput) != "codex\n" {
-		t.Fatalf("expected configured AI initial input %q, got %q", "codex\n", string(started.InitialInput))
+	if len(started.InitialInput) != 0 {
+		t.Fatalf("AI tab must not pipe an initial input (claude launches pod-side), got %q", string(started.InitialInput))
 	}
 }
 

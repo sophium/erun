@@ -375,3 +375,222 @@ func TestTrackExitForLoopGuardTripsAfterCap(t *testing.T) {
 			reconnectLoopMaxExits+1, reconnectLoopMaxExits)
 	}
 }
+
+// TestTryReconnectRefusesAfterDeployFailure pins #447: when an env's open
+// ended in a deploy failure (signalReady recorded an error from
+// `==> Deploy failed`), tryReconnect must NOT respawn. Respawning re-runs
+// `erun open`, re-deploying a broken env — and because every tab (ERun + AI)
+// reconnects independently, that becomes a parallel re-deploy storm. The user
+// recovers via the failed-deploy card actions or by reopening the env.
+func TestTryReconnectRefusesAfterDeployFailure(t *testing.T) {
+	emits := newCapturedEmits()
+	app := &App{}
+	app.SetEmitter(emits.fn())
+
+	respawned := false
+	managed := &managedTerminal{
+		serial:      7,
+		readyClosed: true,
+		readyErr:    errors.New("==> Deploy failed after 4s"),
+		respawn: func() (terminalSession, error) {
+			respawned = true
+			return newStubTerminalSession(), nil
+		},
+	}
+
+	if app.tryReconnect(managed, "exit code 1") {
+		t.Fatal("tryReconnect must refuse to respawn after a deploy failure")
+	}
+	if respawned {
+		t.Fatal("respawn must not run after a deploy failure")
+	}
+	if !sawDeployFailedMarker(emits) {
+		t.Fatal("expected the deploy-failed marker on the terminal-output channel")
+	}
+}
+
+// TestTryReconnectRefusesWhenActivityDeployFailed covers the case the readyErr
+// guard misses: the deploy failed in a *separate* activity and this open exits
+// with an MCP port-forward timeout / pod-not-ready (no `==> Deploy failed`
+// readyErr) while trying to reach the never-ready pod. tryReconnect must still
+// refuse, consulting the activity queue, so the env stops hammering itself.
+func TestTryReconnectRefusesWhenActivityDeployFailed(t *testing.T) {
+	emits := newCapturedEmits()
+	app := &App{}
+	app.SetEmitter(emits.fn())
+	app.activityQueue = newActivityQueueStore(nil, nil)
+	failed, _ := app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "petios", Environment: "rihards-develop"})
+	if _, ok := app.activityQueue.finish(failed.ID, activityQueueStatusFailed, "helm release failed"); !ok {
+		t.Fatal("seed: finish failed deploy returned ok=false")
+	}
+
+	respawned := false
+	managed := &managedTerminal{
+		serial:      9,
+		selection:   uiSelection{Tenant: "petios", Environment: "rihards-develop"},
+		readyClosed: false, // no deploy-failed readyErr — this open timed out reaching the pod
+		respawn: func() (terminalSession, error) {
+			respawned = true
+			return newStubTerminalSession(), nil
+		},
+	}
+
+	if app.tryReconnect(managed, "timed out waiting for MCP port-forward") {
+		t.Fatal("tryReconnect must refuse when the env's latest deploy failed")
+	}
+	if respawned {
+		t.Fatal("respawn must not run when the env's latest deploy failed")
+	}
+	if !sawDeployFailedMarker(emits) {
+		t.Fatal("expected the deploy-failed marker on the terminal-output channel")
+	}
+}
+
+// TestTryReconnectAfterHealthyDropRespawns is the counterpart: a session that
+// reached a healthy ready (readyErr == nil) and then dropped is a transient
+// drop and must still reconnect. Its `erun open` finds the deploy already
+// current and skips it, so no re-deploy storm.
+func TestTryReconnectAfterHealthyDropRespawns(t *testing.T) {
+	emits := newCapturedEmits()
+	app := &App{}
+	app.SetEmitter(emits.fn())
+
+	respawned := false
+	managed := &managedTerminal{
+		serial:      8,
+		readyClosed: true,
+		readyErr:    nil,
+		respawn: func() (terminalSession, error) {
+			respawned = true
+			return newStubTerminalSession(), nil
+		},
+	}
+
+	if !app.tryReconnect(managed, "transient drop") {
+		t.Fatal("a healthy session that dropped should reconnect")
+	}
+	if !respawned {
+		t.Fatal("respawn should run for a healthy dropped session")
+	}
+}
+
+func sawDeployFailedMarker(emits *capturedEmits) bool {
+	const needle = "deploy failed — not retrying"
+	for _, evt := range emits.events(terminalOutputEvent) {
+		payload, ok := evt.(terminalOutputPayload)
+		if !ok {
+			continue
+		}
+		data, err := base64.StdEncoding.DecodeString(payload.Data)
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(data), needle) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestSessionTakenOverByAnotherWindowDoesNotReconnect locks the takeover
+// handover from #478: when another ERun window re-attaches a persistent pod
+// session, this window's `erun open` prints the stable taken-over notice and
+// exits cleanly. The desktop must NOT respawn — a respawn would re-attach and
+// steal the session straight back, and the two windows would fight over it —
+// and must surface the take-back affordance marker instead. Clicking the env
+// in the sidebar is the deliberate take-back (it starts a fresh session).
+func TestSessionTakenOverByAnotherWindowDoesNotReconnect(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"erun": {Name: "erun", ProjectRoot: projectRoot, DefaultEnvironment: "remote"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"erun/remote": {Name: "remote", RepoPath: projectRoot, KubernetesContext: "ctx"},
+		},
+	}
+
+	var sessionsMu sync.Mutex
+	var sessions []*stubTerminalSession
+	emits := newCapturedEmits()
+	app := NewApp(erunUIDeps{
+		store:           store,
+		findProjectRoot: func() (string, string, error) { return "erun", projectRoot, nil },
+		resolveCLIPath:  func() string { return "/tmp/erun" },
+		startTerminal: func(startTerminalSessionParams) (terminalSession, error) {
+			session := newStubTerminalSession()
+			// The PTY replays `erun open`'s output: the kubectl attach line,
+			// then the taken-over notice another window's attach triggered.
+			session.initialOutput = append(session.initialOutput,
+				[]byte(eruncommon.ShellSessionTakenOverNotice+"\n")...)
+			sessionsMu.Lock()
+			sessions = append(sessions, session)
+			sessionsMu.Unlock()
+			return session, nil
+		},
+	})
+	defer app.shutdown(context.Background())
+	app.SetEmitter(emits.fn())
+
+	if _, err := app.StartSession(uiSelection{Tenant: "erun", Environment: "remote"}, 0, 80, 24); err != nil {
+		t.Fatalf("StartSession failed: %v", err)
+	}
+	waitForSessionCount(t, &sessionsMu, &sessions, 1, 2*time.Second)
+
+	// Let streamSession scan the notice line, then end the PTY the way the
+	// CLI does after printing it.
+	waitForTakenOverFlag(t, app, 2*time.Second)
+	sessionsMu.Lock()
+	current := sessions[0]
+	sessionsMu.Unlock()
+	_ = current.Close()
+
+	time.Sleep(200 * time.Millisecond)
+	sessionsMu.Lock()
+	got := len(sessions)
+	sessionsMu.Unlock()
+	if got != 1 {
+		t.Fatalf("takeover must not respawn: expected 1 session, got %d", got)
+	}
+	if !sawTakenOverMarker(emits) {
+		t.Fatal("expected taken-over marker on terminal-output channel")
+	}
+}
+
+func waitForTakenOverFlag(t *testing.T, app *App, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		app.mu.Lock()
+		flagged := false
+		for _, managed := range app.sessions {
+			if managed != nil && managed.takenOver {
+				flagged = true
+			}
+		}
+		app.mu.Unlock()
+		if flagged {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for the taken-over notice to be scanned from session output")
+}
+
+func sawTakenOverMarker(emits *capturedEmits) bool {
+	const needle = "re-attached in another ERun window"
+	for _, evt := range emits.events(terminalOutputEvent) {
+		payload, ok := evt.(terminalOutputPayload)
+		if !ok {
+			continue
+		}
+		data, err := base64.StdEncoding.DecodeString(payload.Data)
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(data), needle) {
+			return true
+		}
+	}
+	return false
+}

@@ -8,6 +8,7 @@ import type {
   AppNotificationPayload,
   AppStatusPayload,
   EnvironmentInitializedPayload,
+  EnvStatusPayload,
   TerminalExitSelections,
 } from './model';
 import {
@@ -20,7 +21,8 @@ import { selectEnvironmentExists, selectSelectedIsPendingFor } from './selectors
 import { openSelection, selectTerminalTab } from './sessionThunks';
 import { setAIBusyForEnv } from './slices/aiActivitySlice';
 import { setDoctorAll } from './slices/doctorSlice';
-import { setReconnect } from './slices/reviewSlice';
+import { setEnvStatusForEnv } from './slices/envStatusSlice';
+import { appendReconnectLine } from './slices/reviewSlice';
 import { setSelected } from './slices/selectionSlice';
 import { recordExitOutput, recordExitReason } from './slices/sessionsSlice';
 import type { AppDispatch, AppThunk } from './store';
@@ -59,6 +61,25 @@ export const handleAIActivity =
     }
     const key = selectionKey({ tenant, environment });
     dispatch(setAIBusyForEnv({ key, busy: payload.busy }));
+  };
+
+// handleEnvStatus records the env's real condition behind the sidebar's open
+// dot (issue #470): the Go side flags a row 'stopped' when reconnect is
+// refused because the linked cloud context is not running, 'failed' when a
+// deploy failure / reconnect loop ends retries, and clears the flag ('') on
+// every fresh open attempt and successful respawn. Match between system and
+// real state (Nielsen #2): the dot must not claim "running" on tab presence
+// alone.
+export const handleEnvStatus =
+  (payload: EnvStatusPayload): AppThunk =>
+  (dispatch) => {
+    const tenant = payload.tenant.trim();
+    const environment = payload.environment.trim();
+    if (!tenant || !environment) {
+      return;
+    }
+    const key = selectionKey({ tenant, environment });
+    dispatch(setEnvStatusForEnv({ key, status: payload.status.trim() }));
   };
 
 // handleAppStatus surfaces backend status lines as a busy-state terminal
@@ -143,8 +164,8 @@ export const handleEnvironmentInitFailed =
   };
 
 // handleReconnectLine appends a status line from the reconnect PTY into
-// the reconnect dialog while it is running. The subscription wiring stays
-// on the controller; this thunk owns the state write.
+// the reconnect line buffer while it is running. The subscription wiring
+// stays on the controller; this thunk owns the state write.
 export const handleReconnectLine =
   (line: string): AppThunk =>
   (dispatch, getState) => {
@@ -152,11 +173,10 @@ export const handleReconnectLine =
     if (!trimmed) {
       return;
     }
-    const reconnect = getState().review.reconnect;
-    if (reconnect.status !== 'running') {
+    if (getState().review.reconnect.status !== 'running') {
       return;
     }
-    dispatch(setReconnect({ ...reconnect, lastLine: trimmed }));
+    dispatch(appendReconnectLine(trimmed));
   };
 
 // updateOpenStatusFromOutput inspects a freshly-decoded chunk of terminal

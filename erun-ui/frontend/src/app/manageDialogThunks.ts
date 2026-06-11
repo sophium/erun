@@ -2,7 +2,12 @@ import type { ManageTab, UIEnvironmentConfig, UISelection, UIVersionSuggestion }
 
 import { environmentApi } from './api/environmentApi';
 import { readError } from './errors';
-import { cloneEnvironmentConfig } from './manageDialogHelpers';
+import {
+  aiSessionLaunchSignature,
+  cloneEnvironmentConfig,
+  compactClaudeDraft,
+  nextPendingRedeploy,
+} from './manageDialogHelpers';
 import { showTerminalMessage } from './notificationThunks';
 import {
   runtimePodConfigToDisplay,
@@ -15,6 +20,7 @@ import { setVersionSuggestions } from './slices/tenantsSlice';
 import { defaultEnvironmentConfig, defaultManageDialog, type ManageDialogState } from './state';
 import { rememberPastContainerRegistry } from './storage';
 import type { AppThunk } from './store';
+import { relaunchAISessionsForLaunchChange } from './tabRespawnThunks';
 import { requireController } from './thunkExtra';
 import { normalizeDialogValue, normalizeVersionSuggestions } from './versionSuggestions';
 
@@ -140,15 +146,12 @@ export const updateManageClaudeConfig =
     if (dialog.busy || dialog.configLoading) {
       return;
     }
-    const merged = { ...dialog.config.claude, ...values };
-    const next: UIEnvironmentConfig['claude'] = {};
-    if (merged.useMantle !== undefined) next.useMantle = merged.useMantle;
-    if (merged.useBedrock !== undefined) next.useBedrock = merged.useBedrock;
-    if (merged.models !== undefined && merged.models.length > 0) next.models = merged.models;
-    if (merged.maxOutputTokens !== undefined) next.maxOutputTokens = merged.maxOutputTokens;
     dispatch(
       patchManageDialog({
-        config: { ...dialog.config, claude: next },
+        config: {
+          ...dialog.config,
+          claude: compactClaudeDraft({ ...dialog.config.claude, ...values }),
+        },
         error: '',
       }),
     );
@@ -299,6 +302,7 @@ export const submitManageConfig = (): AppThunk<Promise<void>> => async (dispatch
     ).unwrap();
     rememberPastContainerRegistry(result.containerRegistry || saveConfig.containerRegistry);
     const displayConfig = { ...result, runtimePod: runtimePodConfigToDisplay(result.runtimePod) };
+    const priorConfig = dialog.initialConfig;
     dispatch(
       patchManageDialog({
         config: displayConfig,
@@ -307,9 +311,22 @@ export const submitManageConfig = (): AppThunk<Promise<void>> => async (dispatch
         busyAction: '',
         busyTarget: '',
         error: '',
-        pendingRedeploy: true,
+        // The banner means "the running pod is behind the saved config", so
+        // raise it only when this save changed a pod-shaping field (issue
+        // #460: saving autoUpgrade/autoStart must not prompt a pod roll).
+        pendingRedeploy: nextPendingRedeploy(dialog.pendingRedeploy, priorConfig, displayConfig),
       }),
     );
+    // A changed Claude launch flag only applies when the AI session's
+    // create-time program runs, so reopen the env's open AI tabs now rather
+    // than leaving a live claude on the stale flags (issues #477/#482). A
+    // save that did not change the launch signature must not churn tabs.
+    if (
+      priorConfig &&
+      aiSessionLaunchSignature(priorConfig) !== aiSessionLaunchSignature(displayConfig)
+    ) {
+      void dispatch(relaunchAISessionsForLaunchChange(selection));
+    }
   } catch (error) {
     const message = readError(error);
     dispatch(

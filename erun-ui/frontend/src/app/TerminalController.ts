@@ -22,6 +22,7 @@ import type {
   AppNotificationPayload,
   AppStatusPayload,
   EnvironmentInitializedPayload,
+  EnvStatusPayload,
   MountElements,
   TerminalDataDisposable,
   TerminalWriteData,
@@ -49,6 +50,7 @@ import {
 import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
 import { decodeDebugOutput } from './terminalStatus';
+import { TerminalWriteSourceQueue } from './TerminalWriteSourceQueue';
 import { thunkExtra } from './thunkExtra';
 import {
   handleAIActivity,
@@ -56,6 +58,7 @@ import {
   handleAppStatus,
   handleEnvironmentInitFailed,
   handleEnvironmentInitialized,
+  handleEnvStatus,
   handleReconnectLine,
   handleTerminalExit,
   hideTerminalMessageIfActive,
@@ -66,6 +69,10 @@ const REVIEW_DIFF_REFRESH_INTERVAL_MS = 5000;
 
 export class TerminalController {
   readonly sessions = new TerminalSessionRegistry();
+  // Tracks the source session of each in-flight xterm write so terminal query
+  // replies route back to the asking session, not the currently-selected one
+  // (issue #347). See TerminalWriteSourceQueue and writeToTerminal().
+  private readonly writeSources = new TerminalWriteSourceQueue();
   private terminal: Terminal | null = null;
   private fitAddon: FitAddon | null = null;
   private terminalRoot: HTMLDivElement | null = null;
@@ -75,6 +82,7 @@ export class TerminalController {
   private _diffList: HTMLDivElement | null = null;
   private resizeObserver: ResizeObserver | null = null;
   private resizeTimer = 0;
+  private resizeFrame = 0;
   private reviewScrollFrame = 0;
   private idleStatusTimer = 0;
   private reviewDiffRefreshTimer = 0;
@@ -90,6 +98,7 @@ export class TerminalController {
   private environmentInitFailedOff: (() => void) | null = null;
   private environmentsChangedOff: (() => void) | null = null;
   private aiActivityOff: (() => void) | null = null;
+  private envStatusOff: (() => void) | null = null;
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
   // Track DECTCEM (`?25`) and alt-screen state across the bytes
   // written to xterm for the active session. When the active session
@@ -126,6 +135,15 @@ export class TerminalController {
 
   fitTerminal(): void {
     this.fitAddon?.fit();
+    this.publishTerminalDims();
+  }
+
+  private publishTerminalDims(): void {
+    if (!this.terminalRoot || !this.terminal) {
+      return;
+    }
+    this.terminalRoot.dataset.terminalCols = String(this.terminal.cols);
+    this.terminalRoot.dataset.terminalRows = String(this.terminal.rows);
   }
 
   mount(elements: MountElements): () => void {
@@ -156,13 +174,23 @@ export class TerminalController {
     this.terminal.loadAddon(this.fitAddon);
     this.terminal.open(elements.terminalRoot);
     this.fitAddon.fit();
+    this.publishTerminalDims();
 
     this.terminalQueryResponseDisposables = registerTerminalQueryResponseHandlers(
       this.terminal,
-      (data) => SendSessionInput(store.getState().terminal.sessionId, data),
+      // Address the reply to the session whose output xterm is parsing right
+      // now (writeSources head), falling back to the current selection when no
+      // write is in flight. Reading the live selection here would misroute the
+      // reply if the user switched sessions during a deferred parse (#347).
+      (data) =>
+        SendSessionInput(this.writeSources.current(store.getState().terminal.sessionId), data),
       (error) => {
         store.dispatch(showTerminalMessage(readError(error)));
       },
+      // Suppress replies to queries re-parsed from a replayed display buffer:
+      // the asking tool consumed the live reply long ago, so a second reply
+      // would land on the session's shell as typed input (#484).
+      () => this.writeSources.currentIsReplay(),
     );
     this.terminalDataDisposable = this.terminal.onData((data) => {
       SendSessionInput(store.getState().terminal.sessionId, data).catch((error: unknown) => {
@@ -216,6 +244,9 @@ export class TerminalController {
     this.aiActivityOff = EventsOn('ai-activity', (payload: AIActivityPayload) => {
       store.dispatch(handleAIActivity(payload));
     });
+    this.envStatusOff = EventsOn('env-status', (payload: EnvStatusPayload) => {
+      store.dispatch(handleEnvStatus(payload));
+    });
 
     if (!this.bootStarted) {
       this.bootStarted = true;
@@ -231,6 +262,12 @@ export class TerminalController {
   private unmountTerminal(): void {
     window.removeEventListener('resize', this.queueTerminalResize);
     this.resizeObserver?.disconnect();
+    window.clearTimeout(this.resizeTimer);
+    this.resizeTimer = 0;
+    if (this.resizeFrame !== 0) {
+      window.cancelAnimationFrame(this.resizeFrame);
+      this.resizeFrame = 0;
+    }
     this.terminalDataDisposable?.dispose();
     for (const disposable of this.terminalQueryResponseDisposables) {
       disposable.dispose();
@@ -245,27 +282,28 @@ export class TerminalController {
     this.terminal?.dispose();
     this.terminal = null;
     this.fitAddon = null;
+    // xterm drops pending write-completion callbacks on dispose, so reset the
+    // source queue to avoid carrying a stale head into the next mount.
+    this.writeSources.clear();
   }
 
   private detachWailsEventListeners(): void {
-    this.terminalOutputOff?.();
-    this.terminalExitOff?.();
-    this.appStatusOff?.();
-    this.appNotificationOff?.();
-    this.reconnectLineOff?.();
-    this.environmentInitializedOff?.();
-    this.environmentInitFailedOff?.();
-    this.environmentsChangedOff?.();
-    this.aiActivityOff?.();
-    this.terminalOutputOff = null;
-    this.terminalExitOff = null;
-    this.appStatusOff = null;
-    this.appNotificationOff = null;
-    this.reconnectLineOff = null;
-    this.environmentInitializedOff = null;
-    this.environmentInitFailedOff = null;
-    this.environmentsChangedOff = null;
-    this.aiActivityOff = null;
+    const fields = [
+      'terminalOutputOff',
+      'terminalExitOff',
+      'appStatusOff',
+      'appNotificationOff',
+      'reconnectLineOff',
+      'environmentInitializedOff',
+      'environmentInitFailedOff',
+      'environmentsChangedOff',
+      'aiActivityOff',
+      'envStatusOff',
+    ] as const;
+    for (const field of fields) {
+      this[field]?.();
+      this[field] = null;
+    }
   }
 
   focusTerminalSoon(): void {
@@ -310,7 +348,7 @@ export class TerminalController {
       if (this.liveCursorState.altScreen || !this.liveCursorState.cursorHidden) {
         return;
       }
-      this.terminal?.write(SHOW_CURSOR_SEQUENCE);
+      this.writeToTerminal(store.getState().terminal.sessionId, SHOW_CURSOR_SEQUENCE);
       this.liveCursorState = { ...this.liveCursorState, cursorHidden: false };
     }, TerminalController.CURSOR_RESTORE_DELAY_MS);
   }
@@ -333,15 +371,30 @@ export class TerminalController {
       return;
     }
     store.dispatch(hideTerminalMessageIfActive(payload.sessionId));
-    this.terminal?.write(displayData);
+    this.writeToTerminal(payload.sessionId, displayData);
     this.liveCursorState = scanCursorVisibility(this.liveCursorState, displayData);
     this.scheduleCursorRestoreIfStuck();
+  }
+
+  // writeToTerminal is the single seam for every xterm write. It tags the write
+  // with its source session via the write-source queue and hands xterm the
+  // matching completion callback, so terminal query replies fired while xterm
+  // parses this chunk route back to sessionId (issue #347). replay marks
+  // chunks re-rendered from the saved display buffer, whose stale queries must
+  // be consumed without replying (issue #484).
+  private writeToTerminal(sessionId: number, data: TerminalWriteData, replay = false): void {
+    const terminal = this.terminal;
+    if (!terminal) {
+      return;
+    }
+    terminal.write(data, this.writeSources.begin(sessionId, replay));
   }
 
   layoutCallbacks(): {
     applyLayoutVars: () => void;
     focusTerminalSoon: () => void;
     queueTerminalResize: () => void;
+    flushTerminalResize: () => void;
   } {
     return {
       applyLayoutVars: () => {
@@ -351,6 +404,7 @@ export class TerminalController {
         this.focusTerminalSoon();
       },
       queueTerminalResize: this.queueTerminalResize,
+      flushTerminalResize: this.flushTerminalResize,
     };
   }
 
@@ -395,14 +449,39 @@ export class TerminalController {
   queueTerminalResize = (): void => {
     window.clearTimeout(this.resizeTimer);
     this.resizeTimer = window.setTimeout(() => {
-      this.applyLayoutVars();
-      this.fitAddon?.fit();
-      const sessionId = store.getState().terminal.sessionId;
-      if (sessionId > 0 && this.terminal) {
-        ResizeSession(sessionId, this.terminal.cols, this.terminal.rows).catch(noop);
-      }
+      this.runTerminalResize();
     }, 40);
   };
+
+  // flushTerminalResize fits the terminal on the next animation frame
+  // and resizes the PTY immediately, bypassing the 40 ms debounce that
+  // queueTerminalResize uses to coalesce drag/ResizeObserver bursts.
+  // One-shot layout toggles (review/sidebar/debug) call this so the
+  // shell sees the new cols before its next prompt redraw — the gap
+  // that caused issue #433 (review-open squashes the terminal and only
+  // partially un-squashes when closed because the PTY was still on the
+  // narrow cols when the next prompt was emitted).
+  flushTerminalResize = (): void => {
+    window.clearTimeout(this.resizeTimer);
+    this.resizeTimer = 0;
+    if (this.resizeFrame !== 0) {
+      return;
+    }
+    this.resizeFrame = window.requestAnimationFrame(() => {
+      this.resizeFrame = 0;
+      this.runTerminalResize();
+    });
+  };
+
+  private runTerminalResize(): void {
+    this.applyLayoutVars();
+    this.fitAddon?.fit();
+    this.publishTerminalDims();
+    const sessionId = store.getState().terminal.sessionId;
+    if (sessionId > 0 && this.terminal) {
+      ResizeSession(sessionId, this.terminal.cols, this.terminal.rows).catch(noop);
+    }
+  }
 
   queueVisibleDiffSelectionUpdate(): void {
     if (this.reviewScrollFrame > 0) {
@@ -482,9 +561,9 @@ export class TerminalController {
     this.focusTerminalSoon();
   }
 
-  writeTerminalBuffer(chunks: TerminalWriteData[]): void {
+  writeTerminalBuffer(sessionId: number, chunks: TerminalWriteData[]): void {
     for (const chunk of chunks) {
-      this.terminal?.write(chunk);
+      this.writeToTerminal(sessionId, chunk, true);
     }
     // Rehydrate live cursor state from the replayed buffer.
     // rebuildTerminalDisplayBuffer already appended `?25h` if the live
@@ -494,5 +573,15 @@ export class TerminalController {
     // buffer in its own intentional state.
     this.liveCursorState = bufferCursorVisibility(chunks);
     this.cancelCursorRestoreTimer();
+    // After resetTerminal() + bulk replay, the viewport can settle
+    // mid-scrollback because xterm parses write() calls asynchronously on its
+    // own timer, so a synchronous scroll here would run before the chunks are
+    // laid out. Enqueue an empty write whose completion callback fires only
+    // after every replayed chunk has flushed (xterm runs write callbacks in
+    // order), then scroll to the live prompt — so switching sessions always
+    // lands at the bottom rather than in the middle of history (issue #438).
+    this.terminal?.write('', () => {
+      this.terminal?.scrollToBottom();
+    });
   }
 }

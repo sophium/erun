@@ -119,6 +119,7 @@ func (d rootDependencies) commands() []*cobra.Command {
 		d.optionalBuildCommand(),
 		d.optionalPushCommand(),
 		d.deployCommand(),
+		d.upgradeCommand(),
 		newMCPCmd(d.resolveOpen, d.runInitForArgs, launchMCPProcess),
 		newAPICmd(d.resolveOpen, d.runInitForArgs, launchAPIProcess),
 		newAppCmd(launchAppProcess),
@@ -208,6 +209,13 @@ func (d rootDependencies) optionalPushCommand() *cobra.Command {
 // clear error when invoked outside a deploy context.
 func (d rootDependencies) deployCommand() *cobra.Command {
 	return newDeployCmd(d.store, d.store.SaveEnvConfig, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, d.push, d.recoveringDeployHelmChart)
+}
+
+// upgradeCommand returns the always-registered upgrade subcommand. It composes
+// the same deploy flow as deployCommand for each lagging opted-in env, so it
+// shares deployCommand's dependency wiring.
+func (d rootDependencies) upgradeCommand() *cobra.Command {
+	return newUpgradeCmd(d.store, d.store.SaveEnvConfig, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.DockerImageBuilder, d.push, d.recoveringDeployHelmChart)
 }
 
 func (d rootDependencies) runRoot(cmd *cobra.Command, args []string) error {

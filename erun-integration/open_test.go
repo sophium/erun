@@ -262,6 +262,77 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/remote_dry_run_propagates_host_credentials_opt_in", normalize.Apply(result.Combined))
 	})
 
+	t.Run("app_session_ai_dry_run_wraps_dtach_and_launches_claude", func(t *testing.T) {
+		// #478: the desktop AI tab runs `erun open --app-session ai --ai`. Without
+		// --no-shell the dry-run reaches traceShellPreview, so the bootstrap-script
+		// block locks that the remote program is wrapped in a persistent dtach
+		// session (so reopening reconnects instead of stranding a parallel claude)
+		// and that the cwd-guarded claude is that session's create-time program.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "ai", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/app_session_ai_dry_run_wraps_dtach_and_launches_claude", normalize.Apply(result.Combined))
+	})
+
+	t.Run("app_session_ai_dry_run_launches_claude_with_model_and_verbose_debug", func(t *testing.T) {
+		// #482/#477: when the env config sets a default Claude model that is in
+		// the env's available models, and opts in to verbose+debug, the AI
+		// session's create-time program must carry `--model <m> --verbose
+		// --debug` after the env effort, in both branches of the cwd-guarded
+		// resume. The launch-ai.sh block in the golden is the contract the
+		// desktop AI tab relies on.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithClaude(t, setup, "team", "dev",
+			"claude:\n"+
+				"  models: [opus, fable]\n"+
+				"  defaultmodel: fable\n"+
+				"  verbosedebug: true\n"+
+				"  effort: high\n")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "ai", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/app_session_ai_dry_run_launches_claude_with_model_and_verbose_debug", normalize.Apply(result.Combined))
+	})
+
+	t.Run("app_session_ai_dry_run_drops_default_model_not_in_available", func(t *testing.T) {
+		// #482: a persisted defaultmodel that is no longer among the env's
+		// available models must not reach the launch — the guard falls back to
+		// no --model flag rather than launching Claude on a model the env does
+		// not expose.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithClaude(t, setup, "team", "dev",
+			"claude:\n"+
+				"  models: [opus]\n"+
+				"  defaultmodel: fable\n")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "ai", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/app_session_ai_dry_run_drops_default_model_not_in_available", normalize.Apply(result.Combined))
+	})
+
+	t.Run("app_session_shell_dry_run_wraps_dtach", func(t *testing.T) {
+		// The ERun and custom "Terminal N" tabs run `erun open --app-session open-N`:
+		// the same persistent dtach session but running a plain interactive shell —
+		// no claude launch and no contribute prelude in the launcher body.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "open-0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/app_session_shell_dry_run_wraps_dtach", normalize.Apply(result.Combined))
+	})
+
+	t.Run("app_session_contribute_ai_dry_run_preludes_clone", func(t *testing.T) {
+		// #478: the contribute-AI tab runs `erun open --app-session contribute-ai
+		// --contribute --ai`. The persistent dtach launcher must prepend the
+		// contribute prelude (contribute toolchain on PATH, ERUN_SKIP_LINT, cd into
+		// the cloned repo) before launching the cwd-guarded claude, all inside the
+		// reattachable session.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "contribute-ai", "--contribute", "--ai", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/app_session_contribute_ai_dry_run_preludes_clone", normalize.Apply(result.Combined))
+	})
+
 	t.Run("vscode_dry_run", func(t *testing.T) {
 		// VSCode against an sshd-enabled remote env: dry-run must reach
 		// past validateIDEOptions and emit the redeploy / port-forward /
@@ -331,6 +402,11 @@ func TestOpen(t *testing.T) {
 		fixture.StubBinaryWithScript(t, stubsDir, "open",
 			`printf '%s\n' "$*" > '`+ideLog+`'`+"\n"+`exit 0`+"\n")
 		envVars = append(envVars, "PATH="+stubsDir+":"+os.Getenv("PATH"))
+		// Pin darwin so the IDE launcher resolves to the stubbed macOS
+		// `open` command. On a Linux host production calls xdg-open, which
+		// this scenario does not stub. (erun-integration/AGENTS.md —
+		// platform-dependent goldens.)
+		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=darwin")
 		result := erun.Run(t, []string{"open", "team", "dev", "--vscode", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
@@ -390,6 +466,11 @@ func TestOpen(t *testing.T) {
 		fixture.StubBinaryWithScript(t, stubsDir, "open",
 			`printf '%s\n' "$*" >> '`+ideLog+`'`+"\n"+`exit 0`+"\n")
 		envVars = append(envVars, "PATH="+stubsDir+":"+os.Getenv("PATH"))
+		// Pin darwin: this scenario seeds the macOS JetBrains options dir
+		// above and asserts the `open -a 'IntelliJ IDEA'` bootstrap, both
+		// macOS-shaped. Without the pin a Linux host resolves a different
+		// options dir and launcher and the writers never fire.
+		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=darwin")
 		result := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)

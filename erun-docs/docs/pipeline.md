@@ -21,6 +21,42 @@ ERun's other half. The [environment model](/intro) gives you a namespace per tas
 
 You rarely run the steps by hand. `erun build --release` folds the release step into the build, and `erun build --deploy` carries straight through push and rollout — so one command runs the flow and the version threads through for you.
 
+## What `build` does
+
+`build` turns the source in an [agent env](/concepts/environment-types) into versioned container images — it runs **only in an agent env**, since a [runtime env](/concepts/environment-types) has no source and only receives already-built artefacts through `deploy`. It resolves the whole build from the project's [conventions](/concepts/conventions); there's nothing per-project to wire up.
+
+### How it finds what to build
+
+It discovers each component's Dockerfile under the tenant's devops module — every `docker/<component>/` directory is one image, named with the tenant prefix (`petios-api`, not bare `api`) — and tags each with the version from the nearest `VERSION` file.
+
+<figure className="erun-hero-figure">
+  <img src="/img/build-discovery.svg" alt="Under the project root, the petios-devops/docker/ directory holds one tenant-prefixed directory per component — petios-api, petios-web, petios-worker — each containing a Dockerfile and an optional VERSION file. Every such directory is one image." />
+</figure>
+
+Build order follows the `FROM …:${ERUN_VERSION}` links between components; component-naming rules and the rest are in [Build path resolution](/reference/configuration-build-paths) and the [conventions spec](/agent-reference/conventions-spec#component-naming).
+
+### The steps
+
+Each component builds for both architectures, reuses unchanged layers from the [fingerprint cache](/agent-reference/conventions-spec#fingerprint-cache), and is tagged with the resolved version.
+
+<figure className="erun-hero-figure">
+  <img src="/img/build-steps.svg" alt="Per component, left to right: from the component plus its Dockerfile, build for amd64 and arm64 (reusing unchanged layers from the cache), then tag with the version (snapshot or release), producing the container image." />
+</figure>
+
+A snapshot tag while you iterate; `--release` stamps a stable tag and assembles the multi-arch manifest list. Full contract: [multi-architecture build](/agent-reference/conventions-spec#multi-architecture-build-contract).
+
+### How you set it up — and where tests run
+
+Each component's Dockerfile is a [multi-stage build](/agent-reference/conventions-spec#multi-stage-dockerfile-expectation): a builder stage that compiles the artefact and runs the tests, then a thin runtime stage that ships only the artefact.
+
+<figure className="erun-hero-figure">
+  <img src="/img/build-stages.svg" alt="One Dockerfile with two stages: a builder stage that compiles the artefact and runs the tests, and a runtime stage that ships only that artefact, producing a tagged container image for amd64 and arm64." />
+</figure>
+
+Run every test that doesn't need a deployed artefact (unit tests, and integration tests against in-build fixtures) in the builder stage — because `build` is `docker build`, a failing test fails the build and no image is tagged, so a green build is a tested build that marks a [review](/collaboration/reviews) `READY`. End-to-end tests that need a running deployment run after `deploy`.
+
+See [`erun build`](/cli/build) for flags, dry-run output, and error behaviour.
+
 ## Two ways to ship
 
 `release` is for stable, promotable versions — but you don't always need one, and that's the pipeline's range:

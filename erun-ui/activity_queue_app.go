@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	eruncommon "github.com/sophium/erun/erun-common"
 )
 
 const (
@@ -487,6 +489,13 @@ func (a *App) finishDeployByTenantEnv(selection uiSelection, tenant, environment
 	}
 	if final, finished := a.activityQueue.finish(entry.ID, status, errMsg); finished {
 		a.unlockTerminalsForActivity(final)
+		if status == activityQueueStatusSucceeded {
+			// A successful deploy supersedes any stale 'failed' flag on the
+			// row (issue #498): the env-status clear keeps the sidebar dot
+			// and hover card truthful, and the next session exit respawns
+			// normally because latestDeployFailed is now false.
+			a.emitEnvStatus(uiSelection{Tenant: tenant, Environment: environment}, "")
+		}
 	}
 }
 
@@ -909,8 +918,20 @@ func (a *App) feedActivityTraceFromTerminal(managed *managedTerminal, chunk []by
 	}
 	handler := newActivityTraceLineHandler(a, managed.selection, managed.kind)
 	for _, line := range lines {
+		// Buffer the line for the active entry before dispatching it, so the
+		// "==> Deploy failed" line that finalizes the entry (and the error
+		// output preceding it) is already captured when finish() snapshots
+		// the buffer into entry.Detail.
+		a.activityQueue.recordOutputLine(managed.selection.Tenant, managed.selection.Environment, line)
 		handler(line)
 		signalSessionReadyOnLine(managed, line)
+		// The CLI's taken-over notice is a public contract line (see
+		// eruncommon.ShellSessionTakenOverNotice): another ERun window
+		// re-attached this persistent session, so the upcoming PTY exit
+		// must not trigger a reconnect that would steal it back.
+		if strings.TrimSpace(line) == eruncommon.ShellSessionTakenOverNotice {
+			a.markSessionTakenOver(managed)
+		}
 	}
 }
 

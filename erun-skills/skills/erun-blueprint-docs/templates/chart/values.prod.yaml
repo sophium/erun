@@ -1,0 +1,8 @@
+# Production overlay: publish to the live Cloudflare Pages project on the
+# `__BRANCH__` branch alias. The branch alias controls which Cloudflare Pages
+# deployment maps to the production custom domain.
+docs:
+  enabled: true
+  project: __PROJECT__
+  branch: __BRANCH__
+  credentialsSecretName: cf-creds

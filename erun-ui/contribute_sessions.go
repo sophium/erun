@@ -82,15 +82,23 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 	}
 	a.mu.Unlock()
 
-	prelude := buildContributePreludeCommand(withAI, result.EnvConfig.AITool)
+	// The contribute tab runs `erun open --app-session contribute-… --contribute
+	// [--ai]`: the persistent remote session cds into the contribute clone with
+	// its env (and launches the AI tool for the AI variant) as its create-time
+	// program, once, so reopening reconnects instead of re-running the prelude or
+	// spawning a parallel session (#478). What used to be typed in (issue #469)
+	// now happens pod-side in `erun open`.
+	appSessionID := "contribute-erun"
+	if withAI {
+		appSessionID = "contribute-ai"
+	}
 	params := startTerminalSessionParams{
-		Dir:          resolveTerminalStartDir(result.RepoPath),
-		Executable:   a.deps.resolveCLIPath(),
-		Args:         buildOpenArgs(result.Tenant, result.Environment, selection.Debug),
-		Env:          []string{appSessionEnvVar + "=1"},
-		Cols:         cols,
-		Rows:         rows,
-		InitialInput: []byte(prelude),
+		Dir:        resolveTerminalStartDir(result.RepoPath),
+		Executable: a.deps.resolveCLIPath(),
+		Args:       withAppSession(buildOpenArgs(result.Tenant, result.Environment, selection.Debug), appSessionID, withAI, true),
+		Env:        []string{appSessionEnvVar + "=1"},
+		Cols:       cols,
+		Rows:       rows,
 	}
 	session, err := a.deps.startTerminal(params)
 	if err != nil {
@@ -136,31 +144,6 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 		Slot:      slot,
 		Kind:      string(kind),
 	}, managed, nil
-}
-
-// buildContributePreludeCommand returns the keystrokes piped into the
-// contribute tab's shell so the contribute clone becomes the working
-// directory and the shim becomes the resolved `erun`. The AI variant
-// additionally invokes the env's configured AI tool.
-//
-// ERUN_SKIP_LINT=1 is set in the contribute shell because the user
-// is iterating — they want fast incremental rebuilds, not a full
-// typecheck+lint+format gate on every `erun app`. The host-side
-// `erun app` workflow leaves the gates on (no contribute prelude
-// runs there), and CI still enforces them.
-func buildContributePreludeCommand(withAI bool, aiTool string) string {
-	parts := []string{
-		`export PATH="$HOME/.erun/contribute/bin:$PATH"`,
-		`export ERUN_SKIP_LINT=1`,
-		`cd "$HOME/git/erun"`,
-		`clear`,
-	}
-	prelude := strings.Join(parts, " && ") + "\n"
-	if withAI {
-		tool := resolveAIToolCommand(aiTool)
-		prelude += tool + "\n"
-	}
-	return prelude
 }
 
 func contributeSessionKey(selection uiSelection, slot int, withAI bool) string {

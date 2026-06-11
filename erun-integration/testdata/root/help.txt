@@ -41,6 +41,7 @@ Available Commands:
   open        Open a shell in the tenant environment
   release     Cut a release: stamp the version, tag it, and push the tag
   sshd        Remote SSH utilities
+  upgrade     Redeploy opted-in environments to the latest version for their channel
   version     Print build information
 
 Flags:

@@ -61,6 +61,10 @@ export interface ActivityQueueEntry {
   lastUpdated: string;
   containers?: ActivityQueueContainerStatus[];
   error?: string;
+  // detail holds the captured command output behind a failed entry (the real
+  // helm/kubectl/docker error), surfaced as an expandable section and folded
+  // into the copyable failure report. Empty for non-failed entries.
+  detail?: string;
   source?: ActivityQueueSource;
   sessionId?: string;
   actionKind?: string;

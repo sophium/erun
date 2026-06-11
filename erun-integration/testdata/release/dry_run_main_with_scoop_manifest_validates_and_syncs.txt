@@ -1,0 +1,78 @@
+<VERSION>
+audit: erun release --dry-run
+release: resolving project root
+release: project root = <TMP>
+release: resolving release module root
+release: release root = <TMP>
+release: loading release config from project
+release: main branch = main, develop branch = develop
+release: resolving git branch and commit
+git -C <TMP> rev-parse --abbrev-ref HEAD
+git -C <TMP> rev-parse --short HEAD
+release: branch = main, commit = <SHORTSHA>
+release: resolving base version from VERSION file
+release: base version = <VERSION> (from <TMP>
+release: classified mode = stable
+git -C <TMP> show-ref --verify --quiet refs/heads/develop
+release: develop branch "develop" exists = false
+release: validating scoop manifest <TMP>
+release: branch=main mode=stable version=<VERSION>
+next version: <VERSION>
+docker image: ghcr.io/sophium/api:<VERSION>
+git -C <TMP> status --porcelain --untracked-files=no
+release: worktree clean = true
+stage: sync-remote
+cd <TMP> && git fetch origin
+cd <TMP> && git rebase origin/main
+stage: release
+write <TMP>
+  apiVersion: v2
+  appVersion: <VERSION>
+  name: api
+  version: <VERSION>
+write <TMP>
+  {
+    "version": "<VERSION>",
+    "description": "erun developer toolkit",
+    "homepage": "https://github.com/sophium/erun",
+    "license": "MIT",
+    "depends": [
+      "go",
+      "mingw",
+      "nodejs",
+      "yarn"
+    ],
+    "url": "https://github.com/sophium/erun/archive/refs/tags/<VERSION>.zip",
+    "hash": "<HEX>",
+    "extract_dir": "erun-<VERSION>",
+    "installer": {
+      "script": [
+        "if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) { throw 'building erun-app.exe requires a C compiler such as MinGW for the Wails CGO build' }",
+        "go build -trimpath -o \"$dir\\erun.exe\" ."
+      ]
+    },
+    "bin": [
+      "erun.exe",
+      "emcp.exe",
+      "eapi.exe",
+      "erun-app.exe"
+    ]
+  }
+cd <TMP> && git add erun-devops/k8s/api/Chart.yaml bucket/erun.json
+cd <TMP> && git commit -m '[skip ci] release <VERSION>'
+git -C <TMP> rev-parse '<VERSION>^{}'
+cd <TMP> && git tag -a <VERSION> -m 'Release <VERSION>'
+stage: push-release-tag
+cd <TMP> && git push origin <VERSION>
+stage: sync-packaging-checksums
+curl -fsSL https://github.com/sophium/erun/archive/refs/tags/<VERSION>.zip
+shasum -a 256 <VERSION>.zip
+cd <TMP> && git add bucket/erun.json
+cd <TMP> && git commit -m '[skip ci] sync package metadata <VERSION>'
+stage: post-release-version-bump
+write <TMP>
+  <VERSION>
+cd <TMP> && git add erun-devops/VERSION
+cd <TMP> && git commit -m '[skip ci] prepare <VERSION>'
+stage: push
+cd <TMP> && git push --follow-tags origin main

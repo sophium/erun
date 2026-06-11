@@ -2,6 +2,7 @@ package erunmcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -15,6 +16,8 @@ type DoctorInput struct {
 	PruneImages             bool                         `json:"pruneImages,omitempty" jsonschema:"when true, prune unused Docker images"`
 	PruneBuildCache         bool                         `json:"pruneBuildCache,omitempty" jsonschema:"when true, prune unused BuildKit cache"`
 	PruneContainers         bool                         `json:"pruneContainers,omitempty" jsonschema:"when true, prune stopped Docker containers"`
+	ClearPendingHelm        bool                         `json:"clearPendingHelm,omitempty" jsonschema:"when true, clear a stuck helm pending-install/upgrade lock for the runtime release so the next deploy can proceed"`
+	Rollback                bool                         `json:"rollback,omitempty" jsonschema:"when true, roll the runtime release back to its last successful revision (recovers a bad/non-converging deploy)"`
 	Preview                 bool                         `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
 	Verbosity               int                          `json:"verbosity,omitempty" jsonschema:"feedback level matching CLI -v semantics"`
 	RestoreConfigFromBackup string                       `json:"restoreConfigFromBackup,omitempty" jsonschema:"YYYY-MM-DD or absolute path; when set, restore the root erun config from the matching daily backup before any tenant/env work"`
@@ -63,6 +66,9 @@ func doctorTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 }
 
 func runDoctorToolCommand(runtime RuntimeConfig, input DoctorInput, runCtx eruncommon.Context) (*DoctorRootConfigReport, error) {
+	if input.ClearPendingHelm && input.Rollback {
+		return nil, errors.New("clearPendingHelm and rollback are alternative recoveries; request only one")
+	}
 	report, fatal, err := runDoctorRootConfigToolFlow(runtime, input, runCtx)
 	if err != nil {
 		return report, err
@@ -78,6 +84,12 @@ func runDoctorToolCommand(runtime RuntimeConfig, input DoctorInput, runCtx erunc
 		return report, err
 	}
 	req := eruncommon.ShellLaunchParamsFromResult(target)
+	if err := writeDoctorDeployDiagnosis(runCtx, req); err != nil {
+		return report, err
+	}
+	if err := runDoctorRecoveryToolActions(runCtx, input, req); err != nil {
+		return report, err
+	}
 	if err := writeDoctorInspection(runCtx, target, req); err != nil {
 		return report, err
 	}
@@ -223,6 +235,27 @@ func firstNonBlank(values ...string) string {
 	return ""
 }
 
+// writeDoctorDeployDiagnosis reports the helm release status and runtime pods
+// so an agent can see why a deploy failed before any cleanup. Read-only; the
+// commands are traced for dry-run previews.
+func writeDoctorDeployDiagnosis(runCtx eruncommon.Context, req eruncommon.ShellLaunchParams) error {
+	diagnosis := eruncommon.RunDeployDiagnosis(runCtx, req)
+	if runCtx.DryRun {
+		return nil
+	}
+	if status := strings.TrimSpace(diagnosis.HelmStatus); status != "" {
+		if _, err := fmt.Fprintf(runCtx.Stdout, "== Helm release status ==\n%s\n\n", status); err != nil {
+			return err
+		}
+	}
+	if pods := strings.TrimSpace(diagnosis.Pods); pods != "" {
+		if _, err := fmt.Fprintf(runCtx.Stdout, "== Pods ==\n%s\n\n", pods); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func writeDoctorInspection(runCtx eruncommon.Context, target eruncommon.OpenResult, req eruncommon.ShellLaunchParams) error {
 	inspection, err := eruncommon.RunDoctorInspection(runCtx, nil, req)
 	if err != nil || runCtx.DryRun {
@@ -232,6 +265,40 @@ func writeDoctorInspection(runCtx eruncommon.Context, target eruncommon.OpenResu
 		return err
 	}
 	return writeDoctorOutput(runCtx, inspection.Stdout, inspection.Stderr)
+}
+
+// runDoctorRecoveryToolActions runs the deploy-recovery actions the caller
+// requested (clear pending helm / rollback). Non-interactive: each runs only
+// when its input flag is set. Mutates the live release; traced for dry-run.
+func runDoctorRecoveryToolActions(runCtx eruncommon.Context, input DoctorInput, req eruncommon.ShellLaunchParams) error {
+	for _, action := range deployRecoveryActionsFromInput(input) {
+		if !runCtx.DryRun {
+			if _, err := fmt.Fprintf(runCtx.Stdout, "Running: %s\n", eruncommon.DeployRecoveryActionDescription(action)); err != nil {
+				return err
+			}
+		}
+		output, err := eruncommon.RunDeployRecovery(runCtx, req, action)
+		if err != nil {
+			return err
+		}
+		if !runCtx.DryRun {
+			if err := writeDoctorOutput(runCtx, output, ""); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func deployRecoveryActionsFromInput(input DoctorInput) []eruncommon.DeployRecoveryAction {
+	actions := make([]eruncommon.DeployRecoveryAction, 0, 2)
+	if input.ClearPendingHelm {
+		actions = append(actions, eruncommon.DeployRecoveryClearPendingHelm)
+	}
+	if input.Rollback {
+		actions = append(actions, eruncommon.DeployRecoveryRollback)
+	}
+	return actions
 }
 
 func runDoctorToolActions(runCtx eruncommon.Context, input DoctorInput, req eruncommon.ShellLaunchParams) error {

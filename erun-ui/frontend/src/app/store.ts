@@ -23,6 +23,7 @@ import autoStartPromptReducer from './slices/autoStartPromptSlice';
 import contributeReducer from './slices/contributeSlice';
 import doctorReducer from './slices/doctorSlice';
 import environmentDialogReducer from './slices/environmentDialogSlice';
+import envStatusReducer from './slices/envStatusSlice';
 import globalConfigDialogReducer from './slices/globalConfigDialogSlice';
 import idleReducer from './slices/idleSlice';
 import layoutReducer from './slices/layoutSlice';
@@ -38,6 +39,7 @@ import tenantDialogReducer from './slices/tenantDialogSlice';
 import tenantsReducer from './slices/tenantsSlice';
 import terminalReducer from './slices/terminalSlice';
 import terminalStatusReducer from './slices/terminalStatusSlice';
+import upgradeAllReducer from './slices/upgradeAllSlice';
 import { type ThunkExtra, thunkExtra } from './thunkExtra';
 
 export const store = configureStore({
@@ -55,6 +57,7 @@ export const store = configureStore({
     idle: idleReducer,
     activity: activityReducer,
     aiActivity: aiActivityReducer,
+    envStatus: envStatusReducer,
     tenants: tenantsReducer,
     environmentDialog: environmentDialogReducer,
     manageDialog: manageDialogReducer,
@@ -63,6 +66,7 @@ export const store = configureStore({
     globalConfigDialog: globalConfigDialogReducer,
     autoStartPrompt: autoStartPromptReducer,
     contribute: contributeReducer,
+    upgradeAll: upgradeAllReducer,
     [wailsApi.reducerPath]: wailsApi.reducer,
   },
   middleware: (getDefaultMiddleware) =>

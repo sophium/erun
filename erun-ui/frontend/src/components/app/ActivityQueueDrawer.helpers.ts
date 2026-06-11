@@ -3,6 +3,30 @@ import {
   type ActivityQueueEntry,
   formatElapsed,
 } from '@/app/activityQueueState';
+import type { UISelection } from '@/types';
+
+// deployUiSelection builds the uiSelection a deploy-oriented recovery action
+// (force redeploy, doctor) needs from an activity entry. Only the fields those
+// flows read are populated from the entry; the rest are left empty so the
+// backend resolves them from the env config, matching how the container-status
+// recovery action constructs its selection.
+export function deployUiSelection(entry: ActivityQueueEntry): UISelection {
+  return {
+    tenant: entry.tenant,
+    environment: entry.environment,
+    version: entry.version ?? '',
+    runtimeImage: '',
+    runtimeCpu: '',
+    runtimeMemory: '',
+    kubernetesContext: entry.kubernetesContext ?? '',
+    containerRegistry: '',
+    noGit: false,
+    bootstrap: false,
+    setDefaultTenant: false,
+    action: 'deploy',
+    debug: false,
+  };
+}
 
 export function isHistoryStatus(status: ActivityQueueEntry['status']): boolean {
   return (
@@ -233,6 +257,54 @@ export function kubectlDescribeCommand(
   }
   parts.push(`# container ${container.name}`);
   return parts.join(' ');
+}
+
+function failureReportContextLines(entry: ActivityQueueEntry): string[] {
+  const lines = [
+    `erun ${entry.command || 'command'} failed`,
+    `Target: ${entry.tenant}/${entry.environment}`,
+  ];
+  const optional: [string, string | undefined][] = [
+    ['Version', entry.version],
+    ['Release', entry.release],
+    ['Namespace', entry.namespace],
+    ['Kubernetes context', entry.kubernetesContext],
+  ];
+  for (const [label, value] of optional) {
+    if (value) lines.push(`${label}: ${value}`);
+  }
+  lines.push(`Started: ${entry.startedAt}`);
+  if (entry.endedAt) lines.push(`Ended: ${entry.endedAt}`);
+  lines.push(`Elapsed: ${activityElapsedLabel(entry, Date.now()).trim()}`);
+  return lines;
+}
+
+function failureReportContainerLine(container: ActivityQueueContainerStatus): string {
+  const parts = [`${container.name}: ${containerPhaseLabel(container)}`];
+  if (container.restarts > 0) {
+    parts.push(`${String(container.restarts)} restart${container.restarts > 1 ? 's' : ''}`);
+  }
+  if (container.reason) parts.push(`reason: ${container.reason}`);
+  const row = `  - ${parts.join(', ')}`;
+  return container.message ? `${row}\n      ${container.message}` : row;
+}
+
+function failureReportContainerLines(entry: ActivityQueueEntry): string[] {
+  if (!entry.containers || entry.containers.length === 0) return [];
+  return ['', 'Containers:', ...entry.containers.map(failureReportContainerLine)];
+}
+
+// buildFailureReport assembles a complete, paste-ready plain-text report for a
+// failed activity: the structured context the user cannot easily retype
+// (target, version, namespace, Kubernetes context, timing, container states)
+// plus the captured command output. It is the payload of the "Copy failure
+// report" action, so a user can hand a deploy failure to developers/admins
+// without scraping the terminal. Sections with no data are omitted.
+export function buildFailureReport(entry: ActivityQueueEntry): string {
+  const lines = [...failureReportContextLines(entry), ...failureReportContainerLines(entry)];
+  if (entry.error) lines.push('', `Error: ${entry.error}`);
+  if (entry.detail) lines.push('', 'Output:', entry.detail);
+  return lines.join('\n');
 }
 
 export async function copyToClipboard(text: string): Promise<void> {

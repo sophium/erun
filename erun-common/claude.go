@@ -19,7 +19,7 @@ func DefaultClaudeAvailableModels() []string {
 }
 
 func KnownClaudeModels() []string {
-	return []string{"opus", "sonnet", "haiku"}
+	return []string{"opus", "sonnet", "haiku", "fable"}
 }
 
 type EnvironmentClaudeConfig struct {
@@ -27,10 +27,32 @@ type EnvironmentClaudeConfig struct {
 	UseBedrock      *bool    `yaml:"usebedrock,omitempty" json:"useBedrock,omitempty"`
 	Models          []string `yaml:"models,omitempty" json:"models,omitempty"`
 	MaxOutputTokens *int     `yaml:"maxoutputtokens,omitempty" json:"maxOutputTokens,omitempty"`
+	// Effort is the per-env Claude Code session effort level (one of
+	// low|medium|high|xhigh|max|ultracode) applied when the desktop launches
+	// the env's AI tab: the first five as `claude --effort <level>`,
+	// ultracode as `--settings '{"ultracode":true}'` (it is not an --effort
+	// value — it enables xhigh effort plus standing workflow orchestration).
+	// Unset means the default (ultracode). The level only influences the
+	// AI-tab launch; this shared field exists so the value round-trips
+	// through the same env config the UI reads and writes.
+	Effort *string `yaml:"effort,omitempty" json:"effort,omitempty"`
+	// DefaultModel is the per-env Claude model preselected as `claude --model`
+	// when the AI tab's session launches. Unset means no --model is passed
+	// (Claude's own default). It only takes effect while it is one of the
+	// env's available models — see resolveClaudeDefaultModel. Named
+	// DefaultModel to stay distinct from the chart's claude.model pod slot,
+	// which this field intentionally does not touch (issue #482).
+	DefaultModel *string `yaml:"defaultmodel,omitempty" json:"defaultModel,omitempty"`
+	// VerboseDebug launches the AI tab's Claude with `--verbose --debug` so
+	// Claude's own diagnostics stream into the tab (issue #477). A plain bool,
+	// not *bool: unlike UseMantle/UseBedrock it has no global-default/inherit
+	// semantics — absent means off with no information lost.
+	VerboseDebug bool `yaml:"verbosedebug,omitempty" json:"verboseDebug,omitempty"`
 }
 
 func (c EnvironmentClaudeConfig) IsZero() bool {
-	return c.UseMantle == nil && c.UseBedrock == nil && len(c.Models) == 0 && c.MaxOutputTokens == nil
+	return c.UseMantle == nil && c.UseBedrock == nil && len(c.Models) == 0 &&
+		c.MaxOutputTokens == nil && c.Effort == nil && c.DefaultModel == nil && !c.VerboseDebug
 }
 
 func (c EnvironmentClaudeConfig) NormalizedModels() []string {

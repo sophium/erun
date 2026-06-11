@@ -5,6 +5,7 @@ export type { ClassifiedTerminalFailure } from './classifiedTerminalFailure';
 export type { DebugOpenFilter } from './debugOpenFilter';
 export type { DebugSessionMode } from './debugSessionMode';
 export type { EnvironmentInitializedPayload } from './environmentInitializedPayload';
+export type { EnvStatusPayload } from './envStatusPayload';
 export type { HiddenSessionMode } from './hiddenSessionMode';
 export type { IDEKind } from './ideKind';
 export type { IdleCloudContextAction } from './idleCloudContextAction';

@@ -43,14 +43,24 @@ test.describe('titlebar status overflow', () => {
   }) => {
     expect(LONG_MESSAGE.length).toBeGreaterThan(160);
 
-    await page.evaluate((message) => {
-      const runtime = (
-        window as unknown as {
-          runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
-        }
-      ).runtime;
-      runtime.EventsEmit('app-status', { message, busy: false });
-    }, LONG_MESSAGE);
+    // Emit the long message as an error notification rather than an app-status
+    // (terminalStatus): on a populated ~/.erun an active/reconnecting env pushes
+    // its own terminal-status updates that would clobber a long app-status mid-
+    // assertion. A notification takes precedence in computeTitlebarStatus and an
+    // error notification does not auto-dismiss, so it stays put while we open the
+    // popover. The long-message escalation (the actual surface under test) renders
+    // identically for either source.
+    const emitLong = () =>
+      page.evaluate((message) => {
+        const runtime = (
+          window as unknown as {
+            runtime: { EventsEmit: (n: string, ...a: unknown[]) => void };
+          }
+        ).runtime;
+        runtime.EventsEmit('app-notification', { kind: 'error', message });
+      }, LONG_MESSAGE);
+
+    await emitLong();
 
     // The popover trigger is a <button> bearing the truncated message.
     // Identified by the data-testid we set on the trigger so the test
@@ -59,6 +69,7 @@ test.describe('titlebar status overflow', () => {
     const trigger = page.getByTestId('titlebar-status-message');
     await expect(trigger).toBeVisible({ timeout: 5_000 });
 
+    await emitLong();
     await trigger.click();
 
     // PopoverContent renders the full text with whitespace-pre-wrap and

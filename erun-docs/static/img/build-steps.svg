@@ -1,0 +1,39 @@
+<svg viewBox="0 0 940 188" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="buildStepsTitle"
+     font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif">
+  <title id="buildStepsTitle">The steps build takes per component: from the component and its Dockerfile, build for both amd64 and arm64 (reusing unchanged layers from the fingerprint cache), tag the result with the resolved version, producing the container image.</title>
+
+  <defs>
+    <linearGradient id="bsCharcoal" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1a2030"/>
+      <stop offset="100%" stop-color="#0f1320"/>
+    </linearGradient>
+    <marker id="bsArrowSolid" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L9,3 L0,6 Z" fill="#0891b2"/>
+    </marker>
+  </defs>
+
+  <!-- component source -->
+  <rect x="20" y="66" width="170" height="56" rx="14" fill="url(#bsCharcoal)"/>
+  <text x="105" y="90" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">component</text>
+  <text x="105" y="108" text-anchor="middle" fill="#ffffff" font-size="11.5" opacity="0.75">+ Dockerfile</text>
+
+  <line x1="190" y1="94" x2="250" y2="94" stroke="#0891b2" stroke-width="1.5" marker-end="url(#bsArrowSolid)"/>
+
+  <!-- build both arches -->
+  <rect x="250" y="56" width="220" height="76" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="360" y="90" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">build · amd64 + arm64</text>
+  <text x="360" y="112" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.7">unchanged layers from cache</text>
+
+  <line x1="470" y1="94" x2="540" y2="94" stroke="#0891b2" stroke-width="1.5" marker-end="url(#bsArrowSolid)"/>
+
+  <!-- tag with version -->
+  <rect x="540" y="56" width="180" height="76" rx="14" fill="none" stroke="#0891b2" stroke-width="1.5"/>
+  <text x="630" y="90" text-anchor="middle" fill="currentColor" font-size="15" font-weight="600">tag · version</text>
+  <text x="630" y="112" text-anchor="middle" fill="currentColor" font-size="12" opacity="0.7">snapshot or release</text>
+
+  <line x1="720" y1="94" x2="780" y2="94" stroke="#0891b2" stroke-width="1.5" marker-end="url(#bsArrowSolid)"/>
+
+  <!-- container image -->
+  <rect x="780" y="66" width="150" height="56" rx="14" fill="url(#bsCharcoal)"/>
+  <text x="855" y="98" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600">image</text>
+</svg>

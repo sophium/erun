@@ -1,11 +1,12 @@
 Diagnose and repair an environment's runtime and config.
 
-Inspects the environment and offers repairs: prune its Docker images, build cache, or stopped containers; restore or fix the root erun config; and finish an interrupted remote init. Each action prompts before running unless you pass its matching flag.
+Reports why a deploy may have failed (helm release status and the runtime pods, read-only). When the release looks unhealthy it recommends the one recovery that fits — clear a stuck pending helm release, or roll back to the last successful revision — and prompts before running it. It also prunes Docker images, build cache, or stopped containers; restores or fixes the root erun config; and finishes an interrupted remote init. The recovery actions mutate the live release; run one directly with --clear-pending-helm or --rollback (the two are alternatives — pass only one).
 
 Usage:
   erun doctor [tenant] [environment] [flags]
 
 Flags:
+      --clear-pending-helm                  Clear a stuck helm pending-install/upgrade lock for the runtime release without prompting
       --codecommit-ssh-key-id string        CodeCommit SSH public key ID to use when finishing an unfinished remote init for an AWS CodeCommit repository
       --dry-run                             Resolve and trace mutating actions without executing them.
       --finish-remote-init                  Finish unfinished remote init tasks without prompting (only takes effect when run inside a runtime pod)
@@ -17,6 +18,7 @@ Flags:
       --repair-config                       Inspect the root erun config and offer to restore from backup or re-init orphaned cloud provider aliases; stops before running tenant/env cleanup actions
       --repair-jetbrains-gateway            Clear cached JetBrains Gateway backend metadata for this environment
       --restore-config-from-backup string   Restore the root erun config from a dated backup non-interactively (YYYY-MM-DD or absolute path)
+      --rollback                            Roll the runtime release back to its last successful revision without prompting
 
 Global Flags:
       --time            Print the elapsed runtime after the command finishes.

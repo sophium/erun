@@ -18,6 +18,17 @@ export class Sidebar {
     await this.page.getByRole('button', { name: 'Open ERun settings' }).click();
   }
 
+  // openUpgradeAll clicks the "Upgrade all environments" header button, which
+  // resolves the cross-env upgrade plan and opens the preview dialog.
+  async openUpgradeAll(): Promise<void> {
+    await this.page.getByRole('button', { name: 'Upgrade all environments' }).click();
+  }
+
+  // upgradeAllDialog targets the Upgrade-all preview dialog.
+  upgradeAllDialog(): Locator {
+    return this.page.getByRole('dialog', { name: 'Upgrade all environments' });
+  }
+
   async openInitDialog(): Promise<void> {
     const button = this.page.getByRole('button', { name: 'Initialize new remote environment' });
     if (await button.isVisible().catch(() => false)) {
@@ -62,6 +73,60 @@ export class Sidebar {
     await this.environmentRow(tenant, env).click();
   }
 
+  // openManageDialogViaKeyboard activates the row's edit button with the
+  // keyboard instead of the mouse. The button is pointer-events-none until the
+  // row is hovered/selected/focused; focusing flips group-focus-within so it
+  // becomes interactive, and Enter fires the handler without a hover (a hover
+  // opens the row's IconTooltip, whose popper intercepts a mouse click). Works
+  // regardless of whether the env is the effective selection.
+  async openManageDialogViaKeyboard(tenant: string, env: string): Promise<void> {
+    await this.environmentRow(tenant, env).press('Enter');
+  }
+
+  // envRowButton targets the clickable env-row button (the one whose
+  // aria-label is "<tenant> / <env>" plus an optional "(local)" suffix).
+  // Distinct from environmentRow(), which targets the row's edit button.
+  envRowButton(tenant: string, env: string): Locator {
+    return this.page.locator(`button[aria-label^="${tenant} / ${env}"]`).first();
+  }
+
+  // hoverEnvironmentRow moves the pointer over the env row, which opens the
+  // env hover card (issue #437). Hovering the inner row button enters the row
+  // container that carries the open handler.
+  async hoverEnvironmentRow(tenant: string, env: string): Promise<void> {
+    await this.envRowButton(tenant, env).hover();
+  }
+
+  // envHoverCard targets the hover card popover for an env row. Its
+  // aria-label is "<tenant> / <env> details".
+  envHoverCard(tenant: string, env: string): Locator {
+    return this.page.getByRole('dialog', { name: `${tenant} / ${env} details` });
+  }
+
+  // envOpenDot targets the env row's open indicator (issue #470): a button
+  // whose data-env-state attribute carries the env's real condition
+  // (running / stopped / failed) and whose click closes the env's tabs. The
+  // row container is the row button's parent, so the lookup stays scoped to
+  // one env even when several are open.
+  envOpenDot(tenant: string, env: string): Locator {
+    return this.envRowButton(tenant, env).locator('..').getByTestId('env-open-dot');
+  }
+
+  // hasLocalBadge reports whether the env row renders the LOCAL pill
+  // (the <span aria-label="Local environment"> inside the row button).
+  async hasLocalBadge(tenant: string, env: string): Promise<boolean> {
+    const badge = this.envRowButton(tenant, env).locator('[aria-label="Local environment"]');
+    return (await badge.count()) > 0;
+  }
+
+  // rowHasLocalSuffix reports whether the env row's accessible label carries
+  // the "(local)" suffix. Both this and the LOCAL pill are driven by the same
+  // isLocal flag, so they must always agree.
+  async rowHasLocalSuffix(tenant: string, env: string): Promise<boolean> {
+    const label = (await this.envRowButton(tenant, env).getAttribute('aria-label')) ?? '';
+    return label.endsWith('(local)');
+  }
+
   cloudAliasButton(): Locator {
     // The bottom-of-sidebar control is a popover trigger labelled with the
     // user's cloud identity; it's the last button in the aside.
@@ -83,6 +148,23 @@ export class Sidebar {
       names.push(name);
     }
     return names;
+  }
+
+  // firstEnvironmentExcludingLocal returns the first {tenant, env} in sidebar
+  // order whose env name is not the local default ("local"). Tests that need a
+  // normal environment use this so they never operate on the special local
+  // default env (e.g. erun/local), whose legacy type and local-shell behaviour
+  // don't fit a deployed-environment contract. Returns null when none exists.
+  async firstEnvironmentExcludingLocal(): Promise<{ tenant: string; env: string } | null> {
+    const tenants = await this.tenants();
+    for (const tenant of tenants) {
+      const envs = await this.environmentsFor(tenant);
+      const env = envs.find((name) => name !== 'local');
+      if (env !== undefined) {
+        return { tenant, env };
+      }
+    }
+    return null;
   }
 
   async environmentsFor(tenant: string): Promise<string[]> {

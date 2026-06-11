@@ -188,6 +188,8 @@ Runs a fixed set of in-pod health checks. Each check returns `ok | warn | fail` 
 
 A failing check returns `status: "fail"` and a `detail` describing the symptom. Agents should prefer running `doctor` before `raw` when they see unexpected behaviour.
 
+`doctor` also reports why a deploy may have failed (helm release status + runtime pods, read-only) and can recover a failing runtime release. Two boolean inputs request the recovery actions, each mutating the live release: `clearPendingHelm` clears a stuck helm pending-install/upgrade lock, and `rollback` rolls the release back to its last successful revision. They are alternative fixes — requesting both in one call is rejected. See [CLI flag spec · Deploy recovery actions](/agent-reference/cli-flags#deploy-recovery-actions) for the exact commands and when to use each.
+
 ### `list`
 
 Same data as the CLI `erun list`, structured. Returns the caller's tenants, envs, and effective target.

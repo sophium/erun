@@ -101,6 +101,50 @@ func setEnvironmentCloudAliasViaMCP(ctx context.Context, endpoint, tenant, envir
 	return output.EnvConfig, nil
 }
 
+// loadPodBranchFromMCP reads the env worktree's current git branch from
+// inside the runtime pod via the per-env MCP endpoint's raw tool — the
+// sidebar hover card's "Working on" source for remote envs (issue #462).
+// The idle-probe header keeps the hover from registering as activity, so a
+// hover never holds an idle env awake.
+func loadPodBranchFromMCP(ctx context.Context, endpoint string) (string, error) {
+	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
+	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint: endpoint,
+		HTTPClient: &http.Client{
+			Transport: idleProbeRoundTripper{},
+		},
+		DisableStandaloneSSE: true,
+	}, nil)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		_ = session.Close()
+	}()
+
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{
+		Name: "raw",
+		Arguments: map[string]any{
+			"command": []string{"git", "rev-parse", "--abbrev-ref", "HEAD"},
+		},
+	})
+	if err != nil {
+		return "", err
+	}
+
+	data, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		return "", err
+	}
+	var output struct {
+		Stdout string `json:"stdout"`
+	}
+	if err := json.Unmarshal(data, &output); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(output.Stdout), nil
+}
+
 func loadIdleStatusFromMCP(ctx context.Context, endpoint string) (eruncommon.EnvironmentIdleStatus, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{

@@ -70,7 +70,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	openParams := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),
-		Args:       buildOpenArgs(result.Tenant, result.Environment, selection.Debug),
+		Args:       withAppSession(buildOpenArgs(result.Tenant, result.Environment, selection.Debug), fmt.Sprintf("open-%d", slot), false, false),
 		Env:        []string{appSessionEnvVar + "=1"},
 		Cols:       cols,
 		Rows:       rows,
@@ -107,6 +107,9 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	go a.startWorkspaceSyncForSelection(selection)
 	go a.startCloudCredentialsRefresherForSelection(selection)
 
+	// A fresh open attempt supersedes any stopped/failed flag the row
+	// carried; the reconnect refusal paths re-flag if this open fails too.
+	a.emitEnvStatus(selection, "")
 	a.logSpawnedCommandToLocal(selection, "erun", formatLocalCommandLog(formatLaunchCommand(openParams), "ERun tab"))
 	_ = ctx
 	return startSessionResult{
@@ -240,15 +243,18 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	}
 	a.mu.Unlock()
 
-	tool := resolveAIToolCommand(result.EnvConfig.AITool)
 	params := startTerminalSessionParams{
-		Dir:          resolveTerminalStartDir(result.RepoPath),
-		Executable:   a.deps.resolveCLIPath(),
-		Args:         buildOpenArgs(result.Tenant, result.Environment, selection.Debug),
-		Env:          []string{appSessionEnvVar + "=1"},
-		Cols:         cols,
-		Rows:         rows,
-		InitialInput: []byte(tool + "\n"),
+		Dir:        resolveTerminalStartDir(result.RepoPath),
+		Executable: a.deps.resolveCLIPath(),
+		// The AI tab runs `erun open --app-session ai --ai`: the persistent
+		// remote session launches the AI tool itself (the cwd-guarded claude
+		// resume at the env effort, issues #451/#469), once on create. Reopening
+		// reconnects to the running claude rather than typing it in again or
+		// spawning a parallel one (#478).
+		Args: withAppSession(buildOpenArgs(result.Tenant, result.Environment, selection.Debug), "ai", true, false),
+		Env:  []string{appSessionEnvVar + "=1"},
+		Cols: cols,
+		Rows: rows,
 	}
 	session, err := a.deps.startTerminal(params)
 	if err != nil {
@@ -276,7 +282,7 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	a.rememberKubeContextForActivity(selection.KubernetesContext)
 	go a.streamSession(managed)
 
-	a.logSpawnedCommandToLocal(selection, "ai", formatLocalCommandLog(formatLaunchCommand(params)+" && "+shellQuoteIfNeeded(tool), "AI tab"))
+	a.logSpawnedCommandToLocal(selection, "ai", formatLocalCommandLog(formatLaunchCommand(params), "AI tab"))
 	_ = ctx
 	return startSessionResult{
 		SessionID: serial,
@@ -306,6 +312,17 @@ func (a *App) StartDeploySession(selection uiSelection, cols, rows int) (startSe
 func (a *App) StartForceDeploySession(selection uiSelection, cols, rows int) (startSessionResult, error) {
 	args := append(buildDeployArgs(selection), "--force")
 	return a.runErunCommandInLocal(selection, cols, rows, args)
+}
+
+// StartUpgradeEnvironmentSession runs `erun upgrade --tenant <t>
+// --environment <e>` in that environment's own Local shell, so each
+// Upgrade-all member upgrades in its respective env — output, activity
+// entry, and any failure land on the env they belong to, and members run in
+// parallel across envs (issue #497). The deploy emits the same
+// `==> Deploying tenant/env` traces the activity-queue parser turns into
+// entries, exactly like StartDeploySession.
+func (a *App) StartUpgradeEnvironmentSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+	return a.runErunCommandInLocal(selection, cols, rows, buildUpgradeArgs(selection))
 }
 
 func (a *App) StartSSHDInitSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
@@ -791,9 +808,25 @@ func (a *App) ResizeSession(sessionID, cols, rows int) error {
 func (a *App) CloseSession(sessionID int) error {
 	a.mu.Lock()
 	managed := a.sessionBySerialLocked(sessionID)
+	var endRemote bool
+	var endSelection uiSelection
+	var endID string
+	if managed != nil && managed.kind == sessionKindOpen && managed.slot > 0 && !managed.takenOver {
+		// An explicit close of a custom terminal tab is the user removing
+		// that terminal, not just detaching: end the pod session too, or
+		// detection rebuilds the tab on the next env open. Default tabs stay
+		// detach-only (their long-running sessions are the feature), and a
+		// taken-over tab must never kill the session another window now owns.
+		endRemote = true
+		endSelection = managed.selection
+		endID = fmt.Sprintf("open-%d", managed.slot)
+	}
 	a.mu.Unlock()
 	if managed == nil || managed.session == nil {
 		return nil
+	}
+	if endRemote {
+		go a.endRemoteAppSession(endSelection, endID)
 	}
 	return managed.session.Close()
 }
@@ -849,6 +882,83 @@ func (a *App) CloseEnvironmentSessions(selection uiSelection) ([]int, error) {
 		closed = append(closed, managed.serial)
 	}
 	return closed, firstErr
+}
+
+// EndAISessions permanently ends the env's AI sessions — the env AI tab and
+// the contribute AI tab, desktop side and pod side — so the next
+// StartAISession / StartContributeAISession launches Claude with the env's
+// current launch flags (--effort / --model / --verbose --debug, issues
+// #477/#482). A launch flag only takes effect when the persistent session's
+// create-time program runs: `dtach -A` reattaches to the running claude, so
+// without ending the pod session a changed flag could never apply. The pod
+// sessions are ended even when no desktop tab is attached — a detached claude
+// would otherwise keep its stale flags and the next open would silently
+// reattach to it. The relaunched guard resumes via --continue, so the Claude
+// conversation carries over. Local/ERun tabs are untouched: their launch
+// command does not change.
+//
+// Returns false without ending anything when the env's AI tool launches
+// verbatim (a non-claude tool, or claude invoked with explicit flags): the
+// managed Claude launch flags never participate in that launch, and ending
+// would discard a session — codex has no --continue — for a setting that
+// cannot affect it.
+func (a *App) EndAISessions(selection uiSelection) (bool, error) {
+	selection = normalizeSelection(selection)
+	if selection.Tenant == "" || selection.Environment == "" {
+		return false, fmt.Errorf("tenant and environment are required")
+	}
+	if envConfig, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment); err == nil {
+		launch := eruncommon.AISessionLaunchCommand(envConfig.AITool, envConfig.Claude)
+		if launch == strings.TrimSpace(envConfig.AITool) {
+			return false, nil
+		}
+	}
+	var targets []*managedTerminal
+	a.mu.Lock()
+	for _, managed := range a.sessions {
+		if !managedAITabFor(managed, selection) {
+			continue
+		}
+		// Mark closed under the lock so the spawn-reuse branch and
+		// tryReconnect both refuse this session while it is torn down; the
+		// frontend respawn that follows must create a fresh session, not
+		// reattach to the dying one.
+		managed.closed = true
+		a.releaseIdleBlockLocked(managed)
+		targets = append(targets, managed)
+	}
+	a.mu.Unlock()
+	for _, managed := range targets {
+		_ = managed.session.Close()
+	}
+	// End the pod-side persistent sessions only after the desktop PTYs are
+	// gone: ending first would remove the owner file under an attached
+	// client, which exits with the taken-over code and freezes the tab on
+	// the takeover marker instead of relaunching.
+	var wg sync.WaitGroup
+	for _, sessionID := range []string{"ai", "contribute-ai"} {
+		wg.Add(1)
+		go func(id string) {
+			defer wg.Done()
+			a.endRemoteAppSession(selection, id)
+		}(sessionID)
+	}
+	wg.Wait()
+	return true, nil
+}
+
+// managedAITabFor reports whether the managed session is one of the env's
+// live AI tabs (env AI tab or contribute AI tab) that EndAISessions tears
+// down for a Claude launch-flag change.
+func managedAITabFor(managed *managedTerminal, selection uiSelection) bool {
+	if managed == nil || managed.closed || managed.session == nil {
+		return false
+	}
+	if managed.selection.Tenant != selection.Tenant ||
+		managed.selection.Environment != selection.Environment {
+		return false
+	}
+	return managed.kind == sessionKindAI || managed.kind == sessionKindContributeAI
 }
 
 func (a *App) sessionBySerialLocked(sessionID int) *managedTerminal {
@@ -983,6 +1093,16 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	respawn := managed.respawn
 	a.mu.Unlock()
 
+	// Another ERun window re-attached this persistent session — a
+	// deliberate handover, not a transient drop. Respawning would run
+	// `erun open` again, whose attach takes the session straight back,
+	// and the two windows would steal it from each other in a loop.
+	// Clicking the env in the sidebar is the deliberate take-back.
+	if a.sessionTakenOver(managed) {
+		a.emitTakenOverMarker(managed.serial)
+		return false
+	}
+
 	// Refuse to respawn while the env's linked cloud context is not
 	// running. Each respawn re-runs `erun open`, whose preflight calls
 	// StartCloudContext and immediately undoes any auto-stop that has
@@ -994,6 +1114,36 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	// empty state from #331).
 	if !a.shouldRespawnForCloudContext(managed) {
 		a.emitStoppedContextMarker(managed.serial)
+		a.emitEnvStatus(managed.selection, envStatusStopped)
+		return false
+	}
+
+	// A deploy failure is terminal, not a transient drop. Respawning
+	// re-runs `erun open`, which re-deploys and fails the same way — and
+	// because every env tab (ERun + AI) reconnects independently, that
+	// turns one failing deploy into a parallel re-deploy storm across
+	// tabs. Refuse here and leave recovery to the user (the failed-deploy
+	// card's Run doctor / Rebuild & redeploy, or the titlebar Play
+	// button). A session that reached a healthy shell and then dropped has
+	// readyErr == nil and still reconnects below; its `erun open` finds the
+	// deploy already current and skips it.
+	if a.reconnectBlockedByDeployFailure(managed) {
+		a.emitDeployFailedMarker(managed.serial)
+		a.emitEnvStatus(managed.selection, envStatusFailed)
+		return false
+	}
+
+	// The readyErr guard above only catches an open that emitted the
+	// `==> Deploy failed` trace. When the deploy failed in a *separate*
+	// activity and this open is just trying to reach the resulting (never
+	// ready) pod, it exits with an MCP port-forward timeout / "pod not ready
+	// while syncing SSH" instead — no deploy-failed readyErr — and would loop
+	// here forever (each respawn re-runs `erun open`, re-times-out, and stacks
+	// another queued open). Consult the activity queue: if the env's latest
+	// deploy failed, refuse for the same reason and leave recovery to the user.
+	if a.reconnectBlockedByActivityDeployFailure(managed) {
+		a.emitDeployFailedMarker(managed.serial)
+		a.emitEnvStatus(managed.selection, envStatusFailed)
 		return false
 	}
 
@@ -1008,6 +1158,7 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	// single explicit retry affordance. See issue #361.
 	if a.trackExitForLoopGuard(managed) {
 		a.emitReconnectLoopMarker(managed.serial)
+		a.emitEnvStatus(managed.selection, envStatusFailed)
 		return false
 	}
 
@@ -1027,6 +1178,10 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	managed.session = next
 	managed.awaitingPostRespawnInput = true
 	a.mu.Unlock()
+	// The respawn went through — whatever stopped/failed condition the row
+	// was flagged with is being retried, so clear it (the refusal paths
+	// above re-flag on the next failure).
+	a.emitEnvStatus(managed.selection, "")
 	return true
 }
 
@@ -1124,9 +1279,11 @@ func (a *App) emitReconnectMarker(sessionID int, exitReason string) {
 // describe-instances error, for example) without leaving the user
 // staring at a terminal of stacked reconnect noise. See issue #361.
 const (
-	reconnectLoopWindow    = 30 * time.Second
-	reconnectLoopMaxExits  = 2
+	reconnectLoopWindow     = 30 * time.Second
+	reconnectLoopMaxExits   = 2
 	reconnectLoopMarkerANSI = "\r\n\x1b[2;33m── stopped reconnecting after repeated failures — click the environment in the sidebar to retry ──\x1b[0m\r\n"
+	deployFailedMarkerANSI  = "\r\n\x1b[2;33m── deploy failed — not retrying automatically; use Run doctor or Rebuild & redeploy on the failed deploy, or click the environment in the sidebar to retry ──\x1b[0m\r\n"
+	takenOverMarkerANSI     = "\r\n\x1b[2;33m── session re-attached in another ERun window — click the environment in the sidebar to attach it here ──\x1b[0m\r\n"
 )
 
 // trackExitForLoopGuard records the moment the managed PTY exited
@@ -1164,6 +1321,76 @@ func (a *App) emitReconnectLoopMarker(sessionID int) {
 		SessionID: sessionID,
 		Data:      base64.StdEncoding.EncodeToString([]byte(reconnectLoopMarkerANSI)),
 	})
+}
+
+// emitDeployFailedMarker writes a single diagnostic line when tryReconnect
+// refuses to respawn because the env's deploy failed (rather than a transient
+// drop). See tryReconnect.
+func (a *App) emitDeployFailedMarker(sessionID int) {
+	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+		SessionID: sessionID,
+		Data:      base64.StdEncoding.EncodeToString([]byte(deployFailedMarkerANSI)),
+	})
+}
+
+// emitTakenOverMarker writes a single diagnostic line when tryReconnect
+// refuses to respawn because another ERun window re-attached the session.
+// The named recovery action mirrors the other markers: clicking the env in
+// the sidebar deliberately takes the session back.
+func (a *App) emitTakenOverMarker(sessionID int) {
+	a.emitEvent(terminalOutputEvent, terminalOutputPayload{
+		SessionID: sessionID,
+		Data:      base64.StdEncoding.EncodeToString([]byte(takenOverMarkerANSI)),
+	})
+}
+
+// markSessionTakenOver flags the managed PTY whose output carried the CLI's
+// taken-over notice (eruncommon.ShellSessionTakenOverNotice); see the
+// takenOver field for the semantics.
+func (a *App) markSessionTakenOver(managed *managedTerminal) {
+	if managed == nil {
+		return
+	}
+	a.mu.Lock()
+	managed.takenOver = true
+	a.mu.Unlock()
+}
+
+func (a *App) sessionTakenOver(managed *managedTerminal) bool {
+	if managed == nil {
+		return false
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return managed.takenOver
+}
+
+// reconnectBlockedByDeployFailure reports whether the managed PTY's open
+// ended in a deploy failure — signalReady was called with an error from the
+// `==> Deploy failed` trace line — as opposed to a healthy ready that later
+// dropped. tryReconnect uses it to avoid re-deploying a broken env (and the
+// parallel re-deploy storm that results when every tab reconnects at once).
+func (a *App) reconnectBlockedByDeployFailure(managed *managedTerminal) bool {
+	if managed == nil {
+		return false
+	}
+	managed.readyMu.Lock()
+	defer managed.readyMu.Unlock()
+	return managed.readyClosed && managed.readyErr != nil
+}
+
+// reconnectBlockedByActivityDeployFailure reports whether the managed PTY's env
+// has a failed deploy recorded in the activity queue. Unlike
+// reconnectBlockedByDeployFailure (which keys on this open's own
+// `==> Deploy failed` readyErr), this catches the case where the deploy failed
+// in a separate activity and the current open merely can't reach the resulting
+// pod — so reconnect still stops hammering the broken env. Cleared once a later
+// deploy succeeds (recovery), letting reconnect resume.
+func (a *App) reconnectBlockedByActivityDeployFailure(managed *managedTerminal) bool {
+	if managed == nil || a.activityQueue == nil {
+		return false
+	}
+	return a.activityQueue.latestDeployFailed(managed.selection.Tenant, managed.selection.Environment)
 }
 
 // emitStoppedContextMarker writes a single diagnostic line when
@@ -1309,6 +1536,17 @@ func (a *App) emitAIActivity(sessionID int, selection uiSelection, busy bool) {
 	})
 }
 
+// emitEnvStatus publishes the env's real condition for the sidebar row
+// (issue #470). Status "" clears; envStatusStopped / envStatusFailed flag
+// the row while its tabs are alive but the env is not actually running.
+func (a *App) emitEnvStatus(selection uiSelection, status string) {
+	a.emitEvent(envStatusEvent, envStatusPayload{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+		Status:      status,
+	})
+}
+
 func terminalSessionExitReason(session terminalSession, readErr error) string {
 	if session != nil {
 		if waitErr := session.Wait(); waitErr != nil {
@@ -1410,6 +1648,14 @@ type managedTerminal struct {
 	// call, so a long-running successful session followed by a single
 	// exit never trips the cap. See issue #361.
 	recentExits []time.Time
+
+	// takenOver is set when the session's output carries the CLI's
+	// taken-over notice: another ERun window re-attached this persistent
+	// pod session (screen-style detach-and-reattach). tryReconnect must
+	// then refuse to respawn — respawning would steal the session straight
+	// back and the two windows would fight. Clicking the env in the
+	// sidebar starts a fresh session, which is the deliberate take-back.
+	takenOver bool
 
 	// aiActiveSince / aiLastOutput / aiBusyEmitted / aiInactivityTimer
 	// drive the debounced AI activity signal that powers the sidebar

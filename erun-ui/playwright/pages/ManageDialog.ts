@@ -41,6 +41,32 @@ export class ManageDialog {
     return this.locator().getByRole('tab', { name: new RegExp(`^${name}(,|$)`) });
   }
 
+  // tabHasUnsavedChanges reads the dirty marker off the tab trigger's
+  // accessible name ("<label>, has unsaved changes" — issue #460).
+  async tabHasUnsavedChanges(name: ManageTab): Promise<boolean> {
+    const label = await this.tab(name).getAttribute('aria-label');
+    return label?.includes('has unsaved changes') ?? false;
+  }
+
+  // redeployBanner targets the amber "Pending redeploy" alert raised after a
+  // save that changed a pod-shaping field (issue #460).
+  redeployBanner(): Locator {
+    return this.locator().getByRole('alert').filter({ hasText: 'Pending redeploy' });
+  }
+
+  // autoUpgradeCheckbox targets the Runtime tab's "Include in Upgrade all"
+  // opt-in — selection metadata for a future `erun upgrade`, never a pod
+  // input (issue #460).
+  autoUpgradeCheckbox(): Locator {
+    return this.locator().locator('#environment-config-autoupgrade');
+  }
+
+  // idleTimeoutInput targets the Runtime tab's Idle-stop "Timeout" field — a
+  // pod-shaping value (helm idle.* → pod env).
+  idleTimeoutInput(): Locator {
+    return this.locator().locator('#environment-config-idle-timeout');
+  }
+
   async selectTab(name: ManageTab): Promise<void> {
     await this.tab(name).click();
   }
@@ -125,5 +151,88 @@ export class ManageDialog {
     // SelectField renders a Radix Select; the listbox is portal'd to body
     // so it is queried at the document root rather than inside the dialog.
     await this.page.getByRole('option', { name: mode }).click();
+  }
+
+  // cloudAliasSelect targets the "Cloud alias" SelectField on the General tab.
+  // It only renders when the tenant has at least one cloud alias configured;
+  // otherwise an EmptyState renders instead, so specs check visibility first.
+  cloudAliasSelect(): Locator {
+    return this.locator().locator('#environment-config-cloudprovideralias');
+  }
+
+  async cloudAliasSelectVisible(): Promise<boolean> {
+    return this.cloudAliasSelect()
+      .isVisible()
+      .catch(() => false);
+  }
+
+  async cloudAliasSelectedValue(): Promise<string> {
+    return (await this.cloudAliasSelect().textContent())?.trim() ?? '';
+  }
+
+  async openCloudAliasOptions(): Promise<void> {
+    await this.cloudAliasSelect().click();
+  }
+
+  // cloudAliasNoneOption targets the "— None —" clear entry (issue #211). The
+  // Radix listbox is portal'd to the document body, so it is queried at the
+  // page root rather than inside the dialog.
+  cloudAliasNoneOption(): Locator {
+    return this.page.getByRole('option', { name: '— None —' });
+  }
+
+  async chooseCloudAliasNone(): Promise<void> {
+    await this.openCloudAliasOptions();
+    await this.cloudAliasNoneOption().click();
+  }
+
+  // claudeEffortSelect targets the "Effort" SelectField in the Claude section
+  // of the AI tab (issues #469/#491). It always renders; with no per-env
+  // override it shows "Default (ultracode)".
+  claudeEffortSelect(): Locator {
+    return this.locator().locator('#environment-config-claude-effort');
+  }
+
+  async claudeEffortSelectedValue(): Promise<string> {
+    return (await this.claudeEffortSelect().textContent())?.trim() ?? '';
+  }
+
+  // chooseClaudeEffort opens the Effort listbox and picks an option by its
+  // visible label. The Radix listbox is portal'd to the document body, so the
+  // option is queried at the page root rather than inside the dialog.
+  async chooseClaudeEffort(label: string): Promise<void> {
+    await this.claudeEffortSelect().click();
+    await this.page.getByRole('option', { name: label, exact: true }).click();
+  }
+
+  // claudeModelCheckbox targets one "Available models" checkbox in the Claude
+  // section of the AI tab. The id suffix is the model token itself.
+  claudeModelCheckbox(model: string): Locator {
+    return this.locator().locator(`#environment-config-claude-models-${model}`);
+  }
+
+  // claudeDefaultModelSelect targets the "Default model" SelectField (issue
+  // #482). It always renders; with no per-env override it shows
+  // "Default (Claude decides)".
+  claudeDefaultModelSelect(): Locator {
+    return this.locator().locator('#environment-config-claude-default-model');
+  }
+
+  async claudeDefaultModelSelectedValue(): Promise<string> {
+    return (await this.claudeDefaultModelSelect().textContent())?.trim() ?? '';
+  }
+
+  // chooseClaudeDefaultModel opens the Default model listbox and picks an
+  // option by its visible label. The Radix listbox is portal'd to the
+  // document body, so the option is queried at the page root.
+  async chooseClaudeDefaultModel(label: string): Promise<void> {
+    await this.claudeDefaultModelSelect().click();
+    await this.page.getByRole('option', { name: label, exact: true }).click();
+  }
+
+  // claudeVerboseDebugCheckbox targets the "Launch Claude in verbose + debug
+  // mode" launch toggle (issue #477).
+  claudeVerboseDebugCheckbox(): Locator {
+    return this.locator().locator('#environment-config-claude-verbose-debug');
   }
 }

@@ -32,6 +32,36 @@ type uiEnvironment struct {
 	AutoStart         *bool  `json:"autoStart,omitempty"`
 }
 
+// uiWorkingIssue is the sidebar hover card's "what is this env working on"
+// read model: the env worktree's current git branch and, when the branch
+// names an issue (feature/<n>-… or bug/<n>-…), the resolved issue title.
+// Empty fields render as honest empty states; Available is false when the
+// worktree isn't reachable from the host (remote-agent / runtime envs).
+type uiWorkingIssue struct {
+	Available   bool   `json:"available"`
+	Branch      string `json:"branch,omitempty"`
+	IssueNumber int    `json:"issueNumber,omitempty"`
+	IssueTitle  string `json:"issueTitle,omitempty"`
+	Reason      string `json:"reason,omitempty"`
+}
+
+// Env-status values carried by the env-status event. The empty string clears
+// the state (the env is healthy again, or a fresh open attempt is in flight).
+const (
+	envStatusStopped = "stopped"
+	envStatusFailed  = "failed"
+)
+
+// envStatusPayload tells the sidebar the real per-env condition behind the
+// open dot (issue #470: tab presence alone is not running-ness — the dot must
+// not show green for an env that is actually stopped or whose deploy failed).
+// Status is one of "", envStatusStopped, envStatusFailed.
+type envStatusPayload struct {
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment"`
+	Status      string `json:"status"`
+}
+
 type uiSelection struct {
 	Tenant            string `json:"tenant"`
 	Environment       string `json:"environment"`
@@ -180,27 +210,29 @@ type uiPortStatus struct {
 }
 
 type uiEnvironmentConfig struct {
-	Name                 string                       `json:"name"`
-	Type                 eruncommon.EnvironmentType   `json:"type,omitempty"`
-	LocalRepoPath        string                       `json:"localRepoPath,omitempty"`
-	RepoPath             string                       `json:"repoPath"`
-	KubernetesContext    string                       `json:"kubernetesContext"`
-	ContainerRegistry    string                  `json:"containerRegistry"`
-	CloudProviderAlias   string                  `json:"cloudProviderAlias"`
-	CloudProviderAliases []string                `json:"cloudProviderAliases,omitempty"`
-	CloudContext         *uiCloudContextStatus   `json:"cloudContext,omitempty"`
-	RuntimeVersion       string                  `json:"runtimeVersion"`
-	RuntimePod           uiRuntimePodConfig      `json:"runtimePod"`
-	SSHD                 uiSSHDConfig            `json:"sshd"`
-	Idle                 uiIdleConfig            `json:"idle"`
-	Claude               uiClaudeConfig          `json:"claude"`
-	ClaudeDefaults       uiClaudeDefaults        `json:"claudeDefaults"`
-	AITool               string                  `json:"aiTool,omitempty"`
-	LocalPorts            uiEnvironmentLocalPorts `json:"localPorts"`
-	Remote                bool                    `json:"remote"`
-	Snapshot              bool                    `json:"snapshot"`
-	AutoStart             *bool                   `json:"autoStart,omitempty"`
-	RemoteHostCredentials bool                    `json:"remoteHostCredentials"`
+	Name                  string                     `json:"name"`
+	Type                  eruncommon.EnvironmentType `json:"type,omitempty"`
+	LocalRepoPath         string                     `json:"localRepoPath,omitempty"`
+	RepoPath              string                     `json:"repoPath"`
+	KubernetesContext     string                     `json:"kubernetesContext"`
+	ContainerRegistry     string                     `json:"containerRegistry"`
+	CloudProviderAlias    string                     `json:"cloudProviderAlias"`
+	CloudProviderAliases  []string                   `json:"cloudProviderAliases,omitempty"`
+	CloudContext          *uiCloudContextStatus      `json:"cloudContext,omitempty"`
+	RuntimeVersion        string                     `json:"runtimeVersion"`
+	RuntimePod            uiRuntimePodConfig         `json:"runtimePod"`
+	SSHD                  uiSSHDConfig               `json:"sshd"`
+	Idle                  uiIdleConfig               `json:"idle"`
+	Claude                uiClaudeConfig             `json:"claude"`
+	ClaudeDefaults        uiClaudeDefaults           `json:"claudeDefaults"`
+	AITool                string                     `json:"aiTool,omitempty"`
+	LocalPorts            uiEnvironmentLocalPorts    `json:"localPorts"`
+	Remote                bool                       `json:"remote"`
+	Snapshot              bool                       `json:"snapshot"`
+	AutoStart             *bool                      `json:"autoStart,omitempty"`
+	RemoteHostCredentials bool                       `json:"remoteHostCredentials"`
+	AutoUpgrade           bool                       `json:"autoUpgrade"`
+	UpgradeChannel        string                     `json:"upgradeChannel,omitempty"`
 }
 
 type uiClaudeConfig struct {
@@ -208,6 +240,9 @@ type uiClaudeConfig struct {
 	UseBedrock      *bool    `json:"useBedrock,omitempty"`
 	Models          []string `json:"models,omitempty"`
 	MaxOutputTokens *int     `json:"maxOutputTokens,omitempty"`
+	Effort          *string  `json:"effort,omitempty"`
+	DefaultModel    *string  `json:"defaultModel,omitempty"`
+	VerboseDebug    bool     `json:"verboseDebug,omitempty"`
 }
 
 type uiClaudeDefaults struct {
@@ -218,6 +253,8 @@ type uiClaudeDefaults struct {
 	KnownModels     []string `json:"knownModels"`
 	MinTokens       int      `json:"minTokens"`
 	MaxTokens       int      `json:"maxTokens"`
+	Effort          string   `json:"effort"`
+	EffortLevels    []string `json:"effortLevels"`
 }
 
 type uiRuntimePodConfig struct {
@@ -393,9 +430,9 @@ type uiIdleStatus struct {
 	// grace-period warning and the user has SecondsUntilForcedStop
 	// seconds to cancel or resume activity before the real
 	// ec2:StopInstances fires. Empty when no auto-stop is pending.
-	StopPendingSince        string `json:"stopPendingSince,omitempty"`
-	SecondsUntilForcedStop  int64  `json:"secondsUntilForcedStop,omitempty"`
-	GracePeriodSeconds      int64  `json:"gracePeriodSeconds,omitempty"`
+	StopPendingSince       string `json:"stopPendingSince,omitempty"`
+	SecondsUntilForcedStop int64  `json:"secondsUntilForcedStop,omitempty"`
+	GracePeriodSeconds     int64  `json:"gracePeriodSeconds,omitempty"`
 }
 
 // uiLastStopEvent describes the most recent automatic stop of a
@@ -456,7 +493,7 @@ type uiIdleMarker struct {
 // leave Clients nil. Bytes and SecondsAgo are pre-formatted at the
 // boundary so the React tooltip can render without computing them.
 type uiIdleMarkerClient struct {
-	Address      string `json:"address"`
-	Bytes        int64  `json:"bytes,omitempty"`
-	SecondsAgo   int64  `json:"secondsAgo,omitempty"`
+	Address    string `json:"address"`
+	Bytes      int64  `json:"bytes,omitempty"`
+	SecondsAgo int64  `json:"secondsAgo,omitempty"`
 }

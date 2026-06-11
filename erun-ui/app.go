@@ -19,6 +19,7 @@ const (
 	environmentInitFailedEvent  = "environment-init-failed"
 	environmentsChangedEvent    = "environments-changed"
 	aiActivityEvent             = "ai-activity"
+	envStatusEvent              = "env-status"
 	appSessionEnvVar            = "ERUN_UI_SESSION"
 )
 
@@ -34,36 +35,38 @@ type projectConfigLoader interface {
 }
 
 type erunUIDeps struct {
-	store                 erunUIStore
-	findProjectRoot       eruncommon.ProjectFinderFunc
-	resolveCLIPath        func() string
-	resolveBuildInfo      func() eruncommon.BuildInfo
-	resolveImageRegistry  func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error)
-	cloudDeps             eruncommon.CloudDependencies
-	cloudContextDeps      eruncommon.CloudContextDependencies
-	deleteNamespace       eruncommon.NamespaceDeleterFunc
-	listKubeContexts      func() ([]string, error)
-	loadResourceStatus    func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
-	ensureMCP             func(context.Context, eruncommon.OpenResult) error
-	reconnectMCP          func(context.Context, eruncommon.OpenResult, func(string)) error
-	ensureSSHD            func(context.Context, eruncommon.OpenResult) error
-	canConnectLocalPort   func(int) bool
-	setRemoteCloudAlias   func(context.Context, string, string, string, string) (eruncommon.EnvConfig, error)
-	startTerminal         func(startTerminalSessionParams) (terminalSession, error)
-	runIDECommand         func(context.Context, startTerminalSessionParams) (string, error)
-	savePastedImage       func(pastedImageSaveParams) (string, error)
-	loadDiff              func(context.Context, string, uiDiffOptions) (eruncommon.DiffResult, error)
-	loadIdleStatus        func(context.Context, string) (eruncommon.EnvironmentIdleStatus, error)
-	loadAPILog            func(context.Context, uiTenantDashboardInput) (string, error)
-	workspaceSyncReady    func(context.Context, string) error
-	syncWorkspace         func(context.Context, workspaceSyncParams) (workspaceSyncResult, error)
-	workspaceSyncInterval time.Duration
-	recordActivity        func(eruncommon.EnvironmentActivityParams) error
-	stopCloudContext      func(context.Context, string) (eruncommon.CloudContextStatus, error)
-	windowStatePath       string
-	windowMaximised       func(context.Context) bool
-	cloneERun             func(context.Context, string) error
-	contributeStatePath   string
+	store                  erunUIStore
+	findProjectRoot        eruncommon.ProjectFinderFunc
+	resolveCLIPath         func() string
+	resolveBuildInfo       func() eruncommon.BuildInfo
+	resolveImageRegistry   func(context.Context, string, string) (eruncommon.RuntimeRegistryVersions, error)
+	cloudDeps              eruncommon.CloudDependencies
+	cloudContextDeps       eruncommon.CloudContextDependencies
+	deleteNamespace        eruncommon.NamespaceDeleterFunc
+	listKubeContexts       func() ([]string, error)
+	loadResourceStatus     func(context.Context, uiRuntimeResourceInput) (uiRuntimeResourceStatus, error)
+	ensureMCP              func(context.Context, eruncommon.OpenResult) error
+	reconnectMCP           func(context.Context, eruncommon.OpenResult, func(string)) error
+	ensureSSHD             func(context.Context, eruncommon.OpenResult) error
+	canConnectLocalPort    func(int) bool
+	setRemoteCloudAlias    func(context.Context, string, string, string, string) (eruncommon.EnvConfig, error)
+	startTerminal          func(startTerminalSessionParams) (terminalSession, error)
+	runIDECommand          func(context.Context, startTerminalSessionParams) (string, error)
+	savePastedImage        func(pastedImageSaveParams) (string, error)
+	loadDiff               func(context.Context, string, uiDiffOptions) (eruncommon.DiffResult, error)
+	loadIdleStatus         func(context.Context, string) (eruncommon.EnvironmentIdleStatus, error)
+	loadAPILog             func(context.Context, uiTenantDashboardInput) (string, error)
+	workspaceSyncReady     func(context.Context, string) error
+	syncWorkspace          func(context.Context, workspaceSyncParams) (workspaceSyncResult, error)
+	workspaceSyncInterval  time.Duration
+	recordActivity         func(eruncommon.EnvironmentActivityParams) error
+	runWorkingIssueCommand workingIssueCommandRunner
+	loadPodBranch          func(context.Context, string) (string, error)
+	stopCloudContext       func(context.Context, string) (eruncommon.CloudContextStatus, error)
+	windowStatePath        string
+	windowMaximised        func(context.Context) bool
+	cloneERun              func(context.Context, string) error
+	contributeStatePath    string
 }
 
 type App struct {
@@ -100,6 +103,12 @@ type App struct {
 	cloudContextStatusesMu sync.RWMutex
 	cloudContextStatuses   map[string]string
 	cloudContextPollerStop chan struct{}
+
+	// workingIssueCache memoizes the resolved working issue (branch +
+	// linked issue title) per env so the sidebar hover card doesn't re-run
+	// git + gh on every hover. Entries expire after workingIssueCacheTTL.
+	workingIssueMu    sync.Mutex
+	workingIssueCache map[string]workingIssueCacheEntry
 
 	// emitFn dispatches Wails-style events to the frontend. In normal Wails
 	// mode this calls runtime.EventsEmit; in headless mode it fans out to
@@ -144,6 +153,7 @@ func NewApp(deps erunUIDeps) *App {
 		busyEnvs:             make(map[string]int),
 		workspaceSyncs:       make(map[string]*workspaceSyncWorker),
 		credentialRefreshers: make(map[string]*cloudCredentialsRefresher),
+		workingIssueCache:    make(map[string]workingIssueCacheEntry),
 	}
 	app.activityQueue = newActivityQueueStore(
 		func(entry activityQueueEntry) {
@@ -240,6 +250,12 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.workspaceSyncInterval <= 0 {
 		deps.workspaceSyncInterval = defaultWorkspaceSyncInterval
+	}
+	if deps.runWorkingIssueCommand == nil {
+		deps.runWorkingIssueCommand = execWorkingIssueCommand
+	}
+	if deps.loadPodBranch == nil {
+		deps.loadPodBranch = loadPodBranchFromMCP
 	}
 	if deps.recordActivity == nil {
 		deps.recordActivity = eruncommon.RecordEnvironmentActivity

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"syscall"
 
 	"github.com/creack/pty"
 )
@@ -83,6 +84,14 @@ func (s *unixTerminalSession) Close() error {
 		return nil
 	}
 	if s.cmd != nil && s.cmd.Process != nil {
+		// Kill the whole process group, not just `erun open`: its kubectl exec
+		// child otherwise survives as an orphan that holds the exec stream open,
+		// leaving a stale dtach client attached in the pod after every close.
+		// pty.Start ran the child with Setsid, so it leads its own group
+		// (pgid == pid) and the negative-pid signal reaps the full chain.
+		if pid := s.cmd.Process.Pid; pid > 0 {
+			_ = syscall.Kill(-pid, syscall.SIGKILL)
+		}
 		_ = s.cmd.Process.Kill()
 		_ = s.Wait()
 	}

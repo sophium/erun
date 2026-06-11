@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -47,6 +49,44 @@ func TestDeployQueueDuplicateStartsReturnExisting(t *testing.T) {
 	}
 	if second.ID != first.ID {
 		t.Fatalf("ID drift: first=%s second=%s", first.ID, second.ID)
+	}
+}
+
+func TestLatestDeployFailed(t *testing.T) {
+	store := newTestActivityQueueStore(t)
+	base := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
+
+	if store.latestDeployFailed("petios", "rihards-develop") {
+		t.Fatal("no deploy recorded: want false")
+	}
+
+	failed, _ := store.start(activityQueueEntry{ID: "d1", Command: "deploy", Tenant: "petios", Environment: "rihards-develop", StartedAt: base})
+	if _, ok := store.finish(failed.ID, activityQueueStatusFailed, "helm release failed"); !ok {
+		t.Fatal("finish failed deploy returned ok=false")
+	}
+	if !store.latestDeployFailed("petios", "rihards-develop") {
+		t.Fatal("latest deploy failed: want true")
+	}
+
+	// A newer non-deploy activity (an open retry) must not flip the verdict —
+	// the env's latest *deploy* is still the failed one.
+	store.start(activityQueueEntry{ID: "o1", Command: "open", Tenant: "petios", Environment: "rihards-develop", StartedAt: base.Add(time.Minute)})
+	if !store.latestDeployFailed("petios", "rihards-develop") {
+		t.Fatal("newer non-deploy activity must be ignored: want true")
+	}
+
+	// A different env is unaffected.
+	if store.latestDeployFailed("petios", "other") {
+		t.Fatal("different env: want false")
+	}
+
+	// A newer deploy that succeeded (recovery) clears it.
+	recovered, _ := store.start(activityQueueEntry{ID: "d2", Command: "deploy", Tenant: "petios", Environment: "rihards-develop", StartedAt: base.Add(2 * time.Minute)})
+	if _, ok := store.finish(recovered.ID, activityQueueStatusSucceeded, ""); !ok {
+		t.Fatal("finish recovered deploy returned ok=false")
+	}
+	if store.latestDeployFailed("petios", "rihards-develop") {
+		t.Fatal("newer succeeded deploy: want false")
 	}
 }
 
@@ -100,6 +140,73 @@ func TestDeployQueueDismissDoesNotRemoveActive(t *testing.T) {
 	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1", Release: "t-devops"})
 	if store.dismiss(entry.ID) {
 		t.Fatal("dismiss should refuse active entry")
+	}
+}
+
+func TestDeployQueueFailureCapturesOutputDetail(t *testing.T) {
+	store := newTestActivityQueueStore(t)
+	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1"})
+	store.recordOutputLine("t", "e", "helm upgrade --install t-devops ./chart")
+	store.recordOutputLine("t", "e", "Error: UPGRADE FAILED: timed out waiting for the condition")
+	store.recordOutputLine("t", "e", "==> Deploy failed after 4s")
+	final, ok := store.finish(entry.ID, activityQueueStatusFailed, "==> Deploy failed after 4s")
+	if !ok {
+		t.Fatal("finish returned ok=false")
+	}
+	for _, want := range []string{"helm upgrade --install", "UPGRADE FAILED", "==> Deploy failed after 4s"} {
+		if !strings.Contains(final.Detail, want) {
+			t.Fatalf("Detail missing %q, got %q", want, final.Detail)
+		}
+	}
+}
+
+func TestDeployQueueSuccessOmitsOutputDetail(t *testing.T) {
+	store := newTestActivityQueueStore(t)
+	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1"})
+	store.recordOutputLine("t", "e", "helm upgrade --install t-devops ./chart")
+	final, _ := store.finish(entry.ID, activityQueueStatusSucceeded, "")
+	if final.Detail != "" {
+		t.Fatalf("succeeded entry must not carry Detail, got %q", final.Detail)
+	}
+}
+
+func TestDeployQueueOutputBufferCapsToRecentLines(t *testing.T) {
+	store := newTestActivityQueueStore(t)
+	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1"})
+	total := activityQueueOutputBufferLines + 50
+	for i := 0; i < total; i++ {
+		store.recordOutputLine("t", "e", fmt.Sprintf("line-%d", i))
+	}
+	final, _ := store.finish(entry.ID, activityQueueStatusFailed, "fail")
+	lines := strings.Split(final.Detail, "\n")
+	if len(lines) != activityQueueOutputBufferLines {
+		t.Fatalf("buffered %d lines, want cap %d", len(lines), activityQueueOutputBufferLines)
+	}
+	if lines[0] != fmt.Sprintf("line-%d", total-activityQueueOutputBufferLines) {
+		t.Fatalf("oldest retained line = %q, want first line after the dropped prefix", lines[0])
+	}
+	if lines[len(lines)-1] != fmt.Sprintf("line-%d", total-1) {
+		t.Fatalf("most recent line not retained, got %q", lines[len(lines)-1])
+	}
+}
+
+func TestDeployQueueRecordOutputLineClipsLongLines(t *testing.T) {
+	store := newTestActivityQueueStore(t)
+	entry, _ := store.start(activityQueueEntry{Tenant: "t", Environment: "e", Version: "1"})
+	store.recordOutputLine("t", "e", strings.Repeat("x", activityQueueOutputLineMaxChars+500))
+	final, _ := store.finish(entry.ID, activityQueueStatusFailed, "fail")
+	if len(final.Detail) != activityQueueOutputLineMaxChars {
+		t.Fatalf("line not clipped: len=%d want %d", len(final.Detail), activityQueueOutputLineMaxChars)
+	}
+}
+
+func TestDeployQueueRecordOutputLineIgnoresInactiveSelection(t *testing.T) {
+	store := newTestActivityQueueStore(t)
+	// No active entry for this selection: recording is a no-op and must not
+	// panic or create an entry.
+	store.recordOutputLine("ghost", "env", "orphan output")
+	if len(store.list()) != 0 {
+		t.Fatal("recording for an inactive selection should not create entries")
 	}
 }
 

@@ -35,13 +35,23 @@ test.describe('auto-start gate', () => {
     await app.sidebar.openManageDialogFor(tenant, env);
     await app.manageDialog.waitForOpen();
 
-    // Environment type field is on the General tab (default landing tab).
-    // Read it first, then hop to Runtime where the AutoStart select lives.
-    const expectVisible = await app.manageDialog.hasRemoteWorktree();
+    // The desktop-only AutoStart select renders only for a remote env bound
+    // to a managed cloud context (it governs starting a stopped cloud host) —
+    // not for every remote env, and never for a local-agent env. The only
+    // direction that holds for any config is "local-agent ⇒ hidden"; the
+    // managed-cloud binding that would show it isn't stageable in the headless
+    // harness (AGENTS), so assert the local-agent direction and skip remote
+    // envs. The env type field is on the General tab (default landing tab).
+    const isRemote = await app.manageDialog.hasRemoteWorktree();
+    test.skip(
+      isRemote,
+      'first env is remote; the managed-cloud binding that shows the AutoStart select is not stageable in the harness',
+    );
 
     await app.manageDialog.selectTab('Runtime');
     await expect.poll(() => app.manageDialog.getActiveTab()).toBe('Runtime');
-    expect(await app.manageDialog.autoStartSelectVisible()).toBe(expectVisible);
+    // A local-agent env must never expose the AutoStart select.
+    await expect(app.manageDialog.autoStartSelect()).toBeHidden();
 
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();

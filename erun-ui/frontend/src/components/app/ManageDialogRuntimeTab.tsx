@@ -17,7 +17,7 @@ import {
   versionChoiceKind,
   versionChoiceLabel,
 } from '@/app/versionSuggestions';
-import { TextField } from '@/components/app/ManageDialog.fields';
+import { CheckboxField, TextField } from '@/components/app/ManageDialog.fields';
 import { parseIdleTrafficBytes } from '@/components/app/ManageDialog.helpers';
 import { RuntimeResourceControls } from '@/components/app/RuntimeResourceControls';
 import { SelectField } from '@/components/app/SelectField';
@@ -146,9 +146,36 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
           }}
         />
       )}
+      <CheckboxField
+        id="environment-config-autoupgrade"
+        label="Include in Upgrade all"
+        checked={config.autoUpgrade}
+        disabled={dialog.busy || dialog.configLoading}
+        onChange={(autoUpgrade) => {
+          dispatch(updateManageConfig({ autoUpgrade }));
+        }}
+      />
+      {config.autoUpgrade && (
+        <SelectField
+          id="environment-config-upgradechannel"
+          label="Upgrade channel"
+          value={config.upgradeChannel ?? 'stable'}
+          options={UPGRADE_CHANNEL_OPTIONS}
+          helper="Which release channel 'Upgrade all' tracks: stable (semver releases) or snapshot (latest snapshot build)."
+          disabled={dialog.busy || dialog.configLoading}
+          onChange={(upgradeChannel) => {
+            dispatch(updateManageConfig({ upgradeChannel }));
+          }}
+        />
+      )}
     </div>
   );
 }
+
+const UPGRADE_CHANNEL_OPTIONS = [
+  { value: 'stable', label: 'Stable' },
+  { value: 'snapshot', label: 'Snapshot' },
+];
 
 const AUTO_START_OPTIONS = [
   { value: 'ask', label: 'Ask each time' },

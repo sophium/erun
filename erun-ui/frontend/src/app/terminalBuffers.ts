@@ -66,6 +66,21 @@ const TERMINAL_RESPONSE_PATTERNS: RegExp[] = [
   // above; without this the user sees the literal text at the prompt
   // even when terminalQueryResponses no longer answers the query.
   /(?:^|[^A-Za-z0-9])\d+(?:;\d+)+c(?![A-Za-z0-9])/g,
+  // Bare CPR tail run (`1;64R`, `1;64R1;69R1;1R`, …) — same readline
+  // stripping, for cursor-position reports that landed on a shell prompt.
+  // terminalQueryResponses no longer answers queries re-parsed from a
+  // replayed buffer (#484), so this is a backstop that cleans buffers
+  // already polluted before that fix. Echoed reports concatenate (each
+  // report is typed input, so the next lands right after it), hence the
+  // run grouping; the anchoring mirrors the DA tail above.
+  /(?:^|[^A-Za-z0-9])(?:\d+(?:;\d+)+R)+(?![A-Za-z0-9])/g,
+  // DECRQSS status-string response: DCS [01] $ r <payload> ST
+  // (e.g. `\x1bP1$r0"q\x1b\\`). terminalQueryResponses no longer answers
+  // DECRQSS, so this is a backstop for a response that reaches the buffer
+  // another way (a pre-fix replayed buffer, or a tool that answers its own
+  // probe). The `(?:\x1bP)?` makes it also catch the bare `1$r0"q␛\` tail
+  // bash leaves after readline eats the leading `\x1bP`.
+  /(?:\x1BP)?[01]\$r[^\x1B]*\x1B\\/g,
 ];
 
 function stripTerminalResponses(input: Uint8Array): Uint8Array {

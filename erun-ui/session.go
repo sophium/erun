@@ -96,6 +96,24 @@ func buildOpenArgs(tenant, environment string, debug ...bool) []string {
 	return erunArgs(debugEnabled(debug...), "open", strings.TrimSpace(tenant), strings.TrimSpace(environment))
 }
 
+// withAppSession appends the desktop persistent-session flags to an `erun open`
+// argv so the remote shell runs as a reattachable dtach session: closing or
+// reopening the tab (or a transient kubectl-exec drop) reconnects to the running
+// shell instead of spawning a parallel one, and the AI tab's claude keeps
+// working in the pod meanwhile. sessionID is stable per (tab kind, slot) so the
+// reattach lands on the same session; the AI/contribute launch now happens
+// pod-side (no typed prelude). See issue #478.
+func withAppSession(args []string, sessionID string, ai, contribute bool) []string {
+	args = append(args, "--app-session", sessionID)
+	if contribute {
+		args = append(args, "--contribute")
+	}
+	if ai {
+		args = append(args, "--ai")
+	}
+	return args
+}
+
 func buildOpenIDEArgs(selection uiSelection, ide string) []string {
 	args := erunArgs(selection.Debug, "open", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
 	switch strings.TrimSpace(ide) {
@@ -332,6 +350,13 @@ func buildDeployArgs(selection uiSelection) []string {
 	return args
 }
 
+// buildUpgradeArgs builds the per-environment `erun upgrade` invocation:
+// scoped to the selection's tenant + environment so each Upgrade-all member
+// upgrades in its own env, in parallel with the others (issue #497).
+func buildUpgradeArgs(selection uiSelection) []string {
+	return erunArgs(selection.Debug, "upgrade", "--tenant", selection.Tenant, "--environment", selection.Environment)
+}
+
 func erunArgs(debug bool, args ...string) []string {
 	if !debug {
 		return args
@@ -400,11 +425,26 @@ func resolveLocalShellCommand(goos string) (string, []string) {
 	}
 }
 
-func resolveAIToolCommand(configured string) string {
-	if tool := strings.TrimSpace(configured); tool != "" {
-		return tool
-	}
-	return defaultAITool
+// claudeEffortLevels enumerates the selectable Claude effort levels, in
+// ascending order. The first five mirror `claude --effort` from
+// `claude --help`; ultracode sits above max as "everything on" (xhigh effort
+// plus standing workflow orchestration, launched via --settings — see
+// erun-common/ai_launch.go, which owns the launch command). Must stay in
+// lockstep with erun-common's claudeEffortLevels and the frontend fallback in
+// state.ts.
+var claudeEffortLevels = []string{"low", "medium", "high", "xhigh", "max", "ultracode"}
+
+// defaultClaudeEffort is the effort level the desktop applies to a Claude AI
+// tab when the env has no explicit Effort configured, or has an invalid one
+// (issues #469/#491). Ultracode is the default: everything on.
+const defaultClaudeEffort = "ultracode"
+
+// claudeEffortLevelOptions returns the valid effort levels for transport to the
+// frontend selector.
+func claudeEffortLevelOptions() []string {
+	out := make([]string, len(claudeEffortLevels))
+	copy(out, claudeEffortLevels)
+	return out
 }
 
 func formatLaunchCommand(params startTerminalSessionParams) string {
@@ -438,7 +478,6 @@ func localSessionBanner(selection uiSelection) []byte {
 	banner := fmt.Sprintf("\x1b[2m# Local host shell for %s/%s — env shell in ERun tab, %s in AI tab\x1b[0m\r\n", tenant, environment, defaultAITool)
 	return []byte(banner)
 }
-
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"

@@ -198,6 +198,7 @@ function ActivityQueueSections(props: ActivityQueueSectionsProps): React.ReactEl
         entries={props.historyEntries}
         emptyText="No recent activities."
         onDismiss={props.dismiss}
+        onRecoverPendingHelm={props.onRecoverPendingHelm}
         onClearAll={props.historyEntries.length > 1 ? props.dismissAllHistory : undefined}
         clearAllLabel="Clear history"
       />

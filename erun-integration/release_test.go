@@ -14,6 +14,69 @@ import (
 	"github.com/sophium/erun/erun-integration/internal/normalize"
 )
 
+// validScoopManifest satisfies every invariant the release-time Scoop
+// validation enforces: a mingw dependency, the MinGW/Wails CGO prerequisite
+// wording (and no stale Fyne wording), a non-empty installer script, and all
+// four shipped executables in bin.
+const validScoopManifest = `{
+  "version": "1.0.0",
+  "description": "erun developer toolkit",
+  "homepage": "https://github.com/sophium/erun",
+  "license": "MIT",
+  "depends": ["go", "mingw", "nodejs", "yarn"],
+  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.0.zip",
+  "hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "extract_dir": "erun-1.0.0",
+  "installer": {
+    "script": [
+      "if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) { throw 'building erun-app.exe requires a C compiler such as MinGW for the Wails CGO build' }",
+      "go build -trimpath -o \"$dir\\erun.exe\" ."
+    ]
+  },
+  "bin": ["erun.exe", "emcp.exe", "eapi.exe", "erun-app.exe"]
+}
+`
+
+// scoopManifestMissingMingwAndBin violates four invariants at once: no mingw
+// dependency, stale Fyne wording instead of the MinGW/Wails prerequisite, and a
+// missing erun-app.exe in bin.
+const scoopManifestMissingMingwAndBin = `{
+  "version": "1.0.0",
+  "description": "erun developer toolkit",
+  "homepage": "https://github.com/sophium/erun",
+  "license": "MIT",
+  "depends": ["go", "nodejs", "yarn"],
+  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.0.zip",
+  "hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "extract_dir": "erun-1.0.0",
+  "installer": {
+    "script": [
+      "if (-not (Get-Command gcc -ErrorAction SilentlyContinue)) { throw 'building erun-app.exe requires the Fyne toolchain prerequisites' }"
+    ]
+  },
+  "bin": ["erun.exe", "emcp.exe", "eapi.exe"]
+}
+`
+
+// scoopManifestEmptyScript keeps depends and bin valid but empties the
+// installer script, tripping both the non-empty-script and MinGW-wording
+// invariants.
+const scoopManifestEmptyScript = `{
+  "version": "1.0.0",
+  "description": "erun developer toolkit",
+  "homepage": "https://github.com/sophium/erun",
+  "license": "MIT",
+  "depends": ["go", "mingw", "nodejs", "yarn"],
+  "url": "https://github.com/sophium/erun/archive/refs/tags/v1.0.0.zip",
+  "hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "extract_dir": "erun-1.0.0",
+  "installer": {
+    "script": []
+  },
+  "bin": ["erun.exe", "emcp.exe", "eapi.exe", "erun-app.exe"]
+}
+`
+
 func TestRelease(t *testing.T) {
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
@@ -121,6 +184,57 @@ func TestRelease(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "release/dry_run_main_with_marketplace_emits_sha_sync", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_main_with_scoop_manifest_validates_and_syncs", func(t *testing.T) {
+		// Exercises release.go's Scoop manifest validation + version/checksum
+		// sync on the stable path: a well-formed bucket/erun.json must trace
+		// `release: validating scoop manifest`, bump the version in the release
+		// stage, and reach the curl/shasum checksum-sync trace (gated on
+		// !DryRun). Locks the invariant guard's happy path.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		fixture.SeedScoopManifest(t, setup.Cwd, validScoopManifest)
+		fixture.RunGit(t, setup.Cwd, "add", "bucket")
+		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add scoop manifest")
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "release/dry_run_main_with_scoop_manifest_validates_and_syncs", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_main_with_invalid_scoop_manifest_fails", func(t *testing.T) {
+		// A malformed bucket/erun.json (no mingw dependency, stale Fyne
+		// wording instead of the MinGW/Wails prerequisite, missing
+		// erun-app.exe) must fail the release during resolution — before any
+		// git mutation — naming every violated invariant. Locks the guard that
+		// keeps a broken Windows install recipe from being published.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		fixture.SeedScoopManifest(t, setup.Cwd, scoopManifestMissingMingwAndBin)
+		fixture.RunGit(t, setup.Cwd, "add", "bucket")
+		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add scoop manifest")
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for invalid scoop manifest, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "release/dry_run_main_with_invalid_scoop_manifest_fails", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_main_with_empty_scoop_script_fails", func(t *testing.T) {
+		// An empty installer.script trips both the non-empty-script and the
+		// MinGW-wording invariants, covering the remaining validation branches.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		fixture.SeedScoopManifest(t, setup.Cwd, scoopManifestEmptyScript)
+		fixture.RunGit(t, setup.Cwd, "add", "bucket")
+		fixture.RunGit(t, setup.Cwd, "commit", "-m", "add scoop manifest")
+		result := erun.Run(t, []string{"release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for empty scoop script, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "release/dry_run_main_with_empty_scoop_script_fails", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_force_includes_tag_deletion_for_stale_release_tag", func(t *testing.T) {

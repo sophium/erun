@@ -91,16 +91,22 @@ The Kubernetes Service named `<component>` is reachable in-cluster as:
 
 ## Multi-stage Dockerfile expectation
 
-ERun expects Dockerfiles to use the multi-stage builder pattern — a builder stage that provisions toolchain and produces an artefact, then a runtime stage that ships only the artefact.
+ERun expects Dockerfiles to use the multi-stage builder pattern — a builder stage that provisions toolchain, runs the tests, and produces an artefact, then a runtime stage that ships only the artefact.
 
 Minimal skeleton:
 
 ```dockerfile
-# Stage 1: builder — provisions toolchain, produces the artefact.
+# Stage 1: builder — provisions toolchain, runs tests, produces the artefact.
 FROM golang:1.26.0 AS builder
 WORKDIR /src
 COPY . .
+# Tests that don't depend on a deployed artefact run here. A failure fails
+# the build, so no image is produced from a red test run.
 RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go test ./...
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
     go build -trimpath -ldflags "-s -w" -o /out/app ./cmd/app
 
 # Stage 2: runtime — thin, no build tools.
@@ -116,6 +122,21 @@ Why ERun expects this:
 - **Security separation** — production images don't ship a build toolchain.
 
 Single-stage Dockerfiles are not rejected, but the multi-arch and cache benefits don't apply.
+
+### Tests run in the builder stage
+
+ERun adds no separate test phase — `erun build` is `docker build`, so tests run where the Dockerfile puts them. The recommendation, **for any stack**, is to run the project's test command in the builder stage, as a `RUN` step before the artefact is produced — `go test ./...`, `npm test`, `pytest`, `mvn test`, `cargo test`, `dotnet test`, whatever the toolchain uses. The Go skeleton above is only an example; the rule is language-independent.
+
+Run every test that **does not depend on a deployed artefact** there:
+
+- **Unit tests**, and
+- **integration tests that run in-process or against fixtures the build can stand up itself** (an embedded database, a stub server, a temp filesystem) — anything that needs no live cluster, no running service, and no network to a deployed dependency.
+
+Because the test step is part of `docker build`, a failing test fails the build and no image is tagged — so a successful build is always a tested build, which is what marks a [review](/collaboration/reviews) `READY`. Keep the test step in the builder stage (never the runtime stage) so test dependencies stay out of the shipped image, and reuse the build cache (e.g. BuildKit `--mount=type=cache`) across the test and compile steps so downloads and intermediate objects are shared.
+
+Whether the test step runs before or after the compile step is toolchain-specific, and doesn't matter to the gate. `go test` compiles and runs the tests on its own, so it can precede the `go build` that produces the shipped binary (as in the skeleton above); a toolchain that exercises a compiled artefact would build first, then test. The only requirement is that the test command is a `RUN` in the builder stage, so a non-zero exit aborts the build before the runtime stage is reached.
+
+Tests that **do** require a running deployment — end-to-end checks against live services — cannot run in the builder stage. They run against a deployed environment after [`deploy`](/cli/deploy), not during build.
 
 ## Docker build context resolution
 

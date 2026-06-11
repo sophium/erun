@@ -1,5 +1,5 @@
 import type { AppState } from '@/app/state';
-import type { UISelection } from '@/types';
+import type { UIEnvironment, UISelection } from '@/types';
 
 // pendingForTenant returns the optimistic selection that is being
 // created right now, when the matching env is not yet in
@@ -26,11 +26,32 @@ export function pendingForTenant(
   return selected;
 }
 
+// environmentIsLocal reports whether the env's worktree is mounted from
+// this machine, i.e. a local-agent env. It keys off the resolved
+// environment type (erun-common computes `type` via EnvConfig.ResolvedType()
+// and lists it on every env), not the legacy `remote` flag — a local-agent
+// env created with the new `type` shape leaves `remote` unset, so the old
+// `remote === false` check missed it and dropped the LOCAL badge.
+//
+// The legacy `remote === false` path is kept only as a fallback for when the
+// resolved type is empty (an ambiguous legacy env where ResolvedType() itself
+// falls back to the Remote/Snapshot pair), so unresolved legacy envs keep
+// today's behavior. This drives both the LOCAL badge and the `(local)`
+// accessible-label suffix, which share the flag.
+export function environmentIsLocal(environment: UIEnvironment | undefined): boolean {
+  const resolvedType = environment?.type ?? '';
+  if (resolvedType !== '') {
+    return resolvedType === 'local-agent';
+  }
+  return environment?.remote === false;
+}
+
 export interface EnvironmentRowDerived {
   selected: boolean;
   busy: boolean;
   busyLabel: string;
   isLocal: boolean;
+  runtimeVersion: string;
   selection: UISelection;
 }
 
@@ -42,34 +63,37 @@ export function deriveEnvironmentRow(
   isOpening: boolean,
   runningCommand: string,
   aiBusy: boolean,
+  reconnecting: boolean,
 ): EnvironmentRowDerived {
   const selected =
     selectedSelection?.tenant === tenantName && selectedSelection.environment === environmentName;
   // busy reflects the per-env opening lifecycle AND any running activity
   // command (deploy, init, sshd init, doctor, ...) queued against the
   // env, AND the debounced "AI tab is producing output" signal from
-  // recordAIActivity in the Go terminal layer. Every source is
-  // independent of which env is currently selected, so concurrent work
-  // on multiple envs (a deploy here + a Claude generation there)
-  // surfaces a spinner on every row that's actually doing something —
-  // not just the one in the active terminal.
-  const busy = isOpening || runningCommand !== '' || aiBusy;
+  // recordAIActivity in the Go terminal layer, AND the in-flight
+  // reconnect (review-pane redeploy) scoped to this env. Every source
+  // is independent of which env is currently selected, so concurrent
+  // work on multiple envs surfaces a spinner on every row that's
+  // actually doing something — not just the one in the active terminal.
+  const busy = isOpening || runningCommand !== '' || aiBusy || reconnecting;
   const busyLabel = environmentRowBusyLabel(
     tenantName,
     environmentName,
     isOpening,
     runningCommand,
     aiBusy,
+    reconnecting,
   );
   const environment = tenants
     .find((tenant) => tenant.name === tenantName)
     ?.environments.find((env) => env.name === environmentName);
-  const isLocal = environment?.remote === false;
+  const isLocal = environmentIsLocal(environment);
   return {
     selected,
     busy,
     busyLabel,
     isLocal,
+    runtimeVersion: environment?.runtimeVersion?.trim() ?? '',
     selection: { tenant: tenantName, environment: environmentName },
   };
 }
@@ -80,6 +104,7 @@ function environmentRowBusyLabel(
   isOpening: boolean,
   runningCommand: string,
   aiBusy: boolean,
+  reconnecting: boolean,
 ): string {
   const target = `${tenantName} / ${environmentName}`;
   if (runningCommand !== '') {
@@ -88,6 +113,9 @@ function environmentRowBusyLabel(
   }
   if (isOpening) {
     return `Opening ${target}`;
+  }
+  if (reconnecting) {
+    return `Reconnecting ${target}`;
   }
   if (aiBusy) {
     return `AI tab working on ${target}`;

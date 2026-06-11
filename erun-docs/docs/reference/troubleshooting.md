@@ -132,6 +132,8 @@ erun deploy <component>                          # commit
 
 The rest of the deploy plan (steps before and after) is unaffected — `erun deploy` stopped at the failing step and didn't continue.
 
+When you deploy from the desktop app, the [Activities panel](/desktop/overview#control-panel) keeps the captured output behind the failed entry: **Show output** to read the error inline, or **Copy failure report** to send the full context (output, environment, version, container status) to whoever can help.
+
 ## When all else fails
 
 - `erun doctor` from your laptop: reports local config issues.
