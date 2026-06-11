@@ -1,4 +1,5 @@
 audit: erun upgrade --dry-run --version <VERSION> team dev
+trace-log: would append the full trace to <TMP>
 upgrade: tenant=team environment=dev version-override=<VERSION> force=false
 upgrade: team/dev opted in, channel=stable current=<VERSION>
 upgrade: team using version override <VERSION> for all channels

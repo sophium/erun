@@ -36,6 +36,16 @@ export interface UIWorkingIssue {
   reason?: string;
 }
 
+// UIEnvTrace mirrors the Go uiEnvTrace from the LoadEnvTrace binding: the
+// Diagnostics console's erun-trace read model (issues #466/#508).
+export interface UIEnvTrace {
+  available: boolean;
+  content?: string;
+  path: string;
+  reason?: string;
+  notice?: string;
+}
+
 // UIUpgradePlanItem mirrors the Go UpgradePlanItem from the ResolveUpgradePlan
 // binding: one opted-in env's channel, current version, the latest version for
 // that channel, and whether it lags (will be redeployed by Upgrade all).
@@ -81,7 +91,6 @@ export interface UISelection {
   bootstrap?: boolean;
   setDefaultTenant?: boolean;
   action?: EnvironmentActionMode;
-  debug?: boolean;
 }
 
 export interface UIBuildDetails {

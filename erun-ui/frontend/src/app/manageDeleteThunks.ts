@@ -7,7 +7,7 @@ import { closeManageDialog } from './manageDialogThunks';
 import { showTerminalMessage } from './notificationThunks';
 import { patchManageDialog, setManageDialog } from './slices/manageDialogSlice';
 import { setSelected } from './slices/selectionSlice';
-import { setDebugOutput, setSessionId } from './slices/terminalSlice';
+import { setSessionId } from './slices/terminalSlice';
 import { setTerminalCopyOutput, setTerminalCopyStatus } from './slices/terminalStatusSlice';
 import { defaultManageDialog } from './state';
 import type { AppThunk } from './store';
@@ -48,7 +48,6 @@ export const submitManageDelete =
       if (deletedSelected) {
         dispatch(setSelected(null));
         dispatch(setSessionId(0));
-        dispatch(setDebugOutput(''));
         controller.resetTerminal();
       }
       await dispatch(reloadStateAfterEnvironmentChange());

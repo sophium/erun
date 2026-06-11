@@ -17,6 +17,7 @@ import { wailsApi } from './api/wailsApi';
 import { persistenceMiddleware } from './middleware/persistenceMiddleware';
 import { selectionSyncMiddleware } from './middleware/selectionSyncMiddleware';
 import { terminalDisplayMiddleware } from './middleware/terminalDisplayMiddleware';
+import { uiTraceMiddleware } from './middleware/uiTraceMiddleware';
 import activityReducer from './slices/activitySlice';
 import aiActivityReducer from './slices/aiActivitySlice';
 import autoStartPromptReducer from './slices/autoStartPromptSlice';
@@ -79,7 +80,8 @@ export const store = configureStore({
       .concat(wailsApi.middleware)
       .concat(persistenceMiddleware.middleware)
       .concat(selectionSyncMiddleware.middleware)
-      .concat(terminalDisplayMiddleware.middleware),
+      .concat(terminalDisplayMiddleware.middleware)
+      .concat(uiTraceMiddleware),
 });
 
 setupListeners(store.dispatch);

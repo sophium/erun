@@ -1,4 +1,5 @@
 audit: erun deploy --components [erun-backend-api,erun-backend-db,erun-backend-postgres] --dry-run --version <VERSION> team dev
+trace-log: would append the full trace to <TMP>
 deploy: tenant=team environment=dev version-override=<VERSION> snapshot=true components=[erun-backend-api erun-backend-db erun-backend-postgres] force=false publish=false
 deploy: resolved 4 spec(s)
 kubectl --context test-context get namespace team-dev -o name

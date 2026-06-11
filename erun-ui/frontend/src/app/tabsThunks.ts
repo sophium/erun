@@ -72,6 +72,6 @@ export const rememberSelectedTab =
     if (!selection) {
       return;
     }
-    const key = selectionKey({ ...selection, debug: state.layout.debugOpen || undefined });
+    const key = selectionKey(selection);
     dispatch(setSelectedSessionForEnv({ key, sessionId }));
   };

@@ -1,7 +1,6 @@
 import type { TerminalExitPayload, UISelection } from '@/types';
 
 import { reloadStateAfterEnvironmentChange } from './bootThunks';
-import { appendDebugOutput } from './debugThunks';
 import { readError } from './errors';
 import type {
   AIActivityPayload,
@@ -83,7 +82,7 @@ export const handleEnvStatus =
   };
 
 // handleAppStatus surfaces backend status lines as a busy-state terminal
-// message and mirrors them into the debug pane for forensics.
+// message.
 export const handleAppStatus =
   (payload: AppStatusPayload): AppThunk =>
   (dispatch) => {
@@ -91,7 +90,6 @@ export const handleAppStatus =
     if (!message) {
       return;
     }
-    dispatch(appendDebugOutput(`[status] ${message}\n`));
     dispatch(showTerminalMessage(message, payload.busy === true));
   };
 
@@ -109,7 +107,6 @@ export const handleAppNotification =
       return;
     }
     const kind = payload.kind ?? 'info';
-    dispatch(appendDebugOutput(`[notification:${kind}] ${message}\n`));
     dispatch(showNotification(kind, message));
   };
 

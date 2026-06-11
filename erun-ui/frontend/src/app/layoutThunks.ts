@@ -12,8 +12,6 @@ import {
   toggleSidebar as toggleSidebarPanel,
 } from './layoutActions';
 import { loadReviewDiff } from './reviewThunks';
-import { clearSessionDebug } from './slices/sessionsSlice';
-import { setDebugOutput } from './slices/terminalSlice';
 import type { AppThunk } from './store';
 import { requireController } from './thunkExtra';
 
@@ -52,15 +50,10 @@ export const setFilesOpen =
 
 export const setDebugOpen =
   (open: boolean): AppThunk =>
-  (dispatch, getState, extra) => {
+  (dispatch, _getState, extra) => {
     const controller = requireController(extra);
-    applyDebugOpen(dispatch, getState, open, controller.flushTerminalResize);
+    applyDebugOpen(dispatch, open, controller.flushTerminalResize);
   };
-
-export const clearDebugOutput = (): AppThunk => (dispatch, getState) => {
-  dispatch(setDebugOutput(''));
-  dispatch(clearSessionDebug(getState().terminal.sessionId));
-};
 
 export const startSidebarResize =
   (event: React.MouseEvent<HTMLElement>): AppThunk =>

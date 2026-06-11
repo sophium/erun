@@ -592,17 +592,9 @@ func TestBuildOpenArgsTrimsTenantAndEnvironment(t *testing.T) {
 	}
 }
 
-func TestBuildOpenArgsIncludesDebugVerbosity(t *testing.T) {
-	got := buildOpenArgs(" erun ", " local ", true)
-	want := []string{"-vv", "open", "erun", "local"}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("unexpected args: got %+v want %+v", got, want)
-	}
-}
-
 func TestBuildOpenIDEArgsAddsIDEFlag(t *testing.T) {
-	got := buildOpenIDEArgs(uiSelection{Tenant: " erun ", Environment: " remote ", Debug: true}, "vscode")
-	want := []string{"-vv", "open", "erun", "remote", "--vscode"}
+	got := buildOpenIDEArgs(uiSelection{Tenant: " erun ", Environment: " remote "}, "vscode")
+	want := []string{"open", "erun", "remote", "--vscode"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected VS Code args: got %+v want %+v", got, want)
 	}
@@ -615,8 +607,8 @@ func TestBuildOpenIDEArgsAddsIDEFlag(t *testing.T) {
 }
 
 func TestBuildDoctorArgsTrimsTenantAndEnvironment(t *testing.T) {
-	got := buildDoctorArgs(uiSelection{Tenant: " erun ", Environment: " remote ", Debug: true})
-	want := []string{"-vv", "doctor", "erun", "remote"}
+	got := buildDoctorArgs(uiSelection{Tenant: " erun ", Environment: " remote "})
+	want := []string{"doctor", "erun", "remote"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected doctor args: got %+v want %+v", got, want)
 	}

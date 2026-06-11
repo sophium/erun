@@ -6,16 +6,12 @@ export interface TerminalState {
   sessionId: number;
   tabsByEnv: Record<string, TerminalTab[]>;
   selectedSessionByEnv: Record<string, number>;
-  debugOutput: string;
-  pendingDebugHeader: string;
 }
 
 const initialState: TerminalState = {
   sessionId: 0,
   tabsByEnv: {},
   selectedSessionByEnv: {},
-  debugOutput: '',
-  pendingDebugHeader: '',
 };
 
 export const terminalSlice = createSlice({
@@ -43,12 +39,6 @@ export const terminalSlice = createSlice({
     clearSelectedSessionForEnv(state, action: PayloadAction<string>) {
       Reflect.deleteProperty(state.selectedSessionByEnv, action.payload);
     },
-    setDebugOutput(state, action: PayloadAction<string>) {
-      state.debugOutput = action.payload;
-    },
-    setPendingDebugHeader(state, action: PayloadAction<string>) {
-      state.pendingDebugHeader = action.payload;
-    },
     setAll(_state, action: PayloadAction<TerminalState>) {
       return action.payload;
     },
@@ -61,8 +51,6 @@ export const {
   clearTabsForEnv,
   setSelectedSessionForEnv,
   clearSelectedSessionForEnv,
-  setDebugOutput,
-  setPendingDebugHeader,
   setAll: setTerminalAll,
 } = terminalSlice.actions;
 export default terminalSlice.reducer;

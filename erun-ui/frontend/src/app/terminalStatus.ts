@@ -74,14 +74,6 @@ export function ideOpenFailure(
   };
 }
 
-export function debugOutputBlock(output: string): string {
-  const trimmed = output.trim();
-  if (!trimmed) {
-    return '';
-  }
-  return `${trimmed}\n`;
-}
-
 export function classifiedTerminalFailure(
   rawReason: string,
   displayReason: string,
@@ -144,75 +136,14 @@ export function statusForTerminalOutput(output: string): string {
   return rule?.message(output) ?? '';
 }
 
-export function decodeDebugOutput(data: Uint8Array): string {
+// decodeTerminalOutput strips ANSI control sequences and normalizes line
+// endings so the open-status parser sees plain text.
+export function decodeTerminalOutput(data: Uint8Array): string {
   return new TextDecoder()
     .decode(data)
     .replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, '')
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n');
-}
-
-export function interactivePromptIndex(output: string): number {
-  const promptLabels = [
-    'Git remote URL for environment',
-    'CodeCommit SSH public key ID for environment',
-    'Use existing SSH host config for environment',
-    'Import the SSH public key above',
-    'Kubernetes context for environment',
-    'Container registry for environment',
-    'Clear cached JetBrains Gateway backend metadata',
-    'Prune unused Docker images',
-    'Prune unused BuildKit cache',
-    'Prune stopped Docker containers',
-    'Initialize default environment',
-    'Initialize tenant',
-    'Select tenant',
-  ];
-  let match = -1;
-  for (const label of promptLabels) {
-    const index = output.lastIndexOf(label);
-    if (index > match) {
-      match = index;
-    }
-  }
-  if (match === -1) {
-    return -1;
-  }
-  return Math.max(output.lastIndexOf('\n', match), output.lastIndexOf('\r', match)) + 1;
-}
-
-export function trimDebugOutput(value: string): string {
-  const maxLength = 80_000;
-  if (value.length <= maxLength) {
-    return value;
-  }
-  return value.slice(value.length - maxLength);
-}
-
-export function formatDebugCommand(
-  selection: UISelection,
-  mode: 'open' | 'init' | 'deploy' | 'sshd-init' | 'doctor' = 'open',
-): string {
-  const args = ['erun'];
-  if (selection.debug) {
-    args.push('-vv');
-  }
-  appendDebugCommandArgs(args, selection, mode);
-  return args.map(shellDebugArg).join(' ');
-}
-
-export function formatIDECommand(selection: UISelection, ide: IDEKind): string {
-  const args = ['erun'];
-  if (selection.debug) {
-    args.push('-vv');
-  }
-  args.push(
-    'open',
-    selection.tenant,
-    selection.environment,
-    ide === 'vscode' ? '--vscode' : '--intellij',
-  );
-  return args.map(shellDebugArg).join(' ');
 }
 
 export function ideLabel(ide: IDEKind): string {
@@ -321,68 +252,4 @@ const terminalOutputStatusRules: {
 function mcpForwardingStatusMessage(output: string): string {
   const port = /Forwarding from 127\.0\.0\.1:(\d+)/.exec(output)?.[1] ?? '';
   return port ? `Waiting for MCP endpoint on 127.0.0.1:${port}...` : 'Waiting for MCP endpoint...';
-}
-
-function appendDebugCommandArgs(
-  args: string[],
-  selection: UISelection,
-  mode: 'open' | 'init' | 'deploy' | 'sshd-init' | 'doctor',
-): void {
-  if (mode === 'init') {
-    appendInitDebugArgs(args, selection);
-    return;
-  }
-  if (mode === 'deploy') {
-    appendDeployDebugArgs(args, selection);
-    return;
-  }
-  if (mode === 'sshd-init') {
-    args.push('sshd', 'init', selection.tenant, selection.environment);
-    return;
-  }
-  if (mode === 'doctor') {
-    args.push('doctor', selection.tenant, selection.environment);
-    return;
-  }
-  args.push('open', selection.tenant, selection.environment);
-}
-
-function appendInitDebugArgs(args: string[], selection: UISelection): void {
-  args.push('init', selection.tenant, selection.environment, '--remote');
-  appendOptionalDebugArg(args, '--version', selection.version);
-  appendOptionalDebugArg(args, '--runtime-image', selection.runtimeImage);
-  appendOptionalDebugArg(args, '--runtime-cpu', selection.runtimeCpu);
-  appendOptionalDebugArg(args, '--runtime-memory', selection.runtimeMemory);
-  appendOptionalDebugArg(args, '--kubernetes-context', selection.kubernetesContext);
-  appendOptionalDebugArg(args, '--container-registry', selection.containerRegistry);
-  args.push(
-    `--set-default-tenant=${selection.setDefaultTenant ? 'true' : 'false'}`,
-    '--confirm-environment=true',
-  );
-  appendDebugFlag(args, '--no-git', selection.noGit);
-  appendDebugFlag(args, '--bootstrap', selection.bootstrap);
-}
-
-function appendDeployDebugArgs(args: string[], selection: UISelection): void {
-  args.push('deploy', selection.tenant, selection.environment);
-  appendOptionalDebugArg(args, '--version', selection.version);
-}
-
-function appendOptionalDebugArg(args: string[], name: string, value: string | undefined): void {
-  if (value) {
-    args.push(name, value);
-  }
-}
-
-function appendDebugFlag(args: string[], name: string, enabled: boolean | undefined): void {
-  if (enabled) {
-    args.push(name);
-  }
-}
-
-function shellDebugArg(value: string): string {
-  if (/^[A-Za-z0-9._/:=-]+$/.test(value)) {
-    return value;
-  }
-  return `'${value.replace(/'/g, `'\\''`)}'`;
 }
