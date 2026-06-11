@@ -22,6 +22,7 @@ import type {
   AppNotificationPayload,
   AppStatusPayload,
   EnvironmentInitializedPayload,
+  EnvStatusPayload,
   MountElements,
   TerminalDataDisposable,
   TerminalWriteData,
@@ -57,6 +58,7 @@ import {
   handleAppStatus,
   handleEnvironmentInitFailed,
   handleEnvironmentInitialized,
+  handleEnvStatus,
   handleReconnectLine,
   handleTerminalExit,
   hideTerminalMessageIfActive,
@@ -96,6 +98,7 @@ export class TerminalController {
   private environmentInitFailedOff: (() => void) | null = null;
   private environmentsChangedOff: (() => void) | null = null;
   private aiActivityOff: (() => void) | null = null;
+  private envStatusOff: (() => void) | null = null;
   private pasteHandler: ((event: ClipboardEvent) => void) | null = null;
   // Track DECTCEM (`?25`) and alt-screen state across the bytes
   // written to xterm for the active session. When the active session
@@ -241,6 +244,9 @@ export class TerminalController {
     this.aiActivityOff = EventsOn('ai-activity', (payload: AIActivityPayload) => {
       store.dispatch(handleAIActivity(payload));
     });
+    this.envStatusOff = EventsOn('env-status', (payload: EnvStatusPayload) => {
+      store.dispatch(handleEnvStatus(payload));
+    });
 
     if (!this.bootStarted) {
       this.bootStarted = true;
@@ -282,24 +288,22 @@ export class TerminalController {
   }
 
   private detachWailsEventListeners(): void {
-    this.terminalOutputOff?.();
-    this.terminalExitOff?.();
-    this.appStatusOff?.();
-    this.appNotificationOff?.();
-    this.reconnectLineOff?.();
-    this.environmentInitializedOff?.();
-    this.environmentInitFailedOff?.();
-    this.environmentsChangedOff?.();
-    this.aiActivityOff?.();
-    this.terminalOutputOff = null;
-    this.terminalExitOff = null;
-    this.appStatusOff = null;
-    this.appNotificationOff = null;
-    this.reconnectLineOff = null;
-    this.environmentInitializedOff = null;
-    this.environmentInitFailedOff = null;
-    this.environmentsChangedOff = null;
-    this.aiActivityOff = null;
+    const fields = [
+      'terminalOutputOff',
+      'terminalExitOff',
+      'appStatusOff',
+      'appNotificationOff',
+      'reconnectLineOff',
+      'environmentInitializedOff',
+      'environmentInitFailedOff',
+      'environmentsChangedOff',
+      'aiActivityOff',
+      'envStatusOff',
+    ] as const;
+    for (const field of fields) {
+      this[field]?.();
+      this[field] = null;
+    }
   }
 
   focusTerminalSoon(): void {

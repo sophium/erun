@@ -19,6 +19,7 @@ const (
 	environmentInitFailedEvent  = "environment-init-failed"
 	environmentsChangedEvent    = "environments-changed"
 	aiActivityEvent             = "ai-activity"
+	envStatusEvent              = "env-status"
 	appSessionEnvVar            = "ERUN_UI_SESSION"
 )
 
@@ -60,6 +61,7 @@ type erunUIDeps struct {
 	workspaceSyncInterval  time.Duration
 	recordActivity         func(eruncommon.EnvironmentActivityParams) error
 	runWorkingIssueCommand workingIssueCommandRunner
+	loadPodBranch          func(context.Context, string) (string, error)
 	stopCloudContext       func(context.Context, string) (eruncommon.CloudContextStatus, error)
 	windowStatePath        string
 	windowMaximised        func(context.Context) bool
@@ -251,6 +253,9 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.runWorkingIssueCommand == nil {
 		deps.runWorkingIssueCommand = execWorkingIssueCommand
+	}
+	if deps.loadPodBranch == nil {
+		deps.loadPodBranch = loadPodBranchFromMCP
 	}
 	if deps.recordActivity == nil {
 		deps.recordActivity = eruncommon.RecordEnvironmentActivity

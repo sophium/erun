@@ -23,6 +23,7 @@ import autoStartPromptReducer from './slices/autoStartPromptSlice';
 import contributeReducer from './slices/contributeSlice';
 import doctorReducer from './slices/doctorSlice';
 import environmentDialogReducer from './slices/environmentDialogSlice';
+import envStatusReducer from './slices/envStatusSlice';
 import globalConfigDialogReducer from './slices/globalConfigDialogSlice';
 import idleReducer from './slices/idleSlice';
 import layoutReducer from './slices/layoutSlice';
@@ -56,6 +57,7 @@ export const store = configureStore({
     idle: idleReducer,
     activity: activityReducer,
     aiActivity: aiActivityReducer,
+    envStatus: envStatusReducer,
     tenants: tenantsReducer,
     environmentDialog: environmentDialogReducer,
     manageDialog: manageDialogReducer,

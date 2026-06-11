@@ -103,6 +103,15 @@ export class Sidebar {
     return this.page.getByRole('dialog', { name: `${tenant} / ${env} details` });
   }
 
+  // envOpenDot targets the env row's open indicator (issue #470): a button
+  // whose data-env-state attribute carries the env's real condition
+  // (running / stopped / failed) and whose click closes the env's tabs. The
+  // row container is the row button's parent, so the lookup stays scoped to
+  // one env even when several are open.
+  envOpenDot(tenant: string, env: string): Locator {
+    return this.envRowButton(tenant, env).locator('..').getByTestId('env-open-dot');
+  }
+
   // hasLocalBadge reports whether the env row renders the LOCAL pill
   // (the <span aria-label="Local environment"> inside the row button).
   async hasLocalBadge(tenant: string, env: string): Promise<boolean> {

@@ -59,4 +59,67 @@ test.describe('sidebar env open dot', () => {
     await dot.click();
     await expect(dot).toHaveCount(0, { timeout: 6_000 });
   });
+
+  // Issue #470 — the dot must reflect the env's REAL condition, not just tab
+  // presence: green filled circle while running, hollow grey ring while the
+  // linked cloud context is stopped, amber triangle after a failed deploy /
+  // abandoned reconnect. Shape + accessible label carry the state (never
+  // colour alone). A real stopped EC2 context or failed deploy cannot be
+  // staged headless, so the spec drives the same env-status Wails event the
+  // Go side emits — the emission decisions themselves are owned by
+  // erun-ui/env_status_test.go (tryReconnect refusal paths, the #331
+  // pattern).
+  test('the dot reflects the real env state: running → stopped → failed → running', async ({
+    app,
+    page,
+  }) => {
+    const tenants = await app.sidebar.tenants();
+    test.skip(tenants.length === 0, 'no tenants in this developer harness');
+    const tenant = tenants[0]!;
+    const envs = await app.sidebar.environmentsFor(tenant);
+    test.skip(envs.length === 0, `no envs under tenant ${tenant}`);
+    const env = envs[0]!;
+
+    await app.sidebar.openEnvironment(tenant, env);
+    const dot = app.sidebar.envOpenDot(tenant, env);
+    await expect(dot).toBeVisible({ timeout: 6_000 });
+    await expect(dot).toHaveAttribute('data-env-state', 'running');
+
+    await emitEnvStatus(page, tenant, env, 'stopped');
+    await expect(dot).toHaveAttribute('data-env-state', 'stopped', { timeout: 4_000 });
+    await expect(dot).toHaveAccessibleName(new RegExp(`^${tenant} / ${env} is stopped`));
+
+    await emitEnvStatus(page, tenant, env, 'failed');
+    await expect(dot).toHaveAttribute('data-env-state', 'failed', { timeout: 4_000 });
+    await expect(dot).toHaveAccessibleName(/deploy failed/);
+
+    await emitEnvStatus(page, tenant, env, '');
+    await expect(dot).toHaveAttribute('data-env-state', 'running', { timeout: 4_000 });
+    await expect(dot).toHaveAccessibleName(`Close ${tenant} / ${env}`);
+
+    // Close the env so the singleton backend returns to its pre-test shape.
+    await dot.click();
+    await expect(dot).toHaveCount(0, { timeout: 6_000 });
+  });
 });
+
+// emitEnvStatus injects an `env-status` event, mirroring what the Go side
+// emits from tryReconnect's refusal paths and the open/respawn clears.
+async function emitEnvStatus(
+  page: import('@playwright/test').Page,
+  tenant: string,
+  environment: string,
+  status: string,
+): Promise<void> {
+  await page.evaluate(
+    (payload) => {
+      const runtime = (
+        window as unknown as {
+          runtime: { EventsEmit: (name: string, ...args: unknown[]) => void };
+        }
+      ).runtime;
+      runtime.EventsEmit('env-status', payload);
+    },
+    { tenant, environment, status },
+  );
+}

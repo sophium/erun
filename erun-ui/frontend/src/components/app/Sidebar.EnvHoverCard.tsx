@@ -24,6 +24,8 @@ export function EnvHoverCard({
   isLocal,
   runtimeVersion,
   activityLabel,
+  isOpen,
+  envState,
   children,
 }: {
   className?: string;
@@ -33,6 +35,8 @@ export function EnvHoverCard({
   isLocal: boolean;
   runtimeVersion: string;
   activityLabel: string;
+  isOpen: boolean;
+  envState: string;
   children: React.ReactNode;
 }): React.ReactElement {
   const [open, setOpen] = React.useState(false);
@@ -110,7 +114,7 @@ export function EnvHoverCard({
             <WorkingOn issue={issue} />
           </HoverRow>
           <HoverRow label="Activity">
-            {activityLabel ? <span>{activityLabel}</span> : <Muted>Idle</Muted>}
+            <ActivityState activityLabel={activityLabel} isOpen={isOpen} envState={envState} />
           </HoverRow>
         </dl>
       </PopoverContent>
@@ -135,6 +139,34 @@ function HoverRow({
 
 function Muted({ children }: { children: React.ReactNode }): React.ReactElement {
   return <span className="text-muted-foreground">{children}</span>;
+}
+
+// ActivityState renders the card's Activity row from the env's real state
+// (issue #462): a desktop in-flight operation wins, then the env-status flag
+// (stopped / failed), then open-and-quiet ("Idle"), and a never-opened env
+// says so instead of claiming "Idle" — there is no pod to be idle.
+function ActivityState({
+  activityLabel,
+  isOpen,
+  envState,
+}: {
+  activityLabel: string;
+  isOpen: boolean;
+  envState: string;
+}): React.ReactElement {
+  if (activityLabel) {
+    return <span>{activityLabel}</span>;
+  }
+  if (envState === 'stopped') {
+    return <Muted>Stopped — start it from the titlebar</Muted>;
+  }
+  if (envState === 'failed') {
+    return <Muted>Deploy failed — recover from Activities</Muted>;
+  }
+  if (!isOpen) {
+    return <Muted>Not open</Muted>;
+  }
+  return <Muted>Idle</Muted>;
 }
 
 function WorkingOn({ issue }: { issue: WorkingIssueState }): React.ReactElement {
@@ -170,20 +202,25 @@ type WorkingIssueState =
   | { status: 'loaded'; value: UIWorkingIssue }
   | { status: 'error' };
 
-// useWorkingIssue lazily resolves the env's working issue the first time the
-// card opens, then keeps the result for the row's lifetime (the backend caches
-// with a short TTL, so a re-fetch on every open would be wasteful).
+// useWorkingIssue resolves the env's working issue lazily, on each card
+// open. Re-resolving per open (instead of once per row lifetime) is what
+// lets a remote env's answer flip from "open this environment to see its
+// in-pod work" to the actual in-pod branch as soon as the env opens (issue
+// #462); the backend caches resolved work for a short TTL, so repeat hovers
+// stay cheap. While a refetch is in flight the previous value keeps
+// rendering — no "Resolving…" flash over known data.
 //
-// The fetch is guarded by a ref rather than the state status: putting the
-// status in the effect deps would re-run the effect when setState('loading')
-// lands, whose cleanup cancels the just-started fetch — leaving the card stuck
-// on "Resolving…". The selection is read through a ref so its per-render
-// identity churn doesn't retrigger the effect; only the env keys are deps.
+// The fetch is guarded by an in-flight ref rather than the state status:
+// putting the status in the effect deps would re-run the effect when
+// setState('loading') lands, whose cleanup cancels the just-started fetch —
+// leaving the card stuck on "Resolving…". The selection is read through a
+// ref so its per-render identity churn doesn't retrigger the effect; only
+// the open flag and env keys are deps.
 function useWorkingIssue(selection: UISelection, open: boolean): WorkingIssueState {
   const [state, setState] = React.useState<WorkingIssueState>({ status: 'idle' });
   const selectionRef = React.useRef(selection);
   selectionRef.current = selection;
-  const fetched = React.useRef(false);
+  const inFlight = React.useRef(false);
   const mounted = React.useRef(true);
   React.useEffect(
     () => () => {
@@ -193,15 +230,13 @@ function useWorkingIssue(selection: UISelection, open: boolean): WorkingIssueSta
   );
   const { tenant, environment } = selection;
   React.useEffect(() => {
-    if (!open || fetched.current) {
+    if (!open || inFlight.current) {
       return;
     }
-    // Fetch exactly once, on first open. Result is guarded by mount, not by
-    // the card's open state: closing the card mid-fetch must not drop the
-    // result (the fetched ref would then block a retry, leaving it stuck on
-    // "Resolving…"). The backend caches, so a single resolve per row is right.
-    fetched.current = true;
-    setState({ status: 'loading' });
+    // Result is guarded by mount, not by the card's open state: closing the
+    // card mid-fetch must not drop the result.
+    inFlight.current = true;
+    setState((prev) => (prev.status === 'loaded' ? prev : { status: 'loading' }));
     void EnvironmentWorkingIssue(selectionRef.current)
       .then((value) => {
         if (mounted.current) {
@@ -210,8 +245,11 @@ function useWorkingIssue(selection: UISelection, open: boolean): WorkingIssueSta
       })
       .catch(() => {
         if (mounted.current) {
-          setState({ status: 'error' });
+          setState((prev) => (prev.status === 'loaded' ? prev : { status: 'error' }));
         }
+      })
+      .finally(() => {
+        inFlight.current = false;
       });
   }, [open, tenant, environment]);
   return state;

@@ -54,12 +54,11 @@ func execWorkingIssueCommand(ctx context.Context, dir, name string, args ...stri
 
 // EnvironmentWorkingIssue resolves what an environment is currently working on
 // for the sidebar hover card: the worktree's current git branch and, when the
-// branch names an issue, that issue's title. The worktree must be reachable
-// from the host, which holds for local-agent envs (worktree mounted from the
-// machine). Remote-agent / runtime envs keep their worktree in the pod, so the
-// result is marked unavailable with a reason rather than reaching into the pod
-// (which is only possible while the env is open). Results are cached per env
-// for workingIssueCacheTTL.
+// branch names an issue, that issue's title. Local-agent envs read the host
+// worktree; remote-agent / runtime envs read the in-pod worktree over the
+// env's MCP port-forward while it is reachable, and report an honest
+// open-to-view state otherwise (issue #462). Resolved results are cached per
+// env for workingIssueCacheTTL.
 func (a *App) EnvironmentWorkingIssue(selection uiSelection) (uiWorkingIssue, error) {
 	selection = normalizeSelection(selection)
 	if selection.Tenant == "" || selection.Environment == "" {
@@ -79,18 +78,25 @@ func (a *App) EnvironmentWorkingIssue(selection uiSelection) (uiWorkingIssue, er
 		return uiWorkingIssue{}, err
 	}
 
-	value := a.resolveWorkingIssue(result.EnvConfig)
-	a.storeWorkingIssue(cacheKey, value)
+	value := a.resolveWorkingIssue(result)
+	// Cache only resolved work: unavailable answers ("open this env…") are a
+	// cheap port probe and must flip the moment the env opens, not after the
+	// TTL.
+	if value.Available {
+		a.storeWorkingIssue(cacheKey, value)
+	}
 	return value, nil
 }
 
-// resolveWorkingIssue is the transport-free core: it runs git in the env's
-// host worktree to read the branch, then gh to resolve the linked issue title.
-// It never errors out to the caller — an unreachable worktree or a failed
+// resolveWorkingIssue is the transport-free core: it reads the env worktree's
+// current branch — from the host worktree for local-agent envs, from inside
+// the pod for remote/runtime envs — then resolves the linked issue title. It
+// never errors out to the caller — an unreachable worktree or a failed
 // lookup degrades to an honest empty/partial state the hover card renders.
-func (a *App) resolveWorkingIssue(env eruncommon.EnvConfig) uiWorkingIssue {
+func (a *App) resolveWorkingIssue(result eruncommon.OpenResult) uiWorkingIssue {
+	env := result.EnvConfig
 	if env.RemoteWorktree() {
-		return uiWorkingIssue{Available: false, Reason: "worktree lives in the pod"}
+		return a.resolvePodWorkingIssue(result)
 	}
 	repo := env.EffectiveLocalRepoPath()
 	if repo == "" {
@@ -101,9 +107,48 @@ func (a *App) resolveWorkingIssue(env eruncommon.EnvConfig) uiWorkingIssue {
 	defer cancel()
 
 	branch, err := a.deps.runWorkingIssueCommand(ctx, repo, "git", "rev-parse", "--abbrev-ref", "HEAD")
-	if err != nil || branch == "" || branch == "HEAD" {
-		// No branch (not a repo, or detached HEAD). Available, but nothing
-		// to show beyond "no branch".
+	if err != nil {
+		// Not a repo. Available, but nothing to show beyond "no branch".
+		return uiWorkingIssue{Available: true}
+	}
+	return a.workingIssueFromBranch(ctx, repo, branch)
+}
+
+// resolvePodWorkingIssue reads the in-pod branch over the env's MCP
+// port-forward (issue #462: the card used to show the implementation excuse
+// "worktree lives in the pod" instead of the work). Reachability is the
+// existing canConnectLocalPort signal — the port-forward only exists while
+// the env is open in this desktop, so an unreachable port means there is
+// nothing to query yet, and the honest state is the next step the user can
+// take.
+func (a *App) resolvePodWorkingIssue(result eruncommon.OpenResult) uiWorkingIssue {
+	mcpPort := eruncommon.MCPPortForResult(result)
+	if mcpPort <= 0 || !a.deps.canConnectLocalPort(mcpPort) {
+		return uiWorkingIssue{Available: false, Reason: "open this environment to see its in-pod work"}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	branch, err := a.deps.loadPodBranch(ctx, mcpEndpointForOpenResult(result))
+	if err != nil {
+		return uiWorkingIssue{Available: false, Reason: "in-pod work is not reachable right now"}
+	}
+	// The issue title resolves host-side: gh reads the origin remote of the
+	// project worktree, which names the same repository the pod cloned.
+	return a.workingIssueFromBranch(ctx, strings.TrimSpace(result.RepoPath), branch)
+}
+
+// workingIssueFromBranch maps a resolved branch to the hover card's read
+// model: the branch itself, the issue number the branch names (per the
+// feature/<n>- / bug/<n>- convention), and — when titleRepo is set — the
+// issue title via gh. A failed title lookup (offline, gh unauthenticated,
+// issue gone) leaves the number without a title — still useful.
+func (a *App) workingIssueFromBranch(ctx context.Context, titleRepo, branch string) uiWorkingIssue {
+	branch = strings.TrimSpace(branch)
+	if branch == "" || branch == "HEAD" {
+		// No branch (detached HEAD or empty repo). Available, but nothing to
+		// show beyond "no branch".
 		return uiWorkingIssue{Available: true}
 	}
 
@@ -113,11 +158,11 @@ func (a *App) resolveWorkingIssue(env eruncommon.EnvConfig) uiWorkingIssue {
 		return value
 	}
 	value.IssueNumber = number
+	if titleRepo == "" {
+		return value
+	}
 
-	// `gh` resolves the repo from the worktree's origin remote when run with
-	// cmd.Dir set. A failed lookup (offline, gh unauthenticated, issue gone)
-	// leaves the number without a title — still useful.
-	title, err := a.deps.runWorkingIssueCommand(ctx, repo, "gh", "issue", "view", strconv.Itoa(number), "--json", "title", "-q", ".title")
+	title, err := a.deps.runWorkingIssueCommand(ctx, titleRepo, "gh", "issue", "view", strconv.Itoa(number), "--json", "title", "-q", ".title")
 	if err == nil {
 		value.IssueTitle = strings.TrimSpace(title)
 	}
