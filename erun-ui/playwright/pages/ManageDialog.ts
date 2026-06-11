@@ -41,6 +41,32 @@ export class ManageDialog {
     return this.locator().getByRole('tab', { name: new RegExp(`^${name}(,|$)`) });
   }
 
+  // tabHasUnsavedChanges reads the dirty marker off the tab trigger's
+  // accessible name ("<label>, has unsaved changes" — issue #460).
+  async tabHasUnsavedChanges(name: ManageTab): Promise<boolean> {
+    const label = await this.tab(name).getAttribute('aria-label');
+    return label?.includes('has unsaved changes') ?? false;
+  }
+
+  // redeployBanner targets the amber "Pending redeploy" alert raised after a
+  // save that changed a pod-shaping field (issue #460).
+  redeployBanner(): Locator {
+    return this.locator().getByRole('alert').filter({ hasText: 'Pending redeploy' });
+  }
+
+  // autoUpgradeCheckbox targets the Runtime tab's "Include in Upgrade all"
+  // opt-in — selection metadata for a future `erun upgrade`, never a pod
+  // input (issue #460).
+  autoUpgradeCheckbox(): Locator {
+    return this.locator().locator('#environment-config-autoupgrade');
+  }
+
+  // idleTimeoutInput targets the Runtime tab's Idle-stop "Timeout" field — a
+  // pod-shaping value (helm idle.* → pod env).
+  idleTimeoutInput(): Locator {
+    return this.locator().locator('#environment-config-idle-timeout');
+  }
+
   async selectTab(name: ManageTab): Promise<void> {
     await this.tab(name).click();
   }
