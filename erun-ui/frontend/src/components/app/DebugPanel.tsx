@@ -407,12 +407,30 @@ function ErunTraceBody({
   }
   if (trace.available) {
     return (
-      <pre className="m-0 font-mono text-[11px] leading-[1.35] break-words whitespace-pre-wrap">
-        {trace.content}
-      </pre>
+      <>
+        <TraceNotice notice={trace.notice} />
+        <pre className="m-0 font-mono text-[11px] leading-[1.35] break-words whitespace-pre-wrap">
+          {trace.content}
+        </pre>
+      </>
     );
   }
-  return <p className="m-0 text-[oklch(0.6_0_0)]">{trace.reason ?? 'No trace available.'}</p>;
+  return (
+    <>
+      <TraceNotice notice={trace.notice} />
+      <p className="m-0 text-[oklch(0.6_0_0)]">{trace.reason ?? 'No trace available.'}</p>
+    </>
+  );
+}
+
+// TraceNotice surfaces a non-fatal caveat about the shown trace (issue
+// #516): e.g. the in-pod side of a remote env could not be included. The
+// content below is still real — the notice keeps it honest.
+function TraceNotice({ notice }: { notice?: string }): React.ReactElement | null {
+  if (!notice) {
+    return null;
+  }
+  return <p className="m-0 mb-1 text-[oklch(0.6_0_0)] italic">{notice}</p>;
 }
 
 // UITracePane renders the Redux action history, polling the module buffer

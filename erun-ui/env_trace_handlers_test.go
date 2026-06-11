@@ -73,7 +73,13 @@ func TestLoadEnvTraceHostFileMissing(t *testing.T) {
 	}
 }
 
-func TestLoadEnvTracePodGatedOnReachability(t *testing.T) {
+// TestLoadEnvTraceRemoteUnreachableKeepsHostTrace pins the #516 fix: a
+// remote env's operator-driven commands trace on the host, so an
+// unreachable pod must degrade to a notice — not blank the pane.
+func TestLoadEnvTraceRemoteUnreachableKeepsHostTrace(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeHostTrace(t, home, "2026-06-11T00:00:00Z open: tenant=acme environment=dev\n")
 	app := envTraceApp(t, eruncommon.EnvConfig{
 		Name: "dev", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
 	}, false, "", nil)
@@ -82,12 +88,49 @@ func TestLoadEnvTracePodGatedOnReachability(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEnvTrace: %v", err)
 	}
-	if trace.Available || !strings.Contains(trace.Reason, "not reachable") {
-		t.Fatalf("expected the not-reachable state, got %+v", trace)
+	if !trace.Available || !strings.Contains(trace.Content, "open: tenant=acme environment=dev") {
+		t.Fatalf("expected the host trace despite the unreachable pod, got %+v", trace)
+	}
+	if !strings.Contains(trace.Notice, "in-pod trace unavailable") {
+		t.Fatalf("expected the in-pod-unavailable notice, got %+v", trace)
 	}
 }
 
-func TestLoadEnvTracePodTail(t *testing.T) {
+// TestLoadEnvTraceRemoteMergesHostAndPod pins the merged timeline: the two
+// stamped tails interleave chronologically and pod-origin lines carry the
+// [pod] marker so the vantage point stays attributable.
+func TestLoadEnvTraceRemoteMergesHostAndPod(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeHostTrace(t, home,
+		"2026-06-11T00:00:01Z open: tenant=acme environment=dev\n"+
+			"2026-06-11T00:00:04Z kubectl config use-context ctx\n")
+	app := envTraceApp(t, eruncommon.EnvConfig{
+		Name: "dev", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
+	}, true,
+		"2026-06-11T00:00:02Z deploy: resolved 1 spec(s)\n"+
+			"2026-06-11T00:00:05Z doctor: all checks passed\n", nil)
+
+	trace, err := app.LoadEnvTrace(uiSelection{Tenant: "acme", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("LoadEnvTrace: %v", err)
+	}
+	want := "2026-06-11T00:00:01Z open: tenant=acme environment=dev\n" +
+		"2026-06-11T00:00:02Z [pod] deploy: resolved 1 spec(s)\n" +
+		"2026-06-11T00:00:04Z kubectl config use-context ctx\n" +
+		"2026-06-11T00:00:05Z [pod] doctor: all checks passed\n"
+	if !trace.Available || trace.Content != want {
+		t.Fatalf("unexpected merged timeline:\n got: %q\nwant: %q (trace %+v)", trace.Content, want, trace)
+	}
+	if trace.Notice != "" {
+		t.Fatalf("expected no notice on a clean merge, got %+v", trace)
+	}
+}
+
+// TestLoadEnvTraceRemotePodOnly covers the inverse vantage: nothing ran on
+// this host yet (fresh laptop), the pod carries the history.
+func TestLoadEnvTraceRemotePodOnly(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	app := envTraceApp(t, eruncommon.EnvConfig{
 		Name: "dev", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
 	}, true, "2026-06-11T00:00:00Z deploy: resolved 1 spec(s)\n", nil)
@@ -96,8 +139,36 @@ func TestLoadEnvTracePodTail(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEnvTrace: %v", err)
 	}
-	if !trace.Available || !strings.Contains(trace.Content, "resolved 1 spec(s)") {
-		t.Fatalf("expected the in-pod tail, got %+v", trace)
+	if !trace.Available || !strings.Contains(trace.Content, "[pod] deploy: resolved 1 spec(s)") {
+		t.Fatalf("expected the marked in-pod tail, got %+v", trace)
+	}
+}
+
+// TestLoadEnvTraceRemoteBothEmpty keeps the honest empty state when neither
+// vantage point has anything.
+func TestLoadEnvTraceRemoteBothEmpty(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	app := envTraceApp(t, eruncommon.EnvConfig{
+		Name: "dev", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
+	}, true, "", nil)
+
+	trace, err := app.LoadEnvTrace(uiSelection{Tenant: "acme", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("LoadEnvTrace: %v", err)
+	}
+	if trace.Available || trace.Reason != "no trace captured yet" {
+		t.Fatalf("expected the honest empty state, got %+v", trace)
+	}
+}
+
+func writeHostTrace(t *testing.T, home, content string) {
+	t.Helper()
+	logPath := filepath.Join(home, ".erun", "acme", "dev", "trace.log")
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(logPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 
