@@ -312,6 +312,7 @@ Methodology when reviewing or editing help / descriptions:
 ## Branching Strategy
 
 - Create a GitHub issue before starting implementation work.
+- Sync `main` before cutting the branch. Run `git checkout main && git pull --ff-only origin main` first so the new branch starts from the current remote tip, never a stale local `main`.
 - Branch from `main`.
 - Use `feature/<issue-number>-<short-kebab-case-description>` for new functionality.
 - Use `bug/<issue-number>-<short-kebab-case-description>` for bug fixes.
