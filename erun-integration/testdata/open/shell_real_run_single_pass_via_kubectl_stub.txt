@@ -1,0 +1,3 @@
+audit: erun open team dev
+open: tenant=team environment=dev kubernetes-context=test-context remote=false no-shell=false ide=shell
+open: SSH private key streamed to the runtime pod on stdin (kept off the command line)

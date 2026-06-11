@@ -1,0 +1,2 @@
+audit: erun open team dev
+open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=shell

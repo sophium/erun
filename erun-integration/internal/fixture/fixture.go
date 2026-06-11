@@ -252,6 +252,27 @@ func SeedRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment stri
 	)
 }
 
+// SeedRemoteTenantEnvWithPortRange writes the same tree as
+// SeedRemoteTenantEnv (remote env, no sshd) and persists localportrangestart
+// on the env config. Real-run shell scenarios pin a high range (e.g. 26100)
+// so their port-forward simulators never collide with a developer's live
+// erun session on the default 17000 range; without the pin those scenarios
+// would silently skip on busy hosts and their coverage would evaporate.
+func SeedRemoteTenantEnvWithPortRange(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
+	t.Helper()
+	SeedRemoteTenantEnv(t, setup, tenant, environment)
+	envDir := filepath.Join(setup.ConfigHome, "erun", tenant, environment)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+filepath.Join(setup.Home, "git", tenant)+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"runtimeversion: 1.0.0\n"+
+			"remote: true\n"+
+			"localportrangestart: "+strconv.Itoa(rangeStart)+"\n",
+	)
+}
+
 // SeedRemoteTenantEnvWithClaude writes the same tree as SeedRemoteTenantEnv
 // plus the given claude: YAML block, so scenarios can exercise the per-env
 // Claude launch flags (--effort / --model / --verbose --debug) that the AI
@@ -664,6 +685,10 @@ func PortSimBinary(t testing.TB) string {
 // `kubectl get deployment ... -o json` should report so production code's
 // deployment-match check (eruncommon/deploy.go::deploymentMatchesExpectedSettings)
 // returns true and the open flow proceeds past the redeploy gate.
+//
+// The optional fields below extend the stub for real-run shell scenarios.
+// Every zero value preserves the original behavior (silent exit 0) so
+// existing callers are unaffected.
 type KubectlDeployedStubSpec struct {
 	DeploymentName string
 	ContainerName  string
@@ -671,6 +696,33 @@ type KubectlDeployedStubSpec struct {
 	SSHDEnabled    bool
 	MCPPort        int
 	SSHPort        int
+	// ExecExitCodes, when non-empty, drives the interactive shell exec
+	// branch (`kubectl ... exec -it deployment/... -- /bin/sh -lc <script>`):
+	// the Nth call exits with the Nth code and the last code repeats for any
+	// further calls. Calls are recorded one line per invocation in
+	// <stubsDir>/exec-calls so tests can assert how many times the shell
+	// loop re-entered kubectl exec (e.g. after a reattach-deploy handoff).
+	ExecExitCodes []int
+	// WaitExitCode, when non-zero, fails the deployment-availability wait
+	// (`kubectl ... wait --for=condition=Available ... deployment/...`)
+	// with this exit code after printing WaitStderr to stderr. Zero keeps
+	// the wait succeeding silently.
+	WaitExitCode int
+	WaitStderr   string
+	// PodsJSON, when non-empty, is written to <stubsDir>/pods.json and
+	// returned verbatim for any `kubectl get pods ...` query. The open
+	// flow's runtime diagnostics (`get pods -l app=<release> -o json`) and
+	// the pod-replacement probe both read this shape.
+	PodsJSON string
+	// EventsJSON, when non-empty, is written to <stubsDir>/events.json and
+	// returned verbatim for `kubectl get events -o json` (the runtime
+	// diagnostics' per-pod warning-event lookup).
+	EventsJSON string
+	// SeedKeyFile, when non-empty, captures stdin of the non-interactive
+	// SSH-key seeding call (`kubectl ... exec -i deployment/... -- /bin/sh
+	// -c <seed-script>`) into this file so tests can assert the private key
+	// was streamed on stdin and never via argv.
+	SeedKeyFile string
 }
 
 // StubKubectlDeployed writes a kubectl stub at <stubsDir>/kubectl that
@@ -735,6 +787,9 @@ func StubKubectlDeployed(t testing.TB, stubsDir string, spec KubectlDeployedStub
 		`fi`,
 		`# Argv-driven branching for non-port-forward kubectl invocations.`,
 		`case "$*" in`,
+	}, "\n")
+	script += "\n" + kubectlDeployedOptionalArms(t, stubsDir, spec)
+	script += strings.Join([]string{
 		`  *"get deployment ` + spec.DeploymentName + ` -o name"*)`,
 		`    printf 'deployment.apps/%s\n' '` + spec.DeploymentName + `' ;;`,
 		`  *"get deployment ` + spec.DeploymentName + ` -o json"*)`,
@@ -772,6 +827,58 @@ func StubKubectlDeployed(t testing.TB, stubsDir string, spec KubectlDeployedStub
 		}
 	})
 	return StubEnv(stubsDir, "kubectl")
+}
+
+// kubectlDeployedOptionalArms renders the optional `case "$*"` arms of the
+// StubKubectlDeployed script for the real-run shell fields of
+// KubectlDeployedStubSpec. It returns "" when no optional field is set, so
+// the generated script is unchanged for existing callers. Arms are emitted
+// most-specific-first; the interactive `exec -it` arm leads so the bootstrap
+// script passed as the exec's last argv can never fall through into the
+// pods/events/wait arms by substring accident.
+func kubectlDeployedOptionalArms(t testing.TB, stubsDir string, spec KubectlDeployedStubSpec) string {
+	t.Helper()
+	var arms strings.Builder
+	if len(spec.ExecExitCodes) > 0 {
+		counterFile := filepath.Join(stubsDir, "exec-calls")
+		arms.WriteString(`  *" exec -it "*)` + "\n")
+		arms.WriteString(`    count=0` + "\n")
+		arms.WriteString(`    if [ -f '` + counterFile + `' ]; then count=$(wc -l < '` + counterFile + `' | tr -d '[:space:]'); fi` + "\n")
+		arms.WriteString(`    printf 'call\n' >> '` + counterFile + `'` + "\n")
+		arms.WriteString(`    case "$count" in` + "\n")
+		for index, code := range spec.ExecExitCodes[:len(spec.ExecExitCodes)-1] {
+			arms.WriteString(fmt.Sprintf(`      %d) exit %d ;;`+"\n", index, code))
+		}
+		arms.WriteString(fmt.Sprintf(`      *) exit %d ;;`+"\n", spec.ExecExitCodes[len(spec.ExecExitCodes)-1]))
+		arms.WriteString(`    esac ;;` + "\n")
+	}
+	if spec.SeedKeyFile != "" {
+		arms.WriteString(`  *" exec -i deployment/"*)` + "\n")
+		arms.WriteString(`    cat > '` + spec.SeedKeyFile + `'` + "\n")
+		arms.WriteString(`    exit 0 ;;` + "\n")
+	}
+	if spec.WaitExitCode != 0 {
+		arms.WriteString(`  *" wait --for=condition=Available"*)` + "\n")
+		if spec.WaitStderr != "" {
+			arms.WriteString(`    printf '%s\n' ` + shellSingleQuote(spec.WaitStderr) + ` >&2` + "\n")
+		}
+		arms.WriteString(fmt.Sprintf(`    exit %d ;;`+"\n", spec.WaitExitCode))
+	}
+	if spec.PodsJSON != "" {
+		podsFile := filepath.Join(stubsDir, "pods.json")
+		mustWrite(t, podsFile, spec.PodsJSON)
+		arms.WriteString(`  *" get pods "*)` + "\n")
+		arms.WriteString(`    cat '` + podsFile + `'` + "\n")
+		arms.WriteString(`    exit 0 ;;` + "\n")
+	}
+	if spec.EventsJSON != "" {
+		eventsFile := filepath.Join(stubsDir, "events.json")
+		mustWrite(t, eventsFile, spec.EventsJSON)
+		arms.WriteString(`  *" get events "*)` + "\n")
+		arms.WriteString(`    cat '` + eventsFile + `'` + "\n")
+		arms.WriteString(`    exit 0 ;;` + "\n")
+	}
+	return arms.String()
 }
 
 // waitForPortClosed blocks until nothing accepts a TCP connection on
