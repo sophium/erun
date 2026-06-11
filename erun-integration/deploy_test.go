@@ -50,6 +50,258 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_from_devops_module_root", func(t *testing.T) {
+		// Exercises resolveCurrentDevopsK8sDir's first arm: when cwd is the
+		// <tenant>-devops module root (not its k8s/ subdir and not a chart
+		// dir), the module's own k8s/ directory must drive chart discovery.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		moduleRoot := filepath.Join(setup.Cwd, "team-devops")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: moduleRoot, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_from_devops_module_root", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_from_nested_devops_subdir", func(t *testing.T) {
+		// Exercises resolveAncestorDevopsK8sDir: from a nested directory
+		// inside the devops module (e.g. team-devops/notes), the walker must
+		// climb to the nearest *-devops ancestor and use its k8s/ directory.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		nested := filepath.Join(setup.Cwd, "team-devops", "notes")
+		if err := os.MkdirAll(nested, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", nested, err)
+		}
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: nested, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_from_nested_devops_subdir", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_from_k8s_dir", func(t *testing.T) {
+		// Exercises ResolveCurrentKubernetesDeployContexts' k8s-dir arm:
+		// when cwd is the devops module's k8s/ directory itself, every chart
+		// underneath it resolves directly without the devops-dir walkers.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		k8sDir := filepath.Join(setup.Cwd, "team-devops", "k8s")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: k8sDir, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_from_k8s_dir", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_from_git_project_root_detects_tenant_devops", func(t *testing.T) {
+		// Exercises detectedProjectRootDevopsK8sDir: from a git project root
+		// whose repo name equals the tenant, chart discovery must go straight
+		// to <root>/<tenant>-devops/k8s instead of scanning every *-devops
+		// candidate. The repo dir is named "team" so findProjectRoot's
+		// detected tenant matches the configured one.
+		setup := env.New(t)
+		repo := filepath.Join(setup.Cwd, "team")
+		fixture.SeedGitRepo(t, repo)
+		fixture.SeedDevopsRepoAt(t, repo, "team", "dev")
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "team")
+		envDir := filepath.Join(tenantDir, "dev")
+		for _, dir := range []string{root, tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("defaulttenant: team\n"), 0o644); err != nil {
+			t.Fatalf("root cfg: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(tenantDir, "config.yaml"),
+			[]byte("projectroot: "+repo+"\nname: team\ndefaultenvironment: dev\n"), 0o644); err != nil {
+			t.Fatalf("tenant cfg: %v", err)
+		}
+		envBody := "name: dev\nrepopath: " + repo + "\nkubernetescontext: test-context\ncontainerregistry: registry.example/test\nruntimeversion: 1.0.0\n"
+		if err := os.WriteFile(filepath.Join(envDir, "config.yaml"), []byte(envBody), 0o644); err != nil {
+			t.Fatalf("env cfg: %v", err)
+		}
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: repo, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_from_git_project_root_detects_tenant_devops", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_multiple_devops_modules_errors", func(t *testing.T) {
+		// Exercises resolveProjectRootDevopsK8sDir's ambiguity guard: two
+		// *-devops modules with k8s charts under the project root cannot be
+		// disambiguated, so deploy must fail with "multiple devops k8s
+		// directories found" instead of picking one arbitrarily.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsRepoAt(t, setup.Cwd, "other", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for ambiguous devops modules, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_multiple_devops_modules_errors", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_no_devops_module_errors", func(t *testing.T) {
+		// Exercises the no-candidates end of chart discovery: a local env
+		// whose project root has no *-devops module anywhere must fail with
+		// "helm chart not found in current directory".
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when no devops module exists, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_no_devops_module_errors", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_unconfigured_alias_derives_provider_and_region", func(t *testing.T) {
+		// Exercises applyCloudProviderDeployMetadata's fallbacks: the env's
+		// cloudprovideralias has no configured provider, so the provider
+		// derives from the alias shape (cloudProviderFromAlias → "aws"), no
+		// cloud context matches the kubernetes context, and the region
+		// derives from the context name suffix (cloudContextRegionFromName →
+		// eu-west-2). The helm set-strings must carry both derived values.
+		setup := env.New(t)
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "team")
+		envDir := filepath.Join(tenantDir, "prod")
+		for _, dir := range []string{root, tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("defaulttenant: team\n"), 0o644); err != nil {
+			t.Fatalf("root cfg: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(tenantDir, "config.yaml"),
+			[]byte("projectroot: "+setup.Cwd+"\nname: team\ndefaultenvironment: prod\n"), 0o644); err != nil {
+			t.Fatalf("tenant cfg: %v", err)
+		}
+		envBody := "name: prod\nrepopath: " + setup.Cwd + "\nkubernetescontext: erun-001-team-eu-west-2\ncontainerregistry: registry.example/test\nruntimeversion: 1.0.0\nmanagedcloud: true\ncloudprovideralias: ops+123456789012@aws\n"
+		if err := os.WriteFile(filepath.Join(envDir, "config.yaml"), []byte(envBody), 0o644); err != nil {
+			t.Fatalf("env cfg: %v", err)
+		}
+		fixture.SeedDevopsRepo(t, setup, "team", "prod")
+		result := erun.Run(t, []string{"deploy", "team", "prod", "--version", "1.0.0", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_unconfigured_alias_derives_provider_and_region", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_tenant_aliases_resolve_oidc_issuers", func(t *testing.T) {
+		// Exercises ResolveTenantCloudProviderIssuers +
+		// CloudProviderOIDCIssuerURL: a tenant carrying three provider
+		// aliases must resolve each issuer (explicit oidcissuerurl, a
+		// duplicate that is deduplicated, and one derived from a non-awsapps
+		// SSO start URL) into the api.oidcAllowedIssuers helm set-string.
+		setup := env.New(t)
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "team")
+		envDir := filepath.Join(tenantDir, "dev")
+		for _, dir := range []string{root, tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		rootBody := "defaulttenant: team\n" +
+			"cloudproviders:\n" +
+			"  - alias: alpha\n" +
+			"    provider: aws\n" +
+			"    profile: alpha\n" +
+			"    oidcissuerurl: https://oidc.example/shared\n" +
+			"  - alias: beta\n" +
+			"    provider: aws\n" +
+			"    profile: beta\n" +
+			"    oidcissuerurl: https://oidc.example/shared\n" +
+			"  - alias: gamma\n" +
+			"    provider: aws\n" +
+			"    profile: gamma\n" +
+			"    ssostarturl: https://idp.example/realm\n"
+		if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte(rootBody), 0o644); err != nil {
+			t.Fatalf("root cfg: %v", err)
+		}
+		tenantBody := "projectroot: " + setup.Cwd + "\nname: team\ndefaultenvironment: dev\n" +
+			"cloudprovideraliases:\n  - alpha\n  - beta\n  - gamma\n"
+		if err := os.WriteFile(filepath.Join(tenantDir, "config.yaml"), []byte(tenantBody), 0o644); err != nil {
+			t.Fatalf("tenant cfg: %v", err)
+		}
+		envBody := "name: dev\nrepopath: " + setup.Cwd + "\nkubernetescontext: test-context\ncontainerregistry: registry.example/test\nruntimeversion: 1.0.0\n"
+		if err := os.WriteFile(filepath.Join(envDir, "config.yaml"), []byte(envBody), 0o644); err != nil {
+			t.Fatalf("env cfg: %v", err)
+		}
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_tenant_aliases_resolve_oidc_issuers", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_remote_env_embedded_chart_via_stubs", func(t *testing.T) {
+		// Real-run deploy of a remote env with no local checkout: the
+		// embedded default-devops chart must be materialized into a temp
+		// dir (prepareHelmChartForDeploy + copyDirectory) before helm
+		// upgrade runs against it. The helm/kubectl stubs exit 0 so the
+		// rollout completes; dry-run cannot reach the materialization —
+		// it short-circuits before the filesystem copy.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_remote_env_embedded_chart_via_stubs", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_preflight_starts_stopped_cloud_context", func(t *testing.T) {
+		// Exercises CloudContextPreflight end to end: the env's kubernetes
+		// context belongs to a managed cloud context whose live AWS state is
+		// "stopped", so the deploy must start the instance (full
+		// StartCloudContext flow through the aws stub) before any kubectl or
+		// helm call targets the cluster. Dry-run cannot reach the start: the
+		// dry-run describe-instances canned answer reports "running" by
+		// design so plans never spuriously start contexts.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		// The cloud context owns the env's kubernetes context name.
+		seedCloudConfigWithContexts(t, setup, contextYAMLItem("test-context", "dev", "us-east-1", "i-0123456789abcdef0"))
+		stubs := setup.Cwd + "/stubs"
+		profileARN := "arn:aws:iam::123456789012:instance-profile/erun-test-context-host-stop"
+		envVars := append(setup.Env(), fixture.StubAWSCloudContext(t, stubs, fixture.AWSCloudContextStubSpec{
+			RoleName:             "erun-test-context-host-stop",
+			InstanceProfileARN:   profileARN,
+			ProfileRoleName:      "erun-test-context-host-stop",
+			ActiveAssociationID:  "iip-assoc-0aa11bb22cc33dd44",
+			ActiveAssociationARN: profileARN,
+			InstanceStates:       "i-0123456789abcdef0\tstopped",
+		})...)
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_preflight_starts_stopped_cloud_context", normalize.Apply(result.Combined))
+	})
+
 	t.Run("publish_traces_helm_package_and_push_before_upgrade", func(t *testing.T) {
 		// --publish runs `helm package` then `helm push oci://<registry>` in
 		// the chart's parent directory before the helm upgrade. The trace

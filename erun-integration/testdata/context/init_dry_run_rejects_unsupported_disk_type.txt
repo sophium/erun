@@ -1,0 +1,4 @@
+audit: erun context init --alias dev --context fresh --disk-type io2 --dry-run
+cloud-context init: alias=dev region=eu-west-2 instance-type=c8gd.2xlarge disk=100GB/io2
+cloud-context init: configuration resolution failed: unsupported cloud context disk type "io2"
+unsupported cloud context disk type "io2"

@@ -1,0 +1,5 @@
+audit: erun cloud init aws --account-id 123456789012 --region eu-west-2 --role-name Admin --sso-region eu-west-1 --sso-start-url https://example.awsapps.com/start
+cloud init aws: profile= account-id=123456789012 region=eu-west-2 sso-region=eu-west-1 sso-start-url=https://example.awsapps.com/start skip-login=false
+Permission denied writing ~/.aws/config
+cloud init aws: profile setup failed: aws configure set sso_start_url: Permission denied writing ~/.aws/config
+aws configure set sso_start_url: Permission denied writing ~/.aws/config

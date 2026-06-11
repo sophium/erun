@@ -1,0 +1,5 @@
+audit: erun context start --dry-run --force edge
+cloud-context start: name=edge force=true
+cloud-context start: force=true bypasses working-hours gate
+skipping cloud context host-stop profile association: cloud provider alias "ghost" is not configured
+cloud provider alias "ghost" is not configured

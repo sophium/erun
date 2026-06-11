@@ -1,0 +1,6 @@
+audit: erun context stop edge
+cloud-context stop: edge
+aws ec2 stop-instances --instance-ids i-0123456789abcdef0 --region us-east-1 --profile dev
+aws ec2 wait instance-stopped --instance-ids i-0123456789abcdef0 --region us-east-1 --profile dev
+Waiter InstanceStopped failed: Max attempts exceeded
+cloud context "edge": stop was accepted but the instance was not observed stopped — it may still be transitioning; check its state in the AWS console and retry: aws ec2 wait instance-stopped --instance-ids i-0123456789abcdef0: Waiter InstanceStopped failed: Max attempts exceeded

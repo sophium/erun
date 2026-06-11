@@ -15,6 +15,63 @@ import (
 )
 
 func TestIdle(t *testing.T) {
+	t.Run("invalid_working_hours_format_errors", func(t *testing.T) {
+		// Exercises EnvironmentIdleConfig.Resolve → parseWorkingHours: a
+		// working-hours value without the HH:MM-HH:MM shape must fail the
+		// status command with the format error.
+		setup := env.New(t)
+		seedIdleEnvWithIdleBlock(t, setup, "idle:\n  workinghours: 9to5\n")
+		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for malformed working hours, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "idle/invalid_working_hours_format_errors", normalize.Apply(result.Combined))
+	})
+
+	t.Run("equal_working_hours_bounds_errors", func(t *testing.T) {
+		// Exercises validateWorkingHours' start==end guard: a zero-width
+		// working window is a configuration error, not "always outside".
+		setup := env.New(t)
+		seedIdleEnvWithIdleBlock(t, setup, "idle:\n  workinghours: 08:00-08:00\n")
+		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for zero-width working hours, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "idle/equal_working_hours_bounds_errors", normalize.Apply(result.Combined))
+	})
+
+	t.Run("invalid_timezone_errors", func(t *testing.T) {
+		// Exercises Resolve's timezone validation: an unknown IANA zone
+		// must fail with "invalid environment idle timezone".
+		setup := env.New(t)
+		seedIdleEnvWithIdleBlock(t, setup, "idle:\n  workinghours: 08:00-20:00\n  timezone: Mars/Olympus\n")
+		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for unknown timezone, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "idle/invalid_timezone_errors", normalize.Apply(result.Combined))
+	})
+
+	t.Run("overnight_working_hours_with_timezone", func(t *testing.T) {
+		// Exercises workingHoursStatus' overnight arm (start > end wraps
+		// past midnight) and the explicit-timezone conversion. The window
+		// 23:59-23:58 is "within" for every wall-clock minute except 23:58,
+		// so the marker reliably reads active; the remaining seconds are
+		// wall-clock dependent, hence the structural assertion instead of a
+		// golden (the value cannot be normalized away without erasing the
+		// marker's meaning).
+		setup := env.New(t)
+		seedIdleEnvWithIdleBlock(t, setup, "idle:\n  workinghours: 23:59-23:58\n  timezone: UTC\n")
+		result := erun.Run(t, []string{"idle", "team", "dev"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		workingHours := regexp.MustCompile(`(?m)^\s*working-hours: (idle|active \(\d+s\))\s*$`)
+		if !workingHours.MatchString(result.Stdout) {
+			t.Errorf("expected working-hours marker line, got:\n%s", result.Stdout)
+		}
+	})
+
 	t.Run("help", func(t *testing.T) {
 		setup := env.New(t)
 		result := erun.Run(t, []string{"idle", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
@@ -165,4 +222,22 @@ func TestIdle(t *testing.T) {
 			t.Errorf("expected legacy stop error surfaced, got:\n%s", result.Stdout)
 		}
 	})
+}
+
+// seedIdleEnvWithIdleBlock seeds the standard tenant/env tree and appends the
+// given idle: YAML block to the env config so idle scenarios can stage
+// arbitrary working-hours/timezone shapes.
+func seedIdleEnvWithIdleBlock(t *testing.T, setup env.Setup, idleBlock string) {
+	t.Helper()
+	fixture.SeedTenantEnv(t, setup, "team", "dev")
+	envCfg := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+	body := "name: dev\n" +
+		"repopath: " + setup.Cwd + "\n" +
+		"kubernetescontext: test-context\n" +
+		"containerregistry: registry.example/test\n" +
+		"runtimeversion: 1.0.0\n" +
+		idleBlock
+	if err := os.WriteFile(envCfg, []byte(body), 0o644); err != nil {
+		t.Fatalf("rewrite env config with idle block: %v", err)
+	}
 }

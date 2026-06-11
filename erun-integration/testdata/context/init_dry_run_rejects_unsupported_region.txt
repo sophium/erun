@@ -1,0 +1,4 @@
+audit: erun context init --alias dev --context fresh --dry-run --region mars-north-1
+cloud-context init: alias=dev region=mars-north-1 instance-type=c8gd.2xlarge disk=100GB/gp3
+cloud-context init: configuration resolution failed: unsupported cloud context region "mars-north-1"
+unsupported cloud context region "mars-north-1"

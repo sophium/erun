@@ -1,0 +1,5 @@
+  - edge provider=aws alias=dev region=us-east-1 instance=i-0123456789abcdef0 type=t3.medium disk=50GB/gp3 kube-context=edge status=running public-ip=<VERSION>.10
+audit: erun context start edge
+cloud-context start: name=edge force=false
+cloud-context start: checking working-hours gate
+cloud-context start: working-hours gate clear

@@ -1,0 +1,2 @@
+audit: erun build --dry-run --version <VERSION>
+cd <TMP> && ERUN_BUILD_VERSION=<VERSION> ./build.sh

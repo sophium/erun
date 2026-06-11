@@ -1,0 +1,20 @@
+  - fresh provider=aws alias=dev region=eu-west-2 instance=i-0aaaabbbbcccc1111 type=c8gd.2xlarge disk=100GB/gp3 kube-context=fresh status=running public-ip=<VERSION>.10
+audit: erun context init --alias dev --context fresh --disk-size 100 --instance-type c8gd.2xlarge --region eu-west-2
+cloud-context init: alias=dev region=eu-west-2 instance-type=c8gd.2xlarge disk=100GB/gp3
+cloud-context init: resolved name=fresh kube-context=fresh
+aws ec2 create-security-group --group-name fresh-k3s --description 'ERun managed k3s API access for fresh' --query GroupId --output text --region eu-west-2 --profile dev
+aws ec2 authorize-security-group-ingress --group-id sg-0123456789abcdef0 --protocol tcp --port 6443 --cidr <VERSION>.0/0 --region eu-west-2 --profile dev
+aws iam get-role --role-name erun-fresh-host-stop --query Role.RoleName --output text --region eu-west-2 --profile dev
+aws iam put-role-policy --role-name erun-fresh-host-stop --policy-name erun-self-stop --policy-document file://<TMP> --region eu-west-2 --profile dev
+aws iam get-instance-profile --instance-profile-name erun-fresh-host-stop --query InstanceProfile.Arn --output text --region eu-west-2 --profile dev
+aws iam get-instance-profile --instance-profile-name erun-fresh-host-stop --query 'InstanceProfile.Roles[0].RoleName' --output text --region eu-west-2 --profile dev
+aws ssm get-parameter --name /aws/service/canonical/ubuntu/server/24.04/stable/current/arm64/hvm/ebs-gp3/ami-id --query Parameter.Value --output text --region eu-west-2 --profile dev
+aws ec2 run-instances --image-id ami-0aabbccddeeff0011 --instance-type c8gd.2xlarge --count 1 --block-device-mappings 'DeviceName=/dev/sda1,Ebs={VolumeSize=100,VolumeType=gp3,DeleteOnTermination=true}' --user-data file://<TMP> --metadata-options 'HttpEndpoint=enabled,HttpTokens=required,HttpPutResponseHopLimit=2' --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=fresh},{Key=erun:context,Value=fresh}]' --query 'Instances[0].InstanceId' --output text --security-group-ids sg-0123456789abcdef0 --iam-instance-profile Name=erun-fresh-host-stop --region eu-west-2 --profile dev
+An error occurred (InvalidParameterValue) when calling the RunInstances operation: Invalid IAM Instance Profile name
+IAM instance profile not yet visible to EC2; retrying in <ELAPSED>
+aws ec2 run-instances --image-id ami-0aabbccddeeff0011 --instance-type c8gd.2xlarge --count 1 --block-device-mappings 'DeviceName=/dev/sda1,Ebs={VolumeSize=100,VolumeType=gp3,DeleteOnTermination=true}' --user-data file://<TMP> --metadata-options 'HttpEndpoint=enabled,HttpTokens=required,HttpPutResponseHopLimit=2' --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=fresh},{Key=erun:context,Value=fresh}]' --query 'Instances[0].InstanceId' --output text --security-group-ids sg-0123456789abcdef0 --iam-instance-profile Name=erun-fresh-host-stop --region eu-west-2 --profile dev
+aws ec2 wait instance-running --instance-ids i-0aaaabbbbcccc1111 --region eu-west-2 --profile dev
+aws ec2 describe-instances --instance-ids i-0aaaabbbbcccc1111 --query 'Reservations[0].Instances[0].PublicIpAddress' --output text --region eu-west-2 --profile dev
+kubectl config set-cluster fresh --server https://<VERSION>.10:6443 --insecure-skip-tls-verify=true
+kubectl config set-credentials fresh --token <TOKEN>
+kubectl config set-context fresh --cluster fresh --user fresh

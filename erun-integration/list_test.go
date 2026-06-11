@@ -38,6 +38,60 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/with_seeded_tenant_env", normalize.Apply(result.Combined))
 	})
 
+	t.Run("corrupted_env_config_errors", func(t *testing.T) {
+		// Exercises LoadEnvConfig's corruption guard through ListEnvConfigs:
+		// an env config.yaml that fails YAML parsing must fail the list
+		// command with the corruption error instead of silently skipping
+		// the environment.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		mustWrite(t, filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml"), "{{{ not yaml")
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a corrupted env config, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/corrupted_env_config_errors", normalize.Apply(result.Combined))
+	})
+
+	t.Run("corrupted_tenant_config_errors", func(t *testing.T) {
+		// Exercises LoadTenantConfig's corruption guard through
+		// ListTenantConfigs: a tenant config.yaml that fails YAML parsing
+		// must fail the list command with the corruption error.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		mustWrite(t, filepath.Join(setup.ConfigHome, "erun", "team", "config.yaml"), "{{{ not yaml")
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a corrupted tenant config, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "list/corrupted_tenant_config_errors", normalize.Apply(result.Combined))
+	})
+
+	t.Run("tenant_api_url_and_envless_tenant", func(t *testing.T) {
+		// Exercises two writeTenantEntry residues: a tenant whose config
+		// carries api_url must print the "api url" line, and a tenant with a
+		// config but no environment subdirectories must print
+		// "environments: none" instead of an empty list.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		tenantCfg := filepath.Join(setup.ConfigHome, "erun", "team", "config.yaml")
+		mustWrite(t, tenantCfg,
+			"projectroot: "+setup.Cwd+"\n"+
+				"name: team\n"+
+				"defaultenvironment: dev\n"+
+				"api_url: https://api.example/erun\n")
+		envlessDir := filepath.Join(setup.ConfigHome, "erun", "envless")
+		if err := os.MkdirAll(envlessDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", envlessDir, err)
+		}
+		mustWrite(t, filepath.Join(envlessDir, "config.yaml"), "name: envless\nprojectroot: "+setup.Home+"\n")
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/tenant_api_url_and_envless_tenant", normalize.Apply(result.Combined))
+	})
+
 	t.Run("explicit_runtime_type", func(t *testing.T) {
 		// Seed an env whose YAML carries `type: runtime` directly. Verifies
 		// that list output surfaces the new field and that the resolver

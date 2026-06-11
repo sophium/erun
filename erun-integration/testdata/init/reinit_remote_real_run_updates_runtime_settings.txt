@@ -1,0 +1,15 @@
+audit: erun init --confirm-environment --container-registry registry.example/test --kubernetes-context test-context --remote --runtime-cpu 8 --runtime-memory 16Gi --set-default-tenant --version <VERSION> team dev
+Loading erun tool configuration, configPath=<TMP>
+Loaded erun tool configuration
+Loading tenant configuration
+Loaded tenant configuration
+Loading environment configuration
+==> Initializing team/dev
+deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
+dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
+==> Deploying team/dev <VERSION>
+    namespace team-dev on context test-context
+    waiting for helm rollout (timeout 2m0s)...
+==> Deployed team/dev <VERSION> in <ELAPSED>
+==> Initialized team/dev
+Configuration initialized OK

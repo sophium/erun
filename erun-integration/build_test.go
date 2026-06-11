@@ -381,6 +381,158 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_build_deploy_resolves_docker_target_deploy_specs", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_linux_package_from_component_dir", func(t *testing.T) {
+		// Exercises the explicit linux-package build path: from inside
+		// linux/<component>, `erun build` resolves the dir's build.sh as the
+		// build (LinuxPackageContextAtDir → ResolveCurrentLinuxBuildScripts)
+		// and dry-run traces the ./build.sh invocation with the version
+		// argument. ERUN_HOST_OS_OVERRIDE pins the host to linux and a
+		// dpkg-deb stub on PATH satisfies LinuxPackageBuildsSupported, so
+		// the golden is identical on mac/CI hosts.
+		setup := env.New(t)
+		pkgDir := filepath.Join(setup.Cwd, "team-devops", "linux", "erun-host")
+		if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", pkgDir, err)
+		}
+		if err := os.WriteFile(filepath.Join(pkgDir, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write build.sh: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "dpkg-deb", "")
+		envVars := append(setup.Env(), "ERUN_HOST_OS_OVERRIDE=linux")
+		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		result := erun.Run(t, []string{"build", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: pkgDir, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_linux_package_from_component_dir", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_linux_packages_from_linux_dir", func(t *testing.T) {
+		// Exercises ResolveLinuxPackageContextsAtDir + the script execution
+		// leg of runBuildExecution: from the linux/ parent dir every
+		// component's build.sh runs for real with ERUN_BUILD_VERSION set. The
+		// scripts record their invocation to marker files (side effect
+		// outside the captured streams). Host pinned to linux with a
+		// dpkg-deb stub as in the dry-run scenario.
+		setup := env.New(t)
+		linuxDir := filepath.Join(setup.Cwd, "team-devops", "linux")
+		pkgDir := filepath.Join(linuxDir, "erun-host")
+		if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", pkgDir, err)
+		}
+		marker := filepath.Join(setup.Cwd, "build-ran")
+		script := "#!/bin/sh\nprintf '%s' \"$ERUN_BUILD_VERSION\" > '" + marker + "'\nexit 0\n"
+		if err := os.WriteFile(filepath.Join(pkgDir, "build.sh"), []byte(script), 0o755); err != nil {
+			t.Fatalf("write build.sh: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "dpkg-deb", "")
+		envVars := append(setup.Env(), "ERUN_HOST_OS_OVERRIDE=linux")
+		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		result := erun.Run(t, []string{"build", "--version", "1.0.0"}, erun.RunOptions{Cwd: linuxDir, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/real_run_linux_packages_from_linux_dir", normalize.Apply(result.Combined))
+		ran, err := os.ReadFile(marker)
+		if err != nil {
+			t.Fatalf("expected build.sh to run and write its marker: %v", err)
+		}
+		if string(ran) != "1.0.0" {
+			t.Errorf("expected build.sh to receive ERUN_BUILD_VERSION, got %q", ran)
+		}
+	})
+
+	t.Run("dry_run_project_root_walks_devops_linux_dir", func(t *testing.T) {
+		// Exercises ResolveCurrentLinuxPackageContexts' devops-walk arms
+		// (resolveCurrentDevopsLinuxDir → findDevopsLinuxDirs): from the
+		// project root the linux module is discovered during command
+		// registration, while the build itself stays scoped to the docker
+		// contexts (explicit linux builds only fire inside linux/ dirs).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		pkgDir := filepath.Join(setup.Cwd, "team-devops", "linux", "erun-host")
+		if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", pkgDir, err)
+		}
+		if err := os.WriteFile(filepath.Join(pkgDir, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write build.sh: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "dpkg-deb", "")
+		envVars := append(setup.Env(), "ERUN_HOST_OS_OVERRIDE=linux")
+		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_project_root_walks_devops_linux_dir", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_build_deploy_default_tenant_breaks_project_tie", func(t *testing.T) {
+		// Exercises resolveProjectTenantForRoot's default-tenant tie-break:
+		// two tenants share the same project root, and `build --deploy`
+		// (which infers the tenant from the project) must pick the
+		// configured default tenant instead of erroring on the ambiguity.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		// A second tenant claiming the same project root, with no envs so
+		// it cannot interfere with environment resolution. Named to sort
+		// after "team" so the environment legacy fallback (which walks
+		// tenants alphabetically) resolves team/dev first.
+		otherDir := filepath.Join(setup.ConfigHome, "erun", "zz-extra")
+		if err := os.MkdirAll(otherDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", otherDir, err)
+		}
+		if err := os.WriteFile(filepath.Join(otherDir, "config.yaml"),
+			[]byte("projectroot: "+setup.Cwd+"\nname: zz-extra\n"), 0o644); err != nil {
+			t.Fatalf("zz-extra tenant cfg: %v", err)
+		}
+		dockerDir := filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops")
+		result := erun.Run(t, []string{"build", "--deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_build_deploy_default_tenant_breaks_project_tie", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_build_deploy_ambiguous_tenants_error", func(t *testing.T) {
+		// Exercises resolveProjectTenantForRoot's ambiguity guard: two
+		// tenants share the project root and the default tenant points
+		// elsewhere, so the inferred-tenant deploy must fail with "multiple
+		// tenants are configured for project" rather than guessing.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		otherDir := filepath.Join(setup.ConfigHome, "erun", "other")
+		if err := os.MkdirAll(otherDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", otherDir, err)
+		}
+		if err := os.WriteFile(filepath.Join(otherDir, "config.yaml"),
+			[]byte("projectroot: "+setup.Cwd+"\nname: other\n"), 0o644); err != nil {
+			t.Fatalf("other tenant cfg: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(setup.ConfigHome, "erun", "config.yaml"),
+			[]byte("defaulttenant: elsewhere\n"), 0o644); err != nil {
+			t.Fatalf("root cfg: %v", err)
+		}
+		dockerDir := filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops")
+		result := erun.Run(t, []string{"build", "--deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for ambiguous tenants, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_build_deploy_ambiguous_tenants_error", normalize.Apply(result.Combined))
+	})
+
 	t.Run("build_deploy_with_project_build_script_errors", func(t *testing.T) {
 		// --deploy cannot compose with a project build script: the script
 		// owns the whole build and erun cannot know what images it produced.

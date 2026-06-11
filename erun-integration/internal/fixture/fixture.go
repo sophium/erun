@@ -521,7 +521,15 @@ func RunGit(t testing.TB, dir string, args ...string) {
 // tests want to assert on it.
 func SeedDevopsRepo(t testing.TB, setup env.Setup, tenant, environment string) string {
 	t.Helper()
-	devops := filepath.Join(setup.Cwd, tenant+"-devops")
+	return SeedDevopsRepoAt(t, setup.Cwd, tenant, environment)
+}
+
+// SeedDevopsRepoAt is SeedDevopsRepo with an explicit project root, for
+// scenarios whose tenant project root is not the default setup.Cwd (e.g. a
+// git-initialized repo directory named after the tenant).
+func SeedDevopsRepoAt(t testing.TB, root, tenant, environment string) string {
+	t.Helper()
+	devops := filepath.Join(root, tenant+"-devops")
 	chart := filepath.Join(devops, "k8s", tenant+"-devops")
 	if err := os.MkdirAll(chart, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", chart, err)

@@ -1,0 +1,2 @@
+audit: erun cloud set --alias team-cloud team ghost
+no such environment exists: ghost

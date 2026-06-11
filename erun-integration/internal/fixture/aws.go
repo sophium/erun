@@ -14,9 +14,13 @@ import (
 // of the StubAWSCloudContext stub. Stderr is what the real AWS CLI would
 // print (the classifiers in erun-common/cloud_context.go substring-match
 // against it); ExitCode defaults to 254, the AWS CLI's client-error code.
+// Once makes the failure fire only on the family's first invocation — the
+// stub drops a marker file in the stubs dir and answers success afterwards —
+// so retry/recovery loops in production can be driven to their success arm.
 type AWSStubError struct {
 	Stderr   string
 	ExitCode int
+	Once     bool
 }
 
 // AWSCloudContextStubSpec configures the argv-branching `aws` stub used by
@@ -48,6 +52,13 @@ type AWSCloudContextStubSpec struct {
 	// PublicIP answers `ec2 describe-instances --query
 	// Reservations[0].Instances[0].PublicIpAddress`.
 	PublicIP string
+	// InstanceStates answers the bulk status-refresh query
+	// (`ec2 describe-instances --query
+	// Reservations[*].Instances[*].[InstanceId,State.Name] --output text`)
+	// issued by RefreshCloudContextStatuses. Multi-line "id<TAB>state"
+	// text, exactly what the AWS CLI prints. Empty answers the query with
+	// no output (every instance reads as "not found in AWS").
+	InstanceStates string
 	// SecurityGroupID answers `ec2 create-security-group` and
 	// `ec2 describe-security-groups`.
 	SecurityGroupID string
@@ -65,6 +76,9 @@ type AWSCloudContextStubSpec struct {
 	AuthorizeIngressError         *AWSStubError
 	StartInstancesError           *AWSStubError
 	StopInstancesError            *AWSStubError
+	RunInstancesError             *AWSStubError
+	WaitError                     *AWSStubError
+	DescribeInstanceStatesError   *AWSStubError
 }
 
 // StubAWSCloudContext writes an argv-branching `aws` stub at
@@ -83,27 +97,31 @@ type AWSCloudContextStubSpec struct {
 func StubAWSCloudContext(t testing.TB, stubsDir string, spec AWSCloudContextStubSpec) []string {
 	t.Helper()
 	spec = withAWSCloudContextDefaults(spec)
+	arm := func(pattern string, failure *AWSStubError, stdout string) string {
+		return awsCloudContextStubArm(stubsDir, pattern, failure, stdout)
+	}
 	arms := []string{
-		awsCloudContextStubArm(`*"iam get-role"*`, spec.GetRoleError, spec.RoleName),
-		awsCloudContextStubArm(`*"iam create-role"*`, nil, spec.RoleName),
-		awsCloudContextStubArm(`*"iam put-role-policy"*`, nil, ""),
-		awsCloudContextStubArm(`*"InstanceProfile.Roles[0].RoleName"*`, nil, spec.ProfileRoleName),
-		awsCloudContextStubArm(`*"iam get-instance-profile"*`, spec.GetInstanceProfileError, spec.InstanceProfileARN),
-		awsCloudContextStubArm(`*"iam create-instance-profile"*`, nil, spec.InstanceProfileARN),
-		awsCloudContextStubArm(`*"iam add-role-to-instance-profile"*`, spec.AddRoleToInstanceProfileError, ""),
-		awsCloudContextStubArm(`*"Name=state,Values=associated"*"AssociationId"*`, nil, spec.ActiveAssociationID),
-		awsCloudContextStubArm(`*"Name=state,Values=associated"*"IamInstanceProfile.Arn"*`, nil, spec.ActiveAssociationARN),
-		awsCloudContextStubArm(`*"Name=state,Values=associating,disassociating"*`, nil, spec.PendingAssociationID),
-		awsCloudContextStubArm(`*"ec2 associate-iam-instance-profile"*`, spec.AssociateInstanceProfileError, ""),
-		awsCloudContextStubArm(`*"ec2 create-security-group"*`, spec.CreateSecurityGroupError, spec.SecurityGroupID),
-		awsCloudContextStubArm(`*"ec2 describe-security-groups"*`, nil, spec.SecurityGroupID),
-		awsCloudContextStubArm(`*"ec2 authorize-security-group-ingress"*`, spec.AuthorizeIngressError, ""),
-		awsCloudContextStubArm(`*"ssm get-parameter"*`, nil, spec.ImageID),
-		awsCloudContextStubArm(`*"ec2 run-instances"*`, nil, spec.InstanceID),
-		awsCloudContextStubArm(`*"ec2 start-instances"*`, spec.StartInstancesError, ""),
-		awsCloudContextStubArm(`*"ec2 stop-instances"*`, spec.StopInstancesError, ""),
-		awsCloudContextStubArm(`*"ec2 wait "*`, nil, ""),
-		awsCloudContextStubArm(`*"PublicIpAddress"*`, nil, spec.PublicIP),
+		arm(`*"iam get-role"*`, spec.GetRoleError, spec.RoleName),
+		arm(`*"iam create-role"*`, nil, spec.RoleName),
+		arm(`*"iam put-role-policy"*`, nil, ""),
+		arm(`*"InstanceProfile.Roles[0].RoleName"*`, nil, spec.ProfileRoleName),
+		arm(`*"iam get-instance-profile"*`, spec.GetInstanceProfileError, spec.InstanceProfileARN),
+		arm(`*"iam create-instance-profile"*`, nil, spec.InstanceProfileARN),
+		arm(`*"iam add-role-to-instance-profile"*`, spec.AddRoleToInstanceProfileError, ""),
+		arm(`*"Name=state,Values=associated"*"AssociationId"*`, nil, spec.ActiveAssociationID),
+		arm(`*"Name=state,Values=associated"*"IamInstanceProfile.Arn"*`, nil, spec.ActiveAssociationARN),
+		arm(`*"Name=state,Values=associating,disassociating"*`, nil, spec.PendingAssociationID),
+		arm(`*"ec2 associate-iam-instance-profile"*`, spec.AssociateInstanceProfileError, ""),
+		arm(`*"ec2 create-security-group"*`, spec.CreateSecurityGroupError, spec.SecurityGroupID),
+		arm(`*"ec2 describe-security-groups"*`, nil, spec.SecurityGroupID),
+		arm(`*"ec2 authorize-security-group-ingress"*`, spec.AuthorizeIngressError, ""),
+		arm(`*"ssm get-parameter"*`, nil, spec.ImageID),
+		arm(`*"ec2 run-instances"*`, spec.RunInstancesError, spec.InstanceID),
+		arm(`*"ec2 start-instances"*`, spec.StartInstancesError, ""),
+		arm(`*"ec2 stop-instances"*`, spec.StopInstancesError, ""),
+		arm(`*"ec2 wait "*`, spec.WaitError, ""),
+		arm(`*"[InstanceId,State.Name]"*`, spec.DescribeInstanceStatesError, spec.InstanceStates),
+		arm(`*"PublicIpAddress"*`, nil, spec.PublicIP),
 	}
 	script := `case "$*" in` + "\n" +
 		strings.Join(arms, "") +
@@ -140,23 +158,56 @@ func withAWSCloudContextDefaults(spec AWSCloudContextStubSpec) AWSCloudContextSt
 
 // awsCloudContextStubArm renders one `case` arm: an injected failure prints
 // its stderr and exits non-zero, a success prints the canned stdout (when
-// any) and exits 0.
-func awsCloudContextStubArm(pattern string, failure *AWSStubError, stdout string) string {
+// any) and exits 0. A failure with Once=true fires only on the family's
+// first invocation: the arm drops a marker file derived from the pattern
+// into stubsDir and answers the success response on every later call, so
+// production retry loops can be driven through failure and into recovery.
+func awsCloudContextStubArm(stubsDir, pattern string, failure *AWSStubError, stdout string) string {
+	successLines := []string{"exit 0 ;;"}
+	if stdout != "" {
+		successLines = []string{"printf '%s\\n' " + shellSingleQuote(stdout), "exit 0 ;;"}
+	}
+	lines := []string{pattern + ")"}
 	if failure != nil {
 		code := failure.ExitCode
 		if code == 0 {
 			code = 254
 		}
-		return "  " + pattern + ")\n" +
-			"    printf '%s\\n' " + shellSingleQuote(failure.Stderr) + " >&2\n" +
-			"    exit " + strconv.Itoa(code) + " ;;\n"
+		failLines := []string{
+			"printf '%s\\n' " + shellSingleQuote(failure.Stderr) + " >&2",
+			"exit " + strconv.Itoa(code),
+		}
+		if failure.Once {
+			marker := shellSingleQuote(filepath.Join(stubsDir, "aws-once-"+sanitizeFilename(pattern)))
+			lines = append(lines, "  if [ ! -f "+marker+" ]; then", "    : > "+marker)
+			for _, l := range failLines {
+				lines = append(lines, "    "+l)
+			}
+			lines = append(lines, "  fi")
+		} else {
+			failLines[len(failLines)-1] += " ;;"
+			for _, l := range failLines {
+				lines = append(lines, "  "+l)
+			}
+			return renderStubArmLines(lines)
+		}
 	}
-	if stdout == "" {
-		return "  " + pattern + ") exit 0 ;;\n"
+	for _, l := range successLines {
+		lines = append(lines, "  "+l)
 	}
-	return "  " + pattern + ")\n" +
-		"    printf '%s\\n' " + shellSingleQuote(stdout) + "\n" +
-		"    exit 0 ;;\n"
+	return renderStubArmLines(lines)
+}
+
+// renderStubArmLines joins one arm's lines with the two-space base indent the
+// surrounding `case "$*" in` body uses.
+func renderStubArmLines(lines []string) string {
+	var b strings.Builder
+	for _, line := range lines {
+		b.WriteString("  ")
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 // SeedAWSSharedConfig writes <home>/.aws/config with one SSO profile for

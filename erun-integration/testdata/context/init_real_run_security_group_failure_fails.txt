@@ -1,0 +1,6 @@
+audit: erun context init --alias dev --context fresh
+cloud-context init: alias=dev region=eu-west-2 instance-type=c8gd.2xlarge disk=100GB/gp3
+cloud-context init: resolved name=fresh kube-context=fresh
+aws ec2 create-security-group --group-name fresh-k3s --description 'ERun managed k3s API access for fresh' --query GroupId --output text --region eu-west-2 --profile dev
+An error occurred (UnauthorizedOperation) when calling the CreateSecurityGroup operation: You are not authorized to perform this operation.
+aws ec2 create-security-group --group-name fresh-k3s --description ERun managed k3s API access for fresh --query GroupId --output text: An error occurred (UnauthorizedOperation) when calling the CreateSecurityGroup operation: You are not authorized to perform this operation.

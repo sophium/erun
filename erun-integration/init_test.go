@@ -904,4 +904,89 @@ func TestInit(t *testing.T) {
 		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "init/real_run_via_stubs", normalize.Apply(result.Combined))
 	})
+
+	t.Run("reinit_real_run_updates_kubernetes_context", func(t *testing.T) {
+		// Re-init of an existing local env with a different
+		// --kubernetes-context: exercises updateEnvConfig's update chain —
+		// updateEnvKubernetesContext (changed context → namespace ensure in
+		// the new context + persisted change), updateEnvCloudProvider (no
+		// matching provider/context → alias stays empty), and
+		// updateEnvContainerRegistry (same registry → no change). The
+		// kubectl stub is the namespace decision input: `get namespace`
+		// reports NotFound so EnsureKubernetesNamespace's create branch
+		// runs. The persisted env config must carry the new context.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "kubectl", strings.Join([]string{
+			`case "$*" in`,
+			`  *"get namespace"*)`,
+			`    printf '%s\n' 'Error from server (NotFound): namespaces "team-dev" not found' >&2`,
+			`    exit 1 ;;`,
+			`  *) : ;;`,
+			`esac`,
+			`exit 0`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		args := []string{
+			"init", "team", "dev",
+			"--kubernetes-context", "new-context",
+			"--container-registry", "registry.example/test",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_real_run_updates_kubernetes_context", normalize.Apply(result.Combined))
+		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		if !strings.Contains(string(raw), "kubernetescontext: new-context") {
+			t.Errorf("expected persisted env config to carry the new kubernetes context, got:\n%s", raw)
+		}
+	})
+
+	t.Run("reinit_remote_real_run_updates_runtime_settings", func(t *testing.T) {
+		// Re-init of an existing remote env: exercises updateRemoteEnvConfig
+		// — the persisted repopath converges on the in-pod worktree
+		// convention path, the runtime version moves to the new --version,
+		// and the runtime pod limits are recorded — without recreating the
+		// env. The kubectl stub reports the remote clone as already present
+		// so the flow pulls instead of prompting for a repository URL.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		stubRemoteInitKubectl(t, stubs, remoteInitKubectlStub{RepoExists: true})
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "git", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "git")...)
+		args := []string{
+			"init", "team", "dev",
+			"--remote",
+			"--version", "2.0.0",
+			"--runtime-cpu", "8",
+			"--runtime-memory", "16Gi",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/test",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/reinit_remote_real_run_updates_runtime_settings", normalize.Apply(result.Combined))
+		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		for _, want := range []string{"runtimeversion: 2.0.0", "cpu: \"8\"", "memory: 16Gi"} {
+			if !strings.Contains(string(raw), want) {
+				t.Errorf("expected persisted env config to contain %q, got:\n%s", want, raw)
+			}
+		}
+	})
 }

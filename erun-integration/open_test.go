@@ -342,6 +342,24 @@ func TestOpen(t *testing.T) {
 		}
 	})
 
+	t.Run("vscode_real_run_requires_deploy_errors", func(t *testing.T) {
+		// Real-run companion to the vscode_dry_run redeploy trace: when the
+		// runtime deployment is missing and the user asked for an IDE
+		// launch, deployRuntime must refuse with the actionable "run
+		// `erun sshd init` or `erun open` first" error instead of deploying
+		// behind the IDE's back. The kubectl NotFound stub is the
+		// deployment-check decision input; the run fails before any
+		// port-forward starts so no ports are needed.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHD(t, setup, "team", "dev")
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_HOST_OS_OVERRIDE=darwin")
+		result := erun.Run(t, []string{"open", "team", "dev", "--vscode", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the IDE open needs a runtime deploy, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "open/vscode_real_run_requires_deploy_errors", normalize.Apply(result.Combined))
+	})
+
 	t.Run("alias_prompt_skipped_when_alias_configured", func(t *testing.T) {
 		// When ~/.zshrc already carries the team-dev alias,
 		// detectOpenNoShellAliasStartupFile reports it configured
