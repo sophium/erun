@@ -1,0 +1,50 @@
+Use the arrow keys to navigate: ↓ ↑ → ←
+? Select tenant:
+  ▸ alpha
+    beta
+    Initialize current project
+Use the arrow keys to navigate: ↓ ↑ → ← ? Select tenant:     alpha  ▸ beta    Initialize current project✔ beta
+audit: erun --dry-run
+running init before resolving open target
+Loading erun tool configuration, configPath=<TMP>
+Loaded erun tool configuration
+Loading tenant configuration
+Loaded tenant configuration
+Loading environment configuration
+==> Initializing beta/dev
+mkdir -p <TMP>
+write-yaml <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+==> Initialized beta/dev
+Configuration initialized OK
+ensure-agent-instructions
+ensure-claude-settings

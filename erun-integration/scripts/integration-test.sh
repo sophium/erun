@@ -6,7 +6,7 @@
 #   ./scripts/integration-test.sh [-threshold=NN]
 #
 # Environment:
-#   COVERAGE_THRESHOLD   default 63 (percent). See note below.
+#   COVERAGE_THRESHOLD   default 67 (percent). See note below.
 #   GOCOVERDIR           override the directory used for raw counter files;
 #                        defaults to ./coverage/raw under the script.
 #   UPDATE_GOLDEN=1      regenerate golden output files instead of comparing.
@@ -28,7 +28,7 @@
 
 set -euo pipefail
 
-threshold="${COVERAGE_THRESHOLD:-63}"
+threshold="${COVERAGE_THRESHOLD:-67}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -threshold=*) threshold="${1#-threshold=}" ;;
