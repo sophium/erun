@@ -25,7 +25,7 @@ When something misbehaves, the panel at the bottom of the terminal area gives yo
 - **erun trace.** The selected environment's persistent trace log: every erun command that ran for the env, at full trace detail, timestamped — including commands that finished before you opened the console. Capture is always on; the log is capped and rotated automatically (see [where it lives](/reference/config-locations#trace-log)). For a local environment the desktop reads the log from your machine; for a remote environment it reads the one inside the pod while the environment is open.
 - **UI trace.** The desktop's own action history — what the app just did, in order — for reporting a desktop bug rather than an environment one.
 
-Both panes have a **Copy** button so a bug report can carry the evidence instead of a description of it.
+Both panes have a **Copy** button for their own stream, and the console's **Copy report** button packages everything at once — app build, the selected environment's identity and state, the erun trace (or the reason there isn't one), and the UI trace — into a single paste-ready block, so a bug report carries the evidence instead of a description of it.
 
 ## Open it in your editor
 

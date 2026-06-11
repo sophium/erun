@@ -1,6 +1,16 @@
-import { CheckCircle2, ChevronDown, ChevronUp, Copy, RefreshCw, Trash2 } from 'lucide-react';
+import {
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  ClipboardList,
+  Copy,
+  RefreshCw,
+  Trash2,
+} from 'lucide-react';
 import * as React from 'react';
 
+import { stateApi } from '@/app/api/stateApi';
+import { formatDiagnosticsReport } from '@/app/diagnosticsReport';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { setDebugOpen, startDebugResize } from '@/app/layoutThunks';
 import {
@@ -10,6 +20,7 @@ import {
   type UITraceEntry,
   uiTraceGeneration,
 } from '@/app/uiTraceBuffer';
+import { selectionKey } from '@/app/versionSuggestions';
 import { ResizeHandle } from '@/components/app/ResizeHandle';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -82,9 +93,21 @@ export function DebugPanel({ open }: { open: boolean }): React.ReactElement {
           </span>
         </button>
         {open && (
-          <div className="flex items-center gap-1" role="tablist" aria-label="Diagnostics sections">
-            <DiagnosticsTabButton current={tab} value="erun" label="erun trace" onSelect={setTab} />
-            <DiagnosticsTabButton current={tab} value="ui" label="UI trace" onSelect={setTab} />
+          <div className="flex items-center gap-2">
+            <CopyReportButton selection={selection} />
+            <div
+              className="flex items-center gap-1"
+              role="tablist"
+              aria-label="Diagnostics sections"
+            >
+              <DiagnosticsTabButton
+                current={tab}
+                value="erun"
+                label="erun trace"
+                onSelect={setTab}
+              />
+              <DiagnosticsTabButton current={tab} value="ui" label="UI trace" onSelect={setTab} />
+            </div>
           </div>
         )}
       </div>
@@ -194,6 +217,78 @@ function CopyButton({
   );
 }
 
+// CopyReportButton assembles the one-click bug report (issue #514): app
+// build, the selected env's identity/state, a fresh erun-trace read (so the
+// report is current even between poll ticks), and the UI action history —
+// one paste-ready block, available from either tab.
+function CopyReportButton({ selection }: { selection: UISelection | null }): React.ReactElement {
+  const selectInitialState = React.useMemo(
+    () => stateApi.endpoints.getInitialState.select(undefined),
+    [],
+  );
+  const build = useAppSelector((state) => selectInitialState(state).data?.build ?? null);
+  const environment = useAppSelector((state) => {
+    if (!selection) {
+      return null;
+    }
+    const tenant = state.tenants.tenants.find((entry) => entry.name === selection.tenant);
+    return tenant?.environments.find((env) => env.name === selection.environment) ?? null;
+  });
+  const envStatus = useAppSelector((state) =>
+    selection ? (state.envStatus.statusByEnv[selectionKey(selection)] ?? '') : '',
+  );
+  const [status, setStatus] = React.useState('');
+
+  const copyReport = React.useCallback(() => {
+    const assemble = async (): Promise<void> => {
+      let trace: UIEnvTrace | null = null;
+      if (selection) {
+        trace = await LoadEnvTrace({
+          tenant: selection.tenant,
+          environment: selection.environment,
+        }).catch(() => null);
+      }
+      const report = formatDiagnosticsReport({
+        generatedAt: new Date().toISOString(),
+        build,
+        selection,
+        environment,
+        envStatus,
+        trace,
+        uiTrace: uiTraceEntries(),
+      });
+      await ClipboardSetText(report);
+    };
+    assemble()
+      .then(() => {
+        setStatus('Copied');
+        window.setTimeout(() => {
+          setStatus('');
+        }, 1400);
+      })
+      .catch(() => {
+        setStatus('Copy failed');
+      });
+  }, [selection, build, environment, envStatus]);
+
+  return (
+    <Button
+      className="h-6 px-2 text-[11px] [&_svg]:size-3.5"
+      type="button"
+      variant="ghost"
+      size="sm"
+      onClick={copyReport}
+    >
+      {status === 'Copied' ? (
+        <CheckCircle2 aria-hidden="true" />
+      ) : (
+        <ClipboardList aria-hidden="true" />
+      )}
+      {status || 'Copy report'}
+    </Button>
+  );
+}
+
 // useEnvTracePoll loads the selected env's persistent trace log and keeps
 // it fresh while the pane is visible, so a running command's lines arrive
 // without manual refresh.
@@ -233,19 +328,23 @@ function ErunTracePane({ selection }: { selection: UISelection | null }): React.
   const content = trace?.content ?? '';
   const { outputRef, handleScroll } = useStickToBottom(content);
 
+  // The toolbar sits in its own grid row, outside the scroll region:
+  // stick-to-bottom would otherwise scroll the actions out the top the
+  // moment the log outgrows the pane — an affordance that exists but cannot
+  // be seen does not exist (issue #514).
   return (
-    <div className="grid min-h-0 grid-rows-[minmax(0,1fr)]">
+    <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
+      <ErunTraceToolbar
+        label={erunTraceLabel(tenant, environment, trace)}
+        content={content}
+        onRefresh={refresh}
+      />
       <div
         ref={outputRef}
         onScroll={handleScroll}
-        className="min-h-0 overflow-auto px-3 py-2 font-mono text-[11px] leading-[1.35] text-[oklch(0.82_0_0)]"
+        className="min-h-0 overflow-auto px-3 pb-2 font-mono text-[11px] leading-[1.35] text-[oklch(0.82_0_0)]"
         aria-label="erun trace output"
       >
-        <ErunTraceToolbar
-          label={erunTraceLabel(tenant, environment, trace)}
-          content={content}
-          onRefresh={refresh}
-        />
         <ErunTraceBody tenant={tenant} environment={environment} trace={trace} />
       </div>
     </div>
@@ -270,7 +369,7 @@ function ErunTraceToolbar({
 }): React.ReactElement {
   const { copyStatus, copy } = useCopyAction(content);
   return (
-    <div className="mb-1 flex items-center justify-between gap-2">
+    <div className="flex items-center justify-between gap-2 px-3 pt-1.5 pb-1">
       <span className="min-w-0 truncate text-[10px] text-[oklch(0.5_0_0)]">{label}</span>
       <span className="flex flex-none items-center gap-1">
         <Button
@@ -340,14 +439,11 @@ function UITracePane(): React.ReactElement {
   const { outputRef, handleScroll } = useStickToBottom(text);
   const { copyStatus, copy } = useCopyAction(text);
 
+  // Actions are pinned outside the scroll region — same rationale as the
+  // erun trace toolbar (issue #514).
   return (
-    <div
-      ref={outputRef}
-      onScroll={handleScroll}
-      className="min-h-0 overflow-auto px-3 py-2 font-mono text-[11px] leading-[1.35] text-[oklch(0.82_0_0)]"
-      aria-label="UI trace output"
-    >
-      <div className="mb-1 flex items-center justify-end gap-1">
+    <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
+      <div className="flex items-center justify-end gap-1 px-3 pt-1.5 pb-1">
         <CopyButton copyStatus={copyStatus} disabled={!text.trim()} onCopy={copy} />
         <Button
           className="h-6 px-2 text-[11px] [&_svg]:size-3.5"
@@ -363,13 +459,20 @@ function UITracePane(): React.ReactElement {
           Clear
         </Button>
       </div>
-      {entries.length === 0 ? (
-        <p className="m-0 text-[oklch(0.6_0_0)]">No UI activity recorded yet.</p>
-      ) : (
-        <pre className="m-0 font-mono text-[11px] leading-[1.35] break-words whitespace-pre-wrap">
-          {text}
-        </pre>
-      )}
+      <div
+        ref={outputRef}
+        onScroll={handleScroll}
+        className="min-h-0 overflow-auto px-3 pb-2 font-mono text-[11px] leading-[1.35] text-[oklch(0.82_0_0)]"
+        aria-label="UI trace output"
+      >
+        {entries.length === 0 ? (
+          <p className="m-0 text-[oklch(0.6_0_0)]">No UI activity recorded yet.</p>
+        ) : (
+          <pre className="m-0 font-mono text-[11px] leading-[1.35] break-words whitespace-pre-wrap">
+            {text}
+          </pre>
+        )}
+      </div>
     </div>
   );
 }

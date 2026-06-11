@@ -33,9 +33,28 @@ test.describe('diagnostics console', () => {
     await expect(app.debugPanel.tab('erun trace')).toHaveAttribute('aria-selected', 'true');
     await expect(app.debugPanel.erunTracePane()).toBeVisible();
     // The pane always offers Refresh; Copy is present (enabled only when
-    // there is content to copy).
+    // there is content to copy); Copy report sits in the header, available
+    // from either tab.
     await expect(app.debugPanel.refreshButton()).toBeVisible();
     await expect(app.debugPanel.copyButton()).toBeVisible();
+    await expect(app.debugPanel.copyReportButton()).toBeVisible();
+  });
+
+  test('pane actions live outside the scroll regions and the report button spans tabs', async ({
+    app,
+  }) => {
+    // #514: the toolbars used to render inside the scrollable region, so
+    // stick-to-bottom pushed Copy/Refresh out the top as soon as always-on
+    // capture filled the pane. Lock the structure: the scroll regions
+    // contain no buttons at all — the actions are pinned rows above them.
+    await expect(app.debugPanel.erunTracePane().getByRole('button')).toHaveCount(0);
+    await expect(app.debugPanel.refreshButton()).toBeVisible();
+
+    await app.debugPanel.selectTab('UI trace');
+    await expect(app.debugPanel.uiTracePane().getByRole('button')).toHaveCount(0);
+    await expect(app.debugPanel.clearButton()).toBeVisible();
+    // The header's Copy report stays available regardless of active tab.
+    await expect(app.debugPanel.copyReportButton()).toBeVisible();
   });
 
   test('UI trace records dispatched actions and Clear empties it', async ({ app }) => {
