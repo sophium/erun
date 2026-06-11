@@ -1,0 +1,2 @@
+audit: erun activity record-stop --environment dev --reason Manual stop --source host-manual --tenant team
+invalid <TMP> invalid character 'n' looking for beginning of object key string

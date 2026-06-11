@@ -1,0 +1,2 @@
+audit: erun activity ssh-proxy --environment dev --tenant team
+listen and target addresses are required

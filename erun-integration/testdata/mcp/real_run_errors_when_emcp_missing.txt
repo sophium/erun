@@ -1,0 +1,2 @@
+audit: erun mcp team dev
+emcp executable not found; build or install it first

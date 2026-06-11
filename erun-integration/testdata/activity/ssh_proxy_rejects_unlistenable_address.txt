@@ -1,0 +1,2 @@
+audit: erun activity ssh-proxy --environment dev --listen <LOOPBACK> --target <LOOPBACK>:1 --tenant team
+listen tcp: address <LOOPBACK>: missing port in address
