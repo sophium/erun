@@ -599,4 +599,68 @@ test.describe('idle widget stop protection', () => {
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
   });
+
+  // Issue #456 — a failed stop used to surface as a bare "exit status 1"
+  // while the instance kept running. erun-common's
+  // classifyCloudContextPowerError now names the reason and the unlock
+  // lever; this locks the desktop surface: the error toast carries the
+  // actionable message and the widget keeps reporting the running state
+  // (the stop affordance), never a false "stopped". A real AWS
+  // OperationNotPermitted cannot be staged headless (no EC2 with stop
+  // protection in the harness), so the rejected RPC carries the exact
+  // message shape the classifier emits; the classification itself is owned
+  // by erun-common/cloud_context_power_error_test.go.
+  test('a failed stop surfaces the actionable reason and keeps the running state', async ({
+    app,
+    page,
+  }) => {
+    const ctxName = 'mock-ctx-stop-fail';
+    const idle: IdleStatusFixture = {
+      cloudContextName: ctxName,
+      cloudContextStatus: 'running',
+      cloudContextLabel: ctxName,
+    };
+    const stopError =
+      `cloud context "${ctxName}" cannot be stopped: stop protection (DisableApiStop) is enabled on instance i-0abc123 — ` +
+      `turn it off first (\`erun context enable-api-stop ${ctxName}\`, or the stop-protection toggle in the desktop titlebar), ` +
+      'then retry: aws ec2 stop-instances: An error occurred (OperationNotPermitted) when calling the StopInstances operation';
+
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as InvokeBody;
+      if (body.method === 'LoadIdleStatus') {
+        return route.fulfill(envelope(managedRunningIdleStatus(idle)));
+      }
+      if (body.method === 'DescribeCloudContextApiStop') {
+        // Locked — the same condition that makes the real stop fail.
+        return route.fulfill(envelope(apiStopStatus(ctxName, true)));
+      }
+      if (body.method === 'StopCloudContext') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ error: stopError }),
+        });
+      }
+      await route.continue();
+    });
+
+    const tenants = await app.sidebar.tenants();
+    test.skip(tenants.length === 0, 'no tenants in this developer harness');
+    const tenant = tenants[0]!;
+    const envs = await app.sidebar.environmentsFor(tenant);
+    test.skip(envs.length === 0, `no envs under tenant ${tenant}`);
+    await app.sidebar.openEnvironment(tenant, envs[0]!);
+
+    const stopButton = page.getByRole('button', { name: new RegExp(`^Stop ${ctxName}`) });
+    await stopButton.waitFor({ state: 'visible', timeout: 6_000 });
+    await stopButton.click();
+
+    // The failure reason renders where the user acted (Nielsen #1/#9):
+    // the titlebar error pill names stop protection as the cause.
+    const errorPill = page.getByRole('alert').filter({ hasText: 'stop protection' });
+    await expect(errorPill).toBeVisible({ timeout: 6_000 });
+
+    // The widget must keep reporting reality: still running, stop still
+    // offered — never a silent flip to "stopped".
+    await expect(stopButton).toBeVisible();
+  });
 });

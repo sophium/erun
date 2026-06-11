@@ -572,7 +572,7 @@ func StopCloudContext(ctx Context, store CloudContextStore, params CloudContextP
 	// delete-env teardown) only see "stopped" once the instance has
 	// actually got there.
 	if _, err := deps.RunAWS(ctx, provider, status.Region, []string{"ec2", "wait", "instance-stopped", "--instance-ids", status.InstanceID}); err != nil {
-		return CloudContextStatus{}, err
+		return CloudContextStatus{}, fmt.Errorf("cloud context %q: stop was accepted but the instance was not observed stopped — it may still be transitioning; check its state in the AWS console and retry: %w", status.Name, classifyCloudContextPowerError("stop-instances", status.CloudContextConfig, err))
 	}
 	return status, nil
 }
@@ -608,6 +608,60 @@ func isAWSIncorrectInstanceStateError(err error) bool {
 		return false
 	}
 	return strings.Contains(err.Error(), "IncorrectInstanceState")
+}
+
+// awsExpiredCredentialsMarkers are the stderr signatures the AWS CLI emits
+// when the call failed for authentication rather than the requested
+// operation: an expired/invalid SSO session, expired STS credentials, or no
+// credentials at all. Substring matching on the wrapped error mirrors
+// isAWSIncorrectInstanceStateError.
+var awsExpiredCredentialsMarkers = []string{
+	"Token has expired",
+	"SSO session associated with this profile has expired",
+	"ExpiredToken",
+	"RequestExpired",
+	"Unable to locate credentials",
+	"InvalidClientTokenId",
+	"AuthFailure",
+}
+
+func isAWSExpiredCredentialsError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	for _, marker := range awsExpiredCredentialsMarkers {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// classifyCloudContextPowerError translates a raw start-instances /
+// stop-instances failure into the actionable reason the operator needs
+// (issue #456: a failed Stop surfaced as a bare exit 1 while the instance
+// kept running). The two failure families with a known next step:
+//
+//   - OperationNotPermitted on stop — stop protection (DisableApiStop) is
+//     on, the deliberate repair-time lock; the fix is unlocking it, not
+//     retrying.
+//   - Expired/missing AWS credentials — the call never reached the
+//     instance; the fix is signing in again.
+//
+// Anything else passes through unchanged so callers (including the
+// IncorrectInstanceState absorption in StopCloudContext/StartCloudContext)
+// keep seeing the raw AWS text.
+func classifyCloudContextPowerError(awsAction string, config CloudContextConfig, err error) error {
+	switch {
+	case err == nil:
+		return nil
+	case awsAction == "stop-instances" && strings.Contains(err.Error(), "OperationNotPermitted"):
+		return fmt.Errorf("cloud context %q cannot be stopped: stop protection (DisableApiStop) is enabled on instance %s — turn it off first (`erun context enable-api-stop %s`, or the stop-protection toggle in the desktop titlebar), then retry: %w", config.Name, config.InstanceID, config.Name, err)
+	case isAWSExpiredCredentialsError(err):
+		return fmt.Errorf("cloud context %q: the AWS session for alias %q is expired or unavailable — sign in again (`erun cloud login --alias %s`, or the cloud login in the desktop settings), then retry: %w", config.Name, config.CloudProviderAlias, config.CloudProviderAlias, err)
+	}
+	return err
 }
 
 func StartCloudContext(ctx Context, store CloudContextStore, params CloudContextParams, deps CloudContextDependencies) (CloudContextStatus, error) {
@@ -1140,7 +1194,7 @@ func changeCloudContextPowerState(ctx Context, store CloudContextStore, params C
 		return CloudContextStatus{}, err
 	}
 	if _, err := deps.RunAWS(ctx, provider, config.Region, []string{"ec2", awsAction, "--instance-ids", config.InstanceID}); err != nil {
-		return CloudContextStatus{}, err
+		return CloudContextStatus{}, classifyCloudContextPowerError(awsAction, config, err)
 	}
 	return CloudContextStatus{CloudContextConfig: NormalizeCloudContextConfig(config), Status: status}, nil
 }
