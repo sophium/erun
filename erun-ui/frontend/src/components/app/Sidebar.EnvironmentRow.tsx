@@ -1,4 +1,4 @@
-import { LoaderCircle, MoreHorizontal } from 'lucide-react';
+import { LoaderCircle, MoreHorizontal, TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 
 import { readError } from '@/app/errors';
@@ -76,29 +76,57 @@ function BusyRowSpinner({ label }: { label: string }): React.ReactElement {
   );
 }
 
-// OpenEnvDot renders a small green circle next to an env name when
-// the env has live tabs registered (the user clicked the row at
-// least once and Local/ERun/AI tabs were spawned). The dot is a
-// real button so clicking it tears those tabs down via the
-// closeEnvironment thunk; stopPropagation keeps the click from
-// bubbling to the row's openSelection handler. Distinct from the
-// LOCAL pill (which marks the row as the dev-machine env) and
-// from BusyRowSpinner (which fires only while an activity-queue
-// entry is running) — open and busy are independent states and
-// can be visible together.
+// OpenEnvDot renders the open indicator next to an env name when the env has
+// live tabs registered (the user clicked the row at least once and
+// Local/ERun/AI tabs were spawned). Its shape and colour reflect the env's
+// REAL condition (issue #470 — tab presence alone is not running-ness):
+// green filled circle while running, a hollow grey ring while the linked
+// cloud context is stopped, an amber triangle after a failed deploy /
+// abandoned reconnect. Shape + accessible label carry the state, never
+// colour alone. The dot is a real button so clicking it tears the tabs down
+// via the closeEnvironment thunk; stopPropagation keeps the click from
+// bubbling to the row's openSelection handler. Distinct from the LOCAL pill
+// (which marks the row as the dev-machine env) and from BusyRowSpinner
+// (which fires only while an activity-queue entry is running) — open and
+// busy are independent states and can be visible together.
 function OpenEnvDot({
   tenantName,
   environmentName,
   selection,
+  envState,
 }: {
   tenantName: string;
   environmentName: string;
   selection: UISelection;
+  envState: string;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
-  const label = `Close ${tenantName} / ${environmentName}`;
+  const name = `${tenantName} / ${environmentName}`;
+  const closeHint = `Click to close its tabs — terminals + tracking only, leaves AWS untouched`;
+  let label = `Close ${name}`;
+  let tooltip = `${label} — terminals + tracking only, leaves AWS untouched`;
+  let glyph = (
+    <span
+      aria-hidden="true"
+      className="block size-2 rounded-full bg-emerald-500 shadow-[0_0_0_1px_color-mix(in_oklch,currentColor_20%,transparent)]"
+    />
+  );
+  if (envState === 'stopped') {
+    label = `${name} is stopped — start it from the titlebar`;
+    tooltip = `${label}. ${closeHint}`;
+    glyph = (
+      <span
+        aria-hidden="true"
+        className="block size-2 rounded-full border-[1.5px] border-muted-foreground bg-transparent"
+      />
+    );
+  } else if (envState === 'failed') {
+    label = `${name} deploy failed — recover from Activities or re-click the row`;
+    tooltip = `${label}. ${closeHint}`;
+    glyph = <TriangleAlert aria-hidden="true" className="size-2.5 text-amber-500" />;
+  }
   return (
-    <IconTooltip label={`${label} — terminals + tracking only, leaves AWS untouched`}>
+    <IconTooltip label={tooltip}>
       <Button
         type="button"
         variant="ghost"
@@ -106,6 +134,7 @@ function OpenEnvDot({
         className="size-[18px] flex-none cursor-pointer rounded-full border-0 bg-transparent p-0 text-current hover:bg-[color-mix(in_oklch,currentColor_12%,transparent)]"
         aria-label={label}
         data-testid="env-open-dot"
+        data-env-state={envState || 'running'}
         onClick={(event) => {
           event.stopPropagation();
           void dispatch(closeEnvironment(selection)).catch((error: unknown) => {
@@ -113,10 +142,7 @@ function OpenEnvDot({
           });
         }}
       >
-        <span
-          aria-hidden="true"
-          className="block size-2 rounded-full bg-emerald-500 shadow-[0_0_0_1px_color-mix(in_oklch,currentColor_20%,transparent)]"
-        />
+        {glyph}
       </Button>
     </IconTooltip>
   );
@@ -180,6 +206,15 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
       state.review.reconnect.tenant === tenantName &&
       state.review.reconnect.environment === environmentName,
   );
+  // envState is the env's real condition behind the open dot (issue #470):
+  // '' (running/normal), 'stopped' (cloud context not running), 'failed'
+  // (deploy failed / reconnect gave up). Driven by the env-status event.
+  const envState = useAppSelector(
+    (state) =>
+      state.envStatus.statusByEnv[
+        selectionKey({ tenant: tenantName, environment: environmentName })
+      ] ?? '',
+  );
   return {
     selectedSelection,
     tenants,
@@ -188,6 +223,7 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
     aiBusy,
     isOpen,
     reconnecting,
+    envState,
   };
 }
 
@@ -199,8 +235,16 @@ export function EnvironmentRow({
   environmentName: string;
 }): React.ReactElement {
   const dispatch = useAppDispatch();
-  const { selectedSelection, tenants, isOpening, runningCommand, aiBusy, isOpen, reconnecting } =
-    useEnvironmentRowSelectors(tenantName, environmentName);
+  const {
+    selectedSelection,
+    tenants,
+    isOpening,
+    runningCommand,
+    aiBusy,
+    isOpen,
+    reconnecting,
+    envState,
+  } = useEnvironmentRowSelectors(tenantName, environmentName);
   const { selected, busy, busyLabel, isLocal, runtimeVersion, selection } = deriveEnvironmentRow(
     tenantName,
     environmentName,
@@ -226,6 +270,8 @@ export function EnvironmentRow({
       isLocal={isLocal}
       runtimeVersion={runtimeVersion}
       activityLabel={busy ? busyLabel : ''}
+      isOpen={isOpen}
+      envState={envState}
     >
       <button
         type="button"
@@ -250,6 +296,7 @@ export function EnvironmentRow({
           tenantName={tenantName}
           environmentName={environmentName}
           selection={selection}
+          envState={envState}
         />
       )}
       <EnvironmentRowEditButton

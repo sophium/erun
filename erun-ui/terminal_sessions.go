@@ -107,6 +107,9 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	go a.startWorkspaceSyncForSelection(selection)
 	go a.startCloudCredentialsRefresherForSelection(selection)
 
+	// A fresh open attempt supersedes any stopped/failed flag the row
+	// carried; the reconnect refusal paths re-flag if this open fails too.
+	a.emitEnvStatus(selection, "")
 	a.logSpawnedCommandToLocal(selection, "erun", formatLocalCommandLog(formatLaunchCommand(openParams), "ERun tab"))
 	_ = ctx
 	return startSessionResult{
@@ -1109,6 +1112,7 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	// empty state from #331).
 	if !a.shouldRespawnForCloudContext(managed) {
 		a.emitStoppedContextMarker(managed.serial)
+		a.emitEnvStatus(managed.selection, envStatusStopped)
 		return false
 	}
 
@@ -1123,6 +1127,7 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	// deploy already current and skips it.
 	if a.reconnectBlockedByDeployFailure(managed) {
 		a.emitDeployFailedMarker(managed.serial)
+		a.emitEnvStatus(managed.selection, envStatusFailed)
 		return false
 	}
 
@@ -1136,6 +1141,7 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	// deploy failed, refuse for the same reason and leave recovery to the user.
 	if a.reconnectBlockedByActivityDeployFailure(managed) {
 		a.emitDeployFailedMarker(managed.serial)
+		a.emitEnvStatus(managed.selection, envStatusFailed)
 		return false
 	}
 
@@ -1150,6 +1156,7 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	// single explicit retry affordance. See issue #361.
 	if a.trackExitForLoopGuard(managed) {
 		a.emitReconnectLoopMarker(managed.serial)
+		a.emitEnvStatus(managed.selection, envStatusFailed)
 		return false
 	}
 
@@ -1169,6 +1176,10 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	managed.session = next
 	managed.awaitingPostRespawnInput = true
 	a.mu.Unlock()
+	// The respawn went through — whatever stopped/failed condition the row
+	// was flagged with is being retried, so clear it (the refusal paths
+	// above re-flag on the next failure).
+	a.emitEnvStatus(managed.selection, "")
 	return true
 }
 
@@ -1520,6 +1531,17 @@ func (a *App) emitAIActivity(sessionID int, selection uiSelection, busy bool) {
 		Tenant:      selection.Tenant,
 		Environment: selection.Environment,
 		Busy:        busy,
+	})
+}
+
+// emitEnvStatus publishes the env's real condition for the sidebar row
+// (issue #470). Status "" clears; envStatusStopped / envStatusFailed flag
+// the row while its tabs are alive but the env is not actually running.
+func (a *App) emitEnvStatus(selection uiSelection, status string) {
+	a.emitEvent(envStatusEvent, envStatusPayload{
+		Tenant:      selection.Tenant,
+		Environment: selection.Environment,
+		Status:      status,
 	})
 }
 

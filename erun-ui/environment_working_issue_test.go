@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	eruncommon "github.com/sophium/erun/erun-common"
@@ -110,6 +111,117 @@ func TestEnvironmentWorkingIssueUnavailableForRemoteWorktree(t *testing.T) {
 	}
 	if got.Reason == "" {
 		t.Errorf("expected a reason explaining why it's unavailable")
+	}
+}
+
+// remoteWorkingIssueApp builds an App for the pod-backed resolution paths
+// (issue #462): a remote-agent env with a port range, an injectable
+// reachability answer, and an injectable in-pod branch loader.
+func remoteWorkingIssueApp(t *testing.T, reachable bool, loadPodBranch func(context.Context, string) (string, error), run workingIssueCommandRunner) *App {
+	t.Helper()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{
+			"acme": {Name: "acme", ProjectRoot: "/tmp/acme", DefaultEnvironment: "dev"},
+		},
+		envs: map[string]eruncommon.EnvConfig{
+			"acme/dev": {
+				Name:                "dev",
+				Type:                eruncommon.EnvironmentTypeRemoteAgent,
+				KubernetesContext:   "ctx",
+				LocalPortRangeStart: 17500,
+			},
+		},
+	}
+	app := NewApp(erunUIDeps{
+		store:                  store,
+		findProjectRoot:        func() (string, string, error) { return "acme", "/tmp/acme", nil },
+		canConnectLocalPort:    func(int) bool { return reachable },
+		loadPodBranch:          loadPodBranch,
+		runWorkingIssueCommand: run,
+	})
+	t.Cleanup(func() { app.shutdown(context.Background()) })
+	return app
+}
+
+func TestEnvironmentWorkingIssueRemoteNotReachable(t *testing.T) {
+	app := remoteWorkingIssueApp(t, false,
+		func(context.Context, string) (string, error) {
+			t.Fatal("loadPodBranch must not run while the env is not reachable")
+			return "", nil
+		},
+		func(context.Context, string, string, ...string) (string, error) {
+			t.Fatal("runner must not run while the env is not reachable")
+			return "", nil
+		},
+	)
+
+	got, err := app.EnvironmentWorkingIssue(uiSelection{Tenant: "acme", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("EnvironmentWorkingIssue: %v", err)
+	}
+	if got.Available {
+		t.Fatalf("expected unavailable while unreachable, got %+v", got)
+	}
+	if !strings.Contains(got.Reason, "open this environment") {
+		t.Fatalf("expected the open-to-view reason, got %q", got.Reason)
+	}
+}
+
+func TestEnvironmentWorkingIssueRemoteReadsPodBranch(t *testing.T) {
+	var ghDirs []string
+	app := remoteWorkingIssueApp(t, true,
+		func(context.Context, string) (string, error) {
+			return "bug/470-sidebar-status", nil
+		},
+		func(_ context.Context, dir, name string, _ ...string) (string, error) {
+			if name != "gh" {
+				t.Fatalf("only the gh title lookup may run host-side for a remote env, got %q", name)
+			}
+			ghDirs = append(ghDirs, dir)
+			return "Sidebar status", nil
+		},
+	)
+
+	got, err := app.EnvironmentWorkingIssue(uiSelection{Tenant: "acme", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("EnvironmentWorkingIssue: %v", err)
+	}
+	if !got.Available || got.Branch != "bug/470-sidebar-status" || got.IssueNumber != 470 || got.IssueTitle != "Sidebar status" {
+		t.Fatalf("unexpected pod-backed working issue: %+v", got)
+	}
+	if len(ghDirs) != 1 || ghDirs[0] == "" {
+		t.Fatalf("expected one gh lookup rooted in the host project worktree, got %v", ghDirs)
+	}
+}
+
+func TestEnvironmentWorkingIssueRemotePodErrorNotCached(t *testing.T) {
+	var loads int
+	app := remoteWorkingIssueApp(t, true,
+		func(context.Context, string) (string, error) {
+			loads++
+			return "", context.DeadlineExceeded
+		},
+		func(context.Context, string, string, ...string) (string, error) {
+			t.Fatal("runner must not run when the pod branch failed to load")
+			return "", nil
+		},
+	)
+
+	got, err := app.EnvironmentWorkingIssue(uiSelection{Tenant: "acme", Environment: "dev"})
+	if err != nil {
+		t.Fatalf("EnvironmentWorkingIssue: %v", err)
+	}
+	if got.Available || !strings.Contains(got.Reason, "not reachable right now") {
+		t.Fatalf("expected the not-reachable reason, got %+v", got)
+	}
+	// Unavailable answers must not be cached: the next hover after the env
+	// recovers has to re-resolve instead of replaying the failure for the
+	// TTL.
+	if _, err := app.EnvironmentWorkingIssue(uiSelection{Tenant: "acme", Environment: "dev"}); err != nil {
+		t.Fatalf("second EnvironmentWorkingIssue: %v", err)
+	}
+	if loads != 2 {
+		t.Fatalf("expected the failed resolution to re-run (2 loads), got %d", loads)
 	}
 }
 

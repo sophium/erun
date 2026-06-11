@@ -45,6 +45,23 @@ type uiWorkingIssue struct {
 	Reason      string `json:"reason,omitempty"`
 }
 
+// Env-status values carried by the env-status event. The empty string clears
+// the state (the env is healthy again, or a fresh open attempt is in flight).
+const (
+	envStatusStopped = "stopped"
+	envStatusFailed  = "failed"
+)
+
+// envStatusPayload tells the sidebar the real per-env condition behind the
+// open dot (issue #470: tab presence alone is not running-ness — the dot must
+// not show green for an env that is actually stopped or whose deploy failed).
+// Status is one of "", envStatusStopped, envStatusFailed.
+type envStatusPayload struct {
+	Tenant      string `json:"tenant"`
+	Environment string `json:"environment"`
+	Status      string `json:"status"`
+}
+
 type uiSelection struct {
 	Tenant            string `json:"tenant"`
 	Environment       string `json:"environment"`
