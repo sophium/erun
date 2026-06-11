@@ -115,6 +115,99 @@ func TestUpgrade(t *testing.T) {
 		golden.Equal(t, "upgrade/dry_run_target_unresolved_reports_reason", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_snapshot_channel_without_published_snapshot", func(t *testing.T) {
+		// A snapshot-channel env whose tenant has a resolvable stable but no
+		// published snapshot: the channel target comes back empty without a
+		// recorded failure, so ResolveUpgradePlan must fall back to the
+		// default "no snapshot version found in the registry" reason and the
+		// run must skip the member as unresolved. The seam supplies only
+		// stable=; the dangling "ignored" segment (no '=') additionally locks
+		// the seam parser's skip-malformed-segment branch without changing
+		// the output.
+		setup := env.New(t)
+		seedUpgradeTenant(t, setup, "team", "agent")
+		seedUpgradeEnv(t, setup, "team", "agent",
+			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\nruntimeversion: 2.0.0-snapshot-20260101000000\ntype: remote-agent\nautoupgrade: true\n")
+		envVars := append(setup.Env(), "ERUN_UPGRADE_VERSIONS_OVERRIDE=stable=2.0.0,ignored")
+		result := erun.Run(t, []string{"upgrade", "team", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "upgrade/dry_run_snapshot_channel_without_published_snapshot", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_failed_deploy_reports_failure", func(t *testing.T) {
+		// A lagging member whose deploy fails — the env has no
+		// kubernetescontext, so the deploy's env resolution rejects it
+		// (ErrKubernetesContextNotConfigured) before any cluster-facing
+		// action — must be recorded as failed: the run continues, the
+		// completion accounting counts it under "failed", and the command
+		// exits non-zero naming the member. The env carries no runtimeversion so the plan line
+		// renders the "(unset)" current version. A second tenant and a
+		// second env are seeded but out of scope: the positional team/dev
+		// scope must filter both (the tenant-scope and env-scope walker
+		// branches) without a trace.
+		setup := env.New(t)
+		seedUpgradeTenant(t, setup, "other", "prod")
+		seedUpgradeEnv(t, setup, "other", "prod",
+			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\nruntimeversion: 1.0.0\ntype: runtime\nautoupgrade: true\n")
+		seedUpgradeTenant(t, setup, "team", "dev")
+		seedUpgradeEnv(t, setup, "team", "dev",
+			"repopath: "+setup.Cwd+"\ntype: runtime\nautoupgrade: true\nupgradechannel: stable\n")
+		seedUpgradeEnv(t, setup, "team", "staging",
+			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\nruntimeversion: 1.0.0\ntype: runtime\nautoupgrade: true\n")
+		result := erun.Run(t, []string{"upgrade", "team", "dev", "--version", "2.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for failed upgrade deploy, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "upgrade/dry_run_failed_deploy_reports_failure", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_no_members_scoped_to_environment", func(t *testing.T) {
+		// Scoping to one env that is not opted in yields the empty-plan
+		// message with the tenant/environment suffix, never a deploy.
+		setup := env.New(t)
+		seedUpgradeTenant(t, setup, "team", "dev")
+		seedUpgradeEnv(t, setup, "team", "dev",
+			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\nruntimeversion: 1.0.0\ntype: runtime\n")
+		result := erun.Run(t, []string{"upgrade", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "upgrade/dry_run_no_members_scoped_to_environment", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_no_members_scoped_to_tenant", func(t *testing.T) {
+		// Scoping to a tenant with no opted-in envs yields the empty-plan
+		// message with the "for tenant" suffix.
+		setup := env.New(t)
+		seedUpgradeTenant(t, setup, "team", "dev")
+		seedUpgradeEnv(t, setup, "team", "dev",
+			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\nruntimeversion: 1.0.0\ntype: runtime\n")
+		result := erun.Run(t, []string{"upgrade", "team", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "upgrade/dry_run_no_members_scoped_to_tenant", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_corrupt_tenant_config_fails", func(t *testing.T) {
+		// A tenant config.yaml that fails to parse must fail the whole
+		// plan resolution with the "plan resolution failed" trace — the
+		// upgrade fan-out cannot safely guess which envs are opted in when
+		// the tenant listing itself is broken.
+		setup := env.New(t)
+		tenantDir := seedUpgradeTenant(t, setup, "team", "dev")
+		mustWriteFile(t, filepath.Join(tenantDir, "config.yaml"), "{notyaml\n")
+		result := erun.Run(t, []string{"upgrade", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for corrupt tenant config, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "upgrade/dry_run_corrupt_tenant_config_fails", normalize.Apply(result.Combined))
+	})
+
+	t.Run("flags_environment_without_tenant_errors", func(t *testing.T) {
+		// --environment without --tenant (or a positional tenant) is
+		// ambiguous; the command must fail before resolving anything.
+		setup := env.New(t)
+		result := erun.Run(t, []string{"upgrade", "--environment", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for --environment without tenant, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "upgrade/flags_environment_without_tenant_errors", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_scoped_flags_lagging", func(t *testing.T) {
 		// The --tenant/--environment flag form scopes the run to one env —
 		// the shape the desktop's per-env Upgrade-all fan-out uses (issue

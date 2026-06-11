@@ -427,6 +427,84 @@ func SeedScoopManifest(t testing.TB, dir, content string) {
 	mustWrite(t, filepath.Join(dst, "erun.json"), content)
 }
 
+// SeedHomebrewFormula writes Formula/erun.rb inside dir so stable `release`
+// scenarios exercise the Homebrew packaging path: the release stage rewrites
+// the formula's release-archive URL to the new version, and the
+// sync-packaging-checksums stage traces the curl/shasum checksum refresh.
+// The url/sha256 lines use the exact two-space indentation the production
+// regexes (updateHomebrewFormulaReleaseVersion / ...ReleaseChecksum) anchor on.
+func SeedHomebrewFormula(t testing.TB, dir string) {
+	t.Helper()
+	dst := filepath.Join(dir, "Formula")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dst, err)
+	}
+	mustWrite(t, filepath.Join(dst, "erun.rb"), `class Erun < Formula
+  desc "erun developer toolkit"
+  homepage "https://github.com/sophium/erun"
+  url "https://github.com/sophium/erun/archive/refs/tags/v1.0.0.tar.gz"
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  license "MIT"
+
+  def install
+    system "go", "build", "-trimpath", "-o", bin/"erun", "."
+  end
+end
+`)
+}
+
+// ReleaseGitStubSpec configures StubReleaseGit, the argv-branching git stub
+// for real-run `release` scenarios. The resolution queries return the canned
+// branch/commit, the tag probes report the tag at TagSHA (or absent when
+// TagSHA is empty), and every mutation (fetch/rebase/add/commit/tag/push) is
+// a silent no-op so the captured output stays deterministic without a real
+// remote or network.
+type ReleaseGitStubSpec struct {
+	// Branch is returned for `rev-parse --abbrev-ref HEAD`.
+	Branch string
+	// ShortCommit is returned for `rev-parse --short HEAD`.
+	ShortCommit string
+	// TagSHA, when non-empty, is returned for the `<tag>^{}` tag-existence
+	// probe and for `rev-parse HEAD`, so the release tag resolves to a
+	// commit and (for the non-force path) that commit equals HEAD. Empty
+	// makes the `^{}` probe exit 1: the tag does not exist yet.
+	TagSHA string
+	// RemoteTag, when non-empty, makes `ls-remote --tags` report the tag as
+	// present on origin at TagSHA, so --force runs the remote tag deletion.
+	// Empty reports no remote tag.
+	RemoteTag string
+}
+
+// StubReleaseGit writes a git stub at <stubsDir>/git implementing spec and
+// returns the ERUN_GIT_BIN env pair routing production git invocations to it.
+// `show-ref --verify --quiet` always exits 1 (no develop branch) so stable
+// releases skip the sync-develop stage and push only the main branch.
+func StubReleaseGit(t testing.TB, stubsDir string, spec ReleaseGitStubSpec) []string {
+	t.Helper()
+	tagProbe := `exit 1`
+	headResolve := `exit 1`
+	if spec.TagSHA != "" {
+		tagProbe = `echo ` + shellSingleQuote(spec.TagSHA)
+		headResolve = `echo ` + shellSingleQuote(spec.TagSHA)
+	}
+	remoteTags := `:`
+	if spec.RemoteTag != "" {
+		remoteTags = `printf '%s\trefs/tags/%s\n' ` + shellSingleQuote(spec.TagSHA) + ` ` + shellSingleQuote(spec.RemoteTag)
+	}
+	StubBinaryWithScript(t, stubsDir, "git", `case "$*" in
+  *'rev-parse --abbrev-ref HEAD'*) echo `+shellSingleQuote(spec.Branch)+` ;;
+  *'rev-parse --short HEAD'*) echo `+shellSingleQuote(spec.ShortCommit)+` ;;
+  *'ls-remote --tags'*) `+remoteTags+` ;;
+  *'show-ref --verify --quiet'*) exit 1 ;;
+  *'^{}'*) `+tagProbe+` ;;
+  *'rev-parse HEAD'*) `+headResolve+` ;;
+  *) : ;;
+esac
+exit 0
+`)
+	return StubEnv(stubsDir, "git")
+}
+
 // RunGit runs `git <args...>` inside dir. Useful for scenarios that need
 // to set up branches, tags, or remotes after SeedReleaseRepo.
 func RunGit(t testing.TB, dir string, args ...string) {

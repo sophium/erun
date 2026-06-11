@@ -1,0 +1,10 @@
+audit: erun upgrade --dry-run --version <VERSION> team dev
+upgrade: tenant=team environment=dev version-override=<VERSION> force=false
+upgrade: team/dev opted in, channel=stable current=
+upgrade: team using version override <VERSION> for all channels
+==> Upgrade plan: 1 member(s), 1 lagging
+    team/dev [stable] (unset) -> <VERSION>  (will upgrade)
+==> Upgrading team/dev (unset) -> <VERSION> (stable)
+upgrade: team/dev failed: kubernetes context is not configured: team/dev
+==> Upgrade complete: 0 upgraded, 0 up to date, 0 unresolved, 1 failed
+upgrade: 1 environment(s) failed: team/dev
