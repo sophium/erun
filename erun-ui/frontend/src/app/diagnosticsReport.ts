@@ -26,11 +26,11 @@ export function formatDiagnosticsReport(input: DiagnosticsReportInput): string {
   if (input.envStatus) {
     lines.push(`status: ${input.envStatus}`);
   }
-  lines.push(
-    '',
-    `── erun trace — ${input.trace?.path ?? 'unavailable'} ──`,
-    traceBlock(input.trace),
-  );
+  lines.push('', `── erun trace — ${input.trace?.path ?? 'unavailable'} ──`);
+  if (input.trace?.notice) {
+    lines.push(`note: ${input.trace.notice}`);
+  }
+  lines.push(traceBlock(input.trace));
   lines.push('', `── UI trace (${String(input.uiTrace.length)} entries) ──`);
   lines.push(input.uiTrace.length > 0 ? formatUITrace(input.uiTrace) : 'no UI activity recorded');
   return `${lines.join('\n')}\n`;

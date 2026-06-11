@@ -43,6 +43,7 @@ export interface UIEnvTrace {
   content?: string;
   path: string;
   reason?: string;
+  notice?: string;
 }
 
 // UIUpgradePlanItem mirrors the Go UpgradePlanItem from the ResolveUpgradePlan
