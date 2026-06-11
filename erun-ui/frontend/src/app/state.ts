@@ -243,7 +243,6 @@ export interface AppState {
   sidebarCloudAliasAction: '' | 'login' | 'logout' | 'bearer';
   debugOpen: boolean;
   debugHeight: number;
-  debugOutput: string;
   lastDoctorBySelection: Record<string, DoctorOutcome>;
 }
 

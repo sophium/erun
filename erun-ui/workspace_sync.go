@@ -58,7 +58,7 @@ func (a *App) startWorkspaceSyncForSelection(selection uiSelection) {
 		a.emitAppStatus(fmt.Sprintf("Workspace sync for %s/%s has no local path.", selection.Tenant, selection.Environment), false)
 		return
 	}
-	key := environmentBusyKey(selection)
+	key := selectionKey(selection)
 
 	a.mu.Lock()
 	if existing := a.workspaceSyncs[key]; existing != nil {
@@ -88,7 +88,7 @@ func (a *App) reconcileWorkspaceSyncForSelection(selection uiSelection, enabled 
 }
 
 func (a *App) stopWorkspaceSyncForSelection(selection uiSelection) {
-	key := environmentBusyKey(selection)
+	key := selectionKey(selection)
 	a.mu.Lock()
 	worker := a.workspaceSyncs[key]
 	if worker != nil {
@@ -186,7 +186,7 @@ func (a *App) setWorkspaceSyncStatus(key string, status workspaceSyncStatus) {
 func (a *App) workspaceSyncStatus(selection uiSelection) workspaceSyncStatus {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if worker := a.workspaceSyncs[environmentBusyKey(selection)]; worker != nil {
+	if worker := a.workspaceSyncs[selectionKey(selection)]; worker != nil {
 		return worker.status
 	}
 	return workspaceSyncStatus{Status: "stopped"}

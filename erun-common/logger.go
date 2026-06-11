@@ -25,6 +25,11 @@ type Logger struct {
 	verbosity int
 	stdout    io.Writer
 	stderr    io.Writer
+	// traceSink, when set, receives every line the logger could print at
+	// VerbosityTrace — independent of the terminal verbosity and always
+	// uncolored — so the per-env debug-output log captures the full trace
+	// even for plain invocations (issue #466).
+	traceSink io.Writer
 }
 
 func NewLogger(verbosity int) Logger {
@@ -41,6 +46,22 @@ func NewLoggerWithWriters(verbosity int, stdout, stderr io.Writer) Logger {
 
 func (l Logger) Verbosity() int { return l.verbosity }
 
+// WithTraceSink returns a copy of the logger that mirrors every loggable
+// line (at any level, including lines the terminal verbosity suppresses)
+// into w. The sink is write-only telemetry: failures to write are ignored
+// so a full disk or rotated file can never break the command.
+func (l Logger) WithTraceSink(w io.Writer) Logger {
+	l.traceSink = w
+	return l
+}
+
+func (l Logger) sink(message string) {
+	if l.traceSink == nil {
+		return
+	}
+	_, _ = fmt.Fprintln(l.traceSink, message)
+}
+
 func clampVerbosity(verbosity int) int {
 	if verbosity < 0 {
 		return verbosity
@@ -52,6 +73,7 @@ func clampVerbosity(verbosity int) int {
 }
 
 func (l Logger) Info(message string) {
+	l.sink(message)
 	if l.verbosity < VerbosityInfo {
 		return
 	}
@@ -64,6 +86,7 @@ func (l Logger) Info(message string) {
 }
 
 func (l Logger) Debug(message string) {
+	l.sink(message)
 	if l.verbosity < VerbosityDebug {
 		return
 	}
@@ -72,6 +95,7 @@ func (l Logger) Debug(message string) {
 }
 
 func (l Logger) Trace(message string) {
+	l.sink(message)
 	if l.verbosity < VerbosityTrace {
 		return
 	}
@@ -80,6 +104,7 @@ func (l Logger) Trace(message string) {
 }
 
 func (l Logger) Error(message string) {
+	l.sink(message)
 	_, _ = fmt.Fprintln(l.stderrWriter(), maybeColorize(l.stderrWriter(), message, colorError))
 }
 

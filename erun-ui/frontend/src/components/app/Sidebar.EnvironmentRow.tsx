@@ -182,19 +182,10 @@ function useEnvironmentRowSelectors(tenantName: string, environmentName: string)
       ] === true,
   );
   // isOpen = the user has opened this env at least once and at least
-  // one of its tabs is still alive. Either debug-mode variant of the
-  // key counts — the dot is per-env, not per-debug-mode.
+  // one of its tabs is still alive.
   const isOpen = useAppSelector((state) => {
-    const baseKey = selectionKey({ tenant: tenantName, environment: environmentName });
-    const debugKey = selectionKey({
-      tenant: tenantName,
-      environment: environmentName,
-      debug: true,
-    });
-    return (
-      (state.terminal.tabsByEnv[baseKey]?.length ?? 0) > 0 ||
-      (state.terminal.tabsByEnv[debugKey]?.length ?? 0) > 0
-    );
+    const key = selectionKey({ tenant: tenantName, environment: environmentName });
+    return (state.terminal.tabsByEnv[key]?.length ?? 0) > 0;
   });
   // reconnecting flips the row's busy indicator while the review-pane
   // reconnect/redeploy is in flight for THIS env. Other rows stay

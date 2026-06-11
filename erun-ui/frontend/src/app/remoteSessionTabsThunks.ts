@@ -1,7 +1,7 @@
 import type { StartSessionResult, UISelection } from '@/types';
 
 import { ListRemoteAppSessions, StartSession } from '../../wailsjs/go/main/App';
-import { registerDebugSession, trackOpenSession } from './slices/sessionsSlice';
+import { trackOpenSession } from './slices/sessionsSlice';
 import type { AppThunk } from './store';
 import { recordTab } from './tabsThunks';
 
@@ -37,16 +37,9 @@ export const reattachRemoteTerminalTabs =
       try {
         const result = (await StartSession(runSelection, slot, cols, rows)) as StartSessionResult;
         // Same bookkeeping trackOpenSessionMetadata does for the + button:
-        // session registry, debug registry, and the tab entry — safe even if
-        // the user has navigated to another env meanwhile.
+        // session registry and the tab entry — safe even if the user has
+        // navigated to another env meanwhile.
         dispatch(trackOpenSession({ key, sessionId: result.sessionId, selection: runSelection }));
-        dispatch(
-          registerDebugSession({
-            sessionId: result.sessionId,
-            selection: runSelection,
-            mode: 'open',
-          }),
-        );
         dispatch(recordTab(key, result.sessionId, slot, 'extra', `Terminal ${String(slot)}`));
       } catch {
         // skip sessions that fail to attach; the next env open retries

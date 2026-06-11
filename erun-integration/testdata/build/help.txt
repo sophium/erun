@@ -45,6 +45,7 @@ Available Commands:
   version     Print build information
 
 Flags:
+      --debug-output    Capture this environment's full erun trace to ~/.erun/<tenant>/<env>/trace.log from now on (persists the env's debugoutput setting; the desktop's Diagnostics console reads it).
       --dry-run         Resolve and trace mutating actions without executing them.
   -h, --help            help for erun
       --time            Print the elapsed runtime after the command finishes.

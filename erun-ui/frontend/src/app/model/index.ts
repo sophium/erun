@@ -2,8 +2,6 @@ export type { AIActivityPayload } from './aiActivityPayload';
 export type { AppNotificationPayload } from './appNotificationPayload';
 export type { AppStatusPayload } from './appStatusPayload';
 export type { ClassifiedTerminalFailure } from './classifiedTerminalFailure';
-export type { DebugOpenFilter } from './debugOpenFilter';
-export type { DebugSessionMode } from './debugSessionMode';
 export type { EnvironmentInitializedPayload } from './environmentInitializedPayload';
 export type { EnvStatusPayload } from './envStatusPayload';
 export type { HiddenSessionMode } from './hiddenSessionMode';

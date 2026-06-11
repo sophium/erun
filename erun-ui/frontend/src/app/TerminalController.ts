@@ -14,7 +14,6 @@ import {
   isTerminalPasteTarget,
   pastedImageFiles,
 } from './clipboard';
-import { appendDebugOutput as appendDebugOutputThunk } from './debugThunks';
 import { readError } from './errors';
 import { refreshIdleStatus } from './idleThunks';
 import type {
@@ -49,7 +48,7 @@ import {
 } from './terminalBuffers';
 import { registerTerminalQueryResponseHandlers } from './terminalQueryResponses';
 import { TerminalSessionRegistry } from './TerminalSessionRegistry';
-import { decodeDebugOutput } from './terminalStatus';
+import { decodeTerminalOutput } from './terminalStatus';
 import { TerminalWriteSourceQueue } from './TerminalWriteSourceQueue';
 import { thunkExtra } from './thunkExtra';
 import {
@@ -360,14 +359,10 @@ export class TerminalController {
   private handleTerminalOutput(payload: TerminalOutputPayload): void {
     const data = decodeBase64Bytes(payload.data);
     this.sessions.appendSessionBuffer(payload.sessionId, data);
-    const debugOutput = decodeDebugOutput(data);
-    store.dispatch(appendDebugOutputThunk(debugOutput, payload.sessionId));
-    store.dispatch(updateOpenStatusFromOutput(payload.sessionId, debugOutput));
-    const displayData = filterTerminalDisplayData(this.sessions, payload.sessionId, data);
-    if (displayData) {
-      this.sessions.appendDisplayBuffer(payload.sessionId, displayData);
-    }
-    if (payload.sessionId !== store.getState().terminal.sessionId || !displayData) {
+    store.dispatch(updateOpenStatusFromOutput(payload.sessionId, decodeTerminalOutput(data)));
+    const displayData = filterTerminalDisplayData(data);
+    this.sessions.appendDisplayBuffer(payload.sessionId, displayData);
+    if (payload.sessionId !== store.getState().terminal.sessionId) {
       return;
     }
     store.dispatch(hideTerminalMessageIfActive(payload.sessionId));

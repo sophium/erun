@@ -24,7 +24,6 @@ export function deployUiSelection(entry: ActivityQueueEntry): UISelection {
     bootstrap: false,
     setDefaultTenant: false,
     action: 'deploy',
-    debug: false,
   };
 }
 

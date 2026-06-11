@@ -33,8 +33,7 @@ export const restoreEnvTabsAfterContextRunning =
     if (!isSameSelection(current, selection)) {
       return;
     }
-    const debugOpen = getState().layout.debugOpen;
-    const runSelection = { ...selection, debug: debugOpen || undefined };
+    const runSelection = { ...selection };
     const key = selectionKey(runSelection);
     if (hasAllDefaultTabs(getState().terminal.tabsByEnv[key] ?? [])) {
       return;
