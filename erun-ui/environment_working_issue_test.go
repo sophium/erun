@@ -29,7 +29,13 @@ func TestParseIssueNumberFromBranch(t *testing.T) {
 
 // workingIssueApp builds an App whose store resolves one env and whose
 // working-issue command runner is stubbed, so the resolver runs without a real
-// repo or gh.
+// repo or gh. The pod-path deps are pinned hermetic (issue #492): a remote
+// env resolved through this helper must never probe the developer machine's
+// real local ports — ResolveOpen allocates a port range even when none is
+// persisted, and a live desktop/headless erun can be listening there, turning
+// the default reachability probe + MCP call into real network traffic. Tests
+// that exercise the pod-backed path inject their own deps via
+// remoteWorkingIssueApp.
 func workingIssueApp(t *testing.T, env eruncommon.EnvConfig, run workingIssueCommandRunner) *App {
 	t.Helper()
 	store := stubUIStore{
@@ -44,6 +50,11 @@ func workingIssueApp(t *testing.T, env eruncommon.EnvConfig, run workingIssueCom
 		store:                  store,
 		findProjectRoot:        func() (string, string, error) { return "acme", "/tmp/acme", nil },
 		runWorkingIssueCommand: run,
+		canConnectLocalPort:    func(int) bool { return false },
+		loadPodBranch: func(context.Context, string) (string, error) {
+			t.Fatal("loadPodBranch must not run through the legacy working-issue helper")
+			return "", nil
+		},
 	})
 	t.Cleanup(func() { app.shutdown(context.Background()) })
 	return app
