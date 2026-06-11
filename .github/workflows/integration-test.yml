@@ -1,0 +1,38 @@
+name: integration-test
+
+# Enforces the Integration Test Gate (root AGENTS.md): builds the
+# coverage-instrumented erun binary, runs the erun-integration suite, and
+# fails when statement coverage of erun-cli + erun-common drops below the
+# threshold pinned in erun-integration/scripts/integration-test.sh.
+#
+# The job must be marked as a required status check in branch protection:
+# GitHub honors [skip ci] on a PR's head commit even for pull_request
+# workflows, and a skipped required check blocks the merge (fails safe)
+# instead of silently bypassing the gate.
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integration-test-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  integration-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: erun-cli/go.mod
+          cache-dependency-path: |
+            erun-cli/go.sum
+            erun-common/go.sum
+            erun-mcp/go.sum
+      - run: make integration-test
