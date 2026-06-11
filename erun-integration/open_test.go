@@ -186,6 +186,228 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/no_shell_dry_run", normalize.Apply(result.Combined))
 	})
 
+	// zshAliasLine is the POSIX alias maybeConfigureOpenNoShellAlias appends
+	// for team/dev when the user accepts the prompt with SHELL=/bin/zsh.
+	const zshAliasLine = `alias team-dev='eval "$(erun open team dev --no-shell)"'`
+
+	t.Run("alias_prompt_dry_run_accept_traces_append", func(t *testing.T) {
+		// ERUN_FORCE_TTY=1 is the deliberate test seam (mirroring
+		// ERUN_HOST_OS_OVERRIDE) that lifts the stdout-TTY gate so the
+		// alias-setup flow (maybeConfigureOpenNoShellAlias) runs in the piped
+		// harness. SHELL=/bin/zsh pins detectOpenNoShellAliasStartupFile to
+		// ~/.zshrc. Accepting the confirm in --dry-run must trace
+		// "open: append team-dev alias to ~/.zshrc" and leave the startup
+		// file untouched — locks the dry-run-contract fix from b01e323 that
+		// gated appendOpenNoShellAlias behind the trace. The alias confirm is
+		// the run's single interactive prompt (readline read-ahead would
+		// starve a second one).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		zshrc := filepath.Join(setup.Home, ".zshrc")
+		if err := os.WriteFile(zshrc, []byte("# seeded zshrc\n"), 0o644); err != nil {
+			t.Fatalf("seed ~/.zshrc: %v", err)
+		}
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1", "SHELL=/bin/zsh")
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "y\n"})
+		golden.Equal(t, "open/alias_prompt_dry_run_accept_traces_append", normalize.Apply(result.Combined))
+		// Dry-run must not mutate the startup file (side effect outside the
+		// captured streams).
+		body, err := os.ReadFile(zshrc)
+		if err != nil {
+			t.Fatalf("read ~/.zshrc: %v", err)
+		}
+		if string(body) != "# seeded zshrc\n" {
+			t.Errorf("dry-run must leave ~/.zshrc untouched, got:\n%s", body)
+		}
+	})
+
+	t.Run("alias_prompt_decline_prints_hint", func(t *testing.T) {
+		// Declining the alias confirm ("n") must fall back to
+		// writeOpenNoShellHintLines: the one-liner alias hint on stderr, no
+		// file write. ERUN_FORCE_TTY=1 lifts the TTY gate; SHELL=/bin/zsh
+		// pins the POSIX dialect and ~/.zshrc startup file.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		zshrc := filepath.Join(setup.Home, ".zshrc")
+		if err := os.WriteFile(zshrc, []byte("# seeded zshrc\n"), 0o644); err != nil {
+			t.Fatalf("seed ~/.zshrc: %v", err)
+		}
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1", "SHELL=/bin/zsh")
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "n\n"})
+		golden.Equal(t, "open/alias_prompt_decline_prints_hint", normalize.Apply(result.Combined))
+		body, err := os.ReadFile(zshrc)
+		if err != nil {
+			t.Fatalf("read ~/.zshrc: %v", err)
+		}
+		if string(body) != "# seeded zshrc\n" {
+			t.Errorf("declined prompt must leave ~/.zshrc untouched, got:\n%s", body)
+		}
+	})
+
+	t.Run("alias_prompt_accept_appends_alias_real_run", func(t *testing.T) {
+		// Real-run arm of the alias setup: accepting the confirm must append
+		// the alias line to ~/.zshrc (appendOpenNoShellAlias) and print the
+		// "added team-dev to ..." stderr lines locked by the golden. The
+		// kubectl stub reports the runtime deployment as deployed-and-matching
+		// so no helm deploy runs; the port-forward simulators come up on the
+		// pinned 26100 range (same shape as shell_real_run_single_pass).
+		// SeedDevopsRepo keeps the runtime spec off the default chart path so
+		// the "create team-devops chart?" prompt never fires — the alias
+		// confirm stays the subprocess's single prompt (readline read-ahead).
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		zshrc := filepath.Join(setup.Home, ".zshrc")
+		if err := os.WriteFile(zshrc, []byte("# seeded zshrc\n"), 0o644); err != nil {
+			t.Fatalf("seed ~/.zshrc: %v", err)
+		}
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName: "team-devops",
+			ContainerName:  "team-devops",
+			RepoPath:       "/home/erun/git/cwd",
+			MCPPort:        26100,
+			SSHPort:        26122,
+		})...)
+		envVars = append(envVars, "ERUN_FORCE_TTY=1", "SHELL=/bin/zsh")
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "y\n"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/alias_prompt_accept_appends_alias_real_run", normalize.Apply(result.Combined))
+		// The append is a side effect outside the captured streams: the
+		// seeded content must survive and the alias line must follow it.
+		body, err := os.ReadFile(zshrc)
+		if err != nil {
+			t.Fatalf("read ~/.zshrc: %v", err)
+		}
+		if want := "# seeded zshrc\n" + zshAliasLine + "\n"; string(body) != want {
+			t.Errorf("expected ~/.zshrc to gain the alias line, want:\n%s\ngot:\n%s", want, body)
+		}
+	})
+
+	t.Run("no_shell_real_run_creates_chart_deploys_and_persists_version", func(t *testing.T) {
+		// Real-run open against a local env whose runtime deployment does
+		// not exist and whose tenant repo has no devops chart. Covers, in
+		// one pass, the branches dry-run cannot reach:
+		//   - maybeCreateMissingRuntimeChart's accepted prompt ("y") and
+		//     the real EnsureDefaultDevopsChartWithVersion chart write;
+		//   - deployRuntime's real helm deploy (helm stub) wrapped in
+		//     wrapOpenHelmDeployWithSpinner;
+		//   - persistOpenRuntimeVersion's save branch: --version 9.9.9
+		//     differs from the persisted 1.0.0, so the env config must be
+		//     rewritten with the deployed version (side-effect assert).
+		// The kubectl stub reports the deployment NotFound (decision input
+		// for shouldDeployRuntime) and runs the port-forward simulator for
+		// the post-deploy forwards on the pinned 26100 range. The chart
+		// confirm is the run's single prompt; --no-alias-prompt keeps the
+		// alias setup out of the way (readline read-ahead). The golden is
+		// stdout-only by design: real-run --no-shell silences stderr so an
+		// `eval "$(erun open ... --no-shell)"` alias stays quiet
+		// (shouldSilenceNoShellOutput).
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName:     "team-devops",
+			ContainerName:      "team-devops",
+			DeploymentNotFound: true,
+		})...)
+		fixture.StubBinary(t, stubsDir, "helm", "")
+		envVars = append(envVars, fixture.StubEnv(stubsDir, "helm")...)
+		result := erun.Run(t, []string{"open", "team", "dev", "--version", "9.9.9", "--no-shell", "--no-alias-prompt"}, erun.RunOptions{
+			Cwd:   setup.Cwd,
+			Env:   envVars,
+			Stdin: "y\n",
+		})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/no_shell_real_run_creates_chart_deploys_and_persists_version", normalize.Apply(result.Combined))
+		// The accepted prompt materialized the default devops chart in the
+		// tenant repo (side effect outside the captured streams).
+		if _, err := os.Stat(filepath.Join(setup.Cwd, "team-devops", "k8s", "team-devops", "Chart.yaml")); err != nil {
+			t.Errorf("expected the default devops chart to be created: %v", err)
+		}
+		// persistOpenRuntimeVersion stamped the deployed version into the
+		// env config.
+		envCfg, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		if !strings.Contains(string(envCfg), "runtimeversion: 9.9.9") {
+			t.Errorf("expected runtimeversion 9.9.9 persisted on the env config, got:\n%s", envCfg)
+		}
+	})
+
+	t.Run("alias_prompt_skipped_when_alias_configured", func(t *testing.T) {
+		// When ~/.zshrc already carries the team-dev alias,
+		// detectOpenNoShellAliasStartupFile reports it configured
+		// (startupFileHasAlias true branch) and the whole prompt is skipped:
+		// no confirm, no hint lines, just the setup script. No stdin is
+		// wired, so a leaked prompt would hang and trip the run timeout.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		zshrc := filepath.Join(setup.Home, ".zshrc")
+		if err := os.WriteFile(zshrc, []byte(zshAliasLine+"\n"), 0o644); err != nil {
+			t.Fatalf("seed ~/.zshrc: %v", err)
+		}
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1", "SHELL=/bin/zsh")
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/alias_prompt_skipped_when_alias_configured", normalize.Apply(result.Combined))
+	})
+
+	t.Run("alias_prompt_bash_accept_creates_bashrc", func(t *testing.T) {
+		// SHELL=/bin/bash exercises openNoShellStartupFiles' bash arm: the
+		// candidate list is ~/.bashrc, ~/.bash_profile, ~/.profile, none of
+		// which exist, so detectOpenNoShellAliasStartupFile falls through
+		// every stat error and offers the preferred ~/.bashrc. Accepting in
+		// real-run drives appendOpenNoShellAlias's create-missing-file arm.
+		// Real-run shape mirrors alias_prompt_accept_appends_alias_real_run
+		// (deployed kubectl stub + port-forward sim on the 26100 range).
+		skipIfPortsBusy(t, 26100, 26133)
+		setup := env.New(t)
+		fixture.SeedTenantEnvWithLocalPortRangeStart(t, setup, "team", "dev", 26100)
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName: "team-devops",
+			ContainerName:  "team-devops",
+			RepoPath:       "/home/erun/git/cwd",
+			MCPPort:        26100,
+			SSHPort:        26122,
+		})...)
+		envVars = append(envVars, "ERUN_FORCE_TTY=1", "SHELL=/bin/bash")
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "y\n"})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/alias_prompt_bash_accept_creates_bashrc", normalize.Apply(result.Combined))
+		body, err := os.ReadFile(filepath.Join(setup.Home, ".bashrc"))
+		if err != nil {
+			t.Fatalf("read ~/.bashrc (append must create the missing file): %v", err)
+		}
+		if want := zshAliasLine + "\n"; string(body) != want {
+			t.Errorf("expected fresh ~/.bashrc with the alias line, want:\n%s\ngot:\n%s", want, body)
+		}
+	})
+
+	t.Run("alias_powershell_dialect_prints_function_hint", func(t *testing.T) {
+		// SHELL=/bin/pwsh resolves the PowerShell dialect:
+		// detectOpenNoShellAliasStartupFile refuses a startup file, so the
+		// flow takes the hint-lines-only arm — "one-liner function:" plus the
+		// Invoke-Expression wrapper — and the stdout setup script switches to
+		// the PowerShell form (powerShellQuote). No prompt fires, so no
+		// stdin is wired.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envVars := append(stubKubectlNotFound(t, setup), "ERUN_FORCE_TTY=1", "SHELL=/bin/pwsh")
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/alias_powershell_dialect_prints_function_hint", normalize.Apply(result.Combined))
+	})
+
 	t.Run("snapshot_env_config_drives_local_build", func(t *testing.T) {
 		// Regression for the snapshot fallback bug: when the env config
 		// has snapshot=true persisted (a prior `erun open --snapshot`),
@@ -798,6 +1020,77 @@ func TestOpen(t *testing.T) {
 		envVars := stubKubectlNotFound(t, setup)
 		result := erun.Run(t, []string{"open", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/not_initialized_triggers_init_retry", normalize.Apply(result.Combined))
+	})
+
+	t.Run("tenant_cloud_provider_issuers_flow_into_runtime_deploy", func(t *testing.T) {
+		// Exercises ResolveTenantCloudProviderIssuers +
+		// CloudProviderOIDCIssuerURL: when the tenant config names cloud
+		// provider aliases and the root config carries their OIDC issuer
+		// URLs, the resolved runtime helm plan must pass the deduplicated
+		// issuer list via api.oidcAllowedIssuers (visible in the dry-run
+		// helm trace). Two aliases share one issuer to lock the dedup
+		// branch. The tenant devops chart is seeded because only the
+		// tenant-chart spec path runs configureDeployInputMetadata — the
+		// materialized default-chart path skips it and would leave the
+		// issuer list empty.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		root := filepath.Join(setup.ConfigHome, "erun")
+		mustWrite(t, filepath.Join(root, "config.yaml"),
+			"defaulttenant: team\n"+
+				"cloudproviders:\n"+
+				"  - alias: alice+123456789012@aws\n"+
+				"    provider: aws\n"+
+				"    username: alice\n"+
+				"    accountid: \"123456789012\"\n"+
+				"    oidcissuerurl: https://oidc.eu-west-2.amazonaws.com/team-issuer\n"+
+				"  - alias: bob+123456789012@aws\n"+
+				"    provider: aws\n"+
+				"    username: bob\n"+
+				"    accountid: \"123456789012\"\n"+
+				"    oidcissuerurl: https://oidc.eu-west-2.amazonaws.com/team-issuer\n",
+		)
+		mustWrite(t, filepath.Join(root, "team", "config.yaml"),
+			"projectroot: "+setup.Cwd+"\n"+
+				"name: team\n"+
+				"defaultenvironment: dev\n"+
+				"cloudprovideraliases:\n"+
+				"  - alice+123456789012@aws\n"+
+				"  - bob+123456789012@aws\n",
+		)
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/tenant_cloud_provider_issuers_flow_into_runtime_deploy", normalize.Apply(result.Combined))
+	})
+
+	t.Run("default_env_not_configured_runs_init_with_tenant", func(t *testing.T) {
+		// `erun open` (no args) against a tenant whose config lacks
+		// defaultenvironment: resolveOpen fails with
+		// ErrDefaultEnvironmentNotConfigured, the init-retry path resolves
+		// init params via initParamsForOpenDefaults — loadOpenDefaultTenant
+		// succeeds, loadOpenDefaultEnvironment reports not-configured — and
+		// init runs in dry-run with the tenant pre-filled. Locks the
+		// tenant-only fallback arm that the fully-seeded scenarios skip.
+		// The handed-off init asks to initialize the default environment;
+		// declining ("n") ends the run after that single prompt (readline
+		// read-ahead allows no second prompt) with init's cancellation
+		// message.
+		setup := env.New(t)
+		root := filepath.Join(setup.ConfigHome, "erun")
+		if err := os.MkdirAll(filepath.Join(root, "team"), 0o755); err != nil {
+			t.Fatalf("mkdir tenant config dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "config.yaml"), []byte("defaulttenant: team\n"), 0o644); err != nil {
+			t.Fatalf("write root config: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "team", "config.yaml"),
+			[]byte("projectroot: "+setup.Cwd+"\nname: team\n"), 0o644); err != nil {
+			t.Fatalf("write tenant config: %v", err)
+		}
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "n\n"})
+		golden.Equal(t, "open/default_env_not_configured_runs_init_with_tenant", normalize.Apply(result.Combined))
 	})
 
 	t.Run("tenant_flag_only_resolves_default_env", func(t *testing.T) {

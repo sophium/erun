@@ -726,6 +726,158 @@ func TestInit(t *testing.T) {
 		golden.Equal(t, "init/remote_real_run_codecommit_key_id_in_url", normalize.Apply(result.Combined))
 	})
 
+	t.Run("local_real_run_persists_project_registry", func(t *testing.T) {
+		// Real-run local-agent init against a project whose .erun/config.yaml
+		// already declares a base container registry and a k8s deploy plan.
+		// --container-registry differs from the base, so the bootstrap's
+		// saveProjectContainerRegistry path must load the project config
+		// (LoadProjectConfig), set the per-environment override
+		// (SetContainerRegistryForEnvironment add-entry branch), and persist
+		// it (SaveProjectConfig + writeFileAtomic). Saving round-trips the
+		// k8s deployments through ProjectK8sDeploymentStep.MarshalYAML —
+		// the scalar arm for the single-component step and the sequence arm
+		// for the parallel group — none of which dry-run init can reach.
+		// kubectl is stubbed so the namespace ensure succeeds offline.
+		// A pre-existing ~/.claude/settings.json with custom permissions
+		// (but no bypass mode) drives EnsureClaudeSettings' merge path:
+		// the custom allow-list must survive while defaultMode and the
+		// dangerous-prompt skip are stamped in.
+		setup := env.New(t)
+		claudeDir := filepath.Join(setup.Home, ".claude")
+		if err := os.MkdirAll(claudeDir, 0o700); err != nil {
+			t.Fatalf("mkdir ~/.claude: %v", err)
+		}
+		mustWrite(t, filepath.Join(claudeDir, "settings.json"),
+			`{"permissions":{"allow":["Bash(ls:*)"]}}`)
+		fixture.SeedProjectK8sConfig(t, setup,
+			"containerregistry: registry.example/base\n"+
+				"environments:\n"+
+				"  local:\n"+
+				"    k8s:\n"+
+				"      deployments:\n"+
+				"        - app\n"+
+				"        - [api, worker]\n",
+		)
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		args := []string{
+			"init", "team", "local",
+			"--type", "local-agent",
+			"--project-root", setup.Cwd,
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/custom",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "init/local_real_run_persists_project_registry", normalize.Apply(result.Combined))
+		// The rewritten project config is a side effect outside the captured
+		// streams: the env override must be persisted and the k8s deploy
+		// plan must round-trip in its natural shape (scalar step + group).
+		raw, err := os.ReadFile(filepath.Join(setup.Cwd, ".erun", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read project config: %v", err)
+		}
+		body := string(raw)
+		for _, want := range []string{
+			"containerregistry: registry.example/base",
+			"registry.example/custom",
+			"- app",
+			"api",
+			"worker",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("expected project config to contain %q, got:\n%s", want, body)
+			}
+		}
+		// EnsureClaudeSettings merged the bypass mode into the pre-existing
+		// settings without dropping the custom allow-list.
+		claudeRaw, err := os.ReadFile(filepath.Join(claudeDir, "settings.json"))
+		if err != nil {
+			t.Fatalf("read ~/.claude/settings.json: %v", err)
+		}
+		// JSON re-indentation makes exact-substring asserts brittle; strip
+		// all whitespace before matching the merged keys.
+		flattened := strings.Join(strings.Fields(string(claudeRaw)), "")
+		for _, want := range []string{
+			`"Bash(ls:*)"`,
+			`"defaultMode":"bypassPermissions"`,
+			`"skipDangerousModePermissionPrompt":true`,
+		} {
+			if !strings.Contains(flattened, want) {
+				t.Errorf("expected claude settings to contain %q, got:\n%s", want, claudeRaw)
+			}
+		}
+	})
+
+	t.Run("local_real_run_drops_redundant_registry_override", func(t *testing.T) {
+		// Exercises SetContainerRegistryForEnvironment's delete-entry branch:
+		// re-initializing an env whose project config carries a
+		// per-environment registry override with a registry equal to the
+		// project-wide base must remove the now-redundant override entry.
+		// The seeded env entry holds only the override — production deletes
+		// the whole map entry, which would also wipe a k8s/docker block if
+		// one were present (see the sibling scenario's k8s round-trip).
+		// ~/.claude/settings.json is pre-seeded in its fully-configured
+		// bypass shape so EnsureClaudeSettings takes the already-configured
+		// early return and leaves the file byte-identical.
+		setup := env.New(t)
+		claudeDir := filepath.Join(setup.Home, ".claude")
+		if err := os.MkdirAll(claudeDir, 0o700); err != nil {
+			t.Fatalf("mkdir ~/.claude: %v", err)
+		}
+		const configuredClaudeSettings = `{"permissions":{"defaultMode":"bypassPermissions"},"skipDangerousModePermissionPrompt":true}`
+		mustWrite(t, filepath.Join(claudeDir, "settings.json"), configuredClaudeSettings)
+		fixture.SeedProjectK8sConfig(t, setup,
+			"containerregistry: registry.example/base\n"+
+				"environments:\n"+
+				"  local:\n"+
+				"    containerregistry: registry.example/custom\n",
+		)
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		args := []string{
+			"init", "team", "local",
+			"--type", "local-agent",
+			"--project-root", setup.Cwd,
+			"--version", "1.0.0",
+			"--kubernetes-context", "test-context",
+			"--container-registry", "registry.example/base",
+			"--set-default-tenant=true",
+			"--confirm-environment=true",
+		}
+		result := erun.Run(t, args, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		raw, err := os.ReadFile(filepath.Join(setup.Cwd, ".erun", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read project config: %v", err)
+		}
+		body := string(raw)
+		if strings.Contains(body, "registry.example/custom") {
+			t.Errorf("expected the per-environment registry override to be removed, got:\n%s", body)
+		}
+		if !strings.Contains(body, "containerregistry: registry.example/base") {
+			t.Errorf("expected the base registry to survive, got:\n%s", body)
+		}
+		// EnsureClaudeSettings' already-configured early return: the seeded
+		// bypass settings must come through byte-identical (no rewrite).
+		claudeRaw, err := os.ReadFile(filepath.Join(claudeDir, "settings.json"))
+		if err != nil {
+			t.Fatalf("read ~/.claude/settings.json: %v", err)
+		}
+		if string(claudeRaw) != configuredClaudeSettings {
+			t.Errorf("expected already-configured claude settings to be left untouched, got:\n%s", claudeRaw)
+		}
+	})
+
 	t.Run("real_run_via_stubs", func(t *testing.T) {
 		// Run init for real (without --dry-run) but route every external
 		// call through stubs. Covers the kubectl namespace check/create

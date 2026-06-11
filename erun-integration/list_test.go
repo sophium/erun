@@ -114,6 +114,57 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/sshd_configured", normalize.Apply(result.Combined))
 	})
 
+	t.Run("with_cloud_providers_and_runtime_details", func(t *testing.T) {
+		// Exercises cmd/list.go's enriched branches in one fixture:
+		// writeCloudProviders' provider loop (alias/provider/account/status/
+		// message fields), writeEffectiveTargetIdentity's "cloud provider"
+		// line, environmentHeaderLine's cloud= suffix, runtimePodLabel's
+		// cpu/memory form, and idleLabel's populated form. The aws stub
+		// fails `sts get-caller-identity` with "could not be found" so
+		// defaultCheckAWSStatus deterministically classifies the provider
+		// as not_configured with a message — without the stub the
+		// developer's real aws CLI would shape the status line.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		root := filepath.Join(setup.ConfigHome, "erun")
+		mustWrite(t, filepath.Join(root, "config.yaml"),
+			"defaulttenant: team\n"+
+				"cloudproviders:\n"+
+				"  - alias: test-user+123456789012@aws\n"+
+				"    provider: aws\n"+
+				"    username: test-user\n"+
+				"    accountid: \"123456789012\"\n"+
+				"    profile: test-profile\n",
+		)
+		mustWrite(t, filepath.Join(root, "team", "dev", "config.yaml"),
+			"name: dev\n"+
+				"repopath: "+setup.Cwd+"\n"+
+				"kubernetescontext: test-context\n"+
+				"containerregistry: registry.example/test\n"+
+				"runtimeversion: 1.0.0\n"+
+				"cloudprovideralias: test-user+123456789012@aws\n"+
+				"runtimepod:\n"+
+				"  cpu: \"2\"\n"+
+				"  memory: 4Gi\n"+
+				"idle:\n"+
+				"  timeout: 10m\n"+
+				"  workinghours: 09:00-18:00\n"+
+				"  timezone: Europe/Riga\n"+
+				"  idletrafficbytes: 2048\n",
+		)
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "aws", fixture.StubBinarySpec{
+			Stderr:   "The config profile (test-profile) could not be found",
+			ExitCode: 255,
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "aws")...)
+		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "list/with_cloud_providers_and_runtime_details", normalize.Apply(result.Combined))
+	})
+
 	t.Run("with_claude_config", func(t *testing.T) {
 		// Exercises cmd/list.go claudeLabel + optionalBoolLabel and
 		// erun-common claude helpers (EnvironmentClaudeConfig.IsZero,

@@ -801,6 +801,12 @@ type KubectlDeployedStubSpec struct {
 	// -c <seed-script>`) into this file so tests can assert the private key
 	// was streamed on stdin and never via argv.
 	SeedKeyFile string
+	// DeploymentNotFound flips the deployment-check arms to report the
+	// deployment as absent (NotFound on stderr, exit 1) instead of
+	// present-and-matching, while keeping the port-forward simulator for
+	// the forwards the open flow starts after its own deploy. Real-run
+	// open scenarios use it to drive the deploy-then-forward path.
+	DeploymentNotFound bool
 }
 
 // StubKubectlDeployed writes a kubectl stub at <stubsDir>/kubectl that
@@ -867,15 +873,26 @@ func StubKubectlDeployed(t testing.TB, stubsDir string, spec KubectlDeployedStub
 		`case "$*" in`,
 	}, "\n")
 	script += "\n" + kubectlDeployedOptionalArms(t, stubsDir, spec)
-	script += strings.Join([]string{
-		`  *"get deployment ` + spec.DeploymentName + ` -o name"*)`,
-		`    printf 'deployment.apps/%s\n' '` + spec.DeploymentName + `' ;;`,
-		`  *"get deployment ` + spec.DeploymentName + ` -o json"*)`,
-		`    printf '%s' '` + deploymentJSON + `' ;;`,
-		`  *) : ;;`,
-		`esac`,
-		`exit 0`,
-	}, "\n")
+	if spec.DeploymentNotFound {
+		script += strings.Join([]string{
+			`  *"get deployment ` + spec.DeploymentName + ` -o name"*)`,
+			`    printf '%s\n' 'Error from server (NotFound): deployments.apps "` + spec.DeploymentName + `" not found' >&2`,
+			`    exit 1 ;;`,
+			`  *) : ;;`,
+			`esac`,
+			`exit 0`,
+		}, "\n")
+	} else {
+		script += strings.Join([]string{
+			`  *"get deployment ` + spec.DeploymentName + ` -o name"*)`,
+			`    printf 'deployment.apps/%s\n' '` + spec.DeploymentName + `' ;;`,
+			`  *"get deployment ` + spec.DeploymentName + ` -o json"*)`,
+			`    printf '%s' '` + deploymentJSON + `' ;;`,
+			`  *) : ;;`,
+			`esac`,
+			`exit 0`,
+		}, "\n")
+	}
 	StubBinaryWithScript(t, stubsDir, "kubectl", script)
 	t.Cleanup(func() {
 		raw, err := os.ReadFile(pidFile)

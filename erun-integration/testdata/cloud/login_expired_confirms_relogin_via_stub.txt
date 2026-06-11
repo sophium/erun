@@ -1,0 +1,8 @@
+? Login to test-user@aws? [Y/n] █
+? Login to test-user@aws? [Y/n] y█
+? Login to test-user@aws? [Y/n] y█
+Login to test-user@aws? y
+test-user@aws: expired (The SSO session associated with this profile has expired or is otherwise invalid.)
+audit: erun cloud login --alias test-user@aws
+cloud login: alias=test-user@aws force=true
+cloud login: resolved profile = test-profile

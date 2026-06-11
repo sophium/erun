@@ -121,6 +121,33 @@ func TestCloud(t *testing.T) {
 		golden.Equal(t, "cloud/init_aws_dry_run", normalize.Apply(result.Combined))
 	})
 
+	t.Run("init_aws_prompts_missing_region_via_stdin", func(t *testing.T) {
+		// Exercises requiredCloudPrompt (via promptCloudValueIfEmpty):
+		// every AWS init param except --region is provided, so the command
+		// asks exactly one prompt — "Default AWS region", defaulting to the
+		// SSO region — and the typed value flows into the traced
+		// `aws configure set region` plan. One prompt per subprocess
+		// (readline read-ahead), which is why only --region is omitted.
+		setup := env.New(t)
+		args := []string{
+			"cloud", "init", "aws",
+			"--account-id", "123456789012",
+			"--role-name", "Admin",
+			"--sso-start-url", "https://example.awsapps.com/start",
+			"--sso-region", "eu-west-1",
+			"--dry-run",
+		}
+		result := erun.Run(t, args, erun.RunOptions{
+			Cwd:   setup.Cwd,
+			Env:   setup.Env(),
+			Stdin: "eu-west-2\n",
+		})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/init_aws_prompts_missing_region_via_stdin", normalize.Apply(result.Combined))
+	})
+
 	t.Run("init_aws_real_run_persists_alias_and_issuer", func(t *testing.T) {
 		// Exercises eruncommon.InitAWSCloudProvider end-to-end without
 		// --dry-run: drives initAWSProfile (configure-set + sso login),
@@ -202,6 +229,221 @@ func TestCloud(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "cloud/oidc_dry_run_traces_bearer_token_command", normalize.Apply(result.Combined))
+	})
+
+	t.Run("login_select_prompt_resolves_active_alias", func(t *testing.T) {
+		// Exercises cloud.go selectCloudAliasPrompt: `cloud login` without
+		// --alias must list the configured aliases in a Select prompt;
+		// "\r" confirms the single (highlighted) entry. The aws stub answers
+		// `sts get-caller-identity` with exit 0, so defaultCheckAWSStatus
+		// classifies the token as active and runCloudLoginCommand returns
+		// the status without a login round-trip. The Select is the run's
+		// single interactive prompt (readline read-ahead).
+		setup := env.New(t)
+		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
+		envVars, _ := stubAWSCallerIdentityAndJWT(t, setup)
+		result := erun.Run(t, []string{"cloud", "login"}, erun.RunOptions{
+			Cwd:   setup.Cwd,
+			Env:   envVars,
+			Stdin: "\r",
+		})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/login_select_prompt_resolves_active_alias", normalize.Apply(result.Combined))
+	})
+
+	t.Run("login_expired_confirms_relogin_via_stub", func(t *testing.T) {
+		// Exercises eruncommon.LoginCloudProviderAlias end to end on the
+		// expired-token path: defaultCheckAWSStatus classifies the stubbed
+		// `sts get-caller-identity` failure as expired, the confirm prompt
+		// is accepted ("y"), the forced login shells out to `aws sso login`
+		// via the stub (defaultRunAWSLogin real arm), and the post-login
+		// status is printed. The stub's stderr message is the decision
+		// input driving the expired classification.
+		setup := env.New(t)
+		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
+		stubs := setup.Cwd + "/stubs"
+		script := strings.Join([]string{
+			`case "$*" in`,
+			`  *"sts get-caller-identity"*)`,
+			`    printf '%s\n' 'The SSO session associated with this profile has expired or is otherwise invalid.' >&2`,
+			`    exit 255 ;;`,
+			`  *) : ;;`,
+			`esac`,
+			`exit 0`,
+		}, "\n")
+		fixture.StubBinaryWithScript(t, stubs, "aws", script)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "aws")...)
+		result := erun.Run(t, []string{"cloud", "login", "--alias", "test-user@aws"}, erun.RunOptions{
+			Cwd:   setup.Cwd,
+			Env:   envVars,
+			Stdin: "y\n",
+		})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/login_expired_confirms_relogin_via_stub", normalize.Apply(result.Combined))
+	})
+
+	t.Run("login_not_configured_declines_relogin", func(t *testing.T) {
+		// Exercises defaultCheckAWSStatus's "could not be found" →
+		// not_configured classification plus runCloudLoginCommand's decline
+		// branch: answering "n" to the login confirm must print the current
+		// status without invoking `aws sso login`.
+		setup := env.New(t)
+		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
+		stubs := setup.Cwd + "/stubs"
+		script := strings.Join([]string{
+			`case "$*" in`,
+			`  *"sts get-caller-identity"*)`,
+			`    printf '%s\n' 'The config profile (test-profile) could not be found' >&2`,
+			`    exit 255 ;;`,
+			`  *"sso login"*)`,
+			`    printf '%s\n' 'sso login must not run when the user declines' >&2`,
+			`    exit 254 ;;`,
+			`  *) : ;;`,
+			`esac`,
+			`exit 0`,
+		}, "\n")
+		fixture.StubBinaryWithScript(t, stubs, "aws", script)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "aws")...)
+		result := erun.Run(t, []string{"cloud", "login", "--alias", "test-user@aws"}, erun.RunOptions{
+			Cwd:   setup.Cwd,
+			Env:   envVars,
+			Stdin: "n\n",
+		})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/login_not_configured_declines_relogin", normalize.Apply(result.Combined))
+	})
+
+	t.Run("oidc_real_run_enables_federation_and_persists_issuer", func(t *testing.T) {
+		// Exercises CloudProviderBearerToken's federation-disabled recovery
+		// end to end: the first `sts get-web-identity-token` fails with
+		// OutboundWebIdentityFederationDisabledException, the command runs
+		// `iam enable-outbound-web-identity-federation` (defaultRunAWSEnableOIDC
+		// real arm), and the retried token call succeeds — a stateful aws
+		// stub flips behavior via a marker file once the enable call runs.
+		// The issuer extracted from the JWT must be persisted to the root
+		// config (side effect outside the captured streams).
+		setup := env.New(t)
+		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
+		stubs := setup.Cwd + "/stubs"
+		issuer := "https://oidc.eu-west-2.amazonaws.com/test-issuer"
+		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+		payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"` + issuer + `"}`))
+		jwt := header + "." + payload + ".sig"
+		marker := filepath.Join(stubs, "federation-enabled")
+		script := strings.Join([]string{
+			`case "$*" in`,
+			`  *"sts get-caller-identity"*) printf '%s' '{"UserId":"AIDAEXAMPLE","Account":"123456789012","Arn":"arn:aws:iam::123456789012:user/test-user"}' ;;`,
+			`  *"iam enable-outbound-web-identity-federation"*)`,
+			`    touch '` + marker + `'`,
+			`    printf '%s\n' '` + issuer + `' ;;`,
+			`  *"sts get-web-identity-token"*)`,
+			`    if [ -f '` + marker + `' ]; then`,
+			`      printf '%s' '` + jwt + `'`,
+			`    else`,
+			`      printf '%s\n' 'An error occurred (OutboundWebIdentityFederationDisabledException) when calling the GetWebIdentityToken operation' >&2`,
+			`      exit 254`,
+			`    fi ;;`,
+			`  *) : ;;`,
+			`esac`,
+			`exit 0`,
+		}, "\n")
+		fixture.StubBinaryWithScript(t, stubs, "aws", script)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "aws")...)
+		result := erun.Run(t, []string{"cloud", "oidc", "--alias", "test-user@aws"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/oidc_real_run_enables_federation_and_persists_issuer", normalize.Apply(result.Combined))
+		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read root config: %v", err)
+		}
+		if !strings.Contains(string(raw), "oidcissuerurl: "+issuer) {
+			t.Errorf("expected persisted OIDC issuer %q, got:\n%s", issuer, raw)
+		}
+	})
+
+	t.Run("oidc_real_run_tolerates_already_enabled_federation", func(t *testing.T) {
+		// Exercises defaultRunAWSEnableOIDC's already-enabled tolerance:
+		// when the enable call itself fails with the "FeatureEnabled /
+		// already enabled" message (another principal enabled federation
+		// between the failed token call and the recovery), the command must
+		// treat it as success and retry the bearer token. The stub fails
+		// the first token call with the disabled exception, fails the
+		// enable call with the already-enabled message (while flipping the
+		// marker), and serves the JWT afterwards.
+		setup := env.New(t)
+		seedCloudProviderAlias(t, setup, "test-user@aws", "test-profile")
+		stubs := setup.Cwd + "/stubs"
+		issuer := "https://oidc.eu-west-2.amazonaws.com/test-issuer"
+		header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+		payload := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"` + issuer + `"}`))
+		jwt := header + "." + payload + ".sig"
+		marker := filepath.Join(stubs, "federation-enabled")
+		script := strings.Join([]string{
+			`case "$*" in`,
+			`  *"sts get-caller-identity"*) printf '%s' '{"UserId":"AIDAEXAMPLE","Account":"123456789012","Arn":"arn:aws:iam::123456789012:user/test-user"}' ;;`,
+			`  *"iam enable-outbound-web-identity-federation"*)`,
+			`    touch '` + marker + `'`,
+			`    printf '%s\n' 'An error occurred (FeatureEnabled): Outbound web identity federation is already enabled' >&2`,
+			`    exit 254 ;;`,
+			`  *"sts get-web-identity-token"*)`,
+			`    if [ -f '` + marker + `' ]; then`,
+			`      printf '%s' '` + jwt + `'`,
+			`    else`,
+			`      printf '%s\n' 'An error occurred (OutboundWebIdentityFederationDisabledException) when calling the GetWebIdentityToken operation' >&2`,
+			`      exit 254`,
+			`    fi ;;`,
+			`  *) : ;;`,
+			`esac`,
+			`exit 0`,
+		}, "\n")
+		fixture.StubBinaryWithScript(t, stubs, "aws", script)
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "aws")...)
+		result := erun.Run(t, []string{"cloud", "oidc", "--alias", "test-user@aws"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/oidc_real_run_tolerates_already_enabled_federation", normalize.Apply(result.Combined))
+	})
+
+	t.Run("set_real_run_same_alias_heals_managed_cloud", func(t *testing.T) {
+		// Exercises saveManagedCloudAliasIfNeeded: `cloud set` with the
+		// alias the remote env already carries takes the no-change path,
+		// which must still backfill managedcloud=true for a remote worktree
+		// that predates the flag (side effect outside the captured
+		// streams).
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		envCfgPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		body := "name: dev\n" +
+			"repopath: /home/erun/git/team\n" +
+			"kubernetescontext: test-context\n" +
+			"containerregistry: registry.example/test\n" +
+			"runtimeversion: 1.0.0\n" +
+			"remote: true\n" +
+			"cloudprovideralias: team-cloud\n"
+		if err := os.WriteFile(envCfgPath, []byte(body), 0o644); err != nil {
+			t.Fatalf("rewrite env config with alias: %v", err)
+		}
+		result := erun.Run(t, []string{"cloud", "set", "team", "dev", "--alias", "team-cloud"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "cloud/set_real_run_same_alias_heals_managed_cloud", normalize.Apply(result.Combined))
+		raw, err := os.ReadFile(envCfgPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		if !strings.Contains(string(raw), "managedcloud: true") {
+			t.Errorf("expected managedcloud backfilled on the remote env, got:\n%s", raw)
+		}
 	})
 
 	t.Run("set_dry_run_traces_env_alias_write", func(t *testing.T) {

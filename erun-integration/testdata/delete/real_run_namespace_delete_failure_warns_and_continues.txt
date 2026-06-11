@@ -1,0 +1,3 @@
+deleted environment: team/dev
+audit: erun delete --yes team dev
+warning: failed to delete namespace "team-dev" in context "test-context": failed to delete kubernetes namespace "team-dev" in context "test-context": exit status 1: Error from server (Forbidden): namespaces "team-dev" is forbidden

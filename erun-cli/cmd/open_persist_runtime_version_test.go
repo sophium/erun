@@ -75,33 +75,3 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 	})
 }
 
-// TestPersistOpenRuntimeVersionWritesRolledOutVersion pins the positive half:
-// when a rollout actually happened, the open flow records the deployed version
-// and registry so the dialog and a later reopen address the same image.
-func TestPersistOpenRuntimeVersionWritesRolledOutVersion(t *testing.T) {
-	const tenant = "erun"
-	const version = "1.0.86-snapshot-20260608163154"
-	const registry = "ghcr.io/sophium"
-
-	var savedTenant string
-	var saved common.EnvConfig
-	result := common.OpenResult{Tenant: tenant, EnvConfig: common.EnvConfig{Name: "local"}}
-
-	updated, err := persistOpenRuntimeVersion(result, version, registry, func(tn string, cfg common.EnvConfig) error {
-		savedTenant = tn
-		saved = cfg
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("persistOpenRuntimeVersion: %v", err)
-	}
-	if savedTenant != tenant {
-		t.Fatalf("saved tenant = %q, want %q", savedTenant, tenant)
-	}
-	if saved.RuntimeVersion != version || saved.RuntimeRegistry != registry {
-		t.Fatalf("saved = {%q, %q}, want {%q, %q}", saved.RuntimeVersion, saved.RuntimeRegistry, version, registry)
-	}
-	if updated.EnvConfig.RuntimeVersion != version {
-		t.Fatalf("returned result RuntimeVersion = %q, want %q", updated.EnvConfig.RuntimeVersion, version)
-	}
-}
