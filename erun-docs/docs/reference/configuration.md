@@ -64,7 +64,6 @@ One per environment. This is the most-edited file.
 | `runtimeregistry` | string | `erun open`, `erun deploy` | Overrides the registry the runtime image is pulled from (per-env). |
 | `autoupgrade` | bool | [`erun upgrade`](/cli/upgrade), desktop Upgrade all | When true, this env joins the Upgrade-all set: `erun upgrade` redeploys it to the latest version for its channel when `runtimeversion` lags. |
 | `upgradechannel` | string (enum) | [`erun upgrade`](/cli/upgrade) | Release channel an upgrade targets: `stable` (semver releases) or `snapshot` (latest snapshot build). Orthogonal to `type`. When unset, defaults from `type` — runtime → `stable`, agent → `snapshot`. |
-| `debugoutput` | bool | `erun open`, `erun doctor`, `erun deploy`, scoped `erun upgrade`, every MCP runtime tool, desktop Diagnostics console | When true, every erun invocation for this env appends its full trace (trace verbosity, independent of console flags) to `~/.erun/<tenant>/<environment>/trace.log`, rotating to `trace.log.1` past 5 MB. Set by `--debug-output` or the desktop's Diagnostics console; the console reads the log back (host file for local envs, in-pod file for remote). |
 | `runtimepod.cpu` | string | helm chart (`runtime.resources.limits.cpu`) | CPU limit for the runtime pod (e.g. `4`, `500m`). |
 | `runtimepod.memory` | string | helm chart (`runtime.resources.limits.memory`) | Memory limit (e.g. `8916Mi`, `2Gi`). |
 | `sshd.enabled` | bool | `erun open`, chart (SSH port-forward setup) | Whether the in-pod SSH server is exposed via port forward. Needed for IDE attach. |

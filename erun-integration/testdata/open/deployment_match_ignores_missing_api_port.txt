@@ -3,6 +3,7 @@ kubectl config set-context --current --namespace='team-dev' >/dev/null &&
 cd '<TMP>'
 audit: erun open --dry-run --no-alias-prompt --no-shell team dev
 config: would assign localportrangestart=17000 to team/dev
+trace-log: would append the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=true ide=shell
 kubectl --context test-context --namespace team-dev get deployment team-devops -o name
 kubectl --context test-context --namespace team-dev get deployment team-devops -o json

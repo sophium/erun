@@ -37,10 +37,9 @@ export interface UIWorkingIssue {
 }
 
 // UIEnvTrace mirrors the Go uiEnvTrace from the LoadEnvTrace binding: the
-// Diagnostics console's erun-trace read model (issue #466).
+// Diagnostics console's erun-trace read model (issues #466/#508).
 export interface UIEnvTrace {
   available: boolean;
-  enabled: boolean;
   content?: string;
   path: string;
   reason?: string;

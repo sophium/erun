@@ -11,10 +11,6 @@ type Context struct {
 	Logger                     Logger
 	Verbosity                  int
 	DryRun                     bool
-	// DebugOutput carries the --debug-output flag: the env-scoped command
-	// activates the per-env trace tee and persists the env's debugoutput
-	// setting (issue #466). See ActivateEnvDebugTee.
-	DebugOutput bool
 	Stdin                      io.Reader
 	Stdout                     io.Writer
 	Stderr                     io.Writer

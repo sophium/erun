@@ -143,13 +143,14 @@ func runRuntimeCommand(runtime RuntimeConfig, preview bool, verbosity int, run f
 	traceOutput := new(bytes.Buffer)
 	ctx := runtimeCallContext(preview, verbosity, nil, traceOutput, traceOutput)
 	ctx.KubernetesContextPreflight = eruncommon.CloudContextPreflight(runtime.Store, eruncommon.CloudContextDependencies{})
-	// Per-env debug-output capture (issue #466): when the server's bound env
-	// opts in (debugoutput in its config), every tool invocation appends its
-	// full trace to the pod-side ~/.erun/<tenant>/<env>/trace.log — the same
-	// contract the CLI honors, so the desktop's Diagnostics console shows
-	// agent-driven operations too.
-	ctx, closeDebugTee := eruncommon.ActivateEnvDebugTeeFromStore(ctx, runtime.Store, runtime.Context.Tenant, runtime.Context.Environment)
-	defer closeDebugTee()
+	// Per-env trace capture (issues #466/#508): every action-tool invocation
+	// appends its full trace to the pod-side ~/.erun/<tenant>/<env>/trace.log
+	// — the same contract the CLI honors, so the desktop's Diagnostics
+	// console shows agent-driven operations too. Always on; read-only tools
+	// (idle, raw, list, version) bypass runRuntimeCommand and are not
+	// captured, so probe polls cannot flood the log.
+	ctx, closeEnvTrace := eruncommon.ActivateEnvTrace(ctx, runtime.Context.Tenant, runtime.Context.Environment)
+	defer closeEnvTrace()
 
 	workDir, err := runtimeRepoPath(runtime.Context)
 	if err != nil {

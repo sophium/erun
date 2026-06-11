@@ -14,7 +14,6 @@ Flags:
   -h, --help      help for raw
 
 Global Flags:
-      --debug-output    Capture this environment's full erun trace to ~/.erun/<tenant>/<env>/trace.log from now on (persists the env's debugoutput setting; the desktop's Diagnostics console reads it).
       --time            Print the elapsed runtime after the command finishes.
   -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
 audit: erun exec raw --help

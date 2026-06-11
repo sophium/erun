@@ -15,17 +15,18 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { UIEnvTrace, UISelection } from '@/types';
 
-import { LoadEnvTrace, SetEnvDebugOutput } from '../../../wailsjs/go/main/App';
+import { LoadEnvTrace } from '../../../wailsjs/go/main/App';
 import { ClipboardSetText } from '../../../wailsjs/runtime/runtime';
 
 // DebugPanel is the Diagnostics console (issue #466): two separate,
 // copyable diagnostic surfaces designed to be pasted into an error report.
 //
-//   - erun trace — the selected env's persistent debug-output log
+//   - erun trace — the selected env's persistent trace log
 //     (~/.erun/<tenant>/<env>/trace.log), written by erun itself at full
-//     trace verbosity whenever the env opts in, readable at any time —
-//     including for commands that ran before this console was opened. Host
-//     file for local envs, in-pod file (reachability-gated) for remote.
+//     trace verbosity on every env-scoped invocation (always on, #508),
+//     readable at any time — including for commands that ran before this
+//     console was opened. Host file for local envs, in-pod file
+//     (reachability-gated) for remote.
 //   - UI trace — the in-app Redux action history (the packaged WebView has
 //     no Redux DevTools).
 //
@@ -245,12 +246,7 @@ function ErunTracePane({ selection }: { selection: UISelection | null }): React.
           content={content}
           onRefresh={refresh}
         />
-        <ErunTraceBody
-          tenant={tenant}
-          environment={environment}
-          trace={trace}
-          onEnabled={refresh}
-        />
+        <ErunTraceBody tenant={tenant} environment={environment} trace={trace} />
       </div>
     </div>
   );
@@ -297,12 +293,10 @@ function ErunTraceBody({
   tenant,
   environment,
   trace,
-  onEnabled,
 }: {
   tenant: string;
   environment: string;
   trace: UIEnvTrace | null;
-  onEnabled: () => void;
 }): React.ReactElement | null {
   if (!tenant || !environment) {
     return (
@@ -319,52 +313,7 @@ function ErunTraceBody({
       </pre>
     );
   }
-  return (
-    <div className="grid gap-2">
-      <p className="m-0 text-[oklch(0.6_0_0)]">{trace.reason ?? 'No trace available.'}</p>
-      {!trace.enabled && (
-        <EnableCaptureNotice tenant={tenant} environment={environment} onEnabled={onEnabled} />
-      )}
-    </div>
-  );
-}
-
-// EnableCaptureNotice is the empty state's recovery affordance: capture is
-// off, so nothing will ever appear — one click persists the env's
-// debugoutput setting (the same one `erun --debug-output` writes).
-function EnableCaptureNotice({
-  tenant,
-  environment,
-  onEnabled,
-}: {
-  tenant: string;
-  environment: string;
-  onEnabled: () => void;
-}): React.ReactElement {
-  const [enabling, setEnabling] = React.useState(false);
-  const enable = React.useCallback(() => {
-    setEnabling(true);
-    void SetEnvDebugOutput({ tenant, environment }, true)
-      .then(onEnabled)
-      .finally(() => {
-        setEnabling(false);
-      });
-  }, [tenant, environment, onEnabled]);
-  return (
-    <p className="m-0 text-[oklch(0.6_0_0)]">
-      Debug output is off for this environment — nothing is being captured.
-      <Button
-        className="ml-2 h-6 px-2 text-[11px]"
-        type="button"
-        variant="outline"
-        size="sm"
-        disabled={enabling}
-        onClick={enable}
-      >
-        {enabling ? 'Enabling…' : 'Enable debug output'}
-      </Button>
-    </p>
-  );
+  return <p className="m-0 text-[oklch(0.6_0_0)]">{trace.reason ?? 'No trace available.'}</p>;
 }
 
 // UITracePane renders the Redux action history, polling the module buffer

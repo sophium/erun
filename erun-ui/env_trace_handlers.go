@@ -15,19 +15,17 @@ import (
 // refresh transfers — enough scrollback to diagnose, small enough to poll.
 const envTraceTailBytes = 64 * 1024
 
-// uiEnvTrace is the Diagnostics console's "erun trace" read model (issue
-// #466): the tail of the env's persistent debug-output log, or an honest
-// reason why there is nothing to show plus whether capture is enabled at
-// all (the empty state offers to enable it).
+// uiEnvTrace is the Diagnostics console's "erun trace" read model (issues
+// #466/#508): the tail of the env's persistent trace log — capture is
+// always on — or an honest reason why there is nothing to show.
 type uiEnvTrace struct {
 	Available bool   `json:"available"`
-	Enabled   bool   `json:"enabled"`
 	Content   string `json:"content,omitempty"`
 	Path      string `json:"path"`
 	Reason    string `json:"reason,omitempty"`
 }
 
-// LoadEnvTrace reads the selected env's debug-output log for the
+// LoadEnvTrace reads the selected env's trace log for the
 // Diagnostics console: the host file for local-agent envs, the in-pod file
 // (over the env's MCP port-forward, gated on reachability) for remote envs.
 // Read-only and side-effect free — reading diagnostics must never mutate
@@ -45,8 +43,7 @@ func (a *App) LoadEnvTrace(selection uiSelection) (uiEnvTrace, error) {
 		return uiEnvTrace{}, err
 	}
 	trace := uiEnvTrace{
-		Enabled: result.EnvConfig.DebugOutput,
-		Path:    "~/.erun/" + result.Tenant + "/" + result.Environment + "/trace.log",
+		Path: "~/.erun/" + result.Tenant + "/" + result.Environment + "/trace.log",
 	}
 	if !result.EnvConfig.RemoteWorktree() {
 		return a.loadHostEnvTrace(result, trace), nil
@@ -97,26 +94,6 @@ func (a *App) loadPodEnvTrace(result eruncommon.OpenResult, trace uiEnvTrace) ui
 	trace.Available = true
 	trace.Content = out
 	return trace
-}
-
-// SetEnvDebugOutput flips the env's persistent debug-output capture (issue
-// #466) — the Diagnostics console's enable affordance. The setting is the
-// same one `erun --debug-output` persists; every later erun invocation for
-// the env appends its full trace to the per-env log.
-func (a *App) SetEnvDebugOutput(selection uiSelection, enabled bool) error {
-	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return fmt.Errorf("tenant and environment are required")
-	}
-	config, _, err := a.deps.store.LoadEnvConfig(selection.Tenant, selection.Environment)
-	if err != nil {
-		return err
-	}
-	if config.DebugOutput == enabled {
-		return nil
-	}
-	config.DebugOutput = enabled
-	return a.deps.store.SaveEnvConfig(selection.Tenant, config)
 }
 
 // tailFile returns up to maxBytes from the end of path, starting at the

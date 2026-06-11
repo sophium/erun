@@ -8,36 +8,25 @@ import (
 	"time"
 )
 
-// TestActivateEnvDebugTee pins the per-env debug-output capture (issue
-// #466): the tee mirrors the full trace stream — including lines the
-// terminal verbosity suppresses — into ~/.erun/<tenant>/<env>/trace.log,
-// stamped per line; the flag persists the env setting; dry-run only names
+// TestActivateEnvTrace pins the per-env trace capture (issues #466/#508):
+// the tee is always on for env-scoped invocations and mirrors the full
+// trace stream — including lines the terminal verbosity suppresses — into
+// ~/.erun/<tenant>/<env>/trace.log, stamped per line; dry-run only names
 // the path. The real-write branches are unreachable from the dry-run
 // integration harness by design, so this white-box test owns them; the
 // dry-run trace contract is locked by the open goldens.
-func TestActivateEnvDebugTee(t *testing.T) {
-	t.Run("tee captures suppressed trace lines, stamped, and persists the flag", func(t *testing.T) {
+func TestActivateEnvTrace(t *testing.T) {
+	t.Run("tee captures suppressed trace lines, stamped, with no opt-in", func(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
-		var saved *EnvConfig
-		save := func(_ string, config EnvConfig) error {
-			saved = &config
-			return nil
-		}
-		ctx := Context{
-			Logger:      NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr),
-			DebugOutput: true,
-		}
-		teeCtx, closeTee := ActivateEnvDebugTee(ctx, EnvConfig{Name: "dev"}, save, "team", "dev")
+		ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr)}
+		teeCtx, closeTee := ActivateEnvTrace(ctx, "team", "dev")
 		// TraceCommand is gated to -vv on the terminal; the sink must see it
 		// anyway — that is the "full trace without -vv" contract.
 		teeCtx.TraceCommand("", "kubectl", "get", "pods")
 		teeCtx.Info("==> Deploying team/dev 1.0.0")
 		closeTee()
 
-		if saved == nil || !saved.DebugOutput {
-			t.Fatalf("expected debugoutput=true persisted, got %+v", saved)
-		}
 		raw, err := os.ReadFile(filepath.Join(home, ".erun", "team", "dev", "trace.log"))
 		if err != nil {
 			t.Fatalf("trace log not written: %v", err)
@@ -63,42 +52,26 @@ func TestActivateEnvDebugTee(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
 		ctx := Context{
-			Logger:      NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr),
-			DebugOutput: true,
-			DryRun:      true,
+			Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr),
+			DryRun: true,
 		}
-		_, closeTee := ActivateEnvDebugTee(ctx, EnvConfig{Name: "dev"}, func(string, EnvConfig) error {
-			t.Fatal("dry-run must not persist")
-			return nil
-		}, "team", "dev")
+		_, closeTee := ActivateEnvTrace(ctx, "team", "dev")
 		closeTee()
 		if _, err := os.Stat(filepath.Join(home, ".erun", "team", "dev", "trace.log")); !os.IsNotExist(err) {
 			t.Fatalf("dry-run must not create the trace log, stat err = %v", err)
 		}
 	})
 
-	t.Run("neither the flag nor the setting means no tee", func(t *testing.T) {
+	t.Run("a blank tenant or environment deactivates the tee", func(t *testing.T) {
 		home := t.TempDir()
 		t.Setenv("HOME", home)
 		ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr)}
-		teeCtx, closeTee := ActivateEnvDebugTee(ctx, EnvConfig{Name: "dev"}, nil, "team", "dev")
+		teeCtx, closeTee := ActivateEnvTrace(ctx, " ", "dev")
 		teeCtx.Trace("invisible")
 		closeTee()
-		if _, err := os.Stat(filepath.Join(home, ".erun", "team", "dev", "trace.log")); !os.IsNotExist(err) {
-			t.Fatalf("opted-out env must not create the trace log, stat err = %v", err)
-		}
-	})
-
-	t.Run("the persisted setting alone activates the tee", func(t *testing.T) {
-		home := t.TempDir()
-		t.Setenv("HOME", home)
-		ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr)}
-		teeCtx, closeTee := ActivateEnvDebugTee(ctx, EnvConfig{Name: "dev", DebugOutput: true}, nil, "team", "dev")
-		teeCtx.Trace("captured without any flag")
-		closeTee()
-		raw, err := os.ReadFile(filepath.Join(home, ".erun", "team", "dev", "trace.log"))
-		if err != nil || !strings.Contains(string(raw), "captured without any flag") {
-			t.Fatalf("persisted setting must capture (err=%v):\n%s", err, raw)
+		entries, err := os.ReadDir(filepath.Join(home, ".erun"))
+		if !os.IsNotExist(err) && len(entries) > 0 {
+			t.Fatalf("unscoped invocation must not create a trace log, got %v (err=%v)", entries, err)
 		}
 	})
 
@@ -113,7 +86,7 @@ func TestActivateEnvDebugTee(t *testing.T) {
 			t.Fatal(err)
 		}
 		ctx := Context{Logger: NewLoggerWithWriters(VerbosityInfo, os.Stderr, os.Stderr)}
-		teeCtx, closeTee := ActivateEnvDebugTee(ctx, EnvConfig{Name: "dev", DebugOutput: true}, nil, "team", "dev")
+		teeCtx, closeTee := ActivateEnvTrace(ctx, "team", "dev")
 		teeCtx.Trace("fresh after rotation")
 		closeTee()
 		if _, err := os.Stat(path + ".1"); err != nil {

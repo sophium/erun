@@ -46,14 +46,14 @@ func TestLoadEnvTraceHostFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := envTraceApp(t, eruncommon.EnvConfig{
-		Name: "dev", Type: eruncommon.EnvironmentTypeLocalAgent, KubernetesContext: "ctx", DebugOutput: true,
+		Name: "dev", Type: eruncommon.EnvironmentTypeLocalAgent, KubernetesContext: "ctx",
 	}, false, "", nil)
 
 	trace, err := app.LoadEnvTrace(uiSelection{Tenant: "acme", Environment: "dev"})
 	if err != nil {
 		t.Fatalf("LoadEnvTrace: %v", err)
 	}
-	if !trace.Available || !trace.Enabled || !strings.Contains(trace.Content, "==> Deploying acme/dev") {
+	if !trace.Available || !strings.Contains(trace.Content, "==> Deploying acme/dev") {
 		t.Fatalf("unexpected host trace: %+v", trace)
 	}
 }
@@ -68,7 +68,7 @@ func TestLoadEnvTraceHostFileMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadEnvTrace: %v", err)
 	}
-	if trace.Available || trace.Enabled || trace.Reason != "no trace captured yet" {
+	if trace.Available || trace.Reason != "no trace captured yet" {
 		t.Fatalf("expected the honest empty state, got %+v", trace)
 	}
 }
@@ -89,7 +89,7 @@ func TestLoadEnvTracePodGatedOnReachability(t *testing.T) {
 
 func TestLoadEnvTracePodTail(t *testing.T) {
 	app := envTraceApp(t, eruncommon.EnvConfig{
-		Name: "dev", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500, DebugOutput: true,
+		Name: "dev", Type: eruncommon.EnvironmentTypeRemoteAgent, KubernetesContext: "ctx", LocalPortRangeStart: 17500,
 	}, true, "2026-06-11T00:00:00Z deploy: resolved 1 spec(s)\n", nil)
 
 	trace, err := app.LoadEnvTrace(uiSelection{Tenant: "acme", Environment: "dev"})
@@ -101,15 +101,3 @@ func TestLoadEnvTracePodTail(t *testing.T) {
 	}
 }
 
-func TestSetEnvDebugOutputPersists(t *testing.T) {
-	app := envTraceApp(t, eruncommon.EnvConfig{
-		Name: "dev", Type: eruncommon.EnvironmentTypeLocalAgent, KubernetesContext: "ctx",
-	}, false, "", nil)
-	if err := app.SetEnvDebugOutput(uiSelection{Tenant: "acme", Environment: "dev"}, true); err != nil {
-		t.Fatalf("SetEnvDebugOutput: %v", err)
-	}
-	config, _, err := app.deps.store.LoadEnvConfig("acme", "dev")
-	if err != nil || !config.DebugOutput {
-		t.Fatalf("expected debugoutput persisted, got %+v err=%v", config, err)
-	}
-}
