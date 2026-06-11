@@ -187,8 +187,8 @@ export class ManageDialog {
   }
 
   // claudeEffortSelect targets the "Effort" SelectField in the Claude section
-  // of the AI tab (issue #469). It always renders; with no per-env override it
-  // shows "Default (max)".
+  // of the AI tab (issues #469/#491). It always renders; with no per-env
+  // override it shows "Default (ultracode)".
   claudeEffortSelect(): Locator {
     return this.locator().locator('#environment-config-claude-effort');
   }

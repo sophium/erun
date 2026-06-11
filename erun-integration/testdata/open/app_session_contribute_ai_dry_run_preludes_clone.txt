@@ -63,7 +63,7 @@ bootstrap-script:
   export PATH="$HOME/.erun/contribute/bin:$PATH"
   export ERUN_SKIP_LINT=1
   cd "$HOME/git/erun"
-  if [ -d "$HOME/.claude/projects/$(pwd | tr / -)" ]; then claude --continue --effort max; else claude --effort max; fi
+  if [ -d "$HOME/.claude/projects/$(pwd | tr / -)" ]; then claude --continue --settings '{"ultracode":true}'; else claude --settings '{"ultracode":true}'; fi
   exec /bin/bash --rcfile "$HOME/.erun/team/dev/bashrc" -i
   EOF
   attach_id="$$-$(date +%s)"

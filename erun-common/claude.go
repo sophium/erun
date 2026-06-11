@@ -28,12 +28,13 @@ type EnvironmentClaudeConfig struct {
 	Models          []string `yaml:"models,omitempty" json:"models,omitempty"`
 	MaxOutputTokens *int     `yaml:"maxoutputtokens,omitempty" json:"maxOutputTokens,omitempty"`
 	// Effort is the per-env Claude Code session effort level (one of
-	// low|medium|high|xhigh|max) applied as `claude --effort` when the desktop
-	// launches the env's AI tab. Unset means the desktop falls back to the
-	// default (max). The level only influences the desktop AI-tab launch, so
-	// its validation, default, and resolution live in erun-ui; this shared
-	// field exists so the value round-trips through the same env config the UI
-	// reads and writes.
+	// low|medium|high|xhigh|max|ultracode) applied when the desktop launches
+	// the env's AI tab: the first five as `claude --effort <level>`,
+	// ultracode as `--settings '{"ultracode":true}'` (it is not an --effort
+	// value — it enables xhigh effort plus standing workflow orchestration).
+	// Unset means the default (ultracode). The level only influences the
+	// AI-tab launch; this shared field exists so the value round-trips
+	// through the same env config the UI reads and writes.
 	Effort *string `yaml:"effort,omitempty" json:"effort,omitempty"`
 	// DefaultModel is the per-env Claude model preselected as `claude --model`
 	// when the AI tab's session launches. Unset means no --model is passed

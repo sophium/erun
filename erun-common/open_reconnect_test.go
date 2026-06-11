@@ -107,8 +107,8 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		if !strings.Contains(script, `dtach -A "/tmp/erun-app/erun-local-ai.dtach" -r ctrl_l`) {
 			t.Fatalf("AI tab missing dtach wrap:\n%s", script)
 		}
-		if !strings.Contains(script, "claude --continue --effort max") {
-			t.Fatalf("AI tab must launch the claude guard at the env effort:\n%s", script)
+		if !strings.Contains(script, `claude --continue --settings '{"ultracode":true}'`) {
+			t.Fatalf("AI tab must launch the claude guard at the default effort (ultracode):\n%s", script)
 		}
 		if !strings.Contains(script, "exec "+bashrc) {
 			t.Fatalf("AI launcher must drop to an interactive shell after claude:\n%s", script)
