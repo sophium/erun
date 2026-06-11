@@ -53,4 +53,8 @@ export class DebugPanel {
   clearButton(): Locator {
     return this.page.getByRole('button', { name: 'Clear' });
   }
+
+  copyReportButton(): Locator {
+    return this.page.getByRole('button', { name: /^(Copy report|Copied|Copy failed)$/ });
+  }
 }
