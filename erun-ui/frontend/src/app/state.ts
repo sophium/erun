@@ -419,6 +419,6 @@ export const defaultClaudeDefaults = (): UIEnvironmentConfig['claudeDefaults'] =
   knownModels: ['opus', 'sonnet', 'haiku', 'fable'],
   minTokens: 1,
   maxTokens: 200000,
-  effort: 'max',
-  effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
+  effort: 'ultracode',
+  effortLevels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultracode'],
 });

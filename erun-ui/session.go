@@ -425,15 +425,19 @@ func resolveLocalShellCommand(goos string) (string, []string) {
 	}
 }
 
-// claudeEffortLevels enumerates the valid `claude --effort` startup levels, in
-// ascending order. The set mirrors `claude --help`; max is the highest and the
-// desktop default.
-var claudeEffortLevels = []string{"low", "medium", "high", "xhigh", "max"}
+// claudeEffortLevels enumerates the selectable Claude effort levels, in
+// ascending order. The first five mirror `claude --effort` from
+// `claude --help`; ultracode sits above max as "everything on" (xhigh effort
+// plus standing workflow orchestration, launched via --settings — see
+// erun-common/ai_launch.go, which owns the launch command). Must stay in
+// lockstep with erun-common's claudeEffortLevels and the frontend fallback in
+// state.ts.
+var claudeEffortLevels = []string{"low", "medium", "high", "xhigh", "max", "ultracode"}
 
 // defaultClaudeEffort is the effort level the desktop applies to a Claude AI
 // tab when the env has no explicit Effort configured, or has an invalid one
-// (issue #469). It is the highest level.
-const defaultClaudeEffort = "max"
+// (issues #469/#491). Ultracode is the default: everything on.
+const defaultClaudeEffort = "ultracode"
 
 // claudeEffortLevelOptions returns the valid effort levels for transport to the
 // frontend selector.

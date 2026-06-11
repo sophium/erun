@@ -7,12 +7,19 @@ import (
 
 const (
 	defaultAITool       = "claude"
-	defaultClaudeEffort = "max"
+	defaultClaudeEffort = "ultracode"
+	// claudeEffortUltracode is not a `claude --effort` value (Claude Code
+	// rejects it): it is the settings key for "everything on" — xhigh
+	// thinking effort plus standing multi-agent workflow orchestration —
+	// enabled via `--settings '{"ultracode":true}'` (issue #491).
+	claudeEffortUltracode = "ultracode"
 )
 
-// claudeEffortLevels enumerates the valid `claude --effort` startup levels in
-// ascending order; max is the default.
-var claudeEffortLevels = []string{"low", "medium", "high", "xhigh", "max"}
+// claudeEffortLevels enumerates the selectable Claude effort levels in
+// ascending order. The first five are `claude --effort` values (mirroring
+// `claude --help`); ultracode sits above max as the desktop default and
+// launches through --settings instead (see claudeEffortFlags).
+var claudeEffortLevels = []string{"low", "medium", "high", "xhigh", "max", claudeEffortUltracode}
 
 func validClaudeEffort(level string) bool {
 	level = strings.TrimSpace(level)
@@ -82,10 +89,7 @@ func AISessionLaunchCommand(aiTool string, claude EnvironmentClaudeConfig) strin
 }
 
 func claudeLaunchGuard(effort, model string, verboseDebug bool) string {
-	flags := ""
-	if validClaudeEffort(effort) {
-		flags = " --effort " + effort
-	}
+	flags := claudeEffortFlags(effort)
 	if model != "" {
 		flags += " --model " + model
 	}
@@ -93,4 +97,20 @@ func claudeLaunchGuard(effort, model string, verboseDebug bool) string {
 		flags += " --verbose --debug"
 	}
 	return `if [ -d "$HOME/.claude/projects/$(pwd | tr / -)" ]; then claude --continue` + flags + `; else claude` + flags + `; fi`
+}
+
+// claudeEffortFlags maps a resolved effort level to its launch flags.
+// ultracode is enabled through Claude Code's settings mechanism, not
+// --effort (which rejects it), so it launches as `--settings
+// '{"ultracode":true}'` — the JSON stays single-quoted because the guard is
+// a sh one-liner and nothing inside it may interpolate. The five --effort
+// levels launch as before.
+func claudeEffortFlags(effort string) string {
+	switch {
+	case effort == claudeEffortUltracode:
+		return ` --settings '{"ultracode":true}'`
+	case validClaudeEffort(effort):
+		return " --effort " + effort
+	}
+	return ""
 }

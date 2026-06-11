@@ -211,7 +211,7 @@ function ClaudeEffortField({
         { value: 'default', label: `Default (${defaults.effort})` },
         ...defaults.effortLevels.map((level) => ({ value: level, label: level })),
       ]}
-      helper="Effort level Claude runs at in this environment's AI tab. Higher levels let Claude think longer before responding. Default applies the highest level (max)."
+      helper="Effort level Claude runs at in this environment's AI tab. Higher levels let Claude think longer before responding. ultracode runs at xhigh effort and additionally enables standing multi-agent workflow orchestration; it is the default."
       disabled={disabled}
       onChange={(next) => {
         onChange(next === 'default' ? undefined : next);

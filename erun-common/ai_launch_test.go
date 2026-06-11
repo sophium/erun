@@ -43,15 +43,37 @@ func TestAISessionLaunchCommand(t *testing.T) {
 		}
 	})
 
-	t.Run("unset and invalid effort both resolve to max", func(t *testing.T) {
-		if got := AISessionLaunchCommand("", EnvironmentClaudeConfig{}); !strings.Contains(got, "--effort max") {
-			t.Fatalf("unset effort must default to max, got %q", got)
+	t.Run("unset and invalid effort both resolve to ultracode", func(t *testing.T) {
+		got := AISessionLaunchCommand("", EnvironmentClaudeConfig{})
+		if !strings.Contains(got, `--settings '{"ultracode":true}'`) || strings.Contains(got, "--effort") {
+			t.Fatalf("unset effort must default to ultracode via --settings, got %q", got)
 		}
 		// A bad persisted value must never reach the shell verbatim; it resolves
 		// to the default instead of injecting `--effort turbo`.
-		got := AISessionLaunchCommand("", effort("turbo"))
-		if strings.Contains(got, "turbo") || !strings.Contains(got, "--effort max") {
-			t.Fatalf("invalid effort must resolve to max, got %q", got)
+		got = AISessionLaunchCommand("", effort("turbo"))
+		if strings.Contains(got, "turbo") || !strings.Contains(got, `--settings '{"ultracode":true}'`) {
+			t.Fatalf("invalid effort must resolve to ultracode, got %q", got)
+		}
+	})
+
+	// Issue #491 — ultracode is not a `claude --effort` value: it launches
+	// through the settings mechanism. The five --effort levels are untouched,
+	// and the settings JSON appears in both branches of the cwd-guarded
+	// resume, composing after --continue.
+	t.Run("ultracode launches via --settings in both guard branches", func(t *testing.T) {
+		got := AISessionLaunchCommand("", effort("ultracode"))
+		if strings.Count(got, `--settings '{"ultracode":true}'`) != 2 || strings.Contains(got, "--effort") {
+			t.Fatalf("ultracode must inject --settings (never --effort) in both branches, got %q", got)
+		}
+		if !strings.Contains(got, `claude --continue --settings '{"ultracode":true}'`) {
+			t.Fatalf("--settings must compose after --continue in the resume branch, got %q", got)
+		}
+	})
+
+	t.Run("an explicit max still launches via --effort", func(t *testing.T) {
+		got := AISessionLaunchCommand("", effort("max"))
+		if !strings.Contains(got, "--effort max") || strings.Contains(got, "--settings") {
+			t.Fatalf("explicit max must keep --effort max, got %q", got)
 		}
 	})
 }
@@ -71,8 +93,8 @@ func TestAISessionLaunchCommandModelAndDebugFlags(t *testing.T) {
 		if strings.Count(got, "--model fable --verbose --debug") != 2 {
 			t.Fatalf("expected --model and --verbose --debug in both guard branches, got %q", got)
 		}
-		if !strings.Contains(got, "claude --continue --effort max --model fable --verbose --debug") {
-			t.Fatalf("flags must compose after --effort in the resume branch, got %q", got)
+		if !strings.Contains(got, `claude --continue --settings '{"ultracode":true}' --model fable --verbose --debug`) {
+			t.Fatalf("flags must compose after the effort flags in the resume branch, got %q", got)
 		}
 	})
 
@@ -115,8 +137,8 @@ func TestResolveClaudeDefaultModel(t *testing.T) {
 }
 
 // TestResolveClaudeEffort covers the per-env effort resolution: a valid level is
-// used; unset, blank, and invalid fall back to max so the launch never carries a
-// bad --effort flag.
+// used; unset, blank, and invalid fall back to ultracode (the default) so the
+// launch never carries a bad effort flag.
 func TestResolveClaudeEffort(t *testing.T) {
 	level := func(v string) *string { return &v }
 	cases := []struct {
@@ -124,11 +146,13 @@ func TestResolveClaudeEffort(t *testing.T) {
 		config EnvironmentClaudeConfig
 		want   string
 	}{
-		{"unset", EnvironmentClaudeConfig{}, "max"},
+		{"unset", EnvironmentClaudeConfig{}, "ultracode"},
 		{"valid", EnvironmentClaudeConfig{Effort: level("low")}, "low"},
+		{"explicit max stays max", EnvironmentClaudeConfig{Effort: level("max")}, "max"},
+		{"ultracode is a valid level", EnvironmentClaudeConfig{Effort: level("ultracode")}, "ultracode"},
 		{"trimmed", EnvironmentClaudeConfig{Effort: level("  high  ")}, "high"},
-		{"blank", EnvironmentClaudeConfig{Effort: level("  ")}, "max"},
-		{"invalid", EnvironmentClaudeConfig{Effort: level("turbo")}, "max"},
+		{"blank", EnvironmentClaudeConfig{Effort: level("  ")}, "ultracode"},
+		{"invalid", EnvironmentClaudeConfig{Effort: level("turbo")}, "ultracode"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
