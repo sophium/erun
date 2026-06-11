@@ -67,12 +67,17 @@ type RegistryVersionsLookup func(ctx context.Context, namespace, repository stri
 //     first env of the tenant with a persisted RuntimeRegistry — falling
 //     back to the default registry, the same source the version picker uses
 //     (issue #475);
-//   - a tenant-specific image that resolves to no versions at all falls back
-//     per channel to the default ERun image: a tenant whose own image was
-//     never published runs the default image, so that is its real target;
-//   - a lookup error is returned, never substituted — the member reports
-//     "target unresolved" with the reason instead of being offered another
-//     image's version.
+//   - the tenant repo refines the targets when it is listable: a published
+//     tenant stream wins per channel;
+//   - a tenant lookup that fails or comes back empty falls back per channel
+//     to the canonical ERun image (issue #501): the tenant image is a thin
+//     wrapper the deploy rebuilds FROM the canonical image at the requested
+//     version (default_devops_module.go), so the canonical channel-latest is
+//     the tenant's real target universe — and registries like ghcr report
+//     403 for private and nonexistent repos alike, so a listing failure says
+//     nothing about what the env can deploy;
+//   - only a canonical-image lookup failure leaves the target unresolved,
+//     with that failure as the reason.
 func UpgradeVersionsResolverForStore(store DeployStore, lookup RegistryVersionsLookup) RuntimeVersionsResolver {
 	return func(_ Context, tenant string) (RuntimeRegistryVersions, error) {
 		if versions, forcedError, ok := runtimeVersionsOverrideFromEnvWithError(); ok {
@@ -86,22 +91,29 @@ func UpgradeVersionsResolverForStore(store DeployStore, lookup RegistryVersionsL
 			namespace = DefaultContainerRegistry
 		}
 		repository := RuntimeReleaseName(tenant)
-		versions, err := lookup(context.Background(), namespace, repository)
-		if err != nil {
-			return RuntimeRegistryVersions{}, err
-		}
 		if repository == DefaultRuntimeImageName {
+			return lookup(context.Background(), namespace, repository)
+		}
+		versions, tenantErr := lookup(context.Background(), namespace, repository)
+		if tenantErr == nil &&
+			strings.TrimSpace(versions.LatestStable) != "" && strings.TrimSpace(versions.LatestSnapshot) != "" {
 			return versions, nil
 		}
-		if strings.TrimSpace(versions.LatestStable) != "" && strings.TrimSpace(versions.LatestSnapshot) != "" {
-			return versions, nil
-		}
-		fallback, err := lookup(context.Background(), DefaultContainerRegistry, DefaultRuntimeImageName)
-		if err != nil {
-			// The tenant's own lookup succeeded (just empty); a failed
-			// default-image lookup must not fail the tenant — the empty
+		fallback, fallbackErr := lookup(context.Background(), DefaultContainerRegistry, DefaultRuntimeImageName)
+		if fallbackErr != nil {
+			if tenantErr != nil {
+				// Neither source is resolvable — genuinely unknown. The
+				// canonical failure is the actionable reason: it is the
+				// image the deploy would build from.
+				return RuntimeRegistryVersions{}, fallbackErr
+			}
+			// The tenant's own lookup succeeded (just partial); a failed
+			// canonical lookup must not fail the tenant — the empty
 			// channels simply stay unresolved.
 			return versions, nil
+		}
+		if tenantErr != nil {
+			return fallback, nil
 		}
 		if strings.TrimSpace(versions.LatestStable) == "" {
 			versions.LatestStable = fallback.LatestStable
