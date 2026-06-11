@@ -149,3 +149,41 @@ func TestEnvStatusFailedAfterReconnectLoopCapAndClearedByRespawns(t *testing.T) 
 		t.Fatalf("expected at least %d clearing emissions (initial open + respawns), got %d in %+v", reconnectLoopMaxExits, clears, statuses)
 	}
 }
+
+// TestEnvStatusClearedByLaterSuccessfulDeploy locks the recovery path from
+// issue #498: an env flagged 'failed' (amber dot, refused ERun-tab respawn)
+// must drop the flag the moment a later deploy for it succeeds through the
+// activity queue — e.g. an `erun upgrade` run — instead of keeping a stale
+// failure on the row until the next manual row click.
+func TestEnvStatusClearedByLaterSuccessfulDeploy(t *testing.T) {
+	var sessionsMu sync.Mutex
+	var sessions []*stubTerminalSession
+	emits := newCapturedEmits()
+	app := envStatusTestApp(t, emits, &sessionsMu, &sessions)
+
+	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "erun", Environment: "remote", Version: "1.0.1"})
+	app.finishDeployByTenantEnv(uiSelection{}, "erun", "remote", activityQueueStatusSucceeded, "")
+
+	waitForEnvStatus(t, emits, "", 2*time.Second)
+	statuses := envStatuses(emits)
+	last := statuses[len(statuses)-1]
+	if last.Tenant != "erun" || last.Environment != "remote" || last.Status != "" {
+		t.Fatalf("expected a clearing env-status for the deployed env, got %+v", statuses)
+	}
+}
+
+// TestEnvStatusNotClearedByFailedDeploy is the negative guard: a deploy that
+// finishes failed must not emit the clear.
+func TestEnvStatusNotClearedByFailedDeploy(t *testing.T) {
+	var sessionsMu sync.Mutex
+	var sessions []*stubTerminalSession
+	emits := newCapturedEmits()
+	app := envStatusTestApp(t, emits, &sessionsMu, &sessions)
+
+	app.activityQueue.start(activityQueueEntry{Command: "deploy", Tenant: "erun", Environment: "remote", Version: "1.0.1"})
+	app.finishDeployByTenantEnv(uiSelection{}, "erun", "remote", activityQueueStatusFailed, "==> Deploy failed after 2m1s")
+
+	if got := envStatuses(emits); len(got) != 0 {
+		t.Fatalf("a failed deploy must not emit env-status, got %+v", got)
+	}
+}
