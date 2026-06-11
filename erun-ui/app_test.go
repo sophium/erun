@@ -2318,9 +2318,10 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	}
 
 	got := strings.Join(actions, "\n")
-	// The ERun tab runs `erun open … --app-session open-0`: a persistent,
-	// reattachable dtach session so reopening reconnects to the running shell (#478).
-	if got != "terminal open frs prod --app-session open-0" {
+	// The ERun tab runs `erun open … --app-session open-0 --skip-ensure`: a
+	// persistent, reattachable dtach session (#478) whose preflight runs once
+	// per env via the shared ensure, not per tab (#463).
+	if got != "terminal open frs prod --app-session open-0 --skip-ensure" {
 		t.Fatalf("expected only terminal start action, got:\n%s", got)
 	}
 	// Cloud-context Status is no longer persisted, so we rely on the
@@ -3396,7 +3397,9 @@ func TestStartAISessionRunsErunOpenAsPersistentAITab(t *testing.T) {
 	// reconnects to the running claude. The desktop no longer types the launch
 	// in, so there is no initial input. The AI tool + effort are resolved pod-side
 	// by `erun open --ai`; AISessionLaunchCommand is covered in erun-common. #478.
-	wantArgs := []string{"open", "erun", "remote", "--app-session", "ai", "--ai"}
+	// --skip-ensure: the preflight runs once per env via the shared ensure,
+	// not per tab (#463).
+	wantArgs := []string{"open", "erun", "remote", "--app-session", "ai", "--ai", "--skip-ensure"}
 	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
 		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
 	}

@@ -98,9 +98,14 @@ test.describe('sidebar env hover card', () => {
     // Let the open settle first: the in-flight open's busy label outranks
     // the stopped state by design, and the spawn path itself emits a
     // clearing env-status — an injection raced against it would be
-    // overwritten (which is the production contract, not a flake).
+    // overwritten (which is the production contract, not a flake). The
+    // settled state is machine-dependent (a dev harness env whose real
+    // deploy fails settles on "Deploy failed", not "Idle" — the #483
+    // class), so accept any terminal non-busy state before injecting.
     const activity = card.locator('dd').nth(2);
-    await expect(activity).toContainText('Idle', { timeout: 15_000 });
+    await expect(activity).toContainText(/Idle|Stopped|Deploy failed|Not open/, {
+      timeout: 15_000,
+    });
 
     await emitEnvStatusEvent(page, tenant, env, 'stopped');
     await expect(dot).toHaveAttribute('data-env-state', 'stopped', { timeout: 4_000 });

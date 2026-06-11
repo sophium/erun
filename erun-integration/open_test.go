@@ -262,6 +262,19 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/remote_dry_run_propagates_host_credentials_opt_in", normalize.Apply(result.Combined))
 	})
 
+	t.Run("app_session_skip_ensure_dry_run_skips_the_deploy_preflight", func(t *testing.T) {
+		// #463: the desktop runs the open/build/deploy preflight once per env
+		// (the shared ensure) and spawns every tab with --skip-ensure. The
+		// flag must skip the preflight with an explicit trace — and nothing
+		// else: the shell preview (the deployment wait + dtach exec) still
+		// runs, which is what holds the tab until the ensure's deploy lands.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		envVars := stubKubectlNotFound(t, setup)
+		result := erun.Run(t, []string{"open", "team", "dev", "--app-session", "open-0", "--skip-ensure", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "open/app_session_skip_ensure_dry_run_skips_the_deploy_preflight", normalize.Apply(result.Combined))
+	})
+
 	t.Run("app_session_ai_dry_run_wraps_dtach_and_launches_claude", func(t *testing.T) {
 		// #478: the desktop AI tab runs `erun open --app-session ai --ai`. Without
 		// --no-shell the dry-run reaches traceShellPreview, so the bootstrap-script

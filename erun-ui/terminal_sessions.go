@@ -67,10 +67,14 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	}
 	a.mu.Unlock()
 
+	// One preflight per env (re)start (issue #463): the shared ensure runs
+	// the open/build/deploy once and streams its traces into the activity
+	// queue; the tab itself skips the preflight and waits on the deployment.
+	a.ensureEnvRuntimeOnce(selection)
 	openParams := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),
-		Args:       withAppSession(buildOpenArgs(result.Tenant, result.Environment, selection.Debug), fmt.Sprintf("open-%d", slot), false, false),
+		Args:       append(withAppSession(buildOpenArgs(result.Tenant, result.Environment, selection.Debug), fmt.Sprintf("open-%d", slot), false, false), "--skip-ensure"),
 		Env:        []string{appSessionEnvVar + "=1"},
 		Cols:       cols,
 		Rows:       rows,
@@ -243,6 +247,8 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	}
 	a.mu.Unlock()
 
+	// Shared per-env ensure (issue #463) — see StartSession.
+	a.ensureEnvRuntimeOnce(selection)
 	params := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),
@@ -251,7 +257,7 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 		// resume at the env effort, issues #451/#469), once on create. Reopening
 		// reconnects to the running claude rather than typing it in again or
 		// spawning a parallel one (#478).
-		Args: withAppSession(buildOpenArgs(result.Tenant, result.Environment, selection.Debug), "ai", true, false),
+		Args: append(withAppSession(buildOpenArgs(result.Tenant, result.Environment, selection.Debug), "ai", true, false), "--skip-ensure"),
 		Env:  []string{appSessionEnvVar + "=1"},
 		Cols: cols,
 		Rows: rows,
@@ -1163,6 +1169,12 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	}
 
 	a.emitReconnectMarker(managed.serial, exitReason)
+	// The respawned `erun open` runs with --skip-ensure; refresh the shared
+	// ensure (TTL-deduped) so a replaced pod gets its deploy back without
+	// every tab repeating the preflight (issue #463).
+	if managed.kind != sessionKindLocal {
+		a.ensureEnvRuntimeOnce(managed.selection)
+	}
 	next, err := respawn()
 	if err != nil {
 		a.emitReconnectFailureMarker(managed.serial, err)
