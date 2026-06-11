@@ -1,0 +1,5 @@
+audit: erun deploy --no-snapshot --version <VERSION> team dev
+deploy: tenant=team environment=dev version-override=<VERSION> snapshot=false components=[] force=false publish=false
+deploy: resolved 1 spec(s)
+deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
+another erun deploy is in progress for team/dev <VERSION> (release "team-devops", namespace "team-dev", context "test-context", pid=<PID>, started <TS>); refusing to run a conflicting helm upgrade

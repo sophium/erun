@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -354,6 +355,152 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "build/real_run_release_pushes_multi_platform_manifest", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_build_deploy_resolves_docker_target_deploy_specs", func(t *testing.T) {
+		// Exercises runBuildCommand's --deploy branch and the docker-target
+		// deploy resolution chain in erun-common/deploy.go:
+		// ResolveCurrentDeploySpecsForDockerTarget ->
+		// resolveDeployTargetForDockerTarget (project root from git,
+		// environment from the tenant env whose repopath matches, tenant via
+		// resolveProjectTenantForRoot + loadDefaultTenant) ->
+		// ResolveCurrentDeploySpecs. The build phase builds and pushes the
+		// cwd image (buildAndPushDeployDockerImages), then RunDeploySpec
+		// rolls the chart out with the explicit --version so both phases
+		// resolve the same deterministic tag.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		dockerDir := filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops")
+		result := erun.Run(t, []string{"build", "--deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_build_deploy_resolves_docker_target_deploy_specs", normalize.Apply(result.Combined))
+	})
+
+	t.Run("build_deploy_with_project_build_script_errors", func(t *testing.T) {
+		// --deploy cannot compose with a project build script: the script
+		// owns the whole build and erun cannot know what images it produced.
+		// runBuildCommand must fail with a clear error before doing any work.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write build.sh: %v", err)
+		}
+		fixture.RunGit(t, setup.Cwd, "add", "build.sh")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add build script")
+		result := erun.Run(t, []string{"build", "--deploy", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for --deploy with a build script, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "build/build_deploy_with_project_build_script_errors", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_missing_base_platform_cascades_dependent_rebuild", func(t *testing.T) {
+		// Exercises cascadeRebuildsThroughLocalDeps plus the two
+		// traceIncrementalDecision arms the all-miss scenarios never reach:
+		// the single-platform "missing for platform linux/arm64" reason and
+		// the "rebuilding X because dependency Y is rebuilding" cascade. The
+		// docker stub is dry-run decision input (the fp-tag inspect answers
+		// drive which branch the planner picks; without it the developer's
+		// local image cache would shape the golden): the base image's arm64
+		// fp-tag is missing (exit 1) so base rebuilds, while every other
+		// fp-tag — including both of api's — is present (exit 0). api FROMs
+		// the base tag, so despite its own fingerprint hit it must cascade
+		// to a rebuild instead of promoting a stale-base image.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "docker", "api", "Dockerfile"),
+			"FROM ghcr.io/sophium/base:9.9.9\n")
+		fixture.RunGit(t, setup.Cwd, "add", "erun-devops/docker/api/Dockerfile")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "api depends on local base image")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$*" in`,
+			`  "image inspect ghcr.io/sophium/base:fp-"*"-arm64") exit 1 ;;`,
+			`  "image inspect"*) exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_missing_base_platform_cascades_dependent_rebuild", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_release_push_auth_failure_retries_after_gh_login", func(t *testing.T) {
+		// Exercises the build-side GHCR auth-retry chain:
+		// runDockerBuildWithRetry catches the DockerRegistryAuthError that
+		// runDockerPushOnce raises when the release push is denied,
+		// promptDockerLoginRetry auto-confirms via ERUN_AUTO_LOGIN_ON_PUSH,
+		// DockerRegistryLogin takes its GHCR branch, and tryGHCRLoginViaGH
+		// resolves user + token from the gh stub and re-auths docker before
+		// the whole image build retries and the pushes succeed. The auth
+		// message deliberately matches neither create_package nor
+		// scope-denied so handleNamespaceAuthError falls through to the
+		// login-and-retry prompt path.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
+		stubs := setup.Cwd + "/stubs"
+		counter := filepath.Join(stubs, "docker-push-counter")
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  push)`,
+			`    count=0`,
+			`    if [ -f '` + counter + `' ]; then count=$(cat '` + counter + `'); fi`,
+			`    count=$((count + 1))`,
+			`    printf '%s' "$count" > '` + counter + `'`,
+			`    if [ "$count" = "1" ]; then`,
+			`      printf 'unauthorized: authentication required: denied: requested access to the resource is denied\n' >&2`,
+			`      exit 1`,
+			`    fi`,
+			`    exit 0 ;;`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		// gh answers the user lookup and token read tryGHCRLoginViaGH
+		// performs; docker's `login --password-stdin` lands in the stub's
+		// default exit-0 arm.
+		fixture.StubBinaryWithScript(t, stubs, "gh", strings.Join([]string{
+			`case "$1 $2" in`,
+			`  "api user") printf 'octo-owner\n'; exit 0 ;;`,
+			`  "auth token") printf 'gh-token\n'; exit 0 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		// Release operations (tag, push) go through the git stub so the
+		// release stage succeeds without a real remote.
+		fixture.StubBinary(t, stubs, "git", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "gh", "git")...)
+		// tryGHCRLoginViaGH gates on exec.LookPath("gh"), which reads PATH
+		// rather than the ERUN_<NAME>_BIN override.
+		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "ERUN_AUTO_LOGIN_ON_PUSH=1")
+		// -vv so the `docker login ghcr.io` TraceCommand that gates the
+		// retry is locked in the golden; at lower verbosity the retry is
+		// only provable by the exit code.
+		result := erun.Run(t, []string{"build", "--release", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/real_run_release_push_auth_failure_retries_after_gh_login", normalize.Apply(result.Combined))
+		// The push counter is a side effect outside the captured streams:
+		// >= 2 proves the failed push really was retried after the login
+		// rather than the auth error being swallowed.
+		rawCount, err := os.ReadFile(counter)
+		if err != nil {
+			t.Fatalf("read push counter: %v", err)
+		}
+		if pushes, convErr := strconv.Atoi(strings.TrimSpace(string(rawCount))); convErr != nil || pushes < 2 {
+			t.Fatalf("expected at least 2 docker push invocations (fail + retry), got %q", rawCount)
+		}
 	})
 
 	t.Run("dry_run_release_pushes_release_tagged_docker_builds", func(t *testing.T) {
