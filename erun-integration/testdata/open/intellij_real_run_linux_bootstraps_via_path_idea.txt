@@ -1,0 +1,17 @@
+SSH:
+  host: <LOOPBACK>
+  alias: erun-team-dev
+  port: 26122
+  user: erun
+  key: none
+  workspace: <HOME>/git/team
+audit: erun open --intellij --no-alias-prompt team dev
+open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=intellij
+write IntelliJ SSH project config in <TMP>
+Opened IntelliJ IDEA locally.
+Complete the remote connection in IntelliJ:
+  Remote Development -> SSH
+  host: erun-team-dev
+  user: erun
+  key: none
+  project: <HOME>/git/team

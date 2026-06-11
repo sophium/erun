@@ -21,19 +21,19 @@ func netDialTimeout(network, address string, timeout time.Duration) (net.Conn, e
 	return net.DialTimeout(network, address, timeout)
 }
 
-// skipIfErunPortsBusy short-circuits a real-run open scenario when the
-// developer's host is already running erun on its default port range
-// (17000/17022/17033). The integration suite has no way to convince
-// production code to use a different port range without changing the
-// public default, so tests that exercise the real port-forward path skip
-// instead of clobbering the dev session.
-func skipIfErunPortsBusy(t *testing.T) {
+// skipIfPortsBusy short-circuits a real-run open scenario when something on
+// the host already listens on one of the scenario's fixed local ports.
+// Real-run fixtures persist localportrangestart=26100 (far from erun's
+// default 17000 range) precisely so this never fires on a developer machine
+// with a live erun session; the guard remains as a last line of defense
+// against an unrelated process squatting on the high range.
+func skipIfPortsBusy(t *testing.T, ports ...int) {
 	t.Helper()
-	for _, port := range []int{17000, 17022, 17033} {
+	for _, port := range ports {
 		conn, err := netDialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 100*time.Millisecond)
 		if err == nil {
 			_ = conn.Close()
-			t.Skipf("port %d is already in use on this host (likely a running erun); skipping real-run open scenario", port)
+			t.Skipf("port %d is already in use on this host; skipping real-run open scenario", port)
 		}
 	}
 }
@@ -61,27 +61,38 @@ func stubKubectlNotFound(t *testing.T, setup env.Setup) []string {
 	return append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "lsof", "ps")...)
 }
 
-// stubAdoptHolderProbes overwrites the lsof + ps stubs that
-// stubKubectlNotFound installed with versions that present a fake port
-// holder for one specific TCP port. The lsof stub returns holderPID only
-// when the queried -iTCP:<port> matches holderPort; for every other port
-// it exits 1 (no holder), so the API/SSHD probes for sibling ports stay
-// silent. The ps stub returns the configured argv only for holderPID.
+// adoptHolder describes one fake TCP port holder the lsof/ps probe stubs
+// present to production's adopt-or-conflict check.
+type adoptHolder struct {
+	port int
+	pid  int
+	argv string
+}
+
+// stubAdoptHolderProbes overwrites the lsof + ps stubs in the scenario's
+// stub dir with versions that present a fake port holder per configured
+// port. The lsof stub returns the holder's PID only when the queried
+// -iTCP:<port> matches; for every other port it exits 1 (no holder), so
+// probes for sibling ports stay silent. The ps stub returns the configured
+// argv only for the matching PID.
 //
 // Returns nothing — the env vars are already wired by the kubectl helper
-// because the two stubs live in the same directory.
-func stubAdoptHolderProbes(t *testing.T, setup env.Setup, holderPID, holderPort int, holderArgv string) {
+// because the stubs live in the same directory.
+func stubAdoptHolderProbes(t *testing.T, setup env.Setup, holders ...adoptHolder) {
 	t.Helper()
 	stubs := setup.Cwd + "/stubs"
-	lsofScript := fmt.Sprintf(`for arg in "$@"; do
+	lsofScript := `for arg in "$@"; do
     case "$arg" in
-        -iTCP:%d) printf '%%s\n' '%d'; exit 0 ;;
-    esac
+`
+	for _, holder := range holders {
+		lsofScript += fmt.Sprintf("        -iTCP:%d) printf '%%s\\n' '%d'; exit 0 ;;\n", holder.port, holder.pid)
+	}
+	lsofScript += `    esac
 done
 exit 1
-`, holderPort, holderPID)
+`
 	fixture.StubBinaryWithScript(t, stubs, "lsof", lsofScript)
-	psScript := fmt.Sprintf(`pid=
+	psScript := `pid=
 prev=
 for arg in "$@"; do
     if [ "$prev" = "-p" ]; then
@@ -89,17 +100,37 @@ for arg in "$@"; do
     fi
     prev="$arg"
 done
-if [ "$pid" = "%d" ]; then
-    printf '%%s\n' %s
-    exit 0
-fi
+case "$pid" in
+`
+	for _, holder := range holders {
+		psScript += fmt.Sprintf("    %d) printf '%%s\\n' %s; exit 0 ;;\n", holder.pid, shellQuote(holder.argv))
+	}
+	psScript += `esac
 exit 1
-`, holderPID, shellQuote(holderArgv))
+`
 	fixture.StubBinaryWithScript(t, stubs, "ps", psScript)
 }
 
 func shellQuote(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}
+
+// waitForFile polls for path until it exists and has content, failing the
+// test at the deadline. Used for side effects written by detached
+// subprocesses (Start+Release launchers) that may outlive the erun run.
+func waitForFile(t *testing.T, path string, timeout time.Duration) string {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		data, err := os.ReadFile(path)
+		if err == nil && len(data) > 0 {
+			return string(data)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("file %s did not appear with content within %s (last err: %v)", path, timeout, err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
 }
 
 // stubKubectlGenericError writes a kubectl stub that exits non-zero with a
@@ -384,13 +415,13 @@ func TestOpen(t *testing.T) {
 		//     to ~/.ssh/known_hosts (real path covered);
 		//   - the IDE launcher stub recorded the vscode-remote URI.
 		//
-		// erun's port allocation deterministically picks 17000/17022/17033
-		// for the first seeded tenant/env. On developer machines running
-		// a real erun runtime, those ports are already taken; skip rather
-		// than fight the collision.
-		skipIfErunPortsBusy(t)
+		// The env pins localportrangestart=26100 so the simulator ports
+		// (26100/26122/26133) never collide with a developer's live erun
+		// session on the default 17000 range; the busy-port skip remains
+		// only as a last-resort guard.
+		skipIfPortsBusy(t, 26100, 26122, 26133)
 		setup := env.New(t)
-		fixture.SeedRemoteTenantEnvWithSSHD(t, setup, "team", "dev")
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", 26100)
 		// Seed a real SSH public key so syncRemoteSSHDKey can resolve it
 		// outside dry-run.
 		sshDir := filepath.Join(setup.Home, ".ssh")
@@ -406,10 +437,10 @@ func TestOpen(t *testing.T) {
 			ContainerName:  "team-devops",
 			RepoPath:       "/home/erun/git/team",
 			SSHDEnabled:    true,
-			MCPPort:        17000,
-			SSHPort:        17022,
+			MCPPort:        26100,
+			SSHPort:        26122,
 		})...)
-		fixture.StubBinary(t, stubsDir, "ssh-keyscan", "[127.0.0.1]:17022 ssh-ed25519 AAAATESTKEY=")
+		fixture.StubBinary(t, stubsDir, "ssh-keyscan", "[127.0.0.1]:26122 ssh-ed25519 AAAATESTKEY=")
 		envVars = append(envVars, fixture.StubEnv(stubsDir, "ssh-keyscan")...)
 		ideLog := filepath.Join(setup.Cwd, "ide-launcher.log")
 		fixture.StubBinaryWithScript(t, stubsDir, "open",
@@ -446,9 +477,9 @@ func TestOpen(t *testing.T) {
 		// configs in the seeded HOME's IntelliJ options dir), the
 		// macOS-only `open -a 'IntelliJ IDEA'` bootstrap is invoked, and
 		// known_hosts gets populated.
-		skipIfErunPortsBusy(t)
+		skipIfPortsBusy(t, 26100, 26122, 26133)
 		setup := env.New(t)
-		fixture.SeedRemoteTenantEnvWithSSHD(t, setup, "team", "dev")
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", 26100)
 		sshDir := filepath.Join(setup.Home, ".ssh")
 		if err := os.MkdirAll(sshDir, 0o700); err != nil {
 			t.Fatalf("mkdir ~/.ssh: %v", err)
@@ -462,17 +493,19 @@ func TestOpen(t *testing.T) {
 			ContainerName:  "team-devops",
 			RepoPath:       "/home/erun/git/team",
 			SSHDEnabled:    true,
-			MCPPort:        17000,
-			SSHPort:        17022,
+			MCPPort:        26100,
+			SSHPort:        26122,
 		})...)
-		fixture.StubBinary(t, stubsDir, "ssh-keyscan", "[127.0.0.1]:17022 ssh-ed25519 AAAAINTELLIJKEY=")
+		fixture.StubBinary(t, stubsDir, "ssh-keyscan", "[127.0.0.1]:26122 ssh-ed25519 AAAAINTELLIJKEY=")
 		envVars = append(envVars, fixture.StubEnv(stubsDir, "ssh-keyscan")...)
-		// Pre-create the IntelliJ JetBrains options dir so the writers
-		// have a place to land. The flow probes for IntelliJ to be
-		// installed; if no candidate dir exists the bootstrap branch
-		// short-circuits and we miss the writer coverage.
-		jetbrainsRoot := filepath.Join(setup.Home, "Library", "Application Support", "JetBrains", "IntelliJIdea2024.3")
-		if err := os.MkdirAll(jetbrainsRoot, 0o755); err != nil {
+		// Pre-create the IntelliJ *options* dir: production globs for
+		// JetBrains/IntelliJIdea*/options (open_ide.go::intelliJOptionsCandidates)
+		// and silently skips the jetbrainsconfig writers when no candidate
+		// matches. Seeding only the version dir (without options/) is the
+		// bug that kept internal/jetbrainsconfig at 0% while this scenario
+		// stayed green.
+		optionsDir := filepath.Join(setup.Home, "Library", "Application Support", "JetBrains", "IntelliJIdea2024.3", "options")
+		if err := os.MkdirAll(optionsDir, 0o755); err != nil {
 			t.Fatalf("mkdir IntelliJ options: %v", err)
 		}
 		ideLog := filepath.Join(setup.Cwd, "ide-launcher.log")
@@ -495,14 +528,239 @@ func TestOpen(t *testing.T) {
 		if !strings.Contains(string(knownHosts), "AAAAINTELLIJKEY=") {
 			t.Errorf("expected ssh-keyscan output in known_hosts, got:\n%s", knownHosts)
 		}
-		// JetBrains writers persist the SSH project config. The flow
-		// will have invoked `open -a 'IntelliJ IDEA'` after the writes.
+		// The jetbrainsconfig writers must have persisted the SSH project
+		// config into the seeded options dir (side effect outside the
+		// captured streams, so asserted directly).
+		sshConfigs, err := os.ReadFile(filepath.Join(optionsDir, "sshConfigs.xml"))
+		if err != nil {
+			t.Fatalf("read sshConfigs.xml (jetbrainsconfig writers did not fire): %v", err)
+		}
+		if !strings.Contains(string(sshConfigs), "erun-team-dev") {
+			t.Errorf("expected sshConfigs.xml to contain the erun-team-dev host alias, got:\n%s", sshConfigs)
+		}
+		if _, err := os.Stat(filepath.Join(optionsDir, "sshRecentConnections.v2.xml")); err != nil {
+			t.Errorf("expected sshRecentConnections.v2.xml to be written: %v", err)
+		}
+		// The flow invokes `open -a 'IntelliJ IDEA'` after the writes.
 		ideArgs, err := os.ReadFile(ideLog)
 		if err != nil {
 			t.Fatalf("read ide-launcher.log: %v", err)
 		}
 		if !strings.Contains(string(ideArgs), "IntelliJ IDEA") {
 			t.Errorf("expected IDE launcher to invoke 'IntelliJ IDEA', got:\n%s", ideArgs)
+		}
+	})
+
+	t.Run("intellij_gateway_adopts_forwards_and_launches_gateway", func(t *testing.T) {
+		// Covers the JetBrains Gateway launch path end to end plus foreign
+		// port-forward adoption, in three passes over one seeded env:
+		//   run 1 (real): registerIntelliJProject writes the JetBrains XML
+		//     (no latestUsedIde yet, so the flow falls back to
+		//     `open -a 'IntelliJ IDEA'`) and starts the port-forward
+		//     simulators that the later passes adopt.
+		//   patch: the test injects a latestUsedIde block into
+		//     sshRecentConnections.v2.xml, exactly as IntelliJ itself would
+		//     after a successful remote session, and deletes the per-env
+		//     port-forward state files so the next pass cannot recognise the
+		//     simulators as its own.
+		//   run 2 (dry-run): with lsof/ps probes presenting run 1's live
+		//     simulators as foreign kubectl port-forwards, the dry-run
+		//     previews adoption ("would adopt"), traces the Gateway config
+		//     scaffolding (mkdir/write-xml) WITHOUT creating it, and traces
+		//     the java Gateway launch argv. The golden locks that plan.
+		//   run 3 (real): adoption fires for MCP+SSHD ("adopted existing
+		//     kubectl port-forward" + state files re-written), the Gateway
+		//     scaffolding is created for real, and the fake java binary in
+		//     the seeded IntelliJ IDEA.app records the
+		//     jetbrains-gateway://connect URI.
+		// Pinned to darwin: the standalone Gateway launch
+		// (intelliJGatewayDarwinLaunchCommand) is macOS-only.
+		skipIfPortsBusy(t, 26100, 26122, 26133)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", 26100)
+		sshDir := filepath.Join(setup.Home, ".ssh")
+		if err := os.MkdirAll(sshDir, 0o700); err != nil {
+			t.Fatalf("mkdir ~/.ssh: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(sshDir, "id_ed25519.pub"), []byte("ssh-ed25519 AAAATESTPUB user@example\n"), 0o644); err != nil {
+			t.Fatalf("write public key: %v", err)
+		}
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName: "team-devops",
+			ContainerName:  "team-devops",
+			RepoPath:       "/home/erun/git/team",
+			SSHDEnabled:    true,
+			MCPPort:        26100,
+			SSHPort:        26122,
+		})...)
+		fixture.StubBinary(t, stubsDir, "ssh-keyscan", "[127.0.0.1]:26122 ssh-ed25519 AAAAGATEWAYKEY=")
+		envVars = append(envVars, fixture.StubEnv(stubsDir, "ssh-keyscan")...)
+		optionsDir := filepath.Join(setup.Home, "Library", "Application Support", "JetBrains", "IntelliJIdea2024.3", "options")
+		if err := os.MkdirAll(optionsDir, 0o755); err != nil {
+			t.Fatalf("mkdir IntelliJ options: %v", err)
+		}
+		// Fake installed IntelliJ IDEA.app: one lib jar so the Gateway
+		// classpath resolves, and a java shim that records its argv.
+		contentsDir := filepath.Join(setup.Home, "Applications", "IntelliJ IDEA.app", "Contents")
+		if err := os.MkdirAll(filepath.Join(contentsDir, "lib"), 0o755); err != nil {
+			t.Fatalf("mkdir IDEA lib: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(contentsDir, "lib", "app.jar"), []byte("jar"), 0o644); err != nil {
+			t.Fatalf("write IDEA lib jar: %v", err)
+		}
+		javaLog := filepath.Join(setup.Cwd, "java-launcher.log")
+		javaDir := filepath.Join(contentsDir, "jbr", "Contents", "Home", "bin")
+		if err := os.MkdirAll(javaDir, 0o755); err != nil {
+			t.Fatalf("mkdir IDEA jbr bin: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(javaDir, "java"),
+			[]byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > '"+javaLog+"'\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write java shim: %v", err)
+		}
+		ideLog := filepath.Join(setup.Cwd, "ide-launcher.log")
+		fixture.StubBinaryWithScript(t, stubsDir, "open",
+			`printf '%s\n' "$*" >> '`+ideLog+`'`+"\n"+`exit 0`+"\n")
+		envVars = append(envVars, "PATH="+stubsDir+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=darwin")
+
+		run1 := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if run1.ExitCode != 0 {
+			t.Fatalf("run 1 exit %d: %s", run1.ExitCode, run1.Combined)
+		}
+
+		// Mark the project as previously opened with a concrete IDE, the
+		// precondition for the Gateway URI path.
+		recentPath := filepath.Join(optionsDir, "sshRecentConnections.v2.xml")
+		recentBody, err := os.ReadFile(recentPath)
+		if err != nil {
+			t.Fatalf("read sshRecentConnections.v2.xml: %v", err)
+		}
+		latestUsedIDE := `<RecentProjectState>
+            <option name="latestUsedIde">
+              <RecentProjectInstalledIde>
+                <option name="buildNumber" value="243.22562.222" />
+                <option name="pathToIde" value="` + contentsDir + `" />
+                <option name="productCode" value="IU" />
+              </RecentProjectInstalledIde>
+            </option>`
+		patched := strings.Replace(string(recentBody), "<RecentProjectState>", latestUsedIDE, 1)
+		if patched == string(recentBody) {
+			t.Fatalf("RecentProjectState not found in:\n%s", recentBody)
+		}
+		if err := os.WriteFile(recentPath, []byte(patched), 0o600); err != nil {
+			t.Fatalf("patch sshRecentConnections.v2.xml: %v", err)
+		}
+		// Drop the state files so the simulators read as foreign forwards.
+		for _, kind := range []string{"mcp", "sshd"} {
+			if err := os.Remove(filepath.Join(setup.ConfigHome, "erun", "portforward", kind, "team", "dev.json")); err != nil {
+				t.Fatalf("remove %s port-forward state: %v", kind, err)
+			}
+		}
+		stubAdoptHolderProbes(t, setup,
+			adoptHolder{port: 26100, pid: 4242,
+				argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26100:26100 --address 127.0.0.1"},
+			adoptHolder{port: 26122, pid: 4243,
+				argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 26122:26122 --address 127.0.0.1"},
+		)
+		envVars = append(envVars, fixture.StubEnv(stubsDir, "lsof", "ps")...)
+
+		run2 := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if run2.ExitCode != 0 {
+			t.Fatalf("run 2 exit %d: %s", run2.ExitCode, run2.Combined)
+		}
+		golden.Equal(t, "open/intellij_gateway_dry_run_previews_adoption_and_launch", normalize.Apply(run2.Combined))
+		// The dry-run must not have created the Gateway launch scaffolding
+		// (regression guard for the write-before-gate bug). The config dir
+		// itself already exists — run 1's registerIntelliJProject writes
+		// JetBrains options there for real — so assert on the two artifacts
+		// only the launch path creates: config/info.xml and system/.
+		gatewayCaches := filepath.Join(setup.Home, "Library", "Caches", "JetBrains", "IntelliJIdea2024.3", "tmp", "JetBrainsGateway")
+		if _, err := os.Stat(filepath.Join(gatewayCaches, "config", "info.xml")); !os.IsNotExist(err) {
+			t.Errorf("expected dry-run to leave Gateway info.xml unwritten, stat err: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(gatewayCaches, "system")); !os.IsNotExist(err) {
+			t.Errorf("expected dry-run to leave Gateway system dir uncreated, stat err: %v", err)
+		}
+
+		run3 := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if run3.ExitCode != 0 {
+			t.Fatalf("run 3 exit %d: %s", run3.ExitCode, run3.Combined)
+		}
+		golden.Equal(t, "open/intellij_gateway_real_run_adopts_and_launches", normalize.Apply(run3.Combined))
+		// Adoption rewrote both state files claiming the holder PIDs.
+		for kind, wantPID := range map[string]int{"mcp": 4242, "sshd": 4243} {
+			stateBody, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "portforward", kind, "team", "dev.json"))
+			if err != nil {
+				t.Fatalf("read adopted %s state: %v", kind, err)
+			}
+			if !strings.Contains(string(stateBody), fmt.Sprintf(`"processId":%d`, wantPID)) {
+				t.Errorf("expected adopted %s state to claim PID %d, got:\n%s", kind, wantPID, stateBody)
+			}
+		}
+		// The Gateway launch went through the java shim with the connect URI.
+		javaArgs := waitForFile(t, javaLog, 5*time.Second)
+		if !strings.Contains(javaArgs, "jetbrains-gateway://connect#") {
+			t.Errorf("expected java shim to receive a jetbrains-gateway connect URI, got:\n%s", javaArgs)
+		}
+		if _, err := os.Stat(filepath.Join(gatewayCaches, "config", "info.xml")); err != nil {
+			t.Errorf("expected real run to create the Gateway config scaffolding: %v", err)
+		}
+	})
+
+	t.Run("intellij_real_run_linux_bootstraps_via_path_idea", func(t *testing.T) {
+		// Linux arm of the IntelliJ flow: the options dir resolves under
+		// ~/.config/JetBrains (no darwin Gateway-options upsert), and with
+		// no recent Gateway project the installed-app fallback resolves
+		// `idea` from PATH via lookPathBootstrapAttempts and launches it
+		// detached. ERUN_HOST_OS_OVERRIDE=linux pins the branch
+		// (erun-integration/AGENTS.md — platform-dependent goldens).
+		skipIfPortsBusy(t, 26100, 26122, 26133)
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnvWithSSHDPortRange(t, setup, "team", "dev", 26100)
+		sshDir := filepath.Join(setup.Home, ".ssh")
+		if err := os.MkdirAll(sshDir, 0o700); err != nil {
+			t.Fatalf("mkdir ~/.ssh: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(sshDir, "id_ed25519.pub"), []byte("ssh-ed25519 AAAATESTPUB user@example\n"), 0o644); err != nil {
+			t.Fatalf("write public key: %v", err)
+		}
+		stubsDir := filepath.Join(setup.Cwd, "stubs")
+		envVars := append(setup.Env(), fixture.StubKubectlDeployed(t, stubsDir, fixture.KubectlDeployedStubSpec{
+			DeploymentName: "team-devops",
+			ContainerName:  "team-devops",
+			RepoPath:       "/home/erun/git/team",
+			SSHDEnabled:    true,
+			MCPPort:        26100,
+			SSHPort:        26122,
+		})...)
+		fixture.StubBinary(t, stubsDir, "ssh-keyscan", "[127.0.0.1]:26122 ssh-ed25519 AAAALINUXKEY=")
+		envVars = append(envVars, fixture.StubEnv(stubsDir, "ssh-keyscan")...)
+		optionsDir := filepath.Join(setup.Home, ".config", "JetBrains", "IntelliJIdea2024.3", "options")
+		if err := os.MkdirAll(optionsDir, 0o755); err != nil {
+			t.Fatalf("mkdir IntelliJ options: %v", err)
+		}
+		ideaLog := filepath.Join(setup.Cwd, "idea-launcher.log")
+		fixture.StubBinaryWithScript(t, stubsDir, "idea",
+			`printf 'idea %s\n' "$*" > '`+ideaLog+`'`+"\n"+`exit 0`+"\n")
+		envVars = append(envVars, "PATH="+stubsDir+":"+os.Getenv("PATH"))
+		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=linux")
+		result := erun.Run(t, []string{"open", "team", "dev", "--intellij", "--no-alias-prompt"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "open/intellij_real_run_linux_bootstraps_via_path_idea", normalize.Apply(result.Combined))
+		sshConfigs, err := os.ReadFile(filepath.Join(optionsDir, "sshConfigs.xml"))
+		if err != nil {
+			t.Fatalf("read sshConfigs.xml (jetbrainsconfig writers did not fire): %v", err)
+		}
+		if !strings.Contains(string(sshConfigs), "erun-team-dev") {
+			t.Errorf("expected sshConfigs.xml to contain the erun-team-dev host alias, got:\n%s", sshConfigs)
+		}
+		// The idea bootstrap is launched detached (Start+Release); wait for
+		// the stub to record the invocation.
+		if got := waitForFile(t, ideaLog, 5*time.Second); !strings.HasPrefix(got, "idea") {
+			t.Errorf("expected the PATH idea stub to record its launch, got:\n%s", got)
 		}
 	})
 
@@ -649,8 +907,8 @@ func TestOpen(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
-		stubAdoptHolderProbes(t, setup, 99999, 17000,
-			"kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address 127.0.0.1")
+		stubAdoptHolderProbes(t, setup, adoptHolder{port: 17000, pid: 99999,
+			argv: "kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address 127.0.0.1"})
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/adopts_existing_kubectl_port_forward", normalize.Apply(result.Combined))
 	})
@@ -664,8 +922,8 @@ func TestOpen(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		envVars := stubKubectlNotFound(t, setup)
-		stubAdoptHolderProbes(t, setup, 88888, 17000,
-			"/usr/local/bin/some-foreign-process --bind 127.0.0.1:17000")
+		stubAdoptHolderProbes(t, setup, adoptHolder{port: 17000, pid: 88888,
+			argv: "/usr/local/bin/some-foreign-process --bind 127.0.0.1:17000"})
 		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/refuses_to_bind_when_foreign_process_holds_port", normalize.Apply(result.Combined))
 	})

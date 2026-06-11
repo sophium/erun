@@ -164,6 +164,22 @@ func SeedTenantEnvWithSnapshot(t testing.TB, setup env.Setup, tenant, environmen
 // `--intellij`) reach past the validateIDEOptions guard.
 func SeedRemoteTenantEnvWithSSHD(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
+	seedRemoteTenantEnvWithSSHD(t, setup, tenant, environment, 0)
+}
+
+// SeedRemoteTenantEnvWithSSHDPortRange writes the same tree as
+// SeedRemoteTenantEnvWithSSHD and additionally persists localportrangestart
+// on the env config. Real-run open scenarios pin a high range (e.g. 26100)
+// so their port-forward simulators never collide with a developer's live
+// erun session sitting on the default 17000 range; without the pin those
+// scenarios silently skip on busy hosts and their coverage evaporates.
+func SeedRemoteTenantEnvWithSSHDPortRange(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
+	t.Helper()
+	seedRemoteTenantEnvWithSSHD(t, setup, tenant, environment, rangeStart)
+}
+
+func seedRemoteTenantEnvWithSSHD(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
+	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
 	tenantDir := filepath.Join(root, tenant)
 	envDir := filepath.Join(tenantDir, environment)
@@ -178,22 +194,25 @@ func SeedRemoteTenantEnvWithSSHD(t testing.TB, setup env.Setup, tenant, environm
 		t.Fatalf("mkdir repo %s: %v", repoPath, err)
 	}
 
+	envContents := "name: " + environment + "\n" +
+		"repopath: " + repoPath + "\n" +
+		"kubernetescontext: test-context\n" +
+		"containerregistry: registry.example/test\n" +
+		"runtimeversion: 1.0.0\n" +
+		"remote: true\n" +
+		"sshd:\n" +
+		"  enabled: true\n"
+	if rangeStart > 0 {
+		envContents += "localportrangestart: " + strconv.Itoa(rangeStart) + "\n"
+	}
+
 	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
 	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
 		"projectroot: "+repoPath+"\n"+
 			"name: "+tenant+"\n"+
 			"defaultenvironment: "+environment+"\n",
 	)
-	mustWrite(t, filepath.Join(envDir, "config.yaml"),
-		"name: "+environment+"\n"+
-			"repopath: "+repoPath+"\n"+
-			"kubernetescontext: test-context\n"+
-			"containerregistry: registry.example/test\n"+
-			"runtimeversion: 1.0.0\n"+
-			"remote: true\n"+
-			"sshd:\n"+
-			"  enabled: true\n",
-	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"), envContents)
 }
 
 // SeedRemoteTenantEnv writes the same minimal config tree as SeedTenantEnv
