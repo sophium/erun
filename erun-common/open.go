@@ -855,7 +855,7 @@ func remoteSessionLauncherBody(req ShellLaunchParams, bashrcPath string) []strin
 		)
 	}
 	if req.AI {
-		body = append(body, AISessionLaunchCommand(req.AITool, req.Claude))
+		body = append(body, AISessionLaunchLines(req.AITool, req.Claude)...)
 	}
 	return append(body, fmt.Sprintf("exec /bin/bash --rcfile \"%s\" -i", bashrcPath))
 }

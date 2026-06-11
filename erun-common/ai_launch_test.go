@@ -1,6 +1,7 @@
 package eruncommon
 
 import (
+	"os/exec"
 	"strings"
 	"testing"
 )
@@ -161,4 +162,69 @@ func TestResolveClaudeEffort(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAISessionLaunchLines pins the AI session's exit wrapper (issue #464):
+// the tool's exit must never silently fall through to the trailing shell —
+// the wrapper captures the exit status, names it (137 with the OOM hint),
+// and prints the exact resume command. A real claude exit can't be staged in
+// the headless Playwright harness, so these script-content assertions own
+// the contract (the #331 pattern); the launcher composition into the dtach
+// script is locked by the open --ai dry-run goldens.
+func TestAISessionLaunchLines(t *testing.T) {
+	t.Run("claude guard wraps with status capture, OOM hint, and quoted resume", func(t *testing.T) {
+		script := strings.Join(AISessionLaunchLines("", EnvironmentClaudeConfig{}), "\n")
+		for _, want := range []string{
+			"ai_status=0",
+			"fi || ai_status=$?",
+			`[ "$ai_status" = 137 ]`,
+			"likely out of memory; consider raising Memory in the environment Runtime settings",
+			"Claude exited (exit %s)",
+			"Claude session ended",
+			"resume with: %s",
+		} {
+			if !strings.Contains(script, want) {
+				t.Fatalf("wrapper missing %q:\n%s", want, script)
+			}
+		}
+		// The resume command goes through shellQuote as a printf argument —
+		// it carries single quotes itself (the ultracode --settings JSON),
+		// which would break the printf format if inlined.
+		if !strings.Contains(script, `'claude --continue --settings '"'"'{"ultracode":true}'"'"''`) {
+			t.Fatalf("resume command not safely shell-quoted:\n%s", script)
+		}
+	})
+
+	t.Run("the wrapper executes: 137 yields the OOM marker and the intact resume", func(t *testing.T) {
+		lines := AISessionLaunchLines("", EnvironmentClaudeConfig{})
+		// Swap the launch (line index 1 by construction) for a bare 137
+		// exit, simulating the OOM kill; everything after is the wrapper
+		// under test, run through a real sh so the printf escapes and the
+		// shell-quoted resume are verified end to end.
+		lines[1] = "(exit 137) || ai_status=$?"
+		out, err := exec.Command("sh", "-c", strings.Join(lines, "\n")).CombinedOutput()
+		if err != nil {
+			t.Fatalf("wrapper script failed: %v\n%s", err, out)
+		}
+		text := string(out)
+		if !strings.Contains(text, "Claude was killed (exit 137)") {
+			t.Fatalf("expected the OOM marker, got:\n%s", text)
+		}
+		if !strings.Contains(text, `resume with: claude --continue --settings '{"ultracode":true}'`) {
+			t.Fatalf("expected the resume command with its quotes intact, got:\n%s", text)
+		}
+	})
+
+	t.Run("a verbatim tool keeps its own resume and a tool-neutral label", func(t *testing.T) {
+		script := strings.Join(AISessionLaunchLines("codex", EnvironmentClaudeConfig{}), "\n")
+		if !strings.Contains(script, "codex || ai_status=$?") {
+			t.Fatalf("verbatim tool must run unmodified ahead of the wrapper:\n%s", script)
+		}
+		if !strings.Contains(script, "The AI tool exited (exit %s)") {
+			t.Fatalf("verbatim tool label wrong:\n%s", script)
+		}
+		if !strings.Contains(script, "'codex'") {
+			t.Fatalf("verbatim tool resume should be the tool itself:\n%s", script)
+		}
+	})
 }
