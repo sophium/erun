@@ -60,7 +60,10 @@ bootstrap-script:
   shell_status=0
   mkdir -p "<TMP>"
   cat > "$HOME/.erun/team/dev/launch-ai.sh" <<'EOF'
-  if [ -d "$HOME/.claude/projects/$(pwd | tr / -)" ]; then claude --continue --effort high --model fable --verbose --debug; else claude --effort high --model fable --verbose --debug; fi
+  ai_status=0
+  if [ -d "$HOME/.claude/projects/$(pwd | tr / -)" ]; then claude --continue --effort high --model fable --verbose --debug; else claude --effort high --model fable --verbose --debug; fi || ai_status=$?
+  if [ "$ai_status" = 137 ]; then printf '\n\033[2;33m── Claude was killed (exit 137) — likely out of memory; consider raising Memory in the environment Runtime settings ──\033[0m\n'; elif [ "$ai_status" != 0 ]; then printf '\n\033[2;33m── Claude exited (exit %s) ──\033[0m\n' "$ai_status"; else printf '\n\033[2;33m── Claude session ended ──\033[0m\n'; fi
+  printf '\033[2;33m── resume with: %s — or use this shell ──\033[0m\n' 'claude --continue --effort high --model fable --verbose --debug'
   exec /bin/bash --rcfile "$HOME/.erun/team/dev/bashrc" -i
   EOF
   attach_id="$$-$(date +%s)"
