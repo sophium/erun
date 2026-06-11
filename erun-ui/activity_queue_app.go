@@ -489,6 +489,13 @@ func (a *App) finishDeployByTenantEnv(selection uiSelection, tenant, environment
 	}
 	if final, finished := a.activityQueue.finish(entry.ID, status, errMsg); finished {
 		a.unlockTerminalsForActivity(final)
+		if status == activityQueueStatusSucceeded {
+			// A successful deploy supersedes any stale 'failed' flag on the
+			// row (issue #498): the env-status clear keeps the sidebar dot
+			// and hover card truthful, and the next session exit respawns
+			// normally because latestDeployFailed is now false.
+			a.emitEnvStatus(uiSelection{Tenant: tenant, Environment: environment}, "")
+		}
 	}
 }
 
