@@ -65,7 +65,7 @@ erun upgrade team prod --version 1.2.3
 | Failure | Behaviour |
 |---|---|
 | No environments opted in (in scope). | Prints "No environments opted into Upgrade all" and exits 0 — nothing to do. |
-| Channel latest can't be resolved (registry unreachable, no matching tags). | That environment's target is left empty and it is reported as not lagging — `erun upgrade` never deploys an unknown version. The trace records the failed resolution. |
+| Channel latest can't be resolved (registry lookup failed, no matching tags). | The environment is reported as **target unresolved** with the reason (e.g. the registry error), in the plan line, the skip trace, and the completion accounting (`==> Upgrade complete: N upgraded, N up to date, N unresolved, N failed`) — never as "up to date", and `erun upgrade` never deploys an unknown version. A failed lookup is never substituted with another image's versions. |
 | `--environment` without `--tenant`. | Errors before any work; exit code 1. |
 | One member's deploy fails. | The run **continues** to the remaining members; the failed environment is reported in a summary and the command exits non-zero. Already-upgraded members stay deployed. |
 | Cluster unreachable / stopped cloud context for a member. | Surfaces per the underlying `erun deploy` behaviour for that member (see [`erun deploy` · Error behaviour](/cli/deploy#error-behaviour)). |

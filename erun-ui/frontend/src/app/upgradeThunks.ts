@@ -1,22 +1,24 @@
 import type { StartSessionResult, UISelection, UIUpgradePlanItem } from '@/types';
 
-import { ResolveUpgradePlan, StartUpgradeAllSession } from '../../wailsjs/go/main/App';
+import { ResolveUpgradePlan, StartUpgradeEnvironmentSession } from '../../wailsjs/go/main/App';
 import { readError } from './errors';
-import { showTerminalMessage } from './notificationThunks';
-import { activateLocalAfterCommand } from './sessionThunks';
-import { setSelected } from './slices/selectionSlice';
+import { showNotification, showTerminalMessage } from './notificationThunks';
 import {
   closeUpgradeAllDialog,
   openUpgradeAllDialog,
   setUpgradeAllError,
   setUpgradeAllPlan,
 } from './slices/upgradeAllSlice';
-import type { AppThunk, RootState } from './store';
+import type { AppThunk } from './store';
+import { recordTab } from './tabsThunks';
 import { requireController } from './thunkExtra';
+import { selectionKey } from './versionSuggestions';
 
 // openUpgradeAll opens the Upgrade-all preview dialog and resolves the plan
 // (every opted-in env, its channel, current → target). Read-only — nothing
-// deploys until the user confirms.
+// deploys until the user confirms. The plan resolver is the same one the
+// per-env runs use (issue #497), so the preview never promises an upgrade
+// the run would refuse.
 export const openUpgradeAll = (): AppThunk<Promise<void>> => async (dispatch) => {
   dispatch(openUpgradeAllDialog());
   try {
@@ -27,59 +29,79 @@ export const openUpgradeAll = (): AppThunk<Promise<void>> => async (dispatch) =>
   }
 };
 
-// resolveUpgradeHostSelection picks the environment whose Local shell hosts the
-// `erun upgrade` run. `erun upgrade` is global — it redeploys every opted-in
-// env itself — so the host only supplies a shell to run the command in. Run it
-// from an environment that is actually being upgraded so the command and its
-// output land in that env's terminal rather than an unrelated one (e.g. the
-// local default): prefer a lagging plan member, then any plan member, then the
-// open env, then any configured env. Resolving from the plan means Upgrade all
-// runs without the operator opening an environment first.
-function resolveUpgradeHostSelection(state: RootState): UISelection | null {
-  const items = state.upgradeAll.items;
-  const member = items.find((item) => item.lagging) ?? items[0];
-  if (member) {
-    return { tenant: member.tenant, environment: member.environment };
-  }
-  const selected = state.selection.selected;
-  if (selected) {
-    return selected;
-  }
-  for (const tenant of state.tenants.tenants) {
-    const host =
-      tenant.environments.find((env) => env.name === tenant.defaultEnvironment) ??
-      tenant.environments[0];
-    if (host) {
-      return { tenant: tenant.name, environment: host.name };
-    }
-  }
-  return null;
-}
-
-// confirmUpgradeAll runs the global `erun upgrade` in the Local shell of an
-// environment that is being upgraded (the command itself redeploys every
-// lagging opted-in env; the host env supplies the shell and the terminal the
-// run is shown in). Each composed deploy surfaces an activity-queue entry, like
-// a normal deploy. It resolves the host from the plan, so the operator does not
-// have to open an environment first and the run lands in a relevant env.
+// confirmUpgradeAll fans the upgrade out per member (issue #497): every
+// lagging plan member runs `erun upgrade --tenant <t> --environment <e>` in
+// its OWN Local shell, so members upgrade in parallel and output, activity
+// entries, and failures land on the env they belong to — not on one host
+// env's terminal. The fan-out deliberately does not change the selection or
+// ensure any env's default tabs: selecting an env subjects it to the
+// selected-env machinery (which keeps its tab set — including the AI tab —
+// alive), and confirming an upgrade is not an open intent; a Claude session
+// must never launch as a side effect of clicking Upgrade. Progress is
+// visible through each member's Local tab, sidebar row, and activity entry,
+// announced by the confirmation toast (Nielsen #1).
 export const confirmUpgradeAll =
   (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
-    const selection = resolveUpgradeHostSelection(getState());
-    if (!selection) {
-      dispatch(closeUpgradeAllDialog());
-      dispatch(showTerminalMessage('No environments are configured to upgrade yet.'));
+    const state = getState();
+    const lagging = state.upgradeAll.items.filter((item) => item.lagging);
+    dispatch(closeUpgradeAllDialog());
+    if (lagging.length === 0) {
+      dispatch(
+        showTerminalMessage('Nothing to upgrade — no opted-in environment lags its channel.'),
+      );
       return;
     }
     const controller = requireController(extra);
-    const debugOpen = getState().layout.debugOpen;
-    const runSelection = { ...selection, debug: debugOpen || undefined };
-    dispatch(closeUpgradeAllDialog());
-    dispatch(setSelected(selection));
-    dispatch(showTerminalMessage('Upgrading all opted-in environments...', true));
+    const debugOpen = state.layout.debugOpen;
     controller.fitTerminal();
     const { cols, rows } = controller.terminalSize();
-    const result = (await StartUpgradeAllSession(runSelection, cols, rows)) as StartSessionResult;
-    await dispatch(activateLocalAfterCommand(selection, result));
+
+    const outcomes = await Promise.allSettled(
+      lagging.map(async (member) => {
+        const selection: UISelection = {
+          tenant: member.tenant,
+          environment: member.environment,
+          debug: debugOpen || undefined,
+        };
+        const result = (await StartUpgradeEnvironmentSession(
+          selection,
+          cols,
+          rows,
+        )) as StartSessionResult;
+        // Register the Local session the run lives in so its tab renders,
+        // WITHOUT ensuring the env's default tab set.
+        dispatch(
+          recordTab(selectionKey(selection), result.sessionId, result.slot ?? 0, 'local', 'Local'),
+        );
+        return member;
+      }),
+    );
+
+    const failed: string[] = [];
+    outcomes.forEach((outcome, index) => {
+      const member = lagging[index];
+      if (outcome.status === 'rejected' && member) {
+        failed.push(`${member.tenant}/${member.environment}`);
+      }
+    });
+    if (failed.length > 0) {
+      dispatch(
+        showNotification(
+          'error',
+          `Could not start the upgrade for ${failed.join(', ')} — see the Local tab and Activities.`,
+        ),
+      );
+      return;
+    }
+    const only = lagging.length === 1 ? lagging[0] : undefined;
+    dispatch(
+      showNotification(
+        'info',
+        only
+          ? `Upgrading ${only.tenant} / ${only.environment} — follow progress in its Local tab and Activities.`
+          : `Upgrading ${String(lagging.length)} environments in parallel — follow progress in their Local tabs and Activities.`,
+      ),
+    );
   };
 
 export { closeUpgradeAllDialog };

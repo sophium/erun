@@ -1,4 +1,4 @@
-audit: erun upgrade --dry-run --version <VERSION> team dev
+audit: erun upgrade --dry-run --environment dev --tenant team --version <VERSION>
 upgrade: tenant=team environment=dev version-override=<VERSION> force=false
 upgrade: team/dev opted in, channel=stable current=<VERSION>
 upgrade: team using version override <VERSION> for all channels

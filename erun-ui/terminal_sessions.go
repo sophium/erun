@@ -314,12 +314,14 @@ func (a *App) StartForceDeploySession(selection uiSelection, cols, rows int) (st
 	return a.runErunCommandInLocal(selection, cols, rows, args)
 }
 
-// StartUpgradeAllSession runs the global `erun upgrade` in the selected env's
-// Local shell. The command redeploys every opted-in lagging env; each composed
-// deploy emits `==> Deploying tenant/env` traces that the activity-queue parser
-// turns into per-env entries, exactly like StartDeploySession. The selection
-// only provides the Local shell to run in (any open env works).
-func (a *App) StartUpgradeAllSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
+// StartUpgradeEnvironmentSession runs `erun upgrade --tenant <t>
+// --environment <e>` in that environment's own Local shell, so each
+// Upgrade-all member upgrades in its respective env — output, activity
+// entry, and any failure land on the env they belong to, and members run in
+// parallel across envs (issue #497). The deploy emits the same
+// `==> Deploying tenant/env` traces the activity-queue parser turns into
+// entries, exactly like StartDeploySession.
+func (a *App) StartUpgradeEnvironmentSession(selection uiSelection, cols, rows int) (startSessionResult, error) {
 	return a.runErunCommandInLocal(selection, cols, rows, buildUpgradeArgs(selection))
 }
 

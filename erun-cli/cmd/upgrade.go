@@ -71,7 +71,7 @@ func runUpgrade(ctx common.Context, store common.DeployStore, target common.Upgr
 	ctx.Trace(fmt.Sprintf("upgrade: tenant=%s environment=%s version-override=%s force=%v",
 		target.Tenant, target.Environment, target.VersionOverride, target.Force))
 
-	plan, err := common.ResolveUpgradePlanForStore(ctx, store, target, common.DefaultRuntimeVersionsResolver)
+	plan, err := common.ResolveUpgradePlanForStore(ctx, store, target, common.UpgradeVersionsResolverForStore(store, common.ResolveRuntimeImageRegistryVersions))
 	if err != nil {
 		ctx.Trace("upgrade: plan resolution failed: " + err.Error())
 		return err
@@ -137,6 +137,9 @@ func laggingSuffix(item common.UpgradePlanItem) string {
 		return "  (will upgrade)"
 	}
 	if strings.TrimSpace(item.Target) == "" {
+		if reason := strings.TrimSpace(item.UnresolvedReason); reason != "" {
+			return "  (target unresolved: " + reason + ")"
+		}
 		return "  (target unresolved)"
 	}
 	return "  (up to date)"
