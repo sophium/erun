@@ -102,8 +102,8 @@ func runDoctorCommand(ctx common.Context, resolveOpen func(common.OpenParams) (c
 	if err != nil {
 		return err
 	}
-	ctx, closeDebugTee := common.ActivateEnvDebugTee(ctx, result.EnvConfig, nil, result.Tenant, result.Environment)
-	defer closeDebugTee()
+	ctx, closeEnvTrace := common.ActivateEnvTrace(ctx, result.Tenant, result.Environment)
+	defer closeEnvTrace()
 
 	if _, err := fmt.Fprintf(ctx.Stdout, "Target: %s/%s\n", result.Tenant, result.Environment); err != nil {
 		return err

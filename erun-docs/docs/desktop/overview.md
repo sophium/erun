@@ -22,7 +22,7 @@ For CI/CD pipelines and headless workflows, use the [CLI](/cli/overview) instead
 
 When something misbehaves, the panel at the bottom of the terminal area gives you two paste-ready diagnostic surfaces — built for handing to whoever (or whatever Agent) is helping you debug:
 
-- **erun trace.** The selected environment's persistent trace log: every erun command that ran for the env, at full trace detail, timestamped — including commands that finished before you opened the console. If capture is off, the pane says so and offers **Enable debug output** (the same setting `erun --debug-output` persists); from then on the env keeps a rolling log, capped and rotated automatically. For a local environment the desktop reads the log from your machine; for a remote environment it reads the one inside the pod while the environment is open.
+- **erun trace.** The selected environment's persistent trace log: every erun command that ran for the env, at full trace detail, timestamped — including commands that finished before you opened the console. Capture is always on; the log is capped and rotated automatically (see [where it lives](/reference/config-locations#trace-log)). For a local environment the desktop reads the log from your machine; for a remote environment it reads the one inside the pod while the environment is open.
 - **UI trace.** The desktop's own action history — what the app just did, in order — for reporting a desktop bug rather than an environment one.
 
 Both panes have a **Copy** button so a bug report can carry the evidence instead of a description of it.

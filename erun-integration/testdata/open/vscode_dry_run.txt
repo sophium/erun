@@ -7,6 +7,7 @@ SSH:
   workspace: <HOME>/git/team
 audit: erun open --dry-run --vscode team dev
 config: would assign localportrangestart=17000 to team/dev
+trace-log: would append the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=vscode
 kubectl --context test-context --namespace team-dev get deployment team-devops -o name
 open: dry-run: would deploy runtime for team/dev before launching VS Code; in real mode the user must run `erun sshd init team dev` or `erun open team dev` first

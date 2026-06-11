@@ -69,14 +69,12 @@ func upgradeTargetFromArgs(args []string, tenant, environment, versionOverride s
 // lagging members via deploy, and reports any per-environment failures.
 func runUpgrade(ctx common.Context, store common.DeployStore, target common.UpgradeTarget, deploy common.UpgradeItemDeployer) error {
 	// A scoped run (the desktop's per-env Upgrade-all fan-out) captures into
-	// that env's debug-output log when the env opts in; the cross-tenant
-	// global run has no single env to attribute the trace to.
+	// that env's trace log; the cross-tenant global run has no single env to
+	// attribute the trace to.
 	if target.Tenant != "" && target.Environment != "" {
-		if config, _, cfgErr := store.LoadEnvConfig(target.Tenant, target.Environment); cfgErr == nil {
-			var closeDebugTee func()
-			ctx, closeDebugTee = common.ActivateEnvDebugTee(ctx, config, nil, target.Tenant, target.Environment)
-			defer closeDebugTee()
-		}
+		var closeEnvTrace func()
+		ctx, closeEnvTrace = common.ActivateEnvTrace(ctx, target.Tenant, target.Environment)
+		defer closeEnvTrace()
 	}
 	ctx.Trace(fmt.Sprintf("upgrade: tenant=%s environment=%s version-override=%s force=%v",
 		target.Tenant, target.Environment, target.VersionOverride, target.Force))

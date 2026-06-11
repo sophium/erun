@@ -11,10 +11,9 @@ import (
 )
 
 const (
-	dryRunFlagUsage      = "Resolve and trace mutating actions without executing them."
-	timeFlagUsage        = "Print the elapsed runtime after the command finishes."
-	verboseFlagUsage     = "Increase verbosity: -v streams external tool output, -vv adds erun command traces."
-	debugOutputFlagUsage = "Capture this environment's full erun trace to ~/.erun/<tenant>/<env>/trace.log from now on (persists the env's debugoutput setting; the desktop's Diagnostics console reads it)."
+	dryRunFlagUsage  = "Resolve and trace mutating actions without executing them."
+	timeFlagUsage    = "Print the elapsed runtime after the command finishes."
+	verboseFlagUsage = "Increase verbosity: -v streams external tool output, -vv adds erun command traces."
 
 	timingWrappedAnnotation = "erun.dev/timing-wrapped"
 )
@@ -25,15 +24,6 @@ func addDryRunFlag(cmd *cobra.Command) {
 
 func addTimeFlag(cmd *cobra.Command) {
 	cmd.PersistentFlags().Bool("time", false, timeFlagUsage)
-}
-
-func addDebugOutputFlag(cmd *cobra.Command) {
-	cmd.PersistentFlags().Bool("debug-output", false, debugOutputFlagUsage)
-}
-
-func isDebugOutputCommand(cmd *cobra.Command) bool {
-	debugOutput, err := cmd.Flags().GetBool("debug-output")
-	return err == nil && debugOutput
 }
 
 func isDryRunCommand(cmd *cobra.Command) bool {
@@ -85,13 +75,12 @@ func isNoShellCommand(cmd *cobra.Command) bool {
 func commandContext(cmd *cobra.Command) common.Context {
 	verbosity := commandVerbosity(cmd)
 	return common.Context{
-		Logger:      common.NewLoggerWithWriters(verbosity, cmd.ErrOrStderr(), cmd.ErrOrStderr()),
-		Verbosity:   verbosity,
-		DryRun:      isDryRunCommand(cmd),
-		DebugOutput: isDebugOutputCommand(cmd),
-		Stdin:       cmd.InOrStdin(),
-		Stdout:      cmd.OutOrStdout(),
-		Stderr:      cmd.ErrOrStderr(),
+		Logger:    common.NewLoggerWithWriters(verbosity, cmd.ErrOrStderr(), cmd.ErrOrStderr()),
+		Verbosity: verbosity,
+		DryRun:    isDryRunCommand(cmd),
+		Stdin:     cmd.InOrStdin(),
+		Stdout:    cmd.OutOrStdout(),
+		Stderr:    cmd.ErrOrStderr(),
 	}
 }
 

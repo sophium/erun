@@ -262,35 +262,6 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/remote_dry_run_propagates_host_credentials_opt_in", normalize.Apply(result.Combined))
 	})
 
-	t.Run("debug_output_flag_dry_run_names_the_trace_log_and_persist", func(t *testing.T) {
-		// #466: --debug-output enables the per-env full-trace capture and
-		// persists the env's debugoutput setting. The dry-run contract: name
-		// the resolved trace-log path and the would-be persist, write
-		// nothing.
-		setup := env.New(t)
-		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
-		envVars := stubKubectlNotFound(t, setup)
-		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--debug-output", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		golden.Equal(t, "open/debug_output_flag_dry_run_names_the_trace_log_and_persist", normalize.Apply(result.Combined))
-	})
-
-	t.Run("debug_output_setting_dry_run_names_the_trace_log", func(t *testing.T) {
-		// #466: an env whose config already carries debugoutput=true captures
-		// on every invocation without any flag; dry-run names the path only
-		// (no persist line — the setting is already on).
-		setup := env.New(t)
-		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
-		envDir := filepath.Join(setup.ConfigHome, "erun", "team", "dev")
-		raw, err := os.ReadFile(filepath.Join(envDir, "config.yaml"))
-		if err != nil {
-			t.Fatalf("read seeded env config: %v", err)
-		}
-		mustWriteFile(t, filepath.Join(envDir, "config.yaml"), string(raw)+"debugoutput: true\n")
-		envVars := stubKubectlNotFound(t, setup)
-		result := erun.Run(t, []string{"open", "team", "dev", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		golden.Equal(t, "open/debug_output_setting_dry_run_names_the_trace_log", normalize.Apply(result.Combined))
-	})
-
 	t.Run("app_session_skip_ensure_dry_run_skips_the_deploy_preflight", func(t *testing.T) {
 		// #463: the desktop runs the open/build/deploy preflight once per env
 		// (the shared ensure) and spawns every tab with --skip-ensure. The

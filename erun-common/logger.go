@@ -27,7 +27,7 @@ type Logger struct {
 	stderr    io.Writer
 	// traceSink, when set, receives every line the logger could print at
 	// VerbosityTrace — independent of the terminal verbosity and always
-	// uncolored — so the per-env debug-output log captures the full trace
+	// uncolored — so the per-env trace log captures the full trace
 	// even for plain invocations (issue #466).
 	traceSink io.Writer
 }

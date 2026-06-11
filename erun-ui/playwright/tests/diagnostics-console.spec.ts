@@ -5,12 +5,12 @@ import { test, expect } from '../fixtures/erunApp.js';
 // the in-app UI (Redux action) trace. It replaced the old raw-PTY mirror
 // that filled with ANSI gibberish whenever a TUI ran in the active session.
 //
-// Harness limits: the suite must not click "Enable debug output" (it would
-// persist debugoutput=true into the developer's real ~/.erun config), and it
-// cannot stage a populated trace.log for a known env. The erun-trace content
-// path is covered by Go tests instead — TestLoadEnvTrace* in
+// Harness limits: the suite cannot stage a populated trace.log for a known
+// env (capture is always-on per #508, but the headless run must not depend
+// on which commands ran on this machine). The erun-trace content path is
+// covered by Go tests instead — TestLoadEnvTrace* in
 // erun-ui/env_trace_handlers_test.go (host + pod reads, reachability gate)
-// and TestActivateEnvDebugTee* in erun-common/env_trace_test.go (what gets
+// and TestActivateEnvTrace* in erun-common/env_trace_test.go (what gets
 // written). Here we lock the rendered shell: tab structure, empty states,
 // the UI-trace record/clear cycle, and the no-raw-ANSI invariant.
 test.describe('diagnostics console', () => {

@@ -53,8 +53,4 @@ export class DebugPanel {
   clearButton(): Locator {
     return this.page.getByRole('button', { name: 'Clear' });
   }
-
-  enableDebugOutputButton(): Locator {
-    return this.page.getByRole('button', { name: /^(Enable debug output|Enabling…)$/ });
-  }
 }
