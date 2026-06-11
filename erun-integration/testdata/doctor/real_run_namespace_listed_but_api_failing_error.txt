@@ -9,4 +9,5 @@ team-devops-pod-1   2/2     Running   0
 
 If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
 audit: erun doctor --prune-images team dev
+trace-log: appending the full trace to <TMP>
 runtime namespace "team-dev" is listed, but direct Kubernetes API access is failing: Error from server (NotFound): namespaces "team-dev" not found

@@ -18,3 +18,4 @@ overlay     100G  20G   80G    /var/lib/docker
 Running: Remove stopped Docker containers
 Total reclaimed space: 1GB
 audit: erun doctor --prune-containers team dev
+trace-log: appending the full trace to <TMP>

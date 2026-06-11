@@ -15,3 +15,4 @@ Total reclaimed space: 2GB
 Running: Remove unused BuildKit cache
 Total: 3GB
 audit: erun doctor --prune-build-cache --prune-images team dev
+trace-log: appending the full trace to <TMP>

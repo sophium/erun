@@ -1,4 +1,5 @@
 audit: erun open team dev
+trace-log: appending the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=shell
 error: timed out waiting for the condition on deployments/team-devops
 exit status 1

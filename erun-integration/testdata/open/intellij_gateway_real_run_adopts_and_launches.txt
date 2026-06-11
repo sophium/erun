@@ -6,6 +6,7 @@ SSH:
   key: none
   workspace: <HOME>/git/team
 audit: erun open --intellij --no-alias-prompt team dev
+trace-log: appending the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=intellij
 sshd: adopted existing kubectl port-forward on <LOOPBACK>:26122 (PID 4243)
 mcp: adopted existing kubectl port-forward on <LOOPBACK>:26100 (PID 4242)

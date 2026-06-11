@@ -6,6 +6,7 @@ SSH:
   key: none
   workspace: <HOME>/git/team
 audit: erun open --dry-run --intellij --no-alias-prompt team dev
+trace-log: would append the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=intellij
 kubectl --context test-context --namespace team-dev get deployment team-devops -o name
 kubectl --context test-context --namespace team-dev get deployment team-devops -o json

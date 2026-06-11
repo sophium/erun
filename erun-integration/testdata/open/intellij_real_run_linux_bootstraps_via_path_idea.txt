@@ -6,6 +6,7 @@ SSH:
   key: none
   workspace: <HOME>/git/team
 audit: erun open --intellij --no-alias-prompt team dev
+trace-log: appending the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=intellij
 write IntelliJ SSH project config in <TMP>
 Opened IntelliJ IDEA locally.
