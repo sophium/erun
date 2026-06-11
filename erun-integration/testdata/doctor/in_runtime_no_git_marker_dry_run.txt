@@ -1,0 +1,7 @@
+Remote init checks for team/dev:
+  marker file                 COMPLETE '<TMP>'
+  project root               OK '<TMP>'
+  git checkout               N/A '<TMP>'
+  SSH keypair                N/A '<TMP>'
+Remote init is complete; nothing to finish.
+audit: erun doctor --dry-run

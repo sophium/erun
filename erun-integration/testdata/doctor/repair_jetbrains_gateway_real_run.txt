@@ -1,0 +1,5 @@
+Target: team/dev
+Running: Clear cached JetBrains Gateway backend metadata
+Cached backend path: <TMP>
+Cleared cached JetBrains Gateway backend metadata. Open IntelliJ again to let Gateway select or redeploy the backend.
+audit: erun doctor --repair-jetbrains-gateway team dev

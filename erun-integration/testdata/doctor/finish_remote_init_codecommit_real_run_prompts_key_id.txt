@@ -1,0 +1,51 @@
+Remote init checks for petios/dev:
+  marker file                 INCOMPLETE '<TMP>'
+  project root               OK '<TMP>'
+  git checkout               MISSING '<TMP>'
+  SSH keypair                OK '<TMP>'
+✗ CodeCommit SSH public key ID for environment "dev" in tenant "petios": █
+✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": A█
+✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": AP█
+✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APK█
+✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKA█
+✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAE█
+✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEX█
+✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXA█
+✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAM█
+✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMP█
+✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPL█
+✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPLE█
+✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPLEK█
+✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPLEKE█
+✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPLEKEY█
+✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPLEKEYI█
+✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPLEKEYID█
+✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPLEKEYID█
+CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPLEKEYID
+Remote init finished.
+Remote init checks for petios/dev:
+  marker file                 COMPLETE '<TMP>'
+  project root               OK '<TMP>'
+  git checkout               MISSING '<TMP>'
+  SSH keypair                OK '<TMP>'
+audit: erun doctor --finish-remote-init --remote-repository-url ssh://git-codecommit.eu-west-1.amazonaws.com/v1/repos/petios
+Upload this SSH public key to the IAM user that should access CodeCommit:
+ssh-rsa AAAASTUBRSAKEY erun-doctor-test
+
+Use the SSH public key ID returned by IAM in this SSH host config:
+Host git-codecommit.eu-west-1.amazonaws.com
+  User <SSH public key ID>
+  IdentityFile ~/.ssh/id_rsa_codecommit
+  IdentitiesOnly yes
+  StrictHostKeyChecking accept-new
+Generated CodeCommit SSH keypair.
+Upload this SSH public key to the IAM user that should access CodeCommit:
+ssh-rsa AAAASTUBRSAKEY erun-doctor-test
+
+Use the SSH public key ID returned by IAM in this SSH host config:
+Host git-codecommit.eu-west-1.amazonaws.com
+  User APKAEXAMPLEKEYID
+  IdentityFile ~/.ssh/id_rsa_codecommit
+  IdentitiesOnly yes
+  StrictHostKeyChecking accept-new
+Waiting for the SSH key to be deployed to the git host. Rechecking every 2 seconds. Press Ctrl+C to cancel.

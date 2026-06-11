@@ -1,0 +1,10 @@
+Root config: <TMP> (status=ok)
+  cloud providers configured: 0
+  cloud contexts: 2, tenants: 1
+  orphaned aliases: 1
+    - bob+111122223333@aws
+        provider=aws account=111122223333 user=bob
+        cloud contexts: ctx-unnamed-region, erun-001-111122223333-eu-west-2 (eu-west-2)
+Dry-run: would re-initialize AWS provider for alias bob+111122223333@aws (account 111122223333, user bob)
+audit: erun doctor --dry-run --repair-config
+doctor repair-config: would re-init aws cloud provider alias=bob+111122223333@aws account=111122223333 user=bob region=eu-west-2
