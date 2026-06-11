@@ -18,6 +18,15 @@ For CI/CD pipelines and headless workflows, use the [CLI](/cli/overview) instead
 - **Activities panel with failure details and fixes.** A queue of recent and in-flight operations — deploys, opens, builds. When a deploy fails, the entry keeps the captured command output (the real helm/kubectl error behind the one-line summary): expand **Show output** to read it, or use **Copy failure report** to package that output together with the environment, version, and container status so you can hand the whole picture to whoever can help. The failed entry also offers one-click recovery: **Run doctor** to troubleshoot (see [`erun doctor`](/cli/doctor)), **Rebuild & redeploy** to force a clean rebuild, and **Clear pending helm release** when a release is stuck.
 - **Settings in one place.** Runtime sizing, AI tooling configuration, port mappings, SSH keys, and cloud bindings — all editable from one screen per environment.
 
+## Diagnostics console {#diagnostics-console}
+
+When something misbehaves, the panel at the bottom of the terminal area gives you two paste-ready diagnostic surfaces — built for handing to whoever (or whatever Agent) is helping you debug:
+
+- **erun trace.** The selected environment's persistent trace log: every erun command that ran for the env, at full trace detail, timestamped — including commands that finished before you opened the console. If capture is off, the pane says so and offers **Enable debug output** (the same setting `erun --debug-output` persists); from then on the env keeps a rolling log, capped and rotated automatically. For a local environment the desktop reads the log from your machine; for a remote environment it reads the one inside the pod while the environment is open.
+- **UI trace.** The desktop's own action history — what the app just did, in order — for reporting a desktop bug rather than an environment one.
+
+Both panes have a **Copy** button so a bug report can carry the evidence instead of a description of it.
+
 ## Open it in your editor
 
 - **Persistent terminal sessions.** Each environment owns its own terminals, and switching tabs doesn't kill them. For an environment backed by a runtime pod, the sessions live in the pod and keep running even while the environment is closed — a long-running Agent keeps working while you're away — so reopening reconnects you to the same sessions and scrollback instead of starting fresh ones.

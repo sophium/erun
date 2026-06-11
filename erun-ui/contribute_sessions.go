@@ -95,7 +95,7 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 	params := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),
-		Args:       withAppSession(buildOpenArgs(result.Tenant, result.Environment, selection.Debug), appSessionID, withAI, true),
+		Args:       withAppSession(buildOpenArgs(result.Tenant, result.Environment), appSessionID, withAI, true),
 		Env:        []string{appSessionEnvVar + "=1"},
 		Cols:       cols,
 		Rows:       rows,
@@ -123,7 +123,7 @@ func (a *App) runContributeSession(ctx context.Context, selection uiSelection, s
 		startedAt: time.Now(),
 	}
 	a.sessions[key] = managed
-	a.busyEnvs[environmentBusyKey(selection)]++
+	a.busyEnvs[selectionKey(selection)]++
 	a.mu.Unlock()
 
 	a.recordTerminalActivity(selection)

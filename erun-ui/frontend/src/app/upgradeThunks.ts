@@ -52,7 +52,6 @@ export const confirmUpgradeAll =
       return;
     }
     const controller = requireController(extra);
-    const debugOpen = state.layout.debugOpen;
     controller.fitTerminal();
     const { cols, rows } = controller.terminalSize();
 
@@ -61,7 +60,6 @@ export const confirmUpgradeAll =
         const selection: UISelection = {
           tenant: member.tenant,
           environment: member.environment,
-          debug: debugOpen || undefined,
         };
         const result = (await StartUpgradeEnvironmentSession(
           selection,

@@ -86,8 +86,7 @@ func (a *App) selectionsLinkedToCloudContext(name string) []string {
 // selectionsForCloudContext returns the (tenant, environment) pairs
 // every env linked to `name`. Used by recordManualStopForCloudContext
 // so it can resolve a per-env MCP endpoint and record an audit row
-// against each — selection keys encode an extra Debug bool that would
-// be ambiguous to reverse-parse.
+// against each.
 func (a *App) selectionsForCloudContext(name string) []uiSelection {
 	name = strings.TrimSpace(name)
 	if name == "" {

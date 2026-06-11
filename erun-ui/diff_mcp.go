@@ -101,12 +101,11 @@ func setEnvironmentCloudAliasViaMCP(ctx context.Context, endpoint, tenant, envir
 	return output.EnvConfig, nil
 }
 
-// loadPodBranchFromMCP reads the env worktree's current git branch from
-// inside the runtime pod via the per-env MCP endpoint's raw tool — the
-// sidebar hover card's "Working on" source for remote envs (issue #462).
-// The idle-probe header keeps the hover from registering as activity, so a
-// hover never holds an idle env awake.
-func loadPodBranchFromMCP(ctx context.Context, endpoint string) (string, error) {
+// runPodRawFromMCP runs an argv inside the runtime pod via the per-env MCP
+// endpoint's raw tool and returns its stdout. The idle-probe header keeps
+// these diagnostic reads from registering as activity, so a hover or an
+// open Diagnostics console never holds an idle env awake.
+func runPodRawFromMCP(ctx context.Context, endpoint string, argv []string) (string, error) {
 	client := mcp.NewClient(&mcp.Implementation{Name: "erun-app", Version: currentBuildInfo().Version}, nil)
 	session, err := client.Connect(ctx, &mcp.StreamableClientTransport{
 		Endpoint: endpoint,
@@ -125,7 +124,7 @@ func loadPodBranchFromMCP(ctx context.Context, endpoint string) (string, error) 
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{
 		Name: "raw",
 		Arguments: map[string]any{
-			"command": []string{"git", "rev-parse", "--abbrev-ref", "HEAD"},
+			"command": argv,
 		},
 	})
 	if err != nil {
@@ -142,7 +141,18 @@ func loadPodBranchFromMCP(ctx context.Context, endpoint string) (string, error) 
 	if err := json.Unmarshal(data, &output); err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(output.Stdout), nil
+	return output.Stdout, nil
+}
+
+// loadPodBranchFromMCP reads the env worktree's current git branch from
+// inside the runtime pod via the per-env MCP endpoint's raw tool — the
+// sidebar hover card's "Working on" source for remote envs (issue #462).
+func loadPodBranchFromMCP(ctx context.Context, endpoint string) (string, error) {
+	out, err := runPodRawFromMCP(ctx, endpoint, []string{"git", "rev-parse", "--abbrev-ref", "HEAD"})
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
 }
 
 func loadIdleStatusFromMCP(ctx context.Context, endpoint string) (eruncommon.EnvironmentIdleStatus, error) {

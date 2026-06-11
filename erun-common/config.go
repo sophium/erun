@@ -127,6 +127,13 @@ type EnvConfig struct {
 	// (and the desktop's Upgrade-all action) redeploy it to the latest
 	// version for its UpgradeChannel when the current RuntimeVersion lags.
 	AutoUpgrade bool `yaml:"autoupgrade,omitempty" json:"autoUpgrade,omitempty"`
+	// DebugOutput opts the env into the persistent debug-output mode
+	// (issue #466): every erun invocation for the env appends its full
+	// VerbosityTrace stream to $HOME/.erun/<tenant>/<env>/trace.log, so
+	// the desktop's Diagnostics console can show what happened at any
+	// time. Enabled by `erun --debug-output <command>` (which persists
+	// this field) or by editing the config directly.
+	DebugOutput bool `yaml:"debugoutput,omitempty" json:"debugOutput,omitempty"`
 	// UpgradeChannel selects which release channel an upgrade targets:
 	// "stable" (semver tags) or "snapshot" (*-snapshot-<timestamp> tags).
 	// It is orthogonal to Type (build location); empty resolves via

@@ -39,6 +39,11 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 			}
 			deployTarget.Snapshot = snapshotOverride
 			deployTarget.Components = components
+			if config, _, cfgErr := store.LoadEnvConfig(deployTarget.Tenant, deployTarget.Environment); cfgErr == nil {
+				var closeDebugTee func()
+				ctx, closeDebugTee = common.ActivateEnvDebugTee(ctx, config, saveEnvConfig, deployTarget.Tenant, deployTarget.Environment)
+				defer closeDebugTee()
+			}
 			ctx.Trace(fmt.Sprintf("deploy: tenant=%s environment=%s version-override=%s snapshot=%v components=%v force=%v publish=%v",
 				deployTarget.Tenant, deployTarget.Environment, deployTarget.VersionOverride,
 				snapshotOverride != nil && *snapshotOverride, components, deployTarget.Force, deployTarget.Publish))

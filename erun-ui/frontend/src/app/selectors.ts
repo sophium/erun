@@ -7,9 +7,6 @@ import { normalizeDialogValue, selectionKey } from './versionSuggestions';
 // TerminalController as instance methods even though they touched no
 // imperative state. Selectors keep them composable and testable.
 
-export const selectActiveSessionDebug = (state: RootState, sessionId: number): boolean =>
-  sessionId > 0 && state.sessions.debugModes[sessionId] !== undefined;
-
 export const selectEnvironmentExists = (
   state: RootState,
   tenant: string,

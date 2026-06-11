@@ -9,7 +9,6 @@ import {
   StartSession,
 } from '../../wailsjs/go/main/App';
 import { resolveAutoStartGate } from './autoStartGate';
-import { applyPendingDebugHeader, setPendingDebugHeader, syncDebugDisplay } from './debugThunks';
 import { readError } from './errors';
 import { hideTerminalMessage, showTerminalMessage } from './notificationThunks';
 import { reattachRemoteTerminalTabs } from './remoteSessionTabsThunks';
@@ -26,20 +25,17 @@ import {
 import { setSelected } from './slices/selectionSlice';
 import {
   clearEnvOpening,
-  clearSessionDebug,
   markEnvOpening,
-  registerDebugSession,
   resetEnvOpening,
   trackOpenSession,
 } from './slices/sessionsSlice';
 import { setTenantDashboard } from './slices/tenantDashboardSlice';
-import { setDebugOutput, setSelectedSessionForEnv, setSessionId } from './slices/terminalSlice';
+import { setSelectedSessionForEnv, setSessionId } from './slices/terminalSlice';
 import { setTerminalCopyOutput, setTerminalCopyStatus } from './slices/terminalStatusSlice';
 import type { TerminalTab, TerminalTabKind } from './state';
 import type { AppThunk } from './store';
 import { maybeRespawnDeadDefaultTab } from './tabRespawnThunks';
 import { recordTab, rememberSelectedTab, removeTab } from './tabsThunks';
-import { formatDebugCommand } from './terminalStatus';
 import { requireController } from './thunkExtra';
 import { selectionKey } from './versionSuggestions';
 
@@ -83,13 +79,6 @@ const spawnERunTabPassive =
     try {
       const result = (await StartSession(runSelection, 0, cols, rows)) as StartSessionResult;
       dispatch(trackOpenSession({ key, sessionId: result.sessionId, selection: runSelection }));
-      dispatch(
-        registerDebugSession({
-          sessionId: result.sessionId,
-          selection: runSelection,
-          mode: 'open',
-        }),
-      );
       dispatch(recordTab(key, result.sessionId, result.slot ?? 0, 'erun', 'ERun'));
     } catch {
       // ERun failed to spawn; future env opens will retry.
@@ -197,9 +186,6 @@ const trackOpenSessionMetadata =
   (key: string, result: StartSessionResult, runSelection: UISelection): AppThunk =>
   (dispatch) => {
     dispatch(trackOpenSession({ key, sessionId: result.sessionId, selection: runSelection }));
-    dispatch(
-      registerDebugSession({ sessionId: result.sessionId, selection: runSelection, mode: 'open' }),
-    );
     const slot = result.slot ?? 0;
     const kind: TerminalTabKind = slot === 0 ? 'erun' : 'extra';
     const label = kind === 'erun' ? 'ERun' : `Terminal ${String(slot)}`;
@@ -210,7 +196,6 @@ export const registerOpenSessionResult =
   (key: string, result: StartSessionResult, runSelection: UISelection): AppThunk =>
   (dispatch, getState) => {
     dispatch(trackOpenSessionMetadata(key, result, runSelection));
-    dispatch(applyPendingDebugHeader(result.sessionId));
     dispatch(setSessionId(result.sessionId));
     // Preserve the user's prior tab choice for this env across re-opens
     // (Nielsen heuristic #4: consistency / user control). Only seed
@@ -225,16 +210,10 @@ export const registerOpenSessionResult =
     if (!rememberedIsLive) {
       dispatch(setSelectedSessionForEnv({ key, sessionId: result.sessionId }));
     }
-    dispatch(syncDebugDisplay());
   };
 
 const prepareOpenSelection =
-  (
-    selection: UISelection,
-    runSelection: UISelection,
-    previousSessionId: number,
-    previousKnownSessionId: number,
-  ): AppThunk =>
+  (selection: UISelection, previousSessionId: number, previousKnownSessionId: number): AppThunk =>
   (dispatch, getState) => {
     const state = getState();
     const previousKey = state.selection.selected ? selectionKey(state.selection.selected) : '';
@@ -254,9 +233,6 @@ const prepareOpenSelection =
     dispatch(setIdleStatus(null));
     if (!isNewSessionSelection(previousSessionId, previousKnownSessionId)) {
       return;
-    }
-    if (state.layout.debugOpen) {
-      dispatch(setPendingDebugHeader(`$ ${formatDebugCommand(runSelection)}\n`));
     }
     dispatch(setTerminalCopyOutput(''));
     dispatch(setTerminalCopyStatus(''));
@@ -308,8 +284,7 @@ export const openSelection =
     dispatch(
       setTenantDashboard({ tenant: '', tab: 'users', loading: false, error: '', data: null }),
     );
-    const debugOpen = getState().layout.debugOpen;
-    const runSelection = { ...selection, debug: debugOpen || undefined };
+    const runSelection = { ...selection };
     const key = selectionKey(runSelection);
     const previousSessionId = getState().terminal.sessionId;
     const previousKnownSessionId = getState().sessions.selectionToSessionId[key] ?? 0;
@@ -343,9 +318,7 @@ export const openSelection =
     // keeps the sidebar spinner from lingering on the env the user has
     // navigated away from.
     dispatch(resetEnvOpening());
-    dispatch(
-      prepareOpenSelection(selection, runSelection, previousSessionId, previousKnownSessionId),
-    );
+    dispatch(prepareOpenSelection(selection, previousSessionId, previousKnownSessionId));
     controller.fitTerminal();
     const { cols, rows } = controller.terminalSize();
 
@@ -467,8 +440,7 @@ export const activateLocalAfterCommand =
   (selection: UISelection, result: StartSessionResult): AppThunk<Promise<void>> =>
   async (dispatch, getState, extra) => {
     const controller = requireController(extra);
-    const debugOpen = getState().layout.debugOpen;
-    const runSelection = { ...selection, debug: debugOpen || undefined };
+    const runSelection = { ...selection };
     const key = selectionKey(runSelection);
     dispatch(recordTab(key, result.sessionId, result.slot ?? 0, 'local', 'Local'));
     if (selectEnvironmentExists(getState(), selection.tenant, selection.environment)) {
@@ -491,10 +463,9 @@ export const activateLocalAfterCommand =
 // erun-ui/AGENTS.md § "UX Impact Review Checklist" item 3.
 export const startInitSelection =
   (selection: UISelection): AppThunk<Promise<void>> =>
-  async (dispatch, getState, extra) => {
+  async (dispatch, _getState, extra) => {
     const controller = requireController(extra);
-    const debugOpen = getState().layout.debugOpen;
-    const runSelection = { ...selection, debug: debugOpen || undefined };
+    const runSelection = { ...selection };
     dispatch(setSelected(selection));
     dispatch(setTerminalCopyOutput(''));
     dispatch(setTerminalCopyStatus(''));
@@ -506,10 +477,9 @@ export const startInitSelection =
 
 export const startDeploySelection =
   (selection: UISelection): AppThunk<Promise<void>> =>
-  async (dispatch, getState, extra) => {
+  async (dispatch, _getState, extra) => {
     const controller = requireController(extra);
-    const debugOpen = getState().layout.debugOpen;
-    const runSelection = { ...selection, debug: debugOpen || undefined };
+    const runSelection = { ...selection };
     dispatch(setSelected(selection));
     dispatch(setTerminalCopyOutput(''));
     dispatch(setTerminalCopyStatus(''));
@@ -532,7 +502,7 @@ export const addTerminalTab = (): AppThunk<Promise<void>> => async (dispatch, ge
   if (!selection) {
     return;
   }
-  const runSelection = { ...selection, debug: state.layout.debugOpen || undefined };
+  const runSelection = { ...selection };
   const key = selectionKey(runSelection);
   const tabs = state.terminal.tabsByEnv[key] ?? [];
   const nextSlot = tabs.reduce((max, tab) => (tab.slot >= max ? tab.slot + 1 : max), 0);
@@ -567,7 +537,6 @@ export const selectTerminalTab =
     }
     dispatch(setSessionId(sessionId));
     dispatch(rememberSelectedTab(sessionId));
-    dispatch(syncDebugDisplay());
     const state = getState();
     const exitReason = state.sessions.exitReasons[sessionId] ?? '';
     if (exitReason) {
@@ -592,7 +561,7 @@ export const closeTerminalTab =
     if (!selection) {
       return;
     }
-    const runSelection = { ...selection, debug: state.layout.debugOpen || undefined };
+    const runSelection = { ...selection };
     const key = selectionKey(runSelection);
     const tabs = state.terminal.tabsByEnv[key] ?? [];
     const target = tabs.find((tab) => tab.sessionId === sessionId);
@@ -606,14 +575,12 @@ export const closeTerminalTab =
       return;
     }
     const remaining = dispatch(removeTab(key, sessionId));
-    dispatch(clearSessionDebug(sessionId));
     if (getState().terminal.sessionId === sessionId) {
       const next = remaining[remaining.length - 1];
       if (next) {
         dispatch(selectTerminalTab(next.sessionId));
       } else {
         dispatch(setSessionId(0));
-        dispatch(setDebugOutput(''));
       }
     }
   };

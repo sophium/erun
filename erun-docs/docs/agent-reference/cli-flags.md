@@ -15,6 +15,7 @@ Common flags inherited from the root command apply to every subcommand:
 | `--dry-run` | bool | `false` | Resolve and print the trace without performing side effects. Implies trace verbosity. |
 | `-v` / `--verbose` | bool | `false` | Stream external tool output (`helm --debug`, `kubectl --v=4`, …). |
 | `-vv` | bool | `false` | `-v` plus per-command `trace:` lines for every action + decision. |
+| `--debug-output` | bool | `false` | For environment-scoped commands (`open`, `doctor`, `deploy`, `upgrade --tenant --environment`): append the invocation's full trace — at trace verbosity, independent of `-v`/`-vv` — to `~/.erun/<tenant>/<environment>/trace.log`, and persist `debugoutput: true` in the env config so every later invocation for that env keeps capturing. The log rotates to `trace.log.1` past 5 MB; capture failures degrade to a `trace:` line and never fail the command. Under `--dry-run` nothing is written or persisted — the trace names the log path it would append to. |
 | `--time` | bool | `false` | Print elapsed wall time at the end. |
 | `--help` / `-h` | bool | `false` | Print command help and exit `0`. |
 

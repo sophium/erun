@@ -1,20 +1,21 @@
 import type { Locator, Page } from '@playwright/test';
 
-// DebugPanel POM. The debug panel sits at the bottom of the terminal area
-// and toggles open/closed; when open it renders a "Resize debug panel"
-// handle button and Copy/Clear actions.
+// Diagnostics console POM (issue #466). The panel sits at the bottom of the
+// terminal area and toggles open/closed; when open it renders a "Resize
+// diagnostics panel" handle, an "erun trace" / "UI trace" tab pair, and
+// per-pane Refresh/Copy/Clear actions.
 export class DebugPanel {
   constructor(public readonly page: Page) {}
 
   resizeHandle(): Locator {
-    return this.page.getByRole('button', { name: 'Resize debug panel' });
+    return this.page.getByRole('button', { name: 'Resize diagnostics panel' });
   }
 
   toggleButton(): Locator {
     // The toggle is the section header button. Its accessible name is
-    // "Debug collapsed" when the panel is closed and "Debug erun -vv
-    // output" when open; both start with "Debug ".
-    return this.page.getByRole('button', { name: /^Debug\b/ }).first();
+    // "Diagnostics collapsed" when closed and "Diagnostics erun trace +
+    // UI trace" when open; both start with "Diagnostics".
+    return this.page.getByRole('button', { name: /^Diagnostics\b/ }).first();
   }
 
   async toggle(): Promise<void> {
@@ -25,11 +26,35 @@ export class DebugPanel {
     return (await this.resizeHandle().count()) > 0 && (await this.resizeHandle().isVisible());
   }
 
-  async clear(): Promise<void> {
-    await this.page.getByRole('button', { name: /^Clear/ }).click();
+  tab(name: 'erun trace' | 'UI trace'): Locator {
+    return this.page.getByRole('tab', { name });
   }
 
-  async copy(): Promise<void> {
-    await this.page.getByRole('button', { name: /^(Copy|Copied)/ }).click();
+  async selectTab(name: 'erun trace' | 'UI trace'): Promise<void> {
+    await this.tab(name).click();
+  }
+
+  erunTracePane(): Locator {
+    return this.page.getByLabel('erun trace output');
+  }
+
+  uiTracePane(): Locator {
+    return this.page.getByLabel('UI trace output');
+  }
+
+  refreshButton(): Locator {
+    return this.page.getByRole('button', { name: 'Refresh' });
+  }
+
+  copyButton(): Locator {
+    return this.page.getByRole('button', { name: /^(Copy|Copied|Copy failed)$/ });
+  }
+
+  clearButton(): Locator {
+    return this.page.getByRole('button', { name: 'Clear' });
+  }
+
+  enableDebugOutputButton(): Locator {
+    return this.page.getByRole('button', { name: /^(Enable debug output|Enabling…)$/ });
   }
 }

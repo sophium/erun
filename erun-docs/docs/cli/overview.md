@@ -48,6 +48,8 @@ Every action-oriented command supports `--dry-run` — resolve and print every s
 
 `-v` / `--verbose` streams external tool output; `-vv` adds per-command trace lines for every action and decision; `--time` prints elapsed wall time at the end. Full flag set per command is on the [CLI flag spec](/agent-reference/cli-flags) page.
 
+To capture diagnostics without re-running anything, add `--debug-output` to any environment-scoped command (or turn it on from the desktop's Diagnostics console): the environment then keeps a rolling `trace.log` of every command's full trace, readable later from the [desktop's Diagnostics console](/desktop/overview#diagnostics-console) even for runs that happened before you went looking. See the [CLI flag spec](/agent-reference/cli-flags) for the exact semantics.
+
 ## How arguments resolve
 
 Most commands accept `[TENANT] [ENVIRONMENT]` as positional args. When omitted, ERun resolves them from explicit flags, then the current directory's git repo, then user-level defaults, then prompt. See [Configuration · Effective tenant + environment](/reference/configuration#effective-tenant--environment-for-a-cli-command) for the full algorithm.

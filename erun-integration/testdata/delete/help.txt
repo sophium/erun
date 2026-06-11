@@ -14,5 +14,6 @@ Flags:
   -y, --yes       Skip the confirmation prompt (for non-interactive callers)
 
 Global Flags:
+      --debug-output    Capture this environment's full erun trace to ~/.erun/<tenant>/<env>/trace.log from now on (persists the env's debugoutput setting; the desktop's Diagnostics console reads it).
       --time            Print the elapsed runtime after the command finishes.
   -v, --verbose count   Increase verbosity: -v streams external tool output, -vv adds erun command traces.
