@@ -25,21 +25,37 @@ func TestUpgradeVersionsResolverForStore(t *testing.T) {
 		},
 	}
 
-	t.Run("a lookup error is returned, never substituted", func(t *testing.T) {
-		lookupErr := errors.New("ghcr token request failed: 403 Forbidden")
-		var fallbackQueried bool
-		resolver := UpgradeVersionsResolverForStore(store, func(_ context.Context, namespace, repository string) (RuntimeRegistryVersions, error) {
+	t.Run("a tenant lookup failure falls back to the canonical image", func(t *testing.T) {
+		// The tenant image is a wrapper the deploy rebuilds FROM the
+		// canonical image at the requested version, and ghcr 403s private
+		// and nonexistent repos alike — a listing failure must not block
+		// the upgrade (issue #501).
+		resolver := UpgradeVersionsResolverForStore(store, func(_ context.Context, _, repository string) (RuntimeRegistryVersions, error) {
 			if repository == DefaultRuntimeImageName {
-				fallbackQueried = true
+				return RuntimeRegistryVersions{LatestStable: "1.0.85", LatestSnapshot: "1.0.86-snapshot-1"}, nil
 			}
-			return RuntimeRegistryVersions{}, lookupErr
+			return RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")
+		})
+		versions, err := resolver(Context{}, "petios")
+		if err != nil {
+			t.Fatalf("a failed tenant listing must fall back, got error %v", err)
+		}
+		if versions.LatestStable != "1.0.85" || versions.LatestSnapshot != "1.0.86-snapshot-1" {
+			t.Fatalf("expected the canonical image's versions, got %+v", versions)
+		}
+	})
+
+	t.Run("both lookups failing is unresolved with the canonical reason", func(t *testing.T) {
+		canonicalErr := errors.New("registry unreachable")
+		resolver := UpgradeVersionsResolverForStore(store, func(_ context.Context, _, repository string) (RuntimeRegistryVersions, error) {
+			if repository == DefaultRuntimeImageName {
+				return RuntimeRegistryVersions{}, canonicalErr
+			}
+			return RuntimeRegistryVersions{}, errors.New("ghcr token request failed: 403 Forbidden")
 		})
 		_, err := resolver(Context{}, "petios")
-		if !errors.Is(err, lookupErr) {
-			t.Fatalf("expected the lookup error to propagate, got %v", err)
-		}
-		if fallbackQueried {
-			t.Fatal("a failed tenant lookup must not be papered over with the default image")
+		if !errors.Is(err, canonicalErr) {
+			t.Fatalf("expected the canonical failure as the reason, got %v", err)
 		}
 	})
 
