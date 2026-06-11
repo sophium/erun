@@ -1,0 +1,19 @@
+  - edge provider=aws alias=dev region=us-east-1 instance=i-0123456789abcdef0 type=t3.medium disk=50GB/gp3 kube-context=edge status=running public-ip=<VERSION>.10
+audit: erun context start --force edge
+cloud-context start: name=edge force=true
+cloud-context start: force=true bypasses working-hours gate
+aws iam get-role --role-name erun-edge-host-stop --query Role.RoleName --output text --region us-east-1 --profile dev
+aws iam put-role-policy --role-name erun-edge-host-stop --policy-name erun-self-stop --policy-document file://<TMP> --region us-east-1 --profile dev
+aws iam get-instance-profile --instance-profile-name erun-edge-host-stop --query InstanceProfile.Arn --output text --region us-east-1 --profile dev
+aws iam get-instance-profile --instance-profile-name erun-edge-host-stop --query 'InstanceProfile.Roles[0].RoleName' --output text --region us-east-1 --profile dev
+aws ec2 describe-iam-instance-profile-associations --filters 'Name=instance-id,Values=i-0123456789abcdef0' 'Name=state,Values=associated' --query 'IamInstanceProfileAssociations[0].AssociationId' --output text --region us-east-1 --profile dev
+aws ec2 describe-iam-instance-profile-associations --filters 'Name=instance-id,Values=i-0123456789abcdef0' 'Name=state,Values=associating,disassociating' --query 'IamInstanceProfileAssociations[0].AssociationId' --output text --region us-east-1 --profile dev
+aws ec2 associate-iam-instance-profile --instance-id i-0123456789abcdef0 --iam-instance-profile Arn=arn:aws:iam::123456789012:instance-profile/erun-edge-host-stop --region us-east-1 --profile dev
+An error occurred (InvalidParameterValue) when calling the AssociateIamInstanceProfile operation: Instance i-0123456789abcdef0 is already associated with an IAM instance profile
+cloud-context: instance profile already associated with i-0123456789abcdef0 — reusing the existing association
+aws ec2 start-instances --instance-ids i-0123456789abcdef0 --region us-east-1 --profile dev
+aws ec2 wait instance-running --instance-ids i-0123456789abcdef0 --region us-east-1 --profile dev
+aws ec2 describe-instances --instance-ids i-0123456789abcdef0 --query 'Reservations[0].Instances[0].PublicIpAddress' --output text --region us-east-1 --profile dev
+kubectl config set-cluster edge --server https://<VERSION>.10:6443 --insecure-skip-tls-verify=true
+kubectl config set-credentials edge --token dummy-admin-token
+kubectl config set-context edge --cluster edge --user edge

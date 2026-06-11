@@ -3,6 +3,7 @@ package integration
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -416,6 +417,63 @@ func TestDoctor(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "doctor/inspect_orphaned_cloud_context", normalize.Apply(result.Combined))
+	})
+
+	t.Run("repair_orphaned_alias_real_run_via_aws_config_profile", func(t *testing.T) {
+		// Real-run --repair-config with a confirmed prompt: covers
+		// buildOrphanRepairParams → common.LookupAWSSSOProfileByAccountID
+		// (parseAWSSharedConfig, findAWSSSOProfileForAccount, and the
+		// sso_session indirection through buildAWSSSOSessionIndex) plus
+		// the follow-up InitAWSCloudProvider re-init through the
+		// argv-branching aws stub. Dry-run cannot reach the lookup:
+		// offerOrphanedAliasRepair short-circuits to runOrphanRepairDryRun
+		// before buildOrphanRepairParams runs, so the ~/.aws/config scan
+		// only happens in a confirmed real run.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		// The tenant references an alias the root config does not list →
+		// orphan. The alias matches the identity the aws stub returns
+		// (user test-user, account 123456789012) so the re-init heals
+		// exactly this alias.
+		alias := "test-user+123456789012@aws"
+		tenantPath := filepath.Join(setup.ConfigHome, "erun", "team", "config.yaml")
+		tenantBody := "projectroot: " + setup.Cwd + "\n" +
+			"name: team\n" +
+			"defaultenvironment: dev\n" +
+			"cloudprovideraliases:\n" +
+			"    - " + alias + "\n" +
+			"primarycloudprovideralias: " + alias + "\n"
+		if err := os.WriteFile(tenantPath, []byte(tenantBody), 0o644); err != nil {
+			t.Fatalf("write tenant: %v", err)
+		}
+		startURL := fixture.SeedAWSSharedConfig(t, setup, "123456789012", "corp-dev")
+		envVars, issuer := stubAWSCallerIdentityAndJWT(t, setup)
+		result := erun.Run(t, []string{"doctor", "--repair-config"}, erun.RunOptions{
+			Cwd:   setup.Cwd,
+			Env:   envVars,
+			Stdin: "y\n",
+		})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/repair_orphaned_alias_real_run_via_aws_config_profile", normalize.Apply(result.Combined))
+		// Persistence is a side effect outside the captured streams: the
+		// re-initialized provider must carry the SSO settings discovered
+		// from ~/.aws/config plus the issuer extracted from the stubbed
+		// web-identity token.
+		raw, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read root config: %v", err)
+		}
+		for _, want := range []string{
+			"alias: " + alias,
+			"ssostarturl: " + startURL,
+			"oidcissuerurl: " + issuer,
+		} {
+			if !strings.Contains(string(raw), want) {
+				t.Errorf("expected persisted config to contain %q, got:\n%s", want, raw)
+			}
+		}
 	})
 
 	t.Run("restore_config_from_backup_dry_run", func(t *testing.T) {

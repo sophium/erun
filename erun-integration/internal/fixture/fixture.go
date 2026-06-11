@@ -897,7 +897,6 @@ func waitForPortClosed(port int, timeout time.Duration) {
 	}
 }
 
-
 func formatStubBool(value bool) string {
 	if value {
 		return "true"
@@ -971,4 +970,3 @@ func sanitizeFilename(s string) string {
 	}
 	return b.String()
 }
-
