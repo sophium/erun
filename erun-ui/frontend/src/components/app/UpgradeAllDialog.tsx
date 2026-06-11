@@ -167,7 +167,7 @@ function UpgradePlanRow({ item }: { item: UIUpgradePlanItem }): React.ReactEleme
         <UpgradeVersionCell item={item} state={state} />
       </td>
       <td className="py-2.5 text-right">
-        <UpgradePlanRowStatus state={state} />
+        <UpgradePlanRowStatus state={state} reason={item.unresolvedReason} />
       </td>
     </tr>
   );
@@ -203,7 +203,13 @@ function UpgradeVersionCell({
   );
 }
 
-function UpgradePlanRowStatus({ state }: { state: UpgradeRowState }): React.ReactElement {
+function UpgradePlanRowStatus({
+  state,
+  reason,
+}: {
+  state: UpgradeRowState;
+  reason?: string;
+}): React.ReactElement {
   if (state === 'lagging') {
     return (
       <span className="text-[11px] font-medium whitespace-nowrap text-primary">will upgrade</span>
@@ -213,11 +219,20 @@ function UpgradePlanRowStatus({ state }: { state: UpgradeRowState }): React.Reac
     // Distinct from "up to date": the channel's latest could not be resolved,
     // so we can't tell whether this env lags. Amber + icon (not muted, not the
     // success-coloured "up to date") keeps the status honest and non-color-only
-    // (WCAG). Mirrors the CLI's "(target unresolved)".
+    // (WCAG). Mirrors the CLI's "(target unresolved)"; the reason under it is
+    // the same one the CLI traces (issue #497), so the operator sees why
+    // (e.g. a registry 403) without leaving the dialog.
     return (
-      <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-medium text-amber-600 dark:text-amber-500">
-        <TriangleAlert className="size-3 flex-none" aria-hidden="true" />
-        latest unknown
+      <span className="inline-flex flex-col items-end gap-0.5">
+        <span className="inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-medium text-amber-600 dark:text-amber-500">
+          <TriangleAlert className="size-3 flex-none" aria-hidden="true" />
+          latest unknown
+        </span>
+        {reason ? (
+          <span className="max-w-56 text-right text-[10px] leading-snug break-words text-muted-foreground">
+            {reason}
+          </span>
+        ) : null}
       </span>
     );
   }

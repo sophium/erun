@@ -46,6 +46,9 @@ export interface UIUpgradePlanItem {
   current: string;
   target: string;
   lagging: boolean;
+  // Why target is empty (registry lookup failed, no published version for
+  // the channel) — rendered under "latest unknown" (issue #497).
+  unresolvedReason?: string;
 }
 
 export interface UITenant {

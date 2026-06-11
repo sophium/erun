@@ -9,4 +9,4 @@ upgrade: team latest stable=<VERSION> snapshot=<VERSION>
     team/prod [stable] <VERSION> -> <VERSION>  (up to date)
 upgrade: team/agent up to date at <VERSION>, skipping
 upgrade: team/prod up to date at <VERSION>, skipping
-==> Upgrade complete: 0 upgraded, 2 up to date, 0 failed
+==> Upgrade complete: 0 upgraded, 2 up to date, 0 unresolved, 0 failed

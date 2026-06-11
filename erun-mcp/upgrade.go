@@ -29,7 +29,7 @@ func upgradeTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReque
 				VersionOverride: strings.TrimSpace(input.Version),
 				Force:           input.Force,
 			}
-			plan, err := eruncommon.ResolveUpgradePlanForStore(runCtx, runtime.Store, target, eruncommon.DefaultRuntimeVersionsResolver)
+			plan, err := eruncommon.ResolveUpgradePlanForStore(runCtx, runtime.Store, target, eruncommon.UpgradeVersionsResolverForStore(runtime.Store, eruncommon.ResolveRuntimeImageRegistryVersions))
 			if err != nil {
 				return err
 			}

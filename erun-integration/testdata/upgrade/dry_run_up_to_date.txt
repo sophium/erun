@@ -5,4 +5,4 @@ upgrade: team using version override <VERSION> for all channels
 ==> Upgrade plan: 1 member(s), 0 lagging
     team/dev [stable] <VERSION> -> <VERSION>  (up to date)
 upgrade: team/dev up to date at <VERSION>, skipping
-==> Upgrade complete: 0 upgraded, 1 up to date, 0 failed
+==> Upgrade complete: 0 upgraded, 1 up to date, 0 unresolved, 0 failed

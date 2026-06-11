@@ -7,22 +7,33 @@ import (
 	"strings"
 )
 
-// UpgradeVersionsOverrideEnv is a test seam: when set, DefaultRuntimeVersionsResolver
-// uses these channel targets for every tenant instead of querying the
-// registry, so tests and integration scenarios can drive the channel-target
-// resolution deterministically without network. Format: "stable=<v>,snapshot=<v>"
-// (either key optional). Mirrors the ERUN_HOST_OS_OVERRIDE pattern — a
-// deliberate test seam, not a production knob.
+// UpgradeVersionsOverrideEnv is a test seam: when set, the shared upgrade
+// versions resolver uses these channel targets for every tenant instead of
+// querying the registry, so tests and integration scenarios can drive the
+// channel-target resolution deterministically without network. Format:
+// "stable=<v>,snapshot=<v>" (either key optional), or "error=<msg>" to stage
+// a tenant whose resolution fails (the target-unresolved path, issue #497).
+// Mirrors the ERUN_HOST_OS_OVERRIDE pattern — a deliberate test seam, not a
+// production knob.
 const UpgradeVersionsOverrideEnv = "ERUN_UPGRADE_VERSIONS_OVERRIDE"
 
 // RuntimeVersionsOverrideFromEnv parses the UpgradeVersionsOverrideEnv seam.
 // ok is false when the env var is unset.
 func RuntimeVersionsOverrideFromEnv() (RuntimeRegistryVersions, bool) {
+	versions, _, ok := runtimeVersionsOverrideFromEnvWithError()
+	return versions, ok
+}
+
+// runtimeVersionsOverrideFromEnvWithError additionally surfaces the seam's
+// forced-failure form ("error=<msg>") so the shared resolver can stage the
+// target-unresolved path deterministically.
+func runtimeVersionsOverrideFromEnvWithError() (RuntimeRegistryVersions, string, bool) {
 	raw := strings.TrimSpace(os.Getenv(UpgradeVersionsOverrideEnv))
 	if raw == "" {
-		return RuntimeRegistryVersions{}, false
+		return RuntimeRegistryVersions{}, "", false
 	}
 	var versions RuntimeRegistryVersions
+	var forcedError string
 	for _, part := range strings.Split(raw, ",") {
 		key, value, found := strings.Cut(strings.TrimSpace(part), "=")
 		if !found {
@@ -33,20 +44,94 @@ func RuntimeVersionsOverrideFromEnv() (RuntimeRegistryVersions, bool) {
 			versions.LatestStable = strings.TrimSpace(value)
 		case UpgradeChannelSnapshot:
 			versions.LatestSnapshot = strings.TrimSpace(value)
+		case "error":
+			forcedError = strings.TrimSpace(value)
 		}
 	}
-	return versions, true
+	return versions, forcedError, true
 }
 
-// DefaultRuntimeVersionsResolver resolves a tenant's latest channel versions
-// from the runtime image registry, honoring the UpgradeVersionsOverrideEnv
-// test seam first. Shared by the CLI `upgrade` command and the MCP `upgrade`
-// tool so both resolve identically.
-func DefaultRuntimeVersionsResolver(_ Context, tenant string) (RuntimeRegistryVersions, error) {
-	if versions, ok := RuntimeVersionsOverrideFromEnv(); ok {
+// RegistryVersionsLookup queries one image repository for its latest channel
+// versions. ResolveRuntimeImageRegistryVersions is the production lookup; the
+// desktop injects its own (same signature) and tests inject fakes.
+type RegistryVersionsLookup func(ctx context.Context, namespace, repository string) (RuntimeRegistryVersions, error)
+
+// UpgradeVersionsResolverForStore returns the one RuntimeVersionsResolver
+// every transport (CLI, MCP, desktop preview) uses for Upgrade all. One
+// resolver is the contract behind issue #497: the desktop preview used to
+// substitute the default ERun image's versions when a tenant lookup failed,
+// promising upgrades the run then refused as "target unresolved". Policy:
+//
+//   - the UpgradeVersionsOverrideEnv seam wins (stable=/snapshot=/error=);
+//   - the tenant's registry namespace comes from deploy provenance — the
+//     first env of the tenant with a persisted RuntimeRegistry — falling
+//     back to the default registry, the same source the version picker uses
+//     (issue #475);
+//   - a tenant-specific image that resolves to no versions at all falls back
+//     per channel to the default ERun image: a tenant whose own image was
+//     never published runs the default image, so that is its real target;
+//   - a lookup error is returned, never substituted — the member reports
+//     "target unresolved" with the reason instead of being offered another
+//     image's version.
+func UpgradeVersionsResolverForStore(store DeployStore, lookup RegistryVersionsLookup) RuntimeVersionsResolver {
+	return func(_ Context, tenant string) (RuntimeRegistryVersions, error) {
+		if versions, forcedError, ok := runtimeVersionsOverrideFromEnvWithError(); ok {
+			if forcedError != "" {
+				return RuntimeRegistryVersions{}, fmt.Errorf("%s", forcedError)
+			}
+			return versions, nil
+		}
+		namespace := upgradeRegistryNamespaceForTenant(store, tenant)
+		if namespace == "" {
+			namespace = DefaultContainerRegistry
+		}
+		repository := RuntimeReleaseName(tenant)
+		versions, err := lookup(context.Background(), namespace, repository)
+		if err != nil {
+			return RuntimeRegistryVersions{}, err
+		}
+		if repository == DefaultRuntimeImageName {
+			return versions, nil
+		}
+		if strings.TrimSpace(versions.LatestStable) != "" && strings.TrimSpace(versions.LatestSnapshot) != "" {
+			return versions, nil
+		}
+		fallback, err := lookup(context.Background(), DefaultContainerRegistry, DefaultRuntimeImageName)
+		if err != nil {
+			// The tenant's own lookup succeeded (just empty); a failed
+			// default-image lookup must not fail the tenant — the empty
+			// channels simply stay unresolved.
+			return versions, nil
+		}
+		if strings.TrimSpace(versions.LatestStable) == "" {
+			versions.LatestStable = fallback.LatestStable
+		}
+		if strings.TrimSpace(versions.LatestSnapshot) == "" {
+			versions.LatestSnapshot = fallback.LatestSnapshot
+		}
 		return versions, nil
 	}
-	return ResolveRuntimeImageRegistryVersions(context.Background(), DefaultContainerRegistry, RuntimeReleaseName(tenant))
+}
+
+// upgradeRegistryNamespaceForTenant mirrors the deploy provenance the desktop
+// version picker uses (issue #475): the first env of the tenant that recorded
+// the registry its runtime image was last pushed to. Empty when nothing is
+// recorded (never-deployed tenant, or configs predating the provenance).
+func upgradeRegistryNamespaceForTenant(store DeployStore, tenant string) string {
+	tenant = strings.TrimSpace(tenant)
+	if tenant == "" || store == nil {
+		return ""
+	}
+	envs, err := store.ListEnvConfigs(tenant)
+	if err != nil {
+		return ""
+	}
+	for _, env := range envs {
+		if registry := strings.TrimSpace(env.RuntimeRegistry); registry != "" {
+			return registry
+		}
+	}
+	return ""
 }
 
 // UpgradeTarget scopes and parameterizes an upgrade run. An empty Tenant
@@ -100,6 +185,7 @@ func buildUpgradePlan(store DeployStore, target UpgradeTarget, resolveVersions R
 
 	candidates := make([]UpgradeCandidate, 0)
 	versionsByTenant := make(map[string]RuntimeRegistryVersions)
+	reasonsByTenant := make(map[string]string)
 	for _, tenant := range tenants {
 		if scopeTenant != "" && tenant.Name != scopeTenant {
 			continue
@@ -124,34 +210,39 @@ func buildUpgradePlan(store DeployStore, target UpgradeTarget, resolveVersions R
 		if !tenantHasMember {
 			continue
 		}
-		versionsByTenant[tenant.Name] = resolveTenantUpgradeVersions(tenant.Name, override, resolveVersions, traceln)
+		versions, reason := resolveTenantUpgradeVersions(tenant.Name, override, resolveVersions, traceln)
+		versionsByTenant[tenant.Name] = versions
+		if reason != "" {
+			reasonsByTenant[tenant.Name] = reason
+		}
 	}
 
-	return ResolveUpgradePlan(candidates, versionsByTenant), nil
+	return ResolveUpgradePlan(candidates, versionsByTenant, reasonsByTenant), nil
 }
 
 // resolveTenantUpgradeVersions resolves the channel targets for a tenant. With
 // an explicit override it short-circuits the registry (both channels resolve
 // to the override). Otherwise it queries the registry via resolveVersions,
-// tracing the outcome; a failure yields empty targets so no env is treated as
-// lagging against an unknown version.
-func resolveTenantUpgradeVersions(tenant, override string, resolveVersions RuntimeVersionsResolver, traceln func(string)) RuntimeRegistryVersions {
+// tracing the outcome; a failure yields empty targets plus the human-readable
+// reason, so no env is treated as lagging against an unknown version and the
+// plan can say why (issue #497).
+func resolveTenantUpgradeVersions(tenant, override string, resolveVersions RuntimeVersionsResolver, traceln func(string)) (RuntimeRegistryVersions, string) {
 	if override != "" {
 		traceln(fmt.Sprintf("upgrade: %s using version override %s for all channels", tenant, override))
-		return RuntimeRegistryVersions{LatestStable: override, LatestSnapshot: override}
+		return RuntimeRegistryVersions{LatestStable: override, LatestSnapshot: override}, ""
 	}
 	if resolveVersions == nil {
 		traceln(fmt.Sprintf("upgrade: %s has no version resolver; targets unresolved", tenant))
-		return RuntimeRegistryVersions{}
+		return RuntimeRegistryVersions{}, "no version resolver"
 	}
 	traceln(fmt.Sprintf("upgrade: resolving latest registry versions for %s", tenant))
 	versions, err := resolveVersions(Context{}, tenant)
 	if err != nil {
 		traceln(fmt.Sprintf("upgrade: %s version resolution failed: %s", tenant, err.Error()))
-		return RuntimeRegistryVersions{}
+		return RuntimeRegistryVersions{}, err.Error()
 	}
 	traceln(fmt.Sprintf("upgrade: %s latest stable=%s snapshot=%s", tenant, strings.TrimSpace(versions.LatestStable), strings.TrimSpace(versions.LatestSnapshot)))
-	return versions
+	return versions, ""
 }
 
 // UpgradeItemDeployer redeploys one lagging env to its target version. The
@@ -165,21 +256,31 @@ type UpgradeItemFailure struct {
 }
 
 // UpgradeResult summarizes an upgrade run: members redeployed, members already
-// up to date (skipped), and members whose deploy failed. The run continues
-// past a failure so one bad env doesn't strand the rest.
+// up to date (skipped), members whose channel target could not be resolved
+// (skipped — never "up to date", issue #497), and members whose deploy
+// failed. The run continues past a failure so one bad env doesn't strand the
+// rest.
 type UpgradeResult struct {
-	Plan     UpgradePlan          `json:"plan"`
-	Upgraded []UpgradePlanItem    `json:"upgraded,omitempty"`
-	UpToDate []UpgradePlanItem    `json:"upToDate,omitempty"`
-	Failed   []UpgradeItemFailure `json:"failed,omitempty"`
+	Plan       UpgradePlan          `json:"plan"`
+	Upgraded   []UpgradePlanItem    `json:"upgraded,omitempty"`
+	UpToDate   []UpgradePlanItem    `json:"upToDate,omitempty"`
+	Unresolved []UpgradePlanItem    `json:"unresolved,omitempty"`
+	Failed     []UpgradeItemFailure `json:"failed,omitempty"`
 }
 
 // RunUpgradePlan deploys every lagging member of the plan via deploy, leaving
-// up-to-date members untouched. It continues past per-env failures and reports
-// them in the result. Each decision is traced.
+// up-to-date members untouched. A member whose target is unresolved is
+// reported as exactly that — it is not known to be up to date, its latest
+// simply couldn't be determined. It continues past per-env failures and
+// reports them in the result. Each decision is traced.
 func RunUpgradePlan(ctx Context, plan UpgradePlan, deploy UpgradeItemDeployer) UpgradeResult {
 	result := UpgradeResult{Plan: plan}
 	for _, item := range plan.Items {
+		if strings.TrimSpace(item.Target) == "" {
+			ctx.Trace(fmt.Sprintf("upgrade: %s/%s target unresolved, skipping%s", item.Tenant, item.Environment, unresolvedReasonSuffix(item)))
+			result.Unresolved = append(result.Unresolved, item)
+			continue
+		}
 		if !item.Lagging {
 			ctx.Trace(fmt.Sprintf("upgrade: %s/%s up to date at %s, skipping", item.Tenant, item.Environment, item.Current))
 			result.UpToDate = append(result.UpToDate, item)
@@ -193,8 +294,17 @@ func RunUpgradePlan(ctx Context, plan UpgradePlan, deploy UpgradeItemDeployer) U
 		}
 		result.Upgraded = append(result.Upgraded, item)
 	}
-	ctx.Info(fmt.Sprintf("==> Upgrade complete: %d upgraded, %d up to date, %d failed", len(result.Upgraded), len(result.UpToDate), len(result.Failed)))
+	ctx.Info(fmt.Sprintf("==> Upgrade complete: %d upgraded, %d up to date, %d unresolved, %d failed", len(result.Upgraded), len(result.UpToDate), len(result.Unresolved), len(result.Failed)))
 	return result
+}
+
+// unresolvedReasonSuffix renders the why behind an unresolved target when the
+// plan carries one (": <reason>"), empty otherwise.
+func unresolvedReasonSuffix(item UpgradePlanItem) string {
+	if reason := strings.TrimSpace(item.UnresolvedReason); reason != "" {
+		return ": " + reason
+	}
+	return ""
 }
 
 func displayVersion(v string) string {
@@ -226,6 +336,10 @@ type UpgradePlanItem struct {
 	Current     string `json:"current"`
 	Target      string `json:"target"`
 	Lagging     bool   `json:"lagging"`
+	// UnresolvedReason says why Target is empty (registry lookup failed, no
+	// published version for the channel) so the dialog and the run report
+	// the cause instead of a bare "(unset)" (issue #497).
+	UnresolvedReason string `json:"unresolvedReason,omitempty"`
 }
 
 // UpgradePlan is the resolved "Upgrade all" plan: every opted-in environment,
@@ -257,12 +371,13 @@ func channelTarget(versions RuntimeRegistryVersions, channel string) string {
 }
 
 // ResolveUpgradePlan computes the upgrade plan over the candidate envs given
-// the latest registry versions per tenant. It includes every env whose
-// AutoUpgrade is set (so callers can show up-to-date members too), resolving
-// each env's channel target and marking it lagging when the current version
-// differs from a non-empty target. Pure: no I/O, deterministic in candidate
-// order.
-func ResolveUpgradePlan(candidates []UpgradeCandidate, versionsByTenant map[string]RuntimeRegistryVersions) UpgradePlan {
+// the latest registry versions per tenant (and, for tenants whose resolution
+// failed, the reason). It includes every env whose AutoUpgrade is set (so
+// callers can show up-to-date members too), resolving each env's channel
+// target and marking it lagging when the current version differs from a
+// non-empty target; an empty target carries the why in UnresolvedReason.
+// Pure: no I/O, deterministic in candidate order.
+func ResolveUpgradePlan(candidates []UpgradeCandidate, versionsByTenant map[string]RuntimeRegistryVersions, reasonsByTenant map[string]string) UpgradePlan {
 	plan := UpgradePlan{Items: make([]UpgradePlanItem, 0, len(candidates))}
 	for _, candidate := range candidates {
 		if !candidate.Config.AutoUpgrade {
@@ -271,13 +386,21 @@ func ResolveUpgradePlan(candidates []UpgradeCandidate, versionsByTenant map[stri
 		channel := candidate.Config.ResolvedUpgradeChannel()
 		current := strings.TrimSpace(candidate.Config.RuntimeVersion)
 		target := channelTarget(versionsByTenant[candidate.Tenant], channel)
+		reason := ""
+		if target == "" {
+			reason = strings.TrimSpace(reasonsByTenant[candidate.Tenant])
+			if reason == "" {
+				reason = fmt.Sprintf("no %s version found in the registry", channel)
+			}
+		}
 		plan.Items = append(plan.Items, UpgradePlanItem{
-			Tenant:      candidate.Tenant,
-			Environment: candidate.Environment,
-			Channel:     channel,
-			Current:     current,
-			Target:      target,
-			Lagging:     target != "" && target != current,
+			Tenant:           candidate.Tenant,
+			Environment:      candidate.Environment,
+			Channel:          channel,
+			Current:          current,
+			Target:           target,
+			Lagging:          target != "" && target != current,
+			UnresolvedReason: reason,
 		})
 	}
 	return plan

@@ -99,4 +99,32 @@ func TestUpgrade(t *testing.T) {
 		result := erun.Run(t, []string{"upgrade", "team", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "upgrade/dry_run_channel_targets_via_registry_seam", normalize.Apply(result.Combined))
 	})
+
+	t.Run("dry_run_target_unresolved_reports_reason", func(t *testing.T) {
+		// An opted-in env whose tenant's registry resolution fails (staged via
+		// the seam's error= form) is never treated as up to date (issue #497):
+		// the plan line carries "(target unresolved: <reason>)", the run skips
+		// it with the same reason, and the completion accounting counts it as
+		// unresolved — distinct from upgraded / up to date / failed.
+		setup := env.New(t)
+		seedUpgradeTenant(t, setup, "team", "dev")
+		seedUpgradeEnv(t, setup, "team", "dev",
+			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\nruntimeversion: 1.0.0\ntype: runtime\nautoupgrade: true\nupgradechannel: stable\n")
+		envVars := append(setup.Env(), "ERUN_UPGRADE_VERSIONS_OVERRIDE=error=ghcr token request failed: 403 Forbidden")
+		result := erun.Run(t, []string{"upgrade", "team", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		golden.Equal(t, "upgrade/dry_run_target_unresolved_reports_reason", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_scoped_flags_lagging", func(t *testing.T) {
+		// The --tenant/--environment flag form scopes the run to one env —
+		// the shape the desktop's per-env Upgrade-all fan-out uses (issue
+		// #497), equivalent to the positional form.
+		setup := env.New(t)
+		seedUpgradeTenant(t, setup, "team", "dev")
+		seedUpgradeEnv(t, setup, "team", "dev",
+			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\ncontainerregistry: registry.example/test\nruntimeversion: 1.0.0\ntype: runtime\nautoupgrade: true\nupgradechannel: stable\n")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		result := erun.Run(t, []string{"upgrade", "--tenant", "team", "--environment", "dev", "--version", "2.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		golden.Equal(t, "upgrade/dry_run_scoped_flags_lagging", normalize.Apply(result.Combined))
+	})
 }

@@ -350,11 +350,11 @@ func buildDeployArgs(selection uiSelection) []string {
 	return args
 }
 
-// buildUpgradeArgs builds the global `erun upgrade` invocation. Upgrade-all is
-// cross-env (it redeploys every opted-in lagging env), so it takes no
-// tenant/environment — the selection only supplies the Local shell it runs in.
+// buildUpgradeArgs builds the per-environment `erun upgrade` invocation:
+// scoped to the selection's tenant + environment so each Upgrade-all member
+// upgrades in its own env, in parallel with the others (issue #497).
 func buildUpgradeArgs(selection uiSelection) []string {
-	return erunArgs(selection.Debug, "upgrade")
+	return erunArgs(selection.Debug, "upgrade", "--tenant", selection.Tenant, "--environment", selection.Environment)
 }
 
 func erunArgs(debug bool, args ...string) []string {

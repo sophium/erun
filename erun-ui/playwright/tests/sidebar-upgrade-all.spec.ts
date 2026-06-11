@@ -75,6 +75,7 @@ test.describe('sidebar Upgrade all', () => {
           current: '1.0.80-snapshot-20260101000000',
           target: '',
           lagging: false,
+          unresolvedReason: 'ghcr token request failed: 403 Forbidden',
         },
       ],
     };
@@ -106,9 +107,12 @@ test.describe('sidebar Upgrade all', () => {
 
     // Unresolved target → "latest unknown", and NOT "up to date" (the
     // regression this fix prevents). The current version is still shown; the
-    // unknown target lives in the Status column, not as a "(unset)" target.
+    // unknown target lives in the Status column, not as a "(unset)" target —
+    // and the row carries the actual failure reason (issue #497), so the
+    // operator sees why without leaving the dialog.
     const unresolvedRow = dialog.locator('tr', { hasText: 'unresolved-env' });
     await expect(unresolvedRow).toContainText('latest unknown');
+    await expect(unresolvedRow).toContainText('ghcr token request failed: 403 Forbidden');
     await expect(unresolvedRow).toContainText('1.0.80-snapshot-20260101000000');
     await expect(unresolvedRow).not.toContainText('up to date');
 
@@ -128,31 +132,55 @@ test.describe('sidebar Upgrade all', () => {
     await expect(dialog).toBeHidden();
   });
 
-  // Issue #459 follow-up — confirming Upgrade all must run the global
-  // `erun upgrade` against an automatically-resolved host environment instead
-  // of telling the operator to "open an environment first". `erun upgrade`
-  // redeploys every opted-in env itself; the host env only supplies the Local
-  // shell to run it in. The fixture boots with no environment selected (the
-  // exact state that previously blocked), so clicking Upgrade exercises the
-  // host-resolution fallback.
+  // Issue #497 — confirming Upgrade all fans out per member: every lagging
+  // env runs its own scoped `erun upgrade --tenant <t> --environment <e>` in
+  // its OWN Local shell (in parallel), instead of one global run executing
+  // serially in a single host env's terminal. And the fan-out must not drag
+  // in each env's default tab set — in particular no AI tab, whose spawn
+  // used to launch a Claude session as a side effect of confirming.
   //
-  // Every Start* RPC is stubbed so neither the real `erun upgrade` nor any real
-  // session spawn fires; the spec asserts the command was dispatched with a
-  // resolved host and the pre-fix block message never appears.
-  test('confirming runs without requiring an open environment', async ({ app, page }) => {
+  // Every Start* RPC is stubbed so neither the real `erun upgrade` nor any
+  // real session spawn fires; the spec asserts one scoped dispatch per
+  // lagging member (and only those), zero AI-session spawns, and that the
+  // pre-#461 block message never appears. The real parallel deploys are not
+  // stageable headless; the per-env command composition is owned by the
+  // upgrade dry-run goldens (dry_run_scoped_flags_lagging) and the Go
+  // resolver tests (the #331 pattern).
+  test('confirming fans out one scoped run per lagging member, with no AI spawn', async ({
+    app,
+    page,
+  }) => {
     const plan = {
       items: [
         {
           tenant: 'acme',
-          environment: 'lagging-env',
+          environment: 'lagging-a',
           channel: 'snapshot',
           current: '1.0.0-snapshot-20260101000000',
           target: '1.0.0-snapshot-20260102000000',
           lagging: true,
         },
+        {
+          tenant: 'beta',
+          environment: 'lagging-b',
+          channel: 'stable',
+          current: '1.0.0',
+          target: '1.1.0',
+          lagging: true,
+        },
+        {
+          tenant: 'acme',
+          environment: 'current-env',
+          channel: 'stable',
+          current: '1.1.0',
+          target: '1.1.0',
+          lagging: false,
+        },
       ],
     };
-    const upgradeHosts: Array<{ tenant?: string; environment?: string }> = [];
+    const upgradeRuns: Array<{ tenant?: string; environment?: string }> = [];
+    const memberAISessions: string[] = [];
+    let nextSessionId = 100;
 
     await page.route('**/__erun_invoke', async (route, request) => {
       const body = JSON.parse(request.postData() ?? '{}') as {
@@ -165,16 +193,32 @@ test.describe('sidebar Upgrade all', () => {
           body: JSON.stringify({ data: plan }),
         });
       }
-      // Defuse the real `erun upgrade` and any dependent-tab session spawns the
-      // confirm path triggers, returning a benign session result for each.
+      // Defuse every session spawn, counting the ones under test. AI spawns
+      // are counted only for the plan's (fake) tenants: the singleton
+      // backend's dead-tab respawn machinery may legitimately revive the AI
+      // tab of whatever REAL env earlier specs left selected, and that
+      // background churn is not the invariant here.
       if (body.method.startsWith('Start')) {
-        if (body.method === 'StartUpgradeAllSession') {
-          upgradeHosts.push(body.args[0] ?? {});
+        const selection = body.args[0] ?? {};
+        if (body.method === 'StartUpgradeEnvironmentSession') {
+          upgradeRuns.push(selection);
         }
+        if (
+          body.method === 'StartAISession' &&
+          (selection.tenant === 'acme' || selection.tenant === 'beta')
+        ) {
+          memberAISessions.push(`${selection.tenant ?? ''}/${selection.environment ?? ''}`);
+        }
+        nextSessionId++;
         return route.fulfill({
           contentType: 'application/json',
           body: JSON.stringify({
-            data: { sessionId: 1, selection: body.args[0] ?? {}, slot: 0, kind: 'local' },
+            data: {
+              sessionId: nextSessionId,
+              selection,
+              slot: 0,
+              kind: 'local',
+            },
           }),
         });
       }
@@ -184,14 +228,19 @@ test.describe('sidebar Upgrade all', () => {
     await app.sidebar.openUpgradeAll();
     const dialog = app.sidebar.upgradeAllDialog();
     await expect(dialog).toBeVisible({ timeout: 6_000 });
-    await dialog.getByRole('button', { name: 'Upgrade 1' }).click();
+    await dialog.getByRole('button', { name: 'Upgrade 2' }).click();
 
-    // The command runs from the environment being upgraded (the lagging plan
-    // member), not an unrelated env, and it did not block on a missing
-    // selection.
-    await expect.poll(() => upgradeHosts.length).toBeGreaterThan(0);
-    expect(upgradeHosts[0]?.tenant).toBe('acme');
-    expect(upgradeHosts[0]?.environment).toBe('lagging-env');
+    // One scoped run per lagging member, each in its own env — never the
+    // up-to-date member, never a single global run.
+    await expect.poll(() => upgradeRuns.length, { timeout: 6_000 }).toBe(2);
+    const ran = upgradeRuns
+      .map((selection) => `${selection.tenant ?? ''}/${selection.environment ?? ''}`)
+      .sort();
+    expect(ran).toEqual(['acme/lagging-a', 'beta/lagging-b']);
+
+    // No member had an AI tab spawned as a side effect of confirming
+    // (issue #497).
+    expect(memberAISessions).toEqual([]);
 
     // The pre-fix block message must never appear.
     await expect(page.getByText('No environments are configured to upgrade')).toHaveCount(0);
