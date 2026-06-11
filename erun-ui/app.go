@@ -89,6 +89,9 @@ type App struct {
 	actionQueueMu             sync.Mutex
 	actionQueues              map[string]*envActionQueue
 	actionCancels             map[string]context.CancelFunc
+	envEnsureMu               sync.Mutex
+	envEnsureInflight         map[string]struct{}
+	envEnsureDone             map[string]time.Time
 	configWatcher             *configWatcher
 	contribute                *contributeStore
 	contributeApps            *contributeAppForwards

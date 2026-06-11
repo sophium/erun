@@ -32,6 +32,7 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 	var versionOverride string
 	var runtimeImage string
 	var appSession string
+	var skipEnsure bool
 	var aiTab bool
 	var contributeTab bool
 	target := common.OpenParams{}
@@ -89,6 +90,7 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 				AppSession:       strings.TrimSpace(appSession),
 				AI:               aiTab,
 				Contribute:       contributeTab,
+				SkipEnsure:       skipEnsure,
 			}, promptRunner, openShell, runManagedDeploy, checkKubernetesDeployment, resolveRuntimeDeploySpec, deployHelmChart, activateMCP, activateAPI, activateSSHD, launchVSCode, launchIntelliJ)
 		},
 	}
@@ -110,9 +112,11 @@ func newOpenCmd(prepareContext func(common.Context) common.Context, resolveOpen 
 	cmd.Flags().StringVar(&appSession, "app-session", "", "Reattach to a persistent terminal session with this id")
 	cmd.Flags().BoolVar(&aiTab, "ai", false, "Launch the configured AI tool as the persistent session's program")
 	cmd.Flags().BoolVar(&contributeTab, "contribute", false, "Start the persistent session in the contribute clone")
+	cmd.Flags().BoolVar(&skipEnsure, "skip-ensure", false, "Skip the runtime deploy preflight; the desktop ensures the environment once before spawning its tabs")
 	_ = cmd.Flags().MarkHidden("app-session")
 	_ = cmd.Flags().MarkHidden("ai")
 	_ = cmd.Flags().MarkHidden("contribute")
+	_ = cmd.Flags().MarkHidden("skip-ensure")
 	return cmd
 }
 
@@ -127,6 +131,7 @@ type openOptions struct {
 	SaveEnvConfig    func(string, common.EnvConfig) error
 	AppSession       string
 	AI               bool
+	SkipEnsure       bool
 	Contribute       bool
 }
 
@@ -334,7 +339,14 @@ func (r *resolvedOpenRunner) run() error {
 	shellReq.AppSession = r.options.AppSession
 	shellReq.AI = r.options.AI
 	shellReq.Contribute = r.options.Contribute
-	if err := r.maybeDeployRuntime(shellReq); err != nil {
+	if r.options.SkipEnsure {
+		// One ensure per environment (re)start (issue #463): the desktop
+		// runs the open/build/deploy preflight once via `open --no-shell`
+		// and spawns every tab with --skip-ensure; the shell runner's
+		// WaitForShellDeployment below still holds each tab until that
+		// ensure's deploy is available.
+		r.ctx.Trace("open: --skip-ensure set, skipping the runtime deploy preflight (ensured once per environment by the desktop)")
+	} else if err := r.maybeDeployRuntime(shellReq); err != nil {
 		return err
 	}
 	if err := r.activateForwarders(); err != nil {
