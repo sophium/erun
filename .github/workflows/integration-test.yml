@@ -1,9 +1,13 @@
 name: integration-test
 
-# Enforces the Integration Test Gate (root AGENTS.md): builds the
-# coverage-instrumented erun binary, runs the erun-integration suite, and
-# fails when statement coverage of erun-cli + erun-common drops below the
-# threshold pinned in erun-integration/scripts/integration-test.sh.
+# Enforces the Integration Test Gate (root AGENTS.md) through erun's own
+# automation surface: CI bootstraps the erun binary from the PR's source and
+# drives the gate via `erun exec raw` — the documented way for pipelines to
+# run repository commands (audited, traced, secret-redacting) — rather than
+# invoking the test target directly. The gate builds the coverage-instrumented
+# erun, runs the erun-integration suite, and fails when statement coverage of
+# erun-cli + erun-common drops below the threshold pinned in
+# erun-integration/scripts/integration-test.sh.
 #
 # The job must be marked as a required status check in branch protection:
 # GitHub honors [skip ci] on a PR's head commit even for pull_request
@@ -35,4 +39,7 @@ jobs:
             erun-cli/go.sum
             erun-common/go.sum
             erun-mcp/go.sum
-      - run: make integration-test
+      - name: Bootstrap erun from the PR source
+        run: go build -C erun-cli -o "$RUNNER_TEMP/erun" .
+      - name: Run the integration gate via erun
+        run: '"$RUNNER_TEMP/erun" -v exec raw make integration-test'
