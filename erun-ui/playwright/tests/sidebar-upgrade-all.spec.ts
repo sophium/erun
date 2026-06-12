@@ -44,6 +44,10 @@ test.describe('sidebar Upgrade all', () => {
   // ResolveUpgradePlan RPC over the /__erun_invoke bridge — the same technique
   // idle-widget-stop-protection.spec.ts uses — to drive a deterministic plan
   // with one item in each state. Every other RPC passes through untouched.
+  // The fourth row is the issue #524 shape: a snapshot-channel member whose
+  // target is a stable release, because the stable was published on top of
+  // the latest snapshot (the resolver decision is owned by the upgrade
+  // dry-run goldens; this locks how the dialog renders the resulting row).
   test('an unresolved channel target renders as "latest unknown", not "up to date"', async ({
     app,
     page,
@@ -76,6 +80,14 @@ test.describe('sidebar Upgrade all', () => {
           target: '',
           lagging: false,
           unresolvedReason: 'ghcr token request failed: 403 Forbidden',
+        },
+        {
+          tenant: 'acme',
+          environment: 'stable-adopt-env',
+          channel: 'snapshot',
+          current: '1.0.86-snapshot-20260606090936',
+          target: '1.0.87',
+          lagging: true,
         },
       ],
     };
@@ -116,14 +128,22 @@ test.describe('sidebar Upgrade all', () => {
     await expect(unresolvedRow).toContainText('1.0.80-snapshot-20260101000000');
     await expect(unresolvedRow).not.toContainText('up to date');
 
-    // Summary counts only the lagging member, and a distinct line explains why
-    // an opted-in env will not be redeployed.
-    await expect(dialog).toContainText('1 of 3 will be redeployed.');
+    // Snapshot-channel member whose stream was superseded by a stable release
+    // (issue #524): the row keeps its snapshot channel but proposes the
+    // stable version, and counts as a regular upgrade.
+    const stableAdoptRow = dialog.locator('tr', { hasText: 'stable-adopt-env' });
+    await expect(stableAdoptRow).toContainText('snapshot');
+    await expect(stableAdoptRow).toContainText('1.0.87');
+    await expect(stableAdoptRow).toContainText('will upgrade');
+
+    // Summary counts only the lagging members, and a distinct line explains
+    // why an opted-in env will not be redeployed.
+    await expect(dialog).toContainText('2 of 4 will be redeployed.');
     await expect(dialog).toContainText('be checked against the latest version');
 
-    // Only the one lagging env is upgradable; the button names that count and
+    // Only the lagging envs are upgradable; the button names that count and
     // stays enabled.
-    await expect(dialog.getByRole('button', { name: 'Upgrade 1' })).toBeEnabled();
+    await expect(dialog.getByRole('button', { name: 'Upgrade 2' })).toBeEnabled();
 
     // Capture the populated plan for visual review of the layout.
     await dialog.screenshot({ path: 'test-results/upgrade-all-plan.png' });

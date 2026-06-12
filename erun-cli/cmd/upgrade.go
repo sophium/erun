@@ -17,7 +17,9 @@ func newUpgradeCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver
 		Use:   "upgrade [TENANT] [ENVIRONMENT]",
 		Short: "Redeploy opted-in environments to the latest version for their channel",
 		Long: "Redeploy every environment opted into \"Upgrade all\" (autoupgrade) whose runtime " +
-			"version lags the latest for its channel (stable or snapshot).\n\n" +
+			"version lags the latest for its channel (stable or snapshot). Snapshot-channel " +
+			"environments adopt a stable release once one is published on top of the latest " +
+			"snapshot.\n\n" +
 			"High blast radius: this rolls out new runtime images to multiple — possibly remote — " +
 			"environments, which restarts their pods and can spend cloud money. Run with --dry-run " +
 			"first to review the resolved plan (each member, its channel, and current → target) and " +

@@ -161,7 +161,7 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
           label="Upgrade channel"
           value={config.upgradeChannel ?? 'stable'}
           options={UPGRADE_CHANNEL_OPTIONS}
-          helper="Which release channel 'Upgrade all' tracks: stable (semver releases) or snapshot (latest snapshot build)."
+          helper="Which release channel 'Upgrade all' tracks: stable (semver releases) or snapshot (latest snapshot build, or the stable release once one is published on top of it)."
           disabled={dialog.busy || dialog.configLoading}
           onChange={(upgradeChannel) => {
             dispatch(updateManageConfig({ upgradeChannel }));
