@@ -18,13 +18,23 @@ If `TENANT` and/or `ENVIRONMENT` are omitted, they resolve from defaults (same w
 
 Each environment declares its deployment plan in `.erun/config.yaml`. Steps run in order; a list within a step is deployed in parallel. When the plan is absent, `erun deploy` falls back to chart-dependency-based ordering. For the full YAML schema and resolution rules, see [Configuration · `environments.<env>.k8s.deployments[]`](/reference/configuration#per-project-config) and [Agent reference · CLI flag spec · `erun deploy`](/agent-reference/cli-flags#erun-deploy).
 
+## Where the runtime chart comes from
+
+When the project repo carries its own runtime chart (`<tenant>-devops/k8s/<tenant>-devops/`), that repo-local chart is what gets deployed — nothing changes for projects that have one. Environments **without** a repo-local runtime chart — every remote env, and any env whose project has no `<tenant>-devops` chart — deploy the published chart directly:
+
+```
+helm upgrade --install <tenant>-devops oci://<registry>/charts/erun-devops --version <runtime version> …
+```
+
+The chart is published at release time alongside the runtime image with the same version — chart and image are one contract (see [Release flow](/deployment/release-flow)). The registry resolves from the env's recorded runtime registry, then the env's container registry, then the project registry, falling back to `ghcr.io/sophium`. The dry-run trace names the decision: `deploy: no local runtime chart; using published chart <ref> version <v>`. To customise a published-chart deploy, use the env's values overlay and the `runtimeimage` field — see [Configuration · Advanced chart values](/reference/configuration#advanced-chart-values).
+
 ## Flags
 
 | Flag | Description |
 |---|---|
 | `--components <name,name,...>` | Opt-in components to include alongside the runtime chart. The accepted list is derived from each project's `<tenant>-devops/k8s/<component>/` charts. |
 | `--version <version>` | Override the deployed chart and image version. |
-| `--snapshot` / `--no-snapshot` | Build and deploy local snapshot images in a local environment (on by default there). A snapshot deploy also **resets the environment's Postgres database**. |
+| `--snapshot` / `--no-snapshot` | Build and deploy local snapshot images in a local environment (on by default there). A snapshot deploy that includes the postgres component also **resets the environment's Postgres database**. |
 | `--publish` | Package and push each resolved chart to the environment's container registry as an OCI Helm artifact before the upgrade. |
 | `--force` | Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected. |
 | `--dry-run` | Resolve and print every `docker`, `docker push`, and `helm upgrade --install` command without executing. |
@@ -43,7 +53,7 @@ This means a no-op `erun deploy` after a clean clone is essentially free.
 
 ## Snapshot mode and the database
 
-In a local environment, `deploy` builds and deploys local snapshot images by default (`--no-snapshot` opts out). A snapshot deploy also **resets the environment's Postgres database** — convenient for a throwaway local stack, surprising if you didn't expect it. Runtime environments deploy released images from the registry and don't reset data.
+In a local environment, `deploy` builds and deploys local snapshot images by default (`--no-snapshot` opts out). A snapshot deploy that includes the `erun-backend-postgres` component also **resets the environment's Postgres database** — convenient for a throwaway local stack, surprising if you didn't expect it. The reset rides in the postgres chart itself, so it still runs when image caching would otherwise skip that chart's helm step (the dry-run trace names the decision). Runtime environments deploy released images from the registry and don't reset data.
 
 On a successful deploy of the runtime chart, the resolved version and registry are persisted to the environment's config, so the next `open` / `deploy` reuses them.
 

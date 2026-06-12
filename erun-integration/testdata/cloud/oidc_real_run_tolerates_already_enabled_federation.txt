@@ -1,0 +1,4 @@
+Saved OIDC issuer https://oidc.eu-west-2.amazonaws.com/test-issuer for test-user@aws
+audit: erun cloud oidc --alias test-user@aws
+cloud oidc: refresh issuer for alias=test-user@aws
+cloud oidc: derived issuer = https://oidc.eu-west-2.amazonaws.com/test-issuer

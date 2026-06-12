@@ -1,0 +1,14 @@
+SSH:
+  host: <LOOPBACK>
+  alias: erun-team-dev
+  port: 26122
+  user: erun
+  key: none
+  workspace: <HOME>/git/team
+audit: erun open --intellij --no-alias-prompt team dev
+trace-log: appending the full trace to <TMP>
+open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=intellij
+deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
+sshd: adopted existing kubectl port-forward on <LOOPBACK>:26122 (PID 4243)
+mcp: adopted existing kubectl port-forward on <LOOPBACK>:26100 (PID 4242)
+write IntelliJ SSH project config in <TMP> Support/JetBrains/IntelliJIdea2024.3/options

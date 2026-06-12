@@ -1,0 +1,27 @@
+Kubernetes context for environment "local" in tenant "team": audit: erun init --confirm-environment --container-registry registry.example/test --dry-run --project-root <TMP> --set-default-tenant --type local-agent --version <VERSION> team local
+Loading erun tool configuration, configPath=<TMP>
+Saving default config
+mkdir -p <TMP>
+write-yaml <TMP>
+Loaded erun tool configuration
+Loading tenant configuration
+Adding new tenant
+mkdir -p <TMP>
+write-yaml <TMP>
+Loaded tenant configuration
+Loading environment configuration
+kubectl --context manual-ctx get namespace team-local -o name
+kubectl --context manual-ctx create namespace team-local
+mkdir -p <TMP>
+write-yaml <TMP>
+Adding new environment
+mkdir -p <TMP>
+write-yaml <TMP>
+==> Initializing team/local
+mkdir -p <TMP>
+write-yaml <TMP>
+init: runtime deploys use the published erun-devops chart; no devops scaffold is written
+==> Initialized team/local
+Configuration initialized OK
+ensure-agent-instructions
+ensure-claude-settings

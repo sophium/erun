@@ -1,0 +1,2 @@
+deleted environment: other/staging
+audit: erun delete --yes other staging

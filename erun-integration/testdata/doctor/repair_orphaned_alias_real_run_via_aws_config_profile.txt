@@ -1,0 +1,21 @@
+Root config: <TMP> (status=ok)
+  cloud providers configured: 0
+  cloud contexts: 0, tenants: 1
+  orphaned aliases: 1
+    - test-user+123456789012@aws
+        provider=aws account=123456789012 user=test-user
+        tenants: team
+? Re-initialize cloud provider alias test-user+123456789012@aws (account 123456789012, user test-user)? [Y/n] Found existing AWS SSO profile "corp-dev" in ~/.aws/config; pre-filling defaults you can edit or accept with Enter.
+  sso_start_url = https://corp.awsapps.com/start
+  sso_region    = eu-west-1
+  sso_role_name = AdminRole
+  region        = eu-west-2
+Re-initializing AWS provider for alias test-user+123456789012@aws...
+Saved cloud provider alias test-user+123456789012@aws
+audit: erun doctor --repair-config
+cloud init aws: profile= account-id=123456789012 region=eu-west-2 sso-region=eu-west-1 sso-start-url=https://corp.awsapps.com/start skip-login=false
+cloud init aws: profile = erun-sso-<TS_COMPACT>
+cloud init aws: resolving caller identity
+cloud init aws: identity account=123456789012 arn=arn:aws:iam::123456789012:user/test-user
+cloud oidc: refresh issuer for alias=test-user+123456789012@aws
+cloud oidc: derived issuer = https://oidc.eu-west-2.amazonaws.com/test-issuer

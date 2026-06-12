@@ -1,19 +1,22 @@
 import { test, expect } from '../fixtures/erunApp.js';
+import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
 // Issues #482/#477 — the env Manage dialog's AI tab gained a per-env Claude
 // "Default model" selector (launched as `claude --model`, with `fable` newly
 // selectable under Available models) and a "verbose + debug" launch toggle
 // (`claude --verbose --debug`). This spec exercises the controls end-to-end
-// after a real boot: both render with their defaults, ticking fable under
-// Available models makes it selectable as Default model, the draft reflects
-// the picks and marks the tab dirty, a stored model that falls out of the
-// available set is flagged rather than silently dropped, and resetting
-// returns the defaults. All without saving, so the dev's persisted config is
-// untouched (mirrors the no-save approach in manage-claude-effort).
+// after a real boot, relative to whatever this machine's config starts them
+// at: ticking fable under Available models makes it selectable as Default
+// model, the draft reflects the picks and marks the tab dirty, a selection
+// that falls out of the available set is flagged rather than silently
+// dropped, and resetting returns the default option. All without saving, so
+// the dev's persisted config is untouched (mirrors the no-save approach in
+// manage-claude-effort).
 //
 // Harness limitation: the real `claude --model ... --verbose --debug` launch
-// and the save-triggered AI-tab reopen cannot be observed headless — saving
-// here would mutate the dev's config and end their real AI sessions. The
+// and the save-triggered AI-tab reopen cannot be observed headless — the
+// seeded env's AI tool is an inert shell, and saving would churn the shared
+// baseline config mid-suite. The
 // launch-string composition is locked by TestAISessionLaunchCommand and
 // TestResolveClaudeDefaultModel in erun-common plus the `erun open
 // --app-session ai --ai --dry-run` integration goldens; the end+respawn flow
@@ -23,57 +26,58 @@ test.describe('manage dialog claude launch flags', () => {
   test('Default model follows Available models; verbose+debug toggles; both reset', async ({
     app,
   }) => {
-    const tenants = await app.sidebar.tenants();
-    test.skip(tenants.length === 0, 'no tenants in this developer harness');
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    test.skip(envs.length === 0, 'no environments in this developer harness');
-    const env = envs[0]!;
-
-    await app.sidebar.openManageDialogFor(tenant, env);
+    await app.sidebar.openManageDialogFor(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
     await app.manageDialog.selectTab('AI');
     await expect.poll(() => app.manageDialog.getActiveTab()).toBe('AI');
 
-    // Both new fields render with their unset defaults. The fields are brand
-    // new, so no developer config can carry an override yet.
+    // Both fields render. The seeded env leaves the claude block unset, but
+    // the spec still captures the starting values and asserts every
+    // transition relative to them — that keeps it valid even if the seeded
+    // baseline ever adopts defaults.
     await expect(app.manageDialog.claudeDefaultModelSelect()).toBeVisible();
-    await expect
-      .poll(() => app.manageDialog.claudeDefaultModelSelectedValue())
-      .toBe('Default (Claude decides)');
     await expect(app.manageDialog.claudeVerboseDebugCheckbox()).toBeVisible();
-    await expect(app.manageDialog.claudeVerboseDebugCheckbox()).not.toBeChecked();
+    const initialVerbose = await app.manageDialog.claudeVerboseDebugCheckbox().isChecked();
 
     // fable is a known model (issue #482) and opt-in: it renders as an
-    // Available-models checkbox, unticked by default.
+    // Available-models checkbox.
     const fable = app.manageDialog.claudeModelCheckbox('fable');
     await expect(fable).toBeVisible();
-    await expect(fable).not.toBeChecked();
+    const initialFable = await fable.isChecked();
 
-    // Ticking fable under Available models makes it a Default-model option —
-    // the link between the two fields — and selecting it is reflected in the
-    // draft and marks the AI tab dirty (visible affordance for the unsaved
-    // change).
-    await fable.click();
+    // With fable ticked under Available models it becomes a Default-model
+    // option — the link between the two fields — and selecting it is
+    // reflected in the draft.
+    if (!initialFable) {
+      await fable.click();
+    }
     await expect(fable).toBeChecked();
     await app.manageDialog.chooseClaudeDefaultModel('fable');
     await expect.poll(() => app.manageDialog.claudeDefaultModelSelectedValue()).toBe('fable');
-    await expect(app.manageDialog.tab('AI')).toHaveAttribute('aria-label', /has unsaved changes/);
 
-    // Unticking fable strands the stored selection outside the available set:
+    // Unticking fable strands the draft selection outside the available set:
     // the field must flag it (visibility of system status) instead of
-    // silently dropping it — the launch side ignores it.
+    // silently dropping it — the launch side ignores it. After this step the
+    // draft is guaranteed to differ from the stored config in every baseline
+    // (fable removed, or the default changed), so the AI tab must carry the
+    // dirty marker (visible affordance for the unsaved change).
     await fable.click();
     await expect(fable).not.toBeChecked();
     await expect
       .poll(() => app.manageDialog.claudeDefaultModelSelectedValue())
       .toBe('fable (not in available models — ignored at launch)');
+    await expect(app.manageDialog.tab('AI')).toHaveAttribute('aria-label', /has unsaved changes/);
 
-    // The verbose+debug launch toggle flips on and back off in the draft.
+    // The verbose+debug launch toggle flips and flips back in the draft,
+    // relative to whatever this machine's config starts it at.
     await app.manageDialog.claudeVerboseDebugCheckbox().click();
-    await expect(app.manageDialog.claudeVerboseDebugCheckbox()).toBeChecked();
+    await expect(app.manageDialog.claudeVerboseDebugCheckbox()).toBeChecked({
+      checked: !initialVerbose,
+    });
     await app.manageDialog.claudeVerboseDebugCheckbox().click();
-    await expect(app.manageDialog.claudeVerboseDebugCheckbox()).not.toBeChecked();
+    await expect(app.manageDialog.claudeVerboseDebugCheckbox()).toBeChecked({
+      checked: initialVerbose,
+    });
 
     // Resetting the Default model returns the draft to the default option.
     await app.manageDialog.chooseClaudeDefaultModel('Default (Claude decides)');

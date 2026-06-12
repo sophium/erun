@@ -19,10 +19,9 @@ const runLocalRecoverySelection =
     busyMessage: string,
     starter: (selection: UISelection, cols: number, rows: number) => Promise<unknown>,
   ): AppThunk<Promise<void>> =>
-  async (dispatch, getState, extra) => {
+  async (dispatch, _getState, extra) => {
     const controller = requireController(extra);
-    const debugOpen = getState().layout.debugOpen;
-    const runSelection = { ...selection, debug: debugOpen || undefined };
+    const runSelection = { ...selection };
     dispatch(setSelected(selection));
     dispatch(setTerminalCopyOutput(''));
     dispatch(setTerminalCopyStatus(''));

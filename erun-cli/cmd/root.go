@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"io"
+	"os"
 	"time"
 
 	"github.com/manifoldco/promptui"
@@ -17,12 +18,22 @@ type (
 	APILauncher              func(io.Reader, io.Writer, io.Writer, []string) error
 )
 
+// runPrompt and runSelect keep promptui's interactive rendering for real
+// terminals and fall back to plain line-based prompts when stdout is a pipe.
+// promptui repaints from its own goroutines, so piped output otherwise carries
+// cursor-control frames whose final flush races process exit (#520).
 func runPrompt(prompt promptui.Prompt) (string, error) {
-	return prompt.Run()
+	if writerIsTerminal(os.Stdout) {
+		return prompt.Run()
+	}
+	return runPlainPrompt(prompt)
 }
 
 func runSelect(prompt promptui.Select) (int, string, error) {
-	return prompt.Run()
+	if writerIsTerminal(os.Stdout) {
+		return prompt.Run()
+	}
+	return runPlainSelect(prompt)
 }
 
 func Execute() error {

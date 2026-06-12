@@ -193,12 +193,13 @@ test.describe('terminal query responses (#347)', () => {
   test('a query replayed from a saved buffer is never re-answered (#484)', async ({
     app,
     page,
+    seededEnv,
   }) => {
-    const target = await app.sidebar.firstEnvironmentExcludingLocal();
-    test.skip(target === null, 'no non-local environment in this developer harness');
-    const { tenant, env } = target!;
+    // A per-test seeded env keeps this spec's extra-terminal churn out of
+    // the shared baseline rows.
+    const { tenant, environment } = seededEnv;
 
-    await app.sidebar.openEnvironment(tenant, env);
+    await app.sidebar.openEnvironment(tenant, environment);
     const localTab = page.getByRole('tab', { name: 'Local', exact: true });
     await localTab.waitFor({ state: 'visible', timeout: 15_000 });
 

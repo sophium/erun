@@ -1,0 +1,14 @@
+Default AWS region [eu-west-1]: Dry run: AWS cloud provider initialization planned.
+audit: erun cloud init aws --account-id 123456789012 --dry-run --role-name Admin --sso-region eu-west-1 --sso-start-url https://example.awsapps.com/start
+aws configure set sso_start_url https://example.awsapps.com/start --profile 'erun-sso-<timestamp>'
+aws configure set sso_region eu-west-1 --profile 'erun-sso-<timestamp>'
+aws configure set sso_account_id 123456789012 --profile 'erun-sso-<timestamp>'
+aws configure set sso_role_name Admin --profile 'erun-sso-<timestamp>'
+aws configure set region eu-west-2 --profile 'erun-sso-<timestamp>'
+aws configure set output json --profile 'erun-sso-<timestamp>'
+aws sso login --profile 'erun-sso-<timestamp>'
+aws sts get-caller-identity --output json --profile 'erun-sso-<timestamp>'
+aws iam enable-outbound-web-identity-federation --query IssuerIdentifier --output text --profile 'erun-sso-<timestamp>'
+aws sts get-web-identity-token --audience erun-api --signing-algorithm RS256 --duration-seconds 900 --query WebIdentityToken --output text --profile 'erun-sso-<timestamp>'
+write erun root cloud provider alias
+write cloud provider OIDC issuer resolved from AWS web identity token

@@ -935,6 +935,7 @@ func ensureCloudContextInstanceProfileAssociation(ctx Context, deps CloudContext
 		if !isAlreadyAssociatedAWSError(err) && !isExistingInstanceProfileAssociationError(err) {
 			return err
 		}
+		ctx.Trace("cloud-context: instance profile already associated with " + instanceID + " — reusing the existing association")
 	}
 	return nil
 }
@@ -1252,6 +1253,7 @@ func createCloudContextSecurityGroup(ctx Context, deps CloudContextDependencies,
 		if !isDuplicateSecurityGroupError(err) {
 			return "", err
 		}
+		ctx.Trace("cloud-context: security group " + groupName + " already exists — reusing it")
 		groupID, err = describeCloudContextSecurityGroupID(ctx, deps, provider, region, groupName)
 		if err != nil {
 			return "", err
@@ -1268,8 +1270,11 @@ func createCloudContextSecurityGroup(ctx Context, deps CloudContextDependencies,
 		"--port", "6443",
 		"--cidr", "0.0.0.0/0",
 	})
-	if err != nil && !isDuplicateSecurityGroupPermissionError(err) {
-		return "", err
+	if err != nil {
+		if !isDuplicateSecurityGroupPermissionError(err) {
+			return "", err
+		}
+		ctx.Trace("cloud-context: k3s API ingress rule already present on " + groupID + " — reusing it")
 	}
 	return groupID, nil
 }
@@ -1401,6 +1406,7 @@ func ensureCloudContextInstanceProfileRole(ctx Context, deps CloudContextDepende
 		if !isInstanceProfileRoleLimitError(err) && !isAlreadyAssociatedAWSError(err) {
 			return err
 		}
+		ctx.Trace("cloud-context: instance profile " + profileName + " already carries a role — checking it matches " + roleName)
 		existingRole, roleErr := cloudContextInstanceProfileRoleName(ctx, deps, provider, region, profileName)
 		if roleErr != nil {
 			return err

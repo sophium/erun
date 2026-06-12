@@ -1,0 +1,14 @@
+Root config: <TMP> (status=ok)
+  cloud providers configured: 1
+  cloud contexts: 0, tenants: 1
+  orphaned cloud contexts: 1
+    - erun-001-020362606330-eu-west-2
+        account=020362606330 region=eu-west-2 alias=alice+020362606330@aws
+        envs: petios/rihards-review
+? Recover cloud context erun-001-020362606330-eu-west-2 from AWS (account 020362606330, region eu-west-2)? [Y/n] Recovering cloud context erun-001-020362606330-eu-west-2...
+Recovered cloud context erun-001-020362606330-eu-west-2 from aws-describe-instances.
+  instance: i-0aaaabbbbcccc1111 (c8gd.2xlarge)
+  public ip: <VERSION>.10
+  disk: gp3 100G
+  admin token: restored from ~/.kube/config
+audit: erun doctor --repair-config

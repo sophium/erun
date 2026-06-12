@@ -1,0 +1,10 @@
+Select tenant:
+  1) alpha
+  2) beta
+  3) Initialize current project
+Select 1-3 [1]: audit: erun --dry-run
+running init before resolving open target
+Loading erun tool configuration, configPath=<TMP>
+Loaded erun tool configuration
+Trying to detect current project directory
+erun config is not initialized. Run erun in project directory.

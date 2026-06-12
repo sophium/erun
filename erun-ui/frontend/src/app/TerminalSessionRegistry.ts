@@ -1,19 +1,9 @@
 import type { UISelection } from '@/types';
 
-import type {
-  DebugOpenFilter,
-  DebugSessionMode,
-  TerminalExitSelections,
-  TerminalWriteData,
-} from './model';
+import type { TerminalExitSelections, TerminalWriteData } from './model';
 import {
-  clearDebugFilter as clearDebugFilterAction,
-  clearSessionDebug as clearSessionDebugAction,
   recordExitOutput as recordExitOutputAction,
   recordExitReason as recordExitReasonAction,
-  registerDebugSession as registerDebugSessionAction,
-  setDebugFilter as setDebugFilterAction,
-  setSessionDebug as setSessionDebugAction,
   takeExitSelections as takeExitSelectionsAction,
   trackCloudInitSession as trackCloudInitSessionAction,
   trackDoctorSession as trackDoctorSessionAction,
@@ -24,9 +14,9 @@ import { store } from './store';
 import { selectionKey } from './versionSuggestions';
 
 // TerminalSessionRegistry is a thin facade. Per-session *metadata* (which
-// sessions are open/sshd/doctor/cloud-init, exit reasons/outputs, debug
-// modes/filters, debug-header buffer) lives in the sessions slice — the
-// methods below read/write through the store. Only the raw output buffers
+// sessions are open/sshd/doctor/cloud-init, exit reasons/outputs) lives in
+// the sessions slice — the methods below read/write through the store. Only
+// the raw output buffers
 // (Uint8Array[]) and the display-filtered TerminalWriteData[] arrays still
 // live on this instance, as Maps: they are large, churn frequently, and
 // were excluded from Redux deliberately for perf.
@@ -118,37 +108,5 @@ export class TerminalSessionRegistry {
       }),
     );
     return selections;
-  }
-
-  clearDebugFilter(sessionId: number): void {
-    store.dispatch(clearDebugFilterAction(sessionId));
-  }
-
-  debugMode(sessionId: number): DebugSessionMode | undefined {
-    return store.getState().sessions.debugModes[sessionId];
-  }
-
-  debugFilter(sessionId: number): DebugOpenFilter {
-    return store.getState().sessions.debugFilters[sessionId] ?? { released: false, pending: '' };
-  }
-
-  setDebugFilter(sessionId: number, filter: DebugOpenFilter): void {
-    store.dispatch(setDebugFilterAction({ sessionId, filter }));
-  }
-
-  registerDebugSession(sessionId: number, selection: UISelection, mode: DebugSessionMode): void {
-    store.dispatch(registerDebugSessionAction({ sessionId, selection, mode }));
-  }
-
-  sessionDebug(sessionId: number): string {
-    return store.getState().sessions.debugBuffers[sessionId] ?? '';
-  }
-
-  setSessionDebug(sessionId: number, value: string): void {
-    store.dispatch(setSessionDebugAction({ sessionId, value }));
-  }
-
-  clearSessionDebug(sessionId: number): void {
-    store.dispatch(clearSessionDebugAction(sessionId));
   }
 }

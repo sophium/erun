@@ -1,0 +1,5 @@
+audit: erun context stop edge
+cloud-context stop: edge
+aws ec2 stop-instances --instance-ids i-0123456789abcdef0 --region us-east-1 --profile dev
+An error occurred (OperationNotPermitted) when calling the StopInstances operation: The instance 'i-0123456789abcdef0' may not be stopped because it has stop protection enabled.
+cloud context "edge" cannot be stopped: stop protection (DisableApiStop) is enabled on instance i-0123456789abcdef0 — turn it off first (`erun context enable-api-stop edge`, or the stop-protection toggle in the desktop titlebar), then retry: aws ec2 stop-instances --instance-ids i-0123456789abcdef0: An error occurred (OperationNotPermitted) when calling the StopInstances operation: The instance 'i-0123456789abcdef0' may not be stopped because it has stop protection enabled.

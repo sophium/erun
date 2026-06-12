@@ -77,7 +77,7 @@ The language skills (`go-service`, `node-service`, `python-service`, `java-servi
 
 | Name | Reservation |
 |---|---|
-| `<tenant>-devops` | The runtime-pod chart at `<tenant>-devops/k8s/<tenant>-devops/`. Always present once `erun init --bootstrap` has run. Bears the runtime image and the env's `erun-devops` / `erun-mcp` / `erun-dind` containers. Application components must not collide with this name. |
+| `<tenant>-devops` | The runtime-pod chart's component name. Every env deploys it — from the repo-local chart at `<tenant>-devops/k8s/<tenant>-devops/` when the project carries one, otherwise from the published `erun-devops` chart (see [`erun deploy`](/cli/deploy#where-the-runtime-chart-comes-from)). Bears the runtime image and the env's `erun-devops` / `erun-mcp` / `erun-dind` containers. Application components must not collide with this name. |
 
 ### `Service` DNS implications
 
@@ -156,7 +156,7 @@ Algorithm:
 3. Otherwise:
    - **Flat layout.** Docker context = the directory containing the Dockerfile. Image name = that directory's basename. `COPY` paths outside the Dockerfile's directory are not available.
 
-The standard layout is what every project scaffolded with `erun init --bootstrap` produces; the flat layout is the fallback for hand-built contexts.
+The standard layout (`<module>/docker/<image>/Dockerfile`) is ERun's convention for project Dockerfiles; the flat layout is the fallback for hand-built contexts.
 
 ## Multi-architecture build contract
 

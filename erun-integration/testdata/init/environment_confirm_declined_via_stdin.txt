@@ -1,0 +1,13 @@
+? Initialize default environment "local" for tenant "team"? [Y/n] audit: erun init --container-registry registry.example/test --dry-run --kubernetes-context test-context --project-root <TMP> --set-default-tenant --type local-agent --version <VERSION> team local
+Loading erun tool configuration, configPath=<TMP>
+Saving default config
+mkdir -p <TMP>
+write-yaml <TMP>
+Loaded erun tool configuration
+Loading tenant configuration
+Adding new tenant
+mkdir -p <TMP>
+write-yaml <TMP>
+Loaded tenant configuration
+Loading environment configuration
+environment initialization cancelled by user

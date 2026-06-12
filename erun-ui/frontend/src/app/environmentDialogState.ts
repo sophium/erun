@@ -23,15 +23,9 @@ export function normalizedEnvironmentDialogValues(
   };
 }
 
-export function validEnvironmentDialogValues(
-  values: NormalizedEnvironmentDialogValues,
-  actionMode: EnvironmentDialogState['actionMode'],
-): boolean {
+export function validEnvironmentDialogValues(values: NormalizedEnvironmentDialogValues): boolean {
   if (!values.tenant || !values.environment) {
     return false;
-  }
-  if (actionMode === 'deploy') {
-    return Boolean(values.version);
   }
   // local-agent envs mount a host directory into the agent pod; the path
   // is required and free-text (the user picks where their project lives).
@@ -41,13 +35,10 @@ export function validEnvironmentDialogValues(
   return Boolean(values.kubernetesContext && values.containerRegistry);
 }
 
-export function rememberEnvironmentDialogSelection(
-  selection: UISelection,
-  actionMode: EnvironmentDialogState['actionMode'],
-): void {
+export function rememberEnvironmentDialogSelection(selection: UISelection): void {
   rememberPastTenant(selection.tenant);
   rememberPastEnvironment(selection.environment);
-  if (actionMode === 'init' && selection.containerRegistry) {
+  if (selection.containerRegistry) {
     rememberPastContainerRegistry(selection.containerRegistry);
   }
 }

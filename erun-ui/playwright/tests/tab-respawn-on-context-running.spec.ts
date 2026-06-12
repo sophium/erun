@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/erunApp.js';
+import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
 // tab-respawn-on-context-running covers the recovery path where an env's
 // linked cloud context dies mid-session (the AI/ERun PTY exits with code
@@ -17,9 +18,9 @@ import { expect, test } from '../fixtures/erunApp.js';
 // selected env.
 //
 // The end-to-end happy path is not reachable from the headless harness:
-//   - The headless harness's ~/.erun/ contains no managed cloud
-//     contexts, so IdleApi returns a managedCloud=false status and the
-//     transition detector never fires.
+//   - The isolated root's envs carry no managed cloud contexts, so
+//     IdleApi returns a managedCloud=false status and the transition
+//     detector never fires; a real transition needs a live cloud host.
 //   - Forcing the transition by emitting a fake idle-status event is
 //     possible in principle but would couple this spec to the
 //     transient API mock surface rather than the production code path.
@@ -37,17 +38,11 @@ import { expect, test } from '../fixtures/erunApp.js';
 
 test.describe('tab respawn after cloud context returns to running', () => {
   test('non-managed env does not lose tabs across an idle poll cycle', async ({ app, page }) => {
-    const tenants = await app.sidebar.tenants();
-    expect(tenants.length).toBeGreaterThan(0);
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    expect(envs.length).toBeGreaterThan(0);
+    // Open a seeded env so its tabs are initialized.
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
-    // Open the first env so its tabs are initialized.
-    await app.sidebar.openEnvironment(tenant, envs[0]!);
-
-    // Give the idle poll a window to run; on dev configs it returns
-    // managedCloud=false and the transition detector should be a
+    // Give the idle poll a window to run; the seeded local-agent env
+    // returns managedCloud=false and the transition detector should be a
     // no-op. We assert the sidebar continues to render a single row
     // for this env with no errant spinner from spurious tab spawn.
     await page.waitForTimeout(1_500);
@@ -57,7 +52,7 @@ test.describe('tab respawn after cloud context returns to running', () => {
     // The clicked env stays selected — restoreEnvTabsAfterContextRunning
     // must not fire setSelected(null) or otherwise perturb selection.
     const selectedRow = page.locator(
-      `button[aria-label^="${tenant} / ${envs[0]!}"][aria-current="page"]`,
+      `button[aria-label^="${SEED_TENANT} / ${SEED_ENV_ALPHA}"][aria-current="page"]`,
     );
     await expect(selectedRow).toBeVisible();
   });

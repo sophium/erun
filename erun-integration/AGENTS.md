@@ -62,6 +62,7 @@ Per the root `AGENTS.md`, `--dry-run` must produce a complete, side-effect-free 
 ## Fixture patterns
 
 - `env.New(t)` allocates a fresh tempdir-rooted HOME/XDG/cwd. Always call this; never share env across scenarios.
+- `erun.Run` enforces the isolation: it fails the test (`t.Fatal`) when `RunOptions.Env` lacks an isolated `HOME` + `XDG_CONFIG_HOME` or points `HOME` at the developer's real home. Always build the env from `setup.Env()` (appending extra vars is fine); a scenario can never silently read or write the real `~/.config/erun`.
 - `fixture.SeedTenantEnv(t, setup, tenant, env)` writes the minimum erun config tree so commands resolve a tenant/environment without prompting. Extend this helper when a new field becomes load-bearing for `--dry-run`.
 - `fixture.SeedDevopsRepo(t, setup, tenant)` materializes a `<tenant>-devops/k8s/<tenant>-devops/` chart so deploy/build resolve a kubernetes deploy context.
 - `fixture.SeedGitRepo(t, dir)` runs `git init` + commit so release/diff/exec see a project root.
@@ -141,6 +142,54 @@ Rules:
 - Document the override in the test comment so a future reader does not delete it. Without the override the scenario would silently re-shape the golden to whatever host ran `UPDATE_GOLDEN=1` last.
 - The override is a deliberate test seam, not a production knob. If you find yourself wanting to set it from a CLI command or MCP tool, that is a sign the production code should be detecting differently — fix the detection.
 
+## TTY-dependent branches: force via `ERUN_FORCE_TTY`
+
+The alias-setup flow in `erun open --no-shell` only prompts when stdout is a
+real terminal. The integration runner pipes stdout into a buffer, so the stat
+check fails and the branch would be unreachable. Production resolves the check
+through `stdoutIsTerminalForAliasSetup` (erun-cli/cmd/open.go), which honors
+`ERUN_FORCE_TTY=1` so a scenario can opt into the TTY branch:
+
+```go
+envVars := append(setup.Env(), "ERUN_FORCE_TTY=1", "SHELL=/bin/zsh")
+result := erun.Run(t, []string{"open", "team", "dev", "--no-shell"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars, Stdin: "y\n"})
+```
+
+The same rules as `ERUN_HOST_OS_OVERRIDE` apply: it is a deliberate test seam,
+not a production knob; document the override in the test comment; if you want
+to set it from a CLI command or MCP tool, the production detection is what
+needs fixing.
+
+## Scripted stdin into prompts: the plain (non-TTY) path
+
+When stdout is a pipe — which it always is under this harness — erun's
+prompts take the plain fallback (`runPlainPrompt`/`runPlainSelect` in
+`erun-cli/cmd/plain_prompt.go`, #520): an fmt-rendered label plus a buffered
+line read, no cursor-control escapes. Scenarios script prompts by passing
+`erun.RunOptions.Stdin`, one line per prompt:
+
+- A text prompt takes `"<text>\n"`; a bare `"\n"` submits the prompt's
+  default.
+- A select prints a numbered option list and takes `"<number>\n"` (or the
+  exact option text). An empty line picks the first option, so a legacy
+  `"\r"` confirm still selects it.
+- The plain reader is shared across prompts, so a scenario may chain several
+  prompts in one subprocess — feed one line per prompt in order.
+
+The promptui branch (cursor repaints, `"j"`/`"k"` navigation) only runs on a
+real terminal or under `ERUN_FORCE_TTY=1`; under the seam the old constraint
+still applies: promptui's readline buffers ahead, so **at most one promptui
+prompt per subprocess**. Verify a new prompt scenario with three consecutive
+compare-mode runs before trusting it.
+
+## Real-run port-forward scenarios: pin a high port range
+
+Real-run `open` scenarios that start port-forward simulators persist
+`localportrangestart: 26100` via `fixture.SeedRemoteTenantEnvWithSSHDPortRange`
+so their ports (26100/26122/26133) never collide with a developer's live erun
+session on the default 17000 range. Keep new real-run scenarios on that range
+and keep `skipIfPortsBusy` as a last-resort guard only.
+
 ## Goldens and normalization
 
 - `golden.Equal(t, "command/scenario", normalize.Apply(out))` is the standard assertion. Normalization strips ANSI escapes, version numbers, ISO timestamps, compact timestamps, OS temp paths, hex tokens, and home-dir prefixes. Add new rules to `internal/normalize/` if a fresh source of nondeterminism appears in output.
@@ -176,7 +225,7 @@ So a usable workflow is closer to:
 
 ## Coverage gate
 
-- `make integration-test` from the repo root: cleans `coverage/raw`, builds instrumented `erun`, runs `go test ./...` with `GOCOVERDIR` set, merges counters with `go tool covdata textfmt`, and fails non-zero if total statement coverage of `erun-cli` + `erun-common` falls below `COVERAGE_THRESHOLD` (default 90).
+- `make integration-test` from the repo root: cleans `coverage/raw`, builds instrumented `erun`, runs `go test ./...` with `GOCOVERDIR` set, merges counters with `go tool covdata textfmt`, and fails non-zero if total statement coverage of `erun-cli` + `erun-common` falls below `COVERAGE_THRESHOLD` (the default is pinned in `scripts/integration-test.sh`; raise it in the same commit as the scenarios that earned the increase, keeping a small margin below the measured total).
 - The threshold is a contract, not a target. Work that drops it must either restore coverage with new scenarios or open a discussion in the PR before lowering it.
 - Coverage scope is set in `internal/erun.CoverPkgs`. Extending it to other modules requires both that constant and a corresponding gate update; do them in the same change.
 - The gate measures statement coverage as reported by `go tool cover -func`. Function-touched rate is shown for diagnosis but not enforced.
@@ -195,17 +244,20 @@ So a usable workflow is closer to:
 
 ## Known integration coverage gaps
 
-Some functions in `erun-cli/cmd` cannot be exercised from a CLI subprocess driven by `--dry-run` traces alone, even with stubs. They show as 0% in the integration coverage report and the gate carries them as a known shortfall rather than a regression:
+Some statements cannot be exercised from a CLI subprocess, even with stubs. They show below 100% in the coverage report and the gate carries them as a known shortfall rather than a regression. The historical headline gaps — IDE launchers, the TTY-gated alias setup, the shell loop, interactive prompts, port-forward workers, AWS error classifiers, config persistence — are all covered now (trace lifts, the `ERUN_FORCE_TTY` seam, scripted stdin, and real-run-via-stub scenarios). What honestly remains:
 
-- **IDE launchers** (`open_ide.go`): functions like `intelliJGatewayProjectURI`, `vscodeRemoteFolderURI`, and the `runJetBrainsBootstrapAttempt` helpers compute URIs and command lines that production code passes directly to `exec.Command` without first emitting them to the trace stream. Until production traces "would launch IDE with: …" before the spawn, dry-run cannot lock these paths and integration scenarios cannot diff their output.
-- **TTY-gated alias setup** (`maybeConfigureOpenNoShellAlias`, `writeOpenNoShellHintLines`, `appendOpenNoShellAlias`): these only run when stdout is a TTY (`info.Mode() & os.ModeCharDevice != 0`). The integration runner pipes stdout into a buffer, so the stat check fails and the entire alias-prompt branch is unreachable from this suite.
-- **Live shell loop** (`runShellLoop`, `traceShellPreview`): the loop calls back into `kubectl exec` and spawns interactive subprocesses; integration cannot drive the reattach/replace-pod cycle without a TTY.
+- **Live-network code with no seam**: `releaseArchiveSHA256`/`fetchReleaseArchiveSHA256` (and the checksum-sync callers that depend on them in real-run mode) GET a hardcoded `https://github.com/...` archive URL with plain `net/http`. The `erun version` registry lookup honors the root config's `runtimeregistry.baseurl`/`tokenurl` seam (scenarios point it at a local `httptest` server), but the upgrade path's `UpgradeVersionsResolverForStore`/`upgradeRegistryNamespaceForTenant` build their lookup from namespace alone, so their non-override arms still hardcode the public registries.
+- **Desktop- or MCP-only `erun-common` API**: functions whose only callers live in `erun-ui` or `erun-mcp` (`LogoutCloudProviderAlias`, `ExportCloudProviderCredentials` + `parseAWSExportCredentials` + their default runners, `RuntimeDeployVersionSuggestions`, `BuildUpgradePlan`, `FindRootConfigBackupByDate`, `ResolveDoctorTarget`, `ResolveDeploySpecForDockerTarget`, `DescribeCloudContextStopProtection`, `LoadEnvironmentStopHistory`, `NormalizeDiffTarget`/`ResolveDiffTargetRoot`, `ParseRemoteAppSessionIDs`/`RemoteAppSessionEndScript`, `ContributeAppPortForResult`) never run inside the instrumented `erun` binary. They are validated by their owning module's suites, not this gate. `LoginCloudProviderAlias`'s non-force token check and resolve-failure arm are in the same class: the CLI resolves the provider first and always calls with `Force=true`.
+- **Dead code with no callers in any module**: `host_runtime.go` (whole file), `resolveDeployContext` (its only call site passes an empty component name from desktop/MCP-only entrypoints; the non-empty arm is unreachable outright), `ResolveDeploySpecForOpenResult`, `LaunchShell`, `DefaultEnvironmentIdleConfig`, `ValidateClaudeMaxOutputTokens`, `RuntimeVersionSuggestions` + `previousPatchVersion`, `FindComponentLinuxPackageContext`/`componentLinuxPackageContextCandidate`, `ResolveCurrentLinuxReleaseScripts`, and the no-version `EnsureDefaultDevopsChart` wrapper. Candidates for deletion, not for scenarios.
+- **Stat-based TTY checks with no override seam**: the spinner stack (`progress.go` `writerIsTerminalForSpinner` + `Spinner.run/draw/Stop`, `cmd/open_shell.go` `runWithSpinner`/`shouldUseSpinner`) and the log colorizer (`logger.go` `shouldColorizeWriter`/`colorize`) gate on `os.File` char-device stats, not on `ERUN_FORCE_TTY`. The piped harness can never reach them; adding the seam is a production change.
+- **CLI-unreachable fallbacks**: `resolveDeployKubernetesContext`'s current-context fallback fires only for an env with an empty kubernetes context, which `validateOpenTarget` rejects earlier on every CLI path.
+- **Second-sequential-prompt flows under `ERUN_FORCE_TTY`**: the plain (non-TTY) prompt path supports chained prompts (one stdin line each), but scenarios that force the promptui branch via `ERUN_FORCE_TTY=1` are still limited to one promptui prompt per subprocess, so TTY-branch coverage of chained prompts (doctor's multi-action confirm loop, `codeCommitSSHKeyIDPrompt` after the URL prompt) remains out of reach.
+- **Host-OS-locked arms**: code gated on real `runtime.GOOS` rather than `eruncommon.DetectHost` (the darwin `.app` arm of `newAppProcessCommand`) only executes on that OS's runner.
+- **Interactive-signal arms**: promptui `ErrInterrupt`/`ErrAbort` paths need Ctrl+C delivery on a real TTY.
+- **Long-running loops with no clean exit**: `cmd/activity_proxy.go`'s accept loop blocks forever; only its validation arms are covered.
+- **Defensive error arms** (chmod/marshal/stat failures and similar "should never happen" branches) that would need fault injection the harness does not do.
 
-The right fix for the IDE launchers is to lift the URI/command computation in front of a `ctx.TraceCommand(...)` call so dry-run mode can show what would be launched and stop there. Once that lands, the IDE branches become reachable from `--dry-run` and the matching scenarios can be added without stubs.
-
-For the TTY-gated paths, the alternative is to expose a deterministic test hook that overrides the TTY check (e.g. a `ERUN_FORCE_TTY=1` env var read from the runner). Until that exists, those branches stay covered by same-package unit tests in `erun-cli/cmd/open_*_test.go`. AGENTS.md flags those unit tests as not contributing to the gate; treat them as documentation of expected behavior, not as coverage.
-
-When you add a new branch to `open` (or any command), check first whether `--dry-run` can reach it — if not, lift the trace, do not extend the unit-test island.
+When you add a new branch to any command, check first whether `--dry-run` can reach it — if not, lift the trace into production code rather than adding a unit test in `erun-cli`/`erun-common`; those do not count toward the gate.
 
 ## Anti-patterns
 

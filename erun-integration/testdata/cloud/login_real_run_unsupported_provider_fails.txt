@@ -1,0 +1,4 @@
+? Login to test-user@gcp? [Y/n] audit: erun cloud login --alias test-user@gcp
+cloud login: alias=test-user@gcp force=true
+cloud login: resolved profile = test-profile
+unsupported cloud provider "gcp"

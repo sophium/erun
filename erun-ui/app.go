@@ -62,6 +62,7 @@ type erunUIDeps struct {
 	recordActivity         func(eruncommon.EnvironmentActivityParams) error
 	runWorkingIssueCommand workingIssueCommandRunner
 	loadPodBranch          func(context.Context, string) (string, error)
+	runPodRaw              func(context.Context, string, []string) (string, error)
 	stopCloudContext       func(context.Context, string) (eruncommon.CloudContextStatus, error)
 	windowStatePath        string
 	windowMaximised        func(context.Context) bool
@@ -89,6 +90,9 @@ type App struct {
 	actionQueueMu             sync.Mutex
 	actionQueues              map[string]*envActionQueue
 	actionCancels             map[string]context.CancelFunc
+	envEnsureMu               sync.Mutex
+	envEnsureInflight         map[string]struct{}
+	envEnsureDone             map[string]time.Time
 	configWatcher             *configWatcher
 	contribute                *contributeStore
 	contributeApps            *contributeAppForwards
@@ -256,6 +260,9 @@ func withDefaultUIDeps(deps erunUIDeps) erunUIDeps {
 	}
 	if deps.loadPodBranch == nil {
 		deps.loadPodBranch = loadPodBranchFromMCP
+	}
+	if deps.runPodRaw == nil {
+		deps.runPodRaw = runPodRawFromMCP
 	}
 	if deps.recordActivity == nil {
 		deps.recordActivity = eruncommon.RecordEnvironmentActivity

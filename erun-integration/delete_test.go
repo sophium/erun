@@ -98,6 +98,133 @@ func TestDelete(t *testing.T) {
 		}
 	})
 
+	t.Run("real_run_confirmation_prompt_accepts_matching_input", func(t *testing.T) {
+		// Exercises cmd/delete.go confirmDeleteCommand's happy path: without
+		// --yes the command prompts for the literal "<tenant>-<environment>"
+		// string; typing it proceeds with the delete. The env is local
+		// (no remote worktree) so no kubectl is involved, and it is the
+		// tenant's last env, so the tenant config and the root default
+		// tenant are cleared too. The typed confirm is the run's single
+		// interactive prompt (readline read-ahead).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envDir := filepath.Join(setup.ConfigHome, "erun", "team", "dev")
+		result := erun.Run(t, []string{"delete", "team", "dev"}, erun.RunOptions{
+			Cwd:   setup.Cwd,
+			Env:   setup.Env(),
+			Stdin: "team-dev\n",
+		})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "delete/real_run_confirmation_prompt_accepts_matching_input", normalize.Apply(result.Combined))
+		if _, err := os.Stat(envDir); !os.IsNotExist(err) {
+			t.Errorf("expected env config tree to be removed at %s, stat err: %v", envDir, err)
+		}
+	})
+
+	t.Run("real_run_confirmation_mismatch_aborts", func(t *testing.T) {
+		// Exercises confirmDeleteCommand's mismatch branch: typing anything
+		// other than "<tenant>-<environment>" must abort before any state
+		// is touched — non-zero exit, config tree intact.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		envDir := filepath.Join(setup.ConfigHome, "erun", "team", "dev")
+		result := erun.Run(t, []string{"delete", "team", "dev"}, erun.RunOptions{
+			Cwd:   setup.Cwd,
+			Env:   setup.Env(),
+			Stdin: "team-prod\n",
+		})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit on confirmation mismatch, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "delete/real_run_confirmation_mismatch_aborts", normalize.Apply(result.Combined))
+		if _, err := os.Stat(envDir); err != nil {
+			t.Errorf("env config tree must remain on disk after aborted delete, stat err: %v", err)
+		}
+	})
+
+	t.Run("real_run_default_env_reassigned_when_other_envs_remain", func(t *testing.T) {
+		// Exercises erun-common/delete.go clearDeletedDefaultEnvironment:
+		// deleting the tenant's default environment while another env
+		// remains must keep the tenant and promote the next remaining env
+		// to default instead of leaving a dangling reference.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		stagingDir := filepath.Join(setup.ConfigHome, "erun", "team", "staging")
+		if err := os.MkdirAll(stagingDir, 0o755); err != nil {
+			t.Fatalf("mkdir staging env: %v", err)
+		}
+		mustWrite(t, filepath.Join(stagingDir, "config.yaml"),
+			"name: staging\n"+
+				"repopath: "+setup.Cwd+"\n"+
+				"kubernetescontext: test-context\n"+
+				"containerregistry: registry.example/test\n"+
+				"runtimeversion: 1.0.0\n",
+		)
+		result := erun.Run(t, []string{"delete", "team", "dev", "--yes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "delete/real_run_default_env_reassigned_when_other_envs_remain", normalize.Apply(result.Combined))
+		tenantCfg, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "team", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read tenant config (tenant must survive while envs remain): %v", err)
+		}
+		if !strings.Contains(string(tenantCfg), "defaultenvironment: staging") {
+			t.Errorf("expected default environment reassigned to staging, got:\n%s", tenantCfg)
+		}
+	})
+
+	t.Run("real_run_last_env_of_non_default_tenant_keeps_root_default", func(t *testing.T) {
+		// Exercises clearDeletedDefaultTenant's not-the-default branch:
+		// removing the last env of a secondary tenant deletes that tenant's
+		// config but must leave the root defaulttenant (team) untouched.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedSecondaryTenantEnv(t, setup, "other", "staging", 0)
+		result := erun.Run(t, []string{"delete", "other", "staging", "--yes"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "delete/real_run_last_env_of_non_default_tenant_keeps_root_default", normalize.Apply(result.Combined))
+		if _, err := os.Stat(filepath.Join(setup.ConfigHome, "erun", "other")); !os.IsNotExist(err) {
+			t.Errorf("expected secondary tenant config tree to be removed, stat err: %v", err)
+		}
+		rootCfg, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "config.yaml"))
+		if err != nil {
+			t.Fatalf("read root config: %v", err)
+		}
+		if !strings.Contains(string(rootCfg), "defaulttenant: team") {
+			t.Errorf("root default tenant must survive deleting a non-default tenant, got:\n%s", rootCfg)
+		}
+	})
+
+	t.Run("real_run_namespace_delete_failure_warns_and_continues", func(t *testing.T) {
+		// Exercises deleteRemoteEnvironmentNamespace's real-run failure arm
+		// plus runDeleteCommand's warning print: when kubectl cannot delete
+		// the namespace, the error is surfaced as a warning on stderr and
+		// the local config delete still proceeds. The kubectl stub's
+		// non-zero exit is the decision input driving the failure branch.
+		setup := env.New(t)
+		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryAdvanced(t, stubs, "kubectl", fixture.StubBinarySpec{
+			Stderr:   `Error from server (Forbidden): namespaces "team-dev" is forbidden`,
+			ExitCode: 1,
+		})
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl")...)
+		envDir := filepath.Join(setup.ConfigHome, "erun", "team", "dev")
+		result := erun.Run(t, []string{"delete", "team", "dev", "--yes"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "delete/real_run_namespace_delete_failure_warns_and_continues", normalize.Apply(result.Combined))
+		if _, err := os.Stat(envDir); !os.IsNotExist(err) {
+			t.Errorf("local config delete must continue after namespace failure, stat err: %v", err)
+		}
+	})
+
 	t.Run("real_run_with_yes_flag_skips_confirmation_and_removes_config", func(t *testing.T) {
 		// Exercises delete.go runDeleteCommand real-run path with --yes:
 		// the confirmation prompt is bypassed, the env config tree is

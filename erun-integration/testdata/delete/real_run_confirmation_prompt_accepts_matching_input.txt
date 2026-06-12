@@ -1,0 +1,2 @@
+Type team-dev to confirm deletion: deleted environment: team/dev
+audit: erun delete team dev

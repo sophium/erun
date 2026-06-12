@@ -1,0 +1,4 @@
+audit: erun cloud oidc --alias test-user@aws
+cloud oidc: refresh issuer for alias=test-user@aws
+cloud oidc: bearer token retrieval failed: get AWS web identity token: An error occurred (AccessDenied) when calling the GetWebIdentityToken operation
+get AWS web identity token: An error occurred (AccessDenied) when calling the GetWebIdentityToken operation

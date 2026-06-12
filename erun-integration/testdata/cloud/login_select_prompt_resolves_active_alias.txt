@@ -1,0 +1,4 @@
+Cloud provider:
+  1) test-user@aws
+Select 1-1 [1]: test-user@aws: active
+audit: erun cloud login

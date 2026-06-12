@@ -69,55 +69,47 @@ export const sessionApi = wailsApi.injectEndpoints({
   endpoints: (builder) => ({
     startSession: builder.mutation<StartSessionResult, StartSessionArgs>({
       queryFn: wailsQueryFn<StartSessionArgs, StartSessionResult>(
-        ({ selection, slot, cols, rows }) =>
-          StartSession(selection, slot, cols, rows) as Promise<StartSessionResult>,
+        ({ selection, slot, cols, rows }) => StartSession(selection, slot, cols, rows),
       ),
     }),
     startLocalSession: builder.mutation<StartSessionResult, StartSessionArgs>({
       queryFn: wailsQueryFn<StartSessionArgs, StartSessionResult>(
-        ({ selection, slot, cols, rows }) =>
-          StartLocalSession(selection, slot, cols, rows) as Promise<StartSessionResult>,
+        ({ selection, slot, cols, rows }) => StartLocalSession(selection, slot, cols, rows),
       ),
     }),
     startAISession: builder.mutation<StartSessionResult, StartSessionArgs>({
       queryFn: wailsQueryFn<StartSessionArgs, StartSessionResult>(
-        ({ selection, slot, cols, rows }) =>
-          StartAISession(selection, slot, cols, rows) as Promise<StartSessionResult>,
+        ({ selection, slot, cols, rows }) => StartAISession(selection, slot, cols, rows),
       ),
     }),
     startInitSession: builder.mutation<StartSessionResult, StartUnslottedArgs>({
-      queryFn: wailsQueryFn<StartUnslottedArgs, StartSessionResult>(
-        ({ selection, cols, rows }) =>
-          StartInitSession(selection, cols, rows) as Promise<StartSessionResult>,
+      queryFn: wailsQueryFn<StartUnslottedArgs, StartSessionResult>(({ selection, cols, rows }) =>
+        StartInitSession(selection, cols, rows),
       ),
     }),
     startDeploySession: builder.mutation<StartSessionResult, StartUnslottedArgs>({
-      queryFn: wailsQueryFn<StartUnslottedArgs, StartSessionResult>(
-        ({ selection, cols, rows }) =>
-          StartDeploySession(selection, cols, rows) as Promise<StartSessionResult>,
+      queryFn: wailsQueryFn<StartUnslottedArgs, StartSessionResult>(({ selection, cols, rows }) =>
+        StartDeploySession(selection, cols, rows),
       ),
     }),
     startForceDeploySession: builder.mutation<StartSessionResult, StartUnslottedArgs>({
-      queryFn: wailsQueryFn<StartUnslottedArgs, StartSessionResult>(
-        ({ selection, cols, rows }) =>
-          StartForceDeploySession(selection, cols, rows) as Promise<StartSessionResult>,
+      queryFn: wailsQueryFn<StartUnslottedArgs, StartSessionResult>(({ selection, cols, rows }) =>
+        StartForceDeploySession(selection, cols, rows),
       ),
     }),
     startDoctorSession: builder.mutation<StartSessionResult, StartUnslottedArgs>({
-      queryFn: wailsQueryFn<StartUnslottedArgs, StartSessionResult>(
-        ({ selection, cols, rows }) =>
-          StartDoctorSession(selection, cols, rows) as Promise<StartSessionResult>,
+      queryFn: wailsQueryFn<StartUnslottedArgs, StartSessionResult>(({ selection, cols, rows }) =>
+        StartDoctorSession(selection, cols, rows),
       ),
     }),
     startSSHDInitSession: builder.mutation<StartSessionResult, StartUnslottedArgs>({
-      queryFn: wailsQueryFn<StartUnslottedArgs, StartSessionResult>(
-        ({ selection, cols, rows }) =>
-          StartSSHDInitSession(selection, cols, rows) as Promise<StartSessionResult>,
+      queryFn: wailsQueryFn<StartUnslottedArgs, StartSessionResult>(({ selection, cols, rows }) =>
+        StartSSHDInitSession(selection, cols, rows),
       ),
     }),
     startCloudInitAWSSession: builder.mutation<StartSessionResult, StartCloudInitArgs>({
-      queryFn: wailsQueryFn<StartCloudInitArgs, StartSessionResult>(
-        ({ cols, rows }) => StartCloudInitAWSSession(cols, rows) as Promise<StartSessionResult>,
+      queryFn: wailsQueryFn<StartCloudInitArgs, StartSessionResult>(({ cols, rows }) =>
+        StartCloudInitAWSSession(cols, rows),
       ),
     }),
     resizeSession: builder.mutation<NoValue, ResizeArgs>({

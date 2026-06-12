@@ -1,5 +1,6 @@
 import { test, expect } from '../fixtures/erunApp.js';
 import type { AppShell } from '../pages/index.js';
+import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
 // Issue #460 — two mirror-image defects on the Manage dialog's Runtime tab:
 // the "Pending redeploy" banner fired on every save, including saves that
@@ -12,8 +13,8 @@ import type { AppShell } from '../pages/index.js';
 //
 // Saves are stubbed over the /__erun_invoke bridge (the
 // sidebar-upgrade-all.spec.ts technique), echoing the submitted config back
-// as the save result — the developer's real ~/.erun is never written, while
-// the dialog behaves exactly as after a real save (initialConfig refresh,
+// as the save result — the seeded config is never written, while the
+// dialog behaves exactly as after a real save (initialConfig refresh,
 // pendingRedeploy computation).
 test.describe('manage dialog redeploy banner scoping (#460)', () => {
   test.beforeEach(async ({ page }) => {
@@ -82,15 +83,10 @@ test.describe('manage dialog redeploy banner scoping (#460)', () => {
   });
 });
 
-// openFirstEnvManageDialog opens the Manage dialog for the first environment
-// of the first tenant via the keyboard path (mouse row clicks can be
-// intercepted by the env hover-card popover on crowded sidebars).
+// openFirstEnvManageDialog opens the Manage dialog for the seeded baseline
+// env via the keyboard path (mouse row clicks can be intercepted by the env
+// hover-card popover on crowded sidebars).
 async function openFirstEnvManageDialog(app: AppShell): Promise<void> {
-  const tenants = await app.sidebar.tenants();
-  test.skip(tenants.length === 0, 'no tenants in this developer harness');
-  const tenant = tenants[0]!;
-  const envs = await app.sidebar.environmentsFor(tenant);
-  test.skip(envs.length === 0, 'no environments in this developer harness');
-  await app.sidebar.openManageDialogViaKeyboard(tenant, envs[0]!);
+  await app.sidebar.openManageDialogViaKeyboard(SEED_TENANT, SEED_ENV_ALPHA);
   await app.manageDialog.waitForOpen();
 }

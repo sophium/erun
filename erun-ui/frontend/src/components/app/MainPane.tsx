@@ -1,7 +1,6 @@
 import * as React from 'react';
 
 import { useAppSelector } from '@/app/hooks';
-import { selectActiveSessionDebug } from '@/app/selectors';
 import { DebugPanel } from '@/components/app/DebugPanel';
 import { TenantDashboardView } from '@/components/app/TenantDashboardView';
 import { TerminalPane } from '@/components/app/TerminalPane';
@@ -24,9 +23,6 @@ export function MainPane({
 }): React.ReactElement {
   const dashboardTenant = useAppSelector((state) => state.tenantDashboard.tenant);
   const debugOpen = useAppSelector((state) => state.layout.debugOpen);
-  const debugOutput = useAppSelector((state) => state.terminal.debugOutput);
-  const sessionId = useAppSelector((state) => state.terminal.sessionId);
-  const verboseDebug = useAppSelector((state) => selectActiveSessionDebug(state, sessionId));
   const dashboardOpen = Boolean(dashboardTenant);
   return (
     <main
@@ -49,14 +45,7 @@ export function MainPane({
         diffListRef={diffListRef}
         onOpenActivityQueue={onOpenActivityQueue}
       />
-      {!dashboardOpen && (
-        <DebugPanel
-          open={debugOpen}
-          output={debugOutput}
-          sessionId={sessionId}
-          verbose={verboseDebug}
-        />
-      )}
+      {!dashboardOpen && <DebugPanel open={debugOpen} />}
     </main>
   );
 }

@@ -1,3 +1,24 @@
+# Run the repository test gate inside the build, per the delivery-pipeline
+# convention (docs /pipeline, "How you set it up — and where tests run"):
+# a failing test fails the build and no image is tagged, so a green build
+# is a tested build. Pinned to BUILDPLATFORM so the suite runs natively
+# exactly once per build instead of once per target arch under emulation;
+# the builder stage depends on this stage's marker, so no artefact ships
+# untested while BuildKit still runs the two stages in parallel.
+FROM --platform=$BUILDPLATFORM golang:1.26.0 AS test
+
+WORKDIR /src
+
+COPY Makefile /src/Makefile
+COPY erun-cli /src/erun-cli
+COPY erun-common /src/erun-common
+COPY erun-mcp /src/erun-mcp
+COPY erun-integration /src/erun-integration
+
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    make integration-test && touch /test-ok
+
 FROM golang:1.26.0 AS builder
 
 WORKDIR /src
@@ -44,6 +65,10 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     GOBIN=/out go install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}"
+
+# Gate the artefacts on the test stage: the runtime stage copies from /out,
+# so an image can only be tagged when the integration gate passed.
+COPY --from=test /test-ok /tmp/erun-test-ok
 
 FROM ghcr.io/sophium/erun-ubuntu:noble-20260217
 

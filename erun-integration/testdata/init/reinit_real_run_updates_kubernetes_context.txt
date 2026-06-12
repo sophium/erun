@@ -1,0 +1,10 @@
+audit: erun init --confirm-environment --container-registry registry.example/test --kubernetes-context new-context --set-default-tenant team dev
+Loading erun tool configuration, configPath=<TMP>
+Loaded erun tool configuration
+Loading tenant configuration
+Loaded tenant configuration
+Loading environment configuration
+==> Initializing team/dev
+init: runtime deploys use the published erun-devops chart; no devops scaffold is written
+==> Initialized team/dev
+Configuration initialized OK

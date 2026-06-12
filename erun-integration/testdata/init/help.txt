@@ -4,7 +4,6 @@ Usage:
   erun init [TENANT] [ENVIRONMENT] [flags]
 
 Flags:
-      --bootstrap                      Create the tenant devops module and chart during initialization
       --codecommit-ssh-key-id string   CodeCommit SSH public key ID to use for remote repository access
       --confirm-environment            Confirm environment initialization without prompting
       --container-registry string      Container registry to associate with the environment

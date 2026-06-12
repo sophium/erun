@@ -1,0 +1,8 @@
+Root config: <TMP> (status=ok)
+  cloud providers configured: 0
+  cloud contexts: 0, tenants: 1
+  orphaned aliases: 1
+    - test-user+123456789012@aws
+        provider=aws account=123456789012 user=test-user
+        tenants: team
+? Re-initialize cloud provider alias test-user+123456789012@aws (account 123456789012, user test-user)? [Y/n] audit: erun doctor --repair-config

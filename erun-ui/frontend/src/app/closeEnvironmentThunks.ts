@@ -5,12 +5,7 @@ import { readError } from './errors';
 import { showTerminalMessage } from './notificationThunks';
 import { setSelected } from './slices/selectionSlice';
 import { clearEnvOpening } from './slices/sessionsSlice';
-import {
-  clearSelectedSessionForEnv,
-  clearTabsForEnv,
-  setDebugOutput,
-  setSessionId,
-} from './slices/terminalSlice';
+import { clearSelectedSessionForEnv, clearTabsForEnv, setSessionId } from './slices/terminalSlice';
 import type { AppThunk } from './store';
 import { selectionKey } from './versionSuggestions';
 
@@ -24,8 +19,8 @@ import { selectionKey } from './versionSuggestions';
 //
 // Independent of the cloud-context Stop button: closing the env's
 // tabs is a desktop-only operation and does NOT touch AWS state.
-// Per-session bookkeeping (selectionToSessionId, openSelections,
-// debugBuffers) is cleared by handleTerminalExit as the Go-side
+// Per-session bookkeeping (selectionToSessionId, openSelections)
+// is cleared by handleTerminalExit as the Go-side
 // Close() fires terminalExitEvent for each session — the thunk
 // only handles env-scoped state that the per-session exit chain
 // would not unwind.
@@ -43,19 +38,13 @@ export const closeEnvironment =
       dispatch(showTerminalMessage(readError(error)));
       return;
     }
-    // Both debug-mode variants of the selection produce distinct keys
-    // in tabsByEnv / selectedSessionByEnv. Clear both so a follow-up
-    // open in either mode starts from a blank slate.
-    for (const debug of [false, true]) {
-      const key = selectionKey({ tenant, environment, debug: debug || undefined });
-      dispatch(clearTabsForEnv(key));
-      dispatch(clearSelectedSessionForEnv(key));
-    }
+    const key = selectionKey({ tenant, environment });
+    dispatch(clearTabsForEnv(key));
+    dispatch(clearSelectedSessionForEnv(key));
     dispatch(clearEnvOpening({ tenant, environment }));
     const current = getState().selection.selected;
     if (current?.tenant === tenant && current.environment === environment) {
       dispatch(setSelected(null));
       dispatch(setSessionId(0));
-      dispatch(setDebugOutput(''));
     }
   };

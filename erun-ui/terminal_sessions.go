@@ -67,10 +67,14 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 	}
 	a.mu.Unlock()
 
+	// One preflight per env (re)start (issue #463): the shared ensure runs
+	// the open/build/deploy once and streams its traces into the activity
+	// queue; the tab itself skips the preflight and waits on the deployment.
+	a.ensureEnvRuntimeOnce(selection)
 	openParams := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),
-		Args:       withAppSession(buildOpenArgs(result.Tenant, result.Environment, selection.Debug), fmt.Sprintf("open-%d", slot), false, false),
+		Args:       append(withAppSession(buildOpenArgs(result.Tenant, result.Environment), fmt.Sprintf("open-%d", slot), false, false), "--skip-ensure"),
 		Env:        []string{appSessionEnvVar + "=1"},
 		Cols:       cols,
 		Rows:       rows,
@@ -98,7 +102,7 @@ func (a *App) runOpenSession(ctx context.Context, selection uiSelection, slot, c
 		startedAt: time.Now(),
 	}
 	a.sessions[key] = managed
-	a.busyEnvs[environmentBusyKey(selection)]++
+	a.busyEnvs[selectionKey(selection)]++
 	a.mu.Unlock()
 
 	a.recordTerminalActivity(selection)
@@ -243,6 +247,8 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 	}
 	a.mu.Unlock()
 
+	// Shared per-env ensure (issue #463) — see StartSession.
+	a.ensureEnvRuntimeOnce(selection)
 	params := startTerminalSessionParams{
 		Dir:        resolveTerminalStartDir(result.RepoPath),
 		Executable: a.deps.resolveCLIPath(),
@@ -251,7 +257,7 @@ func (a *App) runAISession(ctx context.Context, selection uiSelection, slot, col
 		// resume at the env effort, issues #451/#469), once on create. Reopening
 		// reconnects to the running claude rather than typing it in again or
 		// spawning a parallel one (#478).
-		Args: withAppSession(buildOpenArgs(result.Tenant, result.Environment, selection.Debug), "ai", true, false),
+		Args: append(withAppSession(buildOpenArgs(result.Tenant, result.Environment), "ai", true, false), "--skip-ensure"),
 		Env:  []string{appSessionEnvVar + "=1"},
 		Cols: cols,
 		Rows: rows,
@@ -614,7 +620,7 @@ func (a *App) startCommandSessionWithExecutable(selection uiSelection, cols, row
 		startedAt:      time.Now(),
 	}
 	a.sessions[key] = managed
-	a.busyEnvs[environmentBusyKey(selection)]++
+	a.busyEnvs[selectionKey(selection)]++
 	a.mu.Unlock()
 
 	a.recordTerminalActivity(selection)
@@ -1163,6 +1169,12 @@ func (a *App) tryReconnect(managed *managedTerminal, exitReason string) bool {
 	}
 
 	a.emitReconnectMarker(managed.serial, exitReason)
+	// The respawned `erun open` runs with --skip-ensure; refresh the shared
+	// ensure (TTL-deduped) so a replaced pod gets its deploy back without
+	// every tab repeating the preflight (issue #463).
+	if managed.kind != sessionKindLocal {
+		a.ensureEnvRuntimeOnce(managed.selection)
+	}
 	next, err := respawn()
 	if err != nil {
 		a.emitReconnectFailureMarker(managed.serial, err)
@@ -1759,7 +1771,7 @@ func (s *managedTerminal) Close() error {
 
 func selectionKey(selection uiSelection) string {
 	selection = normalizeSelection(selection)
-	return selection.Tenant + "\x00" + selection.Environment + "\x00" + fmt.Sprintf("%t", selection.Debug)
+	return selection.Tenant + "\x00" + selection.Environment
 }
 
 func openSessionKey(selection uiSelection, slot int) string {
@@ -1774,16 +1786,11 @@ func aiSessionKey(selection uiSelection, slot int) string {
 	return "ai\x00" + selectionKey(selection) + "\x00" + fmt.Sprintf("%d", slot)
 }
 
-func environmentBusyKey(selection uiSelection) string {
-	selection = normalizeSelection(selection)
-	return selection.Tenant + "\x00" + selection.Environment
-}
-
 func (a *App) releaseIdleBlockLocked(managed *managedTerminal) {
 	if managed == nil || !managed.blocksIdleStop {
 		return
 	}
-	busyKey := environmentBusyKey(managed.selection)
+	busyKey := selectionKey(managed.selection)
 	if a.busyEnvs[busyKey] <= 1 {
 		delete(a.busyEnvs, busyKey)
 	} else {
@@ -1795,20 +1802,20 @@ func (a *App) releaseIdleBlockLocked(managed *managedTerminal) {
 
 func initSelectionKey(selection uiSelection) string {
 	selection = normalizeSelection(selection)
-	return "init\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00" + selection.Version + "\x00" + selection.RuntimeImage + "\x00" + selection.RuntimeCPU + "\x00" + selection.RuntimeMemory + "\x00" + selection.KubernetesContext + "\x00" + selection.ContainerRegistry + "\x00" + fmt.Sprintf("%t", selection.SetDefaultTenant) + "\x00" + fmt.Sprintf("%t", selection.NoGit) + "\x00" + fmt.Sprintf("%t", selection.Bootstrap) + "\x00" + fmt.Sprintf("%t", selection.Debug)
+	return "init\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00" + selection.Version + "\x00" + selection.RuntimeImage + "\x00" + selection.RuntimeCPU + "\x00" + selection.RuntimeMemory + "\x00" + selection.KubernetesContext + "\x00" + selection.ContainerRegistry + "\x00" + fmt.Sprintf("%t", selection.SetDefaultTenant) + "\x00" + fmt.Sprintf("%t", selection.NoGit)
 }
 
 func deploySelectionKey(selection uiSelection) string {
 	selection = normalizeSelection(selection)
-	return "deploy\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00" + selection.Version + "\x00" + selection.RuntimeImage + "\x00" + fmt.Sprintf("%t", selection.Debug)
+	return "deploy\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00" + selection.Version + "\x00" + selection.RuntimeImage
 }
 
 func sshdInitSelectionKey(selection uiSelection) string {
 	selection = normalizeSelection(selection)
-	return "sshd-init\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00" + fmt.Sprintf("%t", selection.Debug)
+	return "sshd-init\x00" + selection.Tenant + "\x00" + selection.Environment
 }
 
 func doctorSelectionKey(selection uiSelection) string {
 	selection = normalizeSelection(selection)
-	return "doctor\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00" + fmt.Sprintf("%t", selection.Debug)
+	return "doctor\x00" + selection.Tenant + "\x00" + selection.Environment
 }

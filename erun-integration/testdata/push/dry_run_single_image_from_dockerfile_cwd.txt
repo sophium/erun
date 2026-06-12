@@ -1,0 +1,2 @@
+audit: erun push --dry-run --version <VERSION>
+cd <TMP> && docker push ghcr.io/sophium/cwd:<VERSION>

@@ -2,12 +2,14 @@ kubectl config use-context 'test-context' >/dev/null &&
 kubectl config set-context --current --namespace='team-dev' >/dev/null &&
 cd '<TMP>'
 audit: erun open --dry-run --no-alias-prompt --no-shell team dev
+trace-log: would append the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=false no-shell=true ide=shell
+deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
 kubectl --context test-context --namespace team-dev get deployment team-devops -o name
 deploying the devops runtime before opening the shell
 kubectl --context test-context get namespace team-dev -o name
 kubectl --context test-context create namespace team-dev
-cd <TMP> && helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace team-dev --debug --kube-context test-context -f <TMP> --set-string tenant=team --set-string environment=dev --set-string worktreeStorage=host --set-string worktreeRepoName=cwd --set-string worktreeHostPath=<TMP> --set sshdEnabled=false --set mcpPort=17500 --set apiPort=17533 --set sshPort=17522 --set managedCloud=false --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias= --set-string cloudContext.region= --set-string cloudContext.instanceId= --set cloudContext.useHostCredentials=false --set-string api.oidcAllowedIssuers= --set api.postgres.reset=false --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=8916Mi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 team-devops <TMP>
+helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace team-dev --debug --kube-context test-context --set-string tenant=team --set-string environment=dev --set-string worktreeStorage=host --set-string worktreeRepoName=cwd --set-string worktreeHostPath=<TMP> --set sshdEnabled=false --set mcpPort=17500 --set apiPort=17533 --set sshPort=17522 --set managedCloud=false --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias= --set-string cloudContext.region= --set-string cloudContext.instanceId= --set cloudContext.useHostCredentials=false --set-string api.oidcAllowedIssuers= --set api.postgres.reset=false --set-string containerRegistry=registry.example/test --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=8916Mi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 team-devops oci://registry.example/test/charts/erun-devops --version <VERSION>
 deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
 kubectl --context test-context --namespace team-dev get pods -o json
 dedup: ready (release=test-context-team-dev-team-devops, hash=<HASH>)

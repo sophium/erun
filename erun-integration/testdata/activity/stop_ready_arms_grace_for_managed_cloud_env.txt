@@ -1,0 +1,2 @@
+audit: erun activity stop-ready --cloud-context mock-cluster --environment dev --tenant team
+auto-stop armed: 300 seconds of grace before forced stop

@@ -21,7 +21,7 @@ const refreshDialogRuntimeResources =
   async (dispatch, getState) => {
     const context = normalizeDialogValue(kubernetesContext);
     let dialog = getState().environmentDialog;
-    if (!dialog.open || dialog.actionMode !== 'init' || !context) {
+    if (!dialog.open || !context) {
       return;
     }
     dispatch(
@@ -87,7 +87,7 @@ export const refreshKubernetesContexts =
       ).unwrap();
       const contexts = result.map((context) => context.trim()).filter(Boolean);
       const dialog = getState().environmentDialog;
-      if (!dialog.open || dialog.actionMode !== 'init') {
+      if (!dialog.open) {
         return;
       }
       const resolved = selectDialogKubernetesContext(getState(), contexts);
@@ -101,7 +101,7 @@ export const refreshKubernetesContexts =
       await dispatch(refreshDialogRuntimeResources(resolved));
     } catch (error) {
       const dialog = getState().environmentDialog;
-      if (!dialog.open || dialog.actionMode !== 'init') {
+      if (!dialog.open) {
         return;
       }
       dispatch(

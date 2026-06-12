@@ -1,0 +1,2 @@
+audit: erun activity stop-ready
+tenant and environment are required

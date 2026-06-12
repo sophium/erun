@@ -2,6 +2,7 @@ Target: team/dev
 Running: Roll back to the last successful revision
 No cleanup actions selected.
 audit: erun doctor --dry-run --rollback team dev
+trace-log: would append the full trace to <TMP>
 helm status team-devops --namespace team-dev --kube-context test-context
 kubectl --context test-context --namespace team-dev get pods -o wide
 helm rollback team-devops --namespace team-dev --kube-context test-context --wait --timeout 2m0s

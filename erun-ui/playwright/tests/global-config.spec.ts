@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/erunApp.js';
+import { SEED_TENANT } from '../fixtures/seedRoot.js';
 
 test.describe('global config dialog', () => {
   test('opens and closes cleanly', async ({ app }) => {
@@ -6,8 +7,7 @@ test.describe('global config dialog', () => {
     await app.globalConfigDialog.waitForOpen();
     await expect(app.globalConfigDialog.locator()).toBeVisible();
 
-    const tenant = (await app.globalConfigDialog.getDefaultTenant()).trim();
-    expect(tenant.length).toBeGreaterThan(0);
+    expect((await app.globalConfigDialog.getDefaultTenant()).trim()).toBe(SEED_TENANT);
 
     await app.globalConfigDialog.cancel();
     await app.globalConfigDialog.waitForClosed();
@@ -28,11 +28,10 @@ test.describe('global config dialog', () => {
     // tracks of a sm:grid-cols-2 grid. A configured alias long enough
     // to exceed the track (e.g. "Rihards.Freimanis+020362606330@aws")
     // used to bleed past the trigger and visually cover the start of
-    // the Region trigger (#359). The headless backend reflects the
-    // developer's ~/.erun/ config, so we cannot stage a real long
-    // alias here — mutate the select-value span directly to force the
-    // same layout state and assert the rendered content stays within
-    // its column.
+    // the Region trigger (#359). The seeded baseline keeps its alias
+    // short and the layout state under test is purely visual, so mutate
+    // the select-value span directly to force the same layout state and
+    // assert the rendered content stays within its column.
     await provider.evaluate((btn) => {
       const span = btn.querySelector('[data-slot="select-value"]');
       if (!(span instanceof HTMLElement)) {

@@ -25,13 +25,6 @@ type remoteRepositorySpec struct {
 
 var codeCommitHostPattern = regexp.MustCompile(`^git-codecommit\.[a-z0-9-]+\.amazonaws\.com(?:\.cn)?$`)
 
-type remoteDefaultDevopsFile struct {
-	Path    string
-	Mode    string
-	Content []byte
-	Legacy  []string
-}
-
 func (s bootstrapRunner) ensureRemoteRepository(params BootstrapInitParams, tenant, envName, kubernetesContext, projectRoot string) (ShellLaunchParams, remoteRepositorySpec, error) {
 	target := s.remoteRepositoryOpenResult(tenant, envName, kubernetesContext, projectRoot, params.ResolvedType())
 	target.EnvConfig.RuntimePod = NormalizeRuntimePodResources(params.RuntimePod)
@@ -157,16 +150,13 @@ func (s bootstrapRunner) ensureRemoteWorktree(req ShellLaunchParams, projectRoot
 }
 
 func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchParams, runtimeVersion, runtimeImage string) error {
-	runtimeImage = strings.TrimSpace(runtimeImage)
-	if runtimeImage == "" {
-		runtimeImage = DevopsComponentName
+	if runtimeImage = strings.TrimSpace(runtimeImage); runtimeImage != "" && runtimeImage != DevopsComponentName {
+		target.EnvConfig.RuntimeImage = runtimeImage
 	}
-	spec, err := resolveDefaultDevopsDeploySpecWithImage(target, runtimeImage)
+	spec, err := resolvePublishedDevopsDeploySpec(s.Context, target, runtimeVersion)
 	if err != nil {
 		return err
 	}
-	spec.Deploy.ReleaseName = RuntimeReleaseName(target.Tenant)
-	spec.Deploy.Version = strings.TrimSpace(runtimeVersion)
 	if err := RunDeploySpec(s.Context, spec, nil, nil, s.DeployHelmChart); err != nil {
 		return err
 	}
@@ -176,118 +166,6 @@ func (s bootstrapRunner) ensureRemoteRuntime(target OpenResult, req ShellLaunchP
 		return nil
 	}
 	return s.WaitForRemoteRuntime(req)
-}
-
-func (s bootstrapRunner) ensureRemoteDefaultDevopsBootstrap(req ShellLaunchParams, projectRoot, tenant, envName, runtimeVersion string) error {
-	files, err := remoteDefaultDevopsBootstrapFiles(projectRoot, tenant, envName, runtimeVersion)
-	if err != nil {
-		return err
-	}
-	if len(files) == 0 {
-		return nil
-	}
-
-	lines := []string{"set -eu"}
-	for index, file := range files {
-		lines = append(lines, remoteDefaultDevopsFileScript(index, file)...)
-	}
-
-	output, err := s.runRemoteScript(req, "remote-default-devops-bootstrap", strings.Join(lines, "\n"))
-	if err != nil {
-		return fmt.Errorf("bootstrap remote devops module: %w%s", err, formatRemoteCommandStderr(output.Stderr))
-	}
-	return nil
-}
-
-func remoteDefaultDevopsBootstrapFiles(projectRoot, tenant, envName, runtimeVersion string) ([]remoteDefaultDevopsFile, error) {
-	projectRoot = strings.TrimSpace(projectRoot)
-	tenant = strings.TrimSpace(tenant)
-	if projectRoot == "" || tenant == "" {
-		return nil, nil
-	}
-	projectRoot = path.Clean(projectRoot)
-	moduleName := RuntimeReleaseName(tenant)
-	files := make([]remoteDefaultDevopsFile, 0, len(defaultDevopsModuleTemplates)+len(defaultDevopsChartTemplates)+1)
-	for _, templateFile := range defaultDevopsModuleTemplates {
-		data, err := defaultDevopsModuleFiles.ReadFile(templateFile.AssetPath)
-		if err != nil {
-			return nil, err
-		}
-		targetPath := strings.ReplaceAll(templateFile.TargetPath, "__MODULE_NAME__", moduleName)
-		resolvedPath := path.Join(projectRoot, targetPath)
-		content := renderDefaultDevopsModuleTemplate(templateFile.AssetPath, moduleName, runtimeVersion, data)
-		files = append(files, remoteDefaultDevopsFile{
-			Path:    resolvedPath,
-			Mode:    fmt.Sprintf("%o", templateFile.Mode.Perm()),
-			Content: content,
-			Legacy:  defaultDevopsLegacyContents(resolvedPath, content),
-		})
-	}
-
-	replacer := strings.NewReplacer("__MODULE_NAME__", moduleName)
-	resolvedAppVersion := defaultDevopsChartAppVersion(runtimeVersion)
-	for _, templateFile := range defaultDevopsChartTemplates {
-		data, err := defaultDevopsChartFiles.ReadFile(templateFile.AssetPath)
-		if err != nil {
-			return nil, err
-		}
-		targetPath := replacer.Replace(templateFile.TargetPath)
-		resolvedPath := path.Join(projectRoot, targetPath)
-		content := renderDefaultDevopsChartTemplate(templateFile.AssetPath, moduleName, moduleName, resolvedAppVersion, data)
-		files = append(files, remoteDefaultDevopsFile{
-			Path:    resolvedPath,
-			Mode:    fmt.Sprintf("%o", templateFile.Mode.Perm()),
-			Content: content,
-			Legacy:  defaultDevopsLegacyContents(resolvedPath, content),
-		})
-	}
-
-	if strings.TrimSpace(envName) != "" && !isLocalEnvironment(envName) {
-		resolvedPath := path.Join(projectRoot, moduleName, "k8s", moduleName, "values."+strings.ToLower(strings.TrimSpace(envName))+".yaml")
-		files = append(files, remoteDefaultDevopsFile{
-			Path: resolvedPath,
-			Mode: "644",
-		})
-	}
-	return files, nil
-}
-
-func remoteDefaultDevopsFileScript(index int, file remoteDefaultDevopsFile) []string {
-	tmp := fmt.Sprintf("erun_bootstrap_tmp_%d", index)
-	lines := []string{
-		fmt.Sprintf("mkdir -p %s", shellQuote(path.Dir(file.Path))),
-		fmt.Sprintf("if [ -d %s ]; then echo %s >&2; exit 1; fi", shellQuote(file.Path), shellQuote(fmt.Sprintf("%q is a directory", file.Path))),
-		fmt.Sprintf("%s=$(mktemp)", tmp),
-		fmt.Sprintf("printf %%s %s > \"$%s\"", shellQuote(string(file.Content)), tmp),
-		"replace=false",
-		fmt.Sprintf("if [ ! -e %s ]; then", shellQuote(file.Path)),
-		"  replace=true",
-		fmt.Sprintf("elif cmp -s \"$%s\" %s; then", tmp, shellQuote(file.Path)),
-		"  replace=false",
-	}
-	if len(file.Legacy) > 0 {
-		lines = append(lines, "else")
-		for legacyIndex, legacy := range file.Legacy {
-			legacyTmp := fmt.Sprintf("erun_bootstrap_legacy_%d_%d", index, legacyIndex)
-			lines = append(lines,
-				fmt.Sprintf("  %s=$(mktemp)", legacyTmp),
-				fmt.Sprintf("  printf %%s %s > \"$%s\"", shellQuote(legacy), legacyTmp),
-				fmt.Sprintf("  if cmp -s \"$%s\" %s; then replace=true; fi", legacyTmp, shellQuote(file.Path)),
-				fmt.Sprintf("  rm -f \"$%s\"", legacyTmp),
-			)
-		}
-	} else {
-		lines = append(lines,
-			"else",
-			"  replace=false",
-		)
-	}
-	lines = append(lines,
-		"fi",
-		fmt.Sprintf("if [ \"$replace\" = true ]; then cp \"$%s\" %s; chmod %s %s; fi", tmp, shellQuote(file.Path), shellQuote(file.Mode), shellQuote(file.Path)),
-		fmt.Sprintf("rm -f \"$%s\"", tmp),
-	)
-	return lines
 }
 
 func (s bootstrapRunner) resolveRemoteRepositoryURL(params BootstrapInitParams, tenant, envName string) (string, error) {

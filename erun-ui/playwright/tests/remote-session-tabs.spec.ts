@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/erunApp.js';
+import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
 // remote-session-tabs covers the detection flow from #478: when an env opens,
 // finishOpenSession fires reattachRemoteTerminalTabs, which asks the backend
@@ -8,8 +9,9 @@ import { expect, test } from '../fixtures/erunApp.js';
 //
 // The positive path — a pod that actually carries an `open-N` socket from
 // another window — is not reachable from the headless harness:
-//   - The harness has no staged runtime pod; ListRemoteAppSessions is
-//     fail-soft and returns nothing for envs whose cluster is absent.
+//   - The isolated harness has no staged runtime pod (kubectl is stubbed);
+//     ListRemoteAppSessions is fail-soft and returns nothing for envs whose
+//     cluster is absent.
 //   - Pre-seeding a dtach socket would require a live kubectl exec into a
 //     real pod, which the suite deliberately does not depend on.
 //
@@ -26,13 +28,7 @@ import { expect, test } from '../fixtures/erunApp.js';
 
 test.describe('remote session tab detection', () => {
   test('opening an env yields only known tab kinds with no duplicates', async ({ app, page }) => {
-    const tenants = await app.sidebar.tenants();
-    expect(tenants.length).toBeGreaterThan(0);
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    expect(envs.length).toBeGreaterThan(0);
-
-    await app.sidebar.openEnvironment(tenant, envs[0]!);
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     const strip = page.getByRole('tablist', { name: 'Open terminals' });
     await expect(strip).toBeVisible();

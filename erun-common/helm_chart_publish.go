@@ -87,6 +87,33 @@ func RunHelmChartPublish(ctx Context, spec HelmChartPublishSpec) error {
 	return nil
 }
 
+// VerifyPublishedHelmChart pulls the just-pushed chart back from the OCI
+// registry into a temp directory, proving the artifact later steps (and
+// every env consuming the published chart) depend on is actually fetchable.
+// Release Rules: do not assume remote state after pushing — check it.
+func VerifyPublishedHelmChart(ctx Context, ociRepo, chartName, version string) error {
+	destination := filepath.Join(os.TempDir(), "erun-chart-verify")
+	args := []string{
+		"pull",
+		strings.TrimSuffix(strings.TrimSpace(ociRepo), "/") + "/" + chartName,
+		"--version", version,
+		"--destination", destination,
+	}
+	ctx.TraceCommand("", "helm", args...)
+	if ctx.DryRun {
+		return nil
+	}
+	if err := os.MkdirAll(destination, 0o755); err != nil {
+		return err
+	}
+	if err := runHelmCommand(ctx, commandSpec{Name: "helm", Args: args}); err != nil {
+		return fmt.Errorf("verify published chart %s:%s: %w", chartName, version, err)
+	}
+	defer os.Remove(filepath.Join(destination, chartName+"-"+version+".tgz"))
+	ctx.Info("==> Verified published chart " + chartName + " " + version)
+	return nil
+}
+
 func runHelmCommand(ctx Context, spec commandSpec) error {
 	cmd := Command(spec.Name, spec.Args...)
 	cmd.Dir = spec.Dir

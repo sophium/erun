@@ -1,4 +1,5 @@
 audit: erun open --dry-run --vscode team dev
 config: would assign localportrangestart=17000 to team/dev
+trace-log: would append the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=false no-shell=false ide=vscode
 --vscode requires sshd-enabled remote environment; run `erun sshd init team dev` first

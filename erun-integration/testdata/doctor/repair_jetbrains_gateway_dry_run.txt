@@ -1,0 +1,6 @@
+Target: team/dev
+Running: Clear cached JetBrains Gateway backend metadata
+Cached backend path: <TMP>
+Would clear latest used IDE metadata in <TMP>
+audit: erun doctor --dry-run --repair-jetbrains-gateway team dev
+trace-log: would append the full trace to <TMP>

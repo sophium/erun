@@ -22,7 +22,7 @@ Common flags inherited from the root command apply to every subcommand:
 
 ### Common flags
 
-See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-context`, `--container-registry`, `--bootstrap`, `--set-default-tenant`, `-y` / `--yes`.
+See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-context`, `--container-registry`, `--runtime-image`, `--set-default-tenant`, `-y` / `--yes`.
 
 ### Advanced flags
 
@@ -32,7 +32,8 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 | `--remote` | bool | `false` | — | Sets `EnvConfig.remote = true`. With `--remote`, init runs inside the runtime pod (writes the bootstrap marker). |
 | `--no-git` | bool | `false` | Only meaningful with `--remote`. | Skips the in-pod `git clone` step. |
 | `--version <version>` | string (semver) | The CLI's built-in `ERUN_VERSION`. | Must satisfy `^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$`. | `EnvConfig.runtimeversion`. |
-| `--runtime-image <repo>` | string | Built-in default (`ghcr.io/sophium/erun-devops`). | Must be a valid OCI image reference (host[/path]…[:tag] without the tag — the tag comes from `--version`). | `EnvConfig.runtimeregistry` resolution. |
+| `--runtime-image <ref>` | string | unset (the published `<registry>/erun-devops:<version>` image). | A full OCI reference (registry path and/or tag present) is used verbatim; a bare name resolves to `<registry>/<name>:<runtime version>` at deploy time. | `EnvConfig.runtimeimage`; applied as `imageOverrides.erun-devops` on every published-chart deploy. |
+| `--bootstrap` | bool | `false` | — | **Deprecated, ignored.** Prints a deprecation warning; `init` no longer scaffolds a `<tenant>-devops/` module — envs deploy the published `erun-devops` chart. |
 | `--runtime-cpu <value>` | Kubernetes quantity | `4` | Must match the Kubernetes `Quantity` grammar (`m`, plain integer, decimal). | `EnvConfig.runtimepod.cpu`. |
 | `--runtime-memory <value>` | Kubernetes quantity | `8916Mi` | Must match the Kubernetes `Quantity` grammar (`Ki`, `Mi`, `Gi`, …). | `EnvConfig.runtimepod.memory`. |
 | `--codecommit-ssh-key-id <id>` | string (`APKA…` shape) | unset | Must start with `APKA`; must be a valid IAM key id (length 21). | Stored in the in-pod bootstrap marker (`bootstrap.yaml` → `codecommitSshKeyId`). |
@@ -45,9 +46,8 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 1. `~/.config/erun/<tenant>/tenant.yaml` (creating `~/.config/erun/<tenant>/` if missing).
 2. `~/.config/erun/<tenant>/<env>/config.yaml`.
 3. `<projectroot>/.erun/config.yaml`. Existing values are preserved; new defaults are merged.
-4. With `--bootstrap`: scaffolds `<projectroot>/<tenant>-devops/` (Dockerfile, build.sh, helm chart skeleton).
-5. Helm-installs the runtime chart into the namespace `<tenant>-<environment>`.
-6. With `--remote`: writes the in-pod marker at `/home/erun/.erun/<tenant>/<env>/bootstrap.yaml`.
+4. Helm-installs the runtime chart into the namespace `<tenant>-<environment>` — the repo-local chart when the project has one, otherwise the published `oci://<registry>/charts/erun-devops` chart pinned to the runtime version (see [`erun deploy`](/cli/deploy#where-the-runtime-chart-comes-from)).
+5. With `--remote`: writes the in-pod marker at `/home/erun/.erun/<tenant>/<env>/bootstrap.yaml`.
 
 ### `erun init` lifecycle algorithm
 
@@ -55,11 +55,10 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 2. Validate `--kubernetes-context` against `~/.kube/config`. On miss, abort with the available context list.
 3. Resolve `--project-root` (defaults to `git rev-parse --show-toplevel`). On miss, abort with `not in a git repository`.
 4. If the tenant/env already exists, prompt unless `-y` / `--confirm-environment`. Aborting on `n` is the safe default.
-5. With `--bootstrap`: render the `<tenant>-devops/` skeleton from the canonical template. Abort if any target file exists (no silent overwrite).
-6. Render and `helm upgrade --install` the runtime chart into `<tenant>-<environment>`.
-7. With `--remote`: open SSH and write the in-pod bootstrap marker.
-8. Update default-tenant pointer if `--set-default-tenant`.
-9. Exit `0`.
+5. Resolve the runtime chart — repo-local when the project carries one, the published `oci://<registry>/charts/erun-devops` otherwise — and `helm upgrade --install` it into `<tenant>-<environment>`.
+6. With `--remote`: open SSH and write the in-pod bootstrap marker.
+7. Update default-tenant pointer if `--set-default-tenant`.
+8. Exit `0`.
 
 ### Error codes
 
@@ -67,7 +66,6 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 |---|---|---|
 | `NOT_IN_GIT_REPO` | `--project-root` unset and cwd is not in a git repo. | `1` |
 | `KUBE_CONTEXT_MISSING` | `--kubernetes-context` is not present in `~/.kube/config`. | `1` |
-| `BOOTSTRAP_CONFLICT` | `<projectroot>/<tenant>-devops/` exists and `--bootstrap` was passed. | `1` |
 | `HELM_INSTALL_FAILED` | Runtime chart install failed; the per-user config is written but the in-pod marker is not. | `2` |
 | `REGISTRY_UNREACHABLE` | `--container-registry` is set but DNS/network failed. (Warning, not abort.) | `0` (with warning) |
 
@@ -85,7 +83,7 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 |---|---|---|---|---|
 | `--no-alias-prompt` | bool | `false` | Only meaningful with `--no-shell`. | None (interactive choice only). |
 | `--version <version>` | string (semver) | `EnvConfig.runtimeversion` or the CLI built-in. | Same as `erun init --version`. | `EnvConfig.runtimeversion` for this run only (not persisted). |
-| `--runtime-image <repo>` | string | `EnvConfig.runtimeregistry` resolution. | Same as `erun init --runtime-image`. | Run-only override. |
+| `--runtime-image <ref>` | string | `EnvConfig.runtimeimage` (unset → the published image). | Same reference rules as `erun init --runtime-image`. Applies only to envs deploying the published chart (rides in as `imageOverrides.erun-devops`); envs with a repo-local chart ignore it. | Run-only override (not persisted). |
 | `--snapshot` / `--no-snapshot` | tri-state bool (`true` / `false` / unset) | `EnvConfig.snapshot` (defaults to `nil`). | Only applies to agent envs. Ignored against runtime envs (warning logged). | `EnvConfig.snapshot` for this run. |
 
 ### `erun open` lifecycle algorithm
@@ -95,7 +93,7 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 3. If `EnvConfig.cloudprovideralias` is set, look up the cloud context. If `stopped`, send the provider-specific start command. Poll the cluster API every `5s` until reachable or 5 minutes elapse (then abort `CLUSTER_UNREACHABLE`).
 4. Render the runtime chart with the effective `EnvConfig` values; run `helm upgrade --install <env>-runtime <chart>` into `<tenant>-<env>`.
 5. Wait for the runtime pod's SSH server to be reachable on the in-pod port (`EnvConfig.sshd.port`, default `22`). Readiness probe is a TCP connect + banner-line read, retried every `2s` with a `60s` cap.
-6. Establish local port-forwards. The desktop's port allocator writes `<UserConfigDir>/erun/portforward/{mcp,ssh,api}/<tenant>/<env>.json` with `{localPort, podPort, pid}`.
+6. Establish local port-forwards. `erun open` starts a detached `kubectl port-forward` per channel and records it at `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.json` with `{tenant, environment, kubernetesContext, namespace, localPort, logPath, processId}` — see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files).
 7. Attach a terminal (default), print kubectl/cwd switching commands (`--no-shell`), or launch the IDE (`--vscode`/`--intellij`).
 8. Exit `0` when the terminal exits.
 
@@ -246,7 +244,7 @@ Each check returns one of `ok`, `missing`, `error` (parse failure, permission de
 |---|---|---|
 | `config.tenant` | `~/.config/erun/<tenant>/tenant.yaml` exists and parses. | Suggests `erun init <tenant>`. |
 | `config.environment` | `~/.config/erun/<tenant>/<env>/config.yaml` exists and parses. | Suggests `erun init <tenant> <env>`. |
-| `config.project` | `<projectroot>/.erun/config.yaml` exists. | Suggests `erun init --bootstrap`. |
+| `config.project` | `<projectroot>/.erun/config.yaml` exists. | Suggests `erun init`. |
 | `cluster.kube_context` | `EnvConfig.kubernetescontext` is in `~/.kube/config`. | Lists available contexts. |
 | `cluster.runtime_pod` | A pod matching the runtime-chart's labels is `Running` in `<tenant>-<env>`. | Suggests `erun open`. |
 | `workspace.project_root` | `<projectroot>` exists and is a git repo. | No automatic recovery. |
@@ -305,8 +303,9 @@ See [Release version policy](/agent-reference/release-policy) for the version-pa
 
 1. The Kubernetes namespace `<tenant>-<env>` (cascades to every Deployment, PVC, Service, ConfigMap, Secret inside).
 2. The per-user env config directory `~/.config/erun/<tenant>/<env>/`.
-3. The local port-forward marker files under `<UserConfigDir>/erun/portforward/{mcp,ssh,api}/<tenant>/<env>.json`.
-4. If the deleted env was the tenant's `defaultenvironment`: clears the pointer (next `erun open` against the tenant prompts for a new default).
+3. If the deleted env was the tenant's `defaultenvironment`: clears the pointer (next `erun open` against the tenant prompts for a new default).
+
+The local port-forward state files under `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.json` are **not** removed; a later env with the same name overwrites them (see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files)).
 
 ### Error codes
 

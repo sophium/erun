@@ -1,4 +1,4 @@
-import { FolderPlus, LoaderCircle, Rocket } from 'lucide-react';
+import { FolderPlus, LoaderCircle } from 'lucide-react';
 import * as React from 'react';
 
 import {
@@ -36,7 +36,6 @@ import { EditableComboField } from './EditableComboField';
 import { uniqueSuggestions } from './EditableComboField.helpers';
 import { EnvironmentTypeSelect, LocalRepoPathField } from './EnvironmentTypeFields';
 import { KubernetesContextSelect } from './KubernetesContextSelect';
-import { ReadonlyField } from './ManageDialog.fields';
 import { RuntimeResourceControls } from './RuntimeResourceControls';
 import { VersionField } from './VersionField';
 
@@ -108,22 +107,15 @@ export function EnvironmentDialogView(): React.ReactElement {
 }
 
 function EnvironmentDialogHeader({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
-  const isDeploy = dialog.actionMode === 'deploy';
   return (
     <DialogHeader>
-      <DialogTitle>{isDeploy ? 'Deploy environment' : 'New environment'}</DialogTitle>
-      <DialogDescription>{environmentDialogDescription(dialog, isDeploy)}</DialogDescription>
+      <DialogTitle>New environment</DialogTitle>
+      <DialogDescription>{environmentDialogDescription(dialog)}</DialogDescription>
     </DialogHeader>
   );
 }
 
-function environmentDialogDescription(dialog: EnvironmentDialog, isDeploy: boolean): string {
-  if (isDeploy) {
-    if (dialog.tenant && dialog.environment) {
-      return `Roll out a new version to ${dialog.tenant} / ${dialog.environment}.`;
-    }
-    return 'Roll out a new version to the selected environment.';
-  }
+function environmentDialogDescription(dialog: EnvironmentDialog): string {
   if (dialog.tenant && dialog.environment) {
     return `Create ${dialog.tenant} / ${dialog.environment}.`;
   }
@@ -140,7 +132,6 @@ function EnvironmentDialogFields({
   const dispatch = useAppDispatch();
   const dialog = useAppSelector((state) => state.environmentDialog);
   const versionSuggestions = useAppSelector((state) => state.tenants.versionSuggestions);
-  const isDeploy = dialog.actionMode === 'deploy';
   return (
     <>
       <EnvironmentNameFields tenantRef={tenantRef} environmentRef={environmentRef} />
@@ -152,7 +143,6 @@ function EnvironmentDialogFields({
         )}
         suggestions={versionSuggestions}
         choicesOpen={dialog.choicesOpen}
-        required={isDeploy}
         disabled={dialog.busy}
         onValueChange={(version) => {
           dispatch(updateEnvironmentDialog({ version }));
@@ -164,7 +154,7 @@ function EnvironmentDialogFields({
           dispatch(selectEnvironmentVersionSuggestion(suggestion));
         }}
       />
-      {!isDeploy && <EnvironmentCreateFields dialog={dialog} />}
+      <EnvironmentCreateFields dialog={dialog} />
     </>
   );
 }
@@ -179,7 +169,6 @@ function EnvironmentNameFields({
   const dispatch = useAppDispatch();
   const dialog = useAppSelector((state) => state.environmentDialog);
   const tenants = useAppSelector((state) => state.tenants.tenants);
-  const isDeploy = dialog.actionMode === 'deploy';
   const tenantSuggestions = React.useMemo(
     () =>
       uniqueSuggestions([
@@ -194,19 +183,6 @@ function EnvironmentNameFields({
     [dialog, tenants],
   );
 
-  // In deploy mode the tenant + environment are already selected and the
-  // user cannot change them, so render them as ReadonlyField (matching the
-  // ManageDialog General tab) instead of disabled editable inputs that
-  // imply editability. AGENTS.md "empty states must not look like disabled
-  // inputs" — same anti-pattern for fixed values.
-  if (isDeploy) {
-    return (
-      <>
-        <ReadonlyField id="environment-tenant" label="Tenant" value={dialog.tenant} />
-        <ReadonlyField id="environment-name" label="Environment" value={dialog.environment} />
-      </>
-    );
-  }
   return (
     <>
       <EditableComboField
@@ -289,13 +265,6 @@ function RuntimePodFields({ dialog }: { dialog: EnvironmentDialog }): React.Reac
 
 function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
-  // The "Create tenant DevOps repository" toggle used to live here but
-  // its value is fully derived from state the dialog already has: the
-  // submit pipeline (environmentDialogSelection) passes --bootstrap iff
-  // the tenant is new, since that's the only case where the remote
-  // devops module isn't already in place. Removed to stop asking an
-  // unanswerable question.
-  //
   // "Initialize without Git checkout" only changes behavior on the
   // remote-worktree init path (ensureRemoteRepository in
   // erun-common/init.go); it's a no-op for local-agent. Hide it then.
@@ -380,26 +349,15 @@ interface EnvironmentSubmitGate {
   reason: string;
 }
 
-function environmentDialogSubmitGate(
-  dialog: EnvironmentDialog,
-  isDeploy: boolean,
-): EnvironmentSubmitGate {
-  if (dialog.busy) {
-    return { disabled: true, reason: '' };
-  }
-  if (isDeploy) {
-    return { disabled: false, reason: '' };
-  }
-  return environmentCreateSubmitGate(dialog);
-}
-
-// environmentCreateSubmitGate isolates the create-mode preconditions so
-// the outer gate stays within the eslint complexity ceiling. The
+// environmentDialogSubmitGate resolves the create preconditions. The
 // returned reason is rendered next to the disabled submit button to
 // satisfy Nielsen #5 (error prevention) — users see why submit is
 // blocked instead of guessing. Preconditions are checked in order and
 // the first match wins.
-function environmentCreateSubmitGate(dialog: EnvironmentDialog): EnvironmentSubmitGate {
+function environmentDialogSubmitGate(dialog: EnvironmentDialog): EnvironmentSubmitGate {
+  if (dialog.busy) {
+    return { disabled: true, reason: '' };
+  }
   const blocker =
     localRepoPathBlocker(dialog) ??
     kubernetesContextBlocker(dialog) ??
@@ -441,8 +399,7 @@ function runtimeCapacityBlocker(dialog: EnvironmentDialog): string | null {
 
 function EnvironmentDialogFooter({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
-  const isDeploy = dialog.actionMode === 'deploy';
-  const gate = environmentDialogSubmitGate(dialog, isDeploy);
+  const gate = environmentDialogSubmitGate(dialog);
   return (
     <DialogFooter className="items-center sm:justify-between">
       <p
@@ -472,13 +429,7 @@ function EnvironmentDialogFooter({ dialog }: { dialog: EnvironmentDialog }): Rea
           aria-describedby={gate.reason ? 'environment-dialog-submit-reason' : undefined}
         >
           <EnvironmentSubmitIcon dialog={dialog} />
-          {dialog.busy
-            ? isDeploy
-              ? 'Deploying...'
-              : 'Creating...'
-            : isDeploy
-              ? 'Deploy'
-              : 'Create'}
+          {dialog.busy ? 'Creating...' : 'Create'}
         </Button>
       </div>
     </DialogFooter>
@@ -489,11 +440,7 @@ function EnvironmentSubmitIcon({ dialog }: { dialog: EnvironmentDialog }): React
   if (dialog.busy) {
     return <LoaderCircle className="animate-spin" aria-hidden="true" />;
   }
-  return dialog.actionMode === 'deploy' ? (
-    <Rocket aria-hidden="true" />
-  ) : (
-    <FolderPlus aria-hidden="true" />
-  );
+  return <FolderPlus aria-hidden="true" />;
 }
 
 function environmentNameSuggestions(

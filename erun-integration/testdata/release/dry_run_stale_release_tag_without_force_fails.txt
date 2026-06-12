@@ -1,0 +1,36 @@
+<VERSION>
+audit: erun release --dry-run
+release: resolving project root
+release: project root = <TMP>
+release: resolving release module root
+release: release root = <TMP>
+release: loading release config from project
+release: main branch = main, develop branch = develop
+release: resolving git branch and commit
+git -C <TMP> rev-parse --abbrev-ref HEAD
+git -C <TMP> rev-parse --short HEAD
+release: branch = main, commit = <SHORTSHA>
+release: resolving base version from VERSION file
+release: base version = <VERSION> (from <TMP>
+release: classified mode = stable
+git -C <TMP> show-ref --verify --quiet refs/heads/develop
+release: develop branch "develop" exists = false
+release: branch=main mode=stable version=<VERSION>
+next version: <VERSION>
+docker image: ghcr.io/sophium/api:<VERSION>
+git -C <TMP> status --porcelain --untracked-files=no
+release: worktree clean = true
+stage: sync-remote
+cd <TMP> && git fetch origin
+cd <TMP> && git rebase origin/main
+stage: release
+write <TMP>
+  apiVersion: v2
+  appVersion: <VERSION>
+  name: api
+  version: <VERSION>
+cd <TMP> && git add erun-devops/k8s/api/Chart.yaml
+cd <TMP> && git commit -m '[skip ci] release <VERSION>'
+git -C <TMP> rev-parse '<VERSION>^{}'
+git -C <TMP> rev-parse HEAD
+release tag "<VERSION>" already exists at <HEX>, expected current HEAD <HEX>

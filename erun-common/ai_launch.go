@@ -85,18 +85,50 @@ func AISessionLaunchCommand(aiTool string, claude EnvironmentClaudeConfig) strin
 	if tool := strings.TrimSpace(aiTool); tool != "" && tool != defaultAITool {
 		return tool
 	}
-	return claudeLaunchGuard(resolveClaudeEffort(claude), resolveClaudeDefaultModel(claude), claude.VerboseDebug)
+	return `if [ -d "$HOME/.claude/projects/$(pwd | tr / -)" ]; then claude --continue` + claudeLaunchFlags(claude) + `; else claude` + claudeLaunchFlags(claude) + `; fi`
 }
 
-func claudeLaunchGuard(effort, model string, verboseDebug bool) string {
-	flags := claudeEffortFlags(effort)
-	if model != "" {
+// AISessionLaunchLines returns the dtach session's AI program as script
+// lines: the launch plus the exit wrapper that keeps the tab honest when the
+// tool ends (issue #464). The launch used to be a bare line in the launcher
+// body, so a killed Claude (OOM, crash, or a clean exit) silently fell
+// through to the trailing interactive shell — a tab labelled "AI" showing a
+// bash prompt with no explanation. The wrapper captures the exit status,
+// names it (137 = SIGKILL, almost always the container's OOM killer, with
+// the Runtime-settings memory hint), and prints the exact resume command
+// before the shell takes over, so the state is explicit and recovery is one
+// paste away.
+func AISessionLaunchLines(aiTool string, claude EnvironmentClaudeConfig) []string {
+	launch := AISessionLaunchCommand(aiTool, claude)
+	label := "Claude"
+	resume := "claude --continue" + claudeLaunchFlags(claude)
+	if tool := strings.TrimSpace(aiTool); tool != "" && tool != defaultAITool {
+		label = "The AI tool"
+		resume = tool
+	}
+	return []string{
+		"ai_status=0",
+		launch + " || ai_status=$?",
+		`if [ "$ai_status" = 137 ]; then printf '\n\033[2;33m── ` + label + ` was killed (exit 137) — likely out of memory; consider raising Memory in the environment Runtime settings ──\033[0m\n'; elif [ "$ai_status" != 0 ]; then printf '\n\033[2;33m── ` + label + ` exited (exit %s) ──\033[0m\n' "$ai_status"; else printf '\n\033[2;33m── ` + label + ` session ended ──\033[0m\n'; fi`,
+		// The resume command goes through %s + shellQuote: it can carry
+		// single quotes itself (the ultracode --settings JSON), which would
+		// break the printf format's own quoting if inlined.
+		`printf '\033[2;33m── resume with: %s — or use this shell ──\033[0m\n' ` + shellQuote(resume),
+	}
+}
+
+// claudeLaunchFlags composes the managed Claude launch flags: the effort
+// mechanism (--effort or the ultracode --settings), the env's default model
+// (issue #482), and --verbose --debug (issue #477).
+func claudeLaunchFlags(claude EnvironmentClaudeConfig) string {
+	flags := claudeEffortFlags(resolveClaudeEffort(claude))
+	if model := resolveClaudeDefaultModel(claude); model != "" {
 		flags += " --model " + model
 	}
-	if verboseDebug {
+	if claude.VerboseDebug {
 		flags += " --verbose --debug"
 	}
-	return `if [ -d "$HOME/.claude/projects/$(pwd | tr / -)" ]; then claude --continue` + flags + `; else claude` + flags + `; fi`
+	return flags
 }
 
 // claudeEffortFlags maps a resolved effort level to its launch flags.

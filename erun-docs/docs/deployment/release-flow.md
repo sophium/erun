@@ -18,6 +18,12 @@ ERun's release flow is repository-wide: a release moves all modules together (`e
 
 Base images (`erun-ubuntu`, `erun-dind`, `erun-ubuntu`-derived) publish first; dependent images publish only after their bases are available in the registry.
 
+## Published runtime chart
+
+After every release image has pushed, the release publishes the canonical `erun-devops` helm chart as a release artifact: `helm package` + `helm push` to `oci://<registry>/charts`, so the chart is addressable as `oci://<registry>/charts/erun-devops:<version>` (default registry `ghcr.io/sophium`). The chart's `version` and `appVersion` equal the release version — image and chart are one contract, published together. The flow then verifies the artifact with a `helm pull` round-trip before the release is considered complete, so a consuming env never points at a chart that didn't actually land.
+
+Environments without a repo-local runtime chart deploy this artifact directly — see [`erun deploy` · Where the runtime chart comes from](/cli/deploy#where-the-runtime-chart-comes-from).
+
 ## Build caching
 
 Release-tagged builds participate in the same content-fingerprint cache as snapshot builds. Fresh clones promote pinned bases without rebuilding; local Dockerfile edits trigger a rebuild because the recomputed fingerprint diverges.

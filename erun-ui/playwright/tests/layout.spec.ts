@@ -63,8 +63,8 @@ test.describe('layout panels', () => {
       .toBeLessThanOrEqual(1);
   });
 
-  test('debug panel toggle reveals the resize handle', async ({ app, page }) => {
-    const handle = page.getByRole('button', { name: 'Resize debug panel' });
+  test('diagnostics panel toggle reveals the resize handle', async ({ app }) => {
+    const handle = app.debugPanel.resizeHandle();
     const initiallyOpen = await handle.isVisible().catch(() => false);
 
     await app.debugPanel.toggle();

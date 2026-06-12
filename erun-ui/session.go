@@ -92,8 +92,8 @@ func buildOpenCommand(cliPath, tenant, environment string) string {
 	return shellQuote(cliPath) + " open " + shellQuote(strings.TrimSpace(tenant)) + " " + shellQuote(strings.TrimSpace(environment))
 }
 
-func buildOpenArgs(tenant, environment string, debug ...bool) []string {
-	return erunArgs(debugEnabled(debug...), "open", strings.TrimSpace(tenant), strings.TrimSpace(environment))
+func buildOpenArgs(tenant, environment string) []string {
+	return []string{"open", strings.TrimSpace(tenant), strings.TrimSpace(environment)}
 }
 
 // withAppSession appends the desktop persistent-session flags to an `erun open`
@@ -115,7 +115,7 @@ func withAppSession(args []string, sessionID string, ai, contribute bool) []stri
 }
 
 func buildOpenIDEArgs(selection uiSelection, ide string) []string {
-	args := erunArgs(selection.Debug, "open", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
+	args := buildOpenArgs(selection.Tenant, selection.Environment)
 	switch strings.TrimSpace(ide) {
 	case "vscode":
 		return append(args, "--vscode")
@@ -201,11 +201,11 @@ func localOpenIDEWindowsCommand(ide string) (string, error) {
 }
 
 func buildSSHDInitArgs(selection uiSelection) []string {
-	return erunArgs(selection.Debug, "sshd", "init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
+	return []string{"sshd", "init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment)}
 }
 
 func buildDoctorArgs(selection uiSelection) []string {
-	return erunArgs(selection.Debug, "doctor", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
+	return []string{"doctor", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment)}
 }
 
 func buildOpenNoShellArgs(tenant, environment string) []string {
@@ -304,7 +304,7 @@ func buildInitArgs(selection uiSelection) []string {
 		// a silent behavior change for the desktop flow.
 		envType = "remote-agent"
 	}
-	args := erunArgs(selection.Debug, "init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment), "--type="+envType)
+	args := []string{"init", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment), "--type=" + envType}
 	if version := strings.TrimSpace(selection.Version); version != "" {
 		args = append(args, "--version", version)
 	}
@@ -336,14 +336,11 @@ func buildInitArgs(selection uiSelection) []string {
 	if selection.NoGit {
 		args = append(args, "--no-git")
 	}
-	if selection.Bootstrap {
-		args = append(args, "--bootstrap")
-	}
 	return args
 }
 
 func buildDeployArgs(selection uiSelection) []string {
-	args := erunArgs(selection.Debug, "deploy", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment))
+	args := []string{"deploy", strings.TrimSpace(selection.Tenant), strings.TrimSpace(selection.Environment)}
 	if version := strings.TrimSpace(selection.Version); version != "" {
 		args = append(args, "--version", version)
 	}
@@ -354,22 +351,9 @@ func buildDeployArgs(selection uiSelection) []string {
 // scoped to the selection's tenant + environment so each Upgrade-all member
 // upgrades in its own env, in parallel with the others (issue #497).
 func buildUpgradeArgs(selection uiSelection) []string {
-	return erunArgs(selection.Debug, "upgrade", "--tenant", selection.Tenant, "--environment", selection.Environment)
+	return []string{"upgrade", "--tenant", selection.Tenant, "--environment", selection.Environment}
 }
 
-func erunArgs(debug bool, args ...string) []string {
-	if !debug {
-		return args
-	}
-	result := make([]string, 0, len(args)+1)
-	result = append(result, "-vv")
-	result = append(result, args...)
-	return result
-}
-
-func debugEnabled(values ...bool) bool {
-	return len(values) > 0 && values[0]
-}
 
 func buildCloudInitAWSArgs() []string {
 	return []string{"cloud", "init", "aws"}

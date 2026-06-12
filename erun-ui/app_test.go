@@ -291,7 +291,7 @@ func TestLoadVersionSuggestionsFallsBackToDefaultRuntimeTagsWhenTenantImageMissi
 		},
 	})
 
-	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test ", Action: "deploy"})
+	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test "})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T
 		},
 	})
 
-	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test ", Action: "init"})
+	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test "})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
@@ -592,17 +592,9 @@ func TestBuildOpenArgsTrimsTenantAndEnvironment(t *testing.T) {
 	}
 }
 
-func TestBuildOpenArgsIncludesDebugVerbosity(t *testing.T) {
-	got := buildOpenArgs(" erun ", " local ", true)
-	want := []string{"-vv", "open", "erun", "local"}
-	if strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Fatalf("unexpected args: got %+v want %+v", got, want)
-	}
-}
-
 func TestBuildOpenIDEArgsAddsIDEFlag(t *testing.T) {
-	got := buildOpenIDEArgs(uiSelection{Tenant: " erun ", Environment: " remote ", Debug: true}, "vscode")
-	want := []string{"-vv", "open", "erun", "remote", "--vscode"}
+	got := buildOpenIDEArgs(uiSelection{Tenant: " erun ", Environment: " remote "}, "vscode")
+	want := []string{"open", "erun", "remote", "--vscode"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected VS Code args: got %+v want %+v", got, want)
 	}
@@ -615,8 +607,8 @@ func TestBuildOpenIDEArgsAddsIDEFlag(t *testing.T) {
 }
 
 func TestBuildDoctorArgsTrimsTenantAndEnvironment(t *testing.T) {
-	got := buildDoctorArgs(uiSelection{Tenant: " erun ", Environment: " remote ", Debug: true})
-	want := []string{"-vv", "doctor", "erun", "remote"}
+	got := buildDoctorArgs(uiSelection{Tenant: " erun ", Environment: " remote "})
+	want := []string{"doctor", "erun", "remote"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected doctor args: got %+v want %+v", got, want)
 	}
@@ -659,10 +651,9 @@ func TestBuildInitArgsIncludesRuntimeVersion(t *testing.T) {
 		KubernetesContext: " orbstack ",
 		ContainerRegistry: " erunpaas ",
 		NoGit:             true,
-		Bootstrap:         true,
 		SetDefaultTenant:  true,
 	})
-	want := []string{"init", "erun", "remote", "--type=remote-agent", "--version", "1.0.19", "--runtime-image", "erun-devops", "--runtime-cpu", "6", "--runtime-memory", "12Gi", "--kubernetes-context", "orbstack", "--container-registry", "erunpaas", "--set-default-tenant=true", "--confirm-environment=true", "--no-git", "--bootstrap"}
+	want := []string{"init", "erun", "remote", "--type=remote-agent", "--version", "1.0.19", "--runtime-image", "erun-devops", "--runtime-cpu", "6", "--runtime-memory", "12Gi", "--kubernetes-context", "orbstack", "--container-registry", "erunpaas", "--set-default-tenant=true", "--confirm-environment=true", "--no-git"}
 	if len(got) != len(want) {
 		t.Fatalf("unexpected args length: got %+v want %+v", got, want)
 	}
@@ -2318,9 +2309,10 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 	}
 
 	got := strings.Join(actions, "\n")
-	// The ERun tab runs `erun open … --app-session open-0`: a persistent,
-	// reattachable dtach session so reopening reconnects to the running shell (#478).
-	if got != "terminal open frs prod --app-session open-0" {
+	// The ERun tab runs `erun open … --app-session open-0 --skip-ensure`: a
+	// persistent, reattachable dtach session (#478) whose preflight runs once
+	// per env via the shared ensure, not per tab (#463).
+	if got != "terminal open frs prod --app-session open-0 --skip-ensure" {
 		t.Fatalf("expected only terminal start action, got:\n%s", got)
 	}
 	// Cloud-context Status is no longer persisted, so we rely on the
@@ -3396,7 +3388,9 @@ func TestStartAISessionRunsErunOpenAsPersistentAITab(t *testing.T) {
 	// reconnects to the running claude. The desktop no longer types the launch
 	// in, so there is no initial input. The AI tool + effort are resolved pod-side
 	// by `erun open --ai`; AISessionLaunchCommand is covered in erun-common. #478.
-	wantArgs := []string{"open", "erun", "remote", "--app-session", "ai", "--ai"}
+	// --skip-ensure: the preflight runs once per env via the shared ensure,
+	// not per tab (#463).
+	wantArgs := []string{"open", "erun", "remote", "--app-session", "ai", "--ai", "--skip-ensure"}
 	if strings.Join(started.Args, "\n") != strings.Join(wantArgs, "\n") {
 		t.Fatalf("unexpected args: got %+v want %+v", started.Args, wantArgs)
 	}

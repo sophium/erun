@@ -22,21 +22,20 @@ test.describe('terminal scroll on resize (#465)', () => {
   test('panel toggle re-anchors an at-bottom viewport and preserves a scrolled-up one', async ({
     app,
     page,
+    seededEnv,
   }) => {
-    // Use a normal environment, never the local default (erun/local): its
-    // local-shell tab set behaves differently and is not what this spec
-    // drives. The Local tab gives a real selected session to inject into.
-    const target = await app.sidebar.firstEnvironmentExcludingLocal();
-    test.skip(target === null, 'no non-local environment in this developer harness');
-    const { tenant, env } = target!;
+    // Use a per-test seeded env so the scrollback this spec stages never
+    // leaks into the shared baseline rows. The Local tab gives a real
+    // selected session to inject into.
+    const { tenant, environment } = seededEnv;
 
-    await app.sidebar.openEnvironment(tenant, env);
+    await app.sidebar.openEnvironment(tenant, environment);
     const localTab = page.getByRole('tab', { name: 'Local', exact: true });
     await localTab.waitFor({ state: 'visible', timeout: 15_000 });
     await localTab.click();
 
     const sessionId = await discoverSelectedSessionId(app, page);
-    test.skip(sessionId === 0, 'no selected terminal session in this developer harness');
+    expect(sessionId).toBeGreaterThan(0);
 
     // Stage more lines than any viewport height so real scrollback exists.
     // The lines are wider than any plausible cols so a cols-changing resize

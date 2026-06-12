@@ -79,8 +79,27 @@ export class Sidebar {
   // becomes interactive, and Enter fires the handler without a hover (a hover
   // opens the row's IconTooltip, whose popper intercepts a mouse click). Works
   // regardless of whether the env is the effective selection.
+  //
+  // Retries: when the backend boot-reattaches a previously open env, the
+  // restored terminal steals focus asynchronously and can swallow the Enter
+  // between our focus and the keydown. Re-press until the manage dialog
+  // (identified by its General tab, mirroring ManageDialog.locator) opens.
   async openManageDialogViaKeyboard(tenant: string, env: string): Promise<void> {
-    await this.environmentRow(tenant, env).press('Enter');
+    const dialog = this.page
+      .getByRole('dialog')
+      .filter({ has: this.page.getByRole('tab', { name: /^General/ }) })
+      .first();
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await this.environmentRow(tenant, env).press('Enter');
+      const opened = await dialog.waitFor({ state: 'visible', timeout: 2_000 }).then(
+        () => true,
+        () => false,
+      );
+      if (opened) {
+        return;
+      }
+    }
+    throw new Error(`manage dialog did not open for ${tenant} / ${env} via keyboard`);
   }
 
   // envRowButton targets the clickable env-row button (the one whose
@@ -148,23 +167,6 @@ export class Sidebar {
       names.push(name);
     }
     return names;
-  }
-
-  // firstEnvironmentExcludingLocal returns the first {tenant, env} in sidebar
-  // order whose env name is not the local default ("local"). Tests that need a
-  // normal environment use this so they never operate on the special local
-  // default env (e.g. erun/local), whose legacy type and local-shell behaviour
-  // don't fit a deployed-environment contract. Returns null when none exists.
-  async firstEnvironmentExcludingLocal(): Promise<{ tenant: string; env: string } | null> {
-    const tenants = await this.tenants();
-    for (const tenant of tenants) {
-      const envs = await this.environmentsFor(tenant);
-      const env = envs.find((name) => name !== 'local');
-      if (env !== undefined) {
-        return { tenant, env };
-      }
-    }
-    return null;
   }
 
   async environmentsFor(tenant: string): Promise<string[]> {

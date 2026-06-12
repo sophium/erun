@@ -1,0 +1,9 @@
+Cloud Contexts:
+  - ctx-a provider=aws alias=dev region=us-east-1 instance=i-0aaaa11111aaaa1111 type=c8gd.2xlarge disk=100GB/gp3 kube-context=ctx-a status=running
+  - ctx-b provider=aws alias=dev region=us-east-1 instance=i-0bbbb22222bbbb2222 type=c8gd.2xlarge disk=100GB/gp3 kube-context=ctx-b status=pending
+  - ctx-c provider=aws alias=dev region=us-east-1 instance=i-0cccc33333cccc3333 type=c8gd.2xlarge disk=100GB/gp3 kube-context=ctx-c status=unknown message=AWS instance state: terminated
+  - ctx-d provider=aws alias=dev region=us-east-1 instance=i-0dddd44444dddd4444 type=c8gd.2xlarge disk=100GB/gp3 kube-context=ctx-d status=unknown message=instance not found in AWS
+  - ctx-e provider=aws alias=dev region=us-east-1 instance=none type=c8gd.2xlarge disk=100GB/gp3 kube-context=ctx-e status=none
+  - ctx-f provider=aws alias=dev region=us-east-1 instance=i-0ffff55555ffff5555 type=c8gd.2xlarge disk=100GB/gp3 kube-context=ctx-f status=stopped
+audit: erun context list
+aws ec2 describe-instances --filters 'Name=instance-id,Values=i-0aaaa11111aaaa1111,i-0bbbb22222bbbb2222,i-0cccc33333cccc3333,i-0dddd44444dddd4444,i-0ffff55555ffff5555' --query 'Reservations[*].Instances[*].[InstanceId,State.Name]' --output text --region us-east-1 --profile dev

@@ -279,6 +279,20 @@ Key contract: the skill **explicitly reads** the cloned repo's `AGENTS.md` and e
 | Outputs | `<module>/` Docusaurus site (`docusaurus.config.ts` with `onBrokenLinks: throw`, `sidebars.ts`, `docs/`, `src/css`, `static/img`, `package.json`, `tsconfig.json`); `erun-devops/docker/<module>/{Dockerfile,entrypoint.sh}` (two-stage build → pinned wrangler); `erun-devops/k8s/<module>/{Chart.yaml,values.prod.yaml,templates/docs.yaml}` (ServiceAccount + `post-install,post-upgrade` hook Job that runs `wrangler pages deploy`). |
 | Error behaviour | Target dir already has `<module>/docusaurus.config.ts` → stop. `yarn build` fails on a broken link → fix the link, do not disable `onBrokenLinks`. `npx create-docusaurus` offline → fall back to bundled `templates/`. Cloudflare Pages project / `cf-creds` Secret missing → scaffold still succeeds; surface that the first `erun deploy` Job fails until the Direct-Upload project, custom domain, token, and Secret exist. User asks for a Git-connected Pages project → stop (Direct Upload only; a Git connection double-deploys). |
 
+### `erun-build-env`
+
+| Field | Value |
+|---|---|
+| Kind | Workflow — extend the environment's runtime image through ERun's supported extension path. |
+| Source | `erun-skills/skills/erun-build-env/SKILL.md` |
+| Description | "Create a custom build environment by extending ERun's published runtime image with the project's own toolchain, then pointing the environment at the result." |
+| Triggers | "init build environment", "init erun build environment", "create a custom build environment", "customize the runtime image" |
+| Inputs | The tooling to add (packages, toolchains, CLIs); the target tenant + environment; an image name (suggested default `<tenant>-runtime`) |
+| Outputs | A starter Dockerfile at `<module>/docker/<image-name>/Dockerfile` with `FROM <registry>/erun-devops:<runtime-version>` (version read from `erun version` in-pod, or the env's `runtimeversion` / `erun list` on a laptop); an `erun build` run that builds both architectures and pushes to the env's registry; the env's [`runtimeimage`](/reference/configuration#envconfig) field set via `erun init --runtime-image <ref>` or a direct config edit. On the next deploy/open the image rides into the published chart as `imageOverrides.erun-devops` ([Advanced chart values](/reference/configuration#advanced-chart-values)). |
+| Error behaviour | Runtime version unresolvable (no `runtimeversion` in the env config and not inside a pod) → asks the Operator before writing the Dockerfile. Dockerfile target path already exists → stops and asks before overwriting. `erun build` fails (e.g. `BINFMT_MISSING`, registry push rejected) → surfaces the build error and does not touch the env config. Base image other than `erun-devops` requested → refuses; the entrypoint, the Agent tooling, and the in-pod `erun` live in that image. |
+
+### Catalogue evolution
+
 The catalogue is open — new skills land in `erun-skills/skills/` and ship through both distribution paths automatically. Each skill's `description` is what the Agent matches on, so additions don't require coordinated client changes.
 
 ## Adding a custom skill

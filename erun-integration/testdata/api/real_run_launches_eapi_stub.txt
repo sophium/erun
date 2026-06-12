@@ -1,0 +1,3 @@
+eapi stub argv: --host <LOOPBACK> --port 17034
+audit: erun api --port 17034 team dev
+eapi --host <LOOPBACK> --port 17034

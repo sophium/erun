@@ -1,0 +1,5 @@
+Cloud Contexts:
+  - edge provider=aws alias=dev region=us-east-1 instance=i-0aaaa11111aaaa1111 type=c8gd.2xlarge disk=100GB/gp3 kube-context=edge status=unknown message=status refresh failed: aws ec2 describe-instances --filters Name=instance-id,Values=i-0aaaa11111aaaa1111 --query Reservations[*].Instances[*].[InstanceId,State.Name] --output text: An error occurred (ExpiredToken) when calling the DescribeInstances operation: The security token included in the request is expired
+  - ghost-ctx provider=aws alias=ghost region=us-east-1 instance=i-0bbbb22222bbbb2222 type=c8gd.2xlarge disk=100GB/gp3 kube-context=ghost-ctx status=unknown message=status refresh failed: cloud provider alias "ghost" is not configured
+audit: erun context list
+An error occurred (ExpiredToken) when calling the DescribeInstances operation: The security token included in the request is expired

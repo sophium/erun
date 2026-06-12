@@ -60,7 +60,7 @@ cat <UserConfigDir>/erun/portforward/mcp/<tenant>/<env>.json
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<localPort>/mcp
 ```
 
-A `200` (or any non-zero response) means the server is up. If the call hangs or 404s, the desktop's port-forward died — `erun open` re-establishes it. For the JSON-RPC handshake an Agent uses against the same endpoint, see [MCP overview · Worked example](/mcp/overview#worked-example).
+A `200` (or any non-zero response) means the server is up. If the call hangs or 404s, the port-forward died — `erun open` re-establishes it. For the JSON-RPC handshake an Agent uses against the same endpoint, see [MCP overview · Worked example](/mcp/overview#worked-example).
 
 ## Connecting a laptop-side Agent client
 
@@ -70,7 +70,7 @@ The Agent runs inside the env by default — the runtime pod ships the `EnvConfi
    ```bash
    erun open my-tenant local
    ```
-2. The desktop publishes the local MCP port at `<UserConfigDir>/erun/portforward/mcp/<tenant>/<env>.json` — read the `localPort` field.
+2. `erun open` publishes the local MCP port at `<UserConfigDir>/erun/portforward/mcp/<tenant>/<env>.json` — read the `localPort` field.
 3. Point your laptop-side Agent at the published config. Example for Claude Code:
    ```bash
    claude --mcp-config <UserConfigDir>/erun/portforward/mcp/my-tenant/local.json

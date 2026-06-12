@@ -1,0 +1,19 @@
+Select tenant:
+  1) alpha
+  2) beta
+  3) Initialize current project
+Select 1-3 [1]: audit: erun --dry-run
+running init before resolving open target
+Loading erun tool configuration, configPath=<TMP>
+Loaded erun tool configuration
+Loading tenant configuration
+Loaded tenant configuration
+Loading environment configuration
+==> Initializing beta/dev
+mkdir -p <TMP>
+write-yaml <TMP>
+init: runtime deploys use the published erun-devops chart; no devops scaffold is written
+==> Initialized beta/dev
+Configuration initialized OK
+ensure-agent-instructions
+ensure-claude-settings

@@ -1,0 +1,13 @@
+audit: erun context start --force edge
+cloud-context start: name=edge force=true
+cloud-context start: force=true bypasses working-hours gate
+aws iam get-role --role-name erun-edge-host-stop --query Role.RoleName --output text --region us-east-1 --profile dev
+aws iam put-role-policy --role-name erun-edge-host-stop --policy-name erun-self-stop --policy-document file://<TMP> --region us-east-1 --profile dev
+aws iam get-instance-profile --instance-profile-name erun-edge-host-stop --query InstanceProfile.Arn --output text --region us-east-1 --profile dev
+aws iam get-instance-profile --instance-profile-name erun-edge-host-stop --query 'InstanceProfile.Roles[0].RoleName' --output text --region us-east-1 --profile dev
+aws ec2 describe-iam-instance-profile-associations --filters 'Name=instance-id,Values=i-0123456789abcdef0' 'Name=state,Values=associated' --query 'IamInstanceProfileAssociations[0].AssociationId' --output text --region us-east-1 --profile dev
+aws ec2 describe-iam-instance-profile-associations --filters 'Name=instance-id,Values=i-0123456789abcdef0' 'Name=state,Values=associated' --query 'IamInstanceProfileAssociations[0].IamInstanceProfile.Arn' --output text --region us-east-1 --profile dev
+aws ec2 start-instances --instance-ids i-0123456789abcdef0 --region us-east-1 --profile dev
+aws ec2 wait instance-running --instance-ids i-0123456789abcdef0 --region us-east-1 --profile dev
+Waiter InstanceRunning failed: Max attempts exceeded
+aws ec2 wait instance-running --instance-ids i-0123456789abcdef0: Waiter InstanceRunning failed: Max attempts exceeded

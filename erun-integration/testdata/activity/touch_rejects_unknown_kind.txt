@@ -1,0 +1,2 @@
+audit: erun activity touch --environment dev --kind bogus --tenant team
+unsupported activity kind "bogus"

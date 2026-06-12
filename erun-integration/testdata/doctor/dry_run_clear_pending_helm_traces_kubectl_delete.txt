@@ -2,6 +2,7 @@ Target: team/dev
 Running: Clear pending helm release
 No cleanup actions selected.
 audit: erun doctor --clear-pending-helm --dry-run team dev
+trace-log: would append the full trace to <TMP>
 helm status team-devops --namespace team-dev --kube-context test-context
 kubectl --context test-context --namespace team-dev get pods -o wide
 kubectl --v=4 --context test-context --namespace team-dev delete 'secrets,configmaps' -l 'owner=helm,name=team-devops,status in (pending-install,pending-upgrade,pending-rollback)' --ignore-not-found

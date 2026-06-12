@@ -1,0 +1,7 @@
+  - edge provider=aws alias=dev region=us-east-1 instance=i-0123456789abcdef0 type=t3.medium disk=50GB/gp3 kube-context=edge status=stopped
+audit: erun context stop edge
+cloud-context stop: edge
+aws ec2 stop-instances --instance-ids i-0123456789abcdef0 --region us-east-1 --profile dev
+An error occurred (IncorrectInstanceState) when calling the StopInstances operation: This instance 'i-0123456789abcdef0' is not in a state from which it can be stopped.
+cloud-context stop: instance is already in a non-running state — waiting for stopped
+aws ec2 wait instance-stopped --instance-ids i-0123456789abcdef0 --region us-east-1 --profile dev

@@ -11,7 +11,6 @@ import {
   setSidebarHidden,
   setSidebarWidth,
 } from './slices/layoutSlice';
-import { setDebugOutput } from './slices/terminalSlice';
 import {
   computeMaxReviewWidth,
   DEBUG_HEIGHT_STORAGE_KEY,
@@ -220,19 +219,11 @@ export function setFilesOpen(
 
 export function setDebugOpen(
   dispatch: AppDispatch,
-  getState: () => RootState,
   open: boolean,
   flushTerminalResize: () => void,
 ): void {
   dispatch(setDebugOpenAction(open));
   saveBoolean(DEBUG_OPEN_STORAGE_KEY, open);
-  if (open && !getState().terminal.debugOutput) {
-    dispatch(
-      setDebugOutput(
-        'Debug output will appear here for new erun sessions started while this panel is open.\n',
-      ),
-    );
-  }
   flushTerminalResize();
 }
 

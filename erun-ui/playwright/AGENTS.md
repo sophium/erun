@@ -6,7 +6,20 @@ Module-specific guidance for `erun-ui/playwright`. Follow the repository root `A
 
 - `erun-ui/playwright` is a separate Yarn project that runs end-to-end UI tests for the desktop frontend.
 - Tests drive `erun-app --headless` over the HTTP+SSE bridge instead of opening a Wails window. The same React bundle the desktop renders is served at `http://127.0.0.1:34123/`; method calls go through `/__erun_invoke`, events stream from `/__erun_events`, and `window.runtime` / `window.go.main.App` are shimmed at the document root.
+- The backend runs against an isolated, suite-owned config root with a deterministic seeded baseline — never against the developer's real `~/.erun` / `~/.config/erun`. See "Isolated config root and seeded baseline" below.
 - Use this suite for cross-component flows that depend on rendered DOM and round-trip backend calls — sidebar toggles, dialog interactions, layout panels, status banners, activity drawer state. It does not replace `go test ./...`: Go tests cover backend logic, Playwright covers the React frontend behaviour after a real boot sequence.
+
+## Isolated config root and seeded baseline
+
+The suite owns its config root (issue #483). `fixtures/seedRoot.ts` is the single owner of the layout, the seeded names, and the helpers; the moving parts are:
+
+- `run.sh` creates a throwaway root (`mktemp -d …/erun-playwright-home.XXXXXX`), exports it as `ERUN_PLAYWRIGHT_HOME`, and removes it again via an EXIT trap. When `playwright test` is invoked directly, `playwright.config.ts` creates the root itself at config-load time.
+- `playwright.config.ts` points the `webServer` (`erun-app --headless`) at the root by setting `HOME`, `XDG_CONFIG_HOME`, `XDG_CACHE_HOME`, and `XDG_DATA_HOME` (the same redirect seam `erun-integration/internal/env.New` uses — config root is `xdg.ConfigHome + "erun"`, runtime state is `os.UserHomeDir() + ".erun"`, so HOME+XDG redirect both). It also prepends a stub dir to `PATH` so `kubectl`/`helm`/`docker`/`aws` are inert for the backend and for every `erun`/shell child it spawns, and pins `reuseExistingServer: false` so a stale dev server pointed at another root can never be reused.
+- `global-setup.ts` creates the layout (`home/`, `home/.config/`, `home/.cache/`, `home/.local/share/`, `repo/`, `stubs/`) and seeds the baseline before the backend boots; `global-teardown.ts` removes the root.
+- The seeded baseline is one tenant `pw` with two inert local-agent envs `alpha` and `beta`, plus one configured cloud provider alias `pw-aws` (backed by the aws stub). Env configs mirror `erun-integration/internal/fixture.SeedTenantEnv`'s tree — keep the two in lockstep when a config field becomes load-bearing — plus `type: local-agent` (the explicit-type badge contract) and `aitool: sh` (the AI tab launches an inert shell, never a real claude/codex).
+- Specs import the seeded names (`SEED_TENANT`, `SEED_ENV_ALPHA`, `SEED_ENV_BETA`) from `fixtures/seedRoot.ts` and assert against them directly. Do not query the sidebar to "pick the first available row" — the baseline is deterministic, so a missing seeded row is a bug the spec should surface.
+- Specs that mutate per-env state (open/close churn, extra terminals, status injection) use the `seededEnv` fixture in `fixtures/erunApp.ts`: it provisions a uniquely-named inert env (`<spec-slug>-<rand>` under `pw`) by writing the same config tree, waits for the backend's fsnotify watcher to surface the row, and removes the env on teardown. Created envs are inert local-agent envs — never deployed — so setup and teardown need no cluster or cloud.
+- Specs that need state the baseline does not carry should stage exactly what they need (extend the seed, write a per-test env, or stub the RPC over `/__erun_invoke`) instead of skipping. Reserve `test.skip` for state that genuinely requires a live cluster or cloud host (a stopped EC2 context, a real runtime pod, a real Codex session); name the constraint in a comment.
 
 ## Headless Launch
 
@@ -45,8 +58,8 @@ There is only one supported way to run the suite. The shell script `run.sh` in t
 ## Frontend And Backend Split
 
 - Page object classes go in `pages/`. Each file owns one component surface (sidebar, titlebar, a single dialog, a single panel) and exposes high-level actions rather than raw locators or selectors.
-- Tests in `tests/` consume POMs through the fixture in `fixtures/erunApp.ts` (`test`, `expect` re-exports). Avoid calling `page.click(...)` or `page.locator(...)` directly from specs.
-- Keep specs deterministic. Do not assume environment names or tenant counts; query the sidebar at the start of the test and pick the first available row. The headless backend reflects the developer's actual `~/.erun/` config, so hard-coded names will diverge across machines.
+- Tests in `tests/` consume POMs through the fixtures in `fixtures/erunApp.ts` (`test`, `expect` re-exports, plus the per-test `seededEnv` env). Avoid calling `page.click(...)` or `page.locator(...)` directly from specs.
+- Keep specs deterministic by asserting against the seeded baseline names from `fixtures/seedRoot.ts` (or a `seededEnv` row). The backend boots against the suite-owned isolated root, so the rows are the same on every machine; do not re-introduce "query the sidebar and pick the first available row" discovery.
 
 ## Selector Conventions
 
@@ -58,7 +71,7 @@ There is only one supported way to run the suite. The shell script `run.sh` in t
 
 - Boot races are real. The fixture's `AppShell.open()` waits for the "Loading environments..." overlay to clear before yielding control. New specs that mount their own page state should rely on the fixture rather than calling `page.goto` directly.
 - The Cancel buttons on `Init` and `Manage` dialogs sit below the default 900 px viewport. The config uses `1440x1200`; keep tall-dialog tests on that viewport rather than shrinking it.
-- The headless backend is a singleton; `playwright.config.ts` sets `fullyParallel: false` and `workers: 1`. Keep it that way unless you split the backend into per-test processes.
+- The headless backend is a singleton; `playwright.config.ts` sets `fullyParallel: false` and `workers: 1`. Keep it that way unless you split the backend into per-test processes. Each test gets a fresh browser context (fresh Redux state), but backend-side sessions persist across specs — prefer the `seededEnv` fixture for specs whose tab/session churn would otherwise leak into the shared baseline rows.
 - Treat assertion failures as bugs to investigate, not noise to skip. If a test reveals a real frontend regression, fix the frontend; if a flow is genuinely flaky and the cause is environmental (clock skew, port reuse), fix the harness. Use `test.fixme(...)` only with a justification in a comment and a follow-up issue.
 
 ## Validation

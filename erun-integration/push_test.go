@@ -98,6 +98,95 @@ func TestPush(t *testing.T) {
 		golden.Equal(t, "push/devops_container_push_real_run_resolves_single_image_spec", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_single_image_from_dockerfile_cwd", func(t *testing.T) {
+		// Exercises the root `erun push` shorthand's single-image branch in
+		// dry-run: with a Dockerfile in the cwd, ResolveDockerPushSpec
+		// resolves one push spec and the dry-run trace must show the
+		// would-run docker build/push commands without executing them.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectDockerfile(t, setup)
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+			t.Fatalf("write VERSION: %v", err)
+		}
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "push/dry_run_single_image_from_dockerfile_cwd", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_single_image_from_dockerfile_cwd", func(t *testing.T) {
+		// Exercises the root `erun push` single-image branch for real:
+		// ResolveDockerPushSpec resolves the cwd Dockerfile into one
+		// build+push pair, RunDockerPushSpec builds both platforms and
+		// pushes the tag. The docker stub reports no cached fingerprint
+		// images (image inspect exit 1) so the build path runs.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectDockerfile(t, setup)
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "VERSION"), []byte("1.0.0\n"), 0o644); err != nil {
+			t.Fatalf("write VERSION: %v", err)
+		}
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"push", "--version", "1.0.0", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "push/real_run_single_image_from_dockerfile_cwd", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_auth_failure_prompts_login_and_retries", func(t *testing.T) {
+		// Exercises promptDockerLoginRetry's interactive Select (the
+		// non-ERUN_AUTO_LOGIN_ON_PUSH path) plus runDockerPushWithRetry's
+		// docker-login leg: the first push fails with a generic auth error,
+		// "\r" confirms the highlighted "Login and retry push" option, the
+		// stubbed `docker login` succeeds, and the retried push lands. The
+		// Select is the run's single interactive prompt.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		stubs := setup.Cwd + "/stubs"
+		counter := setup.Cwd + "/docker-push-counter"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1" in`,
+			`  push)`,
+			`    count=0`,
+			`    if [ -f '` + counter + `' ]; then count=$(cat '` + counter + `'); fi`,
+			`    count=$((count + 1))`,
+			`    printf '%s' "$count" > '` + counter + `'`,
+			`    if [ "$count" = "1" ]; then`,
+			`      printf 'unauthorized: authentication required\n' >&2`,
+			`      exit 1`,
+			`    fi`,
+			`    exit 0 ;;`,
+			`  login) exit 0 ;;`,
+			`  image)`,
+			`    case "$2" in inspect) exit 1 ;; *) exit 0 ;; esac ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"push", "-v"}, erun.RunOptions{
+			Cwd:   setup.Cwd,
+			Env:   envVars,
+			Stdin: "\r",
+		})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "push/real_run_auth_failure_prompts_login_and_retries", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_create_package_denied_emits_guidance", func(t *testing.T) {
 		// Exercises handleNamespaceAuthError + retryAfterNamespaceLogin
 		// + printCreatePackageGuidance + namespacePath + isGHCR for the

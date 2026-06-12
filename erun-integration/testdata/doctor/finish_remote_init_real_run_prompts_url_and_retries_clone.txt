@@ -1,0 +1,17 @@
+Remote init checks for team/dev:
+  marker file                 INCOMPLETE '<TMP>'
+  project root               MISSING '<TMP>'
+  git checkout               MISSING '<TMP>'
+  SSH keypair                MISSING '<TMP>'
+Git remote URL for environment "dev" in tenant "team": Remote init finished.
+Remote init checks for team/dev:
+  marker file                 COMPLETE '<TMP>'
+  project root               MISSING '<TMP>'
+  git checkout               MISSING '<TMP>'
+  SSH keypair                MISSING '<TMP>'
+audit: erun doctor --finish-remote-init
+Generated SSH keypair. Import this SSH public key into your git host before continuing:
+ssh-ed25519 AAAASTUBEDKEY erun-doctor-test
+Waiting for the SSH key to be deployed to the git host. Rechecking every 2 seconds. Press Ctrl+C to cancel.
+SSH key not active yet; retrying in 2 seconds...
+Remote repository access confirmed.

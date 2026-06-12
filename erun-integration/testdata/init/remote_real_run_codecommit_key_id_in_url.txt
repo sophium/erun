@@ -1,0 +1,29 @@
+Git remote URL for environment "dev" in tenant "team": audit: erun init --container-registry registry.example/test --kubernetes-context test-context --remote --version <VERSION> --yes team dev
+Loading erun tool configuration, configPath=<TMP>
+Saving default config
+Loaded erun tool configuration
+Loading tenant configuration
+Adding new tenant
+Loaded tenant configuration
+Loading environment configuration
+Adding new environment
+==> Initializing team/dev
+deploy: no local runtime chart; using published chart oci://ghcr.io/sophium/charts/erun-devops version <VERSION>
+deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
+dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
+==> Deploying team/dev <VERSION>
+    namespace team-dev on context test-context
+    waiting for helm rollout (timeout 2m0s)...
+==> Deployed team/dev <VERSION> in <ELAPSED>
+Upload this SSH public key to the IAM user that should access CodeCommit:
+ssh-rsa AAAA-test-codecommit-key erun-test
+
+Use the SSH public key ID returned by IAM in this SSH host config:
+Host git-codecommit.eu-west-1.amazonaws.com
+  User APKAEXAMPLEKEYID
+  IdentityFile ~/.ssh/id_rsa_codecommit
+  IdentitiesOnly yes
+  StrictHostKeyChecking accept-new
+Waiting for the SSH key to be deployed to the git host. Rechecking every 2 seconds. Press Ctrl+C to cancel.
+==> Initialized team/dev
+Configuration initialized OK

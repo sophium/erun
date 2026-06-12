@@ -1,0 +1,2 @@
+audit: erun build --deploy --dry-run --version <VERSION>
+multiple tenants are configured for project "<TMP>"

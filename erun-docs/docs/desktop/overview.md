@@ -18,6 +18,15 @@ For CI/CD pipelines and headless workflows, use the [CLI](/cli/overview) instead
 - **Activities panel with failure details and fixes.** A queue of recent and in-flight operations — deploys, opens, builds. When a deploy fails, the entry keeps the captured command output (the real helm/kubectl error behind the one-line summary): expand **Show output** to read it, or use **Copy failure report** to package that output together with the environment, version, and container status so you can hand the whole picture to whoever can help. The failed entry also offers one-click recovery: **Run doctor** to troubleshoot (see [`erun doctor`](/cli/doctor)), **Rebuild & redeploy** to force a clean rebuild, and **Clear pending helm release** when a release is stuck.
 - **Settings in one place.** Runtime sizing, AI tooling configuration, port mappings, SSH keys, and cloud bindings — all editable from one screen per environment.
 
+## Diagnostics console {#diagnostics-console}
+
+When something misbehaves, the panel at the bottom of the terminal area gives you two paste-ready diagnostic surfaces — built for handing to whoever (or whatever Agent) is helping you debug:
+
+- **erun trace.** The selected environment's persistent trace log: every erun command that ran for the env, at full trace detail, timestamped — including commands that finished before you opened the console. Capture is always on; the log is capped and rotated automatically (see [where it lives](/reference/config-locations#trace-log)). For a remote environment the timeline merges two vantage points: the commands you ran from this machine and, while the environment is open, the Agent-driven ones from inside the pod — the in-pod lines are marked `[pod]`. When the pod can't be reached, the console says so and still shows your machine's side.
+- **UI trace.** The desktop's own action history — what the app just did, in order — for reporting a desktop bug rather than an environment one.
+
+Both panes have a **Copy** button for their own stream, and the console's **Copy report** button packages everything at once — app build, the selected environment's identity and state, the erun trace (or the reason there isn't one), and the UI trace — into a single paste-ready block, so a bug report carries the evidence instead of a description of it.
+
 ## Open it in your editor
 
 - **Persistent terminal sessions.** Each environment owns its own terminals, and switching tabs doesn't kill them. For an environment backed by a runtime pod, the sessions live in the pod and keep running even while the environment is closed — a long-running Agent keeps working while you're away — so reopening reconnects you to the same sessions and scrollback instead of starting fresh ones.
@@ -30,7 +39,7 @@ The desktop is equally useful as a clean development surface for human-driven wo
 
 ## Side by side with an Agent
 
-By default, **the Agent runs inside the env** — the runtime pod ships the configured Agent's CLI (`claude`, `codex`, …) pre-wired against the in-pod MCP loopback. The desktop's AI panel surfaces it; any terminal inside the pod can launch it directly.
+By default, **the Agent runs inside the env** — the runtime pod ships the configured Agent's CLI (`claude`, `codex`, …) pre-wired against the in-pod MCP loopback. The desktop's AI panel surfaces it; any terminal inside the pod can launch it directly. If the Agent ends — you exit it, it crashes, or the container's memory limit kills it — the AI tab says so instead of silently turning into a shell: it names the exit (a memory kill includes the hint to raise Memory in the env's Runtime settings) and prints the exact command to resume the conversation.
 
 For a Claude env, the AI tab of the env settings dialog carries the Claude launch controls. **Effort** sets how hard Claude works per turn: the levels from low through max trade response time for thinking depth, and **ultracode** — the default for new envs — runs at xhigh thinking effort and additionally turns on standing multi-agent workflow orchestration, so Claude can fan work out across coordinated agents without being asked. Pick a plain level (for example max) when you want pure single-agent thinking instead. **Default model** picks the model the env's Claude session starts on, chosen from the environment's available models — tick `fable` under Available models to make it selectable. **Launch Claude in verbose + debug mode** streams Claude's own diagnostics into the AI tab. The desktop applies your choices when it opens the env's Claude session, and saving a changed launch setting reopens the env's open AI tabs so it takes effect immediately — the Claude conversation resumes where it left off. For the exact levels and how the values resolve, see [Agent reference · Configuration](/reference/configuration).
 

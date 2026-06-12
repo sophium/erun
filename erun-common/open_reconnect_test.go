@@ -110,6 +110,11 @@ func TestRemoteShellLaunchPersistentSession(t *testing.T) {
 		if !strings.Contains(script, `claude --continue --settings '{"ultracode":true}'`) {
 			t.Fatalf("AI tab must launch the claude guard at the default effort (ultracode):\n%s", script)
 		}
+		// Claude's exit must not silently fall through to the shell: the
+		// wrapper names the exit and the resume command first (issue #464).
+		if !strings.Contains(script, "fi || ai_status=$?") || !strings.Contains(script, "resume with: %s") {
+			t.Fatalf("AI launcher missing the exit wrapper:\n%s", script)
+		}
 		if !strings.Contains(script, "exec "+bashrc) {
 			t.Fatalf("AI launcher must drop to an interactive shell after claude:\n%s", script)
 		}

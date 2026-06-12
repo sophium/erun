@@ -17,9 +17,6 @@ export interface TerminalStatusState {
   // Record<number, true> so the state stays serializable; the original
   // useState held a Set<number>.
   hiddenLockSessions: Record<number, true>;
-  // Debug-panel "Copied"/error transient. The terminal copy status above
-  // is for the main terminal output copy button; this is the debug panel.
-  debugCopyStatus: string;
 }
 
 const initialState: TerminalStatusState = {
@@ -32,7 +29,6 @@ const initialState: TerminalStatusState = {
   terminalCopyStatus: '',
   retrySelection: null,
   hiddenLockSessions: {},
-  debugCopyStatus: '',
 };
 
 export const terminalStatusSlice = createSlice({
@@ -81,9 +77,6 @@ export const terminalStatusSlice = createSlice({
     clearHiddenLockOverlay(state, action: PayloadAction<number>) {
       Reflect.deleteProperty(state.hiddenLockSessions, action.payload);
     },
-    setDebugCopyStatus(state, action: PayloadAction<string>) {
-      state.debugCopyStatus = action.payload;
-    },
   },
 });
 
@@ -96,6 +89,5 @@ export const {
   setRetrySelection,
   hideLockOverlay,
   clearHiddenLockOverlay,
-  setDebugCopyStatus,
 } = terminalStatusSlice.actions;
 export default terminalStatusSlice.reducer;
