@@ -883,7 +883,7 @@ func TestDeploy(t *testing.T) {
 		fixture.SeedDevopsRepo(t, setup, "team", "local")
 		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
 		dockerDir := filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops")
-		result := erun.Run(t, []string{"deploy", "--snapshot", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: setup.Env()})
+		result := erun.Run(t, []string{"deploy", "--snapshot", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -934,7 +934,7 @@ func TestDeploy(t *testing.T) {
 			}
 			mustWriteFile(t, filepath.Join(dir, "Dockerfile"), dockerfile)
 		}
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}

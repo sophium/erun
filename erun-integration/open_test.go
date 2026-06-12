@@ -438,6 +438,7 @@ func TestOpen(t *testing.T) {
 		fixture.SeedDevopsRepo(t, setup, "team", "local")
 		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
 		envVars := stubKubectlNotFound(t, setup)
+		envVars = append(envVars, stubDockerNoLocalImages(t, setup)...)
 		result := erun.Run(t, []string{"open", "team", "local", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/snapshot_env_config_drives_local_build", normalize.Apply(result.Combined))
 	})

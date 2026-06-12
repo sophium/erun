@@ -45,7 +45,7 @@ func TestBuild(t *testing.T) {
 		// and the incremental fingerprint trace in erun-common.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
-		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -58,7 +58,7 @@ func TestBuild(t *testing.T) {
 		// trace using the release-resolved version.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
-		result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -80,7 +80,7 @@ func TestBuild(t *testing.T) {
 				"      fingerprints:\n"+
 				"        base: 0123456789abcdef\n",
 		)
-		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -242,7 +242,7 @@ func TestBuild(t *testing.T) {
 		}
 		fixture.RunGit(t, setup.Cwd, "add", ".dockerignore", "noisy.log")
 		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add dockerignore + noisy file")
-		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -281,7 +281,7 @@ func TestBuild(t *testing.T) {
 
 		fp := func(label string) string {
 			t.Helper()
-			result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+			result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 			if result.ExitCode != 0 {
 				t.Fatalf("%s: exit %d: %s", label, result.ExitCode, result.Combined)
 			}
@@ -374,7 +374,7 @@ func TestBuild(t *testing.T) {
 		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
 		fixture.SeedGitRepo(t, setup.Cwd)
 		dockerDir := filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops")
-		result := erun.Run(t, []string{"build", "--deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: setup.Env()})
+		result := erun.Run(t, []string{"build", "--deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -464,7 +464,8 @@ func TestBuild(t *testing.T) {
 		}
 		stubs := setup.Cwd + "/stubs"
 		fixture.StubBinary(t, stubs, "dpkg-deb", "")
-		envVars := append(setup.Env(), "ERUN_HOST_OS_OVERRIDE=linux")
+		envVars := append(setup.Env(), stubDockerNoLocalImages(t, setup)...)
+		envVars = append(envVars, "ERUN_HOST_OS_OVERRIDE=linux")
 		envVars = append(envVars, "PATH="+stubs+":"+os.Getenv("PATH"))
 		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
@@ -496,7 +497,7 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("zz-extra tenant cfg: %v", err)
 		}
 		dockerDir := filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops")
-		result := erun.Run(t, []string{"build", "--deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: setup.Env()})
+		result := erun.Run(t, []string{"build", "--deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -526,7 +527,7 @@ func TestBuild(t *testing.T) {
 			t.Fatalf("root cfg: %v", err)
 		}
 		dockerDir := filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops")
-		result := erun.Run(t, []string{"build", "--deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: setup.Env()})
+		result := erun.Run(t, []string{"build", "--deploy", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit for ambiguous tenants, got 0:\n%s", result.Combined)
 		}
@@ -662,10 +663,25 @@ func TestBuild(t *testing.T) {
 		// dependencies.
 		setup := env.New(t)
 		fixture.SeedReleaseRepo(t, setup.Cwd, "main")
-		result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "build/dry_run_release_pushes_release_tagged_docker_builds", normalize.Apply(result.Combined))
 	})
+}
+
+// stubDockerNoLocalImages routes docker through a stub that fails every
+// invocation with exit code 1 — the classification DockerImageExists and
+// DockerManifestExists give a real "No such image" miss. Dry-run build and
+// deploy scenarios consult docker as decision input (fingerprint inspects,
+// manifest probes) even though they mutate nothing; without the stub those
+// scenarios silently depend on a docker CLI being installed on the host and
+// fail in docker-less environments such as the image build's test stage.
+// Returns the ERUN_DOCKER_BIN env pair to append to the scenario's env.
+func stubDockerNoLocalImages(t *testing.T, setup env.Setup) []string {
+	t.Helper()
+	stubs := filepath.Join(setup.Cwd, "stubs")
+	fixture.StubBinaryAdvanced(t, stubs, "docker", fixture.StubBinarySpec{ExitCode: 1})
+	return fixture.StubEnv(stubs, "docker")
 }
