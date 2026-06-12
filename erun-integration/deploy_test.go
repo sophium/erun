@@ -941,6 +941,55 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_snapshot_chart_image_scan_resolves_additional_builds", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_snapshot_postgres_reset_forces_helm_despite_cached_images", func(t *testing.T) {
+		// Locks the #506 fix: a snapshot deploy resolves ResetDatabase=true,
+		// and the erun-backend-postgres chart must then run its helm upgrade
+		// even when every locally-built image was promoted from the
+		// fingerprint cache (resolveDeploySkipHelm's reset branch) — the
+		// reset rides in the chart, so skipping helm would drop it. The
+		// docker stub is decision input: it answers every `image inspect`
+		// with exit 0 so all fp-tags appear present and the builds promote;
+		// without it the promotion branch depends on the host's docker
+		// state. The expected trace shows the forced-helm decision line and
+		// the helm upgrade with --set api.postgres.reset=true.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		templates := filepath.Join(setup.Cwd, "team-devops", "k8s", "erun-backend-postgres", "templates")
+		if err := os.MkdirAll(templates, 0o755); err != nil {
+			t.Fatalf("mkdir templates: %v", err)
+		}
+		mustWriteFile(t, filepath.Join(templates, "postgres.yaml"), strings.Join([]string{
+			"apiVersion: apps/v1",
+			"kind: Deployment",
+			"spec:",
+			"  template:",
+			"    spec:",
+			"      containers:",
+			"        - image: registry.example/team/erun-backend-postgres:18.3 # pinned wrapper",
+			"",
+		}, "\n"))
+		dockerDir := filepath.Join(setup.Cwd, "team-devops", "docker", "erun-backend-postgres")
+		if err := os.MkdirAll(dockerDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dockerDir, err)
+		}
+		mustWriteFile(t, filepath.Join(dockerDir, "Dockerfile"), "FROM alpine:3.22\n")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--snapshot",
+			"--components", "erun-backend-postgres",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_snapshot_postgres_reset_forces_helm_despite_cached_images", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_from_chart_cwd_resolves_single_chart_context", func(t *testing.T) {
 		// When deploy runs with cwd inside the chart directory itself,
 		// ResolveCurrentKubernetesDeployContexts takes the direct-context

@@ -7,12 +7,17 @@ import (
 	"strings"
 )
 
+// postgresComponentName is the chart that owns the environment's Postgres
+// instance. Deploy treats it specially: a pending database reset forces its
+// helm step even when every image was promoted from the fingerprint cache.
+const postgresComponentName = "erun-backend-postgres"
+
 // optInDeployComponents lists charts that are not deployed by default and must
 // be explicitly included via DeployTarget.Components or the deploy --components
 // flag. Other charts (notably the per-tenant runtime chart) are always
 // deployed when present.
 var optInDeployComponents = []string{
-	"erun-backend-postgres",
+	postgresComponentName,
 	"erun-backend-db",
 	"erun-backend-api",
 }
@@ -22,7 +27,7 @@ var optInDeployComponents = []string{
 // (e.g. the runtime chart) sort to the end so backend dependencies come up
 // first.
 var defaultDeployComponentOrder = []string{
-	"erun-backend-postgres",
+	postgresComponentName,
 	"erun-backend-db",
 	"erun-backend-api",
 }

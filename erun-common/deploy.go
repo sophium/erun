@@ -668,8 +668,25 @@ func resolveDeploySpecForContext(ctx Context, store DeployStore, findProjectRoot
 		DeployContext: deployContext,
 		Builds:        builds,
 		Deploy:        deployInput,
-		SkipHelm:      allDockerBuildsPromoted(builds),
+		SkipHelm:      resolveDeploySkipHelm(ctx, deployContext, deployInput, builds),
 	}, nil
+}
+
+// resolveDeploySkipHelm decides whether the chart's helm upgrade can be
+// skipped because every locally-built image was promoted from a cached
+// fingerprint. The postgres chart is the exception when a database reset is
+// pending: the reset ships inside the chart (reset init container plus a
+// per-version pod annotation), so skipping helm would silently drop it —
+// exactly the regression that orphaned `api.postgres.reset` in #270.
+func resolveDeploySkipHelm(ctx Context, deployContext KubernetesDeployContext, deployInput HelmDeploySpec, builds []DockerBuildSpec) bool {
+	if !allDockerBuildsPromoted(builds) {
+		return false
+	}
+	if deployInput.ResetDatabase && strings.TrimSpace(deployContext.ComponentName) == postgresComponentName {
+		ctx.Trace("deploy: postgres reset requested; running helm upgrade for " + postgresComponentName + " despite cached images")
+		return false
+	}
+	return true
 }
 
 func configureDeployInputMetadata(store DeployStore, target OpenResult, deployInput *HelmDeploySpec) error {
@@ -714,7 +731,7 @@ func resolveDeploySpecForCurrentDockerBuild(ctx Context, store DeployStore, targ
 		DeployContext: deployContext,
 		Builds:        builds,
 		Deploy:        deployInput,
-		SkipHelm:      allDockerBuildsPromoted(builds),
+		SkipHelm:      resolveDeploySkipHelm(ctx, deployContext, deployInput, builds),
 	}, nil
 }
 
