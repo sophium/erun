@@ -282,6 +282,5 @@ func normalizeSelection(selection uiSelection) uiSelection {
 		NoGit:             selection.NoGit,
 		Bootstrap:         selection.Bootstrap,
 		SetDefaultTenant:  selection.SetDefaultTenant,
-		Action:            strings.TrimSpace(selection.Action),
 	}
 }

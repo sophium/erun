@@ -132,18 +132,13 @@ async function startSessionForKind(
 ): Promise<StartSessionResult> {
   switch (tab.kind) {
     case 'ai':
-      return (await StartAISession(runSelection, tab.slot, cols, rows)) as StartSessionResult;
+      return await StartAISession(runSelection, tab.slot, cols, rows);
     case 'local':
-      return (await StartLocalSession(runSelection, tab.slot, cols, rows)) as StartSessionResult;
+      return await StartLocalSession(runSelection, tab.slot, cols, rows);
     case 'erun':
-      return (await StartSession(runSelection, tab.slot, cols, rows)) as StartSessionResult;
+      return await StartSession(runSelection, tab.slot, cols, rows);
     case 'contribute-ai':
-      return (await StartContributeAISession(
-        runSelection,
-        tab.slot,
-        cols,
-        rows,
-      )) as StartSessionResult;
+      return await StartContributeAISession(runSelection, tab.slot, cols, rows);
     default:
       throw new Error(`cannot respawn tab kind ${tab.kind}`);
   }

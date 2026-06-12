@@ -1,6 +1,5 @@
 import type {
   DiffResult,
-  EnvironmentActionMode,
   EnvironmentType,
   ManageTab,
   UICloudContextInitInput,
@@ -54,7 +53,6 @@ export const PAST_CONTAINER_REGISTRIES_STORAGE_KEY = 'erun.pastContainerRegistri
 
 export interface EnvironmentDialogState {
   open: boolean;
-  actionMode: EnvironmentActionMode;
   tenant: string;
   environment: string;
   version: string;
@@ -248,7 +246,6 @@ export interface AppState {
 
 export const defaultEnvironmentDialog = (): EnvironmentDialogState => ({
   open: false,
-  actionMode: 'init',
   tenant: '',
   environment: '',
   version: '',

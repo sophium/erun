@@ -291,7 +291,7 @@ func TestLoadVersionSuggestionsFallsBackToDefaultRuntimeTagsWhenTenantImageMissi
 		},
 	})
 
-	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test ", Action: "deploy"})
+	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test "})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T
 		},
 	})
 
-	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test ", Action: "init"})
+	suggestions, err := app.LoadVersionSuggestions(uiSelection{Tenant: " test "})
 	if err != nil {
 		t.Fatalf("LoadVersionSuggestions failed: %v", err)
 	}

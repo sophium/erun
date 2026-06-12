@@ -10,7 +10,7 @@ import {
 import { readError } from './errors';
 import { showTerminalMessage } from './notificationThunks';
 import { runtimePodConfigToKubernetes, runtimeResourceLimitMessage } from './runtimeResources';
-import { startDeploySelection, startInitSelection } from './sessionThunks';
+import { startInitSelection } from './sessionThunks';
 import { patchEnvironmentDialog, setEnvironmentDialog } from './slices/environmentDialogSlice';
 import {
   bumpEnvironmentDialogResourceStatus,
@@ -25,7 +25,7 @@ import { requireController } from './thunkExtra';
 import { normalizeDialogValue, normalizeVersionSuggestions } from './versionSuggestions';
 
 // environmentDialogThunks own the open/edit/submit lifecycle for the
-// "create or deploy environment" modal. The version-suggestion debounce
+// "create environment" modal. The version-suggestion debounce
 // handle stays module-local — it is a setTimeout cancellation token, not
 // state. The request counters used to ignore stale responses now live in
 // the requestCounters slice.
@@ -39,7 +39,6 @@ export const openInitializeDialog = (): AppThunk => (dispatch, getState) => {
   dispatch(
     setEnvironmentDialog({
       open: true,
-      actionMode: 'init',
       tenant: tenantDefault,
       environment: '',
       version: state.tenants.versionSuggestions[0]?.version ?? '',
@@ -150,24 +149,17 @@ export const submitEnvironmentDialog =
       form.reportValidity();
       return;
     }
-    const resourceError =
-      dialog.actionMode === 'init'
-        ? runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus)
-        : '';
+    const resourceError = runtimeResourceLimitMessage(dialog.runtimePod, dialog.resourceStatus);
     if (resourceError) {
       dispatch(patchEnvironmentDialog({ error: resourceError }));
       return;
     }
 
-    rememberEnvironmentDialogSelection(selection, dialog.actionMode);
+    rememberEnvironmentDialogSelection(selection);
     beginEnvironmentDialogSubmit(dispatch, dialog, selection);
     const previousSelected = state.selection.selected;
     try {
-      if (dialog.actionMode === 'deploy') {
-        await dispatch(startDeploySelection(selection));
-      } else {
-        await dispatch(startInitSelection(selection));
-      }
+      await dispatch(startInitSelection(selection));
       dispatch(setEnvironmentDialog(defaultEnvironmentDialog()));
       controller.focusTerminalSoon();
     } catch (error) {
@@ -189,23 +181,21 @@ function environmentDialogSelection(
   tenantExists: boolean,
 ): UISelection | null {
   const values = normalizedEnvironmentDialogValues(dialog);
-  if (!validEnvironmentDialogValues(values, dialog.actionMode)) {
+  if (!validEnvironmentDialogValues(values)) {
     return null;
   }
-  const isInit = dialog.actionMode === 'init';
-  const initFields = isInit ? environmentDialogInitFields(dialog, values, tenantExists) : {};
   // noGit only changes behavior on the remote-worktree init path
   // (ensureRemoteRepository in erun-common/init.go). For local-agent
   // init there is no remote repo, so suppress NoGit regardless of any
   // stale dialog state from a previous type selection.
-  const noGit = isInit && dialog.envType === 'local-agent' ? false : dialog.noGit;
+  const noGit = dialog.envType === 'local-agent' ? false : dialog.noGit;
   return {
     tenant: values.tenant,
     environment: values.environment,
     version: values.version,
     runtimeImage: resolveEnvironmentRuntimeImage(values.version, dialog, versionSuggestions),
     noGit,
-    ...initFields,
+    ...environmentDialogInitFields(dialog, values, tenantExists),
   };
 }
 
@@ -290,7 +280,6 @@ export const refreshDialogVersionSuggestions =
     const selection = {
       tenant: normalizeDialogValue(dialog.tenant),
       environment: normalizeDialogValue(dialog.environment),
-      action: dialog.actionMode,
     };
     const raw = await dispatch(
       environmentApi.endpoints.getVersionSuggestions.initiate(selection, { forceRefetch: true }),
@@ -316,7 +305,7 @@ const refreshEnvironmentRuntimeResources =
     const request = getState().requestCounters.environmentDialogResourceStatus;
     const context = normalizeDialogValue(kubernetesContext);
     const dialog = getState().environmentDialog;
-    if (!dialog.open || dialog.actionMode !== 'init' || !context) {
+    if (!dialog.open || !context) {
       return;
     }
     dispatch(

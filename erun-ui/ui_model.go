@@ -76,7 +76,6 @@ type uiSelection struct {
 	NoGit             bool   `json:"noGit,omitempty"`
 	Bootstrap         bool   `json:"bootstrap,omitempty"`
 	SetDefaultTenant  bool   `json:"setDefaultTenant,omitempty"`
-	Action            string `json:"action,omitempty"`
 }
 
 type uiDiffOptions struct {

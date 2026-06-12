@@ -23,7 +23,6 @@ export function deployUiSelection(entry: ActivityQueueEntry): UISelection {
     noGit: false,
     bootstrap: false,
     setDefaultTenant: false,
-    action: 'deploy',
   };
 }
 

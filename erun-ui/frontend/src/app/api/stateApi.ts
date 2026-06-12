@@ -7,7 +7,7 @@ import { type NoValue, wailsQueryFn } from './wailsBaseQuery';
 export const stateApi = wailsApi.injectEndpoints({
   endpoints: (builder) => ({
     getInitialState: builder.query<UIState, NoValue>({
-      queryFn: wailsQueryFn<NoValue, UIState>(() => LoadState() as Promise<UIState>),
+      queryFn: wailsQueryFn<NoValue, UIState>(() => LoadState()),
       providesTags: ['AppState'],
     }),
   }),

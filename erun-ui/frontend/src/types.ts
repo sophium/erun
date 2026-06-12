@@ -69,7 +69,6 @@ export interface UITenant {
   environments: UIEnvironment[];
 }
 
-export type EnvironmentActionMode = 'init' | 'deploy';
 export type ManageTab = 'general' | 'runtime' | 'ai' | 'ports' | 'ssh' | 'history' | 'delete';
 export type ManageEditTab = Exclude<ManageTab, 'delete'>;
 
@@ -90,7 +89,6 @@ export interface UISelection {
   noGit?: boolean;
   bootstrap?: boolean;
   setDefaultTenant?: boolean;
-  action?: EnvironmentActionMode;
 }
 
 export interface UIBuildDetails {
