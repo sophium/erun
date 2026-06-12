@@ -44,10 +44,12 @@ ERun itself doesn't add a service fee — there's no SaaS subscription in the lo
 
 ## What if my project doesn't follow ERun's conventions?
 
-Most things degrade gracefully. ERun expects a `<tenant>-devops/` module, multi-stage Dockerfiles under `docker/<image>/`, and helm charts under `k8s/<component>/`. Without those, you can either:
+Most things degrade gracefully. For your own components, ERun expects multi-stage Dockerfiles under `<module>/docker/<image>/` and helm charts under `<module>/k8s/<component>/`. Without those, you can either:
 
 - Use `<command>.sh` overrides to plug in your own build/deploy logic — see [Conventions · Command overrides](/concepts/conventions#command-overrides-via-commandsh).
-- Run `erun init --bootstrap` once to scaffold the conventional layout from your existing code.
+- Adopt the conventional layout by hand (or ask the Agent to — the built-in skills know the shape).
+
+The env's own runtime needs nothing in your repo: it deploys from the published `erun-devops` chart and image.
 
 Single-stage Dockerfiles, flat directory layouts, custom command logic — all work, you just get less out of ERun's defaults.
 

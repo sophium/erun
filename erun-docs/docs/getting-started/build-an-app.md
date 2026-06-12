@@ -7,7 +7,7 @@ title: Build a small app
 End-to-end walkthrough — from an empty directory to a running service in your env, in roughly ten minutes.
 
 <figure className="erun-hero-figure">
-  <img src="/img/build-app-flow.svg" alt="Six-step overview of building a small app with ERun. Step 1: create the project (mkdir, git init, VERSION). Step 2: bootstrap ERun (erun init --bootstrap). Step 3: ask the Agent to add a service via a skill — the Agent loads the matching skill and writes the source, Dockerfile, and chart by hand. Step 4: build and deploy (erun build --deploy). Step 5: see it running (kubectl port-forward and curl). Step 6: iterate." />
+  <img src="/img/build-app-flow.svg" alt="Six-step overview of building a small app with ERun. Step 1: create the project (mkdir, git init, VERSION). Step 2: initialize ERun (erun init). Step 3: ask the Agent to add a service via a skill — the Agent loads the matching skill and writes the source, Dockerfile, and chart by hand. Step 4: build and deploy (erun build --deploy). Step 5: see it running (kubectl port-forward and curl). Step 6: iterate." />
 </figure>
 
 The whole point of ERun's conventions is that you don't hand-write Dockerfiles, helm charts, or deploy plans by trial and error. **ERun ships [skills](/collaboration/skills)** — guidance bundles that teach the Agent how to lay out a service, write a conformant Dockerfile, structure the helm chart, and wire the deploy plan. You describe the component; the Agent reads the matching skill and writes the pieces idiomatic for your project.
@@ -27,13 +27,13 @@ git init
 echo '1.0.0' > VERSION
 ```
 
-## 2. Bootstrap ERun
+## 2. Initialize ERun
 
 ```bash
-erun init hello-erun local --bootstrap --set-default-tenant
+erun init hello-erun local --set-default-tenant
 ```
 
-This creates the per-user / per-project config and scaffolds `hello-erun-devops/` — the conventional DevOps module that holds Dockerfiles, charts, and the deploy plan.
+This creates the per-user / per-project config and deploys the env's runtime straight from ERun's published chart and image — nothing extra is generated into your project. Your project's own Dockerfiles, charts, and deploy plan live in the conventional `hello-erun-devops/` module, which the Agent writes for you in the next step.
 
 ## 3. Add a service — via a skill
 
@@ -113,7 +113,7 @@ ERun ships skills for the common patterns: `go-service`, `node-service`, `python
 
 In ten minutes you:
 
-- Bootstrapped an ERun-aware project from a blank directory.
+- Initialized an ERun-aware project from a blank directory.
 - Asked the Agent to add a service. ERun's `go-service` skill taught the Agent the layout, the Dockerfile pattern, and the chart structure; the Agent wrote the source + Dockerfile + chart + deploy-plan entry by hand from that guidance.
 - Built and deployed the service into a real Kubernetes namespace.
 - Iterated end-to-end with one command.

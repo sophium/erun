@@ -62,6 +62,7 @@ One per environment. This is the most-edited file.
 | `managedcloud` | bool | helm chart (`ERUN_CLOUD_ENVIRONMENT`) | When true, marks the env as running on a managed cloud context (enables idle-stop, cloud-credential refresh, etc.). |
 | `runtimeversion` | string | `erun open`, `erun deploy`, chart appVersion | Pins the version of the runtime image used by this env. |
 | `runtimeregistry` | string | `erun open`, `erun deploy` | Overrides the registry the runtime image is pulled from (per-env). |
+| `runtimeimage` | string | `erun open`, `erun deploy` | Points the env's runtime pod at a custom image instead of the published `<registry>/erun-devops:<version>` default. A full reference (`ghcr.io/acme/acme-runtime:1.2.3`) is used verbatim; a bare name resolves to `<registry>/<name>:<runtime version>`. Set by `erun init --runtime-image`; carried to the published chart as `imageOverrides.erun-devops` on every deploy (see [Advanced chart values](#advanced-chart-values)). |
 | `autoupgrade` | bool | [`erun upgrade`](/cli/upgrade), desktop Upgrade all | When true, this env joins the Upgrade-all set: `erun upgrade` redeploys it to the latest version for its channel when `runtimeversion` lags. |
 | `upgradechannel` | string (enum) | [`erun upgrade`](/cli/upgrade) | Release channel an upgrade targets: `stable` (semver releases) or `snapshot` (latest snapshot build). Orthogonal to `type`. When unset, defaults from `type` — runtime → `stable`, agent → `snapshot`. |
 | `runtimepod.cpu` | string | helm chart (`runtime.resources.limits.cpu`) | CPU limit for the runtime pod (e.g. `4`, `500m`). |
@@ -121,7 +122,7 @@ The helm chart writes these into the runtime pod at deploy time. They're derived
 
 The runtime chart accepts more values than erun manages. At deploy time erun passes two layers to `helm upgrade --install`:
 
-1. The env's values overlay — `values.<env>.yaml` in the runtime chart directory (`<tenant>-devops/k8s/<tenant>-devops/values.<env>.yaml`). It is passed with `-f` and is required: deploy aborts with `values file not found for environment "<env>"` when it is missing.
+1. The env's values overlay — `values.<env>.yaml` in the runtime chart directory (`<tenant>-devops/k8s/<tenant>-devops/values.<env>.yaml`). It is passed with `-f` and is required: deploy aborts with `values file not found for environment "<env>"` when it is missing. Environments that deploy the [published `erun-devops` chart](/cli/deploy#where-the-runtime-chart-comes-from) have no local chart directory; for them the overlay lives next to the env's config at `<UserConfigDir>/erun/<tenant>/<environment>/values.yaml` (e.g. `~/.config/erun/<tenant>/<environment>/values.yaml` on Linux) and is optional — when absent, the chart defaults plus erun's `--set` list fully describe the deploy.
 2. erun's own `--set`/`--set-string` list, derived from `EnvConfig` and the resolved plan.
 
 Helm gives `--set` precedence over `-f`, so for every key erun manages the overlay can never win. The keys below are exactly the ones erun's `--set` list never includes — for them the `values.<env>.yaml` overlay is authoritative, which makes it the supported escape hatch for behaviour erun doesn't model.
@@ -157,6 +158,10 @@ erun manages only the runtime pod's resource **limits**: `EnvConfig.runtimepod.c
 | `runtime.resources.requests.memory` | `1024Mi` | Memory request for the runtime pod. |
 
 Request overrides are invisible to `erun open`'s redeploy drift detection — it compares the deployed limits against `EnvConfig.runtimepod` and ignores requests — so changing a request in the overlay takes effect on the next deploy, not automatically on the next open.
+
+### Runtime image override {#advanced-image-overrides}
+
+`imageOverrides.erun-devops` is a supported public value of the runtime chart: it replaces the image the `erun-devops` container runs while keeping the rest of the chart canonical. The supported way to set it is the [`EnvConfig.runtimeimage`](#envconfig) field (`erun init --runtime-image`), which erun passes as `--set-string imageOverrides.erun-devops=<image>` on every deploy of the published chart — the intended path for custom toolchain images built `FROM` the published `erun-devops` image (the `erun-build-env` [skill](/concepts/skills) walks through it). When `runtimeimage` is unset, erun passes no override and the overlay may set the value directly.
 
 An example overlay:
 

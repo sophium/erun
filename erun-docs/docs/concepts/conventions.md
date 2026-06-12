@@ -21,7 +21,7 @@ erun/                                    # Git repo root. .git lives here.
 ├── VERSION                               # Default version (fallback).
 ├── build.sh                              # Optional top-level build script.
 │
-├── erun-devops/                          # The DevOps module. Scaffolded by `erun init --bootstrap`.
+├── erun-devops/                          # The DevOps module (`<tenant>-devops`).
 │   │                                       # Owns every Docker build context and every helm chart.
 │   ├── VERSION                           # Default version for builds in this module.
 │   ├── docker/
@@ -59,7 +59,7 @@ erun/                                    # Git repo root. .git lives here.
 - **Tenant name** = your project name (the directory holding `.git`). For `erun` it's `erun`; for `petios` it would be `petios`.
 - **DevOps module** = `<tenant>-devops/`. For `erun` that's `erun-devops/`.
 
-`erun init --bootstrap` scaffolds the `<tenant>-devops/` module for you; subsequent edits are yours.
+The `<tenant>-devops/` module is yours to grow — the Agent's skills write into it as you add components. The env's own runtime pod doesn't depend on it: environments without a repo-local runtime chart deploy ERun's published `erun-devops` chart directly (see [`erun deploy`](/cli/deploy#where-the-runtime-chart-comes-from)).
 
 ### Component naming
 

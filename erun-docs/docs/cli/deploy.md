@@ -18,6 +18,16 @@ If `TENANT` and/or `ENVIRONMENT` are omitted, they resolve from defaults (same w
 
 Each environment declares its deployment plan in `.erun/config.yaml`. Steps run in order; a list within a step is deployed in parallel. When the plan is absent, `erun deploy` falls back to chart-dependency-based ordering. For the full YAML schema and resolution rules, see [Configuration · `environments.<env>.k8s.deployments[]`](/reference/configuration#per-project-config) and [Agent reference · CLI flag spec · `erun deploy`](/agent-reference/cli-flags#erun-deploy).
 
+## Where the runtime chart comes from
+
+When the project repo carries its own runtime chart (`<tenant>-devops/k8s/<tenant>-devops/`), that repo-local chart is what gets deployed — nothing changes for projects that have one. Environments **without** a repo-local runtime chart — every remote env, and any env whose project has no `<tenant>-devops` chart — deploy the published chart directly:
+
+```
+helm upgrade --install <tenant>-devops oci://<registry>/charts/erun-devops --version <runtime version> …
+```
+
+The chart is published at release time alongside the runtime image with the same version — chart and image are one contract (see [Release flow](/deployment/release-flow)). The registry resolves from the env's recorded runtime registry, then the env's container registry, then the project registry, falling back to `ghcr.io/sophium`. The dry-run trace names the decision: `deploy: no local runtime chart; using published chart <ref> version <v>`. To customise a published-chart deploy, use the env's values overlay and the `runtimeimage` field — see [Configuration · Advanced chart values](/reference/configuration#advanced-chart-values).
+
 ## Flags
 
 | Flag | Description |
