@@ -1,32 +1,4 @@
-✔ Container registry for environment "local" in tenant "team": █hcr.io/sophium
-✔ Container registry for environment "local" in tenant "team": r█
-✔ Container registry for environment "local" in tenant "team": re█
-✔ Container registry for environment "local" in tenant "team": reg█
-✔ Container registry for environment "local" in tenant "team": regi█
-✔ Container registry for environment "local" in tenant "team": regis█
-✔ Container registry for environment "local" in tenant "team": regist█
-✔ Container registry for environment "local" in tenant "team": registr█
-✔ Container registry for environment "local" in tenant "team": registry█
-✔ Container registry for environment "local" in tenant "team": registry.█
-✔ Container registry for environment "local" in tenant "team": registry.e█
-✔ Container registry for environment "local" in tenant "team": registry.ex█
-✔ Container registry for environment "local" in tenant "team": registry.exa█
-✔ Container registry for environment "local" in tenant "team": registry.exam█
-✔ Container registry for environment "local" in tenant "team": registry.examp█
-✔ Container registry for environment "local" in tenant "team": registry.exampl█
-✔ Container registry for environment "local" in tenant "team": registry.example█
-✔ Container registry for environment "local" in tenant "team": registry.example/█
-✔ Container registry for environment "local" in tenant "team": registry.example/p█
-✔ Container registry for environment "local" in tenant "team": registry.example/pr█
-✔ Container registry for environment "local" in tenant "team": registry.example/pro█
-✔ Container registry for environment "local" in tenant "team": registry.example/prom█
-✔ Container registry for environment "local" in tenant "team": registry.example/promp█
-✔ Container registry for environment "local" in tenant "team": registry.example/prompt█
-✔ Container registry for environment "local" in tenant "team": registry.example/prompte█
-✔ Container registry for environment "local" in tenant "team": registry.example/prompted█
-✔ Container registry for environment "local" in tenant "team": registry.example/prompted█
-Container registry for environment "local" in tenant "team": registry.example/prompted
-audit: erun init --confirm-environment --dry-run --kubernetes-context test-context --project-root <TMP> --set-default-tenant --type local-agent --version <VERSION> team local
+Container registry for environment "local" in tenant "team" [ghcr.io/sophium]: audit: erun init --confirm-environment --dry-run --kubernetes-context test-context --project-root <TMP> --set-default-tenant --type local-agent --version <VERSION> team local
 Loading erun tool configuration, configPath=<TMP>
 Saving default config
 mkdir -p <TMP>

@@ -1,8 +1,4 @@
-? Initialize default environment "local" for tenant "team"? [Y/n] █
-? Initialize default environment "local" for tenant "team"? [Y/n] n█
-? Initialize default environment "local" for tenant "team"? [Y/n] n█
-Initialize default environment "local" for tenant "team"? n
-audit: erun init --container-registry registry.example/test --dry-run --kubernetes-context test-context --project-root <TMP> --set-default-tenant --type local-agent --version <VERSION> team local
+? Initialize default environment "local" for tenant "team"? [Y/n] audit: erun init --container-registry registry.example/test --dry-run --kubernetes-context test-context --project-root <TMP> --set-default-tenant --type local-agent --version <VERSION> team local
 Loading erun tool configuration, configPath=<TMP>
 Saving default config
 mkdir -p <TMP>

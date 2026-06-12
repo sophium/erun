@@ -3,26 +3,7 @@ Remote init checks for petios/dev:
   project root               OK '<TMP>'
   git checkout               MISSING '<TMP>'
   SSH keypair                OK '<TMP>'
-✗ CodeCommit SSH public key ID for environment "dev" in tenant "petios": █
-✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": A█
-✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": AP█
-✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APK█
-✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKA█
-✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAE█
-✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEX█
-✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXA█
-✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAM█
-✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMP█
-✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPL█
-✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPLE█
-✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPLEK█
-✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPLEKE█
-✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPLEKEY█
-✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPLEKEYI█
-✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPLEKEYID█
-✔ CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPLEKEYID█
-CodeCommit SSH public key ID for environment "dev" in tenant "petios": APKAEXAMPLEKEYID
-Remote init finished.
+CodeCommit SSH public key ID for environment "dev" in tenant "petios": Remote init finished.
 Remote init checks for petios/dev:
   marker file                 COMPLETE '<TMP>'
   project root               OK '<TMP>'

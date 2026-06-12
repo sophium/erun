@@ -1,65 +1,4 @@
-✗ Git remote URL for environment "dev" in tenant "team": █
-✔ Git remote URL for environment "dev" in tenant "team": s█
-✔ Git remote URL for environment "dev" in tenant "team": ss█
-✔ Git remote URL for environment "dev" in tenant "team": ssh█
-✔ Git remote URL for environment "dev" in tenant "team": ssh:█
-✔ Git remote URL for environment "dev" in tenant "team": ssh:/█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://g█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://gi█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-c█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-co█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-cod█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-code█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codec█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codeco█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecom█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecomm█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommi█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.e█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-w█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-we█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-wes█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.a█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.am█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.ama█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amaz█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazo█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazon█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazona█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaw█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.c█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.co█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.com█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.com/█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.com/v█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.com/v1█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.com/v1/█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.com/v1/r█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.com/v1/re█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.com/v1/rep█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.com/v1/repo█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.com/v1/repos█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.com/v1/repos/█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.com/v1/repos/t█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.com/v1/repos/te█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.com/v1/repos/tea█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.com/v1/repos/team█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.com/v1/repos/team█
-Git remote URL for environment "dev" in tenant "team": ssh://git-codecommit.eu-west-1.amazonaws.com/v1/repos/team
-audit: erun init --codecommit-ssh-key-id APKAEXAMPLEKEYID --container-registry registry.example/test --kubernetes-context test-context --remote --version <VERSION> --yes team dev
+Git remote URL for environment "dev" in tenant "team": audit: erun init --codecommit-ssh-key-id APKAEXAMPLEKEYID --container-registry registry.example/test --kubernetes-context test-context --remote --version <VERSION> --yes team dev
 Loading erun tool configuration, configPath=<TMP>
 Saving default config
 Loaded erun tool configuration

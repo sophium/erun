@@ -1,16 +1,4 @@
-✔ Default AWS region: █u-west-1
-✔ Default AWS region: e█
-✔ Default AWS region: eu█
-✔ Default AWS region: eu-█
-✔ Default AWS region: eu-w█
-✔ Default AWS region: eu-we█
-✔ Default AWS region: eu-wes█
-✔ Default AWS region: eu-west█
-✔ Default AWS region: eu-west-█
-✔ Default AWS region: eu-west-2█
-✔ Default AWS region: eu-west-2█
-Default AWS region: eu-west-2
-Dry run: AWS cloud provider initialization planned.
+Default AWS region [eu-west-1]: Dry run: AWS cloud provider initialization planned.
 audit: erun cloud init aws --account-id 123456789012 --dry-run --role-name Admin --sso-region eu-west-1 --sso-start-url https://example.awsapps.com/start
 aws configure set sso_start_url https://example.awsapps.com/start --profile 'erun-sso-<timestamp>'
 aws configure set sso_region eu-west-1 --profile 'erun-sso-<timestamp>'

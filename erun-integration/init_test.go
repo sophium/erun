@@ -390,12 +390,11 @@ func TestInit(t *testing.T) {
 	})
 
 	t.Run("container_registry_empty_submit_uses_default", func(t *testing.T) {
-		// Executes containerRegistryPrompt's empty-input fallback: stdin
-		// sends Ctrl+U (clear the prefilled default from the readline
-		// buffer) followed by Enter, so the prompt returns an empty string
-		// and init must fall back to the default container registry.
-		// Scripted stdin is the honest tool here: the fallback branch only
-		// exists inside the interactive prompt.
+		// Executes containerRegistryPrompt's empty-input fallback: the
+		// piped run takes the plain (non-TTY) prompt path, where a bare
+		// Enter submits the prompt's default container registry. Scripted
+		// stdin is the honest tool here: the fallback branch only exists
+		// inside the interactive prompt.
 		setup := env.New(t)
 		args := []string{
 			"init", "team", "local",
@@ -410,7 +409,7 @@ func TestInit(t *testing.T) {
 		result := erun.Run(t, args, erun.RunOptions{
 			Cwd:   setup.Cwd,
 			Env:   setup.Env(),
-			Stdin: "\x15\n",
+			Stdin: "\n",
 		})
 		golden.Equal(t, "init/container_registry_empty_submit_uses_default", normalize.Apply(result.Combined))
 	})

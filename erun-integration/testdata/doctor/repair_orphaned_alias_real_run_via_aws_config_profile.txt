@@ -5,11 +5,7 @@ Root config: <TMP> (status=ok)
     - test-user+123456789012@aws
         provider=aws account=123456789012 user=test-user
         tenants: team
-? Re-initialize cloud provider alias test-user+123456789012@aws (account 123456789012, user test-user)? [Y/n] █
-? Re-initialize cloud provider alias test-user+123456789012@aws (account 123456789012, user test-user)? [Y/n] y█
-? Re-initialize cloud provider alias test-user+123456789012@aws (account 123456789012, user test-user)? [Y/n] y█
-Re-initialize cloud provider alias test-user+123456789012@aws (account 123456789012, user test-user)? y
-Found existing AWS SSO profile "corp-dev" in ~/.aws/config; pre-filling defaults you can edit or accept with Enter.
+? Re-initialize cloud provider alias test-user+123456789012@aws (account 123456789012, user test-user)? [Y/n] Found existing AWS SSO profile "corp-dev" in ~/.aws/config; pre-filling defaults you can edit or accept with Enter.
   sso_start_url = https://corp.awsapps.com/start
   sso_region    = eu-west-1
   sso_role_name = AdminRole

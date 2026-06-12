@@ -766,18 +766,10 @@ func emitLocalShellSetupForOpenResult(ctx common.Context, result common.OpenResu
 }
 
 // stdoutIsTerminalForAliasSetup gates the interactive alias-setup prompt on a
-// real terminal. ERUN_FORCE_TTY=1 is a deliberate test seam (mirroring
-// ERUN_HOST_OS_OVERRIDE) so non-TTY harnesses can reach the branch.
+// real terminal (the shared writerIsTerminal check, including its
+// ERUN_FORCE_TTY test seam).
 func stdoutIsTerminalForAliasSetup(stdout io.Writer) bool {
-	if os.Getenv("ERUN_FORCE_TTY") == "1" {
-		return true
-	}
-	file, ok := stdout.(*os.File)
-	if !ok {
-		return false
-	}
-	info, err := file.Stat()
-	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
+	return writerIsTerminal(stdout)
 }
 
 func maybeConfigureOpenNoShellAlias(ctx common.Context, result common.OpenResult, promptRunner PromptRunner, shellPath string, stderr io.Writer) error {

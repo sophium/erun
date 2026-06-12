@@ -36,25 +36,26 @@ func TestRoot(t *testing.T) {
 		// resolveTenantFromSelection: two tenants are seeded without a
 		// default-tenant root config and the cwd sits outside both project
 		// roots, so the bare root command falls through to the interactive
-		// tenant selection. Stdin "j\r" moves the highlight to the second
-		// tenant and confirms it; the trace then shows the selected
-		// tenant's env being (re)initialized. Scripted stdin is the honest
-		// tool here: the scenario exists to execute the select-prompt body.
+		// tenant selection. The piped run takes the plain (non-TTY) select
+		// path; stdin "2\n" picks the second tenant by number, and the
+		// trace then shows the selected tenant's env being (re)initialized.
+		// Scripted stdin is the honest tool here: the scenario exists to
+		// execute the select-prompt body.
 		setup := env.New(t)
 		seedTenantWithoutDefault(t, setup, "alpha", "dev")
 		seedTenantWithoutDefault(t, setup, "beta", "dev")
 		result := erun.Run(t, []string{"--dry-run"}, erun.RunOptions{
 			Cwd:   setup.Cwd,
 			Env:   setup.Env(),
-			Stdin: "j\r",
+			Stdin: "2\n",
 		})
 		golden.Equal(t, "root/tenant_select_via_stdin", normalize.Apply(result.Combined))
 	})
 
 	t.Run("tenant_select_initialize_current_project_via_stdin", func(t *testing.T) {
 		// Executes selectTenantPrompt's "Initialize current project" arm:
-		// stdin "jj\r" walks past both seeded tenants onto the initialize
-		// option. The cwd is not a git repository, so the bootstrap must
+		// stdin "3\n" picks the initialize option (the third plain-select
+		// entry) by number. The cwd is not a git repository, so the bootstrap must
 		// stop with the "erun config is not initialized" guidance instead
 		// of initializing anything. Scripted stdin is the honest tool here:
 		// the initialize arm only exists inside the interactive prompt.
@@ -64,7 +65,7 @@ func TestRoot(t *testing.T) {
 		result := erun.Run(t, []string{"--dry-run"}, erun.RunOptions{
 			Cwd:   setup.Cwd,
 			Env:   setup.Env(),
-			Stdin: "jj\r",
+			Stdin: "3\n",
 		})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)

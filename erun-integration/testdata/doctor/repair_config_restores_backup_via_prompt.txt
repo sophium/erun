@@ -2,11 +2,7 @@ Root config: <TMP> (status=corrupted)
   load error: config file cannot be unmarshaled
   available backups (newest first):
     - 2026-05-19 path=<TMP>
-? Restore root config from backup 2026-05-19 path=<TMP> [Y/n] █
-? Restore root config from backup 2026-05-19 path=<TMP> [Y/n] y█
-? Restore root config from backup 2026-05-19 path=<TMP> [Y/n] y█
-Restore root config from backup 2026-05-19 path=<TMP> y
-Restored root config from <TMP>
+? Restore root config from backup 2026-05-19 path=<TMP> [Y/n] Restored root config from <TMP>
 Root config: <TMP> (status=ok)
   cloud providers configured: 0
   cloud contexts: 0, tenants: 1

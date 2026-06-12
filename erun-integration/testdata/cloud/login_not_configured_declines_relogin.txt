@@ -1,6 +1,2 @@
-? Login to test-user@aws? [Y/n] █
-? Login to test-user@aws? [Y/n] n█
-? Login to test-user@aws? [Y/n] n█
-Login to test-user@aws? n
-test-user@aws: not_configured (The config profile (test-profile) could not be found)
+? Login to test-user@aws? [Y/n] test-user@aws: not_configured (The config profile (test-profile) could not be found)
 audit: erun cloud login --alias test-user@aws

@@ -950,6 +950,7 @@ remote-default-devops-bootstrap:
   {{- $postgresPasswordSecretName := default "erun-backend-postgres" $postgres.passwordSecretName -}}
   {{- $postgresPasswordSecretKey := default "password" $postgres.passwordSecretKey -}}
   {{- $postgresStorage := default "10Gi" $postgres.storage -}}
+  {{- $postgresReset := default false $postgres.reset -}}
   {{- $postgresPassword := default "" $postgres.password -}}
   {{- $existingPostgresSecret := lookup "v1" "Secret" .Release.Namespace $postgresPasswordSecretName -}}
   {{- if and (eq $postgresPassword "") $existingPostgresSecret (hasKey $existingPostgresSecret.data $postgresPasswordSecretKey) -}}
@@ -1016,9 +1017,29 @@ remote-default-devops-bootstrap:
       metadata:
         labels:
           app: erun-postgres
+        {{- if $postgresReset }}
+        annotations:
+          # Carries the per-deploy version mint so every snapshot deploy rolls
+          # the pod and re-runs the reset init container. Without it, helm sees
+          # an unchanged pod template on the next snapshot deploy and the reset
+          # silently does not happen.
+          erun.io/postgres-reset-version: {{ .Chart.AppVersion | quote }}
+        {{- end }}
       spec:
         securityContext:
           fsGroup: 999
+        {{- if $postgresReset }}
+        initContainers:
+          - name: erun-postgres-reset
+            image: {{ $postgresImage }}
+            command:
+              - sh
+              - -c
+              - rm -rf /var/lib/postgresql/data/pgdata
+            volumeMounts:
+              - name: data
+                mountPath: /var/lib/postgresql/data
+        {{- end }}
         containers:
           - image: {{ $postgresImage }}
             name: erun-postgres

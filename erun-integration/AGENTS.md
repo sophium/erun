@@ -159,18 +159,27 @@ not a production knob; document the override in the test comment; if you want
 to set it from a CLI command or MCP tool, the production detection is what
 needs fixing.
 
-## Scripted stdin into prompts: one prompt per subprocess
+## Scripted stdin into prompts: the plain (non-TTY) path
 
-promptui works through a pipe — a `Prompt` accepts `"<text>\n"`, a `Select`
-accepts `"\r"` to confirm and `"j"`/`"k"` to move — so scenarios can execute
-real prompt code by passing `erun.RunOptions.Stdin`. The hard constraint:
-**at most one interactive prompt per subprocess.** When a prompt closes, its
-readline instance has already buffered the rest of piped stdin and drops it,
-so a second sequential prompt sees EOF. Design prompt scenarios around exactly
-one prompt and bypass every other prompt with flags. Prompt redraws are
-stripped to deterministic artifacts by the ANSI normalization rule; verify a
-new prompt scenario with three consecutive compare-mode runs before trusting
-it.
+When stdout is a pipe — which it always is under this harness — erun's
+prompts take the plain fallback (`runPlainPrompt`/`runPlainSelect` in
+`erun-cli/cmd/plain_prompt.go`, #520): an fmt-rendered label plus a buffered
+line read, no cursor-control escapes. Scenarios script prompts by passing
+`erun.RunOptions.Stdin`, one line per prompt:
+
+- A text prompt takes `"<text>\n"`; a bare `"\n"` submits the prompt's
+  default.
+- A select prints a numbered option list and takes `"<number>\n"` (or the
+  exact option text). An empty line picks the first option, so a legacy
+  `"\r"` confirm still selects it.
+- The plain reader is shared across prompts, so a scenario may chain several
+  prompts in one subprocess — feed one line per prompt in order.
+
+The promptui branch (cursor repaints, `"j"`/`"k"` navigation) only runs on a
+real terminal or under `ERUN_FORCE_TTY=1`; under the seam the old constraint
+still applies: promptui's readline buffers ahead, so **at most one promptui
+prompt per subprocess**. Verify a new prompt scenario with three consecutive
+compare-mode runs before trusting it.
 
 ## Real-run port-forward scenarios: pin a high port range
 
@@ -241,7 +250,7 @@ Some statements cannot be exercised from a CLI subprocess, even with stubs. They
 - **Dead code with no callers in any module**: `host_runtime.go` (whole file), `resolveDeployContext` (its only call site passes an empty component name from desktop/MCP-only entrypoints; the non-empty arm is unreachable outright), `ResolveDeploySpecForOpenResult`, `LaunchShell`, `DefaultEnvironmentIdleConfig`, `ValidateClaudeMaxOutputTokens`, `RuntimeVersionSuggestions` + `previousPatchVersion`, `FindComponentLinuxPackageContext`/`componentLinuxPackageContextCandidate`, `ResolveCurrentLinuxReleaseScripts`, and the no-version `EnsureDefaultDevopsChart` wrapper. Candidates for deletion, not for scenarios.
 - **Stat-based TTY checks with no override seam**: the spinner stack (`progress.go` `writerIsTerminalForSpinner` + `Spinner.run/draw/Stop`, `cmd/open_shell.go` `runWithSpinner`/`shouldUseSpinner`) and the log colorizer (`logger.go` `shouldColorizeWriter`/`colorize`) gate on `os.File` char-device stats, not on `ERUN_FORCE_TTY`. The piped harness can never reach them; adding the seam is a production change.
 - **CLI-unreachable fallbacks**: `resolveDeployKubernetesContext`'s current-context fallback fires only for an env with an empty kubernetes context, which `validateOpenTarget` rejects earlier on every CLI path.
-- **Second-sequential-prompt flows**: piped stdin supports exactly one promptui prompt per subprocess (see "Scripted stdin into prompts"), so flows that chain prompts (doctor's multi-action confirm loop, `codeCommitSSHKeyIDPrompt` after the URL prompt) keep their later prompts uncovered.
+- **Second-sequential-prompt flows under `ERUN_FORCE_TTY`**: the plain (non-TTY) prompt path supports chained prompts (one stdin line each), but scenarios that force the promptui branch via `ERUN_FORCE_TTY=1` are still limited to one promptui prompt per subprocess, so TTY-branch coverage of chained prompts (doctor's multi-action confirm loop, `codeCommitSSHKeyIDPrompt` after the URL prompt) remains out of reach.
 - **Host-OS-locked arms**: code gated on real `runtime.GOOS` rather than `eruncommon.DetectHost` (the darwin `.app` arm of `newAppProcessCommand`) only executes on that OS's runner.
 - **Interactive-signal arms**: promptui `ErrInterrupt`/`ErrAbort` paths need Ctrl+C delivery on a real TTY.
 - **Long-running loops with no clean exit**: `cmd/activity_proxy.go`'s accept loop blocks forever; only its validation arms are covered.
