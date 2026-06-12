@@ -127,6 +127,10 @@ type ShellLaunchParams struct {
 	Contribute bool
 	AITool     string
 	Claude     EnvironmentClaudeConfig
+	// RuntimeImage mirrors EnvConfig.RuntimeImage. The AI session prelude
+	// uses it to advise on the erun-build-env skill only when the env still
+	// runs the default published runtime image.
+	RuntimeImage string
 }
 
 type ShellLaunchPreview struct {
@@ -540,6 +544,7 @@ func ShellLaunchParamsFromResult(result OpenResult) ShellLaunchParams {
 		Idle:               result.EnvConfig.Idle,
 		AITool:             strings.TrimSpace(result.EnvConfig.AITool),
 		Claude:             result.EnvConfig.Claude,
+		RuntimeImage:       strings.TrimSpace(result.EnvConfig.RuntimeImage),
 	}
 }
 
@@ -855,6 +860,13 @@ func remoteSessionLauncherBody(req ShellLaunchParams, bashrcPath string) []strin
 		)
 	}
 	if req.AI {
+		// Discoverability of the erun-build-env skill where the user would
+		// use it: one advisory line, only when the remote env still runs
+		// the default published runtime image, printed once on session
+		// create (a reattach never re-runs the prelude). See #505.
+		if req.RemoteRepo && req.RuntimeImage == "" {
+			body = append(body, `printf '\033[2mTip: ask Claude to "init an erun build environment" to customize the toolchain of this env.\033[0m\n'`)
+		}
 		body = append(body, AISessionLaunchLines(req.AITool, req.Claude)...)
 	}
 	return append(body, fmt.Sprintf("exec /bin/bash --rcfile \"%s\" -i", bashrcPath))
