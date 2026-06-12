@@ -70,9 +70,9 @@ test.describe('app-notification toast', () => {
     // An empty payload must add no notification toast. Compare the
     // role=status / role=alert counts before and after rather than
     // asserting an absolute zero: the titlebar idle-status widget also
-    // carries role=status whenever an env is active (true on a populated
-    // ~/.erun), so a global count of 0 is not a safe invariant. A no-op
-    // dispatch must leave the counts unchanged.
+    // carries role=status whenever an env with a managed cloud context is
+    // active, so a global count of 0 is not a future-proof invariant. A
+    // no-op dispatch must leave the counts unchanged.
     const statusBefore = await page.locator('[role="status"]').count();
     const alertBefore = await page.locator('[role="alert"]').count();
     await page.evaluate(() => {

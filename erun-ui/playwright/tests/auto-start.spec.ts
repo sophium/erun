@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/erunApp.js';
+import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
 // auto-start covers the desktop-only auto-start gate added in
 // feature/331-idle-stop-and-autostart-gate.
@@ -7,46 +8,31 @@ import { expect, test } from '../fixtures/erunApp.js';
 // card alongside Timeout, Working hours, and Idle SSH activity threshold,
 // because all four govern the env's start/stop lifecycle. It round-trips
 // through the existing LoadEnvironmentConfig / SaveEnvironmentConfig path.
-// The spec opens the manage dialog for the first env and asserts the
-// select's presence tracks the env's "Remote environment" readonly field
-// (visible on the General tab), without saving — same approach as the
-// other manage specs, to avoid mutating the developer's actual ~/.erun/
-// config.
+// The spec opens the manage dialog for the seeded local-agent env and
+// asserts the select stays hidden, without saving — same approach as the
+// other manage specs, to keep the seeded config untouched.
 //
 // AutoStartPromptDialog itself opens only when openSelection has to decide
-// whether to start a stopped EC2 host. The headless backend reflects the
-// developer's real config, so we cannot reliably arrange a remote env with
-// a stopped cloud context per AGENTS.md. Instead the suite asserts the
-// negative invariant: clicking an env never surfaces the prompt when the
-// gate decides the click would not start EC2. Persistence of the three
-// AutoStart values is covered by Go unit tests
+// whether to start a stopped EC2 host. A stopped managed cloud context
+// needs a real cloud host the isolated harness cannot stage, so the suite
+// asserts the negative invariant: clicking an env never surfaces the prompt
+// when the gate decides the click would not start EC2. Persistence of the
+// three AutoStart values is covered by Go unit tests
 // (TestSetEnvironmentAutoStartPersistsTriStateValue) and the dialog itself
 // mirrors ReconnectDialog's primitives.
 
 test.describe('auto-start gate', () => {
   test('Runtime-tab AutoStart select visibility tracks Remote field', async ({ app }) => {
-    const tenants = await app.sidebar.tenants();
-    expect(tenants.length).toBeGreaterThan(0);
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    expect(envs.length).toBeGreaterThan(0);
-    const env = envs[0]!;
-
-    await app.sidebar.openManageDialogFor(tenant, env);
+    await app.sidebar.openManageDialogFor(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
 
     // The desktop-only AutoStart select renders only for a remote env bound
     // to a managed cloud context (it governs starting a stopped cloud host) —
-    // not for every remote env, and never for a local-agent env. The only
-    // direction that holds for any config is "local-agent ⇒ hidden"; the
-    // managed-cloud binding that would show it isn't stageable in the headless
-    // harness (AGENTS), so assert the local-agent direction and skip remote
-    // envs. The env type field is on the General tab (default landing tab).
-    const isRemote = await app.manageDialog.hasRemoteWorktree();
-    test.skip(
-      isRemote,
-      'first env is remote; the managed-cloud binding that shows the AutoStart select is not stageable in the harness',
-    );
+    // not for every remote env, and never for a local-agent env. The seeded
+    // baseline env is local-agent, so the deterministic direction here is
+    // "local-agent ⇒ hidden"; the managed-cloud binding that would show the
+    // select needs a real cloud host the isolated harness cannot stage.
+    expect(await app.manageDialog.hasRemoteWorktree()).toBe(false);
 
     await app.manageDialog.selectTab('Runtime');
     await expect.poll(() => app.manageDialog.getActiveTab()).toBe('Runtime');
@@ -66,13 +52,7 @@ test.describe('auto-start gate', () => {
     // UX checklist.
     await expect(app.autoStartPromptDialog.locator()).toBeHidden();
 
-    const tenants = await app.sidebar.tenants();
-    expect(tenants.length).toBeGreaterThan(0);
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    expect(envs.length).toBeGreaterThan(0);
-
-    await app.sidebar.openEnvironment(tenant, envs[0]!);
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
     // Give the gate's LoadEnvironmentConfig round-trip a moment to land,
     // then assert the prompt did not open. Using toBeHidden() (auto-retry)
     // rather than waitForTimeout keeps the test deterministic on slow

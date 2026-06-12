@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/erunApp.js';
+import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
 // Contribute-toggle coverage for feature/396-contribute-toggle.
 //
@@ -28,47 +29,16 @@ test.describe('titlebar contribute toggle', () => {
   });
 
   test('appears for an eligible local-agent or remote-agent env', async ({ app, page }) => {
-    // The headless backend reflects the developer's real ~/.erun config,
-    // so we walk the available tenants and find the first env whose
-    // type makes the toggle eligible. If none exist on the host, the
-    // assertion bails with a documented skip rather than a failure —
-    // the visibility-gating contract is still locked by the previous
-    // test, and the next test below pins the negative invariant.
-    const tenants = await app.sidebar.tenants();
-    test.skip(tenants.length === 0, 'no tenants configured in this developer ~/.erun');
-    let eligibleTenant: string | null = null;
-    let eligibleEnv: string | null = null;
-    for (const tenant of tenants) {
-      if (tenant.toLowerCase() === 'erun') continue;
-      const envs = await app.sidebar.environmentsFor(tenant);
-      if (envs.length === 0) continue;
-      eligibleTenant = tenant;
-      eligibleEnv = envs[0] ?? null;
-      break;
-    }
-    test.skip(
-      eligibleTenant === null || eligibleEnv === null,
-      'no non-erun tenant with an environment available',
-    );
-    await app.sidebar.openEnvironment(eligibleTenant!, eligibleEnv!);
+    // The seeded baseline stages exactly the eligible case: pw is not the
+    // special "erun" tenant and alpha is an explicit local-agent env, so
+    // the toggle must render once the env is selected.
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
     // The toggle's button label switches between "Contribute to ERun"
     // and "Disable contribute mode" depending on state; either label
-    // appearing in the titlebar means the gating passed. The element
-    // may still be hidden if the env's type is "runtime" — accept that
-    // outcome but require that *if* it's a local/remote agent, the
-    // toggle renders.
+    // appearing in the titlebar means the gating passed.
     const toggle = page.getByRole('button', {
       name: /Contribute to ERun|Disable contribute mode/i,
     });
-    const visible = await toggle
-      .first()
-      .isVisible()
-      .catch(() => false);
-    if (!visible) {
-      // Env was probably a runtime type. Skip with a clear reason so
-      // the test surface stays honest.
-      test.skip(true, 'first non-erun env on host is not a local-agent or remote-agent type');
-    }
     await expect(toggle.first()).toBeVisible();
   });
 });

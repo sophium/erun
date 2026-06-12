@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -155,11 +156,38 @@ type RunOptions struct {
 	Timeout time.Duration
 }
 
+// requireIsolatedEnv fails the test when a scenario invokes the binary
+// without an isolated HOME and XDG_CONFIG_HOME. Every scenario must route
+// its environment through env.New + Setup.Env() (possibly appended to);
+// a scenario that omits them would silently read — or worse, write — the
+// developer's real erun config, and its golden would capture machine
+// state. Guard here so the mistake fails fast at the harness boundary.
+func requireIsolatedEnv(t testing.TB, env []string) {
+	t.Helper()
+	home := ""
+	xdgConfig := ""
+	for _, kv := range env {
+		if value, ok := strings.CutPrefix(kv, "HOME="); ok {
+			home = strings.TrimSpace(value)
+		}
+		if value, ok := strings.CutPrefix(kv, "XDG_CONFIG_HOME="); ok {
+			xdgConfig = strings.TrimSpace(value)
+		}
+	}
+	if home == "" || xdgConfig == "" {
+		t.Fatalf("erun.Run: RunOptions.Env must carry an isolated HOME and XDG_CONFIG_HOME (use env.New(t) and setup.Env()); got HOME=%q XDG_CONFIG_HOME=%q", home, xdgConfig)
+	}
+	if real := strings.TrimSpace(os.Getenv("HOME")); real != "" && home == real {
+		t.Fatalf("erun.Run: RunOptions.Env points HOME at the developer's real home %q; scenarios must run against the env.New(t) tempdir", real)
+	}
+}
+
 // Run invokes the compiled binary with the given args. The caller's
 // RunOptions.Env is used verbatim except GOCOVERDIR is always injected so
 // counters land in the harness coverage dir.
 func Run(t testing.TB, args []string, opts RunOptions) Result {
 	t.Helper()
+	requireIsolatedEnv(t, opts.Env)
 	bin := BinaryPath(t)
 
 	timeout := opts.Timeout

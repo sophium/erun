@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/erunApp.js';
+import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
 // Issues #482/#477 — the env Manage dialog's AI tab gained a per-env Claude
 // "Default model" selector (launched as `claude --model`, with `fable` newly
@@ -13,8 +14,9 @@ import { test, expect } from '../fixtures/erunApp.js';
 // manage-claude-effort).
 //
 // Harness limitation: the real `claude --model ... --verbose --debug` launch
-// and the save-triggered AI-tab reopen cannot be observed headless — saving
-// here would mutate the dev's config and end their real AI sessions. The
+// and the save-triggered AI-tab reopen cannot be observed headless — the
+// seeded env's AI tool is an inert shell, and saving would churn the shared
+// baseline config mid-suite. The
 // launch-string composition is locked by TestAISessionLaunchCommand and
 // TestResolveClaudeDefaultModel in erun-common plus the `erun open
 // --app-session ai --ai --dry-run` integration goldens; the end+respawn flow
@@ -24,23 +26,15 @@ test.describe('manage dialog claude launch flags', () => {
   test('Default model follows Available models; verbose+debug toggles; both reset', async ({
     app,
   }) => {
-    const tenants = await app.sidebar.tenants();
-    test.skip(tenants.length === 0, 'no tenants in this developer harness');
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    test.skip(envs.length === 0, 'no environments in this developer harness');
-    const env = envs[0]!;
-
-    await app.sidebar.openManageDialogFor(tenant, env);
+    await app.sidebar.openManageDialogFor(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
     await app.manageDialog.selectTab('AI');
     await expect.poll(() => app.manageDialog.getActiveTab()).toBe('AI');
 
-    // Both fields render. Their initial values come from this machine's real
-    // env config — an operator may already have adopted fable as an
-    // available/default model — so the spec captures the baseline and
-    // asserts every transition relative to it instead of assuming unset
-    // defaults.
+    // Both fields render. The seeded env leaves the claude block unset, but
+    // the spec still captures the starting values and asserts every
+    // transition relative to them — that keeps it valid even if the seeded
+    // baseline ever adopts defaults.
     await expect(app.manageDialog.claudeDefaultModelSelect()).toBeVisible();
     await expect(app.manageDialog.claudeVerboseDebugCheckbox()).toBeVisible();
     const initialVerbose = await app.manageDialog.claudeVerboseDebugCheckbox().isChecked();

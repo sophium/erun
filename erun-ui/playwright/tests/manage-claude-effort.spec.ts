@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/erunApp.js';
+import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
 // Issue #469 — the env Manage dialog's AI tab gained a per-env Claude "Effort"
 // selector (low|medium|high|xhigh|max|ultracode) that the desktop applies when
@@ -17,14 +18,7 @@ import { test, expect } from '../fixtures/erunApp.js';
 // TestAISessionLaunchCommand* and TestResolveClaudeEffort in erun-common.
 test.describe('manage dialog claude effort', () => {
   test('Effort selector defaults to ultracode, overrides, and resets', async ({ app }) => {
-    const tenants = await app.sidebar.tenants();
-    test.skip(tenants.length === 0, 'no tenants in this developer harness');
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    test.skip(envs.length === 0, 'no environments in this developer harness');
-    const env = envs[0]!;
-
-    await app.sidebar.openManageDialogFor(tenant, env);
+    await app.sidebar.openManageDialogFor(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
     await app.manageDialog.selectTab('AI');
     await expect.poll(() => app.manageDialog.getActiveTab()).toBe('AI');

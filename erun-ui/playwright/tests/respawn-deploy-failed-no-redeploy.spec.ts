@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/erunApp.js';
+import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
 // Coverage for the deploy-failed respawn guard (feature/449 follow-up).
 //
@@ -14,10 +15,10 @@ import { expect, test } from '../fixtures/erunApp.js';
 //
 // The positive path — a dead PTY *and* a `status: failed` deploy activity
 // entry for the same env — cannot be staged deterministically in the headless
-// harness: it reflects the developer's real ~/.erun/ and has no cluster to
-// drive a failing deploy, so neither the exited managed terminal (see the
-// bug/368 note in sidebar-reclick-no-duplicate-tabs.spec.ts) nor the failed
-// activity entry can be arranged here. The guard itself is a pure selector
+// harness: it has no cluster to drive a real failing deploy, so the exited
+// managed terminal (see the bug/368 note in
+// sidebar-reclick-no-duplicate-tabs.spec.ts) and the failed activity entry
+// cannot be arranged together here. The guard itself is a pure selector
 // over state.activity.entries (selectEnvHasFailedDeploy in app/selectors.ts).
 //
 // What this spec locks is the reachable negative invariant: a healthy env
@@ -26,14 +27,7 @@ import { expect, test } from '../fixtures/erunApp.js';
 // not misfire on the common path and block healthy envs from opening.
 test.describe('deploy-failed respawn guard', () => {
   test('healthy env opens normally and shows no deploy-failed marker', async ({ app, page }) => {
-    const tenants = await app.sidebar.tenants();
-    expect(tenants.length).toBeGreaterThan(0);
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    expect(envs.length).toBeGreaterThan(0);
-    const env = envs[0]!;
-
-    await app.sidebar.openEnvironment(tenant, env);
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     // Local is spawned eagerly by openSelection, so it is the most reliable
     // signal that the open settled (same precondition as the sibling specs).

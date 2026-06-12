@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/erunApp.js';
+import { SEED_TENANT } from '../fixtures/seedRoot.js';
 
 test.describe('environment init dialog', () => {
   test('opens with tenant pre-populated and cancels', async ({ app }) => {
@@ -6,13 +7,11 @@ test.describe('environment init dialog', () => {
     await app.envInitDialog.waitForOpen();
     await expect(app.envInitDialog.locator()).toBeVisible();
 
-    // When at least one tenant exists, the dialog pre-populates the
-    // tenant field with the current selection's tenant; assert the field
-    // is present and non-empty.
+    // The dialog pre-populates the tenant field with the current
+    // selection's tenant — the seeded baseline tenant.
     const tenantInput = app.envInitDialog.tenantInput();
     await expect(tenantInput).toBeVisible();
-    const tenant = (await tenantInput.inputValue()).trim();
-    expect(tenant.length).toBeGreaterThan(0);
+    expect((await tenantInput.inputValue()).trim()).toBe(SEED_TENANT);
 
     await app.envInitDialog.cancel();
     await app.envInitDialog.waitForClosed();
@@ -112,20 +111,22 @@ test.describe('environment init dialog', () => {
     // but the Go uiState never carried that field — every
     // environments-changed tick overwrote the populated dropdown with
     // []. Invariant: while the dialog is open, firing the event must
-    // leave the same surface visible (populated stays populated, empty
-    // stays empty). The test works whether or not the dev machine has
-    // kubectl contexts available.
+    // leave the same surface visible. The isolated harness's kubectl stub
+    // reports no contexts, so the deterministic surface is the empty state
+    // (rendered as a status block with a Rescan action), and the populated
+    // select must never appear.
     await app.sidebar.openInitDialog();
     await app.envInitDialog.waitForOpen();
 
     const select = page.locator('#environment-kubernetes-context');
     const emptyState = app.envInitDialog
       .locator()
-      .getByRole('heading', { name: 'No Kubernetes contexts found' });
+      .getByText('No Kubernetes contexts found')
+      .first();
 
-    // Wait for "Loading contexts..." to clear: either surface is fine.
-    await expect(select.or(emptyState)).toBeVisible();
-    const wasPopulated = await select.isVisible().catch(() => false);
+    // Wait for "Loading contexts..." to clear into the empty state.
+    await expect(emptyState).toBeVisible();
+    await expect(select).toBeHidden();
 
     await page.evaluate(() => {
       const runtime = (
@@ -136,10 +137,8 @@ test.describe('environment init dialog', () => {
 
     // Allow the dispatch chain (event → reload → store update) to
     // settle, then assert the surface we started with is still visible.
-    const expectedSurface = wasPopulated ? select : emptyState;
-    const otherSurface = wasPopulated ? emptyState : select;
-    await expect(expectedSurface).toBeVisible();
-    await expect(otherSurface).toBeHidden();
+    await expect(emptyState).toBeVisible();
+    await expect(select).toBeHidden();
 
     await app.envInitDialog.cancel();
     await app.envInitDialog.waitForClosed();

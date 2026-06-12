@@ -62,6 +62,7 @@ Per the root `AGENTS.md`, `--dry-run` must produce a complete, side-effect-free 
 ## Fixture patterns
 
 - `env.New(t)` allocates a fresh tempdir-rooted HOME/XDG/cwd. Always call this; never share env across scenarios.
+- `erun.Run` enforces the isolation: it fails the test (`t.Fatal`) when `RunOptions.Env` lacks an isolated `HOME` + `XDG_CONFIG_HOME` or points `HOME` at the developer's real home. Always build the env from `setup.Env()` (appending extra vars is fine); a scenario can never silently read or write the real `~/.config/erun`.
 - `fixture.SeedTenantEnv(t, setup, tenant, env)` writes the minimum erun config tree so commands resolve a tenant/environment without prompting. Extend this helper when a new field becomes load-bearing for `--dry-run`.
 - `fixture.SeedDevopsRepo(t, setup, tenant)` materializes a `<tenant>-devops/k8s/<tenant>-devops/` chart so deploy/build resolve a kubernetes deploy context.
 - `fixture.SeedGitRepo(t, dir)` runs `git init` + commit so release/diff/exec see a project root.

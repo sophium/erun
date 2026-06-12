@@ -40,11 +40,11 @@ test('failed deploy card reveals captured output and offers a copyable report', 
 
   const drawer = app.activityDrawer.locator();
 
-  // Scope to this entry's own card. The headless backend reflects the dev's
-  // real ~/.erun history, which may already contain other failed activities
-  // (each now rendering its own "Show output"/"Copy failure report" controls),
-  // so we must not match across cards. "petios/rihards-develop 1.0.80" is
-  // unique to the synthetic entry above.
+  // Scope to this entry's own card. Earlier specs in the suite can leave
+  // failed activities in the singleton backend's history (each rendering its
+  // own "Show output"/"Copy failure report" controls), so we must not match
+  // across cards. "petios/rihards-develop 1.0.80" is unique to the synthetic
+  // entry above.
   const card = drawer.locator('article').filter({ hasText: 'petios/rihards-develop' }).first();
 
   // The one-line summary stays first-class.

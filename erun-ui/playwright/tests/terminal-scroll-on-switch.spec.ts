@@ -13,24 +13,26 @@ import type { Page } from '@playwright/test';
 // "Open a new terminal" button (always available once an env is open, unlike
 // the env's optional ERun/AI tabs), then switches between the two sessions.
 //
-// Harness limitation: the headless backend reflects the developer's real
-// ~/.erun config and a freshly spawned shell, so staging a scrollback buffer
-// taller than the viewport is not deterministic (it depends on shell output
-// timing). The spec therefore locks the reachable invariant — after the
+// Harness limitation: the sessions are freshly spawned shells, so staging a
+// scrollback buffer taller than the viewport is not deterministic (it
+// depends on shell output timing). The spec therefore locks the reachable
+// invariant — after the
 // switch the active terminal's viewport is at the bottom (scrollTop at its
 // maximum) rather than parked above it. With no scrollback the viewport is
 // trivially at the bottom; the assertion still guards against a regression
 // that parks the viewport mid-history when scrollback exists, and it confirms
 // the replay path runs without leaving the viewport scrolled up.
 test.describe('terminal scroll on session switch', () => {
-  test('switching back to a tab lands the viewport at the bottom', async ({ app, page }) => {
-    // Use a normal environment, never the local default (erun/local): its
-    // local-shell tab set behaves differently and is not what this spec drives.
-    const target = await app.sidebar.firstEnvironmentExcludingLocal();
-    test.skip(target === null, 'no non-local environment in this developer harness');
-    const { tenant, env } = target!;
+  test('switching back to a tab lands the viewport at the bottom', async ({
+    app,
+    page,
+    seededEnv,
+  }) => {
+    // Use a per-test seeded env so the tab churn this spec drives (extra
+    // terminal spawn + close) never leaks into the shared baseline rows.
+    const { tenant, environment } = seededEnv;
 
-    await app.sidebar.openEnvironment(tenant, env);
+    await app.sidebar.openEnvironment(tenant, environment);
 
     const localTab = page.getByRole('tab', { name: 'Local', exact: true });
     await localTab.waitFor({ state: 'visible', timeout: 15_000 });
