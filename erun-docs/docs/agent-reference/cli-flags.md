@@ -95,7 +95,7 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 3. If `EnvConfig.cloudprovideralias` is set, look up the cloud context. If `stopped`, send the provider-specific start command. Poll the cluster API every `5s` until reachable or 5 minutes elapse (then abort `CLUSTER_UNREACHABLE`).
 4. Render the runtime chart with the effective `EnvConfig` values; run `helm upgrade --install <env>-runtime <chart>` into `<tenant>-<env>`.
 5. Wait for the runtime pod's SSH server to be reachable on the in-pod port (`EnvConfig.sshd.port`, default `22`). Readiness probe is a TCP connect + banner-line read, retried every `2s` with a `60s` cap.
-6. Establish local port-forwards. The desktop's port allocator writes `<UserConfigDir>/erun/portforward/{mcp,ssh,api}/<tenant>/<env>.json` with `{localPort, podPort, pid}`.
+6. Establish local port-forwards. `erun open` starts a detached `kubectl port-forward` per channel and records it at `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.json` with `{tenant, environment, kubernetesContext, namespace, localPort, logPath, processId}` — see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files).
 7. Attach a terminal (default), print kubectl/cwd switching commands (`--no-shell`), or launch the IDE (`--vscode`/`--intellij`).
 8. Exit `0` when the terminal exits.
 
@@ -305,8 +305,9 @@ See [Release version policy](/agent-reference/release-policy) for the version-pa
 
 1. The Kubernetes namespace `<tenant>-<env>` (cascades to every Deployment, PVC, Service, ConfigMap, Secret inside).
 2. The per-user env config directory `~/.config/erun/<tenant>/<env>/`.
-3. The local port-forward marker files under `<UserConfigDir>/erun/portforward/{mcp,ssh,api}/<tenant>/<env>.json`.
-4. If the deleted env was the tenant's `defaultenvironment`: clears the pointer (next `erun open` against the tenant prompts for a new default).
+3. If the deleted env was the tenant's `defaultenvironment`: clears the pointer (next `erun open` against the tenant prompts for a new default).
+
+The local port-forward state files under `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.json` are **not** removed; a later env with the same name overwrites them (see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files)).
 
 ### Error codes
 

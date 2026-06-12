@@ -89,6 +89,8 @@ One per environment. This is the most-edited file.
 | `autostart` | `*bool` | desktop sidebar open | `nil` = ask, `true` = always start linked cloud context on open, `false` = never. |
 | `remotehostcredentials` | bool | helm chart (cloud credentials passthrough) | Mount the host's cloud credentials into the runtime pod (for managed cloud envs). |
 
+The four `claude.*` rows above (`usemantle`, `usebedrock`, `models[]`, `maxoutputtokens`) are the Claude values erun manages itself. The runtime chart accepts further `claude.*` values that erun never sets — pin a model, point Bedrock at a VPC endpoint, tune prompt caching — via the env's values overlay; see [Advanced chart values](#advanced-chart-values).
+
 ---
 
 ## Per-project config
@@ -112,6 +114,63 @@ Committed to the repo, applies to anyone who checks it out.
 ## Per-pod env vars
 
 The helm chart writes these into the runtime pod at deploy time. They're derived from the per-user and per-project layers above; you don't edit them directly. Full list at [Environment variables](/reference/env-vars).
+
+---
+
+## Advanced chart values (Operator escape hatches) {#advanced-chart-values}
+
+The runtime chart accepts more values than erun manages. At deploy time erun passes two layers to `helm upgrade --install`:
+
+1. The env's values overlay — `values.<env>.yaml` in the runtime chart directory (`<tenant>-devops/k8s/<tenant>-devops/values.<env>.yaml`). It is passed with `-f` and is required: deploy aborts with `values file not found for environment "<env>"` when it is missing.
+2. erun's own `--set`/`--set-string` list, derived from `EnvConfig` and the resolved plan.
+
+Helm gives `--set` precedence over `-f`, so for every key erun manages the overlay can never win. The keys below are exactly the ones erun's `--set` list never includes — for them the `values.<env>.yaml` overlay is authoritative, which makes it the supported escape hatch for behaviour erun doesn't model.
+
+### `claude.*` model and Bedrock tuning {#advanced-claude-values}
+
+Each value renders as an env var on the runtime container, and the pod's entrypoint relays it into the Agent's `~/.claude/settings.json`. Both steps are AWS-gated: the chart renders this env block only when the env's cloud provider is `aws` (`cloudContext.provider`), and the entrypoint relay runs only when Bedrock configuration is active — an AWS provider, or `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_MANTLE` set, with a resolvable region.
+
+| Chart value | Env var | Default | Effect |
+|---|---|---|---|
+| `claude.model` | `ANTHROPIC_MODEL` | unset | Pin the primary model Claude uses. |
+| `claude.defaultOpusModel` | `ANTHROPIC_DEFAULT_OPUS_MODEL` | unset | Pin the model ID the `opus` alias resolves to (Bedrock model IDs, `anthropic.`-prefixed). |
+| `claude.defaultSonnetModel` | `ANTHROPIC_DEFAULT_SONNET_MODEL` | unset | Pin the model ID the `sonnet` alias resolves to. |
+| `claude.defaultHaikuModel` | `ANTHROPIC_DEFAULT_HAIKU_MODEL` | unset | Pin the model ID the `haiku` alias resolves to. |
+| `claude.bedrockBaseURL` | `ANTHROPIC_BEDROCK_BASE_URL` | unset | Route Bedrock traffic through a VPC endpoint or gateway instead of the public endpoint. |
+| `claude.mantleBaseURL` | `ANTHROPIC_BEDROCK_MANTLE_BASE_URL` | unset | Base URL for the Bedrock Mantle gateway. |
+| `claude.bedrockServiceTier` | `ANTHROPIC_BEDROCK_SERVICE_TIER` | unset | Bedrock service tier: `default`, `flex`, or `priority`. |
+| `claude.skipMantleAuth` | `CLAUDE_CODE_SKIP_MANTLE_AUTH` | unset | Skip Mantle's own auth step (set `1` when the gateway handles auth). |
+| `claude.disablePromptCaching` | `DISABLE_PROMPT_CACHING` | unset | Turn prompt caching off (set `1`). |
+| `claude.enablePromptCaching1H` | `ENABLE_PROMPT_CACHING_1H` | unset | Use the 1-hour prompt-cache TTL on Bedrock (set `1`). |
+| `claude.maxThinkingTokens` | `MAX_THINKING_TOKENS` | `1024` | Thinking-token budget per response. |
+| `claude.smallFastModelAWSRegion` | `ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION` | `cloudContext.region` | AWS region for the small/fast helper model, when it differs from the env's region. |
+
+The `claude.*` keys erun does manage — `claude.useBedrock`, `claude.useMantle`, `claude.availableModels`, `claude.maxOutputTokens` — come from the [`EnvConfig` fields above](#envconfig) and are always `--set`; an overlay value for them is ignored.
+
+### Runtime pod resource requests {#advanced-runtime-requests}
+
+erun manages only the runtime pod's resource **limits**: `EnvConfig.runtimepod.cpu` / `.memory` (set with `erun init --runtime-cpu` / `--runtime-memory` or the desktop's env settings) are always `--set` as `runtime.resources.limits.{cpu,memory}`. The requests are overlay-only:
+
+| Chart value | Default | Effect |
+|---|---|---|
+| `runtime.resources.requests.cpu` | `0.25` | CPU request for the runtime pod. |
+| `runtime.resources.requests.memory` | `1024Mi` | Memory request for the runtime pod. |
+
+Request overrides are invisible to `erun open`'s redeploy drift detection — it compares the deployed limits against `EnvConfig.runtimepod` and ignores requests — so changing a request in the overlay takes effect on the next deploy, not automatically on the next open.
+
+An example overlay:
+
+```yaml
+# <tenant>-devops/k8s/<tenant>-devops/values.prod.yaml
+claude:
+  model: anthropic.claude-opus-4-8
+  bedrockServiceTier: priority
+runtime:
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2048Mi
+```
 
 ---
 

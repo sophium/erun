@@ -203,20 +203,42 @@ This is a per-env decision: agent envs typically need broad outbound (image pull
 
 ## Port-forward state files
 
-The desktop maintains per-env port-forward state at `<UserConfigDir>/erun/portforward/{mcp,ssh,api}/<tenant>/<env>.json`:
+The CLI owns the local port-forwards: `erun open` starts one detached `kubectl port-forward` process per channel (MCP, SSH, API) and records each in a state file at `<UserConfigDir>/erun/portforward/{mcp,sshd,api}/<tenant>/<env>.json`. The desktop app does not write these files — it reads the convention (that is how the local MCP port reaches laptop-side Agent clients) and re-runs `erun open --no-shell` when a forward needs re-establishing.
 
 ```json
 {
+  "tenant": "my-tenant",
+  "environment": "local",
+  "kubernetesContext": "orbstack",
+  "namespace": "my-tenant-local",
   "localPort": 17000,
-  "podPort": 17000,
-  "pid": 84231,
-  "lastOpened": "2026-05-25T14:30:27Z"
+  "logPath": "/home/sam/.config/erun/portforward/mcp/my-tenant/local.log",
+  "processId": 84231
 }
 ```
 
-`UserConfigDir` follows Go's `os.UserConfigDir`: `~/Library/Application Support` on macOS, `$XDG_CONFIG_HOME` or `~/.config` on Linux, `%AppData%` on Windows.
+| Field | Type | Meaning |
+|---|---|---|
+| `tenant` | string | Tenant the forward belongs to. |
+| `environment` | string | Environment the forward belongs to. |
+| `kubernetesContext` | string | Kubernetes context the `kubectl port-forward` runs against. |
+| `namespace` | string | Target namespace, `<tenant>-<env>`. |
+| `localPort` | int | The `127.0.0.1` port bound on the laptop — the port a client calls. |
+| `logPath` | string, optional | The forward's log file: the state-file path with `.json` replaced by `.log`. |
+| `processId` | int, optional | PID of the detached `kubectl port-forward` process. |
 
-When the forwarded `pid` exits, the file is left in place for diagnostic purposes; the next `erun open` overwrites it.
+The `sshd` file can additionally carry `forwardPort` (int) and `proxyProcessId` (int) — legacy fields from a removed local-proxy design. They are no longer written; when either is present, `erun open` treats the forward as stale and restarts it.
+
+On each open, `erun open` reconciles the recorded state per channel:
+
+1. If the identity fields (`tenant`, `environment`, `kubernetesContext`, `namespace`, `localPort`) match the env being opened and the local endpoint passes the channel's liveness probe (HTTP `GET /mcp` for MCP, HTTP `GET /healthz` for API, an `SSH-` banner read for SSH), the existing forward is reused.
+2. Otherwise, if the identity fields match and the recorded `processId` still holds the port, that process is stopped.
+3. If the local port is still in use, the holder is inspected: a `kubectl port-forward` whose argv matches the one `erun open` would start itself is adopted — the state file is rewritten with that PID — while any other holder aborts with `local <channel> port <n> is already in use by <holder>`.
+4. Otherwise a new detached `kubectl port-forward` is started, its output appended to `logPath`, and the state file is rewritten with the new PID.
+
+When the forwarded `processId` exits, the file is left in place for diagnostic purposes; the next `erun open` overwrites it. `erun delete` does not remove these files either — a later env with the same name simply overwrites them.
+
+`UserConfigDir` follows Go's `os.UserConfigDir`: `~/Library/Application Support` on macOS, `$XDG_CONFIG_HOME` or `~/.config` on Linux, `%AppData%` on Windows. Installs that predate this layout kept the state under `os.UserCacheDir` (`<UserCacheDir>/erun/{mcp,sshd,api}/...`); the first access after upgrading silently renames each file (and its log) into the config-dir path.
 
 ## What ERun doesn't manage
 

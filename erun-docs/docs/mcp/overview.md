@@ -19,7 +19,7 @@ Every open environment exposes an MCP server in its runtime pod. The desktop app
 
 ## Endpoint discovery
 
-The desktop writes a small JSON file per open environment:
+`erun open` — run directly, or by the desktop app, which keeps the forward fresh by re-running `erun open --no-shell` — writes a small JSON state file per open environment:
 
 ```
 <UserConfigDir>/erun/portforward/mcp/<tenant>/<environment>.json
@@ -33,7 +33,7 @@ The desktop writes a small JSON file per open environment:
 | Linux | `$XDG_CONFIG_HOME` or `~/.config` |
 | Windows | `%AppData%` |
 
-The file's `localPort` field is the port to call.
+The file's `localPort` field is the port to call. For the full state-file shape, see [Networking spec · Port-forward state files](/agent-reference/networking-spec#port-forward-state-files).
 
 ## Protocol
 
