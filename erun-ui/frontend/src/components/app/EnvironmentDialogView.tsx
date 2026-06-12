@@ -265,13 +265,6 @@ function RuntimePodFields({ dialog }: { dialog: EnvironmentDialog }): React.Reac
 
 function EnvironmentCreateChecks({ dialog }: { dialog: EnvironmentDialog }): React.ReactElement {
   const dispatch = useAppDispatch();
-  // The "Create tenant DevOps repository" toggle used to live here but
-  // its value is fully derived from state the dialog already has: the
-  // submit pipeline (environmentDialogSelection) passes --bootstrap iff
-  // the tenant is new, since that's the only case where the remote
-  // devops module isn't already in place. Removed to stop asking an
-  // unanswerable question.
-  //
   // "Initialize without Git checkout" only changes behavior on the
   // remote-worktree init path (ensureRemoteRepository in
   // erun-common/init.go); it's a no-op for local-agent. Hide it then.

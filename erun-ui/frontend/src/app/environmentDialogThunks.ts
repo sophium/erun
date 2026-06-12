@@ -136,14 +136,7 @@ export const submitEnvironmentDialog =
     if (dialog.busy) {
       return;
     }
-    const tenantExists = state.tenants.tenants.some(
-      (tenant) => tenant.name === dialog.tenant.trim(),
-    );
-    const selection = environmentDialogSelection(
-      dialog,
-      state.tenants.versionSuggestions,
-      tenantExists,
-    );
+    const selection = environmentDialogSelection(dialog, state.tenants.versionSuggestions);
     if (!selection) {
       dispatch(patchEnvironmentDialog({ error: '' }));
       form.reportValidity();
@@ -178,7 +171,6 @@ export const submitEnvironmentDialog =
 function environmentDialogSelection(
   dialog: EnvironmentDialogState,
   versionSuggestions: UIVersionSuggestion[],
-  tenantExists: boolean,
 ): UISelection | null {
   const values = normalizedEnvironmentDialogValues(dialog);
   if (!validEnvironmentDialogValues(values)) {
@@ -195,14 +187,13 @@ function environmentDialogSelection(
     version: values.version,
     runtimeImage: resolveEnvironmentRuntimeImage(values.version, dialog, versionSuggestions),
     noGit,
-    ...environmentDialogInitFields(dialog, values, tenantExists),
+    ...environmentDialogInitFields(dialog, values),
   };
 }
 
 function environmentDialogInitFields(
   dialog: EnvironmentDialogState,
   values: ReturnType<typeof normalizedEnvironmentDialogValues>,
-  tenantExists: boolean,
 ): Partial<UISelection> {
   const runtimePod = runtimePodConfigToKubernetes(dialog.runtimePod);
   const isLocalAgent = dialog.envType === 'local-agent';
@@ -213,16 +204,6 @@ function environmentDialogInitFields(
     containerRegistry: values.containerRegistry,
     type: dialog.envType,
     localRepoPath: isLocalAgent ? values.localRepoPath : undefined,
-    // Bootstrap is derived from env type and tenant state, not a user
-    // choice. local-agent never passes --bootstrap because the local
-    // code path (EnsureDefaultDevopsModuleWithVersion in
-    // erun-common/init.go) creates the devops module unconditionally
-    // and idempotently. For remote-agent / runtime we pass --bootstrap
-    // only when the tenant is new — no envs yet in state — so the
-    // first init scaffolds the remote devops module; for an existing
-    // tenant the module is already there and re-running the bootstrap
-    // step would be wasted SSH work.
-    bootstrap: !isLocalAgent && !tenantExists,
     setDefaultTenant: dialog.setDefaultTenant,
   };
 }

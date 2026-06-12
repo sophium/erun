@@ -87,7 +87,6 @@ export interface UISelection {
   type?: string;
   localRepoPath?: string;
   noGit?: boolean;
-  bootstrap?: boolean;
   setDefaultTenant?: boolean;
 }
 
