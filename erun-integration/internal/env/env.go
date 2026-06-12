@@ -44,6 +44,15 @@ func (s Setup) Env() []string {
 func New(t testing.TB) Setup {
 	t.Helper()
 	root := t.TempDir()
+	// Canonicalize to the physical path. macOS hands out $TMPDIR under
+	// /var/folders, a symlink into /private/var, and t.TempDir inherits
+	// whichever spelling the invoking shell used — while the binary under
+	// test always reports physical paths (os.Getwd has no PWD hint here).
+	// Without this, path-equality checks such as tenant projectroot
+	// matching pass or fail depending on the shell's TMPDIR spelling.
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
 	home := filepath.Join(root, "home")
 	cfg := filepath.Join(home, ".config")
 	cache := filepath.Join(home, ".cache")

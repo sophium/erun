@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -59,6 +60,21 @@ func stubKubectlNotFound(t *testing.T, setup env.Setup) []string {
 	})
 	stubLsofNoHolder(t, stubs)
 	return append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "lsof", "ps")...)
+}
+
+// portForwardStateFile returns where the erun binary persists a port-forward
+// state file inside the scenario's isolated root. Production resolves the
+// directory via os.UserConfigDir(), which follows the real host OS — HOME's
+// Library/Application Support on darwin, XDG_CONFIG_HOME elsewhere — and is
+// not affected by ERUN_HOST_OS_OVERRIDE. Asserting on setup.ConfigHome alone
+// only passes on Linux; the suite's gate runs on macOS too, so mirror the
+// per-OS split here.
+func portForwardStateFile(setup env.Setup, kind, tenant, environment string) string {
+	base := setup.ConfigHome
+	if runtime.GOOS == "darwin" {
+		base = filepath.Join(setup.Home, "Library", "Application Support")
+	}
+	return filepath.Join(base, "erun", "portforward", kind, tenant, environment+".json")
 }
 
 // adoptHolder describes one fake TCP port holder the lsof/ps probe stubs
@@ -892,7 +908,7 @@ func TestOpen(t *testing.T) {
 		}
 		// Drop the state files so the simulators read as foreign forwards.
 		for _, kind := range []string{"mcp", "sshd"} {
-			if err := os.Remove(filepath.Join(setup.ConfigHome, "erun", "portforward", kind, "team", "dev.json")); err != nil {
+			if err := os.Remove(portForwardStateFile(setup, kind, "team", "dev")); err != nil {
 				t.Fatalf("remove %s port-forward state: %v", kind, err)
 			}
 		}
@@ -929,7 +945,7 @@ func TestOpen(t *testing.T) {
 		golden.Equal(t, "open/intellij_gateway_real_run_adopts_and_launches", normalize.Apply(run3.Combined))
 		// Adoption rewrote both state files claiming the holder PIDs.
 		for kind, wantPID := range map[string]int{"mcp": 4242, "sshd": 4243} {
-			stateBody, err := os.ReadFile(filepath.Join(setup.ConfigHome, "erun", "portforward", kind, "team", "dev.json"))
+			stateBody, err := os.ReadFile(portForwardStateFile(setup, kind, "team", "dev"))
 			if err != nil {
 				t.Fatalf("read adopted %s state: %v", kind, err)
 			}
