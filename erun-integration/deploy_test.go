@@ -279,6 +279,20 @@ func TestDeploy(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		// Pin an always-permitting working-hours window so the preflight's
+		// gate clears no matter when the suite runs; without it the default
+		// 08:00-20:00 local window fails this scenario outside office hours.
+		// The permitting and gated arms themselves are locked by
+		// context_test.go with explicit windows.
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		envBody, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		envBody = append(envBody, []byte("idle:\n  workinghours: 00:00-23:59\n  timezone: UTC\n")...)
+		if err := os.WriteFile(envConfigPath, envBody, 0o644); err != nil {
+			t.Fatalf("write env config: %v", err)
+		}
 		// The cloud context owns the env's kubernetes context name.
 		seedCloudConfigWithContexts(t, setup, contextYAMLItem("test-context", "dev", "us-east-1", "i-0123456789abcdef0"))
 		stubs := setup.Cwd + "/stubs"
