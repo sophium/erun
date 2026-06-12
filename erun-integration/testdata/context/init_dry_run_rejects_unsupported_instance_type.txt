@@ -1,0 +1,4 @@
+audit: erun context init --alias dev --context fresh --dry-run --instance-type m1.tiny
+cloud-context init: alias=dev region=eu-west-2 instance-type=m1.tiny disk=100GB/gp3
+cloud-context init: configuration resolution failed: unsupported cloud context instance type "m1.tiny"
+unsupported cloud context instance type "m1.tiny"

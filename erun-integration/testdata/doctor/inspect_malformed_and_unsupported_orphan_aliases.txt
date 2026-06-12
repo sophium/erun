@@ -1,0 +1,13 @@
+Root config: <TMP> (status=ok)
+  cloud providers configured: 0
+  cloud contexts: 0, tenants: 1
+  orphaned aliases: 2
+    - ###bad-alias
+        alias is malformed; cannot auto-seed an init
+        tenants: team
+    - alice+999000111@gcp
+        provider=gcp account=999000111 user=alice
+        tenants: team
+Skipping malformed alias "###bad-alias"; recreate it manually with `erun cloud init aws`
+Skipping alias "alice+999000111@gcp": provider "gcp" is not supported by repair flow
+audit: erun doctor --dry-run --repair-config

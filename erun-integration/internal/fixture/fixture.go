@@ -164,6 +164,22 @@ func SeedTenantEnvWithSnapshot(t testing.TB, setup env.Setup, tenant, environmen
 // `--intellij`) reach past the validateIDEOptions guard.
 func SeedRemoteTenantEnvWithSSHD(t testing.TB, setup env.Setup, tenant, environment string) {
 	t.Helper()
+	seedRemoteTenantEnvWithSSHD(t, setup, tenant, environment, 0)
+}
+
+// SeedRemoteTenantEnvWithSSHDPortRange writes the same tree as
+// SeedRemoteTenantEnvWithSSHD and additionally persists localportrangestart
+// on the env config. Real-run open scenarios pin a high range (e.g. 26100)
+// so their port-forward simulators never collide with a developer's live
+// erun session sitting on the default 17000 range; without the pin those
+// scenarios silently skip on busy hosts and their coverage evaporates.
+func SeedRemoteTenantEnvWithSSHDPortRange(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
+	t.Helper()
+	seedRemoteTenantEnvWithSSHD(t, setup, tenant, environment, rangeStart)
+}
+
+func seedRemoteTenantEnvWithSSHD(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
+	t.Helper()
 	root := filepath.Join(setup.ConfigHome, "erun")
 	tenantDir := filepath.Join(root, tenant)
 	envDir := filepath.Join(tenantDir, environment)
@@ -178,22 +194,25 @@ func SeedRemoteTenantEnvWithSSHD(t testing.TB, setup env.Setup, tenant, environm
 		t.Fatalf("mkdir repo %s: %v", repoPath, err)
 	}
 
+	envContents := "name: " + environment + "\n" +
+		"repopath: " + repoPath + "\n" +
+		"kubernetescontext: test-context\n" +
+		"containerregistry: registry.example/test\n" +
+		"runtimeversion: 1.0.0\n" +
+		"remote: true\n" +
+		"sshd:\n" +
+		"  enabled: true\n"
+	if rangeStart > 0 {
+		envContents += "localportrangestart: " + strconv.Itoa(rangeStart) + "\n"
+	}
+
 	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
 	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
 		"projectroot: "+repoPath+"\n"+
 			"name: "+tenant+"\n"+
 			"defaultenvironment: "+environment+"\n",
 	)
-	mustWrite(t, filepath.Join(envDir, "config.yaml"),
-		"name: "+environment+"\n"+
-			"repopath: "+repoPath+"\n"+
-			"kubernetescontext: test-context\n"+
-			"containerregistry: registry.example/test\n"+
-			"runtimeversion: 1.0.0\n"+
-			"remote: true\n"+
-			"sshd:\n"+
-			"  enabled: true\n",
-	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"), envContents)
 }
 
 // SeedRemoteTenantEnv writes the same minimal config tree as SeedTenantEnv
@@ -230,6 +249,27 @@ func SeedRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment stri
 			"containerregistry: registry.example/test\n"+
 			"runtimeversion: 1.0.0\n"+
 			"remote: true\n",
+	)
+}
+
+// SeedRemoteTenantEnvWithPortRange writes the same tree as
+// SeedRemoteTenantEnv (remote env, no sshd) and persists localportrangestart
+// on the env config. Real-run shell scenarios pin a high range (e.g. 26100)
+// so their port-forward simulators never collide with a developer's live
+// erun session on the default 17000 range; without the pin those scenarios
+// would silently skip on busy hosts and their coverage would evaporate.
+func SeedRemoteTenantEnvWithPortRange(t testing.TB, setup env.Setup, tenant, environment string, rangeStart int) {
+	t.Helper()
+	SeedRemoteTenantEnv(t, setup, tenant, environment)
+	envDir := filepath.Join(setup.ConfigHome, "erun", tenant, environment)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+filepath.Join(setup.Home, "git", tenant)+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"runtimeversion: 1.0.0\n"+
+			"remote: true\n"+
+			"localportrangestart: "+strconv.Itoa(rangeStart)+"\n",
 	)
 }
 
@@ -387,6 +427,84 @@ func SeedScoopManifest(t testing.TB, dir, content string) {
 	mustWrite(t, filepath.Join(dst, "erun.json"), content)
 }
 
+// SeedHomebrewFormula writes Formula/erun.rb inside dir so stable `release`
+// scenarios exercise the Homebrew packaging path: the release stage rewrites
+// the formula's release-archive URL to the new version, and the
+// sync-packaging-checksums stage traces the curl/shasum checksum refresh.
+// The url/sha256 lines use the exact two-space indentation the production
+// regexes (updateHomebrewFormulaReleaseVersion / ...ReleaseChecksum) anchor on.
+func SeedHomebrewFormula(t testing.TB, dir string) {
+	t.Helper()
+	dst := filepath.Join(dir, "Formula")
+	if err := os.MkdirAll(dst, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", dst, err)
+	}
+	mustWrite(t, filepath.Join(dst, "erun.rb"), `class Erun < Formula
+  desc "erun developer toolkit"
+  homepage "https://github.com/sophium/erun"
+  url "https://github.com/sophium/erun/archive/refs/tags/v1.0.0.tar.gz"
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+  license "MIT"
+
+  def install
+    system "go", "build", "-trimpath", "-o", bin/"erun", "."
+  end
+end
+`)
+}
+
+// ReleaseGitStubSpec configures StubReleaseGit, the argv-branching git stub
+// for real-run `release` scenarios. The resolution queries return the canned
+// branch/commit, the tag probes report the tag at TagSHA (or absent when
+// TagSHA is empty), and every mutation (fetch/rebase/add/commit/tag/push) is
+// a silent no-op so the captured output stays deterministic without a real
+// remote or network.
+type ReleaseGitStubSpec struct {
+	// Branch is returned for `rev-parse --abbrev-ref HEAD`.
+	Branch string
+	// ShortCommit is returned for `rev-parse --short HEAD`.
+	ShortCommit string
+	// TagSHA, when non-empty, is returned for the `<tag>^{}` tag-existence
+	// probe and for `rev-parse HEAD`, so the release tag resolves to a
+	// commit and (for the non-force path) that commit equals HEAD. Empty
+	// makes the `^{}` probe exit 1: the tag does not exist yet.
+	TagSHA string
+	// RemoteTag, when non-empty, makes `ls-remote --tags` report the tag as
+	// present on origin at TagSHA, so --force runs the remote tag deletion.
+	// Empty reports no remote tag.
+	RemoteTag string
+}
+
+// StubReleaseGit writes a git stub at <stubsDir>/git implementing spec and
+// returns the ERUN_GIT_BIN env pair routing production git invocations to it.
+// `show-ref --verify --quiet` always exits 1 (no develop branch) so stable
+// releases skip the sync-develop stage and push only the main branch.
+func StubReleaseGit(t testing.TB, stubsDir string, spec ReleaseGitStubSpec) []string {
+	t.Helper()
+	tagProbe := `exit 1`
+	headResolve := `exit 1`
+	if spec.TagSHA != "" {
+		tagProbe = `echo ` + shellSingleQuote(spec.TagSHA)
+		headResolve = `echo ` + shellSingleQuote(spec.TagSHA)
+	}
+	remoteTags := `:`
+	if spec.RemoteTag != "" {
+		remoteTags = `printf '%s\trefs/tags/%s\n' ` + shellSingleQuote(spec.TagSHA) + ` ` + shellSingleQuote(spec.RemoteTag)
+	}
+	StubBinaryWithScript(t, stubsDir, "git", `case "$*" in
+  *'rev-parse --abbrev-ref HEAD'*) echo `+shellSingleQuote(spec.Branch)+` ;;
+  *'rev-parse --short HEAD'*) echo `+shellSingleQuote(spec.ShortCommit)+` ;;
+  *'ls-remote --tags'*) `+remoteTags+` ;;
+  *'show-ref --verify --quiet'*) exit 1 ;;
+  *'^{}'*) `+tagProbe+` ;;
+  *'rev-parse HEAD'*) `+headResolve+` ;;
+  *) : ;;
+esac
+exit 0
+`)
+	return StubEnv(stubsDir, "git")
+}
+
 // RunGit runs `git <args...>` inside dir. Useful for scenarios that need
 // to set up branches, tags, or remotes after SeedReleaseRepo.
 func RunGit(t testing.TB, dir string, args ...string) {
@@ -403,7 +521,15 @@ func RunGit(t testing.TB, dir string, args ...string) {
 // tests want to assert on it.
 func SeedDevopsRepo(t testing.TB, setup env.Setup, tenant, environment string) string {
 	t.Helper()
-	devops := filepath.Join(setup.Cwd, tenant+"-devops")
+	return SeedDevopsRepoAt(t, setup.Cwd, tenant, environment)
+}
+
+// SeedDevopsRepoAt is SeedDevopsRepo with an explicit project root, for
+// scenarios whose tenant project root is not the default setup.Cwd (e.g. a
+// git-initialized repo directory named after the tenant).
+func SeedDevopsRepoAt(t testing.TB, root, tenant, environment string) string {
+	t.Helper()
+	devops := filepath.Join(root, tenant+"-devops")
 	chart := filepath.Join(devops, "k8s", tenant+"-devops")
 	if err := os.MkdirAll(chart, 0o755); err != nil {
 		t.Fatalf("mkdir %s: %v", chart, err)
@@ -645,6 +771,10 @@ func PortSimBinary(t testing.TB) string {
 // `kubectl get deployment ... -o json` should report so production code's
 // deployment-match check (eruncommon/deploy.go::deploymentMatchesExpectedSettings)
 // returns true and the open flow proceeds past the redeploy gate.
+//
+// The optional fields below extend the stub for real-run shell scenarios.
+// Every zero value preserves the original behavior (silent exit 0) so
+// existing callers are unaffected.
 type KubectlDeployedStubSpec struct {
 	DeploymentName string
 	ContainerName  string
@@ -652,6 +782,39 @@ type KubectlDeployedStubSpec struct {
 	SSHDEnabled    bool
 	MCPPort        int
 	SSHPort        int
+	// ExecExitCodes, when non-empty, drives the interactive shell exec
+	// branch (`kubectl ... exec -it deployment/... -- /bin/sh -lc <script>`):
+	// the Nth call exits with the Nth code and the last code repeats for any
+	// further calls. Calls are recorded one line per invocation in
+	// <stubsDir>/exec-calls so tests can assert how many times the shell
+	// loop re-entered kubectl exec (e.g. after a reattach-deploy handoff).
+	ExecExitCodes []int
+	// WaitExitCode, when non-zero, fails the deployment-availability wait
+	// (`kubectl ... wait --for=condition=Available ... deployment/...`)
+	// with this exit code after printing WaitStderr to stderr. Zero keeps
+	// the wait succeeding silently.
+	WaitExitCode int
+	WaitStderr   string
+	// PodsJSON, when non-empty, is written to <stubsDir>/pods.json and
+	// returned verbatim for any `kubectl get pods ...` query. The open
+	// flow's runtime diagnostics (`get pods -l app=<release> -o json`) and
+	// the pod-replacement probe both read this shape.
+	PodsJSON string
+	// EventsJSON, when non-empty, is written to <stubsDir>/events.json and
+	// returned verbatim for `kubectl get events -o json` (the runtime
+	// diagnostics' per-pod warning-event lookup).
+	EventsJSON string
+	// SeedKeyFile, when non-empty, captures stdin of the non-interactive
+	// SSH-key seeding call (`kubectl ... exec -i deployment/... -- /bin/sh
+	// -c <seed-script>`) into this file so tests can assert the private key
+	// was streamed on stdin and never via argv.
+	SeedKeyFile string
+	// DeploymentNotFound flips the deployment-check arms to report the
+	// deployment as absent (NotFound on stderr, exit 1) instead of
+	// present-and-matching, while keeping the port-forward simulator for
+	// the forwards the open flow starts after its own deploy. Real-run
+	// open scenarios use it to drive the deploy-then-forward path.
+	DeploymentNotFound bool
 }
 
 // StubKubectlDeployed writes a kubectl stub at <stubsDir>/kubectl that
@@ -716,14 +879,28 @@ func StubKubectlDeployed(t testing.TB, stubsDir string, spec KubectlDeployedStub
 		`fi`,
 		`# Argv-driven branching for non-port-forward kubectl invocations.`,
 		`case "$*" in`,
-		`  *"get deployment ` + spec.DeploymentName + ` -o name"*)`,
-		`    printf 'deployment.apps/%s\n' '` + spec.DeploymentName + `' ;;`,
-		`  *"get deployment ` + spec.DeploymentName + ` -o json"*)`,
-		`    printf '%s' '` + deploymentJSON + `' ;;`,
-		`  *) : ;;`,
-		`esac`,
-		`exit 0`,
 	}, "\n")
+	script += "\n" + kubectlDeployedOptionalArms(t, stubsDir, spec)
+	if spec.DeploymentNotFound {
+		script += strings.Join([]string{
+			`  *"get deployment ` + spec.DeploymentName + ` -o name"*)`,
+			`    printf '%s\n' 'Error from server (NotFound): deployments.apps "` + spec.DeploymentName + `" not found' >&2`,
+			`    exit 1 ;;`,
+			`  *) : ;;`,
+			`esac`,
+			`exit 0`,
+		}, "\n")
+	} else {
+		script += strings.Join([]string{
+			`  *"get deployment ` + spec.DeploymentName + ` -o name"*)`,
+			`    printf 'deployment.apps/%s\n' '` + spec.DeploymentName + `' ;;`,
+			`  *"get deployment ` + spec.DeploymentName + ` -o json"*)`,
+			`    printf '%s' '` + deploymentJSON + `' ;;`,
+			`  *) : ;;`,
+			`esac`,
+			`exit 0`,
+		}, "\n")
+	}
 	StubBinaryWithScript(t, stubsDir, "kubectl", script)
 	t.Cleanup(func() {
 		raw, err := os.ReadFile(pidFile)
@@ -755,6 +932,58 @@ func StubKubectlDeployed(t testing.TB, stubsDir string, spec KubectlDeployedStub
 	return StubEnv(stubsDir, "kubectl")
 }
 
+// kubectlDeployedOptionalArms renders the optional `case "$*"` arms of the
+// StubKubectlDeployed script for the real-run shell fields of
+// KubectlDeployedStubSpec. It returns "" when no optional field is set, so
+// the generated script is unchanged for existing callers. Arms are emitted
+// most-specific-first; the interactive `exec -it` arm leads so the bootstrap
+// script passed as the exec's last argv can never fall through into the
+// pods/events/wait arms by substring accident.
+func kubectlDeployedOptionalArms(t testing.TB, stubsDir string, spec KubectlDeployedStubSpec) string {
+	t.Helper()
+	var arms strings.Builder
+	if len(spec.ExecExitCodes) > 0 {
+		counterFile := filepath.Join(stubsDir, "exec-calls")
+		arms.WriteString(`  *" exec -it "*)` + "\n")
+		arms.WriteString(`    count=0` + "\n")
+		arms.WriteString(`    if [ -f '` + counterFile + `' ]; then count=$(wc -l < '` + counterFile + `' | tr -d '[:space:]'); fi` + "\n")
+		arms.WriteString(`    printf 'call\n' >> '` + counterFile + `'` + "\n")
+		arms.WriteString(`    case "$count" in` + "\n")
+		for index, code := range spec.ExecExitCodes[:len(spec.ExecExitCodes)-1] {
+			arms.WriteString(fmt.Sprintf(`      %d) exit %d ;;`+"\n", index, code))
+		}
+		arms.WriteString(fmt.Sprintf(`      *) exit %d ;;`+"\n", spec.ExecExitCodes[len(spec.ExecExitCodes)-1]))
+		arms.WriteString(`    esac ;;` + "\n")
+	}
+	if spec.SeedKeyFile != "" {
+		arms.WriteString(`  *" exec -i deployment/"*)` + "\n")
+		arms.WriteString(`    cat > '` + spec.SeedKeyFile + `'` + "\n")
+		arms.WriteString(`    exit 0 ;;` + "\n")
+	}
+	if spec.WaitExitCode != 0 {
+		arms.WriteString(`  *" wait --for=condition=Available"*)` + "\n")
+		if spec.WaitStderr != "" {
+			arms.WriteString(`    printf '%s\n' ` + shellSingleQuote(spec.WaitStderr) + ` >&2` + "\n")
+		}
+		arms.WriteString(fmt.Sprintf(`    exit %d ;;`+"\n", spec.WaitExitCode))
+	}
+	if spec.PodsJSON != "" {
+		podsFile := filepath.Join(stubsDir, "pods.json")
+		mustWrite(t, podsFile, spec.PodsJSON)
+		arms.WriteString(`  *" get pods "*)` + "\n")
+		arms.WriteString(`    cat '` + podsFile + `'` + "\n")
+		arms.WriteString(`    exit 0 ;;` + "\n")
+	}
+	if spec.EventsJSON != "" {
+		eventsFile := filepath.Join(stubsDir, "events.json")
+		mustWrite(t, eventsFile, spec.EventsJSON)
+		arms.WriteString(`  *" get events "*)` + "\n")
+		arms.WriteString(`    cat '` + eventsFile + `'` + "\n")
+		arms.WriteString(`    exit 0 ;;` + "\n")
+	}
+	return arms.String()
+}
+
 // waitForPortClosed blocks until nothing accepts a TCP connection on
 // 127.0.0.1:port, or the timeout elapses. Used by StubKubectlDeployed's
 // teardown so a killed port-forward simulator's listener is fully gone before
@@ -770,7 +999,6 @@ func waitForPortClosed(port int, timeout time.Duration) {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
-
 
 func formatStubBool(value bool) string {
 	if value {
@@ -845,4 +1073,3 @@ func sanitizeFilename(s string) string {
 	}
 	return b.String()
 }
-

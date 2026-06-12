@@ -1,0 +1,13 @@
+✔ Type team-dev to confirm deletion: █
+✔ Type team-dev to confirm deletion: t█
+✔ Type team-dev to confirm deletion: te█
+✔ Type team-dev to confirm deletion: tea█
+✔ Type team-dev to confirm deletion: team█
+✔ Type team-dev to confirm deletion: team-█
+✔ Type team-dev to confirm deletion: team-d█
+✔ Type team-dev to confirm deletion: team-de█
+✔ Type team-dev to confirm deletion: team-dev█
+✔ Type team-dev to confirm deletion: team-dev█
+Type team-dev to confirm deletion: team-dev
+deleted environment: team/dev
+audit: erun delete team dev

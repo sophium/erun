@@ -1,0 +1,7 @@
+Remote init checks for team/dev:
+  marker file                 INCOMPLETE '<TMP>'
+  project root               OK '<TMP>'
+  git checkout               OK '<TMP>'
+  SSH keypair                OK '<TMP>'
+No missing remote-init artifacts detected, but the bootstrap marker is incomplete. Re-run `erun init --remote` from your local machine to refresh the marker.
+audit: erun doctor --dry-run

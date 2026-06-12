@@ -1,0 +1,4 @@
+audit: erun contribute clone
+==> Cloning ERun for contribute mode
+==> Cloned ERun for contribute mode at <TMP>
+==> Installed contribute shim at <TMP>

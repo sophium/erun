@@ -1,0 +1,3 @@
+audit: erun context stop --dry-run ghost
+cloud-context stop: ghost
+cloud context "ghost" is not configured

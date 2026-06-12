@@ -1,0 +1,4 @@
+audit: erun open --app-session open-0 team dev
+trace-log: appending the full trace to <TMP>
+open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=shell
+open: session re-attached in another ERun window

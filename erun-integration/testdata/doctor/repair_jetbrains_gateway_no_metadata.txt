@@ -1,0 +1,4 @@
+Target: team/dev
+No cached JetBrains Gateway backend metadata found for this environment.
+audit: erun doctor --repair-jetbrains-gateway team dev
+trace-log: appending the full trace to <TMP>

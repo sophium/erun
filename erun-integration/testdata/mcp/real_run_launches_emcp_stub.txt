@@ -1,0 +1,3 @@
+emcp stub argv: --host <LOOPBACK> --port 17001 --path /mcp --tenant team --environment dev --repo-path <TMP> --kubernetes-context test-context --namespace team-dev
+audit: erun mcp --port 17001 team dev
+emcp --host <LOOPBACK> --port 17001 --path /mcp --tenant team --environment dev --repo-path <TMP> --kubernetes-context test-context --namespace team-dev

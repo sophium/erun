@@ -1,0 +1,4 @@
+Root config: <TMP> (status=missing)
+  load error: not initialized
+Root config is not loadable and no backup was restored; resolve the file manually (or supply --restore-config-from-backup <date>) and re-run.
+audit: erun doctor --dry-run --repair-config

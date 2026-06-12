@@ -604,7 +604,7 @@ func (r *resolvedOpenRunner) emitNoShellSetup() error {
 	if r.options.NoAliasPrompt {
 		promptRunner = nil
 	}
-	return emitLocalShellSetupForOpenResult(r.result, promptRunner, r.ctx.Stdout, r.ctx.Stderr)
+	return emitLocalShellSetupForOpenResult(r.ctx, r.result, promptRunner, r.ctx.Stdout, r.ctx.Stderr)
 }
 
 func (r *resolvedOpenRunner) traceShellPreview(shellReq common.ShellLaunchParams) {
@@ -746,7 +746,7 @@ func applyRuntimeDeployVersionOverride(execution common.DeploySpec, versionOverr
 	return execution
 }
 
-func emitLocalShellSetupForOpenResult(result common.OpenResult, promptRunner PromptRunner, stdout, stderr io.Writer) error {
+func emitLocalShellSetupForOpenResult(ctx common.Context, result common.OpenResult, promptRunner PromptRunner, stdout, stderr io.Writer) error {
 	if stdout == nil {
 		stdout = io.Discard
 	}
@@ -755,11 +755,9 @@ func emitLocalShellSetupForOpenResult(result common.OpenResult, promptRunner Pro
 	}
 
 	dialect := openNoShellDialectForShell(os.Getenv("SHELL"))
-	if file, ok := stdout.(*os.File); ok {
-		if info, err := file.Stat(); err == nil && (info.Mode()&os.ModeCharDevice) != 0 {
-			if err := maybeConfigureOpenNoShellAlias(result, promptRunner, os.Getenv("SHELL"), stderr); err != nil {
-				return err
-			}
+	if stdoutIsTerminalForAliasSetup(stdout) {
+		if err := maybeConfigureOpenNoShellAlias(ctx, result, promptRunner, os.Getenv("SHELL"), stderr); err != nil {
+			return err
 		}
 	}
 
@@ -767,7 +765,22 @@ func emitLocalShellSetupForOpenResult(result common.OpenResult, promptRunner Pro
 	return err
 }
 
-func maybeConfigureOpenNoShellAlias(result common.OpenResult, promptRunner PromptRunner, shellPath string, stderr io.Writer) error {
+// stdoutIsTerminalForAliasSetup gates the interactive alias-setup prompt on a
+// real terminal. ERUN_FORCE_TTY=1 is a deliberate test seam (mirroring
+// ERUN_HOST_OS_OVERRIDE) so non-TTY harnesses can reach the branch.
+func stdoutIsTerminalForAliasSetup(stdout io.Writer) bool {
+	if os.Getenv("ERUN_FORCE_TTY") == "1" {
+		return true
+	}
+	file, ok := stdout.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
+}
+
+func maybeConfigureOpenNoShellAlias(ctx common.Context, result common.OpenResult, promptRunner PromptRunner, shellPath string, stderr io.Writer) error {
 	dialect := openNoShellDialectForShell(shellPath)
 	aliasName := openNoShellAliasName(result)
 	startupFile, aliasConfigured := detectOpenNoShellAliasStartupFile(result, shellPath)
@@ -788,6 +801,10 @@ func maybeConfigureOpenNoShellAlias(result common.OpenResult, promptRunner Promp
 		return nil
 	}
 
+	ctx.Trace(fmt.Sprintf("open: append %s alias to %s", aliasName, startupFile))
+	if ctx.DryRun {
+		return nil
+	}
 	if err := appendOpenNoShellAlias(startupFile, openNoShellAliasCommand(result, shellPath)); err != nil {
 		return err
 	}

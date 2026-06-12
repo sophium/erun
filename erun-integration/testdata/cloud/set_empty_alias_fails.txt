@@ -1,0 +1,2 @@
+audit: erun cloud set --alias  team dev
+cloud provider alias is required

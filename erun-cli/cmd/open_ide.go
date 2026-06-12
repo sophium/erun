@@ -226,7 +226,7 @@ func openIntelliJGatewayProject(ctx common.Context, result common.OpenResult, ho
 	if !found || !ok {
 		return false, nil
 	}
-	command, args, err := intelliJGatewayLaunchCommand(hostOS, optionsDir, uri)
+	command, args, err := intelliJGatewayLaunchCommand(ctx, hostOS, optionsDir, uri)
 	if err != nil {
 		return true, formatIDEOpenError("IntelliJ IDEA", hostOS, result, "", err, "")
 	}
@@ -241,34 +241,40 @@ func openIntelliJGatewayProject(ctx common.Context, result common.OpenResult, ho
 	return true, nil
 }
 
-func intelliJGatewayLaunchCommand(hostOS common.HostOS, optionsDir string, uri string) (string, []string, error) {
+func intelliJGatewayLaunchCommand(ctx common.Context, hostOS common.HostOS, optionsDir string, uri string) (string, []string, error) {
 	switch hostOS {
 	case common.HostOSDarwin:
-		return intelliJGatewayDarwinLaunchCommand(optionsDir, uri)
+		return intelliJGatewayDarwinLaunchCommand(ctx, optionsDir, uri)
 	default:
 		return ideLaunchCommand(hostOS, uri)
 	}
 }
 
-func intelliJGatewayDarwinLaunchCommand(optionsDir string, uri string) (string, []string, error) {
+func intelliJGatewayDarwinLaunchCommand(ctx common.Context, optionsDir string, uri string) (string, []string, error) {
 	contentsDir, err := resolveInstalledIntelliJContentsDir(common.HostOSDarwin)
 	if err != nil {
 		return "", nil, err
 	}
-	gatewayConfigDir, err := ensureIntelliJGatewayConfigDir(optionsDir)
+	gatewayConfigDir, err := ensureIntelliJGatewayConfigDir(ctx, optionsDir)
 	if err != nil {
 		return "", nil, err
 	}
 	gatewaySystemDir := filepath.Join(filepath.Dir(gatewayConfigDir), "system")
-	if err := ideMkdirAll(gatewaySystemDir, 0o700); err != nil {
-		return "", nil, err
+	ctx.TraceCommand("", "mkdir", "-p", gatewaySystemDir)
+	if !ctx.DryRun {
+		if err := ideMkdirAll(gatewaySystemDir, 0o700); err != nil {
+			return "", nil, err
+		}
 	}
 	logDir, err := intelliJGatewayLogDir(optionsDir)
 	if err != nil {
 		return "", nil, err
 	}
-	if err := ideMkdirAll(logDir, 0o700); err != nil {
-		return "", nil, err
+	ctx.TraceCommand("", "mkdir", "-p", logDir)
+	if !ctx.DryRun {
+		if err := ideMkdirAll(logDir, 0o700); err != nil {
+			return "", nil, err
+		}
 	}
 
 	java := filepath.Join(contentsDir, "jbr", "Contents", "Home", "bin", "java")
@@ -600,21 +606,27 @@ func resolveIntelliJGatewayOptionsDir(optionsDir string) (string, error) {
 	return filepath.Join(homeDir, "Library", "Caches", "JetBrains", versionDir, "tmp", "JetBrainsGateway", "config", "options"), nil
 }
 
-func ensureIntelliJGatewayConfigDir(optionsDir string) (string, error) {
+func ensureIntelliJGatewayConfigDir(ctx common.Context, optionsDir string) (string, error) {
 	gatewayOptionsDir, err := resolveIntelliJGatewayOptionsDir(optionsDir)
 	if err != nil {
 		return "", err
 	}
 	gatewayConfigDir := filepath.Dir(gatewayOptionsDir)
-	if err := ideMkdirAll(gatewayOptionsDir, 0o700); err != nil {
-		return "", err
+	ctx.TraceCommand("", "mkdir", "-p", gatewayOptionsDir)
+	if !ctx.DryRun {
+		if err := ideMkdirAll(gatewayOptionsDir, 0o700); err != nil {
+			return "", err
+		}
 	}
 	infoPath := filepath.Join(gatewayConfigDir, "info.xml")
 	if _, err := ideStat(infoPath); err == nil {
 		return gatewayConfigDir, nil
 	}
-	if err := ideWriteFile(infoPath, []byte(intelliJGatewayInfoXML()), 0o600); err != nil {
-		return "", err
+	ctx.TraceCommand("", "write-xml", infoPath)
+	if !ctx.DryRun {
+		if err := ideWriteFile(infoPath, []byte(intelliJGatewayInfoXML()), 0o600); err != nil {
+			return "", err
+		}
 	}
 	return gatewayConfigDir, nil
 }

@@ -1,0 +1,25 @@
+audit: erun open team dev
+trace-log: appending the full trace to <TMP>
+open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=shell
+error: timed out waiting for the condition on deployments/team-devops
+exit status 1
+
+Runtime pod diagnostics:
+- Pod team-devops-aaa: phase=Pending
+  Conditions: PodScheduled=False (Unschedulable: 0/3 nodes are available: 3 Insufficient memory.)
+  Warning events:
+    <TS> Warning FailedScheduling: 0/3 nodes are available: 3 Insufficient memory. (x3)
+    <TS> Warning BackOff: Back-off pulling image registry.example/test/team-devops (x7)
+    <TS> Warning FailedMount: MountVolume.SetUp failed for volume workspace (x2)
+    <TS> Warning Unhealthy: Readiness probe failed: connection refused
+    <TS> Warning FailedCreatePodSandBox: Failed to create pod sandbox
+    ... 1 more warning event(s) omitted
+- Pod team-devops-bbb: phase=Running
+  Conditions: Ready=False (ContainersNotReady: containers with unready status: [team-devops]), ContainersReady=False
+  Container init-workspace: ready=true restartCount=0, state=terminated (reason=Completed, startedAt=<TS>, finishedAt=<TS>)
+  Container team-devops: ready=false restartCount=4, state=waiting (reason=CrashLoopBackOff, message=back-off 2m40s restarting failed container=team-devops), lastState=terminated (exitCode=1, reason=Error, startedAt=<TS>, finishedAt=<TS>)
+  Warning events: none found
+- Pod team-devops-ccc: phase=Running, reason=SandboxChanged, message=Pod sandbox changed, it will be killed and re-created.
+  Container team-devops: ready=true restartCount=1, state=running (startedAt=<TS>)
+  Warning events: none found
+... 1 more pod(s) omitted

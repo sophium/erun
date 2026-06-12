@@ -1,0 +1,2 @@
+audit: erun upgrade --dry-run --environment dev
+environment requires a tenant: pass TENANT ENVIRONMENT or --tenant with --environment

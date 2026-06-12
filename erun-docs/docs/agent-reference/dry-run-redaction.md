@@ -6,7 +6,7 @@ title: Dry-run redaction
 
 > For the Operator view, see [CLI overview](/cli/overview).
 
-Every `erun` command supports `--dry-run`, and the resulting trace is byte-for-byte identical to a real-run trace except that values matching one of the redaction patterns below are replaced with a `<redacted…>` placeholder. The same redaction is applied to real-run traces — a real `docker build` invocation is logged with the same flag set you'd see in `--dry-run`; only the matched values are rewritten.
+Every `erun` command supports `--dry-run`, and the resulting trace is byte-for-byte identical to a real-run trace except that values matching one of the redaction patterns below are replaced with a `<redacted…>` placeholder. The same redaction is applied to real-run traces — a real `docker build` invocation is logged with the same flag set you'd see in `--dry-run`; only the matched values are rewritten. A real run can additionally log recovery decisions for events a preview cannot foresee (for example reusing an AWS resource that already exists); those lines appear only when the event occurs.
 
 The contract: previews are safe to paste into a PR description or chat without leaking secrets.
 
@@ -45,7 +45,7 @@ Redaction is applied at **log-emit time**, not at command-resolve time. The actu
 
 This means:
 
-- Dry-run and real-run traces match byte-for-byte (modulo the final `result:` line). An Operator reviewing a dry-run sees exactly what the live trace will look like.
+- Dry-run and real-run traces match byte-for-byte (modulo the final `result:` line and event-driven recovery lines a preview cannot foresee). An Operator reviewing a dry-run sees exactly what the live trace will look like.
 - A secret that is never logged is never redacted because there is nothing to rewrite. Redaction is a defence against accidental logging; it is not a substitute for not handing the value to an untrusted subprocess.
 
 ## Conflict semantics

@@ -1,0 +1,2 @@
+audit: erun app
+erun-app executable not found; build or install it first

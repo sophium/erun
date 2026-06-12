@@ -27,6 +27,11 @@ profile.cov
 __debug_bin*
 .gomodcache
 
+# Integration-suite local artifacts (regenerated per run; must not enter the
+# build context or perturb fingerprint cache keys)
+/erun-integration/coverage
+/erun-integration/bin
+
 # Local packaging / release artifacts
 /packaging/apt/dist
 /erun-devops/linux/*/dist

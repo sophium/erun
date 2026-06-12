@@ -1,0 +1,7 @@
+Remote init checks for <unknown>/<unknown>:
+  marker file                 MISSING '<TMP>'
+  project root               MISSING '<unknown>'
+  git checkout               MISSING '<unknown>'
+  SSH keypair                MISSING '<TMP>'
+audit: erun doctor --finish-remote-init
+remote init marker is missing tenant/environment and ERUN_TENANT/ERUN_ENVIRONMENT are unset

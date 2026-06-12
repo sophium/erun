@@ -1,0 +1,60 @@
+Use the arrow keys to navigate: ↓ ↑ → ←
+? Kubernetes context for environment "local" in tenant "team":
+  ▸ ctx-two
+    ctx-one
+    Enter Kubernetes context manually
+✔ ctx-two
+audit: erun init --confirm-environment --container-registry registry.example/test --dry-run --project-root <TMP> --set-default-tenant --type local-agent --version <VERSION> team local
+Loading erun tool configuration, configPath=<TMP>
+Saving default config
+mkdir -p <TMP>
+write-yaml <TMP>
+Loaded erun tool configuration
+Loading tenant configuration
+Adding new tenant
+mkdir -p <TMP>
+write-yaml <TMP>
+Loaded tenant configuration
+Loading environment configuration
+kubectl --context ctx-two get namespace team-local -o name
+kubectl --context ctx-two create namespace team-local
+mkdir -p <TMP>
+write-yaml <TMP>
+Adding new environment
+mkdir -p <TMP>
+write-yaml <TMP>
+==> Initializing team/local
+mkdir -p <TMP>
+write-yaml <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+mkdir -p <TMP>
+write-file <TMP>
+==> Initialized team/local
+Configuration initialized OK
+ensure-agent-instructions
+ensure-claude-settings

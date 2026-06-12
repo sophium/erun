@@ -1,0 +1,6 @@
+Root config: <TMP> (status=ok)
+  cloud providers configured: 0
+  cloud contexts: 0, tenants: 1
+  no orphaned cloud-provider aliases.
+audit: erun doctor --restore-config-from-backup not-a-date
+invalid backup date "not-a-date" (expected YYYY-MM-DD or an absolute path)

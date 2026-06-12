@@ -1,0 +1,4 @@
+audit: erun cloud oidc --alias test-user@aws
+cloud oidc: refresh issuer for alias=test-user@aws
+cloud oidc: bearer token retrieval failed: cloud provider bearer token is not a JWT
+cloud provider bearer token is not a JWT

@@ -1,0 +1,13 @@
+Target: team/dev
+== Helm release status ==
+NAME: team-devops
+STATUS: deployed
+
+== Pods ==
+NAME                READY   STATUS    RESTARTS
+team-devops-pod-1   2/2     Running   0
+
+If the release is stuck pending or an image failed to pull, re-run `erun deploy --force` to rebuild and redeploy, or clear the pending release.
+audit: erun doctor --prune-images team dev
+trace-log: appending the full trace to <TMP>
+runtime access failed because local Kubernetes storage for team/dev is unhealthy: Error from server: disk i/o error

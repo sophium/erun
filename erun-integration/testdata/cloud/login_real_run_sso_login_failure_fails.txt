@@ -1,0 +1,9 @@
+? Login to test-user@aws? [Y/n] █
+? Login to test-user@aws? [Y/n] y█
+? Login to test-user@aws? [Y/n] y█
+Login to test-user@aws? y
+audit: erun cloud login --alias test-user@aws
+cloud login: alias=test-user@aws force=true
+cloud login: resolved profile = test-profile
+SSO authorization page failed to open
+aws sso login: SSO authorization page failed to open

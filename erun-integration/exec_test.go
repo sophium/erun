@@ -89,6 +89,22 @@ func TestExec(t *testing.T) {
 		golden.Equal(t, "exec/raw_dry_run_redacts_sensitive_args", normalize.Apply(result.Combined))
 	})
 
+	t.Run("raw_dry_run_double_dash_passes_flags_through", func(t *testing.T) {
+		// Exercises extractDryRunFlag's `--dry-run=true` arm plus the `--`
+		// passthrough in both extractDryRunFlag and rawCommandWantsHelp:
+		// erun's own --dry-run=true is consumed (no execution, exit 0),
+		// while everything after `--` — including the wrapped command's
+		// --dry-run and --help — is handed through verbatim, visible in
+		// the audit line's argv.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		result := erun.Run(t, []string{"exec", "raw", "--dry-run=true", "--", "echo", "--dry-run", "--help"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "exec/raw_dry_run_double_dash_passes_flags_through", normalize.Apply(result.Combined))
+	})
+
 	t.Run("diff_dry_run_traces_git_diff", func(t *testing.T) {
 		// Exercises exec.go runExecDiffCommand: --dry-run must trace the
 		// `git diff --no-color --no-ext-diff` command line for the resolved
@@ -282,6 +298,80 @@ func TestExec(t *testing.T) {
 		}
 		if parsed.Summary.FileCount == 0 {
 			t.Errorf("expected non-zero FileCount across selected commit, got 0")
+		}
+	})
+
+	t.Run("diff_parses_deleted_and_binary_files", func(t *testing.T) {
+		// Exercises diffFileParser.parseFileMetadata's "deleted file mode"
+		// and "Binary files ... differ" arms: removing a tracked file and
+		// rewriting a committed binary in the worktree must surface as
+		// status=deleted and binary=true in the parsed --json output.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		binPath := filepath.Join(setup.Cwd, "img.bin")
+		if err := os.WriteFile(binPath, []byte{0x00, 0x01, 0x02, 0x03}, 0o644); err != nil {
+			t.Fatalf("write binary: %v", err)
+		}
+		fixture.RunGit(t, setup.Cwd, "add", "img.bin")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add binary")
+		if err := os.WriteFile(binPath, []byte{0x00, 0xff, 0xfe, 0xfd}, 0o644); err != nil {
+			t.Fatalf("rewrite binary: %v", err)
+		}
+		if err := os.Remove(filepath.Join(setup.Cwd, "README.md")); err != nil {
+			t.Fatalf("remove README: %v", err)
+		}
+		result := erun.Run(t, []string{"exec", "diff", "--json"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var parsed common.DiffResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
+		}
+		statuses := map[string]common.DiffFile{}
+		for _, f := range parsed.Files {
+			statuses[f.Path] = f
+		}
+		if f, ok := statuses["README.md"]; !ok || f.Status != "deleted" {
+			t.Errorf("expected README.md status=deleted, got %+v", parsed.Files)
+		}
+		if f, ok := statuses["img.bin"]; !ok || !f.Binary {
+			t.Errorf("expected img.bin binary=true, got %+v", parsed.Files)
+		}
+	})
+
+	t.Run("diff_scope_all_resolves_origin_head_and_renames", func(t *testing.T) {
+		// Exercises resolveGitDiffReviewBaseBranch's origin/HEAD arm — the
+		// symbolic-ref lookup must translate "origin/HEAD" into the real
+		// remote default branch name for ReviewBase.Branch — plus
+		// parseFileMetadata's "rename from"/"rename to" arms via a committed
+		// `git mv` that scope=all diffs against the merge base. The
+		// origin/* refs are created locally (update-ref + symbolic-ref) so
+		// no network is involved.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		fixture.RunGit(t, setup.Cwd, "update-ref", "refs/remotes/origin/main", "main")
+		fixture.RunGit(t, setup.Cwd, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+		fixture.RunGit(t, setup.Cwd, "checkout", "-q", "-b", "feature")
+		fixture.RunGit(t, setup.Cwd, "mv", "README.md", "RENAMED.md")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "rename readme")
+		result := erun.Run(t, []string{"exec", "diff", "--json", "--scope=all"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		var parsed common.DiffResult
+		if err := json.Unmarshal([]byte(result.Stdout), &parsed); err != nil {
+			t.Fatalf("decode --json output: %v\n%s", err, result.Stdout)
+		}
+		if parsed.ReviewBase.Branch != "origin/main" {
+			t.Errorf("expected ReviewBase.Branch=origin/main via symbolic-ref, got %q", parsed.ReviewBase.Branch)
+		}
+		if len(parsed.Files) != 1 {
+			t.Fatalf("expected single renamed file, got %+v", parsed.Files)
+		}
+		file := parsed.Files[0]
+		if file.Status != "renamed" || file.OldPath != "README.md" || file.NewPath != "RENAMED.md" {
+			t.Errorf("expected renamed README.md->RENAMED.md, got %+v", file)
 		}
 	})
 

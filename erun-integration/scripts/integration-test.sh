@@ -6,7 +6,7 @@
 #   ./scripts/integration-test.sh [-threshold=NN]
 #
 # Environment:
-#   COVERAGE_THRESHOLD   default 55 (percent). See note below.
+#   COVERAGE_THRESHOLD   default 75 (percent). See note below.
 #   GOCOVERDIR           override the directory used for raw counter files;
 #                        defaults to ./coverage/raw under the script.
 #   UPDATE_GOLDEN=1      regenerate golden output files instead of comparing.
@@ -16,19 +16,24 @@
 #     with whatever code is being tested. The build uses the same -coverpkg
 #     selector as the binary helper in internal/erun, so the merged profile
 #     reflects exactly the production packages we want to gate on.
-#   - The default threshold of 55% reflects what `--dry-run` traces can
-#     reach today. The original 90% target turned out to be aspirational:
-#     interactive prompts, subprocess launchers (api/mcp/app), port-forward
-#     workers, IDE launchers, the live shell loop, AWS API-error helpers
-#     and several save/load config paths cannot be exercised by --dry-run
-#     scenarios without first lifting traces in front of their side effects
-#     (per erun-integration/AGENTS.md "Known integration coverage gaps").
-#     Raising the threshold should follow a corresponding production-code
-#     change that makes more of those branches reachable from --dry-run.
+#   - The default threshold tracks what the suite actually reaches, minus a
+#     small margin for cross-host variance. The historical gap families
+#     (interactive prompts, subprocess launchers, port-forward workers, IDE
+#     launchers, the shell loop, AWS error classifiers, config persistence)
+#     are covered via trace lifts, the ERUN_FORCE_TTY seam, scripted stdin,
+#     and real-run-via-stub scenarios. What remains uncovered is documented
+#     in erun-integration/AGENTS.md "Known integration coverage gaps":
+#     live-network code with no seam, desktop/MCP-only erun-common API,
+#     second-sequential-prompt flows, host-OS-locked arms, and defensive
+#     error branches — which caps the honest ceiling below 90%.
+#     Raise the threshold in the same commit as the scenarios (or the
+#     production trace lift) that earned the increase; never raise it past
+#     measured reality minus margin, and never lower it without a tracked
+#     discussion in the PR.
 
 set -euo pipefail
 
-threshold="${COVERAGE_THRESHOLD:-55}"
+threshold="${COVERAGE_THRESHOLD:-75}"
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -threshold=*) threshold="${1#-threshold=}" ;;

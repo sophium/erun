@@ -1,0 +1,2 @@
+Set cloud provider alias team-cloud for team/dev
+audit: erun cloud set --alias team-cloud team dev

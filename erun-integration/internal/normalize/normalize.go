@@ -37,6 +37,14 @@ var defaultRules = []Replacement{
 	// Matches /tmp/..., /var/tmp/..., /var/folders/... (macOS $TMPDIR), and
 	// the /private-prefixed variants on macOS.
 	{regexp.MustCompile(`/(?:private/)?(?:var/folders|var/tmp|tmp)/[^\s'"]+`), "<TMP>"},
+	// URL-encoded temp dir paths (e.g. idePath=%2Ftmp%2FTestOpen... inside a
+	// jetbrains-gateway:// URI). The plain-path rule above cannot see these
+	// because the separators are percent-escaped.
+	{regexp.MustCompile(`%2F(?:private%2F)?(?:var%2Ffolders|var%2Ftmp|tmp)%2F[A-Za-z0-9._%+-]*`), "<TMP>"},
+	// Random UUIDs (e.g. the per-launch runFromIdeToken in gateway URIs).
+	// Deterministic UUIDs like JetBrains ssh config IDs are normalized too;
+	// that loses no coverage signal since both shapes are opaque tokens.
+	{regexp.MustCompile(`\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b`), "<UUID>"},
 	// Elapsed durations after deploy/build progress markers
 	// ("in 0s", "after 1m23s"). The timeout literal "2m0s" is kept because
 	// it lacks the leading "in "/"after " context.
