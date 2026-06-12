@@ -24,34 +24,7 @@ write-yaml <TMP>
 ==> Initializing team/local
 mkdir -p <TMP>
 write-yaml <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
+init: runtime deploys use the published erun-devops chart; no devops scaffold is written
 ==> Initialized team/local
 Configuration initialized OK
 ensure-agent-instructions

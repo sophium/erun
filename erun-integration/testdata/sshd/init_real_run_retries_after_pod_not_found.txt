@@ -5,6 +5,7 @@ SSHD enabled for team/dev
   local port: 64022
   workspace: <HOME>/git/team
 audit: erun sshd init --local-port 64022 --public-key <TMP> team dev
+deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
 deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
 dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
 ==> Deploying team/dev <VERSION>

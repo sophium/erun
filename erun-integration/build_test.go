@@ -65,6 +65,28 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_release_includes_release_and_build_traces", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_release_publishes_runtime_chart", func(t *testing.T) {
+		// A release build whose release root carries the canonical
+		// erun-devops chart must publish it as a release artifact right
+		// after the image pushes (helm package + helm push to
+		// oci://<registry>/charts) and then verify the pushed chart is
+		// fetchable (helm pull) — image and chart are one contract (#505).
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		chartDir := filepath.Join(setup.Cwd, "erun-devops", "k8s", "erun-devops")
+		if err := os.MkdirAll(chartDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", chartDir, err)
+		}
+		mustWriteFile(t, filepath.Join(chartDir, "Chart.yaml"), "apiVersion: v2\nname: erun-devops\ndescription: ERun DevOps\nversion: 0.1.0\nappVersion: 0.1.0\n")
+		fixture.RunGit(t, setup.Cwd, "add", ".")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add runtime chart")
+		result := erun.Run(t, []string{"build", "--release", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_release_publishes_runtime_chart", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_configured_fingerprint_traces_pull_and_tag", func(t *testing.T) {
 		// Exercises docker.fingerprints config: when an image name matches a
 		// configured fingerprint, the materialize step traces docker manifest

@@ -760,6 +760,7 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		CloudProviderAlias: cloudProviderAlias,
 		ManagedCloud:       managedCloud,
 		RuntimeVersion:     strings.TrimSpace(s.params.RuntimeVersion),
+		RuntimeImage:       strings.TrimSpace(s.params.RuntimeImage),
 		RuntimePod:         NormalizeRuntimePodResources(s.params.RuntimePod),
 		Remote:             s.params.Remote,
 	}
@@ -848,6 +849,10 @@ func (s *bootstrapRunState) updateRemoteEnvConfig() {
 		s.envConfig.RuntimeVersion = runtimeVersion
 		s.envConfigChanged = true
 	}
+	if runtimeImage := strings.TrimSpace(s.params.RuntimeImage); runtimeImage != "" && s.envConfig.RuntimeImage != runtimeImage {
+		s.envConfig.RuntimeImage = runtimeImage
+		s.envConfigChanged = true
+	}
 	if runtimePod := NormalizeRuntimePodResources(s.params.RuntimePod); runtimePod != NormalizeRuntimePodResources(s.envConfig.RuntimePod) {
 		s.envConfig.RuntimePod = runtimePod
 		s.envConfigChanged = true
@@ -921,15 +926,19 @@ func (s *bootstrapRunState) projectRoot() string {
 	return projectRoot
 }
 
+// ensureDevopsAssets used to scaffold a per-tenant devops module and chart
+// copy here. That scaffold is retired (#505): environments deploy the
+// published erun-devops chart, and custom toolchains are a user-authored
+// Dockerfile FROM the published runtime image (see the erun-build-env
+// skill). Tenants with an existing scaffolded module keep working — deploy
+// prefers a local chart when one exists.
 func (s *bootstrapRunState) ensureDevopsAssets() error {
 	projectRoot := s.projectRoot()
 	if s.params.RemoteWorktree() {
 		return s.ensureRemoteDevopsAssets(projectRoot)
 	}
-	if err := EnsureDefaultDevopsModuleWithVersion(s.runner.Context, projectRoot, s.tenant, s.params.RuntimeVersion); err != nil {
-		return err
-	}
-	return EnsureDefaultDevopsChartWithVersion(s.runner.Context, projectRoot, s.tenant, s.envName, s.params.RuntimeVersion)
+	s.runner.Context.Trace("init: runtime deploys use the published " + DevopsComponentName + " chart; no devops scaffold is written")
+	return nil
 }
 
 func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
@@ -938,9 +947,7 @@ func (s *bootstrapRunState) ensureRemoteDevopsAssets(projectRoot string) error {
 		return err
 	}
 	if s.params.Bootstrap {
-		if err := s.runner.ensureRemoteDefaultDevopsBootstrap(req, projectRoot, s.tenant, s.envName, s.params.RuntimeVersion); err != nil {
-			return err
-		}
+		s.runner.Context.Info("init: --bootstrap is deprecated and ignored; remote runtimes deploy the published " + DevopsComponentName + " chart")
 	}
 	return s.runner.writeRemoteInitMarker(req, RemoteInitMarker{
 		Tenant:             s.tenant,

@@ -5,37 +5,37 @@ release: release root = <TMP>
 release: loading release config from project
 release: main branch = main, develop branch = develop
 release: resolving git branch and commit
-release: branch = main, commit = <SHORTSHA>
+release: branch = develop, commit = <SHORTSHA>
 release: resolving base version from VERSION file
 release: base version = <VERSION> (from <TMP>
-release: classified mode = stable
-release: develop branch "develop" exists = false
+release: classified mode = candidate
+release: develop branch "develop" exists = true
 audit: erun build --dry-run --release
-release: branch=main mode=stable version=<VERSION>
-next version: <VERSION>
+release: branch=develop mode=candidate version=<VERSION>
 docker image: ghcr.io/sophium/api:<VERSION>
 git -C <TMP> status --porcelain --untracked-files=no
 release: worktree clean = true
 stage: sync-remote
 cd <TMP> && git fetch origin
-cd <TMP> && git rebase origin/main
+cd <TMP> && git rebase origin/develop
 stage: release
 write <TMP>
   apiVersion: v2
   appVersion: <VERSION>
   name: api
   version: <VERSION>
-cd <TMP> && git add erun-devops/k8s/api/Chart.yaml
+write <TMP>
+  apiVersion: v2
+  appVersion: <VERSION>
+  description: ERun DevOps
+  name: erun-devops
+  version: <VERSION>
+cd <TMP> && git add erun-devops/k8s/api/Chart.yaml erun-devops/k8s/erun-devops/Chart.yaml
 cd <TMP> && git commit -m '[skip ci] release <VERSION>'
 git -C <TMP> rev-parse '<VERSION>^{}'
-cd <TMP> && git tag -a <VERSION> -m 'Release <VERSION>'
-stage: post-release-version-bump
-write <TMP>
-  <VERSION>
-cd <TMP> && git add erun-devops/VERSION
-cd <TMP> && git commit -m '[skip ci] prepare <VERSION>'
+cd <TMP> && git tag -a <VERSION> -m 'Release candidate <VERSION>'
 stage: push
-cd <TMP> && git push --follow-tags origin main
+cd <TMP> && git push --follow-tags origin develop
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-arm64
@@ -58,5 +58,7 @@ cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=pl
 cd <TMP> && docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<HEX16>-amd64
 cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/base:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<HEX16>-arm64
-release: no erun-devops chart at the release root; skipping chart publish
+cd <TMP> && helm package erun-devops --version <VERSION> --app-version <VERSION>
+cd <TMP> && helm push erun-devops-<VERSION> oci://ghcr.io/sophium/charts
+helm pull oci://ghcr.io/sophium/charts/erun-devops --version <VERSION> --destination <TMP>
 release version: <VERSION>

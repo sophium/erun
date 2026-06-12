@@ -519,12 +519,9 @@ func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 	}
 
 	if resolvedTarget.RemoteRepo() {
-		spec, err := resolveDefaultDevopsDeploySpecWithImage(resolvedTarget, DevopsComponentName)
+		spec, err := resolvePublishedDevopsDeploySpec(ctx, resolvedTarget, target.VersionOverride)
 		if err != nil {
 			return nil, err
-		}
-		if versionOverride := strings.TrimSpace(target.VersionOverride); versionOverride != "" {
-			spec.Deploy.Version = versionOverride
 		}
 		if err := configureDeployInputMetadata(store, resolvedTarget, &spec.Deploy); err != nil {
 			return nil, err
@@ -577,6 +574,11 @@ func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 // registry is empty so we never reach the package step without one.
 func applyDeploySpecPublish(spec *DeploySpec, publish bool) error {
 	if !publish || spec == nil {
+		return nil
+	}
+	// A published OCI chart is already in the registry; there is no local
+	// chart to package and push.
+	if isOCIChartReference(spec.DeployContext.ChartPath) {
 		return nil
 	}
 	publishSpec, err := resolveHelmChartPublishSpec(spec.DeployContext.ChartPath, spec.Deploy.Version, spec.Deploy.ContainerRegistry)
@@ -1168,7 +1170,13 @@ func newHelmDeploySpec(target OpenResult, deployContext KubernetesDeployContext,
 	if err != nil {
 		return HelmDeploySpec{}, err
 	}
+	return newHelmDeploySpecWithValues(target, deployContext, versionOverride, valuesFilePath)
+}
 
+// newHelmDeploySpecWithValues is newHelmDeploySpec for callers that resolve
+// the values overlay themselves — a published OCI chart has no local chart
+// directory to look in, so it passes an empty path.
+func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDeployContext, versionOverride, valuesFilePath string) (HelmDeploySpec, error) {
 	version := strings.TrimSpace(versionOverride)
 	ports := LocalPortsForResult(target)
 
@@ -1370,8 +1378,12 @@ func (d HelmDeploySpec) command() commandSpec {
 	if strings.TrimSpace(d.KubernetesContext) != "" {
 		args = append(args, "--kube-context", d.KubernetesContext)
 	}
+	// A published OCI chart has no local values overlay file; every other
+	// chart resolves one (possibly empty) next to its templates.
+	if strings.TrimSpace(d.ValuesFilePath) != "" {
+		args = append(args, "-f", d.ValuesFilePath)
+	}
 	args = append(args,
-		"-f", d.ValuesFilePath,
 		"--set-string", "tenant="+d.Tenant,
 		"--set-string", "environment="+d.Environment,
 		"--set-string", "worktreeStorage="+d.WorktreeStorage,
@@ -1410,12 +1422,27 @@ func (d HelmDeploySpec) command() commandSpec {
 		d.ReleaseName,
 		d.ChartPath,
 	)
+	// A published OCI chart is pinned by --version (one version covers
+	// chart and image, stamped at release); local charts get their
+	// Chart.yaml stamped by prepareHelmChartForDeploy instead.
+	dir := d.ChartPath
+	if isOCIChartReference(d.ChartPath) {
+		args = append(args, "--version", d.Version)
+		dir = ""
+	}
 
 	return commandSpec{
-		Dir:  d.ChartPath,
+		Dir:  dir,
 		Name: "helm",
 		Args: args,
 	}
+}
+
+// isOCIChartReference reports whether the chart path addresses a published
+// OCI chart (oci://<registry>/charts/<name>) rather than a local chart
+// directory.
+func isOCIChartReference(chartPath string) bool {
+	return strings.HasPrefix(strings.TrimSpace(chartPath), "oci://")
 }
 
 func (p HelmReleaseRecoveryParams) command() commandSpec {
@@ -1855,7 +1882,9 @@ func isKubernetesDeployModuleDir(dir string) (bool, error) {
 func DeployHelmChart(params HelmDeployParams) error {
 	chartPath := params.ChartPath
 	var cleanup func()
-	if strings.TrimSpace(params.Version) != "" {
+	// A published OCI chart cannot be copied and stamped locally; its
+	// version is pinned on the helm command line instead (see command()).
+	if strings.TrimSpace(params.Version) != "" && !isOCIChartReference(params.ChartPath) {
 		var err error
 		chartPath, cleanup, err = prepareHelmChartForDeploy(params.ChartPath, params.Version)
 		if err != nil {

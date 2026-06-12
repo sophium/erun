@@ -12,36 +12,7 @@ Loading environment configuration
 ==> Initializing beta/dev
 mkdir -p <TMP>
 write-yaml <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
+init: runtime deploys use the published erun-devops chart; no devops scaffold is written
 ==> Initialized beta/dev
 Configuration initialized OK
 ensure-agent-instructions

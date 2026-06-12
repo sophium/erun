@@ -9,6 +9,7 @@ audit: erun open --dry-run --intellij team dev
 config: would assign localportrangestart=17000 to team/dev
 trace-log: would append the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=false ide=intellij
+deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
 kubectl --context test-context --namespace team-dev get deployment team-devops -o name
 open: dry-run: would deploy runtime for team/dev before launching IntelliJ IDEA; in real mode the user must run `erun sshd init team dev` or `erun open team dev` first
 sshd: dry-run: no SSH public key found; use --public-key to choose one; using placeholder key for trace

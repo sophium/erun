@@ -103,16 +103,23 @@ type TenantConfig struct {
 }
 
 type EnvConfig struct {
-	Name                  string
-	Type                  EnvironmentType `yaml:"type,omitempty" json:"type,omitempty"`
-	LocalRepoPath         string          `yaml:"localrepopath,omitempty" json:"localRepoPath,omitempty"`
-	RepoPath              string          `yaml:"repopath,omitempty"`
-	KubernetesContext     string
-	ContainerRegistry     string
-	CloudProviderAlias    string                  `yaml:"cloudprovideralias,omitempty"`
-	ManagedCloud          bool                    `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
-	RuntimeVersion        string                  `yaml:"runtimeversion,omitempty"`
-	RuntimeRegistry       string                  `yaml:"runtimeregistry,omitempty" json:"runtimeRegistry,omitempty"`
+	Name               string
+	Type               EnvironmentType `yaml:"type,omitempty" json:"type,omitempty"`
+	LocalRepoPath      string          `yaml:"localrepopath,omitempty" json:"localRepoPath,omitempty"`
+	RepoPath           string          `yaml:"repopath,omitempty"`
+	KubernetesContext  string
+	ContainerRegistry  string
+	CloudProviderAlias string `yaml:"cloudprovideralias,omitempty"`
+	ManagedCloud       bool   `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
+	RuntimeVersion     string `yaml:"runtimeversion,omitempty"`
+	RuntimeRegistry    string `yaml:"runtimeregistry,omitempty" json:"runtimeRegistry,omitempty"`
+	// RuntimeImage points the env's runtime pod at a custom image instead
+	// of the published <registry>/erun-devops:<version> default. A full
+	// reference ("ghcr.io/acme/my-devops:1.2.3") is used verbatim; a bare
+	// name resolves against the env's registry and runtime version. Set by
+	// `erun init --runtime-image` and carried to the published chart as
+	// imageOverrides.erun-devops on every deploy.
+	RuntimeImage          string                  `yaml:"runtimeimage,omitempty" json:"runtimeImage,omitempty"`
 	RuntimePod            RuntimePodResources     `yaml:"runtimepod,omitempty"`
 	SSHD                  SSHDConfig              `yaml:"sshd,omitempty"`
 	Idle                  EnvironmentIdleConfig   `yaml:"idle,omitempty"`

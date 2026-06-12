@@ -2,6 +2,7 @@ package eruncommon
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -141,6 +142,11 @@ func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []
 	if err != nil {
 		return err
 	}
+	if execution.release != nil {
+		if err = publishReleaseRuntimeChart(ctx, *execution.release); err != nil {
+			return err
+		}
+	}
 	for _, deploySpec := range filterDeploySpecsForPushedTags(deploySpecs, pushedTags) {
 		if err = RunDeploySpec(ctx, deploySpec, build, push, deploy); err != nil {
 			return err
@@ -153,6 +159,54 @@ func runBuildExecution(ctx Context, execution BuildExecutionSpec, deploySpecs []
 		ctx.Info("deployed version: " + version)
 	}
 	return nil
+}
+
+// publishReleaseRuntimeChart pushes the canonical runtime chart as a release
+// artifact alongside the runtime image, then verifies the pushed chart is
+// fetchable. Image and chart are one contract: same version, same registry,
+// published together (#505) — envs without a local chart consume this
+// artifact directly. Ordering: the chart goes out only after every release
+// image push succeeded, respecting the erun-ubuntu → erun-devops image →
+// chart dependency graph.
+func publishReleaseRuntimeChart(ctx Context, release ReleaseSpec) error {
+	chart, ok := releaseRuntimeChart(release)
+	if !ok {
+		ctx.Trace("release: no " + DevopsComponentName + " chart at the release root; skipping chart publish")
+		return nil
+	}
+	registry := releaseRuntimeImageRegistry(release)
+	ociRepo := PublishedDevopsChartOCIRepo(registry)
+	publish := HelmChartPublishSpec{
+		ChartPath: chart.ChartPath,
+		ChartName: DevopsComponentName,
+		Version:   release.Version,
+		OCIRepo:   ociRepo,
+	}
+	if err := RunHelmChartPublish(ctx, publish); err != nil {
+		return err
+	}
+	return VerifyPublishedHelmChart(ctx, ociRepo, DevopsComponentName, release.Version)
+}
+
+func releaseRuntimeChart(release ReleaseSpec) (ReleaseChartSpec, bool) {
+	for _, chart := range release.Charts {
+		if filepath.Base(filepath.Clean(chart.ChartPath)) == DevopsComponentName {
+			return chart, true
+		}
+	}
+	return ReleaseChartSpec{}, false
+}
+
+// releaseRuntimeImageRegistry resolves where the published chart lives: the
+// same registry the release pushes the runtime image to, falling back to the
+// public default.
+func releaseRuntimeImageRegistry(release ReleaseSpec) string {
+	for _, image := range release.DockerImages {
+		if image.ImageName == DevopsComponentName && strings.TrimSpace(image.Registry) != "" {
+			return strings.TrimSpace(image.Registry)
+		}
+	}
+	return DefaultContainerRegistry
 }
 
 func runBuildExecutionBuilds(ctx Context, execution BuildExecutionSpec, deploySpecs []DeploySpec, runScript BuildScriptRunnerFunc, build DockerImageBuilderFunc, push DockerPushFunc) (map[string]struct{}, error) {
