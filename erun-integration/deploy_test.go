@@ -247,13 +247,14 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_tenant_aliases_resolve_oidc_issuers", normalize.Apply(result.Combined))
 	})
 
-	t.Run("real_run_remote_env_embedded_chart_via_stubs", func(t *testing.T) {
+	t.Run("real_run_remote_env_published_chart_via_stubs", func(t *testing.T) {
 		// Real-run deploy of a remote env with no local checkout: the
-		// embedded default-devops chart must be materialized into a temp
-		// dir (prepareHelmChartForDeploy + copyDirectory) before helm
-		// upgrade runs against it. The helm/kubectl stubs exit 0 so the
-		// rollout completes; dry-run cannot reach the materialization —
-		// it short-circuits before the filesystem copy.
+		// runtime spec resolves to the published erun-devops OCI chart and
+		// helm upgrade references it directly (no local chart copy, no
+		// Chart.yaml stamping — the chart is pinned with --version). The
+		// helm/kubectl stubs exit 0 so the rollout completes; real-run is
+		// what proves DeployHelmChart skips prepareHelmChartForDeploy for
+		// an OCI reference.
 		setup := env.New(t)
 		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 		stubs := setup.Cwd + "/stubs"
@@ -265,7 +266,7 @@ func TestDeploy(t *testing.T) {
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		golden.Equal(t, "deploy/real_run_remote_env_embedded_chart_via_stubs", normalize.Apply(result.Combined))
+		golden.Equal(t, "deploy/real_run_remote_env_published_chart_via_stubs", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_preflight_starts_stopped_cloud_context", func(t *testing.T) {
@@ -401,19 +402,55 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_outside_devops_with_tenant_env", normalize.Apply(result.Combined))
 	})
 
-	t.Run("dry_run_remote_env_uses_embedded_chart", func(t *testing.T) {
+	t.Run("dry_run_remote_env_uses_published_chart", func(t *testing.T) {
 		// Regression: a remote env (Remote=true) has its repopath on the
 		// remote host's filesystem (e.g. proxmox1: /home/erun/git/erun) and
 		// has no local checkout at all. Deploy from any cwd must still
-		// work: the embedded default-devops chart is materialized to a
-		// temp dir and used for the helm install. Pre-fix, deploy stat'd
-		// the remote repopath locally and failed with
-		// "open <remote-path>: no such file or directory".
+		// work: the runtime spec resolves to the published erun-devops OCI
+		// chart (decision trace + helm upgrade pinned by --version).
+		// Historically this materialized an embedded chart copy that had
+		// drifted from the canonical chart (#510); the published chart is
+		// the single contract (#505).
 		setup := env.New(t)
 		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
 		// Note: no SeedDevopsRepo — there is no local checkout anywhere.
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
-		golden.Equal(t, "deploy/dry_run_remote_env_uses_embedded_chart", normalize.Apply(result.Combined))
+		golden.Equal(t, "deploy/dry_run_remote_env_uses_published_chart", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_remote_env_custom_runtime_image", func(t *testing.T) {
+		// A persisted EnvConfig.RuntimeImage must ride into the published
+		// chart deploy as imageOverrides.erun-devops (#505): the trace
+		// names the override decision and the helm command carries the
+		// --set-string. A full reference is used verbatim.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		envConfigPath := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		existing, err := os.ReadFile(envConfigPath)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		mustWriteFile(t, envConfigPath, string(existing)+"runtimeimage: registry.example/acme/my-devops:2.0.0\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_custom_runtime_image", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_remote_env_values_overlay", func(t *testing.T) {
+		// A published-chart deploy has no chart directory to host the
+		// operator's values.<env>.yaml overlay; the env config dir's
+		// values.yaml is its home. When present, the deploy traces the
+		// overlay decision and the helm command carries -f.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		mustWriteFile(t, filepath.Join(setup.ConfigHome, "erun", "team", "dev", "values.yaml"), "claude:\n  model: test-model\n")
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Home, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_remote_env_values_overlay", normalize.Apply(result.Combined))
 	})
 
 	t.Run("default_skips_optin_backend_charts", func(t *testing.T) {
@@ -939,6 +976,55 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/dry_run_snapshot_chart_image_scan_resolves_additional_builds", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_snapshot_postgres_reset_forces_helm_despite_cached_images", func(t *testing.T) {
+		// Locks the #506 fix: a snapshot deploy resolves ResetDatabase=true,
+		// and the erun-backend-postgres chart must then run its helm upgrade
+		// even when every locally-built image was promoted from the
+		// fingerprint cache (resolveDeploySkipHelm's reset branch) — the
+		// reset rides in the chart, so skipping helm would drop it. The
+		// docker stub is decision input: it answers every `image inspect`
+		// with exit 0 so all fp-tags appear present and the builds promote;
+		// without it the promotion branch depends on the host's docker
+		// state. The expected trace shows the forced-helm decision line and
+		// the helm upgrade with --set api.postgres.reset=true.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedDevopsBackendCharts(t, setup, "team", "dev")
+		templates := filepath.Join(setup.Cwd, "team-devops", "k8s", "erun-backend-postgres", "templates")
+		if err := os.MkdirAll(templates, 0o755); err != nil {
+			t.Fatalf("mkdir templates: %v", err)
+		}
+		mustWriteFile(t, filepath.Join(templates, "postgres.yaml"), strings.Join([]string{
+			"apiVersion: apps/v1",
+			"kind: Deployment",
+			"spec:",
+			"  template:",
+			"    spec:",
+			"      containers:",
+			"        - image: registry.example/team/erun-backend-postgres:18.3 # pinned wrapper",
+			"",
+		}, "\n"))
+		dockerDir := filepath.Join(setup.Cwd, "team-devops", "docker", "erun-backend-postgres")
+		if err := os.MkdirAll(dockerDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dockerDir, err)
+		}
+		mustWriteFile(t, filepath.Join(dockerDir, "Dockerfile"), "FROM alpine:3.22\n")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{
+			"deploy", "team", "dev",
+			"--snapshot",
+			"--components", "erun-backend-postgres",
+			"--dry-run",
+		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_snapshot_postgres_reset_forces_helm_despite_cached_images", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_from_chart_cwd_resolves_single_chart_context", func(t *testing.T) {

@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/erunApp.js';
+import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
 // ux-tooltip-rules covers AGENTS.md L104 — "Native `title` is only
 // acceptable for non-essential truncation hints" — for the controls that
@@ -18,12 +19,8 @@ import { expect, test } from '../fixtures/erunApp.js';
 
 test.describe('UX tooltip rules', () => {
   test('sidebar env rows carry aria-label and no title attribute', async ({ app }) => {
-    const tenants = await app.sidebar.tenants();
-    expect(tenants.length).toBeGreaterThan(0);
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    expect(envs.length).toBeGreaterThan(0);
-    const env = envs[0]!;
+    const tenant = SEED_TENANT;
+    const env = SEED_ENV_ALPHA;
 
     const rowLocator = app.page.locator(`button[aria-label^="${tenant} / ${env}"]`).first();
     await expect(rowLocator).toBeVisible();
@@ -35,11 +32,9 @@ test.describe('UX tooltip rules', () => {
   });
 
   test('sidebar tenant rows carry aria-label and no title attribute', async ({ app }) => {
-    const tenants = await app.sidebar.tenants();
-    expect(tenants.length).toBeGreaterThan(0);
-    const tenant = tenants[0]!;
-
-    const selectButton = app.page.getByRole('button', { name: `Open ${tenant} dashboard` }).first();
+    const selectButton = app.page
+      .getByRole('button', { name: `Open ${SEED_TENANT} dashboard` })
+      .first();
     await expect(selectButton).toBeVisible();
     await expect(selectButton).not.toHaveAttribute('title', /.*/);
   });

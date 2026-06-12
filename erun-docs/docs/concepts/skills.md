@@ -51,6 +51,7 @@ Skills come in two kinds: *Blueprint* (ERun's accumulated best practices for ind
 | `erun-blueprint-docs` | Blueprint | Scaffold a Docusaurus docs site that publishes to Cloudflare Pages, modelled on `erun-docs`. |
 | `erun-file-issue` | Workflow | File a bug or feature against ERun on GitHub (`sophium/erun`). |
 | `erun-contribute` | Workflow | Create a new issue against `sophium/erun`, then drive the full clone → branch → implement → PR motion to share your improvement back. |
+| `erun-build-env` | Workflow | Extend ERun's published runtime image with your project's own toolchain and point the environment at the custom image ([spec](/agent-reference/skills-spec#erun-build-env)). |
 
 For the SKILL.md contract, the deployment mechanism, the marketplace manifest format, and the per-skill spec, see [Agent reference · Skills spec](/agent-reference/skills-spec).
 

@@ -1,8 +1,4 @@
-? Initialize default environment "local" for tenant "team"? [Y/n] █
-? Initialize default environment "local" for tenant "team"? [Y/n] n█
-? Initialize default environment "local" for tenant "team"? [Y/n] n█
-Initialize default environment "local" for tenant "team"? n
-audit: erun open --dry-run --no-alias-prompt --no-shell
+? Initialize default environment "local" for tenant "team"? [Y/n] audit: erun open --dry-run --no-alias-prompt --no-shell
 running init before resolving open target
 Loading erun tool configuration, configPath=<TMP>
 Loaded erun tool configuration

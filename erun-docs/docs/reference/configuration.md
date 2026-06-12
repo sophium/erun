@@ -62,6 +62,7 @@ One per environment. This is the most-edited file.
 | `managedcloud` | bool | helm chart (`ERUN_CLOUD_ENVIRONMENT`) | When true, marks the env as running on a managed cloud context (enables idle-stop, cloud-credential refresh, etc.). |
 | `runtimeversion` | string | `erun open`, `erun deploy`, chart appVersion | Pins the version of the runtime image used by this env. |
 | `runtimeregistry` | string | `erun open`, `erun deploy` | Overrides the registry the runtime image is pulled from (per-env). |
+| `runtimeimage` | string | `erun open`, `erun deploy` | Points the env's runtime pod at a custom image instead of the published `<registry>/erun-devops:<version>` default. A full reference (`ghcr.io/acme/acme-runtime:1.2.3`) is used verbatim; a bare name resolves to `<registry>/<name>:<runtime version>`. Set by `erun init --runtime-image`; carried to the published chart as `imageOverrides.erun-devops` on every deploy (see [Advanced chart values](#advanced-chart-values)). |
 | `autoupgrade` | bool | [`erun upgrade`](/cli/upgrade), desktop Upgrade all | When true, this env joins the Upgrade-all set: `erun upgrade` redeploys it to the latest version for its channel when `runtimeversion` lags. |
 | `upgradechannel` | string (enum) | [`erun upgrade`](/cli/upgrade) | Release channel an upgrade targets: `stable` (semver releases) or `snapshot` (latest snapshot build). Orthogonal to `type`. When unset, defaults from `type` — runtime → `stable`, agent → `snapshot`. |
 | `runtimepod.cpu` | string | helm chart (`runtime.resources.limits.cpu`) | CPU limit for the runtime pod (e.g. `4`, `500m`). |
@@ -89,6 +90,8 @@ One per environment. This is the most-edited file.
 | `autostart` | `*bool` | desktop sidebar open | `nil` = ask, `true` = always start linked cloud context on open, `false` = never. |
 | `remotehostcredentials` | bool | helm chart (cloud credentials passthrough) | Mount the host's cloud credentials into the runtime pod (for managed cloud envs). |
 
+The four `claude.*` rows above (`usemantle`, `usebedrock`, `models[]`, `maxoutputtokens`) are the Claude values erun manages itself. The runtime chart accepts further `claude.*` values that erun never sets — pin a model, point Bedrock at a VPC endpoint, tune prompt caching — via the env's values overlay; see [Advanced chart values](#advanced-chart-values).
+
 ---
 
 ## Per-project config
@@ -112,6 +115,67 @@ Committed to the repo, applies to anyone who checks it out.
 ## Per-pod env vars
 
 The helm chart writes these into the runtime pod at deploy time. They're derived from the per-user and per-project layers above; you don't edit them directly. Full list at [Environment variables](/reference/env-vars).
+
+---
+
+## Advanced chart values (Operator escape hatches) {#advanced-chart-values}
+
+The runtime chart accepts more values than erun manages. At deploy time erun passes two layers to `helm upgrade --install`:
+
+1. The env's values overlay — `values.<env>.yaml` in the runtime chart directory (`<tenant>-devops/k8s/<tenant>-devops/values.<env>.yaml`). It is passed with `-f` and is required: deploy aborts with `values file not found for environment "<env>"` when it is missing. Environments that deploy the [published `erun-devops` chart](/cli/deploy#where-the-runtime-chart-comes-from) have no local chart directory; for them the overlay lives next to the env's config at `<UserConfigDir>/erun/<tenant>/<environment>/values.yaml` (e.g. `~/.config/erun/<tenant>/<environment>/values.yaml` on Linux) and is optional — when absent, the chart defaults plus erun's `--set` list fully describe the deploy.
+2. erun's own `--set`/`--set-string` list, derived from `EnvConfig` and the resolved plan.
+
+Helm gives `--set` precedence over `-f`, so for every key erun manages the overlay can never win. The keys below are exactly the ones erun's `--set` list never includes — for them the `values.<env>.yaml` overlay is authoritative, which makes it the supported escape hatch for behaviour erun doesn't model.
+
+### `claude.*` model and Bedrock tuning {#advanced-claude-values}
+
+Each value renders as an env var on the runtime container, and the pod's entrypoint relays it into the Agent's `~/.claude/settings.json`. Both steps are AWS-gated: the chart renders this env block only when the env's cloud provider is `aws` (`cloudContext.provider`), and the entrypoint relay runs only when Bedrock configuration is active — an AWS provider, or `CLAUDE_CODE_USE_BEDROCK` / `CLAUDE_CODE_USE_MANTLE` set, with a resolvable region.
+
+| Chart value | Env var | Default | Effect |
+|---|---|---|---|
+| `claude.model` | `ANTHROPIC_MODEL` | unset | Pin the primary model Claude uses. |
+| `claude.defaultOpusModel` | `ANTHROPIC_DEFAULT_OPUS_MODEL` | unset | Pin the model ID the `opus` alias resolves to (Bedrock model IDs, `anthropic.`-prefixed). |
+| `claude.defaultSonnetModel` | `ANTHROPIC_DEFAULT_SONNET_MODEL` | unset | Pin the model ID the `sonnet` alias resolves to. |
+| `claude.defaultHaikuModel` | `ANTHROPIC_DEFAULT_HAIKU_MODEL` | unset | Pin the model ID the `haiku` alias resolves to. |
+| `claude.bedrockBaseURL` | `ANTHROPIC_BEDROCK_BASE_URL` | unset | Route Bedrock traffic through a VPC endpoint or gateway instead of the public endpoint. |
+| `claude.mantleBaseURL` | `ANTHROPIC_BEDROCK_MANTLE_BASE_URL` | unset | Base URL for the Bedrock Mantle gateway. |
+| `claude.bedrockServiceTier` | `ANTHROPIC_BEDROCK_SERVICE_TIER` | unset | Bedrock service tier: `default`, `flex`, or `priority`. |
+| `claude.skipMantleAuth` | `CLAUDE_CODE_SKIP_MANTLE_AUTH` | unset | Skip Mantle's own auth step (set `1` when the gateway handles auth). |
+| `claude.disablePromptCaching` | `DISABLE_PROMPT_CACHING` | unset | Turn prompt caching off (set `1`). |
+| `claude.enablePromptCaching1H` | `ENABLE_PROMPT_CACHING_1H` | unset | Use the 1-hour prompt-cache TTL on Bedrock (set `1`). |
+| `claude.maxThinkingTokens` | `MAX_THINKING_TOKENS` | `1024` | Thinking-token budget per response. |
+| `claude.smallFastModelAWSRegion` | `ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION` | `cloudContext.region` | AWS region for the small/fast helper model, when it differs from the env's region. |
+
+The `claude.*` keys erun does manage — `claude.useBedrock`, `claude.useMantle`, `claude.availableModels`, `claude.maxOutputTokens` — come from the [`EnvConfig` fields above](#envconfig) and are always `--set`; an overlay value for them is ignored.
+
+### Runtime pod resource requests {#advanced-runtime-requests}
+
+erun manages only the runtime pod's resource **limits**: `EnvConfig.runtimepod.cpu` / `.memory` (set with `erun init --runtime-cpu` / `--runtime-memory` or the desktop's env settings) are always `--set` as `runtime.resources.limits.{cpu,memory}`. The requests are overlay-only:
+
+| Chart value | Default | Effect |
+|---|---|---|
+| `runtime.resources.requests.cpu` | `0.25` | CPU request for the runtime pod. |
+| `runtime.resources.requests.memory` | `1024Mi` | Memory request for the runtime pod. |
+
+Request overrides are invisible to `erun open`'s redeploy drift detection — it compares the deployed limits against `EnvConfig.runtimepod` and ignores requests — so changing a request in the overlay takes effect on the next deploy, not automatically on the next open.
+
+### Runtime image override {#advanced-image-overrides}
+
+`imageOverrides.erun-devops` is a supported public value of the runtime chart: it replaces the image the `erun-devops` container runs while keeping the rest of the chart canonical. The supported way to set it is the [`EnvConfig.runtimeimage`](#envconfig) field (`erun init --runtime-image`), which erun passes as `--set-string imageOverrides.erun-devops=<image>` on every deploy of the published chart — the intended path for custom toolchain images built `FROM` the published `erun-devops` image (the `erun-build-env` [skill](/concepts/skills) walks through it). When `runtimeimage` is unset, erun passes no override and the overlay may set the value directly.
+
+An example overlay:
+
+```yaml
+# <tenant>-devops/k8s/<tenant>-devops/values.prod.yaml
+claude:
+  model: anthropic.claude-opus-4-8
+  bedrockServiceTier: priority
+runtime:
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2048Mi
+```
 
 ---
 

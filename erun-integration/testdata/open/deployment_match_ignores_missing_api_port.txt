@@ -5,6 +5,7 @@ audit: erun open --dry-run --no-alias-prompt --no-shell team dev
 config: would assign localportrangestart=17000 to team/dev
 trace-log: would append the full trace to <TMP>
 open: tenant=team environment=dev kubernetes-context=test-context remote=true no-shell=true ide=shell
+deploy: no local runtime chart; using published chart oci://registry.example/test/charts/erun-devops version <VERSION>
 kubectl --context test-context --namespace team-dev get deployment team-devops -o name
 kubectl --context test-context --namespace team-dev get deployment team-devops -o json
 kubectl --context test-context --namespace team-dev port-forward deployment/team-devops 17000:17000 --address <LOOPBACK>

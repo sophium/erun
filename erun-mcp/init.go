@@ -25,7 +25,7 @@ type InitInput struct {
 	NoGit                    bool   `json:"noGit,omitempty" jsonschema:"when true with remote initialization, create the remote worktree directory without configuring a Git checkout"`
 	RemoteRepositoryURL      string `json:"remoteRepositoryURL,omitempty" jsonschema:"optional SSH repository URL used when creating the remote checkout"`
 	CodeCommitSSHKeyID       string `json:"codeCommitSSHKeyID,omitempty" jsonschema:"optional AWS CodeCommit SSH public key ID used when the remote repository URL is a CodeCommit SSH URL"`
-	Bootstrap                bool   `json:"bootstrap,omitempty" jsonschema:"when true, create the tenant devops module and chart during initialization"`
+	Bootstrap                bool   `json:"bootstrap,omitempty" jsonschema:"deprecated and ignored; remote runtimes deploy the published erun-devops chart"`
 	ConfirmTenant            *bool  `json:"confirmTenant,omitempty" jsonschema:"response to a prior tenant confirmation interaction"`
 	ConfirmEnvironment       *bool  `json:"confirmEnvironment,omitempty" jsonschema:"response to a prior environment confirmation interaction"`
 	ConfirmRemoteHostConfig  *bool  `json:"confirmRemoteHostConfig,omitempty" jsonschema:"response to a prior existing remote SSH host config confirmation interaction"`

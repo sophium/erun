@@ -9,11 +9,10 @@ import { expect, test } from '../fixtures/erunApp.js';
 //
 // Staging a real ERUN_MCP_UNREACHABLE diff-load failure requires a deployed
 // runtime whose MCP pod is gone but whose env config still points at a
-// remote endpoint, and the headless harness reflects the developer's real
-// `~/.erun/` rather than a curated fixture — same constraint that AGENTS.md
-// records for #331's AutoStart prompt. So this spec covers the reachable
-// negative invariant only: the "Copy error message" button must not leak
-// into a healthy review surface.
+// remote endpoint — live-cluster state the isolated harness deliberately
+// does not have. So this spec covers the reachable negative invariant only:
+// the "Copy error message" button must not leak into a healthy review
+// surface.
 //
 // The positive path — that DiffErrorAlert renders with a wrapping technical
 // line and a working Copy button — is covered by the Go-side error wrapping

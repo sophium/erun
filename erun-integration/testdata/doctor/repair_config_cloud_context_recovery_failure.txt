@@ -5,10 +5,6 @@ Root config: <TMP> (status=ok)
     - erun-001-020362606330-eu-west-2
         account=020362606330 region=eu-west-2 alias=alice+020362606330@aws
         envs: petios/rihards-review
-? Recover cloud context erun-001-020362606330-eu-west-2 from AWS (account 020362606330, region eu-west-2)? [Y/n] █
-? Recover cloud context erun-001-020362606330-eu-west-2 from AWS (account 020362606330, region eu-west-2)? [Y/n] y█
-? Recover cloud context erun-001-020362606330-eu-west-2 from AWS (account 020362606330, region eu-west-2)? [Y/n] y█
-Recover cloud context erun-001-020362606330-eu-west-2 from AWS (account 020362606330, region eu-west-2)? y
-Recovering cloud context erun-001-020362606330-eu-west-2...
+? Recover cloud context erun-001-020362606330-eu-west-2 from AWS (account 020362606330, region eu-west-2)? [Y/n] Recovering cloud context erun-001-020362606330-eu-west-2...
 Recovery failed for erun-001-020362606330-eu-west-2: no EC2 instance found with Name tag "erun-001-020362606330-eu-west-2" in region eu-west-2
 audit: erun doctor --repair-config

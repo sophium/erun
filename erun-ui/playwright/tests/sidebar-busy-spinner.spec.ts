@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/erunApp.js';
+import { SEED_ENV_ALPHA, SEED_ENV_BETA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
 // sidebar-busy-spinner covers the running-command spinner that appears
 // next to an env name when an activity-queue entry for that env is in
@@ -19,13 +20,7 @@ import { expect, test } from '../fixtures/erunApp.js';
 // spinner + per-command aria-label).
 
 test.describe('sidebar busy spinner', () => {
-  test('quiet env rows show no spinner', async ({ app, page }) => {
-    const tenants = await app.sidebar.tenants();
-    expect(tenants.length).toBeGreaterThan(0);
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    expect(envs.length).toBeGreaterThan(0);
-
+  test('quiet env rows show no spinner', async ({ app: _app, page }) => {
     // The BusyRowSpinner mounts with role="status" and a per-env
     // accessible label. An idle env should expose no such role on its
     // row. We restrict the query to the sidebar to avoid colliding with
@@ -48,27 +43,10 @@ test.describe('sidebar busy spinner', () => {
     // to back, the sidebar must surface at most one spinner, and any
     // sidebar spinner that does linger must be on the currently
     // selected env.
-    // This test needs two envs under one tenant to click back to back.
-    // Don't assume the first tenant has them (a minimal ~/.erun may have a
-    // single-env tenant); search for the first tenant with 2+ envs and skip
-    // when the harness can't stage the precondition (AGENTS: cover what the
-    // harness can reach, skip with justification otherwise).
-    const tenants = await app.sidebar.tenants();
-    test.skip(tenants.length === 0, 'no tenants in this developer harness');
-    let tenant = '';
-    let envs: string[] = [];
-    for (const candidate of tenants) {
-      const candidateEnvs = await app.sidebar.environmentsFor(candidate);
-      if (candidateEnvs.length > 1) {
-        tenant = candidate;
-        envs = candidateEnvs;
-        break;
-      }
-    }
-    test.skip(envs.length < 2, 'no tenant with 2+ environments to exercise back-to-back open');
-
-    await app.sidebar.openEnvironment(tenant, envs[0]!);
-    await app.sidebar.openEnvironment(tenant, envs[1]!);
+    // The baseline seeds two envs under the pw tenant precisely so this
+    // back-to-back click sequence is always stageable.
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_BETA);
 
     // Give the second click a moment to land its prepareOpenSelection
     // (which dispatches resetEnvOpening synchronously) and let any
@@ -80,15 +58,11 @@ test.describe('sidebar busy spinner', () => {
   });
 
   test('running build/release/push entries surface a labelled spinner that clears on finish', async ({
-    app,
+    app: _app,
     page,
   }) => {
-    const tenants = await app.sidebar.tenants();
-    expect(tenants.length).toBeGreaterThan(0);
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    expect(envs.length).toBeGreaterThan(0);
-    const environment = envs[0]!;
+    const tenant = SEED_TENANT;
+    const environment = SEED_ENV_ALPHA;
 
     const sidebar = page.locator('aside').first();
     // Intentionally no "sidebar has zero spinners" precondition: the

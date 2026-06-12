@@ -48,6 +48,7 @@ Let you participate in ERun's processes — report problems, share improvements 
 |---|---|---|
 | `erun-file-issue` | File a bug or feature against ERun on GitHub. | "file an erun bug", "register erun feature", "open an erun issue" |
 | `erun-contribute` | Create a new issue against `sophium/erun`, then drive the full clone → branch → implement → PR motion to share your improvement back. | "contribute to erun", "submit a PR to erun", "propose an improvement to erun" |
+| `erun-build-env` | Extend ERun's published runtime image with your project's own toolchain and point the environment at the custom image. | "init build environment", "create a custom build environment", "customize the runtime image" |
 
 You don't need to memorise the trigger phrases — the Agent matches against the skill's `description` field, which lists several variants. If you describe the work in plain language ("I want to add a Postgres database that's tenant-scoped"), the right skill usually fires on its own.
 

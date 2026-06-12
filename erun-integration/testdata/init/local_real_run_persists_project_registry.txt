@@ -8,5 +8,6 @@ Loaded tenant configuration
 Loading environment configuration
 Adding new environment
 ==> Initializing team/local
+init: runtime deploys use the published erun-devops chart; no devops scaffold is written
 ==> Initialized team/local
 Configuration initialized OK

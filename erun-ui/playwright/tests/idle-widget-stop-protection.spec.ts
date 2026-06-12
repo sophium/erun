@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/erunApp.js';
+import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
 // idle-widget-stop-protection covers the two changes from issue #410:
 //
@@ -21,11 +22,11 @@ import { expect, test } from '../fixtures/erunApp.js';
 //      `running` before the synchronous AWS `wait instance-stopped`
 //      waiter returns.
 //
-// The headless harness uses the dev's real `~/.erun/`, which may or may
-// not contain a managed cloud context, and we never want a Playwright
-// test to fire a real ec2:ModifyInstanceAttribute or ec2:StopInstances.
-// Intercept the relevant Wails RPCs over the /__erun_invoke bridge so
-// the React tree drives a fully simulated lifecycle.
+// The isolated harness has no managed cloud context, and we never want a
+// Playwright test to fire a real ec2:ModifyInstanceAttribute or
+// ec2:StopInstances. Intercept the relevant Wails RPCs over the
+// /__erun_invoke bridge so the React tree drives a fully simulated
+// lifecycle.
 
 interface InvokeBody {
   method: string;
@@ -135,12 +136,7 @@ test.describe('idle widget stop protection', () => {
       await route.continue();
     });
 
-    const tenants = await app.sidebar.tenants();
-    test.skip(tenants.length === 0, 'no tenants in this developer harness');
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    test.skip(envs.length === 0, `no envs under tenant ${tenant}`);
-    await app.sidebar.openEnvironment(tenant, envs[0]!);
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     // The button's accessible label names the action available from
     // the current state: while locked, clicking it would unlock, so
@@ -214,12 +210,7 @@ test.describe('idle widget stop protection', () => {
       await route.continue();
     });
 
-    const tenants = await app.sidebar.tenants();
-    test.skip(tenants.length === 0, 'no tenants in this developer harness');
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    test.skip(envs.length === 0, `no envs under tenant ${tenant}`);
-    await app.sidebar.openEnvironment(tenant, envs[0]!);
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     const stopButton = page.getByRole('button', { name: new RegExp(`^Stop ${ctxName}`) });
     await stopButton.waitFor({ state: 'visible', timeout: 6_000 });
@@ -253,8 +244,8 @@ test.describe('idle widget stop protection', () => {
     // "Start the cloud environment before opening …" tooltip and the
     // diff panel toggle stays enabled (env-touching only by design).
     //
-    // We arrive at this state via the first env (envs[0]), which is
-    // local in most dev harnesses. The IDE buttons are normally
+    // We arrive at this state via the seeded local-agent env
+    // (pw/alpha). The IDE buttons are normally
     // disabled for local envs via isIdeDisabled (env.remote === false
     // would short-circuit envRunning to true; isIdeDisabled's
     // remote+!sshd check disables them anyway). The deterministic
@@ -289,12 +280,7 @@ test.describe('idle widget stop protection', () => {
       await route.continue();
     });
 
-    const tenants = await app.sidebar.tenants();
-    test.skip(tenants.length === 0, 'no tenants in this developer harness');
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    test.skip(envs.length === 0, `no envs under tenant ${tenant}`);
-    await app.sidebar.openEnvironment(tenant, envs[0]!);
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     // Fire the stop so the React tree enters the "busy stopping" state
     // and cloudContextStatus flips out of `running` for the IDE-button
@@ -356,12 +342,7 @@ test.describe('idle widget stop protection', () => {
       await route.continue();
     });
 
-    const tenants = await app.sidebar.tenants();
-    test.skip(tenants.length === 0, 'no tenants in this developer harness');
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    test.skip(envs.length === 0, `no envs under tenant ${tenant}`);
-    await app.sidebar.openEnvironment(tenant, envs[0]!);
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     // The warning banner replaces the idle-time pill when stopPendingSince
     // is set in the idle status.
@@ -449,12 +430,7 @@ test.describe('idle widget stop protection', () => {
       await route.continue();
     });
 
-    const tenants = await app.sidebar.tenants();
-    test.skip(tenants.length === 0, 'no tenants in this developer harness');
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    test.skip(envs.length === 0, `no envs under tenant ${tenant}`);
-    await app.sidebar.openEnvironment(tenant, envs[0]!);
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     const stopButton = page.getByRole('button', { name: new RegExp(`^Stop ${ctxName}`) });
     await stopButton.waitFor({ state: 'visible', timeout: 6_000 });
@@ -531,12 +507,7 @@ test.describe('idle widget stop protection', () => {
       await route.continue();
     });
 
-    const tenants = await app.sidebar.tenants();
-    test.skip(tenants.length === 0, 'no tenants in this developer harness');
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    test.skip(envs.length === 0, `no envs under tenant ${tenant}`);
-    await app.sidebar.openManageDialogFor(tenant, envs[0]!);
+    await app.sidebar.openManageDialogFor(SEED_TENANT, SEED_ENV_ALPHA);
     await app.manageDialog.waitForOpen();
 
     await app.manageDialog.selectTab('History');
@@ -643,12 +614,7 @@ test.describe('idle widget stop protection', () => {
       await route.continue();
     });
 
-    const tenants = await app.sidebar.tenants();
-    test.skip(tenants.length === 0, 'no tenants in this developer harness');
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    test.skip(envs.length === 0, `no envs under tenant ${tenant}`);
-    await app.sidebar.openEnvironment(tenant, envs[0]!);
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     const stopButton = page.getByRole('button', { name: new RegExp(`^Stop ${ctxName}`) });
     await stopButton.waitFor({ state: 'visible', timeout: 6_000 });

@@ -21,9 +21,7 @@ export function deployUiSelection(entry: ActivityQueueEntry): UISelection {
     kubernetesContext: entry.kubernetesContext ?? '',
     containerRegistry: '',
     noGit: false,
-    bootstrap: false,
     setDefaultTenant: false,
-    action: 'deploy',
   };
 }
 

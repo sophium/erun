@@ -1,0 +1,28 @@
+audit: erun deploy --components [erun-backend-postgres] --dry-run --snapshot team dev
+trace-log: would append the full trace to <TMP>
+deploy: tenant=team environment=dev version-override= snapshot=true components=[erun-backend-postgres] force=false publish=false
+deploy: postgres reset requested; running helm upgrade for erun-backend-postgres despite cached images
+deploy: resolved 2 spec(s)
+docker image inspect registry.example/team/erun-backend-postgres:fp-<HEX16>-amd64
+fingerprint image present locally: registry.example/team/erun-backend-postgres:fp-<HEX16>-amd64
+docker image inspect registry.example/team/erun-backend-postgres:fp-<HEX16>-arm64
+fingerprint image present locally: registry.example/team/erun-backend-postgres:fp-<HEX16>-arm64
+promoting from cached fingerprint image: registry.example/team/erun-backend-postgres:18.3
+cd <TMP> && docker tag registry.example/team/erun-backend-postgres:fp-<HEX16>-amd64 registry.example/team/erun-backend-postgres:18.3-amd64
+cd <TMP> && docker tag registry.example/team/erun-backend-postgres:fp-<HEX16>-arm64 registry.example/team/erun-backend-postgres:18.3-arm64
+cd <TMP> && docker push registry.example/team/erun-backend-postgres:18.3-amd64
+cd <TMP> && docker push registry.example/team/erun-backend-postgres:18.3-arm64
+cd <TMP> && docker manifest create --amend registry.example/team/erun-backend-postgres:18.3 registry.example/team/erun-backend-postgres:18.3-amd64 registry.example/team/erun-backend-postgres:18.3-arm64
+cd <TMP> && docker manifest push registry.example/team/erun-backend-postgres:18.3
+kubectl --context test-context get namespace team-dev -o name
+kubectl --context test-context create namespace team-dev
+cd <TMP> && helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace team-dev --debug --kube-context test-context -f <TMP> --set-string tenant=team --set-string environment=dev --set-string worktreeStorage=host --set-string worktreeRepoName=cwd --set-string worktreeHostPath=<TMP> --set sshdEnabled=false --set mcpPort=17000 --set apiPort=17033 --set sshPort=17022 --set managedCloud=false --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias= --set-string cloudContext.region= --set-string cloudContext.instanceId= --set cloudContext.useHostCredentials=false --set-string api.oidcAllowedIssuers= --set api.postgres.reset=true --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=8916Mi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 erun-backend-postgres <TMP>
+deploy: watching pods in team-dev on context test-context for early container failure (release erun-backend-postgres)
+kubectl --context test-context --namespace team-dev get pods -o json
+dedup: ready (release=test-context-team-dev-erun-backend-postgres, hash=<HASH>)
+kubectl --context test-context get namespace team-dev -o name
+kubectl --context test-context create namespace team-dev
+cd <TMP> && helm upgrade --install --wait --wait-for-jobs --timeout 2m0s --namespace team-dev --debug --kube-context test-context -f <TMP> --set-string tenant=team --set-string environment=dev --set-string worktreeStorage=host --set-string worktreeRepoName=cwd --set-string worktreeHostPath=<TMP> --set sshdEnabled=false --set mcpPort=17000 --set apiPort=17033 --set sshPort=17022 --set managedCloud=false --set-string cloudContext.name= --set-string cloudContext.provider= --set-string cloudContext.providerAlias= --set-string cloudContext.region= --set-string cloudContext.instanceId= --set cloudContext.useHostCredentials=false --set-string api.oidcAllowedIssuers= --set api.postgres.reset=true --set-string idle.timeout=5m0s --set-string idle.workingHours=08:00-20:00 --set-string idle.timezone= --set idle.trafficBytes=0 --set-string runtime.resources.limits.cpu=4 --set-string runtime.resources.limits.memory=8916Mi --set-string claude.useMantle=0 --set-string claude.useBedrock=0 team-devops <TMP>
+deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
+kubectl --context test-context --namespace team-dev get pods -o json
+dedup: ready (release=test-context-team-dev-team-devops, hash=<HASH>)

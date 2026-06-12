@@ -1,42 +1,4 @@
-✗ Git remote URL for environment "dev" in tenant "team": █
-✔ Git remote URL for environment "dev" in tenant "team": s█
-✔ Git remote URL for environment "dev" in tenant "team": ss█
-✔ Git remote URL for environment "dev" in tenant "team": ssh█
-✔ Git remote URL for environment "dev" in tenant "team": ssh:█
-✔ Git remote URL for environment "dev" in tenant "team": ssh:/█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://g█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://gi█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.e█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.ex█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.exa█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.exam█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.examp█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.exampl█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.c█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.co█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.com█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.com/█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.com/t█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.com/te█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.com/tea█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.com/team█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.com/team/█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.com/team/r█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.com/team/re█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.com/team/rep█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.com/team/repo█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.com/team/repo.█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.com/team/repo.g█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.com/team/repo.gi█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.com/team/repo.git█
-✔ Git remote URL for environment "dev" in tenant "team": ssh://git.example.com/team/repo.git█
-Git remote URL for environment "dev" in tenant "team": ssh://git.example.com/team/repo.git
-audit: erun init --container-registry registry.example/test --kubernetes-context test-context --remote --version <VERSION> --yes team dev
+Git remote URL for environment "dev" in tenant "team": audit: erun init --container-registry registry.example/test --kubernetes-context test-context --remote --version <VERSION> --yes team dev
 Loading erun tool configuration, configPath=<TMP>
 Saving default config
 Loaded erun tool configuration
@@ -46,6 +8,7 @@ Loaded tenant configuration
 Loading environment configuration
 Adding new environment
 ==> Initializing team/dev
+deploy: no local runtime chart; using published chart oci://ghcr.io/sophium/charts/erun-devops version <VERSION>
 deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
 dedup: claim (release=test-context-team-dev-team-devops, hash=<HASH>, pid=<PID>)
 ==> Deploying team/dev <VERSION>

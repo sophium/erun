@@ -1,17 +1,4 @@
-✗ Kubernetes context for environment "local" in tenant "team": █
-✔ Kubernetes context for environment "local" in tenant "team": m█
-✔ Kubernetes context for environment "local" in tenant "team": ma█
-✔ Kubernetes context for environment "local" in tenant "team": man█
-✔ Kubernetes context for environment "local" in tenant "team": manu█
-✔ Kubernetes context for environment "local" in tenant "team": manua█
-✔ Kubernetes context for environment "local" in tenant "team": manual█
-✔ Kubernetes context for environment "local" in tenant "team": manual-█
-✔ Kubernetes context for environment "local" in tenant "team": manual-c█
-✔ Kubernetes context for environment "local" in tenant "team": manual-ct█
-✔ Kubernetes context for environment "local" in tenant "team": manual-ctx█
-✔ Kubernetes context for environment "local" in tenant "team": manual-ctx█
-Kubernetes context for environment "local" in tenant "team": manual-ctx
-audit: erun init --confirm-environment --container-registry registry.example/test --dry-run --project-root <TMP> --set-default-tenant --type local-agent --version <VERSION> team local
+Kubernetes context for environment "local" in tenant "team": audit: erun init --confirm-environment --container-registry registry.example/test --dry-run --project-root <TMP> --set-default-tenant --type local-agent --version <VERSION> team local
 Loading erun tool configuration, configPath=<TMP>
 Saving default config
 mkdir -p <TMP>
@@ -33,34 +20,7 @@ write-yaml <TMP>
 ==> Initializing team/local
 mkdir -p <TMP>
 write-yaml <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
-mkdir -p <TMP>
-write-file <TMP>
+init: runtime deploys use the published erun-devops chart; no devops scaffold is written
 ==> Initialized team/local
 Configuration initialized OK
 ensure-agent-instructions

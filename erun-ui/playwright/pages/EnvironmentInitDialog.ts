@@ -1,14 +1,11 @@
 import type { Locator, Page } from '@playwright/test';
 
-// EnvironmentInitDialog drives the "New environment" / "Deploy environment"
-// dialog. The dialog title is "New environment" when initialising and
-// "Deploy environment" when deploying; this POM defaults to the
-// init variant.
+// EnvironmentInitDialog drives the "New environment" dialog.
 export class EnvironmentInitDialog {
   constructor(public readonly page: Page) {}
 
   locator(): Locator {
-    return this.page.getByRole('dialog', { name: /New environment|Deploy environment/ });
+    return this.page.getByRole('dialog', { name: 'New environment' });
   }
 
   async waitForOpen(): Promise<void> {
@@ -45,7 +42,7 @@ export class EnvironmentInitDialog {
 
   async submit(): Promise<void> {
     const button = this.locator().getByRole('button', {
-      name: /^(Create|Deploy|Creating|Deploying)/,
+      name: /^(Create|Creating)/,
     });
     await button.scrollIntoViewIfNeeded();
     await button.click();

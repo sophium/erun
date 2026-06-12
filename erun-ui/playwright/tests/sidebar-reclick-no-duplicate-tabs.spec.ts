@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/erunApp.js';
+import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
 // Sidebar-reclick coverage for bug/368-respawn-dead-tabs-from-sidebar.
 //
@@ -9,10 +10,9 @@ import { expect, test } from '../fixtures/erunApp.js';
 // clicks the env. The positive path — staging a real dead PTY for the
 // active env, then re-clicking the sidebar row and asserting the AI tab
 // swaps to a fresh sessionId — needs an exited managed terminal with the
-// right exitReason wired through. Per erun-ui/playwright/AGENTS.md the
-// headless harness reflects the developer's real ~/.erun/, so we cannot
-// deterministically arrange the runtime-pod-replaced scenario the bug
-// reproduces against.
+// right exitReason wired through, which requires a real runtime pod being
+// replaced under the session; the isolated harness has no cluster to
+// stage that against.
 //
 // The backend contract is already pinned by
 // TestStartAISessionRespawnsAfterStoppedCloudContextDeath in
@@ -28,12 +28,8 @@ test.describe('sidebar env re-click with alive default tabs', () => {
     app,
     page,
   }) => {
-    const tenants = await app.sidebar.tenants();
-    expect(tenants.length).toBeGreaterThan(0);
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    expect(envs.length).toBeGreaterThan(0);
-    const env = envs[0]!;
+    const tenant = SEED_TENANT;
+    const env = SEED_ENV_ALPHA;
 
     await app.sidebar.openEnvironment(tenant, env);
 

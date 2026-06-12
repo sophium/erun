@@ -1,146 +1,31 @@
 package eruncommon
 
 import (
-	"crypto/sha256"
+	"bytes"
 	"embed"
-	"encoding/hex"
-	"io/fs"
+	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 )
 
-//go:embed assets/default-devops-chart/Chart.yaml assets/default-devops-chart/values.local.yaml assets/default-devops-chart/templates/service.yaml assets/default-backend-postgres-chart/Chart.yaml assets/default-backend-postgres-chart/values.local.yaml assets/default-backend-postgres-chart/templates/postgres.yaml assets/default-backend-db-chart/Chart.yaml assets/default-backend-db-chart/values.local.yaml assets/default-backend-db-chart/templates/migrate-job.yaml assets/default-backend-api-chart/Chart.yaml assets/default-backend-api-chart/values.local.yaml assets/default-backend-api-chart/templates/api.yaml
+// The embedded Chart.yaml exists only to migrate legacy scaffolded tenant
+// charts (see MigrateDefaultDevopsChartAppVersion). New environments deploy
+// the published erun-devops chart directly (#505); the per-tenant scaffold
+// copies — and the drift they accumulated (#510) — are retired.
+//
+//go:embed assets/default-devops-chart/Chart.yaml
 var defaultDevopsChartFiles embed.FS
-
-type defaultDevopsChartTemplate struct {
-	AssetPath  string
-	TargetPath string
-	Mode       os.FileMode
-}
-
-var defaultDevopsChartTemplates = []defaultDevopsChartTemplate{
-	{
-		AssetPath:  "assets/default-devops-chart/Chart.yaml",
-		TargetPath: "__MODULE_NAME__/k8s/__MODULE_NAME__/Chart.yaml",
-		Mode:       0o644,
-	},
-	{
-		AssetPath:  "assets/default-devops-chart/values.local.yaml",
-		TargetPath: "__MODULE_NAME__/k8s/__MODULE_NAME__/values.local.yaml",
-		Mode:       0o644,
-	},
-	{
-		AssetPath:  "assets/default-devops-chart/templates/service.yaml",
-		TargetPath: "__MODULE_NAME__/k8s/__MODULE_NAME__/templates/service.yaml",
-		Mode:       0o644,
-	},
-	{
-		AssetPath:  "assets/default-backend-postgres-chart/Chart.yaml",
-		TargetPath: "__MODULE_NAME__/k8s/erun-backend-postgres/Chart.yaml",
-		Mode:       0o644,
-	},
-	{
-		AssetPath:  "assets/default-backend-postgres-chart/values.local.yaml",
-		TargetPath: "__MODULE_NAME__/k8s/erun-backend-postgres/values.local.yaml",
-		Mode:       0o644,
-	},
-	{
-		AssetPath:  "assets/default-backend-postgres-chart/templates/postgres.yaml",
-		TargetPath: "__MODULE_NAME__/k8s/erun-backend-postgres/templates/postgres.yaml",
-		Mode:       0o644,
-	},
-	{
-		AssetPath:  "assets/default-backend-db-chart/Chart.yaml",
-		TargetPath: "__MODULE_NAME__/k8s/erun-backend-db/Chart.yaml",
-		Mode:       0o644,
-	},
-	{
-		AssetPath:  "assets/default-backend-db-chart/values.local.yaml",
-		TargetPath: "__MODULE_NAME__/k8s/erun-backend-db/values.local.yaml",
-		Mode:       0o644,
-	},
-	{
-		AssetPath:  "assets/default-backend-db-chart/templates/migrate-job.yaml",
-		TargetPath: "__MODULE_NAME__/k8s/erun-backend-db/templates/migrate-job.yaml",
-		Mode:       0o644,
-	},
-	{
-		AssetPath:  "assets/default-backend-api-chart/Chart.yaml",
-		TargetPath: "__MODULE_NAME__/k8s/erun-backend-api/Chart.yaml",
-		Mode:       0o644,
-	},
-	{
-		AssetPath:  "assets/default-backend-api-chart/values.local.yaml",
-		TargetPath: "__MODULE_NAME__/k8s/erun-backend-api/values.local.yaml",
-		Mode:       0o644,
-	},
-	{
-		AssetPath:  "assets/default-backend-api-chart/templates/api.yaml",
-		TargetPath: "__MODULE_NAME__/k8s/erun-backend-api/templates/api.yaml",
-		Mode:       0o644,
-	},
-}
-
-func EnsureDefaultDevopsChart(ctx Context, projectRoot, tenant, environment string) error {
-	return EnsureDefaultDevopsChartWithVersion(ctx, projectRoot, tenant, environment, "")
-}
-
-// EnsureDefaultDevopsChartWithVersion is the version-aware variant of
-// EnsureDefaultDevopsChart. The appVersion baked into the tenant's
-// generated Chart.yaml drives the runtime image tags resolved by the
-// helm templates — `erun-mcp:{Chart.AppVersion}`, etc. Before issue
-// #361 the asset shipped with a literal "1.0.0" that nothing
-// substituted, so every tenant chart pinned its images to 1.0.0
-// forever and the user's first auto-stop / open cycle deployed a
-// year-old MCP image that couldn't roll out. Callers should pass the
-// resolved build/runtime version; an empty value falls back to "dev",
-// matching NormalizeBuildInfo.
-func EnsureDefaultDevopsChartWithVersion(ctx Context, projectRoot, tenant, environment, appVersion string) error {
-	projectRoot = strings.TrimSpace(projectRoot)
-	tenant = strings.TrimSpace(tenant)
-	if projectRoot == "" || tenant == "" {
-		return nil
-	}
-	projectRoot = filepath.Clean(projectRoot)
-
-	moduleName := RuntimeReleaseName(tenant)
-	resolvedAppVersion := defaultDevopsChartAppVersion(appVersion)
-	replacer := strings.NewReplacer("__MODULE_NAME__", moduleName)
-	for _, templateFile := range defaultDevopsChartTemplates {
-		data, err := defaultDevopsChartFiles.ReadFile(templateFile.AssetPath)
-		if err != nil {
-			return err
-		}
-
-		targetPath := replacer.Replace(templateFile.TargetPath)
-		resolvedPath := filepath.Join(projectRoot, filepath.FromSlash(targetPath))
-		content := renderDefaultDevopsChartTemplate(templateFile.AssetPath, moduleName, moduleName, resolvedAppVersion, data)
-		if err := ensureDefaultDevopsFile(ctx, resolvedPath, templateFile.Mode, content); err != nil {
-			return err
-		}
-	}
-
-	valuesFilePath := filepath.Join(projectRoot, moduleName, "k8s", moduleName, "values."+strings.ToLower(strings.TrimSpace(environment))+".yaml")
-	if strings.TrimSpace(environment) != "" && !isLocalEnvironment(environment) {
-		if err := ensureDefaultDevopsFile(ctx, valuesFilePath, 0o644, nil); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
 
 // MigrateDefaultDevopsChartAppVersion rewrites an existing tenant
 // `<tenant>-devops/k8s/<tenant>-devops/Chart.yaml` whose appVersion
-// still carries the pre-#361 literal placeholder. It is the narrow
-// `erun open` counterpart to EnsureDefaultDevopsChartWithVersion:
-// no backend chart scaffolding, no values files, no `Chart.yaml`
-// creation when the file does not exist. The legacy detection
-// already used by ensureDefaultDevopsFile (description-scoped to
-// "ERun DevOps", version + appVersion lines forced to "1.0.0")
-// keeps the rewrite from clobbering hand-customised tenant charts.
+// still carries the pre-#361 literal placeholder. Tenants with a
+// scaffolded devops module keep deploying their local chart (the
+// published-chart flow only applies when no local chart exists), so
+// this compat migration stays. The legacy detection already used by
+// ensureDefaultDevopsFile (description-scoped to "ERun DevOps",
+// version + appVersion lines forced to "1.0.0") keeps the rewrite from
+// clobbering hand-customised tenant charts.
 //
 // The trace lines emitted by ensureDefaultDevopsFile remain the
 // only side effect in dry-run mode, so adding this call into the
@@ -157,10 +42,8 @@ func MigrateDefaultDevopsChartAppVersion(ctx Context, projectRoot, tenant, appVe
 	chartPath := filepath.Join(projectRoot, moduleName, "k8s", moduleName, "Chart.yaml")
 	if _, err := os.Stat(chartPath); err != nil {
 		if os.IsNotExist(err) {
-			// Nothing to migrate. The open flow will fall back to the
-			// materialized default chart elsewhere, which is already
-			// generated with the right appVersion via
-			// resolveDefaultDevopsDeploySpecWithImage.
+			// Nothing to migrate: the env has no scaffolded chart and
+			// deploys the published erun-devops chart instead.
 			return nil
 		}
 		return err
@@ -171,7 +54,7 @@ func MigrateDefaultDevopsChartAppVersion(ctx Context, projectRoot, tenant, appVe
 	if err != nil {
 		return err
 	}
-	content := renderDefaultDevopsChartTemplate("assets/default-devops-chart/Chart.yaml", moduleName, moduleName, resolvedAppVersion, data)
+	content := renderDefaultDevopsChartTemplate(moduleName, resolvedAppVersion, data)
 	return ensureDefaultDevopsFile(ctx, chartPath, 0o644, content)
 }
 
@@ -186,23 +69,15 @@ func defaultDevopsChartAppVersion(appVersion string) string {
 	return appVersion
 }
 
-func renderDefaultDevopsChartTemplate(assetPath, moduleName, imageName, appVersion string, data []byte) []byte {
+func renderDefaultDevopsChartTemplate(moduleName, appVersion string, data []byte) []byte {
 	content := strings.ReplaceAll(string(data), "__MODULE_NAME__", moduleName)
 	content = strings.ReplaceAll(content, "__APP_VERSION__", appVersion)
-	imageName = strings.TrimSpace(imageName)
-	if imageName == "" {
-		imageName = moduleName
-	}
-	if assetPath == "assets/default-devops-chart/templates/service.yaml" {
-		content = strings.Replace(content, `printf "ghcr.io/sophium/erun-devops:%s"`, `printf "ghcr.io/sophium/`+imageName+`:%s"`, 1)
-		content = strings.Replace(content, `index $imageOverrides "erun-devops"`, `index $imageOverrides "`+imageName+`"`, 1)
-	}
 	return []byte(content)
 }
 
 func resolveOpenRuntimeDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, allowLocalBuilds bool) (DeploySpec, error) {
 	if target.RemoteRepo() {
-		return resolveDefaultDevopsDeploySpecWithImage(target, DevopsComponentName)
+		return resolvePublishedDevopsDeploySpec(ctx, target, "")
 	}
 
 	for _, componentName := range openRuntimeComponentNames(target.Tenant) {
@@ -216,7 +91,7 @@ func resolveOpenRuntimeDeploySpec(ctx Context, store DeployStore, findProjectRoo
 		}
 	}
 
-	return resolveDefaultDevopsDeploySpec(target)
+	return resolvePublishedDevopsDeploySpec(ctx, target, "")
 }
 
 func openRuntimeComponentNames(tenant string) []string {
@@ -237,145 +112,104 @@ func isHelmChartNotFoundForComponent(err error) bool {
 	return err != nil && strings.HasPrefix(err.Error(), "helm chart not found for component ")
 }
 
-func resolveDefaultDevopsDeploySpec(target OpenResult) (DeploySpec, error) {
-	return resolveDefaultDevopsDeploySpecWithImage(target, RuntimeReleaseName(target.Tenant))
-}
-
-func ResolveDefaultDevopsDeploySpecWithImage(target OpenResult, imageName string) (DeploySpec, error) {
-	return resolveDefaultDevopsDeploySpecWithImage(target, imageName)
-}
-
-func resolveDefaultDevopsDeploySpecWithImage(target OpenResult, imageName string) (DeploySpec, error) {
-	moduleName := RuntimeReleaseName(target.Tenant)
-	chartPath, err := materializeDefaultDevopsChart(moduleName, imageName, strings.TrimSpace(target.EnvConfig.RuntimeVersion))
-	if err != nil {
-		return DeploySpec{}, err
-	}
-	if err := ensureDefaultDevopsValuesFile(chartPath, target.Environment); err != nil {
-		return DeploySpec{}, err
-	}
-
-	deployContext := KubernetesDeployContext{
-		Dir:           chartPath,
-		ComponentName: DevopsComponentName,
-		ChartPath:     chartPath,
-	}
-	deployInput, err := newHelmDeploySpec(target, deployContext, "")
-	if err != nil {
-		return DeploySpec{}, err
-	}
-	deployInput.ReleaseName = moduleName
-	deployInput.UseHostCredentials = target.EnvConfig.RemoteHostCredentials
-	if runtimeVersion := strings.TrimSpace(target.EnvConfig.RuntimeVersion); runtimeVersion != "" {
-		deployInput.Version = runtimeVersion
-	}
-
-	return DeploySpec{
-		Target:        target,
-		DeployContext: deployContext,
-		Deploy:        deployInput,
-	}, nil
-}
-
-func IsDefaultDevopsChartPath(chartPath string) bool {
-	chartPath = filepath.Clean(strings.TrimSpace(chartPath))
-	if chartPath == "" {
-		return false
-	}
-
-	return strings.HasPrefix(filepath.Base(chartPath), "erun-default-devops-chart-")
-}
-
-func materializeDefaultDevopsChart(moduleName, imageName, appVersion string) (string, error) {
-	hash, err := defaultDevopsChartHash()
-	if err != nil {
-		return "", err
-	}
-	moduleName = strings.TrimSpace(moduleName)
-	if moduleName == "" {
-		moduleName = DevopsComponentName
-	}
-	imageName = strings.TrimSpace(imageName)
-	if imageName == "" {
-		imageName = moduleName
-	}
-	resolvedAppVersion := defaultDevopsChartAppVersion(appVersion)
-
-	chartPath := filepath.Join(os.TempDir(), "erun-default-devops-chart-"+moduleName+"-"+imageName+"-"+resolvedAppVersion+"-"+hash)
-	if err := os.MkdirAll(chartPath, 0o755); err != nil {
-		return "", err
-	}
-
-	entries := []string{
-		"assets/default-devops-chart/Chart.yaml",
-		"assets/default-devops-chart/values.local.yaml",
-		"assets/default-devops-chart/templates/service.yaml",
-	}
-	for _, name := range entries {
-		data, err := defaultDevopsChartFiles.ReadFile(name)
-		if err != nil {
-			return "", err
-		}
-		data = renderDefaultDevopsChartTemplate(name, moduleName, imageName, resolvedAppVersion, data)
-
-		relativePath := strings.TrimPrefix(name, "assets/default-devops-chart/")
-		targetPath := filepath.Join(chartPath, filepath.FromSlash(relativePath))
-		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
-			return "", err
-		}
-		if err := os.WriteFile(targetPath, data, 0o644); err != nil {
-			return "", err
-		}
-	}
-
-	return chartPath, nil
-}
-
-func defaultDevopsChartHash() (string, error) {
-	names := []string{}
-	if err := fs.WalkDir(defaultDevopsChartFiles, "assets/default-devops-chart", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() {
-			return nil
-		}
-		names = append(names, path)
-		return nil
-	}); err != nil {
-		return "", err
-	}
-
-	sort.Strings(names)
-	sum := sha256.New()
-	for _, name := range names {
-		data, err := defaultDevopsChartFiles.ReadFile(name)
-		if err != nil {
-			return "", err
-		}
-		_, _ = sum.Write([]byte(name))
-		_, _ = sum.Write(data)
-	}
-
-	return hex.EncodeToString(sum.Sum(nil))[:16], nil
-}
-
-func ensureDefaultDevopsValuesFile(chartPath, environment string) error {
-	environment = strings.ToLower(strings.TrimSpace(environment))
-	if environment == "" {
-		return nil
-	}
-
-	valuesFilePath := filepath.Join(chartPath, "values."+environment+".yaml")
-	return ensureDefaultDevopsValuesFileAtPath(valuesFilePath)
-}
-
-func ensureDefaultDevopsValuesFileAtPath(valuesFilePath string) error {
-	if _, err := os.Stat(valuesFilePath); err == nil {
-		return nil
-	} else if !os.IsNotExist(err) {
+func ensureDefaultDevopsFile(ctx Context, path string, mode os.FileMode, content []byte) error {
+	replace, err := shouldWriteDefaultDevopsFile(path, content)
+	if err != nil || !replace {
 		return err
 	}
 
-	return os.WriteFile(valuesFilePath, nil, 0o644)
+	ctx.TraceCommand("", "mkdir", "-p", filepath.Dir(path))
+	ctx.TraceCommand("", "write-file", path)
+	if ctx.DryRun {
+		return nil
+	}
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, content, mode); err != nil {
+		return err
+	}
+	return os.Chmod(path, mode)
+}
+
+func shouldWriteDefaultDevopsFile(path string, content []byte) (bool, error) {
+	info, err := os.Stat(path)
+	switch {
+	case err == nil && info.IsDir():
+		return false, fmt.Errorf("%q is a directory", path)
+	case err == nil:
+		return shouldWriteExistingDefaultDevopsFile(path, content)
+	case os.IsNotExist(err):
+		return true, nil
+	default:
+		return false, err
+	}
+}
+
+func shouldWriteExistingDefaultDevopsFile(path string, content []byte) (bool, error) {
+	existing, err := os.ReadFile(path)
+	if err != nil {
+		return false, err
+	}
+	if bytes.Equal(existing, content) {
+		return false, nil
+	}
+	return shouldReplaceDefaultDevopsFile(existing, content), nil
+}
+
+// shouldReplaceDefaultDevopsFile only ever replaces a legacy scaffolded
+// Chart.yaml still pinned to the pre-#361 "1.0.0" placeholder; any other
+// existing content is treated as hand-customised and left alone.
+func shouldReplaceDefaultDevopsFile(existing, content []byte) bool {
+	current := strings.TrimSpace(string(existing))
+	for _, candidate := range legacyDevopsChartYAMLCandidates(content) {
+		if current == strings.TrimSpace(candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+// legacyDevopsChartYAMLCandidates returns the pre-#361 shapes of a
+// tenant devops chart's Chart.yaml so an existing tenant chart still
+// pinned to the literal placeholder `appVersion: "1.0.0"` gets
+// auto-rewritten on the next open. Only the devops chart is in scope —
+// `description: ERun DevOps` is what disambiguates from the backend-*
+// charts that share the base name.
+//
+// The candidates are the *new* content with the version + appVersion
+// lines forced back to "1.0.0", so byte-exact comparison in
+// shouldReplaceDefaultDevopsFile picks up the upgrade target without
+// needing structural YAML diffing.
+func legacyDevopsChartYAMLCandidates(content []byte) []string {
+	if !bytes.Contains(content, []byte("description: ERun DevOps")) {
+		return nil
+	}
+	pinned := chartYAMLPinnedToLegacyVersion(string(content))
+	if pinned == "" {
+		return nil
+	}
+	return []string{pinned}
+}
+
+func chartYAMLPinnedToLegacyVersion(content string) string {
+	lines := strings.Split(content, "\n")
+	changed := false
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "version:") || strings.HasPrefix(trimmed, "appVersion:") {
+			indent := line[:len(line)-len(strings.TrimLeft(line, " \t"))]
+			key := strings.SplitN(trimmed, ":", 2)[0]
+			next := indent + key + `: "1.0.0"`
+			if next != line {
+				lines[i] = next
+				changed = true
+			}
+		}
+	}
+	if !changed {
+		return ""
+	}
+	return strings.Join(lines, "\n")
 }

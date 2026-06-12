@@ -8,10 +8,8 @@ import (
 )
 
 const (
-	DefaultRuntimePodCPU           = "4"
-	DefaultRuntimePodMemory        = "8916Mi"
-	DefaultRuntimePodRequestCPU    = "0.25"
-	DefaultRuntimePodRequestMemory = "1024Mi"
+	DefaultRuntimePodCPU    = "4"
+	DefaultRuntimePodMemory = "8916Mi"
 )
 
 type RuntimePodResources struct {

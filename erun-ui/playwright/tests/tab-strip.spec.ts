@@ -1,4 +1,5 @@
 import { expect, test } from '../fixtures/erunApp.js';
+import { SEED_ENV_ALPHA, SEED_TENANT } from '../fixtures/seedRoot.js';
 
 // Tab-strip respawn coverage for bug/337-respawn-dead-default-tabs-on-click.
 //
@@ -9,10 +10,10 @@ import { expect, test } from '../fixtures/erunApp.js';
 // fight the stop. The positive path (a dead Local/AI/ERun tab whose click
 // surfaces a "Reopening …" overlay and then swaps in a fresh sessionId)
 // requires staging an exited session with the right exitReason metadata
-// and an env config the gate accepts; per erun-ui/playwright/AGENTS.md
-// the headless harness reflects the developer's real ~/.erun/ config,
-// so we cannot deterministically reproduce a stopped cloud context, a
-// closed PTY, and a specific installed AI tool at the same time.
+// and an env config the gate accepts; the isolated harness cannot
+// deterministically reproduce a stopped cloud context, a closed PTY, and
+// a specific installed AI tool at the same time (the stop needs a real
+// managed cloud host).
 //
 // The backend contract is pinned by the Go unit test
 // TestStartAISessionRespawnsAfterStoppedCloudContextDeath in
@@ -29,14 +30,7 @@ test.describe('terminal tab strip', () => {
     app,
     page,
   }) => {
-    const tenants = await app.sidebar.tenants();
-    expect(tenants.length).toBeGreaterThan(0);
-    const tenant = tenants[0]!;
-    const envs = await app.sidebar.environmentsFor(tenant);
-    expect(envs.length).toBeGreaterThan(0);
-    const env = envs[0]!;
-
-    await app.sidebar.openEnvironment(tenant, env);
+    await app.sidebar.openEnvironment(SEED_TENANT, SEED_ENV_ALPHA);
 
     // Local is spawned eagerly by openSelection before the slower ERun
     // open call, so it reliably appears for any env where the

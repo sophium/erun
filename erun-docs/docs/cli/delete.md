@@ -18,8 +18,9 @@ Both arguments are required. `erun delete` is destructive — there is no `delet
 
 1. The Kubernetes namespace `<tenant>-<env>` and everything inside it (the runtime pod, dind daemon, MCP container, PVCs for `/home/erun` and `/var/lib/docker`, helm releases, etc.).
 2. The local environment config (`~/.config/erun/<tenant>/<env>/`).
-3. Any cached port-forward state for the env (`<UserConfigDir>/erun/portforward/...`).
-4. The tenant's `default_environment` pointer if it referenced the deleted env — a sibling env (if any) is promoted to default.
+3. The tenant's `default_environment` pointer if it referenced the deleted env — a sibling env (if any) is promoted to default.
+
+The cached port-forward state for the env (`<UserConfigDir>/erun/portforward/...`) is left in place; a later env with the same name overwrites it.
 
 The tenant config itself (`~/.config/erun/<tenant>/tenant.yaml`) and the project's `.erun/config.yaml` are **not** removed.
 

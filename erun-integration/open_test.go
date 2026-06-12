@@ -287,24 +287,23 @@ func TestOpen(t *testing.T) {
 		}
 	})
 
-	t.Run("no_shell_real_run_creates_chart_deploys_and_persists_version", func(t *testing.T) {
+	t.Run("no_shell_real_run_deploys_published_chart_and_persists_version", func(t *testing.T) {
 		// Real-run open against a local env whose runtime deployment does
-		// not exist and whose tenant repo has no devops chart. Covers, in
-		// one pass, the branches dry-run cannot reach:
-		//   - maybeCreateMissingRuntimeChart's accepted prompt ("y") and
-		//     the real EnsureDefaultDevopsChartWithVersion chart write;
-		//   - deployRuntime's real helm deploy (helm stub) wrapped in
-		//     wrapOpenHelmDeployWithSpinner;
+		// not exist and whose tenant repo has no devops chart. With the
+		// scaffold retired (#505) there is no chart-creation prompt: the
+		// runtime spec resolves to the published erun-devops OCI chart.
+		// Covers, in one pass, the branches dry-run cannot reach:
+		//   - deployRuntime's real helm deploy of the published chart (helm
+		//     stub) wrapped in wrapOpenHelmDeployWithSpinner;
 		//   - persistOpenRuntimeVersion's save branch: --version 9.9.9
 		//     differs from the persisted 1.0.0, so the env config must be
 		//     rewritten with the deployed version (side-effect assert).
 		// The kubectl stub reports the deployment NotFound (decision input
 		// for shouldDeployRuntime) and runs the port-forward simulator for
-		// the post-deploy forwards on the pinned 26100 range. The chart
-		// confirm is the run's single prompt; --no-alias-prompt keeps the
-		// alias setup out of the way (readline read-ahead). The golden is
-		// stdout-only by design: real-run --no-shell silences stderr so an
-		// `eval "$(erun open ... --no-shell)"` alias stays quiet
+		// the post-deploy forwards on the pinned 26100 range.
+		// --no-alias-prompt keeps the alias setup out of the way. The golden
+		// is stdout-only by design: real-run --no-shell silences stderr so
+		// an `eval "$(erun open ... --no-shell)"` alias stays quiet
 		// (shouldSilenceNoShellOutput).
 		skipIfPortsBusy(t, 26100, 26133)
 		setup := env.New(t)
@@ -318,18 +317,17 @@ func TestOpen(t *testing.T) {
 		fixture.StubBinary(t, stubsDir, "helm", "")
 		envVars = append(envVars, fixture.StubEnv(stubsDir, "helm")...)
 		result := erun.Run(t, []string{"open", "team", "dev", "--version", "9.9.9", "--no-shell", "--no-alias-prompt"}, erun.RunOptions{
-			Cwd:   setup.Cwd,
-			Env:   envVars,
-			Stdin: "y\n",
+			Cwd: setup.Cwd,
+			Env: envVars,
 		})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		golden.Equal(t, "open/no_shell_real_run_creates_chart_deploys_and_persists_version", normalize.Apply(result.Combined))
-		// The accepted prompt materialized the default devops chart in the
-		// tenant repo (side effect outside the captured streams).
-		if _, err := os.Stat(filepath.Join(setup.Cwd, "team-devops", "k8s", "team-devops", "Chart.yaml")); err != nil {
-			t.Errorf("expected the default devops chart to be created: %v", err)
+		golden.Equal(t, "open/no_shell_real_run_deploys_published_chart_and_persists_version", normalize.Apply(result.Combined))
+		// The retired scaffold must not reappear (side effect outside the
+		// captured streams).
+		if _, err := os.Stat(filepath.Join(setup.Cwd, "team-devops")); !os.IsNotExist(err) {
+			t.Errorf("expected no devops scaffold in the tenant repo, stat err=%v", err)
 		}
 		// persistOpenRuntimeVersion stamped the deployed version into the
 		// env config.

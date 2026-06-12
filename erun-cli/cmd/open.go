@@ -444,11 +444,7 @@ func (r *resolvedOpenRunner) resolveRuntimeExecution() (common.DeploySpec, error
 	if err != nil {
 		return common.DeploySpec{}, err
 	}
-	execution, err = maybeCreateMissingRuntimeChart(r.ctx, r.result, r.promptRunner, r.resolveRuntimeDeploySpec, r.options.AllowLocalBuilds, execution)
-	if err != nil {
-		return common.DeploySpec{}, err
-	}
-	execution, err = applyRuntimeDeployImageOverride(r.result, execution, r.options.RuntimeImage)
+	execution, err = applyRuntimeDeployImageOverride(r.ctx, r.result, execution, r.options.RuntimeImage)
 	if err != nil {
 		return common.DeploySpec{}, err
 	}
@@ -686,54 +682,21 @@ func wrapOpenHelmDeployWithSpinner(ctx common.Context, releaseName string, deplo
 	}
 }
 
-func maybeCreateMissingRuntimeChart(ctx common.Context, result common.OpenResult, promptRunner PromptRunner, resolveRuntimeDeploySpec func(common.Context, common.OpenResult, bool) (common.DeploySpec, error), allowLocalBuilds bool, execution common.DeploySpec) (common.DeploySpec, error) {
-	if ctx.DryRun || promptRunner == nil || resolveRuntimeDeploySpec == nil {
-		return execution, nil
-	}
-	if result.RemoteRepo() {
-		return execution, nil
-	}
-	if !common.IsDefaultDevopsChartPath(execution.Deploy.ChartPath) {
-		return execution, nil
-	}
-
-	moduleName := common.RuntimeReleaseName(result.Tenant)
-	ok, err := confirmPrompt(promptRunner, fmt.Sprintf("create %s chart in %s", moduleName, result.RepoPath))
-	if err != nil {
-		return common.DeploySpec{}, err
-	}
-	if !ok {
-		return execution, nil
-	}
-
-	// Pass the resolved runtime version (falls back to the binary's
-	// build version) so the generated Chart.yaml pins appVersion to
-	// the real release. Before #361 this defaulted to the asset's
-	// literal "1.0.0", which baked stale erun-mcp / <tenant>-devops
-	// image tags into every tenant chart.
-	appVersion := strings.TrimSpace(result.EnvConfig.RuntimeVersion)
-	if appVersion == "" {
-		appVersion = currentBuildInfo().Version
-	}
-	if err := common.EnsureDefaultDevopsChartWithVersion(ctx, result.RepoPath, result.Tenant, result.Environment, appVersion); err != nil {
-		return common.DeploySpec{}, err
-	}
-
-	return resolveRuntimeDeploySpec(ctx, result, allowLocalBuilds)
-}
-
-func applyRuntimeDeployImageOverride(result common.OpenResult, execution common.DeploySpec, runtimeImage string) (common.DeploySpec, error) {
+// applyRuntimeDeployImageOverride rebuilds the runtime spec against the
+// published erun-devops chart with the user's image override riding in as
+// imageOverrides.erun-devops. Envs that deploy a repo-local chart ignore the
+// override, matching the historical behavior (the local chart's templates own
+// their image references).
+func applyRuntimeDeployImageOverride(ctx common.Context, result common.OpenResult, execution common.DeploySpec, runtimeImage string) (common.DeploySpec, error) {
 	runtimeImage = strings.TrimSpace(runtimeImage)
 	if runtimeImage == "" {
 		return execution, nil
 	}
-	if result.RemoteRepo() {
-		return common.ResolveDefaultDevopsDeploySpecWithImage(result, runtimeImage)
-	}
-	if !common.IsDefaultDevopsChartPath(execution.Deploy.ChartPath) {
+	if !result.RemoteRepo() && !common.IsOCIChartReference(execution.Deploy.ChartPath) {
 		return execution, nil
 	}
-	return common.ResolveDefaultDevopsDeploySpecWithImage(result, runtimeImage)
+	result.EnvConfig.RuntimeImage = runtimeImage
+	return common.ResolvePublishedDevopsDeploySpec(ctx, result, "")
 }
 
 func applyRuntimeDeployVersionOverride(execution common.DeploySpec, versionOverride string) common.DeploySpec {
@@ -766,18 +729,10 @@ func emitLocalShellSetupForOpenResult(ctx common.Context, result common.OpenResu
 }
 
 // stdoutIsTerminalForAliasSetup gates the interactive alias-setup prompt on a
-// real terminal. ERUN_FORCE_TTY=1 is a deliberate test seam (mirroring
-// ERUN_HOST_OS_OVERRIDE) so non-TTY harnesses can reach the branch.
+// real terminal (the shared writerIsTerminal check, including its
+// ERUN_FORCE_TTY test seam).
 func stdoutIsTerminalForAliasSetup(stdout io.Writer) bool {
-	if os.Getenv("ERUN_FORCE_TTY") == "1" {
-		return true
-	}
-	file, ok := stdout.(*os.File)
-	if !ok {
-		return false
-	}
-	info, err := file.Stat()
-	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
+	return writerIsTerminal(stdout)
 }
 
 func maybeConfigureOpenNoShellAlias(ctx common.Context, result common.OpenResult, promptRunner PromptRunner, shellPath string, stderr io.Writer) error {

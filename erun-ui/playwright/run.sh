@@ -151,6 +151,26 @@ printf '>> playwright: ensuring chromium\n' >&2
 ERUN_PLAYWRIGHT_PORT="$PORT"
 export ERUN_PLAYWRIGHT_PORT
 
+# Isolated config root (issue #483): the headless backend and every erun
+# child process run against a throwaway HOME, so the suite never reads or
+# writes the developer's real ~/.erun / ~/.config/erun. playwright.config.ts
+# points the webServer's HOME/XDG_* at this root, global-setup seeds the
+# deterministic baseline, and global-teardown removes it. The EXIT trap
+# below covers aborted runs; a caller-provided ERUN_PLAYWRIGHT_HOME is
+# respected and never deleted by the trap.
+ERUN_PLAYWRIGHT_HOME_CREATED=0
+if [ -z "${ERUN_PLAYWRIGHT_HOME:-}" ]; then
+	ERUN_PLAYWRIGHT_HOME=$(mktemp -d "${TMPDIR:-/tmp}/erun-playwright-home.XXXXXX")
+	ERUN_PLAYWRIGHT_HOME_CREATED=1
+fi
+export ERUN_PLAYWRIGHT_HOME
+cleanup_isolated_home() {
+	if [ "$ERUN_PLAYWRIGHT_HOME_CREATED" -eq 1 ]; then
+		rm -rf "$ERUN_PLAYWRIGHT_HOME"
+	fi
+}
+trap cleanup_isolated_home EXIT
+
 PLAYWRIGHT_FLAGS=""
 if [ "$HEADED" -eq 1 ]; then
 	PLAYWRIGHT_FLAGS="--headed"

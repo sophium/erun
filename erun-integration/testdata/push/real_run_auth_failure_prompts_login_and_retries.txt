@@ -1,9 +1,7 @@
-Use the arrow keys to navigate: ↓ ↑ → ←
-? Docker push requires login to ghcr.io:
-  ▸ Login and retry push
-    Cancel
-✔ Login and retry push
-audit: erun push
+Docker push requires login to ghcr.io:
+  1) Login and retry push
+  2) Cancel
+Select 1-2 [1]: audit: erun push
 ==> Pushing
 unauthorized: authentication required
 ==> Pushed in <ELAPSED>

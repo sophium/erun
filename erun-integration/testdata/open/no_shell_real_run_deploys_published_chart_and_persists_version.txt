@@ -1,0 +1,3 @@
+kubectl config use-context 'test-context' >/dev/null &&
+kubectl config set-context --current --namespace='team-dev' >/dev/null &&
+cd '<TMP>'
