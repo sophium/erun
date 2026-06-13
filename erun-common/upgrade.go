@@ -254,6 +254,9 @@ func resolveTenantUpgradeVersions(tenant, override string, resolveVersions Runti
 		return RuntimeRegistryVersions{}, err.Error()
 	}
 	traceln(fmt.Sprintf("upgrade: %s latest stable=%s snapshot=%s", tenant, strings.TrimSpace(versions.LatestStable), strings.TrimSpace(versions.LatestSnapshot)))
+	if stable, snapshot, superseded := stableSupersedesSnapshot(versions); superseded {
+		traceln(fmt.Sprintf("upgrade: %s stable %s supersedes snapshot %s; snapshot channel targets the stable release", tenant, stable, snapshot))
+	}
 	return versions, ""
 }
 
@@ -374,12 +377,45 @@ func (p UpgradePlan) Lagging() []UpgradePlanItem {
 }
 
 // channelTarget picks the latest version for a channel from resolved registry
-// versions. Unknown channels fall back to stable.
+// versions. Unknown channels fall back to stable. The snapshot channel targets
+// the latest snapshot unless a stable release supersedes it (issue #524).
 func channelTarget(versions RuntimeRegistryVersions, channel string) string {
 	if strings.TrimSpace(channel) == UpgradeChannelSnapshot {
+		if stable, _, superseded := stableSupersedesSnapshot(versions); superseded {
+			return stable
+		}
 		return strings.TrimSpace(versions.LatestSnapshot)
 	}
 	return strings.TrimSpace(versions.LatestStable)
+}
+
+// stableSupersedesSnapshot reports whether the latest stable release is the
+// newer artifact for the snapshot channel (issue #524). A snapshot tag is a
+// pre-release of its base version — builds stamp <version>-snapshot-<utc-ts>
+// and the release flow bumps the version right after each stable release — so
+// a stable at or above the snapshot's base version was published on top of
+// that snapshot stream, while a snapshot whose base outranks the stable
+// belongs to the next, newer stream. Unparseable versions keep the snapshot
+// target.
+func stableSupersedesSnapshot(versions RuntimeRegistryVersions) (stable, snapshot string, superseded bool) {
+	stable = strings.TrimSpace(versions.LatestStable)
+	snapshot = strings.TrimSpace(versions.LatestSnapshot)
+	if stable == "" || snapshot == "" {
+		return stable, snapshot, false
+	}
+	stableVersion, ok := parseRegistryStableVersion(stable)
+	if !ok {
+		return stable, snapshot, false
+	}
+	base, _, found := strings.Cut(snapshot, "-snapshot-")
+	if !found {
+		return stable, snapshot, false
+	}
+	baseVersion, ok := parseRegistryStableVersion(base)
+	if !ok {
+		return stable, snapshot, false
+	}
+	return stable, snapshot, compareSemver(stableVersion, baseVersion) >= 0
 }
 
 // ResolveUpgradePlan computes the upgrade plan over the candidate envs given

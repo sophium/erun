@@ -74,4 +74,3 @@ func TestDeployRuntimeHealsPersistedVersionOnCachedNoOp(t *testing.T) {
 		}
 	})
 }
-

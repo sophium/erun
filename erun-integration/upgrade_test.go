@@ -3,6 +3,7 @@ package integration
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sophium/erun/erun-integration/internal/env"
@@ -86,18 +87,61 @@ func TestUpgrade(t *testing.T) {
 		// tracks is resolved (runtime->stable default, remote-agent->snapshot
 		// default), and the target for each channel comes from the registry —
 		// supplied here via the ERUN_UPGRADE_VERSIONS_OVERRIDE test seam so the
-		// registry-resolution path is deterministic without network. Both are
-		// seeded already at their channel target, so the plan shows the
+		// registry-resolution path is deterministic without network. The
+		// snapshot stream's base (2.1.0) outranks the stable (2.0.0), so the
+		// snapshot stays the snapshot channel's target (issue #524). Both envs
+		// are seeded already at their channel target, so the plan shows the
 		// resolved channels + targets with no deploy.
 		setup := env.New(t)
 		seedUpgradeTenant(t, setup, "team", "prod")
 		seedUpgradeEnv(t, setup, "team", "prod",
 			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\nruntimeversion: 2.0.0\ntype: runtime\nautoupgrade: true\n")
 		seedUpgradeEnv(t, setup, "team", "agent",
-			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\nruntimeversion: 2.0.0-snapshot-20260101000000\ntype: remote-agent\nautoupgrade: true\n")
-		envVars := append(setup.Env(), "ERUN_UPGRADE_VERSIONS_OVERRIDE=stable=2.0.0,snapshot=2.0.0-snapshot-20260101000000")
+			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\nruntimeversion: 2.1.0-snapshot-20260101000000\ntype: remote-agent\nautoupgrade: true\n")
+		envVars := append(setup.Env(), "ERUN_UPGRADE_VERSIONS_OVERRIDE=stable=2.0.0,snapshot=2.1.0-snapshot-20260101000000")
 		result := erun.Run(t, []string{"upgrade", "team", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "upgrade/dry_run_channel_targets_via_registry_seam", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_snapshot_channel_stable_supersedes_snapshot", func(t *testing.T) {
+		// A snapshot-channel env at the latest snapshot while a stable release
+		// with the same base version exists: the snapshot is a pre-release of
+		// that stable, so the stable supersedes it and becomes the snapshot
+		// channel's target (issue #524) — the supersede decision is traced and
+		// the member upgrades to the stable, with the deploy dry-run traced.
+		setup := env.New(t)
+		seedUpgradeTenant(t, setup, "team", "dev")
+		seedUpgradeEnv(t, setup, "team", "dev",
+			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\ncontainerregistry: registry.example/test\nruntimeversion: 2.0.0-snapshot-20260101000000\ntype: runtime\nautoupgrade: true\nupgradechannel: snapshot\n")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		envVars := append(setup.Env(), "ERUN_UPGRADE_VERSIONS_OVERRIDE=stable=2.0.0,snapshot=2.0.0-snapshot-20260101000000")
+		result := erun.Run(t, []string{"upgrade", "team", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		// Normalization collapses both the stable and the snapshot tag to
+		// <VERSION>, so the golden alone cannot prove the stable was chosen
+		// over the snapshot — assert the un-normalized plan line for that.
+		if !strings.Contains(result.Combined, "[snapshot] 2.0.0-snapshot-20260101000000 -> 2.0.0  (will upgrade)") {
+			t.Fatalf("expected the snapshot-channel member to target the superseding stable 2.0.0, got: %s", result.Combined)
+		}
+		golden.Equal(t, "upgrade/dry_run_snapshot_channel_stable_supersedes_snapshot", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_snapshot_channel_converged_on_stable", func(t *testing.T) {
+		// A snapshot-channel env that already adopted the superseding stable
+		// must stay up to date — the channel target remains the stable, so the
+		// member never flaps back to the older snapshot tag (issue #524).
+		setup := env.New(t)
+		seedUpgradeTenant(t, setup, "team", "agent")
+		seedUpgradeEnv(t, setup, "team", "agent",
+			"repopath: "+setup.Cwd+"\nkubernetescontext: test-context\nruntimeversion: 2.0.0\ntype: remote-agent\nautoupgrade: true\n")
+		envVars := append(setup.Env(), "ERUN_UPGRADE_VERSIONS_OVERRIDE=stable=2.0.0,snapshot=2.0.0-snapshot-20260101000000")
+		result := erun.Run(t, []string{"upgrade", "team", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		// Normalization masks stable-vs-snapshot in the golden; the
+		// un-normalized line proves the up-to-date comparison ran against the
+		// stable target, not the older snapshot.
+		if !strings.Contains(result.Combined, "[snapshot] 2.0.0 -> 2.0.0  (up to date)") {
+			t.Fatalf("expected the converged member to stay up to date at the stable 2.0.0, got: %s", result.Combined)
+		}
+		golden.Equal(t, "upgrade/dry_run_snapshot_channel_converged_on_stable", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_target_unresolved_reports_reason", func(t *testing.T) {

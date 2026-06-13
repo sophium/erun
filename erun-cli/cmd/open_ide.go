@@ -452,13 +452,15 @@ func resolveInstalledIntelliJAttempt(hostOS common.HostOS) (jetbrainsBootstrapAt
 func resolveInstalledIntelliJContentsDir(hostOS common.HostOS) (string, error) {
 	switch hostOS {
 	case common.HostOSDarwin:
+		// Per-user installs take precedence over the machine-global
+		// /Applications, matching the macOS convention that ~/Applications
+		// overrides system-wide apps for that user.
 		homeDir, _ := ideUserHomeDir()
-		patterns := []string{
-			"/Applications/IntelliJ IDEA*.app/Contents",
-		}
+		patterns := make([]string, 0, 2)
 		if strings.TrimSpace(homeDir) != "" {
 			patterns = append(patterns, filepath.Join(homeDir, "Applications", "IntelliJ IDEA*.app", "Contents"))
 		}
+		patterns = append(patterns, "/Applications/IntelliJ IDEA*.app/Contents")
 		for _, pattern := range patterns {
 			matches, err := ideGlob(pattern)
 			if err != nil {
