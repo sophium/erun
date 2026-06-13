@@ -34,6 +34,13 @@ test.describe('manage dialog container registries', () => {
       app.manageDialog.locator().getByText('Only one registry can be marked build.'),
     ).toBeHidden();
 
+    // A deploy-only registry is valid — the image it serves may be published
+    // there externally, so no build/to role is forced on it (#527 follow-up).
+    await app.manageDialog.registryRoleCheckbox(0, 'build').click();
+    await expect(app.manageDialog.registryRoleCheckbox(0, 'deploy')).toBeChecked();
+    await expect(app.manageDialog.registryRoleCheckbox(0, 'build')).not.toBeChecked();
+    await expect(app.manageDialog.locator().getByRole('alert')).toHaveCount(0);
+
     await app.manageDialog.cancel();
     await app.manageDialog.waitForClosed();
   });

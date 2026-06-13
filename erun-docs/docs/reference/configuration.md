@@ -206,9 +206,10 @@ A project declares a **list** of registries, each marked with the roles it plays
 **Role rules** (validated when the list is resolved for build or deploy):
 
 - At most one `build`, at most one `from`; at least one `deploy`.
-- A `deploy` registry must also carry `build` or `to`, so the image exists where the cluster pulls.
 - `from` and `to` are set together and must name different registries.
 - More than one `deploy` → the first wins.
+
+A `deploy` registry need not also carry `build` or `to`: the image it serves may be published there externally (e.g. a runtime env that pulls a released image), which erun does not police at config time.
 
 **Behaviour:**
 

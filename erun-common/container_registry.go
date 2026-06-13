@@ -108,8 +108,9 @@ func (r ContainerRegistries) ToRegistries() []string {
 
 // Validate enforces the marker invariants: at most one BUILD, at most one
 // FROM, at least one DEPLOY; FROM and TO are set together and never name the
-// same registry; every DEPLOY registry also carries BUILD or TO so the image
-// actually exists where the cluster pulls.
+// same registry. A DEPLOY registry need not carry BUILD or TO — the image it
+// serves may be published there externally (e.g. a runtime env pulling a
+// released image), which erun cannot police at config time.
 func (r ContainerRegistries) Validate() error {
 	if r.IsZero() {
 		return errors.New("registry list is empty")
@@ -134,9 +135,6 @@ func (r ContainerRegistries) Validate() error {
 		}
 		if entry.hasRole(RegistryRoleDeploy) {
 			deploy++
-			if !entry.hasRole(RegistryRoleBuild) && !entry.hasRole(RegistryRoleTo) {
-				return fmt.Errorf("deploy registry %q must also be marked build or to", registry)
-			}
 		}
 	}
 	if build > 1 {

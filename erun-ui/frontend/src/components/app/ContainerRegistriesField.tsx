@@ -196,11 +196,5 @@ function registriesValidationHint(entries: UIContainerRegistryEntry[]): string {
   if (fromRegistry && toRows.some((entry) => entry.registry.trim() === fromRegistry)) {
     return 'A registry cannot be both from and to.';
   }
-  const orphanDeploy = withRole('deploy').find(
-    (entry) => !entry.roles.includes('build') && !entry.roles.includes('to'),
-  );
-  if (orphanDeploy) {
-    return `Deploy registry ${orphanDeploy.registry.trim()} must also be marked build or to.`;
-  }
   return '';
 }

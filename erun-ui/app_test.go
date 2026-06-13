@@ -2088,6 +2088,36 @@ func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
 	}
 }
 
+// TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry pins that a registry
+// marked deploy-only is valid: the image it serves may be published there
+// externally (a runtime env pulling a released image), so erun must not force
+// a build or to role on it (issue #527 follow-up).
+func TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs", ProjectRoot: projectRoot}},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/prod": {Name: "prod", RepoPath: projectRoot, Type: eruncommon.EnvironmentTypeRuntime},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "prod"}, uiEnvironmentConfig{
+		Name: "prod",
+		Type: eruncommon.EnvironmentTypeRuntime,
+		ContainerRegistries: []uiContainerRegistryEntry{
+			{Registry: "ghcr.io/sophium", Roles: []string{"deploy"}},
+		},
+		Idle: uiIdleConfig{Timeout: eruncommon.DefaultEnvironmentIdleTimeout.String(), WorkingHours: eruncommon.DefaultEnvironmentWorkingHours},
+	})
+	if err != nil {
+		t.Fatalf("deploy-only registry must be accepted, got %v", err)
+	}
+	if uiRegistryWithRole(saved.ContainerRegistries, "deploy") != "ghcr.io/sophium" {
+		t.Fatalf("expected the deploy-only registry to persist, got %+v", saved.ContainerRegistries)
+	}
+}
+
 func TestLoadEnvironmentConfigExposesClaudeDefaultsAndOverrides(t *testing.T) {
 	projectRoot := t.TempDir()
 	useBedrock := false
