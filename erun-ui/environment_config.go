@@ -230,7 +230,7 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 		name = strings.TrimSpace(fallbackName)
 	}
 	syncStatus := a.workspaceSyncStatus(uiSelection{Tenant: tenant, Environment: name})
-	containerRegistry := strings.TrimSpace(config.ContainerRegistry)
+	containerRegistry := primaryContainerRegistry(config.ContainerRegistries)
 	if containerRegistry == "" {
 		containerRegistry = strings.TrimSpace(effectiveContainerRegistry)
 	}
@@ -296,8 +296,44 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 	return result, nil
 }
 
+// primaryContainerRegistry picks the single registry the desktop's env-settings
+// field shows: the build registry, then the deploy registry, then the first
+// entry. The desktop edits only this single value; the full marked list is
+// authored in .erun/config.yaml.
+func primaryContainerRegistry(list eruncommon.ContainerRegistries) string {
+	if registry, ok := list.BuildRegistry(); ok {
+		return registry
+	}
+	if registry, ok := list.DeployRegistry(); ok {
+		return registry
+	}
+	if len(list) > 0 {
+		return strings.TrimSpace(list[0].Registry)
+	}
+	return ""
+}
+
+// applyEditedContainerRegistry folds the single registry edited in the desktop
+// env-settings field back into the marked list. A multi-entry list (authored in
+// .erun/config.yaml with from/to/deploy roles) is preserved untouched so the
+// single-field edit never clobbers it; the single-registry case becomes a
+// build+deploy entry.
+func applyEditedContainerRegistry(existing eruncommon.ContainerRegistries, edited string) eruncommon.ContainerRegistries {
+	edited = strings.TrimSpace(edited)
+	if len(existing) > 1 {
+		return existing
+	}
+	if edited == "" {
+		return nil
+	}
+	if current, ok := existing.BuildRegistry(); ok && current == edited {
+		return existing
+	}
+	return eruncommon.SingleContainerRegistries(edited)
+}
+
 func (a *App) effectiveEnvironmentContainerRegistry(tenant, environment string, config eruncommon.EnvConfig) string {
-	if registry := strings.TrimSpace(config.ContainerRegistry); registry != "" {
+	if registry := primaryContainerRegistry(config.ContainerRegistries); registry != "" {
 		return registry
 	}
 	if a.deps.store == nil {
@@ -322,7 +358,8 @@ func (a *App) effectiveEnvironmentContainerRegistry(tenant, environment string, 
 	if err != nil {
 		return ""
 	}
-	return projectConfig.ContainerRegistryForEnvironment(environmentName(environment, config))
+	registry, _ := projectConfig.ContainerRegistriesForEnvironment(environmentName(environment, config)).BuildRegistry()
+	return registry
 }
 
 func environmentName(fallbackName string, config eruncommon.EnvConfig) string {
@@ -384,7 +421,7 @@ func canConnectLocalTCP(port int) bool {
 func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.EnvConfig) eruncommon.EnvConfig {
 	existing.Name = strings.TrimSpace(config.Name)
 	existing.CloudProviderAlias = strings.TrimSpace(config.CloudProviderAlias)
-	existing.ContainerRegistry = strings.TrimSpace(config.ContainerRegistry)
+	existing.ContainerRegistries = applyEditedContainerRegistry(existing.ContainerRegistries, config.ContainerRegistry)
 	existing.RuntimePod = runtimePodConfigFromUI(config.RuntimePod)
 	existing.SSHD.WorkspaceSync.Enabled = config.SSHD.WorkspaceSyncEnabled
 	existing.SSHD.WorkspaceSync.LocalPath = strings.TrimSpace(config.SSHD.WorkspaceSyncLocalPath)

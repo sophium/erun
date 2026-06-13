@@ -39,7 +39,7 @@ Tenants:
           api-url: http://<LOOPBACK>:17033
           ssh-port: 17022
           contribute-app-port: 17050
-          container-registry: none
+          container-registries: none
           runtime-version: none
           runtime-pod: none
           managed-cloud: off

@@ -784,7 +784,7 @@ func TestInit(t *testing.T) {
 		}
 		body := string(raw)
 		for _, want := range []string{
-			"containerregistry: registry.example/base",
+			"registry: registry.example/base",
 			"registry.example/custom",
 			"- app",
 			"api",
@@ -863,7 +863,7 @@ func TestInit(t *testing.T) {
 		if strings.Contains(body, "registry.example/custom") {
 			t.Errorf("expected the per-environment registry override to be removed, got:\n%s", body)
 		}
-		if !strings.Contains(body, "containerregistry: registry.example/base") {
+		if !strings.Contains(body, "registry: registry.example/base") {
 			t.Errorf("expected the base registry to survive, got:\n%s", body)
 		}
 		// EnsureClaudeSettings' already-configured early return: the seeded

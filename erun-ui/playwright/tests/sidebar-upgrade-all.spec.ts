@@ -267,4 +267,98 @@ test.describe('sidebar Upgrade all', () => {
     await expect(page.getByText('Open an environment first')).toHaveCount(0);
     await expect(dialog).toBeHidden();
   });
+
+  // Issue #527 — when an env's listed registries offer more than one newer
+  // version, Upgrade all must not silently auto-pick: the row carries every
+  // distinct candidate (each labelled with its source registry) and the
+  // operator picks one before it can be redeployed. The CLI/MCP skip such an
+  // env as ambiguous; the desktop is where the pick happens. The candidate set
+  // comes from a registry fan-out that the headless harness can't stage (it
+  // needs two registries publishing different versions), so we stub
+  // ResolveUpgradePlan over /__erun_invoke — the same technique the rows above
+  // use; the resolver decision is owned by the Go tests
+  // (TestResolveUpgradePlanOffersCandidatesWhenRegistriesDisagree) and the
+  // confirmed --version composition by buildUpgradeArgs.
+  test('an ambiguous env offers a per-registry pick that drives the chosen version', async ({
+    app,
+    page,
+  }) => {
+    const newer = '1.0.90-snapshot-20260606090000';
+    const older = '1.0.86-snapshot-20260606082157';
+    const plan = {
+      items: [
+        {
+          tenant: 'acme',
+          environment: 'pick-env',
+          channel: 'snapshot',
+          current: '1.0.80-snapshot-20260101000000',
+          target: '',
+          lagging: false,
+          candidates: [
+            { version: newer, registry: 'ghcr.io/acme' },
+            { version: older, registry: 'registry.internal/acme' },
+          ],
+          unresolvedReason: 'multiple newer versions across registries; pick one or pass --version',
+        },
+      ],
+    };
+    const upgradeRuns: Array<{ tenant?: string; environment?: string; version?: string }> = [];
+    let nextSessionId = 200;
+
+    await page.route('**/__erun_invoke', async (route, request) => {
+      const body = JSON.parse(request.postData() ?? '{}') as {
+        method: string;
+        args: Array<{ tenant?: string; environment?: string; version?: string }>;
+      };
+      if (body.method === 'ResolveUpgradePlan') {
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({ data: plan }),
+        });
+      }
+      if (body.method.startsWith('Start')) {
+        const selection = body.args[0] ?? {};
+        if (body.method === 'StartUpgradeEnvironmentSession') {
+          upgradeRuns.push(selection);
+        }
+        nextSessionId++;
+        return route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify({
+            data: { sessionId: nextSessionId, selection, slot: 0, kind: 'local' },
+          }),
+        });
+      }
+      await route.continue();
+    });
+
+    await app.sidebar.openUpgradeAll();
+    const dialog = app.sidebar.upgradeAllDialog();
+    await expect(dialog).toBeVisible({ timeout: 6_000 });
+
+    // Until a version is picked the env asks for one and is not in the count;
+    // Upgrade stays disabled (nothing to redeploy yet).
+    const pickRow = dialog.locator('tr', { hasText: 'pick-env' });
+    await expect(pickRow).toContainText('pick a version');
+    await expect(dialog).toContainText('0 of 1 will be redeployed.');
+    await expect(dialog.getByRole('button', { name: 'Upgrade', exact: true })).toBeDisabled();
+
+    // Pick the public registry's newer version from the per-row selector.
+    await pickRow.getByLabel('Pick a version for pick-env').click();
+    await page.getByRole('option', { name: new RegExp(newer) }).click();
+
+    // The env now joins the upgrade set and the button enables + names the count.
+    await expect(pickRow).toContainText('will upgrade');
+    await expect(dialog).toContainText('1 of 1 will be redeployed.');
+    const upgradeButton = dialog.getByRole('button', { name: 'Upgrade 1' });
+    await expect(upgradeButton).toBeEnabled();
+    await upgradeButton.click();
+
+    // The confirmed run carries the picked version so `erun upgrade` deploys
+    // exactly what the operator chose (issue #527).
+    await expect.poll(() => upgradeRuns.length, { timeout: 6_000 }).toBe(1);
+    expect(upgradeRuns[0]?.environment).toBe('pick-env');
+    expect(upgradeRuns[0]?.version).toBe(newer);
+    await expect(dialog).toBeHidden();
+  });
 });

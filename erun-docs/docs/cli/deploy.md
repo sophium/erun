@@ -26,7 +26,7 @@ When the project repo carries its own runtime chart (`<tenant>-devops/k8s/<tenan
 helm upgrade --install <tenant>-devops oci://<registry>/charts/erun-devops --version <runtime version> …
 ```
 
-The chart is published at release time alongside the runtime image with the same version — chart and image are one contract (see [Release flow](/deployment/release-flow)). The registry resolves from the env's recorded runtime registry, then the env's container registry, then the project registry, falling back to `ghcr.io/sophium`. The dry-run trace names the decision: `deploy: no local runtime chart; using published chart <ref> version <v>`. To customise a published-chart deploy, use the env's values overlay and the `runtimeimage` field — see [Configuration · Advanced chart values](/reference/configuration#advanced-chart-values).
+The chart is published at release time alongside the runtime image with the same version — chart and image are one contract (see [Release flow](/deployment/release-flow)). The cluster pulls from the `deploy`-marked registry in the env's [registry list](/deployment/registries) (the env's recorded runtime registry wins as provenance); when the list marks a `from` and a `to`, ERun copies the image there first. The dry-run trace names the decision: `deploy: no local runtime chart; using published chart <ref> version <v>`. To customise a published-chart deploy, use the env's values overlay and the `runtimeimage` field — see [Configuration · Advanced chart values](/reference/configuration#advanced-chart-values).
 
 ## Flags
 

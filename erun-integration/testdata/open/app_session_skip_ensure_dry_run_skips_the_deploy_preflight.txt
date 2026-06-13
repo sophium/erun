@@ -32,7 +32,6 @@ bootstrap-script:
   name: dev
   repopath: <HOME>/git/team
   kubernetescontext: test-context
-  containerregistry: ""
   remote: true
 
   EOF

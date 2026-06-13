@@ -104,13 +104,13 @@ func publishedDevopsValuesOverlayPath(ctx Context, target OpenResult) string {
 
 // publishedDevopsChartRegistry picks the registry the published chart (and
 // default image) is pulled from: the env's recorded RuntimeRegistry
-// provenance, then the env's configured container registry, then the public
-// default.
+// provenance, then the DEPLOY-marked registry of the project's registry list,
+// then the public default.
 func publishedDevopsChartRegistry(target OpenResult) string {
 	if registry := strings.TrimSpace(target.EnvConfig.RuntimeRegistry); registry != "" {
 		return registry
 	}
-	if registry := strings.TrimSpace(target.EnvConfig.ContainerRegistry); registry != "" {
+	if registry, ok := target.EnvConfig.ContainerRegistries.DeployRegistry(); ok {
 		return registry
 	}
 	if registry := resolveProjectContainerRegistry(target.RepoPath, target.Environment); registry != "" {

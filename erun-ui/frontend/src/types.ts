@@ -46,6 +46,14 @@ export interface UIEnvTrace {
   notice?: string;
 }
 
+// UIUpgradeVersionCandidate mirrors the Go UpgradeVersionCandidate: one newer
+// version an env's registries offered, tagged with the registry it came from
+// (issue #527).
+export interface UIUpgradeVersionCandidate {
+  version: string;
+  registry?: string;
+}
+
 // UIUpgradePlanItem mirrors the Go UpgradePlanItem from the ResolveUpgradePlan
 // binding: one opted-in env's channel, current version, the latest version for
 // that channel, and whether it lags (will be redeployed by Upgrade all).
@@ -56,8 +64,13 @@ export interface UIUpgradePlanItem {
   current: string;
   target: string;
   lagging: boolean;
-  // Why target is empty (registry lookup failed, no published version for
-  // the channel) — rendered under "latest unknown" (issue #497).
+  // The distinct newer versions discovered across the env's listed registries,
+  // each with its source registry. One entry when a single target resolved;
+  // more than one when the operator must pick (issue #527).
+  candidates?: UIUpgradeVersionCandidate[];
+  // Why target is empty (registry lookup failed, no published version for the
+  // channel, or multiple newer candidates await a pick) — rendered under
+  // "latest unknown" / the picker (issues #497, #527).
   unresolvedReason?: string;
 }
 

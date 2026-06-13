@@ -19,7 +19,7 @@ type InitInput struct {
 	RuntimeCPU               string `json:"runtimeCpu,omitempty" jsonschema:"optional runtime pod CPU limit"`
 	RuntimeMemory            string `json:"runtimeMemory,omitempty" jsonschema:"optional runtime pod memory limit"`
 	KubernetesContext        string `json:"kubernetesContext,omitempty" jsonschema:"optional kubernetes context to associate with the environment"`
-	ContainerRegistry        string `json:"containerRegistry,omitempty" jsonschema:"optional container registry to associate with the environment"`
+	ContainerRegistry        string `json:"containerRegistry,omitempty" jsonschema:"optional container registry; seeds the project's registry list with this host marked build and deploy"`
 	Type                     string `json:"type,omitempty" jsonschema:"optional environment type (local-agent, remote-agent, runtime); takes precedence over remote"`
 	Remote                   bool   `json:"remote,omitempty" jsonschema:"deprecated alias for type=remote-agent; prefer type instead"`
 	NoGit                    bool   `json:"noGit,omitempty" jsonschema:"when true with remote initialization, create the remote worktree directory without configuring a Git checkout"`

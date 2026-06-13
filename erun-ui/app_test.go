@@ -152,7 +152,7 @@ func TestLoadVersionSuggestionsFiltersOutMissingTenantImageTags(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected suggestions: got %+v want %+v", suggestions, want)
 	}
-	if suggestions[0].Label != "frs latest stable" || suggestions[0].Image != "frs-devops" || suggestions[3].Label != "ERun current" || suggestions[3].Image != eruncommon.DefaultRuntimeImageName {
+	if suggestions[0].Label != "frs latest stable" || suggestions[0].Image != eruncommon.DefaultContainerRegistry+"/frs-devops" || suggestions[3].Label != "ERun current" || suggestions[3].Image != eruncommon.DefaultContainerRegistry+"/"+eruncommon.DefaultRuntimeImageName {
 		t.Fatalf("unexpected suggestion metadata: %+v", suggestions)
 	}
 }
@@ -200,6 +200,44 @@ func TestLoadVersionSuggestionsUsesEnvPersistedRuntimeRegistry(t *testing.T) {
 	}
 	if tenantImageNamespace != customRegistry {
 		t.Fatalf("tenant runtime image queried namespace %q, want %q", tenantImageNamespace, customRegistry)
+	}
+}
+
+func TestLoadVersionSuggestionsQueriesEachListedRegistry(t *testing.T) {
+	// #527: the version picker must query every registry in the env's marked
+	// list, so an offered version can come from any listed registry and carries
+	// its source. Here the env lists build+from on a public registry and
+	// to+deploy on a mirror; both are queried for the tenant image.
+	queried := map[string]bool{}
+	app := NewApp(erunUIDeps{
+		store: stubUIStore{
+			envs: map[string]eruncommon.EnvConfig{
+				"team/prod": {
+					Name: "prod",
+					ContainerRegistries: eruncommon.ContainerRegistries{
+						{Registry: "ghcr.io/acme", Roles: []eruncommon.RegistryRole{eruncommon.RegistryRoleBuild, eruncommon.RegistryRoleFrom}},
+						{Registry: "registry.internal/acme", Roles: []eruncommon.RegistryRole{eruncommon.RegistryRoleTo, eruncommon.RegistryRoleDeploy}},
+					},
+				},
+			},
+		},
+		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+			if repository == "team-devops" {
+				queried[namespace] = true
+				return eruncommon.RuntimeRegistryVersions{Image: namespace + "/" + repository, Tags: []string{"1.0.11"}, LatestStable: "1.0.11"}, nil
+			}
+			return eruncommon.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
+		},
+	})
+
+	if _, err := app.LoadVersionSuggestions(uiSelection{Tenant: "team", Environment: "prod"}); err != nil {
+		t.Fatalf("LoadVersionSuggestions failed: %v", err)
+	}
+	for _, want := range []string{"ghcr.io/acme", "registry.internal/acme"} {
+		if !queried[want] {
+			t.Fatalf("expected the tenant image to be queried at %q; queried=%v", want, queried)
+		}
 	}
 }
 
@@ -338,7 +376,7 @@ func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected suggestions: got %+v want %+v", suggestions, want)
 	}
-	if suggestions[0].Image != "test-devops" || suggestions[1].Image != eruncommon.DefaultRuntimeImageName {
+	if suggestions[0].Image != eruncommon.DefaultContainerRegistry+"/test-devops" || suggestions[1].Image != eruncommon.DefaultContainerRegistry+"/"+eruncommon.DefaultRuntimeImageName {
 		t.Fatalf("unexpected suggestion metadata: %+v", suggestions)
 	}
 }
@@ -1746,7 +1784,7 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	store := stubUIStore{
 		config: rootConfig,
 		projectConfigs: map[string]eruncommon.ProjectConfig{
-			projectRoot: {ContainerRegistry: "registry.example/project"},
+			projectRoot: {ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/project")},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
 			"frs": {
@@ -1756,12 +1794,12 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/prod": {
-				Name:               "prod",
-				RepoPath:           projectRoot,
-				KubernetesContext:  "cluster-old",
-				ContainerRegistry:  "registry.example/old",
-				CloudProviderAlias: "team-cloud",
-				RuntimeVersion:     "1.0.0",
+				Name:                "prod",
+				RepoPath:            projectRoot,
+				KubernetesContext:   "cluster-old",
+				ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/old"),
+				CloudProviderAlias:  "team-cloud",
+				RuntimeVersion:      "1.0.0",
 				RuntimePod: eruncommon.RuntimePodResources{
 					CPU:    "4",
 					Memory: "8916Mi",
@@ -1852,7 +1890,8 @@ func assertLocalPorts(t *testing.T, ports uiEnvironmentLocalPorts) {
 func assertStoredEnvironmentConfig(t *testing.T, stored eruncommon.EnvConfig, projectRoot string) {
 	t.Helper()
 
-	if stored.RepoPath != projectRoot || stored.Remote || stored.RuntimeVersion != "1.0.0" || stored.ContainerRegistry != "registry.example/team" || stored.CloudProviderAlias != "other-cloud" || stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" || stored.Snapshot == nil || *stored.Snapshot {
+	storedRegistry, _ := stored.ContainerRegistries.BuildRegistry()
+	if stored.RepoPath != projectRoot || stored.Remote || stored.RuntimeVersion != "1.0.0" || storedRegistry != "registry.example/team" || stored.CloudProviderAlias != "other-cloud" || stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" || stored.Snapshot == nil || *stored.Snapshot {
 		t.Fatalf("unexpected stored config: %+v", stored)
 	}
 	if stored.RuntimePod.CPU != "6" || stored.RuntimePod.Memory != "12Gi" {
@@ -1865,9 +1904,9 @@ func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *
 	store := stubUIStore{
 		projectConfigs: map[string]eruncommon.ProjectConfig{
 			projectRoot: {
-				ContainerRegistry: "registry.example/shared",
+				ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/shared"),
 				Environments: map[string]eruncommon.ProjectEnvironmentConfig{
-					"prod": {ContainerRegistry: "registry.example/prod"},
+					"prod": {ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/prod")},
 				},
 			},
 		},
@@ -1913,7 +1952,7 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		projectConfigs: map[string]eruncommon.ProjectConfig{
-			projectRoot: {ContainerRegistry: "registry.example/shared"},
+			projectRoot: {ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/shared")},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
 			"frs": {
@@ -1956,7 +1995,7 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 		t.Fatalf("expected saved UI config to keep effective project registry, got %+v", saved)
 	}
 	stored := store.envs["frs/local"]
-	if stored.ContainerRegistry != "" {
+	if len(stored.ContainerRegistries) != 0 {
 		t.Fatalf("expected env save not to copy project registry into env config, got %+v", stored)
 	}
 }
@@ -2140,10 +2179,10 @@ func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/prod": {
-				Name:              "prod",
-				RepoPath:          projectRoot,
-				KubernetesContext: "cluster-prod",
-				ContainerRegistry: "registry.example/keep",
+				Name:                "prod",
+				RepoPath:            projectRoot,
+				KubernetesContext:   "cluster-prod",
+				ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/keep"),
 			},
 		},
 	}
@@ -2159,7 +2198,7 @@ func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
 	if got := store.envs["frs/prod"].AutoStart; got == nil || *got != false {
 		t.Fatalf("expected stored AutoStart=false, got %+v", got)
 	}
-	if store.envs["frs/prod"].ContainerRegistry != "registry.example/keep" {
+	if keptRegistry, _ := store.envs["frs/prod"].ContainerRegistries.BuildRegistry(); keptRegistry != "registry.example/keep" {
 		t.Fatalf("SetEnvironmentAutoStart must not rewrite unrelated fields, got %+v", store.envs["frs/prod"])
 	}
 

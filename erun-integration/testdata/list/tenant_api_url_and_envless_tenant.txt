@@ -39,7 +39,7 @@ Tenants:
           api-url: https://api.example/erun
           ssh-port: 17022
           contribute-app-port: 17050
-          container-registry: registry.example/test
+          container-registries: registry.example/test[build,deploy]
           runtime-version: <VERSION>
           runtime-pod: none
           managed-cloud: off

@@ -50,6 +50,30 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_copies_images_from_to_before_deploy", func(t *testing.T) {
+		// When the project registry list marks a FROM source and a TO
+		// destination, deploy mirrors every image the cluster pulls (the
+		// erun-devops runtime image plus any locally-built component) from FROM
+		// to each TO with a manifest-aware `docker buildx imagetools create`
+		// before the helm upgrade, and the cluster pulls from the DEPLOY (TO)
+		// registry. The copy is a dry-run trace line gated behind real-run.
+		setup := env.New(t)
+		fixture.SeedTenantEnvNoRegistry(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"containerregistries:\n"+
+				"    - registry: ghcr.io/sophium\n"+
+				"      roles: [build, from]\n"+
+				"    - registry: registry.internal/team\n"+
+				"      roles: [to, deploy]\n",
+		)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_copies_images_from_to_before_deploy", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_from_devops_module_root", func(t *testing.T) {
 		// Exercises resolveCurrentDevopsK8sDir's first arm: when cwd is the
 		// <tenant>-devops module root (not its k8s/ subdir and not a chart
@@ -267,6 +291,42 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/real_run_remote_env_published_chart_via_stubs", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_copies_images_from_to_via_stubs", func(t *testing.T) {
+		// Real-run deploy of an env whose registry list marks a FROM source and
+		// a TO destination: before helm upgrade, the runtime image is mirrored
+		// from FROM to TO with `docker buildx imagetools create` (executed
+		// through the docker stub), and the cluster pulls from the DEPLOY (TO)
+		// registry. This proves the copy ACTION runs in real-run, not just its
+		// dry-run trace.
+		setup := env.New(t)
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "team")
+		envDir := filepath.Join(tenantDir, "dev")
+		for _, dir := range []string{root, tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		mustWriteFile(t, filepath.Join(root, "config.yaml"), "defaulttenant: team\n")
+		mustWriteFile(t, filepath.Join(tenantDir, "config.yaml"),
+			"projectroot: /nonexistent-remote/team\nname: team\ndefaultenvironment: dev\n")
+		mustWriteFile(t, filepath.Join(envDir, "config.yaml"),
+			"name: dev\nrepopath: /nonexistent-remote/team\nkubernetescontext: test-context\nremote: true\nruntimeversion: 1.0.0\n"+
+				"containerregistries:\n"+
+				"    - registry: ghcr.io/sophium\n      roles: [build, from]\n"+
+				"    - registry: registry.internal/team\n      roles: [to, deploy]\n")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_copies_images_from_to_via_stubs", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_preflight_starts_stopped_cloud_context", func(t *testing.T) {

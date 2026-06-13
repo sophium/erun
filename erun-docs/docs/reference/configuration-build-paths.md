@@ -76,7 +76,7 @@ For an **agent env**, the version is then transformed into a snapshot: `1.0.76` 
 <registry>/<image-name>:<version>
 ```
 
-- `<registry>` — resolved per the [container-registry resolution order](/reference/configuration#container-registry-for-the-image-tag).
+- `<registry>` — the `build`-marked registry from the [container registries](/reference/configuration#container-registries) list.
 - `<image-name>` — `filepath.Base(buildDir)` — the directory name where the Dockerfile lives.
 - `<version>` — the resolved version, snapshot-stamped for agent envs.
 

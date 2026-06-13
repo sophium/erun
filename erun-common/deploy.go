@@ -479,6 +479,9 @@ func RunDeploySpec(ctx Context, execution DeploySpec, build DockerImageBuilderFu
 			return err
 		}
 	}
+	if err := runDeployRegistryCopies(ctx, execution); err != nil {
+		return err
+	}
 	if execution.PublishChart {
 		if err := RunHelmChartPublish(ctx, execution.Publish); err != nil {
 			return err
@@ -1205,6 +1208,10 @@ func newHelmDeploySpecWithValues(target OpenResult, deployContext KubernetesDepl
 	}, nil
 }
 
+// resolveProjectContainerRegistry resolves the registry the cluster pulls from
+// — the DEPLOY-marked entry of the environment's configured registry list.
+// Returns "" when the project is uninitialized or marks no list, so callers'
+// own fallbacks (deploy provenance, default) still apply.
 func resolveProjectContainerRegistry(projectRoot, environment string) string {
 	projectRoot = strings.TrimSpace(projectRoot)
 	if projectRoot == "" {
@@ -1214,10 +1221,12 @@ func resolveProjectContainerRegistry(projectRoot, environment string) string {
 	if err != nil {
 		return ""
 	}
-	if registry := projectConfig.ContainerRegistryForEnvironment(environment); registry != "" {
-		return registry
+	list := projectConfig.ContainerRegistriesForEnvironment(environment)
+	if list.IsZero() {
+		return ""
 	}
-	return singleProjectContainerRegistry(projectConfig)
+	registry, _ := list.DeployRegistry()
+	return registry
 }
 
 func applyCloudContextStopMetadata(store CloudReadStore, env EnvConfig, deployInput *HelmDeploySpec) {

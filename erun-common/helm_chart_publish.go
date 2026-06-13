@@ -153,7 +153,7 @@ func resolveHelmChartPublishSpec(chartPath, version, containerRegistry string) (
 	}
 	registry := strings.TrimSpace(containerRegistry)
 	if registry == "" {
-		return HelmChartPublishSpec{}, fmt.Errorf("publish %s: container registry is required (configure containerregistry in .erun/config.yaml)", chartName)
+		return HelmChartPublishSpec{}, fmt.Errorf("publish %s: container registry is required (mark a registry with the deploy role in .erun/config.yaml)", chartName)
 	}
 	resolvedVersion := strings.TrimSpace(version)
 	if resolvedVersion == "" {

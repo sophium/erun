@@ -43,11 +43,13 @@ export const openUpgradeAll = (): AppThunk<Promise<void>> => async (dispatch) =>
 export const confirmUpgradeAll =
   (): AppThunk<Promise<void>> => async (dispatch, getState, extra) => {
     const state = getState();
-    const lagging = state.upgradeAll.items.filter((item) => item.lagging);
+    const members = upgradeMembers(state.upgradeAll.items, state.upgradeAll.choices);
     dispatch(closeUpgradeAllDialog());
-    if (lagging.length === 0) {
+    if (members.length === 0) {
       dispatch(
-        showTerminalMessage('Nothing to upgrade — no opted-in environment lags its channel.'),
+        showTerminalMessage(
+          'Nothing to upgrade — no opted-in environment lags its channel or has a version picked.',
+        ),
       );
       return;
     }
@@ -56,10 +58,11 @@ export const confirmUpgradeAll =
     const { cols, rows } = controller.terminalSize();
 
     const outcomes = await Promise.allSettled(
-      lagging.map(async (member) => {
+      members.map(async (member) => {
         const selection: UISelection = {
           tenant: member.tenant,
           environment: member.environment,
+          version: member.version,
         };
         const result = (await StartUpgradeEnvironmentSession(
           selection,
@@ -77,7 +80,7 @@ export const confirmUpgradeAll =
 
     const failed: string[] = [];
     outcomes.forEach((outcome, index) => {
-      const member = lagging[index];
+      const member = members[index];
       if (outcome.status === 'rejected' && member) {
         failed.push(`${member.tenant}/${member.environment}`);
       }
@@ -91,15 +94,50 @@ export const confirmUpgradeAll =
       );
       return;
     }
-    const only = lagging.length === 1 ? lagging[0] : undefined;
+    const only = members.length === 1 ? members[0] : undefined;
     dispatch(
       showNotification(
         'info',
         only
           ? `Upgrading ${only.tenant} / ${only.environment} — follow progress in its Local tab and Activities.`
-          : `Upgrading ${String(lagging.length)} environments in parallel — follow progress in their Local tabs and Activities.`,
+          : `Upgrading ${String(members.length)} environments in parallel — follow progress in their Local tabs and Activities.`,
       ),
     );
   };
+
+// UpgradeMember is one environment the confirmed Upgrade-all run will redeploy:
+// a lagging env (no version — the CLI resolves its single channel target) or an
+// ambiguous env the operator picked a version for (issue #527).
+interface UpgradeMember {
+  tenant: string;
+  environment: string;
+  version?: string;
+}
+
+// upgradeMembers is the set Upgrade redeploys: every lagging env, plus every
+// env with more than one newer candidate the operator has picked a version
+// for. Mirrors the dialog's enable/count logic so what runs matches what the
+// button promised.
+function upgradeMembers(
+  items: UIUpgradePlanItem[],
+  choices: Record<string, string>,
+): UpgradeMember[] {
+  const members: UpgradeMember[] = [];
+  for (const item of items) {
+    if (item.lagging) {
+      members.push({ tenant: item.tenant, environment: item.environment });
+      continue;
+    }
+    if ((item.candidates?.length ?? 0) > 1) {
+      const version = (
+        choices[selectionKey({ tenant: item.tenant, environment: item.environment })] ?? ''
+      ).trim();
+      if (version !== '') {
+        members.push({ tenant: item.tenant, environment: item.environment, version });
+      }
+    }
+  }
+  return members;
+}
 
 export { closeUpgradeAllDialog };

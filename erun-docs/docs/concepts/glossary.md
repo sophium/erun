@@ -51,7 +51,7 @@ Three interfaces, one engine. See the anatomy diagram on the [introduction](/int
 
 **Cloud context** — a managed Kubernetes cluster ERun starts on demand and stops when idle. See [Cloud contexts](/concepts/cloud-contexts).
 
-**Container registry** — durable store for built images. Default `ghcr.io/sophium`; override per project or env.
+**Container registry** — durable store for built images. A project keeps a marked **list** of registries (each with `build`/`from`/`to`/`deploy` roles); the default is a single `ghcr.io/sophium` entry marked build + deploy. See [Container registries](/deployment/registries).
 
 ## Operations
 

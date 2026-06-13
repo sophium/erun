@@ -108,11 +108,15 @@ type EnvConfig struct {
 	LocalRepoPath      string          `yaml:"localrepopath,omitempty" json:"localRepoPath,omitempty"`
 	RepoPath           string          `yaml:"repopath,omitempty"`
 	KubernetesContext  string
-	ContainerRegistry  string
 	CloudProviderAlias string `yaml:"cloudprovideralias,omitempty"`
 	ManagedCloud       bool   `yaml:"managedcloud,omitempty" json:"managedCloud,omitempty"`
 	RuntimeVersion     string `yaml:"runtimeversion,omitempty"`
 	RuntimeRegistry    string `yaml:"runtimeregistry,omitempty" json:"runtimeRegistry,omitempty"`
+	// ContainerRegistries carries the marked registry list for environments
+	// whose project config is not on the local machine (remote-agent and
+	// runtime envs). Local-agent envs resolve their list from the project's
+	// .erun/config.yaml instead; this field stays empty for them.
+	ContainerRegistries ContainerRegistries `yaml:"containerregistries,omitempty" json:"containerRegistries,omitempty"`
 	// RuntimeImage points the env's runtime pod at a custom image instead
 	// of the published <registry>/erun-devops:<version> default. A full
 	// reference ("ghcr.io/acme/my-devops:1.2.3") is used verbatim; a bare
@@ -272,9 +276,9 @@ func (c EnvConfig) EffectiveLocalRepoPath() string {
 }
 
 type ProjectEnvironmentConfig struct {
-	ContainerRegistry string              `yaml:"containerregistry,omitempty"`
-	Docker            ProjectDockerConfig `yaml:"docker,omitempty"`
-	K8s               ProjectK8sConfig    `yaml:"k8s,omitempty"`
+	ContainerRegistries ContainerRegistries `yaml:"containerregistries,omitempty"`
+	Docker              ProjectDockerConfig `yaml:"docker,omitempty"`
+	K8s                 ProjectK8sConfig    `yaml:"k8s,omitempty"`
 }
 
 // ProjectDockerConfig holds project-level docker settings per environment.
@@ -300,14 +304,14 @@ type ReleaseConfig struct {
 }
 
 type ProjectConfig struct {
-	ContainerRegistry string                              `yaml:"containerregistry,omitempty"`
-	Environments      map[string]ProjectEnvironmentConfig `yaml:"environments,omitempty"`
-	Release           ReleaseConfig                       `yaml:"release,omitempty"`
+	ContainerRegistries ContainerRegistries                 `yaml:"containerregistries,omitempty"`
+	Environments        map[string]ProjectEnvironmentConfig `yaml:"environments,omitempty"`
+	Release             ReleaseConfig                       `yaml:"release,omitempty"`
 }
 
 // K8sForEnvironment returns the k8s deploy plan declared for the given
 // environment in this project config, or an empty plan when none exists.
-// Mirrors ContainerRegistryForEnvironment in shape so callers can resolve a
+// Mirrors ContainerRegistriesForEnvironment in shape so callers can resolve a
 // plan by environment without reaching into the Environments map.
 func (c ProjectConfig) K8sForEnvironment(environment string) ProjectK8sConfig {
 	environment = strings.TrimSpace(environment)
@@ -411,57 +415,6 @@ func (c ProjectConfig) DockerFingerprintsForEnvironment(environment string) map[
 		return nil
 	}
 	return out
-}
-
-func (c ProjectConfig) ContainerRegistryForEnvironment(environment string) string {
-	environment = strings.TrimSpace(environment)
-	if environment != "" && c.Environments != nil {
-		if envConfig, ok := c.Environments[environment]; ok {
-			if registry := strings.TrimSpace(envConfig.ContainerRegistry); registry != "" {
-				return registry
-			}
-		}
-	}
-
-	return strings.TrimSpace(c.ContainerRegistry)
-}
-
-func (c *ProjectConfig) SetContainerRegistryForEnvironment(environment, registry string) {
-	environment = strings.TrimSpace(environment)
-	registry = strings.TrimSpace(registry)
-
-	if environment == "" {
-		c.ContainerRegistry = registry
-		return
-	}
-
-	if registry == "" {
-		if c.Environments != nil {
-			delete(c.Environments, environment)
-			if len(c.Environments) == 0 {
-				c.Environments = nil
-			}
-		}
-		return
-	}
-
-	if registry == strings.TrimSpace(c.ContainerRegistry) {
-		if c.Environments != nil {
-			delete(c.Environments, environment)
-			if len(c.Environments) == 0 {
-				c.Environments = nil
-			}
-		}
-		return
-	}
-
-	if c.Environments == nil {
-		c.Environments = make(map[string]ProjectEnvironmentConfig)
-	}
-
-	envConfig := c.Environments[environment]
-	envConfig.ContainerRegistry = registry
-	c.Environments[environment] = envConfig
 }
 
 func (c ProjectConfig) NormalizedReleaseConfig() ReleaseConfig {
