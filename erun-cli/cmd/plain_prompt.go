@@ -49,7 +49,7 @@ func writerIsTerminal(w io.Writer) bool {
 func runPlainPrompt(prompt promptui.Prompt) (string, error) {
 	reader := plainPromptInput()
 	for {
-		fmt.Fprint(os.Stdout, plainPromptLabel(prompt))
+		fmt.Print(plainPromptLabel(prompt))
 		line, err := readPlainPromptLine(reader)
 		if err != nil {
 			return "", err
@@ -60,7 +60,7 @@ func runPlainPrompt(prompt promptui.Prompt) (string, error) {
 		}
 		if prompt.Validate != nil {
 			if err := prompt.Validate(input); err != nil {
-				fmt.Fprintln(os.Stdout, err.Error())
+				fmt.Println(err.Error())
 				continue
 			}
 		}
@@ -142,12 +142,12 @@ func runPlainSelect(prompt promptui.Select) (int, string, error) {
 		defaultIndex = 0
 	}
 	reader := plainPromptInput()
-	fmt.Fprintf(os.Stdout, "%v:\n", prompt.Label)
+	fmt.Printf("%v:\n", prompt.Label)
 	for i, item := range items {
-		fmt.Fprintf(os.Stdout, "  %d) %s\n", i+1, item)
+		fmt.Printf("  %d) %s\n", i+1, item)
 	}
 	for {
-		fmt.Fprintf(os.Stdout, "Select 1-%d [%d]: ", len(items), defaultIndex+1)
+		fmt.Printf("Select 1-%d [%d]: ", len(items), defaultIndex+1)
 		line, err := readPlainPromptLine(reader)
 		if err != nil {
 			return 0, "", err
@@ -156,16 +156,26 @@ func runPlainSelect(prompt promptui.Select) (int, string, error) {
 		if input == "" {
 			return defaultIndex, items[defaultIndex], nil
 		}
-		if number, err := strconv.Atoi(input); err == nil && number >= 1 && number <= len(items) {
-			return number - 1, items[number-1], nil
+		if index, ok := plainSelectChoice(input, items); ok {
+			return index, items[index], nil
 		}
-		for i, item := range items {
-			if item == input {
-				return i, item, nil
-			}
-		}
-		fmt.Fprintf(os.Stdout, "enter a number between 1 and %d\n", len(items))
+		fmt.Printf("enter a number between 1 and %d\n", len(items))
 	}
+}
+
+// plainSelectChoice resolves one input line against the option list: a number
+// within range picks that option, an exact option text picks it, anything
+// else does not resolve.
+func plainSelectChoice(input string, items []string) (int, bool) {
+	if number, err := strconv.Atoi(input); err == nil && number >= 1 && number <= len(items) {
+		return number - 1, true
+	}
+	for i, item := range items {
+		if item == input {
+			return i, true
+		}
+	}
+	return 0, false
 }
 
 func plainSelectItems(prompt promptui.Select) []string {
