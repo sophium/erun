@@ -30,8 +30,9 @@ type erunUIStore interface {
 	SaveEnvConfig(string, eruncommon.EnvConfig) error
 }
 
-type projectConfigLoader interface {
+type projectConfigStore interface {
 	LoadProjectConfig(string) (eruncommon.ProjectConfig, string, error)
+	SaveProjectConfig(string, eruncommon.ProjectConfig) error
 }
 
 type erunUIDeps struct {

@@ -71,7 +71,7 @@ export function nextPendingRedeploy(
 // (issue #460).
 function deployRelevantSignature(config: UIEnvironmentConfig): string {
   return JSON.stringify({
-    containerRegistry: config.containerRegistry,
+    containerRegistries: config.containerRegistries,
     cloudProviderAlias: config.cloudProviderAlias,
     snapshot: config.snapshot,
     runtimePod: config.runtimePod,
@@ -98,7 +98,7 @@ export function manageDialogTabHasUnsavedChanges(
   switch (tab) {
     case 'general':
       return compare(
-        'containerRegistry',
+        'containerRegistries',
         'cloudProviderAlias',
         'snapshot',
         'remoteHostCredentials',

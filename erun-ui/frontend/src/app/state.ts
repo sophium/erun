@@ -351,7 +351,7 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
   name: '',
   repoPath: '',
   kubernetesContext: '',
-  containerRegistry: '',
+  containerRegistries: [],
   cloudProviderAlias: '',
   runtimeVersion: '',
   runtimePod: defaultRuntimePodConfig(),

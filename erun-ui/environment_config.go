@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -26,8 +27,7 @@ func (a *App) LoadEnvironmentConfig(selection uiSelection) (uiEnvironmentConfig,
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	registry := a.effectiveEnvironmentContainerRegistry(selection.Tenant, selection.Environment, config)
-	return a.environmentConfigToUI(selection.Tenant, config, selection.Environment, registry, ports)
+	return a.environmentConfigToUI(selection.Tenant, config, selection.Environment, ports)
 }
 
 func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentConfig) (uiEnvironmentConfig, error) {
@@ -44,6 +44,13 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
+	registries, err := uiToContainerRegistries(config.ContainerRegistries)
+	if err != nil {
+		return uiEnvironmentConfig{}, err
+	}
+	if err := a.applyContainerRegistries(selection, &updated, registries); err != nil {
+		return uiEnvironmentConfig{}, err
+	}
 	if err := a.saveRemoteCloudAlias(selection, existing, updated); err != nil {
 		return uiEnvironmentConfig{}, err
 	}
@@ -56,8 +63,38 @@ func (a *App) SaveEnvironmentConfig(selection uiSelection, config uiEnvironmentC
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	registry := a.effectiveEnvironmentContainerRegistry(selection.Tenant, selection.Environment, updated)
-	return a.environmentConfigToUI(selection.Tenant, updated, selection.Environment, registry, ports)
+	return a.environmentConfigToUI(selection.Tenant, updated, selection.Environment, ports)
+}
+
+// applyContainerRegistries persists the edited marked list to the place that
+// drives resolution: project config (.erun/config.yaml) for local-agent envs,
+// whose build/deploy resolvers read the project list, and the env config for
+// remote/runtime envs, whose project config is not on the local machine.
+func (a *App) applyContainerRegistries(selection uiSelection, updated *eruncommon.EnvConfig, registries eruncommon.ContainerRegistries) error {
+	if updated.ResolvedType() == eruncommon.EnvironmentTypeLocalAgent {
+		updated.ContainerRegistries = nil
+		return a.saveEnvironmentProjectRegistries(selection.Tenant, *updated, registries)
+	}
+	updated.ContainerRegistries = registries.Clone()
+	return nil
+}
+
+// saveEnvironmentProjectRegistries writes a local-agent env's marked list into
+// the project's .erun/config.yaml as a per-env override (collapsing to the
+// project default when they match). Fails clearly when the project root or a
+// project-config store can't be resolved — a local-agent env's list has nowhere
+// else to live.
+func (a *App) saveEnvironmentProjectRegistries(tenant string, config eruncommon.EnvConfig, registries eruncommon.ContainerRegistries) error {
+	projectRoot, store, ok := a.environmentProjectConfigStore(tenant, config)
+	if !ok {
+		return fmt.Errorf("cannot resolve the project root for %q; a local-agent environment's container registries are stored in its repo's .erun/config.yaml", strings.TrimSpace(config.Name))
+	}
+	projectConfig, _, err := store.LoadProjectConfig(projectRoot)
+	if err != nil && !errors.Is(err, eruncommon.ErrNotInitialized) {
+		return err
+	}
+	projectConfig.SetContainerRegistriesForEnvironment(environmentName(config.Name, config), registries)
+	return store.SaveProjectConfig(projectRoot, projectConfig)
 }
 
 // SetEnvironmentAutoStart persists the desktop's auto-start preference for one
@@ -87,8 +124,7 @@ func (a *App) SetEnvironmentAutoStart(selection uiSelection, mode string) (uiEnv
 	if err != nil {
 		return uiEnvironmentConfig{}, err
 	}
-	registry := a.effectiveEnvironmentContainerRegistry(selection.Tenant, selection.Environment, existing)
-	return a.environmentConfigToUI(selection.Tenant, existing, selection.Environment, registry, ports)
+	return a.environmentConfigToUI(selection.Tenant, existing, selection.Environment, ports)
 }
 
 func parseAutoStartMode(mode string) (*bool, error) {
@@ -224,16 +260,13 @@ func (a *App) saveRemoteCloudAlias(selection uiSelection, existing, updated erun
 	return err
 }
 
-func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, fallbackName, effectiveContainerRegistry string, ports eruncommon.EnvironmentLocalPorts) (uiEnvironmentConfig, error) {
+func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, fallbackName string, ports eruncommon.EnvironmentLocalPorts) (uiEnvironmentConfig, error) {
 	name := strings.TrimSpace(config.Name)
 	if name == "" {
 		name = strings.TrimSpace(fallbackName)
 	}
 	syncStatus := a.workspaceSyncStatus(uiSelection{Tenant: tenant, Environment: name})
-	containerRegistry := primaryContainerRegistry(config.ContainerRegistries)
-	if containerRegistry == "" {
-		containerRegistry = strings.TrimSpace(effectiveContainerRegistry)
-	}
+	registries := containerRegistriesToUI(a.effectiveEnvironmentContainerRegistries(tenant, fallbackName, config))
 	ports = eruncommon.LocalPortsForResult(eruncommon.OpenResult{
 		EnvConfig:  config,
 		LocalPorts: ports,
@@ -246,7 +279,7 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 		LocalRepoPath:        strings.TrimSpace(config.LocalRepoPath),
 		RepoPath:             strings.TrimSpace(config.RepoPath),
 		KubernetesContext:    strings.TrimSpace(config.KubernetesContext),
-		ContainerRegistry:    containerRegistry,
+		ContainerRegistries:  registries,
 		CloudProviderAlias:   strings.TrimSpace(config.CloudProviderAlias),
 		CloudProviderAliases: environmentCloudProviderAliases(a.deps.store, config.CloudProviderAlias),
 		RuntimeVersion:       strings.TrimSpace(config.RuntimeVersion),
@@ -296,70 +329,102 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 	return result, nil
 }
 
-// primaryContainerRegistry picks the single registry the desktop's env-settings
-// field shows: the build registry, then the deploy registry, then the first
-// entry. The desktop edits only this single value; the full marked list is
-// authored in .erun/config.yaml.
-func primaryContainerRegistry(list eruncommon.ContainerRegistries) string {
-	if registry, ok := list.BuildRegistry(); ok {
-		return registry
+// containerRegistriesToUI converts the resolved marked list to the desktop
+// editor's row shape.
+func containerRegistriesToUI(list eruncommon.ContainerRegistries) []uiContainerRegistryEntry {
+	entries := make([]uiContainerRegistryEntry, 0, len(list))
+	for _, entry := range list {
+		roles := make([]string, 0, len(entry.Roles))
+		for _, role := range entry.Roles {
+			roles = append(roles, string(role))
+		}
+		entries = append(entries, uiContainerRegistryEntry{Registry: strings.TrimSpace(entry.Registry), Roles: roles})
 	}
-	if registry, ok := list.DeployRegistry(); ok {
-		return registry
-	}
-	if len(list) > 0 {
-		return strings.TrimSpace(list[0].Registry)
-	}
-	return ""
+	return entries
 }
 
-// applyEditedContainerRegistry folds the single registry edited in the desktop
-// env-settings field back into the marked list. A multi-entry list (authored in
-// .erun/config.yaml with from/to/deploy roles) is preserved untouched so the
-// single-field edit never clobbers it; the single-registry case becomes a
-// build+deploy entry.
-func applyEditedContainerRegistry(existing eruncommon.ContainerRegistries, edited string) eruncommon.ContainerRegistries {
-	edited = strings.TrimSpace(edited)
-	if len(existing) > 1 {
-		return existing
+// uiToContainerRegistries converts the desktop editor's rows back to a marked
+// list, dropping blank registries, and validates the marker invariants when the
+// list is non-empty so a bad list is rejected on save with an actionable error
+// (an empty list clears the env's override and inherits the project default).
+func uiToContainerRegistries(entries []uiContainerRegistryEntry) (eruncommon.ContainerRegistries, error) {
+	list := make(eruncommon.ContainerRegistries, 0, len(entries))
+	for _, entry := range entries {
+		registry := strings.TrimSpace(entry.Registry)
+		if registry == "" {
+			continue
+		}
+		roles := make([]eruncommon.RegistryRole, 0, len(entry.Roles))
+		for _, role := range entry.Roles {
+			if trimmed := strings.TrimSpace(role); trimmed != "" {
+				roles = append(roles, eruncommon.RegistryRole(trimmed))
+			}
+		}
+		list = append(list, eruncommon.ContainerRegistryEntry{Registry: registry, Roles: roles})
 	}
-	if edited == "" {
+	if list.IsZero() {
+		return nil, nil
+	}
+	if err := list.Validate(); err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
+// effectiveEnvironmentContainerRegistries resolves the marked list the editor
+// shows: the per-env list on the env config (remote/runtime envs) when set,
+// otherwise the project's list resolved through the store. Mirrors the
+// resolution order the build/deploy resolvers use, but goes through the store
+// so the desktop (and its test stub) drive it.
+func (a *App) effectiveEnvironmentContainerRegistries(tenant, environment string, config eruncommon.EnvConfig) eruncommon.ContainerRegistries {
+	if !config.ContainerRegistries.IsZero() {
+		return config.ContainerRegistries
+	}
+	projectConfig, ok := a.loadEnvironmentProjectConfig(tenant, config)
+	if !ok {
 		return nil
 	}
-	if current, ok := existing.BuildRegistry(); ok && current == edited {
-		return existing
-	}
-	return eruncommon.SingleContainerRegistries(edited)
+	return projectConfig.ContainerRegistriesForEnvironment(environmentName(environment, config))
 }
 
-func (a *App) effectiveEnvironmentContainerRegistry(tenant, environment string, config eruncommon.EnvConfig) string {
-	if registry := primaryContainerRegistry(config.ContainerRegistries); registry != "" {
-		return registry
-	}
-	if a.deps.store == nil {
-		return ""
-	}
-	tenantConfig, _, err := a.deps.store.LoadTenantConfig(strings.TrimSpace(tenant))
-	if err != nil {
-		return ""
-	}
-	projectRoot := strings.TrimSpace(tenantConfig.ProjectRoot)
-	if projectRoot == "" {
-		projectRoot = strings.TrimSpace(config.RepoPath)
-	}
-	if projectRoot == "" {
-		return ""
-	}
-	loader, ok := a.deps.store.(projectConfigLoader)
+// loadEnvironmentProjectConfig loads the project config that backs an env's
+// registry list (local-agent envs), resolving the project root from the tenant
+// config then the env's repo path. ok is false when the project config can't be
+// reached (no project root, store can't load project config, or load failed).
+func (a *App) loadEnvironmentProjectConfig(tenant string, config eruncommon.EnvConfig) (eruncommon.ProjectConfig, bool) {
+	projectRoot, store, ok := a.environmentProjectConfigStore(tenant, config)
 	if !ok {
-		return ""
+		return eruncommon.ProjectConfig{}, false
 	}
-	projectConfig, _, err := loader.LoadProjectConfig(projectRoot)
+	projectConfig, _, err := store.LoadProjectConfig(projectRoot)
 	if err != nil {
-		return ""
+		return eruncommon.ProjectConfig{}, false
 	}
-	registry, _ := projectConfig.ContainerRegistriesForEnvironment(environmentName(environment, config)).BuildRegistry()
-	return registry
+	return projectConfig, true
+}
+
+// environmentProjectConfigStore resolves the project root for an env and the
+// project-config store, used to read and write a local-agent env's registry
+// list in .erun/config.yaml.
+func (a *App) environmentProjectConfigStore(tenant string, config eruncommon.EnvConfig) (string, projectConfigStore, bool) {
+	if a.deps.store == nil {
+		return "", nil, false
+	}
+	projectRoot := ""
+	if tenantConfig, _, err := a.deps.store.LoadTenantConfig(strings.TrimSpace(tenant)); err == nil {
+		projectRoot = strings.TrimSpace(tenantConfig.ProjectRoot)
+	}
+	if projectRoot == "" {
+		projectRoot = strings.TrimSpace(config.EffectiveLocalRepoPath())
+	}
+	if projectRoot == "" {
+		return "", nil, false
+	}
+	store, ok := a.deps.store.(projectConfigStore)
+	if !ok {
+		return "", nil, false
+	}
+	return projectRoot, store, true
 }
 
 func environmentName(fallbackName string, config eruncommon.EnvConfig) string {
@@ -421,7 +486,9 @@ func canConnectLocalTCP(port int) bool {
 func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.EnvConfig) eruncommon.EnvConfig {
 	existing.Name = strings.TrimSpace(config.Name)
 	existing.CloudProviderAlias = strings.TrimSpace(config.CloudProviderAlias)
-	existing.ContainerRegistries = applyEditedContainerRegistry(existing.ContainerRegistries, config.ContainerRegistry)
+	// ContainerRegistries are written by SaveEnvironmentConfig, which routes the
+	// marked list to project config (.erun/config.yaml) for local-agent envs and
+	// to the env config for remote/runtime envs.
 	existing.RuntimePod = runtimePodConfigFromUI(config.RuntimePod)
 	existing.SSHD.WorkspaceSync.Enabled = config.SSHD.WorkspaceSyncEnabled
 	existing.SSHD.WorkspaceSync.LocalPath = strings.TrimSpace(config.SSHD.WorkspaceSyncLocalPath)

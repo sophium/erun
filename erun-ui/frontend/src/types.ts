@@ -373,11 +373,18 @@ export interface UIPortStatus {
   status: string;
 }
 
+// UIContainerRegistryEntry mirrors the Go uiContainerRegistryEntry: one
+// registry host plus the roles it carries (any of build/from/to/deploy).
+export interface UIContainerRegistryEntry {
+  registry: string;
+  roles: string[];
+}
+
 export interface UIEnvironmentConfig {
   name: string;
   repoPath: string;
   kubernetesContext: string;
-  containerRegistry: string;
+  containerRegistries: UIContainerRegistryEntry[];
   cloudProviderAlias: string;
   cloudProviderAliases?: string[];
   cloudContext?: UICloudContextStatus;

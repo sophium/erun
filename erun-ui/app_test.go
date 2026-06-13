@@ -1826,10 +1826,12 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	assertLoadedEnvironmentConfig(t, loaded, projectRoot)
 
 	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "prod"}, uiEnvironmentConfig{
-		Name:               "prod",
-		RepoPath:           " /tmp/repo ",
-		KubernetesContext:  " cluster-new ",
-		ContainerRegistry:  " registry.example/team ",
+		Name:              "prod",
+		RepoPath:          " /tmp/repo ",
+		KubernetesContext: " cluster-new ",
+		ContainerRegistries: []uiContainerRegistryEntry{
+			{Registry: " registry.example/team ", Roles: []string{"build", "deploy"}},
+		},
 		CloudProviderAlias: " other-cloud ",
 		RuntimeVersion:     " 1.2.3 ",
 		RuntimePod: uiRuntimePodConfig{
@@ -1870,13 +1872,26 @@ func assertLoadedEnvironmentConfig(t *testing.T, loaded uiEnvironmentConfig, pro
 func assertSavedEnvironmentConfig(t *testing.T, saved uiEnvironmentConfig, projectRoot string) {
 	t.Helper()
 
-	if saved.RepoPath != projectRoot || saved.KubernetesContext != "cluster-old" || saved.ContainerRegistry != "registry.example/team" || saved.RuntimeVersion != "1.0.0" || saved.CloudProviderAlias != "other-cloud" {
+	if saved.RepoPath != projectRoot || saved.KubernetesContext != "cluster-old" || uiRegistryWithRole(saved.ContainerRegistries, "build") != "registry.example/team" || saved.RuntimeVersion != "1.0.0" || saved.CloudProviderAlias != "other-cloud" {
 		t.Fatalf("unexpected saved config: %+v", saved)
 	}
 	if saved.RuntimePod.CPU != "6" || saved.RuntimePod.Memory != "12Gi" {
 		t.Fatalf("unexpected saved runtime pod config: %+v", saved.RuntimePod)
 	}
 	assertLocalPorts(t, saved.LocalPorts)
+}
+
+// uiRegistryWithRole returns the registry in the desktop editor's row list that
+// carries the given role, or "" when none does.
+func uiRegistryWithRole(entries []uiContainerRegistryEntry, role string) string {
+	for _, entry := range entries {
+		for _, candidate := range entry.Roles {
+			if candidate == role {
+				return entry.Registry
+			}
+		}
+	}
+	return ""
 }
 
 func assertLocalPorts(t *testing.T, ports uiEnvironmentLocalPorts) {
@@ -1935,7 +1950,7 @@ func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *
 	if err != nil {
 		t.Fatalf("LoadEnvironmentConfig local failed: %v", err)
 	}
-	if local.ContainerRegistry != "registry.example/shared" {
+	if uiRegistryWithRole(local.ContainerRegistries, "build") != "registry.example/shared" {
 		t.Fatalf("expected local env to use project-wide registry, got %+v", local)
 	}
 
@@ -1943,7 +1958,7 @@ func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *
 	if err != nil {
 		t.Fatalf("LoadEnvironmentConfig prod failed: %v", err)
 	}
-	if prod.ContainerRegistry != "registry.example/prod" {
+	if uiRegistryWithRole(prod.ContainerRegistries, "build") != "registry.example/prod" {
 		t.Fatalf("expected prod env to use environment registry override, got %+v", prod)
 	}
 }
@@ -1991,12 +2006,85 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 	if err != nil {
 		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
 	}
-	if saved.ContainerRegistry != "registry.example/shared" {
+	if uiRegistryWithRole(saved.ContainerRegistries, "build") != "registry.example/shared" {
 		t.Fatalf("expected saved UI config to keep effective project registry, got %+v", saved)
 	}
 	stored := store.envs["frs/local"]
 	if len(stored.ContainerRegistries) != 0 {
 		t.Fatalf("expected env save not to copy project registry into env config, got %+v", stored)
+	}
+}
+
+// TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig pins the
+// #527 desktop editor: editing a local-agent env's marked registry list writes
+// it to the project's .erun/config.yaml (where the build/deploy resolvers read
+// it), not to the env config, and the saved UI round-trips the full list.
+func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		projectConfigs: map[string]eruncommon.ProjectConfig{
+			projectRoot: {ContainerRegistries: eruncommon.SingleContainerRegistries("ghcr.io/acme")},
+		},
+		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs", ProjectRoot: projectRoot}},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/local": {Name: "local", RepoPath: projectRoot, KubernetesContext: "c", Type: eruncommon.EnvironmentTypeLocalAgent},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+		Name:              "local",
+		RepoPath:          projectRoot,
+		KubernetesContext: "c",
+		Type:              eruncommon.EnvironmentTypeLocalAgent,
+		ContainerRegistries: []uiContainerRegistryEntry{
+			{Registry: "ghcr.io/acme", Roles: []string{"build", "from"}},
+			{Registry: "registry.internal/acme", Roles: []string{"to", "deploy"}},
+		},
+		Idle: uiIdleConfig{Timeout: eruncommon.DefaultEnvironmentIdleTimeout.String(), WorkingHours: eruncommon.DefaultEnvironmentWorkingHours},
+	})
+	if err != nil {
+		t.Fatalf("SaveEnvironmentConfig: %v", err)
+	}
+	if len(store.envs["frs/local"].ContainerRegistries) != 0 {
+		t.Fatalf("a local-agent env must not carry the list on env config, got %+v", store.envs["frs/local"].ContainerRegistries)
+	}
+	list := store.projectConfigs[projectRoot].ContainerRegistriesForEnvironment("local")
+	if from, ok := list.FromRegistry(); !ok || from != "ghcr.io/acme" {
+		t.Fatalf("expected from=ghcr.io/acme in project config, got %+v", list)
+	}
+	if deploy, ok := list.DeployRegistry(); !ok || deploy != "registry.internal/acme" {
+		t.Fatalf("expected deploy=registry.internal/acme in project config, got %+v", list)
+	}
+	if uiRegistryWithRole(saved.ContainerRegistries, "deploy") != "registry.internal/acme" {
+		t.Fatalf("saved UI must reflect the edited list, got %+v", saved.ContainerRegistries)
+	}
+}
+
+// TestSaveEnvironmentConfigRejectsInvalidRegistryList confirms the marker
+// invariants are enforced on save and surfaced as an error (a list with no
+// deploy registry is rejected before persistence).
+func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs", ProjectRoot: projectRoot}},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/local": {Name: "local", RepoPath: projectRoot, Type: eruncommon.EnvironmentTypeLocalAgent},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	_, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+		Name:     "local",
+		RepoPath: projectRoot,
+		Type:     eruncommon.EnvironmentTypeLocalAgent,
+		ContainerRegistries: []uiContainerRegistryEntry{
+			{Registry: "ghcr.io/acme", Roles: []string{"build"}},
+		},
+		Idle: uiIdleConfig{Timeout: eruncommon.DefaultEnvironmentIdleTimeout.String(), WorkingHours: eruncommon.DefaultEnvironmentWorkingHours},
+	})
+	if err == nil {
+		t.Fatal("expected a validation error for a registry list with no deploy registry")
 	}
 }
 
@@ -3208,6 +3296,13 @@ func (s stubUIStore) LoadProjectConfig(projectRoot string) (eruncommon.ProjectCo
 		return eruncommon.ProjectConfig{}, "", eruncommon.ErrNotInitialized
 	}
 	return config, "", nil
+}
+
+func (s stubUIStore) SaveProjectConfig(projectRoot string, config eruncommon.ProjectConfig) error {
+	if s.projectConfigs != nil {
+		s.projectConfigs[projectRoot] = config
+	}
+	return nil
 }
 
 func (s stubUIStore) SaveERunConfig(config eruncommon.ERunConfig) error {

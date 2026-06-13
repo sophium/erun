@@ -32,6 +32,8 @@ flowchart LR
 
 A registry usually wears more than one hat. The simplest project has a single registry marked **build + deploy**: you build and the cluster pulls from the same place, and nothing is copied. That is the default a fresh project starts with.
 
+You edit the list per environment in the desktop app's environment settings (the **General** tab) — add a row, type the registry host, and tick the roles it should carry — or directly in the project's `.erun/config.yaml`. The desktop checks the role rules as you edit and won't save an invalid list.
+
 ## Copying images on deploy
 
 When you want the cluster to pull from a different registry than the one you build into — a private mirror close to the cluster, say — mark a **FROM** and a **TO**. On every deploy ERun mirrors each image the cluster needs (the runtime image and any component images) from FROM to TO before rolling the release, then points the cluster at the **DEPLOY** registry.

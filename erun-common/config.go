@@ -498,6 +498,10 @@ func (ConfigStore) LoadProjectConfig(projectRoot string) (ProjectConfig, string,
 	return LoadProjectConfig(projectRoot)
 }
 
+func (ConfigStore) SaveProjectConfig(projectRoot string, config ProjectConfig) error {
+	return SaveProjectConfig(projectRoot, config)
+}
+
 func SaveERunConfig(config ERunConfig) error {
 	configFilePath, err := xdg.ConfigFile(filepath.Join(configRoot, configFile))
 	if err != nil {
