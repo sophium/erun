@@ -527,6 +527,20 @@ function setEnv(settings, name, value) {
   settings.env[name] = normalized;
 }
 
+// setBoolEnv writes name=1 only when the value is an enabled flag; otherwise it
+// removes any existing entry. Claude Code treats CLAUDE_CODE_USE_BEDROCK /
+// CLAUDE_CODE_USE_MANTLE as present-or-absent, not 1/0, so writing "0" would
+// *enable* them — the variable must be omitted (and any stale "0" deleted) to
+// disable.
+function setBoolEnv(settings, name) {
+  const normalized = envValue(name).toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') {
+    settings.env[name] = '1';
+  } else {
+    delete settings.env[name];
+  }
+}
+
 function listValue(value) {
   const result = [];
   const seen = new Set();
@@ -547,8 +561,8 @@ if (configureBedrock) {
   settings.$schema = settings.$schema || 'https://json.schemastore.org/claude-code-settings.json';
   settings.env = ensureObject(settings, 'env');
 
-  setEnv(settings, 'CLAUDE_CODE_USE_BEDROCK', envValue('CLAUDE_CODE_USE_BEDROCK', '1'));
-  setEnv(settings, 'CLAUDE_CODE_USE_MANTLE', envValue('CLAUDE_CODE_USE_MANTLE', '1'));
+  setBoolEnv(settings, 'CLAUDE_CODE_USE_BEDROCK');
+  setBoolEnv(settings, 'CLAUDE_CODE_USE_MANTLE');
   setEnv(settings, 'AWS_REGION', region);
   setEnv(settings, 'ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION', envValue('ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION', region));
   setEnv(settings, 'CLAUDE_CODE_MAX_OUTPUT_TOKENS', envValue('CLAUDE_CODE_MAX_OUTPUT_TOKENS', '4096'));

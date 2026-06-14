@@ -243,10 +243,14 @@ spec:
             - name: AWS_PROFILE
               value: "erun-host"
             {{ end }}
+            {{- if eq $claudeUseBedrock "1" }}
             - name: CLAUDE_CODE_USE_BEDROCK
-              value: {{ $claudeUseBedrock | quote }}
+              value: "1"
+            {{- end }}
+            {{- if eq $claudeUseMantle "1" }}
             - name: CLAUDE_CODE_USE_MANTLE
-              value: {{ $claudeUseMantle | quote }}
+              value: "1"
+            {{- end }}
             - name: AWS_REGION
               value: {{ $cloudRegion | quote }}
             - name: ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION
