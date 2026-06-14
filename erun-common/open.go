@@ -860,13 +860,6 @@ func remoteSessionLauncherBody(req ShellLaunchParams, bashrcPath string) []strin
 		)
 	}
 	if req.AI {
-		// Discoverability of the erun-build-env skill where the user would
-		// use it: one advisory line, only when the remote env still runs
-		// the default published runtime image, printed once on session
-		// create (a reattach never re-runs the prelude). See #505.
-		if req.RemoteRepo && req.RuntimeImage == "" {
-			body = append(body, `printf '\033[2mTip: ask Claude to "init an erun build environment" to customize the toolchain of this env.\033[0m\n'`)
-		}
 		body = append(body, AISessionLaunchLines(req.AITool, req.Claude)...)
 	}
 	return append(body, fmt.Sprintf("exec /bin/bash --rcfile \"%s\" -i", bashrcPath))
