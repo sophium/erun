@@ -345,11 +345,17 @@ mcp_url="http://127.0.0.1:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}"
 mkdir -p "${codex_dir}"
 
 codex_instructions="${codex_dir}/instructions.md"
-agents_marker="erun-agents-md-hook"
-if [ ! -f "${codex_instructions}" ] || ! grep -qF "${agents_marker}" "${codex_instructions}" 2>/dev/null; then
-    printf '\n<!-- %s -->\n# Agent Instructions\n\nIMPORTANT: Before doing anything else, read `AGENTS.md` in the project root. This is mandatory — do not skip it.\nAlso read `AGENTS.md` in any subdirectory relevant to the task at hand,\nas subdirectories may contain more specific guidance.\n<!-- /%s -->\n' \
-        "${agents_marker}" "${agents_marker}" >> "${codex_instructions}"
+codex_existing=""
+if [ -f "${codex_instructions}" ]; then
+    codex_existing="$(awk '/<!-- erun-agents-md-hook -->/{skip=1} skip&&/<!-- \/erun-agents-md-hook -->/{skip=0;next} !skip{print}' "${codex_instructions}")"
 fi
+codex_tmp="${codex_instructions}.tmp.$$"
+{
+    if [ -n "${codex_existing}" ]; then
+        printf '%s\n\n' "${codex_existing}"
+    fi
+    printf '<!-- erun-agents-md-hook -->\n# Agent Instructions\n\nIMPORTANT: Before doing anything else, read `AGENTS.md` in the project root. This is mandatory — do not skip it.\nAlso read `AGENTS.md` in any subdirectory relevant to the task at hand,\nas subdirectories may contain more specific guidance.\n\nWhen the project'\''s structure is explicit — AGENTS.md, documented module boundaries, a named file or function — read the source directly instead of spawning sub-agent searches to rediscover it. Answer the operator'\''s questions before acting; a question is not authorization to begin the work it hints at.\n<!-- /erun-agents-md-hook -->\n'
+} > "${codex_tmp}" && mv "${codex_tmp}" "${codex_instructions}"
 
 if [ -d /etc/erun/skills ]; then
     for src_dir in /etc/erun/skills/*/; do
@@ -460,11 +466,17 @@ claude_mcp_url="http://127.0.0.1:${ERUN_MCP_PORT:-17000}${ERUN_MCP_PATH:-/mcp}"
 mkdir -p "${claude_dir}"
 
 claude_md="${claude_dir}/CLAUDE.md"
-agents_marker="erun-agents-md-hook"
-if [ ! -f "${claude_md}" ] || ! grep -qF "${agents_marker}" "${claude_md}" 2>/dev/null; then
-    printf '\n<!-- %s -->\n# Agent Instructions\n\nIMPORTANT: Before doing anything else, read `AGENTS.md` in the project root. This is mandatory — do not skip it.\nAlso read `AGENTS.md` in any subdirectory relevant to the task at hand,\nas subdirectories may contain more specific guidance.\n<!-- /%s -->\n' \
-        "${agents_marker}" "${agents_marker}" >> "${claude_md}"
+claude_existing=""
+if [ -f "${claude_md}" ]; then
+    claude_existing="$(awk '/<!-- erun-agents-md-hook -->/{skip=1} skip&&/<!-- \/erun-agents-md-hook -->/{skip=0;next} !skip{print}' "${claude_md}")"
 fi
+claude_md_tmp="${claude_md}.tmp.$$"
+{
+    if [ -n "${claude_existing}" ]; then
+        printf '%s\n\n' "${claude_existing}"
+    fi
+    printf '<!-- erun-agents-md-hook -->\n# Agent Instructions\n\nIMPORTANT: Before doing anything else, read `AGENTS.md` in the project root. This is mandatory — do not skip it.\nAlso read `AGENTS.md` in any subdirectory relevant to the task at hand,\nas subdirectories may contain more specific guidance.\n\nWhen the project'\''s structure is explicit — AGENTS.md, documented module boundaries, a named file or function — read the source directly instead of spawning sub-agent searches to rediscover it. Answer the operator'\''s questions before acting; a question is not authorization to begin the work it hints at.\n<!-- /erun-agents-md-hook -->\n'
+} > "${claude_md_tmp}" && mv "${claude_md_tmp}" "${claude_md}"
 
 if [ -d /etc/erun/skills ]; then
     for src_dir in /etc/erun/skills/*/; do
