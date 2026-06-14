@@ -239,6 +239,7 @@ type uiEnvironmentConfig struct {
 	RemoteHostCredentials bool                       `json:"remoteHostCredentials"`
 	AutoUpgrade           bool                       `json:"autoUpgrade"`
 	UpgradeChannel        string                     `json:"upgradeChannel,omitempty"`
+	DisableBuildScript    bool                       `json:"disableBuildScript"`
 }
 
 type uiClaudeConfig struct {

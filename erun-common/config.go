@@ -143,6 +143,12 @@ type EnvConfig struct {
 	// It is orthogonal to Type (build location); empty resolves via
 	// ResolvedUpgradeChannel from Type.
 	UpgradeChannel string `yaml:"upgradechannel,omitempty" json:"upgradeChannel,omitempty"`
+	// DisableBuildScript makes erun ignore any project build.sh for this env:
+	// erun build (and the build it runs for --deploy) skips root and nested
+	// build.sh discovery and resolves docker/release builds directly, erroring
+	// with no buildable context if none exist. Default false preserves today's
+	// build.sh-shadows-docker behaviour.
+	DisableBuildScript bool `yaml:"disablebuildscript,omitempty" json:"disableBuildScript,omitempty"`
 }
 
 func (c TenantConfig) SnapshotEnabled() bool {

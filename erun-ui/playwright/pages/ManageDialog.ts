@@ -61,6 +61,13 @@ export class ManageDialog {
     return this.locator().locator('#environment-config-autoupgrade');
   }
 
+  // disableBuildScriptCheckbox targets the Runtime tab's "Ignore project
+  // build.sh" toggle (EnvConfig.disableBuildScript, issue #533) — a build-time
+  // CLI setting, never a pod input.
+  disableBuildScriptCheckbox(): Locator {
+    return this.locator().locator('#environment-config-disablebuildscript');
+  }
+
   // idleTimeoutInput targets the Runtime tab's Idle-stop "Timeout" field — a
   // pod-shaping value (helm idle.* → pod env).
   idleTimeoutInput(): Locator {

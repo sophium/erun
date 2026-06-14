@@ -217,6 +217,32 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_with_project_build_script_traces_script_invocation", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_disable_build_script_ignores_project_build_sh", func(t *testing.T) {
+		// #533: an env with disablebuildscript: true makes erun build ignore the
+		// project build.sh and resolve docker/release contexts directly. With no
+		// docker context the build ends at the no-buildable-context error rather
+		// than tracing ./build.sh (which dry_run_with_project_build_script does).
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "dev")
+		fixture.SeedGitRepo(t, setup.Cwd)
+		envCfg := filepath.Join(setup.ConfigHome, "erun", "team", "dev", "config.yaml")
+		data, err := os.ReadFile(envCfg)
+		if err != nil {
+			t.Fatalf("read env config: %v", err)
+		}
+		if err := os.WriteFile(envCfg, append(data, []byte("disablebuildscript: true\n")...), 0o644); err != nil {
+			t.Fatalf("write env config: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write build.sh: %v", err)
+		}
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit (build.sh ignored, no docker context), got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_disable_build_script_ignores_project_build_sh", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_with_project_build_script_executes_script", func(t *testing.T) {
 		// Real-run companion to dry_run_with_project_build_script_traces_script_invocation:
 		// runs the build flow without --dry-run so eruncommon.BuildScriptRunner

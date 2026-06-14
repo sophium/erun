@@ -420,6 +420,9 @@ export interface UIEnvironmentConfig {
   // value is always one of the two.
   autoUpgrade: boolean;
   upgradeChannel?: string;
+  // DisableBuildScript makes `erun build` ignore any project build.sh for this
+  // env and resolve Docker/release builds directly. Never reaches the pod.
+  disableBuildScript: boolean;
 }
 
 export interface UIEnvironmentClaudeConfig {

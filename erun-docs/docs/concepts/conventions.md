@@ -136,6 +136,8 @@ Any `erun` command can be overridden by a matching shell script in the project. 
 
 This is the escape hatch for flows that don't fit ERun's defaults — a hand-rolled build pipeline, a custom registry login dance, a deploy waiting on an external approval. Use it sparingly: the more logic lives outside ERun, the less the audit trail and `--dry-run` previews can show.
 
+An environment can also opt **out** of `build.sh` discovery: turn on **Ignore project build.sh** in its Runtime settings (or pass `--disable-build-script` to `erun init`) when the project keeps a `build.sh` for other tooling but you want `erun build` to build the container images directly.
+
 For the resolution order and the script contract, see [Conventions spec · Command override resolution](/agent-reference/conventions-spec#command-override-resolution).
 
 ## Charts and deploy plans

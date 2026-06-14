@@ -7,6 +7,7 @@ Flags:
       --codecommit-ssh-key-id string   CodeCommit SSH public key ID to use for remote repository access
       --confirm-environment            Confirm environment initialization without prompting
       --container-registry string      Container registry to associate with the environment
+      --disable-build-script           Ignore any project build.sh for this env; erun build resolves docker/release contexts directly
       --dry-run                        Resolve and trace mutating actions without executing them.
       --environment string             Environment name
   -h, --help                           help for init

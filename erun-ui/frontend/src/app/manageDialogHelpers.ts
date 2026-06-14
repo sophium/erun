@@ -63,8 +63,9 @@ export function nextPendingRedeploy(
 // Helm release (pod resources, idle.* pod env, the claude.* pod env subset)
 // plus the image registry/channel and the cloud binding the deploy resolves
 // against. Fields that never reach the pod stay out: autoUpgrade /
-// upgradeChannel select a future `erun upgrade` run, autoStart and
-// remoteHostCredentials are desktop-side behaviour, sshd.workspaceSync* is
+// upgradeChannel select a future `erun upgrade` run, disableBuildScript only
+// affects `erun build` script discovery, autoStart and remoteHostCredentials
+// are desktop-side behaviour, sshd.workspaceSync* is
 // desktop sync, and claude effort/defaultModel/verboseDebug only change the
 // AI launch command (the save path relaunches AI tabs for those). A save
 // whose signature is unchanged must not raise the pending-redeploy banner
@@ -104,7 +105,14 @@ export function manageDialogTabHasUnsavedChanges(
         'remoteHostCredentials',
       );
     case 'runtime':
-      return compare('runtimePod', 'idle', 'autoStart', 'autoUpgrade', 'upgradeChannel');
+      return compare(
+        'runtimePod',
+        'idle',
+        'autoStart',
+        'autoUpgrade',
+        'upgradeChannel',
+        'disableBuildScript',
+      );
     case 'ai':
       return compare('claude');
     case 'ports':
