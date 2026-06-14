@@ -421,7 +421,8 @@ export interface UIEnvironmentConfig {
   autoUpgrade: boolean;
   upgradeChannel?: string;
   // DisableBuildScript makes `erun build` ignore any project build.sh for this
-  // env and resolve Docker/release builds directly. Never reaches the pod.
+  // env and resolve Docker/release builds directly. It changes how a redeploy
+  // rebuilds the runtime image, so saving it raises the pending-redeploy banner.
   disableBuildScript: boolean;
 }
 
