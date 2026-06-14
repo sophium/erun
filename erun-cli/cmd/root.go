@@ -200,7 +200,7 @@ func (d rootDependencies) optionalBuildCommand() *cobra.Command {
 		return nil
 	}
 	buildCmd := newBuildCmd(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext, common.ResolveKubernetesDeployContext, time.Now, common.BuildScriptRunner, common.DockerImageBuilder, common.DockerRegistryLogin, runSelect, d.push, d.recoveringDeployHelmChart)
-	buildCmd.Short = optionalBuildCmdShort(common.FindProjectRoot, common.ResolveDockerBuildContext)
+	buildCmd.Short = optionalBuildCmdShort(d.store, common.FindProjectRoot, common.ResolveDockerBuildContext)
 	return buildCmd
 }
 

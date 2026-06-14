@@ -133,6 +133,10 @@ type DockerCommandTarget struct {
 	// fingerprint tag already exists, the build is skipped and the existing image
 	// is re-tagged and pushed instead of being rebuilt.
 	NoIncremental bool
+	// DisableBuildScriptDiscovery suppresses project build.sh discovery (root
+	// and nested) for this build, so builds resolve docker/release contexts
+	// directly. Populated from the env's EnvConfig.DisableBuildScript.
+	DisableBuildScriptDiscovery bool
 }
 
 type DockerRegistryAuthError struct {

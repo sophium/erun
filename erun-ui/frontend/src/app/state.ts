@@ -400,6 +400,7 @@ export const defaultEnvironmentConfig = (): UIEnvironmentConfig => ({
   remoteHostCredentials: false,
   autoUpgrade: false,
   upgradeChannel: 'stable',
+  disableBuildScript: false,
 });
 
 export const defaultRuntimePodConfig = (): { cpu: string; memory: string } => ({

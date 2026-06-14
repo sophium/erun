@@ -319,6 +319,7 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 		RemoteHostCredentials: config.RemoteHostCredentials,
 		AutoUpgrade:           config.AutoUpgrade,
 		UpgradeChannel:        config.ResolvedUpgradeChannel(),
+		DisableBuildScript:    config.DisableBuildScript,
 	}
 	if cloudContext, ok, err := a.linkedCloudContext(config); err != nil {
 		return uiEnvironmentConfig{}, err
@@ -509,6 +510,7 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	existing.AutoStart = copyBoolPtr(config.AutoStart)
 	existing.RemoteHostCredentials = config.RemoteHostCredentials
 	existing.AutoUpgrade = config.AutoUpgrade
+	existing.DisableBuildScript = config.DisableBuildScript
 	if eruncommon.IsValidUpgradeChannel(config.UpgradeChannel) {
 		existing.UpgradeChannel = config.UpgradeChannel
 	}

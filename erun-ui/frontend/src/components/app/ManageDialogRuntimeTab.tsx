@@ -168,6 +168,16 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
           }}
         />
       )}
+      <CheckboxField
+        id="environment-config-disablebuildscript"
+        label="Ignore project build.sh"
+        helper="erun build resolves Docker/release contexts directly instead of running a project build.sh in this environment."
+        checked={config.disableBuildScript}
+        disabled={dialog.busy || dialog.configLoading}
+        onChange={(disableBuildScript) => {
+          dispatch(updateManageConfig({ disableBuildScript }));
+        }}
+      />
     </div>
   );
 }

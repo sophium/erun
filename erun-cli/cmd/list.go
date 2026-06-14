@@ -266,6 +266,9 @@ func environmentDetailLines(env common.ListEnvironmentResult) []string {
 		indent + "claude: " + claudeLabel(env.Claude),
 		indent + "idle: " + idleLabel(env.Idle),
 	}
+	if env.DisableBuildScript {
+		lines = append(lines, indent+"disable-build-script: enabled")
+	}
 	if env.SSH.Enabled {
 		lines = append(lines, environmentSSHDetailLines(env.SSH, indent)...)
 	} else {

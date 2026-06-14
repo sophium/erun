@@ -31,6 +31,10 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 
 	recommendBuildEnvIfMissing(ctx, findProjectRoot, target)
 
+	if env := ResolveDockerBuildEnvConfig(store, findProjectRoot, target); env != nil && env.DisableBuildScript {
+		target.DisableBuildScriptDiscovery = true
+	}
+
 	target, releaseSpec, script, err := resolveBuildExecutionTargetAndScript(findProjectRoot, target)
 	if err != nil {
 		return BuildExecutionSpec{}, err

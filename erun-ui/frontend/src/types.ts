@@ -420,6 +420,10 @@ export interface UIEnvironmentConfig {
   // value is always one of the two.
   autoUpgrade: boolean;
   upgradeChannel?: string;
+  // DisableBuildScript makes `erun build` ignore any project build.sh for this
+  // env and resolve Docker/release builds directly. It changes how a redeploy
+  // rebuilds the runtime image, so saving it raises the pending-redeploy banner.
+  disableBuildScript: boolean;
 }
 
 export interface UIEnvironmentClaudeConfig {

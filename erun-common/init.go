@@ -89,6 +89,10 @@ type BootstrapInitParams struct {
 	ConfirmRemoteKeyImport  *bool
 	AutoApprove             bool
 	ResolveTenant           bool
+	// DisableBuildScript sets EnvConfig.DisableBuildScript on the new env so
+	// erun build ignores any project build.sh and resolves docker/release
+	// builds directly.
+	DisableBuildScript bool
 }
 
 // ResolvedType returns the new env's type. When Type is explicitly set it is
@@ -763,6 +767,7 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		RuntimeImage:       strings.TrimSpace(s.params.RuntimeImage),
 		RuntimePod:         NormalizeRuntimePodResources(s.params.RuntimePod),
 		Remote:             s.params.Remote,
+		DisableBuildScript: s.params.DisableBuildScript,
 	}
 	if err := saveEnvConfig(s.runner.Store, s.tenant, s.envConfig); err != nil {
 		return err

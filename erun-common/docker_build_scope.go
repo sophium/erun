@@ -281,3 +281,39 @@ func dockerBuildEnvironmentFromDetectedProject(store DockerStore, findProjectRoo
 
 	return strings.TrimSpace(tenantConfig.DefaultEnvironment), nil
 }
+
+// ResolveDockerBuildEnvConfig returns the saved EnvConfig for the environment a
+// build resolves to — the env whose local repo path matches the project root,
+// optionally filtered by target.Environment — or nil when none matches. The
+// build path is otherwise env-agnostic; this is the seam for reading per-env
+// build toggles such as DisableBuildScript. Best-effort: any store error or a
+// miss yields nil so the build proceeds with default behaviour.
+func ResolveDockerBuildEnvConfig(store DockerStore, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) *EnvConfig {
+	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	if err != nil || strings.TrimSpace(projectRoot) == "" {
+		return nil
+	}
+	cleanRoot := filepath.Clean(projectRoot)
+
+	tenants, err := store.ListTenantConfigs()
+	if err != nil {
+		return nil
+	}
+	wantEnv := strings.TrimSpace(target.Environment)
+	for _, tenantConfig := range tenants {
+		envs, err := store.ListEnvConfigs(tenantConfig.Name)
+		if err != nil {
+			continue
+		}
+		for i := range envs {
+			if wantEnv != "" && envs[i].Name != wantEnv {
+				continue
+			}
+			path := strings.TrimSpace(envs[i].EffectiveLocalRepoPath())
+			if path != "" && filepath.Clean(path) == cleanRoot {
+				return &envs[i]
+			}
+		}
+	}
+	return nil
+}
