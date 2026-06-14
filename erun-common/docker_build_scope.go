@@ -140,6 +140,31 @@ func findDevopsDockerDirs(projectRoot string) ([]string, error) {
 	return candidates, nil
 }
 
+// projectHasDevopsFolder reports whether the project root contains any
+// <name>-devops directory. This is a bare presence check — unlike
+// findDevopsDockerDirs it does not require a buildable docker module — so the
+// build-env advisory fires only when there is no devops module at all, not when
+// one exists but is still being set up.
+func projectHasDevopsFolder(projectRoot string) (bool, error) {
+	projectRoot = strings.TrimSpace(projectRoot)
+	if projectRoot == "" {
+		return false, nil
+	}
+	entries, err := os.ReadDir(projectRoot)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasSuffix(entry.Name(), "-devops") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func isDockerBuildModuleDir(dir string) (bool, error) {
 	buildContexts, err := ResolveDockerBuildContextsAtDir(dir)
 	if err != nil {

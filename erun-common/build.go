@@ -29,6 +29,8 @@ func ResolveCurrentDockerBuildSpecs(store DockerStore, findProjectRoot ProjectFi
 func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, now NowFunc, target DockerCommandTarget) (BuildExecutionSpec, error) {
 	store, findProjectRoot, resolveBuildContext, now = normalizeDockerDependencies(store, findProjectRoot, resolveBuildContext, now)
 
+	recommendBuildEnvIfMissing(ctx, findProjectRoot, target)
+
 	target, releaseSpec, script, err := resolveBuildExecutionTargetAndScript(findProjectRoot, target)
 	if err != nil {
 		return BuildExecutionSpec{}, err
@@ -57,6 +59,25 @@ func ResolveBuildExecution(ctx Context, store DockerStore, findProjectRoot Proje
 		execution = BuildExecutionSpecWithRelease(execution, *releaseSpec)
 	}
 	return ApplyIncrementalToBuildExecution(ctx, execution, target.NoIncremental)
+}
+
+// recommendBuildEnvIfMissing emits a one-line advisory pointing at the
+// erun-build-env skill when the project has no <tenant>-devops build
+// environment. Plain build, --release, --deploy, and the MCP build tool all
+// flow through ResolveBuildExecution, so a project without a runtime build
+// module is always nudged toward creating one — even when the build itself
+// succeeds against a Dockerfile in the current directory. Best-effort: a
+// detection failure never blocks the build.
+func recommendBuildEnvIfMissing(ctx Context, findProjectRoot ProjectFinderFunc, target DockerCommandTarget) {
+	projectRoot, err := resolveDockerBuildProjectRoot(findProjectRoot, target)
+	if err != nil || strings.TrimSpace(projectRoot) == "" {
+		return
+	}
+	hasDevops, err := projectHasDevopsFolder(projectRoot)
+	if err != nil || hasDevops {
+		return
+	}
+	ctx.Info(`build: this project has no <tenant>-devops build environment — ask Claude to "init erun build environment" to set one up with the erun-build-env skill`)
 }
 
 func resolveBuildExecutionTargetAndScript(findProjectRoot ProjectFinderFunc, target DockerCommandTarget) (DockerCommandTarget, *ReleaseSpec, *scriptSpec, error) {

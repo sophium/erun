@@ -35,6 +35,27 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_no_devops_recommends_build_env_skill", func(t *testing.T) {
+		// #534: erun build in a project with no <tenant>-devops module emits a
+		// one-line advisory pointing at the erun-build-env skill. The advisory
+		// fires from ResolveBuildExecution whenever a build runs without a devops
+		// build environment — here a project build.sh registers and runs the
+		// build command and the build succeeds via the script, so the tip is
+		// emitted even though the build itself does not fail.
+		setup := env.New(t)
+		fixture.SeedGitRepo(t, setup.Cwd)
+		if err := os.WriteFile(filepath.Join(setup.Cwd, "build.sh"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write build.sh: %v", err)
+		}
+		fixture.RunGit(t, setup.Cwd, "add", "build.sh")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add build script")
+		result := erun.Run(t, []string{"build", "--dry-run", "-v"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_no_devops_recommends_build_env_skill", normalize.Apply(result.Combined))
+	})
+
 	t.Run("no_build_registry_errors", func(t *testing.T) {
 		// A project registry list that marks no build registry cannot build:
 		// `erun build` fails fast with the "no build registry" contract message
