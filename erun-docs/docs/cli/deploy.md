@@ -26,7 +26,7 @@ When the project repo carries its own runtime chart (`<tenant>-devops/k8s/<tenan
 helm upgrade --install <tenant>-devops oci://<registry>/charts/erun-devops --version <runtime version> …
 ```
 
-The chart is published at release time alongside the runtime image with the same version — chart and image are one contract (see [Release flow](/deployment/release-flow)). The cluster pulls from the `deploy`-marked registry in the env's [registry list](/deployment/registries) (the env's recorded runtime registry wins as provenance); when the list marks a `from` and a `to`, ERun copies the image there first. The dry-run trace names the decision: `deploy: no local runtime chart; using published chart <ref> version <v>`. To customise a published-chart deploy, use the env's values overlay and the `runtimeimage` field — see [Configuration · Advanced chart values](/reference/configuration#advanced-chart-values).
+The chart and runtime image are one contract — published together to the same registry at the same version. A release publishes both; so does any `erun deploy` (or `build --deploy`) that builds and pushes the runtime image, which publishes the matching chart to `oci://<registry>/charts/erun-devops` at the same version. That keeps a pushed snapshot deployable instead of leaving an image with no chart for a published-chart env to pull (see [Release flow](/deployment/release-flow)). The cluster pulls from the `deploy`-marked registry in the env's [registry list](/deployment/registries) (the env's recorded runtime registry wins as provenance); when the list marks a `from` and a `to`, ERun copies the image there first. The dry-run trace names the decision: `deploy: no local runtime chart; using published chart <ref> version <v>`. To customise a published-chart deploy, use the env's values overlay and the `runtimeimage` field — see [Configuration · Advanced chart values](/reference/configuration#advanced-chart-values).
 
 ## Flags
 
@@ -90,6 +90,7 @@ erun deploy erun-backend-api
 | Cluster unreachable. | Errors before any change; exit code 1, message identifies the context. |
 | Linked cloud context is stopped. | Starts the context, waits for readiness, then proceeds. If start fails, errors. |
 | Referenced image isn't in the registry. | Errors before `helm upgrade`; logs the missing image and the resolved registry. No partial deploy. |
+| Runtime chart isn't published at the requested version. | Errors with `runtime chart <ref> version <v> could not be pulled from <registry>` and how to recover — deploy a released version, or publish the chart (`erun deploy --publish` / a push-deploy). Common when a snapshot image was pushed but its chart never was. No partial deploy. |
 | Helm upgrade fails on step N. | The plan stops at step N. Steps 1..N-1 are committed; step N is in helm's failure state. Fix and rerun, or `helm rollback` that release. The rest of the plan is left untouched. |
 | `erun deploy <component>` for a component not in the plan. | Deploys the single component directly — that's the documented bypass. No error. |
 | Stale fingerprint cache. | Cache misses silently and the build/push runs as if it weren't cached. Use `--force` to bypass it explicitly. |

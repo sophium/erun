@@ -576,7 +576,7 @@ func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 // resolved container registry; resolveHelmChartPublishSpec fails when the
 // registry is empty so we never reach the package step without one.
 func applyDeploySpecPublish(spec *DeploySpec, publish bool) error {
-	if !publish || spec == nil {
+	if spec == nil {
 		return nil
 	}
 	// A published OCI chart is already in the registry; there is no local
@@ -584,13 +584,61 @@ func applyDeploySpecPublish(spec *DeploySpec, publish bool) error {
 	if isOCIChartReference(spec.DeployContext.ChartPath) {
 		return nil
 	}
-	publishSpec, err := resolveHelmChartPublishSpec(spec.DeployContext.ChartPath, spec.Deploy.Version, spec.Deploy.ContainerRegistry)
+	// Lockstep (#505: image and chart are one contract, published together):
+	// a deploy that builds and pushes the runtime image to a registry must also
+	// publish the runtime chart to that registry at the same version, so the
+	// pushed version is self-contained. Without this a snapshot push lands an
+	// image with no matching chart — which a remote env's deploy then 404s on,
+	// and the version picker would still offer. --publish forces publish for
+	// every resolved chart even without a push.
+	lockstepVersion, lockstep := runtimeChartLockstepPublish(*spec)
+	if !publish && !lockstep {
+		return nil
+	}
+	version := spec.Deploy.Version
+	registry := spec.Deploy.ContainerRegistry
+	if lockstep {
+		// The current-build deploy path stamps the snapshot version into the
+		// build image and leaves Deploy.Version empty (the chart is stamped
+		// locally), so take the version from the image being pushed.
+		if strings.TrimSpace(version) == "" {
+			version = lockstepVersion
+		}
+		// A local-build deploy with no marked registry pushes the runtime image
+		// to the default registry and leaves the deploy's --set containerRegistry
+		// empty; lockstep must still co-locate the chart with that image, so
+		// fall back to the default. --publish keeps its strict registry-required
+		// contract (publish_without_container_registry_errors) and does not.
+		if strings.TrimSpace(registry) == "" {
+			registry = DefaultContainerRegistry
+		}
+	}
+	publishSpec, err := resolveHelmChartPublishSpec(spec.DeployContext.ChartPath, version, registry)
 	if err != nil {
 		return err
 	}
 	spec.PublishChart = true
 	spec.Publish = publishSpec
 	return nil
+}
+
+// runtimeChartLockstepPublish reports whether the spec builds and pushes the
+// runtime image — the case lockstep must publish the runtime chart for — and
+// the version that image is tagged with, since the chart must publish at the
+// same version. Scoped to the runtime devops component: it is the chart remote
+// envs consume from the registry's /charts path, and the release path already
+// publishes it for release builds (so release deploys, which carry a version
+// override and therefore no local build, never double-publish here).
+func runtimeChartLockstepPublish(spec DeploySpec) (version string, ok bool) {
+	if spec.DeployContext.ComponentName != DevopsComponentName {
+		return "", false
+	}
+	for _, build := range spec.Builds {
+		if build.Push {
+			return strings.TrimSpace(build.Image.Version), true
+		}
+	}
+	return "", false
 }
 
 func ResolveDeploySpecForOpenResult(ctx Context, store DeployStore, findProjectRoot ProjectFinderFunc, resolveDockerBuildContext BuildContextResolverFunc, resolveKubernetesDeployContext DeployContextResolverFunc, now NowFunc, target OpenResult, componentName, versionOverride string) (DeploySpec, error) {
@@ -2014,12 +2062,37 @@ func DeployHelmChart(params HelmDeployParams) error {
 			Err:               helmErr,
 		}
 	}
+	// Match against the dedicated stderr capture, not helmOutput: helm errors
+	// land on stderr, and helmOutput doubles as cmd.Stdout so a stderr-only
+	// failure can race to empty there (the pending-operation check above reads
+	// stderr for the same reason).
+	if helmErr != nil && isOCIChartReference(params.ChartPath) && isHelmChartNotFoundMessage(stderr.String()) {
+		return &PublishedChartNotFoundError{
+			ChartReference: params.ChartPath,
+			Version:        params.Version,
+			Registry:       params.ContainerRegistry,
+			HelmOutput:     strings.TrimSpace(stderr.String()),
+			Err:            helmErr,
+		}
+	}
 	if helmErr != nil && params.Verbosity < VerbosityDebug {
 		if output := strings.TrimSpace(helmOutput.String()); output != "" {
 			return fmt.Errorf("%w\n%s", helmErr, output)
 		}
 	}
 	return helmErr
+}
+
+// isHelmChartNotFoundMessage reports whether helm's captured output indicates
+// the chart reference could not be resolved in the registry (a missing or
+// pruned OCI tag), as opposed to a rollout, values, or connectivity failure.
+// Scoped by the caller to OCI charts, it turns the opaque chart-pull exit
+// status into an actionable PublishedChartNotFoundError.
+func isHelmChartNotFoundMessage(output string) bool {
+	lower := strings.ToLower(output)
+	return strings.Contains(lower, "not found") ||
+		strings.Contains(lower, "manifest unknown") ||
+		strings.Contains(lower, "manifestunknown")
 }
 
 // tracePodWatchAction records the watcher action in the dry-run trace so the

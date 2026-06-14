@@ -987,6 +987,75 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/dry_run_local_docker_cwd_uses_current_build_for_owning_chart", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_lockstep_publishes_runtime_chart_when_image_pushed", func(t *testing.T) {
+		// Lockstep (#505: image and chart are one contract, published
+		// together): a snapshot deploy that builds and pushes the runtime
+		// (erun-devops) image must also publish the erun-devops chart to the
+		// registry's /charts path at the same version, so the pushed snapshot
+		// is deployable by envs that consume the published chart and the
+		// version picker only ever offers deployable versions. The tenant's
+		// devops chart is named erun-devops (DevopsComponentName); the registry
+		// list marks build+deploy; stubDockerNoLocalImages forces the
+		// rebuild+push path. The trace must show `helm package erun-devops` +
+		// `helm push erun-devops-<VERSION>.tgz oci://registry.example/test/charts`
+		// ahead of the helm upgrade — proving applyDeploySpecPublish's
+		// publish-on-push branch fires and resolveHelmChartPublishSpec targets
+		// the /charts path for the runtime chart.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "erun", "local")
+		fixture.SeedDevopsRepo(t, setup, "erun", "local")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "erun")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"containerregistries:\n"+
+				"    - registry: registry.example/test\n"+
+				"      roles: [build, deploy]\n",
+		)
+		// Run from the runtime build dir so resolveCurrentDockerComponentBuildForDeploy
+		// resolves the erun-devops image as the current build and the owning
+		// chart claims it — the deterministic way to reach the build+push path.
+		dockerDir := filepath.Join(setup.Cwd, "erun-devops", "docker", "erun-devops")
+		result := erun.Run(t, []string{"deploy", "--snapshot", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_lockstep_publishes_runtime_chart_when_image_pushed", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_published_chart_not_found_reports_actionable_error", func(t *testing.T) {
+		// Safety net: when the resolved published runtime chart is not pullable
+		// at the requested version (a snapshot image whose chart was never
+		// published, or a pruned tag), helm upgrade exits non-zero with a
+		// registry "not found" on stderr. DeployHelmChart must classify that
+		// into a PublishedChartNotFoundError naming the version + registry and
+		// pointing at the recovery (deploy a released version / publish first),
+		// instead of surfacing a bare "exit status 1". The helm stub fails the
+		// upgrade with a 404-shaped message; kubectl/docker succeed so the
+		// failure is isolated to the chart pull.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		// helm errors land on stderr; the stub scans every arg (the real argv
+		// carries --install, --wait, … before "upgrade") and fails the upgrade
+		// with a registry 404 shape.
+		fixture.StubBinaryWithScript(t, stubs, "helm", strings.Join([]string{
+			`for a in "$@"; do`,
+			`  if [ "$a" = "upgrade" ]; then`,
+			`    printf '%s\n' 'Error: failed to perform "FetchReference" on source: registry.example/test/charts/erun-devops: not found' >&2`,
+			`    exit 1`,
+			`  fi`,
+			`done`,
+			`exit 0`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the published chart is not found, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_published_chart_not_found_reports_actionable_error", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_snapshot_chart_image_scan_resolves_additional_builds", func(t *testing.T) {
 		// Exercises the chart image scan that discovers additional docker
 		// builds for a deploy: findDockerImagesInChart walks the chart's

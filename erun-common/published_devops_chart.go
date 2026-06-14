@@ -119,6 +119,37 @@ func publishedDevopsChartRegistry(target OpenResult) string {
 	return DefaultContainerRegistry
 }
 
+// PublishedChartNotFoundError reports that the published runtime chart a remote
+// deploy resolved to could not be pulled at the resolved version. The usual
+// cause is a version whose runtime image was pushed to the registry — so the
+// version picker offered it — but whose chart the release flow never published
+// (snapshots and unreleased versions are not published as charts), or a chart
+// tag that has since been pruned. It replaces helm's opaque chart-pull exit
+// status with an actionable message naming the version and registry.
+type PublishedChartNotFoundError struct {
+	ChartReference string
+	Version        string
+	Registry       string
+	HelmOutput     string
+	Err            error
+}
+
+func (e *PublishedChartNotFoundError) Error() string {
+	msg := "runtime chart " + strings.TrimSpace(e.ChartReference) + " version " + strings.TrimSpace(e.Version) + " could not be pulled"
+	if registry := strings.TrimSpace(e.Registry); registry != "" {
+		msg += " from " + registry
+	}
+	msg += ": this version's image may exist without a published chart " +
+		"(snapshots and unreleased versions are not published as charts). " +
+		"Deploy a released version with --version, or publish the chart first with `erun deploy --publish`."
+	if out := strings.TrimSpace(e.HelmOutput); out != "" {
+		msg += "\n" + out
+	}
+	return msg
+}
+
+func (e *PublishedChartNotFoundError) Unwrap() error { return e.Err }
+
 // resolveRuntimeImageOverride normalizes a custom runtime image: a full
 // reference (anything carrying a registry path or tag) is used verbatim; a
 // bare image name — the historical `--runtime-image <name>` shape — resolves
