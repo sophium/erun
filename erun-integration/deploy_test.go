@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -1054,6 +1055,49 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("expected non-zero exit when the published chart is not found, got 0:\n%s", result.Combined)
 		}
 		golden.Equal(t, "deploy/real_run_published_chart_not_found_reports_actionable_error", normalize.Apply(result.Combined))
+	})
+
+	t.Run("chart_content_is_part_of_the_fingerprint", func(t *testing.T) {
+		// Regression for the SkipHelm-drops-chart-changes gap: the runtime chart
+		// is a released artifact published in lockstep with the image at the same
+		// version, so a chart-only edit must move the component's fingerprint —
+		// otherwise the image promotes from cache and resolveDeploySkipHelm
+		// silently skips the chart change. The fingerprint hash is masked by
+		// normalization in goldens (fp-<HEX16>), so this asserts on the raw fp
+		// tag rather than a snapshot. stubDockerNoLocalImages forces the rebuild
+		// path so the fp tag is emitted.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "local")
+		fixture.SeedDevopsRepo(t, setup, "team", "local")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
+		fpRe := regexp.MustCompile(`team-devops:fp-([0-9a-f]{16})`)
+		runFP := func() string {
+			result := erun.Run(t, []string{"deploy", "team", "local", "--snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+			if result.ExitCode != 0 {
+				t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+			}
+			m := fpRe.FindStringSubmatch(result.Combined)
+			if m == nil {
+				t.Fatalf("no team-devops fingerprint tag in output:\n%s", result.Combined)
+			}
+			return m[1]
+		}
+		fp1 := runFP()
+		// Same content → same fingerprint (content-derived, time-independent), so
+		// any change below is attributable to the edit, not noise.
+		if fp2 := runFP(); fp1 != fp2 {
+			t.Fatalf("fingerprint not deterministic across identical runs: %s vs %s", fp1, fp2)
+		}
+		// Edit a chart file (lives outside the image build context) and re-resolve.
+		chartValues := filepath.Join(setup.Cwd, "team-devops", "k8s", "team-devops", "values.yaml")
+		existing, err := os.ReadFile(chartValues)
+		if err != nil {
+			t.Fatalf("read chart values: %v", err)
+		}
+		mustWriteFile(t, chartValues, string(existing)+"\n# chart-only edit: must move the fingerprint\n")
+		if fp3 := runFP(); fp3 == fp1 {
+			t.Fatalf("chart-only edit did not change the fingerprint (%s) — the chart is not part of the fingerprint", fp1)
+		}
 	})
 
 	t.Run("dry_run_snapshot_chart_image_scan_resolves_additional_builds", func(t *testing.T) {
