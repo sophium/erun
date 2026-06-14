@@ -1,0 +1,11 @@
+Remote init checks for team/dev:
+  marker file                 COMPLETE '<TMP>'
+  project root               OK '<TMP>'
+  git checkout               OK '<TMP>'
+  SSH keypair                OK '<TMP>'
+  agent skills               MISSING '<TMP>'
+Dry-run: would finish remote init by running the steps traced above.
+audit: erun doctor --dry-run --finish-remote-init
+cp -R <TMP> <TMP>
+cp -R <TMP> <TMP>
+write-yaml <TMP>

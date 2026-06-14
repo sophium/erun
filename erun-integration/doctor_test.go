@@ -158,6 +158,81 @@ func TestDoctor(t *testing.T) {
 		golden.Equal(t, "doctor/in_runtime_finish_remote_init_dry_run", normalize.Apply(result.Combined))
 	})
 
+	t.Run("in_runtime_skills_installed_dry_run", func(t *testing.T) {
+		// ERUN_SKILLS_DIR points doctor at the runtime image's baked-skills
+		// seam (/etc/erun/skills). When every baked skill is installed under
+		// ~/.claude/skills the workability check reports OK with nothing to
+		// finish.
+		setup := env.New(t)
+		projectRoot := filepath.Join(setup.Home, "git", "team")
+		bakedSkills := filepath.Join(setup.Home, "baked-skills")
+		for _, dir := range []string{
+			filepath.Join(projectRoot, ".git"),
+			filepath.Join(setup.Home, ".ssh"),
+			filepath.Join(bakedSkills, "erun-sample"),
+			filepath.Join(setup.Home, ".claude", "skills", "erun-sample"),
+			filepath.Join(setup.Home, ".erun", "team", "dev"),
+		} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		mustWriteFile(t, filepath.Join(setup.Home, ".ssh", "id_ed25519"), "stub\n")
+		mustWriteFile(t, filepath.Join(bakedSkills, "erun-sample", "SKILL.md"), "sample\n")
+		mustWriteFile(t, filepath.Join(setup.Home, ".claude", "skills", "erun-sample", "SKILL.md"), "sample\n")
+		mustWriteFile(t, filepath.Join(setup.Home, ".erun", "team", "dev", "bootstrap.yaml"),
+			"tenant: team\nenvironment: dev\nproject_root: "+projectRoot+"\nrepository_url: git@example.com:team/repo.git\nbootstrap_complete: true\n")
+		envVars := append(setup.Env(),
+			"ERUN_REPO_REMOTE=true",
+			"ERUN_TENANT=team",
+			"ERUN_ENVIRONMENT=dev",
+			"ERUN_REPO_PATH="+projectRoot,
+			"ERUN_SKILLS_DIR="+bakedSkills,
+		)
+		result := erun.Run(t, []string{"doctor", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/in_runtime_skills_installed_dry_run", normalize.Apply(result.Combined))
+	})
+
+	t.Run("in_runtime_finish_skills_dry_run", func(t *testing.T) {
+		// Baked skills exist but none are installed under ~/.claude/skills, so
+		// the workability check is MISSING. Project root, git, and ssh are in
+		// place so skills are the only missing artifact; with
+		// --finish-remote-init in dry-run doctor must trace the cp into both
+		// ~/.claude/skills and ~/.codex/skills.
+		setup := env.New(t)
+		projectRoot := filepath.Join(setup.Home, "git", "team")
+		bakedSkills := filepath.Join(setup.Home, "baked-skills")
+		for _, dir := range []string{
+			filepath.Join(projectRoot, ".git"),
+			filepath.Join(setup.Home, ".ssh"),
+			filepath.Join(bakedSkills, "erun-sample"),
+			filepath.Join(setup.Home, ".erun", "team", "dev"),
+		} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		mustWriteFile(t, filepath.Join(setup.Home, ".ssh", "id_ed25519"), "stub\n")
+		mustWriteFile(t, filepath.Join(bakedSkills, "erun-sample", "SKILL.md"), "sample\n")
+		mustWriteFile(t, filepath.Join(setup.Home, ".erun", "team", "dev", "bootstrap.yaml"),
+			"tenant: team\nenvironment: dev\nproject_root: "+projectRoot+"\nrepository_url: git@example.com:team/repo.git\nbootstrap_complete: true\n")
+		envVars := append(setup.Env(),
+			"ERUN_REPO_REMOTE=true",
+			"ERUN_TENANT=team",
+			"ERUN_ENVIRONMENT=dev",
+			"ERUN_REPO_PATH="+projectRoot,
+			"ERUN_SKILLS_DIR="+bakedSkills,
+		)
+		result := erun.Run(t, []string{"doctor", "--dry-run", "--finish-remote-init"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "doctor/in_runtime_finish_skills_dry_run", normalize.Apply(result.Combined))
+	})
+
 	t.Run("in_runtime_finish_remote_init_codecommit_dry_run", func(t *testing.T) {
 		// The marker records a CodeCommit URL and the IAM SSH public
 		// key ID, but bootstrap_complete=false and the .git checkout

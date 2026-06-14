@@ -1,0 +1,8 @@
+Remote init checks for team/dev:
+  marker file                 COMPLETE '<TMP>'
+  project root               OK '<TMP>'
+  git checkout               OK '<TMP>'
+  SSH keypair                OK '<TMP>'
+  agent skills               OK '<TMP>'
+Remote init is complete; nothing to finish.
+audit: erun doctor --dry-run
