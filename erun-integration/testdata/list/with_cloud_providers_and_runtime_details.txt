@@ -36,7 +36,7 @@ Tenants:
           api-url: http://<LOOPBACK>:17033
           ssh-port: 17022
           contribute-app-port: 17050
-          container-registry: registry.example/test
+          container-registries: registry.example/test[build,deploy]
           runtime-version: <VERSION>
           runtime-pod: cpu=2 memory=4Gi
           managed-cloud: off

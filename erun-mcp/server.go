@@ -220,11 +220,11 @@ func newServer(info eruncommon.BuildInfo, runtime RuntimeConfig) *mcp.Server {
 	}, buildTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "push",
-		Description: "Build and push the project's container images to the registry for the resolved tenant/environment. The push step of the build → release → push → deploy flow.",
+		Description: "Build and push the project's container images to the BUILD-marked registry for the resolved tenant/environment. The push step of the build → release → push → deploy flow.",
 	}, pushTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "deploy",
-		Description: "Roll the project's charts out to the resolved tenant/environment: build and push the images they need, then run the rollout. The deploy step of the build → release → push → deploy flow.",
+		Description: "Roll the project's charts out to the resolved tenant/environment: build and push the images they need, mirror them from the FROM to the TO registry when both roles are marked, then run the rollout with the cluster pulling from the DEPLOY registry. The deploy step of the build → release → push → deploy flow.",
 	}, deployTool(runtime))
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "upgrade",

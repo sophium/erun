@@ -57,7 +57,7 @@ One per environment. This is the most-edited file.
 | `localRepoPath` | string | helm chart (`worktreeHostPath` for `local-agent` envs), `erun deploy` (project-config load, registry resolution) | Absolute path to the repo on the local machine. Only meaningful for `local-agent` envs; left empty for `remote-agent` and `runtime`. |
 | `repopath` | string | (legacy) helm chart (`worktreeHostPath`), `erun deploy` (project-config load, registry resolution) | Legacy path field. Kept for backward compatibility with envs created before `localRepoPath` existed; new envs use `localRepoPath` instead. ([Planned removal.](#planned-changes)) |
 | `kubernetescontext` | string | `erun open`, `erun deploy`, `erun list` | Kubernetes context to deploy/open against. Special value `in-cluster` is set inside the runtime pod. |
-| `containerregistry` | string | `erun build`, `erun push`, `erun deploy`, build image tag resolution | Highest-precedence registry for images this env produces or pulls. Becomes the `<registry>` portion of the image tag. |
+| `containerregistries` | list | `erun build`, `erun push`, `erun deploy`, build image tag resolution | Per-env marked registry list, set for `remote-agent`/`runtime` envs whose project config is not on the local machine (`local-agent` envs resolve the list from the project's `.erun/config.yaml` instead). Each entry is `{registry, roles}` where roles ⊆ `build`/`from`/`to`/`deploy`. See [Container registries](#container-registries). |
 | `cloudprovideralias` | string | `erun open`, `erun deploy`, idle-stop, audit labels | Which cloud provider identity backs this env. Resolves to the `cloudproviders[]` entry. |
 | `managedcloud` | bool | helm chart (`ERUN_CLOUD_ENVIRONMENT`) | When true, marks the env as running on a managed cloud context (enables idle-stop, cloud-credential refresh, etc.). |
 | `runtimeversion` | string | `erun open`, `erun deploy`, chart appVersion | Pins the version of the runtime image used by this env. |
@@ -102,9 +102,9 @@ Committed to the repo, applies to anyone who checks it out.
 
 | Field | Type | Used by | Effect |
 |---|---|---|---|
-| `containerregistry` | string | `erun build`, `erun push`, `erun deploy`, build image tag resolution | Project-wide fallback registry. Lower precedence than `EnvConfig.containerregistry`. |
+| `containerregistries` | list | `erun build`, `erun push`, `erun deploy`, build image tag resolution | Project-wide marked registry list. Each entry is `{registry, roles}` with roles ⊆ `build`/`from`/`to`/`deploy`. See [Container registries](#container-registries). |
 | `environments` | map | per-env settings (below) | Map of `<env-name> → ProjectEnvironmentConfig`. |
-| `environments.<env>.containerregistry` | string | `erun build`, `erun push`, `erun deploy` | Per-env registry override. Higher precedence than the top-level project registry, lower than `EnvConfig.containerregistry`. |
+| `environments.<env>.containerregistries` | list | `erun build`, `erun push`, `erun deploy` | Per-env marked registry list override. Higher precedence than the top-level project list. |
 | `environments.<env>.docker.fingerprints` | map | `erun build`, `erun build --release` | Per-image content fingerprints from the last published build. Drives the [fingerprint cache](/agent-reference/conventions-spec#fingerprint-cache). |
 | `environments.<env>.k8s.deployments[]` | ordered list | `erun deploy` | The ordered deploy plan for this env. Each step is either a single component name or a list of names deployed in parallel. |
 | `release.mainbranch` | string | `erun release` | Main branch name (default `main`). |
@@ -183,12 +183,40 @@ runtime:
 
 Some values can be set in multiple layers. When that happens, ERun consults them in a fixed order.
 
-### Container registry (for the image tag)
+### Container registries
 
-1. `EnvConfig.containerregistry` (per-user, per-env).
-2. `ProjectConfig.environments.<env>.containerregistry` (per-project, per-env).
-3. `ProjectConfig.containerregistry` (per-project, top-level).
-4. Built-in default (`ghcr.io/sophium`).
+A project declares a **list** of registries, each marked with the roles it plays. The list resolves per environment, then individual registries are selected by role.
+
+**Resolving the list for an environment:**
+
+1. `EnvConfig.containerregistries` (per-user, per-env — set for `remote-agent`/`runtime` envs).
+2. `ProjectConfig.environments.<env>.containerregistries` (per-project, per-env override).
+3. `ProjectConfig.containerregistries` (per-project, top-level).
+4. Built-in default seed: a single `ghcr.io/sophium` entry marked `build` + `deploy`.
+
+**Roles** (each entry carries any subset):
+
+| Role | Meaning | Count |
+|---|---|---|
+| `build` | `erun build`/`erun push` push target; the `<registry>` of the build image tag. | ≤ 1 |
+| `from` | Copy source on deploy. | ≤ 1 |
+| `to` | Copy destination(s) on deploy. | ≥ 0 |
+| `deploy` | Registry the cluster pulls from (rendered as `containerRegistry` in the chart). | ≥ 1 (required) |
+
+**Role rules** (validated when the list is resolved for build or deploy):
+
+- At most one `build`, at most one `from`; at least one `deploy`.
+- `from` and `to` are set together and must name different registries.
+- More than one `deploy` → the first wins.
+
+A `deploy` registry need not also carry `build` or `to`: the image it serves may be published there externally (e.g. a runtime env that pulls a released image), which erun does not police at config time.
+
+**Behaviour:**
+
+- **Build** pushes to the `build` registry. No `build` registry → the environment cannot build (`erun build` aborts: `environment "<env>" has no build registry`; exit code 1).
+- **Deploy** copies each image the cluster needs (the runtime image and any locally-built component) from `from` to every `to` with `docker buildx imagetools create` (manifest-aware), then the cluster pulls from the `deploy` registry. The copy runs only when both `from` and `to` are set.
+
+**Migration:** a legacy single `containerregistry: X` scalar (project or env config) is read once as a one-entry list `[{registry: X, roles: [build, deploy]}]` and rewritten in the list shape on the next save.
 
 ### Kubernetes context
 

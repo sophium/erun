@@ -349,11 +349,16 @@ func buildDeployArgs(selection uiSelection) []string {
 
 // buildUpgradeArgs builds the per-environment `erun upgrade` invocation:
 // scoped to the selection's tenant + environment so each Upgrade-all member
-// upgrades in its own env, in parallel with the others (issue #497).
+// upgrades in its own env, in parallel with the others (issue #497). A
+// selection Version pins the exact target — used when the operator picked one
+// of several newer versions an env's registries offered (issue #527).
 func buildUpgradeArgs(selection uiSelection) []string {
-	return []string{"upgrade", "--tenant", selection.Tenant, "--environment", selection.Environment}
+	args := []string{"upgrade", "--tenant", selection.Tenant, "--environment", selection.Environment}
+	if version := strings.TrimSpace(selection.Version); version != "" {
+		args = append(args, "--version", version)
+	}
+	return args
 }
-
 
 func buildCloudInitAWSArgs() []string {
 	return []string{"cloud", "init", "aws"}

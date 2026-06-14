@@ -527,6 +527,20 @@ function setEnv(settings, name, value) {
   settings.env[name] = normalized;
 }
 
+// setBoolEnv writes name=1 only when the value is an enabled flag; otherwise it
+// removes any existing entry. Claude Code treats CLAUDE_CODE_USE_BEDROCK /
+// CLAUDE_CODE_USE_MANTLE as present-or-absent, not 1/0, so writing "0" would
+// *enable* them — the variable must be omitted (and any stale "0" deleted) to
+// disable.
+function setBoolEnv(settings, name) {
+  const normalized = envValue(name).toLowerCase();
+  if (normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on') {
+    settings.env[name] = '1';
+  } else {
+    delete settings.env[name];
+  }
+}
+
 function listValue(value) {
   const result = [];
   const seen = new Set();
@@ -547,8 +561,8 @@ if (configureBedrock) {
   settings.$schema = settings.$schema || 'https://json.schemastore.org/claude-code-settings.json';
   settings.env = ensureObject(settings, 'env');
 
-  setEnv(settings, 'CLAUDE_CODE_USE_BEDROCK', envValue('CLAUDE_CODE_USE_BEDROCK', '1'));
-  setEnv(settings, 'CLAUDE_CODE_USE_MANTLE', envValue('CLAUDE_CODE_USE_MANTLE', '1'));
+  setBoolEnv(settings, 'CLAUDE_CODE_USE_BEDROCK');
+  setBoolEnv(settings, 'CLAUDE_CODE_USE_MANTLE');
   setEnv(settings, 'AWS_REGION', region);
   setEnv(settings, 'ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION', envValue('ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION', region));
   setEnv(settings, 'CLAUDE_CODE_MAX_OUTPUT_TOKENS', envValue('CLAUDE_CODE_MAX_OUTPUT_TOKENS', '4096'));
@@ -686,6 +700,25 @@ normalize_ssh_key_permissions() {
     find "${ssh_dir}" -mindepth 1 -maxdepth 1 -type f ! -name '*.pub' -exec chmod 600 {} + 2>/dev/null || true
 }
 
+# pid_running reports whether PID file $1 holds a live process whose
+# /proc/<pid>/cmdline matches $2. The sshd and ssh-proxy PID files live on the
+# persistent /home/erun PVC and survive pod restarts, but each pod gets a fresh
+# PID namespace that recycles low PIDs — so a stale PID written by a previous
+# pod can collide with an unrelated live process in this one (a previous pod's
+# ssh-proxy PID matching this pod's sshd, for example). A bare `kill -0` would
+# then report the process as running and the caller would skip (re)starting it,
+# leaving nothing listening on the SSH port. Matching the command line closes
+# that gap. Distinct `_`-prefixed locals avoid clobbering the caller's globals.
+pid_running() {
+    _pidfile="$1"
+    _pat="$2"
+    [ -r "${_pidfile}" ] || return 1
+    _pid=$(cat "${_pidfile}" 2>/dev/null) || return 1
+    [ -n "${_pid}" ] || return 1
+    kill -0 "${_pid}" 2>/dev/null || return 1
+    tr '\0' ' ' < "/proc/${_pid}/cmdline" 2>/dev/null | grep -q "${_pat}"
+}
+
 start_sshd() {
     if ! runtime_sshd_enabled; then
         return
@@ -702,7 +735,7 @@ start_sshd() {
     mkdir -p "${HOME}/.ssh" "${host_key_dir}"
     chmod 700 "${HOME}/.ssh" "${sshd_dir}" "${host_key_dir}"
 
-    if [ ! -r "${pid_file}" ] || ! kill -0 "$(cat "${pid_file}")" 2>/dev/null; then
+    if ! pid_running "${pid_file}" "sshd"; then
         rm -f "${pid_file}"
 
         host_key="${host_key_dir}/ssh_host_ed25519_key"
@@ -735,7 +768,7 @@ EOF
         /usr/sbin/sshd -f "${config_file}" -E "${sshd_dir}/sshd.log"
     fi
 
-    if [ -r "${proxy_pid_file}" ] && kill -0 "$(cat "${proxy_pid_file}")" 2>/dev/null; then
+    if pid_running "${proxy_pid_file}" "ssh-proxy"; then
         return
     fi
     rm -f "${proxy_pid_file}"

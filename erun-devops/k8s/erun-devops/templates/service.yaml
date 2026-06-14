@@ -71,7 +71,7 @@ docs/concepts/environment-types for the type→storage mapping.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: erun-devops-home
+  name: {{ .Release.Name }}-home
   labels:
     app: erun-devops
 spec:
@@ -84,7 +84,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: erun-devops-docker
+  name: {{ .Release.Name }}-docker
   labels:
     app: erun-devops
 spec:
@@ -98,7 +98,7 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: erun-devops-worktree
+  name: {{ .Release.Name }}-worktree
   labels:
     app: erun-devops
 spec:
@@ -112,19 +112,19 @@ spec:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: erun-devops
+  name: {{ .Release.Name }}
   labels:
     app: erun-devops
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: erun-devops
+  name: {{ .Release.Name }}
   labels:
     app: erun-devops
 subjects:
   - kind: ServiceAccount
-    name: erun-devops
+    name: {{ .Release.Name }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -134,7 +134,7 @@ roleRef:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: erun-devops-namespace-manager
+  name: {{ .Release.Name }}-namespace-manager
   labels:
     app: erun-devops
 rules:
@@ -150,12 +150,12 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: erun-devops
+  name: {{ .Release.Name }}
   labels:
     app: erun-devops
 subjects:
   - kind: ServiceAccount
-    name: erun-devops
+    name: {{ .Release.Name }}
     namespace: {{ .Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
@@ -165,23 +165,23 @@ roleRef:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: erun-devops-namespace-manager
+  name: {{ .Release.Name }}-namespace-manager
   labels:
     app: erun-devops
 subjects:
   - kind: ServiceAccount
-    name: erun-devops
+    name: {{ .Release.Name }}
     namespace: {{ .Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: erun-devops-namespace-manager
+  name: {{ .Release.Name }}-namespace-manager
 ---
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: erun-devops
+  name: {{ .Release.Name }}
   labels:
     app: erun-devops
 spec:
@@ -197,7 +197,7 @@ spec:
         app: erun-devops
     spec:
       automountServiceAccountToken: true
-      serviceAccountName: erun-devops
+      serviceAccountName: {{ .Release.Name }}
       securityContext:
         fsGroup: 1000
       initContainers:
@@ -243,10 +243,14 @@ spec:
             - name: AWS_PROFILE
               value: "erun-host"
             {{ end }}
+            {{- if eq $claudeUseBedrock "1" }}
             - name: CLAUDE_CODE_USE_BEDROCK
-              value: {{ $claudeUseBedrock | quote }}
+              value: "1"
+            {{- end }}
+            {{- if eq $claudeUseMantle "1" }}
             - name: CLAUDE_CODE_USE_MANTLE
-              value: {{ $claudeUseMantle | quote }}
+              value: "1"
+            {{- end }}
             - name: AWS_REGION
               value: {{ $cloudRegion | quote }}
             - name: ANTHROPIC_SMALL_FAST_MODEL_AWS_REGION
@@ -418,7 +422,7 @@ spec:
       volumes:
         - name: erun-home
           persistentVolumeClaim:
-            claimName: erun-devops-home
+            claimName: {{ .Release.Name }}-home
         {{- if eq $worktreeStorage "host" }}
         - name: repo-worktree
           hostPath:
@@ -427,11 +431,11 @@ spec:
         {{- else if eq $worktreeStorage "pvc" }}
         - name: repo-worktree
           persistentVolumeClaim:
-            claimName: erun-devops-worktree
+            claimName: {{ .Release.Name }}-worktree
         {{- end }}
         - name: docker-socket
           emptyDir: {}
         - name: docker-state
           persistentVolumeClaim:
-            claimName: erun-devops-docker
+            claimName: {{ .Release.Name }}-docker
       restartPolicy: Always

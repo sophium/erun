@@ -152,7 +152,7 @@ func TestLoadVersionSuggestionsFiltersOutMissingTenantImageTags(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected suggestions: got %+v want %+v", suggestions, want)
 	}
-	if suggestions[0].Label != "frs latest stable" || suggestions[0].Image != "frs-devops" || suggestions[3].Label != "ERun current" || suggestions[3].Image != eruncommon.DefaultRuntimeImageName {
+	if suggestions[0].Label != "frs latest stable" || suggestions[0].Image != eruncommon.DefaultContainerRegistry+"/frs-devops" || suggestions[3].Label != "ERun current" || suggestions[3].Image != eruncommon.DefaultContainerRegistry+"/"+eruncommon.DefaultRuntimeImageName {
 		t.Fatalf("unexpected suggestion metadata: %+v", suggestions)
 	}
 }
@@ -200,6 +200,44 @@ func TestLoadVersionSuggestionsUsesEnvPersistedRuntimeRegistry(t *testing.T) {
 	}
 	if tenantImageNamespace != customRegistry {
 		t.Fatalf("tenant runtime image queried namespace %q, want %q", tenantImageNamespace, customRegistry)
+	}
+}
+
+func TestLoadVersionSuggestionsQueriesEachListedRegistry(t *testing.T) {
+	// #527: the version picker must query every registry in the env's marked
+	// list, so an offered version can come from any listed registry and carries
+	// its source. Here the env lists build+from on a public registry and
+	// to+deploy on a mirror; both are queried for the tenant image.
+	queried := map[string]bool{}
+	app := NewApp(erunUIDeps{
+		store: stubUIStore{
+			envs: map[string]eruncommon.EnvConfig{
+				"team/prod": {
+					Name: "prod",
+					ContainerRegistries: eruncommon.ContainerRegistries{
+						{Registry: "ghcr.io/acme", Roles: []eruncommon.RegistryRole{eruncommon.RegistryRoleBuild, eruncommon.RegistryRoleFrom}},
+						{Registry: "registry.internal/acme", Roles: []eruncommon.RegistryRole{eruncommon.RegistryRoleTo, eruncommon.RegistryRoleDeploy}},
+					},
+				},
+			},
+		},
+		resolveBuildInfo: func() eruncommon.BuildInfo { return eruncommon.BuildInfo{Version: "1.0.50"} },
+		resolveImageRegistry: func(_ context.Context, namespace, repository string) (eruncommon.RuntimeRegistryVersions, error) {
+			if repository == "team-devops" {
+				queried[namespace] = true
+				return eruncommon.RuntimeRegistryVersions{Image: namespace + "/" + repository, Tags: []string{"1.0.11"}, LatestStable: "1.0.11"}, nil
+			}
+			return eruncommon.RuntimeRegistryVersions{Image: namespace + "/" + repository}, nil
+		},
+	})
+
+	if _, err := app.LoadVersionSuggestions(uiSelection{Tenant: "team", Environment: "prod"}); err != nil {
+		t.Fatalf("LoadVersionSuggestions failed: %v", err)
+	}
+	for _, want := range []string{"ghcr.io/acme", "registry.internal/acme"} {
+		if !queried[want] {
+			t.Fatalf("expected the tenant image to be queried at %q; queried=%v", want, queried)
+		}
 	}
 }
 
@@ -338,7 +376,7 @@ func TestLoadVersionSuggestionsForInitUsesAvailableRuntimeImageTags(t *testing.T
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("unexpected suggestions: got %+v want %+v", suggestions, want)
 	}
-	if suggestions[0].Image != "test-devops" || suggestions[1].Image != eruncommon.DefaultRuntimeImageName {
+	if suggestions[0].Image != eruncommon.DefaultContainerRegistry+"/test-devops" || suggestions[1].Image != eruncommon.DefaultContainerRegistry+"/"+eruncommon.DefaultRuntimeImageName {
 		t.Fatalf("unexpected suggestion metadata: %+v", suggestions)
 	}
 }
@@ -1746,7 +1784,7 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	store := stubUIStore{
 		config: rootConfig,
 		projectConfigs: map[string]eruncommon.ProjectConfig{
-			projectRoot: {ContainerRegistry: "registry.example/project"},
+			projectRoot: {ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/project")},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
 			"frs": {
@@ -1756,12 +1794,12 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/prod": {
-				Name:               "prod",
-				RepoPath:           projectRoot,
-				KubernetesContext:  "cluster-old",
-				ContainerRegistry:  "registry.example/old",
-				CloudProviderAlias: "team-cloud",
-				RuntimeVersion:     "1.0.0",
+				Name:                "prod",
+				RepoPath:            projectRoot,
+				KubernetesContext:   "cluster-old",
+				ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/old"),
+				CloudProviderAlias:  "team-cloud",
+				RuntimeVersion:      "1.0.0",
 				RuntimePod: eruncommon.RuntimePodResources{
 					CPU:    "4",
 					Memory: "8916Mi",
@@ -1788,10 +1826,12 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	assertLoadedEnvironmentConfig(t, loaded, projectRoot)
 
 	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "prod"}, uiEnvironmentConfig{
-		Name:               "prod",
-		RepoPath:           " /tmp/repo ",
-		KubernetesContext:  " cluster-new ",
-		ContainerRegistry:  " registry.example/team ",
+		Name:              "prod",
+		RepoPath:          " /tmp/repo ",
+		KubernetesContext: " cluster-new ",
+		ContainerRegistries: []uiContainerRegistryEntry{
+			{Registry: " registry.example/team ", Roles: []string{"build", "deploy"}},
+		},
 		CloudProviderAlias: " other-cloud ",
 		RuntimeVersion:     " 1.2.3 ",
 		RuntimePod: uiRuntimePodConfig{
@@ -1832,13 +1872,26 @@ func assertLoadedEnvironmentConfig(t *testing.T, loaded uiEnvironmentConfig, pro
 func assertSavedEnvironmentConfig(t *testing.T, saved uiEnvironmentConfig, projectRoot string) {
 	t.Helper()
 
-	if saved.RepoPath != projectRoot || saved.KubernetesContext != "cluster-old" || saved.ContainerRegistry != "registry.example/team" || saved.RuntimeVersion != "1.0.0" || saved.CloudProviderAlias != "other-cloud" {
+	if saved.RepoPath != projectRoot || saved.KubernetesContext != "cluster-old" || uiRegistryWithRole(saved.ContainerRegistries, "build") != "registry.example/team" || saved.RuntimeVersion != "1.0.0" || saved.CloudProviderAlias != "other-cloud" {
 		t.Fatalf("unexpected saved config: %+v", saved)
 	}
 	if saved.RuntimePod.CPU != "6" || saved.RuntimePod.Memory != "12Gi" {
 		t.Fatalf("unexpected saved runtime pod config: %+v", saved.RuntimePod)
 	}
 	assertLocalPorts(t, saved.LocalPorts)
+}
+
+// uiRegistryWithRole returns the registry in the desktop editor's row list that
+// carries the given role, or "" when none does.
+func uiRegistryWithRole(entries []uiContainerRegistryEntry, role string) string {
+	for _, entry := range entries {
+		for _, candidate := range entry.Roles {
+			if candidate == role {
+				return entry.Registry
+			}
+		}
+	}
+	return ""
 }
 
 func assertLocalPorts(t *testing.T, ports uiEnvironmentLocalPorts) {
@@ -1852,7 +1905,8 @@ func assertLocalPorts(t *testing.T, ports uiEnvironmentLocalPorts) {
 func assertStoredEnvironmentConfig(t *testing.T, stored eruncommon.EnvConfig, projectRoot string) {
 	t.Helper()
 
-	if stored.RepoPath != projectRoot || stored.Remote || stored.RuntimeVersion != "1.0.0" || stored.ContainerRegistry != "registry.example/team" || stored.CloudProviderAlias != "other-cloud" || stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" || stored.Snapshot == nil || *stored.Snapshot {
+	storedRegistry, _ := stored.ContainerRegistries.BuildRegistry()
+	if stored.RepoPath != projectRoot || stored.Remote || stored.RuntimeVersion != "1.0.0" || storedRegistry != "registry.example/team" || stored.CloudProviderAlias != "other-cloud" || stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" || stored.Snapshot == nil || *stored.Snapshot {
 		t.Fatalf("unexpected stored config: %+v", stored)
 	}
 	if stored.RuntimePod.CPU != "6" || stored.RuntimePod.Memory != "12Gi" {
@@ -1865,9 +1919,9 @@ func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *
 	store := stubUIStore{
 		projectConfigs: map[string]eruncommon.ProjectConfig{
 			projectRoot: {
-				ContainerRegistry: "registry.example/shared",
+				ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/shared"),
 				Environments: map[string]eruncommon.ProjectEnvironmentConfig{
-					"prod": {ContainerRegistry: "registry.example/prod"},
+					"prod": {ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/prod")},
 				},
 			},
 		},
@@ -1896,7 +1950,7 @@ func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *
 	if err != nil {
 		t.Fatalf("LoadEnvironmentConfig local failed: %v", err)
 	}
-	if local.ContainerRegistry != "registry.example/shared" {
+	if uiRegistryWithRole(local.ContainerRegistries, "build") != "registry.example/shared" {
 		t.Fatalf("expected local env to use project-wide registry, got %+v", local)
 	}
 
@@ -1904,7 +1958,7 @@ func TestLoadEnvironmentConfigUsesProjectContainerRegistryForAllEnvironments(t *
 	if err != nil {
 		t.Fatalf("LoadEnvironmentConfig prod failed: %v", err)
 	}
-	if prod.ContainerRegistry != "registry.example/prod" {
+	if uiRegistryWithRole(prod.ContainerRegistries, "build") != "registry.example/prod" {
 		t.Fatalf("expected prod env to use environment registry override, got %+v", prod)
 	}
 }
@@ -1913,7 +1967,7 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 	projectRoot := t.TempDir()
 	store := stubUIStore{
 		projectConfigs: map[string]eruncommon.ProjectConfig{
-			projectRoot: {ContainerRegistry: "registry.example/shared"},
+			projectRoot: {ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/shared")},
 		},
 		tenants: map[string]eruncommon.TenantConfig{
 			"frs": {
@@ -1952,12 +2006,115 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 	if err != nil {
 		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
 	}
-	if saved.ContainerRegistry != "registry.example/shared" {
+	if uiRegistryWithRole(saved.ContainerRegistries, "build") != "registry.example/shared" {
 		t.Fatalf("expected saved UI config to keep effective project registry, got %+v", saved)
 	}
 	stored := store.envs["frs/local"]
-	if stored.ContainerRegistry != "" {
+	if len(stored.ContainerRegistries) != 0 {
 		t.Fatalf("expected env save not to copy project registry into env config, got %+v", stored)
+	}
+}
+
+// TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig pins the
+// #527 desktop editor: editing a local-agent env's marked registry list writes
+// it to the project's .erun/config.yaml (where the build/deploy resolvers read
+// it), not to the env config, and the saved UI round-trips the full list.
+func TestSaveEnvironmentConfigWritesLocalAgentRegistryListToProjectConfig(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		projectConfigs: map[string]eruncommon.ProjectConfig{
+			projectRoot: {ContainerRegistries: eruncommon.SingleContainerRegistries("ghcr.io/acme")},
+		},
+		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs", ProjectRoot: projectRoot}},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/local": {Name: "local", RepoPath: projectRoot, KubernetesContext: "c", Type: eruncommon.EnvironmentTypeLocalAgent},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+		Name:              "local",
+		RepoPath:          projectRoot,
+		KubernetesContext: "c",
+		Type:              eruncommon.EnvironmentTypeLocalAgent,
+		ContainerRegistries: []uiContainerRegistryEntry{
+			{Registry: "ghcr.io/acme", Roles: []string{"build", "from"}},
+			{Registry: "registry.internal/acme", Roles: []string{"to", "deploy"}},
+		},
+		Idle: uiIdleConfig{Timeout: eruncommon.DefaultEnvironmentIdleTimeout.String(), WorkingHours: eruncommon.DefaultEnvironmentWorkingHours},
+	})
+	if err != nil {
+		t.Fatalf("SaveEnvironmentConfig: %v", err)
+	}
+	if len(store.envs["frs/local"].ContainerRegistries) != 0 {
+		t.Fatalf("a local-agent env must not carry the list on env config, got %+v", store.envs["frs/local"].ContainerRegistries)
+	}
+	list := store.projectConfigs[projectRoot].ContainerRegistriesForEnvironment("local")
+	if from, ok := list.FromRegistry(); !ok || from != "ghcr.io/acme" {
+		t.Fatalf("expected from=ghcr.io/acme in project config, got %+v", list)
+	}
+	if deploy, ok := list.DeployRegistry(); !ok || deploy != "registry.internal/acme" {
+		t.Fatalf("expected deploy=registry.internal/acme in project config, got %+v", list)
+	}
+	if uiRegistryWithRole(saved.ContainerRegistries, "deploy") != "registry.internal/acme" {
+		t.Fatalf("saved UI must reflect the edited list, got %+v", saved.ContainerRegistries)
+	}
+}
+
+// TestSaveEnvironmentConfigRejectsInvalidRegistryList confirms the marker
+// invariants are enforced on save and surfaced as an error (a list with no
+// deploy registry is rejected before persistence).
+func TestSaveEnvironmentConfigRejectsInvalidRegistryList(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs", ProjectRoot: projectRoot}},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/local": {Name: "local", RepoPath: projectRoot, Type: eruncommon.EnvironmentTypeLocalAgent},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	_, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "local"}, uiEnvironmentConfig{
+		Name:     "local",
+		RepoPath: projectRoot,
+		Type:     eruncommon.EnvironmentTypeLocalAgent,
+		ContainerRegistries: []uiContainerRegistryEntry{
+			{Registry: "ghcr.io/acme", Roles: []string{"build"}},
+		},
+		Idle: uiIdleConfig{Timeout: eruncommon.DefaultEnvironmentIdleTimeout.String(), WorkingHours: eruncommon.DefaultEnvironmentWorkingHours},
+	})
+	if err == nil {
+		t.Fatal("expected a validation error for a registry list with no deploy registry")
+	}
+}
+
+// TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry pins that a registry
+// marked deploy-only is valid: the image it serves may be published there
+// externally (a runtime env pulling a released image), so erun must not force
+// a build or to role on it (issue #527 follow-up).
+func TestSaveEnvironmentConfigAcceptsDeployOnlyRegistry(t *testing.T) {
+	projectRoot := t.TempDir()
+	store := stubUIStore{
+		tenants: map[string]eruncommon.TenantConfig{"frs": {Name: "frs", ProjectRoot: projectRoot}},
+		envs: map[string]eruncommon.EnvConfig{
+			"frs/prod": {Name: "prod", RepoPath: projectRoot, Type: eruncommon.EnvironmentTypeRuntime},
+		},
+	}
+	app := NewApp(erunUIDeps{store: store})
+
+	saved, err := app.SaveEnvironmentConfig(uiSelection{Tenant: "frs", Environment: "prod"}, uiEnvironmentConfig{
+		Name: "prod",
+		Type: eruncommon.EnvironmentTypeRuntime,
+		ContainerRegistries: []uiContainerRegistryEntry{
+			{Registry: "ghcr.io/sophium", Roles: []string{"deploy"}},
+		},
+		Idle: uiIdleConfig{Timeout: eruncommon.DefaultEnvironmentIdleTimeout.String(), WorkingHours: eruncommon.DefaultEnvironmentWorkingHours},
+	})
+	if err != nil {
+		t.Fatalf("deploy-only registry must be accepted, got %v", err)
+	}
+	if uiRegistryWithRole(saved.ContainerRegistries, "deploy") != "ghcr.io/sophium" {
+		t.Fatalf("expected the deploy-only registry to persist, got %+v", saved.ContainerRegistries)
 	}
 }
 
@@ -2140,10 +2297,10 @@ func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
 		},
 		envs: map[string]eruncommon.EnvConfig{
 			"frs/prod": {
-				Name:              "prod",
-				RepoPath:          projectRoot,
-				KubernetesContext: "cluster-prod",
-				ContainerRegistry: "registry.example/keep",
+				Name:                "prod",
+				RepoPath:            projectRoot,
+				KubernetesContext:   "cluster-prod",
+				ContainerRegistries: eruncommon.SingleContainerRegistries("registry.example/keep"),
 			},
 		},
 	}
@@ -2159,7 +2316,7 @@ func TestSetEnvironmentAutoStartPersistsTriStateValue(t *testing.T) {
 	if got := store.envs["frs/prod"].AutoStart; got == nil || *got != false {
 		t.Fatalf("expected stored AutoStart=false, got %+v", got)
 	}
-	if store.envs["frs/prod"].ContainerRegistry != "registry.example/keep" {
+	if keptRegistry, _ := store.envs["frs/prod"].ContainerRegistries.BuildRegistry(); keptRegistry != "registry.example/keep" {
 		t.Fatalf("SetEnvironmentAutoStart must not rewrite unrelated fields, got %+v", store.envs["frs/prod"])
 	}
 
@@ -3169,6 +3326,13 @@ func (s stubUIStore) LoadProjectConfig(projectRoot string) (eruncommon.ProjectCo
 		return eruncommon.ProjectConfig{}, "", eruncommon.ErrNotInitialized
 	}
 	return config, "", nil
+}
+
+func (s stubUIStore) SaveProjectConfig(projectRoot string, config eruncommon.ProjectConfig) error {
+	if s.projectConfigs != nil {
+		s.projectConfigs[projectRoot] = config
+	}
+	return nil
 }
 
 func (s stubUIStore) SaveERunConfig(config eruncommon.ERunConfig) error {

@@ -103,6 +103,24 @@ export class ManageDialog {
       .click();
   }
 
+  // --- Container-registries editor (General tab, issue #527) ---
+
+  addRegistryButton(): Locator {
+    return this.locator().getByRole('button', { name: 'Add registry' });
+  }
+
+  registryInput(index: number): Locator {
+    return this.locator().locator(`#environment-config-registry-${String(index)}`);
+  }
+
+  registryRoleCheckbox(index: number, role: string): Locator {
+    return this.locator().getByLabel(`${role} role for registry ${String(index + 1)}`);
+  }
+
+  removeRegistryButton(index: number): Locator {
+    return this.locator().getByRole('button', { name: `Remove registry ${String(index + 1)}` });
+  }
+
   // envTypeFieldValue reads the "Environment type" readonly field on the
   // General tab so specs can pick a remote env without a backend round-trip.
   // ReadonlyField puts the human label on the element with the field id and

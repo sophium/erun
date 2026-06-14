@@ -35,6 +35,27 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
 	})
 
+	t.Run("no_build_registry_errors", func(t *testing.T) {
+		// A project registry list that marks no build registry cannot build:
+		// `erun build` fails fast with the "no build registry" contract message
+		// instead of silently falling back to the default registry. The list is
+		// valid (from+to, deploy on to) — it simply omits the build role.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"containerregistries:\n"+
+				"    - registry: ghcr.io/sophium\n"+
+				"      roles: [from]\n"+
+				"    - registry: registry.internal/team\n"+
+				"      roles: [to, deploy]\n",
+		)
+		result := erun.Run(t, []string{"build", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit for a project with no build registry, got 0: %s", result.Combined)
+		}
+		golden.Equal(t, "build/no_build_registry_errors", normalize.Apply(result.Combined))
+	})
+
 	t.Run("dry_run_from_release_repo_traces_docker_builds", func(t *testing.T) {
 		// Exercises build.go shorthand from a project root with the
 		// erun-devops release-shape layout: --dry-run must trace one

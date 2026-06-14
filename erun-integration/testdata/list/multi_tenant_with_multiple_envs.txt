@@ -35,7 +35,7 @@ Tenants:
           api-url: http://<LOOPBACK>:17033
           ssh-port: 17022
           contribute-app-port: 17050
-          container-registry: none
+          container-registries: none
           runtime-version: none
           runtime-pod: none
           managed-cloud: off
@@ -54,7 +54,7 @@ Tenants:
           api-url: http://<LOOPBACK>:17133
           ssh-port: 17122
           contribute-app-port: 17150
-          container-registry: none
+          container-registries: none
           runtime-version: none
           runtime-pod: none
           managed-cloud: off
@@ -76,7 +76,7 @@ Tenants:
           api-url: http://<LOOPBACK>:17233
           ssh-port: 17222
           contribute-app-port: 17250
-          container-registry: none
+          container-registries: none
           runtime-version: none
           runtime-pod: none
           managed-cloud: off

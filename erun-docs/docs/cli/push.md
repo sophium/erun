@@ -35,7 +35,7 @@ See [Environment types](/concepts/environment-types) for the full split between 
 
 ## Registry resolution
 
-The registry is resolved per-env then per-project, falling back to the built-in default. See [Configuration · Container registry resolution](/reference/configuration#container-registry-for-the-image-tag) for the precise precedence, and [Container registries](/deployment/registries) for setup notes per registry vendor.
+The push target is the `build`-marked registry in the project's registry list; a project that marks no `build` registry cannot build or push. See [Configuration · Container registries](/reference/configuration#container-registries) for the list shape and role rules, and [Container registries](/deployment/registries) for setup notes per registry vendor.
 
 ## Examples
 

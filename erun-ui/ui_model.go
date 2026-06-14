@@ -206,13 +206,22 @@ type uiPortStatus struct {
 	Status    string `json:"status"`
 }
 
+// uiContainerRegistryEntry mirrors eruncommon.ContainerRegistryEntry for the
+// desktop env-settings registry-list editor: a registry host plus the roles it
+// carries (any of build/from/to/deploy). Roles ride as plain strings at the
+// Wails boundary (RegistryRole is a string alias).
+type uiContainerRegistryEntry struct {
+	Registry string   `json:"registry"`
+	Roles    []string `json:"roles"`
+}
+
 type uiEnvironmentConfig struct {
 	Name                  string                     `json:"name"`
 	Type                  eruncommon.EnvironmentType `json:"type,omitempty"`
 	LocalRepoPath         string                     `json:"localRepoPath,omitempty"`
 	RepoPath              string                     `json:"repoPath"`
 	KubernetesContext     string                     `json:"kubernetesContext"`
-	ContainerRegistry     string                     `json:"containerRegistry"`
+	ContainerRegistries   []uiContainerRegistryEntry `json:"containerRegistries"`
 	CloudProviderAlias    string                     `json:"cloudProviderAlias"`
 	CloudProviderAliases  []string                   `json:"cloudProviderAliases,omitempty"`
 	CloudContext          *uiCloudContextStatus      `json:"cloudContext,omitempty"`

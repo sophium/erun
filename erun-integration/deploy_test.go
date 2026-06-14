@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,30 @@ func TestDeploy(t *testing.T) {
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		golden.Equal(t, "deploy/dry_run_from_devops_cwd", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_copies_images_from_to_before_deploy", func(t *testing.T) {
+		// When the project registry list marks a FROM source and a TO
+		// destination, deploy mirrors every image the cluster pulls (the
+		// erun-devops runtime image plus any locally-built component) from FROM
+		// to each TO with a manifest-aware `docker buildx imagetools create`
+		// before the helm upgrade, and the cluster pulls from the DEPLOY (TO)
+		// registry. The copy is a dry-run trace line gated behind real-run.
+		setup := env.New(t)
+		fixture.SeedTenantEnvNoRegistry(t, setup, "team", "dev")
+		fixture.SeedDevopsRepo(t, setup, "team", "dev")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"containerregistries:\n"+
+				"    - registry: ghcr.io/sophium\n"+
+				"      roles: [build, from]\n"+
+				"    - registry: registry.internal/team\n"+
+				"      roles: [to, deploy]\n",
+		)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_copies_images_from_to_before_deploy", normalize.Apply(result.Combined))
 	})
 
 	t.Run("dry_run_from_devops_module_root", func(t *testing.T) {
@@ -267,6 +292,42 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/real_run_remote_env_published_chart_via_stubs", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_copies_images_from_to_via_stubs", func(t *testing.T) {
+		// Real-run deploy of an env whose registry list marks a FROM source and
+		// a TO destination: before helm upgrade, the runtime image is mirrored
+		// from FROM to TO with `docker buildx imagetools create` (executed
+		// through the docker stub), and the cluster pulls from the DEPLOY (TO)
+		// registry. This proves the copy ACTION runs in real-run, not just its
+		// dry-run trace.
+		setup := env.New(t)
+		root := filepath.Join(setup.ConfigHome, "erun")
+		tenantDir := filepath.Join(root, "team")
+		envDir := filepath.Join(tenantDir, "dev")
+		for _, dir := range []string{root, tenantDir, envDir} {
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatalf("mkdir %s: %v", dir, err)
+			}
+		}
+		mustWriteFile(t, filepath.Join(root, "config.yaml"), "defaulttenant: team\n")
+		mustWriteFile(t, filepath.Join(tenantDir, "config.yaml"),
+			"projectroot: /nonexistent-remote/team\nname: team\ndefaultenvironment: dev\n")
+		mustWriteFile(t, filepath.Join(envDir, "config.yaml"),
+			"name: dev\nrepopath: /nonexistent-remote/team\nkubernetescontext: test-context\nremote: true\nruntimeversion: 1.0.0\n"+
+				"containerregistries:\n"+
+				"    - registry: ghcr.io/sophium\n      roles: [build, from]\n"+
+				"    - registry: registry.internal/team\n      roles: [to, deploy]\n")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "helm", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_copies_images_from_to_via_stubs", normalize.Apply(result.Combined))
 	})
 
 	t.Run("real_run_preflight_starts_stopped_cloud_context", func(t *testing.T) {
@@ -925,6 +986,118 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
 		golden.Equal(t, "deploy/dry_run_local_docker_cwd_uses_current_build_for_owning_chart", normalize.Apply(result.Combined))
+	})
+
+	t.Run("dry_run_lockstep_publishes_runtime_chart_when_image_pushed", func(t *testing.T) {
+		// Lockstep (#505: image and chart are one contract, published
+		// together): a snapshot deploy that builds and pushes the runtime
+		// (erun-devops) image must also publish the erun-devops chart to the
+		// registry's /charts path at the same version, so the pushed snapshot
+		// is deployable by envs that consume the published chart and the
+		// version picker only ever offers deployable versions. The tenant's
+		// devops chart is named erun-devops (DevopsComponentName); the registry
+		// list marks build+deploy; stubDockerNoLocalImages forces the
+		// rebuild+push path. The trace must show `helm package erun-devops` +
+		// `helm push erun-devops-<VERSION>.tgz oci://registry.example/test/charts`
+		// ahead of the helm upgrade — proving applyDeploySpecPublish's
+		// publish-on-push branch fires and resolveHelmChartPublishSpec targets
+		// the /charts path for the runtime chart.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "erun", "local")
+		fixture.SeedDevopsRepo(t, setup, "erun", "local")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "erun")
+		fixture.SeedProjectK8sConfig(t, setup,
+			"containerregistries:\n"+
+				"    - registry: registry.example/test\n"+
+				"      roles: [build, deploy]\n",
+		)
+		// Run from the runtime build dir so resolveCurrentDockerComponentBuildForDeploy
+		// resolves the erun-devops image as the current build and the owning
+		// chart claims it — the deterministic way to reach the build+push path.
+		dockerDir := filepath.Join(setup.Cwd, "erun-devops", "docker", "erun-devops")
+		result := erun.Run(t, []string{"deploy", "--snapshot", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "deploy/dry_run_lockstep_publishes_runtime_chart_when_image_pushed", normalize.Apply(result.Combined))
+	})
+
+	t.Run("real_run_published_chart_not_found_reports_actionable_error", func(t *testing.T) {
+		// Safety net: when the resolved published runtime chart is not pullable
+		// at the requested version (a snapshot image whose chart was never
+		// published, or a pruned tag), helm upgrade exits non-zero with a
+		// registry "not found" on stderr. DeployHelmChart must classify that
+		// into a PublishedChartNotFoundError naming the version + registry and
+		// pointing at the recovery (deploy a released version / publish first),
+		// instead of surfacing a bare "exit status 1". The helm stub fails the
+		// upgrade with a 404-shaped message; kubectl/docker succeed so the
+		// failure is isolated to the chart pull.
+		setup := env.New(t)
+		fixture.SeedRemoteRepoPathTenantEnv(t, setup, "team", "dev", "/nonexistent-remote/team")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinary(t, stubs, "kubectl", "")
+		fixture.StubBinary(t, stubs, "docker", "")
+		// helm errors land on stderr; the stub scans every arg (the real argv
+		// carries --install, --wait, … before "upgrade") and fails the upgrade
+		// with a registry 404 shape.
+		fixture.StubBinaryWithScript(t, stubs, "helm", strings.Join([]string{
+			`for a in "$@"; do`,
+			`  if [ "$a" = "upgrade" ]; then`,
+			`    printf '%s\n' 'Error: failed to perform "FetchReference" on source: registry.example/test/charts/erun-devops: not found' >&2`,
+			`    exit 1`,
+			`  fi`,
+			`done`,
+			`exit 0`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Home, Env: envVars})
+		if result.ExitCode == 0 {
+			t.Fatalf("expected non-zero exit when the published chart is not found, got 0:\n%s", result.Combined)
+		}
+		golden.Equal(t, "deploy/real_run_published_chart_not_found_reports_actionable_error", normalize.Apply(result.Combined))
+	})
+
+	t.Run("chart_content_is_part_of_the_fingerprint", func(t *testing.T) {
+		// Regression for the SkipHelm-drops-chart-changes gap: the runtime chart
+		// is a released artifact published in lockstep with the image at the same
+		// version, so a chart-only edit must move the component's fingerprint —
+		// otherwise the image promotes from cache and resolveDeploySkipHelm
+		// silently skips the chart change. The fingerprint hash is masked by
+		// normalization in goldens (fp-<HEX16>), so this asserts on the raw fp
+		// tag rather than a snapshot. stubDockerNoLocalImages forces the rebuild
+		// path so the fp tag is emitted.
+		setup := env.New(t)
+		fixture.SeedTenantEnv(t, setup, "team", "local")
+		fixture.SeedDevopsRepo(t, setup, "team", "local")
+		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
+		fpRe := regexp.MustCompile(`team-devops:fp-([0-9a-f]{16})`)
+		runFP := func() string {
+			result := erun.Run(t, []string{"deploy", "team", "local", "--snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+			if result.ExitCode != 0 {
+				t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+			}
+			m := fpRe.FindStringSubmatch(result.Combined)
+			if m == nil {
+				t.Fatalf("no team-devops fingerprint tag in output:\n%s", result.Combined)
+			}
+			return m[1]
+		}
+		fp1 := runFP()
+		// Same content → same fingerprint (content-derived, time-independent), so
+		// any change below is attributable to the edit, not noise.
+		if fp2 := runFP(); fp1 != fp2 {
+			t.Fatalf("fingerprint not deterministic across identical runs: %s vs %s", fp1, fp2)
+		}
+		// Edit a chart file (lives outside the image build context) and re-resolve.
+		chartValues := filepath.Join(setup.Cwd, "team-devops", "k8s", "team-devops", "values.yaml")
+		existing, err := os.ReadFile(chartValues)
+		if err != nil {
+			t.Fatalf("read chart values: %v", err)
+		}
+		mustWriteFile(t, chartValues, string(existing)+"\n# chart-only edit: must move the fingerprint\n")
+		if fp3 := runFP(); fp3 == fp1 {
+			t.Fatalf("chart-only edit did not change the fingerprint (%s) — the chart is not part of the fingerprint", fp1)
+		}
 	})
 
 	t.Run("dry_run_snapshot_chart_image_scan_resolves_additional_builds", func(t *testing.T) {

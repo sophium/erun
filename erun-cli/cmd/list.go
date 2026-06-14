@@ -258,7 +258,7 @@ func environmentDetailLines(env common.ListEnvironmentResult) []string {
 		indent + "api-url: " + valueOrNone(env.APIURL),
 		indent + "ssh-port: " + fmt.Sprintf("%d", env.LocalPorts.SSH),
 		indent + "contribute-app-port: " + fmt.Sprintf("%d", env.LocalPorts.ContributeApp),
-		indent + "container-registry: " + valueOrNone(env.ContainerRegistry),
+		indent + "container-registries: " + containerRegistriesLabel(env.ContainerRegistries),
 		indent + "runtime-version: " + valueOrNone(env.RuntimeVersion),
 		indent + "runtime-pod: " + runtimePodLabel(env.RuntimePod),
 		indent + "managed-cloud: " + enabledDisabledLabel(env.ManagedCloud),
@@ -389,6 +389,23 @@ func valueOrNone(value string) string {
 		return "none"
 	}
 	return value
+}
+
+// containerRegistriesLabel renders the marked registry list as
+// "<registry>[role,role] <registry>[role]", or "none" when unset.
+func containerRegistriesLabel(registries common.ContainerRegistries) string {
+	if registries.IsZero() {
+		return "none"
+	}
+	entries := make([]string, 0, len(registries))
+	for _, entry := range registries {
+		roles := make([]string, 0, len(entry.Roles))
+		for _, role := range entry.Roles {
+			roles = append(roles, string(role))
+		}
+		entries = append(entries, entry.Registry+"["+strings.Join(roles, ",")+"]")
+	}
+	return strings.Join(entries, " ")
 }
 
 func quotedValueOrNone(value string) string {

@@ -1,0 +1,2 @@
+audit: erun build --dry-run
+environment "" has no build registry; mark a registry with the build role in .erun/config.yaml before building

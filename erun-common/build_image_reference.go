@@ -10,28 +10,19 @@ import (
 	"time"
 )
 
+// resolveDockerBuildRegistryForEnvironment resolves the BUILD-marked registry
+// images are tagged and pushed to. An environment whose effective registry
+// list marks no build registry cannot build: the returned error is the
+// user-facing contract, surfaced identically in dry-run and real runs.
 func resolveDockerBuildRegistryForEnvironment(projectRoot, environment string) (string, error) {
-	registry := DefaultContainerRegistry
-	if projectRoot == "" {
-		return registry, nil
-	}
-
-	projectConfig, _, err := LoadProjectConfig(projectRoot)
+	list, err := effectiveContainerRegistries(projectRoot, environment)
 	if err != nil {
-		if errors.Is(err, ErrNotInitialized) {
-			return registry, nil
-		}
 		return "", err
 	}
-
-	if configured := projectConfig.ContainerRegistryForEnvironment(environment); configured != "" {
-		return configured, nil
+	registry, ok := list.BuildRegistry()
+	if !ok {
+		return "", fmt.Errorf("environment %q has no build registry; mark a registry with the build role in .erun/config.yaml before building", strings.TrimSpace(environment))
 	}
-
-	if configured := singleProjectContainerRegistry(projectConfig); configured != "" {
-		return configured, nil
-	}
-
 	return registry, nil
 }
 
@@ -235,21 +226,6 @@ func (e DockerRegistryAuthError) Unwrap() error {
 
 func isLocalEnvironment(environment string) bool {
 	return strings.EqualFold(strings.TrimSpace(environment), DefaultEnvironment)
-}
-
-func singleProjectContainerRegistry(projectConfig ProjectConfig) string {
-	registry := ""
-	for _, envConfig := range projectConfig.Environments {
-		current := strings.TrimSpace(envConfig.ContainerRegistry)
-		if current == "" {
-			continue
-		}
-		if registry != "" {
-			return ""
-		}
-		registry = current
-	}
-	return registry
 }
 
 // dockerVersionRegistryPattern matches strings that look like a semantic version

@@ -58,6 +58,37 @@ func SeedTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 	)
 }
 
+// SeedTenantEnvNoRegistry writes the same minimal config tree as SeedTenantEnv
+// but omits the per-env container registry, so the env's registry list resolves
+// entirely from the project's .erun/config.yaml (seed it with
+// SeedProjectK8sConfig). Use this for marked-registry-list scenarios where the
+// project config — not a migrated env-config scalar — must drive BUILD/FROM/
+// TO/DEPLOY resolution.
+func SeedTenantEnvNoRegistry(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+setup.Cwd+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+setup.Cwd+"\n"+
+			"kubernetescontext: test-context\n"+
+			"runtimeversion: 1.0.0\n",
+	)
+}
+
 // SeedTenantEnvWithLocalPortRangeStart writes the same minimal config tree
 // as SeedTenantEnv but persists a fixed localportrangestart on the env
 // config so commands that key off EnvConfig.LocalPortRangeStart (notably

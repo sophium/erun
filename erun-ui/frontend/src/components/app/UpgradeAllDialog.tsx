@@ -2,7 +2,9 @@ import { ArrowRight, ArrowUp, LoaderCircle, TriangleAlert } from 'lucide-react';
 import * as React from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { setUpgradeAllChoice } from '@/app/slices/upgradeAllSlice';
 import { closeUpgradeAllDialog, confirmUpgradeAll } from '@/app/upgradeThunks';
+import { selectionKey } from '@/app/versionSuggestions';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -12,17 +14,32 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import type { UIUpgradePlanItem } from '@/types';
+
+// rowKey is the per-env identity used for the choices map; it matches the key
+// confirmUpgradeAll resolves the picked version under.
+function rowKey(item: UIUpgradePlanItem): string {
+  return selectionKey({ tenant: item.tenant, environment: item.environment });
+}
 
 // UpgradeAllDialog previews the cross-env "Upgrade all" plan and gates the
 // deploy behind explicit confirmation (Nielsen #1 visibility of system status,
 // #5 error prevention before a high-blast-radius action). It lists every
 // opted-in env with its channel and current → target, marking which will be
-// redeployed, and only enables Upgrade when at least one env lags.
+// redeployed; envs whose registries offer more than one newer version get a
+// per-row picker (issue #527). Upgrade is enabled once at least one env will
+// be redeployed (a lagging env, or one the operator has picked a version for).
 export function UpgradeAllDialog(): React.ReactElement {
   const dispatch = useAppDispatch();
-  const { open, loading, error, items } = useAppSelector((state) => state.upgradeAll);
-  const lagging = items.filter((item) => item.lagging);
+  const { open, loading, error, items, choices } = useAppSelector((state) => state.upgradeAll);
+  const upgradeCount = countUpgrades(items, choices);
   return (
     <Dialog
       open={open}
@@ -45,7 +62,8 @@ export function UpgradeAllDialog(): React.ReactElement {
           loading={loading}
           error={error}
           items={items}
-          laggingCount={lagging.length}
+          choices={choices}
+          upgradeCount={upgradeCount}
         />
         <DialogFooter>
           <Button
@@ -59,13 +77,13 @@ export function UpgradeAllDialog(): React.ReactElement {
           </Button>
           <Button
             type="button"
-            disabled={loading || lagging.length === 0}
+            disabled={loading || upgradeCount === 0}
             onClick={() => {
               void dispatch(confirmUpgradeAll());
             }}
           >
             <ArrowUp aria-hidden="true" />
-            {lagging.length > 0 ? `Upgrade ${String(lagging.length)}` : 'Upgrade'}
+            {upgradeCount > 0 ? `Upgrade ${String(upgradeCount)}` : 'Upgrade'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -73,16 +91,33 @@ export function UpgradeAllDialog(): React.ReactElement {
   );
 }
 
+// countUpgrades is how many envs Upgrade will redeploy: every lagging env plus
+// every ambiguous env the operator has picked a version for.
+function countUpgrades(items: UIUpgradePlanItem[], choices: Record<string, string>): number {
+  let count = 0;
+  for (const item of items) {
+    const state = upgradeRowState(item);
+    if (state === 'lagging') {
+      count += 1;
+    } else if (state === 'pick' && (choices[rowKey(item)] ?? '').trim() !== '') {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 function UpgradeAllBody({
   loading,
   error,
   items,
-  laggingCount,
+  choices,
+  upgradeCount,
 }: {
   loading: boolean;
   error: string;
   items: UIUpgradePlanItem[];
-  laggingCount: number;
+  choices: Record<string, string>;
+  upgradeCount: number;
 }): React.ReactElement {
   if (loading) {
     return (
@@ -129,12 +164,16 @@ function UpgradeAllBody({
         </thead>
         <tbody>
           {items.map((item) => (
-            <UpgradePlanRow key={`${item.tenant}/${item.environment}`} item={item} />
+            <UpgradePlanRow
+              key={`${item.tenant}/${item.environment}`}
+              item={item}
+              chosen={choices[rowKey(item)] ?? ''}
+            />
           ))}
         </tbody>
       </table>
       <p className="pt-3 text-[12px] text-muted-foreground">
-        {laggingCount} of {items.length} will be redeployed.
+        {upgradeCount} of {items.length} will be redeployed.
       </p>
       {unresolvedCount > 0 ? (
         <p className="flex items-start gap-1.5 pt-1.5 text-[12px] text-amber-600 dark:text-amber-500">
@@ -152,7 +191,13 @@ function UpgradeAllBody({
   );
 }
 
-function UpgradePlanRow({ item }: { item: UIUpgradePlanItem }): React.ReactElement {
+function UpgradePlanRow({
+  item,
+  chosen,
+}: {
+  item: UIUpgradePlanItem;
+  chosen: string;
+}): React.ReactElement {
   const state = upgradeRowState(item);
   return (
     <tr className="border-t border-border/60 align-top">
@@ -164,28 +209,67 @@ function UpgradePlanRow({ item }: { item: UIUpgradePlanItem }): React.ReactEleme
       </td>
       <td className="py-2.5 pr-4 whitespace-nowrap text-muted-foreground">{item.channel}</td>
       <td className="py-2.5 pr-4">
-        <UpgradeVersionCell item={item} state={state} />
+        <UpgradeVersionCell item={item} state={state} chosen={chosen} />
       </td>
       <td className="py-2.5 text-right">
-        <UpgradePlanRowStatus state={state} reason={item.unresolvedReason} />
+        <UpgradePlanRowStatus state={state} reason={item.unresolvedReason} chosen={chosen} />
       </td>
     </tr>
   );
 }
 
-// UpgradeVersionCell shows the env's runtime version. Only a lagging env has a
-// transition worth showing, so it stacks current → target with the versions
-// left-aligned (an arrow gutter keeps long *-snapshot-<ts> tags lined up so the
-// changed portion is scannable); up-to-date and unresolved envs render the
-// single current version, with the Status column carrying the rest.
+// UpgradeVersionCell shows the env's runtime version. A lagging env stacks
+// current → target. An ambiguous env (more than one newer version across its
+// registries) stacks current → a picker the operator chooses from, each option
+// labelled with its source registry (issue #527). Up-to-date and unresolved
+// envs render the single current version, with the Status column carrying the
+// rest.
 function UpgradeVersionCell({
   item,
   state,
+  chosen,
 }: {
   item: UIUpgradePlanItem;
   state: UpgradeRowState;
+  chosen: string;
 }): React.ReactElement {
+  const dispatch = useAppDispatch();
   const current = displayUpgradeVersion(item.current);
+  if (state === 'pick') {
+    return (
+      <div className="font-mono text-[12px] leading-snug">
+        <div className="flex items-center gap-1.5 whitespace-nowrap text-muted-foreground">
+          <span className="w-3 flex-none" aria-hidden="true" />
+          <span>{current}</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <ArrowRight className="size-3 flex-none text-muted-foreground" aria-hidden="true" />
+          <Select
+            value={chosen}
+            onValueChange={(version) => {
+              dispatch(setUpgradeAllChoice({ key: rowKey(item), version }));
+            }}
+          >
+            <SelectTrigger
+              size="sm"
+              className="h-7 font-mono text-[12px]"
+              aria-label={`Pick a version for ${item.environment}`}
+            >
+              <SelectValue placeholder="Pick a version" />
+            </SelectTrigger>
+            <SelectContent>
+              {(item.candidates ?? []).map((candidate) => (
+                <SelectItem key={candidate.version} value={candidate.version}>
+                  {candidate.version}
+                  {candidate.registry ? ` · ${candidate.registry}` : ''}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+    );
+  }
   if (state !== 'lagging') {
     return <span className="font-mono text-[12px] whitespace-nowrap">{current}</span>;
   }
@@ -206,13 +290,32 @@ function UpgradeVersionCell({
 function UpgradePlanRowStatus({
   state,
   reason,
+  chosen,
 }: {
   state: UpgradeRowState;
   reason?: string;
+  chosen: string;
 }): React.ReactElement {
   if (state === 'lagging') {
     return (
       <span className="text-[11px] font-medium whitespace-nowrap text-primary">will upgrade</span>
+    );
+  }
+  if (state === 'pick') {
+    // More than one newer version across the env's registries — the operator
+    // must pick one before it can be redeployed (issue #527). Once picked it
+    // joins the upgrade set; until then it is amber + icon (non-color-only,
+    // WCAG) so the dialog is honest that nothing happens for it yet.
+    if (chosen.trim() !== '') {
+      return (
+        <span className="text-[11px] font-medium whitespace-nowrap text-primary">will upgrade</span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center justify-end gap-1 whitespace-nowrap text-[11px] font-medium text-amber-600 dark:text-amber-500">
+        <TriangleAlert className="size-3 flex-none" aria-hidden="true" />
+        pick a version
+      </span>
     );
   }
   if (state === 'unresolved') {
@@ -239,19 +342,22 @@ function UpgradePlanRowStatus({
   return <span className="text-[11px] whitespace-nowrap text-muted-foreground">up to date</span>;
 }
 
-type UpgradeRowState = 'lagging' | 'upToDate' | 'unresolved';
+type UpgradeRowState = 'lagging' | 'pick' | 'upToDate' | 'unresolved';
 
-// upgradeRowState mirrors the three-way outcome the CLI's `erun upgrade` already
-// renders (see laggingSuffix): an opted-in env either lags a known channel
-// latest (will be redeployed), already sits at the known latest (up to date),
-// or has no resolvable target — the registry lookup failed or returned no
-// matching tags, which the CLI reports as "(target unresolved)". The desktop
-// must not collapse that third state into "up to date": doing so mislabels a
-// failed/empty lookup as success and makes Upgrade all look like it is doing
-// nothing.
+// upgradeRowState mirrors the outcomes the CLI's `erun upgrade` renders, plus
+// the desktop-only "pick" state (issue #527): an opted-in env either lags a
+// known channel latest (will be redeployed), has more than one newer version
+// across its registries (the operator picks one), already sits at the known
+// latest (up to date), or has no resolvable target — the registry lookup
+// failed or returned no matching tags ("(target unresolved)"). The desktop must
+// not collapse the unresolved or pick states into "up to date": doing so
+// mislabels a failed lookup or an un-picked env as success.
 function upgradeRowState(item: UIUpgradePlanItem): UpgradeRowState {
   if (item.lagging) {
     return 'lagging';
+  }
+  if ((item.candidates?.length ?? 0) > 1) {
+    return 'pick';
   }
   if (item.target.trim() === '') {
     return 'unresolved';

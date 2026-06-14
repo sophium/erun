@@ -143,6 +143,13 @@ Repository guidance for humans and coding agents working in this repo.
 - Copying is a good default only for plain value data. Slices, maps, pointers, channels, and structs containing them still share underlying state unless explicitly cloned.
 - Favor clear ownership over incidental sharing. If callers must not mutate returned data, return a copy.
 
+## Answering The Operator's Questions
+
+- The operator's questions are never rhetorical. When the operator asks a question — "how is it done if it is not done?", "why X?", "is Y finished?", "nothing changed?", or pushes back with a question instead of a statement — the question is a genuine request for an answer. Answer it directly and completely as the first thing your reply does, before anything else.
+- A question is not authorization to act. Do not respond to a question by launching a workflow, editing files, running commands, or "helpfully" starting the work the question hints at. Answer first; then wait for an explicit instruction to proceed, or ask what the operator wants. Acting on a question instead of answering it is a defect.
+- Answer honestly, including when the honest answer is "it is not done", "I was wrong", or "that does not work yet". Do not reframe a question as already-handled, do not bury the answer under a wall of planned actions, and do not substitute activity for an answer. If the operator had to ask, the prior reply was probably overclaiming — treat the question as a signal to correct the record, not to push forward.
+- A question that exposes a contradiction (something claimed done that visibly is not) takes priority over momentum. Stop, state the real situation plainly, and only resume work once the operator has confirmed the direction.
+
 ## Working Rules
 
 - Start each non-trivial change by identifying the smallest coherent outcome that would satisfy the request, the modules likely affected, and the validation scope needed for confidence.
