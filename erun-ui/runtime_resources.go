@@ -141,7 +141,15 @@ func runtimeResourceTarget(input uiRuntimeResourceInput) runtimeResourceTargetSp
 	}
 	return runtimeResourceTargetSpec{
 		namespace: eruncommon.KubernetesNamespaceName(input.Tenant, input.Environment),
-		container: eruncommon.RuntimeReleaseName(input.Tenant),
+		// Match the runtime container by its name, which is the component name
+		// (DevopsComponentName, "erun-devops") for every tenant — only the
+		// Deployment/release is named <tenant>-devops. Using the release name
+		// here missed the env's own pod for every non-erun tenant, so its
+		// allocation counted against the node and the capacity check reported a
+		// false "no node has capacity" error that disabled Save in the manage
+		// dialog. It only worked for the erun tenant, where the release name
+		// happens to equal the container name.
+		container: eruncommon.DevopsComponentName,
 	}
 }
 
