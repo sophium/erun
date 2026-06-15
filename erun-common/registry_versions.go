@@ -387,39 +387,6 @@ func (versions RuntimeRegistryVersions) HasVersion(version string) bool {
 	return slices.Contains(versions.Tags, version)
 }
 
-func RuntimeVersionSuggestions(info BuildInfo, registry RuntimeRegistryVersions) []RuntimeVersionSuggestion {
-	info = NormalizeBuildInfo(info)
-	suggestions := make([]RuntimeVersionSuggestion, 0, 4)
-	addSuggestion := func(label, value string) {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return
-		}
-		for _, existing := range suggestions {
-			if existing.Version == value {
-				return
-			}
-		}
-		suggestions = append(suggestions, RuntimeVersionSuggestion{
-			Label:   strings.TrimSpace(label),
-			Version: value,
-		})
-	}
-
-	current := strings.TrimSpace(info.Version)
-	latestStable := strings.TrimSpace(registry.LatestStable)
-	stableBase := current
-	if latestStable != "" {
-		stableBase = latestStable
-	}
-
-	addSuggestion("Current", current)
-	addSuggestion("Latest stable", latestStable)
-	addSuggestion("Previous", previousPatchVersion(stableBase))
-	addSuggestion("Last snapshot", registry.LatestSnapshot)
-	return suggestions
-}
-
 func RuntimeDeployVersionSuggestions(info BuildInfo, registry RuntimeRegistryVersions) []RuntimeVersionSuggestion {
 	info = NormalizeBuildInfo(info)
 	suggestions := make([]RuntimeVersionSuggestion, 0, 4)

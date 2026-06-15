@@ -70,25 +70,6 @@ func resolveExplicitLinuxPackageContexts(resolveBuildContext BuildContextResolve
 	return contexts, nil
 }
 
-func ResolveCurrentLinuxReleaseScripts(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget, version string) ([]scriptSpec, error) {
-	contexts, err := ResolveCurrentLinuxPackageContexts(findProjectRoot, resolveBuildContext, target)
-	if err != nil {
-		return nil, err
-	}
-
-	scripts := make([]scriptSpec, 0, len(contexts))
-	for _, context := range contexts {
-		if strings.TrimSpace(context.ReleaseScriptPath) == "" {
-			continue
-		}
-		scripts = append(scripts, newScriptSpec(context.Dir, "./release.sh", version))
-	}
-	if len(scripts) == 0 {
-		return nil, ErrLinuxPackageBuildNotFound
-	}
-	return scripts, nil
-}
-
 func ResolveCurrentLinuxPackageContexts(findProjectRoot ProjectFinderFunc, resolveBuildContext BuildContextResolverFunc, target DockerCommandTarget) ([]LinuxPackageContext, error) {
 	if resolveBuildContext == nil {
 		resolveBuildContext = ResolveDockerBuildContext
@@ -182,53 +163,6 @@ func ResolveLinuxPackageContextsAtDir(dir string) ([]LinuxPackageContext, error)
 		return nil, ErrLinuxPackageBuildNotFound
 	}
 	return contexts, nil
-}
-
-func FindComponentLinuxPackageContext(projectRoot, componentName string) (LinuxPackageContext, bool, error) {
-	projectRoot = filepath.Clean(strings.TrimSpace(projectRoot))
-	componentName = strings.TrimSpace(componentName)
-	if projectRoot == "" || componentName == "" {
-		return LinuxPackageContext{}, false, nil
-	}
-
-	matches := make([]LinuxPackageContext, 0, 1)
-	err := filepath.WalkDir(projectRoot, func(path string, d os.DirEntry, err error) error {
-		context, ok, walkErr := componentLinuxPackageContextCandidate(path, d, componentName, err)
-		if ok {
-			matches = append(matches, context)
-		}
-		return walkErr
-	})
-	if err != nil {
-		return LinuxPackageContext{}, false, err
-	}
-	if len(matches) == 0 {
-		return LinuxPackageContext{}, false, nil
-	}
-	if len(matches) > 1 {
-		return LinuxPackageContext{}, false, fmt.Errorf("multiple linux package contexts found for component %q", componentName)
-	}
-	return matches[0], true, nil
-}
-
-func componentLinuxPackageContextCandidate(path string, d os.DirEntry, componentName string, err error) (LinuxPackageContext, bool, error) {
-	if err != nil {
-		return LinuxPackageContext{}, false, err
-	}
-	if d.IsDir() {
-		if d.Name() == ".git" {
-			return LinuxPackageContext{}, false, filepath.SkipDir
-		}
-		return LinuxPackageContext{}, false, nil
-	}
-	if d.Name() != "build.sh" && d.Name() != "release.sh" {
-		return LinuxPackageContext{}, false, nil
-	}
-	dir := filepath.Dir(path)
-	if filepath.Base(dir) != componentName || filepath.Base(filepath.Dir(dir)) != "linux" {
-		return LinuxPackageContext{}, false, nil
-	}
-	return LinuxPackageContextAtDir(dir)
 }
 
 func resolveCurrentDevopsLinuxDir(findProjectRoot ProjectFinderFunc, dir string, target DockerCommandTarget) (string, bool, error) {

@@ -145,7 +145,7 @@ Repositories never accept `tenant_id` as an argument. Instead,
 context from the authenticated context:
 
 ```go
-// Sketch — see templates/repository/tx.go.tmpl for the full version.
+// Sketch — see templates/repository_tx.go.tmpl for the full version.
 func (tm *TxManager) WithTx(ctx context.Context, fn func(*bun.Tx) error) error {
     sec, err := SecurityFromContext(ctx)
     if err != nil {

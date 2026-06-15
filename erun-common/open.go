@@ -557,13 +557,6 @@ func LocalShellSetupScript(result OpenResult) string {
 	return strings.Join(commands, " &&\n") + "\n"
 }
 
-func LaunchShell(req ShellLaunchParams) error {
-	if err := WaitForShellDeployment(req); err != nil {
-		return err
-	}
-	return ExecShell(req)
-}
-
 func WaitForShellDeployment(req ShellLaunchParams) error {
 	if err := runOpenKubectl(kubectlDeploymentWaitArgs(req), io.Discard, os.Stderr); err != nil {
 		return enrichShellDeploymentError(req, err, runOpenKubectl)

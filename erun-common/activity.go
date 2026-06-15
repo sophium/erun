@@ -168,14 +168,6 @@ func (c EnvironmentIdleConfig) Resolve() (EnvironmentIdlePolicy, error) {
 	}, nil
 }
 
-func DefaultEnvironmentIdleConfig() EnvironmentIdleConfig {
-	return EnvironmentIdleConfig{
-		Timeout:          DefaultEnvironmentIdleTimeout.String(),
-		WorkingHours:     DefaultEnvironmentWorkingHours,
-		IdleTrafficBytes: DefaultEnvironmentIdleTrafficBytes,
-	}
-}
-
 func ResolveEnvironmentIdleStatus(config EnvironmentIdleConfig, activity map[string]EnvironmentActivitySnapshot, now time.Time) (EnvironmentIdleStatus, error) {
 	policy, err := config.Resolve()
 	if err != nil {
