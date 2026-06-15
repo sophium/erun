@@ -66,6 +66,7 @@ Additional guidance for `erun-devops` and its subtree.
   - after a successful stable release, the next patch version is prepared for subsequent work
 - Candidate releases use candidate version tags and still rely on the same shared release/build orchestration.
 - When changing release behavior, validate the repository-wide flow, not only this subtree. At minimum run the release-sensitive suites in `erun-common`, `erun-cli`, and `erun-mcp`.
+- Non-erun tenant deploys consume the **published** `erun-devops` image and chart from the registry; to land a runtime change in a tenant, publish it from the `erun` tenant first (build/release + push), then deploy the tenant.
 
 ## Version and Metadata Rules
 
