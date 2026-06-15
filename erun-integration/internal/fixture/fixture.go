@@ -54,7 +54,8 @@ func SeedTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 			"repopath: "+setup.Cwd+"\n"+
 			"kubernetescontext: test-context\n"+
 			"containerregistry: registry.example/test\n"+
-			"runtimeversion: 1.0.0\n",
+			"runtimeversion: 1.0.0\n"+
+			"type: local-agent\n",
 	)
 }
 
@@ -85,7 +86,8 @@ func SeedTenantEnvNoRegistry(t testing.TB, setup env.Setup, tenant, environment 
 		"name: "+environment+"\n"+
 			"repopath: "+setup.Cwd+"\n"+
 			"kubernetescontext: test-context\n"+
-			"runtimeversion: 1.0.0\n",
+			"runtimeversion: 1.0.0\n"+
+			"type: local-agent\n",
 	)
 }
 
@@ -117,6 +119,7 @@ func SeedTenantEnvWithLocalPortRangeStart(t testing.TB, setup env.Setup, tenant,
 			"kubernetescontext: test-context\n"+
 			"containerregistry: registry.example/test\n"+
 			"runtimeversion: 1.0.0\n"+
+			"type: local-agent\n"+
 			"localportrangestart: "+strconv.Itoa(rangeStart)+"\n",
 	)
 }
@@ -146,7 +149,8 @@ func SeedSecondaryTenantEnv(t testing.TB, setup env.Setup, tenant, environment s
 		"repopath: " + setup.Cwd + "\n" +
 		"kubernetescontext: test-context\n" +
 		"containerregistry: registry.example/test\n" +
-		"runtimeversion: 1.0.0\n"
+		"runtimeversion: 1.0.0\n" +
+		"type: local-agent\n"
 	if rangeStart > 0 {
 		envContents += "localportrangestart: " + strconv.Itoa(rangeStart) + "\n"
 	}

@@ -1,6 +1,6 @@
-audit: erun deploy --dry-run --no-snapshot --version <VERSION> managed prod
+audit: erun deploy --dry-run --version <VERSION> managed prod
 trace-log: would append the full trace to <TMP>
-deploy: tenant=managed environment=prod version-override=<VERSION> snapshot=false components=[] force=false publish=false
+deploy: tenant=managed environment=prod version-override=<VERSION> components=[] force=false publish=false
 deploy: resolved 1 spec(s)
 aws ec2 describe-instances --filters 'Name=instance-id,Values=i-0123456789abcdef0' --query 'Reservations[*].Instances[*].[InstanceId,State.Name]' --output text --region us-east-1 --profile dev
 kubectl --context edge get namespace managed-prod -o name

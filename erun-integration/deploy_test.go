@@ -216,7 +216,7 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("env cfg: %v", err)
 		}
 		fixture.SeedDevopsRepo(t, setup, "team", "prod")
-		result := erun.Run(t, []string{"deploy", "team", "prod", "--version", "1.0.0", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"deploy", "team", "prod", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -265,7 +265,7 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("env cfg: %v", err)
 		}
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -371,7 +371,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars = append(envVars, fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -408,7 +408,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--publish", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--publish"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -614,17 +614,6 @@ func TestDeploy(t *testing.T) {
 		golden.Equal(t, "deploy/components_rejects_unknown_name", normalize.Apply(result.Combined))
 	})
 
-	t.Run("snapshot_conflict_errors", func(t *testing.T) {
-		setup := env.New(t)
-		fixture.SeedTenantEnv(t, setup, "team", "dev")
-		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--snapshot", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
-		if result.ExitCode == 0 {
-			t.Fatalf("expected non-zero exit for conflicting snapshot flags, got 0:\n%s", result.Combined)
-		}
-		golden.Equal(t, "deploy/snapshot_conflict_errors", normalize.Apply(result.Combined))
-	})
-
 	t.Run("real_run_via_stubs", func(t *testing.T) {
 		// Drive the non-dry-run helm/kubectl runners via stub binaries so
 		// the deploy execution path (deploy.go's run* helpers, post-helm
@@ -637,7 +626,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "deploy/real_run_via_stubs", normalize.Apply(result.Combined))
 	})
 
@@ -661,7 +650,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.99", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.99"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -708,7 +697,7 @@ func TestDeploy(t *testing.T) {
 		}
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		fixture.SeedProjectK8sConfig(t, setup, "containerregistry: registry.example/current\n")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -743,7 +732,7 @@ func TestDeploy(t *testing.T) {
 		}
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		fixture.SeedProjectK8sConfig(t, setup, "containerregistry: registry.example/current\n")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.5", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.5", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -760,7 +749,7 @@ func TestDeploy(t *testing.T) {
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
 		fixture.SeedProjectK8sConfig(t, setup, "containerregistry: registry.example/current\n")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -793,7 +782,7 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("env cfg: %v", err)
 		}
 		fixture.SeedDevopsRepo(t, setup, "managed", "prod")
-		result := erun.Run(t, []string{"deploy", "managed", "prod", "--version", "1.0.0", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"deploy", "managed", "prod", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -837,7 +826,7 @@ func TestDeploy(t *testing.T) {
 			t.Fatalf("env cfg: %v", err)
 		}
 		fixture.SeedDevopsRepo(t, setup, "managed", "prod")
-		result := erun.Run(t, []string{"deploy", "managed", "prod", "--version", "1.0.0", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		result := erun.Run(t, []string{"deploy", "managed", "prod", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -877,7 +866,7 @@ func TestDeploy(t *testing.T) {
 		}, "\n"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		envVars = append(envVars, "ERUN_AUTO_RECOVER_HELM=1")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -899,7 +888,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		envVars = append(envVars, "ERUN_DEPLOY_POD_WATCH_INTERVAL=100ms")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -925,7 +914,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		envVars = append(envVars, "ERUN_DEPLOY_POD_WATCH_INTERVAL=100ms")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
 		}
@@ -952,7 +941,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
 		envVars = append(envVars, "ERUN_DEPLOY_POD_WATCH_INTERVAL=100ms")
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit, got 0:\n%s", result.Combined)
 		}
@@ -970,7 +959,8 @@ func TestDeploy(t *testing.T) {
 		// deployContextOwnsDockerBuild, and resolveDeploySpecForCurrentDockerBuild:
 		// when deploy runs from a devops docker build dir
 		// (<repo>/team-devops/docker/team-devops) in the local environment
-		// with --snapshot, the cwd Dockerfile is resolved as the "current
+		// (a local-agent env that builds here), the cwd Dockerfile is
+		// resolved as the "current
 		// build", the owning chart claims it (the build dir sits inside the
 		// chart's module root), and the resolved spec pins that image via an
 		// imageOverrides entry instead of resolving a separate component
@@ -981,7 +971,7 @@ func TestDeploy(t *testing.T) {
 		fixture.SeedDevopsRepo(t, setup, "team", "local")
 		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
 		dockerDir := filepath.Join(setup.Cwd, "team-devops", "docker", "team-devops")
-		result := erun.Run(t, []string{"deploy", "--snapshot", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		result := erun.Run(t, []string{"deploy", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1015,7 +1005,7 @@ func TestDeploy(t *testing.T) {
 		// resolves the erun-devops image as the current build and the owning
 		// chart claims it — the deterministic way to reach the build+push path.
 		dockerDir := filepath.Join(setup.Cwd, "erun-devops", "docker", "erun-devops")
-		result := erun.Run(t, []string{"deploy", "--snapshot", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		result := erun.Run(t, []string{"deploy", "--dry-run"}, erun.RunOptions{Cwd: dockerDir, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1072,7 +1062,7 @@ func TestDeploy(t *testing.T) {
 		fixture.SeedDevopsRuntimeDockerfile(t, setup, "team")
 		fpRe := regexp.MustCompile(`team-devops:fp-([0-9a-f]{16})`)
 		runFP := func() string {
-			result := erun.Run(t, []string{"deploy", "team", "local", "--snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+			result := erun.Run(t, []string{"deploy", "team", "local", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 			if result.ExitCode != 0 {
 				t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 			}
@@ -1144,7 +1134,7 @@ func TestDeploy(t *testing.T) {
 			}
 			mustWriteFile(t, filepath.Join(dir, "Dockerfile"), dockerfile)
 		}
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1190,7 +1180,6 @@ func TestDeploy(t *testing.T) {
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
 		result := erun.Run(t, []string{
 			"deploy", "team", "dev",
-			"--snapshot",
 			"--components", "erun-backend-postgres",
 			"--dry-run",
 		}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
@@ -1262,7 +1251,7 @@ func TestDeploy(t *testing.T) {
 			`exit 0`,
 		}, "\n"))
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker", "kubectl", "helm")...)
-		result := erun.Run(t, []string{"deploy", "team", "local", "--snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1301,7 +1290,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1330,7 +1319,7 @@ func TestDeploy(t *testing.T) {
 		setup := env.New(t)
 		fixture.SeedTenantEnv(t, setup, "team", "dev")
 		fixture.SeedDevopsRepo(t, setup, "team", "dev")
-		first := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
+		first := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if first.ExitCode != 0 {
 			t.Fatalf("first dry-run exited %d:\n%s", first.ExitCode, first.Combined)
 		}
@@ -1348,7 +1337,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "-vv"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1378,7 +1367,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1412,7 +1401,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
@@ -1441,7 +1430,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode == 0 {
 			t.Fatalf("expected non-zero exit on conflicting live deploy, got 0:\n%s", result.Combined)
 		}
@@ -1468,7 +1457,7 @@ func TestDeploy(t *testing.T) {
 		fixture.StubBinary(t, stubs, "helm", "")
 		fixture.StubBinary(t, stubs, "docker", "")
 		envVars := append(setup.Env(), fixture.StubEnv(stubs, "kubectl", "helm", "docker")...)
-		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0", "--no-snapshot"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		result := erun.Run(t, []string{"deploy", "team", "dev", "--version", "1.0.0"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}

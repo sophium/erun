@@ -84,12 +84,13 @@ See [`erun init`](/cli/init) — `--tenant`, `--environment`, `--kubernetes-cont
 | `--no-alias-prompt` | bool | `false` | Only meaningful with `--no-shell`. | None (interactive choice only). |
 | `--version <version>` | string (semver) | `EnvConfig.runtimeversion` or the CLI built-in. | Same as `erun init --version`. | `EnvConfig.runtimeversion` for this run only (not persisted). |
 | `--runtime-image <ref>` | string | `EnvConfig.runtimeimage` (unset → the published image). | Same reference rules as `erun init --runtime-image`. Applies only to envs deploying the published chart (rides in as `imageOverrides.erun-devops`); envs with a repo-local chart ignore it. | Run-only override (not persisted). |
-| `--snapshot` / `--no-snapshot` | tri-state bool (`true` / `false` / unset) | unset (the env's stored `type` is used unchanged). | Only affects the default `local` environment; ignored for other environments. | `EnvConfig.type` for the `local` env: `--snapshot` → `local-agent` (build a local snapshot), `--no-snapshot` → `runtime` (consume the published image). Persisted. |
+
+Whether `erun open` builds a local snapshot image before deploying is decided by the env's `type` (`EnvConfig.BuildsHere()` — true for `local-agent`/`remote-agent`, false for `runtime`), not a flag. The retired `--snapshot`/`--no-snapshot` pair has no replacement flag; change the env's `type` instead.
 
 ### `erun open` lifecycle algorithm
 
 1. Parse flags; resolve effective tenant + env.
-2. Load `EnvConfig` (Kubernetes context, container registry, runtime version, snapshot flag).
+2. Load `EnvConfig` (Kubernetes context, container registry, runtime version, type). `EnvConfig.BuildsHere()` (true unless the type is `runtime`) decides whether a local snapshot image is built before deploy.
 3. If `EnvConfig.cloudprovideralias` is set, look up the cloud context. If `stopped`, send the provider-specific start command. Poll the cluster API every `5s` until reachable or 5 minutes elapse (then abort `CLUSTER_UNREACHABLE`).
 4. Render the runtime chart with the effective `EnvConfig` values; run `helm upgrade --install <env>-runtime <chart>` into `<tenant>-<env>`.
 5. Wait for the runtime pod's SSH server to be reachable on the in-pod port (`EnvConfig.sshd.port`, default `22`). Readiness probe is a TCP connect + banner-line read, retried every `2s` with a `60s` cap.

@@ -1,6 +1,6 @@
-audit: erun deploy --components [erun-backend-postgres] --dry-run --snapshot team dev
+audit: erun deploy --components [erun-backend-postgres] --dry-run team dev
 trace-log: would append the full trace to <TMP>
-deploy: tenant=team environment=dev version-override= snapshot=true components=[erun-backend-postgres] force=false publish=false
+deploy: tenant=team environment=dev version-override= components=[erun-backend-postgres] force=false publish=false
 deploy: postgres reset requested; running helm upgrade for erun-backend-postgres despite cached images
 deploy: resolved 2 spec(s)
 docker image inspect registry.example/team/erun-backend-postgres:fp-<HEX16>-amd64

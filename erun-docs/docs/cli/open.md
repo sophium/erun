@@ -26,7 +26,7 @@ Arguments resolve the same way as [`erun init`](/cli/init): from working directo
 | `--vscode` | Open the remote environment in VS Code (Remote-SSH) instead of a shell. |
 | `--intellij` | Open the remote environment in IntelliJ IDEA Gateway instead of a shell. |
 
-Advanced flags (`--no-alias-prompt`, `--version`, `--runtime-image`, `--snapshot`/`--no-snapshot`) and the full open lifecycle algorithm are on [Agent reference · CLI flag spec · `erun open`](/agent-reference/cli-flags#erun-open).
+Advanced flags (`--no-alias-prompt`, `--version`, `--runtime-image`) and the full open lifecycle algorithm are on [Agent reference · CLI flag spec · `erun open`](/agent-reference/cli-flags#erun-open). Whether opening builds a local snapshot image is decided by the env's [type](/concepts/environment-types), not a flag.
 
 ## Examples
 

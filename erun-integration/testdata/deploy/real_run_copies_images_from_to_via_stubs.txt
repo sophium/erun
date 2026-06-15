@@ -1,6 +1,6 @@
 audit: erun deploy --version <VERSION> team dev
 trace-log: appending the full trace to <TMP>
-deploy: tenant=team environment=dev version-override=<VERSION> snapshot=true components=[] force=false publish=false
+deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false publish=false
 deploy: no local runtime chart; using published chart oci://registry.internal/team/charts/erun-devops version <VERSION>
 deploy: resolved 1 spec(s)
 ==> Copying erun-devops:<VERSION> from ghcr.io/sophium to registry.internal/team
