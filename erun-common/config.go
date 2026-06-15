@@ -98,8 +98,6 @@ type TenantConfig struct {
 	APIURL                    string   `yaml:"api_url,omitempty" json:"apiUrl,omitempty"`
 	CloudProviderAliases      []string `yaml:"cloudprovideraliases,omitempty" json:"cloudProviderAliases,omitempty"`
 	PrimaryCloudProviderAlias string   `yaml:"primarycloudprovideralias,omitempty" json:"primaryCloudProviderAlias,omitempty"`
-	Remote                    bool     `yaml:"remote,omitempty"`
-	Snapshot                  *bool    `yaml:"snapshot,omitempty"`
 }
 
 type EnvConfig struct {
@@ -129,8 +127,6 @@ type EnvConfig struct {
 	Idle                  EnvironmentIdleConfig   `yaml:"idle,omitempty"`
 	Claude                EnvironmentClaudeConfig `yaml:"claude,omitempty" json:"claude,omitempty"`
 	AITool                string                  `yaml:"aitool,omitempty" json:"aiTool,omitempty"`
-	Remote                bool                    `yaml:"remote,omitempty"`
-	Snapshot              *bool                   `yaml:"snapshot,omitempty"`
 	LocalPortRangeStart   int                     `yaml:"localportrangestart,omitempty" json:"localPortRangeStart,omitempty"`
 	AutoStart             *bool                   `yaml:"autostart,omitempty" json:"autoStart,omitempty"`
 	RemoteHostCredentials bool                    `yaml:"remotehostcredentials,omitempty" json:"remoteHostCredentials,omitempty"`
@@ -151,90 +147,53 @@ type EnvConfig struct {
 	DisableBuildScript bool `yaml:"disablebuildscript,omitempty" json:"disableBuildScript,omitempty"`
 }
 
-func (c TenantConfig) SnapshotEnabled() bool {
-	if c.Snapshot == nil {
-		return false
-	}
-	return *c.Snapshot
-}
-
-func (c *TenantConfig) SetSnapshot(enabled bool) {
-	if c == nil {
-		return
-	}
-	value := enabled
-	c.Snapshot = &value
-}
-
-func (c EnvConfig) SnapshotEnabled() bool {
-	if c.Snapshot == nil {
-		return false
-	}
-	return *c.Snapshot
-}
-
-func (c *EnvConfig) SetSnapshot(enabled bool) {
-	if c == nil {
-		return
-	}
-	value := enabled
-	c.Snapshot = &value
-}
-
-// ResolvedType returns the env's type. When Type is set it is the source of
-// truth. When unset, derives the type from the legacy Remote+Snapshot pair
-// only when both signals are present per the documented truth table at
-// /reference/configuration#planned-changes — otherwise returns "" so callers
-// fall back to the legacy predicates (BuildsHere, RemoteWorktree) without
-// silently reclassifying ambiguous envs:
-//
-//	type set                                  → the set value
-//	type unset, snapshot==nil                 → "" (unresolved; legacy fallback)
-//	type unset, remote=false, snapshot=true   → local-agent
-//	type unset, remote=true,  snapshot=true   → remote-agent
-//	type unset, remote=true,  snapshot=false  → runtime
-//	type unset, remote=false, snapshot=false  → "" (ambiguous local env)
+// ResolvedType returns the env's type, or "" when unresolved. Pre-#376 configs
+// that carried only the legacy remote+snapshot pair are migrated to a concrete
+// Type during YAML decode (see EnvConfig.UnmarshalYAML), so Type is the single
+// source of truth here.
 func (c EnvConfig) ResolvedType() EnvironmentType {
 	if c.Type.IsValid() {
 		return c.Type
 	}
-	if c.Snapshot == nil {
-		return ""
-	}
-	snapshot := *c.Snapshot
-	if !c.Remote {
-		if snapshot {
-			return EnvironmentTypeLocalAgent
-		}
-		return ""
-	}
-	if snapshot {
-		return EnvironmentTypeRemoteAgent
-	}
-	return EnvironmentTypeRuntime
+	return ""
 }
 
 // BuildsHere reports whether builds happen inside this env (local-agent and
-// remote-agent build here; runtime envs only receive deploys). When Type is
-// explicitly set it is the source of truth; otherwise the result matches the
-// legacy SnapshotEnabled() value so callers preserve today's behavior.
+// remote-agent build here; runtime envs only receive deploys). An env whose
+// type is unresolved is treated as not building here.
 func (c EnvConfig) BuildsHere() bool {
-	if c.Type.IsValid() {
-		return c.Type != EnvironmentTypeRuntime
-	}
-	return c.SnapshotEnabled()
+	return c.Type.IsValid() && c.Type != EnvironmentTypeRuntime
 }
 
 // RemoteWorktree reports whether the worktree lives outside the local
 // machine (PVC for remote-agent, none for runtime). Local-agent mounts the
-// worktree from the local filesystem via hostPath. When Type is explicitly
-// set it is the source of truth; otherwise the result matches the legacy
-// Remote bool so callers preserve today's behavior.
+// worktree from the local filesystem via hostPath. An env whose type is
+// unresolved is treated as not having a remote worktree.
 func (c EnvConfig) RemoteWorktree() bool {
-	if c.Type.IsValid() {
-		return c.Type != EnvironmentTypeLocalAgent
+	return c.Type.IsValid() && c.Type != EnvironmentTypeLocalAgent
+}
+
+// legacyEnvTypeFromRemoteSnapshot derives the environment type from the
+// pre-#376 remote+snapshot pair, for configs written before the `type` field
+// existed. It reproduces the old fallback deciders exactly: RemoteWorktree()
+// fell back to the remote flag, and BuildsHere() fell back to SnapshotEnabled()
+// (snapshot != nil && *snapshot), so a missing snapshot key meant "does not
+// build here", identical to snapshot=false. Returns "" only for the one combo
+// with no concrete type — a non-remote env that does not build here — so its
+// deciders stay false on both axes as before. Used only by
+// EnvConfig.UnmarshalYAML to migrate legacy configs on read.
+func legacyEnvTypeFromRemoteSnapshot(remote bool, snapshot *bool) EnvironmentType {
+	buildsHere := snapshot != nil && *snapshot
+	if remote {
+		if buildsHere {
+			return EnvironmentTypeRemoteAgent
+		}
+		return EnvironmentTypeRuntime
 	}
-	return c.Remote
+	if buildsHere {
+		return EnvironmentTypeLocalAgent
+	}
+	return ""
 }
 
 // UpgradeChannel values for EnvConfig.UpgradeChannel / ResolvedUpgradeChannel.
@@ -590,16 +549,11 @@ func SaveTenantConfig(config TenantConfig) error {
 	return nil
 }
 
-// NormalizeEnvConfig populates the new-shape fields (Type, LocalRepoPath)
-// from legacy fields when the new shape is unset. Idempotent: re-running it
-// on an already-normalized config is a no-op. Called by LoadEnvConfig so
-// loaded envs always expose a populated Type, and so subsequent saves write
-// both old and new shapes — letting old binaries read the file while the
-// migration window is open.
+// NormalizeEnvConfig backfills the host-shape LocalRepoPath from the legacy
+// RepoPath for local-agent envs. The env Type is migrated from the pre-#376
+// remote+snapshot pair during YAML decode (see EnvConfig.UnmarshalYAML), so it
+// is already populated by the time this runs. Idempotent.
 func NormalizeEnvConfig(config EnvConfig) EnvConfig {
-	if !config.Type.IsValid() {
-		config.Type = config.ResolvedType()
-	}
 	if strings.TrimSpace(config.LocalRepoPath) == "" && config.Type == EnvironmentTypeLocalAgent {
 		config.LocalRepoPath = strings.TrimSpace(config.RepoPath)
 	}

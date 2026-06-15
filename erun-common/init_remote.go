@@ -115,12 +115,12 @@ func remoteRepositoryTenantConfig(tenant, envName, projectRoot string) TenantCon
 }
 
 func remoteRepositoryEnvConfig(envName, kubernetesContext, projectRoot string, envType EnvironmentType) EnvConfig {
-	cfg := EnvConfig{Name: envName, RepoPath: projectRoot, KubernetesContext: kubernetesContext, Remote: true}
-	if envType.IsValid() {
-		cfg.Type = envType
-		if envType == EnvironmentTypeLocalAgent {
-			cfg.LocalRepoPath = projectRoot
-		}
+	if !envType.IsValid() {
+		envType = EnvironmentTypeRemoteAgent
+	}
+	cfg := EnvConfig{Name: envName, RepoPath: projectRoot, KubernetesContext: kubernetesContext, Type: envType}
+	if envType == EnvironmentTypeLocalAgent {
+		cfg.LocalRepoPath = projectRoot
 	}
 	return cfg
 }

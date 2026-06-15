@@ -11,7 +11,6 @@ Current Directory:
   kubernetes context: test-context
   cloud provider: test-user+123456789012@aws
   type: none
-  snapshot: off
   assigned local port range: 17000-17099
   assigned mcp local port: 17000 (when MCP is running or forwarded)
   assigned api local port: 17033 (when API is running or forwarded)
@@ -27,8 +26,6 @@ Tenants:
     environments:
       - dev [default, effective] context=test-context cloud=test-user+123456789012@aws
           type: none
-          remote: off
-          snapshot: off
           repo: <TMP>
           ports: 17000-17099
           mcp-port: 17000

@@ -28,7 +28,6 @@ type uiEnvironment struct {
 	KubernetesContext string `json:"kubernetesContext,omitempty"`
 	IsActive          bool   `json:"isActive,omitempty"`
 	SSHDEnabled       bool   `json:"sshdEnabled,omitempty"`
-	Remote            bool   `json:"remote"`
 	AutoStart         *bool  `json:"autoStart,omitempty"`
 }
 
@@ -233,8 +232,6 @@ type uiEnvironmentConfig struct {
 	ClaudeDefaults        uiClaudeDefaults           `json:"claudeDefaults"`
 	AITool                string                     `json:"aiTool,omitempty"`
 	LocalPorts            uiEnvironmentLocalPorts    `json:"localPorts"`
-	Remote                bool                       `json:"remote"`
-	Snapshot              bool                       `json:"snapshot"`
 	AutoStart             *bool                      `json:"autoStart,omitempty"`
 	RemoteHostCredentials bool                       `json:"remoteHostCredentials"`
 	AutoUpgrade           bool                       `json:"autoUpgrade"`

@@ -105,18 +105,20 @@ func TestList(t *testing.T) {
 		golden.Equal(t, "list/explicit_runtime_type", normalize.Apply(result.Combined))
 	})
 
-	t.Run("legacy_yaml_keeps_unresolved_type", func(t *testing.T) {
-		// Seed an env with the legacy remote=true shape but no snapshot
-		// field. NormalizeEnvConfig must leave Type unresolved so the env
-		// behaves per legacy semantics — list shows "type: none" and the
-		// downstream chart wiring uses the legacy fallback.
+	t.Run("legacy_remote_yaml_migrates_to_runtime", func(t *testing.T) {
+		// Seed an env with the legacy remote=true shape and no snapshot field.
+		// With the remote/snapshot pair retired, EnvConfig.UnmarshalYAML
+		// migrates it to a concrete Type on read: a remote env with no
+		// build-here signal maps to runtime, preserving the old
+		// RemoteWorktree()=true / BuildsHere()=false semantics that the dropped
+		// fields used to provide. list surfaces "type: runtime".
 		setup := env.New(t)
-		fixture.SeedRemoteTenantEnv(t, setup, "team", "dev")
+		fixture.SeedLegacyRemoteTenantEnv(t, setup, "team", "dev")
 		result := erun.Run(t, []string{"list"}, erun.RunOptions{Cwd: setup.Cwd, Env: setup.Env()})
 		if result.ExitCode != 0 {
 			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
 		}
-		golden.Equal(t, "list/legacy_yaml_keeps_unresolved_type", normalize.Apply(result.Combined))
+		golden.Equal(t, "list/legacy_remote_yaml_migrates_to_runtime", normalize.Apply(result.Combined))
 	})
 
 	t.Run("multi_tenant_with_multiple_envs", func(t *testing.T) {
@@ -320,7 +322,7 @@ func seedListSSHDTenant(t testing.TB, setup env.Setup) {
 		"name: dev\n"+
 			"repopath: "+tenantPath+"\n"+
 			"kubernetescontext: cluster-dev\n"+
-			"remote: true\n"+
+			"type: remote-agent\n"+
 			"sshd:\n"+
 			"  enabled: true\n"+
 			"  localport: 17022\n"+

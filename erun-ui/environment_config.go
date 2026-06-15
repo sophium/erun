@@ -313,8 +313,6 @@ func (a *App) environmentConfigToUI(tenant string, config eruncommon.EnvConfig, 
 			SSHStatus:           localPortStatus(ports.SSH),
 			ContributeAppStatus: localPortStatus(ports.ContributeApp),
 		},
-		Remote:                config.Remote,
-		Snapshot:              config.SnapshotEnabled(),
 		AutoStart:             copyBoolPtr(config.AutoStart),
 		RemoteHostCredentials: config.RemoteHostCredentials,
 		AutoUpgrade:           config.AutoUpgrade,
@@ -506,7 +504,6 @@ func environmentConfigFromUI(config uiEnvironmentConfig, existing eruncommon.Env
 	if localRepo := strings.TrimSpace(config.LocalRepoPath); localRepo != "" {
 		existing.LocalRepoPath = localRepo
 	}
-	existing.SetSnapshot(config.Snapshot)
 	existing.AutoStart = copyBoolPtr(config.AutoStart)
 	existing.RemoteHostCredentials = config.RemoteHostCredentials
 	existing.AutoUpgrade = config.AutoUpgrade

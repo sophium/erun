@@ -147,10 +147,7 @@ func writeEffectiveTargetIdentity(ctx common.Context, effective common.ListEffec
 }
 
 func writeEffectiveTargetType(ctx common.Context, effective common.ListEffectiveTargetResult) error {
-	if err := writeLabeledValue(ctx, "type", valueOrNone(string(effective.Type))); err != nil {
-		return err
-	}
-	return writeLabeledValue(ctx, "snapshot", enabledDisabledLabel(effective.Snapshot))
+	return writeLabeledValue(ctx, "type", valueOrNone(string(effective.Type)))
 }
 
 func writeEffectiveTargetPorts(ctx common.Context, effective common.ListEffectiveTargetResult) error {
@@ -249,8 +246,6 @@ func environmentDetailLines(env common.ListEnvironmentResult) []string {
 	const indent = "          "
 	lines := []string{
 		indent + "type: " + valueOrNone(string(env.Type)),
-		indent + "remote: " + enabledDisabledLabel(env.Remote),
-		indent + "snapshot: " + enabledDisabledLabel(env.Snapshot),
 		indent + "repo: " + valueOrNone(env.RepoPath),
 		indent + "ports: " + portRangeLabel(env.LocalPorts),
 		indent + "mcp-port: " + fmt.Sprintf("%d", env.LocalPorts.MCP),

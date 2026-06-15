@@ -74,7 +74,7 @@ func TestDelete(t *testing.T) {
 		body := "name: dev\n" +
 			"repopath: " + setup.Cwd + "\n" +
 			"runtimeversion: 1.0.0\n" +
-			"remote: true\n"
+			"type: remote-agent\n"
 		if err := os.WriteFile(envCfgPath, []byte(body), 0o644); err != nil {
 			t.Fatalf("rewrite env config without kubernetescontext: %v", err)
 		}

@@ -239,7 +239,7 @@ initialize_erun_config() {
     cloud_region=""
     cloud_instance_id=""
     cloud_context_name="${ERUN_CLOUD_CONTEXT_NAME:-${ERUN_KUBERNETES_CONTEXT:-in-cluster}}"
-    env_remote_line=""
+    env_type_line=""
     env_managed_cloud_line=""
     env_cloud_provider_alias_line=""
 
@@ -251,8 +251,12 @@ initialize_erun_config() {
         cloud_instance_id=$(runtime_cloud_instance_id)
     fi
 
-    if runtime_repo_is_remote; then
-        env_remote_line="remote: true"
+    if [ -n "${ERUN_ENV_TYPE:-}" ]; then
+        env_type_line="type: ${ERUN_ENV_TYPE}"
+    elif runtime_repo_is_remote; then
+        # Fallback for charts that predate ERUN_ENV_TYPE: emit the legacy
+        # remote flag, which erun migrates to a concrete type on read.
+        env_type_line="remote: true"
     fi
     if [ -n "${cloud_provider_alias}" ]; then
         env_cloud_provider_alias_line="cloudprovideralias: ${cloud_provider_alias}"
@@ -319,7 +323,7 @@ EOF
 name: ${environment}
 repopath: ${repo_dir}
 kubernetescontext: ${ERUN_KUBERNETES_CONTEXT:-in-cluster}
-${env_remote_line}
+${env_type_line}
 ${env_cloud_provider_alias_line}
 ${env_managed_cloud_line}
 idle:

@@ -12,7 +12,6 @@ type DeployInput struct {
 	Component  string   `json:"component,omitempty" jsonschema:"component name for the devops k8s deploy COMPONENT command"`
 	Components []string `json:"components,omitempty" jsonschema:"opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api); ignored when component is set"`
 	Version    string   `json:"version,omitempty" jsonschema:"optional explicit version override for the deployed chart"`
-	Snapshot   *bool    `json:"snapshot,omitempty" jsonschema:"optional local snapshot override; when false, skips local snapshot builds in the local environment"`
 	Force      bool     `json:"force,omitempty" jsonschema:"when true, bypass the fingerprint cache and re-run helm upgrade even when no source change is detected"`
 	Publish    bool     `json:"publish,omitempty" jsonschema:"when true, package and push each resolved chart to the environment's container registry as an OCI Helm artifact before helm upgrade"`
 	Preview    bool     `json:"preview,omitempty" jsonschema:"when true, resolve and print the planned actions without executing them"`
@@ -37,7 +36,6 @@ func deployTool(runtime RuntimeConfig) func(context.Context, *mcp.CallToolReques
 				Environment:     strings.TrimSpace(runtime.Context.Environment),
 				RepoPath:        workDir,
 				VersionOverride: strings.TrimSpace(input.Version),
-				Snapshot:        input.Snapshot,
 				Components:      input.Components,
 				Force:           input.Force,
 				Publish:         input.Publish,

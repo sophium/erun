@@ -244,20 +244,26 @@ func (c *ProjectConfig) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// UnmarshalYAML migrates a remote env's legacy single `containerregistry`
-// scalar into the marked list so already-deployed remote and runtime envs keep
-// pulling from the registry they were configured with.
+// UnmarshalYAML migrates an env's pre-#376 legacy fields on read so configs
+// written by older binaries keep working after the fields were removed from the
+// struct: the single `containerregistry` scalar folds into the marked list, and
+// the `remote`+`snapshot` pair derives the env `type` when `type` is unset.
 func (c *EnvConfig) UnmarshalYAML(value *yaml.Node) error {
 	type plain EnvConfig
 	aux := struct {
 		plain                   `yaml:",inline"`
 		LegacyContainerRegistry string `yaml:"containerregistry,omitempty"`
+		LegacyRemote            bool   `yaml:"remote,omitempty"`
+		LegacySnapshot          *bool  `yaml:"snapshot,omitempty"`
 	}{}
 	if err := value.Decode(&aux); err != nil {
 		return err
 	}
 	*c = EnvConfig(aux.plain)
 	c.ContainerRegistries = migrateLegacyContainerRegistry(c.ContainerRegistries, aux.LegacyContainerRegistry)
+	if !c.Type.IsValid() {
+		c.Type = legacyEnvTypeFromRemoteSnapshot(aux.LegacyRemote, aux.LegacySnapshot)
+	}
 	return nil
 }
 

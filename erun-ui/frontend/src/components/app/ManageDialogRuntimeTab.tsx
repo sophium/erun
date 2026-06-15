@@ -1,6 +1,7 @@
 import { Check, ChevronsUpDown, Rocket } from 'lucide-react';
 import * as React from 'react';
 
+import { environmentTypeIsRemoteWorktree } from '@/app/environmentType';
 import { readError } from '@/app/errors';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
@@ -133,7 +134,7 @@ function IdleStopFields({ dialog }: { dialog: ManageDialog }): React.ReactElemen
           );
         }}
       />
-      {config.remote && (
+      {environmentTypeIsRemoteWorktree(config.type) && (
         <SelectField
           id="environment-config-autostart"
           label="Auto-start when opening"

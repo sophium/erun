@@ -34,7 +34,6 @@ The chart and runtime image are one contract — published together to the same 
 |---|---|
 | `--components <name,name,...>` | Opt-in components to include alongside the runtime chart. The accepted list is derived from each project's `<tenant>-devops/k8s/<component>/` charts. |
 | `--version <version>` | Override the deployed chart and image version. |
-| `--snapshot` / `--no-snapshot` | Build and deploy local snapshot images in a local environment (on by default there). A snapshot deploy that includes the postgres component also **resets the environment's Postgres database**. |
 | `--publish` | Package and push each resolved chart to the environment's container registry as an OCI Helm artifact before the upgrade. |
 | `--force` | Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected. |
 | `--dry-run` | Resolve and print every `docker`, `docker push`, and `helm upgrade --install` command without executing. |
@@ -51,9 +50,9 @@ When all of a chart's locally-built images were promoted from the fingerprint ca
 
 This means a no-op `erun deploy` after a clean clone is essentially free.
 
-## Snapshot mode and the database
+## Snapshot builds and the database
 
-In a local environment, `deploy` builds and deploys local snapshot images by default (`--no-snapshot` opts out). A snapshot deploy that includes the `erun-backend-postgres` component also **resets the environment's Postgres database** — convenient for a throwaway local stack, surprising if you didn't expect it. The reset rides in the postgres chart itself, so it still runs when image caching would otherwise skip that chart's helm step (the dry-run trace names the decision). Runtime environments deploy released images from the registry and don't reset data.
+Whether `deploy` builds and deploys local snapshot images is decided by the env's [type](/concepts/environment-types): agent environments (`local-agent`, `remote-agent`) build here; runtime environments deploy released images from the registry and don't build. There is no `--snapshot` flag — set the env's type instead. A snapshot deploy (an agent env) that includes the `erun-backend-postgres` component also **resets the environment's Postgres database** — convenient for a throwaway local stack, surprising if you didn't expect it. The reset rides in the postgres chart itself, so it still runs when image caching would otherwise skip that chart's helm step (the dry-run trace names the decision). Runtime environments don't reset data.
 
 On a successful deploy of the runtime chart, the resolved version and registry are persisted to the environment's config, so the next `open` / `deploy` reuses them.
 

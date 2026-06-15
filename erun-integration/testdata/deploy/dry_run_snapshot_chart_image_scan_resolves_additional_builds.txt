@@ -1,6 +1,6 @@
-audit: erun deploy --dry-run --snapshot team dev
+audit: erun deploy --dry-run team dev
 trace-log: would append the full trace to <TMP>
-deploy: tenant=team environment=dev version-override= snapshot=true components=[] force=false publish=false
+deploy: tenant=team environment=dev version-override= components=[] force=false publish=false
 deploy: resolved 1 spec(s)
 docker image inspect registry.example/test/base:fp-<HEX16>-amd64
 fingerprint image not found locally: registry.example/test/base:fp-<HEX16>-amd64

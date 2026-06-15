@@ -1,6 +1,6 @@
-audit: erun deploy --dry-run --no-snapshot --version <VERSION> team prod
+audit: erun deploy --dry-run --version <VERSION> team prod
 trace-log: would append the full trace to <TMP>
-deploy: tenant=team environment=prod version-override=<VERSION> snapshot=false components=[] force=false publish=false
+deploy: tenant=team environment=prod version-override=<VERSION> components=[] force=false publish=false
 deploy: resolved 1 spec(s)
 kubectl --context erun-001-team-eu-west-2 get namespace team-prod -o name
 kubectl --context erun-001-team-eu-west-2 create namespace team-prod

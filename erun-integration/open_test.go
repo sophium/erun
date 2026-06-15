@@ -441,12 +441,10 @@ func TestOpen(t *testing.T) {
 	})
 
 	t.Run("snapshot_env_config_drives_local_build", func(t *testing.T) {
-		// Regression for the snapshot fallback bug: when the env config
-		// has snapshot=true persisted (a prior `erun open --snapshot`),
-		// `erun open` without --snapshot must still reach the local-build
-		// branch. Pre-fix, allowLocalBuilds was wired to the override
-		// only, so the persisted setting was silently ignored and the
-		// runtime image always came from EnvConfig.RuntimeVersion.
+		// A local env whose config carries the legacy snapshot=true key
+		// migrates to type=local-agent on read, so BuildsHere() is true and
+		// `erun open` reaches the local-build branch. allowLocalBuilds is
+		// derived from the env type (EnvConfig.BuildsHere()), not a flag.
 		setup := env.New(t)
 		fixture.SeedTenantEnvWithSnapshot(t, setup, "team", "local", true)
 		fixture.SeedDevopsRepo(t, setup, "team", "local")
@@ -455,19 +453,6 @@ func TestOpen(t *testing.T) {
 		envVars = append(envVars, stubDockerNoLocalImages(t, setup)...)
 		result := erun.Run(t, []string{"open", "team", "local", "--no-shell", "--no-alias-prompt", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
 		golden.Equal(t, "open/snapshot_env_config_drives_local_build", normalize.Apply(result.Combined))
-	})
-
-	t.Run("no_snapshot_skips_local_build", func(t *testing.T) {
-		// --no-snapshot for a local env where the env config has
-		// snapshot=true must force allowLocalBuilds=false: the
-		// runtime-image trace must not contain a `docker build` line and
-		// the helm chart must use the persisted runtime version.
-		setup := env.New(t)
-		fixture.SeedTenantEnvWithSnapshot(t, setup, "team", "local", true)
-		fixture.SeedDevopsRepo(t, setup, "team", "local")
-		envVars := stubKubectlNotFound(t, setup)
-		result := erun.Run(t, []string{"open", "team", "local", "--no-shell", "--no-alias-prompt", "--no-snapshot", "--dry-run"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
-		golden.Equal(t, "open/no_snapshot_skips_local_build", normalize.Apply(result.Combined))
 	})
 
 	t.Run("version_override_skips_local_build", func(t *testing.T) {

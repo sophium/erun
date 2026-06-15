@@ -766,7 +766,6 @@ func (s *bootstrapRunState) createEnvConfig() error {
 		RuntimeVersion:     strings.TrimSpace(s.params.RuntimeVersion),
 		RuntimeImage:       strings.TrimSpace(s.params.RuntimeImage),
 		RuntimePod:         NormalizeRuntimePodResources(s.params.RuntimePod),
-		Remote:             s.params.Remote,
 		DisableBuildScript: s.params.DisableBuildScript,
 	}
 	if err := saveEnvConfig(s.runner.Store, s.tenant, s.envConfig); err != nil {
@@ -825,7 +824,7 @@ func (s *bootstrapRunState) resolveNewEnvCloudConfig() (string, string, bool, er
 	managedCloud, err := managedCloudEnvironment(s.runner.Store, EnvConfig{
 		KubernetesContext:  kubernetesContext,
 		CloudProviderAlias: cloudProviderAlias,
-		Remote:             s.params.Remote,
+		Type:               s.params.ResolvedType(),
 	})
 	return kubernetesContext, cloudProviderAlias, managedCloud, err
 }
@@ -862,8 +861,8 @@ func (s *bootstrapRunState) updateRemoteEnvConfig() {
 		s.envConfig.RuntimePod = runtimePod
 		s.envConfigChanged = true
 	}
-	if !s.envConfig.Remote {
-		s.envConfig.Remote = true
+	if !s.envConfig.RemoteWorktree() {
+		s.envConfig.Type = s.params.ResolvedType()
 		s.envConfigChanged = true
 	}
 }
@@ -1389,7 +1388,7 @@ func normalizeNamespaceName(value string) string {
 
 func saveEnvConfig(store BootstrapStore, tenant string, config EnvConfig) error {
 	stored := config
-	if !stored.Remote {
+	if !stored.RemoteWorktree() {
 		stored.ContainerRegistries = nil
 	}
 	return store.SaveEnvConfig(tenant, stored)

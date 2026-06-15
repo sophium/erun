@@ -158,7 +158,6 @@ type DeployTarget struct {
 	Environment     string
 	RepoPath        string
 	VersionOverride string
-	Snapshot        *bool
 	// Components lists optional opt-in charts to include alongside the
 	// always-on charts (e.g. the per-tenant runtime). Names must come from
 	// optInDeployComponents; unknown names produce an error during resolve.
@@ -502,7 +501,7 @@ func ResolveDeploySpec(ctx Context, store DeployStore, findProjectRoot ProjectFi
 	if err != nil {
 		return DeploySpec{}, err
 	}
-	spec, err := resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, componentName, versionOverride, deployTargetSnapshotEnabled(resolvedTarget, target.Snapshot), target.Force)
+	spec, err := resolveDeploySpecForOpenResult(ctx, store, findProjectRoot, resolveDockerBuildContext, resolveKubernetesDeployContext, now, resolvedTarget, componentName, versionOverride, resolvedTarget.EnvConfig.BuildsHere(), target.Force)
 	if err != nil {
 		return DeploySpec{}, err
 	}
@@ -549,7 +548,7 @@ func ResolveCurrentDeploySpecs(ctx Context, store DeployStore, findProjectRoot P
 	}
 	sortDeployContextsByDeployOrder(deployContexts, projectK8s)
 	specs := make([]DeploySpec, 0, len(deployContexts))
-	allowLocalBuilds := deployTargetSnapshotEnabled(resolvedTarget, target.Snapshot)
+	allowLocalBuilds := resolvedTarget.EnvConfig.BuildsHere()
 	var currentBuild *DockerBuildSpec
 	if allowLocalBuilds && strings.TrimSpace(target.VersionOverride) == "" {
 		currentBuild, err = resolveCurrentDockerComponentBuildForDeploy(store, findProjectRoot, resolveDockerBuildContext, now, resolvedTarget.RepoPath, resolvedTarget.Environment, target.VersionOverride)
@@ -998,13 +997,6 @@ func resolveDeployVersionOverride(target DeployTarget, versionOverride string) s
 		return versionOverride
 	}
 	return strings.TrimSpace(target.VersionOverride)
-}
-
-func deployTargetSnapshotEnabled(target OpenResult, override *bool) bool {
-	if override != nil {
-		return *override
-	}
-	return target.EnvConfig.BuildsHere()
 }
 
 func deployResetsDatabase(snapshotEnabled bool, version string) bool {

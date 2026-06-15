@@ -179,7 +179,7 @@ func TestStopCloudContextSuppressesReconnect(t *testing.T) {
 				Name:              "remote",
 				RepoPath:          projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Remote:            true,
+				Type: eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -275,7 +275,7 @@ func TestClearIntentionalStopForCloudContext(t *testing.T) {
 				Name:              "remote",
 				RepoPath:          projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Remote:            true,
+				Type: eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -333,7 +333,7 @@ func TestStopCloudContextErrorClearsIntentionalStop(t *testing.T) {
 				Name:              "remote",
 				RepoPath:          projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Remote:            true,
+				Type: eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}

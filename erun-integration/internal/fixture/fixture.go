@@ -54,7 +54,8 @@ func SeedTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
 			"repopath: "+setup.Cwd+"\n"+
 			"kubernetescontext: test-context\n"+
 			"containerregistry: registry.example/test\n"+
-			"runtimeversion: 1.0.0\n",
+			"runtimeversion: 1.0.0\n"+
+			"type: local-agent\n",
 	)
 }
 
@@ -85,7 +86,8 @@ func SeedTenantEnvNoRegistry(t testing.TB, setup env.Setup, tenant, environment 
 		"name: "+environment+"\n"+
 			"repopath: "+setup.Cwd+"\n"+
 			"kubernetescontext: test-context\n"+
-			"runtimeversion: 1.0.0\n",
+			"runtimeversion: 1.0.0\n"+
+			"type: local-agent\n",
 	)
 }
 
@@ -117,6 +119,7 @@ func SeedTenantEnvWithLocalPortRangeStart(t testing.TB, setup env.Setup, tenant,
 			"kubernetescontext: test-context\n"+
 			"containerregistry: registry.example/test\n"+
 			"runtimeversion: 1.0.0\n"+
+			"type: local-agent\n"+
 			"localportrangestart: "+strconv.Itoa(rangeStart)+"\n",
 	)
 }
@@ -146,7 +149,8 @@ func SeedSecondaryTenantEnv(t testing.TB, setup env.Setup, tenant, environment s
 		"repopath: " + setup.Cwd + "\n" +
 		"kubernetescontext: test-context\n" +
 		"containerregistry: registry.example/test\n" +
-		"runtimeversion: 1.0.0\n"
+		"runtimeversion: 1.0.0\n" +
+		"type: local-agent\n"
 	if rangeStart > 0 {
 		envContents += "localportrangestart: " + strconv.Itoa(rangeStart) + "\n"
 	}
@@ -230,7 +234,7 @@ func seedRemoteTenantEnvWithSSHD(t testing.TB, setup env.Setup, tenant, environm
 		"kubernetescontext: test-context\n" +
 		"containerregistry: registry.example/test\n" +
 		"runtimeversion: 1.0.0\n" +
-		"remote: true\n" +
+		"type: remote-agent\n" +
 		"sshd:\n" +
 		"  enabled: true\n"
 	if rangeStart > 0 {
@@ -279,6 +283,43 @@ func SeedRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment stri
 			"kubernetescontext: test-context\n"+
 			"containerregistry: registry.example/test\n"+
 			"runtimeversion: 1.0.0\n"+
+			"type: remote-agent\n",
+	)
+}
+
+// SeedLegacyRemoteTenantEnv writes a tenant/env tree whose env config carries
+// the retired pre-#376 `remote: true` shape with no `type` and no `snapshot`.
+// It exists to exercise EnvConfig.UnmarshalYAML's legacy migration on read:
+// remote with no build-here signal resolves to runtime. All other fixtures use
+// the modern `type:` field; this one is the single deliberate legacy shape.
+func SeedLegacyRemoteTenantEnv(t testing.TB, setup env.Setup, tenant, environment string) {
+	t.Helper()
+	root := filepath.Join(setup.ConfigHome, "erun")
+	tenantDir := filepath.Join(root, tenant)
+	envDir := filepath.Join(tenantDir, environment)
+	for _, dir := range []string{root, tenantDir, envDir} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", dir, err)
+		}
+	}
+
+	repoPath := filepath.Join(setup.Home, "git", tenant)
+	if err := os.MkdirAll(repoPath, 0o755); err != nil {
+		t.Fatalf("mkdir repo %s: %v", repoPath, err)
+	}
+
+	mustWrite(t, filepath.Join(root, "config.yaml"), "defaulttenant: "+tenant+"\n")
+	mustWrite(t, filepath.Join(tenantDir, "config.yaml"),
+		"projectroot: "+repoPath+"\n"+
+			"name: "+tenant+"\n"+
+			"defaultenvironment: "+environment+"\n",
+	)
+	mustWrite(t, filepath.Join(envDir, "config.yaml"),
+		"name: "+environment+"\n"+
+			"repopath: "+repoPath+"\n"+
+			"kubernetescontext: test-context\n"+
+			"containerregistry: registry.example/test\n"+
+			"runtimeversion: 1.0.0\n"+
 			"remote: true\n",
 	)
 }
@@ -299,7 +340,7 @@ func SeedRemoteTenantEnvWithPortRange(t testing.TB, setup env.Setup, tenant, env
 			"kubernetescontext: test-context\n"+
 			"containerregistry: registry.example/test\n"+
 			"runtimeversion: 1.0.0\n"+
-			"remote: true\n"+
+			"type: remote-agent\n"+
 			"localportrangestart: "+strconv.Itoa(rangeStart)+"\n",
 	)
 }
@@ -318,7 +359,7 @@ func SeedRemoteTenantEnvWithClaude(t testing.TB, setup env.Setup, tenant, enviro
 			"kubernetescontext: test-context\n"+
 			"containerregistry: registry.example/test\n"+
 			"runtimeversion: 1.0.0\n"+
-			"remote: true\n"+
+			"type: remote-agent\n"+
 			claudeBlock,
 	)
 }
@@ -337,7 +378,7 @@ func SeedRemoteTenantEnvWithHostCredentials(t testing.TB, setup env.Setup, tenan
 			"kubernetescontext: test-context\n"+
 			"containerregistry: registry.example/test\n"+
 			"runtimeversion: 1.0.0\n"+
-			"remote: true\n"+
+			"type: remote-agent\n"+
 			"remotehostcredentials: true\n",
 	)
 }
@@ -371,7 +412,7 @@ func SeedRemoteRepoPathTenantEnv(t testing.TB, setup env.Setup, tenant, environm
 			"kubernetescontext: test-context\n"+
 			"containerregistry: registry.example/test\n"+
 			"runtimeversion: 1.0.0\n"+
-			"remote: true\n",
+			"type: remote-agent\n",
 	)
 }
 

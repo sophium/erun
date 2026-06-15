@@ -20,7 +20,6 @@ export interface UIEnvironment {
   kubernetesContext?: string;
   isActive?: boolean;
   sshdEnabled?: boolean;
-  remote: boolean;
   autoStart?: boolean;
 }
 
@@ -401,8 +400,6 @@ export interface UIEnvironmentConfig {
   localPorts: UIEnvironmentLocalPorts;
   type?: string;
   localRepoPath?: string;
-  remote: boolean;
-  snapshot: boolean;
   // AutoStart is the desktop-only auto-start policy for the linked cloud
   // context: undefined means "ask the user once" (first-time prompt), true
   // means "always auto-start", false means "never auto-start; render the

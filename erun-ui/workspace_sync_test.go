@@ -258,7 +258,7 @@ func workspaceSyncStore(enabled bool) stubUIStore {
 				Name:              "dev",
 				RepoPath:          "/home/erun/git/frs",
 				KubernetesContext: "cluster-dev",
-				Remote:            true,
+				Type: eruncommon.EnvironmentTypeRuntime,
 				SSHD: eruncommon.SSHDConfig{
 					Enabled: true,
 					WorkspaceSync: eruncommon.SSHDWorkspaceSyncConfig{

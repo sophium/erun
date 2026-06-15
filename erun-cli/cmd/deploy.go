@@ -9,8 +9,6 @@ import (
 
 func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	target := common.DeployTarget{}
-	var snapshot bool
-	var noSnapshot bool
 	var components []string
 	cmd := &cobra.Command{
 		Use:   "deploy [TENANT] [ENVIRONMENT]",
@@ -30,21 +28,13 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 			if err != nil {
 				return err
 			}
-			snapshotOverride, err := resolveSnapshotFlagOverride(cmd, snapshot, noSnapshot)
-			if err != nil {
-				return err
-			}
-			if snapshotOverride == nil {
-				snapshotOverride = &snapshot
-			}
-			deployTarget.Snapshot = snapshotOverride
 			deployTarget.Components = components
 			var closeEnvTrace func()
 			ctx, closeEnvTrace = common.ActivateEnvTrace(ctx, deployTarget.Tenant, deployTarget.Environment)
 			defer closeEnvTrace()
-			ctx.Trace(fmt.Sprintf("deploy: tenant=%s environment=%s version-override=%s snapshot=%v components=%v force=%v publish=%v",
+			ctx.Trace(fmt.Sprintf("deploy: tenant=%s environment=%s version-override=%s components=%v force=%v publish=%v",
 				deployTarget.Tenant, deployTarget.Environment, deployTarget.VersionOverride,
-				snapshotOverride != nil && *snapshotOverride, components, deployTarget.Force, deployTarget.Publish))
+				components, deployTarget.Force, deployTarget.Publish))
 			deploySpecs, err := common.ResolveCurrentDeploySpecs(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, deployTarget)
 			if err != nil {
 				ctx.Trace("deploy: spec resolution failed: " + err.Error())
@@ -58,15 +48,13 @@ func newDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver,
 		},
 	}
 	addDryRunFlag(cmd)
-	addDeployCommandTargetFlags(cmd, &target, &snapshot, &noSnapshot)
+	addDeployCommandTargetFlags(cmd, &target)
 	cmd.Flags().StringSliceVar(&components, "components", nil, "Opt-in components to include alongside the runtime chart (erun-backend-postgres, erun-backend-db, erun-backend-api)")
 	return cmd
 }
 
 func newK8sDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSaver, findProjectRoot common.ProjectFinderFunc, resolveBuildContext common.BuildContextResolverFunc, resolveDeployContext common.DeployContextResolverFunc, now common.NowFunc, buildDockerImage common.DockerImageBuilderFunc, push common.DockerPushFunc, deployHelmChart common.HelmChartDeployerFunc) *cobra.Command {
 	target := common.DeployTarget{}
-	var snapshot bool
-	var noSnapshot bool
 	cmd := &cobra.Command{
 		Use:           "deploy COMPONENT",
 		Short:         "Deploy a component Helm chart",
@@ -75,14 +63,6 @@ func newK8sDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSav
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := withCloudContextPreflight(commandContext(cmd), store)
-			snapshotOverride, err := resolveSnapshotFlagOverride(cmd, snapshot, noSnapshot)
-			if err != nil {
-				return err
-			}
-			if snapshotOverride == nil {
-				snapshotOverride = &snapshot
-			}
-			target.Snapshot = snapshotOverride
 			deploySpec, err := common.ResolveDeploySpec(ctx, store, findProjectRoot, resolveBuildContext, resolveDeployContext, now, target, args[0], "")
 			if err != nil {
 				return err
@@ -94,13 +74,12 @@ func newK8sDeployCmd(store common.DeployStore, saveEnvConfig common.EnvConfigSav
 		},
 	}
 	addDryRunFlag(cmd)
-	addDeployCommandTargetFlags(cmd, &target, &snapshot, &noSnapshot)
+	addDeployCommandTargetFlags(cmd, &target)
 	return cmd
 }
 
-func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget, snapshot, noSnapshot *bool) {
+func addDeployCommandTargetFlags(cmd *cobra.Command, target *common.DeployTarget) {
 	cmd.Flags().StringVar(&target.VersionOverride, "version", "", "Override the deployed chart and image version")
-	addSnapshotFlags(cmd, snapshot, noSnapshot, "Build and deploy local snapshot images in the local environment")
 	cmd.Flags().StringVar(&target.Tenant, "tenant", "", "Deploy for a specific tenant")
 	cmd.Flags().StringVar(&target.Environment, "environment", "", "Deploy for a specific environment; requires --tenant")
 	cmd.Flags().BoolVar(&target.Force, "force", false, "Bypass the fingerprint cache and re-run helm upgrade even when no source change is detected")

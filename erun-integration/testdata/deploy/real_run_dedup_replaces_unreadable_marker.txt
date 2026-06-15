@@ -1,6 +1,6 @@
-audit: erun deploy --no-snapshot --version <VERSION> team dev
+audit: erun deploy --version <VERSION> team dev
 trace-log: appending the full trace to <TMP>
-deploy: tenant=team environment=dev version-override=<VERSION> snapshot=false components=[] force=false publish=false
+deploy: tenant=team environment=dev version-override=<VERSION> components=[] force=false publish=false
 deploy: resolved 1 spec(s)
 deploy: watching pods in team-dev on context test-context for early container failure (release team-devops)
 dedup: replacing unreadable in-flight marker (unexpected end of JSON input)

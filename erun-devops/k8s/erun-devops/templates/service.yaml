@@ -25,6 +25,19 @@ docs/concepts/environment-types for the type→storage mapping.
 {{- if ne $worktreeStorage "none" -}}
   {{- $worktreePath = printf "/home/erun/git/%s" (required "worktreeRepoName is required when worktreeStorage is set" $worktreeRepoName) -}}
 {{- end -}}
+{{- /*
+envType is the canonical environment type written into the in-pod erun config
+(EnvConfig.Type). It is the inverse of the worktreeStorage→type mapping that
+erun-common/deploy.go:resolveWorktreeStorage applies, so the pod records the
+same type the laptop resolved. The retired remote/snapshot pair is no longer
+emitted; type is the single source of truth.
+*/ -}}
+{{- $envType := "runtime" -}}
+{{- if eq $worktreeStorage "host" -}}
+  {{- $envType = "local-agent" -}}
+{{- else if eq $worktreeStorage "pvc" -}}
+  {{- $envType = "remote-agent" -}}
+{{- end -}}
 {{- $idle := default dict .Values.idle -}}
 {{- $idleTimeout := default "5m0s" $idle.timeout -}}
 {{- $idleWorkingHours := default "08:00-20:00" $idle.workingHours -}}
@@ -226,6 +239,8 @@ spec:
               value: {{ $worktreePath | quote }}
             - name: ERUN_REPO_REMOTE
               value: {{ if eq $worktreeStorage "pvc" }}"true"{{ else }}"false"{{ end }}
+            - name: ERUN_ENV_TYPE
+              value: {{ $envType | quote }}
             - name: ERUN_CLOUD_ENVIRONMENT
               value: {{ if $managedCloud }}"true"{{ else }}"false"{{ end }}
             - name: ERUN_CLOUD_CONTEXT_NAME
@@ -364,6 +379,8 @@ spec:
               value: {{ $worktreePath | quote }}
             - name: ERUN_REPO_REMOTE
               value: {{ if eq $worktreeStorage "pvc" }}"true"{{ else }}"false"{{ end }}
+            - name: ERUN_ENV_TYPE
+              value: {{ $envType | quote }}
             - name: ERUN_KUBERNETES_CONTEXT
               value: in-cluster
             - name: ERUN_CLOUD_CONTEXT_NAME

@@ -43,7 +43,6 @@ type ListEffectiveTargetResult struct {
 	RepoPath           string                `json:"repoPath"`
 	LocalRepoPath      string                `json:"localRepoPath,omitempty"`
 	APIURL             string                `json:"apiUrl,omitempty"`
-	Snapshot           bool                  `json:"snapshot"`
 	LocalPorts         EnvironmentLocalPorts `json:"localPorts,omitempty"`
 	SSH                ListSSHResult         `json:"ssh,omitempty"`
 }
@@ -70,13 +69,11 @@ type ListEnvironmentResult struct {
 	ContainerRegistries ContainerRegistries     `json:"containerRegistries,omitempty"`
 	RuntimeVersion      string                  `json:"runtimeVersion,omitempty"`
 	RuntimePod          RuntimePodResources     `json:"runtimePod,omitempty"`
-	Remote              bool                    `json:"remote,omitempty"`
 	ManagedCloud        bool                    `json:"managedCloud,omitempty"`
 	DisableBuildScript  bool                    `json:"disableBuildScript,omitempty"`
 	AITool              string                  `json:"aiTool,omitempty"`
 	Claude              EnvironmentClaudeConfig `json:"claude,omitempty"`
 	Idle                EnvironmentIdleConfig   `json:"idle,omitempty"`
-	Snapshot            bool                    `json:"snapshot"`
 	IsActive            bool                    `json:"isActive,omitempty"`
 	LocalPorts          EnvironmentLocalPorts   `json:"localPorts,omitempty"`
 	IsDefault           bool                    `json:"isDefault,omitempty"`
@@ -170,7 +167,6 @@ func listCurrentDirectoryResult(current ListCurrentDirectoryResult, effective Op
 		RepoPath:           effective.RepoPath,
 		LocalRepoPath:      strings.TrimSpace(effective.EnvConfig.LocalRepoPath),
 		APIURL:             APIURLForListEnvironment(effective.TenantConfig, LocalPortsForResult(effective)),
-		Snapshot:           deployTargetSnapshotEnabled(effective, nil),
 		LocalPorts:         LocalPortsForResult(effective),
 		SSH:                listSSHResult(effective),
 	}
@@ -211,13 +207,11 @@ func listEnvironmentResult(store ListStore, tenant TenantConfig, env EnvConfig, 
 		ContainerRegistries: ResolveEnvironmentContainerRegistries(env),
 		RuntimeVersion:      strings.TrimSpace(env.RuntimeVersion),
 		RuntimePod:          env.RuntimePod,
-		Remote:              env.Remote,
 		ManagedCloud:        env.ManagedCloud,
 		DisableBuildScript:  env.DisableBuildScript,
 		AITool:              strings.TrimSpace(env.AITool),
 		Claude:              env.Claude,
 		Idle:                env.Idle,
-		Snapshot:            env.SnapshotEnabled(),
 		IsActive:            listEnvironmentIsActive(store, env),
 		LocalPorts:          localPorts,
 		IsDefault:           env.Name == tenant.DefaultEnvironment,

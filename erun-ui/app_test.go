@@ -33,7 +33,7 @@ func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
 				Name: "erun",
 				Environments: []eruncommon.ListEnvironmentResult{
 					{Name: "local", APIURL: "http://127.0.0.1:17033", RuntimeVersion: "1.0.19-snapshot-20260418141901", LocalPorts: eruncommon.EnvironmentLocalPorts{MCP: 17000, API: 17033}, SSH: eruncommon.ListSSHResult{Enabled: true}},
-					{Name: "remote", APIURL: "http://127.0.0.1:17133", RuntimeVersion: "1.0.18", Remote: true, LocalPorts: eruncommon.EnvironmentLocalPorts{MCP: 17100, API: 17133}},
+					{Name: "remote", APIURL: "http://127.0.0.1:17133", RuntimeVersion: "1.0.18", Type: eruncommon.EnvironmentTypeRemoteAgent, LocalPorts: eruncommon.EnvironmentLocalPorts{MCP: 17100, API: 17133}},
 				},
 			},
 		},
@@ -60,8 +60,8 @@ func TestStateFromListResultUsesEffectiveSelection(t *testing.T) {
 	if !state.Tenants[0].Environments[0].SSHDEnabled || state.Tenants[0].Environments[1].SSHDEnabled {
 		t.Fatalf("unexpected SSHD flags: %+v", state.Tenants[0].Environments)
 	}
-	if state.Tenants[0].Environments[0].Remote || !state.Tenants[0].Environments[1].Remote {
-		t.Fatalf("unexpected remote flags: %+v", state.Tenants[0].Environments)
+	if state.Tenants[0].Environments[0].Type == string(eruncommon.EnvironmentTypeRemoteAgent) || state.Tenants[0].Environments[1].Type != string(eruncommon.EnvironmentTypeRemoteAgent) {
+		t.Fatalf("unexpected env types: %+v", state.Tenants[0].Environments)
 	}
 }
 
@@ -1114,7 +1114,7 @@ func TestOpenIDERunsWithoutConsumingTerminalWhenSSHDEnabled(t *testing.T) {
 				Name:              "remote",
 				RepoPath:          projectRoot,
 				KubernetesContext: "rancher-desktop",
-				Remote:            true,
+				Type: eruncommon.EnvironmentTypeRuntime,
 				SSHD: eruncommon.SSHDConfig{
 					Enabled: true,
 				},
@@ -1236,7 +1236,7 @@ func TestOpenIDERejectsMissingSSHDWithoutHiddenInit(t *testing.T) {
 				Name:              "remote",
 				RepoPath:          projectRoot,
 				KubernetesContext: "rancher-desktop",
-				Remote:            true,
+				Type: eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -1296,7 +1296,7 @@ func TestDeleteEnvironmentRequiresExactConfirmationAndDeletesConfig(t *testing.T
 				Name:              "prod",
 				RepoPath:          "/home/erun/git/frs",
 				KubernetesContext: "cluster-prod",
-				Remote:            true,
+				Type: eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -1345,7 +1345,6 @@ func assertDeletedEnvironment(t *testing.T, store stubUIStore, result deleteEnvi
 }
 
 func TestLoadAndSaveTenantConfig(t *testing.T) {
-	snapshot := false
 	rootConfig := eruncommon.ERunConfig{CloudProviders: []eruncommon.CloudProviderConfig{{
 		Alias:         "team-cloud",
 		Provider:      eruncommon.CloudProviderAWS,
@@ -1361,8 +1360,6 @@ func TestLoadAndSaveTenantConfig(t *testing.T) {
 				APIURL:                    "https://api.old.example",
 				CloudProviderAliases:      []string{"team-cloud"},
 				PrimaryCloudProviderAlias: "team-cloud",
-				Remote:                    true,
-				Snapshot:                  &snapshot,
 			},
 		},
 	}
@@ -1392,8 +1389,8 @@ func TestLoadAndSaveTenantConfig(t *testing.T) {
 	if saved.DefaultEnvironment != "prod" || saved.APIURL != "https://api.new.example" || saved.PrimaryCloudProviderAlias != "team-cloud" {
 		t.Fatalf("unexpected saved config: %+v", saved)
 	}
-	if store.tenants["frs"].ProjectRoot != "/tmp/old" || store.tenants["frs"].APIURL != "https://api.new.example" || store.tenants["frs"].PrimaryCloudProviderAlias != "team-cloud" || !store.tenants["frs"].Remote || store.tenants["frs"].Snapshot == nil || *store.tenants["frs"].Snapshot {
-		t.Fatalf("expected tenant project root/remote/snapshot to be preserved, got %+v", store.tenants["frs"])
+	if store.tenants["frs"].ProjectRoot != "/tmp/old" || store.tenants["frs"].APIURL != "https://api.new.example" || store.tenants["frs"].PrimaryCloudProviderAlias != "team-cloud" {
+		t.Fatalf("expected tenant project root to be preserved, got %+v", store.tenants["frs"])
 	}
 }
 
@@ -1762,7 +1759,6 @@ func TestApplyCloudContextStatusesToCachePreservesKnownStatusOnTransientUnknown(
 
 func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 	projectRoot := t.TempDir()
-	snapshot := true
 	rootConfig := &eruncommon.ERunConfig{
 		CloudProviders: []eruncommon.CloudProviderConfig{
 			{Alias: "team-cloud", Provider: eruncommon.CloudProviderAWS},
@@ -1809,8 +1805,7 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 					LocalPort:     60022,
 					PublicKeyPath: "/tmp/old.pub",
 				},
-				Remote:   false,
-				Snapshot: &snapshot,
+				Type: eruncommon.EnvironmentTypeLocalAgent,
 			},
 		},
 	}
@@ -1843,8 +1838,7 @@ func TestLoadAndSaveEnvironmentConfig(t *testing.T) {
 			LocalPort:     62222,
 			PublicKeyPath: " /tmp/id_ed25519.pub ",
 		},
-		Remote:   true,
-		Snapshot: false,
+		Type: eruncommon.EnvironmentTypeRuntime,
 	})
 	if err != nil {
 		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
@@ -1906,7 +1900,7 @@ func assertStoredEnvironmentConfig(t *testing.T, stored eruncommon.EnvConfig, pr
 	t.Helper()
 
 	storedRegistry, _ := stored.ContainerRegistries.BuildRegistry()
-	if stored.RepoPath != projectRoot || stored.Remote || stored.RuntimeVersion != "1.0.0" || storedRegistry != "registry.example/team" || stored.CloudProviderAlias != "other-cloud" || stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" || stored.Snapshot == nil || *stored.Snapshot {
+	if stored.RepoPath != projectRoot || stored.Type != eruncommon.EnvironmentTypeRuntime || stored.RuntimeVersion != "1.0.0" || storedRegistry != "registry.example/team" || stored.CloudProviderAlias != "other-cloud" || stored.SSHD.Enabled || stored.SSHD.LocalPort != 60022 || stored.SSHD.PublicKeyPath != "/tmp/old.pub" {
 		t.Fatalf("unexpected stored config: %+v", stored)
 	}
 	if stored.RuntimePod.CPU != "6" || stored.RuntimePod.Memory != "12Gi" {
@@ -2001,7 +1995,6 @@ func TestSaveEnvironmentConfigPreservesProjectContainerRegistryReadModel(t *test
 			Timeout:      eruncommon.DefaultEnvironmentIdleTimeout.String(),
 			WorkingHours: eruncommon.DefaultEnvironmentWorkingHours,
 		},
-		Snapshot: true,
 	})
 	if err != nil {
 		t.Fatalf("SaveEnvironmentConfig failed: %v", err)
@@ -2380,7 +2373,7 @@ func TestSaveRemoteEnvironmentConfigSetsCloudAliasViaMCP(t *testing.T) {
 				RepoPath:           projectRoot,
 				KubernetesContext:  "cluster-dev",
 				CloudProviderAlias: "old-cloud",
-				Remote:             true,
+				Type: eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -2448,7 +2441,7 @@ func TestStartSessionLeavesCloudContextStartupToErunCommand(t *testing.T) {
 					Name:              "prod",
 					RepoPath:          projectRoot,
 					KubernetesContext: "cluster-prod",
-					Remote:            true,
+					Type: eruncommon.EnvironmentTypeRuntime,
 				},
 			},
 		},
@@ -2509,7 +2502,7 @@ func TestDeleteEnvironmentStartsLinkedContextThenStopsIt(t *testing.T) {
 				Name:              "prod",
 				RepoPath:          projectRoot,
 				KubernetesContext: "cluster-prod",
-				Remote:            true,
+				Type: eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -2898,7 +2891,7 @@ func TestMergeLocalIdleActivityUsesSavedPolicyWithRemoteActivity(t *testing.T) {
 					WorkingHours: "00:00-23:59",
 				},
 				ManagedCloud: true,
-				Remote:       true,
+				Type: eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -2965,7 +2958,7 @@ func TestStartCloudContextClearsPreviousIdleStop(t *testing.T) {
 				KubernetesContext:  "cluster-cloud",
 				CloudProviderAlias: "team-cloud",
 				ManagedCloud:       true,
-				Remote:             true,
+				Type: eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -3005,7 +2998,7 @@ func TestLoadIdleStatusDoesNotStopWhileEnvironmentCommandRunning(t *testing.T) {
 				KubernetesContext:  "cluster-cloud",
 				CloudProviderAlias: "team-cloud",
 				ManagedCloud:       true,
-				Remote:             true,
+				Type: eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -3640,7 +3633,7 @@ func TestStartSessionDoesNotReconnectIntoStoppedCloudContext(t *testing.T) {
 				Name:              "remote",
 				RepoPath:          projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Remote:            true,
+				Type: eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -3711,7 +3704,7 @@ func TestStartAISessionRespawnsAfterStoppedCloudContextDeath(t *testing.T) {
 				Name:              "remote",
 				RepoPath:          projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Remote:            true,
+				Type: eruncommon.EnvironmentTypeRuntime,
 			},
 		},
 	}
@@ -3807,7 +3800,7 @@ func TestMaybeStopIdleClearsStaleIdleStopWhenContextIsRunningAgain(t *testing.T)
 				Name:              "remote",
 				RepoPath:          projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Remote:            true,
+				Type: eruncommon.EnvironmentTypeRuntime,
 				ManagedCloud:      true,
 			},
 		},
@@ -3866,7 +3859,7 @@ func TestIdleStatusToUIClearsStopErrorWhenContextIsRunning(t *testing.T) {
 				Name:              "remote",
 				RepoPath:          projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Remote:            true,
+				Type: eruncommon.EnvironmentTypeRuntime,
 				ManagedCloud:      true,
 			},
 		},
@@ -3914,7 +3907,7 @@ func TestIdleStatusToUIKeepsStopErrorWhenContextIsStopped(t *testing.T) {
 				Name:              "remote",
 				RepoPath:          projectRoot,
 				KubernetesContext: "cluster-cloud",
-				Remote:            true,
+				Type: eruncommon.EnvironmentTypeRuntime,
 				ManagedCloud:      true,
 			},
 		},
