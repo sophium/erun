@@ -133,15 +133,6 @@ func (a *App) runEnsureErunClone(selection uiSelection) error {
 	return nil
 }
 
-// uiContributeSnapshot returns the persisted contribute flags so the
-// initial state payload can rehydrate per-env toggle state on app boot.
-func (a *App) uiContributeSnapshot() map[string]bool {
-	if a.contribute == nil {
-		return map[string]bool{}
-	}
-	return a.contribute.snapshot()
-}
-
 // StartContributeApp is the Wails-exposed entrypoint for the "Open
 // contribute app" affordance. It boots `erun app --headless --port N`
 // inside the env's ERun (contribute) tab, brings up a kubectl

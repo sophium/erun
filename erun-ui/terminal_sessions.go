@@ -569,70 +569,6 @@ func (a *App) DeleteEnvironment(selection uiSelection, confirmation string) (del
 	}, nil
 }
 
-func (a *App) startCommandSession(selection uiSelection, cols, rows int, key string, args []string, dir string, env []string) (startSessionResult, error) {
-	return a.startCommandSessionWithExecutable(selection, cols, rows, key, a.deps.resolveCLIPath(), args, dir, env)
-}
-
-func (a *App) startCommandSessionWithExecutable(selection uiSelection, cols, rows int, key string, executable string, args []string, dir string, env []string) (startSessionResult, error) {
-	selection = normalizeSelection(selection)
-	if selection.Tenant == "" || selection.Environment == "" {
-		return startSessionResult{}, fmt.Errorf("tenant and environment are required")
-	}
-	if cols <= 0 {
-		cols = 120
-	}
-	if rows <= 0 {
-		rows = 34
-	}
-
-	a.mu.Lock()
-	if existing := a.sessions[key]; existing != nil && !existing.closed && existing.session != nil {
-		a.mu.Unlock()
-		return startSessionResult{
-			SessionID: existing.serial,
-			Selection: existing.selection,
-		}, nil
-	}
-	a.mu.Unlock()
-
-	session, err := a.deps.startTerminal(startTerminalSessionParams{
-		Dir:        dir,
-		Executable: executable,
-		Args:       args,
-		Env:        env,
-		Cols:       cols,
-		Rows:       rows,
-	})
-	if err != nil {
-		return startSessionResult{}, err
-	}
-
-	a.mu.Lock()
-	a.nextSerial++
-	serial := a.nextSerial
-	managed := &managedTerminal{
-		session:        session,
-		selection:      selection,
-		key:            key,
-		serial:         serial,
-		kind:           sessionKindCommand,
-		blocksIdleStop: true,
-		startedAt:      time.Now(),
-	}
-	a.sessions[key] = managed
-	a.busyEnvs[selectionKey(selection)]++
-	a.mu.Unlock()
-
-	a.recordTerminalActivity(selection)
-	a.rememberKubeContextForActivity(selection.KubernetesContext)
-	go a.streamSession(managed)
-
-	return startSessionResult{
-		SessionID: serial,
-		Selection: selection,
-	}, nil
-}
-
 func (a *App) SendSessionInput(sessionID int, data string) error {
 	if data == "" {
 		return nil
@@ -1617,15 +1553,6 @@ func (a *App) closeSessionsForSelection(selection uiSelection) {
 	}
 }
 
-func resolveInitStartDir(findProjectRoot eruncommon.ProjectFinderFunc) string {
-	if findProjectRoot != nil {
-		if _, projectRoot, err := findProjectRoot(); err == nil && strings.TrimSpace(projectRoot) != "" {
-			return resolveTerminalStartDir(projectRoot)
-		}
-	}
-	return resolveTerminalStartDir("")
-}
-
 type managedTerminal struct {
 	session                terminalSession
 	selection              uiSelection
@@ -1800,22 +1727,3 @@ func (a *App) releaseIdleBlockLocked(managed *managedTerminal) {
 	managed.clearIdleBlockOnOutput = false
 }
 
-func initSelectionKey(selection uiSelection) string {
-	selection = normalizeSelection(selection)
-	return "init\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00" + selection.Version + "\x00" + selection.RuntimeImage + "\x00" + selection.RuntimeCPU + "\x00" + selection.RuntimeMemory + "\x00" + selection.KubernetesContext + "\x00" + selection.ContainerRegistry + "\x00" + fmt.Sprintf("%t", selection.SetDefaultTenant) + "\x00" + fmt.Sprintf("%t", selection.NoGit)
-}
-
-func deploySelectionKey(selection uiSelection) string {
-	selection = normalizeSelection(selection)
-	return "deploy\x00" + selection.Tenant + "\x00" + selection.Environment + "\x00" + selection.Version + "\x00" + selection.RuntimeImage
-}
-
-func sshdInitSelectionKey(selection uiSelection) string {
-	selection = normalizeSelection(selection)
-	return "sshd-init\x00" + selection.Tenant + "\x00" + selection.Environment
-}
-
-func doctorSelectionKey(selection uiSelection) string {
-	selection = normalizeSelection(selection)
-	return "doctor\x00" + selection.Tenant + "\x00" + selection.Environment
-}

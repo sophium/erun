@@ -1,9 +1,7 @@
 package main
 
 import (
-	"fmt"
 	"testing"
-	"time"
 )
 
 // TestEmitAppNotificationDropsEmptyMessage locks the contract that the
@@ -56,41 +54,3 @@ func TestEmitAppNotificationCarriesKindAndMessage(t *testing.T) {
 // `erun activity record-stop` writes the history entry) and by the
 // Playwright spec (which mocks the MCP response and renders the
 // History tab).
-
-func waitForAppNotification(emits *capturedEmits, timeout time.Duration) (appNotificationPayload, error) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		events := emits.events(appNotificationEvent)
-		for _, evt := range events {
-			payload, ok := evt.(appNotificationPayload)
-			if !ok {
-				continue
-			}
-			return payload, nil
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return appNotificationPayload{}, fmt.Errorf("timed out waiting for app-notification emit")
-}
-
-// waitForAppNotificationByKind returns the first notification whose
-// Kind matches the requested string. Lets a test that arms the
-// grace-period warning (kind="warning") still find the later
-// success (kind="info") without false-matching the earlier one.
-func waitForAppNotificationByKind(emits *capturedEmits, kind string, timeout time.Duration) (appNotificationPayload, error) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		events := emits.events(appNotificationEvent)
-		for _, evt := range events {
-			payload, ok := evt.(appNotificationPayload)
-			if !ok {
-				continue
-			}
-			if payload.Kind == kind {
-				return payload, nil
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return appNotificationPayload{}, fmt.Errorf("timed out waiting for app-notification emit with kind=%q", kind)
-}

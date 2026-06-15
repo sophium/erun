@@ -174,10 +174,6 @@ type runtimeResourceTotals struct {
 	MemoryMi int64
 }
 
-func cpuMetric(totalMilli, usedMilli int64) uiRuntimeResourceMetric {
-	return cpuMetricWithMinimumFree(totalMilli, usedMilli, 0)
-}
-
 func cpuMetricWithMinimumFree(totalMilli, usedMilli, minimumFreeMilli int64) uiRuntimeResourceMetric {
 	freeMilli := totalMilli - usedMilli
 	if freeMilli < 0 {
@@ -200,10 +196,6 @@ func formatRuntimeResourceCPU(milli int64) string {
 		return "0"
 	}
 	return eruncommon.FormatKubernetesCPUFromMilli(milli)
-}
-
-func memoryMetric(totalMi, usedMi int64) uiRuntimeResourceMetric {
-	return memoryMetricWithMinimumFree(totalMi, usedMi, 0)
 }
 
 func memoryMetricWithMinimumFree(totalMi, usedMi, minimumFreeMi int64) uiRuntimeResourceMetric {
