@@ -59,10 +59,6 @@ func (c EnvironmentClaudeConfig) NormalizedModels() []string {
 	return normalizeClaudeModels(c.Models)
 }
 
-func ValidateClaudeMaxOutputTokens(value int) bool {
-	return value >= claudeMaxOutputTokensFloor && value <= claudeMaxOutputTokensCeiling
-}
-
 func ClaudeMaxOutputTokensRange() (int, int) {
 	return claudeMaxOutputTokensFloor, claudeMaxOutputTokensCeiling
 }
