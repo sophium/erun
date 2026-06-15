@@ -11,6 +11,8 @@ Module-specific guidance for `erun-ui`. Follow the repository root `AGENTS.md` f
 ## Frontend And Backend Split
 
 - Keep Wails startup, native window integration, PTY management, process execution, and session lifecycle in Go.
+- Desktop terminal sessions are one per pod per tab id: opening an env in any window takes over the existing pod session (`screen -d -r`), never mirrors. Preserve this invariant.
+- Diagnostics and error capture must be always-on and bounded — never gated behind an opt-in the user discovers only after an error has happened.
 - Keep layout, interaction behavior, DOM state, and terminal presentation in the frontend source tree.
 - Keep terminal session ownership in Go. The frontend should attach to sessions by ID, render buffered output, and send input, but it should not start shells on its own.
 - Prefer small transport-facing Go methods with JSON-safe structs over leaking backend internals into the frontend contract.

@@ -10,6 +10,7 @@ Repository guidance for humans and coding agents working in this repo. This file
 - Each module-guidance `AGENTS.md` directory ships a `CLAUDE.md` symlink pointing to its `AGENTS.md` so Claude Code auto-loads the local guidance when launched from any subtree. Treat both names as the same file; only edit `AGENTS.md` directly.
 - **"Documentation" in agent-facing instructions means `AGENTS.md`** (this file plus every applicable subtree `AGENTS.md`). When the user says "read documentation", re-read the relevant `AGENTS.md` files end-to-end; do not substitute `erun-docs/` for that step. When the user says "update documentation", edit the nearest applicable `AGENTS.md`. `erun-docs/` is the public product documentation site — a separate concern with its own update workflow, owned by the `erun-docs/AGENTS.md` rules. Read it only when its content is the load-bearing reference for an investigation; do not treat it as the source of repo workflow or engineering guidance.
 - Do not add new documentation files unless the user explicitly asks for them; add repository instructions to `AGENTS.md` instead.
+- Capture repository guidance, conventions, and best practices in the appropriate `AGENTS.md` — the shared, tool-agnostic source of truth every human and agent reads. Do not use a coding assistant's own private memory or notes feature (for example Claude Code's memory) to persist repo guidance or best practices; that hides them from everyone not using that tool. When you learn something worth keeping as repo guidance, propose adding it to the relevant `AGENTS.md` instead.
 - Keep `AGENTS.md` focused on repository workflow and engineering guidance; do not document app behavior, command semantics, or end-user functionality in it.
 - Do not modify `README.md` unless the user explicitly asks for a README change.
 
@@ -85,6 +86,10 @@ Internal ownership and per-module conventions live in each module's `AGENTS.md`.
 - Prefer deterministic command behavior so tool calls are safe to run repeatedly and concurrently.
 - Prefer safety and clarity over micro-optimizations.
 - For documentation-only guidance changes, do not change app behavior. Update the nearest applicable `AGENTS.md` and validate by reviewing the edited guidance for consistency.
+- Fix lint findings by correcting the code; never disable, suppress, downgrade, or threshold-bump a lint rule.
+- Clarify design and trade-offs in prose conversation; don't batch shaping decisions into rigid question-forms.
+- When delegating analysis to sub-agents, use a capable model — not a lightweight locator model — for substantive reasoning.
+- Once the user authorizes a body of work (e.g. "do it all" / "carry on"), carry it through to completion across commits and PRs without re-asking permission between increments; surface only genuine blockers. This does not license unrequested expansion — still get plan sign-off before multi-module or public-surface diffs the user did not ask for.
 
 ## End-to-End Verification Gate (Mandatory)
 

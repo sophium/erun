@@ -73,6 +73,7 @@ There is only one supported way to run the suite. The shell script `run.sh` in t
 - The Cancel buttons on `Init` and `Manage` dialogs sit below the default 900 px viewport. The config uses `1440x1200`; keep tall-dialog tests on that viewport rather than shrinking it.
 - The headless backend is a singleton; `playwright.config.ts` sets `fullyParallel: false` and `workers: 1`. Keep it that way unless you split the backend into per-test processes. Each test gets a fresh browser context (fresh Redux state), but backend-side sessions persist across specs — prefer the `seededEnv` fixture for specs whose tab/session churn would otherwise leak into the shared baseline rows.
 - Treat assertion failures as bugs to investigate, not noise to skip. If a test reveals a real frontend regression, fix the frontend; if a flow is genuinely flaky and the cause is environmental (clock skew, port reuse), fix the harness. Use `test.fixme(...)` only with a justification in a comment and a follow-up issue.
+- Some env-open specs can be host-environment-flaky. Before treating such a red as a regression you introduced, rebuild from `main` and re-run the focused spec to confirm it is pre-existing rather than caused by your change (tracked in #525).
 
 ## Validation
 
