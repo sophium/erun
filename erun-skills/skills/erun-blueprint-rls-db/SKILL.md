@@ -177,11 +177,13 @@ Copy the reference files verbatim, substituting placeholders:
 - `templates/tables/tenant_issuers.sql` → `${module}/schema/tables/tenant_issuers.sql`
 - `templates/tables/users.sql` → `${module}/schema/tables/users.sql`
 - `templates/tables/user_external_ids.sql` → `${module}/schema/tables/user_external_ids.sql`
-- `templates/indexes/tenant_issuers.sql` → `${module}/schema/indexes/tenant_issuers.sql`
 - `templates/indexes/users.sql` → `${module}/schema/indexes/users.sql`
 - `templates/indexes/user_external_ids.sql` → `${module}/schema/indexes/user_external_ids.sql`
 - `templates/triggers/tenants_set_timestamps.sql` → `${module}/schema/triggers/tenants_set_timestamps.sql`
+- `templates/triggers/tenant_issuers_set_timestamps.sql` → `${module}/schema/triggers/tenant_issuers_set_timestamps.sql`
 - `templates/triggers/users_set_timestamps.sql` → `${module}/schema/triggers/users_set_timestamps.sql`
+- `templates/triggers/user_external_ids_set_timestamps.sql` → `${module}/schema/triggers/user_external_ids_set_timestamps.sql`
+- `templates/rls/context.sql` → `${module}/schema/rls/context.sql`
 - `templates/rls/users.sql` → `${module}/schema/rls/users.sql`
 - `templates/rls/user_external_ids.sql` → `${module}/schema/rls/user_external_ids.sql`
 - `templates/AGENTS.md` → `${module}/AGENTS.md`
