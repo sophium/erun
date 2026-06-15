@@ -94,7 +94,7 @@ The docs serve two audiences. Every page belongs to one of them. The split is bi
 | **Operator** — the human running ERun | Conceptual model, hands-on walkthroughs, day-to-day commands, troubleshooting recipes, the "what" and "why" | Field tables, JSON schemas, regex resolution rules, error-code catalogues, audit-event taxonomies, OIDC details, build-path algorithms |
 | **Agent** — Claude Code / Codex / any MCP client | Everything in the previous column **plus** the spec layer: exact MCP tool schemas, every API error code, every config field's semantics, every resolution algorithm step-by-step | n/a — Agents read the lot |
 
-The directional rule: **details that would let an Operator do something the Agent should be doing → Agent reference.** If an Operator finds themselves looking up a field's exact YAML key, that's usually a sign the Agent should be handling it via [`scaffold`](/mcp/overview#scaffold--generate-conventional-artefacts), [`add`](/cli/add), or one of the [action tools](/mcp/overview#action--typed-wrappers-around-the-cli).
+The directional rule: **details that would let an Operator do something the Agent should be doing → Agent reference.** If an Operator finds themselves looking up a field's exact YAML key, that's usually a sign the Agent should be handling it via one of the [action tools](/mcp/overview#action--typed-wrappers-around-the-cli) or a [skill bundle](/concepts/skills).
 
 ### Where pages live
 
@@ -111,7 +111,7 @@ When you add a page, ask which sidebar section it belongs in *first* — the ans
 ### Operator-page rules
 
 - One value-prop sentence at the top, then a diagram (where useful), then the workflow.
-- Show commands, not options. `erun open` is enough; `erun open --vscode --runtime-cpu 4 --runtime-memory 8916Mi` belongs in CLI reference.
+- Show commands, not options. `erun open` is enough; `erun open --vscode --no-shell --version 1.4.2` belongs in CLI reference.
 - Don't enumerate fields. Replace `EnvConfig.sshd.workspacesync.enabled: true` with "enable workspace sync in the desktop's env settings".
 - Don't show JSON-RPC envelopes, error tables, or HTTP status codes. Link to the Agent reference for those.
 - Use the [canonical terminology](#canonical-terminology) — Operators read other Operator pages and the words have to match.

@@ -79,7 +79,7 @@ Module-specific guidance for `erun-backend-db`. Follow the repository root and `
 ## Primary Key Defaults
 
 - Use column defaults to populate UUIDv7 surrogate primary keys for domain tables that own externally visible identities.
-- UUIDv7 defaults currently apply to `tenants.tenant_id`, `users.user_id`, `roles.role_id`, `role_permissions.role_permission_id`, `reviews.review_id`, `builds.build_id`, and `comments.comment_id`.
+- UUIDv7 defaults currently apply to `tenants.tenant_id`, `users.user_id`, `roles.role_id`, `role_permissions.role_permission_id`, `reviews.review_id`, `builds.build_id`, `comments.comment_id`, and `audit_events.audit_event_id`.
 - Define those columns inline as `<entity>_id UUID PRIMARY KEY DEFAULT uuidv7()`.
 - Do not add UUID defaults for natural keys such as `tenant_issuers.issuer` or composite association keys such as `user_external_ids (tenant_id, issuer, external_id)`.
 - UUID primary-key defaults must call native `uuidv7()`. Do not add a custom UUIDv7 implementation.
