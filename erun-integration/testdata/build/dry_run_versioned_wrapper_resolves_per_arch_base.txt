@@ -1,10 +1,4 @@
 audit: erun build --dry-run --environment local
-docker manifest inspect ghcr.io/sophium/base:<VERSION>
-docker pull --platform linux/amd64 ghcr.io/sophium/base:<VERSION>
-docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<HEX16>-amd64
-docker manifest inspect ghcr.io/sophium/base:<VERSION>
-docker pull --platform linux/arm64 ghcr.io/sophium/base:<VERSION>
-docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<HEX16>-arm64
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-amd64
 fingerprint image not found locally: ghcr.io/sophium/api:fp-<HEX16>-amd64
 docker image inspect ghcr.io/sophium/api:fp-<HEX16>-arm64
@@ -27,3 +21,16 @@ cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=pl
 cd <TMP> && docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<HEX16>-amd64
 cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/base:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker tag ghcr.io/sophium/base:<VERSION> ghcr.io/sophium/base:fp-<HEX16>-arm64
+docker image inspect ghcr.io/sophium/wrapper:fp-<HEX16>-amd64
+fingerprint image not found locally: ghcr.io/sophium/wrapper:fp-<HEX16>-amd64
+docker image inspect ghcr.io/sophium/wrapper:fp-<HEX16>-arm64
+fingerprint image not found locally: ghcr.io/sophium/wrapper:fp-<HEX16>-arm64
+rebuilding ghcr.io/sophium/wrapper:<VERSION> because fingerprint image is missing for platforms [linux/amd64, linux/arm64]
+cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/wrapper:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/wrapper:<VERSION> ghcr.io/sophium/wrapper:fp-<HEX16>-amd64
+cd <TMP> && docker tag ghcr.io/sophium/wrapper:<VERSION> ghcr.io/sophium/wrapper:<VERSION>
+cd <TMP> && docker tag ghcr.io/sophium/wrapper:<VERSION> ghcr.io/sophium/wrapper:<VERSION>
+cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/wrapper:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
+cd <TMP> && docker tag ghcr.io/sophium/wrapper:<VERSION> ghcr.io/sophium/wrapper:fp-<HEX16>-arm64
+cd <TMP> && docker tag ghcr.io/sophium/wrapper:<VERSION> ghcr.io/sophium/wrapper:<VERSION>
+cd <TMP> && docker tag ghcr.io/sophium/wrapper:<VERSION> ghcr.io/sophium/wrapper:<VERSION>

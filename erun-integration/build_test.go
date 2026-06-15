@@ -676,6 +676,74 @@ func TestBuild(t *testing.T) {
 		golden.Equal(t, "build/dry_run_missing_base_platform_cascades_dependent_rebuild", normalize.Apply(result.Combined))
 	})
 
+	t.Run("dry_run_versioned_wrapper_resolves_per_arch_base", func(t *testing.T) {
+		// Locks the fix for the ${ERUN_VERSION}-wrapper build failure. A wrapper
+		// that FROMs its base via ${ERUN_VERSION} resolves the base's unsuffixed
+		// local snapshot tag, which is never pushed and (tagged once per arch
+		// under one name) only ever holds the last arch built. A multi-platform
+		// wrapper build of the other arch therefore can't resolve it on a strict
+		// image store. The fix: the base also publishes a per-arch stable tag
+		// (…-snapshot-<arch>) and the wrapper's per-platform build asks for the
+		// matching arch via ERUN_VERSION=<baseversion>-<arch>. The plan must show
+		// both: the per-arch base tag and the per-arch ERUN_VERSION build-arg.
+		// --environment local makes versions snapshot-suffixed so BaseVersion is
+		// set; the stub answers every fp-tag inspect "missing" so all rebuild.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "docker", "wrapper", "Dockerfile"),
+			"FROM ghcr.io/sophium/api:${ERUN_VERSION}\nCMD [\"true\"]\n")
+		fixture.RunGit(t, setup.Cwd, "add", "erun-devops/docker/wrapper/Dockerfile")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add ${ERUN_VERSION} wrapper over api")
+		result := erun.Run(t, []string{"build", "--dry-run", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: append(setup.Env(), stubDockerNoLocalImages(t, setup)...)})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/dry_run_versioned_wrapper_resolves_per_arch_base", normalize.Apply(result.Combined))
+		// Version normalization collapses the arch suffix (…-snapshot-<ts>-amd64
+		// and …-snapshot-amd64 both become <VERSION>), so the per-arch behavior
+		// this scenario exists to lock is invisible in the golden. Assert it on
+		// the raw output: the wrapper resolves its base per platform, and the
+		// base publishes the matching per-arch stable tag. BaseVersion carries no
+		// timestamp, so these are stable.
+		for _, want := range []string{
+			"--build-arg ERUN_VERSION=1.4.2-snapshot-amd64", // wrapper's amd64 build resolves the amd64 base
+			"--build-arg ERUN_VERSION=1.4.2-snapshot-arm64", // wrapper's arm64 build resolves the arm64 base
+			"ghcr.io/sophium/api:1.4.2-snapshot-amd64",       // base publishes per-arch stable tag
+			"ghcr.io/sophium/api:1.4.2-snapshot-arm64",
+		} {
+			if !strings.Contains(result.Combined, want) {
+				t.Errorf("expected per-arch base resolution %q in output:\n%s", want, result.Combined)
+			}
+		}
+	})
+
+	t.Run("real_run_versioned_wrapper_tags_per_arch_base", func(t *testing.T) {
+		// Companion to the dry-run scenario: drives runMultiPlatformBuild and the
+		// per-arch tagStableBaseVersionAfterBuild for real. The docker stub
+		// returns exit 1 for `image inspect` (no fp images → everything rebuilds)
+		// and exit 0 otherwise, so the per-arch base re-tag (docker tag) and the
+		// wrapper build run against the stub rather than a real daemon.
+		setup := env.New(t)
+		fixture.SeedReleaseRepo(t, setup.Cwd, "develop")
+		mustWriteFile(t, filepath.Join(setup.Cwd, "erun-devops", "docker", "wrapper", "Dockerfile"),
+			"FROM ghcr.io/sophium/api:${ERUN_VERSION}\nCMD [\"true\"]\n")
+		fixture.RunGit(t, setup.Cwd, "add", "erun-devops/docker/wrapper/Dockerfile")
+		fixture.RunGit(t, setup.Cwd, "commit", "-q", "-m", "add ${ERUN_VERSION} wrapper over api")
+		stubs := setup.Cwd + "/stubs"
+		fixture.StubBinaryWithScript(t, stubs, "docker", strings.Join([]string{
+			`case "$1 $2" in`,
+			`  "image inspect") exit 1 ;;`,
+			`  *) exit 0 ;;`,
+			`esac`,
+		}, "\n"))
+		envVars := append(setup.Env(), fixture.StubEnv(stubs, "docker")...)
+		result := erun.Run(t, []string{"build", "-v", "--environment", "local"}, erun.RunOptions{Cwd: setup.Cwd, Env: envVars})
+		if result.ExitCode != 0 {
+			t.Fatalf("exit %d: %s", result.ExitCode, result.Combined)
+		}
+		golden.Equal(t, "build/real_run_versioned_wrapper_tags_per_arch_base", normalize.Apply(result.Combined))
+	})
+
 	t.Run("real_run_release_push_auth_failure_retries_after_gh_login", func(t *testing.T) {
 		// Exercises the build-side GHCR auth-retry chain:
 		// runDockerBuildWithRetry catches the DockerRegistryAuthError that

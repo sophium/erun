@@ -85,22 +85,33 @@ func tagFingerprintAfterBuild(buildInput DockerBuildSpec, platform string, stdou
 	return runDockerTag(sourceTag, target, stdout, stderr)
 }
 
-// tagStableBaseVersionAfterBuild re-tags the platform-suffixed snapshot
-// image as the unsuffixed BaseVersion tag so wrapper builds whose
-// Dockerfiles reference `FROM image:${ERUN_VERSION}` can resolve a base
-// image locally without hitting the registry. Each platform's iteration
-// overwrites the previous one's tag; for a multi-platform build the last
-// platform iterated wins, which is acceptable because Docker BuildKit will
-// emulate cross-platform when the local FROM target's arch does not match
-// the requested --platform. Returns nil when BaseVersion is empty (release
-// builds whose Version already equals the stable tag) or when the source
-// and target tags are identical.
+// tagStableBaseVersionAfterBuild re-tags the platform-suffixed snapshot image
+// under the stable BaseVersion tags that `FROM image:${ERUN_VERSION}` wrappers
+// resolve from the local daemon (the snapshot tag is never pushed). It writes
+// two tags per platform:
+//
+//   - a per-arch tag, e.g. erun-devops:1.0.90-snapshot-amd64 — what a wrapper
+//     resolves for that platform (see dockerBuildArgs), so a multi-platform
+//     wrapper build always finds the matching architecture locally.
+//   - the arch-less tag, e.g. erun-devops:1.0.90-snapshot, kept for any
+//     consumer that references the bare BaseVersion. It is overwritten per
+//     platform (last arch wins) and is therefore single-arch, which is exactly
+//     why wrappers must use the per-arch tag instead.
+//
+// Returns nil when BaseVersion is empty (release builds, whose Version equals
+// the stable tag — those resolve the base from its pushed multi-arch manifest,
+// not from a local tag).
 func tagStableBaseVersionAfterBuild(buildInput DockerBuildSpec, platform string, stdout, stderr io.Writer) error {
 	target := stableBaseVersionTag(buildInput.Image)
 	if target == "" {
 		return nil
 	}
 	sourceTag := platformSuffixedTag(buildInput.Image.Tag, platform)
+	if archTarget := platformSuffixedTag(target, platform); archTarget != sourceTag {
+		if err := runDockerTag(sourceTag, archTarget, stdout, stderr); err != nil {
+			return err
+		}
+	}
 	if sourceTag == target {
 		return nil
 	}
@@ -343,6 +354,18 @@ func dockerBuildArgs(buildInput DockerBuildSpec, platform string) []string {
 	buildArgVersion := dockerImageTagVersion(strings.TrimSpace(buildInput.Image.Tag))
 	if buildInput.Image.BaseVersion != "" {
 		buildArgVersion = buildInput.Image.BaseVersion
+		// A wrapper that resolves its base via ${ERUN_VERSION} must point at the
+		// base's per-arch stable tag (e.g. erun-devops:1.0.90-snapshot-amd64).
+		// The arch-less stable tag names only the last arch built, so a
+		// multi-platform wrapper build would otherwise resolve the wrong arch
+		// (and, on a strict image store, fail "not found"). The base publishes
+		// the matching <BaseVersion>-<arch> tag in tagStableBaseVersionAfterBuild.
+		// Only the snapshot path needs this — a release wrapper resolves its base
+		// from the base's pushed multi-arch manifest, so BaseVersion is empty and
+		// this branch is skipped.
+		if dockerfileHasVersionedFrom(buildInput.DockerfilePath) {
+			buildArgVersion = buildArgVersion + "-" + platformShortSuffix(platform)
+		}
 	}
 	if buildArgVersion != "" {
 		args = append(args, "--build-arg", "ERUN_VERSION="+buildArgVersion)

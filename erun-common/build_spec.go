@@ -269,9 +269,7 @@ func multiPlatformTraceCommands(b DockerBuildSpec) []commandSpec {
 		if b.Fingerprint != "" {
 			commands = append(commands, dockerTagTraceCommand(b.ContextDir, platformTag, fingerprintTag(b.Image, b.Fingerprint, platform)))
 		}
-		if baseTag != "" && platformTag != baseTag {
-			commands = append(commands, dockerTagTraceCommand(b.ContextDir, platformTag, baseTag))
-		}
+		commands = append(commands, stableBaseVersionTraceCommands(b.ContextDir, platformTag, baseTag, platform)...)
 	}
 	if !b.Push {
 		return commands
@@ -296,6 +294,24 @@ func multiPlatformTraceCommands(b DockerBuildSpec) []commandSpec {
 	return commands
 }
 
+// stableBaseVersionTraceCommands mirrors tagStableBaseVersionAfterBuild in the
+// dry-run plan: a per-arch stable tag (what ${ERUN_VERSION} wrappers resolve)
+// followed by the arch-less stable tag, in the same order the executor writes
+// them so the trace stays an honest preview of the real build.
+func stableBaseVersionTraceCommands(dir, platformTag, baseTag, platform string) []commandSpec {
+	if baseTag == "" {
+		return nil
+	}
+	commands := make([]commandSpec, 0, 2)
+	if archTag := platformSuffixedTag(baseTag, platform); archTag != platformTag {
+		commands = append(commands, dockerTagTraceCommand(dir, platformTag, archTag))
+	}
+	if platformTag != baseTag {
+		commands = append(commands, dockerTagTraceCommand(dir, platformTag, baseTag))
+	}
+	return commands
+}
+
 func promoteTraceCommands(b DockerBuildSpec) []commandSpec {
 	commands := make([]commandSpec, 0, len(b.Platforms)*3+2)
 	perPlatformTags := make([]string, 0, len(b.Platforms))
@@ -304,9 +320,7 @@ func promoteTraceCommands(b DockerBuildSpec) []commandSpec {
 		platformTag := platformSuffixedTag(b.Image.Tag, platform)
 		perPlatformTags = append(perPlatformTags, platformTag)
 		commands = append(commands, dockerTagTraceCommand(b.ContextDir, fingerprintTag(b.Image, b.Fingerprint, platform), platformTag))
-		if baseTag != "" && platformTag != baseTag {
-			commands = append(commands, dockerTagTraceCommand(b.ContextDir, platformTag, baseTag))
-		}
+		commands = append(commands, stableBaseVersionTraceCommands(b.ContextDir, platformTag, baseTag, platform)...)
 	}
 	if !b.Push {
 		return commands

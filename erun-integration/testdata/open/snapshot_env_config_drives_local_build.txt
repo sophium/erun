@@ -14,8 +14,10 @@ rebuilding ghcr.io/sophium/team-devops:<VERSION> because fingerprint image is mi
 cd <TMP> && docker build --platform linux/amd64 --provenance=false --progress=plain -t ghcr.io/sophium/team-devops:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker tag ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:fp-<HEX16>-amd64
 cd <TMP> && docker tag ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:<VERSION>
+cd <TMP> && docker tag ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:<VERSION>
 cd <TMP> && docker build --platform linux/arm64 --provenance=false --progress=plain -t ghcr.io/sophium/team-devops:<VERSION> --build-arg ERUN_VERSION=<VERSION> -f <TMP> .
 cd <TMP> && docker tag ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:fp-<HEX16>-arm64
+cd <TMP> && docker tag ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:<VERSION>
 cd <TMP> && docker tag ghcr.io/sophium/team-devops:<VERSION> ghcr.io/sophium/team-devops:<VERSION>
 cd <TMP> && docker push ghcr.io/sophium/team-devops:<VERSION>
 cd <TMP> && docker push ghcr.io/sophium/team-devops:<VERSION>
